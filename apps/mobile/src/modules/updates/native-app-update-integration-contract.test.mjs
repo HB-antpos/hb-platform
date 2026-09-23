@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../../../", import.meta.url);
-const [hookSource, coreSource, bridgeSource, configSource] = await Promise.all([
+const [hookSource, coreSource, bridgeSource, configSource, layoutSource] = await Promise.all([
   readFile(new URL("src/modules/updates/use-automatic-native-app-update.ts", root), "utf8"),
   readFile(new URL("src/modules/updates/native-app-update.ts", root), "utf8"),
   readFile(new URL("modules/hb-app-installer/src/HBAppInstallerModule.ts", root), "utf8"),
   readFile(new URL("app.config.ts", root), "utf8"),
+  readFile(new URL("app/_layout.tsx", root), "utf8"),
 ]);
 
 test("Runtime 1.0.3 build 16 keeps the verified JS compatibility path", () => {
@@ -44,6 +45,14 @@ test("automatic update remains one operation and one prompt per build per proces
   assert.match(hookSource, /inFlightRef\.current = false/);
   assert.match(hookSource, /promptedBuildIdRef\.current === result\.build\.easBuildId/);
   assert.match(hookSource, /promptedBuildIdRef\.current = result\.build\.easBuildId/);
+});
+
+test("APK status stays in the root layout alongside the router, behind the existing OTA gate", () => {
+  assert.match(layoutSource, /const nativeAppUpdate = useAutomaticNativeAppUpdate/);
+  assert.match(layoutSource, /<MobileOtaUpdateBoundary[\s\S]*<NativeAppUpdateStatus[\s\S]*<Stack/);
+  assert.match(layoutSource, /phase=\{nativeAppUpdate\.phase\}/);
+  assert.match(layoutSource, /onRetry=\{nativeAppUpdate\.retry\}/);
+  assert.match(layoutSource, /onDismiss=\{nativeAppUpdate\.dismiss\}/);
 });
 
 test("native downloader trusts only configured HTTPS API and COS origins", () => {

@@ -175,6 +175,30 @@ function validMarker(overrides?: Record<string, unknown>) {
 }
 
 async function run() {
+  {
+    const phases: string[] = [];
+    const harness = createHarness({ overrides: { onPhase: (phase) => phases.push(phase) } });
+    const downloadFile = harness.dependencies.downloadFile;
+    harness.dependencies.downloadFile = async (...args) => {
+      assert.equal(phases.at(-1), "downloading", "下载等待期间必须已通知界面，不能到完成才提示");
+      return downloadFile(...args);
+    };
+    await checkAndDownloadNativeAppUpdate(harness.dependencies);
+    assert.deepEqual(phases, ["checking", "downloading", "verifying"]);
+
+    phases.length = 0;
+    await checkAndDownloadNativeAppUpdate(harness.dependencies);
+    assert.deepEqual(phases, ["checking", "verifying"], "命中缓存时不应误报正在下载");
+
+    phases.length = 0;
+    await checkAndDownloadNativeAppUpdate({ ...harness.dependencies, getCurrentBuildVersion: () => "17" });
+    assert.deepEqual(phases, ["checking"], "无新版本不展示下载或校验");
+
+    phases.length = 0;
+    await checkAndDownloadNativeAppUpdate({ ...harness.dependencies, platform: "ios" });
+    assert.deepEqual(phases, [], "iOS 不产生 APK 下载状态");
+  }
+
   assert.equal(
     getBuildBoundNativeAppDownloadUrl("https://hotbargain.vip/api", VALID_BUILD_PAYLOAD),
     "https://hotbargain.vip/api/mobile-app-builds/android/build-17/download?profile=production",
@@ -359,8 +383,10 @@ async function run() {
 
   {
     const nativeCalls: string[] = [];
+    const phases: string[] = [];
     const nativeInstaller: NativeApkInstallerPort = {
       downloadApk: async (request) => {
+        assert.equal(phases.at(-1), "downloading", "原生下载开始前必须通知界面");
         nativeCalls.push(`download:${request.destinationFileUri}`);
         return {
           fileUri: request.destinationFileUri,
@@ -369,6 +395,7 @@ async function run() {
         };
       },
       verifyApk: async (request) => {
+        assert.equal(phases.at(-1), "verifying", "下载后的身份校验必须显示校验状态");
         nativeCalls.push(`verify:${request.fileUri}:${request.expectedSizeBytes}`);
         return {
           verified: true,
@@ -380,7 +407,7 @@ async function run() {
         nativeCalls.push(`remove:${fileUri}`);
       },
     };
-    const harness = createHarness({ nativeInstaller });
+    const harness = createHarness({ nativeInstaller, overrides: { onPhase: (phase) => phases.push(phase) } });
     const result = await checkAndDownloadNativeAppUpdate(harness.dependencies);
     assert.equal(result.status, "downloaded");
     assert.equal(result.status === "downloaded" ? result.verification : null, "native");
@@ -390,6 +417,11 @@ async function run() {
       `verify:${finalApkUri()}:${APK_BYTES.byteLength}`,
     ]);
     assert.equal(harness.downloaded.length, 0, "原生模块可用时不得走 JS downloader");
+    assert.deepEqual(phases, ["checking", "downloading", "verifying"]);
+    phases.length = 0;
+    harness.files.set(finalApkUri(), APK_BYTES);
+    await checkAndDownloadNativeAppUpdate(harness.dependencies);
+    assert.deepEqual(phases, ["checking", "verifying"], "原生缓存校验不能误报下载");
   }
 
   {

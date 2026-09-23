@@ -19,6 +19,7 @@ import {
   shouldPauseAutomaticOtaForIosNativeUpdate,
 } from "@/modules/updates/ios-native-app-update";
 import { useAutomaticNativeAppUpdate } from "@/modules/updates/use-automatic-native-app-update";
+import { NativeAppUpdateStatus } from "@/modules/updates/NativeAppUpdateStatus";
 import { useIosNativeAppUpdate } from "@/modules/updates/use-ios-native-app-update";
 import { useMobileOtaUpdate } from "@/modules/updates/use-mobile-ota-update";
 import { i18n, initI18n } from "@/shared/i18n/i18n";
@@ -82,7 +83,7 @@ export default function RootLayout() {
 
   usePrinterAutoConnect({ enabled: sideEffectsEnabled });
   // Android 原生包检查先注册 effect；共享互斥会让 APK 提示优先于 OTA optional。
-  useAutomaticNativeAppUpdate({ enabled: automaticUpdatesEnabled });
+  const nativeAppUpdate = useAutomaticNativeAppUpdate({ enabled: automaticUpdatesEnabled });
   const mobileOtaUpdate = useMobileOtaUpdate({
     enabled: automaticUpdatesEnabled && !pauseAutomaticOta,
     beforeCheck: iosNativeUpdateEnabled
@@ -236,6 +237,11 @@ export default function RootLayout() {
                   }}
                 >
                   <View style={styles.appContent}>
+                    <NativeAppUpdateStatus
+                      phase={nativeAppUpdate.phase}
+                      onRetry={nativeAppUpdate.retry}
+                      onDismiss={nativeAppUpdate.dismiss}
+                    />
                     <Stack screenOptions={{ headerShown: false }}>
                       <Stack.Screen name="index" />
                       <Stack.Screen name="(auth)" />

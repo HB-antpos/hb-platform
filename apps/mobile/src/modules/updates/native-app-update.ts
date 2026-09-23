@@ -32,6 +32,7 @@ export type NativeAppUpdateCheckResult =
     };
 
 export type NativeAppUpdatePlatform = "android" | "ios" | "web" | string;
+export type NativeAppUpdatePhase = "checking" | "downloading" | "verifying";
 
 export type NativeAppUpdateApiClient = {
   get: (
@@ -103,6 +104,7 @@ export type NativeAppUpdateDependencies = {
   getDownloadUrl: (build: NativeAppBuildInfo) => string | null;
   readDirectory?: (directory: string) => Promise<string[]>;
   nativeInstaller?: NativeApkInstallerPort | null;
+  onPhase?: (phase: NativeAppUpdatePhase) => void;
   platform: NativeAppUpdatePlatform;
 };
 
@@ -320,6 +322,7 @@ async function verifyJsCachedApk(
   if (!(await hasExpectedFileSize(dependencies, fileUri, build.artifactSize))) {
     return false;
   }
+  dependencies.onPhase?.("verifying");
   if (await readValidMarker(dependencies, fileUri, build)) {
     return true;
   }
@@ -353,7 +356,9 @@ async function downloadJsVerifiedApk(
   await deleteBestEffort(dependencies, temporaryFileUri);
   await deleteBestEffort(dependencies, markerFileUri(finalFileUri));
   try {
+    dependencies.onPhase?.("downloading");
     const download = await dependencies.downloadFile(downloadUrl, temporaryFileUri);
+    dependencies.onPhase?.("verifying");
     if (download.status != null && (download.status < 200 || download.status >= 300)) {
       throw new Error(`APK 下载失败，HTTP 状态码: ${download.status}`);
     }
@@ -417,6 +422,7 @@ async function prepareNativeVerifiedApk(
   const request = verificationRequest(build, fileUri, packageName);
   if (await hasExpectedFileSize(dependencies, fileUri, build.artifactSize)) {
     try {
+      dependencies.onPhase?.("verifying");
       if (await verifyNativeResult(installer, request)) {
         return fileUri;
       }
@@ -427,6 +433,8 @@ async function prepareNativeVerifiedApk(
 
   await installer.removeDownloadedApk(fileUri).catch(() => undefined);
   try {
+    // 旧原生包没有进度事件，只上报实际阶段，不能伪造百分比。
+    dependencies.onPhase?.("downloading");
     const downloaded = await installer.downloadApk({
       url: downloadUrl,
       destinationFileUri: fileUri,
@@ -435,6 +443,7 @@ async function prepareNativeVerifiedApk(
       maximumSizeBytes: MAX_APK_SIZE_BYTES,
       trustedOrigins: dependencies.getTrustedOrigins(build),
     });
+    dependencies.onPhase?.("verifying");
     if (
       downloaded.fileUri !== fileUri
       || downloaded.sizeBytes !== build.artifactSize
@@ -529,6 +538,7 @@ export async function checkAndDownloadNativeAppUpdate(
     return { status: "not-available" };
   }
 
+  dependencies.onPhase?.("checking");
   const build = await fetchLatestBuild(dependencies);
   if (!isNewerBuild(build, currentBuild)) {
     await cleanupDownloadedApkFiles(dependencies, downloadDirectory);

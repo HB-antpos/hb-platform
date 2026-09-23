@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { toByteArray } from "base64-js";
 import { i18n } from "@/shared/i18n/i18n";
@@ -14,6 +14,7 @@ import {
   checkAndDownloadNativeAppUpdate,
   getBuildBoundNativeAppDownloadUrl,
   type NativeAppBuildInfo,
+  type NativeAppUpdatePhase,
 } from "./native-app-update";
 
 const APK_MIME_TYPE = "application/vnd.android.package-archive";
@@ -65,6 +66,7 @@ function getNativeAppInstallerTrustedOrigins(
 }
 
 export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
+  const [phase, setPhase] = useState<NativeAppUpdatePhase | "failed" | null>(null);
   const optionsRef = useRef(options);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const inFlightRef = useRef(false);
@@ -199,6 +201,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
     if (!options.enabled || inFlightRef.current) {
       return;
     }
+    if (Platform.OS !== "android") return;
 
     const updateLease = appUpdateMutualExclusion.tryStartOperation("native");
     if (!updateLease) {
@@ -208,6 +211,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
     operationRetryGateRef.current.clear();
 
     inFlightRef.current = true;
+    setPhase("checking");
     try {
       const { apiClient } = await import("@/shared/api/client");
       const buildProfile = await getNativeAppBuildProfile();
@@ -215,6 +219,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
 
       if (!nativeInstallerEnabled) {
         // 显式关闭时完全停用自动 APK 更新；人工下载只允许从后台受控入口发起。
+        setPhase(null);
         return;
       }
 
@@ -255,7 +260,9 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
           configuredTrustedOrigins,
         ),
         nativeInstaller,
+        onPhase: setPhase,
       });
+      setPhase(null);
 
       if (result.status !== "downloaded" || promptedBuildIdRef.current === result.build.easBuildId) {
         return;
@@ -267,6 +274,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
         promptedBuildIdRef.current = result.build.easBuildId;
       }
     } catch (error) {
+      setPhase("failed");
       console.warn("[updates] automatic APK update check failed", error);
     } finally {
       inFlightRef.current = false;
@@ -319,4 +327,10 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
   useForegroundUpdateCheckInterval(() => {
     void check(optionsRef.current);
   }, { enabled: options.enabled });
+
+  return {
+    phase: options.enabled && Platform.OS === "android" ? phase : null,
+    retry: () => { void check(optionsRef.current); },
+    dismiss: () => setPhase(null),
+  };
 }
