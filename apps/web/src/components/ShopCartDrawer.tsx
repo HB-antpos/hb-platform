@@ -29,15 +29,60 @@ import {
   submitActiveStoreOrder,
   updateStoreOrderCartItem,
 } from '../services/storeOrderService'
-import type { StoreOrderCart } from '../types/storeOrder'
+import type { StoreOrderCart, SubmitStoreOrderResult } from '../types/storeOrder'
 import { isPreorderRequiredError } from '../services/preorderService'
 import { getSupplyPausedSubmitLabels } from '../services/supplyNoticeService'
 import { registerPageMessages } from '../i18n/registerPageMessages'
 import { supplyStatusCardMessages } from './SupplyNotice/supplyNoticeMessages'
+import {
+  splitLabelsForDisplay,
+  summarizeCartForSubmit,
+  summarizeKeptLines,
+  type CartSubmitSummary,
+} from './SupplyNotice/cartSubmitSummary'
 
 registerPageMessages(supplyStatusCardMessages)
 
 const { Text, Title } = Typography
+
+type Translate = (key: string, options?: Record<string, unknown>) => string
+
+/** 货号列表拼成一句话：最多列 10 个，其余折叠成「等 N 个」。 */
+function formatSubmitLabels(labels: string[], t: Translate): string {
+  const { shown, more } = splitLabelsForDisplay(labels)
+  const joined = shown.join(t('supplyStatusCard.labelSeparator'))
+  return more > 0 ? `${joined}${t('supplyStatusCard.labelMore', { count: more })}` : joined
+}
+
+/** 提交前确认与提交后结果共用的「保留 / 需删除」两行说明。 */
+function renderKeptSummary(
+  summary: CartSubmitSummary,
+  keys: { paused: string; discontinued: string },
+  t: Translate,
+) {
+  return (
+    <>
+      {summary.pausedLabels.length ? (
+        <p>
+          {t(keys.paused, {
+            count: summary.pausedLabels.length,
+            labels: formatSubmitLabels(summary.pausedLabels, t),
+          })}
+        </p>
+      ) : null}
+      {summary.discontinuedLabels.length ? (
+        <p>
+          <Text type="danger">
+            {t(keys.discontinued, {
+              count: summary.discontinuedLabels.length,
+              labels: formatSubmitLabels(summary.discontinuedLabels, t),
+            })}
+          </Text>
+        </p>
+      ) : null}
+    </>
+  )
+}
 
 interface ShopCartDrawerProps {
   open: boolean
@@ -68,6 +113,8 @@ export default function ShopCartDrawer({
   const hasCartSummary = Boolean(totalQuantity || cart?.totalSKU || totalImportAmount)
   const isCartDetailLoading = loading || (isSummaryOnly && hasCartSummary)
   const canSubmitCart = !isCartDetailLoading && cartItems.length > 0
+  // 提交前按当前购物车数据预估：哪些行进单、哪些暂停供货的行会保留、哪些已不再供应要删。
+  const submitSummary = useMemo(() => summarizeCartForSubmit(cartItems), [cartItems])
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({})
   const [remarks, setRemarks] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -145,14 +192,37 @@ export default function ShopCartDrawer({
 
     setSubmitting(true)
     try {
-      await submitActiveStoreOrder({
+      const result: SubmitStoreOrderResult = await submitActiveStoreOrder({
         storeCode: cart.storeCode,
         remarks: remarks.trim() || undefined,
       })
-      message.success(t('shop.orderSubmitted', 'Order submitted successfully'))
+      if (result.keptLines.length === 0) {
+        message.success(t('shop.orderSubmitted', 'Order submitted successfully'))
+        setRemarks('')
+        await onCartChanged()
+        onClose()
+        return
+      }
+
+      // 服务端只提交了在供货的行，暂停供货的行留在购物车里：刷新后让店员留在抽屉里处理剩余行，
+      // 用弹窗列出货号（message 几秒就消失，多个货号看不清）。
       setRemarks('')
       await onCartChanged()
-      onClose()
+      const keptSummary = summarizeKeptLines(result.keptLines, result.submittedLineCount)
+      Modal.warning({
+        title: t('supplyStatusCard.keptResultTitle'),
+        okText: t('supplyStatusCard.acknowledge'),
+        content: (
+          <div>
+            <p>{t('supplyStatusCard.keptResultSubmitted', { count: result.submittedLineCount })}</p>
+            {renderKeptSummary(
+              keptSummary,
+              { paused: 'supplyStatusCard.keptResultPaused', discontinued: 'supplyStatusCard.keptResultDiscontinued' },
+              t,
+            )}
+          </div>
+        ),
+      })
     } catch (error) {
       const pausedLabels = getSupplyPausedSubmitLabels(error)
       if (isPreorderRequiredError(error)) {
@@ -160,8 +230,8 @@ export default function ShopCartDrawer({
         message.warning(t('shop.preorder.submitRequiredWarning'))
         await onPreorderRequired?.()
       } else if (pausedLabels) {
-        // 购物车里有加购后才被仓库下架的商品：指出是哪几行并刷新购物车，让标红显示出来；不自动删除。
-        message.warning(t('supplyStatusCard.submitBlocked', { count: pausedLabels.length }))
+        // 购物车里没有一行能进单（全部暂停供货）：刷新购物车让标记显示出来；不自动删除。
+        message.warning(t('supplyStatusCard.submitNothingOrderable'))
         await onCartChanged()
       } else message.error(t('shop.orderSubmitFailed', 'Failed to submit order'))
     } finally {
@@ -177,7 +247,13 @@ export default function ShopCartDrawer({
       message.warning(t('shop.preorder.submitRequiredWarning'))
       return
     }
+    if (submitSummary.submittableCount === 0) {
+      // 全部行都暂停供货：不用请求服务端也知道提交不了。
+      message.warning(t('supplyStatusCard.submitNothingOrderable'))
+      return
+    }
 
+    const hasKeptLines = submitSummary.pausedLabels.length > 0 || submitSummary.discontinuedLabels.length > 0
     Modal.confirm({
       title: t('shop.confirmOrderSubmission', 'Confirm Order Submission'),
       content: (
@@ -186,11 +262,23 @@ export default function ShopCartDrawer({
             {t('common.store', 'Store')}: <strong>{cart.storeName || cart.storeCode}</strong>
           </p>
           <p>
-            {t('shop.totalQuantity', 'Total Quantity')}: <strong>{cart.totalQuantity}</strong>
+            {t('shop.totalQuantity', 'Total Quantity')}:{' '}
+            <strong>{hasKeptLines ? submitSummary.submittableQuantity : cart.totalQuantity}</strong>
           </p>
           <p>
-            {t('shop.estimatedTotal', 'Estimated Total')}: <strong>${cart.totalImportAmount.toFixed(2)}</strong>
+            {t('shop.estimatedTotal', 'Estimated Total')}:{' '}
+            <strong>${(hasKeptLines ? submitSummary.submittableImportAmount : cart.totalImportAmount).toFixed(2)}</strong>
           </p>
+          {hasKeptLines ? (
+            <>
+              <p>{t('supplyStatusCard.confirmSubmitCount', { count: submitSummary.submittableCount })}</p>
+              {renderKeptSummary(
+                submitSummary,
+                { paused: 'supplyStatusCard.confirmKeptPaused', discontinued: 'supplyStatusCard.confirmDiscontinued' },
+                t,
+              )}
+            </>
+          ) : null}
           {remarks.trim() ? (
             <p>
               {t('common.remarks', 'Remarks')}: <em>{remarks.trim()}</em>
@@ -349,9 +437,15 @@ export default function ShopCartDrawer({
                           {item.productName}
                         </Text>
                         {item.isActive === false ? (
-                          <Tooltip title={t('supplyStatusCard.cartPausedHint')}>
-                            <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('supplyStatusCard.cartPausedTag')}</Tag>
-                          </Tooltip>
+                          item.supplyPlan === 'Discontinued' ? (
+                            <Tooltip title={t('supplyStatusCard.cartDiscontinuedHint')}>
+                              <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('supplyStatusCard.cartDiscontinuedTag')}</Tag>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title={t('supplyStatusCard.cartKeptHint')}>
+                              <Tag color="warning" style={{ marginInlineEnd: 0 }}>{t('supplyStatusCard.cartPausedTag')}</Tag>
+                            </Tooltip>
+                          )
                         ) : null}
                       </Space>
                     }
@@ -360,6 +454,16 @@ export default function ShopCartDrawer({
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           {item.itemNumber}
                         </Text>
+                        {item.isActive === false ? (
+                          // 手机上没有 hover，Tooltip 看不到，把提示直接写在行里。
+                          <Text type={item.supplyPlan === 'Discontinued' ? 'danger' : 'warning'} style={{ fontSize: 12 }}>
+                            {t(
+                              item.supplyPlan === 'Discontinued'
+                                ? 'supplyStatusCard.cartDiscontinuedHint'
+                                : 'supplyStatusCard.cartKeptHint',
+                            )}
+                          </Text>
+                        ) : null}
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           {t('shop.importPrice', 'Import')}: ${item.importPrice?.toFixed(2)}
                         </Text>

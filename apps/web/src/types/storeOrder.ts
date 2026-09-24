@@ -1,3 +1,5 @@
+import type { SupplyPlan } from './supplyNotice'
+
 export enum StoreOrderFlowStatus {
   ShoppingCart = 0,
   Submitted = 1,
@@ -541,8 +543,30 @@ export interface StoreOrderCartItem {
   totalVolume?: number
   minOrderQuantity: number
   isActive: boolean
+  /** 仓库登记的后续供货计划；只在已下架且有未关闭说明时有值，旧后端不返回。 */
+  supplyPlan?: SupplyPlan | null
   locationCode?: string
   rrp?: number
+}
+
+/** 提交时因暂停供货而保留在购物车里的一行。 */
+export interface SubmitStoreOrderKeptLine {
+  detailGUID?: string
+  productCode: string
+  itemNumber?: string | null
+  productName?: string | null
+  quantity?: number
+  supplyPlan?: SupplyPlan | null
+}
+
+/** 提交订单结果：在供货的行进单，暂停供货的行保留在购物车。旧后端只返回 true，归一化后 keptLines 为空。 */
+export interface SubmitStoreOrderResult {
+  submitted: boolean
+  orderGUID?: string | null
+  orderNo?: string | null
+  submittedLineCount: number
+  keptLines: SubmitStoreOrderKeptLine[]
+  keptCartOrderGUID?: string | null
 }
 
 export interface StoreOrderCart {

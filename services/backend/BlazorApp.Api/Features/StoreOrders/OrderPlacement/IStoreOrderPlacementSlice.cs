@@ -7,7 +7,9 @@ namespace BlazorApp.Api.Features.StoreOrders.OrderPlacement;
 
 public interface IStoreOrderPlacementSlice
 {
-    Task<ApiResponse<bool>> SubmitOrderAsync(SubmitStoreOrderRequestDto request);
+    Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
+        SubmitStoreOrderRequestDto request
+    );
 
     Task<ApiResponse<string>> CreateOrderAsync(CreateStoreOrderDto request);
 
@@ -20,7 +22,9 @@ internal sealed class StoreOrderPlacementSlice(
     CopyOrderHandler copyOrderHandler
 ) : IStoreOrderPlacementSlice
 {
-    public Task<ApiResponse<bool>> SubmitOrderAsync(SubmitStoreOrderRequestDto request)
+    public Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
+        SubmitStoreOrderRequestDto request
+    )
     {
         return submitOrderHandler.HandleAsync(new SubmitOrderCommand(request));
     }

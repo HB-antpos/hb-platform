@@ -2695,15 +2695,162 @@ public sealed class StoreOrderProductListTests : IDisposable
     }
 
     [Fact]
-    public async Task SubmitOrderAsync_购物车含加购后才下架的商品_分店提交被拦截并指出货号()
+    public async Task SubmitOrderAsync_购物车含加购后才下架的商品_只提交在供货行并把下架行留在新购物车()
     {
         await SeedProductAsync("P-OK", "ITEM-OK");
         await SeedProductAsync("P-GONE", "ITEM-GONE");
         await SeedWarehouseProductAsync("P-OK", oemPrice: 3m, importPrice: 2m);
         await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
         var store = CreateService("store-user");
-        foreach (var code in new[] { "P-OK", "P-GONE" })
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
         {
+            StoreCode = "S001",
+            ProductCode = "P-OK",
+            Quantity = 2,
+        });
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-GONE",
+            Quantity = 1,
+        });
+        await SetWarehouseProductActiveAsync("P-GONE", false);
+        var before = await _db.Queryable<WareHouseOrder>()
+            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
+        var goneDetail = await _db.Queryable<WareHouseOrderDetails>()
+            .SingleAsync(item => item.OrderGUID == before.OrderGUID && item.ProductCode == "P-GONE");
+
+        var result = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto
+        {
+            StoreCode = "S001",
+            Remarks = "partial",
+        });
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(result.Data);
+        Assert.Equal(before.OrderGUID, result.Data!.OrderGUID);
+        Assert.Equal("ORD-store-user", result.Data.OrderNo);
+        Assert.Equal(1, result.Data.SubmittedLineCount);
+        Assert.Equal(1, result.Data.KeptLineCount);
+        var kept = Assert.Single(result.Data.KeptLines);
+        Assert.Equal("P-GONE", kept.ProductCode);
+        Assert.Equal("ITEM-GONE", kept.ItemNumber);
+        Assert.Equal(goneDetail.DetailGUID, kept.DetailGUID);
+        Assert.Equal(1m, kept.Quantity);
+        // 测试库没有建供货说明表：缺表时不识别计划，按普通暂停供货处理。
+        Assert.Null(kept.SupplyPlan);
+        Assert.Contains("ITEM-GONE", result.Message);
+        Assert.DoesNotContain("ITEM-OK", result.Message);
+
+        // 原购物车原地变成订单、只剩在供货行；下架行搬进同店的新购物车，两边合计各自重算。
+        var orders = await _db.Queryable<WareHouseOrder>()
+            .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+            .ToListAsync();
+        Assert.Equal(2, orders.Count);
+        var submitted = Assert.Single(orders, item => item.OrderGUID == before.OrderGUID);
+        var newCart = Assert.Single(orders, item => item.OrderGUID != before.OrderGUID);
+        Assert.Equal(1, submitted.FlowStatus);
+        Assert.Equal("ORD-store-user", submitted.OrderNo);
+        Assert.Equal("partial", submitted.Remarks);
+        Assert.Equal(6m, submitted.OEMTotalAmount);
+        Assert.Equal(4m, submitted.ImportTotalAmount);
+        Assert.Equal(0, newCart.FlowStatus);
+        Assert.Equal(newCart.OrderGUID, result.Data.KeptCartOrderGUID);
+        Assert.True(string.IsNullOrWhiteSpace(newCart.CartOwnerUserGuid));
+        Assert.Equal(3m, newCart.OEMTotalAmount);
+        Assert.Equal(2m, newCart.ImportTotalAmount);
+        // 新车版本号不能倒退，否则移动端会把它当成旧数据丢掉。
+        Assert.True(newCart.UpdatedAt >= before.UpdatedAt);
+
+        var submittedLine = Assert.Single(
+            await _db.Queryable<WareHouseOrderDetails>()
+                .Where(item => item.OrderGUID == submitted.OrderGUID && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal("P-OK", submittedLine.ProductCode);
+        var keptLine = Assert.Single(
+            await _db.Queryable<WareHouseOrderDetails>()
+                .Where(item => item.OrderGUID == newCart.OrderGUID && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal("P-GONE", keptLine.ProductCode);
+        Assert.Equal(goneDetail.DetailGUID, keptLine.DetailGUID);
+
+        var cart = await store.GetActiveCartAsync("S001");
+        Assert.Equal(newCart.OrderGUID, cart.Data?.OrderGUID);
+        var cartItem = Assert.Single(cart.Data!.Items);
+        Assert.False(cartItem.IsActive);
+        Assert.Null(cartItem.SupplyPlan);
+
+        // 仓库恢复供货后，保留的行可以直接再提交，不需要分店重新加购。
+        await SetWarehouseProductActiveAsync("P-GONE", true);
+        var resubmitted = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+        Assert.True(resubmitted.Success, resubmitted.Message);
+        Assert.Equal(1, resubmitted.Data?.SubmittedLineCount);
+        Assert.Empty(resubmitted.Data!.KeptLines);
+        Assert.Null(resubmitted.Data.KeptCartOrderGUID);
+        Assert.Equal(
+            0,
+            await _db.Queryable<WareHouseOrder>()
+                .CountAsync(item => item.StoreCode == "S001" && !item.IsDeleted && item.FlowStatus == 0)
+        );
+    }
+
+    [Fact]
+    public async Task SubmitOrderAsync_购物车全部下架_提交失败且不写入()
+    {
+        await SeedProductAsync("P-GONE", "ITEM-GONE");
+        await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
+        var store = CreateService("store-user");
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-GONE",
+            Quantity = 1,
+        });
+        await SetWarehouseProductActiveAsync("P-GONE", false);
+        var before = await _db.Queryable<WareHouseOrder>()
+            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
+
+        var blocked = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+
+        Assert.False(blocked.Success);
+        Assert.Equal("SUPPLY_PAUSED", blocked.ErrorCode);
+        Assert.Contains("没有可提交的商品", blocked.Message);
+        Assert.Contains("ITEM-GONE", blocked.Message);
+        var labels = Assert.IsAssignableFrom<IEnumerable<string>>(blocked.Details);
+        Assert.Equal(new[] { "ITEM-GONE" }, labels);
+        Assert.Equal(0, blocked.Data?.SubmittedLineCount);
+        Assert.Equal("P-GONE", Assert.Single(blocked.Data!.KeptLines).ProductCode);
+
+        // 没有一行能进单时什么都不写：购物车原样保留，不建新车、不发订单号。
+        var cart = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal(before.OrderGUID, cart.OrderGUID);
+        Assert.Equal(0, cart.FlowStatus);
+        Assert.True(string.IsNullOrWhiteSpace(cart.OrderNo));
+        Assert.Equal(before.UpdatedAt, cart.UpdatedAt);
+        Assert.Equal(
+            1,
+            await _db.Queryable<WareHouseOrderDetails>()
+                .CountAsync(item => item.OrderGUID == cart.OrderGUID && !item.IsDeleted)
+        );
+    }
+
+    [Fact]
+    public async Task SubmitOrderAsync_保留行有未关闭的不再供应说明_购物车与结果都标出SupplyPlan()
+    {
+        await WarehouseProductSupplyNoticeSchemaMigrator.EnsureAsync(_db, NullLogger.Instance);
+        await SeedProductAsync("P-OK", "ITEM-OK");
+        await SeedProductAsync("P-STOP", "ITEM-STOP");
+        await SeedProductAsync("P-CLOSED", "ITEM-CLOSED");
+        var store = CreateService("store-user");
+        foreach (var code in new[] { "P-OK", "P-STOP", "P-CLOSED" })
+        {
+            await SeedWarehouseProductAsync(code, oemPrice: 3m, importPrice: 2m);
             await store.AddToCartMutationAsync(new AddToCartRequestDto
             {
                 StoreCode = "S001",
@@ -2711,32 +2858,92 @@ public sealed class StoreOrderProductListTests : IDisposable
                 Quantity = 1,
             });
         }
+        await SetWarehouseProductActiveAsync("P-STOP", false);
+        await SetWarehouseProductActiveAsync("P-CLOSED", false);
+        var nowUtc = DateTime.UtcNow;
+        await _db.Insertable(new WarehouseProductSupplyNotice
+        {
+            ProductCode = "P-STOP",
+            SupplyPlan = WarehouseProductSupplyPlans.Discontinued,
+            Source = "Test",
+            CreatedAtUtc = nowUtc,
+            UpdatedAtUtc = nowUtc,
+        }).ExecuteCommandAsync();
+        // 已关闭的说明不算数：这行只是普通暂停供货。
+        await _db.Insertable(new WarehouseProductSupplyNotice
+        {
+            ProductCode = "P-CLOSED",
+            SupplyPlan = WarehouseProductSupplyPlans.Discontinued,
+            Source = "Test",
+            CreatedAtUtc = nowUtc,
+            UpdatedAtUtc = nowUtc,
+            ClosedAtUtc = nowUtc,
+            ClosedBy = "Test",
+        }).ExecuteCommandAsync();
+
+        var cart = await store.GetActiveCartAsync("S001");
+        Assert.NotNull(cart.Data);
+        Assert.Equal(
+            WarehouseProductSupplyPlans.Discontinued,
+            cart.Data!.Items.Single(item => item.ProductCode == "P-STOP").SupplyPlan
+        );
+        Assert.Null(cart.Data.Items.Single(item => item.ProductCode == "P-CLOSED").SupplyPlan);
+        Assert.Null(cart.Data.Items.Single(item => item.ProductCode == "P-OK").SupplyPlan);
+
+        var result = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(1, result.Data?.SubmittedLineCount);
+        Assert.Equal(2, result.Data?.KeptLineCount);
+        Assert.Equal(
+            WarehouseProductSupplyPlans.Discontinued,
+            result.Data!.KeptLines.Single(line => line.ProductCode == "P-STOP").SupplyPlan
+        );
+        Assert.Null(result.Data.KeptLines.Single(line => line.ProductCode == "P-CLOSED").SupplyPlan);
+        Assert.Contains("不再供应", result.Message);
+        Assert.Contains("ITEM-STOP", result.Message);
+        Assert.Contains("ITEM-CLOSED", result.Message);
+    }
+
+    [Fact]
+    public async Task SubmitOrderAsync_仓库侧整车提交不拆分下架行()
+    {
+        await SeedProductAsync("P-OK", "ITEM-OK");
+        await SeedProductAsync("P-GONE", "ITEM-GONE");
+        await SeedWarehouseProductAsync("P-OK", oemPrice: 3m, importPrice: 2m);
+        await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
         await SetWarehouseProductActiveAsync("P-GONE", false);
+        var staff = CreateService("warehouse-a", "WarehouseStaff");
+        foreach (var code in new[] { "P-OK", "P-GONE" })
+        {
+            var added = await staff.AddToCartMutationAsync(new AddToCartRequestDto
+            {
+                StoreCode = "S001",
+                ProductCode = code,
+                Quantity = 1,
+            });
+            Assert.True(added.Success, added.Message);
+        }
 
-        var blocked = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+        var result = await staff.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
 
-        Assert.False(blocked.Success);
-        Assert.Equal("SUPPLY_PAUSED", blocked.ErrorCode);
-        Assert.Contains("ITEM-GONE", blocked.Message);
-        Assert.DoesNotContain("ITEM-OK", blocked.Message);
-        // 系统不悄悄删除：被拦截后购物车原样保留，由分店自己移除。
-        var cart = await _db.Queryable<WareHouseOrder>()
-            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
-        Assert.Equal(0, cart.FlowStatus);
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2, result.Data?.SubmittedLineCount);
+        Assert.Equal(0, result.Data?.KeptLineCount);
+        Assert.Empty(result.Data!.KeptLines);
+        Assert.Null(result.Data.KeptCartOrderGUID);
+        var order = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal("warehouse-a", order.CartOwnerUserGuid);
+        Assert.Equal(1, order.FlowStatus);
         Assert.Equal(
             2,
             await _db.Queryable<WareHouseOrderDetails>()
-                .CountAsync(item => item.OrderGUID == cart.OrderGUID && !item.IsDeleted)
+                .CountAsync(item => item.OrderGUID == order.OrderGUID && !item.IsDeleted)
         );
-
-        await store.UpdateCartItemMutationAsync(new AddToCartRequestDto
-        {
-            StoreCode = "S001",
-            ProductCode = "P-GONE",
-            Quantity = 0,
-        });
-        var submitted = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
-        Assert.True(submitted.Success, submitted.Message);
     }
 
     private Task SetWarehouseProductActiveAsync(string productCode, bool isActive) =>

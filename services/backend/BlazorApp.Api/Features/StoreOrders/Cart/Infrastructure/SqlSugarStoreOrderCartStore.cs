@@ -2,6 +2,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Features.StoreOrders.Cart.Application.Ports;
 using BlazorApp.Api.Features.StoreOrders.Cart.Domain;
 using BlazorApp.Api.Features.StoreOrders.Common;
+using BlazorApp.Api.Features.SupplyNotices;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -79,6 +80,7 @@ internal sealed class SqlSugarStoreOrderCartStore(
             )
             .ToListAsync();
 
+        await ApplySupplyPlansAsync(details);
         foreach (var item in details)
         {
             if (!item.Volume.HasValue)
@@ -387,7 +389,11 @@ internal sealed class SqlSugarStoreOrderCartStore(
         var order = await FindActiveCartAsync(scope);
         return order == null
             ? null
-            : new StoreOrderCartSubmissionSnapshot(order.OrderGUID, order.FlowStatus);
+            : new StoreOrderCartSubmissionSnapshot(
+                order.OrderGUID,
+                order.FlowStatus,
+                order.UpdatedAt
+            );
     }
 
     public Task<int> CountActiveItemsAsync(string orderGuid)
@@ -397,11 +403,13 @@ internal sealed class SqlSugarStoreOrderCartStore(
             .CountAsync();
     }
 
-    public async Task<IReadOnlyList<string>> GetSupplyPausedItemLabelsAsync(string orderGuid)
+    public async Task<IReadOnlyList<StoreOrderSupplyPausedLine>> GetSupplyPausedLinesAsync(
+        string orderGuid
+    )
     {
         if (StoreOrderSupplyGuard.CanOrderPausedProducts(actorContext))
         {
-            return Array.Empty<string>();
+            return Array.Empty<StoreOrderSupplyPausedLine>();
         }
 
         // 加购之后才被下架的商品会留在购物车里，提交时必须再查一次当前状态。
@@ -423,18 +431,73 @@ internal sealed class SqlSugarStoreOrderCartStore(
                 (detail, warehouseProduct, product) =>
                     new SupplyPausedLineRow
                     {
+                        DetailGuid = detail.DetailGUID,
                         ProductCode = detail.ProductCode,
                         ItemNumber = product.ItemNumber,
+                        ProductName = product.ProductName,
+                        Quantity = detail.Quantity ?? 0,
                     }
             )
             .ToListAsync();
 
+        var supplyPlans = await LoadOpenSupplyPlansAsync(
+            rows.Select(row => row.ProductCode).ToList()
+        );
         return rows
-            .Select(row => string.IsNullOrWhiteSpace(row.ItemNumber) ? row.ProductCode : row.ItemNumber)
-            .Where(label => !string.IsNullOrWhiteSpace(label))
-            .Select(label => label!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(row => !string.IsNullOrWhiteSpace(row.ProductCode))
+            .Select(row => new StoreOrderSupplyPausedLine(
+                row.DetailGuid ?? string.Empty,
+                row.ProductCode!,
+                row.ItemNumber,
+                row.ProductName,
+                row.Quantity,
+                supplyPlans.GetValueOrDefault(row.ProductCode!)
+            ))
             .ToList();
+    }
+
+    public async Task<StoreOrderCartSplitResult> MoveLinesToNewCartAsync(
+        StoreOrderCartScope scope,
+        StoreOrderCartSubmissionSnapshot source,
+        IReadOnlyCollection<string> detailGuids,
+        DateTime now,
+        string actor
+    )
+    {
+        var guids = detailGuids.Where(guid => !string.IsNullOrWhiteSpace(guid)).Distinct().ToList();
+        if (guids.Count == 0)
+        {
+            throw new InvalidOperationException("No cart lines to move.");
+        }
+
+        // 先建新车头再改明细归属，保证任何时刻明细都指向存在的表头。
+        var newCart = CreateCartHeader(scope, now, actor);
+        await _db.Insertable(newCart).ExecuteCommandAsync();
+
+        var moved = await _db.Updateable<WareHouseOrderDetails>()
+            .SetColumns(detail => new WareHouseOrderDetails
+            {
+                OrderGUID = newCart.OrderGUID,
+                UpdatedAt = now,
+                UpdatedBy = actor,
+            })
+            .Where(detail =>
+                detail.OrderGUID == source.OrderGuid
+                && !detail.IsDeleted
+                && guids.Contains(detail.DetailGUID)
+            )
+            .ExecuteCommandAsync();
+        if (moved != guids.Count)
+        {
+            throw new InvalidOperationException(
+                $"Expected to move {guids.Count} cart lines but moved {moved}."
+            );
+        }
+
+        // 新车版本号以旧车为基准递增，移动端按门店比较 cartRevision 时不会把新车当成旧数据。
+        var newSummary = await RecalculateAsync(newCart.OrderGUID, source.UpdatedAt);
+        await RecalculateAsync(source.OrderGuid, source.UpdatedAt);
+        return new StoreOrderCartSplitResult(newCart.OrderGUID, moved, newSummary.CartRevision);
     }
 
     public Task<int> CompareExchangeSubmitAsync(
@@ -476,21 +539,7 @@ internal sealed class SqlSugarStoreOrderCartStore(
         var order = await FindActiveCartAsync(scope);
         if (order == null)
         {
-            order = new WareHouseOrder
-            {
-                OrderGUID = UuidHelper.GenerateUuid7(),
-                StoreCode = scope.StoreCode,
-                CartOwnerUserGuid = scope.CartOwnerUserGuid,
-                OrderDate = now,
-                FlowStatus = 0,
-                IsDeleted = false,
-                CreatedAt = now,
-                UpdatedAt = now,
-                UpdatedBy = actor,
-                OEMTotalAmount = 0,
-                ImportTotalAmount = 0,
-                ShippingFee = 0,
-            };
+            order = CreateCartHeader(scope, now, actor);
             await _db.Insertable(order).ExecuteCommandAsync();
         }
 
@@ -707,7 +756,13 @@ internal sealed class SqlSugarStoreOrderCartStore(
             )
             .FirstAsync();
 
-        if (item?.Volume.HasValue == true)
+        if (item == null)
+        {
+            return null;
+        }
+
+        await ApplySupplyPlansAsync(new[] { item });
+        if (item.Volume.HasValue)
         {
             item.OrderVolume = StoreOrderCartRules.CalculateVolume(item.Volume, item.Quantity);
             item.AllocVolume = StoreOrderCartRules.CalculateVolume(
@@ -718,6 +773,74 @@ internal sealed class SqlSugarStoreOrderCartStore(
         }
 
         return item;
+    }
+
+    /// <summary>
+    /// 给已下架的购物车行补上未关闭的供货计划；在供货的行不带说明，缺说明表时整体跳过。
+    /// </summary>
+    private async Task ApplySupplyPlansAsync(IReadOnlyCollection<StoreOrderCartItemDto> items)
+    {
+        var pausedCodes = items
+            .Where(item => !item.IsActive && !string.IsNullOrWhiteSpace(item.ProductCode))
+            .Select(item => item.ProductCode)
+            .ToList();
+        if (pausedCodes.Count == 0)
+        {
+            return;
+        }
+
+        var supplyPlans = await LoadOpenSupplyPlansAsync(pausedCodes);
+        if (supplyPlans.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            if (!item.IsActive && supplyPlans.TryGetValue(item.ProductCode, out var plan))
+            {
+                item.SupplyPlan = plan;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 按商品编码批量读取未关闭供货说明的后续计划。说明表尚未建立时返回空，
+    /// 调用方把所有下架行都当普通「暂停供货」处理。
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, string>> LoadOpenSupplyPlansAsync(
+        IReadOnlyCollection<string?> productCodes
+    )
+    {
+        var codes = productCodes
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (codes.Count == 0 || !WarehouseProductSupplyNoticeWriter.IsSchemaReady(_db))
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var rows = await _db.Queryable<WarehouseProductSupplyNotice>()
+            .Where(notice => codes.Contains(notice.ProductCode) && notice.ClosedAtUtc == null)
+            .Select(notice => new SupplyPlanRow
+            {
+                ProductCode = notice.ProductCode,
+                SupplyPlan = notice.SupplyPlan,
+            })
+            .ToListAsync();
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            if (!string.IsNullOrWhiteSpace(row.ProductCode) && !string.IsNullOrWhiteSpace(row.SupplyPlan))
+            {
+                result[row.ProductCode] = row.SupplyPlan;
+            }
+        }
+
+        return result;
     }
 
     private async Task<WareHouseOrder?> FindActiveCartAsync(StoreOrderCartScope scope)
@@ -763,6 +886,30 @@ internal sealed class SqlSugarStoreOrderCartStore(
             )
             .FirstAsync();
     }
+
+    /// <summary>
+    /// 新建一辆空购物车表头（FlowStatus=0）；加购建车与提交时承接保留行共用。
+    /// </summary>
+    private static WareHouseOrder CreateCartHeader(
+        StoreOrderCartScope scope,
+        DateTime now,
+        string actor
+    ) => new()
+    {
+        OrderGUID = UuidHelper.GenerateUuid7(),
+        StoreCode = scope.StoreCode,
+        CartOwnerUserGuid = scope.CartOwnerUserGuid,
+        OrderDate = now,
+        FlowStatus = 0,
+        IsDeleted = false,
+        CreatedAt = now,
+        UpdatedAt = now,
+        CreatedBy = actor,
+        UpdatedBy = actor,
+        OEMTotalAmount = 0,
+        ImportTotalAmount = 0,
+        ShippingFee = 0,
+    };
 
     private static WareHouseOrderDetails CreateDetail(
         string orderGuid,
@@ -834,8 +981,17 @@ internal sealed class SqlSugarStoreOrderCartStore(
 
     private sealed class SupplyPausedLineRow
     {
+        public string? DetailGuid { get; init; }
         public string? ProductCode { get; init; }
         public string? ItemNumber { get; init; }
+        public string? ProductName { get; init; }
+        public decimal Quantity { get; init; }
+    }
+
+    private sealed class SupplyPlanRow
+    {
+        public string? ProductCode { get; init; }
+        public string? SupplyPlan { get; init; }
     }
 
     private sealed class CartProductPriceRow

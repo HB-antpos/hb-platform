@@ -90,7 +90,7 @@ internal sealed class LegacyStoreOrderSliceAdapter(IStoreOrderReactService servi
     public Task<ApiResponse<StoreOrderCartDto?>> ClearCartAsync(string storeCode) =>
         service.ClearCartAsync(storeCode);
 
-    public Task<ApiResponse<bool>> SubmitOrderAsync(
+    public Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
         SubmitStoreOrderRequestDto request
     ) => service.SubmitOrderAsync(request);
 

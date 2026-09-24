@@ -75,9 +75,11 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<StoreOrderCartDto?>> ClearCartAsync(string storeCode);
 
         /// <summary>
-        /// 提交订单 (FlowStatus 0 -> 1)
+        /// 提交订单 (FlowStatus 0 -> 1)；已暂停供货的行留在购物车里，结果里列出。
         /// </summary>
-        Task<ApiResponse<bool>> SubmitOrderAsync(SubmitStoreOrderRequestDto request);
+        Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
+            SubmitStoreOrderRequestDto request
+        );
 
         /// <summary>
         /// 批量获取商品动态数据 (历史订单 + 购物车数量)
