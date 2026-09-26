@@ -112,12 +112,18 @@ namespace BlazorApp.Shared.DTOs
         public string? Name { get; set; }
     }
 
-    /// <summary>按供应商分组的可选供应商分类叶节点。</summary>
+    /// <summary>
+    /// 按供应商分组的供应商分类树节点。
+    /// 父节点用于展示层级，只有叶节点保持原有 GUID 可选/筛选语义。
+    /// </summary>
     public class LocalSupplierProductSalesSupplierCategoryOptionDto
     {
         public string SupplierCode { get; set; } = string.Empty;
         public string Guid { get; set; } = string.Empty;
+        public string? ParentGuid { get; set; }
         public string Name { get; set; } = string.Empty;
+        public bool IsSelectable { get; set; }
+        public List<LocalSupplierProductSalesSupplierCategoryOptionDto> Children { get; set; } = new();
     }
 
     /// <summary>options 接口响应。</summary>

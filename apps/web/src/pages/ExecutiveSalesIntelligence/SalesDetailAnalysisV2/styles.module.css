@@ -15,6 +15,12 @@
 .headerControls > div :global(.ant-picker-range input) { font-size:12.5px; }
 .headerControls :global(.ant-segmented-item-label) { padding-inline:7px; }
 .headerControls > div > div > :global(.ant-btn) { padding-inline:10px; }
+.categoryTreePopup { width:min(400px,calc(100vw - 32px))!important; }
+.categoryTreeHint { padding:8px 12px; border-bottom:1px solid #e8edf3; color:#5c7088; font-size:12px; line-height:1.45; }
+.categoryTreePopup :global(.ant-select-tree) { max-height:360px; overflow-y:auto; }
+.categoryTreePopup :global(.ant-select-tree-node-content-wrapper) { height:auto; min-height:32px; padding-top:6px; padding-bottom:6px; white-space:normal; line-height:18px; }
+.categoryTreePopup :global(.ant-select-tree-title) { overflow-wrap:anywhere; }
+.categoryTreePopup :global(.ant-select-tree-treenode-level-0 .ant-select-tree-title) { font-weight:600; }
 .summary { flex:none; display:flex; align-items:stretch; flex-wrap:wrap; min-height:56px; background:#fff; border:1px solid var(--line); border-radius:8px; }
 .kpi { display:flex; flex-direction:column; justify-content:center; gap:3px; padding:7px 18px; border-left:1px solid #edf1f6; white-space:nowrap; }
 .kpi:first-child { border-left:0; }

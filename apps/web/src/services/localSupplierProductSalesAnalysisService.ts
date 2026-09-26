@@ -158,18 +158,25 @@ export function getLocalSupplierProductSalesAnalysisOptions(signal?: AbortSignal
 
 export function getLocalSupplierProductSalesAnalysisSupplierCategoryOptions(supplierCodes: string[], signal?: AbortSignal) {
   const params = new URLSearchParams()
+  params.set('tree', 'true')
   supplierCodes.forEach((code) => params.append('supplierCodes', code))
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return request(`${API_BASE}/supplier-category-options${suffix}`, { method: 'GET', signal })
     .then((raw) => unwrap(raw, (data): LocalSupplierProductSalesAnalysisSupplierCategoryOption[] => {
       if (!Array.isArray(data)) return []
-      return data.flatMap((entry) => {
+      const parseNode = (entry: unknown): LocalSupplierProductSalesAnalysisSupplierCategoryOption | null => {
         const item = asRecord(entry)
         const supplierCode = item && stringValue(pick(item, 'supplierCode', 'SupplierCode'))
         const guid = item && stringValue(pick(item, 'guid', 'Guid'))
         const name = item && stringValue(pick(item, 'name', 'Name'))
-        return supplierCode && guid ? [{ supplierCode, guid, name: name || guid }] : []
-      })
+        if (!supplierCode || !guid) return null
+        const rawChildren = item && pick(item, 'children', 'Children')
+        const children = Array.isArray(rawChildren)
+          ? rawChildren.map(parseNode).filter((child): child is LocalSupplierProductSalesAnalysisSupplierCategoryOption => !!child)
+          : []
+        return { supplierCode, guid, parentGuid: stringValue(pick(item, 'parentGuid', 'ParentGuid')), name: name || guid, isSelectable: pick(item, 'isSelectable', 'IsSelectable') !== false, children }
+      }
+      return data.map(parseNode).filter((item): item is LocalSupplierProductSalesAnalysisSupplierCategoryOption => !!item)
     }))
 }
 export function queryLocalSupplierProductSalesAnalysisBootstrap(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/bootstrap', body, bootstrap, signal) }

@@ -227,7 +227,8 @@ namespace BlazorApp.Api.Services.React
 
         public async Task<ApiResponse<List<LocalSupplierProductSalesSupplierCategoryOptionDto>>> GetSupplierCategoryOptionsAsync(
             IReadOnlyList<string>? supplierCodes,
-            IReadOnlyList<string>? scopedStoreCodes
+            IReadOnlyList<string>? scopedStoreCodes,
+            bool tree = false
         )
         {
             if (IsEmptyScope(scopedStoreCodes))
@@ -241,51 +242,151 @@ namespace BlazorApp.Api.Services.React
                 return ApiResponse<List<LocalSupplierProductSalesSupplierCategoryOptionDto>>.Error("供应商数量不能超过 100 个", "VALIDATION_ERROR");
             }
 
-            // 只返回可选的叶分类；商品分类归属本身写在叶节点，避免父节点选择语义不明确。
+            // 默认保持旧版叶节点平铺契约；新树形消费者必须显式传 tree=true。
             var categoriesQuery = _db.Queryable<LocalSupplierCategory>()
-                .Where(category => category.IsDeleted == false && category.IsActive == true);
+                .Where(category => category.IsDeleted == false && category.IsActive == true
+                    && category.LocalSupplierCode != "200");
             if (selected.Count > 0)
             {
                 categoriesQuery = categoriesQuery.Where(category => selected.Contains(category.LocalSupplierCode));
             }
             var categories = await categoriesQuery.ToListAsync();
-            var parentGuids = categories
-                .Where(category => !string.IsNullOrWhiteSpace(category.ParentGUID))
-                .Select(category => category.ParentGUID!)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var result = categories
-                .Where(category => !parentGuids.Contains(category.CategoryGUID))
-                .Select(category => new LocalSupplierProductSalesSupplierCategoryOptionDto
+            var localRows = categories.Select(category => new SupplierCategoryTreeRow
                 {
                     SupplierCode = category.LocalSupplierCode,
                     Guid = category.CategoryGUID,
-                    Name = string.IsNullOrWhiteSpace(category.FullPath) ? category.CategoryName : category.FullPath,
-                })
-                .ToList();
+                    ParentGuid = category.ParentGUID,
+                    Name = string.IsNullOrWhiteSpace(category.CategoryName) ? category.CategoryGUID : category.CategoryName,
+                    FlatName = string.IsNullOrWhiteSpace(category.FullPath) ? category.CategoryName : category.FullPath,
+                }).ToList();
+            var result = tree ? BuildSupplierCategoryTree(localRows) : BuildFlatLeafOptions(localRows);
 
             if (selected.Count == 0 || selected.Contains("200", StringComparer.OrdinalIgnoreCase))
             {
                 var warehouseCategories = await _db.Queryable<WarehouseCategory>()
                     .Where(category => category.IsDeleted == false && category.IsActive == true)
                     .ToListAsync();
-                var warehouseParents = warehouseCategories
-                    .Where(category => !string.IsNullOrWhiteSpace(category.ParentGUID))
-                    .Select(category => category.ParentGUID!)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                result.AddRange(warehouseCategories
-                    .Where(category => !warehouseParents.Contains(category.CategoryGUID))
-                    .Select(category => new LocalSupplierProductSalesSupplierCategoryOptionDto
+                var warehouseRows = warehouseCategories.Select(category => new SupplierCategoryTreeRow
                     {
                         SupplierCode = "200",
                         Guid = category.CategoryGUID,
+                        ParentGuid = category.ParentGUID,
                         Name = category.ChineseName ?? category.CategoryName ?? category.CategoryGUID,
-                    }));
+                        FlatName = category.ChineseName ?? category.CategoryName ?? category.CategoryGUID,
+                    }).ToList();
+                result.AddRange(tree ? BuildSupplierCategoryTree(warehouseRows) : BuildFlatLeafOptions(warehouseRows));
             }
 
             return ApiResponse<List<LocalSupplierProductSalesSupplierCategoryOptionDto>>.OK(
                 result.OrderBy(item => item.SupplierCode, StringComparer.OrdinalIgnoreCase)
                     .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToList()
             );
+        }
+
+        private sealed class SupplierCategoryTreeRow
+        {
+            public string SupplierCode { get; init; } = string.Empty;
+            public string Guid { get; init; } = string.Empty;
+            public string? ParentGuid { get; init; }
+            public string Name { get; init; } = string.Empty;
+            public string FlatName { get; init; } = string.Empty;
+        }
+
+        private static List<LocalSupplierProductSalesSupplierCategoryOptionDto> BuildFlatLeafOptions(
+            IReadOnlyList<SupplierCategoryTreeRow> rows
+        )
+        {
+            var parentGuids = rows.Where(row => !string.IsNullOrWhiteSpace(row.ParentGuid))
+                .Select(row => row.ParentGuid!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return rows.Where(row => !parentGuids.Contains(row.Guid))
+                .Select(row => new LocalSupplierProductSalesSupplierCategoryOptionDto
+                {
+                    SupplierCode = row.SupplierCode,
+                    Guid = row.Guid,
+                    Name = row.FlatName,
+                    IsSelectable = true,
+                }).ToList();
+        }
+
+        private static List<LocalSupplierProductSalesSupplierCategoryOptionDto> BuildSupplierCategoryTree(
+            IEnumerable<SupplierCategoryTreeRow> rows
+        )
+        {
+            // 先物化并按「供应商 + GUID」去重：不同供应商的数据不应因 GUID 恰好相同而串树，
+            // 后续建边也使用同一复合键，避免重复枚举输入或重复挂载节点。
+            var distinctRows = rows
+                .Where(row => !string.IsNullOrWhiteSpace(row.Guid))
+                .GroupBy(row => row.SupplierCode + "|" + row.Guid, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            var nodes = distinctRows
+                .ToDictionary(
+                    row => row.SupplierCode + "|" + row.Guid,
+                    row => new LocalSupplierProductSalesSupplierCategoryOptionDto
+                    {
+                        SupplierCode = row.SupplierCode,
+                        Guid = row.Guid,
+                        ParentGuid = row.ParentGuid,
+                        Name = row.Name,
+                    },
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+            foreach (var node in nodes.Values)
+            {
+                node.IsSelectable = true;
+            }
+
+            var roots = new List<LocalSupplierProductSalesSupplierCategoryOptionDto>();
+            var parentByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in distinctRows)
+            {
+                var nodeKey = row.SupplierCode + "|" + row.Guid;
+                var parentKey = row.SupplierCode + "|" + row.ParentGuid;
+                var createsCycle = false;
+                var cursor = parentKey;
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                while (parentByKey.TryGetValue(cursor, out var ancestor) && seen.Add(cursor))
+                {
+                    if (string.Equals(ancestor, nodeKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        createsCycle = true;
+                        break;
+                    }
+                    cursor = ancestor;
+                }
+                var node = nodes[nodeKey];
+                if (!string.IsNullOrWhiteSpace(row.ParentGuid)
+                    && nodes.TryGetValue(parentKey, out var parent)
+                    && !string.Equals(row.ParentGuid, row.Guid, StringComparison.OrdinalIgnoreCase)
+                    && !createsCycle)
+                {
+                    parent.Children.Add(node);
+                    parent.IsSelectable = false;
+                    parentByKey[nodeKey] = parentKey;
+                }
+                else
+                {
+                    roots.Add(node);
+                }
+            }
+
+            // Parent nodes remain non-selectable; orphaned parents are roots so no active category disappears.
+            void Sort(List<LocalSupplierProductSalesSupplierCategoryOptionDto> items)
+            {
+                items.Sort((left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+                foreach (var item in items)
+                {
+                    if (item.Children.Count > 0)
+                    {
+                        item.IsSelectable = false;
+                        Sort(item.Children);
+                    }
+                }
+            }
+            Sort(roots);
+            return roots;
         }
 
         public async Task<

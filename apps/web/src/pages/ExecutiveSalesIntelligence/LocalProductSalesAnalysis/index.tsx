@@ -1,10 +1,11 @@
 import { ClearOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Checkbox, DatePicker, Empty, Input, Pagination, Segmented, Select, Skeleton, Space, message } from 'antd'
+import { Alert, Button, Card, Checkbox, DatePicker, Empty, Input, Pagination, Segmented, Select, Skeleton, Space, Tree, message } from 'antd'
+import type { DataNode } from 'antd/es/tree'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Key, type ReactNode } from 'react'
 import PageContainer from '../../../components/PageContainer'
 import ProductImage from '../ProductFlowShared/ProductImage'
 import {
@@ -47,6 +48,8 @@ import {
   formatAud,
   getDateRangeError,
   getCurrentProductAfterCancellation,
+  collectSupplierCategoryLeafGuids,
+  mergeVisibleSupplierCategorySelection,
   getSellThroughLevel,
   isSelected,
   PAGE_BOOTSTRAP_TIMEOUT_SECONDS,
@@ -175,6 +178,7 @@ export default function LocalProductSalesAnalysisPage() {
   const [supplierCategoryOptions, setSupplierCategoryOptions] = useState<LocalSupplierProductSalesAnalysisSupplierCategoryOption[]>([])
   const [supplierCategoryOpen, setSupplierCategoryOpen] = useState(false)
   const [supplierCategorySearch, setSupplierCategorySearch] = useState('')
+  const [supplierCategoryExpandedKeys, setSupplierCategoryExpandedKeys] = useState<string[]>([])
   const [supplierCategoryLoading, setSupplierCategoryLoading] = useState(false)
   const [supplierCategoryError, setSupplierCategoryError] = useState<string>()
   const [draftDocumentKeyword, setDraftDocumentKeyword] = useState('')
@@ -230,7 +234,7 @@ export default function LocalProductSalesAnalysisPage() {
       .then((response) => {
         if (controller.signal.aborted) return
         setSupplierCategoryOptions(response.data)
-        const valid = new Set(response.data.map((item) => item.guid))
+        const valid = new Set(collectSupplierCategoryLeafGuids(response.data))
         setDraftSupplierCategoryGuids((previous) => previous.filter((guid) => valid.has(guid)))
       })
       .catch((error) => {
@@ -648,24 +652,92 @@ export default function LocalProductSalesAnalysisPage() {
   const supplierNameByCode = useMemo(() => new Map(analysis.options.suppliers.map((item) => [item.code, item.name || item.code])), [analysis.options.suppliers])
   const supplierCategoryGroups = useMemo(() => {
     const groups = new Map<string, { label: string; options: { value: string; label: string }[] }>()
-    supplierCategoryOptions.forEach((item) => {
-      const existing = groups.get(item.supplierCode)
-      const group = existing || { label: `${supplierNameByCode.get(item.supplierCode) || item.supplierCode} (${item.supplierCode})`, options: [] }
-      group.options.push({ value: item.guid, label: item.name })
-      groups.set(item.supplierCode, group)
+    type CategoryNodeOption = LocalSupplierProductSalesAnalysisSupplierCategoryOption & { children?: CategoryNodeOption[] }
+    const leaves = (items: CategoryNodeOption[]): CategoryNodeOption[] => items.flatMap((item) => item.children?.length ? leaves(item.children) : [item])
+    supplierCategoryOptions.forEach((rawItem) => {
+      const item = rawItem as CategoryNodeOption
+      leaves([item]).forEach((leaf) => {
+        const existing = groups.get(item.supplierCode)
+        const group = existing || { label: `${supplierNameByCode.get(item.supplierCode) || item.supplierCode} (${item.supplierCode})`, options: [] }
+        group.options.push({ value: leaf.guid, label: leaf.name })
+        groups.set(item.supplierCode, group)
+      })
     })
     return [...groups.values()]
   }, [supplierCategoryOptions, supplierNameByCode])
   const categoryText = (zh: string, en: string) => i18n.resolvedLanguage?.startsWith('en') ? en : zh
-  const visibleSupplierCategoryGuids = supplierCategoryOptions
-    .filter(item => item.name.toLocaleLowerCase().includes(supplierCategorySearch.trim().toLocaleLowerCase()))
-    .map(item => item.guid)
+  const supplierCategoryTree = useMemo(() => {
+    const query = supplierCategorySearch.trim().toLocaleLowerCase()
+    type CategoryNodeOption = LocalSupplierProductSalesAnalysisSupplierCategoryOption & { parentGuid?: string; children?: CategoryNodeOption[] }
+    const grouped = new Map<string, CategoryNodeOption[]>()
+    supplierCategoryOptions.forEach((item) => {
+      const existing = grouped.get(item.supplierCode)
+      if (existing) existing.push(item as CategoryNodeOption)
+      else grouped.set(item.supplierCode, [item as CategoryNodeOption])
+    })
+    const nodes: DataNode[] = []
+    const leafGuids = new Set<string>()
+    grouped.forEach((items, supplierCode) => {
+      const supplierName = supplierNameByCode.get(supplierCode) || supplierCode
+      const buildNestedChildren = (nestedItems: CategoryNodeOption[]): DataNode[] => nestedItems.flatMap((item) => {
+        const nested = item.children?.length ? buildNestedChildren(item.children) : undefined
+        if (nested?.length) return [{ key: item.guid, title: item.name, children: nested }]
+        leafGuids.add(item.guid)
+        return [{ key: item.guid, title: item.name }]
+      })
+      // 顶层数组就是供应商分类 roots；孤儿根节点即使带有已停用父级的 parentGuid 也必须保留。
+      const allChildren = buildNestedChildren(items)
+      const filterChildren = (treeNodes: DataNode[]): DataNode[] => treeNodes.flatMap((node) => {
+        const children = node.children ? filterChildren(node.children) : []
+        const nodeMatches = !query || String(node.title).toLocaleLowerCase().includes(query)
+        // 命中父分类时保留其完整后代，保证用户可以继续展开并勾选子分类。
+        if (nodeMatches) return [node]
+        if (children.length) return [{ ...node, children }]
+        return []
+      })
+      const children = filterChildren(allChildren)
+      if (!children.length) return
+      const key = `supplier:${supplierCode}`
+      nodes.push({ key, title: `${supplierName} (${supplierCode})`, children })
+    })
+    const expandedKeys: string[] = []
+    const collectExpandedKeys = (treeNodes: DataNode[]) => treeNodes.forEach((node) => {
+      if (!node.children?.length) return
+      expandedKeys.push(String(node.key))
+      collectExpandedKeys(node.children)
+    })
+    if (query) collectExpandedKeys(nodes)
+    return { nodes, expandedKeys, leafGuids }
+  }, [supplierCategoryOptions, supplierCategorySearch, supplierNameByCode])
+  const visibleSupplierCategoryGuids = useMemo(() => {
+    const leaves: string[] = []
+    const visit = (nodes: DataNode[]) => nodes.forEach((node) => {
+      if (node.children?.length) visit(node.children)
+      else if (supplierCategoryTree.leafGuids.has(String(node.key))) leaves.push(String(node.key))
+    })
+    visit(supplierCategoryTree.nodes)
+    return leaves
+  }, [supplierCategoryTree.leafGuids, supplierCategoryTree.nodes])
+  useEffect(() => {
+    if (supplierCategorySearch.trim()) setSupplierCategoryExpandedKeys(supplierCategoryTree.expandedKeys)
+  }, [supplierCategorySearch, supplierCategoryTree.expandedKeys])
   const limitSelection = (values: string[], limit: number, label: string) => {
     if (values.length > limit) message.warning(categoryText(`${label}最多选择 ${limit} 项`, `${label}: select up to ${limit}`))
     return values.slice(0, limit)
   }
   const selectVisibleSupplierCategories = () => {
     setDraftSupplierCategoryGuids(previous => limitSelection([...new Set([...previous, ...visibleSupplierCategoryGuids])], 100, categoryText('供应商分类', 'Supplier categories')))
+  }
+  const updateSupplierCategoryTreeSelection = (checkedKeys: Key[]) => {
+    // 供应商根节点仅用于批量勾选；请求仍保持原有的分类 GUID 语义。
+    const visibleLeafGuids = new Set(visibleSupplierCategoryGuids)
+    const checkedVisibleLeafGuids = checkedKeys.filter((key) => visibleLeafGuids.has(String(key))).map(String)
+    setDraftSupplierCategoryGuids((previous) => limitSelection(mergeVisibleSupplierCategorySelection(previous, checkedVisibleLeafGuids, visibleLeafGuids), 100, categoryText('供应商分类', 'Supplier categories')))
+  }
+  const closeSupplierCategoryDropdown = () => {
+    setSupplierCategoryOpen(false)
+    setSupplierCategorySearch('')
+    setSupplierCategoryExpandedKeys([])
   }
   const selectionLabel = analysis.effectiveSelection.mode === 'included' ? t('localProductSalesAnalysis.selectedCount', { count: analysis.effectiveSelection.includedProductCodes.length }) : t('localProductSalesAnalysis.allFilteredSelected')
 
@@ -677,7 +749,7 @@ export default function LocalProductSalesAnalysisPage() {
         <Segmented value={quickDays ?? ''} options={[7, 30, 90].map((days) => ({ value: days, label: t('localProductSalesAnalysis.quickDays', { count: days }) }))} onChange={(value) => setRangeDays(Number(value))} />
         <Input className={styles.filterKeyword} value={draftKeyword} onChange={(event) => setDraftKeyword(event.target.value)} onPressEnter={applyFilters} placeholder={t('localProductSalesAnalysis.filters.keyword')} allowClear />
         <Select className={styles.filterSelect} mode="multiple" maxTagCount={0} maxTagPlaceholder={() => categoryText(`已选 ${draftSupplierCodes.length} 家`, `${draftSupplierCodes.length} selected`)} value={draftSupplierCodes} onChange={(codes) => { setDraftSupplierCodes(limitSelection(codes, 100, categoryText('供应商', 'Suppliers'))); setDraftSupplierCategoryGuids([]) }} placeholder={t('localProductSalesAnalysis.filters.supplier')} allowClear showSearch optionFilterProp="label" options={supplierOptions} notFoundContent={t('localProductSalesAnalysis.noSuppliers')} aria-label={t('localProductSalesAnalysis.filters.supplier')} />
-        <Select className={styles.filterSelect} mode="multiple" maxTagCount={0} maxTagPlaceholder={() => categoryText(`已选 ${draftSupplierCategoryGuids.length} 项`, `${draftSupplierCategoryGuids.length} selected`)} value={draftSupplierCategoryGuids} onChange={values => setDraftSupplierCategoryGuids(limitSelection(values, 100, categoryText('供应商分类', 'Supplier categories')))} placeholder={categoryText('供应商分类（多选）', 'Supplier categories (multiple)')} allowClear showSearch optionFilterProp="label" options={supplierCategoryGroups} open={supplierCategoryOpen} onOpenChange={open => { setSupplierCategoryOpen(open); if (!open) setSupplierCategorySearch('') }} onSearch={setSupplierCategorySearch} loading={supplierCategoryLoading} notFoundContent={supplierCategoryError || (supplierCategoryLoading ? categoryText('加载中…', 'Loading…') : categoryText('暂无供应商分类', 'No supplier categories'))} aria-label={categoryText('供应商分类', 'Supplier categories')} popupRender={(menu) => <><div className={styles.categoryHint}>{categoryText('按供应商分组；分类与仓库分类共同筛选商品。最多选 100 项。', 'Grouped by supplier; this filter combines with warehouse categories. Select up to 100.')}</div><div className={styles.categoryActions}><Button size="small" type="link" onClick={selectVisibleSupplierCategories}>{categoryText('全选当前分类', 'Select visible categories')}</Button><span>{categoryText(`已选 ${draftSupplierCategoryGuids.length} 项`, `${draftSupplierCategoryGuids.length} selected`)}</span></div>{menu}<div className={styles.categoryFooter}><Button size="small" onClick={() => setDraftSupplierCategoryGuids([])}>{categoryText('清空', 'Clear')}</Button><Button size="small" type="primary" onClick={() => { setSupplierCategoryOpen(false); applyFilters() }}>{categoryText('应用筛选', 'Apply filters')}</Button></div></>} />
+        <Select className={styles.filterSelect} mode="multiple" maxTagCount={0} maxTagPlaceholder={() => categoryText(`已选 ${draftSupplierCategoryGuids.length} 项`, `${draftSupplierCategoryGuids.length} selected`)} value={draftSupplierCategoryGuids} onChange={values => setDraftSupplierCategoryGuids(limitSelection(values, 100, categoryText('供应商分类', 'Supplier categories')))} placeholder={categoryText('供应商分类（多选）', 'Supplier categories (multiple)')} allowClear showSearch optionFilterProp="label" options={supplierCategoryGroups.flatMap(group => group.options)} popupMatchSelectWidth={false} open={supplierCategoryOpen} onOpenChange={open => { if (open) setSupplierCategoryOpen(true); else closeSupplierCategoryDropdown() }} onSearch={setSupplierCategorySearch} loading={supplierCategoryLoading} notFoundContent={supplierCategoryError || (supplierCategoryLoading ? categoryText('加载中…', 'Loading…') : categoryText('暂无供应商分类', 'No supplier categories'))} aria-label={categoryText('供应商分类', 'Supplier categories')} popupRender={() => <><div className={styles.categoryHint}>{categoryText('按供应商展开分类；分类与仓库分类共同筛选商品。最多选 100 项。', 'Expand suppliers to choose categories; this filter combines with warehouse categories.')}</div><div className={styles.categoryActions}><Button size="small" type="link" onClick={selectVisibleSupplierCategories}>{categoryText('全选当前分类', 'Select visible categories')}</Button><span>{categoryText(`已选 ${draftSupplierCategoryGuids.length} 项`, `${draftSupplierCategoryGuids.length} selected`)}</span></div><div className={styles.categoryTree}>{supplierCategoryError ? <div className={styles.emptyLine}>{supplierCategoryError}</div> : supplierCategoryLoading ? <Skeleton active title={false} paragraph={{ rows: 3 }} /> : supplierCategoryTree.nodes.length ? <Tree checkable selectable={false} treeData={supplierCategoryTree.nodes} checkedKeys={draftSupplierCategoryGuids} expandedKeys={supplierCategoryExpandedKeys} onExpand={(keys) => setSupplierCategoryExpandedKeys(keys.map(String))} onCheck={(keys) => updateSupplierCategoryTreeSelection(Array.isArray(keys) ? keys : keys.checked)} /> : <div className={styles.emptyLine}>{categoryText('暂无供应商分类', 'No supplier categories')}</div>}</div><div className={styles.categoryFooter}><Button size="small" onClick={() => setDraftSupplierCategoryGuids([])}>{categoryText('清空', 'Clear')}</Button><Button size="small" type="primary" onClick={() => { closeSupplierCategoryDropdown(); applyFilters() }}>{categoryText('应用筛选', 'Apply filters')}</Button></div></>} />
         <Select className={styles.filterSelect} mode="multiple" maxTagCount={0} maxTagPlaceholder={() => categoryText(`已选 ${draftWarehouseCategoryGuids.length} 项`, `${draftWarehouseCategoryGuids.length} selected`)} value={draftWarehouseCategoryGuids} onChange={values => setDraftWarehouseCategoryGuids(limitSelection(values, 100, categoryText('仓库分类', 'Warehouse categories')))} placeholder={t('localProductSalesAnalysis.filters.category')} allowClear showSearch optionFilterProp="label" options={analysis.options.warehouseCategories.map((item) => ({ value: item.guid, label: item.name || item.guid }))} notFoundContent={t('localProductSalesAnalysis.noCategories')} aria-label={t('localProductSalesAnalysis.filters.category')} />
         <Input className={styles.filterSelect} value={draftDocumentKeyword} onChange={(event) => setDraftDocumentKeyword(event.target.value)} onPressEnter={applyFilters} placeholder={t('localProductSalesAnalysis.filters.invoiceNo')} allowClear />
         <Space>
