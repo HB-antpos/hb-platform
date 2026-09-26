@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 
 namespace Hbpos.RemoteMaintenance.Setup;
 
@@ -13,6 +15,9 @@ public interface IRemoteMaintenanceCommandRunner
     Task<int> RunAsync(string fileName, string arguments, CancellationToken cancellationToken);
     async Task<RemoteMaintenanceCommandResult> RunWithOutputAsync(string fileName, string arguments, CancellationToken cancellationToken) =>
         new(await RunAsync(fileName, arguments, cancellationToken), string.Empty, string.Empty);
+    // 是否仍有与正式安装程序同名、但不是从正式安装位置启动的进程在运行（即脱离外壳的内层安装进程）。
+    // 默认实现供测试替身使用，视为没有后台安装进程。
+    bool IsDetachedProcessRunning(string installedExecutable) => false;
 }
 public sealed record RemoteMaintenanceCommandResult(int ExitCode, string StandardOutput, string StandardError);
 public interface IRemoteMaintenanceServiceControl
@@ -76,6 +81,41 @@ public sealed class WindowsRemoteMaintenanceCommandRunner : IRemoteMaintenanceCo
             throw;
         }
     }
+
+    public bool IsDetachedProcessRunning(string installedExecutable)
+    {
+        var installed = Path.GetFullPath(installedExecutable);
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(installed)))
+        {
+            using (process)
+            {
+                var path = TryGetImagePath(process.Id);
+                if (path is not null && !string.Equals(path, installed, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    // 读内核记录的映像路径：外壳退出时内层进程可能刚创建、模块表尚未初始化，
+    // Process.MainModule 此时会读取失败而漏判。PROCESS_QUERY_LIMITED_INFORMATION
+    // 对 SYSTEM 服务进程同样可用；仍打不开的不是本次提权用户启动的安装进程。
+    private static string? TryGetImagePath(int processId)
+    {
+        using var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        if (handle.IsInvalid) return null;
+        var buffer = new StringBuilder(1024);
+        var size = buffer.Capacity;
+        return QueryFullProcessImageName(handle, 0, buffer, ref size) ? Path.GetFullPath(buffer.ToString(0, size)) : null;
+    }
+
+    private const int ProcessQueryLimitedInformation = 0x1000;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern SafeProcessHandle OpenProcess(int desiredAccess, bool inheritHandle, int processId);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "QueryFullProcessImageNameW")]
+    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, int flags, StringBuilder exeName, ref int size);
 
     // Windows CRT 参数编码：内层引号与末尾反斜杠需要分别处理，尤其 SCM binPath。
     internal static string Quote(string value)
@@ -160,6 +200,10 @@ public sealed class WindowsRemoteMaintenanceInstaller(
     private static string StatusProgramDirectory => Path.Combine(ProgramRoot, "HBPOS", "RemoteStatus");
     private static string InstalledRustDesk => Path.Combine(ProgramRoot, "RustDesk", "rustdesk.exe");
     private static string Q(string value) => WindowsRemoteMaintenanceCommandRunner.Quote(value);
+    // 生产值覆盖慢盘 XCOPY、杀毒扫描和防火墙规则写入；测试可缩短，避免真实等待。
+    internal TimeSpan SetupWaitTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    internal TimeSpan DaemonReadyTimeout { get; init; } = TimeSpan.FromSeconds(90);
+    internal TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(1);
 
     public async Task<RemoteMaintenanceInstallationResult> InstallAsync(RemoteMaintenanceInstallationRequest request, CancellationToken cancellationToken = default)
     {
@@ -193,21 +237,27 @@ public sealed class WindowsRemoteMaintenanceInstaller(
                 await progressWriter(new(true, false, string.Empty, request.ClientVersion, request.DataDirectory));
             rustDeskTouched = true;
             if (await commandRunner.RunAsync(staged, "--silent-install", cancellationToken) != 0)
-                throw new InvalidOperationException("RustDesk 安装未完成。");
-            for (var i = 0; !File.Exists(InstalledRustDesk) && i < 30; i++) await Task.Delay(500, cancellationToken);
-            if (!File.Exists(InstalledRustDesk)) throw new InvalidOperationException("RustDesk 安装文件不存在。");
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+            // 官方安装包是自解压外壳：解包后拉起内层 rustdesk.exe 执行安装脚本就立即退出，
+            // 退出码 0 只代表“解包完成”。安装脚本先卸载旧版、XCOPY 整个目录，最后才创建服务；
+            // 不等它结束就会对着复制中的目录执行命令，且安装会在 helper 失败退出后继续跑完，
+            // 留下一个未配置公司服务器、却开机自启的 RustDesk。
+            await WaitForDetachedRustDeskSetupAsync(cancellationToken);
+            if (!File.Exists(InstalledRustDesk))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
             EnsureProtectedProgramPath(InstalledRustDesk);
             if (await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken) is null &&
                 await commandRunner.RunAsync(InstalledRustDesk, "--install-service", cancellationToken) != 0)
-                throw new InvalidOperationException("RustDesk 服务安装失败。");
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
             if (await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
-                throw new InvalidOperationException("RustDesk 服务启动失败。");
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
 
             await ConfigureRustDeskAsync(InstalledRustDesk, request.Prepare.Config, request.Password, cancellationToken);
             await File.WriteAllTextAsync(Path.Combine(StatusProgramDirectory, "managed-server.json"),
                 JsonSerializer.Serialize(request.Prepare.Config), cancellationToken);
             var rustdeskId = await GetRustdeskIdAsync(cancellationToken);
-            if (string.IsNullOrEmpty(rustdeskId)) throw new InvalidOperationException("无法取得 RustDesk ID。");
+            if (string.IsNullOrEmpty(rustdeskId))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
             // 停止旧状态服务是本次安装对它的第一次实际修改，失败时也必须保留清理依据。
             if (progressWriter is not null)
                 await progressWriter(new(true, true, rustdeskId, request.ClientVersion, request.DataDirectory));
@@ -235,29 +285,60 @@ public sealed class WindowsRemoteMaintenanceInstaller(
     internal async Task ConfigureRustDeskAsync(string executable, RemoteMaintenanceConfig config, string password, CancellationToken cancellationToken)
     {
         ValidateConfig(config);
+        // --password 只有经 IPC 得到服务端 --server 进程确认才输出 Done!，而服务刚启动时 IPC
+        // 尚未就绪（CLI 连接超时仅 1 秒）。先重试到确认成功：既设置了密码，也证明 IPC 已通，
+        // 之后的 --config/--option 才会写入服务配置，而不是静默回退写到当前管理员的本地配置。
+        await WaitForDaemonPasswordAckAsync(executable, password, cancellationToken);
         // 官方 CLI 按精确参数数量分支，--config 和 --password 必须分开调用。
         var value = $"host={config.IdServer},key={config.PublicKey},relay={config.RelayServer},";
         if (await commandRunner.RunAsync(executable, "--config " + Q(value), cancellationToken) != 0)
-            throw new InvalidOperationException("RustDesk 服务器配置失败。");
-        var passwordResult = await commandRunner.RunWithOutputAsync(executable, "--password " + Q(password), cancellationToken);
-        if (passwordResult.ExitCode != 0 || passwordResult.StandardOutput.Trim() != "Done!")
-            throw new InvalidOperationException("RustDesk 密码设置未确认。");
+            throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
         // 仅密码认证允许无人值守；禁止仅靠界面点击确认，逐项读回真实服务配置。
         foreach (var option in new[] { ("verification-method", "use-permanent-password"), ("approve-mode", "password"), ("allow-only-conn-window-open", "N") })
             if (await commandRunner.RunAsync(executable, "--option " + Q(option.Item1) + " " + Q(option.Item2), cancellationToken) != 0)
-                throw new InvalidOperationException("RustDesk 无人值守配置失败。");
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
         var expected = new[] { ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey),
             ("verification-method", "use-permanent-password"), ("approve-mode", "password"), ("allow-only-conn-window-open", "N") };
         foreach (var option in expected)
+            if (!await OptionMatchesAsync(executable, option.Item1, option.Item2, cancellationToken))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+    }
+
+    internal async Task WaitForDetachedRustDeskSetupAsync(CancellationToken cancellationToken)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (commandRunner.IsDetachedProcessRunning(InstalledRustDesk))
         {
-            var matched = false;
-            for (var i = 0; i < 10 && !matched; i++)
-            {
-                var actual = await commandRunner.RunWithOutputAsync(executable, "--option " + Q(option.Item1), cancellationToken);
-                matched = actual.ExitCode == 0 && actual.StandardOutput.Trim() == option.Item2;
-                if (!matched) await Task.Delay(300, cancellationToken);
-            }
-            if (!matched) throw new InvalidOperationException("RustDesk 配置读回不一致。");
+            // 超时不强杀安装进程：中途打断会留下半装状态，交给界面提示卸载后重试。
+            if (elapsed.Elapsed >= SetupWaitTimeout)
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
+            await Task.Delay(PollInterval, cancellationToken);
+        }
+    }
+
+    private async Task WaitForDaemonPasswordAckAsync(string executable, string password, CancellationToken cancellationToken)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (true)
+        {
+            var result = await commandRunner.RunWithOutputAsync(executable, "--password " + Q(password), cancellationToken);
+            if (result.ExitCode == 0 && result.StandardOutput.Trim() == "Done!") return;
+            if (elapsed.Elapsed >= DaemonReadyTimeout)
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskConfigurationFailed);
+            await Task.Delay(PollInterval, cancellationToken);
+        }
+    }
+
+    // 服务刚启动时 IPC 可能短暂不可用，CLI 会回退读取当前用户的本地配置；
+    // 读回允许有限次重试，全部不一致才判定为不一致。
+    private async Task<bool> OptionMatchesAsync(string executable, string key, string expected, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var actual = await commandRunner.RunWithOutputAsync(executable, "--option " + Q(key), cancellationToken);
+            if (actual.ExitCode == 0 && actual.StandardOutput.Trim() == expected) return true;
+            if (attempt >= 10) return false;
+            await Task.Delay(PollInterval, cancellationToken);
         }
     }
 
@@ -326,7 +407,7 @@ public sealed class WindowsRemoteMaintenanceInstaller(
         var status = await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken);
         return new(status is not null, string.Empty, string.Empty, status ?? "notInstalled");
     }
-    private async Task EnsureNoForeignRustDeskConfigAsync(RemoteMaintenanceConfig config, CancellationToken cancellationToken)
+    internal async Task EnsureNoForeignRustDeskConfigAsync(RemoteMaintenanceConfig config, CancellationToken cancellationToken)
     {
         var status = await serviceControl.QueryAsync(RustDeskServiceName, cancellationToken);
         if (status is null) return;
@@ -334,19 +415,19 @@ public sealed class WindowsRemoteMaintenanceInstaller(
         if (status != "running")
         {
             var marker = Path.Combine(StatusProgramDirectory, "managed-server.json");
-            // 只有管理员目录中已确认接管的服务才允许为恢复事务重新启动。
-            if (!File.Exists(marker)) throw new InvalidOperationException("已有 RustDesk 未运行，无法核验其配置。");
+            // 只有管理员目录中已确认接管的服务才允许为恢复事务重新启动；
+            // 其余一律视为外部 RustDesk，不依据普通用户可写的 journal 绕过。
+            if (!File.Exists(marker))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
             EnsureProtectedProgramPath(marker);
-            if (JsonSerializer.Deserialize<RemoteMaintenanceConfig>(await File.ReadAllTextAsync(marker, cancellationToken)) != config ||
-                await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
-                throw new InvalidOperationException("已有 RustDesk 不属于本次公司配置。");
+            if (JsonSerializer.Deserialize<RemoteMaintenanceConfig>(await File.ReadAllTextAsync(marker, cancellationToken)) != config)
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
+            if (await serviceControl.StartAsync(RustDeskServiceName, cancellationToken) != 0)
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.RustDeskSetupIncomplete);
         }
         foreach (var expected in new[] { ("custom-rendezvous-server", config.IdServer), ("relay-server", config.RelayServer), ("key", config.PublicKey) })
-        {
-            var actual = await commandRunner.RunWithOutputAsync(InstalledRustDesk, "--option " + Q(expected.Item1), cancellationToken);
-            if (actual.ExitCode != 0 || actual.StandardOutput.Trim() != expected.Item2)
-                throw new InvalidOperationException("检测到已有其他 RustDesk 配置，已停止接管。");
-        }
+            if (!await OptionMatchesAsync(InstalledRustDesk, expected.Item1, expected.Item2, cancellationToken))
+                throw new RemoteMaintenanceSetupException(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged);
     }
     internal static void ValidateConfig(RemoteMaintenanceConfig config)
     {

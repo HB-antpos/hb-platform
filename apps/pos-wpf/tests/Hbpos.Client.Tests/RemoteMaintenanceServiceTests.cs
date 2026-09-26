@@ -47,6 +47,27 @@ public sealed class RemoteMaintenanceServiceTests
         Assert.False(cleanup.StatusAgentInstalled);
     }
 
+    [Theory]
+    [InlineData(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged, "existingRustDeskUnmanaged", false)]
+    [InlineData(RemoteMaintenanceSetupError.RustDeskSetupIncomplete, "rustDeskSetupIncomplete", true)]
+    [InlineData(RemoteMaintenanceSetupError.RustDeskConfigurationFailed, "rustDeskConfigurationFailed", true)]
+    public async Task Elevated_install_step_failure_shows_actionable_guidance(
+        RemoteMaintenanceSetupError error, string message, bool rustDeskTouched)
+    {
+        using var fixture = new Fixture();
+        fixture.Launcher.InstallExitCode = (int)error;
+        fixture.Launcher.InstallRustDeskInstalled = rustDeskTouched;
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("settings.remoteMaintenance.result." + message, result.Message);
+        Assert.Empty(fixture.Api.CommittedOperations);
+        // 外部 RustDesk 由预检查拒绝，不能被清理步骤停掉；本次触及的才需要停用。
+        var cleanup = Assert.Single(fixture.Launcher.FailClosedRequests);
+        Assert.Equal(rustDeskTouched, cleanup.RustDeskInstalled);
+    }
+
     [Fact]
     public async Task Fresh_install_reads_id_written_by_elevated_helper_before_commit()
     {
