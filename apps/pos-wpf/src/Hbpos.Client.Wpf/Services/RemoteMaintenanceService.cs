@@ -74,12 +74,19 @@ public sealed class RemoteMaintenanceService(
         {
             ReportStage(RemoteMaintenanceStage.Preparing);
             var existing = await journal.ReadAsync(cancellationToken);
-            if (existing?.State == RemoteMaintenanceOperationState.InstalledPendingCommit)
+            // “补登记 / 恢复状态服务”捷径的前提是本机 RustDesk 仍在。RustDesk 被卸载后
+            // （服务不存在）只重跑 configure 会因启动不存在的服务而永远失败，必须完整重装。
+            // 重装沿用原操作号和密码：中心对同一操作号的 prepare/commit 幂等，换新操作号
+            // 会被“设备已有已提交的操作”拒绝。状态读取失败时保持原捷径，不贸然重装。
+            var reinstallRegisteredOperation =
+                existing?.State is RemoteMaintenanceOperationState.InstalledPendingCommit or RemoteMaintenanceOperationState.Committed &&
+                (await GetSafeStatusAsync()).ServiceStatus == "notInstalled";
+            if (!reinstallRegisteredOperation && existing?.State == RemoteMaintenanceOperationState.InstalledPendingCommit)
             {
                 return await ResumePendingCommitAsync(existing, cancellationToken, ReportStage);
             }
 
-            if (existing?.State == RemoteMaintenanceOperationState.Committed)
+            if (!reinstallRegisteredOperation && existing?.State == RemoteMaintenanceOperationState.Committed)
             {
                 ReportStage(RemoteMaintenanceStage.Configuring);
                 var existingConfigureCode = await uacHelperLauncher.RunAsync(
@@ -95,10 +102,11 @@ public sealed class RemoteMaintenanceService(
             }
 
             // 先核验正式安装目录和随 POS 发布的组件，避免下载完成后才发现无法安装。
-            // 已登记的恢复流程仍按原 journal 继续，不重新下载安装包。
+            // 本机 RustDesk 仍在的恢复流程已在上方按原 journal 返回，不重新下载安装包。
             uacHelperLauncher.ValidateInstallation(_helperPath);
 
-            operationId = existing?.State is RemoteMaintenanceOperationState.Prepared or RemoteMaintenanceOperationState.InstalledPendingCommit
+            operationId = existing?.State is RemoteMaintenanceOperationState.Prepared or
+                RemoteMaintenanceOperationState.InstalledPendingCommit or RemoteMaintenanceOperationState.Committed
                 ? existing.OperationId
                 : Guid.NewGuid();
             var password = existing is null

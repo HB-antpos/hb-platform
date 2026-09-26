@@ -121,6 +121,32 @@ public sealed class RemoteMaintenanceServiceTests
         Assert.Equal(0, fixture.Launcher.ValidationCount);
     }
 
+    [Theory]
+    [InlineData(RemoteMaintenanceOperationState.InstalledPendingCommit)]
+    [InlineData(RemoteMaintenanceOperationState.Committed)]
+    public async Task Registered_operation_with_rustdesk_uninstalled_reinstalls_with_same_operation_and_password(
+        RemoteMaintenanceOperationState state)
+    {
+        // 门店卸载 RustDesk 后再点安装：只重跑 configure 会永远失败，必须完整重装；
+        // 沿用原操作号才能通过中心的幂等 prepare/commit。
+        using var fixture = new Fixture();
+        var operationId = Guid.NewGuid();
+        await fixture.WriteStateAsync(fixture.State(operationId, state, "rustdesk-123",
+            state == RemoteMaintenanceOperationState.Committed ? fixture.Protect("monitor-token") : null));
+        fixture.Installer.ServiceStatus = "notInstalled";
+        fixture.Launcher.InstallWritesId = true;
+
+        var result = await fixture.Service.InstallAsync(fixture.Session);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("settings.remoteMaintenance.result.configured", result.Message);
+        Assert.Equal(new[] { "install", "configure" }, fixture.Launcher.Stages);
+        Assert.Equal(2, fixture.Downloader.VerifiedCount);
+        Assert.Equal(operationId, fixture.Api.PreparedOperations.Single());
+        Assert.Equal(operationId, fixture.Api.CommittedOperations.Single());
+        Assert.Equal("same-password-for-retry", fixture.Api.CommittedPasswords.Single());
+    }
+
     [Fact]
     public async Task Committed_recovery_reconfigures_same_operation_and_token()
     {
@@ -483,7 +509,8 @@ public sealed class RemoteMaintenanceServiceTests
             public Task FailClosedAsync(RemoteMaintenanceInstallationResult installation, CancellationToken cancellationToken = default) => Task.CompletedTask;
             public Task ConfigureStatusAgentAsync(RemoteMaintenancePrepareResponse prepare, RemoteMaintenanceCommitResponse commit, string rustdeskId, string clientVersion, CancellationToken cancellationToken = default) => Task.CompletedTask;
             public Task<string?> GetRustdeskIdAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>("unused");
-            public Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RemoteMaintenanceStatus(false, "", "", "stopped"));
+            public string ServiceStatus { get; set; } = "stopped";
+            public Task<RemoteMaintenanceStatus> GetStatusAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RemoteMaintenanceStatus(false, "", "", ServiceStatus));
         }
 
         public sealed class FakeLauncher(RemoteMaintenanceJournal journal) : IRemoteMaintenanceUacHelperLauncher
