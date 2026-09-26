@@ -384,6 +384,9 @@ public static class ServiceRegistration
         services.AddSingleton<IAppUpdateInstallerLauncher, AppUpdateInstallerLauncher>();
         services.AddSingleton<IAppUpdatePromptService, WpfAppUpdatePromptService>();
         services.AddSingleton<IAppUpdateCoordinator, AppUpdateCoordinator>();
+        services.AddSingleton(sp => AppUpdateBackgroundCheckOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
+        services.AddSingleton<AppUpdateBackgroundCheckScheduler>();
         services.AddSingleton(sp => new AttendanceQrPanelViewModel(
             sp.GetRequiredService<IAttendanceSigningKeyApiClient>(),
             sp.GetRequiredService<IConnectivityApiClient>(),

@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly ILocalAppSettingsRepository _localAppSettingsRepository;
     private readonly IAppShutdownCoordinator _appShutdownCoordinator;
     private readonly IColorThemeService? _colorThemeService;
+    private readonly AppUpdateBackgroundCheckScheduler? _appUpdateBackgroundCheckScheduler;
     private HwndSource? _hwndSource;
     private Task? _startupInitializationTask;
     private Task _windowModeSaveTask = Task.CompletedTask;
@@ -62,7 +63,8 @@ public partial class MainWindow : Window
         ILocalAppSettingsRepository localAppSettingsRepository,
         IAppShutdownCoordinator? appShutdownCoordinator = null,
         IColorThemeService? colorThemeService = null,
-        ColorThemeSwitcherViewModel? colorThemeSwitcher = null)
+        ColorThemeSwitcherViewModel? colorThemeSwitcher = null,
+        AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null)
     {
         _viewModel = viewModel;
         _startupOptions = startupOptions;
@@ -73,6 +75,7 @@ public partial class MainWindow : Window
         _localAppSettingsRepository = localAppSettingsRepository;
         _appShutdownCoordinator = appShutdownCoordinator ?? new AppShutdownCoordinator();
         _colorThemeService = colorThemeService;
+        _appUpdateBackgroundCheckScheduler = appUpdateBackgroundCheckScheduler;
 #if DEBUG
         _viewModel.AppUpdate.ConfigureDebugForceUpdateDismissed(ResumeStartupAfterDebugUpdateDismissalAsync);
 #endif
@@ -281,6 +284,12 @@ public partial class MainWindow : Window
         await _rawScannerService.InitializeAsync();
         _rawScannerService.Start(hwnd);
         await _viewModel.InitializeAsync(_startupOptions);
+        if (!_startupOptions.PreviewMode)
+        {
+            // 中文注释：启动闸门放行后才开始运行期后台检查；Preview 与真实更新链完全隔离。
+            _appUpdateBackgroundCheckScheduler?.Start();
+        }
+
         StartupCompleted?.Invoke(this, EventArgs.Empty);
     }
 
@@ -343,7 +352,7 @@ public partial class MainWindow : Window
     {
         return await RunStartupAppUpdateCheckCoreAsync(
             _startupOptions.PreviewMode,
-            () => _appUpdateCoordinator.CheckForUpdatesAsync(manual: false),
+            () => _appUpdateCoordinator.CheckForUpdatesAtStartupAsync(),
             ReportStartupAppUpdateException,
             ReportStartupAppUpdateFailure);
     }
@@ -401,7 +410,9 @@ public partial class MainWindow : Window
                 or AppUpdateCoordinatorStatus.CheckFailed
                 or AppUpdateCoordinatorStatus.PolicyFailed
                 // 安装包没下载成功时不显示任何更新提示，也不能卡住启动；下次启动再下载。
-                or AppUpdateCoordinatorStatus.DownloadFailed => true,
+                or AppUpdateCoordinatorStatus.DownloadFailed
+                // 安装包还没下载时先放行收银，启动后在后台下载；强更下好后空闲即阻断、交易中则等交易结束。
+                or AppUpdateCoordinatorStatus.DownloadDeferred => true,
             _ => false
         };
     }
@@ -445,6 +456,7 @@ public partial class MainWindow : Window
         _isWaitingForWindowModeSaveBeforeClose = true;
         IsEnabled = false;
         _viewModel.BeginShutdown();
+        _appUpdateBackgroundCheckScheduler?.Stop();
         try
         {
             _rawScannerService.Stop();

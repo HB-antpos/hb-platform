@@ -2846,6 +2846,7 @@
   <data name="settings.status.appUpdateDownloadFailed" xml:space="preserve"><value>暂时无法完成更新检查，请稍后重试。</value></data>
   <data name="settings.status.appUpdateInstallFailed" xml:space="preserve"><value>软件更新安装器启动失败。{0}</value></data>
   <data name="settings.status.appUpdateInstalling" xml:space="preserve"><value>正在启动软件更新安装器...</value></data>
+  <data name="settings.status.appUpdateDownloading" xml:space="preserve"><value>正在后台下载软件更新...</value></data>
   <data name="appUpdate.prompt.title" xml:space="preserve"><value>软件更新</value></data>
   <data name="appUpdate.optional.prompt.description" xml:space="preserve"><value>新版本已准备好安装。</value></data>
   <data name="appUpdate.optional.prompt.readyStatus" xml:space="preserve"><value>已准备安装</value></data>
@@ -2867,11 +2868,12 @@
   <data name="appUpdate.force.ready" xml:space="preserve"><value>必须安装此更新后才能继续收银。</value></data>
   <data name="appUpdate.force.minimumRequired" xml:space="preserve"><value>当前终端低于最低支持版本（{0}），必须安装更新后才能继续收银。</value></data>
   <data name="appUpdate.force.rollbackReady" xml:space="preserve"><value>必须回退到版本 {0} 后才能继续收银。</value></data>
+  <data name="appUpdate.force.backgroundReady" xml:space="preserve"><value>必须安装的版本 {0} 已下载完成，请在空闲时点击“安装更新”；下次启动时必须先安装才能收银。</value></data>
   <data name="appUpdate.force.downloadFailed" xml:space="preserve"><value>必须更新失败：{0}</value></data>
   <data name="appUpdate.force.downloadFailedDefault" xml:space="preserve"><value>更新下载失败，请联系管理员。</value></data>
   <data name="appUpdate.force.retry" xml:space="preserve"><value>重试</value></data>
   <data name="appUpdate.force.exit" xml:space="preserve"><value>退出</value></data>
-  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>请先完成或清空当前交易，再重试安装更新。</value></data>
+  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>当前交易尚未完成，交易结束后将自动继续安装更新。</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>无法启动更新安装器。{0}</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>需要操作授权</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>当前收银员没有执行此操作的权限。</value></data>

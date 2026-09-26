@@ -10,6 +10,7 @@ public sealed partial class AppUpdateState : ObservableObject
     private Func<Task<ProcessLaunchResult>>? _installAsync;
     private Func<Task>? _retryAsync;
     private Action? _exitApplication;
+    private string? _declinedOptionalTargetVersion;
 #if DEBUG
     private Func<Task>? _continueStartupAfterDebugDismissAsync;
 #endif
@@ -92,6 +93,9 @@ public sealed partial class AppUpdateState : ObservableObject
 
     public bool IsInstallerReady => !string.IsNullOrWhiteSpace(InstallerPath);
 
+    // 中文注释：已有下载中、强更（含待安装与错误态）时后台检查不能介入，避免覆盖当前更新提示。
+    public bool IsUpdateFlowActive => IsDownloading || IsForceUpdateRequired;
+
     public string CurrentVersion
     {
         get => _currentVersion;
@@ -141,6 +145,32 @@ public sealed partial class AppUpdateState : ObservableObject
     {
         HasDifferentTargetVersion = false;
         IsRollbackTarget = false;
+    }
+
+    // 中文注释：本次运行内记住收银员拒绝或关闭过的可选版本，后台定时检查不再反复提示同一版本；重启后清空。
+    public void MarkOptionalUpdateDeclined(string? targetVersion)
+    {
+        var normalized = AppVersionProvider.NormalizeVersionText(targetVersion);
+        _declinedOptionalTargetVersion = string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    public bool IsOptionalUpdateDeclined(string? targetVersion)
+    {
+        return _declinedOptionalTargetVersion is not null &&
+            string.Equals(
+                _declinedOptionalTargetVersion,
+                AppVersionProvider.NormalizeVersionText(targetVersion),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool IsOptionalUpdateReadyFor(string? targetVersion)
+    {
+        return IsOptionalUpdateReady &&
+            IsInstallerReady &&
+            string.Equals(
+                AppVersionProvider.NormalizeVersionText(TargetVersion),
+                AppVersionProvider.NormalizeVersionText(targetVersion),
+                StringComparison.OrdinalIgnoreCase);
     }
 
     public void SetStatus(string statusKey, params object[] args)
@@ -306,6 +336,12 @@ public sealed partial class AppUpdateState : ObservableObject
         NotifyCommandStates();
     }
 
+    // 中文注释：收银员在交易结束后的安装确认框里选择“稍后安装”时，与点右下角关闭按钮等效。
+    public void DismissOptionalUpdate()
+    {
+        ClearOptionalUpdate();
+    }
+
     public void ClearOptionalUpdateAfterSuccessfulInstall()
     {
         if (IsForceUpdateRequired)
@@ -355,6 +391,7 @@ public sealed partial class AppUpdateState : ObservableObject
             return;
         }
 
+        MarkOptionalUpdateDeclined(TargetVersion);
         IsOptionalUpdateReady = false;
         InstallerPath = null;
         _installAsync = null;

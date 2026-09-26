@@ -12,6 +12,8 @@ namespace Hbpos.Client.Tests;
 [Collection(EnvironmentVariableTestCollection.Name)]
 public sealed class AppUpdateCoordinatorTests
 {
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+
     [Fact]
     public void WpfProject_declares_release_version_source_for_app_update()
     {
@@ -113,6 +115,22 @@ public sealed class AppUpdateCoordinatorTests
         Assert.Equal("2.3.4", state.CurrentVersion);
         Assert.False(state.HasDifferentTargetVersion);
         Assert.False(state.IsRollbackTarget);
+    }
+
+    [Fact]
+    public void Client_services_register_background_update_check_scheduler_with_default_interval()
+    {
+        var services = new ServiceCollection();
+        services.AddHbposClientServices(new AppStartupOptions([], true, null, null));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<AppUpdateBackgroundCheckOptions>();
+
+        Assert.Contains(services, descriptor =>
+            descriptor.ServiceType == typeof(AppUpdateBackgroundCheckScheduler) &&
+            descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.True(options.IsEnabled);
+        Assert.Equal(AppUpdateBackgroundCheckOptions.DefaultInterval, options.Interval);
     }
 
     [Theory]
@@ -758,6 +776,573 @@ public sealed class AppUpdateCoordinatorTests
         Assert.Equal(expectedStatusKey, state.StatusKey);
     }
 
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_optional_update_shows_ready_banner_without_modal_prompt()
+    {
+        var state = new AppUpdateState();
+        var prompt = new CapturingPromptService(confirm: true);
+        var installer = new CapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            prompt,
+            state);
+
+        var result = await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        // 中文注释：后台检查可能落在扫码或结算中，不能弹模态确认框或自动拉起安装器，只显示右下角可关闭的就绪提示。
+        Assert.Equal(AppUpdateCoordinatorStatus.OptionalReady, result.Status);
+        Assert.False(prompt.OptionalPromptShown);
+        Assert.Equal(0, installer.LaunchCallCount);
+        Assert.True(state.IsOptionalUpdateReady);
+        Assert.True(state.IsInstallerReady);
+        Assert.True(state.HasDifferentTargetVersion);
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.Equal("appUpdate.optional.ready", state.StatusKey);
+
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\Temp\hbpos.exe", installer.FilePath);
+        Assert.Equal(1, installer.LaunchCallCount);
+        Assert.False(state.IsOptionalUpdateReady);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_keeps_existing_ready_banner_for_same_version()
+    {
+        var state = new AppUpdateState();
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var installer = new SequenceInstallerLauncher(
+            ProcessLaunchResult.Fail(null, "appUpdate.install.activeTransaction"));
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            download,
+            installer,
+            new CapturingPromptService(),
+            state);
+
+        await coordinator.CheckForUpdatesInBackgroundAsync();
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+        Assert.Equal("appUpdate.install.activeTransaction", state.StatusKey);
+
+        var result = await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        // 中文注释：同版本就绪提示还在时，后台检查不能重复下载，也不能把“先完成交易”的提示冲掉。
+        Assert.Equal(AppUpdateCoordinatorStatus.OptionalReady, result.Status);
+        Assert.Equal(1, download.CallCount);
+        Assert.True(state.IsOptionalUpdateReady);
+        Assert.Equal("appUpdate.install.activeTransaction", state.StatusKey);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_skips_optional_version_declined_in_prompt()
+    {
+        var state = new AppUpdateState();
+        var prompt = new CapturingPromptService(confirm: false);
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            download,
+            new CapturingInstallerLauncher(),
+            prompt,
+            state);
+
+        await coordinator.CheckForUpdatesAsync(manual: false);
+        var result = await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.OptionalDeclined, result.Status);
+        Assert.Equal(1, download.CallCount);
+        Assert.False(state.IsOptionalUpdateReady);
+        Assert.True(state.HasDifferentTargetVersion);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_skips_dismissed_optional_version_but_shows_newer_version()
+    {
+        var state = new AppUpdateState();
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state);
+
+        await coordinator.CheckForUpdatesInBackgroundAsync();
+        state.DismissOptionalUpdateCommand.Execute(null);
+        var repeated = await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.OptionalDeclined, repeated.Status);
+        Assert.Equal(1, download.CallCount);
+        Assert.False(state.IsOptionalUpdateReady);
+
+        var newerDownload = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos-1.2.0.exe"));
+        var newerCoordinator = CreateCoordinator(
+            CreateRelease(force: false) with { TargetVersion = "1.2.0" },
+            newerDownload,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state);
+
+        var newer = await newerCoordinator.CheckForUpdatesInBackgroundAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.OptionalReady, newer.Status);
+        Assert.Equal(1, newerDownload.CallCount);
+        Assert.True(state.IsOptionalUpdateReady);
+        Assert.Equal("1.2.0", state.TargetVersion);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_force_update_stays_nonblocking_even_when_safe_to_install()
+    {
+        var state = new AppUpdateState();
+        var installer = new CapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            state,
+            guard: new ToggleInstallSafetyGuard(canInstall: true));
+
+        var result = await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        // 中文注释：后台发现强更时只显示待安装提示，不在收银员操作中途弹出阻断遮罩。
+        Assert.Equal(AppUpdateCoordinatorStatus.ForcePendingInstall, result.Status);
+        Assert.Equal("appUpdate.force.backgroundReady", result.StatusKey);
+        Assert.True(state.IsForceUpdatePendingInstall);
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.True(state.IsInstallerReady);
+        Assert.Equal("appUpdate.force.backgroundReady", state.StatusKey);
+        Assert.Equal("1.1.0", Assert.Single(state.StatusArgs));
+        Assert.Equal(0, installer.LaunchCallCount);
+
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\Temp\hbpos.exe", installer.FilePath);
+        Assert.Equal(1, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_force_install_click_during_transaction_stays_pending()
+    {
+        var state = new AppUpdateState();
+        var installer = new CapturingInstallerLauncher();
+        var guard = new ToggleInstallSafetyGuard(canInstall: false);
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            state,
+            guard: guard);
+
+        await coordinator.CheckForUpdatesInBackgroundAsync();
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+
+        Assert.True(state.IsForceUpdatePendingInstall);
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.Equal("appUpdate.install.activeTransaction", state.StatusKey);
+        Assert.Equal(0, installer.LaunchCallCount);
+
+        guard.CanInstall = true;
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_does_not_recheck_while_force_update_pending()
+    {
+        var state = new AppUpdateState();
+        var apiClient = new StaticUpdateApiClient(CreateRelease(force: true));
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var coordinator = CreateCoordinator(
+            apiClient,
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state,
+            guard: new ToggleInstallSafetyGuard(canInstall: false));
+
+        await coordinator.CheckForUpdatesAsync(manual: true);
+        Assert.True(state.IsForceUpdatePendingInstall);
+
+        var result = await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.AlreadyRunning, result.Status);
+        Assert.Equal(1, apiClient.CallCount);
+        Assert.Equal(1, download.CallCount);
+        Assert.True(state.IsForceUpdatePendingInstall);
+        Assert.Equal("appUpdate.install.activeTransaction", state.StatusKey);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_check_failure_keeps_displayed_target_version()
+    {
+        var state = new AppUpdateState();
+        var coordinator = CreateCoordinator(
+            AppUpdateCheckResponse.Failed("1.0.0", "APP_UPDATE_CENTER_HTTP_ERROR", "center unavailable"),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            state);
+        state.ApplyVersionCheck(CreateRelease(force: false));
+
+        var result = await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        // 中文注释：后台检查的网络抖动不能清掉底部新版本号，也不能改写设置页状态文字。
+        Assert.Equal(AppUpdateCoordinatorStatus.CheckFailed, result.Status);
+        Assert.Equal("APP_UPDATE_CENTER_HTTP_ERROR", result.ErrorCode);
+        Assert.True(state.HasDifferentTargetVersion);
+        Assert.Equal(string.Empty, state.StatusKey);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesInBackgroundAsync_returns_already_running_while_foreground_check_in_progress()
+    {
+        var download = new BlockingDownloadService();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        var foreground = coordinator.CheckForUpdatesAsync(manual: false);
+        await download.WaitUntilStartedAsync();
+        var background = await coordinator.CheckForUpdatesInBackgroundAsync();
+        download.Complete(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        await foreground;
+
+        Assert.Equal(AppUpdateCoordinatorStatus.AlreadyRunning, background.Status);
+        Assert.Equal(1, download.CallCount);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAtStartupAsync_optional_update_without_cached_installer_does_not_wait_for_download()
+    {
+        var state = new AppUpdateState();
+        var download = new BlockingDownloadService();
+        var prompt = new CapturingPromptService(confirm: true);
+        var installer = new CapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(CreateRelease(force: false), download, installer, prompt, state);
+
+        var result = await coordinator.CheckForUpdatesAtStartupAsync();
+
+        // 中文注释：安装包没在本地时启动闸门立即放行，下载转到启动后继续。
+        Assert.Equal(AppUpdateCoordinatorStatus.DownloadDeferred, result.Status);
+        Assert.True(MainWindow.ShouldContinueStartupAfterAppUpdateCheck(result));
+
+        await download.WaitUntilStartedAsync();
+        Assert.False(state.IsOptionalUpdateReady);
+        Assert.False(state.HasDifferentTargetVersion);
+
+        download.Complete(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
+
+        // 中文注释：下载完成时收银员可能已在操作，只显示右下角就绪提示，不弹模态确认框。
+        Assert.True(state.IsOptionalUpdateReady);
+        Assert.True(state.HasDifferentTargetVersion);
+        Assert.False(prompt.OptionalPromptShown);
+        Assert.Equal(0, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAtStartupAsync_force_update_without_cached_installer_blocks_after_download_when_idle()
+    {
+        var state = new AppUpdateState();
+        var download = new BlockingDownloadService();
+        var installer = new CapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            download,
+            installer,
+            new CapturingPromptService(),
+            state);
+
+        var result = await coordinator.CheckForUpdatesAtStartupAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.DownloadDeferred, result.Status);
+        Assert.True(MainWindow.ShouldContinueStartupAfterAppUpdateCheck(result));
+
+        await download.WaitUntilStartedAsync();
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.True(state.IsDownloading);
+
+        download.Complete(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
+
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.True(state.IsInstallerReady);
+        Assert.Equal(0, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAtStartupAsync_force_update_during_transaction_blocks_once_transaction_ends()
+    {
+        var state = new AppUpdateState();
+        var guard = new ToggleInstallSafetyGuard(canInstall: false);
+        var installer = new GuardedInstallerLauncher(guard);
+        var delays = new ControlledDelays();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            state,
+            guard: guard,
+            delays: delays);
+
+        Assert.Equal(
+            AppUpdateCoordinatorStatus.DownloadDeferred,
+            (await coordinator.CheckForUpdatesAtStartupAsync()).Status);
+        await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
+
+        Assert.True(state.IsForceUpdatePendingInstall);
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.Equal("appUpdate.install.activeTransaction", state.StatusKey);
+
+        await delays.AdvanceAsync();
+        Assert.True(state.IsForceUpdatePendingInstall);
+
+        guard.CanInstall = true;
+        await delays.AdvanceAsync();
+        // 中文注释：第一次看到空闲还不切换，给小票打印等收尾留出时间。
+        Assert.True(state.IsForceUpdatePendingInstall);
+
+        await delays.AdvanceLastAsync();
+        await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+
+        // 中文注释：交易结束后只切到阻断遮罩，由收银员点“安装更新”，不自动拉起安装器。
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.False(state.IsForceUpdatePendingInstall);
+        Assert.Equal(0, installer.LaunchCallCount);
+
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+        Assert.Equal(1, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task Transaction_watch_restarts_idle_count_when_transaction_resumes()
+    {
+        var state = new AppUpdateState();
+        var guard = new ToggleInstallSafetyGuard(canInstall: false);
+        var delays = new ControlledDelays();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new GuardedInstallerLauncher(guard),
+            new CapturingPromptService(),
+            state,
+            guard: guard,
+            delays: delays);
+
+        await coordinator.CheckForUpdatesAsync(manual: false);
+
+        guard.CanInstall = true;
+        await delays.AdvanceAsync();
+        guard.CanInstall = false;
+        await delays.AdvanceAsync();
+        guard.CanInstall = true;
+        await delays.AdvanceAsync();
+
+        Assert.True(state.IsForceUpdatePendingInstall);
+
+        await delays.AdvanceLastAsync();
+        await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+
+        Assert.True(state.IsForceUpdateBlocking);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CheckForUpdatesAtStartupAsync_handles_cached_installer_inside_startup_gate(bool force)
+    {
+        var state = new AppUpdateState();
+        var prompt = new CapturingPromptService(confirm: false);
+        var download = new StaticDownloadService(
+            AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"),
+            cachedInstallerPath: @"C:\Temp\hbpos.exe");
+        var coordinator = CreateCoordinator(
+            CreateRelease(force),
+            download,
+            new CapturingInstallerLauncher(),
+            prompt,
+            state);
+
+        var result = await coordinator.CheckForUpdatesAtStartupAsync();
+
+        // 中文注释：安装包已在本地时和以前一样：强更在启动闸门直接阻断，可选更新弹确认框。
+        Assert.Equal(
+            force ? AppUpdateCoordinatorStatus.ForceReady : AppUpdateCoordinatorStatus.OptionalDeclined,
+            result.Status);
+        Assert.Equal(!force, MainWindow.ShouldContinueStartupAfterAppUpdateCheck(result));
+        Assert.Equal(force, state.IsForceUpdateBlocking);
+        Assert.Equal(!force, prompt.OptionalPromptShown);
+        Assert.Equal(1, download.CallCount);
+        Assert.True(coordinator.DeferredStartupDownloadTask.IsCompleted);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAtStartupAsync_deferred_download_keeps_other_checks_out_until_finished()
+    {
+        var download = new BlockingDownloadService();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        await coordinator.CheckForUpdatesAtStartupAsync();
+        await download.WaitUntilStartedAsync();
+
+        Assert.Equal(
+            AppUpdateCoordinatorStatus.AlreadyRunning,
+            (await coordinator.CheckForUpdatesAsync(manual: true)).Status);
+        Assert.Equal(
+            AppUpdateCoordinatorStatus.AlreadyRunning,
+            (await coordinator.CheckForUpdatesInBackgroundAsync()).Status);
+
+        download.Complete(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
+
+        Assert.NotEqual(
+            AppUpdateCoordinatorStatus.AlreadyRunning,
+            (await coordinator.CheckForUpdatesInBackgroundAsync()).Status);
+        Assert.Equal(1, download.CallCount);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAtStartupAsync_no_update_returns_without_download()
+    {
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var coordinator = CreateCoordinator(
+            AppUpdateCheckResponse.NoUpdate("1.0.0"),
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        var result = await coordinator.CheckForUpdatesAtStartupAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.NoUpdate, result.Status);
+        Assert.Equal(0, download.CallCount);
+        Assert.Equal(AppUpdateCoordinatorStatus.NoUpdate, (await coordinator.CheckForUpdatesAsync(manual: true)).Status);
+    }
+
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 0)]
+    public async Task Optional_install_blocked_by_transaction_prompts_again_after_transaction_ends(
+        bool confirm,
+        int expectedLaunches)
+    {
+        var state = new AppUpdateState();
+        var guard = new ToggleInstallSafetyGuard(canInstall: false);
+        var installer = new GuardedInstallerLauncher(guard);
+        var prompt = new CapturingPromptService(confirm);
+        var delays = new ControlledDelays();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            prompt,
+            state,
+            guard: guard,
+            delays: delays);
+
+        await coordinator.CheckForUpdatesInBackgroundAsync();
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+
+        Assert.Equal("appUpdate.install.activeTransaction", state.StatusKey);
+        Assert.Equal(0, prompt.PromptCount);
+
+        guard.CanInstall = true;
+        await delays.AdvanceAsync();
+        await delays.AdvanceLastAsync();
+        await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+
+        // 中文注释：收银员点过安装但被交易挡住，交易结束后自动弹出安装确认框。
+        Assert.Equal(1, prompt.PromptCount);
+        Assert.Equal(expectedLaunches, installer.LaunchCallCount);
+        Assert.False(state.IsOptionalUpdateReady);
+        if (!confirm)
+        {
+            // 中文注释：选择“稍后安装”等同关闭就绪提示，后台检查不再反复提示同一版本。
+            Assert.Equal(
+                AppUpdateCoordinatorStatus.OptionalDeclined,
+                (await coordinator.CheckForUpdatesInBackgroundAsync()).Status);
+        }
+    }
+
+    [Fact]
+    public async Task Transaction_watch_stops_when_optional_banner_is_dismissed()
+    {
+        var state = new AppUpdateState();
+        var guard = new ToggleInstallSafetyGuard(canInstall: false);
+        var prompt = new CapturingPromptService(confirm: true);
+        var delays = new ControlledDelays();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new GuardedInstallerLauncher(guard),
+            prompt,
+            state,
+            guard: guard,
+            delays: delays);
+
+        await coordinator.CheckForUpdatesInBackgroundAsync();
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+        state.DismissOptionalUpdateCommand.Execute(null);
+
+        guard.CanInstall = true;
+        await delays.AdvanceAsync();
+        await delays.AdvanceLastAsync();
+        await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+
+        Assert.Equal(0, prompt.PromptCount);
+        Assert.False(state.IsOptionalUpdateReady);
+    }
+
+    [Fact]
+    public async Task Background_force_notice_escalates_after_transaction_only_once_cashier_clicked_install()
+    {
+        var state = new AppUpdateState();
+        var guard = new ToggleInstallSafetyGuard(canInstall: false);
+        var installer = new GuardedInstallerLauncher(guard);
+        var delays = new ControlledDelays();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            state,
+            guard: guard,
+            delays: delays);
+
+        await coordinator.CheckForUpdatesInBackgroundAsync();
+
+        // 中文注释：后台发现的强更只是提示，收银员没点安装前不监视交易、不自动阻断。
+        Assert.Equal("appUpdate.force.backgroundReady", state.StatusKey);
+        Assert.Equal(0, delays.RequestCount);
+
+        await state.InstallUpdateCommand.ExecuteAsync(null);
+        Assert.Equal("appUpdate.install.activeTransaction", state.StatusKey);
+        Assert.True(state.IsForceUpdatePendingInstall);
+
+        guard.CanInstall = true;
+        await delays.AdvanceAsync();
+        await delays.AdvanceLastAsync();
+        await coordinator.TransactionWatchTask.WaitAsync(TestTimeout);
+
+        Assert.True(state.IsForceUpdateBlocking);
+        Assert.Equal(0, installer.LaunchCallCount);
+    }
+
     private static AppUpdateCoordinator CreateCoordinator(
         AppUpdateCheckResponse response,
         IAppUpdateDownloadService downloadService,
@@ -766,7 +1351,8 @@ public sealed class AppUpdateCoordinatorTests
         AppUpdateState state,
         IApplicationExitService? exitService = null,
         IAppUpdateChannelProvider? channelProvider = null,
-        IAppUpdateInstallSafetyGuard? guard = null)
+        IAppUpdateInstallSafetyGuard? guard = null,
+        ControlledDelays? delays = null)
     {
         return CreateCoordinator(
             new StaticUpdateApiClient(response),
@@ -776,7 +1362,8 @@ public sealed class AppUpdateCoordinatorTests
             state,
             exitService,
             channelProvider,
-            guard);
+            guard,
+            delays);
     }
 
     private static AppUpdateCoordinator CreateCoordinator(
@@ -787,7 +1374,8 @@ public sealed class AppUpdateCoordinatorTests
         AppUpdateState state,
         IApplicationExitService? exitService = null,
         IAppUpdateChannelProvider? channelProvider = null,
-        IAppUpdateInstallSafetyGuard? guard = null)
+        IAppUpdateInstallSafetyGuard? guard = null,
+        ControlledDelays? delays = null)
     {
         var versionProvider = new StaticVersionProvider("1.0.0");
         state.InitializeCurrentVersion(versionProvider.CurrentVersion);
@@ -800,7 +1388,11 @@ public sealed class AppUpdateCoordinatorTests
             promptService,
             state,
             exitService ?? new CapturingApplicationExitService(),
-            channelProvider ?? new StaticChannelProvider("production"));
+            channelProvider ?? new StaticChannelProvider("production"),
+            // 中文注释：默认让交易结束监视永不触发，只有显式传入可控等待的用例才推进监视循环。
+            delays is null
+                ? (_, cancellationToken) => Task.Delay(Timeout.Infinite, cancellationToken)
+                : delays.DelayAsync);
     }
 
     private static AppUpdateCheckResponse CreateRelease(bool force) => new()
@@ -845,7 +1437,8 @@ public sealed class AppUpdateCoordinatorTests
 
     private sealed class StaticDownloadService(
         AppUpdateDownloadResult result,
-        List<string>? events = null) : IAppUpdateDownloadService
+        List<string>? events = null,
+        string? cachedInstallerPath = null) : IAppUpdateDownloadService
     {
         public int CallCount { get; private set; }
 
@@ -857,6 +1450,13 @@ public sealed class AppUpdateCoordinatorTests
             CallCount++;
             events?.Add("download");
             return Task.FromResult(result);
+        }
+
+        public Task<string?> TryGetVerifiedCachedInstallerAsync(
+            AppUpdateCheckResponse update,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(cachedInstallerPath);
         }
     }
 
@@ -919,6 +1519,26 @@ public sealed class AppUpdateCoordinatorTests
         }
     }
 
+    // 中文注释：与真实 AppUpdateInstallerLauncher 一样先过安全守卫，被交易挡住时返回 activeTransaction。
+    private sealed class GuardedInstallerLauncher(IAppUpdateInstallSafetyGuard guard) : IAppUpdateInstallerLauncher
+    {
+        public int LaunchCallCount { get; private set; }
+
+        public Task<ProcessLaunchResult> LaunchAsync(
+            string installerPath,
+            AppUpdateCheckResponse update,
+            CancellationToken cancellationToken = default)
+        {
+            if (!guard.CanInstallUpdate(out var statusKey, out var statusArgs))
+            {
+                return Task.FromResult(ProcessLaunchResult.Fail(null, statusKey, statusArgs));
+            }
+
+            LaunchCallCount++;
+            return Task.FromResult(ProcessLaunchResult.Succeeded());
+        }
+    }
+
     private sealed class SequenceInstallerLauncher(params ProcessLaunchResult[] results) : IAppUpdateInstallerLauncher
     {
         private readonly Queue<ProcessLaunchResult> _results = new(results);
@@ -943,6 +1563,8 @@ public sealed class AppUpdateCoordinatorTests
     {
         public bool OptionalPromptShown { get; private set; }
 
+        public int PromptCount { get; private set; }
+
         public AppUpdateCheckResponse? Update { get; private set; }
 
         public Task<bool> ConfirmOptionalDownloadAndInstallAsync(
@@ -950,6 +1572,7 @@ public sealed class AppUpdateCoordinatorTests
             CancellationToken cancellationToken = default)
         {
             OptionalPromptShown = true;
+            PromptCount++;
             Update = update;
             events?.Add("prompt");
             return Task.FromResult(confirm);

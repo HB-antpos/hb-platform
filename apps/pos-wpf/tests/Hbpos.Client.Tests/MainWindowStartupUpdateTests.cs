@@ -89,6 +89,7 @@ public sealed class MainWindowStartupUpdateTests
     [InlineData(AppUpdateCoordinatorStatus.ForcePendingInstall, false)]
     [InlineData(AppUpdateCoordinatorStatus.DownloadFailed, true)]
     [InlineData(AppUpdateCoordinatorStatus.Installed, false)]
+    [InlineData(AppUpdateCoordinatorStatus.DownloadDeferred, true)]
     public void ShouldContinueStartupAfterAppUpdateCheck_blocks_until_startup_gate_is_clear(
         AppUpdateCoordinatorStatus status,
         bool expected)

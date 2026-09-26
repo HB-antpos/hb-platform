@@ -1074,6 +1074,7 @@
   <data name="settings.status.appUpdateDownloadFailed" xml:space="preserve"><value>Couldn't complete the update check. Try again later.</value></data>
   <data name="settings.status.appUpdateInstallFailed" xml:space="preserve"><value>Software update installer failed to start. {0}</value></data>
   <data name="settings.status.appUpdateInstalling" xml:space="preserve"><value>Starting software update installer...</value></data>
+  <data name="settings.status.appUpdateDownloading" xml:space="preserve"><value>Downloading software update in the background...</value></data>
   <data name="appUpdate.prompt.title" xml:space="preserve"><value>Software update</value></data>
   <data name="appUpdate.optional.prompt.description" xml:space="preserve"><value>A newer version is ready to install.</value></data>
   <data name="appUpdate.optional.prompt.readyStatus" xml:space="preserve"><value>Ready to install</value></data>
@@ -1095,11 +1096,12 @@
   <data name="appUpdate.force.ready" xml:space="preserve"><value>Install this required update before continuing checkout.</value></data>
   <data name="appUpdate.force.minimumRequired" xml:space="preserve"><value>This terminal is below the minimum supported version ({0}). Install the required update before continuing checkout.</value></data>
   <data name="appUpdate.force.rollbackReady" xml:space="preserve"><value>Roll back to version {0} before continuing checkout.</value></data>
+  <data name="appUpdate.force.backgroundReady" xml:space="preserve"><value>Required version {0} has been downloaded. Select "Install update" when the terminal is idle; it must be installed before checkout on next start.</value></data>
   <data name="appUpdate.force.downloadFailed" xml:space="preserve"><value>Required update failed: {0}</value></data>
   <data name="appUpdate.force.downloadFailedDefault" xml:space="preserve"><value>Update download failed. Contact an administrator.</value></data>
   <data name="appUpdate.force.retry" xml:space="preserve"><value>Retry</value></data>
   <data name="appUpdate.force.exit" xml:space="preserve"><value>Exit</value></data>
-  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>Complete or clear the current transaction before installing the update.</value></data>
+  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>A transaction is in progress. The update will continue automatically when it ends.</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>Could not start the update installer. {0}</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>Approval required</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>The current cashier cannot perform this operation.</value></data>
