@@ -10,6 +10,7 @@ import {
   buildBrisbaneDefaultRange,
   buildLocalProductSalesAnalysisBootstrapRequest,
   canSetCurrentProduct,
+  collectSupplierCategoryLeafGuids,
   clearLocalProductSalesAnalysisDetailSections,
   clearLocalProductSalesAnalysisSectionError,
   createEmptyLocalProductSalesAnalysisState,
@@ -19,6 +20,7 @@ import {
   getDateRangeError,
   getCurrentProductAfterCancellation,
   isSelected,
+  mergeVisibleSupplierCategorySelection,
   PAGE_BOOTSTRAP_TIMEOUT_SECONDS,
   PAGE_SECTION_TIMEOUT_SECONDS,
   setLocalProductSalesAnalysisSectionError,
@@ -46,6 +48,17 @@ selection = applyCandidateSelection(selection, 'P1', false)
 equal(isSelected(selection, 'P1'), false, '取消当前商品必须移出选择')
 equal(canSetCurrentProduct(selection, 'P1'), false, '未勾选候选行不能设为当前商品')
 equal(canSetCurrentProduct(selection, 'P2'), true, '已勾选候选行可以设为当前商品')
+
+deepEqual(
+  mergeVisibleSupplierCategorySelection(['hidden-child', 'visible-old'], ['visible-new'], new Set(['visible-old', 'visible-new'])),
+  ['hidden-child', 'visible-new'],
+  '树搜索后勾选可见分类必须保留隐藏分支中的已选分类',
+)
+deepEqual(
+  collectSupplierCategoryLeafGuids([{ guid: 'root', children: [{ guid: 'child' }] }]),
+  ['child'],
+  '重开供应商分类树时必须保留已选子分类 GUID',
+)
 
 const current = { productCode: 'P2', productName: '跨页商品' }
 equal(getCurrentProductAfterCancellation(current, [{ productCode: 'P3', productName: '首项商品' }], false)?.productCode, 'P2', '未取消时必须保留跨页快照')

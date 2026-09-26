@@ -444,7 +444,7 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSupplierCategoryOptionsAsync_按供应商返回叶分类且供应商200使用仓库分类()
+    public async Task GetSupplierCategoryOptionsAsync_按供应商返回分类树且仅叶分类可选()
     {
         await _db.Insertable(
             new[]
@@ -480,6 +480,15 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
                     IsDeleted = false,
                     IsActive = true,
                 },
+                new LocalSupplierCategory
+                {
+                    CategoryGUID = "dirty-200",
+                    LocalSupplierCode = "200",
+                    CategoryName = "脏本地分类",
+                    FullPath = "脏本地分类",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
             }
         ).ExecuteCommandAsync();
         await _db.Insertable(
@@ -506,26 +515,80 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
 
         var result = await CreateService().GetSupplierCategoryOptionsAsync(
             new[] { "SUP", "200" },
-            new[] { "B1" }
+            new[] { "B1" },
+            tree: true
         );
 
         Assert.True(result.Success);
-        Assert.Collection(
-            result.Data!,
-            item =>
+        Assert.Equal(new[] { "200", "SUP" }, result.Data!.Select(item => item.SupplierCode));
+        var warehouseRoot = result.Data!.Single(item => item.Guid == "warehouse-root");
+        Assert.False(warehouseRoot.IsSelectable);
+        Assert.Equal("warehouse-leaf", warehouseRoot.Children.Single().Guid);
+        Assert.True(warehouseRoot.Children.Single().IsSelectable);
+        Assert.Equal("warehouse-root", warehouseRoot.Children.Single().ParentGuid);
+        var supplierRoot = result.Data!.Single(item => item.Guid == "sup-root");
+        Assert.False(supplierRoot.IsSelectable);
+        Assert.Equal("sup-leaf", supplierRoot.Children.Single().Guid);
+        Assert.Equal("sup-root", supplierRoot.Children.Single().ParentGuid);
+        Assert.DoesNotContain(result.Data!, item => item.Guid == "other-leaf");
+        Assert.DoesNotContain(result.Data!.SelectMany(item => item.Children), item => item.Guid == "dirty-200");
+    }
+
+    [Fact]
+    public async Task GetSupplierCategoryOptionsAsync_默认保持叶分类平铺契约()
+    {
+        await _db.Insertable(new LocalSupplierCategory
+        {
+            CategoryGUID = "flat-root", LocalSupplierCode = "SUP", CategoryName = "Root", FullPath = "Root",
+            IsDeleted = false, IsActive = true,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new LocalSupplierCategory
+        {
+            CategoryGUID = "flat-leaf", LocalSupplierCode = "SUP", ParentGUID = "flat-root", CategoryName = "Leaf",
+            FullPath = "Root > Leaf", IsDeleted = false, IsActive = true,
+        }).ExecuteCommandAsync();
+
+        var result = await CreateService().GetSupplierCategoryOptionsAsync(new[] { "SUP" }, new[] { "B1" });
+
+        Assert.True(result.Success);
+        var item = Assert.Single(result.Data!);
+        Assert.Equal("flat-leaf", item.Guid);
+        Assert.Equal("Root > Leaf", item.Name);
+        Assert.Empty(item.Children);
+    }
+
+    [Fact]
+    public async Task GetSupplierCategoryOptionsAsync_分类父级成环时仍保留节点()
+    {
+        await _db.Insertable(new[]
+        {
+            new LocalSupplierCategory
             {
-                Assert.Equal("200", item.SupplierCode);
-                Assert.Equal("warehouse-leaf", item.Guid);
-                Assert.Equal("仓库叶分类", item.Name);
+                CategoryGUID = "cycle-a", LocalSupplierCode = "SUP", ParentGUID = "cycle-b", CategoryName = "A",
+                FullPath = "A", IsDeleted = false, IsActive = true,
             },
-            item =>
+            new LocalSupplierCategory
             {
-                Assert.Equal("SUP", item.SupplierCode);
-                Assert.Equal("sup-leaf", item.Guid);
-                Assert.Equal("Supplier Root > Supplier Leaf", item.Name);
-            }
-        );
-        Assert.DoesNotContain(result.Data!, item => item.Guid is "sup-root" or "warehouse-root" or "other-leaf");
+                CategoryGUID = "cycle-b", LocalSupplierCode = "SUP", ParentGUID = "cycle-a", CategoryName = "B",
+                FullPath = "B", IsDeleted = false, IsActive = true,
+            },
+        }).ExecuteCommandAsync();
+
+        var result = await CreateService().GetSupplierCategoryOptionsAsync(new[] { "SUP" }, new[] { "B1" }, tree: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Data!.SelectMany(FlattenCategoryOptions).Count());
+    }
+
+    private static IEnumerable<LocalSupplierProductSalesSupplierCategoryOptionDto> FlattenCategoryOptions(
+        LocalSupplierProductSalesSupplierCategoryOptionDto item
+    )
+    {
+        yield return item;
+        foreach (var child in item.Children.SelectMany(FlattenCategoryOptions))
+        {
+            yield return child;
+        }
     }
 
     [Fact]

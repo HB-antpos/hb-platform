@@ -13,7 +13,8 @@ namespace BlazorApp.Api.Interfaces.React
 
         Task<ApiResponse<List<LocalSupplierProductSalesSupplierCategoryOptionDto>>> GetSupplierCategoryOptionsAsync(
             IReadOnlyList<string>? supplierCodes,
-            IReadOnlyList<string>? scopedStoreCodes
+            IReadOnlyList<string>? scopedStoreCodes,
+            bool tree = false
         );
 
         Task<

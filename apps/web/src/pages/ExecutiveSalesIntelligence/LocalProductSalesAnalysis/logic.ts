@@ -117,6 +117,26 @@ export function applyCandidateSelection(
   return { ...selection, includedProductCodes: [...included] }
 }
 
+/** 树搜索后只替换当前可见叶节点，隐藏分支中的已选分类必须继续保留。 */
+export function mergeVisibleSupplierCategorySelection(
+  previous: string[],
+  checkedVisible: string[],
+  visibleLeafGuids: ReadonlySet<string>,
+): string[] {
+  return [...new Set([
+    ...previous.filter((guid) => !visibleLeafGuids.has(guid)),
+    ...checkedVisible.filter((guid) => visibleLeafGuids.has(guid)),
+  ])]
+}
+
+/** 供应商分类接口可能返回嵌套 roots；清理已选值时只保留仍存在的叶分类。 */
+interface SupplierCategoryGuidNode { guid: string; children?: SupplierCategoryGuidNode[] }
+export function collectSupplierCategoryLeafGuids(
+  options: SupplierCategoryGuidNode[],
+): string[] {
+  return options.flatMap((item) => item.children?.length ? collectSupplierCategoryLeafGuids(item.children) : [item.guid])
+}
+
 export function getCurrentProductAfterCancellation<T extends Pick<LocalSupplierProductSalesAnalysisCandidate, 'productCode'>>(
   currentProduct: T | null,
   summaryItems: T[],
