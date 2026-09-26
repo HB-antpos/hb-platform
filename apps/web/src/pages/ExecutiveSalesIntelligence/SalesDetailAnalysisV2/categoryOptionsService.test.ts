@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { fetchSalesDetailCategoryOptions, normalizeSalesDetailCategoryOptions } from './categoryOptionsService'
+import { buildSalesDetailSupplierCategoryTree, fetchSalesDetailCategoryOptions, normalizeSalesDetailCategoryOptions } from './categoryOptionsService'
 
 const warehouse = normalizeSalesDetailCategoryOptions({ success: true, data: { warehouseCategories: [
   { categoryGUID: 'ROOT', categoryName: '家居', children: [
@@ -9,6 +9,9 @@ const warehouse = normalizeSalesDetailCategoryOptions({ success: true, data: { w
 assert.deepEqual(warehouse[0]?.options.map(option => [option.guid, option.name]), [
   ['ROOT', '家居'], ['CHILD', '家居 / 收纳'],
 ], '仓库分类的子节点必须可选')
+assert.deepEqual(warehouse[0]?.options.map(option => [option.guid, option.label, option.parentGuid]), [
+  ['ROOT', '家居', undefined], ['CHILD', '收纳', 'ROOT'],
+], '分类树应保留独立节点名称和父子关系')
 
 const inactiveParent = normalizeSalesDetailCategoryOptions({ data: { warehouseCategories: [
   { categoryGuid: 'OLD', name: '旧分类', isActive: false, children: [
@@ -18,6 +21,7 @@ const inactiveParent = normalizeSalesDetailCategoryOptions({ data: { warehouseCa
 assert.deepEqual(inactiveParent[0]?.options.map(option => [option.guid, option.name]), [
   ['ACTIVE', '新分类'],
 ], '停用的父分类不应隐藏启用的子分类')
+assert.equal(inactiveParent[0]?.options[0]?.parentGuid, undefined, '停用父类下的启用子类应成为可见根节点')
 
 const supplier = normalizeSalesDetailCategoryOptions({ success: true, data: { supplierCategories: [
   { supplierCode: '200', categories: [{ categoryGuid: 'HB', name: '文具', children: [] }] },
@@ -28,6 +32,12 @@ const supplier = normalizeSalesDetailCategoryOptions({ success: true, data: { su
 assert.deepEqual(supplier.map(group => [group.supplierCode, ...group.options.map(option => option.guid)]), [
   ['200', 'HB'], ['240', 'AU', 'AU-CHILD'],
 ], '多个供应商的分类树必须保留各自子分类')
+const tree = buildSalesDetailSupplierCategoryTree(supplier, code => code === '240' ? 'Dats · 240' : 'Hot Bargain · 200')
+assert.deepEqual(tree.map(group => [group.title, group.disableCheckbox, group.children?.map(node => node.title)]), [
+  ['Hot Bargain · 200', true, ['文具']], ['Dats · 240', true, ['Cards']],
+], '供应商仅用于树分组，不能作为可勾选分类')
+assert.equal(tree[1]?.children?.[0]?.children?.[0]?.title, 'Birthday', '子分类应显示自己的名称而非重复完整路径')
+assert.equal(tree[1]?.children?.[0]?.children?.[0]?.searchText, 'Dats · 240 Cards / Birthday', '树搜索仍可匹配完整路径')
 
 const originalFetch = globalThis.fetch
 globalThis.fetch = (async (input: RequestInfo | URL) => {

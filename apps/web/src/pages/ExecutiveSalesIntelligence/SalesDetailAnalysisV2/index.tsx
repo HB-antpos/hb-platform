@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, Image, Input, message, Pagination, Segmented, Select, Skeleton, Tag, Tooltip } from 'antd'
+import { Alert, Button, Image, Input, message, Pagination, Segmented, Select, Skeleton, Tag, Tooltip, TreeSelect } from 'antd'
 import { CloseOutlined, DownloadOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ShopOutlined } from '@ant-design/icons'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -12,7 +12,7 @@ import { useReportQuery, type ReportQueryState } from '../ReportWorkbench/useRep
 import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_PRODUCT_IMAGE_EXPORT_ROWS, MAX_SUPPLIER_SELECTIONS, parseDetailView, RAIL_DEFAULT_WIDTH, selectDimension, sumProductPage, type CompareView, type DetailTotals, type DetailViewPreference } from './logic'
 import ProductBranchDrawer from './ProductBranchDrawer'
 import { fetchSalesDetailReport, type ReportSection, type SalesDetailPage, type SalesDetailQuery, type SalesDetailReport, type SalesDetailRow } from './reportService'
-import { fetchSalesDetailCategoryOptions, type SalesDetailCategoryGroup } from './categoryOptionsService'
+import { buildSalesDetailSupplierCategoryTree, fetchSalesDetailCategoryOptions, type SalesDetailCategoryGroup, type SalesDetailCategoryTreeNode } from './categoryOptionsService'
 import styles from './styles.module.css'
 
 type MetricKey = 'revenue' | 'grossProfit' | 'grossMarginRate' | 'quantity' | 'averageUnitPrice' | 'share' | 'chinaShare'
@@ -292,6 +292,15 @@ export default function SalesDetailAnalysisV2() {
       : group.supplierName || supplierOptions.find(option => option.value === group.supplierCode)?.label || group.supplierCode || text('供应商分类', 'Supplier categories'),
     options: group.options.map(option => ({ value: option.guid, label: option.name })),
   }))
+  const supplierCategoryTree = buildSalesDetailSupplierCategoryTree(categoryGroups ?? [], code =>
+    supplierOptions.find(option => option.value === code)?.label || code || text('供应商分类', 'Supplier categories'))
+  const changeCategories = (values: string[]) => {
+    if (exceedsSalesDetailSelectionLimit(values, MAX_CATEGORY_SELECTIONS)) {
+      message.warning(text(`最多选择 ${MAX_CATEGORY_SELECTIONS} 个分类`, `Select up to ${MAX_CATEGORY_SELECTIONS} categories.`))
+      return
+    }
+    setSelection(value => kind === 'australia' ? ({ ...value, supplierCategoryGuids: values, page: 1 }) : ({ ...value, warehouseCategoryGuids: values, page: 1 }))
+  }
   const storeRows = sortedRows('branches', stores.data?.rows ?? [])
   // 后端保证全量分页顺序；前端再排序当前页，兼容缓存或旧接口返回的非确定顺序。
   const productRows = [...(products.data?.rows ?? [])].sort((left, right) => right.quantity - left.quantity
@@ -485,19 +494,25 @@ export default function SalesDetailAnalysisV2() {
             }
             setSelection(value => ({ ...value, supplier: values[0], supplierCodes: values, supplierCategoryGuids: [], page: 1 }))
           }} />
-        <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
-          aria-label={text(kind === 'australia' ? '选择供应商分类' : '选择仓库分类', kind === 'australia' ? 'Select supplier categories' : 'Select warehouse categories')}
-          placeholder={text(kind === 'australia' ? '供应商分类（可多选）' : '仓库分类（可多选）', kind === 'australia' ? 'Supplier categories (multiple)' : 'Warehouse categories (multiple)')}
-          style={{ minWidth: 220, maxWidth: 360 }} loading={categoryLoading} disabled={kind === 'australia' && !selection.supplierCodes.length}
-          value={kind === 'australia' ? selection.supplierCategoryGuids : selection.warehouseCategoryGuids} options={categoryOptions}
+        {kind === 'australia' ? <TreeSelect treeCheckable multiple allowClear showSearch treeDefaultExpandAll
+          showCheckedStrategy={TreeSelect.SHOW_PARENT} maxTagCount={0} size="small"
+          maxTagPlaceholder={() => text(`已选 ${selection.supplierCategoryGuids.length} 项`, `${selection.supplierCategoryGuids.length} selected`)}
+          aria-label={text('选择供应商分类', 'Select supplier categories')}
+          placeholder={text('供应商分类（可多选）', 'Supplier categories (multiple)')}
+          style={{ minWidth: 220, maxWidth: 360 }} popupClassName={styles.categoryTreePopup}
+          loading={categoryLoading} disabled={!selection.supplierCodes.length}
+          value={selection.supplierCategoryGuids} treeData={supplierCategoryTree}
+          filterTreeNode={(input, node) => ((node as SalesDetailCategoryTreeNode).searchText || '').toLocaleLowerCase().includes(input.trim().toLocaleLowerCase())}
           notFoundContent={categoryError || text('暂无分类', 'No categories')}
-          onChange={values => {
-            if (exceedsSalesDetailSelectionLimit(values, MAX_CATEGORY_SELECTIONS)) {
-              message.warning(text(`最多选择 ${MAX_CATEGORY_SELECTIONS} 个分类`, `Select up to ${MAX_CATEGORY_SELECTIONS} categories.`))
-              return
-            }
-            setSelection(value => kind === 'australia' ? ({ ...value, supplierCategoryGuids: values, page: 1 }) : ({ ...value, warehouseCategoryGuids: values, page: 1 }))
-          }} />
+          popupRender={menu => <><div className={styles.categoryTreeHint}>{text('按所选供应商分类筛选；选择父级包含子分类。', 'Filter by the selected suppliers’ categories. A parent includes its subcategories.')}</div>{menu}</>}
+          onChange={values => changeCategories(Array.isArray(values) ? values.map(String) : [])} />
+          : <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
+            aria-label={text('选择仓库分类', 'Select warehouse categories')}
+            placeholder={text('仓库分类（可多选）', 'Warehouse categories (multiple)')}
+            style={{ minWidth: 220, maxWidth: 360 }} loading={categoryLoading}
+            value={selection.warehouseCategoryGuids} options={categoryOptions}
+            notFoundContent={categoryError || text('暂无分类', 'No categories')}
+            onChange={changeCategories} />}
         <ReportControls value={dates} onChange={value => { setDates(value); setSelection(current => ({ ...current, page: 1 })) }} onRefresh={refreshAll} loading={loading} />
         {access.canViewSalesData && <Button onClick={() => navigate(`/executive-sales-intelligence/overview?branch=${encodeURIComponent(selection.branch ?? '')}&startDate=${dates.startDate}&endDate=${dates.endDate}&compare=${dates.compare}&compareMode=${dates.compareMode}`)}>{text('营业额报告', 'Revenue report')}</Button>}
       </div>

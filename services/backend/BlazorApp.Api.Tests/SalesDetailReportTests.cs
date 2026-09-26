@@ -294,7 +294,7 @@ public sealed class SalesDetailReportTests : IDisposable
     }
 
     [Fact]
-    public async Task 澳洲供应商分类多选包含自营仓库分类且不串到其他供应商()
+    public async Task 澳洲供应商父分类多选包含子类与自营仓库分类且不串到其他供应商()
     {
         var day = new DateTime(2026, 9, 22);
         await _localDb.Insertable(new[]
@@ -305,7 +305,8 @@ public sealed class SalesDetailReportTests : IDisposable
         }).ExecuteCommandAsync();
         await _localDb.Insertable(new[]
         {
-            new LocalSupplierCategory { CategoryGUID = "CAT-A", LocalSupplierCode = "A1", CategoryName = "A分类" },
+            new LocalSupplierCategory { CategoryGUID = "CAT-P", LocalSupplierCode = "A1", CategoryName = "A父分类" },
+            new LocalSupplierCategory { CategoryGUID = "CAT-A", ParentGUID = "CAT-P", LocalSupplierCode = "A1", CategoryName = "A分类" },
             new LocalSupplierCategory { CategoryGUID = "CAT-B", LocalSupplierCode = "A2", CategoryName = "B分类" },
         }).ExecuteCommandAsync();
         await _localDb.Insertable(new[]
@@ -322,7 +323,7 @@ public sealed class SalesDetailReportTests : IDisposable
         var service = CreateService();
         var selected = await service.GetSalesDetailReportFilteredAsync(Range(day, day), SalesDetailKind.Australia,
             new() { "S1" }, selectedSupplierCodes: new() { "A1", "A2", "200" },
-            supplierCategoryGuids: new() { "CAT-A", "WC-HB" });
+            supplierCategoryGuids: new() { "CAT-P", "WC-HB" });
         Assert.Equal(40m, selected.Data!.Summary!.Summary!.Revenue);
         Assert.Equal(new[] { "P-A", "P-HB" }, selected.Data.Products!.Rows.Select(row => row.Code).OrderBy(code => code));
 

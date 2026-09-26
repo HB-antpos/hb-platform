@@ -57,7 +57,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpGet("supplier-category-options")]
-        public async Task<IActionResult> GetSupplierCategoryOptions([FromQuery] List<string>? supplierCodes)
+        public async Task<IActionResult> GetSupplierCategoryOptions([FromQuery] List<string>? supplierCodes, [FromQuery] bool tree = false)
         {
             try
             {
@@ -67,7 +67,7 @@ namespace BlazorApp.Api.Controllers.React
                     return Forbid();
                 }
 
-                return ToResult(await _service.GetSupplierCategoryOptionsAsync(supplierCodes, scope.ScopedStoreCodes));
+                return ToResult(await _service.GetSupplierCategoryOptionsAsync(supplierCodes, scope.ScopedStoreCodes, tree));
             }
             catch (Exception ex)
             {
