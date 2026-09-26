@@ -298,6 +298,9 @@
   <data name="settings.remoteMaintenance.result.componentsMissing" xml:space="preserve"><value>POS 缺少远程维护安装组件。请关闭 POS，使用完整 HB POS 安装包修复到默认 Program Files 目录，然后重新打开 POS，点击“安装远程维护”。无需另外下载 RustDesk。</value></data>
   <data name="settings.remoteMaintenance.result.installationLocationInvalid" xml:space="preserve"><value>当前 POS 未从要求的安装目录运行。请关闭 POS，运行完整 HB POS 安装包，保留默认 Program Files 目录，然后打开安装后的 POS，点击“安装远程维护”。</value></data>
   <data name="settings.remoteMaintenance.result.installationPermissionsInvalid" xml:space="preserve"><value>POS 安装目录不符合 Windows 安全权限要求。请管理员使用完整 HB POS 安装包修复到默认 Program Files 目录，然后重新打开 POS 并重试。</value></data>
+  <data name="settings.remoteMaintenance.result.existingRustDeskUnmanaged" xml:space="preserve"><value>这台 POS 已装有未按公司配置的 RustDesk（可能是之前安装未完成留下的），为安全起见不会自动接管。请在 Windows“设置 &gt; 应用”中卸载 RustDesk，然后回到这里重新点击“安装远程维护”。</value></data>
+  <data name="settings.remoteMaintenance.result.rustDeskSetupIncomplete" xml:space="preserve"><value>RustDesk 安装程序没有在规定时间内完成，或 RustDesk 服务未能启动。请在 Windows“设置 &gt; 应用”中卸载 RustDesk（如已出现），重启 POS 后重新点击“安装远程维护”。</value></data>
+  <data name="settings.remoteMaintenance.result.rustDeskConfigurationFailed" xml:space="preserve"><value>RustDesk 已安装，但公司连接配置未能写入。请在 Windows“设置 &gt; 应用”中卸载 RustDesk，重启 POS 后重新点击“安装远程维护”。</value></data>
   <data name="settings.remoteMaintenance.status.notInstalled" xml:space="preserve"><value>未安装</value></data>
   <data name="settings.remoteMaintenance.status.running" xml:space="preserve"><value>运行中</value></data>
   <data name="settings.remoteMaintenance.status.starting" xml:space="preserve"><value>正在启动</value></data>

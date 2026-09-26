@@ -3734,6 +3734,9 @@ public sealed class SettingsViewModelTests
     [InlineData("installationLocationInvalid")]
     [InlineData("installationPermissionsInvalid")]
     [InlineData("componentsMissing")]
+    [InlineData("existingRustDeskUnmanaged")]
+    [InlineData("rustDeskSetupIncomplete")]
+    [InlineData("rustDeskConfigurationFailed")]
     public async Task Remote_maintenance_failure_is_localized_in_both_status_surfaces(string failure)
     {
         var localization = new LocalizationService();
