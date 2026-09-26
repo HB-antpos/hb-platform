@@ -1267,7 +1267,7 @@ export default function WpfVersionsPage() {
                   maxTagCount="responsive"
                   loading={targetOptionsLoading}
                   disabled={!canManageAppDownloads || Boolean(targetOptionsError)}
-                  style={{ minWidth: 420 }}
+                  style={{ width: 420 }}
                   options={targetDeviceOptions}
                   placeholder={t('system.wpfVersions.searchDevices', '搜索机器编号、分店或备注')}
                   onSearch={handleTargetDeviceSearch}
