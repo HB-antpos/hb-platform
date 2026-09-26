@@ -101,6 +101,113 @@ public sealed class AppUpdateInstallerLauncherTests
         Assert.False(exitService.Exited);
     }
 
+    [Fact]
+    public async Task LaunchAsync_hands_exe_installer_to_progress_window_and_exits_app()
+    {
+        var processLauncher = new CapturingProcessLauncher();
+        var exitService = new CapturingExitService();
+        var progressWindow = new CapturingProgressWindowLauncher(ProcessLaunchResult.Succeeded());
+        var launcher = new AppUpdateInstallerLauncher(processLauncher, exitService, AllowInstallSafetyGuard.Instance, progressWindow);
+        var update = new AppUpdateCheckResponse
+        {
+            InstallerType = "exe",
+            InstallerArguments = " /SP- /VERYSILENT ",
+            TargetVersion = "1.9.0"
+        };
+
+        var result = await launcher.LaunchAsync(@"C:\Temp\hbpos.exe", update);
+
+        Assert.True(result.Success);
+        Assert.Equal(@"C:\Temp\hbpos.exe", progressWindow.InstallerPath);
+        Assert.Equal("/SP- /VERYSILENT", progressWindow.InstallerArguments);
+        Assert.Same(update, progressWindow.Update);
+        Assert.Null(processLauncher.FileName);
+        Assert.True(exitService.Exited);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_falls_back_to_installer_when_progress_window_is_unavailable()
+    {
+        var processLauncher = new CapturingProcessLauncher();
+        var exitService = new CapturingExitService();
+        var progressWindow = new CapturingProgressWindowLauncher(null);
+        var launcher = new AppUpdateInstallerLauncher(processLauncher, exitService, AllowInstallSafetyGuard.Instance, progressWindow);
+
+        var result = await launcher.LaunchAsync(
+            @"C:\Temp\hbpos.exe",
+            new AppUpdateCheckResponse { InstallerType = "exe", InstallerArguments = "/VERYSILENT" });
+
+        Assert.True(result.Success);
+        Assert.NotNull(progressWindow.InstallerPath);
+        Assert.Equal(@"C:\Temp\hbpos.exe", processLauncher.FileName);
+        Assert.Equal("/VERYSILENT", processLauncher.Arguments);
+        Assert.True(exitService.Exited);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_falls_back_to_installer_when_progress_window_throws()
+    {
+        var processLauncher = new CapturingProcessLauncher();
+        var exitService = new CapturingExitService();
+        var progressWindow = new CapturingProgressWindowLauncher(null)
+        {
+            Exception = new InvalidOperationException("broken staging")
+        };
+        var launcher = new AppUpdateInstallerLauncher(processLauncher, exitService, AllowInstallSafetyGuard.Instance, progressWindow);
+
+        var result = await launcher.LaunchAsync(@"C:\Temp\hbpos.exe", new AppUpdateCheckResponse { InstallerType = "exe" });
+
+        Assert.True(result.Success);
+        Assert.Equal(@"C:\Temp\hbpos.exe", processLauncher.FileName);
+        Assert.True(exitService.Exited);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_keeps_msi_and_blocked_installs_away_from_progress_window()
+    {
+        var progressWindow = new CapturingProgressWindowLauncher(ProcessLaunchResult.Succeeded());
+        var msiLauncher = new AppUpdateInstallerLauncher(
+            new CapturingProcessLauncher(),
+            new CapturingExitService(),
+            AllowInstallSafetyGuard.Instance,
+            progressWindow);
+        var blockedLauncher = new AppUpdateInstallerLauncher(
+            new CapturingProcessLauncher(),
+            new CapturingExitService(),
+            new BlockingInstallSafetyGuard("appUpdate.install.activeTransaction"),
+            progressWindow);
+
+        await msiLauncher.LaunchAsync(@"C:\Temp\hbpos.msi", new AppUpdateCheckResponse { InstallerType = "msi" });
+        var blocked = await blockedLauncher.LaunchAsync(@"C:\Temp\hbpos.exe", new AppUpdateCheckResponse { InstallerType = "exe" });
+
+        Assert.False(blocked.Success);
+        Assert.Null(progressWindow.InstallerPath);
+    }
+
+    private sealed class CapturingProgressWindowLauncher(ProcessLaunchResult? result) : IAppUpdateProgressWindowLauncher
+    {
+        public string? InstallerPath { get; private set; }
+
+        public string? InstallerArguments { get; private set; }
+
+        public AppUpdateCheckResponse? Update { get; private set; }
+
+        public Exception? Exception { get; init; }
+
+        public Task<ProcessLaunchResult?> TryLaunchAsync(
+            string installerPath,
+            string installerArguments,
+            AppUpdateCheckResponse update)
+        {
+            InstallerPath = installerPath;
+            InstallerArguments = installerArguments;
+            Update = update;
+            return Exception is null
+                ? Task.FromResult(result)
+                : Task.FromException<ProcessLaunchResult?>(Exception);
+        }
+    }
+
     private sealed class CapturingProcessLauncher : IProcessLauncher
     {
         public string? FileName { get; private set; }

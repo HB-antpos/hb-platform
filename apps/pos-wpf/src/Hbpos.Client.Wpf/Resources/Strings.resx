@@ -26,6 +26,9 @@
   <data name="startup.stage.completed" xml:space="preserve"><value>Startup complete</value></data>
   <data name="startup.error.apiBaseAddress.title" xml:space="preserve"><value>HB POS startup configuration error</value></data>
   <data name="startup.error.apiBaseAddress.message" xml:space="preserve"><value>HBPOS_API_BASE_URL is invalid. Set it to a complete, permitted HTTP or HTTPS server address, then restart HB POS.</value></data>
+  <data name="startup.versionLabel" xml:space="preserve"><value>Version</value></data>
+  <data name="startup.updatedTo" xml:space="preserve"><value>Updated to {0}</value></data>
+  <data name="startup.rolledBackTo" xml:space="preserve"><value>Switched back to {0}</value></data>
   <data name="Backspace" xml:space="preserve"><value>Back</value></data>
   <data name="Barcode" xml:space="preserve"><value>Barcode</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>

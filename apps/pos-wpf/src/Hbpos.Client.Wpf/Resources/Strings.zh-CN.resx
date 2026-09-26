@@ -54,6 +54,15 @@
   <data name="startup.error.apiBaseAddress.message" xml:space="preserve">
     <value>HBPOS_API_BASE_URL 配置无效。请设置为完整且允许使用的 HTTP 或 HTTPS 服务器地址，然后重新启动 HB POS。</value>
   </data>
+  <data name="startup.versionLabel" xml:space="preserve">
+    <value>版本</value>
+  </data>
+  <data name="startup.updatedTo" xml:space="preserve">
+    <value>已更新到 {0}</value>
+  </data>
+  <data name="startup.rolledBackTo" xml:space="preserve">
+    <value>已回退到 {0}</value>
+  </data>
   <data name="Backspace" xml:space="preserve">
     <value>退格</value>
   </data>

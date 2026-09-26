@@ -45,15 +45,15 @@ builder.Services.AddSwaggerGen(options =>
     options.SchemaFilter<SharedSaleCartPayloadSchemaFilter>();
     options.SchemaFilter<DeviceActivationRequestSchemaFilter>();
 });
-// 中文注释：响应压缩仅由 CatalogV2ResponseCompressionProvider 放行（商品分页 + checksumVersion=2），
-// 其他端点与 v1/WPF 一律保持未压缩，行为与启用前一致。
+// 中文注释：响应压缩仅由 CatalogResponseCompressionProvider 按白名单放行（商品分页 + checksumVersion=2、
+// 码冲突候选），其他端点与 v1/WPF 分页一律保持未压缩，行为与启用前一致。
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
     options.Providers.Add<GzipCompressionProvider>();
     options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/json"]);
 });
-builder.Services.AddSingleton<IResponseCompressionProvider, CatalogV2ResponseCompressionProvider>();
+builder.Services.AddSingleton<IResponseCompressionProvider, CatalogResponseCompressionProvider>();
 builder.Services
     .AddAuthentication(DeviceAuthConstants.Scheme)
     .AddScheme<AuthenticationSchemeOptions, DeviceAuthenticationHandler>(

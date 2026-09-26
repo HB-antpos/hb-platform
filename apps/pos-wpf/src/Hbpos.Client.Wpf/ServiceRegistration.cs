@@ -220,7 +220,7 @@ public static class ServiceRegistration
             // 商品同步由调用方令牌控制，禁止 HttpClient 隐式 100 秒超时截断冷缓存构建。
             client.Timeout = Timeout.InfiniteTimeSpan;
         })
-        // 中文注释：声明并自动解压 gzip，服务端对 checksumVersion=2 的目录分页才会压缩，其它接口响应不变。
+        // 中文注释：声明并自动解压 gzip，服务端只对 checksumVersion=2 的目录分页与码冲突候选压缩，其它接口响应不变。
         .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
@@ -377,6 +377,10 @@ public static class ServiceRegistration
         services.AddSingleton<IAppUpdateDownloadDirectoryProvider, AppUpdateDownloadDirectoryProvider>();
         services.AddSingleton<IProcessLauncher, ProcessLauncher>();
         services.AddSingleton<IAppUpdateInstallSafetyGuard, ShellAppUpdateInstallSafetyGuard>();
+        services.AddSingleton<IAppUpdateProgressWindowLauncher>(sp => new AppUpdateProgressWindowLauncher(
+            sp.GetRequiredService<IProcessLauncher>(),
+            sp.GetRequiredService<IAppVersionProvider>(),
+            AppUpdateProgressWindowOptions.CreateDefault()));
         services.AddSingleton<IAppUpdateInstallerLauncher, AppUpdateInstallerLauncher>();
         services.AddSingleton<IAppUpdatePromptService, WpfAppUpdatePromptService>();
         services.AddSingleton<IAppUpdateCoordinator, AppUpdateCoordinator>();

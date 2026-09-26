@@ -29,6 +29,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Hbpos.Contracts\Hbpos.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Hbpos.Client.Wpf\Hbpos.Client.Wpf.csproj" />
+    <ProjectReference Include="..\..\src\Hbpos.Updater\Hbpos.Updater.csproj" />
   </ItemGroup>
 
   <ItemGroup>

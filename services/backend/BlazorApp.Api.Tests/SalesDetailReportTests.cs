@@ -547,6 +547,17 @@ public sealed class SalesDetailReportTests : IDisposable
     }
 
     [Fact]
+    public void 关键词查询跳过日期提示按连续区间合并()
+    {
+        Assert.Null(SalesDashboardReactService.DescribeProjectionSkippedDates(Array.Empty<DateTime>()));
+        Assert.Equal("2026-04-09共 1 天缺少可用的关键词查询投影，本次搜索已跳过，结果未包含这些日期的销售。",
+            SalesDashboardReactService.DescribeProjectionSkippedDates(new[] { new DateTime(2026, 4, 9, 10, 0, 0) }));
+        Assert.StartsWith("2025-05-04～2025-05-06、2026-04-09共 4 天",
+            SalesDashboardReactService.DescribeProjectionSkippedDates(new[]
+                { new DateTime(2026, 4, 9), new DateTime(2025, 5, 5), new DateTime(2025, 5, 4), new DateTime(2025, 5, 6), new DateTime(2026, 4, 9) }));
+    }
+
+    [Fact]
     public async Task 国内原始供应商在澳洲栏按本地供应商解析并支持名称搜索()
     {
         var day = new DateTime(2026, 7, 6);

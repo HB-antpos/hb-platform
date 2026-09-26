@@ -6,6 +6,7 @@
     <Project Path="src/Hbpos.Contracts/Hbpos.Contracts.csproj" />
     <Project Path="src/Hbpos.RemoteMaintenance.Setup/Hbpos.RemoteMaintenance.Setup.csproj" />
     <Project Path="src/Hbpos.RemoteStatus/Hbpos.RemoteStatus.csproj" />
+    <Project Path="src/Hbpos.Updater/Hbpos.Updater.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Hbpos.Api.Tests/Hbpos.Api.Tests.csproj" />

@@ -75,14 +75,15 @@ public sealed class SalesDetailMonthlyProjectionTests
     }
 
     [Fact]
-    public void 月投影路径只服务全部分店范围的无关键词请求()
+    public void 月投影路径服务全部无关键词请求含授权分店与选中分店()
     {
         var all = Enum.GetValues<SalesDetailSection>().ToHashSet();
         Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, null, null, all));
         Assert.True(SalesDashboardReactService.UsesMonthlyProjection("  ", null, "", all));
         Assert.False(SalesDashboardReactService.UsesMonthlyProjection("English", null, null, all));
-        Assert.False(SalesDashboardReactService.UsesMonthlyProjection(null, new[] { "S1" }, null, all));
-        Assert.False(SalesDashboardReactService.UsesMonthlyProjection(null, null, "S1", all));
+        // 授权分店与选中分店由分店粒度事实过滤、商品栏按范围读日事实，不再退回全表扫描。
+        Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, new[] { "S1" }, null, all));
+        Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, null, "S1", all));
         Assert.False(SalesDashboardReactService.UsesMonthlyProjection(null, null, null, new HashSet<SalesDetailSection> { SalesDetailSection.Branches }));
         Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, null, null, new HashSet<SalesDetailSection> { SalesDetailSection.Products }));
     }

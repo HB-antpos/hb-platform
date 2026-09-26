@@ -61,6 +61,13 @@ public partial class SalesDashboardReactService
         public List<SalesDetailReportSqlRow> Products { get; } = new();
         public int ProductTotal { get; set; }
         public SalesDetailDenominator Denominator { get; set; } = new();
+        /// <summary>关键词日投影路径因缺少或无法核验投影而跳过的日期，结果不含这些日期。</summary>
+        public List<DateTime> SkippedDates { get; } = new();
+    }
+
+    private sealed class SalesDetailSkippedDateSqlRow
+    {
+        public DateTime Date { get; init; }
     }
 
     private sealed class SalesDetailProductCountSqlRow
@@ -144,7 +151,7 @@ public partial class SalesDashboardReactService
             effectiveSupplierCategories, effectiveWarehouseCategories, selectedProductCode,
             search, pageIndex, pageSize, wanted, cancellationToken);
         // 四栏全部来自同一份商品日统计，不依赖供应商汇总的完成时间或另一次发布的归属映射。
-        var status = BuildSalesDetailReportStatus(read.Status, dateRange, false, skipFailedDates: true);
+        var status = BuildSalesDetailReportStatus(read.Status, dateRange, false, skipFailedDates: true, projectionSkippedDates: read.SkippedDates);
         var response = new ProductReportResponseDto<SalesDetailReportDto>
         {
             StatisticStatus = status.StatisticStatus, StatisticMessage = status.StatisticMessage,
@@ -202,8 +209,9 @@ public partial class SalesDashboardReactService
         int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted, CancellationToken cancellationToken)
     {
         var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
+        // 分类筛选收窄全部栏位，走完整查询并先按商品索引预取分类商品的事实；其余筛选（分店范围、选中分店、多选供应商）都能走预聚合。
         var hasClassificationFilter = supplierCategoryGuids.Count > 0 || warehouseCategoryGuids.Count > 0;
-        if (sqlServer && !hasClassificationFilter && selectedSupplierCodes.Count <= 1 && _context.Db.Ado.Transaction == null && UsesMonthlyProjection(search, branches, selectedBranchCode, wanted)
+        if (sqlServer && !hasClassificationFilter && _context.Db.Ado.Transaction == null && UsesMonthlyProjection(search, branches, selectedBranchCode, wanted)
             && !MonthlyProjectionRecentlyMissing() && TryGetSameServerPosmDatabase(out _))
         {
             try
@@ -219,7 +227,7 @@ public partial class SalesDashboardReactService
                 _logger.LogInformation("销售明细按月投影尚未建立，改用原查询：{Reason}", ex.Number);
             }
         }
-        if (sqlServer && !hasClassificationFilter && selectedSupplierCodes.Count <= 1 && !string.IsNullOrWhiteSpace(search) && _context.Db.Ado.Transaction == null
+        if (sqlServer && !hasClassificationFilter && !string.IsNullOrWhiteSpace(search) && _context.Db.Ado.Transaction == null
             && (wanted.Contains(SalesDetailSection.Summary) || wanted.Contains(SalesDetailSection.Products))
             && TryGetSameServerPosmDatabase(out _))
         {
@@ -283,11 +291,13 @@ public partial class SalesDashboardReactService
             await using var command = connection.CreateCommand();
             command.CommandText = useMonthly
                 ? BuildSalesDetailReportSqlMonthly(
-                    posmDatabase, range, kind, selectedSupplierCode, selectedProductCode, pageIndex, pageSize, wanted)
+                    posmDatabase, range, kind, selectedSupplierCode, selectedProductCode, pageIndex, pageSize, wanted,
+                    selectedSupplierCodes, branches, selectedBranchCode)
                 : useProjection
-                ? BuildSalesDetailReportSqlServerCore(
+                ? BuildSalesDetailReportSqlServerCoreWithFilters(
                     posmDatabase, range, kind, branches, selectedBranchCode, selectedSupplierCode,
-                    selectedProductCode, search, pageIndex, pageSize, wanted, fallbackMap, useProjection: true, compressOutput: true)
+                    selectedProductCode, search, pageIndex, pageSize, wanted, fallbackMap, useProjection: true, compressOutput: true,
+                    selectedSuppliers: selectedSupplierCodes)
                 : BuildSalesDetailReportSqlWithFilters(
                     sqlServer, direct ? posmDatabase : null, range, kind, branches, selectedBranchCode,
                     selectedSupplierCode, selectedProductCode, search, pageIndex, pageSize, wanted, fallbackMap, selectedSupplierCodes, supplierCategoryGuids, warehouseCategoryGuids);
@@ -366,6 +376,9 @@ public partial class SalesDashboardReactService
                 read.ProductTotal = (await ReadCompressedRevenueRowsAsync<SalesDetailProductCountSqlRow>(reader, cancellationToken)).Single().Total;
                 await NextResult();
                 read.Denominator = (await ReadCompressedRevenueRowsAsync<SalesDetailDenominator>(reader, cancellationToken)).Single();
+                await NextResult();
+                read.SkippedDates.AddRange((await ReadCompressedRevenueRowsAsync<SalesDetailSkippedDateSqlRow>(reader, cancellationToken))
+                    .Select(row => row.Date.Date));
             }
             else
             {
@@ -392,8 +405,8 @@ public partial class SalesDashboardReactService
                 while (await reader.ReadAsync(cancellationToken)) { }
             failed = false;
             _logger.LogInformation(
-                "销售明细统计批次读取完成：连接 {OpenMs}ms，首结果 {FirstResultMs}ms，读取结果 {ReadMs}ms，共 {TotalMs}ms，日投影 {Projection}，月投影 {Monthly}",
-                openedAt, firstResultAt - openedAt, elapsed.ElapsedMilliseconds - firstResultAt, elapsed.ElapsedMilliseconds, useProjection, useMonthly);
+                "销售明细统计批次读取完成：连接 {OpenMs}ms，首结果 {FirstResultMs}ms，读取结果 {ReadMs}ms，共 {TotalMs}ms，日投影 {Projection}，月投影 {Monthly}，跳过 {SkippedDays} 天",
+                openedAt, firstResultAt - openedAt, elapsed.ElapsedMilliseconds - firstResultAt, elapsed.ElapsedMilliseconds, useProjection, useMonthly, read.SkippedDates.Count);
             return read;
 
             async Task NextResult()
@@ -529,7 +542,7 @@ public partial class SalesDashboardReactService
         string? search, int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted,
         IReadOnlyDictionary<string, string>? fallbackMap, bool useProjection, bool compressOutput = false,
         IReadOnlyCollection<string>? selectedSuppliers = null, IReadOnlyCollection<string>? supplierCategoryGuids = null,
-        IReadOnlyCollection<string>? warehouseCategoryGuids = null)
+        IReadOnlyCollection<string>? warehouseCategoryGuids = null, bool prefetchCategorySource = true)
     {
         var hasCompare = HasCompare(range);
         var categorySourceFilter = BuildSalesDetailCategoryFilter(kind, supplierCategoryGuids, warehouseCategoryGuids, "s.[ProductCode]");
@@ -538,6 +551,14 @@ public partial class SalesDashboardReactService
             : string.Empty;
         // 统计失败日只在状态结果集中保留提示；事实读取必须跳过，避免筛选失败时退回整段原始数据。
         var failedDateFilter = " AND NOT EXISTS (SELECT 1 FROM [SalesStatisticRefreshState] failedState WHERE failedState.[StatisticType]='ProductStoreDaily' AND failedState.[Status]='Failed' AND failedState.[Date]=s.[Date])";
+        // 分类筛选收窄全部栏位（含供应商、分店与分母），先按商品索引只读分类商品的事实，其余整套 SQL 不变地读这份小表。
+        var categoryPrefetch = prefetchCategorySource && !useProjection && categorySourceFilter.Length > 0
+            ? BuildSalesDetailCategoryPrefetchSql(kind, supplierCategoryGuids, warehouseCategoryGuids, sourceBranch, categorySourceFilter)
+            : string.Empty;
+        var factSource = useProjection ? "#SalesDetailCandidateSource"
+            : categoryPrefetch.Length > 0 ? "#SalesDetailCategorySource" : "ProductStoreDailySalesStatistic";
+        // 预取表已按分类精确判定过，主查询不再逐行回查商品与分类分配表。
+        if (categoryPrefetch.Length > 0) categorySourceFilter = string.Empty;
         // 商品抽屉只请求分店栏，可在聚合前缩小事实范围；全量报表仍保留其他商品候选和供应商分母。
         var sourceProduct = wanted.Count == 1 && wanted.Contains(SalesDetailSection.Branches)
             && !string.IsNullOrWhiteSpace(selectedProduct)
@@ -587,7 +608,7 @@ WITH Periods AS
         LTRIM(RTRIM(COALESCE(s.[BranchCode],''))) [BranchCode], LTRIM(RTRIM(COALESCE(s.[ProductCode],''))) [ProductCode],
         s.[ProductName] [StatisticProductName], s.[Barcode] [StatisticBarcode],
         s.[TotalQuantity], s.[TotalAmount], s.[OrderCount], s.[GrossProfit], s.[TotalCost]
- FROM [{(useProjection ? "#SalesDetailCandidateSource" : "ProductStoreDailySalesStatistic")}] s
+ FROM [{factSource}] s
  CROSS JOIN Periods periods
  {joinMapping}
  LEFT JOIN (SELECT [SupplierCode] FROM [ChinaSupplier] WHERE [SupplierCode] IS NOT NULL AND [SupplierCode]<>'' GROUP BY [SupplierCode]) cs
@@ -625,7 +646,7 @@ WITH Periods AS
         SUM(s.[TotalAmount]) [Revenue], SUM(s.[TotalQuantity]) [Quantity], SUM(s.[OrderCount]) [OrderCount],
         SUM(s.[GrossProfit]) [GrossProfit], COUNT(*) [StatisticRowCount], COUNT(s.[TotalCost]) [CostedRowCount],
         COUNT(s.[GrossProfit]) [GrossProfitRowCount]
- FROM [ProductStoreDailySalesStatistic] s
+ FROM [{factSource}] s
  CROSS JOIN Periods periods
  WHERE s.[Date]>=periods.[StartDate] AND s.[Date]<periods.[EndDate]{failedDateFilter}{sourceBranch}{sourceProduct}{categorySourceFilter}
  GROUP BY periods.[Period], s.[SupplierCode], s.[BranchCode], s.[ProductCode]
@@ -926,11 +947,12 @@ ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC;
             denominator = wanted.Contains(SalesDetailSection.Suppliers)
                 ? $"SELECT COALESCE(SUM(CASE WHEN [Period]=0 AND [AustralianSupplierCode] IS NOT NULL THEN [Revenue] ELSE 0 END),0), COALESCE(SUM(CASE WHEN [Period]=0 AND [ChinaSupplierCode] IS NOT NULL THEN [Revenue] ELSE 0 END),0), COALESCE(SUM(CASE WHEN [Period]=1 AND [AustralianSupplierCode] IS NOT NULL THEN [Revenue] ELSE 0 END),0), COALESCE(SUM(CASE WHEN [Period]=1 AND [ChinaSupplierCode] IS NOT NULL THEN [Revenue] ELSE 0 END),0) FROM [#SalesDetailFacts] f WHERE [AustralianSupplierCode] IS NOT NULL{aggregateAuthorizedBranchFilter};"
                 : "SELECT 0,0,0,0;";
-            return facts + groupingFacts + status + summary + suppliers + branchesSql + products + productCount + denominator + "DROP TABLE #SalesDetailAggregates;DROP TABLE #SalesDetailFacts;";
+            return categoryPrefetch + facts + groupingFacts + status + summary + suppliers + branchesSql + products + productCount + denominator + "DROP TABLE #SalesDetailAggregates;DROP TABLE #SalesDetailFacts;"
+                + (categoryPrefetch.Length > 0 ? "DROP TABLE #SalesDetailCategorySource;" : string.Empty);
         }
         var projectionGuard = useProjection ? BuildSalesDetailProjectionGuardSql(posmDatabase!, sourceBranch) : string.Empty;
         var projectionSource = useProjection
-            ? BuildSalesDetailProjectionSourceSql(sourceBranch, candidateToken, selectedProduct, projectionQueryHint, candidateRefinement)
+            ? BuildSalesDetailProjectionSourceSql(posmDatabase!, sourceBranch, candidateToken, selectedProduct, projectionQueryHint, candidateRefinement)
             : string.Empty;
         if (compressOutput)
         {
@@ -947,9 +969,14 @@ ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC;
                 : "SELECT 0 [AllRevenue],0 [ChinaRevenue],0 [CompareAllRevenue],0 [CompareChinaRevenue];";
             denominator = CompressSalesDetailResultSql(denominatorSelect);
         }
-        return productSearchMatches + supplierSearchMatches + projectionGuard + projectionSource + remainingProductMatches + facts + searchFacts + status + summary + suppliers + branchesSql + products + productCount + denominator
-            + "DROP TABLE #SalesDetailFacts;" + (needsProductSearch ? "DROP TABLE #SalesDetailSearchFacts;DROP TABLE #SalesDetailProductSearchMatches;DROP TABLE #SalesDetailSupplierSearchMatches;" : string.Empty)
-            + (useProjection ? "DROP TABLE #SalesDetailRequiredDates;DROP TABLE #SalesDetailProjectionTotals;DROP TABLE #SalesDetailCandidateProducts;DROP TABLE #SalesDetailCandidateSuppliers;DROP TABLE #SalesDetailCandidateSource;" : string.Empty);
+        // 日投影路径多返回一个结果集：守卫跳过的日期，接口据此在提示里列出未计入的日期。
+        var skippedDates = useProjection
+            ? "SELECT DISTINCT CAST([Date] AS datetime2(0)) [Date] FROM #SalesDetailSkippedDates ORDER BY [Date];"
+            : string.Empty;
+        if (useProjection && compressOutput) skippedDates = CompressSalesDetailResultSql(skippedDates);
+        return categoryPrefetch + productSearchMatches + supplierSearchMatches + projectionGuard + projectionSource + remainingProductMatches + facts + searchFacts + status + summary + suppliers + branchesSql + products + productCount + denominator + skippedDates
+            + "DROP TABLE #SalesDetailFacts;" + (categoryPrefetch.Length > 0 ? "DROP TABLE #SalesDetailCategorySource;" : string.Empty) + (needsProductSearch ? "DROP TABLE #SalesDetailSearchFacts;DROP TABLE #SalesDetailProductSearchMatches;DROP TABLE #SalesDetailSupplierSearchMatches;" : string.Empty)
+            + (useProjection ? "DROP TABLE #SalesDetailRequiredDates;DROP TABLE #SalesDetailSkippedDates;DROP TABLE #SalesDetailProjectionTotals;DROP TABLE #SalesDetailCandidateProducts;DROP TABLE #SalesDetailCandidateSuppliers;DROP TABLE #SalesDetailCandidateSource;" : string.Empty);
     }
 
     private static string BuildSalesDetailReportSqlLegacy(bool sqlServer, string? posmDatabase, DateRangeDto range, SalesDetailKind kind,
@@ -1085,6 +1112,48 @@ FROM (SELECT {factProjection} FROM {table}) f {whereClause}
         };
     }
 
+    /// <summary>
+    /// 分类商品事实预取：候选商品码按与 <see cref="BuildSalesDetailCategoryFilter"/> 相同的分类规则取超集
+    /// （国内标签只看仓库分类，澳洲标签是供应商分类并上仓库分类），再按 (ProductCode, Date) 索引读事实。
+    /// 精确的分类判定（含原始供应商条件）只取决于 (原始供应商, 商品)：在不同的键上各判一次，删掉不符合的行，
+    /// 预取表即与"扫描事实表 + 逐行判定"得到的事实完全相同。
+    /// </summary>
+    private static string BuildSalesDetailCategoryPrefetchSql(SalesDetailKind kind,
+        IReadOnlyCollection<string>? supplierCategoryGuids, IReadOnlyCollection<string>? warehouseCategoryGuids, string sourceBranch,
+        string categorySourceFilter)
+    {
+        var candidates = new List<string>();
+        if (kind != SalesDetailKind.China && supplierCategoryGuids is { Count: > 0 })
+            candidates.Add($"SELECT categoryProduct.[ProductCode] FROM [Product] categoryProduct INNER JOIN [LocalSupplierCategoryProductAssignment] categoryAssignment ON categoryAssignment.[ProductCode]=categoryProduct.[ProductCode] AND categoryAssignment.[LocalSupplierCode]=categoryProduct.[LocalSupplierCode] WHERE categoryProduct.[IsDeleted]=0 AND categoryAssignment.[CategoryGUID] IN ({string.Join(",", supplierCategoryGuids.Select((_, index) => $"@sdrCategorySupplier{index}"))})");
+        if (warehouseCategoryGuids is { Count: > 0 })
+            candidates.Add($"SELECT categoryProduct.[ProductCode] FROM [Product] categoryProduct WHERE categoryProduct.[IsDeleted]=0 AND (categoryProduct.[LocalSupplierCode]='200' OR categoryProduct.[LocalSupplierCode] IS NULL OR categoryProduct.[LocalSupplierCode]='') AND categoryProduct.[WarehouseCategoryGUID] IN ({string.Join(",", warehouseCategoryGuids.Select((_, index) => $"@sdrCategoryWarehouse{index}"))})");
+        var candidateSql = candidates.Count == 0 ? "SELECT CAST(NULL AS nvarchar(50)) [ProductCode] WHERE 1=0" : string.Join(" UNION ", candidates);
+        const string columns = "s.[Date],s.[SupplierCode],s.[BranchCode],s.[ProductCode],s.[ProductName],s.[Barcode],s.[TotalQuantity],s.[TotalAmount],s.[OrderCount],s.[GrossProfit],s.[TotalCost]";
+        const string dates = "((s.[Date]>=@sdrCurrentStart AND s.[Date]<@sdrCurrentEnd) OR (@sdrHasCompare=1 AND s.[Date]>=@sdrCompareStart AND s.[Date]<@sdrCompareEnd))";
+        return $"""
+SELECT DISTINCT c.[ProductCode] INTO #SalesDetailCategoryProducts FROM ({candidateSql}) c WHERE c.[ProductCode] IS NOT NULL;
+SELECT TOP (0) {columns} INTO #SalesDetailCategorySource FROM [ProductStoreDailySalesStatistic] s;
+-- 常见分类几千个商品：逐商品按 (ProductCode, Date) 索引查找（生产 2391 个商品约 0.7 秒）；极大的分类交给优化器选择扫描方式。
+IF (SELECT COUNT_BIG(*) FROM #SalesDetailCategoryProducts)<=20000
+ INSERT INTO #SalesDetailCategorySource
+ SELECT {columns} FROM #SalesDetailCategoryProducts p
+ INNER LOOP JOIN [ProductStoreDailySalesStatistic] s ON s.[ProductCode]=p.[ProductCode]
+ WHERE {dates}{sourceBranch};
+ELSE
+ INSERT INTO #SalesDetailCategorySource
+ SELECT {columns} FROM [ProductStoreDailySalesStatistic] s
+ JOIN #SalesDetailCategoryProducts p ON p.[ProductCode]=s.[ProductCode]
+ WHERE {dates}{sourceBranch};
+DROP TABLE #SalesDetailCategoryProducts;
+SELECT s.[SupplierCode], s.[ProductCode] INTO #SalesDetailCategoryKeys
+FROM (SELECT DISTINCT [SupplierCode], [ProductCode] FROM #SalesDetailCategorySource) s
+WHERE 1=1{categorySourceFilter};
+DELETE s FROM #SalesDetailCategorySource s
+WHERE NOT EXISTS (SELECT 1 FROM #SalesDetailCategoryKeys k WHERE k.[SupplierCode]=s.[SupplierCode] AND k.[ProductCode]=s.[ProductCode]);
+DROP TABLE #SalesDetailCategoryKeys;
+""";
+    }
+
     private static string BuildSalesDetailCategoryFilter(
         SalesDetailKind kind,
         IReadOnlyCollection<string>? supplierCategoryGuids,
@@ -1125,7 +1194,8 @@ FROM (SELECT {factProjection} FROM {table}) f {whereClause}
     private static string QuoteIdentifier(string value) => "[" + value.Replace("]", "]]", StringComparison.Ordinal) + "]";
     private static string SqlLiteral(string value, bool sqlServer) => value.Replace("'", "''", StringComparison.Ordinal);
 
-    private static ProductReportStatisticStatusDto BuildSalesDetailReportStatus(IEnumerable<SalesDetailReportStatusSqlRow> rows, DateRangeDto range, bool useSupplierRollups, bool skipFailedDates = false)
+    private static ProductReportStatisticStatusDto BuildSalesDetailReportStatus(IEnumerable<SalesDetailReportStatusSqlRow> rows, DateRangeDto range, bool useSupplierRollups,
+        bool skipFailedDates = false, IReadOnlyCollection<DateTime>? projectionSkippedDates = null)
     {
         var dates = EnumerateSalesDetailDates(range).ToList();
         var required = useSupplierRollups ? new[] { SalesStatisticType.ProductStoreDaily, SalesStatisticType.AustralianSupplierStoreSales, SalesStatisticType.ChinaSupplierStoreSales } : new[] { SalesStatisticType.ProductStoreDaily };
@@ -1180,7 +1250,11 @@ FROM (SELECT {factProjection} FROM {table}) f {whereClause}
             }
         }
         result.StatisticStatus = SalesStatisticRefreshStatus.Fresh;
-        result.StatisticMessage = string.Join(" ", new[] { DescribeSkippedFailedDates(skippedFailedDates), DescribeReconciliationFailedDates(reconciliationFailedDates), DescribeMissingHistoryDates(missingHistoryDates) }
+        // 关键词查询因投影缺失跳过的日期不计入结果（失败日已由 skipFailedDates 单独提示），不再重复提示其对账或缺统计情况。
+        var skipped = (projectionSkippedDates ?? Array.Empty<DateTime>()).Select(date => date.Date).ToHashSet();
+        reconciliationFailedDates.RemoveAll(date => skipped.Contains(date.Date));
+        missingHistoryDates.RemoveAll(date => skipped.Contains(date.Date));
+        result.StatisticMessage = string.Join(" ", new[] { DescribeSkippedFailedDates(skippedFailedDates), DescribeProjectionSkippedDates(skipped), DescribeReconciliationFailedDates(reconciliationFailedDates), DescribeMissingHistoryDates(missingHistoryDates) }
             .Where(message => !string.IsNullOrWhiteSpace(message))) is { Length: > 0 } message ? message : null;
         return result;
     }
@@ -1197,8 +1271,15 @@ FROM (SELECT {factProjection} FROM {table}) f {whereClause}
 
     /// <summary>从未生成商品日统计的历史日期：按连续区间合并后列出，提醒该段金额缺失、需另行回填统计。</summary>
     internal static string? DescribeMissingHistoryDates(IReadOnlyCollection<DateTime> dates)
+        => dates.Count == 0 ? null : $"{DescribeDateRanges(dates)}没有商品日统计，该段金额未计入，需另行回填统计。";
+
+    /// <summary>关键词查询缺少可用日投影而跳过的日期：按连续区间列出，说明结果未包含这些日期。</summary>
+    internal static string? DescribeProjectionSkippedDates(IReadOnlyCollection<DateTime> dates)
+        => dates.Count == 0 ? null : $"{DescribeDateRanges(dates)}缺少可用的关键词查询投影，本次搜索已跳过，结果未包含这些日期的销售。";
+
+    /// <summary>日期去重后合并为连续区间，最多列出前三段，形如"2026-05-04～2026-05-06、2026-05-10共 4 天"。</summary>
+    private static string DescribeDateRanges(IReadOnlyCollection<DateTime> dates)
     {
-        if (dates.Count == 0) return null;
         var ordered = dates.Select(date => date.Date).Distinct().OrderBy(date => date).ToList();
         var ranges = new List<string>();
         var start = ordered[0]; var end = ordered[0];
@@ -1211,7 +1292,7 @@ FROM (SELECT {factProjection} FROM {table}) f {whereClause}
         ranges.Add(start == end ? start.ToString("yyyy-MM-dd") : $"{start:yyyy-MM-dd}～{end:yyyy-MM-dd}");
         var shown = string.Join("、", ranges.Take(3));
         var suffix = ranges.Count > 3 ? $" 等 {ranges.Count} 段" : string.Empty;
-        return $"{shown}{suffix}共 {ordered.Count} 天没有商品日统计，该段金额未计入，需另行回填统计。";
+        return $"{shown}{suffix}共 {ordered.Count} 天";
     }
 
     /// <summary>已聚合但对账未通过的日期只提示、不阻断；日期去重后按时间列出，过多时只列前几天。</summary>
