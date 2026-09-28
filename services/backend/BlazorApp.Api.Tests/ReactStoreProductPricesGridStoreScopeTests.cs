@@ -16,7 +16,7 @@ namespace BlazorApp.Api.Tests;
 
 /// <summary>
 /// 分店商品价格网格必须按当前用户可访问分店做范围校验：
-/// 前端只列出可访问分店，但店长直接改请求里的 StoreCode 也不能查看其他分店价格。
+/// 前端只列出可访问分店，但店长直接改请求里的 StoreCode / StoreCodes 也不能查看其他分店价格。
 /// </summary>
 public sealed class ReactStoreProductPricesGridStoreScopeTests
 {
@@ -36,9 +36,10 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
     {
         var (controller, service, users) = Create(roles: "店长");
         SetupUserStores(users, Store("S1", isPrimary: true));
-        SetupGrid(service, "s1");
+        var query = Query("s1");
+        SetupGrid(service, query);
 
-        var result = Assert.IsType<OkObjectResult>(await controller.Grid(Query("s1")));
+        var result = Assert.IsType<OkObjectResult>(await controller.Grid(query));
 
         Assert.True(ReadProperty<bool>(result.Value, "success"));
         service.VerifyAll();
@@ -50,9 +51,10 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
         // Web 前端把 isPrimary 当作 isManageable，只列主分店；后端按全部关联分店放行，前端选项是后端范围的子集，不会误拦。
         var (controller, service, users) = Create(roles: "经理");
         SetupUserStores(users, Store("S1", isPrimary: true), Store("S2", isPrimary: false));
-        SetupGrid(service, "S2");
+        var query = Query("S2");
+        SetupGrid(service, query);
 
-        var result = Assert.IsType<OkObjectResult>(await controller.Grid(Query("S2")));
+        var result = Assert.IsType<OkObjectResult>(await controller.Grid(query));
 
         Assert.True(ReadProperty<bool>(result.Value, "success"));
         service.VerifyAll();
@@ -69,6 +71,57 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
         service.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task 店长多选的分店都已关联时放行()
+    {
+        // 前端多选（含「全部分店」）只传 StoreCodes，不带 StoreCode
+        var (controller, service, users) = Create(roles: "店长");
+        SetupUserStores(users, Store("S1", isPrimary: true), Store("S2", isPrimary: true));
+        var query = Query(null, "S1", "s2");
+        SetupGrid(service, query);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Grid(query));
+
+        Assert.True(ReadProperty<bool>(result.Value, "success"));
+        service.VerifyAll();
+    }
+
+    [Fact]
+    public async Task 店长多选分店中任一越权即返回403且不查询价格()
+    {
+        var (controller, service, users) = Create(roles: "店长");
+        SetupUserStores(users, Store("S1", isPrimary: true));
+
+        Assert.IsType<ForbidResult>(await controller.Grid(Query(null, "S1", "S9")));
+
+        service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task 单选本店搭配多选他店时按合并后的全部分店拒绝()
+    {
+        // 服务层把 StoreCode 与 StoreCodes 合并后查询，只校验 StoreCode 会让他店混在 StoreCodes 里绕过
+        var (controller, service, users) = Create(roles: "店长");
+        SetupUserStores(users, Store("S1", isPrimary: true));
+
+        Assert.IsType<ForbidResult>(await controller.Grid(Query("S1", "S9")));
+
+        service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task 分店编码带空白时按去空白后的编码校验与查询一致()
+    {
+        var (controller, service, users) = Create(roles: "店长");
+        SetupUserStores(users, Store("S1", isPrimary: true));
+        var query = Query(null, " S1 ", "  ");
+        SetupGrid(service, query);
+
+        Assert.IsType<OkObjectResult>(await controller.Grid(query));
+
+        service.VerifyAll();
+    }
+
     [Theory]
     [InlineData("Admin")]
     [InlineData("管理员")]
@@ -79,9 +132,10 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
     public async Task 不限分店的角色直接放行且不读取用户分店(string role)
     {
         var (controller, service, users) = Create(roles: role);
-        SetupGrid(service, "S9");
+        var query = Query(null, "S1", "S9");
+        SetupGrid(service, query);
 
-        var result = Assert.IsType<OkObjectResult>(await controller.Grid(Query("S9")));
+        var result = Assert.IsType<OkObjectResult>(await controller.Grid(query));
 
         Assert.True(ReadProperty<bool>(result.Value, "success"));
         service.VerifyAll();
@@ -95,9 +149,10 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
         // 会落到 GetUserStoresAsync，而该接口对超级管理员别名返回全部未删除分店。
         var (controller, service, users) = Create(roles: "SuperAdmin");
         SetupUserStores(users, Store("S1", isPrimary: false), Store("S9", isPrimary: false));
-        SetupGrid(service, "S9");
+        var query = Query("S9");
+        SetupGrid(service, query);
 
-        Assert.IsType<OkObjectResult>(await controller.Grid(Query("S9")));
+        Assert.IsType<OkObjectResult>(await controller.Grid(query));
 
         service.VerifyAll();
         users.VerifyAll();
@@ -131,7 +186,7 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
     {
         var (controller, service, users) = Create(roles: "店长");
 
-        var result = Assert.IsType<OkObjectResult>(await controller.Grid(Query("  ")));
+        var result = Assert.IsType<OkObjectResult>(await controller.Grid(Query("  ", " ", "")));
 
         Assert.False(ReadProperty<bool>(result.Value, "success"));
         Assert.Equal("请选择分店", ReadProperty<string>(result.Value, "message"));
@@ -139,7 +194,11 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
         users.VerifyNoOtherCalls();
     }
 
-    private static StoreProductPriceQueryDto Query(string storeCode) => new() { StoreCode = storeCode };
+    private static StoreProductPriceQueryDto Query(string? storeCode, params string[] storeCodes) => new()
+    {
+        StoreCode = storeCode,
+        StoreCodes = storeCodes.Length > 0 ? storeCodes.ToList() : null,
+    };
 
     private static UserStoreDto Store(string storeCode, bool isPrimary) => new()
     {
@@ -156,9 +215,10 @@ public sealed class ReactStoreProductPricesGridStoreScopeTests
             .ReturnsAsync(ApiResponse<List<UserStoreDto>>.OK(stores.ToList()));
     }
 
-    private static void SetupGrid(Mock<IStoreProductPriceReactService> service, string storeCode)
+    private static void SetupGrid(Mock<IStoreProductPriceReactService> service, StoreProductPriceQueryDto expected)
     {
-        service.Setup(x => x.GetGridDataAsync(It.Is<StoreProductPriceQueryDto>(query => query.StoreCode == storeCode)))
+        // 控制器必须把请求原样交给服务层，服务层再用同一个 ResolveGridStoreCodes 解析分店
+        service.Setup(x => x.GetGridDataAsync(It.Is<StoreProductPriceQueryDto>(query => ReferenceEquals(query, expected))))
             .ReturnsAsync(GridResponseDto<StoreProductPriceListDto>.OK(new List<StoreProductPriceListDto>(), 0));
     }
 
