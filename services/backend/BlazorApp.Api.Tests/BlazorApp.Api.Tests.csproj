@@ -327,6 +327,7 @@
     <Compile Include="ContainerCreateDuplicateTests.cs" />
     <Compile Include="LegacyContainerProductChangeHistoryTests.cs" />
     <Compile Include="ContainerReactServiceDetailQueryTests.cs" />
+    <Compile Include="ContainerDetailTagStatsSqlServerIntegrationTests.cs" />
     <Compile Include="ContainerDetailQueryIndexMigrationTests.cs" />
     <Compile Include="ContainerReactServiceLocalSupplierCodeTests.cs" />
     <Compile Include="ContainerProductCreationServiceTests.cs" />
