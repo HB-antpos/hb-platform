@@ -7,6 +7,7 @@ import {
   getWarehouseProductCategoryTooltip,
 } from '../Products/categoryPath'
 import {
+  calculateContainerDetailTotalAmount,
   CONTAINER_DETAIL_ALL_CATEGORY_FILTER_KEY,
   ALL_CONTAINER_DETAIL_EXPORT_COLUMN_KEYS,
   CONTAINER_DETAIL_EXPORT_COLUMNS,
@@ -2788,6 +2789,17 @@ assertEqual(
   '只读零售价快览列应只在开关打开时插入表格列',
 )
 
+assertEqual(
+  calculateContainerDetailTotalAmount({ id: 1, hguid: 'total-amount-rate', 装柜数量: 24, 国内价格: 8.8, 调整浮率: 1.3 } as ContainerDetail),
+  211.2,
+  '合计装柜金额 = 装柜数量 × 国内价格，与 HQ 口径一致，不能再乘调整浮率',
+)
+assertEqual(
+  calculateContainerDetailTotalAmount({ id: 2, hguid: 'total-amount-missing', 装柜数量: 24, 国内价格: undefined, 合计装柜金额: 99 } as ContainerDetail),
+  99,
+  '缺少国内价格时保留原合计装柜金额',
+)
+
 const matchedPriceContainer = { 汇率: 4.5, 运费: 100, 总体积: 10 }
 const matchedPriceRows: ContainerDetail[] = [
   {
@@ -2817,7 +2829,7 @@ const matchedPriceRows: ContainerDetail[] = [
     单件装箱数: 12,
     单件体积: 0.2,
     合计装柜体积: 0.4,
-    合计装柜金额: 232.32,
+    合计装柜金额: 211.2,
     商品名称: '保留价格但更新规格',
   },
   {
@@ -3154,7 +3166,7 @@ assertDeepEqual(
       装柜数量: 96,
       单件体积: 0.118,
       合计装柜体积: 0.236,
-      合计装柜金额: 1336.32,
+      合计装柜金额: 1113.6,
       运输成本: 0.02,
       进口价格: 2.83,
     },
@@ -3168,7 +3180,7 @@ assertDeepEqual(
       装柜数量: 48,
       单件体积: 0.33,
       合计装柜体积: 0.66,
-      合计装柜金额: 464.64,
+      合计装柜金额: 422.4,
       运输成本: 0.14,
       进口价格: 2.1,
     },
@@ -3186,7 +3198,7 @@ assertDeepEqual(
       matchType: 'productCode',
       是否新商品: false,
       合计装柜体积: 1,
-      合计装柜金额: 65,
+      合计装柜金额: 50,
       运输成本: 1,
       进口价格: 2.49,
     },
