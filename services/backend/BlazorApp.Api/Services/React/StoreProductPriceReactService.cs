@@ -55,76 +55,28 @@ namespace BlazorApp.Api.Services.React
                 var pageIndex = query.PageNumber;
                 var pageSize = query.PageSize;
 
-                var baseQuery = db.Queryable<Product>()
-                    .With(SqlWith.NoLock)
-                    .Where(p => p.IsDeleted == false);
-
-                if (!string.IsNullOrWhiteSpace(query.LocalSupplierCode))
+                // 兼容旧的单个 StoreCode 与新的多选 StoreCodes；多个分店走按商品分页的展开查询
+                var storeCodes = ResolveGridStoreCodes(query);
+                if (storeCodes.Count > MaxGridStoreCount)
                 {
-                    baseQuery = baseQuery.Where(p =>
-                        p.LocalSupplierCode == query.LocalSupplierCode
+                    return GridResponseDto<StoreProductPriceListDto>.Error(
+                        $"一次最多查询 {MaxGridStoreCount} 个分店"
                     );
                 }
 
-                if (!string.IsNullOrWhiteSpace(query.Search))
+                if (storeCodes.Count > 1)
                 {
-                    var keyword = query.Search.Trim();
-                    baseQuery = baseQuery.Where(p =>
-                        p.ProductName.Contains(keyword)
-                        || (p.ProductCode != null && p.ProductCode.Contains(keyword))
-                        || (p.ItemNumber != null && p.ItemNumber.Contains(keyword))
-                        || (p.Barcode != null && p.Barcode.Contains(keyword))
-                    );
+                    return await GetMultiStoreGridDataAsync(db, query, storeCodes);
                 }
 
-                if (!string.IsNullOrWhiteSpace(query.ProductName))
-                {
-                    baseQuery = baseQuery.Where(p => p.ProductName.Contains(query.ProductName));
-                }
-
-                if (!string.IsNullOrWhiteSpace(query.ProductCode))
-                {
-                    baseQuery = baseQuery.Where(p =>
-                        p.ProductCode != null && p.ProductCode.Contains(query.ProductCode)
-                    );
-                }
-
-                if (!string.IsNullOrWhiteSpace(query.ItemNumber))
-                {
-                    baseQuery = baseQuery.Where(p =>
-                        p.ItemNumber != null && p.ItemNumber.Contains(query.ItemNumber)
-                    );
-                }
-
-                if (!string.IsNullOrWhiteSpace(query.Barcode))
-                {
-                    baseQuery = baseQuery.Where(p =>
-                        p.Barcode != null && p.Barcode.Contains(query.Barcode)
-                    );
-                }
-
-                if (query.ProductType.HasValue)
-                {
-                    baseQuery = baseQuery.Where(p => p.ProductType == query.ProductType.Value);
-                }
-
-                if (query.IsActive.HasValue)
-                {
-                    baseQuery = baseQuery.Where(p => p.IsActive == query.IsActive.Value);
-                }
-
-                if (query.IsSpecialProduct.HasValue)
-                {
-                    baseQuery = baseQuery.Where(p =>
-                        p.IsSpecialProduct == query.IsSpecialProduct.Value
-                    );
-                }
+                var storeCode = storeCodes.FirstOrDefault();
+                var baseQuery = BuildGridProductQuery(db, query);
 
                 var joinQuery = baseQuery
                     .LeftJoin<StoreRetailPrice>(
                         (p, srp) =>
                             p.ProductCode == srp.ProductCode
-                            && srp.StoreCode == query.StoreCode
+                            && srp.StoreCode == storeCode
                             && srp.IsDeleted == false
                     )
                     .LeftJoin<HBLocalSupplier>(
@@ -243,6 +195,304 @@ namespace BlazorApp.Api.Services.React
                 _logger.LogError(ex, "StoreProductPrice Grid 查询失败");
                 return GridResponseDto<StoreProductPriceListDto>.Error("查询失败");
             }
+        }
+
+        /// <summary>
+        /// 网格一次最多查询的分店数（生产约 58 家，留足余量，防止异常请求拼出超长 IN 列表）
+        /// </summary>
+        public const int MaxGridStoreCount = 200;
+
+        /// <summary>
+        /// 合并 StoreCode 与 StoreCodes，去空白、忽略大小写去重，并按编码排序（多分店时即同一商品下的分店顺序）
+        /// </summary>
+        public static List<string> ResolveGridStoreCodes(StoreProductPriceQueryDto query)
+        {
+            var codes = new List<string>();
+            if (!string.IsNullOrWhiteSpace(query.StoreCode))
+            {
+                codes.Add(query.StoreCode.Trim());
+            }
+
+            if (query.StoreCodes != null)
+            {
+                codes.AddRange(
+                    query.StoreCodes.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim())
+                );
+            }
+
+            return codes
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        /// <summary>
+        /// 多分店网格：每个商品在每个所选分店各占一行，分店没有价格记录时价格列为空。
+        /// 行按「商品排序 → 分店编码」排列，总行数恒为「商品数 × 分店数」，
+        /// 所以分页可以先换算出本页覆盖的商品区间，只查这一小段商品及其在所选分店的价格，
+        /// 避免把约 17 万商品与全部分店整表连接后再排序分页（生产分店价约 490 万行）。
+        /// </summary>
+        private async Task<GridResponseDto<StoreProductPriceListDto>> GetMultiStoreGridDataAsync(
+            ISqlSugarClient db,
+            StoreProductPriceQueryDto query,
+            List<string> storeCodes
+        )
+        {
+            if (
+                query.PurchasePriceGt.HasValue
+                || query.PurchasePriceLt.HasValue
+                || query.RetailPriceGt.HasValue
+                || query.RetailPriceLt.HasValue
+            )
+            {
+                // 价格区间会让每个商品的行数不再固定为分店数，无法按商品换算分页
+                return GridResponseDto<StoreProductPriceListDto>.Error(
+                    "多分店查询不支持价格区间筛选，请只选择一个分店"
+                );
+            }
+
+            var pageNumber = Math.Max(1, query.PageNumber);
+            var pageSize = Math.Max(1, query.PageSize);
+            var storeCount = storeCodes.Count;
+
+            var productQuery = BuildGridProductQuery(db, query);
+            var productTotal = await productQuery.Clone().CountAsync();
+            var rowTotal = (long)productTotal * storeCount;
+            var total = (int)Math.Min(rowTotal, int.MaxValue);
+            var rowStart = (long)(pageNumber - 1) * pageSize;
+            if (rowStart >= rowTotal)
+            {
+                return GridResponseDto<StoreProductPriceListDto>.OK(
+                    new List<StoreProductPriceListDto>(),
+                    total
+                );
+            }
+
+            // 本页行区间 [rowStart, rowEnd) 换算成商品区间：第 n 个商品占行 [n × 分店数, (n + 1) × 分店数)
+            var rowEnd = Math.Min(rowStart + pageSize, rowTotal);
+            var firstProductIndex = (int)(rowStart / storeCount);
+            var productTake = (int)((rowEnd - 1) / storeCount) - firstProductIndex + 1;
+
+            var products = await ApplyMultiStoreProductOrder(
+                    productQuery.LeftJoin<HBLocalSupplier>(
+                        (p, sup) =>
+                            p.LocalSupplierCode == sup.LocalSupplierCode && sup.IsDeleted == false
+                    ),
+                    query
+                )
+                .Select(
+                    (p, sup) =>
+                        new StoreProductPriceListDto
+                        {
+                            ProductCode = p.ProductCode,
+                            ProductName = p.ProductName,
+                            ProductImage = p.ProductImage,
+                            ItemNumber = p.ItemNumber,
+                            Barcode = p.Barcode,
+                            LocalSupplierCode = p.LocalSupplierCode,
+                            LocalSupplierName = sup.Name,
+                            ProductType = p.ProductType,
+                            MiddlePackageQuantity = p.MiddlePackageQuantity,
+                            IsActive = p.IsActive,
+                        }
+                )
+                .Skip(firstProductIndex)
+                .Take(productTake)
+                .ToListAsync();
+
+            var pageProductCodes = products
+                .Select(p => p.ProductCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var prices =
+                pageProductCodes.Count == 0
+                    ? new List<StoreRetailPrice>()
+                    : await db.Queryable<StoreRetailPrice>()
+                        .With(SqlWith.NoLock)
+                        .Where(srp =>
+                            srp.IsDeleted == false
+                            && pageProductCodes.Contains(srp.ProductCode)
+                            && storeCodes.Contains(srp.StoreCode)
+                        )
+                        .Select(srp => new StoreRetailPrice
+                        {
+                            StoreCode = srp.StoreCode,
+                            ProductCode = srp.ProductCode,
+                            PurchasePrice = srp.PurchasePrice,
+                            StoreRetailPriceValue = srp.StoreRetailPriceValue,
+                            DiscountRate = srp.DiscountRate,
+                            IsAutoPricing = srp.IsAutoPricing,
+                            IsSpecialProduct = srp.IsSpecialProduct,
+                            UpdatedAt = srp.UpdatedAt,
+                            UpdatedBy = srp.UpdatedBy,
+                        })
+                        .ToListAsync();
+
+            // 同一分店同一商品若有重复价格记录，取最近更新的一条，保证每个「商品 × 分店」只有一行
+            var priceByKey = new Dictionary<string, StoreRetailPrice>(StringComparer.OrdinalIgnoreCase);
+            foreach (var price in prices.OrderByDescending(x => x.UpdatedAt))
+            {
+                priceByKey.TryAdd(BuildStoreProductKey(price.StoreCode, price.ProductCode), price);
+            }
+
+            var items = new List<StoreProductPriceListDto>(pageSize);
+            for (var productOffset = 0; productOffset < products.Count; productOffset++)
+            {
+                var product = products[productOffset];
+                var productRowStart = (long)(firstProductIndex + productOffset) * storeCount;
+                for (var storeIndex = 0; storeIndex < storeCount; storeIndex++)
+                {
+                    var rowIndex = productRowStart + storeIndex;
+                    if (rowIndex < rowStart || rowIndex >= rowEnd)
+                    {
+                        continue;
+                    }
+
+                    var storeCode = storeCodes[storeIndex];
+                    priceByKey.TryGetValue(
+                        BuildStoreProductKey(storeCode, product.ProductCode),
+                        out var price
+                    );
+                    items.Add(
+                        new StoreProductPriceListDto
+                        {
+                            ProductCode = product.ProductCode,
+                            ProductName = product.ProductName,
+                            ProductImage = product.ProductImage,
+                            ItemNumber = product.ItemNumber,
+                            Barcode = product.Barcode,
+                            LocalSupplierCode = product.LocalSupplierCode,
+                            LocalSupplierName = product.LocalSupplierName,
+                            ProductType = product.ProductType,
+                            MiddlePackageQuantity = product.MiddlePackageQuantity,
+                            IsActive = product.IsActive,
+                            // 多分店时分店编码取所选分店本身，缺价格记录的行也能知道属于哪个分店
+                            StoreCode = storeCode,
+                            UpdatedAt = price?.UpdatedAt,
+                            UpdatedBy = price?.UpdatedBy,
+                            StorePurchasePrice = price?.PurchasePrice,
+                            StoreRetailPrice = price?.StoreRetailPriceValue,
+                            IsStoreAutoPricing = price?.IsAutoPricing ?? false,
+                            IsStoreSpecialProduct = price?.IsSpecialProduct ?? false,
+                            DiscountRate = price?.DiscountRate,
+                        }
+                    );
+                }
+            }
+
+            return GridResponseDto<StoreProductPriceListDto>.OK(items, total);
+        }
+
+        private static string BuildStoreProductKey(string? storeCode, string? productCode) =>
+            $"{storeCode?.Trim()}\u001f{productCode?.Trim()}";
+
+        /// <summary>
+        /// 多分店网格的商品排序：只支持商品自身字段；价格类排序依赖单个分店的价格，多分店时回落到默认顺序。
+        /// 最后补商品编码作为稳定次序，保证按商品换算的分页不会因排序值相同而跨页重复或遗漏。
+        /// </summary>
+        private static ISugarQueryable<Product, HBLocalSupplier> ApplyMultiStoreProductOrder(
+            ISugarQueryable<Product, HBLocalSupplier> productQuery,
+            StoreProductPriceQueryDto query
+        )
+        {
+            var sortBy = query.SortBy?.ToLower();
+            var orderType = query.SortOrder?.ToLower() == "asc" ? OrderByType.Asc : OrderByType.Desc;
+            productQuery = sortBy switch
+            {
+                "productname" => productQuery.OrderBy((p, sup) => p.ProductName, orderType),
+                "productcode" => productQuery.OrderBy((p, sup) => p.ProductCode, orderType),
+                "itemnumber" => productQuery.OrderBy((p, sup) => p.ItemNumber, orderType),
+                "barcode" => productQuery.OrderBy((p, sup) => p.Barcode, orderType),
+                "middlesackagequantity" => productQuery.OrderBy(
+                    (p, sup) => p.MiddlePackageQuantity,
+                    orderType
+                ),
+                "updatedat" => productQuery.OrderBy((p, sup) => p.UpdatedAt, orderType),
+                _ => productQuery.OrderBy((p, sup) => p.UpdatedAt, OrderByType.Desc),
+            };
+
+            // SQL Server 不允许 ORDER BY 重复同一列，按商品编码排序时无需再补
+            return sortBy == "productcode"
+                ? productQuery
+                : productQuery.OrderBy((p, sup) => p.ProductCode, OrderByType.Asc);
+        }
+
+        /// <summary>
+        /// 网格的商品侧筛选（单店与多分店共用）
+        /// </summary>
+        private static ISugarQueryable<Product> BuildGridProductQuery(
+            ISqlSugarClient db,
+            StoreProductPriceQueryDto query
+        )
+        {
+            var baseQuery = db.Queryable<Product>()
+                .With(SqlWith.NoLock)
+                .Where(p => p.IsDeleted == false);
+
+            if (!string.IsNullOrWhiteSpace(query.LocalSupplierCode))
+            {
+                baseQuery = baseQuery.Where(p =>
+                    p.LocalSupplierCode == query.LocalSupplierCode
+                );
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var keyword = query.Search.Trim();
+                baseQuery = baseQuery.Where(p =>
+                    p.ProductName.Contains(keyword)
+                    || (p.ProductCode != null && p.ProductCode.Contains(keyword))
+                    || (p.ItemNumber != null && p.ItemNumber.Contains(keyword))
+                    || (p.Barcode != null && p.Barcode.Contains(keyword))
+                );
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.ProductName))
+            {
+                baseQuery = baseQuery.Where(p => p.ProductName.Contains(query.ProductName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.ProductCode))
+            {
+                baseQuery = baseQuery.Where(p =>
+                    p.ProductCode != null && p.ProductCode.Contains(query.ProductCode)
+                );
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.ItemNumber))
+            {
+                baseQuery = baseQuery.Where(p =>
+                    p.ItemNumber != null && p.ItemNumber.Contains(query.ItemNumber)
+                );
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Barcode))
+            {
+                baseQuery = baseQuery.Where(p =>
+                    p.Barcode != null && p.Barcode.Contains(query.Barcode)
+                );
+            }
+
+            if (query.ProductType.HasValue)
+            {
+                baseQuery = baseQuery.Where(p => p.ProductType == query.ProductType.Value);
+            }
+
+            if (query.IsActive.HasValue)
+            {
+                baseQuery = baseQuery.Where(p => p.IsActive == query.IsActive.Value);
+            }
+
+            if (query.IsSpecialProduct.HasValue)
+            {
+                baseQuery = baseQuery.Where(p =>
+                    p.IsSpecialProduct == query.IsSpecialProduct.Value
+                );
+            }
+
+            return baseQuery;
         }
 
         /// <summary>
