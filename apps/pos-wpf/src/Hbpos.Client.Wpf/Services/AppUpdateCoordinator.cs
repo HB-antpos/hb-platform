@@ -18,7 +18,8 @@ public enum AppUpdateCoordinatorStatus
     DownloadFailed,
     InstallFailed,
     Installed,
-    DownloadDeferred
+    DownloadDeferred,
+    UnattendedInstallSkipped
 }
 
 public sealed record AppUpdateCoordinatorResult(
@@ -77,6 +78,7 @@ public sealed record AppUpdateCoordinatorResult(
             AppUpdateCoordinatorStatus.InstallFailed => "settings.status.appUpdateInstallFailed",
             AppUpdateCoordinatorStatus.Installed => "settings.status.appUpdateInstalling",
             AppUpdateCoordinatorStatus.DownloadDeferred => "settings.status.appUpdateDownloading",
+            AppUpdateCoordinatorStatus.UnattendedInstallSkipped => "settings.status.appUpdateInstallFailed",
             _ => "settings.status.appUpdateCheckFailed"
         };
     }
@@ -101,6 +103,10 @@ public interface IAppUpdateCoordinator
     // 中文注释：运行期间的后台定时检查，只做非阻断提示：不弹确认框、不弹强更遮罩，也不写设置页状态文字。
     Task<AppUpdateCoordinatorResult> CheckForUpdatesInBackgroundAsync(
         CancellationToken cancellationToken = default);
+
+    // 中文注释：夜间无人值守安装：有更新（可选或强制、是否被拒绝过都一样）就下载并直接拉起静默安装器，不弹任何提示。
+    Task<AppUpdateCoordinatorResult> InstallUpdateUnattendedAsync(
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class AppUpdateCoordinator(
@@ -115,6 +121,8 @@ public sealed class AppUpdateCoordinator(
     IAppUpdateChannelProvider channelProvider,
     Func<TimeSpan, CancellationToken, Task>? delayAsync = null) : IAppUpdateCoordinator, IDisposable
 {
+    public const string UnattendedInstallerNotSilentErrorCode = "UNATTENDED_INSTALLER_NOT_SILENT";
+    public const string UnattendedActiveTransactionErrorCode = "UNATTENDED_ACTIVE_TRANSACTION";
     private const string ActiveTransactionStatusKey = "appUpdate.install.activeTransaction";
     private const string BackgroundForcePendingStatusKey = "appUpdate.force.backgroundReady";
     private const int RequiredSafeObservations = 2;
@@ -221,6 +229,87 @@ public sealed class AppUpdateCoordinator(
         {
             _gate.Release();
         }
+    }
+
+    public async Task<AppUpdateCoordinatorResult> InstallUpdateUnattendedAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (!await _gate.WaitAsync(0, cancellationToken))
+        {
+            return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.AlreadyRunning);
+        }
+
+        try
+        {
+            // 中文注释：失败时不改动界面上已有的更新提示，按后台检查处理；有无强更遮罩、收银员是否拒绝过都不影响夜间安装。
+            var (update, terminalResult) = await FetchUpdateAsync(manual: false, background: true, cancellationToken);
+            if (terminalResult is not null)
+            {
+                return terminalResult;
+            }
+
+            if (!IsSilentInstallerArguments(update!))
+            {
+                // 中文注释：非静默参数会弹安装向导等人点击，夜间拉起后 POS 已退出却装不完，宁可跳过留给白天。
+                return UnattendedInstallSkipped(
+                    UnattendedInstallerNotSilentErrorCode,
+                    "Installer arguments are not silent; unattended install would wait for user input.");
+            }
+
+            var download = await downloadService.DownloadAsync(update!, progress: null, cancellationToken);
+            if (!download.Success || string.IsNullOrWhiteSpace(download.FilePath))
+            {
+                return AppUpdateCoordinatorResult.FromStatus(
+                    AppUpdateCoordinatorStatus.DownloadFailed,
+                    download.ErrorMessage ?? string.Empty);
+            }
+
+            // 中文注释：启动器内部会再过一次安全守卫；拉起成功后退出 POS，安装包装完会以原登录用户重新启动 POS。
+            var launchResult = await installerLauncher.LaunchAsync(download.FilePath, update!, CancellationToken.None);
+            if (launchResult.Success)
+            {
+                return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.Installed);
+            }
+
+            return ShouldDeferUntilTransactionCompletes(launchResult)
+                ? UnattendedInstallSkipped(
+                    UnattendedActiveTransactionErrorCode,
+                    "A transaction started before the installer could be launched.")
+                : AppUpdateCoordinatorResult.FromStatus(
+                    AppUpdateCoordinatorStatus.InstallFailed,
+                    ResolveInstallFailureMessage(launchResult));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    internal static bool IsSilentInstallerArguments(AppUpdateCheckResponse update)
+    {
+        if (!AppUpdateDownloadService.TryResolveInstallerFileName(update, out _, out var installerType, out _))
+        {
+            return false;
+        }
+
+        var tokens = (update.InstallerArguments ?? string.Empty)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => token.ToLowerInvariant())
+            .ToArray();
+
+        // 中文注释：MSI 认 /qn、/quiet、/passive 等 msiexec 无交互参数；Inno EXE 认 /VERYSILENT 或 /SILENT。
+        return installerType == "msi"
+            ? tokens.Any(token => token is "/quiet" or "/passive" || token.StartsWith("/qn", StringComparison.Ordinal) || token.StartsWith("/qb", StringComparison.Ordinal))
+            : tokens.Any(token => token is "/verysilent" or "/silent");
+    }
+
+    private static AppUpdateCoordinatorResult UnattendedInstallSkipped(string errorCode, string errorMessage)
+    {
+        return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, errorMessage) with
+        {
+            ErrorCode = errorCode,
+            ErrorMessage = errorMessage
+        };
     }
 
     private async Task<AppUpdateCoordinatorResult> CheckForUpdatesCoreAsync(
