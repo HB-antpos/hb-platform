@@ -174,6 +174,8 @@
   <data name="settings.receiptPrinter.phone" xml:space="preserve"><value>Phone</value></data>
   <data name="settings.receiptPrinter.abn" xml:space="preserve"><value>ABN</value></data>
   <data name="settings.receiptPrinter.returnPolicy" xml:space="preserve"><value>Return Policy</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt" xml:space="preserve"><value>Print bank receipt on customer receipt</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>When off, the customer receipt keeps only the card type, last 4 digits and amount, without the full EFTPOS bank receipt text. Signature, declined and settlement slips still print.</value></data>
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>Save Receipt Printer</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>Test Print</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>Load from Store Profile</value></data>

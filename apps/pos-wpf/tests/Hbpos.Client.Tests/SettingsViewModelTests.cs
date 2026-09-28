@@ -3512,7 +3512,30 @@ public sealed class SettingsViewModelTests
         Assert.NotNull(store.SavedSettings);
         Assert.Equal("USB,", store.SavedSettings!.PrinterPort);
         Assert.Equal("0730000000", store.SavedSettings.StorePhone);
+        Assert.True(store.SavedSettings.PrintBankReceiptText);
         Assert.Equal("Receipt printer settings saved.", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Receipt_printer_bank_receipt_toggle_loads_and_saves()
+    {
+        var store = new FakeReceiptPrinterSettingsStore
+        {
+            Settings = ReceiptPrinterSettings.Default with { PrintBankReceiptText = false }
+        };
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptPrintService: new FakeReceiptPrintService());
+
+        await viewModel.LoadAsync();
+
+        Assert.False(viewModel.ReceiptPrintBankReceiptText);
+
+        viewModel.ReceiptPrintBankReceiptText = true;
+        await viewModel.SaveReceiptPrinterCommand.ExecuteAsync(null);
+
+        Assert.True(store.SavedSettings?.PrintBankReceiptText);
     }
 
     [Fact]

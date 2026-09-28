@@ -514,6 +514,38 @@ public sealed class ReceiptPrintingTests
     }
 
     [Fact]
+    public void Receipt_text_formatter_omits_embedded_bank_receipt_text_when_disabled_but_keeps_card_summary()
+    {
+        var receipt = CreateReceipt(
+            Guid.NewGuid(),
+            bankReceiptText:
+                "APPROVED CARD RECEIPT\n" +
+                "TXN REF 260601120038\n" +
+                "CUSTOMER COPY");
+        var formatter = new ReceiptTextFormatter();
+
+        var enabled = formatter.Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
+        var disabled = formatter.Build(
+            receipt,
+            ReceiptPrinterSettings.Default with { PrintBankReceiptText = false },
+            receipt.SoldAt);
+
+        // 默认仍打印银行原文，保持旧行为。
+        Assert.True(ReceiptPrinterSettings.Default.PrintBankReceiptText);
+        Assert.Contains("CUSTOMER COPY", enabled.PlainText, StringComparison.Ordinal);
+        // 关闭后整段银行原文不进入打印与预览，但付款行的卡类型/后四位仍保留。
+        Assert.DoesNotContain("APPROVED CARD RECEIPT", disabled.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("TXN REF 260601120038", disabled.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("CUSTOMER COPY", disabled.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain(disabled.PreviewRows, row => row.Text.Contains("CUSTOMER COPY", StringComparison.Ordinal));
+        Assert.Contains(disabled.PreviewRows, row =>
+            row.Text.Contains("VISA", StringComparison.Ordinal) &&
+            row.Text.Contains("****1111", StringComparison.Ordinal));
+        Assert.Contains("Total(inc GST)", disabled.PlainText, StringComparison.Ordinal);
+        Assert.True(disabled.Elements.Count < enabled.Elements.Count);
+    }
+
+    [Fact]
     public async Task Receipt_print_service_prints_latest_receipt_with_configured_settings()
     {
         var receipt = CreateReceipt(Guid.NewGuid());
