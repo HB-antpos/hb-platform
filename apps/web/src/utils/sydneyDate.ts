@@ -15,17 +15,31 @@ function formatDateParts(year: string, month: string, day: string) {
   return `${year}/${month}/${day}`
 }
 
-function formatIntlDate(date: Date) {
-  const parts = sydneyDateFormatter.formatToParts(date).reduce<Record<string, string>>((result, part) => {
+function getSydneyDateParts(date: Date) {
+  return sydneyDateFormatter.formatToParts(date).reduce<Record<string, string>>((result, part) => {
     if (part.type !== 'literal') {
       result[part.type] = part.value
     }
     return result
   }, {})
+}
+
+function formatIntlDate(date: Date) {
+  const parts = getSydneyDateParts(date)
 
   return parts.year && parts.month && parts.day
     ? formatDateParts(parts.year, parts.month, parts.day)
     : sydneyDateFormatter.format(date).replace(/-/g, '/')
+}
+
+export function formatSydneyIsoDate(date: Date = new Date()) {
+  const parts = getSydneyDateParts(date)
+
+  // 返回悉尼当天的 YYYY-MM-DD（用于导出文件名等面向用户的“今天”）。
+  // 不能用 toISOString 截取：那是 UTC 日期，悉尼上午 10 点（夏令时 11 点）前会落到前一天。
+  return parts.year && parts.month && parts.day
+    ? `${parts.year}-${parts.month}-${parts.day}`
+    : sydneyDateFormatter.format(date)
 }
 
 export function formatSydneyDate(value?: string | null) {
