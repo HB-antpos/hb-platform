@@ -46,13 +46,21 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> Grid([FromBody] StoreProductPriceQueryDto query)
         {
             // 单选 StoreCode 与多选 StoreCodes 至少有一个分店
-            if (StoreProductPriceReactService.ResolveGridStoreCodes(query).Count == 0)
+            var requestedStoreCodes = StoreProductPriceReactService.ResolveGridStoreCodes(query);
+            if (requestedStoreCodes.Count == 0)
             {
                 return Ok(new
                 {
                     success = false,
                     message = "请选择分店"
                 });
+            }
+
+            // 只靠前端分店选项不够：店长改请求里的分店编码就能查看其他分店价格。
+            // 服务层按同一个 ResolveGridStoreCodes 结果查询，这里逐个校验合并后的全部分店，任一越权即拒绝。
+            if (!await CanAccessStoresAsync(requestedStoreCodes))
+            {
+                return Forbid();
             }
 
             var result = await _service.GetGridDataAsync(query);
@@ -304,6 +312,23 @@ namespace BlazorApp.Api.Controllers.React
             }
 
             return targetStoreCodes.All(storeCode => !string.IsNullOrWhiteSpace(storeCode) && storeCodes.Contains(storeCode));
+        }
+
+        /// <summary>
+        /// 请求中的每个分店都必须在当前用户可访问范围内（任一越权即拒绝）；Admin、仓库角色不限分店。
+        /// 受限用户传入空列表时同样拒绝，避免调用方漏传分店时退化为不校验。
+        /// </summary>
+        private async Task<bool> CanAccessStoresAsync(IEnumerable<string?> requestedStoreCodes)
+        {
+            var storeCodes = await GetAccessibleStoreCodesAsync();
+            if (storeCodes == null)
+            {
+                return true;
+            }
+
+            var requested = requestedStoreCodes.ToList();
+            return requested.Count > 0
+                && requested.All(storeCode => !string.IsNullOrWhiteSpace(storeCode) && storeCodes.Contains(storeCode));
         }
 
         private async Task<HashSet<string>?> GetAccessibleStoreCodesAsync()
