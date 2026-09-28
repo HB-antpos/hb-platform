@@ -21,10 +21,11 @@ import {
   Typography,
   message,
 } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   clearActiveStoreOrderCart,
+  getActiveStoreOrderCart,
   removeStoreOrderCartItem,
   submitActiveStoreOrder,
   updateStoreOrderCartItem,
@@ -113,13 +114,20 @@ export default function ShopCartDrawer({
   const hasCartSummary = Boolean(totalQuantity || cart?.totalSKU || totalImportAmount)
   const isCartDetailLoading = loading || (isSummaryOnly && hasCartSummary)
   const canSubmitCart = !isCartDetailLoading && cartItems.length > 0
-  // 提交前按当前购物车数据预估：哪些行进单、哪些暂停供货的行会保留、哪些已不再供应要删。
-  const submitSummary = useMemo(() => summarizeCartForSubmit(cartItems), [cartItems])
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({})
+  const [clearingCart, setClearingCart] = useState(false)
   const [remarks, setRemarks] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
+  const cartMutationCountRef = useRef(0)
+  const cartMutating = clearingCart || Object.values(loadingMap).some(Boolean)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
+
+  const finishSubmit = () => {
+    submittingRef.current = false
+    setSubmitting(false)
+  }
 
   useEffect(() => {
     if (!cartItems.length) {
@@ -141,10 +149,11 @@ export default function ShopCartDrawer({
   }, [cartItems, currentPage, pageSize])
 
   const handleRemove = async (detailGUID: string) => {
-    if (!cart?.storeCode) {
+    if (!cart?.storeCode || submittingRef.current) {
       return
     }
 
+    cartMutationCountRef.current += 1
     setLoadingMap((prev) => ({ ...prev, [detailGUID]: true }))
     try {
       await removeStoreOrderCartItem({
@@ -157,6 +166,7 @@ export default function ShopCartDrawer({
       message.error(t('shop.cartRemoveFailed', 'Failed to remove item'))
     } finally {
       setLoadingMap((prev) => ({ ...prev, [detailGUID]: false }))
+      cartMutationCountRef.current -= 1
     }
   }
 
@@ -166,10 +176,11 @@ export default function ShopCartDrawer({
     minOrderQuantity: number,
     detailGUID: string,
   ) => {
-    if (!cart?.storeCode) {
+    if (!cart?.storeCode || submittingRef.current) {
       return
     }
 
+    cartMutationCountRef.current += 1
     setLoadingMap((prev) => ({ ...prev, [detailGUID]: true }))
     try {
       await updateStoreOrderCartItem({
@@ -182,15 +193,16 @@ export default function ShopCartDrawer({
       message.error(t('shop.cartUpdateFailed', 'Failed to update quantity'))
     } finally {
       setLoadingMap((prev) => ({ ...prev, [detailGUID]: false }))
+      cartMutationCountRef.current -= 1
     }
   }
 
   const handleSubmitOrder = async () => {
     if (!cart?.storeCode || preorderBlocked) {
+      finishSubmit()
       return
     }
 
-    setSubmitting(true)
     try {
       const result: SubmitStoreOrderResult = await submitActiveStoreOrder({
         storeCode: cart.storeCode,
@@ -235,45 +247,57 @@ export default function ShopCartDrawer({
         await onCartChanged()
       } else message.error(t('shop.orderSubmitFailed', 'Failed to submit order'))
     } finally {
-      setSubmitting(false)
+      finishSubmit()
     }
   }
 
-  const handleSubmitWithConfirm = () => {
-    if (!cart?.storeCode) {
+  const handleSubmitWithConfirm = async () => {
+    if (!cart?.storeCode || submittingRef.current || cartMutationCountRef.current > 0) {
       return
     }
     if (preorderBlocked) {
       message.warning(t('shop.preorder.submitRequiredWarning'))
       return
     }
-    if (submitSummary.submittableCount === 0) {
-      // 全部行都暂停供货：不用请求服务端也知道提交不了。
-      message.warning(t('supplyStatusCard.submitNothingOrderable'))
+    let latestCart: StoreOrderCart | null
+    submittingRef.current = true
+    setSubmitting(true)
+    try {
+      // 打开确认框前重读购物车，避免已恢复供货的行仍按抽屉里的旧状态估算。
+      latestCart = await getActiveStoreOrderCart(cart.storeCode)
+    } catch {
+      message.error(t('shop.orderSubmitFailed', 'Failed to submit order'))
+      finishSubmit()
+      return
+    }
+    if (!latestCart?.items.length) {
+      message.warning(t('shop.emptyCart', 'Your cart is empty'))
+      finishSubmit()
       return
     }
 
-    const hasKeptLines = submitSummary.pausedLabels.length > 0 || submitSummary.discontinuedLabels.length > 0
+    const latestSummary = summarizeCartForSubmit(latestCart.items)
+    const hasKeptLines = latestSummary.pausedLabels.length > 0 || latestSummary.discontinuedLabels.length > 0
     Modal.confirm({
       title: t('shop.confirmOrderSubmission', 'Confirm Order Submission'),
       content: (
         <div>
           <p>
-            {t('common.store', 'Store')}: <strong>{cart.storeName || cart.storeCode}</strong>
+            {t('common.store', 'Store')}: <strong>{latestCart.storeName || latestCart.storeCode}</strong>
           </p>
           <p>
             {t('shop.totalQuantity', 'Total Quantity')}:{' '}
-            <strong>{hasKeptLines ? submitSummary.submittableQuantity : cart.totalQuantity}</strong>
+            <strong>{hasKeptLines ? latestSummary.submittableQuantity : latestCart.totalQuantity}</strong>
           </p>
           <p>
             {t('shop.estimatedTotal', 'Estimated Total')}:{' '}
-            <strong>${(hasKeptLines ? submitSummary.submittableImportAmount : cart.totalImportAmount).toFixed(2)}</strong>
+            <strong>${(hasKeptLines ? latestSummary.submittableImportAmount : latestCart.totalImportAmount).toFixed(2)}</strong>
           </p>
           {hasKeptLines ? (
             <>
-              <p>{t('supplyStatusCard.confirmSubmitCount', { count: submitSummary.submittableCount })}</p>
+              <p>{t('supplyStatusCard.confirmSubmitCount', { count: latestSummary.submittableCount })}</p>
               {renderKeptSummary(
-                submitSummary,
+                latestSummary,
                 { paused: 'supplyStatusCard.confirmKeptPaused', discontinued: 'supplyStatusCard.confirmDiscontinued' },
                 t,
               )}
@@ -288,14 +312,13 @@ export default function ShopCartDrawer({
       ),
       okText: t('shop.submitOrder', 'Submit Order'),
       cancelText: t('common.cancel', 'Cancel'),
-      onOk: () => {
-        void handleSubmitOrder()
-      },
+      onOk: handleSubmitOrder,
+      onCancel: finishSubmit,
     })
   }
 
   const handleClearCart = () => {
-    if (!cart?.storeCode || !cartItems.length) {
+    if (!cart?.storeCode || !cartItems.length || submittingRef.current) {
       return
     }
 
@@ -306,6 +329,11 @@ export default function ShopCartDrawer({
       okButtonProps: { danger: true },
       cancelText: t('common.cancel', 'Cancel'),
       onOk: async () => {
+        if (submittingRef.current) {
+          return
+        }
+        cartMutationCountRef.current += 1
+        setClearingCart(true)
         try {
           const storeCode = cart.storeCode
           if (!storeCode) {
@@ -317,6 +345,9 @@ export default function ShopCartDrawer({
           await onCartChanged()
         } catch (error) {
           message.error(t('shop.cartClearFailed', 'Failed to clear cart'))
+        } finally {
+          cartMutationCountRef.current -= 1
+          setClearingCart(false)
         }
       },
     })
@@ -338,6 +369,7 @@ export default function ShopCartDrawer({
               danger
               icon={<DeleteTwoTone twoToneColor="#cf1322" />}
               onClick={handleClearCart}
+              disabled={submitting || cartMutating}
             >
               {t('common.clear', 'Clear')}
             </Button>
@@ -382,7 +414,7 @@ export default function ShopCartDrawer({
               block
               onClick={handleSubmitWithConfirm}
               loading={submitting || isCartDetailLoading}
-              disabled={!canSubmitCart || preorderBlocked}
+              disabled={!canSubmitCart || preorderBlocked || cartMutating}
             >
               {t('shop.submitOrder', 'Submit Order')}
             </Button>
@@ -406,6 +438,7 @@ export default function ShopCartDrawer({
                       key={item.detailGUID}
                       title={t('shop.removeItem', 'Remove Item')}
                       description={t('shop.removeItemConfirm', 'Remove this item from the cart?')}
+                      disabled={submitting || cartMutating}
                       onConfirm={() => {
                         void handleRemove(item.detailGUID)
                       }}
@@ -417,6 +450,7 @@ export default function ShopCartDrawer({
                         danger
                         icon={<DeleteOutlined />}
                         loading={loadingMap[item.detailGUID]}
+                        disabled={submitting || cartMutating}
                       />
                     </Popconfirm>,
                   ]}
@@ -483,7 +517,7 @@ export default function ShopCartDrawer({
                                   item.detailGUID,
                                 )
                               }}
-                              disabled={loadingMap[item.detailGUID]}
+                              disabled={submitting || cartMutating}
                               style={{ width: 80 }}
                             />
                           </Space>

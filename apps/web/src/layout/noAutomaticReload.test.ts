@@ -170,7 +170,7 @@ assert(
 assert(
   shopCartDrawerSource.includes('const canSubmitCart = !isCartDetailLoading && cartItems.length > 0') &&
     shopCartDrawerSource.includes('disabled={!canSubmitCart || submitting}') &&
-    shopCartDrawerSource.includes('disabled={!canSubmitCart || preorderBlocked}'),
+    shopCartDrawerSource.includes('disabled={!canSubmitCart || preorderBlocked || cartMutating}'),
   '购物车抽屉在 summary-only 或明细加载中时不能允许提交未展示明细的订单',
 )
 assert(

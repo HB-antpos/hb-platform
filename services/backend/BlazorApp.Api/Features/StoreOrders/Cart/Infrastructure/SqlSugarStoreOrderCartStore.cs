@@ -34,7 +34,7 @@ internal sealed class SqlSugarStoreOrderCartStore(
             .LeftJoin<Product>((detail, product) => detail.ProductCode == product.ProductCode)
             .LeftJoin<WarehouseProduct>(
                 (detail, product, warehouseProduct) =>
-                    detail.ProductCode == warehouseProduct.ProductCode
+                    detail.ProductCode == warehouseProduct.ProductCode && !warehouseProduct.IsDeleted
             )
             .LeftJoin<DomesticProduct>(
                 (detail, product, warehouseProduct, domesticProduct) =>
@@ -56,8 +56,8 @@ internal sealed class SqlSugarStoreOrderCartStore(
                         Grade = grade.Grade,
                         ProductName = product.ProductName,
                         ProductImage = product.ProductImage,
-                        // 仓库是否仍在供货；false 时前端标明“已暂停供货”。左连接缺行按不可订处理。
-                        IsActive = SqlFunc.IsNull(warehouseProduct.IsActive, false),
+                        // 与提交口径一致：只有有效仓库商品明确下架才标暂停；缺行或软删仍可提交。
+                        IsActive = SqlFunc.IsNull(warehouseProduct.IsActive, true),
                         Price = detail.OEMPrice ?? 0,
                         Quantity = detail.Quantity ?? 0,
                         AllocQuantity = detail.AllocQuantity,
@@ -699,7 +699,7 @@ internal sealed class SqlSugarStoreOrderCartStore(
             .LeftJoin<Product>((detail, product) => detail.ProductCode == product.ProductCode)
             .LeftJoin<WarehouseProduct>(
                 (detail, product, warehouseProduct) =>
-                    detail.ProductCode == warehouseProduct.ProductCode
+                    detail.ProductCode == warehouseProduct.ProductCode && !warehouseProduct.IsDeleted
             )
             .LeftJoin<DomesticProduct>(
                 (detail, product, warehouseProduct, domesticProduct) =>
@@ -732,8 +732,8 @@ internal sealed class SqlSugarStoreOrderCartStore(
                         Grade = grade.Grade,
                         ProductName = product.ProductName,
                         ProductImage = product.ProductImage,
-                        // 仓库是否仍在供货；false 时前端标明“已暂停供货”。左连接缺行按不可订处理。
-                        IsActive = SqlFunc.IsNull(warehouseProduct.IsActive, false),
+                        // 与完整购物车查询保持一致，避免增量返回把可提交行误标为暂停供货。
+                        IsActive = SqlFunc.IsNull(warehouseProduct.IsActive, true),
                         Price = detail.OEMPrice ?? 0,
                         Quantity = detail.Quantity ?? 0,
                         AllocQuantity = detail.AllocQuantity,

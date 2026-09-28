@@ -2840,6 +2840,49 @@ public sealed class StoreOrderProductListTests : IDisposable
         );
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubmitOrderAsync_仓库商品缺行或软删_购物车仍标可提交且能进单(bool softDelete)
+    {
+        await SeedProductAsync("P-MISSING", "ITEM-MISSING");
+        await SeedWarehouseProductAsync("P-MISSING", oemPrice: 3m, importPrice: 2m);
+        var store = CreateService("store-user");
+        var added = await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-MISSING",
+            Quantity = 1,
+        });
+        Assert.True(added.Success, added.Message);
+
+        if (softDelete)
+        {
+            await SetWarehouseProductActiveAsync("P-MISSING", false);
+            await _db.Updateable<WarehouseProduct>()
+                .SetColumns(item => item.IsDeleted == true)
+                .Where(item => item.ProductCode == "P-MISSING")
+                .ExecuteCommandAsync();
+        }
+        else
+        {
+            await _db.Deleteable<WarehouseProduct>()
+                .Where(item => item.ProductCode == "P-MISSING")
+                .ExecuteCommandAsync();
+        }
+
+        var cart = await store.GetActiveCartAsync("S001");
+        Assert.True(Assert.Single(cart.Data!.Items).IsActive);
+
+        var submitted = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+        Assert.True(submitted.Success, submitted.Message);
+        Assert.Equal(1, submitted.Data?.SubmittedLineCount);
+        Assert.Equal(0, submitted.Data?.KeptLineCount);
+        Assert.Empty(submitted.Data!.KeptLines);
+        Assert.Single(await _db.Queryable<WareHouseOrder>().Where(item => item.FlowStatus == 1).ToListAsync());
+        Assert.Equal(0, await _db.Queryable<WareHouseOrder>().CountAsync(item => item.FlowStatus == 0));
+    }
+
     [Fact]
     public async Task SubmitOrderAsync_保留行有未关闭的不再供应说明_购物车与结果都标出SupplyPlan()
     {
