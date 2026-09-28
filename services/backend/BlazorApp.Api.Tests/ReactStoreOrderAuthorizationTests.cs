@@ -1313,7 +1313,9 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
     {
         var request = new SubmitStoreOrderRequestDto { StoreCode = "S001" };
         var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
-        service.Setup(item => item.SubmitOrderAsync(request)).ReturnsAsync(ApiResponse<bool>.OK(true));
+        service
+            .Setup(item => item.SubmitOrderAsync(request))
+            .ReturnsAsync(ApiResponse<SubmitStoreOrderResultDto>.OK(new SubmitStoreOrderResultDto()));
         var scopeService = CreateScopeService();
         var controller = CreateController(
             service,
@@ -1337,7 +1339,7 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
         var gate = new PreorderGateResult { IsBlocked = true, PendingCount = 1 };
         service
             .Setup(item => item.SubmitOrderAsync(request))
-            .ReturnsAsync(new ApiResponse<bool>
+            .ReturnsAsync(new ApiResponse<SubmitStoreOrderResultDto>
             {
                 Success = false,
                 ErrorCode = "PREORDER_REQUIRED",
@@ -1478,7 +1480,9 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
             var request = new SubmitStoreOrderRequestDto { StoreCode = "1024" };
             service
                 .Setup(item => item.SubmitOrderAsync(request))
-                .ReturnsAsync(ApiResponse<bool>.OK(true));
+                .ReturnsAsync(
+                    ApiResponse<SubmitStoreOrderResultDto>.OK(new SubmitStoreOrderResultDto())
+                );
             result = await controller.SubmitOrder(request);
             service.Verify(item => item.SubmitOrderAsync(request), Times.Once);
         }

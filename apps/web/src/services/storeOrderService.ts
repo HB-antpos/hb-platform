@@ -1,4 +1,5 @@
 import type { ApiResponse } from '../types/api'
+import type { SupplyPlan } from '../types/supplyNotice'
 import type {
   AddStoreOrderLinePayload,
   BatchAddStoreOrderLinePayload,
@@ -42,6 +43,8 @@ import type {
   StoreOrderBatchLookupItem,
   StoreOrderBatchLookupPayload,
   StoreOrderCart,
+  SubmitStoreOrderKeptLine,
+  SubmitStoreOrderResult,
   StoreOrderListItem,
   StoreOrderListQuery,
   StoreOrderListResult,
@@ -930,16 +933,52 @@ export async function clearActiveStoreOrderCart(storeCode: string) {
   return normalizeCart(response)
 }
 
+const SUPPLY_PLANS = new Set<string>(['WillRestock', 'Undecided', 'Seasonal', 'Discontinued'])
+
+function normalizeSupplyPlan(value: unknown): SupplyPlan | null {
+  return typeof value === 'string' && SUPPLY_PLANS.has(value) ? (value as SupplyPlan) : null
+}
+
+/**
+ * 提交结果归一化：新后端在 data 里返回保留行；旧后端只返回 true 或空，一律视为整车已提交。
+ */
+function normalizeSubmitStoreOrderResult(raw: unknown): SubmitStoreOrderResult {
+  if (!isRecord(raw) || !Array.isArray(raw.keptLines)) {
+    return { submitted: true, submittedLineCount: 0, keptLines: [] }
+  }
+
+  const keptLines = raw.keptLines
+    .filter(isRecord)
+    .map<SubmitStoreOrderKeptLine>((line) => ({
+      detailGUID: typeof line.detailGUID === 'string' ? line.detailGUID : undefined,
+      productCode: String(line.productCode ?? ''),
+      itemNumber: typeof line.itemNumber === 'string' ? line.itemNumber : null,
+      productName: typeof line.productName === 'string' ? line.productName : null,
+      quantity: Number(line.quantity ?? 0) || 0,
+      supplyPlan: normalizeSupplyPlan(line.supplyPlan),
+    }))
+    .filter((line) => line.productCode)
+
+  return {
+    submitted: true,
+    orderGUID: typeof raw.orderGUID === 'string' ? raw.orderGUID : null,
+    orderNo: typeof raw.orderNo === 'string' ? raw.orderNo : null,
+    submittedLineCount: Number(raw.submittedLineCount ?? 0) || 0,
+    keptLines,
+    keptCartOrderGUID: typeof raw.keptCartOrderGUID === 'string' ? raw.keptCartOrderGUID : null,
+  }
+}
+
 export async function submitActiveStoreOrder(payload: {
   storeCode: string
   remarks?: string
-}) {
+}): Promise<SubmitStoreOrderResult> {
   const response = await request<ApiResponse<unknown> | unknown>(`${API_BASE}/submit`, {
     method: 'POST',
     data: payload,
   })
 
-  return normalizeResult<CopyStoreOrderResult | string | null>(response)
+  return normalizeSubmitStoreOrderResult(normalizeResult<unknown>(response))
 }
 
 export async function createStoreOrder(payload: CreateStoreOrderPayload) {
