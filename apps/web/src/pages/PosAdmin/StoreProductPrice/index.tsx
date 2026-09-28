@@ -41,7 +41,6 @@ import { getActiveStores } from '../../../services/storeService'
 import type {
   BatchUpdateStoreRetailPriceDto,
   CopyProgressDto,
-  StoreProductPriceListDto,
   StoreProductPriceQueryDto,
   StorePriceTransferJobDto,
   StorePriceTransferRequest,
@@ -58,8 +57,24 @@ import { MeasuredTable } from '../../../components/MeasuredTable'
 
 import type { PromoPosterProduct } from './promoPosterLogic'
 import PromoPosterModal from './PromoPosterModal'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import {
+  buildStoreProductPriceRows,
+  getSingleStoreCode,
+  groupProductCodesByStore,
+  isSameStoreSelection,
+  resolveSelectAllState,
+  SINGLE_STORE_SORT_FIELDS,
+  type StoreProductPriceRow,
+} from './multiStoreSelection'
+import { createLatestRequestGate } from './latestRequestGate'
+import multiStoreMessagesEn from './multiStoreMessages.en.json'
+import multiStoreMessagesZh from './multiStoreMessages.zh.json'
 
-type DataType = StoreProductPriceListDto & { key: string }
+// 多分店相关文案随本页代码块懒注册，不进首屏 i18n 包
+registerPageMessages({ zh: multiStoreMessagesZh, en: multiStoreMessagesEn })
+
+type DataType = StoreProductPriceRow
 const PRICE_TRANSFER_POLL_TIMEOUT_MS = 45 * 60 * 1000
 
 const productTypeMap: Record<number, { labelKey: string; color: string }> = {
@@ -108,7 +123,10 @@ export default function StoreProductPricePage() {
 
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
   const [supplierOptions, setSupplierOptions] = useState<{ label: string; value: string }[]>([])
-  const [selectedStoreCode, setSelectedStoreCode] = useState<string | undefined>()
+  // 已生效的分店选择（驱动查询）；搜索栏里的多选框是草稿，下拉关闭后才提交到这里
+  const [selectedStoreCodes, setSelectedStoreCodes] = useState<string[]>([])
+  const storeSelectOpenRef = useRef(false)
+  const draftStoreCodes: string[] | undefined = Form.useWatch('storeCodes', searchForm)
 
   const [batchModalOpen, setBatchModalOpen] = useState(false)
   const [batchForm] = Form.useForm()
@@ -135,7 +153,8 @@ export default function StoreProductPricePage() {
   // 促销海报弹窗：打开时对「分店 + 选中商品」取快照，关闭动画结束后置空卸载
   const [promoPosterSession, setPromoPosterSession] = useState<{ storeCode: string; products: PromoPosterProduct[] } | null>(null)
 
-  const inFlightRef = useRef(false)
+  // 只采用最后一次查询的结果：多选分店、翻页等连续变化时，晚到的旧响应不会覆盖新结果
+  const [loadGate] = useState(createLatestRequestGate)
 
   const stopPriceTransferPolling = useCallback(() => {
     priceTransferPollerRef.current?.stop()
@@ -143,18 +162,20 @@ export default function StoreProductPricePage() {
   }, [])
 
   const loadData = useCallback(async () => {
-    if (!selectedStoreCode) {
+    const seq = loadGate.begin()
+    if (selectedStoreCodes.length === 0) {
       setData([])
       setTotal(0)
+      setLoading(false)
       return
     }
-    if (inFlightRef.current) return
-    inFlightRef.current = true
     try {
       setLoading(true)
       const values = searchForm.getFieldsValue()
       const query: StoreProductPriceQueryDto = {
-        storeCode: selectedStoreCode,
+        // 单店时同时带 storeCode，兼容尚未支持 storeCodes 的后端
+        storeCode: selectedStoreCodes.length === 1 ? selectedStoreCodes[0] : undefined,
+        storeCodes: selectedStoreCodes,
         search: values.search || undefined,
         localSupplierCode: values.localSupplierCode || undefined,
         pageNumber: page,
@@ -163,17 +184,17 @@ export default function StoreProductPricePage() {
         sortOrder: sortOrder === 'ascend' ? 'asc' : sortOrder === 'descend' ? 'desc' : undefined,
       }
       const result = await getStoreProductPriceGrid(query)
-      const items = result?.items ?? []
+      if (!loadGate.isLatest(seq)) return
       setTotal(result?.total ?? 0)
-      setData(items.map((item, idx) => ({ ...item, key: item.productCode ?? String(idx) })))
+      setData(buildStoreProductPriceRows(result?.items ?? [], selectedStoreCodes))
       setSelectedRowKeys([])
     } catch {
+      if (!loadGate.isLatest(seq)) return
       message.error(t('posAdmin.productPrice.loadFailed', '加载商品价格列表失败'))
     } finally {
-      setLoading(false)
-      inFlightRef.current = false
+      if (loadGate.isLatest(seq)) setLoading(false)
     }
-  }, [selectedStoreCode, page, pageSize, sortField, sortOrder, searchForm])
+  }, [loadGate, selectedStoreCodes, page, pageSize, sortField, sortOrder, searchForm])
 
   useEffect(() => {
     ;(async () => {
@@ -198,19 +219,36 @@ export default function StoreProductPricePage() {
     })()
   }, [currentUser, access])
 
-  useEffect(() => {
-    if (storeOptions.length === 1 && selectedStoreCode !== storeOptions[0].value) {
-      setSelectedStoreCode(storeOptions[0].value)
-      searchForm.setFieldsValue({ storeCode: storeOptions[0].value })
-      setPage(1)
-      setSelectedRowKeys([])
-    } else if (selectedStoreCode && !storeOptions.some((s) => s.value === selectedStoreCode)) {
-      setSelectedStoreCode(undefined)
-      searchForm.setFieldsValue({ storeCode: undefined })
-      setData([])
-      setTotal(0)
+  // 提交分店选择：与当前生效的选择相同则不重新查询
+  const commitStoreSelection = useCallback((codes: string[]) => {
+    if (isSameStoreSelection(selectedStoreCodes, codes)) return
+    setSelectedStoreCodes(codes)
+    setPage(1)
+    setSelectedRowKeys([])
+    // 价格类排序只在单个分店下有意义，切到多分店时清掉，避免表头箭头与数据顺序不符
+    if (codes.length > 1 && sortField && SINGLE_STORE_SORT_FIELDS.has(sortField)) {
+      setSortField(undefined)
+      setSortOrder(undefined)
     }
-  }, [storeOptions, selectedStoreCode, searchForm])
+  }, [selectedStoreCodes, sortField])
+
+  useEffect(() => {
+    if (storeOptions.length === 1) {
+      // 只有一个可见分店时自动选中
+      const onlyStore = [storeOptions[0].value]
+      if (!isSameStoreSelection(selectedStoreCodes, onlyStore)) {
+        searchForm.setFieldsValue({ storeCodes: onlyStore })
+        commitStoreSelection(onlyStore)
+      }
+      return
+    }
+    // 分店选项变化后剔除已不可见的分店
+    const visibleCodes = selectedStoreCodes.filter((code) => storeOptions.some((s) => s.value === code))
+    if (visibleCodes.length !== selectedStoreCodes.length) {
+      searchForm.setFieldsValue({ storeCodes: visibleCodes })
+      commitStoreSelection(visibleCodes)
+    }
+  }, [storeOptions, selectedStoreCodes, searchForm, commitStoreSelection])
 
   useEffect(() => {
     loadData()
@@ -232,21 +270,48 @@ export default function StoreProductPricePage() {
     setPageSize(pagination.pageSize)
   }
 
-  const handleStoreChange = (val: string | undefined) => {
-    setSelectedStoreCode(val)
-    setPage(1)
-    setSelectedRowKeys([])
+  // 下拉展开时逐个勾选不触发查询，关闭下拉后一次性提交；下拉关闭时的删除标签、清空立即提交
+  const handleStoreSelectChange = (codes: string[]) => {
+    if (!storeSelectOpenRef.current) commitStoreSelection(codes)
+  }
+
+  const handleStoreSelectOpenChange = (open: boolean) => {
+    storeSelectOpenRef.current = open
+    if (!open) commitStoreSelection(searchForm.getFieldValue('storeCodes') ?? [])
+  }
+
+  const allStoreCodes = useMemo(() => storeOptions.map((option) => option.value), [storeOptions])
+  const storeNameByCode = useMemo(() => new Map(storeOptions.map((option) => [option.value, option.label])), [storeOptions])
+  const storeSelectAllState = resolveSelectAllState(draftStoreCodes ?? [], allStoreCodes)
+  const isAllStoresDraft = storeSelectAllState.checked && allStoreCodes.length > 1
+  const isMultiStore = selectedStoreCodes.length > 1
+  const formatStoreName = useCallback((code: string) => storeNameByCode.get(code) ?? code, [storeNameByCode])
+  // 选中行（列表每次加载都会清空选择，所以选中的都在当前页数据里）；多分店时可能跨多个分店
+  const selectedRows = useMemo(() => {
+    const keys = new Set(selectedRowKeys)
+    return data.filter((row) => keys.has(row.key))
+  }, [data, selectedRowKeys])
+  const selectedRowsStoreCode = getSingleStoreCode(selectedRows)
+  const selectedRowStoreNames = groupProductCodesByStore(selectedRows).map((group) => formatStoreName(group.storeCode))
+
+  // 回到第 1 页再查询：不在第 1 页时由页码变化触发查询，避免先按旧页码多发一次请求
+  const reloadFromFirstPage = () => {
+    if (page !== 1) {
+      setPage(1)
+      return
+    }
+    loadData()
   }
 
   const handleSearch = () => {
-    setPage(1)
-    loadData()
+    reloadFromFirstPage()
   }
 
   const handleReset = () => {
     searchForm.resetFields()
-    setPage(1)
-    loadData()
+    // 重置只清查询条件，分店选择保留（与当前表格数据保持一致）
+    searchForm.setFieldsValue({ storeCodes: selectedStoreCodes })
+    reloadFromFirstPage()
   }
 
   const openBatchModal = () => {
@@ -266,16 +331,16 @@ export default function StoreProductPricePage() {
   }
 
   const handleBatchUpdate = async () => {
+    // 选中行按分店分组，逐个分店调用批量更新（每个分店各自一次事务）
+    const storeGroups = groupProductCodesByStore(selectedRows)
+    let completedStores = 0
     try {
       const values = await batchForm.validateFields()
       if (!values.updatePurchasePrice && !values.updateRetailPrice && !values.updateAutoPricing && !values.updateSpecialProduct && !values.updateDiscountRate) {
         message.warning(t('posAdmin.productPrice.selectUpdateField', '请至少选择一项要更新的字段'))
         return
       }
-      const dto: BatchUpdateStoreRetailPriceDto = {
-        productCodes: selectedRowKeys as string[],
-        storeCode: selectedStoreCode,
-      }
+      const dto: Omit<BatchUpdateStoreRetailPriceDto, 'productCodes' | 'storeCode'> = {}
       if (values.updatePurchasePrice && values.purchasePrice != null) {
         dto.purchasePrice = Number(values.purchasePrice)
       }
@@ -291,12 +356,26 @@ export default function StoreProductPricePage() {
       if (values.updateDiscountRate && values.discountRate != null) {
         dto.discountRate = discountRateToDecimal(Number(values.discountRate))
       }
-      await batchUpdateStoreRetailPrices(dto)
+      for (const group of storeGroups) {
+        await batchUpdateStoreRetailPrices({ ...dto, productCodes: group.productCodes, storeCode: group.storeCode })
+        completedStores += 1
+      }
       message.success(t('posAdmin.productPrice.batchUpdateSuccess', '批量更新成功'))
       setBatchModalOpen(false)
       setSelectedRowKeys([])
       await loadData()
     } catch {
+      if (completedStores > 0) {
+        // 前面的分店已写入：说明进度并刷新表格，避免继续显示旧价格
+        message.error(t('posAdmin.productPrice.multiStore.batchUpdatePartial', '已更新 {{done}}/{{total}} 个分店；分店 {{store}} 更新失败，其后的分店未更新', {
+          done: completedStores,
+          total: storeGroups.length,
+          store: formatStoreName(storeGroups[completedStores].storeCode),
+        }))
+        setBatchModalOpen(false)
+        await loadData()
+        return
+      }
       message.error(t('posAdmin.productPrice.batchUpdateFailed', '批量更新失败'))
     }
   }
@@ -304,6 +383,10 @@ export default function StoreProductPricePage() {
   const openSyncModal = () => {
     if (selectedRowKeys.length === 0) {
       message.warning(t('posAdmin.productPrice.selectProducts', '请先选择商品'))
+      return
+    }
+    if (!selectedRowsStoreCode) {
+      message.warning(t('posAdmin.productPrice.multiStore.singleStoreOnly', '所选商品需来自同一个分店'))
       return
     }
     syncForm.resetFields()
@@ -326,8 +409,8 @@ export default function StoreProductPricePage() {
         return
       }
       const dto: SyncToOtherStoresDto = {
-        productCodes: selectedRowKeys as string[],
-        sourceStoreCode: selectedStoreCode!,
+        productCodes: groupProductCodesByStore(selectedRows)[0]?.productCodes ?? [],
+        sourceStoreCode: selectedRowsStoreCode!,
         targetStoreCodes: values.targetStoreCodes,
         syncPurchasePrice: !!values.syncPurchasePrice,
         syncRetailPrice: !!values.syncRetailPrice,
@@ -363,18 +446,21 @@ export default function StoreProductPricePage() {
   }
 
   const openPromoPosterModal = () => {
-    if (!selectedStoreCode || selectedRowKeys.length === 0) {
+    if (selectedRows.length === 0) {
       message.warning(t('posAdmin.productPrice.selectProducts', '请先选择商品'))
       return
     }
-    // 选中键即商品编码；列表每次加载都会清空选择，所以选中项都能在当前页数据里找到名称与货号
-    const rowsByCode = new Map(data.map((row) => [row.key, row]))
+    // 海报按单个分店的价格生成，选中行必须来自同一个分店
+    if (!selectedRowsStoreCode) {
+      message.warning(t('posAdmin.productPrice.multiStore.singleStoreOnly', '所选商品需来自同一个分店'))
+      return
+    }
+    // 列表每次加载都会清空选择，所以选中行都在当前页数据里，可直接取名称与货号
     setPromoPosterSession({
-      storeCode: selectedStoreCode,
-      products: selectedRowKeys.map((key) => {
-        const row = rowsByCode.get(String(key))
-        return { productCode: String(key), productName: row?.productName, itemNumber: row?.itemNumber }
-      }),
+      storeCode: selectedRowsStoreCode,
+      products: selectedRows
+        .filter((row) => row.productCode)
+        .map((row) => ({ productCode: row.productCode!, productName: row.productName, itemNumber: row.itemNumber })),
     })
   }
 
@@ -436,7 +522,7 @@ export default function StoreProductPricePage() {
     priceTransferForm.setFieldsValue({
       direction: 'HqToLocal',
       sourceStoreCode: undefined,
-      targetStoreCode: selectedStoreCode,
+      targetStoreCode: selectedStoreCodes.length === 1 ? selectedStoreCodes[0] : undefined,
       syncRetailPrices: true,
       syncMultiCodePrices: true,
       syncPurchasePrice: true,
@@ -517,7 +603,7 @@ export default function StoreProductPricePage() {
 
       const totalProcessed = getPriceTransferHandledCount(completedJob.result)
       message.success(t('posAdmin.productPrice.priceTransferComplete', '分店价格同步完成，处理 {{count}} 条', { count: totalProcessed }))
-      if (dto.targetStoreCode === selectedStoreCode) {
+      if (dto.targetStoreCode && selectedStoreCodes.includes(dto.targetStoreCode)) {
         await loadData()
       }
     } catch (error) {
@@ -535,6 +621,12 @@ export default function StoreProductPricePage() {
       setPriceTransferSubmitting(false)
     }
   }
+
+  // 表头排序箭头受控于实际查询的排序字段（切到多分店清掉价格排序时箭头同步消失）
+  const sortOrderFor = useCallback(
+    (field: string) => (sortField === field ? sortOrder ?? null : null),
+    [sortField, sortOrder],
+  )
 
   const columns: ColumnsType<DataType> = useMemo(() => [
     {
@@ -565,6 +657,7 @@ export default function StoreProductPricePage() {
       key: 'itemNumber',
       width: 96,
       sorter: true,
+      sortOrder: sortOrderFor('itemNumber'),
       render: (v: string) => <span className="store-product-price-code-cell">{v || '-'}</span>,
     },
     {
@@ -574,6 +667,7 @@ export default function StoreProductPricePage() {
       width: 48,
       fixed: 'left',
       sorter: true,
+      sortOrder: sortOrderFor('productCode'),
       render: (v: string) => (
         <Tooltip title={v}>
           <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => void copyTextToClipboard(v)} />
@@ -586,6 +680,7 @@ export default function StoreProductPricePage() {
       key: 'productName',
       width: 180,
       sorter: true,
+      sortOrder: sortOrderFor('productName'),
       render: (v: string) => (
         <div
           className="store-product-price-name-cell"
@@ -635,13 +730,22 @@ export default function StoreProductPricePage() {
       },
     },
    
+    // 多分店时同一商品按分店展开成多行，需要「分店」列区分
+    ...(isMultiStore ? [{
+      title: t('posAdmin.productPrice.store', '分店'),
+      dataIndex: 'storeCode',
+      key: 'storeCode',
+      width: 110,
+      render: (code: string) => <div className="store-product-price-supplier-cell" title={formatStoreName(code)}>{formatStoreName(code)}</div>,
+    }] : []),
     {
       title: t('posAdmin.productPrice.purchasePrice', '采购价'),
       dataIndex: 'storePurchasePrice',
       key: 'storePurchasePrice',
       width: 72,
       align: 'right',
-      sorter: true,
+      sorter: !isMultiStore,
+      sortOrder: sortOrderFor('storePurchasePrice'),
       render: (v: number) => <span className="store-product-price-numeric-cell">{v != null ? v.toFixed(2) : '-'}</span>,
     },
     {
@@ -650,7 +754,8 @@ export default function StoreProductPricePage() {
       key: 'storeRetailPrice',
       width: 72,
       align: 'right',
-      sorter: true,
+      sorter: !isMultiStore,
+      sortOrder: sortOrderFor('storeRetailPrice'),
       render: (v: number) => <span className="store-product-price-numeric-cell">{v != null ? v.toFixed(2) : '-'}</span>,
     },
     {
@@ -675,7 +780,8 @@ export default function StoreProductPricePage() {
       key: 'discountRate',
       width: 72,
       align: 'right',
-      sorter: true,
+      sorter: !isMultiStore,
+      sortOrder: sortOrderFor('discountRate'),
       render: (v: number) => <span className="store-product-price-numeric-cell">{formatDiscountRate(v)}</span>,
     },
     {
@@ -692,6 +798,7 @@ export default function StoreProductPricePage() {
       key: 'updatedAt',
       width: 92,
       sorter: true,
+      sortOrder: sortOrderFor('updatedAt'),
       render: (v: string) => v ? (
         <span className="store-product-price-date-cell">
           <span>{dayjs(v).format('YYYY-MM-DD')}</span>
@@ -706,7 +813,7 @@ export default function StoreProductPricePage() {
       width: 80,
       render: (v: string) => <span className="store-product-price-code-cell">{v || '-'}</span>,
     },
-  ], [t])
+  ], [t, isMultiStore, formatStoreName, sortOrderFor])
 
   const selectedCount = selectedRowKeys.length
   const priceTransferErrors = priceTransferJob ? getPriceTransferErrors(priceTransferJob) : []
@@ -718,15 +825,38 @@ export default function StoreProductPricePage() {
     >
       <Card>
         <Form form={searchForm} layout="inline" style={{ marginBottom: 16 }} onFinish={handleSearch}>
-          <Form.Item name="storeCode" label={t('posAdmin.productPrice.store', '分店')}>
+          <Form.Item name="storeCodes" label={t('posAdmin.productPrice.store', '分店')}>
             <Select
+              mode="multiple"
               showSearch
               optionFilterProp="label"
               options={storeOptions}
-              placeholder={t('posAdmin.productPrice.selectStoreFirst', '请选择分店')}
-              style={{ width: 260 }}
+              placeholder={t('posAdmin.productPrice.multiStore.selectStores', '请选择分店（可多选）')}
+              style={{ width: 300 }}
               allowClear
-              onChange={handleStoreChange}
+              // 全选时收成一个「全部分店」标签，避免挤满搜索栏
+              maxTagCount={isAllStoresDraft ? 0 : 'responsive'}
+              maxTagPlaceholder={(omitted) => isAllStoresDraft
+                ? t('posAdmin.productPrice.multiStore.allStores', '全部分店（{{count}} 个）', { count: allStoreCodes.length })
+                : `+${omitted.length}`}
+              onChange={handleStoreSelectChange}
+              onOpenChange={handleStoreSelectOpenChange}
+              popupRender={(menu) => (
+                <>
+                  {/* 阻止 mousedown 夺走焦点，勾选全选时下拉保持展开 */}
+                  <div style={{ padding: '4px 12px 6px', borderBottom: '1px solid #f0f0f0' }} onMouseDown={(event) => event.preventDefault()}>
+                    <Checkbox
+                      checked={storeSelectAllState.checked}
+                      indeterminate={storeSelectAllState.indeterminate}
+                      disabled={allStoreCodes.length === 0}
+                      onChange={(event) => searchForm.setFieldValue('storeCodes', event.target.checked ? allStoreCodes : [])}
+                    >
+                      {t('posAdmin.productPrice.multiStore.allStores', '全部分店（{{count}} 个）', { count: allStoreCodes.length })}
+                    </Checkbox>
+                  </div>
+                  {menu}
+                </>
+              )}
             />
           </Form.Item>
           <Form.Item name="localSupplierCode" label={t('posAdmin.productPrice.supplier', '供应商')}>
@@ -744,7 +874,7 @@ export default function StoreProductPricePage() {
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit" disabled={!selectedStoreCode}>
+              <Button type="primary" htmlType="submit" disabled={selectedStoreCodes.length === 0}>
                 {t('common.query', '查询')}
               </Button>
               <Button onClick={handleReset}>{t('common.reset', '重置')}</Button>
@@ -765,7 +895,7 @@ export default function StoreProductPricePage() {
               </>
             )}
             {/* 海报只读商品与价格，不要求编辑权限；门店范围由后端校验 */}
-            <Button icon={<PrinterOutlined />} disabled={selectedCount === 0 || !selectedStoreCode} onClick={openPromoPosterModal}>
+            <Button icon={<PrinterOutlined />} disabled={selectedCount === 0} onClick={openPromoPosterModal}>
               {t('posAdmin.productPrice.promoPoster.button', '打印促销海报')} {selectedCount > 0 ? `(${selectedCount})` : ''}
             </Button>
             {access.isAdmin && (
@@ -788,7 +918,7 @@ export default function StoreProductPricePage() {
           loading={loading}
           dataSource={data}
           columns={columns}
-          scroll={{ x: 1520, y: 600 }}
+          scroll={{ x: isMultiStore ? 1630 : 1520, y: 600 }}
           virtual
           rowSelection={{
             selectedRowKeys,
@@ -817,7 +947,13 @@ export default function StoreProductPricePage() {
         forceRender
       >
         <p style={{ marginBottom: 16, color: '#666' }}>
-          {t('posAdmin.productPrice.selectedProductsStore', '已选择 {{count}} 个商品，分店：{{storeCode}}', { count: selectedCount, storeCode: selectedStoreCode })}
+          {selectedRowStoreNames.length > 1
+            ? t('posAdmin.productPrice.multiStore.selectedRowsStores', '已选择 {{count}} 行，涉及 {{storeCount}} 个分店：{{stores}}', {
+              count: selectedCount,
+              storeCount: selectedRowStoreNames.length,
+              stores: selectedRowStoreNames.join('、'),
+            })
+            : t('posAdmin.productPrice.selectedProductsStore', '已选择 {{count}} 个商品，分店：{{storeCode}}', { count: selectedCount, storeCode: selectedRowStoreNames[0] })}
         </p>
         <Form form={batchForm} layout="vertical">
           <Form.Item name="updatePurchasePrice" valuePropName="checked" label={t('posAdmin.productPrice.updatePurchasePriceLabel', '更新采购价')}>
@@ -896,7 +1032,7 @@ export default function StoreProductPricePage() {
         forceRender
       >
         <p style={{ marginBottom: 16, color: '#666' }}>
-          {t('posAdmin.productPrice.selectedSourceStore', '已选择 {{count}} 个商品，源分店：{{storeCode}}', { count: selectedCount, storeCode: selectedStoreCode })}
+          {t('posAdmin.productPrice.selectedSourceStore', '已选择 {{count}} 个商品，源分店：{{storeCode}}', { count: selectedCount, storeCode: selectedRowsStoreCode ? formatStoreName(selectedRowsStoreCode) : '' })}
         </p>
         <Form form={syncForm} layout="vertical">
           <Form.Item name="targetStoreCodes" label={t('posAdmin.productPrice.targetStore', '目标分店')} rules={[{ required: true }]}>
@@ -904,7 +1040,7 @@ export default function StoreProductPricePage() {
               mode="multiple"
               showSearch
               optionFilterProp="label"
-              options={storeOptions.filter((s) => s.value !== selectedStoreCode)}
+              options={storeOptions.filter((s) => s.value !== selectedRowsStoreCode)}
               placeholder={t('posAdmin.productPrice.selectTargetStore', '请选择目标分店')}
             />
           </Form.Item>

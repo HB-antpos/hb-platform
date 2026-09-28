@@ -1,0 +1,13 @@
+{
+  "posAdmin": {
+    "productPrice": {
+      "multiStore": {
+        "selectStores": "Select store(s)",
+        "allStores": "All stores ({{count}})",
+        "singleStoreOnly": "Selected rows must belong to one store",
+        "selectedRowsStores": "{{count}} rows selected across {{storeCount}} stores: {{stores}}",
+        "batchUpdatePartial": "Updated {{done}}/{{total}} stores; store {{store}} failed and the remaining stores were not updated"
+      }
+    }
+  }
+}
