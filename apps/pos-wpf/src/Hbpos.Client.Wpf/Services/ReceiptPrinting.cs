@@ -52,7 +52,10 @@ public sealed record ReceiptPrinterSettings(
     string StorePhone,
     string Abn,
     string ReturnPolicy,
-    int CutDistance)
+    int CutDistance,
+    // 中文注释：客人小票是否附带 Linkly 银行收据原文；默认打印，保持旧行为。
+    // 关闭后仍保留付款行的卡类型/卡号后四位，签名单、拒付单、结算单等独立银行单据不受影响。
+    bool PrintBankReceiptText = true)
 {
     public const string DefaultPrinterPort = "USB,";
 
@@ -206,6 +209,8 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
     private const string AbnKey = Prefix + "Abn";
     private const string ReturnPolicyKey = Prefix + "ReturnPolicy";
     private const string CutDistanceKey = Prefix + "CutDistance";
+    // 中文注释：与端口、切纸距离一样按设备保存，不随门店资料作用域迁移。
+    private const string PrintBankReceiptTextKey = Prefix + "PrintBankReceiptText";
     private const string ProfileStoreCodeKey = Prefix + "ProfileStoreCode";
 
     private readonly ILocalAppSettingsRepository _settingsRepository;
@@ -229,10 +234,15 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
             await _settingsRepository.GetValueAsync(CutDistanceKey, cancellationToken),
             ReceiptPrinterSettings.Default.CutDistance);
 
+        var printBankReceiptText = NormalizeFlag(
+            await _settingsRepository.GetValueAsync(PrintBankReceiptTextKey, cancellationToken),
+            ReceiptPrinterSettings.Default.PrintBankReceiptText);
+
         var storeCode = CurrentStoreCode;
-        return storeCode is null
+        var settings = storeCode is null
             ? await LoadLegacyUnscopedAsync(port, cutDistance, cancellationToken)
             : await LoadScopedAsync(storeCode, port, cutDistance, cancellationToken);
+        return settings with { PrintBankReceiptText = printBankReceiptText };
     }
 
     public async Task SaveAsync(ReceiptPrinterSettings settings, CancellationToken cancellationToken = default)
@@ -360,6 +370,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
             [AbnKey] = NormalizeText(settings.Abn, string.Empty),
             [ReturnPolicyKey] = NormalizeText(settings.ReturnPolicy, string.Empty),
             [CutDistanceKey] = Math.Max(1, settings.CutDistance).ToString(CultureInfo.InvariantCulture),
+            [PrintBankReceiptTextKey] = FormatFlag(settings.PrintBankReceiptText),
         };
     }
 
@@ -369,6 +380,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
         {
             [PrinterPortKey] = NormalizePort(settings.PrinterPort),
             [CutDistanceKey] = Math.Max(1, settings.CutDistance).ToString(CultureInfo.InvariantCulture),
+            [PrintBankReceiptTextKey] = FormatFlag(settings.PrintBankReceiptText),
             [ProfileStoreCodeKey] = storeCode,
             [ProfileKey(storeCode, "BrandName")] = NormalizeText(settings.BrandName, string.Empty),
             [ProfileKey(storeCode, "StoreName")] = NormalizeText(settings.StoreName, string.Empty),
@@ -419,6 +431,17 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var distance) && distance > 0
             ? distance
             : fallback;
+    }
+
+    private static bool NormalizeFlag(string? value, bool fallback)
+    {
+        // 中文注释：旧设备没有该键或值损坏时回退默认值（打印），避免升级后静默改变小票内容。
+        return bool.TryParse(value, out var flag) ? flag : fallback;
+    }
+
+    private static string FormatFlag(bool value)
+    {
+        return value ? "true" : "false";
     }
 
     private sealed record ProfileSnapshot(
@@ -576,11 +599,14 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             }
         }
 
-        var receiptTexts = receipt.Payments
-            .Select(payment => payment.ReceiptText)
-            .Where(text => !string.IsNullOrWhiteSpace(text))
-            .Select(text => text!.Trim())
-            .ToList();
+        // 中文注释：设置关闭时整段跳过银行原文，只保留上方付款行里的卡类型/后四位，缩短客人小票。
+        var receiptTexts = settings.PrintBankReceiptText
+            ? receipt.Payments
+                .Select(payment => payment.ReceiptText)
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Select(text => text!.Trim())
+                .ToList()
+            : [];
         if (receiptTexts.Count > 0)
         {
             builder.Separator();
