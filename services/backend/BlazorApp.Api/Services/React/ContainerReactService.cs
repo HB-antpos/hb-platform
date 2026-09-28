@@ -1819,12 +1819,20 @@ namespace BlazorApp.Api.Services.React
             CancellationToken cancellationToken
         )
         {
+            // SQL Server 不允许在聚合函数内包含子查询（错误 130），SQLite 单测测不出来：
+            // 内层逐行把「本柜新品」子查询算成 0/1 标记列，其余列原样透传；外层只对普通列计数，口径不变。
             var stats = await query.Clone()
                 .Select((cd, wp, dp, lp) => new
                 {
-                    All = SqlFunc.AggregateCount(cd.DetailCode),
+                    cd.DetailCode,
+                    DetailProductType = cd.ProductType,
+                    DomesticProductType = dp.ProductType,
+                    LocalProductCode = lp.ProductCode,
+                    cd.OEMPrice,
+                    cd.ImportPrice,
+                    WarehouseIsActive = wp.IsActive,
                     // 新商品/已有商品统计按「本柜新品」口径，与筛选、列表字段一致。
-                    New = SqlFunc.AggregateCount(SqlFunc.IIF(
+                    IsContainerNewProduct = SqlFunc.IIF(
                         lp.ProductCode == null
                             || SqlFunc.Subqueryable<WarehouseProductChangeHistory>()
                                 .Where(h =>
@@ -1833,29 +1841,24 @@ namespace BlazorApp.Api.Services.React
                                     && h.SourceReference == cd.ContainerCode
                                 )
                                 .Any(),
-                        cd.DetailCode,
-                        null
-                    )),
-                    Existing = SqlFunc.AggregateCount(SqlFunc.IIF(
-                        lp.ProductCode != null
-                            && !SqlFunc.Subqueryable<WarehouseProductChangeHistory>()
-                                .Where(h =>
-                                    h.ProductCode == cd.ProductCode
-                                    && h.Action == ContainerNewProductHistoryAction
-                                    && h.SourceReference == cd.ContainerCode
-                                )
-                                .Any(),
-                        cd.DetailCode,
-                        null
-                    )),
-                    Normal = SqlFunc.AggregateCount(SqlFunc.IIF((cd.ProductType == null || cd.ProductType != "套装子商品") && dp.ProductType == 0, cd.DetailCode, null)),
-                    Set = SqlFunc.AggregateCount(SqlFunc.IIF((cd.ProductType == null || cd.ProductType != "套装子商品") && dp.ProductType == 1, cd.DetailCode, null)),
-                    Multi = SqlFunc.AggregateCount(SqlFunc.IIF((cd.ProductType == null || cd.ProductType != "套装子商品") && dp.ProductType == 2, cd.DetailCode, null)),
-                    SetChild = SqlFunc.AggregateCount(SqlFunc.IIF(cd.ProductType == "套装子商品", cd.DetailCode, null)),
-                    NoOemPrice = SqlFunc.AggregateCount(SqlFunc.IIF(lp.ProductCode == null && (cd.OEMPrice == null || cd.OEMPrice <= 0), cd.DetailCode, null)),
-                    AbnormalImport = SqlFunc.AggregateCount(SqlFunc.IIF(cd.ImportPrice == null || cd.ImportPrice <= 0, cd.DetailCode, null)),
-                    Active = SqlFunc.AggregateCount(SqlFunc.IIF(wp.IsActive == true, cd.DetailCode, null)),
-                    Inactive = SqlFunc.AggregateCount(SqlFunc.IIF(wp.IsActive != true, cd.DetailCode, null)),
+                        1,
+                        0
+                    ),
+                })
+                .MergeTable()
+                .Select(row => new
+                {
+                    All = SqlFunc.AggregateCount(row.DetailCode),
+                    New = SqlFunc.AggregateCount(SqlFunc.IIF(row.IsContainerNewProduct == 1, row.DetailCode, null)),
+                    Existing = SqlFunc.AggregateCount(SqlFunc.IIF(row.IsContainerNewProduct == 0, row.DetailCode, null)),
+                    Normal = SqlFunc.AggregateCount(SqlFunc.IIF((row.DetailProductType == null || row.DetailProductType != "套装子商品") && row.DomesticProductType == 0, row.DetailCode, null)),
+                    Set = SqlFunc.AggregateCount(SqlFunc.IIF((row.DetailProductType == null || row.DetailProductType != "套装子商品") && row.DomesticProductType == 1, row.DetailCode, null)),
+                    Multi = SqlFunc.AggregateCount(SqlFunc.IIF((row.DetailProductType == null || row.DetailProductType != "套装子商品") && row.DomesticProductType == 2, row.DetailCode, null)),
+                    SetChild = SqlFunc.AggregateCount(SqlFunc.IIF(row.DetailProductType == "套装子商品", row.DetailCode, null)),
+                    NoOemPrice = SqlFunc.AggregateCount(SqlFunc.IIF(row.LocalProductCode == null && (row.OEMPrice == null || row.OEMPrice <= 0), row.DetailCode, null)),
+                    AbnormalImport = SqlFunc.AggregateCount(SqlFunc.IIF(row.ImportPrice == null || row.ImportPrice <= 0, row.DetailCode, null)),
+                    Active = SqlFunc.AggregateCount(SqlFunc.IIF(row.WarehouseIsActive == true, row.DetailCode, null)),
+                    Inactive = SqlFunc.AggregateCount(SqlFunc.IIF(row.WarehouseIsActive != true, row.DetailCode, null)),
                 })
                 .FirstAsync(cancellationToken);
 
