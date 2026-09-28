@@ -269,6 +269,7 @@
     <Compile Include="StoreRetailPriceHqSyncContractTests.cs" />
     <Compile Include="StorePriceTransferJobServiceTests.cs" />
     <Compile Include="StoreProductPriceGridSortTests.cs" />
+    <Compile Include="ReactStoreProductPricesGridStoreScopeTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqProductSyncTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqConcurrencySqlServerTests.cs" />
@@ -327,6 +328,7 @@
     <Compile Include="ContainerCreateDuplicateTests.cs" />
     <Compile Include="LegacyContainerProductChangeHistoryTests.cs" />
     <Compile Include="ContainerReactServiceDetailQueryTests.cs" />
+    <Compile Include="ContainerDetailTagStatsSqlServerIntegrationTests.cs" />
     <Compile Include="ContainerDetailQueryIndexMigrationTests.cs" />
     <Compile Include="ContainerReactServiceLocalSupplierCodeTests.cs" />
     <Compile Include="ContainerProductCreationServiceTests.cs" />
