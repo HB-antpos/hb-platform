@@ -54,6 +54,12 @@ namespace BlazorApp.Api.Controllers.React
                 });
             }
 
+            // 只靠前端分店选项不够：店长改请求里的分店编码就能查看其他分店价格，这里按服务层实际查询的分店做范围校验
+            if (!await CanAccessStoresAsync(new[] { query.StoreCode }))
+            {
+                return Forbid();
+            }
+
             var result = await _service.GetGridDataAsync(query);
             if (result.Success)
             {
@@ -303,6 +309,23 @@ namespace BlazorApp.Api.Controllers.React
             }
 
             return targetStoreCodes.All(storeCode => !string.IsNullOrWhiteSpace(storeCode) && storeCodes.Contains(storeCode));
+        }
+
+        /// <summary>
+        /// 请求中的每个分店都必须在当前用户可访问范围内（任一越权即拒绝）；Admin、仓库角色不限分店。
+        /// 受限用户传入空列表时同样拒绝，避免调用方漏传分店时退化为不校验。
+        /// </summary>
+        private async Task<bool> CanAccessStoresAsync(IEnumerable<string?> requestedStoreCodes)
+        {
+            var storeCodes = await GetAccessibleStoreCodesAsync();
+            if (storeCodes == null)
+            {
+                return true;
+            }
+
+            var requested = requestedStoreCodes.ToList();
+            return requested.Count > 0
+                && requested.All(storeCode => !string.IsNullOrWhiteSpace(storeCode) && storeCodes.Contains(storeCode));
         }
 
         private async Task<HashSet<string>?> GetAccessibleStoreCodesAsync()
