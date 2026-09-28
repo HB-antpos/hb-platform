@@ -185,6 +185,14 @@ namespace BlazorApp.Api.Mappings.Profiles
             CreateMap<UpdateWarehouseProductDto, WarehouseProduct>()
                 .ForMember(dest => dest.ProductCode, opt => opt.Ignore())
                 .ForMember(
+                    dest => dest.IsActive,
+                    opt =>
+                    {
+                        opt.PreCondition(src => src.IsActive.HasValue);
+                        opt.MapFrom(src => src.IsActive!.Value);
+                    }
+                )
+                .ForMember(
                     dest => dest.ImportPrice,
                     opt => opt.MapFrom(src => src.PurchasePrice ?? src.ImportPrice)
                 )

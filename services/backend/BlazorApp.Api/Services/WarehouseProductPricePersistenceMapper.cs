@@ -24,7 +24,10 @@ namespace BlazorApp.Api.Services
             warehouseProduct.MinOrderQuantity = dto.MinOrderQuantity;
             warehouseProduct.StockValue = dto.StockValue;
             warehouseProduct.StockAlertQuantity = dto.StockAlertQuantity;
-            warehouseProduct.IsActive = dto.IsActive;
+            if (dto.IsActive.HasValue)
+            {
+                warehouseProduct.IsActive = dto.IsActive.Value;
+            }
             warehouseProduct.Volume = dto.Volume;
             warehouseProduct.PackingQuantity = packingQuantity;
             warehouseProduct.UpdatedAt = updatedAt;
