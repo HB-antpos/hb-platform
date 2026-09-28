@@ -131,6 +131,22 @@ public sealed class AppUpdateCoordinatorTests
             descriptor.Lifetime == ServiceLifetime.Singleton);
         Assert.True(options.IsEnabled);
         Assert.Equal(AppUpdateBackgroundCheckOptions.DefaultInterval, options.Interval);
+
+        var unattended = provider.GetRequiredService<AppUpdateUnattendedInstallOptions>();
+        Assert.Contains(services, descriptor =>
+            descriptor.ServiceType == typeof(AppUpdateUnattendedInstallScheduler) &&
+            descriptor.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(services, descriptor =>
+            descriptor.ServiceType == typeof(IAppUpdateElevationProbe) &&
+            descriptor.ImplementationType == typeof(WindowsAppUpdateElevationProbe));
+#if DEBUG
+        // 中文注释：Debug 构建默认关闭夜间自动安装，避免开发机过夜时被装上正式安装包。
+        Assert.False(unattended.IsEnabled);
+#else
+        Assert.True(unattended.IsEnabled);
+        Assert.Equal(new TimeOnly(1, 0), unattended.WindowStart);
+        Assert.Equal(new TimeOnly(7, 0), unattended.WindowEnd);
+#endif
     }
 
     [Theory]
@@ -1342,6 +1358,156 @@ public sealed class AppUpdateCoordinatorTests
         Assert.True(state.IsForceUpdateBlocking);
         Assert.Equal(0, installer.LaunchCallCount);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InstallUpdateUnattendedAsync_installs_any_update_without_prompt_or_overlay(bool force)
+    {
+        var state = new AppUpdateState();
+        var prompt = new CapturingPromptService(confirm: false);
+        var installer = new CapturingInstallerLauncher();
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var coordinator = CreateCoordinator(CreateSilentRelease(force), download, installer, prompt, state);
+        // 中文注释：白天被收银员拒绝过的版本，夜间照样安装。
+        state.MarkOptionalUpdateDeclined("1.1.0");
+
+        var result = await coordinator.InstallUpdateUnattendedAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.Installed, result.Status);
+        Assert.Equal(1, download.CallCount);
+        Assert.Equal(1, installer.LaunchCallCount);
+        Assert.Equal(@"C:\Temp\hbpos.exe", installer.FilePath);
+        Assert.False(prompt.OptionalPromptShown);
+        Assert.False(state.IsForceUpdateBlocking);
+        Assert.False(installer.CancellationToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_skips_non_silent_installer_without_downloading()
+    {
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var installer = new CapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateRelease(force: false) with { InstallerArguments = "/SP-" },
+            download,
+            installer,
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        var result = await coordinator.InstallUpdateUnattendedAsync();
+
+        // 中文注释：非静默参数会弹安装向导等人点，夜间不能拉起。
+        Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
+        Assert.Equal(AppUpdateCoordinator.UnattendedInstallerNotSilentErrorCode, result.ErrorCode);
+        Assert.Equal(0, download.CallCount);
+        Assert.Equal(0, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_reports_transaction_started_before_launch()
+    {
+        var guard = new ToggleInstallSafetyGuard(canInstall: false);
+        var installer = new GuardedInstallerLauncher(guard);
+        var coordinator = CreateCoordinator(
+            CreateSilentRelease(force: true),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            installer,
+            new CapturingPromptService(),
+            new AppUpdateState(),
+            guard: guard);
+
+        var result = await coordinator.InstallUpdateUnattendedAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.UnattendedInstallSkipped, result.Status);
+        Assert.Equal(AppUpdateCoordinator.UnattendedActiveTransactionErrorCode, result.ErrorCode);
+        Assert.Equal(0, installer.LaunchCallCount);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_returns_install_failure_and_no_update_without_touching_prompts()
+    {
+        var state = new AppUpdateState();
+        var failing = CreateCoordinator(
+            CreateSilentRelease(force: false),
+            new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe")),
+            new SequenceInstallerLauncher(ProcessLaunchResult.Fail("launch failed")),
+            new CapturingPromptService(),
+            state);
+
+        var failed = await failing.InstallUpdateUnattendedAsync();
+
+        Assert.Equal(AppUpdateCoordinatorStatus.InstallFailed, failed.Status);
+        Assert.Equal("launch failed", Assert.Single(failed.StatusArgs));
+        Assert.False(state.IsOptionalUpdateReady);
+        Assert.False(state.IsForceUpdateRequired);
+
+        var download = new StaticDownloadService(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        var latest = CreateCoordinator(
+            AppUpdateCheckResponse.NoUpdate("1.0.0"),
+            download,
+            new CapturingInstallerLauncher(),
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        Assert.Equal(AppUpdateCoordinatorStatus.NoUpdate, (await latest.InstallUpdateUnattendedAsync()).Status);
+        Assert.Equal(0, download.CallCount);
+    }
+
+    [Fact]
+    public async Task InstallUpdateUnattendedAsync_waits_for_other_update_flow_to_finish()
+    {
+        var download = new BlockingDownloadService();
+        var installer = new CapturingInstallerLauncher();
+        var coordinator = CreateCoordinator(
+            CreateSilentRelease(force: false),
+            download,
+            installer,
+            new CapturingPromptService(),
+            new AppUpdateState());
+
+        await coordinator.CheckForUpdatesAtStartupAsync();
+        await download.WaitUntilStartedAsync();
+
+        Assert.Equal(
+            AppUpdateCoordinatorStatus.AlreadyRunning,
+            (await coordinator.InstallUpdateUnattendedAsync()).Status);
+
+        download.Complete(AppUpdateDownloadResult.Succeeded(@"C:\Temp\hbpos.exe"));
+        await coordinator.DeferredStartupDownloadTask.WaitAsync(TestTimeout);
+        Assert.Equal(0, installer.LaunchCallCount);
+    }
+
+    [Theory]
+    [InlineData("hbpos.exe", "exe", "/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS", true)]
+    [InlineData("hbpos.exe", "exe", "/silent", true)]
+    [InlineData("hbpos.exe", "exe", "/SP- /NORESTART", false)]
+    [InlineData("hbpos.exe", "exe", null, false)]
+    [InlineData("hbpos.msi", "msi", "/qn /norestart", true)]
+    [InlineData("hbpos.msi", "msi", "/quiet", true)]
+    [InlineData("hbpos.msi", "msi", "/passive", true)]
+    [InlineData("hbpos.msi", "msi", "/norestart", false)]
+    [InlineData("hbpos.msi", null, "/qb!", true)]
+    public void IsSilentInstallerArguments_recognizes_inno_and_msiexec_silent_switches(
+        string fileName,
+        string? installerType,
+        string? arguments,
+        bool expected)
+    {
+        var release = CreateRelease(force: false) with
+        {
+            FileName = fileName,
+            InstallerType = installerType,
+            InstallerArguments = arguments
+        };
+
+        Assert.Equal(expected, AppUpdateCoordinator.IsSilentInstallerArguments(release));
+    }
+
+    private static AppUpdateCheckResponse CreateSilentRelease(bool force) => CreateRelease(force) with
+    {
+        InstallerArguments = "/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
+    };
 
     private static AppUpdateCoordinator CreateCoordinator(
         AppUpdateCheckResponse response,
