@@ -299,9 +299,10 @@ namespace BlazorApp.Api.Services.React
             if (HasAny(request.WarehouseStatus))
             {
                 var statuses = request.WarehouseStatus;
+                // 没有仓库记录的新品（仓库未到货）算下架；左连接未匹配时 IsActive 为 NULL，`<> 1` 会漏掉，需显式判空。
                 query = query.Where((cd, wp, dp, lp) =>
                     (statuses.Contains("active") && wp.IsActive == true)
-                    || (statuses.Contains("inactive") && wp.IsActive != true)
+                    || (statuses.Contains("inactive") && (wp.ProductCode == null || wp.IsActive != true))
                 );
             }
             if (includeSelectedTags && HasAny(request.SelectedTags))
@@ -366,9 +367,10 @@ namespace BlazorApp.Api.Services.React
                 }
                 if (tags.Contains("active") || tags.Contains("inactive"))
                 {
+                    // 下架口径同上：无仓库记录的新品也算下架，与前端本地统计一致。
                     query = query.Where((cd, wp, dp, lp) =>
                         (tags.Contains("active") && wp.IsActive == true)
-                        || (tags.Contains("inactive") && wp.IsActive != true)
+                        || (tags.Contains("inactive") && (wp.ProductCode == null || wp.IsActive != true))
                     );
                 }
             }
@@ -1830,6 +1832,7 @@ namespace BlazorApp.Api.Services.React
                     LocalProductCode = lp.ProductCode,
                     cd.OEMPrice,
                     cd.ImportPrice,
+                    WarehouseProductCode = wp.ProductCode,
                     WarehouseIsActive = wp.IsActive,
                     // 新商品/已有商品统计按「本柜新品」口径，与筛选、列表字段一致。
                     IsContainerNewProduct = SqlFunc.IIF(
@@ -1858,7 +1861,8 @@ namespace BlazorApp.Api.Services.React
                     NoOemPrice = SqlFunc.AggregateCount(SqlFunc.IIF(row.LocalProductCode == null && (row.OEMPrice == null || row.OEMPrice <= 0), row.DetailCode, null)),
                     AbnormalImport = SqlFunc.AggregateCount(SqlFunc.IIF(row.ImportPrice == null || row.ImportPrice <= 0, row.DetailCode, null)),
                     Active = SqlFunc.AggregateCount(SqlFunc.IIF(row.WarehouseIsActive == true, row.DetailCode, null)),
-                    Inactive = SqlFunc.AggregateCount(SqlFunc.IIF(row.WarehouseIsActive != true, row.DetailCode, null)),
+                    // 没有仓库记录的新品（仓库未到货）算下架，与筛选、前端本地统计一致。
+                    Inactive = SqlFunc.AggregateCount(SqlFunc.IIF(row.WarehouseProductCode == null || row.WarehouseIsActive != true, row.DetailCode, null)),
                 })
                 .FirstAsync(cancellationToken);
 

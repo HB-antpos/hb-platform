@@ -61,15 +61,40 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
         });
 
         Assert.True(stats.StatsComputed);
-        Assert.Equal(4, stats.ItemsTotal);
-        Assert.Equal(4, stats.TagStats.All);
-        Assert.Equal(2, stats.TagStats.New);
+        Assert.Equal(5, stats.ItemsTotal);
+        Assert.Equal(5, stats.TagStats.All);
+        Assert.Equal(3, stats.TagStats.New);
         Assert.Equal(2, stats.TagStats.Existing);
         Assert.Equal(1, stats.TagStats.NoOemPrice);
         Assert.Equal(1, stats.TagStats.AbnormalImport);
         Assert.Equal(3, stats.TagStats.Active);
-        Assert.Equal(1, stats.TagStats.Inactive);
-        Assert.Equal(4, stats.TagStats.Normal);
+        // 其它货柜建档但已下架的 1 条 + 仓库未到货（无仓库记录）的 1 条。
+        Assert.Equal(2, stats.TagStats.Inactive);
+        Assert.Equal(5, stats.TagStats.Normal);
+    }
+
+    [ContainerDetailTagStatsSqlServerFact]
+    public async Task SQLServer_无仓库记录的新品应计入下架统计与下架筛选总数()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        using var db = database.CreateClient();
+        await SeedOwnContainerScenarioAsync(db);
+        using var hbSalesDb = database.CreateScope();
+        var service = CreateService(db, hbSalesDb);
+
+        var result = await service.QueryContainerDetailsAsync(new ContainerDetailQueryDto
+        {
+            ContainerGuid = ContainerCode,
+            PageNumber = 1,
+            PageSize = 100,
+            IncludeItems = false,
+            IncludeTotal = true,
+            IncludeStats = true,
+            SelectedTags = new List<string> { "inactive" },
+        });
+
+        Assert.Equal(2, result.TagStats.Inactive);
+        Assert.Equal(2, result.ItemsTotal);
     }
 
     [ContainerDetailTagStatsSqlServerFact]
@@ -94,15 +119,16 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
         });
 
         // 标签统计排除 SelectedTags，保证各标签计数不随当前选中标签变化；总数是筛选后的行数。
-        Assert.Equal(4, result.TagStats.All);
-        Assert.Equal(2, result.TagStats.New);
+        Assert.Equal(5, result.TagStats.All);
+        Assert.Equal(3, result.TagStats.New);
         Assert.Equal(2, result.TagStats.Existing);
-        Assert.Equal(2, result.ItemsTotal);
+        Assert.Equal(3, result.ItemsTotal);
         Assert.False(result.HasMore);
     }
 
     /// <summary>
-    /// 同一货柜内的四种新旧口径：本柜建档、未建档、其它货柜建档、本柜只更新。
+    /// 同一货柜内的四种新旧口径：本柜建档、未建档、其它货柜建档、本柜只更新；
+    /// 另有一条仓库未到货（无仓库商品记录）的新品。
     /// </summary>
     private static async Task SeedOwnContainerScenarioAsync(ISqlSugarClient db)
     {
@@ -124,6 +150,7 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
         await SeedHistoryAsync(db, "P-OWN-OTHER", "Create", "C-EARLIER");
         await SeedDetailAsync(db, "D-OWN-UPDATED", "P-OWN-UPDATED", "HB304", localExists: true);
         await SeedHistoryAsync(db, "P-OWN-UPDATED", "BatchUpdate", ContainerCode);
+        await SeedDetailAsync(db, "D-OWN-ARRIVING", "P-OWN-ARRIVING", "HB305", localExists: false, warehouseExists: false);
     }
 
     private static async Task SeedDetailAsync(
@@ -134,7 +161,8 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
         decimal? oemPrice = 1m,
         decimal? importPrice = 1m,
         bool localExists = true,
-        bool isActive = true
+        bool isActive = true,
+        bool warehouseExists = true
     )
     {
         await db.Insertable(new ContainerDetail
@@ -163,13 +191,16 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
             IsDeleted = false,
         }).ExecuteCommandAsync();
 
-        await db.Insertable(new WarehouseProduct
+        if (warehouseExists)
         {
-            ProductCode = productCode,
-            ImportPrice = importPrice,
-            OEMPrice = oemPrice,
-            IsActive = isActive,
-        }).ExecuteCommandAsync();
+            await db.Insertable(new WarehouseProduct
+            {
+                ProductCode = productCode,
+                ImportPrice = importPrice,
+                OEMPrice = oemPrice,
+                IsActive = isActive,
+            }).ExecuteCommandAsync();
+        }
 
         if (localExists)
         {
