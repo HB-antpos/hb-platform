@@ -205,7 +205,9 @@ export async function updateWarehouseCategory(
 ): Promise<WarehouseCategoryNode> {
   const response = await request.put<ReactApiResponse<WarehouseCategoryApiItem> | WarehouseCategoryApiItem>(
     `/api/react/v1/warehouse-categories/${categoryGuid}`,
-    toPayload(data),
+    // 后端 UpdateWarehouseCategoryDto 把 CategoryGUID 标为必填，模型校验先于控制器执行；
+    // 请求体不带它会直接 400。控制器仍以路由里的 GUID 为准覆盖该字段。
+    { ...toPayload(data), categoryGuid },
   )
   return transformCategory(unwrapReactData(response, '更新分类失败') as WarehouseCategoryApiItem)
 }

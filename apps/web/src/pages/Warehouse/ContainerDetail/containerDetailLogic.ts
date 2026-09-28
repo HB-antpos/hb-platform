@@ -2419,7 +2419,9 @@ function getDetectedUnitVolume(item: ContainerDetailDetectedPrice) {
 
 export function calculateContainerDetailTotalAmount(row: ContainerDetail) {
   if (row.装柜数量 == null || row.国内价格 == null) return row.合计装柜金额
-  return roundToDigits(row.装柜数量 * row.国内价格 * (row.调整浮率 ?? DEFAULT_CONTAINER_DETAIL_FLOAT_RATE), 2)
+  // 合计装柜金额 = 装柜数量 × 国内价格，与 HQ 货柜详情和导入数据口径一致（货柜头「国内价格合计」由它汇总）；
+  // 调整浮率只作用于进口价格，不能乘进这里，否则改箱规/体积后会把国内价格合计放大。
+  return roundToDigits(row.装柜数量 * row.国内价格, 2)
 }
 
 export function calculateContainerDetailTotalVolume(row: ContainerDetail) {
