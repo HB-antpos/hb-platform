@@ -45,7 +45,8 @@ namespace BlazorApp.Api.Controllers.React
         [Authorize(Policy = Permissions.StoreProducts.View)]
         public async Task<IActionResult> Grid([FromBody] StoreProductPriceQueryDto query)
         {
-            if (string.IsNullOrWhiteSpace(query.StoreCode))
+            // 单选 StoreCode 与多选 StoreCodes 至少有一个分店
+            if (StoreProductPriceReactService.ResolveGridStoreCodes(query).Count == 0)
             {
                 return Ok(new
                 {
