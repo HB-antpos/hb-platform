@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.React;
@@ -195,8 +196,10 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        // 2026-09-29 起停用：HQ 零售价表 → 本地 StoreRetailPrice 属于 HQ → HBweb 方向，统一返回 410。
         [HttpPost("sync-from-hq")]
         [Authorize(Roles = "Admin,管理员")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncFromHq([FromBody] SyncRetailPriceFromHqRequest? request)
         {
             request ??= new SyncRetailPriceFromHqRequest();
@@ -239,8 +242,15 @@ namespace BlazorApp.Api.Controllers.React
             return result.Success ? Ok(result) : BadRequest(result);
         }
 
+        // 分店价格同步兼容两个方向：本地 → HQ 继续可用；HQ → 本地（含未传方向，DTO 与 job 都会默认成 HqToLocal）
+        // 属于 HQ → HBweb 方向，2026-09-29 起返回 410。
         [HttpPost("store-price-transfer-jobs")]
         [Authorize(Roles = "Admin,管理员")]
+        [HqToHbwebSyncDisabled(
+            ArgumentName = nameof(request),
+            DirectionProperty = nameof(StorePriceTransferRequest.Direction),
+            AllowedDirection = StorePriceTransferDirectionConstants.LocalToHq
+        )]
         public async Task<IActionResult> StartStorePriceTransferJob(
             [FromBody] StorePriceTransferRequest? request,
             CancellationToken cancellationToken = default

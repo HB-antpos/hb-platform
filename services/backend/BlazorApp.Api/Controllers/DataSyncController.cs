@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
@@ -9,6 +10,8 @@ namespace BlazorApp.Api.Controllers
 {
     /// <summary>
     /// 数据同步控制器 - 提供从HQ数据库同步各类数据的API端点
+    /// 2026-09-29 起所有 HQ → HBweb 入口标注 <see cref="HqToHbwebSyncDisabledAttribute"/> 返回 410；
+    /// 翻译、PostgreSQL 与「国内商品 → HQ」反向同步不属于该方向，保持可用。
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
@@ -63,6 +66,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-suppliers")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncSuppliersFromHq()
         {
             try
@@ -100,6 +104,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-categories")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncCategoriesFromHq()
         {
             try
@@ -137,6 +142,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-products")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductsFromHq()
         {
             try
@@ -186,6 +192,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="lastUpdateDate">上次更新日期，格式：yyyy-MM-dd</param>
         /// <returns>同步结果</returns>
         [HttpPost("sync-products-incremental")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductsIncrementalFromHq(
             [FromQuery] string lastUpdateDate
         )
@@ -256,6 +263,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-product-stocks")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductStocksFromHq()
         {
             try
@@ -294,6 +302,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="lastUpdateDate">上次更新日期，格式：yyyy-MM-dd</param>
         /// <returns>同步结果</returns>
         [HttpPost("sync-product-stocks-incremental")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductStocksIncrementalFromHq(
             [FromQuery] string lastUpdateDate
         )
@@ -355,6 +364,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-locations")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncLocationsFromHq()
         {
             try
@@ -392,6 +402,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-product-locations")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductLocationsFromHq()
         {
             try
@@ -429,6 +440,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果列表</returns>
         [HttpPost("sync-all")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncAllDataFromHq()
         {
             try
@@ -586,6 +598,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-domestic-products")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncDomesticProductsFromHq()
         {
             try
@@ -625,6 +638,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-product-prefix-codes")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductPrefixCodesFromHq()
         {
             try
@@ -664,6 +678,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-domestic-set-products")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncDomesticSetProductsFromHq()
         {
             try
@@ -704,6 +719,7 @@ namespace BlazorApp.Api.Controllers
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync-containers")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainersFromHq()
         {
             try
@@ -740,6 +756,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="lastUpdateDate">上次更新日期，格式：yyyy-MM-dd</param>
         /// <returns>同步结果</returns>
         [HttpPost("sync-containers-incremental")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainersIncrementalFromHq(
             [FromQuery] string lastUpdateDate
         )
@@ -920,6 +937,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="request">同步请求，包含选中的分店代码</param>
         /// <returns>同步结果</returns>
         [HttpPost("store-retail-prices")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreRetailPricesFromHq(
             [FromBody] StoreSyncRequest? request = null
         )
@@ -969,6 +987,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="request">同步请求，包含选中的分店代码</param>
         /// <returns>同步结果</returns>
         [HttpPost("store-clearance-prices")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreClearancePricesFromHq(
             [FromBody] StoreSyncRequest? request = null
         )
@@ -1013,6 +1032,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="request">同步请求，包含选中的分店代码</param>
         /// <returns>同步结果</returns>
         [HttpPost("store-multicode-products")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreMultiCodeProductsFromHq(
             [FromBody] StoreSyncRequest? request = null
         )
