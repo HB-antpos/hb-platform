@@ -6626,7 +6626,7 @@ namespace BlazorApp.Api.Services.React
             }
         }
 
-        public async Task<int> BatchDeleteDetailsScopedAsync(
+        public async Task<(int TotalDeleted, int TotalRequested)> BatchDeleteDetailsScopedAsync(
             string containerGuid,
             ContainerDetailBatchScopeDto request
         )
@@ -6657,14 +6657,15 @@ namespace BlazorApp.Api.Services.React
                 if (details.Count == 0)
                 {
                     await _context.Db.Ado.CommitTranAsync();
-                    return 0;
+                    return (0, lockedHguids.Count);
                 }
                 var deleted = await _context.Db.Deleteable<ContainerDetail>()
                     .Where(detail => lockedHguids.Contains(detail.DetailCode) && detail.ContainerCode == containerGuid)
                     .ExecuteCommandAsync();
                 await RefreshContainerSummariesAsync(mutationLock, new[] { containerGuid });
                 await _context.Db.Ado.CommitTranAsync();
-                return deleted;
+                // 请求数取加锁后的范围行数，与前端 totalRequested 契约一致。
+                return (deleted, lockedHguids.Count);
             }
             catch (Exception exception)
             {

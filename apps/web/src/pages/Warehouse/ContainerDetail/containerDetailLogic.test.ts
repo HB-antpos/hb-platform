@@ -8,6 +8,7 @@ import {
 } from '../Products/categoryPath'
 import {
   calculateContainerDetailTotalAmount,
+  markContainerDetailUpdatesSkipRelatedProductSync,
   CONTAINER_DETAIL_ALL_CATEGORY_FILTER_KEY,
   ALL_CONTAINER_DETAIL_EXPORT_COLUMN_KEYS,
   CONTAINER_DETAIL_EXPORT_COLUMNS,
@@ -3206,6 +3207,27 @@ assertDeepEqual(
   '匹配国内数据只允许商品编码精确命中写入；货号命中仅作为候选，不自动补价格或名称',
 )
 assertEqual(pageSource.includes("t('containers.actions.matchDomesticData')"), true, '页面按钮文案应使用匹配国内数据 i18n key')
+{
+  const original = [{ HGUID: 'match-1', 进口价格: 3 }, { HGUID: 'match-2', 英文名称: 'Hat', SkipRelatedProductSync: false }]
+  const marked = markContainerDetailUpdatesSkipRelatedProductSync(original)
+  assertEqual(marked.every((item) => item.SkipRelatedProductSync === true), true, '匹配国内数据保存前每条更新都应带 SkipRelatedProductSync')
+  assertEqual('SkipRelatedProductSync' in original[0], false, '补标记不应修改原始更新对象')
+  const matchFlow = pageSource.slice(
+    pageSource.indexOf('const handleMatchDomesticData = async () => {'),
+    pageSource.indexOf('const handleAlignDomesticProductCode'),
+  )
+  assertEqual(
+    matchFlow.indexOf('ensureNoPendingDetails()') > -1
+      && matchFlow.indexOf('ensureNoPendingDetails()') < matchFlow.indexOf('confirmBatchRows('),
+    true,
+    '匹配国内数据开始前必须确认没有其它字段草稿，避免补标记波及用户手工修改',
+  )
+  assertEqual(
+    matchFlow.includes('markContainerDetailUpdatesSkipRelatedProductSync(pendingSavePlan.detailUpdates)'),
+    true,
+    '匹配国内数据经草稿保存时必须补回 SkipRelatedProductSync，否则会同步改写已有商品',
+  )
+}
 assertEqual(
   pageSource.includes('alignDomesticProductCode({') &&
     pageSource.includes('expectedDomesticProductCode: domesticProductCode') &&

@@ -2525,6 +2525,17 @@ export function buildContainerDetailMatchedPriceUpdates(
   return buildContainerDetailMatchedDomesticDataUpdates(rows, detectedItems, container)
 }
 
+/**
+ * 匹配国内数据只回写货柜明细本身：保存前给每条更新补上 SkipRelatedProductSync。
+ * 字段草稿只保留业务字段，这个标记在进出草稿时会丢失，丢失后后端会把国内数据同步改写
+ * 已有商品的仓库价、主档进货价/名称和分店进货价。
+ */
+export function markContainerDetailUpdatesSkipRelatedProductSync<T extends { SkipRelatedProductSync?: boolean }>(
+  updates: T[],
+): T[] {
+  return updates.map((update) => ({ ...update, SkipRelatedProductSync: true }))
+}
+
 export function buildContainerDetailMatchedDomesticDataUpdates(
   rows: ContainerDetail[],
   detectedItems: ContainerDetailDetectedPrice[],
