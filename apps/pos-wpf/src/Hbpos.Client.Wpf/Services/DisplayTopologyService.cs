@@ -92,6 +92,36 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
 
     internal static bool UsesFullMonitorBounds(Window window) => (bool)window.GetValue(UsesFullMonitorBoundsProperty);
 
+    /// <summary>取窗口当前所在显示器的整屏与工作区（设备像素）；窗口句柄未创建或查询失败时返回 null。</summary>
+    internal static DisplayBounds? FindDisplayForWindow(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref monitorInfo))
+        {
+            return null;
+        }
+
+        var monitorArea = monitorInfo.Monitor;
+        var workArea = monitorInfo.WorkArea;
+        return new DisplayBounds(
+            monitor,
+            monitorArea.Left,
+            monitorArea.Top,
+            monitorArea.Right - monitorArea.Left,
+            monitorArea.Bottom - monitorArea.Top,
+            workArea.Left,
+            workArea.Top,
+            workArea.Right - workArea.Left,
+            workArea.Bottom - workArea.Top);
+    }
+
     internal static (int Width, int Height) ResolveMaxTrackSize(
         int monitorWidth,
         int monitorHeight,

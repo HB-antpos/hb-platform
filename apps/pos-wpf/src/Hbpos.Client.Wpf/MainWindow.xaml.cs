@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -97,6 +98,7 @@ public partial class MainWindow : Window
         }
         SourceInitialized += MainWindowSourceInitialized;
         Loaded += MainWindowLoaded;
+        ContentRendered += MainWindowContentRendered;
         PreviewKeyDown += MainWindowPreviewKeyDown;
         PreviewMouseDown += MainWindowUserInput;
         PreviewMouseMove += MainWindowUserInput;
@@ -967,6 +969,56 @@ public partial class MainWindow : Window
             WindowState.Normal => NormalCenteredWindowModeValue,
             _ => null
         };
+    }
+
+    private void MainWindowContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= MainWindowContentRendered;
+        try
+        {
+            // 关键逻辑：首帧画完后窗口尺寸、最大化状态与界面缩放都已确定，记一次屏幕诊断，
+            // 用于远程判断"底部被任务栏挡住"是缩放比例过高（内容被裁）还是任务栏自动隐藏（工作区 = 整屏）。
+            ConsoleLog.Write(
+                "Startup",
+                BuildDisplayDiagnosticsMessage(
+                    DisplayTopologyService.FindDisplayForWindow(this),
+                    System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX,
+                    ActualWidth,
+                    ActualHeight,
+                    WindowState));
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteError(
+                "Startup",
+                $"main window display diagnostics failed error={ex.GetType().Name} message={ex.Message}",
+                exception: ex);
+        }
+    }
+
+    internal static string BuildDisplayDiagnosticsMessage(
+        DisplayBounds? display,
+        double dpiScale,
+        double windowWidth,
+        double windowHeight,
+        WindowState windowState)
+    {
+        var scale = AdaptiveUiScale.Calculate(windowWidth, windowHeight);
+        var logicalWidth = windowWidth / scale;
+        var logicalHeight = windowHeight / scale;
+        // 缩放后的逻辑尺寸仍低于设计基准，说明已触到缩放下限，内容右侧或底部会被裁掉。
+        var contentClipped = logicalWidth < AdaptiveUiScale.DesignWidth - 0.5d
+            || logicalHeight < AdaptiveUiScale.DesignHeight - 0.5d;
+        // 任务栏占用 = 整屏 − 工作区（设备像素）；为 0x0 通常表示任务栏自动隐藏或平板模式。
+        var displayText = display is null
+            ? "monitor=<unknown> workArea=<unknown> taskbarReserved=<unknown>"
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"monitor={display.MonitorWidth}x{display.MonitorHeight} workArea={display.WorkAreaWidth}x{display.WorkAreaHeight} taskbarReserved={display.MonitorWidth - display.WorkAreaWidth}x{display.MonitorHeight - display.WorkAreaHeight}");
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"main window display {displayText} dpiScale={dpiScale:0.##} windowDip={windowWidth:0.#}x{windowHeight:0.#} windowState={windowState} contentScale={scale:0.##} contentLogical={logicalWidth:0}x{logicalHeight:0} contentClipped={contentClipped}");
     }
 }
 

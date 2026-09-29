@@ -13,8 +13,12 @@ public static class AdaptiveUiScale
     public const double DesignWidth = 1280d;
     public const double DesignHeight = 720d;
 
-    // 再小的窗口不继续缩，避免文字和触控目标过小；窗口最小尺寸 = 基准 × 该比例。
+    // 窗口最小尺寸 = 基准 × 该比例：用户拖动窗口时不能再小，避免文字和触控目标过小。
     public const double MinimumScale = 0.75d;
+
+    // 屏幕本身放不下 0.75 倍基准时（如 1920×1080@200%、1366×768@150% 扣掉任务栏后不足 540 高），
+    // 窗口会被压到工作区大小，此时继续缩小内容以保证完整显示，只在极端小尺寸下才停在该下限。
+    public const double ScreenLimitedMinimumScale = 0.5d;
 
     public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
         "IsEnabled",
@@ -49,8 +53,10 @@ public static class AdaptiveUiScale
         }
 
         // 向下取两位小数：缩放后的逻辑尺寸不低于设计基准，拖动窗口时比例也不会连续抖动。
+        // 关键逻辑：不再用 0.75 兜底。原来窗口被屏幕压到 540 高以下时内容仍按 540 排版，
+        // 底部超出窗口被裁掉，正好落在任务栏位置，看起来像被任务栏挡住。
         var rounded = Math.Floor((scale * 100d) + 1e-9) / 100d;
-        return Math.Max(MinimumScale, rounded);
+        return Math.Max(ScreenLimitedMinimumScale, rounded);
     }
 
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
