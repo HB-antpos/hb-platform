@@ -61,6 +61,9 @@ import dayjs from 'dayjs'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type HTMLAttributes, type Key, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import containerDetailMessagesEn from './containerDetailMessages.en.json'
+import containerDetailMessagesZh from './containerDetailMessages.zh.json'
 import { useNavigate } from 'react-router-dom'
 import BarcodePreview from '../../../components/BarcodePreview'
 import PageContainer from '../../../components/PageContainer'
@@ -181,6 +184,8 @@ import {
   getContainerDetailMatchType,
   getContainerDetailProductCode,
   getContainerDetailProductName,
+  isContainerDetailAutoSaveValueUnchanged,
+  formatContainerDetailPreviewFields,
   getContainerDetailProductType,
   getContainerDetailTranslationSource,
   getContainerDetailWarehouseStatusFilterKey,
@@ -629,6 +634,9 @@ function TwoLineText({ value }: { value?: string }) {
 
 
 
+// 本页新增文案随页面代码块懒注册，不进入首屏 i18n 包（首屏 gzip 预算余量很小）。
+registerPageMessages({ zh: containerDetailMessagesZh, en: containerDetailMessagesEn })
+
 const CONTAINER_DETAIL_TABLE_SCROLL_X = 2440
 const CONTAINER_DETAIL_TABLE_SCROLL_Y = 620
 const CONTAINER_DETAIL_SELECTION_COLUMN_WIDTH = 56
@@ -636,6 +644,8 @@ const CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.containerDetail.colu
 const CONTAINER_DETAIL_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.containerDetail.columnWidths.v1'
 const CONTAINER_DETAIL_MIN_COLUMN_WIDTH = 48
 const CONTAINER_DETAIL_MAX_COLUMN_WIDTH = 420
+// 完全成功的后台任务通知自动关闭（悬停时暂停计时），避免长期遮住右上角的“编辑货柜”等按钮；失败与部分成功仍需手动关闭。
+const CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS = 10
 const DEFAULT_CONTAINER_DETAIL_SORT: ContainerDetailSortState = { field: 'itemNumber', order: 'ascend' }
 const CONTAINER_DETAIL_EDITABLE_COLUMN_KEYS = ['englishName', 'packingQuantity', 'unitVolume', 'middlePackQuantity', 'floatRate', 'importPrice', 'oemPrice', 'remark'] as const
 const WHOLE_CONTAINER_DETAIL_EXPORT_LABEL_KEYS: Partial<Record<ContainerDetailExportColumnKey, string>> = {
@@ -829,7 +839,8 @@ export default function ContainerDetailPage() {
     pageSize: CONTAINER_DETAIL_DEFAULT_PAGE_SIZE,
     scopeKey: '',
   }))
-  const [remoteTagStats, setRemoteTagStats] = useState<ContainerDetailTagStats>(EMPTY_CONTAINER_DETAIL_TAG_STATS)
+  // null 表示服务端统计尚未返回或加载失败，标签数显示为 --，避免把“不知道”显示成 0。
+  const [remoteTagStats, setRemoteTagStats] = useState<ContainerDetailTagStats | null>(null)
   const [savingHeader, setSavingHeader] = useState(false)
   const savingHeaderRef = useRef(false)
   const [container, setContainer] = useState<ContainerMain | null>(null)
@@ -1561,6 +1572,8 @@ export default function ContainerDetailPage() {
     && detailPagingState.scopeKey === pagedDetailScopeKey
     ? detailPagingState.pageNumber
     : 1
+  // 分页模式每页只含当前页数据，编号需加上前面各页的行数；全量模式从 1 开始。
+  const detailRowNumberOffset = detailLoadMode === 'paged' ? (detailPageNumber - 1) * detailPageSize : 0
   const detailHasMore = detailLoadMode === 'paged'
     && detailPageNumber * detailPageSize < detailItemsTotal
 
@@ -1787,6 +1800,14 @@ export default function ContainerDetailPage() {
         .catch((error) => {
           if (!controller.signal.aborted) {
             console.error('货柜明细统计加载失败', error)
+            // 失败时不保留上一个筛选范围的统计，改显示 --。
+            if (
+              detailStatsRequestIdRef.current === requestId
+              && pagedDetailStatsKeyRef.current === statsKey
+              && currentContainerGuidRef.current === containerGuid
+            ) {
+              setRemoteTagStats(null)
+            }
           }
         })
         .finally(() => {
@@ -1812,7 +1833,7 @@ export default function ContainerDetailPage() {
 
     detailRowsContainerGuidRef.current = containerGuid
     lastLoadedDetailStatsKeyRef.current = null
-    setRemoteTagStats(EMPTY_CONTAINER_DETAIL_TAG_STATS)
+    setRemoteTagStats(null)
     setDetailItemsTotal(0)
     pendingDetailSavePromisesRef.current.clear()
     failedDetailSaveKeysRef.current = new Set()
@@ -2571,16 +2592,24 @@ export default function ContainerDetailPage() {
     parameters: Record<string, unknown>,
     actionName: string,
     danger = false,
+    note?: string,
   ) => {
     const preview = await previewContainerDetailAction(containerGuid, { operation, scope, parameters })
+    const summary = t(
+      'containers.modals.confirmBatchPreviewContent',
+      '{{action}}将影响 {{count}} 条明细（字段：{{fields}}）。数据变化或预览过期后需要重新确认。',
+      { action: actionName, count: preview.affectedCount, fields: formatContainerDetailPreviewFields(preview.fieldSummary, (key, fallback) => t(key, fallback)) },
+    )
     return new Promise<string | null>((resolve) => {
       Modal.confirm({
         title: t('containers.modals.confirmBatchPreviewTitle', '确认批量操作'),
-        content: t(
-          'containers.modals.confirmBatchPreviewContent',
-          '{{action}}将影响 {{count}} 条明细（字段：{{fields}}）。数据变化或预览过期后需要重新确认。',
-          { action: actionName, count: preview.affectedCount, fields: preview.fieldSummary.join('、') || '--' },
-        ),
+        // note 用于说明触发原因（如删除明细后需要重算成本），放在影响摘要之前。
+        content: note ? (
+          <Space direction="vertical" size={6}>
+            <Typography.Text>{note}</Typography.Text>
+            <Typography.Text>{summary}</Typography.Text>
+          </Space>
+        ) : summary,
         okText: t('common.confirm', '确认'),
         cancelText: t('common.cancel'),
         okButtonProps: danger ? { danger: true } : undefined,
@@ -2600,7 +2629,7 @@ export default function ContainerDetailPage() {
       title: t('containers.modals.batchPreviewChangedTitle', '批量操作数据已变化'),
       content: t('containers.modals.batchPreviewChangedContent', '最新预览影响 {{count}} 条明细（字段：{{fields}}），请再次确认后执行。', {
         count: preview.affectedCount,
-        fields: preview.fieldSummary.join('、') || '--',
+        fields: formatContainerDetailPreviewFields(preview.fieldSummary, (key, fallback) => t(key, fallback)),
       }),
     })
   }
@@ -2822,8 +2851,21 @@ export default function ContainerDetailPage() {
     patchRow(rowKey(row), { [field]: value } as Partial<ContainerDetail>)
   }
 
-  const clearAutoSaveEditBaseline = (row: ContainerDetail, field: ContainerDetailAutoSaveField) => {
-    autoSaveEditBaselineRef.current.delete(`${rowKey(row)}:${field}`)
+  // 失焦时取出并清除聚焦基线；没有基线（未经聚焦的写入）时 hasBaseline=false，照常保存。
+  const consumeAutoSaveEditBaseline = (row: ContainerDetail, field: ContainerDetailAutoSaveField) => {
+    const key = `${rowKey(row)}:${field}`
+    const hasBaseline = autoSaveEditBaselineRef.current.has(key)
+    const value = autoSaveEditBaselineRef.current.get(key)
+    autoSaveEditBaselineRef.current.delete(key)
+    return { hasBaseline, value }
+  }
+
+  // 值与聚焦时相同就不入自动保存队列：Tab 经过、点进又点出都不应产生写库请求。
+  // 该字段上次保存失败时仍照常重新入队，保留“点进再点出即重试”的原有行为。
+  const isAutoSaveEditUnchanged = (row: ContainerDetail, field: ContainerDetailAutoSaveField, nextValue: unknown) => {
+    const baseline = consumeAutoSaveEditBaseline(row, field)
+    if (getAutoSaveFailure(row, field)) return false
+    return baseline.hasBaseline && isContainerDetailAutoSaveValueUnchanged(baseline.value, nextValue)
   }
 
   const queuePendingDetailUpdates = (updates: PendingContainerDetailPatch[]) => {
@@ -3705,6 +3747,11 @@ export default function ContainerDetailPage() {
       message.warning(t('containers.messages.productNameRequired', '商品名称不能为空'))
       return
     }
+    // 名称未改动时不入队，避免点进编辑又点出也写库；上次保存失败时仍重新入队。
+    if (
+      !getAutoSaveFailure(row, '商品名称')
+      && isContainerDetailAutoSaveValueUnchanged(getContainerDetailProductName(row), productName)
+    ) return
     await saveRowPatch(row, { 商品名称: productName })
   }
 
@@ -4628,6 +4675,22 @@ export default function ContainerDetailPage() {
       message.warning(t('containers.messages.missingContainerNumberForHqTranslation'))
       return
     }
+    // 该操作会把机器译文直接写入 HQ 商品字典的英文名称，写入前必须确认。
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: t('containers.actions.translateHqData'),
+        content: t(
+          'containers.modals.translateHqDataContent',
+          '将按货柜编号 {{containerNumber}} 找到 HQ 货柜单中的商品，为英文名称为空或含中文的商品机器翻译英文名称，并直接写入 HQ 商品字典（已有有效英文名称的不覆盖）。是否继续？',
+          { containerNumber },
+        ),
+        okText: t('common.confirm', '确认'),
+        cancelText: t('common.cancel'),
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+    if (!confirmed) return
     if (!await drainAutoSavesBeforeAction()) return
 
     setHqTranslating(true)
@@ -4745,7 +4808,7 @@ export default function ContainerDetailPage() {
       key: pushToHqNotificationKey,
       message: t('posAdmin.products.pushToHqSucceeded', '发送到 HQ 完成'),
       description: renderPushToHqResultContent(result, selection),
-      duration: 0,
+      duration: CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS,
     })
   }
 
@@ -4922,7 +4985,7 @@ export default function ContainerDetailPage() {
     notification.success({
       message: t('containers.messages.createProductsJobSucceeded', '创建新商品完成'),
       description,
-      duration: 0,
+      duration: CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS,
     })
   }
 
@@ -4977,7 +5040,7 @@ export default function ContainerDetailPage() {
     notification.success({
       message: t('containers.messages.submitContainerJobSucceeded', '提交货柜完成'),
       description,
-      duration: 0,
+      duration: CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS,
     })
   }
 
@@ -5199,6 +5262,42 @@ export default function ContainerDetailPage() {
     }
   }
 
+  /**
+   * 删除明细后后端已按剩余明细重算货柜总体积，但其余明细的运输成本（= 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积）
+   * 仍按删除前的总体积计算。这里复用整柜重算成本的预览确认，用户确认后才写库；
+   * 已无剩余明细或缺少汇率/运费/总体积时无法重算，不再提示。
+   */
+  const recalculateCostsAfterDetailDelete = async (remainingCount: number) => {
+    if (remainingCount <= 0) return
+    if (getContainerDetailCostMissingFields(container).length) return
+    const scope = buildWholeContainerDetailBatchScope()
+    const actionName = t('containers.actions.recalculateCosts', '重算成本')
+    const note = t(
+      'containers.modals.recalculateCostsAfterDeleteNote',
+      '删除明细后货柜总体积已变化，其余明细的运输成本和进口价格需要按新的总体积重算。',
+    )
+    try {
+      let previewToken = await confirmPreviewedContainerDetailAction('recalculate-costs', scope, {}, actionName, false, note)
+      while (previewToken) {
+        try {
+          const result = await recalculateContainerCostsByScope(containerGuid, scope, previewToken)
+          message.success(t('containers.messages.detailsDeletedCostsRecalculated', '已按剩余明细重算 {{count}} 条成本', { count: result.totalUpdated }))
+          await loadData()
+          return
+        } catch (error) {
+          if (!isContainerDetailActionPreviewExpired(error)) throw error
+          // 409 后重新读取预览；只有用户再次确认新令牌才会重试写入。
+          previewToken = await confirmPreviewedContainerDetailAction('recalculate-costs', scope, {}, actionName, false, note)
+        }
+      }
+      message.info(t('containers.messages.detailsDeletedCostsRecalculateCancelled', '已取消重算，其余明细的运输成本仍按删除前的总体积计算'))
+    } catch (error) {
+      console.error(error)
+      const errorMessage = error instanceof Error ? error.message : t('containers.messages.costRecalculateFailed', '成本重算失败')
+      message.warning(t('containers.messages.detailsDeletedCostsRecalculateFailed', { message: errorMessage, defaultValue: '明细已删除，但成本重算失败：{{message}}' }))
+    }
+  }
+
   const deleteSelected = () => {
     if (!selectedRowKeys.length) {
       message.warning(t('containers.messages.selectDetails'))
@@ -5222,6 +5321,8 @@ export default function ContainerDetailPage() {
           setRows((items) => items.filter((item) => !hguids.includes(item.hguid)))
           setSelectedRowKeys([])
           message.success(t('containers.messages.detailsDeleted', { count: hguids.length }))
+          // 不阻塞删除确认框关闭；重算走独立的预览确认。
+          void recalculateCostsAfterDetailDelete(detailItemsTotal - hguids.length)
         } catch (error) {
           if (await handleExpiredContainerDetailActionPreview(error, 'delete-details', scope, {})) {
             message.info(t('containers.messages.batchPreviewReconfirmRequired', '批量预览已更新，请再次确认后执行'))
@@ -5634,14 +5735,14 @@ export default function ContainerDetailPage() {
   const readonlyOemPriceColumn: ColumnsType<ContainerDetail>[number] = {
     // 只读快览列只展示后端按新/已有商品分流后的来源价。
     key: 'readonlyOemPrice',
-    title: renderCompactHeader(t('containers.fields.oemPrice')),
+    title: renderCompactHeader(t('containers.actions.showReadonlyOemPrice', '只读零售价')),
     width: 96,
     align: 'right',
     render: (_, row) => renderReadonlyOemPriceCell(row),
   }
 
   const baseColumns: ColumnsType<ContainerDetail> = [
-    { key: 'index', title: renderCompactHeader(t('containers.columns.index')), width: 56, fixed: 'left', render: (_v, _r, index) => renderNumericCell(index + 1) },
+    { key: 'index', title: renderCompactHeader(t('containers.columns.index')), width: 56, fixed: 'left', render: (_v, _r, index) => renderNumericCell(detailRowNumberOffset + index + 1) },
     {
       key: 'image',
       title: renderCompactHeader(t('containers.columns.image')),
@@ -5800,7 +5901,7 @@ export default function ContainerDetailPage() {
                 restoreAutoSaveEditBaseline(row, '单件装箱数')
                 return
               }
-              clearAutoSaveEditBaseline(row, '单件装箱数')
+              if (isAutoSaveEditUnchanged(row, '单件装箱数', Number(event.target.value))) return
               void savePackageMetricPatch(row, { 单件装箱数: Number(event.target.value) }).catch(handleDetailSaveError)
             }}
             onKeyDown={(event) => handleEditableCellKeyDown(row, 'packingQuantity', event)}
@@ -5847,7 +5948,7 @@ export default function ContainerDetailPage() {
                 restoreAutoSaveEditBaseline(row, '单件体积')
                 return
               }
-              clearAutoSaveEditBaseline(row, '单件体积')
+              if (isAutoSaveEditUnchanged(row, '单件体积', Number(event.target.value))) return
               void savePackageMetricPatch(row, { 单件体积: Number(event.target.value) }).catch(handleDetailSaveError)
             }}
             onKeyDown={(event) => handleEditableCellKeyDown(row, 'unitVolume', event)}
@@ -5910,8 +6011,8 @@ export default function ContainerDetailPage() {
                 restoreAutoSaveEditBaseline(row, '调整浮率')
                 return
               }
-              clearAutoSaveEditBaseline(row, '调整浮率')
               const value = Number(event.target.value)
+              if (isAutoSaveEditUnchanged(row, '调整浮率', value)) return
               void saveFloatRatePatch(row, value).catch(handleDetailSaveError)
             }}
             onKeyDown={(event) => handleEditableCellKeyDown(row, 'floatRate', event)}
@@ -5949,7 +6050,7 @@ export default function ContainerDetailPage() {
                 restoreAutoSaveEditBaseline(row, '中包数')
                 return
               }
-              clearAutoSaveEditBaseline(row, '中包数')
+              if (isAutoSaveEditUnchanged(row, '中包数', Number(event.target.value))) return
               void saveRowPatch(row, { 中包数: Number(event.target.value) }).catch(handleDetailSaveError)
             }}
             onKeyDown={(event) => handleEditableCellKeyDown(row, 'middlePackQuantity', event)}
@@ -6244,8 +6345,12 @@ export default function ContainerDetailPage() {
             status={saveFailure || concurrencyConflict ? 'error' : undefined}
             aria-invalid={Boolean(saveFailure || concurrencyConflict)}
             title={concurrencyConflict?.message ?? saveFailure?.message}
+            onFocus={() => captureAutoSaveEditBaseline(row, '备注', row.备注 ?? '')}
             onChange={(event) => patchAutoSaveRow(row, { 备注: event.target.value })}
-            onBlur={(event) => void saveRowPatch(row, { 备注: event.target.value }).catch(handleDetailSaveError)}
+            onBlur={(event) => {
+              if (isAutoSaveEditUnchanged(row, '备注', event.target.value)) return
+              void saveRowPatch(row, { 备注: event.target.value }).catch(handleDetailSaveError)
+            }}
             onKeyDown={(event) => handleEditableCellKeyDown(row, 'remark', event)}
             onPaste={(event) => handleEditableCellPaste(row, 'remark', event)}
           />

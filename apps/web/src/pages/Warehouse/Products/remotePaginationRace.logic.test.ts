@@ -638,7 +638,7 @@ async function main() {
 
   const mutationRefreshContractFailure = await runTest('仓库主列表的 post-await 刷新统一走 current loader', () => {
     for (const [name, source, startMarker, endMarker] of [
-      ['商品编辑', warehouseProductsSource, 'const handleSave = async () =>', 'const handleBatchToggleActive = async'],
+      ['商品编辑', warehouseProductsSource, 'const handleSave = async (', 'const handleBatchToggleActive = async'],
       ['商品批量状态', warehouseProductsSource, 'const handleBatchToggleActive = async', 'const openBatchEdit ='],
       ['商品批量编辑后台任务', warehouseProductsSource, 'const refreshBatchUpdateListWithSelection = useCallback', 'const clearSubmittedBatchUpdateSelection = useCallback'],
       ['商品套装保存', warehouseProductsSource, 'const handleSaveSetItems = async', 'const handleExport = async'],

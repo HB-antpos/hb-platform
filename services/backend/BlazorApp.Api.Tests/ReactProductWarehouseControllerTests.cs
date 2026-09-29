@@ -802,6 +802,93 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchUpdate_带供货说明时走带选项重载并透传说明()
+        {
+            // 未开图片生成时旧逻辑走无选项重载；带了下架说明必须改走带选项重载，否则说明会被丢弃。
+            var items = new List<UpdateItemDto> { new() { ProductCode = "P-DELIST", IsActive = false } };
+            var serviceMock = new Mock<IProductWarehouseReactService>(MockBehavior.Strict);
+            serviceMock
+                .Setup(service =>
+                    service.BatchUpdateAsync(
+                        items,
+                        "仓库经理A",
+                        It.Is<WarehouseProductBatchUpdateOptionsDto>(options =>
+                            !options.GenerateImageUrls
+                            && options.SupplyNotice != null
+                            && options.SupplyNotice.SupplyPlan == "Discontinued"
+                            && options.SupplyNotice.StoreFacingNote == "厂家停产"
+                        )
+                    )
+                )
+                .ReturnsAsync(new WarehouseProductBatchUpdateResultDto { Success = true, SuccessCount = 1 });
+            var controller = CreateController(serviceMock.Object, username: "仓库经理A");
+
+            var actionResult = await controller.BatchUpdate(
+                new ReactProductWarehouseController.BatchUpdateRequest
+                {
+                    Items = items,
+                    SupplyNotice = new WarehouseProductSupplyNoticeInputDto
+                    {
+                        SupplyPlan = "Discontinued",
+                        StoreFacingNote = "厂家停产",
+                    },
+                }
+            );
+
+            var ok = Assert.IsType<OkObjectResult>(actionResult);
+            Assert.True((bool)ok.Value!.GetType().GetProperty("success")!.GetValue(ok.Value)!);
+            serviceMock.VerifyAll();
+        }
+
+        [Fact]
+        public async Task StartBatchUpdateJob_透传供货说明给后台任务()
+        {
+            var jobService = new Mock<IWarehouseProductBatchUpdateJobService>(MockBehavior.Strict);
+            jobService
+                .Setup(service => service.StartJobAsync(
+                    It.Is<WarehouseProductBatchUpdateJobRequestDto>(request =>
+                        request.Items.Count == 1
+                        && request.Items[0].IsActive == false
+                        && request.SupplyNotice != null
+                        && request.SupplyNotice.SupplyPlan == "WillRestock"
+                        && request.SupplyNotice.ExpectedPrecision == "Month"
+                        && request.SupplyNotice.ExpectedFrom == new DateOnly(2099, 3, 1)
+                    ),
+                    "后台操作员",
+                    It.IsAny<CancellationToken>()
+                ))
+                .ReturnsAsync(new WarehouseProductBatchUpdateJobDto
+                {
+                    JobId = "batch-job-notice",
+                    OperationId = "warehouse-product-batch-update:notice",
+                    Status = WarehouseProductBatchUpdateJobStatusConstants.Queued,
+                    CreatedAt = DateTime.UtcNow,
+                });
+            var controller = CreateController(
+                Mock.Of<IProductWarehouseReactService>(),
+                batchUpdateJobService: jobService.Object,
+                username: "后台操作员"
+            );
+
+            var actionResult = await controller.StartBatchUpdateJob(
+                new ReactProductWarehouseController.BatchUpdateRequest
+                {
+                    Items = [new UpdateItemDto { ProductCode = "P-JOB-NOTICE", IsActive = false }],
+                    SupplyNotice = new WarehouseProductSupplyNoticeInputDto
+                    {
+                        SupplyPlan = "WillRestock",
+                        ExpectedPrecision = "Month",
+                        ExpectedFrom = new DateOnly(2099, 3, 1),
+                    },
+                },
+                CancellationToken.None
+            );
+
+            Assert.IsType<OkObjectResult>(actionResult);
+            jobService.VerifyAll();
+        }
+
+        [Fact]
         public async Task GetBatchUpdateJob_任务不存在时返回404()
         {
             var jobService = new Mock<IWarehouseProductBatchUpdateJobService>();

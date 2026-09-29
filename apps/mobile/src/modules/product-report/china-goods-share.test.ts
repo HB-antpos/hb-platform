@@ -5,6 +5,7 @@ import {
   DEFAULT_CHINA_BRANCH_SHARE_SORT,
   buildChinaBranchShareRows,
   getChinaBranchShareScaleMax,
+  mergeSupplierBranchSales,
   sortChinaBranchShareRows,
   summarizeChinaGoods,
   summarizeProductPage,
@@ -63,6 +64,41 @@ assert.equal(
   0.4,
   "31% 向上取整到 40%",
 );
+const singleSupplierRows = buildChinaBranchShareRows(
+  [
+    { branchCode: "1", branchName: "A", revenue: 1000, compareRevenue: 1000 },
+    { branchCode: "2", branchName: "B", revenue: 1000, compareRevenue: 1000 },
+  ],
+  [
+    { branchCode: "1", branchName: "A", revenue: 23, compareRevenue: 12 },
+    { branchCode: "2", branchName: "B", revenue: 0, compareRevenue: 31 },
+  ],
+);
+assert.equal(getChinaBranchShareScaleMax(singleSupplierRows, 100), 0.04, "选中供应商后按 1% 取整：3.1% 向上取整到 4%");
+assert.equal(getChinaBranchShareScaleMax([], 100), 0.01, "按 1% 取整时刻度至少 1%");
+assert.equal(getChinaBranchShareScaleMax(singleSupplierRows), 0.1, "默认仍按 10% 取整");
+
+const merged = mergeSupplierBranchSales([
+  { branchCode: "1", branchName: "A", revenue: 10, compareRevenue: 4 },
+  { branchCode: "2", branchName: "", revenue: 0, compareRevenue: 7 },
+  { branchCode: "1", branchName: "A", revenue: 5, compareRevenue: 1 },
+  { branchCode: "2", branchName: "B", revenue: 3, compareRevenue: 0 },
+]);
+assert.deepEqual(
+  merged,
+  [
+    { branchCode: "1", branchName: "A", revenue: 15, compareRevenue: 5 },
+    { branchCode: "2", branchName: "B", revenue: 3, compareRevenue: 7 },
+  ],
+  "分店分解按「分店×供应商」返回时按分店合并金额，名称取第一个非空值",
+);
+const onlyCompare = buildChinaBranchShareRows(
+  [{ branchCode: "2", branchName: "B", revenue: 1000, compareRevenue: 700 }],
+  mergeSupplierBranchSales([{ branchCode: "2", branchName: "B", revenue: 0, compareRevenue: 7 }]),
+)[0];
+assert.equal(onlyCompare.share, 0, "只有同期有销售的分店本期占比为 0%");
+assert.equal(onlyCompare.compareShare, 0.01);
+assert.ok(Math.abs(onlyCompare.shareDeltaPoints! + 1) < 1e-9, "只有同期有销售时增减为负，不能被当成 0");
 
 const branchTotal = (partial: Partial<ChinaGoodsBranchTotals>): ChinaGoodsBranchTotals => ({
   revenue: 0,
