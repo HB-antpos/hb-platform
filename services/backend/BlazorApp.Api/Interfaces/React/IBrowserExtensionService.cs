@@ -7,8 +7,10 @@ public interface IBrowserExtensionService
     BrowserExtensionReleaseDto GetRelease();
     BrowserExtensionSupplierProfilesDto GetSupplierProfiles();
 
+    /// <param name="cancellationToken">调用方请求令牌；已取消时销量排名不再降级，取消异常直接上抛</param>
     Task<BrowserExtensionProductSummaryBatchDto> GetProductSummariesAsync(
-        BrowserExtensionProductSummaryBatchRequestDto request
+        BrowserExtensionProductSummaryBatchRequestDto request,
+        CancellationToken cancellationToken = default
     );
 
     Task<BrowserExtensionPurchaseCyclesDto> GetPurchaseCyclesAsync(

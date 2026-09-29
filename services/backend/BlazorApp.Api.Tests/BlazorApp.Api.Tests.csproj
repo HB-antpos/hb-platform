@@ -25,6 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="ClientAbortCancellationTests.cs" />
     <Compile Include="MobileReportStoreOptionsTests.cs" />
     <Compile Include="StoreProductMaintenanceWarehousePriceSyncTests.cs" />
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />

@@ -2840,6 +2840,108 @@ public sealed class StoreOrderProductListTests : IDisposable
         );
     }
 
+    /// <summary>
+    /// 提交是写操作：取消发生在最后一步（CAS 翻状态）时，前面的拆车写入已在事务里执行，
+    /// 必须整体回滚。客户端中止（调用方令牌已取消）时处理器上抛交给控制器按 499 处理；
+    /// 其他来源的取消（服务端超时）仍返回失败并走错误日志，两种情况都不能留下部分写入。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SubmitOrderAsync_最后一步写入时被取消_事务整体回滚且仅客户端中止时上抛(bool clientAborted)
+    {
+        await SeedProductAsync("P-OK", "ITEM-OK");
+        await SeedProductAsync("P-GONE", "ITEM-GONE");
+        await SeedWarehouseProductAsync("P-OK", oemPrice: 3m, importPrice: 2m);
+        await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
+        var store = CreateService("store-user");
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-OK",
+            Quantity = 2,
+        });
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-GONE",
+            Quantity = 1,
+        });
+        // 让提交先把下架行挪进新购物车（事务内的第一批写入），再执行 CAS。
+        await SetWarehouseProductActiveAsync("P-GONE", false);
+        var before = await _db.Queryable<WareHouseOrder>()
+            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
+        var placementSlice = (BlazorApp.Api.Features.StoreOrders.OrderPlacement.IStoreOrderPlacementSlice)
+            typeof(StoreOrderReactService)
+                .GetField("_orderPlacementSlice", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(store)!;
+
+        using var requestAborted = new CancellationTokenSource();
+        using var serverTimeout = new CancellationTokenSource();
+        var adoTokenSource = clientAborted ? requestAborted : serverTimeout;
+        var callerToken = clientAborted ? requestAborted.Token : CancellationToken.None;
+        var splitCartInserted = false;
+        // 生产中认证阶段已把 RequestAborted 留在同一 ADO 上；服务端超时场景则是另一只令牌。
+        _db.Ado.CancellationToken = adoTokenSource.Token;
+        _db.Aop.OnLogExecuting = (sql, _) =>
+        {
+            var trimmed = sql.TrimStart();
+            if (trimmed.StartsWith("INSERT", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("WareHouseOrder", StringComparison.OrdinalIgnoreCase))
+            {
+                splitCartInserted = true;
+            }
+
+            // CAS 是唯一同时写 FlowStatus 与 OrderNo 的 UPDATE：在它执行前取消。
+            if (trimmed.StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("OrderNo", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("FlowStatus", StringComparison.OrdinalIgnoreCase))
+            {
+                adoTokenSource.Cancel();
+            }
+        };
+
+        try
+        {
+            var request = new SubmitStoreOrderRequestDto { StoreCode = "S001" };
+            if (clientAborted)
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    () => placementSlice.SubmitOrderAsync(request, callerToken)
+                );
+            }
+            else
+            {
+                var result = await placementSlice.SubmitOrderAsync(request, callerToken);
+                Assert.False(result.Success);
+                Assert.Equal("订单提交失败，请稍后重试", result.Message);
+            }
+        }
+        finally
+        {
+            _db.Aop.OnLogExecuting = (sql, parameters) =>
+                _sqlLogs.Add(FormatSqlLog(parameters, sql));
+            _db.Ado.RemoveCancellationToken();
+        }
+
+        Assert.True(adoTokenSource.IsCancellationRequested);
+        Assert.True(splitCartInserted);
+        // 回滚后：没有新购物车、原购物车未提交、两行明细都还在原购物车里。
+        var cart = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal(before.OrderGUID, cart.OrderGUID);
+        Assert.Equal(0, cart.FlowStatus);
+        Assert.True(string.IsNullOrWhiteSpace(cart.OrderNo));
+        Assert.Equal(
+            2,
+            await _db.Queryable<WareHouseOrderDetails>()
+                .CountAsync(item => item.OrderGUID == before.OrderGUID && !item.IsDeleted)
+        );
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

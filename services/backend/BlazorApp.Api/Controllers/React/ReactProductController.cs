@@ -63,7 +63,7 @@ namespace BlazorApp.Api.Controllers.React
         {
             try
             {
-                var result = await _service.GetPagedListAsync(query);
+                var result = await _service.GetPagedListAsync(query, HttpContext.RequestAborted);
                 return Ok(
                     new
                     {
@@ -74,6 +74,11 @@ namespace BlazorApp.Api.Controllers.React
                         pageSize = result.PageSize,
                     }
                 );
+            }
+            catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                // 客户端已断开：不再按 500 记错误；服务端自身超时不满足该条件，仍走下方错误日志。
+                return StatusCode(499);
             }
             catch (Exception ex)
             {
