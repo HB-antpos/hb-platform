@@ -290,20 +290,35 @@ async function main() {
   })
   if (productIntegritySourceFailure) failures.push(productIntegritySourceFailure)
 
-  const adminButtonGuardFailure = await runTest('页面应使用 Admin 权限控制 HQ 同步按钮', () => {
+  // HQ → HBweb 的商品全量/增量/选中同步已于 2026-09-29 停用（后端返回 410），页面不得再保留入口与轮询逻辑。
+  const adminButtonGuardFailure = await runTest('页面不再提供从 HQ 拉取商品的全量、增量和选中同步入口', () => {
+    for (const removed of [
+      "t('posAdmin.products.fullSyncFromHQ'",
+      "t('posAdmin.products.incrementalSyncFromHQ'",
+      "t('posAdmin.products.syncSelectedFromHq'",
+      'ensureCanSyncProductsFromHq',
+      'openHqSyncModal',
+      'handleSyncFromHq',
+      'handleSyncSelectedFromHq',
+      'syncSelectedProductsFromHq',
+      'createProductFullHqSyncJob',
+      'createProductIncrementalHqSyncJob',
+      'getProductHqSyncJob',
+      'createProductHqSyncJobPoller',
+      'buildProductHqSyncOperationId',
+      'PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY',
+      'posAdmin.products.activeHqSyncJob',
+      'activeHqSyncJob',
+      'hqSyncSubmitting',
+      'hqSyncVisible',
+      'selectedFromHqLoading',
+      'buildHqSyncResultLines',
+    ]) {
+      assert(!pageSource.includes(removed), `页面不应再包含 HQ → HBweb 商品同步代码：${removed}`)
+    }
     assert(
-      pageSource.includes("t('posAdmin.products.fullSyncFromHQ', '全量同步')") &&
-        pageSource.includes("t('posAdmin.products.incrementalSyncFromHQ', '增量同步')"),
-      '页面源码中应存在“全量同步”和“增量同步”两个按钮',
-    )
-    assert(
-      pageSource.includes('useAuthStore') && pageSource.includes('isAdmin'),
-      '页面应显式读取 auth store，并基于 Admin 权限决定是否渲染 HQ 同步按钮',
-    )
-    assert(
-      pageSource.includes('ensureCanSyncProductsFromHq') &&
-        pageSource.includes('if (!ensureCanSyncProductsFromHq()) return'),
-      'HQ 同步打开弹窗和确认提交时都应有 Admin 权限守卫',
+      pageSource.includes('useAuthStore') && !pageSource.includes('state.access.isAdmin'),
+      '页面仍通过 auth store 读取权限，但不再需要仅供 HQ 同步使用的 isAdmin',
     )
   })
   if (adminButtonGuardFailure) failures.push(adminButtonGuardFailure)
@@ -664,7 +679,7 @@ async function main() {
 
   const syncToStoreResultGuardFailure = await runTest('同步到分店 job 结果展示应区分失败、部分成功和成功', () => {
     const showResultStart = pageSource.indexOf('function showSyncToStoreJobResult(job: SyncProductsToStoresJobResult)')
-    const showResultEnd = pageSource.indexOf('const ensureCanSyncProductsFromHq', showResultStart)
+    const showResultEnd = pageSource.indexOf('const handleEditFormValuesChange', showResultStart)
     assert(showResultStart >= 0 && showResultEnd > showResultStart, '页面应保留 showSyncToStoreJobResult 结果展示函数')
     const showResultSource = pageSource.slice(showResultStart, showResultEnd)
 
@@ -1360,38 +1375,21 @@ async function main() {
   })
   if (pushToHqFailure) failures.push(pushToHqFailure)
 
-  const selectedFromHqFailure = await runTest('选中商品从 HQ 同步应复用选择、Admin 权限和防重复提交保护', () => {
+  const selectedFromHqFailure = await runTest('选中商品从 HQ 同步的服务层契约保留但页面不再调用', () => {
     assert(
       typeSource.includes('SyncSelectedProductsFromHqRequest') &&
         typeSource.includes('productCodes: string[]'),
-      '类型层应声明选中商品从 HQ 同步的请求契约',
+      '类型层仍声明选中商品从 HQ 同步的请求契约（服务层暂时保留，以后统一清理）',
     )
     assert(
       serviceSource.includes('syncSelectedProductsFromHq') &&
         serviceSource.includes("`${API_BASE}/sync-selected-from-hq`") &&
         serviceSource.includes('normalizeHqProductSyncResult'),
-      '服务层应提供选中商品从 HQ 同步接口，并复用 HQ 同步结果归一化',
+      '服务层函数暂时保留，接口已停用并返回 410',
     )
     assert(
-      pageSource.includes('handleSyncSelectedFromHq') &&
-        pageSource.includes('selectedRowKeys.map(String)') &&
-        pageSource.includes('syncSelectedProductsFromHq({') &&
-        pageSource.includes('showSelectedFromHqResult(result)'),
-      '页面应把当前选中商品编码发送给从 HQ 选中同步接口，并展示结果明细',
-    )
-    assert(
-      pageSource.includes('const selectedFromHqLoadingRef = useRef(false)') &&
-        pageSource.includes('if (selectedFromHqLoadingRef.current) return') &&
-        pageSource.includes('selectedFromHqLoadingRef.current = true') &&
-        pageSource.includes('selectedFromHqLoadingRef.current = false'),
-      '选中商品从 HQ 同步应使用 ref 锁防止连续点击重复提交',
-    )
-    assert(
-      pageSource.includes('ensureCanSyncProductsFromHq') &&
-        pageSource.includes('isAdmin') &&
-        pageSource.includes("t('posAdmin.products.syncSelectedFromHq', '从HQ同步选中')") &&
-        pageSource.includes('disabled={!selectedRowKeys.length || selectedFromHqLoading}'),
-      '从 HQ 同步选中按钮应只对 Admin 显示，并在未选择或 loading 时禁用',
+      !pageSource.includes('syncSelectedProductsFromHq') && !pageSource.includes('showSelectedFromHqResult'),
+      '页面不应再调用选中商品从 HQ 同步接口',
     )
   })
   if (selectedFromHqFailure) failures.push(selectedFromHqFailure)
@@ -1440,109 +1438,63 @@ async function main() {
   })
   if (batchTranslateFailure) failures.push(batchTranslateFailure)
 
-  const jobEndpointFailure = await runTest('全量和增量应创建后台 job 而不是直接等待长同步请求', () => {
+  const jobEndpointFailure = await runTest('商品 HQ 同步 job 的服务层保留但页面不再创建 job', () => {
     assert(
       serviceSource.includes("`${SYNC_API_BASE}/products/jobs`") &&
         serviceSource.includes("`${SYNC_API_BASE}/products-incremental/jobs`") &&
         (serviceSource.includes("`${SYNC_API_BASE}/products/jobs/${encodeURIComponent(jobId)}`") ||
           serviceSource.includes("`${SYNC_API_BASE}/products/jobs/${jobId}`")),
-      '服务层应提供商品 HQ 同步 job 创建和查询接口',
+      '服务层商品 HQ 同步 job 函数暂时保留（以后统一清理）',
     )
     assert(
-        pageSource.includes('createProductFullHqSyncJob({ operationId })') &&
-        pageSource.includes('createProductIncrementalHqSyncJob({') &&
-        pageSource.includes("const startDate = values.startDate ? values.startDate.format('YYYY-MM-DD')"),
-      '页面应按同步模式分别创建全量/增量 job，增量需要传 YYYY-MM-DD 起始日期',
-    )
-    assert(
-      !pageSource.includes('await syncProductsFromHqFull()') &&
+      !pageSource.includes('createProductFullHqSyncJob(') &&
+        !pageSource.includes('createProductIncrementalHqSyncJob(') &&
+        !pageSource.includes('await syncProductsFromHqFull()') &&
         !pageSource.includes('await syncProductsFromHqIncremental({'),
-      '页面不应继续直接等待长同步接口完成',
+      '页面不应再发起任何商品 HQ → HBweb 同步请求',
     )
   })
   if (jobEndpointFailure) failures.push(jobEndpointFailure)
 
-  const syncResultMappingFailure = await runTest('HqProductSyncResult 与页面文案应切到新字段', () => {
+  const syncResultMappingFailure = await runTest('HqProductSyncResult 类型保留新字段且页面不再展示 HQ 同步结果', () => {
     assert(
       typeSource.includes('productsAdded?: number') &&
         typeSource.includes('productsUpdated?: number') &&
         typeSource.includes('productsDeleted?: number'),
       'HqProductSyncResult 类型应声明 productsAdded/productsUpdated/productsDeleted',
     )
+    // productsAdded 仍被「发送到 HQ」的结果展示使用，这里只校验 HQ → HBweb 同步结果展示已移除。
     assert(
-      pageSource.includes('productsAdded') &&
-        pageSource.includes('productsUpdated') &&
-        pageSource.includes('productsDeleted'),
-      '页面同步成功提示应读取 productsAdded/productsUpdated/productsDeleted',
+      !pageSource.includes('showHqSyncJobResult') &&
+        !pageSource.includes("t('posAdmin.products.hqSyncResult'"),
+      '页面不应再展示商品 HQ 同步结果',
     )
   })
   if (syncResultMappingFailure) failures.push(syncResultMappingFailure)
 
-  const duplicateClickGuardFailure = await runTest('HQ 同步确认应防止连续点击重复提交', () => {
-    assert(
-      pageSource.includes('const [hqSyncSubmitting, setHqSyncSubmitting] = useState(false)') &&
-        pageSource.includes('const hqSyncSubmittingRef = useRef(false)'),
-      '页面应维护 hqSyncSubmitting 状态和 ref 锁',
-    )
-    assert(
-      pageSource.includes('if (hqSyncSubmittingRef.current) return') &&
-        pageSource.includes('hqSyncSubmittingRef.current = true') &&
-        pageSource.includes('hqSyncSubmittingRef.current = false'),
-      '同步处理函数应在连续点击时直接返回，并在结束后释放锁',
-    )
-    // 页头改版后 HQ 同步收进「同步」菜单，菜单项以 disabled: hqSyncSubmitting 绑定提交中状态。
+  const duplicateClickGuardFailure = await runTest('「同步」菜单只保留同步到分店，不再包含 HQ 增量/全量同步', () => {
     const syncMenuStart = pageSource.indexOf("label={t('common.listToolbar.sync', '同步')}")
-    const syncMenuSource = pageSource.slice(syncMenuStart, pageSource.indexOf('/>\n', pageSource.indexOf("key: 'syncToStore'", syncMenuStart)))
+    const syncMenuSource = pageSource.slice(syncMenuStart, pageSource.indexOf("label={t('common.listToolbar.tools', '工具')}", syncMenuStart))
     assert(
-      pageSource.includes('confirmLoading={hqSyncSubmitting}') &&
-        syncMenuStart >= 0 &&
-        syncMenuSource.match(/disabled: hqSyncSubmitting,/g)?.length === 2,
-      '同步菜单里的增量/全量同步和弹窗确认应绑定 submitting 状态',
+      syncMenuStart >= 0 &&
+        syncMenuSource.includes("key: 'syncToStore'") &&
+        !syncMenuSource.includes("key: 'incrementalHqSync'") &&
+        !syncMenuSource.includes("key: 'fullHqSync'") &&
+        !syncMenuSource.includes('hqSyncSubmitting'),
+      '同步菜单只应保留 HBweb 内部的同步到分店',
+    )
+    assert(
+      !pageSource.includes('<DatePicker style={{ width: \'100%\' }} allowClear={false} format="YYYY-MM-DD" />'),
+      '增量同步起始日期弹窗应随 HQ 同步一起移除',
     )
   })
   if (duplicateClickGuardFailure) failures.push(duplicateClickGuardFailure)
 
-  const backgroundJobFailure = await runTest('HQ 同步应提交后台 job 后立即关闭弹窗并提示后台执行', () => {
-    assert(
-      pageSource.includes('setHqSyncVisible(false)') &&
-        pageSource.includes('hqSyncJobSubmitted') &&
-        pageSource.includes('startHqSyncJobPolling(activeJob)'),
-      '创建 job 成功后应关闭弹窗、提示后台执行，并启动轮询',
-    )
-  })
-  if (backgroundJobFailure) failures.push(backgroundJobFailure)
-
-  const activeJobFailure = await runTest('HQ 同步 active job 应写入 localStorage 并在刷新后恢复轮询', () => {
-    assert(
-      pageSource.includes('PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY') &&
-        pageSource.includes('localStorage.setItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY') &&
-        pageSource.includes('localStorage.removeItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY'),
-      '页面应使用固定 key 保存和清理 active job',
-    )
-    assert(
-      pageSource.includes('restoreActiveHqSyncJob()') &&
-        pageSource.includes('readActiveProductHqSyncJob()') &&
-        pageSource.includes('startHqSyncJobPolling(restoredJob)'),
-      '页面刷新后应读取 active job 并恢复轮询',
-    )
-    assert(
-      pageSource.includes('}, [stopHqSyncJobPolling])') &&
-        pageSource.includes('}, [restoreActiveHqSyncJob])'),
-      '卸载清理和恢复轮询应拆成独立 effect，避免分页/筛选变化误停轮询',
-    )
-  })
-  if (activeJobFailure) failures.push(activeJobFailure)
-
-  const hqSyncArchitectureFailure = await runTest('商品 HQ 同步页面应使用共享轮询器和统一 operationId', () => {
+  const hqSyncArchitectureFailure = await runTest('商品 HQ 同步共享轮询器与 operationId 仍由服务层导出', () => {
     assert(
       serviceSource.includes('export function buildProductHqSyncOperationId') &&
-        pageSource.includes('buildProductHqSyncOperationId'),
-      'operationId 应由服务层统一导出，页面不应维护另一套生成规则',
-    )
-    assert(
-      serviceSource.includes('createProductHqSyncJobPoller') &&
-        pageSource.includes('createProductHqSyncJobPoller'),
-      '页面和服务兼容 wrapper 应共用商品 HQ 同步轮询器',
+        serviceSource.includes('createProductHqSyncJobPoller'),
+      '服务层导出暂时保留，页面不再使用',
     )
     assert(
       !pageSource.includes("type HqSyncJobStatus = 'Queued'") &&
@@ -1577,7 +1529,7 @@ async function main() {
   const supplierImageResultRefreshFailure = await runTest('供应商图片批量修改成功后应刷新供应商与商品列表', () => {
     const resultSource = pageSource.slice(
       pageSource.indexOf('const showSupplierImageBatchResult = useCallback'),
-      pageSource.indexOf('const startHqSyncJobPolling'),
+      pageSource.indexOf('const startSyncToStoreJobPolling'),
     )
     const successSource = resultSource.slice(resultSource.indexOf('Modal.success({'))
     assert(
@@ -1943,21 +1895,19 @@ async function main() {
       headerSource.indexOf("label={t('common.listToolbar.sync', '同步')}"),
       headerSource.indexOf("label={t('common.listToolbar.tools', '工具')}"),
     )
+    // HQ → HBweb 的增量/全量同步已于 2026-09-29 停用，「同步」菜单只保留同步到分店。
     assert(
-      syncMenuSource.includes("key: 'incrementalHqSync'") &&
-        syncMenuSource.includes("onClick: () => openHqSyncModal('incremental')") &&
-        syncMenuSource.includes("key: 'fullHqSync'") &&
-        syncMenuSource.includes("onClick: () => openHqSyncModal('full')") &&
-        syncMenuSource.match(/visible: isAdmin,/g)?.length === 2 &&
-        syncMenuSource.match(/activeHqSyncJob \? t\('posAdmin\.products\.hqSyncInProgress', '同步中'\)/g)?.length === 2 &&
+      !syncMenuSource.includes("key: 'incrementalHqSync'") &&
+        !syncMenuSource.includes("key: 'fullHqSync'") &&
+        !syncMenuSource.includes('openHqSyncModal') &&
         syncMenuSource.includes("key: 'syncToStore'") &&
         syncMenuSource.includes('visible: canManagePosProducts,') &&
         syncMenuSource.includes('onClick: openSyncToStoreModal'),
-      '「同步」菜单应包含 Admin 可见的增量/全量同步（仍经确认弹窗）和商品管理权限可见的同步到分店',
+      '「同步」菜单应只包含商品管理权限可见的同步到分店',
     )
     assert(
-      syncMenuSource.includes('<SyncOutlined spin={Boolean(activeHqSyncJob) || hqSyncSubmitting} />'),
-      'HQ 同步进行中时「同步」菜单按钮应有进行中提示',
+      syncMenuSource.includes('icon={<SyncOutlined />}'),
+      '「同步」菜单按钮应使用静态同步图标',
     )
     const toolsMenuSource = headerSource.slice(headerSource.indexOf("label={t('common.listToolbar.tools', '工具')}"))
     assert(
@@ -1983,7 +1933,7 @@ async function main() {
     const selectionStart = toolbarSource.indexOf('<SelectionActionBar selectedCount={selectedRowKeys.length} onClearSelection={() => setSelectedRowKeys([])}>')
     const selectionSource = toolbarSource.slice(selectionStart, toolbarSource.indexOf('</SelectionActionBar>'))
     assert(toolbarStart >= 0 && tableStart > toolbarStart && selectionStart > 0, '勾选后操作条应位于 toolbarRef 内、表格之前，以便参与表格高度计算')
-    for (const handler of ['onClick={openBatchEdit}', 'handleBatchEnable(true)', 'handleBatchEnable(false)', 'onClick={handleBatchTranslate}', 'onClick={handleSyncSelectedFromHq}', 'onClick={handlePushToHq}']) {
+    for (const handler of ['onClick={openBatchEdit}', 'handleBatchEnable(true)', 'handleBatchEnable(false)', 'onClick={handleBatchTranslate}', 'onClick={handlePushToHq}']) {
       assertEqual(pageSource.split(handler).length - 1, 1, `${handler} 应只出现一次`)
       assert(selectionSource.includes(handler), `${handler} 应位于勾选后操作条内`)
       assert(!filterRowSource.includes(handler), `${handler} 不应留在筛选行`)
@@ -1994,11 +1944,13 @@ async function main() {
         selectionSource.includes("<Popconfirm title={t('posAdmin.products.confirmBatchDisable', '确认禁用选中的商品？')} onConfirm={() => handleBatchEnable(false)}>") &&
         selectionSource.includes('<Button size="small" danger disabled={!selectedRowKeys.length}>') &&
         selectionSource.includes('disabled={!selectedRowKeys.length || translating}') &&
-        selectionSource.includes('disabled={!selectedRowKeys.length || selectedFromHqLoading}') &&
         selectionSource.includes('disabled={!selectedRowKeys.length || pushToHqLoading || pushToHqModalOpen}'),
-      '勾选后操作条应保留批量编辑、批量启用/禁用确认、批量翻译、从 HQ 同步选中和发送到 HQ 原有的 loading 与禁用条件',
+      '勾选后操作条应保留批量编辑、批量启用/禁用确认、批量翻译和发送到 HQ 原有的 loading 与禁用条件',
     )
-    assertSourceOrder(selectionSource, '{isAdmin && (', 'onClick={handleSyncSelectedFromHq}', '从 HQ 同步选中应只对 Admin 显示')
+    assert(
+      !selectionSource.includes('handleSyncSelectedFromHq') && !selectionSource.includes('{isAdmin && ('),
+      '勾选后操作条不应再保留仅 Admin 可见的「从HQ同步选中」',
+    )
     assert(
       selectionSource.lastIndexOf('{canManagePosProducts && (') < selectionSource.indexOf('onClick={handlePushToHq}') &&
         selectionSource.indexOf('{canManagePosProducts && (') < selectionSource.indexOf('onClick={openBatchEdit}'),
@@ -2137,36 +2089,20 @@ async function main() {
   })
   if (toolbarHeightFailure) failures.push(toolbarHeightFailure)
 
-  const existingJobFailure = await runTest('已有 active job 时 HQ 同步按钮只展示状态不新建任务', () => {
+  const terminalResultFailure = await runTest('HQ 同步 job 的状态展示已移除，其余后台任务仍走共享超时提示', () => {
     assert(
-      pageSource.includes('const storedActiveJob = activeHqSyncJob ?? readActiveProductHqSyncJob()') &&
-        pageSource.includes('showActiveHqSyncJobStatus(storedActiveJob)'),
-      '打开 HQ 同步弹窗前应先判断 active job 并展示状态',
-    )
-    assert(
-      pageSource.includes('hqSyncInProgress'),
-      '已有任务时按钮应展示同步中状态',
-    )
-  })
-  if (existingJobFailure) failures.push(existingJobFailure)
-
-  const terminalResultFailure = await runTest('HQ 同步 job 完成、失败、Succeeded 加错误明细应展示友好结果', () => {
-    assert(
-      pageSource.includes("result.status === 'Failed'") &&
-        pageSource.includes('hqSyncJobPartialSucceeded') &&
-        pageSource.includes('hqSyncJobSucceeded') &&
-        pageSource.includes('hqSyncJobTimeout'),
-      '轮询终态应区分失败、完成、错误明细部分成功和超时',
+      !pageSource.includes('readActiveProductHqSyncJob') &&
+        !pageSource.includes('showActiveHqSyncJobStatus') &&
+        !pageSource.includes('hqSyncInProgress') &&
+        !pageSource.includes('hqSyncJobPartialSucceeded') &&
+        !pageSource.includes('hqSyncJobSucceeded') &&
+        !pageSource.includes('incrementalStartDateRequired'),
+      '页面不应再保留商品 HQ 同步 job 的恢复、状态与结果展示',
     )
     assert(
       pageSource.includes('HqProductSyncPollingTimeoutError') &&
         pageSource.includes('showPollingTimeout()'),
-      '轮询超时应由共享 poller 抛出专门错误，并走统一超时提示',
-    )
-    assert(
-      pageSource.includes('incrementalStartDateRequired') &&
-        pageSource.includes('allowClear={false}'),
-      '增量同步起始日期应必填，避免提交无范围的增量 job',
+      '同步到分店、图片批量修改等后台任务仍应由共享 poller 抛出超时错误并走统一超时提示',
     )
   })
   if (terminalResultFailure) failures.push(terminalResultFailure)

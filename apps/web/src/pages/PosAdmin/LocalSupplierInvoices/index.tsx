@@ -1,5 +1,4 @@
 import {
-  CloudSyncOutlined,
   CopyOutlined,
   HolderOutlined,
   PlusOutlined,
@@ -37,7 +36,6 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType, TableRef } from 'antd/es/table'
-import dayjs from 'dayjs'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import {
   useCallback,
@@ -52,7 +50,6 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../../store/auth'
-import { RequestError } from '../../../utils/request'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 import { getStableTagColor } from '../../../utils/tagColors'
 import {
@@ -60,13 +57,10 @@ import {
   createInvoice,
   deleteInvoice,
   getInvoiceGrid,
-  syncInvoicesFromHq,
 } from '../../../services/localSupplierInvoiceService'
 import { getActiveLocalSuppliers } from '../../../services/localSupplierService'
 import { getActiveStores } from '../../../services/storeService'
 import type {
-  LocalSupplierInvoiceHqSyncRequest,
-  LocalSupplierInvoiceHqSyncResult,
   LocalSupplierInvoiceListDto,
 } from '../../../types/localSupplierInvoice'
 import { copyTextToClipboard } from '../../../utils/clipboard'
@@ -291,12 +285,6 @@ function formatAmount(value?: number) {
   return value.toFixed(2)
 }
 
-function getHqSyncResultFromError(error: unknown) {
-  if (!(error instanceof RequestError)) return undefined
-  const payload = error.payload as { data?: unknown; details?: unknown } | undefined
-  return (payload?.data ?? payload?.details) as LocalSupplierInvoiceHqSyncResult | undefined
-}
-
 export default function LocalSupplierInvoicesPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -345,11 +333,6 @@ export default function LocalSupplierInvoicesPage() {
   const [createForm] = Form.useForm()
   const [creating, setCreating] = useState(false)
   const [_invoiceNoChecking, setInvoiceNoChecking] = useState(false)
-
-  // 从 HQ 增量同步
-  const [hqSyncModalOpen, setHqSyncModalOpen] = useState(false)
-  const [hqSyncing, setHqSyncing] = useState(false)
-  const [hqSyncForm] = Form.useForm()
 
   // 动态高度
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -699,82 +682,7 @@ export default function LocalSupplierInvoicesPage() {
     navigate(`/pos-admin/local-supplier-invoices/${invoiceGuid}`)
   }
 
-  const openHqSyncModal = () => {
-    hqSyncForm.resetFields()
-    hqSyncForm.setFieldsValue({
-      dateRange: [dayjs().subtract(30, 'day'), dayjs()],
-    })
-    setHqSyncModalOpen(true)
-  }
-
-  const showHqSyncResult = (result: LocalSupplierInvoiceHqSyncResult, failed = false) => {
-    const content = (
-      <div>
-        <p>{t('posAdmin.invoices.invoiceAdded', '主表新增')}：{result.invoiceAddedCount} {t('posAdmin.invoices.recordsUnit', '条')}</p>
-        <p>{t('posAdmin.invoices.invoiceUpdated', '主表更新')}：{result.invoiceUpdatedCount} {t('posAdmin.invoices.recordsUnit', '条')}</p>
-        <p>{t('posAdmin.invoices.detailAdded', '明细新增')}：{result.detailAddedCount} {t('posAdmin.invoices.recordsUnit', '条')}</p>
-        <p>{t('posAdmin.invoices.detailUpdated', '明细更新')}：{result.detailUpdatedCount} {t('posAdmin.invoices.recordsUnit', '条')}</p>
-        <p>{t('posAdmin.invoices.totalProcessed', '总处理')}：{result.totalProcessed} {t('posAdmin.invoices.recordsUnit', '条')}</p>
-        <p>{t('posAdmin.invoices.duration', '耗时')}：{(result.durationMs / 1000).toFixed(2)} {t('posAdmin.invoices.seconds', '秒')}</p>
-        {result.errors && result.errors.length > 0 && (
-          <div>
-            <p style={{ color: 'red' }}>{t('posAdmin.invoices.errorInfo', '错误信息')}：</p>
-            <ul>
-              {result.errors.map((err, idx) => (
-                <li key={idx}>{err}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    )
-
-    if (failed) {
-      Modal.warning({
-        title: t('posAdmin.invoices.hqSyncFailed', '从HQ同步失败'),
-        width: 600,
-        content,
-      })
-      return
-    }
-
-    Modal.info({
-      title: t('posAdmin.invoices.hqSyncResult', 'HQ同步结果'),
-      width: 600,
-      content,
-    })
-  }
-
-  const handleSyncFromHq = async () => {
-    try {
-      const values = await hqSyncForm.validateFields()
-      const dto: LocalSupplierInvoiceHqSyncRequest = {}
-      if (values.selectedStoreCodes && values.selectedStoreCodes.length > 0) {
-        dto.selectedStoreCodes = values.selectedStoreCodes
-      }
-      if (values.dateRange && values.dateRange.length === 2) {
-        dto.startDate = values.dateRange[0].format('YYYY-MM-DD')
-        dto.endDate = values.dateRange[1].format('YYYY-MM-DD')
-      }
-
-      setHqSyncing(true)
-      const result = await syncInvoicesFromHq(dto)
-      setHqSyncModalOpen(false)
-      showHqSyncResult(result)
-      setSelectedRowKeys([])
-      await latestLoadDataRef.current()
-    } catch (error) {
-      const result = getHqSyncResultFromError(error)
-      if (result) {
-        showHqSyncResult(result, true)
-        return
-      }
-      message.error(error instanceof Error ? error.message : t('posAdmin.invoices.hqSyncFailed', '从HQ同步失败'))
-    } finally {
-      setHqSyncing(false)
-    }
-  }
-
+  // 「从HQ同步」（HQ 进货单 → HBweb）已于 2026-09-29 停用；编辑页「更新HQ商品」等写 HQ 的操作不受影响。
   const baseColumns: ColumnsType<LocalSupplierInvoiceListDto> = [
     {
       title: t('column.index'),
@@ -1087,16 +995,6 @@ export default function LocalSupplierInvoicesPage() {
         <Space>
           {isAdmin && (
             <Button
-              icon={<CloudSyncOutlined />}
-              loading={hqSyncing}
-              disabled={storeOptions.length === 0}
-              onClick={openHqSyncModal}
-            >
-              {t('posAdmin.invoices.syncFromHQ', '从HQ同步')}
-            </Button>
-          )}
-          {isAdmin && (
-            <Button
               icon={<UploadOutlined />}
               disabled={storeOptions.length === 0}
               onClick={() => setImportVisible(true)}
@@ -1251,32 +1149,6 @@ export default function LocalSupplierInvoicesPage() {
           />
         </div>
       </div>
-
-      <Modal
-        open={hqSyncModalOpen}
-        title={t('posAdmin.invoices.hqSyncTitle', '从HQ同步分店进货单')}
-        confirmLoading={hqSyncing}
-        onCancel={() => setHqSyncModalOpen(false)}
-        onOk={() => void handleSyncFromHq()}
-        width={550}
-        forceRender
-      >
-        <Form form={hqSyncForm} layout="vertical">
-          <Form.Item name="selectedStoreCodes" label={t('posAdmin.invoices.storeOptional', '分店（不选则全部）')}>
-            <Select
-              mode="multiple"
-              showSearch
-              optionFilterProp="label"
-              options={storeOptions}
-              placeholder={t('posAdmin.invoices.syncAllStores', '不选则同步所有分店')}
-              allowClear
-            />
-          </Form.Item>
-          <Form.Item name="dateRange" label={t('posAdmin.invoices.syncDateRange', '同步日期范围')}>
-            <DatePicker.RangePicker style={{ width: '100%' }} />
-          </Form.Item>
-        </Form>
-      </Modal>
 
       <Modal
         open={createVisible}

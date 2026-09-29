@@ -36,6 +36,7 @@
     <Compile Include="StoreProductMaintenanceSyncHelperTests.cs" />
     <Compile Include="SetChildPurchasePriceAllocatorTests.cs" />
     <Compile Include="SetChildPurchasePriceServiceTests.cs" />
+    <Compile Include="StoreMultiCodeUpsertForActiveStoresTests.cs" />
     <Compile Include="SetChildPurchasePriceSqlServerIntegrationTests.cs" />
     <Compile Include="SetChildPurchasePriceMutationLockTests.cs" />
     <Compile Include="ReactProductIntegrityControllerTests.cs" />
@@ -335,6 +336,8 @@
     <Compile Include="DataSyncReactControllerLocationSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerProductSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerSyncResultContractTests.cs" />
+    <Compile Include="HqToHbwebSyncDisabledContractTests.cs" />
+    <Compile Include="HqToHbwebSyncDisabledAttributeTests.cs" />
     <Compile Include="DataSyncLegacyControllerProductSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopFilterOptionsTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopGridTests.cs" />

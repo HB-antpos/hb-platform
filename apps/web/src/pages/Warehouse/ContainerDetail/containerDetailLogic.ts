@@ -2419,7 +2419,9 @@ function getDetectedUnitVolume(item: ContainerDetailDetectedPrice) {
 
 export function calculateContainerDetailTotalAmount(row: ContainerDetail) {
   if (row.装柜数量 == null || row.国内价格 == null) return row.合计装柜金额
-  return roundToDigits(row.装柜数量 * row.国内价格 * (row.调整浮率 ?? DEFAULT_CONTAINER_DETAIL_FLOAT_RATE), 2)
+  // 合计装柜金额 = 装柜数量 × 国内价格，与 HQ 货柜详情和导入数据口径一致（货柜头「国内价格合计」由它汇总）；
+  // 调整浮率只作用于进口价格，不能乘进这里，否则改箱规/体积后会把国内价格合计放大。
+  return roundToDigits(row.装柜数量 * row.国内价格, 2)
 }
 
 export function calculateContainerDetailTotalVolume(row: ContainerDetail) {
@@ -2521,6 +2523,17 @@ export function buildContainerDetailMatchedPriceUpdates(
   container?: Pick<ContainerMain, '汇率' | '运费' | '总体积'> | null,
 ): UpdateContainerDetailRequest[] {
   return buildContainerDetailMatchedDomesticDataUpdates(rows, detectedItems, container)
+}
+
+/**
+ * 匹配国内数据只回写货柜明细本身：保存前给每条更新补上 SkipRelatedProductSync。
+ * 字段草稿只保留业务字段，这个标记在进出草稿时会丢失，丢失后后端会把国内数据同步改写
+ * 已有商品的仓库价、主档进货价/名称和分店进货价。
+ */
+export function markContainerDetailUpdatesSkipRelatedProductSync<T extends { SkipRelatedProductSync?: boolean }>(
+  updates: T[],
+): T[] {
+  return updates.map((update) => ({ ...update, SkipRelatedProductSync: true }))
 }
 
 export function buildContainerDetailMatchedDomesticDataUpdates(

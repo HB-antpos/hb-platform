@@ -72,7 +72,12 @@ namespace BlazorApp.Api.Services.React
                         existingJobId,
                         isDuplicateRequest: true
                     );
-                    if (existingJob != null)
+                    // 排队/运行中与已成功的任务继续复用，防止重复提交；已失败的任务不复用，
+                    // 否则用户修正数据（如补英文名）后再次提交会在保留期内一直拿到旧的失败结果。
+                    if (
+                        existingJob != null
+                        && existingJob.Status != ContainerProductCreationJobStatusConstants.Failed
+                    )
                     {
                         return Task.FromResult(existingJob);
                     }

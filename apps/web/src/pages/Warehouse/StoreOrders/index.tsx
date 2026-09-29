@@ -1,10 +1,8 @@
 import {
   CopyOutlined,
-  DatabaseOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
-  SyncOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
 import {
@@ -47,16 +45,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import PageContainer from '../../../components/PageContainer'
-import { refreshSession } from '../../../services/auth'
 import {
   batchMapStoreOrderStoreCode,
   batchUpdateStoreOrderStatus,
-  createStoreOrderFullHqSyncJob,
-  createStoreOrderIncrementalHqSyncJob,
   copyStoreOrder,
   createStoreOrder,
   deleteStoreOrder,
-  getStoreOrderHqSyncJob,
   getStoreOrderList,
   getUnmatchedStoreOrderGroups,
   getUsedStoreOrderBranches,
@@ -69,8 +63,6 @@ import type { CreateStoreDto, StoreDto } from '../../../types/store'
 import type {
   CopyStoreOrderPayload,
   StoreOrderBranchOption,
-  StoreOrderHqSyncPayload,
-  StoreOrderSyncConflictStrategy,
   StoreOrderFlowStatus,
   StoreOrderListColumnFilters,
   StoreOrderListItem,
@@ -86,15 +78,6 @@ import { getStoreColor } from '../../../utils/userTableColors'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import { RequestError } from '../../../utils/request'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
-import {
-  ensureStoreOrderSyncSession,
-  STORE_ORDER_SYNC_AUTH_EXPIRED_MESSAGE,
-} from './syncSessionGuard'
-import {
-  createStoreOrderSyncJobPoller,
-  StoreOrderSyncPollingCancelledError,
-  StoreOrderSyncPollingTimeoutError,
-} from './syncJobPolling'
 import {
   isStoreOrderListColumnOrderCustomized,
   mergeStoreOrderListColumnOrder,
@@ -304,7 +287,6 @@ function cleanStoreOrderListColumnFilters(
   return Object.keys(next).length ? next : undefined
 }
 
-const DEFAULT_INCREMENTAL_CONFLICT_STRATEGY: StoreOrderSyncConflictStrategy = 'LatestWins'
 const DEFAULT_STATUS_LIST = [FlowStatus.Submitted, FlowStatus.Picking]
 const STATUS_FILTER_ORDER = [FlowStatus.Submitted, FlowStatus.Picking, FlowStatus.Completed]
 const STORE_ORDER_LIST_SELECTION_COLUMN_WIDTH = 48
@@ -866,15 +848,11 @@ function CopyOrderModal({ open, loading, onCancel, onConfirm }: CopyOrderModalPr
   )
 }
 
-function isUnauthorizedError(error: unknown) {
-  return error instanceof RequestError && error.status === 401
-}
-
 export default function StoreOrdersPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { message, modal } = AntdApp.useApp()
-  const { access, clearAuth } = useAuthStore()
+  const { access } = useAuthStore()
   const isWarehouseStaffOnly =
     access.isWarehouseStaff &&
     !access.isAdmin &&
@@ -901,14 +879,6 @@ export default function StoreOrdersPage() {
   const [total, setTotal] = useState(0)
   const [sortField, setSortField] = useState('orderDate')
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend')
-  const [syncingMode, setSyncingMode] = useState<'Full' | 'Incremental' | null>(null)
-  const [incrementalSyncOpen, setIncrementalSyncOpen] = useState(false)
-  const [incrementalSyncRange, setIncrementalSyncRange] = useState<RangeValue>(() => [
-    dayjs().subtract(30, 'day'),
-    dayjs(),
-  ])
-  const [incrementalConflictStrategy, setIncrementalConflictStrategy] =
-    useState<StoreOrderSyncConflictStrategy>(DEFAULT_INCREMENTAL_CONFLICT_STRATEGY)
   const [storePickerOpen, setStorePickerOpen] = useState(false)
   const [copyModalOpen, setCopyModalOpen] = useState(false)
   const [shippingOrder, setShippingOrder] = useState<StoreOrderListItem | null>(null)
@@ -922,8 +892,6 @@ export default function StoreOrdersPage() {
   const [unmatchedTargetStores, setUnmatchedTargetStores] = useState<StoreDto[]>([])
   const [columnOrder, setColumnOrder] = useState<StoreOrderListTableColumnKey[]>([])
   const [columnWidths, setColumnWidths] = useState<StoreOrderListColumnWidthMap>({})
-  // 记录当前轮询停止函数，确保重复触发和页面卸载时都能清理定时器。
-  const stopSyncPollingRef = useRef<(() => void) | null>(null)
   const stopColumnResizeRef = useRef<(() => void) | null>(null)
   // 避免卸载后继续 setState，防止轮询尾声触发无效更新。
   const isMountedRef = useRef(true)
@@ -1336,157 +1304,11 @@ export default function StoreOrdersPage() {
     return () => {
       isMountedRef.current = false
       listRequestGuardRef.current.invalidate()
-      stopSyncPollingRef.current?.()
-      stopSyncPollingRef.current = null
     }
   }, [])
 
-  const runStoreOrderHqSync = async (
-    mode: 'Full' | 'Incremental',
-    options: StoreOrderHqSyncPayload = {},
-  ) => {
-    if (isMountedRef.current) {
-      setSyncingMode(mode)
-    }
-    try {
-      const hasSession = await ensureStoreOrderSyncSession({
-        refreshSession,
-        clearAuth,
-        redirectToLogin: (target) => navigate(target, { replace: true }),
-        currentPath:
-          typeof window === 'undefined'
-            ? '/warehouse/store-orders'
-            : `${window.location.pathname}${window.location.search}`,
-      })
-
-      if (!hasSession) {
-        message.warning(STORE_ORDER_SYNC_AUTH_EXPIRED_MESSAGE)
-        return
-      }
-
-      const syncJob =
-        mode === 'Full'
-          ? await createStoreOrderFullHqSyncJob()
-          : await createStoreOrderIncrementalHqSyncJob(options)
-
-      if (!syncJob.jobId) {
-        message.error(syncJob.message || t('storeOrders.syncJobCreateFailed'))
-        return
-      }
-
-      const poller = createStoreOrderSyncJobPoller({
-        jobId: syncJob.jobId,
-        getJob: getStoreOrderHqSyncJob,
-      })
-      stopSyncPollingRef.current = poller.stop
-
-      const result = await poller.promise
-      stopSyncPollingRef.current = null
-
-      if (result.status === 'Failed') {
-        message.error(result?.message || t('storeOrders.syncFailed'))
-        return
-      }
-
-      const parts: string[] = []
-      if ((result.ordersSynced ?? 0) > 0 || (result.detailsSynced ?? 0) > 0) {
-        parts.push(
-          t('storeOrders.syncCreatedSummary', {
-            orders: result.ordersSynced ?? 0,
-            details: result.detailsSynced ?? 0,
-          }),
-        )
-      }
-      if ((result.ordersUpdated ?? 0) > 0 || (result.detailsUpdated ?? 0) > 0) {
-        parts.push(
-          t('storeOrders.syncUpdatedSummary', {
-            orders: result.ordersUpdated ?? 0,
-            details: result.detailsUpdated ?? 0,
-          }),
-        )
-      }
-      if ((result.ordersSoftDeleted ?? 0) > 0 || (result.detailsSoftDeleted ?? 0) > 0) {
-        parts.push(
-          t('storeOrders.syncDeletedSummary', {
-            orders: result.ordersSoftDeleted ?? 0,
-            details: result.detailsSoftDeleted ?? 0,
-          }),
-        )
-      }
-      if (
-        (result.skippedOrdersBecauseLocalNewer ?? 0) > 0 ||
-        (result.skippedDetailsBecauseLocalNewer ?? 0) > 0
-      ) {
-        parts.push(
-          t('storeOrders.syncSkippedSummary', {
-            orders: result.skippedOrdersBecauseLocalNewer ?? 0,
-            details: result.skippedDetailsBecauseLocalNewer ?? 0,
-          }),
-        )
-      }
-
-      if (parts.length) {
-        message.success(parts.join(', '))
-      } else {
-        message.info(result.message || t('storeOrders.alreadyLatest'))
-      }
-
-      void refreshCurrentList()
-    } catch (error) {
-      if (isUnauthorizedError(error)) {
-        message.warning(STORE_ORDER_SYNC_AUTH_EXPIRED_MESSAGE)
-        return
-      }
-      if (error instanceof StoreOrderSyncPollingCancelledError) {
-        return
-      }
-      if (error instanceof StoreOrderSyncPollingTimeoutError) {
-        message.warning(t('storeOrders.syncTimeout'))
-        return
-      }
-      console.error(error)
-      message.error(error instanceof Error ? error.message : t('storeOrders.syncFailed'))
-    } finally {
-      stopSyncPollingRef.current = null
-      if (isMountedRef.current) {
-        setSyncingMode(null)
-      }
-    }
-  }
-
-  const handleFullHqSync = () => {
-    modal.confirm({
-      title: t('storeOrders.syncFullTitle'),
-      content: t('storeOrders.syncFullContent'),
-      okText: t('storeOrders.syncFullConfirm'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
-      onOk: () => runStoreOrderHqSync('Full'),
-    })
-  }
-
-  const handleOpenIncrementalHqSync = () => {
-    // 每次打开弹窗都恢复安全默认值，避免上次选择 HQ 优先后被无意沿用。
-    setIncrementalConflictStrategy(DEFAULT_INCREMENTAL_CONFLICT_STRATEGY)
-    setIncrementalSyncOpen(true)
-  }
-
-  const handleIncrementalHqSync = async () => {
-    if (!incrementalSyncRange?.[0] || !incrementalSyncRange?.[1]) {
-      message.warning(t('storeOrders.syncDateRangeRequired'))
-      return
-    }
-
-    setIncrementalSyncOpen(false)
-    await runStoreOrderHqSync('Incremental', {
-      storeCodes: selectedStoreCodes.length ? selectedStoreCodes : undefined,
-      startDate: incrementalSyncRange[0].startOf('day').toISOString(),
-      endDate: incrementalSyncRange[1].endOf('day').toISOString(),
-      // 增量同步需明确告知后端冲突策略，避免默认行为随接口演进漂移。
-      conflictStrategy: incrementalConflictStrategy,
-    })
-  }
-
+  // 分店订货的 HQ 全量/增量同步（HQ 订货单 → HBweb）已于 2026-09-29 停用：
+  // 2026-09-21 只读核查时 HQ 分店订货单主表最后变更停在 2026-06-21，订货业务已迁到 HBweb。
   const handleStatusToggle = (record: StoreOrderListItem) => {
     if (!canUseWarehouseManagerActions) {
       return
@@ -2042,27 +1864,6 @@ export default function StoreOrdersPage() {
       subtitle={t('storeOrders.subtitle')}
       extra={
         <Space wrap>
-          {access.isAdmin ? (
-            <Button
-              danger
-              icon={<DatabaseOutlined />}
-              loading={syncingMode === 'Full'}
-              disabled={syncingMode !== null}
-              onClick={handleFullHqSync}
-            >
-              {t('storeOrders.syncFullOrders')}
-            </Button>
-          ) : null}
-          {canUseWarehouseManagerActions ? (
-            <Button
-              icon={<SyncOutlined />}
-              loading={syncingMode === 'Incremental'}
-              disabled={syncingMode !== null}
-              onClick={handleOpenIncrementalHqSync}
-            >
-              {t('storeOrders.syncIncrementalOrders')}
-            </Button>
-          ) : null}
           {canUseWarehouseManagerActions ? (
             <Button
               icon={<ToolOutlined />}
@@ -2402,55 +2203,6 @@ export default function StoreOrdersPage() {
             value={shippingDate}
             onChange={(value) => setShippingDate(value ?? dayjs())}
           />
-        </Space>
-      </Modal>
-
-      <Modal
-        title={t('storeOrders.syncIncrementalTitle')}
-        open={incrementalSyncOpen}
-        confirmLoading={syncingMode === 'Incremental'}
-        okText={t('storeOrders.syncIncrementalOrders')}
-        cancelText={t('common.cancel')}
-        destroyOnHidden
-        onCancel={() => {
-          setIncrementalSyncOpen(false)
-          setIncrementalConflictStrategy(DEFAULT_INCREMENTAL_CONFLICT_STRATEGY)
-        }}
-        onOk={() => void handleIncrementalHqSync()}
-      >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Typography.Text type="secondary">
-            {t('storeOrders.syncDefaultRangeHint')}
-          </Typography.Text>
-          <DatePicker.RangePicker
-            value={incrementalSyncRange}
-            style={{ width: '100%' }}
-            showTime
-            onChange={(value) => setIncrementalSyncRange(value)}
-          />
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <Typography.Text>{t('storeOrders.syncConflictStrategy')}</Typography.Text>
-            <Radio.Group
-              value={incrementalConflictStrategy}
-              onChange={(event) =>
-                setIncrementalConflictStrategy(event.target.value as StoreOrderSyncConflictStrategy)
-              }
-            >
-              <Space direction="vertical" size={8}>
-                <Radio value="LatestWins">{t('storeOrders.syncConflictLatestWins')}</Radio>
-                <Radio value="HqWins">{t('storeOrders.syncConflictHqWins')}</Radio>
-              </Space>
-            </Radio.Group>
-          </Space>
-          {selectedStoreCodes.length ? (
-            <Typography.Text type="secondary">
-              {t('storeOrders.syncIncrementalScope', { count: selectedStoreCodes.length })}
-            </Typography.Text>
-          ) : (
-            <Typography.Text type="secondary">
-              {t('storeOrders.syncIncrementalAllScope')}
-            </Typography.Text>
-          )}
         </Space>
       </Modal>
     </PageContainer>
