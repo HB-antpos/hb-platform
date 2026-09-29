@@ -20,6 +20,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "price-updates",
   // 货柜新品依赖真实到店数据与接口，审核模式没有离线演示数据。
   "container-new-products",
+  // App 安装页依赖真实版本登记与构建记录，审核模式没有离线演示数据。
+  "app-install",
   // 收银用户条码是真实员工登录凭据，审核模式不展示。
   "cash-register-users",
   "workbench",

@@ -72,6 +72,24 @@
   <data name="startup.step" xml:space="preserve">
     <value>第 {0}/{1} 步</value>
   </data>
+  <data name="startup.stepName.services" xml:space="preserve">
+    <value>启动服务</value>
+  </data>
+  <data name="startup.stepName.interface" xml:space="preserve">
+    <value>加载界面</value>
+  </data>
+  <data name="startup.stepName.update" xml:space="preserve">
+    <value>检查更新</value>
+  </data>
+  <data name="startup.stepName.device" xml:space="preserve">
+    <value>验证设备</value>
+  </data>
+  <data name="startup.stepName.catalog" xml:space="preserve">
+    <value>加载商品</value>
+  </data>
+  <data name="startup.stepName.display" xml:space="preserve">
+    <value>打开收银台</value>
+  </data>
   <data name="startup.elapsed" xml:space="preserve">
     <value>已用 {0} 秒</value>
   </data>

@@ -14,8 +14,10 @@ public partial class StartupSplashWindow : Window
         // 启动页在独立线程上运行：资源查找到窗口为止直接转到系统主题，
         // 不读取主线程上的 Application.Resources（主线程可能正在合并主题字典）。
         InheritanceBehavior = InheritanceBehavior.SkipToThemeNext;
-        InitializeComponent();
+        // 必须在 InitializeComponent 之前设置：窗口改了 InheritanceBehavior 后，事后再设 DataContext
+        // 不会传到已创建的文字、图片和进度条上，启动页会只剩空卡片。
         DataContext = progressState;
+        InitializeComponent();
         CenterOnPrimaryScreen();
         Loaded += (_, _) => StartSheenIfAnimationsEnabled();
     }

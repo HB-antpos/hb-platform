@@ -320,6 +320,10 @@ public class ControllerAuthorizationMetadataTests
             nameof(MobileAppBuildsController.CreateOtaRollbackCommand),
             Permissions.System.ManageAppDownloads
         );
+        yield return Policy<MobileAppInstallLinksController>(
+            nameof(MobileAppInstallLinksController.Get),
+            Permissions.System.ViewMobileAppInstallLinks
+        );
         yield return Policy<MobileAppDeviceStatusController>(
             nameof(MobileAppDeviceStatusController.GetPaged),
             Permissions.DeviceRegistration.View

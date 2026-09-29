@@ -47,6 +47,16 @@ async function main() {
   })
   if (stateFailure) failures.push(stateFailure)
 
+  const dateTypeFailure = await runTest('顶部日期类型应提供装柜日期且不被异步选项覆盖', () => {
+    assert(
+      pageSource.includes("const dateTypeOptions = ['预计到岸日期', '实际到货日期', '装柜日期']"),
+      '顶部日期类型缺少装柜日期',
+    )
+    assert(pageSource.includes('options={dateTypeOptions.map('), '日期类型下拉应使用固定选项')
+    assert(!pageSource.includes('getDateFilterOptions'), '异步选项不应覆盖日期类型下拉')
+  })
+  if (dateTypeFailure) failures.push(dateTypeFailure)
+
   const requestMappingFailure = await runTest('前端请求类型和服务映射应包含全部列头过滤字段', () => {
     const requiredTypeFields = [
       'containerNumberFilter?: string',

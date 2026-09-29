@@ -112,6 +112,7 @@ assertArrayEqual(
     'employee-profile-review',
     'device-management',
     'reports',
+    'app-install',
     'app-downloads',
     'wpf-versions',
     'settings',
