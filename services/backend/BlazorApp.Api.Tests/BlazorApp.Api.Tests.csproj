@@ -32,6 +32,7 @@
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />
     <Compile Include="StorePriceUpdateTaskServiceTests.cs" />
     <Compile Include="WarehouseProductSupplyNoticeTests.cs" />
+    <Compile Include="WarehouseProductBatchUpdateSupplyNoticeTests.cs" />
     <Compile Include="StoreProductMaintenanceLookupTests.cs" />
     <Compile Include="StoreProductScanLabelAccessTests.cs" />
     <Compile Include="ProductChangeHistoryLegacyEntryPointTests.cs" />
@@ -352,6 +353,7 @@
     <Compile Include="SqliteTempFileCleanup.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
+    <Compile Include="ApiExceptionFilterDetailsTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

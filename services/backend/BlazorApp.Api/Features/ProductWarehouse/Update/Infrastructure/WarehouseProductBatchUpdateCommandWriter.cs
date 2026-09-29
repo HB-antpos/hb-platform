@@ -232,6 +232,8 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
                 StringComparer.OrdinalIgnoreCase
             );
             var processedProductCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // 只收集本次显式把「是否上架」设为下架的商品；未设状态（留空不改）的行不登记供货说明。
+            var delistedProductCodes = new List<string>();
 
             foreach (var item in items)
             {
@@ -360,6 +362,10 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
                         effectiveUpdatedBy
                     );
                     toCreateWp.Add(newWp);
+                    if (item.IsActive == false)
+                    {
+                        delistedProductCodes.Add(targetCode);
+                    }
                     if (normalizedSupplierCode != null)
                     {
                         supplierCodeByProductCode[targetCode] = normalizedSupplierCode;
@@ -393,6 +399,10 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
                     effectiveUpdatedBy
                 );
                 toUpdateWp.Add(wp);
+                if (item.IsActive == false)
+                {
+                    delistedProductCodes.Add(wp.ProductCode);
+                }
 
                 if (normalizedSupplierCode != null)
                 {
@@ -446,6 +456,19 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
                 WarehouseProductBatchUpdateResultAssembler.AddSuccesses(
                     result,
                     toCreateWp.Count
+                );
+            }
+            if (delistedProductCodes.Count > 0)
+            {
+                // 与下架同一事务登记供货说明（已有未关闭说明则就地更新）；没带说明时保持原状，兼容旧客户端。
+                await WarehouseProductSupplyNoticeWriter.ApplyStatusChangeAsync(
+                    _context.Db,
+                    delistedProductCodes,
+                    isActive: false,
+                    executionPlan.SupplyNotice,
+                    effectiveUpdatedBy,
+                    source: "WarehouseProducts",
+                    DateTime.UtcNow
                 );
             }
 

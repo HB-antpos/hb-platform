@@ -29,6 +29,9 @@ using Xunit;
 
 namespace BlazorApp.Api.Tests;
 
+// 紧凑看板的立方体与月分片缓存按 SalesDashboardCacheKeys 的静态代数守卫写入并随代数失效；其它类并行调用
+// ClearCacheAsync 推进代数，会让本类的缓存命中断言偶发失败（2026-09-29 PR #379 CI），因此与之同处串行 collection。
+[Collection("SalesDashboardCache")]
 public sealed class SalesDashboardBestSellersTests : IDisposable
 {
     private readonly string _localDbPath;
