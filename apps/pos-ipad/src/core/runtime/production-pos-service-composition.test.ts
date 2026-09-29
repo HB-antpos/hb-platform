@@ -5803,6 +5803,17 @@ function databaseFor(
         );
       },
     }),
+    returnApiAttempts: () => ({
+      async get() {
+        return null;
+      },
+      async prepareOrLoad() {
+        throw new Error("return API attempt prepare is not used");
+      },
+      async compareAndSetState() {
+        throw new Error("return API attempt transition is not used");
+      },
+    }),
     returnFulfilmentPlans: () => ({
       async get() {
         return null;
