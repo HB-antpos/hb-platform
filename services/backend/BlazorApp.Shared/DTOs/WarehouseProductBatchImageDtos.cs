@@ -12,6 +12,12 @@ public sealed class WarehouseProductBatchUpdateOptionsDto
     public string? ImageBaseUrl { get; set; }
 
     public bool SyncImageToHq { get; set; }
+
+    /// <summary>
+    /// 本次显式设为下架（IsActive == false）的商品随请求登记的供货说明；
+    /// 未设状态或设为上架的行忽略。旧客户端不传，保持原状。
+    /// </summary>
+    public WarehouseProductSupplyNoticeInputDto? SupplyNotice { get; set; }
 }
 
 /// <summary>
@@ -84,6 +90,11 @@ public sealed class WarehouseProductBatchUpdateJobRequestDto
     public string? ImageBaseUrl { get; set; }
 
     public bool SyncImageToHq { get; set; }
+
+    /// <summary>
+    /// 显式设为下架的商品随任务登记的供货说明；为空时不登记。
+    /// </summary>
+    public WarehouseProductSupplyNoticeInputDto? SupplyNotice { get; set; }
 }
 
 /// <summary>
