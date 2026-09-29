@@ -4,6 +4,11 @@ on:
   pull_request:
     branches:
       - main
+  # 合并队列：对「main + 队列中排在前面的 PR」组合提交重跑同一套门禁，
+  # 必须产出同名 required 检查，否则队列会一直等待。
+  merge_group:
+    types:
+      - checks_requested
   schedule:
     # GitHub cron 使用 UTC；Brisbane 全年 UTC+10，即周日约 02:23。
     - cron: '23 16 * * 6'
@@ -74,12 +79,13 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # 合并队列的 base 是 main 当前提交，head 含队列中排在前面的全部 PR，按组合增量规划。
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           MANUAL_PROFILE: ${{ inputs.profile || 'pr' }}
           MANUAL_COMPONENT: ${{ inputs.component || 'all' }}
         run: |
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "merge_group" ]]; then
             node scripts/ci/plan.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --profile pr
           elif [[ "$EVENT_NAME" == "schedule" || "$MANUAL_PROFILE" == "weekly" ]]; then
             node scripts/ci/plan.mjs --full --profile weekly
@@ -340,14 +346,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: 非 Backend PR 无需运行真实 Schema SQL
-        if: ${{ github.event_name != 'pull_request' || !contains(fromJSON(needs.plan.outputs.components), 'backend') }}
+        if: ${{ !(github.event_name == 'pull_request' || github.event_name == 'merge_group') || !contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         run: echo 'schema_sql=noop'
-      - if: ${{ github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
+      - if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: 9.0.314
       - name: 启动隔离 SQL Server
-        if: ${{ github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
+        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         run: >-
           docker run --detach
           --name "$CI_SCHEMA_SQL_CONTAINER_NAME"
@@ -356,10 +362,10 @@ jobs:
           --publish 1433:1433
           mcr.microsoft.com/mssql/server@sha256:7c29dfbac885ad7519e219c7fe4aee0e67283e21a10e9c252d13b0fbde1866f8
       - name: 运行真实 Schema SQL 门禁
-        if: ${{ github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
+        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         run: ./scripts/ci/run-schema-sql.sh
       - name: 上传 Schema SQL 结果
-        if: ${{ always() && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
+        if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: schema-sql-${{ github.run_attempt }}
@@ -367,7 +373,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: 清理隔离 SQL Server
-        if: ${{ always() && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
+        if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         run: |
           if docker inspect "$CI_SCHEMA_SQL_CONTAINER_NAME" >/dev/null 2>&1; then
             docker rm --force "$CI_SCHEMA_SQL_CONTAINER_NAME"
@@ -433,9 +439,9 @@ jobs:
           retention-days: 7
 
   required:
-    # 分支保护只接受 PR 事件的稳定检查名；手动/定时运行不得伪造同名成功检查。
+    # 分支保护只接受 PR 与合并队列事件的稳定检查名；手动/定时运行不得伪造同名成功检查。
     name: >-
-      ${{ github.event_name == 'pull_request'
+      ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group')
           && 'PR CI / required'
           || 'Non-PR CI / matrix required' }}
     if: ${{ always() }}
