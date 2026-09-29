@@ -11,9 +11,12 @@ public enum StartupStepState
     Done
 }
 
-public sealed partial class StartupStepItem(StartupPhase phase) : ObservableObject
+public sealed partial class StartupStepItem(StartupPhase phase, string title) : ObservableObject
 {
     public StartupPhase Phase { get; } = phase;
+
+    /// <summary>步骤清单上的短名称，按启动语言解析。</summary>
+    public string Title { get; } = title;
 
     [ObservableProperty]
     private StartupStepState state;
@@ -79,7 +82,9 @@ public sealed partial class StartupProgressState : ObservableObject
         titleText = localize("startup.title");
         subtitleText = string.IsNullOrWhiteSpace(storeLabel) ? localize("startup.subtitle") : storeLabel.Trim();
         versionLabel = localize("startup.versionLabel");
-        Steps = StartupProgressTracker.Phases.Select(phase => new StartupStepItem(phase)).ToArray();
+        Steps = StartupProgressTracker.Phases
+            .Select(phase => new StartupStepItem(phase, localize("startup.stepName." + phase.ToString().ToLowerInvariant())))
+            .ToArray();
         ApplyStage(StartupPhase.Services, TimeSpan.Zero, TimeSpan.MaxValue);
         ElapsedText = FormatElapsed(TimeSpan.Zero);
     }

@@ -32,6 +32,12 @@
   <data name="startup.phase.display.detail" xml:space="preserve"><value>Almost ready</value></data>
   <data name="startup.phase.completed" xml:space="preserve"><value>Ready</value></data>
   <data name="startup.step" xml:space="preserve"><value>Step {0} of {1}</value></data>
+  <data name="startup.stepName.services" xml:space="preserve"><value>Services</value></data>
+  <data name="startup.stepName.interface" xml:space="preserve"><value>Interface</value></data>
+  <data name="startup.stepName.update" xml:space="preserve"><value>Updates</value></data>
+  <data name="startup.stepName.device" xml:space="preserve"><value>Device</value></data>
+  <data name="startup.stepName.catalog" xml:space="preserve"><value>Products</value></data>
+  <data name="startup.stepName.display" xml:space="preserve"><value>Checkout</value></data>
   <data name="startup.elapsed" xml:space="preserve"><value>{0}s elapsed</value></data>
   <data name="startup.slowNetwork" xml:space="preserve"><value>The server is slow to respond ({0}s)</value></data>
   <data name="startup.error.apiBaseAddress.title" xml:space="preserve"><value>HB POS startup configuration error</value></data>
