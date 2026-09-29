@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private readonly IAppShutdownCoordinator _appShutdownCoordinator;
     private readonly IColorThemeService? _colorThemeService;
     private readonly AppUpdateBackgroundCheckScheduler? _appUpdateBackgroundCheckScheduler;
+    private readonly AppUpdateUnattendedInstallScheduler? _appUpdateUnattendedInstallScheduler;
     private readonly StartupProgressTracker? _startupProgress;
     private HwndSource? _hwndSource;
     private Task? _startupInitializationTask;
@@ -66,6 +67,7 @@ public partial class MainWindow : Window
         IColorThemeService? colorThemeService = null,
         ColorThemeSwitcherViewModel? colorThemeSwitcher = null,
         AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null,
+        AppUpdateUnattendedInstallScheduler? appUpdateUnattendedInstallScheduler = null,
         StartupProgressTracker? startupProgress = null)
     {
         _viewModel = viewModel;
@@ -78,6 +80,7 @@ public partial class MainWindow : Window
         _appShutdownCoordinator = appShutdownCoordinator ?? new AppShutdownCoordinator();
         _colorThemeService = colorThemeService;
         _appUpdateBackgroundCheckScheduler = appUpdateBackgroundCheckScheduler;
+        _appUpdateUnattendedInstallScheduler = appUpdateUnattendedInstallScheduler;
         _startupProgress = startupProgress;
 #if DEBUG
         _viewModel.AppUpdate.ConfigureDebugForceUpdateDismissed(ResumeStartupAfterDebugUpdateDismissalAsync);
@@ -293,8 +296,9 @@ public partial class MainWindow : Window
             _startupProgress is null ? null : _startupProgress.Enter);
         if (!_startupOptions.PreviewMode)
         {
-            // 中文注释：启动闸门放行后才开始运行期后台检查；Preview 与真实更新链完全隔离。
+            // 中文注释：启动闸门放行后才开始运行期后台检查与夜间自动安装；Preview 与真实更新链完全隔离。
             _appUpdateBackgroundCheckScheduler?.Start();
+            _appUpdateUnattendedInstallScheduler?.Start();
         }
 
         StartupCompleted?.Invoke(this, EventArgs.Empty);
@@ -464,6 +468,7 @@ public partial class MainWindow : Window
         IsEnabled = false;
         _viewModel.BeginShutdown();
         _appUpdateBackgroundCheckScheduler?.Stop();
+        _appUpdateUnattendedInstallScheduler?.Stop();
         try
         {
             _rawScannerService.Stop();

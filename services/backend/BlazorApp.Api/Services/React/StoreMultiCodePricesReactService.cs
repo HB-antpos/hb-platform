@@ -1089,23 +1089,79 @@ namespace BlazorApp.Api.Services.React
                     .ToListAsync();
                 if (stores == null)
                     stores = new List<string>();
+                var productCodes = items
+                    .Select(it => it.ProductCode?.Trim())
+                    .Where(code => !string.IsNullOrWhiteSpace(code))
+                    .Select(code => code!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                // 分店多码行必须挂在具体子码上：只展开父商品下启用的套装(1)/多码(2)子码。
+                // 过去只带父商品编码，会按「分店+父商品」只改最近一行，匹配不到时还插入
+                // MultiCodeProductCode 为空、编码为「分店+零售价」的垃圾行；无子码的普通商品在此直接跳过。
+                var childCodes = productCodes.Count == 0 || stores.Count == 0
+                    ? new List<ProductSetCode>()
+                    : await db.Queryable<ProductSetCode>()
+                        .Where(x =>
+                            productCodes.Contains(x.ProductCode)
+                            && x.SetProductCode != null
+                            && (x.SetType == 1 || x.SetType == 2)
+                            && x.IsActive
+                            && !x.IsDeleted
+                        )
+                        .ToListAsync();
+                if (childCodes.Count == 0)
+                {
+                    // 全是普通商品时没有可写的分店多码；返回成功，避免调用方把前面已完成的仓库/分店价更新报成失败。
+                    return ApiResponse<BatchResultDtoMC>.OK(new BatchResultDtoMC(), "没有需要同步的分店多码");
+                }
+
+                var childProductCodes = childCodes
+                    .Select(x => x.ProductCode)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var existingChildKeys = (await db.Queryable<StoreMultiCodeProduct>()
+                        .Where(x =>
+                            x.ProductCode != null
+                            && childProductCodes.Contains(x.ProductCode)
+                            && x.MultiCodeProductCode != null
+                            && !x.IsDeleted
+                        )
+                        .Select(x => new { x.StoreCode, x.ProductCode, x.MultiCodeProductCode })
+                        .ToListAsync())
+                    .Select(x => $"{x.StoreCode}|{x.ProductCode}|{x.MultiCodeProductCode}")
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var childrenByProduct = childCodes
+                    .GroupBy(x => x.ProductCode, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
                 var upserts = new List<StoreMultiCodePriceUpsertItemDto>();
                 foreach (var it in items)
                 {
-                    foreach (var sc in stores)
+                    var productCode = it.ProductCode?.Trim();
+                    if (string.IsNullOrWhiteSpace(productCode) || !childrenByProduct.TryGetValue(productCode, out var children))
+                        continue;
+                    foreach (var child in children)
                     {
-                        upserts.Add(
-                            new StoreMultiCodePriceUpsertItemDto
-                            {
-                                StoreCode = sc,
-                                ProductCode = it.ProductCode,
-                                PurchasePrice = it.PurchasePrice,
-                                MultiCodeRetailPrice = it.MultiCodeRetailPrice,
-                                DiscountRate = it.DiscountRate,
-                                IsActive = it.IsActive ?? true,
-                                IsAutoPricing = it.IsAutoPricing ?? false,
-                            }
-                        );
+                        var childRetailPrice = child.SetRetailPrice > 0 ? child.SetRetailPrice : null;
+                        foreach (var sc in stores)
+                        {
+                            var rowExists = existingChildKeys.Contains($"{sc}|{child.ProductCode}|{child.SetProductCode}");
+                            upserts.Add(
+                                new StoreMultiCodePriceUpsertItemDto
+                                {
+                                    StoreCode = sc,
+                                    ProductCode = child.ProductCode,
+                                    MultiCodeProductCode = child.SetProductCode,
+                                    // 套装/多码子项进货价由 BatchUpsertAsync 内的成本重算统一写回，这里仅作触发。
+                                    PurchasePrice = it.PurchasePrice,
+                                    // 子码零售价只取子码自己的零售价，与建档口径一致；调用方传来的父商品零售价只表示
+                                    // 「需要同步零售价」。分店缺行时补齐也用子码价，避免成本重算因零售价为空而整批失败。
+                                    MultiCodeRetailPrice = it.MultiCodeRetailPrice.HasValue || !rowExists ? childRetailPrice : null,
+                                    DiscountRate = it.DiscountRate,
+                                    IsActive = it.IsActive ?? true,
+                                    IsAutoPricing = it.IsAutoPricing ?? false,
+                                }
+                            );
+                        }
                     }
                 }
                 return await BatchUpsertAsync(upserts, updatedBy);

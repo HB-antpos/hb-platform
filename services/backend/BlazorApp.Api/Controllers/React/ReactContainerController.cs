@@ -1517,8 +1517,9 @@ namespace BlazorApp.Api.Controllers.React
         {
             try
             {
-                var totalDeleted = await _containerReactService.BatchDeleteDetailsScopedAsync(containerGuid, request ?? new());
-                return Ok(new { success = true, data = new { totalDeleted } });
+                var (totalDeleted, totalRequested) = await _containerReactService.BatchDeleteDetailsScopedAsync(containerGuid, request ?? new());
+                // 前端要求 totalDeleted 与 totalRequested 都返回，缺一个会在删除成功后报「返回数据不完整」。
+                return Ok(new { success = true, data = new { totalDeleted, totalRequested } });
             }
             catch (ContainerDetailConcurrencyTokenRequiredException)
             {

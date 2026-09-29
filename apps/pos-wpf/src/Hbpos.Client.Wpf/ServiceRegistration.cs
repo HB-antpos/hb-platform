@@ -26,6 +26,11 @@ public static class ServiceRegistration
     internal const string PreviewApiBaseAddress = "http://127.0.0.1:0/";
     private const string ApplicationLogUploadClientName = "HbposApplicationLogUpload";
     private const string OperationAuditUploadClientName = "HbposOperationAuditUpload";
+#if DEBUG
+    private const bool IsDebugBuild = true;
+#else
+    private const bool IsDebugBuild = false;
+#endif
 
     public static IServiceCollection AddHbposClientServices(
         this IServiceCollection services,
@@ -401,6 +406,11 @@ public static class ServiceRegistration
         services.AddSingleton(sp => AppUpdateBackgroundCheckOptions.FromConfiguration(
             sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
         services.AddSingleton<AppUpdateBackgroundCheckScheduler>();
+        services.AddSingleton<IAppUpdateElevationProbe, WindowsAppUpdateElevationProbe>();
+        services.AddSingleton(sp => AppUpdateUnattendedInstallOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build(),
+            IsDebugBuild));
+        services.AddSingleton<AppUpdateUnattendedInstallScheduler>();
         services.AddSingleton(sp => new AttendanceQrPanelViewModel(
             sp.GetRequiredService<IAttendanceSigningKeyApiClient>(),
             sp.GetRequiredService<IConnectivityApiClient>(),
