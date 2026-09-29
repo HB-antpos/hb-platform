@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -55,8 +56,10 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         // 写操作从角色硬编码改为权限策略，WarehouseManager 通过角色模板保留原有能力。
+        // 2026-09-29 起停用：HQ 供应商字典 → 本地 HBLocalSupplier 属于 HQ → HBweb 方向，统一返回 410；sync-to-hq 保持可用。
         [HttpPost("sync")]
         [Authorize(Policy = Permissions.AustralianSuppliers.Edit)]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> Sync([FromBody] SyncRequest? body)
         {
             try

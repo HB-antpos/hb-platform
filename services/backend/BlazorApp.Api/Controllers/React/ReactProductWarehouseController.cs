@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using AutoMapper;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
@@ -1036,9 +1037,11 @@ namespace BlazorApp.Api.Controllers.React
 
         /// <summary>
         /// 从 HQ 全量同步仓库商品库存
+        /// 2026-09-29 起停用（HQ → HBweb，会改写 WarehouseProduct），统一返回 410。
         /// </summary>
         [HttpPost("sync-from-hq")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncFromHq()
         {
             try
@@ -1063,9 +1066,11 @@ namespace BlazorApp.Api.Controllers.React
 
         /// <summary>
         /// 创建从 HQ 同步仓库商品库存的后台任务
+        /// 2026-09-29 起停用（HQ → HBweb），统一返回 410；下方查询任务状态的只读接口保留。
         /// </summary>
         [HttpPost("sync-from-hq/jobs")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> StartSyncFromHqJob(
             [FromBody] WarehouseProductHqSyncJobRequestDto request,
             CancellationToken cancellationToken

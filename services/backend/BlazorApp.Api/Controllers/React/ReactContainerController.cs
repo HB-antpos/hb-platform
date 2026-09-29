@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
@@ -1749,8 +1750,10 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        // 2026-09-29 起停用：HQ 货柜表 → 本地 Container/ContainerDetail 属于 HQ → HBweb 方向，统一返回 410。
         [HttpPost("sync-from-hq")]
         [Authorize(Policy = Permissions.Container.Edit)]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainersFromHq(
             [FromBody] SyncFromHqRequestDto? request
         )
