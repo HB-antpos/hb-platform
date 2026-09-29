@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
@@ -698,9 +699,11 @@ namespace BlazorApp.Api.Controllers.React
 
         /// <summary>
         /// 从HQ增量同步商品到本地（先商品主表，再全局一品多码）
+        /// 2026-09-29 起停用（HQ → HBweb），统一返回 410。
         /// </summary>
         [HttpPost("sync-from-hq")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncFromHq()
         {
             try
@@ -735,9 +738,11 @@ namespace BlazorApp.Api.Controllers.React
 
         /// <summary>
         /// 从HQ按选中商品同步到本地，只处理请求中的商品范围。
+        /// 2026-09-29 起停用（HQ → HBweb），统一返回 410。
         /// </summary>
         [HttpPost("sync-selected-from-hq")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncSelectedFromHq(
             [FromBody] SyncSelectedProductsFromHqRequest request
         )
