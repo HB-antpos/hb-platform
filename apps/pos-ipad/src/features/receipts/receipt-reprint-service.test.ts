@@ -201,6 +201,53 @@ test("缺少现金完成审计、打印设置或无订单时 fail closed", async
   assert.equal(missingOrder, null);
 });
 
+test("现金退单没有找零结算也能重打负数整单小票，且不读取结算记录", async () => {
+  const refund = order({
+    orderGuid: "return-order-cash",
+    total: createAud(-250),
+    discount: createAud(0),
+    actualAmount: createAud(-250),
+    lines: [{
+      ...order().lines[0]!,
+      displayName: "Pastel pink shredded paper",
+      unitPrice: createAud(-250),
+      discount: createAud(0),
+      actualAmount: createAud(-250),
+      kind: "return",
+      returnSourceKey: "return:original-order:detail-1",
+      originalOrderGuid: "original-order",
+      originalOrderDetailGuid: "detail-1",
+    }],
+    tenders: [{
+      tenderGuid: "tender-refund-cash",
+      method: "cash",
+      amount: createAud(-250),
+      reference: null,
+      reservationToken: null,
+    }],
+    originalOrderGuid: "original-order",
+  });
+  let settlementReads = 0;
+  const prepared = await new ReceiptReprintPreparationService({
+    orders: new MemoryOrderSource(new Map([[refund.orderGuid, refund]]), refund),
+    settings: { getFrozenReceiptSettings: async () => settings },
+    settlements: {
+      getCompletionSettlement: async () => {
+        settlementReads += 1;
+        return null;
+      },
+    },
+  }).prepareCurrent(refund.orderGuid);
+
+  assert.equal(prepared?.orderGuid, refund.orderGuid);
+  assert.equal(settlementReads, 0);
+  const bytes = encoder.decode(prepared?.receiptBytes);
+  assert.match(bytes, /\*\*\* REPRINT \*\*\*/);
+  // 与 WPF 一致：退单打负数金额的整单小票，付款行为负数现金。
+  assert.match(bytes, /Total\(inc GST\)\s+\$-2\.50/);
+  assert.match(bytes, /Cash\s+\$-2\.50/);
+});
+
 test("零金额订单只接受审计中的零找零", async () => {
   const zero = order({
     orderGuid: "order-zero",
