@@ -1081,7 +1081,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DisposeShutdownCancellationWhenSafe();
     }
 
-    public async Task InitializeAsync(AppStartupOptions startupOptions)
+    public async Task InitializeAsync(
+        AppStartupOptions startupOptions,
+        Action<StartupPhase>? reportStartupPhase = null)
     {
         _startupOptions = startupOptions;
         // 关键逻辑：重新初始化会创建新的页面实例，必须丢弃上一轮 post-show 任务，避免新注册页永久停在“正在加载门店”。
@@ -1089,7 +1091,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _startupActivationRecoveryMode = null;
         _startupActivationRecoveryIsUnreadable = false;
         _posPostShowStartupTask = null;
-        await _schema.InitializeAsync();
+        // Host 启动时审计回放服务已初始化过同一数据库；这里只在它失败或数据库已切换时才会真正再跑一遍。
+        await _schema.EnsureInitializedAsync();
         _schemaReady = true;
 
         await RestoreLanguageAsync(startupOptions);
@@ -1162,6 +1165,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         await ClearActivationRecoverySafeAsync();
+        // 设备已确认可营业，启动页进入"加载商品"阶段（注册页分支不会走到这里，该阶段按跳过处理）。
+        reportStartupPhase?.Invoke(StartupPhase.Catalog);
         await InitializePosExperienceAsync(startupOptions);
     }
 

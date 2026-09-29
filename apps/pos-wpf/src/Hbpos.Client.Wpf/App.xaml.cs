@@ -3,6 +3,8 @@ using System.Windows.Threading;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
+using MaterialDesignColors;
+using MaterialDesignThemes.Wpf;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -12,20 +14,34 @@ internal sealed record StartupFailurePresentation(string Title, string Message);
 
 public partial class App : Application
 {
-    private const int SplashShownPercent = 10;
-    private const int HostBuiltPercent = 30;
-    private const int HostStartedPercent = 50;
-    private const int MainWindowPreparingPercent = 65;
-    private const int MainWindowInitializedPercent = 85;
-    private const int StartupCompletedPercent = 100;
     private const int OfflineShutdownTimeoutSeconds = 1;
     private const int HostShutdownTimeoutSeconds = 2;
     private const int ShutdownPreparationTimeoutSeconds = 3;
 
+    // 主窗口首帧最多等这么久（从 Show 之前开始计时，含首次布局）；超时也关闭启动页，避免它一直盖在主窗口上。
+    private static readonly TimeSpan MainWindowFirstFrameTimeout = TimeSpan.FromSeconds(5);
+
+    // 启动失败时先等启动页关掉再弹错误框，最多等这么久。
+    private static readonly TimeSpan StartupSplashCloseTimeout = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// 原 App.xaml 里 BundledTheme 之后的三个合并字典，顺序必须保持：色板在 POS 主题之前，
+    /// ColorThemeService 会在顶层合并字典里按键找到色板并整体替换。
+    /// 这里只存字符串：pack 协议要等 WPF 初始化后才注册，类型初始化时构造 Uri 会抛"端口无效"。
+    /// </summary>
+    internal static readonly IReadOnlyList<string> DeferredResourceDictionarySources =
+    [
+        "pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml",
+        "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Default.xaml",
+        "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/PosTheme.xaml"
+    ];
+
     private IHost? _host;
     private SingleInstanceStartupLease? _startupLease;
-    private StartupSplashWindow? _startupSplashWindow;
-    private StartupProgressState? _startupProgressState;
+    private StartupSplashHost? _startupSplash;
+    private StartupProgressTracker? _startupProgress;
+    private StartupTimingProfile? _startupProfile;
+    private bool _applicationResourcesLoaded;
     private bool _startupGateReleaseScheduled;
     private bool _globalExceptionObserversRegistered;
 
@@ -50,36 +66,31 @@ public partial class App : Application
             _startupLease = startupResult.Lease;
             if (!startupOptions.PreviewMode)
             {
-                _startupProgressState = new StartupProgressState();
-                ApplyStartupVersion(_startupProgressState);
-                _startupProgressState.SetStage(SplashShownPercent, StartupText("startup.stage.starting"));
-                _startupSplashWindow = new StartupSplashWindow(_startupProgressState);
-                _startupSplashWindow.Show();
-                await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
+                BeginStartupExperience(startupOptions);
             }
 
+            // 阶段一：服务容器、本地数据库与后台服务。启动页在独立线程上刷新，这里占用 UI 线程也不会卡住进度。
             _host = Host.CreateDefaultBuilder(e.Args)
                 .ConfigureServices(services =>
                 {
-                    services.AddHbposClientServices(startupOptions);
+                    services.AddHbposClientServices(startupOptions, _startupProgress, _startupSplash);
                 })
                 .Build();
             var applicationLogOptions = _host.Services.GetRequiredService<ApplicationLogOptions>();
             ConsoleLog.ConfigureCenterDefaults(applicationLogOptions.ToDefaults());
             ConsoleLog.ConfigureCenterSink(_host.Services.GetRequiredService<IApplicationLogSink>());
             RegisterGlobalExceptionObservers();
-            _startupProgressState?.SetStage(HostBuiltPercent, StartupText("startup.stage.initializingServices"));
 
             await _host.StartAsync();
             RegisterShutdownSteps(_host);
             var localization = _host.Services.GetRequiredService<ILocalizationService>();
             LocalizationResourceProvider.Instance.Configure(localization);
-            _startupProgressState?.LocalizeUpdateNotice(localization.T, localization.CurrentCulture);
             ButtonFeedbackRouter.Register(_host.Services.GetRequiredService<IUserFeedbackService>());
-            _startupProgressState?.SetStage(HostStartedPercent, localization.T("startup.stage.startingLocalComponents"));
 
+            // 阶段二：主题资源与主窗口；主窗口内部继续上报"检查更新 / 验证设备 / 加载商品"。
+            _startupProgress?.Enter(StartupPhase.Interface);
+            EnsureApplicationResourcesLoaded();
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
-            _startupProgressState?.SetStage(MainWindowPreparingPercent, localization.T("startup.stage.loadingProducts"));
             await mainWindow.InitializeForStartupAsync();
             if (!mainWindow.IsStartupBlockedByAppUpdate)
             {
@@ -87,15 +98,22 @@ public partial class App : Application
             }
 
             mainWindow.StartupCompleted += (_, _) => ScheduleStartupGateReleaseAfterClickGuardDelay();
-            _startupProgressState?.SetStage(MainWindowInitializedPercent, localization.T("startup.stage.preparingMainWindow"));
+
+            // 阶段三：先显示主窗口并等首帧画完，再让启动页淡出。启动页置顶，淡出前一直盖在上面，
+            // 不会像原来那样先关启动页、再等主窗口首次布局，中间露出桌面。
+            _startupProgress?.Enter(StartupPhase.Display);
+            // 有启动页时必须在 Show 之前订阅首帧事件，避免错过。
+            var contentRendered = _startupSplash is null ? null : WaitForContentRenderedAsync(mainWindow);
             MainWindow = mainWindow;
-            FinishStartupExperience();
             mainWindow.Show();
             // 主窗口句柄会在 Show 前为扫码初始化提前创建；Show 后再刷新一次，确保任务栏按钮拿到正确图标。
             WindowsShellIdentityService.ApplyWindowIdentity(mainWindow);
             WindowsShellIdentityService.ApplyWindowIcon(mainWindow);
             if (mainWindow.IsStartupBlockedByAppUpdate)
             {
+                await WaitForFirstFrameAsync(contentRendered);
+                // 被更新闸门阻断时的耗时不代表正常启动，只记日志、不写入本机档案。
+                FinishStartupExperience(recordTimings: false, fade: true);
                 // 已显示阻断窗口后释放启动闸门；运行中互斥仍会保护单实例。
                 ShutdownMode = ShutdownMode.OnMainWindowClose;
                 ScheduleStartupGateReleaseAfterClickGuardDelay();
@@ -104,7 +122,8 @@ public partial class App : Application
             }
 
             mainWindow.ActivateForScannerInput();
-            await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await WaitForFirstFrameAsync(contentRendered);
+            FinishStartupExperience(recordTimings: true, fade: true);
             mainWindow.ContinueStartupAfterShown();
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             ScheduleStartupGateReleaseAfterClickGuardDelay();
@@ -115,7 +134,8 @@ public partial class App : Application
         {
             // 启动入口是 async void，异常不能继续抛回调度器，避免未观察异常导致进程崩溃。
             ConsoleLog.WriteError("Startup", $"startup failed error={ex.GetType().Name} message={ex.Message}", exception: ex);
-            DismissStartupExperience();
+            // 启动页置顶且在另一个线程上，必须先关掉，否则错误提示框会被它盖住。
+            await DismissStartupExperienceAsync();
             if (_host is not null)
             {
                 DisposeHostWithinTimeout(
@@ -435,27 +455,196 @@ public partial class App : Application
         _startupLease?.ReleaseStartupGate();
     }
 
-    private void FinishStartupExperience()
+    /// <summary>
+    /// 在服务容器建立前启动启动页：读取本机启动档案（上次各阶段耗时、界面语言、门店），
+    /// 用它给进度条分配权重，并按上次的语言直接显示文案。
+    /// </summary>
+    private void BeginStartupExperience(AppStartupOptions startupOptions)
     {
-        if (_startupSplashWindow is null)
+        try
         {
-            return;
+            // 启动页在宿主构建前显示，这里直接读取程序集版本，不走依赖注入。
+            var version = new AppVersionProvider().CurrentVersion;
+            var notice = TryRecordLaunchVersion(version);
+            var profile = StartupTimingProfile.Load(StartupTimingProfile.DefaultFilePath);
+            LocalizationService.TryGetSupportedCulture(startupOptions.InitialCulture ?? profile.CultureName, out var culture);
+            var tracker = new StartupProgressTracker(profile.GetExpectedDurations());
+            tracker.Enter(StartupPhase.Services);
+            var storeLabel = profile.StoreLabel;
+            _startupProfile = profile;
+            _startupProgress = tracker;
+            _startupSplash = StartupSplashHost.Start(tracker, () =>
+            {
+                var state = new StartupProgressState(key => LocalizationService.Translate(key, culture), culture, storeLabel);
+                state.SetVersion(version, notice);
+                return state;
+            });
         }
-
-        _startupProgressState?.SetStage(StartupCompletedPercent, StartupText("startup.stage.completed"));
-        DismissStartupExperience();
+        catch (Exception ex)
+        {
+            // 启动页只是辅助体验，任何意外都不能挡住收银启动。
+            ConsoleLog.WriteError("Startup", $"startup splash unavailable error={ex.GetType().Name} message={ex.Message}", exception: ex);
+            _startupSplash = null;
+        }
     }
 
-    private void DismissStartupExperience()
+    /// <summary>
+    /// 有启动页时等主窗口第一帧真正画出（启动页随后淡出）；没有启动页（Preview）时保持原来的"Show 之后让出一次渲染"。
+    /// </summary>
+    private Task WaitForFirstFrameAsync(Task? contentRendered)
     {
-        if (_startupSplashWindow is null)
+        return contentRendered ?? Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render).Task;
+    }
+
+    /// <summary>订阅主窗口首帧事件；必须在 Show 之前调用，超时兜底防止启动页一直不关。</summary>
+    private static Task WaitForContentRenderedAsync(Window window)
+    {
+        var rendered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnContentRendered(object? sender, EventArgs args) => rendered.TrySetResult();
+        window.ContentRendered += OnContentRendered;
+        return WaitCoreAsync();
+
+        async Task WaitCoreAsync()
+        {
+            try
+            {
+                await rendered.Task.WaitAsync(MainWindowFirstFrameTimeout);
+            }
+            catch (TimeoutException)
+            {
+                ConsoleLog.Write(
+                    "Startup",
+                    $"main window first frame wait timed out timeoutMs={MainWindowFirstFrameTimeout.TotalMilliseconds:0}");
+            }
+            finally
+            {
+                window.ContentRendered -= OnContentRendered;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 结束启动体验：进度落到 100%、输出各阶段耗时，正常启动时写入本机档案，最后关闭启动页。可重复调用。
+    /// </summary>
+    private void FinishStartupExperience(bool recordTimings = false, bool fade = false)
+    {
+        var tracker = _startupProgress;
+        var splash = _startupSplash;
+        _startupProgress = null;
+        _startupSplash = null;
+        if (tracker is not null)
+        {
+            tracker.Complete();
+            RecordStartupTimings(tracker, recordTimings);
+        }
+
+        if (splash is not null)
+        {
+            _ = ObserveStartupSplashCloseAsync(splash.CloseAsync(fade));
+        }
+    }
+
+    private async Task DismissStartupExperienceAsync()
+    {
+        var splash = _startupSplash;
+        _startupSplash = null;
+        _startupProgress = null;
+        if (splash is null)
         {
             return;
         }
 
-        _startupSplashWindow.Close();
-        _startupSplashWindow = null;
-        _startupProgressState = null;
+        try
+        {
+            await splash.CloseAsync(fade: false).WaitAsync(StartupSplashCloseTimeout);
+        }
+        catch (TimeoutException)
+        {
+            ConsoleLog.Write("Startup", "startup splash close timed out before showing startup error");
+        }
+    }
+
+    private void RecordStartupTimings(StartupProgressTracker tracker, bool persist)
+    {
+        var measured = tracker.GetMeasuredDurations();
+        var phases = string.Join(
+            ' ',
+            measured.OrderBy(pair => pair.Key).Select(pair =>
+                $"{pair.Key.ToString().ToLowerInvariant()}Ms={pair.Value.TotalMilliseconds:0}"));
+        ConsoleLog.Write(
+            "Startup",
+            $"startup timings totalMs={tracker.GetSnapshot().Elapsed.TotalMilliseconds:0} recorded={persist} {phases}");
+
+        var profile = _startupProfile;
+        if (!persist || profile is null || _host is null)
+        {
+            return;
+        }
+
+        var localization = _host.Services.GetService<ILocalizationService>();
+        profile.RecordRun(measured);
+        profile.RememberCulture(localization?.CurrentCulture.Name);
+        // 只有设备已授权、真正进入收银（走过"加载商品"阶段）时会话里才是真实门店；
+        // 停在设备注册页时会话仍是默认占位值，此时清空标签，下次启动页显示通用副标题。
+        var session = tracker.HasEntered(StartupPhase.Catalog)
+            ? _host.Services.GetService<MainViewModel>()?.Session
+            : null;
+        profile.RememberStoreLabel(StartupTimingProfile.FormatStoreLabel(session?.StoreName, session?.DeviceCode));
+        SaveStartupProfileInBackground(profile);
+        if (localization is not null)
+        {
+            // 之后在设置里切换语言也同步到档案，下次启动页直接用新语言显示。
+            localization.CultureChanged += (_, _) =>
+            {
+                profile.RememberCulture(localization.CurrentCulture.Name);
+                SaveStartupProfileInBackground(profile);
+            };
+        }
+    }
+
+    private static void SaveStartupProfileInBackground(StartupTimingProfile profile)
+    {
+        // 档案只影响下次启动的进度节奏，写文件放到线程池，不占用刚显示出来的收银界面。
+        _ = Task.Run(() =>
+        {
+            if (!profile.TrySave())
+            {
+                ConsoleLog.Write("Startup", "startup profile save skipped");
+            }
+        });
+    }
+
+    private static async Task ObserveStartupSplashCloseAsync(Task closeTask)
+    {
+        try
+        {
+            await closeTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteError("Startup", $"startup splash close failed error={ex.GetType().Name} message={ex.Message}", exception: ex);
+        }
+    }
+
+    private void EnsureApplicationResourcesLoaded()
+    {
+        if (_applicationResourcesLoaded)
+        {
+            return;
+        }
+
+        _applicationResourcesLoaded = true;
+        var merged = Resources.MergedDictionaries;
+        merged.Add(new BundledTheme
+        {
+            BaseTheme = BaseTheme.Light,
+            PrimaryColor = PrimaryColor.Blue,
+            SecondaryColor = SecondaryColor.Amber
+        });
+        foreach (var source in DeferredResourceDictionarySources)
+        {
+            merged.Add(new ResourceDictionary { Source = new Uri(source, UriKind.Absolute) });
+        }
     }
 
     internal static StartupFailurePresentation? CreateStartupFailurePresentation(
@@ -472,22 +661,18 @@ public partial class App : Application
             : null;
     }
 
-    private static void ApplyStartupVersion(StartupProgressState state)
+    private static AppLaunchVersionNotice? TryRecordLaunchVersion(string version)
     {
-        // 启动页在宿主构建前显示，这里直接读取程序集版本，不走依赖注入。
-        var version = new AppVersionProvider().CurrentVersion;
-        AppLaunchVersionNotice? notice = null;
         try
         {
-            notice = AppLaunchVersionTracker.CreateDefault().RecordLaunch(version);
+            return AppLaunchVersionTracker.CreateDefault().RecordLaunch(version);
         }
         catch (Exception ex)
         {
             // 版本提示只是辅助信息，任何意外都不能挡住收银启动。
             ConsoleLog.WriteError("Startup", $"launch version tracking failed error={ex.GetType().Name} message={ex.Message}", exception: ex);
+            return null;
         }
-
-        state.SetVersion(version, notice, StartupText, LocalizationResourceProvider.Instance.CurrentCulture);
     }
 
     private static string StartupText(string key) => LocalizationResourceProvider.Instance[key];
