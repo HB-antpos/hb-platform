@@ -1,0 +1,17 @@
+{
+  "containers": {
+    "fields": {
+      "lastImportPriceSnapshot": "上次进口价",
+      "lastOemPriceSnapshot": "上次零售价"
+    },
+    "modals": {
+      "recalculateCostsAfterDeleteNote": "删除明细后货柜总体积已变化，其余明细的运输成本和进口价格需要按新的总体积重算。",
+      "translateHqDataContent": "将按货柜编号 {{containerNumber}} 找到 HQ 货柜单中的商品，为英文名称为空或含中文的商品机器翻译英文名称，并直接写入 HQ 商品字典（已有有效英文名称的不覆盖）。是否继续？"
+    },
+    "messages": {
+      "detailsDeletedCostsRecalculated": "已按剩余明细重算 {{count}} 条成本",
+      "detailsDeletedCostsRecalculateCancelled": "已取消重算，其余明细的运输成本仍按删除前的总体积计算",
+      "detailsDeletedCostsRecalculateFailed": "明细已删除，但成本重算失败：{{message}}"
+    }
+  }
+}
