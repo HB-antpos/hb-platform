@@ -19,6 +19,9 @@ using Xunit;
 
 namespace BlazorApp.Api.Tests;
 
+// SalesDashboardCacheKeys 的缓存代数与活动键登记是进程级静态状态。凡断言依赖代数守卫的缓存命中或活动键登记的测试类
+// （商品销量分析、紧凑销售看板）都要加入本 collection：DisableParallelization 让它在全部并行 collection 跑完后单独执行，
+// 所以只经 ClearCacheAsync 推进代数、自身断言不依赖代数的类（如 SupplierReportReadTests）留在并行阶段也不会干扰这里。
 [CollectionDefinition("SalesDashboardCache", DisableParallelization = true)]
 public sealed class SalesDashboardCacheCollection { }
 
