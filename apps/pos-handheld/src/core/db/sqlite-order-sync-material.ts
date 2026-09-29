@@ -679,17 +679,20 @@ export class SqliteOrderSyncMaterialResolver {
         tender,
         attempt,
       );
-      const context = await resolveProtectedMaterial(
-        () => this.options.returnCapacityVault
-          .resolveProtectedContext(returnIdentity.capacityId),
-        "ORDER_SYNC_RETURN_CONTEXT_MISMATCH",
-      );
-      if (
-        !isExactContext(context, ["version", "provider"]) ||
-        context.version !== 1 ||
-        context.provider !== "voucher"
-      ) {
-        throw materialError("ORDER_SYNC_RETURN_CONTEXT_MISMATCH");
+      // 原礼券额度原路退回时核对受保护 context；代替刷卡/现金额度签发的新券不引用原支付。
+      if (returnIdentity.capacityMethod === "voucher") {
+        const context = await resolveProtectedMaterial(
+          () => this.options.returnCapacityVault
+            .resolveProtectedContext(returnIdentity.capacityId),
+          "ORDER_SYNC_RETURN_CONTEXT_MISMATCH",
+        );
+        if (
+          !isExactContext(context, ["version", "provider"]) ||
+          context.version !== 1 ||
+          context.provider !== "voucher"
+        ) {
+          throw materialError("ORDER_SYNC_RETURN_CONTEXT_MISMATCH");
+        }
       }
     }
 
@@ -1320,7 +1323,7 @@ function requireReturnBinding(
   order: LocalOrder,
   tender: OrderTender,
   attempt: ApprovedAttempt,
-): Readonly<{ capacityId: string }> {
+): Readonly<{ capacityId: string; capacityMethod: OrderTender["method"] }> {
   if (!row) throw materialError("ORDER_SYNC_RETURN_BINDING_MISMATCH");
   const bindingActionId = persistedText(
     row.binding_action_id,
@@ -1414,7 +1417,10 @@ function requireReturnBinding(
       row.capacity_original_order_guid,
       "ORDER_SYNC_RETURN_BINDING_MISMATCH",
     ) !== originalOrderGuid ||
-    tenderMethod(row.capacity_method) !== tender.method ||
+    !isReturnCapacityMethodAllowed(
+      tenderMethod(row.capacity_method),
+      tender.method,
+    ) ||
     persistedInteger(
       row.original_amount_cents,
       "ORDER_SYNC_RETURN_BINDING_MISMATCH",
@@ -1422,7 +1428,22 @@ function requireReturnBinding(
   ) {
     throw materialError("ORDER_SYNC_RETURN_BINDING_MISMATCH");
   }
-  return { capacityId };
+  return { capacityId, capacityMethod: tenderMethod(row.capacity_method) };
+}
+
+/**
+ * 退款 tender 必须原路绑定同方式额度；唯一例外是礼券代替刷卡/现金额度
+ * （签发新券，额度仍按原支付扣减）。
+ */
+function isReturnCapacityMethodAllowed(
+  capacityMethod: OrderTender["method"],
+  refundMethod: OrderTender["method"],
+): boolean {
+  return (
+    capacityMethod === refundMethod ||
+    (refundMethod === "voucher" &&
+      (capacityMethod === "card" || capacityMethod === "cash"))
+  );
 }
 
 function persistedLine(row: OrderLineRow): CartLine {

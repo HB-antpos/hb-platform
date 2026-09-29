@@ -192,10 +192,10 @@ test("刷卡订单退款方式开放现金/代金券代替，默认仍按原支�
     expect(screen.getByTestId("return-row-return-line-1")).toBeTruthy(),
   );
 
-  // 代替选项：刷卡订单上出现现金代替；礼券代替刷卡的执行链路未打通，暂不提供。
+  // 代替选项：刷卡订单上同时出现现金、礼券按钮。
   expect(screen.getByTestId("return-method-cash")).toBeTruthy();
   expect(screen.getByTestId("return-method-card")).toBeTruthy();
-  expect(screen.queryByTestId("return-method-voucher")).toBeNull();
+  expect(screen.getByTestId("return-method-voucher")).toBeTruthy();
   // 默认未选择时显示按原支付方式退回的提示。
   expect(screen.getByText(/default to the original tender/i)).toBeTruthy();
 
@@ -213,7 +213,7 @@ test("刷卡订单退款方式开放现金/代金券代替，默认仍按原支�
   ).toBe("card-capacity");
 });
 
-test("手工刷卡订单只能现金兜底：不显示原卡退回，默认现金且绑定原卡额度", async () => {
+test("手工刷卡订单现金/礼券兜底：不显示原卡退回，默认现金且绑定原卡额度", async () => {
   const execution = new ScreenExecution();
   const presenter = createScreenPresenter(execution, {
     receiptContext: {
@@ -250,10 +250,10 @@ test("手工刷卡订单只能现金兜底：不显示原卡退回，默认现�
 
   expect(screen.getByTestId("return-method-cash")).toBeTruthy();
   expect(screen.queryByTestId("return-method-card")).toBeNull();
-  expect(screen.queryByTestId("return-method-voucher")).toBeNull();
+  expect(screen.getByTestId("return-method-voucher")).toBeTruthy();
   expect(
     screen.getByTestId("return-capacity-card").props.children,
-  ).toContain("仅可现金退款");
+  ).toContain("仅可现金或礼券退款");
 
   await fireEvent.press(screen.getByTestId("return-confirm"));
   expect(execution.executeCalls).toHaveLength(1);

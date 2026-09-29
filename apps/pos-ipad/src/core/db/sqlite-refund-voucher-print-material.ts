@@ -317,7 +317,10 @@ implements ProtectedRefundVoucherPrintMaterialPort {
       row.capacity_reservation_state !== "Committed" ||
       exactText(row.capacity_original_order_guid, 128) !==
         originalOrderGuid ||
-      row.capacity_method !== "voucher" ||
+      // 退款券可来自原礼券额度原路退回，也可代替刷卡/现金额度签发。
+      (row.capacity_method !== "voucher" &&
+        row.capacity_method !== "card" &&
+        row.capacity_method !== "cash") ||
       capacityOriginalAmountCents === null ||
       capacityOriginalAmountCents <= 0 ||
       (signedAmountCents !== null &&
@@ -325,8 +328,12 @@ implements ProtectedRefundVoucherPrintMaterialPort {
       capacityRemainingAmountCents === null ||
       capacityRemainingAmountCents < 0 ||
       capacityRemainingAmountCents > capacityOriginalAmountCents ||
-      safeInteger(row.capacity_context_length) === null ||
-      Number(row.capacity_context_length) <= 0 ||
+      // 现金额度按设计不保存 provider context，其余额度必须有受保护 context。
+      (row.capacity_method === "cash"
+        ? row.capacity_context_length !== null &&
+          safeInteger(row.capacity_context_length) !== 0
+        : safeInteger(row.capacity_context_length) === null ||
+          Number(row.capacity_context_length) <= 0) ||
       exactText(row.binding_tender_guid, 128) !== tenderGuid ||
       !tenderGuid ||
       exactText(row.binding_action_id, 128) !== actionId ||
