@@ -59,9 +59,6 @@ public sealed class ReceiptPreviewQrTests
             element => (string?)element.Attribute("Text") == "{Binding Text}");
 
         AssertSharedTemplate(
-            XDocument.Load(Path.Combine(wpfRoot, "Views", "Screens", "PaymentSuccessView.xaml")),
-            presentation);
-        AssertSharedTemplate(
             XDocument.Load(Path.Combine(wpfRoot, "Views", "Screens", "TransactionHistoryView.xaml")),
             presentation);
         AssertSharedTemplate(

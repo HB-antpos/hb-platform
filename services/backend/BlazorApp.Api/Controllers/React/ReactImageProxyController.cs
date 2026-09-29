@@ -149,6 +149,11 @@ namespace BlazorApp.Api.Controllers.React
         [Authorize(Policy = Permissions.SalesDashboard.SalesDetailView)]
         public Task<IActionResult> GetSalesDetail([FromQuery] string url) => Get(url);
 
+        // 独立销售看板导出商品明细带图：看板用户未必有销售明细权限，按看板权限单独放行，白名单与图片校验相同。
+        [HttpGet("compact-sales-board")]
+        [Authorize(Policy = Permissions.SalesDashboard.CompactBoardView)]
+        public Task<IActionResult> GetCompactSalesBoard([FromQuery] string url) => Get(url);
+
         private static bool IsAllowedImageHost(Uri uri)
         {
             return AllowedImageHosts.Contains(uri.IdnHost);

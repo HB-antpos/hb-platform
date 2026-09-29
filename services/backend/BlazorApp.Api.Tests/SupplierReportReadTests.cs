@@ -250,6 +250,132 @@ public sealed class SupplierReportReadTests : IDisposable
     }
 
     [Fact]
+    public async Task 中国供应商分店分解读汇总表时列出只有同期有销售的分店且排行同期口径不变()
+    {
+        var compareDay = _day.AddYears(-1);
+        SeedComplete(_day);
+        SeedComplete(compareDay);
+        _db.Insertable(new[]
+        {
+            ChinaRollup(_day, "S1", "C001", 125, 3, 25),
+            ChinaRollup(_day, "S2", "C001", 40, 1, null),
+            ChinaRollup(compareDay, "S1", "C001", 60, 2, 12),
+            // S3 只在同期卖过 C001：分店表必须列出它（本期为 0），否则同期合计、同期占比和增减都会算错。
+            ChinaRollup(compareDay, "S3", "C001", 70, 2, 20),
+            // C003 本期没有销售、只在同期出现：请求了它就要列出，供应商名称也要映射。
+            ChinaRollup(compareDay, "S1", "C003", 45, 1, 9),
+            // 未请求的供应商、未授权的分店即使同期有销售也不能混进来。
+            ChinaRollup(compareDay, "S3", "C002", 999, 9, 99),
+            ChinaRollup(compareDay, "S9", "C001", 500, 5, 50),
+        }).ExecuteCommand();
+        _db.Insertable(new[]
+        {
+            new Store { StoreGUID = "store-S1", StoreCode = "S1", StoreName = "分店一", IsActive = true },
+            new Store { StoreGUID = "store-S3", StoreCode = "S3", StoreName = "分店三", IsActive = true },
+        }).ExecuteCommand();
+        _db.Insertable(new[]
+        {
+            new ChinaSupplier { Guid = "cs-C001", SupplierCode = "C001", SupplierName = "供应商一" },
+            new ChinaSupplier { Guid = "cs-C003", SupplierCode = "C003", SupplierName = "供应商三" },
+        }).ExecuteCommand();
+        var service = CreateService();
+        var range = new DateRangeDto { StartDate = _day, EndDate = _day, CompareStartDate = compareDay, CompareEndDate = compareDay };
+        var branches = new List<string> { "S1", "S2", "S3" };
+        var status = await service.GetProductReportStatisticStatusAsync(range);
+        Assert.Equal(SalesStatisticRefreshStatus.Fresh, status.StatisticStatus);
+
+        var stores = await service.GetChinaSupplierStoreSalesAsync(range, new() { "C001", "C003" }, branches, status);
+
+        // 本期行在前且顺序、数值不变；只有同期的键补在后面，按同期金额降序。
+        Assert.Equal(new[] { "S1|C001", "S2|C001", "S3|C001", "S1|C003" },
+            stores.Select(row => $"{row.BranchCode}|{row.SupplierCode}"));
+        var s1 = stores[0];
+        Assert.Equal(125m, s1.TotalAmount);
+        Assert.Equal(3, s1.OrderCount);
+        Assert.Equal(25m, s1.GrossProfit);
+        Assert.Equal("Complete", s1.CostStatus);
+        Assert.Equal(60m, s1.CompareTotalAmount);
+        Assert.Equal(12m, s1.CompareGrossProfit);
+        var s2 = stores[1];
+        Assert.Equal(40m, s2.TotalAmount);
+        Assert.Equal(0m, s2.CompareTotalAmount);
+        Assert.Equal("NoActivity", s2.CompareCostStatus);
+        var s3 = stores[2];
+        Assert.Equal("分店三", s3.BranchName);
+        Assert.Equal("供应商一", s3.SupplierName);
+        Assert.Equal(0m, s3.TotalAmount);
+        Assert.Equal(0, s3.TotalQuantity);
+        Assert.Equal(0, s3.OrderCount);
+        Assert.Equal(0m, s3.AverageTransaction);
+        Assert.Null(s3.GrossProfit);
+        Assert.Null(s3.GrossMarginRate);
+        Assert.Equal("NoActivity", s3.CostStatus);
+        Assert.Equal(70m, s3.CompareTotalAmount);
+        Assert.Equal(2, s3.CompareOrderCount);
+        Assert.Equal(20m, s3.CompareGrossProfit);
+        Assert.Equal("Complete", s3.CompareCostStatus);
+        Assert.Equal(-100m, s3.TotalAmountGrowth);
+        var c003 = stores[3];
+        Assert.Equal("供应商三", c003.SupplierName);
+        Assert.Equal("分店一", c003.BranchName);
+        Assert.Equal(0m, c003.TotalAmount);
+        Assert.Equal(45m, c003.CompareTotalAmount);
+        // 分店表同期合计 = 请求范围内的全部同期销售（不含未请求的 C002 与未授权的 S9）。
+        Assert.Equal(60m + 70m + 45m, stores.Sum(row => row.CompareTotalAmount));
+
+        // 请求的供应商本期完全没有销售时，也要返回同期分店而不是整表为空。
+        var compareOnly = Assert.Single(await service.GetChinaSupplierStoreSalesAsync(range, new() { "C003" }, branches, status));
+        Assert.Equal("S1", compareOnly.BranchCode);
+        Assert.Equal(0m, compareOnly.TotalAmount);
+        Assert.Equal(45m, compareOnly.CompareTotalAmount);
+
+        // 不带同期日期时不补行，结果保持原样。
+        var noCompare = await service.GetChinaSupplierStoreSalesAsync(Range(), new() { "C001", "C003" }, branches);
+        Assert.Equal(new[] { "S1|C001", "S2|C001" }, noCompare.Select(row => $"{row.BranchCode}|{row.SupplierCode}"));
+        Assert.All(noCompare, row => Assert.Null(row.CompareTotalAmount));
+
+        // 排行口径不变：同期只算本期上榜的供应商，只在同期出现的 C003 不会多出来。
+        var rank = Assert.Single(await service.GetChinaSupplierSalesRankAsync(range, branches, 1000, null, status));
+        Assert.Equal("C001", rank.SupplierCode);
+        Assert.Equal(165m, rank.TotalAmount);
+        Assert.Equal(60m + 70m, rank.CompareTotalAmount);
+        Assert.Empty(await service.GetChinaSupplierSalesRankAsync(range, branches, 1000, "C003", status));
+    }
+
+    [Fact]
+    public async Task 澳洲供应商分店分解读汇总表时列出只有同期有销售的分店且排行同期口径不变()
+    {
+        var compareDay = _day.AddYears(-1);
+        SeedComplete(_day);
+        SeedComplete(compareDay);
+        SeedRow(_day, "S1", "250", 100, 5, 40);
+        SeedRow(compareDay, "S1", "250", 80, 4, 30);
+        SeedRow(compareDay, "S2", "250", 70, 3, 20);
+        // 300 只在同期出现：分店分解没有请求它，排行也不能因为同期有销售而多出它。
+        SeedRow(compareDay, "S1", "300", 55, 2, 10);
+        var service = CreateService();
+        var range = new DateRangeDto { StartDate = _day, EndDate = _day, CompareStartDate = compareDay, CompareEndDate = compareDay };
+        var branches = new List<string> { "S1", "S2" };
+
+        var stores = await service.GetSupplierStoreSalesAsync(range, new() { "250" }, branches);
+
+        Assert.Equal(new[] { "S1|250", "S2|250" }, stores.Select(row => $"{row.BranchCode}|{row.SupplierCode}"));
+        Assert.Equal(100m, stores[0].TotalAmount);
+        Assert.Equal(40m, stores[0].GrossProfit);
+        Assert.Equal(80m, stores[0].CompareTotalAmount);
+        Assert.Equal(0m, stores[1].TotalAmount);
+        Assert.Null(stores[1].GrossProfit);
+        Assert.Equal("NoActivity", stores[1].CostStatus);
+        Assert.Equal(70m, stores[1].CompareTotalAmount);
+        Assert.Equal(20m, stores[1].CompareGrossProfit);
+
+        var rank = Assert.Single(await service.GetSupplierSalesRankAsync(range, branches, 100));
+        Assert.Equal("250", rank.SupplierCode);
+        Assert.Equal(100m, rank.TotalAmount);
+        Assert.Equal(80m + 70m, rank.CompareTotalAmount);
+    }
+
+    [Fact]
     public async Task 商品分页只保留本期同期授权分店内的遗留中国商品映射()
     {
         var compare = _day.AddYears(-1);
@@ -492,9 +618,9 @@ public sealed class SupplierReportReadTests : IDisposable
         var first = Task.Run(() => firstService.GetSupplierSalesRankAsync(Range(), null, 100));
         try
         {
-            await firstReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await firstReadStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             var second = Task.Run(() => secondService.GetSupplierSalesRankAsync(Range(), null, 100));
-            await secondVersionRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondVersionRead.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             Assert.False(second.IsCompleted);
             var sharedLease = Assert.Single(leases, lease => lease != firstLease && lease != secondLease);
             firstScope.Dispose();
@@ -592,6 +718,13 @@ public sealed class SupplierReportReadTests : IDisposable
             StatisticRowCount = 1, CostedRowCount = costedRows, GrossProfitRowCount = profit.HasValue ? 1 : 0,
         }).ExecuteCommand();
     }
+
+    private static ChinaSupplierStoreSalesDetail ChinaRollup(DateTime date, string branch, string supplier, decimal amount, int orders, decimal? profit) => new()
+    {
+        Date = date, BranchCode = branch, SupplierCode = supplier, TotalAmount = amount, TotalQuantity = orders,
+        OrderCount = orders, GrossProfit = profit, TotalCost = profit.HasValue ? amount - profit : null,
+        StatisticRowCount = 1, CostedRowCount = profit.HasValue ? 1 : 0, GrossProfitRowCount = profit.HasValue ? 1 : 0,
+    };
 
     private SalesDashboardReactService CreateService(bool enabled = true, ISqlSugarClient? db = null, IServiceScopeFactory? scopeFactory = null)
     {

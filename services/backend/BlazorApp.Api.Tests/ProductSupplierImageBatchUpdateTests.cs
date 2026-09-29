@@ -690,7 +690,7 @@ public sealed class ProductSupplierImageBatchUpdateTests : IDisposable
         Assert.NotEqual(first.JobId, second.JobId);
         Assert.False(second.IsDuplicateRequest);
 
-        await AssertEventuallyAsync(() =>
+        await WaitUntilAsync(() =>
         {
             lock (startedRequests)
             {
@@ -983,32 +983,11 @@ public sealed class ProductSupplierImageBatchUpdateTests : IDisposable
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            var job = await jobService.GetJobAsync(jobId);
-            if (job?.Status is BatchUpdateSupplierImagesJobStatusConstants.Succeeded or BatchUpdateSupplierImagesJobStatusConstants.Failed)
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待供应商商品图片批量更新 job 完成超时");
-    }
-
-    private static async Task AssertEventuallyAsync(Func<bool> condition)
-    {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            if (condition())
-            {
-                return;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待异步条件成立超时");
+        var job = await WaitForValueAsync(
+            () => jobService.GetJobAsync(jobId),
+            current => current?.Status is BatchUpdateSupplierImagesJobStatusConstants.Succeeded or BatchUpdateSupplierImagesJobStatusConstants.Failed,
+            describeLast: current => $"供应商商品图片批量更新 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 }

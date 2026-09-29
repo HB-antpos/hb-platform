@@ -24,10 +24,14 @@ public sealed class ReactImageProxyControllerTests
         var salesAuthorize = typeof(ReactImageProxyController)
             .GetMethod(nameof(ReactImageProxyController.GetSalesDetail))!
             .GetCustomAttribute<AuthorizeAttribute>();
+        var compactBoardAuthorize = typeof(ReactImageProxyController)
+            .GetMethod(nameof(ReactImageProxyController.GetCompactSalesBoard))!
+            .GetCustomAttribute<AuthorizeAttribute>();
 
         Assert.NotNull(controllerAuthorize);
         Assert.Equal("Admin,WarehouseManager,WarehouseStaff", warehouseAuthorize?.Roles);
         Assert.Equal(Permissions.SalesDashboard.SalesDetailView, salesAuthorize?.Policy);
+        Assert.Equal(Permissions.SalesDashboard.CompactBoardView, compactBoardAuthorize?.Policy);
     }
 
     [Theory]
@@ -214,10 +218,10 @@ public sealed class ReactImageProxyControllerTests
         controller.HttpContext.RequestAborted = browserAbort.Token;
 
         var request = controller.GetSalesDetail(AllowedImageUrl);
-        var upstreamToken = await upstreamStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var upstreamToken = await upstreamStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         browserAbort.Cancel();
 
-        Assert.IsType<EmptyResult>(await request.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.IsType<EmptyResult>(await request.WaitAsync(AsyncTestWaitSupport.DefaultTimeout));
         Assert.True(upstreamToken.IsCancellationRequested);
     }
 

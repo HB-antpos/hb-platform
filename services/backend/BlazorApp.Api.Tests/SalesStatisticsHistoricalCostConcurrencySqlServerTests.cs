@@ -55,7 +55,8 @@ public sealed class SalesStatisticsHistoricalCostConcurrencySqlServerTests
             new[] { SourceRow(date, productCode, quantity: 2m, amount: 20m) });
         try
         {
-            var completed = await Task.WhenAny(writerTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            // blocker 到 finally 才回滚；写入若错误地等待成本锁，会一直等到预算耗尽而失败。
+            var completed = await Task.WhenAny(writerTask, Task.Delay(AsyncTestWaitSupport.DefaultTimeout));
             Assert.Same(writerTask, completed);
             var result = await writerTask;
             Assert.Equal(SalesStatisticRefreshStatus.Fresh, result.Status.Status);
@@ -266,7 +267,7 @@ public sealed class SalesStatisticsHistoricalCostConcurrencySqlServerTests
                 .Select(code => TruncateApplicationResource(
                     "HB:SetChildPurchasePrice:Product:" + code))
                 .ToArray();
-            var deadline = DateTime.UtcNow.AddSeconds(5);
+            var deadline = DateTime.UtcNow.Add(AsyncTestWaitSupport.DefaultTimeout);
             while (DateTime.UtcNow < deadline)
             {
                 foreach (var resource in resources)

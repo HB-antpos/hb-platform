@@ -104,6 +104,8 @@ public partial class SalesDashboardReactService
             topN
         );
         var useSqlServerBatch = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
+        // 本周、本月等多日区间含今天时，今天只能和去年对应日的同一时刻比较，需要单独返回最后一天的数据。
+        var includeLastDay = startDate < endDate && endDate == SalesStatisticsBusinessDate.Today();
 
         async Task<RevenueReportSnapshotDto> ReadAsync()
         {
@@ -120,6 +122,7 @@ public partial class SalesDashboardReactService
                     normalizedBranches,
                     focusScope,
                     branchCodes == null,
+                    includeLastDay,
                     cancellationToken
                 );
                 refreshRows = batch.RefreshRows;
@@ -169,6 +172,12 @@ public partial class SalesDashboardReactService
             var displayBranchCodes = normalizedBranches.Count > 0
                 ? normalizedBranches.ToHashSet(StringComparer.OrdinalIgnoreCase)
                 : activeStoreNames.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // 全店角色未指定范围时，排行以启用门店目录为准；周层级与分时也必须同口径，
+            // 否则已停用门店去年的营业额只进周层级和分时的同期，与 KPI、排行对不上。
+            // 目录为空（SQLite 路径不读目录）时排行本身按数据中的门店展示，这里同样不收窄。
+            var defaultDetailScope = branchCodes == null && focusBranchCodes == null && displayBranchCodes.Count > 0
+                ? displayBranchCodes
+                : null;
 
             if (!useSqlServerBatch)
             {
@@ -231,12 +240,22 @@ public partial class SalesDashboardReactService
                 compareEndDate,
                 topN
             );
+            if (defaultDetailScope != null)
+            {
+                // 完整性状态已按原始覆盖行算完，这里只收窄展示用的分时行（含最后一天）。
+                hourlyRows = hourlyRows
+                    .Where(row => !string.IsNullOrWhiteSpace(row.BranchCode) && defaultDetailScope.Contains(row.BranchCode.Trim()))
+                    .ToList();
+            }
             var hourly = BuildRevenueHourly(hourlyRows, startDate, endDate, compareStartDate, compareEndDate);
+            var lastDay = includeLastDay
+                ? BuildRevenueLastDay(storeRows, hourlyRows, displayBranchCodes, activeStoreNames, endDate, compareEndDate)
+                : null;
             var weeklyScope = focusBranchCodes != null
                 ? normalizedFocusBranches.ToHashSet(StringComparer.OrdinalIgnoreCase)
                 : branchCodes != null
                     ? normalizedBranches.ToHashSet(StringComparer.OrdinalIgnoreCase)
-                    : null;
+                    : defaultDetailScope;
             var weekly = BuildRevenueWeekly(
                 storeRows
                     .Where(row => weeklyScope == null || weeklyScope.Contains(row.BranchCode))
@@ -259,6 +278,7 @@ public partial class SalesDashboardReactService
             var result = new RevenueReportSnapshotDto
             {
                 Branches = branches,
+                LastDay = lastDay,
                 Hourly = hourly,
                 Weekly = weekly,
                 StatisticsPending = !status.Complete,
@@ -616,6 +636,50 @@ public partial class SalesDashboardReactService
         return result;
     }
 
+    /// <summary>
+    /// 区间最后一天（今天）与同期对应日：分店全天日统计 + 分店×小时统计。
+    /// SQL Server 批次里这两天是单独的期间 2/3；SQLite 路径是逐日原始行，按日期筛选。
+    /// </summary>
+    private static RevenueLastDaySnapshotDto BuildRevenueLastDay(
+        IReadOnlyCollection<RevenueSnapshotStoreRow> storeRows,
+        IReadOnlyCollection<RevenueSnapshotHourlyRow> hourlyRows,
+        HashSet<string> displayBranchCodes,
+        Dictionary<string, string> activeStoreNames,
+        DateTime lastDate,
+        DateTime? compareLastDate
+    )
+    {
+        var dayStoreRows = storeRows
+            .Where(row => row.Date.Date == lastDate || (compareLastDate.HasValue && row.Date.Date == compareLastDate.Value))
+            .ToList();
+        var dayHourlyRows = hourlyRows
+            .Where(row => row.Period.HasValue
+                ? row.Period.Value >= 2
+                : row.Date.Date == lastDate || (compareLastDate.HasValue && row.Date.Date == compareLastDate.Value))
+            .Select(row => row.Period.HasValue
+                // 期间 2/3 映射回 0/1，复用同一套本期/同期聚合。
+                ? new RevenueSnapshotHourlyRow
+                {
+                    Date = row.Date,
+                    Period = row.Period.Value - 2,
+                    Hour = row.Hour,
+                    BranchCode = row.BranchCode,
+                    BranchName = row.BranchName,
+                    TotalAmount = row.TotalAmount,
+                    OrderCount = row.OrderCount,
+                }
+                : row)
+            .ToList();
+        return new RevenueLastDaySnapshotDto
+        {
+            Date = lastDate,
+            CompareDate = compareLastDate,
+            Branches = BuildRevenueBranches(dayStoreRows, displayBranchCodes, activeStoreNames, lastDate, lastDate,
+                compareLastDate, compareLastDate, null),
+            Hourly = BuildRevenueHourly(dayHourlyRows, lastDate, lastDate, compareLastDate, compareLastDate),
+        };
+    }
+
     private static List<ExecutiveHourlyTrafficDto> BuildRevenueHourly(
         IReadOnlyCollection<RevenueSnapshotHourlyRow> rows,
         DateTime startDate,
@@ -796,6 +860,7 @@ public partial class SalesDashboardReactService
     ) => new()
     {
         Branches = source.Branches,
+        LastDay = source.LastDay,
         Hourly = source.Hourly,
         Weekly = source.Weekly,
         StatisticsPending = false,

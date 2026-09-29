@@ -8,7 +8,7 @@
              mc:Ignorable="d"
              d:DesignHeight="688"
              d:DesignWidth="1366"
-             Background="{StaticResource PosSurfaceAltBrush}">
+             Background="{DynamicResource PosSurfaceAltBrush}">
     <Grid Margin="24">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="1.4*" />
@@ -31,10 +31,10 @@
                         <TextBlock Text="{Binding BackToCenterText}" FontWeight="Bold" />
                     </StackPanel>
                 </Button>
-                <TextBlock Text="{Binding PageTitleText}" Margin="0,16,0,0" FontSize="26" FontWeight="Black" Foreground="{StaticResource PosTextBrush}" />
+                <TextBlock Text="{Binding PageTitleText}" Margin="0,16,0,0" FontSize="26" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" />
             </StackPanel>
 
-            <Border Grid.Row="1" Margin="0,18,0,0" Padding="18" Background="White" BorderBrush="#FFE7E8EB" BorderThickness="1" CornerRadius="8">
+            <Border Grid.Row="1" Margin="0,18,0,0" Padding="18" Background="{DynamicResource PosSurfaceBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="8">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -46,7 +46,7 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="2" Margin="0,14,0,0" Background="White" BorderBrush="#FFE7E8EB" BorderThickness="1" CornerRadius="8">
+            <Border Grid.Row="2" Margin="0,14,0,0" Background="{DynamicResource PosSurfaceBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="8">
                 <DataGrid ItemsSource="{Binding CartLines}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" RowHeight="48" BorderThickness="0" GridLinesVisibility="None" HeadersVisibility="Column" Style="{StaticResource PosCartDataGridStyle}">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="{loc:Loc Item}" Binding="{Binding DisplayName}" Width="*" />
@@ -59,12 +59,12 @@
                 </DataGrid>
             </Border>
 
-            <Border Grid.Row="3" Margin="0,14,0,0" Padding="14" Background="White" BorderBrush="#FFE7E8EB" BorderThickness="1" CornerRadius="8">
-                <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource PosMutedForegroundBrush}" TextWrapping="Wrap" />
+            <Border Grid.Row="3" Margin="0,14,0,0" Padding="14" Background="{DynamicResource PosSurfaceBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="8">
+                <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource PosMutedForegroundBrush}" TextWrapping="Wrap" />
             </Border>
         </Grid>
 
-        <Border Grid.Column="2" Background="White" BorderBrush="#FFE7E8EB" BorderThickness="1" CornerRadius="8" Padding="20">
+        <Border Grid.Column="2" Background="{DynamicResource PosSurfaceBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="8" Padding="20">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -74,9 +74,9 @@
                 </Grid.RowDefinitions>
 
                 <StackPanel>
-                    <TextBlock Text="{Binding OrderTotalLabelText}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource PosMutedForegroundBrush}" />
-                    <TextBlock Text="{Binding TotalAmount, StringFormat={}{0:C2}}" Margin="0,8,0,0" FontSize="30" FontWeight="Black" Foreground="{StaticResource PosTextBrush}" />
-                    <TextBlock Text="{Binding FinancedAmountText}" Margin="0,8,0,0" FontSize="18" FontWeight="Bold" Foreground="{StaticResource PosPrimaryBrush}" />
+                    <TextBlock Text="{Binding OrderTotalLabelText}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    <TextBlock Text="{Binding TotalAmount, StringFormat={}{0:C2}}" Margin="0,8,0,0" FontSize="30" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" />
+                    <TextBlock Text="{Binding FinancedAmountText}" Margin="0,8,0,0" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                 </StackPanel>
 
                 <StackPanel Grid.Row="1" Margin="0,20,0,0">
@@ -84,7 +84,7 @@
                     <ComboBox ItemsSource="{Binding PaymentMethodOptions}" SelectedValue="{Binding DownPaymentMethod, Mode=TwoWay}" SelectedValuePath="Method" DisplayMemberPath="DisplayName" Margin="0,10,0,0" Height="42" />
                     <TextBox Text="{Binding DownPaymentReference, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.common.input.reference}" Margin="0,10,0,0" Height="46" Style="{StaticResource PosSearchTextBoxStyle}" />
                     <TextBox Text="{Binding VoucherReservationToken, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.common.input.voucherToken}" Margin="0,10,0,0" Height="46" Style="{StaticResource PosSearchTextBoxStyle}" />
-                    <TextBlock Text="{Binding DownPaymentStatusText}" Margin="0,12,0,0" Foreground="{StaticResource PosMutedForegroundBrush}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding DownPaymentStatusText}" Margin="0,12,0,0" Foreground="{DynamicResource PosMutedForegroundBrush}" TextWrapping="Wrap" />
                 </StackPanel>
 
                 <TextBox Grid.Row="2" Text="{Binding Note, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.create.input.note}" Margin="0,20,0,0" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Style="{StaticResource PosSearchTextBoxStyle}" />

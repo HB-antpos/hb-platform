@@ -50,7 +50,7 @@ public sealed class BatchProductSalesStoreDto
 public sealed class BatchProductSalesOptionsDto
 {
     public List<BatchProductSalesStoreDto> Stores { get; set; } = [];
-    public int MaxItemNumbers { get; set; } = 500;
+    public int MaxItemNumbers { get; set; } = 3000;
     public int MaxDays { get; set; } = 366;
 }
 

@@ -204,20 +204,13 @@ public sealed class ProductPushToHqJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (
-                job?.Status == ProductPushToHqJobStatusConstants.Succeeded
-                || job?.Status == ProductPushToHqJobStatusConstants.Failed
-            )
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待商品推送 HQ job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current =>
+                current?.Status == ProductPushToHqJobStatusConstants.Succeeded
+                || current?.Status == ProductPushToHqJobStatusConstants.Failed,
+            describeLast: current => $"商品推送 HQ job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 }

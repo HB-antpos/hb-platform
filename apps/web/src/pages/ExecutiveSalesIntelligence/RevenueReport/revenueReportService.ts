@@ -1,7 +1,7 @@
 import request from '../../../utils/request'
 import type { ReportPeriod } from '../ReportWorkbench/logic'
 import type { ReportSnapshot } from '../ReportWorkbench/useReportQuery'
-import type { RevenueBranch, RevenueHourly, RevenueWeeklyNode } from './types'
+import type { RevenueBranch, RevenueHourly, RevenueLastDay, RevenueWeeklyNode } from './types'
 
 interface RevenueEnvelope<T> {
   success?: boolean
@@ -11,6 +11,7 @@ interface RevenueEnvelope<T> {
   statisticStatus?: string
   statisticMessage?: string | null
   statisticUpdatedAt?: string | null
+  statisticsLastSuccessfulAtUtc?: string | null
   cacheVersion?: string | null
 }
 
@@ -18,11 +19,15 @@ export interface RevenueReportSnapshot {
   branches: RevenueBranch[]
   hourly: RevenueHourly[]
   weekly: RevenueWeeklyNode[]
+  /** 多日区间且最后一天是今天时才有；旧后端缺字段为 undefined。 */
+  lastDay?: RevenueLastDay | null
   currentPeriodPending?: boolean
   comparePeriodPending?: boolean
   hourlyCurrentPending?: boolean
   hourlyComparePending?: boolean
   weeklyComparePending?: boolean
+  /** 查询含今天时，今天最近一次营业额发布时间（UTC）；决定可与去年同一时刻比较的完整整点。 */
+  statisticsLastSuccessfulAtUtc?: string | null
 }
 
 function unwrapRevenueSnapshot(payload: RevenueEnvelope<RevenueReportSnapshot>): ReportSnapshot<RevenueReportSnapshot> {
@@ -32,7 +37,7 @@ function unwrapRevenueSnapshot(payload: RevenueEnvelope<RevenueReportSnapshot>):
     throw new Error('营业额快照响应不完整')
   }
   return {
-    data,
+    data: { ...data, statisticsLastSuccessfulAtUtc: payload.statisticsLastSuccessfulAtUtc ?? null },
     statisticStatus: payload.statisticStatus || (payload.statisticsPending ? 'Pending' : 'Fresh'),
     statisticMessage: payload.statisticMessage ?? payload.message,
     statisticUpdatedAt: payload.statisticUpdatedAt,

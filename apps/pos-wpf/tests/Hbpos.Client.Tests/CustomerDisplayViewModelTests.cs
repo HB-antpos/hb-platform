@@ -276,6 +276,57 @@ public sealed class CustomerDisplayViewModelTests
             designCanvas.Attribute("Background")?.Value);
     }
 
+    [Theory]
+    // 4:3（常见 15" 客显）→ 画布 1024 宽，铺满不留白。
+    [InlineData(1024d, 768d, 1024d)]
+    [InlineData(800d, 600d, 1024d)]
+    // 16:10（常见 10.1" 客显）→ 约 1229 宽。
+    [InlineData(1280d, 800d, 1228.8d)]
+    // 16:9 保持原设计宽度。
+    [InlineData(1366d, 768d, 1366d)]
+    [InlineData(1920d, 1080d, 1365.3333333333d)]
+    // 更宽的带鱼屏与竖屏分别钳在上下限，由 Viewbox 留白。
+    [InlineData(2560d, 1080d, 1366d)]
+    [InlineData(1080d, 1920d, 1024d)]
+    // 尚未布局。
+    [InlineData(0d, 0d, 1366d)]
+    [InlineData(double.PositiveInfinity, 768d, 1366d)]
+    public void CustomerDisplayView_design_canvas_width_follows_host_aspect_ratio(
+        double hostWidth,
+        double hostHeight,
+        double expectedWidth)
+    {
+        Assert.Equal(expectedWidth, CustomerDisplayView.ResolveDesignCanvasWidth(hostWidth, hostHeight), precision: 6);
+    }
+
+    [Theory]
+    [InlineData(1366d, 0.60d)]
+    [InlineData(1600d, 0.60d)]
+    [InlineData(1024d, 0.68d)]
+    [InlineData(1195d, 0.64d)]
+    public void CustomerDisplayView_gives_cart_more_width_on_narrow_canvases(double canvasWidth, double expectedShare)
+    {
+        Assert.Equal(expectedShare, CustomerDisplayView.ResolveCartColumnShare(canvasWidth), precision: 6);
+    }
+
+    [Fact]
+    public void CustomerDisplayView_resizes_design_canvas_and_cart_columns_with_the_host()
+    {
+        var (xaml, codeBehind) = ReadCustomerDisplayViewFiles();
+        var document = XDocument.Parse(xaml);
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var names = document.Descendants()
+            .Select(element => (string?)element.Attribute(x + "Name"))
+            .Where(name => name is not null)
+            .ToHashSet();
+
+        Assert.Contains("DesignCanvas", names);
+        Assert.Contains("CartColumn", names);
+        Assert.Contains("PromotionColumn", names);
+        Assert.Contains("SizeChanged += CustomerDisplayViewSizeChanged;", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("DesignCanvas.Width = canvasWidth;", codeBehind, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void CustomerDisplayView_uses_compact_left_aligned_quantity_and_sku_grid()
     {

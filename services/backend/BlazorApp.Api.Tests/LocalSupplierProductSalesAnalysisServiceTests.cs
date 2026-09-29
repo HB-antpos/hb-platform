@@ -6,6 +6,7 @@ using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlSugar;
 using Xunit;
@@ -46,6 +47,8 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
             typeof(StoreMultiCodeProduct),
             typeof(ProductSetCode),
             typeof(WarehouseCategory),
+            typeof(LocalSupplierCategory),
+            typeof(LocalSupplierCategoryProductAssignment),
             typeof(StoreLocalSupplierInvoice),
             typeof(StoreLocalSupplierInvoiceDetails),
             typeof(ProductStoreDailySalesStatistic)
@@ -176,6 +179,47 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
 
         Assert.Single(allStores.Data!.Items);
         Assert.Empty(noStores.Data!.Items);
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_多选供应商超过100项返回参数校验错误()
+    {
+        var request = CreateRequest();
+        request.Filter.SupplierCodes = Enumerable.Range(1, 101).Select(index => $"SUP-{index}").ToList();
+
+        var result = await CreateService().GetCandidatesAsync(request, new[] { "B1" });
+
+        Assert.False(result.Success);
+        Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+        Assert.Contains("供应商不能超过 100 项", result.Message);
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_多选仓库分类超过100项返回参数校验错误()
+    {
+        var request = CreateRequest();
+        request.Filter.WarehouseCategoryGuids = Enumerable.Range(1, 101).Select(index => $"CAT-{index}").ToList();
+
+        var result = await CreateService().GetCandidatesAsync(request, new[] { "B1" });
+
+        Assert.False(result.Success);
+        Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+        Assert.Contains("仓库分类不能超过 100 项", result.Message);
+    }
+
+    [Fact]
+    public void ValidateFilterCodeBudget_分类展开后超过SQL参数预算返回参数校验错误()
+    {
+        var filter = new LocalSupplierProductSalesAnalysisFilterDto
+        {
+            SupplierCodes = Enumerable.Range(1, 100).Select(index => $"SUP-{index}").ToList(),
+        };
+
+        var exception = Assert.Throws<LocalSupplierProductSalesAnalysisValidationException>(() =>
+            LocalSupplierProductSalesAnalysisLogic.ValidateFilterCodeBudget(filter, 1701)
+        );
+
+        Assert.Contains("分类和供应商筛选条件过多", exception.Message);
     }
 
     [Fact]
@@ -397,6 +441,217 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
 
         Assert.True(result.Success);
         Assert.Contains(result.Data!.Items, row => row.ProductCode == "P1");
+    }
+
+    [Fact]
+    public async Task GetSupplierCategoryOptionsAsync_按供应商返回分类树且仅叶分类可选()
+    {
+        await _db.Insertable(
+            new[]
+            {
+                new LocalSupplierCategory
+                {
+                    CategoryGUID = "sup-root",
+                    LocalSupplierCode = "SUP",
+                    CategoryName = "Supplier Root",
+                    ExternalKey = "/root",
+                    FullPath = "Supplier Root",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+                new LocalSupplierCategory
+                {
+                    CategoryGUID = "sup-leaf",
+                    LocalSupplierCode = "SUP",
+                    ParentGUID = "sup-root",
+                    CategoryName = "Supplier Leaf",
+                    ExternalKey = "/root/leaf",
+                    FullPath = "Supplier Root > Supplier Leaf",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+                new LocalSupplierCategory
+                {
+                    CategoryGUID = "other-leaf",
+                    LocalSupplierCode = "OTHER",
+                    CategoryName = "Other Leaf",
+                    ExternalKey = "/other",
+                    FullPath = "Other Leaf",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+                new LocalSupplierCategory
+                {
+                    CategoryGUID = "dirty-200",
+                    LocalSupplierCode = "200",
+                    CategoryName = "脏本地分类",
+                    FullPath = "脏本地分类",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+            }
+        ).ExecuteCommandAsync();
+        await _db.Insertable(
+            new[]
+            {
+                new WarehouseCategory
+                {
+                    CategoryGUID = "warehouse-root",
+                    CategoryName = "Warehouse Root",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+                new WarehouseCategory
+                {
+                    CategoryGUID = "warehouse-leaf",
+                    ParentGUID = "warehouse-root",
+                    CategoryName = "Warehouse Leaf",
+                    ChineseName = "仓库叶分类",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+            }
+        ).ExecuteCommandAsync();
+
+        var result = await CreateService().GetSupplierCategoryOptionsAsync(
+            new[] { "SUP", "200" },
+            new[] { "B1" },
+            tree: true
+        );
+
+        Assert.True(result.Success);
+        Assert.Equal(new[] { "200", "SUP" }, result.Data!.Select(item => item.SupplierCode));
+        var warehouseRoot = result.Data!.Single(item => item.Guid == "warehouse-root");
+        Assert.False(warehouseRoot.IsSelectable);
+        Assert.Equal("warehouse-leaf", warehouseRoot.Children.Single().Guid);
+        Assert.True(warehouseRoot.Children.Single().IsSelectable);
+        Assert.Equal("warehouse-root", warehouseRoot.Children.Single().ParentGuid);
+        var supplierRoot = result.Data!.Single(item => item.Guid == "sup-root");
+        Assert.False(supplierRoot.IsSelectable);
+        Assert.Equal("sup-leaf", supplierRoot.Children.Single().Guid);
+        Assert.Equal("sup-root", supplierRoot.Children.Single().ParentGuid);
+        Assert.DoesNotContain(result.Data!, item => item.Guid == "other-leaf");
+        Assert.DoesNotContain(result.Data!.SelectMany(item => item.Children), item => item.Guid == "dirty-200");
+    }
+
+    [Fact]
+    public async Task GetSupplierCategoryOptionsAsync_默认保持叶分类平铺契约()
+    {
+        await _db.Insertable(new LocalSupplierCategory
+        {
+            CategoryGUID = "flat-root", LocalSupplierCode = "SUP", CategoryName = "Root", FullPath = "Root",
+            IsDeleted = false, IsActive = true,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new LocalSupplierCategory
+        {
+            CategoryGUID = "flat-leaf", LocalSupplierCode = "SUP", ParentGUID = "flat-root", CategoryName = "Leaf",
+            FullPath = "Root > Leaf", IsDeleted = false, IsActive = true,
+        }).ExecuteCommandAsync();
+
+        var result = await CreateService().GetSupplierCategoryOptionsAsync(new[] { "SUP" }, new[] { "B1" });
+
+        Assert.True(result.Success);
+        var item = Assert.Single(result.Data!);
+        Assert.Equal("flat-leaf", item.Guid);
+        Assert.Equal("Root > Leaf", item.Name);
+        Assert.Empty(item.Children);
+    }
+
+    [Fact]
+    public async Task GetSupplierCategoryOptionsAsync_分类父级成环时仍保留节点()
+    {
+        await _db.Insertable(new[]
+        {
+            new LocalSupplierCategory
+            {
+                CategoryGUID = "cycle-a", LocalSupplierCode = "SUP", ParentGUID = "cycle-b", CategoryName = "A",
+                FullPath = "A", IsDeleted = false, IsActive = true,
+            },
+            new LocalSupplierCategory
+            {
+                CategoryGUID = "cycle-b", LocalSupplierCode = "SUP", ParentGUID = "cycle-a", CategoryName = "B",
+                FullPath = "B", IsDeleted = false, IsActive = true,
+            },
+        }).ExecuteCommandAsync();
+
+        var result = await CreateService().GetSupplierCategoryOptionsAsync(new[] { "SUP" }, new[] { "B1" }, tree: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Data!.SelectMany(FlattenCategoryOptions).Count());
+    }
+
+    private static IEnumerable<LocalSupplierProductSalesSupplierCategoryOptionDto> FlattenCategoryOptions(
+        LocalSupplierProductSalesSupplierCategoryOptionDto item
+    )
+    {
+        yield return item;
+        foreach (var child in item.Children.SelectMany(FlattenCategoryOptions))
+        {
+            yield return child;
+        }
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_供应商分类多选同时支持网站分类和供应商200仓库分类()
+    {
+        await InsertProductAsync("P-SUP", "ITM-SUP", "BC-SUP", "Supplier Product", localSupplierCode: "SUP");
+        await InsertProductAsync("P-STALE", "ITM-STALE", "BC-STALE", "Stale Assignment", localSupplierCode: "OTHER");
+        await InsertProductAsync("P-200", "ITM-200", "BC-200", "Warehouse Product", "warehouse-leaf", "200");
+        await _db.Insertable(
+            new[]
+            {
+                new WarehouseCategory
+                {
+                    CategoryGUID = "warehouse-root",
+                    CategoryName = "Warehouse Root",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+                new WarehouseCategory
+                {
+                    CategoryGUID = "warehouse-leaf",
+                    ParentGUID = "warehouse-root",
+                    CategoryName = "Warehouse Leaf",
+                    IsDeleted = false,
+                    IsActive = true,
+                },
+            }
+        ).ExecuteCommandAsync();
+        await _db.Insertable(
+            new[]
+            {
+                new LocalSupplierCategoryProductAssignment
+                {
+                    ProductCode = "P-SUP",
+                    LocalSupplierCode = "SUP",
+                    CategoryGUID = "sup-leaf",
+                },
+                // 商品供应商已变更时，旧归属不得误命中。
+                new LocalSupplierCategoryProductAssignment
+                {
+                    ProductCode = "P-STALE",
+                    LocalSupplierCode = "SUP",
+                    CategoryGUID = "sup-leaf",
+                },
+            }
+        ).ExecuteCommandAsync();
+
+        var request = CreateRequest();
+        request.Filter.SupplierCodes = new List<string> { "SUP", "OTHER", "200" };
+        request.Filter.SupplierCategoryGuids = new List<string> { "sup-leaf", "warehouse-root" };
+        string? failedSql = null;
+        _db.Aop.OnLogExecuting = (sql, _) => failedSql = sql;
+        var logger = new RecordingLogger<LocalSupplierProductSalesAnalysisService>();
+        var result = await CreateService(logger: logger).GetCandidatesAsync(request, new[] { "B1" });
+
+        Assert.True(
+            result.Success,
+            $"{logger.LastException?.ToString() ?? result.Message}\nSQL:\n{failedSql}"
+        );
+        Assert.Equal(
+            new[] { "P-200", "P-SUP" },
+            result.Data!.Items.Select(item => item.ProductCode).OrderBy(code => code).ToArray()
+        );
     }
 
     [Fact]
@@ -1188,13 +1443,39 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
         }
     }
 
-    private LocalSupplierProductSalesAnalysisService CreateService(IMemoryCache? cache = null)
+    private LocalSupplierProductSalesAnalysisService CreateService(
+        IMemoryCache? cache = null,
+        ILogger<LocalSupplierProductSalesAnalysisService>? logger = null
+    )
     {
         return new LocalSupplierProductSalesAnalysisService(
             CreateSqlSugarContext(_db),
             cache ?? new MemoryCache(new MemoryCacheOptions()),
-            NullLogger<LocalSupplierProductSalesAnalysisService>.Instance
+            logger ?? NullLogger<LocalSupplierProductSalesAnalysisService>.Instance
         );
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public Exception? LastException { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter
+        )
+        {
+            if (exception is not null)
+            {
+                LastException = exception;
+            }
+        }
     }
 
     private LocalSupplierProductSalesAnalysisRequest CreateRequest()

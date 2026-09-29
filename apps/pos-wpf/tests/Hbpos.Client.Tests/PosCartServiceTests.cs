@@ -21,6 +21,24 @@ public sealed class PosCartServiceTests
     }
 
     [Fact]
+    public void AddItem_keeps_separate_lines_for_different_products_sharing_a_lookup_code()
+    {
+        // 条码 6405090401470 同时是 Fly Swatter 套装码与 flower 主条码：选不同商品必须分行、各按各的价。
+        var cart = new PosCartService();
+
+        var fly = cart.AddItem(CreateItem(productCode: "P-FLY", lookupCode: "6405090401470", displayName: "EXTENSION Fly Swatter", price: 8.99m));
+        var flower = cart.AddItem(CreateItem(productCode: "P-FLOWER", lookupCode: "6405090401470", displayName: "flower", price: 2.99m));
+        var secondFly = cart.AddItem(CreateItem(productCode: "P-FLY", lookupCode: "6405090401470", displayName: "EXTENSION Fly Swatter", price: 8.99m));
+
+        Assert.Equal(2, cart.Lines.Count);
+        Assert.NotSame(fly, flower);
+        Assert.Same(fly, secondFly);
+        Assert.Equal(("P-FLY", "EXTENSION Fly Swatter", 8.99m, 2m), (fly.ProductCode, fly.DisplayName, fly.UnitPrice, fly.Quantity));
+        Assert.Equal(("P-FLOWER", "flower", 2.99m, 1m), (flower.ProductCode, flower.DisplayName, flower.UnitPrice, flower.Quantity));
+        Assert.Equal(20.97m, cart.TotalAmount);
+    }
+
+    [Fact]
     public void AddItem_applies_catalog_discount_in_away_from_zero_cents_and_recalculates_quantity()
     {
         var cart = new PosCartService();
@@ -61,7 +79,6 @@ public sealed class PosCartServiceTests
         Assert.True(searchCart.SetLineUnitPrice(searchLine, 5m));
 
         searchCart.AddItem(CreateItem(
-            productCode: "SKU-SEARCH-NEW",
             referenceCode: "REF-SEARCH-NEW",
             displayName: "Fresh Search Milk",
             itemNumber: "ITEM-SEARCH-NEW",
@@ -73,7 +90,7 @@ public sealed class PosCartServiceTests
         Assert.Equal(2m, searchLine.Quantity);
         Assert.Equal(5m, searchLine.UnitPrice);
         Assert.True(searchLine.IsManualPrice);
-        Assert.Equal("SKU-SEARCH-NEW", searchLine.ProductCode);
+        Assert.Equal("SKU-001", searchLine.ProductCode);
         Assert.Equal("REF-SEARCH-NEW", searchLine.ReferenceCode);
         Assert.Equal("Fresh Search Milk", searchLine.DisplayName);
         Assert.Equal("ITEM-SEARCH-NEW", searchLine.ItemNumber);
@@ -89,7 +106,6 @@ public sealed class PosCartServiceTests
         Assert.True(scanCart.SetLineUnitPrice(scanLine, 5m));
 
         scanCart.AddConsecutiveItem(CreateItem(
-            productCode: "SKU-SCAN-NEW",
             referenceCode: "REF-SCAN-NEW",
             displayName: "Fresh Scan Milk",
             itemNumber: "ITEM-SCAN-NEW",
@@ -101,7 +117,7 @@ public sealed class PosCartServiceTests
         Assert.Equal(2m, scanLine.Quantity);
         Assert.Equal(5m, scanLine.UnitPrice);
         Assert.True(scanLine.IsManualPrice);
-        Assert.Equal("SKU-SCAN-NEW", scanLine.ProductCode);
+        Assert.Equal("SKU-001", scanLine.ProductCode);
         Assert.Equal("REF-SCAN-NEW", scanLine.ReferenceCode);
         Assert.Equal("Fresh Scan Milk", scanLine.DisplayName);
         Assert.Equal("ITEM-SCAN-NEW", scanLine.ItemNumber);
@@ -334,6 +350,22 @@ public sealed class PosCartServiceTests
         Assert.Equal(1m, banana.Quantity);
         Assert.Equal(2m, secondApple.Quantity);
         Assert.Equal("APPLE-001", secondApple.LookupCodeNormalized);
+    }
+
+    [Fact]
+    public void AddConsecutiveItem_does_not_merge_a_different_product_with_the_same_lookup_code()
+    {
+        var cart = new PosCartService();
+
+        var fly = cart.AddConsecutiveItem(CreateItem(productCode: "P-FLY", lookupCode: "6405090401470", displayName: "EXTENSION Fly Swatter", price: 8.99m));
+        var flower = cart.AddConsecutiveItem(CreateItem(productCode: "P-FLOWER", lookupCode: "6405090401470", displayName: "flower", price: 2.99m));
+        var mergedFlower = cart.AddConsecutiveItem(CreateItem(productCode: "P-FLOWER", lookupCode: "6405090401470", displayName: "flower", price: 2.99m));
+
+        Assert.Equal(2, cart.Lines.Count);
+        Assert.NotSame(fly, flower);
+        Assert.Same(flower, mergedFlower);
+        Assert.Equal(("P-FLY", 8.99m, 1m), (fly.ProductCode, fly.UnitPrice, fly.Quantity));
+        Assert.Equal(("P-FLOWER", 2.99m, 2m), (flower.ProductCode, flower.UnitPrice, flower.Quantity));
     }
 
     [Fact]

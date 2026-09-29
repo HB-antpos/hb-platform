@@ -7,6 +7,8 @@
         "unassigned": "Unassigned",
         "manualMark": "Set manually; captures won't overwrite it",
         "filterPlaceholder": "Supplier Category",
+        "filterSearchPlaceholder": "Search suppliers or loaded categories",
+        "filterSearchEmpty": "No matches. Expand a supplier to load its categories first.",
         "emptyTree": "No website categories yet",
         "loadFailedRetry": "Failed to load, click to retry",
         "loadFailed": "Failed to load supplier categories",

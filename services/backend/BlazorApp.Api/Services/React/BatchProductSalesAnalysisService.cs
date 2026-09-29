@@ -16,7 +16,11 @@ namespace BlazorApp.Api.Services.React;
 /// </summary>
 public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysisService
 {
-    internal const int MaxItemNumbers = 500;
+    internal const int MaxItemNumbers = 3000;
+    // 折扣快照按商品读取；超过 500 个商品时只提供净额查询和导出。
+    private const int MaxDiscountOverviewProductCodes = 500;
+    // SQL Server 的参数上限为 2100；给日期、门店等过滤条件留出空间。
+    private const int ProductCodeQueryBatchSize = 500;
     internal const int MaxDays = 366;
     private readonly ISqlSugarClient _db;
     private readonly BatchProductSalesStatisticReader _statisticReader;
@@ -87,29 +91,25 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
             ? await QueuePendingStatisticDatesAsync(coverageBefore.PendingReasons.Keys.ToList(), cancellationToken)
             : BatchProductSalesStatisticQueueResult.NotNeeded;
         // 摘要只需要净销量，直接从稳定的商品-分店-日事实表在 SQL 端聚合；
-        // 不能为 500 个货号把全年逐笔成交明细加载到 API 进程。
-        // 先按日、商品聚合，再由外层安全汇总；绝不能把未完成日期的缺行补为零。
-        var quantityRows = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
-            .Where(s => coverageBefore.ReadyDates.Contains(s.Date) && productCodes.Contains(s.ProductCode));
-        if (storeCodes != null)
-            quantityRows = quantityRows.Where(s => storeCodes.Contains(s.BranchCode));
-        var perDayQuantities = await quantityRows.GroupBy(s => new { s.Date, s.ProductCode }).Select(s => new ProductQuantityRow
-        {
-            Date = s.Date,
-            ProductCode = s.ProductCode,
-            Quantity = SqlFunc.AggregateSum(s.TotalQuantity),
-            SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
-        }).ToListAsync();
+        // 不能为 3000 个货号把全年逐笔成交明细加载到 API 进程。
+        // 分别按商品和日期聚合，避免物化日期×商品矩阵；未完成日期不会进入查询范围。
+        var quantitySummary = await ReadQuantitySummaryAsync(productCodes, coverageBefore.ReadyDates, storeCodes, cancellationToken);
         // 分店总览只聚合日×分店，不展开商品×分店×日期矩阵。
-        var branchRowsQuery = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
-            .Where(s => coverageBefore.ReadyDates.Contains(s.Date) && productCodes.Contains(s.ProductCode));
-        if (storeCodes != null) branchRowsQuery = branchRowsQuery.Where(s => storeCodes.Contains(s.BranchCode));
-        var branchRows = await branchRowsQuery.GroupBy(s => new { s.BranchCode, s.ProductCode }).Select(s => new BatchProductSalesAggregateRow
+        var branchRows = new List<BatchProductSalesAggregateRow>();
+        foreach (var productCodeBatch in productCodes.Chunk(ProductCodeQueryBatchSize))
         {
-            BranchCode = s.BranchCode, ProductCode = s.ProductCode,
-            Quantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownQuantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownRowCount = 1,
-            SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
-        }).ToListAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            var branchRowsQuery = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
+                .Where(BatchProductSalesStatisticReader.BuildDatePredicate(coverageBefore.ReadyDates).ToExpression())
+                .Where(s => productCodeBatch.Contains(s.ProductCode));
+            if (storeCodes != null) branchRowsQuery = branchRowsQuery.Where(s => storeCodes.Contains(s.BranchCode));
+            branchRows.AddRange(await branchRowsQuery.GroupBy(s => new { s.BranchCode, s.ProductCode }).Select(s => new BatchProductSalesAggregateRow
+            {
+                BranchCode = s.BranchCode, ProductCode = s.ProductCode,
+                Quantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownQuantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownRowCount = 1,
+                SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
+            }).ToListAsync(cancellationToken));
+        }
         var coverageAfter = await _statisticReader.CoverageAsync(range.StartDate, range.EndDate, cancellationToken);
         var stableReadyDates = coverageBefore.ReadyDates.Where(date =>
             coverageAfter.DateVersions.TryGetValue(date, out var afterVersion)
@@ -119,26 +119,41 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         // C2 只核验锁定的稳定集合；原 pending 后来 Fresh 不影响本次摘要。
         if (stableReadyDates.Count != coverageBefore.ReadyDates.Count)
         {
-            var stableBranchQuery = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
-                .Where(s => stableReadyDates.Contains(s.Date) && productCodes.Contains(s.ProductCode));
-            if (storeCodes != null) stableBranchQuery = stableBranchQuery.Where(s => storeCodes.Contains(s.BranchCode));
-            branchRows = await stableBranchQuery.GroupBy(s => new { s.BranchCode, s.ProductCode }).Select(s => new BatchProductSalesAggregateRow
+            quantitySummary = await ReadQuantitySummaryAsync(productCodes, stableReadyDates, storeCodes, cancellationToken);
+            branchRows = new List<BatchProductSalesAggregateRow>();
+            foreach (var productCodeBatch in productCodes.Chunk(ProductCodeQueryBatchSize))
             {
-                BranchCode = s.BranchCode, ProductCode = s.ProductCode,
-                Quantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownQuantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownRowCount = 1,
-                SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
-            }).ToListAsync();
+                cancellationToken.ThrowIfCancellationRequested();
+                var stableBranchQuery = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
+                    .Where(BatchProductSalesStatisticReader.BuildDatePredicate(stableReadyDates).ToExpression())
+                    .Where(s => productCodeBatch.Contains(s.ProductCode));
+                if (storeCodes != null) stableBranchQuery = stableBranchQuery.Where(s => storeCodes.Contains(s.BranchCode));
+                branchRows.AddRange(await stableBranchQuery.GroupBy(s => new { s.BranchCode, s.ProductCode }).Select(s => new BatchProductSalesAggregateRow
+                {
+                    BranchCode = s.BranchCode, ProductCode = s.ProductCode,
+                    Quantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownQuantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownRowCount = 1,
+                    SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
+                }).ToListAsync(cancellationToken));
+            }
             var coverageFinal = await _statisticReader.CoverageAsync(range.StartDate, range.EndDate, cancellationToken);
             if (stableReadyDates.Any(date => !coverageFinal.DateVersions.TryGetValue(date, out var version)
                 || !string.Equals(version, coverageAfter.DateVersions.GetValueOrDefault(date), StringComparison.Ordinal)))
                 throw new BatchProductSalesCoverageVersionConflictException();
             coverageAfter = coverageFinal;
         }
-        var quantities = perDayQuantities.Where(row => !string.IsNullOrWhiteSpace(row.ProductCode)
-                && stableReadyDates.Contains(row.Date.Date))
-            .GroupBy(row => row.ProductCode!, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new ProductQuantityRow { ProductCode = group.Key, Quantity = group.Sum(row => row.Quantity) })
-            .ToDictionary(row => row.ProductCode!, row => row.Quantity, StringComparer.OrdinalIgnoreCase);
+        var totalsByProduct = quantitySummary.ByProduct.ToDictionary(row => row.ProductCode,
+            row => (Quantity: row.Quantity, SalesAmount: row.SalesAmount), StringComparer.OrdinalIgnoreCase);
+        var totalsByDate = quantitySummary.ByDate.ToDictionary(row => row.Date.Date,
+            row => (Quantity: row.Quantity, SalesAmount: row.SalesAmount));
+        var branchSummaries = branchRows
+            .GroupBy(row => row.BranchCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group =>
+            {
+                var rows = group.ToList();
+                return (Metrics: BuildNetMetrics(rows),
+                    ContributingProductCount: rows.GroupBy(row => row.ProductCode, StringComparer.OrdinalIgnoreCase)
+                        .Count(productRows => productRows.Sum(row => row.Quantity) != 0m || productRows.Sum(row => row.SalesAmount) != 0m));
+            }, StringComparer.OrdinalIgnoreCase);
         var coverage = BuildCoverage(coverageAfter, stableReadyDates, queueResult);
         var result = new BatchProductSalesQueryResultDto
         {
@@ -151,12 +166,12 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
             Coverage = coverage,
             Overview = new BatchProductSalesOverviewDto
             {
-                Metrics = stableReadyDates.Count == 0 ? null : new BatchProductSalesMetricsDto { Quantity = perDayQuantities.Where(row => stableReadyDates.Contains(row.Date.Date)).Sum(row => row.Quantity), SalesAmount = perDayQuantities.Where(row => stableReadyDates.Contains(row.Date.Date)).Sum(row => row.SalesAmount), UnknownQuantity = perDayQuantities.Where(row => stableReadyDates.Contains(row.Date.Date)).Sum(row => row.Quantity), DiscountStatus = "unknown" },
-                Daily = stableReadyDates.Select(date => new BatchProductSalesDailyDto { Date = date, Metrics = new BatchProductSalesMetricsDto { Quantity = perDayQuantities.Where(row => row.Date.Date == date.Date).Sum(row => row.Quantity), SalesAmount = perDayQuantities.Where(row => row.Date.Date == date.Date).Sum(row => row.SalesAmount), UnknownQuantity = perDayQuantities.Where(row => row.Date.Date == date.Date).Sum(row => row.Quantity), DiscountStatus = "unknown" } }).ToList(),
+                Metrics = stableReadyDates.Count == 0 ? null : new BatchProductSalesMetricsDto { Quantity = quantitySummary.ByProduct.Sum(row => row.Quantity), SalesAmount = quantitySummary.ByProduct.Sum(row => row.SalesAmount), UnknownQuantity = quantitySummary.ByProduct.Sum(row => row.Quantity), DiscountStatus = "unknown" },
+                Daily = stableReadyDates.Select(date => { var totals = totalsByDate.GetValueOrDefault(date.Date); return new BatchProductSalesDailyDto { Date = date, Metrics = new BatchProductSalesMetricsDto { Quantity = totals.Quantity, SalesAmount = totals.SalesAmount, UnknownQuantity = totals.Quantity, DiscountStatus = "unknown" } }; }).ToList(),
                 Branches = (storeCodes ?? branchRows.Select(row => row.BranchCode).Distinct(StringComparer.OrdinalIgnoreCase).ToList()).Select(store =>
                 {
-                    var rows = branchRows.Where(row => string.Equals(row.BranchCode, store, StringComparison.OrdinalIgnoreCase)).ToList();
-                    return new BatchProductSalesOverviewBranchDto { BranchCode = store, BranchName = storeScope.Names.GetValueOrDefault(store, store), Metrics = BuildNetMetrics(rows), Daily = [], ContributingProductCount = rows.GroupBy(row => row.ProductCode).Count(group => group.Sum(row => row.Quantity) != 0m || group.Sum(row => row.SalesAmount) != 0m), SelectedProductCount = products.Count };
+                    var summary = branchSummaries.GetValueOrDefault(store);
+                    return new BatchProductSalesOverviewBranchDto { BranchCode = store, BranchName = storeScope.Names.GetValueOrDefault(store, store), Metrics = summary.Metrics ?? new BatchProductSalesMetricsDto(), Daily = [], ContributingProductCount = summary.ContributingProductCount, SelectedProductCount = products.Count };
                 }).ToList(),
             },
             Products = products.Select(product => new BatchProductSalesProductSummaryDto
@@ -164,8 +179,8 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
                 ProductCode = product.ProductCode, ItemNumber = product.ItemNumber,
                 ProductName = product.ProductName, EnglishName = product.EnglishName,
                 Barcode = product.Barcode, ImageUrl = product.ImageUrl,
-                Quantity = stableReadyDates.Count == 0 ? null : quantities.TryGetValue(product.ProductCode, out var quantity) ? quantity : 0m,
-                SalesAmount = stableReadyDates.Count == 0 ? null : perDayQuantities.Where(row => string.Equals(row.ProductCode, product.ProductCode, StringComparison.OrdinalIgnoreCase) && stableReadyDates.Contains(row.Date.Date)).Sum(row => row.SalesAmount),
+                Quantity = stableReadyDates.Count == 0 ? null : totalsByProduct.GetValueOrDefault(product.ProductCode).Quantity,
+                SalesAmount = stableReadyDates.Count == 0 ? null : totalsByProduct.GetValueOrDefault(product.ProductCode).SalesAmount,
             }).OrderBy(p => p.ItemNumber, StringComparer.OrdinalIgnoreCase).ToList(),
         };
         if (coverage.Status == "complete")
@@ -280,50 +295,104 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         var context = await ResolveFollowupAsync(request, scopedStoreCodes, cancellationToken);
         var branchCode = NormalizeRequired(request.BranchCode, "branchCode");
         if (!context.StoreCodes.Contains(branchCode, StringComparer.OrdinalIgnoreCase)) throw new BatchProductSalesAnalysisForbiddenException();
-        var rows = await _statisticReader.ReadAsync(context.ProductCodes, context.ReadyDates, [branchCode], cancellationToken);
+        // 分店页只需要商品总计和每日总计，在 SQL 端分别聚合，避免展开商品×日期矩阵。
+        // 分店总览沿用统计读取器的整日范围，兼容历史数据中非午夜的 Date 值。
+        var summary = await ReadQuantitySummaryAsync(context.ProductCodes, context.ReadyDates, [branchCode], cancellationToken);
+        var branchRows = summary.ByDate.Select(row => new BatchProductSalesAggregateRow
+        {
+            Date = row.Date, BranchCode = branchCode, Quantity = row.Quantity,
+            UnknownQuantity = row.Quantity, UnknownRowCount = 1, SalesAmount = row.SalesAmount,
+        }).ToList();
+        var productMetrics = summary.ByProduct.ToDictionary(row => row.ProductCode,
+            row => BuildNetMetrics([new BatchProductSalesAggregateRow
+            {
+                Quantity = row.Quantity, UnknownQuantity = row.Quantity, SalesAmount = row.SalesAmount,
+            }]), StringComparer.OrdinalIgnoreCase);
         var after = await _statisticReader.CoverageAsync(context.Range.StartDate, context.Range.EndDate, cancellationToken);
         ValidateLockedCoverage(context, after);
-        var branchRows = rows.Where(r => context.ReadyDates.Contains(r.Date.Date)).ToList();
         var products = context.Products.Select(product => new BatchProductSalesBranchProductDto {
             ProductCode=product.ProductCode, ItemNumber=product.ItemNumber, ProductName=product.ProductName, EnglishName=product.EnglishName, Barcode=product.Barcode, ImageUrl=product.ImageUrl,
-            Metrics=BuildNetMetrics(branchRows.Where(r => string.Equals(r.ProductCode, product.ProductCode, StringComparison.OrdinalIgnoreCase))) }).ToList();
+            Metrics=productMetrics.GetValueOrDefault(product.ProductCode) ?? BuildNetMetrics([]) }).ToList();
         return ApiResponse<BatchProductSalesBranchOverviewDto>.OK(new BatchProductSalesBranchOverviewDto { StartDate=context.Range.StartDate, EndDate=context.Range.EndDate, StoreCodes=context.StoreCodes, ProductCodes=context.ProductCodes, Coverage=BuildCoverage(after, context.ReadyDates, BatchProductSalesStatisticQueueResult.NotNeeded), Branch=BuildBranch(branchCode, context.StoreNames, branchRows, context.ReadyDates), Products=products });
     }
 
     public async Task<ApiResponse<BatchProductSalesDiscountOverviewDto>> GetDiscountOverviewAsync(BatchProductSalesBranchOverviewRequestDto request, IReadOnlyList<string>? scopedStoreCodes, CancellationToken cancellationToken = default)
     {
         var context = await ResolveFollowupAsync(request, scopedStoreCodes, cancellationToken);
+        if (context.ProductCodes.Count > MaxDiscountOverviewProductCodes)
+            throw new BatchProductSalesAnalysisValidationException("折扣分类总览最多支持 500 个商品；超过 500 个商品请查看净销量和金额。");
         var selectedStores = string.IsNullOrWhiteSpace(request.BranchCode) ? context.StoreCodes : [NormalizeRequired(request.BranchCode, "branchCode")];
         if (!selectedStores.All(store => context.StoreCodes.Contains(store, StringComparer.OrdinalIgnoreCase))) throw new BatchProductSalesAnalysisForbiddenException();
-        var statistics = await _statisticReader.ReadAsync(context.ProductCodes, context.ReadyDates, selectedStores, cancellationToken);
-        var discounts = await _discountSnapshotReader.ReadManyAsync(context.ProductCodes, context.ReadyDates, selectedStores, statistics, cancellationToken);
+        var discountStateBefore = await _discountSnapshotReader.CaptureStateAsync(context.ReadyDates, cancellationToken);
+        var readyDates = context.ReadyDates.Select(date => date.Date).ToHashSet();
+        var facts = new List<BatchProductSalesAggregateRow>();
+        var contributingByBranch = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var productMetrics = new Dictionary<string, BatchProductSalesMetricsDto>(StringComparer.OrdinalIgnoreCase);
+        var discountStatuses = new List<string>();
+        DateTime? discountUpdatedAt = null;
+        foreach (var productBatch in context.ProductCodes.Chunk(20))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var statistics = await _statisticReader.ReadAsync(productBatch, context.ReadyDates, selectedStores, cancellationToken);
+            var discounts = await _discountSnapshotReader.ReadManyAsync(productBatch, context.ReadyDates, selectedStores, statistics, cancellationToken, discountStateBefore);
+            foreach (var value in discounts.Values)
+            {
+                discountStatuses.Add(value.Status);
+                if (value.UpdatedAt.HasValue && (!discountUpdatedAt.HasValue || value.UpdatedAt > discountUpdatedAt))
+                    discountUpdatedAt = value.UpdatedAt;
+            }
+            var batchFacts = discounts.Values.SelectMany(value => value.Rows)
+                .Where(row => readyDates.Contains(row.Date.Date)).ToList();
+            foreach (var branchGroup in batchFacts.GroupBy(row => row.BranchCode, StringComparer.OrdinalIgnoreCase))
+            {
+                var count = branchGroup.GroupBy(row => row.ProductCode, StringComparer.OrdinalIgnoreCase)
+                    .Count(group => group.Sum(row => row.Quantity) != 0m || group.Sum(row => row.SalesAmount) != 0m);
+                contributingByBranch[branchGroup.Key] = contributingByBranch.GetValueOrDefault(branchGroup.Key) + count;
+            }
+            if (!string.IsNullOrWhiteSpace(request.BranchCode))
+                foreach (var group in batchFacts.GroupBy(row => row.ProductCode, StringComparer.OrdinalIgnoreCase))
+                    if (!string.IsNullOrWhiteSpace(group.Key)) productMetrics[group.Key] = BuildAggregateMetrics(group);
+            // 折扣快照按小批读取，只累积 Date×Branch 合计与商品指标，避免持有 3000 商品全年明细。
+            facts = MergeDateBranchRows(facts.Concat(batchFacts));
+        }
         var after = await _statisticReader.CoverageAsync(context.Range.StartDate, context.Range.EndDate, cancellationToken);
         ValidateLockedCoverage(context, after);
-        var facts = discounts.Values.SelectMany(v => v.Rows).Where(row => context.ReadyDates.Contains(row.Date.Date)).ToList();
+        var discountStateAfter = await _discountSnapshotReader.CaptureStateAsync(context.ReadyDates, cancellationToken);
+        if (discountStateBefore.SchemaReady != discountStateAfter.SchemaReady
+            || !string.Equals(discountStateBefore.Fingerprint, discountStateAfter.Fingerprint, StringComparison.Ordinal))
+            throw new BatchProductSalesCoverageVersionConflictException();
         var coverage = BuildCoverage(after, context.ReadyDates, BatchProductSalesStatisticQueueResult.NotNeeded);
-        var overview = BuildOverview(facts, context.ReadyDates, selectedStores, context.StoreNames, context.ProductCodes.Count, coverage.Status == "pending");
+        var overview = BuildOverview(facts, context.ReadyDates, selectedStores, context.StoreNames, context.ProductCodes.Count, coverage.Status == "pending", contributingByBranch);
         var branch = string.IsNullOrWhiteSpace(request.BranchCode) ? null : BuildBranch(selectedStores[0], context.StoreNames, facts, context.ReadyDates);
-        var products = branch == null ? [] : context.Products.Select(product => new BatchProductSalesBranchProductDto { ProductCode=product.ProductCode, ItemNumber=product.ItemNumber, ProductName=product.ProductName, EnglishName=product.EnglishName, Barcode=product.Barcode, ImageUrl=product.ImageUrl, Metrics=BuildAggregateMetrics(facts.Where(row => string.Equals(row.ProductCode, product.ProductCode, StringComparison.OrdinalIgnoreCase))) }).ToList();
-        return ApiResponse<BatchProductSalesDiscountOverviewDto>.OK(new BatchProductSalesDiscountOverviewDto { StartDate=context.Range.StartDate, EndDate=context.Range.EndDate, StoreCodes=context.StoreCodes, ProductCodes=context.ProductCodes, Coverage=coverage, Overview=overview, Branch=branch, Products=products, DiscountStatisticStatus=CombineDiscountStatus(discounts.Values), DiscountUpdatedAt=discounts.Values.Where(v => v.UpdatedAt.HasValue).Select(v => v.UpdatedAt!.Value).DefaultIfEmpty().Max() is var discountUpdated && discountUpdated == DateTime.MinValue ? null : discountUpdated, Warnings=coverage.Status == "pending" ? ["所选日期尚无已完成统计。"] : [] });
+        var products = branch == null ? [] : context.Products.Select(product => new BatchProductSalesBranchProductDto { ProductCode=product.ProductCode, ItemNumber=product.ItemNumber, ProductName=product.ProductName, EnglishName=product.EnglishName, Barcode=product.Barcode, ImageUrl=product.ImageUrl, Metrics=productMetrics.GetValueOrDefault(product.ProductCode) ?? BuildAggregateMetrics([]) }).ToList();
+        return ApiResponse<BatchProductSalesDiscountOverviewDto>.OK(new BatchProductSalesDiscountOverviewDto { StartDate=context.Range.StartDate, EndDate=context.Range.EndDate, StoreCodes=context.StoreCodes, ProductCodes=context.ProductCodes, Coverage=coverage, Overview=overview, Branch=branch, Products=products, DiscountStatisticStatus=CombineDiscountStatus(discountStatuses), DiscountUpdatedAt=discountUpdatedAt, Warnings=coverage.Status == "pending" ? ["所选日期尚无已完成统计。"] : [] });
     }
 
     public async Task<string> ExportDetailCsvAsync(BatchProductSalesFollowupRequestDto request, IReadOnlyList<string>? scopedStoreCodes, CancellationToken cancellationToken = default)
     {
         var context = await ResolveFollowupAsync(request, scopedStoreCodes, cancellationToken);
-        var facts = new List<BatchProductSalesAggregateRow>();
-        foreach (var batch in context.ProductCodes.Chunk(20))
+        var netOnly = context.ProductCodes.Count > ProductCodeQueryBatchSize;
+        var facts = netOnly
+            // 超过 500 个货号时，折扣快照会产生大量商品×日期读取；导出改用日统计表的
+            // SQL 汇总，保留净销量和金额，并把折扣分类明确标为未知。
+            ? await ReadNetExportFactsAsync(context.ProductCodes, context.ReadyDates, context.StoreCodes, cancellationToken)
+            : [];
+        if (!netOnly)
         {
-            var statistics = await _statisticReader.ReadAsync(batch, context.ReadyDates, context.StoreCodes, cancellationToken);
-            var discounts = await ReadExportDiscountsWithRetryAsync(batch, context.ReadyDates, context.StoreCodes, statistics, cancellationToken);
-            // 每批立即折叠为 Date×Branch；导出不保留商品明细矩阵，下一批可释放。
-            facts = MergeDateBranchRows(facts.Concat(discounts.Values.SelectMany(value => value.Rows)));
+            foreach (var batch in context.ProductCodes.Chunk(20))
+            {
+                var statistics = await _statisticReader.ReadAsync(batch, context.ReadyDates, context.StoreCodes, cancellationToken);
+                var discounts = await ReadExportDiscountsWithRetryAsync(batch, context.ReadyDates, context.StoreCodes, statistics, cancellationToken);
+                // 每批立即折叠为 Date×Branch；导出不保留商品明细矩阵，下一批可释放。
+                facts = MergeDateBranchRows(facts.Concat(discounts.Values.SelectMany(value => value.Rows)));
+            }
         }
         var beforeWrite = await _statisticReader.CoverageAsync(context.Range.StartDate, context.Range.EndDate, cancellationToken);
         ValidateLockedCoverage(context, beforeWrite);
         var path = Path.Combine(Path.GetTempPath(), $"batch-product-sales-{Guid.NewGuid():N}.csv");
         try
         {
-            var csv = BuildCsv(context, BuildCoverage(beforeWrite, context.ReadyDates, BatchProductSalesStatisticQueueResult.NotNeeded), facts);
+            var csv = BuildCsv(context, BuildCoverage(beforeWrite, context.ReadyDates, BatchProductSalesStatisticQueueResult.NotNeeded), facts, netOnly);
             // 文件已完整落盘后重新核验锁；冲突或取消只能走 finally，绝不下发半文件。
             await File.WriteAllTextAsync(path, csv, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true), cancellationToken);
             var finalCoverage = await _statisticReader.CoverageAsync(context.Range.StartDate, context.Range.EndDate, cancellationToken);
@@ -359,6 +428,33 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         }
     }
 
+    private async Task<List<BatchProductSalesAggregateRow>> ReadNetExportFactsAsync(
+        IReadOnlyList<string> productCodes, IReadOnlyList<DateTime> readyDates,
+        IReadOnlyList<string> storeCodes, CancellationToken cancellationToken)
+    {
+        var facts = new List<BatchProductSalesAggregateRow>();
+        foreach (var productCodeBatch in productCodes.Chunk(ProductCodeQueryBatchSize))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var datePredicate = BatchProductSalesStatisticReader.BuildDatePredicate(readyDates);
+            var query = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
+                .Where(s => productCodeBatch.Contains(s.ProductCode))
+                .Where(datePredicate.ToExpression())
+                .Where(s => storeCodes.Contains(s.BranchCode));
+            facts.AddRange(await query.GroupBy(s => new { s.Date, s.BranchCode })
+                .Select(s => new BatchProductSalesAggregateRow
+                {
+                    Date = s.Date,
+                    BranchCode = s.BranchCode,
+                    Quantity = SqlFunc.AggregateSum(s.TotalQuantity),
+                    UnknownQuantity = SqlFunc.AggregateSum(s.TotalQuantity),
+                    UnknownRowCount = 1,
+                    SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
+                }).ToListAsync(cancellationToken));
+        }
+        return MergeDateBranchRows(facts);
+    }
+
     private async Task<FollowupContext> ResolveFollowupAsync(BatchProductSalesFollowupRequestDto request, IReadOnlyList<string>? granted, CancellationToken token)
     {
         var range = ValidateRange(request);
@@ -379,13 +475,13 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
     {
         if (context.ReadyDates.Any(date => !after.DateVersions.TryGetValue(date, out var version) || !string.Equals(version, context.Before.DateVersions.GetValueOrDefault(date), StringComparison.Ordinal))) throw new BatchProductSalesCoverageVersionConflictException();
     }
-    private static List<string> NormalizeProductCodes(IEnumerable<string>? values) { var rows=values?.Where(v=>!string.IsNullOrWhiteSpace(v)).Select(v=>v.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList()??[]; if(rows.Count==0||rows.Count>MaxItemNumbers) throw new BatchProductSalesAnalysisValidationException("商品数量必须在 1 到 500 之间。"); return rows; }
+    private static List<string> NormalizeProductCodes(IEnumerable<string>? values) { var rows=values?.Where(v=>!string.IsNullOrWhiteSpace(v)).Select(v=>v.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList()??[]; if(rows.Count==0||rows.Count>MaxItemNumbers) throw new BatchProductSalesAnalysisValidationException($"商品数量必须在 1 到 {MaxItemNumbers} 之间。"); return rows; }
     private static BatchProductSalesMetricsDto BuildNetMetrics(IEnumerable<BatchProductSalesAggregateRow> rows) { var list=rows.ToList(); return new BatchProductSalesMetricsDto { Quantity=list.Sum(r=>r.Quantity), SalesAmount=list.Sum(r=>r.SalesAmount), UnknownQuantity=list.Sum(r=>r.Quantity), DiscountStatus="unknown" }; }
     private static BatchProductSalesBranchDto BuildBranch(string code, IReadOnlyDictionary<string,string> names, IEnumerable<BatchProductSalesAggregateRow> rows, IReadOnlyList<DateTime> dates) => new() { BranchCode=code, BranchName=names.GetValueOrDefault(code, code), Metrics=BuildAggregateMetrics(rows), Daily=BuildAggregateDaily(rows,dates) };
-    private static BatchProductSalesOverviewDto BuildOverview(List<BatchProductSalesAggregateRow> facts, IReadOnlyList<DateTime> dates, IReadOnlyList<string> stores, IReadOnlyDictionary<string,string> names, int selected, bool pending) => new() { Metrics=pending?null:BuildAggregateMetrics(facts), Daily=pending?[]:BuildAggregateDaily(facts,dates), Branches=pending?[]:stores.Select(store=>new BatchProductSalesOverviewBranchDto { BranchCode=store, BranchName=names.GetValueOrDefault(store,store), Metrics=BuildAggregateMetrics(facts.Where(f=>string.Equals(f.BranchCode,store,StringComparison.OrdinalIgnoreCase))), Daily=BuildAggregateDaily(facts.Where(f=>string.Equals(f.BranchCode,store,StringComparison.OrdinalIgnoreCase)),dates), ContributingProductCount=facts.Where(f=>string.Equals(f.BranchCode,store,StringComparison.OrdinalIgnoreCase)).GroupBy(f=>f.ProductCode).Count(g=>g.Sum(x=>x.Quantity)!=0||g.Sum(x=>x.SalesAmount)!=0), SelectedProductCount=selected }).ToList() };
-    private static string CombineDiscountStatus(IEnumerable<BatchProductSalesDiscountSnapshotReadResult> values)
+    private static BatchProductSalesOverviewDto BuildOverview(List<BatchProductSalesAggregateRow> facts, IReadOnlyList<DateTime> dates, IReadOnlyList<string> stores, IReadOnlyDictionary<string,string> names, int selected, bool pending, IReadOnlyDictionary<string,int> contributingByBranch) => new() { Metrics=pending?null:BuildAggregateMetrics(facts), Daily=pending?[]:BuildAggregateDaily(facts,dates), Branches=pending?[]:stores.Select(store=>new BatchProductSalesOverviewBranchDto { BranchCode=store, BranchName=names.GetValueOrDefault(store,store), Metrics=BuildAggregateMetrics(facts.Where(f=>string.Equals(f.BranchCode,store,StringComparison.OrdinalIgnoreCase))), Daily=BuildAggregateDaily(facts.Where(f=>string.Equals(f.BranchCode,store,StringComparison.OrdinalIgnoreCase)),dates), ContributingProductCount=contributingByBranch.GetValueOrDefault(store), SelectedProductCount=selected }).ToList() };
+    private static string CombineDiscountStatus(IEnumerable<string> statuses)
     {
-        var rows = values.Select(v => v.Status).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var rows = statuses.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (rows.Count == 0) return "Pending";
         if (rows.Count == 1) return rows[0];
         // 混合时保留最能说明后台进度的状态，不能把 Backfilling/Refreshing 压成 Unavailable。
@@ -407,7 +503,7 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
     private sealed class DateBranchComparer : IEqualityComparer<(DateTime, string)>
     { public bool Equals((DateTime, string) x, (DateTime, string) y) => x.Item1 == y.Item1 && string.Equals(x.Item2, y.Item2, StringComparison.OrdinalIgnoreCase); public int GetHashCode((DateTime, string) value) => HashCode.Combine(value.Item1, StringComparer.OrdinalIgnoreCase.GetHashCode(value.Item2)); }
 
-    private static string BuildCsv(FollowupContext context, BatchProductSalesCoverageDto coverage, List<BatchProductSalesAggregateRow> facts)
+    private static string BuildCsv(FollowupContext context, BatchProductSalesCoverageDto coverage, List<BatchProductSalesAggregateRow> facts, bool netOnly = false)
     {
         static string E(string? value)
         {
@@ -435,7 +531,9 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
             // 门店范围是一个 CSV 单元格；先合并再转义，避免每个门店代码各自带引号而破坏列边界。
             "门店范围," + E(string.Join("|", context.StoreCodes)),
             "商品范围," + E(string.Join("|", context.ProductCodes)),
-            "销量口径," + E("仅含已完成日期；未统计日期数值为空且未计入合计"),
+            "销量口径," + E(netOnly
+                ? "仅含已完成日期的净销量；未统计日期数值为空且未计入合计；折扣分类未知"
+                : "仅含已完成日期；未统计日期数值为空且未计入合计"),
             "Coverage," + coverage.Status,
             "CoverageVersion," + coverage.Version,
             "ReadyDates," + string.Join("|", coverage.ReadyDates),
@@ -459,9 +557,15 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
     private async Task<List<BatchProductSalesMatchDto>> ResolveItemMatchesAsync(
         IReadOnlyList<string> itemNumbers, CancellationToken cancellationToken)
     {
-        var rows = await _db.Queryable<Product>()
-            .Where(p => p.ItemNumber != null && itemNumbers.Contains(p.ItemNumber))
-            .Select(p => new { p.ItemNumber, p.ProductCode }).ToListAsync();
+        var rows = new List<(string? ItemNumber, string? ProductCode)>();
+        foreach (var itemNumberBatch in itemNumbers.Chunk(ProductCodeQueryBatchSize))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var batchRows = await _db.Queryable<Product>()
+                .Where(p => p.ItemNumber != null && itemNumberBatch.Contains(p.ItemNumber))
+                .Select(p => new { p.ItemNumber, p.ProductCode }).ToListAsync(cancellationToken);
+            rows.AddRange(batchRows.Select(row => (row.ItemNumber, row.ProductCode)));
+        }
         cancellationToken.ThrowIfCancellationRequested();
         var byItem = rows.Where(r => !string.IsNullOrWhiteSpace(r.ItemNumber) && !string.IsNullOrWhiteSpace(r.ProductCode))
             .GroupBy(r => r.ItemNumber!.Trim(), StringComparer.OrdinalIgnoreCase)
@@ -482,15 +586,63 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         IReadOnlyList<string> productCodes, CancellationToken cancellationToken)
     {
         if (productCodes.Count == 0) return [];
-        var products = await _db.Queryable<Product>().Where(p => productCodes.Contains(p.ProductCode))
-            .Select(p => new BatchProductSalesProductDto
-            {
-                ProductCode = p.ProductCode ?? string.Empty, ItemNumber = p.ItemNumber ?? string.Empty, ProductName = p.ProductName ?? string.Empty,
-                EnglishName = p.EnglishName, Barcode = p.Barcode, ImageUrl = p.ProductImage,
-            }).ToListAsync();
+        var products = new List<BatchProductSalesProductDto>();
+        foreach (var productCodeBatch in productCodes.Chunk(ProductCodeQueryBatchSize))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            products.AddRange(await _db.Queryable<Product>().Where(p => productCodeBatch.Contains(p.ProductCode))
+                .Select(p => new BatchProductSalesProductDto
+                {
+                    ProductCode = p.ProductCode ?? string.Empty, ItemNumber = p.ItemNumber ?? string.Empty, ProductName = p.ProductName ?? string.Empty,
+                    EnglishName = p.EnglishName, Barcode = p.Barcode, ImageUrl = p.ProductImage,
+                }).ToListAsync(cancellationToken));
+        }
         cancellationToken.ThrowIfCancellationRequested();
         return products.Where(p => !string.IsNullOrWhiteSpace(p.ProductCode))
             .GroupBy(p => p.ProductCode, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
+    }
+
+    private async Task<QuantitySummary> ReadQuantitySummaryAsync(
+        IReadOnlyList<string> productCodes, IReadOnlyList<DateTime> dates,
+        IReadOnlyList<string>? storeCodes, CancellationToken cancellationToken)
+    {
+        if (productCodes.Count == 0 || dates.Count == 0) return new([], []);
+        var byProduct = new List<ProductQuantitySummary>();
+        var byDate = new List<DailyQuantitySummary>();
+        foreach (var productCodeBatch in productCodes.Chunk(ProductCodeQueryBatchSize))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var productQuery = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
+                .Where(s => productCodeBatch.Contains(s.ProductCode));
+            var dateQuery = _db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
+                .Where(s => productCodeBatch.Contains(s.ProductCode));
+            // Date 字段历史上可能带有时间，统一按所选日期生成半开整日区间。
+            var datePredicate = BatchProductSalesStatisticReader.BuildDatePredicate(dates);
+            productQuery = productQuery.Where(datePredicate.ToExpression());
+            dateQuery = dateQuery.Where(datePredicate.ToExpression());
+            if (storeCodes != null)
+            {
+                productQuery = productQuery.Where(s => storeCodes.Contains(s.BranchCode));
+                dateQuery = dateQuery.Where(s => storeCodes.Contains(s.BranchCode));
+            }
+            byProduct.AddRange(await productQuery.GroupBy(s => s.ProductCode).Select(s => new ProductQuantitySummary
+            {
+                ProductCode = s.ProductCode,
+                Quantity = SqlFunc.AggregateSum(s.TotalQuantity),
+                SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
+            }).ToListAsync(cancellationToken));
+            byDate.AddRange(await dateQuery.GroupBy(s => s.Date).Select(s => new DailyQuantitySummary
+            {
+                Date = s.Date,
+                Quantity = SqlFunc.AggregateSum(s.TotalQuantity),
+                SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
+            }).ToListAsync(cancellationToken));
+        }
+        return new QuantitySummary(
+            byProduct.GroupBy(row => row.ProductCode, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new ProductQuantitySummary { ProductCode = group.Key, Quantity = group.Sum(row => row.Quantity), SalesAmount = group.Sum(row => row.SalesAmount) }).ToList(),
+            byDate.GroupBy(row => row.Date.Date)
+                .Select(group => new DailyQuantitySummary { Date = group.Key, Quantity = group.Sum(row => row.Quantity), SalesAmount = group.Sum(row => row.SalesAmount) }).ToList());
     }
 
     internal static BatchProductSalesMetricsDto BuildAggregateMetrics(IEnumerable<BatchProductSalesAggregateRow> facts)
@@ -649,7 +801,7 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
     internal static List<string> NormalizeItemNumbers(IEnumerable<string>? values)
     {
         var items = values?.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
-        if (items.Count == 0 || items.Count > MaxItemNumbers) throw new BatchProductSalesAnalysisValidationException("货号数量必须在 1 到 500 之间。");
+        if (items.Count == 0 || items.Count > MaxItemNumbers) throw new BatchProductSalesAnalysisValidationException($"货号数量必须在 1 到 {MaxItemNumbers} 之间。");
         return items;
     }
     internal static List<string>? ResolveStoreScope(IEnumerable<string>? requested, IReadOnlyList<string>? granted)
@@ -712,7 +864,9 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         }
     }
 
-    private sealed class ProductQuantityRow { public DateTime Date { get; set; } public string? ProductCode { get; set; } public decimal Quantity { get; set; } public decimal SalesAmount { get; set; } }
+    private sealed class ProductQuantitySummary { public string ProductCode { get; set; } = string.Empty; public decimal Quantity { get; set; } public decimal SalesAmount { get; set; } }
+    private sealed class DailyQuantitySummary { public DateTime Date { get; set; } public decimal Quantity { get; set; } public decimal SalesAmount { get; set; } }
+    private sealed record QuantitySummary(List<ProductQuantitySummary> ByProduct, List<DailyQuantitySummary> ByDate);
 }
 
 public sealed class BatchProductSalesAnalysisValidationException(string message) : ArgumentException(message);

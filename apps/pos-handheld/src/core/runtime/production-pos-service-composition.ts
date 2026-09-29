@@ -5,6 +5,10 @@ import type {
 import type { AttendanceAuditRuntimeFactory } from "../../features/attendance-audit/attendance-audit-runtime";
 import { CashierLockService } from "../../features/cashier-lock";
 import {
+  CatalogCodeConflictSynchronizer,
+  findExactCatalogCandidates,
+} from "../../features/catalog/catalog-code-conflicts";
+import {
   RemoteCatalogLookupRevalidationService,
 } from "../../features/catalog/catalog-lookup-revalidation";
 import type {
@@ -246,6 +250,10 @@ export type PosRuntimeCapabilities = Readonly<{
 
 export type PosCatalogRuntimeService = Readonly<{
   findExact(lookupCode: string): Promise<LocalCatalogMatch | null>;
+  /** 一码多商品：目录行在首位，其后为仍有效的冲突候选；码不在当前目录时为空。 */
+  findExactCandidates?(
+    lookupCode: string,
+  ): Promise<readonly LocalCatalogMatch[]>;
   searchByName(
     query: string,
     limit: number,
@@ -639,10 +647,28 @@ export function createProductionPosRuntimeServices(
   };
   const catalogRepository = input.database.catalogSnapshots();
   const catalogLookupOverlay = input.database.catalogLookupOverlay();
+  const catalogCodeConflicts = input.database.catalogCodeConflicts();
   const localSalesCatalog = {
     findExact: (lookupCode: string) =>
       catalogLookupOverlay.findExact(
         input.auditMetadata.storeCode,
+        lookupCode,
+      ),
+    // 中文注释：目录（含在线覆盖层）仍有该码时才并入冲突候选，与 WPF 合并口径一致。
+    findExactCandidates: (lookupCode: string) =>
+      findExactCatalogCandidates(
+        {
+          findExact: (code) =>
+            catalogLookupOverlay.findExact(
+              input.auditMetadata.storeCode,
+              code,
+            ),
+          findConflicts: (storeCode, lookupCodeNormalized) =>
+            catalogCodeConflicts.findCandidates(
+              storeCode,
+              lookupCodeNormalized,
+            ),
+        },
         lookupCode,
       ),
     searchByName: (
@@ -765,12 +791,20 @@ export function createProductionPosRuntimeServices(
       deviceCode: input.auditMetadata.deviceCode,
     },
   );
+  const catalogPageApi = new HbposCatalogPageApi(
+    input.transport,
+    input.catalogPageDigest,
+  );
   const catalogue = new CatalogSnapshotService(
     catalogRepository,
-    new HbposCatalogPageApi(input.transport, input.catalogPageDigest),
+    catalogPageApi,
     {
       createSnapshotId: input.createId,
       nowIso: input.clock.nowIso,
+      codeConflicts: new CatalogCodeConflictSynchronizer({
+        remote: catalogPageApi,
+        storage: catalogCodeConflicts,
+      }),
     },
   );
   catalogue.resumeRetiredCleanup();
@@ -1774,6 +1808,8 @@ export function createProductionPosRuntimeServices(
   const catalog: PosCatalogRuntimeService = {
     findExact: (lookupCode) =>
       localSalesCatalog.findExact(lookupCode),
+    findExactCandidates: (lookupCode) =>
+      localSalesCatalog.findExactCandidates(lookupCode),
     searchByName: (query, limit, offset) =>
       localSalesCatalog.searchByName(query, limit, offset),
     getCurrentCatalog: async (request) => {

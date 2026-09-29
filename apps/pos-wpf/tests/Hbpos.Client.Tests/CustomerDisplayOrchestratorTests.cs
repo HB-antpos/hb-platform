@@ -10,6 +10,22 @@ namespace Hbpos.Client.Tests;
 public sealed class CustomerDisplayOrchestratorTests
 {
     [Fact]
+    public void Fullscreen_request_from_window_service_is_forwarded_to_subscribers()
+    {
+        var windowService = new FakeCustomerDisplayWindowService();
+        var orchestrator = new CustomerDisplayOrchestrator(windowService);
+        var raised = 0;
+        EventHandler handler = (_, _) => raised++;
+        orchestrator.FullscreenRequested += handler;
+
+        windowService.RaiseFullscreenRequested();
+        orchestrator.FullscreenRequested -= handler;
+        windowService.RaiseFullscreenRequested();
+
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
     public async Task RefreshAdvertisementsAsync_loads_snapshot_from_api()
     {
         var orchestrator = new CustomerDisplayOrchestrator(
@@ -444,6 +460,10 @@ public sealed class CustomerDisplayOrchestratorTests
             add { }
             remove { }
         }
+
+        public event EventHandler? FullscreenRequested;
+
+        public void RaiseFullscreenRequested() => FullscreenRequested?.Invoke(this, EventArgs.Empty);
 
         public void Prewarm(CustomerDisplayViewModel viewModel)
         {

@@ -8,6 +8,7 @@ function assert(condition: unknown, message: string): asserts condition {
 
 const source = readFileSync('src/pages/ExecutiveSalesIntelligence/CompactSalesBoard/index.tsx', 'utf8')
 const styles = readFileSync('src/pages/ExecutiveSalesIntelligence/CompactSalesBoard/styles.module.css', 'utf8')
+const exportSource = readFileSync('src/pages/ExecutiveSalesIntelligence/CompactSalesBoard/export.ts', 'utf8')
 
 assert(source.includes("'/api/react/v1/dashboard/compact-sales-board'" ) === false, '页面必须经 salesDashboardService 调用接口')
 assert(source.includes('getCompactSalesBoard'), '页面必须使用 Compact Sales Board 服务')
@@ -31,7 +32,7 @@ assert(source.includes('setCacheState(\'fresh\')'), '强制刷新失败后不得
 assert(source.includes("type CacheState = 'cached' | 'fresh' | 'refreshing' | 'error'"), '缓存状态必须区分刷新成功与错误')
 assert(source.includes("setCacheState('fresh')\n        // 中文注释"), '网络成功后必须从强制刷新状态切回最新查询')
 assert(source.includes("setCacheState('error')"), '请求错误必须记录错误状态')
-assert(source.includes('{loadError\n              ? <span className={styles.statusError}>'), '错误提示存在时不得同时显示误导性的统计新鲜度')
+assert(source.includes('const statusNode = loadError\n    ? <span className={styles.statusError}>'), '错误提示存在时不得同时显示误导性的统计新鲜度')
 
 // 联动筛选：授权范围与选中项分开传，服务端据此让各栏不被自身选中项收窄。
 assert(source.includes('branchCodes: managedStoreCodes'), 'branchCodes 只能传授权分店范围')
@@ -56,6 +57,31 @@ assert(source.includes('sortOrder: toAntdSortOrder(productSort, \'itemNumber\')'
 assert(source.includes('sortField: filterState.productSort.field'), '商品排序字段必须传给服务端')
 assert(source.includes('setProductSort(resolveProductSort(current?.columnKey, current?.order))\n    setPageIndex(1)'), '切换排序后必须回到第一页')
 assert(source.includes('onCompositionStart'), '商品搜索必须等待中文输入法组词结束')
+
+// 版式：三栏从左到右为 国内供应商 → 分店 → 商品；统计收进底部统计条、默认折叠，表格随统计条高度伸缩。
+const supplierPanelAt = source.indexOf('aria-label="国内供应商销售"')
+const branchPanelAt = source.indexOf('aria-label="分店销售"')
+const productPanelAt = source.indexOf('aria-label="国内商品明细"')
+assert(supplierPanelAt > 0 && supplierPanelAt < branchPanelAt && branchPanelAt < productPanelAt, '三栏顺序必须是 国内供应商 → 分店 → 商品')
+assert(source.indexOf('移除国内供应商筛选') < source.indexOf('移除分店筛选') && source.indexOf('移除分店筛选') < source.indexOf('移除商品筛选'), '筛选标签顺序必须与三栏一致')
+assert(source.includes('useState(() => readStoredFlag(statsExpandedStorageKey))'), '底部统计默认折叠，展开偏好按人记住')
+assert(source.includes('aria-expanded={statsExpanded}'), '统计展开按钮必须声明展开状态')
+assert(source.includes("var(--cb-footer-h, 38px)"), '表格高度必须扣除底部统计条的实际高度')
+assert(source.includes('Math.ceil(entry.borderBoxSize?.[0]?.blockSize'), '底部统计条高度必须实时测量并向上取整，避免整页多出 1px 滚动')
+
+// 分页与导出：每页默认 50、上限 500（与带图导出一致）；导出模块按需加载，图片走看板权限的代理。
+assert(source.includes('const pageSizeOptions = [50, 100, 200, MAX_PRODUCT_IMAGE_EXPORT_ROWS]'), '每页条数必须是 50/100/200/500')
+assert(source.includes('const defaultPageSize = 50'), '每页默认 50 条')
+assert(source.includes("await import('./export')"), '导出模块（含 ExcelJS）必须按需加载，不进首屏包')
+assert(source.includes("key: 'page'") && source.includes("key: 'all'"), '必须同时提供导出本页与导出全部结果')
+assert(source.includes('...buildBoardRequest(exportState, managedStoreCodes, false)'), '导出全部结果必须沿用页面同一组筛选与排序条件')
+assert(source.includes('exportAbortRef.current?.abort()'), '导出必须可取消')
+assert(!source.includes('loading={exporting'), '导出触发按钮不得使用 loading（会吞掉点击）')
+assert(exportSource.includes("'/api/react/v1/image-proxy/compact-sales-board'"), '看板导出图片必须走按看板权限放行的代理')
+assert(styles.includes('.numCell { white-space: nowrap; }'), '数字列不得换行')
+// 分店栏占比：国内商品营业额 ÷ 分店总营业额（服务端给出分母），不再是本栏合计。
+assert(source.includes('total={record.branchTotalAmount}'), '分店栏占比分母必须是分店总营业额')
+assert(!source.includes('storeTotal'), '分店栏不得再用本栏合计作占比分母')
 
 assert(styles.includes('.panelLoading .progress'), '局部加载必须有顶部进度条')
 assert(styles.includes(':focus-visible'), '可点击行必须有可见焦点状态')

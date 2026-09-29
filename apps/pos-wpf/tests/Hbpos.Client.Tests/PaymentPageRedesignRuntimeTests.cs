@@ -94,8 +94,15 @@ public sealed class PaymentPageRedesignRuntimeTests(PaymentViewRuntimeStaTestHos
                 AssertInBounds(view, note, width, height, 48);
                 Assert.Equal(Bounds(view, notes[0]).Top, Bounds(view, note).Top, 1);
             }
-            // 检查实际文字布局，防止英文卡片标签或清除键因固定宽度被裁切。
-            foreach (var control in keys.Concat(notes).Concat([cash, activeCard, confirm]))
+            var backToPos = Assert.Single(PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(view)
+                .Where(button => System.Windows.Data.BindingOperations
+                    .GetBinding(button, ButtonBase.CommandProperty)?.Path?.Path == "BackToPosCommand"));
+            var visibleInstallmentToggle = PaymentViewRuntimeStaTestHost.FindVisualDescendants<ToggleButton>(view)
+                .Where(toggle => AutomationProperties.GetAutomationId(toggle) == "InstallmentPaymentToggle" && toggle.IsVisible);
+            // 检查实际文字布局，防止英文卡片标签、清除键或放大后的返回/分期文字因固定宽度被裁切。
+            foreach (var control in keys.Concat(notes).Concat([cash, activeCard, confirm, backToPos])
+                         .Cast<FrameworkElement>()
+                         .Concat(visibleInstallmentToggle))
             {
                 foreach (var label in PaymentViewRuntimeStaTestHost.FindVisualDescendants<TextBlock>(control))
                 {

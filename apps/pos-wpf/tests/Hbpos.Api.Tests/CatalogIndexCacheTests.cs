@@ -282,6 +282,43 @@ public sealed class CatalogIndexCacheTests
     }
 
     [Fact]
+    public async Task CatalogIndexCache_PersistsCodeConflictsAcrossRestart()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new GzipCatalogSnapshotStore(directory.Path);
+        var built = CreateResult("S01", "catalog-v1:conflicts", "P01");
+        IReadOnlyList<SellableItemDto> conflicts =
+        [
+            built.SellableItems[0],
+            built.SellableItems[0] with { ProductCode = "P02", DisplayName = "Other product", RetailPrice = 3m }
+        ];
+        var firstProcess = new CatalogIndexCache(store);
+        await firstProcess.ForceRefreshAndPublishAsync(
+            "S01",
+            since: null,
+            _ => Task.FromResult<CatalogIndexBuildResult?>(built with { CodeConflicts = conflicts }),
+            CancellationToken.None);
+
+        // 模拟容器重启：新实例只能从磁盘快照恢复，不允许冷构建。
+        var restartedProcess = new CatalogIndexCache(store, new RecordingRefreshScheduler());
+        var restored = await restartedProcess.GetOrBuildAsync(
+            "S01",
+            since: null,
+            _ => Task.FromException<CatalogIndexBuildResult?>(new InvalidOperationException("不应冷构建")),
+            CancellationToken.None);
+
+        Assert.NotNull(restored);
+        Assert.Equal("catalog-v1:conflicts", restored!.CatalogIndex.CatalogVersion);
+        Assert.Equal(conflicts, restored.CodeConflicts);
+
+        // 按固定版本读取（iPad 分页）同样从磁盘加载并常驻，之后的普通读取可能直接复用它。
+        var pinnedProcess = new CatalogIndexCache(store, new RecordingRefreshScheduler());
+        var pinned = pinnedProcess.GetByVersion("S01", since: null, "catalog-v1:conflicts");
+        Assert.NotNull(pinned);
+        Assert.Equal(conflicts, pinned!.CodeConflicts);
+    }
+
+    [Fact]
     public void Restored_snapshot_without_raw_candidates_refuses_legacy_since_projection()
     {
         using var directory = new TemporaryDirectory();

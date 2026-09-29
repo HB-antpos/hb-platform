@@ -267,6 +267,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private string _receiptReturnPolicyText = string.Empty;
 
     [ObservableProperty]
+    private bool _receiptPrintBankReceiptText = ReceiptPrinterSettings.Default.PrintBankReceiptText;
+
+    [ObservableProperty]
     private string _receiptPrinterTestStatusMessage = string.Empty;
 
     public string AppUpdateChannelText { get; }
@@ -293,10 +296,12 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         PosSessionState? session = null,
         IRemoteMaintenanceService? remoteMaintenanceService = null,
         Func<string, Task<bool>>? confirmLinklyTerminalAssignmentAsync = null,
-        IPaymentMethodSettingsService? paymentMethodSettingsService = null)
+        IPaymentMethodSettingsService? paymentMethodSettingsService = null,
+        ICatalogSyncStatusService? catalogSyncStatusService = null)
     {
         _setupService = setupService;
         _paymentMethodSettingsService = paymentMethodSettingsService;
+        _catalogSyncStatusService = catalogSyncStatusService;
         _localization = localization;
         _apiServerSettings = apiServerSettings;
         _downloadCatalogAsync = downloadCatalogAsync;
@@ -372,6 +377,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             _localization.CultureChanged += OnCultureChanged;
         }
 
+        InitializeCatalogSyncStatus();
+
         SelectDataMaintenanceCommand = new RelayCommand(() => SelectedCategory = SettingsCategory.DataMaintenance);
         SelectPaymentTerminalCommand = new AsyncRelayCommand(() => SelectCategoryAsync(SettingsCategory.PaymentTerminal, Permissions.PosTerminal.Settings.PaymentTerminal));
         SelectReceiptPrinterCommand = new AsyncRelayCommand(() => SelectCategoryAsync(SettingsCategory.ReceiptPrinter, Permissions.PosTerminal.Settings.ReceiptPrinter));
@@ -432,6 +439,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         {
             _localization.CultureChanged -= OnCultureChanged;
         }
+
+        ReleaseCatalogSyncStatus();
     }
 
     public ObservableCollection<SquareLocationOption> SquareLocations { get; } = [];
@@ -801,6 +810,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             RaiseActivePaymentProviderProperties();
             SetStatus("settings.status.loaded");
         }, operationName: "load settings");
+        await LoadCatalogSyncStatusAsync();
     }
 
     private async Task LoadLocationsAsync()
@@ -2552,6 +2562,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RemoteMaintenanceProgressText));
         OnPropertyChanged(nameof(LinklyTitleText));
         RaiseActivePaymentProviderProperties();
+        RaiseCatalogSyncStatusProperties();
         OnPropertyChanged(nameof(LinklyCloudSecretStatusText));
         OnPropertyChanged(nameof(LinklyCloudCredentialStatusText));
         OnPropertyChanged(nameof(LinklyTestActionText));
@@ -2608,6 +2619,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ReceiptStorePhoneText = settings.StorePhone;
         ReceiptAbnText = settings.Abn;
         ReceiptReturnPolicyText = settings.ReturnPolicy;
+        ReceiptPrintBankReceiptText = settings.PrintBankReceiptText;
     }
 
     private ReceiptPrinterSettings CreateReceiptPrinterSettingsFromFields()
@@ -2620,7 +2632,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ReceiptStorePhoneText,
             ReceiptAbnText,
             ReceiptReturnPolicyText,
-            ReceiptPrinterSettings.Default.CutDistance);
+            ReceiptPrinterSettings.Default.CutDistance,
+            ReceiptPrintBankReceiptText);
     }
 
     partial void OnIsSquareSandboxChanged(bool value)

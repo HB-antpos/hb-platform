@@ -54,6 +54,15 @@
   <data name="startup.error.apiBaseAddress.message" xml:space="preserve">
     <value>HBPOS_API_BASE_URL 配置无效。请设置为完整且允许使用的 HTTP 或 HTTPS 服务器地址，然后重新启动 HB POS。</value>
   </data>
+  <data name="startup.versionLabel" xml:space="preserve">
+    <value>版本</value>
+  </data>
+  <data name="startup.updatedTo" xml:space="preserve">
+    <value>已更新到 {0}</value>
+  </data>
+  <data name="startup.rolledBackTo" xml:space="preserve">
+    <value>已回退到 {0}</value>
+  </data>
   <data name="Backspace" xml:space="preserve">
     <value>退格</value>
   </data>
@@ -825,6 +834,12 @@
   <data name="success.newTransaction" xml:space="preserve">
     <value>新交易</value>
   </data>
+  <data name="success.card.scanToContinue" xml:space="preserve">
+    <value>扫描下一件商品即开始新交易</value>
+  </data>
+  <data name="success.card.close" xml:space="preserve">
+    <value>关闭</value>
+  </data>
   <data name="success.receiptPreview" xml:space="preserve">
     <value>小票预览</value>
   </data>
@@ -1037,6 +1052,33 @@
   </data>
   <data name="shell.customerDisplayWindow" xml:space="preserve">
     <value>客显窗口</value>
+  </data>
+  <data name="shell.colorTheme" xml:space="preserve">
+    <value>界面配色</value>
+  </data>
+  <data name="shell.colorTheme.default" xml:space="preserve">
+    <value>默认</value>
+  </data>
+  <data name="shell.colorTheme.default.hint" xml:space="preserve">
+    <value>原有配色</value>
+  </data>
+  <data name="shell.colorTheme.paper" xml:space="preserve">
+    <value>暖纸</value>
+  </data>
+  <data name="shell.colorTheme.paper.hint" xml:space="preserve">
+    <value>白天明亮门店</value>
+  </data>
+  <data name="shell.colorTheme.graphite" xml:space="preserve">
+    <value>石墨夜</value>
+  </data>
+  <data name="shell.colorTheme.graphite.hint" xml:space="preserve">
+    <value>夜班、灯光偏暗</value>
+  </data>
+  <data name="shell.colorTheme.celadon" xml:space="preserve">
+    <value>青瓷</value>
+  </data>
+  <data name="shell.colorTheme.celadon.hint" xml:space="preserve">
+    <value>全天候柔和护眼</value>
   </data>
   <data name="shell.languageToggle" xml:space="preserve">
     <value>中 / EN</value>
@@ -1666,9 +1708,6 @@
   </data>
   <data name="shell.page.returns" xml:space="preserve">
     <value>退货</value>
-  </data>
-  <data name="shell.page.paymentSuccess" xml:space="preserve">
-    <value>支付成功</value>
   </data>
   <data name="shell.page.history" xml:space="preserve">
     <value>历史</value>
@@ -2804,11 +2843,11 @@
   <data name="settings.status.appUpdateOptionalDeclined" xml:space="preserve"><value>已跳过本次软件更新。</value></data>
   <data name="settings.status.appUpdateReady" xml:space="preserve"><value>软件更新已准备好，可安装。</value></data>
   <data name="settings.status.appUpdateForceReady" xml:space="preserve"><value>必须安装的软件更新已准备好。</value></data>
-  <data name="settings.status.appUpdateDownloadFailed" xml:space="preserve"><value>软件更新下载失败。{0}</value></data>
+  <data name="settings.status.appUpdateDownloadFailed" xml:space="preserve"><value>暂时无法完成更新检查，请稍后重试。</value></data>
   <data name="settings.status.appUpdateInstallFailed" xml:space="preserve"><value>软件更新安装器启动失败。{0}</value></data>
   <data name="settings.status.appUpdateInstalling" xml:space="preserve"><value>正在启动软件更新安装器...</value></data>
+  <data name="settings.status.appUpdateDownloading" xml:space="preserve"><value>正在后台下载软件更新...</value></data>
   <data name="appUpdate.prompt.title" xml:space="preserve"><value>软件更新</value></data>
-  <data name="appUpdate.optional.prompt.message" xml:space="preserve"><value>发现版本 {0}，是否现在下载并安装？</value></data>
   <data name="appUpdate.optional.prompt.description" xml:space="preserve"><value>新版本已准备好安装。</value></data>
   <data name="appUpdate.optional.prompt.readyStatus" xml:space="preserve"><value>已准备安装</value></data>
   <data name="appUpdate.optional.prompt.currentVersion" xml:space="preserve"><value>当前版本</value></data>
@@ -2829,12 +2868,12 @@
   <data name="appUpdate.force.ready" xml:space="preserve"><value>必须安装此更新后才能继续收银。</value></data>
   <data name="appUpdate.force.minimumRequired" xml:space="preserve"><value>当前终端低于最低支持版本（{0}），必须安装更新后才能继续收银。</value></data>
   <data name="appUpdate.force.rollbackReady" xml:space="preserve"><value>必须回退到版本 {0} 后才能继续收银。</value></data>
+  <data name="appUpdate.force.backgroundReady" xml:space="preserve"><value>必须安装的版本 {0} 已下载完成，请在空闲时点击“安装更新”；下次启动时必须先安装才能收银。</value></data>
   <data name="appUpdate.force.downloadFailed" xml:space="preserve"><value>必须更新失败：{0}</value></data>
   <data name="appUpdate.force.downloadFailedDefault" xml:space="preserve"><value>更新下载失败，请联系管理员。</value></data>
-  <data name="appUpdate.startup.checkFailed" xml:space="preserve"><value>启动时检查软件更新失败：{0}</value></data>
   <data name="appUpdate.force.retry" xml:space="preserve"><value>重试</value></data>
   <data name="appUpdate.force.exit" xml:space="preserve"><value>退出</value></data>
-  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>请先完成或清空当前交易，再重试安装更新。</value></data>
+  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>当前交易尚未完成，交易结束后将自动继续安装更新。</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>无法启动更新安装器。{0}</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>需要操作授权</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>当前收银员没有执行此操作的权限。</value></data>

@@ -10,6 +10,9 @@ namespace Hbpos.Client.Wpf.Views.Screens;
 
 public partial class CustomerDisplayView : UserControl
 {
+    internal const double DesignCanvasHeight = 768d;
+    internal const double MinDesignCanvasWidth = 1024d;
+    internal const double MaxDesignCanvasWidth = 1366d;
     private static readonly GridLength VisibleSummaryRowHeight = new(152);
     private static readonly GridLength HiddenSummaryRowHeight = new(0);
     private readonly DispatcherTimer _imageAdvanceTimer = new() { Interval = TimeSpan.FromSeconds(8) };
@@ -25,6 +28,41 @@ public partial class CustomerDisplayView : UserControl
         Loaded += CustomerDisplayViewLoaded;
         DataContextChanged += CustomerDisplayViewDataContextChanged;
         Unloaded += CustomerDisplayViewUnloaded;
+        SizeChanged += CustomerDisplayViewSizeChanged;
+    }
+
+    private void CustomerDisplayViewSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // 按宿主尺寸调整画布宽度，Viewbox 再整体等比缩放；画布变化不影响宿主尺寸，不会形成布局回环。
+        var canvasWidth = ResolveDesignCanvasWidth(e.NewSize.Width, e.NewSize.Height);
+        DesignCanvas.Width = canvasWidth;
+        // 画布变窄时购物车列多分一些，避免商品名被右侧广告挤到只剩几个字。
+        var cartShare = ResolveCartColumnShare(canvasWidth);
+        CartColumn.Width = new GridLength(cartShare, GridUnitType.Star);
+        PromotionColumn.Width = new GridLength(1d - cartShare, GridUnitType.Star);
+    }
+
+    internal static double ResolveCartColumnShare(double canvasWidth)
+    {
+        const double wideShare = 0.60d;
+        const double narrowShare = 0.68d;
+        var narrowness = (MaxDesignCanvasWidth - Math.Clamp(canvasWidth, MinDesignCanvasWidth, MaxDesignCanvasWidth))
+            / (MaxDesignCanvasWidth - MinDesignCanvasWidth);
+        return wideShare + ((narrowShare - wideShare) * narrowness);
+    }
+
+    internal static double ResolveDesignCanvasWidth(double hostWidth, double hostHeight)
+    {
+        if (!double.IsFinite(hostWidth)
+            || !double.IsFinite(hostHeight)
+            || hostWidth <= 0d
+            || hostHeight <= 0d)
+        {
+            return MaxDesignCanvasWidth;
+        }
+
+        // 高度固定，宽度按宿主宽高比推算；比 16:9 更宽的屏保持 1366 两侧留白，比 4:3 更窄的屏保持 1024 上下留白。
+        return Math.Clamp(DesignCanvasHeight * hostWidth / hostHeight, MinDesignCanvasWidth, MaxDesignCanvasWidth);
     }
 
     private void CustomerDisplayViewLoaded(object sender, RoutedEventArgs e)

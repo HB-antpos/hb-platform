@@ -344,7 +344,7 @@ public sealed class ProductStoreSyncJobServiceTests
             .ToList();
 
         var runTask = ProductStoreSyncService.RunStoreSyncTasksAsync(tasks);
-        await allStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await allStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.Equal(3, Volatile.Read(ref runningCount));
         Assert.Equal(3, Volatile.Read(ref maxRunningCount));
@@ -384,32 +384,20 @@ public sealed class ProductStoreSyncJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (job?.Status is ProductStoreSyncJobStatusConstants.Succeeded or ProductStoreSyncJobStatusConstants.Failed)
-                return job;
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待商品同步到分店 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current => current?.Status is ProductStoreSyncJobStatusConstants.Succeeded or ProductStoreSyncJobStatusConstants.Failed,
+            describeLast: current => $"商品同步到分店 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 
-    private static async Task WaitForSyncInvocationCountAsync(
+    private static Task WaitForSyncInvocationCountAsync(
         Mock<IProductStoreSyncService> syncService,
         int expectedCount
-    )
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            if (syncService.Invocations.Count >= expectedCount)
-            {
-                return;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待商品同步到分店服务调用超时");
-    }
+    ) =>
+        WaitUntilAsync(
+            () => syncService.Invocations.Count >= expectedCount,
+            diagnostics: () => $"商品同步到分店服务已调用 {syncService.Invocations.Count} 次，期望至少 {expectedCount} 次"
+        );
 }

@@ -123,6 +123,58 @@ public sealed class SalesDashboardBestSellersTests : IDisposable
     }
 
     [Fact]
+    public async Task GetCompactSalesBoardAsync_分店栏带区间总营业额作占比分母_选中供应商只收窄分子()
+    {
+        var date = new DateTime(2026, 8, 1);
+        await SeedStatisticStateAsync(date, SalesStatisticRefreshStatus.Fresh);
+        await SeedStoreAsync("S-SHARE-A", "占比分店A");
+        await SeedStoreAsync("S-SHARE-B", "占比分店B");
+        await SeedProductAsync("P-SHARE-1", "I-SHARE-1", "B-SHARE-1", "占比商品1", true, true, 1);
+        await SeedProductAsync("P-SHARE-2", "I-SHARE-2", "B-SHARE-2", "占比商品2", true, true, 1);
+        await _localDb.Insertable(new[]
+        {
+            new ChinaSupplier { Guid = "cn-share-a", SupplierCode = "CN-SHARE-A", SupplierName = "占比供应商A" },
+            new ChinaSupplier { Guid = "cn-share-b", SupplierCode = "CN-SHARE-B", SupplierName = "占比供应商B" },
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            new ProductStoreDailySalesStatistic { Date = date, BranchCode = "S-SHARE-A", SupplierCode = "200", ProductCode = "P-SHARE-1", ProductName = "占比商品1", TotalQuantity = 4, TotalAmount = 40m, OrderCount = 1 },
+            new ProductStoreDailySalesStatistic { Date = date, BranchCode = "S-SHARE-A", SupplierCode = "200", ProductCode = "P-SHARE-2", ProductName = "占比商品2", TotalQuantity = 6, TotalAmount = 60m, OrderCount = 1 },
+            new ProductStoreDailySalesStatistic { Date = date, BranchCode = "S-SHARE-B", SupplierCode = "200", ProductCode = "P-SHARE-1", ProductName = "占比商品1", TotalQuantity = 3, TotalAmount = 30m, OrderCount = 1 },
+        }).ExecuteCommandAsync();
+        await _posmDb.Insertable(new[]
+        {
+            new PosmProductSupplierMapping { ProductCode = "P-SHARE-1", LocalSupplierCode = "200", ChinaSupplierCode = "CN-SHARE-A" },
+            new PosmProductSupplierMapping { ProductCode = "P-SHARE-2", LocalSupplierCode = "200", ChinaSupplierCode = "CN-SHARE-B" },
+        }).ExecuteCommandAsync();
+        // 分店总营业额：区间外的日期、没有国内商品销售的分店都不应计入。
+        await _localDb.Insertable(new[]
+        {
+            new StoreSalesStatistic { Date = date, BranchCode = "S-SHARE-A", BranchName = "占比分店A", TotalAmount = 400m },
+            new StoreSalesStatistic { Date = date.AddDays(-1), BranchCode = "S-SHARE-A", BranchName = "占比分店A", TotalAmount = 999m },
+            new StoreSalesStatistic { Date = date, BranchCode = "S-SHARE-B", BranchName = "占比分店B", TotalAmount = 300m },
+            new StoreSalesStatistic { Date = date, BranchCode = "S-SHARE-C", BranchName = "占比分店C", TotalAmount = 500m },
+        }).ExecuteCommandAsync();
+
+        var service = CreateService();
+        var range = new DateRangeDto { StartDate = date, EndDate = date };
+        var all = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range });
+        var storeA = Assert.Single(all.Stores, row => row.BranchCode == "S-SHARE-A");
+        var storeB = Assert.Single(all.Stores, row => row.BranchCode == "S-SHARE-B");
+        Assert.Equal(100m, storeA.TotalAmount);
+        Assert.Equal(400m, storeA.BranchTotalAmount);
+        Assert.Equal(30m, storeB.TotalAmount);
+        Assert.Equal(300m, storeB.BranchTotalAmount);
+        Assert.Equal(2, all.Stores.Count);
+
+        // 选中供应商只收窄分子（国内商品金额），分母仍是分店总营业额。
+        var filtered = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, SelectedChinaSupplierCode = "CN-SHARE-A" });
+        var filteredA = Assert.Single(filtered.Stores, row => row.BranchCode == "S-SHARE-A");
+        Assert.Equal(40m, filteredA.TotalAmount);
+        Assert.Equal(400m, filteredA.BranchTotalAmount);
+    }
+
+    [Fact]
     public async Task GetStatisticsFreshnessAsync_跳过或失败不推进最后完整发布快照时间()
     {
         var publishedAt = DateTime.SpecifyKind(
@@ -557,6 +609,11 @@ public sealed class SalesDashboardBestSellersTests : IDisposable
         Assert.Equal(41, productCodes.Count);
         Assert.Equal(41, productCodes.Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Equal(Enumerable.Range(1, 41).Select(index => $"P-EQUAL-{index:D3}"), productCodes);
+
+        // 每页上限 500（与带图导出一致）：超出时钳到 500，一页即可取回全部 41 款且顺序不变。
+        var widePage = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, PageIndex = 1, PageSize = 900 });
+        Assert.Equal(500, widePage.ProductDetails.PageSize);
+        Assert.Equal(productCodes, widePage.ProductDetails.Data.Select(row => row.ProductCode));
     }
 
     [Fact]

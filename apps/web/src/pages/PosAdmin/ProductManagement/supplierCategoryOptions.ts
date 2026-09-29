@@ -24,6 +24,36 @@ export interface SupplierCategoryCascaderOption {
   children?: SupplierCategoryCascaderOption[]
 }
 
+export interface SupplierCategorySearchResult {
+  valuePath: string[]
+  labelPath: string[]
+}
+
+/** 只检索已加载的分类；未加载的供应商仍可按名称找到并展开。 */
+export function searchSupplierCategoryOptions(
+  options: SupplierCategoryCascaderOption[],
+  query: string,
+  limit = 50,
+): SupplierCategorySearchResult[] {
+  const keyword = query.trim().toLocaleLowerCase()
+  if (!keyword) return []
+  const results: SupplierCategorySearchResult[] = []
+  const visit = (items: SupplierCategoryCascaderOption[], valuePath: string[], labelPath: string[]) => {
+    for (const option of items) {
+      if (results.length >= limit) return
+      if (option.disabled || option.kind === 'empty' || option.kind === 'retry') continue
+      const nextValuePath = [...valuePath, option.value]
+      const nextLabelPath = [...labelPath, option.label]
+      if (option.label.toLocaleLowerCase().includes(keyword)) {
+        results.push({ valuePath: nextValuePath, labelPath: nextLabelPath })
+      }
+      if (option.children?.length) visit(option.children, nextValuePath, nextLabelPath)
+    }
+  }
+  visit(options, [], [])
+  return results
+}
+
 export interface SupplierCascaderSource {
   value: string
   label: string

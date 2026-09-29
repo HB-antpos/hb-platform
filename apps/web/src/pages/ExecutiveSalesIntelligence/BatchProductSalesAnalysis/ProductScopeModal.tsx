@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import { parsePastedItemNumbers, readItemNumberFile, type ImportResult } from './import'
 import styles from './index.module.css'
 
+const PREVIEW_ITEM_LIMIT = 100
+
 interface Props {
   initialText: string
   initialResult: ImportResult
@@ -73,8 +75,9 @@ export default function ProductScopeModal({ initialText, initialResult, maxItems
     <section className={styles.scopePreview}>
       <h3>{t('batchProductSalesAnalysis.validItems', { count: result.itemNumbers.length })}</h3>
       <div tabIndex={0} aria-label={t('batchProductSalesAnalysis.validItems', { count: result.itemNumbers.length })}>
-        {result.itemNumbers.length ? result.itemNumbers.map(item => <Tag key={item}>{item}</Tag>) : <span className={styles.hint}>{t('batchProductSalesAnalysis.noImportedItems')}</span>}
+        {result.itemNumbers.length ? result.itemNumbers.slice(0, PREVIEW_ITEM_LIMIT).map(item => <Tag key={item}>{item}</Tag>) : <span className={styles.hint}>{t('batchProductSalesAnalysis.noImportedItems')}</span>}
       </div>
+      {result.itemNumbers.length > PREVIEW_ITEM_LIMIT ? <p className={styles.hint}>{t('batchProductSalesAnalysis.previewLimited', { count: PREVIEW_ITEM_LIMIT })}</p> : null}
     </section>
     {result.issues.length ? <details className={styles.details}><summary>{t('batchProductSalesAnalysis.issues', { count: result.issues.length })}</summary>
       <div className={styles.importIssues}>{result.issues.map((issue, index) => <p key={index}>{issue.row || '—'} · {issue.value || '—'} · {issue.reason}</p>)}</div>

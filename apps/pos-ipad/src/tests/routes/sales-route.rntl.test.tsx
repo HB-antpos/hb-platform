@@ -571,6 +571,47 @@ test("购物车商品详情返回真实条码，并接受目录复核后的可�
   await screen.unmount();
 });
 
+test("一码多商品时按商品编码在同码候选中取图，非胜出商品行也能显示自己的图片", async () => {
+  const findExactCandidates = jest.fn(async (_lookupCode: string) => [
+    {
+      productCode: "P-FLY",
+      lookupCode: "6405090401470",
+      barcode: "9300000000017",
+      productImage: "/media/products/fly.png",
+    },
+    {
+      productCode: "P-FLOWER",
+      lookupCode: "6405090401470",
+      barcode: "6405090401470",
+      productImage: "/media/products/flower.png",
+    },
+  ]);
+  mockRuntime.services.catalog.findExactCandidates = findExactCandidates;
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  });
+
+  await expect(
+    mockSalesScreenProps.resolveCartProductDetails({
+      productCode: "P-FLOWER",
+      lookupCode: "6405090401470",
+    }),
+  ).resolves.toEqual({
+    barcode: "6405090401470",
+    imageUri: "https://pos.example.test/media/products/flower.png",
+  });
+  await expect(
+    mockSalesScreenProps.resolveCartProductImage({
+      productCode: "P-GONE",
+      lookupCode: "6405090401470",
+    }),
+  ).resolves.toBeNull();
+  expect(findExactCandidates).toHaveBeenLastCalledWith("6405090401470");
+  expect(mockCatalogFindExact).not.toHaveBeenCalled();
+  await screen.unmount();
+});
+
 test("销售页只结算一次，路由直接使用已核验快照且不重复调用 Presenter", async () => {
   const screen = await render(<SalesRoute />);
   await waitFor(() => {

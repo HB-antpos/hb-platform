@@ -45,6 +45,7 @@ type GeneratedCatalogSyncPlanWithLease = GeneratedCatalogSyncPlan & Readonly<{
   downloadLeaseId?: string | null;
   deltaOperationCount?: number | null;
 }>;
+type GeneratedCatalogCodeConflicts = components["schemas"]["CatalogCodeConflictsResponse"];
 
 const DELTA_CHECKSUM_MARKER = "HBPOS-CATALOG-DELTA-PAGE-CHECKSUM-V1";
 const DELTA_CHECKSUM_PREFIX = "sha256-catalog-delta-page-v1:";
@@ -87,6 +88,17 @@ export type VerifiedCatalogSyncPage = Readonly<{
   totalCount: number;
   catalogVersion: string;
   pageChecksum: string;
+}>;
+
+/**
+ * 一码多商品候选：每个冲突查询码下每个不同商品一行（首行即目录胜出项）。
+ * available=false 表示服务端尚未算出候选（如由旧快照恢复），调用方必须保留本地旧数据。
+ */
+export type VerifiedCatalogCodeConflicts = Readonly<{
+  storeCode: string;
+  generatedAt: string;
+  available: boolean;
+  items: readonly CatalogLookupItem[];
 }>;
 
 export type CatalogPageDigest = (canonicalPayload: string) => Promise<string>;
@@ -223,6 +235,73 @@ export class HbposCatalogPageApi {
       unwrapHbposEnvelope(response.data),
       requestedStoreCode,
     );
+  }
+
+  /**
+   * 一码多商品候选。该接口没有分页 checksum，因此逐字段按目录行口径校验，
+   * 门店、查询码规范化或 available 与候选不一致时整体拒绝，由调用方保留本地旧数据。
+   */
+  public async getCodeConflicts(input: Readonly<{
+    storeCode: string;
+    signal?: AbortSignal;
+  }>): Promise<VerifiedCatalogCodeConflicts> {
+    const response = await this.transport.request<HbposEnvelope<GeneratedCatalogCodeConflicts>>({
+      method: "GET",
+      url: "/api/v1/catalog/sellable-items/code-conflicts",
+      params: { storeCode: input.storeCode },
+      // 中文注释：候选刷新发生在目录激活之后，设上限避免旁路请求长期占住目录刷新串行门；
+      // 服务端冷构建索引仍有充足时间。
+      timeoutMs: CODE_CONFLICTS_TIMEOUT_MS,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    return normalizeCodeConflicts(
+      unwrapHbposEnvelope(response.data),
+      input.storeCode,
+    );
+  }
+}
+
+const CODE_CONFLICTS_TIMEOUT_MS = 60_000;
+
+function normalizeCodeConflicts(
+  source: GeneratedCatalogCodeConflicts,
+  requestedStoreCode: string,
+): VerifiedCatalogCodeConflicts {
+  try {
+    const storeCode = requiredText(source.storeCode, "codeConflicts.storeCode");
+    if (storeCode !== requestedStoreCode) {
+      throw invalidPage("codeConflicts.storeCode");
+    }
+    const generatedAt = requiredTimestamp(source.generatedAt, "codeConflicts.generatedAt");
+    const available = requiredBoolean(source.available, "codeConflicts.available");
+    const items = requiredArray(
+      source.items as readonly GeneratedCatalogItem[] | null | undefined,
+      "codeConflicts.items",
+    ).map(normalizeItem);
+    // 中文注释：服务端未算出候选时只返回空列表；带候选的 available=false 属于自相矛盾的响应。
+    if (!available && items.length > 0) {
+      throw invalidPage("codeConflicts.available");
+    }
+    for (const item of items) {
+      if (item.storeCode !== requestedStoreCode) {
+        throw invalidPage("codeConflicts.item.storeCode");
+      }
+      if (item.lookupCode.trim().toUpperCase() !== item.lookupCodeNormalized) {
+        throw invalidPage("codeConflicts.item.lookupCodeNormalized");
+      }
+    }
+    return { storeCode, generatedAt, available, items };
+  } catch (error) {
+    if (error instanceof HbposApiError && error.code === "CATALOG_PAGE_INVALID") {
+      throw new HbposApiError(
+        error.message.replace("Catalog page field", "Catalog code conflicts field"),
+        {
+          kind: "envelope",
+          code: "CATALOG_CODE_CONFLICTS_INVALID",
+        },
+      );
+    }
+    throw error;
   }
 }
 

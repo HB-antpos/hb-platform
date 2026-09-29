@@ -1,5 +1,5 @@
 import { DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, Button, DatePicker, Dropdown, Empty, Input, Select, Skeleton, Tag } from 'antd'
+import { Alert, Button, DatePicker, Dropdown, Empty, Input, Pagination, Select, Skeleton, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react'
@@ -11,7 +11,7 @@ import { useAuthStore } from '../../../store/auth'
 import { RequestError } from '../../../utils/request'
 import type { BatchProductSalesApi, BatchSalesBranch, BatchSalesBranchOverview, BatchSalesCoverage, BatchSalesDaily, BatchSalesDetail, BatchSalesDiscountOverview, BatchSalesMetrics, BatchSalesQueryResult, BatchSalesScope } from '../../../types/batchProductSalesAnalysis'
 import ProductImage from '../ProductFlowShared/ProductImage'
-import { parsePastedItemNumbers, type ImportResult } from './import'
+import { MAX_ITEM_NUMBERS, parsePastedItemNumbers, type ImportResult } from './import'
 import { buildBatchProductSalesAnalysis, buildBatchProductSalesDetailExportScope, formatCsvRow, getBatchProductSalesClassifiedQuantity, getBatchProductSalesDateRangeError, getBatchProductSalesDiscountStateKey, hasBatchProductSalesDiscountStatisticsNotice, mergeBatchProductSalesDetailClassifications } from './logic'
 import DiscountDailyChart from './DiscountDailyChart'
 import type { DiscountChartDaily } from './chartModel'
@@ -26,6 +26,8 @@ registerPageMessages({ zh: messagesZh, en: messagesEn })
 
 const { RangePicker } = DatePicker
 const ALL_PRODUCTS = '__batch-product-sales-all__'
+const PRODUCT_PAGE_SIZE = 50
+const AUTO_DISCOUNT_PRODUCT_LIMIT = 500
 const quantityFormatter = new Intl.NumberFormat('en-AU')
 const audFormatter = new Intl.NumberFormat('en-AU', {
   style: 'currency',
@@ -125,7 +127,10 @@ function sameCoverage(left: BatchSalesCoverage, right: BatchSalesCoverage) {
   return left.version === right.version && sameStringSet(left.readyDates, right.readyDates)
 }
 function sameStringSet(left: string[], right: string[]) {
-  return left.length === right.length && [...left].sort().every((value, index) => value === [...right].sort()[index])
+  if (left.length !== right.length) return false
+  const sortedLeft = [...left].sort()
+  const sortedRight = [...right].sort()
+  return sortedLeft.every((value, index) => value === sortedRight[index])
 }
 function sameLockedScope(response: BatchSalesScope & { productCodes?: string[]; coverage: BatchSalesCoverage }, scope: BatchSalesScope, coverage: BatchSalesCoverage, productCodes?: string[]) {
   return sameCoverage(response.coverage, coverage)
@@ -254,6 +259,8 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
   const [branchSelectionTouched, setBranchSelectionTouched] = useState(false)
   const [scopeOpen, setScopeOpen] = useState(false)
   const [productSearch, setProductSearch] = useState('')
+  const [productPage, setProductPage] = useState(1)
+  const [matchesPage, setMatchesPage] = useState(1)
   const [branchSearch, setBranchSearch] = useState('')
   const [branchTopN, setBranchTopN] = useState(20)
   const [onlyBranchesWithSales, setOnlyBranchesWithSales] = useState(false)
@@ -278,6 +285,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
   const pendingSelectionRestoreRef = useRef<{ productCode: string; branchCode?: string; branchTouched: boolean }>()
   const selectedBranchRequestKeyRef = useRef<string>()
   const selectedDetailRequestKeyRef = useRef<string>()
+  const productListRef = useRef<HTMLDivElement>(null)
 
   const clearQueryForAuthorization = useCallback(() => {
     requestGenerationRef.current += 1
@@ -317,6 +325,8 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
     setBranchSelectionTouched(false)
     setOptions(undefined)
     setDraftStores([])
+    setProductPage(1)
+    setMatchesPage(1)
   }, [])
 
   const loadOptions = useCallback(() => {
@@ -400,6 +410,10 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
     [activeBranchCode, branchOverview, productFilter, selectedDetails],
   )
   const selectedProduct = queryResult?.products.find((product) => product.productCode === productFilter)
+  const filteredProducts = useMemo(() => {
+    const search = productSearch.trim().toLocaleLowerCase()
+    return (queryResult?.products ?? []).filter((product) => `${product.itemNumber} ${product.productName} ${product.englishName ?? ''}`.toLocaleLowerCase().includes(search))
+  }, [productSearch, queryResult?.products])
   const selectedBranch = rankAnalysis.branches.find((branch) => branch.branchCode === activeBranchCode)
   const discountNotice = useMemo(() => {
     const priority = ['Failed', 'OutOfSync', 'Superseded', 'Unavailable', 'Partial', 'Refreshing', 'Backfilling', 'Running', 'Queued', 'Pending'] as const
@@ -439,10 +453,11 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
       })
       .join(' · ')
   }, [appliedScope, options?.stores, t])
-  // 每个 coverage 快照只读取一次总览折扣分类；后台已在一次请求中补齐，不再进行五秒轮询。
+  // 大批量查询先展示可靠的净销量和销售额；折扣分类只在选中单个商品后读取。
   useEffect(() => {
     if (!queryResult || !appliedScope || !queryResult.products.length || !queryResult.coverage.readyDates.length) return
     setGlobalDiscountError(false)
+    if (queryResult.products.length > AUTO_DISCOUNT_PRODUCT_LIMIT) return
     const controller = new AbortController()
     const generation = requestGenerationRef.current
     const productCodes = queryResult.products.map((product) => product.productCode)
@@ -524,6 +539,8 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
     setQueryError(undefined)
     if (!preserveCurrent) {
       setProductSearch('')
+      setProductPage(1)
+      setMatchesPage(1)
       setBranchSearch('')
       setBranchTopN(20)
       setOnlyBranchesWithSales(false)
@@ -540,6 +557,8 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
         if (request !== queryRequestRef.current || generation !== requestGenerationRef.current) return
         // 首屏只替换 query/overview；商品和分店详情由用户选择后按需读取。
         setQueryResult(result)
+        setProductPage(1)
+        setMatchesPage(1)
         setAppliedScope(resultScope)
         const overview = overviewDetail(result)
         setDetailsByProduct(overview ? { [ALL_PRODUCTS]: overview } : {})
@@ -724,6 +743,10 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
         setBranchLoading(false)
         if (branchDiscountLoadedRef.current.has(cacheKey)) return undefined
         // 分店数量先由 branch 总览展示；分类由同一锁定范围的单次补齐请求覆盖，失败绝不把可靠量清零。
+        if (productCodes.length > AUTO_DISCOUNT_PRODUCT_LIMIT) {
+          branchDiscountLoadedRef.current.add(cacheKey)
+          return undefined
+        }
         return api.getDiscounts({ ...appliedScope, productCodes, branchCode, coverageVersion: coverage.version, readyDates: coverage.readyDates }, controller.signal)
           .then((discounts) => {
             if (generation !== requestGenerationRef.current || selectedBranchRequestKeyRef.current !== cacheKey || !sameLockedScope(discounts, appliedScope, coverage, productCodes) || discounts.branch?.branchCode !== branchCode || controller.signal.aborted) throw new Error('coverage')
@@ -772,6 +795,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
   const clearFilters = () => {
     chooseProduct(ALL_PRODUCTS)
     setProductSearch('')
+    setProductPage(1)
     setBranchSearch('')
     setBranchTopN(20)
     setOnlyBranchesWithSales(false)
@@ -977,7 +1001,9 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                   },
                   {
                     key: 'detail',
-                    label: t('batchProductSalesAnalysis.downloadDetail'),
+                    label: t(queryResult && queryResult.products.length > AUTO_DISCOUNT_PRODUCT_LIMIT && !productFilter
+                      ? 'batchProductSalesAnalysis.downloadNetDetail'
+                      : 'batchProductSalesAnalysis.downloadDetail'),
                     disabled: !detailExportReady,
                     onClick: exportDetail,
                   },
@@ -1003,6 +1029,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
           {queryResult && queryError ? <Alert type="warning" showIcon message={t('batchProductSalesAnalysis.errors.title')} description={t(`batchProductSalesAnalysis.errors.${queryError}`)} action={<Button size="small" onClick={() => query(true)}>{t('batchProductSalesAnalysis.retry')}</Button>} /> : null}
           {queryResult && globalDiscountError ? <Alert type="warning" showIcon message={t('batchProductSalesAnalysis.discountLoadFailed')} action={<Button size="small" onClick={() => query(true)}>{t('batchProductSalesAnalysis.refreshStatus')}</Button>} /> : null}
           {queryResult && productFilter && detailDiscountError ? <Alert type="warning" showIcon message={t('batchProductSalesAnalysis.discountLoadFailed')} action={<Button size="small" onClick={() => chooseProduct(productFilter, true)}>{t('batchProductSalesAnalysis.retry')}</Button>} /> : null}
+          {queryResult && queryResult.products.length > AUTO_DISCOUNT_PRODUCT_LIMIT ? <Alert type="info" showIcon message={t('batchProductSalesAnalysis.discountOnDemand', { count: AUTO_DISCOUNT_PRODUCT_LIMIT })} /> : null}
           {appliedScope ? (
             <div className={styles.appliedScope}>
               {t('batchProductSalesAnalysis.appliedScope', {
@@ -1067,10 +1094,11 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                     </span>
                   ) : null}
                 </header>
-                <Input allowClear prefix={<SearchOutlined />} aria-label={t('batchProductSalesAnalysis.searchProducts')} placeholder={t('batchProductSalesAnalysis.searchProducts')} value={productSearch} onChange={(event) => setProductSearch(event.target.value)} />
+                <Input allowClear prefix={<SearchOutlined />} aria-label={t('batchProductSalesAnalysis.searchProducts')} placeholder={t('batchProductSalesAnalysis.searchProducts')} value={productSearch} onChange={(event) => { setProductSearch(event.target.value); setProductPage(1); if (productListRef.current) productListRef.current.scrollTop = 0 }} />
                 <LoadState loading={queryLoading && !queryResult} error={queryResult ? undefined : queryError} empty={!!queryResult && !queryResult.products.length} onRetry={() => query()}>
                     {queryResult ? (
                       <div
+                        ref={productListRef}
                         className={styles.productList}
                         role="region"
                         aria-label={t('batchProductSalesAnalysis.productList', {
@@ -1086,8 +1114,8 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                           </span>
                           <b>{queryResult.coverage.status === 'pending' ? '—' : number(queryResult.products.reduce((sum, product) => sum + (product.quantity ?? 0), 0))}</b>
                         </button>
-                        {queryResult.products
-                          .filter((product) => `${product.itemNumber} ${product.productName} ${product.englishName ?? ''}`.toLocaleLowerCase().includes(productSearch.trim().toLocaleLowerCase()))
+                        {filteredProducts
+                          .slice((productPage - 1) * PRODUCT_PAGE_SIZE, productPage * PRODUCT_PAGE_SIZE)
                           .map((product) => (
                             <button key={product.productCode} className={`${styles.productRow} ${selectedProductCode === product.productCode ? styles.productCurrent : ''}`} aria-pressed={selectedProductCode === product.productCode} onClick={() => chooseProduct(product.productCode)}>
                               <ProductImage src={product.imageUrl} alt={product.productName || product.itemNumber} />
@@ -1103,6 +1131,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('batchProductSalesAnalysis.noQueryResult')} />
                     )}
                 </LoadState>
+                {filteredProducts.length > PRODUCT_PAGE_SIZE ? <Pagination className={styles.productPagination} simple size="small" current={productPage} pageSize={PRODUCT_PAGE_SIZE} total={filteredProducts.length} onChange={(page) => { setProductPage(page); if (productListRef.current) productListRef.current.scrollTop = 0 }} showSizeChanger={false} /> : null}
                 {queryResult?.matches.length ? (
                   <details className={styles.details}>
                     <summary>
@@ -1112,7 +1141,8 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                       {' · '}
                       {t('batchProductSalesAnalysis.ambiguous')} {queryResult.matches.filter((match) => match.status === 'ambiguous').length}
                     </summary>
-                    {queryResult.matches.map((match) => (
+                    {queryResult.matches.length > PRODUCT_PAGE_SIZE ? <Pagination className={styles.productPagination} simple size="small" current={matchesPage} pageSize={PRODUCT_PAGE_SIZE} total={queryResult.matches.length} onChange={setMatchesPage} showSizeChanger={false} /> : null}
+                    {queryResult.matches.slice((matchesPage - 1) * PRODUCT_PAGE_SIZE, matchesPage * PRODUCT_PAGE_SIZE).map((match) => (
                       <div key={match.itemNumber}>
                         <span>{match.itemNumber}</span>
                         <span>{match.productCodes.join(', ') || '—'}</span>
@@ -1236,7 +1266,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
               {activeBranchCode ? (
                 <div className={styles.tableWrap}>
                   <LoadState loading={branchLoading && !branchAnalysisAvailable} error={branchAnalysisAvailable ? undefined : branchError} empty={!branchAnalysisAvailable || !analysis.productContributions.length}>
-                    {branchAnalysisAvailable && analysis.productContributions.length ? <MeasuredTable metricId="executive-sales-intelligence.batch-product-sales-analysis.branch-product-contribution" size="small" rowKey={(row) => row.product.productCode} columns={contributionColumns} dataSource={analysis.productContributions} pagination={false} scroll={{ x: 652 }} /> : null}
+                    {branchAnalysisAvailable && analysis.productContributions.length ? <MeasuredTable metricId="executive-sales-intelligence.batch-product-sales-analysis.branch-product-contribution" size="small" rowKey={(row) => row.product.productCode} columns={contributionColumns} dataSource={analysis.productContributions} pagination={{ pageSize: PRODUCT_PAGE_SIZE, showSizeChanger: false, hideOnSinglePage: true }} scroll={{ x: 652 }} /> : null}
                   </LoadState>
                 </div>
               ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={statisticsPending ? noCompletedStatistics : t('batchProductSalesAnalysis.selectBranch')} />}
@@ -1246,7 +1276,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
             <ProductScopeModal
               initialText={pastedText}
               initialResult={importResult}
-              maxItems={options?.maxItemNumbers ?? 500}
+              maxItems={options?.maxItemNumbers ?? MAX_ITEM_NUMBERS}
               onCancel={() => setScopeOpen(false)}
               onApply={(text, result) => {
                 setPastedText(text)

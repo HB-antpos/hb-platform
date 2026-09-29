@@ -16,8 +16,8 @@ import type { ContainerDetailTagFilter, ContainerDetailTagStats } from './contai
 export interface ContainerTagFiltersProps {
   /** 所有标签选项（含 label/color/统计数） */
   tagStatOptions: Array<{ value: ContainerDetailTagFilter; label: string; color?: string }>
-  /** 标签统计数据 */
-  tagStats: ContainerDetailTagStats
+  /** 标签统计数据；null 表示尚未加载或加载失败，数量显示为 -- */
+  tagStats: ContainerDetailTagStats | null
   /** 当前选中的标签筛选值 */
   selectedTagFilters: ContainerDetailTagFilter[]
   /** 当前选中的标签选项（用于展示可关闭 Tag） */
@@ -71,7 +71,7 @@ export default function ContainerTagFilters({
             >
               <span>{option.label}</span>
               <Typography.Text strong className="container-detail-stat-count">
-                {tagStats[option.value]}
+                {tagStats ? tagStats[option.value] : '--'}
               </Typography.Text>
             </Tag>
           )

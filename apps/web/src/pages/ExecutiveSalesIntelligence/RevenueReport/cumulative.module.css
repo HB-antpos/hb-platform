@@ -1,0 +1,536 @@
+/* 单日累计对比：沿用营业额页的色板与字号（标题 15px、表格 11px），数字一律等宽。 */
+
+.panel {
+  margin-bottom: 12px;
+  border: 1px solid #dce3eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(26 49 75 / 5%);
+  font-variant-numeric: tabular-nums;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5eaf0;
+}
+
+.headerTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.headerTitle h2 {
+  margin: 0;
+  color: #15385f;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.headerTitle span {
+  color: #596d85;
+  font-size: 11px;
+}
+
+.badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: #eef2f6;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.badge::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #98a2b3;
+  content: '';
+}
+
+.badgeLive {
+  background: #e7f6ec;
+  color: #137333;
+}
+
+.badgeLive::before {
+  background: #16a34a;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: 28px;
+  padding: 16px 16px 12px;
+}
+
+.summary {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.asOf {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #0b4a9e;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.headlineRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 2px;
+}
+
+.headline {
+  color: #15385f;
+  font-size: clamp(26px, 2.4vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.headlinePill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.diffRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 22px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.resetButton {
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid #b7d3f7;
+  border-radius: 4px;
+  background: #edf4fd;
+  color: #0b4a9e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.kpiList {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid #eef2f6;
+  list-style: none;
+}
+
+.kpiItem {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.kpiLabel {
+  color: #596d85;
+  font-size: 11px;
+}
+
+.kpiValue {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.kpiValue strong {
+  color: #15385f;
+  font-size: 14px;
+}
+
+.kpiValue small {
+  overflow: hidden;
+  color: #687d94;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chartColumn {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  color: #475467;
+  font-size: 11px;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendLine {
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: #0f3d73;
+}
+
+.legendDash,
+.legendLiveDash {
+  width: 18px;
+  height: 0;
+  border-top: 2px dashed #8a97a8;
+}
+
+.legendLiveDash {
+  border-top-color: #0f3d73;
+  border-top-style: dotted;
+}
+
+.legendGap {
+  display: inline-flex;
+  width: 18px;
+  height: 10px;
+  background: linear-gradient(90deg, rgb(220 38 38 / 28%) 50%, rgb(22 163 74 / 30%) 50%);
+}
+
+.chart {
+  position: relative;
+  width: 100%;
+  min-height: 260px;
+}
+
+.chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.chartTick {
+  position: absolute;
+  color: #687d94;
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chartEndLabel {
+  position: absolute;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.markerBox {
+  position: absolute;
+  display: grid;
+  gap: 2px;
+  width: 168px;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border: 1px solid #d8e0e9;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(21 56 95 / 8%);
+  color: #475467;
+  font-size: 11px;
+  line-height: 15px;
+  pointer-events: none;
+}
+
+.markerBox strong {
+  color: #15385f;
+}
+
+.markerLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.markerLine > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.strip {
+  display: grid;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid #eef2f6;
+}
+
+.stripHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  color: #596d85;
+  font-size: 11px;
+}
+
+.stripHeader h3 {
+  display: inline;
+  margin: 0 10px 0 0;
+  color: #15385f;
+  font-size: 12px;
+}
+
+.stripScroll {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.stripCells {
+  display: grid;
+  grid-auto-columns: minmax(72px, 1fr);
+  grid-auto-flow: column;
+  gap: 6px;
+}
+
+.stripCell {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  height: 84px;
+  box-sizing: border-box;
+  padding: 7px 4px 5px;
+  border: 1px solid #e1e7ee;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.stripCell:hover:not(:disabled) {
+  border-color: #9cc3f2;
+}
+
+.stripCell:disabled {
+  border-style: dashed;
+  border-color: #e8edf2;
+  background: #f8fafc;
+  cursor: default;
+}
+
+.stripCellSelected,
+.stripCellSelected:hover:not(:disabled) {
+  border-color: #1668dc;
+  background: #edf4fd;
+  box-shadow: 0 0 0 1px #1668dc;
+}
+
+.stripValue {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stripBars {
+  position: relative;
+  width: 100%;
+  height: 32px;
+}
+
+.stripZero {
+  position: absolute;
+  top: 15px;
+  right: 20%;
+  left: 20%;
+  height: 1px;
+  background: #d0d7e0;
+}
+
+.stripBar {
+  position: absolute;
+  right: 37%;
+  left: 37%;
+  border-radius: 2px;
+}
+
+.stripLowBase {
+  position: absolute;
+  inset: 8px 0 auto;
+  color: #687d94;
+  font-size: 10px;
+  text-align: center;
+}
+
+.stripHour {
+  color: #475467;
+  font-size: 11px;
+}
+
+.stripCellSelected .stripHour {
+  color: #0b4a9e;
+  font-weight: 700;
+}
+
+.stripCell:disabled .stripValue,
+.stripCell:disabled .stripHour {
+  color: #98a2b3;
+}
+
+.stateBox {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  padding: 16px;
+  color: #687d94;
+  font-size: 12px;
+}
+
+/* 分店表头与时段表里的「截至 xx:00」提示 */
+.alignPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: #edf4fd;
+  color: #0b4a9e;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.alignBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #e5eaf0;
+  color: #596d85;
+  font-size: 11px;
+}
+
+.hourSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #15385f;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.hourSelect:hover {
+  background: #eef4fb;
+}
+
+.hourLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #15385f;
+  font-weight: 650;
+}
+
+.cutoffTag {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #1668dc;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+}
+
+.cutoffRow th,
+.cutoffRow td {
+  background: #edf4fd !important;
+}
+
+.upcomingRow th,
+.upcomingRow td {
+  color: #98a2b3 !important;
+}
+
+.cellWithTag {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+}
+
+.liveTag {
+  color: #0b4a9e;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.mutedTag {
+  color: #98a2b3;
+  font-size: 9px;
+}
+
+.liveValue {
+  color: #596d85 !important;
+  font-weight: 600;
+}
+
+.resetButton:focus-visible,
+.stripCell:focus-visible,
+.hourSelect:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+@media (max-width: 1120px) {
+  .body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .header {
+    align-items: flex-start;
+    padding: 10px 12px;
+  }
+
+  .body,
+  .strip {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}

@@ -22,6 +22,7 @@ import {
   Select,
   Space,
   Tag,
+  TreeSelect,
   Typography,
   message,
 } from 'antd'
@@ -45,6 +46,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import {
   getLocalSupplierPurchaseSalesAnalysis,
+  getLocalSupplierPurchaseSalesAnalysisCategoryTree,
   getLocalSupplierPurchaseSalesAnalysisStoreOptions,
   getLocalSupplierPurchaseSalesAnalysisSupplierOptions,
 } from '../../../services/localSupplierInvoiceService'
@@ -56,6 +58,7 @@ import type {
   LocalSupplierPurchaseSalesAnalysisRowDto,
   LocalSupplierPurchaseSalesAnalysisSupplierOptionDto,
 } from '../../../types/localSupplierInvoice'
+import type { LocalSupplierCategoryNode } from '../../../types/localSupplierCategory'
 import { buildStoreOptionsFromUserStores } from '../../../utils/managedStoreScope'
 import {
   DEFAULT_PURCHASE_SALES_ANALYSIS_PAGE_SIZE,
@@ -91,15 +94,23 @@ const { Text, Title } = Typography
 const LOCAL_SUPPLIER_PURCHASE_SALES_ANALYSIS_COLUMN_ORDER_STORAGE_KEY =
   'hbweb_rv.localSupplierPurchaseSalesAnalysis.columnOrder.v2'
 const STATIC_PURCHASE_SALES_ANALYSIS_COLUMN_KEYS = new Set(['image', 'itemNumber'])
+const MAX_SUPPLIER_CATEGORY_SELECTIONS = 100
 
 type DateRangeValue = [Dayjs, Dayjs]
 type SortOrderState = 'asc' | 'desc'
 type MetricTone = 'interval' | 'between'
 type PurchaseTone = 'latest' | 'previous'
+interface CategoryTreeOption {
+  key: string
+  value: string
+  title: string
+  children: CategoryTreeOption[]
+}
 
 interface SearchFilters {
   storeCode?: string
   supplierCode?: string
+  supplierCategoryGuids: string[]
   keyword: string
   orderDateRange: DateRangeValue
 }
@@ -246,6 +257,7 @@ function buildInitialFilters(): SearchFilters {
   return {
     storeCode: undefined,
     supplierCode: undefined,
+    supplierCategoryGuids: [],
     keyword: '',
     orderDateRange: getDefaultPurchaseSalesAnalysisDateRange(),
   }
@@ -280,6 +292,10 @@ export default function LocalSupplierPurchaseSalesAnalysisPage({ embedded = fals
   const [supplierOptions, setSupplierOptions] = useState<LocalSupplierPurchaseSalesAnalysisSupplierOptionDto[]>([])
   const [storeOptionsLoading, setStoreOptionsLoading] = useState(false)
   const [supplierOptionsLoading, setSupplierOptionsLoading] = useState(false)
+  const [categoryTree, setCategoryTree] = useState<LocalSupplierCategoryNode[]>([])
+  const [categoryTreeLoading, setCategoryTreeLoading] = useState(false)
+  const [categoryTreeError, setCategoryTreeError] = useState(false)
+  const [categoryTreeReloadToken, setCategoryTreeReloadToken] = useState(0)
   const [draftFilters, setDraftFilters] = useState<SearchFilters>(initialFilters)
   const [filters, setFilters] = useState<SearchFilters>(initialFilters)
   const [page, setPage] = useState(1)
@@ -422,6 +438,43 @@ export default function LocalSupplierPurchaseSalesAnalysisPage({ embedded = fals
     }
   }, [draftFilters.storeCode, requiresStoreSelectionBeforeSupplierOptions])
 
+  useEffect(() => {
+    let cancelled = false
+    const supplierCode = draftFilters.supplierCode
+    if (!supplierCode) {
+      setCategoryTree([])
+      setCategoryTreeError(false)
+      setDraftFilters((current) => current.supplierCategoryGuids.length ? { ...current, supplierCategoryGuids: [] } : current)
+      return () => { cancelled = true }
+    }
+    const controller = new AbortController()
+    setCategoryTreeError(false)
+    setCategoryTreeLoading(true)
+    void getLocalSupplierPurchaseSalesAnalysisCategoryTree(supplierCode, draftFilters.storeCode, controller.signal).then((tree) => {
+      if (!cancelled) setCategoryTree(tree)
+    }).catch(() => {
+      if (!cancelled && !controller.signal.aborted) {
+        setCategoryTree([])
+        setCategoryTreeError(true)
+      }
+    }).finally(() => {
+      if (!cancelled) setCategoryTreeLoading(false)
+    })
+    return () => { cancelled = true; controller.abort() }
+  }, [draftFilters.supplierCode, draftFilters.storeCode, categoryTreeReloadToken])
+
+  const categoryTreeData = useMemo(() => {
+    const mapNodes = (nodes: LocalSupplierCategoryNode[]): CategoryTreeOption[] => nodes
+      .filter((node) => node.isActive)
+      .map((node) => ({
+        key: node.categoryGuid,
+        value: node.categoryGuid,
+        title: node.name,
+        children: mapNodes(node.children || []),
+      }))
+    return mapNodes(categoryTree)
+  }, [categoryTree])
+
   const loadData = useCallback(
     async (signal?: AbortSignal) => {
       if (!filters.storeCode || !filters.supplierCode) {
@@ -432,6 +485,7 @@ export default function LocalSupplierPurchaseSalesAnalysisPage({ embedded = fals
       const query: LocalSupplierPurchaseSalesAnalysisQueryDto = {
         storeCode: filters.storeCode,
         supplierCode: filters.supplierCode,
+        supplierCategoryGuids: filters.supplierCategoryGuids.length ? filters.supplierCategoryGuids : undefined,
         orderDateStart: filters.orderDateRange[0].format('YYYY-MM-DD'),
         orderDateEnd: filters.orderDateRange[1].format('YYYY-MM-DD'),
         keyword: filters.keyword || undefined,
@@ -708,6 +762,7 @@ export default function LocalSupplierPurchaseSalesAnalysisPage({ embedded = fals
     setFilters({
       storeCode: draftFilters.storeCode,
       supplierCode: draftFilters.supplierCode,
+      supplierCategoryGuids: draftFilters.supplierCategoryGuids,
       keyword: draftFilters.keyword.trim(),
       orderDateRange: draftFilters.orderDateRange,
     })
@@ -802,7 +857,7 @@ export default function LocalSupplierPurchaseSalesAnalysisPage({ embedded = fals
                 onChange={(value) => {
                   setHasSearched(false)
                   setResult(null)
-                  setDraftFilters((current) => ({ ...current, storeCode: value, supplierCode: undefined }))
+                  setDraftFilters((current) => ({ ...current, storeCode: value, supplierCode: undefined, supplierCategoryGuids: [] }))
                 }}
               />
               <Select
@@ -824,9 +879,59 @@ export default function LocalSupplierPurchaseSalesAnalysisPage({ embedded = fals
                 onChange={(value) => {
                   setHasSearched(false)
                   setResult(null)
-                  setDraftFilters((current) => ({ ...current, supplierCode: value }))
+                  setDraftFilters((current) => ({ ...current, supplierCode: value, supplierCategoryGuids: [] }))
                 }}
               />
+              <div style={{ width: 280, minWidth: 220 }}>
+                <TreeSelect
+                  allowClear
+                  treeCheckable
+                  multiple
+                  treeData={categoryTreeData}
+                  showSearch
+                  treeNodeFilterProp="title"
+                  treeDefaultExpandAll
+                  showCheckedStrategy={TreeSelect.SHOW_PARENT}
+                  maxTagCount="responsive"
+                  style={{ width: '100%' }}
+                  placeholder={t('posAdmin.localSupplierPurchaseSalesAnalysis.filters.supplierCategory', '供应商分类（可多选）')}
+                  value={draftFilters.supplierCategoryGuids}
+                  loading={categoryTreeLoading}
+                  disabled={!draftFilters.supplierCode || categoryTreeLoading || categoryTreeError}
+                  notFoundContent={draftFilters.supplierCode ? t('posAdmin.localSupplierPurchaseSalesAnalysis.filters.noCategories', '暂无启用分类') : t('posAdmin.localSupplierPurchaseSalesAnalysis.filters.selectSupplierFirst', '请先选择供应商')}
+                  onChange={(values) => {
+                    const nextValues = (values as string[]) || []
+                    if (nextValues.length > MAX_SUPPLIER_CATEGORY_SELECTIONS) {
+                      message.warning(
+                        t(
+                          'posAdmin.localSupplierPurchaseSalesAnalysis.validation.categoryLimit',
+                          '供应商分类最多选择 {{count}} 个。',
+                          { count: MAX_SUPPLIER_CATEGORY_SELECTIONS },
+                        ),
+                      )
+                    }
+                    setDraftFilters((current) => ({
+                      ...current,
+                      supplierCategoryGuids: nextValues.slice(0, MAX_SUPPLIER_CATEGORY_SELECTIONS),
+                    }))
+                  }}
+                />
+                {categoryTreeError ? (
+                  <Space size={4} style={{ marginTop: 4 }}>
+                    <Text type="danger">
+                      {t('posAdmin.localSupplierPurchaseSalesAnalysis.filters.categoryLoadFailed', '供应商分类加载失败')}
+                    </Text>
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingInline: 0 }}
+                      onClick={() => setCategoryTreeReloadToken((value) => value + 1)}
+                    >
+                      {t('common.retry', '重试')}
+                    </Button>
+                  </Space>
+                ) : null}
+              </div>
               <RangePicker
                 allowClear={false}
                 value={draftFilters.orderDateRange}

@@ -9,7 +9,7 @@
              mc:Ignorable="d"
              d:DesignHeight="672"
              d:DesignWidth="1366"
-             Background="{StaticResource PosScreenBackgroundBrush}">
+             Background="{DynamicResource PosScreenBackgroundBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringHasValueToVis" />
@@ -17,10 +17,10 @@
         <!-- 与收银主页保持相同的扁平触控反馈，不引入新的业务状态或动效。 -->
         <Style x:Key="SpecialFlatButtonBaseStyle" TargetType="Button">
             <Setter Property="Padding" Value="8,5" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Cursor" Value="Hand" />
@@ -69,8 +69,8 @@
         <Style x:Key="SpecialSidebarPrimaryButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource SpecialSidebarActionButtonStyle}">
-            <Setter Property="Background" Value="{StaticResource PosPrimaryBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
             <Setter Property="Foreground" Value="White" />
         </Style>
 
@@ -102,14 +102,14 @@
         <Style x:Key="SpecialDangerIconButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource SpecialTouchIconButtonStyle}">
-            <Setter Property="Background" Value="#FFFFF5F6" />
-            <Setter Property="BorderBrush" Value="#FFFFC9CD" />
-            <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
         </Style>
 
         <Style x:Key="SpecialPanelStyle" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="5" />
             <Setter Property="SnapsToDevicePixels" Value="True" />
@@ -117,11 +117,11 @@
 
         <Style x:Key="SpecialProductCardStyle" TargetType="Border" BasedOn="{StaticResource SpecialPanelStyle}">
             <Setter Property="Margin" Value="3" />
-            <Setter Property="Background" Value="White" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
         </Style>
     </UserControl.Resources>
 
-    <Grid x:Name="SpecialProductsWorkspace" Background="#FFF7F8FA">
+    <Grid x:Name="SpecialProductsWorkspace" Background="{DynamicResource PosSurfaceAltBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="84*" MinWidth="760" />
             <ColumnDefinition Width="16*" MinWidth="180" />
@@ -149,11 +149,11 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Width="36" Height="36" Background="#FFEAF2FF" CornerRadius="5">
+                    <Border Width="36" Height="36" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="5">
                         <materialDesign:PackIcon Kind="StorefrontOutline"
                                                  Width="21"
                                                  Height="21"
-                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                  HorizontalAlignment="Center"
                                                  VerticalAlignment="Center" />
                     </Border>
@@ -162,21 +162,21 @@
                                Margin="10,0"
                                FontSize="13"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource PosTextBrush}"
+                               Foreground="{DynamicResource PosTextBrush}"
                                VerticalAlignment="Center"
                                TextWrapping="Wrap"
                                TextTrimming="CharacterEllipsis" />
                     <Border Grid.Column="2"
                             Padding="10,4"
-                            Background="#FFF0FBF2"
-                            BorderBrush="#FF9AD7AB"
+                            Background="{DynamicResource PosSuccessSoftBrush}"
+                            BorderBrush="{DynamicResource PosSuccessBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="3"
                             VerticalAlignment="Center">
                         <TextBlock Text="{Binding OnlineStateText}"
                                    FontSize="10"
                                    FontWeight="Black"
-                                   Foreground="#FF20823B" />
+                                   Foreground="{DynamicResource PosSuccessTextBrush}" />
                     </Border>
                 </Grid>
             </Border>
@@ -197,22 +197,22 @@
                                Margin="0,0,12,0"
                                FontSize="11"
                                FontWeight="Black"
-                               Foreground="{StaticResource PosTextBrush}"
+                               Foreground="{DynamicResource PosTextBrush}"
                                VerticalAlignment="Center" />
                     <ProgressBar Grid.Column="1"
                                  Height="7"
                                  Minimum="0"
                                  Maximum="100"
                                  Value="{Binding DownloadProgressValue}"
-                                 Foreground="{StaticResource PosPrimaryBrush}"
-                                 Background="#FFE8EEF9"
+                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                 Background="{DynamicResource PosPrimarySoftBrush}"
                                  BorderThickness="0"
                                  VerticalAlignment="Center" />
                     <TextBlock Grid.Column="2"
                                Text="{Binding DownloadProgressDetailText}"
                                Margin="12,0,0,0"
                                FontSize="10"
-                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                VerticalAlignment="Center"
                                TextWrapping="Wrap"
                                TextTrimming="CharacterEllipsis" />
@@ -260,8 +260,8 @@
                                 MinHeight="44"
                                 MinWidth="104"
                                 Margin="7,0,0,0"
-                                Background="{StaticResource PosPrimaryBrush}"
-                                BorderBrush="{StaticResource PosPrimaryBrush}"
+                                Background="{DynamicResource PosPrimaryBrush}"
+                                BorderBrush="{DynamicResource PosPrimaryBrush}"
                                 Foreground="White">
                             <StackPanel Orientation="Horizontal">
                                 <materialDesign:PackIcon Kind="Magnify"
@@ -285,7 +285,7 @@
                                    Margin="2,0,0,5"
                                    FontSize="10"
                                    FontWeight="Black"
-                                   Foreground="{StaticResource PosMutedForegroundBrush}" />
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}" />
                         <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                       Style="{StaticResource PosHorizontalTouchScrollViewerStyle}"
                                       VerticalScrollBarVisibility="Disabled"
@@ -326,8 +326,8 @@
                                                 Height="70"
                                                 Margin="0,0,7,0"
                                                 Padding="6"
-                                                Background="White"
-                                                BorderBrush="{StaticResource PosBorderBrush}"
+                                                Background="{DynamicResource PosSurfaceBrush}"
+                                                BorderBrush="{DynamicResource PosBorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="5">
                                             <Grid>
@@ -336,12 +336,12 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Border Width="48" Height="48" Background="#FFEAF2FF" CornerRadius="5" ClipToBounds="True">
+                                                <Border Width="48" Height="48" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="5" ClipToBounds="True">
                                                     <Grid>
                                                         <materialDesign:PackIcon Kind="Image"
                                                                                  Width="20"
                                                                                  Height="20"
-                                                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                                                  HorizontalAlignment="Center"
                                                                                  VerticalAlignment="Center" />
                                                         <Image converters:ProductThumbnailImageSourceConverter.AsyncIsEnabled="{Binding DataContext.AreThumbnailsEnabled, RelativeSource={RelativeSource AncestorType=ListBox}}"
@@ -360,7 +360,7 @@
                                                                MaxHeight="30" />
                                                     <TextBlock Text="{Binding LookupCode}"
                                                                FontSize="9"
-                                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                                TextTrimming="CharacterEllipsis"
                                                                Margin="0,3,0,0" />
                                                 </StackPanel>
@@ -371,8 +371,8 @@
                                                         MinWidth="44"
                                                         MinHeight="44"
                                                         Padding="0"
-                                                        Background="{StaticResource PosPrimaryBrush}"
-                                                        BorderBrush="{StaticResource PosPrimaryBrush}"
+                                                        Background="{DynamicResource PosPrimaryBrush}"
+                                                        BorderBrush="{DynamicResource PosPrimaryBrush}"
                                                         Foreground="White"
                                                         ToolTip="{Binding DataContext.AddText, RelativeSource={RelativeSource AncestorType=ListBox}}">
                                                     <materialDesign:PackIcon Kind="Plus" Width="20" Height="20" Foreground="White" />
@@ -381,9 +381,9 @@
                                         </Border>
                                         <DataTemplate.Triggers>
                                             <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                                <Setter TargetName="SearchResultCard" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                                                <Setter TargetName="SearchResultCard" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                                                 <Setter TargetName="SearchResultCard" Property="BorderThickness" Value="3,1,1,1" />
-                                                <Setter TargetName="SearchResultCard" Property="Background" Value="#FFE8F1FF" />
+                                                <Setter TargetName="SearchResultCard" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
                                             </DataTrigger>
                                         </DataTemplate.Triggers>
                                     </DataTemplate>
@@ -403,7 +403,7 @@
                         <materialDesign:PackIcon Kind="StarOutline"
                                                  Width="48"
                                                  Height="48"
-                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                  HorizontalAlignment="Center" />
                         <TextBlock Text="{Binding EmptyText}"
                                    FontSize="16"
@@ -460,7 +460,7 @@
 
                                         <Border Width="64"
                                                 Height="64"
-                                                Background="#FFEAF2FF"
+                                                Background="{DynamicResource PosPrimarySoftBrush}"
                                                 CornerRadius="5"
                                                 ClipToBounds="True"
                                                 VerticalAlignment="Center">
@@ -468,7 +468,7 @@
                                                 <materialDesign:PackIcon Kind="Image"
                                                                          Width="25"
                                                                          Height="25"
-                                                                         Foreground="{StaticResource PosPrimaryBrush}"
+                                                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                                          HorizontalAlignment="Center"
                                                                          VerticalAlignment="Center" />
                                                 <Image converters:ProductThumbnailImageSourceConverter.AsyncIsEnabled="{Binding DataContext.AreThumbnailsEnabled, RelativeSource={RelativeSource AncestorType=ListBox}}"
@@ -489,7 +489,7 @@
                                             <TextBlock Text="{Binding DisplayName}"
                                                        FontSize="13"
                                                        FontWeight="Black"
-                                                       Foreground="{StaticResource PosTextBrush}"
+                                                       Foreground="{DynamicResource PosTextBrush}"
                                                        VerticalAlignment="Center"
                                                        TextWrapping="Wrap"
                                                        TextTrimming="CharacterEllipsis"
@@ -498,12 +498,12 @@
                                                 <TextBlock Text="{Binding ItemNumber}"
                                                            MaxWidth="84"
                                                            FontSize="10"
-                                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                            TextTrimming="CharacterEllipsis" />
                                                 <TextBlock Text="{Binding LookupCode}"
                                                            Margin="7,0,0,0"
                                                            FontSize="9"
-                                                           Foreground="#FF304B73"
+                                                           Foreground="{DynamicResource PosIconBrush}"
                                                            TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
                                             <TextBlock Grid.Row="2"
@@ -511,16 +511,16 @@
                                                        Margin="0,4,0,0"
                                                        FontSize="17"
                                                        FontWeight="Black"
-                                                       Foreground="{StaticResource PosAccentBrush}" />
+                                                       Foreground="{DynamicResource PosAccentBrush}" />
                                         </Grid>
                                     </Grid>
                                 </Button>
                             </Border>
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                    <Setter TargetName="SpecialProductCard" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                                    <Setter TargetName="SpecialProductCard" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                                     <Setter TargetName="SpecialProductCard" Property="BorderThickness" Value="4,1,1,1" />
-                                    <Setter TargetName="SpecialProductCard" Property="Background" Value="#FFE8F1FF" />
+                                    <Setter TargetName="SpecialProductCard" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
                                 </DataTrigger>
                             </DataTemplate.Triggers>
                         </DataTemplate>
@@ -543,7 +543,7 @@
                                Margin="2,0,12,0"
                                FontSize="11"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -562,7 +562,7 @@
                                    Margin="8,0"
                                    FontSize="12"
                                    FontWeight="Black"
-                                   Foreground="{StaticResource PosTextBrush}"
+                                   Foreground="{DynamicResource PosTextBrush}"
                                    TextAlignment="Center"
                                    VerticalAlignment="Center" />
                         <Button Command="{Binding NextPageCommand}"
@@ -580,7 +580,7 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Column="1" Background="#FFF7F8FA">
+        <Grid Grid.Column="1" Background="{DynamicResource PosSurfaceAltBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -617,7 +617,7 @@
                         <materialDesign:PackIcon Kind="Pencil"
                                                  Width="24"
                                                  Height="24"
-                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                  HorizontalAlignment="Center" />
                         <TextBlock Text="{Binding EditModeText}" Style="{StaticResource SpecialSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -627,7 +627,7 @@
                         <materialDesign:PackIcon Kind="Refresh"
                                                  Width="24"
                                                  Height="24"
-                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                  HorizontalAlignment="Center" />
                         <TextBlock Text="{Binding RefreshText}" Style="{StaticResource SpecialSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -648,30 +648,30 @@
                         <materialDesign:PackIcon Kind="StarOutline"
                                                  Width="18"
                                                  Height="18"
-                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                  VerticalAlignment="Center" />
                         <Border Grid.Column="1"
                                 Padding="6,2"
-                                Background="#FFF0FBF2"
-                                BorderBrush="#FF9AD7AB"
+                                Background="{DynamicResource PosSuccessSoftBrush}"
+                                BorderBrush="{DynamicResource PosSuccessBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="3">
                             <TextBlock Text="{Binding OnlineStateText}"
                                        FontSize="9"
                                        FontWeight="Black"
-                                       Foreground="#FF20823B" />
+                                       Foreground="{DynamicResource PosSuccessTextBrush}" />
                         </Border>
                     </Grid>
                     <TextBlock Text="{Binding PageStatusText}"
                                Margin="0,7,0,0"
                                FontSize="11"
                                FontWeight="Black"
-                               Foreground="{StaticResource PosTextBrush}"
+                               Foreground="{DynamicResource PosTextBrush}"
                                TextWrapping="Wrap" />
                     <TextBlock Text="{Binding SubtitleText}"
                                Margin="0,4,0,0"
                                FontSize="9"
-                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                TextWrapping="Wrap"
                                TextTrimming="CharacterEllipsis"
                                MaxHeight="28" />
@@ -689,7 +689,7 @@
                                Margin="2,0,2,5"
                                FontSize="10"
                                FontWeight="Black"
-                               Foreground="{StaticResource PosTextBrush}"
+                               Foreground="{DynamicResource PosTextBrush}"
                                TextWrapping="Wrap"
                                TextTrimming="CharacterEllipsis"
                                MaxHeight="30" />
@@ -729,14 +729,14 @@
                     <materialDesign:PackIcon Kind="InformationOutline"
                                              Width="18"
                                              Height="18"
-                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                              VerticalAlignment="Top" />
                     <TextBlock Grid.Column="1"
                                Text="{Binding StatusMessage}"
                                Margin="7,0,0,0"
                                FontSize="10"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                TextWrapping="Wrap"
                                TextTrimming="CharacterEllipsis"
                                MaxHeight="42" />
@@ -746,7 +746,7 @@
 
         <Border Grid.Column="0"
                 Panel.ZIndex="5"
-                BorderBrush="#FFDDE2E8"
+                BorderBrush="{DynamicResource PosDividerBrush}"
                 BorderThickness="0,0,1,0"
                 IsHitTestVisible="False" />
     </Grid>

@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Runtime.CompilerServices;
 using AutoMapper;
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -505,6 +506,67 @@ public sealed class RevenueReportSnapshotTests : IDisposable
         Assert.Equal("Fresh", result.StatisticStatus);
         Assert.False(result.HourlyCurrentPending);
         Assert.Null(result.StatisticMessage);
+    }
+
+    [Fact]
+    public async Task 多日区间最后一天是今天时单独返回今天与同期对应日()
+    {
+        var today = SalesStatisticsBusinessDate.Today();
+        var yesterday = today.AddDays(-1);
+        var compareToday = today.AddDays(-364);
+        var compareYesterday = today.AddDays(-365);
+        await SeedStoreAsync(yesterday, "S1", "一店", 100m, 2);
+        await SeedStoreAsync(today, "S1", "一店", 200m, 4);
+        await SeedStoreAsync(compareYesterday, "S1", "一店", 150m, 3);
+        await SeedStoreAsync(compareToday, "S1", "一店", 300m, 6);
+        await SeedHourlyAsync(yesterday, 9, "S1", 100m, 2);
+        await SeedHourlyAsync(today, 9, "S1", 50m, 1);
+        await SeedHourlyAsync(today, 10, "S1", 150m, 3);
+        await SeedHourlyAsync(compareYesterday, 9, "S1", 150m, 3);
+        await SeedHourlyAsync(compareToday, 9, "S1", 120m, 2);
+        await SeedHourlyAsync(compareToday, 10, "S1", 180m, 4);
+        foreach (var day in new[] { yesterday, today, compareYesterday, compareToday })
+        {
+            await SeedFreshStateAsync(day, SalesStatisticType.StoreSales);
+            await SeedFreshStateAsync(day, SalesStatisticType.HourlySales);
+        }
+
+        var range = await _service.GetRevenueReportSnapshotAsync(
+            new DateRangeDto { StartDate = yesterday, EndDate = today, CompareStartDate = compareYesterday, CompareEndDate = compareToday },
+            new List<string> { "S1" },
+            new List<string> { "S1" });
+
+        Assert.NotNull(range.LastDay);
+        Assert.Equal(today, range.LastDay!.Date);
+        Assert.Equal(compareToday, range.LastDay.CompareDate);
+        var dayBranch = Assert.Single(range.LastDay.Branches);
+        Assert.Equal(200m, dayBranch.Revenue);
+        Assert.Equal(300m, dayBranch.RevenueLY);
+        Assert.Equal(4, dayBranch.OrderCount);
+        Assert.Equal(6, dayBranch.OrderCountLY);
+        var dayNine = Assert.Single(range.LastDay.Hourly, row => row.Hour == "09:00");
+        Assert.Equal(50m, dayNine.Revenue);
+        Assert.Equal(120m, dayNine.RevenueLY);
+        var dayTen = Assert.Single(range.LastDay.Hourly, row => row.Hour == "10:00");
+        Assert.Equal(150m, dayTen.Revenue);
+        Assert.Equal(180m, dayTen.RevenueLY);
+        // 区间合计的小时行不能把最后一天重复计入。
+        var rangeNine = Assert.Single(range.Hourly, row => row.Hour == "09:00");
+        Assert.Equal(150m, rangeNine.Revenue);
+        Assert.Equal(270m, rangeNine.RevenueLY);
+        Assert.Equal(300m, Assert.Single(range.Branches).Revenue);
+
+        var singleDay = await _service.GetRevenueReportSnapshotAsync(
+            new DateRangeDto { StartDate = today, EndDate = today, CompareStartDate = compareToday, CompareEndDate = compareToday },
+            new List<string> { "S1" },
+            new List<string> { "S1" });
+        Assert.Null(singleDay.LastDay);
+
+        var pastRange = await _service.GetRevenueReportSnapshotAsync(
+            new DateRangeDto { StartDate = yesterday.AddDays(-1), EndDate = yesterday },
+            new List<string> { "S1" },
+            new List<string> { "S1" });
+        Assert.Null(pastRange.LastDay);
     }
 
     private async Task SeedStoreAsync(DateTime date, string branchCode, string branchName, decimal revenue, int orders)

@@ -75,14 +75,15 @@ public sealed class SalesDetailMonthlyProjectionTests
     }
 
     [Fact]
-    public void 月投影路径只服务全部分店范围的无关键词请求()
+    public void 月投影路径服务全部无关键词请求含授权分店与选中分店()
     {
         var all = Enum.GetValues<SalesDetailSection>().ToHashSet();
         Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, null, null, all));
         Assert.True(SalesDashboardReactService.UsesMonthlyProjection("  ", null, "", all));
         Assert.False(SalesDashboardReactService.UsesMonthlyProjection("English", null, null, all));
-        Assert.False(SalesDashboardReactService.UsesMonthlyProjection(null, new[] { "S1" }, null, all));
-        Assert.False(SalesDashboardReactService.UsesMonthlyProjection(null, null, "S1", all));
+        // 授权分店与选中分店由分店粒度事实过滤、商品栏按范围读日事实，不再退回全表扫描。
+        Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, new[] { "S1" }, null, all));
+        Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, null, "S1", all));
         Assert.False(SalesDashboardReactService.UsesMonthlyProjection(null, null, null, new HashSet<SalesDetailSection> { SalesDetailSection.Branches }));
         Assert.True(SalesDashboardReactService.UsesMonthlyProjection(null, null, null, new HashSet<SalesDetailSection> { SalesDetailSection.Products }));
     }
@@ -102,8 +103,11 @@ public sealed class SalesDetailMonthlyProjectionTests
         Assert.Contains("THROW 51014,", sql);
         Assert.Contains("INTO #sdmMonths", sql);
         Assert.Contains("st.[ProjectionSchemaVersion]=2", sql);
-        Assert.Contains("st.[MappingVersion]=@sdmMappingVersion THEN 1 ELSE 0 END AS bit) [BranchValid]", sql);
+        Assert.Contains("st.[MappingVersion]=@sdmMappingVersion", sql);
+        Assert.Contains("failed.[Status]=N'Failed'", sql);
+        Assert.Contains("failed.[Date] >= CONVERT(datetime, m.[Month])", sql);
         Assert.Contains("INTO #sdmDays", sql);
+        Assert.Contains("failed.[Date]=CONVERT(datetime, d.[Day])", sql);
         Assert.Contains("WHEN dv.[DayValid]=1 THEN 1 ELSE 2 END AS tinyint) [ProductSource]", sql);
         Assert.Contains("WHEN dv.[DayValid]=1 AND dv.[MappingValid]=1 THEN 1 ELSE 2 END AS tinyint) [BranchSource]", sql);
         Assert.Contains("INNER JOIN [ProductStoreDailySalesStatistic] s ON s.[Date]>=d.[DayStart] AND s.[Date]<d.[DayEnd]", sql);

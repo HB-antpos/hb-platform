@@ -9,11 +9,11 @@ assert.equal(existsSync(snapshotPath), true, "缺少由 Hbpos.Api 测试宿主�
 assert.equal(existsSync(generatedPath), true, "缺少由 openapi-typescript 生成的 DTO 类型");
 
 const document = JSON.parse(readFileSync(snapshotPath, "utf8"));
-assert.equal(Object.keys(document.paths ?? {}).length, 115, "共享 OpenAPI 必须锁定当前 115 条路径");
+assert.equal(Object.keys(document.paths ?? {}).length, 116, "共享 OpenAPI 必须锁定当前 116 条路径");
 assert.equal(
   Object.keys(document.components?.schemas ?? {}).length,
-  276,
-  "共享 OpenAPI 必须锁定当前 276 个 schema",
+  278,
+  "共享 OpenAPI 必须锁定当前 278 个 schema",
 );
 
 for (const route of [
@@ -27,6 +27,7 @@ for (const route of [
   "/api/v1/catalog/sellable-items/page",
   "/api/v1/catalog/sync-plan",
   "/api/v1/catalog/delta/page",
+  "/api/v1/catalog/sellable-items/code-conflicts",
   "/api/v1/cashiers/barcode-login",
   "/api/v1/square/checkouts",
   "/api/v1/linkly/cloud-backend/terminals",

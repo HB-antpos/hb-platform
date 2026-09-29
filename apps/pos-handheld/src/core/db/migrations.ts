@@ -5919,6 +5919,41 @@ CREATE INDEX IF NOT EXISTS ix_installment_provider_attempts_linkly_ack_pending
   ON installment_provider_attempts (provider, provider_environment, provider_session_id, provider_acknowledged_at_iso, state);
 `;
 
+const M45 = `
+-- 一码多商品候选：服务端目录每个查询码只保留一个胜出商品，这里按门店保存落到
+-- 多个不同商品的全部候选（每个商品一行，candidate_order 保留服务端决胜顺序）。
+-- 独立于 catalog_snapshots 子树，快照激活、退役与分批清理均不触及本表。
+CREATE TABLE catalog_code_conflicts (
+  store_code TEXT NOT NULL CHECK (TRIM(store_code) <> ''),
+  lookup_code_normalized TEXT NOT NULL CHECK (
+    TRIM(lookup_code_normalized) <> ''
+    AND lookup_code_normalized = UPPER(TRIM(lookup_code_normalized))
+  ),
+  product_code TEXT NOT NULL CHECK (TRIM(product_code) <> ''),
+  candidate_order INTEGER NOT NULL CHECK (
+    typeof(candidate_order) = 'integer' AND candidate_order >= 0
+  ),
+  reference_code TEXT NULL,
+  item_number TEXT NULL,
+  display_name TEXT NOT NULL CHECK (TRIM(display_name) <> ''),
+  barcode TEXT NULL,
+  lookup_code TEXT NOT NULL CHECK (TRIM(lookup_code) <> ''),
+  retail_price_cents INTEGER NOT NULL CHECK (
+    typeof(retail_price_cents) = 'integer'
+  ),
+  price_source INTEGER NOT NULL CHECK (price_source IN (0, 1, 2, 3, 4)),
+  price_source_label TEXT NOT NULL CHECK (TRIM(price_source_label) <> ''),
+  quantity_factor TEXT NOT NULL,
+  tax_rate_basis_points INTEGER NULL,
+  updated_at_iso TEXT NULL,
+  row_version TEXT NULL,
+  product_image TEXT NULL,
+  discount_rate TEXT NULL,
+  is_special_product INTEGER NOT NULL CHECK (is_special_product IN (0, 1)),
+  -- 主键前缀 (store_code, lookup_code_normalized) 即扫码点查索引。
+  PRIMARY KEY (store_code, lookup_code_normalized, product_code)
+);
+`;
 
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
@@ -5965,6 +6000,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 42, name: "M42_shared_held_order_claim_wire_version", sql: M42 },
   { version: 43, name: "M43_shared_held_order_publication_wire_version", sql: M43 },
   { version: 44, name: "M44_linkly_provider_acknowledgement", sql: M44 },
+  { version: 45, name: "M45_catalog_code_conflicts", sql: M45 },
 ];
 
 export async function applyMigrations(

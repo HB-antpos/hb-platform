@@ -195,10 +195,11 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
         bool locationLookupEnabled
     )
     {
+        // 关键字检索已不进缓存，缓存范围改用分类浏览验证。
         var filter = new StoreOrderFilterDto
         {
             StoreCode = "S001",
-            ItemNumber = "LOCATION-CACHE",
+            CategoryGUID = "LOCATION-CACHE-CATEGORY",
             PageNumber = 1,
             PageSize = 18,
             SortBy = "Default",
@@ -274,6 +275,148 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
 
         Assert.False(cacheStore.TryGet(filter, out var cachedResult));
         Assert.Null(cachedResult);
+    }
+
+    [Theory]
+    [InlineData("itemNumber")]
+    [InlineData("productName")]
+    [InlineData("columnItemNumber")]
+    [InlineData("columnProductName")]
+    [InlineData("columnBarcode")]
+    [InlineData("columnSupplierKeyword")]
+    public void GetProducts_关键字检索既不写入也不读取缓存(string searchField)
+    {
+        // 回归 ME542-6：上架前搜出的空结果被缓存，上架后回来复查仍搜不到。
+        var filter = new StoreOrderFilterDto
+        {
+            StoreCode = "S001",
+            PageNumber = 1,
+            PageSize = 200,
+            SortBy = "Default",
+        };
+        switch (searchField)
+        {
+            case "itemNumber":
+                filter.ItemNumber = "ME542-6";
+                break;
+            case "productName":
+                filter.ProductName = "Glitter";
+                break;
+            case "columnItemNumber":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { ItemNumber = "ME542" };
+                break;
+            case "columnProductName":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { ProductName = "Glitter" };
+                break;
+            case "columnBarcode":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { Barcode = "6926393389581" };
+                break;
+            case "columnSupplierKeyword":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { SupplierKeyword = "义乌" };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(searchField), searchField, null);
+        }
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var cacheStore = CreatePageCacheStore(cache);
+
+        cacheStore.Set(filter, new PagedListReactDto<StoreOrderProductDto>());
+        Assert.Equal(0, cache.Count);
+
+        // 同键下即使已有条目也必须按未命中处理，保证关键字检索总是查库。
+        cache.Set(
+            StoreOrderCacheKeys.Products(filter, locationLookupEnabled: false),
+            new PagedListReactDto<StoreOrderProductDto>()
+        );
+        Assert.False(cacheStore.TryGet(filter, out var cachedResult));
+        Assert.Null(cachedResult);
+    }
+
+    [Fact]
+    public void GetProducts_分类浏览缓存两分钟后过期()
+    {
+        var clock = new ManualSystemClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        var cacheStore = CreatePageCacheStore(cache);
+        var filter = new StoreOrderFilterDto
+        {
+            StoreCode = "S001",
+            CategoryGUID = "CATEGORY-TTL",
+            PageNumber = 1,
+            PageSize = 200,
+            SortBy = "Default",
+        };
+
+        cacheStore.Set(filter, new PagedListReactDto<StoreOrderProductDto>());
+
+        clock.UtcNow += TimeSpan.FromMinutes(2) - TimeSpan.FromSeconds(1);
+        Assert.True(cacheStore.TryGet(filter, out _));
+
+        clock.UtcNow += TimeSpan.FromSeconds(2);
+        Assert.False(cacheStore.TryGet(filter, out _));
+    }
+
+    [Fact]
+    public async Task WarmUpHomePageAsync_预热写入的首页键与分页缓存同为两分钟过期()
+    {
+        StoreOrderCacheKeys.ClearActiveKeys();
+
+        var clock = new ManualSystemClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        var productPicker = new Mock<IStoreOrderProductPickerSlice>(MockBehavior.Strict);
+        productPicker
+            .Setup(item =>
+                item.GetHomePageWarmUpPageAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()
+                )
+            )
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>());
+        productPicker
+            .Setup(item =>
+                item.GetHomePageCachePageAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()
+                )
+            )
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>());
+        var warmer = StoreOrderCacheWarmerTestFactory.Create(productPicker.Object, cache, out _);
+
+        await warmer.WarmUpHomePageAsync();
+
+        var homePageKeys = new[]
+        {
+            StoreOrderCacheKeys.GetHomePageCacheKey(50),
+            StoreOrderCacheKeys.GetHomePageCacheKey(18),
+            StoreOrderCacheKeys.GetHomePageWarmUpCacheKey(50),
+            StoreOrderCacheKeys.GetHomePageWarmUpCacheKey(18),
+        };
+
+        clock.UtcNow += TimeSpan.FromMinutes(2) - TimeSpan.FromSeconds(1);
+        Assert.All(homePageKeys, key => Assert.True(cache.TryGetValue(key, out _)));
+
+        clock.UtcNow += TimeSpan.FromSeconds(2);
+        Assert.All(homePageKeys, key => Assert.False(cache.TryGetValue(key, out _)));
+    }
+
+    private static ProductPickerPageCacheStore CreatePageCacheStore(IMemoryCache cache)
+    {
+        var locationLookup = new ProductPickerLocationLookup(
+            new StoreOrderActorContext(new HttpContextAccessor()),
+            Mock.Of<IStoreOrderLocationProductLookupService>()
+        );
+        return new ProductPickerPageCacheStore(
+            cache,
+            locationLookup,
+            new TestLogger<ProductPickerPageCacheStore>()
+        );
+    }
+
+    private sealed class ManualSystemClock : Microsoft.Extensions.Internal.ISystemClock
+    {
+        public DateTimeOffset UtcNow { get; set; } =
+            new(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
     }
 
     [Fact]
@@ -510,9 +653,10 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
         );
 
         var firstWarmUpTask = warmer.WarmUpHomePageAsync();
-        await firstCallEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstCallEntered.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
-        await warmer.WarmUpHomePageAsync().WaitAsync(TimeSpan.FromMilliseconds(200));
+        // 第一次预热的闸门到下方才放开；第二次若错误地等待它，会一直等到预算耗尽而失败。
+        await warmer.WarmUpHomePageAsync().WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.Equal(1, Volatile.Read(ref invocationCount));
         Assert.Contains(
@@ -523,7 +667,7 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
         );
 
         releaseFirstCall.TrySetResult();
-        await firstWarmUpTask.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstWarmUpTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         Assert.Equal(4, Volatile.Read(ref invocationCount));
     }
 
@@ -1312,7 +1456,9 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
     {
         var request = new SubmitStoreOrderRequestDto { StoreCode = "S001" };
         var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
-        service.Setup(item => item.SubmitOrderAsync(request)).ReturnsAsync(ApiResponse<bool>.OK(true));
+        service
+            .Setup(item => item.SubmitOrderAsync(request))
+            .ReturnsAsync(ApiResponse<SubmitStoreOrderResultDto>.OK(new SubmitStoreOrderResultDto()));
         var scopeService = CreateScopeService();
         var controller = CreateController(
             service,
@@ -1336,7 +1482,7 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
         var gate = new PreorderGateResult { IsBlocked = true, PendingCount = 1 };
         service
             .Setup(item => item.SubmitOrderAsync(request))
-            .ReturnsAsync(new ApiResponse<bool>
+            .ReturnsAsync(new ApiResponse<SubmitStoreOrderResultDto>
             {
                 Success = false,
                 ErrorCode = "PREORDER_REQUIRED",
@@ -1477,7 +1623,9 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
             var request = new SubmitStoreOrderRequestDto { StoreCode = "1024" };
             service
                 .Setup(item => item.SubmitOrderAsync(request))
-                .ReturnsAsync(ApiResponse<bool>.OK(true));
+                .ReturnsAsync(
+                    ApiResponse<SubmitStoreOrderResultDto>.OK(new SubmitStoreOrderResultDto())
+                );
             result = await controller.SubmitOrder(request);
             service.Verify(item => item.SubmitOrderAsync(request), Times.Once);
         }
@@ -4295,7 +4443,7 @@ public class StoreOrderSyncJobServiceTests
             }
         );
 
-        await invoked.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await invoked.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.Equal(StoreOrderHqSyncConflictStrategy.LatestWins, job.ConflictStrategy);
         Assert.Equal(new List<string> { "S001", "S002" }, job.StoreCodes);
@@ -4359,7 +4507,7 @@ public class StoreOrderSyncJobServiceTests
                 ConflictStrategy = StoreOrderHqSyncConflictStrategy.HqWins,
             }
         );
-        await invoked.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await invoked.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             jobService.StartHqSyncJobAsync(
@@ -4415,7 +4563,7 @@ public class StoreOrderSyncJobServiceTests
         };
 
         var firstJob = await jobService.StartJobAsync("user-1", firstRequest);
-        await invoked.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await invoked.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var secondJob = await jobService.StartJobAsync("user-1", secondRequest);
 
         Assert.Equal(firstJob.JobId, secondJob.JobId);
@@ -4557,7 +4705,7 @@ public class StoreOrderSyncJobServiceTests
         var request = new SyncMissingOrdersRequestDto { StoreCodes = new List<string> { "S001" } };
 
         var firstJob = await jobService.StartJobAsync("user-1", request);
-        await firstInvoked.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstInvoked.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             jobService.StartJobAsync("user-2", request)
         );
@@ -4630,18 +4778,13 @@ public class StoreOrderSyncJobServiceTests
         string expectedStatus
     )
     {
-        for (var index = 0; index < 50; index++)
-        {
-            var job = await jobService.GetJobAsync(jobId);
-            if (job?.Status == expectedStatus)
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new Xunit.Sdk.XunitException($"任务 {jobId} 未在预期时间内进入 {expectedStatus} 状态");
+        var job = await WaitForValueAsync(
+            () => jobService.GetJobAsync(jobId),
+            current => current?.Status == expectedStatus,
+            describeLast: current =>
+                $"任务 {jobId} 当前状态 {current?.Status ?? "未找到"}，期望 {expectedStatus}"
+        );
+        return job!;
     }
 
     private sealed class ManualTimeProvider : TimeProvider

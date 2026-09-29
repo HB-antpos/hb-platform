@@ -112,7 +112,7 @@ public partial class StoreOrderReactService : IStoreOrderReactService
     public Task<ApiResponse<StoreOrderCartDto?>> ClearCartAsync(string storeCode) =>
         _cartSlice.ClearCartAsync(storeCode);
 
-    public Task<ApiResponse<bool>> SubmitOrderAsync(
+    public Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
         SubmitStoreOrderRequestDto request
     ) => _orderPlacementSlice.SubmitOrderAsync(request);
 

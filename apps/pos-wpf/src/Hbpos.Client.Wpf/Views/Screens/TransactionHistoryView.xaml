@@ -11,28 +11,28 @@
              d:DesignHeight="688"
              d:DesignWidth="1366"
              Language="{Binding CurrentUiLanguage}"
-             Background="#FFF5F7FA">
+             Background="{DynamicResource PosSurfaceAltBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringHasValueToVis" />
 
         <Style x:Key="HistoryPanelStyle" TargetType="Border">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="#FFE2E8F0" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="SnapsToDevicePixels" Value="True" />
         </Style>
 
         <Style x:Key="HistoryColumnHeaderStyle" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#FFF8FAFC" />
-            <Setter Property="Foreground" Value="#FF475569" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextSecondaryBrush}" />
             <Setter Property="FontSize" Value="{StaticResource PosFontSizeSmall}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Padding" Value="12,8" />
             <Setter Property="MinHeight" Value="48" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="BorderBrush" Value="#FFE2E8F0" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="ContentTemplate">
                 <Setter.Value>
                     <DataTemplate>
@@ -65,14 +65,14 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFEFF6FF" />
-                    <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
 
         <Style x:Key="HistoryPrimaryTextStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="TextWrapping" Value="NoWrap" />
@@ -80,13 +80,13 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsReturnOrder}" Value="True">
-                    <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
 
         <Style x:Key="HistorySecondaryTextStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#FF64748B" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="TextWrapping" Value="NoWrap" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
@@ -95,19 +95,19 @@
 
         <Style x:Key="HistoryRowStyle" TargetType="DataGridRow">
             <Setter Property="Height" Value="72" />
-            <Setter Property="BorderBrush" Value="#FFE2E8F0" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFEFF6FF" />
-                    <Setter Property="BorderBrush" Value="#FF93C5FD" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#FFF8FBFF" />
+                    <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
                 </Trigger>
                 <DataTrigger Binding="{Binding IsReturnOrder}" Value="True">
-                    <Setter Property="Background" Value="#FFFEF2F2" />
-                    <Setter Property="BorderBrush" Value="{StaticResource PosDangerBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -119,7 +119,7 @@
             <Setter Property="Margin" Value="0" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="#FF334155" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextSecondaryBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -136,8 +136,8 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="{StaticResource PosPrimaryBrush}" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                                 <Setter Property="Foreground" Value="White" />
                             </Trigger>
                             <MultiTrigger>
@@ -145,11 +145,11 @@
                                     <Condition Property="IsChecked" Value="False" />
                                     <Condition Property="IsMouseOver" Value="True" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="Root" Property="Background" Value="#FFF8FAFC" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FFCBD5E1" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
                             </MultiTrigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -166,106 +166,106 @@
         </Style>
 
         <Style x:Key="HistoryFilterLabelStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#FF64748B" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="2,0,0,5" />
         </Style>
 
         <Style x:Key="HistoryStatusBadgeBorderStyle" TargetType="Border">
-            <Setter Property="Background" Value="#FFE7F7EF" />
-            <Setter Property="BorderBrush" Value="#FFBBF7D0" />
+            <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Padding" Value="8,3" />
             <Setter Property="HorizontalAlignment" Value="Left" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSuspendedOrder}" Value="True">
-                    <Setter Property="Background" Value="#FFFFF7ED" />
-                    <Setter Property="BorderBrush" Value="#FFFED7AA" />
+                    <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding CanContinueInstallmentPayment}" Value="True">
-                    <Setter Property="Background" Value="#FFEFF6FF" />
-                    <Setter Property="BorderBrush" Value="#FFBFDBFE" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalHold}">
-                    <Setter Property="Background" Value="#FFFFF7ED" />
-                    <Setter Property="BorderBrush" Value="#FFFED7AA" />
+                    <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalPendingPublish}">
-                    <Setter Property="Background" Value="#FFFFF7ED" />
-                    <Setter Property="BorderBrush" Value="#FFFED7AA" />
+                    <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.Published}">
-                    <Setter Property="Background" Value="#FFE7F7EF" />
-                    <Setter Property="BorderBrush" Value="#FFBBF7D0" />
+                    <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.RemotePending}">
-                    <Setter Property="Background" Value="#FFEFF6FF" />
-                    <Setter Property="BorderBrush" Value="#FFBFDBFE" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalClaimPrepared}">
-                    <Setter Property="Background" Value="#FFF5F3FF" />
-                    <Setter Property="BorderBrush" Value="#FFDDD6FE" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalClaimActive}">
-                    <Setter Property="Background" Value="#FFCCFBF1" />
-                    <Setter Property="BorderBrush" Value="#FF5EEAD4" />
+                    <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.ClaimedByOther}">
-                    <Setter Property="Background" Value="#FFF1F5F9" />
-                    <Setter Property="BorderBrush" Value="#FFCBD5E1" />
+                    <Setter Property="Background" Value="{DynamicResource PosSurfaceMutedBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.Completed}">
-                    <Setter Property="Background" Value="#FFF1F5F9" />
-                    <Setter Property="BorderBrush" Value="#FFE2E8F0" />
+                    <Setter Property="Background" Value="{DynamicResource PosSurfaceMutedBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.Blocked}">
-                    <Setter Property="Background" Value="#FFFEF2F2" />
-                    <Setter Property="BorderBrush" Value="#FFFECACA" />
+                    <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
 
         <Style x:Key="HistoryStatusBadgeTextStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#FF15803D" />
+            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="TextWrapping" Value="NoWrap" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSuspendedOrder}" Value="True">
-                    <Setter Property="Foreground" Value="#FFC2410C" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding CanContinueInstallmentPayment}" Value="True">
-                    <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalHold}">
-                    <Setter Property="Foreground" Value="#FFC2410C" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalPendingPublish}">
-                    <Setter Property="Foreground" Value="#FFC2410C" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.Published}">
-                    <Setter Property="Foreground" Value="#FF15803D" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.RemotePending}">
-                    <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalClaimPrepared}">
-                    <Setter Property="Foreground" Value="#FF6D28D9" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.LocalClaimActive}">
-                    <Setter Property="Foreground" Value="#FF0F766E" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.ClaimedByOther}">
-                    <Setter Property="Foreground" Value="#FF475569" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosTextSecondaryBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.Completed}">
-                    <Setter Property="Foreground" Value="#FF64748B" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HeldBadgeKind}" Value="{x:Static vm:HeldOrderBadgeKind.Blocked}">
-                    <Setter Property="Foreground" Value="#FFB91C1C" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -274,17 +274,17 @@
             <Setter Property="Height" Value="34" />
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="Padding" Value="8,0" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
-            <Setter Property="BorderBrush" Value="#FFE2E8F0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
         </Style>
 
         <Style x:Key="HistoryReceiptButtonStyle" TargetType="Button" BasedOn="{StaticResource HistoryIconTextButtonStyle}">
             <Setter Property="Height" Value="40" />
             <Setter Property="MinWidth" Value="104" />
             <Setter Property="Padding" Value="10,0" />
-            <Setter Property="Background" Value="#FFEFF6FF" />
-            <Setter Property="BorderBrush" Value="#FFBFDBFE" />
+            <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
@@ -293,13 +293,13 @@
             <Setter Property="Height" Value="44" />
             <Setter Property="MinWidth" Value="44" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
-            <Setter Property="BorderBrush" Value="#FFCBD5E1" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
         </Style>
 
         <Style x:Key="HistoryPrimaryIconButtonStyle" TargetType="Button" BasedOn="{StaticResource HistoryIconButtonStyle}">
-            <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
         </Style>
 
         <Style x:Key="HistoryActionCellStyle" TargetType="DataGridCell" BasedOn="{StaticResource HistoryGridCellStyle}">
@@ -310,23 +310,23 @@
             <Setter Property="Height" Value="44" />
             <Setter Property="Padding" Value="10,0" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="#FF334155" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextSecondaryBrush}" />
         </Style>
 
         <Style x:Key="HistoryPreviewLabelStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#FF64748B" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="FontSize" Value="12" />
         </Style>
 
         <Style x:Key="HistoryPreviewValueStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
     </UserControl.Resources>
 
-    <Grid x:Name="HistoryPageLayout" Background="#FFF5F7FA">
+    <Grid x:Name="HistoryPageLayout" Background="{DynamicResource PosSurfaceAltBrush}">
         <Grid x:Name="HistoryWorkspace" Margin="20,18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -353,7 +353,7 @@
                             Height="46"
                             Padding="12,0"
                             Margin="0,0,12,0"
-                            FontSize="12"
+                            FontSize="14"
                             Style="{StaticResource PosSecondaryButtonStyle}">
                         <StackPanel Orientation="Horizontal">
                             <materialDesign:PackIcon Kind="ArrowLeft" Width="16" Height="16" Margin="0,0,6,0" />
@@ -365,10 +365,10 @@
                             Grid.Column="1"
                             Height="46"
                             Padding="4"
-                            BorderBrush="#FFD7DEE8"
+                            BorderBrush="{DynamicResource PosBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="10"
-                            Background="#FFE9EEF5">
+                            Background="{DynamicResource PosSurfaceMutedBrush}">
                         <StackPanel Orientation="Horizontal">
                             <RadioButton GroupName="HistorySource"
                                          IsChecked="{Binding IsLocalSourceSelected, Mode=TwoWay}"
@@ -412,10 +412,10 @@
                     <Border Grid.Column="3"
                             Height="46"
                             Padding="4"
-                            BorderBrush="#FFD7DEE8"
+                            BorderBrush="{DynamicResource PosBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="10"
-                            Background="#FFE9EEF5"
+                            Background="{DynamicResource PosSurfaceMutedBrush}"
                             Visibility="{Binding IsHeldScopeSelectorVisible, Converter={StaticResource BoolToVis}}">
                         <StackPanel Orientation="Horizontal">
                             <RadioButton Content="{Binding HeldLocalScopeLabel}"
@@ -448,8 +448,8 @@
                                        Style="{StaticResource HistoryFilterLabelStyle}" />
                             <Border Height="44"
                                     Padding="2,0"
-                                    Background="White"
-                                    BorderBrush="#FFD7DEE8"
+                                    Background="{DynamicResource PosSurfaceBrush}"
+                                    BorderBrush="{DynamicResource PosBorderBrush}"
                                     BorderThickness="1"
                                     CornerRadius="7">
                                 <Grid>
@@ -470,7 +470,7 @@
                                                 ToolTip="{loc:Loc history.dateRangeLabel}" />
                                     <TextBlock Grid.Column="1"
                                                Text="-"
-                                               Foreground="#FF94A3B8"
+                                               Foreground="{DynamicResource PosSubtleForegroundBrush}"
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center" />
                                     <DatePicker Grid.Column="2"
@@ -528,7 +528,7 @@
                                 <materialDesign:PackIcon Kind="Magnify"
                                                          Width="18"
                                                          Height="18"
-                                                         Foreground="#FF94A3B8"
+                                                         Foreground="{DynamicResource PosSubtleForegroundBrush}"
                                                          Margin="13,0,0,0"
                                                          HorizontalAlignment="Left"
                                                          VerticalAlignment="Center"
@@ -550,7 +550,7 @@
                                             <Setter Property="Padding" Value="0" />
                                             <Setter Property="Background" Value="Transparent" />
                                             <Setter Property="BorderBrush" Value="Transparent" />
-                                            <Setter Property="Foreground" Value="#FF64748B" />
+                                            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
                                             <Setter Property="Visibility" Value="Visible" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Text, ElementName=HistorySearchTextBox}" Value="">
@@ -560,10 +560,10 @@
                                                     <Setter Property="Visibility" Value="Collapsed" />
                                                 </DataTrigger>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter Property="Background" Value="#FFF1F5F9" />
+                                                    <Setter Property="Background" Value="{DynamicResource PosSurfaceMutedBrush}" />
                                                 </Trigger>
                                                 <Trigger Property="IsKeyboardFocused" Value="True">
-                                                    <Setter Property="Background" Value="#FFE8EEF6" />
+                                                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
                                                 </Trigger>
                                             </Style.Triggers>
                                         </Style>
@@ -583,7 +583,7 @@
                                 Padding="16,0"
                                 Margin="12,0,0,0"
                                 VerticalAlignment="Bottom"
-                                FontSize="12"
+                                FontSize="14"
                                 AutomationProperties.Name="{loc:Loc common.load}"
                                 Style="{StaticResource PosPrimaryButtonStyle}">
                             <StackPanel Orientation="Horizontal">
@@ -605,8 +605,8 @@
                           AutoGenerateColumns="False"
                           CanUserAddRows="False"
                           CanUserResizeColumns="False"
-                          RowBackground="White"
-                          AlternatingRowBackground="#FFFBFDFF"
+                          RowBackground="{DynamicResource PosSurfaceBrush}"
+                          AlternatingRowBackground="{DynamicResource PosSurfaceAltBrush}"
                           RowStyle="{StaticResource HistoryRowStyle}"
                           CellStyle="{StaticResource HistoryGridCellStyle}"
                           ColumnHeaderStyle="{StaticResource HistoryColumnHeaderStyle}"
@@ -676,7 +676,7 @@
                                                                      Width="14"
                                                                      Height="14"
                                                                      Margin="0,0,6,0"
-                                                                     Foreground="#FF64748B" />
+                                                                     Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                             <TextBlock Text="{Binding DeviceCode}"
                                                        ToolTip="{Binding DeviceCode}"
                                                        Style="{StaticResource HistorySecondaryTextStyle}" />
@@ -732,7 +732,7 @@
                                                                      Width="14"
                                                                      Height="14"
                                                                      Margin="0,0,6,0"
-                                                                     Foreground="#FF64748B" />
+                                                                     Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                             <TextBlock Style="{StaticResource HistorySecondaryTextStyle}">
                                                 <Run Text="{Binding LineCount}" />
                                                 <Run Text=" · " />
@@ -791,7 +791,7 @@
                                                        Style="{StaticResource HistorySecondaryTextStyle}" />
                                             <TextBlock Text="..."
                                                        Visibility="{Binding Share.IsBusy, Converter={StaticResource BoolToVis}}"
-                                                       Foreground="{StaticResource PosPrimaryBrush}"
+                                                       Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                        FontWeight="SemiBold"
                                                        Margin="4,0,0,0"
                                                        VerticalAlignment="Center" />
@@ -939,7 +939,7 @@
                                                         <MenuItem.Style>
                                                             <Style TargetType="MenuItem" BasedOn="{StaticResource HistoryMenuItemStyle}">
                                                                 <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+                                                                <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
                                                                 <Style.Triggers>
                                                                     <DataTrigger Binding="{Binding DataContext.CanDeleteHeldOrder}"
                                                                                  Value="True">
@@ -952,7 +952,7 @@
                                                             <materialDesign:PackIcon Kind="DeleteOutline"
                                                                                      Width="17"
                                                                                      Height="17"
-                                                                                     Foreground="{StaticResource PosDangerBrush}" />
+                                                                                     Foreground="{DynamicResource PosDangerTextBrush}" />
                                                         </MenuItem.Icon>
                                                     </MenuItem>
                                                     <MenuItem Header="{Binding Tag.ForceReleaseLabel}"
@@ -991,16 +991,16 @@
                     Margin="0,14,0,0">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Foreground="#FF475569" FontWeight="SemiBold">
+                        <TextBlock Foreground="{DynamicResource PosTextSecondaryBrush}" FontWeight="SemiBold">
                             <Run Text="{loc:Loc history.showingPrefix}" />
                             <Run Text="{Binding Orders.Count, Mode=OneWay}" />
                             <Run Text=" " />
                             <Run Text="{loc:Loc history.transactions}" />
                         </TextBlock>
-                        <Separator Width="1" Height="24" Margin="18,0" Background="#FFE2E8F0" />
-                        <TextBlock Text="{Binding PreviewOrderId}" Foreground="{StaticResource PosPrimaryBrush}" FontWeight="SemiBold" />
+                        <Separator Width="1" Height="24" Margin="18,0" Background="{DynamicResource PosSurfaceStrongBrush}" />
+                        <TextBlock Text="{Binding PreviewOrderId}" Foreground="{DynamicResource PosPrimaryTextBrush}" FontWeight="SemiBold" />
                         <TextBlock Text="  " />
-                        <TextBlock Text="{Binding PreviewSoldAt}" Foreground="#FF64748B" />
+                        <TextBlock Text="{Binding PreviewSoldAt}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                     </StackPanel>
 
                     <Button DockPanel.Dock="Right"
@@ -1072,7 +1072,7 @@
                                  Visibility="{Binding IsHeldRemoteRefreshVisible, Converter={StaticResource BoolToVis}}" />
 
                     <TextBlock Text="{Binding HeldOrdersRemoteStatusMessage}"
-                               Foreground="#FFB45309"
+                               Foreground="{DynamicResource PosWarningTextBrush}"
                                VerticalAlignment="Center"
                                TextAlignment="Right"
                                TextWrapping="Wrap"
@@ -1080,7 +1080,7 @@
                                Visibility="{Binding IsHeldRemoteErrorVisible, Converter={StaticResource BoolToVis}}" />
 
                     <TextBlock Text="{Binding StatusMessage}"
-                               Foreground="{StaticResource PosDangerBrush}"
+                               Foreground="{DynamicResource PosDangerTextBrush}"
                                VerticalAlignment="Center"
                                TextAlignment="Right"
                                TextWrapping="Wrap" />
@@ -1107,8 +1107,8 @@
                     Margin="28"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Stretch"
-                    Background="White"
-                    BorderBrush="#FFE2E8F0"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
                     CornerRadius="12"
                     AutomationProperties.AutomationId="TransactionHistoryReceiptPreviewDialog">
@@ -1124,7 +1124,7 @@
 
                     <Border Grid.Row="0"
                             Padding="22,18"
-                            BorderBrush="#FFE2E8F0"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
                             BorderThickness="0,0,0,1">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -1142,19 +1142,19 @@
                                                          Width="22"
                                                          Height="22"
                                                          Margin="0,0,10,0"
-                                                         Foreground="{StaticResource PosPrimaryBrush}" />
+                                                         Foreground="{DynamicResource PosPrimaryTextBrush}" />
                                 <TextBlock Text="{loc:Loc success.receiptPreview}"
                                            FontSize="20"
                                            FontWeight="Black"
-                                           Foreground="{StaticResource PosTextBrush}" />
+                                           Foreground="{DynamicResource PosTextBrush}" />
                                 <Border Margin="10,0,0,0"
                                         Padding="8,3"
                                         CornerRadius="6"
-                                        Background="#FFE7F7EF"
-                                        BorderBrush="#FFBBF7D0"
+                                        Background="{DynamicResource PosSuccessSoftBrush}"
+                                        BorderBrush="{DynamicResource PosSuccessBorderBrush}"
                                         BorderThickness="1">
                                     <TextBlock Text="{Binding SelectedOrder.StatusLabel}"
-                                               Foreground="#FF15803D"
+                                               Foreground="{DynamicResource PosSuccessTextBrush}"
                                                FontSize="12"
                                                FontWeight="SemiBold" />
                                 </Border>
@@ -1164,7 +1164,7 @@
                                        Text="{Binding PreviewTotal, StringFormat={}{0:C2}}"
                                        FontSize="26"
                                        FontWeight="Black"
-                                       Foreground="{StaticResource PosTextBrush}"
+                                       Foreground="{DynamicResource PosTextBrush}"
                                        VerticalAlignment="Center"
                                        Margin="20,0" />
 
@@ -1199,7 +1199,7 @@
                         </Grid>
                     </Border>
 
-                    <Grid Grid.Row="1" Background="#FFF8FAFC">
+                    <Grid Grid.Row="1" Background="{DynamicResource PosSurfaceAltBrush}">
                         <ScrollViewer Margin="24,18"
                                       Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                       HorizontalScrollBarVisibility="Disabled"
@@ -1207,8 +1207,8 @@
                             <Border Width="430"
                                     Padding="24"
                                     HorizontalAlignment="Center"
-                                    Background="#FFFFFEFA"
-                                    BorderBrush="#FFE2E8F0"
+                                    Background="{DynamicResource PosSurfaceBrush}"
+                                    BorderBrush="{DynamicResource PosDividerBrush}"
                                     BorderThickness="1"
                                     CornerRadius="8">
                                 <Border.Effect>
@@ -1227,13 +1227,13 @@
                             </Border>
                         </ScrollViewer>
 
-                        <Border Background="#EFFFFFFF"
+                        <Border Background="{DynamicResource PosSurfaceBrush}"
                                 Visibility="{Binding IsReceiptPreviewLoading, Converter={StaticResource BoolToVis}}">
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <ProgressBar Width="180" Height="5" IsIndeterminate="True" />
                                 <TextBlock Text="{loc:Loc history.receiptLoading}"
                                            Margin="0,14,0,0"
-                                           Foreground="#FF64748B"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            FontSize="13"
                                            FontWeight="SemiBold" />
                             </StackPanel>
@@ -1242,8 +1242,8 @@
 
                     <Border Grid.Row="2"
                             Padding="18"
-                            Background="White"
-                            BorderBrush="#FFE2E8F0"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
                             BorderThickness="0,1,0,0">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                             <Button Command="{Binding CloseReceiptPreviewCommand}"
@@ -1292,8 +1292,8 @@
                     Margin="24"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Stretch"
-                    Background="White"
-                    BorderBrush="#FFE2E8F0"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
                     CornerRadius="12"
                     AutomationProperties.AutomationId="TransactionHistoryOrderDetailsDialog">
@@ -1309,8 +1309,8 @@
 
                     <Border Grid.Row="0"
                             Padding="20,14"
-                            Background="White"
-                            BorderBrush="#FFE2E8F0"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
                             BorderThickness="0,0,0,1">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -1328,31 +1328,31 @@
                                                          Width="22"
                                                          Height="22"
                                                          Margin="0,0,10,0"
-                                                         Foreground="{StaticResource PosPrimaryBrush}" />
+                                                         Foreground="{DynamicResource PosPrimaryTextBrush}" />
                                 <TextBlock Text="{loc:Loc history.viewOrderDetails}"
                                            FontSize="20"
                                            FontWeight="Black"
-                                           Foreground="{StaticResource PosTextBrush}"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            VerticalAlignment="Center" />
                                 <Border Margin="12,0,0,0"
                                         Padding="8,3"
                                         CornerRadius="6"
-                                        Background="#FFEFF6FF"
-                                        BorderBrush="#FFBFDBFE"
+                                        Background="{DynamicResource PosPrimarySoftBrush}"
+                                        BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}"
                                         BorderThickness="1">
                                     <TextBlock Text="{Binding OrderDetailsSourceLabel}"
-                                               Foreground="{StaticResource PosPrimaryBrush}"
+                                               Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                FontSize="12"
                                                FontWeight="SemiBold" />
                                 </Border>
                                  <Border Margin="8,0,0,0"
                                          Padding="8,3"
                                          CornerRadius="6"
-                                         Background="#FFF1F5F9"
-                                         BorderBrush="#FFCBD5E1"
+                                         Background="{DynamicResource PosSurfaceMutedBrush}"
+                                         BorderBrush="{DynamicResource PosBorderBrush}"
                                          BorderThickness="1">
                                      <TextBlock Text="{Binding OrderDetailsStatusLabel}"
-                                                Foreground="#FF475569"
+                                                Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                 FontSize="12"
                                                 FontWeight="SemiBold" />
                                 </Border>
@@ -1363,7 +1363,7 @@
                                            Margin="20,0"
                                            FontSize="26"
                                            FontWeight="Black"
-                                           Foreground="#FFF57C00"
+                                           Foreground="{DynamicResource PosAccentBrush}"
                                            Visibility="{Binding IsOrderDetailsFinancialContentVisible, Converter={StaticResource BoolToVis}}"
                                            VerticalAlignment="Center" />
                                 <Button x:Name="OrderDetailsCloseButton"
@@ -1427,7 +1427,7 @@
                         </Grid>
                     </Border>
 
-                    <Grid Grid.Row="1" Background="#FFF8FAFC">
+                    <Grid Grid.Row="1" Background="{DynamicResource PosSurfaceAltBrush}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
@@ -1449,10 +1449,10 @@
                                       RowHeight="76"
                                       MinRowHeight="76"
                                       GridLinesVisibility="Horizontal"
-                                      HorizontalGridLinesBrush="#FFE2E8F0"
+                                      HorizontalGridLinesBrush="{DynamicResource PosDividerBrush}"
                                       VerticalGridLinesBrush="Transparent"
-                                      Background="White"
-                                      BorderBrush="#FFE2E8F0"
+                                      Background="{DynamicResource PosSurfaceBrush}"
+                                      BorderBrush="{DynamicResource PosDividerBrush}"
                                       BorderThickness="1"
                                       ColumnHeaderStyle="{StaticResource HistoryColumnHeaderStyle}"
                                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -1469,7 +1469,7 @@
                                     <Style TargetType="DataGridRow">
                                         <Setter Property="Height" Value="76" />
                                         <Setter Property="MinHeight" Value="76" />
-                                        <Setter Property="Background" Value="White" />
+                                        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
                                     </Style>
                                 </DataGrid.RowStyle>
                                 <DataGrid.Columns>
@@ -1484,7 +1484,7 @@
                                                     <Border x:Name="OrderDetailProductImage"
                                                             Width="64"
                                                             Height="64"
-                                                            Background="#FFE8F0FE"
+                                                            Background="{DynamicResource PosPrimarySoftBrush}"
                                                             CornerRadius="7"
                                                             ClipToBounds="True"
                                                             SnapsToDevicePixels="True">
@@ -1492,7 +1492,7 @@
                                                             <materialDesign:PackIcon Kind="Shopping"
                                                                                      Width="24"
                                                                                      Height="24"
-                                                                                     Foreground="{StaticResource PosPrimaryBrush}"
+                                                                                     Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                                                      HorizontalAlignment="Center"
                                                                                      VerticalAlignment="Center"
                                                                                      Panel.ZIndex="0" />
@@ -1514,14 +1514,14 @@
                                                         <TextBlock Text="{Binding DisplayName}"
                                                                    FontSize="14"
                                                                    FontWeight="SemiBold"
-                                                                   Foreground="{StaticResource PosTextBrush}"
+                                                                   Foreground="{DynamicResource PosTextBrush}"
                                                                    TextWrapping="NoWrap"
                                                                    TextTrimming="CharacterEllipsis"
                                                                    ToolTip="{Binding DisplayName}" />
                                                         <TextBlock x:Name="OrderDetailItemMetadata"
                                                                    Margin="0,5,0,0"
                                                                    FontSize="12"
-                                                                   Foreground="#FF64748B"
+                                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                                    TextWrapping="NoWrap"
                                                                    TextTrimming="CharacterEllipsis">
                                                             <TextBlock.ToolTip>
@@ -1566,14 +1566,14 @@
                             </DataGrid>
 
                             <Border Panel.ZIndex="10"
-                                    Background="#F7FFFFFF"
+                                    Background="{DynamicResource PosSurfaceBrush}"
                                     Visibility="{Binding IsReceiptPreviewLoading, Converter={StaticResource BoolToVis}}">
                                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <ProgressBar Width="180" Height="5" IsIndeterminate="True" />
                                     <TextBlock x:Name="OrderDetailsLoadingStatusText"
                                                Text="{loc:Loc history.orderDetailsLoading}"
                                                 Margin="0,14,0,0"
-                                                Foreground="#FF64748B"
+                                                Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                 FontSize="13"
                                                 FontWeight="SemiBold"
                                                 AutomationProperties.LiveSetting="Polite" />
@@ -1581,18 +1581,18 @@
                             </Border>
 
                             <Border Panel.ZIndex="11"
-                                    Background="#F7FFFFFF"
+                                    Background="{DynamicResource PosSurfaceBrush}"
                                     Visibility="{Binding OrderDetailsErrorMessage, Converter={StaticResource StringHasValueToVis}}">
                                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <materialDesign:PackIcon Kind="AlertCircleOutline"
                                                              Width="30"
                                                              Height="30"
-                                                             Foreground="{StaticResource PosDangerBrush}" />
+                                                             Foreground="{DynamicResource PosDangerTextBrush}" />
                                     <TextBlock x:Name="OrderDetailsErrorStatusText"
                                                Text="{Binding OrderDetailsErrorMessage}"
                                                 MaxWidth="520"
                                                 Margin="0,10,0,14"
-                                                Foreground="#FF475569"
+                                                Foreground="{DynamicResource PosTextSecondaryBrush}"
                                                 FontSize="13"
                                                 TextAlignment="Center"
                                                 TextWrapping="Wrap"
@@ -1607,17 +1607,17 @@
                             </Border>
 
                             <Border Panel.ZIndex="9"
-                                    Background="#F7FFFFFF"
+                                    Background="{DynamicResource PosSurfaceBrush}"
                                     Visibility="{Binding IsOrderDetailsEmpty, Converter={StaticResource BoolToVis}}">
                                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <materialDesign:PackIcon Kind="BasketOffOutline"
                                                              Width="30"
                                                              Height="30"
-                                                             Foreground="#FF94A3B8" />
+                                                             Foreground="{DynamicResource PosSubtleForegroundBrush}" />
                                     <TextBlock x:Name="OrderDetailsEmptyStatusText"
                                                Text="{loc:Loc history.orderDetailsEmpty}"
                                                 Margin="0,10,0,0"
-                                                Foreground="#FF64748B"
+                                                Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                 FontSize="13"
                                                 FontWeight="SemiBold"
                                                 AutomationProperties.LiveSetting="Polite" />
@@ -1628,8 +1628,8 @@
                         <Border Grid.Row="1"
                                 Margin="20,0,20,8"
                                 Padding="14,10"
-                                Background="White"
-                                BorderBrush="#FFE2E8F0"
+                                Background="{DynamicResource PosSurfaceBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Visibility="{Binding IsOrderDetailsFinancialContentVisible, Converter={StaticResource BoolToVis}}">
@@ -1639,7 +1639,7 @@
                                                Margin="0,0,0,8"
                                                FontSize="12"
                                                FontWeight="SemiBold"
-                                               Foreground="#FF64748B" />
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                     <ItemsControl ItemsSource="{Binding Payments}"
                                                   Visibility="{Binding HasOrderDetailsPayments, Converter={StaticResource BoolToVis}}">
                                         <ItemsControl.ItemsPanel>
@@ -1653,8 +1653,8 @@
                                                         MaxWidth="285"
                                                         Margin="0,0,12,4"
                                                         Padding="10,7"
-                                                        Background="#FFF8FAFC"
-                                                        BorderBrush="#FFE2E8F0"
+                                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                                        BorderBrush="{DynamicResource PosDividerBrush}"
                                                         BorderThickness="1"
                                                         CornerRadius="6">
                                                     <Grid>
@@ -1665,11 +1665,11 @@
                                                         <StackPanel>
                                                             <TextBlock Text="{Binding MethodLabel}"
                                                                        FontWeight="SemiBold"
-                                                                       Foreground="{StaticResource PosTextBrush}" />
+                                                                       Foreground="{DynamicResource PosTextBrush}" />
                                                             <TextBlock Text="{Binding DisplayReference}"
                                                                        Margin="0,2,0,0"
                                                                        FontSize="11"
-                                                                       Foreground="#FF64748B"
+                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                                        TextWrapping="NoWrap"
                                                                        TextTrimming="CharacterEllipsis"
                                                                        ToolTip="{Binding DisplayReference}"
@@ -1677,7 +1677,7 @@
                                                             <TextBlock Text="{Binding CardSummary}"
                                                                        Margin="0,2,0,0"
                                                                        FontSize="11"
-                                                                       Foreground="#FF64748B"
+                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                                        TextWrapping="NoWrap"
                                                                        TextTrimming="CharacterEllipsis"
                                                                        ToolTip="{Binding CardSummary}"
@@ -1688,7 +1688,7 @@
                                                                    Margin="14,0,0,0"
                                                                    FontSize="14"
                                                                    FontWeight="Bold"
-                                                                   Foreground="{StaticResource PosTextBrush}"
+                                                                   Foreground="{DynamicResource PosTextBrush}"
                                                                    VerticalAlignment="Center" />
                                                     </Grid>
                                                 </Border>
@@ -1698,7 +1698,7 @@
                                 </StackPanel>
 
                                 <TextBlock Text="{loc:Loc history.orderDetailsNoPayment}"
-                                           Foreground="#FF64748B"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            FontSize="13"
                                            FontWeight="SemiBold"
                                            VerticalAlignment="Bottom">
@@ -1719,8 +1719,8 @@
                         <Border Grid.Row="2"
                                 Margin="20,0,20,14"
                                 Padding="14,10"
-                                Background="White"
-                                BorderBrush="#FFE2E8F0"
+                                Background="{DynamicResource PosSurfaceBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Visibility="{Binding IsOrderDetailsFinancialContentVisible, Converter={StaticResource BoolToVis}}">
@@ -1761,12 +1761,12 @@
                                     <TextBlock Text="{loc:Loc history.finalTotal}"
                                                FontSize="12"
                                                FontWeight="SemiBold"
-                                               Foreground="#FF64748B"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextAlignment="Right" />
                                     <TextBlock Text="{Binding PreviewTotal, StringFormat={}{0:C2}}"
                                                FontSize="22"
                                                FontWeight="Black"
-                                               Foreground="#FFF57C00"
+                                               Foreground="{DynamicResource PosAccentBrush}"
                                                TextAlignment="Right" />
                                 </StackPanel>
                             </WrapPanel>
@@ -1775,8 +1775,8 @@
 
                     <Border Grid.Row="2"
                             Padding="16"
-                            Background="White"
-                            BorderBrush="#FFE2E8F0"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
                             BorderThickness="0,1,0,0">
                         <Button Command="{Binding CloseOrderDetailsCommand}"
                                 Content="{loc:Loc history.closeOrderDetails}"
@@ -1795,8 +1795,8 @@
               Visibility="{Binding IsForceReleaseReasonPromptOpen, Converter={StaticResource BoolToVis}}">
             <Border Width="440"
                     Padding="24"
-                    Background="White"
-                    BorderBrush="#FFE2E8F0"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
                     CornerRadius="10">
                 <Border.Effect>
@@ -1806,10 +1806,10 @@
                     <TextBlock Text="{Binding ForceReleaseLabel}"
                                FontSize="16"
                                FontWeight="Bold"
-                               Foreground="{StaticResource PosTextBrush}"
+                               Foreground="{DynamicResource PosTextBrush}"
                                Margin="0,0,0,4" />
                     <TextBlock Text="{Binding ForceReleaseReasonLabel}"
-                               Foreground="#FF64748B"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                FontSize="12"
                                Margin="0,0,0,6" />
                     <TextBox Text="{Binding ForceReleaseReason, UpdateSourceTrigger=PropertyChanged}"

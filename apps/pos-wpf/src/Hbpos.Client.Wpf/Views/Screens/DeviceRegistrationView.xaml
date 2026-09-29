@@ -7,7 +7,7 @@
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
-    <Grid Background="{StaticResource PosScreenBackgroundBrush}">
+    <Grid Background="{DynamicResource PosScreenBackgroundBrush}">
         <ScrollViewer x:Name="RegistrationScrollViewer"
                       Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                       VerticalScrollBarVisibility="Auto"
@@ -15,8 +15,8 @@
             <Grid MinHeight="{Binding ElementName=RegistrationScrollViewer, Path=ViewportHeight}">
                 <Border Width="620"
                         Margin="24"
-                        Background="White"
-                        BorderBrush="#FFE0E3EA"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosDividerBrush}"
                         BorderThickness="1"
                         CornerRadius="8"
                         Padding="28"
@@ -41,10 +41,10 @@
                         <TextBlock Text="{Binding TitleText}"
                                    FontSize="22"
                                    FontWeight="Black"
-                                   Foreground="{StaticResource PosTextBrush}" />
+                                   Foreground="{DynamicResource PosTextBrush}" />
                         <TextBlock Text="{loc:Loc AppName}"
                                    FontSize="12"
-                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                    Margin="0,3,0,0" />
                     </StackPanel>
                 </StackPanel>
@@ -54,8 +54,8 @@
                                                  Margin="0,0,0,18" />
 
                 <StackPanel Visibility="{Binding IsActivationCodeMode, Converter={StaticResource BoolToVis}}">
-                    <Border Background="#FFEAF2FF"
-                            BorderBrush="#FFC9DCF8"
+                    <Border Background="{DynamicResource PosPrimarySoftBrush}"
+                            BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="7"
                             Padding="12,10"
@@ -68,12 +68,12 @@
                             <materialDesign:PackIcon Kind="BarcodeScan"
                                                      Width="18"
                                                      Height="18"
-                                                     Foreground="{StaticResource PosPrimaryBrush}"
+                                                     Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                      VerticalAlignment="Top" />
                             <TextBlock Grid.Column="1"
                                        Text="{loc:Loc deviceActivation.description}"
                                        FontSize="12"
-                                       Foreground="{StaticResource PosTextBrush}"
+                                       Foreground="{DynamicResource PosTextBrush}"
                                        TextWrapping="Wrap" />
                         </Grid>
                     </Border>
@@ -81,7 +81,7 @@
                     <TextBlock Text="{loc:Loc deviceActivation.code}"
                                FontSize="12"
                                FontWeight="Bold"
-                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                Margin="0,0,0,6" />
                     <TextBox Text="{Binding ActivationCode, UpdateSourceTrigger=PropertyChanged}"
                              AutomationProperties.AutomationId="DeviceActivationCodeInput"
@@ -99,8 +99,8 @@
                     </TextBox>
 
                     <Border Visibility="{Binding HasActivationPreview, Converter={StaticResource BoolToVis}}"
-                            Background="#FFE8F7F1"
-                            BorderBrush="#FFB9E4D2"
+                            Background="{DynamicResource PosSuccessSoftBrush}"
+                            BorderBrush="{DynamicResource PosSuccessBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="7"
                             Padding="14,12"
@@ -113,19 +113,19 @@
                             <materialDesign:PackIcon Kind="StoreCheck"
                                                      Width="20"
                                                      Height="20"
-                                                     Foreground="#FF0A8F55" />
+                                                     Foreground="{DynamicResource PosSuccessTextBrush}" />
                             <StackPanel Grid.Column="1">
                                 <TextBlock Text="{loc:Loc deviceActivation.targetStore}"
                                            FontSize="11"
                                            FontWeight="Bold"
-                                           Foreground="#FF0A6D44" />
+                                           Foreground="{DynamicResource PosSuccessTextBrush}" />
                                 <TextBlock Text="{Binding StoreTransitionDisplay}"
                                            FontSize="17"
                                            FontWeight="Black"
-                                           Foreground="{StaticResource PosTextBrush}"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            Margin="0,3,0,0" />
                                 <TextBlock FontSize="11"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            Margin="0,4,0,0">
                                     <Run Text="{loc:Loc deviceActivation.platform}" />
                                     <Run Text=": " />
@@ -140,15 +140,15 @@
                     </Border>
 
                     <Border MinHeight="42"
-                            Background="#FFFFF7E8"
-                            BorderBrush="#FFFFD59B"
+                            Background="{DynamicResource PosWarningSoftBrush}"
+                            BorderBrush="{DynamicResource PosWarningBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="6"
                             Padding="10,8"
                             Margin="0,0,0,16">
                         <TextBlock Text="{Binding StatusMessage}"
                                    FontSize="12"
-                                   Foreground="#FF8F4E00"
+                                   Foreground="{DynamicResource PosWarningTextBrush}"
                                    TextWrapping="Wrap" />
                     </Border>
 
@@ -195,7 +195,7 @@
                     <TextBlock Text="{loc:Loc deviceRegistration.store}"
                                FontSize="12"
                                FontWeight="Bold"
-                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                Margin="0,0,0,6" />
                     <ComboBox ItemsSource="{Binding Stores}"
                               SelectedItem="{Binding SelectedStore, Mode=TwoWay}"
@@ -206,7 +206,7 @@
                     <TextBlock Text="{loc:Loc deviceRegistration.deviceCode}"
                                FontSize="12"
                                FontWeight="Bold"
-                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                Margin="0,0,0,6" />
                     <TextBox Text="{Binding DeviceCode}"
                              IsReadOnly="True"
@@ -214,15 +214,15 @@
                              FontSize="14"
                              Margin="0,0,0,12" />
                     <Border MinHeight="42"
-                            Background="#FFFFF7E8"
-                            BorderBrush="#FFFFD59B"
+                            Background="{DynamicResource PosWarningSoftBrush}"
+                            BorderBrush="{DynamicResource PosWarningBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="6"
                             Padding="10,8"
                             Margin="0,0,0,16">
                         <TextBlock Text="{Binding StatusMessage}"
                                    FontSize="12"
-                                   Foreground="#FF8F4E00"
+                                   Foreground="{DynamicResource PosWarningTextBrush}"
                                    TextWrapping="Wrap" />
                     </Border>
                     <Button Command="{Binding VerifyCommand}"

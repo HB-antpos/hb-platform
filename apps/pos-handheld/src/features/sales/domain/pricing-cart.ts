@@ -475,13 +475,17 @@ export class PricingCart {
     );
     const kind = input.kind ?? "sale";
     const normalizedLookup = normalizeLookupCode(input.lookupCode);
+    const normalizedProduct = normalizeProductCode(input.productCode);
 
     if (kind === "sale") {
+      // 一码多商品（套装码、共用条码）时同码可对应不同商品：与 WPF 一致，
+      // 查询码与商品编码都相同才并入已有行，选了不同商品必须分行各按自身价格。
       const existing = this.lines.find(
         (line) =>
           line.kind === "sale" &&
           line.basePriceSource !== "open-item" &&
-          normalizeLookupCode(line.lookupCode) === normalizedLookup,
+          normalizeLookupCode(line.lookupCode) === normalizedLookup &&
+          normalizeProductCode(line.productCode) === normalizedProduct,
       );
       if (existing) {
         if (

@@ -53,6 +53,10 @@ internal interface IAppUpdatePromptDialogPresenter
     bool? Show(AppUpdatePromptViewModel viewModel, Window? owner, XmlLanguage language);
 }
 
+internal readonly record struct AppUpdatePromptPlacement(
+    WindowStartupLocation StartupLocation,
+    Rect Bounds);
+
 internal sealed class WpfAppUpdatePromptDialogPresenter : IAppUpdatePromptDialogPresenter
 {
     private const double FallbackWidth = 1200;
@@ -60,23 +64,55 @@ internal sealed class WpfAppUpdatePromptDialogPresenter : IAppUpdatePromptDialog
 
     public bool? Show(AppUpdatePromptViewModel viewModel, Window? owner, XmlLanguage language)
     {
+        // 中文注释：启动检查时 Application.MainWindow 还是 460×380 的置顶启动页，不能按它的尺寸压缩弹窗。
+        var cashierWindowSize = owner is MainWindow { IsVisible: true }
+            ? new Size(owner.ActualWidth, owner.ActualHeight)
+            : (Size?)null;
+        var placement = ResolvePlacement(cashierWindowSize, SystemParameters.WorkArea);
         var dialog = new AppUpdatePromptWindow(viewModel)
         {
             Language = language,
-            WindowStartupLocation = owner is null
-                ? WindowStartupLocation.CenterScreen
-                : WindowStartupLocation.CenterOwner
+            WindowStartupLocation = placement.StartupLocation,
+            Width = placement.Bounds.Width,
+            Height = placement.Bounds.Height
         };
+
+        if (placement.StartupLocation == WindowStartupLocation.Manual)
+        {
+            dialog.Left = placement.Bounds.Left;
+            dialog.Top = placement.Bounds.Top;
+        }
 
         if (owner is not null)
         {
+            // 中文注释：启动页同样保留为 owner，弹窗才能压在置顶启动页之上。
             dialog.Owner = owner;
-            // 中文注释：弹窗窗口与主窗口同尺寸，确保遮罩覆盖完整收银界面。
-            dialog.Width = ResolveOverlayLength(owner.ActualWidth, FallbackWidth);
-            dialog.Height = ResolveOverlayLength(owner.ActualHeight, FallbackHeight);
         }
 
         return dialog.ShowDialog();
+    }
+
+    internal static AppUpdatePromptPlacement ResolvePlacement(Size? cashierWindowSize, Rect workArea)
+    {
+        if (cashierWindowSize is { } size)
+        {
+            // 中文注释：弹窗窗口与主窗口同尺寸，确保遮罩覆盖完整收银界面。
+            return new AppUpdatePromptPlacement(
+                WindowStartupLocation.CenterOwner,
+                new Rect(
+                    0,
+                    0,
+                    ResolveOverlayLength(size.Width, FallbackWidth),
+                    ResolveOverlayLength(size.Height, FallbackHeight)));
+        }
+
+        // 中文注释：收银主窗口尚未显示时遮罩铺满主屏工作区，与启动页同屏。
+        return double.IsFinite(workArea.Width) && workArea.Width > 0 &&
+            double.IsFinite(workArea.Height) && workArea.Height > 0
+            ? new AppUpdatePromptPlacement(WindowStartupLocation.Manual, workArea)
+            : new AppUpdatePromptPlacement(
+                WindowStartupLocation.CenterScreen,
+                new Rect(0, 0, FallbackWidth, FallbackHeight));
     }
 
     private static double ResolveOverlayLength(double actualLength, double fallbackLength)

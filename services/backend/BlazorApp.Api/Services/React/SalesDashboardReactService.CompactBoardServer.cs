@@ -226,6 +226,8 @@ public partial class SalesDashboardReactService
             PageSize = pageSize,
             ScopeAmount = scopeAmount,
         };
+        // 写视图缓存前补上分店总营业额，命中缓存时不必再查。
+        await FillCompactSalesBoardBranchTotalsAsync(board.Stores, boardRange);
 
         SalesDashboardCacheKeys.TryExecuteProductSalesAnalysisCacheWrite(
             viewKey,
@@ -237,6 +239,40 @@ public partial class SalesDashboardReactService
             )
         );
         return board;
+    }
+
+    /// <summary>
+    /// 分店栏占比的分母：各分店在区间内的总营业额，取 StoreSalesStatistic（营业额日报同一口径，含全部供应商的商品）。
+    /// 在数据库里按分店汇总，只回几十行；选中供应商、商品只收窄分子（国内商品金额），分母不变。两条聚合路径共用。
+    /// </summary>
+    private async Task FillCompactSalesBoardBranchTotalsAsync(IReadOnlyList<CompactSalesBoardStoreDto> stores, DateRangeDto range)
+    {
+        if (stores.Count == 0)
+            return;
+        var codes = stores.Select(row => row.BranchCode.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var start = range.StartDate.Date;
+        var endExclusive = range.EndDate.Date.AddDays(1);
+        var rows = await _context.Db.Queryable<StoreSalesStatistic>()
+            .Where(row => row.Date >= start && row.Date < endExclusive && codes.Contains(row.BranchCode))
+            .GroupBy(row => row.BranchCode)
+            .Select(row => new CompactBoardBranchTotalRow
+            {
+                BranchCode = row.BranchCode,
+                TotalAmount = SqlSugar.SqlFunc.AggregateSum(row.TotalAmount),
+            })
+            .ToListAsync();
+        // 分店代码可能带尾随空格：去空格后再合并，与看板分店栏的代码对齐。
+        var totals = rows
+            .GroupBy(row => (row.BranchCode ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Sum(row => row.TotalAmount), StringComparer.OrdinalIgnoreCase);
+        foreach (var store in stores)
+            store.BranchTotalAmount = totals.TryGetValue(store.BranchCode.Trim(), out var total) ? total : 0m;
+    }
+
+    private sealed class CompactBoardBranchTotalRow
+    {
+        public string BranchCode { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
     }
 
     private static CompactSalesBoardDto CopyCompactSalesBoard(CompactSalesBoardDto source, bool fromCache) => new()

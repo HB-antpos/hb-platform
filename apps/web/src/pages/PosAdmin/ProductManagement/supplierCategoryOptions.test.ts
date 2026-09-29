@@ -12,6 +12,7 @@ import {
   findWarehouseCategoryGuidPath,
   mapSupplierTreeToCascaderOptions,
   resolveBatchSupplierCategoryScope,
+  searchSupplierCategoryOptions,
   sortSuppliersForCascader,
   splitSupplierCategoryPath,
 } from './supplierCategoryOptions'
@@ -83,6 +84,16 @@ assert.equal(brazco.children, undefined)
 assert.equal(brazco.isLeaf, false)
 assert.equal(pjSas.children, undefined)
 assert.equal(pjSas.isLeaf, false)
+
+// 搜索供应商与已加载分类；停用/提示节点不能成为可选结果，结果保留完整路径。
+assert.deepEqual(searchSupplierCategoryOptions(options, 'dats').map((result) => result.valuePath), [['240']])
+assert.deepEqual(searchSupplierCategoryOptions(options, 'PENS').map((result) => result.valuePath), [['240', 'C-ROOT', 'c-leaf']])
+assert.deepEqual(searchSupplierCategoryOptions(options, '笔').map((result) => result.valuePath), [['200', 'w-root', 'w-leaf']])
+assert.deepEqual(searchSupplierCategoryOptions(options, 'malmar').map((result) => result.valuePath), [['227']])
+assert.deepEqual(searchSupplierCategoryOptions(options, '加载失败'), [])
+assert.deepEqual(searchSupplierCategoryOptions(options, 'old'), [])
+assert.equal(searchSupplierCategoryOptions(options, '  ').length, 0)
+assert.equal(searchSupplierCategoryOptions(options, 'a', 2).length, 2)
 
 // 刷新期间仍展示旧数据
 const refreshing = buildSupplierCategoryCascaderOptions({

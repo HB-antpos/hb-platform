@@ -18,6 +18,7 @@ internal sealed record BatchProductSalesDateCoverage(
 /// <summary>页面和折扣任务共享同一个统计版本边界，禁止从未完成统计推断零销量。</summary>
 internal sealed class BatchProductSalesStatisticReader(ISqlSugarClient db)
 {
+    private const int ProductCodeQueryBatchSize = 500;
     internal async Task<BatchProductSalesStatisticStatus> StatusAsync(DateTime start, DateTime end, CancellationToken token)
     {
         var previousToken = db.Ado.CancellationToken;
@@ -177,16 +178,21 @@ internal sealed class BatchProductSalesStatisticReader(ISqlSugarClient db)
         var days = dates.Select(date => date.Date).Distinct().ToList();
         var codes = products.Where(code => !string.IsNullOrWhiteSpace(code)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var datePredicate = BuildDatePredicate(days);
-        var rows = await db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
-            .Where(s => codes.Contains(s.ProductCode) && stores.Contains(s.BranchCode))
-            .Where(datePredicate.ToExpression())
-            .GroupBy(s => new { s.Date, s.BranchCode, s.ProductCode })
-            .Select(s => new BatchProductSalesAggregateRow
-            {
-                Date = s.Date, BranchCode = s.BranchCode, ProductCode = s.ProductCode,
-                Quantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownQuantity = SqlFunc.AggregateSum(s.TotalQuantity),
-                UnknownRowCount = 1, SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
-            }).ToListAsync(token);
+        var rows = new List<BatchProductSalesAggregateRow>();
+        foreach (var codeBatch in codes.Chunk(ProductCodeQueryBatchSize))
+        {
+            token.ThrowIfCancellationRequested();
+            rows.AddRange(await db.Queryable<ProductStoreDailySalesStatistic>().With(SqlWith.Null)
+                .Where(s => codeBatch.Contains(s.ProductCode) && stores.Contains(s.BranchCode))
+                .Where(datePredicate.ToExpression())
+                .GroupBy(s => new { s.Date, s.BranchCode, s.ProductCode })
+                .Select(s => new BatchProductSalesAggregateRow
+                {
+                    Date = s.Date, BranchCode = s.BranchCode, ProductCode = s.ProductCode,
+                    Quantity = SqlFunc.AggregateSum(s.TotalQuantity), UnknownQuantity = SqlFunc.AggregateSum(s.TotalQuantity),
+                    UnknownRowCount = 1, SalesAmount = SqlFunc.AggregateSum(s.TotalAmount),
+                }).ToListAsync(token));
+        }
         token.ThrowIfCancellationRequested();
         return rows;
         }
@@ -207,7 +213,7 @@ internal sealed class BatchProductSalesStatisticReader(ISqlSugarClient db)
         else db.Ado.RemoveCancellationToken();
     }
 
-    private static Expressionable<ProductStoreDailySalesStatistic> BuildDatePredicate(IEnumerable<DateTime> days)
+    internal static Expressionable<ProductStoreDailySalesStatistic> BuildDatePredicate(IEnumerable<DateTime> days)
     {
         var predicate = Expressionable.Create<ProductStoreDailySalesStatistic>();
         // 与折扣快照读取共用区间折叠：连续 ready dates 只生成一组半开区间，不连续日期之间仍保持断开。

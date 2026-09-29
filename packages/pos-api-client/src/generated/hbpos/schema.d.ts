@@ -538,6 +538,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/sellable-items/code-conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    storeCode?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CatalogCodeConflictsResponseApiResult"];
+                        "application/json": components["schemas"]["CatalogCodeConflictsResponseApiResult"];
+                        "text/json": components["schemas"]["CatalogCodeConflictsResponseApiResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/special-products/page": {
         parameters: {
             query?: never;
@@ -5361,6 +5400,19 @@ export interface components {
         CashierSessionDtoApiResult: {
             success?: boolean;
             data?: components["schemas"]["CashierSessionDto"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        CatalogCodeConflictsResponse: {
+            storeCode?: string | null;
+            /** Format: date-time */
+            generatedAt?: string;
+            available?: boolean;
+            items?: components["schemas"]["CatalogLookupItemDto"][] | null;
+        };
+        CatalogCodeConflictsResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["CatalogCodeConflictsResponse"];
             errorCode?: string | null;
             message?: string | null;
         };

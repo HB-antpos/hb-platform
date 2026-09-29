@@ -97,6 +97,88 @@ public sealed class AppUpdateDownloadServiceTests
     }
 
     [Fact]
+    public async Task DownloadAsync_reuses_cached_installer_when_size_and_sha256_match()
+    {
+        var payload = Encoding.UTF8.GetBytes("installer");
+        var response = CreateRelease(payload, Sha256(payload));
+        await using var sandbox = TempDirectory.Create();
+        var cachedPath = Path.Combine(sandbox.Path, response.FileName!);
+        await File.WriteAllBytesAsync(cachedPath, payload);
+        var handler = new BytesHandler(payload);
+        var progress = new RecordingProgress();
+        var service = new AppUpdateDownloadService(
+            new HttpClient(handler),
+            new FixedDownloadDirectoryProvider(sandbox.Path));
+
+        var result = await service.DownloadAsync(response, progress);
+
+        // 中文注释：已校验过的同版本安装包直接复用，后台定时检查和重启都不再重复下载整包。
+        Assert.True(result.Success);
+        Assert.Equal(cachedPath, result.FilePath);
+        Assert.Equal(0, handler.RequestCount);
+        Assert.Equal(100, Assert.Single(progress.Values).Percent);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(cachedPath));
+    }
+
+    [Theory]
+    [InlineData("installer-old")]
+    [InlineData("INSTALLER")]
+    public async Task DownloadAsync_redownloads_when_cached_installer_size_or_sha256_differs(string cachedContent)
+    {
+        var payload = Encoding.UTF8.GetBytes("installer");
+        var response = CreateRelease(payload, Sha256(payload));
+        await using var sandbox = TempDirectory.Create();
+        var cachedPath = Path.Combine(sandbox.Path, response.FileName!);
+        await File.WriteAllTextAsync(cachedPath, cachedContent);
+        var handler = new BytesHandler(payload);
+        var service = new AppUpdateDownloadService(
+            new HttpClient(handler),
+            new FixedDownloadDirectoryProvider(sandbox.Path));
+
+        var result = await service.DownloadAsync(response);
+
+        Assert.True(result.Success);
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(cachedPath));
+    }
+
+    [Theory]
+    [InlineData("installer", true)]
+    [InlineData("INSTALLER", false)]
+    [InlineData(null, false)]
+    public async Task TryGetVerifiedCachedInstallerAsync_only_returns_verified_local_installer_without_network(
+        string? cachedContent,
+        bool expectedCached)
+    {
+        var payload = Encoding.UTF8.GetBytes("installer");
+        var response = CreateRelease(payload, Sha256(payload));
+        await using var sandbox = TempDirectory.Create();
+        var cachedPath = Path.Combine(sandbox.Path, response.FileName!);
+        if (cachedContent is not null)
+        {
+            await File.WriteAllTextAsync(cachedPath, cachedContent);
+        }
+
+        var handler = new BytesHandler(payload);
+        var service = new AppUpdateDownloadService(
+            new HttpClient(handler),
+            new FixedDownloadDirectoryProvider(sandbox.Path));
+
+        var result = await service.TryGetVerifiedCachedInstallerAsync(response);
+
+        if (expectedCached)
+        {
+            Assert.Equal(cachedPath, result);
+        }
+        else
+        {
+            Assert.Null(result);
+        }
+
+        Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task DownloadAsync_replaces_stale_temp_file_only_after_successful_validation()
     {
         var payload = Encoding.UTF8.GetBytes("installer");
@@ -347,10 +429,13 @@ public sealed class AppUpdateDownloadServiceTests
         long? contentLengthOverride = null,
         bool omitContentLength = false) : HttpMessageHandler
     {
+        public int RequestCount { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            RequestCount++;
             HttpContent content = omitContentLength
                 ? new UnknownLengthContent(payload)
                 : new ByteArrayContent(payload);

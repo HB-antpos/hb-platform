@@ -1201,7 +1201,7 @@ public sealed class ProductSalesAnalysisServiceTests : IDisposable
                 (_, expirationToken) =>
                 {
                     oldWriteEntered.Set();
-                    Assert.True(allowOldWriteToFinish.Wait(TimeSpan.FromSeconds(5)));
+                    Assert.True(allowOldWriteToFinish.Wait(AsyncTestWaitSupport.DefaultTimeout));
                     cacheApi.Set(
                         key,
                         "old",
@@ -1210,14 +1210,14 @@ public sealed class ProductSalesAnalysisServiceTests : IDisposable
                 }
             )
         );
-        Assert.True(oldWriteEntered.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(oldWriteEntered.Wait(AsyncTestWaitSupport.DefaultTimeout));
 
         var clearTask = Task.Run(() =>
         {
             clearAttempted.Set();
             SalesDashboardCacheKeys.ClearActiveKeys();
         });
-        Assert.True(clearAttempted.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(clearAttempted.Wait(AsyncTestWaitSupport.DefaultTimeout));
 
         // clear 已开始但必须等待旧写入的短生命周期临界区结束。
         await Task.Delay(TimeSpan.FromMilliseconds(100));
@@ -1330,7 +1330,7 @@ public sealed class ProductSalesAnalysisServiceTests : IDisposable
                 if (k is string keyString && keyString == generalKey)
                 {
                     removeStarted.Set();
-                    allowRemoveToFinish.Wait(TimeSpan.FromSeconds(5));
+                    allowRemoveToFinish.Wait(AsyncTestWaitSupport.DefaultTimeout);
                 }
 
                 cacheApi.Remove(k);
@@ -1343,7 +1343,7 @@ public sealed class ProductSalesAnalysisServiceTests : IDisposable
         );
 
         var clearTask = Task.Run(async () => await warmer.ClearCacheAsync());
-        Assert.True(removeStarted.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(removeStarted.Wait(AsyncTestWaitSupport.DefaultTimeout));
 
         // 清理已切代并正在移除普通键期间，新代 Set 同 key。
         var newOptions = SalesDashboardReactService.CreateProductSalesAnalysisCacheOptions(
@@ -1360,28 +1360,6 @@ public sealed class ProductSalesAnalysisServiceTests : IDisposable
 
         cacheApi.Remove(key);
         SalesDashboardCacheKeys.ClearActiveKeys();
-    }
-
-    private static void WaitUntil(Func<bool> condition)
-    {
-        if (!SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(5)))
-        {
-            Assert.Fail("等待条件超时");
-        }
-    }
-
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (!condition())
-        {
-            if (DateTime.UtcNow >= deadline)
-            {
-                Assert.Fail("等待条件超时");
-            }
-
-            await Task.Delay(5);
-        }
     }
 
     private async Task SeedFreshStatusAsync(DateTime date)

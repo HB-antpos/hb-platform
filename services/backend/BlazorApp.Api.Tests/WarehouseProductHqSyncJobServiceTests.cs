@@ -137,20 +137,13 @@ public sealed class WarehouseProductHqSyncJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (
-                job?.Status == WarehouseProductHqSyncJobStatusConstants.Succeeded
-                || job?.Status == WarehouseProductHqSyncJobStatusConstants.Failed
-            )
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待仓库商品同步 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current =>
+                current?.Status == WarehouseProductHqSyncJobStatusConstants.Succeeded
+                || current?.Status == WarehouseProductHqSyncJobStatusConstants.Failed,
+            describeLast: current => $"仓库商品同步 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 }

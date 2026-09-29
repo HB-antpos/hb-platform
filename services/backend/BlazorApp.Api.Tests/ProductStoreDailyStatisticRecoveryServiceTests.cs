@@ -49,7 +49,7 @@ public sealed class ProductStoreDailyStatisticRecoveryServiceTests : IDisposable
         await using var host = CreateHost("canonical-worker-new", true, queue.Object);
 
         await host.Worker.StartAsync(CancellationToken.None);
-        await recovered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await recovered.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         await host.Worker.StopAsync(CancellationToken.None);
 
         queue.Verify(x => x.RecoverExpiredRunningClaimsAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -148,22 +148,13 @@ public sealed class ProductStoreDailyStatisticRecoveryServiceTests : IDisposable
         return context;
     }
 
-    private async Task WaitForHeartbeatAsync(string instanceId)
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(3);
-        while (DateTime.UtcNow < deadline)
-        {
-            if (await _db.Queryable<ScheduledTaskInstanceState>()
+    private Task WaitForHeartbeatAsync(string instanceId) =>
+        WaitUntilAsync(
+            () => _db.Queryable<ScheduledTaskInstanceState>()
                 .Where(instance => instance.InstanceId == instanceId)
-                .AnyAsync())
-            {
-                return;
-            }
-            await Task.Delay(25);
-        }
-
-        throw new TimeoutException($"恢复服务未触达运行时开关: {instanceId}");
-    }
+                .AnyAsync(),
+            diagnostics: () => $"恢复服务未触达运行时开关: {instanceId}"
+        );
 
     private sealed class RecoveryHost(ServiceProvider provider, ProductStoreDailyStatisticRecoveryService worker)
         : IAsyncDisposable

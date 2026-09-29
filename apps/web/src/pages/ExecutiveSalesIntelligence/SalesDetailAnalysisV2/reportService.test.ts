@@ -6,7 +6,8 @@ const controller = new AbortController()
 const calls: URL[] = []
 let pending = false
 const query: SalesDetailQuery = { kind: 'china', startDate: '2026-09-01', endDate: '2026-09-06', compareMode: 'ByWeek',
-  branchCodes: ['S1', 'S2'], selectedBranchCode: 'S1', selectedSupplierCode: 'HB215', selectedProductCode: 'P1', search: '玛索 pen', pageIndex: 3, pageSize: 20 }
+  branchCodes: ['S1', 'S2'], selectedBranchCode: 'S1', selectedSupplierCode: 'HB215', selectedSupplierCodes: ['HB215', 'HB216'],
+  warehouseCategoryGuids: ['WC1', 'WC2'], selectedProductCode: 'P1', search: '玛索 pen', pageIndex: 3, pageSize: 20 }
 const section = (code: string) => ({ total: 1, rows: [{ Code: code, Revenue: 10, GrossProfit: null,
   GrossMarginRate: null, CompareGrossProfit: 0, CompareGrossMarginRate: 0 }] })
 
@@ -17,6 +18,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   assert.equal(url.searchParams.get('selectedProductCode'), 'P1')
   assert.equal(url.searchParams.get('selectedBranchCode'), 'S1')
   assert.deepEqual(url.searchParams.getAll('branchCodes'), ['S1', 'S2'])
+  assert.deepEqual(url.searchParams.getAll('selectedSupplierCodes'), ['HB215', 'HB216'])
+  assert.deepEqual(url.searchParams.getAll('warehouseCategoryGuids'), ['WC1', 'WC2'])
   assert.equal(url.searchParams.get('search'), '玛索 pen')
   assert.equal(url.searchParams.get('pageIndex'), '3')
   assert.equal(init?.signal, controller.signal)

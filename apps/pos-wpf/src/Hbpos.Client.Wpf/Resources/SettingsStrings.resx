@@ -18,6 +18,13 @@
   <data name="settings.section.dataDownload.title" xml:space="preserve"><value>Data Download</value></data>
   <data name="settings.section.dataDownload.description" xml:space="preserve"><value>Sync the current store catalog from the server and refresh the local checkout item index.</value></data>
   <data name="settings.section.dataDownload.action" xml:space="preserve"><value>Data Download</value></data>
+  <data name="settings.section.dataDownload.lastSync" xml:space="preserve"><value>Last sync</value></data>
+  <data name="settings.section.dataDownload.lastSuccessfulSync" xml:space="preserve"><value>Last successful sync</value></data>
+  <data name="settings.section.dataDownload.neverSynced" xml:space="preserve"><value>Not synced yet</value></data>
+  <data name="settings.section.dataDownload.state.synced" xml:space="preserve"><value>Synced</value></data>
+  <data name="settings.section.dataDownload.state.syncing" xml:space="preserve"><value>Syncing</value></data>
+  <data name="settings.section.dataDownload.state.failed" xml:space="preserve"><value>Sync failed</value></data>
+  <data name="settings.section.dataDownload.failedDetail" xml:space="preserve"><value>Sync failed at {0}: {1}</value></data>
   <data name="settings.section.dataReset.title" xml:space="preserve"><value>Data Reset</value></data>
   <data name="settings.section.dataReset.description" xml:space="preserve"><value>Force a fresh local catalog rebuild when data looks stale, prices do not refresh, or the product index needs a clean reset.</value></data>
   <data name="settings.section.dataReset.action" xml:space="preserve"><value>Data Reset</value></data>
@@ -167,6 +174,8 @@
   <data name="settings.receiptPrinter.phone" xml:space="preserve"><value>Phone</value></data>
   <data name="settings.receiptPrinter.abn" xml:space="preserve"><value>ABN</value></data>
   <data name="settings.receiptPrinter.returnPolicy" xml:space="preserve"><value>Return Policy</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt" xml:space="preserve"><value>Print bank receipt on customer receipt</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>When off, the customer receipt keeps only the card type, last 4 digits and amount, without the full EFTPOS bank receipt text. Signature, declined and settlement slips still print.</value></data>
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>Save Receipt Printer</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>Test Print</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>Load from Store Profile</value></data>
@@ -291,6 +300,9 @@
   <data name="settings.remoteMaintenance.result.componentsMissing" xml:space="preserve"><value>POS is missing remote maintenance installation components. Close POS, use the complete HB POS installer to repair the installation in its default Program Files folder, then reopen POS and select Install remote maintenance. No separate RustDesk download is needed.</value></data>
   <data name="settings.remoteMaintenance.result.installationLocationInvalid" xml:space="preserve"><value>This POS is running outside the required installation folder. Close POS, run the complete HB POS installer, keep its default Program Files folder, then open the installed POS and select Install remote maintenance.</value></data>
   <data name="settings.remoteMaintenance.result.installationPermissionsInvalid" xml:space="preserve"><value>The POS installation folder does not meet Windows security requirements. Ask an administrator to repair HB POS using the complete installer in its default Program Files folder, then reopen POS and retry.</value></data>
+  <data name="settings.remoteMaintenance.result.existingRustDeskUnmanaged" xml:space="preserve"><value>This POS already has a RustDesk installation that was not set up by the company (possibly left by an earlier incomplete setup), so it will not be taken over automatically. Uninstall RustDesk in Windows Settings &gt; Apps, then return here and select Install remote maintenance again.</value></data>
+  <data name="settings.remoteMaintenance.result.rustDeskSetupIncomplete" xml:space="preserve"><value>The RustDesk installer did not finish in time, or the RustDesk service could not start. Uninstall RustDesk in Windows Settings &gt; Apps if it is listed, restart the POS, then select Install remote maintenance again.</value></data>
+  <data name="settings.remoteMaintenance.result.rustDeskConfigurationFailed" xml:space="preserve"><value>RustDesk was installed, but the company connection settings could not be applied. Uninstall RustDesk in Windows Settings &gt; Apps, restart the POS, then select Install remote maintenance again.</value></data>
   <data name="settings.remoteMaintenance.status.notInstalled" xml:space="preserve"><value>Not installed</value></data>
   <data name="settings.remoteMaintenance.status.running" xml:space="preserve"><value>Running</value></data>
   <data name="settings.remoteMaintenance.status.starting" xml:space="preserve"><value>Starting</value></data>

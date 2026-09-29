@@ -359,12 +359,12 @@ public sealed class DataSyncIncrementalPosmSupplierMappingsTests : IDisposable
             var firstRun = CreateService().SyncPosmProductSupplierMappingsIncrementalAsync(
                 now.AddMinutes(-1)
             );
-            await firstSnapshotEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await firstSnapshotEntered.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
             var secondRun = CreateService().SyncPosmProductSupplierMappingsIncrementalAsync(
                 now.AddMinutes(-1)
             );
-            await secondWaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondWaitStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
             // 第二个运行已经请求租约，但第一个尚未放行，绝不能读取源快照或基于旧 POSM 快照插入。
             Assert.Equal(1, Volatile.Read(ref snapshotEnteredCount));

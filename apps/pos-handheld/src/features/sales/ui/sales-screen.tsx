@@ -53,6 +53,7 @@ import {
   getCashDueCents,
   MIN_TOUCH_TARGET,
   parseCashInput,
+  type SalesLookupCandidate,
   type SalesPresenter,
   type SalesFeedbackEvent,
   type SalesProductSearchItem,
@@ -302,6 +303,13 @@ export function SalesScreen({
     !state.capabilities.catalog ||
     newTransactionBlocked ||
     transactionActionsDisabled;
+  // 一码多商品候选只在收银态展示；结账准备、锁屏或成功页一律不弹出。
+  const lookupSelection =
+    state.phase === "selling" ? state.lookupSelection : null;
+  const lookupCandidatesDisabled =
+    !state.capabilities.catalog ||
+    newTransactionBlocked ||
+    state.lookupSelectionPending;
   const manualInputTreeUnavailable =
     state.phase === "success" ||
     state.phase === "locked" ||
@@ -2109,6 +2117,79 @@ export function SalesScreen({
         </View>
       </Modal>
 
+      {lookupSelection ? (
+        <Modal
+          animationType="fade"
+          onRequestClose={() => presenter.cancelLookupSelection()}
+          presentationStyle="overFullScreen"
+          supportedOrientations={["portrait"]}
+          transparent
+          visible
+        >
+          <View style={styles.searchDrawerBackdrop}>
+            <PosPressable
+              accessibilityLabel={t("lookupSelection.cancel")}
+              accessibilityRole="button"
+              onPress={() => presenter.cancelLookupSelection()}
+              sound="navigate"
+              style={styles.searchDrawerDismissArea}
+              testID="sales-lookup-selection-backdrop"
+            />
+            <View
+              accessibilityViewIsModal
+              style={styles.searchDrawer}
+              testID="sales-lookup-selection"
+            >
+              <View style={styles.searchDrawerContent}>
+                <View style={styles.lookupSelectionHeader}>
+                  <Text style={styles.lookupSelectionTitle}>
+                    {t("lookupSelection.title")}
+                  </Text>
+                  <Text
+                    style={styles.lookupSelectionHint}
+                    testID="sales-lookup-selection-hint"
+                  >
+                    {t("lookupSelection.hint", {
+                      code: lookupSelection.lookupCode,
+                      count: lookupSelection.candidates.length,
+                    })}
+                  </Text>
+                </View>
+                <FlatList
+                  contentContainerStyle={styles.searchResults}
+                  data={lookupSelection.candidates}
+                  keyExtractor={(item) => item.productCode}
+                  renderItem={({ item }) => (
+                    <LookupCandidateRow
+                      disabled={lookupCandidatesDisabled}
+                      item={item}
+                      locale={locale}
+                      onChoose={() => {
+                        void presenter.chooseLookupCandidate(item.productCode);
+                      }}
+                      {...(resolveCartProductImage
+                        ? { resolveProductImage: resolveCartProductImage }
+                        : {})}
+                      t={t}
+                    />
+                  )}
+                  style={styles.searchDrawerList}
+                  testID="sales-lookup-selection-list"
+                />
+                <ActionButton
+                  label={t("lookupSelection.cancel")}
+                  onPress={() => presenter.cancelLookupSelection()}
+                  sound="navigate"
+                  style={styles.lookupSelectionCancel}
+                  testID="sales-lookup-selection-cancel"
+                  tone="secondary"
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+
       <Modal
         animationType="fade"
         onRequestClose={closeCashInput}
@@ -2733,6 +2814,127 @@ function ProductSearchRow({
         tone="secondary"
       />
     </View>
+  );
+}
+
+function priceSourceCopyKey(
+  priceSource: SalesLookupCandidate["priceSource"],
+): SalesCopyKey {
+  switch (priceSource) {
+    case 1:
+      return "priceSource.1";
+    case 2:
+      return "priceSource.2";
+    case 3:
+      return "priceSource.3";
+    case 4:
+      return "priceSource.4";
+    case 0:
+    default:
+      return "priceSource.0";
+  }
+}
+
+/**
+ * 一码多商品候选行：窄屏下整行即选择按钮，名称可两行显示，
+ * 货号与编码各占一行，价格来源与价格同排，避免横向挤压。
+ */
+function LookupCandidateRow({
+  disabled = false,
+  item,
+  locale,
+  onChoose,
+  resolveProductImage,
+  t,
+}: Readonly<{
+  disabled?: boolean;
+  item: SalesLookupCandidate;
+  locale: SalesLocale;
+  onChoose(): void;
+  resolveProductImage?: (input: {
+    productCode: string;
+    lookupCode: string;
+  }) => Promise<string | null>;
+  t(
+    key: SalesCopyKey,
+    values?: Readonly<Record<string, string | number>>,
+  ): string;
+}>) {
+  const [imageUri, setImageUri] = useState<string | null | undefined>();
+  useEffect(() => {
+    setImageUri(undefined);
+    if (!resolveProductImage) return;
+    let active = true;
+    void resolveProductImage({
+      productCode: item.productCode,
+      lookupCode: item.lookupCode,
+    })
+      .then((resolved) => {
+        if (active) setImageUri(resolved?.trim() || null);
+      })
+      .catch(() => {
+        if (active) setImageUri(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [item.lookupCode, item.productCode, resolveProductImage]);
+
+  const price = formatAud(item.unitPriceCents, locale);
+  return (
+    <PosPressable
+      accessibilityLabel={t("lookupSelection.chooseProduct", {
+        product: item.displayName,
+        price,
+      })}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onChoose}
+      style={({ pressed }) => [
+        styles.lookupCandidateRow,
+        disabled && styles.actionButtonDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
+      ]}
+      testID={`sales-lookup-candidate-${item.productCode}`}
+    >
+      <CartProductThumbnail
+        accessibilityLabel={t("cart.productImage", {
+          product: item.displayName,
+        })}
+        imageUri={imageUri}
+        placeholderLabel={t("cart.imagePlaceholder")}
+        testID={`sales-lookup-candidate-${item.productCode}-image`}
+      />
+      <View style={styles.lookupCandidateBody}>
+        <Text numberOfLines={2} style={styles.productName}>
+          {item.displayName}
+        </Text>
+        <Text numberOfLines={1} style={styles.productCode}>
+          {t("lookupSelection.itemNumber", {
+            value: item.itemNumber?.trim() || "—",
+          })}
+        </Text>
+        <Text numberOfLines={1} style={styles.productCode}>
+          {t("lookupSelection.lookupCode", { value: item.lookupCode })}
+        </Text>
+        <View style={styles.lookupCandidateFooter}>
+          <Text
+            numberOfLines={1}
+            style={styles.lookupCandidateSource}
+            testID={`sales-lookup-candidate-${item.productCode}-source`}
+          >
+            {t(priceSourceCopyKey(item.priceSource))}
+          </Text>
+          <Text
+            style={styles.lookupCandidatePrice}
+            testID={`sales-lookup-candidate-${item.productCode}-price`}
+          >
+            {price}
+          </Text>
+        </View>
+      </View>
+    </PosPressable>
   );
 }
 
@@ -4020,6 +4222,64 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginBottom: 10,
     marginTop: 20,
+  },
+  lookupCandidateBody: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  lookupCandidateFooter: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  lookupCandidatePrice: {
+    color: posColors.ink,
+    fontSize: 17,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  lookupCandidateRow: {
+    alignItems: "flex-start",
+    borderBottomColor: posColors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 88,
+    paddingVertical: 10,
+  },
+  lookupCandidateSource: {
+    backgroundColor: posColors.orangeSoft,
+    borderRadius: 3,
+    color: posColors.orange,
+    flexShrink: 1,
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  lookupSelectionCancel: {
+    alignSelf: "stretch",
+    marginTop: 12,
+  },
+  lookupSelectionHeader: {
+    borderBottomColor: posColors.border,
+    borderBottomWidth: 1,
+    gap: 4,
+    paddingBottom: 12,
+  },
+  lookupSelectionHint: {
+    color: posColors.mutedInk,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  lookupSelectionTitle: {
+    color: posColors.ink,
+    fontSize: 20,
+    fontWeight: "900",
   },
   modalAction: {
     alignSelf: "stretch",

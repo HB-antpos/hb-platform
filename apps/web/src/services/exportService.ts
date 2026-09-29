@@ -1,5 +1,6 @@
 import { generateBarcodeImages } from '../utils/barcode'
 import { reportExternalFetchError } from '../utils/centerLogClient'
+import { formatSydneyIsoDate } from '../utils/sydneyDate'
 import type { ProductGradeListItem } from '../types/productGrade'
 
 type ExcelWorksheet = import('exceljs').Worksheet
@@ -404,6 +405,11 @@ async function fetchImageAsBase64WithRetry(
   return { data: null, reason: lastReason }
 }
 
+// 导出文件名统一带悉尼当天日期；不用 toISOString 的 UTC 日期，否则悉尼上午 10 点（夏令时 11 点）前导出会带上前一天。
+export function buildDatedExportFileName(baseName: string, extension: 'xlsx' | 'pdf', now: Date = new Date()) {
+  return `${baseName}_${formatSydneyIsoDate(now)}.${extension}`
+}
+
 export async function exportDomesticProductsToExcel(
   products: ExportProductItem[],
   options: ExportOptions = defaultExportOptions,
@@ -597,7 +603,7 @@ export async function exportDomesticProductsToExcel(
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${mergedOptions.fileName || '仓库商品'}_${new Date().toISOString().split('T')[0]}.xlsx`
+  link.download = buildDatedExportFileName(mergedOptions.fileName || '仓库商品', 'xlsx')
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -703,7 +709,7 @@ export async function exportProductGradesToExcel(
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${mergedOptions.fileName || '商品等级'}_${new Date().toISOString().split('T')[0]}.xlsx`
+  link.download = buildDatedExportFileName(mergedOptions.fileName || '商品等级', 'xlsx')
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -837,7 +843,7 @@ export async function exportContainerDetailsToExcel(
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${options.fileName || '货柜明细'}_${new Date().toISOString().split('T')[0]}.xlsx`
+  link.download = buildDatedExportFileName(options.fileName || '货柜明细', 'xlsx')
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -931,7 +937,7 @@ export async function exportContainerDetailsToPdf(
       )
     }
 
-    pdf.save(`${options.fileName || '货柜明细'}_${new Date().toISOString().split('T')[0]}.pdf`)
+    pdf.save(buildDatedExportFileName(options.fileName || '货柜明细', 'pdf'))
     options.onProgress?.(100, 'PDF 导出完成')
   } finally {
     root.remove()

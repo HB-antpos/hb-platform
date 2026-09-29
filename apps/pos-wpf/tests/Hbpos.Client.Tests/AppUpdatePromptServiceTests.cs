@@ -85,6 +85,52 @@ public sealed class AppUpdatePromptServiceTests
         Assert.Empty(viewModel.ReleaseNotes);
     }
 
+    [Fact]
+    public void Prompt_placement_covers_the_visible_cashier_window()
+    {
+        var placement = WpfAppUpdatePromptDialogPresenter.ResolvePlacement(
+            new Size(1366, 728),
+            new Rect(0, 0, 1920, 1040));
+
+        Assert.Equal(WindowStartupLocation.CenterOwner, placement.StartupLocation);
+        Assert.Equal(1366, placement.Bounds.Width);
+        Assert.Equal(728, placement.Bounds.Height);
+    }
+
+    [Fact]
+    public void Prompt_placement_falls_back_when_cashier_window_has_no_layout_size()
+    {
+        var placement = WpfAppUpdatePromptDialogPresenter.ResolvePlacement(
+            new Size(0, double.NaN),
+            new Rect(0, 0, 1920, 1040));
+
+        Assert.Equal(WindowStartupLocation.CenterOwner, placement.StartupLocation);
+        Assert.Equal(1200, placement.Bounds.Width);
+        Assert.Equal(760, placement.Bounds.Height);
+    }
+
+    [Fact]
+    public void Prompt_placement_covers_work_area_during_startup_instead_of_shrinking_to_splash()
+    {
+        // 中文注释：启动检查时没有可见的收银主窗口（owner 只是 460×380 启动页），弹窗必须铺满工作区。
+        var workArea = new Rect(0, 0, 1024, 728);
+
+        var placement = WpfAppUpdatePromptDialogPresenter.ResolvePlacement(null, workArea);
+
+        Assert.Equal(WindowStartupLocation.Manual, placement.StartupLocation);
+        Assert.Equal(workArea, placement.Bounds);
+    }
+
+    [Fact]
+    public void Prompt_placement_centers_fallback_size_when_work_area_is_unavailable()
+    {
+        var placement = WpfAppUpdatePromptDialogPresenter.ResolvePlacement(null, Rect.Empty);
+
+        Assert.Equal(WindowStartupLocation.CenterScreen, placement.StartupLocation);
+        Assert.Equal(1200, placement.Bounds.Width);
+        Assert.Equal(760, placement.Bounds.Height);
+    }
+
     private sealed class CapturingDialogPresenter(bool? result) : IAppUpdatePromptDialogPresenter
     {
         public int ShowCount { get; private set; }

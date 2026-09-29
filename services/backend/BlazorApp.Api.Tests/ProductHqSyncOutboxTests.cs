@@ -397,7 +397,7 @@ public sealed class ProductHqSyncOutboxTests : IDisposable
         );
 
         var firstRun = InvokeProcessNextAsync(workerA);
-        await executor.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await executor.FirstStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var successor = await queue.EnqueueAsync(
             _db,
             Request("operation-store", "product-serial") with
@@ -415,7 +415,7 @@ public sealed class ProductHqSyncOutboxTests : IDisposable
             await Task.WhenAny(executor.SecondStarted.Task, Task.Delay(300))
             == executor.SecondStarted.Task;
         executor.ReleaseFirst.TrySetResult();
-        await Task.WhenAll(firstRun, secondRun).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(firstRun, secondRun).WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.False(secondEnteredBeforeFirstFinished);
         var rowsAfterFirst = await _db.Queryable<ProductHqSyncOutbox>().ToListAsync();

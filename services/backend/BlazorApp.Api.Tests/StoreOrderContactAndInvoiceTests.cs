@@ -1471,21 +1471,14 @@ public sealed class StoreOrderContactAndInvoiceTests : IDisposable
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await jobService.GetJobAsync(jobId);
-            if (
-                job?.Status == StoreOrderInvoiceEmailJobStatusConstants.Succeeded
-                || job?.Status == StoreOrderInvoiceEmailJobStatusConstants.Failed
-            )
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("发票邮件发送 job 未在测试时间内完成");
+        var job = await WaitForValueAsync(
+            () => jobService.GetJobAsync(jobId),
+            current =>
+                current?.Status == StoreOrderInvoiceEmailJobStatusConstants.Succeeded
+                || current?.Status == StoreOrderInvoiceEmailJobStatusConstants.Failed,
+            describeLast: current => $"发票邮件发送 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 
     private static SqlSugarContext CreateSqlSugarContext(ISqlSugarClient db)

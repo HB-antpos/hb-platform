@@ -47,9 +47,18 @@ assert.equal(malformedCsv.issues[0]?.reason, 'CSV 引号未闭合', '未闭合 C
 const invalidClosingQuoteCsv = parseCsvItemNumbers('"00123"x')
 assert.equal(invalidClosingQuoteCsv.issues[0]?.reason, 'CSV 关闭引号后包含非法字符', '关闭引号后的裸字符不得被静默拼接')
 
+assert.equal(MAX_ITEM_NUMBERS, 3000, '货号导入上限必须与后端保持 3000 一致')
+const screenshotRows = Array.from({ length: 924 }, (_, index) => `WIN-${index + 1}`).join('\n')
+assert.equal(parsePastedItemNumbers(screenshotRows).itemNumbers.length, 924, '924 个有效货号应完整导入')
+
 const beyondLimit = parsePastedItemNumbers(Array.from({ length: MAX_ITEM_NUMBERS + 1 }, (_, index) => `N${index}`).join('\n'))
 assert.equal(beyondLimit.itemNumbers.length, MAX_ITEM_NUMBERS, '导入必须限制有效货号数')
 assert.equal(beyondLimit.issues[0]?.reason, `最多可导入 ${MAX_ITEM_NUMBERS} 个货号`, '超限货号必须可见地报告')
+assert.equal(beyondLimit.issues.length, 1, '第 3001 个货号应作为超限问题报告')
+
+const csvAtLimit = parseCsvItemNumbers(Array.from({ length: MAX_ITEM_NUMBERS }, (_, index) => `C${index}`).join('\n'))
+assert.equal(csvAtLimit.itemNumbers.length, MAX_ITEM_NUMBERS, 'CSV 应支持导入 3000 个货号')
+assert.equal(csvAtLimit.issues.length, 0, '3000 个有效 CSV 货号不应报告超限')
 
 const workbook = new ExcelJS.Workbook()
 const worksheet = workbook.addWorksheet('货号')
@@ -81,6 +90,14 @@ xlsxColumnsSheet.addRow(['A-001', '商品 A'])
 const xlsxColumnsBuffer = new Uint8Array(await xlsxColumns.xlsx.writeBuffer() as ArrayBuffer)
 const xlsxColumnsResult = await readItemNumberFile(createFile('columns.xlsx', xlsxColumnsBuffer))
 assert.equal(xlsxColumnsResult.issues[0]?.reason, '仅支持单列货号', 'XLSX 多个非空单元格不得静默读取首列')
+
+const largeWorkbook = new ExcelJS.Workbook()
+const largeWorksheet = largeWorkbook.addWorksheet('货号')
+for (let index = 1; index <= MAX_ITEM_NUMBERS; index += 1) largeWorksheet.addRow([`WIN-${index}`])
+const largeXlsxBuffer = new Uint8Array(await largeWorkbook.xlsx.writeBuffer() as ArrayBuffer)
+const largeXlsxResult = await readItemNumberFile(createFile('items-3000.xlsx', largeXlsxBuffer))
+assert.equal(largeXlsxResult.itemNumbers.length, MAX_ITEM_NUMBERS, 'XLSX 应完整导入 3000 个货号')
+assert.equal(largeXlsxResult.issues.length, 0, '3000 个有效 XLSX 货号不应报告超限')
 
 const unsupported = await readItemNumberFile(createFile('items.xls', 'legacy'))
 assert.equal(unsupported.issues[0]?.reason, '仅支持 .csv 或 .xlsx 文件', '不应宣称支持 .xls')

@@ -221,6 +221,13 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
                 "pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml",
                 UriKind.Absolute)
         });
+        // 与 App.xaml 一致：先加载默认色板，PosTheme 与各页面通过 DynamicResource 引用色板颜色。
+        application.Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri(
+                "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Default.xaml",
+                UriKind.Absolute)
+        });
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
         {
             Source = new Uri(

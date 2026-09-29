@@ -21,27 +21,34 @@ $runId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([Guid]::NewGuid().T
 $resultsPath = Join-Path $ArtifactsPath "test-results/$runId"
 New-Item -ItemType Directory -Path $resultsPath -Force | Out-Null
 
+# 按 FullyQualifiedName 包含匹配；同一族的测试类用前缀（如 CardRecovery）一次纳入，新增同族测试自动进入回归。
 $testClasses = @(
-    'CashPaymentWorkflowServiceTests'
+    'CashPaymentWorkflowService'
     'CardPaymentRecoveryServiceTests'
     'SquarePaymentRecoveryService'
     'ConfiguredCardTerminalClientTests'
     'ConfiguredLinklyTerminalClientTests'
     'LinklyTerminalClientTests'
     'LinklyCloudTerminalClientTests'
+    'LinklyCloudApiClientTests'
     'LinklyBackendTerminalClient'
+    'LinklyRecoveryServiceGateTests'
+    'LinklyTerminalSelectionTransitionGateTests'
     'SquareTerminalPaymentClientTests'
-    'CardRecoveryCenter'
+    'RecoveryCasRepository'
+    'CardRecovery'
+    'CardRefund'
     'CardPaymentHandoff'
+    'ManualCardPayment'
     'PaymentTerminalSelectionViewModelTests'
     'PaymentViewLayoutTests'
     'PaymentViewRuntimeTests'
+    'PaymentPageRedesignRuntimeTests'
     'WpfViewLifecycleTests'
     'PaymentFlowIntegrationTests'
     'MainViewModelScannerTests'
     'PosTerminalCashPaymentViewModelTests'
     'LocalCardPaymentAttemptRepositoryTests'
-    'LocalSquarePaymentAttemptRepositoryTests'
 )
 $scopeFilter = '(' + (($testClasses | ForEach-Object { "FullyQualifiedName~$_" }) -join '|') + ')'
 $filters = [ordered]@{
@@ -55,6 +62,33 @@ $selectedSuites = if ($Suite -eq 'All') { @($filters.Keys) } else { @($Suite) }
 & dotnet build $testProject --configuration $Configuration --artifacts-path $ArtifactsPath --verbosity quiet
 if ($LASTEXITCODE -ne 0) {
     throw "刷卡回归测试工程构建失败，退出码：$LASTEXITCODE"
+}
+
+# 测试类改名或删除后，清单条目会静默匹配 0 个测试；先确认每一项至少命中一个测试（与过滤 ~ 一样不区分大小写）。
+$listing = @(& dotnet test $testProject --configuration $Configuration --artifacts-path $ArtifactsPath `
+    --no-build --no-restore --list-tests)
+if ($LASTEXITCODE -ne 0) {
+    throw "刷卡回归测试清单读取失败，退出码：$LASTEXITCODE"
+}
+$testNames = @($listing | Where-Object { $_ -match '^\s{4}\S' } | ForEach-Object { $_.Trim() })
+if ($testNames.Count -eq 0) {
+    throw '刷卡回归测试清单为空，无法校验类清单。'
+}
+$staleEntries = @()
+foreach ($entry in $testClasses) {
+    $hit = $false
+    foreach ($testName in $testNames) {
+        if ($testName.IndexOf($entry, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $hit = $true
+            break
+        }
+    }
+    if (-not $hit) {
+        $staleEntries += $entry
+    }
+}
+if ($staleEntries.Count -gt 0) {
+    throw "刷卡回归类清单中以下条目未匹配任何测试，请同步改名或删除：$($staleEntries -join ', ')"
 }
 
 $summary = @()

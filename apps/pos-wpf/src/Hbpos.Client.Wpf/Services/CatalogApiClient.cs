@@ -31,6 +31,10 @@ public interface ICatalogApiClient
         int pageSize,
         CancellationToken cancellationToken = default);
 
+    Task<CatalogCodeConflictsResponse> GetCodeConflictsAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default);
+
     Task<CatalogLookupResponse?> LookupSellableItemAsync(
         string storeCode,
         string lookupCode,
@@ -39,6 +43,45 @@ public interface ICatalogApiClient
     Task<CatalogSpecialProductMarkResponse> MarkSpecialProductAsync(
         CatalogSpecialProductMarkRequest request,
         CancellationToken cancellationToken = default);
+
+    // 中文注释：以下三个是与 iPad 同一套按版本同步的协议；默认实现按"服务端不支持"处理，
+    // 同步服务据此回退旧的逐页核对流程，既有测试替身无需实现。
+    Task<CatalogSyncPlanResponse> GetCatalogSyncPlanAsync(
+        string storeCode,
+        string? baseCatalogVersion,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogSyncPlanResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
+
+    /// <summary>
+    /// 读取锁定版本的全量页（checksumVersion=2，服务端 gzip），并在返回前校验页摘要、版本与租约回显。
+    /// </summary>
+    Task<CatalogSyncPageResponse> GetPinnedSellableItemsPageAsync(
+        string storeCode,
+        string catalogVersion,
+        string? downloadLeaseId,
+        string? cursor,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogSyncPageResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
+
+    /// <summary>
+    /// 读取两个固定版本之间的增量页，并在返回前校验页摘要与版本回显。
+    /// </summary>
+    Task<CatalogDeltaPageResponse> GetCatalogDeltaPageAsync(
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        string? downloadLeaseId,
+        string? cursor,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogDeltaPageResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
 }
 
 public sealed class CatalogApiClient : ICatalogApiClient
@@ -191,6 +234,32 @@ public sealed class CatalogApiClient : ICatalogApiClient
         }
     }
 
+    public async Task<CatalogCodeConflictsResponse> GetCodeConflictsAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        var requestUri = BuildUri(
+            "api/v1/catalog/sellable-items/code-conflicts",
+            ("storeCode", storeCode));
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"GET {requestUri} start base={_httpClient.BaseAddress}");
+        try
+        {
+            using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+            var result = await ReadApiResultAsync<CatalogCodeConflictsResponse>(response, cancellationToken);
+            stopwatch.Stop();
+            Log($"GET {requestUri} completed status={(int)response.StatusCode} available={result.Available} items={result.Items.Count} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
     public async Task<CatalogLookupResponse?> LookupSellableItemAsync(
         string storeCode,
         string lookupCode,
@@ -260,6 +329,210 @@ public sealed class CatalogApiClient : ICatalogApiClient
             Log($"POST {requestUri} failed store={request.StoreCode} product={request.ProductCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
             throw;
         }
+    }
+
+    public async Task<CatalogSyncPlanResponse> GetCatalogSyncPlanAsync(
+        string storeCode,
+        string? baseCatalogVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var requestUri = BuildUri(
+            "api/v1/catalog/sync-plan",
+            ("storeCode", storeCode),
+            ("baseCatalogVersion", baseCatalogVersion));
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"GET {requestUri} start base={_httpClient.BaseAddress}");
+        try
+        {
+            var responseResult = await ExecuteWithTransientRetryAsync(
+                $"GET {requestUri}",
+                async token =>
+                {
+                    using var response = await _httpClient.GetAsync(requestUri, token);
+                    var result = await ReadApiResultAsync<CatalogSyncPlanResponse>(response, token);
+                    return (Result: result, response.StatusCode);
+                },
+                cancellationToken);
+            stopwatch.Stop();
+            var plan = responseResult.Result;
+            Log($"GET {requestUri} completed status={(int)responseResult.StatusCode} mode={plan.Mode} target={plan.TargetCatalogVersion} total={plan.TargetTotal} deltaOperations={plan.DeltaOperationCount?.ToString(CultureInfo.InvariantCulture) ?? "<none>"} lease={!string.IsNullOrWhiteSpace(plan.DownloadLeaseId)} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return plan;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task<CatalogSyncPageResponse> GetPinnedSellableItemsPageAsync(
+        string storeCode,
+        string catalogVersion,
+        string? downloadLeaseId,
+        string? cursor,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(catalogVersion);
+        var requestUri = BuildUri(
+            "api/v1/catalog/sellable-items/page",
+            ("storeCode", storeCode),
+            ("cursor", cursor),
+            ("pageSize", pageSize.ToString(CultureInfo.InvariantCulture)),
+            ("catalogVersion", catalogVersion),
+            ("downloadLeaseId", downloadLeaseId),
+            ("checksumVersion", "2"));
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"GET {requestUri} start base={_httpClient.BaseAddress}");
+        try
+        {
+            var responseResult = await ExecuteWithTransientRetryAsync(
+                $"GET {requestUri}",
+                async token =>
+                {
+                    using var response = await _httpClient.GetAsync(requestUri, token);
+                    var result = await ReadApiResultAsync<CatalogSyncPageResponse>(response, token);
+                    return (Result: result, response.StatusCode);
+                },
+                cancellationToken);
+            var page = responseResult.Result;
+            VerifyPinnedPage(page, storeCode, catalogVersion, downloadLeaseId);
+            stopwatch.Stop();
+            Log($"GET {requestUri} completed status={(int)responseResult.StatusCode} items={page.Items.Count} total={page.TotalCount} hasMore={page.HasMore} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return page;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task<CatalogDeltaPageResponse> GetCatalogDeltaPageAsync(
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        string? downloadLeaseId,
+        string? cursor,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseCatalogVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetCatalogVersion);
+        var requestUri = BuildUri(
+            "api/v1/catalog/delta/page",
+            ("storeCode", storeCode),
+            ("baseCatalogVersion", baseCatalogVersion),
+            ("targetCatalogVersion", targetCatalogVersion),
+            ("cursor", cursor),
+            ("pageSize", pageSize.ToString(CultureInfo.InvariantCulture)),
+            ("downloadLeaseId", downloadLeaseId));
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"GET {requestUri} start base={_httpClient.BaseAddress}");
+        try
+        {
+            var responseResult = await ExecuteWithTransientRetryAsync(
+                $"GET {requestUri}",
+                async token =>
+                {
+                    using var response = await _httpClient.GetAsync(requestUri, token);
+                    var result = await ReadApiResultAsync<CatalogDeltaPageResponse>(response, token);
+                    return (Result: result, response.StatusCode);
+                },
+                cancellationToken);
+            var page = responseResult.Result;
+            VerifyDeltaPage(page, storeCode, baseCatalogVersion, targetCatalogVersion, downloadLeaseId);
+            stopwatch.Stop();
+            Log($"GET {requestUri} completed status={(int)responseResult.StatusCode} upserts={page.Items.Count} deletes={page.DeletedLookups.Count} hasMore={page.HasMore} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return page;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    internal static CatalogApiException CreateProtocolNotSupportedException()
+    {
+        return new CatalogApiException(
+            "Catalog sync plan protocol is not supported by this catalog client.",
+            HttpStatusCode.NotImplemented);
+    }
+
+    private static void VerifyPinnedPage(
+        CatalogSyncPageResponse page,
+        string storeCode,
+        string catalogVersion,
+        string? downloadLeaseId)
+    {
+        if (!string.Equals(page.StoreCode?.Trim(), storeCode.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw CreateVerificationException("Catalog page store code does not match the request.", "CATALOG_PAGE_STORE_MISMATCH");
+        }
+
+        if (!string.Equals(page.CatalogVersion, catalogVersion, StringComparison.Ordinal))
+        {
+            throw CreateVerificationException("Catalog page version does not match the pinned catalog version.", "CATALOG_PAGE_VERSION_MISMATCH");
+        }
+
+        if (!string.IsNullOrWhiteSpace(downloadLeaseId) &&
+            !string.Equals(page.DownloadLeaseId, downloadLeaseId, StringComparison.Ordinal))
+        {
+            throw CreateVerificationException("Catalog page download lease does not match the request.", "CATALOG_PAGE_LEASE_MISMATCH");
+        }
+
+        var expectedChecksum = CatalogPageChecksums.ComputeSellablePageV2(page.Items);
+        if (!string.Equals(page.PageChecksum, expectedChecksum, StringComparison.OrdinalIgnoreCase))
+        {
+            throw CreateVerificationException("Catalog page checksum verification failed.", "CATALOG_PAGE_CHECKSUM_MISMATCH");
+        }
+    }
+
+    private static void VerifyDeltaPage(
+        CatalogDeltaPageResponse page,
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        string? downloadLeaseId)
+    {
+        if (!string.Equals(page.StoreCode?.Trim(), storeCode.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw CreateVerificationException("Catalog delta page store code does not match the request.", "CATALOG_PAGE_STORE_MISMATCH");
+        }
+
+        if (!string.Equals(page.BaseCatalogVersion, baseCatalogVersion, StringComparison.Ordinal) ||
+            !string.Equals(page.TargetCatalogVersion, targetCatalogVersion, StringComparison.Ordinal))
+        {
+            throw CreateVerificationException("Catalog delta page versions do not match the request.", "CATALOG_PAGE_VERSION_MISMATCH");
+        }
+
+        if (!string.IsNullOrWhiteSpace(downloadLeaseId) &&
+            !string.Equals(page.DownloadLeaseId, downloadLeaseId, StringComparison.Ordinal))
+        {
+            throw CreateVerificationException("Catalog delta page download lease does not match the request.", "CATALOG_PAGE_LEASE_MISMATCH");
+        }
+
+        var expectedChecksum = CatalogPageChecksums.ComputeDeltaPageV1(
+            baseCatalogVersion,
+            targetCatalogVersion,
+            page.Items,
+            page.DeletedLookups);
+        if (!string.Equals(page.PageChecksum, expectedChecksum, StringComparison.OrdinalIgnoreCase))
+        {
+            throw CreateVerificationException("Catalog delta page checksum verification failed.", "CATALOG_PAGE_CHECKSUM_MISMATCH");
+        }
+    }
+
+    private static CatalogApiException CreateVerificationException(string message, string errorCode)
+    {
+        return new CatalogApiException(message, HttpStatusCode.OK, errorCode);
     }
 
     private static async Task<CatalogLookupResponse?> ReadLookupNotFoundAsync(

@@ -139,7 +139,7 @@ internal sealed class ScreenNavigator
         !IsCashPaymentScreenActive &&
         !IsSpecialProductsScreenActive;
 
-    public string ActivePageTitleText => GetActivePageTitleText();
+    // 标题栏页面标题统一由 MainViewModel.ActivePageTitleText 解析（含设备注册页与启动闸门的 null 保护），这里不再维护副本。
 
     // ── Screen VM instances ──
 
@@ -176,6 +176,13 @@ internal sealed class ScreenNavigator
         }
 
         SetCurrentScreen(PosTerminal);
+    }
+
+    // 中文注释：结账完成后留在收银主页，在购物车区域显示成功卡片，扫码或加入商品后自动收起。
+    public void ShowCompletedSaleOnPos()
+    {
+        ShowPos();
+        PosTerminal?.ShowLastSale(PaymentSuccess);
     }
 
     public async Task ShowCardRecoveryCenterAsync()
@@ -320,7 +327,7 @@ internal sealed class ScreenNavigator
             await PaymentSuccess.LoadLatestAsync();
         }
 
-        SetCurrentScreen(PaymentSuccess);
+        ShowCompletedSaleOnPos();
     }
 
     public async Task ShowHistoryAsync()
@@ -427,12 +434,13 @@ internal sealed class ScreenNavigator
                 ShowCashPayment();
                 break;
             case "success":
-                SetCurrentScreen(PaymentSuccess);
                 var lastCompletedOrder = _getLastCompletedOrder();
                 if (lastCompletedOrder is not null)
                 {
                     PaymentSuccess.LoadFromOrder(lastCompletedOrder);
                 }
+
+                ShowCompletedSaleOnPos();
                 break;
             case "history":
                 _ = ShowHistoryAsync();
@@ -603,88 +611,6 @@ internal sealed class ScreenNavigator
 
         ShowCashPaymentCommand.NotifyCanExecuteChanged();
     }
-
-    private string GetActivePageTitleText()
-    {
-        if (ReferenceEquals(_currentScreen, InstallmentCenter))
-        {
-            return InstallmentCenter?.PageTitleText ?? "分期中心";
-        }
-
-        if (ReferenceEquals(_currentScreen, InstallmentCreate))
-        {
-            return InstallmentCreate?.PageTitleText ?? "创建分期";
-        }
-
-        return _localization.T(GetActivePageTitleKey());
-    }
-
-    private string GetActivePageTitleKey()
-    {
-        if (ReferenceEquals(_currentScreen, PosTerminal))
-        {
-            return "shell.page.pos";
-        }
-
-        if (ReferenceEquals(_currentScreen, CashPayment))
-        {
-            return CashPayment?.PaymentMode switch
-            {
-                PaymentEntryMode.Refund => "shell.page.refund",
-                PaymentEntryMode.ZeroSettlement => "shell.page.zeroSettlement",
-                _ => "shell.page.payment"
-            };
-        }
-
-        if (ReferenceEquals(_currentScreen, SpecialProducts))
-        {
-            return "shell.page.specialProducts";
-        }
-
-        if (ReferenceEquals(_currentScreen, ReceiptReturns))
-        {
-            return "shell.page.returns";
-        }
-
-        if (ReferenceEquals(_currentScreen, PaymentSuccess))
-        {
-            return "shell.page.paymentSuccess";
-        }
-
-        if (ReferenceEquals(_currentScreen, TransactionHistory))
-        {
-            return "shell.page.history";
-        }
-
-        if (ReferenceEquals(_currentScreen, DailyClose))
-        {
-            return "shell.page.dailyClose";
-        }
-
-        if (ReferenceEquals(_currentScreen, Settings))
-        {
-            return "shell.page.settings";
-        }
-
-        if (ReferenceEquals(_currentScreen, CardRecoveryCenter))
-        {
-            return "shell.page.cardRecovery";
-        }
-
-        if (ReferenceEquals(_currentScreen, CustomerDisplay))
-        {
-            return "shell.page.customerDisplay";
-        }
-
-        if (ReferenceEquals(_currentScreen, DeviceRegistration))
-        {
-            return "shell.page.deviceRegistration";
-        }
-
-        return "shell.page.loading";
-    }
-
-    public DeviceRegistrationViewModel? DeviceRegistration { get; set; }
 
     // ── Factory helper methods for creating child VMs ──
 

@@ -1,0 +1,109 @@
+﻿<!-- 由色板总表生成，四套主题的键必须完全一致。青瓷：灰绿中间调、石油蓝主色，全天候通用。 -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <sys:String x:Key="PosPaletteId">Celadon</sys:String>
+    <sys:Boolean x:Key="PosPaletteIsDark">False</sys:Boolean>
+    <Color x:Key="PosPaletteMaterialPrimaryColor">#FF245A74</Color>
+
+    <!-- 整屏背景 -->
+    <SolidColorBrush x:Key="PosScreenBackgroundBrush" Color="#FFE1E8E3" />
+    <!-- 卡片/面板 -->
+    <SolidColorBrush x:Key="PosSurfaceBrush" Color="#FFF2F5F2" />
+    <!-- 次级面板/交替行 -->
+    <SolidColorBrush x:Key="PosSurfaceAltBrush" Color="#FFEAEFEB" />
+    <!-- 浅灰底（输入区、分组底） -->
+    <SolidColorBrush x:Key="PosSurfaceMutedBrush" Color="#FFE4EAE6" />
+    <!-- 较深灰底（按下、禁用块） -->
+    <SolidColorBrush x:Key="PosSurfaceStrongBrush" Color="#FFD6DED8" />
+    <!-- 深色提示底（配白字） -->
+    <SolidColorBrush x:Key="PosInverseSurfaceBrush" Color="#FF1D2923" />
+    <!-- 分隔线/浅描边 -->
+    <SolidColorBrush x:Key="PosDividerBrush" Color="#FFD6DED8" />
+    <!-- 描边 -->
+    <SolidColorBrush x:Key="PosBorderBrush" Color="#FFC4CFC8" />
+    <!-- 深描边/滚动条 -->
+    <SolidColorBrush x:Key="PosBorderStrongBrush" Color="#FF93A39A" />
+    <!-- 正文 -->
+    <SolidColorBrush x:Key="PosTextBrush" Color="#FF1D2923" />
+    <!-- 次级正文 -->
+    <SolidColorBrush x:Key="PosTextSecondaryBrush" Color="#FF34433B" />
+    <!-- 次要文字 -->
+    <SolidColorBrush x:Key="PosMutedForegroundBrush" Color="#FF56655D" />
+    <!-- 占位/弱提示文字 -->
+    <SolidColorBrush x:Key="PosSubtleForegroundBrush" Color="#FF849189" />
+    <!-- 功能图标 -->
+    <SolidColorBrush x:Key="PosIconBrush" Color="#FF3D5A66" />
+    <!-- 侧栏功能图标 -->
+    <SolidColorBrush x:Key="PosSidebarIconBrush" Color="#FF3D5A66" />
+    <!-- 侧栏退款图标 -->
+    <SolidColorBrush x:Key="PosSidebarRefundIconBrush" Color="#FF3D5A66" />
+    <!-- 侧栏挂单图标 -->
+    <SolidColorBrush x:Key="PosSidebarHoldIconBrush" Color="#FF3D5A66" />
+    <!-- 主色填充/描边（配白字） -->
+    <SolidColorBrush x:Key="PosPrimaryBrush" Color="#FF245A74" />
+    <!-- 主色按下 -->
+    <SolidColorBrush x:Key="PosPrimaryStrongBrush" Color="#FF1C4A60" />
+    <!-- 主色文字/图标 -->
+    <SolidColorBrush x:Key="PosPrimaryTextBrush" Color="#FF245A74" />
+    <!-- 选中/主色浅底 -->
+    <SolidColorBrush x:Key="PosPrimarySoftBrush" Color="#FFD5E4EB" />
+    <!-- 主色浅底（悬停/按下） -->
+    <SolidColorBrush x:Key="PosPrimarySoftStrongBrush" Color="#FFC2D7E1" />
+    <!-- 主色浅描边 -->
+    <SolidColorBrush x:Key="PosPrimarySoftBorderBrush" Color="#FFB5CDD8" />
+    <!-- 主色按钮禁用底（配白字） -->
+    <SolidColorBrush x:Key="PosPrimaryDisabledBrush" Color="#FF8DA9B8" />
+    <!-- 标题文字 -->
+    <SolidColorBrush x:Key="PosPrimaryDarkBrush" Color="#FF1D2923" />
+    <!-- 重点金额 -->
+    <SolidColorBrush x:Key="PosAccentBrush" Color="#FF9A5A00" />
+    <!-- 重点金额文字 -->
+    <SolidColorBrush x:Key="PosAccentForegroundBrush" Color="#FF9A5A00" />
+    <!-- 应付合计底色（荧光笔） -->
+    <SolidColorBrush x:Key="PosAmountSoftBrush" Color="#FFF0E2A2" />
+    <!-- 成功填充（配白字） -->
+    <SolidColorBrush x:Key="PosSuccessBrush" Color="#FF2B7550" />
+    <!-- 成功文字 -->
+    <SolidColorBrush x:Key="PosSuccessTextBrush" Color="#FF2B7550" />
+    <!-- 成功浅底 -->
+    <SolidColorBrush x:Key="PosSuccessSoftBrush" Color="#FFD7EBDF" />
+    <!-- 成功描边 -->
+    <SolidColorBrush x:Key="PosSuccessBorderBrush" Color="#FFA3CDB4" />
+    <!-- 警告填充 -->
+    <SolidColorBrush x:Key="PosWarningBrush" Color="#FFD4A23E" />
+    <!-- 警告文字 -->
+    <SolidColorBrush x:Key="PosWarningTextBrush" Color="#FF8A5700" />
+    <!-- 警告强调填充（配白字） -->
+    <SolidColorBrush x:Key="PosWarningStrongBrush" Color="#FF8A5700" />
+    <!-- 警告浅底 -->
+    <SolidColorBrush x:Key="PosWarningSoftBrush" Color="#FFF3E3C3" />
+    <!-- 警告描边 -->
+    <SolidColorBrush x:Key="PosWarningBorderBrush" Color="#FFE0C98E" />
+    <!-- 危险填充（配白字） -->
+    <SolidColorBrush x:Key="PosDangerBrush" Color="#FFA63A32" />
+    <!-- 危险文字 -->
+    <SolidColorBrush x:Key="PosDangerTextBrush" Color="#FFA63A32" />
+    <!-- 危险浅底 -->
+    <SolidColorBrush x:Key="PosDangerSoftBrush" Color="#FFF3DDD9" />
+    <!-- 危险描边 -->
+    <SolidColorBrush x:Key="PosDangerBorderBrush" Color="#FFE0B3AD" />
+    <!-- 标题栏背景 -->
+    <SolidColorBrush x:Key="PosHeaderBackgroundBrush" Color="#FFF2F5F2" />
+    <!-- 标题栏文字 -->
+    <SolidColorBrush x:Key="PosHeaderForegroundBrush" Color="#FF1D2923" />
+    <!-- 标题栏次要文字 -->
+    <SolidColorBrush x:Key="PosHeaderMutedForegroundBrush" Color="#FF56655D" />
+    <!-- 状态栏背景 -->
+    <SolidColorBrush x:Key="PosFooterBackgroundBrush" Color="#FFEAEFEB" />
+
+    <LinearGradientBrush x:Key="PosPrimaryGradientBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF2E6C8A" Offset="0" />
+        <GradientStop Color="#FF245A74" Offset="0.55" />
+        <GradientStop Color="#FF1C4A60" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="PosPayButtonGradientBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#FF2A6682" Offset="0" />
+        <GradientStop Color="#FF1F4F66" Offset="1" />
+    </LinearGradientBrush>
+</ResourceDictionary>

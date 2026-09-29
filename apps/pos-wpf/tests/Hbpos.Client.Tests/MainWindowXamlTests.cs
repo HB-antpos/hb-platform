@@ -316,6 +316,31 @@ public sealed class MainWindowXamlTests
     }
 
     [Fact]
+    public void Startup_splash_shows_current_version_and_update_notice()
+    {
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "StartupSplashWindow.xaml"));
+
+        var footer = FindElementByAutomationId(document, "StartupVersionFooter");
+        var versionText = FindElementByAutomationId(document, "StartupVersionText");
+        var notice = FindElementByAutomationId(document, "StartupUpdateNotice");
+
+        Assert.Contains(footer.Descendants(), element =>
+            (string?)element.Attribute("Text") == "{loc:Loc startup.versionLabel}");
+        Assert.Equal("{Binding VersionText}", (string?)versionText.Attribute("Text"));
+        Assert.Equal(
+            "{Binding HasUpdateNotice, Converter={StaticResource BoolToVis}}",
+            (string?)notice.Attribute("Visibility"));
+        Assert.Contains(notice.Descendants(), element =>
+            (string?)element.Attribute("Text") == "{Binding UpdateNoticeText}");
+    }
+
+    [Fact]
     public void Device_registration_and_all_windows_use_shared_app_icon()
     {
         var repoRoot = FindRepoRoot();

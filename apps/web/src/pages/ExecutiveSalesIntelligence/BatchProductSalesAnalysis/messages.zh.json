@@ -8,6 +8,7 @@
     "importHint": "每行一个货号，保留前导零；支持 .csv 和 .xlsx。",
     "sourceSummary": "{{rows}} 行 · 去重 {{duplicates}} 个 · 有效 {{valid}} 个",
     "validItems": "有效货号预览（{{count}}）",
+    "previewLimited": "仅预览前 {{count}} 个货号；确认时仍包含全部有效货号。",
     "issues": "导入问题（{{count}}）",
     "matches": "匹配结果",
     "matched": "已匹配",
@@ -63,6 +64,7 @@
     "priceUnavailable": "价格范围不可用",
     "downloadSummary": "导出批量摘要 CSV",
     "downloadDetail": "导出当前详情 CSV",
+    "downloadNetDetail": "导出整批净销量详情 CSV",
     "exportResults": "导出结果",
     "export": {
       "scope": "查询范围",
@@ -78,6 +80,7 @@
     },
     "loading": "正在加载…",
     "discountLoadFailed": "折扣明细加载失败，已保留销量和金额；请刷新结果重试。",
+    "discountOnDemand": "超过 {{count}} 个商品时，总览及整批分店分析显示净销量和销售额；选择单个商品查看折扣分类。",
     "retry": "重试",
     "errors": {
       "title": "请求失败",

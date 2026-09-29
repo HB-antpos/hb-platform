@@ -7,6 +7,8 @@
         "unassigned": "未归类",
         "manualMark": "人工指定，采集不会覆盖",
         "filterPlaceholder": "供应商分类",
+        "filterSearchPlaceholder": "搜索供应商或已加载的分类",
+        "filterSearchEmpty": "没有匹配项；请先展开供应商以加载分类",
         "emptyTree": "暂无网站分类",
         "loadFailedRetry": "加载失败，点击重试",
         "loadFailed": "供应商分类加载失败",

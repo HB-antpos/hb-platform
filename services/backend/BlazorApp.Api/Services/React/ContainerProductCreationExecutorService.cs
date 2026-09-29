@@ -557,7 +557,7 @@ namespace BlazorApp.Api.Services.React
                 RollbackSubmitTransaction(submitTransactionStarted);
                 _logger.LogWarning(ex, "货柜套装关系数据校验失败: {OperationId}", request.OperationId);
                 AddError(result, ex.ProductCode, null, null, "SET_GROUP_DATA_QUALITY_ERROR", ex.Message);
-                return FinalizeResult(result);
+                return submitTransactionStarted ? ClearRolledBackWrites(result) : FinalizeResult(result);
             }
             catch (Exception ex) when (isSubmitContainer)
             {
@@ -569,7 +569,7 @@ namespace BlazorApp.Api.Services.React
                         ? SetChildPurchasePriceMutationLock.BusyErrorCode
                         : "SUBMIT_CONTAINER_EXCEPTION";
                 AddError(result, null, null, null, reasonCode, ex.Message);
-                return FinalizeResult(result);
+                return submitTransactionStarted ? ClearRolledBackWrites(result) : FinalizeResult(result);
             }
         }
 
@@ -2026,11 +2026,24 @@ namespace BlazorApp.Api.Services.React
             {
                 // 整柜提交有任何失败就回滚，避免创建/更新部分成功但货柜未完成造成数据半提交。
                 RollbackSubmitTransaction(submitTransactionStarted);
-                return result;
+                return ClearRolledBackWrites(result);
             }
 
             _context.Db.Ado.CommitTran();
             return result;
+        }
+
+        /// <summary>
+        /// 整柜提交事务已回滚时，「已创建/已更新」的明细都没有落库；清空后重算计数，
+        /// 避免结果仍显示「创建 N，更新 M」让用户误以为部分成功。跳过与失败明细保留，供用户修正。
+        /// </summary>
+        private static ContainerProductCreationResultDto ClearRolledBackWrites(
+            ContainerProductCreationResultDto result
+        )
+        {
+            result.Created.Clear();
+            result.Updated.Clear();
+            return FinalizeResult(result);
         }
 
         private void RollbackSubmitTransaction(bool submitTransactionStarted)

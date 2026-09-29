@@ -11,6 +11,7 @@ namespace BlazorApp.Api.Services.React;
 internal sealed class BatchProductSalesDiscountSnapshotReader(ISqlSugarClient db)
 {
     private const int CurrentRuleVersion = 1;
+    private const int ProductCodeQueryBatchSize = 500;
 
     internal bool SchemaReady
     {
@@ -59,7 +60,8 @@ internal sealed class BatchProductSalesDiscountSnapshotReader(ISqlSugarClient db
     /// <summary>批量读取状态和快照各一次；每个商品只在内存中解析自己的发布 JSON。</summary>
     internal async Task<Dictionary<string, BatchProductSalesDiscountSnapshotReadResult>> ReadManyAsync(
         IReadOnlyList<string> productCodes, IReadOnlyList<DateTime> dates, IReadOnlyList<string> stores,
-        IReadOnlyList<BatchProductSalesAggregateRow> statistics, CancellationToken token)
+        IReadOnlyList<BatchProductSalesAggregateRow> statistics, CancellationToken token,
+        BatchProductSalesDiscountStateSnapshot? stateSnapshot = null)
     {
         var codes = productCodes.Where(code => !string.IsNullOrWhiteSpace(code)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var days = dates.Select(date => date.Date).Distinct().OrderBy(date => date).ToList();
@@ -86,7 +88,8 @@ internal sealed class BatchProductSalesDiscountSnapshotReader(ISqlSugarClient db
             dayStatistics.Add(statistic);
         }
 
-        if (!SchemaReady)
+        var schemaReady = stateSnapshot?.SchemaReady ?? SchemaReady;
+        if (!schemaReady)
         {
             var unavailable = new Dictionary<string, BatchProductSalesDiscountSnapshotReadResult>(StringComparer.OrdinalIgnoreCase);
             foreach (var code in codes)
@@ -109,15 +112,21 @@ internal sealed class BatchProductSalesDiscountSnapshotReader(ISqlSugarClient db
             stateDates = stateDates.Or(state => state.Date >= rangeStart && state.Date < rangeEnd);
             snapshotDates = snapshotDates.Or(snapshot => snapshot.StartDate >= rangeStart && snapshot.StartDate < rangeEnd);
         }
-        var states = await db.Queryable<BatchProductSalesDiscountRefreshState>().With(SqlWith.Null)
-            .Where(stateDates.ToExpression()).ToListAsync(token);
+        var states = stateSnapshot?.States.SelectMany(pair => pair.Value).ToList()
+            ?? await db.Queryable<BatchProductSalesDiscountRefreshState>().With(SqlWith.Null)
+                .Where(stateDates.ToExpression()).ToListAsync(token);
         // SnapshotFormat 必须以字面量进入 SQL：表达式常量会被 SqlSugar 参数化为 @SnapshotFormat0，
         // SQL Server 无法为参数化谓词选用过滤索引 IX_BatchSalesDiscount_DailyProduct (WHERE SnapshotFormat = 2)，
         // 会退化为带 LOB 的全表聚集扫描，这是折扣分类晚到的主要原因。
-        var snapshots = await db.Queryable<BatchProductSalesDiscountSnapshot>().With(SqlWith.Null)
-            .Where(SnapshotFormatLiteralPredicate)
-            .Where(snapshot => codes.Contains(snapshot.ProductCode) && snapshot.EndDate == snapshot.StartDate)
-            .Where(snapshotDates.ToExpression()).ToListAsync(token);
+        var snapshots = new List<BatchProductSalesDiscountSnapshot>();
+        foreach (var codeBatch in codes.Chunk(ProductCodeQueryBatchSize))
+        {
+            token.ThrowIfCancellationRequested();
+            snapshots.AddRange(await db.Queryable<BatchProductSalesDiscountSnapshot>().With(SqlWith.Null)
+                .Where(SnapshotFormatLiteralPredicate)
+                .Where(snapshot => codeBatch.Contains(snapshot.ProductCode) && snapshot.EndDate == snapshot.StartDate)
+                .Where(snapshotDates.ToExpression()).ToListAsync(token));
+        }
         token.ThrowIfCancellationRequested();
         var stateByDay = states.GroupBy(x => x.Date.Date).ToDictionary(g => g.Key, g => g.ToList());
         var snapshotMap = snapshots.GroupBy(x => (x.ProductCode ?? string.Empty, x.StartDate.Date), new ProductDayComparer()).ToDictionary(g => g.Key, g => g.ToList(), new ProductDayComparer());
@@ -167,6 +176,47 @@ internal sealed class BatchProductSalesDiscountSnapshotReader(ISqlSugarClient db
             else ranges.Add((day, day.AddDays(1)));
         }
         return ranges;
+    }
+
+    internal async Task<BatchProductSalesDiscountStateSnapshot> CaptureStateAsync(
+        IReadOnlyList<DateTime> dates, CancellationToken token)
+    {
+        var previousToken = db.Ado.CancellationToken;
+        db.Ado.CancellationToken = token;
+        try
+        {
+            var schemaReady = SchemaReady;
+            var days = dates.Select(date => date.Date).Distinct().OrderBy(date => date).ToList();
+            var states = schemaReady ? await ReadStatesAsync(days, token) : [];
+            var grouped = states.GroupBy(state => state.Date.Date)
+                .ToDictionary(group => group.Key, group => (IReadOnlyList<BatchProductSalesDiscountRefreshState>)group.ToList());
+            var fingerprint = JsonSerializer.Serialize(states
+                .Select(state => JsonSerializer.Serialize(new
+                {
+                    state.Date, state.Status, state.RuleVersion, state.StatisticsVersion,
+                    state.SourceVersion, state.CompletedAtUtc,
+                }))
+                .OrderBy(value => value, StringComparer.Ordinal));
+            return new BatchProductSalesDiscountStateSnapshot(schemaReady, grouped, fingerprint);
+        }
+        finally
+        {
+            RestoreAdoCancellationToken(previousToken);
+        }
+    }
+
+    private async Task<List<BatchProductSalesDiscountRefreshState>> ReadStatesAsync(
+        IReadOnlyList<DateTime> days, CancellationToken token)
+    {
+        if (days.Count == 0) return [];
+        var stateDates = Expressionable.Create<BatchProductSalesDiscountRefreshState>();
+        foreach (var (rangeStart, rangeEnd) in CollapseContiguousDays(days))
+        {
+            token.ThrowIfCancellationRequested();
+            stateDates = stateDates.Or(state => state.Date >= rangeStart && state.Date < rangeEnd);
+        }
+        return await db.Queryable<BatchProductSalesDiscountRefreshState>().With(SqlWith.Null)
+            .Where(stateDates.ToExpression()).ToListAsync(token);
     }
 
     /// <summary>SqlSugar 的 token 查询会写入 client ADO；请求结束前必须还原嵌套调用的原令牌。</summary>
@@ -264,6 +314,11 @@ internal sealed record BatchProductSalesDiscountSnapshotReadResult(
     List<BatchProductSalesAggregateRow> Rows,
     string Status,
     DateTime? UpdatedAt);
+
+internal sealed record BatchProductSalesDiscountStateSnapshot(
+    bool SchemaReady,
+    IReadOnlyDictionary<DateTime, IReadOnlyList<BatchProductSalesDiscountRefreshState>> States,
+    string Fingerprint);
 
 internal enum BatchProductSalesDiscountDayOutcome
 {

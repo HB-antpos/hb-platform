@@ -8,6 +8,7 @@
     "importHint": "One item number per line; leading zeros are kept. Supports .csv and .xlsx.",
     "sourceSummary": "{{rows}} rows · {{duplicates}} duplicates removed · {{valid}} valid",
     "validItems": "Valid item preview ({{count}})",
+    "previewLimited": "Only the first {{count}} items are previewed; confirmation includes all valid items.",
     "issues": "Import issues ({{count}})",
     "matches": "Match results",
     "matched": "Matched",
@@ -63,6 +64,7 @@
     "priceUnavailable": "Price range unavailable",
     "downloadSummary": "Export batch summary CSV",
     "downloadDetail": "Export current detail CSV",
+    "downloadNetDetail": "Export bulk net sales detail CSV",
     "exportResults": "Export results",
     "export": {
       "scope": "Query scope",
@@ -78,6 +80,7 @@
     },
     "loading": "Loading…",
     "discountLoadFailed": "Discount details could not be loaded. Quantity and sales amount are retained; refresh results to retry.",
+    "discountOnDemand": "For more than {{count}} products, totals and whole-store analysis show net quantity and sales amount. Select one product to view discount classifications.",
     "retry": "Retry",
     "errors": {
       "title": "Request failed",

@@ -9,12 +9,12 @@
              mc:Ignorable="d"
              d:DesignHeight="688"
              d:DesignWidth="1366"
-             Background="{StaticResource PosScreenBackgroundBrush}">
+             Background="{DynamicResource PosScreenBackgroundBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
         <Style x:Key="ReturnPanelStyle" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
             <Setter Property="CornerRadius" Value="12" />
             <Setter Property="Padding" Value="0" />
         </Style>
@@ -22,11 +22,11 @@
         <Style x:Key="ReturnHeaderLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="10" />
             <Setter Property="FontWeight" Value="Black" />
-            <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
         </Style>
 
         <Style x:Key="ReturnDangerAmountStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
             <Setter Property="FontWeight" Value="Black" />
         </Style>
 
@@ -48,8 +48,8 @@
         </Style>
 
         <Style x:Key="ReturnTableDangerIconButtonStyle" TargetType="Button" BasedOn="{StaticResource ReturnTablePrimaryIconButtonStyle}">
-            <Setter Property="Background" Value="{StaticResource PosDangerBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosDangerBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosDangerBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
         </Style>
     </UserControl.Resources>
 
@@ -60,7 +60,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Padding="24,18,24,14" Background="{StaticResource PosSurfaceAltBrush}">
+        <Border Grid.Row="0" Padding="24,18,24,14" Background="{DynamicResource PosSurfaceAltBrush}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -80,7 +80,7 @@
 
                 <TextBlock Grid.Column="1"
                            Text="{Binding OrderSummaryText}"
-                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                            FontWeight="SemiBold"
                            VerticalAlignment="Center" />
 
@@ -111,7 +111,7 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Height="58" Background="#FFE2E2E6" CornerRadius="14" Padding="14,0">
+            <Border Grid.Row="0" Height="58" Background="{DynamicResource PosSurfaceStrongBrush}" CornerRadius="14" Padding="14,0">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -121,7 +121,7 @@
                     <materialDesign:PackIcon Kind="BarcodeScan"
                                              Width="24"
                                              Height="24"
-                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                              VerticalAlignment="Center" />
                     <!-- 条码/订单号扫码框关闭中文输入法，避免扫码时弹出候选窗。 -->
                     <TextBox Grid.Column="1"
@@ -188,10 +188,10 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Background="#FFF3F3F7" Padding="18,14" CornerRadius="12,12,0,0">
+                        <Border Grid.Row="0" Background="{DynamicResource PosScreenBackgroundBrush}" Padding="18,14" CornerRadius="12,12,0,0">
                             <DockPanel>
-                                <Border DockPanel.Dock="Right" Background="#FFE2E2E6" CornerRadius="8" Padding="10,4">
-                                    <TextBlock FontSize="11" FontWeight="Black" Foreground="{StaticResource PosMutedForegroundBrush}">
+                                <Border DockPanel.Dock="Right" Background="{DynamicResource PosSurfaceStrongBrush}" CornerRadius="8" Padding="10,4">
+                                    <TextBlock FontSize="11" FontWeight="Black" Foreground="{DynamicResource PosMutedForegroundBrush}">
                                         <Run Text="{Binding OrderLines.Count, Mode=OneWay}" />
                                         <Run Text=" " />
                                         <Run Text="{loc:Loc Items}" />
@@ -202,7 +202,7 @@
                                     <TextBlock Text="{loc:Loc returns.staleWarning}"
                                                Visibility="{Binding ReturnRecordsMayBeStale, Converter={StaticResource BoolToVis}}"
                                                FontSize="11"
-                                               Foreground="#FF8F4E00"
+                                               Foreground="{DynamicResource PosWarningTextBrush}"
                                                FontWeight="Bold"
                                                Margin="0,4,0,0" />
                                 </StackPanel>
@@ -246,16 +246,16 @@
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Background="#FFFFDAD6" Padding="18,14" CornerRadius="12,12,0,0">
+                        <Border Grid.Row="0" Background="{DynamicResource PosDangerSoftBrush}" Padding="18,14" CornerRadius="12,12,0,0">
                             <DockPanel>
-                                <Border DockPanel.Dock="Right" Background="White" CornerRadius="8" Padding="10,4">
+                                <Border DockPanel.Dock="Right" Background="{DynamicResource PosSurfaceBrush}" CornerRadius="8" Padding="10,4">
                                     <TextBlock FontSize="11" FontWeight="Black">
                                         <Run Text="{Binding PendingSkuCount, Mode=OneWay}" />
                                         <Run Text=" " />
                                         <Run Text="{loc:Loc Items}" />
                                     </TextBlock>
                                 </Border>
-                                <TextBlock Text="{loc:Loc returns.pending}" FontSize="17" FontWeight="Black" Foreground="{StaticResource PosDangerBrush}" />
+                                <TextBlock Text="{loc:Loc returns.pending}" FontSize="17" FontWeight="Black" Foreground="{DynamicResource PosDangerTextBrush}" />
                             </DockPanel>
                         </Border>
 
@@ -291,7 +291,7 @@
                             </DataGrid.Columns>
                         </DataGrid>
 
-                        <Border Grid.Row="2" Background="#EFFFF7F7" Padding="18" CornerRadius="0,0,12,12">
+                        <Border Grid.Row="2" Background="{DynamicResource PosDangerSoftBrush}" Padding="18" CornerRadius="0,0,12,12">
                             <!-- 退款金额与主操作上下分层，避免窄窗口或高 DPI 下相互挤压。 -->
                             <Grid>
                                 <Grid.RowDefinitions>
@@ -309,7 +309,7 @@
                                     <TextBlock Grid.Column="0"
                                                Text="{loc:Loc returns.totalRefund}"
                                                Style="{StaticResource ReturnHeaderLabelStyle}"
-                                               Foreground="{StaticResource PosDangerBrush}"
+                                               Foreground="{DynamicResource PosDangerTextBrush}"
                                                VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1"
                                                Text="{Binding PendingTotal, StringFormat={}{0:C2}}"
@@ -339,7 +339,7 @@
             </Grid>
         </Grid>
 
-        <Border Grid.Row="2" Background="{StaticResource PosSurfaceBrush}" Padding="24,10">
+        <Border Grid.Row="2" Background="{DynamicResource PosSurfaceBrush}" Padding="24,10">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Command="{Binding ClearCommand}" Style="{StaticResource PosSecondaryButtonStyle}" MinWidth="110">
                     <StackPanel Orientation="Horizontal">
@@ -349,7 +349,7 @@
                 </Button>
                 <TextBlock Text="{Binding StatusMessage}"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                            FontWeight="SemiBold"
                            TextWrapping="Wrap" />
             </DockPanel>
@@ -361,7 +361,7 @@
                 Visibility="{Binding IsOpenItemDialogOpen, Converter={StaticResource BoolToVis}}">
             <Border Width="720"
                     Padding="24"
-                    Background="{StaticResource PosSurfaceBrush}"
+                    Background="{DynamicResource PosSurfaceBrush}"
                     CornerRadius="12"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
@@ -380,7 +380,7 @@
                                    FontWeight="Black" />
                         <TextBlock Text="{loc:Loc returns.openItem.subtitle}"
                                    Margin="0,6,0,0"
-                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
 
@@ -419,7 +419,7 @@
                                 <TextBlock Text="{Binding OpenItemUnitPriceText}"
                                            FontSize="24"
                                            FontWeight="Black"
-                                           Foreground="{StaticResource PosDangerBrush}" />
+                                           Foreground="{DynamicResource PosDangerTextBrush}" />
                             </Button>
                         </StackPanel>
                     </Grid>

@@ -1273,18 +1273,12 @@ public sealed class StorePriceTransferJobServiceTests
         string jobId
     )
     {
-        for (var i = 0; i < 50; i++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (job is { Status: not StorePriceTransferJobStatusConstants.Running })
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("job did not complete");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current => current is { Status: not StorePriceTransferJobStatusConstants.Running },
+            describeLast: current => $"job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 
     private static async Task<StorePriceTransferJobDto> WaitForRunningProgressAsync(
@@ -1292,18 +1286,13 @@ public sealed class StorePriceTransferJobServiceTests
         string jobId
     )
     {
-        for (var i = 0; i < 50; i++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (job is { Status: StorePriceTransferJobStatusConstants.Running, Result: not null })
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("job did not publish progress");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current => current is { Status: StorePriceTransferJobStatusConstants.Running, Result: not null },
+            describeLast: current =>
+                $"job 当前状态：{current?.Status ?? "未找到"}，是否已发布进度：{current?.Result is not null}"
+        );
+        return job!;
     }
 
     private static void InitLocalTables(ISqlSugarClient db)

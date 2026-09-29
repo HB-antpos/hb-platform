@@ -5,11 +5,36 @@ namespace Hbpos.Api.Services;
 public interface IPriceIndexBuilder
 {
     IReadOnlyList<SellableItemDto> Build(string storeCode, PriceIndexInput input);
+
+    /// <summary>
+    /// 与 <see cref="Build"/> 产出相同的决胜结果，并在同一次遍历中收集码冲突候选，避免完整目录重复展开全部候选。
+    /// </summary>
+    PriceIndexBuildOutput BuildWithCodeConflicts(string storeCode, PriceIndexInput input);
 }
 
 public sealed class PriceIndexBuilder : IPriceIndexBuilder
 {
     public IReadOnlyList<SellableItemDto> Build(string storeCode, PriceIndexInput input)
+    {
+        return BuildCore(storeCode, input, codeConflicts: null);
+    }
+
+    public PriceIndexBuildOutput BuildWithCodeConflicts(string storeCode, PriceIndexInput input)
+    {
+        var codeConflicts = new List<SellableItemDto>();
+        var items = BuildCore(storeCode, input, codeConflicts);
+        // OrderBy 是稳定排序：按码归组后，同码内仍保持决胜顺序。
+        return new PriceIndexBuildOutput(
+            items,
+            codeConflicts
+                .OrderBy(x => NormalizeLookupKey(x.LookupCode), StringComparer.Ordinal)
+                .ToList());
+    }
+
+    private static List<SellableItemDto> BuildCore(
+        string storeCode,
+        PriceIndexInput input,
+        List<SellableItemDto>? codeConflicts)
     {
         var storePrices = input.StoreRetailPrices
             .Where(x => HasText(x.ProductCode))
@@ -117,15 +142,56 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
             }
         }
 
-        return items
+        var winners = new List<SellableItemDto>();
+        foreach (var group in items
             .Where(x => input.Since is null || x.UpdatedAt is null || x.UpdatedAt >= input.Since)
-            .GroupBy(x => NormalizeLookupKey(x.LookupCode), StringComparer.Ordinal)
-            .Select(x => x
-                .OrderByDescending(i => i.PriceSource)
-                .ThenByDescending(i => i.UpdatedAt ?? DateTimeOffset.MinValue)
-                .First())
+            .GroupBy(x => NormalizeLookupKey(x.LookupCode), StringComparer.Ordinal))
+        {
+            winners.Add(OrderByPriority(group).First());
+            if (codeConflicts is not null)
+            {
+                AppendCodeConflicts(codeConflicts, group);
+            }
+        }
+
+        return winners
             .OrderBy(x => NormalizeLookupKey(x.LookupCode), StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static IOrderedEnumerable<SellableItemDto> OrderByPriority(IEnumerable<SellableItemDto> items)
+    {
+        return items
+            .OrderByDescending(i => i.PriceSource)
+            .ThenByDescending(i => i.UpdatedAt ?? DateTimeOffset.MinValue);
+    }
+
+    private static void AppendCodeConflicts(List<SellableItemDto> codeConflicts, IEnumerable<SellableItemDto> group)
+    {
+        // 同一商品的多个来源（如清货价覆盖本身条码）按原优先级决胜即可，只有落到不同商品时才是冲突。
+        string? firstProductCode = null;
+        var hasMultipleProducts = false;
+        foreach (var item in group)
+        {
+            if (firstProductCode is null)
+            {
+                firstProductCode = item.ProductCode;
+            }
+            else if (!StringComparer.OrdinalIgnoreCase.Equals(firstProductCode, item.ProductCode))
+            {
+                hasMultipleProducts = true;
+                break;
+            }
+        }
+
+        if (!hasMultipleProducts)
+        {
+            return;
+        }
+
+        // 整组按目录决胜顺序排好后每个商品取首条：得到各商品自己的最优价，且首条就是目录胜出项。
+        codeConflicts.AddRange(OrderByPriority(group)
+            .DistinctBy(item => item.ProductCode, StringComparer.OrdinalIgnoreCase));
     }
 
     private static void AddProductLookup(
@@ -234,6 +300,13 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
         return left > right ? left : right;
     }
 }
+
+/// <summary>
+/// Items 为每个查询码的决胜结果；CodeConflicts 为落到多个不同商品的查询码的全部商品候选（每商品一条）。
+/// </summary>
+public sealed record PriceIndexBuildOutput(
+    IReadOnlyList<SellableItemDto> Items,
+    IReadOnlyList<SellableItemDto> CodeConflicts);
 
 public sealed record PriceIndexInput(
     DateTimeOffset? Since,

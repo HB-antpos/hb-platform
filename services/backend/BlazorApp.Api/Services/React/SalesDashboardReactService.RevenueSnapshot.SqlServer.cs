@@ -29,6 +29,7 @@ public partial class SalesDashboardReactService
         IReadOnlyCollection<string> branchCodes,
         IReadOnlyCollection<string>? focusBranchCodes,
         bool includeActiveStores,
+        bool includeLastDay,
         CancellationToken cancellationToken
     )
     {
@@ -85,6 +86,10 @@ public partial class SalesDashboardReactService
             Parameter("@CompareStart", dateRange.CompareStartDate?.Date ?? dateRange.StartDate.Date, System.Data.DbType.Date);
             Parameter("@CompareEnd", dateRange.CompareEndDate?.Date.AddDays(1) ?? dateRange.EndDate.Date.AddDays(1), System.Data.DbType.Date);
             Parameter("@HasCompare", dateRange.CompareStartDate.HasValue && dateRange.CompareEndDate.HasValue, System.Data.DbType.Boolean);
+            // 期间 2/3 是本期、同期的最后一天，只在多日区间且最后一天是今天时取，用于前端把今天对齐到整点。
+            Parameter("@LastStart", dateRange.EndDate.Date, System.Data.DbType.Date);
+            Parameter("@CompareLastStart", dateRange.CompareEndDate?.Date ?? dateRange.EndDate.Date, System.Data.DbType.Date);
+            Parameter("@IncludeLastDay", includeLastDay, System.Data.DbType.Boolean);
             Parameter("@IncludeActiveStores", includeActiveStores, System.Data.DbType.Boolean);
             Parameter("@OwnTransaction", ownsTransaction, System.Data.DbType.Boolean);
 
@@ -111,9 +116,11 @@ public partial class SalesDashboardReactService
                     SELECT COMPRESS(COALESCE((SELECT p.[DateStart] AS [Date], [Hour], [BranchCode], MAX([BranchName]) AS [BranchName],
                         SUM([TotalAmount]) AS [TotalAmount], SUM([OrderCount]) AS [OrderCount], p.[Period]
                     FROM [dbo].[HourlySalesStatistic] h
-                    INNER JOIN (VALUES (0, @Start, @End), (1, @CompareStart, @CompareEnd)) p([Period], [DateStart], [DateEnd])
+                    INNER JOIN (VALUES (0, @Start, @End), (1, @CompareStart, @CompareEnd),
+                        (2, @LastStart, @End), (3, @CompareLastStart, @CompareEnd)) p([Period], [DateStart], [DateEnd])
                         ON h.[Date] >= p.[DateStart] AND h.[Date] < p.[DateEnd]
-                    WHERE (p.[Period] = 0 OR @HasCompare = 1)
+                    WHERE (p.[Period] = 0 OR (p.[Period] = 1 AND @HasCompare = 1)
+                        OR (p.[Period] = 2 AND @IncludeLastDay = 1) OR (p.[Period] = 3 AND @IncludeLastDay = 1 AND @HasCompare = 1))
                         AND [BranchCode] IS NOT NULL AND [BranchCode] <> N'ALL'{hourlyScope}
                     GROUP BY p.[Period], p.[DateStart], [Hour], [BranchCode] FOR JSON PATH, INCLUDE_NULL_VALUES), N'[]')) AS [Data];
                     SELECT COMPRESS(COALESCE((SELECT [StoreCode], COALESCE([StoreName], [StoreCode]) [StoreName]

@@ -122,6 +122,7 @@ export type LocalSupplierPurchaseSalesAnalysisSortOrder = 'asc' | 'desc'
 export interface LocalSupplierPurchaseSalesAnalysisQueryDto {
   storeCode?: string
   supplierCode?: string
+  supplierCategoryGuids?: string[]
   orderDateStart?: string
   orderDateEnd?: string
   keyword?: string

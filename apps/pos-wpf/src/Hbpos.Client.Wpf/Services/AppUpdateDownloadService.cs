@@ -43,6 +43,12 @@ public interface IAppUpdateDownloadService
         AppUpdateCheckResponse update,
         IProgress<AppUpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default);
+
+    // 中文注释：只查本地缓存、不联网；返回已通过大小与 SHA256 校验的安装包路径，没有则返回 null。
+    Task<string?> TryGetVerifiedCachedInstallerAsync(
+        AppUpdateCheckResponse update,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<string?>(null);
 }
 
 public sealed class AppUpdateDownloadService(
@@ -104,6 +110,14 @@ public sealed class AppUpdateDownloadService(
         try
         {
             DeleteIfExists(tempFilePath);
+
+            if (await IsVerifiedCachedInstallerAsync(filePath, expectedSize, update.Sha256, cancellationToken))
+            {
+                // 中文注释：本地同名安装包的大小和 SHA256 都与本次发布合同一致时直接复用，避免后台定时检查和每次启动都重新下载整包。
+                PruneCachedInstallers(directory, filePath);
+                ReportProgress(progress, expectedSize, expectedSize);
+                return AppUpdateDownloadResult.Succeeded(filePath);
+            }
 
             using var response = await httpClient.GetAsync(
                 downloadUri,
@@ -169,6 +183,22 @@ public sealed class AppUpdateDownloadService(
             DeleteIfExists(tempFilePath);
             return AppUpdateDownloadResult.Fail(filePath, ex.Message);
         }
+    }
+
+    public async Task<string?> TryGetVerifiedCachedInstallerAsync(
+        AppUpdateCheckResponse update,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryValidateDownloadContract(update, out _, out var expectedSize, out _) ||
+            !TryResolveInstallerFileName(update, out var fileName, out _, out _))
+        {
+            return null;
+        }
+
+        var filePath = Path.Combine(directoryProvider.GetDownloadDirectory(), fileName);
+        return await IsVerifiedCachedInstallerAsync(filePath, expectedSize, update.Sha256, cancellationToken)
+            ? filePath
+            : null;
     }
 
     private static bool TryValidateDownloadContract(
@@ -388,6 +418,29 @@ public sealed class AppUpdateDownloadService(
         var firstDotIndex = fileName.IndexOf('.');
         var deviceName = firstDotIndex < 0 ? fileName : fileName[..firstDotIndex];
         return ReservedWindowsFileNames.Contains(deviceName.TrimEnd(' ', '.'));
+    }
+
+    private static async Task<bool> IsVerifiedCachedInstallerAsync(
+        string filePath,
+        long expectedSize,
+        string? expectedSha256,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var cachedFile = new FileInfo(filePath);
+            if (!cachedFile.Exists || cachedFile.Length != expectedSize)
+            {
+                return false;
+            }
+
+            return await VerifySha256Async(filePath, expectedSha256, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 中文注释：缓存安装包被占用或无权读取时回退到重新下载，不能因复用失败让本次更新失败。
+            return false;
+        }
     }
 
     private static async Task<bool> VerifySha256Async(

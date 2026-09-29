@@ -3825,6 +3825,107 @@ test("运行时目录下载在旧后端 sync-plan 404 时回退首包固定版�
   assert.equal(outcome.summary.catalogVersion, "catalog-v3");
 });
 
+test("目录下载成功后刷新码冲突候选，扫码精确查询返回目录胜出项与其它商品", async () => {
+  const conflict = (
+    overrides: Partial<CatalogLookupItem>,
+  ): CatalogLookupItem => ({
+    storeCode: "S001",
+    productCode: "P-1",
+    referenceCode: null,
+    displayName: "Milk",
+    lookupCode: "930000000001",
+    lookupCodeNormalized: "930000000001",
+    itemNumber: "I-1",
+    barcode: "930000000001",
+    retailPrice: 1,
+    priceSource: 2,
+    priceSourceLabel: "set",
+    quantityFactor: 1,
+    updatedAt: "2026-07-28T00:00:00.000Z",
+    rowVersion: "row-conflict",
+    productImage: null,
+    discountRate: null,
+    isSpecialProduct: false,
+    ...overrides,
+  });
+  let conflictRequests = 0;
+  const services = createTestComposition(
+    databaseFor([]),
+    {
+      cashierPermissions: [CATALOG_DOWNLOAD_PERMISSION],
+      transport: await catalogDownloadTransport({
+        codeConflicts: [
+          conflict({}),
+          conflict({
+            productCode: "P-FLOWER",
+            displayName: "flower",
+            itemNumber: "FLW-1",
+            retailPrice: 2.99,
+            priceSource: 0,
+            priceSourceLabel: "product",
+          }),
+        ],
+        onCodeConflictsRequest: () => {
+          conflictRequests += 1;
+        },
+      }),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  assert.deepEqual(
+    (await services.catalog.findExactCandidates?.("930000000001"))?.map(
+      (candidate) => candidate.productCode,
+    ),
+    ["P-1"],
+  );
+
+  await services.catalog.downloadAndActivate({ storeCode: "S001" });
+
+  assert.equal(conflictRequests, 1);
+  assert.deepEqual(
+    (await services.catalog.findExactCandidates?.(" 930000000001 "))?.map(
+      (candidate) => [candidate.productCode, candidate.retailPriceCents],
+    ),
+    [
+      ["P-1", 100],
+      ["P-FLOWER", 299],
+    ],
+  );
+});
+
+test("旧服务端没有码冲突接口时目录下载结果不变", async () => {
+  let conflictRequests = 0;
+  const services = createTestComposition(
+    databaseFor([]),
+    {
+      cashierPermissions: [CATALOG_DOWNLOAD_PERMISSION],
+      transport: await catalogDownloadTransport({
+        codeConflicts: "legacy-404",
+        onCodeConflictsRequest: () => {
+          conflictRequests += 1;
+        },
+      }),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+
+  const outcome = await services.catalog.downloadAndActivate({
+    storeCode: "S001",
+  });
+
+  assert.equal(conflictRequests, 1);
+  assert.equal(outcome.summary.catalogVersion, "catalog-v3");
+  assert.equal(outcome.summary.itemCount, 1);
+  assert.deepEqual(
+    (await services.catalog.findExactCandidates?.("930000000001"))?.map(
+      (candidate) => candidate.productCode,
+    ),
+    ["P-1"],
+  );
+});
+
 test("settings 与维护页共享目录重载告警，已切换目录保持可用", async () => {
   const cases: readonly Readonly<{
     name: string;
@@ -5039,6 +5140,8 @@ async function catalogDownloadTransport(
   options: Readonly<{
     beforePromotions?(): void | Promise<void>;
     syncPlanStatus?: 404 | 501;
+    codeConflicts?: readonly CatalogLookupItem[] | "legacy-404";
+    onCodeConflictsRequest?(): void;
   }> = {},
 ): Promise<HbposTransport> {
   const item: CatalogLookupItem = {
@@ -5120,6 +5223,27 @@ async function catalogDownloadTransport(
               storeCode: "S001",
               generatedAt: "2026-07-28T00:00:00.000Z",
               promotions: [],
+            },
+          } as T,
+        };
+      }
+      if (request.url === "/api/v1/catalog/sellable-items/code-conflicts") {
+        options.onCodeConflictsRequest?.();
+        if (options.codeConflicts === "legacy-404") {
+          throw new HbposApiError("legacy catalog backend", {
+            kind: "http",
+            status: 404,
+          });
+        }
+        return {
+          status: 200,
+          data: {
+            success: true,
+            data: {
+              storeCode: "S001",
+              generatedAt: "2026-07-28T00:00:00.000Z",
+              available: true,
+              items: options.codeConflicts ?? [],
             },
           } as T,
         };
@@ -5285,6 +5409,7 @@ function databaseFor(
 ): PosDatabase {
   let activeCatalogMetadata = options.activeCatalogMetadata ?? null;
   const lookupOverlays = new Map<string, LocalCatalogMatch | null>();
+  const codeConflicts = new Map<string, readonly LocalCatalogMatch[]>();
   let stagingCatalog: Readonly<{
     snapshotId: string;
     catalogVersion: string;
@@ -5495,6 +5620,33 @@ function databaseFor(
       },
       async cleanupOldGenerations() {
         return 0;
+      },
+    }),
+    catalogCodeConflicts: () => ({
+      async replaceStoreConflicts(
+        storeCode: string,
+        items: readonly LocalCatalogMatch[],
+      ) {
+        for (const key of [...codeConflicts.keys()]) {
+          if (key.startsWith(`${storeCode}\0`)) codeConflicts.delete(key);
+        }
+        for (const conflict of items) {
+          const key = `${storeCode}\0${conflict.lookupCodeNormalized}`;
+          codeConflicts.set(key, [...(codeConflicts.get(key) ?? []), conflict]);
+        }
+        return {
+          storeCode,
+          itemCount: items.length,
+          lookupCodeCount: new Set(
+            items.map((conflict) => conflict.lookupCodeNormalized),
+          ).size,
+        };
+      },
+      async findCandidates(storeCode: string, lookupCode: string) {
+        return (
+          codeConflicts.get(`${storeCode}\0${lookupCode.trim().toUpperCase()}`) ??
+          []
+        );
       },
     }),
     specialProducts: () => ({

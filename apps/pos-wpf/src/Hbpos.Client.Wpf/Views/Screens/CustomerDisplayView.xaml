@@ -51,7 +51,9 @@
              StretchDirection="Both"
              UseLayoutRounding="True"
              SnapsToDevicePixels="True">
-        <Grid Width="1366"
+        <!-- 画布高度固定 768，宽度在代码中随宿主宽高比调整（4:3 → 1024、16:10 → 1229、16:9 及更宽 1366），常见客显屏都能铺满。 -->
+        <Grid x:Name="DesignCanvas"
+              Width="1366"
               Height="768"
               Margin="0"
               UseLayoutRounding="True"
@@ -69,8 +71,8 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="60*" MinWidth="0" />
-                <ColumnDefinition Width="40*" MinWidth="0" />
+                <ColumnDefinition x:Name="CartColumn" Width="60*" MinWidth="0" />
+                <ColumnDefinition x:Name="PromotionColumn" Width="40*" MinWidth="0" />
             </Grid.ColumnDefinitions>
 
             <Border x:Name="CartPanel"

@@ -77,7 +77,7 @@ public sealed class BatchProductSalesAnalysisController : ControllerBase
     {
         try { return Ok(await _service.GetDiscountOverviewAsync(request, await ResolveStoreScopeAsync(), HttpContext.RequestAborted)); }
         catch (BatchProductSalesAnalysisForbiddenException) { return Forbid(); }
-        catch (BatchProductSalesCoverageVersionConflictException) { return Conflict(ApiResponse<BatchProductSalesDiscountOverviewDto>.Error("摘要可用日期版本已变化，请重新查询。", "BATCH_PRODUCT_SALES_COVERAGE_VERSION_CONFLICT")); }
+        catch (BatchProductSalesCoverageVersionConflictException) { return Conflict(ApiResponse<BatchProductSalesDiscountOverviewDto>.Error("统计或折扣快照在读取期间更新，请重新查询。", "BATCH_PRODUCT_SALES_COVERAGE_VERSION_CONFLICT")); }
         catch (BatchProductSalesAnalysisValidationException ex) { return BadRequest(ApiResponse<BatchProductSalesDiscountOverviewDto>.Error(ex.Message)); }
         catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested) { return new EmptyResult(); }
         catch (Exception ex) { return InternalError<BatchProductSalesDiscountOverviewDto>(ex, "折扣总览加载失败"); }

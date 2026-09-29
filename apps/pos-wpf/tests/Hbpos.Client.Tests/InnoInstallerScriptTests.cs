@@ -16,6 +16,32 @@ public sealed class InnoInstallerScriptTests
     }
 
     [Fact]
+    public void Inno_script_reports_install_progress_to_update_window()
+    {
+        var script = ReadRepoFile("apps/pos-wpf/installer/inno/Hbpos.Client.Wpf.iss");
+        var progressParameter = Hbpos.Updater.UpdateSession.ProgressFileArgumentName.TrimStart('/');
+
+        Assert.Contains($"ExpandConstant('{{param:{progressParameter}|}}')", script);
+        Assert.Contains("procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);", script);
+        Assert.Contains("ReportUpdateProgress('install', Percent);", script);
+        Assert.Contains("ReportUpdateProgress('prepare', 0);", script);
+        Assert.Contains("ReportUpdateProgress('finish', 100);", script);
+        Assert.Contains("SaveStringToFile(UpdateProgressFile", script);
+    }
+
+    [Fact]
+    public void Build_script_publishes_update_window_into_updater_folder()
+    {
+        var script = ReadRepoFile("apps/pos-wpf/scripts/Build-WpfInnoInstaller.ps1");
+
+        Assert.Contains("apps\\pos-wpf\\src\\Hbpos.Updater\\Hbpos.Updater.csproj", script);
+        Assert.Contains($"Join-Path $publishDir '{Hbpos.Client.Wpf.Services.AppUpdateProgressWindowOptions.UpdaterDirectoryName}'", script);
+        Assert.Contains($"'{Hbpos.Client.Wpf.Services.AppUpdateProgressWindowOptions.UpdaterExecutableName}'", script);
+        Assert.Contains("dotnet publish $updaterProjectPath", script);
+        Assert.Contains("throw \"Publish output is missing the update progress window", script);
+    }
+
+    [Fact]
     public void Inno_script_uninstalls_legacy_msi_by_configured_product_codes()
     {
         var script = ReadRepoFile("apps/pos-wpf/installer/inno/Hbpos.Client.Wpf.iss");

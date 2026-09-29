@@ -97,6 +97,10 @@ public interface ICatalogService
         int pageSize,
         CancellationToken cancellationToken);
 
+    Task<CatalogCodeConflictsResponse?> GetCodeConflictsAsync(
+        string storeCode,
+        CancellationToken cancellationToken);
+
     Task<CatalogSpecialProductMarkServiceResult> MarkSpecialProductAsync(
         CatalogSpecialProductMarkRequest request,
         string updatedBy,
@@ -637,9 +641,9 @@ public sealed class CatalogService(
                     CreatedAt = x.CreatedAt,
                     UpdatedAt = x.UpdatedAt
                 });
+            // 商品停用只影响采购订货，门店仍可销售；收银目录只排除已删除商品。
             var productQuery = dbContext.MainDb.Queryable<Product>()
                 .Where(x =>
-                    x.IsActive &&
                     !x.IsDeleted &&
                     ((x.Barcode != null && lookupCandidates.Contains(x.Barcode)) ||
                      (x.ItemNumber != null && lookupCandidates.Contains(x.ItemNumber))))
@@ -690,7 +694,6 @@ public sealed class CatalogService(
             ? []
             : await dbContext.MainDb.Queryable<Product>()
                 .Where(x =>
-                    x.IsActive &&
                     !x.IsDeleted &&
                     x.ProductCode != null &&
                     relatedProductCodes.Contains(x.ProductCode))
@@ -802,6 +805,27 @@ public sealed class CatalogService(
         return index?.CatalogIndex.GetSpecialProductsPage(cursor, pageSize);
     }
 
+    public async Task<CatalogCodeConflictsResponse?> GetCodeConflictsAsync(
+        string storeCode,
+        CancellationToken cancellationToken)
+    {
+        // 与特殊商品分页一样读取共享缓存的完整工件，不单独查库；门店不存在时返回 null。
+        var index = await BuildSellableIndexAsync(storeCode, since: null, cancellationToken);
+        if (index is null)
+        {
+            return null;
+        }
+
+        var codeConflicts = index.CodeConflicts;
+        return new CatalogCodeConflictsResponse(
+            index.StoreCode,
+            index.GeneratedAt,
+            codeConflicts is not null,
+            codeConflicts is null
+                ? []
+                : codeConflicts.Select(CatalogSellableIndex.ToLookupItem).ToArray());
+    }
+
     public async Task<CatalogSpecialProductMarkServiceResult> MarkSpecialProductAsync(
         CatalogSpecialProductMarkRequest request,
         string updatedBy,
@@ -839,14 +863,14 @@ public sealed class CatalogService(
 
         var productStopwatch = Stopwatch.StartNew();
         var product = await dbContext.MainDb.Queryable<Product>()
-            .FirstAsync(x => x.ProductCode == normalizedProductCode && x.IsActive && !x.IsDeleted, cancellationToken);
+            .FirstAsync(x => x.ProductCode == normalizedProductCode && !x.IsDeleted, cancellationToken);
         productStopwatch.Stop();
         Log($"mark special product product query store={normalizedStoreCode} product={normalizedProductCode} found={product is not null} elapsedMs={productStopwatch.ElapsedMilliseconds}");
         if (product is null)
         {
             totalStopwatch.Stop();
             Log($"mark special product failed store={normalizedStoreCode} product={normalizedProductCode} reason=product-not-found totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
-            return CatalogSpecialProductMarkServiceResult.Fail("PRODUCT_NOT_FOUND", "product was not found or inactive");
+            return CatalogSpecialProductMarkServiceResult.Fail("PRODUCT_NOT_FOUND", "product was not found or deleted");
         }
 
         var now = DateTime.UtcNow;
@@ -1003,7 +1027,6 @@ public sealed class CatalogService(
             .With(SqlWith.Null)
             .FirstAsync(x =>
                 x.ProductCode == normalizedProductCode &&
-                x.IsActive &&
                 !x.IsDeleted,
                 cancellationToken);
         if (product is null)
@@ -1338,10 +1361,23 @@ public sealed class CatalogService(
 
         var generatedAt = DateTimeOffset.UtcNow;
         stepStopwatch.Restart();
-        var items = priceIndexBuilder.Build(store.StoreCode, input);
+        IReadOnlyList<SellableItemDto> items;
+        IReadOnlyList<SellableItemDto>? codeConflicts = null;
+        if (since is null)
+        {
+            // 完整目录在同一次遍历中收集码冲突候选，供新版收银端在扫码时让收银员选择。
+            var buildOutput = priceIndexBuilder.BuildWithCodeConflicts(store.StoreCode, input);
+            items = buildOutput.Items;
+            codeConflicts = buildOutput.CodeConflicts;
+        }
+        else
+        {
+            items = priceIndexBuilder.Build(store.StoreCode, input);
+        }
+
         stepStopwatch.Stop();
         totalStopwatch.Stop();
-        Log($"build index completed store={store.StoreCode} items={items.Count} buildElapsedMs={stepStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+        Log($"build index completed store={store.StoreCode} items={items.Count} codeConflictItems={codeConflicts?.Count.ToString(CultureInfo.InvariantCulture) ?? "<null>"} buildElapsedMs={stepStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
         return new CatalogIndexBuildResult(
             store.StoreCode,
             generatedAt,
@@ -1349,7 +1385,8 @@ public sealed class CatalogService(
             new CatalogSellableIndex(store.StoreCode, generatedAt, items),
             baseData.ValidUntil,
             // 完整工件保留只读候选，供 legacy since 在内存中重新投影；不会二次读数据库。
-            input);
+            input,
+            codeConflicts);
     }
 
     private Task<CatalogBaseData> BuildCatalogBaseDataAsync(
@@ -1370,9 +1407,10 @@ public sealed class CatalogService(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var batchStopwatch = Stopwatch.StartNew();
+            // 停用商品门店仍可销售，全量目录与扫码查询口径一致，只排除已删除商品。
             var productQuery = dbContext.MainDb.Queryable<Product>()
                 .With(SqlWith.Null)
-                .Where(x => x.IsActive && !x.IsDeleted && x.ProductCode != null && x.UUID != null);
+                .Where(x => !x.IsDeleted && x.ProductCode != null && x.UUID != null);
 
             if (lastProductCode is not null && lastProductUuid is not null)
             {
@@ -2334,7 +2372,7 @@ public sealed class CatalogSellableIndex
         }
     }
 
-    private static CatalogLookupItemDto ToLookupItem(SellableItemDto item)
+    internal static CatalogLookupItemDto ToLookupItem(SellableItemDto item)
     {
         var storeCode = NormalizeStoreCode(item.StoreCode);
         var lookupCode = (item.LookupCode ?? string.Empty).Trim();

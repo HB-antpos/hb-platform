@@ -19,6 +19,7 @@ import {
   type SalesCartPort,
   type SalesCashCompletion,
   type SalesFeedbackEvent,
+  type SalesLookupSelection,
   type SalesProductSearchItem,
   type SalesWorkflowPort,
 } from "./sales-presenter";
@@ -4599,5 +4600,140 @@ describe("SalesScreen", () => {
 
     salesPresenter.destroy();
     await screen.unmount();
+  });
+
+  it("TC26 窄屏一码多商品候选整行可点，列出名称、货号、编码、价格来源与价格，底部可取消", async () => {
+    const tc26Metrics = { width: 360, height: 592, scale: 2, fontScale: 1 };
+    const defaultMetrics = { width: 390, height: 844, scale: 3, fontScale: 1 };
+    let publishSelection:
+      | ((selection: SalesLookupSelection) => void)
+      | null = null;
+    let releaseAdd: (() => void) | null = null;
+    const addLookupCandidate = jest.fn(
+      async (
+        _input: Readonly<{
+          lookupCode: string;
+          productCode: string;
+          source?: "manual" | "hid" | "camera";
+        }>,
+      ) => {
+        await new Promise<void>((resolve) => {
+          releaseAdd = resolve;
+        });
+        return null;
+      },
+    );
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART), {
+      workflow: {
+        ...workflow(),
+        subscribeLookupSelection(listener) {
+          publishSelection = listener;
+          return () => {
+            publishSelection = null;
+          };
+        },
+        addLookupCandidate,
+      },
+    });
+    const selection: SalesLookupSelection = {
+      selectionId: "lookup-1",
+      lookupCode: "6405090401470",
+      source: "hid",
+      candidates: [
+        {
+          productCode: "P-FLY",
+          itemNumber: "EXT-FLY",
+          barcode: "9300000000017",
+          lookupCode: "6405090401470",
+          displayName: "EXTENSION Fly Swatter",
+          unitPriceCents: 899,
+          discountRate: null,
+          priceSource: 2,
+        },
+        {
+          productCode: "P-FLOWER",
+          itemNumber: null,
+          barcode: "6405090401470",
+          lookupCode: "6405090401470",
+          displayName: "flower",
+          unitPriceCents: 299,
+          discountRate: null,
+          priceSource: 0,
+        },
+      ],
+    };
+    await act(async () => {
+      Dimensions.set({ window: tc26Metrics, screen: tc26Metrics });
+    });
+
+    try {
+      const screen = await render(
+        <SalesScreen
+          locale="zh"
+          presenter={salesPresenter}
+          showStatusStrip={false}
+        />,
+      );
+      expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
+
+      await act(async () => {
+        publishSelection?.(selection);
+      });
+
+      expect(screen.getByTestId("sales-lookup-selection")).toBeTruthy();
+      expect(screen.getByText("选择商品")).toBeTruthy();
+      expect(
+        screen.getByText(
+          "编码 6405090401470 对应 2 个商品，请选择本次实际售出的商品。",
+        ),
+      ).toBeTruthy();
+      expect(screen.getByText("货号 EXT-FLY")).toBeTruthy();
+      expect(screen.getByText("货号 —")).toBeTruthy();
+      expect(screen.getAllByText("编码 6405090401470")).toHaveLength(2);
+      expect(
+        screen.getByTestId("sales-lookup-candidate-P-FLY-source"),
+      ).toHaveTextContent("套装");
+      expect(
+        screen.getByTestId("sales-lookup-candidate-P-FLOWER-price"),
+      ).toHaveTextContent(formatAud(299, "zh"));
+      const row = screen.getByTestId("sales-lookup-candidate-P-FLY");
+      expect(flattenedStyle(row)).toMatchObject({ flexDirection: "row" });
+      expect(
+        Number(flattenedStyle(row).minHeight),
+      ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+      expect(
+        flattenedStyle(screen.getByTestId("sales-lookup-selection-cancel")),
+      ).toMatchObject({ alignSelf: "stretch", minHeight: MIN_TOUCH_TARGET });
+
+      await fireEvent.press(row);
+      expect(addLookupCandidate).toHaveBeenCalledWith({
+        lookupCode: "6405090401470",
+        productCode: "P-FLY",
+        source: "hid",
+      });
+      // 中文注释：加购完成前弹窗保持打开且候选不可再点。
+      expect(screen.getByTestId("sales-lookup-selection")).toBeTruthy();
+      expect(
+        screen.getByTestId("sales-lookup-candidate-P-FLY").props.accessibilityState,
+      ).toMatchObject({ disabled: true });
+      await act(async () => {
+        (releaseAdd as (() => void) | null)?.();
+      });
+      expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
+
+      await act(async () => {
+        publishSelection?.(selection);
+      });
+      await fireEvent.press(screen.getByTestId("sales-lookup-selection-cancel"));
+      expect(screen.queryByTestId("sales-lookup-selection")).toBeNull();
+      expect(addLookupCandidate).toHaveBeenCalledTimes(1);
+
+      await screen.unmount();
+    } finally {
+      await act(async () => {
+        Dimensions.set({ window: defaultMetrics, screen: defaultMetrics });
+      });
+      salesPresenter.destroy();
+    }
   });
 });

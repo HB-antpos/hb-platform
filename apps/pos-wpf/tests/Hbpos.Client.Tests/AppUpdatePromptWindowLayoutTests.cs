@@ -41,7 +41,7 @@ public sealed class AppUpdatePromptWindowLayoutTests
         Assert.Equal("900", (string?)card.Attribute("MaxWidth"));
         Assert.Equal("640", (string?)card.Attribute("MaxHeight"));
         Assert.Equal("12", (string?)card.Attribute("CornerRadius"));
-        Assert.Equal("{StaticResource PosSurfaceBrush}", (string?)card.Attribute("Background"));
+        Assert.Equal("{DynamicResource PosSurfaceBrush}", (string?)card.Attribute("Background"));
     }
 
     [Fact]

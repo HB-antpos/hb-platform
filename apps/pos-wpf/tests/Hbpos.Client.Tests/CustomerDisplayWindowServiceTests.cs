@@ -47,6 +47,57 @@ public sealed class CustomerDisplayWindowServiceTests
         Assert.False(ReadTopmost(plan));
     }
 
+    [Theory]
+    [InlineData(CustomerDisplayWindowMode.Normal, true)]
+    [InlineData(CustomerDisplayWindowMode.Fullscreen, false)]
+    [InlineData(CustomerDisplayWindowMode.Closed, false)]
+    public void Fullscreen_request_is_forwarded_only_from_the_titled_normal_window(
+        CustomerDisplayWindowMode mode,
+        bool expected)
+    {
+        Assert.Equal(expected, CustomerDisplayWindowService.ShouldForwardFullscreenRequest(mode));
+    }
+
+    [Fact]
+    public void Late_fullscreen_request_after_close_is_ignored()
+    {
+        var service = new CustomerDisplayWindowService(new DeterministicDisplayTopologyService());
+        var raised = 0;
+        service.FullscreenRequested += (_, _) => raised++;
+
+        service.OnFullscreenRequested();
+
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
+    public void Title_bar_double_click_requests_fullscreen_instead_of_maximizing_to_work_area()
+    {
+        var codeBehind = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Views", "Windows", "CustomerDisplayWindow.xaml.cs"));
+
+        Assert.Contains("FullscreenRequested?.Invoke(this, EventArgs.Empty);", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("WindowState.Maximized", codeBehind, StringComparison.Ordinal);
+    }
+
+    private static string FindRepoRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, ".git")) ||
+                File.Exists(Path.Combine(current.FullName, ".git")) ||
+                File.Exists(Path.Combine(current.FullName, "hb-platform.sln")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Unable to find repository root.");
+    }
+
     private static bool ReadTopmost(object plan)
     {
         var property = plan.GetType().GetProperty("Topmost");

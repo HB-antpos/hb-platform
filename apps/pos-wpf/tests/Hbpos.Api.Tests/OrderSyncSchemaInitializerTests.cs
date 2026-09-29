@@ -54,7 +54,8 @@ public sealed class OrderSyncSchemaInitializerTests
 
         await initializer.InitializeAsync();
 
-        var sql = Assert.Single(executor.SqlStatements);
+        // Windows 检出（core.autocrlf=true）时源码里的 SQL 是 CRLF，统一换行后再断言语句相邻关系。
+        var sql = Assert.Single(executor.SqlStatements).ReplaceLineEndings("\n");
         Assert.Equal(
             2,
             System.Text.RegularExpressions.Regex.Matches(sql, "SET LOCK_TIMEOUT -1").Count);

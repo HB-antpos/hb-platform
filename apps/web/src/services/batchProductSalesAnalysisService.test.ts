@@ -82,7 +82,7 @@ try {
         Success: true,
         Data: responseMode === 'emptyPayload'
           ? {}
-          : { Stores: [{ Code: 'S1', Name: 'Sunnybank' }], MaxItemNumbers: 500, MaxDays: 366 },
+          : { Stores: [{ Code: 'S1', Name: 'Sunnybank' }], MaxItemNumbers: 3000, MaxDays: 366 },
       })
     }
     if (pathname.endsWith('/query')) {
@@ -140,7 +140,7 @@ try {
   assert.equal(captured[0]?.init?.method, 'GET', 'options 必须使用 GET')
   assert.equal(captured[0]?.init?.signal, optionsController.signal, 'options 必须透传 AbortSignal')
   assert.deepEqual(options, {
-    stores: [{ code: 'S1', name: 'Sunnybank' }], maxItemNumbers: 500, maxDays: 366,
+    stores: [{ code: 'S1', name: 'Sunnybank' }], maxItemNumbers: 3000, maxDays: 366,
   }, 'options 必须解包 PascalCase 的真实信封')
 
   const queryController = new AbortController()

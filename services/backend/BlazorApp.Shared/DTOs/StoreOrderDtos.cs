@@ -613,6 +613,12 @@ namespace BlazorApp.Shared.DTOs
     public bool IsActive { get; set; }
 
     /// <summary>
+    /// 仓库登记的后续供货计划（WarehouseProductSupplyPlans）。仅在已下架且有未关闭供货说明时有值，
+    /// 前端据此区分「暂停供货，提交时保留」与「不再供应，请删除」。
+    /// </summary>
+    public string? SupplyPlan { get; set; }
+
+    /// <summary>
     /// 货位代码 (配货位)
     /// </summary>
     public string? LocationCode { get; set; }
@@ -676,6 +682,53 @@ namespace BlazorApp.Shared.DTOs
     /// </summary>
     [JsonIgnore]
     public bool BypassPreorderGate { get; set; }
+  }
+
+  /// <summary>
+  /// 提交订单结果：在供货的行进单，已暂停供货的行保留在购物车里。
+  /// </summary>
+  public class SubmitStoreOrderResultDto
+  {
+    /// <summary>
+    /// 已提交订单的 GUID（即原购物车 GUID）。提交失败时为空。
+    /// </summary>
+    public string? OrderGUID { get; set; }
+
+    public string? OrderNo { get; set; }
+
+    /// <summary>
+    /// 实际进单的行数。
+    /// </summary>
+    public int SubmittedLineCount { get; set; }
+
+    /// <summary>
+    /// 因暂停供货而保留在购物车里的行数。
+    /// </summary>
+    public int KeptLineCount { get; set; }
+
+    /// <summary>
+    /// 承接保留行的新购物车 GUID；没有保留行时为空。
+    /// </summary>
+    public string? KeptCartOrderGUID { get; set; }
+
+    public List<SubmitStoreOrderKeptLineDto> KeptLines { get; set; } = new();
+  }
+
+  /// <summary>
+  /// 提交时保留在购物车里的一行。
+  /// </summary>
+  public class SubmitStoreOrderKeptLineDto
+  {
+    public string DetailGUID { get; set; } = string.Empty;
+    public string ProductCode { get; set; } = string.Empty;
+    public string? ItemNumber { get; set; }
+    public string? ProductName { get; set; }
+    public decimal Quantity { get; set; }
+
+    /// <summary>
+    /// 后续供货计划（WarehouseProductSupplyPlans）；为 Discontinued 时前端提示删除。无说明时为空。
+    /// </summary>
+    public string? SupplyPlan { get; set; }
   }
 
   /// <summary>

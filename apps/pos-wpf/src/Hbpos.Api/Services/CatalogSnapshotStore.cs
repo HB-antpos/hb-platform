@@ -37,7 +37,9 @@ public sealed record CatalogPersistedSnapshot(
     DateTimeOffset GeneratedAt,
     DateTimeOffset ExpiresAt,
     string CatalogVersion,
-    IReadOnlyList<SellableItemDto> SellableItems);
+    IReadOnlyList<SellableItemDto> SellableItems,
+    // 新增的可选字段：旧版本写入的快照没有该属性，反序列化为 null，表示冲突未计算。
+    IReadOnlyList<SellableItemDto>? CodeConflicts = null);
 
 public sealed record CatalogSnapshotDescriptor(
     string StoreCode,

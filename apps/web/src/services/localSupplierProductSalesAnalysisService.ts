@@ -12,6 +12,7 @@ import type {
   LocalSupplierProductSalesAnalysisSelection,
   LocalSupplierProductSalesAnalysisSummary,
   LocalSupplierProductSalesAnalysisSummaryRow,
+  LocalSupplierProductSalesAnalysisSupplierCategoryOption,
   LocalSupplierProductSalesAnalysisTotals,
 } from '../types/localSupplierProductSalesAnalysis'
 import request from '../utils/request'
@@ -153,6 +154,30 @@ async function post<T>(path: string, body: LocalSupplierProductSalesAnalysisRequ
 
 export function getLocalSupplierProductSalesAnalysisOptions(signal?: AbortSignal) {
   return request(`${API_BASE}/options`, { method: 'GET', signal }).then((raw) => unwrap(raw, options))
+}
+
+export function getLocalSupplierProductSalesAnalysisSupplierCategoryOptions(supplierCodes: string[], signal?: AbortSignal) {
+  const params = new URLSearchParams()
+  params.set('tree', 'true')
+  supplierCodes.forEach((code) => params.append('supplierCodes', code))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request(`${API_BASE}/supplier-category-options${suffix}`, { method: 'GET', signal })
+    .then((raw) => unwrap(raw, (data): LocalSupplierProductSalesAnalysisSupplierCategoryOption[] => {
+      if (!Array.isArray(data)) return []
+      const parseNode = (entry: unknown): LocalSupplierProductSalesAnalysisSupplierCategoryOption | null => {
+        const item = asRecord(entry)
+        const supplierCode = item && stringValue(pick(item, 'supplierCode', 'SupplierCode'))
+        const guid = item && stringValue(pick(item, 'guid', 'Guid'))
+        const name = item && stringValue(pick(item, 'name', 'Name'))
+        if (!supplierCode || !guid) return null
+        const rawChildren = item && pick(item, 'children', 'Children')
+        const children = Array.isArray(rawChildren)
+          ? rawChildren.map(parseNode).filter((child): child is LocalSupplierProductSalesAnalysisSupplierCategoryOption => !!child)
+          : []
+        return { supplierCode, guid, parentGuid: stringValue(pick(item, 'parentGuid', 'ParentGuid')), name: name || guid, isSelectable: pick(item, 'isSelectable', 'IsSelectable') !== false, children }
+      }
+      return data.map(parseNode).filter((item): item is LocalSupplierProductSalesAnalysisSupplierCategoryOption => !!item)
+    }))
 }
 export function queryLocalSupplierProductSalesAnalysisBootstrap(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/bootstrap', body, bootstrap, signal) }
 export function queryLocalSupplierProductSalesAnalysisCandidates(body: LocalSupplierProductSalesAnalysisRequest, signal?: AbortSignal) { return post('/candidates', body, (raw) => paged(raw, candidate), signal) }

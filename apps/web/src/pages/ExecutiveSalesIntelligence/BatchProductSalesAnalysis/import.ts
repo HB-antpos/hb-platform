@@ -1,4 +1,4 @@
-export const MAX_ITEM_NUMBERS = 500
+export const MAX_ITEM_NUMBERS = 3000
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
 
 export interface ImportIssue {

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Controllers.React;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -41,6 +42,7 @@ public sealed class SalesDetailReportTests : IDisposable
         {
             typeof(Store), typeof(HBLocalSupplier), typeof(ChinaSupplier), typeof(Product),
             typeof(ProductStoreDailySalesStatistic), typeof(SalesStatisticRefreshState),
+            typeof(LocalSupplierCategory), typeof(LocalSupplierCategoryProductAssignment), typeof(WarehouseCategory),
         });
         _posmDb.CodeFirst.InitTables(new[] { typeof(PosmProductSupplierMapping) });
     }
@@ -195,6 +197,143 @@ public sealed class SalesDetailReportTests : IDisposable
 
         Assert.Equal(DateTimeKind.Utc, response.StatisticUpdatedAt!.Value.Kind);
         Assert.Contains("2026-09-07T03:32:59Z", JsonSerializer.Serialize(response));
+    }
+
+    [Fact]
+    public void 无效分类哨兵仍生成零匹配分类过滤条件()
+    {
+        var method = typeof(SalesDashboardReactService).GetMethod(
+            "BuildSalesDetailCategoryFilter", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var sql = Assert.IsType<string>(method.Invoke(null, new object?[]
+        {
+            SalesDetailKind.Australia,
+            new[] { "__sales_detail_no_matching_category__" },
+            Array.Empty<string>(),
+            "s.[ProductCode]",
+        }));
+
+        Assert.Contains("LocalSupplierCategoryProductAssignment", sql);
+        Assert.Contains("@sdrCategorySupplier0", sql);
+    }
+
+    [Fact]
+    public void 澳洲供应商可见范围将国内供应商事实归并为200()
+    {
+        var visible = SalesDetailCategoryOptionsController.MapVisibleSupplierCodes(
+            new (string? Code, string? ChinaCode)[] { ("CN-01", "CN-01"), ("A1", null), ("200", null) });
+
+        Assert.Contains("200", visible);
+        Assert.Contains("A1", visible);
+        Assert.DoesNotContain("CN-01", visible);
+    }
+
+    [Theory]
+    [InlineData("200", null, "200", null)]
+    [InlineData("200,A1", null, "200,A1", null)]
+    [InlineData("A1,A2", null, "A1,A2", "200")]
+    [InlineData("200,A1", "S1,S2", "200,A1,S1,S2", null)]
+    public void 澳洲供应商可见范围_SQLServer查询不生成裸布尔参数谓词(
+        string supplierCodes,
+        string? storeCodes,
+        string expectedParameterValues,
+        string? unexpectedParameterValue)
+    {
+        using var sqlServerDb = new SqlSugarClient(new ConnectionConfig
+        {
+            // ToSql 只生成 SQL，不会连接数据库；方言必须固定为 SQL Server 才能覆盖 4145 回归。
+            ConnectionString = "Server=127.0.0.1;Database=SalesDetailCategoryOptionsSqlTests;User Id=unused;Password=unused;TrustServerCertificate=True",
+            DbType = DbType.SqlServer,
+            IsAutoCloseConnection = true,
+            InitKeyType = InitKeyType.Attribute,
+        });
+        var suppliers = supplierCodes.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var stores = storeCodes?.Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+        var command = SalesDetailCategoryOptionsController.BuildVisibleSupplierQuery(
+                sqlServerDb,
+                suppliers,
+                stores)
+            .ToSql();
+        var generatedCommand = string.Join('\n',
+            command.Key,
+            string.Join(' ', command.Value.Select(parameter => parameter.Value?.ToString())));
+
+        Assert.Contains("[ProductStoreDailySalesStatistic]", command.Key);
+        Assert.Contains("LEFT JOIN [ChinaSupplier]", command.Key, StringComparison.OrdinalIgnoreCase);
+        // SQL Server 4145 的根因是 SqlSugar 把 C# bool 闭包生成成 bit 参数后直接放进 AND。
+        // 参数清单中不能再出现 bool；其余供应商/门店值可能被 SqlSugar 内联到 IN，所以检查完整生成命令。
+        Assert.DoesNotContain(command.Value, parameter => parameter.Value is bool);
+        foreach (var expected in expectedParameterValues.Split(','))
+            Assert.Contains(expected, generatedCommand, StringComparison.Ordinal);
+        if (unexpectedParameterValue != null)
+            Assert.DoesNotContain(unexpectedParameterValue, generatedCommand, StringComparison.Ordinal);
+        if (stores != null)
+            Assert.Contains("[sales].[BranchCode]", command.Key, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task 多选筛选超过服务端上限时明确拒绝而不执行查询()
+    {
+        var day = new DateTime(2026, 9, 22);
+        var service = CreateService();
+        var tooManySuppliers = Enumerable.Range(0, 201).Select(index => $"S-{index}").ToList();
+        var tooManyCategories = Enumerable.Range(0, 501).Select(index => $"C-{index}").ToList();
+
+        var supplierError = await Assert.ThrowsAsync<ArgumentException>(() => service.GetSalesDetailReportFilteredAsync(
+            Range(day, day), SalesDetailKind.Australia, new() { "S1" }, selectedSupplierCodes: tooManySuppliers));
+        Assert.Contains("最多选择 200", supplierError.Message);
+
+        var legacySupplierError = await Assert.ThrowsAsync<ArgumentException>(() => service.GetSalesDetailReportFilteredAsync(
+            Range(day, day), SalesDetailKind.Australia, new() { "S1" }, selectedSupplierCode: "S-extra",
+            selectedSupplierCodes: tooManySuppliers.Take(200).ToList()));
+        Assert.Contains("最多选择 200", legacySupplierError.Message);
+
+        var categoryError = await Assert.ThrowsAsync<ArgumentException>(() => service.GetSalesDetailReportFilteredAsync(
+            Range(day, day), SalesDetailKind.Australia, new() { "S1" }, supplierCategoryGuids: tooManyCategories));
+        Assert.Contains("最多选择 500", categoryError.Message);
+    }
+
+    [Fact]
+    public async Task 澳洲供应商父分类多选包含子类与自营仓库分类且不串到其他供应商()
+    {
+        var day = new DateTime(2026, 9, 22);
+        await _localDb.Insertable(new[]
+        {
+            new Product { UUID = "uuid-a", ProductCode = "P-A", ProductName = "A", LocalSupplierCode = "A1" },
+            new Product { UUID = "uuid-b", ProductCode = "P-B", ProductName = "B", LocalSupplierCode = "A2" },
+            new Product { UUID = "uuid-hb", ProductCode = "P-HB", ProductName = "HB", LocalSupplierCode = "200", WarehouseCategoryGUID = "WC-HB" },
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            new LocalSupplierCategory { CategoryGUID = "CAT-P", LocalSupplierCode = "A1", CategoryName = "A父分类" },
+            new LocalSupplierCategory { CategoryGUID = "CAT-A", ParentGUID = "CAT-P", LocalSupplierCode = "A1", CategoryName = "A分类" },
+            new LocalSupplierCategory { CategoryGUID = "CAT-B", LocalSupplierCode = "A2", CategoryName = "B分类" },
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            new LocalSupplierCategoryProductAssignment { ProductCode = "P-A", LocalSupplierCode = "A1", CategoryGUID = "CAT-A" },
+            new LocalSupplierCategoryProductAssignment { ProductCode = "P-B", LocalSupplierCode = "A2", CategoryGUID = "CAT-B" },
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new WarehouseCategory { CategoryGUID = "WC-HB", CategoryName = "自营分类" }).ExecuteCommandAsync();
+        await SeedStatisticAsync(day, "S1", "A1", "P-A", 1, 10m);
+        await SeedStatisticAsync(day, "S1", "A2", "P-A", 5, 50m); // 同码历史销售不可借用 A1 分类。
+        await SeedStatisticAsync(day, "S1", "A2", "P-B", 2, 20m);
+        await SeedStatisticAsync(day, "S1", "200", "P-HB", 3, 30m);
+
+        var service = CreateService();
+        var selected = await service.GetSalesDetailReportFilteredAsync(Range(day, day), SalesDetailKind.Australia,
+            new() { "S1" }, selectedSupplierCodes: new() { "A1", "A2", "200" },
+            supplierCategoryGuids: new() { "CAT-P", "WC-HB" });
+        Assert.Equal(40m, selected.Data!.Summary!.Summary!.Revenue);
+        Assert.Equal(new[] { "P-A", "P-HB" }, selected.Data.Products!.Rows.Select(row => row.Code).OrderBy(code => code));
+
+        var onlyWarehouse = await service.GetSalesDetailReportFilteredAsync(Range(day, day), SalesDetailKind.Australia,
+            new() { "S1" }, selectedSupplierCodes: new() { "200" }, supplierCategoryGuids: new() { "WC-HB" });
+        Assert.Equal(30m, onlyWarehouse.Data!.Summary!.Summary!.Revenue);
+
+        var onlySupplierCodes = await service.GetSalesDetailReportFilteredAsync(Range(day, day), SalesDetailKind.Australia,
+            new() { "S1" }, selectedSupplierCodes: new() { "A1" });
+        Assert.Equal(10m, onlySupplierCodes.Data!.Summary!.Summary!.Revenue);
     }
 
     [Fact]
@@ -409,6 +548,17 @@ public sealed class SalesDetailReportTests : IDisposable
     }
 
     [Fact]
+    public void 关键词查询跳过日期提示按连续区间合并()
+    {
+        Assert.Null(SalesDashboardReactService.DescribeProjectionSkippedDates(Array.Empty<DateTime>()));
+        Assert.Equal("2026-04-09共 1 天缺少可用的关键词查询投影，本次搜索已跳过，结果未包含这些日期的销售。",
+            SalesDashboardReactService.DescribeProjectionSkippedDates(new[] { new DateTime(2026, 4, 9, 10, 0, 0) }));
+        Assert.StartsWith("2025-05-04～2025-05-06、2026-04-09共 4 天",
+            SalesDashboardReactService.DescribeProjectionSkippedDates(new[]
+                { new DateTime(2026, 4, 9), new DateTime(2025, 5, 5), new DateTime(2025, 5, 4), new DateTime(2025, 5, 6), new DateTime(2026, 4, 9) }));
+    }
+
+    [Fact]
     public async Task 国内原始供应商在澳洲栏按本地供应商解析并支持名称搜索()
     {
         var day = new DateTime(2026, 7, 6);
@@ -442,8 +592,8 @@ public sealed class SalesDetailReportTests : IDisposable
     [InlineData(SalesStatisticRefreshStatus.Running, false, null, SalesStatisticRefreshStatus.Pending)]
     [InlineData(SalesStatisticRefreshStatus.Failed, true, "published", SalesStatisticRefreshStatus.Fresh)]
     [InlineData(SalesStatisticRefreshStatus.Failed, true, null, SalesStatisticRefreshStatus.Fresh)]
-    [InlineData(SalesStatisticRefreshStatus.Failed, false, null, SalesStatisticRefreshStatus.Failed)]
-    public async Task 单一商品快照按已发布状态读取且不受供应商汇总失败影响(string state, bool published, string? version, string expected)
+    [InlineData(SalesStatisticRefreshStatus.Failed, false, null, SalesStatisticRefreshStatus.Fresh)]
+    public async Task 单一商品快照按已发布状态读取并跳过失败日(string state, bool published, string? version, string expected)
     {
         var day = new DateTime(2026, 7, 7);
         await SeedProductAsync("P-PUBLISHED");
@@ -466,9 +616,14 @@ public sealed class SalesDetailReportTests : IDisposable
         var response = await CreateService().GetSalesDetailReportAsync(
             Range(day, day), SalesDetailKind.Australia, new() { "S1" });
         Assert.Equal(expected, response.StatisticStatus);
-        // 对账失败但已聚合的日期照常可读，只在提示里列出日期；从未聚合成功的失败日期仍不可读。
-        if (state == SalesStatisticRefreshStatus.Failed && published)
+        // 商品统计失败日期即使保留旧聚合事实，也不能计入明细；提示必须说明金额已跳过。
+        if (state == SalesStatisticRefreshStatus.Failed)
+        {
             Assert.Contains("2026-07-07", response.StatisticMessage);
+            Assert.Contains("已跳过", response.StatisticMessage);
+            Assert.Empty(response.Data!.Products!.Rows);
+            return;
+        }
         else if (expected == SalesStatisticRefreshStatus.Fresh)
             Assert.Null(response.StatisticMessage);
         if (expected == SalesStatisticRefreshStatus.Fresh)
@@ -481,6 +636,31 @@ public sealed class SalesDetailReportTests : IDisposable
             Assert.Equal(response.CacheVersion, page.CacheVersion);
         }
         else Assert.Null(response.Data!.Products);
+    }
+
+    [Fact]
+    public async Task 明细范围内失败日不计入四栏且提示日期()
+    {
+        var failed = new DateTime(2026, 7, 7);
+        var fresh = failed.AddDays(1);
+        await SeedProductAsync("P-PARTIAL");
+        await SeedStatisticAsync(failed, "S1", "A1", "P-PARTIAL", 3, 30m);
+        await SeedStatisticAsync(fresh, "S1", "A1", "P-PARTIAL", 2, 20m);
+        await _localDb.Updateable<SalesStatisticRefreshState>()
+            .SetColumns(row => new SalesStatisticRefreshState { Status = SalesStatisticRefreshStatus.Failed })
+            .Where(row => row.Date == failed && row.StatisticType == SalesStatisticType.ProductStoreDaily)
+            .ExecuteCommandAsync();
+
+        var response = await CreateService().GetSalesDetailReportAsync(
+            Range(failed, fresh), SalesDetailKind.Australia, new() { "S1" });
+
+        Assert.Equal(SalesStatisticRefreshStatus.Fresh, response.StatisticStatus);
+        Assert.Contains("2026-07-07", response.StatisticMessage);
+        Assert.Contains("已跳过", response.StatisticMessage);
+        Assert.Equal(20m, response.Data!.Summary!.Summary!.Revenue);
+        Assert.Equal(20m, Assert.Single(response.Data.Suppliers!.Rows).Revenue);
+        Assert.Equal(20m, Assert.Single(response.Data.Branches!.Rows).Revenue);
+        Assert.Equal(20m, Assert.Single(response.Data.Products!.Rows).Revenue);
     }
 
     [Fact]

@@ -18,6 +18,13 @@
   <data name="settings.section.dataDownload.title" xml:space="preserve"><value>&#x6570;&#x636E;&#x4E0B;&#x8F7D;</value></data>
   <data name="settings.section.dataDownload.description" xml:space="preserve"><value>&#x4ECE;&#x670D;&#x52A1;&#x5668;&#x540C;&#x6B65;&#x5F53;&#x524D;&#x95E8;&#x5E97;&#x7684;&#x5546;&#x54C1;&#x76EE;&#x5F55;&#xFF0C;&#x5E76;&#x5237;&#x65B0;&#x672C;&#x5730;&#x6536;&#x94F6;&#x5546;&#x54C1;&#x7D22;&#x5F15;&#x3002;</value></data>
   <data name="settings.section.dataDownload.action" xml:space="preserve"><value>&#x6570;&#x636E;&#x4E0B;&#x8F7D;</value></data>
+  <data name="settings.section.dataDownload.lastSync" xml:space="preserve"><value>上次同步</value></data>
+  <data name="settings.section.dataDownload.lastSuccessfulSync" xml:space="preserve"><value>上次成功同步</value></data>
+  <data name="settings.section.dataDownload.neverSynced" xml:space="preserve"><value>尚未同步</value></data>
+  <data name="settings.section.dataDownload.state.synced" xml:space="preserve"><value>已同步</value></data>
+  <data name="settings.section.dataDownload.state.syncing" xml:space="preserve"><value>同步中</value></data>
+  <data name="settings.section.dataDownload.state.failed" xml:space="preserve"><value>同步失败</value></data>
+  <data name="settings.section.dataDownload.failedDetail" xml:space="preserve"><value>{0} 同步失败：{1}</value></data>
   <data name="settings.section.dataReset.title" xml:space="preserve"><value>&#x6570;&#x636E;&#x91CD;&#x7F6E;</value></data>
   <data name="settings.section.dataReset.description" xml:space="preserve"><value>&#x5F3A;&#x5236;&#x91CD;&#x65B0;&#x6784;&#x5EFA;&#x672C;&#x5730;&#x5546;&#x54C1;&#x76EE;&#x5F55;&#x3002;&#x9002;&#x7528;&#x4E8E;&#x6570;&#x636E;&#x8FC7;&#x65E7;&#x3001;&#x4EF7;&#x683C;&#x672A;&#x5237;&#x65B0;&#x6216;&#x5546;&#x54C1;&#x7D22;&#x5F15;&#x9700;&#x8981;&#x5F7B;&#x5E95;&#x91CD;&#x5EFA;&#x65F6;&#x3002;</value></data>
   <data name="settings.section.dataReset.action" xml:space="preserve"><value>&#x6570;&#x636E;&#x91CD;&#x7F6E;</value></data>
@@ -167,6 +174,8 @@
   <data name="settings.receiptPrinter.phone" xml:space="preserve"><value>&#x7535;&#x8BDD;</value></data>
   <data name="settings.receiptPrinter.abn" xml:space="preserve"><value>ABN</value></data>
   <data name="settings.receiptPrinter.returnPolicy" xml:space="preserve"><value>&#x9000;&#x6362;&#x8D27;&#x653F;&#x7B56;</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt" xml:space="preserve"><value>客人小票附带银行收据</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>关闭后客人小票只保留卡类型、卡号后四位和金额，不再附带整段刷卡银行收据，小票更短。签名单、拒付单和结算单照常打印。</value></data>
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>&#x4FDD;&#x5B58;&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>&#x6D4B;&#x8BD5;&#x6253;&#x5370;</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>&#x4ECE;&#x5206;&#x5E97;&#x8D44;&#x6599;&#x8F7D;&#x5165;</value></data>
@@ -291,6 +300,9 @@
   <data name="settings.remoteMaintenance.result.componentsMissing" xml:space="preserve"><value>POS 缺少远程维护安装组件。请关闭 POS，使用完整 HB POS 安装包修复到默认 Program Files 目录，然后重新打开 POS，点击“安装远程维护”。无需另外下载 RustDesk。</value></data>
   <data name="settings.remoteMaintenance.result.installationLocationInvalid" xml:space="preserve"><value>当前 POS 未从要求的安装目录运行。请关闭 POS，运行完整 HB POS 安装包，保留默认 Program Files 目录，然后打开安装后的 POS，点击“安装远程维护”。</value></data>
   <data name="settings.remoteMaintenance.result.installationPermissionsInvalid" xml:space="preserve"><value>POS 安装目录不符合 Windows 安全权限要求。请管理员使用完整 HB POS 安装包修复到默认 Program Files 目录，然后重新打开 POS 并重试。</value></data>
+  <data name="settings.remoteMaintenance.result.existingRustDeskUnmanaged" xml:space="preserve"><value>这台 POS 已装有未按公司配置的 RustDesk（可能是之前安装未完成留下的），为安全起见不会自动接管。请在 Windows“设置 &gt; 应用”中卸载 RustDesk，然后回到这里重新点击“安装远程维护”。</value></data>
+  <data name="settings.remoteMaintenance.result.rustDeskSetupIncomplete" xml:space="preserve"><value>RustDesk 安装程序没有在规定时间内完成，或 RustDesk 服务未能启动。请在 Windows“设置 &gt; 应用”中卸载 RustDesk（如已出现），重启 POS 后重新点击“安装远程维护”。</value></data>
+  <data name="settings.remoteMaintenance.result.rustDeskConfigurationFailed" xml:space="preserve"><value>RustDesk 已安装，但公司连接配置未能写入。请在 Windows“设置 &gt; 应用”中卸载 RustDesk，重启 POS 后重新点击“安装远程维护”。</value></data>
   <data name="settings.remoteMaintenance.status.notInstalled" xml:space="preserve"><value>未安装</value></data>
   <data name="settings.remoteMaintenance.status.running" xml:space="preserve"><value>运行中</value></data>
   <data name="settings.remoteMaintenance.status.starting" xml:space="preserve"><value>正在启动</value></data>

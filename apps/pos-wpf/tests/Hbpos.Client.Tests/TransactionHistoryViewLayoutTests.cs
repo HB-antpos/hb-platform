@@ -30,8 +30,8 @@ public sealed class TransactionHistoryViewLayoutTests
                 .Where(element =>
                     (string?)element.Attribute("Binding") == "{Binding IsReturnOrder}" &&
                     (string?)element.Attribute("Value") == "True"));
-        AssertSetter(rowTrigger, "Background", "#FFFEF2F2");
-        AssertSetter(rowTrigger, "BorderBrush", "{StaticResource PosDangerBrush}");
+        AssertSetter(rowTrigger, "Background", "{DynamicResource PosDangerSoftBrush}");
+        AssertSetter(rowTrigger, "BorderBrush", "{DynamicResource PosDangerBrush}");
 
         var primaryTextTrigger = Assert.Single(
             FindStyle(view, x, "HistoryPrimaryTextStyle")
@@ -39,7 +39,7 @@ public sealed class TransactionHistoryViewLayoutTests
                 .Where(element =>
                     (string?)element.Attribute("Binding") == "{Binding IsReturnOrder}" &&
                     (string?)element.Attribute("Value") == "True"));
-        AssertSetter(primaryTextTrigger, "Foreground", "{StaticResource PosDangerBrush}");
+        AssertSetter(primaryTextTrigger, "Foreground", "{DynamicResource PosDangerTextBrush}");
     }
 
     [Fact]
@@ -335,10 +335,10 @@ public sealed class TransactionHistoryViewLayoutTests
         Assert.Equal("24", (string?)dialog.Attribute("Margin"));
         var statusText = Assert.Single(dialog.Descendants(presentation + "TextBlock").Where(element =>
             (string?)element.Attribute("Text") == "{Binding OrderDetailsStatusLabel}"));
-        Assert.Equal("#FF475569", (string?)statusText.Attribute("Foreground"));
+        Assert.Equal("{DynamicResource PosTextSecondaryBrush}", (string?)statusText.Attribute("Foreground"));
         var statusBadge = Assert.IsType<XElement>(statusText.Parent);
-        Assert.Equal("#FFF1F5F9", (string?)statusBadge.Attribute("Background"));
-        Assert.Equal("#FFCBD5E1", (string?)statusBadge.Attribute("BorderBrush"));
+        Assert.Equal("{DynamicResource PosSurfaceMutedBrush}", (string?)statusBadge.Attribute("Background"));
+        Assert.Equal("{DynamicResource PosBorderBrush}", (string?)statusBadge.Attribute("BorderBrush"));
 
         var itemsGrid = Assert.Single(dialog.Descendants(presentation + "DataGrid").Where(element =>
             (string?)element.Attribute(x + "Name") == "OrderDetailsItemsGrid"));
@@ -464,7 +464,7 @@ public sealed class TransactionHistoryViewLayoutTests
         Assert.Contains(selectedTrigger.Elements(presentation + "Setter"), setter =>
             (string?)setter.Attribute("TargetName") == "Root" &&
             (string?)setter.Attribute("Property") == "Background" &&
-            (string?)setter.Attribute("Value") == "{StaticResource PosPrimaryBrush}");
+            (string?)setter.Attribute("Value") == "{DynamicResource PosPrimaryBrush}");
         Assert.Contains(selectedTrigger.Elements(presentation + "Setter"), setter =>
             (string?)setter.Attribute("Property") == "Foreground" &&
             (string?)setter.Attribute("Value") == "White");

@@ -81,7 +81,7 @@ for (const token of [
 ]) {
   assert(count(page, token) === 1, `分段接口只能用于重试/分页/钻取单点调用：${token}`)
 }
-const mountBlock = block(page, 'useEffect(() => {', '}, [runBootstrap])')
+const mountBlock = block(page, 'useEffect(() => {\n    runBootstrap', '}, [runBootstrap])')
 assert(mountBlock.includes("runBootstrap('bootstrap')"), '挂载必须恰好发起一次 bootstrap')
 assert(!mountBlock.includes('queryLocalSupplierProductSalesAnalysis'), '挂载不得再走分段接口')
 const applyBlock = block(page, 'const applyFilters', 'const resetFilters')
@@ -155,6 +155,31 @@ const clearEnd = page.indexOf('const applyFilters', clearStart)
 const clearBlock = page.slice(clearStart, clearEnd)
 for (const token of ['setBranchDaily([])', 'setSelectedBranchCode(undefined)', 'setBranchDailyError(undefined)', 'setBranchDailyLoading(false)']) {
   if (!clearBlock.includes(token)) throw new Error(`新筛选必须立即清空分店日趋势遗留：${token}`)
+}
+
+// 供应商、供应商分类与仓库分类均为多选；供应商分类按当前供应商加载并进入统一查询条件。
+for (const token of [
+  'draftSupplierCodes',
+  'draftSupplierCategoryGuids',
+  'draftWarehouseCategoryGuids',
+  'getLocalSupplierProductSalesAnalysisSupplierCategoryOptions',
+  'supplierCategoryGroups',
+  'supplierCategoryOpen',
+  'popupRender=',
+  'styles.categoryHint',
+  'styles.categoryFooter',
+]) {
+  assert(page.includes(token), `页面缺少多选供应商分类交互：${token}`)
+}
+assert(count(page, 'mode="multiple"') >= 3, '供应商、供应商分类和仓库分类必须全部支持多选')
+assert(page.includes("setDraftWarehouseCategoryGuids(limitSelection(values, 100"), '仓库分类多选必须提示并限制最多 100 项')
+assert(page.includes('setDraftSupplierCategoryGuids([])'), '切换供应商或重置时必须清空已选供应商分类')
+assert(page.includes('previous.filter((guid) => valid.has(guid))'), '分类选项刷新后必须剔除已失效选择')
+assert(page.includes('controller.abort()'), '供应商分类选项请求必须在条件变化或卸载时取消')
+assert(applyBlock.includes('draftWarehouseCategoryGuids, draftSupplierCodes, draftSupplierCategoryGuids'), '查询必须同时提交仓库分类、供应商与供应商分类多选值')
+assert(resetBlock.includes('setDraftWarehouseCategoryGuids([])') && resetBlock.includes('setDraftSupplierCodes([])') && resetBlock.includes('setDraftSupplierCategoryGuids([])'), '重置必须清空三组多选条件')
+for (const token of ['.categoryHint', '.categoryFooter']) {
+  assert(css.includes(token), `供应商分类下拉缺少说明或操作区样式：${token}`)
 }
 
 for (const token of ['grid-template-columns: 330px minmax(0, 1fr) 340px', '@container (max-width: 760px)', '@media (max-width: 1199px)', '@media (max-width: 768px)']) {

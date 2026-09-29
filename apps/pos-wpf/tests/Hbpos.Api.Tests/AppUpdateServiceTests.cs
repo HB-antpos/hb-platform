@@ -9,6 +9,9 @@ using Microsoft.Extensions.Options;
 
 namespace Hbpos.Api.Tests;
 
+// 会修改进程级 HBPOS_APP_UPDATE_CENTER_BASE_URL / HBPOS_APP_UPDATE_CHECK_KEY；options 未配置时
+// LocalAppUpdateService 回退读取它们，并行的其他更新测试会读到被改写的值。
+[Collection(EnvironmentVariableTestCollection.Name)]
 public sealed class AppUpdateServiceTests
 {
     [Fact]

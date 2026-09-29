@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Services;
 using BlazorApp.Shared.Constants;
@@ -572,10 +573,12 @@ namespace BlazorApp.Api.Controllers
         /// 从HQ总部同步分店数据
         /// 🔄 从总部数据库获取最新分店信息并更新本地数据库
         /// 这是一个敏感操作，只有Admin角色才能执行
+        /// 2026-09-29 起停用（HQ → HBweb），统一返回 410；guid/{guid}/sync-hq（本地 → HQ）保持可用。
         /// </summary>
         /// <returns>同步结果</returns>
         [HttpPost("sync")]
         [Authorize(Policy = Permissions.Stores.Sync)]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoresFromHq()
         {
             try

@@ -15,6 +15,12 @@ public sealed record DisplayBounds(
     int WorkAreaWidth,
     int WorkAreaHeight);
 
+internal readonly record struct WindowSizeLimits(
+    double MinWidth,
+    double MinHeight,
+    double MaxWidth,
+    double MaxHeight);
+
 public interface IDisplayTopologyService
 {
     IReadOnlyList<DisplayBounds> GetDisplays();
@@ -32,6 +38,13 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
 {
     private const uint MonitorDefaultToNearest = 2;
     private const int WmGetMinMaxInfo = 0x0024;
+
+    // 按整块显示器放置的窗口（客显全屏）：拖拽/定位上限放宽到显示器边界，否则会被截到工作区、露出任务栏。
+    private static readonly DependencyProperty UsesFullMonitorBoundsProperty = DependencyProperty.RegisterAttached(
+        "UsesFullMonitorBounds",
+        typeof(bool),
+        typeof(DisplayTopologyService),
+        new PropertyMetadata(false));
 
     public IReadOnlyList<DisplayBounds> GetDisplays()
     {
@@ -66,12 +79,30 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
 
     public void FitToDisplayWorkArea(Window window, DisplayBounds display)
     {
+        window.ClearValue(UsesFullMonitorBoundsProperty);
         ApplyBounds(window, display.WorkAreaLeft, display.WorkAreaTop, display.WorkAreaWidth, display.WorkAreaHeight);
     }
 
     public void FitToDisplayBounds(Window window, DisplayBounds display)
     {
+        // 先标记再定尺寸：定尺寸时系统会查询 WM_GETMINMAXINFO。
+        window.SetValue(UsesFullMonitorBoundsProperty, true);
         ApplyBounds(window, display.MonitorLeft, display.MonitorTop, display.MonitorWidth, display.MonitorHeight);
+    }
+
+    internal static bool UsesFullMonitorBounds(Window window) => (bool)window.GetValue(UsesFullMonitorBoundsProperty);
+
+    internal static (int Width, int Height) ResolveMaxTrackSize(
+        int monitorWidth,
+        int monitorHeight,
+        int workAreaWidth,
+        int workAreaHeight,
+        bool usesFullMonitorBounds)
+    {
+        // 最大化尺寸始终是工作区；只有整屏放置的窗口允许拖拽/定位到显示器边界（盖住任务栏）。
+        return usesFullMonitorBounds
+            ? (monitorWidth, monitorHeight)
+            : (workAreaWidth, workAreaHeight);
     }
 
     private static IReadOnlyList<DisplayBounds> EnumerateDisplays()
@@ -139,8 +170,16 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
         minMaxInfo.MaxPosition.Y = workArea.Top - monitorArea.Top;
         minMaxInfo.MaxSize.X = workArea.Right - workArea.Left;
         minMaxInfo.MaxSize.Y = workArea.Bottom - workArea.Top;
-        minMaxInfo.MaxTrackSize.X = minMaxInfo.MaxSize.X;
-        minMaxInfo.MaxTrackSize.Y = minMaxInfo.MaxSize.Y;
+        var usesFullMonitorBounds = HwndSource.FromHwnd(hwnd)?.RootVisual is Window window
+            && UsesFullMonitorBounds(window);
+        var maxTrackSize = ResolveMaxTrackSize(
+            monitorArea.Right - monitorArea.Left,
+            monitorArea.Bottom - monitorArea.Top,
+            minMaxInfo.MaxSize.X,
+            minMaxInfo.MaxSize.Y,
+            usesFullMonitorBounds);
+        minMaxInfo.MaxTrackSize.X = maxTrackSize.Width;
+        minMaxInfo.MaxTrackSize.Y = maxTrackSize.Height;
 
         Marshal.StructureToPtr(minMaxInfo, lParam, false);
         handled = true;
@@ -160,20 +199,44 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
         var workArea = monitorInfo.WorkArea;
         var topLeft = FromDevice(window, workArea.Left, workArea.Top);
         var bottomRight = FromDevice(window, workArea.Right, workArea.Bottom);
-        var maxWidth = Math.Max(window.MinWidth, bottomRight.X - topLeft.X);
-        var maxHeight = Math.Max(window.MinHeight, bottomRight.Y - topLeft.Y);
+        var limits = ResolveSizeLimits(
+            window.MinWidth,
+            window.MinHeight,
+            bottomRight.X - topLeft.X,
+            bottomRight.Y - topLeft.Y);
 
-        window.MaxWidth = maxWidth;
-        window.MaxHeight = maxHeight;
-        if (window.Width > maxWidth)
+        ApplySizeLimits(window, limits);
+        if (window.Width > limits.MaxWidth)
         {
-            window.Width = maxWidth;
+            window.Width = limits.MaxWidth;
         }
 
-        if (window.Height > maxHeight)
+        if (window.Height > limits.MaxHeight)
         {
-            window.Height = maxHeight;
+            window.Height = limits.MaxHeight;
         }
+    }
+
+    internal static WindowSizeLimits ResolveSizeLimits(
+        double minWidth,
+        double minHeight,
+        double availableWidth,
+        double availableHeight)
+    {
+        // 关键逻辑：屏幕优先。最小尺寸超过所在屏幕时下调最小尺寸，而不是把窗口撑出屏幕（如 1024×768 屏）。
+        return new WindowSizeLimits(
+            Math.Min(minWidth, availableWidth),
+            Math.Min(minHeight, availableHeight),
+            availableWidth,
+            availableHeight);
+    }
+
+    private static void ApplySizeLimits(Window window, WindowSizeLimits limits)
+    {
+        window.MinWidth = limits.MinWidth;
+        window.MinHeight = limits.MinHeight;
+        window.MaxWidth = limits.MaxWidth;
+        window.MaxHeight = limits.MaxHeight;
     }
 
     private static Point FromDevice(Window source, int x, int y)
@@ -186,13 +249,17 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
     {
         var topLeft = FromDevice(window, left, top);
         var bottomRight = FromDevice(window, left + width, top + height);
+        var limits = ResolveSizeLimits(
+            window.MinWidth,
+            window.MinHeight,
+            bottomRight.X - topLeft.X,
+            bottomRight.Y - topLeft.Y);
 
         window.Left = topLeft.X;
         window.Top = topLeft.Y;
-        window.Width = Math.Max(window.MinWidth, bottomRight.X - topLeft.X);
-        window.Height = Math.Max(window.MinHeight, bottomRight.Y - topLeft.Y);
-        window.MaxWidth = window.Width;
-        window.MaxHeight = window.Height;
+        ApplySizeLimits(window, limits);
+        window.Width = limits.MaxWidth;
+        window.Height = limits.MaxHeight;
     }
 
     private delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data);

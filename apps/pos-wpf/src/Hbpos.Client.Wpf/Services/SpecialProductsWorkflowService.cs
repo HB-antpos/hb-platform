@@ -360,7 +360,9 @@ public sealed class SpecialProductsWorkflowService(
     private async Task RefreshIndexAsync(string normalizedStoreCode, CancellationToken cancellationToken)
     {
         var catalogItems = await catalogRepository.LoadSellableItemsAsync(normalizedStoreCode, cancellationToken);
-        priceIndex.ReplaceAll(catalogItems);
+        var codeConflictItems = await catalogRepository.LoadCodeConflictItemsAsync(normalizedStoreCode, cancellationToken);
+        // 与目录加载保持一致：刷新特殊商品后不能丢掉码冲突的备选商品。
+        priceIndex.ReplaceAll(CatalogCodeConflictMerger.Merge(catalogItems, codeConflictItems));
     }
 
     private bool IsLoadedForStore(string normalizedStoreCode)

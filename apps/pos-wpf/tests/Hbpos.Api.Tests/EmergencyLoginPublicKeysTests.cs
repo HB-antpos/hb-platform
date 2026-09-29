@@ -384,7 +384,14 @@ public sealed class EmergencyLoginPublicKeysTests
             SqliteConnection.ClearAllPools();
             if (File.Exists(dbPath))
             {
-                File.Delete(dbPath);
+                try
+                {
+                    File.Delete(dbPath);
+                }
+                catch (IOException)
+                {
+                    // Windows 上 SQLite 清空连接池后仍可能短暂占用文件句柄，不影响授权校验断言。
+                }
             }
         }
     }

@@ -445,7 +445,7 @@ public sealed class ReactLocalSupplierInvoiceAuthorizationTests : IDisposable
         );
         Assert.Equal(Permissions.LocalPurchase.View, invoiceAnalysisAuthorize.Policy);
 
-        // 后台进货销量分析三个 action 改为方法内校验（销售看板新权限码或 LocalPurchase.View），
+        // 后台进货销量分析各 action 在方法内校验（销售看板新权限码或 LocalPurchase.View），
         // 特性上不再挂策略；可接受的权限码里同样不包含 MobileView（行为由分析控制器测试覆盖）。
         foreach (
             var actionName in new[]
@@ -453,6 +453,7 @@ public sealed class ReactLocalSupplierInvoiceAuthorizationTests : IDisposable
                 nameof(ReactLocalSupplierInvoiceSalesAnalysisController.GetPurchaseSalesAnalysis),
                 nameof(ReactLocalSupplierInvoiceSalesAnalysisController.GetPurchaseSalesAnalysisStoreOptions),
                 nameof(ReactLocalSupplierInvoiceSalesAnalysisController.GetPurchaseSalesAnalysisSupplierOptions),
+                nameof(ReactLocalSupplierInvoiceSalesAnalysisController.GetPurchaseSalesAnalysisCategoryTree),
             }
         )
         {

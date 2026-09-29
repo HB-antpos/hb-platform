@@ -7,6 +7,8 @@
             <ResourceDictionary.MergedDictionaries>
                 <materialDesign:BundledTheme BaseTheme="Light" PrimaryColor="Blue" SecondaryColor="Amber" />
                 <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml" />
+                <!-- 配色色板：ColorThemeService 在运行时整体替换这一项，其余字典只能用 DynamicResource 引用色板里的颜色。 -->
+                <ResourceDictionary Source="Themes/Palettes/Default.xaml" />
                 <ResourceDictionary Source="Themes/PosTheme.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

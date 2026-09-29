@@ -1,7 +1,10 @@
+using AutoMapper;
+using BlazorApp.Api.Mappings.Profiles;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Api.Services;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace BlazorApp.Api.Tests
@@ -166,6 +169,68 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(12, product.MiddlePackageQuantity);
             Assert.Equal(2.25m, storeRetailPrice.PurchasePrice);
             Assert.Equal(6.75m, storeRetailPrice.StoreRetailPriceValue);
+        }
+
+        [Fact]
+        public void ApplyUpdate_OnlyChangesWarehouseProductStatusWhenStatusIsProvided()
+        {
+            var omittedStatusProduct = new WarehouseProduct { ProductCode = "P001", IsActive = false };
+            var explicitFalseProduct = new WarehouseProduct { ProductCode = "P002", IsActive = true };
+            var explicitTrueProduct = new WarehouseProduct { ProductCode = "P003", IsActive = false };
+            var product = new Product { ProductCode = "P001" };
+            var updatedAt = new DateTime(2026, 5, 20, 0, 0, 0, DateTimeKind.Utc);
+
+            WarehouseProductPricePersistenceMapper.ApplyUpdate(
+                new UpdateWarehouseProductDto { ProductCode = "P001" },
+                omittedStatusProduct,
+                product,
+                Array.Empty<StoreRetailPrice>(),
+                updatedAt
+            );
+            WarehouseProductPricePersistenceMapper.ApplyUpdate(
+                new UpdateWarehouseProductDto { ProductCode = "P002", IsActive = false },
+                explicitFalseProduct,
+                new Product { ProductCode = "P002" },
+                Array.Empty<StoreRetailPrice>(),
+                updatedAt
+            );
+            WarehouseProductPricePersistenceMapper.ApplyUpdate(
+                new UpdateWarehouseProductDto { ProductCode = "P003", IsActive = true },
+                explicitTrueProduct,
+                new Product { ProductCode = "P003" },
+                Array.Empty<StoreRetailPrice>(),
+                updatedAt
+            );
+
+            Assert.False(omittedStatusProduct.IsActive);
+            Assert.False(explicitFalseProduct.IsActive);
+            Assert.True(explicitTrueProduct.IsActive);
+        }
+
+        [Fact]
+        public void UpdateWarehouseProductMapping_PreservesStatusWhenOmitted()
+        {
+            var mapper = new MapperConfiguration(
+                cfg => cfg.AddProfile<WarehouseMappingProfile>(),
+                NullLoggerFactory.Instance
+            ).CreateMapper();
+
+            var omittedStatusProduct = mapper.Map(
+                new UpdateWarehouseProductDto { ProductCode = "P001" },
+                new WarehouseProduct { ProductCode = "P001", IsActive = true }
+            );
+            var explicitFalseProduct = mapper.Map(
+                new UpdateWarehouseProductDto { ProductCode = "P002", IsActive = false },
+                new WarehouseProduct { ProductCode = "P002", IsActive = true }
+            );
+            var explicitTrueProduct = mapper.Map(
+                new UpdateWarehouseProductDto { ProductCode = "P003", IsActive = true },
+                new WarehouseProduct { ProductCode = "P003", IsActive = false }
+            );
+
+            Assert.True(omittedStatusProduct.IsActive);
+            Assert.False(explicitFalseProduct.IsActive);
+            Assert.True(explicitTrueProduct.IsActive);
         }
     }
 }

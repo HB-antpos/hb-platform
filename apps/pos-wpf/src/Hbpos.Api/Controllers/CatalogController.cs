@@ -352,6 +352,46 @@ public sealed class CatalogController(ICatalogService catalogService) : Controll
             : Ok(ApiResult<CatalogLookupResponse>.Ok(response));
     }
 
+    /// <summary>
+    /// 返回同一查询码对应多个不同商品的全部候选，供新版收银端扫码时弹窗选择；目录分页与扫码回查口径不变。
+    /// </summary>
+    [HttpGet("sellable-items/code-conflicts")]
+    public async Task<ActionResult<ApiResult<CatalogCodeConflictsResponse>>> GetCodeConflicts(
+        [FromQuery] string storeCode,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(storeCode))
+        {
+            return BadRequest(ApiResult<CatalogCodeConflictsResponse>.Fail("STORE_CODE_REQUIRED", "storeCode is required"));
+        }
+
+        if (!this.IsDeviceScopeAllowed(storeCode))
+        {
+            return DeviceAuthorizationExtensions.DeviceScopeForbidden<CatalogCodeConflictsResponse>("Device is not authorized for this store.");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"code conflicts request store={storeCode}");
+        CatalogCodeConflictsResponse? response;
+        try
+        {
+            response = await catalogService.GetCodeConflictsAsync(storeCode, cancellationToken);
+        }
+        catch (CatalogCapacityBusyException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                ApiResult<CatalogCodeConflictsResponse>.Fail("CATALOG_CAPACITY_BUSY", "catalog download capacity is busy"));
+        }
+        stopwatch.Stop();
+        Log(response is null
+            ? $"code conflicts response store={storeCode} status=404 elapsedMs={stopwatch.ElapsedMilliseconds}"
+            : $"code conflicts response store={response.StoreCode} status=200 available={response.Available} items={response.Items.Count} elapsedMs={stopwatch.ElapsedMilliseconds}");
+
+        return response is null
+            ? NotFound(ApiResult<CatalogCodeConflictsResponse>.Fail("STORE_NOT_FOUND", "store was not found or inactive"))
+            : Ok(ApiResult<CatalogCodeConflictsResponse>.Ok(response));
+    }
+
     [Authorize(Policy = CashierAuthorizationPolicies.SpecialProductsView)]
     [HttpGet("special-products/page")]
     public async Task<ActionResult<ApiResult<CatalogSpecialProductsPageResponse>>> GetSpecialProductsPage(

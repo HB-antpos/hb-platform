@@ -22,6 +22,7 @@ public sealed class CatalogControllerTests
         Assert.Equal("delta/page", GetHttpGetTemplate(nameof(CatalogController.GetCatalogDeltaPage)));
         Assert.Equal("sellable-items/lookup", GetHttpGetTemplate(nameof(CatalogController.LookupSellableItem)));
         Assert.Equal("special-products/page", GetHttpGetTemplate(nameof(CatalogController.GetSpecialProductsPage)));
+        Assert.Equal("sellable-items/code-conflicts", GetHttpGetTemplate(nameof(CatalogController.GetCodeConflicts)));
         Assert.Equal("promotions", GetHttpGetTemplate(nameof(CatalogController.GetPromotionRules)));
         Assert.Equal("sellable-items/compare", GetHttpPostTemplate(nameof(CatalogController.CompareSellableItems)));
         Assert.Equal("special-products/mark", GetHttpPostTemplate(nameof(CatalogController.MarkSpecialProduct)));
@@ -96,7 +97,8 @@ public sealed class CatalogControllerTests
             (await controller.GetSellableItemsPage("S01", null, null, cancellationToken: CancellationToken.None)).Result as ObjectResult,
             (await controller.GetCatalogDeltaPage("S01", "base", "target", null, cancellationToken: CancellationToken.None)).Result as ObjectResult,
             (await controller.CompareSellableItems(new CatalogCompareRequest("S01", []), CancellationToken.None)).Result as ObjectResult,
-            (await controller.GetSpecialProductsPage("S01", null, cancellationToken: CancellationToken.None)).Result as ObjectResult
+            (await controller.GetSpecialProductsPage("S01", null, cancellationToken: CancellationToken.None)).Result as ObjectResult,
+            (await controller.GetCodeConflicts("S01", CancellationToken.None)).Result as ObjectResult
         };
 
         foreach (var response in responses)
@@ -429,6 +431,50 @@ public sealed class CatalogControllerTests
     }
 
     [Fact]
+    public async Task GetCodeConflicts_ReturnsWrappedServiceResponse()
+    {
+        var expected = new CatalogCodeConflictsResponse("S01", DateTimeOffset.UnixEpoch, true, []);
+        var service = new FakeCatalogService { CodeConflictsResponse = expected };
+        var controller = new CatalogController(service);
+
+        var result = await controller.GetCodeConflicts("S01", CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var apiResult = Assert.IsType<ApiResult<CatalogCodeConflictsResponse>>(ok.Value);
+        Assert.True(apiResult.Success);
+        Assert.Same(expected, apiResult.Data);
+        Assert.Equal("S01", service.LastCodeConflictsStoreCode);
+    }
+
+    [Fact]
+    public async Task GetCodeConflicts_ReturnsForbiddenWhenDeviceStoreDoesNotMatch()
+    {
+        var service = new FakeCatalogService();
+        var controller = new CatalogController(service);
+        SetAuthenticatedDevice(controller, storeCode: "S02", deviceCode: "POS-02");
+
+        var result = await controller.GetCodeConflicts("S01", CancellationToken.None);
+
+        var forbidden = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        var apiResult = Assert.IsType<ApiResult<CatalogCodeConflictsResponse>>(forbidden.Value);
+        Assert.Equal("DEVICE_SCOPE_FORBIDDEN", apiResult.ErrorCode);
+        Assert.Null(service.LastCodeConflictsStoreCode);
+    }
+
+    [Fact]
+    public async Task GetCodeConflicts_ReturnsStoreNotFoundWhenServiceHasNoStoreIndex()
+    {
+        var controller = new CatalogController(new FakeCatalogService());
+
+        var result = await controller.GetCodeConflicts("S01", CancellationToken.None);
+
+        var notFound = Assert.IsType<NotFoundObjectResult>(result.Result);
+        var apiResult = Assert.IsType<ApiResult<CatalogCodeConflictsResponse>>(notFound.Value);
+        Assert.Equal("STORE_NOT_FOUND", apiResult.ErrorCode);
+    }
+
+    [Fact]
     public async Task MarkSpecialProduct_ReturnsBadRequestWhenProductCodeMissing()
     {
         var controller = new CatalogController(new FakeCatalogService());
@@ -537,6 +583,10 @@ public sealed class CatalogControllerTests
         public CatalogLookupResponse? LookupResponse { get; init; }
 
         public CatalogSpecialProductsPageResponse? SpecialProductsPageResponse { get; init; }
+
+        public CatalogCodeConflictsResponse? CodeConflictsResponse { get; init; }
+
+        public string? LastCodeConflictsStoreCode { get; private set; }
 
         public CatalogPromotionsResponse? PromotionRulesResponse { get; init; }
 
@@ -707,6 +757,16 @@ public sealed class CatalogControllerTests
             return ThrowCapacityBusy
                 ? Task.FromException<CatalogSpecialProductsPageResponse?>(new CatalogCapacityBusyException("busy"))
                 : Task.FromResult(SpecialProductsPageResponse);
+        }
+
+        public Task<CatalogCodeConflictsResponse?> GetCodeConflictsAsync(
+            string storeCode,
+            CancellationToken cancellationToken)
+        {
+            LastCodeConflictsStoreCode = storeCode;
+            return ThrowCapacityBusy
+                ? Task.FromException<CatalogCodeConflictsResponse?>(new CatalogCapacityBusyException("busy"))
+                : Task.FromResult(CodeConflictsResponse);
         }
 
         public Task<CatalogPromotionsResponse?> GetPromotionRulesAsync(

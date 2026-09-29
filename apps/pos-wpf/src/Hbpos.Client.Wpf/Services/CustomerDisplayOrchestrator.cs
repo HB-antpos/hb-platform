@@ -10,6 +10,13 @@ public interface ICustomerDisplayOrchestrator
 {
     event EventHandler? Closed;
 
+    /// <summary>客显窗口请求切到全屏（普通模式下双击标题栏）。</summary>
+    event EventHandler? FullscreenRequested
+    {
+        add { }
+        remove { }
+    }
+
     void LoadFromCart(
         CustomerDisplayViewModel customerDisplay,
         PosSessionState session,
@@ -80,6 +87,12 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
     {
         add => customerDisplayWindowService.Closed += value;
         remove => customerDisplayWindowService.Closed -= value;
+    }
+
+    public event EventHandler? FullscreenRequested
+    {
+        add => customerDisplayWindowService.FullscreenRequested += value;
+        remove => customerDisplayWindowService.FullscreenRequested -= value;
     }
 
     public void LoadFromCart(

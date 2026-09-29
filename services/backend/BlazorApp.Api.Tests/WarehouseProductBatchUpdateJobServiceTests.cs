@@ -354,7 +354,7 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
         secondRequest.SyncImageToHq = false;
 
         var first = await service.StartJobAsync(firstRequest, "操作员甲");
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var second = await service.StartJobAsync(secondRequest, "操作员乙");
 
         var prematureSecondStart = await Task.WhenAny(
@@ -364,7 +364,7 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
         Assert.NotSame(secondStarted.Task, prematureSecondStart);
 
         releaseFirst.SetResult();
-        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         Assert.Equal(
             WarehouseProductBatchUpdateJobStatusConstants.Succeeded,
             (await WaitForJobAsync(service, first.JobId)).Status
@@ -453,6 +453,71 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
     }
 
     [Fact]
+    public async Task 启动任务_仅供货说明不同时不得复用正在执行的Job且说明走带选项重载()
+    {
+        var release = new TaskCompletionSource<WarehouseProductBatchUpdateResultDto>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var capturedNotices = new List<string?>();
+        // Strict：未开图片生成时若仍走旧的无选项重载，调用会直接失败。
+        var localService = new Mock<IProductWarehouseReactService>(MockBehavior.Strict);
+        localService
+            .Setup(service => service.BatchUpdateAsync(
+                It.IsAny<List<UpdateItemDto>>(),
+                It.IsAny<string?>(),
+                It.IsAny<WarehouseProductBatchUpdateOptionsDto>()
+            ))
+            .Returns((List<UpdateItemDto> _, string? _, WarehouseProductBatchUpdateOptionsDto options) =>
+            {
+                lock (capturedNotices)
+                {
+                    capturedNotices.Add(options.SupplyNotice?.StoreFacingNote);
+                    // 第一个任务卡住不完成，保证第二次提交时第一个仍处于执行中。
+                    return capturedNotices.Count == 1
+                        ? release.Task
+                        : Task.FromResult(new WarehouseProductBatchUpdateResultDto
+                        {
+                            Success = true,
+                            SuccessCount = 1,
+                        });
+                }
+            });
+        var service = CreateService(localService.Object, Mock.Of<IProductHqSyncService>());
+
+        var first = await service.StartJobAsync(CreateDelistJobRequest("会补货"), "操作员甲");
+        var second = await service.StartJobAsync(CreateDelistJobRequest("不再供应"), "操作员甲");
+
+        // 同样的商品与字段、只是说明不同：若被合并，第二次填写的说明会被静默丢弃。
+        Assert.NotEqual(first.JobId, second.JobId);
+        Assert.False(second.IsDuplicateRequest);
+        release.SetResult(new WarehouseProductBatchUpdateResultDto
+        {
+            Success = true,
+            SuccessCount = 1,
+        });
+        await WaitForJobAsync(service, first.JobId);
+        await WaitForJobAsync(service, second.JobId);
+        // 两个任务由线程池调度，执行先后不作保证，只校验各自的说明都原样到达服务层。
+        Assert.Equal(
+            new[] { "不再供应", "会补货" },
+            capturedNotices.OrderBy(note => note, StringComparer.Ordinal).ToArray()
+        );
+    }
+
+    private static WarehouseProductBatchUpdateJobRequestDto CreateDelistJobRequest(string storeNote)
+    {
+        return new WarehouseProductBatchUpdateJobRequestDto
+        {
+            Items = [new UpdateItemDto { ProductCode = "P-DELIST", IsActive = false }],
+            SupplyNotice = new WarehouseProductSupplyNoticeInputDto
+            {
+                SupplyPlan = "Undecided",
+                StoreFacingNote = storeNote,
+            },
+        };
+    }
+
+    [Fact]
     public async Task 启动任务_队列达到上限时明确拒绝新任务()
     {
         var release = new TaskCompletionSource<WarehouseProductBatchUpdateResultDto>(
@@ -529,21 +594,14 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (
-                job?.Status == WarehouseProductBatchUpdateJobStatusConstants.Succeeded
-                || job?.Status == WarehouseProductBatchUpdateJobStatusConstants.PartiallySucceeded
-                || job?.Status == WarehouseProductBatchUpdateJobStatusConstants.Failed
-            )
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待仓库商品批量修改 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current =>
+                current?.Status == WarehouseProductBatchUpdateJobStatusConstants.Succeeded
+                || current?.Status == WarehouseProductBatchUpdateJobStatusConstants.PartiallySucceeded
+                || current?.Status == WarehouseProductBatchUpdateJobStatusConstants.Failed,
+            describeLast: current => $"仓库商品批量修改 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 }

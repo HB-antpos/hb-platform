@@ -18,6 +18,20 @@ export interface RevenueHourly {
   isPeak: boolean
   branchCode?: string
   branchName?: string
+  /** 后端整页快照按分店逐小时返回单数；旧接口缺字段时按 0。 */
+  orderCount?: number
+  orderCountLY?: number
+}
+
+/** 多日区间最后一天（今天）与同期对应日的数据，用于把今天对齐到截止整点。 */
+export interface RevenueLastDay {
+  /** 后端 DateTime，形如 2026-09-24T00:00:00；取前 10 位作为日期。 */
+  date: string
+  compareDate?: string | null
+  /** 今天各店全天日统计（revenue）与同期对应日全天（revenueLY）。 */
+  branches: RevenueBranch[]
+  /** 今天（revenue）与同期对应日（revenueLY）的分店×小时。 */
+  hourly: RevenueHourly[]
 }
 
 export interface RevenueWeeklyNode {

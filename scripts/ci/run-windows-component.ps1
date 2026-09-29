@@ -123,24 +123,105 @@ $testFilter = if ($Profile -eq 'weekly') {
 dotnet restore apps/pos-wpf/hbpos_win.slnx
 dotnet build apps/pos-wpf/hbpos_win.slnx --configuration Release --no-restore
 
-$clientShardFilters = @{
-  'client-a-b-d-h' = '(FullyQualifiedName~Hbpos.Client.Tests.A|FullyQualifiedName~Hbpos.Client.Tests.B|FullyQualifiedName~Hbpos.Client.Tests.D|FullyQualifiedName~Hbpos.Client.Tests.E|FullyQualifiedName~Hbpos.Client.Tests.F|FullyQualifiedName~Hbpos.Client.Tests.G|FullyQualifiedName~Hbpos.Client.Tests.H)'
-  'client-c-card' = 'FullyQualifiedName~Hbpos.Client.Tests.Card'
-  'client-c-other' = '(FullyQualifiedName~Hbpos.Client.Tests.C)&(FullyQualifiedName!~Hbpos.Client.Tests.Card)'
-  'client-i-k-m-n' = '(FullyQualifiedName~Hbpos.Client.Tests.I|FullyQualifiedName~Hbpos.Client.Tests.J|FullyQualifiedName~Hbpos.Client.Tests.K|FullyQualifiedName~Hbpos.Client.Tests.M|FullyQualifiedName~Hbpos.Client.Tests.N)'
-  'client-l-linkly' = 'FullyQualifiedName~Hbpos.Client.Tests.Linkly'
-  'client-l-other' = '(FullyQualifiedName~Hbpos.Client.Tests.L)&(FullyQualifiedName!~Hbpos.Client.Tests.Linkly)'
-  'client-o-r' = '(FullyQualifiedName~Hbpos.Client.Tests.O|FullyQualifiedName~Hbpos.Client.Tests.P|FullyQualifiedName~Hbpos.Client.Tests.Q|FullyQualifiedName~Hbpos.Client.Tests.R)'
-  'client-s-shared' = 'FullyQualifiedName~Hbpos.Client.Tests.Shared'
-  'client-s-other' = '(FullyQualifiedName~Hbpos.Client.Tests.S)&(FullyQualifiedName!~Hbpos.Client.Tests.Shared)'
-  'client-t-z' = '(FullyQualifiedName~Hbpos.Client.Tests.T|FullyQualifiedName~Hbpos.Client.Tests.U|FullyQualifiedName~Hbpos.Client.Tests.V|FullyQualifiedName~Hbpos.Client.Tests.W|FullyQualifiedName~Hbpos.Client.Tests.X|FullyQualifiedName~Hbpos.Client.Tests.Y|FullyQualifiedName~Hbpos.Client.Tests.Z)'
+$clientTestsProject = 'apps/pos-wpf/tests/Hbpos.Client.Tests/Hbpos.Client.Tests.csproj'
+$clientTestNamespace = 'Hbpos.Client.Tests.'
+
+# 分片按类名前缀划分：命中任一 Include 且不命中任何 Exclude。同一份定义既生成 dotnet test
+# 过滤表达式，也用于完整性校验，保证两者不会各自漂移。
+$clientShards = [ordered]@{
+  'client-a-b-d-h' = @{ Include = @('A', 'B', 'D', 'E', 'F', 'G', 'H'); Exclude = @() }
+  'client-c-card' = @{ Include = @('Card'); Exclude = @() }
+  'client-c-other' = @{ Include = @('C'); Exclude = @('Card') }
+  'client-i-k-m-n' = @{ Include = @('I', 'J', 'K', 'M', 'N'); Exclude = @() }
+  'client-l-linkly' = @{ Include = @('Linkly'); Exclude = @() }
+  'client-l-other' = @{ Include = @('L'); Exclude = @('Linkly') }
+  'client-o-r' = @{ Include = @('O', 'P', 'Q', 'R'); Exclude = @() }
+  'client-s-shared' = @{ Include = @('Shared'); Exclude = @() }
+  'client-s-other' = @{ Include = @('S'); Exclude = @('Shared') }
+  'client-t-z' = @{ Include = @('T', 'U', 'V', 'W', 'X', 'Y', 'Z'); Exclude = @() }
 }
 
-if ($Shard -eq 'all' -or $clientShardFilters.ContainsKey($Shard)) {
+function Get-ClientShardFilter {
+  param([Parameter(Mandatory = $true)][hashtable]$Definition)
+
+  $include = ($Definition.Include | ForEach-Object { "FullyQualifiedName~$clientTestNamespace$_" }) -join '|'
+  $filter = "($include)"
+  foreach ($prefix in $Definition.Exclude) {
+    $filter += "&(FullyQualifiedName!~$clientTestNamespace$prefix)"
+  }
+  return $filter
+}
+
+function Test-ClientShardMatch {
+  param(
+    [Parameter(Mandatory = $true)][hashtable]$Definition,
+    [Parameter(Mandatory = $true)][string]$TestName
+  )
+
+  # 与 VSTest 过滤的 ~ 语义一致：不区分大小写的包含匹配。用循环而不是管道，几千个测试逐片判断也很快。
+  foreach ($prefix in $Definition.Exclude) {
+    if ($TestName.IndexOf("$clientTestNamespace$prefix", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+      return $false
+    }
+  }
+  foreach ($prefix in $Definition.Include) {
+    if ($TestName.IndexOf("$clientTestNamespace$prefix", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Assert-ClientShardCoverage {
+  # 分片过滤只校验"每片 >0 个测试"，漏片的测试会被静默跳过；这里用全量清单确认每个测试恰好属于一个分片。
+  $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+  $env:VSLANG = '1033'
+  $listing = @(dotnet test $clientTestsProject --configuration Release --no-build --list-tests)
+  $headerIndex = -1
+  for ($i = 0; $i -lt $listing.Count; $i++) {
+    if ($listing[$i].Trim() -eq 'The following Tests are available:') {
+      $headerIndex = $i
+      break
+    }
+  }
+  if ($headerIndex -lt 0) {
+    throw "WPF client tests 清单缺少标题行，无法校验分片完整性"
+  }
+  # Theory 用例带参数后缀，过滤表达式只作用于方法全名。
+  $testNames = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+  for ($i = $headerIndex + 1; $i -lt $listing.Count; $i++) {
+    if ($listing[$i] -match '^\s{4}\S') {
+      [void]$testNames.Add(($listing[$i].Trim() -split '\(', 2)[0])
+    }
+  }
+  if ($testNames.Count -lt 1) {
+    throw "WPF client tests 清单为空，拒绝假绿"
+  }
+
+  $problems = [System.Collections.Generic.List[string]]::new()
+  foreach ($testName in $testNames) {
+    $matched = [System.Collections.Generic.List[string]]::new()
+    foreach ($shardName in $clientShards.Keys) {
+      if (Test-ClientShardMatch -Definition $clientShards[$shardName] -TestName $testName) {
+        $matched.Add($shardName)
+      }
+    }
+    if ($matched.Count -ne 1) {
+      $problems.Add("$testName -> [$($matched -join ', ')]")
+    }
+  }
+  if ($problems.Count -gt 0) {
+    $problems | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" }
+    throw "WPF client tests 有 $($problems.Count) 个测试未落入或重复落入分片（见上方列表，最多显示 20 条）"
+  }
+  Write-Host "WPF client tests 分片完整性校验通过：$($testNames.Count) 个测试方法各属一个分片"
+}
+
+if ($Shard -eq 'all' -or $clientShards.Contains($Shard)) {
   $clientFilter = if ($Shard -eq 'all') {
     $testFilter
   } else {
-    "($testFilter)&($($clientShardFilters[$Shard]))"
+    "($testFilter)&($(Get-ClientShardFilter -Definition $clientShards[$Shard]))"
   }
   $clientLogFileName = if ($Shard -eq 'all') {
     'Hbpos.Client.Tests.trx'
@@ -153,7 +234,7 @@ if ($Shard -eq 'all' -or $clientShardFilters.ContainsKey($Shard)) {
     Join-Path $resultsRoot $Shard
   }
   Invoke-TestProject `
-    -Project 'apps/pos-wpf/tests/Hbpos.Client.Tests/Hbpos.Client.Tests.csproj' `
+    -Project $clientTestsProject `
     -Filter $clientFilter `
     -LogFileName $clientLogFileName `
     -Label "WPF client tests ($Shard)" `
@@ -172,4 +253,13 @@ if ($Shard -eq 'all' -or $Shard -eq 'ui') {
     -LogFileName 'Hbpos.Client.UiTests.trx' `
     -Label 'WPF UI tests' `
     -Destination $uiDestination
+
+  # ui 分片同时承担不按类名分片的小型检查：RemoteStatus 测试与 client 分片完整性。
+  Invoke-TestProject `
+    -Project 'apps/pos-wpf/tests/Hbpos.RemoteStatus.Tests/Hbpos.RemoteStatus.Tests.csproj' `
+    -Filter $testFilter `
+    -LogFileName 'Hbpos.RemoteStatus.Tests.trx' `
+    -Label 'WPF RemoteStatus tests' `
+    -Destination $uiDestination
+  Assert-ClientShardCoverage
 }

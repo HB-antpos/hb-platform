@@ -3,6 +3,12 @@
 .filterBar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .filterKeyword { flex: 1 1 200px; min-width: 0; }
 .filterSelect { flex: 0 1 180px; min-width: 140px; }
+.categoryHint { padding: 8px 12px; border-bottom: 1px solid #e2e7ee; color: #6b788a; font-size: 12px; }
+.categoryActions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; color: #6b788a; font-size: 12px; }
+.categoryTree { width: min(390px, calc(100vw - 32px)); max-height: 280px; overflow: auto; box-sizing: border-box; padding: 4px 8px; border-top: 1px solid #e2e7ee; border-bottom: 1px solid #e2e7ee; }
+.categoryTree :global(.ant-tree) { width: 100%; }
+.categoryTree :global(.ant-tree-title) { white-space: normal; overflow-wrap: anywhere; }
+.categoryFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; border-top: 1px solid #e2e7ee; }
 .optionsAlert { margin-bottom: 12px; }
 .summaryCard { margin-bottom: 12px; }
 .summaryCard :global(.ant-card-body) { padding: 0; }

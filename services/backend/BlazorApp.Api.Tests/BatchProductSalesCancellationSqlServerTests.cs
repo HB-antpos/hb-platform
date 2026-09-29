@@ -114,7 +114,7 @@ public sealed partial class BatchProductSalesAnalysisSqlServerIntegrationTests
             };
             using var cancellation = new CancellationTokenSource();
             var reading = read(cancellation.Token);
-            await queryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await queryStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             var elapsed = Stopwatch.StartNew();
             cancellation.CancelAfter(TimeSpan.FromMilliseconds(200));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reading.WaitAsync(TimeSpan.FromSeconds(3)));

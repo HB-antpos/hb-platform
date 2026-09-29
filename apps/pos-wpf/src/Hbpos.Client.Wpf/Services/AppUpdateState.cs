@@ -10,6 +10,7 @@ public sealed partial class AppUpdateState : ObservableObject
     private Func<Task<ProcessLaunchResult>>? _installAsync;
     private Func<Task>? _retryAsync;
     private Action? _exitApplication;
+    private string? _declinedOptionalTargetVersion;
 #if DEBUG
     private Func<Task>? _continueStartupAfterDebugDismissAsync;
 #endif
@@ -92,6 +93,9 @@ public sealed partial class AppUpdateState : ObservableObject
 
     public bool IsInstallerReady => !string.IsNullOrWhiteSpace(InstallerPath);
 
+    // 中文注释：已有下载中、强更（含待安装与错误态）时后台检查不能介入，避免覆盖当前更新提示。
+    public bool IsUpdateFlowActive => IsDownloading || IsForceUpdateRequired;
+
     public string CurrentVersion
     {
         get => _currentVersion;
@@ -126,6 +130,7 @@ public sealed partial class AppUpdateState : ObservableObject
         ClearVersionCheckResult();
     }
 
+    // 中文注释：底部「最新版本/目标版本」也是更新提示，只能在安装包下载完成后调用。
     public void ApplyVersionCheck(AppUpdateCheckResponse update)
     {
         var targetVersion = AppVersionProvider.NormalizeVersionText(update.TargetVersion);
@@ -140,6 +145,32 @@ public sealed partial class AppUpdateState : ObservableObject
     {
         HasDifferentTargetVersion = false;
         IsRollbackTarget = false;
+    }
+
+    // 中文注释：本次运行内记住收银员拒绝或关闭过的可选版本，后台定时检查不再反复提示同一版本；重启后清空。
+    public void MarkOptionalUpdateDeclined(string? targetVersion)
+    {
+        var normalized = AppVersionProvider.NormalizeVersionText(targetVersion);
+        _declinedOptionalTargetVersion = string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    public bool IsOptionalUpdateDeclined(string? targetVersion)
+    {
+        return _declinedOptionalTargetVersion is not null &&
+            string.Equals(
+                _declinedOptionalTargetVersion,
+                AppVersionProvider.NormalizeVersionText(targetVersion),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool IsOptionalUpdateReadyFor(string? targetVersion)
+    {
+        return IsOptionalUpdateReady &&
+            IsInstallerReady &&
+            string.Equals(
+                AppVersionProvider.NormalizeVersionText(TargetVersion),
+                AppVersionProvider.NormalizeVersionText(targetVersion),
+                StringComparison.OrdinalIgnoreCase);
     }
 
     public void SetStatus(string statusKey, params object[] args)
@@ -163,6 +194,8 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = null;
         _retryAsync = null;
         _exitApplication = null;
+        // 中文注释：新安装包下载完成前底部不能出现目标版本号。
+        ClearVersionCheckResult();
         ClearDownloadProgress();
         SetStatus("appUpdate.force.downloading");
         NotifyCommandStates();
@@ -235,35 +268,9 @@ public sealed partial class AppUpdateState : ObservableObject
         NotifyCommandStates();
     }
 
-    public void ShowStartupUpdateError(
-        string message,
-        Func<Task> retryAsync,
-        Action exitApplication)
+    public void ClearForceUpdateDownload()
     {
-        IsForceUpdateRequired = true;
-        IsForceUpdatePendingInstall = false;
-        IsForceUpdateError = true;
-        IsOptionalUpdateReady = false;
-        IsDownloading = false;
-        InstallerPath = null;
-        TargetVersion = null;
-        ReleaseNotes = null;
-        _installAsync = null;
-        _retryAsync = retryAsync;
-        _exitApplication = exitApplication;
-        ClearDownloadProgress();
-        // 启动阶段检查失败必须复用全局阻断遮罩，但文案不能误导成安装包下载失败。
-        SetStatus("appUpdate.startup.checkFailed", message);
-        NotifyCommandStates();
-    }
-
-    public void ClearStartupUpdateError()
-    {
-        if (!string.Equals(StatusKey, "appUpdate.startup.checkFailed", StringComparison.Ordinal))
-        {
-            return;
-        }
-
+        // 中文注释：强更安装包没下载成功时回到无提示状态，不能留下阻断遮罩或底部新版本号。
         IsForceUpdateRequired = false;
         IsForceUpdatePendingInstall = false;
         IsForceUpdateError = false;
@@ -275,6 +282,7 @@ public sealed partial class AppUpdateState : ObservableObject
         _installAsync = null;
         _retryAsync = null;
         _exitApplication = null;
+        ClearVersionCheckResult();
         ClearDownloadProgress();
         StatusKey = string.Empty;
         StatusArgs = [];
@@ -328,6 +336,12 @@ public sealed partial class AppUpdateState : ObservableObject
         NotifyCommandStates();
     }
 
+    // 中文注释：收银员在交易结束后的安装确认框里选择“稍后安装”时，与点右下角关闭按钮等效。
+    public void DismissOptionalUpdate()
+    {
+        ClearOptionalUpdate();
+    }
+
     public void ClearOptionalUpdateAfterSuccessfulInstall()
     {
         if (IsForceUpdateRequired)
@@ -377,6 +391,7 @@ public sealed partial class AppUpdateState : ObservableObject
             return;
         }
 
+        MarkOptionalUpdateDeclined(TargetVersion);
         IsOptionalUpdateReady = false;
         InstallerPath = null;
         _installAsync = null;

@@ -1,5 +1,6 @@
 namespace BlazorApp.Shared.DTOs
 {
+    using System.Collections.Generic;
     /// <summary>
     /// 指定分店进货单的商品销量分析响应。
     /// </summary>
@@ -56,6 +57,7 @@ namespace BlazorApp.Shared.DTOs
     {
         public string? StoreCode { get; set; }
         public string? SupplierCode { get; set; }
+        public List<string>? SupplierCategoryGuids { get; set; }
         public DateTime? OrderDateStart { get; set; }
         public DateTime? OrderDateEnd { get; set; }
         public string? Keyword { get; set; }

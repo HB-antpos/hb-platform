@@ -296,22 +296,13 @@ public sealed class SalesStatisticsAlignmentBackgroundRecalculateServiceTests : 
 
     private async Task<ScheduledTaskLog> WaitForStatusAsync(Guid taskId, string expectedStatus)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (DateTime.UtcNow < deadline)
-        {
-            var taskLog = await _db.Queryable<ScheduledTaskLog>().SingleAsync(x => x.Id == taskId);
-            if (taskLog?.Status == expectedStatus)
-            {
-                return taskLog;
-            }
-
-            await Task.Delay(50);
-        }
-
-        var latest = await _db.Queryable<ScheduledTaskLog>().SingleAsync(x => x.Id == taskId);
-        throw new Xunit.Sdk.XunitException(
-            $"等待任务状态 {expectedStatus} 超时，当前状态：{latest?.Status ?? "未找到"}"
+        var taskLog = await WaitForValueAsync(
+            () => _db.Queryable<ScheduledTaskLog>().SingleAsync(x => x.Id == taskId),
+            current => current?.Status == expectedStatus,
+            describeLast: current =>
+                $"等待任务状态 {expectedStatus}，当前状态：{current?.Status ?? "未找到"}"
         );
+        return taskLog!;
     }
 
     private static T ReadAnonymousProperty<T>(object? value, string propertyName)

@@ -73,6 +73,29 @@ export type SalesProductSearchItem = Readonly<{
   discountRate: number | null;
 }>;
 
+/**
+ * 一码多商品候选只携带展示与身份字段；加购时运行时按查询码 + 商品编码
+ * 重新读取本地目录，UI 不能提供或改写价格。
+ */
+export type SalesLookupCandidate = Readonly<{
+  productCode: string;
+  itemNumber: string | null;
+  barcode: string | null;
+  lookupCode: string;
+  displayName: string;
+  unitPriceCents: number;
+  discountRate: number | null;
+  priceSource: 0 | 1 | 2 | 3 | 4;
+}>;
+
+/** 扫码或精确输入命中多个不同商品时等待收银员选择；不自动加购任何一个。 */
+export type SalesLookupSelection = Readonly<{
+  selectionId: string;
+  lookupCode: string;
+  source: "manual" | "hid" | "camera";
+  candidates: readonly SalesLookupCandidate[];
+}>;
+
 /** 业务反馈与声音解耦；路由层仅将其映射为本地提示音。 */
 export type SalesFeedbackEvent = Readonly<{
   kind:
@@ -126,6 +149,9 @@ export type SalesPresenterState = Readonly<{
   query: string;
   searchStatus: SalesSearchStatus;
   searchResults: readonly SalesProductSearchItem[];
+  lookupSelection: SalesLookupSelection | null;
+  /** 已点选候选、加购（含主管授权）尚未完成；期间候选弹窗保持打开但不可再选。 */
+  lookupSelectionPending: boolean;
   pendingLookupCount: number;
   cashTenderedText: string;
   errorCode: SalesErrorCode | null;
@@ -187,6 +213,18 @@ export interface SalesWorkflowPort {
   subscribeLookupOutcome?(
     listener: (outcome: SalesFeedbackEvent) => void,
   ): () => void;
+  /** 精确查码命中多个不同商品时发布候选；该次查码不加购，等待收银员选择。 */
+  subscribeLookupSelection?(
+    listener: (selection: SalesLookupSelection) => void,
+  ): () => void;
+  /** 收银员选定候选后按查询码 + 商品编码重新读取本地目录并加购。 */
+  addLookupCandidate?(
+    input: Readonly<{
+      lookupCode: string;
+      productCode: string;
+      source?: "manual" | "hid" | "camera";
+    }>,
+  ): Promise<string | null>;
   subscribeScanTarget(listener: (lineId: string) => void): () => void;
   addOpenItem(unitPriceCents: number): Promise<void>;
   getPendingCatalogWorkCount(): number;
@@ -254,6 +292,7 @@ export class SalesPresenter {
   private readonly unsubscribePendingCatalogWork: () => void;
   private readonly unsubscribeScanTarget: () => void;
   private readonly unsubscribeLookupOutcome: () => void;
+  private readonly unsubscribeLookupSelection: () => void;
   private cashIntentId: string | null = null;
   private cashSubmission: Promise<boolean> | null = null;
   private checkoutPreparation: Promise<CartSnapshot | null> | null = null;
@@ -278,6 +317,8 @@ export class SalesPresenter {
       query: "",
       searchStatus: "idle",
       searchResults: [],
+      lookupSelection: null,
+      lookupSelectionPending: false,
       pendingLookupCount: dependencies.workflow.getPendingCatalogWorkCount(),
       cashTenderedText: "",
       errorCode: null,
@@ -307,6 +348,10 @@ export class SalesPresenter {
       dependencies.workflow.subscribeLookupOutcome?.((outcome) => {
         if (!this.destroyed) this.publishFeedback(outcome);
       }) ?? (() => undefined);
+    this.unsubscribeLookupSelection =
+      dependencies.workflow.subscribeLookupSelection?.((selection) => {
+        this.showLookupSelection(selection);
+      }) ?? (() => undefined);
   }
 
   public readonly getState = (): SalesPresenterState => this.state;
@@ -335,6 +380,7 @@ export class SalesPresenter {
       this.unsubscribePendingCatalogWork();
       this.unsubscribeScanTarget();
       this.unsubscribeLookupOutcome();
+      this.unsubscribeLookupSelection();
       this.listeners.clear();
       this.feedbackListeners.clear();
     }
@@ -430,6 +476,7 @@ export class SalesPresenter {
 
   public addLookupCode(): Promise<boolean> {
     const lookupCode = this.state.query.trim();
+    this.dismissLookupSelection();
     if (!this.dependencies.capabilities.catalog) {
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt("manual");
@@ -482,6 +529,7 @@ export class SalesPresenter {
   }
 
   public addProduct(product: SalesProductSearchItem): Promise<boolean> {
+    this.dismissLookupSelection();
     if (!this.dependencies.capabilities.catalog) {
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt("manual");
@@ -509,6 +557,8 @@ export class SalesPresenter {
     const completeRejectedHid = () => {
       scanTiming.complete(timingId, "failure");
     };
+    // 中文注释：新的扫码取代尚未选择的一码多商品候选，避免旧弹窗遮住后续交易。
+    this.dismissLookupSelection();
     if (!this.dependencies.capabilities.catalog) {
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt(source);
@@ -538,7 +588,68 @@ export class SalesPresenter {
       });
   }
 
+  /**
+   * 收银员从一码多商品候选中选定商品。运行时按查询码 + 商品编码重新读取本地目录，
+   * 经与扫码相同的授权、审计与结账围栏加购。与搜索抽屉一致，加购完成前弹窗保持打开
+   * （主管授权弹窗叠在其上，避免与关闭动画竞争），期间忽略重复点选。
+   */
+  public chooseLookupCandidate(productCode: string): Promise<boolean> {
+    const selection = this.state.lookupSelection;
+    const candidate = selection?.candidates.find(
+      (current) => current.productCode === productCode,
+    );
+    if (!selection || !candidate || this.state.lookupSelectionPending) {
+      return Promise.resolve(false);
+    }
+    const workflow = this.dependencies.workflow;
+    if (!this.dependencies.capabilities.catalog || !workflow.addLookupCandidate) {
+      this.dismissLookupSelection();
+      this.patchState({ errorCode: "runtime-unavailable" });
+      this.publishBlockedAddAttempt(selection.source);
+      return Promise.resolve(false);
+    }
+    if (!this.canMutateNewTransaction()) {
+      this.dismissLookupSelection();
+      this.publishBlockedAddAttempt(selection.source);
+      return Promise.resolve(false);
+    }
+    this.patchState({ lookupSelectionPending: true });
+    const revealRevision = this.state.revealRevision;
+    return workflow
+      .addLookupCandidate({
+        lookupCode: candidate.lookupCode,
+        productCode: candidate.productCode,
+        source: selection.source,
+      })
+      .then((lineId) => {
+        this.finishLookupSelection(selection);
+        this.applyCartSnapshot(this.dependencies.cart.getSnapshot());
+        if (
+          lineId &&
+          !(
+            this.state.revealRevision > revealRevision &&
+            this.state.revealLineId === lineId
+          )
+        ) {
+          this.revealLine(lineId);
+        }
+        this.patchState({ errorCode: null });
+        return true;
+      })
+      .catch((error: unknown) => {
+        this.finishLookupSelection(selection);
+        this.patchState({ errorCode: productMutationErrorCode(error) });
+        return false;
+      });
+  }
+
+  /** 取消选择：本次查码不加入任何商品。 */
+  public cancelLookupSelection(): void {
+    this.dismissLookupSelection();
+  }
+
   public addOpenItem(unitPriceCents: number): Promise<boolean> {
+    this.dismissLookupSelection();
     if (!Number.isSafeInteger(unitPriceCents) || unitPriceCents <= 0) {
       this.patchState({ errorCode: "invalid-price" });
       this.publishBlockedAddAttempt("manual");
@@ -997,7 +1108,12 @@ export class SalesPresenter {
     return this.dependencies.workflow
       .lockTerminal()
       .then(() => {
-        this.patchState({ phase: "locked", errorCode: null });
+        this.patchState({
+          phase: "locked",
+          errorCode: null,
+          lookupSelection: null,
+          lookupSelectionPending: false,
+        });
         return true;
       })
       .catch(() => {
@@ -1033,23 +1149,7 @@ export class SalesPresenter {
         return true;
       })
       .catch((error: unknown) => {
-        this.patchState({
-          errorCode:
-            transportFailureErrorCode(error) ??
-            (hasErrorCode(
-              error,
-              "NEW_TRANSACTIONS_DISABLED",
-            )
-              ? "new-transactions-disabled"
-              : hasErrorCode(
-                    error,
-                    "ACTIVE_PRICING_CART_TERMINAL_RECOVERY_REQUIRED",
-                  )
-                ? "terminal-recovery-required"
-              : hasErrorCode(error, "SALES_OPERATION_NOT_AUTHORIZED")
-                ? "authorization-denied"
-                : "product-add-failed"),
-        });
+        this.patchState({ errorCode: productMutationErrorCode(error) });
         return false;
       });
   }
@@ -1077,6 +1177,8 @@ export class SalesPresenter {
       pendingLookupCount,
       cashTenderedText: "",
       errorCode: null,
+      lookupSelection: null,
+      lookupSelectionPending: false,
     });
     const preparation = Promise.resolve()
       .then(() =>
@@ -1214,6 +1316,50 @@ export class SalesPresenter {
     }
   }
 
+  private showLookupSelection(selection: SalesLookupSelection): void {
+    if (this.destroyed) return;
+    if (
+      this.state.phase !== "selling" ||
+      selection.candidates.length < 2
+    ) {
+      // 中文注释：结账准备或锁屏期间迟到的候选不能弹窗，仅给出失败反馈。
+      this.publishFeedback({
+        attemptId: selection.selectionId,
+        source: selection.source,
+        kind: "failed-blocked",
+      });
+      return;
+    }
+    this.patchState({
+      lookupSelection: selection,
+      lookupSelectionPending: false,
+    });
+    this.publishFeedback({
+      attemptId: selection.selectionId,
+      source: selection.source,
+      kind: "query-found",
+    });
+  }
+
+  private dismissLookupSelection(): void {
+    if (
+      this.state.lookupSelection !== null ||
+      this.state.lookupSelectionPending
+    ) {
+      this.patchState({
+        lookupSelection: null,
+        lookupSelectionPending: false,
+      });
+    }
+  }
+
+  /** 只关闭本次点选所属的候选；期间已被新扫码替换的候选保持不变。 */
+  private finishLookupSelection(selection: SalesLookupSelection): void {
+    if (this.state.lookupSelection === selection) {
+      this.dismissLookupSelection();
+    }
+  }
+
   private publishBlockedAddAttempt(
     source: "manual" | "hid" | "camera",
   ): void {
@@ -1239,6 +1385,19 @@ export class SalesPresenter {
       }
     }
   }
+}
+
+function productMutationErrorCode(error: unknown): SalesErrorCode {
+  return (
+    transportFailureErrorCode(error) ??
+    (hasErrorCode(error, "NEW_TRANSACTIONS_DISABLED")
+      ? "new-transactions-disabled"
+      : hasErrorCode(error, "ACTIVE_PRICING_CART_TERMINAL_RECOVERY_REQUIRED")
+        ? "terminal-recovery-required"
+        : hasErrorCode(error, "SALES_OPERATION_NOT_AUTHORIZED")
+          ? "authorization-denied"
+          : "product-add-failed")
+  );
 }
 
 function findProductMutationTarget(

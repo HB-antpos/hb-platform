@@ -712,7 +712,7 @@ public sealed class LocalSupplierInvoiceBatchUpdateJobServiceTests
                 "191554882683",
             ]
         ), "tester");
-        var captured = await capturedRequest.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var captured = await capturedRequest.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         var item = Assert.Single(captured.Items);
         Assert.Equal("191554882676", item.Barcode);
@@ -938,15 +938,12 @@ public sealed class LocalSupplierInvoiceBatchUpdateJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await service.GetUpdateToStorePricesJobAsync(jobId);
-            if (job?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed)
-                return job;
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待更新到分店价格 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetUpdateToStorePricesJobAsync(jobId),
+            current => current?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed,
+            describeLast: current => $"更新到分店价格 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 
     private static async Task<LocalSupplierInvoiceUpdateHqProductsJobDto> WaitForHqJobAsync(
@@ -954,15 +951,12 @@ public sealed class LocalSupplierInvoiceBatchUpdateJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await service.GetUpdateHqProductsJobAsync(jobId);
-            if (job?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed)
-                return job;
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待更新HQ商品 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetUpdateHqProductsJobAsync(jobId),
+            current => current?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed,
+            describeLast: current => $"更新HQ商品 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 
     private static async Task<LocalSupplierInvoicePasteDetailsJobDto> WaitForPasteJobAsync(
@@ -970,15 +964,12 @@ public sealed class LocalSupplierInvoiceBatchUpdateJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await service.GetPasteDetailsJobAsync(jobId);
-            if (job?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed)
-                return job;
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待粘贴明细 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetPasteDetailsJobAsync(jobId),
+            current => current?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed,
+            describeLast: current => $"粘贴明细 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 
     private static async Task<LocalSupplierInvoiceCheckProductsJobDto> WaitForCheckProductsJobAsync(
@@ -986,14 +977,11 @@ public sealed class LocalSupplierInvoiceBatchUpdateJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var job = await service.GetCheckProductsJobAsync(jobId);
-            if (job?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed)
-                return job;
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待商品检测 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetCheckProductsJobAsync(jobId),
+            current => current?.Status is LocalSupplierInvoiceBatchUpdateJobStatusConstants.Succeeded or LocalSupplierInvoiceBatchUpdateJobStatusConstants.Failed,
+            describeLast: current => $"商品检测 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 }

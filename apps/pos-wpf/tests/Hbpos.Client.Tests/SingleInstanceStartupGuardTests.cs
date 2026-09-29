@@ -97,7 +97,9 @@ public sealed class SingleInstanceStartupGuardTests
     [Fact]
     public async Task TryAcquire_returns_acquired_when_running_mutex_was_abandoned_and_lease_release_allows_reacquire()
     {
-        var options = CreateOptions();
+        // Thread.Join 返回时 OS 线程可能尚未退出完毕，互斥体还没被标记为遗弃；
+        // 等待预算只作防挂死兜底，让守卫轮询到遗弃发生，而不是 1ms 后误判为超时。
+        var options = CreateOptions() with { RunningInstanceWaitTimeout = AsyncTestWaitSupport.DefaultTimeout };
         var process = new FakeRunningProcess(11, @"C:\HBPOS\Hbpos.Client.Wpf.exe");
         var provider = new FakeProcessProvider(10, @"C:\HBPOS\Hbpos.Client.Wpf.exe", [process]);
         var guard = new SingleInstanceStartupGuard(provider, options);

@@ -21,5 +21,9 @@ namespace BlazorApp.Api.Interfaces.React
             IReadOnlyList<string>? scopedStoreCodes,
             string? storeCode
         );
+
+        Task<List<LocalSupplierCategoryNodeDto>> GetPurchaseSalesAnalysisCategoryTreeAsync(
+            string supplierCode
+        );
     }
 }

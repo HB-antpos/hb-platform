@@ -221,6 +221,7 @@ function normalizeCompactStore(raw: unknown): CompactSalesBoardStore | null {
     totalAmount: readNumber(record.totalAmount ?? record.TotalAmount),
     totalQuantity: readNumber(record.totalQuantity ?? record.TotalQuantity),
     domesticSupplierAmount: readNumber(record.domesticSupplierAmount ?? record.DomesticSupplierAmount),
+    branchTotalAmount: readNumber(record.branchTotalAmount ?? record.BranchTotalAmount),
     australianSupplierCode: readString(record.australianSupplierCode ?? record.AustralianSupplierCode) ?? '200',
     australianSupplierName: readString(record.australianSupplierName ?? record.AustralianSupplierName) ?? '200-hotbargain',
     productCount: readNumber(record.productCount ?? record.ProductCount),

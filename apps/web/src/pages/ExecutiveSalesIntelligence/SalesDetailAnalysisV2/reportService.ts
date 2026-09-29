@@ -40,6 +40,9 @@ export interface SalesDetailQuery extends ReportPeriod {
   branchCodes?: string[]
   selectedBranchCode?: string
   selectedSupplierCode?: string
+  selectedSupplierCodes?: string[]
+  supplierCategoryGuids?: string[]
+  warehouseCategoryGuids?: string[]
   selectedProductCode?: string
   search?: string
   pageIndex: number

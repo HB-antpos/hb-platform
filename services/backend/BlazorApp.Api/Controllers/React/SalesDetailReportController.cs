@@ -17,6 +17,8 @@ namespace BlazorApp.Api.Controllers.React;
 [Authorize(Policy = Permissions.SalesDashboard.SalesDetailView)]
 public sealed class SalesDetailReportController : ControllerBase
 {
+    private const int MaxSelectedSupplierCodes = 200;
+    private const int MaxCategoryGuids = 500;
     private readonly ISalesDashboardReactService _service;
     private readonly IUserService _userService;
     private readonly ILogger<SalesDetailReportController> _logger;
@@ -42,6 +44,9 @@ public sealed class SalesDetailReportController : ControllerBase
         [FromQuery] List<string>? branchCodes = null,
         [FromQuery] string? selectedBranchCode = null,
         [FromQuery] string? selectedSupplierCode = null,
+        [FromQuery] List<string>? selectedSupplierCodes = null,
+        [FromQuery] List<string>? supplierCategoryGuids = null,
+        [FromQuery] List<string>? warehouseCategoryGuids = null,
         [FromQuery] string? selectedProductCode = null,
         [FromQuery] string? search = null,
         [FromQuery] int pageIndex = 1,
@@ -56,6 +61,9 @@ public sealed class SalesDetailReportController : ControllerBase
                 return BadRequest(new { success = false, message = "kind 或 compareMode 无效" });
             if (pageIndex < 1 || pageSize < 1 || pageSize > 500)
                 return BadRequest(new { success = false, message = "分页参数无效" });
+            ValidateMultiSelectLimit(selectedSupplierCodes, MaxSelectedSupplierCodes, "供应商");
+            ValidateMultiSelectLimit(supplierCategoryGuids, MaxCategoryGuids, "供应商分类");
+            ValidateMultiSelectLimit(warehouseCategoryGuids, MaxCategoryGuids, "仓库分类");
             ValidateDateRange(startDate, endDate, compareStartDate, compareEndDate);
 
             var scope = await ResolveBranchScopeAsync(branchCodes);
@@ -71,7 +79,7 @@ public sealed class SalesDetailReportController : ControllerBase
                 });
             }
 
-            var result = await _service.GetSalesDetailReportAsync(
+            var result = await _service.GetSalesDetailReportFilteredAsync(
                 new DateRangeDto
                 {
                     StartDate = startDate,
@@ -89,7 +97,10 @@ public sealed class SalesDetailReportController : ControllerBase
                 pageIndex,
                 pageSize,
                 sections,
-                cancellationToken);
+                cancellationToken,
+                selectedSupplierCodes,
+                supplierCategoryGuids,
+                warehouseCategoryGuids);
             cancellationToken.ThrowIfCancellationRequested();
             return Ok(result);
         }
@@ -136,6 +147,13 @@ public sealed class SalesDetailReportController : ControllerBase
         .Select(value => value.Trim())
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToList() ?? new List<string>();
+
+    private static void ValidateMultiSelectLimit(IEnumerable<string>? values, int limit, string name)
+    {
+        var count = Normalize(values).Count;
+        if (count > limit)
+            throw new ArgumentException($"{name}筛选最多选择 {limit} 项，当前为 {count} 项");
+    }
 
     /// <summary>与前端日期控件一致：最长两年（含闰日）。</summary>
     internal const int MaxReportDays = 731;

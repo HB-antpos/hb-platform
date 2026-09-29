@@ -85,6 +85,7 @@ $publishDir = Join-Path $versionOutputRoot 'publish'
 $projectPath = Join-Path $RepoRoot 'apps\pos-wpf\src\Hbpos.Client.Wpf\Hbpos.Client.Wpf.csproj'
 $remoteStatusProjectPath = Join-Path $RepoRoot 'apps\pos-wpf\src\Hbpos.RemoteStatus\Hbpos.RemoteStatus.csproj'
 $remoteSetupProjectPath = Join-Path $RepoRoot 'apps\pos-wpf\src\Hbpos.RemoteMaintenance.Setup\Hbpos.RemoteMaintenance.Setup.csproj'
+$updaterProjectPath = Join-Path $RepoRoot 'apps\pos-wpf\src\Hbpos.Updater\Hbpos.Updater.csproj'
 $innoScript = Join-Path $RepoRoot 'apps\pos-wpf\installer\inno\Hbpos.Client.Wpf.iss'
 $iscc = Find-Iscc
 # 中文注释：旧 MSI ProductCode 是卸载边界，构建期先校验，避免坏 GUID 进入门店安装包。
@@ -129,6 +130,23 @@ dotnet publish $projectPath `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -o $publishDir
+
+# 中文注释：更新进度窗口放在 updater 子目录；收银端更新时先把它复制到临时目录再运行，
+# 这样安装器替换 Program Files 下的文件时不会被它占用。
+$updaterPublishDir = Join-Path $publishDir 'updater'
+dotnet publish $updaterProjectPath `
+    -c $Configuration `
+    -r win-x64 `
+    --self-contained false `
+    -p:HbposWpfAppVersion=$normalizedVersion `
+    -p:DebugType=None `
+    -p:DebugSymbols=false `
+    -o $updaterPublishDir
+
+$updaterExe = Join-Path $updaterPublishDir 'Hbpos.Updater.exe'
+if (!(Test-Path -LiteralPath $updaterExe)) {
+    throw "Publish output is missing the update progress window: $updaterExe"
+}
 
 # 中文注释：WPF 必须通过 all-users Inno 安装到 Program Files，helper 与状态服务
 # 才能从受保护目录运行。仅把 Setup DLL 放进 WPF 输出会导致运行时找不到可提权的 EXE。

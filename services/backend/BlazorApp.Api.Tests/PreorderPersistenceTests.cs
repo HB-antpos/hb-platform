@@ -846,6 +846,8 @@ public sealed class PreorderPersistenceTests : IDisposable
         PreorderGateEvaluation? evaluation = null;
         var secondTask = Task.Run(async () =>
         {
+            // SQLite 的 BeginTran 是 BEGIN IMMEDIATE，第二个连接在开事务时就会等 firstDb 的写锁，
+            // 发出任何 SQL 之前就已阻塞，所以只能在开事务前发信号。
             evaluationStarted.SetResult();
             var transaction = await secondDb.Ado.UseTranAsync(async () =>
             {
@@ -859,13 +861,16 @@ public sealed class PreorderPersistenceTests : IDisposable
             });
             Assert.True(transaction.IsSuccess, transaction.ErrorMessage);
         });
-        await evaluationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        // 防挂死上限：只等 Task.Run 被线程池调度到。原先 2 秒，在 CI runner 负载高时曾偶发超时。
+        await evaluationStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        // 反向等待：给第二个连接进入等锁的时间，并确认它确实被挡住。
+        // 负载高时它可能还没开始等锁，此时仍会在提交后才读时钟，断言照样成立，不会误报。
         await Task.Delay(100);
         Assert.False(secondTask.IsCompleted);
 
         clock.SetUtcNow(Now.AddMinutes(2));
         await firstDb.Ado.CommitTranAsync();
-        await secondTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         Assert.NotNull(evaluation);
         Assert.True(evaluation.IsBlocked);
         Assert.Equal("scheduled-while-lock-wait", Assert.Single(
@@ -1237,19 +1242,20 @@ public sealed class PreorderPersistenceTests : IDisposable
                     EndAtUtc = Now.AddHours(1),
                 }
             ));
-            await initialStoreRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await initialStoreRead.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             deactivateTask = Task.Run(() => competingDb.Updateable<Store>()
                 .SetColumns(item => item.IsActive == false)
                 .Where(item => item.StoreGUID == "store-1")
                 .ExecuteCommandAsync());
-            await Task.Delay(200);
+            // 激活此时只在等进程内 StoreGate、尚未开启数据库事务，停用不会被它阻塞。
+            // 必须确认停用已提交再放开门禁：原先固定等 200ms，负载高时停用可能排到激活事务之后。
+            Assert.Equal(1, await deactivateTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout));
             await heldLock.DisposeAsync();
 
             var error = await Assert.ThrowsAsync<PreorderBusinessException>(async () =>
                 await activateTask
             );
             Assert.Equal("PREORDER_INVALID_REQUEST", error.ErrorCode);
-            Assert.Equal(1, await deactivateTask.WaitAsync(TimeSpan.FromSeconds(5)));
         }
         finally
         {
@@ -1257,7 +1263,7 @@ public sealed class PreorderPersistenceTests : IDisposable
             await heldLock.DisposeAsync();
             if (deactivateTask != null)
             {
-                await deactivateTask.WaitAsync(TimeSpan.FromSeconds(5));
+                await deactivateTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             }
         }
 
@@ -1316,13 +1322,13 @@ public sealed class PreorderPersistenceTests : IDisposable
                     EndAtUtc = Now.AddHours(1),
                 }
             ));
-            await candidateRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await candidateRead.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             replaceDefaultTask = Task.Run(() => competingDb
                 .Updateable<PreorderTemplateStore>()
                 .SetColumns(item => item.StoreGuid == "store-2")
                 .Where(item => item.TemplateGuid == template.TemplateGuid)
                 .ExecuteCommandAsync());
-            Assert.Equal(1, await replaceDefaultTask.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(1, await replaceDefaultTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout));
             await heldLock.DisposeAsync();
 
             var error = await Assert.ThrowsAsync<PreorderBusinessException>(async () =>
@@ -1337,7 +1343,7 @@ public sealed class PreorderPersistenceTests : IDisposable
             await heldLock.DisposeAsync();
             if (replaceDefaultTask != null)
             {
-                await replaceDefaultTask.WaitAsync(TimeSpan.FromSeconds(5));
+                await replaceDefaultTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             }
         }
 
@@ -1472,7 +1478,7 @@ public sealed class PreorderPersistenceTests : IDisposable
                 "S01",
                 "device-1"
             ));
-            await resolverRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await resolverRead.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
             await _db.Updateable<Store>()
                 .SetColumns(item => item.StoreCode == "OLD")
@@ -1507,7 +1513,7 @@ public sealed class PreorderPersistenceTests : IDisposable
             }).ExecuteCommandAsync();
             await heldLock.DisposeAsync();
 
-            var response = await submitTask.WaitAsync(TimeSpan.FromSeconds(5));
+            var response = await submitTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             Assert.False(response.Success);
             Assert.Equal("PREORDER_STORE_IDENTITY_CHANGED", response.ErrorCode);
         }
@@ -2673,7 +2679,7 @@ public sealed class PreorderPersistenceTests : IDisposable
         await Task.Delay(100);
         Assert.False(secondEntered.Task.IsCompleted);
         await first.DisposeAsync();
-        await secondTask.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.True(secondEntered.Task.IsCompletedSuccessfully);
         Assert.Equal(0, PreorderMutationLock.ProcessLockCount);
@@ -2706,7 +2712,7 @@ public sealed class PreorderPersistenceTests : IDisposable
             firstAcquired.SetResult();
             await releaseFirst.Task;
         });
-        await firstAcquired.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstAcquired.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var secondTask = Task.Run(() => secondDb.Ado.UseTranAsync(async () =>
         {
             await PreorderMutationLock.AcquireDatabaseAsync(secondDb, "preorderactivation:db-lock");
@@ -2873,7 +2879,7 @@ public sealed class PreorderPersistenceTests : IDisposable
             firstAcquired.SetResult();
             await releaseFirst.Task;
         });
-        await firstAcquired.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstAcquired.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var mutationTask = Task.Run(async () =>
         {
             mutationStarted.SetResult();
@@ -2885,13 +2891,13 @@ public sealed class PreorderPersistenceTests : IDisposable
                     .ExecuteCommandAsync();
             });
         });
-        await mutationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await mutationStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         await Task.Delay(100);
         Assert.False(mutationTask.IsCompleted);
 
         releaseFirst.SetResult();
         Assert.True((await firstTask).IsSuccess);
-        Assert.True((await mutationTask.WaitAsync(TimeSpan.FromSeconds(5))).IsSuccess);
+        Assert.True((await mutationTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout)).IsSuccess);
         using var verifyDb = CreateIndependentClient();
         var renamed = await verifyDb.Queryable<Store>()
             .FirstAsync(item => item.StoreGUID == "store-1");
@@ -3251,7 +3257,7 @@ public sealed class PreorderPersistenceTests : IDisposable
             var extended = await service.CloseActivationAsync(
                 "extend-renamed-store",
                 new ClosePreorderActivationDto { EndAtUtc = Now.AddHours(3) }
-            ).WaitAsync(TimeSpan.FromSeconds(2));
+            ).WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             Assert.Equal(Now.AddHours(3), extended.EndAtUtc);
         }
         finally
@@ -3720,7 +3726,7 @@ public sealed class PreorderPersistenceTests : IDisposable
             _db.Aop.OnLogExecuted = null;
             startCompetingWrite.TrySetResult();
         }
-        await competingWrite.WaitAsync(TimeSpan.FromSeconds(5));
+        await competingWrite.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.Equal(1, statistics.SubmittedCount);
         Assert.Equal(0, statistics.CancelledCount);
@@ -4525,7 +4531,8 @@ public sealed class PreorderPersistenceTests : IDisposable
 
     private SqlSugarClient CreateIndependentClient() => new(new ConnectionConfig
     {
-        ConnectionString = $"Data Source={_dbPath};Default Timeout=5",
+        // Default Timeout 同时是 SQLite 忙等锁的上限；用例会故意让另一连接等锁，属于防挂死预算。
+        ConnectionString = $"Data Source={_dbPath};Default Timeout={(int)AsyncTestWaitSupport.DefaultTimeout.TotalSeconds}",
         DbType = DbType.Sqlite,
         IsAutoCloseConnection = true,
         InitKeyType = InitKeyType.Attribute,

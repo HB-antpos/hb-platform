@@ -155,10 +155,12 @@ export default function SalesRoute() {
     async (input: Readonly<{ productCode: string; lookupCode: string }>) => {
       const services = runtime.services;
       if (!services) return null;
+      const findExactCandidates = services.catalog.findExactCandidates;
       return resolveTrustedCartProductImage({
         ...input,
         apiBaseUrl: services.apiBaseUrl,
         findExact: services.catalog.findExact,
+        ...(findExactCandidates ? { findExactCandidates } : {}),
       });
     },
     [runtime.services],
@@ -611,23 +613,33 @@ function mapSalesUtilityResult(
   }
 }
 
+type TrustedCartProductMatch = Readonly<{
+  productCode: string;
+  lookupCode: string;
+  productImage: string | null;
+}>;
+
 async function resolveTrustedCartProductImage(
   input: Readonly<{
     productCode: string;
     lookupCode: string;
     apiBaseUrl: string;
-    findExact(lookupCode: string): Promise<Readonly<{
-      productCode: string;
-      lookupCode: string;
-      productImage: string | null;
-    }> | null>;
+    findExact(lookupCode: string): Promise<TrustedCartProductMatch | null>;
+    findExactCandidates?(
+      lookupCode: string,
+    ): Promise<readonly TrustedCartProductMatch[]>;
   }>,
 ): Promise<string | null> {
   const productCode = normalizeCatalogIdentity(input.productCode);
   const lookupCode = normalizeCatalogIdentity(input.lookupCode);
   if (!productCode || !lookupCode) return null;
 
-  const match = await input.findExact(lookupCode);
+  // 一码多商品时购物车行或候选可能不是目录胜出项，需在同码候选中按商品编码取图。
+  const match = input.findExactCandidates
+    ? (await input.findExactCandidates(lookupCode)).find(
+        (candidate) => candidate.productCode.trim() === productCode,
+      ) ?? null
+    : await input.findExact(lookupCode);
   if (
     !match ||
     match.productCode.trim() !== productCode ||
