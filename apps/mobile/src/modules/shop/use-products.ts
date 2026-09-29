@@ -6,6 +6,7 @@ import {
   buildShopProductsQueryKey,
   resolvePageProductCodes,
   resolveShopProductsPlaceholderData,
+  resolveShopProductsStaleTime,
 } from "@/modules/shop/product-query-key";
 import type { ProductDynamicDataMap, StoreOrderProductQuery } from "@/modules/shop/types";
 
@@ -20,7 +21,8 @@ export function useProducts(query: StoreOrderProductQuery, locationLookupEnabled
   const productsQuery = useQuery({
     queryKey: buildShopProductsQueryKey(query, locationLookupEnabled),
     enabled: Boolean(query.storeCode),
-    staleTime: 5 * 60 * 1000,
+    // 关键字检索每次都重新请求，浏览类查询缓存 2 分钟，规则见 resolveShopProductsStaleTime。
+    staleTime: resolveShopProductsStaleTime(query),
     placeholderData: (previousData, previousQuery) =>
       resolveShopProductsPlaceholderData(
         previousData,
