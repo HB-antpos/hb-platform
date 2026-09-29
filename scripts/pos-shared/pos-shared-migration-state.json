@@ -471,6 +471,28 @@
           "pattern": "src/features/returns/*.rntl.test.tsx"
         }
       ]
+    },
+    {
+      "path": "features/receipts/receipt-reprint-service.ts",
+      "package": "pos-receipt-core",
+      "reason": "退单（实收为负）没有找零结算，现金退单的历史重打与预览不再要求结算记录，按 WPF 打负数金额整单小票",
+      "baselineCanonicalRuntimeSha256": "684c7d190c53bc82ae8b0aec7c52e7eec4c5dc3e3fc2ea76a3d774c962c59b04",
+      "canonicalRuntimeSha256": "1c4d72537ee82059853a8307c8fbd7a0cc946a8624d70154bb9873fcc47d0a8d",
+      "canonicalTypeSha256": "842c0ae64278f105f5442bc4d3c32bbe0eb7bf778b4328cc88b8b85e4ac349c8",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        }
+      ]
     }
   ],
   "semanticAdaptations": [
