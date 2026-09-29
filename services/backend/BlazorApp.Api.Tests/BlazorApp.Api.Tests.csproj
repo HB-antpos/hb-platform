@@ -28,6 +28,11 @@
     <Compile Include="ClientAbortCancellationTests.cs" />
     <Compile Include="ClientAbortSqlCancellationTests.cs" />
     <Compile Include="MobileReportStoreOptionsTests.cs" />
+    <Compile Include="WarehouseMinOrderQuantitySyncGuardTests.cs" />
+    <Compile Include="WarehousePickingServiceTests.cs" />
+    <Compile Include="WarehousePickerTests.cs" />
+    <Compile Include="WarehousePickingSqlServerIntegrationTests.cs" />
+    <Compile Include="WarehousePickingControllerTests.cs" />
     <Compile Include="StoreProductMaintenanceWarehousePriceSyncTests.cs" />
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />
     <Compile Include="StorePriceUpdateTaskServiceTests.cs" />

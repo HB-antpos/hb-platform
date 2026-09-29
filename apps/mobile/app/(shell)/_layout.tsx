@@ -22,6 +22,7 @@ import {
 } from "@/modules/employee-profile-review/access";
 import { getEmployeeProfileReviewRequestsApi } from "@/modules/employee-profile-review/api";
 import { AppNavigationAccessProvider } from "@/modules/navigation/access-context";
+import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
 import { getPriceUpdatePendingCount } from "@/modules/price-updates/api";
 import { priceUpdateCountQueryKey } from "@/modules/price-updates/query-keys";
 import { useCartStore } from "@/store/cart-store";
@@ -539,7 +540,7 @@ export default function ShellLayout() {
             }}
           />
         </View>
-        <PrimaryTabBar activeRouteName={currentRouteName} />
+        {shouldHidePrimaryTabBar(pathname) ? null : <PrimaryTabBar activeRouteName={currentRouteName} />}
       </View>
     </AppNavigationAccessProvider>
   );

@@ -880,8 +880,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(34, menu.Count);
+        Assert.Equal(35, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "app-install");
+        Assert.Contains(menu, item => item.RouteName == "warehouse-picking");
         Assert.Contains(menu, item => item.RouteName == "cash-register-users");
         Assert.Contains(menu, item => item.RouteName == "seasonal-product-insights");
         Assert.Contains(menu, item => item.RouteName == "price-updates");
@@ -919,6 +920,29 @@ public class NavigationServiceTests
         // 移动端销售订单查询只认独立权限；Web 收银记录页的 Orders.View 不得顺带放行。
         Assert.Single(salesOrdersMenu, item => item.RouteName == "sales-orders");
         Assert.DoesNotContain(ordersMenu, item => item.RouteName == "sales-orders");
+    }
+
+    [Fact]
+    public void BuildAppMenu_ShowsWarehousePickingForPickingOrWarehouseManagePermissions()
+    {
+        var pickingUser = CreateUser(new Claim("permission", Permissions.Warehouse.Picking));
+        var manageUser = CreateUser(new Claim("permission", Permissions.Warehouse.Manage));
+        var ordersUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageOrders));
+        var productsOnlyUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageProducts));
+
+        // 拣货入口按拣货权限或其别名（管理仓库、管理仓库订货）放行；只管商品的账号看不到。
+        Assert.Single(_service.BuildAppMenu(pickingUser), item => item.RouteName == "warehouse-picking");
+        Assert.Single(_service.BuildAppMenu(manageUser), item => item.RouteName == "warehouse-picking");
+        Assert.Single(_service.BuildAppMenu(ordersUser), item => item.RouteName == "warehouse-picking");
+        Assert.DoesNotContain(_service.BuildAppMenu(productsOnlyUser), item => item.RouteName == "warehouse-picking");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_ShowsWarehousePickingOnlyForWarehouseDevices()
+    {
+        // 纯设备会话没有个人账号，拣货人靠扫员工码确认；只有仓库类型设备放出入口。
+        Assert.Contains(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "warehouse-picking");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "warehouse-picking");
     }
 
     [Fact]

@@ -80,6 +80,52 @@ export function renderBarcodeToCanvas(
   }
 }
 
+/**
+ * 只编码、不绘制：按调用方指定的码制返回条码模块序列（'1' 为黑条模块，'0' 为空白模块）。
+ * 走 JsBarcode 文档化的“传入普通对象接收 encodings”方式，不依赖 DOM，调用方可自行绘制矢量条码。
+ * 与 renderBarcodeToCanvas 不同，这里不做 EAN13 自动判断，码制完全由调用方决定；
+ * 内容无法按该码制编码（如 CODE128 遇到中文）时返回 null，调用方据此不渲染条码。
+ */
+export function encodeBarcodeModules(barcode: string, format: BarcodeFormat): string | null {
+  if (!barcode) {
+    return null
+  }
+
+  const target: { encodings?: { data?: string }[] } = {}
+  try {
+    JsBarcode(target, barcode, { format })
+  } catch {
+    // JsBarcode 遇到非法内容抛出的是字符串而不是 Error，这里统一按“不可编码”处理。
+    return null
+  }
+
+  const modules = (target.encodings ?? []).map((encoding) => encoding.data ?? '').join('')
+  return /^[01]+$/.test(modules) ? modules : null
+}
+
+/**
+ * 把模块序列转成单个 SVG path 的 d 属性：相邻黑条模块合并成一个矩形子路径。
+ * 用一个 path 而不是逐条 rect，DOM 更轻，html2canvas 序列化 SVG 时逐节点复制的计算样式也更少。
+ */
+export function buildBarcodeSvgPath(modules: string, moduleWidth: number, height: number): string {
+  const segments: string[] = []
+  let barStart = -1
+
+  // 多走一步到 modules.length，保证以黑条结尾的最后一段也能闭合输出。
+  for (let index = 0; index <= modules.length; index += 1) {
+    const isBar = modules[index] === '1'
+    if (isBar && barStart < 0) {
+      barStart = index
+    } else if (!isBar && barStart >= 0) {
+      const barWidth = (index - barStart) * moduleWidth
+      segments.push(`M${barStart * moduleWidth} 0h${barWidth}v${height}h-${barWidth}z`)
+      barStart = -1
+    }
+  }
+
+  return segments.join('')
+}
+
 export function generateBarcodeDataUrl(
   barcode: string,
   options: BarcodeOptions = defaultBarcodeOptions,

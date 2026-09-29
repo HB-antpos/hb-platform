@@ -252,6 +252,7 @@ namespace BlazorApp.Shared.Constants
             public const string ManageCategories = "Warehouse.ManageCategories";
             public const string ManageLocations = "Warehouse.ManageLocations";
             public const string ManageOrders = "Warehouse.ManageOrders";
+            public const string Picking = "Warehouse.Picking";
         }
 
         public static class DomesticPurchase
@@ -356,6 +357,8 @@ namespace BlazorApp.Shared.Constants
                 [Reports.ProductMovementView] = [Reports.View],
                 // 前端仓库商品页面兼容旧的仓库总管理权限，API 使用同一访问边界。
                 [Warehouse.ManageProducts] = [Warehouse.Manage],
+                // 现有仓库员工与订货管理者无需重新授权即可拣货；单独授予 Picking 不会反向获得管理权限。
+                [Warehouse.Picking] = [Warehouse.Manage, Warehouse.ManageOrders],
                 // 管理下载权限天然包含查看下载，保证菜单可见性和列表 GET 授权一致。
                 [System.ViewAppDownloads] = [System.ManageAppDownloads],
             };

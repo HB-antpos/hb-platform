@@ -225,6 +225,21 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "warehouse-picking",
+                TitleKey = "tabs.warehousePicking",
+                Icon = "clipboard-check-outline",
+                // 拣货权限按别名覆盖管理仓库与管理订货；菜单显式列出，避免依赖客户端别名展开。
+                Permission = Permissions.Warehouse.Picking,
+                AnyPermissions = new[]
+                {
+                    Permissions.Warehouse.Picking,
+                    Permissions.Warehouse.Manage,
+                    Permissions.Warehouse.ManageOrders,
+                },
+                Order = 42,
+            },
+            new()
+            {
                 RouteName = "domestic-purchase",
                 TitleKey = "tabs.domesticPurchase",
                 Icon = "shopping-outline",
@@ -481,6 +496,12 @@ namespace BlazorApp.Api.Services
             StringComparer.OrdinalIgnoreCase
         );
 
+        // 仓库设备（纯设备会话，无个人账号）额外可见的入口；拣货人通过扫员工码确认。
+        private static readonly HashSet<string> WarehouseDeviceRouteNames = new(
+            new[] { "warehouse", "warehouse-picking" },
+            StringComparer.OrdinalIgnoreCase
+        );
+
         private static readonly HashSet<string> WarehouseDeviceTypes = new(
             new[] { "Warehouse", "PDA-Warehouse", "WarehousePDA", "PDAWarehouse", "仓库", "仓库设备" },
             StringComparer.OrdinalIgnoreCase
@@ -585,7 +606,7 @@ namespace BlazorApp.Api.Services
             return FullAppMenu
                 .Where(node =>
                     DeviceBaseRouteNames.Contains(node.RouteName)
-                    || (isWarehouseDevice && node.RouteName.Equals("warehouse", StringComparison.OrdinalIgnoreCase))
+                    || (isWarehouseDevice && WarehouseDeviceRouteNames.Contains(node.RouteName))
                 )
                 .OrderBy(node => node.Order)
                 .Select(ToAppNavigationMenuDto)

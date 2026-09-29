@@ -737,6 +737,10 @@
       "name": "管理仓库订货",
       "description": "Web 页面 /warehouse/store-orders、/warehouse/preorders、/warehouse/store-order-import-price-variance 与移动端「订货单」- 管理分店订货、预订、配货单和发票"
     },
+    "Warehouse.Picking": {
+      "name": "仓库订单拣货",
+      "description": "移动端「订单拣货」- 扫码拣货、补录缺失的中包数并提交配货数；持有管理仓库或管理仓库订货权限时自动具备"
+    },
     "Warehouse.ManageProducts": {
       "name": "管理仓库商品",
       "description": "Web 页面 /warehouse/products、/warehouse/products/retail-price-changes、/warehouse/product-grade-management 与移动端「仓库」- 管理仓库商品、零售价变更和等级"

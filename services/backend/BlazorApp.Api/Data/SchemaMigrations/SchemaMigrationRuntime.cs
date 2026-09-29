@@ -76,6 +76,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyCompactBoardMonthlyAsync(CancellationToken cancellationToken);
 
+    Task ApplyWarehouseOrderPickingAsync(CancellationToken cancellationToken);
+
+    Task VerifyWarehouseOrderPickingAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -397,6 +401,27 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             CompactBoardMonthlySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyWarehouseOrderPickingAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderPickingSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        await VerifyWarehouseOrderPickingAsync(cancellationToken);
+    }
+
+    public async Task VerifyWarehouseOrderPickingAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderPickingSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

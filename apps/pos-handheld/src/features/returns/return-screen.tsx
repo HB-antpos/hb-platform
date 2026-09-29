@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -35,11 +42,18 @@ import { posColors } from "@/ui/theme";
 
 export const RETURN_MIN_TOUCH_TARGET = 48;
 
+/** 退货页交给路由挂载的无焦点扫码目标：路由负责捕获，页面负责按模式分发。 */
+export type ReturnHidScanTarget = Readonly<{
+  enabled: boolean;
+  onScan(value: string): Promise<void>;
+}>;
+
 type ReturnScreenProps = Readonly<{
   presenter: ReturnPresenter;
   locale?: ReturnLocale;
   initialReceiptQuery?: string | null;
   onBack?(): void;
+  renderHidScannerCapture?(target: ReturnHidScanTarget): ReactNode;
 }>;
 
 export function ReturnScreen({
@@ -47,6 +61,7 @@ export function ReturnScreen({
   locale: localeOverride,
   initialReceiptQuery,
   onBack,
+  renderHidScannerCapture,
 }: ReturnScreenProps) {
   const state = useSyncExternalStore(
     presenter.subscribe,
@@ -66,6 +81,8 @@ export function ReturnScreen({
   const [openItemName, setOpenItemName] = useState("");
   const [openItemAmount, setOpenItemAmount] = useState("");
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  // 可见输入框聚焦时由它直接接收扫码，隐藏捕获框让出焦点，避免两边抢焦点。
+  const [manualInputFocused, setManualInputFocused] = useState(false);
   const initialLookupRef = useRef<Readonly<{
     presenter: ReturnPresenter;
     query: string;
@@ -90,6 +107,33 @@ export function ReturnScreen({
   useEffect(() => {
     if (state.lines.length === 0) setConfirmationOpen(false);
   }, [state.lines.length]);
+
+  const receiptLoaded =
+    state.mode === "receipt" && state.orderSummary !== null;
+  const lookupVisible = !confirmationOpen && !receiptLoaded;
+
+  useEffect(() => {
+    // 查询区卸载时聚焦中的输入框不一定触发 onBlur，回到查询区时从未聚焦开始。
+    if (!lookupVisible) setManualInputFocused(false);
+  }, [lookupVisible]);
+
+  /**
+   * 无焦点扫码：Zebra DataWedge / 蓝牙 HID 以键盘方式输出，只有聚焦的输入框能收到。
+   * 查询区可见且没有手动聚焦输入框时，由隐藏捕获框接收整段条码：
+   * 有单模式按订单号查单，无单模式按商品码加入退货行。并发由 presenter.runExclusive 兜底。
+   */
+  const handleHidScan = useCallback(
+    async (value: string): Promise<void> => {
+      if (state.mode === "receipt") {
+        setOrderQuery(value);
+        if (await presenter.loadReceipt(value)) setOrderQuery("");
+        return;
+      }
+      setProductQuery(value);
+      if (await presenter.addNoReceiptProduct(value)) setProductQuery("");
+    },
+    [presenter, state.mode],
+  );
 
   if (state.phase === "submitting") {
     return (
@@ -178,8 +222,6 @@ export function ReturnScreen({
             "voucher",
           ]),
         );
-  const receiptLoaded =
-    state.mode === "receipt" && state.orderSummary !== null;
   const selectedQuantity = state.lines.reduce(
     (total, line) => total + line.selectedQuantity,
     0,
@@ -191,6 +233,10 @@ export function ReturnScreen({
       style={styles.stateSurface}
     >
       <SafeAreaView style={styles.safeArea} testID="return-screen">
+      {renderHidScannerCapture?.({
+        enabled: lookupVisible && !manualInputFocused,
+        onScan: handleHidScan,
+      })}
       <View style={styles.header}>
         <View style={styles.headerIdentity}>
           <Text style={styles.title}>{t("title")}</Text>
@@ -243,6 +289,7 @@ export function ReturnScreen({
               <View style={styles.lookupCard}>
                 <LabeledInput
                   autoSubmitOnScanIdle
+                  onFocusChange={setManualInputFocused}
                   editable={!state.busy}
                   label={t("search.orderLabel")}
                   onChangeText={setOrderQuery}
@@ -271,6 +318,7 @@ export function ReturnScreen({
                 <View style={styles.lookupCard}>
                   <LabeledInput
                     autoSubmitOnScanIdle
+                    onFocusChange={setManualInputFocused}
                     editable={!state.busy}
                     label={t("search.productLabel")}
                     onChangeText={setProductQuery}
@@ -303,6 +351,7 @@ export function ReturnScreen({
                   <LabeledInput
                     editable={!state.busy}
                     label={t("openItem.nameLabel")}
+                    onFocusChange={setManualInputFocused}
                     onChangeText={setOpenItemName}
                     placeholder={t("openItem.namePlaceholder")}
                     testID="return-open-item-name"
@@ -313,6 +362,7 @@ export function ReturnScreen({
                       editable={!state.busy}
                       keyboardType="decimal-pad"
                       label={t("openItem.amountLabel")}
+                      onFocusChange={setManualInputFocused}
                       onChangeText={setOpenItemAmount}
                       placeholder={t("openItem.amountPlaceholder")}
                       testID="return-open-item-amount"
@@ -695,6 +745,7 @@ function LabeledInput({
   keyboardType,
   label,
   onChangeText,
+  onFocusChange,
   onSubmitEditing,
   placeholder,
   testID,
@@ -705,6 +756,7 @@ function LabeledInput({
   keyboardType?: "default" | "decimal-pad";
   label: string;
   onChangeText(value: string): void;
+  onFocusChange?(focused: boolean): void;
   onSubmitEditing?(): void;
   placeholder: string;
   testID: string;
@@ -719,7 +771,9 @@ function LabeledInput({
         autoSubmitOnScanIdle={autoSubmitOnScanIdle}
         editable={editable}
         keyboardType={keyboardType}
+        onBlur={() => onFocusChange?.(false)}
         onChangeText={onChangeText}
+        onFocus={() => onFocusChange?.(true)}
         onSubmitEditing={onSubmitEditing}
         placeholder={placeholder}
         placeholderTextColor={posColors.mutedInk}
