@@ -153,6 +153,7 @@
     <Compile Include="ProductStoreDailyStatisticRecoveryServiceTests.cs" />
     <Compile Include="SalesStatisticsOrphanRunningStateRecoveryTests.cs" />
     <Compile Include="SalesDashboardBestSellersTests.cs" />
+    <Compile Include="CompactSalesBoardSharedBuildCancellationTests.cs" />
     <Compile Include="ProductSalesAnalysisLogicTests.cs" />
     <Compile Include="BatchProductSalesAnalysisLogicTests.cs" />
     <Compile Include="BatchProductSalesMiddleTableTests.cs" />
