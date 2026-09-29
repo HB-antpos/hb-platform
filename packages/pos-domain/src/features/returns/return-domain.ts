@@ -27,7 +27,9 @@ export type ReturnErrorCode =
   | "RETURN_LOOKUP_FAILED"
   | "RETURN_EXECUTION_DECLINED"
   | "RETURN_EXECUTION_FAILED"
-  | "RETURN_RECOVERY_FAILED";
+  | "RETURN_RECOVERY_FAILED"
+  | "RETURN_ORIGINAL_REFUND_UNAVAILABLE"
+  | "RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE";
 
 export class ReturnFeatureError extends Error {
   public constructor(
@@ -56,6 +58,11 @@ export type OriginalReturnTenderCapacity = Readonly<{
   method: ReturnTenderMethod;
   remainingCents: number;
   offlineCashProof: OfflineCashCapacityProof | null;
+  /**
+   * 原支付不能原路退回（如独立刷卡机人工确认的 MANUAL 刷卡，与 WPF 口径一致），
+   * 只能以现金或代金券代替退款；额度仍按原支付扣减，防止超额。缺省视为可原路退回。
+   */
+  substituteOnly?: boolean;
 }>;
 
 export type ReceiptReturnLine = Readonly<{
@@ -420,6 +427,17 @@ export function buildReturnRefundPlan(input: Readonly<{
     if (!input.online) validateOfflineCashCapacity(capacity);
     const amount = Math.min(remaining, capacity.remainingCents);
     if (amount <= 0) continue;
+    const substituted =
+      input.preferredMethod === "cash" || input.preferredMethod === "voucher";
+    if (capacity.substituteOnly === true && !substituted) {
+      // 不能原路退回的额度必须由收银员明确选择现金或代金券，绝不静默改走刷卡机。
+      throw new ReturnFeatureError("RETURN_ORIGINAL_REFUND_UNAVAILABLE");
+    }
+    if (input.preferredMethod === "voucher" && capacity.method !== "voucher") {
+      // 代金券代替刷卡/现金额度的执行、订单同步与退款券打印链路尚未打通，
+      // 放行会在提交阶段失败并卡在未知恢复；先在计划阶段明确拒绝，改用现金代替。
+      throw new ReturnFeatureError("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE");
+    }
     allocations.push({
       // 用户选定代替方式（现金/代金券）时，整单统一使用该方式退款；
       // 未选定或偏好为其他方式（card/installment）时，保持原支付方式原路退回。

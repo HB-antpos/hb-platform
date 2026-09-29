@@ -35,6 +35,8 @@ export type ReturnPresenterLine = Readonly<{
 export type ReturnPresenterCapacity = Readonly<{
   method: ReturnTenderMethod;
   remainingCents: number;
+  /** 该方式下至少有一笔额度可原路退回；全部为代替退款额度时为 false。 */
+  originalRefundAvailable: boolean;
 }>;
 
 export type ReturnPresenterState = Readonly<{
@@ -426,16 +428,19 @@ function aggregateCapacities(
   snapshot: ReturnWorkflowSnapshot,
 ): readonly ReturnPresenterCapacity[] {
   const totals = new Map<ReturnTenderMethod, number>();
+  const originalRefundable = new Set<ReturnTenderMethod>();
   for (const capacity of snapshot.tenderCapacities) {
     const next = (totals.get(capacity.method) ?? 0) + capacity.remainingCents;
     if (!Number.isSafeInteger(next)) continue;
     totals.set(capacity.method, next);
+    if (capacity.substituteOnly !== true) originalRefundable.add(capacity.method);
   }
   return (["cash", "card", "voucher", "installment"] as const)
     .filter((method) => totals.has(method))
     .map((method) => ({
       method,
       remainingCents: totals.get(method) ?? 0,
+      originalRefundAvailable: originalRefundable.has(method),
     }));
 }
 
