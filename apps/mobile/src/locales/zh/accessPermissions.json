@@ -669,6 +669,10 @@
       "name": "管理设置",
       "description": "Web 页面 /system/invoice-email-settings、/system/payment-terminal-settings、/system/emergency-login-keys - 管理发票邮箱、支付终端与紧急登录密钥"
     },
+    "System.ViewMobileAppInstallLinks": {
+      "name": "移动端查看 App 安装二维码",
+      "description": "移动端「App 安装」- 查看 iOS 与 Android 最新正式版本及安装二维码"
+    },
     "System.ViewAppDownloads": {
       "name": "查看 App 下载",
       "description": "Web 页面 /system/app-downloads、/system/wpf-versions（移动端同名入口另需管理员）- 查看 App 下载与 WPF 版本"

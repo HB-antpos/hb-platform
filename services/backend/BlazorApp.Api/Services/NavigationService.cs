@@ -456,6 +456,15 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 普通员工安装入口：只读最新正式版安装二维码，不需要管理员身份。
+                RouteName = "app-install",
+                TitleKey = "tabs.appInstall",
+                Icon = "qrcode",
+                Permission = Permissions.System.ViewMobileAppInstallLinks,
+                Order = 59,
+            },
+            new()
+            {
                 RouteName = "app-downloads",
                 TitleKey = "tabs.appDownloads",
                 Icon = "download-outline",

@@ -457,6 +457,8 @@ namespace BlazorApp.Shared.Constants
             public const string ManageSettings = "System.ManageSettings";
             public const string ViewAppDownloads = "System.ViewAppDownloads";
             public const string ManageAppDownloads = "System.ManageAppDownloads";
+            /// <summary>移动端「App 安装」页：查看 iOS / Android 最新正式版本及安装二维码，与版本管理权限相互独立。</summary>
+            public const string ViewMobileAppInstallLinks = "System.ViewMobileAppInstallLinks";
             public const string ViewPerformanceBaseline = "System.ViewPerformanceBaseline";
             public const string ManagePerformanceBaseline = "System.ManagePerformanceBaseline";
         }

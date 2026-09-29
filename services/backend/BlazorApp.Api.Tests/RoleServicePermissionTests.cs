@@ -318,6 +318,23 @@ public sealed class RoleServicePermissionTests : IDisposable
     }
 
     [Fact]
+    public void PermissionSeedData_MobileAppInstallLinksPermission_IsRegisteredWithoutRoleTemplates()
+    {
+        Assert.Contains(
+            PermissionSeedData.AllPermissions,
+            seed => seed.Code == Permissions.System.ViewMobileAppInstallLinks
+        );
+        // 只登记权限，不随任何角色模板默认下发，由管理员显式授予。
+        Assert.All(
+            PermissionSeedData.RolePermissionTemplates,
+            template => Assert.DoesNotContain(
+                Permissions.System.ViewMobileAppInstallLinks,
+                template.PermissionCodes
+            )
+        );
+    }
+
+    [Fact]
     public async Task UserHasPermissionAsync_AdminRoleImplicitlyGrantsAnyPermission()
     {
         await SeedUserWithRoleAsync("user-1", "role-admin", "Admin");

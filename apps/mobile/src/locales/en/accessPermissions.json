@@ -669,6 +669,10 @@
       "name": "System Manage Settings",
       "description": "Allows access to System Manage Settings."
     },
+    "System.ViewMobileAppInstallLinks": {
+      "name": "View app install QR codes on mobile",
+      "description": "View the latest iOS and Android releases and their install QR codes on mobile."
+    },
     "System.ViewAppDownloads": {
       "name": "System View App Downloads",
       "description": "Allows access to System View App Downloads."

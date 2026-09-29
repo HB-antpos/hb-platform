@@ -68,6 +68,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "employee-profile", labelKey: "routes.employeeProfile", icon: "card-account-details-outline" },
       { routeName: "employee-profile-review", labelKey: "routes.employeeProfileReview", icon: "account-check-outline" },
       { routeName: "device-management", labelKey: "routes.deviceManagement", icon: "cellphone-cog" },
+      { routeName: "app-install", labelKey: "routes.appInstall", icon: "qrcode" },
       { routeName: "app-downloads", labelKey: "routes.appDownloads", icon: "download-outline" },
       { routeName: "wpf-versions", labelKey: "routes.wpfVersions", icon: "microsoft-windows" },
     ],
