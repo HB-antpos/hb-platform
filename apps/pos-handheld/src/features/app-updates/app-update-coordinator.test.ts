@@ -250,7 +250,7 @@ test("enabled false 和 required 都阻止新交易且恢复永远开放", async
   }
 });
 
-test("重启决策由注入的风险快照控制，活动购物车、未决支付或耐久写入都不得重启", async () => {
+test("重启决策由注入的风险快照控制，活动购物车或耐久写入不得重启，待恢复支付允许更新", async () => {
   assert.deepEqual(
     decideAppUpdateRestart({
       hasActiveCart: true,
@@ -273,7 +273,8 @@ test("重启决策由注入的风险快照控制，活动购物车、未决支�
       hasSyncOrAuditInFlight: false,
       hasFulfilmentInFlight: false,
     }),
-    { canRestart: false, reason: "unresolved-payment" },
+    // 待恢复支付已耐久落库，重启后继续恢复；不能因此阻止含修复的更新。
+    { canRestart: true, reason: null },
   );
   assert.deepEqual(
     decideAppUpdateRestart({
@@ -318,7 +319,7 @@ test("重启决策由注入的风险快照控制，活动购物车、未决支�
   assert.equal(restarts, 1);
 });
 
-test("恢复、同步审计或外设动作仍在进行时不得进入完整更新门禁", () => {
+test("同步审计、目录刷新或外设动作仍在进行时不得进入完整更新门禁，待恢复退货允许更新", () => {
   const safe = {
     hasActiveCart: false,
     hasUnresolvedPayment: false,
@@ -328,8 +329,12 @@ test("恢复、同步审计或外设动作仍在进行时不得进入完整更�
     hasSyncOrAuditInFlight: false,
     hasFulfilmentInFlight: false,
   };
+  // 待恢复退货（含卡在未知恢复的在线现金退款）不再阻止更新，否则修复永远装不上。
+  assert.deepEqual(
+    decideAppUpdateRestart({ ...safe, hasRecoveryRequired: true }),
+    { canRestart: true, reason: null },
+  );
   for (const [field, reason] of [
-    ["hasRecoveryRequired", "recovery-required"],
     ["hasCatalogRefreshInFlight", "catalog-refresh-in-flight"],
     ["hasSyncOrAuditInFlight", "sync-audit-in-flight"],
     ["hasFulfilmentInFlight", "fulfilment-in-flight"],
