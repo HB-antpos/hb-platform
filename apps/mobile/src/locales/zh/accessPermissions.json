@@ -133,6 +133,10 @@
       "name": "编辑货柜",
       "description": "Web 页面 /warehouse/containers - 编辑货柜"
     },
+    "Container.MobileNewProductsView": {
+      "name": "移动端查看新品到店",
+      "description": "移动端「新品到店」- 查看过去 2 周至未来 4 周货柜中的新品及预计到店日期"
+    },
     "Container.View": {
       "name": "查看货柜",
       "description": "Web 页面 /warehouse/containers 与移动端「仓库」- 查看货柜列表与明细"

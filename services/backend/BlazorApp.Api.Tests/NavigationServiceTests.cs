@@ -880,7 +880,7 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(32, menu.Count);
+        Assert.Equal(33, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "cash-register-users");
         Assert.Contains(menu, item => item.RouteName == "seasonal-product-insights");
         Assert.Contains(menu, item => item.RouteName == "price-updates");
@@ -943,6 +943,37 @@ public class NavigationServiceTests
 
         var item = Assert.Single(menu, item => item.RouteName == "warehouse");
         Assert.Equal(Permissions.Warehouse.ManageProducts, item.Permission);
+    }
+
+    [Fact]
+    public void BuildAppMenu_ShowsContainerNewProductsOnlyWithDedicatedPermissionAfterWarehouse()
+    {
+        var authorized = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.Container.MobileNewProductsView))
+        );
+        var unauthorized = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.Container.View))
+        );
+
+        var item = Assert.Single(
+            authorized,
+            menu => menu.RouteName == "container-new-products"
+        );
+        Assert.Equal("tabs.containerNewProducts", item.TitleKey);
+        Assert.Equal(Permissions.Container.MobileNewProductsView, item.Permission);
+        Assert.Equal(41, item.Order);
+        Assert.DoesNotContain(
+            unauthorized,
+            menu => menu.RouteName == "container-new-products"
+        );
+        Assert.DoesNotContain(
+            authorized,
+            menu => menu.RouteName == "warehouse"
+        );
+        Assert.DoesNotContain(
+            authorized,
+            menu => menu.RouteName == "price-updates"
+        );
     }
 
     [Fact]

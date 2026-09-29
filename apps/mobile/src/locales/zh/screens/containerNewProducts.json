@@ -1,0 +1,20 @@
+{
+  "title": "新品到店",
+  "actions": { "back": "返回", "retry": "重试" },
+  "labels": {
+    "currentStore": "当前门店",
+    "range": "近 2 周到货 · 未来 4 周计划",
+    "sortByArrival": "到店日 ↑",
+    "container": "货柜 {{code}}",
+    "estimatedArrival": "预计到店",
+    "actualBasis": "实际到货推算",
+    "estimatedBasis": "预计到岸推算"
+  },
+  "messages": {
+    "notAllowed": "没有新品到店权限，请联系管理员授权",
+    "storesFailed": "门店列表加载失败",
+    "selectStore": "请先选择门店",
+    "dateNotice": "到店日期为推算，货柜实际到货日期优先"
+  },
+  "states": { "loading": "正在加载…", "loadFailed": "加载失败", "stateUnknown": "门店州别未知，无法计算到店日期", "empty": "近 2 周至未来 4 周暂无新品", "noImage": "暂无图片" }
+}
