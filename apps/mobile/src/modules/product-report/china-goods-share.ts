@@ -132,13 +132,34 @@ export function toggleChinaBranchShareSort(
 }
 
 /**
- * 占比条刻度上限：取本期与同期占比的最大值，向上取整到 10% 的倍数（最少 10%，最多 100%），
+ * 占比条刻度上限：取本期与同期占比的最大值，向上取整到 1/stepsPerUnit 的倍数（最少一格，最多 100%），
  * 让条形长度可比、又不会因为占比普遍偏低而全部挤在左侧。
+ * 默认 10 即按 10% 取整；选中单个供应商后占比通常只有几个百分点，传 100 按 1% 取整。
  */
-export function getChinaBranchShareScaleMax(rows: readonly ChinaBranchShareRow[]) {
+export function getChinaBranchShareScaleMax(rows: readonly ChinaBranchShareRow[], stepsPerUnit = 10) {
   const maxShare = rows.reduce((max, row) => Math.max(max, row.share ?? 0, row.compareShare ?? 0), 0);
-  const steps = Math.ceil(Math.max(0, maxShare) * 10 - 1e-9);
-  return Math.min(1, Math.max(1, steps) / 10);
+  const steps = Math.ceil(Math.max(0, maxShare) * stepsPerUnit - 1e-9);
+  return Math.min(1, Math.max(1, steps) / stepsPerUnit);
+}
+
+/**
+ * 选中供应商后，分店表的分子来自供应商分店分解接口，它按「分店×供应商」逐行返回；
+ * 按分店合并成与分店中国货合计同形的行，就能复用同一套占比计算。
+ */
+export function mergeSupplierBranchSales(rows: readonly ChinaGoodsBranchSales[]): ChinaGoodsBranchSales[] {
+  const byBranch = new Map<string, ChinaGoodsBranchSales>();
+  rows.forEach((row) => {
+    const existing = byBranch.get(row.branchCode);
+    byBranch.set(row.branchCode, existing
+      ? {
+          ...existing,
+          branchName: existing.branchName || row.branchName,
+          revenue: existing.revenue + row.revenue,
+          compareRevenue: existing.compareRevenue + row.compareRevenue,
+        }
+      : { branchCode: row.branchCode, branchName: row.branchName, revenue: row.revenue, compareRevenue: row.compareRevenue });
+  });
+  return [...byBranch.values()];
 }
 
 export function mergeReportCostStatuses(statuses: readonly ProductReportCostStatus[]): ProductReportCostStatus {
