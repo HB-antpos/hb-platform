@@ -133,15 +133,18 @@ namespace BlazorApp.Api.Services.React
                             (p, srp, sup) => p.Barcode,
                             asc ? OrderByType.Asc : OrderByType.Desc
                         ),
-                        "middlesackagequantity" => joinQuery.OrderBy(
+                        // middlesackagequantity 是历史拼写错误的键，保留兼容
+                        "middlepackagequantity" or "middlesackagequantity" => joinQuery.OrderBy(
                             (p, srp, sup) => p.MiddlePackageQuantity,
                             asc ? OrderByType.Asc : OrderByType.Desc
                         ),
-                        "purchaseprice" => joinQuery.OrderBy(
+                        // Web 表格按列 dataIndex（storePurchasePrice / storeRetailPrice）发送排序键；
+                        // 旧键 purchaseprice / retailprice 保留兼容
+                        "storepurchaseprice" or "purchaseprice" => joinQuery.OrderBy(
                             (p, srp, sup) => srp.PurchasePrice,
                             asc ? OrderByType.Asc : OrderByType.Desc
                         ),
-                        "retailprice" => joinQuery.OrderBy(
+                        "storeretailprice" or "retailprice" => joinQuery.OrderBy(
                             (p, srp, sup) => srp.StoreRetailPriceValue,
                             asc ? OrderByType.Asc : OrderByType.Desc
                         ),
@@ -149,8 +152,10 @@ namespace BlazorApp.Api.Services.React
                             (p, srp, sup) => srp.DiscountRate,
                             asc ? OrderByType.Asc : OrderByType.Desc
                         ),
+                        // 「更新时间」列显示的是分店价格记录的更新时间（与「更新人」同属 StoreRetailPrice），
+                        // 排序须与显示一致，不能按商品主档的更新时间
                         "updatedat" => joinQuery.OrderBy(
-                            (p, srp, sup) => p.UpdatedAt,
+                            (p, srp, sup) => srp.UpdatedAt,
                             asc ? OrderByType.Asc : OrderByType.Desc
                         ),
                         _ => joinQuery.OrderBy((p, srp, sup) => p.UpdatedAt, OrderByType.Desc),

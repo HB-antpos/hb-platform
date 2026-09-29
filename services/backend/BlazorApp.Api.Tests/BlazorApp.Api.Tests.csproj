@@ -270,6 +270,7 @@
     <Compile Include="ReactProductHqSyncContractTests.cs" />
     <Compile Include="StoreRetailPriceHqSyncContractTests.cs" />
     <Compile Include="StorePriceTransferJobServiceTests.cs" />
+    <Compile Include="StoreProductPriceGridSortTests.cs" />
     <Compile Include="ReactStoreProductPricesGridStoreScopeTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqProductSyncTests.cs" />
