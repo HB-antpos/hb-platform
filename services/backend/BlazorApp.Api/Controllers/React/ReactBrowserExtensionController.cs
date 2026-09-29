@@ -249,7 +249,7 @@ public sealed class ReactBrowserExtensionController : ControllerBase
 
         try
         {
-            var data = await _service.GetProductSummariesAsync(request);
+            var data = await _service.GetProductSummariesAsync(request, HttpContext.RequestAborted);
             return Ok(ApiResponse<BrowserExtensionProductSummaryBatchDto>.OK(data, "查询成功"));
         }
         catch (ArgumentException ex)
@@ -269,6 +269,11 @@ public sealed class ReactBrowserExtensionController : ControllerBase
                     "NOT_FOUND"
                 )
             );
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // 与分类写入一致：客户端已断开按 499 返回，不记错误；服务端自身超时仍走下方错误日志。
+            return StatusCode(499);
         }
         catch (Exception ex)
         {

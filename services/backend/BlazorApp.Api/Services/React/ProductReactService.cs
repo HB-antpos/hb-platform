@@ -377,7 +377,8 @@ namespace BlazorApp.Api.Services.React
         /// 分页查询商品列表（支持排序和过滤）
         /// </summary>
         public async Task<PagedListReactDto<ProductDto>> GetPagedListAsync(
-            ProductReactFilterDto query
+            ProductReactFilterDto query,
+            CancellationToken cancellationToken = default
         )
         {
             try
@@ -817,6 +818,12 @@ namespace BlazorApp.Api.Services.React
                     PageNumber = query.PageNumber,
                     PageSize = query.PageSize,
                 };
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // 调用方已取消（HTTP 请求被客户端中止）：直接上抛交给控制器按 499 处理，不在此记错误。
+                // 认证阶段已把同一请求令牌留在 SqlSugar ADO 上，本方法内的查询都会随它取消。
+                throw;
             }
             catch (Exception ex)
             {

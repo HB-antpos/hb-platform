@@ -7,7 +7,11 @@ using BlazorApp.Shared.Models;
 
 namespace BlazorApp.Api.Features.StoreOrders.OrderPlacement.Commands.SubmitOrder;
 
-internal sealed record SubmitOrderCommand(SubmitStoreOrderRequestDto? Request);
+// CancellationToken 是调用方（HTTP 请求）的中止令牌，只用于识别客户端中止，不传给写库调用。
+internal sealed record SubmitOrderCommand(
+    SubmitStoreOrderRequestDto? Request,
+    CancellationToken CancellationToken = default
+);
 
 internal sealed class SubmitOrderValidator
 {
@@ -204,6 +208,14 @@ internal sealed class SubmitOrderHandler(
                     });
                 }
             );
+        }
+        catch (OperationCanceledException) when (command.CancellationToken.IsCancellationRequested)
+        {
+            // 客户端已中止请求：上抛交给控制器按 499 处理，不记错误。
+            // 不会掩盖部分写入：全部写库在 cartCoordinator 的单个事务里，异常一律先回滚再上抛；
+            // SqlSugar 的提交/回滚不受请求令牌影响，且提交后不再有数据库调用，
+            // 所以能走到这里的取消都发生在提交之前，购物车与订单保持提交前状态（仅内存订单号可能跳号）。
+            throw;
         }
         catch (PreorderBusinessException exception)
         {

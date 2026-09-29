@@ -201,6 +201,11 @@ namespace BlazorApp.Api.Controllers.React
                     ApiResponse<WarehouseProductFlowAnalysisSummaryDto>.Error(ex.Message)
                 );
             }
+            catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                // 客户端已断开：不再按 500 记错误；服务端自身超时不满足该条件，仍走下方错误日志。
+                return StatusCode(499);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "GetSummary failed");

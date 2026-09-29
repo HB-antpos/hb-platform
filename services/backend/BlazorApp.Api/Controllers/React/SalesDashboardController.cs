@@ -1129,6 +1129,11 @@ namespace BlazorApp.Api.Controllers.React
             {
                 return BadRequest(new { success = false, message = exception.Message });
             }
+            catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                // 客户端已断开：不再按 500 记错误；服务端自身超时不满足该条件，仍走下方错误日志。
+                return StatusCode(499);
+            }
             catch (Exception exception)
             {
                 _logger.LogError(exception, "GetCompactSalesBoard failed");
@@ -1335,7 +1340,8 @@ namespace BlazorApp.Api.Controllers.React
                 var result = await _service.GetExecutiveBranchPerformanceAsync(
                     dateRange,
                     topN,
-                    branchScope.BranchCodes
+                    branchScope.BranchCodes,
+                    HttpContext.RequestAborted
                 );
                 if (includeProductStatisticMetadata)
                 {
@@ -1371,6 +1377,11 @@ namespace BlazorApp.Api.Controllers.React
                     result.StatisticsExpectedBranchCount,
                     result.StatisticsSnapshotBranchCount,
                 });
+            }
+            catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                // 客户端已断开：不再按 500 记错误；服务端自身超时不满足该条件，仍走下方错误日志。
+                return StatusCode(499);
             }
             catch (Exception ex)
             {
@@ -1427,7 +1438,8 @@ namespace BlazorApp.Api.Controllers.React
                 // 调用服务获取 Executive 每小时流量
                 var result = await _service.GetExecutiveHourlyTrafficAsync(
                     dateRange,
-                    branchScope.BranchCodes
+                    branchScope.BranchCodes,
+                    HttpContext.RequestAborted
                 );
                 // 维持 data 数组兼容，完整性元数据只在外层新增。
                 return Ok(new
@@ -1438,6 +1450,11 @@ namespace BlazorApp.Api.Controllers.React
                     result.StatisticsExpectedItemCount,
                     result.StatisticsSnapshotItemCount,
                 });
+            }
+            catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                // 客户端已断开：不再按 500 记错误；服务端自身超时不满足该条件，仍走下方错误日志。
+                return StatusCode(499);
             }
             catch (Exception ex)
             {
