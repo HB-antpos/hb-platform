@@ -11,11 +11,12 @@ namespace BlazorApp.Shared.Models;
 public sealed class WarehouseOrderPickRecord
 {
     /// <summary>
-    /// UUIDv7 的 32 位十六进制串：按时间递增，聚集主键顺序追加；
+    /// UUIDv7 的 32 位十六进制串：按时间递增，聚集主键顺序追加；由写入方（拣货服务）插入时生成。
+    /// 本项目同时编译 net8.0 供 WPF 客户端引用，Guid.CreateVersion7 是 .NET 9 API，不能在这里做默认值。
     /// 不用 long 自增，SQLite 测试库的 CodeFirst 建不出 long 自增主键。
     /// </summary>
     [SugarColumn(IsPrimaryKey = true, IsNullable = false, Length = 32)]
-    public string RecordGUID { get; set; } = Guid.CreateVersion7().ToString("N");
+    public string RecordGUID { get; set; } = string.Empty;
 
     [SugarColumn(IsNullable = false, Length = 50)]
     public string OrderGUID { get; set; } = string.Empty;

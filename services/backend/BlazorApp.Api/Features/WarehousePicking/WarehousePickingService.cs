@@ -832,6 +832,8 @@ internal sealed class WarehousePickingService(
         var now = DateTime.UtcNow;
         await _db.Insertable(new WarehouseOrderPickRecord
         {
+            // 主键在 API 侧生成 UUIDv7：按时间递增、聚集主键顺序追加（共享模型还要编译 net8.0，不能用 .NET 9 API 做默认值）。
+            RecordGUID = Guid.CreateVersion7().ToString("N"),
             OrderGUID = orderGuid,
             DetailGUID = line.DetailGUID,
             ProductCode = line.ProductCode ?? string.Empty,
