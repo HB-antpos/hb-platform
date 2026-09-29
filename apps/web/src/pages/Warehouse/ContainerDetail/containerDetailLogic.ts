@@ -2530,6 +2530,51 @@ export function buildContainerDetailMatchedPriceUpdates(
  * 字段草稿只保留业务字段，这个标记在进出草稿时会丢失，丢失后后端会把国内数据同步改写
  * 已有商品的仓库价、主档进货价/名称和分店进货价。
  */
+/**
+ * 自动保存列失焦时判断值是否与聚焦时的基线相同；相同就不发请求，避免无意义写库与变更历史。
+ * 任一侧是数字时按数值比较（0.05 与 "0.050" 相同），文本去首尾空白后比较，null/undefined/空串视为同一个空值。
+ */
+export function isContainerDetailAutoSaveValueUnchanged(baseline: unknown, next: unknown): boolean {
+  const normalize = (value: unknown): string | number => {
+    if (value == null) return ''
+    if (typeof value === 'number') return Number.isFinite(value) ? value : ''
+    return String(value).trim()
+  }
+  const before = normalize(baseline)
+  const after = normalize(next)
+  if (before === '' || after === '') return before === after
+  if (typeof before === 'number' || typeof after === 'number') {
+    const beforeNumber = Number(before)
+    const afterNumber = Number(after)
+    return Number.isFinite(beforeNumber) && Number.isFinite(afterNumber) && Math.abs(beforeNumber - afterNumber) < 1e-9
+  }
+  return before === after
+}
+
+// 批量预览的字段摘要里混有后端内部字段名（ProductCategoryGUID、IsActive 等）和旧称「贴牌价格」，显示前统一映射为页面列名。
+const CONTAINER_DETAIL_PREVIEW_FIELD_LABELS: Record<string, { key: string, fallback: string }> = {
+  ProductCategoryGUID: { key: 'containers.fields.category', fallback: '分类' },
+  IsActive: { key: 'containers.fields.warehouseStatus', fallback: '仓库状态' },
+  LastImportPrice: { key: 'containers.fields.lastImportPriceSnapshot', fallback: '上次进口价' },
+  LastOEMPrice: { key: 'containers.fields.lastOemPriceSnapshot', fallback: '上次零售价' },
+  贴牌价格: { key: 'containers.fields.oemPrice', fallback: '零售价' },
+  进口价格: { key: 'containers.fields.importPrice', fallback: '进口价格' },
+  调整浮率: { key: 'containers.fields.floatRate', fallback: '调整浮率' },
+  运输成本: { key: 'containers.fields.transportCost', fallback: '运输成本' },
+  删除明细: { key: 'containers.actions.deleteDetails', fallback: '删除明细' },
+}
+
+export function formatContainerDetailPreviewFields(
+  fields: readonly string[] | undefined,
+  translate: (key: string, fallback: string) => string,
+): string {
+  const labels = (fields ?? []).map((field) => {
+    const label = CONTAINER_DETAIL_PREVIEW_FIELD_LABELS[field]
+    return label ? translate(label.key, label.fallback) : field
+  })
+  return Array.from(new Set(labels)).join('、') || '--'
+}
+
 export function markContainerDetailUpdatesSkipRelatedProductSync<T extends { SkipRelatedProductSync?: boolean }>(
   updates: T[],
 ): T[] {
