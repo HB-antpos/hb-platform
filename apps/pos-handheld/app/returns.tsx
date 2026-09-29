@@ -24,6 +24,7 @@ import {
   ReturnScreen,
 } from "@/features/returns";
 import { PosPressable } from "@/ui/controls/pos-pressable";
+import { RouteHidScannerCapture } from "@/ui/scanner/scanner-route-bridge";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { posColors } from "@/ui/theme";
 
@@ -152,6 +153,15 @@ export default function ReturnsRoute() {
       {...(initialReceiptQuery ? { initialReceiptQuery } : {})}
       onBack={() => dismissTo("/sales" as Href)}
       presenter={presenter}
+      renderHidScannerCapture={({ enabled, onScan }) => (
+        // 与销售页同一套隐藏捕获：查询区无焦点时也能接收 DataWedge / HID 扫码。
+        <RouteHidScannerCapture
+          context="product-search"
+          enabled={enabled}
+          onScan={onScan}
+          path="/returns"
+        />
+      )}
     />
   );
 }
