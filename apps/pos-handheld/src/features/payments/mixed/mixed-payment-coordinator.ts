@@ -145,6 +145,7 @@ export type MixedPaymentResult = Readonly<{
 }>;
 
 export type AddMixedOnlineTenderInput = Readonly<{
+  manualConfirmed?: boolean;
   actionId: string;
   orderGuid: string;
   provider: PaymentProvider;
@@ -332,6 +333,7 @@ export class MixedPaymentCoordinator {
       operation: "purchase",
       amount: input.amount,
       actor: this.options.actor,
+      ...(input.provider === "manual-card" ? { manualConfirmed: input.manualConfirmed } : {}),
     };
     let execution: PaymentAttemptExecutionResult;
     try {
@@ -850,7 +852,8 @@ function isValidRecoverablePurchaseIdentity(
     attempt.operation === "purchase" &&
     (attempt.provider === "square" ||
       attempt.provider === "linkly-cloud" ||
-      attempt.provider === "voucher") &&
+      attempt.provider === "voucher" ||
+      attempt.provider === "manual-card") &&
     attempt.amount.currency === "AUD" &&
     Number.isSafeInteger(attempt.amount.cents) &&
     attempt.amount.cents > 0 &&
@@ -1031,7 +1034,8 @@ function assertOnlineProvider(provider: PaymentProvider): void {
   if (
     provider !== "square" &&
     provider !== "linkly-cloud" &&
-    provider !== "voucher"
+    provider !== "voucher" &&
+    provider !== "manual-card"
   ) {
     throw new MixedPaymentValidationError(
       "UNSUPPORTED_PAYMENT_PROVIDER",

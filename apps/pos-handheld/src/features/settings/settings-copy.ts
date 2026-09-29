@@ -87,6 +87,11 @@ export const settingsEnglishCopy = {
   "payments.provider": "Card terminal provider",
   "payments.providerHint":
     "Select exactly one terminal provider; card payments remain disabled when no available provider is selected.",
+  "payments.manualCard": "Manual card",
+  "payments.manualCardHint": "Replaces the integrated card entry at checkout. Confirm the independent card machine received payment.",
+  "payments.manualCardOn": "On",
+  "payments.manualCardOff": "Off",
+  "payments.saveManualCard": "Save manual card setting",
   "payments.noneSelected": "Not selected: card payments disabled",
   "payments.squareSelected": "Square selected",
   "payments.linklySelected": "Linkly selected",
@@ -470,6 +475,11 @@ export const settingsChineseCopy = {
   "payments.provider": "刷卡终端提供方",
   "payments.providerHint":
     "必须明确选择一个终端提供方；未选择或所选终端不可用时，银行卡支付保持关闭。",
+  "payments.manualCard": "手动刷卡",
+  "payments.manualCardHint": "开启后替代收银页的联机刷卡入口，由收银员确认独立刷卡机收款成功；关闭后恢复已配置的刷卡机。",
+  "payments.manualCardOn": "开启",
+  "payments.manualCardOff": "关闭",
+  "payments.saveManualCard": "保存手动刷卡设置",
   "payments.noneSelected": "未选择：银行卡支付已关闭",
   "payments.squareSelected": "已选择 Square",
   "payments.linklySelected": "已选择 Linkly",

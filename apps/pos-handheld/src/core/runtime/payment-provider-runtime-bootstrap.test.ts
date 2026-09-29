@@ -32,6 +32,11 @@ test("provider bootstrap 对缺失公开配置返回稳定 unavailable，不触�
       available: false,
       blocker: "VOUCHER_CONFIGURATION_DISABLED",
     },
+    {
+      provider: "manual-card",
+      available: false,
+      blocker: "MANUAL_CARD_CONFIGURATION_DISABLED",
+    },
   ]);
   assert.equal(
     bootstrap.createLinklyOperator({
@@ -72,6 +77,7 @@ test("bootstrap 仅在合法且可用的 Linkly 环境创建 operator，并一�
       { provider: "square", available: true },
       { provider: "linkly-cloud", available: false },
       { provider: "voucher", available: true },
+      { provider: "manual-card", available: false },
     ],
   );
   assert.deepEqual(
@@ -82,6 +88,7 @@ test("bootstrap 仅在合法且可用的 Linkly 环境创建 operator，并一�
       { provider: "square", available: true },
       { provider: "linkly-cloud", available: true },
       { provider: "voucher", available: true },
+      { provider: "manual-card", available: true },
     ],
   );
   assert.ok(
@@ -172,4 +179,41 @@ test("双卡终端均已配置但未显式选择时，新支付全部失败关�
     bootstrap.providers.get("linkly-cloud").provider,
     "linkly-cloud",
   );
+});
+
+test("手动刷卡保存后即时替代联机卡，关闭后仍保留原付款恢复通道", async () => {
+  let methods = { useManualCard: false };
+  const bootstrap = await createPaymentProviderRuntimeBootstrap({
+    transport,
+    extra: {
+      provider: "square",
+      square: { environment: "Sandbox", deviceId: "square-device", locationId: "square-location" },
+      voucher: { enabled: true },
+    },
+    voucherProtectedTokens: voucherTokens,
+    readPaymentMethods: () => methods,
+  });
+  assert.equal(bootstrap.providers.getAvailability("manual-card").available, false);
+  assert.equal(bootstrap.providers.getAvailability("square").available, true);
+  methods = { useManualCard: true };
+  assert.equal(bootstrap.providers.getAvailability("manual-card").available, true);
+  assert.equal(bootstrap.providers.getAvailability("square").available, false);
+  assert.equal(bootstrap.providers.getAvailability("voucher").available, true);
+  methods = { useManualCard: false };
+  assert.equal(bootstrap.providers.getAvailability("manual-card").available, false);
+  assert.equal(bootstrap.providers.getAvailability("square").available, true);
+  assert.equal(bootstrap.providers.get("manual-card").provider, "manual-card");
+
+  const installment = await createPaymentProviderRuntimeBootstrap({
+    transport,
+    extra: {
+      provider: "square",
+      square: { environment: "Sandbox", deviceId: "square-device", locationId: "square-location" },
+    },
+    voucherProtectedTokens: voucherTokens,
+    paymentMethods: { useManualCard: true },
+    allowManualCard: false,
+  });
+  assert.equal(installment.providers.getAvailability("manual-card").available, false);
+  assert.equal(installment.providers.getAvailability("square").available, true);
 });

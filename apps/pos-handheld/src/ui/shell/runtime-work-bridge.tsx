@@ -36,6 +36,19 @@ export function RuntimeWorkBridge() {
   }, [applicationLog, controller]);
 
   useEffect(() => {
+    const updates = runtime.services?.appUpdates;
+    if (!updates || connectivity !== "online") return undefined;
+    // 与移动端一致，常驻前台的收银设备每 30 分钟补查；只准备下载，不自动安装。
+    const timer = setInterval(() => {
+      if (AppState.currentState !== "active") return;
+      void updates.refreshOnForeground().catch(() => {
+        // 保留已有更新策略，下载失败由更新状态条提供重试入口。
+      });
+    }, 30 * 60 * 1_000);
+    return () => clearInterval(timer);
+  }, [connectivity, runtime.services]);
+
+  useEffect(() => {
     if (!controller || connectivity === "checking") return undefined;
     applicationLog?.onNetworkChanged(connectivity === "online");
     void controller

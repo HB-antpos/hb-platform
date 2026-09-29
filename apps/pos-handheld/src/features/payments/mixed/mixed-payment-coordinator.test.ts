@@ -29,6 +29,26 @@ import {
 
 const aud = (cents: number): Money => ({ currency: "AUD", cents });
 
+test("手动刷卡确认标记透传到 PaymentAttemptService 输入并完成入账", async () => {
+  const truth = new MemoryTruth(orderTruth(1_000));
+  const attempts = new FakeAttempts();
+  const completion = new FakeCompletion(truth);
+  attempts.startResult = (input) => approvedExecution(input, "attempt-manual");
+  const coordinator = createCoordinator({ truth, attempts, completion });
+
+  const result = await coordinator.addOnlineTender({
+    actionId: "action-manual",
+    orderGuid: "order-1",
+    provider: "manual-card",
+    amount: aud(1_000),
+    manualConfirmed: true,
+  });
+
+  assert.equal(attempts.startInputs[0]?.manualConfirmed, true);
+  assert.equal(result.status, "completed");
+  assert.deepEqual(truth.current.tenders.map((tender) => tender.amount.cents), [1_000]);
+});
+
 test("部分卡支付后可追加现金，并只按持久 tender truth 判定完成", async () => {
   const truth = new MemoryTruth(orderTruth(1_000));
   const attempts = new FakeAttempts();

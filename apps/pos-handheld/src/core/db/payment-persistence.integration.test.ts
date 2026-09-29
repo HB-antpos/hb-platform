@@ -3110,6 +3110,61 @@ test("真实 SQLite：仅有 binding 的旧草稿可放弃，陈旧异步 attemp
   });
 });
 
+test("真实 SQLite：尚无 attempt 的 manual-card binding 不可 abandon 且完整保留账本", async () => {
+  await withDatabase("draft-abandon-manual-bound-no-attempt", async (connection) => {
+    await migrateFresh(connection);
+    const input = draftInput({ draftId: "draft-abandon-manual-bound-no-attempt" });
+    const store = new SqlitePaymentDraftRecoveryStore(
+      connection,
+      sequenceIds("order-abandon-manual-bound", "audit-abandon-manual-bound"),
+      () => T1,
+    );
+    const created = await store.createOrReuseDraft(input);
+    await connection.run(
+      `INSERT INTO payment_action_bindings (
+        order_guid, action_id, request_signature,
+        attempt_id, idempotency_key, created_at_iso, audit_actor_json
+      ) VALUES (?, 'manual-bound-action', ?, 'manual-bound-attempt',
+        'manual-bound-key', ?, ?)`,
+      [
+        created.orderGuid,
+        JSON.stringify(["manual-card", "purchase", "AUD", 900, "confirmed"]),
+        T0,
+        paymentActorJson(),
+      ],
+    );
+
+    await assert.rejects(
+      () => store.abandonPreparedDraft({
+        actionId: "abandon-manual-bound",
+        draftId: input.draftId,
+        orderGuid: created.orderGuid,
+        actor: paymentAuditActor(),
+        ...input.identity,
+      }),
+      /tender or unresolved payment history/,
+    );
+    const bindingState = await connection.getFirst<{ state: unknown }>(
+      "SELECT state FROM payment_order_draft_bindings WHERE order_guid = ?",
+      [created.orderGuid],
+    );
+    assert.equal(bindingState?.state, "Active");
+    assert.equal(
+      await scalar(
+        connection,
+        "SELECT COUNT(*) AS count FROM payment_action_bindings WHERE order_guid = ?",
+        [created.orderGuid],
+      ),
+      1,
+    );
+    const orderState = await connection.getFirst<{ state: unknown }>(
+      "SELECT state FROM local_orders WHERE order_guid = ?",
+      [created.orderGuid],
+    );
+    assert.equal(orderState?.state, "Draft");
+  });
+});
+
 test("真实 SQLite：仅有已拒付历史的 DraftPrepared 可安全 abandon 且完整保留账本", async () => {
   await withDatabase("draft-abandon-declined-history", async (connection) => {
     await migrateFresh(connection);
@@ -3680,6 +3735,67 @@ test("真实 SQLite：payment action-only recovery 严格解析签名，多 bind
     await assert.rejects(
       () => store.findBlockingRecovery(invalidInput.identity),
       /request signature is invalid JSON/,
+    );
+
+    const manualInput = draftInput({
+      draftId: "draft-manual-binding",
+      identity: {
+        storeCode: "S-MANUAL-BINDING",
+        deviceCode: "D-MANUAL-BINDING",
+        cashierId: "C-MANUAL-BINDING",
+        cashierName: "Manual binding",
+      },
+    });
+    const manualDraft = await store.createOrReuseDraft(manualInput);
+    await connection.run(
+      `INSERT INTO payment_action_bindings (
+        order_guid, action_id, request_signature,
+        attempt_id, idempotency_key, created_at_iso, audit_actor_json
+      ) VALUES (?, 'manual-action', ?,
+        'manual-attempt', 'manual-idempotency', ?, ?)`,
+      [
+        manualDraft.orderGuid,
+        JSON.stringify(["manual-card", "purchase", "AUD", 900, "confirmed"]),
+        T0,
+        paymentActorJson(),
+      ],
+    );
+    const manualRecovery = await store.findBlockingRecovery(manualInput.identity);
+    assert.deepEqual(manualRecovery?.boundAction, {
+      actionId: "manual-action",
+      attemptId: "manual-attempt",
+      provider: "manual-card",
+      operation: "purchase",
+      amount: { currency: "AUD", cents: 900 },
+      manualConfirmed: true,
+    });
+
+    const manualRefundInput = draftInput({
+      draftId: "draft-manual-refund-binding",
+      identity: {
+        storeCode: "S-MANUAL-REFUND-BINDING",
+        deviceCode: "D-MANUAL-REFUND-BINDING",
+        cashierId: "C-MANUAL-REFUND-BINDING",
+        cashierName: "Manual refund binding",
+      },
+    });
+    const manualRefundDraft = await store.createOrReuseDraft(manualRefundInput);
+    await connection.run(
+      `INSERT INTO payment_action_bindings (
+        order_guid, action_id, request_signature,
+        attempt_id, idempotency_key, created_at_iso, audit_actor_json
+      ) VALUES (?, 'manual-refund-action', ?,
+        'manual-refund-attempt', 'manual-refund-idempotency', ?, ?)`,
+      [
+        manualRefundDraft.orderGuid,
+        JSON.stringify(["manual-card", "refund", "AUD", -900, "confirmed"]),
+        T0,
+        paymentActorJson(),
+      ],
+    );
+    await assert.rejects(
+      () => store.findBlockingRecovery(manualRefundInput.identity),
+      /Manual card payment action confirmation is invalid/,
     );
 
     const multipleInput = draftInput({

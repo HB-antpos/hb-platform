@@ -6,6 +6,7 @@ import type {
   InstallPermissionStatus,
   InstallVerifiedApkRequest,
   InstallVerifiedApkResult,
+  VerifyDownloadedApkRequest,
 } from "./HBAppInstaller.types";
 
 type HBAppInstallerNativeModule = {
@@ -17,6 +18,7 @@ type HBAppInstallerNativeModule = {
   installVerifiedApk(
     request: InstallVerifiedApkRequest,
   ): Promise<InstallVerifiedApkResult>;
+  verifyDownloadedApk(request: VerifyDownloadedApkRequest): Promise<void>;
 };
 
 export default requireNativeModule<HBAppInstallerNativeModule>(

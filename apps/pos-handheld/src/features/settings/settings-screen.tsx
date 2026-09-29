@@ -83,6 +83,7 @@ export type SettingsScreenPresenter = Pick<
   | "refreshLinklySetup"
   | "refreshSquareDeviceCode"
   | "savePaymentSettings"
+  | "saveManualCardSettings"
   | "savePrinterSettings"
   | "scanPrinters"
   | "selectLinklyTerminal"
@@ -91,6 +92,7 @@ export type SettingsScreenPresenter = Pick<
   | "setDrawerEnabled"
   | "setLinklyEnvironment"
   | "setPaymentProvider"
+  | "setUseManualCard"
   | "setPrinterEnabled"
   | "setPrinterLocale"
   | "setPrinterPaper"
@@ -212,7 +214,11 @@ export function SettingsScreen({
         </View>
 
         {state.statusCode ? (
-          <StatusBanner locale={locale} statusCode={state.statusCode} />
+          <StatusBanner
+            locale={locale}
+            statusCode={state.statusCode}
+            blockers={state.pendingWorkBlockers}
+          />
         ) : null}
 
         <View
@@ -908,6 +914,27 @@ function PaymentsPane({
               ? t("payments.squareSelected")
               : t("payments.linklySelected")}
         </Text>
+        <View style={styles.actionRow}>
+          <View>
+            <Text style={styles.fieldLabel}>{t("payments.manualCard")}</Text>
+            <Text style={styles.sectionCopy}>{t("payments.manualCardHint")}</Text>
+          </View>
+          <ToggleButton
+            disabled={disabled}
+            label={state.paymentMethods.useManualCard ? t("payments.manualCardOn") : t("payments.manualCardOff")}
+            onPress={() => presenter.setUseManualCard(!state.paymentMethods.useManualCard)}
+            selected={state.paymentMethods.useManualCard}
+            testID="settings-payment-manual-card"
+          />
+        </View>
+        <ActionButton
+          compact
+          disabled={disabled}
+          label={t("payments.saveManualCard")}
+          onPress={() => void presenter.saveManualCardSettings()}
+          testID="settings-payment-manual-card-save"
+          tone="secondary"
+        />
       </SectionCard>
       <View style={styles.twoColumn}>
         <SectionCard
@@ -2980,9 +3007,11 @@ function EmptyPanel({
 function StatusBanner({
   locale,
   statusCode,
+  blockers,
 }: Readonly<{
   locale: SettingsLocale;
   statusCode: SettingsStatusCode;
+  blockers: readonly PendingWorkBlocker[];
 }>) {
   const success = isSuccessStatus(statusCode);
   return (
@@ -2997,6 +3026,13 @@ function StatusBanner({
       <Text style={styles.statusText}>
         {statusCopy(locale, statusCode)}
       </Text>
+      {statusCode === "pending-local-data"
+        ? blockers.map((blocker) => (
+            <Text key={blocker.code} style={styles.statusText}>
+              {pendingWorkBlockerCopy(locale, blocker)}
+            </Text>
+          ))
+        : null}
       <Text style={styles.statusCode}>[{statusCode}]</Text>
     </View>
   );
@@ -3972,9 +4008,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   statusBanner: {
-    alignItems: "center",
+    alignItems: "stretch",
     borderRadius: 6,
-    flexDirection: "row",
+    flexDirection: "column",
     gap: 8,
     marginBottom: 14,
     paddingHorizontal: 14,
@@ -3984,7 +4020,6 @@ const styles = StyleSheet.create({
   statusWarning: { backgroundColor: posColors.redSoft },
   statusText: {
     color: posColors.ink,
-    flex: 1,
     fontSize: 13,
     fontWeight: "700",
   },

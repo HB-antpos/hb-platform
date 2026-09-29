@@ -494,12 +494,40 @@ export class SqliteOrderSyncMaterialResolver {
         linklyEnvironmentInput,
       );
     }
+    if (attempt.provider === "manual-card") {
+      return this.resolveManualCard(tender, attempt, order);
+    }
     return this.resolveVoucher(
       tender,
       attempt,
       bindings[0] ?? null,
       order,
     );
+  }
+
+  private resolveManualCard(
+    tender: OrderTender,
+    attempt: ApprovedAttempt,
+    order: LocalOrder,
+  ): OrderTender {
+    if (
+      tender.method !== "card" ||
+      attempt.provider !== "manual-card" ||
+      attempt.operation !== "purchase" ||
+      attempt.checkoutId !== null ||
+      attempt.paymentId !== null ||
+      attempt.sessionId !== null ||
+      attempt.rfn !== null ||
+      attempt.txnRef !== `MANUAL:${attempt.attemptId}` ||
+      (tender.reference !== null &&
+        tender.reference !== `MANUAL:${attempt.attemptId}`)
+    ) {
+      throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+    }
+    if (tender.amount.cents <= 0 || order.actualAmount.cents <= 0) {
+      throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+    }
+    return frozenTender(tender, attempt.txnRef, null);
   }
 
   private async resolveSquare(
@@ -1219,7 +1247,7 @@ type ReturnBindingRow = Readonly<{
 type ApprovedAttempt = Readonly<{
   attemptId: string;
   idempotencyKey: string;
-  provider: "square" | "linkly-cloud" | "voucher";
+  provider: "square" | "linkly-cloud" | "voucher" | "manual-card";
   operation: "purchase" | "refund";
   checkoutId: string | null;
   paymentId: string | null;
@@ -1262,7 +1290,8 @@ function readApprovedAttempt(
     (operation === "refund" && tender.amount.cents >= 0) ||
     (tender.method === "card" &&
       provider !== "square" &&
-      provider !== "linkly-cloud") ||
+      provider !== "linkly-cloud" &&
+      provider !== "manual-card") ||
     (tender.method === "voucher" && provider !== "voucher")
   ) {
     throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
@@ -1766,7 +1795,8 @@ function paymentProvider(
   if (
     value === "square" ||
     value === "linkly-cloud" ||
-    value === "voucher"
+    value === "voucher" ||
+    value === "manual-card"
   ) {
     return value;
   }

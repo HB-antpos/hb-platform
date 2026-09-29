@@ -1448,6 +1448,29 @@ test("Linkly 缺少公开环境时仍可首次选择、测试并保存", async (
   assert.equal(presenter.getState().statusCode, "payment-settings-saved");
 });
 
+test("手动刷卡默认关闭，切换后独立保存且不触发重载", async () => {
+  const port = new FakeSettingsPort();
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+  presenter.setUseManualCard(true);
+  await presenter.saveManualCardSettings();
+
+  assert.deepEqual(port.savedPaymentMethods, [{ useManualCard: true }]);
+  assert.equal(port.dangerousActionCalls, 0);
+  assert.equal(presenter.getState().statusCode, "payment-settings-saved");
+
+  port.failPaymentMethodSave = true;
+  presenter.setUseManualCard(false);
+  await presenter.saveManualCardSettings();
+  assert.equal(
+    presenter.getState().paymentMethods.useManualCard,
+    true,
+  );
+  assert.equal(presenter.getState().statusCode, "payment-settings-save-failed");
+});
+
 test("Linkly 配置无效或读取失败时仍禁止选择", async () => {
   for (const blockerCode of [
     "LINKLY_CONFIGURATION_INVALID",
@@ -2591,6 +2614,8 @@ class FakeSettingsPort implements SettingsControlPort {
   public readonly apiAddressTests: string[] = [];
   public readonly connectedPrinterIds: string[] = [];
   public readonly savedPayments: SettingsPaymentSettingsInput[] = [];
+  public readonly savedPaymentMethods: { useManualCard: boolean }[] = [];
+  public failPaymentMethodSave = false;
   public readonly paymentTests: Readonly<{
     provider: "square" | "linkly";
     input: SettingsPaymentSettingsInput;
@@ -2622,6 +2647,12 @@ class FakeSettingsPort implements SettingsControlPort {
   public async loadSnapshot(): Promise<SettingsSnapshot> {
     this.loadCalls += 1;
     return this.snapshotValue ?? snapshot();
+  }
+
+  public async savePaymentMethodSettings(settings: { useManualCard: boolean }): Promise<SettingsDangerousActionResult> {
+    if (this.failPaymentMethodSave) throw new Error("save failed");
+    this.savedPaymentMethods.push(settings);
+    return { status: "completed", kind: "change-payment-settings" };
   }
 
   public getCatalogRefreshState() {

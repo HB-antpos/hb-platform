@@ -181,6 +181,59 @@ test("订单同步材料按 tender 绑定即时恢复卡证据，公开订单与
   });
 });
 
+test("Manual card purchase restores protected confirmation evidence for order sync", async () => {
+  await withDatabase(async (connection) => {
+    const orderGuid = "order-manual-card-purchase";
+    const tenderGuid = "tender-manual-card-purchase";
+    const attemptId = "attempt-manual-card-purchase";
+    await seedOrderTender(connection, {
+      orderGuid,
+      tenderGuid,
+      attemptId,
+      provider: "manual-card",
+      operation: "purchase",
+      amountCents: 1_250,
+      syncProvenance: DEFAULT_LINE_SYNC_PROVENANCE,
+      txnRef: `MANUAL:${attemptId}`,
+      responseCode: "MANUAL_CONFIRMED",
+    });
+    const evidence = {
+      version: 1,
+      provider: "manual-card",
+      operation: "purchase",
+      processor: "Manual",
+      txnRef: `MANUAL:${attemptId}`,
+      authCode: null,
+      cardType: null,
+      cardBin: null,
+      maskedCardNumber: null,
+      merchantId: null,
+      responseCode: "MANUAL_CONFIRMED",
+      responseText: null,
+      stan: null,
+      bankDateTimeIso: null,
+      amountCents: 1_250,
+      refundReference: null,
+    } as const;
+    const ciphertext = await encryptPaymentProtectedMaterial(encryptor, {
+      voucherReservationToken: null,
+      cardSyncEvidence: evidence,
+    });
+    assert.ok(ciphertext);
+    await connection.run(
+      `UPDATE payment_attempts
+       SET provider_payload_ciphertext = ?
+       WHERE attempt_id = ?`,
+      [ciphertext, attemptId],
+    );
+
+    const ordinary = await readOrdinaryOrder(connection, orderGuid);
+    const material = await createResolver(connection).resolveForSync(ordinary, null);
+    assert.deepEqual(material.cardSyncEvidenceByTenderGuid.get(tenderGuid), evidence);
+    assert.equal(material.cardSyncEvidenceByTenderGuid.size, 1);
+  });
+});
+
 test("M15 迁移保留 legacy 空来源供普通读取，但同步仍稳定失败关闭", async () => {
   const connection = new TestSqliteConnection();
   try {
@@ -1483,7 +1536,7 @@ type SeedTenderInput = Readonly<{
   orderGuid: string;
   tenderGuid: string;
   attemptId: string | null;
-  provider: "square" | "linkly-cloud" | "voucher" | null;
+  provider: "square" | "linkly-cloud" | "voucher" | "manual-card" | null;
   operation: "purchase" | "refund" | null;
   method?: "cash" | "card" | "voucher";
   amountCents: number;

@@ -755,6 +755,9 @@ async function toCheckoutRecovery(
           provider: action.provider,
           operation: "purchase",
           amount: copyMoney(action.amount),
+          ...(action.manualConfirmed === undefined
+            ? {}
+            : { manualConfirmed: action.manualConfirmed }),
         }
       : null,
   };

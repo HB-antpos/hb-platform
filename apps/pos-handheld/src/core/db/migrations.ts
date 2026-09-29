@@ -5955,6 +5955,107 @@ CREATE TABLE catalog_code_conflicts (
 );
 `;
 
+/** M46 将 manual-card 纳入跨订单 blocking trigger 的已入账判断。 */
+const M46 = `
+DROP TRIGGER IF EXISTS trg_payment_attempts_single_terminal_blocking_insert;
+DROP TRIGGER IF EXISTS trg_payment_attempts_single_terminal_blocking_update;
+
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_insert
+BEFORE INSERT ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND EXISTS (
+  SELECT 1
+  FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid
+    AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order
+    ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order
+    ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid
+   AND prior_draft.state = 'Active'
+  WHERE prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (
+        prior.state = 'Approved'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM order_tenders consumed
+          WHERE consumed.payment_attempt_id = prior.attempt_id
+            AND consumed.order_guid = prior.order_guid
+            AND consumed.amount_cents = prior.amount_cents
+            AND (
+              (prior.provider IN ('square', 'linkly-cloud', 'manual-card')
+                AND consumed.method = 'card')
+              OR (prior.provider = 'voucher'
+                AND consumed.method = 'voucher')
+            )
+        )
+      )
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS');
+END;
+
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_update
+BEFORE UPDATE OF state ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND EXISTS (
+  SELECT 1
+  FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid
+    AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order
+    ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order
+    ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid
+   AND prior_draft.state = 'Active'
+  WHERE prior.attempt_id <> OLD.attempt_id
+    AND prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (
+        prior.state = 'Approved'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM order_tenders consumed
+          WHERE consumed.payment_attempt_id = prior.attempt_id
+            AND consumed.order_guid = prior.order_guid
+            AND consumed.amount_cents = prior.amount_cents
+            AND (
+              (prior.provider IN ('square', 'linkly-cloud', 'manual-card')
+                AND consumed.method = 'card')
+              OR (prior.provider = 'voucher'
+                AND consumed.method = 'voucher')
+            )
+        )
+      )
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS');
+END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -6001,6 +6102,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 43, name: "M43_shared_held_order_publication_wire_version", sql: M43 },
   { version: 44, name: "M44_linkly_provider_acknowledgement", sql: M44 },
   { version: 45, name: "M45_catalog_code_conflicts", sql: M45 },
+  { version: 46, name: "M46_manual_card_terminal_blocking", sql: M46 },
 ];
 
 export async function applyMigrations(

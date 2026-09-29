@@ -58,6 +58,7 @@ test("installVerifiedApk uses one strongly typed metadata object", () => {
     nativeSource,
     /AsyncFunction\("installVerifiedApk"\) \{ request: InstallVerifiedApkRequestRecord ->/,
   );
+  assert.match(nativeSource, /AsyncFunction\("verifyDownloadedApk"\)/);
 });
 
 test("unknown-app-source permission has an explicit query and current-package settings contract", () => {
@@ -95,38 +96,11 @@ test("all native file and install boundaries share the permission guard before s
     nativeSource,
     /private fun requireInstallPermission\(context: Context\)/,
   );
-  assert.equal(
-    nativeSource.match(/requireInstallPermission\(context\)/gu)?.length,
-    3,
-  );
-  assertAppearsBefore(
-    getDirectoryBoundary,
-    "requireInstallPermission(context)",
-    "downloadDirectory(context, persistent = false)",
-  );
-  assertAppearsBefore(
-    getDirectoryBoundary,
-    "requireInstallPermission(context)",
-    "ensureDirectory(directory)",
-  );
-  assertAppearsBefore(
-    downloadBoundary,
-    "requireInstallPermission(context)",
-    "downloadDirectory(context, persistent = false)",
-  );
-  assertAppearsBefore(
-    downloadBoundary,
-    "requireInstallPermission(context)",
-    "ensureDirectory(directory)",
-  );
-  assertAppearsBefore(
-    downloadBoundary,
-    "requireInstallPermission(context)",
-    "HBAppInstallerDownloader().download(",
-  );
+  assert.doesNotMatch(getDirectoryBoundary, /requireInstallPermission/);
+  assert.doesNotMatch(downloadBoundary, /requireInstallPermission/);
   assertAppearsBefore(
     installBoundary,
-    "HBAppInstallerSignerPolicy.validate(",
+    "validateDownloadedApk(context, metadata)",
     "requireInstallPermission(context)",
   );
   assertAppearsBefore(
@@ -160,6 +134,13 @@ test("APK bytes are hashed as a stream and only app-owned file URIs reach FilePr
   assert.match(nativeSource, /val parent = file\.parentFile/);
   assert.match(nativeSource, /parent !in allowedParents/);
   assert.match(nativeSource, /FileProvider\.getUriForFile/);
+});
+
+test("标准 file:/// URI 的空 authority 可通过，远端 file host 仍被拒绝", () => {
+  assert.equal(
+    nativeSource.match(/!uri\.authority\.isNullOrEmpty\(\)/gu)?.length,
+    2,
+  );
 });
 
 test("APK download is native, streaming, redirect-visible, and does not use Expo downloader", () => {

@@ -1,6 +1,7 @@
 import type {
   InstallVerifiedApkRequest as NativeInstallVerifiedApkRequest,
   InstallVerifiedApkResult as NativeInstallVerifiedApkResult,
+  VerifyDownloadedApkRequest as NativeVerifyDownloadedApkRequest,
   InstallPermissionStatus as NativeInstallPermissionStatus,
 } from "../../../modules/hb-app-installer/src/HBAppInstaller.types";
 
@@ -30,6 +31,7 @@ export interface AndroidApkDownloadPort {
 }
 
 export type InstallVerifiedApkRequest = NativeInstallVerifiedApkRequest;
+export type VerifyDownloadedApkRequest = NativeVerifyDownloadedApkRequest;
 export type InstallVerifiedApkResult = NativeInstallVerifiedApkResult;
 export type AndroidInstallPermissionStatus = NativeInstallPermissionStatus;
 
@@ -41,11 +43,13 @@ export interface AndroidAppInstallerPort {
   installVerifiedApk(
     request: InstallVerifiedApkRequest,
   ): Promise<InstallVerifiedApkResult>;
+  verifyDownloadedApk(request: VerifyDownloadedApkRequest): Promise<void>;
 }
 
 export interface AndroidNativeUpdatePort {
   getInstallPermissionStatus(): Promise<AndroidInstallPermissionStatus>;
   openInstallPermissionSettings(): Promise<void>;
+  prepare(decision: PosHandheldUpdatePolicy): Promise<void>;
   install(
     decision: PosHandheldUpdatePolicy,
   ): Promise<InstallVerifiedApkResult>;
@@ -67,6 +71,9 @@ export type AndroidNativeUpdateAdapterOptions = Readonly<{
 export class AndroidNativeUpdateAdapter implements AndroidNativeUpdatePort {
   private readonly trustedOrigins: ReadonlySet<string>;
   private readonly trustedOriginValues: readonly string[];
+  private prepared: PreparedAndroidApk | null = null;
+  private preparing: Promise<void> | null = null;
+  private preparingFingerprint: string | null = null;
 
   public constructor(
     private readonly options: AndroidNativeUpdateAdapterOptions,
@@ -80,91 +87,94 @@ export class AndroidNativeUpdateAdapter implements AndroidNativeUpdatePort {
   public async install(
     input: PosHandheldUpdatePolicy,
   ): Promise<InstallVerifiedApkResult> {
-    if (this.options.platform !== "Android") {
-      throw new Error("Android native update requires the Android platform.");
-    }
-    const decision = normalizePosHandheldUpdatePolicy(input);
-    if (decision.platform !== "Android" || decision.distribution !== "apk") {
-      throw new Error("Android native update requires an Android APK decision.");
-    }
-    const packageName = requiredInstalledPackageName(
-      this.options.installedPackageName,
-    );
-    if (decision.packageName !== packageName) {
-      throw new Error("Android update package identity does not match this app.");
-    }
-    const installedVersionCode = requiredInstalledVersionCode(
-      this.options.installedVersionCode,
-    );
-    const expectedVersionCode = Number(decision.latestBuild);
-    if (
-      !Number.isSafeInteger(expectedVersionCode) ||
-      expectedVersionCode <= installedVersionCode
-    ) {
-      throw new Error("Android update build must be newer than the installed version.");
-    }
-    const downloadUrl = requiredTrustedDownloadUrl(
-      decision.downloadUrl,
-      this.trustedOrigins,
-    );
-    const expectedVersionName = decision.latestVersion;
-    const expectedPackageName = decision.packageName;
-    const expectedSigningCertificateSha256 =
-      decision.signingCertificateSha256;
-    if (
-      decision.fileSize === null ||
-      decision.sha256 === null ||
-      expectedVersionName === null ||
-      expectedPackageName === null ||
-      expectedSigningCertificateSha256 === null
-    ) {
-      throw new Error("Android update identity metadata is incomplete.");
-    }
-
-    // 授权必须在创建目录和任何网络传输前确认，避免用户授权后重复下载同一 APK。
+    const decision = validateAndroidDecision(input, this.options, this.trustedOrigins);
+    await this.prepare(decision);
     if ((await this.getInstallPermissionStatus()) !== "granted") {
       throw new AndroidInstallPermissionRequiredError();
     }
-
-    const directoryUri = await this.options.installer.getDownloadDirectory();
-    const destinationFileUri = appOwnedApkDestination(
-      directoryUri,
-      expectedVersionCode,
-      decision.sha256,
-    );
+    const prepared = this.prepared;
+    if (!prepared || prepared.fingerprint !== androidDecisionFingerprint(decision)) {
+      throw new Error("Android update preparation was lost.");
+    }
     try {
-      const downloaded = await this.options.downloader.download({
-        url: downloadUrl,
-        destinationFileUri,
-        expectedSizeBytes: decision.fileSize,
-        maximumSizeBytes: ANDROID_APK_MAX_SIZE_BYTES,
-        trustedOrigins: this.trustedOriginValues,
-      });
-      validateDownloadedArtifact(
-        downloaded,
-        destinationFileUri,
-        decision.fileSize,
-        this.trustedOrigins,
-      );
-      // package/signer 由 native PackageManager 与当前安装包再次比较；JS 不伪造 APK 解析。
-      const result = await this.options.installer.installVerifiedApk(
-        Object.freeze({
-          fileUri: destinationFileUri,
-          expectedSha256Hex: decision.sha256,
-          expectedPackageName,
-          expectedVersionCode,
-          expectedVersionName,
-          expectedSigningCertificateSha256,
-        }),
-      );
+      const result = await this.options.installer.installVerifiedApk(prepared.request);
       if (
         result.launched !== true ||
-        result.packageName !== packageName ||
-        result.versionCode !== expectedVersionCode
+        result.packageName !== prepared.request.expectedPackageName ||
+        result.versionCode !== prepared.request.expectedVersionCode
       ) {
         throw new Error("Android native installer returned a mismatched identity.");
       }
       return Object.freeze({ ...result });
+    } catch (error) {
+      await bestEffortRemove(this.options.downloader, prepared.request.fileUri);
+      this.prepared = null;
+      throw error;
+    }
+  }
+
+  public async prepare(input: PosHandheldUpdatePolicy): Promise<void> {
+    const decision = validateAndroidDecision(input, this.options, this.trustedOrigins);
+    const fingerprint = androidDecisionFingerprint(decision);
+    if (this.prepared?.fingerprint === fingerprint) return;
+    if (this.preparing) {
+      const waitingForFingerprint = this.preparingFingerprint;
+      try {
+        await this.preparing;
+      } catch (error) {
+        if (waitingForFingerprint === fingerprint) throw error;
+      }
+      if (this.prepared?.fingerprint === fingerprint) return;
+      return this.prepare(input);
+    }
+    const operation = this.prepareFresh(decision, fingerprint);
+    this.preparing = operation;
+    this.preparingFingerprint = fingerprint;
+    try {
+      await operation;
+    } finally {
+      if (this.preparing === operation) {
+        this.preparing = null;
+        this.preparingFingerprint = null;
+      }
+    }
+  }
+
+  private async prepareFresh(
+    decision: PosHandheldUpdatePolicy,
+    fingerprint: string,
+  ): Promise<void> {
+    const downloadUrl = requiredTrustedDownloadUrl(decision.downloadUrl, this.trustedOrigins);
+    const directoryUri = await this.options.installer.getDownloadDirectory();
+    const expectedVersionCode = Number(decision.latestBuild);
+    const destinationFileUri = appOwnedApkDestination(directoryUri, expectedVersionCode, decision.sha256!);
+    const request = Object.freeze({
+      fileUri: destinationFileUri,
+      expectedSha256Hex: decision.sha256!,
+      expectedPackageName: decision.packageName!,
+      expectedVersionCode,
+      expectedVersionName: decision.latestVersion!,
+      expectedSigningCertificateSha256: decision.signingCertificateSha256!,
+    });
+    this.prepared = null;
+    try {
+      await this.options.installer.verifyDownloadedApk(request);
+      this.prepared = Object.freeze({ fingerprint, request });
+      return;
+    } catch {
+      // 目标文件不存在或身份已失效时才重新下载；下载器会原子覆盖同名目标。
+    }
+    try {
+      const downloaded = await this.options.downloader.download({
+        url: downloadUrl,
+        destinationFileUri,
+        expectedSizeBytes: decision.fileSize!,
+        maximumSizeBytes: ANDROID_APK_MAX_SIZE_BYTES,
+        trustedOrigins: this.trustedOriginValues,
+      });
+      validateDownloadedArtifact(downloaded, destinationFileUri, decision.fileSize!, this.trustedOrigins);
+      await this.options.installer.verifyDownloadedApk(request);
+      this.prepared = Object.freeze({ fingerprint, request });
     } catch (error) {
       await bestEffortRemove(this.options.downloader, destinationFileUri);
       throw error;
@@ -186,6 +196,58 @@ export class AndroidNativeUpdateAdapter implements AndroidNativeUpdatePort {
       throw new Error("Android native update requires the Android platform.");
     }
   }
+}
+
+type PreparedAndroidApk = Readonly<{
+  fingerprint: string;
+  request: InstallVerifiedApkRequest;
+}>;
+
+function validateAndroidDecision(
+  input: PosHandheldUpdatePolicy,
+  options: AndroidNativeUpdateAdapterOptions,
+  trustedOrigins: ReadonlySet<string>,
+): PosHandheldUpdatePolicy {
+  if (options.platform !== "Android") {
+    throw new Error("Android native update requires the Android platform.");
+  }
+  const decision = normalizePosHandheldUpdatePolicy(input);
+  if (decision.platform !== "Android" || decision.distribution !== "apk") {
+    throw new Error("Android native update requires an Android APK decision.");
+  }
+  const packageName = requiredInstalledPackageName(options.installedPackageName);
+  if (decision.packageName !== packageName) {
+    throw new Error("Android update package identity does not match this app.");
+  }
+  const installedVersionCode = requiredInstalledVersionCode(options.installedVersionCode);
+  const expectedVersionCode = Number(decision.latestBuild);
+  if (!Number.isSafeInteger(expectedVersionCode) || expectedVersionCode <= installedVersionCode) {
+    throw new Error("Android update build must be newer than the installed version.");
+  }
+  requiredTrustedDownloadUrl(decision.downloadUrl, trustedOrigins);
+  if (
+    decision.fileSize === null ||
+    decision.sha256 === null ||
+    decision.latestVersion === null ||
+    decision.packageName === null ||
+    decision.signingCertificateSha256 === null
+  ) {
+    throw new Error("Android update identity metadata is incomplete.");
+  }
+  return decision;
+}
+
+function androidDecisionFingerprint(decision: PosHandheldUpdatePolicy): string {
+  return [
+    decision.policyVersion,
+    decision.latestVersion,
+    decision.latestBuild,
+    decision.downloadUrl,
+    decision.fileSize,
+    decision.sha256,
+    decision.packageName,
+    decision.signingCertificateSha256,
+  ].join("\u001f");
 }
 
 /** 可恢复的用户授权缺失；UI 必须呈现设置入口，不能降级为普通下载失败。 */

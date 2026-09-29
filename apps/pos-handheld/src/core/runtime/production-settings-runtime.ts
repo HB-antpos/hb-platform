@@ -10,6 +10,7 @@ import {
   type SettingsSquareSetupControlPort,
 } from "../../features/settings/settings-presenter";
 import type { SettingsRuntimeFactory } from "../../features/settings/settings-runtime";
+import type { PaymentMethodSettings } from "../../features/settings/payment-method-settings";
 
 export type SettingsTrustedSession = Readonly<{
   storeCode: string;
@@ -40,6 +41,11 @@ export type ProductionSettingsRuntimeDependencies = Readonly<{
 
 type LeaseAwareSettingsControlPort = SettingsControlPort &
   Readonly<{
+    savePaymentMethodSettings?: (
+      settings: PaymentMethodSettings,
+      signal: AbortSignal,
+      assertActive?: () => void,
+    ) => Promise<SettingsDangerousActionResult>;
     executeDangerousAction(
       action: SettingsDangerousConfirmation,
       signal: AbortSignal,
@@ -309,6 +315,21 @@ function securedSettingsPort(
       ),
     savePrinterSettings: (settings, signal) =>
       run(() => input.control.savePrinterSettings(settings, signal)),
+    ...(leaseAwareControl.savePaymentMethodSettings
+      ? {
+          savePaymentMethodSettings: async (
+            settings: PaymentMethodSettings,
+            signal: AbortSignal,
+          ) => {
+            assertSameSession(lease.get(), identity);
+            return leaseAwareControl.savePaymentMethodSettings!(
+              settings,
+              signal,
+              () => assertSameSession(lease.get(), identity),
+            );
+          },
+        }
+      : {}),
     loadReceiptProfile: (signal) =>
       run(() => input.control.loadReceiptProfile(signal)),
     scanPrinters: (signal) =>
