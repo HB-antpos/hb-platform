@@ -11,6 +11,7 @@ import {
   getCumulativeTotals,
   getCutoffOptions,
   getDisplayCutoffHour,
+  getLiveHourSummary,
   groupHourlySeriesByBranch,
   isLowBase,
   parseUtcTimestamp,
@@ -240,5 +241,26 @@ assert.equal(alignedRanking[2].revenue, 0);
 assert.equal(alignedRanking[2].compareRevenue, 0, "小时数据里没有的分店两期都按 0");
 assert.equal(alignedRanking[2].revenueDeltaRatio, null);
 assert.equal(alignedRanking[0].branchName, "1013", "对齐只替换数值字段，保留分店信息");
+
+// —— 进行中小时的提示：2026-09-29 Orion 10:30 统计，10 点只有 10:00–10:30 的半小时 ——
+{
+  const orion = buildHourlySeries([row(9, 217.73, 401.32), row(10, 239.47, 743.4)]);
+  assert.deepEqual(
+    getLiveHourSummary(orion, { cutoffHour: 10, live: true, liveHourFraction: 0.5 }),
+    { startHour: 10, nextHour: 11, revenue: 239.47 },
+    "半点统计后进行中的半小时单独提示，不进对比",
+  );
+  assert.equal(
+    getLiveHourSummary(orion, { cutoffHour: 10, live: true, liveHourFraction: 0 }),
+    null,
+    "整点统计刚完成（xx:00:22）时进行中小时只有几秒入账，不提示「10:00–10:00」",
+  );
+  assert.equal(getLiveHourSummary(orion, { cutoffHour: 24, live: false, liveHourFraction: 0 }), null, "历史日期没有进行中的小时");
+  assert.equal(
+    getLiveHourSummary(orion, { cutoffHour: 11, live: true, liveHourFraction: 0.5 }),
+    null,
+    "进行中小时尚无入账时不提示",
+  );
+}
 
 console.log("hourly-cumulative.test.ts: ok");
