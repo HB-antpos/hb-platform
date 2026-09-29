@@ -10,6 +10,7 @@ import {
   StyleSheet,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -88,10 +89,23 @@ import {
 import { PRODUCT_PAGE_SIZE, SUPPLIER_PAGE_SIZE, getPageRows } from "@/modules/product-report/pagination";
 import {
   buildChinaBranchShareRows,
+  mergeSupplierBranchSales,
   summarizeChinaGoods,
   summarizeProductPage,
 } from "@/modules/product-report/china-goods-share";
 import { ChinaBranchShareSection, ChinaGoodsSummaryCard } from "@/modules/product-report/china-goods-sections";
+import { LINKED_COLORS, LINKED_STALE_OPACITY } from "@/modules/product-report/linked-colors";
+import { LinkedFilterBar, type LinkedAnchor, type LinkedAnchorKey } from "@/modules/product-report/linked-filter-bar";
+import {
+  FRESH_LINKED_SECTIONS,
+  filterRowsByBranch,
+  findRowPage,
+  getLinkedTransitionStaleness,
+  getScopedRevenue,
+  isSameLinkedCode,
+  type LinkedSectionStaleness,
+  type ProductReportDisplayContext,
+} from "@/modules/product-report/linked-selection";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { useAuthStore } from "@/store/auth-store";
 
@@ -118,6 +132,9 @@ interface ProductPageSummary {
 }
 
 const MAIN_REPORT_CACHE_VERSION_REFETCH_LIMIT = 2;
+
+// 吸顶联动条在主 ScrollView 直接子元素中的位置：日期行（或标题）→ 页签 → 联动条。
+const LINKED_FILTER_BAR_INDEX = 2;
 
 type SupplierMetricSortRow = Pick<
   SupplierReportRow,
@@ -169,6 +186,14 @@ type CompleteProductMainReport = {
   product: ProductReportSnapshot<ProductReportProductPage>;
   // 仅中国供应商页签请求；澳洲页签为 null。
   chinaBranchTotals: ProductReportSnapshot<ChinaSupplierBranchTotalRow[]> | null;
+  // 中国页签选中供应商时，分店表改为该供应商在各分店的销售；未选供应商或澳洲页签为 null。
+  chinaSupplierBranches: ProductReportSnapshot<SupplierBranchBreakdownRow[]> | null;
+};
+
+// 最近一次完整展示的主报表及其条件：联动点选后新数据到齐前，用它做局部过渡，只让受影响的区块变淡。
+type DisplayedMainReport = {
+  context: ProductReportDisplayContext;
+  report: CompleteProductMainReport;
 };
 
 function formatCount(value: number) {
@@ -438,6 +463,14 @@ export function ProductReportScreen({
     sessionKey: null,
     attemptCount: 0,
   });
+  const scrollRef = useRef<ScrollView>(null);
+  // 各区块在滚动内容里的纵向位置与吸顶联动条高度，供锚点跳转时让区块标题落在联动条下方。
+  const sectionOffsetsRef = useRef<Record<LinkedAnchorKey, number>>({ branches: 0, suppliers: 0, products: 0 });
+  const linkedBarHeightRef = useRef(0);
+  const lastDisplayedMainReportRef = useRef<DisplayedMainReport | null>(null);
+  // 已选供应商在新分店无销售时不在当前排行里，联动条与提示仍要显示它的名称。
+  const supplierNamesRef = useRef(new Map<string, string>());
+  const supplierPageAnchorRef = useRef<SupplierReportRow[] | null>(null);
   const [kind, setKind] = useState<SupplierReportKind>("australia");
   const [range, setRange] = useState(() => getDefaultProductReportRange());
   const [draftStartDate, setDraftStartDate] = useState(range.startDate);
@@ -504,6 +537,20 @@ export function ProductReportScreen({
         : null
     ),
     [activeRange, branchCodes, dateRangeValid, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess],
+  );
+  // 三表联动：总营业额、分店中国货合计和「选中供应商在各分店」固定按全部收银启用分店取数，
+  // 选中分店只在前端切片（汇总卡、占比分母），切换分店时不必重取；只有供应商表与商品明细跟随所选分店。
+  const allBranchQueryParams = useMemo(
+    () => (
+      dateRangeValid
+      && activeRange
+      && storeOptionsQuery.isSuccess
+      && !storeOptionsQuery.isFetching
+      && cashierEnabledStoreCodes.length > 0
+        ? buildProductReportDateQuery(activeRange, cashierEnabledStoreCodes)
+        : null
+    ),
+    [activeRange, cashierEnabledStoreCodes, dateRangeValid, storeOptionsQuery.isFetching, storeOptionsQuery.isSuccess],
   );
   useLayoutEffect(() => {
     if (reportNavigationActionId === null) return;
@@ -579,8 +626,8 @@ export function ProductReportScreen({
     [selectedSupplierCode]
   );
   const totalRevenueQueryKey = useMemo(
-    () => ["product-report", "total-revenue", accountIdentity, cashierStoreScopeVersion, queryParams] as const,
-    [accountIdentity, cashierStoreScopeVersion, queryParams],
+    () => ["product-report", "total-revenue", accountIdentity, cashierStoreScopeVersion, allBranchQueryParams] as const,
+    [accountIdentity, allBranchQueryParams, cashierStoreScopeVersion],
   );
   const supplierQueryKey = useMemo(
     () => ["product-report", "suppliers", accountIdentity, kind, cashierStoreScopeVersion, queryParams] as const,
@@ -603,8 +650,22 @@ export function ProductReportScreen({
   );
   const isChinaKind = kind === "china";
   const chinaBranchTotalsQueryKey = useMemo(
-    () => ["product-report", "china-branch-totals", accountIdentity, cashierStoreScopeVersion, queryParams] as const,
-    [accountIdentity, cashierStoreScopeVersion, queryParams],
+    () => ["product-report", "china-branch-totals", accountIdentity, cashierStoreScopeVersion, allBranchQueryParams] as const,
+    [accountIdentity, allBranchQueryParams, cashierStoreScopeVersion],
+  );
+  // 中国页签选中供应商后，分店表显示该供应商在全部授权分店的销售；它和分店合计一样不随所选分店变化。
+  const linkedSupplierCode = isChinaKind ? selectedSupplierCode : null;
+  const hasChinaSupplierBranches = Boolean(linkedSupplierCode);
+  const chinaSupplierBranchesQueryKey = useMemo(
+    () => [
+      "product-report",
+      "china-supplier-branch-link",
+      accountIdentity,
+      cashierStoreScopeVersion,
+      linkedSupplierCode,
+      allBranchQueryParams,
+    ] as const,
+    [accountIdentity, allBranchQueryParams, cashierStoreScopeVersion, linkedSupplierCode],
   );
   const productLoadSessionKey = useMemo(
     () => ({
@@ -613,8 +674,17 @@ export function ProductReportScreen({
       productQueryKey,
       // 中国页签多一块分店中国货合计，它同样属于首屏主报表的同一次加载会话。
       chinaBranchTotalsQueryKey: isChinaKind ? chinaBranchTotalsQueryKey : null,
+      chinaSupplierBranchesQueryKey: hasChinaSupplierBranches ? chinaSupplierBranchesQueryKey : null,
     }),
-    [chinaBranchTotalsQueryKey, isChinaKind, productQueryKey, supplierQueryKey, totalRevenueQueryKey],
+    [
+      chinaBranchTotalsQueryKey,
+      chinaSupplierBranchesQueryKey,
+      hasChinaSupplierBranches,
+      isChinaKind,
+      productQueryKey,
+      supplierQueryKey,
+      totalRevenueQueryKey,
+    ],
   );
   const mainReportSnapshotKey = useMemo(
     () => snapshotQueryParams
@@ -665,6 +735,14 @@ export function ProductReportScreen({
       cachedChinaBranchTotals,
       (cachedChinaBranchTotals) => cachedChinaBranchTotals.isComplete,
     );
+    const cachedChinaSupplierBranches = hasChinaSupplierBranches
+      ? queryClient.getQueryData<ProductReportSnapshot<SupplierBranchBreakdownRow[]>>(chinaSupplierBranchesQueryKey)
+      : undefined;
+    const hasCompleteChinaSupplierBranchCache = !hasChinaSupplierBranches || hasUsableSuccessfulReportCache(
+      queryClient.getQueryState(chinaSupplierBranchesQueryKey)?.status,
+      cachedChinaSupplierBranches,
+      (cachedChinaSupplierBranches) => cachedChinaSupplierBranches.isComplete,
+    );
     const hasCompleteCache =
       hasUsableSuccessfulReportCache(
         queryClient.getQueryState(totalRevenueQueryKey)?.status,
@@ -682,16 +760,20 @@ export function ProductReportScreen({
         (cachedProductPage) => cachedProductPage.isComplete,
       )
       && hasCompleteChinaBranchCache
+      && hasCompleteChinaSupplierBranchCache
       && getProductReportCacheVersionState([
         cachedTotalRevenue,
         cachedSupplierRows,
         cachedProductPage,
         ...(isChinaKind ? [cachedChinaBranchTotals] : []),
+        ...(hasChinaSupplierBranches ? [cachedChinaSupplierBranches] : []),
       ]) === "aligned"
       && (cachedSupplierRows.data.length > 0 || cachedProductPage.data.rows.length > 0);
     startProductLoad(hasCompleteCache ? "warm" : "cold");
   }, [
     chinaBranchTotalsQueryKey,
+    chinaSupplierBranchesQueryKey,
+    hasChinaSupplierBranches,
     isChinaKind,
     productLoadSessionKey,
     productQueryKey,
@@ -712,13 +794,13 @@ export function ProductReportScreen({
     queryFn: async ({ signal }) => {
       ensureProductLoadStarted();
       try {
-        return await fetchProductReportTotalRevenue(queryParams!, { signal });
+        return await fetchProductReportTotalRevenue(allBranchQueryParams!, { signal });
       } catch (error) {
         failProductLoad();
         throw error;
       }
     },
-    enabled: Boolean(queryParams),
+    enabled: Boolean(allBranchQueryParams),
     ...REPORT_QUERY_OPTIONS,
   });
 
@@ -779,13 +861,29 @@ export function ProductReportScreen({
     queryFn: async ({ signal }) => {
       ensureProductLoadStarted();
       try {
-        return await fetchChinaSupplierBranchTotals(queryParams!, { signal });
+        return await fetchChinaSupplierBranchTotals(allBranchQueryParams!, { signal });
       } catch (error) {
         failProductLoad();
         throw error;
       }
     },
-    enabled: Boolean(queryParams) && isChinaKind,
+    enabled: Boolean(allBranchQueryParams) && isChinaKind,
+    ...REPORT_QUERY_OPTIONS,
+  });
+  // 中国页签选中供应商时的第 5 块主数据：该供应商在各分店的销售，作为分店表的分子。
+  // cacheVersion 只由日期决定、与分店和供应商参数无关，因此可以并入同一统计批次校验。
+  const chinaSupplierBranchesQuery = useQuery({
+    queryKey: chinaSupplierBranchesQueryKey,
+    queryFn: async ({ signal }) => {
+      ensureProductLoadStarted();
+      try {
+        return await fetchSupplierBranchBreakdown("china", allBranchQueryParams!, linkedSupplierCode!, { signal });
+      } catch (error) {
+        failProductLoad();
+        throw error;
+      }
+    },
+    enabled: Boolean(allBranchQueryParams) && hasChinaSupplierBranches,
     ...REPORT_QUERY_OPTIONS,
   });
   const mainReportCacheVersionState = getProductReportCacheVersionState([
@@ -793,12 +891,14 @@ export function ProductReportScreen({
     supplierQuery.data,
     productQuery.data,
     ...(isChinaKind ? [chinaBranchTotalsQuery.data] : []),
+    ...(hasChinaSupplierBranches ? [chinaSupplierBranchesQuery.data] : []),
   ]);
   const mainReportQueriesFetching =
     totalRevenueQuery.isFetching
     || supplierQuery.isFetching
     || productQuery.isFetching
-    || (isChinaKind && chinaBranchTotalsQuery.isFetching);
+    || (isChinaKind && chinaBranchTotalsQuery.isFetching)
+    || (hasChinaSupplierBranches && chinaSupplierBranchesQuery.isFetching);
   const refetchMainReport = useCallback(() => Promise.all([
     queryClient.refetchQueries({ queryKey: totalRevenueQueryKey, exact: true, type: "active" }),
     queryClient.refetchQueries({ queryKey: supplierQueryKey, exact: true, type: "active" }),
@@ -806,7 +906,19 @@ export function ProductReportScreen({
     ...(isChinaKind
       ? [queryClient.refetchQueries({ queryKey: chinaBranchTotalsQueryKey, exact: true, type: "active" })]
       : []),
-  ]), [chinaBranchTotalsQueryKey, isChinaKind, productQueryKey, queryClient, supplierQueryKey, totalRevenueQueryKey]);
+    ...(hasChinaSupplierBranches
+      ? [queryClient.refetchQueries({ queryKey: chinaSupplierBranchesQueryKey, exact: true, type: "active" })]
+      : []),
+  ]), [
+    chinaBranchTotalsQueryKey,
+    chinaSupplierBranchesQueryKey,
+    hasChinaSupplierBranches,
+    isChinaKind,
+    productQueryKey,
+    queryClient,
+    supplierQueryKey,
+    totalRevenueQueryKey,
+  ]);
   const resetMainReportVersionSync = useCallback(() => {
     mainReportVersionSyncRef.current = { sessionKey: productLoadSessionKey, attemptCount: 0 };
     setMainReportVersionSyncExhausted(false);
@@ -884,6 +996,17 @@ export function ProductReportScreen({
           && (!chinaBranchTotalsQuery.data.pollingExhausted || chinaBranchTotalsQuery.isFetching)
         )
       )
+    )
+    || (
+      hasChinaSupplierBranches
+      && (
+        chinaSupplierBranchesQuery.isLoading
+        || (
+          chinaSupplierBranchesQuery.data !== undefined
+          && !chinaSupplierBranchesQuery.data.isComplete
+          && (!chinaSupplierBranchesQuery.data.pollingExhausted || chinaSupplierBranchesQuery.isFetching)
+        )
+      )
     );
   const mainReportStatisticsIncomplete =
     totalRevenueStatisticsIncomplete
@@ -910,13 +1033,21 @@ export function ProductReportScreen({
       && !chinaBranchTotalsQuery.data.isComplete
       && chinaBranchTotalsQuery.data.pollingExhausted
       && !chinaBranchTotalsQuery.isFetching
+    )
+    || (
+      hasChinaSupplierBranches
+      && chinaSupplierBranchesQuery.data !== undefined
+      && !chinaSupplierBranchesQuery.data.isComplete
+      && chinaSupplierBranchesQuery.data.pollingExhausted
+      && !chinaSupplierBranchesQuery.isFetching
     );
   const mainReportRequestError =
     storeOptionsQuery.isError
     || totalRevenueQuery.isError
     || supplierQuery.isError
     || productQuery.isError
-    || (isChinaKind && chinaBranchTotalsQuery.isError);
+    || (isChinaKind && chinaBranchTotalsQuery.isError)
+    || (hasChinaSupplierBranches && chinaSupplierBranchesQuery.isError);
 
   const mainReportCurrentComplete =
     reportScopeValid && dateRangeValid && !mainReportRequestError
@@ -925,8 +1056,18 @@ export function ProductReportScreen({
     && supplierQuery.data?.isComplete === true
     && productQuery.data?.isComplete === true
     && (!isChinaKind || chinaBranchTotalsQuery.data?.isComplete === true)
+    && (!hasChinaSupplierBranches || chinaSupplierBranchesQuery.data?.isComplete === true)
     && mainReportCacheVersionState === "aligned"
     && !mainReportQueriesFetching;
+  const currentMainReport: CompleteProductMainReport | undefined = mainReportCurrentComplete
+    ? {
+        totalRevenue: totalRevenueQuery.data!,
+        supplier: supplierQuery.data!,
+        product: productQuery.data!,
+        chinaBranchTotals: isChinaKind ? chinaBranchTotalsQuery.data ?? null : null,
+        chinaSupplierBranches: hasChinaSupplierBranches ? chinaSupplierBranchesQuery.data ?? null : null,
+      }
+    : undefined;
   useLayoutEffect(() => {
     if (!mainReportSnapshotKey || !mainReportCurrentComplete) return;
     saveCompleteReportSnapshot(
@@ -937,6 +1078,7 @@ export function ProductReportScreen({
         supplier: supplierQuery.data!,
         product: productQuery.data!,
         chinaBranchTotals: isChinaKind ? chinaBranchTotalsQuery.data ?? null : null,
+        chinaSupplierBranches: hasChinaSupplierBranches ? chinaSupplierBranchesQuery.data ?? null : null,
       },
       {
         statisticUpdatedAt:
@@ -949,7 +1091,9 @@ export function ProductReportScreen({
     );
   }, [
     chinaBranchTotalsQuery.data,
+    chinaSupplierBranchesQuery.data,
     completeMainReportSnapshotsRef,
+    hasChinaSupplierBranches,
     isChinaKind,
     mainReportCurrentComplete,
     mainReportSnapshotKey,
@@ -964,12 +1108,14 @@ export function ProductReportScreen({
       // 授权门店范围变化代表权限边界变化，旧范围的内存快照必须立即失效。
       completeMainReportSnapshotsRef.clear();
       completeDrilldownSnapshotsRef.clear();
+      lastDisplayedMainReportRef.current = null;
       setDrilldown(null);
     }
     previousScopeCodesRef.current = scopeFingerprint;
     if (!reportScopeValid) {
       completeMainReportSnapshotsRef.clear();
       completeDrilldownSnapshotsRef.clear();
+      lastDisplayedMainReportRef.current = null;
       setDrilldown(null);
     }
   }, [
@@ -985,18 +1131,70 @@ export function ProductReportScreen({
     ? getCompleteReportSnapshot(completeMainReportSnapshotsRef, mainReportSnapshotKey)
     : undefined;
   const mainReportHasSnapshot = mainReportSnapshot !== undefined;
-  const displayedMainReport: CompleteProductMainReport | undefined = mainReportCurrentComplete
-    ? {
-        totalRevenue: totalRevenueQuery.data!,
-        supplier: supplierQuery.data!,
-        product: productQuery.data!,
-        chinaBranchTotals: isChinaKind ? chinaBranchTotalsQuery.data ?? null : null,
-      }
-    : mainReportSnapshot?.data;
+  const linkedScopeKey = useMemo(
+    () => JSON.stringify([accountIdentity, cashierEnabledStoreCodes]),
+    [accountIdentity, cashierEnabledStoreCodes],
+  );
+  const requestedDisplayContext = useMemo<ProductReportDisplayContext | null>(
+    () => snapshotQueryParams
+      ? {
+          scopeKey: linkedScopeKey,
+          kind,
+          startDate: snapshotQueryParams.startDate,
+          endDate: snapshotQueryParams.endDate,
+          compareStartDate: snapshotQueryParams.compareStartDate,
+          compareEndDate: snapshotQueryParams.compareEndDate,
+          compareMode: snapshotQueryParams.compareMode,
+          branchCode: selectedStoreCode ?? null,
+          supplierCode: selectedSupplierCode,
+          productSearch,
+          productPage,
+          productSort: productSortKey,
+        }
+      : null,
+    [kind, linkedScopeKey, productPage, productSearch, productSortKey, selectedStoreCode, selectedSupplierCode, snapshotQueryParams],
+  );
+  // 联动点选或明细翻页后，新条件的数据到齐前沿用最近一次完整展示的结果：
+  // 只有依赖变化的区块变淡并显示「更新中」，其余区块保持可读可点，避免整页闪成加载态或空表。
+  const lastDisplayedMainReport = lastDisplayedMainReportRef.current;
+  const linkedTransitionStaleness = !mainReportCurrentComplete
+    && !mainReportHasSnapshot
+    && reportScopeValid
+    && requestedDisplayContext
+    && lastDisplayedMainReport
+    ? getLinkedTransitionStaleness(lastDisplayedMainReport.context, requestedDisplayContext)
+    : null;
+  const linkedTransition = linkedTransitionStaleness && lastDisplayedMainReport
+    ? { ...lastDisplayedMainReport, staleness: linkedTransitionStaleness }
+    : null;
+  const displayedMainReport: CompleteProductMainReport | undefined =
+    currentMainReport ?? mainReportSnapshot?.data ?? linkedTransition?.report;
+  // 表格里的数据属于哪组条件：实时结果与快照就是当前条件，过渡期间仍是上一次展示的条件。
+  const displayedContext = currentMainReport || mainReportHasSnapshot
+    ? requestedDisplayContext
+    : linkedTransition?.context ?? null;
+  const linkedStaleness: LinkedSectionStaleness = linkedTransition?.staleness ?? FRESH_LINKED_SECTIONS;
+  const mainReportHasDisplay = mainReportHasSnapshot || linkedTransition !== null;
+  useLayoutEffect(() => {
+    // 记录最近一次完整展示（实时结果或同条件快照），作为下一次联动点选的过渡底图。
+    if (!requestedDisplayContext || !displayedMainReport || !(currentMainReport || mainReportHasSnapshot)) return;
+    lastDisplayedMainReportRef.current = { context: requestedDisplayContext, report: displayedMainReport };
+  });
   const supplierRows = useMemo(
     () => displayedMainReport?.supplier.data ?? [],
     [displayedMainReport?.supplier.data],
   );
+  useEffect(() => {
+    // 供应商只能从已展示的行里点选，所以在行展示后缓存名称即可覆盖所有已选供应商。
+    supplierRows.forEach((row) => supplierNamesRef.current.set(row.supplierCode, getSupplierTitle(row)));
+  }, [supplierRows]);
+  const getSupplierLabel = (supplierCode: string | null | undefined) =>
+    supplierCode ? supplierNamesRef.current.get(supplierCode) ?? supplierCode : null;
+  const getStoreLabel = (storeCode: string | null | undefined) =>
+    storeCode
+      ? storeOptionsQuery.data?.find((item) => isSameLinkedCode(item.value, storeCode))?.label ?? storeCode
+      : null;
+  const selectedSupplierLabel = getSupplierLabel(selectedSupplierCode);
   // 供应商表是全量数据、前端分页：先排序再分页，# 即当前排序下的名次；小计与顺序无关，仍用原数组。
   const sortedSupplierRows = useMemo(
     () => sortReportRows(supplierRows, supplierSort, SUPPLIER_METRIC_SORT_VALUES, (row) => row.supplierCode),
@@ -1006,8 +1204,26 @@ export function ProductReportScreen({
   const supplierPageRows = getPageRows(sortedSupplierRows, supplierPage, SUPPLIER_PAGE_SIZE);
   const supplierSubtotal = supplierRows.reduce((sum, row) => sum + row.revenue, 0);
   const supplierCompareSubtotal = supplierRows.reduce((sum, row) => sum + row.compareRevenue, 0);
-  const totalRevenue = displayedMainReport?.totalRevenue ?? { revenue: 0, compareRevenue: 0 };
-  const productSectionLoading = !mainReportHasSnapshot
+  // 总营业额固定按全部授权分店取数：汇总卡按当前所选分店即时切片；
+  // 供应商表的「占总营业」分母则跟随表里数据所属的分店，过渡期间两者可能暂时不同。
+  const summaryRevenue = getScopedRevenue(displayedMainReport?.totalRevenue, selectedStoreCode);
+  const supplierScopeBranchCode = displayedContext?.branchCode ?? null;
+  const supplierScopeRevenue = getScopedRevenue(displayedMainReport?.totalRevenue, supplierScopeBranchCode);
+  const selectedSupplierMissing = Boolean(selectedSupplierCode && selectedStoreCode)
+    && displayedMainReport !== undefined
+    && !linkedStaleness.supplierTable
+    && !supplierRows.some((row) => isSameLinkedCode(row.supplierCode, selectedSupplierCode));
+  // 换分店后供应商排行重排：若已选供应商仍在榜上，翻到它所在的页，让高亮行看得见；用户手动翻页不受影响。
+  useEffect(() => {
+    if (supplierPageAnchorRef.current === supplierRows) return;
+    supplierPageAnchorRef.current = supplierRows;
+    if (!selectedSupplierCode) return;
+    const page = findRowPage(sortedSupplierRows, SUPPLIER_PAGE_SIZE, (row) => isSameLinkedCode(row.supplierCode, selectedSupplierCode));
+    if (page !== null) setSupplierPage(page);
+  }, [selectedSupplierCode, sortedSupplierRows, supplierRows]);
+  // 明细的行号与「本页合计」说明按表里实际显示的那一页计算，过渡期间不把旧行标成新页码。
+  const displayedProductPage = displayedContext?.productPage ?? productPage;
+  const productSectionLoading = !mainReportHasDisplay
     && (productQuery.isLoading || productQuery.isPlaceholderData);
 
   const completeProductLoad = useCallback(() => {
@@ -1056,7 +1272,12 @@ export function ProductReportScreen({
       (totalRevenueQuery.data !== undefined && !totalRevenueQuery.data.isComplete)
       || (supplierQuery.data !== undefined && !supplierQuery.data.isComplete)
       || (productQuery.data !== undefined && !productQuery.data.isComplete)
-      || (isChinaKind && chinaBranchTotalsQuery.data !== undefined && !chinaBranchTotalsQuery.data.isComplete);
+      || (isChinaKind && chinaBranchTotalsQuery.data !== undefined && !chinaBranchTotalsQuery.data.isComplete)
+      || (
+        hasChinaSupplierBranches
+        && chinaSupplierBranchesQuery.data !== undefined
+        && !chinaSupplierBranchesQuery.data.isComplete
+      );
     if (hasIncompleteSnapshot) {
       if (!mainReportStatisticsPending) failProductLoad();
       return;
@@ -1066,6 +1287,8 @@ export function ProductReportScreen({
       supplierQuery.data?.isComplete === true &&
       productQuery.data?.isComplete === true &&
       (!isChinaKind || (chinaBranchTotalsQuery.data?.isComplete === true && !chinaBranchTotalsQuery.isFetching)) &&
+      (!hasChinaSupplierBranches
+        || (chinaSupplierBranchesQuery.data?.isComplete === true && !chinaSupplierBranchesQuery.isFetching)) &&
       mainReportCacheVersionState === "aligned" &&
       !totalRevenueQuery.isFetching &&
       !supplierQuery.isFetching &&
@@ -1085,7 +1308,10 @@ export function ProductReportScreen({
   }, [
     chinaBranchTotalsQuery.data,
     chinaBranchTotalsQuery.isFetching,
+    chinaSupplierBranchesQuery.data,
+    chinaSupplierBranchesQuery.isFetching,
     failProductLoad,
+    hasChinaSupplierBranches,
     isChinaKind,
     mainReportStatisticsPending,
     mainReportCacheVersionState,
@@ -1136,14 +1362,36 @@ export function ProductReportScreen({
     () => displayedMainReport?.totalRevenue.branches ?? [],
     [displayedMainReport?.totalRevenue.branches],
   );
-  // 中国货合计取自分店合计（同期覆盖全部中国供应商），供应商表的「占中国货」也以它为分母。
+  // 中国货合计取自分店合计（同期覆盖全部中国供应商）。分店合计固定是全部授权分店：
+  // 汇总卡按当前所选分店即时切片（行为与原先顶部单店筛选一致，只跟分店、不跟供应商）；
+  // 供应商表的「占中国货」分母按表里数据所属的分店切片。
   const chinaGoodsSummary = useMemo(
-    () => summarizeChinaGoods(chinaBranchTotalRows, totalRevenue.revenue, totalRevenue.compareRevenue),
-    [chinaBranchTotalRows, totalRevenue.compareRevenue, totalRevenue.revenue],
+    () => summarizeChinaGoods(
+      filterRowsByBranch(chinaBranchTotalRows, selectedStoreCode),
+      summaryRevenue.revenue,
+      summaryRevenue.compareRevenue,
+    ),
+    [chinaBranchTotalRows, selectedStoreCode, summaryRevenue.compareRevenue, summaryRevenue.revenue],
   );
+  const supplierScopeChinaGoods = useMemo(
+    () => summarizeChinaGoods(
+      filterRowsByBranch(chinaBranchTotalRows, supplierScopeBranchCode),
+      supplierScopeRevenue.revenue,
+      supplierScopeRevenue.compareRevenue,
+    ),
+    [chinaBranchTotalRows, supplierScopeBranchCode, supplierScopeRevenue.compareRevenue, supplierScopeRevenue.revenue],
+  );
+  // 分店表只随供应商变化：选了供应商就改用该供应商在各分店的销售作分子，分母仍是分店营业额。
+  const branchTableSupplierCode = isChinaKind ? displayedContext?.supplierCode ?? null : null;
+  const chinaSupplierBranchRows = displayedMainReport?.chinaSupplierBranches?.data;
   const chinaBranchShareRows = useMemo(
-    () => buildChinaBranchShareRows(reportBranchRevenues, chinaBranchTotalRows),
-    [chinaBranchTotalRows, reportBranchRevenues],
+    () => buildChinaBranchShareRows(
+      reportBranchRevenues,
+      branchTableSupplierCode && chinaSupplierBranchRows
+        ? mergeSupplierBranchSales(chinaSupplierBranchRows)
+        : chinaBranchTotalRows,
+    ),
+    [branchTableSupplierCode, chinaBranchTotalRows, chinaSupplierBranchRows, reportBranchRevenues],
   );
   const chinaProductPageTotals = useMemo(() => summarizeProductPage(productRows), [productRows]);
   // 占比细条以当前页签全量供应商中的最大金额为满格，只表达相对集中度。
@@ -1153,6 +1401,8 @@ export function ProductReportScreen({
   );
   const supplierNameWidth = CHINA_SUPPLIER_NAME_COLUMN_WIDTH;
   const productInfoWidth = getChinaLeadingColumnWidth(width, CHINA_PRODUCT_FIRST_SCREEN_FIXED, 96, 220);
+  // 宽表可横向滚动，空态若按整表宽度居中会落到屏幕外；限制在首屏可见宽度内居中。
+  const tableViewportWidth = Math.max(0, width - CHINA_TABLE_VIEWPORT_INSET);
   const productPageCount = Math.max(1, Math.ceil(productTotal / PRODUCT_PAGE_SIZE));
   // 商品报告的两个数据区块各自接近一屏，分页和搜索栏也计入区块高度。
   const sectionScreenHeight = Math.max(560, Math.floor(height * 0.76));
@@ -1530,9 +1780,42 @@ export function ProductReportScreen({
   const applyStore = (storeCode?: string) => {
     setSelectedStoreCode(storeCode);
     setStoreModalVisible(false);
-    setSelectedSupplierCode(null);
+    // 三表联动：换分店保留已选供应商，供应商表与明细按新分店重取（交集为空时由提示条说明）。
     setSupplierPage(1);
     setProductPage(1);
+  };
+
+  // 分店表整行点按：选中分店，再点同一行取消。
+  const toggleLinkedBranch = (branchCode: string) => {
+    applyStore(isSameLinkedCode(selectedStoreCode, branchCode) ? undefined : branchCode);
+  };
+
+  // 供应商名称点按：选中供应商，再点同一行取消；明细回到第 1 页。
+  const toggleLinkedSupplier = (supplierCode: string) => {
+    setSelectedSupplierCode((current) => (isSameLinkedCode(current, supplierCode) ? null : supplierCode));
+    setProductPage(1);
+  };
+
+  const clearLinkedSupplier = () => {
+    setSelectedSupplierCode(null);
+    setProductPage(1);
+  };
+
+  const clearLinkedSelection = () => {
+    applyStore(undefined);
+    clearLinkedSupplier();
+  };
+
+  const recordSectionOffset = (key: LinkedAnchorKey) => (event: LayoutChangeEvent) => {
+    sectionOffsetsRef.current[key] = event.nativeEvent.layout.y;
+  };
+
+  // 锚点跳转：让区块标题落在吸顶联动条下方，而不是被它盖住。
+  const scrollToLinkedSection = (key: LinkedAnchorKey) => {
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, sectionOffsetsRef.current[key] - linkedBarHeightRef.current - 8),
+      animated: true,
+    });
   };
 
   const updateDraftStartDate = (value: string) => {
@@ -1579,15 +1862,24 @@ export function ProductReportScreen({
     void storeOptionsQuery.refetch();
   };
 
+  // 明细换页、换筛选时靠上一份数据占位重取，属于局部加载（区块内显示「更新中」），
+  // 不能驱动下拉刷新转圈，否则每次联动点选都会把整页往下推。
   const isRefreshing =
     storeOptionsQuery.isRefetching ||
     totalRevenueQuery.isRefetching ||
     supplierQuery.isRefetching ||
-    productQuery.isRefetching ||
-    (isChinaKind && chinaBranchTotalsQuery.isRefetching);
-  const selectedStoreLabel =
-    storeOptionsQuery.data?.find((item) => item.value === selectedStoreCode)?.label ??
-    t("productReport.filters.allStores");
+    (productQuery.isRefetching && !productQuery.isPlaceholderData) ||
+    (isChinaKind && chinaBranchTotalsQuery.isRefetching) ||
+    (hasChinaSupplierBranches && chinaSupplierBranchesQuery.isRefetching);
+  const selectedBranchName = getStoreLabel(selectedStoreCode);
+  // 锚点行数：分店与明细取表里实际显示的数据，正在按新条件重取的区块显示省略号。
+  const linkedAnchors: LinkedAnchor[] = [
+    ...(isChinaKind
+      ? [{ key: "branches" as const, count: chinaBranchShareRows.length, updating: linkedStaleness.branchTable }]
+      : []),
+    { key: "suppliers", count: supplierRows.length, updating: linkedStaleness.supplierTable },
+    { key: "products", count: productTotal, updating: linkedStaleness.productTable },
+  ];
 
   const applySupplierSort = (field: ReportSortField) => {
     setSupplierSort((current) => toggleReportSort(current, field));
@@ -1620,11 +1912,12 @@ export function ProductReportScreen({
     rowNumber: number;
     scrollX: Animated.Value;
   }) => {
-    const isSelected = item.supplierCode === selectedSupplierCode;
+    const isSelected = isSameLinkedCode(item.supplierCode, selectedSupplierCode);
     const showComparison = isChinaKind;
-    const categoryRevenue = isChinaKind ? chinaGoodsSummary.revenue : supplierSubtotal;
+    // 占比分母跟随表里数据所属的分店：中国页签用该范围的中国货合计，澳洲页签用本表小计。
+    const categoryRevenue = isChinaKind ? supplierScopeChinaGoods.revenue : supplierSubtotal;
     const categoryCompareRevenue = isChinaKind
-      ? chinaGoodsSummary.compareRevenue
+      ? supplierScopeChinaGoods.compareRevenue
       : supplierCompareSubtotal;
     const shareBarPercent = topSupplierRevenue > 0
       ? Math.min(100, Math.max(0, (item.revenue / topSupplierRevenue) * 100))
@@ -1637,21 +1930,23 @@ export function ProductReportScreen({
           style={styles.frozenSupplierColumns}
           tone={isSelected ? "selected" : "body"}
         >
+          {isSelected ? <View style={styles.selectedSupplierAccent} /> : null}
           <View style={styles.rowNumberColumn}>
             <TableCell numeric style={styles.strongText}>{formatRowNumber(rowNumber)}</TableCell>
           </View>
           <Pressable
-            // 供应商列筛下方商品明细，金额列单独查看分店汇总。
-            onPress={() => {
-              setSelectedSupplierCode(item.supplierCode);
-              setProductPage(1);
-            }}
+            // 供应商列点选联动分店表与商品明细（再点取消），金额列单独查看分店汇总。
+            onPress={() => toggleLinkedSupplier(item.supplierCode)}
             accessibilityRole="button"
-            accessibilityLabel={[getSupplierTitle(item), t("productReport.sections.products")].join(" ")}
+            accessibilityLabel={isSelected
+              ? t("productReport.linked.selectedSupplierA11y", { supplier: getSupplierTitle(item) })
+              : t("productReport.linked.selectSupplierA11y", { supplier: getSupplierTitle(item) })}
             accessibilityState={{ selected: isSelected }}
             style={[{ width: supplierNameWidth }, styles.fullHeightCell]}
           >
-            <TableCell style={styles.strongText}>{getSupplierTitle(item)}</TableCell>
+            <TableCell style={isSelected ? [styles.strongText, styles.selectedSupplierName] : styles.strongText}>
+              {getSupplierTitle(item)}
+            </TableCell>
             <TableCell style={styles.muted}>{shouldShowSupplierCode(item) ? item.supplierCode : ""}</TableCell>
           </Pressable>
         </FrozenLeadingColumns>
@@ -1676,7 +1971,7 @@ export function ProductReportScreen({
           </View>
         </View>
         <View style={styles.chinaShareColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>{formatShare(item.revenue, totalRevenue.revenue)}</TableCell>
+          <TableCell numeric style={styles.chinaMetricText}>{formatShare(item.revenue, supplierScopeRevenue.revenue)}</TableCell>
         </View>
         <View style={styles.chinaAverageColumn}>
           <TableCell numeric style={styles.chinaMetricText}>{formatNullableMoney(item.averagePrice)}</TableCell>
@@ -1704,7 +1999,7 @@ export function ProductReportScreen({
               <TableCell numeric style={styles.muted}>{formatShare(item.compareRevenue, categoryCompareRevenue)}</TableCell>
             </View>
             <View style={styles.chinaShareColumn}>
-              <TableCell numeric style={styles.muted}>{formatShare(item.compareRevenue, totalRevenue.compareRevenue)}</TableCell>
+              <TableCell numeric style={styles.muted}>{formatShare(item.compareRevenue, supplierScopeRevenue.compareRevenue)}</TableCell>
             </View>
             <View style={styles.chinaAverageColumn}>
               <TableCell numeric style={styles.muted}>{formatNullableMoney(item.compareAveragePrice)}</TableCell>
@@ -1786,14 +2081,21 @@ export function ProductReportScreen({
   const renderChinaProductPageTotalRow = (scrollX: Animated.Value) => {
     const totals = chinaProductPageTotals;
     return (
-      <View style={[styles.tableRow, styles.productTableRow, styles.chinaPageTotalRow]}>
+      <View
+        style={[
+          styles.tableRow,
+          styles.productTableRow,
+          styles.chinaPageTotalRow,
+          linkedStaleness.productTable ? styles.staleSection : null,
+        ]}
+      >
         <FrozenLeadingColumns scrollX={scrollX} style={[styles.frozenProductColumns, styles.chinaPageTotalFrozen]}>
           <View style={{ width: CHINA_PRODUCT_IMAGE_COLUMN_WIDTH + 3 + productInfoWidth, minWidth: 0 }}>
             <TableCell style={styles.strongText}>{t("productReport.chinaGoods.pageTotal")}</TableCell>
             <TableCell style={styles.muted}>
               {t("productReport.pageSummaryCaption", {
-                start: productTotal === 0 ? 0 : (productPage - 1) * PRODUCT_PAGE_SIZE + 1,
-                end: Math.min(productPage * PRODUCT_PAGE_SIZE, productTotal),
+                start: productTotal === 0 ? 0 : (displayedProductPage - 1) * PRODUCT_PAGE_SIZE + 1,
+                end: Math.min(displayedProductPage * PRODUCT_PAGE_SIZE, productTotal),
                 total: productTotal,
               })}
             </TableCell>
@@ -1824,10 +2126,12 @@ export function ProductReportScreen({
   return (
     <View style={styles.container}>
       <ScrollView
+        ref={scrollRef}
         bounces={false}
         onScroll={markProductDataVisible}
         scrollEventThrottle={16}
         contentContainerStyle={styles.content}
+        stickyHeaderIndices={[LINKED_FILTER_BAR_INDEX]}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />}
       >
         {!embedded ? (
@@ -1854,34 +2158,27 @@ export function ProductReportScreen({
           ]}
         />
 
-        <View style={styles.filterBar}>
-          <Button
-            mode="outlined"
-            compact
-            icon="store-outline"
-            disabled={
-              !storeOptionsQuery.isSuccess
-              || storeOptionsQuery.isFetching
-              || cashierEnabledStoreCodes.length === 0
-            }
-            onPress={() => setStoreModalVisible(true)}
-          >
-            {selectedStoreLabel}
-          </Button>
-          {selectedSupplierCode ? (
-            <Button
-              mode="outlined"
-              compact
-              icon="close"
-              onPress={() => {
-                setSelectedSupplierCode(null);
-                setProductPage(1);
-              }}
-            >
-              {t("productReport.actions.clearSupplier")}
-            </Button>
-          ) : null}
-        </View>
+        {/* 吸顶联动条：ScrollView 第 3 个直接子元素（LINKED_FILTER_BAR_INDEX），前面两个子元素不能增删。 */}
+        <LinkedFilterBar
+          branchName={selectedBranchName}
+          supplierName={selectedSupplierLabel}
+          hint={isChinaKind ? t("productReport.linked.hintChina") : t("productReport.linked.hintAustralia")}
+          branchPickerDisabled={
+            !storeOptionsQuery.isSuccess
+            || storeOptionsQuery.isFetching
+            || cashierEnabledStoreCodes.length === 0
+          }
+          anchors={linkedAnchors}
+          onOpenBranchPicker={() => setStoreModalVisible(true)}
+          onClearBranch={() => applyStore(undefined)}
+          onPressSupplier={() => scrollToLinkedSection("suppliers")}
+          onClearSupplier={clearLinkedSupplier}
+          onClearAll={clearLinkedSelection}
+          onPressAnchor={scrollToLinkedSection}
+          onLayout={(event) => {
+            linkedBarHeightRef.current = event.nativeEvent.layout.height;
+          }}
+        />
 
         <View style={styles.dateInputs}>
           <TextInput
@@ -1916,7 +2213,7 @@ export function ProductReportScreen({
           <View style={styles.stateBox}>
             <Text variant="bodyMedium">{t("productReport.states.invalidDate")}</Text>
           </View>
-        ) : mainReportRequestError && !mainReportHasSnapshot ? (
+        ) : mainReportRequestError && !mainReportHasDisplay ? (
           <ErrorState
             label={t("productReport.states.error")}
             retryLabel={t("actions.retry")}
@@ -1925,9 +2222,9 @@ export function ProductReportScreen({
               void storeOptionsQuery.refetch();
             }}
           />
-        ) : mainReportStatisticsPending && !mainReportHasSnapshot ? (
+        ) : mainReportStatisticsPending && !mainReportHasDisplay ? (
           <LoadingState label={t("reports.states.refreshingStatistics")} />
-        ) : mainReportStatisticsIncomplete && !mainReportHasSnapshot ? (
+        ) : mainReportStatisticsIncomplete && !mainReportHasDisplay ? (
           <ErrorState
             label={t("reports.states.statisticsIncomplete")}
             retryLabel={t("actions.retry")}
@@ -1938,6 +2235,10 @@ export function ProductReportScreen({
           />
         ) : storeOptionsQuery.isSuccess && cashierEnabledStoreCodes.length === 0 ? (
           <EmptyState label={t("reports.states.noCashierEnabledStores")} />
+        ) : !displayedMainReport ? (
+          // 兜底：切页签或改日期后，其余主数据已到齐、商品明细仍是上一组条件的占位数据时，
+          // 既没有同条件快照也不能沿用旧报告过渡；此时停在整页加载，不能渲染零值汇总与空表。
+          <LoadingState label={t("reports.states.refreshingStatistics")} />
         ) : (
           <>
             {mainReportHasSnapshot && (mainReportQueriesFetching || mainReportRequestError || mainReportStatisticsPending || mainReportStatisticsIncomplete) ? (
@@ -1947,12 +2248,34 @@ export function ProductReportScreen({
                     ?? t("reports.freshness.noSuccess"),
                 })}
               </Text>
+            ) : linkedTransition && (mainReportRequestError || mainReportStatisticsIncomplete) ? (
+              // 联动点选后新数据失败或统计未完成：保留上一次完整结果，并给出重试入口。
+              <View style={styles.linkedNotice}>
+                <Text variant="labelSmall" style={styles.linkedNoticeText}>{t("productReport.linked.updateFailed")}</Text>
+                <Button
+                  compact
+                  mode="text"
+                  onPress={() => {
+                    resetMainReportVersionSync();
+                    void storeOptionsQuery.refetch();
+                  }}
+                >
+                  {t("actions.retry")}
+                </Button>
+              </View>
             ) : null}
             {isChinaKind ? (
               // 中国页签顶部：中国货汇总与分店中国货占比；「本页合计」移到商品明细表头下方。
               <>
                 <ChinaGoodsSummaryCard summary={chinaGoodsSummary} />
-                <ChinaBranchShareSection rows={chinaBranchShareRows} />
+                <ChinaBranchShareSection
+                  rows={chinaBranchShareRows}
+                  selectedBranchCode={selectedStoreCode ?? null}
+                  onSelectBranch={toggleLinkedBranch}
+                  supplierName={getSupplierLabel(branchTableSupplierCode)}
+                  updating={linkedStaleness.branchTable}
+                  onLayout={recordSectionOffset("branches")}
+                />
               </>
             ) : productSectionLoading ? (
               <View style={[styles.productSummaryCard, styles.productSummaryLoading]}>
@@ -1962,20 +2285,26 @@ export function ProductReportScreen({
                 </Text>
               </View>
             ) : (
-              <ProductPageSummaryCard
-                summary={productPageSummary}
-                caption={t("productReport.pageSummaryCaption", {
-                  start: productTotal === 0 ? 0 : (productPage - 1) * PRODUCT_PAGE_SIZE + 1,
-                  end: Math.min(productPage * PRODUCT_PAGE_SIZE, productTotal),
-                  total: productTotal,
-                })}
-              />
+              <View style={linkedStaleness.productTable ? styles.staleSection : null}>
+                <ProductPageSummaryCard
+                  summary={productPageSummary}
+                  caption={t("productReport.pageSummaryCaption", {
+                    start: productTotal === 0 ? 0 : (displayedProductPage - 1) * PRODUCT_PAGE_SIZE + 1,
+                    end: Math.min(displayedProductPage * PRODUCT_PAGE_SIZE, productTotal),
+                    total: productTotal,
+                  })}
+                />
+              </View>
             )}
-            <View style={[styles.reportSection, { minHeight: sectionScreenHeight }]}>
+            <View style={[styles.reportSection, { minHeight: sectionScreenHeight }]} onLayout={recordSectionOffset("suppliers")}>
               <SectionHeader
                 title={t("productReport.sections.suppliers")}
                 hint={isChinaKind ? t("productReport.chinaGoods.supplierHint") : undefined}
                 showComparison={false}
+                badges={displayedContext?.branchCode ? (
+                  <ScopePill tone="branch" label={t("productReport.linked.branchScope", { branch: getStoreLabel(displayedContext.branchCode) })} />
+                ) : null}
+                updating={linkedStaleness.supplierTable}
                 page={supplierPage}
                 pageCount={supplierPageCount}
                 onPrevious={() => setSupplierPage((current) => Math.max(1, current - 1))}
@@ -1983,7 +2312,19 @@ export function ProductReportScreen({
                 previousLabel={t("productReport.actions.previous")}
                 nextLabel={t("productReport.actions.next")}
               />
-              {supplierQuery.isLoading && !mainReportHasSnapshot ? (
+              {selectedSupplierMissing ? (
+                // 已选供应商在所选分店本期无销售：保留选择，不自动清除，由用户决定。
+                <View style={styles.supplierMissingNotice}>
+                  <View style={styles.supplierMissingDot} />
+                  <Text variant="bodySmall" style={styles.supplierMissingText}>
+                    {t("productReport.linked.supplierMissing", { supplier: selectedSupplierLabel, branch: selectedBranchName })}
+                  </Text>
+                  <Button compact mode="outlined" textColor={LINKED_COLORS.supplierText} onPress={clearLinkedSupplier}>
+                    {t("productReport.actions.clearSupplier")}
+                  </Button>
+                </View>
+              ) : null}
+              {supplierQuery.isLoading && !mainReportHasDisplay ? (
                 <LoadingState label={t("productReport.states.loading")} />
               ) : (
                 <FrozenHorizontalTable>
@@ -2001,10 +2342,16 @@ export function ProductReportScreen({
                         bounces={false}
                         nestedScrollEnabled
                         showsVerticalScrollIndicator={false}
-                        style={[styles.tableBody, { height: supplierTableBodyHeight }]}
+                        style={[
+                          styles.tableBody,
+                          { height: supplierTableBodyHeight },
+                          linkedStaleness.supplierTable ? styles.staleSection : null,
+                        ]}
                       >
                         {supplierPageRows.length === 0 ? (
-                          <EmptyState label={t("productReport.states.emptySuppliers")} />
+                          <View style={{ width: tableViewportWidth }}>
+                            <EmptyState label={t("productReport.states.emptySuppliers")} />
+                          </View>
                         ) : (
                           supplierPageRows.map((item, index) => (
                             <View
@@ -2028,11 +2375,22 @@ export function ProductReportScreen({
               )}
             </View>
 
-            <View style={[styles.reportSection, { minHeight: sectionScreenHeight }]}>
+            <View style={[styles.reportSection, { minHeight: sectionScreenHeight }]} onLayout={recordSectionOffset("products")}>
               <SectionHeader
                 title={t("productReport.sections.products")}
                 hint={t("productReport.chinaGoods.productHint")}
                 showComparison={false}
+                badges={displayedContext?.branchCode || displayedContext?.supplierCode ? (
+                  <>
+                    {displayedContext.branchCode ? (
+                      <ScopePill tone="branch" label={getStoreLabel(displayedContext.branchCode) ?? ""} />
+                    ) : null}
+                    {displayedContext.supplierCode ? (
+                      <ScopePill tone="supplier" label={getSupplierLabel(displayedContext.supplierCode) ?? ""} />
+                    ) : null}
+                  </>
+                ) : null}
+                updating={linkedStaleness.productTable}
                 page={productPage}
                 pageCount={productPageCount}
                 onPrevious={() => setProductPage((current) => Math.max(1, current - 1))}
@@ -2080,12 +2438,27 @@ export function ProductReportScreen({
                       bounces={false}
                       nestedScrollEnabled
                       showsVerticalScrollIndicator={false}
-                      style={[styles.tableBody, { height: productTableBodyHeight }]}
+                      style={[
+                        styles.tableBody,
+                        { height: productTableBodyHeight },
+                        linkedStaleness.productTable ? styles.staleSection : null,
+                      ]}
                     >
                       {productRows.length === 0 ? (
-                        <EmptyState
-                          label={t(productSearch ? "productReport.states.emptyProductSearch" : "productReport.states.emptyProducts")}
-                        />
+                        <View style={{ width: tableViewportWidth }}>
+                          {displayedContext?.productSearch ? (
+                            <EmptyState label={t("productReport.states.emptyProductSearch")} />
+                          ) : displayedContext?.branchCode || displayedContext?.supplierCode ? (
+                            // 分店与供应商的交集没有销售：说明是筛选组合为空，并给出清除入口。
+                            <EmptyState
+                              label={t("productReport.linked.emptyFiltered")}
+                              actionLabel={t("productReport.linked.clearFilters")}
+                              onAction={clearLinkedSelection}
+                            />
+                          ) : (
+                            <EmptyState label={t("productReport.states.emptyProducts")} />
+                          )}
+                        </View>
                       ) : (
                         productRows.map((item, index) => (
                           <View
@@ -2096,7 +2469,7 @@ export function ProductReportScreen({
                           >
                             {renderProductRow({
                               item,
-                              rowNumber: (productPage - 1) * PRODUCT_PAGE_SIZE + index + 1,
+                              rowNumber: (displayedProductPage - 1) * PRODUCT_PAGE_SIZE + index + 1,
                               scrollX,
                             })}
                           </View>
@@ -2175,6 +2548,8 @@ function SectionHeader({
   title,
   hint,
   showComparison = true,
+  badges,
+  updating = false,
   page,
   pageCount,
   onPrevious,
@@ -2186,6 +2561,10 @@ function SectionHeader({
   // 单行布局可用提示替代「本期 / 同期」图例；无提示时由 showComparison 控制图例。
   hint?: string;
   showComparison?: boolean;
+  // 表里数据所属的联动范围（分店、供应商标签），描述的是当前显示的数据而不是刚点选的条件。
+  badges?: ReactNode;
+  // 正在按新的联动条件重取：旧数据变淡，标题旁显示「更新中」。
+  updating?: boolean;
   page: number;
   pageCount: number;
   onPrevious: () => void;
@@ -2197,9 +2576,18 @@ function SectionHeader({
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionTitleBlock}>
-        <Text variant="titleMedium" style={styles.sectionTitle}>
-          {title}
-        </Text>
+        <View style={styles.sectionTitleLine}>
+          <Text variant="titleMedium" style={styles.sectionTitle}>
+            {title}
+          </Text>
+          {badges}
+          {updating ? (
+            <View style={styles.updatingIndicator} accessibilityRole="progressbar">
+              <ActivityIndicator size={12} />
+              <Text variant="labelSmall" style={styles.updatingText}>{t("productReport.linked.updating")}</Text>
+            </View>
+          ) : null}
+        </View>
         {hint ? (
           <Text variant="labelSmall" style={styles.muted} numberOfLines={2}>{hint}</Text>
         ) : showComparison ? (
@@ -2220,6 +2608,22 @@ function SectionHeader({
           {nextLabel}
         </Button>
       </View>
+    </View>
+  );
+}
+
+/** 区块标题旁的联动范围标签：分店蓝、供应商紫，与吸顶联动条和选中行同色。 */
+function ScopePill({ tone, label }: { tone: "branch" | "supplier"; label: string }) {
+  const branch = tone === "branch";
+  return (
+    <View style={[styles.scopePill, branch ? styles.branchScopePill : styles.supplierScopePill]}>
+      <Text
+        variant="labelSmall"
+        numberOfLines={1}
+        style={[styles.scopePillText, { color: branch ? LINKED_COLORS.branchText : LINKED_COLORS.supplierText }]}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
@@ -2397,10 +2801,15 @@ function ErrorState({ label, retryLabel, onRetry }: { label: string; retryLabel:
   );
 }
 
-function EmptyState({ label }: { label: string }) {
+function EmptyState({ label, actionLabel, onAction }: { label: string; actionLabel?: string; onAction?: () => void }) {
   return (
     <View style={styles.stateBox}>
       <Text variant="bodyMedium">{label}</Text>
+      {actionLabel && onAction ? (
+        <Button compact mode="outlined" onPress={onAction}>
+          {actionLabel}
+        </Button>
+      ) : null}
     </View>
   );
 }
@@ -2860,10 +3269,45 @@ const styles = StyleSheet.create({
     color: "#B45309",
     marginBottom: 4,
   },
-  filterBar: {
+  linkedNotice: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 8,
+    borderRadius: 8,
+    backgroundColor: "#FFFBEB",
+    paddingLeft: 10,
+  },
+  linkedNoticeText: {
+    flex: 1,
+    color: "#B45309",
+  },
+  // 局部加载：依赖变化的区块在新数据到齐前变淡，旧数据仍可读、可点。
+  staleSection: {
+    opacity: LINKED_STALE_OPACITY,
+  },
+  supplierMissingNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: LINKED_COLORS.supplierBorder,
+    borderRadius: 8,
+    backgroundColor: LINKED_COLORS.supplierBackground,
+    paddingLeft: 10,
+    paddingRight: 4,
+    paddingVertical: 4,
+  },
+  supplierMissingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 2,
+    backgroundColor: LINKED_COLORS.supplier,
+  },
+  supplierMissingText: {
+    flex: 1,
+    minWidth: 0,
+    color: "#4C1D95",
   },
   dateInputs: {
     flexDirection: "row",
@@ -2959,6 +3403,39 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  sectionTitleLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  updatingIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  updatingText: {
+    color: "#475467",
+  },
+  scopePill: {
+    maxWidth: 168,
+    height: 22,
+    justifyContent: "center",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+  },
+  branchScopePill: {
+    borderColor: LINKED_COLORS.branchBorder,
+    backgroundColor: LINKED_COLORS.branchBackground,
+  },
+  supplierScopePill: {
+    borderColor: LINKED_COLORS.supplierBorder,
+    backgroundColor: LINKED_COLORS.supplierBackground,
+  },
+  scopePillText: {
+    fontWeight: "600",
+  },
   valueLegend: {
     flexDirection: "row",
     alignItems: "center",
@@ -3031,8 +3508,20 @@ const styles = StyleSheet.create({
   frozenHeaderColumns: {
     backgroundColor: "#F3F4F6",
   },
+  // 供应商选中色用紫色（分店蓝、供应商紫），与吸顶联动条的供应商 chip 同色。
   frozenSelectedColumns: {
-    backgroundColor: "#EFF6FF",
+    backgroundColor: LINKED_COLORS.supplierBackground,
+  },
+  selectedSupplierAccent: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: LINKED_COLORS.supplier,
+  },
+  selectedSupplierName: {
+    color: LINKED_COLORS.supplierText,
   },
   frozenSupplierColumns: {
     gap: 3,
@@ -3378,8 +3867,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   selectedRow: {
-    borderColor: "#2563EB",
-    backgroundColor: "#EFF6FF",
+    borderColor: LINKED_COLORS.supplier,
+    backgroundColor: LINKED_COLORS.supplierBackground,
   },
   rowPressable: {
     gap: 10,
