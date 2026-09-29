@@ -161,19 +161,12 @@ export class ProductionReturnRefundAdapter
     const capacity = await this.requireCapacity(capacityId);
     if (
       capacity.originalOrderGuid !== originalOrderGuid ||
-      capacity.method !== input.method ||
+      !isRefundMethodAllowedForCapacity(input.method, capacity.method) ||
       capacity.remainingAmountCents < amountCents
     ) {
       throw new ReturnRefundAdapterError("REFUND_CAPACITY_MISMATCH");
     }
-    const context = await this.requireContext(capacityId);
-    const provider = providerFromContext(context);
-    if (
-      (input.method === "card" && provider === "voucher") ||
-      (input.method === "voucher" && provider !== "voucher")
-    ) {
-      throw new ReturnRefundAdapterError("REFUND_PROVIDER_MISMATCH");
-    }
+    const provider = await this.resolveProvider(input.method, capacity);
     assertRegisteredProvider(this.options.providers, provider);
     return {
       provider,
@@ -188,6 +181,29 @@ export class ProductionReturnRefundAdapter
         refundCapacityId: capacityId,
       },
     };
+  }
+
+  /**
+   * 原路退款按受保护 context 解析 provider；礼券代替刷卡/现金额度一律签发新券，
+   * 不读取原支付引用（手工刷卡、现金额度本就没有可用的集成凭据）。
+   */
+  private async resolveProvider(
+    method: "card" | "voucher",
+    capacity: ReturnTenderCapacity,
+  ): Promise<PaymentProvider> {
+    if (method === "voucher" && capacity.method !== "voucher") {
+      return "voucher";
+    }
+    const provider = providerFromContext(
+      await this.requireContext(capacity.capacityId),
+    );
+    if (
+      (method === "card" && provider === "voucher") ||
+      (method === "voucher" && provider !== "voucher")
+    ) {
+      throw new ReturnRefundAdapterError("REFUND_PROVIDER_MISMATCH");
+    }
+    return provider;
   }
 
   private async requireCapacity(
@@ -214,6 +230,22 @@ export class ReturnRefundAdapterError extends Error {
     super(`Return refund provider bridge rejected (${code}).`);
     this.name = "ReturnRefundAdapterError";
   }
+}
+
+/**
+ * 退款方式与原额度方式：刷卡只能原路退回刷卡额度；礼券既可退回原礼券额度，
+ * 也可代替刷卡/现金额度（额度仍按原支付扣减，由账本预留保证不超额）。
+ */
+function isRefundMethodAllowedForCapacity(
+  method: "card" | "voucher",
+  capacityMethod: ReturnTenderCapacity["method"],
+): boolean {
+  if (method === "card") return capacityMethod === "card";
+  return (
+    capacityMethod === "voucher" ||
+    capacityMethod === "card" ||
+    capacityMethod === "cash"
+  );
 }
 
 function providerFromContext(

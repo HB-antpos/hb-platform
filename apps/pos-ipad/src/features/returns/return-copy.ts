@@ -33,7 +33,7 @@ export const returnEnglishCopy = {
   "capacity.title": "Original tender capacity",
   "capacity.noReceipt": "No original tender capacity. This supervised return must stay online.",
   "capacity.remaining": "{{method}} · {{amount}} available",
-  "capacity.substituteOnly": "{{method}} · {{amount}} available · cash refund only",
+  "capacity.substituteOnly": "{{method}} · {{amount}} available · cash or voucher only",
   "method.cash": "Cash",
   "method.card": "Card",
   "method.voucher": "Voucher",
@@ -72,8 +72,8 @@ export const returnEnglishCopy = {
   "error.RETURN_EXECUTION_DECLINED": "The refund was declined.",
   "error.RETURN_EXECUTION_FAILED": "The refund could not be completed and was not automatically retried.",
   "error.RETURN_RECOVERY_FAILED": "Recovery did not complete. Keep this refund in recovery.",
-  "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "This card payment was confirmed on a standalone terminal and cannot be refunded to the card. Choose cash.",
-  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "A voucher cannot yet replace a card or cash refund. Choose cash or the original tender.",
+  "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "This card payment was confirmed on a standalone terminal and cannot be refunded to the card. Choose cash or voucher.",
+  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "A voucher can replace only a single original payment (not instalments). Choose cash for this order.",
 } as const;
 
 export type ReturnCopyKey = keyof typeof returnEnglishCopy;
@@ -113,7 +113,7 @@ const returnChineseCopy = {
   "capacity.title": "原支付退款容量",
   "capacity.noReceipt": "无原支付容量；此主管授权退货必须保持在线。",
   "capacity.remaining": "{{method}} · 可退 {{amount}}",
-  "capacity.substituteOnly": "{{method}} · 可退 {{amount}} · 仅可现金退款",
+  "capacity.substituteOnly": "{{method}} · 可退 {{amount}} · 仅可现金或礼券退款",
   "method.cash": "现金",
   "method.card": "银行卡",
   "method.voucher": "礼券",
@@ -152,8 +152,8 @@ const returnChineseCopy = {
   "error.RETURN_EXECUTION_DECLINED": "退款已被拒绝。",
   "error.RETURN_EXECUTION_FAILED": "退款未完成，系统没有自动重试。",
   "error.RETURN_RECOVERY_FAILED": "恢复尚未完成，请保持此退款为恢复状态。",
-  "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "该笔刷卡为独立刷卡机人工确认，无法原卡退回，请选择现金退款。",
-  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "礼券暂不能代替刷卡或现金退款，请选择现金或原支付方式。",
+  "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "该笔刷卡为独立刷卡机人工确认，无法原卡退回，请选择现金或礼券退款。",
+  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "礼券只能代替单一原支付（分期除外）退款，该订单请选择现金。",
 } as const satisfies Record<ReturnCopyKey, string>;
 
 const returnCopy = {

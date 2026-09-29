@@ -433,9 +433,8 @@ export function buildReturnRefundPlan(input: Readonly<{
       // 不能原路退回的额度必须由收银员明确选择现金或代金券，绝不静默改走刷卡机。
       throw new ReturnFeatureError("RETURN_ORIGINAL_REFUND_UNAVAILABLE");
     }
-    if (input.preferredMethod === "voucher" && capacity.method !== "voucher") {
-      // 代金券代替刷卡/现金额度的执行、订单同步与退款券打印链路尚未打通，
-      // 放行会在提交阶段失败并卡在未知恢复；先在计划阶段明确拒绝，改用现金代替。
+    if (input.preferredMethod === "voucher" && capacity.method === "installment") {
+      // 分期额度的退款需走分期流程，不能签发礼券代替。
       throw new ReturnFeatureError("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE");
     }
     allocations.push({
@@ -457,6 +456,11 @@ export function buildReturnRefundPlan(input: Readonly<{
     throw new ReturnFeatureError(
       input.online ? "RETURN_CAPACITY_EXCEEDED" : "RETURN_ONLINE_REQUIRED",
     );
+  }
+  if (input.preferredMethod === "voucher" && allocations.length > 1) {
+    // 每条礼券分配签发一张新券，退款券打印与同步只支持单张；
+    // 多笔原支付的订单改用现金代替，避免拆成多张券或打印失败。
+    throw new ReturnFeatureError("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE");
   }
 
   return {

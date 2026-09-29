@@ -181,7 +181,7 @@
     {
       "path": "features/returns/return-domain.test.ts",
       "package": "pos-domain",
-      "reason": "覆盖手工刷卡额度只能现金代替、礼券代替刷卡/现金额度在计划阶段被拒，替换原先断言礼券可代替刷卡的用例",
+      "reason": "覆盖手工刷卡额度只能现金/礼券代替、礼券可代替单一刷卡/现金额度，分期与多笔原支付的礼券代替在计划阶段被拒",
       "requiredAssertion": "hasCode(\"RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE\")"
     }
   ],
@@ -391,10 +391,10 @@
     {
       "path": "features/returns/return-domain.ts",
       "package": "pos-domain",
-      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金代替并绑定原额度；礼券代替刷卡/现金额度的执行链路未打通，计划阶段明确拒绝以免卡在未知恢复",
+      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；礼券代替仅限单一刷卡/现金/礼券额度，分期与多笔原支付在计划阶段拒绝",
       "baselineCanonicalRuntimeSha256": "3797772fd2f5077d3dee899186d28a0e52201d024b6c77be1b6b31f48dd71257",
-      "canonicalRuntimeSha256": "2e3fbd33855311d8588a977d332dc8f0e88690679c6a6f6dd5b5df28e05ce29f",
-      "canonicalTypeSha256": "0624fdde394398173332d970d465be8d0088cb95822a7d3b5d51161c47753580",
+      "canonicalRuntimeSha256": "b6a1e45dd936f8f3c1f4f2cbd3617ba08d20bc2ff965c1fe6f8d2db24626b0c6",
+      "canonicalTypeSha256": "6157f28a92669c4c140c5e29864c441c056ec529ea6033d5a47c05deab0b5263",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
