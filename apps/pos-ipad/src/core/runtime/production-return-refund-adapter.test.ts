@@ -53,6 +53,19 @@ test("Linkly seed 只交付 RFN；provider/context 冲突、无小票卡和非�
   } as never));
 });
 
+test("手工刷卡额度（manual-card context）原卡退款在创建 attempt 前即拒绝", async () => {
+  const payments = new FakePayments(attempt("Created", "square"));
+  const adapter = createAdapter({
+    payments,
+    context: { version: 1, provider: "manual-card" },
+  });
+  await assert.rejects(
+    () => adapter.prepareAttempt(input()),
+    (error: unknown) => (error as { code?: unknown }).code === "REFUND_CONTEXT_INVALID",
+  );
+  assert.equal(payments.prepareInputs.length, 0);
+});
+
 test("Voucher 先耐久 prepareRefund，再以空 provider reference 创建退款 attempt", async () => {
   const payments = new FakePayments(attempt("Created", "voucher"));
   const voucher = new FakeVoucherPreparation();

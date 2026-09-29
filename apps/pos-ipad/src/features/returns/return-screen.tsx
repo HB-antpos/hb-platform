@@ -137,15 +137,18 @@ export function ReturnScreen({
   }
 
   // 无单退货可自由选择现金/银行卡/礼券；
-  // 有单退货默认按原支付方式退回，同时开放现金、礼券作为代替选项。
+  // 有单退货默认按原支付方式退回，同时开放现金作为代替选项。
+  // 不能原路退回的额度（如手工刷卡）不提供原方式按钮，只能现金代替；
+  // 礼券只退回原礼券额度，代替刷卡/现金的执行链路尚未打通，暂不提供。
   const methods: readonly ReturnTenderMethod[] =
     state.mode === "no-receipt"
       ? ["cash", "card", "voucher"]
       : Array.from(
           new Set<ReturnTenderMethod>([
-            ...state.capacities.map((capacity) => capacity.method),
+            ...state.capacities
+              .filter((capacity) => capacity.originalRefundAvailable)
+              .map((capacity) => capacity.method),
             "cash",
-            "voucher",
           ]),
         );
 
@@ -360,10 +363,15 @@ export function ReturnScreen({
                 style={styles.capacityRow}
                 testID={`return-capacity-${capacity.method}`}
               >
-                {t("capacity.remaining", {
-                  method: t(`method.${capacity.method}`),
-                  amount: formatAud(capacity.remainingCents, locale),
-                })}
+                {t(
+                  capacity.originalRefundAvailable
+                    ? "capacity.remaining"
+                    : "capacity.substituteOnly",
+                  {
+                    method: t(`method.${capacity.method}`),
+                    amount: formatAud(capacity.remainingCents, locale),
+                  },
+                )}
               </Text>
             ))
           )}

@@ -177,6 +177,12 @@
       "package": "pos-domain",
       "reason": "覆盖首笔退款确认失败后的停止与重启恢复，断言未确认前第二笔零提交且原退款不重放",
       "requiredAssertion": "首笔卡退款 ACK pending 时暂停后续 allocation，恢复先确认原退款再提交第二笔"
+    },
+    {
+      "path": "features/returns/return-domain.test.ts",
+      "package": "pos-domain",
+      "reason": "覆盖手工刷卡额度只能现金代替、礼券代替刷卡/现金额度在计划阶段被拒，替换原先断言礼券可代替刷卡的用例",
+      "requiredAssertion": "hasCode(\"RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE\")"
     }
   ],
   "runtimeAdaptations": [
@@ -381,6 +387,90 @@
       "baselineCanonicalRuntimeSha256": "ba43dc821fb08fde8f1d2070f072222a42d078c0f5c8d92a1680faaf32b45c24",
       "canonicalRuntimeSha256": "055af91c0b9c7f0dcfd59acfeb47b19d9766fc8fbf9ea3b438c031bf3e1f72f1",
       "canonicalTypeSha256": "548a1c1d0f346baf2dff7503ad2b546260ff984cd42513bc5f5c4e47f899a291"
+    },
+    {
+      "path": "features/returns/return-domain.ts",
+      "package": "pos-domain",
+      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金代替并绑定原额度；礼券代替刷卡/现金额度的执行链路未打通，计划阶段明确拒绝以免卡在未知恢复",
+      "baselineCanonicalRuntimeSha256": "3797772fd2f5077d3dee899186d28a0e52201d024b6c77be1b6b31f48dd71257",
+      "canonicalRuntimeSha256": "2e3fbd33855311d8588a977d332dc8f0e88690679c6a6f6dd5b5df28e05ce29f",
+      "canonicalTypeSha256": "0624fdde394398173332d970d465be8d0088cb95822a7d3b5d51161c47753580",
+      "behaviorTests": [
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/features/returns/return-domain.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:returns",
+          "path": "src/features/returns/return-screen.rntl.test.tsx",
+          "pattern": "src/features/returns/*.rntl.test.tsx"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:returns",
+          "path": "src/features/returns/return-screen.rntl.test.tsx",
+          "pattern": "src/features/returns/*.rntl.test.tsx"
+        }
+      ]
+    },
+    {
+      "path": "features/returns/return-presenter.ts",
+      "package": "pos-domain",
+      "reason": "容量汇总暴露 originalRefundAvailable，界面据此隐藏无法原路退回的退款方式按钮",
+      "baselineCanonicalRuntimeSha256": "c31c130fc7b0d8ecf8d6ad9be3b1a32e7edbd9ecca17d831f22a1f1cdfa9ba8c",
+      "canonicalRuntimeSha256": "476919c6b229cf45ac4b98c31271c70d24f6137f48e12165a9d15393fc86a43a",
+      "canonicalTypeSha256": "f59c149f051ff2e25bf5710804defde0c3bbf2544fd25af50ac8ca59af6767b6",
+      "behaviorTests": [
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/features/returns/return-domain.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:returns",
+          "path": "src/features/returns/return-screen.rntl.test.tsx",
+          "pattern": "src/features/returns/*.rntl.test.tsx"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:returns",
+          "path": "src/features/returns/return-screen.rntl.test.tsx",
+          "pattern": "src/features/returns/*.rntl.test.tsx"
+        }
+      ]
+    },
+    {
+      "path": "features/returns/return-workflow.ts",
+      "package": "pos-domain",
+      "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款",
+      "baselineCanonicalRuntimeSha256": "55a8b7b7f0db17efa15f1d7591e4fb8624b4b4b35b1efe4443927704ef262afc",
+      "canonicalRuntimeSha256": "dc485d7a2350982dc9be359af284c169a9adc2eb9261c20a0ed2ef8cdd8acca5",
+      "canonicalTypeSha256": "ce098e333505aa1857a61b43603a1a9afae2c9e6e47994334649657ef5e46fbb",
+      "behaviorTests": [
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/features/returns/return-domain.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:returns",
+          "path": "src/features/returns/return-screen.rntl.test.tsx",
+          "pattern": "src/features/returns/*.rntl.test.tsx"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:returns",
+          "path": "src/features/returns/return-screen.rntl.test.tsx",
+          "pattern": "src/features/returns/*.rntl.test.tsx"
+        }
+      ]
     }
   ],
   "semanticAdaptations": [

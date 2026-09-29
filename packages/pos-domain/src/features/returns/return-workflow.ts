@@ -236,7 +236,12 @@ export class ReturnWorkflow {
       returnRecordsMayBeStale: context.returnRecordsMayBeStale,
       lines: createReceiptDraftLines(context),
       tenderCapacities: [...context.tenderCapacities],
-      preferredMethod: null,
+      // 含不能原路退回的额度时默认现金兜底；收银员仍可改选代金券。
+      preferredMethod: context.tenderCapacities.some(
+        (capacity) => capacity.substituteOnly === true && capacity.remainingCents > 0,
+      )
+        ? "cash"
+        : null,
       selectedTotalCents: 0,
       status: "draft",
       completedReturnOrderGuid: null,

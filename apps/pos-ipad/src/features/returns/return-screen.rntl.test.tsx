@@ -192,10 +192,10 @@ test("刷卡订单退款方式开放现金/代金券代替，默认仍按原支�
     expect(screen.getByTestId("return-row-return-line-1")).toBeTruthy(),
   );
 
-  // 代替选项：刷卡订单上同时出现现金、礼券按钮。
+  // 代替选项：刷卡订单上出现现金代替；礼券代替刷卡的执行链路未打通，暂不提供。
   expect(screen.getByTestId("return-method-cash")).toBeTruthy();
   expect(screen.getByTestId("return-method-card")).toBeTruthy();
-  expect(screen.getByTestId("return-method-voucher")).toBeTruthy();
+  expect(screen.queryByTestId("return-method-voucher")).toBeNull();
   // 默认未选择时显示按原支付方式退回的提示。
   expect(screen.getByText(/default to the original tender/i)).toBeTruthy();
 
@@ -211,6 +211,58 @@ test("刷卡订单退款方式开放现金/代金券代替，默认仍按原支�
   expect(
     execution.executeCalls[0]?.plan.allocations[0]?.originalCapacityId,
   ).toBe("card-capacity");
+});
+
+test("手工刷卡订单只能现金兜底：不显示原卡退回，默认现金且绑定原卡额度", async () => {
+  const execution = new ScreenExecution();
+  const presenter = createScreenPresenter(execution, {
+    receiptContext: {
+      ...screenReceiptContext(),
+      tenderCapacities: [
+        {
+          capacityId: "manual-card-capacity",
+          originalOrderGuid: "order-a",
+          method: "card",
+          remainingCents: 2_000,
+          offlineCashProof: null,
+          substituteOnly: true,
+        },
+      ],
+    },
+  });
+  const screen = await render(
+    <ReturnScreen locale="zh" presenter={presenter} />,
+  );
+
+  await fireEvent.changeText(
+    screen.getByTestId("return-order-query"),
+    "HB-1001",
+  );
+  await fireEvent.press(screen.getByTestId("return-order-search"));
+  await waitFor(() =>
+    expect(screen.getByTestId("return-row-return-line-1")).toBeTruthy(),
+  );
+  // 查单成功后默认现金兜底，而不是按原支付方式（手工刷卡无法原路退回）。
+  expect(presenter.getState().preferredMethod).toBe("cash");
+  await fireEvent.press(
+    screen.getByTestId("return-increase-return-line-1"),
+  );
+
+  expect(screen.getByTestId("return-method-cash")).toBeTruthy();
+  expect(screen.queryByTestId("return-method-card")).toBeNull();
+  expect(screen.queryByTestId("return-method-voucher")).toBeNull();
+  expect(
+    screen.getByTestId("return-capacity-card").props.children,
+  ).toContain("仅可现金退款");
+
+  await fireEvent.press(screen.getByTestId("return-confirm"));
+  expect(execution.executeCalls).toHaveLength(1);
+  expect(
+    execution.executeCalls[0]?.plan.allocations.map((allocation) => [
+      allocation.method,
+      allocation.originalCapacityId,
+    ]),
+  ).toEqual([["cash", "manual-card-capacity"]]);
 });
 
 test("刷卡订单选现金代替：整单按现金退款且仍绑定原卡容量", async () => {
