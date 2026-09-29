@@ -11,6 +11,11 @@ import type {
   DurableOnlineReturnRefundPort,
   OnlineReturnRefundInput,
 } from "@hb/pos-domain/features/returns/adapters/durable-return-execution-orchestrator";
+import type {
+  DurableReturnApiAttempt,
+  PrepareReturnApiAttempt,
+  ReturnApiAttemptState,
+} from "@/core/db/sqlite-return-api-attempt-store";
 
 
 const cashPreparation = Object.freeze({
@@ -39,6 +44,7 @@ const cashAttempt: OnlineReturnRefundInput = Object.freeze({
 test("在线现金退款以既有 externalAttemptId 建立耐久本地绑定，提交和恢复都不调用 provider", async () => {
   let providerCalls = 0;
   const router = new ProductionReturnOnlineRefundRouter({
+    ...cashRouterOptions(),
     providerRefund: providerPort(() => {
       providerCalls += 1;
     }),
@@ -64,6 +70,7 @@ test("在线现金退款以既有 externalAttemptId 建立耐久本地绑定，�
 
 test("现金退款拒绝伪造 provider 绑定、非负金额和受保护恢复键", async () => {
   const router = new ProductionReturnOnlineRefundRouter({
+    ...cashRouterOptions(),
     providerRefund: null,
   });
 
@@ -96,6 +103,7 @@ test("卡与券退款逐项委托既有 provider bridge，缺少 bridge 时失�
     trace.push(operation);
   });
   const router = new ProductionReturnOnlineRefundRouter({
+    ...cashRouterOptions(),
     providerRefund,
   });
   const cardPreparation = {
@@ -124,6 +132,7 @@ test("卡与券退款逐项委托既有 provider bridge，缺少 bridge 时失�
 
   await assert.rejects(
     new ProductionReturnOnlineRefundRouter({
+      ...cashRouterOptions(),
       providerRefund: null,
     }).prepareAttempt(cardPreparation),
     isRouterError("RETURN_PROVIDER_REFUND_UNAVAILABLE"),
@@ -197,4 +206,38 @@ function isRouterError(code: string) {
   return (error: unknown): boolean =>
     error instanceof ReturnOnlineRefundRouterError &&
     error.code === code;
+}
+
+/** 内存版现金 attempt 存储：只实现路由用到的面，状态转换与生产存储一致。 */
+class FakeCashAttempts {
+  public readonly rows = new Map<string, DurableReturnApiAttempt>();
+  public async get(id: string): Promise<DurableReturnApiAttempt | null> {
+    return this.rows.get(id) ?? null;
+  }
+  public async prepareOrLoad(input: PrepareReturnApiAttempt): Promise<DurableReturnApiAttempt> {
+    const existing = this.rows.get(input.durableAttemptId);
+    if (existing) {
+      assert.equal(existing.createdAtIso, input.createdAtIso, "重放必须沿用首次创建时间");
+      return existing;
+    }
+    const { protectedContext: _ignored, ...rest } = input;
+    const row = { ...rest, state: "Created" as const, updatedAtIso: input.createdAtIso };
+    this.rows.set(input.durableAttemptId, row);
+    return row;
+  }
+  public async compareAndSetState(input: Readonly<{
+    durableAttemptId: string;
+    expected: ReturnApiAttemptState;
+    next: ReturnApiAttemptState;
+    updatedAtIso: string;
+  }>): Promise<boolean> {
+    const row = this.rows.get(input.durableAttemptId);
+    if (!row || row.state !== input.expected) return false;
+    this.rows.set(input.durableAttemptId, { ...row, state: input.next, updatedAtIso: input.updatedAtIso });
+    return true;
+  }
+}
+
+function cashRouterOptions(attempts = new FakeCashAttempts()) {
+  return { cashAttempts: attempts, nowIso: () => "2026-09-30T00:00:00.000Z" };
 }

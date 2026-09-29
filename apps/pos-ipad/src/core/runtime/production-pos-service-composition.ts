@@ -2883,6 +2883,8 @@ function createAvailableReturnRuntime(input: Readonly<{
     cashRefund: new ProductionReturnCashRefundAdapter(),
     onlineRefund: new ProductionReturnOnlineRefundRouter({
       providerRefund: input.providerRefund,
+      cashAttempts: input.input.database.returnApiAttempts(input.input.encryptor),
+      nowIso: input.input.clock.nowIso,
     }),
     ...(input.acknowledgements
       ? { acknowledgements: input.acknowledgements }

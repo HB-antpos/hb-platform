@@ -28,6 +28,7 @@ import {
   type SensitivePayloadEncryptor,
 } from "./sqlite-repositories";
 import { SqliteReturnApiAttemptStore } from "./sqlite-return-api-attempt-store";
+import { ProductionReturnOnlineRefundRouter } from "../runtime/production-return-online-refund-router";
 import { SqliteReturnCapacityVault } from "./sqlite-return-capacity-vault";
 import { SqliteReturnExecutionLedger } from "./sqlite-return-execution-ledger";
 import { SqliteReturnFulfilmentPlanStore } from "./sqlite-return-fulfilment-plan-store";
@@ -2983,6 +2984,108 @@ test("真实 SQLite：代替刷卡退款允许退款方式与原 capacity 不同
     // 代替退款仍从原卡 capacity 扣减额度，防止超额退款。
     assert.equal(
       (await vault.get("return-capacity-card"))?.remainingAmountCents,
+      0,
+    );
+  });
+});
+
+test("真实 SQLite：在线现金退款经生产路由写入 API attempt 后绑定并完成，恢复重放幂等", async () => {
+  await withDatabase("durable-return-online-cash-router", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(
+      connection,
+      encryptor,
+      () => T0,
+    );
+    // 手工刷卡原单：只能现金代替，capacity 仍按原卡扣减。
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-manual-card",
+      originalOrderGuid: "original-return-order",
+      method: "card",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: { version: 1, provider: "manual-card" },
+      observedAtIso: T0,
+    });
+    let tender = 0;
+    let audit = 0;
+    const ledger = new SqliteReturnExecutionLedger(
+      connection,
+      encryptor,
+      {
+        createTenderGuid: () => `router-cash-tender-${++tender}`,
+        createAuditEventId: () => `router-cash-audit-${++audit}`,
+      },
+      () => T2,
+    );
+    const draft = durableReturnDraft({
+      actionId: "router-cash-action",
+      requestFingerprint: "router-cash-fingerprint",
+      returnOrderGuid: "router-cash-order",
+      actionRecoveryToken: "router-cash-recovery",
+      returnSourceKey: "router-cash-source",
+      capacityId: "return-capacity-manual-card",
+      onlineCashOnly: true,
+    });
+    await ledger.prepareOrLoad(draft);
+    await ledger.markAllocationSubmitted({
+      actionId: draft.actionId,
+      allocationId: "return-allocation-cash",
+    });
+
+    let clock = T1;
+    const router = new ProductionReturnOnlineRefundRouter({
+      providerRefund: null,
+      cashAttempts: new SqliteReturnApiAttemptStore(connection, encryptor),
+      nowIso: () => clock,
+    });
+    const allocation = draft.allocations[0]!;
+    const preparation = {
+      actionId: draft.actionId,
+      allocationId: allocation.allocationId,
+      externalAttemptId: allocation.externalAttemptId!,
+      returnOrderGuid: draft.returnOrderGuid,
+      actor: { cashierId: "cashier-1", cashierName: "Cashier", userGuid: null },
+      method: "cash" as const,
+      signedAmountCents: allocation.signedAmountCents,
+      capacityId: allocation.capacityId,
+      originalOrderGuid: allocation.originalOrderGuid,
+    };
+    const binding = await router.prepareAttempt(preparation);
+    // 原实现不写 return_api_attempts，账本在这里抛“attempt identity is inconsistent”。
+    assert.equal(
+      await ledger.bindAllocationAttempt({
+        actionId: draft.actionId,
+        allocationId: allocation.allocationId,
+        ...binding,
+      }),
+      true,
+    );
+    // 恢复路径会再次 prepare：时钟前进也必须按首次创建时间幂等重放。
+    clock = T2;
+    assert.deepEqual(await router.prepareAttempt(preparation), binding);
+    const bound = { ...preparation, ...binding };
+    assert.deepEqual(await router.submit(bound), { status: "completed" });
+    assert.deepEqual(
+      await router.recover({ ...bound, protectedRecoveryKey: null }),
+      { status: "completed" },
+    );
+    assert.equal(
+      await ledger.recordAllocationOutcome({
+        actionId: draft.actionId,
+        allocationId: allocation.allocationId,
+        expectedStatuses: ["submitted"],
+        status: "completed",
+        protectedRecoveryKey: null,
+      }),
+      true,
+    );
+    const completed = await ledger.completeAtomically(
+      durableReturnCompletion(draft),
+    );
+    assert.equal(completed.status, "completed");
+    assert.equal(
+      (await vault.get("return-capacity-manual-card"))?.remainingAmountCents,
       0,
     );
   });
