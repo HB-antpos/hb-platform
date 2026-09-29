@@ -613,6 +613,105 @@ public sealed class DataSyncLegacyHistoryTests : IDisposable
     }
 
     [Fact]
+    public async Task SyncProductStocksFromHqAsync_清表重建时保留本地正数中包数且只用HQ补空缺()
+    {
+        await _localDb.Insertable(
+                new List<WarehouseProduct>
+                {
+                    new() { ProductCode = "P-KEEP", MinOrderQuantity = 6, StockQuantity = 1 },
+                    new() { ProductCode = "P-FILL", MinOrderQuantity = null, StockQuantity = 1 },
+                }
+            )
+            .ExecuteCommandAsync();
+        await _hqDb.Insertable(
+                new List<CBP_DIC_商品库存表>
+                {
+                    new()
+                    {
+                        HGUID = "HQ-KEEP",
+                        H商品编码 = "P-KEEP",
+                        H库存 = 30m,
+                        H最小订货量 = 0m,
+                        H使用状态 = 1,
+                    },
+                    new()
+                    {
+                        HGUID = "HQ-FILL",
+                        H商品编码 = "P-FILL",
+                        H库存 = 40m,
+                        H最小订货量 = 8m,
+                        H使用状态 = 1,
+                    },
+                    new()
+                    {
+                        HGUID = "HQ-NEW",
+                        H商品编码 = "P-NEW",
+                        H库存 = 50m,
+                        H最小订货量 = 10m,
+                        H使用状态 = 1,
+                    },
+                }
+            )
+            .ExecuteCommandAsync();
+
+        var result = await CreateService(CreateRealHistoryService()).SyncProductStocksFromHqAsync();
+
+        Assert.True(result.IsSuccess, result.Message);
+        var rows = await _localDb.Queryable<WarehouseProduct>().ToListAsync();
+        Assert.Equal(6, rows.Single(row => row.ProductCode == "P-KEEP").MinOrderQuantity);
+        Assert.Equal(30, rows.Single(row => row.ProductCode == "P-KEEP").StockQuantity);
+        Assert.Equal(8, rows.Single(row => row.ProductCode == "P-FILL").MinOrderQuantity);
+        Assert.Equal(10, rows.Single(row => row.ProductCode == "P-NEW").MinOrderQuantity);
+    }
+
+    [Fact]
+    public async Task SyncProductStocksIncrementalFromHqAsync_整行更新时保留本地正数中包数()
+    {
+        await _localDb.Insertable(
+                new List<WarehouseProduct>
+                {
+                    new() { ProductCode = "P-KEEP", MinOrderQuantity = 6, StockQuantity = 1 },
+                    new() { ProductCode = "P-ZERO", MinOrderQuantity = 0, StockQuantity = 1 },
+                }
+            )
+            .ExecuteCommandAsync();
+        await _hqDb.Insertable(
+                new List<CBP_DIC_商品库存表>
+                {
+                    new()
+                    {
+                        HGUID = "HQ-KEEP",
+                        H商品编码 = "P-KEEP",
+                        H库存 = 30m,
+                        H最小订货量 = 12m,
+                        H使用状态 = 1,
+                        FGC_LastModifyDate = new DateTime(2026, 8, 12, 2, 0, 0),
+                    },
+                    new()
+                    {
+                        HGUID = "HQ-ZERO",
+                        H商品编码 = "P-ZERO",
+                        H库存 = 40m,
+                        H最小订货量 = 4m,
+                        H使用状态 = 1,
+                        FGC_LastModifyDate = new DateTime(2026, 8, 12, 2, 0, 0),
+                    },
+                }
+            )
+            .ExecuteCommandAsync();
+
+        var result = await CreateService(CreateRealHistoryService()).SyncProductStocksIncrementalFromHqAsync(
+            new DateTime(2026, 8, 12, 0, 0, 0)
+        );
+
+        Assert.True(result.IsSuccess, result.Message);
+        var rows = await _localDb.Queryable<WarehouseProduct>().ToListAsync();
+        Assert.Equal(6, rows.Single(row => row.ProductCode == "P-KEEP").MinOrderQuantity);
+        Assert.Equal(30, rows.Single(row => row.ProductCode == "P-KEEP").StockQuantity);
+        Assert.Equal(4, rows.Single(row => row.ProductCode == "P-ZERO").MinOrderQuantity);
+    }
+
+    [Fact]
     public async Task SyncProductsFromHqAsync_全量同步使用当前请求用户历史上下文()
     {
         await _hqDb.Insertable(

@@ -15,7 +15,7 @@ import { useDynamicTabTitle } from '../../../hooks/useDynamicTabTitle'
 import { shouldSkipDetailAutoReload } from '../../../utils/detailLoadState'
 import { shouldShowStoreOrderDetailInitialLoading } from './detailLoadState'
 import { buildDocumentFileName, downloadElementPagesAsPdf, formatCurrency, formatPrintDate, printElementPagesAsPdf } from './printUtils'
-import { buildPickingListExcelData, buildPickingListPdfPages, formatInnerPackCount, formatPickingOrderQuantity } from './pickingListLogic'
+import { buildPickingListExcelData, buildPickingListPdfPages, buildPickingOrderBarcode, formatInnerPackCount, formatPickingOrderQuantity } from './pickingListLogic'
 import { formatStoreOrderVolume } from './volumeFormat'
 import './print.css'
 
@@ -183,6 +183,9 @@ export default function PickingListPage() {
   const pdfPages = useMemo(() => {
     return buildPickingListPdfPages(sortedItems, Boolean(order))
   }, [order, sortedItems])
+
+  // 订单条码只依赖订单号（HBSO:订单号，强制 CODE128）；必须放在下方提前 return 之前，保证 Hook 顺序稳定。
+  const orderBarcode = useMemo(() => buildPickingOrderBarcode(order?.orderNo), [order?.orderNo])
 
   const handleBeforePrint = async () => {
     if (!order) {
@@ -408,7 +411,14 @@ export default function PickingListPage() {
   const orderNoText = order.orderNo || order.orderGUID || t('warehouse.pickingList.unknownOrder')
   const renderPickingHeader = () => (
     <div className="store-order-picking-header">
-      <div className="store-order-picking-title">{t('warehouse.pickingList.title')}</div>
+      {/* 订货日期并到标题下方，右栏让给订单条码：表头只随条码块小幅增高，不额外占一行。 */}
+      <div className="store-order-picking-heading">
+        <div className="store-order-picking-title">{t('warehouse.pickingList.title')}</div>
+        <div className="store-order-picking-order-date">
+          <strong>{t('warehouse.pickingList.orderDate')}</strong>
+          {formatPrintDate(order.orderDate, false, printLocale)}
+        </div>
+      </div>
       <div className="store-order-picking-primary">
         {/* 店名和单号放在同一视觉主线，方便仓库打印后快速识别单据归属。 */}
         <div className="store-order-picking-primary-line">
@@ -419,10 +429,25 @@ export default function PickingListPage() {
         </div>
       </div>
       <div className="store-order-picking-meta">
-        <div>
-          <strong>{t('warehouse.pickingList.orderDate')}</strong>
-          {formatPrintDate(order.orderDate, false, printLocale)}
-        </div>
+        {/* PDA 扫这个 Code 128 订单条码进入拣货；SVG 矢量绘制，html2canvas 按 2 倍截图时条边仍保持锐利。 */}
+        {orderBarcode ? (
+          <div className="store-order-picking-barcode">
+            <svg
+              className="store-order-picking-barcode-bars"
+              width={orderBarcode.width}
+              height={orderBarcode.height}
+              viewBox={`0 0 ${orderBarcode.width} ${orderBarcode.height}`}
+              shapeRendering="crispEdges"
+              role="img"
+              aria-label={orderBarcode.value}
+            >
+              <path d={orderBarcode.path} fill="#000" />
+            </svg>
+            <div className="store-order-picking-barcode-caption">
+              {orderBarcode.value} · {t('warehouse.pickingList.scanToPick')}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )

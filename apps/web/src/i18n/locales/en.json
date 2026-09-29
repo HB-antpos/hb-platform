@@ -2195,6 +2195,7 @@
       "orderDate": "Order Date: ",
       "innerPackShort": "INNER Pack",
       "orderQtyShort": "Order Qty",
+      "scanToPick": "Scan to pick",
       "remarks": "Remarks: {{remarks}}",
       "totalSKU": "Total SKU: {{count}}",
       "totalOrderQty": "Total Order Qty: {{count}}",

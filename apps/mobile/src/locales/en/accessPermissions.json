@@ -733,6 +733,10 @@
       "name": "Warehouse Manage Orders",
       "description": "Allows access to Warehouse Manage Orders."
     },
+    "Warehouse.Picking": {
+      "name": "Warehouse Order Picking",
+      "description": "Mobile Order picking - scan to pick, fill in a missing min order qty and submit ship quantities. Included with Warehouse Manage or Warehouse Manage Orders."
+    },
     "Warehouse.ManageProducts": {
       "name": "Warehouse Manage Products",
       "description": "Allows access to Warehouse Manage Products."
