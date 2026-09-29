@@ -887,7 +887,7 @@ export default function WarehouseProductsPage() {
     // 下架 / 修改说明弹窗：target 为空即关闭。单个开关、批量下架、修改说明、编辑弹窗、批量修改共用。
     // origin 标记从哪个保存流程发起：editModal = 编辑弹窗把「是否上架」改为下架，batchEdit = 批量修改设为下架；
     // 不带 origin 的是原有的单个开关 / 批量下架路径。
-    const [supplyNoticeTarget, setSupplyNoticeTarget] = useState<{ mode: 'delist' | 'edit'; productCodes: string[]; initial?: WarehouseSupplyNotice | null; origin?: 'editModal' | 'batchEdit' } | null>(null);
+    const [supplyNoticeTarget, setSupplyNoticeTarget] = useState<{ mode: 'delist' | 'edit'; productCodes: string[]; initial?: WarehouseSupplyNotice | null; origin?: 'editModal' | 'batchEdit' | 'rowToggle' | 'batchToggle' } | null>(null);
     const [supplyNoticeSaving, setSupplyNoticeSaving] = useState(false);
     const [exportFailDetailOpen, setExportFailDetailOpen] = useState(false);
     const [exportFailDetail, setExportFailDetail] = useState<ExportResult['failedProductImages']>([]);
@@ -1875,7 +1875,7 @@ export default function WarehouseProductsPage() {
         }
         // 下架必须先登记供货说明（后续计划必选），说明随下架同一请求提交。
         if (!nextIsActive && !supplyNotice) {
-            setSupplyNoticeTarget({ mode: 'delist', productCodes: selectedRowKeys.map(String) });
+            setSupplyNoticeTarget({ mode: 'delist', productCodes: selectedRowKeys.map(String), origin: 'batchToggle' });
             return;
         }
         try {
@@ -2153,7 +2153,7 @@ export default function WarehouseProductsPage() {
     };
     const handleToggleSingleActive = async (record: WarehouseProductListItem, nextIsActive: boolean, supplyNotice?: SupplyNoticeInput) => {
         if (!nextIsActive && !supplyNotice) {
-            setSupplyNoticeTarget({ mode: 'delist', productCodes: [record.productCode] });
+            setSupplyNoticeTarget({ mode: 'delist', productCodes: [record.productCode], origin: 'rowToggle' });
             return;
         }
         try {
@@ -2201,16 +2201,16 @@ export default function WarehouseProductsPage() {
                 // 批量修改：带说明回到批量保存流程，继续二次确认并提交后台任务。
                 await handleBatchEditSave(notice);
             }
+            else if (mode === 'delist' && origin === 'rowToggle') {
+                // 行上开关：只下架被点击的那一行。必须按来源分发，不能按勾选数量推断，
+                // 否则恰好勾选了另一行时会把勾选行下架、被点击的行反而不动。
+                const record = data.find((item) => item.productCode === productCodes[0]);
+                if (record) {
+                    await handleToggleSingleActive(record, false, notice);
+                }
+            }
             else if (mode === 'delist') {
-                if (productCodes.length === 1 && selectedRowKeys.length !== 1) {
-                    const record = data.find((item) => item.productCode === productCodes[0]);
-                    if (record) {
-                        await handleToggleSingleActive(record, false, notice);
-                    }
-                }
-                else {
-                    await handleBatchToggleActive(false, notice);
-                }
+                await handleBatchToggleActive(false, notice);
             }
             else {
                 const result = await upsertWarehouseSupplyNotices(productCodes, notice);

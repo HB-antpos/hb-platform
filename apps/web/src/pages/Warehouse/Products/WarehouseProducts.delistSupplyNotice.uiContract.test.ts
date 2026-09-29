@@ -33,6 +33,15 @@ assert(
   '仓库商品页应复用统一的下架说明判定',
 )
 
+// 0. 说明弹窗提交必须按下架来源分发：行上开关只下架被点击的行，不能按勾选数量推断
+// （回归：只勾选了 Y 却点 X 的开关下架时，旧逻辑会把 Y 下架、X 不动）。
+const submitSection = extractSection(pageSource, 'const handleSupplyNoticeSubmit = async (notice: SupplyNoticeInput) => {', 'const handleOpenSetItems')
+assert(!submitSection.includes('selectedRowKeys.length'), '说明弹窗提交不得按勾选数量推断下架对象')
+assert(submitSection.includes("origin === 'rowToggle'"), '说明弹窗提交应识别行上开关来源')
+assertBefore(submitSection, "origin === 'rowToggle'", 'handleToggleSingleActive(record, false, notice)', '行上开关来源应只下架被点击的那一行')
+assert(pageSource.includes("productCodes: [record.productCode], origin: 'rowToggle' }"), '行上开关打开说明弹窗时应记录来源 rowToggle')
+assert(pageSource.includes("productCodes: selectedRowKeys.map(String), origin: 'batchToggle' }"), '批量上下架打开说明弹窗时应记录来源 batchToggle')
+
 // 1. 编辑弹窗：从上架改为下架才弹说明；弹窗在提交 full-update 之前拦截。
 const handleSaveSection = extractSection(pageSource, 'const handleSave = async (supplyNotice?: SupplyNoticeInput) => {', 'const getInlineCellKey')
 const editGate = "if (!supplyNotice && requiresDelistSupplyNotice(values.isActive, editingItem.isActive)) {"
@@ -78,7 +87,7 @@ assert(
   noticeSubmitSection.includes("else if (mode === 'delist' && origin === 'batchEdit') {") && noticeSubmitSection.includes('await handleBatchEditSave(notice);'),
   '批量修改来源的说明应带回 handleBatchEditSave 继续提交',
 )
-assertBefore(noticeSubmitSection, "origin === 'editModal'", 'if (productCodes.length === 1 && selectedRowKeys.length !== 1) {', '来源分发必须先于原有单个/批量开关的启发式判断')
+assertBefore(noticeSubmitSection, "origin === 'editModal'", "origin === 'rowToggle'", '编辑弹窗、批量修改的来源分发必须先于行上开关与批量上下架')
 
 // 4. 请求体：三个接口都要把说明原样提交给后端。
 const notice: SupplyNoticeInput = {
