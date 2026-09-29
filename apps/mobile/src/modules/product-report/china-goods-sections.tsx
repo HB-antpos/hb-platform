@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
-import { Text } from "react-native-paper";
+import { Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { ActivityIndicator, Text } from "react-native-paper";
 import type { ProductReportCostStatus } from "@/modules/product-report/api";
 import {
   CHINA_BRANCH_COLLAPSED_ROW_COUNT,
@@ -13,6 +13,8 @@ import {
   type ChinaBranchShareSortField,
   type ChinaGoodsSummary,
 } from "@/modules/product-report/china-goods-share";
+import { LINKED_COLORS, LINKED_STALE_OPACITY } from "@/modules/product-report/linked-colors";
+import { getCollapsedRowsWithSelection, isSameLinkedCode } from "@/modules/product-report/linked-selection";
 import { formatWholeDollars } from "@/modules/reports/format";
 import { GROWTH_COLORS, formatGrowthRate, getGrowthTone } from "@/modules/reports/growth-rate";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -191,28 +193,69 @@ function ShareBar({ share, compareShare, scaleMax }: { share: number | null; com
 /**
  * 分店中国货占比：中国货金额 ÷ 分店营业额，本期与同期上下两行，默认按中国货金额降序。
  * 主报表四块数据同批次到齐后才渲染本区块，因此这里不再单独处理加载与失败状态。
+ *
+ * 三表联动：整行点按选中分店（再点取消），供应商表与商品明细随之收窄，本表自身不过滤、只高亮；
+ * 传入 supplierName 时本表显示的是该供应商在各分店的销售（分母仍是分店营业额）。
+ * updating 表示正在按新供应商重取，旧数据变淡但仍可点按。
  */
-export function ChinaBranchShareSection({ rows }: { rows: readonly ChinaBranchShareRow[] }) {
+export function ChinaBranchShareSection({
+  rows,
+  selectedBranchCode = null,
+  onSelectBranch,
+  supplierName = null,
+  updating = false,
+  onLayout,
+}: {
+  rows: readonly ChinaBranchShareRow[];
+  selectedBranchCode?: string | null;
+  onSelectBranch?: (branchCode: string) => void;
+  supplierName?: string | null;
+  updating?: boolean;
+  onLayout?: (event: LayoutChangeEvent) => void;
+}) {
   const { t } = useAppTranslation("common");
   const [sort, setSort] = useState<ChinaBranchShareSort>(DEFAULT_CHINA_BRANCH_SHARE_SORT);
   const [expanded, setExpanded] = useState(false);
+  const supplierMode = Boolean(supplierName);
   const sortedRows = useMemo(() => sortChinaBranchShareRows(rows, sort), [rows, sort]);
-  const scaleMax = useMemo(() => getChinaBranchShareScaleMax(rows), [rows]);
-  const visibleRows = expanded ? sortedRows : sortedRows.slice(0, CHINA_BRANCH_COLLAPSED_ROW_COUNT);
+  // 单个供应商在各分店的占比通常只有几个百分点，刻度改按 1% 取整，条形才看得出差异。
+  const scaleMax = useMemo(() => getChinaBranchShareScaleMax(rows, supplierMode ? 100 : 10), [rows, supplierMode]);
+  // 已选分店不在前 8 名时附在折叠列表末尾，保证选中行始终看得见。
+  const { rows: visibleRows, appendedSelected } = expanded
+    ? { rows: sortedRows, appendedSelected: false }
+    : getCollapsedRowsWithSelection(
+        sortedRows,
+        CHINA_BRANCH_COLLAPSED_ROW_COUNT,
+        (row) => isSameLinkedCode(row.branchCode, selectedBranchCode),
+      );
   const canExpand = sortedRows.length > CHINA_BRANCH_COLLAPSED_ROW_COUNT;
+  // 点选提示由吸顶联动条统一给出，公式行只说明口径，保持单行不折行。
+  const formula = supplierMode
+    ? t("productReport.chinaGoods.supplierBranchFormula", { supplier: supplierName })
+    : t("productReport.chinaGoods.branchFormula");
 
   return (
-    <View style={styles.section}>
+    <View style={styles.section} onLayout={onLayout}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <View style={styles.titleLine}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>{t("productReport.chinaGoods.branchSection")}</Text>
+            <Text variant="titleMedium" numberOfLines={1} style={[styles.sectionTitle, styles.shrinkText]}>
+              {supplierMode
+                ? t("productReport.chinaGoods.supplierBranchSection", { supplier: supplierName })
+                : t("productReport.chinaGoods.branchSection")}
+            </Text>
             <Text variant="labelSmall" style={styles.muted}>
               <Text variant="labelSmall" style={styles.strong}>{t("reports.metrics.current")}</Text>
               {` / ${t("productReport.metrics.compare")}`}
             </Text>
+            {updating ? (
+              <View style={styles.updating} accessibilityRole="progressbar">
+                <ActivityIndicator size={12} />
+                <Text variant="labelSmall" style={styles.updatingText}>{t("productReport.linked.updating")}</Text>
+              </View>
+            ) : null}
           </View>
-          <Text variant="labelSmall" style={styles.muted}>{t("productReport.chinaGoods.branchFormula")}</Text>
+          <Text variant="labelSmall" style={styles.muted}>{formula}</Text>
         </View>
         <View style={styles.legend} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <View style={styles.legendItem}>
@@ -234,7 +277,7 @@ export function ChinaBranchShareSection({ rows }: { rows: readonly ChinaBranchSh
           </View>
           <View style={styles.amountColumn}>
             <SortHeader
-              label={t("productReport.chinaGoods.chinaAmount")}
+              label={supplierMode ? t("productReport.chinaGoods.supplierAmount") : t("productReport.chinaGoods.chinaAmount")}
               field="amount"
               sort={sort}
               onSort={(field) => setSort((current) => toggleChinaBranchShareSort(current, field))}
@@ -267,61 +310,114 @@ export function ChinaBranchShareSection({ rows }: { rows: readonly ChinaBranchSh
             </Text>
           </View>
         </View>
-        {visibleRows.length === 0 ? (
-          <View style={styles.stateBox}>
-            <Text variant="bodySmall">{t("productReport.chinaGoods.emptyBranches")}</Text>
-          </View>
-        ) : visibleRows.map((row) => (
-          <View key={row.branchCode} style={styles.row}>
-            <View style={styles.branchColumn}>
-              <Text variant="bodySmall" style={styles.strong} numberOfLines={1} selectable>{row.branchName}</Text>
-              <Text variant="labelSmall" style={[styles.muted, styles.numeric]} numberOfLines={1}>
-                {formatWholeDollars(row.branchRevenue)}
-              </Text>
+        <View style={updating ? styles.staleBody : null}>
+          {visibleRows.length === 0 ? (
+            <View style={styles.stateBox}>
+              <Text variant="bodySmall">{t("productReport.chinaGoods.emptyBranches")}</Text>
             </View>
-            <View style={styles.amountColumn}>
-              <Text variant="bodySmall" style={[styles.strong, styles.numeric, styles.alignRight]} numberOfLines={1} selectable>
-                {formatWholeDollars(row.chinaRevenue)}
-              </Text>
-              <Text variant="bodySmall" style={[styles.muted, styles.numeric, styles.alignRight]} numberOfLines={1}>
-                {formatWholeDollars(row.compareChinaRevenue)}
-              </Text>
-            </View>
-            <View style={[styles.shareColumn, styles.shareCell]}>
-              <View style={styles.shareNumbers}>
-                <Text variant="bodySmall" style={[styles.strong, styles.numeric, styles.alignRight]} numberOfLines={1}>
-                  {formatPercent(row.share)}
-                </Text>
-                <Text variant="bodySmall" style={[styles.muted, styles.numeric, styles.alignRight]} numberOfLines={1}>
-                  {formatPercent(row.compareShare)}
-                </Text>
+          ) : visibleRows.map((row, index) => {
+            const selected = isSameLinkedCode(row.branchCode, selectedBranchCode);
+            // 选中供应商后，本期没卖该供应商的分店仍列出（同期可能有销售），金额置灰。
+            const noSales = supplierMode && row.chinaRevenue === 0;
+            const cells = (
+              <>
+                {selected ? <View style={styles.selectedAccent} /> : null}
+                <View style={styles.branchColumn}>
+                  <Text
+                    variant="bodySmall"
+                    style={[styles.strong, selected ? styles.selectedBranchName : noSales ? styles.mutedStrong : null]}
+                    numberOfLines={1}
+                    selectable
+                  >
+                    {row.branchName}
+                  </Text>
+                  <Text variant="labelSmall" style={[styles.muted, styles.numeric]} numberOfLines={1}>
+                    {formatWholeDollars(row.branchRevenue)}
+                  </Text>
+                </View>
+                <View style={styles.amountColumn}>
+                  <Text
+                    variant="bodySmall"
+                    style={[styles.strong, styles.numeric, styles.alignRight, noSales ? styles.mutedStrong : null]}
+                    numberOfLines={1}
+                    selectable
+                  >
+                    {formatWholeDollars(row.chinaRevenue)}
+                  </Text>
+                  <Text variant="bodySmall" style={[styles.muted, styles.numeric, styles.alignRight]} numberOfLines={1}>
+                    {formatWholeDollars(row.compareChinaRevenue)}
+                  </Text>
+                </View>
+                <View style={[styles.shareColumn, styles.shareCell]}>
+                  <View style={styles.shareNumbers}>
+                    <Text
+                      variant="bodySmall"
+                      style={[styles.strong, styles.numeric, styles.alignRight, noSales ? styles.mutedStrong : null]}
+                      numberOfLines={1}
+                    >
+                      {formatPercent(row.share)}
+                    </Text>
+                    <Text variant="bodySmall" style={[styles.muted, styles.numeric, styles.alignRight]} numberOfLines={1}>
+                      {formatPercent(row.compareShare)}
+                    </Text>
+                  </View>
+                  <ShareBar share={row.share} compareShare={row.compareShare} scaleMax={scaleMax} />
+                </View>
+                <View style={styles.deltaColumn}>
+                  <Text
+                    variant="bodySmall"
+                    style={[styles.strong, styles.numeric, styles.alignRight, { color: GROWTH_COLORS[getPointsTone(row.shareDeltaPoints)] }]}
+                    numberOfLines={1}
+                  >
+                    {formatSignedPoints(row.shareDeltaPoints)}
+                  </Text>
+                </View>
+              </>
+            );
+            return (
+              <View key={row.branchCode}>
+                {appendedSelected && index === visibleRows.length - 1 ? (
+                  <View style={styles.appendedNote}>
+                    <Text variant="labelSmall" style={styles.muted}>
+                      {t("productReport.chinaGoods.appendedSelectedBranch", { count: CHINA_BRANCH_COLLAPSED_ROW_COUNT })}
+                    </Text>
+                  </View>
+                ) : null}
+                {onSelectBranch ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={selected
+                      ? t("productReport.linked.selectedBranchA11y", { branch: row.branchName })
+                      : t("productReport.linked.selectBranchA11y", { branch: row.branchName })}
+                    onPress={() => onSelectBranch(row.branchCode)}
+                    style={({ pressed }) => [
+                      styles.row,
+                      selected ? styles.selectedRow : pressed ? styles.pressedRow : null,
+                    ]}
+                  >
+                    {cells}
+                  </Pressable>
+                ) : (
+                  <View style={styles.row}>{cells}</View>
+                )}
               </View>
-              <ShareBar share={row.share} compareShare={row.compareShare} scaleMax={scaleMax} />
-            </View>
-            <View style={styles.deltaColumn}>
-              <Text
-                variant="bodySmall"
-                style={[styles.strong, styles.numeric, styles.alignRight, { color: GROWTH_COLORS[getPointsTone(row.shareDeltaPoints)] }]}
-                numberOfLines={1}
-              >
-                {formatSignedPoints(row.shareDeltaPoints)}
+            );
+          })}
+          {canExpand ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setExpanded((current) => !current)}
+              style={styles.expandButton}
+            >
+              <Text variant="labelLarge" style={styles.expandText}>
+                {expanded
+                  ? t("productReport.chinaGoods.collapseBranches")
+                  : t("productReport.chinaGoods.expandBranches", { count: sortedRows.length })}
               </Text>
-            </View>
-          </View>
-        ))}
-        {canExpand ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setExpanded((current) => !current)}
-            style={styles.expandButton}
-          >
-            <Text variant="labelLarge" style={styles.expandText}>
-              {expanded
-                ? t("productReport.chinaGoods.collapseBranches")
-                : t("productReport.chinaGoods.expandBranches", { count: sortedRows.length })}
-            </Text>
-          </Pressable>
-        ) : null}
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -552,5 +648,47 @@ const styles = StyleSheet.create({
   expandText: {
     color: "#2563EB",
     fontWeight: "700",
+  },
+  shrinkText: {
+    flexShrink: 1,
+  },
+  updating: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  updatingText: {
+    color: "#475467",
+  },
+  staleBody: {
+    opacity: LINKED_STALE_OPACITY,
+  },
+  // 选中行：浅蓝底 + 左侧 3pt 分店蓝条 + 名称变蓝，与吸顶条的分店 chip 同色。
+  selectedRow: {
+    backgroundColor: LINKED_COLORS.branchBackground,
+  },
+  pressedRow: {
+    backgroundColor: "#F3F4F6",
+  },
+  selectedAccent: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: LINKED_COLORS.branch,
+  },
+  selectedBranchName: {
+    color: LINKED_COLORS.branchText,
+  },
+  mutedStrong: {
+    color: "#6B7280",
+  },
+  appendedNote: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF0F3",
+    backgroundColor: "#F9FAFB",
   },
 });
