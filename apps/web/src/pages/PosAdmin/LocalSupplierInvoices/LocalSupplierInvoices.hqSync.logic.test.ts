@@ -387,20 +387,26 @@ async function main() {
   })
   if (jobTypeFailure) failures.push(jobTypeFailure)
 
-  const pageButtonFailure = await runTest('页面应给管理员显示从HQ同步按钮并打开弹窗', () => {
-    assert(pageSource.includes('CloudSyncOutlined'), '页面应使用同步图标')
-    assert(pageSource.includes("t('posAdmin.invoices.syncFromHQ'"), '页面应存在从HQ同步按钮文案')
-    assert(pageSource.includes('isAdmin &&') && pageSource.includes('setHqSyncModalOpen(true)'), '按钮应仅管理员可见并打开同步弹窗')
+  // HQ 进货单 → HBweb 的「从HQ同步」已于 2026-09-29 停用（后端返回 410），列表页不得再提供入口。
+  const pageButtonFailure = await runTest('列表页不再提供从HQ同步按钮与弹窗', () => {
+    for (const removed of [
+      'syncInvoicesFromHq',
+      'CloudSyncOutlined',
+      "t('posAdmin.invoices.syncFromHQ'",
+      'setHqSyncModalOpen',
+      'hqSyncForm',
+      'handleSyncFromHq',
+      'getHqSyncResultFromError',
+    ]) {
+      assert(!pageSource.includes(removed), `列表页不应再包含 HQ 同步入口代码：${removed}`)
+    }
+    assert(
+      pageSource.includes("t('posAdmin.invoices.import.uploadButton')") &&
+        pageSource.includes('onClick={() => setImportVisible(true)}'),
+      '列表页应保留管理员的导入入口',
+    )
   })
   if (pageButtonFailure) failures.push(pageButtonFailure)
-
-  const pagePayloadFailure = await runTest('页面应从弹窗提交分店和日期范围', () => {
-    assert(pageSource.includes('hqSyncForm.validateFields()'), '同步前应校验弹窗表单')
-    assert(pageSource.includes("dto.startDate = values.dateRange[0].format('YYYY-MM-DD')"), '页面应传 startDate')
-    assert(pageSource.includes("dto.endDate = values.dateRange[1].format('YYYY-MM-DD')"), '页面应传 endDate')
-    assert(pageSource.includes('dto.selectedStoreCodes = values.selectedStoreCodes'), '页面应传 selectedStoreCodes')
-  })
-  if (pagePayloadFailure) failures.push(pagePayloadFailure)
 
   const listPaginationLayoutFailure = await runTest('列表页表格滚动区域不应覆盖外置分页', () => {
     assert(pageSource.includes('const tableRegionRef = useRef<HTMLDivElement>(null)'), '列表页应声明表格区域 ref')
