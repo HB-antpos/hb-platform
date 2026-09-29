@@ -48,7 +48,6 @@ import {
   buildHourlyDetailRows,
   buildHourlySeries,
   formatHourLabel,
-  formatLocalClockTime,
   getCumulativeTotals,
   getDisplayCutoffHour,
   groupHourlySeriesByBranch,
@@ -57,6 +56,16 @@ import {
   type HourlyDetailView,
 } from "@/modules/reports/hourly-cumulative";
 import { useStatisticsFreshnessQuery } from "@/modules/reports/statistics-freshness";
+import {
+  buildStoreTimeZoneMap,
+  formatClockTimeAtOffset,
+  getBranchOffsetMinutes,
+  getBranchShiftHours,
+  getCutoffClockAnchorUtc,
+  resolveCutoffClock,
+  shiftBranchHourlyRows,
+  toBranchClockHour,
+} from "@/modules/reports/store-cutoff-clock";
 import {
   RevenuePeriod,
   RevenuePeriodMode,
@@ -853,17 +862,36 @@ export function RevenueReportScreen({
     : cumulativeQuery.data?.isComplete
       ? cumulativeQuery.data.rows
       : completeCumulativeSnapshotsRef.get(summarySnapshotKey) ?? null;
+  // 截止整点按门店时区：选中单店用本店时间，全部分店用范围内最东门店的时间（夏令时期间即悉尼），
+  // 其余门店的小时桶平移到同一时钟，排行与卡片的同一截止整点对每家店都是「本店已结束的整点」。
+  const storeTimeZoneByBranch = useMemo(
+    () => buildStoreTimeZoneMap(cashierStoreOptionsQuery.data ?? []),
+    [cashierStoreOptionsQuery.data],
+  );
+  const cutoffClock = useMemo(
+    () => resolveCutoffClock({
+      branchCodes: cashierEnabledStoreCodes,
+      referenceBranchCodes: selectedBranchCode ? [selectedBranchCode] : cashierEnabledStoreCodes,
+      timeZoneByBranch: storeTimeZoneByBranch,
+      atUtc: getCutoffClockAnchorUtc(period.startDate),
+    }),
+    [cashierEnabledStoreCodes, period.startDate, selectedBranchCode, storeTimeZoneByBranch],
+  );
+  const cumulativeClockRows = useMemo(
+    () => (cumulativeRows ? shiftBranchHourlyRows(cumulativeRows, cutoffClock) : null),
+    [cumulativeRows, cutoffClock],
+  );
   const cumulativeSeriesByBranch = useMemo(
-    () => (cumulativeRows ? groupHourlySeriesByBranch(cumulativeRows) : null),
-    [cumulativeRows],
+    () => (cumulativeClockRows ? groupHourlySeriesByBranch(cumulativeClockRows) : null),
+    [cumulativeClockRows],
   );
   const cumulativeScopeSeries = useMemo(
-    () => cumulativeRows
+    () => cumulativeClockRows
       ? buildHourlySeries(selectedBranchCode
-          ? cumulativeRows.filter((row) => row.branchCode === selectedBranchCode)
-          : cumulativeRows)
+          ? cumulativeClockRows.filter((row) => row.branchCode === selectedBranchCode)
+          : cumulativeClockRows)
       : null,
-    [cumulativeRows, selectedBranchCode],
+    [cumulativeClockRows, selectedBranchCode],
   );
   const cumulativeCutoff = useMemo(
     () => mode === "day"
@@ -871,14 +899,15 @@ export function RevenueReportScreen({
           selectedDate: period.startDate,
           todayKey: dateBounds.maxDate,
           statisticsCompletedAtUtc,
+          utcOffsetMinutes: cutoffClock.referenceOffsetMinutes,
         })
       : null,
-    [dateBounds.maxDate, mode, period.startDate, statisticsCompletedAtUtc],
+    [cutoffClock.referenceOffsetMinutes, dateBounds.maxDate, mode, period.startDate, statisticsCompletedAtUtc],
   );
   const effectiveCutoffHour = cumulativeCutoff
     ? resolveEffectiveCutoff(selectedCutoffHour, cumulativeCutoff.cutoffHour)
     : null;
-  const liveTimeLabel = formatLocalClockTime(statisticsCompletedAtUtc);
+  const liveTimeLabel = formatClockTimeAtOffset(statisticsCompletedAtUtc, cutoffClock.referenceOffsetMinutes);
   // 当天比到最近完整整点；历史日期默认比整天（沿用日统计原值），只有点选了整点才截断。
   const rankingAlignmentNeeded =
     mode === "day" && effectiveCutoffHour !== null && effectiveCutoffHour < FULL_DAY_CUTOFF_HOUR;
@@ -898,11 +927,12 @@ export function RevenueReportScreen({
     && (cutoffPendingForToday
       || (rankingAlignmentNeeded && !cumulativeSeriesByBranch && !cumulativeSettledWithoutData));
   const rankingCutoffHour = rankingAlignmentNeeded && cumulativeSeriesByBranch ? effectiveCutoffHour : null;
-  const rankingCutoffLabel = rankingCutoffHour === null
+  const rankingDisplayCutoffHour = rankingCutoffHour === null
     ? null
-    : formatHourLabel(cumulativeScopeSeries
+    : cumulativeScopeSeries
       ? getDisplayCutoffHour(cumulativeScopeSeries, rankingCutoffHour)
-      : rankingCutoffHour);
+      : rankingCutoffHour;
+  const rankingCutoffLabel = rankingDisplayCutoffHour === null ? null : formatHourLabel(rankingDisplayCutoffHour);
   const selectCutoffHour = (hour: number) => {
     if (!cumulativeCutoff) return;
     const defaultDisplay = cumulativeScopeSeries
@@ -1053,6 +1083,29 @@ export function RevenueReportScreen({
     && (detailQuery.isFetching || !detailQuery.data?.isComplete || detailQuery.isError);
   const detailPending = detailQuery.data !== undefined && !detailQuery.data.isComplete;
   const detailPollingExhausted = detailPending && Boolean(detailQuery.data?.pollingExhausted);
+  // 分时下钻是单店本地小时（未平移）：截止、高亮与「实时」时刻都换算到该店自己的时间，
+  // 否则夏令时期间从全部分店点进布里斯班店，会按悉尼时间把本地进行中的小时当成已完整。
+  const detailBranchCode = drilldown?.branch.branchCode ?? null;
+  const detailOffsetMinutes = detailBranchCode
+    ? getBranchOffsetMinutes(cutoffClock, detailBranchCode)
+    : cutoffClock.referenceOffsetMinutes;
+  const detailShiftHours = detailBranchCode ? getBranchShiftHours(cutoffClock, detailBranchCode) : 0;
+  const detailCutoff = useMemo(
+    () => mode === "day"
+      ? resolveDefaultCutoff({
+          selectedDate: period.startDate,
+          todayKey: dateBounds.maxDate,
+          statisticsCompletedAtUtc,
+          utcOffsetMinutes: detailOffsetMinutes,
+        })
+      : null,
+    [dateBounds.maxDate, detailOffsetMinutes, mode, period.startDate, statisticsCompletedAtUtc],
+  );
+  const detailHighlightHour = toBranchClockHour(effectiveCutoffHour ?? FULL_DAY_CUTOFF_HOUR, detailShiftHours);
+  const detailLiveTimeLabel = formatClockTimeAtOffset(statisticsCompletedAtUtc, detailOffsetMinutes);
+  const detailCutoffLabel = rankingDisplayCutoffHour === null
+    ? null
+    : formatHourLabel(toBranchClockHour(rankingDisplayCutoffHour, detailShiftHours));
   // 分时下钻：累计 / 逐小时两种口径；状态按最近完整整点判断，高亮跟随用户点选的整点。
   const hourlyDetailSourceRows = useMemo(
     () => drilldown?.type === "hourly"
@@ -1063,13 +1116,13 @@ export function RevenueReportScreen({
   const hourlyDetailRows = useMemo(
     () => drilldown?.type === "hourly"
       ? buildHourlyDetailRows(hourlyDetailSourceRows, {
-          cutoffHour: cumulativeCutoff?.cutoffHour ?? FULL_DAY_CUTOFF_HOUR,
-          live: cumulativeCutoff?.live ?? false,
+          cutoffHour: detailCutoff?.cutoffHour ?? FULL_DAY_CUTOFF_HOUR,
+          live: detailCutoff?.live ?? false,
           cumulative: hourlyDetailMode === "cumulative",
-          highlightCutoffHour: effectiveCutoffHour ?? FULL_DAY_CUTOFF_HOUR,
+          highlightCutoffHour: detailHighlightHour,
         })
       : null,
-    [cumulativeCutoff, drilldown?.type, effectiveCutoffHour, hourlyDetailMode, hourlyDetailSourceRows],
+    [detailCutoff, detailHighlightHour, drilldown?.type, hourlyDetailMode, hourlyDetailSourceRows],
   );
   const detailListRows: DetailRow[] = hourlyDetailRows ?? detailRows;
   const detailSeries = useMemo(
@@ -1077,11 +1130,11 @@ export function RevenueReportScreen({
     [hourlyDetailSourceRows],
   );
   const detailChartModel = useMemo(
-    () => (detailSeries && cumulativeCutoff ? buildCumulativeChartModel(detailSeries, cumulativeCutoff) : null),
-    [cumulativeCutoff, detailSeries],
+    () => (detailSeries && detailCutoff ? buildCumulativeChartModel(detailSeries, detailCutoff) : null),
+    [detailCutoff, detailSeries],
   );
   const detailMarkerHour = detailSeries
-    ? getDisplayCutoffHour(detailSeries, effectiveCutoffHour ?? FULL_DAY_CUTOFF_HOUR)
+    ? getDisplayCutoffHour(detailSeries, detailHighlightHour)
     : FULL_DAY_CUTOFF_HOUR;
   useLayoutEffect(() => {
     if (
@@ -1263,7 +1316,7 @@ export function RevenueReportScreen({
           )}
           {inProgress ? (
             <Text style={styles.detailLiveTag} numberOfLines={1}>
-              {t("reports.cumulative.live", { time: liveTimeLabel ?? "" })}
+              {t("reports.cumulative.live", { time: detailLiveTimeLabel ?? "" })}
             </Text>
           ) : upcoming ? (
             <TableText style={styles.muted}>{t("reports.cumulative.upcoming")}</TableText>
@@ -1601,8 +1654,8 @@ export function RevenueReportScreen({
               <View style={styles.detailListHeader}>
                 <RevenueSummaryCard
                   title={t("reports.sections.branchSummary")}
-                  caption={rankingCutoffLabel
-                    ? t("reports.cumulative.asOfShort", { time: rankingCutoffLabel })
+                  caption={detailCutoffLabel
+                    ? t("reports.cumulative.asOfShort", { time: detailCutoffLabel })
                     : undefined}
                   summary={selectedBranchSummary}
                 />
@@ -1614,8 +1667,8 @@ export function RevenueReportScreen({
                         {t("reports.cumulative.title")}
                       </Text>
                       <Text variant="bodySmall" style={[styles.muted, styles.detailChartCaption]}>
-                        {`${cumulativeCutoff?.live
-                          ? t("reports.cumulative.liveAt", { time: liveTimeLabel ?? "" })
+                        {`${detailCutoff?.live
+                          ? t("reports.cumulative.liveAt", { time: detailLiveTimeLabel ?? "" })
                           : t("reports.cumulative.dayTotal")} ${formatWholeMoney(getCumulativeTotals(detailSeries, FULL_DAY_CUTOFF_HOUR).revenue)}`}
                       </Text>
                     </View>

@@ -220,6 +220,7 @@
       "lowBase": "基数小",
       "compareAsOf": "对比截至 {{time}}，{{change}}",
       "noCompleteHour": "{{time}} 起开始对比",
+      "liveHourNote": "{{from}}–{{to}} 进行中 {{amount}}，{{next}} 统计后计入对比",
       "noData": "暂无销售记录",
       "loadFailed": "分时营业额加载失败",
       "cutoffUnavailable": "正在等待最新统计时间",

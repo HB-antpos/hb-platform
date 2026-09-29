@@ -13,7 +13,8 @@ export const FULL_DAY_CUTOFF_HOUR = 24;
 export const LOW_BASE_SHARE = 0.05;
 
 /**
- * 截止整点按固定 UTC+10 计算。
+ * 截止整点的默认参考偏移：固定 UTC+10。
+ * 营业额页面会按门店时区（store-cutoff-clock.ts）换算参考时钟；拿不到门店时区时才回退到这里。
  * 门店只分布在悉尼与布里斯班，小时桶是各店本地墙钟；取最西且无夏令时的 UTC+10，
  * 夏令时期间悉尼店的同一整点也已结束，任何门店都不会把半截小时拿去和去年整小时比较。
  */
@@ -259,6 +260,27 @@ export function resolveDefaultCutoff({
     live: true,
     liveHourFraction: reference.getUTCMinutes() / 60,
   };
+}
+
+export interface LiveHourSummary {
+  /** 进行中小时的起点，即默认截止整点。 */
+  startHour: number;
+  /** 下一次整点统计后该小时才计入对比。 */
+  nextHour: number;
+  /** 进行中小时已统计到的营业额（截止整点之后的全部入账）。 */
+  revenue: number;
+}
+
+/**
+ * 默认截止之后进行中的小时：去年同期只有整小时数据，半小时不能拿去比较，只单独展示。
+ * 整点那次统计在 xx:00 后几十秒完成，此时进行中的小时只有几秒入账，不值得提示；
+ * 统计时刻至少过了该整点一分钟、且确有入账时才返回。
+ */
+export function getLiveHourSummary(series: HourlySeries, cutoff: CutoffResolution): LiveHourSummary | null {
+  if (!cutoff.live || cutoff.cutoffHour >= HOURS_PER_DAY || cutoff.liveHourFraction <= 0) return null;
+  const revenue = sumBeforeHour(series.revenue, HOURS_PER_DAY) - sumBeforeHour(series.revenue, cutoff.cutoffHour);
+  if (Math.round(revenue) === 0) return null;
+  return { startHour: cutoff.cutoffHour, nextHour: cutoff.cutoffHour + 1, revenue };
 }
 
 /** 可点选的截止整点：从最早营业小时之后一直到默认截止（或最后营业小时）。 */
