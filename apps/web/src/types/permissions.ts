@@ -57,6 +57,7 @@ export const P = {
     Create: 'Container.Create',
     Edit: 'Container.Edit',
     Delete: 'Container.Delete',
+    MobileNewProductsView: 'Container.MobileNewProductsView',
   },
   SalesOrders: {
     View: 'SalesOrders.View',
@@ -96,6 +97,7 @@ export const P = {
     ManageSettings: 'System.ManageSettings',
     ViewAppDownloads: 'System.ViewAppDownloads',
     ManageAppDownloads: 'System.ManageAppDownloads',
+    ViewMobileAppInstallLinks: 'System.ViewMobileAppInstallLinks',
   },
   DeviceRegistration: {
     View: 'DeviceRegistration.View',

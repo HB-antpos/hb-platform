@@ -30,6 +30,7 @@ export type AppTabPath =
   | "/(shell)/employee-profile-review"
   | "/(shell)/pos-operation-logs"
   | "/(shell)/device-management"
+  | "/(shell)/app-install"
   | "/(shell)/app-downloads"
   | "/(shell)/wpf-versions"
   | "/(shell)/settings";
@@ -66,6 +67,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   "employee-profile-review": "/(shell)/employee-profile-review",
   "pos-operation-logs": "/(shell)/pos-operation-logs",
   "device-management": "/(shell)/device-management",
+  "app-install": "/(shell)/app-install",
   "app-downloads": "/(shell)/app-downloads",
   "wpf-versions": "/(shell)/wpf-versions",
   settings: "/(shell)/settings",
@@ -75,6 +77,8 @@ export const SUPPORTED_TAB_ROUTE_NAMES = new Set(Object.keys(TAB_PATHS));
 export const SETTINGS_FALLBACK_ROUTE_NAME = "settings";
 
 const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
+  // 安装页按账号独立权限授权，设备会话没有该权限，接口会直接拒绝。
+  "app-install",
   "app-downloads",
   "wpf-versions",
   "attendance-personal",

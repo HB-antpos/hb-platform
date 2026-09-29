@@ -880,7 +880,8 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(33, menu.Count);
+        Assert.Equal(34, menu.Count);
+        Assert.Contains(menu, item => item.RouteName == "app-install");
         Assert.Contains(menu, item => item.RouteName == "cash-register-users");
         Assert.Contains(menu, item => item.RouteName == "seasonal-product-insights");
         Assert.Contains(menu, item => item.RouteName == "price-updates");
@@ -1470,6 +1471,35 @@ public class NavigationServiceTests
         Assert.DoesNotContain(
             _service.BuildAppMenu(unauthorized),
             menu => menu.RouteName == "permissions"
+        );
+    }
+
+    [Fact]
+    public void BuildAppMenu_ShowsAppInstallOnlyWithDedicatedPermissionWithoutAdmin()
+    {
+        var authorized = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.System.ViewMobileAppInstallLinks))
+        );
+        // 版本管理查看权限不代表安装页权限，两者独立授权。
+        var appDownloadsOnly = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.System.ViewAppDownloads))
+        );
+
+        var item = Assert.Single(authorized, menu => menu.RouteName == "app-install");
+        Assert.Equal("tabs.appInstall", item.TitleKey);
+        Assert.Equal("qrcode", item.Icon);
+        Assert.Equal(Permissions.System.ViewMobileAppInstallLinks, item.Permission);
+        Assert.Equal(59, item.Order);
+        Assert.DoesNotContain(authorized, menu => menu.RouteName == "app-downloads");
+        Assert.DoesNotContain(appDownloadsOnly, menu => menu.RouteName == "app-install");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_HidesAppInstallForDeviceMode()
+    {
+        Assert.DoesNotContain(
+            _service.BuildDeviceAppMenu("Mobile"),
+            item => item.RouteName == "app-install"
         );
     }
 

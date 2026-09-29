@@ -341,6 +341,7 @@
     <Compile Include="ReactContainerControllerSyncContractTests.cs" />
     <Compile Include="PdfCjkFontProviderConcurrencyTests.cs" />
     <Compile Include="ContainerNewProductsControllerTests.cs" />
+    <Compile Include="MobileAppInstallLinksControllerTests.cs" />
     <Compile Include="ContainerNewProductsServiceSqliteTests.cs" />
     <Compile Include="DataSyncReactControllerLocationSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerProductSyncContractTests.cs" />

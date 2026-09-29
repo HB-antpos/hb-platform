@@ -90,7 +90,11 @@ assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
 assert.equal(fullMenus.filter((item) => item.platform === "web").length, 45);
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 30);
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 31);
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "app-install")?.permissionCodes,
+  ["System.ViewMobileAppInstallLinks"]
+);
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "container-new-products")?.permissionCodes,
   ["Container.MobileNewProductsView"]

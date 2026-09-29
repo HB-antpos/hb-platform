@@ -87,6 +87,7 @@ const MOBILE_MENU: MenuSource[] = ([
   ["device-management", "Device management", "设备管理", ["DeviceRegistration.View"]],
   ["reports", "Reports", "报表", ["Reports.ProductMovement.View"]],
   ["pos-operation-logs", "POS operation logs", "员工操作日志", ["Permissions.PosTerminal.Audit.View"]],
+  ["app-install", "Install app", "App 安装", ["System.ViewMobileAppInstallLinks"]],
   ["app-downloads", "App downloads", "应用下载", ["System.ViewAppDownloads"], { requireAdmin: true }],
   ["wpf-versions", "WPF versions", "WPF 版本", ["System.ViewAppDownloads"], { requireAdmin: true }],
   ["settings", "Settings", "我的", [], { fixed: true }],

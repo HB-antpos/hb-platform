@@ -1,0 +1,36 @@
+{
+  "title": "Install app",
+  "subtitle": "Scan to install the latest HB release",
+  "actions": {
+    "back": "Back",
+    "retry": "Retry",
+    "openHere": "Open on this device",
+    "copy": "Copy link",
+    "share": "Share"
+  },
+  "platforms": { "ios": "iOS", "android": "Android" },
+  "labels": {
+    "version": "Version {{version}}",
+    "build": "Build {{build}}",
+    "iosSource": "App Store release",
+    "androidSource": "Android release APK",
+    "verifiedAt": "Verified on App Store {{time}}",
+    "builtAt": "Built {{time}}",
+    "size": "Package {{size}}"
+  },
+  "hints": {
+    "ios": "Scan with the iPhone camera to install or update from the App Store.",
+    "android": "Scan with an Android browser or camera to download the APK. Allow \"Install unknown apps\" on first install."
+  },
+  "messages": {
+    "notAllowed": "You do not have access to app installation. Ask an administrator for access.",
+    "copied": "Link copied",
+    "actionFailed": "Something went wrong. Please try again."
+  },
+  "states": {
+    "loading": "Loading…",
+    "loadFailed": "Could not load",
+    "iosEmpty": "No iOS release is available yet",
+    "androidEmpty": "No Android release is available yet"
+  }
+}

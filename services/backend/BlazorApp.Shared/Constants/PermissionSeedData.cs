@@ -360,6 +360,8 @@ namespace BlazorApp.Shared.Constants
                 // 仅注册权限，不写入角色模板，避免默认扩大 App 下载入口访问面。
                 new(Permissions.System.ViewAppDownloads, "查看 App 下载", "系统管理", "Web 页面 /system/app-downloads、/system/wpf-versions（移动端同名入口另需管理员）- 查看 App 下载与 WPF 版本"),
                 new(Permissions.System.ManageAppDownloads, "管理 App 下载", "系统管理", "系统管理 - 登记 OTA 更新和生成回撤命令"),
+                // 仅注册权限，不写入角色模板；由管理员按需授予，只读展示最新正式版安装链接。
+                new(Permissions.System.ViewMobileAppInstallLinks, "移动端查看 App 安装二维码", "系统管理", "移动端「App 安装」- 查看 iOS 与 Android 最新正式版本及安装二维码"),
                 // 仅注册权限，不写入角色模板；由管理员显式授予查看或冻结基线能力。
                 new(Permissions.System.ViewPerformanceBaseline, "查看性能与质量基线", "系统管理", "Web 页面 /system/performance-baseline - 查看性能与质量指标"),
                 new(Permissions.System.ManagePerformanceBaseline, "管理性能与质量基线", "系统管理", "Web 页面 /system/performance-baseline - 冻结已满足观察期和覆盖率的基线"),
