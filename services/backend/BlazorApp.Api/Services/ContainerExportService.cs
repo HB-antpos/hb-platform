@@ -3,6 +3,7 @@ using iTextSharp.text;
 using iTextSharp.text.pdf;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
+using BlazorApp.Api.Services.Pdf;
 using System.Net.Http;
 
 namespace BlazorApp.Api.Services
@@ -228,8 +229,8 @@ namespace BlazorApp.Api.Services
 
                 document.Open();
 
-                // 设置中文字体
-                var baseFont = BaseFont.CreateFont("STSong-Light", "UniGB-UCS2-H", BaseFont.NOT_EMBEDDED);
+                // 设置中文字体：走线程安全的共享提供者，避免冷启动并发首次创建 CJK 字体时 iTextSharp 静态缓存重复 Add
+                var baseFont = PdfCjkFontProvider.SimplifiedChinese;
                 var titleFont = new iTextSharp.text.Font(baseFont, 16, iTextSharp.text.Font.BOLD);
                 var headerFont = new iTextSharp.text.Font(baseFont, 12, iTextSharp.text.Font.BOLD);
                 var normalFont = new iTextSharp.text.Font(baseFont, 10, iTextSharp.text.Font.NORMAL);
