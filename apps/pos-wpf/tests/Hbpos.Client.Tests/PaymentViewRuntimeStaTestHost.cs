@@ -31,11 +31,14 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
             _thread.SetApartmentState(ApartmentState.STA);
             _thread.Start();
 
-            _dispatcher = await _dispatcherReady.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // 两处等待都是防挂死保险（真卡死时兜底报错，不是性能断言），统一用共享的 DefaultTimeout。
+            // 进程内首次创建 Application 并合并 MaterialDesign 等字典属于 WPF 冷启动，CI 实测耗时随 xUnit 随机的集合顺序波动：
+            // 排在其它串行集合之后不超过 3.2 秒，紧接 SQLite 并行阶段结束时约 10~11.8 秒，原来的 10 秒会偶发整组超时。
+            _dispatcher = await _dispatcherReady.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             var operation = _dispatcher.InvokeAsync(
                 static () => CreateTestApplication(),
                 DispatcherPriority.Normal);
-            _application = await operation.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            _application = await operation.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         }
         catch
         {
@@ -57,6 +60,8 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
 
     private async Task StopDispatcherAsync()
     {
+        // 以下等待同属防挂死兜底（关闭请求已发出，只等 Dispatcher 线程执行完），与初始化共用 DefaultTimeout：
+        // 初始化超时后 Dispatcher 仍在执行 CreateTestApplication，要等它返回才会处理关闭请求。
         var dispatcher = _dispatcher;
         var thread = _thread;
         if (thread is null)
@@ -66,7 +71,7 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
 
         if (dispatcher is null)
         {
-            if (!thread.Join(TimeSpan.FromSeconds(10)))
+            if (!thread.Join(AsyncTestWaitSupport.DefaultTimeout))
             {
                 throw new TimeoutException("WPF 运行时测试的共享 Dispatcher 线程未能退出。");
             }
@@ -93,7 +98,7 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
                                 }
                             },
                             DispatcherPriority.Send);
-                        await shutdown.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                        await shutdown.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
                     }
                     catch (Exception ex)
                     {
@@ -108,7 +113,7 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
                 }
             }
 
-            if (!thread.Join(TimeSpan.FromSeconds(10)))
+            if (!thread.Join(AsyncTestWaitSupport.DefaultTimeout))
             {
                 throw new TimeoutException("WPF 运行时测试的共享 Dispatcher 线程未能退出。");
             }
@@ -135,7 +140,7 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
         var dispatcher = _dispatcher ?? throw new InvalidOperationException("WPF 测试 Dispatcher 尚未初始化。");
         var application = _application ?? throw new InvalidOperationException("WPF 测试 Application 尚未初始化。");
         var operation = dispatcher.InvokeAsync(() => test(application), DispatcherPriority.Normal);
-        await operation.Task.Unwrap().WaitAsync(TimeSpan.FromSeconds(30));
+        await operation.Task.Unwrap().WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
     }
 
     private void RunDispatcher()
