@@ -282,7 +282,12 @@ export function ReturnScreen({
       </View> : null}
 
       <View style={styles.workspace}>
-        <View style={styles.mainColumn}>
+        <View
+          style={[
+            styles.mainColumn,
+            confirmationOpen && styles.mainColumnConfirm,
+          ]}
+        >
           {!confirmationOpen && !receiptLoaded ? (
             <PosKeyboardAwareScrollView
               style={styles.editorScroll}
@@ -520,6 +525,12 @@ export function ReturnScreen({
         </View>
 
         {confirmationOpen ? <View style={styles.summaryColumn}>
+          {/* 小屏手持上汇总内容可滚动，确认按钮固定在面板底部，避免挤压商品列表或遮挡说明。 */}
+          <ScrollView
+            contentContainerStyle={styles.summaryContent}
+            style={styles.summaryScroll}
+            testID="return-summary-scroll"
+          >
           <Text style={styles.sectionTitle}>{t("capacity.title")}</Text>
           {state.mode === "no-receipt" ? (
             <Text style={styles.capacityHint}>{t("capacity.noReceipt")}</Text>
@@ -549,23 +560,27 @@ export function ReturnScreen({
           <Text style={styles.total} testID="return-selected-total">
             {formatAud(state.selectedTotalCents, locale)}
           </Text>
-          <Text style={styles.summaryLabel}>{t("summary.method")}</Text>
-          <View style={styles.methodGrid}>
-            {methods.map((method) => (
-              <MethodButton
-                active={state.preferredMethod === method}
-                key={method}
-                label={t(`method.${method}`)}
-                onPress={() => presenter.selectMethod(method)}
-                testID={`return-method-${method}`}
-              />
-            ))}
-          </View>
           <Text style={styles.rule}>
             {state.mode === "receipt" && state.preferredMethod === null
               ? t("summary.ruleReceiptDefault")
               : t("summary.rule")}
           </Text>
+          </ScrollView>
+          {/* 退款方式是确认前的关键选择，与确认按钮一起固定在面板底部，不随内容滚走。 */}
+          <View style={styles.methodArea}>
+            <Text style={styles.summaryLabel}>{t("summary.method")}</Text>
+            <View style={styles.methodGrid}>
+              {methods.map((method) => (
+                <MethodButton
+                  active={state.preferredMethod === method}
+                  key={method}
+                  label={t(`method.${method}`)}
+                  onPress={() => presenter.selectMethod(method)}
+                  testID={`return-method-${method}`}
+                />
+              ))}
+            </View>
+          </View>
           <View style={styles.confirmArea}>
             <ActionButton
               disabled={!state.canConfirm || state.busy}
@@ -1041,8 +1056,15 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 1,
   },
+  mainColumnConfirm: {
+    // 确认页至少完整露出一行已选商品（行高 104 + 列表间距）。
+    minHeight: 124,
+  },
   summaryColumn: {
     flex: 0,
+    flexShrink: 1,
+    // 汇总面板最多占工作区六成高度，剩余留给已选商品列表。
+    maxHeight: "60%",
     minWidth: 0,
     padding: 16,
     borderColor: posColors.border,
@@ -1332,10 +1354,21 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 14,
   },
+  summaryScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  summaryContent: {
+    paddingBottom: 4,
+  },
+  methodArea: {
+    borderTopColor: posColors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 8,
+    paddingTop: 10,
+  },
   confirmArea: {
-    flex: 1,
-    justifyContent: "flex-end",
-    paddingTop: 18,
+    paddingTop: 12,
   },
   selectionFooter: {
     alignItems: "center",
