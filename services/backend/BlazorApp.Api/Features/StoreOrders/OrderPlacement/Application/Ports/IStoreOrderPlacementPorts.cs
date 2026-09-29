@@ -9,13 +9,16 @@ internal interface IStoreOrderPlacementGateCoordinator
         string storeCode,
         bool bypassPreorderGate,
         string entryPoint,
-        Func<StoreOrderPlacementGateContext, Task<ApiResponse<T>>> command
+        Func<StoreOrderPlacementGateContext, Task<ApiResponse<T>>> command,
+        // 调用方请求令牌：只用于识别客户端中止（此时门禁不 fail-open，取消原样上抛），不传给数据库调用。
+        CancellationToken requestAborted = default
     );
 
     Task<StoreOrderPlacementGateDecision> IsBlockedInsideTransactionAsync(
         StoreOrderPlacementGateContext context,
         string storeCode,
-        string entryPoint
+        string entryPoint,
+        CancellationToken requestAborted = default
     );
 }
 

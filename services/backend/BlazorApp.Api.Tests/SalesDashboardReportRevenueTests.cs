@@ -4036,9 +4036,10 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
             .Setup(service => service.GetExecutiveBranchPerformanceAsync(
                 It.IsAny<DateRangeDto>(),
                 It.IsAny<int?>(),
-                It.IsAny<List<string>?>()
+                It.IsAny<List<string>?>(),
+                It.IsAny<CancellationToken>()
             ))
-            .Callback<DateRangeDto, int?, List<string>?>((_, topN, branchCodes) =>
+            .Callback<DateRangeDto, int?, List<string>?, CancellationToken>((_, topN, branchCodes, _) =>
             {
                 capturedTopN = topN;
                 capturedBranchCodes = branchCodes;
@@ -4079,7 +4080,8 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
             .Setup(service => service.GetExecutiveBranchPerformanceAsync(
                 It.IsAny<DateRangeDto>(),
                 It.IsAny<int?>(),
-                It.IsAny<List<string>?>()
+                It.IsAny<List<string>?>(),
+                It.IsAny<CancellationToken>()
             ))
             .ReturnsAsync(new ExecutiveBranchPerformanceResultDto());
         serviceMock
@@ -4123,7 +4125,7 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
     {
         var serviceMock = new Mock<ISalesDashboardReactService>();
         serviceMock.Setup(service => service.GetExecutiveBranchPerformanceAsync(
-                It.IsAny<DateRangeDto>(), It.IsAny<int?>(), It.IsAny<List<string>?>()))
+                It.IsAny<DateRangeDto>(), It.IsAny<int?>(), It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExecutiveBranchPerformanceResultDto());
         serviceMock.SetupSequence(service => service.GetProductReportStatisticStatusAsync(It.IsAny<DateRangeDto>()))
             .ReturnsAsync(new ProductReportStatisticStatusDto
@@ -4169,9 +4171,10 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
         serviceMock
             .Setup(service => service.GetExecutiveHourlyTrafficAsync(
                 It.IsAny<DateRangeDto>(),
-                It.IsAny<List<string>?>()
+                It.IsAny<List<string>?>(),
+                It.IsAny<CancellationToken>()
             ))
-            .Callback<DateRangeDto, List<string>?>((_, branchCodes) =>
+            .Callback<DateRangeDto, List<string>?, CancellationToken>((_, branchCodes, _) =>
                 capturedBranchCodes = branchCodes
             )
             .ReturnsAsync(new ExecutiveReportResultDto<ExecutiveHourlyTrafficDto>());

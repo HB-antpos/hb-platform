@@ -14,8 +14,12 @@ namespace BlazorApp.Api.Interfaces.React
         /// 分页查询商品列表（支持排序和过滤）
         /// </summary>
         /// <param name="query">查询条件</param>
+        /// <param name="cancellationToken">调用方请求令牌；已取消时取消异常直接上抛、不记错误日志</param>
         /// <returns>商品列表和总数</returns>
-        Task<PagedListReactDto<ProductDto>> GetPagedListAsync(ProductReactFilterDto query);
+        Task<PagedListReactDto<ProductDto>> GetPagedListAsync(
+            ProductReactFilterDto query,
+            CancellationToken cancellationToken = default
+        );
 
         /// <summary>
         /// 根据ProductCode获取商品详情
