@@ -51,6 +51,8 @@ export const P = {
     ManageCategories: 'Warehouse.ManageCategories',
     ManageLocations: 'Warehouse.ManageLocations',
     ManageOrders: 'Warehouse.ManageOrders',
+    // 移动端「订单拣货」专用权限；后端按别名让 Warehouse.Manage / Warehouse.ManageOrders 持有者自动具备，反向不成立。
+    Picking: 'Warehouse.Picking',
   },
   Container: {
     View: 'Container.View',

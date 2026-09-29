@@ -4,6 +4,7 @@ export type AppTabPath =
   | "/(shell)/orders"
   | "/(shell)/cart"
   | "/(shell)/warehouse"
+  | "/(shell)/warehouse-picking"
   | "/(shell)/domestic-purchase"
   | "/(shell)/local-supplier-invoices"
   | "/(shell)/installment-orders"
@@ -39,6 +40,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   orders: "/(shell)/orders",
   cart: "/(shell)/cart",
   warehouse: "/(shell)/warehouse",
+  "warehouse-picking": "/(shell)/warehouse-picking",
   "domestic-purchase": "/(shell)/domestic-purchase",
   "local-supplier-invoices": "/(shell)/local-supplier-invoices",
   "installment-orders": "/(shell)/installment-orders",

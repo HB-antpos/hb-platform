@@ -1,4 +1,5 @@
 import type { StoreOrderDetail, StoreOrderDetailLine } from '../../../types/storeOrder'
+import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../../utils/barcode'
 import { formatStoreOrderVolume } from './volumeFormat'
 
 export interface PickingListExcelTexts {
@@ -59,6 +60,19 @@ export interface PickingListPdfPage {
   footerKind: 'pageNumber'
   showSummary: boolean
 }
+
+export interface PickingOrderBarcode {
+  value: string
+  width: number
+  height: number
+  path: string
+}
+
+/** 配货单订单条码前缀；必须与后端 WarehousePickingRules.OrderQrPrefix、移动端 ORDER_QR_PREFIX 保持一致。 */
+export const PICKING_ORDER_BARCODE_PREFIX = 'HBSO:'
+// 模块宽 1px（打印约 0.26mm）、条高 36px：PDA 能稳定识读，且条码块不高于店名两行时的主信息区。
+export const PICKING_ORDER_BARCODE_MODULE_WIDTH = 1
+export const PICKING_ORDER_BARCODE_HEIGHT = 36
 
 const DEFAULT_PDF_PAGINATION_OPTIONS: Required<PickingListPdfPaginationOptions> = {
   pageHeightMm: 297,
@@ -137,6 +151,34 @@ export function formatInnerPackCount(quantity: unknown, allocQuantity: unknown, 
 export function formatPickingOrderQuantity(quantity: unknown, allocQuantity?: unknown) {
   // 订货数为空或为 0 时，用发货数兜底显示；兜底值也为空时保持空白。
   return resolvePickingDisplayQuantity(quantity, allocQuantity) ?? ''
+}
+
+/**
+ * 配货单订单条码内容：HBSO:订单号，PDA 扫到后按订单号直接进入拣货。
+ * 只认真实订单号；为空或全是空白时返回 null，页面据此不渲染条码（不能拿 orderGUID 兜底，PDA 无法按它解析）。
+ */
+export function buildPickingOrderBarcodeValue(orderNo?: string | null) {
+  const normalizedOrderNo = orderNo?.trim() ?? ''
+  return normalizedOrderNo ? `${PICKING_ORDER_BARCODE_PREFIX}${normalizedOrderNo}` : null
+}
+
+/**
+ * 生成配货单表头订单条码的矢量绘制数据；强制 CODE128，不走 EAN13 自动判断。
+ * 订单号为空或含 CODE128 无法编码的字符时返回 null，表头不渲染条码。
+ */
+export function buildPickingOrderBarcode(orderNo?: string | null): PickingOrderBarcode | null {
+  const value = buildPickingOrderBarcodeValue(orderNo)
+  const modules = value ? encodeBarcodeModules(value, 'CODE128') : null
+  if (!value || !modules) {
+    return null
+  }
+
+  return {
+    value,
+    width: modules.length * PICKING_ORDER_BARCODE_MODULE_WIDTH,
+    height: PICKING_ORDER_BARCODE_HEIGHT,
+    path: buildBarcodeSvgPath(modules, PICKING_ORDER_BARCODE_MODULE_WIDTH, PICKING_ORDER_BARCODE_HEIGHT),
+  }
 }
 
 export function buildPickingListExcelData(

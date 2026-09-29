@@ -31,6 +31,8 @@ internal sealed class SchemaMigrationCoordinator
         "20260923.001-local-supplier-category";
     internal const string CompactBoardMonthlyMigrationId =
         "20260924.001-compact-board-monthly";
+    internal const string WarehouseOrderPickingMigrationId =
+        "20260929.001-warehouse-order-picking";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -97,6 +99,11 @@ internal sealed class SchemaMigrationCoordinator
             CompactBoardMonthlyMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyCompactBoardMonthlyAsync(cancellationToken)
+        ),
+        new(
+            WarehouseOrderPickingMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyWarehouseOrderPickingAsync(cancellationToken)
         ),
     ];
 

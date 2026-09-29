@@ -41,6 +41,7 @@
     "salesOrders": "销售订单",
     "cart": "购物车",
     "warehouse": "仓库",
+    "warehousePicking": "订单拣货",
     "warehouseProductInsights": "仓库商品进销",
     "seasonalProductInsights": "季节商品查询",
     "posOperationLogs": "操作日志",

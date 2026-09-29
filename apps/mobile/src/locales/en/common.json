@@ -41,6 +41,7 @@
     "salesOrders": "Sales Records",
     "cart": "Cart",
     "warehouse": "Warehouse",
+    "warehousePicking": "Order picking",
     "warehouseProductInsights": "Warehouse activity",
     "seasonalProductInsights": "Seasonal products",
     "posOperationLogs": "POS logs",

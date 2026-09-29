@@ -51,16 +51,24 @@ internal sealed class DataSyncWarehouseStore : DataSyncSliceBase
                 await LocalContext.Db.Ado.BeginTranAsync();
                 try
                 {
-                    var existingProductCodes = await LocalContext
+                    var existingRows = await LocalContext
                         .Db.Queryable<WarehouseProduct>()
-                        .Select(item => item.ProductCode)
+                        .Select(item => new WarehouseMinOrderQuantitySyncGuard.LocalMinOrderQuantityRow
+                        {
+                            ProductCode = item.ProductCode,
+                            MinOrderQuantity = item.MinOrderQuantity,
+                        })
                         .ToListAsync();
                     var auditProductCodes = new HashSet<string>(
-                        existingProductCodes
+                        existingRows
+                            .Select(row => row.ProductCode)
                             .Where(code => !string.IsNullOrWhiteSpace(code))
-                            .Select(code => code.Trim()),
+                            .Select(code => code!.Trim()),
                         StringComparer.OrdinalIgnoreCase
                     );
+                    // 清表前记下本地中包数，重建时回填：HQ 的最小订货量只补本地空缺，不覆盖本地维护值。
+                    var localMinOrderQuantities =
+                        WarehouseMinOrderQuantitySyncGuard.BuildLocalValues(existingRows);
                     var beforeSnapshots = await ChangeHistoryService.CaptureSnapshotsAsync(
                         auditProductCodes
                     );
@@ -95,6 +103,10 @@ internal sealed class DataSyncWarehouseStore : DataSyncSliceBase
                         );
 
                         var warehouseProducts = Mapper.Map<List<WarehouseProduct>>(hqStocksBatch);
+                        WarehouseMinOrderQuantitySyncGuard.Apply(
+                            warehouseProducts,
+                            localMinOrderQuantities
+                        );
                         foreach (var product in warehouseProducts)
                         {
                             if (!string.IsNullOrWhiteSpace(product.ProductCode))

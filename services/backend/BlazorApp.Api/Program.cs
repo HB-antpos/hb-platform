@@ -918,6 +918,16 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.SupplyNotices.IWarehouseProductSupplyNoticeService,
     BlazorApp.Api.Features.SupplyNotices.WarehouseProductSupplyNoticeService
 >();
+// 仓库 PDA 订单拣货：拣货记录、一起拣、扫员工码确认拣货人（凭证用应用 DataProtection 密钥环签名）。
+builder.Services.AddSingleton<BlazorApp.Api.Features.WarehousePicking.WarehousePickerTicketProtector>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.WarehousePicking.IWarehousePickerService,
+    BlazorApp.Api.Features.WarehousePicking.WarehousePickerService
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.WarehousePicking.IWarehousePickingService,
+    BlazorApp.Api.Features.WarehousePicking.WarehousePickingService
+>();
 builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.React.IWarehouseRetailPriceChangeService,
     BlazorApp.Api.Services.React.WarehouseRetailPriceChangeService

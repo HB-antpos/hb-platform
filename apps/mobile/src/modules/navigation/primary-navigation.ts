@@ -69,9 +69,10 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
     return "scan";
   }
 
-  // 商品进销、仓库商品进销、销售订单查询与员工操作日志都从工作台进入，是子页，不额外占用一级导航。
+  // 商品进销、仓库商品进销、订单拣货、销售订单查询与员工操作日志都从工作台进入，是子页，不额外占用一级导航。
   if (
     routeName === "product-insights" ||
+    routeName === "warehouse-picking" ||
     routeName === "warehouse-product-insights" ||
     routeName === "sales-orders" ||
     routeName === "pos-operation-logs"
@@ -92,6 +93,16 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
   }
 
   return "workbench";
+}
+
+// 全屏作业页：PDA 小屏上底部留给页面自己的操作栏（如“完成拣货”），不显示全局底栏。
+const FULL_SCREEN_TASK_ROUTE_PREFIXES = ["/warehouse-picking"] as const;
+
+export function shouldHidePrimaryTabBar(pathname: string | null | undefined) {
+  if (!pathname) return false;
+  return FULL_SCREEN_TASK_ROUTE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
 }
 
 export function buildPrimaryNavigation({
