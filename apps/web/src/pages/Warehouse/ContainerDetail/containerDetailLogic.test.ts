@@ -9,6 +9,8 @@ import {
 import {
   calculateContainerDetailTotalAmount,
   markContainerDetailUpdatesSkipRelatedProductSync,
+  isContainerDetailAutoSaveValueUnchanged,
+  formatContainerDetailPreviewFields,
   CONTAINER_DETAIL_ALL_CATEGORY_FILTER_KEY,
   ALL_CONTAINER_DETAIL_EXPORT_COLUMN_KEYS,
   CONTAINER_DETAIL_EXPORT_COLUMNS,
@@ -5799,5 +5801,219 @@ assertEqual(
   true,
   '可点击商品类型 Tag 应有专属样式提示可操作',
 )
+
+// ---- 自动保存：失焦未改值不写库 ----
+assertEqual(isContainerDetailAutoSaveValueUnchanged(0.05, '0.050'), true, '数字与等值文本应视为未改动')
+assertEqual(isContainerDetailAutoSaveValueUnchanged(12, 12), true, '相同数字应视为未改动')
+assertEqual(isContainerDetailAutoSaveValueUnchanged(12, 13), false, '不同数字应视为已改动')
+assertEqual(isContainerDetailAutoSaveValueUnchanged('  备注 ', '备注'), true, '文本应忽略首尾空白')
+assertEqual(isContainerDetailAutoSaveValueUnchanged('备注', '备注2'), false, '不同文本应视为已改动')
+assertEqual(isContainerDetailAutoSaveValueUnchanged(null, ''), true, 'null 与空串应视为同一个空值')
+assertEqual(isContainerDetailAutoSaveValueUnchanged(undefined, '   '), true, 'undefined 与空白串应视为同一个空值')
+assertEqual(isContainerDetailAutoSaveValueUnchanged(null, 0), false, '空值改成 0 应视为已改动')
+assertEqual(isContainerDetailAutoSaveValueUnchanged(1.3, Number.NaN), false, '非法数字不应被当成未改动')
+{
+  const unchangedStart = pageSource.indexOf('const isAutoSaveEditUnchanged = (')
+  const unchangedSource = pageSource.slice(unchangedStart, pageSource.indexOf('const queuePendingDetailUpdates', unchangedStart))
+  assertEqual(
+    unchangedStart >= 0 &&
+      unchangedSource.includes('consumeAutoSaveEditBaseline(row, field)') &&
+      unchangedSource.includes('if (getAutoSaveFailure(row, field)) return false') &&
+      unchangedSource.includes('baseline.hasBaseline && isContainerDetailAutoSaveValueUnchanged(baseline.value, nextValue)'),
+    true,
+    '失焦比较应消费聚焦基线；无基线或上次保存失败时照常入队',
+  )
+}
+assertEqual(
+  ['单件装箱数', '单件体积', '中包数'].every((field) =>
+    pageSource.includes(`if (isAutoSaveEditUnchanged(row, '${field}', Number(event.target.value))) return`)) &&
+    pageSource.includes("if (isAutoSaveEditUnchanged(row, '调整浮率', value)) return") &&
+    pageSource.includes("onFocus={() => captureAutoSaveEditBaseline(row, '备注', row.备注 ?? '')}") &&
+    pageSource.includes("if (isAutoSaveEditUnchanged(row, '备注', event.target.value)) return") &&
+    pageSource.includes('isContainerDetailAutoSaveValueUnchanged(getContainerDetailProductName(row), productName)') &&
+    !pageSource.includes('clearAutoSaveEditBaseline'),
+  true,
+  '单件装箱数、单件体积、中包数、调整浮率、备注、商品名称失焦时值未改动都不应入自动保存队列',
+)
+
+// ---- 批量预览：字段名显示为页面列名 ----
+{
+  const translate = (_key: string, fallback: string) => fallback
+  assertEqual(
+    formatContainerDetailPreviewFields(['ProductCategoryGUID'], translate),
+    '分类',
+    '批量分类预览应显示“分类”而不是 ProductCategoryGUID',
+  )
+  assertEqual(
+    formatContainerDetailPreviewFields(['IsActive'], translate),
+    '仓库状态',
+    '批量上下架预览应显示“仓库状态”而不是 IsActive',
+  )
+  assertEqual(
+    formatContainerDetailPreviewFields(['进口价格', '贴牌价格', 'LastImportPrice', 'LastOEMPrice'], translate),
+    '进口价格、零售价、上次进口价、上次零售价',
+    '价格类预览应把“贴牌价格”和 Last*Price 换成页面列名',
+  )
+  assertEqual(
+    formatContainerDetailPreviewFields(['调整浮率', '运输成本', '进口价格', '进口价格'], translate),
+    '调整浮率、运输成本、进口价格',
+    '重复字段应去重，已是中文的字段原样保留',
+  )
+  assertEqual(formatContainerDetailPreviewFields([], translate), '--', '无字段时显示 --')
+  assertEqual(formatContainerDetailPreviewFields(undefined, translate), '--', '缺少字段摘要时显示 --')
+  assertEqual(
+    formatContainerDetailPreviewFields(['UnknownField'], translate),
+    'UnknownField',
+    '未登记的字段原样显示，便于发现遗漏',
+  )
+  const keys: string[] = []
+  formatContainerDetailPreviewFields(['ProductCategoryGUID', 'IsActive', '贴牌价格'], (key, fallback) => {
+    keys.push(key)
+    return fallback
+  })
+  assertDeepEqual(
+    keys,
+    ['containers.fields.category', 'containers.fields.warehouseStatus', 'containers.fields.oemPrice'],
+    '字段名应复用页面现有列名文案键',
+  )
+  const zhPageMessages = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailMessages.zh.json', 'utf8'))
+  const enPageMessages = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailMessages.en.json', 'utf8'))
+  assertEqual(
+    zhPageMessages.containers.fields.lastImportPriceSnapshot === '上次进口价' &&
+      zhPageMessages.containers.fields.lastOemPriceSnapshot === '上次零售价' &&
+      Boolean(enPageMessages.containers.fields.lastImportPriceSnapshot) &&
+      Boolean(enPageMessages.containers.fields.lastOemPriceSnapshot),
+    true,
+    '上次进口价/上次零售价文案应在本页中英文文案中登记',
+  )
+  assertEqual(
+    (pageSource.match(/formatContainerDetailPreviewFields\(preview\.fieldSummary, \(key, fallback\) => t\(key, fallback\)\)/g) ?? []).length === 2 &&
+      !pageSource.includes("preview.fieldSummary.join('、')"),
+    true,
+    '批量预览确认与预览过期提示都应使用字段名映射',
+  )
+}
+
+// ---- 删除明细后提示整柜重算成本 ----
+{
+  const deleteStart = pageSource.indexOf('const deleteSelected = () => {')
+  const deleteSource = pageSource.slice(deleteStart, pageSource.indexOf('const confirmExportAllRows', deleteStart))
+  const recalcStart = pageSource.indexOf('const recalculateCostsAfterDetailDelete = async (remainingCount: number) => {')
+  const recalcSource = pageSource.slice(recalcStart, deleteStart)
+  assertEqual(
+    deleteSource.indexOf('await deleteContainerDetailsByScope(containerGuid, scope, previewToken)') >= 0 &&
+      deleteSource.indexOf('void recalculateCostsAfterDetailDelete(detailItemsTotal - hguids.length)') >
+        deleteSource.indexOf('await deleteContainerDetailsByScope(containerGuid, scope, previewToken)'),
+    true,
+    '删除明细成功后应提示按剩余明细重算成本',
+  )
+  assertEqual(
+    recalcStart >= 0 &&
+      recalcStart < deleteStart &&
+      recalcSource.includes('if (remainingCount <= 0) return') &&
+      recalcSource.includes('if (getContainerDetailCostMissingFields(container).length) return') &&
+      recalcSource.includes('const scope = buildWholeContainerDetailBatchScope()') &&
+      recalcSource.includes("confirmPreviewedContainerDetailAction('recalculate-costs', scope, {}, actionName, false, note)") &&
+      recalcSource.includes('recalculateContainerCostsByScope(containerGuid, scope, previewToken)') &&
+      recalcSource.includes('isContainerDetailActionPreviewExpired(error)') &&
+      recalcSource.indexOf('await loadData()') > recalcSource.indexOf('recalculateContainerCostsByScope(') &&
+      recalcSource.includes('detailsDeletedCostsRecalculateCancelled') &&
+      recalcSource.includes('detailsDeletedCostsRecalculateFailed'),
+    true,
+    '删除后重算应复用整柜重算预览确认，令牌过期需再次确认，成功后刷新，取消与失败分别提示',
+  )
+  assertEqual(
+    pageSource.includes('    note?: string,\n  ) => {\n    const preview = await previewContainerDetailAction(') &&
+      pageSource.includes('content: note ? ('),
+    true,
+    '批量预览确认应支持在影响摘要前显示触发原因',
+  )
+}
+
+// ---- 本页新增文案懒注册 ----
+{
+  const flattenKeys = (value: unknown, prefix = ''): string[] => (
+    value && typeof value === 'object'
+      ? Object.entries(value as Record<string, unknown>).flatMap(([key, child]) => flattenKeys(child, prefix ? `${prefix}.${key}` : key))
+      : [prefix]
+  )
+  const zhPageMessages = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailMessages.zh.json', 'utf8'))
+  const enPageMessages = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailMessages.en.json', 'utf8'))
+  const zhKeys = flattenKeys(zhPageMessages).sort()
+  assertDeepEqual(zhKeys, flattenKeys(enPageMessages).sort(), '本页中英文文案的键应一一对应')
+  const zhLocaleSource = readFileSync('src/i18n/locales/zh.json', 'utf8')
+  assertEqual(
+    pageSource.includes('registerPageMessages({ zh: containerDetailMessagesZh, en: containerDetailMessagesEn })') &&
+      zhKeys.every((key) => pageSource.includes(`'${key}'`) || containerDetailLogicSource.includes(`'${key}'`)) &&
+      zhKeys.every((key) => !zhLocaleSource.includes(`"${key.split('.').pop()}"`)),
+    true,
+    '本页新增文案应在页面顶层懒注册并被代码引用，不应进入首屏语言包',
+  )
+}
+
+// ---- 完成通知与翻译 HQ 数据确认 ----
+assertEqual(
+  pageSource.includes('const CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS = 10') &&
+    (pageSource.match(/duration: CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS/g) ?? []).length === 3,
+  true,
+  '发送到 HQ、创建新商品、提交货柜完全成功的通知应自动关闭',
+)
+{
+  const notifyStart = pageSource.indexOf('const notifyPushToHqJobFinished = (')
+  const notifySource = pageSource.slice(notifyStart, pageSource.indexOf('\n  }\n', notifyStart))
+  assertEqual(
+    (notifySource.match(/duration: 0/g) ?? []).length === 2,
+    true,
+    '发送到 HQ 失败与部分成功的通知仍需手动关闭',
+  )
+}
+{
+  const translateStart = pageSource.indexOf('const translateHqData = async () => {')
+  const translateSource = pageSource.slice(translateStart, pageSource.indexOf('translateHqProductNamesByContainerNumber(containerNumber)', translateStart))
+  assertEqual(
+    translateStart >= 0 &&
+      translateSource.includes('Modal.confirm({') &&
+      translateSource.includes("'containers.modals.translateHqDataContent'") &&
+      translateSource.indexOf('if (!confirmed) return') < translateSource.indexOf('drainAutoSavesBeforeAction()') &&
+      translateSource.indexOf('if (!confirmed) return') < translateSource.indexOf('setHqTranslating(true)'),
+    true,
+    '翻译 HQ 数据会直接写 HQ 商品字典，执行前应先确认',
+  )
+}
+
+// ---- 分页编号、只读零售价列标题、标签统计未加载 ----
+assertEqual(
+  pageSource.includes("const detailRowNumberOffset = detailLoadMode === 'paged' ? (detailPageNumber - 1) * detailPageSize : 0") &&
+    pageSource.includes('renderNumericCell(detailRowNumberOffset + index + 1)') &&
+    !pageSource.includes('renderNumericCell(index + 1)'),
+  true,
+  '分页模式的编号应接续前页，全量模式从 1 开始',
+)
+assertEqual(
+  pageSource.slice(pageSource.indexOf('const readonlyOemPriceColumn'), pageSource.indexOf('const baseColumns'))
+    .includes("title: renderCompactHeader(t('containers.actions.showReadonlyOemPrice', '只读零售价'))"),
+  true,
+  '只读零售价列标题应与开关同名，不能与可编辑的零售价列重名',
+)
+assertEqual(
+  pageSource.includes('const [remoteTagStats, setRemoteTagStats] = useState<ContainerDetailTagStats | null>(null)') &&
+    pageSource.includes('setRemoteTagStats(null)') &&
+    tagFiltersSource.includes('tagStats: ContainerDetailTagStats | null') &&
+    tagFiltersSource.includes("{tagStats ? tagStats[option.value] : '--'}"),
+  true,
+  '服务端标签统计未返回或加载失败时应显示 --，不能显示 0',
+)
+{
+  const statsStart = pageSource.indexOf('const schedulePagedDetailStats = (')
+  const statsSource = pageSource.slice(statsStart, pageSource.indexOf('const prepareDetailLoad', statsStart))
+  const catchSource = statsSource.slice(statsSource.indexOf('.catch((error) => {'))
+  assertEqual(
+    catchSource.includes('setRemoteTagStats(null)') &&
+      catchSource.includes('detailStatsRequestIdRef.current === requestId') &&
+      catchSource.includes('pagedDetailStatsKeyRef.current === statsKey'),
+    true,
+    '统计请求失败时只清空当前筛选范围的统计，过期请求不影响新结果',
+  )
+}
 
 console.log('containerDetailLogic.test: ok')

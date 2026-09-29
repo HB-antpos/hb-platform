@@ -176,9 +176,11 @@ public sealed class WarehouseProductBatchUpdateJobService
             GenerateImageUrls = request.GenerateImageUrls,
             ImageBaseUrl = request.ImageBaseUrl,
             SyncImageToHq = request.SyncImageToHq,
+            SupplyNotice = request.SupplyNotice,
         };
         WarehouseProductBatchUpdateResultDto result;
-        if (options.GenerateImageUrls)
+        // 带供货说明时必须走带选项的重载，旧重载不会把说明传到写入器。
+        if (options.GenerateImageUrls || options.SupplyNotice != null)
         {
             result = await localService.BatchUpdateAsync(request.Items, updatedBy, options);
         }
@@ -456,9 +458,33 @@ public sealed class WarehouseProductBatchUpdateJobService
             + $"|store={FormatNullable(request.SyncStorePurchasePrice)}"
             + $"|image={request.GenerateImageUrls}"
             + $"|base={request.ImageBaseUrl}"
-            + $"|hq={request.SyncImageToHq}";
+            + $"|hq={request.SyncImageToHq}"
+            + $"|notice={BuildSupplyNoticeOperationPart(request.SupplyNotice)}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return $"warehouse-product-batch-update:{Convert.ToHexString(hash).ToLowerInvariant()}";
+    }
+
+    /// <summary>
+    /// 供货说明纳入去重指纹：仅说明不同的两次提交不能被合并成同一个任务，否则后一次的说明会被静默丢弃。
+    /// </summary>
+    private static string BuildSupplyNoticeOperationPart(
+        WarehouseProductSupplyNoticeInputDto? notice
+    )
+    {
+        if (notice == null)
+        {
+            return "~";
+        }
+
+        return string.Join(
+            '\u001F',
+            NormalizeKey(notice.SupplyPlan),
+            NormalizeKey(notice.ExpectedPrecision),
+            notice.ExpectedFrom?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "~",
+            notice.ExpectedTo?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "~",
+            NormalizeKey(notice.StoreFacingNote),
+            NormalizeKey(notice.InternalNote)
+        );
     }
 
     private static string BuildItemOperationPart(UpdateItemDto item)
@@ -518,7 +544,26 @@ public sealed class WarehouseProductBatchUpdateJobService
             GenerateImageUrls = request.GenerateImageUrls,
             ImageBaseUrl = request.ImageBaseUrl,
             SyncImageToHq = request.SyncImageToHq,
+            SupplyNotice = CloneSupplyNotice(request.SupplyNotice),
         };
+    }
+
+    private static WarehouseProductSupplyNoticeInputDto? CloneSupplyNotice(
+        WarehouseProductSupplyNoticeInputDto? notice
+    )
+    {
+        // 任务快照与调用方请求不共享可变对象，避免排队期间被外部改写。
+        return notice == null
+            ? null
+            : new WarehouseProductSupplyNoticeInputDto
+            {
+                SupplyPlan = notice.SupplyPlan,
+                ExpectedFrom = notice.ExpectedFrom,
+                ExpectedTo = notice.ExpectedTo,
+                ExpectedPrecision = notice.ExpectedPrecision,
+                StoreFacingNote = notice.StoreFacingNote,
+                InternalNote = notice.InternalNote,
+            };
     }
 
     private static UpdateItemDto CloneItem(UpdateItemDto item)

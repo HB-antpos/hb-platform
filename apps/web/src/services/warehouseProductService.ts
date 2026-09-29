@@ -294,6 +294,8 @@ export interface UpdateWarehouseProductFullPayload {
   oemPrice?: number
   importPrice?: number
   isActive: boolean
+  /** 从上架改为下架时随请求登记的供货说明；上架或保持下架时不传（已有说明保留）。 */
+  supplyNotice?: SupplyNoticeInput
   productImage?: string
   productType?: 0 | 1 | 2
   middlePackQuantity?: number
@@ -404,6 +406,8 @@ export interface WarehouseProductBatchUpdateOptions {
   imageBaseUrl?: string
   /** 开启后把 H 商品图片地址同步到 HQ 数据库。 */
   syncImageToHq?: boolean
+  /** 批量把「是否上架」设为下架时随请求登记的供货说明；只作用于显式设为下架的行。 */
+  supplyNotice?: SupplyNoticeInput
 }
 
 export interface WarehouseProductHqImageSyncItem {
@@ -915,6 +919,7 @@ export async function batchUpdateWarehouseProducts(
       ...(options.generateImageUrls === undefined ? {} : { GenerateImageUrls: options.generateImageUrls }),
       ...(options.imageBaseUrl === undefined ? {} : { ImageBaseUrl: options.imageBaseUrl }),
       ...(options.syncImageToHq === undefined ? {} : { SyncImageToHq: options.syncImageToHq }),
+      ...(options.supplyNotice === undefined ? {} : { SupplyNotice: options.supplyNotice }),
     },
   })
   const raw = response as { success?: boolean; isSuccess?: boolean; message?: string } | undefined
@@ -960,6 +965,7 @@ export async function createWarehouseProductBatchUpdateJob(
       ...(options.generateImageUrls === undefined ? {} : { GenerateImageUrls: options.generateImageUrls }),
       ...(options.imageBaseUrl === undefined ? {} : { ImageBaseUrl: options.imageBaseUrl }),
       ...(options.syncImageToHq === undefined ? {} : { SyncImageToHq: options.syncImageToHq }),
+      ...(options.supplyNotice === undefined ? {} : { SupplyNotice: options.supplyNotice }),
     },
   )
   ensureApiSuccess(response.success ?? response.isSuccess, response.message, '创建仓库商品批量修改任务失败')
@@ -1128,6 +1134,7 @@ export async function updateWarehouseProductFull(
       OEMPrice: payload.oemPrice,
       ImportPrice: payload.importPrice,
       IsActive: payload.isActive,
+      ...(payload.supplyNotice === undefined ? {} : { SupplyNotice: payload.supplyNotice }),
       ProductImage: payload.productImage,
       ProductType: payload.productType,
       MiddlePackQuantity: payload.middlePackQuantity,
