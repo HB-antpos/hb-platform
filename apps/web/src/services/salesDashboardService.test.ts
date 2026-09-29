@@ -26,7 +26,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       JSON.stringify({
         success: true,
         data: {
-          Stores: [{ BranchCode: 'S1', BranchName: 'Store 1', TotalAmount: 100, TotalQuantity: 10, DomesticSupplierAmount: 70, ProductCount: 3 }],
+          Stores: [{ BranchCode: 'S1', BranchName: 'Store 1', TotalAmount: 100, TotalQuantity: 10, DomesticSupplierAmount: 70, BranchTotalAmount: 400, ProductCount: 3 }],
           ChinaSuppliers: [{ SupplierCode: 'SUP-CN', SupplierName: '国内供应商', TotalAmount: 70, TotalQuantity: 7, ProductCount: 2 }],
           ProductDetails: {
             Data: [{ ProductCode: 'P001', ItemNumber: 'HB001', ProductName: '国内商品', ChinaSupplierCode: 'SUP-CN', TotalQuantity: 7, UnitPrice: 10, TotalAmount: 70 }],
@@ -153,6 +153,7 @@ try {
   assertEqual(capturedInit?.method, 'GET', '销售看板接口应使用 GET 请求')
   assertEqual(capturedInit?.signal, controller.signal, '销售看板接口应继续透传 AbortSignal')
   assertEqual(board.stores[0]?.domesticSupplierAmount, 70, '销售看板应归一化分店国内供应商金额')
+  assertEqual(board.stores[0]?.branchTotalAmount, 400, '销售看板应归一化分店总营业额（占比分母）')
   assertEqual(board.chinaSuppliers[0]?.supplierCode, 'SUP-CN', '销售看板应归一化国内供应商')
   assertEqual(board.productDetails.data[0]?.itemNumber, 'HB001', '销售看板应归一化商品货号')
   assertEqual(board.productDetails.data[0]?.unitPrice, 10, '销售看板应归一化商品单价')

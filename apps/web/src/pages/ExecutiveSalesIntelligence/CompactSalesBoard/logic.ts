@@ -137,3 +137,42 @@ export function shouldHandleEscape(target: EventTarget | null): boolean {
   const element = target as Element
   return !element.closest('input, textarea, select, [contenteditable="true"], .ant-picker-dropdown, .ant-select-dropdown, .ant-modal')
 }
+
+/**
+ * 导出表头的筛选说明，顺序与三栏一致（供应商 → 分店），再附搜索词。
+ * 商品栏不被自身的选中商品收窄，所以选中的商品不写进说明。
+ */
+export function describeExportFilters(state: Pick<BoardFilterState, 'supplier' | 'branch' | 'keyword'>): string {
+  const labelOf = (selection: BoardSelection) => selection.label && selection.label !== selection.code
+    ? `${selection.label}（${selection.code}）`
+    : selection.code
+  const parts: string[] = []
+  if (state.supplier) parts.push(`国内供应商 ${labelOf(state.supplier)}`)
+  if (state.branch) parts.push(`分店 ${labelOf(state.branch)}`)
+  const keyword = state.keyword.trim()
+  if (keyword) parts.push(`搜索「${keyword}」`)
+  return parts.length > 0 ? parts.join(' · ') : '全部国内供应商 · 全部分店'
+}
+
+type FlagStorage = Pick<Storage, 'getItem' | 'setItem'>
+
+function defaultFlagStorage(): FlagStorage | null {
+  return typeof window === 'undefined' ? null : window.localStorage
+}
+
+/** 每人记住的界面偏好（如底部统计展开）；隐私模式、禁用存储时读写会抛错，一律按默认值处理。 */
+export function readStoredFlag(key: string, storage: () => FlagStorage | null = defaultFlagStorage): boolean {
+  try {
+    return storage()?.getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function writeStoredFlag(key: string, value: boolean, storage: () => FlagStorage | null = defaultFlagStorage): void {
+  try {
+    storage()?.setItem(key, value ? '1' : '0')
+  } catch {
+    // 存储不可用时只是不记住偏好，不影响看板使用。
+  }
+}

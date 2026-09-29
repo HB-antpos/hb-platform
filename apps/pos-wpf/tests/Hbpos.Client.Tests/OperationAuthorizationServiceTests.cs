@@ -91,15 +91,35 @@ public sealed class OperationAuthorizationServiceTests
             CreateCashierContext(requester),
             new RecordingAuditLogger(),
             new StubTimeProvider(Now));
-        var authorization = service.AuthorizeAsync(
-            Permissions.PosTerminal.Sales.ChangePrice,
-            "Pos",
-            "change-price",
-            CreateState(requester));
 
-        Assert.True(service.ProcessScannerBarcode("supervisor"));
-        Assert.True(service.ProcessScannerBarcode("supervisor"));
+        // 生产中授权运行在单线程的 WPF Dispatcher 上：成功后的收尾（清空待授权状态）被投递回 Dispatcher，
+        // 同一轮同步处理里的重复扫码一定先于收尾。xunit 的调度上下文是多线程的，空闲线程可能抢先跑完收尾，
+        // 使第二次扫码看不到待授权状态而返回 false；这里用由测试放行的上下文还原 Dispatcher 的先后次序。
+        var dispatcher = new DeferredSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(dispatcher);
+        Task<OperationAuthorizationScope?> authorization;
+        try
+        {
+            authorization = service.AuthorizeAsync(
+                Permissions.PosTerminal.Sales.ChangePrice,
+                "Pos",
+                "change-price",
+                CreateState(requester));
 
+            Assert.True(service.ProcessScannerBarcode("supervisor"));
+            Assert.True(service.ProcessScannerBarcode("supervisor"));
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        await WaitUntilAsync(() =>
+        {
+            dispatcher.RunPending();
+            return authorization.IsCompleted;
+        });
         using var scope = await authorization;
         Assert.NotNull(scope);
         Assert.Equal(1, login.CallCount);
@@ -551,6 +571,35 @@ public sealed class OperationAuthorizationServiceTests
             return Task.FromResult(_results.Count == 0
                 ? CashierLoginResult.Fail("not configured")
                 : _results.Dequeue());
+        }
+    }
+
+    /// <summary>
+    /// 模拟单线程 Dispatcher：投递的回调先排队，只有测试调用 <see cref="RunPending"/> 时才在当前线程执行。
+    /// </summary>
+    private sealed class DeferredSynchronizationContext : SynchronizationContext
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _queue = new();
+
+        public override void Post(SendOrPostCallback d, object? state) => _queue.Enqueue((d, state));
+
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+
+        public void RunPending()
+        {
+            var previous = Current;
+            SetSynchronizationContext(this);
+            try
+            {
+                while (_queue.TryDequeue(out var item))
+                {
+                    item.Callback(item.State);
+                }
+            }
+            finally
+            {
+                SetSynchronizationContext(previous);
+            }
         }
     }
 

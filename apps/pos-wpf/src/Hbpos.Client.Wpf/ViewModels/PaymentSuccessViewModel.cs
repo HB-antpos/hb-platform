@@ -109,6 +109,9 @@ public sealed partial class PaymentSuccessViewModel : ObservableObject
 
     public string NewTransactionLabel => "success.newTransaction";
 
+    // 中文注释：金额固定按 $ 显示，不随界面语言变成其它货币符号。
+    public string TotalAmountPaidDisplay => FormatMoney(TotalAmountPaid);
+
     public string TenderedAmountDisplay => TenderedAmount is { } amount ? FormatMoney(amount) : "-";
 
     public string ChangeAmountDisplay => ChangeAmount is { } amount ? FormatMoney(amount) : "-";
@@ -182,6 +185,7 @@ public sealed partial class PaymentSuccessViewModel : ObservableObject
         ReceiptPreviewRows.ReplaceWith(BuildPreviewRows(receipt, settings));
 
         OnPropertyChanged(nameof(TransactionIdDisplay));
+        OnPropertyChanged(nameof(TotalAmountPaidDisplay));
         OnPropertyChanged(nameof(SoldAtDisplay));
         OnPropertyChanged(nameof(Subtotal));
         OnPropertyChanged(nameof(DiscountTotal));

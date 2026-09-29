@@ -102,6 +102,26 @@ namespace BlazorApp.Shared.DTOs
         public string? WarehouseCategoryGUID { get; set; }
 
         /// <summary>
+        /// 供应商分类GUID：200（Hot Bargain）为仓库分类GUID，其他供应商为网站采集的供应商分类GUID
+        /// </summary>
+        public string? SupplierCategoryGUID { get; set; }
+
+        /// <summary>
+        /// 供应商分类名称（叶子）
+        /// </summary>
+        public string? SupplierCategoryName { get; set; }
+
+        /// <summary>
+        /// 供应商分类完整路径 "A &gt; B &gt; C"
+        /// </summary>
+        public string? SupplierCategoryPath { get; set; }
+
+        /// <summary>
+        /// 供应商分类来源：website（网站自动归类）、manual（人工指定）、warehouse（随仓库分类）
+        /// </summary>
+        public string? SupplierCategorySource { get; set; }
+
+        /// <summary>
         /// 已存在的分店价格记录数量
         /// </summary>
         public int StoreRecordCount { get; set; }
@@ -304,6 +324,17 @@ namespace BlazorApp.Shared.DTOs
         /// 仓库类别GUID
         /// </summary>
         public string? WarehouseCategoryGUID { get; set; }
+
+        /// <summary>
+        /// 人工指定供应商分类GUID（锁定，不被网站自动归类覆盖）；为空表示不修改
+        /// </summary>
+        [StringLength(50, ErrorMessage = "供应商分类GUID不能超过50个字符")]
+        public string? SupplierCategoryGUID { get; set; }
+
+        /// <summary>
+        /// 为 true 时清除人工指定并按网站采集重新自动归类
+        /// </summary>
+        public bool ClearSupplierCategory { get; set; }
     }
 
     /// <summary>

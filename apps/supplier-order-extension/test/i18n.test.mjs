@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeLocale, resolveInitialLocale, t } from '../src/lib/i18n.js';
+import {
+  MESSAGES,
+  categoryErrorMessageKey,
+  normalizeLocale,
+  resolveInitialLocale,
+  t,
+} from '../src/lib/i18n.js';
+import { CRAWL_ERROR_CODES } from '../src/lib/category-crawl.js';
 
 test('normalizeLocale', () => {
   assert.equal(normalizeLocale('en'), 'en');
@@ -92,6 +99,34 @@ test('TOP 30 分页、旧服务提示与重试提供完整中英文文案', () =
   assert.match(t('en', 'rankingPageSummary'), /\{total\}/);
   assert.match(t('zh', 'salesRankBand'), /\{days\}.*\{band\}/);
   assert.match(t('en', 'salesRankBand'), /\{days\}.*\{band\}/);
+});
+
+test('中英文文案键集合完全一致', () => {
+  assert.deepEqual(Object.keys(MESSAGES.en).sort(), Object.keys(MESSAGES.zh).sort());
+});
+
+test('供应商分类采集区提供完整中英文文案', () => {
+  const keys = Object.keys(MESSAGES.zh).filter((key) => key.startsWith('category'));
+  assert.ok(keys.length >= 22, `分类采集文案数量不足：${keys.length}`);
+  for (const key of keys) {
+    assert.equal(typeof t('en', key), 'string', `en.${key}`);
+    assert.notEqual(t('en', key), key, `en.${key}`);
+    assert.notEqual(t('zh', key), t('en', key), `${key} 中英文不应相同`);
+  }
+  assert.match(t('zh', 'categoryProgress'), /\{done\}.*\{total\}.*\{failed\}/);
+  assert.match(t('en', 'categoryProgress'), /\{done\}.*\{total\}.*\{failed\}/);
+  assert.match(t('zh', 'categoryLastRun'), /\{time\}.*\{status\}/);
+  assert.match(t('en', 'categoryErrorGeneric'), /\{code\}/);
+});
+
+test('侧栏展示的每个分类采集错误码都有专属中英文文案', () => {
+  for (const code of CRAWL_ERROR_CODES) {
+    const key = categoryErrorMessageKey(code);
+    assert.notEqual(key, 'categoryErrorGeneric', `${code} 缺少专属文案`);
+    assert.notEqual(t('zh', key), key, `zh.${key}`);
+    assert.notEqual(t('en', key), key, `en.${key}`);
+  }
+  assert.equal(categoryErrorMessageKey('SOMETHING_NEW'), 'categoryErrorGeneric');
 });
 
 test('供应商折叠控件提供完整中英文文案', () => {

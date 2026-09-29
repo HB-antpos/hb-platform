@@ -53,7 +53,7 @@ HB_IOS_SIMULATOR_ID=<simulator-uuid> ./script/build_and_run.sh --verify
 
 ## Archive、TestFlight 与 App Store Connect
 
-发布目标仅包含 iPhone/iPad App 与 Safari Extension，不得增加或恢复 macOS target。当前开发版本跟随共享扩展 1.4.1；TestFlight 构建号使用独立正整数，正式上传仍需独立发布确认，重传时只递增 Xcode 的 CURRENT_PROJECT_VERSION。
+发布目标仅包含 iPhone/iPad App 与 Safari Extension，不得增加或恢复 macOS target。当前开发版本跟随共享扩展 1.5.0；TestFlight 构建号使用独立正整数，正式上传仍需独立发布确认，重传时只递增 Xcode 的 CURRENT_PROJECT_VERSION。
 
 先运行完整发布前检查并创建 Release Archive：
 

@@ -442,7 +442,7 @@ public sealed class BrowserExtensionProfileCatalogTests
     {
         var result = BrowserExtensionProfileCatalog.BuildProfiles(new BrowserExtensionOptions());
 
-        Assert.Equal("6", result.ConfigVersion);
+        Assert.Equal("7", result.ConfigVersion);
         Assert.Equal(
             new[] { "240", "243", "227", "226", "201", "203", "225", "218", "267", "236", "SP2502280001", "SP0101" },
             result.Profiles.Select(profile => profile.SupplierCode)

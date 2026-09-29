@@ -111,7 +111,8 @@ public interface IAppUpdateInstallerLauncher
 public sealed class AppUpdateInstallerLauncher(
     IProcessLauncher processLauncher,
     IApplicationExitService exitService,
-    IAppUpdateInstallSafetyGuard safetyGuard) : IAppUpdateInstallerLauncher
+    IAppUpdateInstallSafetyGuard safetyGuard,
+    IAppUpdateProgressWindowLauncher? progressWindowLauncher = null) : IAppUpdateInstallerLauncher
 {
     public async Task<ProcessLaunchResult> LaunchAsync(
         string installerPath,
@@ -148,7 +149,9 @@ public sealed class AppUpdateInstallerLauncher(
         }
         else
         {
-            launchResult = await processLauncher.StartAsync(installerPath, configuredArguments);
+            // 中文注释：exe 安装包优先交给独立更新窗口接管并显示进度；窗口不可用时退回直接启动安装器，更新不能因此卡住。
+            launchResult = await TryLaunchProgressWindowAsync(installerPath, configuredArguments, update)
+                ?? await processLauncher.StartAsync(installerPath, configuredArguments);
         }
 
         if (!launchResult.Success)
@@ -159,6 +162,30 @@ public sealed class AppUpdateInstallerLauncher(
         // 中文注释：安装器已交给 Windows 后才退出 WPF，避免启动失败时误关收银端。
         exitService.Exit();
         return launchResult;
+    }
+
+    private async Task<ProcessLaunchResult?> TryLaunchProgressWindowAsync(
+        string installerPath,
+        string installerArguments,
+        AppUpdateCheckResponse update)
+    {
+        if (progressWindowLauncher is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await progressWindowLauncher.TryLaunchAsync(installerPath, installerArguments, update);
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteError(
+                "AppUpdate",
+                $"update progress window failed, falling back to installer error={ex.GetType().Name} message={ex.Message}",
+                exception: ex);
+            return null;
+        }
     }
 
     private static bool TryResolveInstallerType(

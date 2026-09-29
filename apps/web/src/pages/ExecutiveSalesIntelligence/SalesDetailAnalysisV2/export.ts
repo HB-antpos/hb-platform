@@ -8,6 +8,7 @@ export type ExportProgress = (message: string) => void
 type ImageLoader = (url: string, signal: AbortSignal) => Promise<string | null>
 
 const IMAGE_BATCH_SIZE = 12
+const SALES_DETAIL_IMAGE_PROXY = '/api/react/v1/image-proxy/sales-detail'
 const IMAGE_TIMEOUT_MS = 4_000
 
 function checkCancelled(signal: AbortSignal) {
@@ -21,8 +22,8 @@ export function selectCurrentPageExportRows(currentPage: SalesDetailPage, signal
   return currentPage.rows
 }
 
-async function fetchImageBlob(url: string, signal: AbortSignal): Promise<Blob | null> {
-  for (const candidate of getImageDownloadCandidates(url, '/api/react/v1/image-proxy/sales-detail')) {
+async function fetchImageBlob(url: string, signal: AbortSignal, proxyPath: string): Promise<Blob | null> {
+  for (const candidate of getImageDownloadCandidates(url, proxyPath)) {
     checkCancelled(signal)
     const controller = new AbortController()
     const abort = () => controller.abort()
@@ -46,9 +47,12 @@ async function fetchImageBlob(url: string, signal: AbortSignal): Promise<Blob | 
   return null
 }
 
-/** 将原图缩成 Excel 单元格大小，避免大批商品图片撑爆浏览器内存和工作簿。 */
-export async function loadSalesDetailImage(url: string, signal: AbortSignal): Promise<string | null> {
-  const blob = await fetchImageBlob(url, signal)
+/**
+ * 将原图缩成 Excel 单元格大小，避免大批商品图片撑爆浏览器内存和工作簿。
+ * proxyPath 按页面权限选择图片代理路由（销售明细、独立销售看板各有一条），白名单与校验相同。
+ */
+export async function loadProductExportImage(url: string, signal: AbortSignal, proxyPath: string): Promise<string | null> {
+  const blob = await fetchImageBlob(url, signal, proxyPath)
   if (!blob) return null
   checkCancelled(signal)
   let bitmap: ImageBitmap | undefined
@@ -72,6 +76,10 @@ export async function loadSalesDetailImage(url: string, signal: AbortSignal): Pr
   } finally {
     bitmap?.close()
   }
+}
+
+export function loadSalesDetailImage(url: string, signal: AbortSignal): Promise<string | null> {
+  return loadProductExportImage(url, signal, SALES_DETAIL_IMAGE_PROXY)
 }
 
 function columns(compare: boolean, english: boolean): Partial<ExcelJS.Column>[] {

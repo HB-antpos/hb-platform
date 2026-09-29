@@ -173,6 +173,26 @@ public class LocalSupplierInvoiceSalesAnalysisSqlBuilderTests
     }
 
     [Fact]
+    public void BuildPurchaseSalesAnalysis_分类多选生成完整CTE并按当前供应商归属过滤()
+    {
+        var sql = LocalSupplierInvoiceSalesAnalysisSqlBuilder.BuildPurchaseSalesAnalysis(
+            new LocalSupplierPurchaseSalesAnalysisQueryDto
+            {
+                StoreCode = "1001",
+                SupplierCode = "240",
+                SupplierCategoryGuids = new List<string> { "CAT-1", "CAT-2" },
+            },
+            null);
+
+        Assert.Matches(@"WarehouseCategoryScope AS \([\s\S]*?\)\s*,\s*DetailResolved AS", sql.PagedSql);
+        Assert.Contains("assignment.LocalSupplierCode = categoryProduct.LocalSupplierCode", sql.PagedSql);
+        Assert.Contains("assignment.LocalSupplierCode = @SupplierCode", sql.PagedSql);
+        Assert.Contains(sql.Parameters, parameter => parameter.ParameterName == "@SupplierCategoryGuid0" && (string)parameter.Value == "CAT-1");
+        Assert.Contains(sql.Parameters, parameter => parameter.ParameterName == "@SupplierCategoryGuid1" && (string)parameter.Value == "CAT-2");
+        Assert.Contains("WarehouseCategoryScope AS", sql.SummarySql);
+    }
+
+    [Fact]
     public void BuildPurchaseSalesAnalysis_ShouldAggregatePurchasesByDateAndPickLatestTwoRows()
     {
         var sql = LocalSupplierInvoiceSalesAnalysisSqlBuilder.BuildPurchaseSalesAnalysis(
@@ -415,6 +435,38 @@ public class LocalSupplierInvoiceSalesAnalysisSqlBuilderTests
 
         Assert.False(validation.IsValid);
         Assert.Equal("供应商不能为空。", validation.Message);
+    }
+
+    [Fact]
+    public void ValidatePurchaseSalesAnalysisQuery_ShouldRejectMoreThan100SupplierCategories()
+    {
+        var normalized =
+            LocalSupplierInvoiceSalesAnalysisSqlBuilder.NormalizePurchaseSalesAnalysisQuery(
+                new LocalSupplierPurchaseSalesAnalysisQueryDto
+                {
+                    StoreCode = "1001",
+                    SupplierCode = "240",
+                    SupplierCategoryGuids = Enumerable.Range(1, 101)
+                        .Select(index => $"CAT-{index}")
+                        .ToList(),
+                }
+            );
+
+        Assert.Equal(101, normalized.SupplierCategoryGuids?.Count);
+
+        var validation =
+            LocalSupplierInvoiceSalesAnalysisSqlBuilder.ValidatePurchaseSalesAnalysisQuery(
+                normalized
+            );
+
+        Assert.False(validation.IsValid);
+        Assert.Equal("供应商分类最多选择 100 个。", validation.Message);
+        Assert.Throws<ArgumentException>(() =>
+            LocalSupplierInvoiceSalesAnalysisSqlBuilder.BuildPurchaseSalesAnalysis(
+                normalized,
+                null
+            )
+        );
     }
 
     [Fact]

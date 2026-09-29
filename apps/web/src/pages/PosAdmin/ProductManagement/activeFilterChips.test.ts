@@ -12,6 +12,8 @@ import {
 const labels: ToolbarFilterChipLabels = {
   keyword: '关键词',
   supplier: '澳洲供应商',
+  supplierCategory: '供应商分类',
+  supplierCategoryUnassigned: '未归类',
   category: '商品分类',
   warehouseCategory: '仓库分类',
   status: '状态',
@@ -90,6 +92,42 @@ assert.equal(
   '≤ 4',
 )
 assert.deepEqual(buildToolbarFilterChips({ storeRecordCountMode: 'custom' }, lookups, labels), [])
+
+// 供应商分类：排在供应商之后；已加载的树显示名称路径，未加载回退 GUID
+const supplierCategoryLookups = {
+  ...lookups,
+  supplierCategoryPath: (code: string, guid: string) => (code === 'S01' && guid === 'sc-leaf' ? ['文具', '笔'] : undefined),
+}
+assert.deepEqual(
+  buildToolbarFilterChips(
+    { supplierCode: 'S01', supplierCategoryGuid: 'sc-leaf', storeRecordCountMode: 'all' },
+    supplierCategoryLookups,
+    labels,
+  ).map((chip) => [chip.key, chip.label, chip.value]),
+  [
+    ['supplierCode', '澳洲供应商', '悉尼供应商'],
+    ['supplierCategory', '供应商分类', '文具 / 笔'],
+  ],
+)
+assert.equal(
+  buildToolbarFilterChips({ supplierCode: 'S01', supplierCategoryGuid: 'sc-unknown', storeRecordCountMode: 'all' }, lookups, labels)[1]?.value,
+  'sc-unknown',
+)
+// 仅未归类：显示「未归类」，200 下也显示
+assert.deepEqual(
+  buildToolbarFilterChips({ supplierCode: '200', supplierCategoryUnassignedOnly: true, storeRecordCountMode: 'all' }, lookups, labels)
+    .map((chip) => [chip.key, chip.value]),
+  [['supplierCode', '200'], ['supplierCategory', '未归类']],
+)
+// 200 的供应商分类即仓库分类：只出仓库分类标签，不重复出供应商分类标签
+assert.deepEqual(
+  buildToolbarFilterChips(
+    { supplierCode: '200', supplierCategoryGuid: 'w-1', warehouseCategoryGuid: 'w-1', storeRecordCountMode: 'all' },
+    lookups,
+    labels,
+  ).map((chip) => chip.key),
+  ['supplierCode', 'warehouseCategoryGuid'],
+)
 
 // 列头筛选摘要
 const summaryLabels = {

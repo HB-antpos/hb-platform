@@ -31,6 +31,7 @@ const testAllPath = new URL('../test-all.sh', import.meta.url)
 const mobilePackagePath = new URL('../../apps/mobile/package.json', import.meta.url)
 const wpfClientTestsProjectPath = new URL('../../apps/pos-wpf/tests/Hbpos.Client.Tests/Hbpos.Client.Tests.csproj', import.meta.url)
 const xunitRunnerConfigPath = new URL('../../apps/pos-wpf/tests/Hbpos.Client.Tests/xunit.runner.json', import.meta.url)
+const wpfSolutionPath = new URL('../../apps/pos-wpf/hbpos_win.slnx', import.meta.url)
 const transactionHistoryTestsPath = new URL(
   '../../apps/pos-wpf/tests/Hbpos.Client.Tests/TransactionHistoryViewModelTests.cs',
   import.meta.url,
@@ -348,10 +349,12 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
   const wpfProject = readFileSync(wpfClientTestsProjectPath, 'utf8')
   const xunitRunnerConfig = JSON.parse(readFileSync(xunitRunnerConfigPath, 'utf8'))
 
+  // conservative：已启动的用例真正结束后才启动新用例，避免阻塞写法占满 4 个调度线程后续延排队、超时误报。
   assert.deepEqual(xunitRunnerConfig, {
     parallelizeAssembly: true,
     parallelizeTestCollections: true,
     maxParallelThreads: 4,
+    parallelAlgorithm: 'conservative',
   })
   assert.match(wpfProject, /<None Update="xunit\.runner\.json" CopyToOutputDirectory="PreserveNewest" \/>/)
   assert.match(windows, /\$\{\{ matrix\.shard \|\| 'noop' \}\}/)
@@ -364,9 +367,18 @@ test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内�
   assert.match(windowsRunner, /client-s-shared/)
   assert.match(windowsRunner, /client-s-other/)
   assert.match(windowsRunner, /client-t-z/)
-  assert.match(windowsRunner, /FullyQualifiedName~Hbpos\.Client\.Tests\./)
+  assert.match(windowsRunner, /\$clientTestNamespace = 'Hbpos\.Client\.Tests\.'/)
+  assert.match(windowsRunner, /FullyQualifiedName~\$clientTestNamespace/)
   assert.match(windowsRunner, /WPF client tests \(\$Shard\)/)
   assert.match(windowsRunner, /if \(\$Shard -eq 'all' -or \$Shard -eq 'ui'\)/)
+  // ui 分片兼跑 RemoteStatus 测试，并用全量清单确认 client 测试恰好各属一个分片，防止漏片静默跳过。
+  assert.match(windowsRunner, /Hbpos\.RemoteStatus\.Tests\/Hbpos\.RemoteStatus\.Tests\.csproj/)
+  assert.match(windowsRunner, /--list-tests/)
+  assert.match(windowsRunner, /^\s+Assert-ClientShardCoverage\s*$/m)
+  // Windows lane 只构建 slnx，RemoteStatus 必须在其中，否则上面的测试没有产物可跑。
+  const wpfSolution = readFileSync(wpfSolutionPath, 'utf8')
+  assert.match(wpfSolution, /src\/Hbpos\.RemoteStatus\/Hbpos\.RemoteStatus\.csproj/)
+  assert.match(wpfSolution, /tests\/Hbpos\.RemoteStatus\.Tests\/Hbpos\.RemoteStatus\.Tests\.csproj/)
 
   // PR 执行 prebuild 与原生互操作测试；完整 app 冷构建留给 weekly，并继续强制 arm64。
   assert.match(macos, /CI_PROFILE:\s*\$\{\{ needs\.plan\.outputs\.profile \}\}/)

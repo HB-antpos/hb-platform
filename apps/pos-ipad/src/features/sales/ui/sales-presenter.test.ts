@@ -16,6 +16,7 @@ import {
   type SalesCartPort,
   type SalesCashCompletion,
   type SalesFeedbackEvent,
+  type SalesLookupSelection,
   type SalesPresenterDependencies,
   type SalesProductSearchItem,
   type SalesWorkflowPort,
@@ -1444,4 +1445,153 @@ test("transportFailureErrorCode 不把配置/内部/取消错误映射为网络�
     ),
     "network-unavailable",
   );
+});
+
+const CONFLICT_SELECTION: SalesLookupSelection = {
+  selectionId: "lookup-7",
+  lookupCode: "6405090401470",
+  source: "hid",
+  candidates: [
+    {
+      productCode: "P-FLY",
+      itemNumber: "EXT-FLY",
+      barcode: "9300000000017",
+      lookupCode: "6405090401470",
+      displayName: "EXTENSION Fly Swatter",
+      unitPriceCents: 899,
+      discountRate: null,
+      priceSource: 2,
+    },
+    {
+      productCode: "P-FLOWER",
+      itemNumber: "FLW-1",
+      barcode: "6405090401470",
+      lookupCode: "6405090401470",
+      displayName: "flower",
+      unitPriceCents: 299,
+      discountRate: null,
+      priceSource: 0,
+    },
+  ],
+};
+
+function selectionWorkflow(
+  addLookupCandidate: NonNullable<SalesWorkflowPort["addLookupCandidate"]>,
+): Readonly<{
+  workflow: SalesWorkflowPort;
+  publish(selection: SalesLookupSelection): void;
+}> {
+  let listener: ((selection: SalesLookupSelection) => void) | null = null;
+  return {
+    workflow: {
+      ...createWorkflow(async () => ({
+        completed: true,
+        canClearCart: true,
+        orderGuid: "order-selection",
+        cashDueCents: 995,
+        changeCents: 5,
+        postCommit: { drawerDisposition: "queued" },
+      })),
+      subscribeLookupSelection(next) {
+        listener = next;
+        return () => {
+          listener = null;
+        };
+      },
+      addLookupCandidate,
+    },
+    publish(selection) {
+      listener?.(selection);
+    },
+  };
+}
+
+test("一码多商品候选：弹出选择并发出 query-found，选定后按查询码与商品编码加购并定位新行", async () => {
+  const cart = new MemoryCartPort(EMPTY_SALE_CART);
+  const requests: unknown[] = [];
+  let releaseAdd: (() => void) | null = null;
+  const harness = selectionWorkflow(async (input) => {
+    requests.push(input);
+    await new Promise<void>((resolve) => {
+      releaseAdd = resolve;
+    });
+    cart.publish(cartWithLines(["line-flower"]));
+    return "line-flower";
+  });
+  const { presenter } = createPresenter({ cart, workflow: harness.workflow });
+  const feedback: SalesFeedbackEvent[] = [];
+  presenter.subscribeFeedback((event) => feedback.push(event));
+
+  harness.publish(CONFLICT_SELECTION);
+
+  assert.equal(presenter.getState().lookupSelection, CONFLICT_SELECTION);
+  assert.equal(presenter.getState().lookupSelectionPending, false);
+  assert.deepEqual(feedback, [
+    { attemptId: "lookup-7", source: "hid", kind: "query-found" },
+  ]);
+
+  assert.equal(await presenter.chooseLookupCandidate("P-UNKNOWN"), false);
+  assert.equal(presenter.getState().lookupSelection, CONFLICT_SELECTION);
+  const choosing = presenter.chooseLookupCandidate("P-FLOWER");
+
+  // 中文注释：加购（可能含主管授权）完成前弹窗保持打开，重复点选被忽略。
+  assert.equal(presenter.getState().lookupSelection, CONFLICT_SELECTION);
+  assert.equal(presenter.getState().lookupSelectionPending, true);
+  assert.equal(await presenter.chooseLookupCandidate("P-FLY"), false);
+  (releaseAdd as (() => void) | null)?.();
+  assert.equal(await choosing, true);
+
+  assert.deepEqual(requests, [
+    { lookupCode: "6405090401470", productCode: "P-FLOWER", source: "hid" },
+  ]);
+  assert.equal(presenter.getState().lookupSelection, null);
+  assert.equal(presenter.getState().lookupSelectionPending, false);
+  assert.equal(presenter.getState().selectedLineId, "line-flower");
+  assert.equal(presenter.getState().errorCode, null);
+  presenter.destroy();
+});
+
+test("取消、新的扫码与结账准备都关闭候选；非收银态迟到的候选只发失败反馈", async () => {
+  const harness = selectionWorkflow(async () => "unused");
+  const { presenter } = createPresenter({ workflow: harness.workflow });
+  const feedback: SalesFeedbackEvent[] = [];
+  presenter.subscribeFeedback((event) => feedback.push(event));
+
+  harness.publish(CONFLICT_SELECTION);
+  presenter.cancelLookupSelection();
+  assert.equal(presenter.getState().lookupSelection, null);
+
+  harness.publish(CONFLICT_SELECTION);
+  await presenter.addScannedLookupCode("930000000001", "hid");
+  assert.equal(presenter.getState().lookupSelection, null);
+
+  harness.publish(CONFLICT_SELECTION);
+  const preparing = presenter.prepareOnlineCheckout();
+  assert.equal(presenter.getState().phase, "verifying-checkout");
+  assert.equal(presenter.getState().lookupSelection, null);
+
+  feedback.length = 0;
+  harness.publish(CONFLICT_SELECTION);
+  assert.equal(presenter.getState().lookupSelection, null);
+  assert.deepEqual(feedback, [
+    { attemptId: "lookup-7", source: "hid", kind: "failed-blocked" },
+  ]);
+  await preparing;
+  presenter.destroy();
+});
+
+test("候选加购被拒绝时关闭弹窗并显示对应错误", async () => {
+  const harness = selectionWorkflow(async () => {
+    throw Object.assign(new Error("denied"), {
+      code: "SALES_OPERATION_NOT_AUTHORIZED",
+    });
+  });
+  const { presenter } = createPresenter({ workflow: harness.workflow });
+
+  harness.publish(CONFLICT_SELECTION);
+  assert.equal(await presenter.chooseLookupCandidate("P-FLY"), false);
+
+  assert.equal(presenter.getState().lookupSelection, null);
+  assert.equal(presenter.getState().errorCode, "authorization-denied");
+  presenter.destroy();
 });

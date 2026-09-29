@@ -2,12 +2,14 @@
  * 商品管理「已生效筛选条」的纯逻辑：把生效态的顶部筛选与列头筛选转换成可读标签。
  * 不依赖 React 与 i18n，文案由调用方通过 labels 传入，便于单元测试。
  */
+import { HOT_BARGAIN_SUPPLIER_CODE } from '../../../types/localSupplierCategory'
 
 export type StoreRecordCountMode = 'all' | 'hasRecords' | 'noRecords' | 'custom'
 
 export type ToolbarFilterKey =
   | 'keyword'
   | 'supplierCode'
+  | 'supplierCategory'
   | 'categoryGuid'
   | 'warehouseCategoryGuid'
   | 'isActive'
@@ -18,6 +20,9 @@ export type ToolbarFilterKey =
 export interface AppliedToolbarFilters {
   keyword?: string
   supplierCode?: string
+  /** 非 200 供应商的分类；200 的分类由 warehouseCategoryGuid 表达，不重复出标签。 */
+  supplierCategoryGuid?: string
+  supplierCategoryUnassignedOnly?: boolean
   categoryGuid?: string
   warehouseCategoryGuid?: string
   isActive?: boolean
@@ -31,11 +36,15 @@ export interface ToolbarFilterLookups {
   supplierName: (code: string) => string | undefined
   categoryPath: (guid: string) => string[] | undefined
   warehouseCategoryPath: (guid: string) => string[] | undefined
+  /** 已加载的供应商分类树里查名称路径；树未加载时返回 undefined 回退为 GUID。 */
+  supplierCategoryPath?: (supplierCode: string, guid: string) => string[] | undefined
 }
 
 export interface ToolbarFilterChipLabels {
   keyword: string
   supplier: string
+  supplierCategory: string
+  supplierCategoryUnassigned: string
   category: string
   warehouseCategory: string
   status: string
@@ -97,6 +106,18 @@ export function buildToolbarFilterChips(
       key: 'supplierCode',
       label: labels.supplier,
       value: lookups.supplierName(filters.supplierCode) || filters.supplierCode,
+    })
+  }
+  if (filters.supplierCategoryUnassignedOnly) {
+    chips.push({ key: 'supplierCategory', label: labels.supplierCategory, value: labels.supplierCategoryUnassigned })
+  } else if (filters.supplierCategoryGuid && filters.supplierCode !== HOT_BARGAIN_SUPPLIER_CODE) {
+    chips.push({
+      key: 'supplierCategory',
+      label: labels.supplierCategory,
+      value: formatPath(
+        lookups.supplierCategoryPath?.(filters.supplierCode ?? '', filters.supplierCategoryGuid),
+        filters.supplierCategoryGuid,
+      ),
     })
   }
   if (filters.categoryGuid) {

@@ -115,9 +115,19 @@ public sealed class ReceiptReturnsViewModelTests
         {
             NoReceiptLookupHandler = async (_, cancellationToken) =>
             {
-                using var registration = cancellationToken.Register(() => cancellationObserved.TrySetResult());
                 lookupStarted.TrySetResult();
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                // 在取消异常里记录，而不是另注册回调：Cancel() 先执行 Task.Delay 的回调，其续延若被空闲线程
+                // 立刻执行，using 会在观察回调运行前注销它，导致取消已发生却永远观察不到。
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    cancellationObserved.TrySetResult();
+                    throw;
+                }
+
                 return new ReceiptReturnProductLookupResult(null, string.Empty);
             }
         };

@@ -5821,3 +5821,19 @@ body {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* 商品管理「供应商分类」：未归类用禁用色文字，伪叶子「未归类」弱化显示，来源/说明小图标 */
+.pos-products-supplier-category-empty {
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.pos-products-supplier-category-unassigned-option {
+  color: rgba(0, 0, 0, 0.45);
+  font-style: italic;
+}
+
+.pos-products-source-mark {
+  margin-inline-start: 4px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}

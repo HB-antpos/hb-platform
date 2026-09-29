@@ -1,3 +1,5 @@
+import type { SupplierCategorySource, SupplierCategoryUpdatePayload } from './localSupplierCategory'
+
 export interface PosProductDto {
   productCode: string
   barcode: string
@@ -9,6 +11,12 @@ export interface PosProductDto {
   categoryGuid?: string
   categoryName?: string
   warehouseCategoryGuid?: string
+  /** 供应商分类：非 200 来自网站采集或人工指定；200 由服务端用仓库分类填充。 */
+  supplierCategoryGuid?: string
+  supplierCategoryName?: string
+  /** 完整路径，形如 "A > B > C"。 */
+  supplierCategoryPath?: string
+  supplierCategorySource?: SupplierCategorySource
   domesticSupplierCode?: string
   domesticSupplierName?: string
   purchasePrice: number
@@ -51,6 +59,10 @@ export interface PosProductFilterParams {
   supplierCode?: string
   categoryGuid?: string
   warehouseCategoryGuid?: string
+  /** 供应商分类筛选（服务端展开子树）；200 的分类走 warehouseCategoryGuid。 */
+  supplierCategoryGuid?: string
+  /** 只看当前供应商下未归类的商品。 */
+  supplierCategoryUnassignedOnly?: boolean
   isActive?: boolean
   isSet?: boolean
   storeRecordCountMin?: number
@@ -66,7 +78,8 @@ export type PosProductNumberFilterOperator = 'equals' | 'between' | 'gte' | 'lte
 export type PosProductDateFilterOperator = 'equals' | 'between' | 'gte' | 'lte'
 export type PosProductColumnFilters = Record<string, string[]>
 
-export interface BatchUpdatePosProductDto {
+// 供应商分类三态字段（supplierCategoryGUID / clearSupplierCategory）见 SupplierCategoryUpdatePayload。
+export interface BatchUpdatePosProductDto extends SupplierCategoryUpdatePayload {
   productCode: string
   retailPrice?: number
   purchasePrice?: number

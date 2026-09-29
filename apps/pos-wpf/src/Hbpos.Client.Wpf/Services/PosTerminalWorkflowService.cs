@@ -174,8 +174,11 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
                 matchKind = "search-multiple";
             }
 
+            // 码冲突时只列精确命中的商品，口径同 ProcessSearchScanAsync。
             var searchStopwatch = Stopwatch.StartNew();
-            var matches = _priceIndex.Search(session.StoreCode, submittedScanText);
+            var matches = hasDuplicateExactMatch
+                ? exactMatches
+                : _priceIndex.Search(session.StoreCode, submittedScanText);
             searchStopwatch.Stop();
             searchElapsedMs = searchStopwatch.ElapsedMilliseconds;
 
@@ -232,8 +235,12 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         var hasDuplicateExactMatch = exactMatches.Count > 1;
         var matchKind = hasDuplicateExactMatch ? "search-multiple" : "search";
 
+        // 输入的码精确命中多个商品（码冲突）时只列这些商品，与扫码枪口径一致：关键词搜索会把同一商品
+        // 按它自己的货号再列一次，且只取前 20 条，候选多时排在后面的商品选不到。
         var searchStopwatch = Stopwatch.StartNew();
-        var matches = await _priceIndex.SearchAsync(session.StoreCode, submittedScanText, cancellationToken);
+        var matches = hasDuplicateExactMatch
+            ? exactMatches
+            : await _priceIndex.SearchAsync(session.StoreCode, submittedScanText, cancellationToken);
         searchStopwatch.Stop();
         cancellationToken.ThrowIfCancellationRequested();
 

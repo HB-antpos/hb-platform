@@ -205,7 +205,7 @@ public sealed class PerformanceOperationalRunServiceTests : IDisposable
                 await allowFailureRecord.Task;
             }
         );
-        await rolledBackToSavepoint.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await rolledBackToSavepoint.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var second = Task.Run(() =>
             PerformanceOperationalRunWriterService.ProcessOutboxAsync(
                 secondDb,

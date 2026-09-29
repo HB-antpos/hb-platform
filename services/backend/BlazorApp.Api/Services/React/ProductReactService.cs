@@ -8,6 +8,7 @@ using AutoMapper;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -482,6 +483,8 @@ namespace BlazorApp.Api.Services.React
                     );
                 }
 
+                q = await ApplySupplierCategoryFiltersAsync(q, query);
+
                 if (query.ProductType.HasValue)
                 {
                     if (query.ProductType.Value == 0)
@@ -804,6 +807,8 @@ namespace BlazorApp.Api.Services.React
                         StoreRecordCount = p.StoreRecordCount,
                     })
                     .ToListAsync();
+                // 供应商分类只为当前页回填，不参与分页前的计数与排序。
+                await ProductSupplierCategoryProjection.FillAsync(_db, items);
 
                 return new PagedListReactDto<ProductDto>
                 {
@@ -946,6 +951,8 @@ namespace BlazorApp.Api.Services.React
                 }
             }
 
+            await ProductSupplierCategoryProjection.FillAsync(_db, items);
+
             return new PagedListReactDto<ProductDto>
             {
                 Items = items,
@@ -986,6 +993,93 @@ namespace BlazorApp.Api.Services.React
                 "updatedat" => products.OrderBy(p => p.UpdatedAt, direction),
                 _ => products.OrderBy(p => p.UpdatedAt, OrderByType.Desc),
             };
+        }
+
+        /// <summary>
+        /// 供应商分类筛选：200 商品按仓库分类，其他供应商按有效归属（归属登记的供应商须与商品当前供应商一致）。
+        /// 使用 EXISTS 子查询作用在 Product 单表查询上，不改变列表快/慢路径的判定。
+        /// </summary>
+        private async Task<ISugarQueryable<Product>> ApplySupplierCategoryFiltersAsync(
+            ISugarQueryable<Product> q,
+            ProductReactFilterDto query
+        )
+        {
+            var hotBargain = DefaultLocalSupplierCode;
+            var requestedGuids = NormalizeColumnFilterValues(query.SupplierCategoryGUIDs)
+                .Where(guid => !string.IsNullOrWhiteSpace(guid))
+                .Select(guid => guid.Trim())
+                .ToList();
+            if (requestedGuids.Count > 0)
+            {
+                var (supplierGuids, warehouseGuids) = await LocalSupplierCategoryFilter.ExpandAsync(
+                    _db,
+                    requestedGuids
+                );
+                if (supplierGuids.Count == 0 && warehouseGuids.Count == 0)
+                {
+                    // 所选分类均不存在：返回空结果而不是忽略条件。
+                    q = q.Where("1 = 0");
+                }
+                else if (warehouseGuids.Count == 0)
+                {
+                    q = q.Where(p =>
+                        SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
+                            .Where(a =>
+                                a.ProductCode == p.ProductCode
+                                && a.LocalSupplierCode == p.LocalSupplierCode
+                                && supplierGuids.Contains(a.CategoryGUID)
+                            )
+                            .Any()
+                    );
+                }
+                else if (supplierGuids.Count == 0)
+                {
+                    q = q.Where(p =>
+                        (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
+                        && p.WarehouseCategoryGUID != null
+                        && warehouseGuids.Contains(p.WarehouseCategoryGUID)
+                    );
+                }
+                else
+                {
+                    q = q.Where(p =>
+                        SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
+                            .Where(a =>
+                                a.ProductCode == p.ProductCode
+                                && a.LocalSupplierCode == p.LocalSupplierCode
+                                && supplierGuids.Contains(a.CategoryGUID)
+                            )
+                            .Any()
+                        || (
+                            (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
+                            && p.WarehouseCategoryGUID != null
+                            && warehouseGuids.Contains(p.WarehouseCategoryGUID)
+                        )
+                    );
+                }
+            }
+
+            if (query.SupplierCategoryUnassignedOnly == true)
+            {
+                q = q.Where(p =>
+                    (
+                        (p.LocalSupplierCode == hotBargain || p.LocalSupplierCode == null || p.LocalSupplierCode == "")
+                        && (p.WarehouseCategoryGUID == null || p.WarehouseCategoryGUID == "")
+                    )
+                    || (
+                        p.LocalSupplierCode != null
+                        && p.LocalSupplierCode != ""
+                        && p.LocalSupplierCode != hotBargain
+                        && SqlFunc.Subqueryable<LocalSupplierCategoryProductAssignment>()
+                            .Where(a =>
+                                a.ProductCode == p.ProductCode && a.LocalSupplierCode == p.LocalSupplierCode
+                            )
+                            .NotAny()
+                    )
+                );
+            }
+
+            return q;
         }
 
         /// <summary>
@@ -1245,6 +1339,7 @@ namespace BlazorApp.Api.Services.React
                     UpdatedAt = product.UpdatedAt,
                     UpdatedBy = product.UpdatedBy,
                 };
+                await ProductSupplierCategoryProjection.FillAsync(_db, new[] { dto });
 
                 return new ApiResponse<ProductDto> { Success = true, Data = dto };
             }
@@ -1344,6 +1439,21 @@ namespace BlazorApp.Api.Services.React
 
                     if (storePriceList.Count > 0)
                         await _db.Insertable(storePriceList).ExecuteCommandAsync();
+
+                    // 非 200 新商品若其货号已被扩展采集过，立即按网站分类自动归类。
+                    await new LocalSupplierCategoryAssignmentService(_db).ApplyProductEditAsync(
+                        new LocalSupplierCategoryAssignmentService.ProductEditContext(
+                            product.ProductCode ?? string.Empty,
+                            OldProductCode: null,
+                            OldSupplierCode: null,
+                            NewSupplierCode: product.LocalSupplierCode,
+                            OldItemNumber: null,
+                            NewItemNumber: product.ItemNumber,
+                            RequestedCategoryGuid: null,
+                            ClearRequested: false,
+                            Actor: currentUser
+                        )
+                    );
 
                     var afterSnapshots = await CaptureProductSnapshotsAsync(
                         new[] { product.ProductCode ?? string.Empty }
@@ -1477,6 +1587,8 @@ namespace BlazorApp.Api.Services.React
                     var beforeSnapshots = await CaptureProductSnapshotsAsync(
                         new[] { productCode }
                     );
+                    var oldSupplierCode = product.LocalSupplierCode;
+                    var oldItemNumber = product.ItemNumber;
 
                     // 未改码：仅更新 Product；StoreRetailPrice 只同步镜像字段，不进入统一商品快照。
                     product.ProductCategoryGUID = dto.ProductCategoryGUID;
@@ -1504,6 +1616,21 @@ namespace BlazorApp.Api.Services.React
                         .SetColumns(srp => srp.IsAutoPricing == product.IsAutoPricing)
                         .Where(srp => srp.ProductCode == product.ProductCode)
                         .ExecuteCommandAsync();
+
+                    // 供应商分类联动：人工指定锁定、清空恢复自动、换供应商或改货号重算；校验失败回滚整个编辑。
+                    await new LocalSupplierCategoryAssignmentService(_db).ApplyProductEditAsync(
+                        new LocalSupplierCategoryAssignmentService.ProductEditContext(
+                            productCode,
+                            OldProductCode: null,
+                            OldSupplierCode: oldSupplierCode,
+                            NewSupplierCode: product.LocalSupplierCode,
+                            OldItemNumber: oldItemNumber,
+                            NewItemNumber: product.ItemNumber,
+                            RequestedCategoryGuid: dto.SupplierCategoryGUID,
+                            ClearRequested: dto.ClearSupplierCategory,
+                            Actor: currentUser
+                        )
+                    );
 
                     var recalculation = await new SetChildPurchasePriceService(
                         _db
@@ -1548,6 +1675,10 @@ namespace BlazorApp.Api.Services.React
                     SetChildPurchasePriceMutationLock.BusyErrorCode
                 );
             }
+            catch (LocalSupplierCategoryValidationException ex)
+            {
+                return ApiResponse<ProductDto>.Error(ex.Message, ex.ErrorCode);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "更新商品失败: {ProductCode}", productCode);
@@ -1566,6 +1697,8 @@ namespace BlazorApp.Api.Services.React
             string newProductCode
         )
         {
+            var oldSupplierCode = product.LocalSupplierCode;
+            var oldItemNumber = product.ItemNumber;
             product.ProductCode = newProductCode;
             product.ProductCategoryGUID = dto.ProductCategoryGUID;
             product.LocalSupplierCode = NormalizeLocalSupplierCode(dto.LocalSupplierCode);
@@ -1606,6 +1739,21 @@ namespace BlazorApp.Api.Services.React
                 .SetColumns(psc => psc.ProductCode == newProductCode)
                 .Where(psc => psc.ProductCode == oldProductCode)
                 .ExecuteCommandAsync();
+
+            // 供应商分类归属随商品编码迁移，再按本次编辑联动（人工指定/清空/换供应商/改货号）。
+            await new LocalSupplierCategoryAssignmentService(_db).ApplyProductEditAsync(
+                new LocalSupplierCategoryAssignmentService.ProductEditContext(
+                    newProductCode,
+                    OldProductCode: oldProductCode,
+                    OldSupplierCode: oldSupplierCode,
+                    NewSupplierCode: product.LocalSupplierCode,
+                    OldItemNumber: oldItemNumber,
+                    NewItemNumber: product.ItemNumber,
+                    RequestedCategoryGuid: dto.SupplierCategoryGUID,
+                    ClearRequested: dto.ClearSupplierCategory,
+                    Actor: currentUser
+                )
+            );
         }
 
         /// <summary>
@@ -1728,7 +1876,12 @@ namespace BlazorApp.Api.Services.React
                     .Where(s => s.ProductCode == productCode)
                     .ExecuteCommandAsync();
 
-                // 4. Product
+                // 4. 供应商分类归属（软删除保留，便于恢复商品时沿用）
+                await new LocalSupplierCategoryAssignmentService(_db).DeleteAssignmentsAsync(
+                    new[] { productCode }
+                );
+
+                // 5. Product
                 var productRows = await _db.Deleteable<Product>()
                     .Where(p => p.ProductCode == productCode)
                     .ExecuteCommandAsync();
@@ -1844,6 +1997,8 @@ namespace BlazorApp.Api.Services.React
                                 continue;
                             }
 
+                            var oldSupplierCode = product.LocalSupplierCode;
+
                             // 只更新提供的字段
                             if (item.ProductName != null)
                                 product.ProductName = item.ProductName;
@@ -1869,7 +2024,41 @@ namespace BlazorApp.Api.Services.React
                                 _httpContextAccessor.HttpContext?.User?.Identity?.Name ?? "System";
                             product.UpdatedBy = currentUser;
 
+                            var categoryAssignments = new LocalSupplierCategoryAssignmentService(_db);
+                            var touchesSupplierCategory =
+                                item.LocalSupplierCode != null
+                                || !string.IsNullOrWhiteSpace(item.SupplierCategoryGUID)
+                                || item.ClearSupplierCategory == true;
+                            // 先校验人工指定的分类，失败时本商品不写入任何字段。
+                            if (
+                                !string.IsNullOrWhiteSpace(item.SupplierCategoryGUID)
+                                && !LocalSupplierCategoryConstants.IsHotBargain(product.LocalSupplierCode)
+                            )
+                            {
+                                await categoryAssignments.ValidateManualCategoryAsync(
+                                    product.LocalSupplierCode,
+                                    item.SupplierCategoryGUID
+                                );
+                            }
+
                             await _db.Updateable(product).ExecuteCommandAsync();
+
+                            if (touchesSupplierCategory)
+                            {
+                                await categoryAssignments.ApplyProductEditAsync(
+                                    new LocalSupplierCategoryAssignmentService.ProductEditContext(
+                                        product.ProductCode ?? item.ProductCode,
+                                        OldProductCode: null,
+                                        OldSupplierCode: oldSupplierCode,
+                                        NewSupplierCode: product.LocalSupplierCode,
+                                        OldItemNumber: product.ItemNumber,
+                                        NewItemNumber: product.ItemNumber,
+                                        RequestedCategoryGuid: item.SupplierCategoryGUID,
+                                        ClearRequested: item.ClearSupplierCategory == true,
+                                        Actor: currentUser
+                                    )
+                                );
+                            }
 
                             if (item.IsAutoPricing.HasValue)
                             {

@@ -29,6 +29,7 @@
 .itemPreview > div { display: flex; flex-wrap: wrap; gap: 4px; max-height: 116px; margin-top: 6px; overflow: auto; }
 .itemPreview :global(.ant-tag) { margin-inline-end: 0; font-variant-numeric: tabular-nums; }
 .productList { display: flex; flex-direction: column; height: clamp(320px, calc(100dvh - 350px), 640px); margin: 10px -4px 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; }
+.productPagination { display: flex; justify-content: center; margin-top: 10px; }
 .productList::-webkit-scrollbar, .scopePreview > div::-webkit-scrollbar { width: 7px; }
 .productList::-webkit-scrollbar-thumb, .scopePreview > div::-webkit-scrollbar-thumb { border-radius: 4px; background: #b8c4d4; }
 .productList:focus-visible, .productRow:focus-visible { outline: 2px solid #1677ff; outline-offset: -2px; }

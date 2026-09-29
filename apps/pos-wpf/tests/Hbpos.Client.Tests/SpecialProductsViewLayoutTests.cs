@@ -19,7 +19,7 @@ public sealed class SpecialProductsViewLayoutTests
 
         Assert.Equal(["84*", "16*"], columns.Select(column => (string?)column.Attribute("Width")));
         Assert.Equal(["760", "180"], columns.Select(column => (string?)column.Attribute("MinWidth")));
-        Assert.Equal("#FFF7F8FA", (string?)workspace.Attribute("Background"));
+        Assert.Equal("{DynamicResource PosSurfaceAltBrush}", (string?)workspace.Attribute("Background"));
 
         var actionPanel = FindNamedElement(view, "SpecialActionsPanel");
         Assert.Equal("2", (string?)actionPanel.Attribute("Rows"));
@@ -46,7 +46,7 @@ public sealed class SpecialProductsViewLayoutTests
         var panelStyle = FindStyle(view, "SpecialPanelStyle");
         AssertSetter(panelStyle, "CornerRadius", "5");
         AssertSetter(panelStyle, "BorderThickness", "1");
-        AssertSetter(panelStyle, "BorderBrush", "{StaticResource PosBorderBrush}");
+        AssertSetter(panelStyle, "BorderBrush", "{DynamicResource PosBorderBrush}");
 
         var actionStyle = FindStyle(view, "SpecialSidebarActionButtonStyle");
         AssertSetter(actionStyle, "MinHeight", "84");
@@ -87,14 +87,14 @@ public sealed class SpecialProductsViewLayoutTests
             (string?)text.Attribute("Text") == "{Binding LookupCode}");
         var price = Assert.Single(cardButton.Descendants(Presentation + "TextBlock").Where(text =>
             ((string?)text.Attribute("Text"))?.Contains("{Binding RetailPrice", StringComparison.Ordinal) == true));
-        Assert.Equal("{StaticResource PosAccentBrush}", (string?)price.Attribute("Foreground"));
+        Assert.Equal("{DynamicResource PosAccentBrush}", (string?)price.Attribute("Foreground"));
 
         var selectedTrigger = Assert.Single(view.Descendants(Presentation + "DataTrigger").Where(trigger =>
             trigger.Elements(Presentation + "Setter").Any(setter =>
                 (string?)setter.Attribute("TargetName") == "SpecialProductCard")));
-        AssertTriggerSetter(selectedTrigger, "BorderBrush", "{StaticResource PosPrimaryBrush}");
+        AssertTriggerSetter(selectedTrigger, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
         AssertTriggerSetter(selectedTrigger, "BorderThickness", "4,1,1,1");
-        AssertTriggerSetter(selectedTrigger, "Background", "#FFE8F1FF");
+        AssertTriggerSetter(selectedTrigger, "Background", "{DynamicResource PosPrimarySoftBrush}");
     }
 
     [Fact]

@@ -812,6 +812,89 @@ th {
   color: #b3261e;
   font-size: 12px;
 }
+.category-capture {
+  padding: 10px;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+  background: #fff;
+}
+.category-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.category-heading h2 {
+  margin: 0;
+}
+.category-heading small {
+  color: #757575;
+  font-size: 11px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.category-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.category-toggle input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: #1c5bd8;
+}
+.category-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.category-actions button {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.category-progress {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+}
+.category-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #1c5bd8;
+}
+.category-progress span {
+  color: #424242;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.category-hint {
+  margin: 6px 0 0;
+  color: #757575;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.category-status {
+  min-height: 0;
+  margin: 6px 0 0;
+  color: #424242;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.category-status:empty {
+  display: none;
+}
+.category-status.error {
+  color: #b3261e;
+}
 
 @media (pointer: coarse), (max-width: 600px) {
   header {

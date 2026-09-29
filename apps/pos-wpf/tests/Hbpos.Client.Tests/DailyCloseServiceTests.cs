@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
@@ -16,22 +15,18 @@ public sealed class DailyCloseServiceTests
         var repository = new BlockingDailyCloseRepository();
         var service = new DailyCloseService(repository);
         var callerThreadId = Environment.CurrentManagedThreadId;
-        var stopwatch = Stopwatch.StartNew();
 
         var loadTask = service.LoadReportAsync(CreateSession(), new DateTime(2026, 5, 28));
 
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromMilliseconds(100));
+        // 慢读由闸门挡住而不是 Task.Delay 计时：负载高时测试线程可能晚于固定延时才走到断言，
+        // 只有闸门能保证"放行前任务一定未完成"，也能证明调用方确实等到了慢读结果。
         await repository.Started.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         Assert.NotEqual(callerThreadId, repository.ExecutionThreadId);
         Assert.False(loadTask.IsCompleted);
 
-        var report = await loadTask;
+        repository.Release.TrySetResult();
+        var report = await loadTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
-        // 仓储慢读是 Task.Delay(500ms)，由约 15.6ms 粒度的系统计时器驱动，用高精度 Stopwatch 量可能只有
-        // 499.x ms（CI 已两次误报）。要证明的是调用方等到了慢读结果，而不是精确计时，留出计时器误差余量。
-        Assert.True(
-            stopwatch.Elapsed >= TimeSpan.FromMilliseconds(450),
-            $"LoadReportAsync 应等待仓储慢读完成，实际耗时 {stopwatch.Elapsed.TotalMilliseconds:F1}ms");
         Assert.Equal(1, report.OrderCount);
     }
 
@@ -419,6 +414,8 @@ public sealed class DailyCloseServiceTests
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int ExecutionThreadId { get; private set; }
 
         public async Task<DailyCloseReport> LoadReportAsync(
@@ -428,7 +425,8 @@ public sealed class DailyCloseServiceTests
         {
             ExecutionThreadId = Environment.CurrentManagedThreadId;
             Started.TrySetResult();
-            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+            // 带超时等待放行：若服务改成同步阻塞调用方，测试会超时失败而不是永久挂住。
+            await Release.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout, cancellationToken);
             return new DailyCloseReport(
                 businessDate,
                 DateTimeOffset.UtcNow,

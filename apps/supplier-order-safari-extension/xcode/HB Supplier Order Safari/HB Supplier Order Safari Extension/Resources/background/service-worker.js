@@ -63,7 +63,7 @@
 
   // src/lib/profiles-default.js
   var DEFAULT_PROFILES = {
-    configVersion: "2",
+    configVersion: "3",
     profiles: [
       {
         // DATS 是显示名称；HB 的供应商业务代码是 240。
@@ -80,7 +80,35 @@
           transforms: ["trim", "uppercase"]
         },
         mountSelector: ".widget-productlist-code",
-        mountPosition: "afterend"
+        mountPosition: "afterend",
+        // 供应商分类采集（1.5.0+）：离线回退时使用；联网后以后端下发的 category 块为准。
+        // 以下选择器已于 2026-09-23 对公开页 /、/office-stationery、/office-stationery/adhesives-and-tape 核实；
+        // 登录后的页面结构待登录核实，若不同由后端配置热更新修正（递增 ConfigVersion，无需发版）。
+        category: {
+          enabled: true,
+          passiveEnabled: true,
+          crawlEnabled: true,
+          categoryPagePatterns: ["https://www.dats.com.au/*"],
+          categoryExcludePatterns: [],
+          // 面包屑：首项 Home 只有图标，名称在 meta[itemprop=name]；末项无链接，URL 在 meta/data-url。
+          breadcrumbSelector: '.widget-breadcrumb li[itemprop="itemListElement"]',
+          breadcrumbSkip: 1,
+          titleSelector: "h1.page-title, h1",
+          keySource: "pathname",
+          keyQueryParams: [],
+          navRootUrl: "https://www.dats.com.au/",
+          // 顶部 mega menu（标题链接 + 兄弟 ul）与分类页侧栏分类树（li 嵌套）两个候选，按 key 去重合并。
+          navSelector: ".widget-navigation-menu .dropdown-area a[href], .widget-product-category-list a.box-title",
+          // 分类页侧栏会列出整棵树；采集器只接受当前分类路径下的子链接，其余忽略。
+          subcategoryLinkSelector: ".widget-product-category-list a.box-title",
+          // DATS 分页写在 <head> 的 link[rel=next]（?PageProduct=2&PageSizeProduct=24）。
+          paginationNextSelector: 'link[rel="next"], a[rel="next"]',
+          maxPages: 20,
+          maxDepth: 4,
+          maxCategories: 400,
+          crawlDelayMs: 1500,
+          promotionalPatterns: []
+        }
       }
     ]
   };
@@ -125,6 +153,60 @@
     });
   }
 
+  // src/lib/category-path.js
+  var MAX_CATEGORY_KEY_LENGTH = 300;
+  var MAX_CATEGORY_NAME_LENGTH = 200;
+  var MAX_CATEGORY_URL_LENGTH = 1e3;
+  var MAX_CATEGORY_PATH_DEPTH = 8;
+  var MAX_KEY_QUERY_PARAMS = 5;
+  var KEY_QUERY_PARAM_PATTERN = /^[A-Za-z0-9_\-[\]]{1,50}$/u;
+  var BUILTIN_CATEGORY_EXCLUDE_PATTERNS = Object.freeze([
+    "/search*",
+    "/cart*",
+    "/checkout*",
+    "/account*",
+    "/login*",
+    "/my-account*",
+    "/wishlist*"
+  ]);
+  var DEFAULT_PROMOTIONAL_PATTERNS = Object.freeze([
+    "clearance*",
+    "*-clearance",
+    "sale",
+    "sale-*",
+    "on-sale*",
+    "specials*",
+    "special-offers*",
+    "new-arrivals*",
+    "new-in*",
+    "whats-new*",
+    "new-products*",
+    "best-sellers*",
+    "bestsellers*",
+    "shop-by-*",
+    "gift-ideas*",
+    "trending*",
+    "promotions*",
+    "deals*"
+  ]);
+  var TRAILING_COUNT = /\s*\(\s*\d+\s*\)$/u;
+  function normalizeKeyQueryParams(params) {
+    const names = /* @__PURE__ */ new Map();
+    for (const name of Array.isArray(params) ? params : []) {
+      if (typeof name !== "string" || !KEY_QUERY_PARAM_PATTERN.test(name)) continue;
+      const lower = name.toLowerCase();
+      if (!names.has(lower)) names.set(lower, lower);
+    }
+    return [...names.values()].sort();
+  }
+  function normalizeCategoryName(name) {
+    if (name == null) return "";
+    let value = String(name).replace(/\s+/gu, " ").trim();
+    value = value.replace(TRAILING_COUNT, "").trim();
+    if (value.length > MAX_CATEGORY_NAME_LENGTH) value = value.slice(0, MAX_CATEGORY_NAME_LENGTH).trim();
+    return value;
+  }
+
   // src/lib/profiles.js
   var ALLOWED_SOURCES = /* @__PURE__ */ new Set(["attribute", "text"]);
   var ALLOWED_MOUNT_POSITIONS = /* @__PURE__ */ new Set(["beforebegin", "afterbegin", "beforeend", "afterend"]);
@@ -157,11 +239,204 @@
     const regex = `^${escapeRegex(candidate).replaceAll("*", ".*")}$`;
     return new RegExp(regex, "i").test(target);
   }
+  var NON_CAPTURABLE_SUPPLIER_CODES = /* @__PURE__ */ new Set(["200"]);
+  var CATEGORY_NUMBER_RULES = {
+    breadcrumbSkip: { fallback: 1, min: 0, max: 5 },
+    maxPages: { fallback: 20, min: 1, max: 50 },
+    maxDepth: { fallback: 4, min: 1, max: 6 },
+    maxCategories: { fallback: 400, min: 10, max: 2e3 },
+    crawlDelayMs: { fallback: 1500, min: 500, max: 15e3 }
+  };
+  var CATEGORY_SELECTOR_DEFAULTS = {
+    breadcrumbSelector: null,
+    titleSelector: "h1",
+    navSelector: null,
+    subcategoryLinkSelector: null,
+    paginationNextSelector: 'a[rel="next"]'
+  };
+  var MAX_CATEGORY_SELECTOR_LENGTH = 500;
+  var MAX_PROMOTIONAL_PATTERNS = 50;
+  var MAX_PROMOTIONAL_PATTERN_LENGTH = 100;
+  function uniqueStrings(values) {
+    return [...new Set(values)];
+  }
+  function normalizeCategorySelector(value, fallback, name, errors) {
+    if (value == null || value === "") return fallback;
+    if (typeof value !== "string" || value.length > MAX_CATEGORY_SELECTOR_LENGTH || /[\r\n]/u.test(value)) {
+      errors.push(`${name} \u975E\u6CD5`);
+      return fallback;
+    }
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+  function normalizeCategoryNumber(value, name, errors) {
+    const rule = CATEGORY_NUMBER_RULES[name];
+    if (value == null) return rule.fallback;
+    if (!Number.isInteger(value) || value < rule.min || value > rule.max) {
+      errors.push(`${name} \u8D85\u51FA\u8303\u56F4 ${rule.min}..${rule.max}`);
+      return rule.fallback;
+    }
+    return value;
+  }
+  function normalizeCategoryBoolean(value, fallback, name, errors) {
+    if (value == null) return fallback;
+    if (typeof value !== "boolean") {
+      errors.push(`${name} \u5FC5\u987B\u4E3A boolean`);
+      return fallback;
+    }
+    return value;
+  }
+  function normalizePagePatternList(value, name, errors) {
+    if (value == null) return [];
+    if (!Array.isArray(value)) {
+      errors.push(`${name} \u5FC5\u987B\u4E3A\u6570\u7EC4`);
+      return [];
+    }
+    const out = [];
+    value.forEach((pattern, index) => {
+      if (!isSafePagePattern(pattern)) errors.push(`${name}[${index}] \u975E\u6CD5`);
+      else out.push(pattern);
+    });
+    return out;
+  }
+  function normalizePromotionalPatterns(value, errors) {
+    if (value == null) return [...DEFAULT_PROMOTIONAL_PATTERNS];
+    if (!Array.isArray(value) || value.length > MAX_PROMOTIONAL_PATTERNS) {
+      errors.push(`promotionalPatterns \u5FC5\u987B\u4E3A\u4E0D\u8D85\u8FC7 ${MAX_PROMOTIONAL_PATTERNS} \u9879\u7684\u6570\u7EC4`);
+      return [...DEFAULT_PROMOTIONAL_PATTERNS];
+    }
+    const out = [];
+    value.forEach((pattern, index) => {
+      const trimmed = typeof pattern === "string" ? pattern.trim().toLowerCase() : "";
+      if (!trimmed || trimmed.length > MAX_PROMOTIONAL_PATTERN_LENGTH || /[?\u0000-\u001f\u007f]/u.test(trimmed)) {
+        errors.push(`promotionalPatterns[${index}] \u975E\u6CD5`);
+        return;
+      }
+      out.push(trimmed);
+    });
+    return out.length > 0 ? uniqueStrings(out) : [...DEFAULT_PROMOTIONAL_PATTERNS];
+  }
+  function normalizeNavRootUrl(value, profile, errors) {
+    if (value == null || value === "") return null;
+    if (typeof value !== "string" || value.length > 1e3 || /\s/u.test(value)) {
+      errors.push("navRootUrl \u975E\u6CD5");
+      return null;
+    }
+    if (value.startsWith("/") && !value.startsWith("//")) return value;
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      errors.push("navRootUrl \u975E\u6CD5");
+      return null;
+    }
+    if (!/^https?:$/u.test(url.protocol) || url.username || url.password || !originMatchesAny(profile?.origins, url.origin)) {
+      errors.push("navRootUrl \u5FC5\u987B\u4E0E\u4F9B\u5E94\u5546\u540C\u6E90");
+      return null;
+    }
+    return url.href;
+  }
+  function normalizeCategoryConfig(raw, profile) {
+    const errors = [];
+    const source = raw == null ? {} : raw;
+    if (typeof source !== "object" || Array.isArray(source)) {
+      errors.push("category \u5FC5\u987B\u4E3A\u5BF9\u8C61");
+    }
+    const input = typeof source === "object" && !Array.isArray(source) ? source : {};
+    const categoryPagePatterns = normalizePagePatternList(
+      input.categoryPagePatterns,
+      "categoryPagePatterns",
+      errors
+    );
+    const excludePatterns = normalizePagePatternList(
+      input.categoryExcludePatterns,
+      "categoryExcludePatterns",
+      errors
+    );
+    let keySource = "pathname";
+    if (input.keySource != null) {
+      const normalized = typeof input.keySource === "string" ? input.keySource.toLowerCase() : "";
+      if (normalized === "pathname" || normalized === "hash") keySource = normalized;
+      else errors.push("keySource \u5FC5\u987B\u4E3A pathname \u6216 hash");
+    }
+    let keyQueryParams = [];
+    if (input.keyQueryParams != null) {
+      if (!Array.isArray(input.keyQueryParams) || input.keyQueryParams.length > MAX_KEY_QUERY_PARAMS) {
+        errors.push(`keyQueryParams \u5FC5\u987B\u4E3A\u4E0D\u8D85\u8FC7 ${MAX_KEY_QUERY_PARAMS} \u9879\u7684\u6570\u7EC4`);
+      } else {
+        input.keyQueryParams.forEach((name, index) => {
+          if (typeof name !== "string" || !KEY_QUERY_PARAM_PATTERN.test(name)) {
+            errors.push(`keyQueryParams[${index}] \u975E\u6CD5`);
+          }
+        });
+        keyQueryParams = normalizeKeyQueryParams(input.keyQueryParams);
+      }
+    }
+    const config = {
+      enabled: false,
+      passiveEnabled: normalizeCategoryBoolean(input.passiveEnabled, true, "passiveEnabled", errors),
+      crawlEnabled: normalizeCategoryBoolean(input.crawlEnabled, true, "crawlEnabled", errors),
+      // 未单独配置分类页模式时沿用列表页模式。
+      categoryPagePatterns: categoryPagePatterns.length > 0 ? categoryPagePatterns : [...Array.isArray(profile?.listPagePatterns) ? profile.listPagePatterns : []],
+      categoryExcludePatterns: uniqueStrings([...BUILTIN_CATEGORY_EXCLUDE_PATTERNS, ...excludePatterns]),
+      breadcrumbSelector: normalizeCategorySelector(
+        input.breadcrumbSelector,
+        CATEGORY_SELECTOR_DEFAULTS.breadcrumbSelector,
+        "breadcrumbSelector",
+        errors
+      ),
+      breadcrumbSkip: normalizeCategoryNumber(input.breadcrumbSkip, "breadcrumbSkip", errors),
+      titleSelector: normalizeCategorySelector(
+        input.titleSelector,
+        CATEGORY_SELECTOR_DEFAULTS.titleSelector,
+        "titleSelector",
+        errors
+      ),
+      keySource,
+      keyQueryParams,
+      navRootUrl: normalizeNavRootUrl(input.navRootUrl, profile, errors),
+      navSelector: normalizeCategorySelector(
+        input.navSelector,
+        CATEGORY_SELECTOR_DEFAULTS.navSelector,
+        "navSelector",
+        errors
+      ),
+      subcategoryLinkSelector: normalizeCategorySelector(
+        input.subcategoryLinkSelector,
+        CATEGORY_SELECTOR_DEFAULTS.subcategoryLinkSelector,
+        "subcategoryLinkSelector",
+        errors
+      ),
+      paginationNextSelector: normalizeCategorySelector(
+        input.paginationNextSelector,
+        CATEGORY_SELECTOR_DEFAULTS.paginationNextSelector,
+        "paginationNextSelector",
+        errors
+      ),
+      maxPages: normalizeCategoryNumber(input.maxPages, "maxPages", errors),
+      maxDepth: normalizeCategoryNumber(input.maxDepth, "maxDepth", errors),
+      maxCategories: normalizeCategoryNumber(input.maxCategories, "maxCategories", errors),
+      crawlDelayMs: normalizeCategoryNumber(input.crawlDelayMs, "crawlDelayMs", errors),
+      promotionalPatterns: normalizePromotionalPatterns(input.promotionalPatterns, errors)
+    };
+    if (input.enabled != null && typeof input.enabled !== "boolean") {
+      errors.push("enabled \u5FC5\u987B\u4E3A boolean");
+    }
+    const capturable = !NON_CAPTURABLE_SUPPLIER_CODES.has(profile?.supplierCode);
+    config.enabled = input.enabled === true && capturable && errors.length === 0;
+    return { config, errors };
+  }
   function validateProfiles(raw) {
     if (!raw || typeof raw !== "object" || !Array.isArray(raw.profiles)) {
-      return { valid: false, profiles: [], errors: ["profiles \u5FC5\u987B\u4E3A {profiles:[...]} \u5BF9\u8C61"] };
+      return {
+        valid: false,
+        profiles: [],
+        errors: ["profiles \u5FC5\u987B\u4E3A {profiles:[...]} \u5BF9\u8C61"],
+        warnings: []
+      };
     }
     const errors = [];
+    const warnings = [];
     const out = [];
     raw.profiles.forEach((p, i) => {
       const path = `profiles[${i}]`;
@@ -207,9 +482,11 @@
         errors.push(...errs.map((e) => `${path}.${e}`));
         return;
       }
-      out.push(p);
+      const category = normalizeCategoryConfig(p.category, p);
+      warnings.push(...category.errors.map((e) => `${path}.category.${e}`));
+      out.push({ ...p, category: category.config });
     });
-    return { valid: errors.length === 0, profiles: out, errors };
+    return { valid: errors.length === 0, profiles: out, errors, warnings };
   }
   function matchProfile(profiles, { origin, pathname }) {
     for (const p of profiles || []) {
@@ -218,6 +495,419 @@
       return p;
     }
     return null;
+  }
+
+  // src/lib/item-number.js
+  var MAX_ITEM_NUMBER_LENGTH = 50;
+  function normalizeCaptureItemNumber(value) {
+    if (value == null) return "";
+    const normalized = String(value).trim().toUpperCase();
+    if (!normalized || normalized.length > MAX_ITEM_NUMBER_LENGTH) return "";
+    if (/[\u0000-\u001f\u007f]/u.test(normalized)) return "";
+    return normalized;
+  }
+  function normalizeCaptureItemNumbers(values) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const value of values || []) {
+      const normalized = normalizeCaptureItemNumber(value);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
+    }
+    return out;
+  }
+
+  // src/lib/category-capture.js
+  var CAPTURE_CHUNK_SIZE = 100;
+  var CAPTURE_DEDUPE_TTL_MS = 6 * 60 * 60 * 1e3;
+  var CAPTURE_DEDUPE_MAX_ENTRIES = 500;
+  var CAPTURE_MODES = Object.freeze(["passive", "crawl"]);
+  var MAX_TREE_SNAPSHOT_NODES = 2e3;
+  var MAX_RETRY_AFTER_MS = 6e4;
+  var MAX_SUPPLIER_CODE_LENGTH = 50;
+  function fnv1a(value) {
+    let hash = 2166136261;
+    const text = String(value ?? "");
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  }
+  function hashItemNumbers(itemNumbers) {
+    const unique = [...new Set(normalizeCaptureItemNumbers(itemNumbers))].sort();
+    return fnv1a(unique.join("\n"));
+  }
+  function buildCaptureDedupeKey({ supplierCode, categoryPath, itemNumbers }) {
+    const keys = (Array.isArray(categoryPath) ? categoryPath : []).map((node) => node?.key || "");
+    const items = normalizeCaptureItemNumbers(itemNumbers);
+    return `${String(supplierCode || "")}|${fnv1a(keys.join(">"))}|${hashItemNumbers(items)}:${items.length}`;
+  }
+  function createCaptureDedupeStore({
+    read,
+    write,
+    now = () => Date.now(),
+    ttlMs = CAPTURE_DEDUPE_TTL_MS,
+    maxEntries = CAPTURE_DEDUPE_MAX_ENTRIES
+  }) {
+    let queue = Promise.resolve();
+    const serial = (task) => {
+      const run = queue.then(task, task);
+      queue = run.catch(() => void 0);
+      return run;
+    };
+    async function load() {
+      let raw;
+      try {
+        raw = await read();
+      } catch {
+        raw = [];
+      }
+      const current = now();
+      return (Array.isArray(raw) ? raw : []).filter((entry) => Array.isArray(entry) && typeof entry[0] === "string" && Number.isFinite(entry[1]) && current - entry[1] < ttlMs && entry[1] <= current + 6e4);
+    }
+    return {
+      has(key) {
+        return serial(async () => (await load()).some(([entryKey]) => entryKey === key));
+      },
+      add(key) {
+        return serial(async () => {
+          const entries = (await load()).filter(([entryKey]) => entryKey !== key);
+          entries.push([key, now()]);
+          entries.sort((a, b) => a[1] - b[1]);
+          const trimmed = entries.length > maxEntries ? entries.slice(entries.length - maxEntries) : entries;
+          await write(trimmed);
+          return trimmed.length;
+        });
+      }
+    };
+  }
+  function parseUrl(value) {
+    if (typeof value !== "string" || !value) return null;
+    try {
+      return new URL(value);
+    } catch {
+      return null;
+    }
+  }
+  function truncatePageUrl(value) {
+    const url = parseUrl(value);
+    if (!url) return typeof value === "string" ? value.slice(0, MAX_CATEGORY_URL_LENGTH) : "";
+    if (url.href.length <= MAX_CATEGORY_URL_LENGTH) return url.href;
+    url.hash = "";
+    if (url.href.length <= MAX_CATEGORY_URL_LENGTH) return url.href;
+    const base = `${url.origin}${url.pathname}`;
+    return base.slice(0, MAX_CATEGORY_URL_LENGTH);
+  }
+  function toIsoString(value, now) {
+    const date = value instanceof Date ? value : new Date(value ?? now());
+    return Number.isFinite(date.getTime()) ? date.toISOString() : new Date(now()).toISOString();
+  }
+  function isValidKey(value) {
+    return typeof value === "string" && value.startsWith("/") && value.length <= MAX_CATEGORY_KEY_LENGTH && !/[\s\u0000-\u001f\u007f]/u.test(value.split("?")[0]);
+  }
+  function sanitizeName(value) {
+    if (typeof value !== "string") return null;
+    const name = value.replace(/\s+/gu, " ").trim();
+    return name && name.length <= MAX_CATEGORY_NAME_LENGTH ? name : null;
+  }
+  function sanitizeSameOriginUrl(value, origin) {
+    if (value == null || value === "") return { ok: true, url: null };
+    const url = parseUrl(value);
+    if (!url || !/^https?:$/u.test(url.protocol) || url.origin !== origin) return { ok: false };
+    if (url.href.length > MAX_CATEGORY_URL_LENGTH) return { ok: true, url: null };
+    return { ok: true, url: url.href };
+  }
+  function invalid(error) {
+    return { ok: false, errorCode: "INVALID_CAPTURE", error };
+  }
+  function checkSupplier(supplierCode, expectedSupplierCode) {
+    if (typeof supplierCode !== "string" || !supplierCode || supplierCode.length > MAX_SUPPLIER_CODE_LENGTH) {
+      return "supplierCode \u975E\u6CD5";
+    }
+    if (expectedSupplierCode != null && supplierCode !== expectedSupplierCode) return "supplierCode \u4E0E\u6765\u6E90\u9875\u9762\u4E0D\u4E00\u81F4";
+    return null;
+  }
+  function validateCapturePayload(payload, { senderOrigin, expectedSupplierCode, now = () => Date.now() } = {}) {
+    if (!payload || typeof payload !== "object") return invalid("\u8F7D\u8377\u7F3A\u5931");
+    const supplierError = checkSupplier(payload.supplierCode, expectedSupplierCode);
+    if (supplierError) return invalid(supplierError);
+    if (!CAPTURE_MODES.includes(payload.mode)) return invalid("mode \u975E\u6CD5");
+    const page = parseUrl(payload.pageUrl);
+    if (!page || !/^https?:$/u.test(page.protocol) || page.origin !== senderOrigin) {
+      return invalid("pageUrl \u5FC5\u987B\u4E0E\u6765\u6E90\u9875\u9762\u540C\u6E90");
+    }
+    const path = payload.categoryPath;
+    if (!Array.isArray(path) || path.length < 1 || path.length > MAX_CATEGORY_PATH_DEPTH) {
+      return invalid(`categoryPath \u5FC5\u987B\u4E3A 1..${MAX_CATEGORY_PATH_DEPTH} \u4E2A\u8282\u70B9`);
+    }
+    const categoryPath = [];
+    for (const node of path) {
+      const name = sanitizeName(node?.name);
+      if (!name || !isValidKey(node?.key)) return invalid("categoryPath \u8282\u70B9\u975E\u6CD5");
+      const url = sanitizeSameOriginUrl(node.url, senderOrigin);
+      if (!url.ok) return invalid("categoryPath \u8282\u70B9 URL \u5FC5\u987B\u4E0E\u6765\u6E90\u9875\u9762\u540C\u6E90");
+      categoryPath.push({ name, key: node.key, url: url.url });
+    }
+    if (!Array.isArray(payload.itemNumbers)) return invalid("itemNumbers \u5FC5\u987B\u4E3A\u6570\u7EC4");
+    const itemNumbers = normalizeCaptureItemNumbers(payload.itemNumbers);
+    if (itemNumbers.length < 1 || itemNumbers.length > CAPTURE_CHUNK_SIZE || payload.itemNumbers.length > CAPTURE_CHUNK_SIZE) {
+      return invalid(`itemNumbers \u5FC5\u987B\u4E3A 1..${CAPTURE_CHUNK_SIZE} \u4E2A\u6709\u6548\u8D27\u53F7`);
+    }
+    const pageNumber = Number.isInteger(payload.pageNumber) && payload.pageNumber >= 1 && payload.pageNumber <= 1e4 ? payload.pageNumber : void 0;
+    return {
+      ok: true,
+      payload: {
+        supplierCode: payload.supplierCode,
+        pageUrl: truncatePageUrl(page.href),
+        categoryPath,
+        itemNumbers,
+        capturedAt: toIsoString(payload.capturedAt, now),
+        mode: payload.mode,
+        ...pageNumber ? { pageNumber } : {}
+      }
+    };
+  }
+  function validateTreeSnapshotPayload(payload, { senderOrigin, expectedSupplierCode } = {}) {
+    if (!payload || typeof payload !== "object") return invalid("\u8F7D\u8377\u7F3A\u5931");
+    const supplierError = checkSupplier(payload.supplierCode, expectedSupplierCode);
+    if (supplierError) return invalid(supplierError);
+    const source = sanitizeSameOriginUrl(payload.sourceUrl, senderOrigin);
+    if (!source.ok || !payload.sourceUrl) return invalid("sourceUrl \u5FC5\u987B\u4E0E\u6765\u6E90\u9875\u9762\u540C\u6E90");
+    const sourceUrl = source.url || truncatePageUrl(payload.sourceUrl);
+    if (!Array.isArray(payload.nodes) || payload.nodes.length < 1 || payload.nodes.length > MAX_TREE_SNAPSHOT_NODES) {
+      return invalid(`nodes \u5FC5\u987B\u4E3A 1..${MAX_TREE_SNAPSHOT_NODES} \u4E2A\u8282\u70B9`);
+    }
+    const nodes = [];
+    const keys = /* @__PURE__ */ new Set();
+    for (const node of payload.nodes) {
+      const name = sanitizeName(node?.name);
+      if (!name || !isValidKey(node?.key) || keys.has(node.key)) return invalid("nodes \u8282\u70B9\u975E\u6CD5\u6216\u91CD\u590D");
+      if (node.parentKey != null && (!isValidKey(node.parentKey) || node.parentKey === node.key)) {
+        return invalid("nodes.parentKey \u975E\u6CD5");
+      }
+      const url = sanitizeSameOriginUrl(node.url, senderOrigin);
+      if (!url.ok) return invalid("nodes \u8282\u70B9 URL \u5FC5\u987B\u4E0E\u6765\u6E90\u9875\u9762\u540C\u6E90");
+      keys.add(node.key);
+      nodes.push({
+        key: node.key,
+        name,
+        parentKey: node.parentKey ?? null,
+        url: url.url,
+        sortOrder: Number.isInteger(node.sortOrder) ? node.sortOrder : null
+      });
+    }
+    return { ok: true, payload: { supplierCode: payload.supplierCode, sourceUrl, nodes } };
+  }
+  function toCount(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : 0;
+  }
+  function normalizeCaptureResponse(data) {
+    const source = data && typeof data === "object" ? data : {};
+    return {
+      categoryGuid: typeof source.categoryGuid === "string" ? source.categoryGuid : "",
+      fullPath: typeof source.fullPath === "string" ? source.fullPath : "",
+      depth: toCount(source.depth),
+      isPromotional: source.isPromotional === true,
+      categoriesCreated: toCount(source.categoriesCreated),
+      matchedProducts: toCount(source.matchedProducts),
+      assignedProducts: toCount(source.assignedProducts),
+      unchangedProducts: toCount(source.unchangedProducts),
+      skippedManual: toCount(source.skippedManual),
+      unmatchedItemNumberCount: toCount(source.unmatchedItemNumberCount),
+      unmatchedSamples: Array.isArray(source.unmatchedSamples) ? source.unmatchedSamples.filter((item) => typeof item === "string").slice(0, 10) : []
+    };
+  }
+  function normalizeTreeSnapshotResponse(data) {
+    const source = data && typeof data === "object" ? data : {};
+    return {
+      created: toCount(source.created),
+      updated: toCount(source.updated),
+      unchanged: toCount(source.unchanged),
+      orphanCount: toCount(source.orphanCount),
+      promotionalCount: toCount(source.promotionalCount)
+    };
+  }
+  function parseRetryAfter(value, now = () => Date.now()) {
+    if (value == null || value === "") return null;
+    const text = String(value).trim();
+    if (/^\d+(?:\.\d+)?$/u.test(text)) return Math.min(Number(text) * 1e3, MAX_RETRY_AFTER_MS);
+    const date = Date.parse(text);
+    if (!Number.isFinite(date)) return null;
+    return Math.min(Math.max(0, date - now()), MAX_RETRY_AFTER_MS);
+  }
+  function createSlidingWindowLimiter({ limit = 100, windowMs = 6e4, now = () => Date.now() } = {}) {
+    const stamps = [];
+    return {
+      tryAcquire() {
+        const current = now();
+        while (stamps.length > 0 && current - stamps[0] >= windowMs) stamps.shift();
+        if (stamps.length >= limit) {
+          return { ok: false, retryAfterMs: Math.max(0, windowMs - (current - stamps[0])) };
+        }
+        stamps.push(current);
+        return { ok: true, retryAfterMs: 0 };
+      }
+    };
+  }
+
+  // src/lib/category-crawl.js
+  var CRAWL_STATUSES = Object.freeze({
+    RUNNING: "running",
+    COMPLETED: "completed",
+    ABORTED: "aborted",
+    INTERRUPTED: "interrupted",
+    FAILED: "failed"
+  });
+  var TERMINAL_CRAWL_STATUSES = /* @__PURE__ */ new Set(["completed", "aborted", "interrupted", "failed"]);
+  var CRAWL_ERROR_CODES = Object.freeze([
+    "SUPPLIER_TAB_REQUIRED",
+    "CONTENT_SCRIPT_UNAVAILABLE",
+    "CRAWL_ALREADY_RUNNING",
+    "CRAWL_DISABLED",
+    "LOGIN_REQUIRED",
+    "SITE_BLOCKING",
+    "NAV_NOT_FOUND",
+    "FEATURE_DISABLED",
+    "WEBSITE_SESSION_REQUIRED"
+  ]);
+  var MAX_TRACKED_CRAWL_KEYS = 2e3;
+  var STALE_RUNNING_JOB_MS = 5 * 60 * 1e3;
+  function isValidCrawlKey(value) {
+    return typeof value === "string" && value.startsWith("/") && value.length <= MAX_CATEGORY_KEY_LENGTH;
+  }
+  function sanitizeKeys(values, limit = MAX_TRACKED_CRAWL_KEYS) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const value of Array.isArray(values) ? values : []) {
+      if (!isValidCrawlKey(value) || seen.has(value)) continue;
+      seen.add(value);
+      out.push(value);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+  function sanitizeCrawlNodes(values, limit = MAX_TRACKED_CRAWL_KEYS) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const node of Array.isArray(values) ? values : []) {
+      if (!node || !isValidCrawlKey(node.key) || seen.has(node.key)) continue;
+      const name = normalizeCategoryName(node.name);
+      if (!name) continue;
+      seen.add(node.key);
+      out.push({
+        key: node.key,
+        name,
+        url: typeof node.url === "string" && node.url.length <= MAX_CATEGORY_URL_LENGTH ? node.url : null,
+        parentKey: isValidCrawlKey(node.parentKey) ? node.parentKey : null,
+        depth: Number.isInteger(node.depth) && node.depth >= 0 ? node.depth : 0
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+  function toCount2(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : 0;
+  }
+  function isTerminalCrawlStatus(status) {
+    return TERMINAL_CRAWL_STATUSES.has(status);
+  }
+  function createCrawlJob({
+    jobId,
+    supplierCode,
+    tabId,
+    origin,
+    mode = "full",
+    completedKeys = [],
+    now = () => Date.now()
+  }) {
+    const timestamp = new Date(now()).toISOString();
+    return {
+      jobId,
+      supplierCode,
+      tabId,
+      origin,
+      mode,
+      status: CRAWL_STATUSES.RUNNING,
+      startedAt: timestamp,
+      updatedAt: timestamp,
+      finishedAt: null,
+      total: 0,
+      done: 0,
+      failed: 0,
+      pages: 0,
+      itemsSent: 0,
+      completedKeys: sanitizeKeys(completedKeys),
+      failedNodes: [],
+      current: null,
+      errorCode: null
+    };
+  }
+  function mergeCrawlProgress(job, progress, { now = () => Date.now() } = {}) {
+    if (!job || !progress || progress.jobId !== job.jobId) return job;
+    const timestamp = new Date(now()).toISOString();
+    const next = { ...job, updatedAt: timestamp };
+    for (const field of ["total", "done", "failed", "pages", "itemsSent"]) {
+      if (progress[field] != null) next[field] = toCount2(progress[field]);
+    }
+    if (Array.isArray(progress.completedKeys)) {
+      next.completedKeys = sanitizeKeys([...job.completedKeys || [], ...progress.completedKeys]);
+    }
+    if (Array.isArray(progress.failedNodes)) {
+      next.failedNodes = sanitizeCrawlNodes(progress.failedNodes);
+    }
+    if (progress.current && isValidCrawlKey(progress.current.key)) {
+      next.current = { key: progress.current.key, name: normalizeCategoryName(progress.current.name) };
+    } else if (progress.current === null) {
+      next.current = null;
+    }
+    if (!isTerminalCrawlStatus(job.status) && Object.values(CRAWL_STATUSES).includes(progress.status)) {
+      next.status = progress.status;
+      if (isTerminalCrawlStatus(progress.status)) {
+        next.finishedAt = timestamp;
+        next.current = null;
+        next.errorCode = typeof progress.errorCode === "string" ? progress.errorCode : null;
+      }
+    }
+    return next;
+  }
+  function finalizeCrawlJob(job, status, { errorCode = null, now = () => Date.now() } = {}) {
+    if (!job || isTerminalCrawlStatus(job.status)) return job;
+    const timestamp = new Date(now()).toISOString();
+    return {
+      ...job,
+      status,
+      errorCode,
+      current: null,
+      updatedAt: timestamp,
+      finishedAt: timestamp
+    };
+  }
+  function isCrawlJobStale(job, now = () => Date.now()) {
+    if (!job || job.status !== CRAWL_STATUSES.RUNNING) return false;
+    const updatedAt = Date.parse(job.updatedAt || "");
+    return !Number.isFinite(updatedAt) || now() - updatedAt > STALE_RUNNING_JOB_MS;
+  }
+  function toCrawlHistoryEntry(job) {
+    return {
+      jobId: job.jobId,
+      supplierCode: job.supplierCode,
+      mode: job.mode,
+      status: job.status,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+      total: toCount2(job.total),
+      done: toCount2(job.done),
+      failed: toCount2(job.failed),
+      pages: toCount2(job.pages),
+      itemsSent: toCount2(job.itemsSent),
+      errorCode: job.errorCode || null,
+      completedKeys: sanitizeKeys(job.completedKeys),
+      failedNodes: sanitizeCrawlNodes(job.failedNodes)
+    };
   }
 
   // src/lib/assistant-panel.js
@@ -414,7 +1104,7 @@
   }
 
   // hb-safari-config:config.js
-  var EXTENSION_VERSION = "1.4.1";
+  var EXTENSION_VERSION = "1.5.0";
   var HB_API_ORIGIN = "https://hotbargain.vip";
   var HB_WEB_ORIGIN = "https://hotbargain.vip";
   var BUILD_TARGET = "safari";
@@ -430,6 +1120,11 @@
   var PROFILES_KEY = "supplierProfiles";
   var GRANTED_KEY = "grantedOrigins";
   var API_ORIGIN_KEY = "apiOrigin";
+  var CATEGORY_JOB_KEY = "categoryCrawlJob";
+  var CATEGORY_HISTORY_KEY = "categoryCrawlHistory";
+  var CATEGORY_DEDUPE_KEY = "categoryCaptureDedupe";
+  var CATEGORY_CAPTURES_PATH = "/api/react/v1/browser-extension/supplier-categories/captures";
+  var CATEGORY_TREE_SNAPSHOT_PATH = "/api/react/v1/browser-extension/supplier-categories/tree-snapshot";
   var assistantPanel = createAssistantPanelController({ browserApi: chrome, buildTarget: BUILD_TARGET });
   assistantPanel.registerListeners();
   var getSession = (keys) => chrome.storage.session.get(keys);
@@ -500,7 +1195,9 @@
       success: body && body.success,
       data: body && body.data,
       message: body && body.message,
-      errorCode: body && body.errorCode
+      errorCode: body && body.errorCode,
+      // 429/503 的退避提示，分类采集按它延迟重试。
+      retryAfter: res.headers?.get?.("Retry-After") ?? null
     };
   }
   async function handleGetApiOrigin() {
@@ -523,7 +1220,12 @@
       return { ok: true, apiOrigin: normalized, changed: false, requiresWebsiteSession: false };
     }
     await setLocal({ [API_ORIGIN_KEY]: normalized, [PROFILES_KEY]: DEFAULT_PROFILES });
-    await Promise.all([clearAccessSession(), removeSession(PENDING_HANDOFF_KEY)]);
+    await Promise.all([
+      clearAccessSession(),
+      removeSession(PENDING_HANDOFF_KEY),
+      // 分类回传去重记录属于旧环境，新环境需要重新回传。
+      removeLocal([CATEGORY_DEDUPE_KEY])
+    ]);
     await syncContentScripts();
     return { ok: true, apiOrigin: normalized, changed: true, requiresWebsiteSession: true };
   }
@@ -683,6 +1385,7 @@
       profiles: storedValidation.profiles
     } : DEFAULT_PROFILES;
     let source = storedValidation.valid ? "cache" : "default";
+    let warnings = storedValidation.valid ? storedValidation.warnings : [];
     try {
       const res = await apiRequest("/api/react/v1/browser-extension/supplier-profiles", { method: "GET" });
       if (res.success && res.data && Array.isArray(res.data.profiles)) {
@@ -693,17 +1396,295 @@
             profiles: v.profiles
           };
           source = "server";
+          warnings = v.warnings;
         } else {
           config = { configVersion: res.data.configVersion ?? "invalid", profiles: [] };
           source = "invalid-server";
+          warnings = [];
         }
       }
     } catch {
     }
+    if (source === "default") {
+      const defaults = validateProfiles(DEFAULT_PROFILES);
+      config = { configVersion: DEFAULT_PROFILES.configVersion, profiles: defaults.profiles };
+      warnings = defaults.warnings;
+    }
     await setLocal({ [PROFILES_KEY]: config });
     await syncContentScripts();
-    return { ok: true, profiles: config.profiles, configVersion: config.configVersion, source };
+    return {
+      ok: true,
+      profiles: config.profiles,
+      configVersion: config.configVersion,
+      source,
+      warnings
+    };
   }
+  var captureDedupe = createCaptureDedupeStore({
+    read: async () => (await getLocal(CATEGORY_DEDUPE_KEY))[CATEGORY_DEDUPE_KEY],
+    write: (entries) => setLocal({ [CATEGORY_DEDUPE_KEY]: entries })
+  });
+  var captureLimiter = createSlidingWindowLimiter({ limit: 100, windowMs: 6e4 });
+  var crawlJobQueue = Promise.resolve();
+  function withCrawlJobLock(task) {
+    const run = crawlJobQueue.then(task, task);
+    crawlJobQueue = run.catch(() => void 0);
+    return run;
+  }
+  async function loadValidatedProfiles() {
+    const storedConfig = await migrateStoredProfiles();
+    const validation = validateProfiles(storedConfig);
+    return validation.valid ? validation.profiles : [];
+  }
+  function isTopFrameSender(sender) {
+    return sender?.frameId == null || sender.frameId === 0;
+  }
+  function isExtensionPageSender(sender) {
+    const root = chrome.runtime.getURL("");
+    return sender?.id === chrome.runtime.id && typeof sender.url === "string" && sender.url.startsWith(root);
+  }
+  function parseHttpUrl(value) {
+    try {
+      const url = new URL(value);
+      return /^https?:$/u.test(url.protocol) ? url : null;
+    } catch {
+      return null;
+    }
+  }
+  function categoryRejection(httpStatus, errorCode, error) {
+    return { ok: false, httpStatus, errorCode, ...error ? { error } : {} };
+  }
+  async function resolveCategorySender(sender, supplierCode) {
+    if (!sender?.tab || sender.tab.id == null || !isTopFrameSender(sender)) {
+      return categoryRejection(403, "INVALID_SENDER");
+    }
+    const pageUrl = parseHttpUrl(sender.url || sender.tab.url);
+    if (!pageUrl) return categoryRejection(403, "INVALID_SENDER");
+    const profile = matchProfile(await loadValidatedProfiles(), {
+      origin: pageUrl.origin,
+      pathname: pageUrl.pathname
+    });
+    if (!profile || typeof supplierCode !== "string" || profile.supplierCode !== supplierCode) {
+      return categoryRejection(403, "SUPPLIER_ORIGIN_MISMATCH");
+    }
+    if (NON_CAPTURABLE_SUPPLIER_CODES.has(profile.supplierCode)) {
+      return categoryRejection(400, "SUPPLIER_NOT_CAPTURABLE");
+    }
+    if (!profile.category?.enabled) return categoryRejection(404, "CATEGORY_CAPTURE_DISABLED");
+    return { ok: true, profile, origin: pageUrl.origin, tabId: sender.tab.id };
+  }
+  async function getCrawlJob() {
+    const { [CATEGORY_JOB_KEY]: job } = await getSession(CATEGORY_JOB_KEY);
+    return job && typeof job === "object" ? job : null;
+  }
+  async function getCrawlHistory(supplierCode) {
+    const { [CATEGORY_HISTORY_KEY]: history } = await getLocal(CATEGORY_HISTORY_KEY);
+    const entry = history && typeof history === "object" ? history[supplierCode] : null;
+    return entry && typeof entry === "object" ? entry : null;
+  }
+  async function recordCrawlHistory(job) {
+    const { [CATEGORY_HISTORY_KEY]: history } = await getLocal(CATEGORY_HISTORY_KEY);
+    await setLocal({
+      [CATEGORY_HISTORY_KEY]: {
+        ...history && typeof history === "object" ? history : {},
+        [job.supplierCode]: toCrawlHistoryEntry(job)
+      }
+    });
+  }
+  async function saveCrawlJob(job, { recordHistory = true } = {}) {
+    await setSession({ [CATEGORY_JOB_KEY]: job });
+    if (recordHistory && isTerminalCrawlStatus(job.status)) await recordCrawlHistory(job);
+  }
+  async function requireRunningCrawlJob(jobId, tabId) {
+    const job = await getCrawlJob();
+    return !!job && job.jobId === jobId && job.tabId === tabId && job.status === CRAWL_STATUSES.RUNNING;
+  }
+  async function postCategoryApi(path, payload) {
+    try {
+      return await apiRequest(path, { method: "POST", body: JSON.stringify(payload) });
+    } catch (error) {
+      return {
+        httpStatus: 0,
+        success: false,
+        errorCode: "NETWORK_ERROR",
+        message: String(error?.message || error)
+      };
+    }
+  }
+  function categoryApiFailure(res) {
+    return {
+      ok: false,
+      httpStatus: res.httpStatus || 0,
+      errorCode: res.errorCode || (res.httpStatus ? `HTTP_${res.httpStatus}` : "NETWORK_ERROR"),
+      error: res.message || null,
+      retryAfterMs: parseRetryAfter(res.retryAfter),
+      ...res.httpStatus ? {} : { networkError: true }
+    };
+  }
+  async function handleCategoryCapture(message, sender) {
+    const payload = message?.payload;
+    const source = await resolveCategorySender(sender, payload?.supplierCode);
+    if (!source.ok) return source;
+    const category = source.profile.category;
+    if (payload?.mode === "passive" && !category.passiveEnabled) {
+      return categoryRejection(404, "CATEGORY_CAPTURE_DISABLED");
+    }
+    if (payload?.mode === "crawl") {
+      if (!category.crawlEnabled) return categoryRejection(404, "CATEGORY_CAPTURE_DISABLED");
+      if (!await requireRunningCrawlJob(message.jobId, source.tabId)) {
+        return categoryRejection(403, "CRAWL_JOB_MISMATCH");
+      }
+    }
+    const validation = validateCapturePayload(payload, {
+      senderOrigin: source.origin,
+      expectedSupplierCode: source.profile.supplierCode
+    });
+    if (!validation.ok) return categoryRejection(400, validation.errorCode, validation.error);
+    const dedupeKey = buildCaptureDedupeKey(validation.payload);
+    if (await captureDedupe.has(dedupeKey)) return { ok: true, deduped: true };
+    const permit = captureLimiter.tryAcquire();
+    if (!permit.ok) {
+      return { ok: false, httpStatus: 429, errorCode: "LOCAL_RATE_LIMITED", retryAfterMs: permit.retryAfterMs };
+    }
+    const res = await postCategoryApi(CATEGORY_CAPTURES_PATH, validation.payload);
+    if (!res.success) return categoryApiFailure(res);
+    await captureDedupe.add(dedupeKey);
+    return { ok: true, data: normalizeCaptureResponse(res.data) };
+  }
+  async function handleCategoryTreeSnapshot(message, sender) {
+    const payload = message?.payload;
+    const source = await resolveCategorySender(sender, payload?.supplierCode);
+    if (!source.ok) return source;
+    if (!source.profile.category.crawlEnabled) return categoryRejection(404, "CATEGORY_CAPTURE_DISABLED");
+    if (!await requireRunningCrawlJob(message.jobId, source.tabId)) {
+      return categoryRejection(403, "CRAWL_JOB_MISMATCH");
+    }
+    const validation = validateTreeSnapshotPayload(payload, {
+      senderOrigin: source.origin,
+      expectedSupplierCode: source.profile.supplierCode
+    });
+    if (!validation.ok) return categoryRejection(400, validation.errorCode, validation.error);
+    const permit = captureLimiter.tryAcquire();
+    if (!permit.ok) {
+      return { ok: false, httpStatus: 429, errorCode: "LOCAL_RATE_LIMITED", retryAfterMs: permit.retryAfterMs };
+    }
+    const res = await postCategoryApi(CATEGORY_TREE_SNAPSHOT_PATH, validation.payload);
+    if (!res.success) return categoryApiFailure(res);
+    return { ok: true, data: normalizeTreeSnapshotResponse(res.data) };
+  }
+  async function isTabAlive(tabId) {
+    try {
+      await chrome.tabs.get(tabId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async function handleCategoryCrawlStart(message, sender) {
+    if (!isExtensionPageSender(sender)) return { ok: false, errorCode: "FORBIDDEN" };
+    let tab = null;
+    try {
+      [tab] = await assistantPanel.queryActiveTabs();
+    } catch {
+      tab = null;
+    }
+    const tabUrl = parseHttpUrl(tab?.url);
+    if (tab?.id == null || !tabUrl) return { ok: false, errorCode: "SUPPLIER_TAB_REQUIRED" };
+    const profile = matchProfile(await loadValidatedProfiles(), {
+      origin: tabUrl.origin,
+      pathname: tabUrl.pathname
+    });
+    if (!profile || message?.supplierCode && profile.supplierCode !== message.supplierCode) {
+      return { ok: false, errorCode: "SUPPLIER_TAB_REQUIRED" };
+    }
+    if (NON_CAPTURABLE_SUPPLIER_CODES.has(profile.supplierCode) || !profile.category?.enabled || !profile.category.crawlEnabled) {
+      return { ok: false, errorCode: "CRAWL_DISABLED" };
+    }
+    return withCrawlJobLock(async () => {
+      let existing = await getCrawlJob();
+      if (existing?.status === CRAWL_STATUSES.RUNNING) {
+        if (await isTabAlive(existing.tabId) && !isCrawlJobStale(existing)) {
+          return { ok: false, errorCode: "CRAWL_ALREADY_RUNNING", job: existing };
+        }
+        existing = finalizeCrawlJob(existing, CRAWL_STATUSES.INTERRUPTED);
+        await saveCrawlJob(existing);
+      }
+      const mode = message?.mode === "resume" || message?.mode === "retry" ? message.mode : "full";
+      const previous = await getCrawlHistory(profile.supplierCode);
+      const completedKeys = mode === "full" ? [] : previous?.completedKeys || [];
+      const onlyNodes = mode === "retry" ? sanitizeCrawlNodes(previous?.failedNodes) : null;
+      if (mode === "retry" && onlyNodes.length === 0) return { ok: false, errorCode: "NOTHING_TO_RETRY" };
+      const job = createCrawlJob({
+        jobId: crypto.randomUUID(),
+        supplierCode: profile.supplierCode,
+        tabId: tab.id,
+        origin: tabUrl.origin,
+        mode,
+        completedKeys
+      });
+      await saveCrawlJob(job);
+      let response = null;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {
+          type: "CATEGORY_CRAWL_RUN",
+          jobId: job.jobId,
+          supplierCode: profile.supplierCode,
+          completedKeys,
+          onlyNodes
+        });
+      } catch {
+        response = null;
+      }
+      if (!response?.ok) {
+        const errorCode = response?.errorCode || "CONTENT_SCRIPT_UNAVAILABLE";
+        const failed = finalizeCrawlJob(job, CRAWL_STATUSES.FAILED, { errorCode });
+        await saveCrawlJob(failed, { recordHistory: false });
+        return { ok: false, errorCode, job: failed };
+      }
+      return { ok: true, job };
+    });
+  }
+  async function handleCategoryCrawlAbort(sender) {
+    if (!isExtensionPageSender(sender)) return { ok: false, errorCode: "FORBIDDEN" };
+    return withCrawlJobLock(async () => {
+      const job = await getCrawlJob();
+      if (!job || job.status !== CRAWL_STATUSES.RUNNING) return { ok: true, job };
+      try {
+        await chrome.tabs.sendMessage(job.tabId, { type: "CATEGORY_CRAWL_STOP", jobId: job.jobId });
+      } catch {
+      }
+      const aborted = finalizeCrawlJob(job, CRAWL_STATUSES.ABORTED);
+      await saveCrawlJob(aborted);
+      return { ok: true, job: aborted };
+    });
+  }
+  async function handleCategoryCrawlProgress(message, sender) {
+    if (!sender?.tab || sender.tab.id == null || !isTopFrameSender(sender)) {
+      return { ok: false, errorCode: "INVALID_SENDER" };
+    }
+    return withCrawlJobLock(async () => {
+      const job = await getCrawlJob();
+      if (!job || job.jobId !== message?.jobId || job.tabId !== sender.tab.id) {
+        return { ok: false, errorCode: "CRAWL_JOB_MISMATCH" };
+      }
+      const next = mergeCrawlProgress(job, message.progress);
+      await saveCrawlJob(next);
+      return { ok: true, status: next.status };
+    });
+  }
+  function interruptCrawlForTab(tabId) {
+    return withCrawlJobLock(async () => {
+      const job = await getCrawlJob();
+      if (!job || job.tabId !== tabId || job.status !== CRAWL_STATUSES.RUNNING) return;
+      await saveCrawlJob(finalizeCrawlJob(job, CRAWL_STATUSES.INTERRUPTED));
+    }).catch(() => void 0);
+  }
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    void interruptCrawlForTab(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo?.status === "loading") void interruptCrawlForTab(tabId);
+  });
   async function migrateStoredProfiles() {
     const { [PROFILES_KEY]: storedConfig } = await getLocal(PROFILES_KEY);
     const migrated = migrateProfileConfig(storedConfig);
@@ -999,6 +1980,16 @@
             supplierCode: message.supplierCode,
             itemNumber: message.itemNumber
           });
+        case "CATEGORY_CAPTURE":
+          return handleCategoryCapture(message, sender);
+        case "CATEGORY_TREE_SNAPSHOT":
+          return handleCategoryTreeSnapshot(message, sender);
+        case "CATEGORY_CRAWL_START":
+          return handleCategoryCrawlStart(message, sender);
+        case "CATEGORY_CRAWL_ABORT":
+          return handleCategoryCrawlAbort(sender);
+        case "CATEGORY_CRAWL_PROGRESS":
+          return handleCategoryCrawlProgress(message, sender);
         default:
           return { ok: false, error: "\u672A\u77E5\u6D88\u606F\u7C7B\u578B" };
       }

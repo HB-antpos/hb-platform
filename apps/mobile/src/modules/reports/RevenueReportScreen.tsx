@@ -215,16 +215,18 @@ function TableText({
   style,
   numeric,
   noTruncate = false,
+  lines = 1,
 }: {
   children: string;
   style?: object;
   numeric?: boolean;
   noTruncate?: boolean;
+  lines?: number;
 }) {
   return (
     <Text
       variant="bodySmall"
-      numberOfLines={noTruncate || numeric ? undefined : 1}
+      numberOfLines={noTruncate || numeric ? undefined : lines}
       selectable
       style={[styles.tableCellText, numeric ? styles.numericText : null, style]}
     >
@@ -1185,7 +1187,8 @@ export function RevenueReportScreen({
         <TableText style={styles.rankText}>{formatOrdinal(rowIndex)}</TableText>
       </View>
       <View style={styles.branchColumn}>
-        <TableText style={styles.strongText}>{item.branchName || item.branchCode}</TableText>
+        {/* 最长的分店名（如 Discount General Charlestown）允许折两行，与右侧三行数字同高。 */}
+        <TableText style={styles.strongText} lines={2}>{item.branchName || item.branchCode}</TableText>
         <TableText style={styles.muted}>{item.branchCode}</TableText>
       </View>
       <View style={styles.amountColumn}>
@@ -2073,23 +2076,23 @@ const styles = StyleSheet.create({
     color: "#64748B",
     fontVariant: ["tabular-nums"],
   },
+  // 分店列吃掉全部剩余宽度；数字列按内容定宽（月度单店营业额约 $250,000、客单数 5 位以内）。
+  // 原先四列都用 flex 比例 + minWidth，Yoga 会把数字列 minWidth 撑出的差额全部从分店列扣掉，名称只剩两三个字母。
   branchColumn: {
-    flex: 1.15,
+    flex: 1,
+    flexShrink: 1,
     minWidth: 0,
   },
   amountColumn: {
-    flex: 0.9,
-    minWidth: 96,
+    width: 68,
     flexShrink: 0,
   },
   countColumn: {
-    flex: 0.62,
-    minWidth: 44,
+    width: 46,
     flexShrink: 0,
   },
   averageColumn: {
-    flex: 0.9,
-    minWidth: 64,
+    width: 56,
     flexShrink: 0,
   },
   chevronColumn: {

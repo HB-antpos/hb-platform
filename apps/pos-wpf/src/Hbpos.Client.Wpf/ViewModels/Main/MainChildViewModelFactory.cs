@@ -51,6 +51,7 @@ internal sealed class MainChildViewModelFactory
     private readonly IStoreReceiptProfileApiClient? _storeReceiptProfileApiClient;
     private readonly IRemoteMaintenanceService? _remoteMaintenanceService;
     private readonly IPaymentMethodSettingsService? _paymentMethodSettingsService;
+    private readonly ICatalogSyncStatusService? _catalogSyncStatusService;
 
     public MainChildViewModelFactory(
         IDeviceRegistrationWorkflowService deviceRegistrationWorkflowService,
@@ -93,7 +94,8 @@ internal sealed class MainChildViewModelFactory
         ISharedHeldOrderPublicationWorker? sharedHeldOrderPublicationWorker = null,
         IStoreReceiptProfileApiClient? storeReceiptProfileApiClient = null,
         IRemoteMaintenanceService? remoteMaintenanceService = null,
-        IPaymentMethodSettingsService? paymentMethodSettingsService = null)
+        IPaymentMethodSettingsService? paymentMethodSettingsService = null,
+        ICatalogSyncStatusService? catalogSyncStatusService = null)
     {
         _deviceRegistrationWorkflowService = deviceRegistrationWorkflowService;
         _receiptQueryService = receiptQueryService;
@@ -136,6 +138,7 @@ internal sealed class MainChildViewModelFactory
         _storeReceiptProfileApiClient = storeReceiptProfileApiClient;
         _remoteMaintenanceService = remoteMaintenanceService;
         _paymentMethodSettingsService = paymentMethodSettingsService;
+        _catalogSyncStatusService = catalogSyncStatusService;
     }
 
     public DeviceRegistrationViewModel CreateDeviceRegistrationViewModel(
@@ -441,7 +444,8 @@ internal sealed class MainChildViewModelFactory
             session: session,
             remoteMaintenanceService: _remoteMaintenanceService,
             confirmLinklyTerminalAssignmentAsync: confirmLinklyTerminalAssignmentAsync,
-            paymentMethodSettingsService: _paymentMethodSettingsService);
+            paymentMethodSettingsService: _paymentMethodSettingsService,
+            catalogSyncStatusService: _catalogSyncStatusService);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()

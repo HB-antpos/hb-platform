@@ -44,6 +44,34 @@ public sealed class RemoteMaintenanceCommandRunnerTests
     }
 
     [Fact]
+    public async Task 刚启动的非正式位置同名进程被识别为未结束的安装进程()
+    {
+        // 模拟 RustDesk 自解压外壳拉起的内层安装进程：同名 exe 从用户目录启动。
+        var name = "hbposprobe" + Guid.NewGuid().ToString("N")[..8];
+        var directory = Path.Combine(Path.GetTempPath(), name);
+        Directory.CreateDirectory(directory);
+        var detached = Path.Combine(directory, name + ".exe");
+        File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "PING.EXE"), detached);
+        var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HBPOS-probe", name + ".exe");
+        var runner = new WindowsRemoteMaintenanceCommandRunner();
+        var process = Process.Start(new ProcessStartInfo(detached, "-n 30 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+        try
+        {
+            // 启动后立即检测：此时模块表可能尚未初始化，必须仍能识别。
+            Assert.True(runner.IsDetachedProcessRunning(installed));
+        }
+        finally
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+            process.Dispose();
+            try { Directory.Delete(directory, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+
+        Assert.False(runner.IsDetachedProcessRunning(installed));
+    }
+
+    [Fact]
     public async Task 已取消的安装命令不会启动进程()
     {
         using var cancelled = new CancellationTokenSource();

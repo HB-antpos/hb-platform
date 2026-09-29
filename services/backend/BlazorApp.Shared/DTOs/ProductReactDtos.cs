@@ -298,6 +298,16 @@ namespace BlazorApp.Shared.DTOs
         /// 商品分类GUID过滤（支持多个）
         /// </summary>
         public List<string>? ProductCategoryGUIDs { get; set; }
+
+        /// <summary>
+        /// 供应商分类GUID过滤（含子分类）；可为网站供应商分类，也可为 200 商品对应的仓库分类
+        /// </summary>
+        public List<string>? SupplierCategoryGUIDs { get; set; }
+
+        /// <summary>
+        /// 仅看未归类：200 商品为未设置仓库分类，其他供应商为没有有效供应商分类归属
+        /// </summary>
+        public bool? SupplierCategoryUnassignedOnly { get; set; }
         public int? ProductType { get; set; }
 
         /// <summary>
@@ -383,6 +393,16 @@ namespace BlazorApp.Shared.DTOs
         /// 本地供应商编码
         /// </summary>
         public string? LocalSupplierCode { get; set; }
+
+        /// <summary>
+        /// 人工指定供应商分类GUID；为空表示不修改
+        /// </summary>
+        public string? SupplierCategoryGUID { get; set; }
+
+        /// <summary>
+        /// 为 true 时清除人工指定并恢复网站自动归类
+        /// </summary>
+        public bool? ClearSupplierCategory { get; set; }
     }
 
     /// <summary>

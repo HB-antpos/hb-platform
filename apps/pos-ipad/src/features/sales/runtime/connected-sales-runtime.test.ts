@@ -29,7 +29,10 @@ import type {
 } from "@/features/catalog/catalog-lookup-revalidation";
 import { PAYMENT_PERMISSION } from "@/features/payments/runtime/payment-checkout-runtime";
 import { PricingCart } from "@/features/sales/domain";
-import type { SalesFeedbackEvent } from "@/features/sales/ui/sales-presenter";
+import type {
+  SalesFeedbackEvent,
+  SalesLookupSelection,
+} from "@/features/sales/ui/sales-presenter";
 
 const item = (overrides: Partial<LocalCatalogMatch> = {}): LocalCatalogMatch => ({
   storeCode: "S1", productCode: "P-TEA", referenceCode: null, itemNumber: "100", displayName: "Tea", barcode: "930000000001", lookupCode: "930000000001", lookupCodeNormalized: "930000000001", retailPriceCents: 500, priceSource: 0, priceSourceLabel: "Retail", quantityFactor: 1, taxRateBasisPoints: 1_000, updatedAtIso: null, rowVersion: "1", productImage: null, discountRate: null, isSpecialProduct: false,
@@ -2241,3 +2244,420 @@ function paymentSecurity(
 function uuid(value: number): string {
   return `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 }
+
+const CONFLICT_CODE = "6405090401470";
+
+function flySwatter(
+  overrides: Partial<LocalCatalogMatch> = {},
+): LocalCatalogMatch {
+  return item({
+    productCode: "P-FLY",
+    itemNumber: "EXT-FLY",
+    displayName: "EXTENSION Fly Swatter",
+    barcode: "9300000000017",
+    lookupCode: CONFLICT_CODE,
+    lookupCodeNormalized: CONFLICT_CODE,
+    retailPriceCents: 899,
+    priceSource: 2,
+    priceSourceLabel: "set",
+    taxRateBasisPoints: null,
+    ...overrides,
+  });
+}
+
+function flower(overrides: Partial<LocalCatalogMatch> = {}): LocalCatalogMatch {
+  return flySwatter({
+    productCode: "P-FLOWER",
+    itemNumber: "FLW-1",
+    displayName: "flower",
+    barcode: CONFLICT_CODE,
+    retailPriceCents: 299,
+    priceSource: 0,
+    priceSourceLabel: "product",
+    ...overrides,
+  });
+}
+
+/** 一码多商品目录：精确候选首项为目录胜出项，其余为同码其它商品。 */
+class ConflictCatalog extends Catalog {
+  public candidateReads = 0;
+
+  public constructor(
+    values: readonly LocalCatalogMatch[],
+    private readonly conflicts: readonly LocalCatalogMatch[],
+  ) {
+    super(values);
+  }
+
+  public async findExactCandidates(
+    code: string,
+  ): Promise<readonly LocalCatalogMatch[]> {
+    this.candidateReads += 1;
+    const primary = await this.findExact(code);
+    if (primary === null) return [];
+    return [
+      primary,
+      ...this.conflicts.filter(
+        (candidate) =>
+          candidate.lookupCodeNormalized === primary.lookupCodeNormalized &&
+          candidate.productCode !== primary.productCode,
+      ),
+    ];
+  }
+}
+
+class CountingRevalidation implements CatalogLookupRevalidationPort {
+  public readonly requests: string[] = [];
+
+  public constructor(
+    private readonly result: (code: string) => CatalogLookupRevalidationResult,
+  ) {}
+
+  public async revalidate(code: string): Promise<CatalogLookupRevalidationResult> {
+    this.requests.push(code);
+    return this.result(code);
+  }
+
+  public async isCurrentBaseSnapshot(): Promise<boolean> {
+    return true;
+  }
+}
+
+function recordingSecurity(actions: string[]): SalesOperationSecurity {
+  return {
+    ...security(),
+    authorization: {
+      async authorizeAndRun(input, operation) {
+        actions.push(input.action);
+        return {
+          authorized: true,
+          value: await operation({
+            authorizationMode: "current-cashier",
+            requestingCashierId: "C1",
+            authorizingCashierId: null,
+            permissionCode: input.permissionCode,
+          }),
+        };
+      },
+    },
+  };
+}
+
+test("一码多商品扫码不自动加购并发布候选；选 Fly、flower、Fly 得到两行共 20.97", async () => {
+  const actions: string[] = [];
+  const catalog = new ConflictCatalog([flySwatter()], [flySwatter(), flower()]);
+  const revalidation = new CountingRevalidation(() => ({
+    kind: "found",
+    baseSnapshotId: "snapshot-1",
+    item: flySwatter(),
+  }));
+  const dependencies = connected({
+    catalog,
+    catalogRevalidation: revalidation,
+    catalogWorkScheduler: immediateScheduler(),
+    operationSecurity: recordingSecurity(actions),
+  });
+  const selections: SalesLookupSelection[] = [];
+  const outcomes: SalesFeedbackEvent[] = [];
+  const scanTargets: string[] = [];
+  dependencies.workflow.subscribeLookupSelection?.((selection) => {
+    selections.push(selection);
+  });
+  dependencies.workflow.subscribeLookupOutcome?.((outcome) => {
+    outcomes.push(outcome);
+  });
+  dependencies.workflow.subscribeScanTarget((lineId) => {
+    scanTargets.push(lineId);
+  });
+
+  assert.equal(
+    await dependencies.workflow.addByLookupCode(` ${CONFLICT_CODE} `, {
+      source: "hid",
+    }),
+    null,
+  );
+
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
+  assert.equal(dependencies.workflow.getPendingCatalogWorkCount(), 0);
+  assert.deepEqual(revalidation.requests, []);
+  assert.equal(outcomes.length, 0);
+  assert.equal(selections.length, 1);
+  assert.deepEqual(selections[0], {
+    selectionId: "lookup-1",
+    lookupCode: CONFLICT_CODE,
+    source: "hid",
+    candidates: [
+      {
+        productCode: "P-FLY",
+        itemNumber: "EXT-FLY",
+        barcode: "9300000000017",
+        lookupCode: CONFLICT_CODE,
+        displayName: "EXTENSION Fly Swatter",
+        unitPriceCents: 899,
+        discountRate: null,
+        priceSource: 2,
+      },
+      {
+        productCode: "P-FLOWER",
+        itemNumber: "FLW-1",
+        barcode: CONFLICT_CODE,
+        lookupCode: CONFLICT_CODE,
+        displayName: "flower",
+        unitPriceCents: 299,
+        discountRate: null,
+        priceSource: 0,
+      },
+    ],
+  });
+
+  for (const productCode of ["P-FLY", "P-FLOWER", "P-FLY"]) {
+    await dependencies.workflow.addLookupCandidate?.({
+      lookupCode: CONFLICT_CODE,
+      productCode,
+      source: "hid",
+    });
+    await waitFor(
+      () => dependencies.workflow.getPendingCatalogWorkCount() === 0,
+    );
+  }
+
+  const cart = dependencies.cart.getSnapshot();
+  assert.deepEqual(
+    cart.lines.map((line) => [
+      line.productCode,
+      line.displayName,
+      line.quantity,
+      line.unitPrice.cents,
+      line.actualAmount.cents,
+    ]),
+    [
+      ["P-FLY", "EXTENSION Fly Swatter", "2", 899, 1_798],
+      ["P-FLOWER", "flower", "1", 299, 299],
+    ],
+  );
+  assert.equal(cart.actualAmount.cents, 2_097);
+  assert.deepEqual(actions, [
+    "scan-add-item",
+    "select-match",
+    "select-match",
+    "select-match",
+  ]);
+  assert.deepEqual(scanTargets, ["line-1", "line-2", "line-1"]);
+  assert.deepEqual(
+    outcomes.map((outcome) => [outcome.kind, outcome.source, outcome.lineId]),
+    [
+      ["added", "hid", "line-1"],
+      ["added", "hid", "line-2"],
+      ["incremented", "hid", "line-1"],
+    ],
+  );
+  // 中文注释：每次选择都照常排入在线回查，保持与扫码一致的结账前收敛。
+  assert.deepEqual(revalidation.requests, [
+    CONFLICT_CODE,
+    CONFLICT_CODE,
+    CONFLICT_CODE,
+  ]);
+});
+
+test("远程回查只返回胜出项：不改写选中的非胜出商品，也不套用胜出价；胜出项本身仍按回查更新", async () => {
+  const catalog = new ConflictCatalog([flySwatter()], [flower()]);
+  const revalidation = new CountingRevalidation(() => ({
+    kind: "found",
+    baseSnapshotId: "snapshot-1",
+    item: flySwatter({ retailPriceCents: 950, displayName: "Fly Swatter v2" }),
+  }));
+  const dependencies = connected({
+    catalog,
+    catalogRevalidation: revalidation,
+    catalogWorkScheduler: immediateScheduler(),
+  });
+
+  await dependencies.workflow.addLookupCandidate?.({
+    lookupCode: CONFLICT_CODE,
+    productCode: "P-FLOWER",
+  });
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
+  assert.equal(revalidation.requests.length, 1);
+  assert.deepEqual(
+    dependencies.cart.getSnapshot().lines.map((line) => [
+      line.productCode,
+      line.displayName,
+      line.unitPrice.cents,
+    ]),
+    [["P-FLOWER", "flower", 299]],
+  );
+
+  await dependencies.workflow.addLookupCandidate?.({
+    lookupCode: CONFLICT_CODE,
+    productCode: "P-FLY",
+  });
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
+  assert.deepEqual(
+    dependencies.cart.getSnapshot().lines.map((line) => [
+      line.productCode,
+      line.displayName,
+      line.unitPrice.cents,
+    ]),
+    [
+      ["P-FLOWER", "flower", 299],
+      ["P-FLY", "Fly Swatter v2", 950],
+    ],
+  );
+});
+
+test("无在线校准时一码多商品同样发布候选，选择后按本地目录加购", async () => {
+  const dependencies = connected({
+    catalog: new ConflictCatalog([flySwatter()], [flower()]),
+  });
+  const selections: string[][] = [];
+  dependencies.workflow.subscribeLookupSelection?.((selection) => {
+    selections.push(selection.candidates.map((candidate) => candidate.productCode));
+  });
+
+  assert.equal(await dependencies.workflow.addByLookupCode(CONFLICT_CODE), null);
+  assert.deepEqual(selections, [["P-FLY", "P-FLOWER"]]);
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
+
+  assert.equal(
+    await dependencies.workflow.addLookupCandidate?.({
+      lookupCode: CONFLICT_CODE,
+      productCode: "P-FLOWER",
+    }),
+    "line-1",
+  );
+  assert.equal(dependencies.cart.getSnapshot().lines[0]?.productCode, "P-FLOWER");
+  assert.equal(dependencies.cart.getSnapshot().lines[0]?.unitPrice.cents, 299);
+});
+
+test("候选待选时丢弃 scan timing；没有页面订阅候选时按失败收口且绝不加购", async () => {
+  const originalComplete = scanTiming.complete;
+  const originalDiscard = scanTiming.discard;
+  const timing: string[] = [];
+  scanTiming.complete = (id, outcome) => {
+    timing.push(`complete:${id}:${outcome}`);
+  };
+  scanTiming.discard = (id) => {
+    timing.push(`discard:${id}`);
+  };
+  try {
+    const subscribed = connected({
+      catalog: new ConflictCatalog([flySwatter()], [flower()]),
+    });
+    subscribed.workflow.subscribeLookupSelection?.(() => undefined);
+    await subscribed.workflow.addByLookupCode(CONFLICT_CODE, {
+      source: "hid",
+      timingId: "scan-conflict",
+    });
+    assert.deepEqual(timing, ["discard:scan-conflict"]);
+
+    timing.length = 0;
+    const unsubscribed = connected({
+      catalog: new ConflictCatalog([flySwatter()], [flower()]),
+      catalogRevalidation: new CountingRevalidation(() => ({ kind: "unavailable" })),
+      catalogWorkScheduler: immediateScheduler(),
+    });
+    const outcomes: SalesFeedbackEvent[] = [];
+    unsubscribed.workflow.subscribeLookupOutcome?.((outcome) => {
+      outcomes.push(outcome);
+    });
+    assert.equal(
+      await unsubscribed.workflow.addByLookupCode(CONFLICT_CODE, {
+        source: "hid",
+        timingId: "scan-unobserved",
+      }),
+      null,
+    );
+    assert.deepEqual(outcomes.map((outcome) => outcome.kind), ["failed-blocked"]);
+    assert.deepEqual(timing, ["complete:scan-unobserved:failure"]);
+    assert.equal(unsubscribed.cart.getSnapshot().lines.length, 0);
+    assert.equal(unsubscribed.workflow.getPendingCatalogWorkCount(), 0);
+  } finally {
+    scanTiming.complete = originalComplete;
+    scanTiming.discard = originalDiscard;
+  }
+});
+
+test("单商品码仍直接加购并启动在线校准，只读一次精确候选", async () => {
+  const catalog = new ConflictCatalog([item()], []);
+  const revalidation = new CountingRevalidation(() => ({
+    kind: "found",
+    baseSnapshotId: "snapshot-1",
+    item: item(),
+  }));
+  const dependencies = connected({
+    catalog,
+    catalogRevalidation: revalidation,
+    catalogWorkScheduler: immediateScheduler(),
+  });
+  const selections: SalesLookupSelection[] = [];
+  dependencies.workflow.subscribeLookupSelection?.((selection) => {
+    selections.push(selection);
+  });
+
+  assert.equal(await dependencies.workflow.addByLookupCode("930000000001"), "line-1");
+  await waitFor(() => dependencies.workflow.getPendingCatalogWorkCount() === 0);
+
+  assert.equal(catalog.candidateReads, 1);
+  assert.deepEqual(selections, []);
+  assert.deepEqual(revalidation.requests, ["930000000001"]);
+  assert.equal(dependencies.cart.getSnapshot().lines[0]?.productCode, "P-TEA");
+});
+
+test("搜索框输入冲突码时列出全部候选，选择非胜出商品按其自身价格加购", async () => {
+  const dependencies = connected({
+    catalog: new ConflictCatalog([flySwatter()], [flower()]),
+  });
+
+  const results = await dependencies.workflow.searchProducts(` ${CONFLICT_CODE} `);
+  assert.deepEqual(
+    results.map((result) => [result.productCode, result.lookupCode, result.unitPriceCents]),
+    [
+      ["P-FLY", CONFLICT_CODE, 899],
+      ["P-FLOWER", CONFLICT_CODE, 299],
+    ],
+  );
+
+  await dependencies.workflow.addProduct(results[1]!);
+  await dependencies.workflow.addProduct(results[0]!);
+  assert.deepEqual(
+    dependencies.cart.getSnapshot().lines.map((line) => [
+      line.productCode,
+      line.unitPrice.cents,
+    ]),
+    [
+      ["P-FLOWER", 299],
+      ["P-FLY", 899],
+    ],
+  );
+  await assert.rejects(
+    () =>
+      dependencies.workflow.addProduct({ ...results[1]!, productCode: "P-FORGED" }),
+    /identity/iu,
+  );
+});
+
+test("结账准备冻结后候选选择 fail-closed；候选已从本地目录消失时按未找到失败", async () => {
+  const dependencies = connected({
+    catalog: new ConflictCatalog([flySwatter()], [flower()]),
+  });
+
+  await assert.rejects(
+    async () =>
+      dependencies.workflow.addLookupCandidate?.({
+        lookupCode: CONFLICT_CODE,
+        productCode: "P-GONE",
+      }),
+    hasCode("CATALOG_LOOKUP_NOT_FOUND"),
+  );
+
+  await dependencies.workflow.settlePendingCatalogWork({ timeoutMs: 0 });
+  await assert.rejects(
+    async () =>
+      dependencies.workflow.addLookupCandidate?.({
+        lookupCode: CONFLICT_CODE,
+        productCode: "P-FLOWER",
+      }),
+    hasCode(SALES_CHECKOUT_PREPARED),
+  );
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
+});

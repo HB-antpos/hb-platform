@@ -61,6 +61,66 @@ Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir:
 Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser
 
 [Code]
+var
+  UpdateProgressFile: String;
+  LastReportedUpdateProgress: Integer;
+
+procedure ReportUpdateProgress(Stage: String; Percent: Integer);
+begin
+  if UpdateProgressFile = '' then
+  begin
+    exit;
+  end;
+
+  // 中文注释：进度文件只供独立更新窗口显示进度，写入失败不能影响安装本身。
+  if not SaveStringToFile(UpdateProgressFile, Stage + ' ' + IntToStr(Percent), False) then
+  begin
+    Log('Failed to write update progress file: ' + UpdateProgressFile);
+  end;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  // 中文注释：更新窗口通过 /HBPOSPROGRESS="<文件>" 传入进度文件；手动安装不带该参数时不写进度。
+  UpdateProgressFile := ExpandConstant('{param:HBPOSPROGRESS|}');
+  LastReportedUpdateProgress := -1;
+  Result := True;
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+var
+  Ratio: Extended;
+  Percent: Integer;
+begin
+  if MaxProgress <= 0 then
+  begin
+    exit;
+  end;
+
+  // 中文注释：先转成浮点再算百分比，避免大安装包的进度值乘 100 后整型溢出；100% 留给安装收尾。
+  Ratio := CurProgress;
+  Ratio := Ratio / MaxProgress;
+  Percent := Trunc(Ratio * 100);
+  if Percent > 99 then
+  begin
+    Percent := 99;
+  end;
+
+  if Percent <> LastReportedUpdateProgress then
+  begin
+    LastReportedUpdateProgress := Percent;
+    ReportUpdateProgress('install', Percent);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    ReportUpdateProgress('finish', 100);
+  end;
+end;
+
 function NormalizeGuid(Value: String): String;
 begin
   Result := Trim(Value);
@@ -230,6 +290,8 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  ReportUpdateProgress('prepare', 0);
+
   // 中文注释：先按配置的旧 MSI ProductCode 精确迁移；未覆盖的门店再走严格注册表兜底。
   Result := UninstallConfiguredLegacyMsiProductCodes(NeedsRestart);
   if Result <> '' then

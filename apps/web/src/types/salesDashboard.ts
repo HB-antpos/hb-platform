@@ -123,6 +123,8 @@ export interface CompactSalesBoardStore {
   totalAmount: number
   totalQuantity: number
   domesticSupplierAmount: number
+  /** 该分店在区间内的总营业额（营业额日报同一口径，含全部供应商的商品），分店栏占比的分母；无统计时为 0 */
+  branchTotalAmount: number
   australianSupplierCode: string
   australianSupplierName: string
   /** 当前筛选下该分店有销售的商品款数 */

@@ -178,6 +178,70 @@ public sealed class CatalogSyncServiceTests
     }
 
     [Fact]
+    public async Task FullSyncAsync_ReplacesCodeConflictsAfterCatalogDownload()
+    {
+        var repository = new FakeLocalCatalogRepository();
+        repository.ComparePages.Enqueue([]);
+        var apiClient = new FakeCatalogApiClient();
+        apiClient.PageResponses.Enqueue(EmptyPage("S01"));
+        apiClient.CodeConflictResponses.Enqueue(new CatalogCodeConflictsResponse(
+            "S01",
+            Timestamp,
+            Available: true,
+            [
+                CreateConflictLookupItem("P-FLY", "EXTENSION Fly Swatter", PriceSourceKind.ProductSetCode, 8.99m),
+                CreateConflictLookupItem("P-FLOWER", "flower", PriceSourceKind.ProductBase, 2.99m)
+            ]));
+        var service = new LocalCatalogSyncService(repository, apiClient);
+
+        await service.FullSyncAsync("S01");
+
+        Assert.Equal(["S01"], apiClient.CodeConflictRequests);
+        var replaceCall = Assert.Single(repository.CodeConflictReplaceCalls);
+        Assert.Equal("S01", replaceCall.StoreCode);
+        Assert.Equal(["P-FLY", "P-FLOWER"], replaceCall.Items.Select(item => item.ProductCode));
+        Assert.Equal(2.99m, replaceCall.Items[1].RetailPrice);
+        Assert.Equal("6405090401470", replaceCall.Items[1].LookupCode);
+    }
+
+    [Fact]
+    public async Task FullSyncAsync_KeepsLocalCodeConflictsWhenServerHasNotComputedThem()
+    {
+        var repository = new FakeLocalCatalogRepository();
+        repository.ComparePages.Enqueue([]);
+        var apiClient = new FakeCatalogApiClient();
+        apiClient.PageResponses.Enqueue(EmptyPage("S01"));
+        apiClient.CodeConflictResponses.Enqueue(new CatalogCodeConflictsResponse("S01", Timestamp, Available: false, []));
+        var service = new LocalCatalogSyncService(repository, apiClient);
+
+        await service.FullSyncAsync("S01");
+
+        // 服务端刚从旧快照恢复时 Available=false，不能用空列表清掉本地已有的冲突候选。
+        Assert.Equal(["S01"], apiClient.CodeConflictRequests);
+        Assert.Empty(repository.CodeConflictReplaceCalls);
+    }
+
+    [Fact]
+    public async Task FullSyncAsync_WhenCodeConflictRequestFails_StillCompletesCatalogSync()
+    {
+        var repository = new FakeLocalCatalogRepository();
+        repository.ComparePages.Enqueue([]);
+        var apiClient = new FakeCatalogApiClient
+        {
+            // 旧版服务端没有该接口时同样表现为请求失败。
+            CodeConflictsException = new CatalogApiException("404 Not Found")
+        };
+        apiClient.PageResponses.Enqueue(EmptyPage("S01"));
+        var service = new LocalCatalogSyncService(repository, apiClient);
+
+        var result = await service.FullSyncAsync("S01");
+
+        Assert.NotNull(result);
+        Assert.Equal(["S01"], apiClient.CodeConflictRequests);
+        Assert.Empty(repository.CodeConflictReplaceCalls);
+    }
+
+    [Fact]
     public async Task FullSyncAsync_WhenLocalMatchesRemoteAndCompareHasNoChanges_SkipsFullDownload()
     {
         var repository = new FakeLocalCatalogRepository();
@@ -1134,6 +1198,34 @@ public sealed class CatalogSyncServiceTests
             DiscountRate: 0.2m);
     }
 
+    private static CatalogLookupItemDto CreateConflictLookupItem(
+        string productCode,
+        string displayName,
+        PriceSourceKind priceSource,
+        decimal retailPrice)
+    {
+        return CreateLookupItem(productCode, "6405090401470") with
+        {
+            DisplayName = displayName,
+            PriceSource = priceSource,
+            PriceSourceLabel = priceSource.ToString(),
+            RetailPrice = retailPrice
+        };
+    }
+
+    private static CatalogSyncPageResponse EmptyPage(string storeCode)
+    {
+        return new CatalogSyncPageResponse(
+            storeCode,
+            Timestamp,
+            Cursor: null,
+            [],
+            [],
+            NextCursor: null,
+            HasMore: false,
+            TotalCount: 0);
+    }
+
     private static DeletedLookupDto CreateDeletedLookup(string lookupCode)
     {
         return new DeletedLookupDto(
@@ -1318,6 +1410,17 @@ public sealed class CatalogSyncServiceTests
             return Task.CompletedTask;
         }
 
+        public List<(string StoreCode, IReadOnlyList<SellableItemDto> Items)> CodeConflictReplaceCalls { get; } = [];
+
+        public Task ReplaceCodeConflictItemsAsync(
+            string storeCode,
+            IEnumerable<SellableItemDto> items,
+            CancellationToken cancellationToken = default)
+        {
+            CodeConflictReplaceCalls.Add((storeCode, items.ToArray()));
+            return Task.CompletedTask;
+        }
+
         public Task<IReadOnlyList<CatalogPromotionRuleDto>> LoadPromotionRulesAsync(
             string storeCode,
             CancellationToken cancellationToken = default)
@@ -1491,6 +1594,28 @@ public sealed class CatalogSyncServiceTests
             return PromotionResponses.Count > 0
                 ? Task.FromResult(PromotionResponses.Dequeue())
                 : Task.FromResult(new CatalogPromotionsResponse(storeCode, Timestamp, []));
+        }
+
+        public Queue<CatalogCodeConflictsResponse> CodeConflictResponses { get; } = new();
+
+        public List<string> CodeConflictRequests { get; } = [];
+
+        public Exception? CodeConflictsException { get; init; }
+
+        public Task<CatalogCodeConflictsResponse> GetCodeConflictsAsync(
+            string storeCode,
+            CancellationToken cancellationToken = default)
+        {
+            CodeConflictRequests.Add(storeCode);
+            if (CodeConflictsException is not null)
+            {
+                return Task.FromException<CatalogCodeConflictsResponse>(CodeConflictsException);
+            }
+
+            // 默认模拟"服务端尚未算出冲突"，既有同步用例不会触发本地冲突表写入。
+            return CodeConflictResponses.Count > 0
+                ? Task.FromResult(CodeConflictResponses.Dequeue())
+                : Task.FromResult(new CatalogCodeConflictsResponse(storeCode, Timestamp, false, []));
         }
 
         public Task<CatalogSpecialProductMarkResponse> MarkSpecialProductAsync(

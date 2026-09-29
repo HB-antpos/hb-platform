@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.React;
@@ -45,13 +46,22 @@ namespace BlazorApp.Api.Controllers.React
         [Authorize(Policy = Permissions.StoreProducts.View)]
         public async Task<IActionResult> Grid([FromBody] StoreProductPriceQueryDto query)
         {
-            if (string.IsNullOrWhiteSpace(query.StoreCode))
+            // 单选 StoreCode 与多选 StoreCodes 至少有一个分店
+            var requestedStoreCodes = StoreProductPriceReactService.ResolveGridStoreCodes(query);
+            if (requestedStoreCodes.Count == 0)
             {
                 return Ok(new
                 {
                     success = false,
                     message = "请选择分店"
                 });
+            }
+
+            // 只靠前端分店选项不够：店长改请求里的分店编码就能查看其他分店价格。
+            // 服务层按同一个 ResolveGridStoreCodes 结果查询，这里逐个校验合并后的全部分店，任一越权即拒绝。
+            if (!await CanAccessStoresAsync(requestedStoreCodes))
+            {
+                return Forbid();
             }
 
             var result = await _service.GetGridDataAsync(query);
@@ -186,8 +196,10 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        // 2026-09-29 起停用：HQ 零售价表 → 本地 StoreRetailPrice 属于 HQ → HBweb 方向，统一返回 410。
         [HttpPost("sync-from-hq")]
         [Authorize(Roles = "Admin,管理员")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncFromHq([FromBody] SyncRetailPriceFromHqRequest? request)
         {
             request ??= new SyncRetailPriceFromHqRequest();
@@ -230,8 +242,15 @@ namespace BlazorApp.Api.Controllers.React
             return result.Success ? Ok(result) : BadRequest(result);
         }
 
+        // 分店价格同步兼容两个方向：本地 → HQ 继续可用；HQ → 本地（含未传方向，DTO 与 job 都会默认成 HqToLocal）
+        // 属于 HQ → HBweb 方向，2026-09-29 起返回 410。
         [HttpPost("store-price-transfer-jobs")]
         [Authorize(Roles = "Admin,管理员")]
+        [HqToHbwebSyncDisabled(
+            ArgumentName = nameof(request),
+            DirectionProperty = nameof(StorePriceTransferRequest.Direction),
+            AllowedDirection = StorePriceTransferDirectionConstants.LocalToHq
+        )]
         public async Task<IActionResult> StartStorePriceTransferJob(
             [FromBody] StorePriceTransferRequest? request,
             CancellationToken cancellationToken = default
@@ -303,6 +322,23 @@ namespace BlazorApp.Api.Controllers.React
             }
 
             return targetStoreCodes.All(storeCode => !string.IsNullOrWhiteSpace(storeCode) && storeCodes.Contains(storeCode));
+        }
+
+        /// <summary>
+        /// 请求中的每个分店都必须在当前用户可访问范围内（任一越权即拒绝）；Admin、仓库角色不限分店。
+        /// 受限用户传入空列表时同样拒绝，避免调用方漏传分店时退化为不校验。
+        /// </summary>
+        private async Task<bool> CanAccessStoresAsync(IEnumerable<string?> requestedStoreCodes)
+        {
+            var storeCodes = await GetAccessibleStoreCodesAsync();
+            if (storeCodes == null)
+            {
+                return true;
+            }
+
+            var requested = requestedStoreCodes.ToList();
+            return requested.Count > 0
+                && requested.All(storeCode => !string.IsNullOrWhiteSpace(storeCode) && storeCodes.Contains(storeCode));
         }
 
         private async Task<HashSet<string>?> GetAccessibleStoreCodesAsync()

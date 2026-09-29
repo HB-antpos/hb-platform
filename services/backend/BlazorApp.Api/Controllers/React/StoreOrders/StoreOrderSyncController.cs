@@ -1,5 +1,6 @@
 using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Api.Features.StoreOrders.Sync;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -7,6 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace BlazorApp.Api.Controllers.React.StoreOrders;
 
+/// <summary>
+/// 分店订货单 HQ → 本地 WareHouseOrder 同步。2026-09-21 只读核查时 HQ 分店订货单主表最后变更停在 2026-06-21
+/// （订货业务已迁到 HBweb），2026-09-29 起四个发起同步的入口统一返回 410；两个查询 job 状态的只读接口保留。
+/// </summary>
 [ApiController]
 [Route(StoreOrderControllerBase.BaseRoute)]
 [Authorize]
@@ -21,6 +26,7 @@ public sealed class StoreOrderSyncController(
     /// 从 HQ 同步本地不存在的仓库订单（主表 + 明细表）
     /// </summary>
     [HttpPost("sync-missing-orders")]
+    [HqToHbwebSyncDisabled]
     public async Task<IActionResult> SyncMissingOrders(
         [FromBody] SyncMissingOrdersRequestDto? request
     )
@@ -59,6 +65,7 @@ public sealed class StoreOrderSyncController(
     /// 创建分店订货缺失订单同步 job。
     /// </summary>
     [HttpPost("sync-missing-orders/jobs")]
+    [HqToHbwebSyncDisabled]
     public async Task<IActionResult> CreateSyncMissingOrdersJob(
         [FromBody] SyncMissingOrdersRequestDto? request
     )
@@ -154,6 +161,7 @@ public sealed class StoreOrderSyncController(
     /// 创建分店订货 HQ 全量同步 job。全量同步只允许真实 Admin，且忽略前端筛选条件。
     /// </summary>
     [HttpPost("hq-sync/full/jobs")]
+    [HqToHbwebSyncDisabled]
     public async Task<IActionResult> CreateStoreOrderHqFullSyncJob(
         [FromBody] StoreOrderHqSyncRequestDto? request
     )
@@ -201,6 +209,7 @@ public sealed class StoreOrderSyncController(
     /// 创建分店订货 HQ 增量同步 job。
     /// </summary>
     [HttpPost("hq-sync/incremental/jobs")]
+    [HqToHbwebSyncDisabled]
     public async Task<IActionResult> CreateStoreOrderHqIncrementalSyncJob(
         [FromBody] StoreOrderHqSyncRequestDto? request
     )

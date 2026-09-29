@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BlazorApp.Api.Controllers.React;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -189,7 +190,7 @@ public sealed class SalesReportStoreScopeTests
     {
         var service = new Mock<ISalesDashboardReactService>(MockBehavior.Strict);
         List<string>? capturedBranches = new();
-        service.Setup(x => x.GetSalesDetailReportAsync(
+        service.Setup(x => x.GetSalesDetailReportFilteredAsync(
                 It.IsAny<DateRangeDto>(),
                 SalesDetailKind.Australia,
                 It.IsAny<List<string>?>(),
@@ -200,9 +201,12 @@ public sealed class SalesReportStoreScopeTests
                 It.IsAny<int>(),
                 It.IsAny<int>(),
                 It.IsAny<IReadOnlyCollection<SalesDetailSection>?>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken>(
-                (_, _, branches, _, _, _, _, _, _, _, _) => capturedBranches = branches)
+                It.IsAny<CancellationToken>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<List<string>?>()))
+            .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken, List<string>?, List<string>?, List<string>?>(
+                (_, _, branches, _, _, _, _, _, _, _, _, _, _, _) => capturedBranches = branches)
             .ReturnsAsync(new ProductReportResponseDto<SalesDetailReportDto> { Data = new() });
         var userService = new Mock<IUserService>(MockBehavior.Strict);
 
@@ -327,6 +331,71 @@ public sealed class SalesReportStoreScopeTests
         service.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task 营业额快照含今天时附带最近统计发布时间()
+    {
+        var today = SalesStatisticsBusinessDate.Today();
+        var publishedAt = new DateTime(2026, 9, 24, 6, 12, 0, DateTimeKind.Utc);
+        var service = new Mock<ISalesDashboardReactService>(MockBehavior.Strict);
+        SetupRevenueSnapshot(service);
+        service.Setup(x => x.GetStatisticsFreshnessAsync())
+            .ReturnsAsync(new StatisticsFreshnessDto { LastSuccessfulAtUtc = publishedAt, LatestRunStatus = "Success" });
+
+        var response = await CreateRevenueController(service.Object, CreateUserService(new[] { "S1" }).Object)
+            .GetRevenueReportSnapshot(today, today);
+
+        Assert.Equal(publishedAt, ReadLastSuccessfulAt(response));
+        service.VerifyAll();
+    }
+
+    [Fact]
+    public async Task 营业额快照为历史日期时不读取统计发布时间()
+    {
+        var service = new Mock<ISalesDashboardReactService>(MockBehavior.Strict);
+        SetupRevenueSnapshot(service);
+        service.Setup(x => x.GetStatisticsFreshnessAsync()).ReturnsAsync(new StatisticsFreshnessDto());
+
+        var response = await CreateRevenueController(service.Object, CreateUserService(new[] { "S1" }).Object)
+            .GetRevenueReportSnapshot(StartDate, StartDate);
+
+        Assert.Null(ReadLastSuccessfulAt(response));
+        service.Verify(x => x.GetStatisticsFreshnessAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task 统计发布时间读取失败时营业额快照照常返回()
+    {
+        var today = SalesStatisticsBusinessDate.Today();
+        var service = new Mock<ISalesDashboardReactService>(MockBehavior.Strict);
+        SetupRevenueSnapshot(service);
+        service.Setup(x => x.GetStatisticsFreshnessAsync()).ThrowsAsync(new InvalidOperationException("db down"));
+
+        var response = await CreateRevenueController(service.Object, CreateUserService(new[] { "S1" }).Object)
+            .GetRevenueReportSnapshot(today, today);
+
+        Assert.Null(ReadLastSuccessfulAt(response));
+        service.VerifyAll();
+    }
+
+    private static void SetupRevenueSnapshot(Mock<ISalesDashboardReactService> service)
+    {
+        service.Setup(x => x.GetRevenueReportSnapshotAsync(
+                It.IsAny<DateRangeDto>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RevenueReportSnapshotDto());
+    }
+
+    private static DateTime? ReadLastSuccessfulAt(IActionResult response)
+    {
+        var body = Assert.IsType<OkObjectResult>(response).Value!;
+        var property = body.GetType().GetProperty("statisticsLastSuccessfulAtUtc");
+        Assert.NotNull(property);
+        return (DateTime?)property!.GetValue(body);
+    }
+
     private static void SetupReportService(
         Mock<ISalesDashboardReactService> service,
         string endpoint,
@@ -335,7 +404,7 @@ public sealed class SalesReportStoreScopeTests
     {
         if (endpoint == "sales-detail")
         {
-            service.Setup(x => x.GetSalesDetailReportAsync(
+            service.Setup(x => x.GetSalesDetailReportFilteredAsync(
                     It.IsAny<DateRangeDto>(),
                     SalesDetailKind.Australia,
                     It.IsAny<List<string>?>(),
@@ -346,9 +415,12 @@ public sealed class SalesReportStoreScopeTests
                     It.IsAny<int>(),
                     It.IsAny<int>(),
                     It.IsAny<IReadOnlyCollection<SalesDetailSection>?>(),
-                    It.IsAny<CancellationToken>()))
-                .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken>(
-                    (_, _, branches, _, _, _, _, _, _, _, _) => capture(branches, null))
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<List<string>?>()))
+                .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken, List<string>?, List<string>?, List<string>?>(
+                    (_, _, branches, _, _, _, _, _, _, _, _, _, _, _) => capture(branches, null))
                 .ReturnsAsync(new ProductReportResponseDto<SalesDetailReportDto> { Data = new() });
             return;
         }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HB Supplier Order",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Hot Bargain supplier order purchase-cycle assistant for supplier list pages.",
   "permissions": ["storage", "scripting"],
   "host_permissions": ["https://hotbargain.vip/*"],

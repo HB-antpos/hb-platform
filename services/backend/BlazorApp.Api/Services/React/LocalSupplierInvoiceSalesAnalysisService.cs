@@ -213,6 +213,52 @@ namespace BlazorApp.Api.Services.React
             );
         }
 
+        public async Task<List<LocalSupplierCategoryNodeDto>> GetPurchaseSalesAnalysisCategoryTreeAsync(string supplierCode)
+        {
+            var supplier = supplierCode.Trim();
+            var nodes = new List<LocalSupplierCategoryNodeDto>();
+            if (string.Equals(supplier, "200", StringComparison.OrdinalIgnoreCase))
+            {
+                var categories = await _db.Queryable<WarehouseCategory>()
+                    .Where(category => category.IsDeleted == false && category.IsActive)
+                    .Select(category => new { category.CategoryGUID, category.ParentGUID, category.CategoryName, category.SortOrder })
+                    .ToListAsync();
+                nodes.AddRange(categories.Select(category => new LocalSupplierCategoryNodeDto {
+                    CategoryGuid = category.CategoryGUID, ParentGuid = category.ParentGUID,
+                    Name = category.CategoryName, SortOrder = category.SortOrder, IsActive = true
+                }));
+            }
+            else
+            {
+                var categories = await _db.Queryable<LocalSupplierCategory>()
+                    .Where(category => category.LocalSupplierCode == supplier && category.IsDeleted == false && category.IsActive)
+                    .Select(category => new { category.CategoryGUID, category.ParentGUID, category.CategoryName, category.SortOrder, category.FullPath, category.Depth })
+                    .ToListAsync();
+                nodes.AddRange(categories.Select(category => new LocalSupplierCategoryNodeDto {
+                    CategoryGuid = category.CategoryGUID, ParentGuid = category.ParentGUID,
+                    Name = category.CategoryName, SortOrder = category.SortOrder, FullPath = category.FullPath,
+                    Depth = category.Depth, IsActive = true
+                }));
+            }
+            var byGuid = nodes.ToDictionary(node => node.CategoryGuid, StringComparer.OrdinalIgnoreCase);
+            foreach (var node in nodes) node.Children = new List<LocalSupplierCategoryNodeDto>();
+            var roots = new List<LocalSupplierCategoryNodeDto>();
+            foreach (var node in nodes)
+            {
+                if (!string.IsNullOrWhiteSpace(node.ParentGuid) && byGuid.TryGetValue(node.ParentGuid, out var parent)) parent.Children.Add(node);
+                else roots.Add(node);
+            }
+            static void Sort(List<LocalSupplierCategoryNodeDto> list)
+            {
+                list.Sort((a, b) => (a.SortOrder ?? int.MaxValue) != (b.SortOrder ?? int.MaxValue)
+                    ? (a.SortOrder ?? int.MaxValue).CompareTo(b.SortOrder ?? int.MaxValue)
+                    : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+                foreach (var node in list) Sort(node.Children);
+            }
+            Sort(roots);
+            return roots;
+        }
+
         /// <summary>
         /// 为当前页每行填充进货事件与逐日销量序列。
         /// 窗口：上次进货日（没有则最近进货日前 30 天）到布里斯班业务日期今天。
@@ -653,6 +699,11 @@ namespace BlazorApp.Api.Services.React
             {
                 StoreCode = NormalizeText(query.StoreCode),
                 SupplierCode = NormalizeText(query.SupplierCode),
+                SupplierCategoryGuids = query.SupplierCategoryGuids?
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
                 OrderDateStart = orderDateStart,
                 OrderDateEnd = orderDateEnd,
                 Keyword = NormalizeText(query.Keyword),
@@ -676,6 +727,11 @@ namespace BlazorApp.Api.Services.React
             if (string.IsNullOrWhiteSpace(query.SupplierCode))
             {
                 return (false, "供应商不能为空。");
+            }
+
+            if (query.SupplierCategoryGuids?.Count > 100)
+            {
+                return (false, "供应商分类最多选择 100 个。");
             }
 
             if (!query.OrderDateStart.HasValue || !query.OrderDateEnd.HasValue)
@@ -748,12 +804,40 @@ namespace BlazorApp.Api.Services.React
                 );
             }
 
+            var categoryGuidParameterNames = new List<string>();
+            foreach (var guid in normalized.SupplierCategoryGuids ?? new List<string>())
+            {
+                var parameterName = $"@SupplierCategoryGuid{categoryGuidParameterNames.Count}";
+                parameters.Add(new SugarParameter(parameterName, guid));
+                categoryGuidParameterNames.Add(parameterName);
+            }
+
             var storeCodes = ResolveStoreCodes(normalized.StoreCode, scopedStoreCodes);
             var storeParameterNames = AddStoreParameters(parameters, storeCodes);
             var invoiceStoreFilter = BuildStoreFilter("h.StoreCode", storeParameterNames);
             var invoiceDateFilter = BuildInvoiceDateFilter(normalized);
             var productFilter = BuildProductFilter(normalized);
             var orderBy = BuildPurchaseSalesOrderBy(normalized);
+            var categoryFilter = BuildSupplierCategoryFilter(categoryGuidParameterNames);
+            var categoryCte = categoryGuidParameterNames.Count == 0
+                ? string.Empty
+                : "\nLocalCategoryScope AS (\n"
+                    + "    SELECT c.CategoryGUID FROM [LocalSupplierCategory] c\n"
+                    + "    WHERE @SupplierCode <> N'200' AND c.LocalSupplierCode = @SupplierCode AND c.IsDeleted = 0 AND c.IsActive = 1\n"
+                    + "      AND c.CategoryGUID IN (" + string.Join(", ", categoryGuidParameterNames) + ")\n"
+                    + "    UNION ALL\n"
+                    + "    SELECT child.CategoryGUID FROM [LocalSupplierCategory] child\n"
+                    + "    INNER JOIN LocalCategoryScope parent ON child.ParentGUID = parent.CategoryGUID\n"
+                    + "    WHERE child.LocalSupplierCode = @SupplierCode AND child.IsDeleted = 0 AND child.IsActive = 1\n"
+                    + "), WarehouseCategoryScope AS (\n"
+                    + "    SELECT c.CategoryGUID FROM [WarehouseCategory] c\n"
+                    + "    WHERE @SupplierCode = N'200' AND c.IsDeleted = 0 AND c.IsActive = 1\n"
+                    + "      AND c.CategoryGUID IN (" + string.Join(", ", categoryGuidParameterNames) + ")\n"
+                    + "    UNION ALL\n"
+                    + "    SELECT child.CategoryGUID FROM [WarehouseCategory] child\n"
+                    + "    INNER JOIN WarehouseCategoryScope parent ON child.ParentGUID = parent.CategoryGUID\n"
+                    + "    WHERE child.IsDeleted = 0 AND child.IsActive = 1\n"
+                    + "),\n";
 
             var coreSql =
                 $$"""
@@ -769,7 +853,7 @@ WITH FilteredInvoices AS (
     WHERE
         h.IsDeleted = 0
         AND CAST(COALESCE(h.InboundDate, h.OrderDate, h.CreatedAt) AS date) IS NOT NULL{{invoiceStoreFilter}}{{invoiceDateFilter}}
-),
+),{{categoryCte}}
 DetailResolved AS (
     -- 先把明细与分店零售价关联、确定最终 ProductCode，再去 JOIN Product。
     -- 原先 JOIN Product 的条件是跨 d/srp 两表的 COALESCE 表达式，优化器无法用 ProductCode 索引，
@@ -790,7 +874,7 @@ DetailResolved AS (
     LEFT JOIN [StoreRetailPrice] srp
         ON srp.UUID = d.StoreProductCode
         AND srp.IsDeleted = 0
-    WHERE NULLIF(fi.StoreCode, N'') IS NOT NULL
+    WHERE NULLIF(fi.StoreCode, N'') IS NOT NULL{{categoryFilter}}
 ),
 PurchaseDailyAggregation AS (
     SELECT
@@ -1250,6 +1334,23 @@ ORDER BY
             }
 
             return builder.ToString();
+        }
+
+        private static string BuildSupplierCategoryFilter(IReadOnlyList<string> categoryParameterNames)
+        {
+            if (categoryParameterNames.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var productCode = "COALESCE(NULLIF(d.ProductCode, N''), NULLIF(srp.ProductCode, N''))";
+            return "\n        AND EXISTS (\n"
+                + "            SELECT 1 FROM [Product] categoryProduct\n"
+                + "            WHERE categoryProduct.ProductCode = " + productCode + "\n"
+                + "              AND categoryProduct.IsDeleted = 0\n"
+                + "              AND ((@SupplierCode = N'200' AND (categoryProduct.LocalSupplierCode = N'200' OR categoryProduct.LocalSupplierCode IS NULL OR categoryProduct.LocalSupplierCode = N'') AND EXISTS (SELECT 1 FROM WarehouseCategoryScope wc WHERE wc.CategoryGUID = categoryProduct.WarehouseCategoryGUID))\n"
+                + "                OR (@SupplierCode <> N'200' AND EXISTS (SELECT 1 FROM [LocalSupplierCategoryProductAssignment] assignment INNER JOIN LocalCategoryScope lc ON lc.CategoryGUID = assignment.CategoryGUID WHERE assignment.ProductCode = categoryProduct.ProductCode AND assignment.LocalSupplierCode = categoryProduct.LocalSupplierCode AND assignment.LocalSupplierCode = @SupplierCode)))\n"
+                + "        )";
         }
 
         private static string BuildPurchaseSalesOrderBy(

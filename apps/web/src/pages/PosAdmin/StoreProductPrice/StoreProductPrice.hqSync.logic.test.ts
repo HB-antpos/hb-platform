@@ -77,82 +77,36 @@ async function main() {
   })
   if (transferTypeFailure) failures.push(transferTypeFailure)
 
-  const pagePayloadFailure = await runTest('页面应同时传递 startDate 和 endDate', () => {
-    assert(
-      pageSource.includes('selectedStoreCodes: values.selectedStoreCodes'),
-      '页面应总是把必填分店列表写入请求体',
-    )
-    assert(
-      pageSource.includes("startDate: values.dateRange[0].format('YYYY-MM-DD')"),
-      '页面应继续从范围选择器读取 startDate',
-    )
-    assert(
-      pageSource.includes("endDate: values.dateRange[1].format('YYYY-MM-DD')"),
-      '页面应从范围选择器读取 endDate',
-    )
+  // HQ 零售价 → HBweb 的「从HQ更新零售价」已于 2026-09-29 停用（后端返回 410），页面不得再保留入口与弹窗。
+  const hqSyncRemovedFailure = await runTest('页面不再提供从HQ更新零售价的按钮与弹窗', () => {
+    for (const removed of [
+      'syncFromHq',
+      'SyncFromHqRequest',
+      'hqSyncForm',
+      'hqSyncModalOpen',
+      'openHqSyncModal',
+      'selectAllHqSyncStores',
+      'handleSyncFromHq',
+      "t('posAdmin.productPrice.updateFromHQ'",
+      "t('posAdmin.productPrice.hqSyncTitle'",
+      "t('posAdmin.productPrice.hqSyncFailed'",
+    ]) {
+      assert(!pageSource.includes(removed), `页面不应再包含 HQ → HBweb 零售价同步代码：${removed}`)
+    }
   })
-  if (pagePayloadFailure) failures.push(pagePayloadFailure)
+  if (hqSyncRemovedFailure) failures.push(hqSyncRemovedFailure)
 
-  const pageRequiredFailure = await runTest('页面应要求选择分店和日期范围', () => {
-    assert(
-      pageSource.includes("rules={[{ required: true, message: t('posAdmin.productPrice.selectStoreRequired', '请选择分店') }]}"),
-      'HQ 同步弹窗应要求选择分店',
-    )
-    assert(
-      pageSource.includes("rules={[{ required: true, message: t('posAdmin.productPrice.selectDateRangeRequired', '请选择日期范围') }]}"),
-      'HQ 同步弹窗应要求选择日期范围',
-    )
-  })
-  if (pageRequiredFailure) failures.push(pageRequiredFailure)
-
-  const selectAllFailure = await runTest('页面应提供从 storeOptions 生成分店全选的逻辑', () => {
-    assert(
-      pageSource.includes('const selectAllHqSyncStores = () => {'),
-      '页面应声明 HQ 同步分店全选函数',
-    )
-    assert(
-      pageSource.includes("hqSyncForm.setFieldValue('selectedStoreCodes', storeOptions.map((option) => option.value))"),
-      '全选函数应把所有分店编码写入 selectedStoreCodes',
-    )
-    assert(
-      pageSource.includes("t('posAdmin.productPrice.selectAllStores', '全选分店')"),
-      'HQ 同步弹窗应显示全选分店按钮文案',
-    )
-  })
-  if (selectAllFailure) failures.push(selectAllFailure)
-
-  const selectAllBindingFailure = await runTest('HQ 同步分店多选框应直接绑定到 Form.Item 字段', () => {
-    assert(
-      !pageSource.includes('<Form.Item name="selectedStoreCodes" label={t('),
-      'selectedStoreCodes 不应包住 Space.Compact，否则 Select 不会接收表单字段 value/onChange',
-    )
-    assert(
-      pageSource.includes('<Form.Item name="selectedStoreCodes" noStyle rules={[{ required: true, message: t('),
-      'selectedStoreCodes 应使用 noStyle Form.Item 直接包住 Select',
-    )
-    assert(
-      pageSource.includes('<Button htmlType="button" icon={<CheckSquareOutlined />} onClick={selectAllHqSyncStores}>'),
-      '全选按钮应声明 htmlType="button"，避免被表单上下文当成提交按钮',
-    )
-  })
-  if (selectAllBindingFailure) failures.push(selectAllBindingFailure)
-
-  const pageErrorFailure = await runTest('页面应优先展示后端返回的失败文案', () => {
-    assert(
-      pageSource.includes("error instanceof Error ? error.message : t('posAdmin.productPrice.hqSyncFailed', '从HQ同步失败')"),
-      '页面 catch 分支应优先展示后端错误消息，而不是固定提示',
-    )
-  })
-  if (pageErrorFailure) failures.push(pageErrorFailure)
-
-  const priceTransferPageFailure = await runTest('页面应新增独立 HQ/本地价格同步 job 弹窗', () => {
+  const priceTransferPageFailure = await runTest('HQ/本地价格同步 job 弹窗只保留本地 -> HQ 方向', () => {
     assert(
       pageSource.includes("t('posAdmin.productPrice.priceTransfer', 'HQ/本地价格同步')"),
       '页面应显示独立的 HQ/本地价格同步入口',
     )
+    // HQ -> 本地方向属于 HQ → HBweb，已于 2026-09-29 停用；后端也只放行 LocalToHq。
     assert(
-      pageSource.includes("direction: 'HqToLocal'"),
-      '弹窗默认方向应为 HQ -> 本地',
+      pageSource.includes("direction: 'LocalToHq'") &&
+        !pageSource.includes("direction: 'HqToLocal'") &&
+        !pageSource.includes("value: 'HqToLocal'"),
+      '弹窗默认方向应为本地 -> HQ，且不再提供 HQ -> 本地选项',
     )
     assert(
       pageSource.includes('startStorePriceTransferJob(dto)'),
@@ -234,7 +188,7 @@ async function main() {
     )
     assert(
       pageSource.includes('if (isFormValidationError(error)) return'),
-      'handleSyncFromHq 应让字段级校验错误留在表单内展示，不弹出同步失败提示',
+      '分店价格同步提交应让字段级校验错误留在表单内展示，不弹出同步失败提示',
     )
   })
   if (validationErrorFailure) failures.push(validationErrorFailure)

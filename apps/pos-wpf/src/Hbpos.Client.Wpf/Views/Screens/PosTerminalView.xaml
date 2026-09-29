@@ -15,7 +15,7 @@
              KeyDown="AttendanceQrView_KeyDown"
              d:DesignHeight="672"
              d:DesignWidth="1366"
-             Background="{StaticResource PosScreenBackgroundBrush}">
+             Background="{DynamicResource PosScreenBackgroundBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <converters:AlternationIndexToRowNumberConverter x:Key="RowNumberConverter" />
@@ -24,13 +24,13 @@
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringIsEmptyToVis" Invert="True" />
 
         <Style x:Key="CartColumnHeaderCenterStyle" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#FFF8FAFD" />
-            <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="FontSize" Value="{StaticResource PosFontSizeSmall}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Padding" Value="10,8" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
@@ -44,8 +44,8 @@
         </Style>
 
         <Style x:Key="CartDataGridRowStyle" TargetType="DataGridRow">
-            <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-            <Setter Property="BorderBrush" Value="#FFE2E2E6" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="SnapsToDevicePixels" Value="True" />
             <Setter Property="Template">
@@ -56,7 +56,7 @@
                                     Width="88"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Stretch"
-                                    Background="{StaticResource PosDangerBrush}"
+                                    Background="{DynamicResource PosDangerBrush}"
                                     Foreground="White"
                                     AutomationProperties.Name="{loc:Loc Remove}"
                                     Command="{Binding DataContext.RemoveLineCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
@@ -72,7 +72,7 @@
                                                              HorizontalAlignment="Center" />
                                     <TextBlock Margin="0,4,0,0"
                                                Text="{loc:Loc Remove}"
-                                               FontSize="11"
+                                               FontSize="13"
                                                FontWeight="SemiBold"
                                                TextAlignment="Center" />
                                 </StackPanel>
@@ -97,20 +97,20 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFE8F1FF" />
-                    <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
-                    <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                     <Setter Property="BorderThickness" Value="4,0,0,1" />
                 </Trigger>
                 <DataTrigger Binding="{Binding HasZeroUnitPrice}" Value="True">
-                    <Setter Property="Background" Value="#FFFFEEF0" />
-                    <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
-                    <Setter Property="BorderBrush" Value="{StaticResource PosDangerBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsReturnLine}" Value="True">
-                    <Setter Property="Background" Value="#FFFFEEF0" />
-                    <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
-                    <Setter Property="BorderBrush" Value="{StaticResource PosDangerBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -122,7 +122,7 @@
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="Transparent" />
-                    <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -130,10 +130,10 @@
         <Style x:Key="CartZeroPriceAmountTextStyle" TargetType="TextBlock">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding HasZeroUnitPrice}" Value="True">
-                    <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsReturnLine}" Value="True">
-                    <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -183,7 +183,7 @@
             <Setter Property="Margin" Value="0,0,6,0" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Background" Value="#00FFFFFF" />
-            <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="IsTabStop" Value="False" />
@@ -199,11 +199,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFFFFFFF" />
-                                <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFE2E2E6" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceStrongBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -245,22 +245,22 @@
         </Style>
 
         <Style x:Key="CartQuantityIncreaseButtonStyle" TargetType="Button" BasedOn="{StaticResource CartQuantityStepButtonStyle}">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="#FFB7E3C1" />
-            <Setter Property="Foreground" Value="#FF15803D" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
         </Style>
 
         <Style x:Key="CartQuantityDecreaseButtonStyle" TargetType="Button" BasedOn="{StaticResource CartQuantityStepButtonStyle}">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="#FFFFC9CD" />
-            <Setter Property="Foreground" Value="#FFE11D48" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
         </Style>
 
         <Style x:Key="CartTouchScrollBarStyle" TargetType="ScrollBar">
             <Setter Property="Width" Value="22" />
             <Setter Property="MinWidth" Value="22" />
-            <Setter Property="Background" Value="#FFF3F5F8" />
-            <Setter Property="BorderBrush" Value="#FFC3C6D6" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceMutedBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Style.Triggers>
                 <!-- 无需滚动时隐藏轨道，但保留 22px 布局占位，避免购物车列宽跳动。 -->
@@ -271,11 +271,14 @@
         </Style>
 
         <Style x:Key="CashierFlatButtonBaseStyle" TargetType="Button">
+            <Style.Resources>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}" />
+            </Style.Resources>
             <Setter Property="Padding" Value="8,4" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Cursor" Value="Hand" />
@@ -293,15 +296,19 @@
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                                               RecognizesAccessKey="True"
-                                              TextBlock.Foreground="{TemplateBinding Foreground}" />
+                                              TextBlock.Foreground="{TemplateBinding Foreground}">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}" />
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFF5F8FC" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FFB9C7DB" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFE9F0FA" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.48" />
@@ -323,25 +330,32 @@
         </Style>
 
         <Style x:Key="CashierClearKeyStyle" TargetType="Button" BasedOn="{StaticResource CashierNumberKeyStyle}">
-            <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
-            <Setter Property="BorderBrush" Value="#FFFFB4AB" />
-            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+            <Setter Property="FontSize" Value="18" />
             <Setter Property="FontWeight" Value="Medium" />
         </Style>
 
         <Style x:Key="CashierQuickKeyStyle" TargetType="Button" BasedOn="{StaticResource CashierNumberKeyStyle}">
-            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontSize" Value="18" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
         <Style x:Key="CashierWholeOrderToggleStyle" TargetType="ToggleButton">
+            <Style.Resources>
+                <!-- 英文 “Whole Order” 在 1080 宽时单行放不下，放大后允许换成两行。 -->
+                <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                    <Setter Property="TextAlignment" Value="Center" />
+                </Style>
+            </Style.Resources>
             <Setter Property="MinHeight" Value="44" />
             <Setter Property="Margin" Value="2" />
             <Setter Property="Padding" Value="6,4" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Setter Property="FontSize" Value="16" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -356,16 +370,23 @@
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
-                                              TextBlock.Foreground="{TemplateBinding Foreground}" />
+                                              TextBlock.Foreground="{TemplateBinding Foreground}">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}">
+                                        <Setter Property="TextWrapping" Value="Wrap" />
+                                        <Setter Property="TextAlignment" Value="Center" />
+                                    </Style>
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFF5F8FC" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFEAF2FF" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
-                                <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.48" />
@@ -380,17 +401,20 @@
             <Setter Property="Height" Value="54" />
             <Setter Property="Margin" Value="3" />
             <Setter Property="Padding" Value="8,5" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="16" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
 
         <Style x:Key="CashierNoBarcodeButtonStyle" TargetType="Button" BasedOn="{StaticResource CashierFlatButtonBaseStyle}">
+            <Style.Resources>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}" />
+            </Style.Resources>
             <Setter Property="Height" Value="50" />
-            <Setter Property="Background" Value="{StaticResource PosPrimaryBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
             <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="18" />
             <Setter Property="FontWeight" Value="Black" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -407,18 +431,22 @@
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                                               RecognizesAccessKey="True"
-                                              TextBlock.Foreground="{TemplateBinding Foreground}" />
+                                              TextBlock.Foreground="{TemplateBinding Foreground}">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}" />
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FF095CC8" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FF0049A8" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimaryStrongBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="Root" Property="Background" Value="#FF78A9ED" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FF78A9ED" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimaryDisabledBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryDisabledBrush}" />
                                 <Setter Property="Opacity" Value="1" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -430,17 +458,10 @@
         <Style x:Key="CashierPayButtonStyle" TargetType="Button" BasedOn="{StaticResource CashierFlatButtonBaseStyle}">
             <Setter Property="Height" Value="64" />
             <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderBrush" Value="#FF0049D8" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="Background">
-                <Setter.Value>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                        <GradientStop Color="#FF0877F9" Offset="0" />
-                        <GradientStop Color="#FF0046D5" Offset="1" />
-                    </LinearGradientBrush>
-                </Setter.Value>
-            </Setter>
+            <Setter Property="Background" Value="{DynamicResource PosPayButtonGradientBrush}" />
         </Style>
 
         <Style x:Key="CashierDiscountButtonStyle" TargetType="Button" BasedOn="{StaticResource CashierFlatButtonBaseStyle}">
@@ -449,7 +470,7 @@
             <Setter Property="Padding" Value="4" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0,0,1,0" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="18" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
@@ -461,8 +482,8 @@
             <Setter Property="MinHeight" Value="62" />
             <Setter Property="Margin" Value="3" />
             <Setter Property="Padding" Value="4" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
@@ -470,9 +491,9 @@
         <Style x:Key="PosSidebarExitButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource PosSidebarActionButtonStyle}">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
         </Style>
 
         <Style x:Key="PosSidebarActionIconHostStyle" TargetType="Border">
@@ -486,10 +507,10 @@
                TargetType="TextBlock"
                BasedOn="{StaticResource PosStitchTileLabelStyle}">
             <Setter Property="MaxWidth" Value="88" />
-            <Setter Property="MaxHeight" Value="30" />
+            <Setter Property="MaxHeight" Value="32" />
             <Setter Property="Margin" Value="0,4,0,0" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="LineHeight" Value="14" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="LineHeight" Value="16" />
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="TextAlignment" Value="Center" />
             <Setter Property="TextWrapping" Value="Wrap" />
@@ -497,8 +518,8 @@
         </Style>
 
         <Style x:Key="PosStatusCardStyle" TargetType="Border">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="5" />
         </Style>
@@ -522,14 +543,14 @@
             <ColumnDefinition Width="16*" MinWidth="180" />
         </Grid.ColumnDefinitions>
 
-        <Grid Grid.Column="0" Background="#FFF7F8FA">
+        <Grid Grid.Column="0" Background="{DynamicResource PosSurfaceAltBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Padding="17,16,12,8" Background="#FFF7F8FA">
+            <Border Grid.Row="0" Padding="17,16,12,8" Background="{DynamicResource PosSurfaceAltBrush}">
                 <Grid Height="48">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -541,8 +562,8 @@
 
                     <Border x:Name="SearchBoxHost"
                             Grid.Column="0"
-                            Background="White"
-                            BorderBrush="{StaticResource PosBorderBrush}"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="6">
                         <Grid>
@@ -554,7 +575,7 @@
                             <materialDesign:PackIcon Kind="Magnify"
                                                      Width="21"
                                                      Height="21"
-                                                     Foreground="#FF304B73"
+                                                     Foreground="{DynamicResource PosIconBrush}"
                                                      VerticalAlignment="Center"
                                                      Margin="14,0,0,0" />
                             <TextBox Grid.Column="1"
@@ -581,21 +602,21 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Column="2" Background="{StaticResource PosPrimaryBrush}" CornerRadius="6" ClipToBounds="True">
+                    <Border Grid.Column="2" Background="{DynamicResource PosPrimaryBrush}" CornerRadius="6" ClipToBounds="True">
                         <Button Command="{Binding ScanCommand}"
                                 Style="{StaticResource PosSearchSegmentButtonStyle}"
                                 HorizontalContentAlignment="Center"
                                 VerticalContentAlignment="Center">
                             <StackPanel Orientation="Horizontal">
                                 <materialDesign:PackIcon Kind="BarcodeScan" Width="17" Height="17" Foreground="White" Margin="0,0,6,0" />
-                                <TextBlock Text="{Binding SearchButtonText}" Foreground="White" FontSize="14" FontWeight="Bold" />
+                                <TextBlock Text="{Binding SearchButtonText}" Foreground="White" FontSize="16" FontWeight="Bold" />
                             </StackPanel>
                         </Button>
                     </Border>
 
                     <Border Grid.Column="4"
-                            Background="White"
-                            BorderBrush="{StaticResource PosBorderBrush}"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="6"
                             ClipToBounds="True">
@@ -607,7 +628,7 @@
                             <materialDesign:PackIcon Kind="KeyboardOutline"
                                                      Width="22"
                                                      Height="22"
-                                                     Foreground="#FF304B73" />
+                                                     Foreground="{DynamicResource PosIconBrush}" />
                         </Button>
                     </Border>
                 </Grid>
@@ -625,8 +646,8 @@
                    VerticalOffset="6">
                 <Border Width="{Binding PlacementTarget.ActualWidth, ElementName=MatchesPopup}"
                         MaxHeight="260"
-                        Background="{StaticResource PosSurfaceBrush}"
-                        BorderBrush="#FFE2E2E6"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosDividerBrush}"
                         BorderThickness="1"
                         CornerRadius="10"
                         Padding="10">
@@ -649,8 +670,10 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Button Width="222"
-                                            Height="74"
+                                    <!-- 码冲突时多个候选的码相同，靠商品图与货号区分；图片走与购物车行相同的异步缩略图缓存，不阻塞扫码。 -->
+                                    <Button x:Name="MatchCandidateCard"
+                                            Width="264"
+                                            Height="80"
                                             Margin="0,0,10,10"
                                             Padding="0"
                                             Background="Transparent"
@@ -658,28 +681,85 @@
                                              Style="{StaticResource PosSearchSegmentButtonStyle}"
                                              Command="{Binding DataContext.SelectMatchCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                              CommandParameter="{Binding}">
-                                        <Border Background="{StaticResource PosSurfaceBrush}"
-                                                BorderBrush="#FFE2E2E6"
+                                        <Border Background="{DynamicResource PosSurfaceBrush}"
+                                                BorderBrush="{DynamicResource PosDividerBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="10"
                                                 Padding="10">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
-                                                <StackPanel>
+                                                <Border Width="56"
+                                                        Height="56"
+                                                        Background="{DynamicResource PosPrimarySoftBrush}"
+                                                        CornerRadius="6"
+                                                        Margin="0,0,10,0"
+                                                        VerticalAlignment="Center"
+                                                        SnapsToDevicePixels="True"
+                                                        UseLayoutRounding="True"
+                                                        ClipToBounds="True">
+                                                    <Grid>
+                                                        <Rectangle RadiusX="5"
+                                                                   RadiusY="5"
+                                                                   Margin="2"
+                                                                   SnapsToDevicePixels="True"
+                                                                   RenderOptions.BitmapScalingMode="HighQuality"
+                                                                   Panel.ZIndex="1">
+                                                            <Rectangle.Fill>
+                                                                <ImageBrush converters:ProductThumbnailImageSourceConverter.AsyncSourceText="{Binding ProductImage}"
+                                                                            converters:ProductThumbnailImageSourceConverter.AsyncDecodePixelWidth="80"
+                                                                            Stretch="Uniform" />
+                                                            </Rectangle.Fill>
+                                                        </Rectangle>
+                                                        <materialDesign:PackIcon Kind="Shopping"
+                                                                                 Width="22"
+                                                                                 Height="22"
+                                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                                 HorizontalAlignment="Center"
+                                                                                 VerticalAlignment="Center"
+                                                                                 Panel.ZIndex="0" />
+                                                    </Grid>
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding DisplayName}" FontSize="12" FontWeight="Black" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding LookupCode}" FontSize="10" Foreground="{StaticResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
-                                                    <TextBlock Text="{Binding PriceSourceLabel}" FontSize="9" Foreground="{StaticResource PosPrimaryBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" />
+                                                    <DockPanel Margin="0,3,0,0" LastChildFill="True">
+                                                        <TextBlock DockPanel.Dock="Left" Text="{loc:Loc ItemNumber}" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                        <TextBlock DockPanel.Dock="Left" Text=":" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                        <Grid Margin="4,0,0,0">
+                                                            <TextBlock Text="{Binding ItemNumber}"
+                                                                       Visibility="{Binding ItemNumber, Converter={StaticResource StringHasValueToVis}}"
+                                                                       FontSize="10"
+                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="-"
+                                                                       Visibility="{Binding ItemNumber, Converter={StaticResource StringIsEmptyToVis}}"
+                                                                       FontSize="10"
+                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                        </Grid>
+                                                    </DockPanel>
+                                                    <DockPanel Margin="0,3,0,0" LastChildFill="True">
+                                                        <TextBlock DockPanel.Dock="Right"
+                                                                   Text="{Binding RetailPrice, StringFormat={}{0:C2}}"
+                                                                   FontSize="15"
+                                                                   FontWeight="Black"
+                                                                   Foreground="{DynamicResource PosAccentBrush}"
+                                                                   VerticalAlignment="Bottom"
+                                                                   Margin="8,0,0,0" />
+                                                        <TextBlock DockPanel.Dock="Left"
+                                                                   Text="{Binding LookupCode}"
+                                                                   FontSize="10"
+                                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                   VerticalAlignment="Center" />
+                                                        <TextBlock Text="{Binding PriceSourceLabel}"
+                                                                   FontSize="9"
+                                                                   Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="6,0,0,0"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </DockPanel>
                                                 </StackPanel>
-                                                <TextBlock Grid.Column="1"
-                                                           Text="{Binding RetailPrice, StringFormat={}{0:C2}}"
-                                                           FontSize="15"
-                                                           FontWeight="Black"
-                                                           Foreground="{StaticResource PosAccentBrush}"
-                                                           VerticalAlignment="Center"
-                                                           Margin="10,0,0,0" />
                                             </Grid>
                                         </Border>
                                     </Button>
@@ -701,8 +781,8 @@
                    StaysOpen="False"
                    VerticalOffset="6">
                 <Grid Width="620" Background="Transparent">
-                    <Border Background="{StaticResource PosSurfaceBrush}"
-                            BorderBrush="#FFE2E2E6"
+                    <Border Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
                             BorderThickness="1"
                             CornerRadius="12"
                             ClipToBounds="True"
@@ -772,8 +852,8 @@
 
             <Border Grid.Row="1"
                     Margin="17,0,10,10"
-                    Background="White"
-                    BorderBrush="{StaticResource PosBorderBrush}"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="6"
                     ClipToBounds="True">
@@ -786,8 +866,8 @@
                           SelectionChanged="CartDataGrid_SelectionChanged"
                           IsReadOnly="True"
                           AlternationCount="1000000"
-                          AlternatingRowBackground="{StaticResource PosSurfaceAltBrush}"
-                          RowBackground="{StaticResource PosSurfaceBrush}"
+                          AlternatingRowBackground="{DynamicResource PosSurfaceAltBrush}"
+                          RowBackground="{DynamicResource PosSurfaceBrush}"
                           MinRowHeight="67"
                           ColumnHeaderHeight="36"
                           EnableRowVirtualization="True"
@@ -802,7 +882,7 @@
                           ScrollViewer.PanningRatio="1.0"
                           services:CartSwipeRevealBehavior.IsEnabled="True"
                           GridLinesVisibility="None"
-                          Background="White"
+                          Background="{DynamicResource PosSurfaceBrush}"
                           BorderThickness="0"
                           RowStyle="{StaticResource CartDataGridRowStyle}"
                           CellStyle="{StaticResource CartDataGridCellStyle}"
@@ -814,8 +894,8 @@
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="{x:Type Thumb}">
-                                        <Border Background="#FF94A3B8"
-                                                BorderBrush="#FF64748B"
+                                        <Border Background="{DynamicResource PosBorderStrongBrush}"
+                                                BorderBrush="{DynamicResource PosBorderStrongBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="9"
                                                 Margin="4" />
@@ -831,7 +911,7 @@
                                     <TextBlock Text="{Binding RelativeSource={RelativeSource AncestorType=DataGridRow}, Path=(ItemsControl.AlternationIndex), Converter={StaticResource RowNumberConverter}}"
                                                FontSize="13"
                                                FontWeight="SemiBold"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextAlignment="Center"
                                                HorizontalAlignment="Stretch"
                                                VerticalAlignment="Center" />
@@ -848,7 +928,7 @@
                                         </Grid.ColumnDefinitions>
                                         <Border Width="52"
                                                 Height="52"
-                                                Background="#FFE8F0FE"
+                                                Background="{DynamicResource PosPrimarySoftBrush}"
                                                 CornerRadius="6"
                                                 Margin="0,0,12,0"
                                                 SnapsToDevicePixels="True"
@@ -870,7 +950,7 @@
                                                 <materialDesign:PackIcon Kind="Shopping"
                                                                          Width="22"
                                                                          Height="22"
-                                                                         Foreground="{StaticResource PosPrimaryBrush}"
+                                                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                                          HorizontalAlignment="Center"
                                                                          VerticalAlignment="Center"
                                                                          Panel.ZIndex="0" />
@@ -879,31 +959,31 @@
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="Black" TextTrimming="CharacterEllipsis" />
                                             <StackPanel x:Name="CartItemMetadataLine" Margin="0,2,0,0" Orientation="Horizontal">
-                                                <TextBlock Text="{loc:Loc ItemNumber}" FontSize="11" Foreground="#FF304B73" />
-                                                <TextBlock Text=":" FontSize="11" Foreground="#FF304B73" />
+                                                <TextBlock Text="{loc:Loc ItemNumber}" FontSize="11" Foreground="{DynamicResource PosIconBrush}" />
+                                                <TextBlock Text=":" FontSize="11" Foreground="{DynamicResource PosIconBrush}" />
                                                 <Grid Margin="4,0,0,0">
                                                     <TextBlock Text="{Binding ItemNumber}"
                                                                ToolTip="{Binding ItemNumber}"
                                                                Visibility="{Binding ItemNumber, Converter={StaticResource StringHasValueToVis}}"
                                                                FontSize="11"
-                                                               Foreground="#FF304B73"
+                                                               Foreground="{DynamicResource PosIconBrush}"
                                                                TextWrapping="NoWrap" />
                                                     <TextBlock Text="-"
                                                                Visibility="{Binding ItemNumber, Converter={StaticResource StringIsEmptyToVis}}"
                                                                FontSize="11"
-                                                               Foreground="#FF304B73" />
+                                                               Foreground="{DynamicResource PosIconBrush}" />
                                                 </Grid>
                                                 <Grid Margin="14,0,0,0">
                                                     <TextBlock Text="{Binding LookupCode}"
                                                                ToolTip="{Binding LookupCode}"
                                                                Visibility="{Binding LookupCode, Converter={StaticResource StringHasValueToVis}}"
                                                                FontSize="11"
-                                                               Foreground="#FF304B73"
+                                                               Foreground="{DynamicResource PosIconBrush}"
                                                                TextWrapping="NoWrap" />
                                                     <TextBlock Text="-"
                                                                Visibility="{Binding LookupCode, Converter={StaticResource StringIsEmptyToVis}}"
                                                                FontSize="11"
-                                                               Foreground="#FF304B73" />
+                                                               Foreground="{DynamicResource PosIconBrush}" />
                                                 </Grid>
                                             </StackPanel>
                                         </StackPanel>
@@ -920,7 +1000,7 @@
                                                    Visibility="{Binding HasDiscount, Converter={StaticResource BoolToVis}}"
                                                    FontSize="10"
                                                    FontWeight="Black"
-                                                   Foreground="{StaticResource PosAccentBrush}"
+                                                   Foreground="{DynamicResource PosAccentBrush}"
                                                    TextAlignment="Right"
                                                    HorizontalAlignment="Stretch" />
                                     </StackPanel>
@@ -946,13 +1026,13 @@
                                         <Border Grid.Column="1"
                                                 Width="50"
                                                 Height="32"
-                                                Background="White"
-                                                BorderBrush="{StaticResource PosBorderBrush}"
+                                                Background="{DynamicResource PosSurfaceBrush}"
+                                                BorderBrush="{DynamicResource PosBorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="4">
                                             <TextBlock AutomationProperties.AutomationId="CartLineQuantity"
                                                        Text="{Binding SignedQuantity, StringFormat={}{0:0.##}}"
-                                                       FontSize="14"
+                                                       FontSize="16"
                                                        FontWeight="SemiBold"
                                                        TextAlignment="Center"
                                                        HorizontalAlignment="Stretch"
@@ -979,7 +1059,7 @@
                                                    Visibility="{Binding HasDiscount, Converter={StaticResource BoolToVis}}"
                                                    FontSize="10"
                                                    FontWeight="Black"
-                                                   Foreground="{StaticResource PosAccentBrush}"
+                                                   Foreground="{DynamicResource PosAccentBrush}"
                                                    TextAlignment="Right"
                                                    HorizontalAlignment="Stretch" />
                                     </StackPanel>
@@ -990,7 +1070,169 @@
                 </DataGrid>
             </Border>
 
-            <Border Grid.Row="2" Padding="17,0,12,18" Background="#FFF7F8FA">
+            <!-- 结账完成后在购物车区域显示上一单结果；扫码或加入商品后由 VM 收起。与购物车同行叠放，不包裹购物车 DataGrid。 -->
+            <Border x:Name="PaymentSuccessCard"
+                    Grid.Row="1"
+                    Panel.ZIndex="3"
+                    MaxWidth="540"
+                    Margin="37,44,30,30"
+                    Padding="20,16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosSuccessBrush}"
+                    BorderThickness="2"
+                    CornerRadius="12"
+                    AutomationProperties.AutomationId="PaymentSuccessCard"
+                    Visibility="{Binding IsLastSaleVisible, Converter={StaticResource BoolToVis}}">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.16" />
+                </Border.Effect>
+                <Grid DataContext="{Binding LastSale}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="40"
+                                Height="40"
+                                CornerRadius="20"
+                                Background="{DynamicResource PosSuccessSoftBrush}"
+                                VerticalAlignment="Center">
+                            <materialDesign:PackIcon Kind="Check"
+                                                     Width="24"
+                                                     Height="24"
+                                                     HorizontalAlignment="Center"
+                                                     VerticalAlignment="Center"
+                                                     Foreground="{DynamicResource PosSuccessTextBrush}" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                            <TextBlock Text="{loc:Loc PaymentSuccessful}"
+                                       FontSize="20"
+                                       FontWeight="Black"
+                                       Foreground="{DynamicResource PosSuccessTextBrush}" />
+                            <StackPanel Margin="0,2,0,0" Orientation="Horizontal">
+                                <TextBlock Text="{Binding TransactionIdDisplay}"
+                                           AutomationProperties.AutomationId="CompletedTransactionId"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="  ·  " FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{Binding SoldAtDisplay}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <Button Grid.Column="2"
+                                Width="40"
+                                Height="40"
+                                VerticalAlignment="Top"
+                                Command="{Binding DataContext.DismissLastSaleCommand, ElementName=PaymentSuccessCard}"
+                                Style="{StaticResource PosSearchSegmentButtonStyle}"
+                                AutomationProperties.AutomationId="PaymentSuccessCardCloseButton"
+                                AutomationProperties.Name="{loc:Loc success.card.close}"
+                                ToolTip="{loc:Loc success.card.close}">
+                            <materialDesign:PackIcon Kind="Close" Width="20" Height="20" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        </Button>
+                    </Grid>
+
+                    <!-- 现金单并排显示实付、实收与找零；非现金单只显示实付。UniformGrid 不为折叠的子项留位。 -->
+                    <UniformGrid Grid.Row="1" Margin="0,14,0,0" Rows="1">
+                        <Border Margin="0,0,8,0" Padding="12,8" Background="{DynamicResource PosSurfaceAltBrush}" CornerRadius="8">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc success.totalPaid}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{Binding TotalAmountPaidDisplay}"
+                                           AutomationProperties.AutomationId="CompletedSaleTotalPaid"
+                                           Margin="0,2,0,0"
+                                           FontSize="22"
+                                           FontWeight="Black" />
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="0,0,8,0"
+                                Padding="12,8"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                CornerRadius="8"
+                                Visibility="{Binding IsCashChangeVisible, Converter={StaticResource BoolToVis}}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc payment.cash.amountTendered}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{Binding TenderedAmountDisplay}" Margin="0,2,0,0" FontSize="22" FontWeight="Black" />
+                            </StackPanel>
+                        </Border>
+                        <Border Padding="12,8"
+                                Background="{DynamicResource PosWarningSoftBrush}"
+                                CornerRadius="8"
+                                Visibility="{Binding IsCashChangeVisible, Converter={StaticResource BoolToVis}}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc payment.cash.changeDue}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosAccentBrush}" />
+                                <TextBlock Text="{Binding ChangeAmountDisplay}"
+                                           AutomationProperties.AutomationId="CompletedSaleChangeDue"
+                                           FontSize="30"
+                                           FontWeight="Black"
+                                           Foreground="{DynamicResource PosAccentBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+
+                    <TextBlock Grid.Row="2"
+                               Margin="0,10,0,0"
+                               FontSize="13"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource PosTextBrush}"
+                               Visibility="{Binding IsCardPaymentSummaryVisible, Converter={StaticResource BoolToVis}}">
+                        <Run Text="{loc:Loc success.cardDetails}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        <Run Text=" " />
+                        <Run Text="{Binding CardPaymentSummary, Mode=OneWay}" />
+                    </TextBlock>
+
+                    <Border Grid.Row="3"
+                            Margin="0,10,0,0"
+                            Padding="10,8"
+                            Background="{DynamicResource PosDangerSoftBrush}"
+                            CornerRadius="8"
+                            AutomationProperties.AutomationId="PaymentCompletedWarning"
+                            Visibility="{Binding HasPostCommitWarning, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{loc:Loc payment.status.completedWarning}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource PosDangerTextBrush}" />
+                    </Border>
+
+                    <Grid Grid.Row="4" Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                            <materialDesign:PackIcon Kind="BarcodeScan" Width="18" Height="18" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                            <TextBlock Text="{loc:Loc success.card.scanToContinue}"
+                                       VerticalAlignment="Center"
+                                       FontSize="13"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                MinHeight="40"
+                                Padding="14,4"
+                                Command="{Binding PrintReceiptCommand}"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                AutomationProperties.AutomationId="PaymentSuccessCardPrintButton">
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="PrinterOutline" Width="18" Height="18" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{loc:Loc success.printReceipt}" VerticalAlignment="Center" FontWeight="Bold" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2" Padding="17,0,12,18" Background="{DynamicResource PosSurfaceAltBrush}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="92" />
@@ -999,8 +1241,8 @@
                     </Grid.RowDefinitions>
                     <Border x:Name="CartSummaryPanel"
                             Grid.Row="0"
-                            Background="White"
-                            BorderBrush="{StaticResource PosBorderBrush}"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="6"
                             ClipToBounds="True">
@@ -1013,7 +1255,7 @@
                             <Border x:Name="CartCountSummaryRow"
                                     Grid.Row="0"
                                     Padding="14,0"
-                                    BorderBrush="#FFE8ECF2"
+                                    BorderBrush="{DynamicResource PosDividerBrush}"
                                     BorderThickness="0,0,0,1">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -1036,7 +1278,7 @@
                                         <ColumnDefinition Width="0.9*" />
                                         <ColumnDefinition Width="1.2*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Padding="14,0" BorderBrush="#FFE8ECF2" BorderThickness="0,0,1,0">
+                                    <Border Grid.Column="0" Padding="14,0" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="0,0,1,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -1046,14 +1288,14 @@
                                             <TextBlock Grid.Column="1" Text="{Binding TotalAmount, StringFormat={}{0:C2}}" FontSize="14" FontWeight="SemiBold" TextAlignment="Right" VerticalAlignment="Center" Margin="10,0,0,0" />
                                         </Grid>
                                     </Border>
-                                    <Border Grid.Column="1" Padding="14,0" BorderBrush="#FFE8ECF2" BorderThickness="0,0,1,0">
+                                    <Border Grid.Column="1" Padding="14,0" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="0,0,1,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{loc:Loc Discount}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource PosAccentBrush}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="1" Text="{Binding DiscountAmount, StringFormat={}{0:C2}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PosAccentBrush}" TextAlignment="Right" VerticalAlignment="Center" Margin="10,0,0,0" />
+                                            <TextBlock Text="{loc:Loc Discount}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosAccentBrush}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="{Binding DiscountAmount, StringFormat={}{0:C2}}" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource PosAccentBrush}" TextAlignment="Right" VerticalAlignment="Center" Margin="10,0,0,0" />
                                         </Grid>
                                     </Border>
                                     <Grid Grid.Column="2" Margin="14,0">
@@ -1061,8 +1303,16 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding TotalsLabelText}" FontSize="15" FontWeight="Black" Foreground="{StaticResource PosTextBrush}" VerticalAlignment="Center" />
-                                        <TextBlock Grid.Column="1" Text="{Binding ActualAmount, StringFormat={}{0:C2}}" FontSize="24" FontWeight="Black" Foreground="{StaticResource PosAccentBrush}" TextAlignment="Right" VerticalAlignment="Center" Margin="10,0,0,0" />
+                                        <TextBlock Text="{Binding TotalsLabelText}" FontSize="15" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" VerticalAlignment="Center" />
+                                        <!-- 应付合计高亮底（青瓷为荧光笔底）；默认主题透明，负外边距抵消内边距，位置不变。 -->
+                                        <Border Grid.Column="1"
+                                                Margin="2,0,-8,0"
+                                                Padding="8,0"
+                                                VerticalAlignment="Center"
+                                                CornerRadius="6"
+                                                Background="{DynamicResource PosAmountSoftBrush}">
+                                            <TextBlock Text="{Binding ActualAmount, StringFormat={}{0:C2}}" FontSize="24" FontWeight="Black" Foreground="{DynamicResource PosAccentBrush}" TextAlignment="Right" VerticalAlignment="Center" />
+                                        </Border>
                                     </Grid>
                                 </Grid>
                             </Border>
@@ -1075,14 +1325,14 @@
                              Style="{StaticResource CashierPayButtonStyle}">
                         <StackPanel Orientation="Horizontal">
                             <materialDesign:PackIcon Kind="Cash" Width="26" Height="26" Foreground="White" Margin="0,0,16,0" />
-                            <TextBlock Text="{Binding PayNowText}" Foreground="White" FontSize="18" FontWeight="Black" />
+                            <TextBlock Text="{Binding PayNowText}" Foreground="White" FontSize="22" FontWeight="Black" />
                         </StackPanel>
                     </Button>
                 </Grid>
             </Border>
         </Grid>
 
-        <Grid Grid.Column="1" Background="#FFF7F8FA">
+        <Grid Grid.Column="1" Background="{DynamicResource PosSurfaceAltBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -1095,8 +1345,8 @@
                     Height="78"
                     Margin="13,10,13,8"
                     Padding="12,6"
-                    Background="White"
-                    BorderBrush="{StaticResource PosBorderBrush}"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="6">
                 <!-- 输入缓冲区和退格按钮共享同一外框，保持总宽度不超过下方键盘。 -->
@@ -1115,7 +1365,7 @@
                                Text="{loc:Loc pos.terminal.inputBuffer}"
                                FontSize="11"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource PosMutedForegroundBrush}" />
+                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                     <TextBlock Grid.Row="1"
                                Grid.Column="0"
                                Text="{Binding KeypadBuffer, TargetNullValue=0}"
@@ -1130,8 +1380,8 @@
                             Width="44"
                             Height="44"
                             Margin="8,0,0,0"
-                            Background="White"
-                            BorderBrush="#1F000000"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
                             Command="{Binding KeypadInputCommand}"
                             CommandParameter="Back"
                             ToolTip="{loc:Loc Backspace}">
@@ -1151,8 +1401,8 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="RootBorder" Property="Background" Value="#FFFFF1F0" />
-                                        <Setter TargetName="RootBorder" Property="BorderBrush" Value="#33B3261E" />
+                                        <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                                        <Setter TargetName="RootBorder" Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
                                     </Trigger>
                                     <Trigger Property="IsPressed" Value="True">
                                         <Setter TargetName="RootBorder" Property="RenderTransform">
@@ -1160,13 +1410,13 @@
                                                 <ScaleTransform ScaleX="0.95" ScaleY="0.95" />
                                             </Setter.Value>
                                         </Setter>
-                                        <Setter TargetName="RootBorder" Property="Background" Value="#FFFFDAD6" />
+                                        <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
                         </Button.Template>
                         <!-- 红色退格图标用于提示这是逐位删除，不是清空整个缓冲区。 -->
-                        <materialDesign:PackIcon Kind="BackspaceOutline" Width="22" Height="22" Foreground="{StaticResource PosDangerBrush}" />
+                        <materialDesign:PackIcon Kind="BackspaceOutline" Width="22" Height="22" Foreground="{DynamicResource PosDangerTextBrush}" />
                     </Button>
                 </Grid>
             </Border>
@@ -1195,7 +1445,7 @@
                     Command="{Binding AddOpenItemCommand}"
                     Margin="13,0,13,8"
                     Style="{StaticResource CashierNoBarcodeButtonStyle}">
-                <TextBlock Text="{loc:Loc pos.terminal.actions.noBarcode}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="{loc:Loc pos.terminal.actions.noBarcode}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
             </Button>
 
             <Grid Grid.Row="3" Margin="9,0,9,0" VerticalAlignment="Top">
@@ -1207,27 +1457,27 @@
                 <UniformGrid Grid.Row="0" Columns="2">
                     <Button Command="{Binding ModifySelectedLineQuantityCommand}"
                             Style="{StaticResource CashierFunctionButtonStyle}">
-                        <TextBlock Text="{loc:Loc pos.terminal.actions.modifyQty}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" />
+                        <TextBlock Text="{loc:Loc pos.terminal.actions.modifyQty}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                     </Button>
                     <Button Command="{Binding ModifySelectedLinePriceCommand}"
                             Style="{StaticResource CashierFunctionButtonStyle}">
-                        <TextBlock Text="{loc:Loc Price}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" />
+                        <TextBlock Text="{loc:Loc Price}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                     </Button>
                     <Button Command="{Binding ApplySelectedLineDiscountAmountCommand}"
                             Style="{StaticResource CashierFunctionButtonStyle}">
-                        <TextBlock Text="{loc:Loc pos.terminal.actions.discountAmount}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" />
+                        <TextBlock Text="{loc:Loc pos.terminal.actions.discountAmount}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                     </Button>
                     <Button Command="{Binding ApplySelectedLineDiscountPercentCommand}"
                             Style="{StaticResource CashierFunctionButtonStyle}">
-                        <TextBlock Text="{loc:Loc pos.terminal.actions.discountPercent}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" />
+                        <TextBlock Text="{loc:Loc pos.terminal.actions.discountPercent}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                     </Button>
                 </UniformGrid>
 
                 <Border x:Name="QuickDiscountSegment"
                         Grid.Row="1"
                         Margin="3,4,3,0"
-                        Background="White"
-                        BorderBrush="{StaticResource PosBorderBrush}"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="5">
                     <Border.OpacityMask>
@@ -1251,7 +1501,7 @@
             </Grid>
         </Grid>
 
-        <Grid x:Name="AttendanceQrSidebar" Grid.Column="2" Background="#FFF4F6F9">
+        <Grid x:Name="AttendanceQrSidebar" Grid.Column="2" Background="{DynamicResource PosSurfaceAltBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
@@ -1263,7 +1513,7 @@
                 <Button Command="{Binding OpenSpecialProductsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="StarOutline" Width="24" Height="24" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="StarOutline" Width="24" Height="24" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{loc:Loc pos.terminal.actions.specialItems}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1271,7 +1521,7 @@
                 <Button Command="{Binding OpenReturnsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="CashRefund" Width="24" Height="24" Foreground="{StaticResource PosDangerBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="CashRefund" Width="24" Height="24" Foreground="{DynamicResource PosSidebarRefundIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{loc:Loc Refund}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1279,7 +1529,7 @@
                 <Button Command="{Binding HoldOrderCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="ClipboardTextOutline" Width="24" Height="24" Foreground="#FFFF6D1B" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="ClipboardTextOutline" Width="24" Height="24" Foreground="{DynamicResource PosSidebarHoldIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{Binding HoldOrderText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1287,7 +1537,7 @@
                 <Button Command="{Binding RecallOrderCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="FileDocumentOutline" Width="24" Height="24" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="FileDocumentOutline" Width="24" Height="24" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{Binding RecallOrderText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1295,7 +1545,7 @@
                 <Button Command="{Binding OpenCashDrawerCommand}" services:ButtonFeedback.Cue="CashDrawer" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="CashRegister" Width="24" Height="24" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="CashRegister" Width="24" Height="24" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{Binding OpenCashDrawerText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1303,7 +1553,7 @@
                 <Button Command="{Binding PrintLastReceiptCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="ReceiptTextOutline" Width="24" Height="24" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="ReceiptTextOutline" Width="24" Height="24" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{Binding PrintLastReceiptText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1311,7 +1561,7 @@
                 <Button Command="{Binding LockCashierCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="LogoutVariant" Width="24" Height="24" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="LogoutVariant" Width="24" Height="24" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{Binding LockCashierText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1319,7 +1569,7 @@
                 <Button Command="{Binding OpenDailyCloseCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="CalendarCheckOutline" Width="24" Height="24" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="CalendarCheckOutline" Width="24" Height="24" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{Binding DailyCloseText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1327,7 +1577,7 @@
                 <Button Command="{Binding OpenSettingsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="CogOutline" Width="24" Height="24" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="CogOutline" Width="24" Height="24" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="{Binding SettingsText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
@@ -1335,9 +1585,9 @@
                 <Button Command="{Binding ExitApplicationCommand}" Style="{StaticResource PosSidebarExitButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="Power" Width="24" Height="24" Foreground="{StaticResource PosDangerBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <materialDesign:PackIcon Kind="Power" Width="24" Height="24" Foreground="{DynamicResource PosDangerTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="{Binding ExitApplicationText}" Style="{StaticResource PosSidebarActionLabelStyle}" Foreground="{StaticResource PosDangerBrush}" />
+                        <TextBlock Text="{Binding ExitApplicationText}" Style="{StaticResource PosSidebarActionLabelStyle}" Foreground="{DynamicResource PosDangerTextBrush}" />
                     </StackPanel>
                 </Button>
             </UniformGrid>
@@ -1361,9 +1611,9 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="{loc:Loc common.status}" FontSize="11" FontWeight="Black" Foreground="{StaticResource PosTextBrush}" VerticalAlignment="Center" />
-                        <Border Grid.Column="1" Padding="6,2" Background="#FFF0FBF2" BorderBrush="#FF9AD7AB" BorderThickness="1" CornerRadius="3">
-                            <TextBlock Text="{Binding PendingSyncText}" Foreground="#FF20823B" FontSize="9" FontWeight="SemiBold" />
+                        <TextBlock Text="{loc:Loc common.status}" FontSize="11" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" VerticalAlignment="Center" />
+                        <Border Grid.Column="1" Padding="6,2" Background="{DynamicResource PosSuccessSoftBrush}" BorderBrush="{DynamicResource PosSuccessBorderBrush}" BorderThickness="1" CornerRadius="3">
+                            <TextBlock Text="{Binding PendingSyncText}" Foreground="{DynamicResource PosSuccessTextBrush}" FontSize="9" FontWeight="SemiBold" />
                         </Border>
                     </Grid>
                     <TextBlock x:Name="PosTerminalStatusMessage"
@@ -1388,10 +1638,10 @@
                             AutomationProperties.Name="{Binding CardRecoveryCenterAutomationName}">
                         <Button.Style>
                             <Style TargetType="Button">
-                                <Setter Property="Background" Value="White" />
-                                <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+                                <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
                                 <Setter Property="BorderThickness" Value="1" />
-                                <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
                                 <Setter Property="Cursor" Value="Hand" />
                                 <Setter Property="Template">
                                     <Setter.Value>
@@ -1416,7 +1666,7 @@
                                                     <Setter TargetName="Root" Property="Opacity" Value="0.82" />
                                                 </Trigger>
                                                 <Trigger Property="IsKeyboardFocused" Value="True">
-                                                    <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                                                    <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                                                     <Setter TargetName="Root" Property="BorderThickness" Value="2" />
                                                 </Trigger>
                                                 <Trigger Property="IsEnabled" Value="False">
@@ -1428,9 +1678,9 @@
                                 </Setter>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
-                                        <Setter Property="Background" Value="#FFFFF4E5" />
-                                        <Setter Property="BorderBrush" Value="#FFF59E0B" />
-                                        <Setter Property="Foreground" Value="#FF7C2D12" />
+                                        <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBrush}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -1449,11 +1699,11 @@
                                 <materialDesign:PackIcon.Style>
                                     <Style TargetType="{x:Type materialDesign:PackIcon}">
                                         <Setter Property="Kind" Value="CreditCardSearchOutline" />
-                                        <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
                                                 <Setter Property="Kind" Value="AlertCircleOutline" />
-                                                <Setter Property="Foreground" Value="#FFB45309" />
+                                                <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -1481,7 +1731,7 @@
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
                                                 <Setter Property="Visibility" Value="Visible" />
-                                                <Setter Property="Background" Value="#FFB45309" />
+                                                <Setter Property="Background" Value="{DynamicResource PosWarningStrongBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -1499,10 +1749,10 @@
                                                      VerticalAlignment="Center">
                                 <materialDesign:PackIcon.Style>
                                     <Style TargetType="{x:Type materialDesign:PackIcon}">
-                                        <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
-                                                <Setter Property="Foreground" Value="#FFB45309" />
+                                                <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -1519,8 +1769,8 @@
                     Margin="8,0,8,16"
                     Padding="8,6"
                     HorizontalContentAlignment="Stretch"
-                    Background="White"
-                    BorderBrush="{StaticResource PosBorderBrush}"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
                     BorderThickness="1"
                     Click="AttendanceQrLauncher_Click"
                     AutomationProperties.Name="{loc:Loc attendance.qr.open}">
@@ -1530,28 +1780,28 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <materialDesign:PackIcon Kind="Qrcode" Width="22" Height="22" Foreground="{StaticResource PosPrimaryBrush}" VerticalAlignment="Center" />
+                    <materialDesign:PackIcon Kind="Qrcode" Width="22" Height="22" Foreground="{DynamicResource PosPrimaryTextBrush}" VerticalAlignment="Center" />
                     <StackPanel Grid.Column="1" Margin="6,0" VerticalAlignment="Center">
                         <TextBlock Text="{loc:Loc attendance.qr.title}" FontSize="11" FontWeight="Black" TextTrimming="CharacterEllipsis" />
-                        <TextBlock FontSize="9" Foreground="{StaticResource PosMutedForegroundBrush}" TextTrimming="CharacterEllipsis">
+                        <TextBlock FontSize="9" Foreground="{DynamicResource PosMutedForegroundBrush}" TextTrimming="CharacterEllipsis">
                             <Run Text="{Binding AttendanceQrPanel.VerificationStatusText, Mode=OneWay}" />
                             <Run Text=" " />
                             <Run Text="{Binding AttendanceQrPanel.MessageText, Mode=OneWay}" />
                         </TextBlock>
                     </StackPanel>
-                    <TextBlock Grid.Column="2" Text="{Binding AttendanceQrPanel.SecondsRemaining}" FontSize="14" FontWeight="Black" Foreground="{StaticResource PosPrimaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding AttendanceQrPanel.SecondsRemaining}" FontSize="14" FontWeight="Black" Foreground="{DynamicResource PosPrimaryTextBrush}" VerticalAlignment="Center" />
                 </Grid>
             </Button>
         </Grid>
 
         <Border Grid.Column="0"
                 Panel.ZIndex="5"
-                BorderBrush="#FFDDE2E8"
+                BorderBrush="{DynamicResource PosDividerBrush}"
                 BorderThickness="0,0,1,0"
                 IsHitTestVisible="False" />
         <Border Grid.Column="1"
                 Panel.ZIndex="5"
-                BorderBrush="#FFDDE2E8"
+                BorderBrush="{DynamicResource PosDividerBrush}"
                 BorderThickness="0,0,1,0"
                 IsHitTestVisible="False" />
 
@@ -1571,8 +1821,8 @@
                     Padding="18"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Background="White"
-                    BorderBrush="#FFD7E7DD"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="16"
                     KeyboardNavigation.TabNavigation="Cycle"
@@ -1585,17 +1835,17 @@
                     </Grid.RowDefinitions>
                     <Grid>
                         <StackPanel>
-                            <TextBlock Text="{loc:Loc attendance.qr.title}" FontSize="18" FontWeight="Black" Foreground="{StaticResource PosPrimaryDarkBrush}" />
-                            <TextBlock Text="{loc:Loc attendance.qr.scanHint}" FontSize="11" Foreground="{StaticResource PosMutedForegroundBrush}" />
+                            <TextBlock Text="{loc:Loc attendance.qr.title}" FontSize="18" FontWeight="Black" Foreground="{DynamicResource PosPrimaryDarkBrush}" />
+                            <TextBlock Text="{loc:Loc attendance.qr.scanHint}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                         </StackPanel>
                         <Button x:Name="AttendanceQrCloseButton" Width="44" Height="44" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Click="AttendanceQrCloseButton_Click" AutomationProperties.Name="{loc:Loc attendance.qr.close}" AutomationProperties.HelpText="{loc:Loc attendance.qr.closeHelp}">
                             <materialDesign:PackIcon Kind="Close" Width="24" Height="24" />
                         </Button>
                     </Grid>
-                    <Border Grid.Row="1" Width="260" Height="260" HorizontalAlignment="Center" Background="White" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="6">
+                    <Border Grid.Row="1" Width="260" Height="260" HorizontalAlignment="Center" Background="{DynamicResource PosSurfaceBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="6">
                         <Grid>
                             <Image Width="260" Height="260" Source="{Binding AttendanceQrPanel.QrImage}" Stretch="None" RenderOptions.BitmapScalingMode="NearestNeighbor" SnapsToDevicePixels="True" AutomationProperties.Name="{loc:Loc attendance.qr.title}" />
-                            <TextBlock Text="{Binding AttendanceQrPanel.MessageText}" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource PosMutedForegroundBrush}">
+                            <TextBlock Text="{Binding AttendanceQrPanel.MessageText}" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed" />
@@ -1616,16 +1866,16 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="{Binding AttendanceQrPanel.StoreText}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Margin="0,3,0,0" FontSize="11" Foreground="{StaticResource PosMutedForegroundBrush}">
+                            <TextBlock Margin="0,3,0,0" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}">
                                 <Run Text="{loc:Loc attendance.qr.device}" />
                                 <Run Text=": " />
                                 <Run Text="{Binding AttendanceQrPanel.DeviceText, Mode=OneWay}" />
                             </TextBlock>
-                            <TextBlock Text="{Binding AttendanceQrPanel.VerificationStatusText}" Margin="0,3,0,0" FontSize="11" FontWeight="SemiBold" Foreground="#FF16794A" />
+                            <TextBlock Text="{Binding AttendanceQrPanel.VerificationStatusText}" Margin="0,3,0,0" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PosSuccessTextBrush}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                            <TextBlock Text="{Binding AttendanceQrPanel.SecondsRemaining}" FontSize="24" FontWeight="Black" Foreground="{StaticResource PosPrimaryBrush}" HorizontalAlignment="Center" />
-                            <TextBlock Text="{loc:Loc attendance.qr.seconds}" FontSize="10" Foreground="{StaticResource PosMutedForegroundBrush}" />
+                            <TextBlock Text="{Binding AttendanceQrPanel.SecondsRemaining}" FontSize="24" FontWeight="Black" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" />
+                            <TextBlock Text="{loc:Loc attendance.qr.seconds}" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                         </StackPanel>
                     </Grid>
                 </Grid>

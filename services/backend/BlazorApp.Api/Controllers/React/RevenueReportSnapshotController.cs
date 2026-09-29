@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -77,6 +78,7 @@ public sealed class RevenueReportSnapshotController : ControllerBase
                 topN,
                 cancellationToken
             );
+            var statisticsLastSuccessfulAtUtc = await ReadLastSuccessfulAtForTodayAsync(endDate);
 
             return Ok(new
             {
@@ -85,6 +87,7 @@ public sealed class RevenueReportSnapshotController : ControllerBase
                 statisticStatus = result.StatisticStatus,
                 statisticMessage = result.StatisticMessage,
                 statisticUpdatedAt = result.StatisticUpdatedAt,
+                statisticsLastSuccessfulAtUtc,
                 cacheVersion = result.CacheVersion,
                 statisticsPending = result.StatisticsPending,
                 statisticsExpectedBranchCount = result.StatisticsExpectedBranchCount,
@@ -103,6 +106,27 @@ public sealed class RevenueReportSnapshotController : ControllerBase
         {
             _logger.LogError(ex, "GetRevenueReportSnapshot failed");
             return StatusCode(500, new { success = false, message = "服务器内部错误" });
+        }
+    }
+
+    /// <summary>
+    /// 查询范围含今天时返回今天最近一次营业额发布时间，前端据此确定可与去年同一时刻比较的完整整点。
+    /// 与移动端 statistics-freshness 同源，两端截止整点一致；只有销售数据权限的账号也能拿到。
+    /// 读取失败只影响累计对齐（前端回退为不对齐），不能让整页快照失败。
+    /// </summary>
+    private async Task<DateTime?> ReadLastSuccessfulAtForTodayAsync(DateTime endDate)
+    {
+        if (endDate.Date < SalesStatisticsBusinessDate.Today())
+            return null;
+        try
+        {
+            var freshness = await _service.GetStatisticsFreshnessAsync();
+            return freshness.LastSuccessfulAtUtc;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "营业额快照读取统计发布时间失败，累计对齐将回退为不对齐");
+            return null;
         }
     }
 

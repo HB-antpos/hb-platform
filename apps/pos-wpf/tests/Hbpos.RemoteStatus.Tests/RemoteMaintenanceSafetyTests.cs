@@ -24,8 +24,78 @@ public sealed class RemoteMaintenanceSafetyTests
     [Fact]
     public async Task 密码命令退出零但未确认成功必须失败()
     {
-        var installer = new WindowsRemoteMaintenanceInstaller(new CliRunner(Config, passwordAcknowledged: false), null!);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => installer.ConfigureRustDeskAsync("unused.exe", Config, "test-password-only", CancellationToken.None));
+        var installer = new WindowsRemoteMaintenanceInstaller(new CliRunner(Config, passwordAcknowledged: false), null!)
+        { DaemonReadyTimeout = TimeSpan.Zero, PollInterval = TimeSpan.Zero };
+        var error = await Assert.ThrowsAsync<RemoteMaintenanceSetupException>(() =>
+            installer.ConfigureRustDeskAsync("unused.exe", Config, "test-password-only", CancellationToken.None));
+        Assert.Equal(RemoteMaintenanceSetupError.RustDeskConfigurationFailed, error.Error);
+    }
+
+    [Fact]
+    public async Task 服务IPC就绪前密码未确认会重试且确认后才写服务器配置()
+    {
+        // 服务刚启动时 --password 连不上 IPC；若先写 --config 会静默落到管理员本地配置。
+        var runner = new CliRunner(Config, passwordFailuresBeforeAck: 3);
+        var installer = new WindowsRemoteMaintenanceInstaller(runner, null!) { PollInterval = TimeSpan.Zero };
+
+        await installer.ConfigureRustDeskAsync("unused.exe", Config, "test-password-only", CancellationToken.None);
+
+        Assert.Equal(4, runner.Commands.Count(x => x.StartsWith("--password ")));
+        Assert.True(runner.Commands.FindLastIndex(x => x.StartsWith("--password ")) <
+            runner.Commands.FindIndex(x => x.StartsWith("--config ")));
+    }
+
+    [Fact]
+    public async Task 安装外壳退出后等待内层安装进程结束才继续()
+    {
+        var runner = new DetachedSetupRunner(runningChecks: 3);
+        var installer = new WindowsRemoteMaintenanceInstaller(runner, null!) { PollInterval = TimeSpan.Zero };
+
+        await installer.WaitForDetachedRustDeskSetupAsync(CancellationToken.None);
+
+        Assert.Equal(4, runner.Checks);
+        Assert.EndsWith(Path.Combine("RustDesk", "rustdesk.exe"), runner.CheckedExecutable);
+    }
+
+    [Fact]
+    public async Task 内层安装进程超时未结束给出安装未完成故障码()
+    {
+        var installer = new WindowsRemoteMaintenanceInstaller(new DetachedSetupRunner(int.MaxValue), null!)
+        { SetupWaitTimeout = TimeSpan.Zero, PollInterval = TimeSpan.Zero };
+
+        var error = await Assert.ThrowsAsync<RemoteMaintenanceSetupException>(() =>
+            installer.WaitForDetachedRustDeskSetupAsync(CancellationToken.None));
+
+        Assert.Equal(RemoteMaintenanceSetupError.RustDeskSetupIncomplete, error.Error);
+    }
+
+    [Theory]
+    [InlineData("running")]
+    [InlineData("stopped")]
+    public async Task 外部RustDesk给出需先卸载的故障码且不重新启动它(string status)
+    {
+        // stopped 分支依赖 Program Files 下没有公司接管标记；CI runner 上不存在该文件。
+        var control = new RecordingServiceControl { Status = status };
+        var installer = new WindowsRemoteMaintenanceInstaller(new OptionRunner("rs-ny.rustdesk.com", wrongReads: int.MaxValue), control)
+        { PollInterval = TimeSpan.Zero };
+
+        var error = await Assert.ThrowsAsync<RemoteMaintenanceSetupException>(() =>
+            installer.EnsureNoForeignRustDeskConfigAsync(Config, CancellationToken.None));
+
+        Assert.Equal(RemoteMaintenanceSetupError.ExistingRustDeskUnmanaged, error.Error);
+        Assert.Empty(control.StartedServices);
+    }
+
+    [Fact]
+    public async Task 公司配置的RustDesk读回在IPC短暂回退时重试而不误判为外部()
+    {
+        var runner = new OptionRunner("unused", wrongReads: 2);
+        var installer = new WindowsRemoteMaintenanceInstaller(runner, new RecordingServiceControl { Status = "running" })
+        { PollInterval = TimeSpan.Zero };
+
+        await installer.EnsureNoForeignRustDeskConfigAsync(Config, CancellationToken.None);
+
+        Assert.Equal(3, runner.Reads["custom-rendezvous-server"]);
     }
 
     [Theory]
@@ -82,8 +152,9 @@ public sealed class RemoteMaintenanceSafetyTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1]) });
         }
     }
-    private sealed class CliRunner(RemoteMaintenanceConfig config, bool passwordAcknowledged = true) : IRemoteMaintenanceCommandRunner
+    private sealed class CliRunner(RemoteMaintenanceConfig config, bool passwordAcknowledged = true, int passwordFailuresBeforeAck = 0) : IRemoteMaintenanceCommandRunner
     {
+        private int _passwordAttempts;
         public List<string> Commands { get; } = [];
         public Task<int> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)
         { Commands.Add(arguments); return Task.FromResult(0); }
@@ -98,7 +169,9 @@ public sealed class RemoteMaintenanceSafetyTests
                 "--option \"approve-mode\"" => "password",
                 "--option \"verification-method\"" => "use-permanent-password",
                 "--option \"allow-only-conn-window-open\"" => "N",
-                _ when arguments.StartsWith("--password ") => passwordAcknowledged ? "Done!\r\n" : "Installation required!",
+                // 与 RustDesk 1.4.9 一致：IPC 未就绪时打印连接错误而不是 Done!。
+                _ when arguments.StartsWith("--password ") =>
+                    passwordAcknowledged && ++_passwordAttempts > passwordFailuresBeforeAck ? "Done!\r\n" : "Installation required!",
                 _ => throw new InvalidOperationException("unexpected command")
             };
             return Task.FromResult(new RemoteMaintenanceCommandResult(0, output, ""));
@@ -110,12 +183,50 @@ public sealed class RemoteMaintenanceSafetyTests
         public Task<int> RunAsync(string fileName, string arguments, CancellationToken cancellationToken) => Task.FromResult(0);
     }
 
+    private sealed class DetachedSetupRunner(int runningChecks) : IRemoteMaintenanceCommandRunner
+    {
+        public int Checks { get; private set; }
+        public string? CheckedExecutable { get; private set; }
+        public Task<int> RunAsync(string fileName, string arguments, CancellationToken cancellationToken) => Task.FromResult(0);
+        public bool IsDetachedProcessRunning(string installedExecutable)
+        {
+            CheckedExecutable = installedExecutable;
+            return ++Checks <= runningChecks;
+        }
+    }
+
+    // 模拟 --option 读回：前 wrongReads 次返回外部服务器（IPC 回退到本地配置），之后返回公司配置。
+    private sealed class OptionRunner(string foreignServer, int wrongReads) : IRemoteMaintenanceCommandRunner
+    {
+        public Dictionary<string, int> Reads { get; } = [];
+        public Task<int> RunAsync(string fileName, string arguments, CancellationToken cancellationToken) => Task.FromResult(0);
+        public Task<RemoteMaintenanceCommandResult> RunWithOutputAsync(string fileName, string arguments, CancellationToken cancellationToken)
+        {
+            var key = arguments["--option \"".Length..^1];
+            Reads[key] = Reads.GetValueOrDefault(key) + 1;
+            var output = Reads[key] <= wrongReads ? foreignServer : key switch
+            {
+                "custom-rendezvous-server" => Config.IdServer,
+                "relay-server" => Config.RelayServer,
+                "key" => Config.PublicKey,
+                _ => throw new InvalidOperationException("unexpected command")
+            };
+            return Task.FromResult(new RemoteMaintenanceCommandResult(0, output + "\r\n", ""));
+        }
+    }
+
     private sealed class RecordingServiceControl : IRemoteMaintenanceServiceControl
     {
+        public string? Status { get; init; }
         public List<string> StoppedServices { get; } = [];
-        public Task<string?> QueryAsync(string serviceName, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+        public List<string> StartedServices { get; } = [];
+        public Task<string?> QueryAsync(string serviceName, CancellationToken cancellationToken) => Task.FromResult(Status);
         public Task<int> CreateOrUpdateAsync(string serviceName, string binaryPath, string accountName, CancellationToken cancellationToken) => Task.FromResult(0);
-        public Task<int> StartAsync(string serviceName, CancellationToken cancellationToken) => Task.FromResult(0);
+        public Task<int> StartAsync(string serviceName, CancellationToken cancellationToken)
+        {
+            StartedServices.Add(serviceName);
+            return Task.FromResult(0);
+        }
         public Task<int> StopAsync(string serviceName, CancellationToken cancellationToken)
         {
             StoppedServices.Add(serviceName);

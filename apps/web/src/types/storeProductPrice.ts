@@ -20,7 +20,9 @@ export interface StoreProductPriceListDto {
 }
 
 export interface StoreProductPriceQueryDto {
-  storeCode: string
+  storeCode?: string
+  /** 多选分店；与 storeCode 合并去重，多个分店时每个商品在每个分店各占一行 */
+  storeCodes?: string[]
   search?: string
   localSupplierCode?: string
   pageNumber: number

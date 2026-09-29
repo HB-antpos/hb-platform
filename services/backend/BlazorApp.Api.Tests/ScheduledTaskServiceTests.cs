@@ -408,9 +408,10 @@ public sealed class ScheduledTaskServiceTests : IDisposable
 
             updateCommands++;
             // 在真正执行 UPDATE 前等待独立 ADO deadline 到期；随后由 SqlSugar 将已取消令牌传给 DbCommand。
+            // 250ms deadline 由生产代码的计时器触发，这里只是等它被线程池调度到，属于防挂死预算。
             updateSawCancelledDeadline = SpinWait.SpinUntil(
                 () => terminalDb.Ado.CancellationToken?.IsCancellationRequested == true,
-                TimeSpan.FromSeconds(2)
+                AsyncTestWaitSupport.DefaultTimeout
             );
         };
 

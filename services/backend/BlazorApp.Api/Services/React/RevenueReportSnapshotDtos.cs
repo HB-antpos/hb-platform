@@ -10,6 +10,13 @@ namespace BlazorApp.Api.Services.React;
 public sealed class RevenueReportSnapshotDto
 {
     public List<ExecutiveBranchPerformanceDto> Branches { get; set; } = new();
+
+    /// <summary>
+    /// 多日区间且最后一天是今天时，单独给出今天与同期对应日的数据，
+    /// 前端据此把区间里「今天」这一天换成截至最近完整整点的累计，其余日期仍按全天比较。
+    /// 其余情况为 null。
+    /// </summary>
+    public RevenueLastDaySnapshotDto? LastDay { get; set; }
     public List<ExecutiveHourlyTrafficDto> Hourly { get; set; } = new();
     public List<WeeklyPerformanceHierarchyDto> Weekly { get; set; } = new();
 
@@ -34,4 +41,17 @@ public sealed class RevenueReportSnapshotDto
     public string CacheVersion { get; set; } = string.Empty;
     public int StatisticsExpectedBranchCount { get; set; }
     public int StatisticsSnapshotBranchCount { get; set; }
+}
+
+/// <summary>区间最后一天（今天）与同期对应日的分店日统计和分店×小时统计。</summary>
+public sealed class RevenueLastDaySnapshotDto
+{
+    public DateTime Date { get; set; }
+    public DateTime? CompareDate { get; set; }
+
+    /// <summary>今天各店的全天日统计（Revenue）与同期对应日全天（RevenueLY），与排行同一范围。</summary>
+    public List<ExecutiveBranchPerformanceDto> Branches { get; set; } = new();
+
+    /// <summary>今天（Revenue）与同期对应日（RevenueLY）的分店×小时统计。</summary>
+    public List<ExecutiveHourlyTrafficDto> Hourly { get; set; } = new();
 }

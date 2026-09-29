@@ -1,6 +1,5 @@
 import {
   BarChartOutlined,
-  CloudSyncOutlined,
   CloudUploadOutlined,
   EyeOutlined,
   PlusOutlined,
@@ -38,7 +37,6 @@ import {
   getContainerList,
   getDateFilterOptions,
   pushContainersToHbSales,
-  syncContainersFromHq,
   updateContainer,
 } from '../../../services/containerService'
 import { useAuthStore } from '../../../store/auth'
@@ -289,7 +287,6 @@ export default function ContainersPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [statusUpdatingKeys, setStatusUpdatingKeys] = useState<string[]>([])
   const listRequestGuardRef = useRef(createLatestRequestGuard())
@@ -456,36 +453,7 @@ export default function ContainersPage() {
     }
   }
 
-  const handleSync = () => {
-    Modal.confirm({
-      title: t('containers.modals.syncTitle'),
-      content: t('containers.modals.syncContent'),
-      okText: t('containers.actions.confirmSync'),
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        setSyncing(true)
-        try {
-          const result = await syncContainersFromHq()
-          const success = result.isSuccess ?? result.IsSuccess ?? true
-          const msg = result.message ?? result.Message ?? t('containers.messages.syncComplete')
-          // 只有同步真正成功时才提示成功并刷新第一页，失败分支只展示后端消息。
-          if (success) {
-            message.success(msg)
-            await latestRequestFirstPageRef.current()
-          } else {
-            message.error(msg)
-          }
-        } catch (error) {
-          console.error(error)
-          const errorMessage = error instanceof Error ? error.message : t('containers.messages.syncFailed')
-          message.error(errorMessage)
-        } finally {
-          setSyncing(false)
-        }
-      },
-    })
-  }
-
+  // 「从HQ同步」（HQ 货柜 → HBweb）已于 2026-09-29 停用；「推送到 HBSales」方向相反，继续保留。
   const handlePush = () => {
     if (!selectedRowKeys.length) {
       message.warning(t('containers.messages.selectContainersToPush'))
@@ -890,13 +858,10 @@ export default function ContainersPage() {
             <Space wrap>
               {access.canEditContainer ? (
                 <>
-                  <Button icon={<CloudSyncOutlined />} loading={syncing} disabled={pushing} onClick={handleSync}>
-                    {t('containers.actions.syncFromHq')}
-                  </Button>
                   <Button
                     icon={<CloudUploadOutlined />}
                     loading={pushing}
-                    disabled={syncing || !selectedRowKeys.length}
+                    disabled={!selectedRowKeys.length}
                     onClick={handlePush}
                   >
                     {t('containers.actions.pushToHbSales')}{selectedRowKeys.length ? ` (${selectedRowKeys.length})` : ''}

@@ -1,6 +1,8 @@
 import type {
   SalesCapabilities,
   SalesCartPort,
+  SalesLookupCandidate,
+  SalesLookupSelection,
   SalesPresenterDependencies,
   SalesProductSearchItem,
   SalesWorkflowPort,
@@ -65,6 +67,13 @@ type LookupAttempt = {
 
 export interface LocalCatalogPort {
   findExact(lookupCode: string): Promise<LocalCatalogMatch | null>;
+  /**
+   * 一码多商品：目录行在首位，其后为仍有效的冲突候选（按商品去重）。
+   * 未实现时退回 findExact 单行语义。
+   */
+  findExactCandidates?(
+    lookupCode: string,
+  ): Promise<readonly LocalCatalogMatch[]>;
   searchByName(
     query: string,
     limit: number,
@@ -746,6 +755,9 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
   private readonly lookupOutcomeListeners = new Set<
     (outcome: LookupOutcome) => void
   >();
+  private readonly lookupSelectionListeners = new Set<
+    (selection: SalesLookupSelection) => void
+  >();
   private checkoutFence = 0;
   private catalogWorkDisposed = false;
   private nextLookupAttemptId = 0;
@@ -778,6 +790,13 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       SALES_PERMISSIONS.view,
       "search-products",
       async () => {
+        const exactCandidates = await this.findSearchExactCandidates(query);
+        this.sessionGuard.assertActive();
+        if (exactCandidates.length > 1) {
+          // 与 WPF 一致：输入精确命中一码多商品时直接列出全部候选，每个商品一次，
+          // 避免关键词搜索只列目录胜出项（单结果会被自动加购）或被结果上限截断。
+          return exactCandidates.map(toSearchItem);
+        }
         const matches = await this.requireCatalog().searchByName(
           query,
           50,
@@ -806,9 +825,14 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       eventType: "CART_ITEM_ADD",
       getCart: () => this.cart.getSnapshot(),
       operation: async () => {
-        const match = await this.requireExactCatalogItem(
+        // 一码多商品时搜索结果可能是冲突候选：按商品编码在同码候选中取回本地目录行。
+        const candidates = await this.requireExactCatalogCandidates(
           product.lookupCode,
         );
+        const match =
+          candidates.find(
+            (candidate) => candidate.productCode === product.productCode,
+          ) ?? candidates[0]!;
         this.assertCanStartOrContinueTransaction();
         if (
           match.productCode !== product.productCode ||
@@ -850,10 +874,17 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
         eventType: "CART_ITEM_ADD",
         getCart: () => this.cart.getSnapshot(),
         operation: async () => {
-          const match = await this.requireExactCatalogItem(lookupCode);
+          const candidates = await this.requireExactCatalogCandidates(
+            lookupCode,
+          );
           this.assertCanStartOrContinueTransaction();
+          if (candidates.length > 1) {
+            this.preparedCheckoutGate.assertMutable();
+            this.publishLookupSelection(attempt, candidates);
+            return null;
+          }
           const result = this.cart.addScannedCatalogItemWithDisposition(
-            match,
+            candidates[0]!,
             this.createLineId(),
           );
           this.notifyScanTarget(result.lineId);
@@ -861,7 +892,7 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
           return result;
         },
       });
-      return disposition.lineId;
+      return disposition?.lineId ?? null;
     }
 
     const normalizedLookupCode = normalizeLookupCode(
@@ -871,15 +902,16 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
     const transactionEpoch = this.activeCart.read().transactionEpoch;
     let anchor: CatalogIdentity | null = null;
     let addedLineId: string | null = null;
+    let selectionRequested = false;
     await this.operations.runCartMutation({
       permissionCode: SALES_PERMISSIONS.addItem,
       action: "scan-add-item",
       eventType: "CART_ITEM_ADD",
       getCart: () => this.cart.getSnapshot(),
       operation: async () => {
-        let match: LocalCatalogMatch | null = null;
+        let candidates: readonly LocalCatalogMatch[] = [];
         try {
-          match = await this.requireCatalog().findExact(
+          candidates = await this.findLocalCatalogCandidates(
             normalizedLookupCode,
           );
         } catch {
@@ -889,14 +921,19 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
         // 授权或本地查询可能跨越结账准备边界，回调真正继续前必须再次检查。
         this.preparedCheckoutGate.assertMutable();
         this.assertCanStartOrContinueTransaction();
-        if (
-          match !== null &&
-          (match.storeCode !== this.identity.storeCode ||
-            normalizeLookupCode(match.lookupCodeNormalized) !==
-              normalizedLookupCode)
-        ) {
-          match = null;
+        candidates = candidates.filter(
+          (candidate) =>
+            candidate.storeCode === this.identity.storeCode &&
+            normalizeLookupCode(candidate.lookupCodeNormalized) ===
+              normalizedLookupCode,
+        );
+        if (candidates.length > 1) {
+          // 一码多商品：不自动加购，等待收银员在候选中选择。
+          selectionRequested = true;
+          this.publishLookupSelection(attempt, candidates);
+          return;
         }
+        const match = candidates[0] ?? null;
         anchor = match === null ? null : catalogIdentity(match);
         if (match !== null) {
           const disposition = this.cart.addScannedCatalogItemWithDisposition(
@@ -909,6 +946,10 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
         }
       },
     });
+    if (selectionRequested) {
+      // 服务端单品回查只知道目录胜出项；候选待选时启动远程续作会把胜出项自动加购。
+      return null;
+    }
     if (!this.preparedCheckoutGate.isMutable()) {
       // 本地命中与 ADD 审计已经完成，但冻结后不得再登记新的目录续作。
       return addedLineId;
@@ -933,6 +974,102 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       }
       throw error;
     }
+  }
+
+  /**
+   * 收银员从一码多商品候选中选定商品。与扫码同一加购权限、审计、结账围栏与定位；
+   * 按与 WPF 选择弹窗一致的全局合并口径加购（同码且同商品才并入已有行），不同商品分行。
+   * 远程回查只返回目录胜出项，锚点为所选商品，身份不同则绝不改写该行。
+   */
+  public async addLookupCandidate(
+    input: Readonly<{
+      lookupCode: string;
+      productCode: string;
+      source?: LookupSource;
+    }>,
+  ): Promise<string | null> {
+    const attempt = this.createLookupAttempt(input.source ?? "manual");
+    try {
+      this.sessionGuard.assertActive();
+      this.preparedCheckoutGate.assertMutable();
+      this.assertCanStartOrContinueTransaction();
+      const normalizedLookupCode = normalizeLookupCode(
+        requiredText(input.lookupCode, "Catalog lookup code"),
+      );
+      const productKey = normalizeProductKey(
+        requiredText(input.productCode, "Catalog product code"),
+      );
+      const checkoutFence = this.checkoutFence;
+      const transactionEpoch = this.activeCart.read().transactionEpoch;
+      const added: {
+        anchor: CatalogIdentity | null;
+        lineId: string | null;
+      } = { anchor: null, lineId: null };
+      await this.operations.runCartMutation({
+        permissionCode: SALES_PERMISSIONS.addItem,
+        action: "select-match",
+        eventType: "CART_ITEM_ADD",
+        getCart: () => this.cart.getSnapshot(),
+        operation: async () => {
+          const candidates = await this.requireExactCatalogCandidates(
+            normalizedLookupCode,
+          );
+          this.preparedCheckoutGate.assertMutable();
+          this.assertCanStartOrContinueTransaction();
+          const match = candidates.find(
+            (candidate) =>
+              normalizeLookupCode(candidate.lookupCodeNormalized) ===
+                normalizedLookupCode &&
+              normalizeProductKey(candidate.productCode) === productKey,
+          );
+          if (!match) {
+            throw Object.assign(
+              new Error("Selected catalog candidate is no longer available."),
+              { code: "CATALOG_LOOKUP_NOT_FOUND" },
+            );
+          }
+          const disposition = this.cart.addCatalogItemWithDisposition(
+            match,
+            this.createLineId(),
+          );
+          added.anchor = catalogIdentity(match);
+          added.lineId = disposition.lineId;
+          this.notifyScanTarget(disposition.lineId);
+          this.completeLookupAttempt(attempt, disposition);
+        },
+      });
+      if (
+        added.anchor === null ||
+        !this.catalogRevalidation ||
+        !this.preparedCheckoutGate.isMutable()
+      ) {
+        return added.lineId;
+      }
+      const task = this.applyRemoteScanResult({
+        lookupCode: normalizedLookupCode,
+        anchor: added.anchor,
+        checkoutFence,
+        transactionEpoch,
+        attempt,
+      });
+      this.trackCatalogWork(task);
+      return added.lineId;
+    } catch (error) {
+      this.notifyFailedLookupAttempt(attempt, error);
+      throw error;
+    }
+  }
+
+  public subscribeLookupSelection(
+    listener: (selection: SalesLookupSelection) => void,
+  ): () => void {
+    this.lookupSelectionListeners.add(listener);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      this.lookupSelectionListeners.delete(listener);
+    };
   }
 
   public getPendingCatalogWorkCount(): number {
@@ -1019,6 +1156,7 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
     this.pendingCatalogWorkListeners.clear();
     this.scanTargetListeners.clear();
     this.lookupOutcomeListeners.clear();
+    this.lookupSelectionListeners.clear();
   }
 
   public releasePreparedCheckout(): void {
@@ -1142,6 +1280,90 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
         new Error("New transactions are disabled by the iPad policy gate."),
         { code: SALES_NEW_TRANSACTIONS_DISABLED },
       );
+    }
+  }
+
+  private async findLocalCatalogCandidates(
+    lookupCode: string,
+  ): Promise<readonly LocalCatalogMatch[]> {
+    const catalog = this.requireCatalog();
+    if (catalog.findExactCandidates) {
+      return catalog.findExactCandidates(lookupCode);
+    }
+    const match = await catalog.findExact(lookupCode);
+    return match === null ? [] : [match];
+  }
+
+  /** 精确查码的全部本地候选（仅本店）；没有任何候选时按“商品不存在”失败。 */
+  private async requireExactCatalogCandidates(
+    lookupCode: string,
+  ): Promise<readonly LocalCatalogMatch[]> {
+    this.sessionGuard.assertActive();
+    const candidates = await this.findLocalCatalogCandidates(lookupCode);
+    this.sessionGuard.assertActive();
+    const scoped = candidates.filter(
+      (candidate) => candidate.storeCode === this.identity.storeCode,
+    );
+    if (scoped.length === 0) {
+      throw Object.assign(
+        new Error("Catalog item is unavailable for this store."),
+        { code: "CATALOG_LOOKUP_NOT_FOUND" },
+      );
+    }
+    return scoped;
+  }
+
+  /** 搜索框输入恰为冲突码时的精确候选；只作增强，读取失败时回到普通关键词搜索。 */
+  private async findSearchExactCandidates(
+    query: string,
+  ): Promise<readonly LocalCatalogMatch[]> {
+    const catalog = this.requireCatalog();
+    const normalizedQuery = normalizeLookupCode(query);
+    if (!normalizedQuery || !catalog.findExactCandidates) return [];
+    try {
+      const candidates = await catalog.findExactCandidates(normalizedQuery);
+      return candidates.filter(
+        (candidate) =>
+          candidate.storeCode === this.identity.storeCode &&
+          normalizeLookupCode(candidate.lookupCodeNormalized) ===
+            normalizedQuery,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 候选待选不是加购结果：本次查码不再发布加购/失败终态（提示音由页面按候选给出），
+   * 也不计入 scan-to-cart 时序。没有页面订阅候选时按失败收口，绝不静默或自动加购任一商品。
+   */
+  private publishLookupSelection(
+    attempt: LookupAttempt,
+    candidates: readonly LocalCatalogMatch[],
+  ): void {
+    if (this.lookupSelectionListeners.size === 0) {
+      this.completeLookupAttempt(attempt, { kind: "failed-blocked" });
+      return;
+    }
+    if (attempt.terminalPublished) return;
+    attempt.terminalPublished = true;
+    try {
+      scanTiming.discard(attempt.timingId);
+    } catch {
+      // timing 是旁路；候选发布不能因指标异常中断。
+    }
+    const selection: SalesLookupSelection = Object.freeze({
+      selectionId: attempt.attemptId,
+      lookupCode: candidates[0]!.lookupCode,
+      source: attempt.source,
+      candidates: Object.freeze(candidates.map(toLookupCandidate)),
+    });
+    for (const listener of [...this.lookupSelectionListeners]) {
+      try {
+        listener(selection);
+      } catch {
+        // 已卸载页面的监听器不能阻断其他订阅者。
+      }
     }
   }
 
@@ -1464,6 +1686,23 @@ function toSearchItem(item: LocalCatalogMatch): SalesProductSearchItem {
     unitPriceCents: item.retailPriceCents,
     discountRate: item.discountRate,
   };
+}
+
+function toLookupCandidate(item: LocalCatalogMatch): SalesLookupCandidate {
+  return Object.freeze({
+    productCode: item.productCode,
+    itemNumber: item.itemNumber,
+    barcode: item.barcode,
+    lookupCode: item.lookupCode,
+    displayName: item.displayName,
+    unitPriceCents: item.retailPriceCents,
+    discountRate: item.discountRate,
+    priceSource: item.priceSource,
+  });
+}
+
+function normalizeProductKey(value: string): string {
+  return value.trim().toUpperCase();
 }
 
 function deduplicateProductSearchMatches(

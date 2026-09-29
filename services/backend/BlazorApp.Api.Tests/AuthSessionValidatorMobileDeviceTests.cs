@@ -141,7 +141,7 @@ public sealed class AuthSessionValidatorMobileDeviceTests
         };
         var validationTask = new AuthSessionValidator(fixture.Context, activationService.Object)
             .ValidateMobileDeviceAccessAsync(binding.UserGuid, CreateMobilePrincipal(binding));
-        await mainQueryStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await mainQueryStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         Assert.False(validationTask.IsCompleted);
         bindingGate.SetResult();
         var result = await validationTask;

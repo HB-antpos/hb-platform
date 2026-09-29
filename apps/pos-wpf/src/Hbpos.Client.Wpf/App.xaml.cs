@@ -51,6 +51,7 @@ public partial class App : Application
             if (!startupOptions.PreviewMode)
             {
                 _startupProgressState = new StartupProgressState();
+                ApplyStartupVersion(_startupProgressState);
                 _startupProgressState.SetStage(SplashShownPercent, StartupText("startup.stage.starting"));
                 _startupSplashWindow = new StartupSplashWindow(_startupProgressState);
                 _startupSplashWindow.Show();
@@ -73,6 +74,7 @@ public partial class App : Application
             RegisterShutdownSteps(_host);
             var localization = _host.Services.GetRequiredService<ILocalizationService>();
             LocalizationResourceProvider.Instance.Configure(localization);
+            _startupProgressState?.LocalizeUpdateNotice(localization.T, localization.CurrentCulture);
             ButtonFeedbackRouter.Register(_host.Services.GetRequiredService<IUserFeedbackService>());
             _startupProgressState?.SetStage(HostStartedPercent, localization.T("startup.stage.startingLocalComponents"));
 
@@ -468,6 +470,24 @@ public partial class App : Application
                 localize("startup.error.apiBaseAddress.title"),
                 localize("startup.error.apiBaseAddress.message"))
             : null;
+    }
+
+    private static void ApplyStartupVersion(StartupProgressState state)
+    {
+        // 启动页在宿主构建前显示，这里直接读取程序集版本，不走依赖注入。
+        var version = new AppVersionProvider().CurrentVersion;
+        AppLaunchVersionNotice? notice = null;
+        try
+        {
+            notice = AppLaunchVersionTracker.CreateDefault().RecordLaunch(version);
+        }
+        catch (Exception ex)
+        {
+            // 版本提示只是辅助信息，任何意外都不能挡住收银启动。
+            ConsoleLog.WriteError("Startup", $"launch version tracking failed error={ex.GetType().Name} message={ex.Message}", exception: ex);
+        }
+
+        state.SetVersion(version, notice, StartupText, LocalizationResourceProvider.Instance.CurrentCulture);
     }
 
     private static string StartupText(string key) => LocalizationResourceProvider.Instance[key];

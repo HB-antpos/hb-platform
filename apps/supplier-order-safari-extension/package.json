@@ -1,6 +1,6 @@
 {
   "name": "hb-supplier-order-safari-extension",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "HB Supplier Order Safari Web Extension iPhone and iPad host project",

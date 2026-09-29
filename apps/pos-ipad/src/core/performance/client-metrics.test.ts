@@ -377,6 +377,9 @@ test("运行时短时合并多条指标且上传复用设备认证请求头", as
       "X-HBPOS-Hardware-Id": "hardware-01",
     }),
     samplingPolicy: { state: policyState, store: policyStore },
+    // 事件时间固定为 OBSERVED_AT；不注入时钟时上传器按真实时间剔除超过 30 天离线窗口的事件，
+    // 过了 OBSERVED_AT 30 天后一条都不会发送，下面等待请求的循环会永远挂住。
+    now: () => new Date(OBSERVED_AT),
   } as ConstructorParameters<typeof ClientMetricUploader>[0];
   let scheduledFlush: (() => void) | undefined;
   const runtime = new ClientMetricRuntime(

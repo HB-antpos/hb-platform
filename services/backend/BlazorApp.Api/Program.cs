@@ -20,6 +20,7 @@ using BlazorApp.Api.Services; // 业务服务层
 using BlazorApp.Api.Services.Attendance;
 using BlazorApp.Api.Services.Background; // 后台定时服务
 using BlazorApp.Api.Services.Logging;
+using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Api.Services.MobileDeviceActivation;
 using BlazorApp.Api.Services.OperationAudits;
 using BlazorApp.Api.Services.Performance;
@@ -118,6 +119,9 @@ if (schemaCommand.Mode != SchemaCommandMode.Server)
     }
 
     Environment.ExitCode = explicitSchemaResult.ExitCode;
+    // 关键位置：默认控制台日志由后台线程异步写出，只有释放 host（连带 LoggerFactory）才会排空队列；
+    // 不释放直接 return，进程退出时上面的诊断日志可能整条丢失。退出码已先写入，释放不改变其语义。
+    await schemaApp.DisposeAsync();
     return;
 }
 
@@ -433,6 +437,7 @@ builder.Services.AddRateLimiter(MobileDeviceActivationRateLimits.Configure);
 // 浏览器扩展一次性授权按父会话限流，匿名兑换按可信客户端 IP 限流。
 builder.Services.AddRateLimiter(BrowserExtensionSessionGrantRateLimits.Configure);
 builder.Services.AddRateLimiter(RustDeskLoginRateLimits.Configure);
+builder.Services.AddRateLimiter(BrowserExtensionCaptureRateLimits.Configure);
 
 // --------------------- JWT认证配置 ---------------------
 // 🔐 配置JSON Web Token（JWT）身份验证
@@ -1047,6 +1052,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddStoreOrderReactFacade();
 builder.Services.AddScoped<IBrowserExtensionAccessService, BrowserExtensionAccessService>();
 builder.Services.AddScoped<IBrowserExtensionService, BrowserExtensionService>();
+builder.Services.AddScoped<ILocalSupplierCategoryCaptureService, LocalSupplierCategoryCaptureService>();
+builder.Services.AddScoped<ILocalSupplierCategoryReactService, LocalSupplierCategoryReactService>();
 builder.Services.AddScoped<PreorderReactService>();
 builder.Services.AddScoped<IPreorderReactService>(provider =>
     provider.GetRequiredService<PreorderReactService>()
@@ -1094,6 +1101,7 @@ builder.Services.AddHostedService<ProductMovementReportSnapshotWorker>();
 builder.Services.AddHostedService<MobileChinaReportCacheWarmupWorker>();
 builder.Services.AddHostedService<ProductStoreDailyColumnstoreMaintenanceWorker>();
 builder.Services.AddHostedService<SalesDetailMonthlyProjectionWorker>();
+builder.Services.AddHostedService<CompactBoardMonthlyProjectionWorker>();
 builder.Services.AddScoped<
     IWarehouseProductFlowAnalysisService,
     WarehouseProductFlowAnalysisService
@@ -1154,6 +1162,9 @@ if (!startupSchemaResult.Success)
         startupSchemaResult.ExitCode
     );
     Environment.ExitCode = startupSchemaResult.ExitCode;
+    // 与显式 schema 分支相同：host 尚未 Run，不会自动释放，须手动释放以排空控制台日志队列，
+    // 否则容器启动失败时 docker logs 可能看不到诊断码。
+    await app.DisposeAsync();
     return;
 }
 

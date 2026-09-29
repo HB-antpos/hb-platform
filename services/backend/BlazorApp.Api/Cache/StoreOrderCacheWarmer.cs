@@ -1,4 +1,5 @@
 using BlazorApp.Api.Features.StoreOrders.ProductPicker;
+using BlazorApp.Api.Features.StoreOrders.ProductPicker.Domain;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.DTOs;
 using Microsoft.Extensions.Caching.Memory;
@@ -15,7 +16,8 @@ namespace BlazorApp.Api.Cache
         private readonly ILogger<StoreOrderCacheWarmer> _logger;
         private readonly IMemoryCache _cache;
 
-        private static readonly TimeSpan CACHE_DURATION = TimeSpan.FromMinutes(10);
+        // 预热写入的首页键会被真实 /products 请求命中，必须与分页缓存同一时长，否则预热后首页仍按旧时长陈旧。
+        private static readonly TimeSpan CACHE_DURATION = ProductPickerRules.HomePageCacheDuration;
         private static readonly TimeSpan HOME_PAGE_WARM_UP_TIMEOUT = TimeSpan.FromSeconds(30);
         private int _isHomePageWarmUpRunning;
 

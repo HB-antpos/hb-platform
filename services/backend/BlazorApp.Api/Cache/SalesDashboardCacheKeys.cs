@@ -225,6 +225,27 @@ namespace BlazorApp.Api.Cache
         }
 
         /// <summary>
+        /// 紧凑销售看板按自然月分片的原始聚合缓存键：分片区间 + 分片身份（片内每天的来源版本与聚合时间）
+        /// + 国内编码族签名。不同看板区间只要覆盖同一分片就共用这一份，与立方体同走 generation 生命周期。
+        /// </summary>
+        public static string CompactSalesBoardSegment(DateTime start, DateTime endExclusive, string identity, string codeFamilySignature)
+        {
+            var key = $"{PREFIX}:CompactSalesBoardSegment:{start:yyyyMMdd}-{endExclusive:yyyyMMdd}:{Hash(identity, codeFamilySignature)}";
+            LogKeyGenerated("CompactSalesBoardSegment", key, start, endExclusive, identity);
+            return key;
+        }
+
+        /// <summary>
+        /// 紧凑销售看板数据库端聚合结果（四栏只有几百行）的缓存键：区间、统计水位、授权范围与全部交互参数。
+        /// </summary>
+        public static string CompactSalesBoardView(DateRangeDto dateRange, string cacheVersion, string scopeKey, string interactionKey)
+        {
+            var key = $"{PREFIX}:CompactSalesBoardView:{Hash(dateRange.StartDate.Date.ToString("yyyyMMdd"), dateRange.EndDate.Date.ToString("yyyyMMdd"), cacheVersion, scopeKey, interactionKey)}";
+            LogKeyGenerated("CompactSalesBoardView", key, dateRange, cacheVersion);
+            return key;
+        }
+
+        /// <summary>
         /// 生成增强产品销售明细（含折扣信息）缓存键
         /// </summary>
         public static string EnhancedProductDetail(

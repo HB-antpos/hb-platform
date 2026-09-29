@@ -118,6 +118,58 @@ public sealed class CatalogSnapshotStoreTests
     }
 
     [Fact]
+    public void Save_RoundTripsCodeConflicts()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new GzipCatalogSnapshotStore(directory.Path);
+        var baseSnapshot = CreateSnapshot("S01", "catalog-v1:one");
+        var expected = baseSnapshot with
+        {
+            CodeConflicts =
+            [
+                baseSnapshot.SellableItems[0],
+                baseSnapshot.SellableItems[0] with { ProductCode = "P02", DisplayName = "另一个商品", RetailPrice = 3m }
+            ]
+        };
+
+        store.Save(expected);
+
+        var restored = store.Load(expected.StoreCode, expected.Since, expected.CatalogVersion);
+        Assert.NotNull(restored);
+        Assert.Equal(expected.CodeConflicts, restored!.CodeConflicts);
+    }
+
+    [Fact]
+    public void Load_LegacyBodyWithoutCodeConflictsRestoresAsNotComputed()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new GzipCatalogSnapshotStore(directory.Path);
+        var expected = CreateSnapshot("S01", "catalog-v1:one");
+        store.Save(expected);
+        var bodyPath = Assert.Single(Directory.GetFiles(
+            directory.Path,
+            "*.json.gz",
+            SearchOption.AllDirectories));
+        // 模拟上线前写入的快照：正文里完全没有 codeConflicts 属性。
+        var webOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var legacyBody = JsonSerializer.SerializeToNode(expected, webOptions)!.AsObject();
+        Assert.True(legacyBody.Remove("codeConflicts"));
+        using (var output = new FileStream(bodyPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var gzip = new GZipStream(output, CompressionLevel.Fastest))
+        {
+            JsonSerializer.Serialize(gzip, legacyBody, webOptions);
+        }
+
+        UpdateManifestSha256(directory.Path, bodyPath);
+
+        var restored = store.Load(expected.StoreCode, expected.Since, expected.CatalogVersion);
+
+        Assert.NotNull(restored);
+        Assert.Equal(expected.SellableItems, restored!.SellableItems);
+        Assert.Null(restored.CodeConflicts);
+    }
+
+    [Fact]
     public void Load_RejectsBodyWhoseMetadataDoesNotMatchManifest()
     {
         using var directory = new TemporaryDirectory();

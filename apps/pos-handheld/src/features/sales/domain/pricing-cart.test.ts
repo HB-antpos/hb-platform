@@ -44,6 +44,8 @@ test("cart merges normalized sale lookups but keeps OPENITEM lines independent",
   assert.equal(
     cart.addItem(
       item("ignored-merge-id", {
+        // 合并要求同一商品；这里只验证查询码的空白与大小写规范化。
+        productCode: "SKU-line-a",
         lookupCode: "ABC-001",
         unitPrice: createAud(1_200),
       }),
@@ -147,12 +149,14 @@ test("加购 disposition 明确区分新增行与合并行，旧 string API 保�
   const cart = new PricingCart({ asOfIso });
 
   assert.deepEqual(
-    cart.addItemWithDisposition(item("first", { lookupCode: "same-code" })),
+    cart.addItemWithDisposition(
+      item("first", { lookupCode: "same-code", productCode: "SAME-SKU" }),
+    ),
     { lineId: "first", kind: "added" },
   );
   assert.deepEqual(
     cart.addItemWithDisposition(
-      item("ignored", { lookupCode: " SAME-CODE " }),
+      item("ignored", { lookupCode: " SAME-CODE ", productCode: "same-sku" }),
     ),
     { lineId: "first", kind: "incremented" },
   );
@@ -176,6 +180,55 @@ test("加购 disposition 明确区分新增行与合并行，旧 string API 保�
     ),
     { lineId: "scan-first", kind: "incremented" },
   );
+});
+
+test("一码多商品先后选择不同商品时分行加购，各按自身价格，同商品再选才合并", () => {
+  const cart = new PricingCart({ asOfIso });
+  const fly = {
+    productCode: "P-FLY",
+    itemNumber: "EXT-FLY",
+    lookupCode: "6405090401470",
+    displayName: "EXTENSION Fly Swatter",
+    unitPrice: createAud(899),
+    syncProvenance: { referenceCode: null, priceSource: 2 as const },
+  };
+  const flower = {
+    productCode: "P-FLOWER",
+    itemNumber: "FLW-1",
+    lookupCode: "6405090401470",
+    displayName: "flower",
+    unitPrice: createAud(299),
+    syncProvenance: { referenceCode: null, priceSource: 0 as const },
+  };
+
+  assert.deepEqual(
+    cart.addItemWithDisposition({ ...fly, lineId: "fly" }),
+    { lineId: "fly", kind: "added" },
+  );
+  assert.deepEqual(
+    cart.addItemWithDisposition({ ...flower, lineId: "flower" }),
+    { lineId: "flower", kind: "added" },
+  );
+  assert.deepEqual(
+    cart.addItemWithDisposition({ ...fly, lineId: "fly-again" }),
+    { lineId: "fly", kind: "incremented" },
+  );
+
+  const snapshot = cart.snapshot();
+  assert.deepEqual(
+    snapshot.lines.map((line) => [
+      line.productCode,
+      line.displayName,
+      line.quantity,
+      line.unitPrice.cents,
+      line.actualAmount.cents,
+    ]),
+    [
+      ["P-FLY", "EXTENSION Fly Swatter", "2", 899, 1_798],
+      ["P-FLOWER", "flower", "1", 299, 299],
+    ],
+  );
+  assert.equal(snapshot.actualAmount.cents, 2_097);
 });
 
 test("扫码仅合并最后一行的完整同源商品，非连续重复与不兼容折扣保留独立行", () => {

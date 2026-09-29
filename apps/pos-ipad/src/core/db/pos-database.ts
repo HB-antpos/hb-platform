@@ -37,6 +37,7 @@ import type {
 import type { TerminalCartFence } from "@hb/pos-domain/core/contracts/terminal-cart";
 import { SqliteApplicationLogOutbox } from "../logging/application-log";
 
+import { SqliteCatalogCodeConflictRepository } from "./catalog-code-conflict-repository";
 import { SqliteCatalogLookupOverlayRepository } from "./catalog-lookup-overlay-repository";
 import { SqliteCatalogSnapshotRepository } from "./catalog-repository";
 import { applyMigrations } from "./migrations";
@@ -274,6 +275,11 @@ export class PosDatabase implements DatabasePort {
       this.connection,
       this.nowIso,
     );
+  }
+
+  /** 一码多商品候选按门店整体替换，与目录快照表隔离，不参与快照激活与清理。 */
+  public catalogCodeConflicts(): SqliteCatalogCodeConflictRepository {
+    return new SqliteCatalogCodeConflictRepository(this.connection);
   }
 
   /** 日结汇总与冻结归档只经专用 facade 访问，feature 不取得审计表或裸连接。 */

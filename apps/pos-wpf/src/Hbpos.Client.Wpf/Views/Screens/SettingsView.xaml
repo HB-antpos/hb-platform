@@ -12,7 +12,7 @@
              d:DesignHeight="688"
              d:DesignWidth="1366"
              FontFamily="Segoe UI"
-             Background="{StaticResource PosScreenBackgroundBrush}">
+             Background="{DynamicResource PosScreenBackgroundBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <converters:LocalizationKeyConverter x:Key="LocalizationKeyConverter" />
@@ -20,7 +20,7 @@
         <Style x:Key="SettingsLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="Margin" Value="0,0,0,6" />
         </Style>
 
@@ -35,17 +35,22 @@
             <Setter Property="Height" Value="42" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="Padding" Value="12,0" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource PosTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="ScrollViewer.PanningMode" Value="None" />
         </Style>
 
-        <Style x:Key="SettingsComboBoxStyle" TargetType="ComboBox">
+        <!-- 系统默认下拉框模板的底色写死为浅灰渐变，深色主题下会变成浅字压浅底；
+             改为继承 MaterialDesign 下拉框（与历史、卡交易异常中心一致），底色与弹出层随主题切换。 -->
+        <Style x:Key="SettingsComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
             <Setter Property="Height" Value="42" />
             <Setter Property="Padding" Value="10,0" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
@@ -54,22 +59,22 @@
             <Setter Property="Margin" Value="0,0,0,12" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Padding" Value="18,0" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="16" />
             <Setter Property="BorderThickness" Value="1" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="True">
-                    <Setter Property="Background" Value="#FFEAF2FF" />
-                    <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                     <Setter Property="BorderThickness" Value="4,1,1,1" />
-                    <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                     <Setter Property="Padding" Value="15,0,18,0" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
 
         <Style x:Key="SettingsActionCardStyle" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-            <Setter Property="BorderBrush" Value="#FFE0E4EC" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="10" />
             <Setter Property="Padding" Value="20" />
@@ -78,26 +83,26 @@
         <Style x:Key="SettingsPageTitleStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="22" />
             <Setter Property="FontWeight" Value="Black" />
-            <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         </Style>
 
         <Style x:Key="SettingsPageDescriptionStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
 
         <Style x:Key="SettingsContextBadgeStyle" TargetType="Border">
-            <Setter Property="Background" Value="#FFFFFFFF" />
-            <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="14,9" />
         </Style>
 
         <Style x:Key="SettingsProviderTabStyle" TargetType="TabItem">
-            <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="Margin" Value="0,0,12,14" />
@@ -108,8 +113,8 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
                         <Border x:Name="ProviderTabBorder"
-                                Background="#FFFFFFFF"
-                                BorderBrush="{StaticResource PosBorderBrush}"
+                                Background="{DynamicResource PosSurfaceBrush}"
+                                BorderBrush="{DynamicResource PosBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Padding="18,12">
@@ -119,12 +124,12 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="ProviderTabBorder" Property="Background" Value="#FFEAF2FF" />
-                                <Setter TargetName="ProviderTabBorder" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
-                                <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
+                                <Setter TargetName="ProviderTabBorder" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                <Setter TargetName="ProviderTabBorder" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ProviderTabBorder" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                                <Setter TargetName="ProviderTabBorder" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -133,16 +138,16 @@
         </Style>
 
         <Style x:Key="SettingsModeChoiceBorderStyle" TargetType="Border">
-            <Setter Property="Background" Value="#FFFFFFFF" />
-            <Setter Property="BorderBrush" Value="#FFE0E4EC" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Padding" Value="10,7" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                              Value="True">
-                    <Setter Property="Background" Value="#FFEAF2FF" />
-                    <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -156,8 +161,8 @@
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
-                Background="{StaticResource PosSurfaceBrush}"
-                BorderBrush="#FFE1E5EC"
+                Background="{DynamicResource PosSurfaceBrush}"
+                BorderBrush="{DynamicResource PosDividerBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="24,14">
             <Grid>
@@ -179,11 +184,11 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{Binding ScreenTitleText}"
                                FontSize="12"
-                               Foreground="{StaticResource PosMutedForegroundBrush}" />
-                    <TextBlock Text="/" Margin="12,0" FontSize="12" Foreground="#FF9AA4B2" />
+                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    <TextBlock Text="/" Margin="12,0" FontSize="12" Foreground="{DynamicResource PosSubtleForegroundBrush}" />
                     <TextBlock Text="{Binding SettingsSubtitleText}"
                                FontSize="12"
-                               Foreground="{StaticResource PosMutedForegroundBrush}" />
+                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                 </StackPanel>
                 <Border Grid.Column="3"
                         Style="{StaticResource SettingsContextBadgeStyle}">
@@ -227,8 +232,8 @@
 
             <!-- 导航先于内容声明，使键盘 Tab 顺序与左到右的视觉顺序一致。 -->
             <Border Grid.Column="0"
-                    Background="{StaticResource PosSurfaceBrush}"
-                    BorderBrush="#FFE0E4EC"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
                     CornerRadius="10"
                     Padding="16">
@@ -236,7 +241,7 @@
                     <TextBlock Text="{loc:Loc settings.category.title}"
                                FontSize="13"
                                FontWeight="Black"
-                               Foreground="{StaticResource PosTextBrush}"
+                               Foreground="{DynamicResource PosTextBrush}"
                                Margin="2,0,0,12" />
 
                     <Button Command="{Binding SelectDataMaintenanceCommand}"
@@ -359,7 +364,6 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid Grid.Row="0">
@@ -371,19 +375,90 @@
                                                              Kind="CloudDownloadOutline"
                                                              Width="48"
                                                              Height="48"
-                                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Top" />
                                     <StackPanel Grid.Column="1">
                                         <TextBlock Text="{loc:Loc settings.section.dataDownload.title}"
                                                    FontSize="18"
                                                    FontWeight="Black"
-                                                   Foreground="{StaticResource PosTextBrush}" />
+                                                   Foreground="{DynamicResource PosTextBrush}" />
                                         <TextBlock Text="{loc:Loc settings.section.dataDownload.description}"
                                                    Style="{StaticResource SettingsPageDescriptionStyle}" />
                                     </StackPanel>
                                 </Grid>
-                                <Button Grid.Row="1"
+                                <!-- 同步时间与同步状态合并展示；页面级操作提示仍由底部状态栏显示。 -->
+                                <Border x:Name="CatalogSyncStatusPanel"
+                                        Grid.Row="1"
+                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        BorderBrush="{DynamicResource PosDividerBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="12,10"
+                                        Margin="72,14,0,0">
+                                    <StackPanel>
+                                        <DockPanel LastChildFill="False">
+                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                                <materialDesign:PackIcon Kind="ClockOutline"
+                                                                         Width="14"
+                                                                         Height="14"
+                                                                         Margin="0,0,6,0"
+                                                                         VerticalAlignment="Center"
+                                                                         Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                <TextBlock Text="{Binding CatalogSyncTimeLabelText}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                            </StackPanel>
+                                            <Grid DockPanel.Dock="Right">
+                                                <Border Background="{DynamicResource PosSuccessSoftBrush}"
+                                                        CornerRadius="10"
+                                                        Padding="8,2"
+                                                        Visibility="{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <materialDesign:PackIcon Kind="CheckCircleOutline" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.state.synced}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Background="{DynamicResource PosPrimarySoftBrush}"
+                                                        CornerRadius="10"
+                                                        Padding="8,2"
+                                                        Visibility="{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <materialDesign:PackIcon Kind="Sync" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.state.syncing}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Background="{DynamicResource PosDangerSoftBrush}"
+                                                        CornerRadius="10"
+                                                        Padding="8,2"
+                                                        Visibility="{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <materialDesign:PackIcon Kind="AlertCircleOutline" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                                        <TextBlock Text="{loc:Loc settings.section.dataDownload.state.failed}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Grid>
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding CatalogSyncTimeText}"
+                                                   FontSize="18"
+                                                   FontWeight="Bold"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource PosTextBrush}" />
+                                        <ProgressBar Height="4"
+                                                     Margin="0,8,0,0"
+                                                     IsIndeterminate="True"
+                                                     Visibility="{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}" />
+                                        <TextBlock Text="{Binding CatalogSyncFailureText}"
+                                                   FontSize="11"
+                                                   Margin="0,4,0,0"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource PosDangerTextBrush}"
+                                                   Visibility="{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </Border>
+                                <Button Grid.Row="2"
                                         Command="{Binding DownloadCatalogCommand}"
                                         services:ButtonFeedback.Cue="Download"
                                         Style="{StaticResource PosPrimaryButtonStyle}"
@@ -396,25 +471,6 @@
                                         <TextBlock Text="{loc:Loc settings.section.dataDownload.action}" Foreground="White" />
                                     </StackPanel>
                                 </Button>
-                                <Border Grid.Row="3"
-                                        Background="#FFF6F8FB"
-                                        BorderBrush="#FFE0E4EC"
-                                        BorderThickness="1"
-                                        CornerRadius="8"
-                                        Padding="12,10"
-                                        Margin="0,16,0,0">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding StatusMessage}"
-                                                   FontSize="11"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
-                                                   TextTrimming="CharacterEllipsis" />
-                                        <ProgressBar Height="4"
-                                                     Margin="0,9,0,0"
-                                                     IsIndeterminate="True"
-                                                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
-                                </Border>
                             </Grid>
                         </Border>
 
@@ -437,14 +493,14 @@
                                                              Kind="DatabaseRefreshOutline"
                                                              Width="48"
                                                              Height="48"
-                                                             Foreground="#FFEF8A00"
+                                                             Foreground="{DynamicResource PosAccentBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Top" />
                                     <StackPanel Grid.Column="1">
                                         <TextBlock Text="{loc:Loc settings.section.dataReset.title}"
                                                    FontSize="18"
                                                    FontWeight="Black"
-                                                   Foreground="{StaticResource PosTextBrush}" />
+                                                   Foreground="{DynamicResource PosTextBrush}" />
                                         <TextBlock Text="{loc:Loc settings.section.dataReset.description}"
                                                    Style="{StaticResource SettingsPageDescriptionStyle}" />
                                     </StackPanel>
@@ -472,13 +528,13 @@
                                 <Border DockPanel.Dock="Left"
                                         Width="52"
                                         Height="52"
-                                        Background="#FFE8F7F1"
+                                        Background="{DynamicResource PosSuccessSoftBrush}"
                                         CornerRadius="10"
                                         Margin="0,0,16,0">
                                     <materialDesign:PackIcon Kind="Update"
                                                              Width="28"
                                                              Height="28"
-                                                             Foreground="#FF047857"
+                                                             Foreground="{DynamicResource PosSuccessTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center" />
                                 </Border>
@@ -497,11 +553,11 @@
                                     <TextBlock Text="{loc:Loc settings.section.appUpdate.title}"
                                                FontSize="18"
                                                FontWeight="Black"
-                                               Foreground="{StaticResource PosTextBrush}" />
+                                               Foreground="{DynamicResource PosTextBrush}" />
                                     <TextBlock Text="{loc:Loc settings.section.appUpdate.description}"
                                                Style="{StaticResource SettingsPageDescriptionStyle}" />
                                     <TextBlock FontSize="11"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                Margin="0,5,0,0">
                                         <Run Text="{loc:Loc settings.section.appUpdate.channel}" />
                                         <Run Text=": " />
@@ -514,21 +570,21 @@
                         <Border Grid.Row="3"
                                 Grid.ColumnSpan="3"
                                 Style="{StaticResource SettingsActionCardStyle}"
-                                Background="#FFFFF7F7"
-                                BorderBrush="#FFFFCCCC"
+                                Background="{DynamicResource PosDangerSoftBrush}"
+                                BorderBrush="{DynamicResource PosDangerBorderBrush}"
                                 Margin="0,16,0,0"
                                 Visibility="{Binding IsDebugTestSalesDataResetVisible, Converter={StaticResource BoolToVis}}">
                             <DockPanel>
                                 <Border DockPanel.Dock="Left"
                                         Width="52"
                                         Height="52"
-                                        Background="#FFFFE5E5"
+                                        Background="{DynamicResource PosDangerSoftBrush}"
                                         CornerRadius="10"
                                         Margin="0,0,16,0">
                                     <materialDesign:PackIcon Kind="DeleteOutline"
                                                              Width="28"
                                                              Height="28"
-                                                             Foreground="#FFB42318"
+                                                             Foreground="{DynamicResource PosDangerTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center" />
                                 </Border>
@@ -540,15 +596,15 @@
                                         MinWidth="168"
                                         Margin="18,0,0,0">
                                     <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="DeleteOutline" Width="18" Height="18" Margin="0,0,8,0" Foreground="#FFB42318" />
-                                        <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.action}" Foreground="#FFB42318" />
+                                        <materialDesign:PackIcon Kind="DeleteOutline" Width="18" Height="18" Margin="0,0,8,0" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                        <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.action}" Foreground="{DynamicResource PosDangerTextBrush}" />
                                     </StackPanel>
                                 </Button>
                                 <StackPanel>
                                     <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.title}"
                                                FontSize="18"
                                                FontWeight="Black"
-                                               Foreground="#FFB42318" />
+                                               Foreground="{DynamicResource PosDangerTextBrush}" />
                                     <TextBlock Text="{loc:Loc settings.section.testSalesDataReset.description}"
                                                Style="{StaticResource SettingsPageDescriptionStyle}" />
                                 </StackPanel>
@@ -591,7 +647,7 @@
                                     <StackPanel Margin="0,0,20,0">
                                         <TextBlock Text="{loc:Loc settings.payment.methods.manualCard}" FontSize="16" FontWeight="SemiBold" />
                                         <TextBlock Text="{loc:Loc settings.payment.methods.manualCard.help}"
-                                                   TextWrapping="Wrap" Foreground="{StaticResource PosMutedForegroundBrush}" Margin="0,5,0,0" />
+                                                   TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,5,0,0" />
                                     </StackPanel>
                                     <ToggleButton Grid.Column="1" x:Name="ManualCardSettingToggle"
                                                   Style="{StaticResource MaterialDesignSwitchToggleButton}"
@@ -600,7 +656,7 @@
                                                   AutomationProperties.Name="{loc:Loc settings.payment.methods.manualCard}"
                                                   MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
                                 </Grid>
-                                <Border Height="1" Background="{StaticResource PosBorderBrush}" Margin="0,0,0,16" />
+                                <Border Height="1" Background="{DynamicResource PosBorderBrush}" Margin="0,0,0,16" />
                                 <Grid Margin="0,0,0,18">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -609,7 +665,7 @@
                                     <StackPanel Margin="0,0,20,0">
                                         <TextBlock Text="{loc:Loc settings.payment.methods.voucher}" FontSize="16" FontWeight="SemiBold" />
                                         <TextBlock Text="{loc:Loc settings.payment.methods.voucher.help}"
-                                                   TextWrapping="Wrap" Foreground="{StaticResource PosMutedForegroundBrush}" Margin="0,5,0,0" />
+                                                   TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,5,0,0" />
                                     </StackPanel>
                                     <ToggleButton Grid.Column="1" x:Name="VoucherSettingToggle"
                                                   Style="{StaticResource MaterialDesignSwitchToggleButton}"
@@ -629,8 +685,8 @@
                         <Border Grid.Row="2"
                                 Grid.Column="0"
                                 Grid.ColumnSpan="3"
-                                Background="#FFFFFFFF"
-                                BorderBrush="{StaticResource PosBorderBrush}"
+                                Background="{DynamicResource PosSurfaceBrush}"
+                                BorderBrush="{DynamicResource PosBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="20,16"
@@ -639,13 +695,13 @@
                                 <Border DockPanel.Dock="Left"
                                         Width="44"
                                         Height="44"
-                                        Background="#FFEAF2FF"
+                                        Background="{DynamicResource PosPrimarySoftBrush}"
                                         CornerRadius="8"
                                         Margin="0,0,14,0">
                                     <materialDesign:PackIcon Kind="ContactlessPayment"
                                                              Width="24"
                                                              Height="24"
-                                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center" />
                                 </Border>
@@ -653,14 +709,14 @@
                                     <TextBlock Text="{loc:Loc settings.payment.activeProvider.title}"
                                                FontSize="11"
                                                FontWeight="Bold"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}" />
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                     <TextBlock Text="{Binding ActivePaymentProviderText}"
                                                FontSize="18"
                                                FontWeight="Black"
                                                Margin="0,2,0,0" />
                                     <TextBlock Text="{Binding ActivePaymentProviderDetailText}"
                                                FontSize="12"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,4,0,0" />
                                 </StackPanel>
@@ -698,13 +754,13 @@
                                     <Border DockPanel.Dock="Left"
                                             Width="38"
                                             Height="38"
-                                            Background="#FFE8F0FE"
+                                            Background="{DynamicResource PosPrimarySoftBrush}"
                                             CornerRadius="8"
                                             Margin="0,0,12,0">
                                         <materialDesign:PackIcon Kind="ContactlessPayment"
                                                                  Width="22"
                                                                  Height="22"
-                                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                                  HorizontalAlignment="Center"
                                                                  VerticalAlignment="Center" />
                                     </Border>
@@ -714,11 +770,11 @@
                                                    FontWeight="Black" />
                                         <TextBlock Text="{loc:Loc settings.square.description}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    Margin="0,4,0,0" />
                                         <TextBlock Text="{loc:Loc settings.square.switchHelp}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosPrimaryBrush}"
+                                                   Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,6,0,0" />
                                     </StackPanel>
@@ -732,19 +788,19 @@
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="{loc:Loc settings.square.tokenSource}" Style="{StaticResource SettingsLabelStyle}" />
                                         <Border MinHeight="42"
-                                                Background="#FFF6F8FB"
-                                                BorderBrush="{StaticResource PosBorderBrush}"
+                                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                                BorderBrush="{DynamicResource PosBorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="6"
                                                 Padding="12,8">
                                             <TextBlock Text="{Binding SquareTokenStatusText}"
                                                        FontSize="12"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        TextWrapping="Wrap" />
                                         </Border>
                                         <TextBlock Text="{loc:Loc settings.square.tokenHelp}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    Margin="0,6,0,0" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Margin="14,0,0,0">
@@ -772,7 +828,7 @@
                                                 <DataTemplate>
                                                     <StackPanel>
                                                         <TextBlock Text="{Binding Name}" FontWeight="Bold" />
-                                                        <TextBlock Text="{Binding Id}" FontSize="10" Foreground="{StaticResource PosMutedForegroundBrush}" />
+                                                        <TextBlock Text="{Binding Id}" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                                     </StackPanel>
                                                 </DataTemplate>
                                             </ComboBox.ItemTemplate>
@@ -807,7 +863,7 @@
                                                 <DataTemplate>
                                                     <StackPanel>
                                                         <TextBlock Text="{Binding Name}" FontWeight="Bold" />
-                                                        <TextBlock FontSize="10" Foreground="{StaticResource PosMutedForegroundBrush}">
+                                                        <TextBlock FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}">
                                                             <Run Text="{Binding Id}" />
                                                             <Run Text="  " />
                                                             <Run Text="{Binding StatusDisplayName}" />
@@ -835,11 +891,11 @@
                                     <TextBlock Text="{loc:Loc settings.square.deviceCodes}"
                                                FontSize="14"
                                                FontWeight="Black"
-                                               Foreground="{StaticResource PosTextBrush}"
+                                               Foreground="{DynamicResource PosTextBrush}"
                                                Margin="0,0,0,8" />
 
-                                    <Border Background="#FFFFF4DE"
-                                            BorderBrush="#FFF2D3A2"
+                                    <Border Background="{DynamicResource PosWarningSoftBrush}"
+                                            BorderBrush="{DynamicResource PosWarningBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="12,8"
@@ -847,7 +903,7 @@
                                             Visibility="{Binding IsSquareDeviceCodesUnsupported, Converter={StaticResource BoolToVis}}">
                                         <TextBlock Text="{Binding SquareDeviceCodesUnavailableText}"
                                                    FontSize="11"
-                                                   Foreground="#FF8F4E00"
+                                                   Foreground="{DynamicResource PosWarningTextBrush}"
                                                    TextWrapping="Wrap" />
                                     </Border>
 
@@ -907,7 +963,7 @@
                                                         <DataTemplate>
                                                             <StackPanel>
                                                                 <TextBlock Text="{Binding Name}" FontWeight="Bold" />
-                                                                <TextBlock FontSize="10" Foreground="{StaticResource PosMutedForegroundBrush}">
+                                                                <TextBlock FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}">
                                                                     <Run Text="{Binding Code}" />
                                                                     <Run Text="  " />
                                                                     <Run Text="{Binding Status}" />
@@ -933,14 +989,14 @@
                                         </Grid>
 
                                         <Border Grid.Row="2"
-                                                Background="#FFF6F8FB"
-                                                BorderBrush="{StaticResource PosBorderBrush}"
+                                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                                BorderBrush="{DynamicResource PosBorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="6"
                                                 Padding="12,8">
                                             <TextBlock Text="{loc:Loc settings.square.deviceCodesHelp}"
                                                        FontSize="11"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        TextWrapping="Wrap" />
                                         </Border>
                                     </Grid>
@@ -996,13 +1052,13 @@
                                     <Border DockPanel.Dock="Left"
                                             Width="38"
                                             Height="38"
-                                            Background="#FFFFF4DE"
+                                            Background="{DynamicResource PosWarningSoftBrush}"
                                             CornerRadius="8"
                                             Margin="0,0,12,0">
                                         <materialDesign:PackIcon Kind="LanConnect"
                                                                  Width="22"
                                                                  Height="22"
-                                                                 Foreground="#FF8F4E00"
+                                                                 Foreground="{DynamicResource PosWarningTextBrush}"
                                                                  HorizontalAlignment="Center"
                                                                  VerticalAlignment="Center" />
                                     </Border>
@@ -1012,7 +1068,7 @@
                                                    FontWeight="Black" />
                                         <TextBlock Text="{loc:Loc settings.linkly.description}"
                                                    FontSize="11"
-                                                   Foreground="#FF8F4E00"
+                                                   Foreground="{DynamicResource PosWarningTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,4,0,0" />
                                     </StackPanel>
@@ -1041,12 +1097,12 @@
                                               Margin="0,0,0,16">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border BorderBrush="#FFE1E5EA"
+                                            <Border BorderBrush="{DynamicResource PosDividerBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="8"
                                                     Padding="10,7"
                                                     Margin="0,0,0,6"
-                                                    Background="#FFFFFFFF">
+                                                    Background="{DynamicResource PosSurfaceBrush}">
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="36" />
@@ -1057,25 +1113,25 @@
                                                                Text="{Binding Rank}"
                                                                FontSize="18"
                                                                FontWeight="Black"
-                                                               Foreground="{StaticResource PosAccentBrush}"
+                                                               Foreground="{DynamicResource PosAccentBrush}"
                                                                VerticalAlignment="Center" />
                                                     <StackPanel Grid.Column="1">
                                                         <StackPanel Orientation="Horizontal">
                                                             <TextBlock Text="{Binding ModeKey, Converter={StaticResource LocalizationKeyConverter}}"
                                                                        FontWeight="Bold" />
-                                                            <Border Background="#FFEAF2FF"
+                                                            <Border Background="{DynamicResource PosPrimarySoftBrush}"
                                                                     CornerRadius="6"
                                                                     Padding="6,2"
                                                                     Margin="8,0,0,0">
                                                                 <TextBlock Text="{Binding RoleKey, Converter={StaticResource LocalizationKeyConverter}}"
                                                                            FontSize="10"
                                                                            FontWeight="Bold"
-                                                                           Foreground="{StaticResource PosAccentBrush}" />
+                                                                           Foreground="{DynamicResource PosAccentBrush}" />
                                                             </Border>
                                                         </StackPanel>
                                                         <TextBlock Text="{Binding HelpKey, Converter={StaticResource LocalizationKeyConverter}}"
                                                                    FontSize="11"
-                                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                                    TextWrapping="Wrap"
                                                                    Margin="0,4,0,0"
                                                                    Visibility="Collapsed" />
@@ -1142,7 +1198,7 @@
                                                 <TextBlock Text="{loc:Loc settings.linkly.mode.localIp}" FontWeight="Bold" />
                                                 <TextBlock Text="{loc:Loc settings.linkly.mode.localIp.help}"
                                                            FontSize="11"
-                                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                            TextWrapping="Wrap"
                                                            Margin="0,4,0,0" />
                                             </StackPanel>
@@ -1157,7 +1213,7 @@
                                                 <TextBlock Text="{loc:Loc settings.linkly.mode.cloudDirectSync}" FontWeight="Bold" />
                                                 <TextBlock Text="{loc:Loc settings.linkly.mode.cloudDirectSync.help}"
                                                            FontSize="11"
-                                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                            TextWrapping="Wrap"
                                                            Margin="0,4,0,0" />
                                             </StackPanel>
@@ -1171,7 +1227,7 @@
                                                 <TextBlock Text="{loc:Loc settings.linkly.mode.cloudBackendAsync}" FontWeight="Bold" />
                                                 <TextBlock Text="{loc:Loc settings.linkly.mode.cloudBackendAsync.help}"
                                                            FontSize="11"
-                                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                            TextWrapping="Wrap"
                                                            Margin="0,4,0,0" />
                                             </StackPanel>
@@ -1211,8 +1267,8 @@
 
                                 <Expander Visibility="Collapsed"
                                           Margin="0,0,0,16"
-                                          Background="#FFFFFBF2"
-                                          BorderBrush="#FFFFD89A"
+                                          Background="{DynamicResource PosWarningSoftBrush}"
+                                          BorderBrush="{DynamicResource PosWarningBorderBrush}"
                                           BorderThickness="1"
                                           Padding="10,8"
                                           IsExpanded="False">
@@ -1220,12 +1276,12 @@
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.title}"
                                                    FontSize="12"
                                                    FontWeight="Black"
-                                                   Foreground="#FF8F4E00" />
+                                                   Foreground="{DynamicResource PosWarningTextBrush}" />
                                     </Expander.Header>
                                     <StackPanel Margin="0,8,0,0">
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.note}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,10" />
 
@@ -1234,42 +1290,42 @@
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step1}"
                                                    FontFamily="Consolas"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosTextBrush}"
+                                                   Foreground="{DynamicResource PosTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step2}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step3}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step4}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step5}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step6}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step7}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step8}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,10" />
 
@@ -1278,23 +1334,23 @@
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.repair.step1}"
                                                    FontFamily="Consolas"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosTextBrush}"
+                                                   Foreground="{DynamicResource PosTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.repair.step2}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.repair.step3}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.repair.warning}"
                                                    FontSize="11"
                                                    FontWeight="Bold"
-                                                   Foreground="{StaticResource PosDangerBrush}"
+                                                   Foreground="{DynamicResource PosDangerTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,10" />
 
@@ -1303,58 +1359,58 @@
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step1}"
                                                    FontFamily="Consolas"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosTextBrush}"
+                                                   Foreground="{DynamicResource PosTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step2}"
                                                    FontFamily="Consolas"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosTextBrush}"
+                                                   Foreground="{DynamicResource PosTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step3}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step4}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step5}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step6}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step7}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step8}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step9}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step10}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.local.step11}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,10" />
 
@@ -1362,13 +1418,13 @@
                                                    Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.manual.steps}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.manual.warning}"
                                                    FontSize="11"
                                                    FontWeight="Bold"
-                                                   Foreground="{StaticResource PosDangerBrush}"
+                                                   Foreground="{DynamicResource PosDangerTextBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,10" />
 
@@ -1376,12 +1432,12 @@
                                                    Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.ip.steps}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.ip.note}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,10" />
 
@@ -1389,17 +1445,17 @@
                                                    Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.mode.localIp}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.mode.cloudDirectSync}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,0,0,4" />
                                         <TextBlock Text="{loc:Loc settings.linkly.sop.mode.cloudBackendAsync}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Expander>
@@ -1408,11 +1464,11 @@
                                     <TextBlock Text="{loc:Loc settings.linkly.localIp.title}"
                                                FontSize="14"
                                                FontWeight="SemiBold"
-                                               Foreground="{StaticResource PosTextBrush}"
+                                               Foreground="{DynamicResource PosTextBrush}"
                                                Margin="0,0,0,6" />
                                     <TextBlock Text="{loc:Loc settings.linkly.localIp.description}"
                                                FontSize="11"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,12" />
                                     <TextBlock Text="{loc:Loc settings.payment.environment}" Style="{StaticResource SettingsLabelStyle}" />
@@ -1422,8 +1478,8 @@
                                               Margin="0,0,0,14">
                                         <TextBlock Text="{loc:Loc settings.payment.sandbox.toggle}" FontWeight="Bold" />
                                     </CheckBox>
-                                    <Border Background="#FFF6F8FB"
-                                            BorderBrush="{StaticResource PosBorderBrush}"
+                                    <Border Background="{DynamicResource PosSurfaceAltBrush}"
+                                            BorderBrush="{DynamicResource PosBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="12,8"
@@ -1432,7 +1488,7 @@
                                         <TextBlock Text="{loc:Loc settings.linkly.localIp.sandboxSafety}"
                                                    FontSize="11"
                                                    FontWeight="SemiBold"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap" />
                                     </Border>
                                     <Grid Margin="0,0,0,14">
@@ -1463,8 +1519,8 @@
                                              HorizontalAlignment="Left"
                                              Margin="0,0,0,12" />
 
-                                    <Border Background="#FFFFF8E8"
-                                            BorderBrush="#FFFFD597"
+                                    <Border Background="{DynamicResource PosWarningSoftBrush}"
+                                            BorderBrush="{DynamicResource PosWarningBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="10,8"
@@ -1474,11 +1530,11 @@
                                                                      Kind="AlertOutline"
                                                                      Width="18"
                                                                      Height="18"
-                                                                     Foreground="#FFEF8A00"
+                                                                     Foreground="{DynamicResource PosAccentBrush}"
                                                                      Margin="0,0,8,0" />
                                             <TextBlock Text="{loc:Loc settings.linkly.localIp.testSafetyShort}"
                                                        FontSize="11"
-                                                       Foreground="#FF8F4E00"
+                                                       Foreground="{DynamicResource PosWarningTextBrush}"
                                                        TextWrapping="Wrap" />
                                         </DockPanel>
                                     </Border>
@@ -1488,29 +1544,29 @@
                                     <TextBlock Text="{loc:Loc settings.linkly.cloudDirect.title}"
                                                FontSize="14"
                                                FontWeight="SemiBold"
-                                               Foreground="{StaticResource PosTextBrush}"
+                                               Foreground="{DynamicResource PosTextBrush}"
                                                Margin="0,0,0,6" />
                                     <TextBlock Text="{loc:Loc settings.linkly.cloudDirect.description}"
                                                FontSize="11"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,12" />
                                     <TextBlock Text="{loc:Loc settings.linkly.cloud.secret}" Style="{StaticResource SettingsLabelStyle}" />
                                     <Border MinHeight="42"
-                                            Background="#FFF6F8FB"
-                                            BorderBrush="{StaticResource PosBorderBrush}"
+                                            Background="{DynamicResource PosSurfaceAltBrush}"
+                                            BorderBrush="{DynamicResource PosBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="12,8"
                                             Margin="0,0,0,14">
                                         <TextBlock Text="{Binding LinklyCloudSecretStatusText}"
                                                    FontSize="12"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap" />
                                     </Border>
 
-                                    <Border Background="#FFFFFFFF"
-                                            BorderBrush="{StaticResource PosBorderBrush}"
+                                    <Border Background="{DynamicResource PosSurfaceBrush}"
+                                            BorderBrush="{DynamicResource PosBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="18"
@@ -1519,10 +1575,10 @@
                                             <TextBlock Text="{loc:Loc settings.linkly.cloud.terminalPairingTitle}"
                                                        FontSize="18"
                                                        FontWeight="SemiBold"
-                                                       Foreground="{StaticResource PosTextBrush}" />
+                                                       Foreground="{DynamicResource PosTextBrush}" />
                                             <TextBlock Text="{loc:Loc settings.linkly.cloud.terminalPairingSubtitle}"
                                                        FontSize="12"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        Margin="0,4,0,18" />
 
                                              <TextBlock Text="{loc:Loc settings.payment.environment}" Style="{StaticResource SettingsLabelStyle}" />
@@ -1535,15 +1591,15 @@
 
                                             <TextBlock Text="{loc:Loc settings.linkly.cloud.credential}" Style="{StaticResource SettingsLabelStyle}" />
                                             <Border MinHeight="42"
-                                                    Background="#FFF6F8FB"
-                                                    BorderBrush="{StaticResource PosBorderBrush}"
+                                                    Background="{DynamicResource PosSurfaceAltBrush}"
+                                                    BorderBrush="{DynamicResource PosBorderBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="6"
                                                     Padding="12,8"
                                                     Margin="0,0,0,14">
                                                 <TextBlock Text="{Binding LinklyCloudCredentialStatusText}"
                                                            FontSize="12"
-                                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                            TextWrapping="Wrap" />
                                             </Border>
 
@@ -1576,8 +1632,8 @@
                                                      Style="{StaticResource SettingsFieldTextBoxStyle}"
                                                      Margin="0,0,0,12" />
 
-                                            <Border Background="#FFF6F8FB"
-                                                    BorderBrush="#FFE0E4EC"
+                                            <Border Background="{DynamicResource PosSurfaceAltBrush}"
+                                                    BorderBrush="{DynamicResource PosDividerBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="6"
                                                     Padding="10,8"
@@ -1586,7 +1642,7 @@
                                                 <TextBlock Text="{Binding LinklyTestStatusMessage}"
                                                            FontSize="12"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                            TextWrapping="Wrap" />
                                             </Border>
 
@@ -1619,8 +1675,8 @@
                                 </StackPanel>
 
                                 <StackPanel Visibility="{Binding IsLinklyCloudBackendAsyncMode, Converter={StaticResource BoolToVis}}">
-                                    <Border Background="#FFFFFFFF"
-                                            BorderBrush="{StaticResource PosBorderBrush}"
+                                    <Border Background="{DynamicResource PosSurfaceBrush}"
+                                            BorderBrush="{DynamicResource PosBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="18"
@@ -1629,10 +1685,10 @@
                                             <TextBlock Text="{loc:Loc settings.linkly.cloudBackend.title}"
                                                        FontSize="18"
                                                        FontWeight="SemiBold"
-                                                       Foreground="{StaticResource PosTextBrush}" />
+                                                       Foreground="{DynamicResource PosTextBrush}" />
                                             <TextBlock Text="{loc:Loc settings.linkly.cloudBackend.description}"
                                                        FontSize="12"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        TextWrapping="Wrap"
                                                        Margin="0,4,0,18" />
 
@@ -1644,8 +1700,8 @@
                                                 <TextBlock Text="{loc:Loc settings.payment.sandbox.toggle}" FontWeight="Bold" />
                                             </CheckBox>
 
-                                            <Border Background="#FFF3F7FF"
-                                                    BorderBrush="#FFBED0EE"
+                                            <Border Background="{DynamicResource PosPrimarySoftBrush}"
+                                                    BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="6"
                                                     Padding="12,10"
@@ -1658,12 +1714,12 @@
                                                     <materialDesign:PackIcon Kind="ShieldLockOutline"
                                                                              Width="20"
                                                                              Height="20"
-                                                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                                              Margin="0,1,10,0" />
                                                     <TextBlock Grid.Column="1"
                                                                Text="{loc:Loc settings.linkly.cloudBackend.credentialsManagedByWeb}"
                                                                FontSize="12"
-                                                               Foreground="{StaticResource PosTextBrush}"
+                                                               Foreground="{DynamicResource PosTextBrush}"
                                                                TextWrapping="Wrap" />
                                                 </Grid>
                                             </Border>
@@ -1675,7 +1731,7 @@
                                                 </Button>
                                                 <StackPanel VerticalAlignment="Center">
                                                     <TextBlock Text="{loc:Loc settings.linkly.lines.title}" FontSize="16" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{loc:Loc settings.linkly.lines.description}" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource PosMutedForegroundBrush}" />
+                                                    <TextBlock Text="{loc:Loc settings.linkly.lines.description}" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                                 </StackPanel>
                                             </DockPanel>
                                             <TextBlock Text="{loc:Loc settings.linkly.cloudBackend.terminal}" Style="{StaticResource SettingsLabelStyle}" />
@@ -1700,11 +1756,11 @@
                                                                     <ColumnDefinition Width="*" />
                                                                     <ColumnDefinition Width="Auto" />
                                                                 </Grid.ColumnDefinitions>
-                                                                <Border Background="#FFE9EFF9" CornerRadius="4" Padding="7,3" Margin="0,0,9,0">
+                                                                <Border Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="4" Padding="7,3" Margin="0,0,9,0">
                                                                     <TextBlock Text="{Binding LaneNo, StringFormat=Lane {0}}" FontSize="11" FontWeight="Bold" />
                                                                 </Border>
                                                                 <TextBlock Grid.Column="1" Text="{Binding DisplayName}" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                                                <TextBlock Grid.Column="2" Text="{Binding PairingState}" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource PosMutedForegroundBrush}" Margin="10,0,0,0" />
+                                                                <TextBlock Grid.Column="2" Text="{Binding PairingState}" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="10,0,0,0" />
                                                             </Grid>
                                                         </DataTemplate>
                                                     </ComboBox.ItemTemplate>
@@ -1722,8 +1778,8 @@
                                                 </Button>
                                             </Grid>
 
-                                            <Border Background="#FFFFF4DE"
-                                                    BorderBrush="#FFF2D3A2"
+                                            <Border Background="{DynamicResource PosWarningSoftBrush}"
+                                                    BorderBrush="{DynamicResource PosWarningBorderBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="6"
                                                     Padding="12,8"
@@ -1731,12 +1787,12 @@
                                                     Visibility="{Binding IsLinklyCloudLineManagementUnavailable, Converter={StaticResource BoolToVis}}">
                                                 <TextBlock Text="{Binding LinklyCloudLineManagementMessage}"
                                                            FontSize="11"
-                                                           Foreground="#FF8F4E00"
+                                                           Foreground="{DynamicResource PosWarningTextBrush}"
                                                            TextWrapping="Wrap" />
                                             </Border>
 
-                                            <Border Background="#FFF8F9FB"
-                                                    BorderBrush="{StaticResource PosBorderBrush}"
+                                            <Border Background="{DynamicResource PosSurfaceAltBrush}"
+                                                    BorderBrush="{DynamicResource PosBorderBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="6"
                                                     Padding="10,8"
@@ -1745,11 +1801,11 @@
                                                     <TextBlock Text="{Binding SelectedLinklyCloudTerminalText}"
                                                                FontSize="12"
                                                                FontWeight="SemiBold"
-                                                               Foreground="{StaticResource PosTextBrush}"
+                                                               Foreground="{DynamicResource PosTextBrush}"
                                                                TextWrapping="Wrap" />
                                                     <TextBlock Text="{loc:Loc settings.linkly.cloudBackend.readyHint}"
                                                                Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
-                                                               Foreground="{StaticResource PosMutedForegroundBrush}" />
+                                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                                 </StackPanel>
                                             </Border>
                                             <TextBlock Text="{loc:Loc settings.linkly.lines.empty}" TextWrapping="Wrap" Margin="0,0,0,14">
@@ -1769,12 +1825,12 @@
                                                         <Border BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,12">
                                                             <Border.Style>
                                                                 <Style TargetType="Border">
-                                                                    <Setter Property="Background" Value="White" />
-                                                                    <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+                                                                    <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                                                    <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsExpanded}" Value="True">
-                                                                            <Setter Property="Background" Value="#FFF5F9FF" />
-                                                                            <Setter Property="BorderBrush" Value="#FF90B8F0" />
+                                                                            <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                                                            <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
@@ -1789,11 +1845,11 @@
                                                                     <StackPanel VerticalAlignment="Center">
                                                                         <TextBlock Text="{Binding DisplayName}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                                         <WrapPanel Margin="0,5,0,0">
-                                                                            <Border Background="#FFE6EFFF" CornerRadius="4" Padding="8,4" Margin="0,0,8,4">
-                                                                                <TextBlock Text="{Binding LaneLabel}" FontWeight="Bold" Foreground="{StaticResource PosPrimaryBrush}" />
+                                                                            <Border Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="4" Padding="8,4" Margin="0,0,8,4">
+                                                                                <TextBlock Text="{Binding LaneLabel}" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                                                                             </Border>
                                                                             <TextBlock Text="{loc:Loc settings.linkly.lines.selected}" VerticalAlignment="Center"
-                                                                                       Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}" Foreground="{StaticResource PosMutedForegroundBrush}" />
+                                                                                       Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                                                         </WrapPanel>
                                                                     </StackPanel>
                                                                 </DockPanel>
@@ -1803,9 +1859,9 @@
                                                                         <TextBlock Text="{Binding PairingStatusText}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap">
                                                                             <TextBlock.Style>
                                                                                 <Style TargetType="TextBlock">
-                                                                                    <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+                                                                                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
                                                                                     <Style.Triggers>
-                                                                                        <DataTrigger Binding="{Binding Terminal.IsReady}" Value="True"><Setter Property="Foreground" Value="#FF137A4B" /></DataTrigger>
+                                                                                        <DataTrigger Binding="{Binding Terminal.IsReady}" Value="True"><Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" /></DataTrigger>
                                                                                     </Style.Triggers>
                                                                                 </Style>
                                                                             </TextBlock.Style>
@@ -1816,10 +1872,10 @@
                                                                         <TextBlock Text="{Binding ConnectionStatusText}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap">
                                                                             <TextBlock.Style>
                                                                                 <Style TargetType="TextBlock">
-                                                                                    <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+                                                                                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
                                                                                     <Style.Triggers>
-                                                                                        <DataTrigger Binding="{Binding IsConnected}" Value="True"><Setter Property="Foreground" Value="#FF137A4B" /></DataTrigger>
-                                                                                        <DataTrigger Binding="{Binding HasConnectionFailure}" Value="True"><Setter Property="Foreground" Value="#FFB83B24" /></DataTrigger>
+                                                                                        <DataTrigger Binding="{Binding IsConnected}" Value="True"><Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" /></DataTrigger>
+                                                                                        <DataTrigger Binding="{Binding HasConnectionFailure}" Value="True"><Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" /></DataTrigger>
                                                                                     </Style.Triggers>
                                                                                 </Style>
                                                                             </TextBlock.Style>
@@ -1831,9 +1887,9 @@
                                                                                    FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                                     </StackPanel>
                                                                 </WrapPanel>
-                                                                <Border Background="#FFFFF5E6" BorderBrush="#FFE7BF7A" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,10"
+                                                                <Border Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,10"
                                                                         Visibility="{Binding HasConnectionHelp, Converter={StaticResource BoolToVis}}">
-                                                                    <TextBlock Text="{Binding ConnectionHelpText}" TextWrapping="Wrap" Foreground="#FF805000" />
+                                                                    <TextBlock Text="{Binding ConnectionHelpText}" TextWrapping="Wrap" Foreground="{DynamicResource PosWarningTextBrush}" />
                                                                 </Border>
                                                                 <WrapPanel Margin="0,0,0,4">
                                                                     <Button Command="{Binding TestConnectionCommand}" Style="{StaticResource PosSecondaryButtonStyle}" MinHeight="44" Padding="12,8" Margin="0,0,10,6">
@@ -1869,7 +1925,7 @@
                                                                         <TextBlock Text="{loc:Loc settings.linkly.cloudBackend.unassign}" />
                                                                     </Button>
                                                                 </WrapPanel>
-                                                                <Border Background="#FFEAF2FF" CornerRadius="4" Padding="14" Margin="0,10,0,0"
+                                                                <Border Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="4" Padding="14" Margin="0,10,0,0"
                                                                         Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
                                                                     <StackPanel>
                                                                         <TextBlock Text="{loc:Loc settings.linkly.lines.working}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,10"
@@ -1895,7 +1951,7 @@
                                                                         <StackPanel Visibility="{Binding IsConfirming, Converter={StaticResource BoolToVis}}">
                                                                             <TextBlock Text="{loc:Loc settings.linkly.lines.confirmTitle}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                                             <TextBlock Text="{Binding DisplayName}" FontSize="22" FontWeight="Bold" TextWrapping="Wrap" Margin="0,12,0,4" />
-                                                                            <TextBlock Text="{Binding LaneLabel}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource PosPrimaryBrush}" />
+                                                                            <TextBlock Text="{Binding LaneLabel}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                                                                             <TextBlock Text="{loc:Loc settings.linkly.cloud.pairCode}" Margin="0,12,0,4" />
                                                                             <TextBlock Text="{Binding PairCode}" FontSize="28" FontFamily="Consolas" FontWeight="Bold" />
                                                                             <TextBlock Text="{loc:Loc settings.linkly.lines.confirmHelp}" TextWrapping="Wrap" Margin="0,10,0,12" />
@@ -1919,9 +1975,9 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                            <TextBlock Text="{loc:Loc settings.linkly.lines.singleExpandedHint}" TextWrapping="Wrap" Foreground="{StaticResource PosMutedForegroundBrush}" Margin="0,0,0,14" />
+                                            <TextBlock Text="{loc:Loc settings.linkly.lines.singleExpandedHint}" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,0,0,14" />
                                             <TextBlock Text="{Binding SelectedLinklyCloudTerminalText}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,12" />
-                                            <Border Background="#FFF6F8FB" BorderBrush="#FFE0E4EC" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,12">
+                                            <Border Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,12">
                                                 <TextBlock Text="{Binding LinklyTestStatusMessage}" FontSize="12" TextWrapping="Wrap" />
                                             </Border>
                                             <StackPanel>
@@ -1983,8 +2039,8 @@
                                     </Button>
                                 </WrapPanel>
 
-                                <Border Background="#FFF6F8FB"
-                                        BorderBrush="#FFE0E4EC"
+                                <Border Background="{DynamicResource PosSurfaceAltBrush}"
+                                        BorderBrush="{DynamicResource PosDividerBrush}"
                                         BorderThickness="1"
                                         CornerRadius="6"
                                         Padding="10,8"
@@ -1993,7 +2049,7 @@
                                     <TextBlock Text="{Binding LinklyTestStatusMessage}"
                                                FontSize="12"
                                                FontWeight="SemiBold"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap" />
                                 </Border>
                             </StackPanel>
@@ -2031,19 +2087,20 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <DockPanel Grid.Row="0" Margin="0,0,0,18">
                                     <Border DockPanel.Dock="Left"
                                             Width="42"
                                             Height="42"
-                                            Background="#FFE8F0FE"
+                                            Background="{DynamicResource PosPrimarySoftBrush}"
                                             CornerRadius="8"
                                             Margin="0,0,14,0">
                                         <materialDesign:PackIcon Kind="Printer"
                                                                  Width="24"
                                                                  Height="24"
-                                                                 Foreground="{StaticResource PosPrimaryBrush}"
+                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                                  HorizontalAlignment="Center"
                                                                  VerticalAlignment="Center" />
                                     </Border>
@@ -2063,10 +2120,10 @@
                                         <TextBlock Text="{Binding ReceiptPrinterTitleText}"
                                                    FontSize="18"
                                                    FontWeight="Black"
-                                                   Foreground="{StaticResource PosTextBrush}" />
+                                                   Foreground="{DynamicResource PosTextBrush}" />
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.description}"
                                                    FontSize="12"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,5,0,0" />
                                     </StackPanel>
@@ -2141,7 +2198,42 @@
                                     </StackPanel>
                                 </Grid>
 
-                                <DockPanel Grid.Row="4">
+                                <!-- 中文注释：客人小票是否附带银行收据原文；与其他小票字段一样点“保存”后生效。 -->
+                                <Border Grid.Row="4"
+                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        BorderBrush="{DynamicResource PosDividerBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="14,10"
+                                        Margin="0,0,0,18">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,20,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource PosTextBrush}" />
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt.help}"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <ToggleButton Grid.Column="1"
+                                                      x:Name="PrintBankReceiptTextToggle"
+                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                      IsChecked="{Binding ReceiptPrintBankReceiptText, Mode=TwoWay}"
+                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.printBankReceipt}"
+                                                      MinHeight="48"
+                                                      MinWidth="56"
+                                                      VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+
+                                <DockPanel Grid.Row="5">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="18,0,0,0">
                                         <Button Command="{Binding TestReceiptPrinterCommand}"
                                                 Style="{StaticResource PosSecondaryButtonStyle}"
@@ -2163,15 +2255,15 @@
                                             </StackPanel>
                                         </Button>
                                     </StackPanel>
-                                    <Border Background="#FFF6F8FB"
-                                            BorderBrush="#FFE0E4EC"
+                                    <Border Background="{DynamicResource PosSurfaceAltBrush}"
+                                            BorderBrush="{DynamicResource PosDividerBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="10,8">
                                         <TextBlock Text="{Binding ReceiptPrinterTestStatusMessage}"
                                                    FontSize="12"
                                                    FontWeight="SemiBold"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap" />
                                     </Border>
                                 </DockPanel>
@@ -2191,7 +2283,7 @@
                                     <materialDesign:PackIcon Kind="ReceiptTextOutline"
                                                              Width="22"
                                                              Height="22"
-                                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                              Margin="0,0,9,0" />
                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.preview}"
                                                FontSize="15"
@@ -2200,8 +2292,8 @@
                                 </StackPanel>
 
                                 <Border Grid.Row="1"
-                                        Background="#FFF4F6F9"
-                                        BorderBrush="#FFE0E4EC"
+                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        BorderBrush="{DynamicResource PosDividerBrush}"
                                         BorderThickness="1"
                                         CornerRadius="8"
                                         Padding="18">
@@ -2209,7 +2301,7 @@
                                             MinHeight="410"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Top"
-                                            Background="#FFFFFFFF"
+                                            Background="{DynamicResource PosSurfaceBrush}"
                                             Padding="18,24">
                                         <Border.Effect>
                                             <DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity="0.18" Color="#FF64748B" />
@@ -2228,35 +2320,35 @@
                                                        Margin="0,10,0,0" />
                                             <TextBlock Text="{Binding ReceiptStoreAddressText}"
                                                        FontSize="10"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        TextAlignment="Center"
                                                        TextWrapping="Wrap"
                                                        Margin="0,6,0,0" />
                                             <TextBlock Text="{Binding ReceiptStorePhoneText}"
                                                        FontSize="10"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        TextAlignment="Center"
                                                        TextWrapping="Wrap"
                                                        Margin="0,4,0,0" />
                                             <TextBlock Text="{Binding ReceiptAbnText}"
                                                        FontSize="10"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        TextAlignment="Center"
                                                        TextWrapping="Wrap"
                                                        Margin="0,4,0,0" />
-                                            <Border BorderBrush="#FF9AA4B2"
+                                            <Border BorderBrush="{DynamicResource PosBorderStrongBrush}"
                                                     BorderThickness="0,1,0,0"
                                                     Margin="0,20,0,18" />
                                             <TextBlock Text="{loc:Loc settings.receiptPrinter.test}"
                                                        FontSize="15"
                                                        FontWeight="Black"
                                                        TextAlignment="Center" />
-                                            <Border BorderBrush="#FF9AA4B2"
+                                            <Border BorderBrush="{DynamicResource PosBorderStrongBrush}"
                                                     BorderThickness="0,1,0,0"
                                                     Margin="0,18,0,18" />
                                             <TextBlock Text="{Binding ReceiptReturnPolicyText}"
                                                        FontSize="10"
-                                                       Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                        TextAlignment="Center"
                                                        TextWrapping="Wrap" />
                                         </StackPanel>
@@ -2283,7 +2375,7 @@
                                 Margin="0,0,0,16">
                             <DockPanel>
                                 <Border DockPanel.Dock="Right"
-                                        Background="#FFE8F7F1"
+                                        Background="{DynamicResource PosSuccessSoftBrush}"
                                         CornerRadius="8"
                                         Padding="12,8"
                                         Margin="18,0,0,0">
@@ -2291,25 +2383,25 @@
                                         <materialDesign:PackIcon Kind="CheckCircleOutline"
                                                                  Width="19"
                                                                  Height="19"
-                                                                 Foreground="#FF0A8F55"
+                                                                 Foreground="{DynamicResource PosSuccessTextBrush}"
                                                                  Margin="0,0,7,0" />
                                         <TextBlock Text="{loc:Loc settings.deviceRegistration.active}"
                                                    FontSize="11"
                                                    FontWeight="Bold"
-                                                   Foreground="#FF0A8F55"
+                                                   Foreground="{DynamicResource PosSuccessTextBrush}"
                                                    VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Border>
                                 <Border DockPanel.Dock="Left"
                                         Width="58"
                                         Height="58"
-                                        Background="#FFEAF2FF"
+                                        Background="{DynamicResource PosPrimarySoftBrush}"
                                         CornerRadius="10"
                                         Margin="0,0,18,0">
                                     <materialDesign:PackIcon Kind="CashRegister"
                                                              Width="34"
                                                              Height="34"
-                                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center" />
                                 </Border>
@@ -2317,10 +2409,10 @@
                                     <TextBlock Text="{loc:Loc settings.deviceRegistration.current}"
                                                FontSize="11"
                                                FontWeight="Bold"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}" />
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                     <TextBlock FontSize="21"
                                                FontWeight="Black"
-                                               Foreground="{StaticResource PosTextBrush}"
+                                               Foreground="{DynamicResource PosTextBrush}"
                                                Margin="0,3,0,0">
                                         <Run Text="{Binding Session.StoreName, Mode=OneWay}" />
                                         <Run Text=" (" />
@@ -2328,7 +2420,7 @@
                                         <Run Text=")" />
                                     </TextBlock>
                                     <TextBlock FontSize="11"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                Margin="0,4,0,0">
                                         <Run Text="{loc:Loc settings.deviceRegistration.thisDevice}" />
                                         <Run Text=": " />
@@ -2356,14 +2448,14 @@
                                     <TextBlock Text="{Binding DeviceRegistrationTitleText}"
                                                FontSize="18"
                                                FontWeight="Black"
-                                               Foreground="{StaticResource PosTextBrush}" />
+                                               Foreground="{DynamicResource PosTextBrush}" />
                                     <TextBlock Text="{loc:Loc settings.deviceRegistration.description}"
                                                Style="{StaticResource SettingsPageDescriptionStyle}" />
                                 </StackPanel>
 
                                 <Border Grid.Row="1"
-                                        Background="#FFFFF7E8"
-                                        BorderBrush="#FFFFD59B"
+                                        Background="{DynamicResource PosWarningSoftBrush}"
+                                        BorderBrush="{DynamicResource PosWarningBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="8"
                                         Padding="14,12"
@@ -2377,13 +2469,13 @@
                                                                  Kind="ShieldAccountOutline"
                                                                  Width="20"
                                                                  Height="20"
-                                                                 Foreground="#FFEF8A00"
+                                                                 Foreground="{DynamicResource PosAccentBrush}"
                                                                  VerticalAlignment="Top" />
                                         <TextBlock Grid.Column="1"
                                                    Text="{loc:Loc settings.deviceRegistration.supervisorRequired}"
                                                    FontSize="11"
                                                    FontWeight="SemiBold"
-                                                   Foreground="#FF7A4A00"
+                                                   Foreground="{DynamicResource PosWarningTextBrush}"
                                                    TextWrapping="Wrap" />
                                     </Grid>
                                 </Border>
@@ -2394,24 +2486,24 @@
                                                FontWeight="Black"
                                                Margin="0,0,0,12" />
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <materialDesign:PackIcon Kind="Cart" Width="20" Height="20" Foreground="{StaticResource PosPrimaryBrush}" Margin="0,0,10,0" />
+                                        <materialDesign:PackIcon Kind="Cart" Width="20" Height="20" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,10,0" />
                                         <TextBlock Text="{loc:Loc settings.deviceRegistration.checkCart}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <materialDesign:PackIcon Kind="CreditCard" Width="20" Height="20" Foreground="{StaticResource PosPrimaryBrush}" Margin="0,0,10,0" />
+                                        <materialDesign:PackIcon Kind="CreditCard" Width="20" Height="20" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,10,0" />
                                         <TextBlock Text="{loc:Loc settings.deviceRegistration.checkPayment}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="Sync" Width="20" Height="20" Foreground="{StaticResource PosPrimaryBrush}" Margin="0,0,10,0" />
+                                        <materialDesign:PackIcon Kind="Sync" Width="20" Height="20" Foreground="{DynamicResource PosPrimaryTextBrush}" Margin="0,0,10,0" />
                                         <TextBlock Text="{loc:Loc settings.deviceRegistration.checkSync}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </StackPanel>
@@ -2428,7 +2520,7 @@
                                     </Button>
                                     <TextBlock Text="{loc:Loc settings.deviceRegistration.deviceReuse}"
                                                FontSize="10"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,10,0,0" />
                                 </StackPanel>
@@ -2446,13 +2538,13 @@
                                 <Border DockPanel.Dock="Left"
                                         Width="58"
                                         Height="58"
-                                        Background="#FFEAF2FF"
+                                        Background="{DynamicResource PosPrimarySoftBrush}"
                                         CornerRadius="10"
                                         Margin="0,0,18,0">
                                     <materialDesign:PackIcon Kind="RemoteDesktop"
                                                              Width="34"
                                                              Height="34"
-                                                             Foreground="{StaticResource PosPrimaryBrush}"
+                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center" />
                                 </Border>
@@ -2460,7 +2552,7 @@
                                     <TextBlock Text="{Binding RemoteMaintenanceTitleText}" FontSize="21" FontWeight="Black" />
                                     <TextBlock Text="{Binding RemoteMaintenanceDescriptionText}"
                                                FontSize="11"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,4,0,0" />
                                 </StackPanel>
@@ -2475,8 +2567,8 @@
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Text="{loc:Loc settings.remoteMaintenance.localStatus}" Style="{StaticResource SettingsLabelStyle}" />
                                 <Border Grid.Row="1"
-                                        Background="#FFF6F8FB"
-                                        BorderBrush="{StaticResource PosBorderBrush}"
+                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        BorderBrush="{DynamicResource PosBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="8"
                                         Padding="14,12"
@@ -2485,10 +2577,10 @@
                                         <TextBlock Text="{Binding RemoteMaintenanceStatusText}"
                                                    FontSize="18"
                                                    FontWeight="Black"
-                                                   Foreground="{StaticResource PosTextBrush}" />
+                                                   Foreground="{DynamicResource PosTextBrush}" />
                                         <TextBlock Text="{Binding RemoteMaintenanceDetailText}"
                                                    FontSize="11"
-                                                   Foreground="{StaticResource PosMutedForegroundBrush}"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,5,0,0" />
                                     </StackPanel>
@@ -2517,13 +2609,13 @@
                                         <TextBlock Text="{Binding RemoteMaintenanceProgressText}"
                                                    FontSize="12"
                                                    FontWeight="SemiBold"
-                                                   Foreground="{StaticResource PosTextBrush}"
+                                                   Foreground="{DynamicResource PosTextBrush}"
                                                    TextWrapping="Wrap"
                                                    AutomationProperties.LiveSetting="Polite" />
                                     </StackPanel>
                                     <TextBlock Text="{loc:Loc settings.remoteMaintenance.installHint}"
                                                FontSize="10"
-                                               Foreground="{StaticResource PosMutedForegroundBrush}"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,10,0,0" />
                                 </StackPanel>
@@ -2535,19 +2627,19 @@
         </Grid>
 
         <Border Grid.Row="2"
-                Background="#FFFAFAFA"
-                BorderBrush="#FFE1E5EC"
+                Background="{DynamicResource PosSurfaceAltBrush}"
+                BorderBrush="{DynamicResource PosDividerBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="24,10">
             <StackPanel Orientation="Horizontal">
                 <materialDesign:PackIcon Kind="InformationOutline"
                                          Width="16"
                                          Height="16"
-                                         Foreground="{StaticResource PosMutedForegroundBrush}"
+                                         Foreground="{DynamicResource PosMutedForegroundBrush}"
                                          Margin="0,0,8,0" />
                 <TextBlock Text="{Binding StatusMessage}"
                            FontSize="12"
-                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                            TextTrimming="CharacterEllipsis" />
                 <ProgressBar Width="90"
                              Height="4"
@@ -2565,8 +2657,8 @@
                         MaxHeight="560"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        Background="{StaticResource PosSurfaceBrush}"
-                        BorderBrush="#FFE0E4EC"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosDividerBrush}"
                         BorderThickness="1"
                         CornerRadius="8"
                         Padding="22">
@@ -2594,10 +2686,10 @@
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.title}"
                                            FontSize="18"
                                            FontWeight="Black"
-                                           Foreground="{StaticResource PosTextBrush}" />
+                                           Foreground="{DynamicResource PosTextBrush}" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.note}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,4,16,0" />
                             </StackPanel>
@@ -2612,42 +2704,42 @@
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step1}"
                                            FontFamily="Consolas"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosTextBrush}"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step2}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step3}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step4}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step5}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step6}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step7}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.cloud.step8}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,16" />
 
@@ -2656,23 +2748,23 @@
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.repair.step1}"
                                            FontFamily="Consolas"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosTextBrush}"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.repair.step2}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.repair.step3}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.repair.warning}"
                                            FontSize="12"
                                            FontWeight="Bold"
-                                           Foreground="{StaticResource PosDangerBrush}"
+                                           Foreground="{DynamicResource PosDangerTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,16" />
 
@@ -2681,58 +2773,58 @@
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step1}"
                                            FontFamily="Consolas"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosTextBrush}"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step2}"
                                            FontFamily="Consolas"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosTextBrush}"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step3}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step4}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step5}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step6}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step7}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step8}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step9}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step10}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.local.step11}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,16" />
 
@@ -2740,13 +2832,13 @@
                                            Style="{StaticResource SettingsLabelStyle}" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.manual.steps}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.manual.warning}"
                                            FontSize="12"
                                            FontWeight="Bold"
-                                           Foreground="{StaticResource PosDangerBrush}"
+                                           Foreground="{DynamicResource PosDangerTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,16" />
 
@@ -2754,12 +2846,12 @@
                                            Style="{StaticResource SettingsLabelStyle}" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.ip.steps}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.ip.note}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,16" />
 
@@ -2767,17 +2859,17 @@
                                            Style="{StaticResource SettingsLabelStyle}" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.mode.localIp}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.mode.cloudDirectSync}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,5" />
                                 <TextBlock Text="{loc:Loc settings.linkly.sop.mode.cloudBackendAsync}"
                                            FontSize="12"
-                                           Foreground="{StaticResource PosMutedForegroundBrush}"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </ScrollViewer>

@@ -2,15 +2,18 @@ import {
   buildPanelKeys,
   buildRequestKey,
   defaultProductSort,
+  describeExportFilters,
   describeProductSort,
   formatShare,
   matchesSupplierSearch,
   pageRange,
+  readStoredFlag,
   resolveProductSort,
   resolveSupplierToggle,
   shouldHandleEscape,
   toAntdSortOrder,
   toggleSelection,
+  writeStoredFlag,
   type BoardFilterState,
 } from './logic'
 
@@ -93,5 +96,23 @@ assert(!matchesSupplierSearch({ supplierCode: 'HB215', supplierName: '玛索文�
 assertEqual(pageRange(2, 80, 150), [81, 150], '最后一页区间应截断到总数')
 assertEqual(pageRange(1, 80, 0), [0, 0], '无数据时区间为 0')
 assert(shouldHandleEscape(null), '无目标元素时可处理 Esc')
+
+// 导出说明：顺序与三栏一致，选中商品不写入（商品栏不被自身收窄）；名称与代码相同时不重复。
+assertEqual(describeExportFilters(base), '全部国内供应商 · 全部分店', '无筛选时说明全部范围')
+assertEqual(describeExportFilters({ ...base, branch, supplier, keyword: ' 笔 ' }), '国内供应商 玛索文具（HB215） · 分店 Glendale（1012） · 搜索「笔」', '供应商在前、分店在后，并附搜索词')
+assertEqual(describeExportFilters({ ...base, branch: { code: '1012', label: '1012' } }), '分店 1012', '名称缺失时只写代码')
+
+// 偏好存储：默认折叠；存储不可用或抛错时退回默认值且不影响使用。
+const memory = new Map<string, string>()
+const memoryStorage = () => ({ getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) } })
+assertEqual(readStoredFlag('stats', memoryStorage), false, '未记录时默认折叠')
+writeStoredFlag('stats', true, memoryStorage)
+assertEqual(readStoredFlag('stats', memoryStorage), true, '记住展开')
+writeStoredFlag('stats', false, memoryStorage)
+assertEqual(readStoredFlag('stats', memoryStorage), false, '记住折叠')
+const throwingStorage = () => ({ getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } })
+assertEqual(readStoredFlag('stats', throwingStorage), false, '读取抛错时按默认折叠')
+writeStoredFlag('stats', true, throwingStorage)
+assertEqual(readStoredFlag('stats', () => null), false, '无存储时按默认折叠')
 
 console.log('compactSalesBoard logic: ok')

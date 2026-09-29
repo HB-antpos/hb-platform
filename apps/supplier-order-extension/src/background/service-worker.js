@@ -9,7 +9,31 @@ import {
 import { resolveGrantedProfileOrigins } from '../lib/origin-registration.js';
 import { DEFAULT_PROFILES } from '../lib/profiles-default.js';
 import { migrateProfileConfig } from '../lib/profile-cache.js';
-import { matchProfile, validateProfiles } from '../lib/profiles.js';
+import {
+  NON_CAPTURABLE_SUPPLIER_CODES,
+  matchProfile,
+  validateProfiles,
+} from '../lib/profiles.js';
+import {
+  buildCaptureDedupeKey,
+  createCaptureDedupeStore,
+  createSlidingWindowLimiter,
+  normalizeCaptureResponse,
+  normalizeTreeSnapshotResponse,
+  parseRetryAfter,
+  validateCapturePayload,
+  validateTreeSnapshotPayload,
+} from '../lib/category-capture.js';
+import {
+  CRAWL_STATUSES,
+  createCrawlJob,
+  finalizeCrawlJob,
+  isCrawlJobStale,
+  isTerminalCrawlStatus,
+  mergeCrawlProgress,
+  sanitizeCrawlNodes,
+  toCrawlHistoryEntry,
+} from '../lib/category-crawl.js';
 import { createAssistantPanelController } from '../lib/assistant-panel.js';
 import { normalizeRankingDays, normalizeTopSalesRequest } from '../lib/ranking.js';
 import {
@@ -35,6 +59,12 @@ const LEGACY_REFRESH_KEY = 'refreshToken';
 const PROFILES_KEY = 'supplierProfiles';
 const GRANTED_KEY = 'grantedOrigins';
 const API_ORIGIN_KEY = 'apiOrigin';
+// 分类采集：主动任务状态放会话存储（刷新侧栏不丢），终态摘要与去重记录放本地存储。
+const CATEGORY_JOB_KEY = 'categoryCrawlJob';
+const CATEGORY_HISTORY_KEY = 'categoryCrawlHistory';
+const CATEGORY_DEDUPE_KEY = 'categoryCaptureDedupe';
+const CATEGORY_CAPTURES_PATH = '/api/react/v1/browser-extension/supplier-categories/captures';
+const CATEGORY_TREE_SNAPSHOT_PATH = '/api/react/v1/browser-extension/supplier-categories/tree-snapshot';
 const assistantPanel = createAssistantPanelController({ browserApi: chrome, buildTarget: BUILD_TARGET });
 assistantPanel.registerListeners();
 
@@ -130,6 +160,8 @@ async function rawFetch(path, options = {}, { anonymous = false } = {}) {
     data: body && body.data,
     message: body && body.message,
     errorCode: body && body.errorCode,
+    // 429/503 的退避提示，分类采集按它延迟重试。
+    retryAfter: res.headers?.get?.('Retry-After') ?? null,
   };
 }
 
@@ -158,7 +190,12 @@ async function handleSetApiOrigin({ apiOrigin }) {
 
   // 环境切换时清除旧环境短期令牌和供应商缓存，避免跨环境传递授权。
   await setLocal({ [API_ORIGIN_KEY]: normalized, [PROFILES_KEY]: DEFAULT_PROFILES });
-  await Promise.all([clearAccessSession(), removeSession(PENDING_HANDOFF_KEY)]);
+  await Promise.all([
+    clearAccessSession(),
+    removeSession(PENDING_HANDOFF_KEY),
+    // 分类回传去重记录属于旧环境，新环境需要重新回传。
+    removeLocal([CATEGORY_DEDUPE_KEY]),
+  ]);
   await syncContentScripts();
   return { ok: true, apiOrigin: normalized, changed: true, requiresWebsiteSession: true };
 }
@@ -347,6 +384,8 @@ async function handleGetProfiles() {
       }
     : DEFAULT_PROFILES;
   let source = storedValidation.valid ? 'cache' : 'default';
+  // 分类块非法只降级该供应商的分类采集，原因通过 warnings 返回给侧栏排查。
+  let warnings = storedValidation.valid ? storedValidation.warnings : [];
   try {
     const res = await apiRequest('/api/react/v1/browser-extension/supplier-profiles', { method: 'GET' });
     if (res.success && res.data && Array.isArray(res.data.profiles)) {
@@ -358,19 +397,347 @@ async function handleGetProfiles() {
           profiles: v.profiles,
         };
         source = 'server';
+        warnings = v.warnings;
       } else {
         // 非法远程配置采取 fail-closed，不继续使用可能已被后台停用的旧配置。
         config = { configVersion: res.data.configVersion ?? 'invalid', profiles: [] };
         source = 'invalid-server';
+        warnings = [];
       }
     }
   } catch {
     // 未登录或服务端暂不可用时沿用最近一次已验证配置。
   }
+  if (source === 'default') {
+    // 内置配置同样经过归一化，保证分类块字段完整。
+    const defaults = validateProfiles(DEFAULT_PROFILES);
+    config = { configVersion: DEFAULT_PROFILES.configVersion, profiles: defaults.profiles };
+    warnings = defaults.warnings;
+  }
   await setLocal({ [PROFILES_KEY]: config });
   await syncContentScripts();
-  return { ok: true, profiles: config.profiles, configVersion: config.configVersion, source };
+  return {
+    ok: true,
+    profiles: config.profiles,
+    configVersion: config.configVersion,
+    source,
+    warnings,
+  };
 }
+
+// ---------- 供应商分类采集 ----------
+
+const captureDedupe = createCaptureDedupeStore({
+  read: async () => (await getLocal(CATEGORY_DEDUPE_KEY))[CATEGORY_DEDUPE_KEY],
+  write: (entries) => setLocal({ [CATEGORY_DEDUPE_KEY]: entries }),
+});
+// 后端按用户 120 次/分钟限流；本地先削峰到 100 次/分钟，超出时让内容脚本按提示退避。
+const captureLimiter = createSlidingWindowLimiter({ limit: 100, windowMs: 60_000 });
+
+// 任务状态的读-改-写全部串行，避免进度消息与标签页事件互相覆盖。
+let crawlJobQueue = Promise.resolve();
+function withCrawlJobLock(task) {
+  const run = crawlJobQueue.then(task, task);
+  crawlJobQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function loadValidatedProfiles() {
+  const storedConfig = await migrateStoredProfiles();
+  const validation = validateProfiles(storedConfig);
+  return validation.valid ? validation.profiles : [];
+}
+
+function isTopFrameSender(sender) {
+  return sender?.frameId == null || sender.frameId === 0;
+}
+
+function isExtensionPageSender(sender) {
+  const root = chrome.runtime.getURL('');
+  return sender?.id === chrome.runtime.id
+    && typeof sender.url === 'string'
+    && sender.url.startsWith(root);
+}
+
+function parseHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return /^https?:$/u.test(url.protocol) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function categoryRejection(httpStatus, errorCode, error) {
+  // 本地拒绝也带 HTTP 语义：403/404 让内容脚本熔断，400 只跳过当前块。
+  return { ok: false, httpStatus, errorCode, ...(error ? { error } : {}) };
+}
+
+// 内容脚本来源校验：必须来自标签页顶层 frame，且页面 origin 属于该供应商 profile。
+async function resolveCategorySender(sender, supplierCode) {
+  if (!sender?.tab || sender.tab.id == null || !isTopFrameSender(sender)) {
+    return categoryRejection(403, 'INVALID_SENDER');
+  }
+  const pageUrl = parseHttpUrl(sender.url || sender.tab.url);
+  if (!pageUrl) return categoryRejection(403, 'INVALID_SENDER');
+  const profile = matchProfile(await loadValidatedProfiles(), {
+    origin: pageUrl.origin,
+    pathname: pageUrl.pathname,
+  });
+  if (!profile || typeof supplierCode !== 'string' || profile.supplierCode !== supplierCode) {
+    return categoryRejection(403, 'SUPPLIER_ORIGIN_MISMATCH');
+  }
+  if (NON_CAPTURABLE_SUPPLIER_CODES.has(profile.supplierCode)) {
+    return categoryRejection(400, 'SUPPLIER_NOT_CAPTURABLE');
+  }
+  if (!profile.category?.enabled) return categoryRejection(404, 'CATEGORY_CAPTURE_DISABLED');
+  return { ok: true, profile, origin: pageUrl.origin, tabId: sender.tab.id };
+}
+
+async function getCrawlJob() {
+  const { [CATEGORY_JOB_KEY]: job } = await getSession(CATEGORY_JOB_KEY);
+  return job && typeof job === 'object' ? job : null;
+}
+
+async function getCrawlHistory(supplierCode) {
+  const { [CATEGORY_HISTORY_KEY]: history } = await getLocal(CATEGORY_HISTORY_KEY);
+  const entry = history && typeof history === 'object' ? history[supplierCode] : null;
+  return entry && typeof entry === 'object' ? entry : null;
+}
+
+async function recordCrawlHistory(job) {
+  const { [CATEGORY_HISTORY_KEY]: history } = await getLocal(CATEGORY_HISTORY_KEY);
+  await setLocal({
+    [CATEGORY_HISTORY_KEY]: {
+      ...(history && typeof history === 'object' ? history : {}),
+      [job.supplierCode]: toCrawlHistoryEntry(job),
+    },
+  });
+}
+
+async function saveCrawlJob(job, { recordHistory = true } = {}) {
+  await setSession({ [CATEGORY_JOB_KEY]: job });
+  if (recordHistory && isTerminalCrawlStatus(job.status)) await recordCrawlHistory(job);
+}
+
+// 主动采集中的回传必须属于当前运行任务，且来自任务绑定的标签页。
+async function requireRunningCrawlJob(jobId, tabId) {
+  const job = await getCrawlJob();
+  return !!job
+    && job.jobId === jobId
+    && job.tabId === tabId
+    && job.status === CRAWL_STATUSES.RUNNING;
+}
+
+async function postCategoryApi(path, payload) {
+  try {
+    return await apiRequest(path, { method: 'POST', body: JSON.stringify(payload) });
+  } catch (error) {
+    return {
+      httpStatus: 0,
+      success: false,
+      errorCode: 'NETWORK_ERROR',
+      message: String(error?.message || error),
+    };
+  }
+}
+
+function categoryApiFailure(res) {
+  return {
+    ok: false,
+    httpStatus: res.httpStatus || 0,
+    errorCode: res.errorCode || (res.httpStatus ? `HTTP_${res.httpStatus}` : 'NETWORK_ERROR'),
+    error: res.message || null,
+    retryAfterMs: parseRetryAfter(res.retryAfter),
+    ...(res.httpStatus ? {} : { networkError: true }),
+  };
+}
+
+async function handleCategoryCapture(message, sender) {
+  const payload = message?.payload;
+  const source = await resolveCategorySender(sender, payload?.supplierCode);
+  if (!source.ok) return source;
+  const category = source.profile.category;
+  if (payload?.mode === 'passive' && !category.passiveEnabled) {
+    return categoryRejection(404, 'CATEGORY_CAPTURE_DISABLED');
+  }
+  if (payload?.mode === 'crawl') {
+    if (!category.crawlEnabled) return categoryRejection(404, 'CATEGORY_CAPTURE_DISABLED');
+    if (!(await requireRunningCrawlJob(message.jobId, source.tabId))) {
+      return categoryRejection(403, 'CRAWL_JOB_MISMATCH');
+    }
+  }
+  const validation = validateCapturePayload(payload, {
+    senderOrigin: source.origin,
+    expectedSupplierCode: source.profile.supplierCode,
+  });
+  if (!validation.ok) return categoryRejection(400, validation.errorCode, validation.error);
+
+  // 6 小时内同一分类路径 + 同一批货号不重复回传。
+  const dedupeKey = buildCaptureDedupeKey(validation.payload);
+  if (await captureDedupe.has(dedupeKey)) return { ok: true, deduped: true };
+  const permit = captureLimiter.tryAcquire();
+  if (!permit.ok) {
+    return { ok: false, httpStatus: 429, errorCode: 'LOCAL_RATE_LIMITED', retryAfterMs: permit.retryAfterMs };
+  }
+  const res = await postCategoryApi(CATEGORY_CAPTURES_PATH, validation.payload);
+  if (!res.success) return categoryApiFailure(res);
+  await captureDedupe.add(dedupeKey);
+  return { ok: true, data: normalizeCaptureResponse(res.data) };
+}
+
+async function handleCategoryTreeSnapshot(message, sender) {
+  const payload = message?.payload;
+  const source = await resolveCategorySender(sender, payload?.supplierCode);
+  if (!source.ok) return source;
+  if (!source.profile.category.crawlEnabled) return categoryRejection(404, 'CATEGORY_CAPTURE_DISABLED');
+  if (!(await requireRunningCrawlJob(message.jobId, source.tabId))) {
+    return categoryRejection(403, 'CRAWL_JOB_MISMATCH');
+  }
+  const validation = validateTreeSnapshotPayload(payload, {
+    senderOrigin: source.origin,
+    expectedSupplierCode: source.profile.supplierCode,
+  });
+  if (!validation.ok) return categoryRejection(400, validation.errorCode, validation.error);
+  const permit = captureLimiter.tryAcquire();
+  if (!permit.ok) {
+    return { ok: false, httpStatus: 429, errorCode: 'LOCAL_RATE_LIMITED', retryAfterMs: permit.retryAfterMs };
+  }
+  const res = await postCategoryApi(CATEGORY_TREE_SNAPSHOT_PATH, validation.payload);
+  if (!res.success) return categoryApiFailure(res);
+  return { ok: true, data: normalizeTreeSnapshotResponse(res.data) };
+}
+
+async function isTabAlive(tabId) {
+  try {
+    await chrome.tabs.get(tabId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function handleCategoryCrawlStart(message, sender) {
+  if (!isExtensionPageSender(sender)) return { ok: false, errorCode: 'FORBIDDEN' };
+  let tab = null;
+  try {
+    [tab] = await assistantPanel.queryActiveTabs();
+  } catch {
+    tab = null;
+  }
+  const tabUrl = parseHttpUrl(tab?.url);
+  if (tab?.id == null || !tabUrl) return { ok: false, errorCode: 'SUPPLIER_TAB_REQUIRED' };
+  const profile = matchProfile(await loadValidatedProfiles(), {
+    origin: tabUrl.origin,
+    pathname: tabUrl.pathname,
+  });
+  if (!profile || (message?.supplierCode && profile.supplierCode !== message.supplierCode)) {
+    return { ok: false, errorCode: 'SUPPLIER_TAB_REQUIRED' };
+  }
+  if (
+    NON_CAPTURABLE_SUPPLIER_CODES.has(profile.supplierCode)
+    || !profile.category?.enabled
+    || !profile.category.crawlEnabled
+  ) {
+    return { ok: false, errorCode: 'CRAWL_DISABLED' };
+  }
+
+  return withCrawlJobLock(async () => {
+    let existing = await getCrawlJob();
+    if (existing?.status === CRAWL_STATUSES.RUNNING) {
+      // 单飞：同一时间只允许一个主动采集任务；标签页已关闭或长时间无进度的任务视为中断。
+      if ((await isTabAlive(existing.tabId)) && !isCrawlJobStale(existing)) {
+        return { ok: false, errorCode: 'CRAWL_ALREADY_RUNNING', job: existing };
+      }
+      existing = finalizeCrawlJob(existing, CRAWL_STATUSES.INTERRUPTED);
+      await saveCrawlJob(existing);
+    }
+    const mode = message?.mode === 'resume' || message?.mode === 'retry' ? message.mode : 'full';
+    // 续跑/重试的依据来自上次真正运行过的任务摘要（未能启动的任务不写入摘要）。
+    const previous = await getCrawlHistory(profile.supplierCode);
+    const completedKeys = mode === 'full' ? [] : previous?.completedKeys || [];
+    const onlyNodes = mode === 'retry' ? sanitizeCrawlNodes(previous?.failedNodes) : null;
+    if (mode === 'retry' && onlyNodes.length === 0) return { ok: false, errorCode: 'NOTHING_TO_RETRY' };
+
+    const job = createCrawlJob({
+      jobId: crypto.randomUUID(),
+      supplierCode: profile.supplierCode,
+      tabId: tab.id,
+      origin: tabUrl.origin,
+      mode,
+      completedKeys,
+    });
+    await saveCrawlJob(job);
+    let response = null;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'CATEGORY_CRAWL_RUN',
+        jobId: job.jobId,
+        supplierCode: profile.supplierCode,
+        completedKeys,
+        onlyNodes,
+      });
+    } catch {
+      response = null;
+    }
+    if (!response?.ok) {
+      const errorCode = response?.errorCode || 'CONTENT_SCRIPT_UNAVAILABLE';
+      const failed = finalizeCrawlJob(job, CRAWL_STATUSES.FAILED, { errorCode });
+      // 未真正开始的任务不覆盖上次采集摘要，保留“继续/重试失败”的依据。
+      await saveCrawlJob(failed, { recordHistory: false });
+      return { ok: false, errorCode, job: failed };
+    }
+    return { ok: true, job };
+  });
+}
+
+async function handleCategoryCrawlAbort(sender) {
+  if (!isExtensionPageSender(sender)) return { ok: false, errorCode: 'FORBIDDEN' };
+  return withCrawlJobLock(async () => {
+    const job = await getCrawlJob();
+    if (!job || job.status !== CRAWL_STATUSES.RUNNING) return { ok: true, job };
+    try {
+      await chrome.tabs.sendMessage(job.tabId, { type: 'CATEGORY_CRAWL_STOP', jobId: job.jobId });
+    } catch {
+      // 标签页已关闭或内容脚本失效：直接记为中止。
+    }
+    const aborted = finalizeCrawlJob(job, CRAWL_STATUSES.ABORTED);
+    await saveCrawlJob(aborted);
+    return { ok: true, job: aborted };
+  });
+}
+
+async function handleCategoryCrawlProgress(message, sender) {
+  if (!sender?.tab || sender.tab.id == null || !isTopFrameSender(sender)) {
+    return { ok: false, errorCode: 'INVALID_SENDER' };
+  }
+  return withCrawlJobLock(async () => {
+    const job = await getCrawlJob();
+    if (!job || job.jobId !== message?.jobId || job.tabId !== sender.tab.id) {
+      return { ok: false, errorCode: 'CRAWL_JOB_MISMATCH' };
+    }
+    const next = mergeCrawlProgress(job, message.progress);
+    await saveCrawlJob(next);
+    return { ok: true, status: next.status };
+  });
+}
+
+// 任务标签页关闭或整页导航（内容脚本随之销毁）时标记为已中断，可在侧栏“继续”。
+function interruptCrawlForTab(tabId) {
+  return withCrawlJobLock(async () => {
+    const job = await getCrawlJob();
+    if (!job || job.tabId !== tabId || job.status !== CRAWL_STATUSES.RUNNING) return;
+    await saveCrawlJob(finalizeCrawlJob(job, CRAWL_STATUSES.INTERRUPTED));
+  }).catch(() => undefined);
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void interruptCrawlForTab(tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo?.status === 'loading') void interruptCrawlForTab(tabId);
+});
 
 async function migrateStoredProfiles() {
   const { [PROFILES_KEY]: storedConfig } = await getLocal(PROFILES_KEY);
@@ -714,6 +1081,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           supplierCode: message.supplierCode,
           itemNumber: message.itemNumber,
         });
+      case 'CATEGORY_CAPTURE':
+        return handleCategoryCapture(message, sender);
+      case 'CATEGORY_TREE_SNAPSHOT':
+        return handleCategoryTreeSnapshot(message, sender);
+      case 'CATEGORY_CRAWL_START':
+        return handleCategoryCrawlStart(message, sender);
+      case 'CATEGORY_CRAWL_ABORT':
+        return handleCategoryCrawlAbort(sender);
+      case 'CATEGORY_CRAWL_PROGRESS':
+        return handleCategoryCrawlProgress(message, sender);
       default:
         return { ok: false, error: '未知消息类型' };
     }

@@ -58,7 +58,10 @@ namespace BlazorApp.Api.Tests
                 typeof(ProductGrade),
                 typeof(WarehouseCategory),
                 typeof(HBLocalSupplier),
-                typeof(ProductSetCode)
+                typeof(ProductSetCode),
+                typeof(LocalSupplierCategory),
+                typeof(LocalSupplierCategoryCapture),
+                typeof(LocalSupplierCategoryProductAssignment)
             );
             _db.Ado.ExecuteCommand(
                 """

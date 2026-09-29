@@ -282,8 +282,9 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
             if (IsSelect(sql) && Interlocked.Increment(ref sensitiveSelects) == 1)
             {
                 sensitiveChangeEnteredLock.TrySetResult();
+                // 屏障上限必须长于下方 GET 的等待预算：否则错误实现（GET 等锁）会在屏障自行超时放锁后完成，被误判为通过。
                 Assert.True(
-                    releaseSensitiveChange.Wait(TimeSpan.FromSeconds(10)),
+                    releaseSensitiveChange.Wait(AsyncTestWaitSupport.DefaultTimeout * 2),
                     "敏感变更持锁屏障等待超时"
                 );
             }
@@ -297,7 +298,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
                 {
                     BankAccountNumber = "pending-must-not-block-fast-read",
                 }));
-            await sensitiveChangeEnteredLock.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await sensitiveChangeEnteredLock.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
             var getSensitive = CreateService("user-self", "self_user", db: getDb);
             var getTask = Task.Run(() => CreateProfileService(
@@ -306,9 +307,11 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
                 getSensitive,
                 getDb
             ).GetSelfAsync());
+            // 屏障到下方 Set 才放开，GET 若错误地等待该锁就会一直等到预算耗尽；
+            // 这里只证明"屏障挂住期间能完成"，不是耗时断言，所以用防挂死预算而不是固定毫秒数。
             var fastReadCompletedBeforeSensitiveLockRelease = await Task.WhenAny(
                 getTask,
-                Task.Delay(TimeSpan.FromMilliseconds(250))
+                Task.Delay(AsyncTestWaitSupport.DefaultTimeout)
             ) == getTask;
 
             releaseSensitiveChange.Set();
@@ -367,7 +370,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
                 {
                     BankAccountNumber = "first-pending",
                 }));
-            await sensitiveReadEnsureProfile.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await sensitiveReadEnsureProfile.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             var getSensitive = CreateService("user-self", "self_user", db: getDb);
             var getTask = Task.Run(() => CreateProfileService(
                 "user-self",
@@ -433,7 +436,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
         ).GetSelfAsync());
         try
         {
-            await getReadInsideLifecycleLock.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await getReadInsideLifecycleLock.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             var users = new UserService(CreateContext(deleteDb), NullLogger<UserService>.Instance);
             var deleteTask = batchDelete
                 ? Task.Run(() => users.BatchManageUsersAsync(new BatchUserOperationDto
@@ -487,7 +490,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
         {
             var users = new UserService(CreateContext(_db), NullLogger<UserService>.Instance);
             var deleteTask = Task.Run(() => users.DeleteUserByGuidAsync("user-self"));
-            await deleteReadProfileInsideLock.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await deleteReadProfileInsideLock.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
             var sensitiveTask = Task.Run(() => CreateService("user-self", "self_user")
                 .UpsertSelfAsync(new EmployeeProfileSensitiveChangeUpsertDto
@@ -1697,7 +1700,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
                 request.RequestId,
                 new EmployeeProfileSensitiveRejectDto { Reason = "并发授权测试" }
             ));
-        await authorizationRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await authorizationRead.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var managementTask = Task.Run(async () =>
         {
             if (elevateRole)
@@ -1779,7 +1782,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
                 request.RequestId,
                 new EmployeeProfileSensitiveRejectDto { Reason = "资料无法核验" }
             ));
-        await requestRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await requestRead.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         currentScope = new CurrentUserManageableStoreScope
         {
             IsAuthenticated = true,
@@ -1789,7 +1792,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
         };
         await heldLock.DisposeAsync();
 
-        var result = await reviewTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await reviewTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.False(result.Success);
         Assert.Equal(EmployeeProfileSensitiveChangeService.ReviewScopeForbiddenCode, result.ErrorCode);
@@ -2163,7 +2166,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
         {
             BankAccountNumber = "latest-pending",
         }));
-        await resubmitReachedBarrier.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await resubmitReachedBarrier.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         var reviewer = CreateService("admin-user", "admin", db: reviewDb);
         var reviewTask = Task.Run(() => approve
@@ -2172,7 +2175,7 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
                 requestId,
                 new EmployeeProfileSensitiveRejectDto { Reason = "资料无法核验" }
             ));
-        await reviewReadRequest.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await reviewReadRequest.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         // 若审批入口共用 sensitive-change 锁，此时只完成了锁外 requestId -> userGuid 定位，不能越过重新提交。
         var reviewCompletedBeforeRelease = await Task.WhenAny(

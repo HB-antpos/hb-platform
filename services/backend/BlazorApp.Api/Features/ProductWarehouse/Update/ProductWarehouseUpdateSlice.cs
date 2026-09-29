@@ -11,6 +11,7 @@ using BlazorApp.Api.Features.SupplyNotices;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -253,6 +254,7 @@ internal sealed class ProductWarehouseUpdateSlice
             product.IsAutoPricing = dto.IsAutoPricing;
             if (dto.MiddlePackQuantity.HasValue)
                 product.MiddlePackageQuantity = dto.MiddlePackQuantity;
+            var oldLocalSupplierCode = product.LocalSupplierCode;
             if (dto.LocalSupplierCode != null)
                 product.LocalSupplierCode = dto.LocalSupplierCode;
             if (dto.ProductImage != null)
@@ -284,6 +286,31 @@ internal sealed class ProductWarehouseUpdateSlice
                     p.UpdatedBy,
                 })
                 .ExecuteCommandAsync();
+
+            // 换供应商时旧供应商分类作废，并按新供应商已有采集自动归类。
+            if (
+                dto.LocalSupplierCode != null
+                && !string.Equals(
+                    LocalSupplierCategoryAssignmentService.NormalizeSupplierCode(oldLocalSupplierCode),
+                    LocalSupplierCategoryAssignmentService.NormalizeSupplierCode(product.LocalSupplierCode),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                await new LocalSupplierCategoryAssignmentService(_context.Db).ApplyProductEditAsync(
+                    new LocalSupplierCategoryAssignmentService.ProductEditContext(
+                        product.ProductCode ?? string.Empty,
+                        OldProductCode: null,
+                        OldSupplierCode: oldLocalSupplierCode,
+                        NewSupplierCode: product.LocalSupplierCode,
+                        OldItemNumber: product.ItemNumber,
+                        NewItemNumber: product.ItemNumber,
+                        RequestedCategoryGuid: null,
+                        ClearRequested: false,
+                        Actor: effectiveUpdatedBy
+                    )
+                );
+            }
 
             // 4. 更新 WarehouseProduct
             if (dto.DomesticPrice.HasValue)

@@ -1079,7 +1079,7 @@ public sealed class SetChildPurchasePriceSqlServerIntegrationTests
                 firstHasLock,
                 allowFirstCommit.Task
             );
-            await firstHasLock.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await firstHasLock.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             var secondTask = UpdateSourceAndDerivedAsync(secondDb, 30m);
             await Task.Delay(200);
             allowFirstCommit.SetResult();

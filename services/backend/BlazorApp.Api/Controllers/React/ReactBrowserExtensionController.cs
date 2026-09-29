@@ -1,9 +1,12 @@
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace BlazorApp.Api.Controllers.React;
 
@@ -14,16 +17,19 @@ public sealed class ReactBrowserExtensionController : ControllerBase
 {
     private readonly IBrowserExtensionService _service;
     private readonly IBrowserExtensionAccessService _accessService;
+    private readonly ILocalSupplierCategoryCaptureService _categoryCaptureService;
     private readonly ILogger<ReactBrowserExtensionController> _logger;
 
     public ReactBrowserExtensionController(
         IBrowserExtensionService service,
         IBrowserExtensionAccessService accessService,
+        ILocalSupplierCategoryCaptureService categoryCaptureService,
         ILogger<ReactBrowserExtensionController> logger
     )
     {
         _service = service;
         _accessService = accessService;
+        _categoryCaptureService = categoryCaptureService;
         _logger = logger;
     }
 
@@ -336,6 +342,116 @@ public sealed class ReactBrowserExtensionController : ControllerBase
                     "商品采购周期查询失败。",
                     "QUERY_ERROR"
                 )
+            );
+        }
+    }
+
+    /// <summary>
+    /// 扩展回传一次分类页采集：分类路径 + 该页货号。写入分类树与观察记录并即时重算商品归属。
+    /// </summary>
+    [HttpPost("supplier-categories/captures")]
+    [EnableRateLimiting(BrowserExtensionCaptureRateLimits.PolicyName)]
+    [BrowserExtensionInvalidRequestFilter]
+    public async Task<IActionResult> CaptureSupplierCategory(
+        [FromBody] BrowserExtensionCategoryCaptureRequestDto request,
+        CancellationToken cancellationToken
+    )
+    {
+        if (request == null)
+        {
+            return BadRequest(
+                ApiResponse<BrowserExtensionCategoryCaptureResultDto>.Error(
+                    "请求参数不能为空。",
+                    LocalSupplierCategoryErrorCodes.InvalidRequest
+                )
+            );
+        }
+
+        if (!await _accessService.CanAccessAsync(User))
+        {
+            return Forbid();
+        }
+
+        return await ExecuteCategoryWriteAsync(
+            () => _categoryCaptureService.CaptureAsync(request, User.Identity?.Name, cancellationToken),
+            request.SupplierCode,
+            "供应商分类采集写入失败。"
+        );
+    }
+
+    /// <summary>
+    /// 主动采集开始时上送供应商网站导航树，让空分类与排序也入库。
+    /// </summary>
+    [HttpPost("supplier-categories/tree-snapshot")]
+    [EnableRateLimiting(BrowserExtensionCaptureRateLimits.PolicyName)]
+    [BrowserExtensionInvalidRequestFilter]
+    public async Task<IActionResult> SubmitSupplierCategoryTreeSnapshot(
+        [FromBody] BrowserExtensionCategoryTreeSnapshotRequestDto request,
+        CancellationToken cancellationToken
+    )
+    {
+        if (request == null)
+        {
+            return BadRequest(
+                ApiResponse<BrowserExtensionCategoryTreeSnapshotResultDto>.Error(
+                    "请求参数不能为空。",
+                    LocalSupplierCategoryErrorCodes.InvalidRequest
+                )
+            );
+        }
+
+        if (!await _accessService.CanAccessAsync(User))
+        {
+            return Forbid();
+        }
+
+        return await ExecuteCategoryWriteAsync(
+            () => _categoryCaptureService.ApplyTreeSnapshotAsync(request, User.Identity?.Name, cancellationToken),
+            request.SupplierCode,
+            "供应商分类树写入失败。"
+        );
+    }
+
+    /// <summary>
+    /// 分类写入的统一错误映射：400 校验失败、404 供应商未启用/功能关闭、409 同供应商写入繁忙（可退避重试）。
+    /// </summary>
+    private async Task<IActionResult> ExecuteCategoryWriteAsync<T>(
+        Func<Task<T>> action,
+        string? supplierCode,
+        string failureMessage
+    )
+    {
+        try
+        {
+            var data = await action();
+            return Ok(ApiResponse<T>.OK(data, "保存成功"));
+        }
+        catch (LocalSupplierCategoryValidationException ex)
+        {
+            return BadRequest(ApiResponse<T>.Error(ex.Message, ex.ErrorCode));
+        }
+        catch (LocalSupplierCategoryFeatureDisabledException ex)
+        {
+            return NotFound(ApiResponse<T>.Error(ex.Message, LocalSupplierCategoryErrorCodes.FeatureDisabled));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse<T>.Error(ex.Message, "NOT_FOUND"));
+        }
+        catch (LocalSupplierCategoryBusyException ex)
+        {
+            return Conflict(ApiResponse<T>.Error(ex.Message, LocalSupplierCategoryErrorCodes.SupplierBusy));
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "浏览器订货助手供应商分类写入失败 SupplierCode={SupplierCode}", supplierCode);
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                ApiResponse<T>.Error(failureMessage, "QUERY_ERROR")
             );
         }
     }

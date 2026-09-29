@@ -35,6 +35,9 @@ public partial class MainWindow : Window
     private readonly IAppUpdateCoordinator _appUpdateCoordinator;
     private readonly ILocalAppSettingsRepository _localAppSettingsRepository;
     private readonly IAppShutdownCoordinator _appShutdownCoordinator;
+    private readonly IColorThemeService? _colorThemeService;
+    private readonly AppUpdateBackgroundCheckScheduler? _appUpdateBackgroundCheckScheduler;
+    private readonly AppUpdateUnattendedInstallScheduler? _appUpdateUnattendedInstallScheduler;
     private HwndSource? _hwndSource;
     private Task? _startupInitializationTask;
     private Task _windowModeSaveTask = Task.CompletedTask;
@@ -59,7 +62,11 @@ public partial class MainWindow : Window
         IUiPriorityCoordinator uiPriorityCoordinator,
         IAppUpdateCoordinator appUpdateCoordinator,
         ILocalAppSettingsRepository localAppSettingsRepository,
-        IAppShutdownCoordinator? appShutdownCoordinator = null)
+        IAppShutdownCoordinator? appShutdownCoordinator = null,
+        IColorThemeService? colorThemeService = null,
+        ColorThemeSwitcherViewModel? colorThemeSwitcher = null,
+        AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null,
+        AppUpdateUnattendedInstallScheduler? appUpdateUnattendedInstallScheduler = null)
     {
         _viewModel = viewModel;
         _startupOptions = startupOptions;
@@ -69,11 +76,22 @@ public partial class MainWindow : Window
         _appUpdateCoordinator = appUpdateCoordinator;
         _localAppSettingsRepository = localAppSettingsRepository;
         _appShutdownCoordinator = appShutdownCoordinator ?? new AppShutdownCoordinator();
+        _colorThemeService = colorThemeService;
+        _appUpdateBackgroundCheckScheduler = appUpdateBackgroundCheckScheduler;
+        _appUpdateUnattendedInstallScheduler = appUpdateUnattendedInstallScheduler;
 #if DEBUG
         _viewModel.AppUpdate.ConfigureDebugForceUpdateDismissed(ResumeStartupAfterDebugUpdateDismissalAsync);
 #endif
         DataContext = _viewModel;
         InitializeComponent();
+        if (colorThemeSwitcher is null)
+        {
+            ColorThemeSwitcher.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            ColorThemeSwitcher.DataContext = colorThemeSwitcher;
+        }
         SourceInitialized += MainWindowSourceInitialized;
         Loaded += MainWindowLoaded;
         PreviewKeyDown += MainWindowPreviewKeyDown;
@@ -246,6 +264,11 @@ public partial class MainWindow : Window
     private async Task InitializeForStartupCoreAsync()
     {
         await RestoreWindowModeAsync();
+        if (_colorThemeService is not null)
+        {
+            // 在主窗口显示前应用本机保存的配色，避免先闪一下默认配色。
+            await _colorThemeService.InitializeAsync();
+        }
 
         var updateResult = await RunStartupAppUpdateCheckAsync();
         IsStartupBlockedByAppUpdate = !ShouldContinueStartupAfterAppUpdateCheck(updateResult);
@@ -264,6 +287,13 @@ public partial class MainWindow : Window
         await _rawScannerService.InitializeAsync();
         _rawScannerService.Start(hwnd);
         await _viewModel.InitializeAsync(_startupOptions);
+        if (!_startupOptions.PreviewMode)
+        {
+            // 中文注释：启动闸门放行后才开始运行期后台检查与夜间自动安装；Preview 与真实更新链完全隔离。
+            _appUpdateBackgroundCheckScheduler?.Start();
+            _appUpdateUnattendedInstallScheduler?.Start();
+        }
+
         StartupCompleted?.Invoke(this, EventArgs.Empty);
     }
 
@@ -326,7 +356,7 @@ public partial class MainWindow : Window
     {
         return await RunStartupAppUpdateCheckCoreAsync(
             _startupOptions.PreviewMode,
-            () => _appUpdateCoordinator.CheckForUpdatesAsync(manual: false),
+            () => _appUpdateCoordinator.CheckForUpdatesAtStartupAsync(),
             ReportStartupAppUpdateException,
             ReportStartupAppUpdateFailure);
     }
@@ -382,7 +412,11 @@ public partial class MainWindow : Window
                 or AppUpdateCoordinatorStatus.OptionalReady
                 or AppUpdateCoordinatorStatus.InstallFailed
                 or AppUpdateCoordinatorStatus.CheckFailed
-                or AppUpdateCoordinatorStatus.PolicyFailed => true,
+                or AppUpdateCoordinatorStatus.PolicyFailed
+                // 安装包没下载成功时不显示任何更新提示，也不能卡住启动；下次启动再下载。
+                or AppUpdateCoordinatorStatus.DownloadFailed
+                // 安装包还没下载时先放行收银，启动后在后台下载；强更下好后空闲即阻断、交易中则等交易结束。
+                or AppUpdateCoordinatorStatus.DownloadDeferred => true,
             _ => false
         };
     }
@@ -426,6 +460,8 @@ public partial class MainWindow : Window
         _isWaitingForWindowModeSaveBeforeClose = true;
         IsEnabled = false;
         _viewModel.BeginShutdown();
+        _appUpdateBackgroundCheckScheduler?.Stop();
+        _appUpdateUnattendedInstallScheduler?.Stop();
         try
         {
             _rawScannerService.Stop();

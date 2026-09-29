@@ -1020,7 +1020,7 @@ public sealed class SaleFlowTests
             var confirm = _app.WaitForAutomationId("ConfirmPaymentButton", step: "等待确认支付按钮").AsButton();
             Assert.True(confirm.IsEnabled);
             confirm.Invoke();
-            _app.WaitForAutomationId("PaymentSuccessScreen", TimeSpan.FromSeconds(60), "等待支付成功页");
+            _app.WaitForAutomationId("PaymentSuccessCard", TimeSpan.FromSeconds(60), "等待收银主页的支付成功卡片");
             Assert.NotEqual("-", _app.WaitForAutomationId(
                 "CompletedTransactionId",
                 step: "等待交易编号").Name);

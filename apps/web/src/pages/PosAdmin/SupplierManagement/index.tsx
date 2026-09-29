@@ -1,4 +1,4 @@
-import { CloudUploadOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CloudUploadOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   Button,
   Card,
@@ -17,7 +17,6 @@ import { useTranslation } from 'react-i18next'
 import {
   createLocalSupplier,
   getLocalSuppliers,
-  syncLocalSuppliers,
   syncLocalSuppliersToHq,
   updateLocalSupplier,
 } from '../../../services/localSupplierService'
@@ -55,7 +54,6 @@ export default function SupplierManagementPage() {
   const [sortBy, setSortBy] = useState('name')
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('ascend')
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([])
-  const [syncingFromHq, setSyncingFromHq] = useState(false)
   const [syncingToHq, setSyncingToHq] = useState(false)
   const [createVisible, setCreateVisible] = useState(false)
   const [createForm] = Form.useForm()
@@ -180,28 +178,7 @@ export default function SupplierManagementPage() {
     }
   }, [data.length, pageSize, total])
 
-  const handleSyncFromHq = async () => {
-    setSyncingFromHq(true)
-    try {
-      const result = await syncLocalSuppliers()
-      message.success(
-        t('posAdmin.suppliers.syncComplete', {
-          created: result.createdCount ?? 0,
-          updated: result.updatedCount ?? 0,
-          deactivated: result.deactivatedCount ?? 0,
-        }),
-      )
-      setSelectedRowKeys([])
-      if (mountedRef.current) {
-        await latestLoadDataRef.current()
-      }
-    } catch {
-      message.error(t('posAdmin.suppliers.syncFailed', '同步失败'))
-    } finally {
-      setSyncingFromHq(false)
-    }
-  }
-
+  // 「从 HQ 同步」（HQ → HBweb）已于 2026-09-29 停用；「同步所选到 HQ」方向相反，继续保留。
   const handleSyncToHq = () => {
     if (!selectedRowKeys.length) {
       message.warning(t('posAdmin.suppliers.selectSyncFirst', '请先选择要同步的澳洲供应商'))
@@ -329,17 +306,9 @@ export default function SupplierManagementPage() {
             ]}
           />
           <Button
-            icon={<ReloadOutlined />}
-            loading={syncingFromHq}
-            disabled={!canEdit || syncingToHq}
-            onClick={handleSyncFromHq}
-          >
-            {t('posAdmin.suppliers.syncFromHq', '从 HQ 同步')}
-          </Button>
-          <Button
             icon={<CloudUploadOutlined />}
             loading={syncingToHq}
-            disabled={!canEdit || !selectedRowKeys.length || syncingFromHq}
+            disabled={!canEdit || !selectedRowKeys.length}
             onClick={handleSyncToHq}
           >
             {t('posAdmin.suppliers.syncToHq', '同步所选到 HQ')}

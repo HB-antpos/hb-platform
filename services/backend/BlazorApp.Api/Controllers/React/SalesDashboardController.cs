@@ -1094,7 +1094,7 @@ namespace BlazorApp.Api.Controllers.React
             [FromQuery] string? sortField = null,
             [FromQuery] string? sortOrder = null,
             [FromQuery] int pageIndex = 1,
-            [FromQuery] int pageSize = 80,
+            [FromQuery] int pageSize = 50,
             [FromQuery] bool forceRefresh = false
         )
         {

@@ -56,6 +56,31 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        [HttpGet("supplier-category-options")]
+        public async Task<IActionResult> GetSupplierCategoryOptions([FromQuery] List<string>? supplierCodes, [FromQuery] bool tree = false)
+        {
+            try
+            {
+                var scope = await ResolveStoreScopeAsync();
+                if (scope.Forbidden)
+                {
+                    return Forbid();
+                }
+
+                return ToResult(await _service.GetSupplierCategoryOptionsAsync(supplierCodes, scope.ScopedStoreCodes, tree));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "本地商品销量分析供应商分类选项加载失败");
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    ApiResponse<List<LocalSupplierProductSalesSupplierCategoryOptionDto>>.Error(
+                        "供应商分类选项加载失败"
+                    )
+                );
+            }
+        }
+
         [HttpPost("bootstrap")]
         public async Task<IActionResult> Bootstrap(
             [FromBody] LocalSupplierProductSalesAnalysisRequest request

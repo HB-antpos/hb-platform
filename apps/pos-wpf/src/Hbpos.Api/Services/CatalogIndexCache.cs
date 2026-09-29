@@ -48,7 +48,9 @@ public sealed record CatalogIndexBuildResult(
     IReadOnlyList<SellableItemDto> SellableItems,
     CatalogSellableIndex CatalogIndex,
     DateTimeOffset? SourceValidUntil = null,
-    PriceIndexInput? RawPriceIndexInput = null);
+    PriceIndexInput? RawPriceIndexInput = null,
+    // 码冲突候选；null 表示该工件未计算（旧快照恢复或 legacy since 派生），不等同于"没有冲突"。
+    IReadOnlyList<SellableItemDto>? CodeConflicts = null);
 
 public sealed class CatalogIndexCache : ICatalogIndexCache
 {
@@ -655,7 +657,8 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                     }
 
                     var result = new CatalogIndexBuildResult(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems,
-                        new CatalogSellableIndex(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems, key.CatalogVersion));
+                        new CatalogSellableIndex(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems, key.CatalogVersion),
+                        CodeConflicts: loaded.CodeConflicts);
                     if (TryAdmitLoadedSnapshotLocked(key, result, loaded.ExpiresAt, lazySnapshot.Sequence))
                     {
                         _lazySnapshotDescriptors.Remove(key);
@@ -1108,7 +1111,8 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                         result.GeneratedAt,
                         expiresAt,
                         catalogVersion.Trim(),
-                        result.SellableItems));
+                        result.SellableItems,
+                        result.CodeConflicts));
                 }
                 else
                 {
@@ -1184,7 +1188,8 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                     }
 
                     var result = new CatalogIndexBuildResult(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems,
-                        new CatalogSellableIndex(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems, descriptor.CatalogVersion));
+                        new CatalogSellableIndex(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems, descriptor.CatalogVersion),
+                        CodeConflicts: loaded.CodeConflicts);
                     if (TryAdmitLoadedSnapshotLocked(descriptorKey, result, loaded.ExpiresAt, lazySnapshot.Sequence))
                     {
                         _lazySnapshotDescriptors.Remove(descriptorKey);

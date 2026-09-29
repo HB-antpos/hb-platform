@@ -4,8 +4,8 @@
   "bundleId": "com.hotbargain.supplierorder.safari",
   "extensionBundleId": "com.hotbargain.supplierorder.safari.Extension",
   "sku": "HB-SUPPLIER-ORDER-IOS-2026",
-  "version": "1.4.1",
-  "buildNumber": 4,
+  "version": "1.5.0",
+  "buildNumber": 5,
   "primaryLanguage": "en-AU",
   "category": "BUSINESS",
   "territories": [

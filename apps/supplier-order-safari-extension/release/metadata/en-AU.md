@@ -17,11 +17,11 @@ The Safari extension is designed for iPhone and iPad and is available only to au
 
 Keywords: supplier,ordering,purchase,sales,inventory,business
 
-## What's New in Version 1.4.1
+## What's New in Version 1.5.0
 
-- Tap a product's total sales in the supplier TOP 30% ranking to see sales by individual store.
-- Search the store breakdown and compare stores in descending sales order, including stores with zero sales.
-- Adds clearer loading, refresh and return behaviour when ranking data changes.
+- Records supplier categories while you browse supported supplier category pages, so Hot Bargain products can be organised by each supplier's own categories. It can be switched off for each supplier in the assistant.
+- Adds "Capture all categories" to the assistant: it visits the open supplier website's category pages one at a time at a limited rate, shows progress, and can be stopped at any time.
+- If iOS suspends the supplier tab, return to it and tap Continue to resume from where the capture stopped, or Retry failed for categories that could not be read.
 
 Privacy URL: https://hotbargain.vip/privacy/browser-extension
 

@@ -60,6 +60,12 @@ export class ScanTimingCollector {
     }
   }
 
+  /** 一码多商品需人工选择时丢弃会话：选择耗时不属于 scan-to-cart 指标。 */
+  public discard(id: string | undefined): void {
+    if (id === undefined) return;
+    this.sessions.delete(id);
+  }
+
   /** 兼容测量期调用面；新路径统一由 complete 明确成功或失败。 */
   public mark(id: string | undefined, label: string): void {
     if (label === "cart-published") this.complete(id, "success");

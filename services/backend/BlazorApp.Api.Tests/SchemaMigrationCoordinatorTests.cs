@@ -90,6 +90,8 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifySalesDetailQueryProjectionAsync", runtimeMethods);
         Assert.Contains("ApplyMobileOtaRuntimeTargetsAsync", runtimeMethods);
         Assert.Contains("VerifyMobileOtaRuntimeTargetsAsync", runtimeMethods);
+        Assert.Contains("ApplyLocalSupplierCategoryAsync", runtimeMethods);
+        Assert.Contains("VerifyLocalSupplierCategoryAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -346,6 +348,13 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Equal(1, CountOccurrences(checkMethod, "VerifyDeviceActivationSchemaAsync"));
         Assert.Equal(1, CountOccurrences(checkMethod, "VerifyMobileDeviceActivationSchemaAsync"));
         Assert.Equal(1, CountOccurrences(checkMethod, "VerifyLinklyMultiTerminalSchemaAsync"));
+        Assert.Equal(1, CountOccurrences(checkMethod, "VerifyLocalSupplierCategoryAsync"));
+        Assert.Contains("LocalSupplierCategorySchema.VerifySql", runtimeSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "exception.Number is >= 51930 and <= 51939",
+            runtimeSource,
+            StringComparison.Ordinal
+        );
         Assert.Contains("DeviceActivationCodeSchema.VerifySql", runtimeSource, StringComparison.Ordinal);
         Assert.Contains("MobileDeviceActivationSchema.VerifySql", runtimeSource, StringComparison.Ordinal);
         Assert.Contains(
@@ -407,6 +416,14 @@ public sealed class SchemaMigrationCoordinatorTests
         runtime.MarkApplied(
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.SalesDetailQueryMonthlyMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId
         );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
@@ -830,6 +847,8 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20260909.003-sales-detail-query-mapping-use",
                 "Check:Main:20260921.001-mobile-ota-runtime-targets",
                 "Check:Main:20260922.001-sales-detail-query-monthly",
+                "Check:Main:20260923.001-local-supplier-category",
+                "Check:Main:20260924.001-compact-board-monthly",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1017,6 +1036,61 @@ public sealed class SchemaMigrationCoordinatorTests
     }
 
     [Fact]
+    public async Task CheckAsync_供应商分类签名漂移时阻止启动且不写库()
+    {
+        var runtime = new FakeSchemaMigrationRuntime
+        {
+            LocalSupplierCategoryVerifyException = new LocalSupplierCategorySchemaMismatchException(),
+        };
+        foreach (var step in SchemaMigrationCoordinator.MainMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Main, step.MigrationId);
+        foreach (var step in SchemaMigrationCoordinator.PosmMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Posm, step.MigrationId);
+
+        var result = await CreateCoordinator(runtime).CheckAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SchemaExitCodes.SchemaNotReady, result.ExitCode);
+        Assert.Equal(
+            SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible,
+            result.DiagnosticCode
+        );
+        Assert.DoesNotContain(
+            runtime.Events,
+            entry => entry.StartsWith("Apply:") || entry.StartsWith("Record:")
+        );
+    }
+
+    [Fact]
+    public async Task MigrateAsync_供应商分类与看板月投影按日期追加在末尾且成功后才登记()
+    {
+        var runtime = new FakeSchemaMigrationRuntime();
+        var coordinator = CreateCoordinator(runtime);
+
+        // 新迁移按日期追加：供应商分类（09-23）之后是看板月投影（09-24）。
+        Assert.Equal(
+            SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
+        );
+        Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
+        foreach (var migrationId in new[]
+        {
+            SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
+            SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
+        })
+        {
+            var apply = $"Apply:Main:{migrationId}";
+            var record = $"Record:Main:{migrationId}";
+            Assert.True(runtime.Events.IndexOf(apply) < runtime.Events.IndexOf(record));
+        }
+        Assert.Contains("VerifyLocalSupplierCategory", runtime.Events);
+    }
+
+    [Fact]
     public async Task MigrateAsync_定价曲线成功后登记且再次执行跳过()
     {
         var runtime = new FakeSchemaMigrationRuntime();
@@ -1049,6 +1123,7 @@ public sealed class SchemaMigrationCoordinatorTests
         public Exception? ProductHqOutboxVerifyException { get; init; }
         public Exception? LinklyVerifyException { get; init; }
         public Exception? MobileOtaRuntimeTargetsVerifyException { get; init; }
+        public Exception? LocalSupplierCategoryVerifyException { get; init; }
 
         public void MarkApplied(SchemaDatabase database, string migrationId) =>
             _applied.Add((database, migrationId));
@@ -1181,6 +1256,20 @@ public sealed class SchemaMigrationCoordinatorTests
             return Task.CompletedTask;
         }
 
+        public Task ApplyCompactBoardMonthlyAsync(CancellationToken cancellationToken) =>
+            ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
+                cancellationToken
+            );
+
+        public Task VerifyCompactBoardMonthlyAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyCompactBoardMonthly");
+            return Task.CompletedTask;
+        }
+
         public Task VerifyMobileOtaRuntimeTargetsAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1188,6 +1277,25 @@ public sealed class SchemaMigrationCoordinatorTests
             if (MobileOtaRuntimeTargetsVerifyException is not null)
             {
                 throw MobileOtaRuntimeTargetsVerifyException;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ApplyLocalSupplierCategoryAsync(CancellationToken cancellationToken) =>
+            ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
+                cancellationToken
+            );
+
+        public Task VerifyLocalSupplierCategoryAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyLocalSupplierCategory");
+            if (LocalSupplierCategoryVerifyException is not null)
+            {
+                throw LocalSupplierCategoryVerifyException;
             }
 
             return Task.CompletedTask;

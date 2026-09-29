@@ -492,9 +492,9 @@ public sealed class SupplierReportReadTests : IDisposable
         var first = Task.Run(() => firstService.GetSupplierSalesRankAsync(Range(), null, 100));
         try
         {
-            await firstReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await firstReadStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             var second = Task.Run(() => secondService.GetSupplierSalesRankAsync(Range(), null, 100));
-            await secondVersionRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondVersionRead.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             Assert.False(second.IsCompleted);
             var sharedLease = Assert.Single(leases, lease => lease != firstLease && lease != secondLease);
             firstScope.Dispose();

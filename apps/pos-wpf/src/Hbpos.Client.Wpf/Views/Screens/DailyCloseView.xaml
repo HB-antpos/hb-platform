@@ -10,7 +10,7 @@
              mc:Ignorable="d"
              d:DesignHeight="688"
              d:DesignWidth="1366"
-             Background="#FFF9F9FD">
+             Background="{DynamicResource PosSurfaceAltBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <converters:CashDenominationAccentBrushConverter x:Key="CashDenominationAccentBrush" />
@@ -18,8 +18,8 @@
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringIsEmptyToVis" Invert="True" />
 
         <Style x:Key="SettlementCardStyle" TargetType="Border">
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="#1FC3C6D6" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="20" />
@@ -37,7 +37,7 @@
         <Style x:Key="SettlementLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="10" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="#FF737785" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
             <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
             <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
         </Style>
@@ -45,7 +45,7 @@
         <Style x:Key="SettlementTitleStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="17" />
             <Setter Property="FontWeight" Value="Black" />
-            <Setter Property="Foreground" Value="#FF0040A1" />
+            <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
             <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
             <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
         </Style>
@@ -53,7 +53,7 @@
         <Style x:Key="SettlementValueStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="19" />
             <Setter Property="FontWeight" Value="Black" />
-            <Setter Property="Foreground" Value="#FF191C1E" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
             <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
         </Style>
@@ -72,10 +72,10 @@
             <Setter Property="MinHeight" Value="54" />
             <Setter Property="Margin" Value="0,0,0,7" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="#FFE2E2E6" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#FF191C1E" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -93,16 +93,16 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFF7FAFF" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FF80A9E8" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FF0056D2" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                                 <Setter TargetName="Root" Property="BorderThickness" Value="2" />
                             </Trigger>
                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFEAF2FF" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FF0056D2" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                                 <Setter TargetName="Root" Property="BorderThickness" Value="2" />
                             </DataTrigger>
                             <Trigger Property="IsPressed" Value="True">
@@ -122,10 +122,10 @@
             <Setter Property="MinWidth" Value="84" />
             <Setter Property="Margin" Value="5" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="#FFC3C6D6" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#FF191C1E" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
             <Setter Property="FontSize" Value="24" />
             <Setter Property="FontWeight" Value="Black" />
             <Setter Property="Cursor" Value="Hand" />
@@ -143,11 +143,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFEAF2FF" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FF0056D2" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFD6E4FA" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftStrongBrush}" />
                                 <Setter TargetName="Root" Property="Opacity" Value="0.82" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -185,12 +185,12 @@
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="{loc:Loc dailyClose.quantityShort}"
-                                   Foreground="#FF737785"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
                                    FontSize="11"
                                    FontWeight="SemiBold" />
                         <TextBlock Text="{Binding Count}"
                                    Margin="5,0,0,0"
-                                   Foreground="#FF191C1E"
+                                   Foreground="{DynamicResource PosTextBrush}"
                                    FontSize="14"
                                    FontWeight="Black" />
                     </StackPanel>
@@ -199,7 +199,7 @@
                                Text="{Binding Subtotal, StringFormat={}{0:C2}}"
                                VerticalAlignment="Center"
                                HorizontalAlignment="Right"
-                               Foreground="#FF191C1E"
+                               Foreground="{DynamicResource PosTextBrush}"
                                FontSize="14"
                                FontWeight="Black" />
                     <materialDesign:PackIcon Grid.Column="3"
@@ -208,7 +208,7 @@
                                              Height="18"
                                              VerticalAlignment="Center"
                                              HorizontalAlignment="Right"
-                                             Foreground="#FF737785" />
+                                             Foreground="{DynamicResource PosMutedForegroundBrush}" />
                 </Grid>
             </Button>
         </DataTemplate>
@@ -217,7 +217,7 @@
             <Setter Property="Height" Value="38" />
             <Setter Property="MinWidth" Value="148" />
             <Setter Property="Padding" Value="12,0" />
-            <Setter Property="Foreground" Value="#FF424654" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextSecondaryBrush}" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="Black" />
             <Setter Property="Cursor" Value="Hand" />
@@ -226,8 +226,8 @@
                     <ControlTemplate TargetType="{x:Type TabItem}">
                         <Border x:Name="Root"
                                 Margin="2,0"
-                                Background="#FFF9F9FD"
-                                BorderBrush="#FFC3C6D6"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource PosBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="6"
                                 Padding="{TemplateBinding Padding}">
@@ -239,12 +239,12 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FFEAF2FF" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FF80A9E8" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#FF0056D2" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#FF0056D2" />
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                                 <Setter Property="Foreground" Value="White" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -268,8 +268,8 @@
 
                             <Border x:Name="DailyCloseToolbar"
                                     Grid.Row="0"
-                                    Background="#FFEDEEF1"
-                                    BorderBrush="#FFE2E2E6"
+                                    Background="{DynamicResource PosSurfaceMutedBrush}"
+                                    BorderBrush="{DynamicResource PosDividerBrush}"
                                     BorderThickness="1"
                                     CornerRadius="8"
                                     Padding="14,10">
@@ -281,6 +281,7 @@
                                     </Grid.ColumnDefinitions>
 
                                     <Button Grid.Column="0"
+                                            FontSize="14"
                                             Command="{Binding ReturnToPosCommand}"
                                             Height="36"
                                             VerticalAlignment="Center"
@@ -316,8 +317,8 @@
                                         <Border x:Name="DailyCloseNavigationTabsBorder"
                                                 Grid.Column="0"
                                                 MinWidth="308"
-                                                Background="#FFFFFFFF"
-                                                BorderBrush="#FFC3C6D6"
+                                                Background="{DynamicResource PosSurfaceBrush}"
+                                                BorderBrush="{DynamicResource PosBorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="7"
                                                 Padding="2">
@@ -326,7 +327,9 @@
                                                       Background="Transparent" />
                                         </Border>
 
+                                        <!-- 工具栏与标签页同处一行，1080 宽时放不下全局 16 号按钮字，这一行的按钮（含左侧返回收银）保持 14。 -->
                                         <Button x:Name="DailyCloseRefreshHistoryButton"
+                                                FontSize="14"
                                                 Grid.Column="2"
                                                 Command="{Binding LoadHistoryCommand}"
                                                 Height="36"
@@ -349,6 +352,7 @@
                                         </Button>
 
                                         <Button x:Name="DailyCloseCreateDraftButton"
+                                                FontSize="14"
                                                 Grid.Column="3"
                                                 Command="{Binding CreateOrResumeDailyCloseCommand}"
                                                 Height="36"
@@ -374,6 +378,7 @@
                                         </Button>
 
                                         <Button x:Name="DailyCloseContinueDraftButton"
+                                                FontSize="14"
                                                 Grid.Column="3"
                                                 Command="{Binding CreateOrResumeDailyCloseCommand}"
                                                 Height="36"
@@ -454,7 +459,7 @@
                                     <TextBlock Text="{loc:Loc dailyClose.history.title}" Style="{StaticResource SettlementTitleStyle}" />
                                     <TextBlock Text="{Binding BusinessDateText}"
                                                Margin="0,4,0,0"
-                                               Foreground="#FF737785" />
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                 </StackPanel>
                                 <Button Grid.Column="1"
                                         Command="{Binding LoadHistoryCommand}"
@@ -513,7 +518,7 @@
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
                                                             <Setter Property="TextAlignment" Value="Left" />
-                                                            <Setter Property="Foreground" Value="#FF191C1E" />
+                                                            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsCentered}" Value="True">
                                                                     <Setter Property="TextAlignment" Value="Center" />
@@ -624,7 +629,7 @@
                                     <TextBlock Text="{loc:Loc dailyClose.linklySettlement.title}" Style="{StaticResource SettlementTitleStyle}" />
                                     <TextBlock Text="{loc:Loc dailyClose.linklySettlement.hint}"
                                                Margin="0,4,0,0"
-                                               Foreground="#FF737785" />
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                 </StackPanel>
                                 <Button Grid.Column="1"
                                         Command="{Binding LoadSettlementHistoryCommand}"
@@ -692,7 +697,7 @@
                                                            Margin="0,0,0,3"
                                                            FontFamily="Consolas"
                                                            FontSize="11"
-                                                           Foreground="#FF191C1E"
+                                                           Foreground="{DynamicResource PosTextBrush}"
                                                            TextWrapping="Wrap" />
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -704,8 +709,8 @@
                         <Border Grid.Row="1"
                                 Margin="0,14,0,0"
                                 Padding="12"
-                                Background="#FFFDF8E8"
-                                BorderBrush="#FFE0C56B"
+                                Background="{DynamicResource PosWarningSoftBrush}"
+                                BorderBrush="{DynamicResource PosWarningBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="6"
                                 Visibility="{Binding IsSettlementManualResolutionVisible, Converter={StaticResource BoolToVis}}"
@@ -713,11 +718,11 @@
                             <StackPanel>
                                 <TextBlock Text="{loc:Loc dailyClose.linklySettlement.manual.title}"
                                            FontWeight="Bold"
-                                           Foreground="#FF694F00" />
+                                           Foreground="{DynamicResource PosWarningTextBrush}" />
                                 <TextBlock Text="{loc:Loc dailyClose.linklySettlement.manual.hint}"
                                            Margin="0,3,0,8"
                                            FontSize="11"
-                                           Foreground="#FF5F5A4D"
+                                           Foreground="{DynamicResource PosTextSecondaryBrush}"
                                            TextWrapping="Wrap" />
                                 <WrapPanel>
                                     <Button Command="{Binding PrepareSettlementManualResolutionCommand}"
@@ -756,8 +761,8 @@
                                 </WrapPanel>
                                 <Border Margin="0,4,0,0"
                                         Padding="9"
-                                        Background="#FFFFFDF5"
-                                        BorderBrush="#FFE0C56B"
+                                        Background="{DynamicResource PosWarningSoftBrush}"
+                                        BorderBrush="{DynamicResource PosWarningBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="4"
                                         Visibility="{Binding IsSettlementManualResolutionConfirmationVisible, Converter={StaticResource BoolToVis}}">
@@ -821,8 +826,8 @@
                     MaxWidth="1600"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Stretch"
-                    Background="White"
-                    BorderBrush="#FFD8DAE4"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="16">
                 <Border.Effect>
@@ -849,10 +854,10 @@
                             <TextBlock Text="{loc:Loc dailyClose.cashWorkspace.title}"
                                        FontSize="21"
                                        FontWeight="Black"
-                                       Foreground="#FF191C1E" />
+                                       Foreground="{DynamicResource PosTextBrush}" />
                             <TextBlock Margin="0,3,0,0"
                                        FontSize="12"
-                                       Foreground="#FF5F636E">
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}">
                                 <Run Text="{loc:Loc dailyClose.businessDate}" />
                                 <Run Text=": " />
                                 <Run Text="{Binding BusinessDateText, Mode=OneWay}" />
@@ -872,7 +877,7 @@
                         </Button>
                     </Grid>
 
-                    <Border Grid.Row="1" Background="#FFE2E2E6" />
+                    <Border Grid.Row="1" Background="{DynamicResource PosSurfaceStrongBrush}" />
 
                 <Grid x:Name="DailyCloseCashWorkspaceBody"
                       Grid.Row="2"
@@ -912,7 +917,7 @@
                                         <TextBlock Text="{loc:Loc dailyClose.cashCountHint}"
                                                    Margin="0,3,0,0"
                                                    FontSize="11"
-                                                   Foreground="#FF737785" />
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" />
                                     </StackPanel>
 
                                     <Grid Grid.Row="1" Margin="0,12,0,10">
@@ -970,7 +975,7 @@
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <Border Grid.Column="0"
-                                                Background="#FFF3F3F7"
+                                                Background="{DynamicResource PosScreenBackgroundBrush}"
                                                 CornerRadius="8"
                                                 Padding="12,8">
                                             <StackPanel>
@@ -979,7 +984,7 @@
                                             </StackPanel>
                                         </Border>
                                         <Border Grid.Column="2"
-                                                Background="#FFF3F3F7"
+                                                Background="{DynamicResource PosScreenBackgroundBrush}"
                                                 CornerRadius="8"
                                                 Padding="12,8">
                                             <StackPanel>
@@ -988,14 +993,14 @@
                                             </StackPanel>
                                         </Border>
                                         <Border Grid.Column="4"
-                                                Background="#FFEAF2FF"
-                                                BorderBrush="#FF80A9E8"
+                                                Background="{DynamicResource PosPrimarySoftBrush}"
+                                                BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="8"
                                                 Padding="12,8">
                                             <StackPanel>
-                                                <TextBlock Text="{loc:Loc dailyClose.cashCounted}" Style="{StaticResource SettlementLabelStyle}" Foreground="#FF0040A1" />
-                                                <TextBlock Text="{Binding CountedCashAmount, StringFormat={}{0:C2}}" Style="{StaticResource SettlementValueStyle}" Foreground="#FF0040A1" />
+                                                <TextBlock Text="{loc:Loc dailyClose.cashCounted}" Style="{StaticResource SettlementLabelStyle}" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                                <TextBlock Text="{Binding CountedCashAmount, StringFormat={}{0:C2}}" Style="{StaticResource SettlementValueStyle}" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                                             </StackPanel>
                                         </Border>
                                     </Grid>
@@ -1020,20 +1025,20 @@
                                 </Grid.RowDefinitions>
 
                                 <Border Grid.Row="0"
-                                        BorderBrush="#FFC3C6D6"
+                                        BorderBrush="{DynamicResource PosBorderBrush}"
                                         BorderThickness="0,0,0,1"
                                         Padding="18"
-                                        Background="White">
+                                        Background="{DynamicResource PosSurfaceBrush}">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{loc:Loc dailyClose.reportTitle}"
                                                    FontSize="20"
                                                    FontWeight="Black"
-                                                   Foreground="#FF191C1E"
+                                                   Foreground="{DynamicResource PosTextBrush}"
                                                    HorizontalAlignment="Center" />
                                         <TextBlock Text="{Binding BusinessDateText}"
                                                    Margin="0,4,0,0"
                                            FontSize="10"
-                                           Foreground="#FF737785"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Border>
@@ -1081,11 +1086,11 @@
                                         </Grid.RowDefinitions>
 
                                         <Grid Margin="0,0,0,8">
-                                            <TextBlock Text="{loc:Loc dailyClose.totalNetSales}" Foreground="#FF424654" />
+                                            <TextBlock Text="{loc:Loc dailyClose.totalNetSales}" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                             <TextBlock Text="{Binding NetAmount, StringFormat={}{0:C2}}" HorizontalAlignment="Right" FontWeight="SemiBold" />
                                         </Grid>
                                         <Grid Grid.Row="1" Margin="0,0,0,8">
-                                            <TextBlock Text="{loc:Loc dailyClose.expectedCash}" Foreground="#FF424654" />
+                                            <TextBlock Text="{loc:Loc dailyClose.expectedCash}" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                             <TextBlock Text="{Binding ExpectedCashAmount, StringFormat={}{0:C2}}" HorizontalAlignment="Right" FontWeight="SemiBold" />
                                         </Grid>
                                         <Grid Grid.Row="2" Margin="0,0,0,8">
@@ -1094,18 +1099,18 @@
                                         </Grid>
                                         <Grid Grid.Row="3" Margin="0,2,0,10">
                                             <TextBlock Text="{loc:Loc dailyClose.overShort}" FontWeight="Bold" />
-                                            <TextBlock Text="{Binding CashDifference, StringFormat={}{0:C2}}" HorizontalAlignment="Right" FontWeight="Black" Foreground="#FFBA1A1A" />
+                                            <TextBlock Text="{Binding CashDifference, StringFormat={}{0:C2}}" HorizontalAlignment="Right" FontWeight="Black" Foreground="{DynamicResource PosDangerTextBrush}" />
                                         </Grid>
                                         <Grid Grid.Row="4" Margin="0,0,0,8">
-                                            <TextBlock Text="{loc:Loc dailyClose.refundAmount}" Foreground="#FF424654" />
+                                            <TextBlock Text="{loc:Loc dailyClose.refundAmount}" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                             <TextBlock Text="{Binding RefundAmount, StringFormat={}{0:C2}}" HorizontalAlignment="Right" />
                                         </Grid>
                                         <Grid Grid.Row="5" Margin="0,0,0,8">
-                                            <TextBlock Text="{loc:Loc dailyClose.returnQty}" Foreground="#FF424654" />
+                                            <TextBlock Text="{loc:Loc dailyClose.returnQty}" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                             <TextBlock Text="{Binding ReturnQuantity}" HorizontalAlignment="Right" />
                                         </Grid>
                                         <Grid Grid.Row="6">
-                                            <TextBlock Text="{loc:Loc dailyClose.orders}" Foreground="#FF424654" />
+                                            <TextBlock Text="{loc:Loc dailyClose.orders}" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                             <TextBlock Text="{Binding TransactionCount}" HorizontalAlignment="Right" />
                                         </Grid>
                                     </Grid>
@@ -1116,7 +1121,7 @@
                     </Grid>
                 </Grid>
 
-                    <Border Grid.Row="3" Background="#FFE2E2E6" />
+                    <Border Grid.Row="3" Background="{DynamicResource PosSurfaceStrongBrush}" />
 
                     <Grid Grid.Row="4" Margin="18,12">
                         <Grid.ColumnDefinitions>
@@ -1187,8 +1192,8 @@
                     Padding="24,20"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Background="White"
-                    BorderBrush="#FFE2E2E6"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
                     CornerRadius="16">
                 <Border.Effect>
@@ -1216,7 +1221,7 @@
                         <TextBlock VerticalAlignment="Center"
                                    FontSize="20"
                                    FontWeight="Black"
-                                   Foreground="#FF191C1E">
+                                   Foreground="{DynamicResource PosTextBrush}">
                             <Run Text="{loc:Loc dailyClose.cashCountDialog.titlePrefix}" />
                             <Run Text=" " />
                             <Run Text="{Binding SelectedCashDenomination.Label, Mode=OneWay}" />
@@ -1237,7 +1242,7 @@
 
                     <TextBlock Grid.Row="1"
                                Margin="0,5,0,0"
-                               Foreground="#FF5F636E"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
                                FontSize="12"
                                TextWrapping="Wrap">
                         <Run Text="{loc:Loc dailyClose.cashCountDialog.helperPrefix}" />
@@ -1250,27 +1255,27 @@
                     <Border Grid.Row="2"
                             Margin="0,16,0,0"
                             Padding="14,10"
-                            Background="#FFF7F9FC"
-                            BorderBrush="#FFE2E2E6"
+                            Background="{DynamicResource PosSurfaceAltBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
                             BorderThickness="1"
                             CornerRadius="10">
                         <StackPanel HorizontalAlignment="Center">
                             <TextBlock Text="{loc:Loc dailyClose.quantity}"
                                        FontSize="10"
                                        FontWeight="Bold"
-                                       Foreground="#FF737785"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
                                        HorizontalAlignment="Center" />
                             <Grid Margin="0,2,0,0">
                                 <TextBlock Text="0"
                                            FontSize="34"
                                            FontWeight="Black"
-                                           Foreground="#FF191C1E"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            HorizontalAlignment="Center"
                                            Visibility="{Binding KeypadBuffer, Converter={StaticResource StringIsEmptyToVis}}" />
                                 <TextBlock Text="{Binding KeypadBuffer}"
                                            FontSize="34"
                                            FontWeight="Black"
-                                           Foreground="#FF191C1E"
+                                           Foreground="{DynamicResource PosTextBrush}"
                                            HorizontalAlignment="Center"
                                            Visibility="{Binding KeypadBuffer, Converter={StaticResource StringHasValueToVis}}" />
                             </Grid>
@@ -1280,7 +1285,7 @@
                     <StackPanel Grid.Row="3" Margin="0,10,0,6" HorizontalAlignment="Center">
                         <TextBlock HorizontalAlignment="Center"
                                    FontSize="12"
-                                   Foreground="#FF737785">
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}">
                             <Run Text="{Binding CashCountDialogQuantity, Mode=OneWay}" />
                             <Run Text=" × " />
                             <Run Text="{Binding SelectedCashDenomination.Label, Mode=OneWay}" />
@@ -1290,7 +1295,7 @@
                                    HorizontalAlignment="Center"
                                    FontSize="27"
                                    FontWeight="Black"
-                                   Foreground="#FF191C1E" />
+                                   Foreground="{DynamicResource PosTextBrush}" />
                     </StackPanel>
 
                     <UniformGrid x:Name="CashCountNineGrid"
@@ -1314,9 +1319,9 @@
                                  Columns="3">
                         <Button Style="{StaticResource KeypadButtonStyle}"
                                 Command="{Binding KeypadClearCommand}"
-                                Background="#FFFFF3F2"
-                                BorderBrush="#FFFFB4AB"
-                                Foreground="#FF93000A"
+                                Background="{DynamicResource PosDangerSoftBrush}"
+                                BorderBrush="{DynamicResource PosDangerBorderBrush}"
+                                Foreground="{DynamicResource PosDangerTextBrush}"
                                 FontSize="14"
                                 AutomationProperties.Name="{loc:Loc dailyClose.cashCountDialog.clear}">
                             <TextBlock Text="{loc:Loc dailyClose.cashCountDialog.clear}" FontWeight="Bold" />
@@ -1329,11 +1334,11 @@
                         </Button>
                         <Button Style="{StaticResource KeypadButtonStyle}"
                                 Command="{Binding KeypadBackspaceCommand}"
-                                Background="#FFEAF2FF"
-                                BorderBrush="#FF80A9E8"
-                                Foreground="#FF0040A1"
+                                Background="{DynamicResource PosPrimarySoftBrush}"
+                                BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}"
+                                Foreground="{DynamicResource PosPrimaryTextBrush}"
                                 AutomationProperties.Name="{loc:Loc dailyClose.cashCountDialog.backspace}">
-                            <materialDesign:PackIcon Kind="BackspaceOutline" Width="24" Height="24" Foreground="#FF0040A1" />
+                            <materialDesign:PackIcon Kind="BackspaceOutline" Width="24" Height="24" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                         </Button>
                     </UniformGrid>
 
@@ -1380,8 +1385,8 @@
                     Padding="24,22"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Background="White"
-                    BorderBrush="#FFE2E2E6"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
                     CornerRadius="16">
                 <Border.Effect>
@@ -1400,26 +1405,26 @@
                         <Border Width="38"
                                 Height="38"
                                 Margin="0,0,12,0"
-                                Background="#FFFFEDEA"
+                                Background="{DynamicResource PosDangerSoftBrush}"
                                 CornerRadius="19">
                             <materialDesign:PackIcon Kind="AlertOutline"
                                                      Width="20"
                                                      Height="20"
                                                      HorizontalAlignment="Center"
                                                      VerticalAlignment="Center"
-                                                     Foreground="#FFBA1A1A" />
+                                                     Foreground="{DynamicResource PosDangerTextBrush}" />
                         </Border>
                         <TextBlock Text="{loc:Loc dailyClose.cashWorkspace.discardConfirm.title}"
                                    VerticalAlignment="Center"
                                    FontSize="19"
                                    FontWeight="Black"
-                                   Foreground="#FF191C1E" />
+                                   Foreground="{DynamicResource PosTextBrush}" />
                     </StackPanel>
                     <TextBlock Grid.Row="1"
                                Margin="0,16,0,20"
                                Text="{loc:Loc dailyClose.cashWorkspace.discardConfirm.message}"
                                FontSize="13"
-                               Foreground="#FF424654"
+                               Foreground="{DynamicResource PosTextSecondaryBrush}"
                                TextWrapping="Wrap" />
                     <Grid Grid.Row="2">
                         <Grid.ColumnDefinitions>
@@ -1438,8 +1443,8 @@
                         <Button Grid.Column="2"
                                 Command="{Binding ConfirmDiscardDailyCloseDraftCommand}"
                                 Height="46"
-                                Background="#FFBA1A1A"
-                                BorderBrush="#FFBA1A1A"
+                                Background="{DynamicResource PosDangerBrush}"
+                                BorderBrush="{DynamicResource PosDangerBrush}"
                                 AutomationProperties.Name="{loc:Loc dailyClose.cashWorkspace.discardConfirm.action}"
                                 Style="{StaticResource PosPrimaryButtonStyle}">
                             <TextBlock Text="{loc:Loc dailyClose.cashWorkspace.discardConfirm.action}"

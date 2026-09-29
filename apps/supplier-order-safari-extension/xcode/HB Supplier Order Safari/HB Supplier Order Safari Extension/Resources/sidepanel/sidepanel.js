@@ -1,5 +1,7 @@
-// 侧栏：网站会话连接、门店选择、供应商授权、采购周期混排/筛选/分页、zh/en 切换
-import { resolveInitialLocale, t } from '../lib/i18n.js';
+// 侧栏：网站会话连接、门店选择、供应商授权、供应商分类采集、采购周期混排/筛选/分页、zh/en 切换
+import { categoryErrorMessageKey, resolveInitialLocale, t } from '../lib/i18n.js';
+import { BUILD_TARGET } from '../config.js';
+import { summarizeProgress } from '../lib/category-crawl.js';
 import { normalizeApiOrigin, toApiHostPattern } from '../lib/api-origin.js';
 import { createGenerationGuard } from '../lib/dats-state.js';
 import { selectVisibleSupplierEntries } from '../lib/supplier-list.js';
@@ -80,6 +82,13 @@ let supplierListExpanded = false;
 let manuallySelectedSupplierCode = null;
 let lastDetectedSupplierCode = null;
 let activeSupplierRefreshTimer = null;
+// 分类采集：以当前标签页识别出的供应商为准（与排行榜的手动选择互不影响）。
+let activeTabSupplier = null;
+let categoryJob = null;
+let categoryHistory = {};
+let categorySettings = {};
+let categoryError = null;
+let categoryBusy = false;
 const itemRequestGeneration = createGenerationGuard(0);
 const rankingRequestGeneration = createGenerationGuard(0);
 const storeSalesRequestGeneration = createGenerationGuard(0);
@@ -140,6 +149,14 @@ function applyI18n() {
   el('storeLabel').textContent = t(locale, 'store');
   el('storeEmpty').textContent = t(locale, 'noPosStore');
   el('supplierTitle').textContent = t(locale, 'supplier');
+  el('categoryTitle').textContent = t(locale, 'categoryTitle');
+  el('categoryPassiveLabel').textContent = t(locale, 'categoryPassiveLabel');
+  el('categoryPassiveHint').textContent = t(locale, 'categoryPassiveHint');
+  el('categoryCrawlBtn').textContent = t(locale, 'categoryCrawlAll');
+  el('categoryAbortBtn').textContent = t(locale, 'categoryAbort');
+  el('categoryResumeBtn').textContent = t(locale, 'categoryResume');
+  el('categoryRetryBtn').textContent = t(locale, 'categoryRetryFailed');
+  el('categorySafariHint').textContent = t(locale, 'categorySafariHint');
   el('historyTab').textContent = t(locale, 'historyTab');
   renderRankingPercentLabels();
   el('rankingSupplierLabel').textContent = t(locale, 'rankingSupplier');
@@ -302,6 +319,186 @@ async function grantOrigin(pattern) {
   } catch (e) {
     setStatus(`${t(locale, 'grantFailed')}: ${String((e && e.message) || e)}`);
   }
+}
+
+const CATEGORY_STATUS_KEYS = {
+  running: 'categoryStatusRunning',
+  completed: 'categoryStatusCompleted',
+  aborted: 'categoryStatusAborted',
+  interrupted: 'categoryStatusInterrupted',
+  failed: 'categoryStatusFailed',
+};
+
+function formatCategoryError(code) {
+  return formatMessage(categoryErrorMessageKey(code), { code: code || '—' });
+}
+
+function formatCategoryTime(value) {
+  const date = new Date(value || '');
+  if (!Number.isFinite(date.getTime())) return '—';
+  try {
+    return date.toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-AU', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function isCategoryPassiveOn(supplierCode, category) {
+  return !!category?.passiveEnabled && categorySettings?.[supplierCode]?.passiveEnabled !== false;
+}
+
+// 分类采集区：状态全部来自 storage（会话中的任务 + 本地摘要），刷新侧栏不丢进度。
+function renderCategory() {
+  const section = el('categorySection');
+  const visible = !!user && authState === 'connected' && !storeSalesSelection;
+  section.hidden = !visible;
+  if (!visible) return;
+
+  const supplier = activeTabSupplier;
+  const profile = supplier ? profiles.find((item) => item.supplierCode === supplier.supplierCode) : null;
+  const category = profile?.category;
+  const enabled = !!category?.enabled && supplier?.supplierCode !== '200';
+  el('categorySupplier').textContent = supplier
+    ? `${supplier.displayName || supplier.supplierCode} (${supplier.supplierCode})`
+    : '';
+  const unavailable = el('categoryUnavailable');
+  unavailable.hidden = enabled;
+  unavailable.textContent = !supplier ? t(locale, 'categoryNoSupplier') : t(locale, 'categoryNotEnabled');
+  el('categoryControls').hidden = !enabled;
+  if (!enabled) return;
+
+  const toggle = el('categoryPassiveToggle');
+  toggle.checked = isCategoryPassiveOn(supplier.supplierCode, category);
+  toggle.disabled = !category.passiveEnabled;
+
+  const job = categoryJob?.supplierCode === supplier.supplierCode ? categoryJob : null;
+  const otherRunning = categoryJob?.status === 'running' && !job ? categoryJob : null;
+  const history = categoryHistory?.[supplier.supplierCode] || null;
+  const running = job?.status === 'running';
+  const latest = job && job.status !== 'running' ? job : history;
+  const crawlAllowed = !!category.crawlEnabled;
+  const resumable = !!latest
+    && ['interrupted', 'aborted', 'failed'].includes(latest.status)
+    && Array.isArray(latest.completedKeys)
+    && latest.completedKeys.length > 0
+    && (latest.done ?? 0) < (latest.total ?? 0);
+  const retryable = !!latest && Array.isArray(latest.failedNodes) && latest.failedNodes.length > 0;
+
+  el('categoryCrawlBtn').hidden = !crawlAllowed || running;
+  el('categoryCrawlBtn').disabled = categoryBusy || !!otherRunning;
+  el('categoryAbortBtn').hidden = !running;
+  el('categoryAbortBtn').disabled = categoryBusy;
+  el('categoryResumeBtn').hidden = !crawlAllowed || running || !resumable;
+  el('categoryResumeBtn').disabled = categoryBusy || !!otherRunning;
+  el('categoryRetryBtn').hidden = !crawlAllowed || running || !retryable;
+  el('categoryRetryBtn').disabled = categoryBusy || !!otherRunning;
+
+  const note = el('categoryCrawlNote');
+  if (!crawlAllowed) note.textContent = t(locale, 'categoryCrawlUnavailable');
+  else if (otherRunning) {
+    note.textContent = formatMessage('categoryOtherJobRunning', { supplier: otherRunning.supplierCode });
+  } else note.textContent = t(locale, 'categoryKeepTabOpen');
+  note.hidden = false;
+
+  const progressJob = job || null;
+  const progressWrap = el('categoryProgressWrap');
+  progressWrap.hidden = !progressJob;
+  if (progressJob) {
+    const summary = summarizeProgress(progressJob);
+    const progress = el('categoryProgress');
+    progress.max = Math.max(1, summary.total);
+    progress.value = Math.min(summary.done, Math.max(1, summary.total));
+    const parts = [formatMessage('categoryProgress', summary)];
+    parts.push(formatMessage('categoryItemsSent', {
+      items: progressJob.itemsSent ?? 0,
+      pages: progressJob.pages ?? 0,
+    }));
+    el('categoryProgressText').textContent = parts.join(' · ');
+  }
+
+  const status = el('categoryStatus');
+  let statusText = '';
+  let isError = false;
+  if (categoryBusy) statusText = t(locale, 'categoryStarting');
+  else if (categoryError) {
+    statusText = formatCategoryError(categoryError);
+    isError = true;
+  } else if (running) {
+    statusText = progressJob.current?.name
+      ? formatMessage('categoryCurrent', { name: progressJob.current.name })
+      : t(locale, 'categoryStatusRunning');
+  } else if (job) {
+    statusText = t(locale, CATEGORY_STATUS_KEYS[job.status] || 'categoryStatusFailed');
+    if (job.errorCode) {
+      statusText = `${statusText} · ${formatCategoryError(job.errorCode)}`;
+      isError = true;
+    }
+  }
+  status.textContent = statusText;
+  status.classList.toggle('error', isError);
+
+  el('categoryLastRun').textContent = history
+    ? formatMessage('categoryLastRun', {
+      time: formatCategoryTime(history.finishedAt || history.startedAt),
+      status: t(locale, CATEGORY_STATUS_KEYS[history.status] || 'categoryStatusFailed'),
+      done: history.done ?? 0,
+      total: history.total ?? 0,
+      failed: history.failed ?? 0,
+    })
+    : t(locale, 'categoryNever');
+  // iOS Safari 会挂起后台标签页，主动采集可能中断，提示用户返回后“继续”。
+  el('categorySafariHint').hidden = BUILD_TARGET !== 'safari' || !crawlAllowed;
+}
+
+async function startCategoryCrawl(mode) {
+  if (!activeTabSupplier || categoryBusy) return;
+  categoryBusy = true;
+  categoryError = null;
+  renderCategory();
+  let response;
+  try {
+    response = await send({
+      type: 'CATEGORY_CRAWL_START',
+      supplierCode: activeTabSupplier.supplierCode,
+      mode,
+    });
+  } catch {
+    response = { ok: false, errorCode: 'CONTENT_SCRIPT_UNAVAILABLE' };
+  }
+  categoryBusy = false;
+  if (response?.job) categoryJob = response.job;
+  categoryError = response?.ok ? null : response?.errorCode || 'CONTENT_SCRIPT_UNAVAILABLE';
+  renderCategory();
+}
+
+async function abortCategoryCrawl() {
+  if (categoryBusy) return;
+  categoryBusy = true;
+  categoryError = null;
+  renderCategory();
+  let response;
+  try {
+    response = await send({ type: 'CATEGORY_CRAWL_ABORT' });
+  } catch {
+    response = null;
+  }
+  categoryBusy = false;
+  if (response?.job) categoryJob = response.job;
+  if (response && !response.ok) categoryError = response.errorCode || null;
+  renderCategory();
+}
+
+async function loadCategoryState() {
+  const [local, session] = await Promise.all([
+    chrome.storage.local.get(['categoryCaptureSettings', 'categoryCrawlHistory']),
+    chrome.storage.session.get('categoryCrawlJob'),
+  ]);
+  categorySettings = local.categoryCaptureSettings || {};
+  categoryHistory = local.categoryCrawlHistory || {};
+  categoryJob = session.categoryCrawlJob || null;
 }
 
 function renderDataTabs() {
@@ -854,6 +1051,7 @@ function render() {
   renderAuth();
   renderStore();
   void renderSuppliers();
+  renderCategory();
   renderDataTabs();
   renderItem();
   renderRanking();
@@ -883,6 +1081,8 @@ async function loadActiveSupplier() {
   const response = await send({ type: 'ACTIVE_SUPPLIER' });
   if (!activeSupplierRequestGeneration.isCurrent(requestGeneration)) return false;
   const detectedSupplier = response && response.ok ? response.supplier || null : null;
+  if (activeTabSupplier?.supplierCode !== detectedSupplier?.supplierCode) categoryError = null;
+  activeTabSupplier = detectedSupplier;
   const previousDetectedSupplierCode = lastDetectedSupplierCode;
   const detectedSupplierCode = detectedSupplier?.supplierCode || null;
   // 离开供应商网站时保留最近一次自动识别结果，返回同一网站后仍尊重手动选择。
@@ -939,6 +1139,8 @@ function selectSupplier(supplierCode, { manual = false } = {}) {
 async function refreshActiveSupplierAndRanking() {
   if (!user) return;
   const changed = await loadActiveSupplier();
+  // 排行榜可能保留手动选择，但分类采集区始终跟随当前标签页。
+  renderCategory();
   if (!changed) return;
   render();
   if (activeView === 'ranking' && currentSupplier) await loadRanking();
@@ -1149,6 +1351,8 @@ function resetAuthenticatedData() {
   rankingData = null;
   rankingLegacyItems = null;
   currentSupplier = null;
+  activeTabSupplier = null;
+  categoryError = null;
   manuallySelectedSupplierCode = null;
   lastDetectedSupplierCode = null;
   rankingPage = 1;
@@ -1217,6 +1421,11 @@ async function init() {
   }
   applyI18n();
   selectedStoreCode = stored.selectedStoreCode || null;
+  try {
+    await loadCategoryState();
+  } catch {
+    // 分类采集状态读取失败不影响侧栏其余功能。
+  }
 
   const apiConfig = await send({ type: 'GET_API_ORIGIN' });
   if (apiConfig && apiConfig.ok) {
@@ -1353,6 +1562,38 @@ el('supplierToggleBtn').addEventListener('click', () => {
   void renderSuppliers();
 });
 
+el('categoryPassiveToggle').addEventListener('change', async (event) => {
+  const supplierCode = activeTabSupplier?.supplierCode;
+  if (!supplierCode) return;
+  const next = {
+    ...categorySettings,
+    [supplierCode]: {
+      ...(categorySettings?.[supplierCode] || {}),
+      passiveEnabled: event.currentTarget.checked,
+    },
+  };
+  categorySettings = next;
+  // 内容脚本监听该键热更新，无需刷新供应商页面。
+  await chrome.storage.local.set({ categoryCaptureSettings: next });
+  renderCategory();
+});
+
+el('categoryCrawlBtn').addEventListener('click', () => {
+  void startCategoryCrawl('full');
+});
+
+el('categoryResumeBtn').addEventListener('click', () => {
+  void startCategoryCrawl('resume');
+});
+
+el('categoryRetryBtn').addEventListener('click', () => {
+  void startCategoryCrawl('retry');
+});
+
+el('categoryAbortBtn').addEventListener('click', () => {
+  void abortCategoryCrawl();
+});
+
 el('historyTab').addEventListener('click', () => {
   activeView = 'history';
   setStatus('');
@@ -1487,6 +1728,24 @@ el('nextBtn').addEventListener('click', () => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  // 分类采集任务进度由 service worker 写入存储，侧栏只负责按存储渲染。
+  let categoryChanged = false;
+  if (matchesStorageArea(areaName, 'session') && changes.categoryCrawlJob) {
+    categoryJob = changes.categoryCrawlJob.newValue || null;
+    categoryChanged = true;
+  }
+  if (matchesStorageArea(areaName, 'local')) {
+    if (changes.categoryCrawlHistory) {
+      categoryHistory = changes.categoryCrawlHistory.newValue || {};
+      categoryChanged = true;
+    }
+    if (changes.categoryCaptureSettings) {
+      categorySettings = changes.categoryCaptureSettings.newValue || {};
+      categoryChanged = true;
+    }
+  }
+  if (categoryChanged) renderCategory();
+
   if (matchesStorageArea(areaName, 'local')) {
     let rankingContextChanged = false;
     let rankingPageSizeChanged = false;

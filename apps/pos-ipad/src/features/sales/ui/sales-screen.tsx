@@ -44,6 +44,7 @@ import {
   getCashDueCents,
   MIN_TOUCH_TARGET,
   parseCashInput,
+  type SalesLookupCandidate,
   type SalesPresenter,
   type SalesProductSearchItem,
 } from "./sales-presenter";
@@ -279,6 +280,9 @@ export function SalesScreen({
   const visibleSearchResults = searchResultsAreCurrent
     ? state.searchResults
     : [];
+  // 一码多商品候选只在收银态展示；结账准备、锁屏或成功页一律不弹出。
+  const lookupSelection =
+    state.phase === "selling" ? state.lookupSelection : null;
   const newTransactionBlocked =
     cartEmpty && newTransactionGate?.canStartNewTransaction === false;
   const checkoutVerifying = state.phase === "verifying-checkout";
@@ -292,6 +296,11 @@ export function SalesScreen({
     !state.capabilities.catalog ||
     newTransactionBlocked ||
     transactionActionsDisabled;
+  // 连续相机扫码期间也要能选择候选，只受目录能力、新交易门禁与在途点选约束。
+  const lookupCandidatesDisabled =
+    !state.capabilities.catalog ||
+    newTransactionBlocked ||
+    state.lookupSelectionPending;
   const manualInputTreeUnavailable =
     state.phase === "success" ||
     state.phase === "locked" ||
@@ -1623,6 +1632,78 @@ export function SalesScreen({
         </View>
       </Modal>
 
+      {lookupSelection ? (
+        <Modal
+          animationType="fade"
+          onRequestClose={() => presenter.cancelLookupSelection()}
+          presentationStyle="overFullScreen"
+          supportedOrientations={["landscape-left", "landscape-right"]}
+          transparent
+          visible
+        >
+          <View style={styles.searchDrawerBackdrop}>
+            <PosPressable
+              accessibilityLabel={t("lookupSelection.cancel")}
+              accessibilityRole="button"
+              onPress={() => presenter.cancelLookupSelection()}
+              sound="navigate"
+              style={styles.searchDrawerDismissArea}
+              testID="sales-lookup-selection-backdrop"
+            />
+            <View
+              accessibilityViewIsModal
+              style={styles.searchDrawer}
+              testID="sales-lookup-selection"
+            >
+              <View style={styles.searchDrawerHeader}>
+                <View style={styles.searchDrawerHeading}>
+                  <Text style={styles.modalTitle}>
+                    {t("lookupSelection.title")}
+                  </Text>
+                  <Text
+                    style={styles.lookupSelectionHint}
+                    testID="sales-lookup-selection-hint"
+                  >
+                    {t("lookupSelection.hint", {
+                      code: lookupSelection.lookupCode,
+                      count: lookupSelection.candidates.length,
+                    })}
+                  </Text>
+                </View>
+                <ActionButton
+                  label={t("lookupSelection.cancel")}
+                  onPress={() => presenter.cancelLookupSelection()}
+                  sound="navigate"
+                  testID="sales-lookup-selection-cancel"
+                  tone="quiet"
+                />
+              </View>
+              <FlatList
+                contentContainerStyle={styles.searchResults}
+                data={lookupSelection.candidates}
+                keyExtractor={(item) => item.productCode}
+                renderItem={({ item }) => (
+                  <LookupCandidateRow
+                    disabled={lookupCandidatesDisabled}
+                    item={item}
+                    locale={locale}
+                    onChoose={() => {
+                      void presenter.chooseLookupCandidate(item.productCode);
+                    }}
+                    {...(resolveCartProductImage
+                      ? { resolveProductImage: resolveCartProductImage }
+                      : {})}
+                    t={t}
+                  />
+                )}
+                style={styles.searchDrawerList}
+                testID="sales-lookup-selection-list"
+              />
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+
       <Modal
         animationType="fade"
         onRequestClose={closeCashInput}
@@ -2320,6 +2401,138 @@ function ProductSearchRow({
         />
       </View>
     </View>
+  );
+}
+
+function priceSourceCopyKey(
+  priceSource: SalesLookupCandidate["priceSource"],
+): SalesCopyKey {
+  switch (priceSource) {
+    case 1:
+      return "priceSource.1";
+    case 2:
+      return "priceSource.2";
+    case 3:
+      return "priceSource.3";
+    case 4:
+      return "priceSource.4";
+    case 0:
+    default:
+      return "priceSource.0";
+  }
+}
+
+/** 一码多商品候选行：整行即选择按钮，同码商品按名称、货号、价格与价格来源区分。 */
+function LookupCandidateRow({
+  disabled = false,
+  item,
+  locale,
+  onChoose,
+  resolveProductImage,
+  t,
+}: Readonly<{
+  disabled?: boolean;
+  item: SalesLookupCandidate;
+  locale: SalesLocale;
+  onChoose(): void;
+  resolveProductImage?: (input: {
+    productCode: string;
+    lookupCode: string;
+  }) => Promise<string | null>;
+  t(
+    key: SalesCopyKey,
+    values?: Readonly<Record<string, string | number>>,
+  ): string;
+}>) {
+  const [imageUri, setImageUri] = useState<string | null | undefined>();
+  useEffect(() => {
+    setImageUri(undefined);
+    if (!resolveProductImage) return;
+    let active = true;
+    void resolveProductImage({
+      productCode: item.productCode,
+      lookupCode: item.lookupCode,
+    })
+      .then((resolved) => {
+        if (active) setImageUri(resolved?.trim() || null);
+      })
+      .catch(() => {
+        if (active) setImageUri(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [item.lookupCode, item.productCode, resolveProductImage]);
+
+  const itemNumber = item.itemNumber?.trim() || "—";
+  const price = formatAud(item.unitPriceCents, locale);
+  const discountRate = formatCatalogDiscountRate(item.discountRate, locale);
+  return (
+    <PosPressable
+      accessibilityLabel={t("lookupSelection.chooseProduct", {
+        product: item.displayName,
+        price,
+      })}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onChoose}
+      style={({ pressed }) => [
+        styles.lookupCandidateRow,
+        disabled && styles.actionButtonDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
+      ]}
+      testID={`sales-lookup-candidate-${item.productCode}`}
+    >
+      <CartProductThumbnail
+        accessibilityLabel={t("cart.productImage", {
+          product: item.displayName,
+        })}
+        imageUri={imageUri}
+        placeholderLabel={t("cart.imagePlaceholder")}
+        testID={`sales-lookup-candidate-${item.productCode}-image`}
+      />
+      <View style={styles.productIdentity}>
+        <Text numberOfLines={2} style={styles.productName}>
+          {item.displayName}
+        </Text>
+        <Text numberOfLines={1} style={styles.productCode}>
+          {formatCatalogField(t("catalog.itemNumber"), itemNumber, locale)}
+        </Text>
+        <Text numberOfLines={1} style={styles.productCode}>
+          {formatCatalogField(
+            t("lookupSelection.lookupCode"),
+            item.lookupCode,
+            locale,
+          )}
+        </Text>
+        <View style={styles.lookupCandidateTags}>
+          <Text
+            numberOfLines={1}
+            style={styles.lookupCandidateSource}
+            testID={`sales-lookup-candidate-${item.productCode}-source`}
+          >
+            {t(priceSourceCopyKey(item.priceSource))}
+          </Text>
+          {discountRate ? (
+            <Text numberOfLines={1} style={styles.productDiscount}>
+              {formatCatalogField(t("catalog.discount"), discountRate, locale)}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.lookupCandidatePricing}>
+        <Text
+          style={styles.lookupCandidatePrice}
+          testID={`sales-lookup-candidate-${item.productCode}-price`}
+        >
+          {price}
+        </Text>
+        <Text style={styles.lookupCandidateChoose}>
+          {t("lookupSelection.choose")}
+        </Text>
+      </View>
+    </PosPressable>
   );
 }
 
@@ -3545,6 +3758,55 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginBottom: 10,
     marginTop: 20,
+  },
+  lookupCandidateChoose: {
+    color: posColors.blue,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  lookupCandidatePrice: {
+    color: posColors.ink,
+    fontSize: 18,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  lookupCandidatePricing: {
+    alignItems: "flex-end",
+    gap: 6,
+    justifyContent: "center",
+    minWidth: 72,
+  },
+  lookupCandidateRow: {
+    alignItems: "center",
+    borderBottomColor: posColors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 96,
+    paddingVertical: 10,
+  },
+  lookupCandidateSource: {
+    backgroundColor: posColors.orangeSoft,
+    borderRadius: 3,
+    color: posColors.orange,
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  lookupCandidateTags: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 5,
+  },
+  lookupSelectionHint: {
+    color: posColors.mutedInk,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   modalAction: {
     flex: 1,

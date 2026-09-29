@@ -169,22 +169,18 @@ public sealed class StoreOrderPasteReplaceJobServiceTests : IDisposable
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 50; attempt += 1)
-        {
-            var job = await jobService.GetJobAsync(jobId);
-            Assert.NotNull(job);
-            if (
-                job.Status == StoreOrderPasteReplaceJobStatusConstants.Succeeded
-                || job.Status == StoreOrderPasteReplaceJobStatusConstants.Failed
-            )
+        return await WaitForValueAsync(
+            async () =>
             {
+                var job = await jobService.GetJobAsync(jobId);
+                Assert.NotNull(job);
                 return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("paste replace job did not finish");
+            },
+            job =>
+                job.Status == StoreOrderPasteReplaceJobStatusConstants.Succeeded
+                || job.Status == StoreOrderPasteReplaceJobStatusConstants.Failed,
+            describeLast: job => $"paste replace job 当前状态：{job.Status}"
+        );
     }
 
     private async Task SeedProductAsync(string productCode, string itemNumber)

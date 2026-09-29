@@ -176,6 +176,14 @@ namespace BlazorApp.Api.Interfaces.React
             CancellationToken cancellationToken = default
         );
 
+        Task<ProductReportResponseDto<SalesDetailReportDto>> GetSalesDetailReportFilteredAsync(
+            DateRangeDto dateRange, SalesDetailKind kind, List<string>? branchCodes = null,
+            string? selectedBranchCode = null, string? selectedSupplierCode = null,
+            string? selectedProductCode = null, string? search = null, int pageIndex = 1, int pageSize = 20,
+            IReadOnlyCollection<SalesDetailSection>? sections = null, CancellationToken cancellationToken = default,
+            List<string>? selectedSupplierCodes = null, List<string>? supplierCategoryGuids = null,
+            List<string>? warehouseCategoryGuids = null);
+
         /// <summary>
         /// 一次读取营业额、分店、时段及周层级，读取过程不触发统计重建。
         /// </summary>

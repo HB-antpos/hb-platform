@@ -2,6 +2,7 @@ import dayjs from 'dayjs'
 import {
   __localSupplierInvoiceServiceTestOnly,
   getLocalSupplierPurchaseSalesAnalysis,
+  getLocalSupplierPurchaseSalesAnalysisCategoryTree,
   getLocalSupplierPurchaseSalesAnalysisSupplierOptions,
   getShopLocalSupplierPurchaseSalesAnalysis,
   getShopLocalSupplierPurchaseSalesAnalysisSupplierOptions,
@@ -38,6 +39,7 @@ const originalFetch = globalThis.fetch
 let requestUrl = ''
 let requestMethod = ''
 let supplierOptionsRequestUrl = ''
+let categoryTreeRequestUrl = ''
 let shopRequestUrl = ''
 let shopSupplierOptionsRequestUrl = ''
 let refreshRequestCount = 0
@@ -85,6 +87,16 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         { Label: '', Value: 'BROKEN' },
       ],
     }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  if (url.includes('/api/react/v1/local-supplier-invoices/purchase-sales-analysis/category-tree')) {
+    categoryTreeRequestUrl = url
+    return new Response(JSON.stringify({ success: true, data: [
+      { categoryGuid: 'CAT-A', name: 'Cards', isActive: true, children: [] },
+    ] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })
@@ -247,9 +259,16 @@ try {
   )
   assertDeepEqual(supplierOptions, [{ label: 'Malmar', value: '200' }], '供应商选项接口应归一化响应')
 
+  const categoryTree = await getLocalSupplierPurchaseSalesAnalysisCategoryTree('SUP01', 'S001')
+  const parsedCategoryTreeUrl = new URL(categoryTreeRequestUrl, 'https://example.test')
+  assertEqual(parsedCategoryTreeUrl.searchParams.get('supplierCode'), 'SUP01', '分类树应限定当前供应商')
+  assertEqual(parsedCategoryTreeUrl.searchParams.get('storeCode'), 'S001', '分类树应携带当前分店供后端校验可见范围')
+  assertEqual(categoryTree[0]?.categoryGuid, 'CAT-A', '分类树响应应返回可选分类')
+
   const result = await getLocalSupplierPurchaseSalesAnalysis({
     storeCode: 'S001',
     supplierCode: 'SUP01',
+    supplierCategoryGuids: ['CAT-A', 'CAT-B'],
     orderDateStart: '2026-01-01',
     orderDateEnd: '2026-06-25',
     keyword: '苹果',
@@ -264,6 +283,7 @@ try {
   assertEqual(parsedUrl.searchParams.get('sortBy'), 'totalSalesSinceLatestPurchase', '总销量排序字段应透传到后端')
   assertEqual(parsedUrl.searchParams.get('sortOrder'), 'desc', '排序方向应透传到后端')
   assertEqual(parsedUrl.searchParams.get('pageSize'), '200', '合法 pageSize 应透传到后端')
+  assertDeepEqual(parsedUrl.searchParams.getAll('supplierCategoryGuids'), ['CAT-A', 'CAT-B'], '分类多选应重复序列化为查询参数')
   assertEqual(result.items.length, 1, '接口 normalizer 应过滤无效行')
   assertEqual(result.pageSize, 100, '接口响应中的非法 pageSize 应回退到 100')
   assertEqual(result.items[0].totalSalesSinceLatestPurchase, 137, '总销量应从后端响应归一化')

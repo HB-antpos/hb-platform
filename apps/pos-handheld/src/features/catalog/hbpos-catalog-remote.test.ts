@@ -833,3 +833,161 @@ test("Hbpos catalog adapter 拒绝缺失数组和不安全的促销金额、时�
     );
   }
 });
+
+test("Hbpos catalog adapter 读取码冲突候选并保留服务端决胜顺序与请求上限", async () => {
+  const calls: HbposTransportRequest[] = [];
+  const fly = {
+    ...canonicalItem,
+    productCode: "P-FLY",
+    displayName: "EXTENSION Fly Swatter",
+    lookupCode: "6405090401470",
+    lookupCodeNormalized: "6405090401470",
+    retailPrice: 8.99,
+    priceSource: 2 as const,
+    priceSourceLabel: "set",
+  };
+  const flower = {
+    ...fly,
+    productCode: "P-FLOWER",
+    displayName: "flower",
+    retailPrice: 2.99,
+    priceSource: 0 as const,
+    priceSourceLabel: "product",
+  };
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest) {
+      calls.push(request);
+      return {
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            storeCode: "S01",
+            generatedAt: "2026-09-26T01:02:03+10:00",
+            available: true,
+            items: [fly, flower],
+          },
+        } as T,
+      };
+    },
+  };
+
+  const controller = new AbortController();
+  const result = await new HbposCatalogPageApi(transport, digest).getCodeConflicts({
+    storeCode: "S01",
+    signal: controller.signal,
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.generatedAt, "2026-09-25T15:02:03.000Z");
+  assert.deepEqual(
+    result.items.map((entry) => [entry.productCode, entry.retailPrice]),
+    [
+      ["P-FLY", 8.99],
+      ["P-FLOWER", 2.99],
+    ],
+  );
+  assert.deepEqual(calls, [{
+    method: "GET",
+    url: "/api/v1/catalog/sellable-items/code-conflicts",
+    params: { storeCode: "S01" },
+    timeoutMs: 60_000,
+    signal: controller.signal,
+  }]);
+});
+
+test("Hbpos catalog adapter 对跨门店、未规范化或自相矛盾的码冲突响应整体拒绝", async () => {
+  const conflictItem = {
+    ...canonicalItem,
+    lookupCode: " abc-1 ",
+    lookupCodeNormalized: "ABC-1",
+  };
+  const cases = [
+    { label: "跨门店响应", body: { storeCode: "S02", available: true, items: [] } },
+    {
+      label: "跨门店候选",
+      body: {
+        storeCode: "S01",
+        available: true,
+        items: [{ ...conflictItem, storeCode: "S02" }],
+      },
+    },
+    {
+      label: "查询码未规范化",
+      body: {
+        storeCode: "S01",
+        available: true,
+        items: [{ ...conflictItem, lookupCodeNormalized: "abc-1" }],
+      },
+    },
+    {
+      label: "未计算却带候选",
+      body: { storeCode: "S01", available: false, items: [conflictItem] },
+    },
+    { label: "缺少 available", body: { storeCode: "S01", items: [] } },
+    { label: "缺少候选数组", body: { storeCode: "S01", available: true } },
+    {
+      label: "候选字段非法",
+      body: {
+        storeCode: "S01",
+        available: true,
+        items: [{ ...conflictItem, retailPrice: "8.99" }],
+      },
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    const transport: HbposTransport = {
+      async request<T>() {
+        return {
+          status: 200,
+          data: {
+            success: true,
+            data: { generatedAt: "2026-09-26T00:00:00.000Z", ...entry.body },
+          } as T,
+        };
+      },
+    };
+    await assert.rejects(
+      () =>
+        new HbposCatalogPageApi(transport, digest).getCodeConflicts({
+          storeCode: "S01",
+        }),
+      (error: unknown) =>
+        error instanceof HbposApiError &&
+        error.code === "CATALOG_CODE_CONFLICTS_INVALID",
+      entry.label,
+    );
+  }
+});
+
+test("Hbpos catalog adapter 接受服务端尚未计算码冲突的空响应", async () => {
+  const transport: HbposTransport = {
+    async request<T>() {
+      return {
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            storeCode: "S01",
+            generatedAt: "2026-09-26T00:00:00.000Z",
+            available: false,
+            items: [],
+          },
+        } as T,
+      };
+    },
+  };
+
+  assert.deepEqual(
+    await new HbposCatalogPageApi(transport, digest).getCodeConflicts({
+      storeCode: "S01",
+    }),
+    {
+      storeCode: "S01",
+      generatedAt: "2026-09-26T00:00:00.000Z",
+      available: false,
+      items: [],
+    },
+  );
+});

@@ -77,8 +77,44 @@ public sealed class LocalSellableItemIndex
         lock (_gate)
         {
             // 单商品回写只维护受影响的索引项，避免持锁重建全量目录阻塞扫码。
-            RemoveLookupLocked(new ExactLookupKey(normalizedStoreCode, normalizedLookupCode));
+            var key = new ExactLookupKey(normalizedStoreCode, normalizedLookupCode);
+            if (_exactLookupIndex.TryGetValue(key, out var existingItems) && HasMultipleProducts(existingItems))
+            {
+                // 码冲突：服务端回查只返回胜出商品，整码替换会把收银员可选的其它商品冲掉，
+                // 下次扫码就不再弹出选择；因此只替换同一商品的条目。
+                RemoveProductItemsLocked(existingItems, Normalize(item.ProductCode));
+            }
+            else
+            {
+                RemoveLookupLocked(key);
+            }
+
             InsertItemLocked(item);
+        }
+    }
+
+    private static bool HasMultipleProducts(List<SellableItemDto> items)
+    {
+        for (var index = 1; index < items.Count; index++)
+        {
+            if (Normalize(items[index].ProductCode) != Normalize(items[0].ProductCode))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void RemoveProductItemsLocked(List<SellableItemDto> existingItems, string normalizedProductCode)
+    {
+        // RemoveItemLocked 会修改 existingItems，先拷贝再逐个移除。
+        foreach (var existing in existingItems.ToArray())
+        {
+            if (Normalize(existing.ProductCode) == normalizedProductCode)
+            {
+                RemoveItemLocked(existing);
+            }
         }
     }
 

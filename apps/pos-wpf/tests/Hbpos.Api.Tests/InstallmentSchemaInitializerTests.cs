@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Hbpos.Api;
 using Hbpos.Api.Data;
 using Hbpos.Api.Services;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -69,7 +70,7 @@ public sealed class InstallmentSchemaInitializerTests
         var databasePath = Path.Combine(
             Path.GetTempPath(),
             $"hbpos-installment-schema-{Guid.NewGuid():N}.db");
-        using var client = new SqlSugarClient(new ConnectionConfig
+        var client = new SqlSugarClient(new ConnectionConfig
         {
             ConnectionString = $"Data Source={databasePath}",
             DbType = DbType.Sqlite,
@@ -96,9 +97,19 @@ public sealed class InstallmentSchemaInitializerTests
         }
         finally
         {
+            // Windows 上连接池仍持有文件句柄时无法删除，先释放客户端并清空连接池。
+            client.Dispose();
+            SqliteConnection.ClearAllPools();
             if (File.Exists(databasePath))
             {
-                File.Delete(databasePath);
+                try
+                {
+                    File.Delete(databasePath);
+                }
+                catch (IOException)
+                {
+                    // SQLite 可能短暂占用测试数据库文件，不影响建表断言。
+                }
             }
         }
     }

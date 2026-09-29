@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>..\Hbpos.Client.Wpf\Resources\AppIcon.ico</ApplicationIcon>
+    <HbposWpfAppVersion Condition="'$(HbposWpfAppVersion)' == '' and '$(HBPOS_WPF_APP_VERSION)' != ''">$(HBPOS_WPF_APP_VERSION)</HbposWpfAppVersion>
+    <HbposWpfAppVersion Condition="'$(HbposWpfAppVersion)' == ''">0.0.0-local</HbposWpfAppVersion>
+    <Version>$(HbposWpfAppVersion)</Version>
+    <InformationalVersion>$(HbposWpfAppVersion)</InformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Hbpos.Client.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 更新窗口与收银端共用同一份品牌图标，不在这里另存副本。 -->
+    <Resource Include="..\Hbpos.Client.Wpf\Resources\AppBrandIcon.png" Link="Resources\AppBrandIcon.png" />
+    <Resource Include="..\Hbpos.Client.Wpf\Resources\AppIcon.ico" Link="Resources\AppIcon.ico" />
+  </ItemGroup>
+
+</Project>

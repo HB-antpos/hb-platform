@@ -1654,6 +1654,8 @@ namespace BlazorApp.Shared.DTOs
         public decimal TotalAmount { get; set; }
         public int TotalQuantity { get; set; }
         public decimal DomesticSupplierAmount { get; set; }
+        /// <summary>该分店在区间内的总营业额（营业额日报同一口径，含全部供应商的商品），分店栏占比的分母；无统计时为 0。</summary>
+        public decimal BranchTotalAmount { get; set; }
         public string AustralianSupplierCode { get; set; } = "200";
         public string AustralianSupplierName { get; set; } = "200-hotbargain";
         /// <summary>该分店在当前筛选下有销售的商品款数。</summary>

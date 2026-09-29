@@ -1,6 +1,6 @@
 {
   "name": "hb-supplier-order-extension",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "HB Supplier Order Chrome/Edge/Safari Manifest V3 extension",

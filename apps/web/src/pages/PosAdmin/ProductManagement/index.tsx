@@ -1,11 +1,12 @@
 import {
-  CloudDownloadOutlined,
+  ApartmentOutlined,
   CloudSyncOutlined,
   CloudUploadOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   FileImageOutlined,
+  InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -68,23 +69,17 @@ import {
 import {
   batchUpdateProductStoreRecords,
   batchUpdateProducts,
-  buildProductHqSyncOperationId,
   buildSupplierImageBatchUpdateOperationId,
-  createProductHqSyncJobPoller,
   createProductWithPrices,
-  createProductFullHqSyncJob,
-  createProductIncrementalHqSyncJob,
   createSupplierImageBatchUpdateJob,
   getPushToHqStoreOptions,
   getSyncProductsToStoresJob,
   getSupplierImageBatchUpdateJob,
   getProductStoreRecords,
-  getProductHqSyncJob,
   getProducts,
   HqProductSyncPollingTimeoutError,
   pushProductsToHq,
   startSyncProductsToStoresJob,
-  syncSelectedProductsFromHq,
   updateProduct,
 } from '../../../services/posProductService'
 import { createHqSyncJobPoller } from '../../../services/productHqSyncPolling'
@@ -103,7 +98,7 @@ import PosHqPushModal from '../../../components/posHqPush/PosHqPushModal'
 import { createPushToHqStoreOptionsGuard } from '../../../components/posHqPush/storeSelection'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import { RequestError } from '../../../utils/request'
-import type { BatchUpdatePosProductDto, BatchUpdateProductStoreRecordsChanges, BatchUpdateSupplierImagesJobResult, BatchUpdateSupplierImagesResult, HqProductSyncJobResult, HqProductSyncJobStatus, HqProductSyncResult, PosProductColumnFilters, PosProductDateFilterOperator, PosProductDto, PosProductFilterParams, PosProductNumberFilterOperator, PosProductTextFilterOperator, ProductStoreRecordDto, PushProductsToHqResult, PushProductsToHqStoreOption, PushProductsToHqUpdateField, SyncProductsToStoresField, SyncProductsToStoresJobResult, SyncProductsToStoresRequest, SyncProductsToStoresResult } from '../../../types/posProduct'
+import type { BatchUpdatePosProductDto, BatchUpdateProductStoreRecordsChanges, BatchUpdateSupplierImagesJobResult, BatchUpdateSupplierImagesResult, PosProductColumnFilters, PosProductDateFilterOperator, PosProductDto, PosProductFilterParams, PosProductNumberFilterOperator, PosProductTextFilterOperator, ProductStoreRecordDto, PushProductsToHqResult, PushProductsToHqStoreOption, PushProductsToHqUpdateField, SyncProductsToStoresField, SyncProductsToStoresJobResult, SyncProductsToStoresRequest, SyncProductsToStoresResult } from '../../../types/posProduct'
 import type { ProductCategoryDto } from '../../../types/productCategory'
 import type { ProductIntegrityCheckResultDto, ProductIntegrityFixResultDto } from '../../../types/productIntegrity'
 import type { MulticodeSetItem } from '../../../types/multiCodeSet'
@@ -166,13 +161,45 @@ import {
 } from './activeFilterChips'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 import ProductListImage from '../../../components/ProductListImage'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import { readRequestErrorCode } from '../../../services/localSupplierCategoryService'
+import { SUPPLIER_CATEGORY_MISMATCH_ERROR_CODE, type SupplierCategoryUpdatePayload } from '../../../types/localSupplierCategory'
+import SupplierCategoryCascader from './SupplierCategoryCascader'
+import SupplierCategoryCell from './SupplierCategoryCell'
+import SupplierCategoryFormField from './SupplierCategoryFormField'
+import SupplierCategoryManagerModal from './SupplierCategoryManagerModal'
+import {
+  applySupplierCategoryCascaderChange,
+  applySupplierSelectChange,
+  applyWarehouseCategoryFilterChange,
+  clearSupplierCategoryFilter,
+  resolveBatchSupplierCategoryUpdate,
+  resolveSupplierCategoryUpdate,
+  toSupplierCategoryCascaderValue,
+  toSupplierCategoryQueryParams,
+  type SupplierCategoryFilterState,
+  type SupplierCategorySelection,
+} from './supplierCategoryFilter'
+import {
+  buildSupplierCategoryCascaderOptions,
+  findSupplierCategoryGuidPath,
+  findSupplierCategoryNamePath,
+  findWarehouseCategoryGuidPath,
+  resolveBatchSupplierCategoryScope,
+  type BatchSupplierCategoryScopeStatus,
+} from './supplierCategoryOptions'
+import { useSupplierCategoryTrees } from './useSupplierCategoryTrees'
+import messagesEn from './messages.en.json'
+import messagesZh from './messages.zh.json'
+
+// 供应商分类等本页新增文案随页面代码块懒注册，不进入首屏 i18n 包。
+registerPageMessages({ zh: messagesZh, en: messagesEn })
 
 type ProductRow = (PosProductDto & {
   warehouseCategoryGuid?: string
   domesticSupplierCode?: string
   domesticSupplierName?: string
 }) & { key: string }
-type HqSyncMode = Parameters<typeof buildProductHqSyncOperationId>[0]
 type SupplierOption = { label: string; value: string; localSupplierCode: string; name?: string; imageBaseUrl?: string }
 type ChinaSupplierOption = { label: string; value: string }
 type ProductFilterParams = PosProductFilterParams & { warehouseCategoryGuid?: string }
@@ -192,16 +219,6 @@ type StoreRecordBatchEditFormValues = {
   isActive?: boolean
 }
 
-type ActiveProductHqSyncJob = {
-  jobId: string
-  mode: HqSyncMode
-  operationId: string
-  createdAt: string
-  status?: HqProductSyncJobStatus | string
-  message?: string
-  startDate?: string
-}
-
 function isSameSetCodePasteTarget(
   left: SetCodePasteTarget | null,
   right: SetCodePasteTarget,
@@ -212,7 +229,7 @@ function isSameSetCodePasteTarget(
 // 商品列表容器距视口底部的留白，以及容器最小高度（窗口很矮时也保证表格可用）。
 const PRODUCT_LIST_BOTTOM_GAP = 16
 const PRODUCT_LIST_MIN_HEIGHT = 360
-const PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY = 'posAdmin.products.activeHqSyncJob'
+// HQ → HBweb 商品同步已于 2026-09-29 停用；以下轮询参数仍供「同步到分店」后台任务复用。
 const PRODUCT_HQ_SYNC_POLL_INTERVAL_MS = 2000
 const PRODUCT_HQ_SYNC_TIMEOUT_MS = 10 * 60 * 1000
 const SUPPLIER_IMAGE_BATCH_POLL_INTERVAL_MS = 2000
@@ -380,28 +397,6 @@ function buildProductNameTranslationUpdates(
   }, [])
 }
 
-function readActiveProductHqSyncJob(): ActiveProductHqSyncJob | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<ActiveProductHqSyncJob>
-    if (!parsed.jobId || !parsed.operationId || !parsed.mode || !parsed.createdAt) return null
-    return parsed as ActiveProductHqSyncJob
-  } catch {
-    return null
-  }
-}
-
-function saveActiveProductHqSyncJob(job: ActiveProductHqSyncJob | null) {
-  if (typeof window === 'undefined') return
-  if (!job) {
-    window.localStorage.removeItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY)
-    return
-  }
-  window.localStorage.setItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY, JSON.stringify(job))
-}
-
 function resolveCascaderLeafValue(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     const leaf = value[value.length - 1]
@@ -511,7 +506,6 @@ export default function ProductManagementPage() {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { active } = useKeepAliveContext()
-  const isAdmin = useAuthStore((state) => state.access.isAdmin)
   const canManagePosProducts = useAuthStore((state) => state.access.canManagePosProducts)
   const canManageStoreProducts = useAuthStore((state) => state.access.canManageStoreProducts)
   const canEditStoreProducts = useAuthStore((state) => state.access.canEditStoreProducts)
@@ -531,6 +525,11 @@ export default function ProductManagementPage() {
   const [categoryGuidInput, setCategoryGuidInput] = useState<string | undefined>(undefined)
   const [warehouseCategoryGuid, setWarehouseCategoryGuid] = useState<string | undefined>(undefined)
   const [warehouseCategoryGuidInput, setWarehouseCategoryGuidInput] = useState<string | undefined>(undefined)
+  // 供应商分类筛选：非 200 供应商的分类 GUID 与「仅未归类」，和供应商、仓库分类共用一份状态（见 supplierCategoryFilter.ts）。
+  const [supplierCategoryGuid, setSupplierCategoryGuid] = useState<string | undefined>(undefined)
+  const [supplierCategoryGuidInput, setSupplierCategoryGuidInput] = useState<string | undefined>(undefined)
+  const [supplierCategoryUnassignedOnly, setSupplierCategoryUnassignedOnly] = useState(false)
+  const [supplierCategoryUnassignedOnlyInput, setSupplierCategoryUnassignedOnlyInput] = useState(false)
   const [isActiveFilter, setIsActiveFilter] = useState<boolean | undefined>(undefined)
   const [isActiveFilterInput, setIsActiveFilterInput] = useState<boolean | undefined>(undefined)
   const [isSetFilter, setIsSetFilter] = useState<boolean | undefined>(undefined)
@@ -546,17 +545,10 @@ export default function ProductManagementPage() {
   const [sortBy, setSortBy] = useState('productCode')
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('ascend')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
-  const [hqSyncSubmitting, setHqSyncSubmitting] = useState(false)
-  const hqSyncSubmittingRef = useRef(false)
-  const stopHqSyncPollingRef = useRef<(() => void) | null>(null)
   const stopSyncToStorePollingRef = useRef<(() => void) | null>(null)
   const stopSupplierImageBatchPollingRef = useRef<Record<string, () => void>>({})
   const isMountedRef = useRef(true)
-  const [activeHqSyncJob, setActiveHqSyncJob] = useState<ActiveProductHqSyncJob | null>(() => readActiveProductHqSyncJob())
   const [activeImageBatchJobs, setActiveImageBatchJobs] = useState<ActiveSupplierImageBatchJobMap>(() => readActiveSupplierImageBatchJobs())
-  const [hqSyncMode, setHqSyncMode] = useState<HqSyncMode>('incremental')
-  const [hqSyncVisible, setHqSyncVisible] = useState(false)
-  const [hqSyncForm] = Form.useForm()
 
   const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([])
   const [categoryTree, setCategoryTree] = useState<ProductCategoryDto[]>([])
@@ -594,12 +586,12 @@ export default function ProductManagementPage() {
   const [pushToHqStoreOptionsLoading, setPushToHqStoreOptionsLoading] = useState(false)
   const [pushToHqStoreOptionsError, setPushToHqStoreOptionsError] = useState<string | null>(null)
   const [pushToHqConfirmLoading, setPushToHqConfirmLoading] = useState(false)
-  const [selectedFromHqLoading, setSelectedFromHqLoading] = useState(false)
-  const selectedFromHqLoadingRef = useRef(false)
 
   const productTypeWatch = Form.useWatch('productType', editForm)
   const imageBatchSupplierCode = Form.useWatch('localSupplierCode', imageBatchForm)
   const imageBatchTemplate = Form.useWatch('urlTemplate', imageBatchForm)
+  const editSupplierCodeWatch = Form.useWatch('localSupplierCode', editForm)
+  const batchSupplierCodeWatch = Form.useWatch('localSupplierCode', batchEditForm)
   const [editSetCodes, setEditSetCodes] = useState<SetCodeDraftRow[]>([])
   const [editSetCodesLoading, setEditSetCodesLoading] = useState(false)
   const [editSetCodesReady, setEditSetCodesReady] = useState(false)
@@ -627,6 +619,8 @@ export default function ProductManagementPage() {
   const storeRecordsRequestSeqRef = useRef(0)
 
   const [categoryModalVisible, setCategoryModalVisible] = useState(false)
+  const [supplierCategoryManagerOpen, setSupplierCategoryManagerOpen] = useState(false)
+  const supplierCategoryTrees = useSupplierCategoryTrees()
   const [categoryEditForm] = Form.useForm()
   const [editingCategory, setEditingCategory] = useState<ProductCategoryDto | null>(null)
 
@@ -694,6 +688,43 @@ export default function ProductManagementPage() {
   // 分类单元格需要按 GUID 反查叶级名和完整路径，树加载完成后构建一次索引。
   const categoryPathMaps = useMemo(() => buildCategoryPathMaps(categoryTree), [categoryTree])
   const warehouseCategoryPathMaps = useMemo(() => buildWarehouseCategoryPathMaps(warehouseCategoryTree), [warehouseCategoryTree])
+  // 顶部供应商分类级联框：200 挂仓库分类树，其他供应商的网站分类树按需懒加载（version 变化即重建选项）。
+  const supplierCategoryCascaderOptions = useMemo(() => buildSupplierCategoryCascaderOptions({
+    suppliers: supplierOptions,
+    warehouseTree: warehouseCategoryTree,
+    getTree: supplierCategoryTrees.get,
+    labels: {
+      unassigned: t('posAdmin.products.supplierCategory.unassigned', '未归类'),
+      empty: t('posAdmin.products.supplierCategory.emptyTree', '暂无网站分类'),
+      retry: t('posAdmin.products.supplierCategory.loadFailedRetry', '加载失败，点击重试'),
+    },
+  }), [supplierOptions, warehouseCategoryTree, supplierCategoryTrees, t])
+  const supplierCategoryCellLabels = useMemo(() => ({
+    unassigned: t('posAdmin.products.supplierCategory.unassigned', '未归类'),
+    manual: t('posAdmin.products.supplierCategory.manualMark', '人工指定，采集不会覆盖'),
+  }), [t])
+  const batchSupplierCategoryScope = useMemo(() => resolveBatchSupplierCategoryScope({
+    selectedKeys: selectedRowKeys.map(String),
+    rows: data,
+    nextSupplierCode: batchSupplierCodeWatch,
+  }), [batchSupplierCodeWatch, data, selectedRowKeys])
+  const batchSupplierCategoryUnavailableReasons: Record<Exclude<BatchSupplierCategoryScopeStatus, 'enabled'>, string> = {
+    mixedSuppliers: t('posAdmin.products.supplierCategory.batchMixedSuppliers', '所选商品属于多个澳洲供应商，无法统一设置供应商分类'),
+    hotBargain: t('posAdmin.products.supplierCategory.batchHotBargain', 'Hot Bargain（200）的供应商分类随仓库分类，无需设置'),
+    noSupplier: t('posAdmin.products.supplierCategory.batchNoSupplier', '所选商品未设置澳洲供应商'),
+    unknownRows: t('posAdmin.products.supplierCategory.batchUnknownRows', '所选商品不全在当前页，无法判断供应商'),
+    supplierChanging: t('posAdmin.products.supplierCategory.batchSupplierChanging', '修改澳洲供应商时不能同时设置供应商分类'),
+  }
+  const loadSupplierCategoryTree = (supplierCode: string) => {
+    supplierCategoryTrees.ensure(supplierCode).catch(() => {
+      message.error(t('posAdmin.products.supplierCategory.loadFailed', '供应商分类加载失败'))
+    })
+  }
+  const reloadSupplierCategoryTree = (supplierCode: string) => {
+    supplierCategoryTrees.reload(supplierCode).catch(() => {
+      message.error(t('posAdmin.products.supplierCategory.loadFailed', '供应商分类加载失败'))
+    })
+  }
   const getProductTypeLabel = useCallback((productType: unknown) => {
     const normalizedType = normalizeProductType(productType)
     if (normalizedType === 1) return t('posAdmin.products.setProduct', '套装')
@@ -951,6 +982,7 @@ export default function ProductManagementPage() {
       supplierCode: supplierCode || undefined,
       categoryGuid: categoryGuid || undefined,
       warehouseCategoryGuid: warehouseCategoryGuid || undefined,
+      ...toSupplierCategoryQueryParams({ supplierCode, warehouseCategoryGuid, supplierCategoryGuid, supplierCategoryUnassignedOnly }),
       isActive: isActiveFilter,
       isSet: isSetFilter,
       storeRecordCountMin: storeRecordCountMin,
@@ -981,26 +1013,11 @@ export default function ProductManagementPage() {
         onSettled: () => setLoading(false),
       },
     )
-  }, [page, pageSize, keyword, supplierCode, categoryGuid, warehouseCategoryGuid, isActiveFilter, isSetFilter, storeRecordCountMin, storeRecordCountMax, sortBy, sortOrder, columnFilters, queryVersion])
-
-  const stopHqSyncJobPolling = useCallback(() => {
-    stopHqSyncPollingRef.current?.()
-    stopHqSyncPollingRef.current = null
-  }, [])
+  }, [page, pageSize, keyword, supplierCode, categoryGuid, warehouseCategoryGuid, supplierCategoryGuid, supplierCategoryUnassignedOnly, isActiveFilter, isSetFilter, storeRecordCountMin, storeRecordCountMax, sortBy, sortOrder, columnFilters, queryVersion])
 
   const stopSyncToStorePolling = useCallback(() => {
     stopSyncToStorePollingRef.current?.()
     stopSyncToStorePollingRef.current = null
-  }, [])
-
-  const saveActiveHqSyncJob = useCallback((job: ActiveProductHqSyncJob) => {
-    setActiveHqSyncJob(job)
-    saveActiveProductHqSyncJob(job)
-  }, [])
-
-  const clearActiveHqSyncJob = useCallback(() => {
-    setActiveHqSyncJob(null)
-    saveActiveProductHqSyncJob(null)
   }, [])
 
   const stopSupplierImageBatchPolling = useCallback((localSupplierCode?: string) => {
@@ -1040,77 +1057,6 @@ export default function ProductManagementPage() {
     if (!jobKey) return null
     return activeImageBatchJobs[jobKey] ?? readActiveSupplierImageBatchJobs()[jobKey] ?? null
   }, [activeImageBatchJobs])
-
-  const buildHqSyncResultLines = useCallback((result: HqProductSyncResult) => {
-    const lines = [
-      t('posAdmin.products.hqSyncResult', '同步完成：新增 {{added}}，更新 {{updated}}，软删 {{deleted}}', {
-        added: result.productsAdded ?? 0,
-        updated: result.productsUpdated ?? 0,
-        deleted: result.productsDeleted ?? 0,
-      }),
-    ]
-
-    const relationStats = [
-      { label: t('posAdmin.products.storeRetailPricesCreated', '门店零售价新增'), value: result.storeRetailPricesCreated ?? 0 },
-      { label: t('posAdmin.products.storeRetailPricesDeleted', '门店零售价删除'), value: result.storeRetailPricesDeleted ?? 0 },
-      { label: t('posAdmin.products.productSetCodesCreated', '套装编码新增'), value: result.productSetCodesCreated ?? 0 },
-      { label: t('posAdmin.products.productSetCodesUpdated', '套装编码更新'), value: result.productSetCodesUpdated ?? 0 },
-      { label: t('posAdmin.products.productSetCodesDeleted', '套装编码删除'), value: result.productSetCodesDeleted ?? 0 },
-      { label: t('posAdmin.products.storeMultiCodesCreated', '门店多码新增'), value: result.storeMultiCodesCreated ?? 0 },
-      { label: t('posAdmin.products.storeMultiCodesDeleted', '门店多码删除'), value: result.storeMultiCodesDeleted ?? 0 },
-    ].filter((item) => item.value > 0)
-
-    relationStats.forEach((item) => {
-      lines.push(`${item.label}: ${item.value}`)
-    })
-
-    return lines
-  }, [t])
-
-  const showHqSyncJobResult = useCallback((result: HqProductSyncJobResult) => {
-    const displayResult: HqProductSyncResult & Pick<Partial<HqProductSyncJobResult>, 'status' | 'message'> = {
-      ...(result.result ?? result),
-      status: result.status,
-      message: result.message ?? result.result?.message,
-      errors: result.errors?.length ? result.errors : result.result?.errors,
-    }
-    const content = (
-      <Space direction="vertical" size={6}>
-        {displayResult.message && <div>{displayResult.message}</div>}
-        {buildHqSyncResultLines(displayResult).map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-        {displayResult.errors?.length ? (
-          <div>
-            {t('posAdmin.products.partialSyncError', '部分同步错误')}：{displayResult.errors.join('\n')}
-          </div>
-        ) : null}
-      </Space>
-    )
-
-    if (result.status === 'Failed') {
-      Modal.error({
-        title: t('posAdmin.products.hqSyncJobFailed', '商品 HQ 同步失败'),
-        content,
-      })
-      return
-    }
-
-    if (displayResult.errors?.length) {
-      Modal.warning({
-        title: t('posAdmin.products.hqSyncJobPartialSucceeded', '商品 HQ 同步部分成功'),
-        content,
-      })
-      void loadData()
-      return
-    }
-
-    Modal.success({
-      title: t('posAdmin.products.hqSyncJobSucceeded', '商品 HQ 同步完成'),
-      content,
-    })
-    void loadData()
-  }, [buildHqSyncResultLines, loadData, t])
 
   const refreshSupplierOptions = useCallback(async () => {
     try {
@@ -1177,82 +1123,6 @@ export default function ProductManagementPage() {
     void refreshSupplierOptions()
     void loadData()
   }, [loadData, refreshSupplierOptions, t])
-
-  const startHqSyncJobPolling = useCallback((job: ActiveProductHqSyncJob) => {
-    stopHqSyncJobPolling()
-
-    const showPollingTimeout = () => {
-      clearActiveHqSyncJob()
-      Modal.warning({
-        title: t('posAdmin.products.hqSyncJobTimeoutTitle', '商品 HQ 同步仍在后台执行'),
-        content: t('posAdmin.products.hqSyncJobTimeout', '前端已停止轮询该同步任务。你可以稍后刷新列表，或重新提交同一同步范围以接管后端已有任务。'),
-      })
-    }
-
-    saveActiveHqSyncJob(job)
-    const poller = createProductHqSyncJobPoller({
-      jobId: job.jobId,
-      getJob: async (jobId) => {
-        try {
-          const result = await getProductHqSyncJob(jobId)
-          saveActiveHqSyncJob({
-            ...job,
-            status: result.status,
-            message: result.message,
-          })
-          return result
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : ''
-          if (errorMessage.includes('未知同步任务状态') || errorMessage.includes('未知商品同步任务状态')) {
-            throw error
-          }
-          if (isMountedRef.current) {
-            message.warning(error instanceof Error ? error.message : t('posAdmin.products.hqSyncJobPollingFailed', '同步任务状态获取失败，将继续在后台重试'))
-          }
-          return {
-            jobId,
-            status: 'Running',
-            message: errorMessage,
-          }
-        }
-      },
-      pollIntervalMs: PRODUCT_HQ_SYNC_POLL_INTERVAL_MS,
-      timeoutMs: PRODUCT_HQ_SYNC_TIMEOUT_MS,
-    })
-    stopHqSyncPollingRef.current = poller.stop
-
-    void poller.promise
-      .then((result) => {
-        if (!isMountedRef.current) {
-          return
-        }
-        clearActiveHqSyncJob()
-        showHqSyncJobResult(result)
-      })
-      .catch((error) => {
-        if (!isMountedRef.current) {
-          return
-        }
-
-        const errorMessage = error instanceof Error ? error.message : ''
-        if (error instanceof HqProductSyncPollingTimeoutError) {
-          showPollingTimeout()
-          return
-        }
-        if (errorMessage === '商品同步任务轮询已取消') {
-          return
-        }
-        if (errorMessage.includes('未知同步任务状态') || errorMessage.includes('未知商品同步任务状态')) {
-          clearActiveHqSyncJob()
-          Modal.error({
-            title: t('posAdmin.products.hqSyncJobFailed', '商品 HQ 同步失败'),
-            content: errorMessage,
-          })
-          return
-        }
-        message.warning(error instanceof Error ? error.message : t('posAdmin.products.hqSyncJobPollingFailed', '同步任务状态获取失败，将继续在后台重试'))
-      })
-  }, [clearActiveHqSyncJob, saveActiveHqSyncJob, showHqSyncJobResult, stopHqSyncJobPolling, t])
 
   const startSyncToStoreJobPolling = useCallback((job: SyncProductsToStoresJobResult) => {
     stopSyncToStorePolling()
@@ -1429,43 +1299,12 @@ export default function ProductManagementPage() {
       })
   }, [clearActiveImageBatchJob, saveActiveImageBatchJob, showSupplierImageBatchResult, stopSupplierImageBatchPolling, t])
 
-  const restoreActiveHqSyncJob = useCallback(() => {
-    const restoredJob = readActiveProductHqSyncJob()
-    if (!restoredJob?.jobId) return
-    startHqSyncJobPolling(restoredJob)
-  }, [startHqSyncJobPolling])
-
   const restoreActiveSupplierImageBatchJobs = useCallback(() => {
     Object.values(readActiveSupplierImageBatchJobs()).forEach((restoredJob) => {
       if (!restoredJob?.jobId) return
       startSupplierImageBatchPolling(restoredJob)
     })
   }, [startSupplierImageBatchPolling])
-
-  const showActiveHqSyncJobStatus = useCallback((job: ActiveProductHqSyncJob | null = activeHqSyncJob) => {
-    if (!job) return
-
-    Modal.info({
-      title: t('posAdmin.products.hqSyncJobStatusTitle', '商品 HQ 同步正在后台执行'),
-      content: (
-        <Descriptions size="small" column={1}>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobId', '任务 ID')}>
-            {job.jobId}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobMode', '同步类型')}>
-            {job.mode === 'full' ? t('posAdmin.products.fullSyncFromHQ', '全量同步') : t('posAdmin.products.incrementalSyncFromHQ', '增量同步')}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobStatus', '任务状态')}>
-            {job.status || t('posAdmin.products.hqSyncJobQueued', '排队中')}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobStartedAt', '提交时间')}>
-            {dayjs(job.createdAt).format('YYYY-MM-DD HH:mm:ss')}
-          </Descriptions.Item>
-        </Descriptions>
-      ),
-    })
-    message.info(t('posAdmin.products.hqSyncJobStatusContent', '同步任务已在后台执行，请等待完成提示。'))
-  }, [activeHqSyncJob, t])
 
   const showActiveSupplierImageBatchStatus = useCallback((job: ActiveSupplierImageBatchJob | null) => {
     if (!job) return
@@ -1579,9 +1418,8 @@ export default function ProductManagementPage() {
   useEffect(() => {
     return () => {
       isMountedRef.current = false
-      stopHqSyncJobPolling()
     }
-  }, [stopHqSyncJobPolling])
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -1594,10 +1432,6 @@ export default function ProductManagementPage() {
       stopSupplierImageBatchPolling()
     }
   }, [stopSupplierImageBatchPolling])
-
-  useEffect(() => {
-    restoreActiveHqSyncJob()
-  }, [restoreActiveHqSyncJob])
 
   useEffect(() => {
     restoreActiveSupplierImageBatchJobs()
@@ -1670,6 +1504,8 @@ export default function ProductManagementPage() {
     setSupplierCode(supplierCodeInput)
     setCategoryGuid(categoryGuidInput)
     setWarehouseCategoryGuid(warehouseCategoryGuidInput)
+    setSupplierCategoryGuid(supplierCategoryGuidInput)
+    setSupplierCategoryUnassignedOnly(supplierCategoryUnassignedOnlyInput)
     setIsActiveFilter(isActiveFilterInput)
     setIsSetFilter(isSetFilterInput)
     setStoreRecordCountMode(nextStoreRecordCountMode)
@@ -1690,6 +1526,10 @@ export default function ProductManagementPage() {
     setCategoryGuid(undefined)
     setWarehouseCategoryGuidInput(undefined)
     setWarehouseCategoryGuid(undefined)
+    setSupplierCategoryGuidInput(undefined)
+    setSupplierCategoryGuid(undefined)
+    setSupplierCategoryUnassignedOnlyInput(false)
+    setSupplierCategoryUnassignedOnly(false)
     setIsActiveFilterInput(undefined)
     setIsActiveFilter(undefined)
     setIsSetFilterInput(undefined)
@@ -1766,9 +1606,41 @@ export default function ProductManagementPage() {
     setSelectedRowKeys([])
   }
 
+  // 供应商、供应商分类、仓库分类「一份状态、两个视图」：当前值以输入态为准（下拉类筛选总是同时写输入态和生效态）。
+  const supplierCategoryFilterInputState: SupplierCategoryFilterState = {
+    supplierCode: supplierCodeInput,
+    warehouseCategoryGuid: warehouseCategoryGuidInput,
+    supplierCategoryGuid: supplierCategoryGuidInput,
+    supplierCategoryUnassignedOnly: supplierCategoryUnassignedOnlyInput,
+  }
+  const supplierCategoryCascaderValue = toSupplierCategoryCascaderValue(supplierCategoryFilterInputState, {
+    findWarehouseGuidPath: (guid) => findWarehouseCategoryGuidPath(warehouseCategoryTree, guid),
+    findSupplierGuidPath: (code, guid) => findSupplierCategoryGuidPath(supplierCategoryTrees.get(code)?.nodes ?? [], guid),
+  })
+
+  const commitSupplierCategorySelection = (next: SupplierCategorySelection) => {
+    setSupplierCategoryGuidInput(next.supplierCategoryGuid)
+    setSupplierCategoryGuid(next.supplierCategoryGuid)
+    setSupplierCategoryUnassignedOnlyInput(next.supplierCategoryUnassignedOnly)
+    setSupplierCategoryUnassignedOnly(next.supplierCategoryUnassignedOnly)
+  }
+
   const handleSupplierFilterChange = (value: string | undefined) => {
     setSupplierCodeInput(value)
     setSupplierCode(value)
+    // 换供应商时连带清掉只属于旧供应商的供应商分类条件；仓库分类是独立筛选保持不变。
+    commitSupplierCategorySelection(applySupplierSelectChange(supplierCategoryFilterInputState, value))
+    applyToolbarFilterChange()
+  }
+
+  const handleSupplierCategoryFilterChange = (value: string[] | undefined) => {
+    const next = applySupplierCategoryCascaderChange(supplierCategoryFilterInputState, value)
+    setSupplierCodeInput(next.supplierCode)
+    setSupplierCode(next.supplierCode)
+    // 200 下级联框第二层就是仓库分类，因此级联框变更可能同时改写仓库分类。
+    setWarehouseCategoryGuidInput(next.warehouseCategoryGuid)
+    setWarehouseCategoryGuid(next.warehouseCategoryGuid)
+    commitSupplierCategorySelection(next)
     applyToolbarFilterChange()
   }
 
@@ -1783,6 +1655,8 @@ export default function ProductManagementPage() {
     const guid = resolveCascaderLeafValue(value)
     setWarehouseCategoryGuidInput(guid)
     setWarehouseCategoryGuid(guid)
+    // 200 下「未归类」与具体仓库分类互斥，以最后一次选择为准。
+    commitSupplierCategorySelection(applyWarehouseCategoryFilterChange(supplierCategoryFilterInputState, guid))
     applyToolbarFilterChange()
   }
 
@@ -1817,6 +1691,10 @@ export default function ProductManagementPage() {
     } else if (key === 'supplierCode') {
       setSupplierCodeInput(undefined)
       setSupplierCode(undefined)
+      // 供应商分类依附于供应商，移除供应商时一并清掉。
+      commitSupplierCategorySelection(applySupplierSelectChange(supplierCategoryFilterInputState, undefined))
+    } else if (key === 'supplierCategory') {
+      commitSupplierCategorySelection(clearSupplierCategoryFilter(supplierCategoryFilterInputState))
     } else if (key === 'categoryGuid') {
       setCategoryGuidInput(undefined)
       setCategoryGuid(undefined)
@@ -1875,6 +1753,8 @@ export default function ProductManagementPage() {
       {
         keyword,
         supplierCode,
+        supplierCategoryGuid,
+        supplierCategoryUnassignedOnly,
         categoryGuid,
         warehouseCategoryGuid,
         isActive: isActiveFilter,
@@ -1887,10 +1767,13 @@ export default function ProductManagementPage() {
         supplierName: (code) => supplierNameMap.get(code),
         categoryPath: (guid) => categoryPathMaps.pathByGuid.get(guid),
         warehouseCategoryPath: (guid) => warehouseCategoryPathMaps.pathByGuid.get(guid),
+        supplierCategoryPath: (code, guid) => findSupplierCategoryNamePath(supplierCategoryTrees.get(code)?.nodes ?? [], guid),
       },
       {
         keyword: t('posAdmin.products.activeFilterKeyword', '关键词'),
         supplier: t('posAdmin.products.supplierPlaceholder', '澳洲供应商'),
+        supplierCategory: t('posAdmin.products.supplierCategory.column', '供应商分类'),
+        supplierCategoryUnassigned: t('posAdmin.products.supplierCategory.unassigned', '未归类'),
         category: t('posAdmin.products.categoryPlaceholder', '商品分类'),
         warehouseCategory: t('posAdmin.products.warehouseCategoryPlaceholder', '仓库分类'),
         status: t('posAdmin.products.statusPlaceholder', '状态'),
@@ -2001,35 +1884,6 @@ export default function ProductManagementPage() {
     return true
   }, [t])
 
-  const showSelectedFromHqResult = useCallback((result: HqProductSyncResult) => {
-    const content = (
-      <Space direction="vertical" size={6}>
-        {result.message && <div>{result.message}</div>}
-        {buildHqSyncResultLines(result).map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-        {result.errors?.length ? (
-          <div style={{ whiteSpace: 'pre-wrap' }}>
-            {t('posAdmin.products.partialSyncError', '部分同步错误')}：{result.errors.join('\n')}
-          </div>
-        ) : null}
-      </Space>
-    )
-
-    if (result.errors?.length) {
-      Modal.warning({
-        title: t('posAdmin.products.syncSelectedFromHqPartialSucceeded', '从 HQ 同步选中商品部分成功'),
-        content,
-      })
-      return
-    }
-
-    Modal.success({
-      title: t('posAdmin.products.syncSelectedFromHqSucceeded', '从 HQ 同步选中商品完成'),
-      content,
-    })
-  }, [buildHqSyncResultLines, t])
-
   function showSyncToStoreJobResult(job: SyncProductsToStoresJobResult) {
     const result: SyncProductsToStoresResult = job.result ?? {
       createdCount: 0,
@@ -2086,11 +1940,14 @@ export default function ProductManagementPage() {
     void loadData()
   }
 
-  const ensureCanSyncProductsFromHq = () => {
-    if (isAdmin) return true
-    setHqSyncVisible(false)
-    message.warning(t('posAdmin.products.noManagePermission', '无权限管理商品'))
-    return false
+  // 换了澳洲供应商后旧分类不属于新供应商：清空让用户在新供应商的树里重选，保存时按「换供应商」恢复自动归类。
+  const handleEditFormValuesChange = (changedValues: Record<string, unknown>) => {
+    if ('localSupplierCode' in changedValues) editForm.setFieldValue('supplierCategoryGuid', undefined)
+  }
+
+  // 批量改供应商时不能同时设置供应商分类，清掉已选值避免误提交。
+  const handleBatchEditFormValuesChange = (changedValues: Record<string, unknown>) => {
+    if ('localSupplierCode' in changedValues) batchEditForm.setFieldValue('supplierCategoryGuid', undefined)
   }
 
   const openEdit = (record: PosProductDto) => {
@@ -2114,6 +1971,7 @@ export default function ProductManagementPage() {
       isSpecialProduct: record.isSpecialProduct ?? false,
       isActive: record.isActive,
       categoryGuid: getCategoryValueFromGuid(record.categoryGuid, categoryTree),
+      supplierCategoryGuid: record.supplierCategoryGuid,
     })
     setEditVisible(true)
   }
@@ -2276,7 +2134,14 @@ export default function ProductManagementPage() {
       ) as SetCodeDraftEdits
       const pendingDeletesSnapshot = { ...editPendingDeletes }
       const resolvedCategoryGuid = resolveCascaderLeafValue(values.categoryGuid)
-      const updateData: Partial<PosProductDto> = {
+      // 供应商分类三态：未改动不传；改选则人工锁定；清空或换供应商则恢复自动归类；200 由服务端随仓库分类。
+      const supplierCategoryUpdate = resolveSupplierCategoryUpdate({
+        originalSupplierCode: editingProduct.localSupplierCode,
+        nextSupplierCode: values.localSupplierCode,
+        originalGuid: editingProduct.supplierCategoryGuid,
+        nextGuid: values.supplierCategoryGuid,
+      })
+      const updateData: Partial<PosProductDto> & SupplierCategoryUpdatePayload = {
         productName: values.productName,
         itemNumber: values.itemNumber,
         barcode: values.barcode,
@@ -2293,6 +2158,7 @@ export default function ProductManagementPage() {
         warehouseCategoryGuid: editingProduct.warehouseCategoryGuid,
         // 后端商品更新可能是覆盖式 PUT，保存多码前必须带回原图片字段。
         productImage: values.productImage ?? editingProduct.productImage ?? '',
+        ...supplierCategoryUpdate,
       }
       await updateProduct(editingProduct.productCode, updateData)
 
@@ -2340,8 +2206,10 @@ export default function ProductManagementPage() {
       setEditingProduct(null)
       resetEditSetCodeState()
       await loadData()
-    } catch {
-      message.error(t('message.saveFailed', '保存失败'))
+    } catch (error) {
+      message.error(readRequestErrorCode(error) === SUPPLIER_CATEGORY_MISMATCH_ERROR_CODE
+        ? t('posAdmin.products.supplierCategory.mismatch', '所选供应商分类不属于该商品的澳洲供应商，请重新选择')
+        : t('message.saveFailed', '保存失败'))
     } finally {
       editSaveInFlightRef.current = false
       setEditSaving(false)
@@ -2542,6 +2410,10 @@ export default function ProductManagementPage() {
     try {
       const values = await batchEditForm.validateFields()
       const resolvedCategoryGuid = resolveCascaderLeafValue(values.categoryGuid)
+      // 供应商分类只有所选商品同属一个非 200 供应商、且本次不改供应商时才提交。
+      const supplierCategoryUpdate = batchSupplierCategoryScope.status === 'enabled'
+        ? resolveBatchSupplierCategoryUpdate(values.supplierCategoryGuid)
+        : {}
       const items: BatchUpdatePosProductDto[] = selectedRowKeys.map((code) => ({
         productCode: String(code),
         retailPrice: values.retailPrice ?? undefined,
@@ -2552,6 +2424,7 @@ export default function ProductManagementPage() {
         isActive: values.isActive,
         categoryGuid: resolvedCategoryGuid ?? undefined,
         localSupplierCode: values.localSupplierCode ?? undefined,
+        ...supplierCategoryUpdate,
       }))
       const result = await batchUpdateProducts(items)
       message.success(t('posAdmin.products.batchUpdateSuccess', '成功更新 {{count}} 个商品', { count: result.successCount }))
@@ -2564,25 +2437,6 @@ export default function ProductManagementPage() {
     } catch {
       message.error(t('posAdmin.products.batchEditFailed', '批量编辑失败'))
     }
-  }
-
-  const openHqSyncModal = (mode: HqSyncMode) => {
-    if (!ensureCanSyncProductsFromHq()) return
-    const storedActiveJob = activeHqSyncJob ?? readActiveProductHqSyncJob()
-    if (storedActiveJob) {
-      if (!activeHqSyncJob) {
-        setActiveHqSyncJob(storedActiveJob)
-        startHqSyncJobPolling(storedActiveJob)
-      }
-      showActiveHqSyncJobStatus(storedActiveJob)
-      return
-    }
-    setHqSyncMode(mode)
-    hqSyncForm.resetFields()
-    if (mode === 'incremental') {
-      hqSyncForm.setFieldsValue({ startDate: dayjs().subtract(100, 'day') })
-    }
-    setHqSyncVisible(true)
   }
 
   const openSyncToStoreModal = () => {
@@ -2601,60 +2455,6 @@ export default function ProductManagementPage() {
       })
     }
     setSyncToStoreVisible(true)
-  }
-
-  const handleSyncFromHq = async () => {
-    if (!ensureCanSyncProductsFromHq()) return
-    const storedActiveJob = activeHqSyncJob ?? readActiveProductHqSyncJob()
-    if (hqSyncSubmitting || storedActiveJob) {
-      if (storedActiveJob) {
-        if (!activeHqSyncJob) {
-          setActiveHqSyncJob(storedActiveJob)
-          startHqSyncJobPolling(storedActiveJob)
-        }
-        showActiveHqSyncJobStatus(storedActiveJob)
-      }
-      return
-    }
-    if (hqSyncSubmittingRef.current) return
-
-    try {
-      hqSyncSubmittingRef.current = true
-      setHqSyncSubmitting(true)
-      const values = hqSyncMode === 'incremental' ? await hqSyncForm.validateFields() : {}
-      const startDate = values.startDate ? values.startDate.format('YYYY-MM-DD') : undefined
-      const operationId = buildProductHqSyncOperationId(hqSyncMode, startDate)
-      const syncJob = hqSyncMode === 'full'
-        ? await createProductFullHqSyncJob({ operationId })
-        : await createProductIncrementalHqSyncJob({
-          operationId,
-          startDate,
-        })
-
-      if (!syncJob.jobId) {
-        message.error(syncJob.message || t('posAdmin.products.hqSyncJobCreateFailed', '创建商品 HQ 同步任务失败'))
-        return
-      }
-
-      const activeJob: ActiveProductHqSyncJob = {
-        jobId: syncJob.jobId,
-        mode: hqSyncMode,
-        operationId: syncJob.operationId || operationId,
-        createdAt: new Date().toISOString(),
-        status: syncJob.status ?? 'Queued',
-        message: syncJob.message,
-        startDate,
-      }
-
-      setHqSyncVisible(false)
-      message.success(t('posAdmin.products.hqSyncJobSubmitted', '同步任务已提交，正在后台执行。完成后会自动提示结果。'))
-      startHqSyncJobPolling(activeJob)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t('posAdmin.products.hqSyncJobCreateFailed', '创建商品 HQ 同步任务失败'))
-    } finally {
-      hqSyncSubmittingRef.current = false
-      setHqSyncSubmitting(false)
-    }
   }
 
   const handleSyncToStores = async () => {
@@ -2823,32 +2623,6 @@ export default function ProductManagementPage() {
       setPushToHqModalOpen(false)
       setPushToHqConfirmLoading(false)
       setPushToHqLoading(false)
-    }
-  }
-
-  const handleSyncSelectedFromHq = async () => {
-    if (!ensureCanSyncProductsFromHq()) return
-    if (!selectedRowKeys.length) {
-      message.warning(t('posAdmin.products.selectProductsFirst', '请先选择商品'))
-      return
-    }
-    // 使用 ref 作为即时锁，避免连续点击在状态刷新前重复提交同一批商品。
-    if (selectedFromHqLoadingRef.current) return
-
-    try {
-      selectedFromHqLoadingRef.current = true
-      setSelectedFromHqLoading(true)
-      const result = await syncSelectedProductsFromHq({
-        productCodes: selectedRowKeys.map(String),
-      })
-      showSelectedFromHqResult(result)
-      setSelectedRowKeys([])
-      await loadData()
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t('posAdmin.products.syncSelectedFromHqFailed', '从 HQ 同步选中商品失败'))
-    } finally {
-      selectedFromHqLoadingRef.current = false
-      setSelectedFromHqLoading(false)
     }
   }
 
@@ -3453,6 +3227,29 @@ export default function ProductManagementPage() {
       },
     },
     {
+      // 供应商分类列：各供应商的树独立且懒加载，不做列头筛选；首版不支持按供应商分类排序。
+      title: (
+        <span>
+          {t('posAdmin.products.supplierCategory.column', '供应商分类')}
+          <Tooltip title={t('posAdmin.products.supplierCategory.columnHint', '商品在供应商网站上的分类。Hot Bargain（200）的商品等同仓库分类；商品分类用于 POS，仓库分类来自 HQ。')}>
+            <InfoCircleOutlined className="pos-products-source-mark" />
+          </Tooltip>
+        </span>
+      ),
+      key: 'supplierCategory',
+      width: 120,
+      sorter: false,
+      render: (_: unknown, record: ProductRow) => (
+        <SupplierCategoryCell
+          hasSupplier={Boolean(record.localSupplierCode)}
+          name={record.supplierCategoryName}
+          path={record.supplierCategoryPath}
+          source={record.supplierCategorySource}
+          labels={supplierCategoryCellLabels}
+        />
+      ),
+    },
+    {
       title: t('posAdmin.products.domesticSupplier', '国内供应商'),
       dataIndex: 'domesticSupplierCode',
       key: 'domesticSupplierCode',
@@ -3662,25 +3459,9 @@ export default function ProductManagementPage() {
           {/* 页头只保留分组菜单和唯一的主按钮「创建商品」；批量操作移到勾选后操作条。 */}
           <ToolbarMenuButton
             label={t('common.listToolbar.sync', '同步')}
-            // HQ 同步任务进行中时只让图标转动，不用按钮 loading：loading 会屏蔽点击，菜单就打不开了。
-            icon={<SyncOutlined spin={Boolean(activeHqSyncJob) || hqSyncSubmitting} />}
+            icon={<SyncOutlined />}
+            // HQ → HBweb 的增量/全量同步已于 2026-09-29 停用，菜单只保留 HBweb 内部的「同步到分店」。
             actions={[
-              {
-                key: 'incrementalHqSync',
-                icon: <CloudSyncOutlined />,
-                label: activeHqSyncJob ? t('posAdmin.products.hqSyncInProgress', '同步中') : t('posAdmin.products.incrementalSyncFromHQ', '增量同步'),
-                visible: isAdmin,
-                disabled: hqSyncSubmitting,
-                onClick: () => openHqSyncModal('incremental'),
-              },
-              {
-                key: 'fullHqSync',
-                icon: <CloudDownloadOutlined />,
-                label: activeHqSyncJob ? t('posAdmin.products.hqSyncInProgress', '同步中') : t('posAdmin.products.fullSyncFromHQ', '全量同步'),
-                visible: isAdmin,
-                disabled: hqSyncSubmitting,
-                onClick: () => openHqSyncModal('full'),
-              },
               {
                 key: 'syncToStore',
                 icon: <CloudUploadOutlined />,
@@ -3713,6 +3494,13 @@ export default function ProductManagementPage() {
                 label: t('posAdmin.products.categoryManagement', '商品分类管理'),
                 visible: canManagePosProducts,
                 onClick: handleOpenCategoryModal,
+              },
+              {
+                // 查看沿用页面的 POS 商品查看权限；切换促销、重新解析在弹窗内按商品管理权限控制。
+                key: 'supplierCategoryManagement',
+                icon: <ApartmentOutlined />,
+                label: t('posAdmin.products.supplierCategory.manage', '供应商分类管理'),
+                onClick: () => setSupplierCategoryManagerOpen(true),
               },
             ]}
           />
@@ -3755,8 +3543,18 @@ export default function ProductManagementPage() {
               onChange={handleSupplierFilterChange}
               options={supplierOptions}
             />
+            <SupplierCategoryCascader
+              placeholder={t('posAdmin.products.supplierCategory.filterPlaceholder', '供应商分类')}
+              style={{ width: 220 }}
+              options={supplierCategoryCascaderOptions}
+              value={supplierCategoryCascaderValue}
+              onChange={handleSupplierCategoryFilterChange}
+              onLoadSupplier={loadSupplierCategoryTree}
+              onRetrySupplier={reloadSupplierCategoryTree}
+            />
             <Cascader
               allowClear
+              showSearch
               placeholder={t('posAdmin.products.categoryPlaceholder', '商品分类')}
               style={{ width: 200 }}
               value={getCategoryValueFromGuid(categoryGuidInput, categoryTree)}
@@ -3879,17 +3677,6 @@ export default function ProductManagementPage() {
                   {t('posAdmin.products.batchTranslate', '批量翻译')}
                 </Button>
               </>
-            )}
-            {isAdmin && (
-              <Button
-                size="small"
-                icon={<CloudDownloadOutlined />}
-                loading={selectedFromHqLoading}
-                disabled={!selectedRowKeys.length || selectedFromHqLoading}
-                onClick={handleSyncSelectedFromHq}
-              >
-                {t('posAdmin.products.syncSelectedFromHq', '从HQ同步选中')}
-              </Button>
             )}
             {canManagePosProducts && (
               <Button
@@ -4052,33 +3839,6 @@ export default function ProductManagementPage() {
       </Modal>
 
       <Modal
-        open={hqSyncVisible}
-        title={hqSyncMode === 'full' ? t('posAdmin.products.fullSyncFromHQ', '全量同步') : t('posAdmin.products.incrementalSyncFromHQ', '增量同步')}
-        onCancel={() => setHqSyncVisible(false)}
-        onOk={handleSyncFromHq}
-        confirmLoading={hqSyncSubmitting}
-        okText={t('common.confirm', '确定')}
-        cancelText={t('common.cancel', '取消')}
-        destroyOnHidden
-      >
-        <Form form={hqSyncForm} layout="vertical">
-          {hqSyncMode === 'full' ? (
-            <div style={{ color: '#595959' }}>
-              {t('posAdmin.products.fullSyncNotice', '全量同步只覆盖商品主表，不同步关联表。')}
-            </div>
-          ) : (
-            <Form.Item
-              name="startDate"
-              label={t('posAdmin.products.incrementalStartDate', '起始日期')}
-              rules={[{ required: true, message: t('posAdmin.products.incrementalStartDateRequired', '请选择增量同步起始日期') }]}
-            >
-              <DatePicker style={{ width: '100%' }} allowClear={false} format="YYYY-MM-DD" />
-            </Form.Item>
-          )}
-        </Form>
-      </Modal>
-
-      <Modal
         open={editVisible}
         title={editingProduct ? t('posAdmin.products.editProductWithCode', '编辑商品 - {{code}}', { code: editingProduct.productCode }) : t('posAdmin.products.editProduct', '编辑商品')}
         onCancel={() => {
@@ -4096,7 +3856,7 @@ export default function ProductManagementPage() {
         width={900}
         destroyOnHidden
       >
-        <Form form={editForm} disabled={editSaving} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+        <Form form={editForm} disabled={editSaving} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} onValuesChange={handleEditFormValuesChange}>
           <Form.Item name="productName" label={t('posAdmin.products.productName', '商品名称')} rules={[{ required: true, message: t('posAdmin.products.inputProductName', '请输入商品名称') }]}>
             <Input />
           </Form.Item>
@@ -4236,6 +3996,19 @@ export default function ProductManagementPage() {
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item name="supplierCategoryGuid" label={t('posAdmin.products.supplierCategory.column', '供应商分类')}>
+            <SupplierCategoryFormField
+              supplierCode={editSupplierCodeWatch}
+              treeEntry={supplierCategoryTrees.get(editSupplierCodeWatch)}
+              onEnsureTree={loadSupplierCategoryTree}
+              onRetryTree={reloadSupplierCategoryTree}
+              warehousePath={editingProduct?.warehouseCategoryGuid
+                ? warehouseCategoryPathMaps.pathByGuid.get(editingProduct.warehouseCategoryGuid)?.join(' / ')
+                : undefined}
+              originalGuid={editingProduct?.supplierCategoryGuid}
+              originalSource={editingProduct?.supplierCategorySource}
+            />
+          </Form.Item>
         </Form>
         {productTypeWatch === 1 && (
           <div style={{ marginTop: 12 }}>
@@ -4485,7 +4258,7 @@ export default function ProductManagementPage() {
         width={600}
         destroyOnHidden
       >
-        <Form form={batchEditForm} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+        <Form form={batchEditForm} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} onValuesChange={handleBatchEditFormValuesChange}>
           <Form.Item name="categoryGuid" label={t('posAdmin.products.productCategoryLabel', '商品分类')}>
             <Cascader
               allowClear
@@ -4499,6 +4272,18 @@ export default function ProductManagementPage() {
           </Form.Item>
           <Form.Item name="localSupplierCode" label={t('posAdmin.products.supplier', '澳洲供应商')}>
             <Select allowClear showSearch optionFilterProp="label" options={supplierOptions} placeholder={t('posAdmin.products.leaveEmpty', '留空不修改')} />
+          </Form.Item>
+          <Form.Item name="supplierCategoryGuid" label={t('posAdmin.products.supplierCategory.column', '供应商分类')}>
+            <SupplierCategoryFormField
+              mode="batch"
+              supplierCode={batchSupplierCategoryScope.supplierCode}
+              treeEntry={supplierCategoryTrees.get(batchSupplierCategoryScope.supplierCode)}
+              onEnsureTree={loadSupplierCategoryTree}
+              onRetryTree={reloadSupplierCategoryTree}
+              unavailableReason={batchSupplierCategoryScope.status === 'enabled'
+                ? undefined
+                : batchSupplierCategoryUnavailableReasons[batchSupplierCategoryScope.status]}
+            />
           </Form.Item>
           <Form.Item name="purchasePrice" label={t('posAdmin.products.purchasePrice', '采购价')}>
             <InputNumber min={0} precision={2} prefix="$" style={{ width: '100%' }} placeholder={t('posAdmin.products.leaveEmpty', '留空不修改')} />
@@ -5023,6 +4808,17 @@ export default function ProductManagementPage() {
           </div>
         </div>
       </Modal>
+
+      <SupplierCategoryManagerModal
+        open={supplierCategoryManagerOpen}
+        canManage={canManagePosProducts}
+        trees={supplierCategoryTrees}
+        onClose={(changed) => {
+          setSupplierCategoryManagerOpen(false)
+          // 弹窗内切换促销或重新解析会改动商品归类，关闭后刷新列表。
+          if (changed) void loadData()
+        }}
+      />
 
       <Modal
         open={integrityVisible}

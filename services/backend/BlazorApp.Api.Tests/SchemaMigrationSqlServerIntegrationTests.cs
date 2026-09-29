@@ -840,6 +840,55 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             """);
     }
 
+    [SchemaMigrationSqlServerFact]
+    public async Task 供应商分类三表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql);
+
+        // 唯一索引保证同一供应商同一站点键只有一行，重复插入必须被数据库拒绝。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, """
+                INSERT dbo.LocalSupplierCategory
+                    (CategoryGUID, LocalSupplierCode, CategoryName, ExternalKey, FullPath, Depth,
+                     IsPromotional, PromotionalSource, IsActive, FirstSeenAt, LastSeenAt, CreatedAt)
+                VALUES
+                    (N'a', N'240', N'Office', N'/office', N'Office', 0, 0, N'pattern', 1, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME()),
+                    (N'b', N'240', N'Office', N'/office', N'Office', 0, 0, N'pattern', 1, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME());
+                """));
+        Assert.Contains(duplicate.Number, new[] { 2601, 2627 });
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "DROP INDEX [UX_LocalSupplierCategory_Supplier_ExternalKey] ON dbo.LocalSupplierCategory;");
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql));
+        Assert.Equal(51933, missingIndex.Number);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "ALTER TABLE dbo.LocalSupplierCategoryProductAssignment ALTER COLUMN Source nvarchar(64) NOT NULL;");
+        var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql));
+        Assert.Equal(51931, driftedColumn.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 供应商分类签名门禁_缺表时报缺失()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql));
+
+        Assert.Equal(51930, missing.Number);
+    }
+
     private static async Task<string> RunApiUntilListeningAsync(
         IsolatedSchemaDatabases databases
     )

@@ -28,6 +28,7 @@ import type {
   SyncProductsToStoresJobStatus,
   SyncProductsToStoresResult,
 } from '../types/posProduct'
+import { SUPPLIER_CATEGORY_SOURCES, type SupplierCategorySource } from '../types/localSupplierCategory'
 import request, { RequestError, unwrapApiData, unwrapPagedResult } from '../utils/request'
 import {
   HqProductSyncPollingTimeoutError,
@@ -108,6 +109,30 @@ export function normalizePosProductDto(raw: unknown): PosProductDto {
   ])
   const domesticSupplierCode = readFirstString(source, ['domesticSupplierCode', 'DomesticSupplierCode'])
   const domesticSupplierName = readFirstString(source, ['domesticSupplierName', 'DomesticSupplierName'])
+  // 供应商分类四字段（新增）：后端 supplierCategoryGUID → supplierCategoryGuid，来源只接受小写白名单值。
+  const supplierCategoryGuid = readFirstString(source, [
+    'supplierCategoryGuid',
+    'supplierCategoryGUID',
+    'SupplierCategoryGUID',
+  ])
+  const supplierCategoryName = readFirstString(source, ['supplierCategoryName', 'SupplierCategoryName'])
+  const supplierCategoryPath = readFirstString(source, ['supplierCategoryPath', 'SupplierCategoryPath'])
+  const supplierCategorySource = normalizeSupplierCategorySource(
+    readFirstString(source, ['supplierCategorySource', 'SupplierCategorySource']),
+  )
+  for (const alias of [
+    'supplierCategoryGUID',
+    'SupplierCategoryGUID',
+    'supplierCategoryGuid',
+    'SupplierCategoryName',
+    'supplierCategoryName',
+    'SupplierCategoryPath',
+    'supplierCategoryPath',
+    'SupplierCategorySource',
+    'supplierCategorySource',
+  ]) {
+    delete source[alias]
+  }
 
   delete source.productCategoryGUID
   delete source.ProductCategoryGUID
@@ -124,7 +149,16 @@ export function normalizePosProductDto(raw: unknown): PosProductDto {
   if (warehouseCategoryGuid !== undefined) normalized.warehouseCategoryGuid = warehouseCategoryGuid
   if (domesticSupplierCode !== undefined) normalized.domesticSupplierCode = domesticSupplierCode
   if (domesticSupplierName !== undefined) normalized.domesticSupplierName = domesticSupplierName
+  if (supplierCategoryGuid !== undefined) normalized.supplierCategoryGuid = supplierCategoryGuid
+  if (supplierCategoryName !== undefined) normalized.supplierCategoryName = supplierCategoryName
+  if (supplierCategoryPath !== undefined) normalized.supplierCategoryPath = supplierCategoryPath
+  if (supplierCategorySource !== undefined) normalized.supplierCategorySource = supplierCategorySource
   return normalized as unknown as PosProductDto
+}
+
+function normalizeSupplierCategorySource(value: string | undefined): SupplierCategorySource | undefined {
+  const normalized = value?.trim().toLowerCase()
+  return SUPPLIER_CATEGORY_SOURCES.find((source) => source === normalized)
 }
 
 function normalizePosProductList(raw: unknown[]): PosProductDto[] {
@@ -422,6 +456,13 @@ export async function getProducts(params: PosProductFilterParams, options: { sig
 
   if (!params.supplierCode) {
     payload.localSupplierCodes = getColumnFilterStrings(params, 'localSupplierCode')
+  }
+  // 供应商分类筛选：服务端展开子树并按分类所属树（供应商分类/仓库分类）分流；未设置时不写键，旧请求体保持不变。
+  if (params.supplierCategoryGuid) {
+    payload.supplierCategoryGUIDs = [params.supplierCategoryGuid]
+  }
+  if (params.supplierCategoryUnassignedOnly) {
+    payload.supplierCategoryUnassignedOnly = true
   }
   // 国内供应商列头按契约发送 domesticSupplierCodes，不能映射到本地供应商字段。
   payload.domesticSupplierCodes = getColumnFilterStrings(params, 'domesticSupplierCode')

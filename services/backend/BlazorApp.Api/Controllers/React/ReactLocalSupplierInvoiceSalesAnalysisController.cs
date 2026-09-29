@@ -239,6 +239,34 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        [HttpGet("purchase-sales-analysis/category-tree")]
+        public async Task<IActionResult> GetPurchaseSalesAnalysisCategoryTree(
+            [FromQuery] string? supplierCode,
+            [FromQuery] string? storeCode)
+        {
+            if (!await HasPurchaseSalesAnalysisReadPermissionAsync()) return Forbid();
+            if (string.IsNullOrWhiteSpace(supplierCode) || supplierCode.Trim().Length > 64)
+                return BadRequest(ApiResponse<List<LocalSupplierCategoryNodeDto>>.Error("供应商代码无效。", "VALIDATION_ERROR"));
+            try
+            {
+                // 分类选项与页面供应商下拉共用分店范围，不能仅凭供应商代码枚举其他门店的分类。
+                var storeScope = await ResolveStoreScopeAsync(storeCode, requireStoreSelectionWhenMissing: false);
+                if (storeScope.Forbidden) return Forbid();
+                var visibleSuppliers = await _service.GetSupplierOptionsAsync(
+                    storeScope.ScopedStoreCodes,
+                    storeScope.SelectedStoreCode ?? storeCode);
+                if (!visibleSuppliers.Any(option => string.Equals(option.Value, supplierCode.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    return Forbid();
+                var data = await _service.GetPurchaseSalesAnalysisCategoryTreeAsync(supplierCode);
+                return Ok(ApiResponse<List<LocalSupplierCategoryNodeDto>>.OK(data));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "分店供应商进货销量分析分类树加载失败 SupplierCode={SupplierCode}", supplierCode);
+                return StatusCode(500, ApiResponse<List<LocalSupplierCategoryNodeDto>>.Error("分类树加载失败。", "QUERY_ERROR"));
+            }
+        }
+
         /// <summary>
         /// 订货前台：分店供应商进货销量分析（只读）。
         /// 只认订货前台权限（OrderFront.View，或纯仓库员工 + Orders.Create），不放开后台 LocalPurchase.View；

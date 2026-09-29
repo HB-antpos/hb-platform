@@ -522,6 +522,133 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task Data_download_card_shows_catalog_sync_time_and_follows_status_changes()
+    {
+        var localization = new LocalizationService();
+        localization.SetCulture("zh-CN");
+        var succeededAt = new DateTimeOffset(2026, 9, 26, 14, 32, 0, TimeSpan.FromHours(8));
+        var clock = new CatalogSyncStatusServiceTests.MutableTimeProvider(succeededAt);
+        var syncStatus = new CatalogSyncStatusService(
+            new CatalogSyncStatusServiceTests.InMemoryAppSettingsRepository(),
+            clock);
+        var session = new PosSessionState("HB POS", "S01", "Store", "D01", string.Empty, string.Empty, true, 0);
+        try
+        {
+            using var viewModel = new SettingsViewModel(
+                new FakeCardTerminalSetupService(),
+                localization,
+                session: session,
+                catalogSyncStatusService: syncStatus);
+            await viewModel.LoadAsync();
+
+            Assert.Equal("上次同步", viewModel.CatalogSyncTimeLabelText);
+            Assert.Equal("尚未同步", viewModel.CatalogSyncTimeText);
+            Assert.False(viewModel.IsCatalogSyncSucceeded);
+            Assert.False(viewModel.IsCatalogSyncing);
+            Assert.False(viewModel.IsCatalogSyncFailed);
+
+            var notifications = new List<string?>();
+            viewModel.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
+            syncStatus.MarkStarted("S01");
+            Assert.True(viewModel.IsCatalogSyncing);
+            Assert.Contains(nameof(viewModel.IsCatalogSyncing), notifications);
+
+            await syncStatus.MarkSucceededAsync("S01");
+            var expectedTime = succeededAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+            Assert.Equal(expectedTime, viewModel.CatalogSyncTimeText);
+            Assert.True(viewModel.IsCatalogSyncSucceeded);
+            Assert.False(viewModel.IsCatalogSyncing);
+
+            var failedAt = succeededAt.AddMinutes(8);
+            clock.UtcNow = failedAt;
+            syncStatus.MarkStarted("S01");
+            syncStatus.MarkFailed("S01", "网络连接超时");
+            Assert.True(viewModel.IsCatalogSyncFailed);
+            Assert.False(viewModel.IsCatalogSyncSucceeded);
+            Assert.Equal("上次成功同步", viewModel.CatalogSyncTimeLabelText);
+            Assert.Equal(expectedTime, viewModel.CatalogSyncTimeText);
+            Assert.Equal(
+                $"{failedAt.ToLocalTime():yyyy-MM-dd HH:mm} 同步失败：网络连接超时",
+                viewModel.CatalogSyncFailureText);
+
+            localization.SetCulture("en-US");
+            Assert.Equal("Last successful sync", viewModel.CatalogSyncTimeLabelText);
+            Assert.StartsWith("Sync failed at ", viewModel.CatalogSyncFailureText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            localization.SetCulture("en-US");
+        }
+    }
+
+    [Fact]
+    public async Task Settings_reload_shows_persisted_catalog_sync_time()
+    {
+        var repository = new CatalogSyncStatusServiceTests.InMemoryAppSettingsRepository();
+        var succeededAt = new DateTimeOffset(2026, 9, 25, 9, 15, 0, TimeSpan.Zero);
+        repository.Values[CatalogSyncStatusService.LastSucceededAtKeyPrefix + "S01"] = succeededAt.ToString("O");
+        var session = new PosSessionState("HB POS", "S01", "Store", "D01", string.Empty, string.Empty, true, 0);
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            session: session,
+            catalogSyncStatusService: new CatalogSyncStatusService(repository));
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal(succeededAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), viewModel.CatalogSyncTimeText);
+        Assert.True(viewModel.IsCatalogSyncSucceeded);
+        Assert.Equal("Last sync", viewModel.CatalogSyncTimeLabelText);
+    }
+
+    [Fact]
+    public void Data_download_card_merges_sync_status_into_single_panel_above_action()
+    {
+        var xamlPath = Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "Views",
+            "Screens",
+            "SettingsView.xaml");
+        var document = System.Xml.Linq.XDocument.Load(xamlPath);
+        var xamlNamespace = System.Xml.Linq.XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
+        var downloadButton = Assert.Single(document.Descendants().Where(element =>
+            element.Name.LocalName == "Button" &&
+            element.Attribute("Command")?.Value == "{Binding DownloadCatalogCommand}"));
+        var cardGrid = downloadButton.Parent!;
+        var statusPanel = Assert.Single(cardGrid.Elements().Where(element =>
+            element.Attribute(xamlNamespace + "Name")?.Value == "CatalogSyncStatusPanel"));
+        var panelBindings = statusPanel.Descendants()
+            .SelectMany(element => element.Attributes())
+            .Select(attribute => attribute.Value)
+            .ToArray();
+
+        Assert.Equal("1", statusPanel.Attribute("Grid.Row")?.Value);
+        Assert.Equal("2", downloadButton.Attribute("Grid.Row")?.Value);
+        foreach (var binding in new[]
+                 {
+                     "{Binding CatalogSyncTimeLabelText}",
+                     "{Binding CatalogSyncTimeText}",
+                     "{Binding CatalogSyncFailureText}",
+                     "{Binding IsCatalogSyncSucceeded, Converter={StaticResource BoolToVis}}",
+                     "{Binding IsCatalogSyncing, Converter={StaticResource BoolToVis}}",
+                     "{Binding IsCatalogSyncFailed, Converter={StaticResource BoolToVis}}"
+                 })
+        {
+            Assert.Contains(binding, panelBindings);
+        }
+
+        // 原卡片底部的通用状态框已并入同步信息块，页面级提示只保留在底部状态栏。
+        Assert.DoesNotContain(cardGrid.Descendants(), element =>
+            element.Attribute("Text")?.Value == "{Binding StatusMessage}");
+        Assert.Single(document.Descendants().Where(element =>
+            element.Name.LocalName == "TextBlock" &&
+            element.Attribute("Text")?.Value == "{Binding StatusMessage}"));
+    }
+
+    [Fact]
     public async Task ResetCatalogCommand_calls_injected_reset_delegate()
     {
         var resetCallCount = 0;
@@ -3385,7 +3512,30 @@ public sealed class SettingsViewModelTests
         Assert.NotNull(store.SavedSettings);
         Assert.Equal("USB,", store.SavedSettings!.PrinterPort);
         Assert.Equal("0730000000", store.SavedSettings.StorePhone);
+        Assert.True(store.SavedSettings.PrintBankReceiptText);
         Assert.Equal("Receipt printer settings saved.", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Receipt_printer_bank_receipt_toggle_loads_and_saves()
+    {
+        var store = new FakeReceiptPrinterSettingsStore
+        {
+            Settings = ReceiptPrinterSettings.Default with { PrintBankReceiptText = false }
+        };
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptPrintService: new FakeReceiptPrintService());
+
+        await viewModel.LoadAsync();
+
+        Assert.False(viewModel.ReceiptPrintBankReceiptText);
+
+        viewModel.ReceiptPrintBankReceiptText = true;
+        await viewModel.SaveReceiptPrinterCommand.ExecuteAsync(null);
+
+        Assert.True(store.SavedSettings?.PrintBankReceiptText);
     }
 
     [Fact]
@@ -3607,6 +3757,9 @@ public sealed class SettingsViewModelTests
     [InlineData("installationLocationInvalid")]
     [InlineData("installationPermissionsInvalid")]
     [InlineData("componentsMissing")]
+    [InlineData("existingRustDeskUnmanaged")]
+    [InlineData("rustDeskSetupIncomplete")]
+    [InlineData("rustDeskConfigurationFailed")]
     public async Task Remote_maintenance_failure_is_localized_in_both_status_surfaces(string failure)
     {
         var localization = new LocalizationService();
@@ -4455,6 +4608,7 @@ public sealed class SettingsViewModelTests
         while (current is not null)
         {
             if (Directory.Exists(Path.Combine(current.FullName, ".git")) ||
+                File.Exists(Path.Combine(current.FullName, ".git")) ||
                 File.Exists(Path.Combine(current.FullName, "hb-platform.sln")))
             {
                 return current.FullName;

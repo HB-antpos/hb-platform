@@ -6,6 +6,7 @@ import {
   CatalogSnapshotService,
   mapCatalogLookupToStagedItem,
   type ActiveCatalogSnapshotMetadata,
+  type CatalogCodeConflictRefreshPort,
   type CatalogDeltaPage,
   type CatalogSyncPlan,
   type CatalogSnapshotStoragePort,
@@ -1748,4 +1749,153 @@ test("delta 下载在落库当前页期间预取下一页并保持 cursor 顺序
   await operation;
   assert.equal(storage.deltaActivated, "delta-prefetch");
   assert.deepEqual(calls.filter((call) => call.startsWith("delta:")), ["delta:null", "delta:C2"]);
+});
+
+class RecordingCodeConflictRefresh implements CatalogCodeConflictRefreshPort {
+  public readonly calls: Readonly<{ storeCode: string; aborted: boolean }>[] = [];
+
+  public constructor(
+    private readonly events: string[] = [],
+    private readonly failure: unknown = null,
+  ) {}
+
+  public async refresh(input: Readonly<{
+    storeCode: string;
+    signal?: AbortSignal;
+  }>): Promise<void> {
+    this.calls.push({
+      storeCode: input.storeCode,
+      aborted: input.signal?.aborted ?? false,
+    });
+    this.events.push("code-conflicts");
+    if (this.failure !== null) throw this.failure;
+  }
+}
+
+test("全量、增量与 noChange 刷新成功后都在 afterActivate 前刷新码冲突候选", async () => {
+  const fullEvents: string[] = [];
+  const fullStorage = new MemoryCatalogStorage();
+  const fullConflicts = new RecordingCodeConflictRefresh(fullEvents);
+  const full = new CatalogSnapshotService(fullStorage, remote([
+    page({ cursor: null, nextCursor: null, items: [item("A")], totalCount: 1 }),
+  ]), {
+    createSnapshotId: () => "full-conflicts",
+    codeConflicts: fullConflicts,
+  });
+  await full.downloadAndActivate({
+    storeCode: "S1",
+    afterActivate: () => {
+      fullEvents.push(`after:${fullStorage.activated ?? "none"}`);
+    },
+  });
+  assert.deepEqual(fullEvents, ["code-conflicts", "after:full-conflicts"]);
+  assert.deepEqual(fullConflicts.calls, [{ storeCode: "S1", aborted: false }]);
+
+  const deltaEvents: string[] = [];
+  const deltaStorage = new MemoryCatalogStorage();
+  deltaStorage.active.set("active-s1", [mapCatalogLookupToStagedItem(item("KEEP"))]);
+  deltaStorage.activeMetadata = {
+    snapshotId: "active-s1", storeCode: "S1", catalogVersion: "v1", itemCount: 1,
+    activatedAt: "2026-07-28T00:00:00.000Z",
+  };
+  const deltaConflicts = new RecordingCodeConflictRefresh(deltaEvents);
+  const delta = new CatalogSnapshotService(deltaStorage, {
+    ...remote([]),
+    async getSyncPlan() {
+      return syncPlan({
+        mode: "delta",
+        baseCatalogVersion: "v1",
+        targetCatalogVersion: "v2",
+        targetTotal: 2,
+        deltaOperationCount: 1,
+      });
+    },
+    async getDeltaPage() {
+      return {
+        ...page({ cursor: null, nextCursor: null, items: [item("NEW")], totalCount: 2, catalogVersion: "v2" }),
+        deletedLookups: [],
+      };
+    },
+  }, { createSnapshotId: () => "delta-conflicts", codeConflicts: deltaConflicts });
+  await delta.downloadAndActivate({
+    storeCode: "S1",
+    afterActivate: () => {
+      deltaEvents.push(`after:${deltaStorage.deltaActivated ?? "none"}`);
+    },
+  });
+  assert.deepEqual(deltaEvents, ["code-conflicts", "after:delta-conflicts"]);
+
+  // 中文注释：服务端 noChange 只比较胜出行；候选可能已变化，仍须刷新。
+  const noChangeEvents: string[] = [];
+  const noChangeStorage = new MemoryCatalogStorage();
+  noChangeStorage.activeMetadata = {
+    snapshotId: "active-s1", storeCode: "S1", catalogVersion: "v1", itemCount: 1,
+    activatedAt: "2026-07-28T00:00:00.000Z",
+  };
+  const noChangeConflicts = new RecordingCodeConflictRefresh(noChangeEvents);
+  const noChange = new CatalogSnapshotService(noChangeStorage, {
+    ...remote([]),
+    async getSyncPlan() {
+      return syncPlan({ mode: "noChange", baseCatalogVersion: "v1", targetCatalogVersion: "v1", targetTotal: 1 });
+    },
+    async getPromotions() {
+      noChangeEvents.push("promotions");
+      return [];
+    },
+  }, { createSnapshotId: () => "unused", codeConflicts: noChangeConflicts });
+  const result = await noChange.downloadAndActivate({
+    storeCode: "S1",
+    afterActivate: () => {
+      noChangeEvents.push("after");
+    },
+  });
+  assert.equal(noChangeStorage.activated, null);
+  assert.equal(result.snapshotId, "active-s1");
+  assert.deepEqual(noChangeEvents, ["promotions", "code-conflicts", "after"]);
+
+  // 中文注释：重置目录走 null-base 全量，同样在激活后刷新候选。
+  const resetEvents: string[] = [];
+  const resetConflicts = new RecordingCodeConflictRefresh(resetEvents);
+  const reset = new CatalogSnapshotService(new MemoryCatalogStorage(), remote([
+    page({ cursor: null, nextCursor: null, items: [item("A")], totalCount: 1 }),
+  ]), { createSnapshotId: () => "reset-conflicts", codeConflicts: resetConflicts });
+  await reset.resetAndRedownload({ storeCode: "S1" });
+  assert.deepEqual(resetConflicts.calls, [{ storeCode: "S1", aborted: false }]);
+});
+
+test("码冲突刷新失败不回滚、不误报已激活目录，后置重载照常执行", async () => {
+  const storage = new MemoryCatalogStorage();
+  const events: string[] = [];
+  const service = new CatalogSnapshotService(storage, remote([
+    page({ cursor: null, nextCursor: null, items: [item("A")], totalCount: 1 }),
+  ]), {
+    createSnapshotId: () => "active-after-conflict-failure",
+    codeConflicts: new RecordingCodeConflictRefresh(
+      events,
+      new HbposApiError("offline", { kind: "transport", code: "NETWORK" }),
+    ),
+  });
+
+  const result = await service.downloadAndActivate({
+    storeCode: "S1",
+    afterActivate: () => {
+      events.push("after");
+    },
+  });
+
+  assert.equal(result.snapshotId, "active-after-conflict-failure");
+  assert.equal(storage.activated, "active-after-conflict-failure");
+  assert.deepEqual(events, ["code-conflicts", "after"]);
+});
+
+test("目录刷新在激活前失败时不刷新码冲突候选", async () => {
+  const conflicts = new RecordingCodeConflictRefresh();
+  const service = new CatalogSnapshotService(new MemoryCatalogStorage(), {
+    async getPage() {
+      throw new HbposApiError("offline", { kind: "transport", code: "NETWORK" });
+    },
+  }, { createSnapshotId: () => "never-active", codeConflicts: conflicts });
+
+  await assert.rejects(() => service.downloadAndActivate({ storeCode: "S1" }));
+  assert.deepEqual(conflicts.calls, []);
 });

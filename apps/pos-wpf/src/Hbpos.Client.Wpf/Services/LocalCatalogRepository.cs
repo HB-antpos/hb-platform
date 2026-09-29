@@ -16,11 +16,38 @@ public sealed record LocalCatalogStoreReplaceCommitResult(
     int InsertedCount,
     int DeletedCount);
 
+/// <summary>
+/// 全量替换对应的服务端目录版本；提交时暂存条数必须等于 ExpectedItemCount 才会生效。
+/// </summary>
+public sealed record LocalCatalogVersionStamp(
+    string CatalogVersion,
+    int ExpectedItemCount);
+
+public sealed record LocalCatalogDeltaApplyResult(
+    int UpsertedCount,
+    int DeletedCount,
+    int LocalItemCount);
+
+/// <summary>
+/// 本地目录与服务端版本对不上（暂存条数不符、增量基准已变），调用方应改走全量下载。
+/// </summary>
+public sealed class LocalCatalogVersionConflictException(string message) : InvalidOperationException(message);
+
 public interface ILocalCatalogStoreReplaceSession : IAsyncDisposable
 {
     Task StageAsync(IEnumerable<SellableItemDto> items, CancellationToken cancellationToken = default);
 
     Task<LocalCatalogStoreReplaceCommitResult> CommitAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 与版本记录在同一事务里提交全量替换；暂存条数与版本期望不符时整体回滚。
+    /// </summary>
+    Task<LocalCatalogStoreReplaceCommitResult> CommitAsync(
+        LocalCatalogVersionStamp versionStamp,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Versioned store replace is not supported by this session.");
+    }
 }
 
 public interface ILocalCatalogRepository
@@ -78,6 +105,62 @@ public interface ILocalCatalogRepository
         CancellationToken cancellationToken = default)
     {
         throw new NotSupportedException("Store replace sessions are not supported by this repository.");
+    }
+
+    Task ReplaceCodeConflictItemsAsync(
+        string storeCode,
+        IEnumerable<SellableItemDto> items,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Code conflict caching is not supported by this repository.");
+    }
+
+    Task<IReadOnlyList<SellableItemDto>> LoadCodeConflictItemsAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<SellableItemDto>>([]);
+    }
+
+    /// <summary>
+    /// 内容与本地一致时不写库并返回 false，调用方据此跳过内存扫码索引重建。
+    /// </summary>
+    async Task<bool> ReplaceCodeConflictItemsIfChangedAsync(
+        string storeCode,
+        IEnumerable<SellableItemDto> items,
+        CancellationToken cancellationToken = default)
+    {
+        await ReplaceCodeConflictItemsAsync(storeCode, items, cancellationToken);
+        return true;
+    }
+
+    Task<string?> GetCatalogVersionAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<string?>(null);
+    }
+
+    Task ClearCatalogVersionAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 在一个事务里应用 base→target 的增量并把版本记录改为 target；
+    /// 本地记录的版本不是 base 时抛 <see cref="LocalCatalogVersionConflictException"/> 且不做任何修改。
+    /// </summary>
+    Task<LocalCatalogDeltaApplyResult> ApplyCatalogDeltaAsync(
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        IReadOnlyList<SellableItemDto> upsertedItems,
+        IReadOnlyList<string> deletedLookupCodes,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Catalog delta apply is not supported by this repository.");
     }
 }
 
@@ -507,6 +590,372 @@ public sealed class LocalCatalogRepository(LocalSqliteStore store) : ILocalCatal
         return items;
     }
 
+    public async Task ReplaceCodeConflictItemsAsync(
+        string storeCode,
+        IEnumerable<SellableItemDto> items,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            throw new ArgumentException("Store code is required.", nameof(storeCode));
+        }
+
+        var materializedItems = items.ToList();
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        await ReplaceCodeConflictItemsCoreAsync(connection, transaction, normalizedStoreCode, materializedItems, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<bool> ReplaceCodeConflictItemsIfChangedAsync(
+        string storeCode,
+        IEnumerable<SellableItemDto> items,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            throw new ArgumentException("Store code is required.", nameof(storeCode));
+        }
+
+        var materializedItems = items.ToList();
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        // 按"码 + 顺序 + 内容"比较：服务端下发的冲突与本地完全相同时不重写，让同步调用方跳过扫码索引重建。
+        var incoming = materializedItems
+            .Select(item => (Item: item, LookupCodeNormalized: NormalizeLookupCode(item.LookupCode)))
+            .Where(entry =>
+                string.Equals(NormalizeStoreCode(entry.Item.StoreCode), normalizedStoreCode, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrEmpty(entry.LookupCodeNormalized))
+            .Select((entry, index) => (entry.LookupCodeNormalized, Index: index, Key: CreateCodeConflictComparisonKey(
+                entry.Item.ProductCode,
+                CreateContentHash(entry.Item, normalizedStoreCode, entry.LookupCodeNormalized),
+                entry.Item.LookupCode,
+                entry.Item.UpdatedAt?.ToString("O"))))
+            .OrderBy(entry => entry.LookupCodeNormalized, StringComparer.Ordinal)
+            .ThenBy(entry => entry.Index)
+            .Select(entry => string.Concat(entry.LookupCodeNormalized, "|", entry.Key))
+            .ToList();
+
+        var existing = new List<string>();
+        await using (var selectCommand = connection.CreateCommand())
+        {
+            selectCommand.Transaction = transaction;
+            selectCommand.CommandText = """
+                SELECT LookupCodeNormalized, ProductCode, ContentHash, LookupCode, UpdatedAt
+                FROM LocalSellableItemCodeConflict
+                WHERE StoreCode = $StoreCode
+                ORDER BY LookupCodeNormalized, SortOrder;
+                """;
+            selectCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            await using var reader = await selectCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existing.Add(string.Concat(
+                    ReadString(reader, "LookupCodeNormalized"),
+                    "|",
+                    CreateCodeConflictComparisonKey(
+                        ReadString(reader, "ProductCode"),
+                        ReadString(reader, "ContentHash"),
+                        ReadString(reader, "LookupCode"),
+                        ReadNullableString(reader, "UpdatedAt"))));
+            }
+        }
+
+        if (existing.SequenceEqual(incoming, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        await ReplaceCodeConflictItemsCoreAsync(connection, transaction, normalizedStoreCode, materializedItems, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    private static string CreateCodeConflictComparisonKey(
+        string productCode,
+        string contentHash,
+        string lookupCode,
+        string? updatedAt)
+    {
+        // 内容摘要不含原始码与更新时间，这里补上，避免只改大小写或时间时漏写。
+        return string.Join("|", productCode, contentHash, lookupCode, updatedAt ?? string.Empty);
+    }
+
+    private static async Task ReplaceCodeConflictItemsCoreAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string normalizedStoreCode,
+        IReadOnlyList<SellableItemDto> materializedItems,
+        CancellationToken cancellationToken)
+    {
+        // 冲突候选按门店全量替换：服务端数据已修复的码必须随之消失，不能残留旧的备选商品。
+        await using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = """
+                DELETE FROM LocalSellableItemCodeConflict
+                WHERE StoreCode = $StoreCode;
+                """;
+            deleteCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var syncedAt = DateTimeOffset.UtcNow;
+        await using (var insertCommand = connection.CreateCommand())
+        {
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = InsertCodeConflictItemSql;
+            AddUpsertParameters(insertCommand);
+            insertCommand.Parameters.AddWithValue("$SortOrder", 0);
+            insertCommand.Prepare();
+
+            for (var index = 0; index < materializedItems.Count; index++)
+            {
+                var item = materializedItems[index];
+                var lookupCodeNormalized = NormalizeLookupCode(item.LookupCode);
+                if (!string.Equals(NormalizeStoreCode(item.StoreCode), normalizedStoreCode, StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrEmpty(lookupCodeNormalized))
+                {
+                    continue;
+                }
+
+                var contentHash = CreateContentHash(item, normalizedStoreCode, lookupCodeNormalized);
+                SetItemParameters(insertCommand, item, normalizedStoreCode, lookupCodeNormalized, contentHash, syncedAt);
+                // 保留服务端决胜顺序，读取时按它排序。
+                insertCommand.Parameters["$SortOrder"].Value = index;
+                await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+    }
+
+    public async Task<string?> GetCatalogVersionAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            return null;
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        return await ReadCatalogVersionAsync(command, normalizedStoreCode, cancellationToken);
+    }
+
+    public async Task ClearCatalogVersionAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            return;
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        await DeleteCatalogVersionAsync(command, normalizedStoreCode, cancellationToken);
+    }
+
+    public async Task<LocalCatalogDeltaApplyResult> ApplyCatalogDeltaAsync(
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        IReadOnlyList<SellableItemDto> upsertedItems,
+        IReadOnlyList<string> deletedLookupCodes,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            throw new ArgumentException("Store code is required.", nameof(storeCode));
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseCatalogVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetCatalogVersion);
+        ArgumentNullException.ThrowIfNull(upsertedItems);
+        ArgumentNullException.ThrowIfNull(deletedLookupCodes);
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        // 基准版本必须在同一事务里核对：期间若被全量替换或清掉版本，这批增量就不再适用。
+        await using (var versionCommand = connection.CreateCommand())
+        {
+            versionCommand.Transaction = transaction;
+            var currentVersion = await ReadCatalogVersionAsync(versionCommand, normalizedStoreCode, cancellationToken);
+            if (!string.Equals(currentVersion, baseCatalogVersion, StringComparison.Ordinal))
+            {
+                throw new LocalCatalogVersionConflictException(
+                    $"Local catalog version changed before applying delta. expected={baseCatalogVersion} actual={currentVersion ?? "<none>"}");
+            }
+        }
+
+        var syncedAt = DateTimeOffset.UtcNow;
+        var upsertedCount = 0;
+        if (upsertedItems.Count > 0)
+        {
+            await using var upsertCommand = connection.CreateCommand();
+            upsertCommand.Transaction = transaction;
+            upsertCommand.CommandText = UpsertSellableItemSql;
+            AddUpsertParameters(upsertCommand);
+            upsertCommand.Prepare();
+            foreach (var item in upsertedItems)
+            {
+                var itemStoreCode = NormalizeStoreCode(item.StoreCode);
+                var lookupCodeNormalized = NormalizeLookupCode(item.LookupCode);
+                if (!string.Equals(itemStoreCode, normalizedStoreCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException("Delta item store code must match the target store.", nameof(upsertedItems));
+                }
+
+                if (string.IsNullOrEmpty(lookupCodeNormalized))
+                {
+                    throw new ArgumentException("Sellable item lookup code is required.", nameof(upsertedItems));
+                }
+
+                var contentHash = CreateContentHash(item, normalizedStoreCode, lookupCodeNormalized);
+                SetItemParameters(upsertCommand, item, normalizedStoreCode, lookupCodeNormalized, contentHash, syncedAt);
+                await upsertCommand.ExecuteNonQueryAsync(cancellationToken);
+                upsertedCount++;
+            }
+        }
+
+        var deletedCount = 0;
+        var normalizedDeletes = deletedLookupCodes
+            .Select(NormalizeLookupCode)
+            .Where(code => !string.IsNullOrEmpty(code))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedDeletes.Length > 0)
+        {
+            await using var deleteCommand = connection.CreateCommand();
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = """
+                DELETE FROM LocalSellableItemIndex
+                WHERE StoreCode = $StoreCode
+                  AND LookupCodeNormalized = $LookupCodeNormalized;
+                """;
+            deleteCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            deleteCommand.Parameters.AddWithValue("$LookupCodeNormalized", string.Empty);
+            deleteCommand.Prepare();
+            foreach (var lookupCodeNormalized in normalizedDeletes)
+            {
+                deleteCommand.Parameters["$LookupCodeNormalized"].Value = lookupCodeNormalized;
+                deletedCount += await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
+        int localItemCount;
+        await using (var countCommand = connection.CreateCommand())
+        {
+            countCommand.Transaction = transaction;
+            countCommand.CommandText = """
+                SELECT COUNT(*)
+                FROM LocalSellableItemIndex
+                WHERE StoreCode = $StoreCode;
+                """;
+            countCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            localItemCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        }
+
+        await using (var versionCommand = connection.CreateCommand())
+        {
+            versionCommand.Transaction = transaction;
+            await UpsertCatalogVersionAsync(versionCommand, normalizedStoreCode, targetCatalogVersion, localItemCount, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return new LocalCatalogDeltaApplyResult(upsertedCount, deletedCount, localItemCount);
+    }
+
+    private static async Task<string?> ReadCatalogVersionAsync(
+        SqliteCommand command,
+        string normalizedStoreCode,
+        CancellationToken cancellationToken)
+    {
+        command.CommandText = """
+            SELECT CatalogVersion
+            FROM LocalCatalogSyncState
+            WHERE StoreCode = $StoreCode;
+            """;
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is string version && !string.IsNullOrWhiteSpace(version) ? version : null;
+    }
+
+    private static async Task UpsertCatalogVersionAsync(
+        SqliteCommand command,
+        string normalizedStoreCode,
+        string catalogVersion,
+        int itemCount,
+        CancellationToken cancellationToken)
+    {
+        command.CommandText = """
+            INSERT INTO LocalCatalogSyncState (StoreCode, CatalogVersion, ItemCount, UpdatedAt)
+            VALUES ($StoreCode, $CatalogVersion, $ItemCount, $UpdatedAt)
+            ON CONFLICT(StoreCode) DO UPDATE SET
+                CatalogVersion = excluded.CatalogVersion,
+                ItemCount = excluded.ItemCount,
+                UpdatedAt = excluded.UpdatedAt;
+            """;
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+        command.Parameters.AddWithValue("$CatalogVersion", catalogVersion);
+        command.Parameters.AddWithValue("$ItemCount", itemCount);
+        command.Parameters.AddWithValue("$UpdatedAt", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task DeleteCatalogVersionAsync(
+        SqliteCommand command,
+        string normalizedStoreCode,
+        CancellationToken cancellationToken)
+    {
+        command.CommandText = """
+            DELETE FROM LocalCatalogSyncState
+            WHERE StoreCode = $StoreCode;
+            """;
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SellableItemDto>> LoadCodeConflictItemsAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        if (string.IsNullOrWhiteSpace(normalizedStoreCode))
+        {
+            return [];
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT StoreCode, ProductCode, ReferenceCode, DisplayName, LookupCode, ItemNumber, Barcode, ProductImage, DiscountRate, IsSpecialProduct, RetailPrice, PriceSource, PriceSourceLabel, QuantityFactor, UpdatedAt
+            FROM LocalSellableItemCodeConflict
+            WHERE StoreCode = $StoreCode
+            ORDER BY LookupCodeNormalized, SortOrder;
+            """;
+        command.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+
+        var items = new List<SellableItemDto>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(ReadSellableItem(reader));
+        }
+
+        return items;
+    }
+
     public async Task ReplacePromotionRulesAsync(
         string storeCode,
         IEnumerable<CatalogPromotionRuleDto> rules,
@@ -806,6 +1255,54 @@ public sealed class LocalCatalogRepository(LocalSqliteStore store) : ILocalCatal
             UpdatedAt = excluded.UpdatedAt,
             ContentHash = excluded.ContentHash,
             SyncedAt = excluded.SyncedAt;
+        """;
+
+    private const string InsertCodeConflictItemSql = """
+        INSERT INTO LocalSellableItemCodeConflict
+        (
+            StoreCode,
+            ProductCode,
+            ReferenceCode,
+            DisplayName,
+            LookupCode,
+            LookupCodeNormalized,
+            ItemNumber,
+            Barcode,
+            ProductImage,
+            DiscountRate,
+            IsSpecialProduct,
+            RetailPrice,
+            PriceSource,
+            PriceSourceLabel,
+            QuantityFactor,
+            UpdatedAt,
+            ContentHash,
+            SyncedAt,
+            SortOrder
+        )
+        VALUES
+        (
+            $StoreCode,
+            $ProductCode,
+            $ReferenceCode,
+            $DisplayName,
+            $LookupCode,
+            $LookupCodeNormalized,
+            $ItemNumber,
+            $Barcode,
+            $ProductImage,
+            $DiscountRate,
+            $IsSpecialProduct,
+            $RetailPrice,
+            $PriceSource,
+            $PriceSourceLabel,
+            $QuantityFactor,
+            $UpdatedAt,
+            $ContentHash,
+            $SyncedAt,
+            $SortOrder
+        )
+        ON CONFLICT(StoreCode, LookupCodeNormalized, ProductCode) DO NOTHING;
         """;
 
     private const string StageSellableItemSql = """
@@ -1192,7 +1689,23 @@ public sealed class LocalCatalogRepository(LocalSqliteStore store) : ILocalCatal
             await transaction.CommitAsync(cancellationToken);
         }
 
-        public async Task<LocalCatalogStoreReplaceCommitResult> CommitAsync(CancellationToken cancellationToken = default)
+        public Task<LocalCatalogStoreReplaceCommitResult> CommitAsync(CancellationToken cancellationToken = default)
+        {
+            return CommitCoreAsync(versionStamp: null, cancellationToken);
+        }
+
+        public Task<LocalCatalogStoreReplaceCommitResult> CommitAsync(
+            LocalCatalogVersionStamp versionStamp,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(versionStamp);
+            ArgumentException.ThrowIfNullOrWhiteSpace(versionStamp.CatalogVersion);
+            return CommitCoreAsync(versionStamp, cancellationToken);
+        }
+
+        private async Task<LocalCatalogStoreReplaceCommitResult> CommitCoreAsync(
+            LocalCatalogVersionStamp? versionStamp,
+            CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             if (_committed)
@@ -1203,6 +1716,12 @@ public sealed class LocalCatalogRepository(LocalSqliteStore store) : ILocalCatal
             using var transaction = connection.BeginTransaction();
             var deletedCount = await CountDeletedLookupsAsync(transaction, cancellationToken);
             var insertedCount = await CountStagedItemsAsync(transaction, cancellationToken);
+            if (versionStamp is not null && insertedCount != versionStamp.ExpectedItemCount)
+            {
+                // 暂存条数与服务端版本总数不符说明下载不完整或有重复码，保留旧目录不做替换。
+                throw new LocalCatalogVersionConflictException(
+                    $"Staged catalog item count does not match the pinned version. version={versionStamp.CatalogVersion} expected={versionStamp.ExpectedItemCount} staged={insertedCount}");
+            }
 
             await using (var deleteCommand = connection.CreateCommand())
             {
@@ -1264,6 +1783,20 @@ public sealed class LocalCatalogRepository(LocalSqliteStore store) : ILocalCatal
                     """;
                 insertCommand.Parameters.AddWithValue("$StoreCode", storeCode);
                 await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await using (var versionCommand = connection.CreateCommand())
+            {
+                versionCommand.Transaction = transaction;
+                if (versionStamp is null)
+                {
+                    // 未锁定版本的旧协议全量替换不对应任何已知版本，下次同步必须重新全量。
+                    await DeleteCatalogVersionAsync(versionCommand, storeCode, cancellationToken);
+                }
+                else
+                {
+                    await UpsertCatalogVersionAsync(versionCommand, storeCode, versionStamp.CatalogVersion, insertedCount, cancellationToken);
+                }
             }
 
             await transaction.CommitAsync(cancellationToken);

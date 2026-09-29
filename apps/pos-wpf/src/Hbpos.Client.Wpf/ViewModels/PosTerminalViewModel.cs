@@ -78,6 +78,13 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     [ObservableProperty]
     private bool _isMatchesPopupOpen;
 
+    // 中文注释：结账完成后不再跳转整页成功页，上一单以卡片显示在购物车区域，扫码或加入商品后收起。
+    [ObservableProperty]
+    private PaymentSuccessViewModel? _lastSale;
+
+    [ObservableProperty]
+    private bool _isLastSaleVisible;
+
     [ObservableProperty]
     private bool _isTouchKeyboardOpen;
 
@@ -202,6 +209,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         ApplyQuickDiscountPercentCommand = new AsyncRelayCommand<string>(ApplyQuickDiscountPercentAsync);
         ClearSearchCommand = new RelayCommand(ClearSearch, () => !string.IsNullOrWhiteSpace(ScanText));
         ClearCartCommand = new AsyncRelayCommand(ClearCartAsync, () => !_cart.IsEmpty);
+        DismissLastSaleCommand = new RelayCommand(DismissLastSale);
         OpenPaymentCommand = new AsyncRelayCommand(OpenPaymentAsync, () => !_cart.IsEmpty);
         OpenReturnsCommand = new AsyncRelayCommand(OpenReturnsAsync);
         OpenSpecialProductsCommand = new AsyncRelayCommand(OpenSpecialProductsAsync);
@@ -261,6 +269,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     public IRelayCommand ClearSearchCommand { get; }
 
     public IRelayCommand ClearCartCommand { get; }
+
+    public IRelayCommand DismissLastSaleCommand { get; }
 
     public IRelayCommand OpenPaymentCommand { get; }
 
@@ -536,8 +546,24 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
     }
 
+    public void ShowLastSale(PaymentSuccessViewModel sale)
+    {
+        LastSale = sale;
+        IsLastSaleVisible = true;
+    }
+
+    public void DismissLastSale()
+    {
+        IsLastSaleVisible = false;
+    }
+
     private void OnCartChanged(object? sender, EventArgs e)
     {
+        if (!_cart.IsEmpty)
+        {
+            DismissLastSale();
+        }
+
         _cartChangedSequence++;
         RefreshCartCore("cart-changed", _activeScanTraceId, _activeScanStartedAt);
     }
@@ -1613,6 +1639,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         Func<bool>? isCurrent = null)
     {
         // 中文注释：统一承接手动检索与扫描枪入口，只让 VM 负责 UI 状态投影和结果应用。
+        // 任何扫码都代表开始下一单，先收起上一单的成功卡片。
+        DismissLastSale();
         var totalStopwatch = Stopwatch.StartNew();
         _scanController.LogStarted(plan, Session.StoreCode);
 

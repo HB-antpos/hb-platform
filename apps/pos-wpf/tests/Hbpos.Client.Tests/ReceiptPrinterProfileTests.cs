@@ -40,6 +40,40 @@ public sealed class ReceiptPrinterProfileTests
     }
 
     [Fact]
+    public async Task Bank_receipt_text_flag_defaults_to_print_and_round_trips_per_device()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository, NewAuth("S001"));
+
+        // 旧设备没有该键：默认继续打印银行原文。
+        Assert.True((await store.LoadAsync()).PrintBankReceiptText);
+
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { PrintBankReceiptText = false });
+
+        Assert.Equal("false", await repository.GetValueAsync("ReceiptPrinter:PrintBankReceiptText"));
+        Assert.False((await store.LoadAsync()).PrintBankReceiptText);
+
+        // 按设备保存：设备改店后仍沿用该偏好，不随门店资料回退。
+        var movedStore = new ReceiptPrinterSettingsStore(repository, NewAuth("S002"));
+        Assert.False((await movedStore.LoadAsync()).PrintBankReceiptText);
+
+        // 值损坏时回退默认（打印），避免静默丢失银行收据。
+        await repository.SetValueAsync("ReceiptPrinter:PrintBankReceiptText", "garbage");
+        Assert.True((await store.LoadAsync()).PrintBankReceiptText);
+    }
+
+    [Fact]
+    public async Task Legacy_unscoped_store_persists_bank_receipt_text_flag()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository);
+
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { PrintBankReceiptText = false });
+
+        Assert.False((await store.LoadAsync()).PrintBankReceiptText);
+    }
+
+    [Fact]
     public async Task Explicit_empty_brand_name_persists_empty_not_default()
     {
         var repository = new InMemorySettingsRepository();

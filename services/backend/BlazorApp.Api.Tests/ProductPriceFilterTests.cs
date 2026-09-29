@@ -45,7 +45,11 @@ namespace BlazorApp.Api.Tests
                 typeof(Product),
                 typeof(StoreRetailPrice),
                 typeof(Store),
-                typeof(HBLocalSupplier)
+                typeof(HBLocalSupplier),
+                typeof(WarehouseCategory),
+                typeof(LocalSupplierCategory),
+                typeof(LocalSupplierCategoryCapture),
+                typeof(LocalSupplierCategoryProductAssignment)
             );
             SeedPriceData();
 

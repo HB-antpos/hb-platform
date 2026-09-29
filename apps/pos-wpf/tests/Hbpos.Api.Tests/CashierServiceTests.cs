@@ -421,7 +421,14 @@ public sealed class CashierServiceTests : IDisposable
         SqliteConnection.ClearAllPools();
         if (File.Exists(_dbPath))
         {
-            File.Delete(_dbPath);
+            try
+            {
+                File.Delete(_dbPath);
+            }
+            catch (IOException)
+            {
+                // Windows 上 SQLite 清空连接池后仍可能短暂占用文件句柄，不影响登录断言。
+            }
         }
     }
 

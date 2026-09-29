@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
         Width="460"
-        Height="380"
+        Height="420"
         WindowStyle="None"
         ResizeMode="NoResize"
         WindowStartupLocation="Manual"
@@ -20,13 +20,17 @@
                 BorderBrush="#FFE3E7EF"
                 BorderThickness="1"
                 CornerRadius="18"
-                Padding="28">
+                Padding="28,28,28,18">
             <Grid>
+            <Grid.Resources>
+                <BooleanToVisibilityConverter x:Key="BoolToVis" />
+            </Grid.Resources>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="1"
@@ -53,13 +57,51 @@
                            HorizontalAlignment="Stretch"
                            TextAlignment="Center"
                            TextWrapping="Wrap" />
+                <!-- 更新后首次启动时用"已更新到"标签替换这句通用提示，保持启动页高度不变。 -->
+                <Border Margin="0,6,0,0"
+                        Height="26"
+                        Padding="8,0,12,0"
+                        HorizontalAlignment="Center"
+                        CornerRadius="13"
+                        Background="#FFDCFCE7"
+                        Visibility="{Binding HasUpdateNotice, Converter={StaticResource BoolToVis}}"
+                        AutomationProperties.AutomationId="StartupUpdateNotice">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Path Width="16"
+                              Height="16"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
+                              Data="M5,12.5 L9.5,17 L19,7.5"
+                              Stroke="#FF166534"
+                              StrokeThickness="2.6"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round" />
+                        <TextBlock Text="{Binding UpdateNoticeText}"
+                                   Margin="6,0,0,0"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF166534"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
                 <TextBlock Text="{loc:Loc startup.loading}"
                            Margin="0,4,0,0"
                            FontSize="13"
                            Foreground="#FF64748B"
                            HorizontalAlignment="Stretch"
                            TextAlignment="Center"
-                           TextWrapping="Wrap" />
+                           TextWrapping="Wrap">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasUpdateNotice}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
                 <TextBlock Text="{Binding StatusText}"
                            Margin="0,8,0,0"
                            FontSize="13"
@@ -112,6 +154,25 @@
                         </EventTrigger>
                     </Border.Triggers>
                 </Border>
+            </Border>
+
+            <Border Grid.Row="4"
+                    BorderBrush="#FFEEF1F5"
+                    BorderThickness="0,1,0,0"
+                    Padding="0,14,0,0"
+                    AutomationProperties.AutomationId="StartupVersionFooter">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <TextBlock Text="{loc:Loc startup.versionLabel}"
+                               FontSize="12"
+                               Foreground="#FF64748B" />
+                    <TextBlock Text="{Binding VersionText}"
+                               Margin="6,0,0,0"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="#FF475569"
+                               Typography.NumeralAlignment="Tabular"
+                               AutomationProperties.AutomationId="StartupVersionText" />
+                </StackPanel>
             </Border>
             </Grid>
         </Border>

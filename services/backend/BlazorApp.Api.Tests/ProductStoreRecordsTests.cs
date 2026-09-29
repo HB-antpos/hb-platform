@@ -7,6 +7,7 @@ using BlazorApp.Api.Controllers.React;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Mappings.Profiles.React;
+using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -55,7 +56,11 @@ public sealed class ProductStoreRecordsTests : IDisposable
             typeof(ProductSetCode),
             typeof(DomesticProduct),
             typeof(ChinaSupplier),
-            typeof(UserStore)
+            typeof(UserStore),
+            typeof(WarehouseCategory),
+            typeof(LocalSupplierCategory),
+            typeof(LocalSupplierCategoryCapture),
+            typeof(LocalSupplierCategoryProductAssignment)
         );
     }
 
@@ -1218,6 +1223,92 @@ public sealed class ProductStoreRecordsTests : IDisposable
         Assert.True(response.Success, response.Message);
         var product = await _localDb.Queryable<Product>().SingleAsync(item => item.ProductCode == "P-NEW");
         Assert.Equal("200", product.LocalSupplierCode);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_人工指定供应商分类后锁定并在详情返回()
+    {
+        await SeedProductAsync("P-SC", "A-SC", localSupplierCode: "240");
+        var categoryGuid = await SeedSupplierCategoryAsync("240", "/office-stationery", "Office Stationery");
+
+        var response = await CreateService("updater").UpdateAsync("P-SC", new UpdateProductDto
+        {
+            ProductCode = "P-SC",
+            ProductName = "指定供应商分类",
+            LocalSupplierCode = "240",
+            ItemNumber = "A-SC",
+            IsActive = true,
+            SupplierCategoryGUID = categoryGuid,
+        });
+
+        Assert.True(response.Success, response.Message);
+        Assert.Equal(categoryGuid, response.Data!.SupplierCategoryGUID);
+        Assert.Equal("manual", response.Data.SupplierCategorySource);
+        Assert.Equal("Office Stationery", response.Data.SupplierCategoryPath);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_指定其他供应商的分类时返回错误码且不写入商品()
+    {
+        await SeedProductAsync("P-SC-MISMATCH", "A-SC", localSupplierCode: "240", productName: "原名称");
+        var otherSupplierCategory = await SeedSupplierCategoryAsync("243", "/kitchen", "Kitchen");
+
+        var response = await CreateService("updater").UpdateAsync("P-SC-MISMATCH", new UpdateProductDto
+        {
+            ProductCode = "P-SC-MISMATCH",
+            ProductName = "不应写入",
+            LocalSupplierCode = "240",
+            ItemNumber = "A-SC",
+            IsActive = true,
+            SupplierCategoryGUID = otherSupplierCategory,
+        });
+
+        Assert.False(response.Success);
+        Assert.Equal(LocalSupplierCategoryErrorCodes.CategorySupplierMismatch, response.ErrorCode);
+        var product = await _localDb.Queryable<Product>().SingleAsync(item => item.ProductCode == "P-SC-MISMATCH");
+        Assert.Equal("原名称", product.ProductName);
+        Assert.Equal(0, await _localDb.Queryable<LocalSupplierCategoryProductAssignment>().CountAsync());
+    }
+
+    [Fact]
+    public async Task BatchUpdateAsync_换供应商时清除旧供应商分类归属()
+    {
+        await SeedProductAsync("P-SC-BATCH", "A-SC", localSupplierCode: "240");
+        var categoryGuid = await SeedSupplierCategoryAsync("240", "/office-stationery", "Office Stationery");
+        await _localDb.Insertable(new LocalSupplierCategoryProductAssignment
+        {
+            ProductCode = "P-SC-BATCH",
+            LocalSupplierCode = "240",
+            CategoryGUID = categoryGuid,
+            Source = "manual",
+            AssignedAt = DateTime.UtcNow,
+        }).ExecuteCommandAsync();
+
+        var response = await CreateService("batcher").BatchUpdateAsync(new List<BatchUpdateProductReactDto>
+        {
+            new() { ProductCode = "P-SC-BATCH", LocalSupplierCode = "243" },
+        });
+
+        Assert.True(response.Success, response.Message);
+        Assert.Equal(1, response.Data!.SuccessCount);
+        Assert.Equal(0, await _localDb.Queryable<LocalSupplierCategoryProductAssignment>().CountAsync());
+    }
+
+    private async Task<string> SeedSupplierCategoryAsync(string supplierCode, string key, string name)
+    {
+        var category = new LocalSupplierCategory
+        {
+            LocalSupplierCode = supplierCode,
+            ExternalKey = key,
+            CategoryName = name,
+            FullPath = name,
+            Depth = 0,
+            PromotionalSource = LocalSupplierCategoryPromotionalSources.Pattern,
+            IsActive = true,
+            IsDeleted = false,
+        };
+        await _localDb.Insertable(category).ExecuteCommandAsync();
+        return category.CategoryGUID;
     }
 
     [Fact]

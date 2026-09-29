@@ -4,6 +4,9 @@ export interface LocalSupplierProductSalesAnalysisFilter {
   keyword?: string
   categoryGuid?: string
   supplierCode?: string
+  warehouseCategoryGuids?: string[]
+  supplierCodes?: string[]
+  supplierCategoryGuids?: string[]
   documentKeyword?: string
 }
 
@@ -35,6 +38,14 @@ export interface LocalSupplierProductSalesAnalysisRequest {
 
 export interface LocalSupplierProductSalesAnalysisCategoryOption { guid: string; name?: string }
 export interface LocalSupplierProductSalesAnalysisSupplierOption { code: string; name?: string }
+export interface LocalSupplierProductSalesAnalysisSupplierCategoryOption {
+  supplierCode: string
+  guid: string
+  parentGuid?: string
+  name: string
+  isSelectable: boolean
+  children: LocalSupplierProductSalesAnalysisSupplierCategoryOption[]
+}
 export interface LocalSupplierProductSalesAnalysisOptions {
   warehouseCategories: LocalSupplierProductSalesAnalysisCategoryOption[]
   suppliers: LocalSupplierProductSalesAnalysisSupplierOption[]

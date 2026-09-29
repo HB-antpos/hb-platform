@@ -354,7 +354,7 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
         secondRequest.SyncImageToHq = false;
 
         var first = await service.StartJobAsync(firstRequest, "操作员甲");
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var second = await service.StartJobAsync(secondRequest, "操作员乙");
 
         var prematureSecondStart = await Task.WhenAny(
@@ -364,7 +364,7 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
         Assert.NotSame(secondStarted.Task, prematureSecondStart);
 
         releaseFirst.SetResult();
-        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         Assert.Equal(
             WarehouseProductBatchUpdateJobStatusConstants.Succeeded,
             (await WaitForJobAsync(service, first.JobId)).Status
@@ -529,21 +529,14 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (
-                job?.Status == WarehouseProductBatchUpdateJobStatusConstants.Succeeded
-                || job?.Status == WarehouseProductBatchUpdateJobStatusConstants.PartiallySucceeded
-                || job?.Status == WarehouseProductBatchUpdateJobStatusConstants.Failed
-            )
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待仓库商品批量修改 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current =>
+                current?.Status == WarehouseProductBatchUpdateJobStatusConstants.Succeeded
+                || current?.Status == WarehouseProductBatchUpdateJobStatusConstants.PartiallySucceeded
+                || current?.Status == WarehouseProductBatchUpdateJobStatusConstants.Failed,
+            describeLast: current => $"仓库商品批量修改 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 }

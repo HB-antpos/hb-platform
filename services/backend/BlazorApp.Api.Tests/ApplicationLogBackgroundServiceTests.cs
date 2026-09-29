@@ -16,7 +16,7 @@ public class ApplicationLogBackgroundServiceTests
         queue.TryEnqueue(CreateItem("first"));
         queue.TryEnqueue(CreateItem("second"));
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(AsyncTestWaitSupport.DefaultTimeout);
         var service = new TestableApplicationLogBackgroundService(
             queue,
             new ThrowingScopeFactory(new InvalidOperationException("模拟落库失败")),

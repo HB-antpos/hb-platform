@@ -134,12 +134,24 @@ export interface CatalogSnapshotStoragePort {
   cleanupRetiredBatch?(batchSize?: number): Promise<number>;
 }
 
+/**
+ * 目录刷新成功后的一码多商品候选刷新。实现应自行把失败收敛为“保留旧候选”；
+ * 服务仍会兜底吞掉异常，候选失败绝不影响已激活目录或刷新结果。
+ */
+export interface CatalogCodeConflictRefreshPort {
+  refresh(input: Readonly<{
+    storeCode: string;
+    signal?: AbortSignal;
+  }>): Promise<unknown>;
+}
+
 export type CatalogSnapshotServiceOptions = Readonly<{
   createSnapshotId: () => string;
   nowIso?: () => string;
   nowMilliseconds?: () => number;
   pageSize?: number;
   yieldControl?: () => Promise<void>;
+  codeConflicts?: CatalogCodeConflictRefreshPort;
 }>;
 
 export type CatalogRefreshRequest = Readonly<{
@@ -581,6 +593,7 @@ export class CatalogSnapshotService {
         itemCount: count,
         activatedAt,
       };
+      await this.refreshCodeConflicts(input);
       await input.afterActivate?.(result);
       // 中文注释：100% 表示 active 与同快照运行时依赖均已完成收口。
       progress({ step: "activate", percent: 100 });
@@ -627,6 +640,8 @@ export class CatalogSnapshotService {
       activatedAt: active.activatedAt,
     };
     progress({ step: "activate", percent: 0 });
+    // 中文注释：服务端判定 noChange 只比较胜出行，码冲突候选可能已变化，因此仍须刷新。
+    await this.refreshCodeConflicts(input);
     await input.afterActivate?.(result);
     progress({ step: "activate", percent: 100 });
     return result;
@@ -824,6 +839,7 @@ export class CatalogSnapshotService {
         itemCount: plan.targetTotal,
         activatedAt: activatedMetadata.activatedAt,
       };
+      await this.refreshCodeConflicts(input);
       await input.afterActivate?.(result);
       progress({ step: "activate", percent: 100 });
       return result;
@@ -850,6 +866,23 @@ export class CatalogSnapshotService {
     // 中文注释：reset 与普通刷新共用同一串行门，不能让旧 delta 在重置前插队。
     this.serial = operation.then(() => undefined, () => undefined);
     return operation;
+  }
+
+  /**
+   * 目录已提交后在同一串行临界区内刷新码冲突候选；任何异常都只保留旧候选，
+   * 不能回到“切换前失败”的清理路径，也不能把已激活目录报告为失败。
+   */
+  private async refreshCodeConflicts(input: CatalogRefreshRequest): Promise<void> {
+    const codeConflicts = this.options.codeConflicts;
+    if (!codeConflicts) return;
+    try {
+      await codeConflicts.refresh({
+        storeCode: input.storeCode,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch {
+      // 中文注释：候选是扫码选择的增强数据，失败时继续使用本地旧候选。
+    }
   }
 
   private async discardStaging(snapshotId: string): Promise<void> {

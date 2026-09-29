@@ -126,7 +126,7 @@ public sealed class WarehouseStorePriceSyncJobServiceTests
             },
             "admin"
         );
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await firstStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var second = await service.StartJobAsync(
             new WarehouseStorePriceSyncRequestDto
             {
@@ -155,7 +155,7 @@ public sealed class WarehouseStorePriceSyncJobServiceTests
             WarehouseStorePriceSyncJobStatusConstants.Succeeded,
             (await WaitForJobAsync(service, first.JobId)).Status
         );
-        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         Assert.Equal(
             WarehouseStorePriceSyncJobStatusConstants.Succeeded,
             (await WaitForJobAsync(service, second.JobId)).Status
@@ -398,21 +398,14 @@ public sealed class WarehouseStorePriceSyncJobServiceTests
         string jobId
     )
     {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            var job = await service.GetJobAsync(jobId);
-            if (
-                job?.Status == WarehouseStorePriceSyncJobStatusConstants.Succeeded
-                || job?.Status == WarehouseStorePriceSyncJobStatusConstants.PartiallySucceeded
-                || job?.Status == WarehouseStorePriceSyncJobStatusConstants.Failed
-            )
-            {
-                return job;
-            }
-
-            await Task.Delay(20);
-        }
-
-        throw new TimeoutException("等待仓库价格同步 job 完成超时");
+        var job = await WaitForValueAsync(
+            () => service.GetJobAsync(jobId),
+            current =>
+                current?.Status == WarehouseStorePriceSyncJobStatusConstants.Succeeded
+                || current?.Status == WarehouseStorePriceSyncJobStatusConstants.PartiallySucceeded
+                || current?.Status == WarehouseStorePriceSyncJobStatusConstants.Failed,
+            describeLast: current => $"仓库价格同步 job 当前状态：{current?.Status ?? "未找到"}"
+        );
+        return job!;
     }
 }

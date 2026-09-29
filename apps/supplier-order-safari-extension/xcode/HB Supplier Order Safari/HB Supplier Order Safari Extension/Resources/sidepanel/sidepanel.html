@@ -68,6 +68,35 @@
         <ul id="supplierList"></ul>
       </section>
 
+      <section id="categorySection" class="category-capture" aria-labelledby="categoryTitle" hidden>
+        <div class="category-heading">
+          <h2 id="categoryTitle">供应商分类采集</h2>
+          <small id="categorySupplier"></small>
+        </div>
+        <p id="categoryUnavailable" class="inline-empty" hidden></p>
+        <div id="categoryControls" hidden>
+          <label class="category-toggle" for="categoryPassiveToggle">
+            <input id="categoryPassiveToggle" type="checkbox" />
+            <span id="categoryPassiveLabel">浏览分类页时自动采集</span>
+          </label>
+          <p id="categoryPassiveHint" class="category-hint"></p>
+          <div class="category-actions">
+            <button id="categoryCrawlBtn" class="primary" type="button">采集全部分类</button>
+            <button id="categoryAbortBtn" type="button" hidden>中止</button>
+            <button id="categoryResumeBtn" type="button" hidden>继续</button>
+            <button id="categoryRetryBtn" type="button" hidden>重试失败</button>
+          </div>
+          <p id="categoryCrawlNote" class="category-hint" hidden></p>
+          <div id="categoryProgressWrap" class="category-progress" hidden>
+            <progress id="categoryProgress" max="1" value="0" aria-labelledby="categoryProgressText"></progress>
+            <span id="categoryProgressText"></span>
+          </div>
+          <p id="categoryStatus" class="category-status" role="status" aria-live="polite"></p>
+          <p id="categoryLastRun" class="category-hint"></p>
+          <p id="categorySafariHint" class="category-hint" hidden></p>
+        </div>
+      </section>
+
       <div id="dataTabs" class="data-tabs" role="tablist" hidden>
         <button id="historyTab" type="button" role="tab" aria-selected="true" aria-controls="itemSection">商品记录</button>
         <button id="rankingTab" type="button" role="tab" aria-selected="false" aria-controls="rankingSection">热销 TOP 30%</button>

@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Models;
+using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -862,12 +863,7 @@ public sealed class BrowserExtensionService : IBrowserExtensionService
 
     private void EnsureSupplierEnabled(string supplierCode)
     {
-        if (
-            !GetSupplierProfiles()
-                .Profiles.Any(profile =>
-                    profile.SupplierCode.Equals(supplierCode, StringComparison.OrdinalIgnoreCase)
-                )
-        )
+        if (!BrowserExtensionProfileCatalog.IsSupplierEnabled(_options.Value, supplierCode))
         {
             throw new KeyNotFoundException("供应商配置不存在或已停用。");
         }
@@ -965,6 +961,15 @@ public static partial class BrowserExtensionProfileCatalog
     public const string ExtensionVersionHeader = "X-HB-Extension-Version";
     public const string SupplierProfilesMinimumClientVersion = "1.1.0";
     public const string ExtendedProfilesMinimumClientVersion = "1.2.0";
+    public const string CategoryProfilesMinimumClientVersion = "1.5.0";
+
+    private static readonly HashSet<string> AllowedCategoryKeySources = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "pathname",
+        "hash",
+    };
 
     private static readonly HashSet<string> AllowedSources = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1030,20 +1035,82 @@ public static partial class BrowserExtensionProfileCatalog
             .Where(profile => !configuredCodes.Contains(profile.SupplierCode))
             .Concat(configuredProfiles);
 
+        var profiles = candidates
+            .Where(profile => profile.Enabled)
+            .Select(TryBuildProfile)
+            .Where(profile => profile != null)
+            .Cast<BrowserExtensionSupplierProfileDto>()
+            .GroupBy(profile => profile.SupplierCode, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+        if (!options.CategoryCaptureEnabled)
+        {
+            // 总开关关闭时不下发任何分类配置，扩展随下一次配置同步停止采集。
+            foreach (var profile in profiles)
+            {
+                profile.Category = null;
+            }
+        }
+
         return new BrowserExtensionSupplierProfilesDto
         {
             ConfigVersion = string.IsNullOrWhiteSpace(options.ConfigVersion)
                 ? "1"
                 : options.ConfigVersion.Trim(),
-            Profiles = candidates
-                .Where(profile => profile.Enabled)
-                .Select(TryBuildProfile)
-                .Where(profile => profile != null)
-                .Cast<BrowserExtensionSupplierProfileDto>()
-                .GroupBy(profile => profile.SupplierCode, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .ToList(),
+            Profiles = profiles,
         };
+    }
+
+    /// <summary>
+    /// 按业务供应商代码查找当前生效的 profile（已合并内置与后台配置、已校验）。
+    /// </summary>
+    public static BrowserExtensionSupplierProfileDto? FindProfile(
+        BrowserExtensionOptions options,
+        string? supplierCode
+    )
+    {
+        if (string.IsNullOrWhiteSpace(supplierCode))
+        {
+            return null;
+        }
+
+        var normalized = supplierCode.Trim();
+        return BuildProfiles(options)
+            .Profiles.FirstOrDefault(profile =>
+                profile.SupplierCode.Equals(normalized, StringComparison.OrdinalIgnoreCase)
+            );
+    }
+
+    public static bool IsSupplierEnabled(BrowserExtensionOptions options, string? supplierCode) =>
+        FindProfile(options, supplierCode) != null;
+
+    /// <summary>
+    /// 判断绝对 URL 的来源是否落在 profile 声明的供应商 origin 内（与扩展 host 授权同一口径）。
+    /// </summary>
+    public static bool UrlMatchesProfileOrigins(
+        BrowserExtensionSupplierProfileDto profile,
+        string? url
+    )
+    {
+        if (
+            !Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+        )
+        {
+            return false;
+        }
+
+        var origin = $"{uri.Scheme}://{uri.Authority}/";
+        return profile.Origins.Any(pattern =>
+        {
+            var regex = "^" + Regex.Escape(pattern).Replace("\\*", ".*") + "$";
+            return Regex.IsMatch(
+                origin,
+                regex,
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(50)
+            );
+        });
     }
 
     public static BrowserExtensionSupplierProfilesDto FilterProfilesForClient(
@@ -1051,6 +1118,12 @@ public static partial class BrowserExtensionProfileCatalog
         string? extensionVersion
     )
     {
+        if (IsVersionAtLeast(extensionVersion, CategoryProfilesMinimumClientVersion))
+        {
+            return profiles;
+        }
+
+        profiles = StripCategoryProfiles(profiles);
         if (IsVersionAtLeast(extensionVersion, ExtendedProfilesMinimumClientVersion))
         {
             return profiles;
@@ -1083,6 +1156,32 @@ public static partial class BrowserExtensionProfileCatalog
                 .ToList(),
         };
     }
+
+    /// <summary>
+    /// 1.5.0 之前的扩展不认识分类配置；虽然旧版校验会忽略未知字段，仍剥离以保持载荷最小。
+    /// </summary>
+    private static BrowserExtensionSupplierProfilesDto StripCategoryProfiles(
+        BrowserExtensionSupplierProfilesDto profiles
+    ) =>
+        new()
+        {
+            ConfigVersion = profiles.ConfigVersion,
+            Profiles = profiles.Profiles
+                .Select(profile => new BrowserExtensionSupplierProfileDto
+                {
+                    SupplierCode = profile.SupplierCode,
+                    DisplayName = profile.DisplayName,
+                    Enabled = profile.Enabled,
+                    Origins = profile.Origins,
+                    ListPagePatterns = profile.ListPagePatterns,
+                    CardSelector = profile.CardSelector,
+                    ItemNumber = profile.ItemNumber,
+                    MountSelector = profile.MountSelector,
+                    MountPosition = profile.MountPosition,
+                    Category = null,
+                })
+                .ToList(),
+        };
 
     private static bool IsVersionAtLeast(string? value, string minimum)
     {
@@ -1161,8 +1260,154 @@ public static partial class BrowserExtensionProfileCatalog
             },
             MountSelector = options.MountSelector.Trim(),
             MountPosition = mountPosition,
+            Category = TryBuildCategory(options.Category, supplierCode, origins),
         };
     }
+
+    /// <summary>
+    /// 校验并构建分类采集配置。任何字段非法只关闭该供应商的分类采集（返回 null），不影响按钮注入 profile。
+    /// 供应商 200（Hot Bargain）的分类即仓库分类，永不下发采集配置。
+    /// </summary>
+    internal static BrowserExtensionSupplierCategoryProfileDto? TryBuildCategory(
+        BrowserExtensionSupplierCategoryOptions? options,
+        string supplierCode,
+        IReadOnlyList<string> origins
+    )
+    {
+        if (
+            options == null
+            || !options.Enabled
+            || LocalSupplierCategoryConstants.IsHotBargain(supplierCode)
+        )
+        {
+            return null;
+        }
+
+        var pagePatterns = NormalizePagePatterns(options.CategoryPagePatterns);
+        var excludePatterns = NormalizePagePatterns(options.CategoryExcludePatterns);
+        var keyQueryParams = (options.KeyQueryParams ?? new List<string>())
+            .Select(value => value?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var promotionalPatterns = (options.PromotionalPatterns ?? new List<string>())
+            .Select(value => value?.Trim().ToLowerInvariant())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var keySource = options.KeySource?.Trim().ToLowerInvariant() ?? "pathname";
+        var navRootUrl = options.NavRootUrl?.Trim();
+
+        if (
+            pagePatterns == null
+            || excludePatterns == null
+            || pagePatterns.Count > 20
+            || excludePatterns.Count > 20
+            || !AllowedCategoryKeySources.Contains(keySource)
+            || keyQueryParams.Count > 5
+            || keyQueryParams.Any(value => !CategoryQueryParamRegex().IsMatch(value))
+            || promotionalPatterns.Count > LocalSupplierCategoryPromotionRule.MaxPatternCount
+            || promotionalPatterns.Any(value => !LocalSupplierCategoryPromotionRule.IsSafePattern(value))
+            || !IsSafeSelector(options.BreadcrumbSelector, allowEmpty: true)
+            || !IsSafeSelector(options.TitleSelector, allowEmpty: true)
+            || !IsSafeSelector(options.NavSelector, allowEmpty: true)
+            || !IsSafeSelector(options.SubcategoryLinkSelector, allowEmpty: true)
+            || !IsSafeSelector(options.PaginationNextSelector, allowEmpty: true)
+            || options.BreadcrumbSkip is < 0 or > 5
+            || options.MaxPages is < 1 or > 50
+            || options.MaxDepth is < 1 or > 6
+            || options.MaxCategories is < 10 or > 2000
+            || options.CrawlDelayMs is < 500 or > 15000
+            || !IsSafeNavRootUrl(navRootUrl, origins)
+        )
+        {
+            return null;
+        }
+
+        return new BrowserExtensionSupplierCategoryProfileDto
+        {
+            Enabled = true,
+            PassiveEnabled = options.PassiveEnabled,
+            CrawlEnabled = options.CrawlEnabled,
+            CategoryPagePatterns = pagePatterns,
+            CategoryExcludePatterns = excludePatterns,
+            BreadcrumbSelector = NullIfBlank(options.BreadcrumbSelector),
+            BreadcrumbSkip = options.BreadcrumbSkip,
+            TitleSelector = NullIfBlank(options.TitleSelector),
+            KeySource = keySource,
+            KeyQueryParams = keyQueryParams,
+            NavRootUrl = string.IsNullOrWhiteSpace(navRootUrl) ? null : navRootUrl,
+            NavSelector = NullIfBlank(options.NavSelector),
+            SubcategoryLinkSelector = NullIfBlank(options.SubcategoryLinkSelector),
+            PaginationNextSelector = NullIfBlank(options.PaginationNextSelector),
+            MaxPages = options.MaxPages,
+            MaxDepth = options.MaxDepth,
+            MaxCategories = options.MaxCategories,
+            CrawlDelayMs = options.CrawlDelayMs,
+            PromotionalPatterns = promotionalPatterns,
+        };
+    }
+
+    private static List<string>? NormalizePagePatterns(IEnumerable<string>? values)
+    {
+        var result = new List<string>();
+        foreach (var raw in values ?? Array.Empty<string>())
+        {
+            var value = raw?.Trim();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            // 分类页模式允许 "/" 开头的路径通配，或与 listPagePatterns 相同的完整 match pattern。
+            var isPathGlob = value.StartsWith('/') && value.Length <= 300 && !value.Any(char.IsWhiteSpace);
+            if (!isPathGlob && !IsSafeMatchPattern(value, originOnly: false))
+            {
+                return null;
+            }
+
+            if (!result.Contains(value, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add(value);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsSafeNavRootUrl(string? value, IReadOnlyList<string> origins)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        if (value.Length > 300 || value.Any(char.IsWhiteSpace))
+        {
+            return false;
+        }
+
+        if (value.StartsWith('/') && !value.StartsWith("//", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // 绝对地址必须落在该供应商已声明的 origin 内，且不得携带账号信息。
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            return false;
+        }
+
+        return UrlMatchesProfileOrigins(
+            new BrowserExtensionSupplierProfileDto { Origins = origins.ToList() },
+            uri.AbsoluteUri
+        );
+    }
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static bool IsSafeMatchPattern(string? value, bool originOnly)
     {
@@ -1226,4 +1471,7 @@ public static partial class BrowserExtensionProfileCatalog
 
     [GeneratedRegex(@"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")]
     private static partial Regex VersionRegex();
+
+    [GeneratedRegex(@"^[A-Za-z0-9_\-\[\]]{1,50}$")]
+    private static partial Regex CategoryQueryParamRegex();
 }

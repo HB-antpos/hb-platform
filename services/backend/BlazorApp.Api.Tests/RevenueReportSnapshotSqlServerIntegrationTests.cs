@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using AutoMapper;
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
 using Microsoft.Data.SqlClient;
@@ -111,10 +112,99 @@ public sealed class RevenueReportSnapshotSqlServerIntegrationTests
         Assert.Equal(999.99m, outside.Revenue);
     }
 
+    [RevenueReportSnapshotSqlServerFact]
+    public async Task 管理员全店视图的周层级与分时排除停用门店与排行同口径()
+    {
+        await using var fixture = await RevenueSnapshotSqlServerFixture.CreateAsync();
+        // 停用门店去年仍有日统计与小时统计：只能进排行口径之外，不能单独进周层级和分时。
+        await fixture.ExecuteAsync("""
+            INSERT INTO [dbo].[Store] ([StoreCode], [StoreName], [IsActive], [IsDeleted]) VALUES (N'CLOSED', N'已关店', 0, 0);
+            INSERT INTO [dbo].[StoreSalesStatistic] ([Date], [BranchCode], [BranchName], [TotalAmount], [OrderCount]) VALUES
+                ('2026-09-07', N'CLOSED', N'已关店', 777.77, 7);
+            INSERT INTO [dbo].[HourlySalesStatistic] ([Date], [Hour], [BranchCode], [BranchName], [TotalAmount], [OrderCount]) VALUES
+                ('2026-09-07', 9, N'CLOSED', N'已关店', 777.77, 7);
+            """);
+
+        var result = await fixture.CreateService().GetRevenueReportSnapshotAsync(
+            new DateRangeDto { StartDate = SeedDate, EndDate = SeedDate },
+            null,
+            null);
+
+        Assert.DoesNotContain(result.Branches, row => row.BranchCode == "CLOSED");
+        Assert.DoesNotContain(result.Hourly, row => row.BranchCode == "CLOSED");
+        var week = Assert.Single(result.Weekly);
+        Assert.DoesNotContain(week.Children!, child => child.Key.EndsWith("-CLOSED", StringComparison.Ordinal));
+        Assert.Equal(result.Branches.Sum(row => row.Revenue), week.Revenue);
+        Assert.Equal(result.Branches.Sum(row => row.Revenue), result.Hourly.Sum(row => row.Revenue));
+
+        // 显式请求停用门店时按请求返回，不被目录收窄。
+        var explicitScope = await fixture.CreateService().GetRevenueReportSnapshotAsync(
+            new DateRangeDto { StartDate = SeedDate, EndDate = SeedDate },
+            null,
+            new List<string> { "CLOSED" });
+        Assert.Equal(777.77m, Assert.Single(explicitScope.Hourly).Revenue);
+    }
+
+    [RevenueReportSnapshotSqlServerFact]
+    public async Task 多日区间最后一天是今天时批次单独返回今天与同期对应日()
+    {
+        await using var fixture = await RevenueSnapshotSqlServerFixture.CreateAsync();
+        var today = SalesStatisticsBusinessDate.Today();
+        var yesterday = today.AddDays(-1);
+        var compareToday = today.AddDays(-364);
+        var compareYesterday = today.AddDays(-365);
+        string D(DateTime value) => value.ToString("yyyy-MM-dd");
+        await fixture.ExecuteAsync($$"""
+            INSERT INTO [dbo].[StoreSalesStatistic] ([Date], [BranchCode], [BranchName], [TotalAmount], [OrderCount]) VALUES
+                ('{{D(yesterday)}}', N'1003', N'一〇〇三店', 100.00, 2),
+                ('{{D(today)}}', N'1003', N'一〇〇三店', 200.00, 4),
+                ('{{D(compareYesterday)}}', N'1003', N'一〇〇三店', 150.00, 3),
+                ('{{D(compareToday)}}', N'1003', N'一〇〇三店', 300.00, 6);
+            INSERT INTO [dbo].[HourlySalesStatistic] ([Date], [Hour], [BranchCode], [BranchName], [TotalAmount], [OrderCount]) VALUES
+                ('{{D(yesterday)}}', 9, N'1003', N'一〇〇三店', 100.00, 2),
+                ('{{D(today)}}', 9, N'1003', N'一〇〇三店', 50.00, 1),
+                ('{{D(today)}}', 10, N'1003', N'一〇〇三店', 150.00, 3),
+                ('{{D(compareYesterday)}}', 9, N'1003', N'一〇〇三店', 150.00, 3),
+                ('{{D(compareToday)}}', 9, N'1003', N'一〇〇三店', 120.00, 2),
+                ('{{D(compareToday)}}', 10, N'1003', N'一〇〇三店', 180.00, 4);
+            INSERT INTO [dbo].[SalesStatisticRefreshState] ([StatisticType], [Date], [Status], [LastAggregatedAtUtc], [CompletedAtUtc])
+            SELECT t.[StatisticType], d.[Date], N'Fresh', SYSUTCDATETIME(), SYSUTCDATETIME()
+            FROM (VALUES (N'StoreSales'), (N'HourlySales')) t([StatisticType])
+            CROSS JOIN (VALUES ('{{D(yesterday)}}'), ('{{D(today)}}'), ('{{D(compareYesterday)}}'), ('{{D(compareToday)}}')) d([Date]);
+            """);
+        var codes = new List<string> { "1003" };
+
+        var result = await fixture.CreateService().GetRevenueReportSnapshotAsync(
+            new DateRangeDto { StartDate = yesterday, EndDate = today, CompareStartDate = compareYesterday, CompareEndDate = compareToday },
+            codes,
+            codes);
+
+        Assert.NotNull(result.LastDay);
+        var dayBranch = Assert.Single(result.LastDay!.Branches);
+        Assert.Equal(200m, dayBranch.Revenue);
+        Assert.Equal(300m, dayBranch.RevenueLY);
+        var dayTen = Assert.Single(result.LastDay.Hourly, row => row.Hour == "10:00");
+        Assert.Equal(150m, dayTen.Revenue);
+        Assert.Equal(180m, dayTen.RevenueLY);
+        Assert.Equal(4, dayTen.OrderCountLY);
+        // 期间 2/3 只进最后一天，区间合计仍是两天之和。
+        var rangeNine = Assert.Single(result.Hourly, row => row.Hour == "09:00");
+        Assert.Equal(150m, rangeNine.Revenue);
+        Assert.Equal(270m, rangeNine.RevenueLY);
+
+        var singleDay = await fixture.CreateService().GetRevenueReportSnapshotAsync(
+            new DateRangeDto { StartDate = today, EndDate = today, CompareStartDate = compareToday, CompareEndDate = compareToday },
+            codes,
+            codes);
+        Assert.Null(singleDay.LastDay);
+        Assert.Equal(150m, Assert.Single(singleDay.Hourly, row => row.Hour == "10:00").Revenue);
+    }
+
     private sealed class RevenueSnapshotSqlServerFixture : IAsyncDisposable
     {
         private readonly string _masterConnectionString;
         private readonly string _databaseName;
+        private readonly string _databaseConnectionString;
         private readonly SqlSugarClient _db;
         private readonly SqlSugarClient _posmDb;
         private readonly MemoryCache _cache = new(new MemoryCacheOptions());
@@ -126,6 +216,7 @@ public sealed class RevenueReportSnapshotSqlServerIntegrationTests
         {
             _masterConnectionString = masterConnectionString;
             _databaseName = databaseName;
+            _databaseConnectionString = databaseConnectionString;
             _db = new SqlSugarClient(CreateConnectionConfig(databaseConnectionString));
             _posmDb = new SqlSugarClient(CreateConnectionConfig(databaseConnectionString));
         }
@@ -161,6 +252,8 @@ public sealed class RevenueReportSnapshotSqlServerIntegrationTests
                 throw;
             }
         }
+
+        public Task ExecuteAsync(string sql) => ExecuteNonQueryAsync(_databaseConnectionString, sql);
 
         public SalesDashboardReactService CreateService()
         {

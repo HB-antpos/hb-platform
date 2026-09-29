@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
@@ -25,6 +26,11 @@ public static class ServiceRegistration
     internal const string PreviewApiBaseAddress = "http://127.0.0.1:0/";
     private const string ApplicationLogUploadClientName = "HbposApplicationLogUpload";
     private const string OperationAuditUploadClientName = "HbposOperationAuditUpload";
+#if DEBUG
+    private const bool IsDebugBuild = true;
+#else
+    private const bool IsDebugBuild = false;
+#endif
 
     public static IServiceCollection AddHbposClientServices(
         this IServiceCollection services,
@@ -219,6 +225,11 @@ public static class ServiceRegistration
             // 商品同步由调用方令牌控制，禁止 HttpClient 隐式 100 秒超时截断冷缓存构建。
             client.Timeout = Timeout.InfiniteTimeSpan;
         })
+        // 中文注释：声明并自动解压 gzip，服务端只对 checksumVersion=2 的目录分页与码冲突候选压缩，其它接口响应不变。
+        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+        })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
         services.AddHttpClient<IDeviceApiClient, DeviceApiClient>(client =>
@@ -345,6 +356,7 @@ public static class ServiceRegistration
         services.AddSingleton<IRemoteLookupRefreshService, RemoteLookupRefreshService>();
         services.AddSingleton<ISpecialProductService, SpecialProductService>();
         services.AddSingleton<IShellCultureService, ShellCultureService>();
+        services.AddSingleton<ICatalogSyncStatusService, CatalogSyncStatusService>();
         services.AddSingleton<IShellCatalogService, ShellCatalogService>();
         services.AddSingleton<IMainShellStartupService, MainShellStartupService>();
         services.AddSingleton<IShellSyncCenterService, ShellSyncCenterService>();
@@ -370,9 +382,21 @@ public static class ServiceRegistration
         services.AddSingleton<IAppUpdateDownloadDirectoryProvider, AppUpdateDownloadDirectoryProvider>();
         services.AddSingleton<IProcessLauncher, ProcessLauncher>();
         services.AddSingleton<IAppUpdateInstallSafetyGuard, ShellAppUpdateInstallSafetyGuard>();
+        services.AddSingleton<IAppUpdateProgressWindowLauncher>(sp => new AppUpdateProgressWindowLauncher(
+            sp.GetRequiredService<IProcessLauncher>(),
+            sp.GetRequiredService<IAppVersionProvider>(),
+            AppUpdateProgressWindowOptions.CreateDefault()));
         services.AddSingleton<IAppUpdateInstallerLauncher, AppUpdateInstallerLauncher>();
         services.AddSingleton<IAppUpdatePromptService, WpfAppUpdatePromptService>();
         services.AddSingleton<IAppUpdateCoordinator, AppUpdateCoordinator>();
+        services.AddSingleton(sp => AppUpdateBackgroundCheckOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
+        services.AddSingleton<AppUpdateBackgroundCheckScheduler>();
+        services.AddSingleton<IAppUpdateElevationProbe, WindowsAppUpdateElevationProbe>();
+        services.AddSingleton(sp => AppUpdateUnattendedInstallOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build(),
+            IsDebugBuild));
+        services.AddSingleton<AppUpdateUnattendedInstallScheduler>();
         services.AddSingleton(sp => new AttendanceQrPanelViewModel(
             sp.GetRequiredService<IAttendanceSigningKeyApiClient>(),
             sp.GetRequiredService<IConnectivityApiClient>(),
@@ -523,6 +547,8 @@ public static class ServiceRegistration
                 sp.GetRequiredService<IUiPriorityCoordinator>(),
                 () => sp.GetRequiredService<IShellCatalogService>().IsCatalogSyncActive));
         services.AddSingleton<IDisplayTopologyService, DisplayTopologyService>();
+        services.AddSingleton<IColorThemeService, ColorThemeService>();
+        services.AddSingleton<ColorThemeSwitcherViewModel>();
         services.AddSingleton<IWindowOwnerProvider, WpfWindowOwnerProvider>();
         services.AddSingleton<ICustomerDisplayWindowService, CustomerDisplayWindowService>();
         services.AddSingleton<RawScannerInputProcessor>();
@@ -612,7 +638,8 @@ public static class ServiceRegistration
                 storeReceiptProfileApiClient: sp.GetRequiredService<IStoreReceiptProfileApiClient>(),
                 cashierSessionRefreshService: sp.GetRequiredService<CashierSessionRefreshService>(),
                 remoteMaintenanceService: sp.GetRequiredService<IRemoteMaintenanceService>(),
-                paymentMethodSettingsService: sp.GetRequiredService<IPaymentMethodSettingsService>());
+                paymentMethodSettingsService: sp.GetRequiredService<IPaymentMethodSettingsService>(),
+                catalogSyncStatusService: sp.GetRequiredService<ICatalogSyncStatusService>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

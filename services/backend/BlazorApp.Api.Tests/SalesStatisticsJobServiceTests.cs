@@ -4623,11 +4623,12 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
                 return;
 
             guardEntered.TrySetResult();
-            await releaseGuard.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // 守卫上限必须长于下方"接管不应被阻塞"的正向等待预算，否则错误实现会在守卫自行超时后才放行而被误判。
+            await releaseGuard.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout * 2);
         }
 
         var executionTask = executeAsync(ValidateOwnerAsync);
-        await guardEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await guardEntered.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         using var takeoverDb = CreateIndependentLocalClient();
         var takeoverWriteStarted = new TaskCompletionSource(
@@ -4656,27 +4657,40 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
         bool takeoverWasBlocked;
         try
         {
-            await takeoverWriteStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            await Task.Delay(250);
-            takeoverWasBlocked = !takeoverTask.IsCompleted;
+            await takeoverWriteStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            if (expectTakeoverBlocked)
+            {
+                // 反向等待：守卫挂住期间接管写入不应在短窗口内完成；负载只会让它更难完成，不会误报。
+                await Task.Delay(250);
+                takeoverWasBlocked = !takeoverTask.IsCompleted;
+            }
+            else
+            {
+                // 正向等待：守卫到 finally 才放开，接管写入必须在守卫挂住期间完成。
+                // 这不是耗时断言，原先固定等 250ms，负载高时写入本身就可能超过而误报。
+                takeoverWasBlocked = await Task.WhenAny(
+                    takeoverTask,
+                    Task.Delay(AsyncTestWaitSupport.DefaultTimeout)
+                ) != takeoverTask;
+            }
         }
         finally
         {
             if (waitForTakeoverBeforeRelease)
-                await takeoverTask.WaitAsync(TimeSpan.FromSeconds(10));
+                await takeoverTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
             releaseGuard.TrySetResult();
         }
 
         Exception? executionError = null;
         try
         {
-            await executionTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await executionTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         }
         catch (Exception ex)
         {
             executionError = ex;
         }
-        await takeoverTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await takeoverTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         if (expectedExecutionErrorType != null)
         {
@@ -4697,7 +4711,8 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
 
     private SqlSugarClient CreateIndependentLocalClient() => new(new ConnectionConfig
     {
-        ConnectionString = $"Data Source={_localDbPath};Default Timeout=5",
+        // Default Timeout 同时是 SQLite 忙等锁的上限；接管写入会故意等执行事务的写锁，属于防挂死预算。
+        ConnectionString = $"Data Source={_localDbPath};Default Timeout={(int)AsyncTestWaitSupport.DefaultTimeout.TotalSeconds}",
         DbType = DbType.Sqlite,
         IsAutoCloseConnection = true,
         InitKeyType = InitKeyType.Attribute,

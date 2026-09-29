@@ -26,7 +26,7 @@
   var EXTENSION_VERSION, HB_API_ORIGIN, HB_WEB_ORIGIN, BUILD_TARGET, API_BASE;
   var init_config = __esm({
     "hb-safari-config:config.js"() {
-      EXTENSION_VERSION = "1.4.1";
+      EXTENSION_VERSION = "1.5.0";
       HB_API_ORIGIN = "https://hotbargain.vip";
       HB_WEB_ORIGIN = "https://hotbargain.vip";
       BUILD_TARGET = "safari";

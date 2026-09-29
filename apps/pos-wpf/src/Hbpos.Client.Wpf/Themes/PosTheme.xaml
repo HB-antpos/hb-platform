@@ -3,22 +3,9 @@
                     xmlns:converters="clr-namespace:Hbpos.Client.Wpf.Converters"
                     xmlns:services="clr-namespace:Hbpos.Client.Wpf.Services"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
-    <Color x:Key="PosColorCanvas">#FFF3F3F7</Color>
-    <Color x:Key="PosColorSurface">#FFFFFFFF</Color>
-    <Color x:Key="PosColorSurfaceAlt">#FFF9F9FD</Color>
-    <Color x:Key="PosColorPrimary">#FF0056D2</Color>
-    <Color x:Key="PosColorPrimaryDark">#FF191C1E</Color>
-    <Color x:Key="PosColorAccent">#FFFF8F00</Color>
-    <Color x:Key="PosColorSuccess">#FF0F9D58</Color>
-    <Color x:Key="PosColorWarning">#FFFFB74D</Color>
-    <Color x:Key="PosColorDanger">#FF940010</Color>
-    <Color x:Key="PosColorText">#FF191C1E</Color>
-    <Color x:Key="PosColorMutedText">#FF737785</Color>
-    <Color x:Key="PosColorBorder">#FFC3C6D6</Color>
-    <Color x:Key="PosColorHeader">#FFFFFFFF</Color>
-    <Color x:Key="PosColorFooter">#FFFFFFFF</Color>
+    <!-- 收银主界面的颜色都在 Themes/Palettes/*.xaml 色板中，按主题整体替换；本文件只能用 DynamicResource 引用它们。 -->
 
-    <!-- 客显使用独立深色调色板，避免改变收银主界面的浅色主题。 -->
+    <!-- 客显使用独立深色调色板，不随收银主界面的配色主题切换。 -->
     <Color x:Key="PosCustomerDisplayColorBackground">#FF09111F</Color>
     <Color x:Key="PosCustomerDisplayColorSurface">#FF101B2D</Color>
     <Color x:Key="PosCustomerDisplayColorText">#FFFFFFFF</Color>
@@ -27,24 +14,6 @@
     <Color x:Key="PosCustomerDisplayColorAmount">#FFFFC73D</Color>
     <Color x:Key="PosCustomerDisplayColorDivider">#1FFFFFFF</Color>
     <Color x:Key="PosCustomerDisplayColorAccentSurface">#1F69E3C2</Color>
-
-    <SolidColorBrush x:Key="PosScreenBackgroundBrush" Color="{StaticResource PosColorCanvas}" />
-    <SolidColorBrush x:Key="PosSurfaceBrush" Color="{StaticResource PosColorSurface}" />
-    <SolidColorBrush x:Key="PosSurfaceAltBrush" Color="{StaticResource PosColorSurfaceAlt}" />
-    <SolidColorBrush x:Key="PosPrimaryBrush" Color="{StaticResource PosColorPrimary}" />
-    <SolidColorBrush x:Key="PosPrimaryDarkBrush" Color="{StaticResource PosColorPrimaryDark}" />
-    <SolidColorBrush x:Key="PosAccentBrush" Color="{StaticResource PosColorAccent}" />
-    <SolidColorBrush x:Key="PosSuccessBrush" Color="{StaticResource PosColorSuccess}" />
-    <SolidColorBrush x:Key="PosWarningBrush" Color="{StaticResource PosColorWarning}" />
-    <SolidColorBrush x:Key="PosDangerBrush" Color="{StaticResource PosColorDanger}" />
-    <SolidColorBrush x:Key="PosTextBrush" Color="{StaticResource PosColorText}" />
-    <SolidColorBrush x:Key="PosMutedForegroundBrush" Color="{StaticResource PosColorMutedText}" />
-    <SolidColorBrush x:Key="PosBorderBrush" Color="{StaticResource PosColorBorder}" />
-    <SolidColorBrush x:Key="PosHeaderBackgroundBrush" Color="{StaticResource PosColorHeader}" />
-    <SolidColorBrush x:Key="PosHeaderForegroundBrush" Color="{StaticResource PosColorPrimaryDark}" />
-    <SolidColorBrush x:Key="PosHeaderMutedForegroundBrush" Color="{StaticResource PosColorMutedText}" />
-    <SolidColorBrush x:Key="PosFooterBackgroundBrush" Color="{StaticResource PosColorFooter}" />
-    <SolidColorBrush x:Key="PosAccentForegroundBrush" Color="{StaticResource PosColorAccent}" />
 
     <SolidColorBrush x:Key="PosCustomerDisplayBackgroundBrush" Color="{StaticResource PosCustomerDisplayColorBackground}" />
     <SolidColorBrush x:Key="PosCustomerDisplaySurfaceBrush" Color="{StaticResource PosCustomerDisplayColorSurface}" />
@@ -57,6 +26,7 @@
 
     <FontFamily x:Key="PosFontFamily">Segoe UI</FontFamily>
     <sys:Double x:Key="PosFontSizeBody">14</sys:Double>
+    <sys:Double x:Key="PosFontSizeButton">16</sys:Double>
     <sys:Double x:Key="PosFontSizeSmall">12</sys:Double>
     <sys:Double x:Key="PosFontSizeTitle">22</sys:Double>
     <sys:Double x:Key="PosFontSizeAmount">32</sys:Double>
@@ -118,7 +88,7 @@
                     <Style TargetType="TextBlock">
                         <Setter Property="TextAlignment" Value="Left" />
                         <Setter Property="FontWeight" Value="Normal" />
-                        <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+                        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsCentered}" Value="True">
                                 <Setter Property="TextAlignment" Value="Center" />
@@ -130,7 +100,7 @@
                                 <Setter Property="FontWeight" Value="Black" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsMachineCode}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource PosPrimaryBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -141,20 +111,33 @@
 
     <Style TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
-        <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         <Setter Property="FontSize" Value="{StaticResource PosFontSizeBody}" />
+    </Style>
+
+    <!-- 日期框沿用原样式，只把文字改为主题正文色；系统默认黑字在深色主题下看不见。 -->
+    <Style TargetType="DatePicker" BasedOn="{StaticResource {x:Type DatePicker}}">
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+    </Style>
+
+    <!-- 上面的全局 TextBlock 样式会把按钮里的文字也固定成 14，按钮样式里的 FontSize 传不到文字。
+         按钮样式在 Style.Resources（显式 TextBlock 子元素）和模板 ContentPresenter.Resources（字符串内容）里
+         基于本样式声明隐式 TextBlock 样式，让按钮文字跟随所在按钮的字号；按钮外的正文仍是 14。 -->
+    <Style x:Key="PosButtonContentTextStyle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+        <Setter Property="FontSize"
+                Value="{Binding FontSize, RelativeSource={RelativeSource AncestorType=ButtonBase}, FallbackValue={StaticResource PosFontSizeBody}}" />
     </Style>
 
     <Style x:Key="PosTitleTextBlock" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
-        <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         <Setter Property="FontSize" Value="{StaticResource PosFontSizeTitle}" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style x:Key="PosCardStyle" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="6" />
         <Setter Property="Padding" Value="16" />
@@ -167,23 +150,26 @@
     </Style>
 
     <Style x:Key="PosStatusPillStyle" TargetType="Border" BasedOn="{StaticResource PosPillBaseStyle}">
-        <Setter Property="Background" Value="#FFE7F7EF" />
+        <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
     </Style>
 
     <Style x:Key="PosWarningPillStyle" TargetType="Border" BasedOn="{StaticResource PosPillBaseStyle}">
-        <Setter Property="Background" Value="#FFFFF1D6" />
+        <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
     </Style>
 
     <Style x:Key="PosPriceSourceBadgeStyle" TargetType="Border" BasedOn="{StaticResource PosPillBaseStyle}">
-        <Setter Property="Background" Value="#FFE8F0FE" />
+        <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
         <Setter Property="Padding" Value="8,2" />
     </Style>
 
     <Style x:Key="PosButtonBaseStyle" TargetType="Button">
+        <Style.Resources>
+            <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}" />
+        </Style.Resources>
         <Setter Property="MinHeight" Value="40" />
         <Setter Property="Padding" Value="14,8" />
         <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
-        <Setter Property="FontSize" Value="{StaticResource PosFontSizeBody}" />
+        <Setter Property="FontSize" Value="{StaticResource PosFontSizeButton}" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="BorderThickness" Value="1" />
@@ -203,7 +189,14 @@
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           Margin="{TemplateBinding Padding}"
-                                          RecognizesAccessKey="True" />
+                                          RecognizesAccessKey="True">
+                            <ContentPresenter.Resources>
+                                <!-- 纯文字按钮会生成 TextBlock 并套用全局正文色；这里跟随按钮字号，文字色改为跟随按钮前景色（主按钮白字）。 -->
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}">
+                                    <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                </Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -254,29 +247,21 @@
     </Style>
 
     <Style x:Key="PosPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PosButtonBaseStyle}">
-        <Setter Property="Background" Value="{StaticResource PosPrimaryBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
         <Setter Property="Foreground" Value="White" />
     </Style>
 
     <Style x:Key="PosBlueGradientButtonStyle" TargetType="Button" BasedOn="{StaticResource PosButtonBaseStyle}">
-        <Setter Property="BorderBrush" Value="#FF0046B2" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
         <Setter Property="Foreground" Value="White" />
-        <Setter Property="Background">
-            <Setter.Value>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#FF0088FF" Offset="0" />
-                    <GradientStop Color="#FF0056D2" Offset="0.55" />
-                    <GradientStop Color="#FF003C9A" Offset="1" />
-                </LinearGradientBrush>
-            </Setter.Value>
-        </Setter>
+        <Setter Property="Background" Value="{DynamicResource PosPrimaryGradientBrush}" />
     </Style>
 
     <Style x:Key="PosSecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PosButtonBaseStyle}">
-        <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource PosPrimaryDarkBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosPrimaryDarkBrush}" />
     </Style>
 
     <Style x:Key="PosSearchSegmentButtonStyle" TargetType="Button" BasedOn="{StaticResource PosButtonBaseStyle}">
@@ -288,8 +273,8 @@
     </Style>
 
     <Style x:Key="PosDangerButtonStyle" TargetType="Button" BasedOn="{StaticResource PosPrimaryButtonStyle}">
-        <Setter Property="Background" Value="{StaticResource PosDangerBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosDangerBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosDangerBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
     </Style>
 
     <Style x:Key="PosNumberButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
@@ -298,7 +283,7 @@
         <Setter Property="Padding" Value="6,2" />
         <Setter Property="FontSize" Value="44" />
         <Setter Property="FontWeight" Value="Black" />
-        <Setter Property="Background" Value="White" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Button}">
@@ -382,9 +367,12 @@
         <Setter Property="Margin" Value="0,0,0,12" />
     </Style>
 
+    <!-- 本样式不继承 MaterialDesign，系统默认模板会把文字和光标设成黑色；深色主题下必须显式跟随色板。 -->
     <Style x:Key="PosSearchTextBoxStyle" TargetType="TextBox">
-        <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource PosTextBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="12,0" />
         <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
@@ -397,8 +385,8 @@
     </Style>
 
     <Style x:Key="PosSearchResultListStyle" TargetType="ListBox">
-        <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
     </Style>
 
@@ -415,23 +403,23 @@
         <Setter Property="CanUserDeleteRows" Value="False" />
         <Setter Property="HeadersVisibility" Value="Column" />
         <Setter Property="GridLinesVisibility" Value="Horizontal" />
-        <Setter Property="Background" Value="{StaticResource PosSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         <Setter Property="RowHeight" Value="44" />
         <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
         <Setter Property="FontSize" Value="{StaticResource PosFontSizeBody}" />
         <Setter Property="ColumnHeaderStyle">
             <Setter.Value>
                 <Style TargetType="DataGridColumnHeader">
-                    <Setter Property="Background" Value="#FFF8FAFD" />
-                    <Setter Property="Foreground" Value="{StaticResource PosMutedForegroundBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
                     <Setter Property="FontSize" Value="{StaticResource PosFontSizeSmall}" />
                     <Setter Property="FontWeight" Value="SemiBold" />
                     <Setter Property="Padding" Value="10,8" />
                     <Setter Property="BorderThickness" Value="0,0,0,1" />
-                    <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
                 </Style>
             </Setter.Value>
         </Setter>
@@ -441,7 +429,7 @@
         <Setter Property="Width" Value="36" />
         <Setter Property="Height" Value="32" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="BorderThickness" Value="0" />
@@ -457,10 +445,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#FFF0F0F2" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceMutedBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#FFE2E2E6" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceStrongBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -471,8 +459,8 @@
     <Style x:Key="TitleBarCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource TitleBarButtonStyle}">
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="#FFFFE0E0" />
-                <Setter Property="Foreground" Value="{StaticResource PosDangerBrush}" />
+                <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
             </Trigger>
         </Style.Triggers>
     </Style>
@@ -480,7 +468,7 @@
     <Style x:Key="PosShellNavButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Padding" Value="16,6" />
@@ -501,10 +489,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#FFF0F0F2" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceMutedBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#FFE2E2E6" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceStrongBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Root" Property="Opacity" Value="0.45" />
@@ -518,7 +506,7 @@
     <Style x:Key="PosIconTileButtonStyle" TargetType="Button" BasedOn="{StaticResource PosButtonBaseStyle}">
         <Setter Property="MinHeight" Value="78" />
         <Setter Property="Margin" Value="6" />
-        <Setter Property="Background" Value="White" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Padding" Value="8" />
         <Setter Property="FontSize" Value="12" />
@@ -530,8 +518,8 @@
     </Style>
 
     <Style x:Key="PosQuickAmountButtonStyle" TargetType="Button" BasedOn="{StaticResource PosPrimaryButtonStyle}">
-        <Setter Property="Background" Value="{StaticResource PosAccentBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosAccentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosAccentBrush}" />
         <Setter Property="Foreground" Value="White" />
         <Setter Property="MinHeight" Value="48" />
         <Setter Property="Margin" Value="4" />
@@ -540,8 +528,8 @@
     </Style>
 
     <Style x:Key="PosSyncBadgeStyle" TargetType="Border">
-        <Setter Property="Background" Value="#FFF3F3F7" />
-        <Setter Property="BorderBrush" Value="#FFD9DCE5" />
+        <Setter Property="Background" Value="{DynamicResource PosScreenBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="Padding" Value="10,5" />
@@ -551,7 +539,7 @@
     <Style x:Key="PosStitchTileLabelStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="Black" />
-        <Setter Property="Foreground" Value="{StaticResource PosTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         <Setter Property="TextAlignment" Value="Left" />
         <Setter Property="TextWrapping" Value="Wrap" />
         <Setter Property="TextTrimming" Value="CharacterEllipsis" />
@@ -562,9 +550,9 @@
         <Setter Property="Height" Value="56" />
         <Setter Property="Margin" Value="3" />
         <Setter Property="Padding" Value="8,6" />
-        <Setter Property="Background" Value="White" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource PosPrimaryDarkBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosPrimaryDarkBrush}" />
         <Setter Property="FontSize" Value="10" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -587,8 +575,8 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#FFE8F0FE" />
-                            <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Root" Property="RenderTransform">
@@ -596,7 +584,7 @@
                                     <ScaleTransform ScaleX="0.96" ScaleY="0.96" />
                                 </Setter.Value>
                             </Setter>
-                            <Setter TargetName="Root" Property="Background" Value="#FFD6E4FA" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftStrongBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Root" Property="Opacity" Value="0.45" />
@@ -618,28 +606,28 @@
         <Setter Property="Margin" Value="3" />
         <Setter Property="MinHeight" Value="54" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="Background" Value="White" />
-        <Setter Property="BorderBrush" Value="#FFE2E2E6" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
         <Setter Property="FontSize" Value="20" />
         <Setter Property="FontWeight" Value="Black" />
     </Style>
 
     <Style x:Key="PosStitchClearNumberButtonStyle" TargetType="Button" BasedOn="{StaticResource PosStitchNumberButtonStyle}">
-        <Setter Property="Background" Value="#FFFFDAD6" />
-        <Setter Property="BorderBrush" Value="#FFFFDAD6" />
-        <Setter Property="Foreground" Value="#FF93000A" />
+        <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
     </Style>
 
     <Style x:Key="PosStitchQuickButtonStyle" TargetType="Button" BasedOn="{StaticResource PosStitchNumberButtonStyle}">
-        <Setter Property="Background" Value="#FFFFDCC2" />
-        <Setter Property="BorderBrush" Value="#FFFFDCC2" />
+        <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
         <Setter Property="Foreground" Value="#FF2E1500" />
-        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontSize" Value="16" />
     </Style>
 
     <Style x:Key="PosMainNumberButtonStyle" TargetType="Button" BasedOn="{StaticResource PosStitchNumberButtonStyle}">
-        <Setter Property="Background" Value="White" />
-        <Setter Property="Foreground" Value="#191C1E" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
         <Setter Property="FontSize" Value="26" />
         <Setter Property="FontWeight" Value="Bold" />
         <Setter Property="Margin" Value="2" />
@@ -674,8 +662,8 @@
               </Border>
               <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True">
-                      <Setter TargetName="RootBorder" Property="Background" Value="#E8F0FE" />
-                      <Setter TargetName="RootBorder" Property="BorderBrush" Value="#330056D2" />
+                      <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                      <Setter TargetName="RootBorder" Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
                   </Trigger>
                   <Trigger Property="IsPressed" Value="True">
                       <Setter TargetName="RootBorder" Property="RenderTransform">
@@ -683,7 +671,7 @@
                               <ScaleTransform ScaleX="0.95" ScaleY="0.95" />
                           </Setter.Value>
                       </Setter>
-                      <Setter TargetName="RootBorder" Property="Background" Value="#D6E4FA" />
+                      <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource PosPrimarySoftStrongBrush}" />
                   </Trigger>
               </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -692,17 +680,17 @@
     </Style>
 
     <Style x:Key="PosMainClearNumberButtonStyle" TargetType="Button" BasedOn="{StaticResource PosMainNumberButtonStyle}">
-        <Setter Property="Background" Value="White" />
-        <Setter Property="BorderBrush" Value="#FFFFB4AB" />
-        <Setter Property="Foreground" Value="#FF93000A" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
         <Setter Property="FontSize" Value="18" />
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
 
     <Style x:Key="PosMainQuickButtonStyle" TargetType="Button" BasedOn="{StaticResource PosMainNumberButtonStyle}">
-        <Setter Property="Background" Value="#FFE8F0FE" />
-        <Setter Property="BorderBrush" Value="#FF8AB4F8" />
-        <Setter Property="Foreground" Value="#FF003C9A" />
+        <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
         <Setter Property="FontSize" Value="20" />
         <Setter Property="FontWeight" Value="Black" />
         <Setter Property="Template">
@@ -735,8 +723,8 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="RootBorder" Property="Background" Value="#FFD6E4FA" />
-                            <Setter TargetName="RootBorder" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                            <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource PosPrimarySoftStrongBrush}" />
+                            <Setter TargetName="RootBorder" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="RootBorder" Property="RenderTransform">
@@ -744,7 +732,7 @@
                                     <ScaleTransform ScaleX="0.95" ScaleY="0.95" />
                                 </Setter.Value>
                             </Setter>
-                            <Setter TargetName="RootBorder" Property="Background" Value="#FFC4D7F5" />
+                            <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource PosPrimarySoftStrongBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -756,9 +744,9 @@
         <Setter Property="MinHeight" Value="48" />
         <Setter Property="Margin" Value="2" />
         <Setter Property="Padding" Value="8,4" />
-        <Setter Property="Background" Value="White" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource PosPrimaryDarkBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosPrimaryDarkBrush}" />
         <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="Black" />
@@ -805,14 +793,14 @@
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
-                            <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#FFE8F0FE" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="{StaticResource PosPrimaryBrush}" />
-                            <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                             <Setter Property="Foreground" Value="White" />
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -826,8 +814,8 @@
         <Setter Property="Margin" Value="0" />
         <Setter Property="Padding" Value="6,2" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosBorderBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource PosPrimaryDarkBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource PosPrimaryDarkBrush}" />
         <Setter Property="BorderThickness" Value="0,0,1,0" />
         <Setter Property="FontFamily" Value="{StaticResource PosFontFamily}" />
         <Setter Property="FontSize" Value="13" />
@@ -859,8 +847,8 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Root" Property="Background" Value="#FFE8F0FE" />
-                            <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Root" Property="RenderTransform">
@@ -868,8 +856,8 @@
                                     <ScaleTransform ScaleX="0.95" ScaleY="0.95" />
                                 </Setter.Value>
                             </Setter>
-                            <Setter TargetName="Root" Property="Background" Value="{StaticResource PosPrimaryBrush}" />
-                            <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource PosPrimaryBrush}" />
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
                             <Setter TargetName="DiscountText" Property="Foreground" Value="White" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
@@ -885,8 +873,8 @@
         <Setter Property="Padding" Value="12,6" />
         <Style.Triggers>
             <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Background" Value="#FF9CA3AF" />
-                <Setter Property="BorderBrush" Value="#FF6B7280" />
+                <Setter Property="Background" Value="{DynamicResource PosBorderStrongBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource PosBorderStrongBrush}" />
                 <Setter Property="Foreground" Value="White" />
             </Trigger>
         </Style.Triggers>
@@ -896,7 +884,7 @@
         <Setter Property="MinHeight" Value="48" />
         <Setter Property="Margin" Value="3,0" />
         <Setter Property="Padding" Value="7" />
-        <Setter Property="Background" Value="White" />
+        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Effect">
             <Setter.Value>
@@ -906,8 +894,8 @@
     </Style>
 
     <Style x:Key="PosStitchExitButtonStyle" TargetType="Button" BasedOn="{StaticResource PosStitchActionButtonStyle}">
-        <Setter Property="Background" Value="{StaticResource PosDangerBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource PosDangerBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PosDangerBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
         <Setter Property="Foreground" Value="White" />
     </Style>
 
@@ -915,16 +903,16 @@
         <Setter Property="Width" Value="32" />
         <Setter Property="Height" Value="32" />
         <Setter Property="CornerRadius" Value="16" />
-        <Setter Property="Background" Value="#FFDAE2FF" />
+        <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
         <Setter Property="HorizontalAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="PosStitchDangerIconCircleStyle" TargetType="Border" BasedOn="{StaticResource PosStitchActionIconCircleStyle}">
-        <Setter Property="Background" Value="#FFFFDAD6" />
+        <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
     </Style>
 
     <Style x:Key="PosStitchWarmIconCircleStyle" TargetType="Border" BasedOn="{StaticResource PosStitchActionIconCircleStyle}">
-        <Setter Property="Background" Value="#FFFFDCC2" />
+        <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
     </Style>
 
     <Style x:Key="PosStitchExitIconCircleStyle" TargetType="Border" BasedOn="{StaticResource PosStitchActionIconCircleStyle}">

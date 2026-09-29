@@ -31,6 +31,13 @@ public interface ICustomerDisplayWindowService
 
     event EventHandler? Closed;
 
+    /// <summary>客显窗口在普通模式下双击标题栏，请求切到全屏。</summary>
+    event EventHandler? FullscreenRequested
+    {
+        add { }
+        remove { }
+    }
+
     void Prewarm(CustomerDisplayViewModel viewModel)
     {
     }
@@ -64,6 +71,8 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
     public CustomerDisplayWindowMode Mode => _mode;
 
     public event EventHandler? Closed;
+
+    public event EventHandler? FullscreenRequested;
 
     internal sealed record CustomerDisplayLayoutPlan(
         bool TitleBarVisibleDuringPlacement,
@@ -188,6 +197,7 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
 
         _displayTopology.AttachWorkAreaConstraint(_window);
         _window.Closed += OnWindowClosed;
+        _window.FullscreenRequested += OnWindowFullscreenRequested;
         stopwatch.Stop();
         ConsoleLog.Write(
             "CustomerDisplay",
@@ -349,10 +359,31 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
         if (_window is not null)
         {
             _window.Closed -= OnWindowClosed;
+            _window.FullscreenRequested -= OnWindowFullscreenRequested;
             _window = null;
         }
 
         _mode = CustomerDisplayWindowMode.Closed;
         Closed?.Invoke(this, EventArgs.Empty);
     }
+
+    private void OnWindowFullscreenRequested(object? sender, EventArgs e)
+    {
+        OnFullscreenRequested();
+    }
+
+    internal void OnFullscreenRequested()
+    {
+        ConsoleLog.Write("CustomerDisplay", $"window fullscreen requested currentMode={_mode}");
+        if (!ShouldForwardFullscreenRequest(_mode))
+        {
+            return;
+        }
+
+        FullscreenRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // 只有带标题栏的普通模式能双击；全屏已无标题栏，关闭状态下的迟到事件直接忽略。
+    internal static bool ShouldForwardFullscreenRequest(CustomerDisplayWindowMode mode) =>
+        mode == CustomerDisplayWindowMode.Normal;
 }

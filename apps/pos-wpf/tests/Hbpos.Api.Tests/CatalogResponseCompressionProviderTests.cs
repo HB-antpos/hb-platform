@@ -7,12 +7,12 @@ using Microsoft.Extensions.Options;
 namespace Hbpos.Api.Tests;
 
 /// <summary>
-/// gzip 仅对商品分页且 checksumVersion=2 生效；v1/WPF 与其他端点保持未压缩，
+/// gzip 只对商品分页且 checksumVersion=2、码冲突候选两条白名单生效；v1/WPF 分页与其他端点保持未压缩，
 /// 保证 WPF v1 下载响应与修改前字节级一致。
 /// </summary>
-public sealed class CatalogV2ResponseCompressionProviderTests
+public sealed class CatalogResponseCompressionProviderTests
 {
-    private static CatalogV2ResponseCompressionProvider CreateProvider()
+    private static CatalogResponseCompressionProvider CreateProvider()
     {
         // 中文注释：与 Program.cs 注册一致：为压缩 provider 注册所需 options，
         // JSON 需显式加入可压缩 MIME 白名单。
@@ -25,7 +25,7 @@ public sealed class CatalogV2ResponseCompressionProviderTests
         services.AddOptions();
         services.Configure<GzipCompressionProviderOptions>(_ => { });
         services.Configure<BrotliCompressionProviderOptions>(_ => { });
-        var provider = new CatalogV2ResponseCompressionProvider(
+        var provider = new CatalogResponseCompressionProvider(
             services.BuildServiceProvider(),
             Options.Create(compressionOptions));
         return provider;
@@ -73,24 +73,39 @@ public sealed class CatalogV2ResponseCompressionProviderTests
         Assert.False(provider.ShouldCompressResponse(context));
     }
 
-    [Fact]
-    public void Does_not_compress_other_endpoints()
+    [Theory]
+    [InlineData("/api/v1/catalog/sellable-items/code-conflicts", "?storeCode=S1")]
+    [InlineData("/API/V1/Catalog/Sellable-Items/Code-Conflicts", "?storeCode=S1")]
+    [InlineData("/api/v1/catalog/sellable-items/code-conflicts/", "?storeCode=S1")]
+    public void Compresses_code_conflicts_with_json_content_type(string path, string query)
     {
         var provider = CreateProvider();
-        var context = CreateContext(
-            "/api/v1/catalog/promotions",
-            "?storeCode=S1&checksumVersion=2");
+        var context = CreateContext(path, query);
+
+        Assert.True(provider.ShouldCompressResponse(context));
+    }
+
+    [Theory]
+    [InlineData("/api/v1/catalog/promotions", "?storeCode=S1&checksumVersion=2")]
+    [InlineData("/api/v1/catalog/sellable-items", "?storeCode=S1")]
+    [InlineData("/api/v1/catalog/sellable-items/lookup", "?storeCode=S1&lookupCode=123")]
+    [InlineData("/api/v1/catalog/sellable-items/code-conflicts-v2", "?storeCode=S1")]
+    [InlineData("/api/v1/health", "")]
+    public void Does_not_compress_other_endpoints(string path, string query)
+    {
+        var provider = CreateProvider();
+        var context = CreateContext(path, query);
 
         Assert.False(provider.ShouldCompressResponse(context));
     }
 
-    [Fact]
-    public void Does_not_compress_non_compressible_content_type()
+    [Theory]
+    [InlineData("/api/v1/catalog/sellable-items/page", "?storeCode=S1&pageSize=5000&checksumVersion=2")]
+    [InlineData("/api/v1/catalog/sellable-items/code-conflicts", "?storeCode=S1")]
+    public void Does_not_compress_non_compressible_content_type(string path, string query)
     {
         var provider = CreateProvider();
-        var context = CreateContext(
-            "/api/v1/catalog/sellable-items/page",
-            "?storeCode=S1&pageSize=5000&checksumVersion=2");
+        var context = CreateContext(path, query);
         context.Response.ContentType = "application/octet-stream";
 
         Assert.False(provider.ShouldCompressResponse(context));

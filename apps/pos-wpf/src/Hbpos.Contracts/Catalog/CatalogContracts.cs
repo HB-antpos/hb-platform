@@ -189,3 +189,13 @@ public sealed record CatalogSpecialProductsPageResponse(
     string? NextCursor,
     bool HasMore,
     int TotalCount);
+
+/// <summary>
+/// 同一查询码对应多个不同商品时的全部候选：每个商品一条，按目录决胜顺序排列，首条即目录中的胜出项。
+/// Available=false 表示服务端当前目录尚未算出冲突（例如刚从旧快照恢复），客户端应保留本地已有数据。
+/// </summary>
+public sealed record CatalogCodeConflictsResponse(
+    string StoreCode,
+    DateTimeOffset GeneratedAt,
+    bool Available,
+    IReadOnlyList<CatalogLookupItemDto> Items);

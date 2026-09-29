@@ -4,6 +4,7 @@ public sealed class BrowserExtensionOptions
 {
     public const string SectionName = "BrowserExtension";
 
+    // 扩展 1.5.0 上架商店后再通过配置把 LatestVersion/ReleaseNotes 提升，避免提示用户升级到尚不存在的版本。
     public string LatestVersion { get; set; } = "1.2.0";
     public string MinimumVersion { get; set; } = "1.1.0";
     public string ChromeStoreUrl { get; set; } = string.Empty;
@@ -12,10 +13,78 @@ public sealed class BrowserExtensionOptions
     public string SafariStoreUrl { get; set; } = string.Empty;
     public string ReleaseNotesZh { get; set; } = "新增 Jemark、GFA、TXK 和 Boom Up 供应商支持";
     public string ReleaseNotesEn { get; set; } = "Adds Jemark, GFA, TXK and Boom Up supplier support";
-    public string ConfigVersion { get; set; } = "6";
+    public string ConfigVersion { get; set; } = "7";
     public bool UseBuiltInDatsProfile { get; set; } = true;
     public bool UseBuiltInSupplierProfiles { get; set; } = true;
     public List<BrowserExtensionSupplierProfileOptions> SupplierProfiles { get; set; } = new();
+
+    /// <summary>
+    /// 供应商分类采集总开关；关闭后不下发分类配置，采集接口返回 FEATURE_DISABLED（热生效，无需发版）。
+    /// </summary>
+    public bool CategoryCaptureEnabled { get; set; } = true;
+}
+
+/// <summary>
+/// 供应商分类采集的声明式配置。选择器与路径模式只作为数据下发，扩展绝不执行远程代码。
+/// 注：登录后才可见的站点选择器按平台惯例推测，可通过 appsettings 覆盖并递增 ConfigVersion 热修正。
+/// </summary>
+public sealed class BrowserExtensionSupplierCategoryOptions
+{
+    public bool Enabled { get; set; } = true;
+    public bool PassiveEnabled { get; set; } = true;
+    public bool CrawlEnabled { get; set; } = true;
+    public List<string> CategoryPagePatterns { get; set; } = new();
+    public List<string> CategoryExcludePatterns { get; set; } = new();
+    public string? BreadcrumbSelector { get; set; }
+    public int BreadcrumbSkip { get; set; } = 1;
+    public string? TitleSelector { get; set; } = "h1";
+    public string KeySource { get; set; } = "pathname";
+    public List<string> KeyQueryParams { get; set; } = new();
+    public string? NavRootUrl { get; set; }
+    public string? NavSelector { get; set; }
+    public string? SubcategoryLinkSelector { get; set; }
+    public string? PaginationNextSelector { get; set; } = "a[rel=\"next\"]";
+    public int MaxPages { get; set; } = 20;
+    public int MaxDepth { get; set; } = 4;
+    public int MaxCategories { get; set; } = 400;
+    public int CrawlDelayMs { get; set; } = 1500;
+    public List<string> PromotionalPatterns { get; set; } = new();
+
+    // DATS 与 Yatsal 同一电商平台：分类页公开，路径形如 /office-stationery，面包屑 Home > 分类。
+    internal static BrowserExtensionSupplierCategoryOptions CreateDatsPlatformDefault() =>
+        new()
+        {
+            CategoryPagePatterns = new List<string> { "/*" },
+            CategoryExcludePatterns = new List<string> { "/product/*", "/products/*", "/clearance*" },
+            BreadcrumbSelector = ".breadcrumb a, .breadcrumbs a, nav[aria-label='breadcrumb'] a",
+            NavSelector = "nav a[href^='/'], .navbar a[href^='/'], .menu a[href^='/']",
+            SubcategoryLinkSelector = ".subcategories a, .category-list a, .widget-categorylist a",
+            PaginationNextSelector = ".pagination a.next, a[rel='next']",
+        };
+
+    // WooCommerce 站点（Windragon、Boom Up）：/product-category/父/子/，分页 /page/N/。
+    internal static BrowserExtensionSupplierCategoryOptions CreateWooCommerceDefault() =>
+        new()
+        {
+            CategoryPagePatterns = new List<string> { "/product-category/*" },
+            BreadcrumbSelector = ".woocommerce-breadcrumb a",
+            TitleSelector = "h1.page-title, h1.woocommerce-products-header__title, h1",
+            NavSelector = "ul.product-categories a, nav a[href*='/product-category/']",
+            SubcategoryLinkSelector = "ul.products li.product-category a",
+            PaginationNextSelector = ".woocommerce-pagination a.next, a[rel='next']",
+        };
+
+    // Brazco、MNB、PJ SAS 同一平台：分类页为 *.html。
+    internal static BrowserExtensionSupplierCategoryOptions CreateListingHtmlDefault() =>
+        new()
+        {
+            CategoryPagePatterns = new List<string> { "/*.html*" },
+            CategoryExcludePatterns = new List<string> { "/home.html*", "/product/*" },
+            BreadcrumbSelector = ".breadcrumb a, #breadcrumb a, .breadcrumbs a",
+            NavSelector = "nav a[href$='.html'], .menu a[href$='.html']",
+            SubcategoryLinkSelector = ".category-listing a, .subcategory-listing a",
+            PaginationNextSelector = ".pager a.next, .pagination a.next, a[rel='next']",
+        };
 }
 
 public sealed class BrowserExtensionSupplierProfileOptions
@@ -33,6 +102,11 @@ public sealed class BrowserExtensionSupplierProfileOptions
     public string MountSelector { get; set; } = string.Empty;
     public string MountPosition { get; set; } = "afterend";
 
+    /// <summary>
+    /// 分类采集配置；为空表示该供应商不采集分类。
+    /// </summary>
+    public BrowserExtensionSupplierCategoryOptions? Category { get; set; }
+
     public static BrowserExtensionSupplierProfileOptions CreateDatsDefault() =>
         new()
         {
@@ -47,6 +121,7 @@ public sealed class BrowserExtensionSupplierProfileOptions
             ItemNumberTransforms = new List<string> { "trim", "uppercase" },
             MountSelector = ".widget-productlist-code",
             MountPosition = "afterend",
+            Category = BrowserExtensionSupplierCategoryOptions.CreateDatsPlatformDefault(),
         };
 
     public static IReadOnlyList<BrowserExtensionSupplierProfileOptions> CreateSupplierDefaults() =>
@@ -67,6 +142,7 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "after-colon", "trim", "uppercase" },
                 MountSelector = ".product-listing-code",
                 MountPosition = "afterend",
+                Category = BrowserExtensionSupplierCategoryOptions.CreateListingHtmlDefault(),
             },
             new()
             {
@@ -84,6 +160,14 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "trim", "uppercase" },
                 MountSelector = ".p-spec",
                 MountPosition = "afterend",
+                Category = new BrowserExtensionSupplierCategoryOptions
+                {
+                    CategoryPagePatterns = new List<string> { "/Products.aspx*", "/products/*.htm*" },
+                    KeyQueryParams = new List<string> { "cat", "category", "id" },
+                    BreadcrumbSelector = ".breadcrumb a, .breadcrumbs a",
+                    NavSelector = "nav a[href*='/products/'], nav a[href*='Products.aspx']",
+                    PaginationNextSelector = ".pager a.next, .pagination a.next, a[rel='next']",
+                },
             },
             new()
             {
@@ -105,6 +189,15 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "trim", "uppercase" },
                 MountSelector = ".facets-item-cell-grid-title",
                 MountPosition = "afterend",
+                Category = new BrowserExtensionSupplierCategoryOptions
+                {
+                    // SuiteCommerce 单页应用：直接抓取分类 URL 只得到应用壳，先只做被动采集。
+                    CrawlEnabled = false,
+                    BreadcrumbSelector = ".global-views-breadcrumb a",
+                    TitleSelector = ".facets-facet-browse-title, h1",
+                    NavSelector = ".header-menu-level1 a, .header-menu-level2 a, .header-menu-level3 a",
+                    PaginationNextSelector = ".global-views-pagination-next a",
+                },
             },
             new()
             {
@@ -126,6 +219,7 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "trim", "uppercase" },
                 MountSelector = ".widget-productlist-code",
                 MountPosition = "afterend",
+                Category = BrowserExtensionSupplierCategoryOptions.CreateDatsPlatformDefault(),
             },
             new()
             {
@@ -142,6 +236,7 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "trim", "uppercase" },
                 MountSelector = ".sku",
                 MountPosition = "afterend",
+                Category = BrowserExtensionSupplierCategoryOptions.CreateWooCommerceDefault(),
             },
             new()
             {
@@ -158,6 +253,7 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "after-colon", "trim", "uppercase" },
                 MountSelector = ".product-listing-code",
                 MountPosition = "afterend",
+                Category = BrowserExtensionSupplierCategoryOptions.CreateListingHtmlDefault(),
             },
             new()
             {
@@ -174,6 +270,7 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "after-colon", "trim", "uppercase" },
                 MountSelector = ".product-listing-code",
                 MountPosition = "afterend",
+                Category = BrowserExtensionSupplierCategoryOptions.CreateListingHtmlDefault(),
             },
             new()
             {
@@ -190,6 +287,14 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "trim", "uppercase" },
                 MountSelector = ".model",
                 MountPosition = "afterend",
+                Category = new BrowserExtensionSupplierCategoryOptions
+                {
+                    CategoryPagePatterns = new List<string> { "/category/*" },
+                    BreadcrumbSelector = ".breadcrumb a, ul.breadcrumb li a",
+                    NavSelector = "nav a[href*='/category/'], .categories a[href*='/category/']",
+                    SubcategoryLinkSelector = ".subcategories a[href*='/category/']",
+                    PaginationNextSelector = ".pagination a.next, a[rel='next']",
+                },
             },
             new()
             {
@@ -211,6 +316,16 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 },
                 MountSelector = ".content > a[href*='/product/view?id=']",
                 MountPosition = "afterend",
+                Category = new BrowserExtensionSupplierCategoryOptions
+                {
+                    CategoryPagePatterns = new List<string> { "/products/view*" },
+                    KeyQueryParams = new List<string> { "category", "cat", "group", "id" },
+                    BreadcrumbSelector = ".breadcrumb a",
+                    TitleSelector = "h1, .page-title",
+                    NavRootUrl = "/products/view",
+                    NavSelector = "a[href*='/products/view?']",
+                    PaginationNextSelector = ".pagination a.next, a[rel='next']",
+                },
             },
             new()
             {
@@ -227,6 +342,15 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "after-sku", "trim", "uppercase" },
                 MountSelector = ".price-box",
                 MountPosition = "afterend",
+                Category = new BrowserExtensionSupplierCategoryOptions
+                {
+                    CategoryPagePatterns = new List<string> { "/shop*" },
+                    KeyQueryParams = new List<string> { "category", "cat", "c" },
+                    BreadcrumbSelector = ".breadcrumb a",
+                    NavRootUrl = "/shop",
+                    NavSelector = ".category-list a, .sidebar a[href*='/shop']",
+                    PaginationNextSelector = ".pagination a.next, a[rel='next']",
+                },
             },
             new()
             {
@@ -244,6 +368,7 @@ public sealed class BrowserExtensionSupplierProfileOptions
                 ItemNumberTransforms = new List<string> { "trim", "uppercase" },
                 MountSelector = "h2.woocommerce-loop-product__title",
                 MountPosition = "afterend",
+                Category = BrowserExtensionSupplierCategoryOptions.CreateWooCommerceDefault(),
             },
         };
 }

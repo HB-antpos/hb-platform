@@ -458,7 +458,8 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
             var result = await _orderPlacementSlice.SubmitOrderAsync(request);
             if (result.Success)
             {
-                return Ok(new { success = true, data = result.Data });
+                // data 里带保留在购物车的行；message 是同一内容的中文说明，供旧客户端直接展示。
+                return Ok(new { success = true, message = result.Message, data = result.Data });
             }
             var atomicGateError = MapPreorderGateServiceError(
                 result.ErrorCode,
@@ -471,7 +472,7 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
             }
             if (result.ErrorCode == StoreOrderSupplyGuard.PausedErrorCode)
             {
-                // 带上错误码与受影响货号，前端据此标出具体是购物车里的哪几行。
+                // 购物车里没有可提交的行：带上错误码、受影响货号与各行的供货计划，前端据此标出是哪几行。
                 return BadRequest(
                     new
                     {
@@ -479,6 +480,7 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
                         message = result.Message,
                         errorCode = result.ErrorCode,
                         details = result.Details,
+                        data = result.Data,
                     }
                 );
             }

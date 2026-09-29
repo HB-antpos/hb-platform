@@ -50,7 +50,11 @@ public sealed class ProductReactServiceHqSyncTests : IDisposable
             typeof(Store),
             typeof(StoreRetailPrice),
             typeof(StoreMultiCodeProduct),
-            typeof(ProductSetCode)
+            typeof(ProductSetCode),
+            typeof(WarehouseCategory),
+            typeof(LocalSupplierCategory),
+            typeof(LocalSupplierCategoryCapture),
+            typeof(LocalSupplierCategoryProductAssignment)
         );
         _hqDb.CodeFirst.InitTables(
             typeof(DIC_商品信息字典表),

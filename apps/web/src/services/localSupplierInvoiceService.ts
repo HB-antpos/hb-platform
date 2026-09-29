@@ -52,11 +52,13 @@ import type {
   UpdateToStorePricesRequest,
   LocalSupplierPurchaseSalesDailyPointDto,
 } from '../types/localSupplierInvoice'
+import type { LocalSupplierCategoryNode } from '../types/localSupplierCategory'
 import request, { RequestError, unwrapApiData } from '../utils/request'
 
 const API_BASE = '/api/react/v1/local-supplier-invoices'
 const PURCHASE_SALES_ANALYSIS_API_BASE = `${API_BASE}/purchase-sales-analysis`
 const SHOP_PURCHASE_SALES_ANALYSIS_API_BASE = `${API_BASE}/shop/purchase-sales-analysis`
+const PURCHASE_SALES_ANALYSIS_CATEGORY_TREE_API = `${PURCHASE_SALES_ANALYSIS_API_BASE}/category-tree`
 const PURCHASE_SALES_ANALYSIS_ALLOWED_PAGE_SIZES = new Set([50, 100, 200])
 const SHOP_INVOICE_DETAILS_ALLOWED_PAGE_SIZES = new Set<ShopLocalSupplierInvoiceDetailsPageSize>([50, 100, 200])
 
@@ -557,6 +559,19 @@ export async function getLocalSupplierPurchaseSalesAnalysisSupplierOptions(
     params: storeCode ? { storeCode } : undefined,
   })
   return normalizePurchaseSalesAnalysisSupplierOptions(unwrapApiData(response))
+}
+
+export async function getLocalSupplierPurchaseSalesAnalysisCategoryTree(
+  supplierCode: string,
+  storeCode?: string,
+  signal?: AbortSignal,
+): Promise<LocalSupplierCategoryNode[]> {
+  const response = await request.get<ApiResponse<LocalSupplierCategoryNode[]>>(
+    PURCHASE_SALES_ANALYSIS_CATEGORY_TREE_API,
+    { params: { supplierCode, storeCode }, signal },
+  )
+  const data = unwrapApiData(response)
+  return Array.isArray(data) ? data : []
 }
 
 /** 订货前台只读接口：只认前台权限，门店限定为本人名下门店；响应结构与后台分析一致。 */

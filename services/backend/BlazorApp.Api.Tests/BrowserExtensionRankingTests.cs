@@ -453,6 +453,7 @@ public sealed class BrowserExtensionRankingTests
         var controller = new ReactBrowserExtensionController(
             service.Object,
             access.Object,
+            Mock.Of<ILocalSupplierCategoryCaptureService>(),
             NullLogger<ReactBrowserExtensionController>.Instance
         )
         {
@@ -602,6 +603,7 @@ public sealed class BrowserExtensionRankingRequestBindingTests
             new ReactBrowserExtensionController(
                 Mock.Of<IBrowserExtensionService>(),
                 Mock.Of<IBrowserExtensionAccessService>(),
+                Mock.Of<ILocalSupplierCategoryCaptureService>(),
                 NullLogger<ReactBrowserExtensionController>.Instance
             )
         );
@@ -634,6 +636,7 @@ public sealed class BrowserExtensionRankingRequestBindingTests
                     services.AddAuthorization();
                     services.AddSingleton(service.Object);
                     services.AddSingleton(access.Object);
+                    services.AddSingleton(Mock.Of<ILocalSupplierCategoryCaptureService>());
                     services.AddControllers().AddApplicationPart(
                         typeof(ReactBrowserExtensionController).Assembly
                     );

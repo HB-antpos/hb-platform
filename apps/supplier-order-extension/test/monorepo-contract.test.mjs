@@ -328,3 +328,170 @@ test('没有当前商品时仍可切换到商品记录空状态', () => {
   assert.ok(!tabClick.includes('if (!currentItem) return'));
   assert.ok(sidepanel.includes("t(locale, 'historyNoItem')"));
 });
+
+const CATEGORY_LIB_FILES = [
+  'src/lib/item-number.js',
+  'src/lib/category-path.js',
+  'src/lib/category-capture.js',
+  'src/lib/category-crawl.js',
+  'src/lib/category-dom.js',
+];
+
+test('分类采集：service worker 路由五类消息、两个回传端点与任务状态持久化', () => {
+  const worker = read('src/background/service-worker.js');
+  for (const type of [
+    'CATEGORY_CAPTURE',
+    'CATEGORY_TREE_SNAPSHOT',
+    'CATEGORY_CRAWL_START',
+    'CATEGORY_CRAWL_ABORT',
+    'CATEGORY_CRAWL_PROGRESS',
+  ]) {
+    assert.ok(worker.includes(`case '${type}':`), `service worker 缺少 ${type}`);
+  }
+  assert.ok(worker.includes("'/api/react/v1/browser-extension/supplier-categories/captures'"));
+  assert.ok(worker.includes("'/api/react/v1/browser-extension/supplier-categories/tree-snapshot'"));
+  assert.ok(worker.includes("const CATEGORY_JOB_KEY = 'categoryCrawlJob'"));
+  assert.ok(worker.includes("const CATEGORY_HISTORY_KEY = 'categoryCrawlHistory'"));
+  assert.ok(worker.includes('setSession({ [CATEGORY_JOB_KEY]: job })'));
+  assert.ok(worker.includes('chrome.tabs.onRemoved.addListener'));
+  assert.ok(worker.includes("changeInfo?.status === 'loading'"));
+  // 来源校验：顶层 frame、页面 origin 属于供应商、载荷 URL 同源、任务与标签页绑定。
+  assert.ok(worker.includes('isTopFrameSender(sender)'));
+  assert.ok(worker.includes('senderOrigin: source.origin'));
+  assert.ok(worker.includes('requireRunningCrawlJob(message.jobId, source.tabId)'));
+  assert.ok(worker.includes('isExtensionPageSender(sender)'));
+  assert.ok(worker.includes('captureDedupe.has(dedupeKey)'));
+  assert.ok(worker.includes('warnings,'));
+});
+
+test('分类采集：内容脚本隔离失败、复用货号读取并只接受后台下发的采集指令', () => {
+  const list = read('src/content/list.js');
+  assert.ok(list.includes('return readItemNumberFrom(card, itemCfg);'));
+  assert.ok(list.includes("import(chrome.runtime.getURL('lib/item-number.js'))"));
+  assert.ok(list.includes('.catch(() => null);'), '分类模块加载失败不得影响按钮注入');
+  const scan = list.slice(list.indexOf('  function scan() {'), list.indexOf('  // 仅可见（含 600px 缓冲）卡片才请求摘要'));
+  assert.ok(scan.indexOf('ensureCard(card)') < scan.indexOf('notifyCategoryCapture(cards)'), '按钮注入先于分类采集');
+  assert.ok(scan.includes('resetCategoryCapture()'));
+  assert.ok(list.includes("type !== 'CATEGORY_CRAWL_RUN' && type !== 'CATEGORY_CRAWL_STOP'"));
+  assert.ok(list.includes('sender?.id !== chrome.runtime.id || sender?.tab'));
+  assert.ok(list.includes("credentials: 'include'"));
+  assert.ok(list.includes('target.origin !== location.origin'), '主动采集只允许同源请求');
+  assert.ok(list.includes("window.addEventListener('pagehide', handleCategoryPageHide)"));
+  assert.ok(list.includes('changes.categoryCaptureSettings'));
+});
+
+test('分类采集：侧栏区块位于供应商列表之后并通过后台启动/中止任务', () => {
+  const html = read('src/sidepanel/sidepanel.html');
+  const sidepanel = read('src/sidepanel/sidepanel.js');
+  assert.ok(html.indexOf('id="supplierSection"') < html.indexOf('id="categorySection"'));
+  assert.ok(html.indexOf('id="categorySection"') < html.indexOf('id="dataTabs"'));
+  for (const id of [
+    'categoryPassiveToggle',
+    'categoryCrawlBtn',
+    'categoryAbortBtn',
+    'categoryResumeBtn',
+    'categoryRetryBtn',
+    'categoryProgress',
+    'categoryStatus',
+    'categoryLastRun',
+    'categorySafariHint',
+  ]) {
+    assert.ok(html.includes(`id="${id}"`), `分类采集区缺少 ${id}`);
+  }
+  assert.ok(sidepanel.includes("type: 'CATEGORY_CRAWL_START'"));
+  assert.ok(sidepanel.includes("type: 'CATEGORY_CRAWL_ABORT'"));
+  assert.ok(sidepanel.includes('chrome.storage.local.set({ categoryCaptureSettings: next })'));
+  assert.ok(sidepanel.includes("BUILD_TARGET !== 'safari'"));
+});
+
+test('分类采集不新增 manifest 权限', () => {
+  const chromeManifest = JSON.parse(read('src/manifest.template.json').replaceAll('__API_ORIGIN__', 'https://x').replaceAll('__WEB_ORIGIN__', 'https://x'));
+  const safariManifest = JSON.parse(read('src/manifest.safari.template.json').replaceAll('__API_ORIGIN__', 'https://x').replaceAll('__WEB_ORIGIN__', 'https://x'));
+  assert.deepEqual(chromeManifest.permissions, ['storage', 'sidePanel', 'scripting']);
+  assert.deepEqual(safariManifest.permissions, ['storage', 'scripting']);
+  for (const manifest of [chromeManifest, safariManifest]) {
+    assert.deepEqual(manifest.host_permissions, ['https://x/*']);
+    assert.ok(!('externally_connectable' in manifest));
+  }
+});
+
+test('分类采集新模块不执行远程代码、不写入 HTML', () => {
+  for (const path of CATEGORY_LIB_FILES) {
+    const source = read(path);
+    for (const forbidden of ['eval(', 'new Function', 'innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write']) {
+      assert.ok(!source.includes(forbidden), `${path} 不得包含 ${forbidden}`);
+    }
+  }
+  // DOMParser 文档的 baseURI 是当前页，链接必须显式按被抓取页面解析。
+  const dom = read('src/lib/category-dom.js');
+  assert.ok(dom.includes("getAttribute('href')"));
+  assert.ok(dom.includes('new URL(trimmed, baseUrl)'));
+  assert.ok(!/\b(?:anchor|el|element|link|previous)\.href\b/u.test(dom), '不得读取元素的 .href 属性');
+});
+
+test('分类采集载荷字段与后端 DTO 保持一致', () => {
+  const dto = read('../../services/backend/BlazorApp.Shared/DTOs/BrowserExtensionDtos.cs');
+  const capture = read('src/lib/category-capture.js');
+  const crawl = read('src/lib/category-crawl.js');
+  const profiles = read('src/lib/profiles.js');
+  for (const className of [
+    'BrowserExtensionCategoryCaptureRequestDto',
+    'BrowserExtensionCategoryPathNodeDto',
+    'BrowserExtensionCategoryCaptureResultDto',
+    'BrowserExtensionCategoryTreeSnapshotRequestDto',
+    'BrowserExtensionCategoryTreeNodeDto',
+    'BrowserExtensionCategoryTreeSnapshotResultDto',
+    'BrowserExtensionSupplierCategoryProfileDto',
+  ]) {
+    assert.ok(dto.includes(`class ${className}`), `后端缺少 ${className}`);
+  }
+  const camel = (field) => field[0].toLowerCase() + field.slice(1);
+  for (const field of ['SupplierCode', 'PageUrl', 'CategoryPath', 'ItemNumbers', 'CapturedAt', 'Mode', 'PageNumber']) {
+    assert.ok(dto.includes(` ${field} `), `后端采集请求缺少 ${field}`);
+    assert.ok(capture.includes(camel(field)), `扩展采集载荷缺少 ${camel(field)}`);
+  }
+  for (const field of [
+    'CategoryGuid',
+    'FullPath',
+    'Depth',
+    'IsPromotional',
+    'CategoriesCreated',
+    'MatchedProducts',
+    'AssignedProducts',
+    'UnchangedProducts',
+    'SkippedManual',
+    'UnmatchedItemNumberCount',
+    'UnmatchedSamples',
+    'SourceUrl',
+    'Nodes',
+    'ParentKey',
+    'SortOrder',
+    'Created',
+    'Updated',
+    'Unchanged',
+    'OrphanCount',
+    'PromotionalCount',
+  ]) {
+    assert.ok(dto.includes(` ${field} `), `后端 DTO 缺少 ${field}`);
+    assert.ok(capture.includes(camel(field)) || crawl.includes(camel(field)), `扩展缺少 ${camel(field)}`);
+  }
+  const categoryDto = dto.slice(
+    dto.indexOf('class BrowserExtensionSupplierCategoryProfileDto'),
+    dto.indexOf('class BrowserExtensionSupplierProfilesDto'),
+  );
+  const fields = [...categoryDto.matchAll(/public [\w<>?]+ (\w+) \{ get; set; \}/gu)].map((match) => match[1]);
+  assert.equal(fields.length, 19, `分类 profile DTO 字段数变化：${fields.join(',')}`);
+  for (const field of fields) {
+    assert.ok(profiles.includes(camel(field)), `扩展 normalizeCategoryConfig 未处理 ${camel(field)}`);
+  }
+});
+
+// 以下断言依赖后端同一 PR 中的 Options 与控制器实现。
+test('分类采集后端 Options 与控制器端点已登记', () => {
+  const options = read('../../services/backend/BlazorApp.Api/Models/BrowserExtensionOptions.cs');
+  const controller = read('../../services/backend/BlazorApp.Api/Controllers/React/ReactBrowserExtensionController.cs');
+  assert.ok(options.includes('class BrowserExtensionSupplierCategoryOptions'));
+  assert.ok(options.includes('CategoryCaptureEnabled'));
+  assert.ok(controller.includes('supplier-categories/captures'));
+  assert.ok(controller.includes('supplier-categories/tree-snapshot'));
+});
