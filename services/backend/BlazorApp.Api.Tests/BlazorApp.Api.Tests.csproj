@@ -339,6 +339,7 @@
     <Compile Include="DataSyncReactControllerSyncResultContractTests.cs" />
     <Compile Include="HqToHbwebSyncDisabledContractTests.cs" />
     <Compile Include="HqToHbwebSyncDisabledAttributeTests.cs" />
+    <Compile Include="ClientAbortedRequestLoggingTests.cs" />
     <Compile Include="DataSyncLegacyControllerProductSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopFilterOptionsTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopGridTests.cs" />
