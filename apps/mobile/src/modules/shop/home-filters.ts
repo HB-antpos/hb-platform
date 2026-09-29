@@ -71,6 +71,15 @@ export function resolveHomeSearchPageState(
   };
 }
 
+/**
+ * 再次提交与当前已生效关键词相同的搜索：页码状态不变、查询键不变，React Query 不会自动重新请求，
+ * 调用方需显式 refetch，否则门店在零结果页上架后再点搜索仍看到旧结果（Web ShopHome 用 location.key 解决同一问题）。
+ */
+export function isSameKeywordResubmit(appliedKeyword: string, input: string) {
+  const nextKeyword = input.trim();
+  return Boolean(nextKeyword) && nextKeyword === appliedKeyword.trim();
+}
+
 export function buildCategoryNameMap(tree: StoreOrderCategoryNode[]) {
   const map = new Map<string, string>();
   const stack = [...tree];
