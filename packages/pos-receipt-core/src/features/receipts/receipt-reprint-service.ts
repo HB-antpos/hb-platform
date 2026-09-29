@@ -210,6 +210,9 @@ export function renderLocalOrderReceiptDocument(
 }
 
 export function requiresCashSettlementAudit(order: LocalOrder): boolean {
+  // 中文注释：退单（实收为负）是把钱退给顾客，不存在找零结算；要求结算记录会让
+  // 现金退单的历史重打与预览永远失败。WPF 可重打任何退单（负数金额整单小票）。
+  if (order.actualAmount.cents < 0) return false;
   return order.actualAmount.cents === 0 || order.tenders.some((tender) => tender.method === "cash");
 }
 
