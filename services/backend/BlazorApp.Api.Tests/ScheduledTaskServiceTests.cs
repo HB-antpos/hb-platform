@@ -7,6 +7,7 @@ using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.Background;
 using BlazorApp.Api.Services.Performance;
+using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
 using Microsoft.Data.Sqlite;
@@ -146,6 +147,81 @@ public sealed class ScheduledTaskServiceTests : IDisposable
             .SingleAsync(x => x.TaskType == TaskType.SyncPosmProductSupplierMappingsIncremental);
         Assert.Equal(BlazorApp.Shared.Models.HBweb.TaskStatus.Failed, syncTaskLog.Status);
         Assert.Contains("事务已完成", syncTaskLog.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task 供应商分类每晚重新归类_全部成功时记录成功日志()
+    {
+        var categoryService = new Mock<ILocalSupplierCategoryReactService>(MockBehavior.Strict);
+        categoryService
+            .Setup(x => x.ResolveAllSuppliersAsync("System", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LocalSupplierCategoryNightlyResolveResultDto { SupplierCount = 2, Assigned = 5 });
+        var scopeFactory = CreateScopeFactory(
+            CreateScope(
+                new Dictionary<Type, object?>
+                {
+                    [typeof(ScheduledTaskLogService)] = _taskLogService,
+                    [typeof(ILocalSupplierCategoryReactService)] = categoryService.Object,
+                }
+            )
+        );
+        var service = CreateScheduledTaskService(scopeFactory.Object, NullLogger<ScheduledTaskService>.Instance);
+
+        await InvokeLocalSupplierCategoryResolveTaskAsync(service);
+
+        var log = await _db.Queryable<ScheduledTaskLog>()
+            .SingleAsync(x => x.TaskType == TaskType.ResolveLocalSupplierCategories);
+        Assert.Equal(BlazorApp.Shared.Models.HBweb.TaskStatus.Success, log.Status);
+        categoryService.VerifyAll();
+    }
+
+    [Fact]
+    public async Task 供应商分类每晚重新归类_部分供应商失败时如实记为失败并列出供应商()
+    {
+        var categoryService = new Mock<ILocalSupplierCategoryReactService>(MockBehavior.Strict);
+        categoryService
+            .Setup(x => x.ResolveAllSuppliersAsync("System", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LocalSupplierCategoryNightlyResolveResultDto
+            {
+                SupplierCount = 1,
+                FailedSuppliers = new List<string> { "243: lock timeout" },
+            });
+        var scopeFactory = CreateScopeFactory(
+            CreateScope(
+                new Dictionary<Type, object?>
+                {
+                    [typeof(ScheduledTaskLogService)] = _taskLogService,
+                    [typeof(ILocalSupplierCategoryReactService)] = categoryService.Object,
+                }
+            )
+        );
+        var service = CreateScheduledTaskService(scopeFactory.Object, NullLogger<ScheduledTaskService>.Instance);
+
+        await InvokeLocalSupplierCategoryResolveTaskAsync(service);
+
+        var log = await _db.Queryable<ScheduledTaskLog>()
+            .SingleAsync(x => x.TaskType == TaskType.ResolveLocalSupplierCategories);
+        Assert.Equal(BlazorApp.Shared.Models.HBweb.TaskStatus.Failed, log.Status);
+        Assert.Contains("243: lock timeout", log.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task 供应商分类每晚重新归类_配置关闭时不创建作用域也不调用服务()
+    {
+        var scopeFactory = CreateScopeFactory();
+        var service = CreateScheduledTaskService(
+            scopeFactory.Object,
+            NullLogger<ScheduledTaskService>.Instance,
+            new ScheduledTaskOptions { LocalSupplierCategoryNightlyResolveEnabled = false }
+        );
+
+        await InvokeLocalSupplierCategoryResolveTaskAsync(service);
+
+        Assert.DoesNotContain(
+            scopeFactory.Invocations,
+            x => x.Method.Name == nameof(IServiceScopeFactory.CreateScope)
+        );
+        Assert.Equal(0, await _db.Queryable<ScheduledTaskLog>().CountAsync());
     }
 
     [Fact]
@@ -718,6 +794,19 @@ public sealed class ScheduledTaskServiceTests : IDisposable
     {
         var method = typeof(ScheduledTaskService).GetMethod(
             "ExecuteHourlyTask",
+            BindingFlags.Instance | BindingFlags.NonPublic
+        );
+        Assert.NotNull(method);
+
+        var task = method!.Invoke(service, null) as Task;
+        Assert.NotNull(task);
+        await task!;
+    }
+
+    private static async Task InvokeLocalSupplierCategoryResolveTaskAsync(ScheduledTaskService service)
+    {
+        var method = typeof(ScheduledTaskService).GetMethod(
+            "ExecuteLocalSupplierCategoryResolveTask",
             BindingFlags.Instance | BindingFlags.NonPublic
         );
         Assert.NotNull(method);

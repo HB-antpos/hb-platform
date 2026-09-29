@@ -371,6 +371,37 @@ public sealed class LocalSupplierCategoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReactService_全部供应商重新归类_为采集后新增的商品补归类并清理陈旧归属()
+    {
+        await SeedProductAsync("P-OLD", "69798", Dats);
+        // 72264 采集时还没有对应商品，只留下观察记录。
+        await CreateCaptureService().CaptureAsync(BuildCapture(new[] { "69798", "72264" }), "tester");
+        // HQ 同步随后批量写入新商品，不经过商品编辑联动，所以此时仍未归类。
+        await SeedProductAsync("P-NEW", "72264", Dats);
+        Assert.Null(await AssignedCategoryAsync("P-NEW"));
+        // 另一供应商只剩陈旧归属：商品已被改到 200。
+        await SeedProductAsync("P-MOVED", "X-1", "200");
+        await _db.Insertable(new LocalSupplierCategoryProductAssignment
+        {
+            ProductCode = "P-MOVED",
+            LocalSupplierCode = "243",
+            CategoryGUID = "gone",
+            Source = LocalSupplierCategorySources.Website,
+            AssignedAt = DateTime.UtcNow,
+        }).ExecuteCommandAsync();
+
+        var result = await CreateReactService().ResolveAllSuppliersAsync("System");
+
+        Assert.Equal(2, result.SupplierCount);
+        Assert.Equal(1, result.Assigned);
+        Assert.Equal(1, result.StaleRemoved);
+        Assert.Empty(result.FailedSuppliers);
+        Assert.NotNull(await AssignedCategoryAsync("P-NEW"));
+        Assert.Equal(await AssignedCategoryAsync("P-OLD"), await AssignedCategoryAsync("P-NEW"));
+        Assert.Null(await AssignedCategoryAsync("P-MOVED"));
+    }
+
+    [Fact]
     public async Task ProductList_回填供应商分类并支持子树筛选与仅未归类()
     {
         await SeedWarehouseCategoryAsync("WC-ROOT", null, "Stationery");

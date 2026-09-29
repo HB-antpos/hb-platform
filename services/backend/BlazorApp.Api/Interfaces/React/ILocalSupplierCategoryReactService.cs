@@ -23,4 +23,12 @@ public interface ILocalSupplierCategoryReactService
         string? actor,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>
+    /// 对所有有采集记录或归属记录的供应商（不含 200）逐个重新归类；供每晚定时任务调用。
+    /// </summary>
+    Task<LocalSupplierCategoryNightlyResolveResultDto> ResolveAllSuppliersAsync(
+        string? actor,
+        CancellationToken cancellationToken = default
+    );
 }
