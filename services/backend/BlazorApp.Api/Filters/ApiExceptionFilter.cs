@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using BlazorApp.Api.Utils;
 using BlazorApp.Shared.DTOs;
 
 namespace BlazorApp.Api.Filters
@@ -16,10 +17,9 @@ namespace BlazorApp.Api.Filters
         public void OnException(ExceptionContext context)
         {
             // 客户端主动中止（前端切标签时 abort 上一个请求、关闭页面、断网）不是服务端故障：
-            // 必须同时满足「异常是 OperationCanceledException（含 TaskCanceledException）」且「RequestAborted 已触发」，
-            // 服务端自己的 CTS 超时、HttpClient 超时不会触发 RequestAborted，仍走下方按错误记录的原有逻辑。
-            if (context.Exception is OperationCanceledException
-                && context.HttpContext.RequestAborted.IsCancellationRequested)
+            // 必须同时满足「异常是取消形态（OCE / SqlClient 用户取消的 SqlException）」且「RequestAborted 已触发」，
+            // 服务端自己的 CTS 超时、HttpClient 超时、SqlCommand 超时不满足，仍走下方按错误记录的原有逻辑。
+            if (ClientAbortDetector.IsClientAbort(context.Exception, context.HttpContext.RequestAborted))
             {
                 // 降为 Information，低于 ApplicationLog 的 Warning 门槛，不再淹没真正的 500。
                 _logger.LogInformation(

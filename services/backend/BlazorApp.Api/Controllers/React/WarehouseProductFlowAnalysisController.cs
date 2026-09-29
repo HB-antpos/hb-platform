@@ -6,6 +6,7 @@ using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Controllers.React
 {
@@ -201,7 +202,7 @@ namespace BlazorApp.Api.Controllers.React
                     ApiResponse<WarehouseProductFlowAnalysisSummaryDto>.Error(ex.Message)
                 );
             }
-            catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, HttpContext.RequestAborted))
             {
                 // 客户端已断开：不再按 500 记错误；服务端自身超时不满足该条件，仍走下方错误日志。
                 return StatusCode(499);

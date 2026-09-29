@@ -4,14 +4,18 @@ namespace BlazorApp.Api.Interfaces.React
 {
     public interface IStoreProductMaintenanceReactService
     {
+        // cancellationToken：调用方请求令牌；客户端已中止时取消异常直接上抛、不记错误日志
         Task<ApiResponse<List<StoreProductLookupItemDto>>> LookupAsync(
             StoreProductLookupRequestDto request,
-            List<string>? accessibleStoreCodes
+            List<string>? accessibleStoreCodes,
+            CancellationToken cancellationToken = default
         );
 
+        // cancellationToken：调用方请求令牌；客户端已中止时取消异常直接上抛、不记错误日志
         Task<ApiResponse<StoreProductScanLabelResultDto>> ScanLabelAsync(
             StoreProductLookupRequestDto request,
-            List<string>? accessibleStoreCodes
+            List<string>? accessibleStoreCodes,
+            CancellationToken cancellationToken = default
         );
 
         Task<ApiResponse<StoreProductDetailDto>> GetDetailAsync(
@@ -21,10 +25,12 @@ namespace BlazorApp.Api.Interfaces.React
             bool includeCodes = true
         );
 
+        // cancellationToken：调用方请求令牌；客户端已中止时取消异常直接上抛、不记错误日志
         Task<ApiResponse<StoreProductDetailDto>> GetFastDetailAsync(
             string productCode,
             string? storeCode,
-            List<string>? accessibleStoreCodes
+            List<string>? accessibleStoreCodes,
+            CancellationToken cancellationToken = default
         );
 
         Task<ApiResponse<StoreProductCodePageDto<StoreProductSetCodeDto>>> GetSetCodesAsync(

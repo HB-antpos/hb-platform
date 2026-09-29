@@ -3341,6 +3341,102 @@ public sealed class StoreOrderProductListTests : IDisposable
             (response.Success, response.ErrorCode);
     }
 
+    /// <summary>
+    /// 生产 09-24 分店 1020 两次提交：门禁等 Store 行锁时客户端中止，驱动抛用户取消 SqlException，
+    /// 旧逻辑按“门禁不可用”fail-open 放行继续写单。现在调用方令牌已触发时取消原样上抛、事务回滚、购物车保持未提交；
+    /// 未传请求令牌时（旧入口）仍沿用 fail-open 契约，订单照常提交。门禁的两个数据库步骤（解析锁资源、取行锁）都要覆盖。
+    /// </summary>
+    [Theory]
+    [InlineData("行锁", true)]
+    [InlineData("行锁", false)]
+    [InlineData("解析锁资源", true)]
+    [InlineData("解析锁资源", false)]
+    public async Task SubmitOrderAsync_门禁数据库步骤中客户端中止_不再fail_open放行且事务回滚(
+        string abortedStage,
+        bool passRequestToken
+    )
+    {
+        const string targetStoreCode = "S-ABORT";
+        await _db.Insertable(new Store
+        {
+            StoreGUID = "store-abort",
+            StoreCode = targetStoreCode,
+            StoreName = "门禁中止店",
+            IsActive = true,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new WareHouseOrder
+        {
+            OrderGUID = "abort-cart",
+            StoreCode = targetStoreCode,
+            OrderNo = "DRAFT-ABORT",
+            FlowStatus = 0,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new WareHouseOrderDetails
+        {
+            DetailGUID = "abort-cart-detail",
+            OrderGUID = "abort-cart",
+            StoreCode = targetStoreCode,
+            ProductCode = "P-ABORT",
+            Quantity = 1,
+        }).ExecuteCommandAsync();
+        var placementSlice = (BlazorApp.Api.Features.StoreOrders.OrderPlacement.IStoreOrderPlacementSlice)
+            typeof(StoreOrderReactService)
+                .GetField("_orderPlacementSlice", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(CreateService())!;
+
+        using var requestAborted = new CancellationTokenSource();
+        var injected = false;
+        _db.Aop.OnLogExecuting = (sql, _) =>
+        {
+            var trimmed = sql.TrimStart();
+            var isTargetStage = abortedStage == "行锁"
+                // SQLite 下门禁取 Store 身份行锁是 no-op UPDATE；生产 SQL Server 对应 UPDATE [Store] WITH (UPDLOCK, HOLDLOCK)。
+                ? trimmed.StartsWith("UPDATE \"Store\"", StringComparison.Ordinal)
+                // 门禁第一步按 StoreCode 查 Store 解析不可变 StoreGuid 锁键。
+                : trimmed.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                    && System.Text.RegularExpressions.Regex.IsMatch(sql, "FROM\\s+[`\"\\[]?Store[`\"\\]]?(\\s|$)");
+            if (!injected && isTargetStage)
+            {
+                injected = true;
+                // 客户端在该语句执行中途断开：请求令牌先触发，驱动随即抛出用户取消 SqlException。
+                requestAborted.Cancel();
+                throw SqlClientExceptionShapes.UserCancellationWhileWaitingRowLock();
+            }
+        };
+        var request = new SubmitStoreOrderRequestDto { StoreCode = targetStoreCode };
+        var callerToken = passRequestToken ? requestAborted.Token : CancellationToken.None;
+
+        try
+        {
+            if (passRequestToken)
+            {
+                var thrown = await Assert.ThrowsAsync<Microsoft.Data.SqlClient.SqlException>(
+                    () => placementSlice.SubmitOrderAsync(request, callerToken)
+                );
+                Assert.True(BlazorApp.Api.Utils.ClientAbortDetector.IsClientAbort(thrown, callerToken));
+            }
+            else
+            {
+                var result = await placementSlice.SubmitOrderAsync(request, callerToken);
+                Assert.True(result.Success, result.Message);
+            }
+        }
+        finally
+        {
+            _db.Aop.OnLogExecuting = (sql, parameters) =>
+                _sqlLogs.Add(FormatSqlLog(parameters, sql));
+        }
+
+        Assert.True(injected);
+        var cart = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == targetStoreCode && !item.IsDeleted)
+                .ToListAsync()
+        );
+        // 客户端中止：门禁不放行、事务回滚，购物车仍是草稿；未传令牌：沿用 fail-open，订单已提交。
+        Assert.Equal(passRequestToken ? 0 : 1, cart.FlowStatus);
+    }
+
     [Fact]
     public async Task RemoveFromCartAsync_不会用请求门店删除其他分店购物车明细()
     {

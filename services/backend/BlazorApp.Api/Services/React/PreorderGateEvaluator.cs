@@ -1,4 +1,5 @@
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Utils;
 using BlazorApp.Shared.Models;
 using SqlSugar;
 
@@ -101,7 +102,8 @@ internal static class PreorderGateEvaluator
     internal static Task<string> ResolveStoreLockResourceFailClosedAsync(
         ISqlSugarClient db,
         string storeCode,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     ) => ExecuteFailClosedAsync(async () =>
     {
         var normalized = NormalizeStoreCode(storeCode);
@@ -121,7 +123,7 @@ internal static class PreorderGateEvaluator
         }
         // StoreCode 可改名，所有门禁写入统一使用不可变 StoreGuid 作为锁键。
         return GetStoreLockResourceByStoreGuid(store.StoreGUID);
-    }, storeCode, logger);
+    }, storeCode, logger, requestAborted);
 
     internal static async Task<PreorderGateEvaluation> EvaluateAsync(
         ISqlSugarClient db,
@@ -203,7 +205,8 @@ internal static class PreorderGateEvaluator
         string lockResource,
         string storeCode,
         TimeProvider timeProvider,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     )
     {
         var canonicalStoreGuid = GetCanonicalStoreGuidFromLockResource(lockResource);
@@ -212,14 +215,16 @@ internal static class PreorderGateEvaluator
             lockResource,
             canonicalStoreGuid,
             storeCode,
-            logger
+            logger,
+            requestAborted
         );
         return await EvaluateWithHeldStoreGateFailClosedAsync(
             db,
             lockResource,
             storeCode,
             timeProvider,
-            logger
+            logger,
+            requestAborted
         );
     }
 
@@ -228,12 +233,13 @@ internal static class PreorderGateEvaluator
         string lockResource,
         string storeCode,
         TimeProvider timeProvider,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     )
     {
         // 必须在取得数据库 StoreGate 后再读时钟，等锁期间开始的批次不得被漏掉。
         var utcNow = timeProvider.GetUtcNow().UtcDateTime;
-        var evaluation = await EvaluateFailClosedAsync(db, storeCode, utcNow, logger);
+        var evaluation = await EvaluateFailClosedAsync(db, storeCode, utcNow, logger, requestAborted);
         var currentResource = GetStoreLockResourceByStoreGuid(evaluation.Store.StoreGUID);
         if (!string.Equals(lockResource, currentResource, StringComparison.OrdinalIgnoreCase))
         {
@@ -252,7 +258,8 @@ internal static class PreorderGateEvaluator
         string lockResource,
         string canonicalStoreGuid,
         string storeCode,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     )
     {
         try
@@ -266,6 +273,13 @@ internal static class PreorderGateEvaluator
         }
         catch (PreorderBusinessException)
         {
+            throw;
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, requestAborted))
+        {
+            // 客户端已中止（等行锁时令牌触发，OCE 或用户取消的 SqlException）：原样上抛、不记错误。
+            // 不能包装成 PREORDER_GATE_UNAVAILABLE——普通订单的 fail-open 会把它当“门禁不可用”放行继续写单；
+            // 原样上抛则由外层事务回滚、控制器按 499 收尾。未传请求令牌的调用方（Preorder、旧购物车、PDA）不受影响。
             throw;
         }
         catch (Exception ex)
@@ -284,13 +298,15 @@ internal static class PreorderGateEvaluator
         ISqlSugarClient db,
         string storeCode,
         DateTime utcNow,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     )
     {
         return await ExecuteFailClosedAsync(
             () => EvaluateAsync(db, storeCode, utcNow),
             storeCode,
-            logger
+            logger,
+            requestAborted
         );
     }
 
@@ -298,9 +314,10 @@ internal static class PreorderGateEvaluator
         ISqlSugarClient db,
         string storeCode,
         string entryPoint,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     ) => ExecuteOrdinaryOrderWriteFailOpenAsync(
-        () => ResolveStoreLockResourceFailClosedAsync(db, storeCode, logger),
+        () => ResolveStoreLockResourceFailClosedAsync(db, storeCode, logger, requestAborted),
         entryPoint,
         storeCode,
         logger
@@ -324,14 +341,16 @@ internal static class PreorderGateEvaluator
         string storeCode,
         TimeProvider timeProvider,
         string entryPoint,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     ) => ExecuteOrdinaryOrderWriteFailOpenAsync(
         () => EvaluateLockedFailClosedAsync(
             db,
             lockResource,
             storeCode,
             timeProvider,
-            logger
+            logger,
+            requestAborted
         ),
         entryPoint,
         storeCode,
@@ -417,7 +436,8 @@ internal static class PreorderGateEvaluator
     internal static async Task<T> ExecuteFailClosedAsync<T>(
         Func<Task<T>> action,
         string storeCode,
-        ILogger logger
+        ILogger logger,
+        CancellationToken requestAborted = default
     )
     {
         try
@@ -426,6 +446,11 @@ internal static class PreorderGateEvaluator
         }
         catch (PreorderBusinessException)
         {
+            throw;
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, requestAborted))
+        {
+            // 同 AcquireDatabaseLockFailClosedAsync：客户端中止原样上抛，不包装成“门禁不可用”触发普通订单 fail-open。
             throw;
         }
         catch (Exception ex)

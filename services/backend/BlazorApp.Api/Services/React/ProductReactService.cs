@@ -16,6 +16,7 @@ using BlazorApp.Shared.Models.HqEntities;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using SqlSugar;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Services.React
 {
@@ -819,7 +820,7 @@ namespace BlazorApp.Api.Services.React
                     PageSize = query.PageSize,
                 };
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
             {
                 // 调用方已取消（HTTP 请求被客户端中止）：直接上抛交给控制器按 499 处理，不在此记错误。
                 // 认证阶段已把同一请求令牌留在 SqlSugar ADO 上，本方法内的查询都会随它取消。

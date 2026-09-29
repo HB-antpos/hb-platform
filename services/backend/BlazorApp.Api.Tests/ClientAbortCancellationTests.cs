@@ -251,6 +251,111 @@ public sealed class ClientAbortCancellationControllerTests
         AssertOutcome(result, logger, clientAborted);
     }
 
+    // 以下三个接口在生产 09-21～28 都出现过 SqlClient 用户取消形态的 SqlException（令牌在执行中途触发）。
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 分店业绩_SqlClient用户取消_客户端中止返回499且不记错误_服务端取消仍记错误(bool clientAborted)
+    {
+        var service = new Mock<ISalesDashboardReactService>();
+        service
+            .Setup(item => item.GetExecutiveBranchPerformanceAsync(
+                It.IsAny<DateRangeDto>(),
+                It.IsAny<int?>(),
+                It.IsAny<List<string>?>(),
+                It.IsAny<CancellationToken>()
+            ))
+            .ThrowsAsync(SqlClientExceptionShapes.UserCancellation());
+        var logger = new TestLogger<SalesDashboardController>();
+        var controller = CreateSalesDashboardController(service.Object, logger, clientAborted);
+
+        var result = await controller.GetExecutiveBranchPerformance(new DateTime(2026, 9, 1), new DateTime(2026, 9, 7));
+
+        AssertSqlCancellationOutcome(result, logger, clientAborted);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 浏览器扩展批量摘要_SqlClient用户取消_客户端中止返回499且不记错误_服务端取消仍记错误(bool clientAborted)
+    {
+        var accessService = new Mock<IBrowserExtensionAccessService>();
+        accessService
+            .Setup(item => item.CanAccessAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+        var service = new Mock<IBrowserExtensionService>();
+        service
+            .Setup(item => item.GetProductSummariesAsync(
+                It.IsAny<BrowserExtensionProductSummaryBatchRequestDto>(),
+                It.IsAny<CancellationToken>()
+            ))
+            .ThrowsAsync(SqlClientExceptionShapes.UserCancellation());
+        var logger = new TestLogger<ReactBrowserExtensionController>();
+        var controller = new ReactBrowserExtensionController(
+            service.Object,
+            accessService.Object,
+            Mock.Of<ILocalSupplierCategoryCaptureService>(),
+            logger
+        )
+        {
+            ControllerContext = new ControllerContext { HttpContext = CreateHttpContext(clientAborted) },
+        };
+
+        var result = await controller.GetProductSummaries(new BrowserExtensionProductSummaryBatchRequestDto
+        {
+            StoreCode = "1016",
+            SupplierCode = "240",
+            ItemNumbers = new List<string> { "A1" },
+        });
+
+        AssertSqlCancellationOutcome(result, logger, clientAborted);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 提交订单_门禁等行锁时SqlClient用户取消_客户端中止返回499且不记错误_服务端取消仍记错误(bool clientAborted)
+    {
+        var accessPolicy = new Mock<IStoreOrderAccessPolicy>();
+        accessPolicy
+            .Setup(item => item.RequireCartWriteAsync(It.IsAny<string?>(), It.IsAny<string>()))
+            .ReturnsAsync(StoreOrderAccessDecision.Allowed);
+        var placement = new Mock<IStoreOrderPlacementSlice>();
+        placement
+            .Setup(item => item.SubmitOrderAsync(It.IsAny<SubmitStoreOrderRequestDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(SqlClientExceptionShapes.UserCancellationWhileWaitingRowLock());
+        var logger = new TestLogger<StoreOrderCartController>();
+        var controller = new StoreOrderCartController(
+            Mock.Of<IStoreOrderCartSlice>(),
+            placement.Object,
+            accessPolicy.Object,
+            logger
+        )
+        {
+            ControllerContext = new ControllerContext { HttpContext = CreateHttpContext(clientAborted) },
+        };
+
+        var result = await controller.SubmitOrder(new SubmitStoreOrderRequestDto { StoreCode = "1020" });
+
+        AssertSqlCancellationOutcome(result, logger, clientAborted);
+    }
+
+    private static void AssertSqlCancellationOutcome(IActionResult result, ITestLoggerSink logger, bool clientAborted)
+    {
+        if (clientAborted)
+        {
+            var status = Assert.IsType<StatusCodeResult>(result);
+            Assert.Equal(499, status.StatusCode);
+            Assert.DoesNotContain(logger.Entries, entry => entry.LogLevel >= LogLevel.Warning);
+            return;
+        }
+
+        var failure = Assert.IsAssignableFrom<IStatusCodeActionResult>(result);
+        Assert.Equal(StatusCodes.Status500InternalServerError, failure.StatusCode);
+        var error = Assert.Single(logger.Entries, entry => entry.LogLevel == LogLevel.Error);
+        Assert.IsType<Microsoft.Data.SqlClient.SqlException>(error.Exception);
+    }
+
     private static DefaultHttpContext CreateHttpContext(bool clientAborted)
     {
         // 未中止时也用可取消的令牌，才能断言控制器传下去的正是 RequestAborted 本身。
@@ -421,6 +526,47 @@ public sealed class ClientAbortCancellationServiceTests : IDisposable
             clientAborted,
             hourlyTraffic ? "GetExecutiveHourlyTrafficAsync failed" : "GetExecutiveBranchPerformanceAsync failed"
         );
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 看板分店业绩服务_SqlClient用户取消_请求令牌已取消时只上抛不记错误_其他取消仍记错误(bool clientAborted)
+    {
+        // 生产 09-22：服务层与控制器各记一条「Operation cancelled by user」Error；经 SqlSugar 执行时取消几乎都是这种形态。
+        _localDb.Aop.OnLogExecuting = (_, _) => throw SqlClientExceptionShapes.UserCancellation();
+        _posmDb.Aop.OnLogExecuting = (_, _) => throw SqlClientExceptionShapes.UserCancellation();
+        var logger = new TestLogger<SalesDashboardReactService>();
+        var service = new SalesDashboardReactService(
+            CreateContext<SqlSugarContext>(_localDb),
+            CreateContext<POSMSqlSugarContext>(_posmDb),
+            Mock.Of<IMapper>(),
+            logger,
+            new MemoryCache(new MemoryCacheOptions()),
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>()
+        );
+
+        await Assert.ThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => service.GetExecutiveBranchPerformanceAsync(
+            new DateRangeDto
+            {
+                StartDate = new DateTime(2026, 9, 1),
+                EndDate = new DateTime(2026, 9, 7),
+                CompareMode = CompareMode.ByDate,
+            },
+            null,
+            new List<string> { "S1" },
+            CallerToken(clientAborted)
+        ));
+
+        if (clientAborted)
+        {
+            Assert.DoesNotContain(logger.Entries, entry => entry.LogLevel >= LogLevel.Warning);
+            return;
+        }
+
+        var error = Assert.Single(logger.Entries, entry => entry.LogLevel == LogLevel.Error);
+        Assert.Equal("GetExecutiveBranchPerformanceAsync failed", error.Message);
+        Assert.IsType<Microsoft.Data.SqlClient.SqlException>(error.Exception);
     }
 
     [Fact]

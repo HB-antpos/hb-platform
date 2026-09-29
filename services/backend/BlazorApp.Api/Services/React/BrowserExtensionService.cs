@@ -12,6 +12,7 @@ using BlazorApp.Shared.Models.POSM;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using SqlSugar;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Services.React;
 
@@ -97,7 +98,7 @@ public sealed class BrowserExtensionService : IBrowserExtensionService
                 ranking.RankedTopThirty
             );
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
         {
             // 客户端已中止请求：降级后的结果没有人接收，直接上抛交给控制器按 499 处理，不记降级告警。
             // 其他来源的取消（如服务端超时）不满足该条件，仍按下方降级处理。

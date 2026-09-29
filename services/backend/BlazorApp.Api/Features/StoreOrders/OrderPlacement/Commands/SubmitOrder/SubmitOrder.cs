@@ -4,6 +4,7 @@ using BlazorApp.Api.Features.StoreOrders.OrderPlacement.Domain;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Features.StoreOrders.OrderPlacement.Commands.SubmitOrder;
 
@@ -65,10 +66,12 @@ internal sealed class SubmitOrderHandler(
                     var cartScope = ownerScope.Resolve(storeCode);
                     return await cartCoordinator.ExecuteAsync(cartScope, async () =>
                     {
+                        // 请求令牌只让门禁识别客户端中止（此时不 fail-open 放行，取消上抛、事务回滚），不传给写库调用。
                         var gateDecision = await gateCoordinator.IsBlockedInsideTransactionAsync(
                             gateContext,
                             storeCode,
-                            "React.SubmitOrder"
+                            "React.SubmitOrder",
+                            command.CancellationToken
                         );
                         if (gateDecision.IsBlocked)
                         {
@@ -206,12 +209,14 @@ internal sealed class SubmitOrderHandler(
                             },
                         };
                     });
-                }
+                },
+                command.CancellationToken
             );
         }
-        catch (OperationCanceledException) when (command.CancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, command.CancellationToken))
         {
-            // 客户端已中止请求：上抛交给控制器按 499 处理，不记错误。
+            // 客户端已中止请求（OCE，或令牌在 SqlClient 执行中途触发的用户取消 SqlException，含门禁等行锁时）：
+            // 上抛交给控制器按 499 处理，不记错误。
             // 不会掩盖部分写入：全部写库在 cartCoordinator 的单个事务里，异常一律先回滚再上抛；
             // SqlSugar 的提交/回滚不受请求令牌影响，且提交后不再有数据库调用，
             // 所以能走到这里的取消都发生在提交之前，购物车与订单保持提交前状态（仅内存订单号可能跳号）。

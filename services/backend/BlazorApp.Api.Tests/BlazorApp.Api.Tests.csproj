@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <Compile Include="ClientAbortCancellationTests.cs" />
+    <Compile Include="ClientAbortSqlCancellationTests.cs" />
     <Compile Include="MobileReportStoreOptionsTests.cs" />
     <Compile Include="StoreProductMaintenanceWarehousePriceSyncTests.cs" />
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />
