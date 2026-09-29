@@ -71,6 +71,12 @@ namespace BlazorApp.Shared.DTOs
     {
         public string Label { get; set; } = string.Empty;
         public string Value { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 门店 IANA 时区（如 Australia/Sydney）。移动营业额报表据此按门店本地时间计算同期对比的截止整点；
+        /// 未维护时为 null，客户端回退为固定 UTC+10。
+        /// </summary>
+        public string? TimeZoneId { get; set; }
     }
 
     /// <summary>
