@@ -17,6 +17,7 @@ import ActiveFilterBar from '../../../components/listToolbar/ActiveFilterBar';
 import MoreFiltersButton from '../../../components/listToolbar/MoreFiltersButton';
 import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar';
 import ToolbarMenuButton from '../../../components/listToolbar/ToolbarMenuButton';
+import { requiresDelistSupplyNotice } from '../../../components/SupplyNotice/delistSupplyNoticeGate';
 import { getSupplierOptions, } from '../../../services/domesticProductService';
 import { exportDomesticProductsToExcel, type ExportResult } from '../../../services/exportService';
 import { getActiveLocalSuppliers as getActiveAustralianSuppliers } from '../../../services/localSupplierService';
@@ -883,8 +884,10 @@ export default function WarehouseProductsPage() {
     const [togglingProductCodes, setTogglingProductCodes] = useState<string[]>([]);
     // 供货说明按当前页商品批量查询，键为商品编码；下架成功、修改成功后就地更新。
     const [supplyNotices, setSupplyNotices] = useState<Record<string, WarehouseSupplyNotice>>({});
-    // 下架 / 修改说明弹窗：target 为空即关闭。单个开关、批量下架、修改说明三条路径共用。
-    const [supplyNoticeTarget, setSupplyNoticeTarget] = useState<{ mode: 'delist' | 'edit'; productCodes: string[]; initial?: WarehouseSupplyNotice | null } | null>(null);
+    // 下架 / 修改说明弹窗：target 为空即关闭。单个开关、批量下架、修改说明、编辑弹窗、批量修改共用。
+    // origin 标记从哪个保存流程发起：editModal = 编辑弹窗把「是否上架」改为下架，batchEdit = 批量修改设为下架；
+    // 不带 origin 的是原有的单个开关 / 批量下架路径。
+    const [supplyNoticeTarget, setSupplyNoticeTarget] = useState<{ mode: 'delist' | 'edit'; productCodes: string[]; initial?: WarehouseSupplyNotice | null; origin?: 'editModal' | 'batchEdit' | 'rowToggle' | 'batchToggle' } | null>(null);
     const [supplyNoticeSaving, setSupplyNoticeSaving] = useState(false);
     const [exportFailDetailOpen, setExportFailDetailOpen] = useState(false);
     const [exportFailDetail, setExportFailDetail] = useState<ExportResult['failedProductImages']>([]);
@@ -1477,12 +1480,18 @@ export default function WarehouseProductsPage() {
         setEditingSuggestedDiscount({ loaded: false, percent: null });
         form.resetFields();
     };
-    const handleSave = async () => {
+    const handleSave = async (supplyNotice?: SupplyNoticeInput) => {
         if (!editingItem) {
             return;
         }
         try {
             const values = await form.validateFields();
+            // 只有从「上架」改为「下架」才要求先填写供货说明，说明随 full-update 同一请求提交；
+            // 原本就是下架且保持下架的不强制（不传说明，后端保留已有说明）。弹窗取消则不保存。
+            if (!supplyNotice && requiresDelistSupplyNotice(values.isActive, editingItem.isActive)) {
+                setSupplyNoticeTarget({ mode: 'delist', productCodes: [editingItem.productCode], origin: 'editModal' });
+                return;
+            }
             setSaving(true);
             // 一次保存可能连发两个请求，通知汇总以最后一个带头的响应为准（不相加）。
             const priceNotificationCapture = createPriceNotificationCapture();
@@ -1502,6 +1511,8 @@ export default function WarehouseProductsPage() {
                 remark: values.remarks,
                 productImage: values.productImage,
                 isActive: values.isActive,
+                // 说明只在下架时有意义；上架时即使残留也不提交。
+                ...(supplyNotice && !values.isActive ? { supplyNotice } : {}),
                 supplierCode: values.supplierCode,
             }, { onResponse: priceNotificationCapture.onResponse });
             const nextSuggestedDiscountPercent = values.suggestedDiscountPercent ?? null;
@@ -1864,7 +1875,7 @@ export default function WarehouseProductsPage() {
         }
         // 下架必须先登记供货说明（后续计划必选），说明随下架同一请求提交。
         if (!nextIsActive && !supplyNotice) {
-            setSupplyNoticeTarget({ mode: 'delist', productCodes: selectedRowKeys.map(String) });
+            setSupplyNoticeTarget({ mode: 'delist', productCodes: selectedRowKeys.map(String), origin: 'batchToggle' });
             return;
         }
         try {
@@ -1973,6 +1984,8 @@ export default function WarehouseProductsPage() {
         generateImageUrls?: boolean;
         imageBaseUrl?: string;
         syncImageToHq?: boolean;
+        // 批量设为下架时的供货说明，随后台任务同一请求提交，只登记显式设为下架的商品。
+        supplyNotice?: SupplyNoticeInput;
     }, suggestedDiscount?: { rate: number | null }) => {
         if (!selectedRowKeys.length) {
             message.warning(t('warehouse.selectProductsFirst', '请先选择商品'));
@@ -2060,7 +2073,7 @@ export default function WarehouseProductsPage() {
             setBatchEditSaving(false);
         }
     };
-    const handleBatchEditSave = async () => {
+    const handleBatchEditSave = async (supplyNotice?: SupplyNoticeInput) => {
         if (!selectedRowKeys.length) {
             message.warning(t('warehouse.selectProductsFirst', '请先选择商品'));
             return;
@@ -2108,6 +2121,11 @@ export default function WarehouseProductsPage() {
             return;
         }
         const syncImageToHq = generateImageUrls && values.syncImageToHq === true;
+        // 批量把「是否上架」设为下架时，与批量上下架一致先登记供货说明；填写完成后回到这里继续确认提交。
+        if (!supplyNotice && requiresDelistSupplyNotice(values.isActive)) {
+            setSupplyNoticeTarget({ mode: 'delist', productCodes: selectedRowKeys.map(String), origin: 'batchEdit' });
+            return;
+        }
         Modal.confirm({
             title: t('warehouse.batchEditConfirmTitle', '确认批量修改'),
             content: (<Space direction="vertical" size={8}>
@@ -2128,13 +2146,14 @@ export default function WarehouseProductsPage() {
                     generateImageUrls,
                     imageBaseUrl,
                     syncImageToHq,
+                    ...(supplyNotice && values.isActive === false ? { supplyNotice } : {}),
                 }, suggestedDiscount)
                 : submitBatchSuggestedDiscountOnly(suggestedDiscount!),
         });
     };
     const handleToggleSingleActive = async (record: WarehouseProductListItem, nextIsActive: boolean, supplyNotice?: SupplyNoticeInput) => {
         if (!nextIsActive && !supplyNotice) {
-            setSupplyNoticeTarget({ mode: 'delist', productCodes: [record.productCode] });
+            setSupplyNoticeTarget({ mode: 'delist', productCodes: [record.productCode], origin: 'rowToggle' });
             return;
         }
         try {
@@ -2171,19 +2190,27 @@ export default function WarehouseProductsPage() {
         if (!supplyNoticeTarget) {
             return;
         }
-        const { mode, productCodes } = supplyNoticeTarget;
+        const { mode, productCodes, origin } = supplyNoticeTarget;
         setSupplyNoticeSaving(true);
         try {
-            if (mode === 'delist') {
-                if (productCodes.length === 1 && selectedRowKeys.length !== 1) {
-                    const record = data.find((item) => item.productCode === productCodes[0]);
-                    if (record) {
-                        await handleToggleSingleActive(record, false, notice);
-                    }
+            if (mode === 'delist' && origin === 'editModal') {
+                // 编辑弹窗：带说明重新走保存，说明随 full-update 同一请求提交。
+                await handleSave(notice);
+            }
+            else if (mode === 'delist' && origin === 'batchEdit') {
+                // 批量修改：带说明回到批量保存流程，继续二次确认并提交后台任务。
+                await handleBatchEditSave(notice);
+            }
+            else if (mode === 'delist' && origin === 'rowToggle') {
+                // 行上开关：只下架被点击的那一行。必须按来源分发，不能按勾选数量推断，
+                // 否则恰好勾选了另一行时会把勾选行下架、被点击的行反而不动。
+                const record = data.find((item) => item.productCode === productCodes[0]);
+                if (record) {
+                    await handleToggleSingleActive(record, false, notice);
                 }
-                else {
-                    await handleBatchToggleActive(false, notice);
-                }
+            }
+            else if (mode === 'delist') {
+                await handleBatchToggleActive(false, notice);
             }
             else {
                 const result = await upsertWarehouseSupplyNotices(productCodes, notice);

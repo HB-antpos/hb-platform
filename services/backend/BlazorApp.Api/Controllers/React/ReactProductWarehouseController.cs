@@ -358,6 +358,7 @@ namespace BlazorApp.Api.Controllers.React
                     GenerateImageUrls = request.GenerateImageUrls,
                     ImageBaseUrl = request.ImageBaseUrl,
                     SyncImageToHq = request.SyncImageToHq,
+                    SupplyNotice = request.SupplyNotice,
                 };
                 if (options.GenerateImageUrls)
                 {
@@ -378,7 +379,8 @@ namespace BlazorApp.Api.Controllers.React
 
                 var currentUsername = GetCurrentUsername();
                 WarehouseProductBatchUpdateResultDto resp;
-                if (options.GenerateImageUrls)
+                // 带供货说明的下架也必须走带选项的重载，否则说明会在旧重载里被丢弃。
+                if (options.GenerateImageUrls || options.SupplyNotice != null)
                 {
                     resp = await _service.BatchUpdateAsync(
                         request.Items,
@@ -505,6 +507,7 @@ namespace BlazorApp.Api.Controllers.React
                         GenerateImageUrls = request.GenerateImageUrls,
                         ImageBaseUrl = request.ImageBaseUrl,
                         SyncImageToHq = request.SyncImageToHq,
+                        SupplyNotice = request.SupplyNotice,
                     },
                     GetCurrentUsername(),
                     cancellationToken
@@ -1291,6 +1294,12 @@ namespace BlazorApp.Api.Controllers.React
             /// 本地提交后是否只同步 HQ 的 H商品图片字段。
             /// </summary>
             public bool SyncImageToHq { get; set; }
+
+            /// <summary>
+            /// 显式设为下架的商品随请求登记的供货说明；上架或未设状态的行忽略。
+            /// 旧客户端不传时保持原状（分店端按“后续计划待确认”展示），必填只在 Web 前端强制。
+            /// </summary>
+            public WarehouseProductSupplyNoticeInputDto? SupplyNotice { get; set; }
         }
 
         public class BatchCreateRequest

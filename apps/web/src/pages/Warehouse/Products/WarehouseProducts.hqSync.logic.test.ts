@@ -850,7 +850,8 @@ async function main() {
     const batchCategorySaveSection = extractSection(
       pageSource,
       'const handleBatchCategorySave = async () => {',
-      'const handleBatchEditSave = async () => {',
+      // 批量修改保存可带下架供货说明参数，锚点只匹配函数名前缀。
+      'const handleBatchEditSave = async (',
     )
     assert(
       batchCategorySaveSection.includes('await batchAssignProducts(targetCategoryGuid, selectedProductCodes)') &&
