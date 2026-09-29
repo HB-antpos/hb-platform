@@ -170,10 +170,12 @@ assert(latestLoaderLayoutEffect.includes('latestLoadDataRef.current = loadData')
 const mountLifecycle = extractBlock(source, 'useLayoutEffect(() => {\n    mountedRef.current = true', '\n\n  useEffect(() => {\n    void loadData()', 'SupplierManagement 挂载生命周期')
 assert(mountLifecycle.includes('useLayoutEffect'), 'SupplierManagement 应在 layout cleanup 阶段关闭 session')
 assert(mountLifecycle.indexOf('mountedRef.current = false') < mountLifecycle.indexOf('listRequestGuardRef.current.invalidate()'), 'SupplierManagement 卸载时应先标记 unmounted 再 invalidate')
-const syncMutation = extractBlock(source, 'const handleSyncFromHq = async () => {', '\n\n  const handleSyncToHq', 'SupplierManagement 从 HQ 同步 mutation')
+// HQ → HBweb 的「从 HQ 同步」已于 2026-09-29 停用，页面不应再提供该入口；「同步所选到 HQ」保留。
+assert(!source.includes('handleSyncFromHq') && !source.includes('syncLocalSuppliers('), 'SupplierManagement 不应再提供从 HQ 同步入口')
+assert(source.includes('syncLocalSuppliersToHq(selectedRowKeys.map(String))'), 'SupplierManagement 应保留同步所选到 HQ')
 const createMutation = extractBlock(source, 'const handleCreate = async () => {', '\n\n  const openEdit', 'SupplierManagement 创建 mutation')
 const editMutation = extractBlock(source, 'const handleEdit = async () => {', '\n\n  return (', 'SupplierManagement 编辑 mutation')
-for (const [label, block] of [['同步', syncMutation], ['创建', createMutation], ['编辑', editMutation]] as const) {
+for (const [label, block] of [['创建', createMutation], ['编辑', editMutation]] as const) {
   assert(block.includes('await latestLoadDataRef.current()'), `SupplierManagement ${label}完成后应调用当前 loader`)
   assert(block.includes('if (mountedRef.current)'), `SupplierManagement ${label}完成后应先确认组件仍挂载`)
   assert(!block.includes('await loadData()'), `SupplierManagement ${label}不得调用旧 render loader`)
@@ -181,6 +183,6 @@ for (const [label, block] of [['同步', syncMutation], ['创建', createMutatio
 const listEffect = extractBlock(source, 'useEffect(() => {\n    void loadData()', '\n\n  useLayoutEffect', 'SupplierManagement 列表 effect')
 assertEqual(count(listEffect, 'loadData('), 1, 'SupplierManagement effect 每次只能加载一次')
 assert(listEffect.includes('listRequestGuardRef.current.invalidate()'), 'SupplierManagement effect 清理时应使旧请求失效')
-assertEqual(count(source, 'await latestLoadDataRef.current()'), 3, 'SupplierManagement mutation 后仍应显式刷新列表')
+assertEqual(count(source, 'await latestLoadDataRef.current()'), 2, 'SupplierManagement mutation 后仍应显式刷新列表')
 
 console.log('SupplierManagement/requestRace.test.ts: ok')

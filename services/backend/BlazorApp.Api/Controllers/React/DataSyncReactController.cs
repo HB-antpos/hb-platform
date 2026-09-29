@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
@@ -8,6 +9,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace BlazorApp.Api.Controllers.React
 {
+    /// <summary>
+    /// 数据同步入口。除「商品-供应商映射 → POSM」两个接口外，其余都是 HQ / HBSales → HBweb 方向，
+    /// 已于 2026-09-29 通过 <see cref="HqToHbwebSyncDisabledAttribute"/> 统一返回 410；服务实现暂时保留。
+    /// </summary>
     [ApiController]
     [Route("api/react/v1/sync")]
     [Authorize]
@@ -39,6 +44,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("products")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProducts()
         {
             try
@@ -81,6 +87,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("store-retail-prices")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreRetailPrices(
             [FromBody] ReactStoreSyncRequest? request = null
         )
@@ -118,6 +125,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("store-multi-code-products")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreMultiCodeProducts(
             [FromBody] ReactStoreSyncRequest? request = null
         )
@@ -150,6 +158,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("product-set-codes")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductSetCodes()
         {
             try
@@ -174,6 +183,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("store-clearance-prices")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreClearancePrices(
             [FromBody] ReactStoreSyncRequest? request = null
         )
@@ -206,6 +216,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("domestic-products")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncDomesticProducts()
         {
             var result = await _fullSyncService.SyncDomesticProductsFromHqAsync();
@@ -214,6 +225,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("domestic-set-products")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncDomesticSetProducts()
         {
             var result = await _fullSyncService.SyncDomesticSetProductsFromHqAsync();
@@ -222,6 +234,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("product-prefix-codes")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductPrefixCodes()
         {
             var result = await _fullSyncService.SyncProductPrefixCodesFromHqAsync();
@@ -230,6 +243,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("china-suppliers")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncChinaSuppliers()
         {
             var result = await _fullSyncService.SyncChinaSuppliersFromHqAsync();
@@ -238,6 +252,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("warehouse-categories")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWarehouseCategories()
         {
             var result = await _fullSyncService.SyncWarehouseCategoriesFromHqAsync();
@@ -257,6 +272,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("container-details")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainerDetails(
             [FromBody] ContainerSyncRequest? request = null
         )
@@ -269,6 +285,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("containers")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainers()
         {
             var result = await _fullSyncService.SyncContainersFromHqAsync();
@@ -277,6 +294,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("warehouse-products")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWarehouseProducts()
         {
             var result = await _fullSyncService.SyncWarehouseProductsFromHqAsync(
@@ -290,6 +308,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("store-local-supplier-invoices")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreLocalSupplierInvoices()
         {
             var result = await _fullSyncService.SyncStoreLocalSupplierInvoicesFromHqAsync();
@@ -298,6 +317,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("store-local-supplier-invoice-details")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreLocalSupplierInvoiceDetails()
         {
             var result = await _fullSyncService.SyncStoreLocalSupplierInvoiceDetailsFromHqAsync();
@@ -306,6 +326,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("store-local-supplier-invoices-all")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreLocalSupplierInvoicesAll()
         {
             var result =
@@ -315,6 +336,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("warehouse-orders")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWareHouseOrders()
         {
             var result = await _fullSyncService.SyncWareHouseOrdersFromHqAsync();
@@ -323,6 +345,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("warehouse-order-details")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWareHouseOrderDetails()
         {
             var result = await _fullSyncService.SyncWareHouseOrderDetailsFromHqAsync();
@@ -331,6 +354,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("warehouse-orders-all")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWareHouseOrdersAll()
         {
             var result = await _fullSyncService.SyncWareHouseOrdersAllFromHqAsync();
@@ -339,6 +363,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("locations")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncLocations()
         {
             var result = await _fullSyncService.SyncLocationsFromHqAsync();
@@ -347,6 +372,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("product-locations")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductLocations()
         {
             var result = await _fullSyncService.SyncProductLocationsFromHqAsync();
@@ -358,6 +384,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("cash-register-users")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncCashRegisterUsers()
         {
             try
@@ -463,6 +490,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("store-local-supplier-invoices-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreLocalSupplierInvoicesIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -501,6 +529,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("containers-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainersIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -538,6 +567,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("container-details-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainerDetailsIncremental(
             [FromBody] ContainerSyncRequest? request = null
         )
@@ -576,6 +606,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("warehouse-orders-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWareHouseOrdersIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -614,6 +645,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("products-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -752,6 +784,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("store-retail-prices-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreRetailPricesIncremental(
             [FromBody] ReactStoreSyncRequest? request = null
         )
@@ -791,6 +824,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("store-multi-code-products-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreMultiCodeProductsIncremental(
             [FromBody] ReactStoreSyncRequest? request = null
         )
@@ -830,6 +864,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("product-set-codes-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductSetCodesIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -868,6 +903,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("store-clearance-prices-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreClearancePricesIncremental(
             [FromBody] ReactStoreSyncRequest? request = null
         )
@@ -907,6 +943,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("domestic-products-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncDomesticProductsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -945,6 +982,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("domestic-set-products-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncDomesticSetProductsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -983,6 +1021,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("product-prefix-codes-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductPrefixCodesIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1021,6 +1060,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("china-suppliers-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncChinaSuppliersIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1059,6 +1099,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("warehouse-categories-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWarehouseCategoriesIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1097,6 +1138,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("warehouse-products-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWarehouseProductsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1135,6 +1177,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("store-local-supplier-invoice-details-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncStoreLocalSupplierInvoiceDetailsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1173,6 +1216,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("warehouse-order-details-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncWareHouseOrderDetailsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1211,6 +1255,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("locations-incremental")]
         [Authorize(Roles = "Admin,WarehouseManager")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncLocationsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1248,6 +1293,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("product-locations-incremental")]
         [Authorize(Roles = "Admin,WarehouseManager")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductLocationsIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1286,6 +1332,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("cash-register-users-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncCashRegisterUsersIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1323,6 +1370,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("product-categories")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductCategories(
             [FromBody] ReactStoreSyncRequest? request = null
         )
@@ -1357,6 +1405,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("product-categories-incremental")]
         [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncProductCategoriesIncremental(
             [FromBody] IncrementalSyncRequest? request = null
         )
@@ -1389,8 +1438,10 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        // 原先误标 [AllowAnonymous]，未登录请求即可改写分店特殊商品标记；停用同时恢复为管理员授权。
         [HttpPost("special-product-from-hq")]
-         [AllowAnonymous] // 🔓 允许匿名访问，登录不需要认证
+        [Authorize(Roles = "Admin")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncSpecialProductFromHq(
             [FromBody] ReactStoreSyncRequest? request = null
         )

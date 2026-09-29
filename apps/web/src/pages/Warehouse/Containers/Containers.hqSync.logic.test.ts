@@ -32,41 +32,26 @@ const pageSource = readFileSync(pageFile, 'utf8')
 async function main() {
   const failures: string[] = []
 
-  const successRefreshFailure = await runTest('同步成功后才提示成功并刷新第一页', () => {
-    assert(
-      pageSource.includes('if (success) {') &&
-      pageSource.includes('message.success(msg)') &&
-      pageSource.includes('await latestRequestFirstPageRef.current()'),
-      '页面应显式区分成功分支，并在成功后提示成功且刷新第一页',
-    )
-
-    assert(
-      pageSource.includes("const success = result.isSuccess ?? result.IsSuccess ?? true"),
-      '页面应基于同步结果中的 success 字段判断是否成功',
-    )
-  })
-  if (successRefreshFailure) failures.push(successRefreshFailure)
-
-  const errorHandlingFailure = await runTest('同步失败时只展示 error.message 且不刷新', () => {
-    assert(
-      pageSource.includes("const errorMessage = error instanceof Error ? error.message : t('containers.messages.syncFailed')") &&
-      pageSource.includes('message.error(errorMessage)'),
-      '页面失败分支应优先展示 error.message，并为非 Error 异常保留兜底文案',
-    )
+  // HQ 货柜 → HBweb 的「从HQ同步」已于 2026-09-29 停用（后端返回 410），页面只保留推送到 HBSales。
+  const hqSyncRemovedFailure = await runTest('货柜页不再提供从HQ同步入口', () => {
+    for (const removed of ['syncContainersFromHq', 'handleSync', 'setSyncing', "t('containers.actions.syncFromHq')", 'CloudSyncOutlined']) {
+      assert(!pageSource.includes(removed), `页面不应再包含 HQ 同步入口代码：${removed}`)
+    }
 
     const firstPageRequestCount = pageSource.split('await latestRequestFirstPageRef.current()').length - 1
-    assertEqual(firstPageRequestCount, 2, '创建成功和同步成功应分别通过当前单一入口刷新第一页一次')
+    assertEqual(firstPageRequestCount, 1, '只剩创建成功后通过当前单一入口刷新第一页')
   })
-  if (errorHandlingFailure) failures.push(errorHandlingFailure)
+  if (hqSyncRemovedFailure) failures.push(hqSyncRemovedFailure)
 
-  const loadingGuardFailure = await runTest('同步按钮应保留 loading 与 disabled 行为', () => {
+  const pushToHbSalesFailure = await runTest('推送到 HBSales 按钮应保留 loading 与选择禁用', () => {
     assert(
-      pageSource.includes('loading={syncing}') &&
-      pageSource.includes('disabled={pushing}'),
-      '同步按钮应继续保留 loading 和 disabled 控制',
+      pageSource.includes('loading={pushing}') &&
+      pageSource.includes('disabled={!selectedRowKeys.length}') &&
+      pageSource.includes('onClick={handlePush}'),
+      '推送到 HBSales 应继续保留 loading，并在未勾选时禁用',
     )
   })
-  if (loadingGuardFailure) failures.push(loadingGuardFailure)
+  if (pushToHbSalesFailure) failures.push(pushToHbSalesFailure)
 
   const inlineStatusFailure = await runTest('状态列应支持行内四态下拉更新', () => {
     assert(

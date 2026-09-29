@@ -96,7 +96,7 @@ const editSaveSource = sliceBetween(pageSource, 'const handleEditSave = async ()
 assert.ok(editSaveSource.includes('resolveSupplierCategoryUpdate('), '单个保存走三态解析')
 assert.ok(editSaveSource.includes('...supplierCategoryUpdate'), '三态结果并入更新请求')
 assert.ok(editSaveSource.includes('SUPPLIER_CATEGORY_MISMATCH_ERROR_CODE'), '分类与供应商不一致时给出明确提示')
-const batchSaveSource = sliceBetween(pageSource, 'const handleBatchEditSave = async () => {', '\n  const openHqSyncModal')
+const batchSaveSource = sliceBetween(pageSource, 'const handleBatchEditSave = async () => {', '\n  const openSyncToStoreModal')
 assert.ok(batchSaveSource.includes("batchSupplierCategoryScope.status === 'enabled'") && batchSaveSource.includes('resolveBatchSupplierCategoryUpdate('), '批量只在同一非 200 供应商时提交')
 
 const editFormSource = sliceBetween(pageSource, '<Form form={editForm}', '</Form>')
