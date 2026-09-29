@@ -344,8 +344,39 @@
       "compareShareOfChina": "China %",
       "compareShareOfTotal": "Total %",
       "pageTotal": "Page total",
-      "supplierHint": "Tap supplier to filter · tap amount for stores · swipe for share, growth and LY",
-      "productHint": "Tap item for stores · swipe for avg, margin and growth"
+      "supplierHint": "Tap supplier to filter stores and products · tap amount for stores · swipe for share, growth and LY",
+      "productHint": "Tap item for stores · swipe for avg, margin and growth",
+      "supplierBranchSection": "Stores · {{supplier}}",
+      "supplierBranchFormula": "{{supplier}} sales ÷ store revenue",
+      "supplierAmount": "Supplier sales",
+      "appendedSelectedBranch": "Selected store is outside the top {{count}}; shown below"
+    },
+    "linked": {
+      "hintChina": "Tap a store or supplier to filter",
+      "hintAustralia": "Tap a supplier to filter products",
+      "branchLabel": "Store",
+      "supplierLabel": "Supplier",
+      "clearAll": "Clear",
+      "clearAllA11y": "Clear all filters",
+      "clearBranch": "Remove store filter",
+      "clearSupplier": "Remove supplier filter",
+      "branchChipA11y": "Store filter: {{name}}. Tap to change store",
+      "supplierChipA11y": "Supplier filter: {{name}}. Tap to jump to suppliers",
+      "anchorBranches": "Stores",
+      "anchorSuppliers": "Suppliers",
+      "anchorProducts": "Products",
+      "anchorA11y": "Jump to {{section}}, {{count}} rows",
+      "anchorUpdatingA11y": "Jump to {{section}}, updating",
+      "updating": "Updating",
+      "updateFailed": "Couldn't update the filtered data. Showing the previous result.",
+      "supplierMissing": "{{supplier}} has no sales at {{branch}} this period",
+      "branchScope": "Suppliers at {{branch}}",
+      "emptyFiltered": "No sales for the current filters",
+      "clearFilters": "Clear filters",
+      "selectBranchA11y": "{{branch}}. Tap to filter suppliers and products",
+      "selectedBranchA11y": "{{branch}}, selected. Tap again to clear",
+      "selectSupplierA11y": "{{supplier}}. Tap to filter stores and products",
+      "selectedSupplierA11y": "{{supplier}}, selected. Tap again to clear"
     }
   }
 }

@@ -344,8 +344,39 @@
       "compareShareOfChina": "占中国货",
       "compareShareOfTotal": "占总营业",
       "pageTotal": "本页合计",
-      "supplierHint": "点供应商筛商品 · 点金额看分店 · 左滑看占比、增长率与同期",
-      "productHint": "点商品看分店 · 左滑看均价、毛利与增长率"
+      "supplierHint": "点供应商联动分店与明细 · 点金额看分店 · 左滑看占比、增长率与同期",
+      "productHint": "点商品看分店 · 左滑看均价、毛利与增长率",
+      "supplierBranchSection": "分店 · {{supplier}}",
+      "supplierBranchFormula": "{{supplier}}金额 ÷ 分店营业额",
+      "supplierAmount": "供应商金额",
+      "appendedSelectedBranch": "已选分店不在前 {{count}} 名，附在末尾"
+    },
+    "linked": {
+      "hintChina": "点分店或供应商可联动筛选",
+      "hintAustralia": "点供应商可筛选商品明细",
+      "branchLabel": "分店",
+      "supplierLabel": "供应商",
+      "clearAll": "清除",
+      "clearAllA11y": "清除全部联动筛选",
+      "clearBranch": "移除分店筛选",
+      "clearSupplier": "移除供应商筛选",
+      "branchChipA11y": "分店筛选：{{name}}，点按更换分店",
+      "supplierChipA11y": "供应商筛选：{{name}}，点按跳到供应商表",
+      "anchorBranches": "分店",
+      "anchorSuppliers": "供应商",
+      "anchorProducts": "明细",
+      "anchorA11y": "跳到{{section}}，{{count}} 行",
+      "anchorUpdatingA11y": "跳到{{section}}，正在更新",
+      "updating": "更新中",
+      "updateFailed": "联动数据没有更新成功，当前显示的是上一次结果",
+      "supplierMissing": "{{supplier}} 在 {{branch}} 本期无销售",
+      "branchScope": "{{branch}} 的供应商",
+      "emptyFiltered": "当前筛选组合下没有销售记录",
+      "clearFilters": "清除筛选",
+      "selectBranchA11y": "{{branch}}，点按联动供应商与商品明细",
+      "selectedBranchA11y": "{{branch}}，已选中，再点取消",
+      "selectSupplierA11y": "{{supplier}}，点按联动分店与商品明细",
+      "selectedSupplierA11y": "{{supplier}}，已选中，再点取消"
     }
   }
 }
