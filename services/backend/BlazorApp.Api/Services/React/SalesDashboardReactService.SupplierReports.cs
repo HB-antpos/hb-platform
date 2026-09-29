@@ -280,16 +280,36 @@ public partial class SalesDashboardReactService
     private async Task<List<(SupplierRollupReadRow Current, SupplierRollupReadRow Compare, string SupplierName, string BranchName)>>
         ReadSupplierRollupMetricsAsync(bool china, bool byBranch, DateRangeDto range, List<string>? branches, List<string>? suppliers, int? topN)
     {
+        // 分店分解（按分店拆开、不截断、指定了供应商且带同期）要按「请求的供应商 × 授权分店」列出全部同期销售：
+        // 移动端分店表的同期金额、同期占比和增减都按这些行求和，只在同期卖过的分店被丢掉就会少算同期。
+        // 排行（不按分店或带 topN）的同期只算本期上榜的供应商，是既定口径，不走这条分支。
+        var requestedSuppliers = NormalizeCodes(suppliers);
+        var includeCompareOnly = byBranch && !topN.HasValue && requestedSuppliers.Count > 0
+            && range.CompareStartDate.HasValue && range.CompareEndDate.HasValue;
         var current = await QuerySupplierRollupRowsAsync(china, byBranch, range.StartDate, range.EndDate, branches, suppliers);
         current = current.OrderByDescending(row => row.TotalAmount).ThenBy(row => row.SupplierCode).ThenBy(row => row.BranchCode).ToList();
         if (topN.HasValue) current = current.Take(Math.Max(0, topN.Value)).ToList();
-        if (current.Count == 0) return new();
+        // 分店分解即使本期为空也要继续读同期，只有补行后仍为空才返回空。
+        if (current.Count == 0 && !includeCompareOnly) return new();
         var selectedSuppliers = current.Select(row => row.SupplierCode).Distinct().ToList();
         var comparison = range.CompareStartDate.HasValue && range.CompareEndDate.HasValue
-            ? await QuerySupplierRollupRowsAsync(china, byBranch, range.CompareStartDate.Value, range.CompareEndDate.Value, branches, selectedSuppliers)
+            ? await QuerySupplierRollupRowsAsync(china, byBranch, range.CompareStartDate.Value, range.CompareEndDate.Value, branches,
+                includeCompareOnly ? requestedSuppliers : selectedSuppliers)
             : new List<SupplierRollupReadRow>();
         string Key(SupplierRollupReadRow row) => byBranch ? $"{row.BranchCode}|{row.SupplierCode}" : row.SupplierCode;
         var compare = comparison.ToDictionary(Key, StringComparer.OrdinalIgnoreCase);
+        if (includeCompareOnly)
+        {
+            // 只有同期有销售的「分店|供应商」补一行本期全 0 的指标（成本状态为 NoActivity、毛利为空），
+            // 排在本期行之后，按同期金额降序、再按供应商与分店排序，保证结果稳定。
+            var currentKeys = current.Select(Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            current.AddRange(comparison.Where(row => !currentKeys.Contains(Key(row)))
+                .OrderByDescending(row => row.TotalAmount).ThenBy(row => row.SupplierCode).ThenBy(row => row.BranchCode)
+                .Select(row => new SupplierRollupReadRow { SupplierCode = row.SupplierCode, BranchCode = row.BranchCode }));
+            if (current.Count == 0) return new();
+            // 供应商与门店名称映射都要覆盖补出来的行。
+            selectedSuppliers = current.Select(row => row.SupplierCode).Distinct().ToList();
+        }
         var names = china ? await GetChinaSupplierNameMapAsync(selectedSuppliers) : await GetAustralianSupplierNameMapAsync(selectedSuppliers);
         var stores = byBranch ? await GetStoreNameMapAsync(current.Select(row => row.BranchCode).ToHashSet()) : new Dictionary<string, string>();
         return current.Select(row => (row, compare.GetValueOrDefault(Key(row)) ?? new SupplierRollupReadRow(),

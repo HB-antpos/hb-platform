@@ -340,6 +340,7 @@
     <Compile Include="DataSyncReactControllerSyncResultContractTests.cs" />
     <Compile Include="HqToHbwebSyncDisabledContractTests.cs" />
     <Compile Include="HqToHbwebSyncDisabledAttributeTests.cs" />
+    <Compile Include="ClientAbortedRequestLoggingTests.cs" />
     <Compile Include="DataSyncLegacyControllerProductSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopFilterOptionsTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopGridTests.cs" />
@@ -350,6 +351,7 @@
     <Compile Include="SqliteTempFileCleanup.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
+    <Compile Include="ApiExceptionFilterDetailsTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
