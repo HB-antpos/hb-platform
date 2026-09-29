@@ -1030,150 +1030,58 @@ async function main() {
   })
   if (mainTablePaginationFailure) failures.push(mainTablePaginationFailure)
 
-  const adminOnlyButtonFailure = await runTest('页面应仅对 Admin 渲染从 HQ 同步按钮', () => {
-    assert(
-      pageSource.includes('CloudSyncOutlined'),
-      '页面应引入 CloudSyncOutlined 图标',
-    )
-
-    assert(
-      pageSource.includes('access.isAdmin') &&
-      pageSource.includes("t('warehouse.hqSync', '从HQ同步库存')"),
-      '页面应基于 access.isAdmin 控制“从HQ同步库存”按钮可见性',
-    )
+  // HQ → HBweb 的「从HQ同步库存」已于 2026-09-29 停用（后端返回 410），页面不得再保留入口、job 与轮询逻辑。
+  const adminOnlyButtonFailure = await runTest('页面不再提供从HQ同步库存入口', () => {
+    for (const removed of [
+      "t('warehouse.hqSync', '从HQ同步库存')",
+      "key: 'hqSync'",
+      'handleSyncWarehouseProductsFromHq',
+      'syncingFromHq',
+      'activeHqSyncJob',
+      'createWarehouseProductHqSyncJob',
+      'getWarehouseProductHqSyncJob',
+      'createWarehouseProductHqSyncJobPoller',
+      'WAREHOUSE_PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY',
+      'warehouse.products.activeHqSyncJob',
+      'startHqSyncJobPolling',
+      'showHqSyncJobResult',
+      'buildHqSyncResultDescription',
+    ]) {
+      assert(!pageSource.includes(removed), `页面不应再包含 HQ → HBweb 库存同步代码：${removed}`)
+    }
   })
   if (adminOnlyButtonFailure) failures.push(adminOnlyButtonFailure)
 
-  const modalConfirmFailure = await runTest('点击同步按钮前应弹出明确提示按商品编码新增更新的确认框', () => {
-    const syncSection = extractSection(
-      pageSource,
-      'const handleSyncWarehouseProductsFromHq = () => {',
-      'const baseColumns = useMemo',
-    )
-
-    assert(
-      syncSection.includes('Modal.confirm({') &&
-      syncSection.includes("t('warehouse.hqSyncTitle', '从HQ同步库存')") &&
-      syncSection.includes('按商品编码匹配') &&
-      syncSection.includes('不会删除本地缺失商品'),
-      '同步前应弹出明确提示“按商品编码匹配新增/更新且不删除本地缺失商品”的确认框',
-    )
-  })
-  if (modalConfirmFailure) failures.push(modalConfirmFailure)
-
-  const loadingFailure = await runTest('同步按钮应在后台任务提交中或运行中展示 loading，提交请求中 disabled', () => {
-    // 同步入口收进「同步」菜单：菜单图标在提交中或后台运行中转圈；菜单项只在提交请求中禁用，
-    // 运行中仍可点击查看任务状态（因此不能用会吞掉点击的 Button loading）。
+  const loadingFailure = await runTest('「同步」菜单只保留更新分店价格且使用静态图标', () => {
     const syncMenuSection = extractSection(
       pageSource,
       "<ToolbarMenuButton label={t('common.listToolbar.sync', '同步')}",
       "<ToolbarMenuButton label={t('common.listToolbar.importExport'",
     )
     assert(
-      syncMenuSection.includes('icon={syncingFromHq || Boolean(activeHqSyncJob) ? <LoadingOutlined /> : <CloudSyncOutlined />}') &&
+      syncMenuSection.includes('icon={<CloudSyncOutlined />}') &&
         !syncMenuSection.includes('loading={') &&
-        syncMenuSection.includes("key: 'hqSync'") &&
-        syncMenuSection.includes('disabled: syncingFromHq,') &&
-        syncMenuSection.includes('onClick: handleSyncWarehouseProductsFromHq,'),
-      '同步菜单应绑定提交中和后台运行中状态，并允许运行中点击查看状态',
+        !syncMenuSection.includes("key: 'hqSync'") &&
+        syncMenuSection.includes("key: 'storePriceSync'"),
+      '同步菜单应只保留写 HQ 的更新分店价格',
     )
   })
   if (loadingFailure) failures.push(loadingFailure)
 
-  const jobApiFailure = await runTest('页面应提交后台 job 并轮询查询 job 状态', () => {
-    const syncSection = extractSection(
-      pageSource,
-      'const handleSyncWarehouseProductsFromHq = () => {',
-      'const baseColumns = useMemo',
-    )
-
-    assert(
-      pageSource.includes('createWarehouseProductHqSyncJob') &&
-      pageSource.includes('getWarehouseProductHqSyncJob') &&
-      pageSource.includes('createWarehouseProductHqSyncJobPoller'),
-      '页面应使用后台 job 创建接口、查询接口和轮询器',
-    )
-
-    assert(
-      syncSection.includes('createWarehouseProductHqSyncJob') &&
-      !syncSection.includes('syncWarehouseProductsFromHq()'),
-      '按钮确认后不应再直接等待旧同步接口完成',
-    )
-  })
-  if (jobApiFailure) failures.push(jobApiFailure)
-
-  const notificationFailure = await runTest('同步提交和完成结果应通过右上角 notification 返回', () => {
-    const syncSection = extractSection(
-      pageSource,
-      'const handleSyncWarehouseProductsFromHq = () => {',
-      'const baseColumns = useMemo',
-    )
-
-    assert(
-      pageSource.includes('notification') &&
-      pageSource.includes('notification.info') &&
-      pageSource.includes('notification.success') &&
-      pageSource.includes('notification.error') &&
-      pageSource.includes('notification.warning'),
-      '页面应使用 notification 展示提交、成功、失败和超时信息',
-    )
-
-    assert(
-      syncSection.includes("t('warehouse.hqSyncJobSubmitted") &&
-      syncSection.includes('startHqSyncJobPolling'),
-      '提交成功后应提示后台执行并启动轮询',
-    )
-  })
-  if (notificationFailure) failures.push(notificationFailure)
-
-  const successRefreshFailure = await runTest('后台同步成功后右上角提示结果并刷新第一页', () => {
-    const descriptionSection = extractSection(
-      pageSource,
-      'const buildHqSyncResultDescription',
-      'const showHqSyncJobResult',
-    )
-    const resultSection = extractSection(
-      pageSource,
-      'const showHqSyncJobResult',
-      'const startHqSyncJobPolling',
-    )
+  const successRefreshFailure = await runTest('刷新当前列表仍应经过 mounted gate 并走 current loader', () => {
     const refreshSection = extractSection(
       pageSource,
       'const refreshCurrentList',
-      'const stopHqSyncJobPolling',
+      'const stopBatchUpdateJobPolling',
     )
 
     assert(
-      resultSection.includes('notification.success') &&
-      descriptionSection.includes('addedCount') &&
-      descriptionSection.includes('updatedCount') &&
-      descriptionSection.includes('errorCount') &&
-      resultSection.includes('void refreshCurrentList({ page: 1 })') &&
       refreshSection.includes('if (!isMountedRef.current) {') &&
       refreshSection.includes('loadDataRef.current?.(overrides)'),
-      '后台同步成功应展示结果，并在 mounted gate 后通过 current loader 刷新第一页',
+      '刷新当前列表应在 mounted gate 后通过 current loader 执行',
     )
   })
   if (successRefreshFailure) failures.push(successRefreshFailure)
-
-  const failureNoRefreshFailure = await runTest('后台同步失败时只提示失败且不刷新第一页', () => {
-    const resultSection = extractSection(
-      pageSource,
-      'const showHqSyncJobResult',
-      'const startHqSyncJobPolling',
-    )
-
-    assert(
-      resultSection.includes('notification.error'),
-      '后台同步失败时应使用 notification.error',
-    )
-
-    assert(
-      !extractSection(resultSection, 'if (!success) {', 'const errorCount').includes('refreshCurrentList('),
-      '后台同步失败分支不应刷新第一页',
-    )
-  })
-  if (failureNoRefreshFailure) failures.push(failureNoRefreshFailure)
 
   const serviceUrlFailure = await runTest('同步服务应使用正确的 URL、POST 方法，并在后端返回失败时抛出 message', async () => {
     const originalFetch = globalThis.fetch
@@ -1732,13 +1640,12 @@ async function main() {
       '紧凑页头副标题应显示记录总数，不再显示原说明文字',
     )
     assert(
-      syncMenuSection.includes("t('warehouse.hqSync', '从HQ同步库存')") &&
-        syncMenuSection.includes('visible: access.isAdmin,') &&
+      !syncMenuSection.includes("t('warehouse.hqSync', '从HQ同步库存')") &&
         syncMenuSection.includes("t('warehouse.storePriceSync.title', '更新分店价格')") &&
         syncMenuSection.includes('visible: canManageWarehouseStorePriceSync,') &&
         syncMenuSection.includes('disabled: storePriceSyncOpen,') &&
         syncMenuSection.includes('onClick: () => setStorePriceSyncOpen(true),'),
-      '「同步」菜单应包含按权限显示的从HQ同步库存和更新分店价格',
+      '「同步」菜单应只包含按权限显示的更新分店价格（从HQ同步库存已停用）',
     )
     assert(
       importExportMenuSection.includes('icon={exporting ? <LoadingOutlined /> : <DownloadOutlined />}') &&

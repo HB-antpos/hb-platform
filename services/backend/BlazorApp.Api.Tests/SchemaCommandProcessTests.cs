@@ -7,13 +7,17 @@ namespace BlazorApp.Api.Tests;
 public sealed class SchemaCommandProcessTests
 {
     [Theory]
-    [InlineData("--schema=check")]
-    [InlineData("--schema=migrate")]
-    public async Task 显式Schema命令_数据库不可用时退出22且不启动HTTP(string argument)
+    [InlineData("--schema=check", SchemaDiagnosticCodes.DatabaseFailure)]
+    [InlineData("--schema=migrate", SchemaDiagnosticCodes.MigrationFailure)]
+    public async Task 显式Schema命令_数据库不可用时退出22且不启动HTTP(
+        string argument,
+        string expectedDiagnosticCode)
     {
         var result = await RunApiToExitAsync([argument], includeInvalidDatabaseConfiguration: true);
 
         Assert.Equal(22, result.ExitCode);
+        // 诊断码经异步控制台日志写出，断言它可以防止 host 未释放导致日志丢失的回归。
+        Assert.Contains(expectedDiagnosticCode, result.CombinedOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("Now listening on:", result.CombinedOutput, StringComparison.Ordinal);
     }
 
@@ -38,6 +42,10 @@ public sealed class SchemaCommandProcessTests
         var result = await RunApiToExitAsync([], includeInvalidDatabaseConfiguration: true);
 
         Assert.Equal(22, result.ExitCode);
+        Assert.Contains(
+            SchemaDiagnosticCodes.DatabaseFailure,
+            result.CombinedOutput,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("Now listening on:", result.CombinedOutput, StringComparison.Ordinal);
     }
 

@@ -1,6 +1,5 @@
 import {
   ApartmentOutlined,
-  CloudDownloadOutlined,
   CloudSyncOutlined,
   CloudUploadOutlined,
   CopyOutlined,
@@ -70,23 +69,17 @@ import {
 import {
   batchUpdateProductStoreRecords,
   batchUpdateProducts,
-  buildProductHqSyncOperationId,
   buildSupplierImageBatchUpdateOperationId,
-  createProductHqSyncJobPoller,
   createProductWithPrices,
-  createProductFullHqSyncJob,
-  createProductIncrementalHqSyncJob,
   createSupplierImageBatchUpdateJob,
   getPushToHqStoreOptions,
   getSyncProductsToStoresJob,
   getSupplierImageBatchUpdateJob,
   getProductStoreRecords,
-  getProductHqSyncJob,
   getProducts,
   HqProductSyncPollingTimeoutError,
   pushProductsToHq,
   startSyncProductsToStoresJob,
-  syncSelectedProductsFromHq,
   updateProduct,
 } from '../../../services/posProductService'
 import { createHqSyncJobPoller } from '../../../services/productHqSyncPolling'
@@ -105,7 +98,7 @@ import PosHqPushModal from '../../../components/posHqPush/PosHqPushModal'
 import { createPushToHqStoreOptionsGuard } from '../../../components/posHqPush/storeSelection'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import { RequestError } from '../../../utils/request'
-import type { BatchUpdatePosProductDto, BatchUpdateProductStoreRecordsChanges, BatchUpdateSupplierImagesJobResult, BatchUpdateSupplierImagesResult, HqProductSyncJobResult, HqProductSyncJobStatus, HqProductSyncResult, PosProductColumnFilters, PosProductDateFilterOperator, PosProductDto, PosProductFilterParams, PosProductNumberFilterOperator, PosProductTextFilterOperator, ProductStoreRecordDto, PushProductsToHqResult, PushProductsToHqStoreOption, PushProductsToHqUpdateField, SyncProductsToStoresField, SyncProductsToStoresJobResult, SyncProductsToStoresRequest, SyncProductsToStoresResult } from '../../../types/posProduct'
+import type { BatchUpdatePosProductDto, BatchUpdateProductStoreRecordsChanges, BatchUpdateSupplierImagesJobResult, BatchUpdateSupplierImagesResult, PosProductColumnFilters, PosProductDateFilterOperator, PosProductDto, PosProductFilterParams, PosProductNumberFilterOperator, PosProductTextFilterOperator, ProductStoreRecordDto, PushProductsToHqResult, PushProductsToHqStoreOption, PushProductsToHqUpdateField, SyncProductsToStoresField, SyncProductsToStoresJobResult, SyncProductsToStoresRequest, SyncProductsToStoresResult } from '../../../types/posProduct'
 import type { ProductCategoryDto } from '../../../types/productCategory'
 import type { ProductIntegrityCheckResultDto, ProductIntegrityFixResultDto } from '../../../types/productIntegrity'
 import type { MulticodeSetItem } from '../../../types/multiCodeSet'
@@ -207,7 +200,6 @@ type ProductRow = (PosProductDto & {
   domesticSupplierCode?: string
   domesticSupplierName?: string
 }) & { key: string }
-type HqSyncMode = Parameters<typeof buildProductHqSyncOperationId>[0]
 type SupplierOption = { label: string; value: string; localSupplierCode: string; name?: string; imageBaseUrl?: string }
 type ChinaSupplierOption = { label: string; value: string }
 type ProductFilterParams = PosProductFilterParams & { warehouseCategoryGuid?: string }
@@ -227,16 +219,6 @@ type StoreRecordBatchEditFormValues = {
   isActive?: boolean
 }
 
-type ActiveProductHqSyncJob = {
-  jobId: string
-  mode: HqSyncMode
-  operationId: string
-  createdAt: string
-  status?: HqProductSyncJobStatus | string
-  message?: string
-  startDate?: string
-}
-
 function isSameSetCodePasteTarget(
   left: SetCodePasteTarget | null,
   right: SetCodePasteTarget,
@@ -247,7 +229,7 @@ function isSameSetCodePasteTarget(
 // 商品列表容器距视口底部的留白，以及容器最小高度（窗口很矮时也保证表格可用）。
 const PRODUCT_LIST_BOTTOM_GAP = 16
 const PRODUCT_LIST_MIN_HEIGHT = 360
-const PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY = 'posAdmin.products.activeHqSyncJob'
+// HQ → HBweb 商品同步已于 2026-09-29 停用；以下轮询参数仍供「同步到分店」后台任务复用。
 const PRODUCT_HQ_SYNC_POLL_INTERVAL_MS = 2000
 const PRODUCT_HQ_SYNC_TIMEOUT_MS = 10 * 60 * 1000
 const SUPPLIER_IMAGE_BATCH_POLL_INTERVAL_MS = 2000
@@ -415,28 +397,6 @@ function buildProductNameTranslationUpdates(
   }, [])
 }
 
-function readActiveProductHqSyncJob(): ActiveProductHqSyncJob | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<ActiveProductHqSyncJob>
-    if (!parsed.jobId || !parsed.operationId || !parsed.mode || !parsed.createdAt) return null
-    return parsed as ActiveProductHqSyncJob
-  } catch {
-    return null
-  }
-}
-
-function saveActiveProductHqSyncJob(job: ActiveProductHqSyncJob | null) {
-  if (typeof window === 'undefined') return
-  if (!job) {
-    window.localStorage.removeItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY)
-    return
-  }
-  window.localStorage.setItem(PRODUCT_HQ_SYNC_ACTIVE_JOB_STORAGE_KEY, JSON.stringify(job))
-}
-
 function resolveCascaderLeafValue(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     const leaf = value[value.length - 1]
@@ -546,7 +506,6 @@ export default function ProductManagementPage() {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { active } = useKeepAliveContext()
-  const isAdmin = useAuthStore((state) => state.access.isAdmin)
   const canManagePosProducts = useAuthStore((state) => state.access.canManagePosProducts)
   const canManageStoreProducts = useAuthStore((state) => state.access.canManageStoreProducts)
   const canEditStoreProducts = useAuthStore((state) => state.access.canEditStoreProducts)
@@ -586,17 +545,10 @@ export default function ProductManagementPage() {
   const [sortBy, setSortBy] = useState('productCode')
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('ascend')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
-  const [hqSyncSubmitting, setHqSyncSubmitting] = useState(false)
-  const hqSyncSubmittingRef = useRef(false)
-  const stopHqSyncPollingRef = useRef<(() => void) | null>(null)
   const stopSyncToStorePollingRef = useRef<(() => void) | null>(null)
   const stopSupplierImageBatchPollingRef = useRef<Record<string, () => void>>({})
   const isMountedRef = useRef(true)
-  const [activeHqSyncJob, setActiveHqSyncJob] = useState<ActiveProductHqSyncJob | null>(() => readActiveProductHqSyncJob())
   const [activeImageBatchJobs, setActiveImageBatchJobs] = useState<ActiveSupplierImageBatchJobMap>(() => readActiveSupplierImageBatchJobs())
-  const [hqSyncMode, setHqSyncMode] = useState<HqSyncMode>('incremental')
-  const [hqSyncVisible, setHqSyncVisible] = useState(false)
-  const [hqSyncForm] = Form.useForm()
 
   const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([])
   const [categoryTree, setCategoryTree] = useState<ProductCategoryDto[]>([])
@@ -634,8 +586,6 @@ export default function ProductManagementPage() {
   const [pushToHqStoreOptionsLoading, setPushToHqStoreOptionsLoading] = useState(false)
   const [pushToHqStoreOptionsError, setPushToHqStoreOptionsError] = useState<string | null>(null)
   const [pushToHqConfirmLoading, setPushToHqConfirmLoading] = useState(false)
-  const [selectedFromHqLoading, setSelectedFromHqLoading] = useState(false)
-  const selectedFromHqLoadingRef = useRef(false)
 
   const productTypeWatch = Form.useWatch('productType', editForm)
   const imageBatchSupplierCode = Form.useWatch('localSupplierCode', imageBatchForm)
@@ -1065,24 +1015,9 @@ export default function ProductManagementPage() {
     )
   }, [page, pageSize, keyword, supplierCode, categoryGuid, warehouseCategoryGuid, supplierCategoryGuid, supplierCategoryUnassignedOnly, isActiveFilter, isSetFilter, storeRecordCountMin, storeRecordCountMax, sortBy, sortOrder, columnFilters, queryVersion])
 
-  const stopHqSyncJobPolling = useCallback(() => {
-    stopHqSyncPollingRef.current?.()
-    stopHqSyncPollingRef.current = null
-  }, [])
-
   const stopSyncToStorePolling = useCallback(() => {
     stopSyncToStorePollingRef.current?.()
     stopSyncToStorePollingRef.current = null
-  }, [])
-
-  const saveActiveHqSyncJob = useCallback((job: ActiveProductHqSyncJob) => {
-    setActiveHqSyncJob(job)
-    saveActiveProductHqSyncJob(job)
-  }, [])
-
-  const clearActiveHqSyncJob = useCallback(() => {
-    setActiveHqSyncJob(null)
-    saveActiveProductHqSyncJob(null)
   }, [])
 
   const stopSupplierImageBatchPolling = useCallback((localSupplierCode?: string) => {
@@ -1122,77 +1057,6 @@ export default function ProductManagementPage() {
     if (!jobKey) return null
     return activeImageBatchJobs[jobKey] ?? readActiveSupplierImageBatchJobs()[jobKey] ?? null
   }, [activeImageBatchJobs])
-
-  const buildHqSyncResultLines = useCallback((result: HqProductSyncResult) => {
-    const lines = [
-      t('posAdmin.products.hqSyncResult', '同步完成：新增 {{added}}，更新 {{updated}}，软删 {{deleted}}', {
-        added: result.productsAdded ?? 0,
-        updated: result.productsUpdated ?? 0,
-        deleted: result.productsDeleted ?? 0,
-      }),
-    ]
-
-    const relationStats = [
-      { label: t('posAdmin.products.storeRetailPricesCreated', '门店零售价新增'), value: result.storeRetailPricesCreated ?? 0 },
-      { label: t('posAdmin.products.storeRetailPricesDeleted', '门店零售价删除'), value: result.storeRetailPricesDeleted ?? 0 },
-      { label: t('posAdmin.products.productSetCodesCreated', '套装编码新增'), value: result.productSetCodesCreated ?? 0 },
-      { label: t('posAdmin.products.productSetCodesUpdated', '套装编码更新'), value: result.productSetCodesUpdated ?? 0 },
-      { label: t('posAdmin.products.productSetCodesDeleted', '套装编码删除'), value: result.productSetCodesDeleted ?? 0 },
-      { label: t('posAdmin.products.storeMultiCodesCreated', '门店多码新增'), value: result.storeMultiCodesCreated ?? 0 },
-      { label: t('posAdmin.products.storeMultiCodesDeleted', '门店多码删除'), value: result.storeMultiCodesDeleted ?? 0 },
-    ].filter((item) => item.value > 0)
-
-    relationStats.forEach((item) => {
-      lines.push(`${item.label}: ${item.value}`)
-    })
-
-    return lines
-  }, [t])
-
-  const showHqSyncJobResult = useCallback((result: HqProductSyncJobResult) => {
-    const displayResult: HqProductSyncResult & Pick<Partial<HqProductSyncJobResult>, 'status' | 'message'> = {
-      ...(result.result ?? result),
-      status: result.status,
-      message: result.message ?? result.result?.message,
-      errors: result.errors?.length ? result.errors : result.result?.errors,
-    }
-    const content = (
-      <Space direction="vertical" size={6}>
-        {displayResult.message && <div>{displayResult.message}</div>}
-        {buildHqSyncResultLines(displayResult).map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-        {displayResult.errors?.length ? (
-          <div>
-            {t('posAdmin.products.partialSyncError', '部分同步错误')}：{displayResult.errors.join('\n')}
-          </div>
-        ) : null}
-      </Space>
-    )
-
-    if (result.status === 'Failed') {
-      Modal.error({
-        title: t('posAdmin.products.hqSyncJobFailed', '商品 HQ 同步失败'),
-        content,
-      })
-      return
-    }
-
-    if (displayResult.errors?.length) {
-      Modal.warning({
-        title: t('posAdmin.products.hqSyncJobPartialSucceeded', '商品 HQ 同步部分成功'),
-        content,
-      })
-      void loadData()
-      return
-    }
-
-    Modal.success({
-      title: t('posAdmin.products.hqSyncJobSucceeded', '商品 HQ 同步完成'),
-      content,
-    })
-    void loadData()
-  }, [buildHqSyncResultLines, loadData, t])
 
   const refreshSupplierOptions = useCallback(async () => {
     try {
@@ -1259,82 +1123,6 @@ export default function ProductManagementPage() {
     void refreshSupplierOptions()
     void loadData()
   }, [loadData, refreshSupplierOptions, t])
-
-  const startHqSyncJobPolling = useCallback((job: ActiveProductHqSyncJob) => {
-    stopHqSyncJobPolling()
-
-    const showPollingTimeout = () => {
-      clearActiveHqSyncJob()
-      Modal.warning({
-        title: t('posAdmin.products.hqSyncJobTimeoutTitle', '商品 HQ 同步仍在后台执行'),
-        content: t('posAdmin.products.hqSyncJobTimeout', '前端已停止轮询该同步任务。你可以稍后刷新列表，或重新提交同一同步范围以接管后端已有任务。'),
-      })
-    }
-
-    saveActiveHqSyncJob(job)
-    const poller = createProductHqSyncJobPoller({
-      jobId: job.jobId,
-      getJob: async (jobId) => {
-        try {
-          const result = await getProductHqSyncJob(jobId)
-          saveActiveHqSyncJob({
-            ...job,
-            status: result.status,
-            message: result.message,
-          })
-          return result
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : ''
-          if (errorMessage.includes('未知同步任务状态') || errorMessage.includes('未知商品同步任务状态')) {
-            throw error
-          }
-          if (isMountedRef.current) {
-            message.warning(error instanceof Error ? error.message : t('posAdmin.products.hqSyncJobPollingFailed', '同步任务状态获取失败，将继续在后台重试'))
-          }
-          return {
-            jobId,
-            status: 'Running',
-            message: errorMessage,
-          }
-        }
-      },
-      pollIntervalMs: PRODUCT_HQ_SYNC_POLL_INTERVAL_MS,
-      timeoutMs: PRODUCT_HQ_SYNC_TIMEOUT_MS,
-    })
-    stopHqSyncPollingRef.current = poller.stop
-
-    void poller.promise
-      .then((result) => {
-        if (!isMountedRef.current) {
-          return
-        }
-        clearActiveHqSyncJob()
-        showHqSyncJobResult(result)
-      })
-      .catch((error) => {
-        if (!isMountedRef.current) {
-          return
-        }
-
-        const errorMessage = error instanceof Error ? error.message : ''
-        if (error instanceof HqProductSyncPollingTimeoutError) {
-          showPollingTimeout()
-          return
-        }
-        if (errorMessage === '商品同步任务轮询已取消') {
-          return
-        }
-        if (errorMessage.includes('未知同步任务状态') || errorMessage.includes('未知商品同步任务状态')) {
-          clearActiveHqSyncJob()
-          Modal.error({
-            title: t('posAdmin.products.hqSyncJobFailed', '商品 HQ 同步失败'),
-            content: errorMessage,
-          })
-          return
-        }
-        message.warning(error instanceof Error ? error.message : t('posAdmin.products.hqSyncJobPollingFailed', '同步任务状态获取失败，将继续在后台重试'))
-      })
-  }, [clearActiveHqSyncJob, saveActiveHqSyncJob, showHqSyncJobResult, stopHqSyncJobPolling, t])
 
   const startSyncToStoreJobPolling = useCallback((job: SyncProductsToStoresJobResult) => {
     stopSyncToStorePolling()
@@ -1511,43 +1299,12 @@ export default function ProductManagementPage() {
       })
   }, [clearActiveImageBatchJob, saveActiveImageBatchJob, showSupplierImageBatchResult, stopSupplierImageBatchPolling, t])
 
-  const restoreActiveHqSyncJob = useCallback(() => {
-    const restoredJob = readActiveProductHqSyncJob()
-    if (!restoredJob?.jobId) return
-    startHqSyncJobPolling(restoredJob)
-  }, [startHqSyncJobPolling])
-
   const restoreActiveSupplierImageBatchJobs = useCallback(() => {
     Object.values(readActiveSupplierImageBatchJobs()).forEach((restoredJob) => {
       if (!restoredJob?.jobId) return
       startSupplierImageBatchPolling(restoredJob)
     })
   }, [startSupplierImageBatchPolling])
-
-  const showActiveHqSyncJobStatus = useCallback((job: ActiveProductHqSyncJob | null = activeHqSyncJob) => {
-    if (!job) return
-
-    Modal.info({
-      title: t('posAdmin.products.hqSyncJobStatusTitle', '商品 HQ 同步正在后台执行'),
-      content: (
-        <Descriptions size="small" column={1}>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobId', '任务 ID')}>
-            {job.jobId}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobMode', '同步类型')}>
-            {job.mode === 'full' ? t('posAdmin.products.fullSyncFromHQ', '全量同步') : t('posAdmin.products.incrementalSyncFromHQ', '增量同步')}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobStatus', '任务状态')}>
-            {job.status || t('posAdmin.products.hqSyncJobQueued', '排队中')}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('posAdmin.products.hqSyncJobStartedAt', '提交时间')}>
-            {dayjs(job.createdAt).format('YYYY-MM-DD HH:mm:ss')}
-          </Descriptions.Item>
-        </Descriptions>
-      ),
-    })
-    message.info(t('posAdmin.products.hqSyncJobStatusContent', '同步任务已在后台执行，请等待完成提示。'))
-  }, [activeHqSyncJob, t])
 
   const showActiveSupplierImageBatchStatus = useCallback((job: ActiveSupplierImageBatchJob | null) => {
     if (!job) return
@@ -1661,9 +1418,8 @@ export default function ProductManagementPage() {
   useEffect(() => {
     return () => {
       isMountedRef.current = false
-      stopHqSyncJobPolling()
     }
-  }, [stopHqSyncJobPolling])
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -1676,10 +1432,6 @@ export default function ProductManagementPage() {
       stopSupplierImageBatchPolling()
     }
   }, [stopSupplierImageBatchPolling])
-
-  useEffect(() => {
-    restoreActiveHqSyncJob()
-  }, [restoreActiveHqSyncJob])
 
   useEffect(() => {
     restoreActiveSupplierImageBatchJobs()
@@ -2132,35 +1884,6 @@ export default function ProductManagementPage() {
     return true
   }, [t])
 
-  const showSelectedFromHqResult = useCallback((result: HqProductSyncResult) => {
-    const content = (
-      <Space direction="vertical" size={6}>
-        {result.message && <div>{result.message}</div>}
-        {buildHqSyncResultLines(result).map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-        {result.errors?.length ? (
-          <div style={{ whiteSpace: 'pre-wrap' }}>
-            {t('posAdmin.products.partialSyncError', '部分同步错误')}：{result.errors.join('\n')}
-          </div>
-        ) : null}
-      </Space>
-    )
-
-    if (result.errors?.length) {
-      Modal.warning({
-        title: t('posAdmin.products.syncSelectedFromHqPartialSucceeded', '从 HQ 同步选中商品部分成功'),
-        content,
-      })
-      return
-    }
-
-    Modal.success({
-      title: t('posAdmin.products.syncSelectedFromHqSucceeded', '从 HQ 同步选中商品完成'),
-      content,
-    })
-  }, [buildHqSyncResultLines, t])
-
   function showSyncToStoreJobResult(job: SyncProductsToStoresJobResult) {
     const result: SyncProductsToStoresResult = job.result ?? {
       createdCount: 0,
@@ -2215,13 +1938,6 @@ export default function ProductManagementPage() {
     })
     setSelectedRowKeys([])
     void loadData()
-  }
-
-  const ensureCanSyncProductsFromHq = () => {
-    if (isAdmin) return true
-    setHqSyncVisible(false)
-    message.warning(t('posAdmin.products.noManagePermission', '无权限管理商品'))
-    return false
   }
 
   // 换了澳洲供应商后旧分类不属于新供应商：清空让用户在新供应商的树里重选，保存时按「换供应商」恢复自动归类。
@@ -2723,25 +2439,6 @@ export default function ProductManagementPage() {
     }
   }
 
-  const openHqSyncModal = (mode: HqSyncMode) => {
-    if (!ensureCanSyncProductsFromHq()) return
-    const storedActiveJob = activeHqSyncJob ?? readActiveProductHqSyncJob()
-    if (storedActiveJob) {
-      if (!activeHqSyncJob) {
-        setActiveHqSyncJob(storedActiveJob)
-        startHqSyncJobPolling(storedActiveJob)
-      }
-      showActiveHqSyncJobStatus(storedActiveJob)
-      return
-    }
-    setHqSyncMode(mode)
-    hqSyncForm.resetFields()
-    if (mode === 'incremental') {
-      hqSyncForm.setFieldsValue({ startDate: dayjs().subtract(100, 'day') })
-    }
-    setHqSyncVisible(true)
-  }
-
   const openSyncToStoreModal = () => {
     if (!ensureCanManagePosProducts()) return
     syncToStoreForm.resetFields()
@@ -2758,60 +2455,6 @@ export default function ProductManagementPage() {
       })
     }
     setSyncToStoreVisible(true)
-  }
-
-  const handleSyncFromHq = async () => {
-    if (!ensureCanSyncProductsFromHq()) return
-    const storedActiveJob = activeHqSyncJob ?? readActiveProductHqSyncJob()
-    if (hqSyncSubmitting || storedActiveJob) {
-      if (storedActiveJob) {
-        if (!activeHqSyncJob) {
-          setActiveHqSyncJob(storedActiveJob)
-          startHqSyncJobPolling(storedActiveJob)
-        }
-        showActiveHqSyncJobStatus(storedActiveJob)
-      }
-      return
-    }
-    if (hqSyncSubmittingRef.current) return
-
-    try {
-      hqSyncSubmittingRef.current = true
-      setHqSyncSubmitting(true)
-      const values = hqSyncMode === 'incremental' ? await hqSyncForm.validateFields() : {}
-      const startDate = values.startDate ? values.startDate.format('YYYY-MM-DD') : undefined
-      const operationId = buildProductHqSyncOperationId(hqSyncMode, startDate)
-      const syncJob = hqSyncMode === 'full'
-        ? await createProductFullHqSyncJob({ operationId })
-        : await createProductIncrementalHqSyncJob({
-          operationId,
-          startDate,
-        })
-
-      if (!syncJob.jobId) {
-        message.error(syncJob.message || t('posAdmin.products.hqSyncJobCreateFailed', '创建商品 HQ 同步任务失败'))
-        return
-      }
-
-      const activeJob: ActiveProductHqSyncJob = {
-        jobId: syncJob.jobId,
-        mode: hqSyncMode,
-        operationId: syncJob.operationId || operationId,
-        createdAt: new Date().toISOString(),
-        status: syncJob.status ?? 'Queued',
-        message: syncJob.message,
-        startDate,
-      }
-
-      setHqSyncVisible(false)
-      message.success(t('posAdmin.products.hqSyncJobSubmitted', '同步任务已提交，正在后台执行。完成后会自动提示结果。'))
-      startHqSyncJobPolling(activeJob)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t('posAdmin.products.hqSyncJobCreateFailed', '创建商品 HQ 同步任务失败'))
-    } finally {
-      hqSyncSubmittingRef.current = false
-      setHqSyncSubmitting(false)
-    }
   }
 
   const handleSyncToStores = async () => {
@@ -2980,32 +2623,6 @@ export default function ProductManagementPage() {
       setPushToHqModalOpen(false)
       setPushToHqConfirmLoading(false)
       setPushToHqLoading(false)
-    }
-  }
-
-  const handleSyncSelectedFromHq = async () => {
-    if (!ensureCanSyncProductsFromHq()) return
-    if (!selectedRowKeys.length) {
-      message.warning(t('posAdmin.products.selectProductsFirst', '请先选择商品'))
-      return
-    }
-    // 使用 ref 作为即时锁，避免连续点击在状态刷新前重复提交同一批商品。
-    if (selectedFromHqLoadingRef.current) return
-
-    try {
-      selectedFromHqLoadingRef.current = true
-      setSelectedFromHqLoading(true)
-      const result = await syncSelectedProductsFromHq({
-        productCodes: selectedRowKeys.map(String),
-      })
-      showSelectedFromHqResult(result)
-      setSelectedRowKeys([])
-      await loadData()
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t('posAdmin.products.syncSelectedFromHqFailed', '从 HQ 同步选中商品失败'))
-    } finally {
-      selectedFromHqLoadingRef.current = false
-      setSelectedFromHqLoading(false)
     }
   }
 
@@ -3842,25 +3459,9 @@ export default function ProductManagementPage() {
           {/* 页头只保留分组菜单和唯一的主按钮「创建商品」；批量操作移到勾选后操作条。 */}
           <ToolbarMenuButton
             label={t('common.listToolbar.sync', '同步')}
-            // HQ 同步任务进行中时只让图标转动，不用按钮 loading：loading 会屏蔽点击，菜单就打不开了。
-            icon={<SyncOutlined spin={Boolean(activeHqSyncJob) || hqSyncSubmitting} />}
+            icon={<SyncOutlined />}
+            // HQ → HBweb 的增量/全量同步已于 2026-09-29 停用，菜单只保留 HBweb 内部的「同步到分店」。
             actions={[
-              {
-                key: 'incrementalHqSync',
-                icon: <CloudSyncOutlined />,
-                label: activeHqSyncJob ? t('posAdmin.products.hqSyncInProgress', '同步中') : t('posAdmin.products.incrementalSyncFromHQ', '增量同步'),
-                visible: isAdmin,
-                disabled: hqSyncSubmitting,
-                onClick: () => openHqSyncModal('incremental'),
-              },
-              {
-                key: 'fullHqSync',
-                icon: <CloudDownloadOutlined />,
-                label: activeHqSyncJob ? t('posAdmin.products.hqSyncInProgress', '同步中') : t('posAdmin.products.fullSyncFromHQ', '全量同步'),
-                visible: isAdmin,
-                disabled: hqSyncSubmitting,
-                onClick: () => openHqSyncModal('full'),
-              },
               {
                 key: 'syncToStore',
                 icon: <CloudUploadOutlined />,
@@ -4077,17 +3678,6 @@ export default function ProductManagementPage() {
                 </Button>
               </>
             )}
-            {isAdmin && (
-              <Button
-                size="small"
-                icon={<CloudDownloadOutlined />}
-                loading={selectedFromHqLoading}
-                disabled={!selectedRowKeys.length || selectedFromHqLoading}
-                onClick={handleSyncSelectedFromHq}
-              >
-                {t('posAdmin.products.syncSelectedFromHq', '从HQ同步选中')}
-              </Button>
-            )}
             {canManagePosProducts && (
               <Button
                 size="small"
@@ -4245,33 +3835,6 @@ export default function ProductManagementPage() {
               </Form.Item>
             </Col>
           </Row>
-        </Form>
-      </Modal>
-
-      <Modal
-        open={hqSyncVisible}
-        title={hqSyncMode === 'full' ? t('posAdmin.products.fullSyncFromHQ', '全量同步') : t('posAdmin.products.incrementalSyncFromHQ', '增量同步')}
-        onCancel={() => setHqSyncVisible(false)}
-        onOk={handleSyncFromHq}
-        confirmLoading={hqSyncSubmitting}
-        okText={t('common.confirm', '确定')}
-        cancelText={t('common.cancel', '取消')}
-        destroyOnHidden
-      >
-        <Form form={hqSyncForm} layout="vertical">
-          {hqSyncMode === 'full' ? (
-            <div style={{ color: '#595959' }}>
-              {t('posAdmin.products.fullSyncNotice', '全量同步只覆盖商品主表，不同步关联表。')}
-            </div>
-          ) : (
-            <Form.Item
-              name="startDate"
-              label={t('posAdmin.products.incrementalStartDate', '起始日期')}
-              rules={[{ required: true, message: t('posAdmin.products.incrementalStartDateRequired', '请选择增量同步起始日期') }]}
-            >
-              <DatePicker style={{ width: '100%' }} allowClear={false} format="YYYY-MM-DD" />
-            </Form.Item>
-          )}
         </Form>
       </Modal>
 

@@ -286,7 +286,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 是否启用
         /// </summary>
-        public bool IsActive { get; set; } = true;
+        public bool? IsActive { get; set; }
 
         /// <summary>
         /// 商品名称

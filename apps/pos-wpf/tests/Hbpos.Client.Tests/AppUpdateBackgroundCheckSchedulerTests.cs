@@ -195,5 +195,11 @@ public sealed class AppUpdateBackgroundCheckSchedulerTests
         {
             throw new InvalidOperationException("Background scheduler must not call startup checks.");
         }
+
+        public Task<AppUpdateCoordinatorResult> InstallUpdateUnattendedAsync(
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Background scheduler must not install unattended.");
+        }
     }
 }

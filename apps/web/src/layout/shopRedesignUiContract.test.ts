@@ -106,6 +106,11 @@ assert.ok(
   fetchProductsSource.includes('productName: keyword || undefined,'),
   '商城关键词必须同时按商品名称进行不区分大小写的包含搜索',
 )
+const fetchProductsDeps = shopHome.slice(fetchProductsEnd, shopHome.indexOf('])', fetchProductsEnd))
+assert.ok(
+  shopHome.includes('const { key: navigationKey } = useLocation()') && fetchProductsDeps.includes('navigationKey'),
+  '再次搜索同一关键字时 URL 不变，商品列表必须随每次导航重新请求，不能只靠 URL 变化触发',
+)
 assert.ok(layout.includes('className="shop-ordering-scan"'), '交易工具栏必须提供扫码入口')
 assert.ok(layout.includes('className="shop-ordering-store"'), '交易工具栏必须保留门店选择')
 assert.ok(layout.includes('className="shop-ordering-cart"'), '交易工具栏必须保留购物车摘要')

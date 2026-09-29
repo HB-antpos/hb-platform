@@ -140,6 +140,7 @@ import {
   calculateContainerFreight,
   calculateContainerDetailImportPrice,
   calculateContainerDetailTotalAmount,
+  markContainerDetailUpdatesSkipRelatedProductSync,
   calculateContainerDetailTotalVolume,
   calculateContainerDetailTransportCost,
   calculateContainerDetailUnitTransportCost,
@@ -4062,6 +4063,8 @@ export default function ContainerDetailPage() {
 
   const handleMatchDomesticData = async () => {
     if (!access.canEditContainer) return
+    // 匹配结果要带「不同步已有商品」标记整体保存，开始前必须没有其它字段草稿混在同一次保存里。
+    if (!ensureNoPendingDetails()) return
     const scopedRows = await confirmBatchRows(t('containers.actions.matchDomesticData'))
     if (!scopedRows) return
     if (!await drainAutoSavesBeforeAction()) return
@@ -4104,7 +4107,11 @@ export default function ContainerDetailPage() {
         // 匹配结果先进入同一份字段草稿：实际字段的首次 server token 会随请求提交，
         // 冲突、校验失败或网络失败均保留意图而非被本地展示覆盖。
         queuePendingDetailUpdates(writableUpdates)
-        const savePlan = buildPendingDetailSavePlan()
+        const pendingSavePlan = buildPendingDetailSavePlan()
+        // 草稿不保留 SkipRelatedProductSync，提交前补回，避免匹配把国内数据同步改写已有商品。
+        const savePlan = pendingSavePlan
+          ? { ...pendingSavePlan, detailUpdates: markContainerDetailUpdatesSkipRelatedProductSync(pendingSavePlan.detailUpdates) }
+          : null
         const saveResult = savePlan
           ? await executePendingDetailSavePlan(savePlan)
           : { isCurrent: false, successfulFieldKeys: [] }
