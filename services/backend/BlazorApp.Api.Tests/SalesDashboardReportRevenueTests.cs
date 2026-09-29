@@ -3585,7 +3585,7 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
     [Fact]
     public void EnhancedProductDetail_搜索词参与缓存键但不写入日志()
     {
-        var logger = new RecordingLogger();
+        var logger = new ConcurrentRecordingLogger();
         SalesDashboardCacheKeys.SetLogger(logger);
 
         try
@@ -3626,9 +3626,11 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
 
             Assert.Equal(first, sameNormalized);
             Assert.NotEqual(first, otherSearch);
-            Assert.Contains(logger.Messages, message => message.Contains("HasProductSearch=True", StringComparison.Ordinal));
-            Assert.DoesNotContain(logger.Messages, message => message.Contains("SECRET-BARCODE", StringComparison.Ordinal));
-            Assert.DoesNotContain(logger.Messages, message => message.Contains("OTHER-BARCODE", StringComparison.Ordinal));
+            // 日志器是进程级静态的，并行测试类此刻仍可能写入；三条断言只针对同一份快照。
+            var messages = logger.Messages;
+            Assert.Contains(messages, message => message.Contains("HasProductSearch=True", StringComparison.Ordinal));
+            Assert.DoesNotContain(messages, message => message.Contains("SECRET-BARCODE", StringComparison.Ordinal));
+            Assert.DoesNotContain(messages, message => message.Contains("OTHER-BARCODE", StringComparison.Ordinal));
         }
         finally
         {
@@ -5854,35 +5856,6 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
 
     private sealed class ConcurrentRecordingLogger<T> : ConcurrentRecordingLogger, ILogger<T>
     {
-    }
-
-    private sealed class RecordingLogger : ILogger
-    {
-        public List<string> Messages { get; } = new();
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter
-        )
-        {
-            Messages.Add(formatter(state, exception));
-        }
-
-        private sealed class NullScope : IDisposable
-        {
-            public static readonly NullScope Instance = new();
-
-            public void Dispose()
-            {
-            }
-        }
     }
 
     private static async Task<string> InvokeStatisticsCacheVersionAsync(
