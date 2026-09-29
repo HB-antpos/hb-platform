@@ -227,6 +227,20 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ota.requireHttpsApiOrigins,
   );
   const logCenter = buildLogCenterConfiguration(ota.buildProfile);
+  // 与客户端启用条件一致：未配置 DSN 时不注入原生源码地图上传任务。
+  const sentryPlugins: NonNullable<ExpoConfig["plugins"]> =
+    process.env.EXPO_PUBLIC_HBPOS_SENTRY_DSN?.trim()
+      ? [[
+          "@sentry/react-native/expo",
+          {
+            ...(process.env.SENTRY_ORG?.trim()
+              ? { organization: process.env.SENTRY_ORG.trim() }
+              : {}),
+            project: process.env.SENTRY_PROJECT?.trim() || "hb-pos-handheld",
+            url: process.env.SENTRY_URL?.trim() || "https://sentry.io/",
+          },
+        ]]
+      : [];
   return ({
   ...config,
   name: "HB POS Mobile",
@@ -272,17 +286,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   plugins: [
     "expo-router",
     "expo-localization",
-    [
-      "@sentry/react-native/expo",
-      {
-        ...(process.env.SENTRY_ORG?.trim()
-          ? { organization: process.env.SENTRY_ORG.trim() }
-          : {}),
-        project:
-          process.env.SENTRY_PROJECT?.trim() || "hb-pos-handheld",
-        url: process.env.SENTRY_URL?.trim() || "https://sentry.io/",
-      },
-    ],
+    ...sentryPlugins,
     [
       "expo-audio",
       {
