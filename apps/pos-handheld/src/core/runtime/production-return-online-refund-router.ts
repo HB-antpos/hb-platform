@@ -6,9 +6,18 @@ import type {
   PreparedOnlineReturnAttempt,
   ReturnAllocationExternalOutcome,
 } from "@hb/pos-domain/features/returns/adapters/durable-return-execution-orchestrator";
+import type { SqliteReturnApiAttemptStore } from "@/core/db/sqlite-return-api-attempt-store";
+
+/** 在线现金退款的耐久本地 attempt；账本绑定与完成都要核对这条记录。 */
+export type ReturnCashAttemptPort = Pick<
+  SqliteReturnApiAttemptStore,
+  "prepareOrLoad" | "get" | "compareAndSetState"
+>;
 
 export type ProductionReturnOnlineRefundRouterOptions = Readonly<{
   providerRefund: DurableOnlineReturnRefundPort | null;
+  cashAttempts: ReturnCashAttemptPort;
+  nowIso(): string;
 }>;
 
 /**
@@ -34,6 +43,22 @@ export class ProductionReturnOnlineRefundRouter
     }
     validateCashPreparation(input);
     const attemptId = requiredText(input.externalAttemptId);
+    // 账本以 hbpos-api 绑定前会核对 return_api_attempts；此前从未写入，
+    // 导致所有在线现金退款在绑定时失败并卡在未知恢复。重放沿用首次创建时间。
+    const existing = await this.options.cashAttempts.get(attemptId);
+    await this.options.cashAttempts.prepareOrLoad({
+      durableAttemptId: attemptId,
+      externalAttemptId: attemptId,
+      returnOrderGuid: requiredText(input.returnOrderGuid),
+      actionId: requiredText(input.actionId),
+      allocationId: requiredText(input.allocationId),
+      externalActionId: attemptId,
+      idempotencyKey: `return-cash:${attemptId}`,
+      method: "cash",
+      signedAmountCents: input.signedAmountCents,
+      protectedContext: null,
+      createdAtIso: existing?.createdAtIso ?? this.options.nowIso(),
+    });
     return Object.freeze({
       attemptKind: "hbpos-api" as const,
       externalActionId: attemptId,
@@ -48,6 +73,7 @@ export class ProductionReturnOnlineRefundRouter
       return this.requireProvider(input.method).submit(input);
     }
     assertCashBinding(input);
+    await this.approveCashAttempt(input);
     return Object.freeze({ status: "completed" as const });
   }
 
@@ -64,7 +90,50 @@ export class ProductionReturnOnlineRefundRouter
         "RETURN_CASH_RECOVERY_KEY_INVALID",
       );
     }
+    await this.approveCashAttempt(input);
     return Object.freeze({ status: "completed" as const });
+  }
+
+  /**
+   * 现金由收银员当面退付，没有外部 provider；账本要求 completed 对应 Approved，
+   * 这里按合法转换推进（Created→Submitted→Approved），重复提交/恢复保持幂等。
+   */
+  private async approveCashAttempt(input: OnlineReturnRefundInput): Promise<void> {
+    const attemptId = requiredText(input.durableAttemptId);
+    const attempt = await this.options.cashAttempts.get(attemptId);
+    if (
+      !attempt ||
+      attempt.method !== "cash" ||
+      attempt.actionId !== input.actionId ||
+      attempt.allocationId !== input.allocationId ||
+      attempt.returnOrderGuid !== input.returnOrderGuid ||
+      attempt.signedAmountCents !== input.signedAmountCents
+    ) {
+      throw new ReturnOnlineRefundRouterError("RETURN_CASH_ATTEMPT_MISMATCH");
+    }
+    let state = attempt.state;
+    if (state === "Created") {
+      await this.options.cashAttempts.compareAndSetState({
+        durableAttemptId: attemptId,
+        expected: "Created",
+        next: "Submitted",
+        updatedAtIso: this.options.nowIso(),
+      });
+      state = "Submitted";
+    }
+    if (state === "Submitted" || state === "Pending" || state === "Unknown") {
+      await this.options.cashAttempts.compareAndSetState({
+        durableAttemptId: attemptId,
+        expected: state,
+        next: "Approved",
+        updatedAtIso: this.options.nowIso(),
+      });
+    }
+    // 以持久状态为准：并发推进或终态拒绝都不能被报告为 completed。
+    const latest = await this.options.cashAttempts.get(attemptId);
+    if (latest?.state !== "Approved") {
+      throw new ReturnOnlineRefundRouterError("RETURN_CASH_ATTEMPT_NOT_APPROVED");
+    }
   }
 
   private requireProvider(method: OnlineReturnRefundInput["method"]) {
