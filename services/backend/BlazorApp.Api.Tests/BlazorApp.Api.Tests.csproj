@@ -35,12 +35,14 @@
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />
     <Compile Include="StorePriceUpdateTaskServiceTests.cs" />
     <Compile Include="WarehouseProductSupplyNoticeTests.cs" />
+    <Compile Include="WarehouseProductBatchUpdateSupplyNoticeTests.cs" />
     <Compile Include="StoreProductMaintenanceLookupTests.cs" />
     <Compile Include="StoreProductScanLabelAccessTests.cs" />
     <Compile Include="ProductChangeHistoryLegacyEntryPointTests.cs" />
     <Compile Include="StoreProductMaintenanceSyncHelperTests.cs" />
     <Compile Include="SetChildPurchasePriceAllocatorTests.cs" />
     <Compile Include="SetChildPurchasePriceServiceTests.cs" />
+    <Compile Include="StoreMultiCodeUpsertForActiveStoresTests.cs" />
     <Compile Include="SetChildPurchasePriceSqlServerIntegrationTests.cs" />
     <Compile Include="SetChildPurchasePriceMutationLockTests.cs" />
     <Compile Include="ReactProductIntegrityControllerTests.cs" />
@@ -273,6 +275,8 @@
     <Compile Include="ReactProductHqSyncContractTests.cs" />
     <Compile Include="StoreRetailPriceHqSyncContractTests.cs" />
     <Compile Include="StorePriceTransferJobServiceTests.cs" />
+    <Compile Include="StoreProductPriceGridSortTests.cs" />
+    <Compile Include="ReactStoreProductPricesGridStoreScopeTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqProductSyncTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqConcurrencySqlServerTests.cs" />
@@ -331,6 +335,7 @@
     <Compile Include="ContainerCreateDuplicateTests.cs" />
     <Compile Include="LegacyContainerProductChangeHistoryTests.cs" />
     <Compile Include="ContainerReactServiceDetailQueryTests.cs" />
+    <Compile Include="ContainerDetailTagStatsSqlServerIntegrationTests.cs" />
     <Compile Include="ContainerDetailQueryIndexMigrationTests.cs" />
     <Compile Include="ContainerReactServiceLocalSupplierCodeTests.cs" />
     <Compile Include="ContainerProductCreationServiceTests.cs" />
@@ -338,6 +343,9 @@
     <Compile Include="DataSyncReactControllerLocationSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerProductSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerSyncResultContractTests.cs" />
+    <Compile Include="HqToHbwebSyncDisabledContractTests.cs" />
+    <Compile Include="HqToHbwebSyncDisabledAttributeTests.cs" />
+    <Compile Include="ClientAbortedRequestLoggingTests.cs" />
     <Compile Include="DataSyncLegacyControllerProductSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopFilterOptionsTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopGridTests.cs" />
@@ -348,6 +356,7 @@
     <Compile Include="SqliteTempFileCleanup.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
+    <Compile Include="ApiExceptionFilterDetailsTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

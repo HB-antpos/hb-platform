@@ -2,7 +2,6 @@ import {
   Button,
   Card,
   Checkbox,
-  DatePicker,
   Form,
   Image,
   Input,
@@ -29,7 +28,6 @@ import {
   getStorePriceTransferJob,
   getStoreProductPriceGrid,
   startStorePriceTransferJob,
-  syncFromHq,
   syncToOtherStores,
 } from '../../../services/storeProductPriceService'
 import {
@@ -45,10 +43,9 @@ import type {
   StorePriceTransferJobDto,
   StorePriceTransferRequest,
   StorePriceTransferResult,
-  SyncFromHqRequest,
   SyncToOtherStoresDto,
 } from '../../../types/storeProductPrice'
-import { CheckSquareOutlined, CopyOutlined, PrinterOutlined, SwapOutlined } from '@ant-design/icons'
+import { CopyOutlined, PrinterOutlined, SwapOutlined } from '@ant-design/icons'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import { discountRateToDecimal, formatDiscountRate } from '../../../utils/discountRate'
 import { useAuthStore } from '../../../store/auth'
@@ -139,10 +136,6 @@ export default function StoreProductPricePage() {
   const [copyProgress, setCopyProgress] = useState<CopyProgressDto | null>(null)
   const [copying, setCopying] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
-
-  const [hqSyncModalOpen, setHqSyncModalOpen] = useState(false)
-  const [hqSyncForm] = Form.useForm()
-  const [hqSyncing, setHqSyncing] = useState(false)
 
   const [priceTransferModalOpen, setPriceTransferModalOpen] = useState(false)
   const [priceTransferForm] = Form.useForm()
@@ -464,63 +457,12 @@ export default function StoreProductPricePage() {
     })
   }
 
-  const openHqSyncModal = () => {
-    hqSyncForm.resetFields()
-    setHqSyncModalOpen(true)
-  }
-
-  const selectAllHqSyncStores = () => {
-    hqSyncForm.setFieldValue('selectedStoreCodes', storeOptions.map((option) => option.value))
-  }
-
-  const handleSyncFromHq = async () => {
-    try {
-      const values = await hqSyncForm.validateFields()
-      setHqSyncing(true)
-      const dto: SyncFromHqRequest = {
-        selectedStoreCodes: values.selectedStoreCodes,
-        startDate: values.dateRange[0].format('YYYY-MM-DD'),
-        endDate: values.dateRange[1].format('YYYY-MM-DD'),
-      }
-      const result = await syncFromHq(dto)
-      setHqSyncModalOpen(false)
-      Modal.info({
-        title: t('posAdmin.productPrice.hqSyncResult', 'HQ同步结果'),
-        width: 600,
-        content: (
-          <div>
-            <p>{t('posAdmin.productPrice.added', '新增')}：{result.addedCount} {t('posAdmin.productPrice.recordsUnit', '条')}</p>
-            <p>{t('posAdmin.productPrice.updated', '更新')}：{result.updatedCount} {t('posAdmin.productPrice.recordsUnit', '条')}</p>
-            <p>{t('posAdmin.productPrice.totalProcessed', '总处理')}：{result.totalProcessed} {t('posAdmin.productPrice.recordsUnit', '条')}</p>
-            <p>{t('posAdmin.productPrice.duration', '耗时')}：{(result.durationMs / 1000).toFixed(2)} {t('posAdmin.productPrice.seconds', '秒')}</p>
-            {result.errors && result.errors.length > 0 && (
-              <div>
-                <p style={{ color: 'red' }}>{t('posAdmin.productPrice.errorInfo', '错误信息')}：</p>
-                <ul>
-                  {result.errors.map((err, idx) => (
-                    <li key={idx} style={{ color: 'red' }}>{err}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        ),
-      })
-      await loadData()
-    } catch (error) {
-      // 表单校验错误由字段自身展示，避免误提示为后端同步失败。
-      if (isFormValidationError(error)) return
-      message.error(error instanceof Error ? error.message : t('posAdmin.productPrice.hqSyncFailed', '从HQ同步失败'))
-    } finally {
-      setHqSyncing(false)
-    }
-  }
-
   const openPriceTransferModal = () => {
     stopPriceTransferPolling()
     priceTransferForm.resetFields()
     priceTransferForm.setFieldsValue({
-      direction: 'HqToLocal',
+      // HQ → 本地方向已于 2026-09-29 停用（后端返回 410），这里只保留本地 → HQ。
+      direction: 'LocalToHq',
       sourceStoreCode: undefined,
       targetStoreCode: selectedStoreCodes.length === 1 ? selectedStoreCodes[0] : undefined,
       syncRetailPrices: true,
@@ -906,9 +848,6 @@ export default function StoreProductPricePage() {
                 {t('posAdmin.productPrice.priceTransfer', 'HQ/本地价格同步')}
               </Button>
             )}
-            {access.isAdmin && (
-              <Button onClick={openHqSyncModal}>{t('posAdmin.productPrice.updateFromHQ', '从HQ更新零售价')}</Button>
-            )}
           </Space>
         </div>
 
@@ -1170,7 +1109,6 @@ export default function StoreProductPricePage() {
           <Form.Item name="direction" label={t('posAdmin.productPrice.transferDirection', '同步方向')} rules={[{ required: true }]}>
             <Select
               options={[
-                { value: 'HqToLocal', label: t('posAdmin.productPrice.hqToLocal', 'HQ -> 本地') },
                 { value: 'LocalToHq', label: t('posAdmin.productPrice.localToHq', '本地 -> HQ') },
               ]}
             />
@@ -1265,41 +1203,6 @@ export default function StoreProductPricePage() {
             </Space>
           </Card>
         )}
-      </Modal>
-
-      <Modal
-        open={hqSyncModalOpen}
-        title={t('posAdmin.productPrice.hqSyncTitle', '从HQ更新零售价')}
-        onCancel={() => setHqSyncModalOpen(false)}
-        onOk={handleSyncFromHq}
-        width={550}
-        confirmLoading={hqSyncing}
-        forceRender
-      >
-        <Form form={hqSyncForm} layout="vertical">
-          <Form.Item label={t('posAdmin.productPrice.storeOptional', '分店')} required>
-            <Space.Compact style={{ width: '100%' }}>
-              {/* selectedStoreCodes 必须直接绑定 Select，否则全选写入表单后多选框不会回显。 */}
-              <Form.Item name="selectedStoreCodes" noStyle rules={[{ required: true, message: t('posAdmin.productPrice.selectStoreRequired', '请选择分店') }]}>
-                <Select
-                  mode="multiple"
-                  showSearch
-                  optionFilterProp="label"
-                  options={storeOptions}
-                  placeholder={t('posAdmin.productPrice.syncAllStores', '请选择分店')}
-                  allowClear
-                  style={{ flex: 1 }}
-                />
-              </Form.Item>
-              <Button htmlType="button" icon={<CheckSquareOutlined />} onClick={selectAllHqSyncStores}>
-                {t('posAdmin.productPrice.selectAllStores', '全选分店')}
-              </Button>
-            </Space.Compact>
-          </Form.Item>
-          <Form.Item name="dateRange" label={t('posAdmin.productPrice.syncDateRange', '同步日期范围')} rules={[{ required: true, message: t('posAdmin.productPrice.selectDateRangeRequired', '请选择日期范围') }]}>
-            <DatePicker.RangePicker style={{ width: '100%' }} />
-          </Form.Item>
-        </Form>
       </Modal>
 
       {promoPosterSession && (

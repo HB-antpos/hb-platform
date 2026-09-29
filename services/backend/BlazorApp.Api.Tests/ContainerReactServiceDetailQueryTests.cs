@@ -348,6 +348,63 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task QueryContainerDetailsAsync_无仓库记录的新品应计为下架并可按下架筛选()
+    {
+        await SeedContainerAsync("C-WH", "CSLU6099487");
+        await SeedDetailAsync("D-WH-ACTIVE", "C-WH", "P-WH-ACTIVE", "HB601", isActive: true);
+        await SeedDetailAsync("D-WH-INACTIVE", "C-WH", "P-WH-INACTIVE", "HB602", isActive: false);
+        // 仓库未到货的新品：没有仓库商品记录，左连接后 IsActive 为 NULL。
+        await SeedDetailAsync("D-WH-MISSING", "C-WH", "P-WH-MISSING", "HB603", localExists: false);
+        await _localDb.Deleteable<WarehouseProduct>()
+            .Where(x => x.ProductCode == "P-WH-MISSING")
+            .ExecuteCommandAsync();
+        var service = CreateService();
+
+        var stats = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto { ContainerGuid = "C-WH", PageSize = 50, IncludeItems = false }
+        );
+        Assert.Equal(1, stats.TagStats.Active);
+        Assert.Equal(2, stats.TagStats.Inactive);
+
+        var inactiveTag = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-WH",
+                PageSize = 50,
+                SelectedTags = new List<string> { "inactive" },
+            }
+        );
+        Assert.Equal(2, inactiveTag.ItemsTotal);
+        Assert.Equal(
+            new[] { "D-WH-INACTIVE", "D-WH-MISSING" },
+            inactiveTag.Items.Select(x => x.HGUID).OrderBy(x => x).ToArray()
+        );
+
+        var inactiveStatus = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-WH",
+                PageSize = 50,
+                WarehouseStatus = new List<string> { "inactive" },
+            }
+        );
+        Assert.Equal(
+            new[] { "D-WH-INACTIVE", "D-WH-MISSING" },
+            inactiveStatus.Items.Select(x => x.HGUID).OrderBy(x => x).ToArray()
+        );
+
+        var activeTag = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-WH",
+                PageSize = 50,
+                SelectedTags = new List<string> { "active" },
+            }
+        );
+        Assert.Equal(new[] { "D-WH-ACTIVE" }, activeTag.Items.Select(x => x.HGUID).ToArray());
+    }
+
+    [Fact]
     public async Task QueryContainerDetailsAsync_禁用标签统计时应保留总数但标记未计算统计()
     {
         await SeedContainerAsync("C-NO-STATS", "CSLU6099488");

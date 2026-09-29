@@ -393,7 +393,8 @@ async function main() {
     assert(pageSource.includes('activeFirstPageResolverRef.current = resolve'), '网络开始时未登记 active resolver')
     assert(pageSource.includes('resolveActiveFirstPageRequest(resolve)'), '网络 finally 未幂等收口 active resolver')
 
-    assert(pageSource.split('await latestRequestFirstPageRef.current()').length - 1 === 2, '创建和 HQ 同步应统一使用 current first-page ref')
+    // HQ 同步入口已于 2026-09-29 停用，只剩创建成功后刷新第一页。
+    assert(pageSource.split('await latestRequestFirstPageRef.current()').length - 1 === 1, '创建成功后应统一使用 current first-page ref')
     assert(pageSource.includes('void requestFirstPage({ columnFilters: nextFilters })'), '列头筛选未统一走 first-page 入口')
     assert(pageSource.includes('onPressEnter={() => void requestFirstPage()}'), '回车查询未统一走 first-page 入口')
     assert(pageSource.includes('onClick={() => void requestFirstPage()}'), '查询按钮未统一走 first-page 入口')

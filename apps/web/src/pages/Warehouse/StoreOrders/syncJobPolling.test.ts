@@ -105,23 +105,24 @@ const pageSource = readFileSync(pageFile, 'utf8')
 async function main() {
   const failures: string[] = []
 
-  const pageSourceFailure = await runTest('页面应通过 job 轮询文件接线同步流程', () => {
-    assert(pageSource.includes('createStoreOrderFullHqSyncJob'), '页面应创建全量 HQ 同步任务')
-    assert(pageSource.includes('createStoreOrderIncrementalHqSyncJob'), '页面应创建增量 HQ 同步任务')
-    assert(pageSource.includes('getStoreOrderHqSyncJob'), '页面应轮询 HQ 同步任务')
-    assert(pageSource.includes('createStoreOrderSyncJobPoller'), '页面应使用独立轮询器')
-    assert(pageSource.includes('stopSyncPollingRef.current?.()'), '页面卸载时应清理轮询定时器')
-    assert(pageSource.includes("result.status === 'Failed'"), '页面应单独处理失败状态')
-    assert(pageSource.includes('void refreshCurrentList()'), '同步成功后应刷新当前筛选列表')
-    assert(pageSource.includes('const [incrementalConflictStrategy, setIncrementalConflictStrategy]'), '页面应维护增量同步冲突策略状态')
-    assert(pageSource.includes('const handleOpenIncrementalHqSync = () =>'), '页面应通过统一入口打开增量同步弹窗')
-    assert(pageSource.includes('setIncrementalConflictStrategy(DEFAULT_INCREMENTAL_CONFLICT_STRATEGY)'), '每次打开或取消增量同步弹窗时应恢复默认冲突策略')
-    assert(pageSource.includes('onClick={handleOpenIncrementalHqSync}'), '增量同步按钮应先重置默认策略再打开弹窗')
-    assert(pageSource.includes('conflictStrategy: incrementalConflictStrategy'), '提交增量同步时应带上当前冲突策略')
-    assert(pageSource.includes("value={incrementalConflictStrategy}"), '冲突处理单选组应绑定当前策略')
-    assert(pageSource.includes("t('storeOrders.syncConflictLatestWins')"), '页面应渲染按最新更新时间处理冲突的文案')
-    assert(pageSource.includes("t('storeOrders.syncConflictHqWins')"), '页面应渲染 HQ 优先的冲突处理文案')
-    assert(pageSource.includes("t('storeOrders.syncSkippedSummary'"), '同步成功提示应拼接跳过统计')
+  // 分店订货 HQ → HBweb 的全量/增量同步已于 2026-09-29 停用（后端返回 410），列表页不得再接线同步流程；
+  // 本文件其余用例继续验证 syncJobPolling 轮询器本身。
+  const pageSourceFailure = await runTest('列表页不再接线 HQ 全量/增量同步流程', () => {
+    for (const removed of [
+      'createStoreOrderFullHqSyncJob',
+      'createStoreOrderIncrementalHqSyncJob',
+      'getStoreOrderHqSyncJob',
+      'createStoreOrderSyncJobPoller',
+      'stopSyncPollingRef',
+      'runStoreOrderHqSync',
+      'handleFullHqSync',
+      'handleOpenIncrementalHqSync',
+      'incrementalConflictStrategy',
+      "t('storeOrders.syncFullOrders')",
+      "t('storeOrders.syncIncrementalOrders')",
+    ]) {
+      assert(!pageSource.includes(removed), `列表页不应再包含 HQ 同步代码：${removed}`)
+    }
   })
   if (pageSourceFailure) failures.push(pageSourceFailure)
 

@@ -73,11 +73,14 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import BarcodePreview from '../../../components/BarcodePreview'
 import PageContainer from '../../../components/PageContainer'
+import { requiresDelistSupplyNotice } from '../../../components/SupplyNotice/delistSupplyNoticeGate'
+import SupplyNoticeModal from '../../../components/SupplyNotice/SupplyNoticeModal'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
 import { useAuthStore } from '../../../store/auth'
 import { getActiveChinaSuppliers } from '../../../services/chinaSupplierService'
 import { getStores } from '../../../services/storeService'
+import type { SupplyNoticeInput } from '../../../types/supplyNotice'
 import ContainerProductPicker from './components/ContainerProductPicker'
 import {
   addStoreOrderLine,
@@ -699,18 +702,25 @@ function StoreOrderDetailStatusFilterDropdown({
   )
 }
 
+interface BatchEditPayload {
+  type: BatchEditType
+  allocQuantity?: number
+  importPrice?: number
+  isActive?: boolean
+}
+
 interface BatchEditModalProps {
   open: boolean
   loading?: boolean
   selectedCount: number
   onCancel: () => void
-  onConfirm: (payload: {
-    type: BatchEditType
-    allocQuantity?: number
-    importPrice?: number
-    isActive?: boolean
-  }) => Promise<void>
+  onConfirm: (payload: BatchEditPayload) => Promise<void>
 }
+
+// 下架前的供货说明弹窗目标：行上的上/下架按钮（line）或批量改状态（batch）；为空即关闭。
+type StoreOrderSupplyNoticeTarget =
+  | { kind: 'line'; productCodes: string[]; line: StoreOrderDetailLine }
+  | { kind: 'batch'; productCodes: string[]; payload: BatchEditPayload }
 
 function ProductPickerModal({ open, orderGUID, loading, onCancel, onConfirm }: ProductPickerModalProps) {
   const { t } = useTranslation()
@@ -1459,6 +1469,8 @@ export default function StoreOrderDetailPage() {
   const [containerPickerLoading, setContainerPickerLoading] = useState(false)
   const [containerExistingProductCodes, setContainerExistingProductCodes] = useState<string[]>([])
   const [batchModalOpen, setBatchModalOpen] = useState(false)
+  const [supplyNoticeTarget, setSupplyNoticeTarget] = useState<StoreOrderSupplyNoticeTarget | null>(null)
+  const [supplyNoticeSaving, setSupplyNoticeSaving] = useState(false)
   const [pasteModalOpen, setPasteModalOpen] = useState(false)
   const [quickAddItemNumber, setQuickAddItemNumber] = useState('')
   const [quickAddQuantity, setQuickAddQuantity] = useState<number>(1)
@@ -2260,15 +2272,22 @@ export default function StoreOrderDetailPage() {
     }
   }
 
-  const handleToggleLineStatus = async (line: StoreOrderDetailLine) => {
+  const handleToggleLineStatus = async (line: StoreOrderDetailLine, supplyNotice?: SupplyNoticeInput) => {
     if (!ensureOrderEditable()) {
+      return
+    }
+    const nextIsActive = !line.isActive
+    // 下架前必须先填写供货说明（与仓库商品页批量上下架一致），说明随下架同一请求提交；上架不需要。
+    if (!supplyNotice && requiresDelistSupplyNotice(nextIsActive, line.isActive)) {
+      setSupplyNoticeTarget({ kind: 'line', productCodes: [line.productCode], line })
       return
     }
     setLineActionLoading(true)
     try {
       await updateStoreOrderProductStatus({
         productCode: line.productCode,
-        isActive: !line.isActive,
+        isActive: nextIsActive,
+        ...(supplyNotice && !nextIsActive ? { supplyNotice } : {}),
       })
       message.success(t('storeOrders.detail.productStatusUpdated', { status: line.isActive ? t('common.inactiveUpper') : t('common.activeUpper') }))
       await loadDetail(false)
@@ -2280,16 +2299,20 @@ export default function StoreOrderDetailPage() {
     }
   }
 
-  const handleBatchConfirm = async (payload: {
-    type: BatchEditType
-    allocQuantity?: number
-    importPrice?: number
-    isActive?: boolean
-  }) => {
+  const handleBatchConfirm = async (payload: BatchEditPayload, supplyNotice?: SupplyNoticeInput) => {
     if (!detail || selectedLines.length === 0) {
       return
     }
     if (!ensureOrderEditable()) {
+      return
+    }
+    // 批量改状态为下架时同样先填写供货说明；填写完成后带着说明回到这里继续提交。
+    if (payload.type === 'status' && !supplyNotice && requiresDelistSupplyNotice(payload.isActive ?? true)) {
+      setSupplyNoticeTarget({
+        kind: 'batch',
+        productCodes: Array.from(new Set(selectedLines.map((item) => item.productCode))),
+        payload,
+      })
       return
     }
 
@@ -2339,9 +2362,11 @@ export default function StoreOrderDetailPage() {
       let successMessage = t('storeOrders.batchUpdateSuccess', { count: selectedLines.length })
       let successMessageType: 'success' | 'info' = 'success'
       if (payload.type === 'status') {
+        const nextIsActive = payload.isActive ?? true
         await batchUpdateStoreOrderProductStatus({
           productCodes: selectedLines.map((item) => item.productCode),
-          isActive: payload.isActive ?? true,
+          isActive: nextIsActive,
+          ...(supplyNotice && !nextIsActive ? { supplyNotice } : {}),
         })
       } else if (payload.type === 'copyOrderQuantityToAllocQuantity' && copyOrderQuantityPayload) {
         const changedCopyLines = selectedLines.filter((line) => {
@@ -2390,6 +2415,24 @@ export default function StoreOrderDetailPage() {
       message.error(error instanceof Error ? error.message : t('storeOrders.detail.batchUpdateFailed'))
     } finally {
       setBatchLoading(false)
+    }
+  }
+
+  // 说明弹窗提交：按来源转交行开关或批量改状态，说明随下架同一请求提交；取消则不下架。
+  const handleSupplyNoticeSubmit = async (notice: SupplyNoticeInput) => {
+    if (!supplyNoticeTarget) {
+      return
+    }
+    setSupplyNoticeSaving(true)
+    try {
+      if (supplyNoticeTarget.kind === 'line') {
+        await handleToggleLineStatus(supplyNoticeTarget.line, notice)
+      } else {
+        await handleBatchConfirm(supplyNoticeTarget.payload, notice)
+      }
+      setSupplyNoticeTarget(null)
+    } finally {
+      setSupplyNoticeSaving(false)
     }
   }
 
@@ -3972,7 +4015,16 @@ export default function StoreOrderDetailPage() {
               loading={batchLoading}
               selectedCount={selectedLineKeys.length}
               onCancel={() => setBatchModalOpen(false)}
-              onConfirm={handleBatchConfirm}
+              onConfirm={(payload) => handleBatchConfirm(payload)}
+            />
+
+            <SupplyNoticeModal
+              open={Boolean(supplyNoticeTarget)}
+              mode="delist"
+              productCount={supplyNoticeTarget?.productCodes.length ?? 0}
+              confirmLoading={supplyNoticeSaving}
+              onCancel={() => setSupplyNoticeTarget(null)}
+              onSubmit={handleSupplyNoticeSubmit}
             />
 
             <Modal

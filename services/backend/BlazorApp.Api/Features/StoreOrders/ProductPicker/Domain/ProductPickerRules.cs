@@ -62,7 +62,9 @@ internal static class ProductPickerRules
     internal const int BatchLookupMaximumCodes = 500;
     internal const int HomePageQueryCommandTimeoutSeconds = 30;
 
-    internal static readonly TimeSpan HomePageCacheDuration = TimeSpan.FromMinutes(10);
+    // 首页/分类浏览分页缓存与首页预热共用的时长：生产实测跨用户复用极少，
+    // 缩到 2 分钟让上下架、改价尽快可见，同时保留同一用户短时间内来回切换的命中。
+    internal static readonly TimeSpan HomePageCacheDuration = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan HomePageWarmUpTimeout = TimeSpan.FromSeconds(30);
     internal static readonly IReadOnlyList<int> HomePageWarmUpPageSizes = [50, 18];
 

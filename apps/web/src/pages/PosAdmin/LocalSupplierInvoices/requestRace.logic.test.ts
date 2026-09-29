@@ -368,19 +368,14 @@ async function main() {
     const importedSection = extractSection(
       pageSource,
       'const handleImportedInvoiceCreated = async',
-      'const openHqSyncModal = () =>',
+      'const baseColumns: ColumnsType<LocalSupplierInvoiceListDto>',
       'invoice imported continuation',
     )
-    const syncSection = extractSection(
-      pageSource,
-      'const handleSyncFromHq = async',
-      '\n  return (',
-      'invoice HQ sync continuation',
-    )
+    // 「从HQ同步」已于 2026-09-29 停用，列表页只剩删除与导入两个需要刷新列表的后续动作。
+    assert(!pageSource.includes('const handleSyncFromHq = async'), '列表页不应再保留 HQ 同步后续刷新逻辑')
     for (const [name, section] of [
       ['delete', deleteSection],
       ['imported', importedSection],
-      ['HQ sync', syncSection],
     ] as const) {
       assert(section.includes('latestLoadDataRef.current()'), `${name} 刷新未调用当前 loader ref`)
       assert(!section.includes('loadData()'), `${name} 仍可能调用旧闭包 loader`)
