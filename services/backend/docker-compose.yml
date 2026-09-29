@@ -112,6 +112,8 @@ services:
       - PosHandheldUpdatePolicy__AndroidPackageName=com.hbweb.poshandheld
       - PosHandheldUpdatePolicy__AndroidSigningCertificateSha256=${POS_HANDHELD_ANDROID_SIGNING_CERTIFICATE_SHA256:?required}
       - PosHandheldUpdatePolicy__OtaChannel=pos-handheld-production
+      # 手持端按 release channel 发布 OTA 的服务端放行闸门；默认关闭，由服务器 .env 显式开启。
+      - EasWebhook__PosHandheldReleaseChannelPublishingEnabled=${EAS_WEBHOOK_POS_HANDHELD_RELEASE_CHANNEL_PUBLISHING_ENABLED:-false}
       - EasWebhook__AcceptedProfiles__0=preview
       - EasWebhook__AcceptedProfiles__1=production
       - Translation__Provider=deepseek

@@ -693,6 +693,11 @@ public sealed class PosHandheldUpdatePolicyServiceTests : IDisposable
             "PosHandheldUpdatePolicy__AndroidSigningCertificateSha256=${POS_HANDHELD_ANDROID_SIGNING_CERTIFICATE_SHA256:?required}",
             compose
         );
+        // 手持端 release channel 发布闸门必须可由服务器 .env 开启，且缺省保持关闭。
+        Assert.Contains(
+            "EasWebhook__PosHandheldReleaseChannelPublishingEnabled=${EAS_WEBHOOK_POS_HANDHELD_RELEASE_CHANNEL_PUBLISHING_ENABLED:-false}",
+            compose
+        );
     }
 
     public void Dispose()
