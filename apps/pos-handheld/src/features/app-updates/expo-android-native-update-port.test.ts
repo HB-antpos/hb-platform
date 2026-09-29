@@ -43,6 +43,9 @@ test("Expo bridge 受真实 HBAppInstaller 六项身份对象签名约束", asyn
         versionCode: 200,
       };
     },
+    async verifyDownloadedApk(request) {
+      calls.push(request);
+    },
   } satisfies HbAppInstallerNativeContract;
   const bridge = new ExpoHbAppInstallerBridge(async () => nativeModule);
   const request = {

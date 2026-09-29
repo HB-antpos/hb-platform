@@ -84,6 +84,26 @@ afterEach(() => {
 });
 
 describe("SettingsScreen", () => {
+  it("手动刷卡保存受购物车阻断时显示原因并恢复原开关", async () => {
+    const port = Object.assign(new ScreenSettingsPort(), {
+      savePaymentMethodSettings: async () => ({
+        status: "blocked",
+        reason: "pending-local-data",
+        blockers: [{ kind: "in-progress", code: "active-cart" }],
+      } as const),
+    });
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(<SettingsScreen locale="zh" presenter={presenter} />);
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    await fireEvent.press(screen.getByTestId("settings-payment-manual-card"));
+    await fireEvent.press(screen.getByTestId("settings-payment-manual-card-save"));
+
+    expect(await screen.findByText("当前购物车｜请完成或清空购物车后再试")).toBeTruthy();
+    expect(screen.queryByText("支付终端设置保存失败")).toBeNull();
+    expect(presenter.getState().paymentMethods.useManualCard).toBe(false);
+  });
+
   it("设置内容滚动区采用系统键盘避让合同", async () => {
     const port = new ScreenSettingsPort();
     const presenter = createPresenter(port);

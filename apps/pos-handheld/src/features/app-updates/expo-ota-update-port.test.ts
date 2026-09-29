@@ -111,6 +111,7 @@ test("命中策略后才覆盖 channel，且 check/fetch 双重验证 runtime/up
     "check",
     "fetch",
     "override:clear",
+    "override:store-s001",
     "reload",
   ]);
 });
@@ -501,16 +502,93 @@ test("连续应用不同 release channel 时每次都独立覆盖并清理，不
   });
 
   assert.equal((await port.apply(first)).state, "reloaded");
-  assert.equal(activeChannel, null);
+  assert.equal(activeChannel, first.channel);
   assert.equal((await port.apply(second)).state, "reloaded");
-  assert.equal(activeChannel, null);
+  assert.equal(activeChannel, second.channel);
   assert.deepEqual(trace, [
     "clear",
     `set:${first.channel}`,
     "clear",
+    `set:${first.channel}`,
     "reload",
     `set:${second.channel}`,
     "clear",
+    `set:${second.channel}`,
     "reload",
   ]);
+});
+
+test("prepare 只下载并校验，不 reload；apply 复用已准备目标", async () => {
+  let fetches = 0;
+  let reloads = 0;
+  const manifest = { id: policy.updateId, runtimeVersion: policy.runtimeVersion };
+  const port = new ExpoOtaUpdatePort({
+    enabled: true,
+    runtimeVersion: policy.runtimeVersion,
+    updates: {
+      setUpdateRequestHeadersOverride() {},
+      async checkForUpdateAsync() { return { isAvailable: true, manifest }; },
+      async fetchUpdateAsync() {
+        fetches += 1;
+        return { isNew: true, manifest };
+      },
+      async reloadAsync() { reloads += 1; },
+    },
+  });
+
+  assert.deepEqual(await port.prepare(policy), { state: "ready", reason: null });
+  assert.equal(fetches, 1);
+  assert.equal(reloads, 0);
+  assert.deepEqual(await port.apply(policy), { state: "reloaded", reason: null });
+  assert.equal(fetches, 1);
+  assert.equal(reloads, 1);
+});
+
+test("策略改变会使旧 ready 失效，不能借用旧目标 reload", async () => {
+  let fetches = 0;
+  let reloads = 0;
+  let activeChannel: string | null = null;
+  const first = { ...policy, channel: "channel-a" };
+  const second = { ...policy, channel: "channel-b", updateId: "323e4567-e89b-42d3-a456-426614174000" };
+  const port = new ExpoOtaUpdatePort({
+    enabled: true,
+    runtimeVersion: policy.runtimeVersion,
+    updates: {
+      setUpdateRequestHeadersOverride(headers) { activeChannel = headers?.["expo-channel-name"] ?? null; },
+      async checkForUpdateAsync() { return { isAvailable: true, manifest: { id: activeChannel === second.channel ? second.updateId : first.updateId, runtimeVersion: policy.runtimeVersion } }; },
+      async fetchUpdateAsync() { fetches += 1; return { isNew: true, manifest: { id: activeChannel === second.channel ? second.updateId : first.updateId, runtimeVersion: policy.runtimeVersion } }; },
+      async reloadAsync() { reloads += 1; },
+    },
+  });
+
+  await port.prepare(first);
+  await port.prepare(second);
+  assert.equal(fetches, 2);
+  await port.apply(second);
+  assert.equal(reloads, 1);
+});
+
+test("reload 失败会恢复 channel，且下一次 apply 重新下载并可重试", async () => {
+  let fetches = 0;
+  let reloads = 0;
+  let failReload = true;
+  let activeChannel: string | null = null;
+  const port = new ExpoOtaUpdatePort({
+    enabled: true,
+    runtimeVersion: policy.runtimeVersion,
+    updates: {
+      setUpdateRequestHeadersOverride(headers) { activeChannel = headers?.["expo-channel-name"] ?? null; },
+      async checkForUpdateAsync() { return { isAvailable: true, manifest: { id: policy.updateId, runtimeVersion: policy.runtimeVersion } }; },
+      async fetchUpdateAsync() { fetches += 1; return { isNew: true, manifest: { id: policy.updateId, runtimeVersion: policy.runtimeVersion } }; },
+      async reloadAsync() { reloads += 1; if (failReload) throw new Error("reload failed"); },
+    },
+  });
+
+  await port.prepare(policy);
+  await assert.rejects(port.apply(policy), /reload failed/u);
+  assert.equal(activeChannel, null);
+  failReload = false;
+  await port.apply(policy);
+  assert.equal(fetches, 2);
+  assert.equal(reloads, 2);
 });

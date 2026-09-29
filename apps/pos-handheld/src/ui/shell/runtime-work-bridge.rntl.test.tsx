@@ -1,5 +1,6 @@
 import { afterEach, expect, jest, test } from "@jest/globals";
 import { act, cleanup, render, waitFor } from "@testing-library/react-native";
+import { AppState } from "react-native";
 
 import { RuntimeWorkBridge } from "./runtime-work-bridge";
 
@@ -17,7 +18,32 @@ jest.mock("./pos-shell-store", () => ({
 afterEach(async () => {
   await cleanup();
   jest.restoreAllMocks();
+  jest.useRealTimers();
   mockRuntime = null;
+});
+
+test("常驻前台每 30 分钟检查更新，后台和卸载后不检查", async () => {
+  jest.useFakeTimers();
+  const refresh = jest.fn(async () => undefined);
+  const previous = AppState.currentState;
+  mockRuntime = { services: {
+    sync: { onApplicationStarted: async () => {}, onForeground: async () => {}, onNetworkChanged: async () => {} },
+    fulfilment: { drainAutomaticQueue: async () => {} },
+    appUpdates: { refreshOnStartup: async () => {}, refreshOnNetworkAvailable: async () => {}, refreshOnForeground: refresh },
+  } };
+  try {
+    AppState.currentState = "active";
+    const screen = await render(<RuntimeWorkBridge />);
+    await act(async () => { jest.advanceTimersByTime(30 * 60 * 1_000); });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    AppState.currentState = "background";
+    await act(async () => { jest.advanceTimersByTime(30 * 60 * 1_000); });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await screen.unmount();
+    AppState.currentState = "active";
+    await act(async () => { jest.advanceTimersByTime(30 * 60 * 1_000); });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  } finally { AppState.currentState = previous; }
 });
 
 test("程序日志缺失或 SQLite 日志失败时，启动与联网同步仍照常运行", async () => {

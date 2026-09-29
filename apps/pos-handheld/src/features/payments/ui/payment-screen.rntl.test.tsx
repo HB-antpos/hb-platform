@@ -3015,6 +3015,77 @@ test("分期全额付款确认弹窗点击面板外遮罩关闭且不确认", as
   await screen.unmount();
 });
 
+test.each(["en", "zh"] as const)("%s 手动刷卡固定余额并要求确认", async (locale) => {
+  setPaymentWindowSize(locale === "en" ? 320 : 360, locale === "en" ? 568 : 592);
+  try {
+    const { presenter, spies } = createUiPresenter({
+      providers: [providerAvailability("manual-card"), providerAvailability("voucher")],
+      selectedMethod: "cash",
+    });
+    const screen = await render(<PaymentScreen locale={locale} presenter={presenter} showStatusStrip={false} />);
+    expect(screen.queryByTestId("payment-method-square")).toBeNull();
+    expect(screen.queryByTestId("payment-method-linkly-cloud")).toBeNull();
+    await openPaymentEntry(screen, "manual-card");
+    expect(StyleSheet.flatten(screen.getByTestId("payment-entry-pane").props.style)).toMatchObject({ height: "90%" });
+    expect(screen.getByTestId("payment-entry-scroll")).not.toContainElement(screen.getByTestId("payment-submit"));
+    expect(screen.getByTestId("payment-amount").props.editable).toBe(false);
+    expect(screen.getByTestId("payment-amount").props.value).toBe("10.00");
+    expect(screen.queryByTestId("payment-keypad")).toBeNull();
+    expect(screen.getByTestId("payment-submit").props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(screen.getByTestId("payment-submit"));
+    expect(spies.submitSelected).not.toHaveBeenCalled();
+    const checkbox = screen.getByTestId("payment-manual-card-check");
+    expect(checkbox.props.accessibilityRole).toBe("checkbox");
+    expect(StyleSheet.flatten(checkbox.props.style).minHeight).toBeGreaterThanOrEqual(PAYMENT_MIN_TOUCH_TARGET);
+    await fireEvent.press(checkbox);
+    expect(presenter.getState().manualCardConfirmed).toBe(true);
+    expect(screen.getByTestId("payment-submit").props.accessibilityState.disabled).toBe(false);
+    await fireEvent.press(screen.getByTestId("payment-submit"));
+    expect(spies.submitSelected).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("payment-entry-modal")).toBeNull();
+    await screen.unmount();
+  } finally {
+    setPaymentWindowSize(390, 844);
+  }
+});
+
+test("手动刷卡关闭时隐藏入口且不把关闭开关当作配置错误", async () => {
+  const { presenter } = createUiPresenter({
+    providers: [providerAvailability("square"), {
+      provider: "manual-card", available: false, blocker: "MANUAL_CARD_CONFIGURATION_DISABLED",
+    }],
+  });
+  const screen = await render(<PaymentScreen locale="zh" presenter={presenter} showStatusStrip={false} />);
+  expect(screen.getByTestId("payment-method-square")).toBeTruthy();
+  expect(screen.queryByTestId("payment-method-manual-card")).toBeNull();
+  expect(screen.queryByTestId("payment-provider-blockers")).toBeNull();
+  await screen.unmount();
+});
+
+test("手动刷卡退出重进和剩余金额改变必须重新勾选", async () => {
+  const harness = createUiPresenter({ providers: [providerAvailability("manual-card")], selectedMethod: "cash" });
+  const screen = await render(<PaymentScreen locale="zh" presenter={harness.presenter} showStatusStrip={false} />);
+  await openPaymentEntry(screen, "manual-card");
+  await fireEvent.press(screen.getByTestId("payment-manual-card-check"));
+  await fireEvent.press(screen.getByTestId("payment-entry-cancel"));
+  await openPaymentEntry(screen, "manual-card");
+  expect(harness.presenter.getState().manualCardConfirmed).toBe(false);
+  await fireEvent.press(screen.getByTestId("payment-manual-card-check"));
+  await act(async () => harness.publish({ ...harness.presenter.getState(), remaining: aud(650) }));
+  expect(harness.presenter.getState().manualCardConfirmed).toBe(false);
+  expect(screen.getByTestId("payment-amount").props.value).toBe("6.50");
+  expect(screen.getByTestId("payment-submit").props.accessibilityState.disabled).toBe(true);
+  await screen.unmount();
+});
+
+test("分期流程隐藏手动刷卡入口", async () => {
+  const harness = createUiPresenter({ providers: [providerAvailability("manual-card")] });
+  harness.publish({ ...harness.presenter.getState(), checkout: { ...harness.presenter.getState().checkout, flow: "installment-repayment" } });
+  const screen = await render(<PaymentScreen locale="zh" presenter={harness.presenter} showStatusStrip={false} />);
+  expect(screen.queryByTestId("payment-method-manual-card")).toBeNull();
+  await screen.unmount();
+});
+
 function createUiPresenter(
   override: Partial<PaymentPresenterState> = {},
   applySubmittedState?: (
@@ -3099,7 +3170,7 @@ function createUiPresenter(
   };
   const spies = {
     selectMethod: jest.fn((method: PaymentUiMethod) => {
-      publish({ ...state, selectedMethod: method });
+      publish({ ...state, selectedMethod: method, manualCardConfirmed: false });
       return true;
     }),
     selectLinklyTerminal: jest.fn(async (terminalId: string) => {
@@ -3122,6 +3193,9 @@ function createUiPresenter(
       publish({ ...state, amountText: value });
     }),
     setVoucherCode: jest.fn((_value: string) => undefined),
+    setManualCardConfirmed: jest.fn((confirmed: boolean) => {
+      publish({ ...state, manualCardConfirmed: confirmed });
+    }),
     dismissError: jest.fn(() => undefined),
     submitSelected: jest.fn(async () => {
       if (applySubmittedState) publish(applySubmittedState(state));

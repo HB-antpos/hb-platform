@@ -1074,6 +1074,83 @@ test("销毁后异步结果不回流；未知异常只映射稳定失败码且�
   );
 });
 
+test("手动刷卡要求人工确认、固定全部余额且重复提交只调用一次 runtime", async () => {
+  const runtime = new FakePaymentRuntime();
+  runtime.listProviderAvailability = () => [availability("manual-card")];
+  const pending = deferred<PaymentCheckoutPublicSnapshot>();
+  const presenter = createPresenter(runtime);
+  await presenter.initialize();
+  assert.equal(presenter.selectMethod("manual-card"), true);
+  assert.equal(await presenter.submitSelected(), false);
+  assert.equal(presenter.getState().fieldIssue, "manual-card-confirmation-required");
+  assert.equal(runtime.startCalls.length, 0);
+  runtime.startImpl = async () => pending.promise;
+  presenter.setManualCardConfirmed(true);
+  presenter.setAmountText("1.00");
+  assert.equal(presenter.getState().amountText, "10.00");
+  assert.equal(presenter.getState().manualCardConfirmed, false);
+  presenter.setManualCardConfirmed(true);
+  const first = presenter.submitSelected();
+  const duplicate = presenter.submitSelected();
+  await tick();
+  assert.equal(runtime.startCalls.length, 1);
+  assert.deepEqual(runtime.startCalls[0], {
+    checkoutIntentId: "checkout-local-1",
+    expectedCartRevision: 7,
+    actionId: "action-1",
+    provider: "manual-card",
+    amount: aud(1_000),
+    manualConfirmed: true,
+  });
+  pending.resolve(snapshot({ status: "completed", remaining: aud(0), provider: "manual-card" }));
+  assert.equal(await first, true);
+  await duplicate;
+  assert.equal(presenter.getState().manualCardConfirmed, false);
+});
+
+test("手动刷卡切换、刷新余额和销毁均清确认，恢复草稿显式传递确认", async () => {
+  const runtime = new FakePaymentRuntime();
+  runtime.listProviderAvailability = () => [availability("manual-card")];
+  runtime.recovery = snapshot({ remaining: aud(650) });
+  const presenter = createPresenter(runtime);
+  await presenter.initialize();
+  presenter.selectMethod("manual-card");
+  presenter.setManualCardConfirmed(true);
+  presenter.selectMethod("cash");
+  presenter.selectMethod("manual-card");
+  assert.equal(presenter.getState().manualCardConfirmed, false);
+  presenter.setManualCardConfirmed(true);
+  runtime.read = async () => snapshot({ remaining: aud(500) });
+  await presenter.load("order-local-1");
+  assert.equal(presenter.getState().manualCardConfirmed, false);
+  presenter.selectMethod("manual-card");
+  assert.equal(presenter.getState().amountText, "5.00");
+  presenter.setManualCardConfirmed(true);
+  await presenter.submitSelected();
+  assert.deepEqual(runtime.resumeCalls[0], {
+    actionId: "action-1", provider: "manual-card", amount: aud(500), manualConfirmed: true,
+  });
+  assert.equal(runtime.startCalls.length, 0);
+  presenter.destroy();
+  assert.equal(presenter.getState().manualCardConfirmed, false);
+});
+
+test("手动刷卡不能绕过普通销售限制或 unknown 恢复锁", async () => {
+  const runtime = new FakePaymentRuntime();
+  runtime.listProviderAvailability = () => [availability("manual-card")];
+  const presenter = createPresenter(runtime);
+  await presenter.initialize();
+  const state = presenter.getState();
+  assert.equal(canSelectPaymentMethod({ ...state, checkout: { ...state.checkout, flow: "installment-create" } }, "manual-card"), false);
+  runtime.read = async () => snapshot({ status: "unknown", allowedActions: actions({ recover: true }) });
+  await presenter.load("order-local-1");
+  assert.equal(presenter.selectMethod("manual-card"), false);
+  presenter.setManualCardConfirmed(true);
+  assert.equal(presenter.getState().manualCardConfirmed, false);
+  assert.equal(await presenter.submitSelected(), false);
+  assert.equal(runtime.startCalls.length + runtime.resumeCalls.length, 0);
+});
+
 test("AUD 输入仅接受正数与最多两位小数", () => {
   assert.deepEqual(parseAudInput("4"), aud(400));
   assert.deepEqual(parseAudInput("4.5"), aud(450));
@@ -1087,6 +1164,7 @@ test("AUD 输入仅接受正数与最多两位小数", () => {
 class FakePaymentRuntime implements PaymentCheckoutRuntimePort {
   public recovery: PaymentCheckoutPublicSnapshot | null = null;
   public readonly startCalls: unknown[] = [];
+  public readonly resumeCalls: unknown[] = [];
   public readonly startCashCalls: unknown[] = [];
   public recoverCalls = 0;
   public readonly recoverInputs: Parameters<PaymentCheckoutRuntimePort["recover"]>[0][] = [];
@@ -1138,7 +1216,8 @@ class FakePaymentRuntime implements PaymentCheckoutRuntimePort {
     return this.findRecoveryImpl();
   }
 
-  public async resumeCurrent(): Promise<PaymentCheckoutPublicSnapshot | null> {
+  public async resumeCurrent(input: Parameters<PaymentCheckoutRuntimePort["resumeCurrent"]>[0]): Promise<PaymentCheckoutPublicSnapshot | null> {
+    this.resumeCalls.push(input);
     return snapshot({ status: "pending" });
   }
 

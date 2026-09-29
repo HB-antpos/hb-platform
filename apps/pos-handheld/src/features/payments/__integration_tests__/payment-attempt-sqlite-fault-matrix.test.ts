@@ -21,11 +21,77 @@ import { createSqliteRepositories } from "@/core/db/sqlite-repositories";
 import type { SqliteConnectionPort, SqlRunResult, SqlValue } from "@hb/pos-db/core/db/types";
 import { ApprovedPaymentOrderCompletionService } from "@/features/payments/approved-payment-order-completion";
 import { MixedPaymentCoordinator } from "@/features/payments/mixed";
+import { ManualCardPaymentAdapter } from "@/features/payments/manual/manual-card-payment-adapter";
 import {
   PaymentAttemptBlockedError,
   PaymentAttemptOfflineError,
   PaymentAttemptService,
 } from "@hb/pos-payments-core/features/payments/payment-attempt-service";
+
+test("真实 SQLite：manual-card confirmation 经 MixedPaymentCoordinator 到 PaymentAttemptService 后完成入账", async () => {
+  await withSqlite(async (connection) => {
+    const harness = await createHarness(connection, true);
+    const completion = new ApprovedPaymentOrderCompletionService({
+      planner: {
+        async plan(execution, actor) {
+          return {
+            tenderGuid: "tender-manual-card",
+            completionAuditEvents: [{
+              eventId: "audit-manual-card",
+              eventType: "PAYMENT_APPROVED_COMPLETE",
+              occurredAtIso: T0,
+              orderGuid: execution.attempt.orderGuid,
+              correlationId: execution.attempt.attemptId,
+              payload: { attemptId: execution.attempt.attemptId, ...auditActorPayload(actor) },
+            }],
+            outbox: {
+              messageId: "outbox-manual-card",
+              aggregateId: execution.attempt.orderGuid,
+              kind: "order-sync",
+              payloadJson: JSON.stringify({ orderGuid: execution.attempt.orderGuid }),
+              nextAttemptAtIso: T0,
+            },
+            fulfilment: { print: null, drawer: null },
+          };
+        },
+      },
+      committer: new SqliteApprovedPaymentOrderCommitter(connection, testEncryptor, () => T0),
+    });
+    const coordinator = new MixedPaymentCoordinator({
+      actor: input().actor,
+      orderTruth: new SqliteMixedPaymentOrderTruthStore(connection),
+      paymentAttempts: harness.service,
+      approvedCompletion: completion,
+    });
+
+    const unconfirmed = await coordinator.addOnlineTender({
+        actionId: "manual-unconfirmed",
+        orderGuid: "order-payment-matrix",
+        provider: "manual-card",
+        amount: { currency: "AUD", cents: 500 },
+      });
+    assert.equal(unconfirmed.status, "recovery-required");
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_attempts"), 0);
+
+    const result = await coordinator.addOnlineTender({
+      actionId: "manual-confirmed",
+      orderGuid: "order-payment-matrix",
+      provider: "manual-card",
+      amount: { currency: "AUD", cents: 500 },
+      manualConfirmed: true,
+    });
+    assert.equal(result.status, "completed");
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_attempts"), 1);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM order_tenders"), 1);
+    const order = await connection.getFirst<{ state: string }>(
+      "SELECT state FROM local_orders WHERE order_guid = ?",
+      ["order-payment-matrix"],
+    );
+    assert.equal(order?.state, "PendingSync");
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM audit_events"), 1);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM outbox_messages"), 1);
+  });
+});
 
 const T0 = "2026-07-28T00:00:00.000Z";
 const references = (): PaymentProviderReferences => ({
@@ -238,6 +304,7 @@ async function createHarness(connection: NodeSqliteConnection, online: boolean) 
   });
   const square = new FakeProvider("square");
   const linkly = new FakeProvider("linkly-cloud");
+  const manual = new ManualCardPaymentAdapter();
   let id = 0;
   const service = new PaymentAttemptService({
     ledger: repositories.payments,
@@ -249,7 +316,9 @@ async function createHarness(connection: NodeSqliteConnection, online: boolean) 
     },
     providers: {
       get(provider) {
-        return provider === "square" ? square : linkly;
+        if (provider === "square") return square;
+        if (provider === "linkly-cloud") return linkly;
+        return manual;
       },
     },
     connectivity: { isOnline: async () => online },
@@ -257,7 +326,7 @@ async function createHarness(connection: NodeSqliteConnection, online: boolean) 
     createIdempotencyKey: () => `idempotency-${id}`,
     nowIso: () => T0,
   });
-  return { service, repositories, square, linkly };
+  return { service, repositories, square, linkly, manual };
 }
 
 function input() {
@@ -325,7 +394,7 @@ function withApprovedCardEvidence(
   result: PaymentProviderResult,
   attempt: PaymentAttempt,
 ): PaymentProviderResult {
-  if (result.state !== "Approved" || attempt.provider === "voucher") {
+  if (result.state !== "Approved" || attempt.provider === "voucher" || attempt.provider === "manual-card") {
     return result;
   }
   return {

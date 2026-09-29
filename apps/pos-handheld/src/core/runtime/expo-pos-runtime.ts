@@ -177,6 +177,15 @@ type ExpoAppUpdateCacheMetadata = Readonly<{
   currentUpdateGroupId: string | null;
 }>;
 
+export function shouldEnableAppUpdates(
+  isDevelopment: boolean,
+  buildProfile: string | undefined,
+): boolean {
+  return !isDevelopment && !["development", "test", "testing"].includes(
+    buildProfile?.trim().toLowerCase() ?? "production",
+  );
+}
+
 export function createExpoAppUpdateCacheScopes(
   metadata: ExpoAppUpdateCacheMetadata,
 ): Readonly<{
@@ -751,10 +760,13 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         undefined,
         deviceLock,
       );
+    const paymentMethodSettingsRepository = database.paymentMethodSettings();
+    let paymentMethods = await paymentMethodSettingsRepository.load();
     const paymentBootstrap =
       await createPaymentProviderRuntimeBootstrap({
         transport,
         extra: paymentPublicConfiguration,
+        readPaymentMethods: () => paymentMethods,
         voucherProtectedTokens: database.voucherProtectedTokens(
           encryptor,
           createId,
@@ -766,6 +778,8 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       await createPaymentProviderRuntimeBootstrap({
         transport,
         extra: paymentPublicConfiguration,
+        readPaymentMethods: () => paymentMethods,
+        allowManualCard: false,
         voucherProtectedTokens:
           installmentPaymentPersistence.voucherProtectedTokens,
       });
@@ -825,7 +839,12 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       currentUpdateId,
       currentUpdateGroupId,
     });
+    // 与移动端一致：开发/测试包保留本次安装快照，不接收正式升级。
+    const appUpdatesEnabled = shouldEnableAppUpdates(
+      __DEV__, publicExtra?.hbpos?.buildProfile,
+    );
     const nativeAppUpdates = new AppUpdateCoordinator({
+      updatesEnabled: appUpdatesEnabled,
       metadata: {
         version: appVersion,
         build: installedBuild,
@@ -848,7 +867,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       platform: deviceSystem,
       automaticChecksEnabled: shouldCheckOtaPolicy({
         automaticChecksConfigured:
-          publicExtra?.hbpos?.automaticOtaChecks === true,
+          appUpdatesEnabled && publicExtra?.hbpos?.automaticOtaChecks === true,
         updatesEnabled: Updates.isEnabled,
       }),
       metadata: {
@@ -1048,6 +1067,13 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         bootstrap: installmentPaymentBootstrap,
       },
       settings: {
+        paymentMethods: {
+          load: () => paymentMethodSettingsRepository.load(),
+          save: async (settings) => {
+            // 全局配置写租约内先耐久保存，再发布新开关；旧付款恢复仍使用原通道。
+            paymentMethods = await paymentMethodSettingsRepository.save(settings);
+          },
+        },
         apiBaseUrl,
         appVersion,
         updateChannel,

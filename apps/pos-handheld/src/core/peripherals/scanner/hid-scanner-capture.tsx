@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { StyleSheet, TextInput, type TextInput as TextInputInstance } from "react-native";
+import { AppState, StyleSheet, TextInput, type TextInput as TextInputInstance } from "react-native";
 
 import { HidScannerRouter } from "./hid-scanner";
 import type { ScannerCaptureStatus } from "./types";
@@ -26,6 +26,7 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
   ({ active, focusRequestKey, onCaptureStatusChange, onHidTextChange, scanner }, ref) => {
     const inputRef = useRef<TextInputInstance>(null);
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [value, setValue] = useState("");
     const valueRef = useRef("");
     const setCapturedValue = (nextValue: string): void => {
@@ -44,6 +45,22 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
       scanner.setCaptureActive(active && nextFocused);
       onCaptureStatusChange?.(scanner.getCaptureStatus());
     }, [active, onCaptureStatusChange, scanner]);
+
+    const scheduleFocus = useCallback((resetWindowFocus = false) => {
+      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+      if (!active) return;
+      // 等原生焦点交接完成；手动输入框已接管时不抢焦点。
+      focusTimerRef.current = setTimeout(() => {
+        focusTimerRef.current = null;
+        if (AppState.currentState === "background" || AppState.currentState === "inactive") return;
+        const input = inputRef.current;
+        const focusedInput = TextInput.State.currentlyFocusedInput();
+        if (!input || (focusedInput && focusedInput !== input)) return;
+        // Android 弹窗关闭后 JS 可能仍缓存旧焦点，重新连接原生编辑器供 DataWedge 输出。
+        if (resetWindowFocus && focusedInput === input) input.blur();
+        input.focus();
+      }, 50);
+    }, [active]);
 
     const scheduleIdleReset = () => {
       if (idleTimerRef.current) {
@@ -77,15 +94,17 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
         updateCaptureState(false);
         return;
       }
-      const focusTimer = setTimeout(() => inputRef.current?.focus(), 0);
-      return () => clearTimeout(focusTimer);
-    }, [active, updateCaptureState]);
-
-    useEffect(() => {
-      if (active) {
-        inputRef.current?.focus();
-      }
-    }, [active, focusRequestKey]);
+      scheduleFocus();
+      const focusSubscription = AppState.addEventListener("focus", () => scheduleFocus(true));
+      const stateSubscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") scheduleFocus(true);
+      });
+      return () => {
+        if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+        focusSubscription.remove();
+        stateSubscription.remove();
+      };
+    }, [active, focusRequestKey, scheduleFocus, updateCaptureState]);
 
     useEffect(() => () => {
       if (idleTimerRef.current) {
@@ -106,7 +125,10 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
         editable={active}
         importantForAutofill="no"
         keyboardType="default"
-        onBlur={() => updateCaptureState(false)}
+        onBlur={() => {
+          updateCaptureState(false);
+          scheduleFocus();
+        }}
         onChangeText={(nextValue) => {
           if (nextValue && nextValue !== valueRef.current) {
             onHidTextChange?.();

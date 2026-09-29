@@ -1,3 +1,8 @@
+import type {
+  AndroidInstallPermissionStatus,
+  AndroidNativeUpdatePort,
+} from "./android-native-update-adapter";
+import { isAndroidInstallPermissionRequiredError } from "./android-native-update-adapter";
 import {
   decideAppUpdateRestart,
   type AppUpdateRefreshReason,
@@ -7,18 +12,15 @@ import {
 import type {
   ExpoOtaBeforeReloadDecision,
   ExpoOtaUpdateApplyResult,
+  ExpoOtaUpdatePrepareResult,
 } from "./expo-ota-update-port";
-import type {
-  AndroidInstallPermissionStatus,
-  AndroidNativeUpdatePort,
-} from "./android-native-update-adapter";
 
 import type {
   NewTransactionGate,
   PosHandheldUpdatePolicy,
 } from "@/core/contracts/app-updates";
-import type { DeviceSystem } from "@/core/contracts/security";
 import type { PosHandheldOtaUpdatePolicy } from "@/core/contracts/ota-app-updates";
+import type { DeviceSystem } from "@/core/contracts/security";
 
 export type AppUpdatePresentation = Readonly<{
   key: string;
@@ -35,6 +37,8 @@ export type AppUpdatePresentation = Readonly<{
   platform: DeviceSystem | null;
   appStoreUrl: string | null;
   downloadUrl: string | null;
+  downloadState?: "idle" | "downloading" | "ready" | "failed" | undefined;
+  downloadTargetKey?: string | undefined;
 }>;
 
 export type AppUpdateActionResult =
@@ -69,6 +73,7 @@ type OtaUpdateCoordinatorPort = Readonly<{
   refreshOnStartup(): Promise<unknown>;
   refreshOnForeground(): Promise<unknown>;
   refreshOnNetworkAvailable(): Promise<unknown>;
+  prepare(policy: PosHandheldOtaUpdatePolicy): Promise<ExpoOtaUpdatePrepareResult>;
   apply(
     policy: PosHandheldOtaUpdatePolicy,
     beforeReload: () =>
@@ -111,6 +116,11 @@ export class AppUpdateOrchestrator {
   private safeForCompletion: boolean | null = null;
   private safetyInFlight: Promise<AppUpdatePresentation> | null = null;
   private refreshInFlight: Promise<AppUpdatePresentation> | null = null;
+  private preparationInFlight: Promise<AppUpdatePresentation> | null = null;
+  private preparingKey: string | null = null;
+  private preparedKey: string | null = null;
+  private failedKey: string | null = null;
+  private disposed = false;
   private readonly gateListeners = new Set<GateListener>();
   private readonly presentationListeners =
     new Set<PresentationListener>();
@@ -267,6 +277,49 @@ export class AppUpdateOrchestrator {
     return operation;
   }
 
+  /** APK/OTA 先后台下载；此阶段不持交易切换租约，也不打开系统安装器或重启。 */
+  public async prepareSelectedUpdate(): Promise<AppUpdatePresentation> {
+    if (this.disposed) return this.presentation;
+    const key = this.downloadKey();
+    if (key === null || key === this.preparedKey) return this.presentation;
+    if (this.preparationInFlight) {
+      const previousKey = this.preparingKey;
+      await this.preparationInFlight;
+      return this.downloadKey() !== previousKey
+        ? this.prepareSelectedUpdate()
+        : this.presentation;
+    }
+    const selected = this.presentation;
+    const nativePolicy = this.options.native.getPolicy();
+    const otaPolicy = this.options.ota.getPolicy();
+    this.preparingKey = key;
+    this.preparedKey = null;
+    this.failedKey = null;
+    this.recompute();
+    const operation = Promise.resolve().then(async () => {
+      try {
+        if (selected.kind === "native" && nativePolicy && this.options.androidNative) {
+          await this.options.androidNative.prepare(nativePolicy);
+        } else if (selected.kind === "ota" && otaPolicy) {
+          const result = await this.options.ota.prepare(otaPolicy);
+          if (result.state !== "ready") throw new Error("OTA download is not ready.");
+        } else {
+          throw new Error("Update downloader is unavailable.");
+        }
+        if (!this.disposed && this.downloadKey() === key) this.preparedKey = key;
+      } catch {
+        if (!this.disposed && this.downloadKey() === key) this.failedKey = key;
+      } finally {
+        this.preparingKey = null;
+        this.preparationInFlight = null;
+        if (!this.disposed) this.recompute();
+      }
+      return this.presentation;
+    });
+    this.preparationInFlight = operation;
+    return operation;
+  }
+
   public async performSelectedUpdate(): Promise<AppUpdateActionResult> {
     const selected = this.presentation;
     if (selected.phase === "unchecked") {
@@ -275,11 +328,22 @@ export class AppUpdateOrchestrator {
     if (selected.kind === "none") {
       return Object.freeze({ action: "none", reason: "no-update" });
     }
+    // 手动入口也不能跳过下载完成状态，避免点击“安装”后才开始长时间传输。
+    if (this.downloadKey() !== null && this.downloadKey() !== this.preparedKey) {
+      return Object.freeze({ action: "blocked", reason: "restart-unavailable" });
+    }
     const selectedOtaPolicy =
       selected.kind === "ota" ? this.options.ota.getPolicy() : null;
     const selectedNativePolicy =
       selected.kind === "native" ? this.options.native.getPolicy() : null;
+    const selectedDownloadKey = this.downloadKey();
     return this.options.transition.runTransition(async () => {
+      // 参考移动端，在最终安装/重启前重新核对策略；准备期间撤回或替换的目标不能继续安装。
+      await Promise.all([
+        this.options.native.refreshOnForeground(),
+        this.options.ota.refreshOnForeground(),
+      ]);
+      this.recompute();
       const safety = await this.readSafetyDecision();
       if (
         !this.selectionMatches(
@@ -336,7 +400,14 @@ export class AppUpdateOrchestrator {
           selected.platform === "Android" &&
           this.options.androidNative
         ) {
-          await this.options.androidNative.install(selectedNativePolicy);
+          try {
+            await this.options.androidNative.install(selectedNativePolicy);
+          } catch (error) {
+            if (!isAndroidInstallPermissionRequiredError(error)) {
+              this.invalidatePreparedDownload(selectedDownloadKey);
+            }
+            throw error;
+          }
           return Object.freeze({ action: "install-android-apk" });
         }
         return Object.freeze({
@@ -350,9 +421,9 @@ export class AppUpdateOrchestrator {
           reason: "selection-changed",
         });
       }
-      return Object.freeze({
-        action: "ota",
-        result: await this.options.ota.apply(
+      let result: ExpoOtaUpdateApplyResult;
+      try {
+        result = await this.options.ota.apply(
           selectedOtaPolicy,
           async () => {
             if (
@@ -376,8 +447,16 @@ export class AppUpdateOrchestrator {
             }
             return finalSafety.canRestart ? true : "restart-unsafe";
           },
-        ),
-      });
+        );
+      } catch (error) {
+        this.invalidatePreparedDownload(selectedDownloadKey);
+        throw error;
+      }
+      if (result.state !== "reloaded" && result.reason !== "selection-changed" &&
+        result.reason !== "restart-unsafe") {
+        this.invalidatePreparedDownload(selectedDownloadKey);
+      }
+      return Object.freeze({ action: "ota", result });
     });
   }
 
@@ -406,6 +485,7 @@ export class AppUpdateOrchestrator {
   }
 
   public dispose(): void {
+    this.disposed = true;
     this.unsubscribeNative();
     this.unsubscribeOta();
     this.unsubscribeTransition();
@@ -441,6 +521,8 @@ export class AppUpdateOrchestrator {
           : this.options.ota.refreshOnNetworkAvailable();
     await Promise.all([nativeRefresh, otaRefresh]);
     this.recompute();
+    // 不等待大文件下载，启动、联网恢复和收银页面继续工作。
+    void this.prepareSelectedUpdate();
     if (this.presentation.requirement === "required") {
       return this.refreshSafety();
     }
@@ -505,21 +587,47 @@ export class AppUpdateOrchestrator {
       this.safeSelectionKey = null;
       this.safeForCompletion = null;
     }
+    const downloadKey = this.downloadKey(next);
+    const downloadState = downloadKey === null ? undefined
+      : this.preparingKey === downloadKey ? "downloading"
+      : this.preparedKey === downloadKey ? "ready"
+      : this.failedKey === downloadKey ? "failed" : "idle";
     this.presentation =
       next.requirement === "required" &&
       this.safeSelectionKey === next.key &&
       this.safeForCompletion === true
         ? Object.freeze({
             ...next,
+            downloadState,
+            downloadTargetKey: downloadKey ?? undefined,
             phase: "blocking",
             blocking: true,
           })
-        : next;
+        : Object.freeze({
+            ...next, downloadState, downloadTargetKey: downloadKey ?? undefined,
+          });
     this.recomputeGate();
     for (const listener of this.gateListeners) this.notifyGate(listener);
     for (const listener of this.presentationListeners) {
       this.notifyPresentation(listener);
     }
+  }
+
+  private downloadKey(selected = this.presentation): string | null {
+    if (selected.kind === "ota") {
+      return JSON.stringify(["ota", this.options.ota.getPolicy()]);
+    }
+    if (selected.kind === "native" && selected.platform === "Android") {
+      return JSON.stringify(["apk", this.options.native.getPolicy()]);
+    }
+    return null;
+  }
+
+  private invalidatePreparedDownload(key: string | null): void {
+    if (key === null || key !== this.downloadKey()) return;
+    this.preparedKey = null;
+    this.failedKey = key;
+    this.recompute();
   }
 
   private notifyGate(listener: GateListener): void {

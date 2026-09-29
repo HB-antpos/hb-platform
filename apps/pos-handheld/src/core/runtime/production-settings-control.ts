@@ -19,6 +19,7 @@ import {
   type SettingsLinklyTerminalSelectionSnapshot,
   type SettingsSnapshot,
 } from "../../features/settings/settings-presenter";
+import type { PaymentMethodSettings } from "../../features/settings/payment-method-settings";
 import type { ReceiptPrinterSettings } from "../db/pos-settings-repository";
 import {
   derivePendingWorkBlockers,
@@ -44,6 +45,9 @@ export type ProductionSettingsControlDependencies = Readonly<{
   }>;
   paymentConfiguration: Readonly<{
     save(input: SettingsPaymentSettingsInput): Promise<void>;
+  }>;
+  paymentMethods?: Readonly<{
+    save(settings: PaymentMethodSettings): Promise<void>;
   }>;
   paymentConfigurationTransition: Readonly<{
     run<T>(operation: () => Promise<T>): Promise<T>;
@@ -142,6 +146,28 @@ export class ProductionSettingsControl implements SettingsControlPort {
 
   public loadSnapshot(signal: AbortSignal): Promise<SettingsSnapshot> {
     return abortChecked(signal, () => this.input.readSnapshot(signal));
+  }
+
+  public savePaymentMethodSettings(
+    settings: PaymentMethodSettings,
+    signal: AbortSignal,
+    assertActive: () => void = () => undefined,
+  ): Promise<SettingsDangerousActionResult> {
+    return this.input.paymentConfigurationTransition.run(async () => {
+      throwIfAborted(signal);
+      if (this.catalogRefreshBlocks()) return safetyBlocked();
+      const pending = await abortChecked(signal, () =>
+        this.input.pendingData.read(signal),
+      );
+      // 手动刷卡沿用支付配置门禁；普通耐久队列不影响配置保存。
+      const blockers = pendingDataBlockersForAction("change-payment-settings", pending);
+      if (blockers.length > 0) return pendingBlocked(blockers);
+      if (this.catalogRefreshBlocks()) return safetyBlocked();
+      if (!this.input.paymentMethods) throw new Error("PAYMENT_METHOD_SETTINGS_UNAVAILABLE");
+      assertActive();
+      await abortChecked(signal, () => this.input.paymentMethods!.save(settings));
+      return completed("change-payment-settings");
+    });
   }
 
   public getCatalogRefreshState(): CatalogRefreshState {
@@ -458,7 +484,7 @@ export class ProductionSettingsControl implements SettingsControlPort {
       pending = await abortChecked(signal, () =>
         this.input.pendingData.read(signal),
       );
-      blockers = pendingDataBlockersForAction(action, pending);
+      blockers = pendingDataBlockersForAction(action.kind, pending);
     } catch (error) {
       if (signal.aborted) throw error;
       return safetyBlocked();
@@ -644,13 +670,13 @@ export class ProductionSettingsControl implements SettingsControlPort {
 }
 
 function pendingDataBlockersForAction(
-  action: SettingsDangerousConfirmation,
+  kind: SettingsDangerousConfirmation["kind"],
   pending: SettingsPendingDataSnapshot,
 ): readonly PendingWorkBlocker[] {
   const blockers = derivePendingWorkBlockers(pending);
   if (
-    action.kind === "change-payment-settings" ||
-    action.kind === "pair-linkly"
+    kind === "change-payment-settings" ||
+    kind === "pair-linkly"
   ) {
     // 普通已耐久队列可在 reload 后继续处理；内存购物车、进行中的外部动作，
     // 以及仍依赖旧 provider/environment 的订单或恢复必须保持失败关闭。

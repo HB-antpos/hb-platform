@@ -50,7 +50,11 @@ export type ExpoOtaUpdateApplyResult =
         | "channel-override-failed"
         | "channel-clear-failed"
         | "update-check-failed";
-    }>;
+  }>;
+
+export type ExpoOtaUpdatePrepareResult =
+  | Readonly<{ state: "ready"; reason: null }>
+  | Exclude<ExpoOtaUpdateApplyResult, Readonly<{ state: "reloaded"; reason: null }>>;
 
 export type ExpoOtaBeforeReloadDecision =
   | true
@@ -68,6 +72,12 @@ export type ExpoOtaUpdatePortOptions = Readonly<{
  * runtimeVersion/update id 都必须匹配策略，任一不一致都不能 reload。
  */
 export class ExpoOtaUpdatePort {
+  private readyTarget: Readonly<{
+    identity: string;
+    channel: string;
+  }> | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   public constructor(private readonly options: ExpoOtaUpdatePortOptions) {
     if (!options.enabled) return;
     try {
@@ -85,6 +95,62 @@ export class ExpoOtaUpdatePort {
       | Promise<ExpoOtaBeforeReloadDecision> = () => true,
   ): Promise<ExpoOtaUpdateApplyResult> {
     const policy = normalizePosHandheldOtaUpdatePolicy(input);
+    return this.runExclusive(async () => {
+      const prepared = await this.prepareUnlocked(policy);
+      if (prepared.state !== "ready") return prepared;
+
+      const approval = beforeReload();
+      const selectionStillCurrent =
+        isPromiseLike(approval) ? await approval : approval;
+      if (selectionStillCurrent !== true) {
+        return Object.freeze({
+          state: "rejected",
+          reason: selectionStillCurrent,
+        });
+      }
+
+      const readyTarget = this.readyTarget;
+      if (!readyTarget || readyTarget.identity !== targetIdentity(policy)) {
+        return Object.freeze({
+          state: "rejected",
+          reason: "selection-changed",
+        });
+      }
+      this.readyTarget = null;
+      try {
+        this.options.updates.setUpdateRequestHeadersOverride({
+          "expo-channel-name": readyTarget.channel,
+        });
+        await this.options.updates.reloadAsync();
+        return Object.freeze({ state: "reloaded", reason: null });
+      } catch (error) {
+        try {
+          this.options.updates.setUpdateRequestHeadersOverride(null);
+        } catch {
+          throw new Error("OTA reload and channel restore both failed", {
+            cause: error,
+          });
+        }
+        throw error;
+      }
+    });
+  }
+
+  public prepare(
+    input: PosHandheldOtaUpdatePolicy,
+  ): Promise<ExpoOtaUpdatePrepareResult> {
+    const policy = normalizePosHandheldOtaUpdatePolicy(input);
+    return this.runExclusive(() => this.prepareUnlocked(policy));
+  }
+
+  private async prepareUnlocked(
+    policy: PosHandheldOtaUpdatePolicy,
+  ): Promise<ExpoOtaUpdatePrepareResult> {
+    const identity = targetIdentity(policy);
+    if (this.readyTarget?.identity === identity) {
+      return Object.freeze({ state: "ready", reason: null });
+    }
+    this.readyTarget = null;
     if (policy.state === "none") {
       return Object.freeze({ state: "unavailable", reason: "no-update" });
     }
@@ -105,10 +171,7 @@ export class ExpoOtaUpdatePort {
     }
 
     let readyToReload = false;
-    let preReloadResult: Exclude<
-      ExpoOtaUpdateApplyResult,
-      Readonly<{ state: "reloaded"; reason: null }>
-    > | null = null;
+    let preReloadResult: ExpoOtaUpdatePrepareResult | null = null;
     let channelClearFailed = false;
     try {
       try {
@@ -187,22 +250,22 @@ export class ExpoOtaUpdatePort {
     }
 
     if (readyToReload) {
-      const approval = beforeReload();
-      const selectionStillCurrent =
-        isPromiseLike(approval) ? await approval : approval;
-      if (selectionStillCurrent !== true) {
-        return Object.freeze({
-          state: "rejected",
-          reason: selectionStillCurrent,
-        });
-      }
-      await this.options.updates.reloadAsync();
-      return Object.freeze({ state: "reloaded", reason: null });
+      this.readyTarget = Object.freeze({ identity, channel: policy.channel });
+      return Object.freeze({ state: "ready", reason: null });
     }
     return Object.freeze({
       state: "rejected",
       reason: "manifest-invalid",
     });
+  }
+
+  private runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.operationTail;
+    let release!: () => void;
+    this.operationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return previous.then(operation).finally(release);
   }
 }
 
@@ -244,4 +307,17 @@ function verifyManifest(
     });
   }
   return null;
+}
+
+function targetIdentity(policy: PosHandheldOtaUpdatePolicy): string {
+  return JSON.stringify([
+    policy.platform,
+    policy.appKey,
+    policy.projectName,
+    policy.policyVersion,
+    policy.channel,
+    policy.runtimeVersion,
+    policy.updateId,
+    policy.updateGroupId,
+  ]);
 }

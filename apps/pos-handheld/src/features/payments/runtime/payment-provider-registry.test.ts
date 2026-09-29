@@ -161,6 +161,7 @@ test("缺失、非法、load 失败和运行时未知 provider 均 fail closed �
       "SQUARE_CONFIGURATION_INVALID",
       "LINKLY_CONFIGURATION_LOAD_FAILED",
       "VOUCHER_CONFIGURATION_DISABLED",
+      "MANUAL_CARD_CONFIGURATION_DISABLED",
     ],
   );
   assert.throws(

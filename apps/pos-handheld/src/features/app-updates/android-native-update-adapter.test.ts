@@ -66,9 +66,10 @@ test("Android 成功路径只下载一次，并把后端六项安装身份完整
     versionCode: 200,
   });
   assert.deepEqual(harness.events, [
-    "permission",
     "directory",
     "download",
+    "verify",
+    "permission",
     "install",
   ]);
   assert.equal(harness.downloads.length, 1);
@@ -94,6 +95,55 @@ test("Android 成功路径只下载一次，并把后端六项安装身份完整
   assert.deepEqual(harness.removals, []);
 });
 
+test("prepare 后复用已校验 APK；策略身份变化会重新下载且不查询安装权限", async () => {
+  const harness = createHarness();
+
+  await harness.adapter.prepare(androidDecision);
+  await harness.adapter.prepare(androidDecision);
+  assert.equal(harness.downloads.length, 1);
+  assert.deepEqual(harness.events, ["directory", "download", "verify"]);
+
+  await harness.adapter.prepare({
+    ...androidDecision,
+    policyVersion: "android-policy-201",
+    latestBuild: "201",
+    latestVersion: "2.0.1",
+    sha256: "c".repeat(64),
+  });
+  assert.equal(harness.downloads.length, 2);
+  assert.equal(harness.events.filter((event) => event === "permission").length, 0);
+});
+
+test("已有有效 APK 时冷启动 prepare 不联网", async () => {
+  const harness = createHarness({ existingPreparedFile: true });
+  await harness.adapter.prepare(androidDecision);
+  assert.equal(harness.downloads.length, 0);
+  assert.deepEqual(harness.events, ["directory", "verify"]);
+});
+
+test("不同策略并发 prepare 串行下载并各自保留最终目标", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const harness = createHarness({ downloadGate: gate });
+  const secondDecision = { ...androidDecision, latestBuild: "201", latestVersion: "2.0.1", sha256: "c".repeat(64) };
+  const first = harness.adapter.prepare(androidDecision);
+  while (harness.downloads.length === 0) await Promise.resolve();
+  const second = harness.adapter.prepare(secondDecision);
+  assert.equal(harness.downloads.length, 1);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(harness.downloads.length, 2);
+});
+
+test("prepare 失败后允许显式重试同一策略", async () => {
+  const harness = createHarness({ downloadErrors: [new Error("network failed")] });
+  await assert.rejects(() => harness.adapter.prepare(androidDecision), /network failed/u);
+  await harness.adapter.prepare(androidDecision);
+  assert.equal(harness.downloads.length, 2);
+});
+
 test("下载大小不符时 fail closed、删除临时文件且不调用 installer", async () => {
   const harness = createHarness({ downloadedSizeBytes: 2_047 });
   await assert.rejects(
@@ -107,7 +157,7 @@ test("下载大小不符时 fail closed、删除临时文件且不调用 install
   ]);
 });
 
-test("未知来源安装未授权时在下载前拒绝，绝不创建传输或重放", async () => {
+test("未知来源安装未授权时仍可完成后台下载，点击安装时才拒绝", async () => {
   const harness = createHarness({ installPermissionGranted: false });
 
   await assert.rejects(
@@ -118,8 +168,8 @@ test("未知来源安装未授权时在下载前拒绝，绝不创建传输或�
         "APP_INSTALL_PERMISSION_REQUIRED",
   );
 
-  assert.deepEqual(harness.events, ["permission"]);
-  assert.equal(harness.downloads.length, 0);
+  assert.deepEqual(harness.events, ["directory", "download", "verify", "permission"]);
+  assert.equal(harness.downloads.length, 1);
   assert.equal(harness.installs.length, 0);
   assert.deepEqual(harness.removals, []);
 });
@@ -165,9 +215,10 @@ test("native 流式拒绝 APK hash、package 或 signature 篡改时删除文件
       assert.equal(harness.installs.length, 1);
       assert.equal(harness.removals.length, 1);
       assert.deepEqual(harness.events, [
-        "permission",
         "directory",
         "download",
+        "verify",
+        "permission",
         "install",
         "remove",
       ]);
@@ -213,7 +264,6 @@ test("下载异常只尝试一次并清理已分配的 app-owned 目标", async 
   assert.equal(harness.downloads.length, 1);
   assert.equal(harness.installs.length, 0);
   assert.deepEqual(harness.events, [
-    "permission",
     "directory",
     "download",
     "remove",
@@ -233,7 +283,6 @@ test("native 返回未受信最终 URL 时不安装并清理目标", async () =>
   );
   assert.equal(harness.installs.length, 0);
   assert.deepEqual(harness.events, [
-    "permission",
     "directory",
     "download",
     "remove",
@@ -250,6 +299,9 @@ function createHarness(
     downloadedSizeBytes?: number;
     downloadedFinalUrl?: string;
     downloadError?: Error;
+    downloadErrors?: Error[];
+    downloadGate?: Promise<void>;
+    existingPreparedFile?: boolean;
     installerError?: Error;
     installPermissionGranted?: boolean;
   }> = {},
@@ -258,11 +310,18 @@ function createHarness(
   const downloads: DownloadInput[] = [];
   const removals: string[] = [];
   const installs: InstallCall[] = [];
+  const availableFiles = new Set<string>();
   const downloader: AndroidApkDownloadPort = {
     async download(input) {
       events.push("download");
       downloads.push(input);
       if (overrides.downloadError) throw overrides.downloadError;
+      if (overrides.downloadErrors?.length) {
+        const error = overrides.downloadErrors.shift();
+        if (error) throw error;
+      }
+      if (overrides.downloadGate) await overrides.downloadGate;
+      availableFiles.add(input.destinationFileUri);
       return {
         fileUri: input.destinationFileUri,
         sizeBytes: overrides.downloadedSizeBytes ?? input.expectedSizeBytes,
@@ -297,6 +356,12 @@ function createHarness(
         packageName: PACKAGE_NAME,
         versionCode: 200,
       };
+    },
+    async verifyDownloadedApk(input) {
+      if (!overrides.existingPreparedFile && !availableFiles.has(input.fileUri)) {
+        throw new Error("APK file is not prepared.");
+      }
+      events.push("verify");
     },
   };
   return {

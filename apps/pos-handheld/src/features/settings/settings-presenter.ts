@@ -25,6 +25,7 @@ import {
 } from "@hb/pos-domain";
 import type { CatalogRefreshState } from "@/features/catalog/catalog-refresh-coordinator";
 import { parseDeviceActivationCode } from "@/core/security/device-activation-code";
+import type { PaymentMethodSettings } from "./payment-method-settings";
 
 export type SettingsPane =
   "general" | "payments" | "peripherals" | "device" | "hardware";
@@ -192,6 +193,7 @@ export type SettingsSnapshot = Readonly<{
   hardware: SettingsHardwareSnapshot;
   linkly: SettingsPaymentProviderSnapshot;
   paymentProvider: SettingsPaymentProvider | null;
+  paymentMethods?: PaymentMethodSettings;
   printer: ReceiptPrinterSettings;
   square: SettingsSquareSnapshot;
 }>;
@@ -389,6 +391,7 @@ export interface SettingsControlPort {
   /** 只允许读取 health；配对必须经过 executeDangerousAction。 */
   linklySetup?: SettingsLinklySetupReadPort | undefined;
   loadSnapshot(signal: AbortSignal): Promise<SettingsSnapshot>;
+  savePaymentMethodSettings?(settings: PaymentMethodSettings, signal: AbortSignal, assertActive?: () => void): Promise<SettingsDangerousActionResult>;
   getCatalogRefreshState(): CatalogRefreshState;
   subscribeCatalogRefresh(listener: () => void): () => void;
   /** 凭据已不可逆提交后的脱敏终态通知；无 payload，必须由实现只发布一次。 */
@@ -536,6 +539,7 @@ export type SettingsState = Readonly<{
   linklySetup: SettingsLinklySetupState | null;
   paymentProvider: SettingsPaymentProvider | null;
   paymentProviderDraft: SettingsPaymentProvider | null;
+  paymentMethods: PaymentMethodSettings;
   printer: ReceiptPrinterSettings;
   printerDevices: readonly SettingsPrinterDevice[];
   square: SettingsSquareSnapshot;
@@ -543,6 +547,7 @@ export type SettingsState = Readonly<{
   squareDeviceCodeNameDraft: string;
   squareSetup: SettingsSquareSetupState;
   statusCode: SettingsStatusCode | null;
+  pendingWorkBlockers: readonly PendingWorkBlocker[];
   terminalNameDraft: string;
 }>;
 
@@ -571,6 +576,10 @@ export class SettingsPresenter {
   private linklySetupGeneration = 0;
   private actionInFlight: Promise<void> | null = null;
   private catalogRefreshInFlight: Promise<void> | null = null;
+  /** 最近一次已加载或成功保存的值；保存失败时恢复运行中的配置。 */
+  private lastSavedPaymentMethods: PaymentMethodSettings = Object.freeze({
+    useManualCard: false,
+  });
 
   public constructor(private readonly options: SettingsPresenterOptions) {
     const access = resolveSettingsAccess(options.permissions);
@@ -637,6 +646,10 @@ export class SettingsPresenter {
         await this.options.port.loadSnapshot(this.lifetime.signal),
       );
       if (!this.isCurrentLoad(generation)) return;
+      const paymentMethods = Object.freeze(
+        snapshot.paymentMethods ?? { useManualCard: false },
+      );
+      this.lastSavedPaymentMethods = paymentMethods;
       this.patch({
         apiBaseUrl: snapshot.apiBaseUrl,
         apiAddressDraft: snapshot.apiBaseUrl,
@@ -660,6 +673,7 @@ export class SettingsPresenter {
           : null,
         paymentProvider: snapshot.paymentProvider,
         paymentProviderDraft: snapshot.paymentProvider,
+        paymentMethods,
         printer: snapshot.printer,
         square: snapshot.square,
         squareDraft: {
@@ -1547,6 +1561,45 @@ export class SettingsPresenter {
     return Promise.resolve();
   }
 
+  public setUseManualCard(value: boolean): void {
+    if (!this.canEditPayments()) return;
+    this.patch({ paymentMethods: Object.freeze({ useManualCard: value }), statusCode: null });
+  }
+
+  public saveManualCardSettings(): Promise<void> {
+    if (!this.requirePermission(this.state.access.canConfigurePayments)) return Promise.resolve();
+    if (!this.options.port.savePaymentMethodSettings) {
+      this.patch({ statusCode: "payment-settings-save-failed" });
+      return Promise.resolve();
+    }
+    return this.runAction(async () => {
+      try {
+        const result = await this.options.port.savePaymentMethodSettings!(
+          this.state.paymentMethods,
+          this.lifetime.signal,
+        );
+        if (result.status === "blocked") {
+          this.patch({
+            paymentMethods: this.lastSavedPaymentMethods,
+            statusCode: result.reason === "pending-local-data" ? result.reason : "safety-check-failed",
+            pendingWorkBlockers: result.reason === "pending-local-data" ? result.blockers : [],
+          });
+          return;
+        }
+        if (result.status !== "completed" || result.kind !== "change-payment-settings") {
+          throw new Error("unexpected payment settings save result");
+        }
+        this.lastSavedPaymentMethods = this.state.paymentMethods;
+        this.patch({ statusCode: "payment-settings-saved" });
+      } catch {
+        this.patch({
+          paymentMethods: this.lastSavedPaymentMethods,
+          statusCode: "payment-settings-save-failed",
+        });
+      }
+    });
+  }
+
   public requestLinklyPair(pairCode: string): boolean;
   public requestLinklyPair(terminalId: string, pairCode: string): boolean;
   public requestLinklyPair(
@@ -2280,6 +2333,7 @@ export class SettingsPresenter {
         );
         if (result.status === "blocked") {
           this.patch({
+            pendingWorkBlockers: result.reason === "pending-local-data" ? result.blockers : [],
             ...(confirmation.kind === "change-api-address"
               ? { apiAddressDraft: this.state.apiBaseUrl }
               : {}),
@@ -2762,7 +2816,7 @@ export class SettingsPresenter {
   private runAction(action: () => Promise<void>): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     if (this.actionInFlight) return this.actionInFlight;
-    this.patch({ busy: true, statusCode: null });
+    this.patch({ busy: true, statusCode: null, pendingWorkBlockers: [] });
     const operation = action().finally(() => {
       if (this.actionInFlight === operation) {
         this.actionInFlight = null;
@@ -2917,6 +2971,7 @@ function initialState(
       : null,
     paymentProvider: null,
     paymentProviderDraft: null,
+    paymentMethods: Object.freeze({ useManualCard: false }),
     printer,
     printerDevices: Object.freeze([]),
     square,
@@ -2928,6 +2983,7 @@ function initialState(
     squareDeviceCodeNameDraft: "HBPOS Terminal",
     squareSetup: initialSquareSetupState(squareSetupAvailable),
     statusCode: access.canView ? null : "permission-required",
+    pendingWorkBlockers: Object.freeze([]),
     terminalNameDraft: "",
   });
 }

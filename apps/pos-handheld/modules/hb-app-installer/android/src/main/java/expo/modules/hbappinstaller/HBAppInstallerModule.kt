@@ -139,7 +139,6 @@ class HBAppInstallerModule : Module() {
 
     AsyncFunction("getDownloadDirectory") {
       val context = requireContext()
-      requireInstallPermission(context)
       val directory = downloadDirectory(context, persistent = false)
       ensureDirectory(directory)
       Uri.fromFile(directory.canonicalFile).toString()
@@ -147,7 +146,6 @@ class HBAppInstallerModule : Module() {
 
     AsyncFunction("downloadApk") { request: DownloadApkRequestRecord ->
       val context = requireContext()
-      requireInstallPermission(context)
       val metadata = request.validated()
       val directory = downloadDirectory(context, persistent = false)
       ensureDirectory(directory)
@@ -181,6 +179,45 @@ class HBAppInstallerModule : Module() {
     AsyncFunction("installVerifiedApk") { request: InstallVerifiedApkRequestRecord ->
       val context = requireContext()
       val metadata = request.validated()
+      val archiveInfo = validateDownloadedApk(context, metadata)
+      requireInstallPermission(context)
+
+      val apk = validatedLocalApk(context, metadata.fileUri)
+      val contentUri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.hbappinstaller.fileprovider",
+        apk,
+      )
+      val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(contentUri, APK_MIME_TYPE)
+        clipData = ClipData.newRawUri("HB POS update", contentUri)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      if (intent.resolveActivity(context.packageManager) == null) {
+        throw InstallerException(
+          "APP_INSTALLER_UNAVAILABLE",
+          "Android 系统安装器不可用。",
+        )
+      }
+      context.startActivity(intent)
+      mapOf(
+        "launched" to true,
+        "packageName" to archiveInfo.packageName,
+        "versionCode" to metadata.expectedVersionCode,
+      )
+    }
+
+    AsyncFunction("verifyDownloadedApk") { request: InstallVerifiedApkRequestRecord ->
+      validateDownloadedApk(requireContext(), request.validated())
+      Unit
+    }
+  }
+
+  private fun validateDownloadedApk(
+    context: Context,
+    metadata: InstallVerifiedApkMetadata,
+  ): PackageInfo {
       if (metadata.expectedPackageName != context.packageName) {
         throw InstallerException(
           "APP_INSTALL_PACKAGE_MISMATCH",
@@ -223,32 +260,7 @@ class HBAppInstallerModule : Module() {
         installed = readSignerEvidence(currentInfo, "当前应用"),
         archive = readSignerEvidence(archiveInfo, "APK"),
       )
-      requireInstallPermission(context)
-
-      val contentUri = FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.hbappinstaller.fileprovider",
-        apk,
-      )
-      val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(contentUri, APK_MIME_TYPE)
-        clipData = ClipData.newRawUri("HB POS update", contentUri)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      }
-      if (intent.resolveActivity(context.packageManager) == null) {
-        throw InstallerException(
-          "APP_INSTALLER_UNAVAILABLE",
-          "Android 系统安装器不可用。",
-        )
-      }
-      context.startActivity(intent)
-      mapOf(
-        "launched" to true,
-        "packageName" to archiveInfo.packageName,
-        "versionCode" to metadata.expectedVersionCode,
-      )
-    }
+      return archiveInfo
   }
 
   private fun requireContext(): Context =
@@ -279,7 +291,7 @@ class HBAppInstallerModule : Module() {
     }
     if (
       uri.scheme != "file" ||
-      uri.authority != null ||
+      !uri.authority.isNullOrEmpty() ||
       uri.query != null ||
       uri.fragment != null ||
       uri.path.isNullOrEmpty()
@@ -326,7 +338,7 @@ class HBAppInstallerModule : Module() {
     }
     if (
       uri.scheme != "file" ||
-      uri.authority != null ||
+      !uri.authority.isNullOrEmpty() ||
       uri.query != null ||
       uri.fragment != null ||
       uri.path.isNullOrEmpty()

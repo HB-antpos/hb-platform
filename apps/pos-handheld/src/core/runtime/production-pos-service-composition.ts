@@ -483,6 +483,7 @@ export type ProductionSettingsRuntimeConfiguration = Pick<
   | "readDevicePresentation"
   | "reportSnapshotFailure"
   | "paymentConfiguration"
+  | "paymentMethods"
   | "apiConfiguration"
   | "runtimeReload"
   | "device"

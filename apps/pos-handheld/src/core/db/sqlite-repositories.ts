@@ -1425,7 +1425,7 @@ class SqlitePaymentAttemptRepository implements PaymentAttemptRepositoryPort {
              HAVING COUNT(*) = 1
                 AND MAX(CASE WHEN t.order_guid = p.order_guid
                                   AND t.amount_cents = p.amount_cents
-                                  AND ((p.provider IN ('square', 'linkly-cloud') AND t.method = 'card')
+                                    AND ((p.provider IN ('square', 'linkly-cloud', 'manual-card') AND t.method = 'card')
                                     OR (p.provider = 'voucher' AND t.method = 'voucher'))
                              THEN 1 ELSE 0 END) = 1
            ))

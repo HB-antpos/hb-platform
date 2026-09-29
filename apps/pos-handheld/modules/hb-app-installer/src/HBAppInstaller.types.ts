@@ -28,3 +28,5 @@ export type InstallVerifiedApkResult = Readonly<{
   packageName: string;
   versionCode: number;
 }>;
+
+export type VerifyDownloadedApkRequest = InstallVerifiedApkRequest;
