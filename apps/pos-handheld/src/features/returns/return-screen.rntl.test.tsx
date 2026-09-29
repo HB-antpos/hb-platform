@@ -1,5 +1,5 @@
 import { expect, jest, test } from "@jest/globals";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 
 import type {
@@ -9,6 +9,7 @@ import type {
 import { ReturnPresenter } from "@hb/pos-domain/features/returns/return-presenter";
 import {
   RETURN_MIN_TOUCH_TARGET,
+  type ReturnHidScanTarget,
   ReturnScreen,
   parsePositiveAudCents,
 } from "./return-screen";
@@ -156,6 +157,53 @@ test("无小票 OPENITEM 走在线主管路径并提供中英文一致的 48px �
   expect(screen.queryByTestId("return-method-installment")).toBeNull();
   await fireEvent.press(screen.getByTestId("return-method-voucher"));
   expect(presenter.getState().preferredMethod).toBe("voucher");
+});
+
+test("无焦点扫码：查询区可见时按模式查单或加商品，手动聚焦输入框时让出扫码", async () => {
+  const execution = new ScreenExecution();
+  const presenter = createScreenPresenter(execution);
+  const loadReceipt = jest.spyOn(presenter, "loadReceipt");
+  const addNoReceiptProduct = jest.spyOn(presenter, "addNoReceiptProduct");
+  let target: ReturnHidScanTarget | null = null;
+  const renderCapture = (next: ReturnHidScanTarget) => {
+    target = next;
+    return null;
+  };
+  const currentTarget = (): ReturnHidScanTarget => {
+    if (!target) throw new Error("扫码目标未渲染");
+    return target;
+  };
+  const screen = await render(
+    <ReturnScreen
+      locale="en"
+      presenter={presenter}
+      renderHidScannerCapture={renderCapture}
+    />,
+  );
+
+  expect(currentTarget().enabled).toBe(true);
+  // 手动点进可见输入框时，由可见框直接接收扫码，隐藏捕获必须让出焦点。
+  await fireEvent(screen.getByTestId("return-order-query"), "focus");
+  expect(currentTarget().enabled).toBe(false);
+  await fireEvent(screen.getByTestId("return-order-query"), "blur");
+  expect(currentTarget().enabled).toBe(true);
+
+  await act(() => currentTarget().onScan("HB-1001"));
+  expect(loadReceipt).toHaveBeenCalledWith("HB-1001");
+  await waitFor(() =>
+    expect(screen.getByTestId("return-selection-footer")).toBeTruthy(),
+  );
+  // 订单已载入、查询区隐藏后不再接收无焦点扫码。
+  expect(currentTarget().enabled).toBe(false);
+
+  await act(async () => presenter.reset());
+  await fireEvent.press(screen.getByTestId("return-mode-no-receipt"));
+  await waitFor(() => expect(currentTarget().enabled).toBe(true));
+  await act(() => currentTarget().onScan("SKU-RETURN-1"));
+  expect(addNoReceiptProduct).toHaveBeenCalledWith("SKU-RETURN-1");
+  expect(presenter.getState().lines).toHaveLength(1);
+  // 无单模式连续扫码：加入商品后查询区仍在，继续接收下一次扫码。
+  expect(currentTarget().enabled).toBe(true);
 });
 
 test("OPENITEM 金额只接受正数且最多两位小数", () => {

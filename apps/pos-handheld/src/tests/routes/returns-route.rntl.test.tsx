@@ -11,6 +11,7 @@ import ReturnsRoute from "../../../app/returns";
 let mockRuntime: any;
 let mockActiveCashier: any;
 let mockReturnScreenProps: any;
+let mockRouteCaptureProps: any;
 let mockSearchParams: Record<string, string | string[]>;
 const mockClearActiveCashier = jest.fn();
 const mockSignOut = jest.fn();
@@ -59,6 +60,13 @@ jest.mock("@/features/cashier-login", () => ({
       clearActiveCashier: mockClearActiveCashier,
       signOut: mockSignOut,
     }),
+}));
+
+jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
+  RouteHidScannerCapture: (props: unknown) => {
+    mockRouteCaptureProps = props;
+    return null;
+  },
 }));
 
 jest.mock("@/features/returns", () => {
@@ -122,7 +130,21 @@ test("available 时保持稳定加载占位，异步创建窄 presenter 并在�
   expect(Object.keys(mockReturnScreenProps).sort()).toEqual([
     "onBack",
     "presenter",
+    "renderHidScannerCapture",
   ]);
+
+  // 路由把退货页的扫码目标挂到与销售页同一套隐藏 HID 捕获上。
+  const onScan = jest.fn<(value: string) => Promise<void>>();
+  const capture = await render(
+    mockReturnScreenProps.renderHidScannerCapture({ enabled: true, onScan }),
+  );
+  expect(mockRouteCaptureProps).toEqual({
+    context: "product-search",
+    enabled: true,
+    onScan,
+    path: "/returns",
+  });
+  await capture.unmount();
 
   mockReturnScreenProps.onBack();
   expect(mockRouterDismissTo).toHaveBeenCalledWith("/sales");
@@ -211,7 +233,7 @@ test("Returns.View 明确拒绝时退回既有销售页，不清空 cashier 或 
   expect(screen.queryByTestId("returns-route-error")).toBeNull();
 });
 
-test("route 只向 ReturnScreen 传 presenter/back，不读取或泄露私有依赖", async () => {
+test("route 只向 ReturnScreen 传 presenter/back/扫码捕获，不读取或泄露私有依赖", async () => {
   const privateAccess = jest.fn();
   const returns = {
     status: "available",
@@ -243,6 +265,7 @@ test("route 只向 ReturnScreen 传 presenter/back，不读取或泄露私有依
     presenter: expect.objectContaining({
       destroy: mockDestroyPresenter,
     }),
+    renderHidScannerCapture: expect.any(Function),
   });
 });
 
