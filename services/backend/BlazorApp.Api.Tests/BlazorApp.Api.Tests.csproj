@@ -30,6 +30,7 @@
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />
     <Compile Include="StorePriceUpdateTaskServiceTests.cs" />
     <Compile Include="WarehouseProductSupplyNoticeTests.cs" />
+    <Compile Include="WarehouseProductBatchUpdateSupplyNoticeTests.cs" />
     <Compile Include="StoreProductMaintenanceLookupTests.cs" />
     <Compile Include="StoreProductScanLabelAccessTests.cs" />
     <Compile Include="ProductChangeHistoryLegacyEntryPointTests.cs" />
