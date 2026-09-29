@@ -29,9 +29,23 @@ public static class ServiceRegistration
 
     public static IServiceCollection AddHbposClientServices(
         this IServiceCollection services,
-        AppStartupOptions startupOptions)
+        AppStartupOptions startupOptions,
+        StartupProgressTracker? startupProgress = null,
+        IStartupScreen? startupScreen = null)
     {
         services.AddSingleton(startupOptions);
+        // 启动页要最先出现，追踪器和启动页在服务容器建立前就已创建；这里登记同一个实例，
+        // 供主窗口上报启动阶段、启动更新提示弹框前让启动页让位。Preview 不显示启动页，两者都为空。
+        if (startupProgress is not null)
+        {
+            services.AddSingleton(startupProgress);
+        }
+
+        if (startupScreen is not null)
+        {
+            services.AddSingleton(startupScreen);
+        }
+
         services.AddSingleton<ILocalizationService, LocalizationService>();
         var initialApiAddress = GetInitialApiBaseAddress(startupOptions);
         services.AddSingleton(new ApiRuntimeEndpointState(initialApiAddress.AbsoluteUri));

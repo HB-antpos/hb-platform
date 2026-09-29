@@ -110,6 +110,48 @@ public sealed class LocalizationService : ILocalizationService
         return $"[[{key}]]";
     }
 
+    /// <summary>
+    /// 把界面语言名规范成受支持的语言；启动页在服务容器建立前就要按本机上次的语言显示。
+    /// </summary>
+    internal static bool TryGetSupportedCulture(string? cultureName, out CultureInfo culture)
+    {
+        if (!string.IsNullOrWhiteSpace(cultureName) &&
+            SupportedCultures.TryGetValue(cultureName.Trim(), out var supported))
+        {
+            culture = supported;
+            return true;
+        }
+
+        culture = SupportedCultures[DefaultCultureName];
+        return false;
+    }
+
+    /// <summary>不依赖实例状态的查词，供启动页线程按固定语言取文案。</summary>
+    internal static string Translate(string key, CultureInfo culture)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return "[[]]";
+        }
+
+        foreach (var resourceManager in ResourceManagers)
+        {
+            try
+            {
+                var value = resourceManager.GetString(key, culture);
+                if (value is not null)
+                {
+                    return value;
+                }
+            }
+            catch (MissingManifestResourceException)
+            {
+            }
+        }
+
+        return $"[[{key}]]";
+    }
+
     private static void ApplyThreadCulture(CultureInfo culture)
     {
         CultureInfo.DefaultThreadCurrentCulture = culture;

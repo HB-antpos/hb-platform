@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private readonly IAppShutdownCoordinator _appShutdownCoordinator;
     private readonly IColorThemeService? _colorThemeService;
     private readonly AppUpdateBackgroundCheckScheduler? _appUpdateBackgroundCheckScheduler;
+    private readonly StartupProgressTracker? _startupProgress;
     private HwndSource? _hwndSource;
     private Task? _startupInitializationTask;
     private Task _windowModeSaveTask = Task.CompletedTask;
@@ -64,7 +65,8 @@ public partial class MainWindow : Window
         IAppShutdownCoordinator? appShutdownCoordinator = null,
         IColorThemeService? colorThemeService = null,
         ColorThemeSwitcherViewModel? colorThemeSwitcher = null,
-        AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null)
+        AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null,
+        StartupProgressTracker? startupProgress = null)
     {
         _viewModel = viewModel;
         _startupOptions = startupOptions;
@@ -76,6 +78,7 @@ public partial class MainWindow : Window
         _appShutdownCoordinator = appShutdownCoordinator ?? new AppShutdownCoordinator();
         _colorThemeService = colorThemeService;
         _appUpdateBackgroundCheckScheduler = appUpdateBackgroundCheckScheduler;
+        _startupProgress = startupProgress;
 #if DEBUG
         _viewModel.AppUpdate.ConfigureDebugForceUpdateDismissed(ResumeStartupAfterDebugUpdateDismissalAsync);
 #endif
@@ -267,6 +270,7 @@ public partial class MainWindow : Window
             await _colorThemeService.InitializeAsync();
         }
 
+        _startupProgress?.Enter(StartupPhase.Update);
         var updateResult = await RunStartupAppUpdateCheckAsync();
         IsStartupBlockedByAppUpdate = !ShouldContinueStartupAfterAppUpdateCheck(updateResult);
         if (IsStartupBlockedByAppUpdate)
@@ -280,10 +284,13 @@ public partial class MainWindow : Window
 
     private async Task CompleteStartupInitializationAsync()
     {
+        _startupProgress?.Enter(StartupPhase.Device);
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
         await _rawScannerService.InitializeAsync();
         _rawScannerService.Start(hwnd);
-        await _viewModel.InitializeAsync(_startupOptions);
+        await _viewModel.InitializeAsync(
+            _startupOptions,
+            _startupProgress is null ? null : _startupProgress.Enter);
         if (!_startupOptions.PreviewMode)
         {
             // 中文注释：启动闸门放行后才开始运行期后台检查；Preview 与真实更新链完全隔离。

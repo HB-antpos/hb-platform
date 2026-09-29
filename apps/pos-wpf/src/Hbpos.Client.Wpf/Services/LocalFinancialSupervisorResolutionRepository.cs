@@ -294,7 +294,8 @@ internal sealed class FinancialSupervisorAuditReplayHostedService(
     {
         try
         {
-            await schema.InitializeAsync(cancellationToken);
+            // 与主界面初始化共用同一次表结构初始化，避免启动时对同一数据库完整跑两遍。
+            await schema.EnsureInitializedAsync(cancellationToken);
             await replay.ReplayPendingAsync(cancellationToken);
         }
         catch (Exception exception) when (
