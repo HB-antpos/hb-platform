@@ -199,7 +199,7 @@ test("刷卡订单可选现金代替退款：整单统一现金且仍绑定原�
   ]);
 });
 
-test("刷卡/现金额度暂不允许代金券代替：计划阶段明确拒绝，避免提交后卡在未知恢复", () => {
+test("礼券可代替单一刷卡/现金额度并绑定原额度；分期额度与多笔原支付被拒", () => {
   const context = receiptContext({
     lines: [
       {
@@ -216,36 +216,49 @@ test("刷卡/现金额度暂不允许代金券代替：计划阶段明确拒绝�
     "line-a",
     1,
   );
-  for (const original of ["card", "cash"] as const) {
-    assert.throws(
-      () =>
-        buildReturnRefundPlan({
-          sourceKind: "receipt",
-          originalOrderGuid: "order-a",
-          lines: selected,
-          capacities: [capacity(original, 5_000, false)],
-          online: true,
-          preferredMethod: "voucher",
-        }),
-      hasCode("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE"),
+  for (const original of ["card", "cash", "voucher"] as const) {
+    const plan = buildReturnRefundPlan({
+      sourceKind: "receipt",
+      originalOrderGuid: "order-a",
+      lines: selected,
+      capacities: [capacity(original, 5_000, false)],
+      online: true,
+      preferredMethod: "voucher",
+    });
+    assert.deepEqual(
+      plan.allocations.map((allocation) => [
+        allocation.method,
+        allocation.signedAmountCents,
+        allocation.originalCapacityId,
+      ]),
+      [["voucher", -5_000, `capacity-${original}`]],
     );
   }
 
-  // 原礼券额度按礼券原路退回仍然允许。
-  const voucherPlan = buildReturnRefundPlan({
-    sourceKind: "receipt",
-    originalOrderGuid: "order-a",
-    lines: selected,
-    capacities: [capacity("voucher", 5_000, false)],
-    online: true,
-    preferredMethod: "voucher",
-  });
-  assert.deepEqual(
-    voucherPlan.allocations.map((allocation) => [
-      allocation.method,
-      allocation.originalCapacityId,
-    ]),
-    [["voucher", "capacity-voucher"]],
+  assert.throws(
+    () =>
+      buildReturnRefundPlan({
+        sourceKind: "receipt",
+        originalOrderGuid: "order-a",
+        lines: selected,
+        capacities: [capacity("installment", 5_000, false)],
+        online: true,
+        preferredMethod: "voucher",
+      }),
+    hasCode("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE"),
+  );
+  // 多笔原支付会拆成多张券，退款券打印与同步只支持单张。
+  assert.throws(
+    () =>
+      buildReturnRefundPlan({
+        sourceKind: "receipt",
+        originalOrderGuid: "order-a",
+        lines: selected,
+        capacities: [capacity("cash", 2_000, false), capacity("card", 3_000, false)],
+        online: true,
+        preferredMethod: "voucher",
+      }),
+    hasCode("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE"),
   );
 });
 

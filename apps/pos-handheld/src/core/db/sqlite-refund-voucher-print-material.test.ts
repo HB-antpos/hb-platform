@@ -261,6 +261,29 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
   });
 });
 
+test("礼券代替刷卡/现金额度签发的退款券同样可恢复；分期或带 context 的现金额度失败关闭", async (t) => {
+  const cases = [
+    { name: "代替刷卡额度", method: "card", keepContext: true, expected: true },
+    { name: "代替现金额度（无 context）", method: "cash", keepContext: false, expected: true },
+    { name: "现金额度却带 context", method: "cash", keepContext: true, expected: false },
+    { name: "分期额度", method: "installment", keepContext: true, expected: false },
+  ] as const;
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withFixture(async ({ adapter }) => {
+        const resolved = await adapter.resolveApprovedRefundVoucher(
+          "return-action-1",
+          "return-order-1",
+        );
+        assert.equal(resolved !== null, testCase.expected);
+        if (testCase.expected) {
+          assert.equal(resolved?.voucherCode, "REFUND-VOUCHER-001");
+        }
+      }, { method: testCase.method, context: testCase.keepContext });
+    });
+  }
+});
+
 test("已解密 JSON/绑定损坏使用 typed integrity error", async (t) => {
   await t.test("JSON 损坏", async () => {
     await withFixture(async ({ adapter, connection }) => {
@@ -373,9 +396,10 @@ async function withFixture(
     connection: SqliteConnectionPort;
     adapter: SqliteRefundVoucherPrintMaterial;
   }>) => Promise<void>,
+  capacity: CapacitySeed = { method: "voucher", context: true },
 ): Promise<void> {
   await withUnboundFixture(async (fixture) => {
-    await seedValidReturnIdentity(fixture.connection);
+    await seedValidReturnIdentity(fixture.connection, capacity);
     await operation(fixture);
   });
 }
@@ -543,8 +567,14 @@ async function seedCrossBoundFulfilmentPlan(
   );
 }
 
+type CapacitySeed = Readonly<{
+  method: "voucher" | "card" | "cash" | "installment";
+  context: boolean;
+}>;
+
 async function seedValidReturnIdentity(
   connection: SqliteConnectionPort,
+  capacity: CapacitySeed = { method: "voucher", context: true },
 ): Promise<void> {
   await connection.run(
     `INSERT INTO return_tender_capacities (
@@ -553,10 +583,10 @@ async function seedValidReturnIdentity(
       protected_context_ciphertext, observed_at_iso,
       created_at_iso, updated_at_iso
     ) VALUES (
-      'voucher-capacity-1', 'original-order-1', 'voucher',
+      'voucher-capacity-1', 'original-order-1', ?,
       500, 0, ?, ?, ?, ?
     )`,
-    [new Uint8Array([1]), NOW, NOW, NOW],
+    [capacity.method, capacity.context ? new Uint8Array([1]) : null, NOW, NOW, NOW],
   );
   await connection.run(
     `INSERT INTO return_actions (

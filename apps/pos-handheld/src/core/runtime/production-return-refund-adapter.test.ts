@@ -81,6 +81,39 @@ test("Voucher 先耐久 prepareRefund，再以空 provider reference 创建退�
   assert.equal(JSON.stringify(payments.prepareInputs[0]).includes("voucher-original-secret"), false);
 });
 
+test("礼券代替刷卡/现金额度：签发新券且不读取原支付凭据；分期额度与刷卡退现金额度被拒", async () => {
+  for (const [capacityMethod, context] of [
+    ["card", { version: 1, provider: "manual-card" }],
+    ["card", squareContext()],
+    ["cash", null],
+  ] as const) {
+    const payments = new FakePayments(attempt("Created", "voucher"));
+    const voucher = new FakeVoucherPreparation();
+    const vault = new FakeVault(capacityMethod, context);
+    const adapter = createAdapter({ payments, voucher, method: "voucher", vault });
+
+    await adapter.prepareAttempt({ ...input(), method: "voucher" });
+
+    assert.deepEqual(voucher.inputs, [{
+      actionId: "external-1", orderGuid: returnOrderGuid, refundReason: "RETURN_REFUND",
+    }]);
+    assert.equal(payments.prepareInputs[0]?.provider, "voucher");
+    assert.equal(payments.prepareInputs[0]?.amount.cents, -500);
+    assert.equal(vault.contextReads, 0);
+  }
+
+  const rejected = [
+    createAdapter({ method: "voucher", capacityMethod: "installment", context: null }),
+    createAdapter({ method: "card", capacityMethod: "cash", context: null }),
+  ];
+  for (const adapter of rejected) {
+    await assert.rejects(
+      () => adapter.prepareAttempt({ ...input(), method: adapter === rejected[0] ? "voucher" : "card" }),
+      (error: unknown) => (error as { code?: unknown }).code === "REFUND_CAPACITY_MISMATCH",
+    );
+  }
+});
+
 test("submit/recover 只使用已绑定 attempt，并如实映射 Approved、Cancelled 与 Unknown", async () => {
   const payments = new FakePayments(attempt("Created", "square"));
   payments.startResult = result(attempt("Approved", "square"));
@@ -142,22 +175,27 @@ function createAdapter(inputOverrides: Partial<{
   payments: FakePayments;
   voucher: FakeVoucherPreparation;
   method: "card" | "voucher";
-  context: Readonly<Record<string, unknown>>;
+  capacityMethod: CapacityMethod;
+  vault: FakeVault;
+  context: Readonly<Record<string, unknown>> | null;
 }> = {}): ProductionReturnRefundAdapter {
   const method = inputOverrides.method ?? "card";
-  const context = inputOverrides.context ?? squareContext();
+  const context = inputOverrides.context === undefined ? squareContext() : inputOverrides.context;
   return new ProductionReturnRefundAdapter({
     paymentAttempts: inputOverrides.payments ?? new FakePayments(attempt("Created", method === "voucher" ? "voucher" : "square")),
-    capacityVault: new FakeVault(method, context),
+    capacityVault: inputOverrides.vault ?? new FakeVault(inputOverrides.capacityMethod ?? method, context),
     providers: providers(),
     voucherPreparation: inputOverrides.voucher ?? new FakeVoucherPreparation(),
   });
 }
 
+type CapacityMethod = "card" | "voucher" | "cash" | "installment";
+
 class FakeVault implements ReturnCapacityVaultReadPort {
-  public constructor(private readonly method: "card" | "voucher", private readonly context: Readonly<Record<string, unknown>>) {}
+  public contextReads = 0;
+  public constructor(private readonly method: CapacityMethod, private readonly context: Readonly<Record<string, unknown>> | null) {}
   public async get() { return { capacityId: "capacity-1", originalOrderGuid, method: this.method, originalAmountCents: 500, remainingAmountCents: 500, observedAtIso: "2026-07-28T00:00:00.000Z" } as const; }
-  public async resolveProtectedContext() { return this.context; }
+  public async resolveProtectedContext() { this.contextReads += 1; return this.context; }
 }
 
 function providers(): PaymentProviderRegistryPort {

@@ -511,6 +511,70 @@ test("Voucher purchase/refund 仅从 approved 受保护状态恢复券码和 tok
   });
 });
 
+test("礼券代替刷卡/现金额度的退款可同步；刷卡退款绑定现金额度仍失败关闭", async () => {
+  for (const [capacityMethod, protectedContext] of [
+    ["card", { version: 1, provider: "manual-card" }],
+    ["cash", null],
+  ] as const) {
+    await withDatabase(async (connection) => {
+      const refund = await seedRefundTender(connection, {
+        orderGuid: "order-voucher-substitute",
+        tenderGuid: "tender-voucher-substitute",
+        attemptId: "attempt-voucher-substitute",
+        provider: "voucher",
+        method: "voucher",
+        capacityMethod,
+        amountCents: -250,
+        syncProvenance: DEFAULT_LINE_SYNC_PROVENANCE,
+        protectedContext,
+      });
+      await createVoucherTokens(connection, 3).save({
+        attemptId: "attempt-voucher-substitute",
+        idempotencyKey: "idem-attempt-voucher-substitute",
+        orderGuid: "order-voucher-substitute",
+        operation: "refund",
+        phase: "approved",
+        storeCode: "S1",
+        cashierId: "cashier-1",
+        voucherCode: "VOUCHER-SUBSTITUTE-1",
+        reservationToken: null,
+        amountCents: -250,
+        expiresAtIso: EXPIRES,
+        reason: "RETURN_REFUND",
+      });
+      const resolved = await refund.resolver.resolve(
+        await readOrdinaryOrder(connection, "order-voucher-substitute"),
+        null,
+      );
+      assert.deepEqual(
+        resolved.tenders.map(({ method, reference }) => ({ method, reference })),
+        [{ method: "voucher", reference: "VOUCHER-SUBSTITUTE-1" }],
+      );
+    });
+  }
+
+  await withDatabase(async (connection) => {
+    const refund = await seedRefundTender(connection, {
+      orderGuid: "order-card-on-cash",
+      tenderGuid: "tender-card-on-cash",
+      attemptId: "attempt-card-on-cash",
+      provider: "square",
+      method: "card",
+      capacityMethod: "cash",
+      amountCents: -250,
+      syncProvenance: DEFAULT_LINE_SYNC_PROVENANCE,
+      paymentId: "payment-card-on-cash",
+      responseCode: "refund-card-on-cash",
+      protectedContext: null,
+    });
+    await assertMaterialRejects(
+      refund.resolver,
+      await readOrdinaryOrder(connection, "order-card-on-cash"),
+      "ORDER_SYNC_RETURN_BINDING_MISMATCH",
+    );
+  });
+});
+
 test("M16 voucher reversal：普通读取保留完整账本，同步只在严格 Reversed 事实下成对剔除", async () => {
   await withDatabase(async (connection) => {
     const fixture = await seedApprovedVoucherPurchase(
@@ -1782,7 +1846,9 @@ async function seedRefundTender(
     attemptId: string;
     provider: "square" | "linkly-cloud" | "voucher";
     method: "card" | "voucher";
-    protectedContext: Readonly<Record<string, unknown>>;
+    protectedContext: Readonly<Record<string, unknown>> | null;
+    /** 原额度方式；缺省与退款方式相同（原路退款）。 */
+    capacityMethod?: "cash" | "card" | "voucher";
   }>,
 ): Promise<Readonly<{ resolver: SqliteOrderSyncMaterialResolver }>> {
   await seedOrderTender(connection, { ...input, operation: "refund" });
@@ -1796,7 +1862,7 @@ async function seedRefundTender(
   await vault.seedOrLoad({
     capacityId,
     originalOrderGuid,
-    method: input.method,
+    method: input.capacityMethod ?? input.method,
     originalAmountCents: -input.amountCents,
     remainingAmountCents: 0,
     protectedContext: input.protectedContext,
