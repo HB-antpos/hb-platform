@@ -18,8 +18,29 @@ internal sealed class ProductPickerPageQueryStore(
 {
     private readonly ISqlSugarClient _db = context.Db;
 
-    internal async Task<PagedListReactDto<StoreOrderProductDto>> GetPagedListAsync(
+    internal Task<PagedListReactDto<StoreOrderProductDto>> GetPagedListAsync(
         ProductPickerPageInput input
+    )
+    {
+        return GetPagedListCoreAsync(
+            input,
+            useSqlServerNativeQuery: ProductPickerSqlServerPageQuery.IsSupported(_db)
+        );
+    }
+
+    /// <summary>
+    /// 强制走改造前的 SqlSugar 写法。仅作为原生 SQL 的语义基准，供 SQL Server 集成测试与生产只读对照使用。
+    /// </summary>
+    internal Task<PagedListReactDto<StoreOrderProductDto>> GetPagedListWithSqlSugarAsync(
+        ProductPickerPageInput input
+    )
+    {
+        return GetPagedListCoreAsync(input, useSqlServerNativeQuery: false);
+    }
+
+    private async Task<PagedListReactDto<StoreOrderProductDto>> GetPagedListCoreAsync(
+        ProductPickerPageInput input,
+        bool useSqlServerNativeQuery
     )
     {
         var filter = input.Filter;
@@ -38,27 +59,146 @@ internal sealed class ProductPickerPageQueryStore(
 
         if (ProductPickerRules.IsDefaultHomePageProductFilter(filter, normalizedGrades))
         {
-            return await GetDefaultHomePageProductPageAsync(filter, normalizedGrades);
+            return await GetDefaultHomePageProductPageAsync(
+                filter,
+                normalizedGrades,
+                useSqlServerNativeQuery
+            );
         }
 
         var includeInactiveForQuickAdd =
             ProductPickerRules.ShouldIncludeInactiveWarehouseProductsForQuickAdd(filter);
-        var query = ProductPickerQueryBuilder.CreateDefaultWarehouseProductQuery(
-            _db,
-            includeInactiveForQuickAdd
-        );
         var searchFilter = ProductPickerRules.CreateProductSearchFilter(filter);
-        var categoryFilterCount = 0;
+        List<string>? categoryIds = null;
 
         if (!string.IsNullOrWhiteSpace(filter.CategoryGUID))
         {
-            var categoryIds = GetAllSubCategoryIds(filter.CategoryGUID);
-            categoryFilterCount = categoryIds.Count;
+            categoryIds = GetAllSubCategoryIds(filter.CategoryGUID);
             logger.LogInformation(
                 "Category Filter: Found {Count} categories (including self) for root {CategoryGUID}",
                 categoryIds.Count,
                 filter.CategoryGUID
             );
+        }
+
+        var localSupplierCode = string.IsNullOrWhiteSpace(filter.LocalSupplierCode)
+            ? null
+            : filter.LocalSupplierCode.Trim();
+        var domesticSupplierCode = string.IsNullOrWhiteSpace(filter.SupplierCode)
+            ? null
+            : filter.SupplierCode.Trim();
+        var locationProductCodes = await LookupManualLocationProductCodesAsync(filter);
+
+        var countStopwatch = new Stopwatch();
+        var listStopwatch = new Stopwatch();
+        int total;
+        List<StoreOrderProductDto> items;
+        string queryPath;
+        if (useSqlServerNativeQuery)
+        {
+            // SQL Server 走原生单条查询（计数与分页合一）；语义与下方 SqlSugar 写法逐条对应，
+            // 由 SQL Server 集成测试对照两条路径的 total 与商品编码序列。
+            listStopwatch.Start();
+            var nativeResult = await ProductPickerSqlServerPageQuery.QueryAsync(
+                _db,
+                new ProductPickerSqlServerPageSpec(
+                    includeInactiveForQuickAdd,
+                    categoryIds,
+                    localSupplierCode,
+                    domesticSupplierCode,
+                    searchFilter,
+                    locationProductCodes,
+                    normalizedGrades,
+                    filter.ColumnFilters,
+                    filter.SortBy,
+                    filter.SortDescending,
+                    filter.PageNumber,
+                    filter.PageSize
+                )
+            );
+            listStopwatch.Stop();
+            total = nativeResult.Total;
+            items = nativeResult.Items;
+            queryPath = nativeResult.UsedCountFallback ? "sqlserver-native+count" : "sqlserver-native";
+        }
+        else
+        {
+            var query = BuildLegacyWarehouseProductPageQuery(
+                filter,
+                normalizedGrades,
+                includeInactiveForQuickAdd,
+                searchFilter,
+                categoryIds,
+                localSupplierCode,
+                domesticSupplierCode,
+                locationProductCodes
+            );
+
+            countStopwatch.Start();
+            total = await query.Clone().CountAsync();
+            countStopwatch.Stop();
+
+            listStopwatch.Start();
+            items = await QueryWarehouseProductItemsByPagedProductCodesAsync(query, filter);
+            listStopwatch.Stop();
+            queryPath = "sqlsugar";
+        }
+
+        var gradeStopwatch = Stopwatch.StartNew();
+        await productEnricher.PopulateGradesAsync(_db, items, normalizedGrades);
+        gradeStopwatch.Stop();
+
+        totalStopwatch.Stop();
+        logger.LogInformation(
+            "[shop-home-perf] stage=products.service.done pageNumber={PageNumber} pageSize={PageSize} category={CategoryGUID} categoryCount={CategoryCount} searchMode={SearchMode} keywordLength={KeywordLength} gradeCount={GradeCount} total={Total} itemCount={ItemCount} countMs={CountMs} listMs={ListMs} gradeMs={GradeMs} totalMs={TotalMs} queryPath={QueryPath}",
+            filter.PageNumber,
+            filter.PageSize,
+            filter.CategoryGUID,
+            categoryIds?.Count ?? 0,
+            searchFilter.Mode,
+            filter.ItemNumber?.Length ?? 0,
+            normalizedGrades.Count,
+            total,
+            items.Count,
+            countStopwatch.ElapsedMilliseconds,
+            listStopwatch.ElapsedMilliseconds,
+            gradeStopwatch.ElapsedMilliseconds,
+            totalStopwatch.ElapsedMilliseconds,
+            queryPath
+        );
+
+        return new PagedListReactDto<StoreOrderProductDto>
+        {
+            Items = items,
+            Total = total,
+            PageNumber = filter.PageNumber,
+            PageSize = filter.PageSize,
+        };
+    }
+
+    /// <summary>
+    /// 非 SQL Server（SQLite 测试库等）沿用的 SqlSugar 写法，也是原生 SQL 的语义基准；
+    /// Where 的叠加顺序保持改造前不变。
+    /// </summary>
+    private ISugarQueryable<Product, WarehouseProduct, WarehouseCategory, HBLocalSupplier>
+        BuildLegacyWarehouseProductPageQuery(
+            StoreOrderFilterDto filter,
+            List<string> normalizedGrades,
+            bool includeInactiveForQuickAdd,
+            ProductPickerSearchFilter searchFilter,
+            List<string>? categoryIds,
+            string? localSupplierCode,
+            string? domesticSupplierCode,
+            List<string> locationProductCodes
+        )
+    {
+        var query = ProductPickerQueryBuilder.CreateDefaultWarehouseProductQuery(
+            _db,
+            includeInactiveForQuickAdd
+        );
+
+        if (categoryIds != null)
+        {
             query = query.Where(
                 (product, warehouseProduct, category, supplier) =>
                     product.WarehouseCategoryGUID != null
@@ -66,31 +206,28 @@ internal sealed class ProductPickerPageQueryStore(
             );
         }
 
-        if (!string.IsNullOrWhiteSpace(filter.LocalSupplierCode))
+        if (localSupplierCode != null)
         {
-            var supplierCode = filter.LocalSupplierCode.Trim();
             query = query.Where(
                 (product, warehouseProduct, category, supplier) =>
-                    product.LocalSupplierCode == supplierCode
+                    product.LocalSupplierCode == localSupplierCode
             );
         }
 
-        if (!string.IsNullOrWhiteSpace(filter.SupplierCode))
+        if (domesticSupplierCode != null)
         {
-            var supplierCode = filter.SupplierCode.Trim();
             query = query.Where(
                 (product, warehouseProduct, category, supplier) =>
                     SqlFunc.Subqueryable<DomesticProduct>()
                         .Where(domesticProduct =>
                             domesticProduct.ProductCode == product.ProductCode
-                            && domesticProduct.SupplierCode == supplierCode
+                            && domesticProduct.SupplierCode == domesticSupplierCode
                             && !domesticProduct.IsDeleted
                         )
                         .Any()
             );
         }
 
-        var locationProductCodes = await LookupManualLocationProductCodesAsync(filter);
         query = ProductPickerQueryBuilder.ApplyWarehouseProductSearch(
             query,
             searchFilter,
@@ -115,45 +252,7 @@ internal sealed class ProductPickerPageQueryStore(
             query,
             filter.ColumnFilters
         );
-        query = ProductPickerQueryBuilder.ApplyWarehouseProductSort(query, filter);
-
-        var countStopwatch = Stopwatch.StartNew();
-        var total = await query.Clone().CountAsync();
-        countStopwatch.Stop();
-
-        var listStopwatch = Stopwatch.StartNew();
-        var items = await QueryWarehouseProductItemsByPagedProductCodesAsync(query, filter);
-        listStopwatch.Stop();
-
-        var gradeStopwatch = Stopwatch.StartNew();
-        await productEnricher.PopulateGradesAsync(_db, items, normalizedGrades);
-        gradeStopwatch.Stop();
-
-        totalStopwatch.Stop();
-        logger.LogInformation(
-            "[shop-home-perf] stage=products.service.done pageNumber={PageNumber} pageSize={PageSize} category={CategoryGUID} categoryCount={CategoryCount} searchMode={SearchMode} keywordLength={KeywordLength} gradeCount={GradeCount} total={Total} itemCount={ItemCount} countMs={CountMs} listMs={ListMs} gradeMs={GradeMs} totalMs={TotalMs}",
-            filter.PageNumber,
-            filter.PageSize,
-            filter.CategoryGUID,
-            categoryFilterCount,
-            searchFilter.Mode,
-            filter.ItemNumber?.Length ?? 0,
-            normalizedGrades.Count,
-            total,
-            items.Count,
-            countStopwatch.ElapsedMilliseconds,
-            listStopwatch.ElapsedMilliseconds,
-            gradeStopwatch.ElapsedMilliseconds,
-            totalStopwatch.ElapsedMilliseconds
-        );
-
-        return new PagedListReactDto<StoreOrderProductDto>
-        {
-            Items = items,
-            Total = total,
-            PageNumber = filter.PageNumber,
-            PageSize = filter.PageSize,
-        };
+        return ProductPickerQueryBuilder.ApplyWarehouseProductSort(query, filter);
     }
 
     internal async Task<PagedListReactDto<StoreOrderProductDto>> GetHomePageAsync(
@@ -175,20 +274,34 @@ internal sealed class ProductPickerPageQueryStore(
                 : ProductPickerRules.HomePageQueryCommandTimeoutSeconds;
 
             var total = 0;
-            if (input.Mode == ProductPickerHomePageMode.AccurateCache)
+            List<StoreOrderProductDto> items;
+            if (ProductPickerSqlServerPageQuery.IsSupported(homePageDb))
             {
-                total = await ProductPickerQueryBuilder
-                    .CreateDefaultWarehouseProductBaseQuery(homePageDb)
-                    .CountAsync();
-                cancellationToken.ThrowIfCancellationRequested();
+                // 原生查询的 COUNT(1) OVER() 就是准确首页总数，不再单独计数。
+                var nativeResult = await ProductPickerSqlServerPageQuery.QueryAsync(
+                    homePageDb,
+                    CreateDefaultHomePageSpec(pageNumber: 1, input.PageSize)
+                );
+                total = nativeResult.Total;
+                items = nativeResult.Items;
             }
+            else
+            {
+                if (input.Mode == ProductPickerHomePageMode.AccurateCache)
+                {
+                    total = await ProductPickerQueryBuilder
+                        .CreateDefaultWarehouseProductBaseQuery(homePageDb)
+                        .CountAsync();
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
 
-            var items = await QueryDefaultHomePageProductItemsAsync(
-                homePageDb,
-                pageNumber: 1,
-                input.PageSize,
-                cancellationToken
-            );
+                items = await QueryDefaultHomePageProductItemsAsync(
+                    homePageDb,
+                    pageNumber: 1,
+                    input.PageSize,
+                    cancellationToken
+                );
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
             await productEnricher.PopulateGradesAsync(
@@ -478,23 +591,42 @@ internal sealed class ProductPickerPageQueryStore(
     private async Task<PagedListReactDto<StoreOrderProductDto>>
         GetDefaultHomePageProductPageAsync(
             StoreOrderFilterDto filter,
-            List<string> normalizedGrades
+            List<string> normalizedGrades,
+            bool useSqlServerNativeQuery
         )
     {
         var totalStopwatch = Stopwatch.StartNew();
-        var countStopwatch = Stopwatch.StartNew();
-        var total = await ProductPickerQueryBuilder
-            .CreateDefaultWarehouseProductBaseQuery(_db)
-            .CountAsync();
-        countStopwatch.Stop();
+        var countStopwatch = new Stopwatch();
+        var listStopwatch = new Stopwatch();
+        int total;
+        List<StoreOrderProductDto> items;
+        if (useSqlServerNativeQuery)
+        {
+            listStopwatch.Start();
+            var nativeResult = await ProductPickerSqlServerPageQuery.QueryAsync(
+                _db,
+                CreateDefaultHomePageSpec(filter.PageNumber, filter.PageSize)
+            );
+            listStopwatch.Stop();
+            total = nativeResult.Total;
+            items = nativeResult.Items;
+        }
+        else
+        {
+            countStopwatch.Start();
+            total = await ProductPickerQueryBuilder
+                .CreateDefaultWarehouseProductBaseQuery(_db)
+                .CountAsync();
+            countStopwatch.Stop();
 
-        var listStopwatch = Stopwatch.StartNew();
-        var items = await QueryDefaultHomePageProductItemsAsync(
-            _db,
-            filter.PageNumber,
-            filter.PageSize
-        );
-        listStopwatch.Stop();
+            listStopwatch.Start();
+            items = await QueryDefaultHomePageProductItemsAsync(
+                _db,
+                filter.PageNumber,
+                filter.PageSize
+            );
+            listStopwatch.Stop();
+        }
 
         var gradeStopwatch = Stopwatch.StartNew();
         await productEnricher.PopulateGradesAsync(_db, items, normalizedGrades);
@@ -523,6 +655,29 @@ internal sealed class ProductPickerPageQueryStore(
             PageNumber = filter.PageNumber,
             PageSize = filter.PageSize,
         };
+    }
+
+    private static ProductPickerSqlServerPageSpec CreateDefaultHomePageSpec(
+        int pageNumber,
+        int pageSize
+    )
+    {
+        // 首页 = 无任何筛选的默认排序（货号升序）。旧写法只按货号排序，同货号时顺序不确定；
+        // 这里与非首页默认排序一样追加商品编码作全序（生产在售商品货号无重复，结果一致）。
+        return new ProductPickerSqlServerPageSpec(
+            IncludeInactiveWarehouseProducts: false,
+            CategoryIds: null,
+            LocalSupplierCode: null,
+            SupplierCode: null,
+            Search: new ProductPickerSearchFilter(null, null, null, "none"),
+            LocationProductCodes: Array.Empty<string>(),
+            Grades: Array.Empty<string>(),
+            ColumnFilters: null,
+            SortBy: null,
+            SortDescending: false,
+            PageNumber: pageNumber,
+            PageSize: pageSize
+        );
     }
 
     private async Task<List<StoreOrderProductDto>> QueryDefaultHomePageProductItemsAsync(

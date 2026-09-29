@@ -58,6 +58,13 @@ const SOUND_PATTERNS: Record<GeneratedToneKey, ToneStep[]> = {
     { frequency: 0, durationMs: 70 },
     { frequency: 640, durationMs: 170, volume: 0.8 },
   ],
+  // 暂停供货：由高到低两个长音。节奏（两长 vs 三短）与走向（下降 vs 平）都和「找不到」不同，
+  // 两个频率都高于 400Hz，Zebra 小喇叭能清楚放出。
+  supply_paused: [
+    { frequency: 1047, durationMs: 220, volume: 0.8 },
+    { frequency: 0, durationMs: 60 },
+    { frequency: 698, durationMs: 320, volume: 0.8 },
+  ],
   blocked: [
     { frequency: 440, durationMs: 180, volume: 0.32 },
   ],

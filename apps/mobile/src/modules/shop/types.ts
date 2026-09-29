@@ -81,6 +81,13 @@ export interface StoreOrderDynamicData {
 export interface StoreOrderDynamicDataRequest {
   storeCode: string;
   productCodes: string[];
+  /** 移动端不显示「来货后销量」，传 false 让后端跳过销量统计查询。 */
+  includeSales?: boolean;
+}
+
+/** 商品分页结果；后端支持时会顺带返回本页动态数据，省掉第二次串行请求。 */
+export interface StoreOrderProductPageResult extends StoreOrderProductListResult {
+  dynamicData?: StoreOrderDynamicData[];
 }
 
 export interface StoreOrderCategoryNode {

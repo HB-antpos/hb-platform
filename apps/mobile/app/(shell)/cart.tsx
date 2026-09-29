@@ -4,7 +4,6 @@ import {
   Alert,
   Animated,
   FlatList,
-  Image,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -14,13 +13,8 @@ import {
 } from "react-native";
 import {
   Button,
-  Card,
-  Chip,
-  IconButton,
-  Modal,
-  Portal,
+  Menu,
   Searchbar,
-  Snackbar,
   Text,
   TextInput as PaperTextInput,
 } from "react-native-paper";
@@ -28,11 +22,30 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { type Href, useRouter } from "expo-router";
 import { useIsMutating, useQueryClient } from "@tanstack/react-query";
+import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { ScanResultPicker } from "@/components/ui/ScanResultPicker";
+import { OrderBarPrimaryButton, OrderBottomBar } from "@/components/order/OrderBottomBar";
+import { OrderStepper } from "@/components/order/OrderStepper";
+import { GradeTag, OrderStatusTag, OrderThumbnail } from "@/components/order/OrderTags";
+import { QuantityPresetRow } from "@/components/order/QuantityPresetRow";
+import {
+  mapScanFeedbackToNotice,
+  ORDER_NOTICE_DURATION_MS,
+  type OrderNotice,
+  type OrderNoticeTone,
+} from "@/components/order/order-notice";
+import {
+  formatOrderMoney,
+  ORDER_COLORS,
+  resolveOrderStep,
+  resolveTotalPages,
+} from "@/components/order/order-ui";
+import { ORDER_MONO_FONT } from "@/components/order/order-fonts";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { HB_COLORS } from "@/shared/theme/tokens";
 import { submitStoreOrder } from "@/modules/orders/store-order-api";
 import { reconcileSubmittedCartCache } from "@/modules/shop/cart-cache";
 import { useClearCart } from "@/modules/shop/use-clear-cart";
@@ -47,10 +60,6 @@ import {
   resolveCurrentCartQuantityItem,
   shouldSubmitCartQuantityUpdate,
 } from "@/modules/shop/cart-quantity-input";
-import {
-  resolveCartSummaryScale,
-  resolveCheckoutBarMaxHeight,
-} from "@/modules/shop/cart-summary-density";
 import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner";
 import { useScanResult } from "@/modules/scanner/use-scan-result";
 import type { StoreOrderCartItem } from "@/modules/shop/types";
@@ -64,12 +73,6 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const SWIPE_ACTION_WIDTH = 92;
 // 与 Web 端购物车备注长度保持一致。
 const ORDER_REMARKS_MAX_LENGTH = 500;
-const PRODUCT_GRADE_CONFIG: Record<string, { color: string }> = {
-  A: { color: "#722ED1" },
-  B: { color: "#1890FF" },
-  C: { color: "#FA8C16" },
-  D: { color: "#F5222D" },
-};
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -77,7 +80,9 @@ function clamp(value: number, min: number, max: number) {
 
 interface CartListItemCardProps {
   clearCartPending: boolean;
+  compact: boolean;
   isDeleting: boolean;
+  isPriority: boolean;
   isUpdating: boolean;
   item: StoreOrderCartItem;
   openSwipeDetailGUID: string | null;
@@ -90,7 +95,9 @@ interface CartListItemCardProps {
 
 function CartListItemCard({
   clearCartPending,
+  compact,
   isDeleting,
+  isPriority,
   isUpdating,
   item,
   openSwipeDetailGUID,
@@ -102,13 +109,13 @@ function CartListItemCard({
 }: CartListItemCardProps) {
   const translateX = useRef(new Animated.Value(0)).current;
   const offsetRef = useRef(0);
-  const step = item.minOrderQuantity > 0 ? item.minOrderQuantity : 1;
+  const step = resolveOrderStep(item.minOrderQuantity);
   const isBusy = isUpdating || isDeleting || clearCartPending;
-  const grade = item.grade?.trim().toUpperCase();
-  const gradeColor = grade ? PRODUCT_GRADE_CONFIG[grade]?.color ?? "#999" : undefined;
   const importPrice = Number(item.importPrice ?? 0);
   const importAmount = Number(item.importAmount ?? importPrice * item.quantity);
   const hasZeroImportPrice = importPrice <= 0;
+  // 加购后被仓库暂停供货：服务端会拦截加量和提交，只放行减量与移除，这里提前标出来。
+  const isPaused = item.isActive === false;
   const skuValue = item.itemNumber || item.productCode || "--";
 
   const animateTo = useCallback(
@@ -184,6 +191,7 @@ function CartListItemCard({
     <View style={styles.swipeRow}>
       <View style={styles.deleteActionWrap}>
         <Pressable
+          accessibilityRole="button"
           disabled={isBusy}
           onPress={() => {
             closeSwipe(true);
@@ -195,7 +203,8 @@ function CartListItemCard({
             isBusy ? styles.deleteActionDisabled : null,
           ]}
         >
-          <Text variant="labelLarge" style={styles.deleteActionText}>
+          <MaterialCommunityIcons name="trash-can-outline" size={20} color={HB_COLORS.white} />
+          <Text style={styles.deleteActionText}>
             {isDeleting ? t("item.deleting") : t("item.delete")}
           </Text>
         </Pressable>
@@ -203,114 +212,66 @@ function CartListItemCard({
 
       <Animated.View
         style={[
-          styles.swipeCardWrap,
-          {
-            transform: [{ translateX }],
-          },
+          styles.itemRow,
+          isPriority ? styles.itemRowPriority : null,
+          isPaused ? styles.itemRowPaused : null,
+          { transform: [{ translateX }] },
         ]}
         {...panResponder.panHandlers}
       >
-        <Card mode="outlined" style={styles.itemCard}>
-          <Card.Content style={styles.itemContent}>
-            <View style={styles.itemAccentBar} />
-            <View style={styles.itemMainRow}>
-              <View style={styles.itemImageWrap}>
-                {item.productImage ? (
-                  <Image source={{ uri: item.productImage }} style={styles.itemImage} />
-                ) : (
-                  <View style={styles.itemImagePlaceholder}>
-                    <MaterialCommunityIcons name="package-variant-closed" size={24} color="#8A919F" />
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.itemBody}>
-                <View style={styles.itemHeader}>
-                  <View style={styles.itemTitleWrap}>
-                    <Text variant="titleSmall" numberOfLines={2} style={styles.itemTitle}>
-                      {item.productName || item.productCode}
-                    </Text>
-                    <Text variant="bodySmall" style={styles.itemNumberText}>
-                      {t("item.sku", { value: skuValue })}
-                    </Text>
-                    <View style={styles.itemTagRow}>
-                      {item.isActive === false ? (
-                        // 加购后被仓库暂停供货：提交会被拦截，先在这里标出来让分店移除。
-                        <View style={[styles.gradeBadge, styles.pausedBadge]}>
-                          <Text style={styles.gradeBadgeText}>{t("supplyNotice:cartPausedTag")}</Text>
-                        </View>
-                      ) : null}
-                      {grade ? (
-                        <View style={[styles.gradeBadge, { backgroundColor: gradeColor }]}>
-                          <Text style={styles.gradeBadgeText}>{t("item.grade", { grade })}</Text>
-                        </View>
-                      ) : null}
-                      {item.productCode ? (
-                        <Text variant="labelSmall" numberOfLines={1} style={styles.itemCodeText}>
-                          {item.productCode}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <Text
-                      variant="labelSmall"
-                      numberOfLines={1}
-                      style={[styles.itemUnitPriceText, hasZeroImportPrice ? styles.zeroImportText : null]}
-                    >
-                      {t("item.unitPrice", { amount: importPrice.toFixed(2) })}
-                    </Text>
-                  </View>
-                  <View style={styles.itemRightColumn}>
-                    <View style={styles.quantityStepper}>
-                      <IconButton
-                        icon="minus"
-                        mode="contained-tonal"
-                        size={16}
-                        disabled={isBusy}
-                        loading={isUpdating}
-                        onPress={() => void onUpdateQuantity(item, Math.max(0, item.quantity - step))}
-                        style={styles.quantityButton}
-                      />
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={t("common:labels.editCartQuantity", { quantity: item.quantity })}
-                        disabled={isBusy}
-                        hitSlop={8}
-                        onPress={() => onEditQuantity(item)}
-                        style={({ pressed }) => [
-                          styles.quantityValueWrap,
-                          !isBusy ? styles.quantityValueEditable : null,
-                          pressed && !isBusy ? styles.quantityValuePressed : null,
-                        ]}
-                      >
-                        <Text variant="titleMedium" style={styles.quantityValue}>
-                          {item.quantity}
-                        </Text>
-                      </Pressable>
-                      <IconButton
-                        icon="plus"
-                        mode="contained"
-                        size={16}
-                        disabled={isBusy}
-                        loading={isUpdating}
-                        onPress={() => void onUpdateQuantity(item, item.quantity + step)}
-                        style={styles.quantityButton}
-                      />
-                    </View>
-                    <Text
-                      variant="labelSmall"
-                      numberOfLines={1}
-                      style={[styles.importPriceText, hasZeroImportPrice ? styles.zeroImportText : null]}
-                    >
-                      {t("item.subtotal", {
-                        amount: importAmount.toFixed(2),
-                      })}
-                    </Text>
-                  </View>
-                </View>
-              </View>
+        <OrderThumbnail uri={item.productImage} size={compact ? 48 : 56} muted={isPaused} />
+        <View style={styles.itemBody}>
+          <Text numberOfLines={2} style={[styles.itemTitle, isPaused ? styles.itemTitleMuted : null]}>
+            {item.productName || item.productCode}
+          </Text>
+          <View style={styles.itemMetaRow}>
+            {isPriority ? <OrderStatusTag label={t("common:orderRow.justScanned")} tone="solidAction" /> : null}
+            {isPaused ? <OrderStatusTag label={t("supplyNotice:cartPausedTag")} tone="solidDark" /> : null}
+            <GradeTag grade={item.grade} />
+            <Text numberOfLines={1} style={styles.itemNumberText}>
+              {skuValue}
+            </Text>
+            {step > 1 ? (
+              <Text numberOfLines={1} style={styles.itemMetaMuted}>
+                · {t("common:orderRow.minOrder", { quantity: step })}
+              </Text>
+            ) : null}
+            {hasZeroImportPrice ? <OrderStatusTag label={t("common:orderRow.zeroImportPrice")} tone="danger" /> : null}
+          </View>
+          <View style={styles.itemBottomRow}>
+            <View style={styles.itemPriceColumn}>
+              <Text numberOfLines={1} style={[styles.itemUnitPriceText, hasZeroImportPrice ? styles.zeroImportText : null]}>
+                {t("common:orderRow.unitPrice", { amount: formatOrderMoney(importPrice) })}
+              </Text>
+              <Text numberOfLines={1} style={styles.itemSubtotalLine}>
+                <Text style={styles.itemSubtotalLabel}>{t("common:orderRow.subtotal")} </Text>
+                <Text
+                  style={[
+                    styles.itemSubtotalValue,
+                    hasZeroImportPrice ? styles.zeroImportText : null,
+                    isPaused ? styles.itemTitleMuted : null,
+                  ]}
+                >
+                  {formatOrderMoney(importAmount)}
+                </Text>
+              </Text>
             </View>
-          </Card.Content>
-        </Card>
+            <OrderStepper
+              quantity={item.quantity}
+              step={step}
+              compact={compact}
+              busy={isBusy}
+              increaseDisabled={isPaused}
+              accessibilityLabel={t("common:labels.editCartQuantity", { quantity: item.quantity })}
+              decreaseLabel={t("common:orderRow.decrease")}
+              increaseLabel={t("common:orderRow.increase")}
+              removeLabel={t("common:orderRow.remove")}
+              onDecrease={() => void onUpdateQuantity(item, Math.max(0, item.quantity - step))}
+              onIncrease={() => void onUpdateQuantity(item, item.quantity + step)}
+              onEdit={() => onEditQuantity(item)}
+            />
+          </View>
+        </View>
       </Animated.View>
     </View>
   );
@@ -332,7 +293,8 @@ export default function Cart() {
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState("");
   const [searchInput, setSearchInput] = useState("");
-  const [filtersVisible, setFiltersVisible] = useState(false);
+  const [moreMenuVisible, setMoreMenuVisible] = useState(false);
+  const [pageSizeMenuVisible, setPageSizeMenuVisible] = useState(false);
   const [submitDialogVisible, setSubmitDialogVisible] = useState(false);
   const [quantityEditorItem, setQuantityEditorItem] = useState<StoreOrderCartItem | null>(null);
   const [quantityEditorStoreCode, setQuantityEditorStoreCode] = useState<string | null>(null);
@@ -340,7 +302,11 @@ export default function Cart() {
   const [quantityEditorError, setQuantityEditorError] = useState("");
   const quantityEditorSubmittingRef = useRef(false);
   const [orderRemarks, setOrderRemarks] = useState("");
-  const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [notice, setNotice] = useState<OrderNotice | null>(null);
+  // 购物车的提示统一在底部结算栏闪现，不再用会盖住结算按钮的 Snackbar。
+  const showNotice = useCallback((tone: OrderNoticeTone, title: string) => {
+    setNotice({ tone, title });
+  }, []);
   const getErrorMessage = useCallback((error: unknown, fallbackKey: string) => (
     resolveLocalizedErrorMessage(error, {
       language,
@@ -394,11 +360,6 @@ export default function Cart() {
   }, [cartQuery.items, keyword]);
 
   const canGoNextPage = page * pageSize < cartQuery.total;
-  const totalAmount = t("summary.money", { amount: cartQuery.stats.totalImportAmount.toFixed(2) });
-  const cartSummaryScale = resolveCartSummaryScale(viewport);
-  const useCompactSummary = cartSummaryScale < 0.95;
-  const checkoutBarMaxHeight = resolveCheckoutBarMaxHeight(viewport);
-  const checkoutButtonHeight = Math.max(36, Math.min(40, Math.round(checkoutBarMaxHeight * 0.42)));
 
   const scanResult = useScanResult({
     onAddedToCart: async (product) => {
@@ -475,12 +436,25 @@ export default function Cart() {
   }, [cartQuery.total, page, pageSize]);
 
   useEffect(() => {
-    if (scanResult.feedback.status === "ready" || scanResult.feedback.status === "scanning") {
+    const nextNotice = mapScanFeedbackToNotice(scanResult.feedback, t);
+    if (nextNotice) {
+      setNotice(nextNotice);
+    }
+  }, [scanResult.feedback, t]);
+
+  useEffect(() => {
+    if (!notice) {
       return;
     }
 
-    setSnackbarMessage(scanResult.feedback.message);
-  }, [scanResult.feedback.message, scanResult.feedback.status]);
+    const dismissTimer = setTimeout(() => {
+      setNotice(null);
+    }, ORDER_NOTICE_DURATION_MS);
+
+    return () => {
+      clearTimeout(dismissTimer);
+    };
+  }, [notice]);
 
   async function handleUpdateQuantity(item: StoreOrderCartItem, nextQuantity: number) {
     setActiveCartItemCode(item.productCode);
@@ -495,7 +469,7 @@ export default function Cart() {
         void preorderGate.refresh();
         openPreorder();
       } else {
-        setSnackbarMessage(getErrorMessage(error, "messages.updateQtyFailed"));
+        showNotice("error", getErrorMessage(error, "messages.updateQtyFailed"));
       }
     } finally {
       setActiveCartItemCode(null);
@@ -504,7 +478,7 @@ export default function Cart() {
 
   function handleEditQuantity(item: StoreOrderCartItem) {
     if (cartMutationPendingRef.current || quantityEditorSubmittingRef.current) {
-      setSnackbarMessage(t("common:loading"));
+      showNotice("info", t("common:loading"));
       return;
     }
 
@@ -565,7 +539,7 @@ export default function Cart() {
     const currentItem = resolveCurrentCartQuantityItem(cartQuery.items, editorItem);
     if (!currentItem) {
       resetQuantityEditor();
-      setSnackbarMessage(t("quantityEditor.itemUnavailable"));
+      showNotice("warning", t("quantityEditor.itemUnavailable"));
       return;
     }
 
@@ -592,7 +566,7 @@ export default function Cart() {
       } else {
         const message = getErrorMessage(error, "messages.updateQtyFailed");
         setQuantityEditorError(message);
-        setSnackbarMessage(message);
+        showNotice("error", message);
       }
     } finally {
       quantityEditorSubmittingRef.current = false;
@@ -614,7 +588,7 @@ export default function Cart() {
         setPriorityProductCode(null);
       }
     } catch (error) {
-      setSnackbarMessage(getErrorMessage(error, "messages.deleteFailed"));
+      showNotice("error", getErrorMessage(error, "messages.deleteFailed"));
     } finally {
       setActiveDeleteDetailGUID(null);
     }
@@ -622,7 +596,7 @@ export default function Cart() {
 
   async function handleClearCart() {
     if (cartMutationPendingRef.current) {
-      setSnackbarMessage(t("common:loading"));
+      showNotice("info", t("common:loading"));
       return;
     }
 
@@ -631,9 +605,9 @@ export default function Cart() {
       setOpenSwipeDetailGUID(null);
       setPriorityProductCode(null);
       setPage(1);
-      setSnackbarMessage(t("messages.clearSuccess"));
+      showNotice("success", t("messages.clearSuccess"));
     } catch (error) {
-      setSnackbarMessage(getErrorMessage(error, "messages.clearFailed"));
+      showNotice("error", getErrorMessage(error, "messages.clearFailed"));
     }
   }
 
@@ -652,7 +626,7 @@ export default function Cart() {
 
   async function handleSubmitCart() {
     if (cartMutationPendingRef.current) {
-      setSnackbarMessage(t("common:loading"));
+      showNotice("info", t("common:loading"));
       return;
     }
 
@@ -663,12 +637,12 @@ export default function Cart() {
     }
 
     if (!selectedStoreCode) {
-      setSnackbarMessage(t("messages.needStore"));
+      showNotice("warning", t("messages.needStore"));
       return;
     }
 
     if (!cartQuery.total) {
-      setSnackbarMessage(t("messages.emptyCart"));
+      showNotice("warning", t("messages.emptyCart"));
       return;
     }
 
@@ -684,7 +658,7 @@ export default function Cart() {
       setSubmitDialogVisible(false);
       setOrderRemarks("");
       setPage(1);
-      setSnackbarMessage(t("messages.submitSuccess"));
+      showNotice("success", t("messages.submitSuccess"));
       router.push("/(shell)/orders");
     } catch (error) {
       if (isPreorderRequiredError(error)) {
@@ -692,7 +666,7 @@ export default function Cart() {
         void preorderGate.refresh();
         openPreorder();
       } else {
-        setSnackbarMessage(getErrorMessage(error, "messages.submitFailed"));
+        showNotice("error", getErrorMessage(error, "messages.submitFailed"));
       }
     } finally {
       setSubmitPending(false);
@@ -701,7 +675,7 @@ export default function Cart() {
 
   function confirmSubmitCart() {
     if (cartMutationPendingRef.current) {
-      setSnackbarMessage(t("common:loading"));
+      showNotice("info", t("common:loading"));
       return;
     }
 
@@ -711,12 +685,12 @@ export default function Cart() {
     }
 
     if (!selectedStoreCode) {
-      setSnackbarMessage(t("messages.needStore"));
+      showNotice("warning", t("messages.needStore"));
       return;
     }
 
     if (!cartQuery.total) {
-      setSnackbarMessage(t("messages.emptyCart"));
+      showNotice("warning", t("messages.emptyCart"));
       return;
     }
 
@@ -728,7 +702,9 @@ export default function Cart() {
     return (
       <CartListItemCard
         clearCartPending={clearCart.isPending}
+        compact={viewport.width <= 390}
         isDeleting={activeDeleteDetailGUID === item.detailGUID}
+        isPriority={Boolean(priorityProductCode) && priorityProductCode === item.productCode}
         isUpdating={activeCartItemCode === item.productCode}
         item={item}
         t={t}
@@ -741,25 +717,98 @@ export default function Cart() {
     );
   }
 
+  const totalPages = resolveTotalPages(cartQuery.total, pageSize);
+  const storeName = selectedStore?.storeName || t("common:labels.selectStore");
+  // 购物车为空时结算栏隐藏；但扫码提示仍需要一个固定位置显示。
+  const showCheckoutBar = Boolean(cartQuery.total) || Boolean(notice);
+  // 当前页有暂停供货商品时在结算栏提前提示；服务端仍是提交时的最终拦截方。
+  const hasPausedLines = cartQuery.items.some((item) => item.isActive === false);
+  const submitDisabled =
+    !selectedStoreCode || !cartQuery.total || (cartMutationPending && !submitPending);
+
+  function handleBack() {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.push("/(shell)/home");
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchInput(value);
+    if (!value.trim()) {
+      setKeyword("");
+    }
+  }
+
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <View style={styles.headerTitleRow}>
-            <IconButton icon="cart-outline" size={22} style={styles.headerCartIcon} />
-            <Text variant="titleLarge" style={styles.headerTitle}>
-              {t("title")}
-            </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("header.back")}
+            onPress={handleBack}
+            style={({ pressed }) => [styles.headerIconButton, pressed ? styles.pressed : null]}
+          >
+            <MaterialCommunityIcons name="chevron-left" size={26} color={HB_COLORS.textPrimary} />
+          </Pressable>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>{t("title")}</Text>
+            <View style={styles.headerStoreRow}>
+              <MaterialCommunityIcons name="storefront-outline" size={13} color={HB_COLORS.textSecondary} />
+              <Text numberOfLines={1} style={styles.headerStore}>
+                {storeName}
+              </Text>
+            </View>
           </View>
-          <View style={styles.headerActions}>
-            <IconButton
-              icon="filter-variant"
-              mode="contained-tonal"
-              onPress={() => setFiltersVisible(true)}
-              style={styles.headerIconButton}
+          <Menu
+            visible={moreMenuVisible}
+            onDismiss={() => setMoreMenuVisible(false)}
+            anchorPosition="bottom"
+            contentStyle={styles.menuContent}
+            anchor={
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("header.more")}
+                onPress={() => setMoreMenuVisible(true)}
+                style={({ pressed }) => [styles.headerIconButton, pressed ? styles.pressed : null]}
+              >
+                <MaterialCommunityIcons name="dots-horizontal" size={24} color={HB_COLORS.textPrimary} />
+              </Pressable>
+            }
+          >
+            <Menu.Item
+              leadingIcon="storefront-outline"
+              title={t("filters.goHome")}
+              onPress={() => {
+                setMoreMenuVisible(false);
+                router.push("/(shell)/home");
+              }}
             />
-          </View>
+            <Menu.Item
+              leadingIcon="delete-sweep-outline"
+              title={t("header.clearCart")}
+              titleStyle={styles.menuDangerText}
+              disabled={!selectedStoreCode || !cartQuery.total || cartMutationPending}
+              onPress={() => {
+                setMoreMenuVisible(false);
+                confirmClearCart();
+              }}
+            />
+          </Menu>
         </View>
+        <Searchbar
+          placeholder={t("filters.searchPlaceholder")}
+          value={searchInput}
+          onChangeText={handleSearchChange}
+          onSubmitEditing={() => setKeyword(searchInput.trim())}
+          onIconPress={() => setKeyword(searchInput.trim())}
+          elevation={0}
+          style={styles.searchbar}
+          inputStyle={styles.searchInputText}
+        />
       </View>
 
       <PreorderGateBanner gate={preorderGate} onOpen={openPreorder} />
@@ -772,58 +821,83 @@ export default function Cart() {
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           cartQuery.total ? (
-            <View style={[styles.cartStatsBar, useCompactSummary ? styles.cartStatsBarCompact : null]}>
-              <View style={[styles.cartStatItem, useCompactSummary ? styles.cartStatItemCompact : null]}>
-                <Text variant="labelSmall" style={styles.cartStatLabel}>
-                  {t("summary.quantity")}
+            <View>
+              <View style={styles.listMeta}>
+                <Text style={styles.listMetaText}>
+                  {t("listMeta.summary", { count: cartQuery.total, page, pages: totalPages })}
                 </Text>
-                <Text variant="titleSmall" style={styles.cartStatValue}>
-                  {cartQuery.stats.totalQuantity}
-                </Text>
+                <Menu
+                  visible={pageSizeMenuVisible}
+                  onDismiss={() => setPageSizeMenuVisible(false)}
+                  anchorPosition="bottom"
+                  contentStyle={styles.menuContent}
+                  anchor={
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t("listMeta.pageSize", { size: pageSize })}
+                      onPress={() => setPageSizeMenuVisible(true)}
+                      style={({ pressed }) => [styles.pageSizeButton, pressed ? styles.pressed : null]}
+                    >
+                      <Text style={styles.pageSizeText}>{t("listMeta.pageSize", { size: pageSize })}</Text>
+                      <MaterialCommunityIcons name="chevron-down" size={16} color={HB_COLORS.textSecondary} />
+                    </Pressable>
+                  }
+                >
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <Menu.Item
+                      key={option}
+                      title={t("listMeta.pageSizeOption", { size: option })}
+                      trailingIcon={pageSize === option ? "check" : undefined}
+                      onPress={() => {
+                        setPageSize(option);
+                        setPageSizeMenuVisible(false);
+                      }}
+                    />
+                  ))}
+                </Menu>
               </View>
-              <View style={[styles.cartStatDivider, useCompactSummary ? styles.cartStatDividerCompact : null]} />
-              <View style={[styles.cartStatItem, useCompactSummary ? styles.cartStatItemCompact : null]}>
-                <Text variant="labelSmall" style={styles.cartStatLabel}>
-                  {t("summary.sku")}
-                </Text>
-                <Text variant="titleSmall" style={styles.cartStatValue}>
-                  {cartQuery.stats.skuCount}
-                </Text>
-              </View>
-              <View style={[styles.cartStatDivider, useCompactSummary ? styles.cartStatDividerCompact : null]} />
-              <View
-                style={[
-                  styles.cartStatItem,
-                  styles.cartStatAmountItem,
-                  useCompactSummary ? styles.cartStatItemCompact : null,
-                ]}
-              >
-                <Text variant="labelSmall" style={styles.cartStatLabel}>
-                  {t("summary.orderTotal")}
-                </Text>
-                <Text variant="titleSmall" style={styles.cartStatAmount}>
-                  {totalAmount}
-                </Text>
-              </View>
+              {keyword ? (
+                <Text style={styles.searchScope}>{t("listMeta.searchScope", { keyword })}</Text>
+              ) : null}
             </View>
           ) : null
         }
         ListEmptyComponent={
-          <EmptyState
-            title={selectedStoreCode ? t("empty.cartEmptyTitle") : t("empty.selectStoreTitle")}
-            description={
-              selectedStoreCode ? t("empty.cartEmptyDescription") : t("empty.selectStoreDescription")
-            }
-          />
+          <View style={styles.emptyWrap}>
+            <EmptyState
+              title={selectedStoreCode ? t("empty.cartEmptyTitle") : t("empty.selectStoreTitle")}
+              description={
+                selectedStoreCode ? t("empty.cartEmptyDescription") : t("empty.selectStoreDescription")
+              }
+              actionLabel={t("empty.goHome")}
+              onAction={() => router.push("/(shell)/home")}
+            />
+          </View>
         }
         ListFooterComponent={
           cartQuery.total ? (
             <View style={styles.paginationRow}>
-              <Button mode="outlined" disabled={page <= 1} onPress={() => setPage((value) => value - 1)}>
+              <Button
+                mode="outlined"
+                icon="chevron-left"
+                disabled={page <= 1}
+                onPress={() => setPage((value) => value - 1)}
+                style={styles.paginationButton}
+                contentStyle={styles.paginationButtonContent}
+              >
                 {t("pagination.previous")}
               </Button>
-              <Text variant="bodyMedium">{t("pagination.page", { page })}</Text>
-              <Button mode="outlined" disabled={!canGoNextPage} onPress={() => setPage((value) => value + 1)}>
+              <Text style={styles.paginationText}>
+                {t("pagination.pageOf", { page, pages: totalPages })}
+              </Text>
+              <Button
+                mode="outlined"
+                icon="chevron-right"
+                disabled={!canGoNextPage}
+                onPress={() => setPage((value) => value + 1)}
+                style={styles.paginationButton}
+                contentStyle={[styles.paginationButtonContent, styles.paginationNextContent]}
+              >
                 {t("pagination.next")}
               </Button>
             </View>
@@ -831,111 +905,59 @@ export default function Cart() {
         }
       />
 
-      {cartQuery.total ? (
-        <View
-          style={[
-            styles.checkoutBar,
-            { maxHeight: checkoutBarMaxHeight },
-            useCompactSummary ? styles.checkoutBarCompact : null,
-          ]}
-        >
-          <View style={styles.checkoutSummaryRow}>
-            <View style={styles.checkoutSummaryGroup}>
-              <Text variant="bodySmall" style={styles.checkoutLabel}>
-                {t("checkout.totalItems")}
-              </Text>
-              <Text variant="bodySmall" style={styles.checkoutValue}>
-                {cartQuery.stats.totalQuantity}
-              </Text>
-            </View>
-            <View style={[styles.checkoutSummaryGroup, styles.checkoutSummaryAmount]}>
-              <Text variant="bodySmall" style={styles.checkoutTotalLabel}>
-                {t("checkout.totalAmount")}
-              </Text>
-              <Text variant="bodySmall" numberOfLines={1} style={styles.checkoutTotalValue}>
-                {totalAmount}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.checkoutActionsRow}>
-            <Button
-              mode="contained"
-              icon="arrow-right"
-              contentStyle={[styles.checkoutButtonContent, { minHeight: checkoutButtonHeight }]}
-              disabled={!selectedStoreCode || !cartQuery.total || cartMutationPending}
+      {showCheckoutBar ? (
+        <OrderBottomBar
+          notice={notice}
+          emphasizeTitle
+          title={formatOrderMoney(cartQuery.stats.totalImportAmount)}
+          subtitle={
+            preorderGate.normalOrderBlocked
+              ? t("checkout.preorderBlocked")
+              : cartMutationPending && !submitPending
+                ? t("checkout.syncing")
+                : hasPausedLines
+                  ? t("checkout.pausedLines")
+                : t("checkout.summaryLine", {
+                    sku: cartQuery.stats.skuCount,
+                    quantity: cartQuery.stats.totalQuantity,
+                  })
+          }
+          action={
+            <OrderBarPrimaryButton
+              large
+              label={
+                preorderGate.normalOrderBlocked
+                  ? t("checkout.preorderFirst")
+                  : submitPending
+                    ? t("checkout.submitting")
+                    : t("checkout.submit")
+              }
+              icon={preorderGate.normalOrderBlocked ? undefined : "arrow-right"}
+              tone={preorderGate.normalOrderBlocked ? "warning" : "action"}
               loading={submitPending}
+              disabled={submitDisabled}
               onPress={confirmSubmitCart}
-              style={[styles.checkoutButton, styles.checkoutSubmitButton]}
-              labelStyle={useCompactSummary ? styles.checkoutButtonLabelCompact : undefined}
-            >
-              {t("checkout.submit")}
-            </Button>
-            <Button
-              compact
-              mode="outlined"
-              icon="delete-sweep-outline"
-              contentStyle={styles.clearCartButtonContent}
-              disabled={!selectedStoreCode || !cartQuery.total || cartMutationPending}
-              loading={clearCart.isPending}
-              onPress={confirmClearCart}
-              style={styles.checkoutClearButton}
-              labelStyle={[
-                styles.clearCartLabel,
-                useCompactSummary ? styles.clearCartLabelCompact : null,
-              ]}
-            >
-              {t("checkout.clear")}
-            </Button>
-          </View>
-        </View>
+            />
+          }
+        />
       ) : null}
 
       {cartQuery.isLoading ? <LoadingOverlay /> : null}
 
-      <Portal>
-        <Modal
-          visible={Boolean(quantityEditorItem)}
-          onDismiss={handleDismissQuantityEditor}
-          contentContainerStyle={styles.quantityEditorModal}
-        >
-          <Text variant="titleMedium" style={styles.quantityEditorTitle}>
-            {t("quantityEditor.title")}
-          </Text>
-          <Text variant="bodySmall" numberOfLines={2} style={styles.secondaryText}>
-            {quantityEditorItem
-              ? t("quantityEditor.product", {
-                  name: quantityEditorItem.productName || quantityEditorItem.productCode,
-                })
-              : ""}
-          </Text>
-          {/* 只收集覆盖数量；确认后继续走统一乐观更新与失败回滚链路。 */}
-          <PaperTextInput
-            mode="outlined"
-            label={t("quantityEditor.inputLabel")}
-            value={quantityDraft}
-            onChangeText={(value) => {
-              setQuantityDraft(value);
-              setQuantityEditorError("");
-            }}
-            keyboardType="number-pad"
-            autoFocus
-            selectTextOnFocus
-            disabled={quantityEditorBusy}
-            error={Boolean(quantityEditorError)}
-            style={styles.quantityEditorInput}
-          />
-          {quantityEditorError ? (
-            <Text
-              variant="bodySmall"
-              accessibilityLiveRegion="polite"
-              accessibilityRole="alert"
-              style={styles.quantityEditorError}
+      <BusinessSheet
+        visible={Boolean(quantityEditorItem)}
+        title={t("quantityEditor.title")}
+        onDismiss={handleDismissQuantityEditor}
+        dismissable={!quantityEditorBusy}
+        footer={
+          <View style={styles.sheetActions}>
+            <Button
+              mode="outlined"
+              disabled={quantityEditorBusy}
+              onPress={handleDismissQuantityEditor}
+              style={styles.sheetActionButton}
+              contentStyle={styles.sheetActionContent}
             >
-              {quantityEditorError}
-            </Text>
-          ) : null}
-          <View style={styles.quantityEditorActions}>
-            <Button mode="contained-tonal" disabled={quantityEditorBusy} onPress={handleDismissQuantityEditor}>
               {t("common:actions.cancel")}
             </Button>
             <Button
@@ -943,144 +965,100 @@ export default function Cart() {
               loading={quantityEditorBusy}
               disabled={quantityEditorBusy}
               onPress={() => void handleConfirmQuantityEdit()}
+              style={[styles.sheetActionButton, styles.sheetActionPrimary]}
+              contentStyle={styles.sheetActionContent}
             >
               {t("common:actions.confirm")}
             </Button>
           </View>
-        </Modal>
-
-        <Modal
-          visible={filtersVisible}
-          onDismiss={() => setFiltersVisible(false)}
-          contentContainerStyle={styles.filtersModal}
-        >
-          <View style={styles.filtersHeader}>
-            <View style={styles.filtersTitleWrap}>
-              <Text variant="titleMedium">{t("filters.title")}</Text>
-              <Text variant="bodySmall" style={styles.secondaryText}>
-                {t("filters.currentStore", { store: selectedStore?.storeName || t("common:na") })}
-              </Text>
+        }
+      >
+        {quantityEditorItem ? (
+          <>
+            <View style={styles.editorProduct}>
+              <OrderThumbnail uri={quantityEditorItem.productImage} size={44} />
+              <View style={styles.editorProductCopy}>
+                <Text numberOfLines={2} style={styles.editorProductName}>
+                  {quantityEditorItem.productName || quantityEditorItem.productCode}
+                </Text>
+                <View style={styles.editorProductMeta}>
+                  <GradeTag grade={quantityEditorItem.grade} />
+                  <Text numberOfLines={1} style={styles.editorItemNumber}>
+                    {quantityEditorItem.itemNumber || quantityEditorItem.productCode}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.editorMetaMuted}>
+                    · {t("common:orderRow.minOrder", { quantity: resolveOrderStep(quantityEditorItem.minOrderQuantity) })}
+                  </Text>
+                </View>
+              </View>
             </View>
-            <Button mode="text" onPress={() => setFiltersVisible(false)}>
-              {t("common:actions.close")}
-            </Button>
-          </View>
+            {/* 只收集覆盖数量；确认后继续走统一乐观更新与失败回滚链路。 */}
+            <PaperTextInput
+              mode="outlined"
+              label={t("quantityEditor.inputLabel")}
+              value={quantityDraft}
+              onChangeText={(value) => {
+                setQuantityDraft(value);
+                setQuantityEditorError("");
+              }}
+              keyboardType="number-pad"
+              autoFocus
+              selectTextOnFocus
+              disabled={quantityEditorBusy}
+              error={Boolean(quantityEditorError)}
+              style={styles.editorInput}
+              contentStyle={styles.editorInputContent}
+            />
+            <Text style={styles.editorHelper}>
+              {t("quantityEditor.helper", { current: quantityEditorItem.quantity })}
+            </Text>
+            {quantityEditorError ? (
+              <Text
+                variant="bodySmall"
+                accessibilityLiveRegion="polite"
+                accessibilityRole="alert"
+                style={styles.quantityEditorError}
+              >
+                {quantityEditorError}
+              </Text>
+            ) : null}
+            <QuantityPresetRow
+              step={resolveOrderStep(quantityEditorItem.minOrderQuantity)}
+              value={quantityDraft}
+              disabled={quantityEditorBusy}
+              onSelect={(quantity) => {
+                setQuantityDraft(String(quantity));
+                setQuantityEditorError("");
+              }}
+            />
+          </>
+        ) : null}
+      </BusinessSheet>
 
-          <Searchbar
-            placeholder={t("filters.searchPlaceholder")}
-            value={searchInput}
-            onChangeText={setSearchInput}
-            onSubmitEditing={() => setKeyword(searchInput.trim())}
-            onIconPress={() => setKeyword(searchInput.trim())}
-            style={styles.searchbar}
-          />
-
-          <View style={styles.filterActions}>
+      <BusinessSheet
+        visible={submitDialogVisible}
+        title={t("confirm.submitTitle")}
+        subtitle={t("confirm.submitMessage")}
+        dismissable={!submitPending}
+        onDismiss={() => {
+          if (!submitPending) {
+            setSubmitDialogVisible(false);
+          }
+        }}
+        footer={
+          <View style={styles.sheetActions}>
             <Button
               mode="outlined"
-              onPress={() => {
-                setSearchInput("");
-                setKeyword("");
-              }}
-            >
-              {t("filters.clearSearch")}
-            </Button>
-            <Button
-              mode="contained-tonal"
-              onPress={() => {
-                setKeyword(searchInput.trim());
-                setFiltersVisible(false);
-              }}
-            >
-              {t("filters.applySearch")}
-            </Button>
-          </View>
-
-          <View style={styles.summaryGrid}>
-            <Text variant="bodySmall" style={styles.summaryText}>
-              {t("filters.items", { count: cartQuery.total })}
-            </Text>
-            <Text variant="bodySmall" style={styles.summaryText}>
-              {t("filters.totalQuantity", { count: cartQuery.cart?.totalQuantity ?? 0 })}
-            </Text>
-            <Text variant="bodySmall" style={styles.summaryText}>
-              {t("filters.salesAmount", {
-                amount: Number(cartQuery.cart?.totalAmount ?? 0).toFixed(2),
-              })}
-            </Text>
-            <Text variant="bodySmall" style={styles.summaryText}>
-              {t("filters.importAmount", {
-                amount: Number(cartQuery.cart?.totalImportAmount ?? 0).toFixed(2),
-              })}
-            </Text>
-            <Text variant="bodySmall" style={styles.summaryText}>
-              {t("filters.volume", { value: Number(cartQuery.cart?.totalVolume ?? 0).toFixed(2) })}
-            </Text>
-          </View>
-
-          <View style={styles.pageSizeSection}>
-            <Text variant="labelLarge">{t("filters.pageSize")}</Text>
-            <View style={styles.pageSizeRow}>
-              {PAGE_SIZE_OPTIONS.map((option) => (
-                <Chip compact key={option} selected={pageSize === option} onPress={() => setPageSize(option)}>
-                  {option}
-                </Chip>
-              ))}
-            </View>
-          </View>
-
-          <View style={styles.storeHintCard}>
-            <Text variant="bodyMedium">{t("filters.storeHint")}</Text>
-            <Button mode="outlined" onPress={() => router.push("/(shell)/home")}>
-              {t("filters.goHome")}
-            </Button>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={submitDialogVisible}
-          onDismiss={() => {
-            if (!submitPending) {
-              setSubmitDialogVisible(false);
-            }
-          }}
-          contentContainerStyle={styles.submitModal}
-        >
-          <Text variant="titleMedium" style={styles.submitModalTitle}>
-            {t("confirm.submitTitle")}
-          </Text>
-          <Text variant="bodyMedium" style={styles.submitModalMessage}>
-            {t("confirm.submitMessage")}
-          </Text>
-          <PaperTextInput
-            mode="outlined"
-            label={t("remarks.label")}
-            placeholder={t("remarks.placeholder")}
-            value={orderRemarks}
-            onChangeText={(value) => setOrderRemarks(value.slice(0, ORDER_REMARKS_MAX_LENGTH))}
-            multiline
-            numberOfLines={3}
-            maxLength={ORDER_REMARKS_MAX_LENGTH}
-            disabled={submitPending}
-            style={styles.submitRemarksInput}
-          />
-          <Text variant="labelSmall" style={styles.submitRemarksCounter}>
-            {t("remarks.counter", {
-              count: orderRemarks.length,
-              max: ORDER_REMARKS_MAX_LENGTH,
-            })}
-          </Text>
-          <View style={styles.submitModalActions}>
-            <Button
-              mode="contained-tonal"
               disabled={submitPending}
               onPress={() => setSubmitDialogVisible(false)}
-              style={styles.submitModalButton}
+              style={styles.sheetActionButton}
+              contentStyle={styles.sheetActionContent}
             >
               {t("common:actions.cancel")}
             </Button>
             <Button
               mode="contained"
+              icon="arrow-right"
               loading={submitPending}
               disabled={
                 !selectedStoreCode ||
@@ -1090,13 +1068,71 @@ export default function Cart() {
               onPress={() => {
                 void handleSubmitCart();
               }}
-              style={[styles.submitModalButton, styles.submitModalSubmitButton]}
+              style={[styles.sheetActionButton, styles.sheetActionPrimary]}
+              contentStyle={[styles.sheetActionContent, styles.submitButtonContent]}
             >
-              {t("common:actions.submit")}
+              {t("confirm.submitAction")}
             </Button>
           </View>
-        </Modal>
-      </Portal>
+        }
+      >
+        {/* 提交前把门店和金额放在最显眼处核对，避免给错门店下单。 */}
+        <View style={styles.submitStore}>
+          <View style={styles.submitStoreIcon}>
+            <MaterialCommunityIcons name="storefront-outline" size={18} color={HB_COLORS.action} />
+          </View>
+          <View style={styles.submitStoreCopy}>
+            <Text style={styles.submitStoreLabel}>{t("submitSheet.store")}</Text>
+            <Text numberOfLines={1} style={styles.submitStoreName}>
+              {storeName}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.submitSummary}>
+          <Text style={styles.submitTotalLabel}>{t("submitSheet.totalLabel")}</Text>
+          <Text style={styles.submitTotalValue}>{formatOrderMoney(cartQuery.stats.totalImportAmount)}</Text>
+          <View style={styles.submitGrid}>
+            <View style={styles.submitGridCell}>
+              <Text style={styles.submitGridLabel}>{t("submitSheet.sku")}</Text>
+              <Text style={styles.submitGridValue}>{cartQuery.stats.skuCount}</Text>
+            </View>
+            <View style={styles.submitGridCell}>
+              <Text style={styles.submitGridLabel}>{t("submitSheet.quantity")}</Text>
+              <Text style={styles.submitGridValue}>{cartQuery.stats.totalQuantity}</Text>
+            </View>
+            <View style={styles.submitGridCell}>
+              <Text style={styles.submitGridLabel}>{t("submitSheet.salesAmount")}</Text>
+              <Text style={styles.submitGridValue}>
+                {formatOrderMoney(Number(cartQuery.cart?.totalAmount ?? 0))}
+              </Text>
+            </View>
+            <View style={styles.submitGridCell}>
+              <Text style={styles.submitGridLabel}>{t("submitSheet.volume")}</Text>
+              <Text style={styles.submitGridValue}>
+                {Number(cartQuery.cart?.totalVolume ?? 0).toFixed(2)}
+              </Text>
+            </View>
+          </View>
+        </View>
+        <PaperTextInput
+          mode="outlined"
+          label={t("remarks.label")}
+          placeholder={t("remarks.placeholder")}
+          value={orderRemarks}
+          onChangeText={(value) => setOrderRemarks(value.slice(0, ORDER_REMARKS_MAX_LENGTH))}
+          multiline
+          numberOfLines={3}
+          maxLength={ORDER_REMARKS_MAX_LENGTH}
+          disabled={submitPending}
+          style={styles.submitRemarksInput}
+        />
+        <Text style={styles.submitRemarksCounter}>
+          {t("remarks.counter", {
+            count: orderRemarks.length,
+            max: ORDER_REMARKS_MAX_LENGTH,
+          })}
+        </Text>
+      </BusinessSheet>
 
       <ScanResultPicker
         visible={Boolean(scanResult.selectionState)}
@@ -1115,10 +1151,6 @@ export default function Cart() {
       {hidScanner.mode === "textInput" && hidScanner.textInputProps ? (
         <NativeTextInput style={styles.hiddenInput} {...hidScanner.textInputProps} />
       ) : null}
-
-      <Snackbar visible={Boolean(snackbarMessage)} onDismiss={() => setSnackbarMessage("")} duration={2500}>
-        {snackbarMessage}
-      </Snackbar>
     </SafeAreaView>
   );
 }
@@ -1126,464 +1158,396 @@ export default function Cart() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F4F6F8",
+    backgroundColor: HB_COLORS.background,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingTop: 0,
-    paddingBottom: 6,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 8,
+    backgroundColor: HB_COLORS.white,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E4E7EC",
-    backgroundColor: "#FFFFFF",
+    borderBottomColor: HB_COLORS.outline,
   },
   headerRow: {
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  headerTitle: {
-    color: "#0F172A",
-    fontWeight: "700",
-  },
-  headerTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 0,
-  },
-  headerCartIcon: {
-    margin: 0,
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    gap: 2,
+    marginHorizontal: -8,
   },
   headerIconButton: {
-    margin: 0,
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitle: {
+    color: HB_COLORS.textPrimary,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "700",
+  },
+  headerStoreRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  headerStore: {
+    flexShrink: 1,
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  menuContent: {
+    backgroundColor: HB_COLORS.white,
+  },
+  menuDangerText: {
+    color: HB_COLORS.danger,
+    fontWeight: "600",
+  },
+  searchbar: {
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HB_COLORS.outlineMuted,
+  },
+  searchInputText: {
+    minHeight: 0,
+    fontSize: 15,
   },
   listContent: {
     flexGrow: 1,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 20,
+    paddingBottom: 12,
   },
-  cartStatsBar: {
+  listMeta: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E4E7EC",
+    justifyContent: "space-between",
+    paddingLeft: 12,
+    paddingRight: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HB_COLORS.outline,
   },
-  cartStatsBarCompact: {
-    marginBottom: 6,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 8,
+  listMetaText: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontVariant: ["tabular-nums"],
   },
-  cartStatItem: {
-    flex: 1,
+  pageSizeButton: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
     gap: 2,
+    paddingHorizontal: 8,
   },
-  cartStatItemCompact: {
-    gap: 0,
+  pageSizeText: {
+    color: "#344054",
+    fontSize: 12,
   },
-  cartStatAmountItem: {
-    flex: 1.35,
+  searchScope: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    color: ORDER_COLORS.subtleText,
+    fontSize: 12,
+    backgroundColor: HB_COLORS.surfaceMuted,
   },
-  cartStatLabel: {
-    color: "#6B7280",
-    fontWeight: "600",
-  },
-  cartStatValue: {
-    color: "#111827",
-    fontWeight: "800",
-  },
-  cartStatAmount: {
-    color: "#111827",
-    fontWeight: "800",
-  },
-  cartStatDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 30,
-    marginHorizontal: 8,
-    backgroundColor: "#D9E0E8",
-  },
-  cartStatDividerCompact: {
-    height: 22,
-    marginHorizontal: 6,
-  },
-  filtersModal: {
-    margin: 16,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    padding: 16,
-    gap: 14,
-  },
-  quantityEditorModal: {
-    margin: 18,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    padding: 18,
-    gap: 12,
-  },
-  quantityEditorTitle: {
-    color: "#0F172A",
-    fontWeight: "800",
-  },
-  quantityEditorInput: {
-    backgroundColor: "#FFFFFF",
-  },
-  quantityEditorError: {
-    color: "#BA1A1A",
-  },
-  quantityEditorActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    gap: 8,
-  },
-  submitModal: {
-    margin: 18,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    padding: 18,
-    gap: 12,
-  },
-  submitModalTitle: {
-    color: "#0F172A",
-    fontWeight: "800",
-  },
-  submitModalMessage: {
-    color: "#6B7280",
-  },
-  submitRemarksInput: {
-    backgroundColor: "#FFFFFF",
-  },
-  submitRemarksCounter: {
-    alignSelf: "flex-end",
-    color: "#6B7280",
-  },
-  submitModalActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  submitModalButton: {
+  emptyWrap: {
     flex: 1,
-    borderRadius: 8,
-  },
-  submitModalSubmitButton: {
-    backgroundColor: "#111111",
-  },
-  filtersHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  filtersTitleWrap: {
-    flex: 1,
-    gap: 4,
-  },
-  searchbar: {
-    backgroundColor: "#F6F8FB",
-  },
-  filterActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 10,
-  },
-  summaryGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  summaryText: {
-    color: "#333",
-  },
-  pageSizeSection: {
-    gap: 8,
-  },
-  pageSizeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  storeHintCard: {
-    gap: 10,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: "#F6F8FB",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 24,
   },
   swipeRow: {
-    marginBottom: 8,
     position: "relative",
+    backgroundColor: "#D92D20",
   },
   deleteActionWrap: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "flex-end",
-    justifyContent: "center",
-  },
-  swipeCardWrap: {
-    zIndex: 1,
-  },
-  itemCard: {
-    marginBottom: 0,
-    overflow: "hidden",
-    borderRadius: 12,
-    borderColor: "#E4E7EC",
-    backgroundColor: "#FFFFFF",
-  },
-  itemContent: {
-    paddingVertical: 10,
-    paddingLeft: 12,
-    paddingRight: 10,
-  },
-  itemAccentBar: {
     position: "absolute",
-    left: 0,
     top: 0,
+    right: 0,
     bottom: 0,
-    width: 4,
-    borderTopLeftRadius: 12,
-    borderBottomLeftRadius: 12,
-    backgroundColor: "#1677FF",
+    width: SWIPE_ACTION_WIDTH,
   },
-  itemMainRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  itemImageWrap: {
-    width: 60,
-    height: 60,
-  },
-  itemImage: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 8,
-    backgroundColor: "#F2F4F7",
-  },
-  itemImagePlaceholder: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 8,
+  deleteAction: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F2F4F7",
+    gap: 4,
+  },
+  deleteActionPressed: {
+    backgroundColor: "#B42318",
+  },
+  deleteActionDisabled: {
+    opacity: 0.6,
+  },
+  deleteActionText: {
+    color: HB_COLORS.white,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  itemRow: {
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: HB_COLORS.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HB_COLORS.outline,
+  },
+  itemRowPriority: {
+    backgroundColor: ORDER_COLORS.inCartRow,
+  },
+  itemRowPaused: {
+    backgroundColor: ORDER_COLORS.mutedRow,
   },
   itemBody: {
     flex: 1,
     minWidth: 0,
-  },
-  itemHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  itemTitleWrap: {
-    flex: 1,
-    minWidth: 0,
-    gap: 3,
-  },
-  gradeBadge: {
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  pausedBadge: {
-    backgroundColor: "#B42318",
-  },
-  gradeBadgeText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "700",
+    gap: 6,
   },
   itemTitle: {
-    flex: 1,
-    color: "#111827",
+    color: HB_COLORS.textPrimary,
     fontSize: 14,
     lineHeight: 18,
-    fontWeight: "800",
-  },
-  itemNumberText: {
-    color: "#6B7280",
     fontWeight: "600",
   },
-  itemTagRow: {
+  itemTitleMuted: {
+    color: HB_COLORS.textSecondary,
+  },
+  itemMetaRow: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
     gap: 6,
   },
-  itemCodeText: {
+  itemNumberText: {
     flexShrink: 1,
-    color: "#8A919F",
-    fontWeight: "600",
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: ORDER_MONO_FONT,
+  },
+  itemMetaMuted: {
+    color: ORDER_COLORS.subtleText,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  itemBottomRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  itemPriceColumn: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
   },
   itemUnitPriceText: {
-    color: "#111827",
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontVariant: ["tabular-nums"],
+  },
+  itemSubtotalLine: {
+    fontVariant: ["tabular-nums"],
+  },
+  itemSubtotalLabel: {
+    color: ORDER_COLORS.subtleText,
+    fontSize: 11,
+  },
+  itemSubtotalValue: {
+    color: HB_COLORS.textPrimary,
+    fontSize: 15,
     fontWeight: "700",
-  },
-  itemRightColumn: {
-    width: 104,
-    alignItems: "flex-end",
-    gap: 6,
-  },
-  quantityStepper: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 0,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#D0D5DD",
-    borderRadius: 8,
-    backgroundColor: "#F2F4F7",
-  },
-  quantityButton: {
-    margin: 0,
-    width: 28,
-    height: 28,
-  },
-  quantityValueWrap: {
-    minWidth: 36,
-    minHeight: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 2,
-    borderRadius: 6,
-  },
-  quantityValueEditable: {
-    backgroundColor: "#FFFFFF",
-  },
-  quantityValuePressed: {
-    backgroundColor: "#E7EEF8",
-  },
-  quantityValue: {
-    color: "#171C1F",
-    fontWeight: "700",
-  },
-  importPriceText: {
-    color: "#111827",
-    fontWeight: "700",
-    textAlign: "right",
   },
   zeroImportText: {
-    color: "#F5222D",
-  },
-  deleteAction: {
-    width: 92,
-    marginBottom: 10,
-    borderRadius: 12,
-    backgroundColor: "#FF4D4F",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  deleteActionPressed: {
-    opacity: 0.88,
-  },
-  deleteActionDisabled: {
-    backgroundColor: "#FFB3B3",
-  },
-  deleteActionText: {
-    color: "#fff",
-    fontWeight: "700",
+    color: ORDER_COLORS.danger,
   },
   paginationRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  checkoutBar: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#D7DCE2",
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 8,
-    gap: 6,
-    overflow: "hidden",
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: 8,
-  },
-  checkoutBarCompact: {
-    paddingHorizontal: 10,
-    paddingTop: 6,
-    paddingBottom: 6,
-    gap: 5,
-  },
-  checkoutSummaryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  checkoutSummaryGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    minWidth: 0,
-  },
-  checkoutSummaryAmount: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  checkoutActionsRow: {
-    flexDirection: "row",
-    alignItems: "center",
     gap: 8,
+    padding: 12,
   },
-  checkoutLabel: {
-    color: "#6B7280",
-  },
-  checkoutValue: {
-    color: "#374151",
-    fontWeight: "600",
-  },
-  checkoutTotalLabel: {
-    color: "#111827",
-    fontWeight: "700",
-  },
-  checkoutTotalValue: {
-    color: "#111827",
-    fontWeight: "800",
-  },
-  checkoutButton: {
-    borderRadius: 8,
-    backgroundColor: "#111111",
-  },
-  checkoutSubmitButton: {
+  paginationButton: {
     flex: 1,
+    borderRadius: 8,
   },
-  checkoutButtonContent: {
+  paginationButtonContent: {
+    minHeight: 44,
+  },
+  paginationNextContent: {
     flexDirection: "row-reverse",
   },
-  checkoutButtonLabelCompact: {
+  paginationText: {
+    minWidth: 72,
+    textAlign: "center",
+    color: HB_COLORS.textSecondary,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+  },
+  sheetActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  sheetActionButton: {
+    flex: 1,
+    borderRadius: 10,
+  },
+  sheetActionPrimary: {
+    flex: 2,
+  },
+  sheetActionContent: {
+    minHeight: 48,
+  },
+  submitButtonContent: {
+    flexDirection: "row-reverse",
+  },
+  editorProduct: {
+    flexDirection: "row",
+    gap: 10,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HB_COLORS.outline,
+    backgroundColor: ORDER_COLORS.mutedRow,
+  },
+  editorProductCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  editorProductName: {
+    color: HB_COLORS.textPrimary,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  editorProductMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  editorItemNumber: {
+    flexShrink: 1,
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    fontFamily: ORDER_MONO_FONT,
+  },
+  editorMetaMuted: {
+    color: ORDER_COLORS.subtleText,
+    fontSize: 12,
+  },
+  editorInput: {
+    backgroundColor: HB_COLORS.white,
+  },
+  editorInputContent: {
+    fontSize: 24,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  editorHelper: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  quantityEditorError: {
+    color: HB_COLORS.danger,
+  },
+  submitStore: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: ORDER_COLORS.stepperBorder,
+    backgroundColor: ORDER_COLORS.tonalBackground,
+  },
+  submitStoreIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: HB_COLORS.white,
+  },
+  submitStoreCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  submitStoreLabel: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  submitStoreName: {
+    color: ORDER_COLORS.tonalText,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "700",
+  },
+  submitSummary: {
+    gap: 4,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HB_COLORS.outline,
+    backgroundColor: ORDER_COLORS.mutedRow,
+  },
+  submitTotalLabel: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  submitTotalValue: {
+    color: HB_COLORS.textPrimary,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  submitGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: HB_COLORS.outline,
+    rowGap: 8,
+  },
+  submitGridCell: {
+    width: "50%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingRight: 12,
+  },
+  submitGridLabel: {
+    color: HB_COLORS.textSecondary,
     fontSize: 13,
   },
-  checkoutClearButton: {
-    borderRadius: 8,
-    borderColor: "#D1D5DB",
+  submitGridValue: {
+    color: HB_COLORS.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
   },
-  clearCartButtonContent: {
-    minHeight: 36,
+  submitRemarksInput: {
+    minHeight: 88,
+    backgroundColor: HB_COLORS.white,
   },
-  clearCartLabel: {
-    color: "#6B7280",
-  },
-  clearCartLabelCompact: {
+  submitRemarksCounter: {
+    alignSelf: "flex-end",
+    color: ORDER_COLORS.subtleText,
     fontSize: 12,
   },
   hiddenInput: {
@@ -1591,8 +1555,5 @@ const styles = StyleSheet.create({
     width: 1,
     height: 1,
     opacity: 0,
-  },
-  secondaryText: {
-    color: "#666",
   },
 });

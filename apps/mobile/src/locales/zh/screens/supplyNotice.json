@@ -58,5 +58,6 @@
     "internalNoteLabel": "内部备注（仅仓库可见）",
     "confirmDelist": "确认下架",
     "cancel": "取消"
-  }
+  },
+  "scanPausedNamed": "暂停供货 · {{name}}"
 }

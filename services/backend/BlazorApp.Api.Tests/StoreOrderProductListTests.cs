@@ -3491,12 +3491,31 @@ public sealed class StoreOrderProductListTests : IDisposable
                 log.Contains("SUM", StringComparison.OrdinalIgnoreCase)
                 && log.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)
         );
-        Assert.Contains(
+        // 最近订货日期与历史明细合并为一次扫描：窗口 MAX 在数据库侧只留最近日期的明细行，
+        // 不再单独执行一条 MAX + GROUP BY；商品编码以 JSON 参数传入而非内联 IN 列表。
+        // 该请求默认 IncludeSales=true，最近来货查询也会读订单明细；这里只看购物车与最近订单两条。
+        var orderSqlLogs = _sqlLogs
+            .Where(log => log.Contains("d.[ProductCode] IN (", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, orderSqlLogs.Count);
+        Assert.DoesNotContain(
             _sqlLogs,
             log =>
-                log.Contains("MAX", StringComparison.OrdinalIgnoreCase)
+                log.Contains("MAX(", StringComparison.OrdinalIgnoreCase)
                 && log.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)
+                && log.Contains("WareHouseOrder", StringComparison.OrdinalIgnoreCase)
+                && log.Contains("OrderDate", StringComparison.OrdinalIgnoreCase)
         );
+        Assert.Contains(
+            orderSqlLogs,
+            log => log.Contains("MAX(o.[OrderDate]) OVER (PARTITION BY d.[ProductCode])", StringComparison.Ordinal)
+        );
+        // 日志已把参数名替换成参数值：商品编码来自 @ProductCode0 参数（替换后不带引号），不是 IN ('P001') 字面量。
+        Assert.All(orderSqlLogs, log =>
+        {
+            Assert.Contains("d.[ProductCode] IN (P001)", log, StringComparison.Ordinal);
+            Assert.DoesNotContain("'P001'", log, StringComparison.Ordinal);
+        });
     }
 
     [Fact]
@@ -4364,8 +4383,8 @@ public sealed class StoreOrderProductListTests : IDisposable
             statsSql[(groupByIndex + "GROUP BY".Length)..],
             StringComparison.OrdinalIgnoreCase
         );
-        // 全流程固定 6 次查询：门店校验、购物车、最近订单日期、历史候选、最近来货、销售统计。
-        Assert.Equal(6, _sqlLogs.Count);
+        // 全流程固定 5 次查询：门店校验、购物车、最近订单（最近日期与历史明细合并为一次扫描）、最近来货、销售统计。
+        Assert.Equal(5, _sqlLogs.Count);
     }
 
     [Fact]

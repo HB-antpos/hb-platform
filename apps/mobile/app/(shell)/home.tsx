@@ -1,22 +1,21 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
-  ScrollView,
+  Pressable,
   StyleSheet,
   TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { CameraView } from "expo-camera";
 import { type Href, useRouter } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import {
-  Badge,
   Button,
   Card,
-  Chip,
-  IconButton,
+  Menu,
   Modal,
   Portal,
   Searchbar,
@@ -25,10 +24,29 @@ import {
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AnimatedEmptyStateGraphic } from "@/components/ui/AnimatedEmptyStateGraphic";
+import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
-import { ProductCard } from "@/components/ui/ProductCard";
 import { CameraScanSheet } from "@/components/ui/CameraScanSheet";
+import {
+  OrderBarIconButton,
+  OrderBarPrimaryButton,
+  OrderBottomBar,
+} from "@/components/order/OrderBottomBar";
+import { OrderProductRow } from "@/components/order/OrderProductRow";
+import { GradeTag, OrderThumbnail } from "@/components/order/OrderTags";
+import { QuantityPresetRow } from "@/components/order/QuantityPresetRow";
+import {
+  mapScanFeedbackToNotice,
+  ORDER_NOTICE_DURATION_MS,
+  type OrderNotice,
+} from "@/components/order/order-notice";
+import {
+  formatOrderMoney,
+  ORDER_COLORS,
+  resolveTotalPages,
+} from "@/components/order/order-ui";
+import { ORDER_MONO_FONT } from "@/components/order/order-fonts";
 import { getCategoryTree } from "@/modules/shop/api";
 import {
   canSubmitCartQuantityEdit,
@@ -85,6 +103,9 @@ import { usePreorderGate } from "@/modules/preorder/use-preorder-gate";
 import { useAuthStore } from "@/store/auth-store";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { HB_COLORS } from "@/shared/theme/tokens";
+
+const HOME_PAGE_SIZE = 18;
 
 function resolveDisplayCategories(tree: StoreOrderCategoryNode[]) {
   const allNode = tree.find((item) =>
@@ -102,10 +123,68 @@ function normalizeStoreCode(value: string | null | undefined) {
   return normalized ? normalized : null;
 }
 
+interface FilterChipProps {
+  label: string;
+  value: string;
+  active: boolean;
+  onPress: () => void;
+}
+
+/** 页头筛选芯片：左侧是筛选维度，右侧是当前取值，生效时换成浅蓝底。 */
+function FilterChip({ label, value, active, onPress }: FilterChipProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label} ${value}`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.filterChip,
+        active ? styles.filterChipActive : null,
+        pressed ? styles.filterChipPressed : null,
+      ]}
+    >
+      <Text style={styles.filterChipLabel}>{label}</Text>
+      <Text numberOfLines={1} style={[styles.filterChipValue, active ? styles.filterChipValueActive : null]}>
+        {value}
+      </Text>
+      <MaterialCommunityIcons name="chevron-down" size={16} color={HB_COLORS.textSecondary} />
+    </Pressable>
+  );
+}
+
+interface AutoAddToggleProps {
+  label: string;
+  value: boolean;
+  accessibilityLabel: string;
+  onToggle: () => void;
+}
+
+/** 自动加购决定扫码后会发生什么，单独做成开关，状态始终可见。 */
+function AutoAddToggle({ label, value, accessibilityLabel, onToggle }: AutoAddToggleProps) {
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      accessibilityLabel={accessibilityLabel}
+      onPress={onToggle}
+      style={({ pressed }) => [
+        styles.autoAdd,
+        value ? styles.autoAddOn : null,
+        pressed ? styles.filterChipPressed : null,
+      ]}
+    >
+      <Text style={[styles.autoAddText, value ? styles.autoAddTextOn : null]}>{label}</Text>
+      <View style={[styles.switchTrack, value ? styles.switchTrackOn : null]}>
+        <View style={[styles.switchKnob, value ? styles.switchKnobOn : null]} />
+      </View>
+    </Pressable>
+  );
+}
+
 export default function Home() {
   const isFocused = useIsFocused();
   const { t, language } = useAppTranslation(["home", "common", "supplyNotice"]);
-  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const productColumns = resolveHomeProductColumns(windowWidth);
   const router = useRouter();
   const {
@@ -164,7 +243,8 @@ export default function Home() {
   isFocusedRef.current = isFocused;
   cameraScanModeRef.current = cameraScanMode;
   const searchReturnPageRef = useRef<number | null>(null);
-  const [noticeMessage, setNoticeMessage] = useState("");
+  const [notice, setNotice] = useState<OrderNotice | null>(null);
+  const [scanBarcode, setScanBarcode] = useState<string | null>(null);
   const [activeCartMutationProductCode, setActiveCartMutationProductCode] =
     useState<string | null>(null);
   const [quantityEditorProduct, setQuantityEditorProduct] =
@@ -224,7 +304,7 @@ export default function Home() {
         openPreorder();
         return;
       }
-      setNoticeMessage(getErrorMessage(error, fallbackKey));
+      setNotice({ tone: "error", title: getErrorMessage(error, fallbackKey) });
     },
     [getErrorMessage, openPreorder, preorderGate],
   );
@@ -275,6 +355,7 @@ export default function Home() {
 
       setSearchInput("");
       clearAppliedSearchForScan();
+      setScanBarcode(barcode || product.productCode);
       setScannedProducts([product]);
       setScannedProductTraceIds(
         scanTraceId ? { [product.productCode]: scanTraceId } : {},
@@ -300,11 +381,15 @@ export default function Home() {
           return;
         }
 
-        setNoticeMessage(
-          t("messages.addedToCart", {
+        setNotice({
+          tone: "success",
+          title: t("common:orderNotice.addedNamed", {
             name: product.productName || product.productCode,
           }),
-        );
+          detail: t("common:orderNotice.addedQuantity", {
+            quantity: resolveMinimumOrderQuantity(product),
+          }),
+        });
       } catch (error) {
         if (selectedStoreCodeRef.current !== expectedStoreCode) {
           return;
@@ -339,6 +424,7 @@ export default function Home() {
     ) => {
       setSearchInput("");
       clearAppliedSearchForScan();
+      setScanBarcode(barcode || product.productCode);
       setScannedProducts([product]);
       setScannedProductTraceIds(
         scanTraceId ? { [product.productCode]: scanTraceId } : {},
@@ -348,13 +434,8 @@ export default function Home() {
       if (source === "camera") {
         setLastCameraScan({ product, barcode: barcode || product.productCode });
       }
-      setNoticeMessage(
-        t("messages.addedToCart", {
-          name: product.productName || product.productCode,
-        }),
-      );
     },
-    [clearAppliedSearchForScan, t],
+    [clearAppliedSearchForScan],
   );
   const scanResult = useScanResult({
     autoAddWhenSingle,
@@ -542,7 +623,7 @@ export default function Home() {
         categoryGUID: selectedCategoryGUID,
         grade: selectedGrade,
         pageNumber,
-        pageSize: 18,
+        pageSize: HOME_PAGE_SIZE,
       }),
     [
       keyword,
@@ -587,24 +668,18 @@ export default function Home() {
   ]);
 
   useEffect(() => {
-    if (
-      scanResult.feedback.status === "ready" ||
-      scanResult.feedback.status === "scanning" ||
-      scanResult.feedback.status === "found" ||
-      scanResult.feedback.status === "multiple"
-    ) {
-      return;
+    const nextNotice = mapScanFeedbackToNotice(scanResult.feedback, t);
+    if (nextNotice) {
+      setNotice(nextNotice);
     }
-
-    setNoticeMessage(scanResult.feedback.message);
-  }, [scanResult.feedback.message, scanResult.feedback.status]);
+  }, [scanResult.feedback, t]);
 
   useEffect(() => {
     if (!storesLoadFailed) {
       return;
     }
 
-    setNoticeMessage(getErrorMessage(storesError, "messages.storesLoadFailed"));
+    setNotice({ tone: "error", title: getErrorMessage(storesError, "messages.storesLoadFailed") });
   }, [getErrorMessage, storesError, storesLoadFailed]);
 
   useEffect(() => {
@@ -612,42 +687,36 @@ export default function Home() {
       return;
     }
 
-    setNoticeMessage(
-      getErrorMessage(productsQuery.error, "messages.productsLoadFailed"),
-    );
+    setNotice({
+      tone: "error",
+      title: getErrorMessage(productsQuery.error, "messages.productsLoadFailed"),
+    });
   }, [getErrorMessage, productsQuery.error, productsQuery.isError]);
 
   useEffect(() => {
-    if (!noticeMessage) {
+    if (!notice) {
       return;
     }
 
+    // 提示在操作栏停留 2.5 秒后回到购物车汇总，位置固定不推动列表。
     const dismissTimer = setTimeout(() => {
-      setNoticeMessage("");
-    }, 2500);
+      setNotice(null);
+    }, ORDER_NOTICE_DURATION_MS);
 
     return () => {
       clearTimeout(dismissTimer);
     };
-  }, [noticeMessage]);
+  }, [notice]);
 
   const canGoNextPage = useMemo(() => {
     const total = productsQuery.data?.total ?? 0;
-    return pageNumber * 18 < total;
+    return pageNumber * HOME_PAGE_SIZE < total;
   }, [pageNumber, productsQuery.data?.total]);
   const hasNoAssignedStores =
     !storesLoading &&
     !storesLoadFailed &&
     stores.length === 0 &&
     !selectedStoreCode;
-  const isCompactLayout = windowHeight < 780;
-  const productListContentStyle = useMemo(
-    () => [
-      styles.listContent,
-      isCompactLayout ? styles.listContentCompact : null,
-    ],
-    [isCompactLayout],
-  );
   const displayProducts = useMemo(() => {
     if (scannedProducts?.length) {
       return selectedGrade
@@ -659,7 +728,7 @@ export default function Home() {
 
     return productsQuery.data?.items ?? [];
   }, [productsQuery.data?.items, scannedProducts, selectedGrade]);
-  // 关注恢复订货：汇总用于横幅与入口角标；搜索零结果时补查暂停供货商品，让分店知道是下架而不是搜错。
+  // 关注恢复订货：汇总用于横幅与入口角标；搜索零结果时补查暂停供货商品，让分店知道是暂停供货而不是搜错。
   const supplyWatchSummary = useSupplyWatchSummary(selectedStoreCode ?? null);
   const [supplyWatchesVisible, setSupplyWatchesVisible] = useState(false);
   const supplyLookupEnabled =
@@ -672,7 +741,11 @@ export default function Home() {
   const handleSupplyWatchToggle = useCallback(
     async (status: StoreSupplyStatus, watch: boolean) => {
       const ok = await supplyLookup.toggleWatch(status, watch);
-      setNoticeMessage(t(ok ? (watch ? "supplyNotice:watchDone" : "supplyNotice:unwatchDone") : "supplyNotice:actionFailed"));
+      setNotice(
+        ok
+          ? { tone: "success", title: t(watch ? "supplyNotice:watchDone" : "supplyNotice:unwatchDone") }
+          : { tone: "error", title: t("supplyNotice:actionFailed") },
+      );
     },
     [supplyLookup, t],
   );
@@ -745,10 +818,10 @@ export default function Home() {
     },
     [applySearchPageAction],
   );
-  // 扫到暂停供货的商品：把条码转成搜索词，让零结果处展示恢复计划与关注按钮。
+  // 扫到暂停供货的商品：把条码转成搜索词，零结果处展示后续计划与关注按钮。
   const scanFeedback = scanResult.feedback;
   useEffect(() => {
-    if (scanFeedback.status !== "not_found" || !scanFeedback.pausedSupply || !scanFeedback.barcode) {
+    if (scanFeedback.status !== "supply_paused" || !scanFeedback.barcode) {
       return;
     }
     setScannedProducts(null);
@@ -779,6 +852,7 @@ export default function Home() {
   const handleClearSearchAndScan = useCallback(() => {
     setScannedProducts(null);
     setScannedProductTraceIds({});
+    setScanBarcode(null);
     setSearchInput("");
     setKeyword("");
     setSelectedGrade(undefined);
@@ -794,6 +868,17 @@ export default function Home() {
     setCameraSession(next);
   }, []);
 
+  const handleToggleAutoAdd = useCallback(() => {
+    const nextValue = !autoAddWhenSingle;
+    setAutoAddWhenSingle(nextValue);
+    // 切换后在操作栏说明扫码会发生什么，避免店员误以为扫码没反应。
+    setNotice({
+      tone: "info",
+      title: nextValue ? t("autoAddOn") : t("autoAddOff"),
+      detail: nextValue ? t("autoAddOnDetail") : t("autoAddOffDetail"),
+    });
+  }, [autoAddWhenSingle, t]);
+
   const toggleCategoryExpanded = useCallback((categoryGUID: string) => {
     setExpandedCategoryGUIDs((currentValue) =>
       currentValue.includes(categoryGUID)
@@ -806,6 +891,9 @@ export default function Home() {
     setSelectedCategoryGUID((currentValue) =>
       currentValue === categoryGUID ? undefined : categoryGUID,
     );
+    // 与分类同一次更新里回到第一页：等 effect 再重置会先按旧页码多发一次商品请求。
+    searchReturnPageRef.current = null;
+    setPageNumber(1);
     // 分类选择完成后回到商品列表；展开箭头不走这个回调，保持只展开分类树。
     setFiltersVisible(false);
   }, []);
@@ -817,36 +905,47 @@ export default function Home() {
 
       return (
         <View
+          key={node.categoryGUID}
           style={[
-            styles.categoryTreeNode,
-            depth ? { marginLeft: depth * 14 } : null,
+            styles.categoryTreeRow,
+            isSelected ? styles.categoryRowSelected : null,
           ]}
         >
-          <View
-            style={[
-              styles.categoryTreeRow,
-              isSelected ? styles.categoryTreeRowSelected : null,
-            ]}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: isSelected }}
+            onPress={() => handleSelectCategoryFilter(node.categoryGUID)}
+            style={[styles.categoryTreeLabelButton, { paddingLeft: 12 + depth * 20 }]}
           >
-            <Button
-              compact
-              mode={isSelected ? "contained-tonal" : "text"}
-              onPress={() => handleSelectCategoryFilter(node.categoryGUID)}
-              style={styles.categoryTreeButton}
-              contentStyle={styles.categoryTreeButtonContent}
-              labelStyle={styles.categoryTreeButtonLabel}
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.categoryLabel,
+                depth === 0 ? styles.categoryLabelRoot : null,
+                isSelected ? styles.categoryLabelSelected : null,
+              ]}
             >
               {node.categoryName}
-            </Button>
-            {hasChildren ? (
-              <IconButton
-                icon={isExpanded ? "chevron-up" : "chevron-down"}
-                size={18}
-                onPress={() => toggleCategoryExpanded(node.categoryGUID)}
-                style={styles.categoryTreeToggle}
-              />
+            </Text>
+            {isSelected ? (
+              <MaterialCommunityIcons name="check" size={18} color={HB_COLORS.action} />
             ) : null}
-          </View>
+          </Pressable>
+          {hasChildren ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={node.categoryName}
+              accessibilityState={{ expanded: isExpanded }}
+              onPress={() => toggleCategoryExpanded(node.categoryGUID)}
+              style={styles.categoryToggle}
+            >
+              <MaterialCommunityIcons
+                name={isExpanded ? "chevron-down" : "chevron-right"}
+                size={20}
+                color={HB_COLORS.textSecondary}
+              />
+            </Pressable>
+          ) : null}
         </View>
       );
     },
@@ -862,11 +961,15 @@ export default function Home() {
         // 扫码结果手动加购继续透传 trace，方便后端日志串起同一次扫码链路。
         scanTraceId: scannedProductTraceIds[product.productCode],
       });
-      setNoticeMessage(
-        t("messages.addedToCart", {
+      setNotice({
+        tone: "success",
+        title: t("common:orderNotice.addedNamed", {
           name: product.productName || product.productCode,
         }),
-      );
+        detail: t("common:orderNotice.addedQuantity", {
+          quantity: resolveMinimumOrderQuantity(product),
+        }),
+      });
     } catch (error) {
       handleNormalOrderError(error, "messages.addFailed");
     } finally {
@@ -965,7 +1068,7 @@ export default function Home() {
       } else {
         const message = getErrorMessage(error, "messages.updateQtyFailed");
         setQuantityEditorError(message);
-        setNoticeMessage(message);
+        setNotice({ tone: "error", title: message });
       }
     } finally {
       if (
@@ -1034,225 +1137,209 @@ export default function Home() {
     }
   }
 
-  const fixedHeaderContent = (
-    <View
-      style={[styles.header, isCompactLayout ? styles.headerCompact : null]}
-    >
-      <View
-        style={[
-          styles.headerTopRow,
-          isCompactLayout ? styles.headerTopRowCompact : null,
-        ]}
-      >
-        <View style={styles.headerTitleWrap}>
-          <Text variant="titleLarge" style={styles.headerTitle}>
-            {t("title")}
+  const totalProducts = productsQuery.data?.total ?? 0;
+  const totalPages = resolveTotalPages(totalProducts, HOME_PAGE_SIZE);
+  // Zebra TC26 等 360dp 窄屏收紧缩略图和步进器宽度，保证货号与价格不被挤掉。
+  const compactRows = windowWidth <= 390;
+  const selectedStoreName =
+    selectedStore?.storeName || t("common:labels.selectStore");
+  const showScanResultHeader = Boolean(scannedProducts?.length);
+  const gradeChipValue = selectedGrade
+    ? t("gradeMenu.gradeValue", { grade: selectedGradeLabel })
+    : t("filters.all");
+  const cartSkuCount = cartSummary?.totalSku ?? 0;
+  const cartQuantityTotal = cartSummary?.totalQuantity ?? 0;
+  const cartImportTotal = Number(cartSummary?.totalImportAmount ?? 0);
+
+  const restockedCount = supplyWatchSummary.data?.restockedCount ?? 0;
+
+  const handleOpenCameraSheet = () => {
+    cameraResultGenerationRef.current = null;
+    setCameraScanHandling(false);
+    updateCameraSheetSession({ type: "open" }, cameraScanModeRef.current);
+  };
+
+  const listHeader = showScanResultHeader ? (
+    <View style={styles.resultHeader}>
+      <MaterialCommunityIcons name="barcode-scan" size={20} color={HB_COLORS.action} />
+      <View style={styles.resultHeaderCopy}>
+        <Text style={styles.resultHeaderTitle}>
+          {t("scanResult.title", { count: displayProducts.length })}
+        </Text>
+        {scanBarcode ? (
+          <Text numberOfLines={1} style={styles.resultHeaderBarcode}>
+            {scanBarcode}
           </Text>
-          <Text variant="bodySmall" style={styles.headerSubtitle}>
-            {selectedStore?.storeName || t("common:labels.selectStore")}
-          </Text>
-        </View>
-        <View style={styles.cartBox}>
-          <IconButton
-            icon="cart-outline"
-            size={18}
-            onPress={() => router.push("/(shell)/cart")}
-            style={styles.cartButton}
-          />
-          {cartSummary?.totalQuantity ? (
-            <Badge style={styles.badge}>{cartSummary.totalQuantity}</Badge>
-          ) : null}
-          <Text variant="labelMedium" style={styles.cartText}>
-            {t("cartSummary.total")} {cartSummary?.totalQuantity ?? 0}
-          </Text>
-        </View>
-      </View>
-      <View
-        style={[
-          styles.searchRow,
-          isCompactLayout ? styles.searchRowCompact : null,
-        ]}
-      >
-        <View style={styles.searchInputWrap}>
-          <Searchbar
-            ref={visibleSearchScanner.searchInputRef}
-            placeholder={t(
-              locationLookupEnabled
-                ? "locationSearchPlaceholder"
-                : "searchPlaceholder",
-            )}
-            value={searchInput}
-            onChangeText={visibleSearchScanner.handleChangeText}
-            onSubmitEditing={handleSearchSubmit}
-            onIconPress={handleSearchSubmit}
-            onFocus={handleSearchFocus}
-            onBlur={handleSearchBlur}
-            style={styles.searchInput}
-            inputStyle={styles.searchInputText}
-          />
-        </View>
-        <IconButton
-          icon="camera-outline"
-          mode="contained-tonal"
-          accessibilityLabel={t("cameraQuery")}
-          onPress={() => {
-            cameraResultGenerationRef.current = null;
-            setCameraScanHandling(false);
-            updateCameraSheetSession(
-              { type: "open" },
-              cameraScanModeRef.current,
-            );
-          }}
-          style={styles.cameraQueryButton}
-        />
-        <IconButton
-          icon="filter-variant"
-          mode="outlined"
-          accessibilityLabel={t("common:actions.openFilters")}
-          onPress={() => setFiltersVisible(true)}
-          style={styles.filterToggleButton}
-        />
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.utilityRow}
-      >
-        <Chip
-          compact
-          mode="outlined"
-          icon="storefront-outline"
-          onPress={() => setStorePickerVisible(true)}
-          style={styles.utilityChip}
-          textStyle={styles.utilityChipText}
-        >
-          {selectedStore?.storeName || t("common:labels.selectStore")}
-        </Chip>
-        <Chip
-          compact
-          mode={selectedCategoryGUID ? "flat" : "outlined"}
-          icon="shape-outline"
-          onPress={() => setFiltersVisible(true)}
-          style={[
-            styles.utilityChip,
-            selectedCategoryGUID ? styles.utilityChipActive : null,
-          ]}
-          textStyle={[
-            styles.utilityChipText,
-            selectedCategoryGUID ? styles.utilityChipTextActive : null,
-          ]}
-        >
-          {selectedCategoryName}
-        </Chip>
-        <Chip
-          compact
-          mode={selectedGrade ? "flat" : "outlined"}
-          icon="label-outline"
-          onPress={() => setGradeFilterVisible(true)}
-          style={[
-            styles.utilityChip,
-            selectedGrade ? styles.utilityChipActive : null,
-          ]}
-          textStyle={[
-            styles.utilityChipText,
-            selectedGrade ? styles.utilityChipTextActive : null,
-          ]}
-        >
-          {selectedGrade
-            ? t("common:grade", { grade: selectedGrade })
-            : t("filters.grade")}
-        </Chip>
-        <Chip
-          compact
-          mode={autoAddWhenSingle ? "flat" : "outlined"}
-          selected={autoAddWhenSingle}
-          icon={autoAddWhenSingle ? "cart-check" : "cart-off"}
-          onPress={() => setAutoAddWhenSingle((currentValue) => !currentValue)}
-          accessibilityLabel={
-            autoAddWhenSingle ? t("autoAddOn") : t("autoAddOff")
-          }
-          style={[
-            styles.utilityChip,
-            autoAddWhenSingle ? styles.utilityChipActive : null,
-          ]}
-          textStyle={[
-            styles.utilityChipText,
-            autoAddWhenSingle ? styles.utilityChipTextActive : null,
-          ]}
-        >
-          {t("common:labels.autoAddShort")}
-        </Chip>
-        <Chip
-          compact
-          mode={supplyWatchSummary.data?.restockedCount ? "flat" : "outlined"}
-          icon="bell-outline"
-          onPress={() => setSupplyWatchesVisible(true)}
-          accessibilityLabel={t("supplyNotice:watchesTitle")}
-          style={[
-            styles.utilityChip,
-            supplyWatchSummary.data?.restockedCount ? styles.utilityChipActive : null,
-          ]}
-          textStyle={[
-            styles.utilityChipText,
-            supplyWatchSummary.data?.restockedCount ? styles.utilityChipTextActive : null,
-          ]}
-        >
-          {supplyWatchSummary.data?.restockedCount
-            ? `${t("supplyNotice:watchesEntry")} ${supplyWatchSummary.data.restockedCount}`
-            : t("supplyNotice:watchesEntry")}
-        </Chip>
-        {scannedProducts?.length ? (
-          <Chip
-            compact
-            mode="outlined"
-            icon="barcode-scan"
-            onClose={handleClearSearchAndScan}
-            style={styles.utilityChip}
-            textStyle={styles.utilityChipText}
-          >
-            {t("common:labels.scanResults")}
-          </Chip>
         ) : null}
-        {hidScanner.mode === "textInput" ? (
-          <IconButton
-            icon="barcode-scan"
-            mode="outlined"
-            accessibilityLabel={t("resetScanFocus")}
-            onPress={() => hidScanner.focusHiddenInput?.()}
-            style={styles.scanFocusButton}
-          />
-        ) : null}
-      </ScrollView>
-      {scannedProducts?.length ? (
-        <View style={styles.scanHintBanner}>
-          <Text variant="bodySmall" style={styles.scanHintText}>
-            {t("scanResultHint")}
-          </Text>
-        </View>
-      ) : null}
-      {noticeMessage ? (
-        <View style={styles.headerNotice}>
-          {/* 页头内联提示用于避免遮挡商品数量加减按钮。 */}
-          <Text variant="bodySmall" style={styles.headerNoticeText}>
-            {noticeMessage}
-          </Text>
-          <IconButton
-            icon="close"
-            size={16}
-            accessibilityLabel={t("common:actions.close")}
-            onPress={() => setNoticeMessage("")}
-            style={styles.headerNoticeClose}
-          />
-        </View>
-      ) : null}
+      </View>
+      <Button
+        compact
+        icon="close"
+        onPress={handleClearSearchAndScan}
+        contentStyle={styles.resultHeaderButton}
+      >
+        {t("scanResult.clear")}
+      </Button>
     </View>
-  );
+  ) : displayProducts.length ? (
+    <View style={styles.listMeta}>
+      <Text style={styles.listMetaText}>
+        {t("listMeta.total", { count: totalProducts })}
+      </Text>
+      <Text style={styles.listMetaText}>
+        {t("listMeta.page", { page: pageNumber, pages: totalPages })}
+      </Text>
+    </View>
+  ) : null;
+
+  const renderCategoryPickerRow = (row: VisibleCategoryRow) => renderCategoryRow({ item: row });
+
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.container}>
-      {fixedHeaderContent}
+      <View style={styles.header}>
+        <View style={styles.headerTopRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("storeSwitchAccessibility", { store: selectedStoreName })}
+            onPress={() => setStorePickerVisible(true)}
+            style={({ pressed }) => [styles.storeButton, pressed ? styles.pressed : null]}
+          >
+            <View style={styles.storeIcon}>
+              <MaterialCommunityIcons name="storefront-outline" size={18} color={HB_COLORS.action} />
+            </View>
+            <View style={styles.storeCopy}>
+              <Text style={styles.storeCaption}>{t("storeCaption")}</Text>
+              <View style={styles.storeNameRow}>
+                <Text numberOfLines={1} style={styles.storeName}>
+                  {selectedStoreName}
+                </Text>
+                <MaterialCommunityIcons name="chevron-down" size={18} color={HB_COLORS.textPrimary} />
+              </View>
+            </View>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              restockedCount
+                ? `${t("supplyNotice:watchesTitle")} ${t("supplyNotice:restockedBanner", { count: restockedCount })}`
+                : t("supplyNotice:watchesTitle")
+            }
+            onPress={() => setSupplyWatchesVisible(true)}
+            style={({ pressed }) => [styles.watchButton, pressed ? styles.pressed : null]}
+          >
+            <MaterialCommunityIcons
+              name={restockedCount ? "bell-ring-outline" : "bell-outline"}
+              size={22}
+              color={restockedCount ? HB_COLORS.success : HB_COLORS.textSecondary}
+            />
+            {restockedCount ? (
+              <View style={styles.watchBadge}>
+                <Text style={styles.watchBadgeText}>{restockedCount > 99 ? "99+" : restockedCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+          {hidScanner.mode === "textInput" ? (
+            <Button
+              compact
+              icon="barcode-scan"
+              textColor={HB_COLORS.textSecondary}
+              accessibilityLabel={t("resetScanFocus")}
+              onPress={() => hidScanner.focusHiddenInput?.()}
+              contentStyle={styles.focusButtonContent}
+            >
+              {t("resetScanFocusShort")}
+            </Button>
+          ) : null}
+        </View>
+        <Searchbar
+          ref={visibleSearchScanner.searchInputRef}
+          placeholder={t(
+            locationLookupEnabled
+              ? "locationSearchPlaceholder"
+              : "searchPlaceholder",
+          )}
+          value={searchInput}
+          onChangeText={visibleSearchScanner.handleChangeText}
+          onSubmitEditing={handleSearchSubmit}
+          onIconPress={handleSearchSubmit}
+          onFocus={handleSearchFocus}
+          onBlur={handleSearchBlur}
+          elevation={0}
+          style={styles.searchInput}
+          inputStyle={styles.searchInputText}
+        />
+        <View style={styles.filterRow}>
+          <FilterChip
+            label={t("filters.category")}
+            value={selectedCategoryName}
+            active={Boolean(selectedCategoryGUID)}
+            onPress={() => setFiltersVisible(true)}
+          />
+          <Menu
+            visible={gradeFilterVisible}
+            onDismiss={() => setGradeFilterVisible(false)}
+            anchorPosition="bottom"
+            contentStyle={styles.gradeMenu}
+            anchor={
+              <FilterChip
+                label={t("filters.grade")}
+                value={gradeChipValue}
+                active={Boolean(selectedGrade)}
+                onPress={() => setGradeFilterVisible(true)}
+              />
+            }
+          >
+            <Menu.Item
+              title={t("filters.allGrades")}
+              trailingIcon={!selectedGrade ? "check" : undefined}
+              onPress={() => {
+                searchReturnPageRef.current = null;
+                setPageNumber(1);
+                setSelectedGrade(undefined);
+                setGradeFilterVisible(false);
+              }}
+            />
+            {gradeOptions.map((option) => {
+              const grade = normalizeGradeValue(option.value);
+              const isSelected = selectedGrade === grade;
+
+              return (
+                <Menu.Item
+                  key={option.value}
+                  title={t("gradeMenu.gradeValue", { grade: option.label })}
+                  trailingIcon={isSelected ? "check" : undefined}
+                  onPress={() => {
+                    // 与等级同一次更新里回到第一页，避免按旧页码多发一次请求。
+                    searchReturnPageRef.current = null;
+                    setPageNumber(1);
+                    setSelectedGrade(isSelected ? undefined : grade);
+                    setGradeFilterVisible(false);
+                  }}
+                />
+              );
+            })}
+            {productGradesQuery.isError ? (
+              <Menu.Item disabled title={t("filters.gradesLoadFailed")} />
+            ) : null}
+            {!gradeOptions.length ? (
+              <Menu.Item
+                disabled
+                title={productGradesQuery.isLoading ? t("common:loading") : t("filters.noGrades")}
+              />
+            ) : null}
+          </Menu>
+          <View style={styles.filterSpacer} />
+          <AutoAddToggle
+            label={t("common:labels.autoAddShort")}
+            value={autoAddWhenSingle}
+            accessibilityLabel={autoAddWhenSingle ? t("autoAddOn") : t("autoAddOff")}
+            onToggle={handleToggleAutoAdd}
+          />
+        </View>
+      </View>
       <PreorderGateBanner gate={preorderGate} onOpen={openPreorder} />
       <SupplyRestockedBanner
-        restockedCount={supplyWatchSummary.data?.restockedCount ?? 0}
+        restockedCount={restockedCount}
         onOpen={() => setSupplyWatchesVisible(true)}
       />
       <SupplyWatchesSheet
@@ -1261,7 +1348,7 @@ export default function Home() {
         onDismiss={() => setSupplyWatchesVisible(false)}
         onOrder={handleSupplyOrder}
         onChanged={() => void supplyWatchSummary.refetch()}
-        onError={setNoticeMessage}
+        onError={(message) => setNotice({ tone: "error", title: message })}
       />
       <FlatList
         style={styles.content}
@@ -1269,75 +1356,99 @@ export default function Home() {
         key={`product-grid-${productColumns}`}
         keyExtractor={(item) => item.productCode}
         numColumns={productColumns}
-        columnWrapperStyle={styles.columnWrapper}
-        contentContainerStyle={productListContentStyle}
+        columnWrapperStyle={productColumns > 1 ? styles.columnWrapper : undefined}
+        contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={
           supplyLookup.items.length ? (
-            <View style={styles.supplyStatusList} testID="home-supply-status-list">
-              <Text variant="titleSmall">{t("supplyNotice:pausedHeading")}</Text>
-              <Text variant="bodySmall" style={styles.supplyStatusHint}>{t("supplyNotice:pausedHint")}</Text>
-              {supplyLookup.items.map((status) => (
-                <SupplyStatusCard
-                  key={status.productCode}
-                  status={status}
-                  busy={supplyLookup.busyCode === status.productCode}
-                  onWatch={(item) => void handleSupplyWatchToggle(item, true)}
-                  onUnwatch={(item) => void handleSupplyWatchToggle(item, false)}
-                />
-              ))}
+            <View testID="home-supply-status-list">
+              <View style={styles.pausedHeader}>
+                <MaterialCommunityIcons name="package-variant-remove" size={20} color={ORDER_COLORS.paused} />
+                <View style={styles.resultHeaderCopy}>
+                  <Text style={styles.pausedHeaderTitle}>{t("supplyNotice:pausedHeading")}</Text>
+                  <Text numberOfLines={2} style={styles.pausedHeaderHint}>{t("supplyNotice:pausedHint")}</Text>
+                </View>
+                <Button
+                  compact
+                  icon="close"
+                  onPress={() => handleSearchInputChange("")}
+                  contentStyle={styles.resultHeaderButton}
+                >
+                  {t("scanResult.clear")}
+                </Button>
+              </View>
+              <View style={styles.supplyStatusList}>
+                {supplyLookup.items.map((status) => (
+                  <SupplyStatusCard
+                    key={status.productCode}
+                    status={status}
+                    busy={supplyLookup.busyCode === status.productCode}
+                    onWatch={(item) => void handleSupplyWatchToggle(item, true)}
+                    onUnwatch={(item) => void handleSupplyWatchToggle(item, false)}
+                  />
+                ))}
+              </View>
             </View>
           ) : (
-          <View style={styles.homeEmptyState}>
-            <AnimatedEmptyStateGraphic />
-            <EmptyState
-              title={
-                productsQuery.isError
-                  ? t("empty.productsLoadFailedTitle")
-                  : hasNoAssignedStores
-                    ? t("empty.noAssignedStoresTitle")
-                    : selectedStoreCode
-                      ? t("empty.noProductsTitle")
-                      : t("empty.selectStoreTitle")
-              }
-              description={
-                productsQuery.isError
-                  ? t("empty.productsLoadFailedDescription")
-                  : hasNoAssignedStores
-                    ? t("empty.noAssignedStoresDescription")
-                    : selectedStoreCode
-                      ? t("empty.noProductsDescription")
-                      : t("empty.selectStoreDescription")
-              }
-              actionLabel={
-                productsQuery.isError ? t("common:actions.retry") : undefined
-              }
-              onAction={
-                productsQuery.isError
-                  ? () => void productsQuery.refetch()
-                  : undefined
-              }
-            />
-          </View>
+            <View style={styles.homeEmptyState}>
+              <AnimatedEmptyStateGraphic />
+              <EmptyState
+                title={
+                  productsQuery.isError
+                    ? t("empty.productsLoadFailedTitle")
+                    : hasNoAssignedStores
+                      ? t("empty.noAssignedStoresTitle")
+                      : selectedStoreCode
+                        ? t("empty.noProductsTitle")
+                        : t("empty.selectStoreTitle")
+                }
+                description={
+                  productsQuery.isError
+                    ? t("empty.productsLoadFailedDescription")
+                    : hasNoAssignedStores
+                      ? t("empty.noAssignedStoresDescription")
+                      : selectedStoreCode
+                        ? t("empty.noProductsDescription")
+                        : t("empty.selectStoreDescription")
+                }
+                actionLabel={
+                  productsQuery.isError ? t("common:actions.retry") : undefined
+                }
+                onAction={
+                  productsQuery.isError
+                    ? () => void productsQuery.refetch()
+                    : undefined
+                }
+              />
+            </View>
           )
         }
         ListFooterComponent={
-          displayProducts.length ? (
+          showScanResultHeader ? (
+            <Text style={styles.resultHint}>{t("scanResultHint")}</Text>
+          ) : displayProducts.length ? (
             <View style={styles.paginationRow}>
               <Button
                 mode="outlined"
+                icon="chevron-left"
                 disabled={pageNumber <= 1}
                 onPress={() => setPageNumber((value) => value - 1)}
+                style={styles.paginationButton}
+                contentStyle={styles.paginationButtonContent}
               >
                 {t("pagination.previous")}
               </Button>
-              <Text variant="bodyMedium">
-                {t("pagination.page", { page: pageNumber })}
+              <Text style={styles.paginationText}>
+                {t("pagination.pageOf", { page: pageNumber, pages: totalPages })}
               </Text>
               <Button
                 mode="outlined"
+                icon="chevron-right"
                 disabled={!canGoNextPage}
                 onPress={() => setPageNumber((value) => value + 1)}
+                style={styles.paginationButton}
+                contentStyle={[styles.paginationButtonContent, styles.paginationNextContent]}
               >
                 {t("pagination.next")}
               </Button>
@@ -1345,17 +1456,38 @@ export default function Home() {
           ) : null
         }
         renderItem={({ item }) => (
-          <ProductCard
+          <OrderProductRow
             product={item}
-            dynamicDataMap={displayDynamicDataMap}
+            cartQuantity={getCurrentCartQuantity(item.productCode)}
+            compact={compactRows}
             disabled={!selectedStoreCode}
-            isUpdatingCart={activeCartMutationProductCode === item.productCode}
+            isUpdating={activeCartMutationProductCode === item.productCode}
             onAddToCart={handleAddToCart}
             onDecreaseCartQuantity={handleDecreaseCartQuantity}
             onEditCartQuantity={handleEditCartQuantity}
             onIncreaseCartQuantity={handleIncreaseCartQuantity}
           />
         )}
+      />
+
+      <OrderBottomBar
+        leading={
+          <OrderBarIconButton
+            icon="camera-outline"
+            accessibilityLabel={t("cameraQuery")}
+            onPress={handleOpenCameraSheet}
+          />
+        }
+        notice={notice}
+        title={t("actionBar.summary", { sku: cartSkuCount, quantity: cartQuantityTotal })}
+        subtitle={t("actionBar.importTotal", { amount: formatOrderMoney(cartImportTotal) })}
+        action={
+          <OrderBarPrimaryButton
+            label={t("actionBar.cart")}
+            icon="chevron-right"
+            onPress={() => router.push("/(shell)/cart")}
+          />
+        }
       />
 
       {productsQuery.isFetching || storesLoading ? <LoadingOverlay /> : null}
@@ -1393,55 +1525,19 @@ export default function Home() {
         </Modal>
       </Portal>
 
-      <Portal>
-        <Modal
-          visible={Boolean(quantityEditorProduct)}
-          onDismiss={handleDismissQuantityEditor}
-          contentContainerStyle={styles.quantityEditorModal}
-        >
-          <Text variant="titleMedium">{t("quantityEditor.title")}</Text>
-          <Text
-            variant="bodySmall"
-            numberOfLines={2}
-            style={styles.secondaryText}
-          >
-            {quantityEditorProduct
-              ? t("quantityEditor.product", {
-                  name:
-                    quantityEditorProduct.productName ||
-                    quantityEditorProduct.productCode,
-                })
-              : ""}
-          </Text>
-          {/* 编辑弹窗只收集覆盖数量；确认时统一走后端订货数量 mutation。 */}
-          <PaperTextInput
-            mode="outlined"
-            label={t("quantityEditor.inputLabel")}
-            value={quantityDraft}
-            onChangeText={(value) => {
-              setQuantityDraft(value);
-              setQuantityEditorError("");
-            }}
-            keyboardType="number-pad"
-            autoFocus
-            disabled={quantityEditorBusy}
-            error={Boolean(quantityEditorError)}
-            onFocus={pauseHiddenScannerFocus}
-            onBlur={() => {
-              if (!quantityEditorProduct) {
-                resumeHiddenScannerFocusSoon();
-              }
-            }}
-          />
-          {quantityEditorError ? (
-            <Text variant="bodySmall" style={styles.quantityEditorError}>
-              {quantityEditorError}
-            </Text>
-          ) : null}
-          <View style={styles.quantityEditorActions}>
+      <BusinessSheet
+        visible={Boolean(quantityEditorProduct)}
+        title={t("quantityEditor.title")}
+        onDismiss={handleDismissQuantityEditor}
+        dismissable={!quantityEditorBusy}
+        footer={
+          <View style={styles.sheetActions}>
             <Button
+              mode="outlined"
               onPress={handleDismissQuantityEditor}
               disabled={quantityEditorBusy}
+              style={styles.sheetActionButton}
+              contentStyle={styles.sheetActionContent}
             >
               {t("common:actions.cancel")}
             </Button>
@@ -1450,235 +1546,211 @@ export default function Home() {
               onPress={() => void handleConfirmQuantityEdit()}
               loading={quantityEditorBusy}
               disabled={quantityEditorBusy}
+              style={[styles.sheetActionButton, styles.sheetActionPrimary]}
+              contentStyle={styles.sheetActionContent}
             >
               {t("common:actions.confirm")}
             </Button>
           </View>
-        </Modal>
-      </Portal>
-
-      <Portal>
-        <Modal
-          visible={storePickerVisible}
-          onDismiss={() => setStorePickerVisible(false)}
-          contentContainerStyle={styles.filtersModal}
-        >
-          <ScrollView contentContainerStyle={styles.filtersModalContent}>
-            <View style={styles.filtersModalHeader}>
-              <View style={styles.filtersModalTitleWrap}>
-                <Text variant="titleMedium">{t("filters.store")}</Text>
-                <Text variant="bodySmall" style={styles.secondaryText}>
-                  {t("filters.currentStore", {
-                    store: selectedStore?.storeName || t("common:na"),
-                  })}
+        }
+      >
+        {quantityEditorProduct ? (
+          <>
+            <View style={styles.editorProduct}>
+              <OrderThumbnail uri={quantityEditorProduct.productImage} size={44} />
+              <View style={styles.editorProductCopy}>
+                <Text numberOfLines={2} style={styles.editorProductName}>
+                  {quantityEditorProduct.productName || quantityEditorProduct.productCode}
                 </Text>
-              </View>
-              <Button mode="text" onPress={() => setStorePickerVisible(false)}>
-                {t("common:actions.close")}
-              </Button>
-            </View>
-            <View style={styles.filtersSection}>
-              <View style={styles.filtersSectionHeader}>
-                <Text variant="labelLarge">{t("filters.store")}</Text>
-                <Button compact onPress={() => void refetchStores()}>
-                  {t("common:actions.refresh")}
-                </Button>
-              </View>
-              {storesLoading ? (
-                <Text variant="bodyMedium">{t("common:loading")}</Text>
-              ) : storesLoadFailed ? (
-                <View style={styles.storeErrorWrap}>
-                  <Text variant="bodyMedium">
-                    {getErrorMessage(storesError, "messages.storesLoadFailed")}
+                <View style={styles.editorProductMeta}>
+                  <GradeTag grade={quantityEditorProduct.grade} />
+                  <Text numberOfLines={1} style={styles.editorItemNumber}>
+                    {quantityEditorProduct.itemNumber || quantityEditorProduct.productCode}
                   </Text>
-                  <Button mode="outlined" onPress={() => void refetchStores()}>
-                    {t("common:actions.retry")}
-                  </Button>
+                  <Text numberOfLines={1} style={styles.editorMetaMuted}>
+                    · {t("common:orderRow.minOrder", { quantity: resolveMinimumOrderQuantity(quantityEditorProduct) })}
+                  </Text>
                 </View>
-              ) : stores.length ? (
-                <ScrollView
-                  style={styles.storeListScroll}
-                  contentContainerStyle={styles.storeListContent}
-                >
-                  {stores.map((item) => (
-                    <Button
-                      key={item.storeCode}
-                      mode={
-                        selectedStoreCode === item.storeCode
-                          ? "contained"
-                          : "outlined"
-                      }
-                      style={styles.storeButton}
-                      onPress={() => {
-                        void selectStore(item);
-                        setStorePickerVisible(false);
-                      }}
-                    >
-                      {item.storeName}
-                    </Button>
-                  ))}
-                </ScrollView>
-              ) : (
-                <Text variant="bodyMedium">{t("filters.noStores")}</Text>
-              )}
-            </View>
-          </ScrollView>
-        </Modal>
-      </Portal>
-
-      <Portal>
-        <Modal
-          visible={filtersVisible}
-          onDismiss={() => setFiltersVisible(false)}
-          contentContainerStyle={styles.filtersModal}
-        >
-          <View style={styles.filtersModalContent}>
-            <View style={styles.filtersModalHeader}>
-              <View style={styles.filtersModalTitleWrap}>
-                <Text variant="titleMedium">{t("filterTitle")}</Text>
-                <Text variant="bodySmall" style={styles.secondaryText}>
-                  {t("filters.currentCategory", {
-                    category: selectedCategoryName,
-                  })}
-                </Text>
               </View>
-              <Button mode="text" onPress={() => setFiltersVisible(false)}>
-                {t("common:actions.close")}
-              </Button>
             </View>
-            <View style={styles.filtersSection}>
-              <View style={styles.filtersSectionHeader}>
-                <Text variant="labelLarge">{t("filters.category")}</Text>
-                <Button
-                  compact
-                  onPress={() => handleSelectCategoryFilter(undefined)}
-                >
-                  {t("filters.allCategories")}
-                </Button>
-              </View>
-              <View
-                style={[
-                  styles.categoryTreeWrap,
-                  { maxHeight: Math.max(260, windowHeight - 260) },
-                ]}
+            {/* 编辑面板只收集覆盖数量；确认时统一走后端订货数量 mutation。 */}
+            <PaperTextInput
+              mode="outlined"
+              label={t("quantityEditor.inputLabel")}
+              value={quantityDraft}
+              onChangeText={(value) => {
+                setQuantityDraft(value);
+                setQuantityEditorError("");
+              }}
+              keyboardType="number-pad"
+              autoFocus
+              selectTextOnFocus
+              disabled={quantityEditorBusy}
+              error={Boolean(quantityEditorError)}
+              onFocus={pauseHiddenScannerFocus}
+              onBlur={() => {
+                if (!quantityEditorProduct) {
+                  resumeHiddenScannerFocusSoon();
+                }
+              }}
+              style={styles.editorInput}
+              contentStyle={styles.editorInputContent}
+            />
+            <Text style={styles.editorHelper}>
+              {t("quantityEditor.helper", {
+                current: getCurrentCartQuantity(quantityEditorProduct.productCode),
+              })}
+            </Text>
+            {quantityEditorError ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                accessibilityRole="alert"
+                style={styles.quantityEditorError}
               >
-                <Button
-                  compact
-                  mode={!selectedCategoryGUID ? "contained-tonal" : "text"}
-                  onPress={() => handleSelectCategoryFilter(undefined)}
-                  contentStyle={styles.resetFilterButtonContent}
-                >
-                  {t("filters.all")}
-                </Button>
-                {categoriesQuery.isLoading ? (
-                  <Text variant="bodyMedium">{t("common:loading")}</Text>
-                ) : (
-                  <FlatList
-                    data={filtersVisible ? visibleCategoryRows : []}
-                    keyExtractor={(item) => item.node.categoryGUID}
-                    renderItem={renderCategoryRow}
-                    contentContainerStyle={styles.categoryTreeListContent}
-                    keyboardShouldPersistTaps="handled"
-                    initialNumToRender={18}
-                    maxToRenderPerBatch={18}
-                    windowSize={5}
-                  />
-                )}
-              </View>
-            </View>
+                {quantityEditorError}
+              </Text>
+            ) : null}
+            <QuantityPresetRow
+              step={resolveMinimumOrderQuantity(quantityEditorProduct)}
+              value={quantityDraft}
+              disabled={quantityEditorBusy}
+              onSelect={(quantity) => {
+                setQuantityDraft(String(quantity));
+                setQuantityEditorError("");
+              }}
+            />
+          </>
+        ) : null}
+      </BusinessSheet>
+
+      <BusinessSheet
+        visible={storePickerVisible}
+        title={t("storePicker.title")}
+        subtitle={t("filters.currentStore", {
+          store: selectedStore?.storeName || t("common:na"),
+        })}
+        onDismiss={() => setStorePickerVisible(false)}
+        footer={<Text style={styles.sheetNote}>{t("storePicker.note")}</Text>}
+      >
+        <View style={styles.sheetToolbar}>
+          <Text style={styles.sheetSectionLabel}>{t("filters.store")}</Text>
+          <Button compact icon="refresh" onPress={() => void refetchStores()}>
+            {t("common:actions.refresh")}
+          </Button>
+        </View>
+        {storesLoading ? (
+          <Text variant="bodyMedium">{t("common:loading")}</Text>
+        ) : storesLoadFailed ? (
+          <View style={styles.storeErrorWrap}>
+            <Text variant="bodyMedium">
+              {getErrorMessage(storesError, "messages.storesLoadFailed")}
+            </Text>
+            <Button mode="outlined" onPress={() => void refetchStores()}>
+              {t("common:actions.retry")}
+            </Button>
           </View>
-        </Modal>
-      </Portal>
+        ) : stores.length ? (
+          <View accessibilityRole="radiogroup" style={styles.optionList}>
+            {stores.map((item) => {
+              const selected = selectedStoreCode === item.storeCode;
 
-      <Portal>
-        <Modal
-          visible={gradeFilterVisible}
-          onDismiss={() => setGradeFilterVisible(false)}
-          contentContainerStyle={styles.filtersModal}
-        >
-          <ScrollView contentContainerStyle={styles.filtersModalContent}>
-            <View style={styles.filtersModalHeader}>
-              <View style={styles.filtersModalTitleWrap}>
-                <Text variant="titleMedium">{t("gradeFilterTitle")}</Text>
-                <Text variant="bodySmall" style={styles.secondaryText}>
-                  {t("filters.currentGrade", { grade: selectedGradeLabel })}
-                </Text>
-              </View>
-              <Button mode="text" onPress={() => setGradeFilterVisible(false)}>
-                {t("common:actions.close")}
-              </Button>
-            </View>
-            <View style={styles.filtersSection}>
-              <View style={styles.filtersSectionHeader}>
-                <Text variant="labelLarge">{t("filters.grade")}</Text>
-                <Button compact onPress={() => setSelectedGrade(undefined)}>
-                  {t("filters.allGrades")}
-                </Button>
-              </View>
-              <View style={styles.gradeOptionsWrap}>
-                <Chip
-                  compact
-                  mode={!selectedGrade ? "flat" : "outlined"}
-                  selected={!selectedGrade}
+              return (
+                <Pressable
+                  key={item.storeCode}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
                   onPress={() => {
-                    setSelectedGrade(undefined);
-                    setGradeFilterVisible(false);
+                    searchReturnPageRef.current = null;
+                    setPageNumber(1);
+                    void selectStore(item);
+                    setStorePickerVisible(false);
                   }}
-                  style={[
-                    styles.filterChip,
-                    !selectedGrade ? styles.filterChipActive : null,
-                  ]}
-                  textStyle={[
-                    styles.filterChipText,
-                    !selectedGrade ? styles.filterChipTextActive : null,
+                  style={({ pressed }) => [
+                    styles.optionRow,
+                    selected ? styles.optionRowSelected : null,
+                    pressed ? styles.optionRowPressed : null,
                   ]}
                 >
-                  {t("filters.all")}
-                </Chip>
-                {gradeOptions.map((option) => {
-                  const grade = normalizeGradeValue(option.value);
-                  const isSelected = selectedGrade === grade;
+                  <View style={[styles.radio, selected ? styles.radioSelected : null]}>
+                    {selected ? <View style={styles.radioDot} /> : null}
+                  </View>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.optionLabel, selected ? styles.optionLabelSelected : null]}
+                  >
+                    {item.storeName}
+                  </Text>
+                  {selected ? (
+                    <View style={styles.currentTag}>
+                      <Text style={styles.currentTagText}>{t("storePicker.current")}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <Text variant="bodyMedium">{t("filters.noStores")}</Text>
+        )}
+      </BusinessSheet>
 
-                  return (
-                    <Chip
-                      key={option.value}
-                      compact
-                      mode={isSelected ? "flat" : "outlined"}
-                      selected={isSelected}
-                      onPress={() => {
-                        setSelectedGrade(isSelected ? undefined : grade);
-                        setGradeFilterVisible(false);
-                      }}
-                      style={[
-                        styles.filterChip,
-                        isSelected ? styles.filterChipActive : null,
-                      ]}
-                      textStyle={[
-                        styles.filterChipText,
-                        isSelected ? styles.filterChipTextActive : null,
-                      ]}
-                    >
-                      {t("common:grade", { grade: option.label })}
-                    </Chip>
-                  );
-                })}
-              </View>
-              {productGradesQuery.isError ? (
-                <Text variant="bodySmall" style={styles.secondaryText}>
-                  {t("filters.gradesLoadFailed")}
-                </Text>
-              ) : null}
-              {!gradeOptions.length ? (
-                <Text variant="bodySmall" style={styles.secondaryText}>
-                  {productGradesQuery.isLoading
-                    ? t("common:loading")
-                    : t("filters.noGrades")}
-                </Text>
-              ) : null}
-            </View>
-          </ScrollView>
-        </Modal>
-      </Portal>
+      <BusinessSheet
+        visible={filtersVisible}
+        title={t("filterTitle")}
+        subtitle={t("filters.currentCategory", {
+          category: selectedCategoryName,
+        })}
+        onDismiss={() => setFiltersVisible(false)}
+        footer={
+          selectedCategoryGUID ? (
+            <Button
+              mode="outlined"
+              icon="filter-remove-outline"
+              onPress={() => handleSelectCategoryFilter(undefined)}
+              contentStyle={styles.sheetActionContent}
+            >
+              {t("filters.clearCategory")}
+            </Button>
+          ) : undefined
+        }
+      >
+        <View style={styles.categoryList}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: !selectedCategoryGUID }}
+            onPress={() => handleSelectCategoryFilter(undefined)}
+            style={({ pressed }) => [
+              styles.categoryRow,
+              !selectedCategoryGUID ? styles.categoryRowSelected : null,
+              pressed ? styles.optionRowPressed : null,
+            ]}
+          >
+            <MaterialCommunityIcons
+              name="view-grid-outline"
+              size={18}
+              color={!selectedCategoryGUID ? HB_COLORS.action : HB_COLORS.textSecondary}
+            />
+            <Text
+              style={[
+                styles.categoryLabel,
+                styles.categoryLabelRoot,
+                !selectedCategoryGUID ? styles.categoryLabelSelected : null,
+              ]}
+            >
+              {t("filters.allCategories")}
+            </Text>
+            {!selectedCategoryGUID ? (
+              <MaterialCommunityIcons name="check" size={18} color={HB_COLORS.action} />
+            ) : null}
+          </Pressable>
+          <View style={styles.categoryDivider} />
+          {categoriesQuery.isLoading ? (
+            <Text variant="bodyMedium">{t("common:loading")}</Text>
+          ) : (
+            visibleCategoryRows.map(renderCategoryPickerRow)
+          )}
+        </View>
+      </BusinessSheet>
 
       <CameraScanSheet
         visible={
@@ -1704,10 +1776,15 @@ export default function Home() {
       >
         {lastCameraBarcode &&
         scanResult.feedback.barcode === lastCameraBarcode &&
-        ["not_found", "blocked", "error"].includes(
+        ["not_found", "blocked", "error", "supply_paused"].includes(
           scanResult.feedback.status,
         ) ? (
-          <View style={styles.cameraFeedbackBar}>
+          <View
+            style={[
+              styles.cameraFeedbackBar,
+              scanResult.feedback.status === "supply_paused" ? styles.cameraFeedbackBarPaused : null,
+            ]}
+          >
             <View style={styles.cameraHitCopy}>
               <Text variant="labelLarge">{scanResult.feedback.message}</Text>
               <Text
@@ -1828,66 +1905,310 @@ export default function Home() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F4F6F8",
+    backgroundColor: HB_COLORS.background,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingTop: 2,
+    paddingHorizontal: 12,
     paddingBottom: 8,
-    gap: 10,
-  },
-  headerCompact: {
     gap: 8,
+    backgroundColor: HB_COLORS.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HB_COLORS.outline,
   },
   headerTopRow: {
+    minHeight: 48,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    gap: 12,
-  },
-  headerTopRowCompact: {
     gap: 8,
   },
-  headerTitleWrap: {
+  storeButton: {
     flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  storeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: ORDER_COLORS.tonalBackground,
+  },
+  storeCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  storeCaption: {
+    color: ORDER_COLORS.subtleText,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  storeNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 2,
   },
-  headerTitle: {
-    color: "#0F172A",
+  storeName: {
+    flexShrink: 1,
+    color: HB_COLORS.textPrimary,
+    fontSize: 17,
+    lineHeight: 22,
     fontWeight: "700",
-    fontSize: 18,
   },
-  headerSubtitle: {
-    color: "#5B6474",
+  watchButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  headerNotice: {
-    minHeight: 40,
+  watchBadge: {
+    position: "absolute",
+    top: 4,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: HB_COLORS.success,
+  },
+  watchBadgeText: {
+    color: HB_COLORS.white,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  focusButtonContent: {
+    minHeight: 44,
+  },
+  searchInput: {
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HB_COLORS.outlineMuted,
+  },
+  searchInputText: {
+    minHeight: 0,
+    fontSize: 15,
+  },
+  filterRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  filterSpacer: {
+    flex: 1,
+  },
+  filterChip: {
+    height: 40,
+    maxWidth: 150,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingLeft: 10,
+    paddingRight: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#B7D6F6",
-    backgroundColor: "#EAF4FF",
+    borderColor: HB_COLORS.outline,
+    backgroundColor: HB_COLORS.white,
+  },
+  filterChipActive: {
+    borderColor: HB_COLORS.action,
+    backgroundColor: ORDER_COLORS.tonalBackground,
+  },
+  filterChipPressed: {
+    opacity: 0.75,
+  },
+  filterChipLabel: {
+    color: ORDER_COLORS.subtleText,
+    fontSize: 13,
+  },
+  filterChipValue: {
+    flexShrink: 1,
+    color: HB_COLORS.textPrimary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  filterChipValueActive: {
+    color: ORDER_COLORS.tonalText,
+  },
+  gradeMenu: {
+    backgroundColor: HB_COLORS.white,
+  },
+  autoAdd: {
+    height: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 10,
+    paddingRight: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: HB_COLORS.outline,
+    backgroundColor: HB_COLORS.white,
+  },
+  autoAddOn: {
+    borderColor: ORDER_COLORS.stepperBorder,
+    backgroundColor: ORDER_COLORS.tonalBackground,
+  },
+  autoAddText: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  autoAddTextOn: {
+    color: ORDER_COLORS.tonalText,
+  },
+  switchTrack: {
+    width: 32,
+    height: 20,
+    borderRadius: 10,
+    padding: 2,
+    backgroundColor: ORDER_COLORS.placeholderIcon,
+  },
+  switchTrackOn: {
+    backgroundColor: HB_COLORS.action,
+  },
+  switchKnob: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: HB_COLORS.white,
+  },
+  switchKnobOn: {
+    transform: [{ translateX: 12 }],
+  },
+  content: {
+    flex: 1,
+  },
+  listContent: {
+    flexGrow: 1,
+    paddingBottom: 12,
+  },
+  columnWrapper: {
+    gap: StyleSheet.hairlineWidth,
+  },
+  listMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HB_COLORS.outline,
+  },
+  listMetaText: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontVariant: ["tabular-nums"],
+  },
+  resultHeader: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingLeft: 12,
+    paddingRight: 4,
+    backgroundColor: ORDER_COLORS.tonalBackground,
+    borderBottomWidth: 1,
+    borderBottomColor: ORDER_COLORS.stepperBorder,
+  },
+  resultHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  resultHeaderTitle: {
+    color: ORDER_COLORS.tonalText,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  resultHeaderBarcode: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: ORDER_MONO_FONT,
+  },
+  resultHeaderButton: {
+    minHeight: 44,
+  },
+  pausedHeader: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
     paddingLeft: 12,
     paddingRight: 4,
     paddingVertical: 6,
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderBottomWidth: 1,
+    borderBottomColor: HB_COLORS.outline,
   },
-  headerNoticeText: {
-    flex: 1,
-    color: "#174A7C",
-    fontWeight: "600",
+  pausedHeaderTitle: {
+    color: ORDER_COLORS.paused,
+    fontSize: 13,
     lineHeight: 18,
+    fontWeight: "700",
   },
-  headerNoticeClose: {
-    width: 28,
-    height: 28,
-    margin: 0,
+  pausedHeaderHint: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  supplyStatusList: {
+    padding: 12,
+    gap: 10,
+  },
+  resultHint: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    color: ORDER_COLORS.subtleText,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+  },
+  homeEmptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+  },
+  paginationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+  },
+  paginationButton: {
+    flex: 1,
+    borderRadius: 8,
+  },
+  paginationButtonContent: {
+    minHeight: 44,
+  },
+  paginationNextContent: {
+    flexDirection: "row-reverse",
+  },
+  paginationText: {
+    minWidth: 72,
+    textAlign: "center",
+    color: HB_COLORS.textSecondary,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
   },
   preorderPromptModal: {
     marginHorizontal: 24,
     borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: HB_COLORS.white,
     padding: 20,
     gap: 12,
   },
@@ -1904,315 +2225,209 @@ const styles = StyleSheet.create({
   preorderPromptButtonContent: {
     minHeight: 44,
   },
-  filterToggleButton: {
-    margin: 0,
+  secondaryText: {
+    color: HB_COLORS.textSecondary,
   },
-  cartBox: {
-    minWidth: 82,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E4E7EC",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cartButton: {
-    margin: 0,
-  },
-  badge: {
-    position: "absolute",
-    top: 3,
-    right: 8,
-  },
-  cartText: {
-    color: "#2C3134",
-  },
-  categoryCardContent: {
+  sheetActions: {
+    flexDirection: "row",
     gap: 10,
   },
-  categoryCardContentCompact: {
-    gap: 6,
-    paddingVertical: 10,
-  },
-  categoryCardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-  },
-  categoryCardTitleWrap: {
+  sheetActionButton: {
     flex: 1,
-    gap: 2,
-  },
-  categoryCardActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  categoryTriggerButton: {
-    flex: 1,
-  },
-  categoryTriggerButtonContent: {
-    minHeight: 38,
-    justifyContent: "flex-start",
-  },
-  categoryTriggerButtonLabel: {
-    marginVertical: 0,
-  },
-  categoryMenuButton: {
-    margin: 0,
-  },
-  categoryTreeWrap: {
-    gap: 6,
-  },
-  categoryTreeListContent: {
-    gap: 6,
-  },
-  categoryTreeNode: {
-    gap: 6,
-  },
-  categoryTreeRow: {
-    minHeight: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     borderRadius: 10,
-    backgroundColor: "#f7f7f7",
-    paddingLeft: 4,
-    paddingRight: 2,
   },
-  categoryTreeRowSelected: {
-    backgroundColor: "#eef4ff",
+  sheetActionPrimary: {
+    flex: 2,
   },
-  categoryTreeButton: {
-    flex: 1,
-    alignItems: "flex-start",
-    justifyContent: "center",
+  sheetActionContent: {
+    minHeight: 48,
   },
-  categoryTreeButtonContent: {
-    justifyContent: "flex-start",
-    minHeight: 40,
-  },
-  categoryTreeButtonLabel: {
-    marginVertical: 0,
-  },
-  categoryTreeToggle: {
-    margin: 0,
-  },
-  searchRow: {
+  sheetToolbar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
   },
-  searchRowCompact: {
-    gap: 6,
-  },
-  cameraQueryButton: {
-    margin: 0,
-  },
-  scanModeSelector: {
-    marginTop: 2,
-  },
-  inlineCameraPanel: {
-    borderWidth: 1,
-    borderColor: "#DFE3E7",
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: "#FFFFFF",
-  },
-  inlineCameraView: {
-    width: "100%",
-    height: 220,
-  },
-  inlineCameraViewCompact: {
-    height: 160,
-  },
-  autoAddToggleButton: {
-    margin: 0,
-  },
-  scanFocusButton: {
-    margin: 0,
-  },
-  searchToggleButton: {
-    margin: 0,
-  },
-  searchClearFilterButton: {
-    margin: 0,
-  },
-  searchInputWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  searchInput: {
-    width: "100%",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#DFE3E7",
-    elevation: 0,
-  },
-  searchInputText: {
-    minHeight: 0,
-    fontSize: 14,
-  },
-  utilityRow: {
-    gap: 8,
-    paddingRight: 4,
-  },
-  utilityChip: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#DFE3E7",
-  },
-  utilityChipActive: {
-    backgroundColor: "#E8F3EC",
-    borderColor: "#9AF1C7",
-  },
-  utilityChipText: {
-    color: "#45474C",
-    fontSize: 12,
-  },
-  utilityChipTextActive: {
-    color: "#0B704F",
-    fontWeight: "700",
-  },
-  filterChip: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#C5C6CD",
-  },
-  filterChipActive: {
-    backgroundColor: "#111C2E",
-    borderColor: "#111C2E",
-  },
-  filterChipText: {
-    fontSize: 12,
-    color: "#45474C",
-  },
-  filterChipTextActive: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-  gradeOptionsWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  resetFilterButtonContent: {
-    justifyContent: "flex-start",
-  },
-  scanHintBanner: {
-    borderRadius: 8,
-    backgroundColor: "#EEF4FF",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  scanHintText: {
-    color: "#1677FF",
+  sheetSectionLabel: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 13,
     fontWeight: "600",
   },
-  content: {
-    flex: 1,
+  sheetNote: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingBottom: 4,
   },
-  listContent: {
-    paddingHorizontal: 4,
-    paddingBottom: 16,
-    paddingTop: 6,
-    flexGrow: 1,
-  },
-  listContentCompact: {
-    paddingBottom: 0,
-  },
-  supplyStatusList: {
-    paddingHorizontal: 12,
-    paddingVertical: 16,
-    gap: 10,
-  },
-  supplyStatusHint: {
-    color: "#475467",
-    marginBottom: 4,
-  },
-  homeEmptyState: {
-    flexGrow: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-    paddingTop: 28,
-  },
-  columnWrapper: {
-    justifyContent: "space-between",
-    gap: 0,
-  },
-  paginationRow: {
+  editorProduct: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    gap: 10,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HB_COLORS.outline,
+    backgroundColor: ORDER_COLORS.mutedRow,
+  },
+  editorProductCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  editorProductName: {
+    color: HB_COLORS.textPrimary,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  editorProductMeta: {
+    flexDirection: "row",
     alignItems: "center",
-    marginHorizontal: 8,
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    gap: 6,
   },
-  filtersModal: {
-    margin: 16,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    padding: 16,
+  editorItemNumber: {
+    flexShrink: 1,
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    fontFamily: ORDER_MONO_FONT,
   },
-  filtersModalContent: {
-    gap: 16,
+  editorMetaMuted: {
+    color: ORDER_COLORS.subtleText,
+    fontSize: 12,
   },
-  quantityEditorModal: {
-    margin: 16,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    padding: 16,
-    gap: 12,
+  editorInput: {
+    backgroundColor: HB_COLORS.white,
+  },
+  editorInputContent: {
+    fontSize: 24,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  editorHelper: {
+    color: HB_COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
   },
   quantityEditorError: {
-    color: "#BA1A1A",
+    color: HB_COLORS.danger,
+    fontSize: 12,
+    lineHeight: 16,
   },
-  quantityEditorActions: {
+  storeErrorWrap: {
+    gap: 12,
+  },
+  optionList: {
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HB_COLORS.outline,
+    overflow: "hidden",
+  },
+  optionRow: {
+    minHeight: 56,
     flexDirection: "row",
-    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    backgroundColor: HB_COLORS.white,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HB_COLORS.outlineMuted,
+  },
+  optionRowSelected: {
+    backgroundColor: ORDER_COLORS.inCartRow,
+  },
+  optionRowPressed: {
+    backgroundColor: HB_COLORS.surfaceMuted,
+  },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: ORDER_COLORS.placeholderIcon,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioSelected: {
+    borderColor: HB_COLORS.action,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: HB_COLORS.action,
+  },
+  optionLabel: {
+    flex: 1,
+    color: HB_COLORS.textPrimary,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  optionLabelSelected: {
+    color: ORDER_COLORS.tonalText,
+    fontWeight: "700",
+  },
+  currentTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: ORDER_COLORS.tonalBackground,
+  },
+  currentTagText: {
+    color: HB_COLORS.action,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  categoryList: {
+    gap: 2,
+  },
+  categoryRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  categoryRowSelected: {
+    backgroundColor: ORDER_COLORS.tonalBackground,
+  },
+  categoryDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 4,
+    backgroundColor: HB_COLORS.outline,
+  },
+  categoryTreeRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 8,
+  },
+  categoryTreeLabelButton: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 48,
+    flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    paddingRight: 8,
   },
-  filtersModalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
+  categoryLabel: {
+    flexShrink: 1,
+    color: HB_COLORS.textPrimary,
+    fontSize: 14,
   },
-  filtersModalTitleWrap: {
+  categoryLabelRoot: {
     flex: 1,
-    gap: 4,
+    fontSize: 15,
+    fontWeight: "600",
   },
-  filtersSection: {
-    gap: 10,
+  categoryLabelSelected: {
+    color: ORDER_COLORS.tonalText,
+    fontWeight: "700",
   },
-  filtersSectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  categoryToggle: {
+    width: 44,
+    height: 44,
     alignItems: "center",
-    gap: 12,
-  },
-  cameraModal: {
-    margin: 16,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    padding: 16,
-    gap: 12,
-  },
-  cameraModalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-  },
-  cameraModalTitleWrap: {
-    flex: 1,
-    gap: 4,
+    justifyContent: "center",
   },
   cameraView: {
     width: "100%",
@@ -2227,13 +2442,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  cameraFeedbackBarPaused: {
+    backgroundColor: HB_COLORS.surfaceMuted,
+  },
   cameraHitBar: {
     minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderRadius: 8,
-    backgroundColor: "#EAF2FF",
+    backgroundColor: ORDER_COLORS.tonalBackground,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
@@ -2248,25 +2466,10 @@ const styles = StyleSheet.create({
   permissionCardContent: {
     gap: 12,
   },
-  storeButton: {
-    marginBottom: 8,
-  },
-  storeListScroll: {
-    maxHeight: 280,
-  },
-  storeListContent: {
-    paddingBottom: 4,
-  },
-  storeErrorWrap: {
-    gap: 12,
-  },
   hiddenInput: {
     position: "absolute",
     width: 1,
     height: 1,
     opacity: 0,
-  },
-  secondaryText: {
-    color: "#666",
   },
 });

@@ -1,4 +1,4 @@
-import type { StoreOrderProductQuery } from "./types";
+import type { StoreOrderProductItem, StoreOrderProductQuery } from "./types";
 
 export function buildShopProductsQueryKey(
   query: StoreOrderProductQuery,
@@ -33,4 +33,13 @@ export function resolveShopProductsPlaceholderData<T>(
   }
 
   return previousData;
+}
+
+/** 本页商品编码，顺序与列表一致；动态数据缓存键依赖它。 */
+export function resolvePageProductCodes(items: StoreOrderProductItem[] | undefined) {
+  return (items ?? []).map((item) => item.productCode).filter(Boolean);
+}
+
+export function buildShopDynamicDataQueryKey(storeCode: string | null | undefined, productCodes: string[]) {
+  return ["shopDynamicData", storeCode ?? null, productCodes] as const;
 }

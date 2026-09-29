@@ -220,6 +220,7 @@
     <Compile Include="LocalSupplierInvoicesArchitectureContractTests.cs" />
     <Compile Include="LocalSupplierInvoicesTransactionContractTests.cs" />
     <Compile Include="StoreOrderProductListTests.cs" />
+    <Compile Include="StoreOrderProductPickerSqlServerTests.cs" />
     <Compile Include="StoreOrderImportPriceVarianceTests.cs" />
     <Compile Include="StoreOrderPasteReplaceJobServiceTests.cs" />
     <Compile Include="StoreOrderContactAndInvoiceTests.cs" />

@@ -385,5 +385,29 @@
       "selectSupplierA11y": "{{supplier}}，点按联动分店与商品明细",
       "selectedSupplierA11y": "{{supplier}}，已选中，再点取消"
     }
+  },
+  "orderRow": {
+    "minOrder": "起订 {{quantity}}",
+    "importPrice": "进货",
+    "retailPrice": "零售",
+    "unitPrice": "{{amount}} / 件",
+    "subtotal": "小计",
+    "add": "加购",
+    "addWithStep": "加购 ×{{step}}",
+    "addAccessibility": "加购 {{name}}，数量 {{quantity}}",
+    "decrease": "减少一个起订量",
+    "increase": "增加一个起订量",
+    "remove": "移出购物车",
+    "justScanned": "刚扫入",
+    "zeroImportPrice": "进价为 0"
+  },
+  "orderNotice": {
+    "addedNamed": "已加入 {{name}}",
+    "addedQuantity": "×{{quantity}}"
+  },
+  "quantityPresets": {
+    "caption": "快捷数量（起订 {{step}} 的倍数）",
+    "clear": "清零",
+    "set": "设为 {{quantity}}"
   }
 }
