@@ -788,7 +788,7 @@ export default function ShopHomePage() {
         }
 
         const result = await withShopBarcodeRequestTimeout(
-          (signal) => lookupStoreOrderProductsByBarcode(barcode, signal),
+          (signal) => lookupStoreOrderProductsByBarcode(barcode, storeCode, signal),
         )
         if (selectedStoreCodeRef.current !== storeCode) {
           return 'ignored'
