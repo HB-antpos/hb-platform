@@ -102,6 +102,17 @@ public sealed class StartupProgressStateTests
     }
 
     [Theory]
+    [InlineData("en-US", new[] { "Services", "Interface", "Updates", "Device", "Products", "Checkout" })]
+    [InlineData("zh-CN", new[] { "启动服务", "加载界面", "检查更新", "验证设备", "加载商品", "打开收银台" })]
+    public void Steps_carry_localized_short_names_in_phase_order(string culture, string[] expected)
+    {
+        var state = CreateState(culture);
+
+        Assert.Equal(expected, state.Steps.Select(step => step.Title).ToArray());
+        Assert.Equal(StartupProgressTracker.Phases, state.Steps.Select(step => step.Phase).ToArray());
+    }
+
+    [Theory]
     [InlineData(StartupPhase.Update, 3500, 600, true)]
     [InlineData(StartupPhase.Device, 3200, 500, true)]
     // 未到 3 秒下限：即使已超出预期很多倍也不提示。

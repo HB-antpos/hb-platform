@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:Hbpos.Client.Wpf"
         Title="{Binding TitleText}"
-        Width="540"
-        Height="296"
+        Width="640"
+        Height="356"
         WindowStyle="None"
         ResizeMode="NoResize"
         WindowStartupLocation="Manual"
@@ -21,43 +21,52 @@
         不能引用 App.xaml 的 StaticResource，也不能依赖主线程正在加载的主题字典；
         文案全部绑定启动页自己的视图模型，不使用 loc:Loc（它绑定主线程的本地化单例）。
         所有文字都固定行高，保证中英文字体回退时卡片高度不变、与窗口高度严格对齐。
+        布局：左侧品牌橙色区（图标、门店、版本），右侧当前阶段 + 六步清单 + 进度条，卡住时一眼看出停在哪一步。
     -->
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
-        <SolidColorBrush x:Key="InkBrush" Color="#FF1E293B" />
+        <SolidColorBrush x:Key="InkBrush" Color="#FF0F172A" />
         <SolidColorBrush x:Key="BodyBrush" Color="#FF475569" />
         <SolidColorBrush x:Key="MutedBrush" Color="#FF64748B" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#FF2563EB" />
-        <SolidColorBrush x:Key="AccentSoftBrush" Color="#FFEFF6FF" />
-        <SolidColorBrush x:Key="TrackBrush" Color="#FFE2E8F0" />
-        <SolidColorBrush x:Key="DividerBrush" Color="#FFEEF1F5" />
-        <SolidColorBrush x:Key="PendingRingBrush" Color="#FFCBD5E1" />
+        <SolidColorBrush x:Key="SubtleBrush" Color="#FF94A3B8" />
+        <SolidColorBrush x:Key="PendingTextBrush" Color="#FF9AA3AF" />
+        <SolidColorBrush x:Key="PendingRingBrush" Color="#FFD4D8DE" />
+        <SolidColorBrush x:Key="BrandBrush" Color="#FFEA580C" />
+        <SolidColorBrush x:Key="TrackBrush" Color="#FFF1F3F6" />
         <SolidColorBrush x:Key="WarnBrush" Color="#FFB45309" />
-        <SolidColorBrush x:Key="SuccessSoftBrush" Color="#FFDCFCE7" />
-        <SolidColorBrush x:Key="SuccessDeepBrush" Color="#FF166534" />
+        <SolidColorBrush x:Key="OnBrandBrush" Color="White" />
+        <SolidColorBrush x:Key="OnBrandMutedBrush" Color="#E6FFFFFF" />
+        <SolidColorBrush x:Key="OnBrandSubtleBrush" Color="#CCFFFFFF" />
+        <SolidColorBrush x:Key="OnBrandTintBrush" Color="#33FFFFFF" />
+        <SolidColorBrush x:Key="OnBrandTileBrush" Color="#26FFFFFF" />
+
+        <LinearGradientBrush x:Key="BrandPanelBrush" StartPoint="0,0" EndPoint="0.6,1">
+            <GradientStop Offset="0" Color="#FFF47540" />
+            <GradientStop Offset="1" Color="#FFD9481F" />
+        </LinearGradientBrush>
 
         <Style x:Key="StartupProgressBarStyle" TargetType="ProgressBar">
             <Setter Property="Minimum" Value="0" />
             <Setter Property="Maximum" Value="100" />
-            <Setter Property="Height" Value="8" />
+            <Setter Property="Height" Value="6" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ProgressBar">
                         <Grid>
-                            <Border x:Name="PART_Track" Background="{StaticResource TrackBrush}" CornerRadius="4" />
+                            <Border x:Name="PART_Track" Background="{StaticResource TrackBrush}" CornerRadius="3" />
                             <!-- 高光是指示条自身背景里的一段渐变，随圆角一起裁剪；由代码按系统动画设置决定是否播放。 -->
-                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="4">
+                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="3">
                                 <Border.Background>
                                     <LinearGradientBrush MappingMode="Absolute" StartPoint="0,0" EndPoint="120,0">
                                         <LinearGradientBrush.Transform>
                                             <TranslateTransform x:Name="SheenTransform" X="-120" />
                                         </LinearGradientBrush.Transform>
-                                        <GradientStop Offset="0" Color="#FF2563EB" />
-                                        <GradientStop Offset="0.35" Color="#FF2563EB" />
-                                        <GradientStop Offset="0.5" Color="#FF60A5FA" />
-                                        <GradientStop Offset="0.65" Color="#FF2563EB" />
-                                        <GradientStop Offset="1" Color="#FF2563EB" />
+                                        <GradientStop Offset="0" Color="#FFEA580C" />
+                                        <GradientStop Offset="0.35" Color="#FFEA580C" />
+                                        <GradientStop Offset="0.5" Color="#FFFDBA74" />
+                                        <GradientStop Offset="0.65" Color="#FFEA580C" />
+                                        <GradientStop Offset="1" Color="#FFEA580C" />
                                     </LinearGradientBrush>
                                 </Border.Background>
                             </Border>
@@ -67,76 +76,183 @@
             </Setter>
         </Style>
 
-        <DataTemplate x:Key="StepDotTemplate" DataType="{x:Type local:StartupStepItem}">
-            <Ellipse x:Name="Dot"
-                     Width="8"
-                     Height="8"
-                     Margin="0,0,6,0"
-                     Fill="White"
-                     Stroke="{StaticResource PendingRingBrush}"
-                     StrokeThickness="1.5" />
-            <DataTemplate.Triggers>
-                <DataTrigger Binding="{Binding State}" Value="{x:Static local:StartupStepState.Active}">
-                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource AccentSoftBrush}" />
-                    <Setter TargetName="Dot" Property="Stroke" Value="{StaticResource AccentBrush}" />
+        <Style x:Key="StageDetailTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Style.Triggers>
+                <!-- 网络阶段等待过久时换成琥珀色说明，提示"在等服务器"而不是卡死。 -->
+                <DataTrigger Binding="{Binding IsStageSlow}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource WarnBrush}" />
                 </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 清单一行：已完成=橙底白勾，进行中=橙圈橙点并加粗，未开始=灰圈灰字。 -->
+        <DataTemplate x:Key="StepRowTemplate" DataType="{x:Type local:StartupStepItem}">
+            <StackPanel Orientation="Horizontal" Height="25">
+                <Grid Width="18" Height="18" VerticalAlignment="Center">
+                    <Ellipse x:Name="Ring" Fill="White" Stroke="{StaticResource PendingRingBrush}" StrokeThickness="1.5" />
+                    <Ellipse x:Name="Core" Width="6" Height="6" Fill="{StaticResource BrandBrush}" Visibility="Collapsed" />
+                    <Path x:Name="Tick"
+                          Width="9"
+                          Height="9"
+                          Stretch="Uniform"
+                          Data="M5,12.5 L9.5,17 L19,7.5"
+                          Stroke="White"
+                          StrokeThickness="3"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          StrokeLineJoin="Round"
+                          Visibility="Collapsed" />
+                </Grid>
+                <TextBlock x:Name="Label"
+                           Margin="10,0,0,0"
+                           Text="{Binding Title}"
+                           FontSize="13"
+                           LineHeight="18"
+                           LineStackingStrategy="BlockLineHeight"
+                           Foreground="{StaticResource PendingTextBrush}"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+            <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding State}" Value="{x:Static local:StartupStepState.Done}">
-                    <Setter TargetName="Dot" Property="Fill" Value="{StaticResource AccentBrush}" />
-                    <Setter TargetName="Dot" Property="Stroke" Value="{StaticResource AccentBrush}" />
+                    <Setter TargetName="Ring" Property="Fill" Value="{StaticResource BrandBrush}" />
+                    <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource BrandBrush}" />
+                    <Setter TargetName="Tick" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Label" Property="Foreground" Value="{StaticResource BodyBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="{x:Static local:StartupStepState.Active}">
+                    <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource BrandBrush}" />
+                    <Setter TargetName="Ring" Property="StrokeThickness" Value="2" />
+                    <Setter TargetName="Core" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Label" Property="Foreground" Value="{StaticResource InkBrush}" />
+                    <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
     </Window.Resources>
 
-    <!-- 外层留 10px 透明边距，避免裁掉卡片圆角；与更新进度窗口同一套卡片样式。 -->
+    <!-- 外层留 10px 透明边距，避免裁掉卡片圆角。 -->
     <Grid Margin="10" Background="Transparent">
         <Border x:Name="Card"
                 Background="White"
-                BorderBrush="#FFE3E7EF"
+                BorderBrush="#FFE2E6EC"
                 BorderThickness="1"
-                CornerRadius="18"
-                Padding="32,28,32,20">
-            <StackPanel>
-                <StackPanel Orientation="Horizontal">
-                    <Image Width="48"
-                           Height="48"
-                           Source="pack://application:,,,/Resources/AppBrandIcon.png"
-                           Stretch="Uniform"
-                           RenderOptions.BitmapScalingMode="HighQuality"
-                           VerticalAlignment="Center"
-                           SnapsToDevicePixels="True"
-                           UseLayoutRounding="True"
-                           IsHitTestVisible="False"
-                           AutomationProperties.AutomationId="StartupBrandMark"
-                           AutomationProperties.Name="{Binding TitleText}" />
-                    <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding TitleText}"
-                                   FontSize="20"
-                                   FontWeight="Bold"
-                                   LineHeight="26"
-                                   LineStackingStrategy="BlockLineHeight"
-                                   Foreground="{StaticResource InkBrush}"
-                                   AutomationProperties.AutomationId="StartupTitle" />
-                        <TextBlock Margin="0,2,0,0"
-                                   Text="{Binding SubtitleText}"
-                                   FontSize="13"
-                                   LineHeight="18"
-                                   LineStackingStrategy="BlockLineHeight"
-                                   Foreground="{StaticResource MutedBrush}"
-                                   TextTrimming="CharacterEllipsis"
-                                   MaxWidth="380"
-                                   AutomationProperties.AutomationId="StartupSubtitle" />
-                    </StackPanel>
-                </StackPanel>
+                CornerRadius="18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-                <Grid Margin="0,24,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Bottom">
+                <!-- 左：品牌区 -->
+                <Border CornerRadius="17,0,0,17" Background="{StaticResource BrandPanelBrush}">
+                    <Grid Margin="26,30,22,24">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel>
+                            <Border Width="64"
+                                    Height="64"
+                                    CornerRadius="16"
+                                    HorizontalAlignment="Left"
+                                    Background="{StaticResource OnBrandTileBrush}">
+                                <Image Width="56"
+                                       Height="56"
+                                       Source="pack://application:,,,/Resources/AppBrandIcon.png"
+                                       Stretch="Uniform"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       VerticalAlignment="Center"
+                                       SnapsToDevicePixels="True"
+                                       UseLayoutRounding="True"
+                                       IsHitTestVisible="False"
+                                       AutomationProperties.AutomationId="StartupBrandMark"
+                                       AutomationProperties.Name="{Binding TitleText}" />
+                            </Border>
+                            <TextBlock Margin="0,18,0,0"
+                                       Text="{Binding TitleText}"
+                                       FontSize="24"
+                                       FontWeight="Bold"
+                                       LineHeight="30"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Foreground="{StaticResource OnBrandBrush}"
+                                       TextTrimming="CharacterEllipsis"
+                                       AutomationProperties.AutomationId="StartupTitle" />
+                            <!-- 门店名 · 设备号，过长时最多两行。 -->
+                            <TextBlock Margin="0,4,0,0"
+                                       Text="{Binding SubtitleText}"
+                                       FontSize="13"
+                                       LineHeight="18"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       MaxHeight="36"
+                                       TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       Foreground="{StaticResource OnBrandMutedBrush}"
+                                       AutomationProperties.AutomationId="StartupSubtitle" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="2" AutomationProperties.AutomationId="StartupVersionFooter">
+                            <!-- 更新后首次启动在版本号上方显示"已更新到"标签；平时不占位。 -->
+                            <Border Margin="0,0,0,10"
+                                    Height="22"
+                                    Padding="8,0,10,0"
+                                    HorizontalAlignment="Left"
+                                    CornerRadius="11"
+                                    Background="{StaticResource OnBrandTintBrush}"
+                                    Visibility="{Binding HasUpdateNotice, Converter={StaticResource BoolToVis}}"
+                                    AutomationProperties.AutomationId="StartupUpdateNotice">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Path Width="10"
+                                          Height="10"
+                                          Stretch="Uniform"
+                                          VerticalAlignment="Center"
+                                          Data="M5,12.5 L9.5,17 L19,7.5"
+                                          Stroke="{StaticResource OnBrandBrush}"
+                                          StrokeThickness="2.8"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round" />
+                                    <TextBlock Text="{Binding UpdateNoticeText}"
+                                               Margin="6,0,0,0"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource OnBrandBrush}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding VersionLabel}"
+                                           FontSize="12"
+                                           LineHeight="16"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           Foreground="{StaticResource OnBrandSubtleBrush}" />
+                                <TextBlock Text="{Binding VersionText}"
+                                           Margin="4,0,0,0"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           LineHeight="16"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           Foreground="{StaticResource OnBrandSubtleBrush}"
+                                           Typography.NumeralAlignment="Tabular"
+                                           AutomationProperties.AutomationId="StartupVersionText" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- 右：当前阶段 + 步骤清单 + 进度 -->
+                <Grid Grid.Column="1" Margin="30,26,28,22">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel>
                         <TextBlock Text="{Binding StageTitle}"
-                                   FontSize="17"
+                                   FontSize="18"
                                    FontWeight="SemiBold"
                                    LineHeight="24"
                                    LineStackingStrategy="BlockLineHeight"
@@ -144,128 +260,61 @@
                                    TextTrimming="CharacterEllipsis"
                                    AutomationProperties.AutomationId="StartupStageTitle"
                                    AutomationProperties.LiveSetting="Polite" />
-                        <TextBlock Margin="0,4,0,0"
+                        <TextBlock Margin="0,3,0,0"
                                    Text="{Binding StageDetail}"
-                                   FontSize="13"
+                                   FontSize="12.5"
                                    LineHeight="18"
                                    LineStackingStrategy="BlockLineHeight"
+                                   Height="18"
                                    TextTrimming="CharacterEllipsis"
-                                   AutomationProperties.AutomationId="StartupStageDetail">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
-                                    <Style.Triggers>
-                                        <!-- 网络阶段等待过久时换成琥珀色说明，提示"在等服务器"而不是卡死。 -->
-                                        <DataTrigger Binding="{Binding IsStageSlow}" Value="True">
-                                            <Setter Property="Foreground" Value="{StaticResource WarnBrush}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
+                                   Style="{StaticResource StageDetailTextStyle}"
+                                   AutomationProperties.AutomationId="StartupStageDetail" />
                     </StackPanel>
-                    <TextBlock Grid.Column="1"
-                               Margin="16,0,0,0"
-                               VerticalAlignment="Bottom"
-                               LineHeight="46"
-                               LineStackingStrategy="BlockLineHeight"
-                               Foreground="{StaticResource AccentBrush}"
-                               Typography.NumeralAlignment="Tabular"
-                               AutomationProperties.AutomationId="StartupPercent">
-                        <Run Text="{Binding PercentText, Mode=OneWay}" FontSize="40" FontWeight="Bold" /><Run Text="%" FontSize="20" FontWeight="SemiBold" />
-                    </TextBlock>
-                </Grid>
 
-                <ProgressBar x:Name="StartupProgressBar"
-                             Margin="0,14,0,0"
-                             Value="{Binding ProgressValue, Mode=OneWay}"
-                             Style="{StaticResource StartupProgressBarStyle}"
-                             AutomationProperties.AutomationId="StartupProgressBar"
-                             AutomationProperties.Name="{Binding StageTitle}" />
+                    <ItemsControl Grid.Row="1"
+                                  Margin="0,14,0,0"
+                                  ItemsSource="{Binding Steps}"
+                                  ItemTemplate="{StaticResource StepRowTemplate}"
+                                  Focusable="False"
+                                  IsTabStop="False"
+                                  AutomationProperties.AutomationId="StartupStepList"
+                                  AutomationProperties.Name="{Binding StepText}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="2" Rows="3" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
 
-                <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                        <ItemsControl ItemsSource="{Binding Steps}"
-                                      ItemTemplate="{StaticResource StepDotTemplate}"
-                                      VerticalAlignment="Center"
-                                      Focusable="False"
-                                      IsTabStop="False">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
-                        <TextBlock Margin="2,0,0,0"
-                                   Text="{Binding StepText}"
-                                   FontSize="12"
-                                   LineHeight="16"
-                                   LineStackingStrategy="BlockLineHeight"
-                                   Foreground="{StaticResource MutedBrush}"
-                                   Typography.NumeralAlignment="Tabular"
-                                   VerticalAlignment="Center"
-                                   AutomationProperties.AutomationId="StartupStepText" />
-                    </StackPanel>
-                    <TextBlock DockPanel.Dock="Right"
-                               Text="{Binding ElapsedText}"
-                               FontSize="12"
-                               LineHeight="16"
-                               LineStackingStrategy="BlockLineHeight"
-                               Foreground="{StaticResource MutedBrush}"
-                               Typography.NumeralAlignment="Tabular"
-                               VerticalAlignment="Center"
-                               AutomationProperties.AutomationId="StartupElapsed" />
-                </DockPanel>
-
-                <Border Margin="0,20,0,0"
-                        BorderBrush="{StaticResource DividerBrush}"
-                        BorderThickness="0,1,0,0"
-                        Padding="0,14,0,0"
-                        AutomationProperties.AutomationId="StartupVersionFooter">
-                    <DockPanel Height="24" LastChildFill="False">
-                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding VersionLabel}"
+                    <StackPanel Grid.Row="2">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="{Binding ElapsedText}"
                                        FontSize="12"
-                                       Foreground="{StaticResource MutedBrush}" />
-                            <TextBlock Text="{Binding VersionText}"
-                                       Margin="6,0,0,0"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource BodyBrush}"
+                                       LineHeight="16"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Foreground="{StaticResource SubtleBrush}"
                                        Typography.NumeralAlignment="Tabular"
-                                       AutomationProperties.AutomationId="StartupVersionText" />
-                        </StackPanel>
-                        <!-- 更新后首次启动在右下角显示"已更新到"标签；平时不占位。 -->
-                        <Border DockPanel.Dock="Right"
-                                Height="24"
-                                Padding="8,0,10,0"
-                                VerticalAlignment="Center"
-                                CornerRadius="12"
-                                Background="{StaticResource SuccessSoftBrush}"
-                                Visibility="{Binding HasUpdateNotice, Converter={StaticResource BoolToVis}}"
-                                AutomationProperties.AutomationId="StartupUpdateNotice">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Path Width="14"
-                                      Height="14"
-                                      Stretch="Uniform"
-                                      VerticalAlignment="Center"
-                                      Data="M5,12.5 L9.5,17 L19,7.5"
-                                      Stroke="{StaticResource SuccessDeepBrush}"
-                                      StrokeThickness="2.6"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round" />
-                                <TextBlock Text="{Binding UpdateNoticeText}"
-                                           Margin="6,0,0,0"
-                                           FontSize="12"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource SuccessDeepBrush}"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Border>
-                    </DockPanel>
-                </Border>
-            </StackPanel>
+                                       VerticalAlignment="Bottom"
+                                       AutomationProperties.AutomationId="StartupElapsed" />
+                            <TextBlock DockPanel.Dock="Right"
+                                       VerticalAlignment="Bottom"
+                                       LineHeight="28"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Foreground="{StaticResource InkBrush}"
+                                       Typography.NumeralAlignment="Tabular"
+                                       AutomationProperties.AutomationId="StartupPercent">
+                                <Run Text="{Binding PercentText, Mode=OneWay}" FontSize="22" FontWeight="Bold" /><Run Text="%" FontSize="13" Foreground="{StaticResource MutedBrush}" />
+                            </TextBlock>
+                        </DockPanel>
+                        <ProgressBar x:Name="StartupProgressBar"
+                                     Margin="0,8,0,0"
+                                     Value="{Binding ProgressValue, Mode=OneWay}"
+                                     Style="{StaticResource StartupProgressBarStyle}"
+                                     AutomationProperties.AutomationId="StartupProgressBar"
+                                     AutomationProperties.Name="{Binding StageTitle}" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
         </Border>
     </Grid>
 </Window>

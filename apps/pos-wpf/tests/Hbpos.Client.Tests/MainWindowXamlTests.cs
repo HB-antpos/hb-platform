@@ -304,9 +304,10 @@ public sealed class MainWindowXamlTests
 
         var brandMark = FindElementByAutomationId(document, "StartupBrandMark");
 
-        AssertSharedBrandImage(brandMark, "48", "48", StartupSplashAutomationName);
-        Assert.Equal(presentation + "StackPanel", brandMark.Parent?.Name);
-        Assert.Equal("Horizontal", (string?)brandMark.Parent?.Attribute("Orientation"));
+        AssertSharedBrandImage(brandMark, "56", "56", StartupSplashAutomationName);
+        // 图标放在品牌橙色区的半透明圆角底板里。
+        Assert.Equal(presentation + "Border", brandMark.Parent?.Name);
+        Assert.Equal("64", (string?)brandMark.Parent?.Attribute("Width"));
         Assert.Equal("Center", (string?)brandMark.Attribute("VerticalAlignment"));
         Assert.DoesNotContain(document.Descendants(presentation + "TextBlock"), element =>
             string.Equals((string?)element.Attribute("Text"), "HB", StringComparison.Ordinal));
@@ -382,7 +383,9 @@ public sealed class MainWindowXamlTests
         Assert.Equal("{Binding ProgressValue, Mode=OneWay}", (string?)progressBar.Attribute("Value"));
         Assert.Equal("{Binding StageTitle}", (string?)FindElementByAutomationId(document, "StartupStageTitle").Attribute("Text"));
         Assert.Equal("{Binding StageDetail}", (string?)FindElementByAutomationId(document, "StartupStageDetail").Attribute("Text"));
-        Assert.Equal("{Binding StepText}", (string?)FindElementByAutomationId(document, "StartupStepText").Attribute("Text"));
+        var stepList = FindElementByAutomationId(document, "StartupStepList");
+        Assert.Equal("{Binding Steps}", (string?)stepList.Attribute("ItemsSource"));
+        Assert.Equal("{Binding StepText}", (string?)stepList.Attribute("AutomationProperties.Name"));
         Assert.Equal("{Binding ElapsedText}", (string?)FindElementByAutomationId(document, "StartupElapsed").Attribute("Text"));
         Assert.Contains(FindElementByAutomationId(document, "StartupPercent").Descendants(), element =>
             (string?)element.Attribute("Text") == "{Binding PercentText, Mode=OneWay}");
@@ -468,7 +471,7 @@ public sealed class MainWindowXamlTests
                 StringComparison.Ordinal)));
 
         AssertSharedBrandImage(FindElementByAutomationId(mainWindow, "HeaderBrandMark"), "32", "32");
-        AssertSharedBrandImage(FindElementByAutomationId(startup, "StartupBrandMark"), "48", "48", StartupSplashAutomationName);
+        AssertSharedBrandImage(FindElementByAutomationId(startup, "StartupBrandMark"), "56", "56", StartupSplashAutomationName);
         AssertSharedBrandImage(registrationIcon, "42", "42");
     }
 
