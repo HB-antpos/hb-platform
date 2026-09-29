@@ -1,0 +1,38 @@
+import { z } from "zod";
+import { apiClient } from "@/shared/api/client";
+import { unwrapApiEnvelope } from "@/shared/api/api-envelope";
+import type { ContainerNewProductsResponse } from "./types";
+import { getContainerNewProductsErrorCode } from "./errors";
+
+const responseSchema = z.object({
+  storeCode: z.string().min(1),
+  stateCode: z.string().nullable().optional().transform((value) => value ?? null),
+  items: z.array(z.object({
+    productCode: z.string().min(1),
+    imageUrl: z.string().nullable().optional().transform((value) => value ?? null),
+    containerNumber: z.string().nullable().optional().transform((value) => value ?? null),
+    containerCode: z.string(),
+    estimatedStoreArrivalDate: z.string().min(1),
+    basis: z.enum(["actual", "estimated"]),
+  })),
+});
+
+export async function getContainerNewProducts(storeCode: string): Promise<ContainerNewProductsResponse> {
+  try {
+    // apiClient 已将 /api 作为 baseURL 前缀，业务路径保持与其他 mobile API 一致。
+    const response = await apiClient.get("/react/v1/container-new-products", {
+      params: { storeCode },
+    });
+    const parsed = responseSchema.safeParse(unwrapApiEnvelope(response.data));
+    if (!parsed.success) {
+      throw new Error("Invalid container new products response");
+    }
+    return parsed.data;
+  } catch (error) {
+    const code = getContainerNewProductsErrorCode(error);
+    if (code === "STORE_STATE_UNKNOWN") {
+      throw Object.assign(new Error("Store state is unknown"), { code });
+    }
+    throw error;
+  }
+}

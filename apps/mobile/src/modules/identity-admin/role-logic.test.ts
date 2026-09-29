@@ -90,7 +90,11 @@ assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
 assert.equal(fullMenus.filter((item) => item.platform === "web").length, 45);
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 29);
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 30);
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "container-new-products")?.permissionCodes,
+  ["Container.MobileNewProductsView"]
+);
 // 季节商品查询会展示其他分店库存，只认独立权限，不复用商品查询的 StoreProducts.View。
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "seasonal-product-insights")?.permissionCodes,

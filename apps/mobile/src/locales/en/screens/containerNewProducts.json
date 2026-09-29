@@ -1,0 +1,20 @@
+{
+  "title": "New arrivals",
+  "actions": { "back": "Back", "retry": "Retry" },
+  "labels": {
+    "currentStore": "Current store",
+    "range": "Arrived in 2 weeks · Planned for 4 weeks",
+    "sortByArrival": "Arrival date ↑",
+    "container": "Container {{code}}",
+    "estimatedArrival": "Estimated arrival",
+    "actualBasis": "Based on actual arrival",
+    "estimatedBasis": "Based on estimated arrival"
+  },
+  "messages": {
+    "notAllowed": "You do not have access to new arrivals.",
+    "storesFailed": "Stores could not be loaded.",
+    "selectStore": "Select a store first.",
+    "dateNotice": "Store arrival dates are estimates; the container's actual arrival date takes priority."
+  },
+  "states": { "loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new arrivals in the last 2 weeks or next 4 weeks.", "noImage": "No image" }
+}
