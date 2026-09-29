@@ -27,7 +27,6 @@ import RouteLoadBoundary from '../components/RouteLoadBoundary'
 import ShopCartDrawer from '../components/ShopCartDrawer'
 import ShopCartSummary from '../components/ShopCartSummary'
 import SupplierOrderingExtensionEntry from '../components/SupplierOrderingExtensionEntry'
-import { getUserStores } from '../services/userService'
 import { getCategoryTree, type WarehouseCategoryNode } from '../services/warehouseCategoryService'
 import { getActiveStoreOrderCart, getActiveStoreOrderCartSummary } from '../services/storeOrderService'
 import {
@@ -39,6 +38,7 @@ import { useAuthStore } from '../store/auth'
 import { useShopStore } from '../store/shop'
 import { resolveShopBannerCopy } from './shopBannerCopy'
 import { shopNavMessages } from './shopNavMessages'
+import { useShopUserStores } from './useShopUserStores'
 import { registerPageMessages } from '../i18n/registerPageMessages'
 import {
   resolvePreorderPromptPresentation,
@@ -149,7 +149,6 @@ export default function ShopLayout() {
   const userStores = useShopStore((state) => state.userStores)
   const selectedStore = useShopStore((state) => state.selectedStore)
   const cart = useShopStore((state) => state.cart)
-  const setUserStores = useShopStore((state) => state.setUserStores)
   const setSelectedStore = useShopStore((state) => state.setSelectedStore)
   const setCart = useShopStore((state) => state.setCart)
   const preorderActivations = useShopStore((state) => state.preorderActivations)
@@ -212,42 +211,7 @@ export default function ShopLayout() {
     setIsHoverSupported(supportsHover())
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-
-    const fetchStores = async () => {
-      if (!currentUser?.userGUID) {
-        resetShop()
-        return
-      }
-
-      try {
-        const stores = (await getUserStores(currentUser.userGUID)).slice().sort((left, right) =>
-          (left.storeName || left.storeCode || '').localeCompare(right.storeName || right.storeCode || '', undefined, {
-            sensitivity: 'base',
-          }),
-        )
-        if (cancelled) {
-          return
-        }
-
-        setUserStores(stores)
-        if (!selectedStore && stores.length === 1) {
-          setSelectedStore(stores[0])
-        }
-      } catch (error) {
-        if (!cancelled) {
-          message.error(t('shop.loadStoresFailed', 'Failed to load stores'))
-        }
-      }
-    }
-
-    void fetchStores()
-
-    return () => {
-      cancelled = true
-    }
-  }, [currentUser?.userGUID, resetShop, selectedStore, setSelectedStore, setUserStores, t])
+  useShopUserStores(currentUser?.userGUID)
 
   useEffect(() => {
     let cancelled = false
