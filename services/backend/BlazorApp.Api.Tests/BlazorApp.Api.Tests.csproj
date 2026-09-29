@@ -348,6 +348,7 @@
     <Compile Include="SqliteTempFileCleanup.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
     <Compile Include="OfflineCatalogIndexTests.cs" />
+    <Compile Include="ApiExceptionFilterDetailsTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
