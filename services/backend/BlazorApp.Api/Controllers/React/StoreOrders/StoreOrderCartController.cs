@@ -6,6 +6,7 @@ using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Controllers.React.StoreOrders;
 
@@ -455,7 +456,10 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
                 return forbidden;
             }
 
-            var result = await _orderPlacementSlice.SubmitOrderAsync(request);
+            var result = await _orderPlacementSlice.SubmitOrderAsync(
+                request,
+                HttpContext.RequestAborted
+            );
             if (result.Success)
             {
                 // data 里带保留在购物车的行；message 是同一内容的中文说明，供旧客户端直接展示。
@@ -485,6 +489,11 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
                 );
             }
             return BadRequest(new { success = false, message = result.Message });
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, HttpContext.RequestAborted))
+        {
+            // 客户端已断开：事务已在处理器内回滚，按 499 返回且不记错误；服务端自身超时仍走下方错误日志。
+            return StatusCode(499);
         }
         catch (Exception ex)
         {

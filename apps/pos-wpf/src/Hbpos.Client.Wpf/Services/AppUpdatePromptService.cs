@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Markup;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.ViewModels;
@@ -18,18 +19,21 @@ public sealed class WpfAppUpdatePromptService : IAppUpdatePromptService
 {
     private readonly ILocalizationService? _localization;
     private readonly IAppUpdatePromptDialogPresenter _dialogPresenter;
+    private readonly IStartupScreen? _startupScreen;
 
-    public WpfAppUpdatePromptService(ILocalizationService? localization = null)
-        : this(localization, new WpfAppUpdatePromptDialogPresenter())
+    public WpfAppUpdatePromptService(ILocalizationService? localization = null, IStartupScreen? startupScreen = null)
+        : this(localization, new WpfAppUpdatePromptDialogPresenter(), startupScreen)
     {
     }
 
     internal WpfAppUpdatePromptService(
         ILocalizationService? localization,
-        IAppUpdatePromptDialogPresenter dialogPresenter)
+        IAppUpdatePromptDialogPresenter dialogPresenter,
+        IStartupScreen? startupScreen = null)
     {
         _localization = localization;
         _dialogPresenter = dialogPresenter;
+        _startupScreen = startupScreen;
     }
 
     public Task<bool> ConfirmOptionalDownloadAndInstallAsync(
@@ -42,6 +46,8 @@ public sealed class WpfAppUpdatePromptService : IAppUpdatePromptService
         var culture = _localization?.CurrentCulture ?? LocalizationResourceProvider.Instance.CurrentCulture;
         var language = XmlLanguage.GetLanguage(culture.IetfLanguageTag);
         var viewModel = new AppUpdatePromptViewModel(update);
+        // 中文注释：启动检查时启动页仍置顶显示，先让它让位；启动完成后这里是空操作。
+        using var startupScreenSuspension = _startupScreen?.SuspendForDialog();
         var result = _dialogPresenter.Show(viewModel, owner, language);
 
         return Task.FromResult(result == true);
@@ -64,7 +70,7 @@ internal sealed class WpfAppUpdatePromptDialogPresenter : IAppUpdatePromptDialog
 
     public bool? Show(AppUpdatePromptViewModel viewModel, Window? owner, XmlLanguage language)
     {
-        // 中文注释：启动检查时 Application.MainWindow 还是 460×380 的置顶启动页，不能按它的尺寸压缩弹窗。
+        // 中文注释：启动检查时收银主窗口已构造但还没显示（甚至没有窗口句柄），不能按它的尺寸压缩弹窗。
         var cashierWindowSize = owner is MainWindow { IsVisible: true }
             ? new Size(owner.ActualWidth, owner.ActualHeight)
             : (Size?)null;
@@ -83,13 +89,21 @@ internal sealed class WpfAppUpdatePromptDialogPresenter : IAppUpdatePromptDialog
             dialog.Top = placement.Bounds.Top;
         }
 
-        if (owner is not null)
+        if (CanOwnDialog(owner))
         {
-            // 中文注释：启动页同样保留为 owner，弹窗才能压在置顶启动页之上。
             dialog.Owner = owner;
         }
 
         return dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// 只有已创建窗口句柄的窗口才能当 owner；启动阶段 Application.MainWindow 是尚未显示的主窗口，
+    /// 直接赋值会抛 InvalidOperationException。此时不设 owner，由调用方先让启动页让位。
+    /// </summary>
+    internal static bool CanOwnDialog(Window? owner)
+    {
+        return owner is not null && new WindowInteropHelper(owner).Handle != IntPtr.Zero;
     }
 
     internal static AppUpdatePromptPlacement ResolvePlacement(Size? cashierWindowSize, Rect workArea)

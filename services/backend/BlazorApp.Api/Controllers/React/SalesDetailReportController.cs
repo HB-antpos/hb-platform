@@ -6,6 +6,7 @@ using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Controllers.React;
 
@@ -104,8 +105,10 @@ public sealed class SalesDetailReportController : ControllerBase
             cancellationToken.ThrowIfCancellationRequested();
             return Ok(result);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
         {
+            // 客户端中止（含令牌在 SqlClient 读取中途触发抛出的用户取消 SqlException）交给全局过滤器按 499 处理，
+            // 不落入下方 500 分支；长区间查询被切走时这里最常见（生产 09-21～28 共 9 条）。
             throw;
         }
         catch (ArgumentException ex)

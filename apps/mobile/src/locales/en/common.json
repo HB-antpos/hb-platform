@@ -44,6 +44,7 @@
     "warehousePicking": "Order picking",
     "warehouseProductInsights": "Warehouse activity",
     "seasonalProductInsights": "Seasonal products",
+    "containerNewProducts": "New arrivals",
     "posOperationLogs": "POS logs",
     "domesticPurchase": "China Purchase",
     "localSupplierInvoices": "AU Invoices",
@@ -228,6 +229,7 @@
       "lowBase": "low base",
       "compareAsOf": "Compare as of {{time}}, {{change}}",
       "noCompleteHour": "Comparison starts at {{time}}",
+      "liveHourNote": "{{from}}–{{to}} in progress ({{amount}}); joins the comparison after the {{next}} update",
       "noData": "No sales recorded yet",
       "loadFailed": "Failed to load hourly revenue",
       "cutoffUnavailable": "Waiting for the latest statistics time",
@@ -386,5 +388,29 @@
       "selectSupplierA11y": "{{supplier}}. Tap to filter stores and products",
       "selectedSupplierA11y": "{{supplier}}, selected. Tap again to clear"
     }
+  },
+  "orderRow": {
+    "minOrder": "MOQ {{quantity}}",
+    "importPrice": "Import",
+    "retailPrice": "Retail",
+    "unitPrice": "{{amount}} / pc",
+    "subtotal": "Subtotal",
+    "add": "Add",
+    "addWithStep": "Add ×{{step}}",
+    "addAccessibility": "Add {{name}}, quantity {{quantity}}",
+    "decrease": "Decrease by one MOQ",
+    "increase": "Increase by one MOQ",
+    "remove": "Remove from cart",
+    "justScanned": "Just scanned",
+    "zeroImportPrice": "Import price 0"
+  },
+  "orderNotice": {
+    "addedNamed": "Added {{name}}",
+    "addedQuantity": "×{{quantity}}"
+  },
+  "quantityPresets": {
+    "caption": "Quick quantities (multiples of MOQ {{step}})",
+    "clear": "Clear",
+    "set": "Set to {{quantity}}"
   }
 }

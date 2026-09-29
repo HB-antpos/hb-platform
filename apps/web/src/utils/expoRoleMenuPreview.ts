@@ -140,6 +140,7 @@ const TAB_PATHS: Record<string, string> = {
   'sales-orders': '/(shell)/sales-orders',
   cart: '/(shell)/cart',
   warehouse: '/(shell)/warehouse',
+  'container-new-products': '/(shell)/container-new-products',
   'warehouse-picking': '/(shell)/warehouse-picking',
   'domestic-purchase': '/(shell)/domestic-purchase',
   'local-supplier-invoices': '/(shell)/local-supplier-invoices',
@@ -176,6 +177,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'sales-orders': { zhTitle: '销售订单', enTitle: 'Sales Records' },
   cart: { zhTitle: '购物车', enTitle: 'Cart' },
   warehouse: { zhTitle: '仓库', enTitle: 'Warehouse' },
+  'container-new-products': { zhTitle: '新品到店', enTitle: 'New arrivals' },
   'warehouse-picking': { zhTitle: '订单拣货', enTitle: 'Order picking' },
   'domestic-purchase': { zhTitle: '中国采购', enTitle: 'China Purchase' },
   'local-supplier-invoices': { zhTitle: '澳洲进货', enTitle: 'AU Invoices' },
@@ -254,13 +256,22 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     ...ROUTE_LABELS.warehouse,
   },
   {
+    routeName: 'container-new-products',
+    titleKey: 'tabs.containerNewProducts',
+    icon: 'package-variant-closed',
+    // 与后端 FullAppMenu 一致：只认移动端新品到店专用权限，后端没有为它配置别名。
+    permissionCodes: [P.Container.MobileNewProductsView],
+    order: 41,
+    ...ROUTE_LABELS['container-new-products'],
+  },
+  {
     routeName: 'warehouse-picking',
     titleKey: 'tabs.warehousePicking',
     icon: 'clipboard-check-outline',
     // 与后端 FullAppMenu 的 AnyPermissions 一致：拣货专用权限，或管理仓库 / 管理仓库订货任一即可见。
     // 不加入 PERMISSION_ALIAS_GROUPS：那里是双向等价，会让只有拣货权限的人在预览里误显示订单等入口。
     permissionCodes: [P.Warehouse.Picking, P.Warehouse.Manage, P.Warehouse.ManageOrders],
-    order: 41,
+    order: 42,
     ...ROUTE_LABELS['warehouse-picking'],
   },
   {

@@ -170,6 +170,83 @@ public class ClientAbortedRequestLoggingTests
         Assert.IsType<InvalidOperationException>(entry.Exception);
     }
 
+    [Theory]
+    [InlineData("SqlClient用户取消")]
+    [InlineData("SqlClient用户取消_MARS批处理已中止")]
+    public void 过滤器_令牌在SqlClient读取中途触发的用户取消SqlException不记Error且返回无正文499(string shape)
+    {
+        // 生产 09-21～28 销售明细等接口约 18 条：取消在执行中途落地时驱动抛 SqlException 而不是 OCE。
+        var logger = new TestLogger<ApiExceptionFilter>();
+        var context = CreateExceptionContext(ClientAbortDetectorTests.CreateShape(shape), clientAborted: true);
+
+        new ApiExceptionFilter(logger).OnException(context);
+
+        Assert.True(context.ExceptionHandled);
+        var result = Assert.IsType<StatusCodeResult>(context.Result);
+        Assert.Equal(StatusCodes.Status499ClientClosedRequest, result.StatusCode);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, entry.LogLevel);
+    }
+
+    [Fact]
+    public void 过滤器_SqlClient命令超时即使客户端已中止仍按Error记录并返回500()
+    {
+        var logger = new TestLogger<ApiExceptionFilter>();
+        var context = CreateExceptionContext(SqlClientExceptionShapes.CommandTimeout(), clientAborted: true);
+
+        new ApiExceptionFilter(logger).OnException(context);
+
+        AssertInternalError(context, logger);
+    }
+
+    [Fact]
+    public void 过滤器_用户取消形态的SqlException但RequestAborted未触发仍按Error记录并返回500()
+    {
+        // 服务端自己的 CTS 超时同样产生「Operation cancelled by user」，请求令牌未触发时不能当客户端中止。
+        var logger = new TestLogger<ApiExceptionFilter>();
+        var context = CreateExceptionContext(SqlClientExceptionShapes.UserCancellation(), clientAborted: false);
+
+        new ApiExceptionFilter(logger).OnException(context);
+
+        AssertInternalError(context, logger);
+    }
+
+    [Fact]
+    public async Task 中间件_认证阶段SqlClient用户取消的SqlException不记Error不外抛并标记499()
+    {
+        // 生产 09-28 容器商品查询：认证阶段会话校验被取消，中间件与 Kestrel 各记一条 Error；
+        // 现在中间件识别后不再外抛，Kestrel 那条随之消失，只剩 JwtBearerHandler 自身那条（事件里不能 Fail 吞取消）。
+        var logger = new TestLogger<ApplicationExceptionLoggingMiddleware>();
+        var httpContext = CreateHttpContext(clientAborted: true);
+        var middleware = new ApplicationExceptionLoggingMiddleware(
+            _ => throw SqlClientExceptionShapes.UserCancellationWithBatchAborted(),
+            logger
+        );
+
+        await middleware.InvokeAsync(httpContext);
+
+        Assert.Equal(StatusCodes.Status499ClientClosedRequest, httpContext.Response.StatusCode);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, entry.LogLevel);
+        Assert.Contains(QueryPath, entry.Message);
+    }
+
+    [Fact]
+    public async Task 中间件_SqlClient命令超时即使客户端已中止仍按Error记录并外抛()
+    {
+        var logger = new TestLogger<ApplicationExceptionLoggingMiddleware>();
+        var httpContext = CreateHttpContext(clientAborted: true);
+        var middleware = new ApplicationExceptionLoggingMiddleware(
+            _ => throw SqlClientExceptionShapes.CommandTimeout(),
+            logger
+        );
+
+        await Assert.ThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => middleware.InvokeAsync(httpContext));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.LogLevel);
+    }
+
     private static void AssertInternalError(ExceptionContext context, TestLogger<ApiExceptionFilter> logger)
     {
         Assert.True(context.ExceptionHandled);

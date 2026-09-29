@@ -788,6 +788,167 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
     }
 
     [Fact]
+    public async Task GetProducts_IncludeDynamicData_顶层附带本页动态数据且不改写缓存分页对象()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = "S001", IncludeDynamicData = true };
+        var cachedPage = new PagedListReactDto<StoreOrderProductDto>
+        {
+            Items = new List<StoreOrderProductDto>
+            {
+                new() { ProductCode = "P001" },
+                new() { ProductCode = "P002" },
+            },
+            Total = 12,
+            PageNumber = 1,
+            PageSize = 2,
+        };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service.Setup(item => item.GetPagedListAsync(filter)).ReturnsAsync(cachedPage);
+        service
+            .Setup(item => item.GetProductsDynamicDataAsync(It.Is<StoreOrderDynamicDataRequestDto>(request =>
+                request.StoreCode == "S001"
+                && !request.IncludeSales
+                && request.ProductCodes.SequenceEqual(new[] { "P001", "P002" })
+            )))
+            .ReturnsAsync(ApiResponse<List<StoreOrderDynamicDataDto>>.OK(new List<StoreOrderDynamicDataDto>
+            {
+                new() { ProductCode = "P001", CartQuantity = 3m },
+                new() { ProductCode = "P002", LastQuantity = 5m },
+            }));
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.OrderFront.View, Permissions.Orders.View),
+            CreateScopeService(),
+            new[] { "Order" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+        var data = json.RootElement.GetProperty("data");
+
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(12, data.GetProperty("total").GetInt32());
+        Assert.Equal(2, data.GetProperty("items").GetArrayLength());
+        var dynamicData = data.GetProperty("dynamicData");
+        Assert.Equal(2, dynamicData.GetArrayLength());
+        Assert.Equal(3m, dynamicData[0].GetProperty("cartQuantity").GetDecimal());
+        Assert.Equal(5m, dynamicData[1].GetProperty("lastQuantity").GetDecimal());
+        // 动态数据含购物车数量，只能包在新响应对象里，不能写回可能来自缓存的分页实例。
+        var payload = ok.Value!.GetType().GetProperty("data")!.GetValue(ok.Value);
+        var embeddedPage = Assert.IsType<StoreOrderProductPageReactDto>(payload);
+        Assert.NotSame(cachedPage, embeddedPage);
+        Assert.Equal(2, cachedPage.Items.Count);
+        service.Verify(item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetProducts_未请求动态数据时不查询也不输出dynamicData字段()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = "S001" };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service
+            .Setup(item => item.GetPagedListAsync(filter))
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>
+            {
+                Items = new List<StoreOrderProductDto> { new() { ProductCode = "P001" } },
+                Total = 1,
+            });
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.OrderFront.View, Permissions.Orders.View),
+            CreateScopeService(),
+            new[] { "Order" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+
+        Assert.False(json.RootElement.GetProperty("data").TryGetProperty("dynamicData", out _));
+        service.Verify(
+            item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()),
+            Times.Never
+        );
+    }
+
+    [Fact]
+    public async Task GetProducts_IncludeDynamicData但未带门店时不查询动态数据()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = null, IncludeDynamicData = true };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service
+            .Setup(item => item.GetPagedListAsync(filter))
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>
+            {
+                Items = new List<StoreOrderProductDto> { new() { ProductCode = "P001" } },
+                Total = 1,
+            });
+        // 纯仓库员工凭 Orders.Create 可不带门店读取商品列表。
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.Orders.Create),
+            CreateScopeService(),
+            new[] { "WarehouseStaff" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+
+        Assert.False(json.RootElement.GetProperty("data").TryGetProperty("dynamicData", out _));
+        service.Verify(
+            item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()),
+            Times.Never
+        );
+    }
+
+    [Fact]
+    public async Task GetProducts_动态数据读取失败时仍返回商品列表()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = "S001", IncludeDynamicData = true };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service
+            .Setup(item => item.GetPagedListAsync(filter))
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>
+            {
+                Items = new List<StoreOrderProductDto> { new() { ProductCode = "P001" } },
+                Total = 1,
+            });
+        service
+            .Setup(item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()))
+            .ReturnsAsync(new ApiResponse<List<StoreOrderDynamicDataDto>>
+            {
+                Success = false,
+                Message = "无法识别当前仓库员工",
+            });
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.OrderFront.View, Permissions.Orders.View),
+            CreateScopeService(),
+            new[] { "Order" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+        var data = json.RootElement.GetProperty("data");
+
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(1, data.GetProperty("items").GetArrayLength());
+        Assert.False(data.TryGetProperty("dynamicData", out _));
+    }
+
+    /// <summary>与 Program.cs 的 MVC JSON 配置一致：camelCase、忽略 null。</summary>
+    private static string SerializeLikeApi(object? value)
+    {
+        return JsonSerializer.Serialize(
+            value,
+            new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            }
+        );
+    }
+
+    [Fact]
     public async Task GetProducts_AllowsAssignedStoreWhenManageScopeRejectsOrderUser()
     {
         var filter = new StoreOrderFilterDto { StoreCode = "1024" };

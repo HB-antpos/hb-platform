@@ -25,7 +25,6 @@ import {
   createContainer,
   getContainerList,
   pushContainersToHbSales,
-  syncContainersFromHq,
   updateContainer,
 } from "./api";
 import { CONTAINER_LIST_PAGE_SIZE, getContainerGuid, trimToUndefined } from "./query";
@@ -264,15 +263,8 @@ export function ContainerListScreen() {
     onError: (error) => setSnackbar(error instanceof Error ? error.message : "状态更新失败"),
   });
 
-  const syncMutation = useMutation({
-    mutationFn: () => syncContainersFromHq(appliedFilters.startDate),
-    onSuccess: (result) => {
-      void invalidateList();
-      setSnackbar(result.message ?? result.Message ?? "HQ 同步已提交");
-    },
-    onError: (error) => setSnackbar(error instanceof Error ? error.message : "HQ 同步失败"),
-  });
-
+  // 「同步 HQ」（HQ 货柜 → HBweb）已于 2026-09-29 随全部 HQ → HBweb 同步入口停用（PR #384，后端返回 410）；
+  // 「推送已选到 HBSales」方向相反，继续保留。
   const pushMutation = useMutation({
     mutationFn: (containerGuids: string[]) => pushContainersToHbSales(containerGuids),
     onSuccess: (result) => {
@@ -392,17 +384,6 @@ export function ContainerListScreen() {
             <Button icon="filter" mode="contained" onPress={applyFilters}>筛选</Button>
             {canCreateContainer ? (
               <Button icon="plus" mode="outlined" onPress={() => setCreateVisible(true)}>创建</Button>
-            ) : null}
-            {canEditContainer ? (
-              <Button
-                icon="sync"
-                mode="outlined"
-                loading={syncMutation.isPending}
-                disabled={syncMutation.isPending}
-                onPress={() => syncMutation.mutate()}
-              >
-                同步 HQ
-              </Button>
             ) : null}
           </View>
           {canEditContainer ? (

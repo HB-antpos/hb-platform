@@ -217,6 +217,14 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "container-new-products",
+                TitleKey = "tabs.containerNewProducts",
+                Icon = "package-variant-closed",
+                Permission = Permissions.Container.MobileNewProductsView,
+                Order = 41,
+            },
+            new()
+            {
                 RouteName = "warehouse-picking",
                 TitleKey = "tabs.warehousePicking",
                 Icon = "clipboard-check-outline",
@@ -228,7 +236,7 @@ namespace BlazorApp.Api.Services
                     Permissions.Warehouse.Manage,
                     Permissions.Warehouse.ManageOrders,
                 },
-                Order = 41,
+                Order = 42,
             },
             new()
             {

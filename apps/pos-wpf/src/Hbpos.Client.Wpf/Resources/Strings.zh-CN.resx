@@ -27,26 +27,56 @@
   <data name="startup.title" xml:space="preserve">
     <value>HB POS</value>
   </data>
-  <data name="startup.loading" xml:space="preserve">
-    <value>正在准备收银系统...</value>
+  <data name="startup.subtitle" xml:space="preserve">
+    <value>收银系统</value>
   </data>
-  <data name="startup.stage.starting" xml:space="preserve">
-    <value>正在启动...</value>
+  <data name="startup.phase.services" xml:space="preserve">
+    <value>正在启动服务</value>
   </data>
-  <data name="startup.stage.initializingServices" xml:space="preserve">
-    <value>正在初始化服务...</value>
+  <data name="startup.phase.services.detail" xml:space="preserve">
+    <value>准备本地数据库与后台服务</value>
   </data>
-  <data name="startup.stage.startingLocalComponents" xml:space="preserve">
-    <value>正在启动本地组件...</value>
+  <data name="startup.phase.interface" xml:space="preserve">
+    <value>正在加载界面</value>
   </data>
-  <data name="startup.stage.loadingProducts" xml:space="preserve">
-    <value>正在加载本地商品和特殊商品...</value>
+  <data name="startup.phase.interface.detail" xml:space="preserve">
+    <value>加载收银界面与配色</value>
   </data>
-  <data name="startup.stage.preparingMainWindow" xml:space="preserve">
-    <value>正在准备主界面...</value>
+  <data name="startup.phase.update" xml:space="preserve">
+    <value>正在检查更新</value>
   </data>
-  <data name="startup.stage.completed" xml:space="preserve">
+  <data name="startup.phase.update.detail" xml:space="preserve">
+    <value>连接服务器检查新版本</value>
+  </data>
+  <data name="startup.phase.device" xml:space="preserve">
+    <value>正在验证设备</value>
+  </data>
+  <data name="startup.phase.device.detail" xml:space="preserve">
+    <value>确认本机收银授权</value>
+  </data>
+  <data name="startup.phase.catalog" xml:space="preserve">
+    <value>正在加载商品</value>
+  </data>
+  <data name="startup.phase.catalog.detail" xml:space="preserve">
+    <value>读取本地商品与特殊商品</value>
+  </data>
+  <data name="startup.phase.display" xml:space="preserve">
+    <value>正在打开收银台</value>
+  </data>
+  <data name="startup.phase.display.detail" xml:space="preserve">
+    <value>即将就绪</value>
+  </data>
+  <data name="startup.phase.completed" xml:space="preserve">
     <value>启动完成</value>
+  </data>
+  <data name="startup.step" xml:space="preserve">
+    <value>第 {0}/{1} 步</value>
+  </data>
+  <data name="startup.elapsed" xml:space="preserve">
+    <value>已用 {0} 秒</value>
+  </data>
+  <data name="startup.slowNetwork" xml:space="preserve">
+    <value>服务器响应较慢，已等待 {0} 秒</value>
   </data>
   <data name="startup.error.apiBaseAddress.title" xml:space="preserve">
     <value>HB POS 启动配置错误</value>

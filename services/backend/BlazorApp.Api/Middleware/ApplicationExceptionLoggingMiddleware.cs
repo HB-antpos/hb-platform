@@ -1,4 +1,5 @@
 using BlazorApp.Api.Services.Logging;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Middleware
 {
@@ -22,10 +23,10 @@ namespace BlazorApp.Api.Middleware
             {
                 await _next(context);
             }
-            catch (OperationCanceledException ex) when (context.RequestAborted.IsCancellationRequested)
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, context.RequestAborted))
             {
-                // 客户端中途断开（如认证阶段会话校验被 RequestAborted 取消）：不是服务端故障，
-                // 降为 Information 不进 ApplicationLog；也不再向外抛出，避免被当成未处理异常按 500 收尾。
+                // 客户端中途断开（如认证阶段会话校验被 RequestAborted 取消，OCE 或 SqlClient 用户取消的 SqlException）：
+                // 不是服务端故障，降为 Information 不进 ApplicationLog；也不再向外抛出，避免被 Kestrel 当成未处理异常再记一条。
                 // 服务端自身超时不会触发 RequestAborted，仍落入下方分支按 Error 记录并抛出。
                 _logger.LogInformation(
                     "客户端已取消请求 - 路径: {Path}, 方法: {Method}, TraceId: {TraceId}, 异常: {ExceptionType}",

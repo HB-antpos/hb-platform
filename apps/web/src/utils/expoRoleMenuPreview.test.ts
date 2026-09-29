@@ -86,6 +86,7 @@ assertArrayEqual(
     'sales-orders',
     'cart',
     'warehouse',
+    'container-new-products',
     'warehouse-picking',
     'domestic-purchase',
     'local-supplier-invoices',
@@ -215,6 +216,24 @@ assertEqual(
   buildPreview([P.Orders.View]).allRoutes.find((route) => route.routeName === 'warehouse-picking')?.visible,
   false,
   '只有订单查看权限时不应显示订单拣货入口',
+)
+
+// 新品到店入口与后端 FullAppMenu 同口径：只认移动端新品到店专用权限，货柜查看权限不会连带显示。
+const containerNewProductsRoute = completePreview.allRoutes.find((route) => route.routeName === 'container-new-products')
+assertArrayEqual(
+  containerNewProductsRoute?.permissionCodes ?? [],
+  [P.Container.MobileNewProductsView],
+  '新品到店入口应只声明 Container.MobileNewProductsView',
+)
+assertEqual(
+  buildPreview([P.Container.MobileNewProductsView]).allRoutes.find((route) => route.routeName === 'container-new-products')?.visible,
+  true,
+  '仅有 Container.MobileNewProductsView 时应显示新品到店入口',
+)
+assertEqual(
+  buildPreview([P.Container.View]).allRoutes.find((route) => route.routeName === 'container-new-products')?.visible,
+  false,
+  '只有货柜查看权限时不应显示新品到店入口',
 )
 
 const inheritedAndDirectPreview = buildExpoUserMenuPreview({

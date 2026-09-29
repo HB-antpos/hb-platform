@@ -89,6 +89,11 @@ namespace BlazorApp.Api.Services.Background
 
         /// <summary>单轮最多处理的折扣业务日数，防止持续回填占用其他后台工作。</summary>
         public int DiscountSnapshotBatchSize { get; set; } = 12;
+
+        /// <summary>
+        /// 每日任务结束后是否按已有采集记录为全部供应商重新归类（默认开启，可用配置热关闭）。
+        /// </summary>
+        public bool LocalSupplierCategoryNightlyResolveEnabled { get; set; } = true;
     }
 
     /// <summary>
@@ -714,6 +719,53 @@ namespace BlazorApp.Api.Services.Background
                     _logger.LogError(ex, "公共假期自动同步任务执行失败");
                 }
             }
+
+            // 放在统计刷新之后串行执行，错开数据库负载；统计失败或跳过都不影响重新归类。
+            await ExecuteLocalSupplierCategoryResolveTask();
+        }
+
+        /// <summary>
+        /// 每晚供应商分类重新归类：只读写本库，不访问供应商网站。
+        /// 为白天 HQ 同步进来的新商品按已有采集记录补上归类，并清理换供应商留下的陈旧归属。
+        /// </summary>
+        private async Task ExecuteLocalSupplierCategoryResolveTask()
+        {
+            if (!_options.LocalSupplierCategoryNightlyResolveEnabled)
+            {
+                _logger.LogInformation("供应商分类每晚重新归类已通过配置关闭，跳过执行");
+                return;
+            }
+
+            await ExecuteHourlyTaskWithIndependentScopeAsync(
+                TaskType.ResolveLocalSupplierCategories,
+                "供应商分类每晚重新归类",
+                async serviceProvider =>
+                {
+                    var categoryService =
+                        serviceProvider.GetRequiredService<ILocalSupplierCategoryReactService>();
+                    var result = await categoryService.ResolveAllSuppliersAsync("System");
+                    _logger.LogInformation(
+                        "供应商分类重新归类：供应商 {SupplierCount} 家，扫描商品 {ProductsScanned}，新归类 {Assigned}，"
+                            + "改归类 {Updated}，清除 {Cleared}，人工锁定跳过 {ManualSkipped}，陈旧归属清理 {StaleRemoved}",
+                        result.SupplierCount,
+                        result.ProductsScanned,
+                        result.Assigned,
+                        result.Updated,
+                        result.Cleared,
+                        result.ManualSkipped,
+                        result.StaleRemoved
+                    );
+                    if (result.FailedSuppliers.Count > 0)
+                    {
+                        // 其余供应商已各自提交；这里转成异常，让任务日志如实记为失败并列出失败的供应商。
+                        throw new InvalidOperationException(
+                            "部分供应商重新归类失败：" + string.Join("；", result.FailedSuppliers)
+                        );
+                    }
+
+                    return TaskExecutionOutcome.Completed();
+                }
+            );
         }
 
         /// <summary>

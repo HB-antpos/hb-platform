@@ -5,6 +5,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Utils;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -58,7 +59,8 @@ namespace BlazorApp.Api.Services.React
 
         public async Task<ApiResponse<List<StoreProductLookupItemDto>>> LookupAsync(
             StoreProductLookupRequestDto request,
-            List<string>? accessibleStoreCodes
+            List<string>? accessibleStoreCodes,
+            CancellationToken cancellationToken = default
         )
         {
             var totalSw = Stopwatch.StartNew();
@@ -138,6 +140,12 @@ namespace BlazorApp.Api.Services.React
 
                 return ApiResponse<List<StoreProductLookupItemDto>>.OK(normalized);
             }
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+            {
+                // 调用方已取消（请求被客户端中止）：直接上抛，不记错误；全局过滤器按 499 处理。
+                // 认证阶段已把请求令牌留在 SqlSugar ADO 上，本方法内的查询都会随它取消（OCE 或用户取消的 SqlException）。
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "商品查询失败: {Keyword}", request.Keyword);
@@ -147,7 +155,8 @@ namespace BlazorApp.Api.Services.React
 
         public async Task<ApiResponse<StoreProductScanLabelResultDto>> ScanLabelAsync(
             StoreProductLookupRequestDto request,
-            List<string>? accessibleStoreCodes
+            List<string>? accessibleStoreCodes,
+            CancellationToken cancellationToken = default
         )
         {
             var totalSw = Stopwatch.StartNew();
@@ -162,7 +171,8 @@ namespace BlazorApp.Api.Services.React
                 // 复用既有精确候选查询和授权门店范围；本入口只读，不补建价格、不写仓库价。
                 var candidatesResult = await LookupAsync(
                     new StoreProductLookupRequestDto { Keyword = keyword, StoreCode = request.StoreCode },
-                    accessibleStoreCodes
+                    accessibleStoreCodes,
+                    cancellationToken
                 );
                 var candidates = candidatesResult.Data ?? new List<StoreProductLookupItemDto>();
                 if (!candidatesResult.Success)
@@ -182,7 +192,8 @@ namespace BlazorApp.Api.Services.React
                     var detailResult = await GetFastDetailAsync(
                         productCode,
                         request.StoreCode,
-                        accessibleStoreCodes
+                        accessibleStoreCodes,
+                        cancellationToken
                     );
                     if (detailResult.Success && detailResult.Data != null)
                     {
@@ -213,6 +224,12 @@ namespace BlazorApp.Api.Services.React
                     totalSw.ElapsedMilliseconds
                 );
                 return ApiResponse<StoreProductScanLabelResultDto>.OK(result);
+            }
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+            {
+                // 调用方已取消（请求被客户端中止）：直接上抛，不记错误；全局过滤器按 499 处理。
+                // 认证阶段已把请求令牌留在 SqlSugar ADO 上，本方法内的查询都会随它取消（OCE 或用户取消的 SqlException）。
+                throw;
             }
             catch (Exception ex)
             {
@@ -540,7 +557,8 @@ namespace BlazorApp.Api.Services.React
         public async Task<ApiResponse<StoreProductDetailDto>> GetFastDetailAsync(
             string productCode,
             string? storeCode,
-            List<string>? accessibleStoreCodes
+            List<string>? accessibleStoreCodes,
+            CancellationToken cancellationToken = default
         )
         {
             var totalSw = Stopwatch.StartNew();
@@ -639,6 +657,12 @@ namespace BlazorApp.Api.Services.React
                 );
 
                 return ApiResponse<StoreProductDetailDto>.OK(detail);
+            }
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+            {
+                // 调用方已取消（请求被客户端中止）：直接上抛，不记错误；全局过滤器按 499 处理。
+                // 认证阶段已把请求令牌留在 SqlSugar ADO 上，本方法内的查询都会随它取消（OCE 或用户取消的 SqlException）。
+                throw;
             }
             catch (Exception ex)
             {

@@ -65,6 +65,7 @@ public class ReactStoreOrderController : ControllerBase
 
         _productController = new StoreOrderProductController(
             adapter,
+            adapter,
             accessPolicy,
             NullLogger<StoreOrderProductController>.Instance
         );

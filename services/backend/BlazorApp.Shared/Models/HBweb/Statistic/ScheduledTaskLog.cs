@@ -106,6 +106,7 @@ namespace BlazorApp.Shared.Models.HBweb
         public const string RecalculateProductStoreDaily = "RecalculateProductStoreDaily";
         public const string SyncPosmProductSupplierMappingsIncremental = "SyncPosmProductSupplierMappingsIncremental";
         public const string WarmUpStoreOrderCache = "WarmUpStoreOrderCache";
+        public const string ResolveLocalSupplierCategories = "ResolveLocalSupplierCategories";
         public const string SyncStoreLocalSupplierInvoices = "SyncStoreLocalSupplierInvoices";
         public const string SyncStoreLocalSupplierInvoiceDetails = "SyncStoreLocalSupplierInvoiceDetails";
         public const string SyncStoreLocalSupplierInvoicesAll = "SyncStoreLocalSupplierInvoicesAll";

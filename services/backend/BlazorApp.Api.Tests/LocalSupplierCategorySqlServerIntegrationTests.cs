@@ -110,6 +110,27 @@ public sealed class LocalSupplierCategorySqlServerIntegrationTests
         Assert.Equal(1, await verifyDb.Queryable<LocalSupplierCategoryProductAssignment>().CountAsync());
     }
 
+    [LocalSupplierCategorySqlServerFact]
+    public async Task SQLServer_每晚重新归类在供应商锁内为新商品补归类()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        using var db = database.CreateClient();
+        await SeedProductAsync(db, "P-1", "69798", Dats);
+        await CreateCaptureService(db).CaptureAsync(BuildCapture("69798", "72264"), "tester");
+        // 采集之后才由 HQ 同步写入的商品。
+        await SeedProductAsync(db, "P-NEW", "72264", Dats);
+
+        var result = await CreateReactService(db).ResolveAllSuppliersAsync("System");
+
+        Assert.Empty(result.FailedSuppliers);
+        Assert.Equal(1, result.SupplierCount);
+        Assert.Equal(1, result.Assigned);
+        Assert.Equal(
+            2,
+            await db.Queryable<LocalSupplierCategoryProductAssignment>().CountAsync()
+        );
+    }
+
     private static BrowserExtensionCategoryCaptureRequestDto BuildCapture(params string[] itemNumbers) =>
         new()
         {
@@ -149,6 +170,13 @@ public sealed class LocalSupplierCategorySqlServerIntegrationTests
             options.Object,
             NullLogger<LocalSupplierCategoryCaptureService>.Instance
         );
+    }
+
+    private static LocalSupplierCategoryReactService CreateReactService(ISqlSugarClient db)
+    {
+        var options = new Mock<IOptionsSnapshot<BrowserExtensionOptions>>();
+        options.Setup(item => item.Value).Returns(new BrowserExtensionOptions());
+        return new LocalSupplierCategoryReactService(WrapContext<SqlSugarContext>(db), options.Object);
     }
 
     private static ProductReactService CreateProductService(ISqlSugarClient db) =>

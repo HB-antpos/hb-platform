@@ -52,14 +52,16 @@ public sealed class LocalizationAndSettingsTests
     {
         var localization = new LocalizationService();
 
-        Assert.Equal("Preparing point of sale...", localization.T("startup.loading"));
-        Assert.Equal("Loading local products and special products...", localization.T("startup.stage.loadingProducts"));
+        Assert.Equal("Point of sale", localization.T("startup.subtitle"));
+        Assert.Equal("Loading products", localization.T("startup.phase.catalog"));
+        Assert.Equal("Step {0} of {1}", localization.T("startup.step"));
         Assert.Equal("Scanner", localization.T("shell.scannerBinding"));
 
         localization.SetCulture("zh-CN");
 
-        Assert.Equal("\u6B63\u5728\u51C6\u5907\u6536\u94F6\u7CFB\u7EDF...", localization.T("startup.loading"));
-        Assert.Equal("\u6B63\u5728\u52A0\u8F7D\u672C\u5730\u5546\u54C1\u548C\u7279\u6B8A\u5546\u54C1...", localization.T("startup.stage.loadingProducts"));
+        Assert.Equal("收银系统", localization.T("startup.subtitle"));
+        Assert.Equal("正在加载商品", localization.T("startup.phase.catalog"));
+        Assert.Equal("第 {0}/{1} 步", localization.T("startup.step"));
         Assert.Equal("\u626B\u7801\u67AA", localization.T("shell.scannerBinding"));
         Assert.Equal("\u91CD\u65B0\u5B66\u4E60\u626B\u7801\u67AA", localization.T("shell.scannerBinding.resetTooltip"));
     }

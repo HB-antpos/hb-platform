@@ -59,6 +59,8 @@ export const P = {
     Create: 'Container.Create',
     Edit: 'Container.Edit',
     Delete: 'Container.Delete',
+    // 移动端「新品到店」页面专用权限，与后端 Permissions.Container.MobileNewProductsView 一致。
+    MobileNewProductsView: 'Container.MobileNewProductsView',
   },
   SalesOrders: {
     View: 'SalesOrders.View',

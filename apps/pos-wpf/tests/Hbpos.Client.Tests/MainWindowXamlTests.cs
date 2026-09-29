@@ -1,4 +1,6 @@
 using System.Xml.Linq;
+using Hbpos.Client.Wpf;
+using Hbpos.Client.Wpf.Services;
 
 namespace Hbpos.Client.Tests;
 
@@ -302,9 +304,10 @@ public sealed class MainWindowXamlTests
 
         var brandMark = FindElementByAutomationId(document, "StartupBrandMark");
 
-        AssertSharedBrandImage(brandMark, "82", "82");
+        AssertSharedBrandImage(brandMark, "48", "48", StartupSplashAutomationName);
         Assert.Equal(presentation + "StackPanel", brandMark.Parent?.Name);
-        Assert.Equal("Center", (string?)brandMark.Attribute("HorizontalAlignment"));
+        Assert.Equal("Horizontal", (string?)brandMark.Parent?.Attribute("Orientation"));
+        Assert.Equal("Center", (string?)brandMark.Attribute("VerticalAlignment"));
         Assert.DoesNotContain(document.Descendants(presentation + "TextBlock"), element =>
             string.Equals((string?)element.Attribute("Text"), "HB", StringComparison.Ordinal));
         Assert.DoesNotContain(document.Descendants().Attributes(), attribute =>
@@ -331,13 +334,88 @@ public sealed class MainWindowXamlTests
         var notice = FindElementByAutomationId(document, "StartupUpdateNotice");
 
         Assert.Contains(footer.Descendants(), element =>
-            (string?)element.Attribute("Text") == "{loc:Loc startup.versionLabel}");
+            (string?)element.Attribute("Text") == "{Binding VersionLabel}");
         Assert.Equal("{Binding VersionText}", (string?)versionText.Attribute("Text"));
         Assert.Equal(
             "{Binding HasUpdateNotice, Converter={StaticResource BoolToVis}}",
             (string?)notice.Attribute("Visibility"));
         Assert.Contains(notice.Descendants(), element =>
             (string?)element.Attribute("Text") == "{Binding UpdateNoticeText}");
+    }
+
+    [Fact]
+    public void Startup_splash_is_self_contained_because_it_runs_on_its_own_ui_thread()
+    {
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "StartupSplashWindow.xaml"));
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var window = Assert.IsType<XElement>(document.Root);
+        var resources = Assert.Single(window.Elements(), element => element.Name.LocalName == "Window.Resources");
+        var localKeys = resources.Elements()
+            .Select(element => (string?)element.Attribute(xaml + "Key"))
+            .Where(key => key is not null)
+            .ToHashSet(StringComparer.Ordinal);
+        var attributeValues = document.Descendants().Attributes().Select(attribute => attribute.Value).ToList();
+        var staticKeys = attributeValues
+            .SelectMany(value => System.Text.RegularExpressions.Regex.Matches(value, @"\{StaticResource ([^}]+)\}"))
+            .Select(match => match.Groups[1].Value.Trim())
+            .ToList();
+
+        // 启动页线程不能读取主线程正在合并的 App 资源：只允许引用窗口内联的资源，也不允许 DynamicResource。
+        Assert.NotEmpty(staticKeys);
+        Assert.All(staticKeys, key => Assert.Contains(key, localKeys));
+        Assert.DoesNotContain(attributeValues, value => value.Contains("DynamicResource", StringComparison.Ordinal));
+        Assert.DoesNotContain(attributeValues, value => value.Contains("loc:Loc", StringComparison.Ordinal));
+        Assert.Equal("Segoe UI", (string?)window.Attribute("FontFamily"));
+
+        // 不进任务栏：WPF 会给它挂隐藏 owner，UI 自动化按 MainWindowHandle 取到的仍是收银主窗口。
+        Assert.Equal("False", (string?)window.Attribute("ShowInTaskbar"));
+        Assert.Equal("True", (string?)window.Attribute("Topmost"));
+
+        var progressBar = FindElementByAutomationId(document, "StartupProgressBar");
+        Assert.Equal("ProgressBar", progressBar.Name.LocalName);
+        Assert.Equal("{Binding ProgressValue, Mode=OneWay}", (string?)progressBar.Attribute("Value"));
+        Assert.Equal("{Binding StageTitle}", (string?)FindElementByAutomationId(document, "StartupStageTitle").Attribute("Text"));
+        Assert.Equal("{Binding StageDetail}", (string?)FindElementByAutomationId(document, "StartupStageDetail").Attribute("Text"));
+        Assert.Equal("{Binding StepText}", (string?)FindElementByAutomationId(document, "StartupStepText").Attribute("Text"));
+        Assert.Equal("{Binding ElapsedText}", (string?)FindElementByAutomationId(document, "StartupElapsed").Attribute("Text"));
+        Assert.Contains(FindElementByAutomationId(document, "StartupPercent").Descendants(), element =>
+            (string?)element.Attribute("Text") == "{Binding PercentText, Mode=OneWay}");
+    }
+
+    [Fact]
+    public void App_theme_dictionaries_load_after_splash_in_original_order()
+    {
+        var appXaml = XDocument.Load(Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "App.xaml"));
+
+        // 写在 App.xaml 里的字典会在启动页出现之前同步解析，这里必须保持为空。
+        Assert.DoesNotContain(appXaml.Descendants(), element =>
+            element.Name.LocalName is "ResourceDictionary.MergedDictionaries" or "BundledTheme");
+        Assert.Equal(
+            new[]
+            {
+                "pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml",
+                "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Default.xaml",
+                "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/PosTheme.xaml"
+            },
+            App.DeferredResourceDictionarySources.ToArray());
+
+        // 配色切换按同一个地址替换默认色板；测试进程里先注册 pack 协议再构造 Uri。
+        _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
+        Assert.Equal(
+            WpfColorThemeApplier.GetPaletteUri(PosColorTheme.Default).OriginalString,
+            App.DeferredResourceDictionarySources[1]);
     }
 
     [Fact]
@@ -390,7 +468,7 @@ public sealed class MainWindowXamlTests
                 StringComparison.Ordinal)));
 
         AssertSharedBrandImage(FindElementByAutomationId(mainWindow, "HeaderBrandMark"), "32", "32");
-        AssertSharedBrandImage(FindElementByAutomationId(startup, "StartupBrandMark"), "82", "82");
+        AssertSharedBrandImage(FindElementByAutomationId(startup, "StartupBrandMark"), "48", "48", StartupSplashAutomationName);
         AssertSharedBrandImage(registrationIcon, "42", "42");
     }
 
@@ -405,7 +483,14 @@ public sealed class MainWindowXamlTests
                 string.Equals(attribute.Value, automationId, StringComparison.Ordinal))));
     }
 
-    private static void AssertSharedBrandImage(XElement image, string width, string height)
+    // 启动页在独立线程上运行，不绑定主线程的本地化单例，品牌图名称改绑启动页自己的标题（同为 "HB POS"）。
+    private const string StartupSplashAutomationName = "{Binding TitleText}";
+
+    private static void AssertSharedBrandImage(
+        XElement image,
+        string width,
+        string height,
+        string automationName = "{loc:Loc AppName}")
     {
         Assert.Equal("Image", image.Name.LocalName);
         Assert.Equal(width, (string?)image.Attribute("Width"));
@@ -415,7 +500,7 @@ public sealed class MainWindowXamlTests
         Assert.Equal("HighQuality", GetAttributeValue(image, "RenderOptions.BitmapScalingMode"));
         Assert.Equal("True", (string?)image.Attribute("SnapsToDevicePixels"));
         Assert.Equal("True", (string?)image.Attribute("UseLayoutRounding"));
-        Assert.Equal("{loc:Loc AppName}", GetAttributeValue(image, "AutomationProperties.Name"));
+        Assert.Equal(automationName, GetAttributeValue(image, "AutomationProperties.Name"));
     }
 
     private static string? GetAttributeValue(XElement element, string localName)

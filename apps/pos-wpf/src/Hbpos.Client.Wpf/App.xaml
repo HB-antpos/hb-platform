@@ -1,16 +1,12 @@
 <Application x:Class="Hbpos.Client.Wpf.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        主题字典（MaterialDesign 全套控件样式、配色色板、POS 主题）不再写在这里：
+        这里的资源会在进程启动、启动页出现之前同步解析完，拖慢首屏。
+        改由 App.OnStartup 在启动页显示后按原顺序合并，见 App.EnsureApplicationResourcesLoaded。
+    -->
     <Application.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <materialDesign:BundledTheme BaseTheme="Light" PrimaryColor="Blue" SecondaryColor="Amber" />
-                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml" />
-                <!-- 配色色板：ColorThemeService 在运行时整体替换这一项，其余字典只能用 DynamicResource 引用色板里的颜色。 -->
-                <ResourceDictionary Source="Themes/Palettes/Default.xaml" />
-                <ResourceDictionary Source="Themes/PosTheme.xaml" />
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
+        <ResourceDictionary />
     </Application.Resources>
 </Application>

@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Markup;
+using System.Windows.Threading;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
@@ -70,6 +72,44 @@ public sealed class AppUpdatePromptServiceTests
     }
 
     [Fact]
+    public async Task ConfirmOptionalDownloadAndInstallAsync_hides_startup_screen_only_while_dialog_is_open()
+    {
+        var startupScreen = new RecordingStartupScreen();
+        var suspendedWhileShowing = false;
+        var presenter = new CapturingDialogPresenter(true, () => suspendedWhileShowing = startupScreen.IsSuspended);
+        var service = new WpfAppUpdatePromptService(null, presenter, startupScreen);
+
+        var accepted = await service.ConfirmOptionalDownloadAndInstallAsync(new AppUpdateCheckResponse
+        {
+            CurrentVersion = "1.0.0",
+            TargetVersion = "1.1.0"
+        });
+
+        Assert.True(accepted);
+        // 启动页置顶且不在主线程上，弹框期间必须让位，关闭后恢复。
+        Assert.True(suspendedWhileShowing);
+        Assert.False(startupScreen.IsSuspended);
+        Assert.Equal(1, startupScreen.SuspendCount);
+    }
+
+    [Fact]
+    public async Task Dialog_owner_requires_a_created_window_handle()
+    {
+        Assert.False(WpfAppUpdatePromptDialogPresenter.CanOwnDialog(null));
+
+        await RunOnStaDispatcherAsync(() =>
+        {
+            // 启动阶段 Application.MainWindow 是已构造、未显示的主窗口，直接当 owner 会抛异常。
+            var window = new Window();
+            Assert.False(WpfAppUpdatePromptDialogPresenter.CanOwnDialog(window));
+
+            new WindowInteropHelper(window).EnsureHandle();
+            Assert.True(WpfAppUpdatePromptDialogPresenter.CanOwnDialog(window));
+            window.Close();
+        });
+    }
+
+    [Fact]
     public void Prompt_view_model_exposes_empty_release_notes_state_and_safe_version_fallbacks()
     {
         var viewModel = new AppUpdatePromptViewModel(new AppUpdateCheckResponse
@@ -131,7 +171,7 @@ public sealed class AppUpdatePromptServiceTests
         Assert.Equal(760, placement.Bounds.Height);
     }
 
-    private sealed class CapturingDialogPresenter(bool? result) : IAppUpdatePromptDialogPresenter
+    private sealed class CapturingDialogPresenter(bool? result, Action? onShow = null) : IAppUpdatePromptDialogPresenter
     {
         public int ShowCount { get; private set; }
 
@@ -147,7 +187,69 @@ public sealed class AppUpdatePromptServiceTests
             ViewModel = viewModel;
             Owner = owner;
             Language = language;
+            onShow?.Invoke();
             return result;
+        }
+    }
+
+    private sealed class RecordingStartupScreen : IStartupScreen
+    {
+        private int _depth;
+
+        public int SuspendCount { get; private set; }
+
+        public bool IsSuspended => _depth > 0;
+
+        public IDisposable SuspendForDialog()
+        {
+            SuspendCount++;
+            _depth++;
+            return new Resume(this);
+        }
+
+        private sealed class Resume(RecordingStartupScreen owner) : IDisposable
+        {
+            public void Dispose() => owner._depth--;
+        }
+    }
+
+    private static async Task RunOnStaDispatcherAsync(Action action)
+    {
+        var dispatcherReady = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+                dispatcherReady.TrySetResult(dispatcher);
+                Dispatcher.Run();
+            }
+            catch (Exception ex)
+            {
+                dispatcherReady.TrySetException(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Hbpos.Client.Tests.AppUpdatePromptOwnerDispatcher"
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        var dispatcher = await dispatcherReady.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        try
+        {
+            await dispatcher.InvokeAsync(action, DispatcherPriority.Normal).Task;
+        }
+        finally
+        {
+            if (!dispatcher.HasShutdownStarted)
+            {
+                dispatcher.BeginInvokeShutdown(DispatcherPriority.Send);
+            }
+
+            Assert.True(thread.Join(AsyncTestWaitSupport.DefaultTimeout), "WPF Dispatcher thread did not shut down.");
         }
     }
 }

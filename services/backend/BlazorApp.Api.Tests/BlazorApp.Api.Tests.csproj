@@ -25,6 +25,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="ClientAbortCancellationTests.cs" />
+    <Compile Include="ClientAbortSqlCancellationTests.cs" />
     <Compile Include="MobileReportStoreOptionsTests.cs" />
     <Compile Include="WarehouseMinOrderQuantitySyncGuardTests.cs" />
     <Compile Include="WarehousePickingServiceTests.cs" />
@@ -225,6 +227,7 @@
     <Compile Include="LocalSupplierInvoicesArchitectureContractTests.cs" />
     <Compile Include="LocalSupplierInvoicesTransactionContractTests.cs" />
     <Compile Include="StoreOrderProductListTests.cs" />
+    <Compile Include="StoreOrderProductPickerSqlServerTests.cs" />
     <Compile Include="StoreOrderImportPriceVarianceTests.cs" />
     <Compile Include="StoreOrderPasteReplaceJobServiceTests.cs" />
     <Compile Include="StoreOrderContactAndInvoiceTests.cs" />
@@ -340,6 +343,8 @@
     <Compile Include="ContainerReactServiceLocalSupplierCodeTests.cs" />
     <Compile Include="ContainerProductCreationServiceTests.cs" />
     <Compile Include="ReactContainerControllerSyncContractTests.cs" />
+    <Compile Include="ContainerNewProductsControllerTests.cs" />
+    <Compile Include="ContainerNewProductsServiceSqliteTests.cs" />
     <Compile Include="DataSyncReactControllerLocationSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerProductSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerSyncResultContractTests.cs" />

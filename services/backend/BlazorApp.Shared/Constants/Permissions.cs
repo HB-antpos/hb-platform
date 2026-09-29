@@ -241,6 +241,8 @@ namespace BlazorApp.Shared.Constants
             public const string Create = "Container.Create";
             public const string Edit = "Container.Edit";
             public const string Delete = "Container.Delete";
+            /// <summary>移动端查看近期新品到店预告。</summary>
+            public const string MobileNewProductsView = "Container.MobileNewProductsView";
         }
 
         public static class Warehouse

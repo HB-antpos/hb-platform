@@ -18,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 using SqlSugar;
 using ScheduledTaskStatus = BlazorApp.Shared.Models.HBweb.TaskStatus;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Services.React
 {
@@ -3593,11 +3594,13 @@ namespace BlazorApp.Api.Services.React
         /// <param name="dateRange">日期范围</param>
         /// <param name="topN">返回前N条记录</param>
         /// <param name="branchCodes">分店代码列表（可选）</param>
+        /// <param name="cancellationToken">调用方请求令牌，仅用于识别客户端中止</param>
         /// <returns>分店业绩排名及统计完整性状态</returns>
         public async Task<ExecutiveBranchPerformanceResultDto> GetExecutiveBranchPerformanceAsync(
             DateRangeDto dateRange,
             int? topN = null,
-            List<string>? branchCodes = null
+            List<string>? branchCodes = null,
+            CancellationToken cancellationToken = default
         )
         {
             try
@@ -3868,6 +3871,12 @@ namespace BlazorApp.Api.Services.React
                     return response;
                 });
             }
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+            {
+                // 调用方已取消（HTTP 请求被客户端中止）：直接上抛交给控制器按 499 处理，不在此记错误。
+                // 认证阶段已把同一请求令牌留在 SqlSugar ADO 上，本方法内的查询都会随它取消。
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "GetExecutiveBranchPerformanceAsync failed");
@@ -3881,10 +3890,12 @@ namespace BlazorApp.Api.Services.React
         /// </summary>
         /// <param name="dateRange">日期范围</param>
         /// <param name="branchCodes">分店代码列表（可选）</param>
+        /// <param name="cancellationToken">调用方请求令牌，仅用于识别客户端中止</param>
         /// <returns>每小时流量密度及统计完整性状态</returns>
         public async Task<ExecutiveReportResultDto<ExecutiveHourlyTrafficDto>> GetExecutiveHourlyTrafficAsync(
             DateRangeDto dateRange,
-            List<string>? branchCodes = null
+            List<string>? branchCodes = null,
+            CancellationToken cancellationToken = default
         )
         {
             try
@@ -4144,6 +4155,11 @@ namespace BlazorApp.Api.Services.React
 
                     return response;
                 });
+            }
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+            {
+                // 同 GetExecutiveBranchPerformanceAsync：客户端中止只上抛，不记错误。
+                throw;
             }
             catch (Exception ex)
             {

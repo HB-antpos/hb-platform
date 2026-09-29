@@ -22,6 +22,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "product-query", labelKey: "routes.productQuery", icon: "barcode-scan" },
       { routeName: "product-insights", labelKey: "routes.productInsights", icon: "chart-timeline-variant" },
       { routeName: "seasonal-product-insights", labelKey: "routes.seasonalProductInsights", icon: "calendar-star" },
+      { routeName: "container-new-products", labelKey: "routes.containerNewProducts", icon: "package-variant-closed" },
       { routeName: "price-updates", labelKey: "routes.priceUpdates", icon: "tag-arrow-up-outline" },
       { routeName: "home", labelKey: "routes.storeOrdering", icon: "storefront-outline" },
       { routeName: "cart", labelKey: "routes.cart", icon: "cart-outline" },
