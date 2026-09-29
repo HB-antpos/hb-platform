@@ -133,6 +133,10 @@
       "name": "Edit containers",
       "description": "Edit container records."
     },
+    "Container.MobileNewProductsView": {
+      "name": "View new arrivals on mobile",
+      "description": "View new products from containers in the last 2 weeks and next 4 weeks, including estimated store arrival dates."
+    },
     "Container.View": {
       "name": "View containers",
       "description": "View container lists and details."
