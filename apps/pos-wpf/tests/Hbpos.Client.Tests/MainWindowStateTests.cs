@@ -37,6 +37,33 @@ public sealed class MainWindowStateTests
     }
 
     [Fact]
+    public void Display_diagnostics_shows_high_dpi_screen_content_now_fits_above_the_taskbar()
+    {
+        // 1920×1080 @200%，Win11 任务栏 48 DIP = 96 设备像素：工作区只剩 960×492 DIP。
+        var display = new DisplayBounds(IntPtr.Zero, 0, 0, 1920, 1080, 0, 0, 1920, 984);
+
+        var message = MainWindow.BuildDisplayDiagnosticsMessage(display, 2d, 960d, 492d, WindowState.Maximized);
+
+        Assert.Contains("monitor=1920x1080 workArea=1920x984 taskbarReserved=0x96", message, StringComparison.Ordinal);
+        Assert.Contains("dpiScale=2 windowDip=960x492 windowState=Maximized", message, StringComparison.Ordinal);
+        Assert.Contains("contentScale=0.68 contentLogical=1412x724 contentClipped=False", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Display_diagnostics_reveals_auto_hidden_taskbar_and_unknown_display()
+    {
+        var autoHidden = new DisplayBounds(IntPtr.Zero, 0, 0, 1366, 768, 0, 0, 1366, 768);
+
+        var autoHiddenMessage = MainWindow.BuildDisplayDiagnosticsMessage(autoHidden, 1d, 1366d, 768d, WindowState.Maximized);
+        var unknownMessage = MainWindow.BuildDisplayDiagnosticsMessage(null, 1.25d, 1092.8d, 576d, WindowState.Normal);
+
+        Assert.Contains("taskbarReserved=0x0", autoHiddenMessage, StringComparison.Ordinal);
+        Assert.Contains("contentScale=1 contentLogical=1366x768 contentClipped=False", autoHiddenMessage, StringComparison.Ordinal);
+        Assert.Contains("monitor=<unknown> workArea=<unknown> taskbarReserved=<unknown>", unknownMessage, StringComparison.Ordinal);
+        Assert.Contains("dpiScale=1.25 windowDip=1092.8x576 windowState=Normal", unknownMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LoadWindowStateAsync_falls_back_to_fullscreen_when_local_settings_fail()
     {
         var repository = new RecordingSettingsRepository { ExceptionToThrow = new InvalidOperationException("broken") };
