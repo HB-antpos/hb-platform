@@ -612,13 +612,13 @@ async function main() {
       const refreshSection = extractSection(
         source,
         'const refreshCurrentList =',
-        name === '仓库商品' ? 'const stopHqSyncJobPolling' : 'const loadUnmatchedStoreGroups = async () =>',
+        name === '仓库商品' ? 'const stopBatchUpdateJobPolling' : 'const loadUnmatchedStoreGroups = async () =>',
         `${name} refreshCurrentList`,
       )
       const lifecycleSection = extractSection(
         source,
         lifecycleMarker,
-        name === '仓库商品' ? 'useEffect(() => {' : 'const runStoreOrderHqSync = async (',
+        name === '仓库商品' ? 'useEffect(() => {' : 'const handleStatusToggle =',
         `${name} layout lifecycle`,
       )
 
@@ -638,12 +638,12 @@ async function main() {
 
   const mutationRefreshContractFailure = await runTest('仓库主列表的 post-await 刷新统一走 current loader', () => {
     for (const [name, source, startMarker, endMarker] of [
-      ['商品编辑', warehouseProductsSource, 'const handleSave = async () =>', 'const handleBatchToggleActive = async'],
+      ['商品编辑', warehouseProductsSource, 'const handleSave = async (', 'const handleBatchToggleActive = async'],
       ['商品批量状态', warehouseProductsSource, 'const handleBatchToggleActive = async', 'const openBatchEdit ='],
       ['商品批量编辑后台任务', warehouseProductsSource, 'const refreshBatchUpdateListWithSelection = useCallback', 'const clearSubmittedBatchUpdateSelection = useCallback'],
       ['商品套装保存', warehouseProductsSource, 'const handleSaveSetItems = async', 'const handleExport = async'],
       ['进货单未匹配分店修复', storeOrdersSource, 'const handleSaveUnmatchedStoreMappings = async', 'const updateColumnFilters ='],
-      ['进货单 HQ 同步', storeOrdersSource, 'const runStoreOrderHqSync = async', 'const handleFullHqSync ='],
+      // 分店订货的 HQ 全量/增量同步已于 2026-09-29 停用，页面不再有对应刷新路径。
       ['进货单状态', storeOrdersSource, 'const handleStatusToggle =', 'const handleBatchStatusChange ='],
       ['进货单批量状态', storeOrdersSource, 'const handleBatchStatusChange =', 'const handleCopyOrderNo ='],
       ['进货单发货', storeOrdersSource, 'const handleConfirmShipping = async', 'const columnDragSensors ='],

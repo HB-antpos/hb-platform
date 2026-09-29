@@ -1,4 +1,4 @@
-import type { SupplyPlan } from './supplyNotice'
+import type { SupplyNoticeInput, SupplyPlan } from './supplyNotice'
 
 export enum StoreOrderFlowStatus {
   ShoppingCart = 0,
@@ -675,11 +675,15 @@ export interface RefreshStoreOrderImportPricesResult {
 export interface UpdateStoreOrderProductStatusPayload {
   productCode: string
   isActive: boolean
+  /** 下架时随请求登记的供货说明；上架时不传。 */
+  supplyNotice?: SupplyNoticeInput
 }
 
 export interface BatchUpdateStoreOrderProductStatusPayload {
   productCodes: string[]
   isActive: boolean
+  /** 下架时随请求登记的供货说明；上架时不传。 */
+  supplyNotice?: SupplyNoticeInput
 }
 
 export interface UpdateStoreOrderHeaderPayload {

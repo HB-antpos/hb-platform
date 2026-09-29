@@ -1,0 +1,17 @@
+{
+  "containers": {
+    "fields": {
+      "lastImportPriceSnapshot": "Last Import Price",
+      "lastOemPriceSnapshot": "Last RRP"
+    },
+    "modals": {
+      "recalculateCostsAfterDeleteNote": "Deleting details changed the container total volume. Transport cost and import price of the remaining details need to be recalculated with the new total volume.",
+      "translateHqDataContent": "Products in HQ container {{containerNumber}} whose English name is empty or contains Chinese will be machine-translated and written directly to the HQ product dictionary (valid English names are kept). Continue?"
+    },
+    "messages": {
+      "detailsDeletedCostsRecalculated": "Recalculated costs for {{count}} remaining details",
+      "detailsDeletedCostsRecalculateCancelled": "Recalculation cancelled. Remaining details still use the pre-deletion total volume for transport cost",
+      "detailsDeletedCostsRecalculateFailed": "Details deleted, but cost recalculation failed: {{message}}"
+    }
+  }
+}

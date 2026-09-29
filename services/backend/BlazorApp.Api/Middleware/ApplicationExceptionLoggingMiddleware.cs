@@ -22,6 +22,25 @@ namespace BlazorApp.Api.Middleware
             {
                 await _next(context);
             }
+            catch (OperationCanceledException ex) when (context.RequestAborted.IsCancellationRequested)
+            {
+                // 客户端中途断开（如认证阶段会话校验被 RequestAborted 取消）：不是服务端故障，
+                // 降为 Information 不进 ApplicationLog；也不再向外抛出，避免被当成未处理异常按 500 收尾。
+                // 服务端自身超时不会触发 RequestAborted，仍落入下方分支按 Error 记录并抛出。
+                _logger.LogInformation(
+                    "客户端已取消请求 - 路径: {Path}, 方法: {Method}, TraceId: {TraceId}, 异常: {ExceptionType}",
+                    context.Request.Path,
+                    context.Request.Method,
+                    context.TraceIdentifier,
+                    ex.GetType().Name
+                );
+
+                // 响应已开始时状态码不可再改；未开始时与 ApiExceptionFilter 保持一致，标记为 499。
+                if (!context.Response.HasStarted)
+                {
+                    context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+                }
+            }
             catch (Exception ex)
             {
                 _logger.LogError(

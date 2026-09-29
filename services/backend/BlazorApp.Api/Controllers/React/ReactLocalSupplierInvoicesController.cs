@@ -1,4 +1,5 @@
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
@@ -1583,8 +1584,11 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        // 2026-09-29 起停用：HQ 进货单主表/详情 → 本地 StoreLocalSupplierInvoice 属于 HQ → HBweb 方向，统一返回 410；
+        // 上方 push-to-hq（本地 → HQ）保持可用。
         [HttpPost("sync-from-hq")]
         [Authorize(Roles = "Admin,管理员")]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncFromHq([FromBody] LocalSupplierInvoiceHqSyncRequest? request)
         {
             request ??= new LocalSupplierInvoiceHqSyncRequest();
