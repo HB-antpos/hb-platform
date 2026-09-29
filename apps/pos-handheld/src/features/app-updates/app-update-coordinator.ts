@@ -231,22 +231,16 @@ export function decideAppUpdateRestart(
       reason: "invalid-safety-snapshot",
     });
   }
+  // 只拦截正在进行的操作。待恢复的支付/退货事实都已耐久落库，重启后由恢复流程继续；
+  // 若因此禁止更新，含恢复修复的新版本将永远装不上（例如在线现金退款卡在未知恢复）。
+  // 进行中的收银由购物车、耐久写入、同步与外设动作覆盖，仍然阻止重启。
   if (snapshot.hasActiveCart) {
     return Object.freeze({ canRestart: false, reason: "active-cart" });
-  }
-  if (snapshot.hasUnresolvedPayment) {
-    return Object.freeze({ canRestart: false, reason: "unresolved-payment" });
   }
   if (snapshot.hasPendingDurableWrite) {
     return Object.freeze({
       canRestart: false,
       reason: "pending-durable-write",
-    });
-  }
-  if (snapshot.hasRecoveryRequired) {
-    return Object.freeze({
-      canRestart: false,
-      reason: "recovery-required",
     });
   }
   if (snapshot.hasCatalogRefreshInFlight) {
