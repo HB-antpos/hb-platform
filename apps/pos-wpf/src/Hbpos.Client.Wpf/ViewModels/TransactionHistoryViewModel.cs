@@ -895,12 +895,30 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
     }
 
+    /// <summary>
+    /// 收银页“取回”入口：直接落在挂单（Held）页签的本机范围，日期回到当天。
+    /// </summary>
     public Task ShowSuspendedOrdersAsync(CancellationToken cancellationToken = default)
     {
+        ResetDateRangeToToday();
         _suppressSourceAutoLoad = true;
-        SelectedSourceOption = SourceOptions.First(x => x.Source == TransactionHistorySource.LocalOrders);
+        SelectedSourceOption = SourceOptions.First(x => x.Source == TransactionHistorySource.HeldOrders);
         _suppressSourceAutoLoad = false;
+        // 上次离开时已停在挂单页签则不会触发来源变更回调，这里显式回到本机范围。
+        ResetHeldScopeToLocal();
         return LoadAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 每次从导航进入历史页时把日期范围重置为当天。
+    /// 视图模型首次创建后常驻复用，字段初值只在创建那天有效；收银机跨夜不重启时
+    /// 若不重置，次日进入仍会停在前一天。
+    /// </summary>
+    public void ResetDateRangeToToday()
+    {
+        var today = _timeProvider.GetLocalNow().Date;
+        DateFrom = today;
+        DateTo = today;
     }
 
     partial void OnSelectedSourceOptionChanged(HistorySourceOption? value)
