@@ -21,6 +21,7 @@ import type {
   ReturnCapacityVaultInput,
   ReturnCapacityVaultPort,
 } from "./return-lookup-adapter";
+import { isManualCardReturnMaterial } from "./return-lookup-adapter";
 
 import type { CartLine } from "@hb/pos-domain/core/contracts/cart";
 import {
@@ -379,6 +380,11 @@ function validateCapacityMaterial(
 function cardProtectedContext(
   material: ProtectedTenderCapacityMaterial,
 ): Readonly<Record<string, unknown>> {
+  if (isManualCardReturnMaterial(material)) {
+    // 手工刷卡只登记额度，不保存引用或交易号：执行层对 manual-card 原路退款一律拒绝，
+    // 收银员只能以现金或代金券代替退款（与 WPF 一致）。
+    return { version: 1, provider: "manual-card" };
+  }
   const originalReference = requiredProviderText(
     material.protectedProviderMaterial.reference,
   );

@@ -474,6 +474,10 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
                 remainingCents: handle.remainingCents,
               }
             : null,
+        // 手工刷卡没有集成刷卡机退款凭据，只能现金或代金券代替退款。
+        ...(isManualCardReturnMaterial(material)
+          ? { substituteOnly: true }
+          : {}),
       };
     });
   }
@@ -593,6 +597,29 @@ function unwrapNullableEnvelope<T>(envelope: HbposEnvelope<T | null>): T | null 
     return unwrapHbposEnvelope(envelope);
   }
   return envelope.data ?? null;
+}
+
+const MANUAL_CARD_REFERENCE_PREFIX = "MANUAL:";
+const MANUAL_CARD_PROCESSOR = "Manual";
+
+/**
+ * 与 WPF ManualCardPaymentReference.IsManualRefundSource 口径一致：
+ * 独立刷卡机人工确认的刷卡（引用 MANUAL: 前缀或处理器 Manual）不能经集成刷卡机原路退回。
+ */
+export function isManualCardReturnMaterial(
+  material: ProtectedTenderCapacityMaterial,
+): boolean {
+  if (material.method !== "card") return false;
+  const reference = material.protectedProviderMaterial.reference?.trim() ?? "";
+  return (
+    reference.toUpperCase().startsWith(MANUAL_CARD_REFERENCE_PREFIX) ||
+    material.protectedProviderMaterial.cardTransactions.some(
+      (transaction) =>
+        typeof transaction.processor === "string" &&
+        transaction.processor.trim().toLowerCase() ===
+          MANUAL_CARD_PROCESSOR.toLowerCase(),
+    )
+  );
 }
 
 function isTransportFailure(error: unknown): boolean {

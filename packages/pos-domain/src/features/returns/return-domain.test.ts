@@ -199,7 +199,7 @@ test("刷卡订单可选现金代替退款：整单统一现金且仍绑定原�
   ]);
 });
 
-test("刷卡订单可选代金券代替退款：method 为 voucher 且绑定原卡容量", () => {
+test("刷卡/现金额度暂不允许代金券代替：计划阶段明确拒绝，避免提交后卡在未知恢复", () => {
   const context = receiptContext({
     lines: [
       {
@@ -216,22 +216,90 @@ test("刷卡订单可选代金券代替退款：method 为 voucher 且绑定原�
     "line-a",
     1,
   );
-  const plan = buildReturnRefundPlan({
+  for (const original of ["card", "cash"] as const) {
+    assert.throws(
+      () =>
+        buildReturnRefundPlan({
+          sourceKind: "receipt",
+          originalOrderGuid: "order-a",
+          lines: selected,
+          capacities: [capacity(original, 5_000, false)],
+          online: true,
+          preferredMethod: "voucher",
+        }),
+      hasCode("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE"),
+    );
+  }
+
+  // 原礼券额度按礼券原路退回仍然允许。
+  const voucherPlan = buildReturnRefundPlan({
     sourceKind: "receipt",
     originalOrderGuid: "order-a",
     lines: selected,
-    capacities: context.tenderCapacities,
+    capacities: [capacity("voucher", 5_000, false)],
     online: true,
     preferredMethod: "voucher",
   });
-
   assert.deepEqual(
-    plan.allocations.map((allocation) => [
+    voucherPlan.allocations.map((allocation) => [
+      allocation.method,
+      allocation.originalCapacityId,
+    ]),
+    [["voucher", "capacity-voucher"]],
+  );
+});
+
+test("手工刷卡额度只能现金代替：默认原路退回被拒，现金代替绑定原卡额度", () => {
+  const manualCard: OriginalReturnTenderCapacity = {
+    ...capacity("card", 250, false),
+    substituteOnly: true,
+  };
+  const context = receiptContext({
+    lines: [
+      {
+        ...receiptContext().lines[0]!,
+        availableQuantity: 1,
+        unitRefundCents: 250,
+        remainingAmountCents: 250,
+      },
+    ],
+    tenderCapacities: [manualCard],
+  });
+  const selected = updateReturnLineQuantity(
+    createReceiptDraftLines(context),
+    "line-a",
+    1,
+  );
+  for (const preferredMethod of [null, "card"] as const) {
+    assert.throws(
+      () =>
+        buildReturnRefundPlan({
+          sourceKind: "receipt",
+          originalOrderGuid: "order-a",
+          lines: selected,
+          capacities: [manualCard],
+          online: true,
+          preferredMethod,
+        }),
+      hasCode("RETURN_ORIGINAL_REFUND_UNAVAILABLE"),
+    );
+  }
+
+  const cashPlan = buildReturnRefundPlan({
+    sourceKind: "receipt",
+    originalOrderGuid: "order-a",
+    lines: selected,
+    capacities: [manualCard],
+    online: true,
+    preferredMethod: "cash",
+  });
+  assert.deepEqual(
+    cashPlan.allocations.map((allocation) => [
       allocation.method,
       allocation.signedAmountCents,
       allocation.originalCapacityId,
     ]),
-    [["voucher", -5_000, "capacity-card"]],
+    [["cash", -250, "capacity-card"]],
   );
 });
 

@@ -161,6 +161,52 @@ test("公开退款上下文使用 Vault 复用后余额及现金证明余额", a
   assert.equal(context?.tenderCapacities[0]?.offlineCashProof?.remainingCents, 0);
 });
 
+test("手工刷卡原付款可查出，额度只允许现金代替；集成刷卡与现金额度不受影响", async () => {
+  const remote = new FakeHistoryApi();
+  const base = remoteContext();
+  remote.contextResult = {
+    ...base,
+    paymentCapacities: [
+      ...(base.paymentCapacities ?? []),
+      {
+        method: 2,
+        originalAmount: 2.5,
+        refundedAmount: 0,
+        remainingAmount: 2.5,
+        originalOrderGuid: orderGuid,
+        reference: "MANUAL:0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00",
+        cardTransactions: [{ processor: "Manual" }],
+      },
+    ],
+  };
+  const adapter = createAdapter({
+    historyApi: remote,
+    capacityVault: {
+      async protect(input) {
+        return input.capacities.map((capacity) => ({
+          sourceKey: capacity.sourceKey,
+          capacityId: `opaque-${capacity.sourceKey}`,
+          remainingCents: capacity.remainingCents,
+          offlineCashEvidenceId: capacity.method === "cash" ? `proof-${capacity.sourceKey}` : null,
+        }));
+      },
+    },
+  });
+  const context = await adapter.lookupReceipt(orderGuid);
+  assert.deepEqual(
+    context?.tenderCapacities.map((capacity) => [
+      capacity.method,
+      capacity.remainingCents,
+      capacity.substituteOnly === true,
+    ]),
+    [
+      ["cash", 500, false],
+      ["card", 501, false],
+      ["card", 250, true],
+    ],
+  );
+});
+
 test("只有传输失败才回退同门店本地订单，并始终标记 stale", async () => {
   const remote = new FakeHistoryApi();
   remote.searchError = new HbposApiError("offline", { kind: "transport" });
