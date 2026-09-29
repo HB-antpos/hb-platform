@@ -2373,6 +2373,11 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         Assert.Null(await _db.Queryable<Product>().FirstAsync(item => item.ProductCode == "P-ROLLBACK-NEW"));
         Assert.Null(await _db.Queryable<WarehouseProduct>().FirstAsync(item => item.ProductCode == "P-ROLLBACK-NEW"));
         Assert.Equal(0, await _db.Queryable<StoreRetailPrice>().Where(item => item.ProductCode == "P-ROLLBACK-NEW").CountAsync());
+        // 结果计数必须与回滚后的数据一致，不能仍显示「创建 1」让用户误以为部分成功。
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Empty(result.Created);
+        Assert.Equal(0, result.UpdatedCount);
+        Assert.Empty(result.Updated);
         var container = await _db.Queryable<Container>().SingleAsync(item => item.ContainerCode == "C-ROLLBACK");
         Assert.Equal(1, container.Status);
     }
@@ -2519,6 +2524,112 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
 
         executor.Release();
         await Task.Delay(50);
+    }
+
+    [Fact]
+    public async Task JobService_失败任务完成后同一操作再次提交应重新执行()
+    {
+        // 第一次执行失败（如缺英文名），用户修正数据后再次提交必须真的重跑，不能返回缓存的失败结果。
+        var executor = new SequencedContainerProductCreationExecutor(failedCountByCall: new[] { 1, 0 });
+        var jobService = CreateJobService(executor);
+        var request = new ContainerProductCreationJobRequestDto { OperationId = "op-retry", ContainerGuid = "C001", SubmitContainer = true };
+
+        var first = await jobService.StartJobAsync("user-1", request);
+        var firstDone = await WaitForJobAsync(jobService, "user-1", first.JobId);
+        Assert.Equal(ContainerProductCreationJobStatusConstants.Failed, firstDone.Status);
+
+        var second = await jobService.StartJobAsync("user-1", request);
+        var secondDone = await WaitForJobAsync(jobService, "user-1", second.JobId);
+
+        Assert.NotEqual(first.JobId, second.JobId);
+        Assert.False(second.IsDuplicateRequest);
+        Assert.Equal(ContainerProductCreationJobStatusConstants.Succeeded, secondDone.Status);
+        Assert.Equal(2, executor.CallCount);
+    }
+
+    [Fact]
+    public async Task JobService_成功任务在保留期内再次提交仍复用结果()
+    {
+        var executor = new SequencedContainerProductCreationExecutor(failedCountByCall: new[] { 0, 0 });
+        var jobService = CreateJobService(executor);
+        var request = new ContainerProductCreationJobRequestDto { OperationId = "op-done", ContainerGuid = "C001", SubmitContainer = true };
+
+        var first = await jobService.StartJobAsync("user-1", request);
+        await WaitForJobAsync(jobService, "user-1", first.JobId);
+        var second = await jobService.StartJobAsync("user-1", request);
+
+        Assert.Equal(first.JobId, second.JobId);
+        Assert.True(second.IsDuplicateRequest);
+        Assert.Equal(1, executor.CallCount);
+    }
+
+    private static ContainerProductCreationJobService CreateJobService(IContainerProductCreationExecutorService executor)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(executor);
+        var provider = services.BuildServiceProvider();
+        return new ContainerProductCreationJobService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<ContainerProductCreationJobService>.Instance
+        );
+    }
+
+    private static async Task<ContainerProductCreationJobDto> WaitForJobAsync(
+        ContainerProductCreationJobService jobService,
+        string userId,
+        string jobId
+    )
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var job = await jobService.GetJobAsync(userId, jobId);
+            if (job != null
+                && job.Status != ContainerProductCreationJobStatusConstants.Queued
+                && job.Status != ContainerProductCreationJobStatusConstants.Running)
+            {
+                return job;
+            }
+
+            await Task.Delay(10);
+        }
+
+        throw new TimeoutException($"任务 {jobId} 未在预期时间内完成");
+    }
+
+    private sealed class SequencedContainerProductCreationExecutor : IContainerProductCreationExecutorService
+    {
+        private readonly int[] _failedCountByCall;
+        private int _callCount;
+
+        public SequencedContainerProductCreationExecutor(int[] failedCountByCall)
+        {
+            _failedCountByCall = failedCountByCall;
+        }
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public Task<ContainerProductCreationResultDto> ExecuteAsync(
+            ContainerProductCreationJobRequestDto request,
+            CancellationToken cancellationToken = default
+        ) => ExecuteAsync(request, null, null, cancellationToken);
+
+        public Task<ContainerProductCreationResultDto> ExecuteAsync(
+            ContainerProductCreationJobRequestDto request,
+            string? updatedBy,
+            CancellationToken cancellationToken = default
+        ) => ExecuteAsync(request, null, updatedBy, cancellationToken);
+
+        public Task<ContainerProductCreationResultDto> ExecuteAsync(
+            ContainerProductCreationJobRequestDto request,
+            string? actorUserGuid,
+            string? updatedBy,
+            CancellationToken cancellationToken = default
+        )
+        {
+            var call = Interlocked.Increment(ref _callCount) - 1;
+            var failed = _failedCountByCall[Math.Min(call, _failedCountByCall.Length - 1)];
+            return Task.FromResult(new ContainerProductCreationResultDto { FailedCount = failed });
+        }
     }
 
     public void Dispose()

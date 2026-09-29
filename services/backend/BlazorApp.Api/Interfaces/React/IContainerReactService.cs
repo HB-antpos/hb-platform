@@ -128,7 +128,8 @@ namespace BlazorApp.Api.Interfaces.React
             ContainerDetailBatchPreviewRequestDto request
         );
 
-        Task<int> BatchDeleteDetailsScopedAsync(string containerGuid, ContainerDetailBatchScopeDto request);
+        /// <summary>按范围删除明细；返回实际删除数与范围内请求数（前端据此校验删除结果）。</summary>
+        Task<(int TotalDeleted, int TotalRequested)> BatchDeleteDetailsScopedAsync(string containerGuid, ContainerDetailBatchScopeDto request);
 
         /// <summary>
         /// 创建新货柜（React）

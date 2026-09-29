@@ -64,6 +64,20 @@ internal sealed class ProductPickerPageCacheStore(
     {
         return !filter.ExcludeExistingWarehouseProducts
             && string.IsNullOrWhiteSpace(filter.ExcludeOrderGUID)
-            && string.IsNullOrWhiteSpace(filter.SupplierCode);
+            && string.IsNullOrWhiteSpace(filter.SupplierCode)
+            && !HasTextSearch(filter);
+    }
+
+    private static bool HasTextSearch(StoreOrderFilterDto filter)
+    {
+        // 关键字检索既不读也不写缓存：跨用户几乎不复用，且上下架、改价后用户常立即用同一关键字复查，
+        // 缓存（尤其是空结果）会让刚上架的商品在过期前一直搜不到；写入口众多，无法可靠地按写入失效。
+        var columnFilters = filter.ColumnFilters;
+        return !string.IsNullOrWhiteSpace(filter.ItemNumber)
+            || !string.IsNullOrWhiteSpace(filter.ProductName)
+            || !string.IsNullOrWhiteSpace(columnFilters?.ItemNumber)
+            || !string.IsNullOrWhiteSpace(columnFilters?.ProductName)
+            || !string.IsNullOrWhiteSpace(columnFilters?.Barcode)
+            || !string.IsNullOrWhiteSpace(columnFilters?.SupplierKeyword);
     }
 }
