@@ -35,12 +35,11 @@ import PageContainer from '../../../components/PageContainer'
 import {
   createContainer,
   getContainerList,
-  getDateFilterOptions,
   pushContainersToHbSales,
   updateContainer,
 } from '../../../services/containerService'
 import { useAuthStore } from '../../../store/auth'
-import type { ContainerMain, CreateContainerRequest, DateFilterOption } from '../../../types/container'
+import type { ContainerMain, CreateContainerRequest } from '../../../types/container'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
@@ -145,6 +144,8 @@ function getDateOptionLabel(value: string, t: TFunction) {
   }
   return map[value] ? t(map[value]) : value
 }
+
+const dateTypeOptions = ['预计到岸日期', '实际到货日期', '装柜日期']
 
 function getContainerDateWeekKey(value?: string) {
   if (!value) return undefined
@@ -280,10 +281,6 @@ export default function ContainersPage() {
   const [dateRange, setDateRange] = useState<RangeValue>(null)
   const [itemNumberFilter, setItemNumberFilter] = useState('')
   const [columnFilters, setColumnFilters] = useState<ContainerColumnFilters>({})
-  const [dateOptions, setDateOptions] = useState<DateFilterOption[]>([
-    { value: '预计到岸日期', label: t('containers.fields.estimatedArrivalDate') },
-    { value: '实际到货日期', label: t('containers.fields.actualArrivalDate') },
-  ])
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
@@ -419,10 +416,6 @@ export default function ContainersPage() {
     latestLoadDataRef.current = loadData
     latestRequestFirstPageRef.current = requestFirstPage
   })
-
-  useEffect(() => {
-    getDateFilterOptions().then(setDateOptions).catch(() => undefined)
-  }, [])
 
   useEffect(() => {
     const pendingRequest = pendingFirstPageRequestRef.current
@@ -822,7 +815,7 @@ export default function ContainersPage() {
         <Card>
           <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
             <Space wrap>
-              <Select value={dateType} style={{ width: 160 }} options={dateOptions.map((option) => ({ ...option, label: getDateOptionLabel(option.value, t) }))} onChange={setDateType} />
+              <Select value={dateType} style={{ width: 160 }} options={dateTypeOptions.map((value) => ({ value, label: getDateOptionLabel(value, t) }))} onChange={setDateType} />
               <DatePicker.RangePicker value={dateRange} onChange={setDateRange} />
               <Input
                 allowClear

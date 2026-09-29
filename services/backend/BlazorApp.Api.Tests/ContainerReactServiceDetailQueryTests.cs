@@ -288,6 +288,79 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetContainersAsync_装柜日期应按装柜日期过滤结束日整天并倒序()
+    {
+        await SeedContainerAsync(
+            "C-LOADING-1",
+            "LOAD-1",
+            loadingDate: new DateTime(2026, 6, 10, 23, 59, 0),
+            estimatedArrivalDate: new DateTime(2026, 1, 1),
+            status: 1
+        );
+        await SeedContainerAsync(
+            "C-LOADING-2",
+            "LOAD-2",
+            loadingDate: new DateTime(2026, 6, 9, 8, 0, 0),
+            estimatedArrivalDate: new DateTime(2026, 12, 31),
+            status: 1
+        );
+        await SeedContainerAsync(
+            "C-LOADING-3",
+            "LOAD-3",
+            loadingDate: new DateTime(2026, 6, 11),
+            estimatedArrivalDate: new DateTime(2026, 6, 10),
+            status: 1
+        );
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest
+            {
+                Page = 1,
+                PageSize = 20,
+                DateType = "装柜日期",
+                StartDate = new DateTime(2026, 6, 9),
+                EndDate = new DateTime(2026, 6, 10),
+            }
+        );
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(new[] { "LOAD-1", "LOAD-2" }, result.Containers.Select(x => x.货柜编号).ToArray());
+    }
+
+    [Fact]
+    public async Task GetContainersAsync_装柜日期同日分页应按货柜编码稳定排序()
+    {
+        await SeedContainerAsync(
+            "C-SAME-B",
+            "SAME-B",
+            loadingDate: new DateTime(2026, 6, 10, 12, 0, 0),
+            status: 1
+        );
+        await SeedContainerAsync(
+            "C-SAME-A",
+            "SAME-A",
+            loadingDate: new DateTime(2026, 6, 10, 12, 0, 0),
+            status: 1
+        );
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest
+            {
+                Page = 1,
+                PageSize = 1,
+                DateType = "装柜日期",
+                StartDate = new DateTime(2026, 6, 10),
+                EndDate = new DateTime(2026, 6, 10),
+            }
+        );
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal("SAME-A", Assert.Single(result.Containers).货柜编号);
+    }
+
+    [Fact]
     public async Task GetContainersAsync_空列头过滤应保持原分页总数()
     {
         await SeedContainerAsync("C-EMPTY-1", "CSGU7035442", status: 1);

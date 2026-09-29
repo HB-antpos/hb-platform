@@ -943,7 +943,16 @@ namespace BlazorApp.Api.Services.React
                 if (request.StartDate.HasValue && request.EndDate.HasValue)
                 {
                     // 根据日期类型选择不同的日期字段进行过滤
-                    if (
+                    if (request.DateType == "装柜日期")
+                    {
+                        var start = request.StartDate.Value.Date;
+                        var endExclusive = request.EndDate.Value.Date.AddDays(1);
+                        query = query.Where(x =>
+                            x.LoadingDate >= start
+                            && x.LoadingDate < endExclusive
+                        );
+                    }
+                    else if (
                         request.DateType == "实际到货日期"
                         || request.DateType == "Actual Arrival Date"
                     )
@@ -1070,7 +1079,13 @@ namespace BlazorApp.Api.Services.React
                 }
 
                 // 排序：根据日期类型选择排序字段
-                if (request.DateType == "实际到货日期" || request.DateType == "Actual Arrival Date")
+                if (request.DateType == "装柜日期")
+                {
+                    query = query
+                        .OrderBy(x => x.LoadingDate, OrderByType.Desc)
+                        .OrderBy(x => x.ContainerCode, OrderByType.Asc);
+                }
+                else if (request.DateType == "实际到货日期" || request.DateType == "Actual Arrival Date")
                 {
                     query = query.OrderByDescending(x => x.ActualArrivalDate);
                 }
