@@ -98,7 +98,6 @@ async function main() {
 
   const pageWiringFailure = await runTest('仓库标签页应挂载局部紧凑表格样式和商品条码列', () => {
     assert(locationsPageSource.includes("import './compact.css'"), '页面应引入局部 compact.css')
-    assert(locationsPageSource.includes('CloudSyncOutlined'), '页面应引入 HQ 同步图标')
     assert(locationsPageSource.includes('className="warehouse-locations-compact-table"'), 'Table 缺少局部紧凑 class')
     assert(locationsPageSource.includes('size="small"'), 'Table 应使用 small 尺寸')
     assert(locationsPageSource.includes("title: t('column.productBarcode')"), '表格缺少商品条码列')
@@ -107,19 +106,23 @@ async function main() {
   })
   if (pageWiringFailure) failures.push(pageWiringFailure)
 
-  const hqSyncPageFailure = await runTest('仓库标签页应提供一键从HQ更新货位入口', () => {
-    assert(locationsPageSource.includes('syncLocationsFromHq'), '页面应调用 syncLocationsFromHq')
-    assert(locationsPageSource.includes('const [syncingFromHq, setSyncingFromHq] = useState(false)'), '页面应维护 HQ 同步 loading 状态')
-    assert(locationsPageSource.includes('const canSyncLocationsFromHq = access.isAdmin || access.isWarehouseManager'), '页面应按后端 Admin/WarehouseManager 角色显示同步按钮')
-    assert(locationsPageSource.includes('const handleSyncFromHq = () => {'), '页面缺少 HQ 同步处理函数')
-    assert(locationsPageSource.includes('Modal.confirm'), 'HQ 同步应二次确认')
-    assert(locationsPageSource.includes('setSyncingFromHq(true)'), '确认同步后应进入 loading 状态')
-    assert(locationsPageSource.includes('await syncLocationsFromHq()'), '页面应等待一键同步完成')
-    assert(locationsPageSource.includes('await loadDataWithColumnFilters(1, pageSize)'), '同步成功后应刷新第一页')
-    assert(locationsPageSource.includes('loading={syncingFromHq}'), '同步按钮应绑定 loading 状态')
-    assert(locationsPageSource.includes('disabled={syncingFromHq || loading}'), '同步按钮应在同步或列表加载中禁用')
-    assert(locationsPageSource.includes("t('warehouseLocations.syncFromHq'"), '同步按钮应使用仓库标签文案')
-    assert(locationsPageSource.includes("t('warehouseLocations.syncFromHqSuccessTitle'"), '同步成功应展示专属结果标题')
+  // HQ → HBweb 的「从HQ更新货位」已于 2026-09-29 停用（后端返回 410），页面不得再提供入口。
+  const hqSyncPageFailure = await runTest('仓库标签页不再提供从HQ更新货位入口', () => {
+    for (const removed of [
+      'syncLocationsFromHq',
+      'syncingFromHq',
+      'canSyncLocationsFromHq',
+      'handleSyncFromHq',
+      'CloudSyncOutlined',
+      "t('warehouseLocations.syncFromHq'",
+      "t('warehouseLocations.syncFromHqSuccessTitle'",
+    ]) {
+      assert(!locationsPageSource.includes(removed), `页面不应再包含 HQ 同步入口代码：${removed}`)
+    }
+    assert(
+      locationsPageSource.includes('<Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>'),
+      '页头应保留新建货位按钮',
+    )
   })
   if (hqSyncPageFailure) failures.push(hqSyncPageFailure)
 

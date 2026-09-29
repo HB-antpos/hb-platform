@@ -28,6 +28,11 @@ namespace BlazorApp.Shared.DTOs
     public class StoreProductPriceQueryDto
     {
         public string? StoreCode { get; set; }
+
+        /// <summary>
+        /// 多选分店；与 StoreCode 合并去重，选了多个分店时每个商品在每个分店各占一行。
+        /// </summary>
+        public List<string>? StoreCodes { get; set; }
         public string? Search { get; set; }
         public string? LocalSupplierCode { get; set; }
         public int PageNumber { get; set; } = 1;

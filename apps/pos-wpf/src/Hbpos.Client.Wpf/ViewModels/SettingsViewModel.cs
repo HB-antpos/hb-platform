@@ -267,6 +267,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private string _receiptReturnPolicyText = string.Empty;
 
     [ObservableProperty]
+    private bool _receiptPrintBankReceiptText = ReceiptPrinterSettings.Default.PrintBankReceiptText;
+
+    [ObservableProperty]
     private string _receiptPrinterTestStatusMessage = string.Empty;
 
     public string AppUpdateChannelText { get; }
@@ -2616,6 +2619,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ReceiptStorePhoneText = settings.StorePhone;
         ReceiptAbnText = settings.Abn;
         ReceiptReturnPolicyText = settings.ReturnPolicy;
+        ReceiptPrintBankReceiptText = settings.PrintBankReceiptText;
     }
 
     private ReceiptPrinterSettings CreateReceiptPrinterSettingsFromFields()
@@ -2628,7 +2632,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ReceiptStorePhoneText,
             ReceiptAbnText,
             ReceiptReturnPolicyText,
-            ReceiptPrinterSettings.Default.CutDistance);
+            ReceiptPrinterSettings.Default.CutDistance,
+            ReceiptPrintBankReceiptText);
     }
 
     partial void OnIsSquareSandboxChanged(bool value)

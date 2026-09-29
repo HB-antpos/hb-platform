@@ -566,9 +566,13 @@ async function main() {
         storeOrdersSource.includes('const canDeleteStoreOrder = access.canDeleteOrder || canUseWarehouseManagerActions'),
       '列表页应使用仓库订货管理权限开关，并排除纯 WarehouseStaff 写权限',
     )
+    // HQ 增量同步按钮已随 HQ → HBweb 同步于 2026-09-29 停用，不再出现在列表页。
+    assert(
+      !storeOrdersSource.includes("t('storeOrders.syncIncrementalOrders')"),
+      '列表页不应再显示 HQ 增量同步按钮',
+    )
     assert(
       storeOrdersSource.includes('{canUseWarehouseManagerActions ? (') &&
-        storeOrdersSource.includes("t('storeOrders.syncIncrementalOrders')") &&
         storeOrdersSource.includes("t('storeOrders.fixStoreGuid', '修复分店 GUID')") &&
         storeOrdersSource.includes("t('storeOrders.newOrder')") &&
         storeOrdersSource.includes('disabled={!canCreateStoreOrder}') &&
@@ -576,7 +580,7 @@ async function main() {
         storeOrdersSource.includes("t('storeOrders.batchSubmitted')") &&
         storeOrdersSource.includes("t('storeOrders.batchCompleted')") &&
         storeOrdersSource.includes('{canDeleteStoreOrder ? ('),
-      '列表页同步、修复、新建、复制、删除和批量状态按钮应仅仓库订货管理权限可见',
+      '列表页修复、新建、复制、删除和批量状态按钮应仅仓库订货管理权限可见',
     )
     assert(
       storeOrdersSource.includes('canUseWarehouseManagerActions && (record.flowStatus === FlowStatus.Submitted || record.flowStatus === FlowStatus.Picking)'),

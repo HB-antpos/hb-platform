@@ -119,6 +119,9 @@ if (schemaCommand.Mode != SchemaCommandMode.Server)
     }
 
     Environment.ExitCode = explicitSchemaResult.ExitCode;
+    // 关键位置：默认控制台日志由后台线程异步写出，只有释放 host（连带 LoggerFactory）才会排空队列；
+    // 不释放直接 return，进程退出时上面的诊断日志可能整条丢失。退出码已先写入，释放不改变其语义。
+    await schemaApp.DisposeAsync();
     return;
 }
 
@@ -1160,6 +1163,9 @@ if (!startupSchemaResult.Success)
         startupSchemaResult.ExitCode
     );
     Environment.ExitCode = startupSchemaResult.ExitCode;
+    // 与显式 schema 分支相同：host 尚未 Run，不会自动释放，须手动释放以排空控制台日志队列，
+    // 否则容器启动失败时 docker logs 可能看不到诊断码。
+    await app.DisposeAsync();
     return;
 }
 
