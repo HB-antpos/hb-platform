@@ -269,6 +269,7 @@
     <Compile Include="ReactProductHqSyncContractTests.cs" />
     <Compile Include="StoreRetailPriceHqSyncContractTests.cs" />
     <Compile Include="StorePriceTransferJobServiceTests.cs" />
+    <Compile Include="StoreProductPriceGridSortTests.cs" />
     <Compile Include="ReactStoreProductPricesGridStoreScopeTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqProductSyncTests.cs" />
@@ -338,6 +339,7 @@
     <Compile Include="DataSyncReactControllerSyncResultContractTests.cs" />
     <Compile Include="HqToHbwebSyncDisabledContractTests.cs" />
     <Compile Include="HqToHbwebSyncDisabledAttributeTests.cs" />
+    <Compile Include="ClientAbortedRequestLoggingTests.cs" />
     <Compile Include="DataSyncLegacyControllerProductSyncContractTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopFilterOptionsTests.cs" />
     <Compile Include="LocalSupplierInvoiceShopGridTests.cs" />

@@ -19,8 +19,8 @@ assert.match(
 );
 assert.equal(
   (source.match(/buildProductReportDateQuery\(activeRange, cashierEnabledStoreCodes\)/g) ?? []).length,
-  3,
-  "供应商与商品分店下钻及完整快照都必须显式限定在全部收银启用分店",
+  4,
+  "三表联动的全店数据、供应商与商品分店下钻及完整快照都必须显式限定在全部收银启用分店",
 );
 assert.match(
   source,
@@ -121,7 +121,11 @@ assert.match(source, /\(value \* 100\)\.toFixed\(1\)/, "毛利率 0.4 必须显�
 assert.match(source, /productReport\.states\.costPending/);
 assert.match(source, /styles\.rowNumberColumn/);
 assert.match(source, /rowNumber: \(supplierPage - 1\) \* SUPPLIER_PAGE_SIZE \+ index \+ 1/);
-assert.match(source, /rowNumber: \(productPage - 1\) \* PRODUCT_PAGE_SIZE \+ index \+ 1/);
+assert.match(
+  source,
+  /rowNumber: \(displayedProductPage - 1\) \* PRODUCT_PAGE_SIZE \+ index \+ 1/,
+  "明细行号按表里实际显示的那一页计算，局部过渡期间不能把旧行标成新页码",
+);
 assert.match(source, /grossProfit/);
 assert.match(source, /grossMarginRate/);
 assert.match(source, /costStatus/);
@@ -187,18 +191,28 @@ assert.match(
 );
 assert.match(
   source.slice(reportContentStart),
-  /mainReportStatisticsPending && !mainReportHasSnapshot \? \([\s\S]*?<LoadingState label=\{t\("reports\.states\.refreshingStatistics"\)\}/,
-  "首次无完整快照时，供应商或商品主表处于非 Fresh 追数必须停在 Loading",
+  /mainReportStatisticsPending && !mainReportHasDisplay \? \([\s\S]*?<LoadingState label=\{t\("reports\.states\.refreshingStatistics"\)\}/,
+  "首次无可展示的完整结果时，供应商或商品主表处于非 Fresh 追数必须停在 Loading",
 );
 assert.match(
   source.slice(reportContentStart),
-  /mainReportRequestError && !mainReportHasSnapshot \? \([\s\S]*?<ErrorState[\s\S]*?resetMainReportVersionSync\(\);[\s\S]*?void storeOptionsQuery\.refetch\(\);/,
-  "首次无完整快照时，任一首屏请求失败才显示统一重试",
+  /mainReportRequestError && !mainReportHasDisplay \? \([\s\S]*?<ErrorState[\s\S]*?resetMainReportVersionSync\(\);[\s\S]*?void storeOptionsQuery\.refetch\(\);/,
+  "首次无可展示的完整结果时，任一首屏请求失败才显示统一重试",
 );
 assert.match(
   source.slice(reportContentStart),
-  /mainReportStatisticsIncomplete && !mainReportHasSnapshot \? \([\s\S]*?<ErrorState[\s\S]*?reports\.states\.statisticsIncomplete[\s\S]*?resetMainReportVersionSync\(\);[\s\S]*?void storeOptionsQuery\.refetch\(\);/,
-  "首次无完整快照时，主表轮询耗尽才显示重试",
+  /mainReportStatisticsIncomplete && !mainReportHasDisplay \? \([\s\S]*?<ErrorState[\s\S]*?reports\.states\.statisticsIncomplete[\s\S]*?resetMainReportVersionSync\(\);[\s\S]*?void storeOptionsQuery\.refetch\(\);/,
+  "首次无可展示的完整结果时，主表轮询耗尽才显示重试",
+);
+assert.match(
+  source,
+  /const mainReportHasDisplay = mainReportHasSnapshot \|\| linkedTransition !== null;/,
+  "只有同条件快照或同一份报告内的联动过渡才算可展示结果",
+);
+assert.match(
+  source,
+  /const linkedTransitionStaleness = !mainReportCurrentComplete[\s\S]*?!mainReportHasSnapshot[\s\S]*?reportScopeValid[\s\S]*?getLinkedTransitionStaleness\(lastDisplayedMainReport\.context, requestedDisplayContext\)/,
+  "联动过渡只在没有同条件快照、权限范围有效时沿用上一次完整展示",
 );
 assert.match(
   source,
@@ -222,8 +236,8 @@ assert.doesNotMatch(
 );
 assert.match(
   source,
-  /queryFn: async \(\{ signal \}\) => \{[\s\S]*?fetchProductReportTotalRevenue\(queryParams!, \{ signal \}\)/,
-  "商品页总营业额请求必须接收并透传 React Query 取消信号",
+  /queryFn: async \(\{ signal \}\) => \{[\s\S]*?fetchProductReportTotalRevenue\(allBranchQueryParams!, \{ signal \}\)/,
+  "商品页总营业额固定按全部授权分店请求（所选分店在前端切片），并透传 React Query 取消信号",
 );
 assert.match(
   source,
@@ -565,13 +579,13 @@ assert.match(
 // ===== 中国供应商页签（2026-09-22 重设计）=====
 assert.match(
   source,
-  /const chinaBranchTotalsQuery = useQuery\(\{[\s\S]*?fetchChinaSupplierBranchTotals\(queryParams!, \{ signal \}\)[\s\S]*?enabled: Boolean\(queryParams\) && isChinaKind,/,
-  "分店中国货合计只在中国页签请求，并透传取消信号",
+  /const chinaBranchTotalsQuery = useQuery\(\{[\s\S]*?fetchChinaSupplierBranchTotals\(allBranchQueryParams!, \{ signal \}\)[\s\S]*?enabled: Boolean\(allBranchQueryParams\) && isChinaKind,/,
+  "分店中国货合计只在中国页签请求、固定覆盖全部授权分店，并透传取消信号",
 );
 assert.match(
   source,
-  /const mainReportCacheVersionState = getProductReportCacheVersionState\(\[[\s\S]*?productQuery\.data,\s*\.\.\.\(isChinaKind \? \[chinaBranchTotalsQuery\.data\] : \[\]\),\s*\]\)/,
-  "中国页签必须把分店中国货合计并入同一统计批次校验",
+  /const mainReportCacheVersionState = getProductReportCacheVersionState\(\[[\s\S]*?productQuery\.data,\s*\.\.\.\(isChinaKind \? \[chinaBranchTotalsQuery\.data\] : \[\]\),\s*\.\.\.\(hasChinaSupplierBranches \? \[chinaSupplierBranchesQuery\.data\] : \[\]\),\s*\]\)/,
+  "中国页签必须把分店中国货合计、选中供应商的分店分解并入同一统计批次校验",
 );
 assert.match(
   source,
@@ -600,8 +614,71 @@ assert.match(
 );
 assert.match(
   source,
-  /\{isChinaKind \? \([\s\S]*?<ChinaGoodsSummaryCard summary=\{chinaGoodsSummary\} \/>[\s\S]*?<ChinaBranchShareSection rows=\{chinaBranchShareRows\} \/>[\s\S]*?\) : productSectionLoading \? \(/,
+  /\{isChinaKind \? \([\s\S]*?<ChinaGoodsSummaryCard summary=\{chinaGoodsSummary\} \/>[\s\S]*?<ChinaBranchShareSection\s+rows=\{chinaBranchShareRows\}[\s\S]*?\) : productSectionLoading \? \(/,
   "中国页签顶部展示中国货汇总与分店占比，澳洲页签保留本页商品汇总卡",
+);
+
+// ===== 中国页签三表联动（2026-09-29）=====
+assert.match(
+  source,
+  /<ChinaBranchShareSection[\s\S]*?selectedBranchCode=\{selectedStoreCode \?\? null\}[\s\S]*?onSelectBranch=\{toggleLinkedBranch\}[\s\S]*?supplierName=\{getSupplierLabel\(branchTableSupplierCode\)\}[\s\S]*?updating=\{linkedStaleness\.branchTable\}/,
+  "分店表点行选中分店（与顶部分店选择共用状态），选中供应商时显示该供应商在各分店的销售，重取期间标记更新中",
+);
+assert.match(
+  source,
+  /const chinaSupplierBranchesQuery = useQuery\(\{[\s\S]*?fetchSupplierBranchBreakdown\("china", allBranchQueryParams!, linkedSupplierCode!, \{ signal \}\)[\s\S]*?enabled: Boolean\(allBranchQueryParams\) && hasChinaSupplierBranches,/,
+  "选中中国供应商后，分店表数据按全部授权分店请求该供应商的分店分解",
+);
+assert.match(
+  source,
+  /const linkedSupplierCode = isChinaKind \? selectedSupplierCode : null;/,
+  "分店表按供应商联动只在中国页签生效",
+);
+assert.match(
+  source,
+  /const mainReportCurrentComplete =[\s\S]*?\(!hasChinaSupplierBranches \|\| chinaSupplierBranchesQuery\.data\?\.isComplete === true\)/,
+  "选中供应商的分店分解 Fresh 后才能与其余主数据一起展示并保存快照",
+);
+assert.match(
+  source,
+  /const mainReportRequestError =[\s\S]*?\(hasChinaSupplierBranches && chinaSupplierBranchesQuery\.isError\)/,
+  "选中供应商的分店分解失败时必须走统一错误处理",
+);
+assert.match(
+  source,
+  /summarizeChinaGoods\(\s*filterRowsByBranch\(chinaBranchTotalRows, selectedStoreCode\),\s*summaryRevenue\.revenue,/,
+  "汇总卡只跟随所选分店（前端切片），不随供应商变化",
+);
+const applyStoreStart = source.indexOf("const applyStore = ");
+assert.ok(applyStoreStart >= 0, "必须保留分店选择入口");
+const applyStoreSource = source.slice(applyStoreStart, source.indexOf("\n  };", applyStoreStart));
+assert.doesNotMatch(applyStoreSource, /setSelectedSupplierCode/, "三表联动：换分店必须保留已选供应商");
+assert.doesNotMatch(
+  productMainRowSource,
+  /toggleLinked|setSelectedStoreCode|setSelectedSupplierCode|applyStore/,
+  "明细不反向联动：点商品行只打开商品分店弹窗，不改变分店与供应商选择",
+);
+assert.match(
+  source.slice(reportContentStart),
+  /cashierEnabledStoreCodes\.length === 0 \? \([\s\S]*?\) : !displayedMainReport \? \([\s\S]*?<LoadingState label=\{t\("reports\.states\.refreshingStatistics"\)\} \/>/,
+  "切页签或改日期后商品明细仍是占位数据、没有任何完整结果可展示时，必须停在整页加载，不能渲染零值汇总与空表",
+);
+assert.match(
+  source,
+  /const isRefreshing =[\s\S]*?\(productQuery\.isRefetching && !productQuery\.isPlaceholderData\)/,
+  "明细占位重取属于局部加载，不能驱动下拉刷新转圈把整页往下推",
+);
+assert.equal(
+  (source.match(/<View style=\{\{ width: tableViewportWidth \}\}>/g) ?? []).length,
+  2,
+  "供应商与商品宽表的空态必须限制在首屏可见宽度内居中，联动出现空交集时提示与清除按钮才看得见",
+);
+assert.match(source, /const LINKED_FILTER_BAR_INDEX = 2;/, "吸顶联动条必须位于日期行与页签之后");
+assert.match(source, /stickyHeaderIndices=\{\[LINKED_FILTER_BAR_INDEX\]\}/, "联动条必须吸顶，受影响的表在屏幕外时仍能看到并清除选择");
+assert.match(
+  source,
+  /<SegmentedButtons[\s\S]*?\/>\s*\{\/\*[^*]*\*\/\}\s*<LinkedFilterBar/,
+  "吸顶联动条紧跟在页签之后（第 3 个直接子元素）",
 );
 assert.match(
   source,
