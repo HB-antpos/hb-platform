@@ -798,10 +798,15 @@ export async function batchLookupStoreOrderProducts(payload: StoreOrderBatchLook
   return normalizeResult<StoreOrderBatchLookupItem[]>(response)
 }
 
-export async function lookupStoreOrderProductsByBarcode(barcode: string, signal?: AbortSignal) {
+export async function lookupStoreOrderProductsByBarcode(
+  barcode: string,
+  storeCode: string,
+  signal?: AbortSignal,
+) {
+  // 后端对非全局范围用户（普通分店账号）按 storeCode 校验分店授权，缺失即 403，因此必填。
   const response = await request<ApiResponse<unknown> | unknown>(`${API_BASE}/products/scan-lookup`, {
     method: 'POST',
-    data: { barcode },
+    data: { barcode, storeCode },
     signal,
   })
 
