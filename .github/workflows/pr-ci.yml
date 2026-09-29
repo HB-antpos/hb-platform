@@ -468,7 +468,9 @@ jobs:
           CI_REPOSITORY: ${{ github.repository }}
           CI_RUN_ID: ${{ github.run_id }}
           CI_RUN_ATTEMPT: ${{ github.run_attempt }}
-          CI_RUN_BUDGET_SECONDS: ${{ needs.plan.outputs.budget_seconds }}
+          # 预算从 run 开始计时、含 runner 排队；合并队列多组并行构建时排队是常态，
+          # 放宽到 45 分钟避免整组被误踢出队列。单 job 的 12 分钟超时仍约束实际执行。
+          CI_RUN_BUDGET_SECONDS: ${{ github.event_name == 'merge_group' && '2700' || needs.plan.outputs.budget_seconds }}
           CI_JOB_RESULTS: >-
             {"plan":"${{ needs.plan.result }}","linux_node":"${{ needs.linux_node.result }}","linux_dotnet":"${{ needs.linux_dotnet.result }}","windows":"${{ needs.windows.result }}","macos":"${{ needs.macos.result }}","android":"${{ needs.android.result }}","schema_sql":"${{ needs.schema_sql.result }}","quality_report":"${{ needs.quality_report.result }}"}
         run: node scripts/ci/required-gate.mjs

@@ -292,15 +292,20 @@ test('PR/weekly 使用 15/45 分钟端到端预算并为稳定 gate 预留时间
   assert.match(source, /timeout-minutes:\s*\$\{\{ matrix\.timeout \}\}/)
   assert.match(source, /budget_seconds:\s*\$\{\{ steps\.plan\.outputs\.budget_seconds \}\}/)
   assert.equal([...source.matchAll(/CI_RUN_ATTEMPT:\s*\$\{\{ github\.run_attempt \}\}/g)].length, 2)
-  assert.equal([...source.matchAll(/CI_RUN_BUDGET_SECONDS:\s*\$\{\{ needs\.plan\.outputs\.budget_seconds \}\}/g)].length, 2)
+  assert.equal([...source.matchAll(/CI_RUN_BUDGET_SECONDS:\s*\$\{\{ [^\n]*needs\.plan\.outputs\.budget_seconds \}\}/g)].length, 2)
   for (const gate of [required, weeklyRequired]) {
     assert.match(gate, /GITHUB_TOKEN:\s*\$\{\{ github\.token \}\}/)
     assert.match(gate, /CI_API_URL:\s*\$\{\{ github\.api_url \}\}/)
     assert.match(gate, /CI_REPOSITORY:\s*\$\{\{ github\.repository \}\}/)
     assert.match(gate, /CI_RUN_ID:\s*\$\{\{ github\.run_id \}\}/)
     assert.match(gate, /CI_RUN_ATTEMPT:\s*\$\{\{ github\.run_attempt \}\}/)
-    assert.match(gate, /CI_RUN_BUDGET_SECONDS:\s*\$\{\{ needs\.plan\.outputs\.budget_seconds \}\}/)
   }
+  // PR 与每周全量沿用 plan 预算；只有合并队列（含 runner 排队的并行组构建）放宽到 45 分钟。
+  assert.match(
+    required,
+    /CI_RUN_BUDGET_SECONDS:\s*\$\{\{ github\.event_name == 'merge_group' && '2700' \|\| needs\.plan\.outputs\.budget_seconds \}\}/,
+  )
+  assert.match(weeklyRequired, /CI_RUN_BUDGET_SECONDS:\s*\$\{\{ needs\.plan\.outputs\.budget_seconds \}\}/)
   assert.equal(plan.match(/^    timeout-minutes:/gm)?.length, 1)
   assert.match(plan, /^    timeout-minutes:[ \t]*4[ \t]*$/m)
   assert.match(source, /timeout-minutes:\s*40/g)
