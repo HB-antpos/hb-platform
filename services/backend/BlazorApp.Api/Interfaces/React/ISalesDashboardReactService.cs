@@ -216,11 +216,13 @@ namespace BlazorApp.Api.Interfaces.React
         /// <param name="dateRange">日期范围</param>
         /// <param name="topN">返回前N条记录；为空返回全部</param>
         /// <param name="branchCodes">分店代码列表（可选）</param>
+        /// <param name="cancellationToken">调用方请求令牌；已取消时取消异常直接上抛、不记错误日志</param>
         /// <returns>分店业绩排名及统计完整性状态</returns>
         Task<ExecutiveBranchPerformanceResultDto> GetExecutiveBranchPerformanceAsync(
             DateRangeDto dateRange,
             int? topN = null,
-            List<string>? branchCodes = null
+            List<string>? branchCodes = null,
+            CancellationToken cancellationToken = default
         );
 
         /// <summary>
@@ -229,10 +231,12 @@ namespace BlazorApp.Api.Interfaces.React
         /// </summary>
         /// <param name="dateRange">日期范围</param>
         /// <param name="branchCodes">分店代码列表（可选）</param>
+        /// <param name="cancellationToken">调用方请求令牌；已取消时取消异常直接上抛、不记错误日志</param>
         /// <returns>每小时流量密度及统计完整性状态</returns>
         Task<ExecutiveReportResultDto<ExecutiveHourlyTrafficDto>> GetExecutiveHourlyTrafficAsync(
             DateRangeDto dateRange,
-            List<string>? branchCodes = null
+            List<string>? branchCodes = null,
+            CancellationToken cancellationToken = default
         );
 
         /// <summary>

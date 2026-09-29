@@ -333,6 +333,7 @@ internal sealed class ScreenNavigator
     public async Task ShowHistoryAsync()
     {
         TransactionHistory ??= CreateTransactionHistoryViewModel();
+        TransactionHistory.ResetDateRangeToToday();
         await TransactionHistory.LoadAsync();
         SetCurrentScreen(TransactionHistory);
     }

@@ -23,6 +23,7 @@ import productInsightsEn from "@/locales/en/screens/productInsights.json";
 import priceUpdatesEn from "@/locales/en/screens/priceUpdates.json";
 import warehouseProductInsightsEn from "@/locales/en/screens/warehouseProductInsights.json";
 import seasonalProductInsightsEn from "@/locales/en/screens/seasonalProductInsights.json";
+import containerNewProductsEn from "@/locales/en/screens/containerNewProducts.json";
 import salesOrdersEn from "@/locales/en/screens/salesOrders.json";
 import posOperationLogsEn from "@/locales/en/screens/posOperationLogs.json";
 import preorderEn from "@/locales/en/screens/preorder.json";
@@ -53,6 +54,7 @@ import productInsightsZh from "@/locales/zh/screens/productInsights.json";
 import priceUpdatesZh from "@/locales/zh/screens/priceUpdates.json";
 import warehouseProductInsightsZh from "@/locales/zh/screens/warehouseProductInsights.json";
 import seasonalProductInsightsZh from "@/locales/zh/screens/seasonalProductInsights.json";
+import containerNewProductsZh from "@/locales/zh/screens/containerNewProducts.json";
 import salesOrdersZh from "@/locales/zh/screens/salesOrders.json";
 import posOperationLogsZh from "@/locales/zh/screens/posOperationLogs.json";
 import preorderZh from "@/locales/zh/screens/preorder.json";
@@ -97,6 +99,7 @@ const resources = {
     priceUpdates: priceUpdatesZh,
     warehouseProductInsights: warehouseProductInsightsZh,
     seasonalProductInsights: seasonalProductInsightsZh,
+    containerNewProducts: containerNewProductsZh,
     salesOrders: salesOrdersZh,
     posOperationLogs: posOperationLogsZh,
     preorder: preorderZh,
@@ -131,6 +134,7 @@ const resources = {
     priceUpdates: priceUpdatesEn,
     warehouseProductInsights: warehouseProductInsightsEn,
     seasonalProductInsights: seasonalProductInsightsEn,
+    containerNewProducts: containerNewProductsEn,
     salesOrders: salesOrdersEn,
     posOperationLogs: posOperationLogsEn,
     preorder: preorderEn,
@@ -164,7 +168,7 @@ if (!i18n.isInitialized) {
     lng: DEFAULT_APP_LANGUAGE,
     fallbackLng: DEFAULT_APP_LANGUAGE,
     defaultNS: "common",
-    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "seasonalProductInsights", "salesOrders", "posOperationLogs", "userManagement", "cashRegisterUsers", "warehouse", "workbench"],
+    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "seasonalProductInsights", "containerNewProducts", "salesOrders", "posOperationLogs", "userManagement", "cashRegisterUsers", "warehouse", "workbench"],
     interpolation: {
       escapeValue: false,
     },

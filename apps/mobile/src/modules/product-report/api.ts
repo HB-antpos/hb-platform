@@ -90,6 +90,8 @@ export interface ProductReportDateQuery {
 export interface ProductReportStoreOption {
   label: string;
   value: string;
+  /** 门店 IANA 时区（如 Australia/Sydney）；旧后端不返回，营业额截止整点按固定 UTC+10 回退。 */
+  timeZoneId?: string;
 }
 
 /** 分店营业额，作为中国供应商页签「分店中国货占比」的分母。 */
@@ -468,9 +470,11 @@ export function normalizeStoreOptions(payload: unknown): ProductReportStoreOptio
     .map((raw, index) => {
       const item = asRecord(raw) ?? {};
       const value = asString(pick(item, "value", "Value", "storeCode", "StoreCode"), String(index));
+      const timeZoneId = asString(pick(item, "timeZoneId", "TimeZoneId")).trim();
       return {
         value,
         label: asString(pick(item, "label", "Label", "storeName", "StoreName"), value),
+        ...(timeZoneId ? { timeZoneId } : {}),
       };
     })
     .filter((item) => item.value.length > 0);

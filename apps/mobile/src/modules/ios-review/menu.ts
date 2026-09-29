@@ -16,6 +16,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "pos-operation-logs",
   // 价格更新依赖真实分店任务与改价接口，审核模式没有对应的离线演示数据。
   "price-updates",
+  // 货柜新品依赖真实到店数据与接口，审核模式没有离线演示数据。
+  "container-new-products",
   // 收银用户条码是真实员工登录凭据，审核模式不展示。
   "cash-register-users",
   "workbench",

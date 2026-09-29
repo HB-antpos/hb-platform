@@ -217,6 +217,14 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "container-new-products",
+                TitleKey = "tabs.containerNewProducts",
+                Icon = "package-variant-closed",
+                Permission = Permissions.Container.MobileNewProductsView,
+                Order = 41,
+            },
+            new()
+            {
                 RouteName = "domestic-purchase",
                 TitleKey = "tabs.domesticPurchase",
                 Icon = "shopping-outline",

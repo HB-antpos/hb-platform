@@ -83,7 +83,7 @@ namespace BlazorApp.Api.Controllers.React
                 return Unauthorized(ApiResponse<List<StoreProductLookupItemDto>>.Error(access.Message));
             }
 
-            var result = await _service.LookupAsync(request, access.StoreCodes);
+            var result = await _service.LookupAsync(request, access.StoreCodes, HttpContext.RequestAborted);
             _logger.LogInformation(
                 "StoreProductMaintenance lookup completed keyword={Keyword} requestedStore={RequestedStore} allowed={IsAllowed} total_ms={TotalMs}",
                 request.Keyword,
@@ -109,7 +109,7 @@ namespace BlazorApp.Api.Controllers.React
                 return Unauthorized(ApiResponse<StoreProductScanLabelResultDto>.Error(access.Message));
             }
 
-            var result = await _service.ScanLabelAsync(request, access.StoreCodes);
+            var result = await _service.ScanLabelAsync(request, access.StoreCodes, HttpContext.RequestAborted);
             _logger.LogInformation(
                 "StoreProductMaintenance scan-label request completed requestedStore={RequestedStore} total_ms={TotalMs}",
                 request.StoreCode,
@@ -150,7 +150,7 @@ namespace BlazorApp.Api.Controllers.React
                 return Unauthorized(ApiResponse<StoreProductDetailDto>.Error(access.Message));
             }
 
-            var result = await _service.GetFastDetailAsync(productCode, storeCode, access.StoreCodes);
+            var result = await _service.GetFastDetailAsync(productCode, storeCode, access.StoreCodes, HttpContext.RequestAborted);
             _logger.LogInformation(
                 "StoreProductMaintenance fast-detail completed productCode={ProductCode} requestedStore={RequestedStore} total_ms={TotalMs}",
                 productCode,

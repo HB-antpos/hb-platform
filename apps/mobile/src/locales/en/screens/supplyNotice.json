@@ -58,5 +58,6 @@
     "internalNoteLabel": "Internal note (warehouse only)",
     "confirmDelist": "Confirm delist",
     "cancel": "Cancel"
-  }
+  },
+  "scanPausedNamed": "Supply paused · {{name}}"
 }

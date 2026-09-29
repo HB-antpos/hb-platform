@@ -15,7 +15,6 @@ namespace BlazorApp.Api.Services.LocalSupplierCategories;
 /// </summary>
 public sealed class LocalSupplierCategoryCaptureService : ILocalSupplierCategoryCaptureService
 {
-    private const int ApplockTimeoutMilliseconds = 10000;
     private const int MaxUnmatchedSamples = 10;
 
     private readonly ISqlSugarClient _db;
@@ -483,7 +482,7 @@ public sealed class LocalSupplierCategoryCaptureService : ILocalSupplierCategory
             T? value = default;
             var transaction = await _db.Ado.UseTranAsync(async () =>
             {
-                await AcquireSupplierLockAsync(supplier);
+                await LocalSupplierCategorySupplierLock.AcquireAsync(_db, supplier);
                 value = await work();
             });
             if (transaction.IsSuccess)
@@ -500,32 +499,6 @@ public sealed class LocalSupplierCategoryCaptureService : ILocalSupplierCategory
             }
 
             throw exception;
-        }
-    }
-
-    private async Task AcquireSupplierLockAsync(string supplier)
-    {
-        if (_db.CurrentConnectionConfig.DbType != DbType.SqlServer)
-        {
-            return;
-        }
-
-        var result = await _db.Ado.GetIntAsync(
-            """
-            DECLARE @Result int;
-            EXEC @Result = sys.sp_getapplock
-                @Resource = @LockResource,
-                @LockMode = N'Exclusive',
-                @LockOwner = N'Transaction',
-                @LockTimeout = @LockTimeout;
-            SELECT @Result;
-            """,
-            new SugarParameter("@LockResource", $"HB:LocalSupplierCategory:{supplier}"),
-            new SugarParameter("@LockTimeout", ApplockTimeoutMilliseconds)
-        );
-        if (result < 0)
-        {
-            throw new LocalSupplierCategoryBusyException();
         }
     }
 

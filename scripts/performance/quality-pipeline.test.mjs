@@ -377,6 +377,7 @@ test("事件环境按正式与 PR 口径映射，禁止统一写成 CI", () => {
     ["schedule", "refs/heads/main", "Production"],
     ["workflow_dispatch", "refs/heads/main", "Production"],
     ["pull_request", "refs/pull/42/merge", "PullRequest"],
+    ["merge_group", "refs/heads/gh-readonly-queue/main/pr-42-0123456789abcdef0123456789abcdef01234567", "PullRequest"],
   ];
   for (const [eventName, ref, expectedEnvironment] of cases) {
     const batch = buildMetricBatch({

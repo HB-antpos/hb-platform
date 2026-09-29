@@ -122,6 +122,24 @@ namespace BlazorApp.Shared.DTOs
     /// 商品选择弹窗列头筛选条件。
     /// </summary>
     public StoreOrderProductColumnFiltersDto? ColumnFilters { get; set; }
+
+    /// <summary>
+    /// 为 true 且带门店编码时，响应顶层额外附带本页商品的动态数据（购物车数量、最近订货），
+    /// 省掉前端第二次串行请求；动态数据每次现算，不进入商品分页缓存，也不参与缓存键。
+    /// </summary>
+    public bool IncludeDynamicData { get; set; }
+  }
+
+  /// <summary>
+  /// 订货商品分页结果；请求 IncludeDynamicData 时在 items/total 同级附带本页动态数据。
+  /// </summary>
+  public class StoreOrderProductPageReactDto : PagedListReactDto<StoreOrderProductDto>
+  {
+    /// <summary>
+    /// 本页商品动态数据（等价于 dynamic-data 接口 IncludeSales=false 的结果）；
+    /// 未请求、缺门店编码或读取失败时为 null，JSON 中不输出。
+    /// </summary>
+    public List<StoreOrderDynamicDataDto>? DynamicData { get; set; }
   }
 
   /// <summary>

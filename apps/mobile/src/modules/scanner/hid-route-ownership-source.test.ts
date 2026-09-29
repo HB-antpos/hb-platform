@@ -115,8 +115,8 @@ assert.match(
 );
 assert.match(
   homeSource,
-  /scanResult\.feedback\.barcode === lastCameraBarcode[\s\S]*?\["not_found", "blocked", "error"\]\.includes\(\s*scanResult\.feedback\.status,?\s*\)[\s\S]*?scanResult\.feedback\.message/,
-  "首页连续加购队列的失败、无结果和阻止反馈必须在相机 sheet 内可见",
+  /scanResult\.feedback\.barcode === lastCameraBarcode[\s\S]*?\["not_found", "blocked", "error", "supply_paused"\]\.includes\(\s*scanResult\.feedback\.status,?\s*\)[\s\S]*?scanResult\.feedback\.message/,
+  "首页连续加购队列的失败、无结果、暂停供货和阻止反馈必须在相机 sheet 内可见",
 );
 assert.match(
   productQueryContentSource,

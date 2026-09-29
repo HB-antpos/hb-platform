@@ -174,7 +174,9 @@ namespace BlazorApp.Api.Services.React
             var sql =
                 "SELECT\n"
                 + "    COALESCE(NULLIF(s.StoreName, N''), s.StoreCode) AS Label,\n"
-                + "    s.StoreCode AS Value\n"
+                + "    s.StoreCode AS Value,\n"
+                // 移动营业额报表按门店时区对齐截止整点，空串视为未维护。
+                + "    NULLIF(s.TimeZoneId, N'') AS TimeZoneId\n"
                 + "FROM [Store] s\n"
                 + "WHERE\n"
                 + "    COALESCE(s.IsActive, 0) = 1\n"

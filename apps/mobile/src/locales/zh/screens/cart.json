@@ -9,7 +9,7 @@
   "filters": {
     "title": "过滤面板",
     "currentStore": "当前门店: {{store}}",
-    "searchPlaceholder": "搜索购物车商品",
+    "searchPlaceholder": "在本页搜索：名称 / 货号 / 条码",
     "clearSearch": "清空搜索",
     "applySearch": "应用搜索",
     "items": "商品项: {{count}}",
@@ -25,14 +25,16 @@
     "cartEmptyTitle": "购物车为空",
     "cartEmptyDescription": "可以在此页扫码加购商品",
     "selectStoreTitle": "先选择门店",
-    "selectStoreDescription": "请先在商品页选择门店"
+    "selectStoreDescription": "请先在商品页选择门店",
+    "goHome": "去商品页"
   },
   "confirm": {
     "clearTitle": "清空购物车",
     "clearMessage": "确定要清空当前门店购物车吗？",
     "clearAction": "清空",
     "submitTitle": "提交购物车",
-    "submitMessage": "确定要提交当前门店购物车吗？"
+    "submitMessage": "确定要提交当前门店购物车吗？",
+    "submitAction": "确认提交"
   },
   "remarks": {
     "label": "订单备注（选填）",
@@ -44,12 +46,14 @@
     "product": "商品: {{name}}",
     "inputLabel": "订货数量",
     "invalidQuantity": "请输入 0 或正整数",
-    "itemUnavailable": "该商品已发生变化，请重新编辑数量"
+    "itemUnavailable": "该商品已发生变化，请重新编辑数量",
+    "helper": "当前 {{current}} 件 · 输入 0 表示清零"
   },
   "pagination": {
     "previous": "上一页",
     "next": "下一页",
-    "page": "第 {{page}} 页"
+    "page": "第 {{page}} 页",
+    "pageOf": "{{page}} / {{pages}}"
   },
   "messages": {
     "updateQtyFailed": "更新购物车数量失败",
@@ -76,10 +80,35 @@
     "subtotal": "小计",
     "totalAmount": "订单总额",
     "submit": "提交订单",
-    "clear": "清空购物车"
+    "clear": "清空购物车",
+    "summaryLine": "订单总额 · {{sku}} 款 · {{quantity}} 件",
+    "syncing": "正在同步数量…",
+    "preorderBlocked": "完成 Preorder 前不能提交普通订单",
+    "preorderFirst": "先完成 Preorder",
+    "submitting": "提交中",
+    "pausedLines": "有商品暂停供货，提交前请移除"
   },
   "actions": {
     "submit": "提交",
     "clear": "清空"
+  },
+  "header": {
+    "back": "返回商品列表",
+    "more": "更多操作",
+    "clearCart": "清空购物车…"
+  },
+  "listMeta": {
+    "summary": "共 {{count}} 款 · 第 {{page}} / {{pages}} 页",
+    "pageSize": "每页 {{size}} 条",
+    "pageSizeOption": "{{size}} 条",
+    "searchScope": "仅在本页中筛选「{{keyword}}」"
+  },
+  "submitSheet": {
+    "store": "订货门店",
+    "totalLabel": "订单总额（进货价）",
+    "sku": "款数",
+    "quantity": "件数",
+    "salesAmount": "销售合计",
+    "volume": "体积合计"
   }
 }

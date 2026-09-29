@@ -119,6 +119,7 @@ const taskTypeOptions = [
   { label: '全量刷新当天', value: 'FullRefreshCurrentDay' },
   { label: '并发全量刷新', value: 'BatchFullRefreshConcurrent' },
   { label: '数据对齐后台补算', value: 'RecalculateDailyStatisticsAlignment' },
+  { label: '供应商分类每晚重新归类', value: 'ResolveLocalSupplierCategories' },
 ]
 
 const taskStatusOptions = [

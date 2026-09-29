@@ -8,6 +8,7 @@ import type {
   StoreOrderProductItem,
   StoreOrderProductQuery,
   StoreOrderProductListResult,
+  StoreOrderProductPageResult,
   StoreOrderScanLookupResult,
   StoreOrderScanLookupAddResult,
   AddToCartPayload,
@@ -17,6 +18,7 @@ import type {
 } from "@/modules/shop/types";
 import type { StoreOrderScanMatchType } from "@/modules/orders/types";
 import { resolveCartSkuCount } from "@/modules/shop/cart-summary-density";
+import { normalizeEmbeddedDynamicData } from "@/modules/shop/embedded-dynamic-data";
 import { buildScanLookupPayload } from "@/modules/shop/scan-lookup-payload";
 import { normalizeShopStores, normalizeShopStoresApiResponse } from "@/modules/shop/store-normalization";
 import { apiClient } from "@/shared/api/client";
@@ -395,13 +397,15 @@ export async function getProductGradeOptions(): Promise<StoreOrderProductGradeOp
   }, []);
 }
 
-export async function getProducts(query: StoreOrderProductQuery): Promise<StoreOrderProductListResult> {
+export async function getProducts(query: StoreOrderProductQuery): Promise<StoreOrderProductPageResult> {
   const grade = getStringValue(query.grade);
   const response = await apiClient.post(
     "/react/v1/store-order/products",
     {
       ...query,
       grade,
+      // 有门店时请后端顺带返回本页动态数据（购物车数量等），省掉一次串行往返。
+      includeDynamicData: Boolean(query.storeCode),
     },
     {
       params: {
@@ -409,13 +413,20 @@ export async function getProducts(query: StoreOrderProductQuery): Promise<StoreO
       },
     }
   );
-  return normalizeProductPagedList(response.data as Partial<StoreOrderProductListResult>);
+  return {
+    ...normalizeProductPagedList(response.data as Partial<StoreOrderProductListResult>),
+    dynamicData: normalizeEmbeddedDynamicData(response.data),
+  };
 }
 
 export async function getProductDynamicData(
   payload: StoreOrderDynamicDataRequest
 ): Promise<StoreOrderDynamicData[]> {
-  const response = await apiClient.post("/react/v1/store-order/dynamic-data", payload);
+  const response = await apiClient.post("/react/v1/store-order/dynamic-data", {
+    ...payload,
+    // 移动端不展示来货后销量；未显式指定时关掉，减少后端 2–3 条统计查询。
+    includeSales: payload.includeSales ?? false,
+  });
   return Array.isArray(response.data) ? (response.data as StoreOrderDynamicData[]) : [];
 }
 

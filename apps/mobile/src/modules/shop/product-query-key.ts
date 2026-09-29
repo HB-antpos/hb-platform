@@ -1,4 +1,20 @@
-import type { StoreOrderProductQuery } from "./types";
+import type { StoreOrderProductItem, StoreOrderProductQuery } from "./types";
+
+/** 首页/分类浏览的客户端新鲜期，与后端订货商品首页、分类缓存（PR #379 起为 2 分钟）对齐。 */
+export const SHOP_BROWSE_PRODUCTS_STALE_TIME_MS = 2 * 60 * 1000;
+
+export function hasShopProductsKeyword(query: StoreOrderProductQuery) {
+  return Boolean(query.itemNumber?.trim() || query.productName?.trim());
+}
+
+/**
+ * 关键字检索（货号/条码/商品名）不设客户端新鲜期：上架前搜过同词得到的空结果若仍在新鲜期内，
+ * 上架后再搜会被直接复用，门店会误以为“上架了还搜不到”（2026-09-29 ME542-6）。
+ * 后端自 PR #379 起关键字检索也不缓存，两端口径一致；浏览类查询保留与后端相同的 2 分钟。
+ */
+export function resolveShopProductsStaleTime(query: StoreOrderProductQuery) {
+  return hasShopProductsKeyword(query) ? 0 : SHOP_BROWSE_PRODUCTS_STALE_TIME_MS;
+}
 
 export function buildShopProductsQueryKey(
   query: StoreOrderProductQuery,
@@ -33,4 +49,13 @@ export function resolveShopProductsPlaceholderData<T>(
   }
 
   return previousData;
+}
+
+/** 本页商品编码，顺序与列表一致；动态数据缓存键依赖它。 */
+export function resolvePageProductCodes(items: StoreOrderProductItem[] | undefined) {
+  return (items ?? []).map((item) => item.productCode).filter(Boolean);
+}
+
+export function buildShopDynamicDataQueryKey(storeCode: string | null | undefined, productCodes: string[]) {
+  return ["shopDynamicData", storeCode ?? null, productCodes] as const;
 }

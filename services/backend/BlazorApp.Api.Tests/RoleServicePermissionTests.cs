@@ -294,6 +294,30 @@ public sealed class RoleServicePermissionTests : IDisposable
     }
 
     [Fact]
+    public void PermissionSeedData_NewContainerProductsPermission_IsOnlyInEnglishStoreManagerTemplate()
+    {
+        Assert.Contains(
+            PermissionSeedData.AllPermissions,
+            seed => seed.Code == Permissions.Container.MobileNewProductsView
+        );
+
+        var english = Assert.Single(
+            PermissionSeedData.RolePermissionTemplates,
+            item => item.RoleName.Equals("StoreManager", StringComparison.OrdinalIgnoreCase)
+        );
+        Assert.Contains(Permissions.Container.MobileNewProductsView, english.PermissionCodes);
+
+        foreach (var roleName in new[] { "店长", "经理" })
+        {
+            var template = Assert.Single(
+                PermissionSeedData.RolePermissionTemplates,
+                item => item.RoleName.Equals(roleName, StringComparison.OrdinalIgnoreCase)
+            );
+            Assert.DoesNotContain(Permissions.Container.MobileNewProductsView, template.PermissionCodes);
+        }
+    }
+
+    [Fact]
     public async Task UserHasPermissionAsync_AdminRoleImplicitlyGrantsAnyPermission()
     {
         await SeedUserWithRoleAsync("user-1", "role-admin", "Admin");

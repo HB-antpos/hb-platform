@@ -29,6 +29,25 @@
     <InformationalVersion>$(HbposWpfAppVersion)</InformationalVersion>
   </PropertyGroup>
 
+  <!--
+    发布时预编译为本机代码（ReadyToRun），减少收银机每天开机后首次启动时的 JIT 开销。
+    只在带运行时标识的发布中生效（安装包构建使用 -r win-x64），调试构建与测试不受影响。
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <!--
+    以下程序集由 BlazorApp.Shared 的 SqlSugar / Blazor 依赖间接带入，收银端运行时不会加载：
+    照常随包发布，但不做预编译，避免发布目录白白增大约 22MB。
+  -->
+  <ItemGroup>
+    <PublishReadyToRunExclude Include="Oracle.ManagedDataAccess.dll;SqlSugar.dll;Npgsql.dll;Kdbndp.dll;DmProvider.dll;MySqlConnector.dll;Oscar.Data.SqlClient.dll" />
+    <PublishReadyToRunExclude Include="Microsoft.Data.SqlClient.dll;Microsoft.Identity.Client.dll;System.IdentityModel.Tokens.Jwt.dll;Newtonsoft.Json.dll" />
+    <PublishReadyToRunExclude Include="Microsoft.IdentityModel.JsonWebTokens.dll;Microsoft.IdentityModel.Logging.dll;Microsoft.IdentityModel.Protocols.dll;Microsoft.IdentityModel.Protocols.OpenIdConnect.dll;Microsoft.IdentityModel.Tokens.dll" />
+    <PublishReadyToRunExclude Include="Microsoft.AspNetCore.Authorization.dll;Microsoft.AspNetCore.Components.dll;Microsoft.AspNetCore.Components.Forms.dll;Microsoft.AspNetCore.Components.Web.dll;Microsoft.AspNetCore.Components.WebAssembly.dll;Microsoft.AspNetCore.Metadata.dll" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Remove="Resources\AppIcon.ico" />
     <None Remove="Resources\AppBrandIcon.png" />

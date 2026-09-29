@@ -8,7 +8,8 @@ namespace BlazorApp.Api.Features.StoreOrders.OrderPlacement;
 public interface IStoreOrderPlacementSlice
 {
     Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
-        SubmitStoreOrderRequestDto request
+        SubmitStoreOrderRequestDto request,
+        CancellationToken cancellationToken = default
     );
 
     Task<ApiResponse<string>> CreateOrderAsync(CreateStoreOrderDto request);
@@ -23,10 +24,11 @@ internal sealed class StoreOrderPlacementSlice(
 ) : IStoreOrderPlacementSlice
 {
     public Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
-        SubmitStoreOrderRequestDto request
+        SubmitStoreOrderRequestDto request,
+        CancellationToken cancellationToken = default
     )
     {
-        return submitOrderHandler.HandleAsync(new SubmitOrderCommand(request));
+        return submitOrderHandler.HandleAsync(new SubmitOrderCommand(request, cancellationToken));
     }
 
     public Task<ApiResponse<string>> CreateOrderAsync(CreateStoreOrderDto request)

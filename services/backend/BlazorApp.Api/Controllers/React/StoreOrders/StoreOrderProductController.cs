@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using BlazorApp.Api.Features.StoreOrders.Common;
+using BlazorApp.Api.Features.StoreOrders.ProductHistory;
 using BlazorApp.Api.Features.StoreOrders.ProductPicker;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -15,15 +16,18 @@ public sealed class StoreOrderProductController : StoreOrderControllerBase
     private const string ScanTraceHeaderName = "X-Scan-Trace-Id";
     private const string ScanOrderFlowCheckType = "scan-order-flow";
     private readonly IStoreOrderProductPickerSlice _productPickerSlice;
+    private readonly IStoreOrderProductHistorySlice _productHistorySlice;
     private readonly ILogger<StoreOrderProductController> _logger;
 
     public StoreOrderProductController(
         IStoreOrderProductPickerSlice productPickerSlice,
+        IStoreOrderProductHistorySlice productHistorySlice,
         IStoreOrderAccessPolicy accessPolicy,
         ILogger<StoreOrderProductController> logger
     ) : base(accessPolicy)
     {
         _productPickerSlice = productPickerSlice;
+        _productHistorySlice = productHistorySlice;
         _logger = logger;
     }
 
@@ -62,8 +66,29 @@ public sealed class StoreOrderProductController : StoreOrderControllerBase
             var result = await _productPickerSlice.GetPagedListAsync(filter);
             serviceSw.Stop();
 
+            // 商品页可能来自 10 分钟分页缓存；动态数据含购物车数量，必须每次现算并包进新对象，
+            // 不能写回缓存里的分页实例。
+            object payload = result;
+            var embedDynamicData = ShouldEmbedDynamicData(filter);
+            var dynamicDataSw = new Stopwatch();
+            List<StoreOrderDynamicDataDto>? dynamicData = null;
+            if (embedDynamicData)
+            {
+                dynamicDataSw.Start();
+                dynamicData = await LoadEmbeddedDynamicDataAsync(filter.StoreCode!, result);
+                dynamicDataSw.Stop();
+                payload = new StoreOrderProductPageReactDto
+                {
+                    Items = result.Items,
+                    Total = result.Total,
+                    PageNumber = result.PageNumber,
+                    PageSize = result.PageSize,
+                    DynamicData = dynamicData,
+                };
+            }
+
             _logger.LogInformation(
-                "[shop-home-perf] stage=products.controller.done storeCode={StoreCode} pageNumber={PageNumber} pageSize={PageSize} itemCount={ItemCount} total={Total} permissionMs={PermissionMs} serviceMs={ServiceMs} totalMs={TotalMs}",
+                "[shop-home-perf] stage=products.controller.done storeCode={StoreCode} pageNumber={PageNumber} pageSize={PageSize} itemCount={ItemCount} total={Total} permissionMs={PermissionMs} serviceMs={ServiceMs} totalMs={TotalMs} includeDynamicData={IncludeDynamicData} dynamicDataCount={DynamicDataCount} dynamicDataMs={DynamicDataMs}",
                 filter.StoreCode,
                 filter.PageNumber,
                 filter.PageSize,
@@ -71,9 +96,12 @@ public sealed class StoreOrderProductController : StoreOrderControllerBase
                 result.Total,
                 permissionSw.ElapsedMilliseconds,
                 serviceSw.ElapsedMilliseconds,
-                totalSw.ElapsedMilliseconds
+                totalSw.ElapsedMilliseconds,
+                embedDynamicData,
+                dynamicData?.Count ?? -1,
+                dynamicDataSw.ElapsedMilliseconds
             );
-            return Ok(new { success = true, data = result });
+            return Ok(new { success = true, data = payload });
         }
         catch (Exception ex)
         {
@@ -183,6 +211,55 @@ public sealed class StoreOrderProductController : StoreOrderControllerBase
             _logger.LogError(ex, "ScanLookupProducts failed");
             return StatusCode(500, new { success = false, message = "服务器内部错误" });
         }
+    }
+
+    private static bool ShouldEmbedDynamicData(StoreOrderFilterDto filter)
+    {
+        // 权限无需额外校验：RequireProductPickerReadAsync 已按同一门店、同一检查类型执行
+        // RequireCartReadAsync，与独立 dynamic-data 接口的门槛完全相同。
+        return filter.IncludeDynamicData && !string.IsNullOrWhiteSpace(filter.StoreCode);
+    }
+
+    private async Task<List<StoreOrderDynamicDataDto>?> LoadEmbeddedDynamicDataAsync(
+        string storeCode,
+        PagedListReactDto<StoreOrderProductDto> page
+    )
+    {
+        try
+        {
+            // 与前端单独调用 dynamic-data（includeSales=false）完全同一条链路，商品编码由切片统一规范化。
+            var response = await _productHistorySlice.GetProductsDynamicDataAsync(
+                new StoreOrderDynamicDataRequestDto
+                {
+                    StoreCode = storeCode,
+                    ProductCodes = (page.Items ?? new List<StoreOrderProductDto>())
+                        .Select(item => item.ProductCode)
+                        .ToList(),
+                    IncludeSales = false,
+                }
+            );
+            if (response.Success)
+            {
+                return response.Data ?? new List<StoreOrderDynamicDataDto>();
+            }
+
+            _logger.LogWarning(
+                "[shop-home-perf] stage=products.controller.dynamic-data-failed storeCode={StoreCode} message={Message}",
+                storeCode,
+                response.Message
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[shop-home-perf] stage=products.controller.dynamic-data-failed storeCode={StoreCode}",
+                storeCode
+            );
+        }
+
+        // 动态数据失败不影响商品列表本身；返回 null 让前端按旧流程单独请求 dynamic-data。
+        return null;
     }
 
     private string GetScanTraceId()
