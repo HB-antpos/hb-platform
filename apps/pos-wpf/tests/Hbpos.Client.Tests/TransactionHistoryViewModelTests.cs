@@ -1293,6 +1293,9 @@ public sealed class TransactionHistoryViewModelTests
 
         await viewModel.ShowSuspendedOrdersAsync();
 
+        // 收银页“取回”入口应直接落在挂单页签的本机范围，而不是本机销售记录。
+        Assert.True(viewModel.IsHeldSourceSelected);
+        Assert.True(viewModel.IsHeldLocalScopeSelected);
         Assert.True(viewModel.IsRecallVisible);
         Assert.False(viewModel.IsReprintVisible);
         Assert.True(viewModel.RecallSelectedCommand.CanExecute(null));
@@ -1314,6 +1317,35 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal("BAR-HOLD", detailLine.LookupCode);
         Assert.Equal("snapshot://held-image", detailLine.ProductImage);
         Assert.False(viewModel.HasOrderDetailsPayments);
+    }
+
+    [Fact]
+    public async Task Entering_history_resets_stale_date_range_to_today()
+    {
+        // 视图模型常驻复用：模拟收银机前一天打开过历史页、次日未重启再次进入。
+        var today = new DateTimeOffset(2026, 9, 29, 10, 0, 0, TimeSpan.Zero);
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: new FixedUtcTimeProvider(today))
+        {
+            DateFrom = new DateTime(2026, 9, 28),
+            DateTo = new DateTime(2026, 9, 28)
+        };
+
+        await viewModel.ShowSuspendedOrdersAsync();
+
+        Assert.Equal(today.Date, viewModel.DateFrom);
+        Assert.Equal(today.Date, viewModel.DateTo);
+
+        viewModel.DateFrom = new DateTime(2026, 9, 1);
+        viewModel.DateTo = new DateTime(2026, 9, 2);
+        viewModel.ResetDateRangeToToday();
+
+        Assert.Equal(today.Date, viewModel.DateFrom);
+        Assert.Equal(today.Date, viewModel.DateTo);
     }
 
     [Fact]
@@ -5232,6 +5264,13 @@ public sealed class TransactionHistoryViewModelTests
         {
             throw new NotSupportedException();
         }
+    }
+
+    private sealed class FixedUtcTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class ManualTimeProvider : TimeProvider
