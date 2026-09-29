@@ -11,6 +11,7 @@ import {
   getCumulativeTotals,
   getCutoffOptions,
   getDisplayCutoffHour,
+  getLiveHourSummary,
   isLowBase,
   type CutoffResolution,
   type HourlySeries,
@@ -197,6 +198,16 @@ function CumulativeRevenueContent({
   const differenceText = t(`reports.cumulative.${differenceKey}${coversFullDay ? "FullDay" : ""}`, {
     amount: formatWholeMoney(Math.abs(difference)),
   });
+  // 进行中的小时已有入账时，说明这部分为什么还没进对比、哪次统计后计入。
+  const liveHour = getLiveHourSummary(series, cutoff);
+  const liveHourNote = !noCompleteHour && liveHour && liveTimeLabel
+    ? t("reports.cumulative.liveHourNote", {
+        from: formatHourLabel(liveHour.startHour),
+        to: liveTimeLabel,
+        amount: formatWholeMoney(liveHour.revenue),
+        next: formatHourLabel(liveHour.nextHour),
+      })
+    : null;
 
   const stats: MiniStatItem[] = coversFullDay
     ? [
@@ -283,6 +294,14 @@ function CumulativeRevenueContent({
           <Text variant="bodySmall" style={styles.differenceText}>
             {lowBase ? t("reports.cumulative.lowBaseNote") : differenceText}
           </Text>
+        ) : null}
+        {liveHourNote ? (
+          <View style={styles.liveNoteRow}>
+            <Icon source="progress-clock" size={14} color="#6B7280" />
+            <Text variant="bodySmall" style={styles.liveNoteText}>
+              {liveHourNote}
+            </Text>
+          </View>
         ) : null}
       </View>
 
@@ -561,6 +580,18 @@ const styles = StyleSheet.create({
     color: "#475467",
     fontSize: 13,
     lineHeight: 18,
+  },
+  liveNoteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+  },
+  liveNoteText: {
+    flexShrink: 1,
+    color: "#6B7280",
+    fontSize: 12,
+    lineHeight: 16,
   },
   stats: {
     minWidth: "100%",

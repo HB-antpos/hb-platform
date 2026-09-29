@@ -227,6 +227,7 @@
       "lowBase": "low base",
       "compareAsOf": "Compare as of {{time}}, {{change}}",
       "noCompleteHour": "Comparison starts at {{time}}",
+      "liveHourNote": "{{from}}–{{to}} in progress ({{amount}}); joins the comparison after the {{next}} update",
       "noData": "No sales recorded yet",
       "loadFailed": "Failed to load hourly revenue",
       "cutoffUnavailable": "Waiting for the latest statistics time",
