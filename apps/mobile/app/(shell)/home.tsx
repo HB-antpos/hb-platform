@@ -51,6 +51,7 @@ import {
   buildCategoryNameMap,
   buildHomeProductQuery,
   flattenVisibleCategories,
+  isSameKeywordResubmit,
   resolveHomeSearchPageState,
   type HomeSearchPageAction,
   type VisibleCategoryRow,
@@ -548,6 +549,7 @@ export default function Home() {
     ],
   );
   const productsQuery = useProducts(productQuery, locationLookupEnabled);
+  const { refetch: refetchProducts } = productsQuery;
 
   useEffect(() => {
     searchReturnPageRef.current = null;
@@ -695,14 +697,25 @@ export default function Home() {
     },
     [keyword, pageNumber],
   );
+  // 用户主动提交搜索的入口：同词重搜不会换查询键，需显式重新请求，确保上架/恢复订货后再搜能拿到最新结果。
+  // 扫码回填关键词的 effect 不走这里，避免它因依赖变化重跑时重复请求。
+  const submitSearchKeyword = useCallback(
+    (input: string) => {
+      if (isSameKeywordResubmit(keyword, input)) {
+        void refetchProducts();
+      }
+      applySearchPageAction({ type: "apply", input });
+    },
+    [applySearchPageAction, keyword, refetchProducts],
+  );
   const handleApplySearch = useCallback(() => {
     setScannedProducts(null);
     // 搜索框可能接收到同一扫码枪输入，保留商品 trace 让同商品数量调整继续走 scan-update。
     if (!searchInput.trim()) {
       setSearchInput("");
     }
-    applySearchPageAction({ type: "apply", input: searchInput });
-  }, [applySearchPageAction, searchInput]);
+    submitSearchKeyword(searchInput);
+  }, [searchInput, submitSearchKeyword]);
   const handleSearchInputChange = useCallback(
     (value: string) => {
       setSearchInput(value);
