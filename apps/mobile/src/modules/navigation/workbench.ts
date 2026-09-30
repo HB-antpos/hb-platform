@@ -94,3 +94,37 @@ export function buildWorkbenchSections(
     items: section.items.filter((item) => visibleRoutes.has(item.routeName)),
   })).filter((section) => section.items.length > 0);
 }
+
+// 工作台分组折叠状态只记录「已折叠」的分组键：空集合即默认全部展开，
+// 权限变化后新出现的分组也自然是展开的。
+export function toggleWorkbenchSectionCollapsed(
+  collapsedKeys: ReadonlySet<string>,
+  sectionKey: string
+): Set<string> {
+  const next = new Set(collapsedKeys);
+  if (next.has(sectionKey)) {
+    next.delete(sectionKey);
+  } else {
+    next.add(sectionKey);
+  }
+  return next;
+}
+
+// 只看当前可见分组：残留的已失效分组键不影响判断；没有分组时视为未折叠。
+export function areAllWorkbenchSectionsCollapsed(
+  sections: readonly Pick<WorkbenchNavigationSection, "key">[],
+  collapsedKeys: ReadonlySet<string>
+): boolean {
+  return sections.length > 0
+    && sections.every((section) => collapsedKeys.has(section.key));
+}
+
+// 全部折叠/展开：已全部折叠时清空（全部展开），否则折叠当前所有可见分组。
+export function toggleAllWorkbenchSections(
+  sections: readonly Pick<WorkbenchNavigationSection, "key">[],
+  collapsedKeys: ReadonlySet<string>
+): Set<string> {
+  return areAllWorkbenchSectionsCollapsed(sections, collapsedKeys)
+    ? new Set()
+    : new Set(sections.map((section) => section.key));
+}

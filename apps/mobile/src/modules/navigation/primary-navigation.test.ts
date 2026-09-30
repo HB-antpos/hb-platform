@@ -8,7 +8,12 @@ import {
   resolvePrimaryNavigationAction,
   shouldHidePrimaryTabBar,
 } from "./primary-navigation";
-import { buildWorkbenchSections } from "./workbench";
+import {
+  areAllWorkbenchSectionsCollapsed,
+  buildWorkbenchSections,
+  toggleAllWorkbenchSections,
+  toggleWorkbenchSectionCollapsed,
+} from "./workbench";
 
 const localeRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -591,3 +596,62 @@ assert.equal(
   "我的",
   "设备模式没有个人账号，不显示残留的用户名"
 );
+
+// 工作台分组折叠：默认全部展开；单组切换互不影响；全部折叠/展开只作用于当前可见分组。
+{
+  const sections = buildWorkbenchSections(["orders", "product-query", "warehouse"]);
+  const none = new Set<string>();
+  assert.equal(areAllWorkbenchSectionsCollapsed(sections, none), false, "默认空集合即全部展开");
+  assert.equal(areAllWorkbenchSectionsCollapsed([], none), false, "没有分组时不得显示为已全部折叠");
+
+  const oneCollapsed = toggleWorkbenchSectionCollapsed(none, "product-sales");
+  assert.deepEqual([...oneCollapsed], ["product-sales"]);
+  assert.equal(none.size, 0, "切换分组不得修改原集合");
+  assert.deepEqual(
+    [...toggleWorkbenchSectionCollapsed(oneCollapsed, "product-sales")],
+    [],
+    "再次点按同一分组恢复展开"
+  );
+
+  const allCollapsed = toggleAllWorkbenchSections(sections, oneCollapsed);
+  assert.deepEqual(
+    [...allCollapsed].sort(),
+    ["product-purchasing", "product-sales", "warehouse-purchase"],
+    "部分折叠时点全部折叠，折叠全部可见分组"
+  );
+  assert.equal(areAllWorkbenchSectionsCollapsed(sections, allCollapsed), true);
+  assert.deepEqual([...toggleAllWorkbenchSections(sections, allCollapsed)], [], "已全部折叠时点全部展开清空");
+
+  assert.equal(
+    areAllWorkbenchSectionsCollapsed(sections, new Set(["product-purchasing", "product-sales", "people-management"])),
+    false,
+    "失效分组键不得让可见分组被判定为全部折叠"
+  );
+}
+
+{
+  const workbenchScreenSource = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../workbench/workbench-screen.tsx"),
+    "utf8"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /useState<ReadonlySet<string>>\(\s*\(\) => new Set\(\)\s*\)/,
+    "工作台分组必须默认全部展开"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /accessibilityState=\{\{ expanded \}\}[\s\S]*toggleWorkbenchSectionCollapsed\(current, section\.key\)/,
+    "分组标题必须可点按折叠，并向读屏暴露展开状态"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /sections\.length > 1 \?[\s\S]*toggleAllWorkbenchSections\(sections, current\)/,
+    "多个分组时必须提供全部折叠/展开"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /\{expanded \? section\.items\.map/,
+    "折叠的分组不得渲染其功能入口"
+  );
+}

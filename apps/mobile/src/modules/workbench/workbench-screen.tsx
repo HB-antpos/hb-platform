@@ -23,7 +23,10 @@ import { useAppNavigationAccess } from "@/modules/navigation/access-context";
 import { TAB_PATHS } from "@/modules/navigation/default-route";
 import { useAppNavigationStore } from "@/modules/navigation/store";
 import {
+  areAllWorkbenchSectionsCollapsed,
   buildWorkbenchSections,
+  toggleAllWorkbenchSections,
+  toggleWorkbenchSectionCollapsed,
   type WorkbenchNavigationItem,
 } from "@/modules/navigation/workbench";
 import { useCartSummary } from "@/modules/shop/use-cart-summary";
@@ -218,6 +221,10 @@ export function WorkbenchScreen() {
   } = useStores();
   const cartSummaryQuery = useCartSummary(selectedStoreCode);
   const [storePickerVisible, setStorePickerVisible] = useState(false);
+  // 「全部功能」分组折叠状态：默认空集合即全部展开，仅在本次运行内保留。
+  const [collapsedSectionKeys, setCollapsedSectionKeys] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
 
   const sections = useMemo(
     () =>
@@ -225,6 +232,10 @@ export function WorkbenchScreen() {
         ? []
         : buildWorkbenchSections(orderedVisibleRouteNames),
     [navigationErrorMessage, navigationLoading, orderedVisibleRouteNames]
+  );
+  const allSectionsCollapsed = areAllWorkbenchSectionsCollapsed(
+    sections,
+    collapsedSectionKeys
   );
   const allItems = useMemo(
     () => sections.flatMap((section) => section.items),
@@ -561,49 +572,96 @@ export function WorkbenchScreen() {
 
             <View style={styles.sectionBlock}>
               <View style={styles.sectionHeading}>
-                <Text variant="titleMedium" style={styles.sectionTitle}>
-                  {t("allFunctions.title")}
-                </Text>
-                <Text variant="bodySmall" style={styles.sectionCaption}>
-                  {t("allFunctions.caption")}
-                </Text>
+                <View style={styles.sectionHeadingText}>
+                  <Text variant="titleMedium" style={styles.sectionTitle}>
+                    {t("allFunctions.title")}
+                  </Text>
+                  <Text variant="bodySmall" style={styles.sectionCaption}>
+                    {t("allFunctions.caption")}
+                  </Text>
+                </View>
+                {/* 只有一个分组时点分组标题即可，不再显示全部折叠/展开。 */}
+                {sections.length > 1 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t(
+                      allSectionsCollapsed ? "allFunctions.expandAll" : "allFunctions.collapseAll"
+                    )}
+                    hitSlop={10}
+                    onPress={() =>
+                      setCollapsedSectionKeys((current) =>
+                        toggleAllWorkbenchSections(sections, current)
+                      )
+                    }
+                    style={({ pressed }) => [
+                      styles.toggleAllButton,
+                      pressed ? styles.toggleAllButtonPressed : null,
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={allSectionsCollapsed ? "unfold-more-horizontal" : "unfold-less-horizontal"}
+                      color={HB_COLORS.action}
+                      size={18}
+                    />
+                    <Text variant="labelLarge" style={styles.toggleAllLabel}>
+                      {t(allSectionsCollapsed ? "allFunctions.expandAll" : "allFunctions.collapseAll")}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
               <View style={styles.functionSections}>
                 <Surface style={styles.functionSurface} elevation={0}>
-                  {sections.map((section, sectionIndex) => (
-                    <View key={section.key}>
-                      {sectionIndex > 0 ? <Divider style={styles.groupDivider} /> : null}
-                      <View
-                        accessible
-                        accessibilityRole="header"
-                        accessibilityLabel={t("accessibility.functionCount", {
-                          title: t(section.titleKey),
-                          count: section.items.length,
-                        })}
-                        style={styles.functionSectionHeader}
-                      >
-                        <Text variant="titleSmall" style={styles.functionSectionTitle}>
-                          {t(section.titleKey)}
-                        </Text>
-                        <Text variant="labelMedium" style={styles.functionSectionCount}>
-                          {t("allFunctions.sectionCount", { count: section.items.length })}
-                        </Text>
-                      </View>
-                      <Divider />
-                      {section.items.map((item, index) => (
-                        <View key={item.routeName}>
-                          {index > 0 ? <Divider style={styles.insetDivider} /> : null}
-                          <FunctionButton
-                            item={item}
-                            label={t(item.labelKey)}
-                            pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
-                            maxCount={maxCountByRouteName[item.routeName]}
-                            onPress={() => navigateTo(item.routeName)}
+                  {sections.map((section, sectionIndex) => {
+                    const expanded = !collapsedSectionKeys.has(section.key);
+                    return (
+                      <View key={section.key}>
+                        {sectionIndex > 0 ? <Divider style={styles.groupDivider} /> : null}
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{ expanded }}
+                          accessibilityLabel={t("accessibility.functionCount", {
+                            title: t(section.titleKey),
+                            count: section.items.length,
+                          })}
+                          accessibilityHint={t("accessibility.toggleSectionHint")}
+                          onPress={() =>
+                            setCollapsedSectionKeys((current) =>
+                              toggleWorkbenchSectionCollapsed(current, section.key)
+                            )
+                          }
+                          style={({ pressed }) => [
+                            styles.functionSectionHeader,
+                            pressed ? styles.pressed : null,
+                          ]}
+                        >
+                          <Text variant="titleSmall" style={styles.functionSectionTitle}>
+                            {t(section.titleKey)}
+                          </Text>
+                          <Text variant="labelMedium" style={styles.functionSectionCount}>
+                            {t("allFunctions.sectionCount", { count: section.items.length })}
+                          </Text>
+                          <MaterialCommunityIcons
+                            name={expanded ? "chevron-up" : "chevron-down"}
+                            color={HB_COLORS.textSecondary}
+                            size={21}
                           />
-                        </View>
-                      ))}
-                    </View>
-                  ))}
+                        </Pressable>
+                        {expanded ? <Divider /> : null}
+                        {expanded ? section.items.map((item, index) => (
+                          <View key={item.routeName}>
+                            {index > 0 ? <Divider style={styles.insetDivider} /> : null}
+                            <FunctionButton
+                              item={item}
+                              label={t(item.labelKey)}
+                              pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
+                              maxCount={maxCountByRouteName[item.routeName]}
+                              onPress={() => navigateTo(item.routeName)}
+                            />
+                          </View>
+                        )) : null}
+                      </View>
+                    );
+                  })}
                 </Surface>
               </View>
             </View>
@@ -778,9 +836,31 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: HB_SPACING.xs,
   },
+  sectionHeadingText: {
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "baseline",
+    flexWrap: "wrap",
+    columnGap: HB_SPACING.xs,
+  },
   sectionTitle: {
     color: HB_COLORS.textPrimary,
     fontWeight: "700",
+  },
+  toggleAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "center",
+    gap: HB_SPACING.xxs,
+    paddingHorizontal: HB_SPACING.xxs,
+    borderRadius: HB_RADIUS.control,
+  },
+  toggleAllButtonPressed: {
+    opacity: 0.6,
+  },
+  toggleAllLabel: {
+    color: HB_COLORS.action,
+    fontWeight: "600",
   },
   sectionCaption: {
     flexShrink: 1,
@@ -856,7 +936,7 @@ const styles = StyleSheet.create({
     paddingVertical: HB_SPACING.xs,
   },
   functionSectionTitle: {
-    flexShrink: 1,
+    flex: 1,
     color: HB_COLORS.textPrimary,
     fontWeight: "700",
   },
