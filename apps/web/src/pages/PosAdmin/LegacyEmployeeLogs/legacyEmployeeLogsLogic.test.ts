@@ -12,8 +12,11 @@ import {
   getUploadLagMinutes,
   isHighRiskOperation,
   isQuickFilterActive,
+  normalizeStoreCodes,
   parseLegacyDetail,
+  resolveInitialStores,
   splitLagMinutes,
+  storeSelectionKey,
   sumOperationCounts,
   validateTimeRange,
 } from './legacyEmployeeLogsLogic'
@@ -153,7 +156,7 @@ assertDeepEqual(
   buildLegacyLogQuery(
     {
       timeRange: day,
-      storeCode: ' 1013 ',
+      storeCodes: [' 1013 ', '1022', '1013'],
       deviceCode: ' ',
       employeeIds: [],
       operations: ['删除商品'],
@@ -162,7 +165,7 @@ assertDeepEqual(
     { pageNumber: 2, pageSize: 50, sortOrder: 'desc' },
   ),
   {
-    storeCode: '1013',
+    storeCodes: ['1013', '1022'],
     from: '2026-09-30T00:00:00',
     to: '2026-10-01T00:00:00',
     operations: ['删除商品'],
@@ -174,6 +177,22 @@ assertDeepEqual(
   '单日选择按墙钟传半开区间，空条件不传',
 )
 assertEqual(buildLegacyLogQuery({ timeRange: day }, { pageNumber: 1, pageSize: 50, sortOrder: 'desc' }), null, '没选分店不发请求')
+
+assertEqual(
+  buildLegacyLogQuery({ timeRange: day, storeCodes: [' ', ''] }, { pageNumber: 1, pageSize: 50, sortOrder: 'desc' }),
+  null,
+  '分店全是空白时不发请求',
+)
+
+// —— 分店多选 ——
+assertDeepEqual(normalizeStoreCodes([' 1022', '1013', '1022', null, '']), ['1022', '1013'], '分店去空白去重并保持顺序')
+assertEqual(storeSelectionKey(['1022', '1013']), storeSelectionKey(['1013', ' 1022 ']), '选择比较与顺序无关')
+assertEqual(storeSelectionKey([]), '', '空选择的比较键为空')
+assertDeepEqual(resolveInitialStores('["1013","1099","1022"]', ['1013', '1022', '1004']), ['1013', '1022'], '只恢复仍可选的分店')
+assertDeepEqual(resolveInitialStores('1013', ['1013', '1022']), ['1013'], '兼容早期单个编码的纯文本')
+assertDeepEqual(resolveInitialStores('["1099"]', ['1004']), ['1004'], '记住的都不可选且只有一个可选分店时直接选中')
+assertDeepEqual(resolveInitialStores(null, ['1004', '1013']), [], '没有记录且有多个可选分店时不预选')
+assertDeepEqual(resolveInitialStores('{bad json', ['1004', '1013']), [], '无法解析时按原文当编码，不可选即丢弃')
 
 const guard = createLatestRequestGuard()
 const first = guard.begin()

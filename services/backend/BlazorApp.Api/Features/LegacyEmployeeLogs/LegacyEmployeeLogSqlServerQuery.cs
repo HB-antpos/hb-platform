@@ -8,9 +8,9 @@ using DbType = System.Data.DbType;
 
 namespace BlazorApp.Api.Features.LegacyEmployeeLogs;
 
-/// <summary>校验与归一化后的查询条件；分店与时间范围必填。</summary>
+/// <summary>校验与归一化后的查询条件；分店（至少一个）与时间范围必填。</summary>
 public sealed record LegacyEmployeeLogNormalizedQuery(
-    string StoreCode,
+    IReadOnlyList<string> StoreCodes,
     DateTime From,
     DateTime ToExclusive,
     string? DeviceCode,
@@ -25,6 +25,18 @@ public sealed record LegacyEmployeeLogNormalizedQuery(
 public sealed record LegacyEmployeeLogSqlParameter(string Name, object? Value, DbType DbType, int? Size = null);
 
 public sealed record LegacyEmployeeLogSqlCommand(string Sql, IReadOnlyList<LegacyEmployeeLogSqlParameter> Parameters);
+
+/// <summary>列表批处理的读取结果；RejectedScanRows 非空表示关键字扫描范围超限，其余集合为空。</summary>
+public sealed record LegacyEmployeeLogListPage(
+    List<LegacyEmployeeLogOperationCountDto> Counts,
+    List<LegacyEmployeeLogItemDto> Rows,
+    List<LegacyEmployeeLogEmployeeOptionDto> Employees,
+    List<LegacyEmployeeLogDeviceOptionDto> Devices,
+    long? RejectedScanRows
+)
+{
+    public static LegacyEmployeeLogListPage KeywordRejected(long scanRows) => new([], [], [], [], scanRows);
+}
 
 /// <summary>
 /// POSM.dbo.EmployeeLogs（旧版收银上传的员工操作日志）的 SQL Server 查询。
@@ -45,9 +57,20 @@ public static class LegacyEmployeeLogSqlServerQuery
     public const int MaxKeywordLength = 100;
     public const int ContextWindowMinutes = 5;
     public const int ContextRowLimit = 200;
+    public const int MaxStoreFilters = 64;
+
+    /// <summary>
+    /// 带详情关键字时允许扫描的最大行数。关键字要逐行回表读 OperationDetail（包含列里没有它），
+    /// 2026-09-30 生产实测 25 店 7 天约 37 万行冷读要 10 秒以上；单店 31 天约 12 万行热读 3 秒。
+    /// 超过上限直接提示缩小范围，不让一次搜索长时间压住线上库。
+    /// </summary>
+    public const int DefaultKeywordScanRowLimit = 200_000;
 
     private const string Columns =
         "l.[Id], l.[EmployeeId], l.[EmployeeName], l.[Operation], l.[OperationDetail], l.[OperationTime], l.[DeviceCode], l.[StoreCode], l.[LastUploadTime]";
+
+    private const string PageColumns =
+        "x.[Id], x.[EmployeeId], x.[EmployeeName], x.[Operation], x.[OperationDetail], x.[OperationTime], x.[DeviceCode], x.[StoreCode], x.[LastUploadTime]";
 
     // 与索引定义保持一致：键 (StoreCode, OperationTime)，包含列覆盖汇总与下拉选项，详情和上传时间回表读取。
     private static readonly string Source = $"[dbo].[EmployeeLogs] AS l WITH (NOLOCK, INDEX([{IndexName}]))";
@@ -55,14 +78,15 @@ public static class LegacyEmployeeLogSqlServerQuery
     /// <summary>校验请求；返回错误文案或归一化后的条件（二者恰有一个非空）。</summary>
     public static (LegacyEmployeeLogNormalizedQuery? Query, string? Error) Normalize(LegacyEmployeeLogQueryDto request)
     {
-        var storeCode = TrimToNull(request.StoreCode);
-        if (storeCode == null)
+        // StoreCode 是单店旧参数，与 StoreCodes 合并后去重。
+        var storeCodes = NormalizeList((request.StoreCodes ?? []).Append(request.StoreCode ?? string.Empty));
+        if (storeCodes.Count == 0)
         {
             return (null, "请选择分店");
         }
-        if (storeCode.Length > 200)
+        if (storeCodes.Count > MaxStoreFilters || storeCodes.Any(code => code.Length > 200))
         {
-            return (null, "分店编码无效");
+            return (null, $"分店条件无效（最多 {MaxStoreFilters} 个）");
         }
         if (request.From is not { } from || request.To is not { } to)
         {
@@ -108,16 +132,23 @@ public static class LegacyEmployeeLogSqlServerQuery
         var descending = !string.Equals(TrimToNull(request.SortOrder), "asc", StringComparison.OrdinalIgnoreCase);
         return (
             new LegacyEmployeeLogNormalizedQuery(
-                storeCode, from, to, deviceCode, employeeIds, operations, keyword, pageNumber, pageSize, descending),
+                storeCodes, from, to, deviceCode, employeeIds, operations, keyword, pageNumber, pageSize, descending),
             null
         );
     }
 
     /// <summary>
-    /// 一次往返返回四个结果集：按操作类型计数（不含操作类型条件）、当前页、员工选项、设备选项。
+    /// 一次往返返回：[关键字守卫行数]、按操作类型计数（不含操作类型条件）、当前页、员工选项、设备选项。
     /// 总数由服务层用计数结果按操作类型条件累加，省掉一次 COUNT。
+    /// - 当前页先只从索引取「时间 + 主键」排好序分页，再按主键回表取详情。多店时索引顺序不再等于时间顺序，
+    ///   直接带着详情列排序会先把范围内每一行都回表（生产 25 店 31 天 165 万行要 30 秒），先分页后回表只要 0.6 秒。
+    /// - 带关键字时先数一遍要扫描的行数，超过上限只返回守卫结果集；未超限时把命中行落到临时表，
+    ///   计数和分页共用，逐行回表的 LIKE 只做一次。
     /// </summary>
-    public static LegacyEmployeeLogSqlCommand BuildList(LegacyEmployeeLogNormalizedQuery query)
+    public static LegacyEmployeeLogSqlCommand BuildList(
+        LegacyEmployeeLogNormalizedQuery query,
+        int keywordScanRowLimit = DefaultKeywordScanRowLimit
+    )
     {
         var parameters = new List<LegacyEmployeeLogSqlParameter>();
         string Param(string name, object? value, DbType dbType, int? size = null)
@@ -126,9 +157,10 @@ public static class LegacyEmployeeLogSqlServerQuery
             return name;
         }
 
+        var storeNames = query.StoreCodes.Select((code, index) => Param($"@Store{index}", code, DbType.AnsiString, 200));
         var scope = new List<string>
         {
-            $"l.[StoreCode] = {Param("@StoreCode", query.StoreCode, DbType.AnsiString, 200)}",
+            $"l.[StoreCode] IN ({string.Join(", ", storeNames)})",
             $"l.[OperationTime] >= {Param("@From", query.From, DbType.DateTime)}",
             $"l.[OperationTime] < {Param("@ToExclusive", query.ToExclusive, DbType.DateTime)}",
         };
@@ -143,38 +175,89 @@ public static class LegacyEmployeeLogSqlServerQuery
             var names = query.EmployeeIds.Select((id, index) => Param($"@Employee{index}", id, DbType.AnsiString, 50));
             filters.Add($"l.[EmployeeId] IN ({string.Join(", ", names)})");
         }
-        if (query.Keyword != null)
-        {
-            var pattern = LocalSupplierProductSalesAnalysisService.BuildSqlServerLikePattern(query.Keyword);
-            filters.Add($"l.[OperationDetail] LIKE {Param("@KeywordPattern", pattern, DbType.AnsiString, 400)}");
-        }
 
-        var listFilters = new List<string>(filters);
+        string? operationList = null;
         if (query.Operations.Count > 0)
         {
-            var names = query.Operations.Select((operation, index) => Param($"@Operation{index}", operation, DbType.AnsiString, 200));
-            listFilters.Add($"l.[Operation] IN ({string.Join(", ", names)})");
+            operationList = string.Join(", ", query.Operations.Select((operation, index) => Param($"@Operation{index}", operation, DbType.AnsiString, 200)));
         }
 
         Param("@Offset", (query.PageNumber - 1) * query.PageSize, DbType.Int32);
         Param("@PageSize", query.PageSize, DbType.Int32);
         var direction = query.Descending ? "DESC" : "ASC";
+        var where = string.Join("\n  AND ", filters);
 
         var sql = new StringBuilder();
         sql.AppendLine("SET NOCOUNT ON;");
-        // 时间范围 1–31 天、分店大小差别很大，统一 RECOMPILE，避免小范围编译的计划被大范围复用。
+        // 时间范围 1–31 天、分店数量差别很大，统一 RECOMPILE，避免小范围编译的计划被大范围复用。
+        if (query.Keyword != null)
+        {
+            Param("@ScanLimit", (long)keywordScanRowLimit, DbType.Int64);
+            var pattern = LocalSupplierProductSalesAnalysisService.BuildSqlServerLikePattern(query.Keyword);
+            Param("@KeywordPattern", pattern, DbType.AnsiString, 400);
+            // 守卫计数先写表变量再取值：生产实测 `SELECT @ScanRows = COUNT_BIG(*) …` 这种变量赋值写法，
+            // 25 店的 IN 列表要 11 秒以上（与时间范围无关，加 FORCESEEK 也一样），写入表变量只要 0.3 秒。
+            // 临时表建在 tempdb，字符列必须显式跟随当前库排序规则，否则与 POSM 列比较会报排序规则冲突。
+            sql.AppendLine($"""
+                DECLARE @ScanCount TABLE ([Rows] bigint NOT NULL);
+                INSERT INTO @ScanCount ([Rows]) SELECT COUNT_BIG(*) FROM {Source} WHERE {where} OPTION (RECOMPILE);
+                DECLARE @ScanRows bigint = (SELECT [Rows] FROM @ScanCount);
+                SELECT @ScanRows AS [ScanRows];
+                IF @ScanRows > @ScanLimit RETURN;
+                IF OBJECT_ID(N'tempdb..#hb_legacy_log_hits') IS NOT NULL DROP TABLE #hb_legacy_log_hits;
+                CREATE TABLE #hb_legacy_log_hits (
+                    [OperationTime] datetime NOT NULL,
+                    [Id] varchar(255) COLLATE DATABASE_DEFAULT NOT NULL,
+                    [Operation] varchar(200) COLLATE DATABASE_DEFAULT NULL,
+                    PRIMARY KEY CLUSTERED ([OperationTime], [Id])
+                );
+                INSERT INTO #hb_legacy_log_hits ([OperationTime], [Id], [Operation])
+                SELECT l.[OperationTime], l.[Id], l.[Operation]
+                FROM {Source}
+                WHERE {where}
+                  AND l.[OperationDetail] LIKE @KeywordPattern
+                OPTION (RECOMPILE);
+                SELECT h.[Operation], COUNT_BIG(*) AS [Count]
+                FROM #hb_legacy_log_hits AS h
+                GROUP BY h.[Operation];
+                WITH p AS (
+                    SELECT h.[Id], h.[OperationTime]
+                    FROM #hb_legacy_log_hits AS h
+                    {(operationList == null ? string.Empty : $"WHERE h.[Operation] IN ({operationList})")}
+                    ORDER BY h.[OperationTime] {direction}, h.[Id] {direction}
+                    OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+                )
+                SELECT {PageColumns}
+                FROM p
+                JOIN [dbo].[EmployeeLogs] AS x WITH (NOLOCK) ON x.[Id] = p.[Id]
+                ORDER BY p.[OperationTime] {direction}, p.[Id] {direction};
+                DROP TABLE #hb_legacy_log_hits;
+                """);
+        }
+        else
+        {
+            var listWhere = operationList == null ? where : $"{where}\n  AND l.[Operation] IN ({operationList})";
+            sql.AppendLine($"""
+                SELECT l.[Operation], COUNT_BIG(*) AS [Count]
+                FROM {Source}
+                WHERE {where}
+                GROUP BY l.[Operation]
+                OPTION (RECOMPILE);
+                WITH p AS (
+                    SELECT l.[Id], l.[OperationTime]
+                    FROM {Source}
+                    WHERE {listWhere}
+                    ORDER BY l.[OperationTime] {direction}, l.[Id] {direction}
+                    OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+                )
+                SELECT {PageColumns}
+                FROM p
+                JOIN [dbo].[EmployeeLogs] AS x WITH (NOLOCK) ON x.[Id] = p.[Id]
+                ORDER BY p.[OperationTime] {direction}, p.[Id] {direction}
+                OPTION (RECOMPILE);
+                """);
+        }
         sql.AppendLine($"""
-            SELECT l.[Operation], COUNT_BIG(*) AS [Count]
-            FROM {Source}
-            WHERE {string.Join("\n  AND ", filters)}
-            GROUP BY l.[Operation]
-            OPTION (RECOMPILE);
-            SELECT {Columns}
-            FROM {Source}
-            WHERE {string.Join("\n  AND ", listFilters)}
-            ORDER BY l.[OperationTime] {direction}, l.[Id] {direction}
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
-            OPTION (RECOMPILE);
             SELECT l.[EmployeeId], MAX(l.[EmployeeName]) AS [EmployeeName], COUNT_BIG(*) AS [Count]
             FROM {Source}
             WHERE {string.Join("\n  AND ", scope)}
@@ -226,15 +309,26 @@ public static class LegacyEmployeeLogSqlServerQuery
         );
     }
 
-    public static async Task<(
-        List<LegacyEmployeeLogOperationCountDto> Counts,
-        List<LegacyEmployeeLogItemDto> Rows,
-        List<LegacyEmployeeLogEmployeeOptionDto> Employees,
-        List<LegacyEmployeeLogDeviceOptionDto> Devices
-    )> ExecuteListAsync(DbConnection connection, LegacyEmployeeLogSqlCommand command, CancellationToken cancellationToken = default)
+    public static async Task<LegacyEmployeeLogListPage> ExecuteListAsync(
+        DbConnection connection,
+        LegacyEmployeeLogSqlCommand command,
+        bool hasKeywordGuard,
+        int keywordScanRowLimit = DefaultKeywordScanRowLimit,
+        CancellationToken cancellationToken = default
+    )
     {
         return await WithReaderAsync(connection, command, async reader =>
         {
+            if (hasKeywordGuard)
+            {
+                // 守卫结果集：超限时批处理已 RETURN，后面没有其他结果集。
+                var scanRows = await reader.ReadAsync(cancellationToken) ? Convert.ToInt64(reader.GetValue(0)) : 0L;
+                if (scanRows > keywordScanRowLimit)
+                {
+                    return LegacyEmployeeLogListPage.KeywordRejected(scanRows);
+                }
+                await NextResultAsync(reader, cancellationToken);
+            }
             var counts = new List<LegacyEmployeeLogOperationCountDto>();
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -267,7 +361,7 @@ public static class LegacyEmployeeLogSqlServerQuery
                     Count = Convert.ToInt32(reader.GetValue(1)),
                 });
             }
-            return (counts, rows, employees, devices);
+            return new LegacyEmployeeLogListPage(counts, rows, employees, devices, null);
         }, cancellationToken);
     }
 

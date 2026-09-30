@@ -45,7 +45,8 @@ export interface LegacyEmployeeLogContext {
 }
 
 export interface LegacyEmployeeLogQueryParams {
-  storeCode: string
+  /** 至少一个；数组按重复键展开为 storeCodes=a&storeCodes=b */
+  storeCodes: string[]
   /** 墙钟时间 YYYY-MM-DDTHH:mm:ss，半开区间 [from, to) */
   from: string
   to: string

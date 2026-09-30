@@ -6,7 +6,46 @@ export const LEGACY_LOG_MAX_RANGE_DAYS = 31
 export const LEGACY_LOG_DEFAULT_PAGE_SIZE = 50
 /** 上传滞后超过该分钟数标橙：用来解释“刚才的操作为什么还查不到”。 */
 export const LEGACY_LOG_LATE_UPLOAD_MINUTES = 60
-export const LEGACY_LOG_STORE_STORAGE_KEY = 'hb.legacyEmployeeLogs.storeCode'
+export const LEGACY_LOG_STORE_STORAGE_KEY = 'hb.legacyEmployeeLogs.storeCodes'
+
+/** 去空白、去重、保持选择顺序。 */
+export function normalizeStoreCodes(codes: readonly (string | null | undefined)[] | null | undefined) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  ;(codes ?? []).forEach((code) => {
+    const trimmed = code?.trim()
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed)
+      result.push(trimmed)
+    }
+  })
+  return result
+}
+
+/** 分店选择的比较键：与顺序无关，用来判断选择是否真的变了。 */
+export function storeSelectionKey(codes: readonly string[] | null | undefined) {
+  return [...normalizeStoreCodes(codes)].sort().join(',')
+}
+
+/**
+ * 解析记住的分店（JSON 数组；兼容早期只存单个编码的纯文本），只保留当前账号仍可选的分店。
+ * 都不可选时，只有一个可选分店就直接选它。
+ */
+export function resolveInitialStores(raw: string | null | undefined, visibleCodes: readonly string[]) {
+  const visible = new Set(visibleCodes)
+  let remembered: string[] = []
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      remembered = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [String(parsed)]
+    } catch {
+      remembered = [raw]
+    }
+  }
+  const kept = normalizeStoreCodes(remembered).filter((code) => visible.has(code))
+  if (kept.length > 0) return kept
+  return visibleCodes.length === 1 ? [visibleCodes[0]] : []
+}
 
 export type LegacyOperationCategory = 'item' | 'price' | 'delete' | 'payment' | 'return' | 'auth' | 'window' | 'other'
 
@@ -213,7 +252,7 @@ export function getDayRange(day: Dayjs): [Dayjs, Dayjs] {
 
 export interface LegacyLogFormValues {
   timeRange?: [Dayjs, Dayjs]
-  storeCode?: string
+  storeCodes?: string[]
   deviceCode?: string
   employeeIds?: string[]
   operations?: string[]
@@ -224,12 +263,12 @@ export function buildLegacyLogQuery(
   values: LegacyLogFormValues,
   page: { pageNumber: number; pageSize: number; sortOrder: 'asc' | 'desc' },
 ): LegacyEmployeeLogQueryParams | null {
-  const storeCode = values.storeCode?.trim()
-  if (!storeCode || !values.timeRange || validateTimeRange(values.timeRange)) return null
+  const storeCodes = normalizeStoreCodes(values.storeCodes)
+  if (storeCodes.length === 0 || !values.timeRange || validateTimeRange(values.timeRange)) return null
   const [from, to] = toQueryRange(values.timeRange)
   const keyword = values.keyword?.trim()
   return {
-    storeCode,
+    storeCodes,
     from: formatWallClock(from),
     to: formatWallClock(to),
     deviceCode: values.deviceCode?.trim() || undefined,
