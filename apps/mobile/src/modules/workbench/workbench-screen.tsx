@@ -268,6 +268,13 @@ export function WorkbenchScreen() {
     : !cartSummaryFailed && cartSummaryQuery.isSuccess
       ? 0
       : null;
+  const cartSkuLabel = cartSkuCount == null
+    ? "—"
+    : t("summary.skuCount", { count: cartSkuCount });
+  // 与 navigateTo 的守卫一致：只有菜单就绪且账号获授购物车时，指标才可点击。
+  const canOpenCart = itemsByRoute.has("cart")
+    && !navigationLoading
+    && !navigationErrorMessage;
   const cartSummaryLoading = Boolean(
     effectiveStoreCode
     && !scopedCart
@@ -467,25 +474,45 @@ export function WorkbenchScreen() {
               </Text>
             </View>
             <View style={styles.metricDivider} />
-            <View style={styles.metric}>
-              <Text variant="labelMedium" style={styles.summaryLabel}>
-                {t("summary.cartSku")}
-              </Text>
-              {cartSummaryLoading ? (
-                <ActivityIndicator
-                  accessibilityLabel={t("summary.cartLoading")}
+            {/* 购物车 SKU 指标可直接点进购物车；无购物车权限或菜单未就绪时保持纯展示，不暴露伪入口。 */}
+            <Pressable
+              accessibilityRole={canOpenCart ? "button" : undefined}
+              accessibilityLabel={canOpenCart
+                ? t("accessibility.openCart", { value: cartSkuLabel })
+                : undefined}
+              disabled={!canOpenCart}
+              onPress={() => navigateTo("cart")}
+              style={({ pressed }) => [
+                styles.metric,
+                styles.cartMetric,
+                pressed && canOpenCart ? styles.storeSummaryPressed : null,
+              ]}
+            >
+              <View style={styles.cartMetricCopy}>
+                <Text variant="labelMedium" style={styles.summaryLabel}>
+                  {t("summary.cartSku")}
+                </Text>
+                {cartSummaryLoading ? (
+                  <ActivityIndicator
+                    accessibilityLabel={t("summary.cartLoading")}
+                    color={HB_COLORS.action}
+                    size={20}
+                    style={styles.metricActivity}
+                  />
+                ) : (
+                  <Text variant="titleMedium" style={styles.metricValue}>
+                    {cartSkuLabel}
+                  </Text>
+                )}
+              </View>
+              {canOpenCart ? (
+                <MaterialCommunityIcons
+                  name="chevron-right"
                   color={HB_COLORS.action}
                   size={20}
-                  style={styles.metricActivity}
                 />
-              ) : (
-                <Text variant="titleMedium" style={styles.metricValue}>
-                  {cartSkuCount == null
-                    ? "—"
-                    : t("summary.skuCount", { count: cartSkuCount })}
-                </Text>
-              )}
-            </View>
+              ) : null}
+            </Pressable>
           </View>
         </Surface>
 
@@ -706,6 +733,16 @@ const styles = StyleSheet.create({
     color: HB_COLORS.textPrimary,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
+  },
+  cartMetric: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.xs,
+  },
+  cartMetricCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: HB_SPACING.xxs,
   },
   metricActivity: {
     alignSelf: "flex-start",
