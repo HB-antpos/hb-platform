@@ -108,7 +108,7 @@ export class SqliteSettingsSafetyRepository {
          ORDER BY message_id`,
       );
       const auditRows = await transaction.getAll<AuditSafetyRow>(
-        `SELECT event_id, uploaded_at_iso
+        `SELECT event_id, uploaded_at_iso, delivery_state
          FROM audit_events
          ORDER BY event_id`,
       );
@@ -171,6 +171,7 @@ type OutboxSafetyRow = Readonly<{
 type AuditSafetyRow = Readonly<{
   event_id: unknown;
   uploaded_at_iso: unknown;
+  delivery_state: unknown;
 }>;
 
 type PrintSafetyRow = Readonly<{
@@ -335,8 +336,16 @@ function countPendingDurableWrites(input: Readonly<{
   }
   for (const row of input.auditRows) {
     requiredIdentifier(row.event_id, "audit event id");
+    const deliveryState = auditDeliveryState(row.delivery_state);
     if (row.uploaded_at_iso === null) {
-      count = incrementSafe(count, "pending durable write count");
+      if (deliveryState === "uploaded") {
+        throw new Error("Invalid persisted settings safety audit delivery.");
+      }
+      // rejected 是投递终态：服务端已拒收或本地诊断被隔离，上传器永不再选中；
+      // 计入待处理只会让危险操作永久阻断且无可处理路径，业务事实仍保留在本地。
+      if (deliveryState === "pending") {
+        count = incrementSafe(count, "pending durable write count");
+      }
     } else {
       canonicalIso(row.uploaded_at_iso, "audit uploaded timestamp");
     }
@@ -396,13 +405,16 @@ function paymentState(
   throw new Error("Invalid persisted settings safety payment state.");
 }
 
+// 必须与 PaymentProvider 契约及上方 SQL 的 provider 集合保持一致；漏一个正式
+// provider 会让含该支付记录的设备在所有危险设置操作上永久失败关闭。
 function paymentProvider(
   value: unknown,
-): "square" | "linkly-cloud" | "voucher" {
+): "square" | "linkly-cloud" | "voucher" | "manual-card" {
   if (
     value === "square" ||
     value === "linkly-cloud" ||
-    value === "voucher"
+    value === "voucher" ||
+    value === "manual-card"
   ) {
     return value;
   }
@@ -432,6 +444,15 @@ function outboxState(
     return value;
   }
   throw new Error("Invalid persisted settings safety outbox state.");
+}
+
+function auditDeliveryState(
+  value: unknown,
+): "pending" | "uploaded" | "rejected" {
+  if (value === "pending" || value === "uploaded" || value === "rejected") {
+    return value;
+  }
+  throw new Error("Invalid persisted settings safety audit delivery state.");
 }
 
 function printState(

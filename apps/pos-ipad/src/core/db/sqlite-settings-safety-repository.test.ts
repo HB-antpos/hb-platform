@@ -247,6 +247,69 @@ test("真实 SQLite：仅按未同步订单去重统计 Linkly 配置敏感支�
   });
 });
 
+test("真实 SQLite：手动刷卡支付按正式 provider 计数，不再让安全检查失败关闭", async () => {
+  await withMigratedDatabase(async (connection) => {
+    await insertOrder(connection, "manual-completed", "Synced", "sale");
+    await insertPaymentAttempt(connection, {
+      attemptId: "manual-consumed",
+      orderGuid: "manual-completed",
+      state: "Approved",
+      provider: "manual-card",
+    });
+    await insertTender(connection, {
+      tenderGuid: "manual-consumed-tender",
+      orderGuid: "manual-completed",
+      paymentAttemptId: "manual-consumed",
+    });
+    await insertOrder(connection, "manual-draft", "Draft", "sale");
+    await insertPaymentAttempt(connection, {
+      attemptId: "manual-pending",
+      orderGuid: "manual-draft",
+      state: "Pending",
+      provider: "manual-card",
+    });
+
+    assert.deepEqual(
+      await new SqliteSettingsSafetyRepository(connection).read(),
+      {
+        pendingDurableWriteCount: 0,
+        pendingReturnCount: 0,
+        pendingSaleCount: 1,
+        unresolvedPaymentCount: 1,
+        paymentConfigurationSensitiveOrderCount: 0,
+      },
+    );
+  });
+});
+
+test("真实 SQLite：已拒收审计是投递终态，不再永久阻断危险设置操作", async () => {
+  await withMigratedDatabase(async (connection) => {
+    await insertAudit(connection, "pending-audit", null);
+    await insertAudit(connection, "rejected-audit", null);
+    await connection.run(
+      `UPDATE audit_events
+       SET delivery_state = 'rejected', last_error_code = 'HTTP_400'
+       WHERE event_id = 'rejected-audit'`,
+    );
+
+    assert.equal(
+      (await new SqliteSettingsSafetyRepository(connection).read())
+        .pendingDurableWriteCount,
+      1,
+    );
+
+    // 未上传却标记 uploaded 属于自相矛盾的状态，仍须失败关闭。
+    await connection.run(
+      `UPDATE audit_events SET delivery_state = 'uploaded'
+       WHERE event_id = 'pending-audit'`,
+    );
+    await assert.rejects(
+      new SqliteSettingsSafetyRepository(connection).read(),
+      /Invalid persisted settings safety audit delivery/,
+    );
+  });
+});
+
 test("真实 SQLite：所有读取只在单个独占事务内完成，损坏状态失败关闭", async () => {
   await withMigratedDatabase(async (connection) => {
     await insertOrder(connection, "atomic-order", "CompletedLocal", "sale");
@@ -428,7 +491,7 @@ async function insertPaymentAttempt(
     attemptId: string;
     orderGuid: string;
     state: string;
-    provider?: "square" | "linkly-cloud" | "voucher";
+    provider?: "square" | "linkly-cloud" | "voucher" | "manual-card";
     operation?: "purchase" | "refund";
     amountCents?: number;
   }>,
