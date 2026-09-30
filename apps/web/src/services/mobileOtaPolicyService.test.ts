@@ -94,6 +94,11 @@ const transport: MobileOtaPolicyTransport = {
         targetRuntimeVersion: '1.0.2',
         releaseMessage: '可选更新',
         targetRelease: null,
+        additionalTargets: [
+          { targetReleaseId: 'release-106', targetRuntimeVersion: '1.0.6' },
+          { targetRuntimeVersion: '1.0.7' },
+          'broken',
+        ],
         updatedAt: '2026-08-27T03:00:00Z',
         updatedBy: 'admin',
       },
@@ -141,6 +146,11 @@ async function run() {
 
   const policy = await service.getPolicy('production', 'ios')
   assertEqual(policy.targetRuntimeVersion, '1.0.2', '策略必须保留服务端权威目标 Runtime')
+  assertDeepEqual(
+    policy.additionalTargets,
+    [{ targetReleaseId: 'release-106', targetRuntimeVersion: '1.0.6' }],
+    '策略必须保留按 Runtime 的附加目标，并丢弃缺少发布 ID 的异常项',
+  )
   assertEqual(
     calls[calls.length - 1]?.url,
     '/api/app-update-policies/mobile-ota/production/ios',
