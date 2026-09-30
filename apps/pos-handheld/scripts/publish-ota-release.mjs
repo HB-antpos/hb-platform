@@ -736,11 +736,15 @@ function validateRegisteredReleaseResponse(release, payload) {
       "projectName",
       "runtimeVersion",
       "message",
-      "gitCommitHash",
-      "dashboardUrl",
       "isRollback",
     ]) {
       if (responseField(release, field) !== payload[field]) {
+        throw new Error(`${field} 不匹配`);
+      }
+    }
+    // 可空文本字段：后端 WhenWritingNull 会省略 null，缺失视同 null 后再严格比较。
+    for (const field of ["gitCommitHash", "dashboardUrl"]) {
+      if (nullableResponseField(release, field) !== payload[field]) {
         throw new Error(`${field} 不匹配`);
       }
     }
@@ -795,12 +799,21 @@ function assertUuidResponseField(release, payload, field) {
   }
 }
 
-function assertNullableUuidResponseField(release, payload, field) {
+// 后端 JSON 序列化配置 JsonIgnoreCondition.WhenWritingNull，值为 null 的可空字段
+// 会从响应中整体省略；因此“字段缺失”与“显式 null”等价，统一归一为 null。
+// 字段存在时原样返回，由调用方继续严格比较，不放宽任何非空值的校验。
+function nullableResponseField(release, field) {
   const releaseObject = asObject(release);
+  if (!releaseObject) return null;
   const pascalField = `${field[0].toUpperCase()}${field.slice(1)}`;
-  const responseValue = Object.hasOwn(releaseObject, field)
+  const value = Object.hasOwn(releaseObject, field)
     ? releaseObject[field]
     : releaseObject[pascalField];
+  return value === undefined ? null : value;
+}
+
+function assertNullableUuidResponseField(release, payload, field) {
+  const responseValue = nullableResponseField(release, field);
   const requestValue = payload[field];
   if (responseValue === null && requestValue === null) return;
   if (responseValue === null || requestValue === null) {
