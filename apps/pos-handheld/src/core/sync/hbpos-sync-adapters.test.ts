@@ -557,10 +557,16 @@ test("非订单登录审计只使用发生时冻结的 requester userGuid", asyn
     },
   }])), { kind: "uploaded" });
   const body = transport.calls[0]?.data as {
-    events: { cashierId: string | null; userGuid: string | null }[];
+    events: {
+      cashierId: string | null;
+      userGuid: string | null;
+      items: unknown;
+    }[];
   };
   assert.equal(body.events[0]?.cashierId, "cashier-1");
   assert.equal(body.events[0]?.userGuid, "user-guid-1");
+  // 服务端 Items 为非可空 List，null 会触发整批 400 并被本地永久标为 rejected。
+  assert.deepEqual(body.events[0]?.items, []);
 });
 
 test("设备重新注册后，订单和非订单审计仍使用入库时冻结的门店与设备范围", async () => {

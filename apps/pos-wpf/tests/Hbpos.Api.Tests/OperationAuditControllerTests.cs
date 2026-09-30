@@ -171,6 +171,43 @@ public sealed class OperationAuditControllerTests
     }
 
     [Fact]
+    public async Task Batch_http_pipeline_accepts_null_items_from_handheld_non_order_events()
+    {
+        // 已发布的手持/iPad 对非订单事件（如 CASHIER_LOGIN）上传 "items": null；
+        // 若被隐式必填校验整批 400，客户端会把同批事件全部永久标为 rejected。
+        var service = new RecordingOperationAuditIngestService();
+        await using var factory = new OperationAuditApiFactory(service);
+        using var client = factory.CreateClient();
+        var json = $$"""
+            {"events":[{"eventId":"{{Guid.NewGuid()}}","schemaVersion":1,
+            "occurredAtUtc":"2026-09-30T05:16:54.678Z","operationType":"CASHIER_LOGIN",
+            "outcome":"Succeeded","cashierId":"89adde426db243a9b5aedb9b863fb50f","userGuid":null,
+            "cashierName":"管理员","isOfflineCached":false,"isEmergencyOverride":false,
+            "storeCode":"STORE-1","deviceCode":"POS-1","appVersion":"0.1.0","instanceId":null,
+            "orderGuid":null,"correlationId":"{{Guid.NewGuid()}}","currencyCode":"AUD",
+            "properties":null,"items":null}]}
+            """;
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/v1/operation-audits/batch")
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "valid-device-token");
+        request.Headers.Add(DeviceAuthConstants.StoreCodeHeader, "STORE-1");
+        request.Headers.Add(DeviceAuthConstants.DeviceCodeHeader, "POS-1");
+        request.Headers.Add(DeviceAuthConstants.HardwareIdHeader, "HW-1");
+
+        var response = await client.SendAsync(request);
+
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        Assert.NotNull(service.Request);
+        Assert.Empty(service.Request!.Events[0].Items);
+    }
+
+    [Fact]
     public async Task Batch_http_pipeline_returns_structured_device_disabled_code()
     {
         var service = new RecordingOperationAuditIngestService();
