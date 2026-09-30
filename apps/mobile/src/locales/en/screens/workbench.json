@@ -86,6 +86,7 @@
     "currentStore": "Current store, {{store}}",
     "changeStore": "Current store, {{store}}, switch store",
     "changeStoreHint": "Opens the stores authorised for this account",
-    "storesLoading": "Loading available stores"
+    "storesLoading": "Loading available stores",
+    "openCart": "Cart SKUs, {{value}}, open cart"
   }
 }

@@ -86,6 +86,7 @@
     "currentStore": "当前门店，{{store}}",
     "changeStore": "当前门店，{{store}}，切换分店",
     "changeStoreHint": "打开当前账号获权的分店列表",
-    "storesLoading": "正在加载可用分店"
+    "storesLoading": "正在加载可用分店",
+    "openCart": "购物车 SKU，{{value}}，打开购物车"
   }
 }
