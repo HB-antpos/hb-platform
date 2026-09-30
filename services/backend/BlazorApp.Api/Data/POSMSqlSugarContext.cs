@@ -406,6 +406,8 @@ namespace BlazorApp.Api.Data
                     "IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_sales_order_detail_OrderGuid_ProductCode' AND object_id = OBJECT_ID('sales_order_detail')) CREATE NONCLUSTERED INDEX IX_sales_order_detail_OrderGuid_ProductCode ON sales_order_detail(OrderGuid, ProductCode)",
                     // 收银记录关键词按商品编码定位订单；生产已于 2026-09-19 用 SqlScripts/PosmSalesOrderDetailProductCodeIndex.sql 在线创建。
                     "IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_sales_order_detail_ProductCode' AND object_id = OBJECT_ID('sales_order_detail')) CREATE NONCLUSTERED INDEX IX_sales_order_detail_ProductCode ON sales_order_detail(ProductCode) INCLUDE (OrderGuid)",
+                    // 老系统操作日志按分店 + 时间查询；EmployeeLogs 由旧收银写入，表不存在时跳过。生产用 SqlScripts/PosmEmployeeLogsStoreTimeIndex.sql 在线创建。
+                    "IF OBJECT_ID('EmployeeLogs') IS NOT NULL AND NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_EmployeeLogs_StoreCode_OperationTime' AND object_id = OBJECT_ID('EmployeeLogs')) CREATE NONCLUSTERED INDEX IX_EmployeeLogs_StoreCode_OperationTime ON EmployeeLogs(StoreCode, OperationTime) INCLUDE (EmployeeId, EmployeeName, Operation, DeviceCode)",
                 };
 
                 foreach (var sql in indexStatements)

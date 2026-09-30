@@ -110,6 +110,7 @@
     "advertisements": "Advertisements",
     "cashRegisterUsers": "Cashier Barcodes",
     "operationLogs": "Employee Operation Logs",
+    "legacyEmployeeLogs": "Legacy POS Operation Logs",
     "linklySettlements": "Linkly Settlements",
     "linklySettlementDetail": "Linkly Settlement Detail",
     "scheduleAttendance": "Schedule Attendance",

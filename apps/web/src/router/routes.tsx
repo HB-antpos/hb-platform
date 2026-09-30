@@ -73,6 +73,7 @@ const PosAdminProductManagementPage = lazy(() => import('../pages/PosAdmin/Produ
 const PosAdminStoreProductPricePage = lazy(() => import('../pages/PosAdmin/StoreProductPrice'))
 const PosAdminAdvertisementsPage = lazy(() => import('../pages/PosAdmin/Advertisements'))
 const PosAdminOperationLogsPage = lazy(() => import('../pages/PosAdmin/OperationLogs'))
+const PosAdminLegacyEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/LegacyEmployeeLogs'))
 const LinklySettlementsPage = lazy(() => import('../pages/PosAdmin/LinklySettlements'))
 const LinklySettlementDetailPage = lazy(() => import('../pages/PosAdmin/LinklySettlementDetail'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
@@ -796,6 +797,16 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewOperationAudits',
         },
         element: <PosAdminOperationLogsPage />,
+      },
+      {
+        path: '/pos-admin/legacy-employee-logs',
+        meta: {
+          title: 'menu.legacyEmployeeLogs',
+          icon: 'FileTextOutlined',
+          keepAlive: true,
+          accessKey: 'canViewLegacyEmployeeLogs',
+        },
+        element: <PosAdminLegacyEmployeeLogsPage />,
       },
       {
         path: '/pos-admin/linkly-settlements',

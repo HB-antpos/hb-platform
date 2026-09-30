@@ -1,0 +1,109 @@
+{
+  "legacyEmployeeLogs": {
+    "pageTitle": "老系统操作日志",
+    "pageSubtitle": "旧版收银系统上传的员工操作记录：加购、改价、删除、开钱箱、退货与支付。",
+    "wallClockNotice": "时间均为门店本地时间（旧收银写入的墙钟时间，不做时区换算）。日志由收银机批量上传，通常滞后十几到几十分钟，最近的操作可能尚未出现。",
+    "filters": {
+      "timeRange": "操作时间（最长 31 天）",
+      "store": "分店",
+      "storePlaceholder": "选择分店",
+      "device": "设备",
+      "devicePlaceholder": "全部设备",
+      "employee": "员工",
+      "employeePlaceholder": "全部员工，可多选",
+      "operation": "操作类型",
+      "operationPlaceholder": "全部操作",
+      "keyword": "详情关键字",
+      "keywordPlaceholder": "订单号 / 条码 / 商品编码 / 金额",
+      "optionsHint": "设备与员工选项来自上次查询的分店和时间范围"
+    },
+    "presets": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "last7Days": "最近 7 天",
+      "last31Days": "最近 31 天"
+    },
+    "validation": {
+      "storeRequired": "请选择分店",
+      "rangeRequired": "请选择操作时间范围",
+      "rangeReversed": "结束时间必须晚于开始时间",
+      "rangeTooLong": "时间范围最长 31 天"
+    },
+    "quick": {
+      "label": "快捷筛选",
+      "highRisk": "高风险操作",
+      "price": "价格与折扣",
+      "return": "退货",
+      "auth": "钱箱与身份",
+      "payment": "支付与挂单"
+    },
+    "categories": {
+      "item": "商品",
+      "price": "价格折扣",
+      "delete": "删除",
+      "payment": "结账支付",
+      "return": "退货",
+      "auth": "钱箱与身份",
+      "window": "窗口",
+      "other": "其他"
+    },
+    "stats": {
+      "total": "符合条件",
+      "deleted": "删除商品",
+      "priceChanges": "改价 / 改折扣",
+      "cashDrawer": "开钱箱",
+      "scope": "期间员工 / 设备",
+      "unitRows": "条",
+      "unitPeople": "人",
+      "unitDevices": "台",
+      "basisHint": "计数不受「操作类型」条件影响"
+    },
+    "table": {
+      "title": "操作记录",
+      "hint": "点击行查看详情与前后操作",
+      "empty": "没有符合条件的操作记录",
+      "selectStoreFirst": "请选择分店后查询",
+      "paginationTotal": "共 {{total}} 条"
+    },
+    "columns": {
+      "time": "操作时间",
+      "device": "设备",
+      "employee": "员工",
+      "operation": "操作",
+      "detail": "详情",
+      "lag": "上传滞后",
+      "action": "操作"
+    },
+    "lag": {
+      "minutes": "{{minutes}} 分钟",
+      "hours": "{{hours}} 小时 {{minutes}} 分",
+      "days": "{{days}} 天 {{hours}} 小时",
+      "unknown": "-"
+    },
+    "detail": {
+      "title": "操作详情",
+      "highRisk": "高风险",
+      "operationTime": "操作时间",
+      "localTime": "门店本地",
+      "uploadTime": "上传时间",
+      "lagSuffix": "滞后 {{lag}}",
+      "storeDevice": "分店 / 设备",
+      "employee": "员工",
+      "operation": "操作",
+      "parsedTitle": "解析字段",
+      "parsedHint": "由详情文本按「键:值」自动提取",
+      "product": "商品",
+      "order": "订单号",
+      "rawTitle": "原始详情",
+      "contextTitle": "前后操作",
+      "contextHint": "同设备 ±{{minutes}} 分钟",
+      "contextTruncated": "窗口内操作过多，只显示前 {{count}} 条",
+      "contextEmpty": "窗口内没有其他操作",
+      "contextFailed": "前后操作加载失败",
+      "onlyEmployeeDay": "只看该员工当天操作"
+    },
+    "loadFailed": "老系统操作日志加载失败",
+    "retry": "重试",
+    "loadStoresFailed": "分店列表加载失败"
+  }
+}
