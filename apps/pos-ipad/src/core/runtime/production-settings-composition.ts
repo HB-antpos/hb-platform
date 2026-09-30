@@ -94,6 +94,13 @@ export type ProductionSettingsCompositionInput = Readonly<{
     | (SettingsLinklySetupControlPort & SettingsLinklyPairingPort)
     | undefined;
   readDevicePresentation(): Promise<SettingsDevicePresentation>;
+  /**
+   * 设置快照读取失败时上报（中心日志）。页面仍按原逻辑显示 load-failed，
+   * 这里只补充“哪一步失败、异常是什么”，便于线上设备排查。
+   */
+  reportSnapshotFailure?:
+    | ((stage: SettingsSnapshotStage, error: unknown) => void)
+    | undefined;
   catalog: Readonly<{
     getActiveMetadata(): Promise<SettingsCatalogSnapshot | null>;
     getRefreshState(): CatalogRefreshState;
@@ -201,18 +208,32 @@ export function createProductionSettingsComposition(
   const productionControl = new ProductionSettingsControl({
     readSnapshot: async (signal) => {
       throwIfAborted(signal);
+      const readStage = <T,>(
+        stage: SettingsSnapshotStage,
+        operation: () => Promise<T>,
+      ): Promise<T> => readSnapshotStage(input, stage, operation);
       const [device, catalog, printer, printerStatus, displayStatus, paymentMethods] =
         await Promise.all([
-          input.readDevicePresentation(),
-          input.catalog.getActiveMetadata(),
-          input.receiptSettings.get(),
-          input.printer.getStatus(),
-          input.externalDisplay?.getStatus() ??
-            Promise.resolve("disconnected" as const),
-          input.paymentMethods?.load() ?? Promise.resolve(DEFAULT_PAYMENT_METHOD_SETTINGS),
+          readStage("device", () => input.readDevicePresentation()),
+          readStage("catalog", () => input.catalog.getActiveMetadata()),
+          readStage("receipt-settings", () => input.receiptSettings.get()),
+          readStage("printer-status", () => input.printer.getStatus()),
+          readStage("external-display", () =>
+            input.externalDisplay?.getStatus() ??
+              Promise.resolve("disconnected" as const),
+          ),
+          readStage("payment-methods", () =>
+            input.paymentMethods?.load() ??
+              Promise.resolve(DEFAULT_PAYMENT_METHOD_SETTINGS),
+          ),
         ]);
       throwIfAborted(signal);
-      assertDeviceScope(device, terminal);
+      try {
+        assertDeviceScope(device, terminal);
+      } catch (error) {
+        reportSnapshotFailure(input, "device-scope", error);
+        throw error;
+      }
       return Object.freeze({
         apiBaseUrl: input.apiBaseUrl,
         appUpdate: input.appUpdate.snapshot(),
@@ -531,6 +552,40 @@ function normalizeTerminal(input: TerminalScope): TerminalScope {
     storeCode: requiredText(input.storeCode, "store code"),
     deviceCode: requiredText(input.deviceCode, "device code"),
   });
+}
+
+export type SettingsSnapshotStage =
+  | "device"
+  | "catalog"
+  | "receipt-settings"
+  | "printer-status"
+  | "external-display"
+  | "payment-methods"
+  | "device-scope";
+
+async function readSnapshotStage<T>(
+  input: Pick<ProductionSettingsCompositionInput, "reportSnapshotFailure">,
+  stage: SettingsSnapshotStage,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    reportSnapshotFailure(input, stage, error);
+    throw error;
+  }
+}
+
+function reportSnapshotFailure(
+  input: Pick<ProductionSettingsCompositionInput, "reportSnapshotFailure">,
+  stage: SettingsSnapshotStage,
+  error: unknown,
+): void {
+  try {
+    input.reportSnapshotFailure?.(stage, error);
+  } catch {
+    // 日志旁路失败不能改变设置页原有的失败语义。
+  }
 }
 
 function assertDeviceScope(

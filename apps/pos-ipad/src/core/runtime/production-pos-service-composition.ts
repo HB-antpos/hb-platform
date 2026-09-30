@@ -520,6 +520,7 @@ export type ProductionSettingsRuntimeConfiguration = Pick<
   | "squareSetup"
   | "linklySetup"
   | "readDevicePresentation"
+  | "reportSnapshotFailure"
   | "paymentConfiguration"
   | "paymentMethods"
   | "apiConfiguration"

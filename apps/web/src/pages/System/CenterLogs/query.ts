@@ -25,6 +25,7 @@ export const CENTER_LOG_PROJECT_DEFINITIONS = [
   { projectCode: 'HbwebExpo', labelKey: 'system.centerLogs.projects.HbwebExpo' },
   { projectCode: 'hbpos_win', labelKey: 'system.centerLogs.projects.hbpos_win' },
   { projectCode: 'hbpos_ipad', labelKey: 'system.centerLogs.projects.hbpos_ipad' },
+  { projectCode: 'hbpos_handheld', labelKey: 'system.centerLogs.projects.hbpos_handheld' },
   { projectCode: 'hbpos_api', labelKey: 'system.centerLogs.projects.hbpos_api' },
 ] as const
 export const CENTER_LOG_LEVEL_OPTIONS = ['Trace', 'Debug', 'Information', 'Warning', 'Error', 'Critical']
