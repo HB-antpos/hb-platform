@@ -104,6 +104,97 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
     }
 
     [Fact]
+    public async Task ContainerReactServiceUpdateContainerAsync_显式清空到库日期_应置空且不影响其他字段()
+    {
+        await _localDb.Insertable(
+            new List<Container>
+            {
+                new()
+                {
+                    ContainerCode = "C-CLEAR-DATES",
+                    ContainerNumber = "CLEAR0001",
+                    LoadingDate = new DateTime(2026, 9, 1),
+                    EstimatedArrivalDate = new DateTime(2026, 10, 8),
+                    ActualArrivalDate = new DateTime(2026, 10, 9),
+                    Status = 1,
+                    Remarks = "保留备注",
+                },
+                new()
+                {
+                    ContainerCode = "C-KEEP-DATES",
+                    ContainerNumber = "KEEP0001",
+                    LoadingDate = new DateTime(2026, 9, 2),
+                    EstimatedArrivalDate = new DateTime(2026, 10, 10),
+                    ActualArrivalDate = new DateTime(2026, 10, 11),
+                    Status = 1,
+                },
+            }
+        ).ExecuteCommandAsync();
+        var service = CreateService();
+
+        // 只清空实际到货：预计到岸未传值、也未要求清空，必须保持原值。
+        Assert.True(
+            await service.UpdateContainerAsync(
+                "C-CLEAR-DATES",
+                new UpdateContainerDto { ClearActualArrivalDate = true }
+            )
+        );
+        var afterActualCleared = await _localDb.Queryable<Container>()
+            .SingleAsync(x => x.ContainerCode == "C-CLEAR-DATES");
+        Assert.Null(afterActualCleared.ActualArrivalDate);
+        Assert.Equal(new DateTime(2026, 10, 8), afterActualCleared.EstimatedArrivalDate);
+        Assert.Equal("保留备注", afterActualCleared.Remarks);
+        Assert.Equal(1, afterActualCleared.Status);
+
+        Assert.True(
+            await service.UpdateContainerAsync(
+                "C-CLEAR-DATES",
+                new UpdateContainerDto { ClearEstimatedArrivalDate = true }
+            )
+        );
+        var afterBothCleared = await _localDb.Queryable<Container>()
+            .SingleAsync(x => x.ContainerCode == "C-CLEAR-DATES");
+        Assert.Null(afterBothCleared.EstimatedArrivalDate);
+        Assert.Null(afterBothCleared.ActualArrivalDate);
+
+        // 清空只作用于目标货柜。
+        var untouched = await _localDb.Queryable<Container>()
+            .SingleAsync(x => x.ContainerCode == "C-KEEP-DATES");
+        Assert.Equal(new DateTime(2026, 10, 10), untouched.EstimatedArrivalDate);
+        Assert.Equal(new DateTime(2026, 10, 11), untouched.ActualArrivalDate);
+    }
+
+    [Fact]
+    public async Task ContainerReactServiceUpdateContainerAsync_只设置日期不传清空标记_应只改日期()
+    {
+        await _localDb.Insertable(
+            new Container
+            {
+                ContainerCode = "C-SET-ACTUAL",
+                ContainerNumber = "SET0001",
+                LoadingDate = new DateTime(2026, 9, 3),
+                EstimatedArrivalDate = new DateTime(2026, 10, 8),
+                Status = 1,
+            }
+        ).ExecuteCommandAsync();
+        var service = CreateService();
+
+        Assert.True(
+            await service.UpdateContainerAsync(
+                "C-SET-ACTUAL",
+                new UpdateContainerDto { 实际到货日期 = new DateTime(2026, 10, 7) }
+            )
+        );
+
+        var container = await _localDb.Queryable<Container>()
+            .SingleAsync(x => x.ContainerCode == "C-SET-ACTUAL");
+        Assert.Equal(new DateTime(2026, 10, 7), container.ActualArrivalDate);
+        Assert.Equal(new DateTime(2026, 10, 8), container.EstimatedArrivalDate);
+        // 登记实际到库不联动状态。
+        Assert.Equal(1, container.Status);
+    }
+
+    [Fact]
     public async Task ContainerReactServiceUpdateContainerAsync_更新成同编号同装柜日期_应拒绝保存()
     {
         await _localDb.Insertable(

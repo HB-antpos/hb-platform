@@ -937,8 +937,8 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
             <>
               <Text variant="titleLarge">{headerQuery.data?.货柜编号 ?? containerGuid}</Text>
               <View style={styles.metricGrid}>
-                <DetailMetric label="预计到岸" value={formatDate(headerQuery.data?.预计到岸日期)} />
-                <DetailMetric label="实际到货" value={formatDate(headerQuery.data?.实际到货日期)} />
+                <DetailMetric label="预计到库" value={formatDate(headerQuery.data?.预计到岸日期)} />
+                <DetailMetric label="实际到库" value={formatDate(headerQuery.data?.实际到货日期)} />
                 <DetailMetric label="件数" value={formatNumber(headerQuery.data?.合计件数, 0)} />
                 <DetailMetric label="金额" value={formatNumber(headerQuery.data?.合计金额)} />
               </View>
