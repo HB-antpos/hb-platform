@@ -54,6 +54,7 @@ const EXISTING_TAB_PATHS = {
   reports: "/(shell)/reports",
   "store-vouchers": "/(shell)/store-vouchers",
   "seasonal-cards": "/(shell)/seasonal-cards",
+  containers: "/(shell)/containers",
   "attendance-personal": "/(shell)/attendance-personal",
   "attendance-management": "/(shell)/attendance-management",
   "product-query": "/(shell)/product-query",

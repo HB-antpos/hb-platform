@@ -4,6 +4,7 @@ export type AppTabPath =
   | "/(shell)/orders"
   | "/(shell)/cart"
   | "/(shell)/warehouse"
+  | "/(shell)/containers"
   | "/(shell)/domestic-purchase"
   | "/(shell)/local-supplier-invoices"
   | "/(shell)/installment-orders"
@@ -38,6 +39,8 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   orders: "/(shell)/orders",
   cart: "/(shell)/cart",
   warehouse: "/(shell)/warehouse",
+  // 货柜管理是独立菜单入口；列表页在 containers 栈内，明细页仍由根 Stack 接管。
+  containers: "/(shell)/containers",
   "domestic-purchase": "/(shell)/domestic-purchase",
   "local-supplier-invoices": "/(shell)/local-supplier-invoices",
   "installment-orders": "/(shell)/installment-orders",

@@ -441,7 +441,6 @@ export default function WarehouseScreen() {
   const productSectionConfig = getWarehouseProductSections(productLayoutMode);
   const isPdaProductLayout = productLayoutMode === "pda";
   const canMaintainLocations = canMaintainWarehouseLocations(access);
-  const canViewContainers = access.canViewContainers;
   const canUseWarehouseTools =
     hasStoredDeviceSession ||
     (
@@ -452,10 +451,8 @@ export default function WarehouseScreen() {
         canMaintainLocations
       )
     );
-  const hasWarehouseAccess = canUseWarehouseTools || (canViewContainers && hasVisibleWarehouseTab);
-  const openContainers = useCallback(() => {
-    router.push("/containers" as Parameters<typeof router.push>[0]);
-  }, [router]);
+  // 货柜管理已拆为工作台「仓库与采购」下的独立入口，本页只承载商品和货位管理。
+  const hasWarehouseAccess = canUseWarehouseTools;
   const getErrorMessage = useCallback((error: unknown, fallbackKey: string) => (
     resolveLocalizedErrorMessage(error, {
       language,
@@ -1862,23 +1859,6 @@ export default function WarehouseScreen() {
       ) : null}
     </>
   );
-  const renderContainerEntry = () => canViewContainers ? (
-    <Card mode="contained" style={[styles.containerEntryCard, isPdaProductLayout ? styles.containerEntryCardCompact : null]}>
-      <Card.Content style={styles.containerEntryContent}>
-        <View style={styles.containerEntryText}>
-          <Text variant="titleMedium">{t("containers.entryTitle")}</Text>
-          <Text variant="bodySmall" style={styles.secondaryText}>
-            {t("containers.entryDescription")}
-          </Text>
-        </View>
-        {/* 货柜迁移入口只看 Container.View，不放大原仓库 PDA 权限。 */}
-        <Button mode="contained-tonal" compact={isPdaProductLayout} icon="archive-outline" onPress={openContainers}>
-          {t("containers.entryAction")}
-        </Button>
-      </Card.Content>
-    </Card>
-  ) : null;
-
   if (!hasWarehouseAccess) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -1895,24 +1875,11 @@ export default function WarehouseScreen() {
     );
   }
 
-  if (!canUseWarehouseTools) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-        <View style={[styles.header, isPdaProductLayout ? styles.headerCompact : null]}>
-          <Text variant="headlineSmall">{t("title")}</Text>
-        </View>
-        {renderContainerEntry()}
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={[styles.header, isPdaProductLayout ? styles.headerCompact : null]}>
         <Text variant="headlineSmall">{t("title")}</Text>
       </View>
-
-      {renderContainerEntry()}
 
       <SegmentedButtons
         value={segment}
@@ -2915,30 +2882,6 @@ const styles = StyleSheet.create({
   },
   cardCompact: {
     borderRadius: 10,
-  },
-  containerEntryCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E4E7EC",
-  },
-  containerEntryCardCompact: {
-    marginHorizontal: 10,
-    marginBottom: 8,
-    borderRadius: 10,
-  },
-  containerEntryContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  containerEntryText: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
   },
   cardContent: {
     gap: 10,
