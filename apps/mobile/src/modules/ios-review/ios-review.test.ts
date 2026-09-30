@@ -227,8 +227,8 @@ assert.equal(
   true
 );
 
-assert.equal(IOS_REVIEW_MENU_ITEMS.length, 19);
-assert.equal(new Set(IOS_REVIEW_ROUTE_NAMES).size, 19);
+assert.equal(IOS_REVIEW_MENU_ITEMS.length, 20);
+assert.equal(new Set(IOS_REVIEW_ROUTE_NAMES).size, 20);
 assert.equal(
   IOS_REVIEW_EXCLUDED_ROUTE_NAMES.includes("container-new-products"),
   true,

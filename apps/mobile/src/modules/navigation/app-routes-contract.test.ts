@@ -57,6 +57,7 @@ const EXISTING_TAB_PATHS = {
   "store-vouchers": "/(shell)/store-vouchers",
   "seasonal-cards": "/(shell)/seasonal-cards",
   "container-new-products": "/(shell)/container-new-products",
+  containers: "/(shell)/containers",
   "app-install": "/(shell)/app-install",
   "attendance-personal": "/(shell)/attendance-personal",
   "attendance-management": "/(shell)/attendance-management",

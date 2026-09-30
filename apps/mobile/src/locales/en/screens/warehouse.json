@@ -1,13 +1,8 @@
 {
-  "title": "Warehouse",
+  "title": "Products & locations",
   "segments": {
     "product": "Products",
     "location": "Location"
-  },
-  "containers": {
-    "entryTitle": "Container management",
-    "entryDescription": "View container lists and container details.",
-    "entryAction": "Open"
   },
   "messages": {
     "noAccessTitle": "No warehouse access",

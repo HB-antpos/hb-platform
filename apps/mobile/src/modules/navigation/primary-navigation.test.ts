@@ -457,6 +457,27 @@ assert.deepEqual(
   "订单拣货归入仓库与采购并紧跟仓库入口，只依赖后端显式菜单"
 );
 assert.deepEqual(
+  buildWorkbenchSections(["warehouse", "containers", "warehouse-picking"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "warehouse-purchase",
+      itemRouteNames: ["warehouse", "containers", "warehouse-picking"],
+    },
+  ],
+  "货柜管理必须作为独立入口归入仓库与采购，并紧跟商品和货位管理"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["containers"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [{ key: "warehouse-purchase", itemRouteNames: ["containers"] }],
+  "只有 Container.View 的账号也要在仓库与采购分区看到货柜管理"
+);
+assert.deepEqual(
   buildWorkbenchSections(["reports", "pos-operation-logs"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
