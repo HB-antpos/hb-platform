@@ -59,7 +59,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["orders", "Orders", "订单", ["OrderFront", "Orders.View", "Warehouse.ManageOrders", "Warehouse.Manage"]],
   ["sales-orders", "Sales records", "销售订单", ["SalesOrders.View"]],
   ["cart", "Cart", "购物车", ["Orders.Create"]],
-  ["warehouse", "Warehouse", "仓库", ["Warehouse.ManageProducts", "Container.View"]],
+  ["warehouse", "Products & locations", "商品和货位管理", ["Warehouse.ManageProducts"]],
+  ["containers", "Containers", "货柜管理", ["Container.View"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：拣货专用权限，或管理仓库 / 管理仓库订货任一即可见。
   ["warehouse-picking", "Order picking", "订单拣货", ["Warehouse.Picking", "Warehouse.Manage", "Warehouse.ManageOrders"]],
   ["domestic-purchase", "Domestic purchase", "国内采购", ["DomesticPurchase.ManageProducts"]],

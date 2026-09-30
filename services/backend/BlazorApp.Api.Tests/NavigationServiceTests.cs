@@ -907,8 +907,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(35, menu.Count);
+        Assert.Equal(36, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "app-install");
+        Assert.Contains(menu, item => item.RouteName == "containers");
         Assert.Contains(menu, item => item.RouteName == "warehouse-picking");
         Assert.Contains(menu, item => item.RouteName == "cash-register-users");
         Assert.Contains(menu, item => item.RouteName == "seasonal-product-insights");
@@ -987,14 +988,32 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_ShowsWarehouseWithContainerViewPermission()
+    public void BuildAppMenu_ShowsContainersOnlyWithContainerViewPermission()
     {
-        var user = CreateUser(new Claim("permission", Permissions.Container.View));
+        var containerUser = CreateUser(new Claim("permission", Permissions.Container.View));
+        var productsOnlyUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageProducts));
 
-        var menu = _service.BuildAppMenu(user);
+        var containerMenu = _service.BuildAppMenu(containerUser);
+        var productsOnlyMenu = _service.BuildAppMenu(productsOnlyUser);
 
-        var item = Assert.Single(menu, item => item.RouteName == "warehouse");
-        Assert.Equal(Permissions.Warehouse.ManageProducts, item.Permission);
+        // 货柜管理是独立入口：只凭 Container.View 可见，且不再顺带放出商品和货位管理（warehouse）。
+        var item = Assert.Single(containerMenu, item => item.RouteName == "containers");
+        Assert.Equal("tabs.containers", item.TitleKey);
+        Assert.Equal(Permissions.Container.View, item.Permission);
+        Assert.DoesNotContain(containerMenu, item => item.RouteName == "warehouse");
+
+        // 只管商品的账号看得到商品和货位管理，看不到货柜管理。
+        var warehouse = Assert.Single(productsOnlyMenu, item => item.RouteName == "warehouse");
+        Assert.Equal(Permissions.Warehouse.ManageProducts, warehouse.Permission);
+        Assert.DoesNotContain(productsOnlyMenu, item => item.RouteName == "containers");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_HidesContainers()
+    {
+        // 纯设备会话没有 Container.View，仓库设备也只放出商品和货位管理与拣货。
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "containers");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "containers");
     }
 
     [Fact]

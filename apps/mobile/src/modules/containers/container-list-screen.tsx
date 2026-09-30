@@ -219,13 +219,13 @@ export function ContainerListScreen() {
   const canEditContainer = access.canEditContainer;
 
   const handleBack = useCallback(() => {
-    // 深链直达时可能没有历史栈，此时回到货柜功能所属的仓库页。
+    // 深链直达时可能没有历史栈，此时回到货柜管理入口所在的工作台（仅有 Container.View 的账号进不了商品和货位管理）。
     if (router.canGoBack()) {
       router.back();
       return;
     }
 
-    router.navigate("/(shell)/warehouse");
+    router.navigate("/(shell)/workbench");
   }, [router]);
 
   const invalidateList = () => queryClient.invalidateQueries({ queryKey: ["containers"] });

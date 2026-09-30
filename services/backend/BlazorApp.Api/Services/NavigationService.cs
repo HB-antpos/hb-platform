@@ -205,15 +205,20 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 商品和货位管理：仓库商品与货位维护；货柜管理已拆为独立入口，不再凭 Container.View 放行。
                 RouteName = "warehouse",
                 TitleKey = "tabs.warehouse",
                 Icon = "warehouse",
                 Permission = Permissions.Warehouse.ManageProducts,
-                AnyPermissions = new[]
-                {
-                    Permissions.Warehouse.ManageProducts,
-                    Permissions.Container.View,
-                },
+                Order = 40,
+            },
+            new()
+            {
+                // 货柜管理：原先是仓库页内的卡片，现为工作台「仓库与采购」组下的独立入口，只看 Container.View。
+                RouteName = "containers",
+                TitleKey = "tabs.containers",
+                Icon = "archive-outline",
+                Permission = Permissions.Container.View,
                 Order = 40,
             },
             new()
