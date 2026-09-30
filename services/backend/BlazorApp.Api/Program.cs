@@ -771,6 +771,9 @@ builder.Services.AddHttpClient<TencentCosMobileAppBuildArtifactMirror>()
 builder.Services.AddScoped<IMobileAppBuildArtifactMirror>(sp =>
     sp.GetRequiredService<TencentCosMobileAppBuildArtifactMirror>()
 );
+// 商品图片版本号：HEAD 探测 COS 图片修改时间；禁止跳转，防止白名单域名 302 到内网。
+builder.Services.AddHttpClient<ProductImageVersionService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<IChinaSupplierService, ChinaSupplierService>(); // 国内供应商管理服务
 builder.Services.AddScoped<IDomesticSupplierService, DomesticSupplierService>(); // 义乌采购国内供应商服务
 builder.Services.AddScoped<IWarehouseCategoryService, WarehouseCategoryService>(); // 仓库分类服务

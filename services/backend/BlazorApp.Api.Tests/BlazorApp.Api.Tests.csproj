@@ -113,6 +113,7 @@
     <Compile Include="ProductWarehouseReactServiceTests.cs" />
     <Compile Include="ProductGradeReactServiceTests.cs" />
     <Compile Include="ReactImageProxyControllerTests.cs" />
+    <Compile Include="ProductImageVersionServiceTests.cs" />
     <Compile Include="ProductWarehouseReactServiceNonHotbargainTests.cs" />
     <Compile Include="ProductWarehouseReactServiceSyncTests.cs" />
     <Compile Include="ProductServiceChangeHistoryTests.cs" />

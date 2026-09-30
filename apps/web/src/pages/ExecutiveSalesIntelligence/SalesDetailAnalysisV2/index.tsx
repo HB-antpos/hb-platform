@@ -4,8 +4,9 @@ import { CloseOutlined, DownloadOutlined, FullscreenExitOutlined, FullscreenOutl
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../../hooks/useIsMobile'
+import { useProductImageVersions } from '../../../hooks/useProductImageVersion'
 import { useAuthStore } from '../../../store/auth'
-import { toProductThumbnailUrl } from '../../../utils/productImageThumbnail'
+import { toProductImagePreviewUrl, toProductThumbnailUrl } from '../../../utils/productImageThumbnail'
 import { MetricPair, ReportControls, useReportText } from '../ReportWorkbench/ReportControls'
 import { growth, normalizeKeyword, reportPeriod } from '../ReportWorkbench/logic'
 import { useReportQuery, type ReportQueryState } from '../ReportWorkbench/useReportQuery'
@@ -306,15 +307,19 @@ export default function SalesDetailAnalysisV2() {
   const productRows = [...(products.data?.rows ?? [])].sort((left, right) => right.quantity - left.quantity
     || (right.compareQuantity ?? 0) - (left.compareQuantity ?? 0)
     || left.code.localeCompare(right.code))
+  // COS 上按原文件名换过的图带版本号，绕开缩略图 30 天强缓存；没换过的图地址不变。
+  const imageVersion = useProductImageVersions(productRows.map(row => row.productImage))
   // 预览组只收本页能正常显示的图片，按表格顺序排列，预览中左右键即可逐个翻看本页商品。
   const previewRows = productRows.filter(row => row.productImage && !brokenImages.has(row.productImage))
   const previewIndex = previewCode === null ? -1 : previewRows.findIndex(row => row.code === previewCode)
   const markImageBroken = (url: string) => setBrokenImages(value => value.has(url) ? value : new Set(value).add(url))
   // 缩略图处理失败（桶未开通图片处理、格式不支持等）时退回原图再试一次，原图也失败才换成占位符。
   const handleThumbnailError = (image: HTMLImageElement, original: string) => {
-    if (image.dataset.fallback !== 'original' && image.getAttribute('src') !== original) {
+    // 退回的原图同样带版本号，避免换过图后退回到浏览器缓存里的旧原图。
+    const originalSrc = toProductImagePreviewUrl(original, imageVersion(original))
+    if (image.dataset.fallback !== 'original' && image.getAttribute('src') !== originalSrc) {
       image.dataset.fallback = 'original'
-      image.src = original
+      image.src = originalSrc
       return
     }
     markImageBroken(original)
@@ -430,7 +435,8 @@ export default function SalesDetailAnalysisV2() {
           {row.productImage && !brokenImages.has(row.productImage)
             ? <button type="button" className={styles.thumbButton} onClick={() => setPreviewCode(row.code)}
               title={text('查看大图', 'View larger image')} aria-label={text(`查看${row.name || row.code}的大图`, `View larger image of ${row.name || row.code}`)}>
-              <img key={row.productImage} src={toProductThumbnailUrl(row.productImage)} alt="" loading="lazy" decoding="async"
+              <img key={`${row.productImage}|${imageVersion(row.productImage) ?? ''}`}
+                src={toProductThumbnailUrl(row.productImage, undefined, imageVersion(row.productImage))} alt="" loading="lazy" decoding="async"
                 onError={event => handleThumbnailError(event.currentTarget, row.productImage!)} /></button>
             : <span className={styles.imagePlaceholder}>▦</span>}
           {/* 点击商品与供应商、分店一样作为联动筛选；分店分布抽屉改由行尾图标打开。 */}
@@ -604,7 +610,7 @@ export default function SalesDetailAnalysisV2() {
     <ProductBranchDrawer key={currentUser?.userGUID ?? 'anonymous'} open={active && allowed && !!drawerProduct}
       product={drawerProduct} baseQuery={query} onClose={() => setDrawerProduct(null)} />
     {/* 受控预览组：不渲染子元素，只由缩略图按钮打开；页脚显示序号、货号与商品名，方便翻看时对照。 */}
-    <Image.PreviewGroup items={previewRows.map(row => ({ src: row.productImage!, alt: row.name || row.code }))}
+    <Image.PreviewGroup items={previewRows.map(row => ({ src: toProductImagePreviewUrl(row.productImage!, imageVersion(row.productImage)), alt: row.name || row.code }))}
       preview={{ visible: active && previewIndex >= 0, current: Math.max(previewIndex, 0),
         onVisibleChange: visible => { if (!visible) setPreviewCode(null) },
         onChange: current => setPreviewCode(previewRows[current]?.code ?? null),
