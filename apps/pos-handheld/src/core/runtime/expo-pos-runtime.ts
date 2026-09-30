@@ -1073,6 +1073,16 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         printer,
         readDevicePresentation: () =>
           readSettingsDevicePresentation(publicDeviceSession),
+        // 设置页读取失败原本只显示 load-failed；把失败阶段与异常写入中心日志。
+        reportSnapshotFailure: (stage, error) => {
+          applicationLog?.record({
+            level: "Error",
+            message: "Settings snapshot load failed.",
+            category: "settings.load",
+            error,
+            properties: { stage },
+          });
+        },
         paymentConfiguration: {
           current: currentPaymentSettings,
           availability: {
