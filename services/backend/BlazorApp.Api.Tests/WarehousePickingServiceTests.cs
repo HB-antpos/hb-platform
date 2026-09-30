@@ -55,7 +55,8 @@ public sealed class WarehousePickingServiceTests : IDisposable
             typeof(WarehouseOrderPickSession),
             typeof(WarehouseOrderPickRecord),
             typeof(WarehouseOrderPickParticipant),
-            typeof(WarehouseOrderPickStockout)
+            typeof(WarehouseOrderPickStockout),
+            typeof(WarehouseOrderPickAssignment)
         );
     }
 

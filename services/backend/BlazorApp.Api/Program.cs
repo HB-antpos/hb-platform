@@ -964,6 +964,10 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.WarehousePicking.WarehousePickingService
 >();
 builder.Services.AddScoped<
+    BlazorApp.Api.Features.WarehousePicking.IWarehousePickingAssignmentService,
+    BlazorApp.Api.Features.WarehousePicking.WarehousePickingAssignmentService
+>();
+builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.React.IWarehouseRetailPriceChangeService,
     BlazorApp.Api.Services.React.WarehouseRetailPriceChangeService
 >();

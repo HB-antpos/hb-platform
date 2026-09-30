@@ -23,6 +23,7 @@ public sealed class WarehousePickingControllerTests
 
     private readonly Mock<IWarehousePickingService> _picking = new();
     private readonly Mock<IWarehousePickerService> _pickers = new();
+    private readonly Mock<IWarehousePickingAssignmentService> _assignments = new();
     private readonly Mock<IDeviceRegistrationService> _devices = new();
     private readonly Mock<IAuthorizationService> _authorization = new();
     private readonly WarehousePickerTicketProtector _tickets = new(new EphemeralDataProtectionProvider());
@@ -45,6 +46,77 @@ public sealed class WarehousePickingControllerTests
         _authorization
             .Setup(service => service.AuthorizeAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<object?>(), It.IsAny<string>()))
             .ReturnsAsync(AuthorizationResult.Failed());
+    }
+
+    [Fact]
+    public async Task 派单只允许仓库经理_员工账号与设备会话都被拒绝()
+    {
+        var staff = await CreateController(User("u-staff", "WarehouseStaff"), headers: new())
+            .SaveAssignments(OrderGuid, new WarehousePickingAssignmentSaveRequestDto());
+        var device = await CreateController(user: null, headers: DeviceHeaders()).ListPickerCandidates();
+
+        Assert.Equal(403, StatusOf(staff));
+        Assert.Equal(WarehousePickingErrorCodes.AssignNotAllowed, ErrorCodeOf(staff));
+        Assert.Equal(403, StatusOf(device));
+        Assert.Equal(WarehousePickingErrorCodes.AssignNotAllowed, ErrorCodeOf(device));
+        _assignments.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task 仓库经理或持有订货管理权限的账号可以派单_记录派单人()
+    {
+        WarehousePickingAssigner? captured = null;
+        _assignments
+            .Setup(service => service.SaveAsync(OrderGuid, It.IsAny<WarehousePickingAssignmentSaveRequestDto>(), It.IsAny<WarehousePickingAssigner>()))
+            .Callback<string, WarehousePickingAssignmentSaveRequestDto, WarehousePickingAssigner>((_, _, assigner) => captured = assigner)
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingAssignmentSummaryDto>.Ok(new WarehousePickingAssignmentSummaryDto()));
+        _authorization
+            .Setup(service => service.AuthorizeAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<object?>(), "Warehouse.Picking"))
+            .ReturnsAsync(AuthorizationResult.Success());
+        _authorization
+            .Setup(service => service.AuthorizeAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<object?>(), "Warehouse.ManageOrders"))
+            .ReturnsAsync(AuthorizationResult.Success());
+
+        var manager = await CreateController(User("u-mgr", "仓库经理"), headers: new())
+            .SaveAssignments(OrderGuid, new WarehousePickingAssignmentSaveRequestDto());
+        Assert.Equal(200, StatusOf(manager));
+        Assert.Equal(new WarehousePickingAssigner("u-mgr", "Full u-mgr"), captured);
+
+        var orders = await CreateController(User("u-orders", "User"), headers: new())
+            .SaveAssignments(OrderGuid, new WarehousePickingAssignmentSaveRequestDto());
+        Assert.Equal(200, StatusOf(orders));
+        Assert.Equal("u-orders", captured!.UserGuid);
+    }
+
+    [Fact]
+    public async Task 扫分单条码只需终端校验_纯设备会话没确认拣货人也能解析()
+    {
+        _assignments
+            .Setup(service => service.ResolveSlipAsync("HBSP:SO1/1/A"))
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingSlipResolveDto>.Ok(new WarehousePickingSlipResolveDto { OrderGuid = OrderGuid }));
+
+        var device = await CreateController(user: null, headers: DeviceHeaders()).ResolveSlip("HBSP:SO1/1/A");
+        var anonymous = await CreateController(user: null, headers: new()).ResolveSlip("HBSP:SO1/1/A");
+
+        Assert.Equal(200, StatusOf(device));
+        Assert.Equal(401, StatusOf(anonymous));
+    }
+
+    [Fact]
+    public async Task 订单列表认得出拣货人时传入拣货人_认不出时不传()
+    {
+        string? capturedPicker = "unset";
+        _picking
+            .Setup(service => service.ListOrdersAsync("mine", null, It.IsAny<string?>()))
+            .Callback<string?, string?, string?>((_, _, picker) => capturedPicker = picker)
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingOrderListDto>.Ok(new WarehousePickingOrderListDto()));
+
+        await CreateController(User("u-staff", "WarehouseStaff"), headers: new()).ListOrders("mine", null);
+        Assert.Equal("u-staff", capturedPicker);
+
+        var result = await CreateController(user: null, headers: DeviceHeaders()).ListOrders("mine", null);
+        Assert.Equal(200, StatusOf(result));
+        Assert.Null(capturedPicker);
     }
 
     [Fact]
@@ -165,6 +237,7 @@ public sealed class WarehousePickingControllerTests
         return new WarehousePickingController(
             _picking.Object,
             _pickers.Object,
+            _assignments.Object,
             _tickets,
             _devices.Object,
             _authorization.Object,

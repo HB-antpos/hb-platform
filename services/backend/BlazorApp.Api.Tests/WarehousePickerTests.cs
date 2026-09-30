@@ -144,6 +144,47 @@ public sealed class WarehousePickerTests : IDisposable
     }
 
     [Fact]
+    public async Task ListEligible_仓库角色_角色或本人持有拣货相关权限的在职账号可派单_普通与停用账号不在名单()
+    {
+        _db.CodeFirst.InitTables(typeof(Role), typeof(UserRole), typeof(SysRolePermission), typeof(SysUserPermission));
+        await SeedUserAsync("u-staff", "staff", "Chen Staff");
+        await SeedUserAsync("u-mgr", "mgr", "Amy Manager");
+        await SeedUserAsync("u-pack", "pack", "Dan Packer");
+        await SeedUserAsync("u-direct", "direct", "Bo Direct");
+        await SeedUserAsync("u-plain", "plain", "Pat Plain");
+        await SeedUserAsync("u-off", "off", "Off Staff", isActive: false);
+        await _db.Insertable(new List<Role>
+        {
+            new() { RoleGUID = "r-staff", RoleName = "仓库员工", IsActive = true },
+            new() { RoleGUID = "r-mgr", RoleName = "WarehouseManager", IsActive = true },
+            new() { RoleGUID = "r-pack", RoleName = "打包组", IsActive = true },
+            new() { RoleGUID = "r-user", RoleName = "User", IsActive = true },
+            new() { RoleGUID = "r-old", RoleName = "WarehouseStaff", IsActive = false },
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new List<UserRole>
+        {
+            new() { UserGUID = "u-staff", RoleGUID = "r-staff" },
+            new() { UserGUID = "u-mgr", RoleGUID = "r-mgr" },
+            new() { UserGUID = "u-pack", RoleGUID = "r-pack" },
+            new() { UserGUID = "u-plain", RoleGUID = "r-user" },
+            new() { UserGUID = "u-plain", RoleGUID = "r-old" },
+            new() { UserGUID = "u-off", RoleGUID = "r-staff" },
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new SysRolePermission { RoleGuid = "r-pack", PermissionCode = Permissions.Warehouse.Picking }).ExecuteCommandAsync();
+        await _db.Insertable(new SysUserPermission { UserGuid = "u-direct", PermissionCode = Permissions.Warehouse.ManageOrders }).ExecuteCommandAsync();
+        SetupRoles("u-staff", roles: new[] { "仓库员工" }, permissions: Array.Empty<string>());
+        SetupRoles("u-mgr", roles: new[] { "WarehouseManager" }, permissions: Array.Empty<string>());
+        SetupRoles("u-pack", roles: new[] { "打包组" }, permissions: new[] { Permissions.Warehouse.Picking });
+        SetupRoles("u-direct", roles: new[] { "User" }, permissions: new[] { Permissions.Warehouse.ManageOrders });
+
+        var eligible = await CreateService().ListEligibleAsync();
+
+        Assert.Equal(new[] { "u-mgr", "u-direct", "u-staff", "u-pack" }, eligible.Select(item => item.UserGuid).ToArray());
+        Assert.All(eligible, item => Assert.True(item.IsAllowed));
+        Assert.Equal("WarehouseManager", eligible[0].RoleLabel);
+    }
+
+    [Fact]
     public void 权限别名_管理仓库或管理订货的持有人自动具备拣货权限_反向不成立()
     {
         var expanded = Permissions.ExpandPermissionCodes(new[] { Permissions.Warehouse.Manage });

@@ -30,6 +30,7 @@
     <Compile Include="MobileReportStoreOptionsTests.cs" />
     <Compile Include="WarehouseMinOrderQuantitySyncGuardTests.cs" />
     <Compile Include="WarehousePickingServiceTests.cs" />
+    <Compile Include="WarehousePickingAssignmentServiceTests.cs" />
     <Compile Include="WarehousePickerTests.cs" />
     <Compile Include="WarehousePickingSqlServerIntegrationTests.cs" />
     <Compile Include="WarehousePickingControllerTests.cs" />

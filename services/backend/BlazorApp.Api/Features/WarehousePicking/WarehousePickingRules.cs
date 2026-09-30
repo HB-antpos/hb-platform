@@ -21,6 +21,11 @@ public static class WarehousePickingErrorCodes
     public const string PickedBelowZero = "PICKED_BELOW_ZERO";
     public const string PickedTotalChanged = "PICKED_TOTAL_CHANGED";
     public const string LineAlreadyComplete = "LINE_ALREADY_COMPLETE";
+    public const string AssignNotAllowed = "ASSIGN_NOT_ALLOWED";
+    public const string AssignPickerInvalid = "ASSIGN_PICKER_INVALID";
+    public const string AssignCountsInvalid = "ASSIGN_COUNTS_INVALID";
+    public const string AssignLinesInvalid = "ASSIGN_LINES_INVALID";
+    public const string SlipStale = "SLIP_STALE";
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string CodeNotFound = "CODE_NOT_FOUND";
 }
@@ -75,6 +80,97 @@ internal static class WarehousePickingRules
 {
     /// <summary>配货单二维码前缀；PDA 同一扫码入口靠它区分订单码与商品条码。</summary>
     public const string OrderQrPrefix = "HBSO:";
+
+    /// <summary>分单拣货单条码前缀：HBSP:订单号/段号/版本。</summary>
+    public const string SlipCodePrefix = "HBSP:";
+
+    /// <summary>分配版本起点：版本按距此时刻的秒数计，int 可用到 2094 年。</summary>
+    private static readonly DateTime AssignmentVersionEpochUtc = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
+    /// 新的分配版本：取当前秒数与旧版本 +1 的较大值。按时间取值，撤销分配（删行）后再派也不会与旧分单撞号；
+    /// 同一秒内连续保存靠“旧版本 +1”保证严格递增。
+    /// </summary>
+    public static int NextAssignmentVersion(int? previousMax, DateTime nowUtc)
+    {
+        var bySeconds = (int)Math.Max(1, (nowUtc - AssignmentVersionEpochUtc).TotalSeconds);
+        return Math.Max(bySeconds, (previousMax ?? 0) + 1);
+    }
+
+    /// <summary>分单条码：HBSP:订单号/段号/版本（版本转大写 36 进制，缩短条码长度）。</summary>
+    public static string FormatSlipCode(string orderNo, int segmentNo, int version) =>
+        $"{SlipCodePrefix}{orderNo.Trim().ToUpperInvariant()}/{segmentNo}/{ToBase36(version)}";
+
+    /// <summary>解析分单条码；订单号里不会有斜杠，从右往左取段号与版本。不是分单条码返回 null。</summary>
+    public static (string OrderNo, int SegmentNo, int Version)? ParseSlipCode(string? raw)
+    {
+        var code = NormalizeCode(raw);
+        if (!code.StartsWith(SlipCodePrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var parts = code[SlipCodePrefix.Length..].Split('/');
+        if (parts.Length != 3
+            || parts[0].Length == 0
+            || !int.TryParse(parts[1], out var segmentNo)
+            || segmentNo <= 0
+            || !TryParseBase36(parts[2], out var version))
+        {
+            return null;
+        }
+
+        return (parts[0], segmentNo, version);
+    }
+
+    private static string ToBase36(int value)
+    {
+        const string digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        if (value <= 0)
+        {
+            return "0";
+        }
+
+        var chars = new Stack<char>();
+        while (value > 0)
+        {
+            chars.Push(digits[value % 36]);
+            value /= 36;
+        }
+
+        return new string(chars.ToArray());
+    }
+
+    private static bool TryParseBase36(string text, out int value)
+    {
+        value = 0;
+        if (text.Length is 0 or > 6)
+        {
+            return false;
+        }
+
+        long result = 0;
+        foreach (var character in text)
+        {
+            var digit = character is >= '0' and <= '9' ? character - '0'
+                : character is >= 'A' and <= 'Z' ? character - 'A' + 10
+                : -1;
+            if (digit < 0)
+            {
+                return false;
+            }
+
+            result = result * 36 + digit;
+        }
+
+        if (result > int.MaxValue)
+        {
+            return false;
+        }
+
+        value = (int)result;
+        return true;
+    }
 
     public const int FlowStatusSubmitted = 1;
     public const int FlowStatusCompleted = 2;

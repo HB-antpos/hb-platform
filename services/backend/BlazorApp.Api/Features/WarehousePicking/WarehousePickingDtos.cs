@@ -35,6 +35,22 @@ public sealed class WarehousePickingOrderListItemDto
     public int PickedLineCount { get; set; }
     public int? SessionStatus { get; set; }
     public List<WarehousePickerRefDto> Pickers { get; set; } = new();
+
+    /// <summary>经理派的负责人与各自行数；没有分配时为空列表。</summary>
+    public List<WarehousePickingAssigneeDto> Assignees { get; set; } = new();
+}
+
+public sealed class WarehousePickingAssigneeDto
+{
+    public string PickerUserGuid { get; set; } = string.Empty;
+    public string PickerName { get; set; } = string.Empty;
+    public int LineCount { get; set; }
+
+    /// <summary>第几段（从 1 起）。</summary>
+    public int SegmentNo { get; set; }
+
+    /// <summary>该段分单条码（HBSP:订单号/段号/版本）；订单列表里不下发。</summary>
+    public string? SlipCode { get; set; }
 }
 
 public sealed class WarehousePickingOrderCountsDto
@@ -42,6 +58,9 @@ public sealed class WarehousePickingOrderCountsDto
     public int All { get; set; }
     public int ToPick { get; set; }
     public int Picking { get; set; }
+
+    /// <summary>派给当前拣货人的订单数；列表请求认不出拣货人（设备未扫员工码）时为空。</summary>
+    public int? Mine { get; set; }
 }
 
 public sealed class WarehousePickingOrderListDto
@@ -100,6 +119,13 @@ public sealed class WarehousePickingLineDto
 
     /// <summary>仍有效的“货位没货”标记；没有标记时为空（序列化时省略）。</summary>
     public WarehousePickingStockoutDto? Stockout { get; set; }
+
+    /// <summary>经理派的负责人；没有分配时为空。</summary>
+    public string? AssigneeUserGuid { get; set; }
+    public string? AssigneeName { get; set; }
+
+    /// <summary>所属分段（扫分单后“我的”范围按段号过滤）。</summary>
+    public int? AssignmentSegmentNo { get; set; }
 }
 
 /// <summary>“货位没货”标记：原因见 WarehouseOrderPickStockoutReasons，谁在什么时候标的、标记时已拣多少。</summary>
@@ -169,6 +195,11 @@ public sealed class WarehousePickingLineProgressDto
 
     /// <summary>随进度轮询下发，一起拣的同事能看到谁把哪一行标成了没货。</summary>
     public WarehousePickingStockoutDto? Stockout { get; set; }
+
+    /// <summary>随进度轮询下发，经理改派后拣货页能同步。</summary>
+    public string? AssigneeUserGuid { get; set; }
+    public string? AssigneeName { get; set; }
+    public int? AssignmentSegmentNo { get; set; }
 }
 
 public sealed class WarehousePickingProgressDto
@@ -237,4 +268,151 @@ public sealed class WarehousePickingCodeLookupDto
     public string? Barcode { get; set; }
     public string? LocationCode { get; set; }
     public string? ProductImage { get; set; }
+}
+
+// ---- 拣货分配（仓库经理派单） ----
+
+public sealed class WarehousePickingPickerCandidateDto
+{
+    public string PickerUserGuid { get; set; } = string.Empty;
+    public string PickerName { get; set; } = string.Empty;
+    public string? RoleLabel { get; set; }
+
+    /// <summary>手上已派、仍在拣货中的订单数，帮经理平衡工作量。</summary>
+    public int ActiveOrderCount { get; set; }
+}
+
+public sealed class WarehousePickingAssignmentPickerInputDto
+{
+    public string? PickerUserGuid { get; set; }
+
+    /// <summary>该员工分几个品种；全部为空时按品种数平均分。</summary>
+    public int? LineCount { get; set; }
+}
+
+public sealed class WarehousePickingAssignmentPreviewRequestDto
+{
+    public List<WarehousePickingAssignmentPickerInputDto> Pickers { get; set; } = new();
+}
+
+public sealed class WarehousePickingAssignmentSegmentDto
+{
+    public string PickerUserGuid { get; set; } = string.Empty;
+    public string PickerName { get; set; } = string.Empty;
+    public int LineCount { get; set; }
+    public decimal Pieces { get; set; }
+
+    /// <summary>这一段在走位顺序上的第一个与最后一个有货位的行；整段都没货位时为空。</summary>
+    public string? FirstLocation { get; set; }
+    public string? LastLocation { get; set; }
+
+    public int UnlocatedLineCount { get; set; }
+    public int IrregularLineCount { get; set; }
+    public List<string> DetailGuids { get; set; } = new();
+}
+
+public sealed class WarehousePickingAssignmentPreviewDto
+{
+    public int LineCount { get; set; }
+    public decimal Pieces { get; set; }
+    public int UnlocatedLineCount { get; set; }
+    public int IrregularLineCount { get; set; }
+    public List<WarehousePickingAssignmentSegmentDto> Segments { get; set; } = new();
+}
+
+public sealed class WarehousePickingAssignmentInputDto
+{
+    public string? PickerUserGuid { get; set; }
+    public List<string> DetailGuids { get; set; } = new();
+}
+
+public sealed class WarehousePickingAssignmentSaveRequestDto
+{
+    public List<WarehousePickingAssignmentInputDto> Assignments { get; set; } = new();
+}
+
+public sealed class WarehousePickingAssignmentSummaryDto
+{
+    public string OrderGuid { get; set; } = string.Empty;
+    public int LineCount { get; set; }
+    public int UnassignedLineCount { get; set; }
+    public List<WarehousePickingAssigneeDto> Assignees { get; set; } = new();
+    public string? AssignedByName { get; set; }
+    public DateTime? AssignedAtUtc { get; set; }
+}
+
+public sealed class WarehousePickingBatchAssignRequestDto
+{
+    public List<string> OrderGuids { get; set; } = new();
+    public List<string> PickerUserGuids { get; set; } = new();
+}
+
+public sealed class WarehousePickingBatchAssignItemDto
+{
+    public string OrderGuid { get; set; } = string.Empty;
+    public string? OrderNo { get; set; }
+    public bool Success { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? Message { get; set; }
+}
+
+public sealed class WarehousePickingBatchAssignResultDto
+{
+    public List<WarehousePickingBatchAssignItemDto> Items { get; set; } = new();
+}
+
+/// <summary>PDA 扫分单条码的解析结果：打开哪张单、看哪一段。</summary>
+public sealed class WarehousePickingSlipResolveDto
+{
+    public string OrderGuid { get; set; } = string.Empty;
+    public string? OrderNo { get; set; }
+    public int SegmentNo { get; set; }
+    public int SegmentCount { get; set; }
+    public string PickerUserGuid { get; set; } = string.Empty;
+    public string PickerName { get; set; } = string.Empty;
+    public int LineCount { get; set; }
+}
+
+public sealed class WarehousePickingSlipLineDto
+{
+    public string DetailGuid { get; set; } = string.Empty;
+    public string? LocationCode { get; set; }
+
+    /// <summary>货位所在区与排（如 A、03），打印时换排处插提示行；无货位或编码不规范时为空。</summary>
+    public string? Zone { get; set; }
+    public string? RowLabel { get; set; }
+
+    public string? ItemNumber { get; set; }
+    public string? ProductName { get; set; }
+    public string? Barcode { get; set; }
+    public decimal OrderedQuantity { get; set; }
+    public int? MinOrderQuantity { get; set; }
+}
+
+/// <summary>一张分单拣货单（每人一页）。</summary>
+public sealed class WarehousePickingSlipDto
+{
+    public int SegmentNo { get; set; }
+    public int SegmentCount { get; set; }
+    public string SlipCode { get; set; } = string.Empty;
+    public string PickerUserGuid { get; set; } = string.Empty;
+    public string PickerName { get; set; } = string.Empty;
+    public int LineCount { get; set; }
+    public decimal Pieces { get; set; }
+    public string? FirstLocation { get; set; }
+    public string? LastLocation { get; set; }
+    public List<string> OtherPickerNames { get; set; } = new();
+    public List<WarehousePickingSlipLineDto> Lines { get; set; } = new();
+}
+
+public sealed class WarehousePickingSlipsDto
+{
+    public string OrderGuid { get; set; } = string.Empty;
+    public string? OrderNo { get; set; }
+    public string? StoreCode { get; set; }
+    public string? StoreName { get; set; }
+    public DateTime? OrderDate { get; set; }
+    public string? AssignedByName { get; set; }
+    public DateTime? AssignedAtUtc { get; set; }
+    public List<WarehousePickingSlipDto> Slips { get; set; } = new();
 }

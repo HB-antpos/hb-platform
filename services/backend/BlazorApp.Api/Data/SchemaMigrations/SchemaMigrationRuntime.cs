@@ -84,6 +84,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyWarehouseOrderPickStockoutAsync(CancellationToken cancellationToken);
 
+    Task ApplyWarehouseOrderPickAssignmentAsync(CancellationToken cancellationToken);
+
+    Task VerifyWarehouseOrderPickAssignmentAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -460,6 +464,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             WarehouseOrderPickStockoutSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyWarehouseOrderPickAssignmentAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderPickAssignmentSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但结构错误的表不会被误标为完成。
+        await VerifyWarehouseOrderPickAssignmentAsync(cancellationToken);
+    }
+
+    public async Task VerifyWarehouseOrderPickAssignmentAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderPickAssignmentSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
