@@ -35,6 +35,35 @@ namespace BlazorApp.Api.Services.React
             _currentUserService = currentUserService;
         }
 
+        public async Task<ApiResponse<List<string>>> GetGradeOptionsAsync()
+        {
+            try
+            {
+                // 直接对等级列去重：不能借用分页列表（按等级排序取前 1000 行再去重），
+                // 否则同一等级的商品超过 1000 个时，后面的等级会整个被截掉（生产上 A 级 1045 个，只剩 A）。
+                var grades = await _context.Db.Queryable<ProductGrade>()
+                    .Where(g => !g.IsDeleted && g.Grade != null && g.Grade != "")
+                    .Select(g => g.Grade)
+                    .Distinct()
+                    .ToListAsync();
+
+                var options = grades
+                    .Select(grade => grade?.Trim().ToUpperInvariant())
+                    .Where(grade => !string.IsNullOrEmpty(grade))
+                    .Select(grade => grade!)
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(grade => grade, StringComparer.Ordinal)
+                    .ToList();
+
+                return ApiResponse<List<string>>.OK(options);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取商品等级选项失败");
+                return ApiResponse<List<string>>.Error("获取商品等级选项失败", "GET_GRADE_OPTIONS_ERROR");
+            }
+        }
+
         public async Task<ApiResponse<PagedResult<ProductGradeDto>>> GetProductGradesAsync(
             ProductGradeListQueryDto query
         )

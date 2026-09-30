@@ -15,6 +15,7 @@ import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import {
   Button,
   Card,
+  IconButton,
   Menu,
   Modal,
   Portal,
@@ -1280,6 +1281,38 @@ export default function Home() {
           elevation={0}
           style={styles.searchInput}
           inputStyle={styles.searchInputText}
+          // 搜索框右侧常驻相机扫码按钮：自带 traileringIcon 一有文字就被清空按钮替换，
+          // 扫码后框里常留着条码，所以改用 right 自己渲染「清空 + 扫码」。
+          right={({ color }) => (
+            <View style={styles.searchActions}>
+              {searchInput ? (
+                <IconButton
+                  icon="close"
+                  size={20}
+                  iconColor={color}
+                  accessibilityLabel={t("common:actions.clear")}
+                  onPress={() => {
+                    // 与 Searchbar 自带清空一致：先清输入框，再走可见框扫码识别 → 统一关键词处理器退出搜索。
+                    visibleSearchScanner.searchInputRef.current?.clear();
+                    visibleSearchScanner.handleChangeText("");
+                  }}
+                  style={styles.searchActionButton}
+                />
+              ) : null}
+              <IconButton
+                icon="barcode-scan"
+                size={22}
+                iconColor={HB_COLORS.action}
+                accessibilityLabel={t("cameraQuery")}
+                onPress={() => {
+                  // 先收起键盘，避免键盘挡住相机扫码弹层。
+                  visibleSearchScanner.blurSearchInput();
+                  handleOpenCameraSheet();
+                }}
+                style={styles.searchActionButton}
+              />
+            </View>
+          )}
         />
         <View style={styles.filterRow}>
           <FilterChip
@@ -2010,6 +2043,14 @@ const styles = StyleSheet.create({
   searchInputText: {
     minHeight: 0,
     fontSize: 15,
+  },
+  searchActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 2,
+  },
+  searchActionButton: {
+    margin: 0,
   },
   filterRow: {
     flexDirection: "row",

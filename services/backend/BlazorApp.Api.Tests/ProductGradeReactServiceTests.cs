@@ -833,6 +833,50 @@ public sealed class ProductGradeReactServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetGradeOptionsAsync_超过一千个同等级商品时仍返回全部等级()
+    {
+        // 生产上 A 级超过 1000 个商品；旧做法先按等级排序取前 1000 行再去重，结果只剩 A。
+        var rows = Enumerable.Range(0, 1001)
+            .Select(index => new ProductGrade { ProductCode = $"P-A-{index:D4}", Grade = "A" })
+            .ToList();
+        rows.Add(new ProductGrade { ProductCode = "P-B", Grade = "B" });
+        rows.Add(new ProductGrade { ProductCode = "P-B-LOWER", Grade = "b" });
+        rows.Add(new ProductGrade { ProductCode = "P-C", Grade = "C" });
+        rows.Add(new ProductGrade { ProductCode = "P-D-DELETED", Grade = "D", IsDeleted = true });
+        await _db.Insertable(rows).ExecuteCommandAsync();
+
+        var result = await CreateService().GetGradeOptionsAsync();
+
+        Assert.True(result.Success);
+        Assert.Equal(new[] { "A", "B", "C" }, result.Data);
+    }
+
+    [Fact]
+    public async Task GetProductGradeOptions_使用去重等级查询而不是分页列表()
+    {
+        var serviceMock = new Mock<IProductGradeReactService>(MockBehavior.Strict);
+        serviceMock
+            .Setup(service => service.GetGradeOptionsAsync())
+            .ReturnsAsync(ApiResponse<List<string>>.OK(new List<string> { "A", "B", "C" }));
+
+        var controller = new ReactProductGradesController(
+            serviceMock.Object,
+            NullLogger<ReactProductGradesController>.Instance
+        );
+
+        var actionResult = await controller.GetProductGradeOptions();
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var data = ok.Value!.GetType().GetProperty("data")!.GetValue(ok.Value) as System.Collections.IEnumerable;
+        var values = data!.Cast<object>()
+            .Select(option => (string)option.GetType().GetProperty("value")!.GetValue(option)!)
+            .ToList();
+        Assert.Equal(new[] { "A", "B", "C" }, values);
+        // Strict mock：若控制器仍走分页列表 GetProductGradesAsync 会直接抛异常。
+        serviceMock.VerifyAll();
+    }
+
+    [Fact]
     public async Task GetProductGrades_ClampsPagingAndPassesWarehouseIsActiveQuery()
     {
         ProductGradeListQueryDto? capturedQuery = null;

@@ -27,23 +27,12 @@ namespace BlazorApp.Api.Controllers.React
         {
             try
             {
-                var query = new ProductGradeListQueryDto
-                {
-                    Page = 1,
-                    PageSize = 1000,
-                    SortField = "grade",
-                    SortDirection = "asc",
-                };
-
-                var result = await _productGradeReactService.GetProductGradesAsync(query);
+                // 等级选项直接取去重后的等级列；分页列表按商品行分页，同一等级超过 1000 个商品会截掉其余等级。
+                var result = await _productGradeReactService.GetGradeOptionsAsync();
 
                 if (result.Success)
                 {
-                    var options = (result.Data?.Items ?? new List<ProductGradeDto>())
-                        .Select(item => item.Grade?.Trim())
-                        .Where(grade => !string.IsNullOrWhiteSpace(grade))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .OrderBy(grade => grade)
+                    var options = (result.Data ?? new List<string>())
                         .Select(grade => new
                         {
                             grade,

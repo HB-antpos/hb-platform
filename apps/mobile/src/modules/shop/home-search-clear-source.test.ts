@@ -40,6 +40,20 @@ assert.doesNotMatch(
   "Searchbar 已会触发 onChangeText，不能再绑定清空回调导致重复恢复",
 );
 
+// 搜索框右侧常驻相机扫码按钮：打开的是与底栏相机按钮同一个扫码弹层，并先收起键盘。
+const searchbarRight = homeSource.match(/<Searchbar[\s\S]*?right=\{[\s\S]*?\n        \/>/)?.[0] ?? "";
+assert.match(
+  searchbarRight,
+  /icon="barcode-scan"[\s\S]*?visibleSearchScanner\.blurSearchInput\(\);[\s\S]*?handleOpenCameraSheet\(\);/,
+  "订货页搜索框右侧必须有相机扫码按钮，点击先收起键盘再打开扫码弹层",
+);
+// 自绘 right 会隐藏 Searchbar 自带清空按钮，自绘清空必须同样走可见框扫码识别回落到关键词处理器。
+assert.match(
+  searchbarRight,
+  /icon="close"[\s\S]*?searchInputRef\.current\?\.clear\(\);[\s\S]*?visibleSearchScanner\.handleChangeText\(""\);/,
+  "自绘清空按钮必须清空输入框并经 visibleSearchScanner.handleChangeText 退出已提交搜索",
+);
+
 const productContextReset = homeSource.match(
   /useEffect\(\(\) => \{[\s\S]*?searchReturnPageRef\.current = null;[\s\S]*?setPageNumber\(1\);[\s\S]*?\}, \[selectedCategoryGUID, selectedGrade, selectedStoreCode\]\);/,
 );
