@@ -780,7 +780,9 @@ export class HbposAuditBatchAdapter implements AuditBatchUploadPort {
       isEmergencyOverride: event.payload.isEmergencyOverride === true,
       storeCode: identity.storeCode, deviceCode: identity.deviceCode,
       appVersion: this.metadata.appVersion, instanceId: this.metadata.instanceId, orderGuid: event.orderGuid,
-      correlationId: event.correlationId, currencyCode: "AUD", properties: safeProperties(event.payload), items,
+      // 服务端 Items 是非可空 List（nullable 上下文下隐式必填），发 null 会让整批 400；
+      // 非订单且无明细的事件（如 CASHIER_LOGIN）必须发空数组。
+      correlationId: event.correlationId, currencyCode: "AUD", properties: safeProperties(event.payload), items: items ?? [],
       ...cartAmounts,
     };
   }
