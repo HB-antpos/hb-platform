@@ -13,7 +13,24 @@ export const PICK_MATCH = {
   setChild: 5,
 } as const;
 
+/** “货位没货”原因，与后端 WarehouseOrderPickStockoutReasons 一致。 */
+export const PICK_STOCKOUT_REASON = { locationEmpty: 1, wrongProduct: 2, damaged: 3 } as const;
+
 export type PickOrderFilter = "all" | "toPick" | "picking";
+
+/** 拣货范围：全部 / 有货位 / 无货位（未绑定配货位）。 */
+export type PickScope = "all" | "located" | "unlocated";
+
+/** 走位方式：M 型每排同一端进出、列号全部从小到大（默认）；S 型单数排从小到大、双数排从大到小。 */
+export type PickRoute = "m" | "s";
+
+/** 仍有效的“货位没货”标记。 */
+export interface PickStockout {
+  reason: number;
+  markedByName: string;
+  markedAtUtc: string;
+  pickedAtMark: number;
+}
 
 /** 当前拣货人：账号本人，或扫员工码换来的短期凭证。 */
 export interface PickerIdentity {
@@ -53,6 +70,7 @@ export interface PickSheetLine {
   setChildren: PickSetChild[];
   pickedTotal: number;
   pickedBy: PickedByEntry[];
+  stockout: PickStockout | null;
 }
 
 export interface PickCodeEntry {
@@ -98,6 +116,7 @@ export interface PickProgressLine {
   pickedTotal: number;
   pickedBy: PickedByEntry[];
   minOrderQuantity: number | null;
+  stockout: PickStockout | null;
 }
 
 export interface PickProgress {

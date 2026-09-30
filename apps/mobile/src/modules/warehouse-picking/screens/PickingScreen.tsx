@@ -8,6 +8,7 @@ import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner"
 import { playScanFeedbackSound, preloadScanFeedbackSounds } from "@/modules/scanner/scan-sound";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import {
+  deletePickStockout,
   fetchPickProgress,
   joinPickOrder,
   lookupPickCode,
@@ -15,31 +16,42 @@ import {
   postPickRecord,
   putMinOrderQuantity,
   putPickLineTotal,
+  putPickStockout,
   resolvePickOrder,
 } from "../api";
 import { readPickingError } from "../api-normalization";
 import { buildPickCodeIndex, resolvePickScan } from "../code-resolver";
 import {
   firstOpenLine,
+  hasLocation,
   hasMinOrderQuantity,
-  lineStatus,
+  isOpenLine,
+  isStockout,
+  lineInScope,
   mergeProgressLines,
+  primaryLocation,
+  scopeCounts,
   sortLinesByLocation,
   summarizeLines,
   upNextLines,
 } from "../pick-math";
+import { hydratePickPreferences, usePickPreferences } from "../pick-preferences";
 import { activeTeammates, shortPickerName, teammateByLine } from "../pick-view-model";
 import { usePickerStore } from "../picker-store";
 import { PICKER_RECONFIRM_CODES, pickingErrorMessage } from "../picking-errors";
 import { PICK_MATCH, PICK_SESSION_STATUS, PICK_SOURCE } from "../types";
-import type { PickLineMutationResult, PickParticipant, PickProgressLine, PickSessionInfo, PickSheet, PickSheetLine } from "../types";
+import type { PickLineMutationResult, PickParticipant, PickProgressLine, PickScope, PickSessionInfo, PickSheet, PickSheetLine } from "../types";
+import { AllLinesSheet } from "../components/AllLinesSheet";
 import { CurrentLineCard } from "../components/CurrentLineCard";
 import { LineChooserSheet } from "../components/LineChooserSheet";
 import { ManualQtySheet } from "../components/ManualQtySheet";
 import { MinOrderQtySheet } from "../components/MinOrderQtySheet";
 import { PickCameraSheet } from "../components/PickCameraSheet";
 import { PickHeader, PickerChip } from "../components/PickHeader";
+import { PickScopeTabs } from "../components/PickScopeTabs";
+import { RouteSheet } from "../components/RouteSheet";
 import { ScanStatusBanner, type ScanBannerState } from "../components/ScanStatusBanner";
+import { StockoutSheet } from "../components/StockoutSheet";
 import { UpNextList } from "../components/UpNextList";
 import { PICK_COLORS } from "../components/pick-theme";
 import { PICKING_HOME, pickingRoute } from "./PickOrderListView";
@@ -56,6 +68,10 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
   const picker = usePickerStore((state) => state.picker);
   const clearPicker = usePickerStore((state) => state.clearPicker);
   const myGuid = picker?.userGuid ?? null;
+  const route = usePickPreferences((state) => state.route);
+  const scope = usePickPreferences((state) => state.scope);
+  const setRoute = usePickPreferences((state) => state.setRoute);
+  const setScope = usePickPreferences((state) => state.setScope);
 
   const [sheet, setSheet] = useState<PickSheet | null>(null);
   const [lines, setLines] = useState<PickSheetLine[]>([]);
@@ -71,6 +87,8 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
   const [chooser, setChooser] = useState<{ code: string; detailGuids: string[]; matchedBy: number | null; label: string | null } | null>(null);
   const [allLinesVisible, setAllLinesVisible] = useState(false);
   const [cameraVisible, setCameraVisible] = useState(false);
+  const [routeVisible, setRouteVisible] = useState(false);
+  const [stockoutGuid, setStockoutGuid] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingWrites, setPendingWrites] = useState(0);
   const [snackbar, setSnackbar] = useState("");
@@ -84,6 +102,7 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
 
   useEffect(() => {
     preloadScanFeedbackSounds();
+    void hydratePickPreferences();
   }, []);
 
   const handleAuthError = useCallback(
@@ -114,8 +133,11 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
         setLines(result.lines);
         setParticipants(result.participants);
         setSession(result.session);
-        const sorted = sortLinesByLocation(result.lines);
-        setCurrentGuid((current) => current ?? firstOpenLine(sorted)?.detailGuid ?? null);
+        // 默认落在当前范围、当前走位下第一条还要拣的行；范围里没有行时退回全部。
+        const preferences = usePickPreferences.getState();
+        const sorted = sortLinesByLocation(result.lines, preferences.route);
+        const scoped = sorted.filter((line) => lineInScope(line, preferences.scope));
+        setCurrentGuid((current) => current ?? firstOpenLine(scoped.length > 0 ? scoped : sorted)?.detailGuid ?? null);
       })
       .catch((error) => {
         const latest = latestRef.current;
@@ -240,7 +262,10 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
 
       const pieces = line.minOrderQuantity as number;
       playScanFeedbackSound("added");
-      if (scan.matchedBy === PICK_MATCH.setChild) {
+      if (isStockout(line)) {
+        // 标了没货的行又扫到货：照常计入，服务端同时取消没货标记。
+        setBanner({ kind: "success", title: t("picking.feedbackAdded", { pieces }), message: t("picking.stockoutAutoCleared") });
+      } else if (scan.matchedBy === PICK_MATCH.setChild) {
         setBanner({
           kind: "success",
           title: t("picking.feedbackAddedSet", { pieces }),
@@ -259,7 +284,9 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
   );
 
   const codeIndex = useMemo(() => buildPickCodeIndex(sheet?.codes ?? []), [sheet]);
-  const sortedLines = useMemo(() => sortLinesByLocation(lines), [lines]);
+  const sortedLines = useMemo(() => sortLinesByLocation(lines, route), [lines, route]);
+  const scopedLines = useMemo(() => sortedLines.filter((line) => lineInScope(line, scope)), [scope, sortedLines]);
+  const counts = useMemo(() => scopeCounts(lines), [lines]);
 
   const handleScan = useCallback(
     (raw: string) => {
@@ -296,7 +323,7 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
           const candidates = resolution.detailGuids
             .map((guid) => linesRef.current.find((line) => line.detailGuid === guid))
             .filter((line): line is PickSheetLine => Boolean(line));
-          const target = candidates.find((line) => ["notStarted", "partial"].includes(lineStatus(line))) ?? candidates[0];
+          const target = candidates.find(isOpenLine) ?? candidates[0];
           if (!target) return;
           playScanFeedbackSound("found");
           setCurrentGuid(target.detailGuid);
@@ -332,14 +359,70 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
     [codeIndex, currentGuid, language, readonly, router, scanLine, session?.submittedByName, sheet, t],
   );
 
-  const sheetsOpen = Boolean(minOrderSheet || manualGuid || chooser || allLinesVisible || cameraVisible);
+  const sheetsOpen = Boolean(minOrderSheet || manualGuid || chooser || allLinesVisible || cameraVisible || routeVisible || stockoutGuid);
   const hid = useHidBarcodeScanner({ enabled: focused && Boolean(sheet) && !sheetsOpen, onScan: handleScan });
 
   const currentLine = lines.find((line) => line.detailGuid === currentGuid) ?? null;
-  const summary = summarizeLines(lines);
+  // 进度、剩余行与“接下来”只算当前范围；扫到范围外的行照常计入并跳过去。
+  const summary = summarizeLines(scopedLines);
+  const openCount = scopedLines.filter(isOpenLine).length;
+  const stockoutPieces = scopedLines
+    .filter(isStockout)
+    .reduce((sum, line) => sum + (line.orderedQuantity - line.pickedTotal), 0);
   const teammates = activeTeammates(participants, myGuid, nowMs);
   const teammateMap = teammateByLine(participants, myGuid, nowMs);
-  const upNext = upNextLines(sortedLines, currentGuid, 3);
+  const upNext = upNextLines(scopedLines, currentGuid, 3);
+
+  const changeScope = (next: PickScope) => {
+    setScope(next);
+    const nextScoped = sortedLines.filter((line) => lineInScope(line, next));
+    if (currentLine && !lineInScope(currentLine, next)) {
+      const target = firstOpenLine(nextScoped);
+      if (target) {
+        setCurrentGuid(target.detailGuid);
+        setScannedChildCode(null);
+        setBanner({ kind: "ready" });
+      }
+    }
+  };
+
+  const clearStockout = async (detailGuid: string) => {
+    setSaving(true);
+    const result = await runWrite(() => deletePickStockout(orderGuid, detailGuid));
+    setSaving(false);
+    if (result) {
+      setCurrentGuid(detailGuid);
+      setBanner({ kind: "info", title: t("picking.stockoutCleared") });
+    }
+  };
+
+  const confirmStockout = async (reason: number) => {
+    const line = linesRef.current.find((item) => item.detailGuid === stockoutGuid);
+    if (!line) return;
+    // 标记后跳到本范围内按走位顺序的下一条待拣行（标记前算好，当前行本身会被排除）。
+    const next = upNextLines(scopedLines, line.detailGuid, 1)[0] ?? null;
+    setSaving(true);
+    const result = await runWrite(() => putPickStockout(orderGuid, line.detailGuid, reason));
+    setSaving(false);
+    // 弹层是原生 Modal，会压住报错提示条：失败也先关掉，让拣货员看到原因（如刚被同事拣齐）。
+    setStockoutGuid(null);
+    if (!result) return;
+    const short = Math.max(0, line.orderedQuantity - result.line.pickedTotal);
+    const location = primaryLocation(line.locationCode);
+    setBanner({
+      kind: "stockout",
+      title: hasLocation(line)
+        ? t("picking.stockoutMarked", { location, count: short })
+        : t("picking.stockoutMarkedNoLocation", { count: short }),
+      message: t("picking.stockoutMarkedHint"),
+      actionLabel: t("picking.stockoutUndo"),
+      onAction: () => void clearStockout(line.detailGuid),
+    });
+    if (next) {
+      setCurrentGuid(next.detailGuid);
+      setScannedChildCode(null);
+    }
+  };
 
   const changeButton = (source: number) => {
     if (!currentLine || !hasMinOrderQuantity(currentLine)) return;
@@ -444,6 +527,14 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
   }
 
   const progressRatio = summary.orderedPieces > 0 ? Math.min(1, summary.pickedPieces / summary.orderedPieces) : 0;
+  const stockoutRatio =
+    summary.orderedPieces > 0 ? Math.min(1 - progressRatio, stockoutPieces / summary.orderedPieces) : 0;
+  const progressText = t("picking.progress", {
+    lines: summary.completeLineCount,
+    totalLines: summary.lineCount,
+    pieces: summary.pickedPieces,
+    totalPieces: summary.orderedPieces,
+  });
   const chooserLines = chooser
     ? chooser.detailGuids
         .map((guid) => lines.find((line) => line.detailGuid === guid))
@@ -451,6 +542,7 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
     : [];
   const manualLine = manualGuid ? lines.find((line) => line.detailGuid === manualGuid) ?? null : null;
   const minOrderLine = minOrderSheet ? lines.find((line) => line.detailGuid === minOrderSheet.detailGuid) ?? null : null;
+  const stockoutLine = stockoutGuid ? lines.find((line) => line.detailGuid === stockoutGuid) ?? null : null;
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={styles.screen}>
@@ -477,22 +569,27 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
         }
       >
         <View style={styles.progressBlock}>
+          <PickScopeTabs value={scope} counts={counts} onChange={changeScope} />
           <View style={styles.progressRow}>
-            <Text style={styles.progressText}>
-              {t("picking.progress", {
-                lines: summary.completeLineCount,
-                totalLines: summary.lineCount,
-                pieces: summary.pickedPieces,
-                totalPieces: summary.orderedPieces,
-              })}
+            <Text numberOfLines={1} style={[styles.progressText, styles.progressMain]}>
+              {scope === "all"
+                ? progressText
+                : t("picking.scopeProgress", {
+                    scope: t(scope === "located" ? "picking.scopeLocated" : "picking.scopeUnlocated"),
+                    progress: progressText,
+                  })}
             </Text>
             <View style={styles.leftRow}>
               {pendingWrites > 0 ? <ActivityIndicator size={10} /> : null}
-              <Text style={styles.progressText}>{t("picking.left", { count: summary.lineCount - summary.completeLineCount })}</Text>
+              {summary.stockoutLineCount > 0 ? (
+                <Text style={[styles.progressText, styles.stockoutText]}>{t("picking.stockoutCount", { count: summary.stockoutLineCount })}</Text>
+              ) : null}
+              <Text style={styles.progressText}>{t("picking.left", { count: openCount })}</Text>
             </View>
           </View>
           <View style={styles.track}>
             <View style={[styles.fill, { width: `${Math.round(progressRatio * 100)}%` }]} />
+            {stockoutRatio > 0 ? <View style={[styles.fillStockout, { width: `${Math.max(1, Math.round(stockoutRatio * 100))}%` }]} /> : null}
           </View>
         </View>
       </PickHeader>
@@ -529,12 +626,18 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
             onMinus={() => changeButton(PICK_SOURCE.decrement)}
             onManual={() => setManualGuid(currentLine.detailGuid)}
             onSetMinOrder={() => setMinOrderSheet({ detailGuid: currentLine.detailGuid, pendingScan: null })}
+            onStockout={() => setStockoutGuid(currentLine.detailGuid)}
+            onClearStockout={() => void clearStockout(currentLine.detailGuid)}
           />
         ) : null}
 
         <UpNextList
+          current={currentLine}
           lines={upNext}
+          route={route}
+          scope={scope}
           teammateByLine={teammateMap}
+          onRoutePress={() => setRouteVisible(true)}
           onSelect={(detailGuid) => {
             setCurrentGuid(detailGuid);
             setScannedChildCode(null);
@@ -589,10 +692,25 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
           if (scan) scanLine(detailGuid, { code: scan.code, matchedBy: scan.matchedBy, label: scan.label });
         }}
       />
-      <LineChooserSheet
+      {stockoutLine ? (
+        <StockoutSheet
+          key={stockoutLine.detailGuid}
+          visible
+          line={stockoutLine}
+          saving={saving}
+          onDismiss={() => setStockoutGuid(null)}
+          onConfirm={(reason) => void confirmStockout(reason)}
+        />
+      ) : null}
+      <RouteSheet visible={routeVisible} value={route} onChange={setRoute} onDismiss={() => setRouteVisible(false)} />
+      <AllLinesSheet
         visible={allLinesVisible}
-        title={t("picking.allLines")}
-        lines={sortedLines}
+        lines={scopedLines}
+        scope={scope}
+        scopeCounts={counts}
+        route={route}
+        onScopeChange={changeScope}
+        onRoutePress={() => setRoute(route === "m" ? "s" : "m")}
         onDismiss={() => setAllLinesVisible(false)}
         onPick={(detailGuid) => {
           setAllLinesVisible(false);
@@ -633,12 +751,15 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: PICK_COLORS.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24, backgroundColor: PICK_COLORS.background },
   centerText: { textAlign: "center", color: PICK_COLORS.ink },
-  progressBlock: { paddingHorizontal: 12, paddingBottom: 10, gap: 6 },
+  progressBlock: { paddingHorizontal: 12, paddingBottom: 10, gap: 8 },
   progressRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   progressText: { fontSize: 12, lineHeight: 16, color: PICK_COLORS.textSecondary, fontVariant: ["tabular-nums"] },
-  leftRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  track: { height: 6, borderRadius: 3, backgroundColor: PICK_COLORS.outlineMuted, overflow: "hidden" },
-  fill: { height: 6, borderRadius: 3, backgroundColor: PICK_COLORS.action },
+  leftRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  track: { height: 6, borderRadius: 3, backgroundColor: PICK_COLORS.outlineMuted, overflow: "hidden", flexDirection: "row" },
+  fill: { height: 6, backgroundColor: PICK_COLORS.action },
+  fillStockout: { height: 6, backgroundColor: PICK_COLORS.danger },
+  progressMain: { flexShrink: 1 },
+  stockoutText: { color: PICK_COLORS.danger, fontWeight: "600" },
   content: { padding: 12, paddingBottom: 88, gap: 10 },
   footer: {
     position: "absolute",

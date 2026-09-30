@@ -54,7 +54,8 @@ public sealed class WarehousePickingServiceTests : IDisposable
             typeof(Store),
             typeof(WarehouseOrderPickSession),
             typeof(WarehouseOrderPickRecord),
-            typeof(WarehouseOrderPickParticipant)
+            typeof(WarehouseOrderPickParticipant),
+            typeof(WarehouseOrderPickStockout)
         );
     }
 
@@ -276,6 +277,93 @@ public sealed class WarehousePickingServiceTests : IDisposable
         Assert.Equal("Alex Chen", session.SubmittedByName);
         Assert.Equal(WarehousePickingErrorCodes.SessionSubmitted, afterSubmit.ErrorCode);
         Assert.Equal(WarehousePickingErrorCodes.SessionSubmitted, again.ErrorCode);
+    }
+
+    [Fact]
+    public async Task MarkStockout_保留已拣合计_记录原因与货位快照_拣货单与进度都带标记_撤销后消失()
+    {
+        await SeedStandardOrderAsync(flowStatus: 3);
+        var service = CreateService();
+        await service.JoinAsync(OrderGuid, Alex);
+        await service.AppendRecordAsync(OrderGuid, Scan("d-cup", "9312345678905"), Alex);
+
+        var marked = await service.MarkStockoutAsync(OrderGuid, "d-cup", WarehouseOrderPickStockoutReasons.LocationEmpty, Mia);
+
+        Assert.True(marked.Success, marked.Message);
+        Assert.Equal(12, marked.Data!.Line.PickedTotal);
+        Assert.Equal(0, marked.Data.AppliedDelta);
+        Assert.Equal(WarehouseOrderPickStockoutReasons.LocationEmpty, marked.Data.Line.Stockout!.Reason);
+        Assert.Equal("Mia Wong", marked.Data.Line.Stockout.MarkedByName);
+        Assert.Equal(12, marked.Data.Line.Stockout.PickedAtMark);
+        var row = await _db.Queryable<WarehouseOrderPickStockout>().SingleAsync();
+        Assert.Equal("A-03-12-02", row.LocationCode);
+        Assert.Equal("P-CUP", row.ProductCode);
+        // 标记不写拣货记录。
+        Assert.Equal(1, await _db.Queryable<WarehouseOrderPickRecord>().CountAsync());
+
+        var sheet = await service.GetSheetAsync(OrderGuid);
+        Assert.NotNull(sheet.Data!.Lines.Single(line => line.DetailGuid == "d-cup").Stockout);
+        Assert.Null(sheet.Data.Lines.Single(line => line.DetailGuid == "d-sponge").Stockout);
+        var progress = await service.GetProgressAsync(OrderGuid);
+        Assert.NotNull(progress.Data!.Lines.Single(line => line.DetailGuid == "d-cup").Stockout);
+
+        // 同一行再次标记覆盖原因，不新增行。
+        var remarked = await service.MarkStockoutAsync(OrderGuid, "d-cup", WarehouseOrderPickStockoutReasons.Damaged, Alex);
+        Assert.Equal(WarehouseOrderPickStockoutReasons.Damaged, remarked.Data!.Line.Stockout!.Reason);
+        Assert.Equal(1, await _db.Queryable<WarehouseOrderPickStockout>().CountAsync());
+
+        var cleared = await service.ClearStockoutAsync(OrderGuid, "d-cup", Alex);
+        var clearedAgain = await service.ClearStockoutAsync(OrderGuid, "d-cup", Alex);
+
+        Assert.True(cleared.Success, cleared.Message);
+        Assert.Null(cleared.Data!.Line.Stockout);
+        Assert.True(clearedAgain.Success, clearedAgain.Message);
+        var clearedRow = await _db.Queryable<WarehouseOrderPickStockout>().SingleAsync();
+        Assert.NotNull(clearedRow.ClearedAtUtc);
+        Assert.Equal("Alex Chen", clearedRow.ClearedByName);
+        Assert.Null((await service.GetProgressAsync(OrderGuid)).Data!.Lines.Single(line => line.DetailGuid == "d-cup").Stockout);
+    }
+
+    [Fact]
+    public async Task MarkStockout_已拣齐的行与无效原因都拒绝_已提交后不能再标()
+    {
+        await SeedStandardOrderAsync(flowStatus: 3);
+        var service = CreateService();
+        await service.JoinAsync(OrderGuid, Alex);
+        await service.SetLineTotalAsync(OrderGuid, "d-cup", SetTotal(36, 0), Alex);
+
+        var complete = await service.MarkStockoutAsync(OrderGuid, "d-cup", WarehouseOrderPickStockoutReasons.LocationEmpty, Alex);
+        var invalidReason = await service.MarkStockoutAsync(OrderGuid, "d-sponge", 9, Alex);
+        var missingLine = await service.MarkStockoutAsync(OrderGuid, "d-none", WarehouseOrderPickStockoutReasons.LocationEmpty, Alex);
+        await service.SubmitAsync(OrderGuid, Alex);
+        var afterSubmit = await service.MarkStockoutAsync(OrderGuid, "d-sponge", WarehouseOrderPickStockoutReasons.LocationEmpty, Alex);
+
+        Assert.Equal(WarehousePickingErrorCodes.LineAlreadyComplete, complete.ErrorCode);
+        Assert.Equal(36, complete.Data!.Line.PickedTotal);
+        Assert.Equal(WarehousePickingErrorCodes.InvalidRequest, invalidReason.ErrorCode);
+        Assert.Equal(WarehousePickingErrorCodes.LineNotFound, missingLine.ErrorCode);
+        Assert.Equal(WarehousePickingErrorCodes.SessionSubmitted, afterSubmit.ErrorCode);
+        Assert.Equal(0, await _db.Queryable<WarehouseOrderPickStockout>().CountAsync());
+    }
+
+    [Fact]
+    public async Task 又拣到货时没货标记自动失效_减少数量不影响标记()
+    {
+        await SeedStandardOrderAsync(flowStatus: 3);
+        var service = CreateService();
+        await service.JoinAsync(OrderGuid, Alex);
+        await service.SetLineTotalAsync(OrderGuid, "d-cup", SetTotal(24, 0), Alex);
+        await service.MarkStockoutAsync(OrderGuid, "d-cup", WarehouseOrderPickStockoutReasons.WrongProduct, Alex);
+
+        var decrement = await service.AppendRecordAsync(OrderGuid, Button("d-cup", WarehouseOrderPickSources.Decrement), Alex);
+        Assert.NotNull(decrement.Data!.Line.Stockout);
+
+        var scanned = await service.AppendRecordAsync(OrderGuid, Scan("d-cup", "9312345678905"), Mia);
+
+        Assert.True(scanned.Success, scanned.Message);
+        Assert.Null(scanned.Data!.Line.Stockout);
+        var row = await _db.Queryable<WarehouseOrderPickStockout>().SingleAsync();
+        Assert.Equal("Mia Wong", row.ClearedByName);
     }
 
     [Fact]

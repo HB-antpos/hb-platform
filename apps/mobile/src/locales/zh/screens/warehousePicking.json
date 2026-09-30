@@ -111,7 +111,34 @@
     "readonlyHint": "已提交的拣货不能再修改",
     "syncFailed": "同步失败，请检查网络后重试",
     "pickers": "拣货人：{{names}}",
-    "othersCount": "+{{count}}"
+    "othersCount": "+{{count}}",
+    "scopeLabel": "拣货范围",
+    "scopeAll": "全部",
+    "scopeLocated": "有货位",
+    "scopeUnlocated": "无货位",
+    "scopeProgress": "{{scope}} · {{progress}}",
+    "stockoutCount": "没货 {{count}}",
+    "routeM": "M型走位",
+    "routeS": "S型走位",
+    "routeSwitch": "走位方式：{{route}}，点按切换",
+    "turnM": "折返 · 转入 {{zone}}-{{row}} 排 · 列号从小到大",
+    "turnSAsc": "转入 {{zone}}-{{row}} 排 · 列号从小到大",
+    "turnSDesc": "转入 {{zone}}-{{row}} 排 · 列号从大到小",
+    "byItemNumber": "无货位 · 按货号顺序",
+    "scopeEmpty": "这个范围里没有明细",
+    "markStockout": "货位没货",
+    "markNotFound": "找不到货",
+    "clearStockout": "撤销没货",
+    "stockoutBadge": "没货",
+    "stockoutMarked": "已标记 {{location}} 没货 · 缺 {{count}} 件",
+    "stockoutMarkedNoLocation": "已标记找不到货 · 缺 {{count}} 件",
+    "stockoutMarkedHint": "找到货直接扫码即可计入",
+    "stockoutUndo": "撤销",
+    "stockoutCleared": "已撤销没货标记",
+    "stockoutAutoCleared": "又拣到货，没货标记已自动取消",
+    "noteStockout": "没货 · {{reason}} · {{name}}",
+    "hintStockout": "已标记没货，缺 {{count}} 件 · 找到货扫码即可计入",
+    "noLocationSearch": "未绑定货位 · 按商品找"
   },
   "minOrder": {
     "title": "设置中包数",
@@ -173,13 +200,53 @@
     "confirmTitle": "还有同事在拣",
     "confirmBody": "{{names}} 仍在拣货，提交后他们无法继续修改。确定提交吗？",
     "confirmSubmit": "提交",
-    "submitted": "已提交配货数"
+    "submitted": "已提交配货数",
+    "stockout": "没货",
+    "stockoutGroup": "货位没货 · 缺 {{count}} 件",
+    "shortGroup": "少拣 · 缺 {{count}} 件",
+    "overGroup": "超拣 · 多 {{count}} 件",
+    "stockoutMeta": "{{reason}} · {{name}}"
   },
   "time": {
     "justNow": "刚刚",
     "minutesAgo": "{{count}} 分钟前",
     "today": "今天 {{time}}",
     "yesterday": "昨天 {{time}}"
+  },
+  "stockout": {
+    "title": "货位没货",
+    "titleNoLocation": "找不到货",
+    "ordered": "订货",
+    "picked": "已拣",
+    "short": "记为缺货",
+    "reasonLabel": "货位上的情况",
+    "reasonLabelNoLocation": "现场情况",
+    "reasonLocationEmpty": "货位空了，一件都没有",
+    "reasonNotFound": "仓库里找不到",
+    "reasonWrongProduct": "放的不是这个商品",
+    "reasonDamaged": "有货，但破损不能发",
+    "shortLocationEmpty": "货位空了",
+    "shortNotFound": "找不到",
+    "shortWrongProduct": "放错商品",
+    "shortDamaged": "破损",
+    "hint": "找到货直接扫码就能计入，没货标记会自动取消。",
+    "confirm": "标记没货 · 下一个"
+  },
+  "route": {
+    "title": "走位方式",
+    "subtitle": "决定“接下来”和全部明细的货位顺序 · 只改本机",
+    "defaultTag": "默认",
+    "mDesc": "每排都从通道口进，走到本排最远一个要拣的货位再折返；列号一律从小到大",
+    "sDesc": "蛇形穿过每一排：单数排列号从小到大，双数排从大到小，从另一头出",
+    "note": "货位编码按「区-排-列-层」解析，如 A-03-12-02 = A 区 03 排 12 列 2 层。编码不规范的货位排在后面，未绑定货位的行始终在最后。",
+    "done": "完成"
+  },
+  "allLines": {
+    "groupOpen": "待拣",
+    "groupStockout": "货位没货",
+    "groupDone": "已拣齐",
+    "showDone": "展开已拣齐的 {{count}} 行",
+    "hideDone": "收起已拣齐"
   },
   "errors": {
     "PICKER_REQUIRED": "请先扫描员工码确认拣货人",
@@ -200,6 +267,7 @@
     "PICKED_TOTAL_CHANGED": "这一行刚被同事更新，已刷新为最新数量",
     "CODE_NOT_FOUND": "找不到该条码对应的商品",
     "INVALID_REQUEST": "请求无效",
+    "LINE_ALREADY_COMPLETE": "这一行已经拣齐，不需要标记没货",
     "generic": "操作失败，请重试"
   }
 }

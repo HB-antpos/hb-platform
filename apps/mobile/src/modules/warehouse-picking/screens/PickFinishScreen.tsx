@@ -7,12 +7,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { fetchPickSheet, submitPickOrder } from "../api";
 import { readPickingError } from "../api-normalization";
-import { lineStatus, sortLinesByLocation, summarizeLines, summarizePickers } from "../pick-math";
-import { activeTeammates, relativeMinutes, shortPickerName } from "../pick-view-model";
+import { hasLocation, isStockout, lineStatus, sortLinesByLocation, summarizeLines, summarizePickers } from "../pick-math";
+import { usePickPreferences } from "../pick-preferences";
+import { activeTeammates, relativeMinutes, shortPickerName, stockoutReasonKey } from "../pick-view-model";
 import { usePickerStore } from "../picker-store";
 import { PICKER_RECONFIRM_CODES, pickingErrorMessage } from "../picking-errors";
 import { PICK_SESSION_STATUS } from "../types";
-import type { PickSheet } from "../types";
+import type { PickSheet, PickSheetLine } from "../types";
 import { Avatar, PickHeader } from "../components/PickHeader";
 import { ProductThumb } from "../components/ProductThumb";
 import { MONO_FONT, PICK_COLORS } from "../components/pick-theme";
@@ -31,6 +32,7 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
   const queryClient = useQueryClient();
   const picker = usePickerStore((state) => state.picker);
   const clearPicker = usePickerStore((state) => state.clearPicker);
+  const route = usePickPreferences((state) => state.route);
   const [sheet, setSheet] = useState<PickSheet | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -76,7 +78,12 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
   }
 
   const summary = summarizeLines(sheet.lines);
-  const variances = sortLinesByLocation(sheet.lines).filter((line) => lineStatus(line) !== "complete");
+  // 差异分三组：货位没货（有原因与标记人）、少拣（没说明原因）、超拣；组内按走位顺序。
+  const variances = sortLinesByLocation(sheet.lines, route).filter((line) => lineStatus(line) !== "complete");
+  const stockoutLines = variances.filter(isStockout);
+  const shortLines = variances.filter((line) => lineStatus(line) !== "over" && !isStockout(line));
+  const overLines = variances.filter((line) => lineStatus(line) === "over");
+  const shortPieces = (items: PickSheetLine[]) => items.reduce((sum, line) => sum + (line.orderedQuantity - line.pickedTotal), 0);
   const pickers = summarizePickers(sheet.lines);
   const stillPicking = activeTeammates(sheet.participants, picker?.userGuid ?? null, nowMs, STILL_PICKING_MS);
   const submitted = sheet.session.status === PICK_SESSION_STATUS.submitted;
@@ -140,7 +147,10 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
           </View>
           <View style={styles.grid}>
             <Metric label={t("finish.pieces")} value={`${summary.pickedPieces}/${summary.orderedPieces}`} />
-            <Metric label={t("finish.short")} value={t("finish.lineCount", { count: summary.shortLineCount })} tone="danger" />
+            <Metric label={t("finish.short")} value={t("finish.lineCount", { count: summary.shortLineCount - summary.stockoutLineCount })} tone="danger" />
+            {summary.stockoutLineCount > 0 ? (
+              <Metric label={t("finish.stockout")} value={t("finish.lineCount", { count: summary.stockoutLineCount })} tone="danger" />
+            ) : null}
             <Metric label={t("finish.over")} value={t("finish.lineCount", { count: summary.overLineCount })} tone="warning" />
           </View>
           {pickers.length > 0 ? (
@@ -157,27 +167,32 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
           <Text style={styles.sectionHint}>{t("finish.variancesHint")}</Text>
         </View>
         {variances.length === 0 ? <Text style={styles.sectionHint}>{t("finish.noVariances")}</Text> : null}
-        {variances.map((line) => {
-          const diff = line.pickedTotal - line.orderedQuantity;
-          const over = diff > 0;
-          return (
-            <Pressable key={line.detailGuid} accessibilityRole="button" onPress={() => backToPicking(line.detailGuid)} style={styles.row}>
-              <ProductThumb uri={line.productImage} size={44} />
-              <View style={styles.rowText}>
-                <View style={styles.rowTitle}>
-                  <Text style={styles.rowLocation}>{line.locationCode || "—"}</Text>
-                  <Text numberOfLines={1} style={styles.rowName}>
-                    {line.productName || line.productCode}
-                  </Text>
-                </View>
-                <Text style={styles.rowMeta}>{t("finish.orderedPicked", { ordered: line.orderedQuantity, picked: line.pickedTotal })}</Text>
-              </View>
-              <Text style={[styles.badge, over ? styles.badgeOver : styles.badgeShort]}>
-                {over ? t("finish.badgeOver", { count: diff }) : t("finish.badgeShort", { count: -diff })}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {stockoutLines.length > 0 ? (
+          <Text style={[styles.groupTitle, { color: PICK_COLORS.danger }]}>{t("finish.stockoutGroup", { count: shortPieces(stockoutLines) })}</Text>
+        ) : null}
+        {stockoutLines.map((line) => (
+          <VarianceRow
+            key={line.detailGuid}
+            line={line}
+            meta={t("finish.stockoutMeta", {
+              reason: t(stockoutReasonKey(line.stockout!.reason, hasLocation(line), true)),
+              name: line.stockout!.markedByName,
+            })}
+            onPress={() => backToPicking(line.detailGuid)}
+          />
+        ))}
+        {shortLines.length > 0 ? (
+          <Text style={[styles.groupTitle, { color: PICK_COLORS.warning }]}>{t("finish.shortGroup", { count: shortPieces(shortLines) })}</Text>
+        ) : null}
+        {shortLines.map((line) => (
+          <VarianceRow key={line.detailGuid} line={line} onPress={() => backToPicking(line.detailGuid)} />
+        ))}
+        {overLines.length > 0 ? (
+          <Text style={styles.groupTitle}>{t("finish.overGroup", { count: -shortPieces(overLines) })}</Text>
+        ) : null}
+        {overLines.map((line) => (
+          <VarianceRow key={line.detailGuid} line={line} onPress={() => backToPicking(line.detailGuid)} />
+        ))}
         <Text style={styles.note}>{t("finish.note")}</Text>
       </ScrollView>
 
@@ -213,6 +228,36 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
         {snackbar}
       </Snackbar>
     </SafeAreaView>
+  );
+}
+
+/** 差异行：货位、商品、订/拣数量与差额；meta 用于没货原因与标记人。 */
+function VarianceRow({ line, meta, onPress }: { line: PickSheetLine; meta?: string; onPress: () => void }) {
+  const { t } = useAppTranslation("warehousePicking");
+  const diff = line.pickedTotal - line.orderedQuantity;
+  const over = diff > 0;
+  const stockout = isStockout(line);
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.row, stockout ? styles.rowStockout : null]}>
+      <ProductThumb uri={line.productImage} size={44} />
+      <View style={styles.rowText}>
+        <View style={styles.rowTitle}>
+          <Text style={styles.rowLocation}>{line.locationCode || "—"}</Text>
+          <Text numberOfLines={1} style={styles.rowName}>
+            {line.productName || line.productCode}
+          </Text>
+        </View>
+        <Text style={styles.rowMeta}>{t("finish.orderedPicked", { ordered: line.orderedQuantity, picked: line.pickedTotal })}</Text>
+        {meta ? (
+          <Text numberOfLines={1} style={[styles.rowMeta, { color: PICK_COLORS.danger }]}>
+            {meta}
+          </Text>
+        ) : null}
+      </View>
+      <Text style={[styles.badge, over ? styles.badgeOver : styles.badgeShort]}>
+        {over ? t("finish.badgeOver", { count: diff }) : t("finish.badgeShort", { count: -diff })}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -252,6 +297,8 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
   sectionTitle: { fontSize: 14, lineHeight: 20, fontWeight: "700", color: PICK_COLORS.ink },
   sectionHint: { fontSize: 12, lineHeight: 16, color: PICK_COLORS.textSecondary },
+  groupTitle: { marginTop: 4, fontSize: 13, lineHeight: 18, fontWeight: "700", color: PICK_COLORS.ink },
+  rowStockout: { borderColor: PICK_COLORS.dangerBorder, backgroundColor: "#FFFBFA" },
   row: { minHeight: 60, flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 8, paddingRight: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: PICK_COLORS.outlineMuted, backgroundColor: PICK_COLORS.white },
   rowText: { flex: 1, minWidth: 0, gap: 2 },
   rowTitle: { flexDirection: "row", alignItems: "baseline", gap: 8 },

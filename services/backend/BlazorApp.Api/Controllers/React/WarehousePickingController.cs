@@ -106,6 +106,22 @@ public sealed class WarehousePickingController(
         RunWithPickerAsync(nameof(SetLineTotal), recheckEligibility: false, picker =>
             pickingService.SetLineTotalAsync(orderGuid.Trim(), detailGuid, request ?? new WarehousePickingSetTotalRequestDto(), picker));
 
+    /// <summary>标记“货位没货”：已拣的保留，剩余记为拣不到；之后又拣到货会自动失效。</summary>
+    [HttpPut("orders/{orderGuid}/lines/{detailGuid}/stockout")]
+    public Task<IActionResult> MarkStockout(
+        string orderGuid,
+        string detailGuid,
+        [FromBody] WarehousePickingStockoutRequestDto request
+    ) =>
+        RunWithPickerAsync(nameof(MarkStockout), recheckEligibility: false, picker =>
+            pickingService.MarkStockoutAsync(orderGuid.Trim(), detailGuid, request?.Reason ?? 0, picker));
+
+    /// <summary>撤销“货位没货”标记（幂等）。</summary>
+    [HttpDelete("orders/{orderGuid}/lines/{detailGuid}/stockout")]
+    public Task<IActionResult> ClearStockout(string orderGuid, string detailGuid) =>
+        RunWithPickerAsync(nameof(ClearStockout), recheckEligibility: false, picker =>
+            pickingService.ClearStockoutAsync(orderGuid.Trim(), detailGuid, picker));
+
     [HttpPut("orders/{orderGuid}/lines/{detailGuid}/min-order-quantity")]
     public Task<IActionResult> SetMinOrderQuantity(
         string orderGuid,

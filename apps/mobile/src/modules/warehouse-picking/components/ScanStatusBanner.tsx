@@ -9,6 +9,7 @@ export type ScanBannerState =
   | { kind: "success"; title: string; message?: string | null }
   | { kind: "info"; title: string; message?: string | null; actionLabel?: string; onAction?: () => void }
   | { kind: "warning"; title: string; message?: string | null }
+  | { kind: "stockout"; title: string; message?: string | null; actionLabel?: string; onAction?: () => void }
   | {
       kind: "error";
       title: string;
@@ -18,7 +19,7 @@ export type ScanBannerState =
     };
 
 /**
- * 扫码后的即时反馈条：就绪（蓝）、计入成功（绿）、需要处理（橙）、不在本单（红）。
+ * 扫码后的即时反馈条：就绪（蓝）、计入成功（绿）、需要处理（橙）、不在本单（红）、刚标了货位没货（红，可撤销）。
  * 不弹窗打断连续扫码，下一次扫码时被新结果替换。
  */
 export function ScanStatusBanner({
@@ -80,6 +81,7 @@ export function ScanStatusBanner({
     success: { bg: PICK_COLORS.successBg, border: PICK_COLORS.successBorder, text: PICK_COLORS.successText, badge: PICK_COLORS.success, icon: "check" as const },
     warning: { bg: PICK_COLORS.warningBg, border: PICK_COLORS.warningBorder, text: PICK_COLORS.warningText, badge: PICK_COLORS.warning, icon: "alert-outline" as const },
     info: { bg: PICK_COLORS.infoBg, border: PICK_COLORS.infoBorder, text: PICK_COLORS.infoText, badge: PICK_COLORS.action, icon: "information-variant" as const },
+    stockout: { bg: PICK_COLORS.dangerBg, border: PICK_COLORS.dangerBorder, text: PICK_COLORS.dangerText, badge: PICK_COLORS.danger, icon: "package-variant-remove" as const },
   }[state.kind];
 
   return (
@@ -97,9 +99,13 @@ export function ScanStatusBanner({
           {state.message ? <Text style={[styles.message, { color: palette.text }]}>{state.message}</Text> : null}
         </View>
       </View>
-      {state.kind === "info" && state.actionLabel && state.onAction ? (
-        <Pressable accessibilityRole="button" onPress={state.onAction} style={styles.action}>
-          <Text style={styles.actionText}>{state.actionLabel}</Text>
+      {(state.kind === "info" || state.kind === "stockout") && state.actionLabel && state.onAction ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={state.onAction}
+          style={[styles.action, state.kind === "stockout" ? { borderColor: PICK_COLORS.dangerBorder } : null]}
+        >
+          <Text style={[styles.actionText, state.kind === "stockout" ? { color: PICK_COLORS.danger } : null]}>{state.actionLabel}</Text>
         </Pressable>
       ) : null}
     </View>

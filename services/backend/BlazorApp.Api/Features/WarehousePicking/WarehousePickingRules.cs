@@ -20,6 +20,7 @@ public static class WarehousePickingErrorCodes
     public const string MinOrderQuantityInvalid = "MIN_ORDER_QUANTITY_INVALID";
     public const string PickedBelowZero = "PICKED_BELOW_ZERO";
     public const string PickedTotalChanged = "PICKED_TOTAL_CHANGED";
+    public const string LineAlreadyComplete = "LINE_ALREADY_COMPLETE";
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string CodeNotFound = "CODE_NOT_FOUND";
 }
