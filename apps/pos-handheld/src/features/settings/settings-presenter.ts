@@ -497,6 +497,7 @@ export type SettingsStatusCode =
   | "printer-cleared"
   | "printer-cleared-disconnect-failed"
   | "printer-bluetooth-authorization-pending"
+  | "printer-bluetooth-location-off"
   | "printer-bluetooth-permission-required"
   | "printer-bluetooth-powered-off"
   | "printer-bluetooth-restricted"
@@ -3719,6 +3720,8 @@ function printerScanFailureStatus(error: unknown): SettingsStatusCode {
   const bluetoothStatusByCode: Readonly<Record<string, SettingsStatusCode>> = {
     PRINTER_BLUETOOTH_AUTHORIZATION_PENDING:
       "printer-bluetooth-authorization-pending",
+    // Android 10/11 定位总开关关闭时 BLE 扫描会静默无结果，原生层提前拦截。
+    PRINTER_BLUETOOTH_LOCATION_OFF: "printer-bluetooth-location-off",
     PRINTER_BLUETOOTH_PERMISSION_REQUIRED:
       "printer-bluetooth-permission-required",
     PRINTER_BLUETOOTH_POWERED_OFF: "printer-bluetooth-powered-off",

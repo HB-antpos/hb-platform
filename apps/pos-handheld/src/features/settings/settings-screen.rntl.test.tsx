@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { act, fireEvent, render, waitFor, within } from "@testing-library/react-native";
-import { Linking, StyleSheet } from "react-native";
+import { Linking, Platform, StyleSheet } from "react-native";
 
 import { derivePendingWorkBlockers } from "@hb/pos-domain";
 import type { SettingsSquareLocation } from "@hb/pos-domain/features/settings/settings-square-setup";
@@ -1496,6 +1496,78 @@ describe("SettingsScreen", () => {
       screen.getByTestId("settings-printer-open-system-settings"),
     );
     expect(openSettings).toHaveBeenCalledTimes(1);
+  });
+
+  describe("Android 蓝牙扫描引导按系统版本区分", () => {
+    const originalOs = Platform.OS;
+    const originalVersion = Platform.Version;
+    const setAndroidVersion = (version: number) => {
+      Object.defineProperty(Platform, "OS", { configurable: true, value: "android" });
+      Object.defineProperty(Platform, "Version", { configurable: true, value: version });
+    };
+
+    afterEach(() => {
+      Object.defineProperty(Platform, "OS", { configurable: true, value: originalOs });
+      Object.defineProperty(Platform, "Version", {
+        configurable: true,
+        value: originalVersion,
+      });
+    });
+
+    const renderScanFailure = async (code: string) => {
+      const port = new ScreenSettingsPort();
+      port.printerScanError = Object.assign(new Error(code), { code });
+      const presenter = createPresenter(port);
+      await presenter.load();
+      const screen = await render(
+        <SettingsScreen locale="zh" presenter={presenter} />,
+      );
+      await screen.findByTestId("settings-pane-content-general");
+      await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+      await fireEvent.press(screen.getByTestId("settings-printer-scan"));
+      return screen;
+    };
+
+    it("Android 10 缺权限时指向“位置信息”，不再提示不存在的蓝牙权限项", async () => {
+      setAndroidVersion(29);
+      const screen = await renderScanFailure("PRINTER_BLUETOOTH_PERMISSION_REQUIRED");
+
+      await screen.findByText(/\[printer-bluetooth-permission-required\]/);
+      expect(screen.getByText(/权限 → 位置信息/)).toBeTruthy();
+      expect(
+        screen.queryByText("请在设备系统设置中允许 HB POS 使用蓝牙，然后返回应用重新扫描。"),
+      ).toBeNull();
+      expect(screen.getByTestId("settings-printer-open-system-settings")).toBeTruthy();
+    });
+
+    it("Android 12+ 缺权限时指向“附近的设备”", async () => {
+      setAndroidVersion(33);
+      const screen = await renderScanFailure("PRINTER_BLUETOOTH_PERMISSION_REQUIRED");
+
+      await screen.findByText(/\[printer-bluetooth-permission-required\]/);
+      expect(screen.getByText(/允许“附近的设备”/)).toBeTruthy();
+      expect(screen.queryByText(/位置信息/)).toBeNull();
+    });
+
+    it("定位服务关闭时提示打开定位，并可直达定位设置页", async () => {
+      setAndroidVersion(29);
+      const sendIntent = jest
+        .spyOn(Linking, "sendIntent")
+        .mockResolvedValue(undefined);
+      const screen = await renderScanFailure("PRINTER_BLUETOOTH_LOCATION_OFF");
+
+      await screen.findByText(/\[printer-bluetooth-location-off\]/);
+      expect(screen.getByText(/打开“位置信息”开关/)).toBeTruthy();
+      expect(screen.queryByTestId("settings-printer-open-system-settings")).toBeNull();
+      expect(screen.queryByText(/未发现附近的蓝牙设备/)).toBeNull();
+
+      await fireEvent.press(
+        screen.getByTestId("settings-printer-open-location-settings"),
+      );
+      expect(sendIntent).toHaveBeenCalledWith(
+        "android.settings.LOCATION_SOURCE_SETTINGS",
+      );
+    });
   });
 
   it("蓝牙关闭时提示开启蓝牙且不会误导用户修改应用权限", async () => {
