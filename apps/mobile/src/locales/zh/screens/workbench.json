@@ -23,7 +23,8 @@
     "caption": "按当前权限显示"
   },
   "groups": {
-    "salesProduct": "销售与商品",
+    "productPurchasing": "商品进货",
+    "productSales": "商品销售",
     "warehousePurchase": "仓库与采购",
     "operationsReports": "运营与报表",
     "peopleManagement": "人员与管理"

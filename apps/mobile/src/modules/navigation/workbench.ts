@@ -6,7 +6,8 @@ export interface WorkbenchNavigationItem {
 
 export interface WorkbenchNavigationSection {
   key:
-    | "sales-product"
+    | "product-purchasing"
+    | "product-sales"
     | "warehouse-purchase"
     | "operations-reports"
     | "people-management";
@@ -15,20 +16,27 @@ export interface WorkbenchNavigationSection {
 }
 
 const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
+  // 原「销售与商品」13 项过长，按业务流拆成进货与销售两组：先进货后销售。
   {
-    key: "sales-product",
-    titleKey: "groups.salesProduct",
+    key: "product-purchasing",
+    titleKey: "groups.productPurchasing",
+    items: [
+      { routeName: "container-new-products", labelKey: "routes.containerNewProducts", icon: "package-variant-closed" },
+      { routeName: "home", labelKey: "routes.storeOrdering", icon: "storefront-outline" },
+      { routeName: "cart", labelKey: "routes.cart", icon: "cart-outline" },
+      { routeName: "orders", labelKey: "routes.orders", icon: "clipboard-list-outline" },
+      { routeName: "local-supplier-invoices", labelKey: "routes.localSupplierInvoices", icon: "receipt-text-outline" },
+    ],
+  },
+  {
+    key: "product-sales",
+    titleKey: "groups.productSales",
     items: [
       { routeName: "product-query", labelKey: "routes.productQuery", icon: "barcode-scan" },
       { routeName: "product-insights", labelKey: "routes.productInsights", icon: "chart-timeline-variant" },
       { routeName: "seasonal-product-insights", labelKey: "routes.seasonalProductInsights", icon: "calendar-star" },
-      { routeName: "container-new-products", labelKey: "routes.containerNewProducts", icon: "package-variant-closed" },
       { routeName: "price-updates", labelKey: "routes.priceUpdates", icon: "tag-arrow-up-outline" },
-      { routeName: "home", labelKey: "routes.storeOrdering", icon: "storefront-outline" },
-      { routeName: "cart", labelKey: "routes.cart", icon: "cart-outline" },
-      { routeName: "orders", labelKey: "routes.orders", icon: "clipboard-list-outline" },
       { routeName: "sales-orders", labelKey: "routes.salesOrders", icon: "receipt-text-outline" },
-      { routeName: "local-supplier-invoices", labelKey: "routes.localSupplierInvoices", icon: "receipt-text-outline" },
       { routeName: "installment-orders", labelKey: "routes.installmentOrders", icon: "cash-clock" },
       { routeName: "store-vouchers", labelKey: "routes.storeVouchers", icon: "ticket-confirmation-outline" },
       { routeName: "seasonal-cards", labelKey: "routes.seasonalCards", icon: "cards-outline" },

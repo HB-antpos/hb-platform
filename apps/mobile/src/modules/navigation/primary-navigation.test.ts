@@ -364,12 +364,12 @@ assert.deepEqual(
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
   [
-    { key: "sales-product", itemRouteNames: ["orders"] },
+    { key: "product-purchasing", itemRouteNames: ["orders"] },
     { key: "warehouse-purchase", itemRouteNames: ["warehouse"] },
     { key: "operations-reports", itemRouteNames: ["reports"] },
     { key: "people-management", itemRouteNames: ["users", "user-admin", "roles"] },
   ],
-  "工作台仅按显式可见路由显示四类业务入口"
+  "工作台仅按显式可见路由显示各类业务入口"
 );
 
 const salesAndSupplierInvoiceSections = buildWorkbenchSections([
@@ -384,20 +384,20 @@ assert.deepEqual(
   })),
   [
     {
-      key: "sales-product",
+      key: "product-purchasing",
       itemRouteNames: ["orders", "local-supplier-invoices"],
     },
     { key: "warehouse-purchase", itemRouteNames: ["warehouse"] },
   ],
-  "供应商发票必须归入销售与商品并紧跟 HB订单，仓库与采购不得再包含该入口"
+  "供应商发票必须归入商品进货并紧跟 HB订单，仓库与采购不得再包含该入口"
 );
 assert.deepEqual(
   buildWorkbenchSections(["container-new-products"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
-  [{ key: "sales-product", itemRouteNames: ["container-new-products"] }],
-  "HB新品必须在工作台销售与商品分区显示"
+  [{ key: "product-purchasing", itemRouteNames: ["container-new-products"] }],
+  "HB新品必须在工作台商品进货分区显示"
 );
 assert.deepEqual(
   buildWorkbenchSections(["app-install", "app-downloads"]).map((section) => ({
@@ -412,16 +412,19 @@ assert.deepEqual(
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
-  [{ key: "sales-product", itemRouteNames: ["product-query", "product-insights"] }],
-  "商品查询与商品进销查询必须同属销售与商品，并且只依赖后端显式菜单"
+  [{ key: "product-sales", itemRouteNames: ["product-query", "product-insights"] }],
+  "商品查询与商品进销查询必须同属商品销售，并且只依赖后端显式菜单"
 );
 assert.deepEqual(
   buildWorkbenchSections(["orders", "sales-orders"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
-  [{ key: "sales-product", itemRouteNames: ["orders", "sales-orders"] }],
-  "销售订单查询必须归入销售与商品并紧跟 HB订单，同样只依赖后端显式菜单"
+  [
+    { key: "product-purchasing", itemRouteNames: ["orders"] },
+    { key: "product-sales", itemRouteNames: ["sales-orders"] },
+  ],
+  "HB订单归入商品进货、销售订单归入商品销售，同样只依赖后端显式菜单"
 );
 assert.equal(
   buildWorkbenchSections(["orders"]).some((section) =>
@@ -497,11 +500,51 @@ assert.deepEqual(
   })),
   [
     {
-      key: "sales-product",
+      key: "product-purchasing",
       itemRouteNames: ["local-supplier-invoices"],
     },
   ],
-  "只有供应商发票权限时必须只生成销售与商品分组"
+  "只有供应商发票权限时必须只生成商品进货分组"
+);
+assert.deepEqual(
+  buildWorkbenchSections([
+    "product-query",
+    "product-insights",
+    "seasonal-product-insights",
+    "container-new-products",
+    "price-updates",
+    "home",
+    "cart",
+    "orders",
+    "sales-orders",
+    "local-supplier-invoices",
+    "installment-orders",
+    "store-vouchers",
+    "seasonal-cards",
+  ]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "product-purchasing",
+      itemRouteNames: ["container-new-products", "home", "cart", "orders", "local-supplier-invoices"],
+    },
+    {
+      key: "product-sales",
+      itemRouteNames: [
+        "product-query",
+        "product-insights",
+        "seasonal-product-insights",
+        "price-updates",
+        "sales-orders",
+        "installment-orders",
+        "store-vouchers",
+        "seasonal-cards",
+      ],
+    },
+  ],
+  "原销售与商品分组拆为商品进货在前、商品销售在后，入口不得遗漏或重复"
 );
 
 const visibleSectionRoutes = sparseSections.flatMap((section) =>

@@ -23,7 +23,8 @@
     "caption": "Based on your current access"
   },
   "groups": {
-    "salesProduct": "Sales & products",
+    "productPurchasing": "Product purchasing",
+    "productSales": "Product sales",
     "warehousePurchase": "Warehouse & purchasing",
     "operationsReports": "Operations & reports",
     "peopleManagement": "People & management"
