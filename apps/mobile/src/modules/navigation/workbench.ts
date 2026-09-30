@@ -128,3 +128,36 @@ export function toggleAllWorkbenchSections(
     ? new Set()
     : new Set(sections.map((section) => section.key));
 }
+
+/** 工作台角标默认封顶值：超过显示「N+」。 */
+export const WORKBENCH_BADGE_DEFAULT_MAX = 99;
+
+export function formatWorkbenchBadgeCount(
+  count: number,
+  maxCount: number = WORKBENCH_BADGE_DEFAULT_MAX
+): string {
+  return count > maxCount ? `${maxCount}+` : String(count);
+}
+
+// 折叠分组的汇总角标：累加组内各入口角标；封顶值取组内最大（含 HB新品 999 时按 999 封顶），
+// 避免数百款新品被压成「99+」而和展开时的数字不一致。
+export function summarizeWorkbenchSectionBadge(
+  section: Pick<WorkbenchNavigationSection, "items">,
+  countByRouteName: Readonly<Record<string, number>>,
+  maxCountByRouteName: Readonly<Record<string, number>>
+): { count: number; maxCount: number } {
+  let count = 0;
+  let maxCount = WORKBENCH_BADGE_DEFAULT_MAX;
+  for (const item of section.items) {
+    const itemCount = countByRouteName[item.routeName] ?? 0;
+    if (itemCount <= 0) {
+      continue;
+    }
+    count += itemCount;
+    maxCount = Math.max(
+      maxCount,
+      maxCountByRouteName[item.routeName] ?? WORKBENCH_BADGE_DEFAULT_MAX
+    );
+  }
+  return { count, maxCount };
+}

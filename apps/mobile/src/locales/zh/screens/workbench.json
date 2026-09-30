@@ -87,6 +87,7 @@
   "accessibility": {
     "openFunction": "打开{{title}}",
     "toggleSectionHint": "点按展开或折叠该分组",
+    "sectionBadge": "{{label}}，{{badge}} 项提醒",
     "functionCount": "{{title}}，{{count}}项可用功能",
     "currentStore": "当前门店，{{store}}",
     "changeStore": "当前门店，{{store}}，切换分店",

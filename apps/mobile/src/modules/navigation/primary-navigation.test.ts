@@ -11,6 +11,8 @@ import {
 import {
   areAllWorkbenchSectionsCollapsed,
   buildWorkbenchSections,
+  formatWorkbenchBadgeCount,
+  summarizeWorkbenchSectionBadge,
   toggleAllWorkbenchSections,
   toggleWorkbenchSectionCollapsed,
 } from "./workbench";
@@ -654,4 +656,52 @@ assert.equal(
     /\{expanded \? section\.items\.map/,
     "折叠的分组不得渲染其功能入口"
   );
+  assert.match(
+    workbenchScreenSource,
+    /const collapsedBadge = expanded\s*\?\s*null\s*:\s*summarizeWorkbenchSectionBadge\(/,
+    "分组展开时标题不得重复显示汇总角标，折叠后才汇总"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /\{collapsedBadgeText \? \(\s*<View style=\{styles\.countBadge\}>/,
+    "折叠分组标题必须用与入口相同的角标样式显示汇总数"
+  );
+}
+
+// 折叠分组汇总角标：累加组内入口角标，封顶值取组内最大。
+{
+  const [purchasing, sales] = buildWorkbenchSections([
+    "container-new-products",
+    "orders",
+    "product-query",
+    "price-updates",
+  ]);
+  const counts = { "container-new-products": 134, "price-updates": 3, orders: 0 };
+  const maxCounts = { "container-new-products": 999 };
+
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(purchasing, counts, maxCounts),
+    { count: 134, maxCount: 999 },
+    "含 HB新品的分组按 999 封顶，与展开时入口角标一致"
+  );
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(sales, counts, maxCounts),
+    { count: 3, maxCount: 99 },
+    "价格更新待办汇总到商品销售分组"
+  );
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(sales, {}, maxCounts),
+    { count: 0, maxCount: 99 },
+    "组内无角标时汇总为 0，不显示角标"
+  );
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(purchasing, { "container-new-products": 0, orders: 5 }, maxCounts),
+    { count: 5, maxCount: 99 },
+    "数量为 0 的入口不得抬高封顶值"
+  );
+
+  assert.equal(formatWorkbenchBadgeCount(99), "99");
+  assert.equal(formatWorkbenchBadgeCount(100), "99+");
+  assert.equal(formatWorkbenchBadgeCount(1000, 999), "999+");
+  assert.equal(formatWorkbenchBadgeCount(137, 999), "137");
 }

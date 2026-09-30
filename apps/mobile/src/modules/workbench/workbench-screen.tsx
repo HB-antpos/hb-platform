@@ -25,7 +25,10 @@ import { useAppNavigationStore } from "@/modules/navigation/store";
 import {
   areAllWorkbenchSectionsCollapsed,
   buildWorkbenchSections,
+  formatWorkbenchBadgeCount,
+  summarizeWorkbenchSectionBadge,
   toggleAllWorkbenchSections,
+  WORKBENCH_BADGE_DEFAULT_MAX,
   toggleWorkbenchSectionCollapsed,
   type WorkbenchNavigationItem,
 } from "@/modules/navigation/workbench";
@@ -79,12 +82,12 @@ function FunctionButton({
   item,
   label,
   pendingCount = 0,
-  maxCount = 99,
+  maxCount = WORKBENCH_BADGE_DEFAULT_MAX,
   onPress,
   compact = false,
 }: FunctionButtonProps) {
   const { t } = useAppTranslation("workbench");
-  const visiblePendingCount = pendingCount > maxCount ? `${maxCount}+` : String(pendingCount);
+  const visiblePendingCount = formatWorkbenchBadgeCount(pendingCount, maxCount);
 
   return (
     <Pressable
@@ -613,16 +616,35 @@ export function WorkbenchScreen() {
                 <Surface style={styles.functionSurface} elevation={0}>
                   {sections.map((section, sectionIndex) => {
                     const expanded = !collapsedSectionKeys.has(section.key);
+                    // 折叠后组内入口角标看不到，汇总到分组标题上，避免漏看价格更新等待办。
+                    const collapsedBadge = expanded
+                      ? null
+                      : summarizeWorkbenchSectionBadge(
+                        section,
+                        pendingCountByRouteName,
+                        maxCountByRouteName
+                      );
+                    const collapsedBadgeText = collapsedBadge && collapsedBadge.count > 0
+                      ? formatWorkbenchBadgeCount(collapsedBadge.count, collapsedBadge.maxCount)
+                      : null;
+                    const sectionLabel = t("accessibility.functionCount", {
+                      title: t(section.titleKey),
+                      count: section.items.length,
+                    });
                     return (
                       <View key={section.key}>
                         {sectionIndex > 0 ? <Divider style={styles.groupDivider} /> : null}
                         <Pressable
                           accessibilityRole="button"
                           accessibilityState={{ expanded }}
-                          accessibilityLabel={t("accessibility.functionCount", {
-                            title: t(section.titleKey),
-                            count: section.items.length,
-                          })}
+                          accessibilityLabel={
+                            collapsedBadgeText
+                              ? t("accessibility.sectionBadge", {
+                                label: sectionLabel,
+                                badge: collapsedBadgeText,
+                              })
+                              : sectionLabel
+                          }
                           accessibilityHint={t("accessibility.toggleSectionHint")}
                           onPress={() =>
                             setCollapsedSectionKeys((current) =>
@@ -640,6 +662,13 @@ export function WorkbenchScreen() {
                           <Text variant="labelMedium" style={styles.functionSectionCount}>
                             {t("allFunctions.sectionCount", { count: section.items.length })}
                           </Text>
+                          {collapsedBadgeText ? (
+                            <View style={styles.countBadge}>
+                              <Text variant="labelSmall" style={styles.countBadgeText}>
+                                {collapsedBadgeText}
+                              </Text>
+                            </View>
+                          ) : null}
                           <MaterialCommunityIcons
                             name={expanded ? "chevron-up" : "chevron-down"}
                             color={HB_COLORS.textSecondary}

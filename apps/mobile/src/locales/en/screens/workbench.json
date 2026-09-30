@@ -87,6 +87,7 @@
   "accessibility": {
     "openFunction": "Open {{title}}",
     "toggleSectionHint": "Expands or collapses this group",
+    "sectionBadge": "{{label}}, {{badge}} alerts",
     "functionCount": "{{title}}, {{count}} available tools",
     "currentStore": "Current store, {{store}}",
     "changeStore": "Current store, {{store}}, switch store",
