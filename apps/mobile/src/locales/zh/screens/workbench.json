@@ -23,7 +23,8 @@
     "caption": "按当前权限显示"
   },
   "groups": {
-    "salesProduct": "销售与商品",
+    "productPurchasing": "商品进货",
+    "productSales": "商品销售",
     "warehousePurchase": "仓库与采购",
     "operationsReports": "运营与报表",
     "peopleManagement": "人员与管理"
@@ -68,7 +69,9 @@
   "allFunctions": {
     "title": "全部功能",
     "caption": "按角色与设备授权",
-    "sectionCount": "{{count}} 项可用"
+    "sectionCount": "{{count}} 项可用",
+    "collapseAll": "全部折叠",
+    "expandAll": "全部展开"
   },
   "states": {
     "loadingTitle": "正在加载功能权限",
@@ -83,6 +86,8 @@
   },
   "accessibility": {
     "openFunction": "打开{{title}}",
+    "toggleSectionHint": "点按展开或折叠该分组",
+    "sectionBadge": "{{label}}，{{badge}} 项提醒",
     "functionCount": "{{title}}，{{count}}项可用功能",
     "currentStore": "当前门店，{{store}}",
     "changeStore": "当前门店，{{store}}，切换分店",

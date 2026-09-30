@@ -23,7 +23,8 @@
     "caption": "Based on your current access"
   },
   "groups": {
-    "salesProduct": "Sales & products",
+    "productPurchasing": "Product purchasing",
+    "productSales": "Product sales",
     "warehousePurchase": "Warehouse & purchasing",
     "operationsReports": "Operations & reports",
     "peopleManagement": "People & management"
@@ -68,7 +69,9 @@
   "allFunctions": {
     "title": "All tools",
     "caption": "Authorised by role and device",
-    "sectionCount": "{{count}} available"
+    "sectionCount": "{{count}} available",
+    "collapseAll": "Collapse all",
+    "expandAll": "Expand all"
   },
   "states": {
     "loadingTitle": "Loading your access",
@@ -83,6 +86,8 @@
   },
   "accessibility": {
     "openFunction": "Open {{title}}",
+    "toggleSectionHint": "Expands or collapses this group",
+    "sectionBadge": "{{label}}, {{badge}} alerts",
     "functionCount": "{{title}}, {{count}} available tools",
     "currentStore": "Current store, {{store}}",
     "changeStore": "Current store, {{store}}, switch store",
