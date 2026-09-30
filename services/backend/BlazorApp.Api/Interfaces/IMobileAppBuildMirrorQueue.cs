@@ -16,5 +16,18 @@ namespace BlazorApp.Api.Interfaces
         );
 
         Task CompleteCosMirrorFailureAsync(MobileAppBuild entity, Exception exception);
+
+        Task<MobileAppBuild?> ClaimNextCosChecksumBackfillJobAsync(
+            DateTime now,
+            int maxAttempts,
+            TimeSpan retryAfter
+        );
+
+        Task CompleteCosChecksumBackfillSuccessAsync(
+            MobileAppBuild entity,
+            MobileAppBuildArtifactChecksum checksum
+        );
+
+        Task CompleteCosChecksumBackfillFailureAsync(MobileAppBuild entity, Exception exception);
     }
 }

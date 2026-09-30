@@ -306,6 +306,7 @@
     <Compile Include="TencentCosMobileAppBuildArtifactMirrorTests.cs" />
     <Compile Include="MobileAppBuildMirrorBackgroundServiceTests.cs" />
     <Compile Include="MobileAppBuildServiceTests.cs" />
+    <Compile Include="MobileAppBuildCosChecksumSqlServerTests.cs" />
     <Compile Include="MobileAppBuildAppKeyIsolationTests.cs" />
     <Compile Include="MobileAppDeviceStatusServiceTests.cs" />
     <Compile Include="AppOtaReleaseSqlParameterTests.cs" />

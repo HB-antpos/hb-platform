@@ -155,6 +155,79 @@ public sealed class TencentCosMobileAppBuildArtifactMirrorTests
         );
     }
 
+    [Fact]
+    public async Task ComputeMirroredChecksumAsync_用签名GET读取COS对象计算SHA256与大小()
+    {
+        var content = new ByteArrayContent([1, 2, 3, 4]);
+        content.Headers.ContentLength = 4;
+        var cosHandler = new CaptureHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = content }
+        );
+        var uploadHandler = new CaptureHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        var mirror = CreateMirror(cosHandler, uploadHandler);
+
+        var checksum = await mirror.ComputeMirroredChecksumAsync(
+            CreateMirroredBuild("mobile-app-builds/production/build-123.apk")
+        );
+
+        Assert.Equal(4, checksum.FileSize);
+        Assert.Equal(
+            "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+            checksum.Sha256
+        );
+        Assert.Equal(HttpMethod.Get, cosHandler.Request!.Method);
+        Assert.Equal(
+            "hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com",
+            cosHandler.Request.RequestUri!.Host
+        );
+        Assert.Equal("/mobile-app-builds/production/build-123.apk", cosHandler.Request.RequestUri.AbsolutePath);
+        Assert.Contains("q-signature=", cosHandler.Request.RequestUri.Query);
+        Assert.Null(uploadHandler.Request);
+    }
+
+    [Fact]
+    public async Task ComputeMirroredChecksumAsync_COS地址与对象键不一致_不发请求()
+    {
+        var cosHandler = new CaptureHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        var mirror = CreateMirror(cosHandler, cosHandler);
+        var build = CreateMirroredBuild("mobile-app-builds/production/build-123.apk");
+        build.CosObjectKey = "mobile-app-builds/pos-handheld/production/build-123.apk";
+
+        var error = await Assert.ThrowsAsync<MobileAppBuildArtifactMirrorException>(() =>
+            mirror.ComputeMirroredChecksumAsync(build)
+        );
+
+        Assert.Contains("对象键不一致", error.Message);
+        Assert.Null(cosHandler.Request);
+    }
+
+    [Fact]
+    public async Task ComputeMirroredChecksumAsync_实际字节数少于ContentLength_拒绝补算()
+    {
+        var content = new ByteArrayContent([1, 2, 3]);
+        content.Headers.ContentLength = 4;
+        var cosHandler = new StubHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = content }
+        );
+        var mirror = CreateMirror(cosHandler, cosHandler);
+
+        var error = await Assert.ThrowsAsync<MobileAppBuildArtifactMirrorException>(() =>
+            mirror.ComputeMirroredChecksumAsync(
+                CreateMirroredBuild("mobile-app-builds/production/build-123.apk")
+            )
+        );
+
+        Assert.Contains("Content-Length", error.Message);
+    }
+
+    private static MobileAppBuild CreateMirroredBuild(string objectKey)
+    {
+        var build = CreateBuild("https://expo.dev/artifacts/eas/build-123.apk");
+        build.CosObjectKey = objectKey;
+        build.CosArtifactUrl = $"https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/{objectKey}";
+        return build;
+    }
+
     private static TencentCosMobileAppBuildArtifactMirror CreateMirror(
         HttpMessageHandler artifactHandler,
         HttpMessageHandler uploadHandler

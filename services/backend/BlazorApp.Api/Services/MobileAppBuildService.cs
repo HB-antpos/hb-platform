@@ -22,6 +22,7 @@ namespace BlazorApp.Api.Services
         public const long PublicAndroidArtifactMaxBytes = 300L * 1024 * 1024;
         private const int PublicAndroidArtifactCandidateScanLimit = 32;
         private const int CosMirrorErrorMaxLength = 1000;
+        private const string CosChecksumBackfillErrorPrefix = "CHECKSUM_BACKFILL:";
 
         public MobileAppBuildService(
             ISqlSugarClient db,
@@ -801,10 +802,12 @@ namespace BlazorApp.Api.Services
             MobileAppBuildArtifactMirrorResult mirror
         )
         {
+            // 关键位置：没有 SHA-256/大小的“成功”会让构建永远进不了原生候选；按失败处理以便 worker 重试。
+            var sha256 = NormalizeChecksum(mirror.Sha256, mirror.FileSize);
             entity.CosArtifactUrl = NormalizeOptionalText(mirror.ArtifactUrl);
             entity.CosObjectKey = NormalizeOptionalText(mirror.ObjectKey);
-            entity.ArtifactSha256 = NormalizeOptionalText(mirror.Sha256)?.ToLowerInvariant();
-            entity.ArtifactSize = mirror.FileSize > 0 ? mirror.FileSize : null;
+            entity.ArtifactSha256 = sha256;
+            entity.ArtifactSize = mirror.FileSize;
             entity.CosMirroredAt = mirror.MirroredAt;
             entity.CosMirrorStatus = CosMirrorStatusSucceeded;
             entity.CosMirrorError = null;
@@ -850,6 +853,139 @@ namespace BlazorApp.Api.Services
                         && string.IsNullOrEmpty(x.CosArtifactUrl)
                 )
                 .ExecuteCommandAsync();
+        }
+
+        public async Task<MobileAppBuild?> ClaimNextCosChecksumBackfillJobAsync(
+            DateTime now,
+            int maxAttempts,
+            TimeSpan retryAfter
+        )
+        {
+            var retryCutoff = now.Subtract(retryAfter);
+            // 补算对象：已镜像成功、COS 地址齐全，但 SHA-256 或大小缺失的行（例如旧版本进程写回的记录）。
+            // 这里不改 CosMirrorStatus，补算期间构建仍按 succeeded 对外可见。
+            var job = await _db
+                .Queryable<MobileAppBuild>()
+                .Where(x =>
+                    x.Platform == "android"
+                    && x.CosMirrorStatus == CosMirrorStatusSucceeded
+                    && !string.IsNullOrEmpty(x.CosArtifactUrl)
+                    && !string.IsNullOrEmpty(x.CosObjectKey)
+                    && (
+                        string.IsNullOrEmpty(x.ArtifactSha256)
+                        || x.ArtifactSize == null
+                        || x.ArtifactSize <= 0
+                    )
+                    && x.CosMirrorAttempts < maxAttempts
+                    && (x.CosMirrorLastAttemptAtUtc == null || x.CosMirrorLastAttemptAtUtc < retryCutoff)
+                )
+                .OrderByDescending(x => x.CompletedAt)
+                .OrderByDescending(x => x.ReceivedAt)
+                .FirstAsync();
+
+            if (job == null)
+            {
+                return null;
+            }
+
+            var previousAttempts = job.CosMirrorAttempts;
+            var attempts = Math.Max(0, previousAttempts) + 1;
+            var affected = await _db
+                .Updateable<MobileAppBuild>()
+                .SetColumns(x => new MobileAppBuild
+                {
+                    CosMirrorAttempts = attempts,
+                    CosMirrorLastAttemptAtUtc = now,
+                })
+                // 以尝试次数做乐观锁，多个实例同时轮询时只有一个能认领同一行。
+                .Where(x =>
+                    x.Id == job.Id
+                    && x.CosMirrorStatus == CosMirrorStatusSucceeded
+                    && x.CosArtifactUrl == job.CosArtifactUrl
+                    && x.CosMirrorAttempts == previousAttempts
+                )
+                .ExecuteCommandAsync();
+
+            if (affected <= 0)
+            {
+                return null;
+            }
+
+            job.CosMirrorAttempts = attempts;
+            job.CosMirrorLastAttemptAtUtc = now;
+            return job;
+        }
+
+        public async Task CompleteCosChecksumBackfillSuccessAsync(
+            MobileAppBuild entity,
+            MobileAppBuildArtifactChecksum checksum
+        )
+        {
+            var sha256 = NormalizeChecksum(checksum.Sha256, checksum.FileSize);
+            var fileSize = checksum.FileSize;
+            entity.ArtifactSha256 = sha256;
+            entity.ArtifactSize = fileSize;
+            entity.CosMirrorError = null;
+
+            await _db
+                .Updateable<MobileAppBuild>()
+                .SetColumns(x => new MobileAppBuild
+                {
+                    ArtifactSha256 = sha256,
+                    ArtifactSize = fileSize,
+                    CosMirrorError = null,
+                })
+                // 只补仍然缺值且 COS 对象未变的行，避免覆盖期间被重新镜像或人工写入的结果。
+                .Where(x =>
+                    x.Id == entity.Id
+                    && x.CosMirrorStatus == CosMirrorStatusSucceeded
+                    && x.CosArtifactUrl == entity.CosArtifactUrl
+                    && x.CosObjectKey == entity.CosObjectKey
+                    && (
+                        string.IsNullOrEmpty(x.ArtifactSha256)
+                        || x.ArtifactSize == null
+                        || x.ArtifactSize <= 0
+                    )
+                )
+                .ExecuteCommandAsync();
+        }
+
+        public async Task CompleteCosChecksumBackfillFailureAsync(
+            MobileAppBuild entity,
+            Exception exception
+        )
+        {
+            var error = TruncateForColumn(
+                $"{CosChecksumBackfillErrorPrefix} {FormatCosMirrorError(exception)}",
+                CosMirrorErrorMaxLength
+            );
+            entity.CosMirrorError = error;
+
+            await _db
+                .Updateable<MobileAppBuild>()
+                .SetColumns(x => new MobileAppBuild { CosMirrorError = error })
+                // 只记录错误，不改 succeeded 状态与 COS 地址；是否继续重试由认领条件里的次数与间隔控制。
+                .Where(x =>
+                    x.Id == entity.Id
+                    && x.CosMirrorStatus == CosMirrorStatusSucceeded
+                    && x.CosArtifactUrl == entity.CosArtifactUrl
+                )
+                .ExecuteCommandAsync();
+        }
+
+        private static string NormalizeChecksum(string? sha256, long fileSize)
+        {
+            var normalized = NormalizeOptionalText(sha256)?.ToLowerInvariant();
+            if (
+                normalized is not { Length: 64 }
+                || !normalized.All(ch => ch is >= '0' and <= '9' or >= 'a' and <= 'f')
+                || fileSize <= 0
+            )
+            {
+                throw new InvalidOperationException("APK 镜像结果缺少有效的 SHA-256 或文件大小");
+            }
+
+            return normalized;
         }
 
         private static bool HasArtifactUrlChanged(string? previousArtifactUrl, string currentArtifactUrl)
