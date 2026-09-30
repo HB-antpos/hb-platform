@@ -33,6 +33,7 @@ import { MeasuredTable } from '../../../components/MeasuredTable'
 import type { MobileAppOtaUpdate } from '../../../types/mobileAppBuild'
 import type {
   AppOtaRelease,
+  MobileOtaAdditionalTarget,
   MobileOtaEnvironment,
   MobileOtaPlatform,
   MobileOtaPolicy,
@@ -49,6 +50,7 @@ import {
   formatMobileOtaReleaseLabel,
   isMobileOtaReleaseCompatibleWithLane,
   parseMobileOtaRevisionSnapshot,
+  resolveMobileOtaReleaseActivation,
   type MobileOtaPolicyFormValue,
 } from './mobileOtaPolicyLogic'
 import { formatAppDownloadLocalDateTime } from './time'
@@ -163,16 +165,39 @@ function MobileOtaLane({
     [releases],
   )
   const domainReady = status.loaded && !status.loading && !status.failed && policy !== null
+  const additionalTargets = useMemo(() => policy?.additionalTargets ?? [], [policy?.additionalTargets])
+  // 附加目标按「Runtime · Update Group 前 8 位 · Commit」展示，便于和上方发布事实表逐行对照。
+  const formatAdditionalTarget = useCallback((target: MobileOtaAdditionalTarget) => {
+    const release = releases.find((item) => item.id === target.targetReleaseId)
+    const runtime = target.targetRuntimeVersion ?? release?.runtimeVersion ?? '--'
+    return release
+      ? `${runtime} · ${shortIdentity(release.updateGroupId)} · ${shortIdentity(release.gitCommitHash)}`
+      : `${runtime} · ${shortIdentity(target.targetReleaseId)}`
+  }, [releases])
 
   const releaseColumns: ColumnsType<AppOtaRelease> = useMemo(() => [
     {
       title: t('system.appDownloads.updatePolicy.status'),
       width: 110,
-      render: (_, release) => release.id === policy?.targetReleaseId && policy.enabled
-        ? <Tag color="processing">{t('system.appDownloads.updatePolicy.active')}</Tag>
-        : release.legacy
+      render: (_, release) => {
+        // 主目标与按 Runtime 的附加目标都在投放，附加目标额外标出所属 Runtime。
+        const activation = resolveMobileOtaReleaseActivation(release.id, policy)
+        if (activation?.kind === 'primary') {
+          return <Tag color="processing">{t('system.appDownloads.updatePolicy.active')}</Tag>
+        }
+        if (activation?.kind === 'additional') {
+          return (
+            <Tag color="processing">
+              {t('system.appDownloads.updatePolicy.mobileOta.activeAdditional', {
+                runtime: activation.runtimeVersion ?? release.runtimeVersion,
+              })}
+            </Tag>
+          )
+        }
+        return release.legacy
           ? <Tag>{t('system.appDownloads.updatePolicy.mobileOta.legacy')}</Tag>
-          : <Tag color="success">{t('system.appDownloads.updatePolicy.registered')}</Tag>,
+          : <Tag color="success">{t('system.appDownloads.updatePolicy.registered')}</Tag>
+      },
     },
     {
       title: t('system.appDownloads.updatePolicy.runtime'),
@@ -250,7 +275,7 @@ function MobileOtaLane({
         ) : '--'
       },
     },
-  ], [policy?.enabled, policy?.targetReleaseId, t])
+  ], [policy, t])
 
   async function savePolicy(value: MobileOtaPolicyFormValue) {
     if (!policy) {
@@ -317,6 +342,12 @@ function MobileOtaLane({
             </Descriptions.Item>
             <Descriptions.Item label={t('system.appDownloads.updatePolicy.release')}>
               {release ? formatMobileOtaReleaseLabel(release) : value.targetReleaseId || '--'}
+            </Descriptions.Item>
+            {/* 表单不提交附加目标，后端按「未提交即保留」处理；这里明确告知保存不会改动它们。 */}
+            <Descriptions.Item label={t('system.appDownloads.updatePolicy.mobileOta.additionalTargetsKept')}>
+              {additionalTargets.length > 0
+                ? additionalTargets.map(formatAdditionalTarget).join('；')
+                : t('system.appDownloads.updatePolicy.mobileOta.additionalTargetsNone')}
             </Descriptions.Item>
           </Descriptions>
         </Space>
@@ -446,6 +477,17 @@ function MobileOtaLane({
           </Descriptions.Item>
           <Descriptions.Item label={t('system.appDownloads.updatePolicy.updatedBy')}>
             {policy?.updatedBy || '--'}
+          </Descriptions.Item>
+          <Descriptions.Item label={t('system.appDownloads.updatePolicy.mobileOta.additionalTargets')} span="filled">
+            {additionalTargets.length > 0 ? (
+              <Space size={[6, 6]} wrap>
+                {additionalTargets.map((target) => (
+                  <Tag key={target.targetReleaseId} color={policy?.enabled ? 'processing' : 'default'}>
+                    {formatAdditionalTarget(target)}
+                  </Tag>
+                ))}
+              </Space>
+            ) : t('system.appDownloads.updatePolicy.mobileOta.additionalTargetsNone')}
           </Descriptions.Item>
         </Descriptions>
         <Alert

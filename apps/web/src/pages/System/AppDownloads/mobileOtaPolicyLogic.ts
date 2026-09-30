@@ -2,6 +2,7 @@ import type {
   AppOtaRelease,
   MobileOtaEnvironment,
   MobileOtaPlatform,
+  MobileOtaPolicy,
   MobileOtaPolicyRequest,
 } from '../../../types/mobileOtaPolicy'
 
@@ -49,6 +50,30 @@ export function isMobileOtaReleaseCompatibleWithLane(
     && release.environment === environment
     && release.platform === platform
     && release.clientChannel === environment
+}
+
+export type MobileOtaReleaseActivation =
+  | { kind: 'primary' }
+  | { kind: 'additional'; runtimeVersion: string | null }
+  | null
+
+/**
+ * 判断某条发布是否正在被当前策略投放。
+ * 策略除主目标外还按 Runtime 挂附加目标（例如 iOS 主目标 1.0.5、附加 1.0.6/1.0.7），
+ * 只比对主目标会把正在下发的附加目标误显示为「已登记」。策略停用时两者都不再投放。
+ */
+export function resolveMobileOtaReleaseActivation(
+  releaseId: string,
+  policy: Pick<MobileOtaPolicy, 'enabled' | 'targetReleaseId' | 'additionalTargets'> | null,
+): MobileOtaReleaseActivation {
+  if (!policy?.enabled) {
+    return null
+  }
+  if (policy.targetReleaseId === releaseId) {
+    return { kind: 'primary' }
+  }
+  const additional = policy.additionalTargets.find((target) => target.targetReleaseId === releaseId)
+  return additional ? { kind: 'additional', runtimeVersion: additional.targetRuntimeVersion } : null
 }
 
 export function formatMobileOtaReleaseLabel(release: AppOtaRelease) {

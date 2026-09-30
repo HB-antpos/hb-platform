@@ -1,6 +1,7 @@
 import type { ApiResponse } from '../types/api'
 import type {
   AppOtaRelease,
+  MobileOtaAdditionalTarget,
   MobileOtaEnvironment,
   MobileOtaPlatform,
   MobileOtaPolicy,
@@ -106,6 +107,20 @@ export function normalizeAppOtaRelease(value: unknown): AppOtaRelease {
   }
 }
 
+function normalizeAdditionalTargets(value: unknown): MobileOtaAdditionalTarget[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  // 附加目标只用于展示与确认；缺少发布 ID 的异常项直接丢弃，不让整条 lane 渲染失败。
+  return value.flatMap((item) => {
+    const raw = asRecord(item)
+    const targetReleaseId = nullableText(raw, 'targetReleaseId')
+    return targetReleaseId
+      ? [{ targetReleaseId, targetRuntimeVersion: nullableText(raw, 'targetRuntimeVersion') }]
+      : []
+  })
+}
+
 export function normalizeMobileOtaPolicy(value: unknown): MobileOtaPolicy {
   const raw = asRecord(value)
   const targetRelease = raw.targetRelease && typeof raw.targetRelease === 'object'
@@ -124,6 +139,7 @@ export function normalizeMobileOtaPolicy(value: unknown): MobileOtaPolicy {
       ?? null,
     releaseMessage: nullableText(raw, 'releaseMessage'),
     targetRelease,
+    additionalTargets: normalizeAdditionalTargets(raw.additionalTargets),
     updatedAt: nullableText(raw, 'updatedAt'),
     updatedBy: nullableText(raw, 'updatedBy'),
   }

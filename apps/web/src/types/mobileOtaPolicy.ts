@@ -28,6 +28,12 @@ export interface AppOtaRelease {
   createdBy: string | null
 }
 
+/** 按 Runtime 挂在策略上的附加目标：与主目标 Runtime 不同的客户端各自收到这里的发布。 */
+export interface MobileOtaAdditionalTarget {
+  targetReleaseId: string
+  targetRuntimeVersion: string | null
+}
+
 export interface MobileOtaPolicy {
   id: string | null
   environment: MobileOtaEnvironment
@@ -39,6 +45,7 @@ export interface MobileOtaPolicy {
   targetRuntimeVersion: string | null
   releaseMessage: string | null
   targetRelease: AppOtaRelease | null
+  additionalTargets: MobileOtaAdditionalTarget[]
   updatedAt: string | null
   updatedBy: string | null
 }
