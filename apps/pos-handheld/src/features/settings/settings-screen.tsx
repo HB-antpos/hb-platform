@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,6 +35,10 @@ import type {
 } from "@hb/pos-domain/features/settings/settings-square-setup";
 import type { PendingWorkBlocker } from "@hb/pos-domain";
 
+import {
+  ANDROID_NEARBY_DEVICES_MIN_API,
+  androidApiLevel,
+} from "@/core/peripherals/printer/android-bluetooth-permissions";
 import {
   HidScannerCapture,
   type HidScannerRouter,
@@ -2049,6 +2054,8 @@ function PeripheralsPane({
   const printerPickerBusy = printerPickerStatus !== "ready";
   const printerPickerPermissionRequired =
     printerPickerError === "printer-bluetooth-permission-required";
+  const printerPickerLocationOff =
+    printerPickerError === "printer-bluetooth-location-off";
 
   const scanPrinterDevices = async () => {
     setPrinterPickerVisible(true);
@@ -2275,13 +2282,28 @@ function PeripheralsPane({
                 {printerPickerPermissionRequired ? (
                   <>
                     <Text style={styles.printerPickerPermissionHint}>
-                      {t("printer.bluetoothPermissionHint")}
+                      {t(bluetoothPermissionHintKey())}
                     </Text>
                     <View style={styles.printerPickerPermissionAction}>
                       <ActionButton
                         label={t("action.openSystemSettings")}
                         onPress={() => void Linking.openSettings()}
                         testID="settings-printer-open-system-settings"
+                        tone="secondary"
+                      />
+                    </View>
+                  </>
+                ) : null}
+                {printerPickerLocationOff ? (
+                  <>
+                    <Text style={styles.printerPickerPermissionHint}>
+                      {t("printer.locationServiceHint")}
+                    </Text>
+                    <View style={styles.printerPickerPermissionAction}>
+                      <ActionButton
+                        label={t("action.openLocationSettings")}
+                        onPress={() => void openLocationSettings()}
+                        testID="settings-printer-open-location-settings"
                         tone="secondary"
                       />
                     </View>
@@ -3164,6 +3186,29 @@ function confirmationTitle(
       });
     default:
       return settingsText(locale, "confirmation.restartApp");
+  }
+}
+
+/**
+ * 系统设置里蓝牙扫描权限的名称随 Android 版本变化：12+ 叫“附近的设备”，
+ * 10/11 归在“位置信息”下，没有单独的蓝牙项；非 Android 沿用通用提示。
+ */
+function bluetoothPermissionHintKey(): SettingsCopyKey {
+  if (Platform.OS !== "android") {
+    return "printer.bluetoothPermissionHint";
+  }
+  return androidApiLevel({ os: Platform.OS, version: Platform.Version }) >=
+    ANDROID_NEARBY_DEVICES_MIN_API
+    ? "printer.bluetoothPermissionHintNearby"
+    : "printer.bluetoothPermissionHintLocation";
+}
+
+/** 直达系统定位开关页；个别 ROM 不支持该 Intent 时退回应用详情页。 */
+async function openLocationSettings(): Promise<void> {
+  try {
+    await Linking.sendIntent("android.settings.LOCATION_SOURCE_SETTINGS");
+  } catch {
+    await Linking.openSettings();
   }
 }
 
