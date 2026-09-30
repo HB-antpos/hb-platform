@@ -1,0 +1,109 @@
+{
+  "legacyEmployeeLogs": {
+    "pageTitle": "Legacy POS Operation Logs",
+    "pageSubtitle": "Employee operations uploaded by the legacy POS: adding items, price changes, deletions, cash drawer, returns and payments.",
+    "wallClockNotice": "All times are store local time (wall-clock time written by the legacy POS, no time-zone conversion). Terminals upload logs in batches, usually 10 to 60 minutes late, so the latest operations may not appear yet.",
+    "filters": {
+      "timeRange": "Operation time (up to 31 days)",
+      "store": "Store",
+      "storePlaceholder": "Select a store",
+      "device": "Device",
+      "devicePlaceholder": "All devices",
+      "employee": "Employee",
+      "employeePlaceholder": "All employees, multi-select",
+      "operation": "Operation",
+      "operationPlaceholder": "All operations",
+      "keyword": "Detail keyword",
+      "keywordPlaceholder": "Order ID / barcode / product code / amount",
+      "optionsHint": "Device and employee options come from the last queried store and time range"
+    },
+    "presets": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "last7Days": "Last 7 days",
+      "last31Days": "Last 31 days"
+    },
+    "validation": {
+      "storeRequired": "Select a store",
+      "rangeRequired": "Select an operation time range",
+      "rangeReversed": "End time must be later than start time",
+      "rangeTooLong": "The time range can be at most 31 days"
+    },
+    "quick": {
+      "label": "Quick filters",
+      "highRisk": "High-risk",
+      "price": "Price & discount",
+      "return": "Returns",
+      "auth": "Cash drawer & identity",
+      "payment": "Payment & hold"
+    },
+    "categories": {
+      "item": "Item",
+      "price": "Price",
+      "delete": "Delete",
+      "payment": "Payment",
+      "return": "Return",
+      "auth": "Drawer & identity",
+      "window": "Window",
+      "other": "Other"
+    },
+    "stats": {
+      "total": "Matching",
+      "deleted": "Items deleted",
+      "priceChanges": "Price / discount changes",
+      "cashDrawer": "Cash drawer opened",
+      "scope": "Employees / devices in range",
+      "unitRows": "rows",
+      "unitPeople": "people",
+      "unitDevices": "devices",
+      "basisHint": "Counts ignore the Operation filter"
+    },
+    "table": {
+      "title": "Operations",
+      "hint": "Click a row to see details and surrounding operations",
+      "empty": "No matching operations",
+      "selectStoreFirst": "Select a store to search",
+      "paginationTotal": "{{total}} rows"
+    },
+    "columns": {
+      "time": "Time",
+      "device": "Device",
+      "employee": "Employee",
+      "operation": "Operation",
+      "detail": "Detail",
+      "lag": "Upload delay",
+      "action": "Action"
+    },
+    "lag": {
+      "minutes": "{{minutes}} min",
+      "hours": "{{hours}} h {{minutes}} min",
+      "days": "{{days}} d {{hours}} h",
+      "unknown": "-"
+    },
+    "detail": {
+      "title": "Operation detail",
+      "highRisk": "High-risk",
+      "operationTime": "Operation time",
+      "localTime": "store local",
+      "uploadTime": "Uploaded at",
+      "lagSuffix": "{{lag}} late",
+      "storeDevice": "Store / device",
+      "employee": "Employee",
+      "operation": "Operation",
+      "parsedTitle": "Parsed fields",
+      "parsedHint": "Extracted from key:value pairs in the detail text",
+      "product": "Product",
+      "order": "Order ID",
+      "rawTitle": "Raw detail",
+      "contextTitle": "Surrounding operations",
+      "contextHint": "Same device ±{{minutes}} min",
+      "contextTruncated": "Too many operations in the window; showing the first {{count}}",
+      "contextEmpty": "No other operations in the window",
+      "contextFailed": "Failed to load surrounding operations",
+      "onlyEmployeeDay": "Show only this employee on that day"
+    },
+    "loadFailed": "Failed to load legacy POS operation logs",
+    "retry": "Retry",
+    "loadStoresFailed": "Failed to load stores"
+  }
+}

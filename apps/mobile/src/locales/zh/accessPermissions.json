@@ -241,6 +241,10 @@
       "name": "查看员工操作日志",
       "description": "收银端操作审计 - Web 页面 /pos-admin/operation-logs 与移动端工作台「员工操作日志」查看管理分店的员工操作记录"
     },
+    "LegacyEmployeeLogs.View": {
+      "name": "查看老系统操作日志",
+      "description": "Web 页面 /pos-admin/legacy-employee-logs - 按分店查看旧版收银系统上传的员工操作记录"
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "打开钱箱",
       "description": "收银端钱箱 - 打开钱箱按钮"

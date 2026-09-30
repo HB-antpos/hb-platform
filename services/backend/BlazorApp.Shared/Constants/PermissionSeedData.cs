@@ -332,6 +332,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.PosTerminal.CustomerDisplay.Manage, "管理客显", "POS 客显", "收银端客显 - 管理客显按钮"),
                 new(Permissions.PosTerminal.System.Sync, "同步收银数据", "POS 同步", "收银端同步 - 手动同步按钮"),
                 new(Permissions.PosTerminal.Audit.View, "查看员工操作日志", "POS 审计", "收银端操作审计 - Web 页面 /pos-admin/operation-logs 与移动端工作台「员工操作日志」查看管理分店的员工操作记录"),
+                // 仅注册权限，不写入角色模板；由管理员显式授予，数据范围仍按当前账号可管理分店收口。
+                new(Permissions.LegacyEmployeeLogs.View, "查看老系统操作日志", "POS 审计", "Web 页面 /pos-admin/legacy-employee-logs - 按分店查看旧版收银系统上传的员工操作记录"),
                 new(Permissions.Promotions.View, "查看促销", "促销管理", "Web 页面 /pos-admin/promotions 与移动端「促销」- 查看促销活动"),
                 // 全局促销的写接口额外要求 Admin 角色，属有意设计；分店促销仅需本权限。
                 new(Permissions.Promotions.Edit, "编辑促销", "促销管理", "Web 页面 /pos-admin/promotions - 编辑分店促销；全局促销的新增、修改、删除、启停另需管理员角色"),

@@ -595,6 +595,33 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildMenu_仅凭老系统操作日志权限可见对应入口()
+    {
+        var user = CreateUser(new Claim("permission", Permissions.LegacyEmployeeLogs.View));
+
+        var menu = _service.BuildMenu(user);
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        var legacyLogs = Assert.Single(posAdmin.Children!);
+        Assert.Equal("/pos-admin/legacy-employee-logs", legacyLogs.Path);
+        Assert.Equal("menu.legacyEmployeeLogs", legacyLogs.TitleKey);
+        Assert.Equal(Permissions.LegacyEmployeeLogs.View, legacyLogs.Permission);
+    }
+
+    [Fact]
+    public void BuildMenu_员工操作日志权限不连带老系统操作日志()
+    {
+        var user = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
+
+        var menu = _service.BuildMenu(user);
+
+        Assert.DoesNotContain(
+            menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
+            child => child.Path == "/pos-admin/legacy-employee-logs"
+        );
+    }
+
+    [Fact]
     public void BuildMenu_ShowsWarehouseContainerWithContainerViewPermission()
     {
         var user = CreateUser(new Claim("permission", Permissions.Container.View));

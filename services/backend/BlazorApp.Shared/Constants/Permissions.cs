@@ -82,6 +82,15 @@ namespace BlazorApp.Shared.Constants
             public const string Manage = "PosProducts.Manage";
         }
 
+        /// <summary>
+        /// 旧版收银系统（POSM.EmployeeLogs）的员工操作日志只读查询。
+        /// 刻意不放在 Permissions.PosTerminal.* 下：该前缀会被当作收银端权限下发到收银机与收银员授权。
+        /// </summary>
+        public static class LegacyEmployeeLogs
+        {
+            public const string View = "LegacyEmployeeLogs.View";
+        }
+
         public static class PosTerminal
         {
             public static class Sales
