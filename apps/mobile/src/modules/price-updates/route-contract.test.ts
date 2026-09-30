@@ -23,8 +23,8 @@ assert.deepEqual(
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
-  [{ key: "sales-product", itemRouteNames: ["product-query", "price-updates"] }],
-  "价格更新归入销售与商品，且只依赖后端显式菜单"
+  [{ key: "product-sales", itemRouteNames: ["product-query", "price-updates"] }],
+  "价格更新归入商品销售，且只依赖后端显式菜单"
 );
 assert.equal(
   buildWorkbenchSections(["product-query"]).some((section) =>
