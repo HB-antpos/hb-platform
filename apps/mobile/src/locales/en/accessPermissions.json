@@ -241,6 +241,10 @@
       "name": "View POS audit logs",
       "description": "View POS operation audit logs for managed stores on the web admin and the mobile workbench."
     },
+    "LegacyEmployeeLogs.View": {
+      "name": "View legacy POS operation logs",
+      "description": "View employee operation logs uploaded by the legacy POS for a selected store on the web admin."
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",
       "description": "Allows access to Permissions Pos Terminal Cash Drawer Open."

@@ -110,6 +110,7 @@
     "advertisements": "广告管理",
     "cashRegisterUsers": "收银用户条码",
     "operationLogs": "员工操作日志",
+    "legacyEmployeeLogs": "老系统操作日志",
     "linklySettlements": "Linkly 结算记录",
     "linklySettlementDetail": "Linkly 结算详情",
     "scheduleAttendance": "排班考勤",

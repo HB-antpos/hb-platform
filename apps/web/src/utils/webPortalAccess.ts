@@ -129,6 +129,12 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.canViewOperationAudits,
   },
   {
+    // 排在既有入口之后：已有入口的用户默认落点不变，只持有老系统操作日志权限的账号落到该页。
+    defaultPath: '/pos-admin/legacy-employee-logs',
+    targetPrefixes: ['/pos-admin/legacy-employee-logs'],
+    canAccess: (access) => access.hasPermission(P.LegacyEmployeeLogs.View),
+  },
+  {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
     targetPrefixes: ['/system/performance-baseline'],

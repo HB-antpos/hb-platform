@@ -324,6 +324,14 @@ public class ControllerAuthorizationMetadataTests
             nameof(MobileAppInstallLinksController.Get),
             Permissions.System.ViewMobileAppInstallLinks
         );
+        yield return Policy<LegacyEmployeeLogsController>(
+            nameof(LegacyEmployeeLogsController.GetList),
+            Permissions.LegacyEmployeeLogs.View
+        );
+        yield return Policy<LegacyEmployeeLogsController>(
+            nameof(LegacyEmployeeLogsController.GetContext),
+            Permissions.LegacyEmployeeLogs.View
+        );
         yield return Policy<MobileAppDeviceStatusController>(
             nameof(MobileAppDeviceStatusController.GetPaged),
             Permissions.DeviceRegistration.View

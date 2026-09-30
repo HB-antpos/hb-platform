@@ -152,6 +152,7 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/advertisements",        TitleKey = "menu.advertisements",         Icon = "PictureOutlined",            Permission = Permissions.Advertisements.View },
                     new() { Path = "/pos-admin/cash-register-users",   TitleKey = "menu.cashRegisterUsers",      Icon = "UserOutlined",               Permission = Permissions.Store.ManageOperations },
                     new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           Permission = Permissions.PosTerminal.Audit.View },
+                    new() { Path = "/pos-admin/legacy-employee-logs", TitleKey = "menu.legacyEmployeeLogs",     Icon = "FileTextOutlined",           Permission = Permissions.LegacyEmployeeLogs.View },
                     new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
@@ -721,6 +722,7 @@ namespace BlazorApp.Api.Services
                 Permissions.System.ViewAppDownloads,
                 Permissions.System.ManageAppDownloads,
                 Permissions.PosTerminal.Audit.View,
+                Permissions.LegacyEmployeeLogs.View,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage
             );
