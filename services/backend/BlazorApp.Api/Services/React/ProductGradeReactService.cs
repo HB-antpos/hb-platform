@@ -35,6 +35,9 @@ namespace BlazorApp.Api.Services.React
             _currentUserService = currentUserService;
         }
 
+        /// <summary>业务定义的固定等级（A 核心、B 观察、C 淘汰、D 清库存），与 Web 端 PRODUCT_GRADE_CONFIG 保持一致。</summary>
+        private static readonly string[] DefinedGrades = { "A", "B", "C", "D" };
+
         public async Task<ApiResponse<List<string>>> GetGradeOptionsAsync()
         {
             try
@@ -47,13 +50,15 @@ namespace BlazorApp.Api.Services.React
                     .Distinct()
                     .ToListAsync();
 
-                var options = grades
+                // 固定四档始终列出（某档暂无商品也要能选，例如 D 级），库里出现的其他等级按字母序追加在后。
+                var extraGrades = grades
                     .Select(grade => grade?.Trim().ToUpperInvariant())
                     .Where(grade => !string.IsNullOrEmpty(grade))
                     .Select(grade => grade!)
+                    .Where(grade => !DefinedGrades.Contains(grade, StringComparer.Ordinal))
                     .Distinct(StringComparer.Ordinal)
-                    .OrderBy(grade => grade, StringComparer.Ordinal)
-                    .ToList();
+                    .OrderBy(grade => grade, StringComparer.Ordinal);
+                var options = DefinedGrades.Concat(extraGrades).ToList();
 
                 return ApiResponse<List<string>>.OK(options);
             }

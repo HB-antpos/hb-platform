@@ -842,13 +842,25 @@ public sealed class ProductGradeReactServiceTests : IDisposable
         rows.Add(new ProductGrade { ProductCode = "P-B", Grade = "B" });
         rows.Add(new ProductGrade { ProductCode = "P-B-LOWER", Grade = "b" });
         rows.Add(new ProductGrade { ProductCode = "P-C", Grade = "C" });
-        rows.Add(new ProductGrade { ProductCode = "P-D-DELETED", Grade = "D", IsDeleted = true });
+        rows.Add(new ProductGrade { ProductCode = "P-E", Grade = " e " });
+        rows.Add(new ProductGrade { ProductCode = "P-F-DELETED", Grade = "F", IsDeleted = true });
         await _db.Insertable(rows).ExecuteCommandAsync();
 
         var result = await CreateService().GetGradeOptionsAsync();
 
+        // 固定四档 A–D 始终在前（与 Web 订货前台 PRODUCT_GRADE_CONFIG 一致，D 级暂无商品也要能选），
+        // 库里出现的其他等级追加在后；已删除行不产生选项。
         Assert.True(result.Success);
-        Assert.Equal(new[] { "A", "B", "C" }, result.Data);
+        Assert.Equal(new[] { "A", "B", "C", "D", "E" }, result.Data);
+    }
+
+    [Fact]
+    public async Task GetGradeOptionsAsync_没有任何等级数据时仍返回固定四档()
+    {
+        var result = await CreateService().GetGradeOptionsAsync();
+
+        Assert.True(result.Success);
+        Assert.Equal(new[] { "A", "B", "C", "D" }, result.Data);
     }
 
     [Fact]
