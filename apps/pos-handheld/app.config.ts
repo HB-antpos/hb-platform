@@ -325,7 +325,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           deploymentTarget: "17.0",
         },
         android: {
-          minSdkVersion: 30,
+          // 门店仍有 Android 10 手持机；原生模块对 Android 12/13 新 API 均有版本分支。
+          minSdkVersion: 29,
         },
       },
     ],
