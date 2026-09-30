@@ -6,7 +6,7 @@
     "filters": {
       "timeRange": "Operation time (up to 31 days)",
       "store": "Store",
-      "storePlaceholder": "Select a store",
+      "storePlaceholder": "Select stores (multiple)",
       "device": "Device",
       "devicePlaceholder": "All devices",
       "employee": "Employee",
@@ -15,7 +15,9 @@
       "operationPlaceholder": "All operations",
       "keyword": "Detail keyword",
       "keywordPlaceholder": "Order ID / barcode / product code / amount",
-      "optionsHint": "Device and employee options come from the last queried store and time range"
+      "optionsHint": "Device and employee options come from the last queried store and time range",
+      "selectAllStores": "Select all ({{count}})",
+      "clearStores": "Clear"
     },
     "presets": {
       "today": "Today",
@@ -24,7 +26,7 @@
       "last31Days": "Last 31 days"
     },
     "validation": {
-      "storeRequired": "Select a store",
+      "storeRequired": "Select at least one store",
       "rangeRequired": "Select an operation time range",
       "rangeReversed": "End time must be later than start time",
       "rangeTooLong": "The time range can be at most 31 days"
@@ -72,7 +74,8 @@
       "operation": "Operation",
       "detail": "Detail",
       "lag": "Upload delay",
-      "action": "Action"
+      "action": "Action",
+      "store": "Store"
     },
     "lag": {
       "minutes": "{{minutes}} min",
@@ -104,6 +107,15 @@
     },
     "loadFailed": "Failed to load legacy POS operation logs",
     "retry": "Retry",
-    "loadStoresFailed": "Failed to load stores"
+    "loadStoresFailed": "Failed to load stores",
+    "weekdays": [
+      "Sun",
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat"
+    ]
   }
 }

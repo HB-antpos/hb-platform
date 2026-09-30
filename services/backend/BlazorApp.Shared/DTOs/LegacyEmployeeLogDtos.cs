@@ -6,7 +6,11 @@ namespace BlazorApp.Shared.DTOs;
 /// </summary>
 public sealed class LegacyEmployeeLogQueryDto
 {
+    /// <summary>单店旧参数，与 StoreCodes 合并。</summary>
     public string? StoreCode { get; set; }
+
+    /// <summary>分店，可多选；至少一个。</summary>
+    public List<string>? StoreCodes { get; set; }
 
     public DateTime? From { get; set; }
 

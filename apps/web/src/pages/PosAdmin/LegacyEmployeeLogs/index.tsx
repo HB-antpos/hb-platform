@@ -57,8 +57,11 @@ import {
   getUploadLagMinutes,
   isHighRiskOperation,
   isQuickFilterActive,
+  normalizeStoreCodes,
   parseLegacyDetail,
+  resolveInitialStores,
   splitLagMinutes,
+  storeSelectionKey,
   sumOperationCounts,
   validateTimeRange,
   type LegacyLogFormValues,
@@ -75,17 +78,17 @@ const QUICK_FILTER_KEYS: LegacyQuickFilterKey[] = ['highRisk', 'price', 'return'
 const PRICE_OPERATIONS = QUICK_FILTER_OPERATIONS.price
 type TableSortOrder = 'ascend' | 'descend'
 
-function readRememberedStore() {
+function readRememberedStores() {
   try {
-    return localStorage.getItem(LEGACY_LOG_STORE_STORAGE_KEY) ?? undefined
+    return localStorage.getItem(LEGACY_LOG_STORE_STORAGE_KEY)
   } catch {
-    return undefined
+    return null
   }
 }
 
-function rememberStore(storeCode: string) {
+function rememberStores(storeCodes: string[]) {
   try {
-    localStorage.setItem(LEGACY_LOG_STORE_STORAGE_KEY, storeCode)
+    localStorage.setItem(LEGACY_LOG_STORE_STORAGE_KEY, JSON.stringify(storeCodes))
   } catch {
     // 浏览器存储不可用时只是不记住上次的分店，不影响查询。
   }
@@ -117,7 +120,10 @@ export default function PosAdminLegacyEmployeeLogsPage() {
   const listGuardRef = useRef(createLatestRequestGuard())
   const contextGuardRef = useRef(createLatestRequestGuard())
   const selectedOperations = Form.useWatch('operations', form)
-  const selectedStoreCode = Form.useWatch('storeCode', form)
+  const selectedStoreCodes = Form.useWatch('storeCodes', form)
+  const selectedStoresKey = storeSelectionKey(selectedStoreCodes)
+  const hasStores = selectedStoresKey !== ''
+  const [storeDropdownOpen, setStoreDropdownOpen] = useState(false)
 
   const visibleStoreOptions = useMemo(
     () =>
@@ -151,7 +157,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
   const loadData = useCallback(
     async (nextPage: number, nextPageSize: number, nextSortOrder: TableSortOrder) => {
       const values = form.getFieldsValue()
-      if (!values.storeCode) {
+      if (normalizeStoreCodes(values.storeCodes).length === 0) {
         setResult(null)
         return
       }
@@ -176,7 +182,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         setResult(data)
         setPageNumber(data.pageNumber)
         setPageSize(data.pageSize)
-        rememberStore(query.storeCode)
+        rememberStores(query.storeCodes)
       } catch (error) {
         if (!listGuardRef.current.isLatest(requestId)) return
         console.error(error)
@@ -188,30 +194,31 @@ export default function PosAdminLegacyEmployeeLogsPage() {
     [form, t],
   )
 
-  // 分店列表就绪后选定默认分店：优先上次查询的分店，只有一个可选分店时直接选中，然后自动查询。
+  // 分店列表就绪后选定默认分店：恢复上次查询的分店（仍可选的部分），只有一个可选分店时直接选中。
   useEffect(() => {
-    if (form.getFieldValue('storeCode') || visibleStoreOptions.length === 0) return
-    const remembered = readRememberedStore()
-    const initial = visibleStoreOptions.find((option) => option.value === remembered)?.value
-      ?? (visibleStoreOptions.length === 1 ? visibleStoreOptions[0].value : undefined)
+    if (normalizeStoreCodes(form.getFieldValue('storeCodes')).length > 0 || visibleStoreOptions.length === 0) return
+    const initial = resolveInitialStores(readRememberedStores(), visibleStoreOptions.map((option) => option.value))
     // 只设字段；查询由下面的分店变化监听统一发起。
-    if (initial) form.setFieldsValue({ storeCode: initial })
+    if (initial.length > 0) form.setFieldsValue({ storeCodes: initial })
   }, [form, visibleStoreOptions])
 
-  // 分店变化（默认选中或用户切换）后立即查询。员工与设备选项属于上一家分店，换店时先清空，避免带着别家员工条件查询。
-  const lastStoreRef = useRef<string | undefined>(undefined)
+  // 分店选择变化后查询：下拉展开期间连续勾选不发请求，收起（或在收起状态下删掉标签、清空）后才查一次。
+  // 员工与设备选项属于上一次的分店范围，范围变化时先清空，避免带着别店员工条件查询。
+  const lastStoresKeyRef = useRef('')
   useEffect(() => {
-    if (!selectedStoreCode || selectedStoreCode === lastStoreRef.current) return
-    if (lastStoreRef.current) {
+    if (storeDropdownOpen || selectedStoresKey === lastStoresKeyRef.current) return
+    const hadStores = lastStoresKeyRef.current !== ''
+    lastStoresKeyRef.current = selectedStoresKey
+    if (hadStores) {
       form.setFieldsValue({ employeeIds: undefined, deviceCode: undefined })
       setResult(null)
     }
-    lastStoreRef.current = selectedStoreCode
+    if (!selectedStoresKey) return
     setPageNumber(1)
     void loadData(1, pageSize, sortOrder)
-    // 只在分店变化时触发；分页与排序变化各自发起查询。
+    // 只在分店选择或下拉开合变化时触发；分页与排序变化各自发起查询。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStoreCode])
+  }, [selectedStoresKey, storeDropdownOpen])
 
   const initialValues = useMemo<LegacyLogFormValues>(() => ({ timeRange: getDayRange(dayjs()) }), [])
 
@@ -221,10 +228,10 @@ export default function PosAdminLegacyEmployeeLogsPage() {
   }
 
   const handleReset = () => {
-    const storeCode = form.getFieldValue('storeCode') as string | undefined
+    const storeCodes = form.getFieldValue('storeCodes') as string[] | undefined
     form.resetFields()
     // 重置只清筛选条件，保留所选分店，避免重置后页面变成空白。
-    form.setFieldsValue({ storeCode, timeRange: getDayRange(dayjs()) })
+    form.setFieldsValue({ storeCodes, timeRange: getDayRange(dayjs()) })
     setSortOrder('descend')
     setPageNumber(1)
     void loadData(1, pageSize, 'descend')
@@ -299,6 +306,15 @@ export default function PosAdminLegacyEmployeeLogsPage() {
     [t],
   )
 
+  // 星期按页面语言显示，不依赖 dayjs 的全局语言（生产上它是英文，会显示成 Wed）。
+  const weekdayLabel = useCallback(
+    (day: number) => {
+      const labels = t('legacyEmployeeLogs.weekdays', { returnObjects: true })
+      return Array.isArray(labels) && typeof labels[day] === 'string' ? labels[day] : ''
+    },
+    [t],
+  )
+
   const operationTag = useCallback(
     (operation?: string | null) =>
       operation ? <Tag color={CATEGORY_TAG_COLOR[getOperationCategory(operation)]} style={{ marginInlineEnd: 0 }}>{operation}</Tag> : '-',
@@ -344,6 +360,10 @@ export default function PosAdminLegacyEmployeeLogsPage() {
     [token],
   )
 
+  // 结果里出现多家分店时才显示分店列，单店时省出宽度。
+  const multiStore = new Set((result?.items ?? []).map((item) => item.storeCode)).size > 1
+    || normalizeStoreCodes(selectedStoreCodes).length > 1
+
   const columns = useMemo<ColumnsType<LegacyEmployeeLogItem>>(
     () => [
       {
@@ -367,11 +387,20 @@ export default function PosAdminLegacyEmployeeLogsPage() {
               }}
             >
               <div>{time.format('HH:mm:ss')}</div>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{time.format('YYYY-MM-DD ddd')}</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{`${time.format('YYYY-MM-DD')} ${weekdayLabel(time.day())}`}</Typography.Text>
             </div>
           )
         },
       },
+      ...(multiStore
+        ? [{
+            title: t('legacyEmployeeLogs.columns.store'),
+            dataIndex: 'storeCode',
+            key: 'storeCode',
+            width: 80,
+            render: (value?: string | null) => value || '-',
+          }]
+        : []),
       {
         title: t('legacyEmployeeLogs.columns.device'),
         dataIndex: 'deviceCode',
@@ -428,7 +457,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         ),
       },
     ],
-    [formatLag, operationTag, renderParsedDetail, sortOrder, t, token],
+    [formatLag, multiStore, operationTag, renderParsedDetail, sortOrder, t, token, weekdayLabel],
   )
 
   const operationOptions = useMemo(
@@ -472,7 +501,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
       title={t('legacyEmployeeLogs.pageTitle')}
       subtitle={t('legacyEmployeeLogs.pageSubtitle')}
       extra={(
-        <Button icon={<ReloadOutlined />} disabled={!selectedStoreCode} onClick={() => void loadData(pageNumber, pageSize, sortOrder)}>
+        <Button icon={<ReloadOutlined />} disabled={!hasStores} onClick={() => void loadData(pageNumber, pageSize, sortOrder)}>
           {t('common.refresh')}
         </Button>
       )}
@@ -491,10 +520,43 @@ export default function PosAdminLegacyEmployeeLogsPage() {
               <Col xs={24} sm={12} lg={6}>
                 <Form.Item
                   label={t('legacyEmployeeLogs.filters.store')}
-                  name="storeCode"
-                  rules={[{ required: true, message: t('legacyEmployeeLogs.validation.storeRequired') }]}
+                  name="storeCodes"
+                  rules={[{ required: true, type: 'array', min: 1, message: t('legacyEmployeeLogs.validation.storeRequired') }]}
                 >
-                  <Select showSearch optionFilterProp="label" options={visibleStoreOptions} placeholder={t('legacyEmployeeLogs.filters.storePlaceholder')} />
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    maxTagCount="responsive"
+                    optionFilterProp="label"
+                    options={visibleStoreOptions}
+                    placeholder={t('legacyEmployeeLogs.filters.storePlaceholder')}
+                    onOpenChange={setStoreDropdownOpen}
+                    popupRender={(menu) => (
+                      <>
+                        {visibleStoreOptions.length > 1 ? (
+                          <Space style={{ padding: '4px 8px' }}>
+                            <Button
+                              size="small"
+                              type="link"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => form.setFieldsValue({ storeCodes: visibleStoreOptions.map((option) => option.value) })}
+                            >
+                              {t('legacyEmployeeLogs.filters.selectAllStores', { count: visibleStoreOptions.length })}
+                            </Button>
+                            <Button
+                              size="small"
+                              type="link"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => form.setFieldsValue({ storeCodes: [] })}
+                            >
+                              {t('legacyEmployeeLogs.filters.clearStores')}
+                            </Button>
+                          </Space>
+                        ) : null}
+                        {menu}
+                      </>
+                    )}
+                  />
                 </Form.Item>
               </Col>
               <Col xs={24} sm={12} lg={6}>
@@ -636,7 +698,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
               emptyText: (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={selectedStoreCode ? t('legacyEmployeeLogs.table.empty') : t('legacyEmployeeLogs.table.selectStoreFirst')}
+                  description={hasStores ? t('legacyEmployeeLogs.table.empty') : t('legacyEmployeeLogs.table.selectStoreFirst')}
                 />
               ),
             }}

@@ -111,6 +111,61 @@ public sealed class LegacyEmployeeLogSqlServerIntegrationTests
 
     [LegacyEmployeeLogSqlServerFact]
     [Trait("Category", "SQL")]
+    public async Task 多店按时间交错排序且计数与选项覆盖所选分店()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var service = fixture.CreateService("1013", LegacyEmployeeLogSqlServerQuery.DefaultKeywordScanRowLimit, "1022");
+        var request = Day();
+        request.StoreCode = null;
+        request.StoreCodes = ["1013", "1022"];
+
+        var data = (await service.QueryAsync(request)).Data!;
+
+        Assert.Equal(7, data.Total);
+        // 1022 的 10:00 排在 1013 的 15:20 与 00:06:30 之间。
+        Assert.Equal(
+            new[] { "L-1013-6", "L-1013-5", "L-1022-1", "L-1013-4", "L-1013-3", "L-1013-2", "L-1013-1" },
+            data.Items.Select(item => item.Id)
+        );
+        Assert.Equal(2, data.OperationCounts.Single(row => row.Operation == "删除商品").Count);
+        Assert.Contains(data.Devices, row => row.DeviceCode == "POS_1022_1133");
+
+        var page2 = Day();
+        page2.StoreCodes = ["1013", "1022"];
+        page2.PageSize = 3;
+        page2.PageNumber = 2;
+        Assert.Equal(new[] { "L-1013-4", "L-1013-3", "L-1013-2" }, (await service.QueryAsync(page2)).Data!.Items.Select(item => item.Id));
+
+        // 多选中有越权分店时整次拒绝。
+        var onlyOne = fixture.CreateService("1013");
+        Assert.Equal(LegacyEmployeeLogResultStatus.Forbidden, (await onlyOne.QueryAsync(request)).Status);
+    }
+
+    [LegacyEmployeeLogSqlServerFact]
+    [Trait("Category", "SQL")]
+    public async Task 关键字扫描范围超限时拒绝并提示缩小范围()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        // 上限 3 行：1013 当天 6 行超限；只看 Oscar（2 行）就在上限内。
+        var service = fixture.CreateService("1013", keywordScanRowLimit: 3);
+        var request = Day();
+        request.Keyword = "钱箱";
+
+        var rejected = await service.QueryAsync(request);
+        Assert.Equal(LegacyEmployeeLogResultStatus.Invalid, rejected.Status);
+        Assert.Contains("6 条", rejected.Message);
+
+        request.EmployeeIds = [Oscar];
+        var narrowed = await service.QueryAsync(request);
+        Assert.Equal(LegacyEmployeeLogResultStatus.Ok, narrowed.Status);
+        Assert.Equal("L-1013-5", Assert.Single(narrowed.Data!.Items).Id);
+
+        // 不带关键字时不受该上限限制。
+        Assert.Equal(6, (await service.QueryAsync(Day())).Data!.Total);
+    }
+
+    [LegacyEmployeeLogSqlServerFact]
+    [Trait("Category", "SQL")]
     public async Task 分页与升序()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -200,12 +255,25 @@ public sealed class LegacyEmployeeLogSqlServerIntegrationTests
             }
         }
 
-        public LegacyEmployeeLogQueryService CreateService(string accessibleStoreCode)
+        public LegacyEmployeeLogQueryService CreateService(
+            string accessibleStoreCode,
+            int keywordScanRowLimit = LegacyEmployeeLogSqlServerQuery.DefaultKeywordScanRowLimit,
+            params string[] moreAccessibleStoreCodes
+        )
         {
+            var accessible = new[] { accessibleStoreCode }.Concat(moreAccessibleStoreCodes).ToArray();
             var scope = new Mock<ICurrentUserManageableStoreScopeService>();
             scope.Setup(service => service.CanAccessStoreCodeAsync(It.IsAny<string>()))
-                .ReturnsAsync((string code) => code == accessibleStoreCode);
-            return new LegacyEmployeeLogQueryService(_db, scope.Object, NullLogger<LegacyEmployeeLogQueryService>.Instance);
+                .ReturnsAsync((string code) => accessible.Contains(code));
+            scope.Setup(service => service.GetScopeAsync()).ReturnsAsync(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true,
+                IsAuthenticated = true,
+                IsStoreManager = true,
+                StoreCodes = accessible,
+            });
+            return new LegacyEmployeeLogQueryService(
+                _db, scope.Object, NullLogger<LegacyEmployeeLogQueryService>.Instance, keywordScanRowLimit);
         }
 
         private async Task SeedAsync()
