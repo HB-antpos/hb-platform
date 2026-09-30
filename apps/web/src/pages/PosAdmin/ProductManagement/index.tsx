@@ -161,6 +161,8 @@ import {
 } from './activeFilterChips'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 import ProductListImage from '../../../components/ProductListImage'
+import { useProductImageVersion } from '../../../hooks/useProductImageVersion'
+import { toProductImagePreviewUrl } from '../../../utils/productImageThumbnail'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { readRequestErrorCode } from '../../../services/localSupplierCategoryService'
 import { SUPPLIER_CATEGORY_MISMATCH_ERROR_CODE, type SupplierCategoryUpdatePayload } from '../../../types/localSupplierCategory'
@@ -219,6 +221,25 @@ type StoreRecordBatchEditFormValues = {
   isActive?: boolean
 }
 
+/**
+ * 编辑弹窗里的商品图预览。直接加载原图，而原图响应没有 Cache-Control，浏览器会按启发式长期缓存；
+ * COS 上按原文件名换过的图带版本号，避免编辑时仍看到旧图。
+ */
+function ProductImageEditPreview({ src }: { src: string }) {
+  const version = useProductImageVersion(src)
+  return (
+    <Image
+      className="pos-products-edit-image-preview"
+      src={toProductImagePreviewUrl(src, version)}
+      width={64}
+      height={64}
+      style={{ objectFit: 'contain' }}
+      preview={{ mask: '' }}
+      fallback={PRODUCT_IMAGE_FALLBACK}
+    />
+  )
+}
+
 function isSameSetCodePasteTarget(
   left: SetCodePasteTarget | null,
   right: SetCodePasteTarget,
@@ -235,6 +256,7 @@ const PRODUCT_HQ_SYNC_TIMEOUT_MS = 10 * 60 * 1000
 const SUPPLIER_IMAGE_BATCH_POLL_INTERVAL_MS = 2000
 const SUPPLIER_IMAGE_BATCH_TIMEOUT_MS = 30 * 60 * 1000
 const PRODUCT_IMAGE_FALLBACK = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjAiIHk9IjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjY2NjIj7ml6DnvKk8L3RleHQ+PC9zdmc+'
+
 const DEFAULT_PRODUCT_IMAGE_BASE_URL = 'https://hotbargain-yw-2023-1300114625.cos.ap-shanghai.myqcloud.com/YW200'
 const CHINESE_TEXT_PATTERN = /[\u4e00-\u9fff]/
 const PRODUCT_TEXT_FILTER_OPERATORS: PosProductTextFilterOperator[] = ['contains', 'equals', 'startsWith', 'endsWith']
@@ -3866,15 +3888,7 @@ export default function ProductManagementPage() {
                 {({ getFieldValue }) => {
                   const productImage = String(getFieldValue('productImage') ?? '').trim()
                   return productImage ? (
-                    <Image
-                      className="pos-products-edit-image-preview"
-                      src={productImage}
-                      width={64}
-                      height={64}
-                      style={{ objectFit: 'contain' }}
-                      preview={{ mask: '' }}
-                      fallback={PRODUCT_IMAGE_FALLBACK}
-                    />
+                    <ProductImageEditPreview src={productImage} />
                   ) : (
                     <span className="pos-products-edit-image-preview">-</span>
                   )

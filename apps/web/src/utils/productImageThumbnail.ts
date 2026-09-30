@@ -22,10 +22,14 @@ export function isCosImageUrl(url: string): boolean {
 /**
  * 返回 COS 图片的缩略图地址；非 COS 地址、已带查询参数的地址原样返回。
  * 已带查询参数时不追加：COS 要求图片处理参数位于查询串开头，拼接容易生成无效地址。
+ *
+ * version 是图片在 COS 上的修改时间（见 productImageVersions）。COS 缩略图响应带 30 天强缓存，
+ * 图片按原文件名覆盖后浏览器仍显示旧缩略图；换过的图追加 &v= 换一个缓存键，COS 会忽略这个参数。
  */
 export function toProductThumbnailUrl(
   url: string | null | undefined,
   size: number = PRODUCT_LIST_THUMBNAIL_SIZE,
+  version?: string,
 ): string | undefined {
   const trimmed = url?.trim()
   if (!trimmed) {
@@ -34,5 +38,18 @@ export function toProductThumbnailUrl(
   if (trimmed.includes('?') || !isCosImageUrl(trimmed)) {
     return trimmed
   }
-  return `${trimmed}?imageMogr2/thumbnail/${size}x${size}/format/webp`
+  const versionSuffix = version ? `&v=${encodeURIComponent(version)}` : ''
+  return `${trimmed}?imageMogr2/thumbnail/${size}x${size}/format/webp${versionSuffix}`
+}
+
+/**
+ * 预览原图的地址：换过的 COS 图追加 ?v=，避免浏览器按启发式缓存继续显示旧原图。
+ * 没有版本号、非 COS 或已带查询参数的地址原样返回。
+ */
+export function toProductImagePreviewUrl(url: string, version?: string): string {
+  const trimmed = url.trim()
+  if (!version || trimmed.includes('?') || !isCosImageUrl(trimmed)) {
+    return url
+  }
+  return `${trimmed}?v=${encodeURIComponent(version)}`
 }
