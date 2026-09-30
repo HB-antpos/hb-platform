@@ -189,10 +189,10 @@
     {
       "path": "core/sync/hbpos-sync-adapters.ts",
       "package": "pos-sync",
-      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对",
+      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400",
       "baselineCanonicalRuntimeSha256": "1320cf6ac0ade04e774ee613faf5fff1c562384f7e8d6397c3a45a3e3adaac58",
-      "canonicalRuntimeSha256": "2a92c1ccb38a7cba447ddf094c662a49d3727968c0fcf8dc0aa9e69f66216789",
-      "canonicalTypeSha256": "12d04d23b8f16891df9ca81c3e37a9439d881f582d7912f120580f7f2d707f3a",
+      "canonicalRuntimeSha256": "3e3143c07c49f141d4da90a5e4f11069b4b8b24226c5535a93ab8242498c7fe6",
+      "canonicalTypeSha256": "108246e230572095955b875a0a09b5362271b22ad7d5b3d6fa05da07c940ece5",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -341,7 +341,7 @@
     {
       "path": "core/db/sqlite-settings-safety-repository.ts",
       "package": "pos-db",
-      "reason": "手动刷卡已入账的批准记录不再阻塞设置保存，未完成交易仍然保留安全门禁",
+      "reason": "手动刷卡已入账的批准记录不再阻塞设置保存，未完成交易仍然保留安全门禁；manual-card 按正式 provider 校验，已拒收审计视为投递终态不再计入待处理",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -357,8 +357,8 @@
         }
       ],
       "baselineCanonicalRuntimeSha256": "948600d0fb3c5027f60f8cfe9c57fc2bbc192abc1901915e86418c2b09fb92a7",
-      "canonicalRuntimeSha256": "48d65ed51e50f3177456f2f40338690129f1d0bf613db90459c6f799a4359eef",
-      "canonicalTypeSha256": "0ab843016531f79e65cecc09dfded1618aaca8ee86660eb55300f9ebf4d6d74f"
+      "canonicalRuntimeSha256": "4d7d0ece903b44b7ba8c0fedb4b123b66b242457fbdcd82123f69a275a2af366",
+      "canonicalTypeSha256": "8eb33aa4aef94707e91d1cfe0c640aabe87cc943e87dc50ad8b6fd571dbf8d8b"
     },
     {
       "path": "core/contracts/payment.ts",
