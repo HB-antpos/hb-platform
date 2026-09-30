@@ -209,6 +209,13 @@ export const settingsEnglishCopy = {
     "No nearby Bluetooth devices found. Make sure Bluetooth is on, then scan again.",
   "printer.bluetoothPermissionHint":
     "Allow HB POS to use Bluetooth in device Settings, then return to the app and scan again.",
+  "printer.bluetoothPermissionHintLocation":
+    "On Android 10/11, Bluetooth scanning is controlled by the Location permission. In device Settings, open Apps → HB POS → Permissions → Location, choose \"Allow only while using the app\", then return and scan again.",
+  "printer.bluetoothPermissionHintNearby":
+    "In device Settings, open Apps → HB POS → Permissions and allow \"Nearby devices\", then return and scan again.",
+  "printer.locationServiceHint":
+    "Turn on Location in the quick settings panel, or use the button below to open location settings, then return and scan again.",
+  "action.openLocationSettings": "Open location settings",
   "action.openSystemSettings": "Open system settings",
   "eyebrow.scanner": "SCANNER",
   "peripherals.scanner": "Scanner",
@@ -359,6 +366,8 @@ export const settingsEnglishCopy = {
     "Saved printer cleared, but the device may still be connected",
   "status.printer-bluetooth-authorization-pending":
     "Complete the device Bluetooth permission prompt, then scan again",
+  "status.printer-bluetooth-location-off":
+    "Location is off, so Android 10/11 cannot scan for nearby Bluetooth devices",
   "status.printer-bluetooth-permission-required":
     "Bluetooth permission is required to scan nearby devices",
   "status.printer-bluetooth-powered-off":
@@ -587,6 +596,13 @@ export const settingsChineseCopy = {
     "未发现附近的蓝牙设备。请确认蓝牙已开启，然后重新扫描。",
   "printer.bluetoothPermissionHint":
     "请在设备系统设置中允许 HB POS 使用蓝牙，然后返回应用重新扫描。",
+  "printer.bluetoothPermissionHintLocation":
+    "本机为 Android 10 或 11，蓝牙扫描归在“位置信息”权限下：请在系统设置 → 应用 → HB POS → 权限 → 位置信息中选择“仅在使用该应用时允许”，然后返回应用重新扫描。",
+  "printer.bluetoothPermissionHintNearby":
+    "请在系统设置 → 应用 → HB POS → 权限中允许“附近的设备”，然后返回应用重新扫描。",
+  "printer.locationServiceHint":
+    "请下拉通知栏打开“位置信息”开关，或点下方按钮前往定位设置，然后返回应用重新扫描。",
+  "action.openLocationSettings": "前往定位设置",
   "action.openSystemSettings": "前往系统设置",
   "eyebrow.scanner": "扫描器",
   "peripherals.scanner": "扫描器",
@@ -725,6 +741,8 @@ export const settingsChineseCopy = {
     "已清除保存的打印机，但设备可能仍保持连接",
   "status.printer-bluetooth-authorization-pending":
     "请先完成设备蓝牙授权弹窗，然后重新扫描",
+  "status.printer-bluetooth-location-off":
+    "定位服务已关闭，Android 10 或 11 无法扫描附近的蓝牙设备",
   "status.printer-bluetooth-permission-required":
     "扫描附近设备需要蓝牙权限",
   "status.printer-bluetooth-powered-off": "蓝牙已关闭，请开启后重新扫描",
