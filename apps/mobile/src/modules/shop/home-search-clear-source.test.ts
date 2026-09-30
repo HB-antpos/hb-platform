@@ -53,6 +53,11 @@ assert.match(
   /icon="close"[\s\S]*?searchInputRef\.current\?\.clear\(\);[\s\S]*?visibleSearchScanner\.handleChangeText\(""\);/,
   "自绘清空按钮必须清空输入框并经 visibleSearchScanner.handleChangeText 退出已提交搜索",
 );
+assert.match(
+  homeSource,
+  /if \(scanFeedback\.status !== "supply_paused"[\s\S]*?if \(appliedSupplyPausedFeedbackRef\.current === scanFeedback\) \{\s*return;\s*\}\s*appliedSupplyPausedFeedbackRef\.current = scanFeedback;[\s\S]*?setSearchInput\(scanFeedback\.barcode\);/,
+  "暂停供货扫码回填只能按同一条反馈执行一次，否则清空搜索框后 effect 重跑会把旧条码写回",
+);
 
 const productContextReset = homeSource.match(
   /useEffect\(\(\) => \{[\s\S]*?searchReturnPageRef\.current = null;[\s\S]*?setPageNumber\(1\);[\s\S]*?\}, \[selectedCategoryGUID, selectedGrade, selectedStoreCode\]\);/,
