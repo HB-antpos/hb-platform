@@ -14,7 +14,7 @@
     "notAllowed": "You do not have access to new arrivals.",
     "storesFailed": "Stores could not be loaded.",
     "selectStore": "Select a store first.",
-    "dateNotice": "Store arrival dates are estimates; the container's actual arrival date takes priority."
+    "dateNotice": "Store arrival dates are estimates based on the container's warehouse arrival date, or its estimated port arrival if it has not reached the warehouse yet."
   },
   "states": { "loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new arrivals in the last 2 weeks or next 4 weeks.", "noImage": "No image" }
 }

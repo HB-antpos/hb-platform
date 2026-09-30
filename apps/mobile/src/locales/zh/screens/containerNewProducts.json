@@ -14,7 +14,7 @@
     "notAllowed": "没有新品到店权限，请联系管理员授权",
     "storesFailed": "门店列表加载失败",
     "selectStore": "请先选择门店",
-    "dateNotice": "到店日期为推算，货柜实际到货日期优先"
+    "dateNotice": "到店日期为推算，优先按货柜到仓库日期，未到仓库的按预计到岸日期"
   },
   "states": { "loading": "正在加载…", "loadFailed": "加载失败", "stateUnknown": "门店州别未知，无法计算到店日期", "empty": "近 2 周至未来 4 周暂无新品", "noImage": "暂无图片" }
 }
