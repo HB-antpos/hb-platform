@@ -9,6 +9,8 @@ const responseSchema = z.object({
   stateCode: z.string().nullable().optional().transform((value) => value ?? null),
   items: z.array(z.object({
     productCode: z.string().min(1),
+    hbProductNo: z.string().nullable().optional().transform((value) => value?.trim() || null),
+    quantity: z.number().nullable().optional().transform((value) => value ?? null),
     imageUrl: z.string().nullable().optional().transform((value) => value ?? null),
     containerNumber: z.string().nullable().optional().transform((value) => value ?? null),
     containerCode: z.string(),
@@ -16,6 +18,11 @@ const responseSchema = z.object({
     basis: z.enum(["actual", "estimated"]),
   })),
 });
+
+// 页面与外壳（工作台角标）共用同一缓存键：工作台取到的数据点进 HB新品 可直接复用
+export function containerNewProductsQueryKey(storeCode: string | null) {
+  return ["container-new-products", storeCode] as const;
+}
 
 export async function getContainerNewProducts(storeCode: string): Promise<ContainerNewProductsResponse> {
   try {

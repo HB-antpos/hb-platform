@@ -44,12 +44,15 @@ public sealed class ContainerNewProductsReactService(
         }
 
         var localToday = GetLocalToday(stateCode);
+        // 窗口按「预计到店日」算；到店日 = 货柜日期 + N 个工作日，所以先按放宽后的货柜日期粗筛，再逐柜精确过滤
         var (from, toExclusive) = BuildWindow(localToday);
-        var containers = await _db.Queryable<Container>()
+        var (containerFrom, containerToExclusive) = BuildContainerQueryWindow(from, toExclusive);
+        var storeArrivalWeekdays = stateCode == "NSW" ? 3 : 7;
+        var candidateContainers = await _db.Queryable<Container>()
             .Where(x => !x.IsDeleted)
             .Where(x =>
-                (x.ActualArrivalDate != null && x.ActualArrivalDate >= from && x.ActualArrivalDate < toExclusive)
-                || (x.ActualArrivalDate == null && x.EstimatedArrivalDate != null && x.EstimatedArrivalDate >= from && x.EstimatedArrivalDate < toExclusive))
+                (x.ActualArrivalDate != null && x.ActualArrivalDate >= containerFrom && x.ActualArrivalDate < containerToExclusive)
+                || (x.ActualArrivalDate == null && x.EstimatedArrivalDate != null && x.EstimatedArrivalDate >= containerFrom && x.EstimatedArrivalDate < containerToExclusive))
             .Select(x => new ContainerDateRow
             {
                 ContainerCode = x.ContainerCode,
@@ -58,6 +61,15 @@ public sealed class ContainerNewProductsReactService(
                 EstimatedArrivalDate = x.EstimatedArrivalDate,
             })
             .ToListAsync(cancellationToken);
+        var storeArrivalByContainer = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        var containers = new List<ContainerDateRow>();
+        foreach (var candidate in candidateContainers)
+        {
+            var storeArrival = AddWeekdays((candidate.ActualArrivalDate ?? candidate.EstimatedArrivalDate)!.Value.Date, storeArrivalWeekdays);
+            if (storeArrival < from || storeArrival >= toExclusive) continue;
+            storeArrivalByContainer[candidate.ContainerCode] = storeArrival;
+            containers.Add(candidate);
+        }
 
         if (containers.Count == 0)
         {
@@ -72,6 +84,8 @@ public sealed class ContainerNewProductsReactService(
             {
                 ContainerCode = detail.ContainerCode,
                 ProductCode = detail.ProductCode!,
+                HbProductNo = product.HBProductNo,
+                LoadingQuantity = detail.LoadingQuantity,
                 ImageUrl = product.ProductImage,
             })
             .ToListAsync(cancellationToken);
@@ -99,8 +113,9 @@ public sealed class ContainerNewProductsReactService(
 
         var containerByCode = containers.ToDictionary(x => x.ContainerCode, StringComparer.OrdinalIgnoreCase);
         var items = new List<ContainerNewProductItemDto>();
-        foreach (var detail in details.GroupBy(x => (x.ContainerCode, x.ProductCode)).Select(x => x.First()))
+        foreach (var group in details.GroupBy(x => (x.ContainerCode, x.ProductCode)))
         {
+            var detail = group.First();
             if (!ShouldIncludeProduct(
                     existingProducts.Contains(detail.ProductCode),
                     historyKeys.Contains(new HistoryKey(detail.ProductCode, detail.ContainerCode))))
@@ -109,14 +124,16 @@ public sealed class ContainerNewProductsReactService(
             }
 
             var container = containerByCode[detail.ContainerCode];
-            var baseDate = (container.ActualArrivalDate ?? container.EstimatedArrivalDate)!.Value.Date;
             items.Add(new ContainerNewProductItemDto
             {
                 ProductCode = detail.ProductCode,
+                HbProductNo = string.IsNullOrWhiteSpace(detail.HbProductNo) ? null : detail.HbProductNo.Trim(),
+                // 同一货柜同一商品可能拆成多行明细，数量要合计；全部为空时保持 null，前端不显示
+                Quantity = group.Any(x => x.LoadingQuantity.HasValue) ? group.Sum(x => x.LoadingQuantity ?? 0) : null,
                 ImageUrl = ProductImageUrlHelper.EnsureImageUrl(detail.ImageUrl, detail.ProductCode),
                 ContainerCode = detail.ContainerCode,
                 ContainerNumber = container.ContainerNumber,
-                EstimatedStoreArrivalDate = DateOnly.FromDateTime(AddWeekdays(baseDate, stateCode == "NSW" ? 3 : 7)),
+                EstimatedStoreArrivalDate = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode]),
                 Basis = container.ActualArrivalDate.HasValue ? "actual" : "estimated",
             });
         }
@@ -125,7 +142,13 @@ public sealed class ContainerNewProductsReactService(
         {
             StoreCode = normalizedStoreCode,
             StateCode = stateCode,
-            Items = items.OrderBy(x => x.EstimatedStoreArrivalDate).ThenBy(x => x.ProductCode, StringComparer.Ordinal).ToList(),
+            // 同一到店日按 HB 货号排；没有货号的排在该日末尾，最后用 ProductCode 保证顺序稳定
+            Items = items
+                .OrderBy(x => x.EstimatedStoreArrivalDate)
+                .ThenBy(x => x.HbProductNo == null)
+                .ThenBy(x => x.HbProductNo, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.ProductCode, StringComparer.Ordinal)
+                .ToList(),
         };
     }
 
@@ -160,8 +183,14 @@ public sealed class ContainerNewProductsReactService(
         return date;
     }
 
+    // 预计到店日窗口：过去 1 周至未来 2 周，含今天前 7 天与后 14 天，上界为开区间
     internal static (DateTime From, DateTime ToExclusive) BuildWindow(DateTime localToday) =>
-        (localToday.Date.AddDays(-14), localToday.Date.AddDays(29));
+        (localToday.Date.AddDays(-7), localToday.Date.AddDays(15));
+
+    // 货柜日期粗筛窗口：到店日比货柜日期晚 3~7 个工作日（最多跨 11 个自然日），下界多放 14 天保证不漏；
+    // 到店日一定晚于货柜日期，所以上界沿用到店窗口上界即可
+    internal static (DateTime From, DateTime ToExclusive) BuildContainerQueryWindow(DateTime storeFrom, DateTime storeToExclusive) =>
+        (storeFrom.AddDays(-14), storeToExclusive);
 
     internal static bool ShouldIncludeProduct(bool warehouseProductExists, bool matchingContainerCreateAudit) =>
         !warehouseProductExists || matchingContainerCreateAudit;
@@ -182,7 +211,7 @@ public sealed class ContainerNewProductsReactService(
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(state == "QLD" ? "Australia/Brisbane" : "Australia/Sydney")).Date;
 
     private sealed class ContainerDateRow { public string ContainerCode { get; init; } = string.Empty; public string? ContainerNumber { get; init; } public DateTime? ActualArrivalDate { get; init; } public DateTime? EstimatedArrivalDate { get; init; } }
-    private sealed class DetailRow { public string ContainerCode { get; init; } = string.Empty; public string ProductCode { get; init; } = string.Empty; public string? ImageUrl { get; init; } }
+    private sealed class DetailRow { public string ContainerCode { get; init; } = string.Empty; public string ProductCode { get; init; } = string.Empty; public string? HbProductNo { get; init; } public decimal? LoadingQuantity { get; init; } public string? ImageUrl { get; init; } }
     private sealed class HistoryRow { public string ProductCode { get; init; } = string.Empty; public string ContainerCode { get; init; } = string.Empty; }
     private sealed record HistoryKey(string ProductCode, string ContainerCode) { public static IEqualityComparer<HistoryKey> Comparer { get; } = new KeyComparer(); private sealed class KeyComparer : IEqualityComparer<HistoryKey> { public bool Equals(HistoryKey? x, HistoryKey? y) => x != null && y != null && string.Equals(x.ProductCode, y.ProductCode, StringComparison.OrdinalIgnoreCase) && string.Equals(x.ContainerCode, y.ContainerCode, StringComparison.OrdinalIgnoreCase); public int GetHashCode(HistoryKey obj) => HashCode.Combine(obj.ProductCode.ToUpperInvariant(), obj.ContainerCode.ToUpperInvariant()); } }
 }

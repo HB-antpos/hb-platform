@@ -69,14 +69,36 @@ public sealed class ContainerNewProductsRulesTests
     }
 
     [Fact]
-    public void QueryWindow_UsesInclusiveFourteenBackAndTwentyEightForwardDays()
+    public void ContainerQueryWindow_CoversEveryContainerWhoseStoreArrivalFallsInWindow()
+    {
+        // 逐日枚举（覆盖一周内每个星期几起算）：凡到店日落在窗口内的货柜日期，都必须在粗筛窗口内，否则会漏柜
+        for (var today = new DateTime(2026, 9, 21); today < new DateTime(2026, 10, 5); today = today.AddDays(1))
+        {
+            var (from, toExclusive) = ContainerNewProductsReactService.BuildWindow(today);
+            var (containerFrom, containerToExclusive) = ContainerNewProductsReactService.BuildContainerQueryWindow(from, toExclusive);
+            for (var containerDate = today.AddDays(-40); containerDate < today.AddDays(40); containerDate = containerDate.AddDays(1))
+            {
+                foreach (var weekdays in new[] { 3, 7 })
+                {
+                    var storeArrival = ContainerNewProductsReactService.AddWeekdays(containerDate, weekdays);
+                    if (storeArrival >= from && storeArrival < toExclusive)
+                    {
+                        Assert.InRange(containerDate, containerFrom, containerToExclusive.AddDays(-1));
+                    }
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void QueryWindow_UsesInclusiveSevenBackAndFourteenForwardDays()
     {
         var (from, toExclusive) = ContainerNewProductsReactService.BuildWindow(new DateTime(2026, 9, 28));
 
-        Assert.Equal(new DateTime(2026, 9, 14), from);
-        Assert.Equal(new DateTime(2026, 10, 27), toExclusive);
-        Assert.True(new DateTime(2026, 10, 26) < toExclusive);
-        Assert.False(new DateTime(2026, 10, 27) < toExclusive);
+        Assert.Equal(new DateTime(2026, 9, 21), from);
+        Assert.Equal(new DateTime(2026, 10, 13), toExclusive);
+        Assert.True(new DateTime(2026, 10, 12) < toExclusive);
+        Assert.False(new DateTime(2026, 10, 13) < toExclusive);
     }
 
     [Theory]
