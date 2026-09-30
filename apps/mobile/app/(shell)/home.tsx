@@ -833,10 +833,17 @@ export default function Home() {
   );
   // 扫到暂停供货的商品：把条码转成搜索词，零结果处展示后续计划与关注按钮。
   const scanFeedback = scanResult.feedback;
+  const appliedSupplyPausedFeedbackRef = useRef<typeof scanFeedback | null>(null);
   useEffect(() => {
     if (scanFeedback.status !== "supply_paused" || !scanFeedback.barcode) {
       return;
     }
+    // 每次扫码都会产生新的反馈对象，同一条反馈只回填一次。applySearchPageAction 随 keyword 重建，
+    // 用户点清除或删空搜索框使 keyword 置空时本 effect 会重跑，不拦截就会把上一个条码重新写回搜索框。
+    if (appliedSupplyPausedFeedbackRef.current === scanFeedback) {
+      return;
+    }
+    appliedSupplyPausedFeedbackRef.current = scanFeedback;
     setScannedProducts(null);
     setSearchInput(scanFeedback.barcode);
     applySearchPageAction({ type: "apply", input: scanFeedback.barcode });
