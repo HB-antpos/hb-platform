@@ -203,11 +203,14 @@ public sealed class LinklyCloudConnectionPoolTests
                 await Task.Delay(TimeSpan.FromMilliseconds(10), timeout.Token);
             }
 
-            using var observation = new CancellationTokenSource(TimeSpan.FromMilliseconds(900));
+            // 等待只是防挂死：被测语义由下方"流量仍在进行"与耗时下限断言守住，而连续流量永不停止，
+            // 若服务退化为"静默后才输出"，快照在整个预算内都不会出现，照样失败。曾用 900ms 观察窗口，
+            // CI 冷启动时线程池被其它测试占满，250ms 计时器回调与取消计时器同批触发、取消先执行而误报，
+            // 这里改用整个测试的兜底预算。
             var snapshot = await WaitForSnapshotAsync(
                 logger,
                 value => value.Environment == "Production" && value.TotalConnections == 1,
-                observation.Token);
+                timeout.Token);
 
             // 关键断言：连续请求仍在复用连接时，固定 250ms 窗口必须已经输出首次物理连接快照。
             Assert.False(trafficTask.IsCompleted);
