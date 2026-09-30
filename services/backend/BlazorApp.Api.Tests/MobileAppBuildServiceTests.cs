@@ -27,6 +27,8 @@ public sealed class MobileAppBuildServiceTests : IDisposable
     private const string OtaPreviewNew = "77777777-7777-7777-8777-777777777777";
     private const string OtaGroupRollback = "88888888-8888-8888-8888-888888888888";
     private const string OtaNewerThanApk = "99999999-9999-9999-8999-999999999999";
+    private const string MirroredSha256 = "5ce1912d1589a0545febc0054b4225eb16bd2ef308b27104f7a0902e1d7cf873";
+    private const long MirroredFileSize = 173913208;
     private readonly string _dbPath;
     private readonly ISqlSugarClient _db;
 
@@ -111,6 +113,8 @@ public sealed class MobileAppBuildServiceTests : IDisposable
         Assert.Equal(1, mirror.Calls);
         Assert.Equal(cosUrl, saved.CosArtifactUrl);
         Assert.Equal("mobile-app-builds/production/build-cos.apk", saved.CosObjectKey);
+        Assert.Equal(MirroredSha256, saved.ArtifactSha256);
+        Assert.Equal(MirroredFileSize, saved.ArtifactSize);
         Assert.Equal(new DateTime(2026, 6, 23, 1, 0, 0, DateTimeKind.Utc), saved.CosMirroredAt);
         Assert.Equal(MobileAppBuildService.CosMirrorStatusSucceeded, saved.CosMirrorStatus);
         Assert.Equal(1, saved.CosMirrorAttempts);
@@ -163,6 +167,204 @@ public sealed class MobileAppBuildServiceTests : IDisposable
         var saved = await _db.Queryable<MobileAppBuild>().SingleAsync();
         Assert.Equal(cosUrl, saved.CosArtifactUrl);
         Assert.Null(saved.CosMirrorError);
+    }
+
+    [Theory]
+    [InlineData(null, MirroredFileSize)]
+    [InlineData("not-a-sha256", MirroredFileSize)]
+    [InlineData(MirroredSha256, 0L)]
+    public async Task Cos镜像成功回写_缺少有效SHA256或大小时_拒绝写成功以便重试(
+        string? sha256,
+        long fileSize
+    )
+    {
+        var service = CreateService();
+        await service.HandleEasWebhookAsync(
+            CreatePayload(easBuildId: "build-no-checksum", artifactUrl: "https://expo.dev/artifacts/eas/build-no-checksum.apk")
+        );
+        var job = await service.ClaimNextCosMirrorJobAsync(
+            new DateTime(2026, 9, 30, 0, 0, 0, DateTimeKind.Utc),
+            3,
+            TimeSpan.FromMinutes(30)
+        );
+        Assert.NotNull(job);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CompleteCosMirrorSuccessAsync(
+                job!,
+                new MobileAppBuildArtifactMirrorResult
+                {
+                    ArtifactUrl = "https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/mobile-app-builds/production/build-no-checksum.apk",
+                    ObjectKey = "mobile-app-builds/production/build-no-checksum.apk",
+                    Sha256 = sha256!,
+                    FileSize = fileSize,
+                }
+            )
+        );
+
+        var saved = await _db.Queryable<MobileAppBuild>().SingleAsync();
+        Assert.Null(saved.CosArtifactUrl);
+        Assert.Null(saved.ArtifactSha256);
+        Assert.Equal(MobileAppBuildService.CosMirrorStatusRunning, saved.CosMirrorStatus);
+    }
+
+    [Fact]
+    public async Task Cos校验值补算_只认领成功但缺校验值的行_补齐后不再认领()
+    {
+        var service = CreateService();
+        var now = new DateTime(2026, 9, 30, 2, 0, 0, DateTimeKind.Utc);
+        // 生产 build 5 的形态：旧版本进程镜像成功，但只写了 COS 地址，没写 SHA-256/大小。
+        var missing = await InsertMirroredBuildAsync("build-missing-checksum", attempts: 2);
+        var complete = await InsertMirroredBuildAsync(
+            "build-complete",
+            sha256: new string('b', 64),
+            size: 4096,
+            completedAt: now
+        );
+        var sizeOnlyMissing = await InsertMirroredBuildAsync(
+            "build-size-missing",
+            sha256: new string('c', 64),
+            completedAt: now.AddHours(-2)
+        );
+        var exhausted = await InsertMirroredBuildAsync("build-exhausted", attempts: 6, completedAt: now);
+        await _db.Insertable(
+            new MobileAppBuild
+            {
+                Id = Guid.NewGuid(),
+                EasBuildId = "build-pending",
+                AccountName = "hotbargain",
+                ProjectName = "hb-mobile",
+                Platform = "android",
+                Status = "finished",
+                BuildProfile = "production",
+                ArtifactUrl = "https://expo.dev/artifacts/eas/build-pending.apk",
+                CosMirrorStatus = MobileAppBuildService.CosMirrorStatusPending,
+                CompletedAt = now,
+                ReceivedAt = now,
+            }
+        ).ExecuteCommandAsync();
+
+        var job = await service.ClaimNextCosChecksumBackfillJobAsync(now, 6, TimeSpan.FromMinutes(30));
+
+        Assert.NotNull(job);
+        Assert.Equal(missing, job!.Id);
+        Assert.Equal(3, job.CosMirrorAttempts);
+        var claimed = await _db.Queryable<MobileAppBuild>().SingleAsync(x => x.Id == missing);
+        // 认领不改变对外状态，补算期间构建仍是 succeeded。
+        Assert.Equal(MobileAppBuildService.CosMirrorStatusSucceeded, claimed.CosMirrorStatus);
+        Assert.Equal(3, claimed.CosMirrorAttempts);
+        Assert.Equal(now, claimed.CosMirrorLastAttemptAtUtc);
+
+        await service.CompleteCosChecksumBackfillSuccessAsync(
+            job,
+            new MobileAppBuildArtifactChecksum { Sha256 = MirroredSha256.ToUpperInvariant(), FileSize = MirroredFileSize }
+        );
+
+        var saved = await _db.Queryable<MobileAppBuild>().SingleAsync(x => x.Id == missing);
+        Assert.Equal(MirroredSha256, saved.ArtifactSha256);
+        Assert.Equal(MirroredFileSize, saved.ArtifactSize);
+        Assert.Equal(MobileAppBuildService.CosMirrorStatusSucceeded, saved.CosMirrorStatus);
+        Assert.NotNull(saved.CosArtifactUrl);
+
+        // 只缺大小的行同样需要补；已完整、已用尽次数、未镜像的行都不认领。
+        var next = await service.ClaimNextCosChecksumBackfillJobAsync(now, 6, TimeSpan.FromMinutes(30));
+        Assert.Equal(sizeOnlyMissing, next!.Id);
+        await service.CompleteCosChecksumBackfillSuccessAsync(
+            next,
+            new MobileAppBuildArtifactChecksum { Sha256 = new string('c', 64), FileSize = 2048 }
+        );
+        Assert.Null(await service.ClaimNextCosChecksumBackfillJobAsync(now.AddHours(1), 6, TimeSpan.FromMinutes(30)));
+        Assert.Equal(6, (await _db.Queryable<MobileAppBuild>().SingleAsync(x => x.Id == exhausted)).CosMirrorAttempts);
+        Assert.Equal(new string('b', 64), (await _db.Queryable<MobileAppBuild>().SingleAsync(x => x.Id == complete)).ArtifactSha256);
+    }
+
+    [Fact]
+    public async Task Cos校验值补算失败_只记录错误不改状态_间隔后重试_用尽次数后停止()
+    {
+        var service = CreateService();
+        var now = new DateTime(2026, 9, 30, 2, 0, 0, DateTimeKind.Utc);
+        var id = await InsertMirroredBuildAsync("build-backfill-fail", attempts: 4);
+
+        var first = await service.ClaimNextCosChecksumBackfillJobAsync(now, 6, TimeSpan.FromMinutes(30));
+        Assert.Equal(id, first!.Id);
+        await service.CompleteCosChecksumBackfillFailureAsync(
+            first,
+            new MobileAppBuildArtifactMirrorException("COS 对象返回 HTTP 404 Not Found")
+        );
+
+        var saved = await _db.Queryable<MobileAppBuild>().SingleAsync(x => x.Id == id);
+        Assert.Equal(MobileAppBuildService.CosMirrorStatusSucceeded, saved.CosMirrorStatus);
+        Assert.NotNull(saved.CosArtifactUrl);
+        Assert.StartsWith("CHECKSUM_BACKFILL:", saved.CosMirrorError);
+        Assert.Contains("HTTP 404", saved.CosMirrorError);
+
+        Assert.Null(await service.ClaimNextCosChecksumBackfillJobAsync(now.AddMinutes(10), 6, TimeSpan.FromMinutes(30)));
+        var second = await service.ClaimNextCosChecksumBackfillJobAsync(now.AddMinutes(31), 6, TimeSpan.FromMinutes(30));
+        Assert.Equal(6, second!.CosMirrorAttempts);
+        await service.CompleteCosChecksumBackfillFailureAsync(second, new HttpRequestException("timeout"));
+        Assert.Null(await service.ClaimNextCosChecksumBackfillJobAsync(now.AddHours(2), 6, TimeSpan.FromMinutes(30)));
+    }
+
+    [Fact]
+    public async Task Cos校验值补算回写_期间已被补值或对象已变更_不覆盖()
+    {
+        var service = CreateService();
+        var now = new DateTime(2026, 9, 30, 2, 0, 0, DateTimeKind.Utc);
+        var id = await InsertMirroredBuildAsync("build-backfill-race");
+        var job = await service.ClaimNextCosChecksumBackfillJobAsync(now, 6, TimeSpan.FromMinutes(30));
+        Assert.Equal(id, job!.Id);
+
+        // 补算期间有人工核对后写入了校验值。
+        await _db.Updateable<MobileAppBuild>()
+            .SetColumns(x => new MobileAppBuild { ArtifactSha256 = MirroredSha256, ArtifactSize = MirroredFileSize })
+            .Where(x => x.Id == id)
+            .ExecuteCommandAsync();
+        await service.CompleteCosChecksumBackfillSuccessAsync(
+            job,
+            new MobileAppBuildArtifactChecksum { Sha256 = new string('d', 64), FileSize = 1 }
+        );
+
+        var saved = await _db.Queryable<MobileAppBuild>().SingleAsync(x => x.Id == id);
+        Assert.Equal(MirroredSha256, saved.ArtifactSha256);
+        Assert.Equal(MirroredFileSize, saved.ArtifactSize);
+    }
+
+    private async Task<Guid> InsertMirroredBuildAsync(
+        string easBuildId,
+        string? sha256 = null,
+        long? size = null,
+        int attempts = 1,
+        DateTime? completedAt = null
+    )
+    {
+        var id = Guid.NewGuid();
+        var at = completedAt ?? new DateTime(2026, 9, 30, 0, 3, 20, DateTimeKind.Utc);
+        await _db.Insertable(
+            new MobileAppBuild
+            {
+                Id = id,
+                AppKey = "pos-handheld",
+                EasBuildId = easBuildId,
+                AccountName = "hotbargain",
+                ProjectName = "hb-pos-handheld",
+                Platform = "android",
+                Status = "finished",
+                BuildProfile = "production",
+                ArtifactUrl = $"https://expo.dev/artifacts/eas/{easBuildId}.apk",
+                CosArtifactUrl = $"https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/mobile-app-builds/production/{easBuildId}.apk",
+                CosObjectKey = $"mobile-app-builds/production/{easBuildId}.apk",
+                CosMirroredAt = at,
+                CosMirrorStatus = MobileAppBuildService.CosMirrorStatusSucceeded,
+                CosMirrorAttempts = attempts,
+                CosMirrorLastAttemptAtUtc = at,
+                ArtifactSha256 = sha256,
+                ArtifactSize = size,
+                CompletedAt = at,
+                ReceivedAt = at,
+                CreatedAt = at,
+            }
+        ).ExecuteCommandAsync();
+        return id;
     }
 
     [Fact]
@@ -1567,6 +1769,8 @@ public sealed class MobileAppBuildServiceTests : IDisposable
                 {
                     ArtifactUrl = artifactUrl,
                     ObjectKey = objectKey,
+                    Sha256 = MirroredSha256,
+                    FileSize = MirroredFileSize,
                     MirroredAt = mirroredAt,
                 },
                 null
@@ -1590,6 +1794,14 @@ public sealed class MobileAppBuildServiceTests : IDisposable
             }
 
             return Task.FromResult(_result!);
+        }
+
+        public Task<MobileAppBuildArtifactChecksum> ComputeMirroredChecksumAsync(
+            MobileAppBuild build,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException("服务测试不经过 COS 校验值补算。");
         }
     }
 

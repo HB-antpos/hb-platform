@@ -47,7 +47,62 @@ public sealed class MobileAppBuildMirrorBackgroundServiceTests
 
         Assert.False(processed);
         Assert.Equal(1, queue.ClaimCalls);
+        Assert.Equal(1, queue.BackfillClaimCalls);
         Assert.Equal(0, mirror.Calls);
+        Assert.Equal(0, mirror.ChecksumCalls);
+    }
+
+    [Fact]
+    public async Task ProcessOneAsync_有镜像任务时_不做校验值补算()
+    {
+        var queue = new FakeMirrorQueue
+        {
+            ClaimedJob = new MobileAppBuild { Id = Guid.NewGuid(), EasBuildId = "build-new" },
+            BackfillJob = new MobileAppBuild { Id = Guid.NewGuid(), EasBuildId = "build-old" },
+        };
+        var mirror = new FakeArtifactMirror();
+        using var host = CreateHost(queue, mirror);
+
+        Assert.True(await host.Service.ProcessOneAsync(CancellationToken.None));
+
+        Assert.Equal(1, queue.SuccessCalls);
+        Assert.Equal(0, queue.BackfillClaimCalls);
+        Assert.Equal(0, mirror.ChecksumCalls);
+    }
+
+    [Fact]
+    public async Task ProcessOneAsync_镜像队列空闲时_补算成功但缺校验值的记录()
+    {
+        var job = new MobileAppBuild { Id = Guid.NewGuid(), EasBuildId = "build-missing-checksum" };
+        var queue = new FakeMirrorQueue { BackfillJob = job };
+        var mirror = new FakeArtifactMirror();
+        using var host = CreateHost(queue, mirror);
+
+        Assert.True(await host.Service.ProcessOneAsync(CancellationToken.None));
+
+        Assert.Equal(1, mirror.ChecksumCalls);
+        Assert.Same(job, queue.BackfillSucceeded);
+        Assert.Equal(new string('a', 64), queue.BackfillChecksum!.Sha256);
+        Assert.Equal(0, queue.BackfillFailureCalls);
+    }
+
+    [Fact]
+    public async Task ProcessOneAsync_补算失败_回写失败而不是抛出()
+    {
+        var queue = new FakeMirrorQueue
+        {
+            BackfillJob = new MobileAppBuild { Id = Guid.NewGuid(), EasBuildId = "build-cos-missing" },
+        };
+        var mirror = new FakeArtifactMirror
+        {
+            ChecksumException = new MobileAppBuildArtifactMirrorException("COS 对象返回 HTTP 404 Not Found"),
+        };
+        using var host = CreateHost(queue, mirror);
+
+        Assert.True(await host.Service.ProcessOneAsync(CancellationToken.None));
+
+        Assert.Null(queue.BackfillSucceeded);
+        Assert.Equal(1, queue.BackfillFailureCalls);
     }
 
     private static TestHost CreateHost(
@@ -123,6 +178,42 @@ public sealed class MobileAppBuildMirrorBackgroundServiceTests
             FailureCalls++;
             return Task.CompletedTask;
         }
+
+        public MobileAppBuild? BackfillJob { get; init; }
+
+        public int BackfillClaimCalls { get; private set; }
+
+        public MobileAppBuild? BackfillSucceeded { get; private set; }
+
+        public MobileAppBuildArtifactChecksum? BackfillChecksum { get; private set; }
+
+        public int BackfillFailureCalls { get; private set; }
+
+        public Task<MobileAppBuild?> ClaimNextCosChecksumBackfillJobAsync(
+            DateTime now,
+            int maxAttempts,
+            TimeSpan retryAfter
+        )
+        {
+            BackfillClaimCalls++;
+            return Task.FromResult(BackfillJob);
+        }
+
+        public Task CompleteCosChecksumBackfillSuccessAsync(
+            MobileAppBuild entity,
+            MobileAppBuildArtifactChecksum checksum
+        )
+        {
+            BackfillSucceeded = entity;
+            BackfillChecksum = checksum;
+            return Task.CompletedTask;
+        }
+
+        public Task CompleteCosChecksumBackfillFailureAsync(MobileAppBuild entity, Exception exception)
+        {
+            BackfillFailureCalls++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeArtifactMirror : IMobileAppBuildArtifactMirror
@@ -147,8 +238,30 @@ public sealed class MobileAppBuildMirrorBackgroundServiceTests
                 {
                     ArtifactUrl = "https://cos.example.com/mobile-app-builds/production/build.apk",
                     ObjectKey = "mobile-app-builds/production/build.apk",
+                    Sha256 = new string('a', 64),
+                    FileSize = 4096,
                     MirroredAt = DateTime.UtcNow,
                 }
+            );
+        }
+
+        public Exception? ChecksumException { get; init; }
+
+        public int ChecksumCalls { get; private set; }
+
+        public Task<MobileAppBuildArtifactChecksum> ComputeMirroredChecksumAsync(
+            MobileAppBuild build,
+            CancellationToken cancellationToken = default
+        )
+        {
+            ChecksumCalls++;
+            if (ChecksumException != null)
+            {
+                throw ChecksumException;
+            }
+
+            return Task.FromResult(
+                new MobileAppBuildArtifactChecksum { Sha256 = new string('a', 64), FileSize = 4096 }
             );
         }
     }

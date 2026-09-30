@@ -91,39 +91,12 @@ namespace BlazorApp.Api.Services
             ))
             {
                 await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                var buffer = new byte[128 * 1024];
-                actualSize = 0;
-                while (true)
-                {
-                    var read = await source.ReadAsync(buffer, cancellationToken);
-                    if (read == 0)
-                    {
-                        break;
-                    }
-
-                    actualSize += read;
-                    if (actualSize > MaxApkBytes || actualSize > contentLength.Value)
-                    {
-                        throw new MobileAppBuildArtifactMirrorException(
-                            "APK 实际大小超过响应声明或安全上限",
-                            isDownloadUnsafe: true
-                        );
-                    }
-
-                    hash.AppendData(buffer, 0, read);
-                    await tempStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                }
-
-                if (actualSize != contentLength.Value)
-                {
-                    throw new MobileAppBuildArtifactMirrorException(
-                        "APK 实际大小与 Content-Length 不一致",
-                        isDownloadUnsafe: true
-                    );
-                }
-
-                sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+                (sha256, actualSize) = await HashStreamAsync(
+                    source,
+                    contentLength.Value,
+                    tempStream,
+                    cancellationToken
+                );
                 tempStream.Position = 0;
                 upload = await _uploadService.UploadStreamAsync(
                     objectKey,
@@ -153,6 +126,115 @@ namespace BlazorApp.Api.Services
                 FileSize = actualSize,
                 MirroredAt = DateTime.UtcNow,
             };
+        }
+
+        public async Task<MobileAppBuildArtifactChecksum> ComputeMirroredChecksumAsync(
+            MobileAppBuild build,
+            CancellationToken cancellationToken = default
+        )
+        {
+            var objectKey = build.CosObjectKey?.Trim();
+            if (
+                string.IsNullOrEmpty(objectKey)
+                || !_uploadService.TryGetPublicObjectKey(build.CosArtifactUrl, out var urlObjectKey)
+                || !string.Equals(urlObjectKey, objectKey, StringComparison.Ordinal)
+            )
+            {
+                // 关键位置：校验值必须来自客户端实际下载的那个 COS 对象；地址与对象键对不上时宁可不补。
+                throw new MobileAppBuildArtifactMirrorException(
+                    "COS 下载地址与对象键不一致，无法补算校验值"
+                );
+            }
+
+            // 用签名 GET 读取，避免依赖 bucket 公开读；COS 对象不会像 EAS artifact 那样过期。
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                _uploadService.GetSignedDownloadUrl(objectKey)
+            );
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken
+            );
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new MobileAppBuildArtifactMirrorException(
+                    $"COS 对象返回 HTTP {(int)response.StatusCode} {response.ReasonPhrase}"
+                );
+            }
+
+            var contentLength = response.Content.Headers.ContentLength;
+            if (contentLength is not > 0 || contentLength > MaxApkBytes)
+            {
+                throw new MobileAppBuildArtifactMirrorException(
+                    "COS 对象缺少有效 Content-Length 或超过大小上限"
+                );
+            }
+
+            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var (sha256, actualSize) = await HashStreamAsync(
+                source,
+                contentLength.Value,
+                copyTo: null,
+                cancellationToken
+            );
+
+            _logger.LogInformation(
+                "APK COS 对象校验值已补算，EasBuildId: {EasBuildId}, ObjectKey: {ObjectKey}, Size: {Size}",
+                build.EasBuildId,
+                objectKey,
+                actualSize
+            );
+
+            return new MobileAppBuildArtifactChecksum { Sha256 = sha256, FileSize = actualSize };
+        }
+
+        /// <summary>
+        /// 流式计算 SHA-256 并严格校验实际字节数等于声明长度；copyTo 非空时同时落盘供后续上传。
+        /// </summary>
+        private static async Task<(string Sha256, long Size)> HashStreamAsync(
+            Stream source,
+            long declaredLength,
+            Stream? copyTo,
+            CancellationToken cancellationToken
+        )
+        {
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[128 * 1024];
+            long actualSize = 0;
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer, cancellationToken);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                actualSize += read;
+                if (actualSize > MaxApkBytes || actualSize > declaredLength)
+                {
+                    throw new MobileAppBuildArtifactMirrorException(
+                        "APK 实际大小超过响应声明或安全上限",
+                        isDownloadUnsafe: true
+                    );
+                }
+
+                hash.AppendData(buffer, 0, read);
+                if (copyTo != null)
+                {
+                    await copyTo.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
+            }
+
+            if (actualSize != declaredLength)
+            {
+                throw new MobileAppBuildArtifactMirrorException(
+                    "APK 实际大小与 Content-Length 不一致",
+                    isDownloadUnsafe: true
+                );
+            }
+
+            return (Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(), actualSize);
         }
 
         private async Task<HttpResponseMessage> GetArtifactResponseAsync(
