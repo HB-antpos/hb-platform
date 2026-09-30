@@ -36,16 +36,19 @@ public sealed class LegacyEmployeeLogQueryService
     private readonly ISqlSugarClient _posmDb;
     private readonly ICurrentUserManageableStoreScopeService _storeScopeService;
     private readonly ILogger<LegacyEmployeeLogQueryService> _logger;
+    private readonly int _keywordScanRowLimit;
 
     public LegacyEmployeeLogQueryService(
         ISqlSugarClient posmDb,
         ICurrentUserManageableStoreScopeService storeScopeService,
-        ILogger<LegacyEmployeeLogQueryService> logger
+        ILogger<LegacyEmployeeLogQueryService> logger,
+        int keywordScanRowLimit = LegacyEmployeeLogSqlServerQuery.DefaultKeywordScanRowLimit
     )
     {
         _posmDb = posmDb;
         _storeScopeService = storeScopeService;
         _logger = logger;
+        _keywordScanRowLimit = keywordScanRowLimit;
     }
 
     public async Task<LegacyEmployeeLogResult<LegacyEmployeeLogListResultDto>> QueryAsync(
@@ -58,17 +61,27 @@ public sealed class LegacyEmployeeLogQueryService
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogListResultDto>.Invalid(error!);
         }
-        if (!await _storeScopeService.CanAccessStoreCodeAsync(query.StoreCode))
+        // 多选时每家分店都必须在当前账号可管理范围内，任一越权整次拒绝，不静默剔除。
+        var scope = await _storeScopeService.GetScopeAsync();
+        if (!scope.IsAllowed || query.StoreCodes.Any(code => !scope.CanAccessStoreCode(code)))
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogListResultDto>.Forbidden();
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var (counts, rows, employees, devices) = await LegacyEmployeeLogSqlServerQuery.ExecuteListAsync(
+        var page = await LegacyEmployeeLogSqlServerQuery.ExecuteListAsync(
             GetSqlServerConnection(),
-            LegacyEmployeeLogSqlServerQuery.BuildList(query),
+            LegacyEmployeeLogSqlServerQuery.BuildList(query, _keywordScanRowLimit),
+            hasKeywordGuard: query.Keyword != null,
+            _keywordScanRowLimit,
             cancellationToken
         );
+        if (page.RejectedScanRows is { } scanRows)
+        {
+            return LegacyEmployeeLogResult<LegacyEmployeeLogListResultDto>.Invalid(
+                $"详情关键字需要逐条读取记录，当前范围约 {scanRows:N0} 条，超过 {_keywordScanRowLimit:N0} 条上限；请减少分店、缩短时间，或先选定员工 / 设备后再搜索");
+        }
+        var (counts, rows, employees, devices) = (page.Counts, page.Rows, page.Employees, page.Devices);
         // 计数结果已套用除操作类型外的全部条件，按操作类型条件累加即为列表总数，省掉一次 COUNT。
         var operationFilter = new HashSet<string>(query.Operations, StringComparer.OrdinalIgnoreCase);
         var total = counts
@@ -79,8 +92,8 @@ public sealed class LegacyEmployeeLogQueryService
         if (stopwatch.ElapsedMilliseconds >= SlowQueryWarningMilliseconds)
         {
             _logger.LogWarning(
-                "[legacy-employee-logs-perf] store={Store} days={Days} device={HasDevice} employees={EmployeeCount} operations={OperationCount} keyword={HasKeyword} total={Total} ms={Ms}",
-                query.StoreCode,
+                "[legacy-employee-logs-perf] stores={Stores} days={Days} device={HasDevice} employees={EmployeeCount} operations={OperationCount} keyword={HasKeyword} total={Total} ms={Ms}",
+                string.Join(",", query.StoreCodes),
                 Math.Ceiling((query.ToExclusive - query.From).TotalDays),
                 query.DeviceCode != null,
                 query.EmployeeIds.Count,

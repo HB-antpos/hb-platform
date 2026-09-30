@@ -135,6 +135,11 @@ async function run() {
   );
   assert.match(
     workbenchScreen,
+    /const canOpenCart = itemsByRoute\.has\("cart"\)[\s\S]*disabled=\{!canOpenCart\}[\s\S]*onPress=\{\(\) => navigateTo\("cart"\)\}/,
+    "购物车 SKU 指标必须按购物车权限直接进入购物车，无权限时不得可点"
+  );
+  assert.match(
+    workbenchScreen,
     /cartSummaryQuery\.isError\s*\|\|\s*cartSummaryQuery\.isRefetchError[\s\S]*scopedCart\s*=\s*cartSummaryFailed\s*\?\s*null/,
     "购物车请求或后台刷新失败时必须显示占位符，不得继续显示缓存数量"
   );

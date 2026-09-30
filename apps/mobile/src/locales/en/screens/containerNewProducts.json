@@ -1,20 +1,22 @@
 {
-  "title": "New arrivals",
+  "title": "HB new arrivals",
+  "pagination": { "previous": "Previous", "next": "Next", "page": "Page {{page}} of {{pageCount}} · {{total}} items" },
   "actions": { "back": "Back", "retry": "Retry" },
   "labels": {
     "currentStore": "Current store",
-    "range": "Arrived in 2 weeks · Planned for 4 weeks",
+    "range": "Store arrival: past week · next 2 weeks",
     "sortByArrival": "Arrival date ↑",
     "container": "Container {{code}}",
+    "quantity": "Qty {{value}}",
     "estimatedArrival": "Estimated arrival",
-    "actualBasis": "Based on actual arrival",
+    "actualBasis": "Based on container warehouse arrival",
     "estimatedBasis": "Based on estimated arrival"
   },
   "messages": {
-    "notAllowed": "You do not have access to new arrivals.",
+    "notAllowed": "You do not have access to HB new arrivals.",
     "storesFailed": "Stores could not be loaded.",
     "selectStore": "Select a store first.",
     "dateNotice": "Store arrival dates are estimates; the container's actual arrival date takes priority."
   },
-  "states": { "loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new arrivals in the last 2 weeks or next 4 weeks.", "noImage": "No image" }
+  "states": { "loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new products arriving in store in the past week or next 2 weeks.", "noImage": "No image" }
 }

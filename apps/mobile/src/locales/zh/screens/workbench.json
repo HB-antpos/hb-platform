@@ -44,7 +44,7 @@
     "warehousePicking": "订单拣货",
     "warehouseProductInsights": "仓库商品进销",
     "seasonalProductInsights": "季节商品查询",
-    "containerNewProducts": "新品到店",
+    "containerNewProducts": "HB新品",
     "domesticPurchase": "国内采购",
     "localSupplierInvoices": "供应商发票",
     "advertisements": "广告",
@@ -87,6 +87,7 @@
     "currentStore": "当前门店，{{store}}",
     "changeStore": "当前门店，{{store}}，切换分店",
     "changeStoreHint": "打开当前账号获权的分店列表",
-    "storesLoading": "正在加载可用分店"
+    "storesLoading": "正在加载可用分店",
+    "openCart": "购物车 SKU，{{value}}，打开购物车"
   }
 }

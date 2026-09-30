@@ -29,8 +29,8 @@ const enOrders = JSON.parse(
 
 assert.equal(zhWorkbench.routes.orders, "HB订单", "中文工作台必须显示 HB订单");
 assert.equal(enWorkbench.routes.orders, "HB Orders", "英文工作台必须显示 HB Orders");
-assert.equal(zhWorkbench.routes.containerNewProducts, "新品到店", "中文工作台必须显示新品到店");
-assert.equal(enWorkbench.routes.containerNewProducts, "New arrivals", "英文工作台必须显示 New arrivals");
+assert.equal(zhWorkbench.routes.containerNewProducts, "HB新品", "中文工作台必须显示 HB新品");
+assert.equal(enWorkbench.routes.containerNewProducts, "HB new arrivals", "英文工作台必须显示 HB new arrivals");
 assert.equal(zhWorkbench.routes.appInstall, "App 安装", "中文工作台必须显示 App 安装");
 assert.equal(enWorkbench.routes.appInstall, "Install app", "英文工作台必须显示 Install app");
 assert.equal(zhOrders.title, "订单列表", "中文订单业务页标题不得随工作台入口改名");
@@ -397,7 +397,7 @@ assert.deepEqual(
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
   [{ key: "sales-product", itemRouteNames: ["container-new-products"] }],
-  "新品到店必须在工作台销售与商品分区显示"
+  "HB新品必须在工作台销售与商品分区显示"
 );
 assert.deepEqual(
   buildWorkbenchSections(["app-install", "app-downloads"]).map((section) => ({
