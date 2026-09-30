@@ -492,7 +492,6 @@ export type SettingsSnapshotStage =
   | "catalog"
   | "receipt-settings"
   | "printer-status"
-  | "external-display"
   | "payment-methods"
   | "device-scope";
 
