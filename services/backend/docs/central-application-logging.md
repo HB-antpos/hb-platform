@@ -65,12 +65,13 @@ Content-Type: application/json
 
 `ApiKeyHash` 是项目日志密钥的 SHA-256 小写十六进制摘要。明文密钥只放部署环境变量或服务器配置，不提交仓库。
 
-生产 compose 已连续配置六个项目。只有已启用的外部项目需要注入合法的 64 位十六进制 SHA-256 摘要：
+生产 compose 已连续配置七个项目。只有已启用的外部项目需要注入合法的 64 位十六进制 SHA-256 摘要：
 
 ```bash
 CENTER_LOG_HBWEB_RV_KEY_SHA256=<sha256-lower-hex>
 CENTER_LOG_HBPOS_API_KEY_SHA256=<sha256-lower-hex>
 CENTER_LOG_HBPOS_IPAD_KEY_SHA256=<sha256-lower-hex>
+CENTER_LOG_HBPOS_HANDHELD_KEY_SHA256=<sha256-lower-hex>
 ```
 
 项目清单和默认保留期：
@@ -81,6 +82,7 @@ CENTER_LOG_HBPOS_IPAD_KEY_SHA256=<sha256-lower-hex>
 - `hbpos_win`：WPF 客户端，禁用，30 天。
 - `hbpos_api`：WPF 收银后端，启用，7 天。
 - `hbpos_ipad`：iPad 客户端，启用，30 天，`sourceType=POS`。
+- `hbpos_handheld`：手持收银客户端，启用，30 天，`sourceType=POS`。
 
 清理任务会覆盖 `Projects` 中的全部项目，包括已禁用项目，避免停用后遗留日志无限保留。
 
@@ -118,6 +120,7 @@ GET /api/system/logs/summary?startUtc=2026-06-05T00:00:00Z
 - 收银端：`hbpos_win`，`sourceType=POS`
 - 收银后端：`hbpos_api`，`sourceType=Backend`
 - iPad 收银端：`hbpos_ipad`，`sourceType=POS`
+- 手持收银端：`hbpos_handheld`，`sourceType=POS`
 
 ## 上报原则
 

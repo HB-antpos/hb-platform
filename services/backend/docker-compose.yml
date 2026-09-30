@@ -92,6 +92,12 @@ services:
       - ApplicationLogging__Projects__5__Enabled=true
       - ApplicationLogging__Projects__5__RetentionDays=30
       - ApplicationLogging__Projects__5__ApiKeyHash=${CENTER_LOG_HBPOS_IPAD_KEY_SHA256:?required}
+      # 手持收银使用独立写入 Key，泄露时可单独吊销，不影响 iPad 与 WPF。
+      - ApplicationLogging__Projects__6__ProjectCode=hbpos_handheld
+      - ApplicationLogging__Projects__6__DisplayName=手持收银客户端
+      - ApplicationLogging__Projects__6__Enabled=true
+      - ApplicationLogging__Projects__6__RetentionDays=30
+      - ApplicationLogging__Projects__6__ApiKeyHash=${CENTER_LOG_HBPOS_HANDHELD_KEY_SHA256:?required}
       # SMTP 密码密文依赖 DataProtection key ring，必须落到宿主机目录以跨容器重建保留。
       - DataProtection__KeysPath=/app/App_Data/DataProtectionKeys
       # 考勤二维码使用独立 key ring，仅向需要互通的考勤服务共享。

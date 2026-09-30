@@ -4785,6 +4785,7 @@
         "HbwebExpo": "移动端",
         "hbpos_win": "WPF客户端",
         "hbpos_ipad": "iPad客户端",
+        "hbpos_handheld": "手持收银客户端",
         "hbpos_api": "WPF收银后端"
       },
       "status": {

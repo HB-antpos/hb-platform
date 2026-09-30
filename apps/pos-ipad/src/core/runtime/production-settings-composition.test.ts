@@ -445,6 +445,53 @@ test("生产组合每次创建 Square 配对码只生成一个幂等键并调用
   assert.equal(JSON.stringify(capturedInput).includes("token"), false);
 });
 
+test("设置快照读取失败时按阶段上报异常，页面仍显示 load-failed", async () => {
+  const reported: Array<{ stage: string; error: unknown }> = [];
+  const printerError = new Error("printer settings unreadable");
+  const runtime = createProductionSettingsComposition(
+    dependencies({
+      receiptSettings: {
+        get: async () => {
+          throw printerError;
+        },
+        save: async () => undefined,
+      },
+      reportSnapshotFailure: (stage, error) => {
+        reported.push({ stage, error });
+      },
+    }),
+  );
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+
+  assert.equal(presenter.getState().kind, "failed");
+  assert.equal(presenter.getState().statusCode, "load-failed");
+  assert.deepEqual(reported, [{ stage: "receipt-settings", error: printerError }]);
+});
+
+test("设备范围不一致时上报 device-scope，上报钩子抛错不改变失败语义", async () => {
+  const stages: string[] = [];
+  const runtime = createProductionSettingsComposition(
+    dependencies({
+      readDevicePresentation: async () => ({
+        deviceCode: "OTHER-DEVICE",
+        storeCode: "S1",
+        storeName: "Store One",
+        terminalName: "Front",
+      }),
+      reportSnapshotFailure: (stage) => {
+        stages.push(stage);
+        throw new Error("log sink unavailable");
+      },
+    }),
+  );
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+
+  assert.equal(presenter.getState().statusCode, "load-failed");
+  assert.deepEqual(stages, ["device-scope"]);
+});
+
 test("数据库、退货或支付恢复任一未清零时，危险设置动作保持阻断", async () => {
   let saved = false;
   const runtime = createProductionSettingsComposition(

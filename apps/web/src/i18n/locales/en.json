@@ -4785,6 +4785,7 @@
         "HbwebExpo": "Mobile App",
         "hbpos_win": "WPF Client",
         "hbpos_ipad": "iPad Client",
+        "hbpos_handheld": "Handheld POS Client",
         "hbpos_api": "WPF POS Backend"
       },
       "status": {
