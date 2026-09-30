@@ -66,6 +66,8 @@ interface FunctionButtonProps {
   item: WorkbenchNavigationItem;
   label: string;
   pendingCount?: number;
+  /** 角标封顶值，超过显示「N+」；待办类默认 99，HB新品品种数常达数百，放宽到 999。 */
+  maxCount?: number;
   onPress: () => void;
   compact?: boolean;
 }
@@ -74,11 +76,12 @@ function FunctionButton({
   item,
   label,
   pendingCount = 0,
+  maxCount = 99,
   onPress,
   compact = false,
 }: FunctionButtonProps) {
   const { t } = useAppTranslation("workbench");
-  const visiblePendingCount = pendingCount > 99 ? "99+" : String(pendingCount);
+  const visiblePendingCount = pendingCount > maxCount ? `${maxCount}+` : String(pendingCount);
 
   return (
     <Pressable
@@ -184,6 +187,7 @@ export function WorkbenchScreen() {
     navigationLoading,
     pendingProfileReviewCount,
     pendingPriceUpdateCount,
+    newProductKindCount,
     isDeviceMode,
     isWarehouseStaffOnly,
   } = useAppNavigationAccess();
@@ -191,6 +195,10 @@ export function WorkbenchScreen() {
   const pendingCountByRouteName: Record<string, number> = {
     "employee-profile-review": pendingProfileReviewCount,
     "price-updates": pendingPriceUpdateCount,
+    "container-new-products": newProductKindCount,
+  };
+  const maxCountByRouteName: Record<string, number> = {
+    "container-new-products": 999,
   };
   const fetchMenu = useAppNavigationStore((state) => state.fetchMenu);
   const refreshCurrentUser = useAuthStore((state) => state.refreshCurrentUser);
@@ -344,6 +352,8 @@ export function WorkbenchScreen() {
       await Promise.all([
         fetchMenu({ background: true }),
         queryClient.invalidateQueries({ queryKey: ["userStores"] }),
+        // HB新品角标缓存 5 分钟，下拉刷新时强制重取（按前缀匹配所有分店）
+        queryClient.invalidateQueries({ queryKey: ["container-new-products"] }),
       ]);
     } finally {
       setRefreshing(false);
@@ -513,6 +523,7 @@ export function WorkbenchScreen() {
                       item={item}
                       label={t(item.labelKey)}
                       pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
+                      maxCount={maxCountByRouteName[item.routeName]}
                       compact
                       onPress={() => navigateTo(item.routeName)}
                     />
@@ -559,6 +570,7 @@ export function WorkbenchScreen() {
                             item={item}
                             label={t(item.labelKey)}
                             pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
+                            maxCount={maxCountByRouteName[item.routeName]}
                             onPress={() => navigateTo(item.routeName)}
                           />
                         </View>

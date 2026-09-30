@@ -7,6 +7,8 @@ export interface AppNavigationAccessValue {
   pendingProfileReviewCount: number;
   /** 当前分店未完成的价格更新任务数，用于工作台入口角标。 */
   pendingPriceUpdateCount: number;
+  /** 当前分店 HB新品 列表里的商品品种数（按商品去重），用于工作台入口角标。 */
+  newProductKindCount: number;
   isDeviceMode: boolean;
   isWarehouseStaffOnly: boolean;
 }

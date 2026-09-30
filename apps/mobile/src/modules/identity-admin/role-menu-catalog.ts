@@ -68,7 +68,7 @@ const MOBILE_MENU: MenuSource[] = ([
   ["promotions", "Promotions", "促销", ["Promotions.View"]],
   ["product-query", "Product query", "商品查询", ["StoreProducts.View"]],
   ["seasonal-product-insights", "Seasonal products", "季节商品查询", ["SeasonalProductInsights.View"]],
-  ["container-new-products", "New arrivals", "新品到店", ["Container.MobileNewProductsView"]],
+  ["container-new-products", "HB new arrivals", "HB新品", ["Container.MobileNewProductsView"]],
   ["installment-orders", "Installment orders", "分期订单", ["InstallmentOrders.View"]],
   ["store-vouchers", "Store vouchers", "门店代金券", ["StoreVouchers.View"]],
   ["attendance-personal", "My attendance", "我的考勤", ["Attendance.Schedule.ViewSelf"]],

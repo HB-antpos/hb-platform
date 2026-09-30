@@ -37,9 +37,14 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         database.Insertable(new Store { StoreGUID = "store-1", StoreCode = "S-1", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
         database.Insertable(new UserStore { UserStoreGUID = "rel-1", UserGUID = "user-1", StoreGUID = "store-1", IsPrimary = false }).ExecuteCommand();
 
-        database.Insertable(new Container { ContainerCode = "C-LATE", ContainerNumber = "LATE", ActualArrivalDate = today.AddDays(8), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
-        database.Insertable(new Container { ContainerCode = "C-EARLY", ContainerNumber = "EARLY", ActualArrivalDate = today.AddDays(1), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
-        database.Insertable(new Container { ContainerCode = "C-FALL", ContainerNumber = "FALL", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(15) }).ExecuteCommand();
+        // 窗口按预计到店日（QLD = 货柜日期 + 7 个工作日，跨 9~11 个自然日）算：
+        // C-EARLY 12 天前到仓库 → 到店日在今天前 1~3 天（按货柜日期算已超 1 周，按到店日仍应显示）
+        database.Insertable(new Container { ContainerCode = "C-LATE", ContainerNumber = "LATE", ActualArrivalDate = today.AddDays(-5), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-EARLY", ContainerNumber = "EARLY", ActualArrivalDate = today.AddDays(-12), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-FALL", ContainerNumber = "FALL", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(2) }).ExecuteCommand();
+        // 窗口外：到店日在 9~11 天前、17~19 天后，都不应出现
+        database.Insertable(new Container { ContainerCode = "C-OLD", ContainerNumber = "OLD", ActualArrivalDate = today.AddDays(-20) }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-FAR", ContainerNumber = "FAR", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(8) }).ExecuteCommand();
         database.Insertable(new[]
         {
             new ContainerDetail { DetailCode = "D1", ContainerCode = "C-LATE", ProductCode = "P-AUDIT" },
@@ -47,6 +52,8 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
             new ContainerDetail { DetailCode = "D3", ContainerCode = "C-EARLY", ProductCode = "P-WRONG" },
             new ContainerDetail { DetailCode = "D4", ContainerCode = "C-EARLY", ProductCode = "P-EARLY" },
             new ContainerDetail { DetailCode = "D5", ContainerCode = "C-FALL", ProductCode = "P-FALLBACK" },
+            new ContainerDetail { DetailCode = "D6", ContainerCode = "C-OLD", ProductCode = "P-OLD" },
+            new ContainerDetail { DetailCode = "D7", ContainerCode = "C-FAR", ProductCode = "P-FAR" },
         }).ExecuteCommand();
         database.Insertable(new[]
         {
@@ -62,9 +69,46 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.Equal("QLD", result.StateCode);
         Assert.Equal(new[] { "C-EARLY", "C-LATE", "C-LATE", "C-FALL" }, result.Items.Select(x => x.ContainerCode));
         Assert.DoesNotContain(result.Items, x => x.ProductCode == "P-WRONG");
+        var storeFrom = DateOnly.FromDateTime(today.AddDays(-7));
+        var storeTo = DateOnly.FromDateTime(today.AddDays(14));
+        Assert.All(result.Items, x => Assert.InRange(x.EstimatedStoreArrivalDate, storeFrom, storeTo));
         Assert.Contains(result.Items, x => x.ProductCode == "P-AUDIT" && x.Basis == "actual");
         Assert.Contains(result.Items, x => x.ProductCode == "P-NONE");
         Assert.Contains(result.Items, x => x.ProductCode == "P-FALLBACK" && x.Basis == "estimated");
+    }
+
+    [Fact]
+    public async Task GetAsync_同一到店日按HB货号排序_无货号排在末尾()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+        database.Insertable(new Store { StoreGUID = "store-4", StoreCode = "S-4", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-4", UserGUID = "user-4", StoreGUID = "store-4", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-SAME", ContainerNumber = "SAME", ActualArrivalDate = today.AddDays(2) }).ExecuteCommand();
+        // ProductCode 顺序（A→D）与货号顺序故意相反，确保排序依据是货号而不是 UUID 主键
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "S1", ContainerCode = "C-SAME", ProductCode = "P-A" },
+            new ContainerDetail { DetailCode = "S2", ContainerCode = "C-SAME", ProductCode = "P-B", LoadingQuantity = 1920 },
+            // 同一货柜同一商品拆成两行明细：只出一张卡片，数量合计
+            new ContainerDetail { DetailCode = "S2B", ContainerCode = "C-SAME", ProductCode = "P-B", LoadingQuantity = 480 },
+            new ContainerDetail { DetailCode = "S3", ContainerCode = "C-SAME", ProductCode = "P-C" },
+            new ContainerDetail { DetailCode = "S4", ContainerCode = "C-SAME", ProductCode = "P-D" },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new DomesticProduct { ProductCode = "P-A", HBProductNo = "  " },
+            new DomesticProduct { ProductCode = "P-B", HBProductNo = "HB150-574" },
+            new DomesticProduct { ProductCode = "P-C", HBProductNo = "hb150-568" },
+            new DomesticProduct { ProductCode = "P-D", HBProductNo = "HB038-XM-017" },
+        }).ExecuteCommand();
+
+        var result = await CreateService("user-4").GetAsync("S-4");
+
+        Assert.Equal(new[] { "P-D", "P-C", "P-B", "P-A" }, result.Items.Select(x => x.ProductCode));
+        Assert.Equal(new string?[] { "HB038-XM-017", "hb150-568", "HB150-574", null }, result.Items.Select(x => x.HbProductNo));
+        Assert.Equal(2400m, result.Items.Single(x => x.ProductCode == "P-B").Quantity);
+        Assert.Null(result.Items.Single(x => x.ProductCode == "P-A").Quantity);
     }
 
     [Fact]

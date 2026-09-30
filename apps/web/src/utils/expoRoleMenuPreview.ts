@@ -178,7 +178,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'sales-orders': { zhTitle: '销售订单', enTitle: 'Sales Records' },
   cart: { zhTitle: '购物车', enTitle: 'Cart' },
   warehouse: { zhTitle: '仓库', enTitle: 'Warehouse' },
-  'container-new-products': { zhTitle: '新品到店', enTitle: 'New arrivals' },
+  'container-new-products': { zhTitle: 'HB新品', enTitle: 'HB new arrivals' },
   'warehouse-picking': { zhTitle: '订单拣货', enTitle: 'Order picking' },
   'domestic-purchase': { zhTitle: '中国采购', enTitle: 'China Purchase' },
   'local-supplier-invoices': { zhTitle: '澳洲进货', enTitle: 'AU Invoices' },
