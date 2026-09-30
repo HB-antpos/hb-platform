@@ -97,7 +97,7 @@ assert.match(
 assert.match(appConfigSource, /package:\s*"com\.hbweb\.poshandheld"/u);
 assert.match(appConfigSource, /supportsTablet:\s*false/u);
 assert.match(appConfigSource, /deploymentTarget:\s*"17\.0"/u);
-assert.match(appConfigSource, /minSdkVersion:\s*30/u);
+assert.match(appConfigSource, /minSdkVersion:\s*29/u);
 assert.match(appConfigSource, /useSQLCipher:\s*true/u);
 assert.doesNotMatch(appConfigSource, /iPadOS|pos-ipad|posipad/iu);
 assert.doesNotMatch(appConfigSource, /with-hb-external-display/iu);

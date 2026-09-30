@@ -1,6 +1,6 @@
 # HB POS Handheld
 
-独立的小屏幕收银前端，目标为 iPhone iOS 17+ 和 Android PDA 11/API 30+。它复用现有 Hbpos POS 后端与 iPad POS 的业务技术栈，但应用身份、原生工程、更新策略和发布通道独立，并且不包含客显。
+独立的小屏幕收银前端，目标为 iPhone iOS 17+ 和 Android PDA 10/API 29+。它复用现有 Hbpos POS 后端与 iPad POS 的业务技术栈，但应用身份、原生工程、更新策略和发布通道独立，并且不包含客显。
 
 ## 本地启动
 
@@ -33,7 +33,7 @@ npm run typecheck
 npm run lint
 ```
 
-完整测试使用 `npm test`。Android BLE/SPP 打印、钱箱和 APK 安装仍须在 API 30 与 API 31+ 真机分别验收。
+完整测试使用 `npm test`。Android BLE/SPP 打印、钱箱和 APK 安装仍须在 API 29/30 与 API 31+ 真机分别验收。
 
 ## 设计与架构
 
