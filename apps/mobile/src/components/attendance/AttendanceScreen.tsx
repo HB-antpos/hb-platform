@@ -36,6 +36,7 @@ import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import {
   approveAttendanceApproval,
   cancelAvailability,
+  copyAttendanceScheduleWeek,
   createAttendanceHoliday,
   createAttendanceSchedule,
   createAvailabilityBatch,
@@ -46,6 +47,7 @@ import {
   deleteAttendanceSchedule,
   getAttendanceHolidays,
   getAttendanceSchedulesWeek,
+  getManagedAvailability,
   getMyAttendanceToday,
   getMyAttendanceWeek,
   getMyAvailability,
@@ -406,6 +408,24 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       isAuthenticated && user && isScheduleManagementTab && selectedStoreCode,
     ),
   });
+  // 排班网格的「可」标记：本店员工本周可上班时间。失败只是不显示标记，不并入 managerLoadError。
+  const managedAvailabilityQuery = useQuery({
+    queryKey: [
+      "attendance",
+      "availability",
+      "managed",
+      selectedStoreCode ?? "",
+      managerWeekStartDate,
+    ],
+    queryFn: () =>
+      getManagedAvailability({
+        storeCode: selectedStoreCode!,
+        weekStartDate: managerWeekStartDate,
+      }),
+    enabled: Boolean(
+      isAuthenticated && user && isScheduleManagementTab && selectedStoreCode,
+    ),
+  });
   const holidaysQuery = useQuery({
     queryKey: attendanceKeys.holidays(selectedStoreCode),
     queryFn: () => getAttendanceHolidays({ storeCode: selectedStoreCode }),
@@ -587,6 +607,24 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     onError: (error) =>
       showMessage(
         getErrorMessage(error, "messages.publishFailed"),
+      ),
+  });
+
+  // 复制上周排班到当前周：新班次为草稿，目标周同人同日已有班次由后端跳过。
+  const copyScheduleWeekMutation = useMutation({
+    mutationFn: copyAttendanceScheduleWeek,
+    onSuccess: async (result) => {
+      await invalidateScheduleManagementData();
+      showMessage(
+        t("scheduleManagement.copyWeekResult", {
+          created: result.createdCount,
+          skipped: result.skippedCount,
+        }),
+      );
+    },
+    onError: (error) =>
+      showMessage(
+        getErrorMessage(error, "scheduleManagement.copyWeekFailed"),
       ),
   });
 
@@ -791,6 +829,9 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
         isScheduleManagementTab && selectedStoreCode
           ? managerSchedulesQuery.refetch()
           : Promise.resolve(),
+        isScheduleManagementTab && selectedStoreCode
+          ? managedAvailabilityQuery.refetch()
+          : Promise.resolve(),
         isHolidayManagementTab && selectedStoreCode
           ? holidaysQuery.refetch()
           : Promise.resolve(),
@@ -809,6 +850,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     isLeaveManagementTab,
     isPunchRecordsTab,
     isScheduleManagementTab,
+    managedAvailabilityQuery,
     managerSchedulesQuery,
     selectedStoreCode,
     showMessage,
@@ -1580,10 +1622,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 storeName={selectedStoreName}
                 users={storeUsersQuery.data ?? []}
                 schedules={managerSchedulesQuery.data ?? []}
+                availability={managedAvailabilityQuery.data ?? []}
                 isLoading={
                   storeUsersQuery.isLoading || managerSchedulesQuery.isLoading
                 }
-                isBusy={isScheduleBusy}
+                isBusy={isScheduleBusy || copyScheduleWeekMutation.isPending}
+                isCopying={copyScheduleWeekMutation.isPending}
                 onPreviousWeek={() =>
                   setManagerWeekStartDate((current) => addWeeks(current, -1))
                 }
@@ -1598,6 +1642,17 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   deleteScheduleMutation.mutate(scheduleGuid)
                 }
                 onPublishWeek={handlePublishWeek}
+                onCopyPreviousWeek={() => {
+                  if (!selectedStoreCode) {
+                    showMessage(t("messages.selectStoreFirst"));
+                    return;
+                  }
+                  copyScheduleWeekMutation.mutate({
+                    storeCode: selectedStoreCode,
+                    sourceWeekStartDate: addWeeks(managerWeekStartDate, -1),
+                    targetWeekStartDate: managerWeekStartDate,
+                  });
+                }}
               />
             ) : null}
             {isHolidayManagementTab && !isManagementContentLoading ? (

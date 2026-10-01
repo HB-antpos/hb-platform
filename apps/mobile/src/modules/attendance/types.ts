@@ -73,6 +73,9 @@ export interface AttendanceSchedule {
   candidateOvertimeMinutes?: number;
   approvedOvertimeMinutes?: number;
   overtimeApprovalStatus?: string;
+  /** 当天已批准请假的类型；有值表示员工请假，不计工时、不算缺卡。 */
+  leaveType?: string;
+  leaveGuid?: string;
   segments?: AttendancePunchSegment[];
 }
 
@@ -290,6 +293,7 @@ export interface AttendanceWeek {
 
 export interface AttendanceAvailability {
   availabilityGuid: string;
+  userGuid?: string;
   storeCode?: string;
   storeName?: string;
   workDate: string;

@@ -6,6 +6,7 @@ import type {
 
 /** 店长打卡记录列表里的异常分类；越靠前越需要先处理。 */
 export type ManagedRecordIssue =
+  | "onLeave"
   | "missingClockOut"
   | "noPunch"
   | "late"
@@ -15,13 +16,15 @@ export type ManagedRecordIssue =
   | "normal";
 
 const ISSUE_PRIORITY: Record<ManagedRecordIssue, number> = {
+  // 请假不是异常，排在正常之前、未开始之后，便于店长一眼看到谁今天请假。
+  onLeave: 5,
   missingClockOut: 0,
   noPunch: 1,
   late: 2,
   earlyLeave: 3,
   inProgress: 4,
   notStarted: 5,
-  normal: 6,
+  normal: 7,
 };
 
 const EXCEPTION_ISSUES = new Set<ManagedRecordIssue>([
@@ -42,6 +45,8 @@ export function classifyManagedRecord(
   today: string,
 ): ManagedRecordIssue {
   if (session.hasMissingClockOut) return "missingClockOut";
+  // 已批准请假且没有任何打卡：不算缺卡。
+  if (session.leaveType && !session.segments.some((segment) => segment.clockIn || segment.clockOut)) return "onLeave";
   const punches = session.segments.flatMap((segment) => [segment.clockIn, segment.clockOut]);
   const hasAnyPunch = punches.some(Boolean);
   const workDay = parseDay(session.workDate);

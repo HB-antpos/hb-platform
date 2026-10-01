@@ -1,0 +1,124 @@
+import { scheduleDurationMinutes } from "./attendance-my-week";
+import type { AttendanceAvailability, AttendanceSchedule } from "./types";
+
+/** 店长排班周网格单元格类型：有班 / 已批准请假 / 员工可上班 / 空。 */
+export type ScheduleGridCellKind = "shift" | "leave" | "available" | "empty";
+
+export interface ScheduleGridCell {
+  kind: ScheduleGridCellKind;
+  /** 当天未取消的班次（含请假班次），按开始时间排序。 */
+  schedules: AttendanceSchedule[];
+  /** 当天未取消的可上班时间段，按开始时间排序。 */
+  availability: AttendanceAvailability[];
+}
+
+export type SchedulePublishState = "draft" | "published" | "empty";
+
+const isNotCancelled = (status: string) => status.toLowerCase() !== "cancelled";
+
+/** 统一取 HH:mm：兼容 "09:00"、"09:00:00" 与带日期的 ISO 时间。 */
+export function normalizeClockTime(value: string) {
+  const time = value.includes("T") ? value.split("T").pop() ?? "" : value;
+  const match = /^(\d{1,2}):(\d{2})/.exec(time);
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
+}
+
+export function availabilityKey(userGuid: string, workDate: string) {
+  return `${userGuid}|${workDate.slice(0, 10)}`;
+}
+
+/** 店长查看的全店可上班时间按「员工|日期」分组；已取消与缺员工标识的记录忽略。 */
+export function groupAvailabilityByUserDate(availability: AttendanceAvailability[]) {
+  const map = new Map<string, AttendanceAvailability[]>();
+  availability.forEach((item) => {
+    if (!item.userGuid || !isNotCancelled(item.status)) return;
+    const key = availabilityKey(item.userGuid, item.workDate);
+    map.set(key, [...(map.get(key) ?? []), item]);
+  });
+  map.forEach((items) => items.sort((left, right) => left.startTime.localeCompare(right.startTime)));
+  return map;
+}
+
+/**
+ * 单元格分类：请假优先（当天整天不上班、不计工时），其次是班次，
+ * 都没有时员工填过可上班显示「可」，否则为空。已取消的班次视同不存在。
+ */
+export function classifyScheduleGridCell(
+  schedules: AttendanceSchedule[],
+  availability: AttendanceAvailability[] = [],
+): ScheduleGridCell {
+  const daySchedules = schedules
+    .filter((item) => isNotCancelled(item.status))
+    .sort((left, right) => left.startTime.localeCompare(right.startTime));
+  const dayAvailability = availability.filter((item) => isNotCancelled(item.status));
+  const kind: ScheduleGridCellKind = daySchedules.some((item) => item.leaveType)
+    ? "leave"
+    : daySchedules.length
+      ? "shift"
+      : dayAvailability.length ? "available" : "empty";
+  return { kind, schedules: daySchedules, availability: dayAvailability };
+}
+
+function shortClock(value: string) {
+  const [hourText, minuteText] = normalizeClockTime(value).split(":");
+  const hour = Number(hourText);
+  if (!hourText || Number.isNaN(hour)) return "--";
+  // 12 小时制去掉上下午与整点分钟，网格里只占很窄的宽度。
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return minuteText === "00" ? String(hour12) : `${hour12}:${minuteText}`;
+}
+
+/** 班次简写，如 09:00–17:30 → 9–5:30。 */
+export function formatShiftShort(startTime: string, endTime: string) {
+  return `${shortClock(startTime)}–${shortClock(endTime)}`;
+}
+
+/** 可上班全天约定为 00:00–23:59（秒数可有可无）。 */
+export function isAllDayRange(startTime: string, endTime: string) {
+  return normalizeClockTime(startTime) === "00:00" && normalizeClockTime(endTime) === "23:59";
+}
+
+/** 时间步进：按分钟增减并在一天内循环，结果为 HH:mm；无法解析时原样返回。 */
+export function stepClockTime(value: string, deltaMinutes: number) {
+  const normalized = normalizeClockTime(value);
+  if (!normalized) return value;
+  const [hour, minute] = normalized.split(":").map(Number);
+  const total = (((hour * 60 + minute + deltaMinutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** 编辑中班次的时长（分钟）；开始等于结束视为 0，跨午夜按次日结束。 */
+export function shiftEditorMinutes(startTime: string, endTime: string) {
+  const start = normalizeClockTime(startTime);
+  const end = normalizeClockTime(endTime);
+  if (!start || !end || start === end) return 0;
+  return scheduleDurationMinutes({ startTime: start, endTime: end });
+}
+
+/** 空缺日：一周中没有任何人上班（不含请假、已取消）的日期数。 */
+export function countUncoveredDays(weekDates: string[], schedules: AttendanceSchedule[]) {
+  const covered = new Set(
+    schedules
+      .filter((item) => isNotCancelled(item.status) && !item.leaveType)
+      .map((item) => item.workDate.slice(0, 10)),
+  );
+  return weekDates.filter((date) => !covered.has(date)).length;
+}
+
+/** 本周发布状态：存在草稿班次即「草稿·未发布」，否则有班次即「已发布」。 */
+export function summarizeSchedulePublishState(schedules: AttendanceSchedule[]): SchedulePublishState {
+  const active = schedules.filter((item) => isNotCancelled(item.status) && !item.leaveType);
+  if (active.some((item) => item.status.toLowerCase() === "draft")) return "draft";
+  return active.length ? "published" : "empty";
+}
+
+export type EmploymentTypeCode = "F" | "P" | "C";
+
+/** 用工类型缩写：全职 F、兼职 P、临时工 C；未知返回 undefined。 */
+export function employmentTypeCode(type?: string): EmploymentTypeCode | undefined {
+  const normalized = type?.replace(/[\s_-]/g, "").toLowerCase();
+  if (normalized === "fulltime") return "F";
+  if (normalized === "parttime") return "P";
+  if (normalized === "casual" || normalized === "temporary") return "C";
+  return undefined;
+}

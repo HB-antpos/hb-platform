@@ -1577,6 +1577,112 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CopyScheduleWeekAsync_CopiesAsDraftAndSkipsOccupiedDays()
+        {
+            await SeedStoreScopeAsync();
+            // 来源周 5-11：员工周一、店长周二；目标周 5-18 员工周一已有 schedule-1。
+            await SeedScheduleAsync("src-staff-mon", "BRI", "staff-user", new DateTime(2026, 5, 11), "Active");
+            await SeedScheduleAsync("src-manager-tue", "BRI", "manager-user", new DateTime(2026, 5, 12), "Active",
+                new TimeSpan(10, 0, 0), new TimeSpan(18, 0, 0));
+            await SeedScheduleAsync("src-cancelled", "BRI", "staff-user", new DateTime(2026, 5, 13), "Cancelled");
+            await SeedScheduleAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .CopyScheduleWeekAsync(new CopyAttendanceScheduleWeekDto
+                {
+                    StoreCode = "BRI",
+                    SourceWeekStartDate = new DateTime(2026, 5, 11),
+                    TargetWeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal(1, result.Data!.CreatedCount);
+            Assert.Equal(1, result.Data.SkippedCount);
+            var copied = await _db.Queryable<AttendanceSchedule>()
+                .SingleAsync(item => item.UserGuid == "manager-user" && item.WorkDate == new DateTime(2026, 5, 19));
+            Assert.Equal("Draft", copied.Status);
+            Assert.Equal(new TimeSpan(10, 0, 0), copied.StartTime);
+            Assert.Equal(new TimeSpan(18, 0, 0), copied.EndTime);
+        }
+
+        [Fact]
+        public async Task CopyScheduleWeekAsync_OtherStore_IsForbidden()
+        {
+            await SeedStoreScopeAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .CopyScheduleWeekAsync(new CopyAttendanceScheduleWeekDto
+                {
+                    StoreCode = "OTHER",
+                    SourceWeekStartDate = new DateTime(2026, 5, 11),
+                    TargetWeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.False(result.Success);
+            Assert.Equal(0, await _db.Queryable<AttendanceSchedule>().CountAsync());
+        }
+
+        [Fact]
+        public async Task GetWeekSchedulesAsync_ApprovedLeave_AnnotatesSchedule()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await SeedScheduleAsync("schedule-2", "BRI", "staff-user", new DateTime(2026, 5, 20), "Active");
+            await _db.Insertable(new[]
+            {
+                new AttendanceLeaveRequest
+                {
+                    LeaveGuid = "leave-approved",
+                    StoreCode = "BRI",
+                    UserGuid = "staff-user",
+                    LeaveType = "SickLeave",
+                    StartDate = new DateTime(2026, 5, 18),
+                    EndDate = new DateTime(2026, 5, 19),
+                    Status = "Approved",
+                    CreatedAt = DateTime.UtcNow,
+                },
+                new AttendanceLeaveRequest
+                {
+                    LeaveGuid = "leave-pending",
+                    StoreCode = "BRI",
+                    UserGuid = "staff-user",
+                    LeaveType = "AnnualLeave",
+                    StartDate = new DateTime(2026, 5, 20),
+                    EndDate = new DateTime(2026, 5, 20),
+                    Status = "Pending",
+                    CreatedAt = DateTime.UtcNow,
+                },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetWeekSchedulesAsync(new AttendanceScheduleQueryDto
+                {
+                    StoreCode = "BRI",
+                    WeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            var onLeave = Assert.Single(result.Data!, item => item.ScheduleGuid == "schedule-1");
+            Assert.Equal("SickLeave", onLeave.LeaveType);
+            Assert.Equal("leave-approved", onLeave.LeaveGuid);
+            var pendingOnly = Assert.Single(result.Data!, item => item.ScheduleGuid == "schedule-2");
+            Assert.Null(pendingOnly.LeaveType);
+        }
+
+        [Theory]
+        [InlineData("2010-05-18", "2026-05-18", 16)]
+        [InlineData("2010-05-19", "2026-05-18", 15)]
+        [InlineData("2008-05-18", "2026-05-18", null)]
+        [InlineData("2008-05-19", "2026-05-18", 17)]
+        [InlineData("2030-01-01", "2026-05-18", null)]
+        public void ResolveMinorAge_OnlyReturnsAgeUnder18(string birthday, string today, int? expected)
+        {
+            Assert.Equal(
+                expected,
+                AttendanceReactService.ResolveMinorAge(DateTime.Parse(birthday), DateTime.Parse(today)));
+        }
+
+        [Fact]
         public void ScheduleViewStore_IsImpliedByEditManagedStore()
         {
             // 能编辑排班就能看排班；反向不成立，查看权限不能借此获得编辑权。
@@ -1607,6 +1713,11 @@ namespace BlazorApp.Api.Tests
                 CreatedAt = DateTime.UtcNow,
             }).ExecuteCommandAsync();
             await SeedEmployeeProfileAsync("staff-user", EmployeeType.PartTime);
+            await _db.Updateable<EmployeeProfile>()
+                .SetColumns(item => item.Birthday == new DateTime(2010, 6, 1))
+                .Where(item => item.UserGUID == "staff-user")
+                .ExecuteCommandAsync();
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 2, 0, 0, DateTimeKind.Utc));
 
             var result = await CreateService("manager-user", "manager", "StoreManager")
                 .GetStoreEmployeesAsync("BRI");
@@ -1615,6 +1726,7 @@ namespace BlazorApp.Api.Tests
             var employee = Assert.Single(result.Data!);
             Assert.Equal("staff-user", employee.UserGuid);
             Assert.Equal("partTime", employee.EmploymentType);
+            Assert.Equal(15, employee.Age);
         }
 
         [Fact]

@@ -227,6 +227,8 @@ function normalizeScheduleBase(raw: ApiRecord): AttendanceSchedule {
     overtimeApprovalStatus: asOptionalString(
       pick(raw, "overtimeApprovalStatus", "OvertimeApprovalStatus", "adjustmentStatus", "AdjustmentStatus"),
     ),
+    leaveType: asOptionalString(pick(raw, "leaveType", "LeaveType")),
+    leaveGuid: asOptionalString(pick(raw, "leaveGuid", "LeaveGuid")),
   };
 }
 

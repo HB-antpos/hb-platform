@@ -794,6 +794,10 @@ public class ControllerAuthorizationMetadataTests
             Permissions.Attendance.Punch.Self
         );
         yield return Policy<ReactAttendanceController>(
+            nameof(ReactAttendanceController.CopyScheduleWeek),
+            Permissions.Attendance.Schedule.EditManagedStore
+        );
+        yield return Policy<ReactAttendanceController>(
             nameof(ReactAttendanceController.PreviewManagedPunchAdjustment),
             Permissions.Attendance.Punch.AdjustManagedStore
         );

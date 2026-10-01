@@ -301,13 +301,17 @@
     "attachmentRequired": "Sick leave requires a medical certificate photo.",
     "fields": {
       "employee": "Employee",
-      "attachment": "Medical certificate photo"
+      "attachment": "Medical certificate photo",
+      "selectEmployee": "Select employee",
+      "specifyTime": "Specific hours"
     },
     "actions": {
       "takePhoto": "Take photo",
       "retakePhoto": "Retake photo",
       "grantCameraPermission": "Allow camera",
-      "capture": "Capture"
+      "capture": "Capture",
+      "save": "Save",
+      "reset": "Clear"
     },
     "messages": {
       "permissionRequired": "Camera permission is required to take a photo.",
@@ -324,7 +328,23 @@
     },
     "registerAction": "Record leave",
     "registerHint": "Record annual or sick leave for an employee (sick leave needs a medical certificate photo)",
-    "hideRegister": "Hide"
+    "hideRegister": "Hide",
+    "employmentTypes": {
+      "fulltime": "Full-time",
+      "parttime": "Part-time"
+    },
+    "dayCount_one": "{{count}} day",
+    "dayCount_other": "{{count}} days",
+    "attachment": {
+      "captureTitle": "Photograph certificate",
+      "captureHint": "Required for sick leave",
+      "uploaded": "Uploaded"
+    },
+    "a11y": {
+      "previousDay": "{{label}}: previous day",
+      "nextDay": "{{label}}: next day",
+      "pickDate": "Pick {{label}} from calendar"
+    }
   },
   "scheduleManagement": {
     "employeeColumn": "Store / employee",
@@ -352,7 +372,11 @@
       "totalPeople": "Total people",
       "plannedHours": "Planned hours",
       "peopleUnit": "staff",
-      "hoursUnit": "hrs"
+      "hoursUnit": "hrs",
+      "weekHours": "Total",
+      "weekdayHours": "Weekdays",
+      "weekendHours": "Weekend",
+      "scheduledPeople": "Staffed"
     },
     "quickShiftTitle": "Common shifts",
     "quickShifts": {
@@ -363,7 +387,45 @@
     "timePicker": {
       "hour": "HH",
       "minute": "MM"
-    }
+    },
+    "hoursShort": "{{hours}}h",
+    "uncoveredDays": "{{count}} day(s) unstaffed",
+    "publishState": {
+      "draft": "Draft · not published",
+      "published": "Published",
+      "empty": "No shifts this week"
+    },
+    "cell": {
+      "leave": "Leave",
+      "available": "Avail"
+    },
+    "legend": {
+      "shift": "Shift",
+      "leave": "On leave",
+      "available": "Available",
+      "draft": "Draft",
+      "employmentTypes": "F full-time · P part-time · C casual"
+    },
+    "gridHint": "Tap a cell to add or edit a shift",
+    "editor": {
+      "availabilityLabel": "Available",
+      "noAvailability": "Not provided",
+      "weekHoursLabel": "Scheduled this week",
+      "hoursValue": "{{hours}} h",
+      "leaveNotice": "Approved leave: {{type}}",
+      "stepMinus": "{{label}} 30 minutes earlier",
+      "stepPlus": "{{label}} 30 minutes later",
+      "setRest": "Set as rest day",
+      "save": "Save ({{hours}} h)",
+      "addShift": "Add another shift"
+    },
+    "copyPreviousWeek": "Copy last week",
+    "copyConfirmTitle": "Copy last week's schedule",
+    "copyConfirmMessage": "Copy last week's shifts into this week as drafts. Employees who already have a shift on a day are skipped.",
+    "copyConfirm": "Copy",
+    "copyWeekResult": "Copied {{created}} shift(s), skipped {{skipped}}",
+    "copyWeekFailed": "Failed to copy last week's schedule",
+    "ageBadge": "{{age}}y"
   },
   "adjustment": {
     "title": "Punch correction",
@@ -573,7 +635,8 @@
       "earlyLeave": "Left early",
       "inProgress": "On shift",
       "notStarted": "Not started",
-      "normal": "Normal"
+      "normal": "Normal",
+      "onLeave": "On leave"
     },
     "editTitle": "Edit punches",
     "viewTitle": "Punch details",
@@ -631,6 +694,7 @@
       "sickHint": "Give your manager a medical certificate; they attach it when recording sick leave.",
       "submit_one": "Submit {{count}} day",
       "submit_other": "Submit {{count}} days"
-    }
+    },
+    "weekHoursSplit": "Weekdays {{weekday}} · Weekend {{weekend}} h"
   }
 }

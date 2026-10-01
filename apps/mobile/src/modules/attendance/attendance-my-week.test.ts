@@ -3,6 +3,8 @@ import {
   buildMyRequestItems,
   buildMyWeekRows,
   buildWeekDates,
+  computeScheduleHourStats,
+  formatScheduleHours,
   defaultAvailabilityDates,
   leaveDayCount,
   scheduleDurationMinutes,
@@ -94,5 +96,17 @@ assert.deepEqual(items.map((item) => item.key), [
 assert.equal(leaveDayCount("2026-10-12", "2026-10-14"), 3);
 assert.equal(leaveDayCount("2026-10-14", "2026-10-12"), 0);
 assert.equal(shiftDate("2026-09-30", 1), "2026-10-01");
+
+// 工时统计：周一至五计入工作日、周六日计入周末；已取消与请假班次不计入。
+const stats = computeScheduleHourStats([
+  schedule("2026-09-28", "09:00:00", "17:00:00"),
+  schedule("2026-10-02", "09:00:00", "13:30:00"),
+  schedule("2026-10-03", "10:00:00", "16:00:00"),
+  schedule("2026-10-04", "10:00:00", "14:00:00", "Cancelled"),
+  { ...schedule("2026-10-01", "09:00:00", "17:00:00"), leaveType: "SickLeave" },
+]);
+assert.deepEqual(stats, { totalMinutes: 18.5 * 60, weekdayMinutes: 12.5 * 60, weekendMinutes: 6 * 60 });
+assert.equal(formatScheduleHours(stats.totalMinutes), "18.5");
+assert.equal(formatScheduleHours(6 * 60), "6");
 
 console.log("attendance-my-week.test.ts: ok");

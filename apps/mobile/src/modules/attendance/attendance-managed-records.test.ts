@@ -42,6 +42,8 @@ assert.equal(classifyManagedRecord(session({ segments: [{ clockIn: clockIn(), cl
 assert.equal(classifyManagedRecord(session({ hasOpenSegment: true, segments: [{ clockIn: clockIn() }] }), "2026-05-18"), "inProgress");
 assert.equal(classifyManagedRecord(session({ hasOpenSegment: true, segments: [{ clockIn: clockIn() }] }), "2026-05-19"), "missingClockOut");
 assert.equal(classifyManagedRecord(session({ segments: [{ clockIn: clockIn(), clockOut: clockOut() }] }), "2026-05-18"), "normal");
+assert.equal(classifyManagedRecord(session({ leaveType: "SickLeave", segments: [] }), "2026-05-19"), "onLeave", "已批准请假且无打卡不算缺卡");
+assert.equal(isManagedRecordException("onLeave"), false);
 assert.equal(isManagedRecordException("late"), true);
 assert.equal(isManagedRecordException("inProgress"), false);
 

@@ -21,6 +21,7 @@ import { type AttendanceStatusTone, ATTENDANCE_STATUS_TONES, StatusPill } from "
 import { ManagedPunchEditSheet } from "./ManagedPunchEditSheet";
 
 const ISSUE_TONES: Record<ManagedRecordIssue, AttendanceStatusTone> = {
+  onLeave: "neutral",
   missingClockOut: "danger",
   noPunch: "danger",
   late: "warning",

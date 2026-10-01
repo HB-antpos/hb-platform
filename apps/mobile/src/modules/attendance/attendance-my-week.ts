@@ -96,6 +96,41 @@ export function buildMyWeekRows(
   });
 }
 
+export interface ScheduleHourStats {
+  totalMinutes: number;
+  weekdayMinutes: number;
+  weekendMinutes: number;
+}
+
+/**
+ * 排班工时统计：周合计、工作日（周一至五）、周末（周六日）。
+ * 已取消的班次与已批准请假的班次不计入。
+ */
+export function computeScheduleHourStats(
+  schedules: Pick<AttendanceSchedule, "workDate" | "startTime" | "endTime" | "status" | "leaveType">[],
+): ScheduleHourStats {
+  return schedules.reduce<ScheduleHourStats>((stats, schedule) => {
+    if (schedule.status.toLowerCase() === "cancelled" || schedule.leaveType) return stats;
+    const day = parseDay(schedule.workDate);
+    if (day === undefined) return stats;
+    const minutes = scheduleDurationMinutes(schedule);
+    // 1970-01-01 是周四；换算成周一=0 的序号，5、6 为周末。
+    const weekdayIndex = (((day + 3) % 7) + 7) % 7;
+    const isWeekend = weekdayIndex >= 5;
+    return {
+      totalMinutes: stats.totalMinutes + minutes,
+      weekdayMinutes: stats.weekdayMinutes + (isWeekend ? 0 : minutes),
+      weekendMinutes: stats.weekendMinutes + (isWeekend ? minutes : 0),
+    };
+  }, { totalMinutes: 0, weekdayMinutes: 0, weekendMinutes: 0 });
+}
+
+/** 分钟转小时文本：整数不带小数，否则保留 1 位。 */
+export function formatScheduleHours(minutes: number) {
+  const hours = minutes / 60;
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+}
+
 export function sumScheduledMinutes(rows: MyWeekRow[]) {
   return rows.reduce(
     (sum, row) => sum + row.schedules.reduce((inner, schedule) => inner + scheduleDurationMinutes(schedule), 0),
