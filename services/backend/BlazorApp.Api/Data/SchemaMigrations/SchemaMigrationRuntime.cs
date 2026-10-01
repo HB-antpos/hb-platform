@@ -95,6 +95,10 @@ internal interface ISchemaMigrationRuntime
     Task VerifyMobileDeviceActivationSchemaAsync(CancellationToken cancellationToken);
 
     Task VerifyLinklyMultiTerminalSchemaAsync(CancellationToken cancellationToken);
+
+    Task ApplyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken);
+
+    Task VerifyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken);
 }
 
 internal interface ISchemaMigrationSession : IAsyncDisposable
@@ -125,6 +129,8 @@ internal sealed class LinklyMultiTerminalSchemaMismatchException : Exception;
 internal sealed class MobileOtaRuntimeTargetsSchemaMismatchException : Exception;
 
 internal sealed class LocalSupplierCategorySchemaMismatchException : Exception;
+
+internal sealed class LegacyEmployeeLogRiskSchemaMismatchException : Exception;
 
 internal sealed class SchemaBaselineSqlFailureException(string stepId) : Exception
 {
@@ -727,6 +733,35 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         catch (SqlException exception) when (exception.Number is >= 51600 and <= 51616)
         {
             throw new LinklyMultiTerminalSchemaMismatchException();
+        }
+    }
+
+    public async Task ApplyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _posmDatabase.ConnectionString,
+            LegacyEmployeeLogRiskSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记 POSM 账本，已有同名但结构错误的表不会被误标为完成。
+        await VerifyLegacyEmployeeLogRiskAsync(cancellationToken);
+    }
+
+    public async Task VerifyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+                _posmDatabase.ConnectionString,
+                LegacyEmployeeLogRiskSchema.VerifySql,
+                _commandTimeoutSeconds,
+                cancellationToken
+            );
+        }
+        catch (SqlException exception) when (exception.Number is >= 51950 and <= 51969)
+        {
+            throw new LegacyEmployeeLogRiskSchemaMismatchException();
         }
     }
 

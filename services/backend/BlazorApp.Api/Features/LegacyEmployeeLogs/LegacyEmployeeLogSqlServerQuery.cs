@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using System.Text;
+using BlazorApp.Api.Features.LegacyEmployeeLogs.Risk;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
 // 项目全局引用了 SqlSugar，其 DbType 与 ADO.NET 参数类型同名。
@@ -19,8 +20,14 @@ public sealed record LegacyEmployeeLogNormalizedQuery(
     string? Keyword,
     int PageNumber,
     int PageSize,
-    bool Descending
-);
+    bool Descending,
+    string RiskLens = LegacyEmployeeLogSqlServerQuery.LensAll,
+    IReadOnlyList<string>? RuleCodes = null,
+    string ReviewStatus = LegacyEmployeeLogSqlServerQuery.ReviewAll
+)
+{
+    public IReadOnlyList<string> RuleCodeList => RuleCodes ?? [];
+}
 
 public sealed record LegacyEmployeeLogSqlParameter(string Name, object? Value, DbType DbType, int? Size = null);
 
@@ -32,7 +39,8 @@ public sealed record LegacyEmployeeLogListPage(
     List<LegacyEmployeeLogItemDto> Rows,
     List<LegacyEmployeeLogEmployeeOptionDto> Employees,
     List<LegacyEmployeeLogDeviceOptionDto> Devices,
-    long? RejectedScanRows
+    long? RejectedScanRows,
+    long? LensTotal = null
 )
 {
     public static LegacyEmployeeLogListPage KeywordRejected(long scanRows) => new([], [], [], [], scanRows);
@@ -56,8 +64,25 @@ public static class LegacyEmployeeLogSqlServerQuery
     public const int MaxOperationFilters = 64;
     public const int MaxKeywordLength = 100;
     public const int ContextWindowMinutes = 5;
+    /// <summary>详情「前后操作」可选的窗口；异常核查常要看更长的上下文（例如开钱箱前最近一次结账）。</summary>
+    public static readonly IReadOnlySet<int> AllowedContextWindows = new HashSet<int> { 5, 10, 15 };
     public const int ContextRowLimit = 200;
     public const int MaxStoreFilters = 64;
+
+    public const string LensAll = "all";
+    public const string LensDanger = "danger";
+    public const string LensAbnormal = "abnormal";
+    public const string ReviewAll = "all";
+    public const string ReviewPending = "pending";
+    public const string ReviewReviewed = "reviewed";
+    public const string ReviewFollowUp = "followUp";
+    private static readonly string[] Lenses = [LensAll, LensDanger, LensAbnormal];
+    private static readonly string[] ReviewStatuses = [ReviewAll, ReviewPending, ReviewReviewed, ReviewFollowUp];
+
+    /// <summary>核查结论在库里的取值：0 已撤销（视同待核查）、1 确认正常、2 需跟进。</summary>
+    public const byte ReviewRevoked = 0;
+    public const byte ReviewNormal = 1;
+    public const byte ReviewNeedsFollowUp = 2;
 
     /// <summary>
     /// 带详情关键字时允许扫描的最大行数。关键字要逐行回表读 OperationDetail（包含列里没有它），
@@ -73,7 +98,7 @@ public static class LegacyEmployeeLogSqlServerQuery
         "x.[Id], x.[EmployeeId], x.[EmployeeName], x.[Operation], x.[OperationDetail], x.[OperationTime], x.[DeviceCode], x.[StoreCode], x.[LastUploadTime]";
 
     // 与索引定义保持一致：键 (StoreCode, OperationTime)，包含列覆盖汇总与下拉选项，详情和上传时间回表读取。
-    private static readonly string Source = $"[dbo].[EmployeeLogs] AS l WITH (NOLOCK, INDEX([{IndexName}]))";
+    internal static readonly string Source = $"[dbo].[EmployeeLogs] AS l WITH (NOLOCK, INDEX([{IndexName}]))";
 
     /// <summary>校验请求；返回错误文案或归一化后的条件（二者恰有一个非空）。</summary>
     public static (LegacyEmployeeLogNormalizedQuery? Query, string? Error) Normalize(LegacyEmployeeLogQueryDto request)
@@ -130,9 +155,32 @@ public static class LegacyEmployeeLogSqlServerQuery
         // 页码上限保证 OFFSET 不会溢出 int。
         var pageNumber = Math.Clamp(request.PageNumber, 1, int.MaxValue / MaxPageSize);
         var descending = !string.Equals(TrimToNull(request.SortOrder), "asc", StringComparison.OrdinalIgnoreCase);
+
+        // 风险入口与规则都是封闭取值；未知值直接拒绝，不静默退回「全部」放宽结果。
+        var lens = Lenses.FirstOrDefault(value => string.Equals(value, TrimToNull(request.RiskLens) ?? LensAll, StringComparison.OrdinalIgnoreCase));
+        if (lens == null)
+        {
+            return (null, "风险入口无效");
+        }
+        var ruleCodes = new List<string>();
+        foreach (var code in NormalizeList(request.RuleCodes))
+        {
+            var known = LegacyEmployeeLogRiskCatalog.AllRules.FirstOrDefault(rule => string.Equals(rule, code, StringComparison.OrdinalIgnoreCase));
+            if (known == null)
+            {
+                return (null, "异常规则条件无效");
+            }
+            ruleCodes.Add(known);
+        }
+        var reviewStatus = ReviewStatuses.FirstOrDefault(value => string.Equals(value, TrimToNull(request.ReviewStatus) ?? ReviewAll, StringComparison.OrdinalIgnoreCase));
+        if (reviewStatus == null)
+        {
+            return (null, "核查状态条件无效");
+        }
         return (
             new LegacyEmployeeLogNormalizedQuery(
-                storeCodes, from, to, deviceCode, employeeIds, operations, keyword, pageNumber, pageSize, descending),
+                storeCodes, from, to, deviceCode, employeeIds, operations, keyword, pageNumber, pageSize, descending,
+                lens, ruleCodes, reviewStatus),
             null
         );
     }
@@ -186,12 +234,30 @@ public static class LegacyEmployeeLogSqlServerQuery
         Param("@PageSize", query.PageSize, DbType.Int32);
         var direction = query.Descending ? "DESC" : "ASC";
         var where = string.Join("\n  AND ", filters);
+        // 异常入口只作用于当前页与总数；按操作类型计数、员工 / 设备选项保持原口径。
+        // 标记表很小，与索引范围做半连接，代价与按操作类型计数同量级。
+        var abnormal = query.RiskLens == LensAbnormal;
+        var abnormalOn = (string idColumn) => abnormal ? AbnormalPredicate(idColumn, query, parameters) : null;
 
         var sql = new StringBuilder();
         sql.AppendLine("SET NOCOUNT ON;");
+        if (abnormal)
+        {
+            sql.AppendLine("DECLARE @LensCount TABLE ([Rows] bigint NOT NULL);");
+        }
         // 时间范围 1–31 天、分店数量差别很大，统一 RECOMPILE，避免小范围编译的计划被大范围复用。
         if (query.Keyword != null)
         {
+            var hitConditions = new List<string>();
+            if (operationList != null)
+            {
+                hitConditions.Add($"h.[Operation] IN ({operationList})");
+            }
+            if (abnormalOn("h.[Id]") is { } hitAbnormal)
+            {
+                hitConditions.Add(hitAbnormal);
+            }
+            var hitWhere = hitConditions.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", hitConditions);
             Param("@ScanLimit", (long)keywordScanRowLimit, DbType.Int64);
             var pattern = LocalSupplierProductSalesAnalysisService.BuildSqlServerLikePattern(query.Keyword);
             Param("@KeywordPattern", pattern, DbType.AnsiString, 400);
@@ -220,10 +286,11 @@ public static class LegacyEmployeeLogSqlServerQuery
                 SELECT h.[Operation], COUNT_BIG(*) AS [Count]
                 FROM #hb_legacy_log_hits AS h
                 GROUP BY h.[Operation];
+                {(abnormal ? $"INSERT INTO @LensCount ([Rows]) SELECT COUNT_BIG(*) FROM #hb_legacy_log_hits AS h {hitWhere};" : string.Empty)}
                 WITH p AS (
                     SELECT h.[Id], h.[OperationTime]
                     FROM #hb_legacy_log_hits AS h
-                    {(operationList == null ? string.Empty : $"WHERE h.[Operation] IN ({operationList})")}
+                    {hitWhere}
                     ORDER BY h.[OperationTime] {direction}, h.[Id] {direction}
                     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
                 )
@@ -237,6 +304,11 @@ public static class LegacyEmployeeLogSqlServerQuery
         else
         {
             var listWhere = operationList == null ? where : $"{where}\n  AND l.[Operation] IN ({operationList})";
+            if (abnormalOn("l.[Id]") is { } listAbnormal)
+            {
+                listWhere = $"{listWhere}\n  AND {listAbnormal}";
+                sql.AppendLine($"INSERT INTO @LensCount ([Rows]) SELECT COUNT_BIG(*) FROM {Source} WHERE {listWhere} OPTION (RECOMPILE);");
+            }
             sql.AppendLine($"""
                 SELECT l.[Operation], COUNT_BIG(*) AS [Count]
                 FROM {Source}
@@ -269,7 +341,45 @@ public static class LegacyEmployeeLogSqlServerQuery
             GROUP BY l.[DeviceCode]
             OPTION (RECOMPILE);
             """);
+        if (abnormal)
+        {
+            // 放在最后一个结果集，前面的结果集顺序与「全部 / 危险」入口一致。
+            sql.AppendLine("SELECT [Rows] FROM @LensCount;");
+        }
         return new LegacyEmployeeLogSqlCommand(sql.ToString(), parameters);
+    }
+
+    /// <summary>
+    /// 异常入口的行过滤：存在未撤回的规则命中（可限定规则），再按核查状态收窄。
+    /// 待核查 = 没有「确认正常 / 需跟进」结论（撤销过的回到待核查）。
+    /// </summary>
+    private static string AbnormalPredicate(
+        string idColumn,
+        LegacyEmployeeLogNormalizedQuery query,
+        List<LegacyEmployeeLogSqlParameter> parameters
+    )
+    {
+        var flagFilter = "f.[RetractedAtUtc] IS NULL";
+        if (query.RuleCodeList.Count > 0)
+        {
+            var names = query.RuleCodeList.Select((code, index) =>
+            {
+                var name = $"@Rule{index}";
+                parameters.Add(new LegacyEmployeeLogSqlParameter(name, code, DbType.AnsiString, 32));
+                return name;
+            });
+            flagFilter += $" AND f.[RuleCode] IN ({string.Join(", ", names)})";
+        }
+        var flagged = $"EXISTS (SELECT 1 FROM [dbo].[LegacyEmployeeLogFlags] AS f WITH (NOLOCK) WHERE f.[LogId] = {idColumn} AND {flagFilter})";
+        string Reviewed(string results) =>
+            $"EXISTS (SELECT 1 FROM [dbo].[LegacyEmployeeLogReviews] AS r WITH (NOLOCK) WHERE r.[LogId] = {idColumn} AND r.[Result] IN ({results}))";
+        return query.ReviewStatus switch
+        {
+            ReviewPending => $"{flagged} AND NOT {Reviewed("1, 2")}",
+            ReviewReviewed => $"{flagged} AND {Reviewed("1, 2")}",
+            ReviewFollowUp => $"{flagged} AND {Reviewed("2")}",
+            _ => flagged,
+        };
     }
 
     /// <summary>按主键取单条（聚集索引点查，不需要时间索引）。</summary>
@@ -280,13 +390,13 @@ public static class LegacyEmployeeLogSqlServerQuery
         );
 
     /// <summary>同分店、同设备在目标时间前后窗口内的操作，按时间升序，多取一条用于判断是否截断。</summary>
-    public static LegacyEmployeeLogSqlCommand BuildNeighbors(LegacyEmployeeLogItemDto target)
+    public static LegacyEmployeeLogSqlCommand BuildNeighbors(LegacyEmployeeLogItemDto target, int windowMinutes = ContextWindowMinutes)
     {
         var parameters = new List<LegacyEmployeeLogSqlParameter>
         {
             new("@StoreCode", target.StoreCode, DbType.AnsiString, 200),
-            new("@From", target.OperationTime.AddMinutes(-ContextWindowMinutes), DbType.DateTime),
-            new("@To", target.OperationTime.AddMinutes(ContextWindowMinutes), DbType.DateTime),
+            new("@From", target.OperationTime.AddMinutes(-windowMinutes), DbType.DateTime),
+            new("@To", target.OperationTime.AddMinutes(windowMinutes), DbType.DateTime),
             new("@Limit", ContextRowLimit + 1, DbType.Int32),
         };
         var deviceFilter = "l.[DeviceCode] IS NULL";
@@ -309,12 +419,323 @@ public static class LegacyEmployeeLogSqlServerQuery
         );
     }
 
+    /// <summary>
+    /// 异常入口计数：与按操作类型计数同口径（分店、时间、设备、员工、关键字），不受操作类型、规则、核查状态影响。
+    /// 从标记表出发（按分店 + 时间索引），关键字只对命中的少量记录回表比对。
+    /// </summary>
+    public static LegacyEmployeeLogSqlCommand BuildRiskSummary(LegacyEmployeeLogNormalizedQuery query)
+    {
+        var parameters = new List<LegacyEmployeeLogSqlParameter>();
+        var conditions = FlagScope(query.StoreCodes, query.From, query.ToExclusive, query.DeviceCode, parameters);
+        if (query.EmployeeIds.Count > 0)
+        {
+            var names = query.EmployeeIds.Select((id, index) => AddParam(parameters, $"@Employee{index}", id, DbType.AnsiString, 50));
+            conditions.Add($"f.[EmployeeId] IN ({string.Join(", ", names)})");
+        }
+        if (query.Keyword != null)
+        {
+            AddParam(parameters, "@KeywordPattern", LocalSupplierProductSalesAnalysisService.BuildSqlServerLikePattern(query.Keyword), DbType.AnsiString, 400);
+            conditions.Add("EXISTS (SELECT 1 FROM [dbo].[EmployeeLogs] AS x WITH (NOLOCK) WHERE x.[Id] = f.[LogId] AND x.[OperationDetail] LIKE @KeywordPattern)");
+        }
+        var sql = $"""
+            SET NOCOUNT ON;
+            DECLARE @fl TABLE ([LogId] varchar(255) NOT NULL, [RuleCode] varchar(32) NOT NULL, [EmployeeKey] varchar(50) NULL);
+            INSERT INTO @fl ([LogId], [RuleCode], [EmployeeKey])
+            SELECT f.[LogId], f.[RuleCode], COALESCE(f.[EmployeeId], f.[EmployeeName])
+            FROM [dbo].[LegacyEmployeeLogFlags] AS f WITH (NOLOCK)
+            WHERE {string.Join("\n  AND ", conditions)}
+            OPTION (RECOMPILE);
+            SELECT fl.[RuleCode], COUNT(DISTINCT fl.[LogId]) FROM @fl AS fl GROUP BY fl.[RuleCode];
+            SELECT COUNT(DISTINCT fl.[LogId]),
+                   COUNT(DISTINCT CASE WHEN r.[LogId] IS NULL THEN fl.[LogId] END),
+                   COUNT(DISTINCT fl.[EmployeeKey])
+            FROM @fl AS fl
+            LEFT JOIN [dbo].[LegacyEmployeeLogReviews] AS r WITH (NOLOCK) ON r.[LogId] = fl.[LogId] AND r.[Result] IN (1, 2);
+            """;
+        return new LegacyEmployeeLogSqlCommand(sql, parameters);
+    }
+
+    public static async Task<(List<LegacyEmployeeLogRuleCountDto> ByRule, int Total, int Pending, int Employees)> ExecuteRiskSummaryAsync(
+        DbConnection connection,
+        LegacyEmployeeLogSqlCommand command,
+        CancellationToken cancellationToken = default
+    ) => await WithReaderAsync(connection, command, async reader =>
+    {
+        var byRule = new List<LegacyEmployeeLogRuleCountDto>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            byRule.Add(new LegacyEmployeeLogRuleCountDto { RuleCode = reader.GetString(0), Count = Convert.ToInt32(reader.GetValue(1)) });
+        }
+        await NextResultAsync(reader, cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return (byRule, 0, 0, 0);
+        }
+        return (byRule, Convert.ToInt32(reader.GetValue(0)), Convert.ToInt32(reader.GetValue(1)), Convert.ToInt32(reader.GetValue(2)));
+    }, cancellationToken);
+
+    /// <summary>当前页（或上下文）记录的规则命中、核查结论与金额；编号最多约 200 个。</summary>
+    public static LegacyEmployeeLogSqlCommand BuildEnrichment(IReadOnlyCollection<string> ids)
+    {
+        var parameters = new List<LegacyEmployeeLogSqlParameter>();
+        var names = string.Join(", ", ids.Select((id, index) => AddParam(parameters, $"@Id{index}", id, DbType.AnsiString, 255)));
+        var sql = $"""
+            SET NOCOUNT ON;
+            SELECT f.[LogId], f.[RuleCode], f.[EvidenceJson], f.[DetectedAtUtc]
+            FROM [dbo].[LegacyEmployeeLogFlags] AS f WITH (NOLOCK)
+            WHERE f.[LogId] IN ({names}) AND f.[RetractedAtUtc] IS NULL;
+            SELECT r.[LogId], r.[Result], r.[Note], r.[ReviewedByName], r.[ReviewedAtUtc], r.[Version]
+            FROM [dbo].[LegacyEmployeeLogReviews] AS r WITH (NOLOCK)
+            WHERE r.[LogId] IN ({names});
+            SELECT i.[LogId], i.[Amount]
+            FROM [dbo].[LegacyEmployeeLogImpacts] AS i WITH (NOLOCK)
+            WHERE i.[LogId] IN ({names});
+            """;
+        return new LegacyEmployeeLogSqlCommand(sql, parameters);
+    }
+
+    /// <summary>把风险信息补到记录上；IsDanger 只看操作类型，不依赖扫描任务。</summary>
+    public static async Task EnrichAsync(
+        DbConnection connection,
+        IReadOnlyList<LegacyEmployeeLogItemDto> items,
+        CancellationToken cancellationToken = default
+    )
+    {
+        foreach (var item in items)
+        {
+            item.IsDanger = LegacyEmployeeLogRiskCatalog.IsDanger(item.Operation);
+        }
+        var ids = items.Select(item => item.Id).Distinct(StringComparer.Ordinal).ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+        var byId = items.GroupBy(item => item.Id, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        await WithReaderAsync(connection, BuildEnrichment(ids), async reader =>
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var flag = new LegacyEmployeeLogFlagDto
+                {
+                    RuleCode = reader.GetString(1),
+                    Evidence = ParseEvidence(reader.GetString(2)),
+                    DetectedAtUtc = DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc),
+                };
+                foreach (var item in byId.GetValueOrDefault(reader.GetString(0)) ?? [])
+                {
+                    item.Flags.Add(flag);
+                }
+            }
+            await NextResultAsync(reader, cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var review = ReadReview(reader, 1);
+                foreach (var item in byId.GetValueOrDefault(reader.GetString(0)) ?? [])
+                {
+                    item.Review = review;
+                }
+            }
+            await NextResultAsync(reader, cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var amount = reader.GetDecimal(1);
+                foreach (var item in byId.GetValueOrDefault(reader.GetString(0)) ?? [])
+                {
+                    item.AmountImpact = amount;
+                }
+            }
+            return true;
+        }, cancellationToken);
+        foreach (var item in items)
+        {
+            item.Flags = item.Flags
+                .OrderBy(flag => LegacyEmployeeLogRiskCatalog.AllRules.ToList().IndexOf(flag.RuleCode))
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// 按员工汇总：操作数与危险数来自日志索引（不回表），异常与待核查来自标记表，金额来自金额表。
+    /// 金额表没有设备列，选了设备时按主键回表核对设备（金额表每店每天只有几十行）。
+    /// </summary>
+    public static LegacyEmployeeLogSqlCommand BuildEmployeeSummary(LegacyEmployeeLogNormalizedQuery query)
+    {
+        var parameters = new List<LegacyEmployeeLogSqlParameter>();
+        var stores = string.Join(", ", query.StoreCodes.Select((code, index) => AddParam(parameters, $"@Store{index}", code, DbType.AnsiString, 200)));
+        AddParam(parameters, "@From", query.From, DbType.DateTime);
+        AddParam(parameters, "@ToExclusive", query.ToExclusive, DbType.DateTime);
+        var logScope = $"l.[StoreCode] IN ({stores}) AND l.[OperationTime] >= @From AND l.[OperationTime] < @ToExclusive";
+        var flagScope = $"f.[StoreCode] IN ({stores}) AND f.[OperationTime] >= @From AND f.[OperationTime] < @ToExclusive AND f.[RetractedAtUtc] IS NULL";
+        var impactScope = $"i.[StoreCode] IN ({stores}) AND i.[OperationTime] >= @From AND i.[OperationTime] < @ToExclusive";
+        if (query.DeviceCode != null)
+        {
+            AddParam(parameters, "@DeviceCode", query.DeviceCode, DbType.AnsiString, 200);
+            logScope += " AND l.[DeviceCode] = @DeviceCode";
+            flagScope += " AND f.[DeviceCode] = @DeviceCode";
+            impactScope += " AND EXISTS (SELECT 1 FROM [dbo].[EmployeeLogs] AS x WITH (NOLOCK) WHERE x.[Id] = i.[LogId] AND x.[DeviceCode] = @DeviceCode)";
+        }
+        var danger = string.Join(", ", LegacyEmployeeLogRiskCatalog.DangerOperations.Select((operation, index) =>
+            AddParam(parameters, $"@Danger{index}", operation, DbType.AnsiString, 200)));
+        var sql = $"""
+            SET NOCOUNT ON;
+            SELECT l.[EmployeeId], MAX(l.[EmployeeName]), COUNT_BIG(*),
+                   SUM(CASE WHEN l.[Operation] IN ({danger}) THEN 1 ELSE 0 END)
+            FROM {Source}
+            WHERE {logScope}
+            GROUP BY l.[EmployeeId]
+            OPTION (RECOMPILE);
+            SELECT l.[EmployeeId], l.[StoreCode], l.[DeviceCode]
+            FROM {Source}
+            WHERE {logScope}
+            GROUP BY l.[EmployeeId], l.[StoreCode], l.[DeviceCode]
+            OPTION (RECOMPILE);
+            DECLARE @fl TABLE ([LogId] varchar(255) NOT NULL, [RuleCode] varchar(32) NOT NULL, [EmployeeId] varchar(50) NULL);
+            INSERT INTO @fl SELECT f.[LogId], f.[RuleCode], f.[EmployeeId]
+            FROM [dbo].[LegacyEmployeeLogFlags] AS f WITH (NOLOCK)
+            WHERE {flagScope}
+            OPTION (RECOMPILE);
+            SELECT fl.[EmployeeId], fl.[RuleCode], COUNT(DISTINCT fl.[LogId]) FROM @fl AS fl GROUP BY fl.[EmployeeId], fl.[RuleCode];
+            SELECT fl.[EmployeeId], COUNT(DISTINCT fl.[LogId]), COUNT(DISTINCT CASE WHEN r.[LogId] IS NULL THEN fl.[LogId] END)
+            FROM @fl AS fl
+            LEFT JOIN [dbo].[LegacyEmployeeLogReviews] AS r WITH (NOLOCK) ON r.[LogId] = fl.[LogId] AND r.[Result] IN (1, 2)
+            GROUP BY fl.[EmployeeId];
+            SELECT i.[EmployeeId], SUM(i.[Amount])
+            FROM [dbo].[LegacyEmployeeLogImpacts] AS i WITH (NOLOCK)
+            WHERE {impactScope}
+            GROUP BY i.[EmployeeId]
+            OPTION (RECOMPILE);
+            """;
+        return new LegacyEmployeeLogSqlCommand(sql, parameters);
+    }
+
+    public static async Task<List<LegacyEmployeeLogEmployeeSummaryDto>> ExecuteEmployeeSummaryAsync(
+        DbConnection connection,
+        LegacyEmployeeLogSqlCommand command,
+        CancellationToken cancellationToken = default
+    ) => await WithReaderAsync(connection, command, async reader =>
+    {
+        // EmployeeId 可能为空（旧数据），用空串做字典键，回填时还原为 null。
+        var rows = new Dictionary<string, LegacyEmployeeLogEmployeeSummaryDto>(StringComparer.Ordinal);
+        LegacyEmployeeLogEmployeeSummaryDto Row(string? employeeId) =>
+            rows.TryGetValue(employeeId ?? string.Empty, out var row)
+                ? row
+                : rows[employeeId ?? string.Empty] = new LegacyEmployeeLogEmployeeSummaryDto { EmployeeId = employeeId };
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var row = Row(NullableString(reader, 0));
+            row.EmployeeName = NullableString(reader, 1);
+            row.Total = Convert.ToInt32(reader.GetValue(2));
+            row.DangerCount = Convert.ToInt32(reader.GetValue(3));
+        }
+        await NextResultAsync(reader, cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var row = Row(NullableString(reader, 0));
+            if (NullableString(reader, 1) is { } store && !row.StoreCodes.Contains(store))
+            {
+                row.StoreCodes.Add(store);
+            }
+            if (NullableString(reader, 2) is { } device && !row.DeviceCodes.Contains(device))
+            {
+                row.DeviceCodes.Add(device);
+            }
+        }
+        await NextResultAsync(reader, cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            Row(NullableString(reader, 0)).AbnormalByRule.Add(new LegacyEmployeeLogRuleCountDto
+            {
+                RuleCode = reader.GetString(1),
+                Count = Convert.ToInt32(reader.GetValue(2)),
+            });
+        }
+        await NextResultAsync(reader, cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var row = Row(NullableString(reader, 0));
+            row.AbnormalCount = Convert.ToInt32(reader.GetValue(1));
+            row.PendingReview = Convert.ToInt32(reader.GetValue(2));
+        }
+        await NextResultAsync(reader, cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            Row(NullableString(reader, 0)).AmountImpact = reader.GetDecimal(1);
+        }
+        foreach (var row in rows.Values)
+        {
+            row.StoreCodes.Sort(StringComparer.Ordinal);
+            row.DeviceCodes.Sort(StringComparer.Ordinal);
+            row.AbnormalByRule = row.AbnormalByRule.OrderByDescending(rule => rule.Count).ThenBy(rule => rule.RuleCode, StringComparer.Ordinal).ToList();
+        }
+        // 只在标记表或金额表出现、日志范围内却没有的员工（理论上不会）也保留，避免计数对不上总数。
+        return rows.Values.ToList();
+    }, cancellationToken);
+
+    internal static LegacyEmployeeLogReviewDto ReadReview(DbDataReader reader, int start) => new()
+    {
+        Result = Convert.ToByte(reader.GetValue(start)) switch
+        {
+            ReviewNormal => "normal",
+            ReviewNeedsFollowUp => "followUp",
+            _ => "revoked",
+        },
+        Note = NullableString(reader, start + 1),
+        ReviewedByName = reader.GetString(start + 2),
+        ReviewedAtUtc = DateTime.SpecifyKind(reader.GetDateTime(start + 3), DateTimeKind.Utc),
+        Version = reader.GetInt32(start + 4),
+    };
+
+    private static Dictionary<string, string> ParseEvidence(string json)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new();
+        }
+    }
+
+    private static List<string> FlagScope(
+        IReadOnlyList<string> storeCodes,
+        DateTime from,
+        DateTime toExclusive,
+        string? deviceCode,
+        List<LegacyEmployeeLogSqlParameter> parameters
+    )
+    {
+        var stores = string.Join(", ", storeCodes.Select((code, index) => AddParam(parameters, $"@Store{index}", code, DbType.AnsiString, 200)));
+        AddParam(parameters, "@From", from, DbType.DateTime);
+        AddParam(parameters, "@ToExclusive", toExclusive, DbType.DateTime);
+        var conditions = new List<string>
+        {
+            $"f.[StoreCode] IN ({stores})",
+            "f.[OperationTime] >= @From",
+            "f.[OperationTime] < @ToExclusive",
+            "f.[RetractedAtUtc] IS NULL",
+        };
+        if (deviceCode != null)
+        {
+            AddParam(parameters, "@DeviceCode", deviceCode, DbType.AnsiString, 200);
+            conditions.Add("f.[DeviceCode] = @DeviceCode");
+        }
+        return conditions;
+    }
+
+    private static string AddParam(List<LegacyEmployeeLogSqlParameter> parameters, string name, object? value, DbType dbType, int? size = null)
+    {
+        parameters.Add(new LegacyEmployeeLogSqlParameter(name, value, dbType, size));
+        return name;
+    }
+
     public static async Task<LegacyEmployeeLogListPage> ExecuteListAsync(
         DbConnection connection,
         LegacyEmployeeLogSqlCommand command,
         bool hasKeywordGuard,
         int keywordScanRowLimit = DefaultKeywordScanRowLimit,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        bool hasLensTotal = false
     )
     {
         return await WithReaderAsync(connection, command, async reader =>
@@ -361,7 +782,13 @@ public static class LegacyEmployeeLogSqlServerQuery
                     Count = Convert.ToInt32(reader.GetValue(1)),
                 });
             }
-            return new LegacyEmployeeLogListPage(counts, rows, employees, devices, null);
+            long? lensTotal = null;
+            if (hasLensTotal)
+            {
+                await NextResultAsync(reader, cancellationToken);
+                lensTotal = await reader.ReadAsync(cancellationToken) ? Convert.ToInt64(reader.GetValue(0)) : 0L;
+            }
+            return new LegacyEmployeeLogListPage(counts, rows, employees, devices, null, lensTotal);
         }, cancellationToken);
     }
 
@@ -371,11 +798,12 @@ public static class LegacyEmployeeLogSqlServerQuery
         CancellationToken cancellationToken = default
     ) => WithReaderAsync(connection, command, reader => ReadItemsAsync(reader, cancellationToken), cancellationToken);
 
-    private static async Task<T> WithReaderAsync<T>(
+    internal static async Task<T> WithReaderAsync<T>(
         DbConnection connection,
         LegacyEmployeeLogSqlCommand command,
         Func<DbDataReader, Task<T>> read,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        int commandTimeoutSeconds = 30
     )
     {
         var shouldClose = connection.State != ConnectionState.Open;
@@ -388,7 +816,7 @@ public static class LegacyEmployeeLogSqlServerQuery
         {
             await using var dbCommand = connection.CreateCommand();
             dbCommand.CommandText = command.Sql;
-            dbCommand.CommandTimeout = 30;
+            dbCommand.CommandTimeout = commandTimeoutSeconds;
             foreach (var parameter in command.Parameters)
             {
                 var dbParameter = dbCommand.CreateParameter();
@@ -435,7 +863,7 @@ public static class LegacyEmployeeLogSqlServerQuery
         return rows;
     }
 
-    private static async Task NextResultAsync(DbDataReader reader, CancellationToken cancellationToken)
+    internal static async Task NextResultAsync(DbDataReader reader, CancellationToken cancellationToken)
     {
         if (!await reader.NextResultAsync(cancellationToken))
         {
@@ -443,7 +871,7 @@ public static class LegacyEmployeeLogSqlServerQuery
         }
     }
 
-    private static string? NullableString(DbDataReader reader, int ordinal) =>
+    internal static string? NullableString(DbDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
     private static List<string> NormalizeList(IEnumerable<string>? values) =>

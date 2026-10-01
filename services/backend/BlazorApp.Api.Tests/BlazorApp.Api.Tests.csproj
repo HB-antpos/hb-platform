@@ -274,6 +274,8 @@
     <Compile Include="PosmSalesOrderListSqlServerIntegrationTests.cs" />
     <Compile Include="LegacyEmployeeLogQueryTests.cs" />
     <Compile Include="LegacyEmployeeLogSqlServerIntegrationTests.cs" />
+    <Compile Include="LegacyEmployeeLogRiskSqlServerIntegrationTests.cs" />
+    <Compile Include="LegacyEmployeeLogRiskEvaluatorTests.cs" />
     <Compile Include="PosmSalesOrderMobileRulesTests.cs" />
     <Compile Include="InstallmentOrderReactServiceTests.cs" />
     <Compile Include="InstallmentOrdersControllerTests.cs" />

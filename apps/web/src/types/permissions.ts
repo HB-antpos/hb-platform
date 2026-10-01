@@ -165,6 +165,7 @@ export const P = {
   // 老系统（旧版收银 POSM.EmployeeLogs）操作日志只读页，刻意不用 Permissions.PosTerminal.* 前缀。
   LegacyEmployeeLogs: {
     View: 'LegacyEmployeeLogs.View',
+    Review: 'LegacyEmployeeLogs.Review',
   },
   Dashboard: {
     View: 'Dashboard',

@@ -249,6 +249,10 @@
       "name": "查看老系统操作日志",
       "description": "Web 页面 /pos-admin/legacy-employee-logs - 按分店查看旧版收银系统上传的员工操作记录"
     },
+    "LegacyEmployeeLogs.Review": {
+      "name": "核查老系统异常操作",
+      "description": "Web 页面 /pos-admin/legacy-employee-logs 与移动端「员工操作日志」- 对命中异常规则的操作标记确认正常或需跟进，并可撤销"
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "打开钱箱",
       "description": "收银端钱箱 - 打开钱箱按钮"
