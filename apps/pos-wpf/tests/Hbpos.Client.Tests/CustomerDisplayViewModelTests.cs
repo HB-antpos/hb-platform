@@ -462,25 +462,16 @@ public sealed class CustomerDisplayViewModelTests
     }
 
     [Fact]
-    public void CustomerDisplayView_hides_advertisement_title_when_media_is_available()
-    {
-        var (_, codeBehind) = ReadCustomerDisplayViewFiles();
-
-        Assert.Contains("PromotionSubtitleText.Visibility = Visibility.Collapsed;", codeBehind);
-        Assert.DoesNotContain(
-            "PromotionSubtitleText.Visibility = hasAdvertisement ? Visibility.Visible : Visibility.Collapsed;",
-            codeBehind);
-    }
-
-    [Fact]
-    public void CustomerDisplayView_hides_promotion_badge_when_advertisement_media_is_available()
+    public void CustomerDisplayView_does_not_render_builtin_default_promotion_text()
     {
         var (xaml, codeBehind) = ReadCustomerDisplayViewFiles();
 
-        Assert.Contains("Text=\"{loc:Loc customer.promotionTitle}\"", xaml);
-        Assert.Contains(
-            "PromotionTextPanel.Visibility = hasAdvertisement ? Visibility.Collapsed : Visibility.Visible;",
-            codeBehind);
+        // 默认促销文案（Deal of the Week 等）已取消：广告区只展示后台配置的广告素材。
+        Assert.DoesNotContain("customer.promotion", xaml);
+        Assert.DoesNotContain("PromotionTextPanel", xaml);
+        Assert.DoesNotContain("PromotionTextPanel", codeBehind);
+        Assert.DoesNotContain("PromotionFallbackSubtitleText", codeBehind);
+        Assert.DoesNotContain("PromotionFallbackBodyText", codeBehind);
     }
 
     [Fact]

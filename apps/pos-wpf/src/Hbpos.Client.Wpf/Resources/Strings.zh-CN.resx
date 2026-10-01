@@ -1074,15 +1074,6 @@
   <data name="customer.insertOrTap" xml:space="preserve">
     <value>插卡或轻触刷卡</value>
   </data>
-  <data name="customer.promotionTitle" xml:space="preserve">
-    <value>本周优惠</value>
-  </data>
-  <data name="customer.promotionSubtitle" xml:space="preserve">
-    <value>有机生鲜最高 30% 优惠</value>
-  </data>
-  <data name="customer.promotionBody" xml:space="preserve">
-    <value>本周末精选新鲜商品，会员专享优惠。</value>
-  </data>
   <data name="customerDisplay.window.opened" xml:space="preserve">
     <value>客显窗口已在第二个屏幕打开。</value>
   </data>
