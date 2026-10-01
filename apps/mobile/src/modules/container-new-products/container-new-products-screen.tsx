@@ -11,7 +11,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { canViewContainerNewProducts } from "./access";
-import { ARRIVAL_RANGE_FILTERS, deviceLocalToday, matchesArrivalRange, type ArrivalRangeFilter } from "./arrival-range";
+import { ARRIVAL_RANGE_FILTERS, deviceLocalToday, formatArrivalDateRange, matchesArrivalRange, type ArrivalRangeFilter } from "./arrival-range";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "./api";
 import { compareByArrivalThenProductNo } from "./ordering";
 import { paginate } from "./pagination";
@@ -21,12 +21,6 @@ import type { ContainerNewProductItem } from "./types";
 function ScreenMessage({ message, onBack, retry }: { message: string; onBack: () => void; retry?: () => void }) {
   const { t } = useAppTranslation("containerNewProducts");
   return <SafeAreaView style={styles.message}><Text>{message}</Text>{retry ? <Button onPress={retry}>{t("actions.retry")}</Button> : null}<Button onPress={onBack}>{t("actions.back")}</Button></SafeAreaView>;
-}
-
-function formatDate(value: string) {
-  const [year, month, day] = value.slice(0, 10).split("-");
-  if (!year || !month || !day) return { dayMonth: value, year: "" };
-  return { dayMonth: `${day}/${month}`, year };
 }
 
 function formatQuantity(value: number) {
@@ -40,7 +34,7 @@ function formatPrice(value: number) {
 function ProductCard({ item, basisLabel, basis, imageSize, dateWidth }: { item: ContainerNewProductItem; basisLabel: string; basis: ContainerNewProductItem["basis"]; imageSize: number; dateWidth: number }) {
   const { t } = useAppTranslation("containerNewProducts");
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
-  const date = formatDate(item.estimatedStoreArrivalDate);
+  const date = formatArrivalDateRange(item.estimatedStoreArrivalDate, item.estimatedStoreArrivalDateEnd);
   return <Card style={styles.card} contentStyle={styles.cardContent} mode="contained">
     <View style={styles.cardRow}>
       <View style={[styles.imageFrame, { width: imageSize, height: imageSize }]}>{item.imageUrl && item.imageUrl !== failedImageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="contain" onError={() => setFailedImageUrl(item.imageUrl)} /> : <Text style={styles.imagePlaceholder}>{t("states.noImage")}</Text>}</View>
@@ -53,7 +47,11 @@ function ProductCard({ item, basisLabel, basis, imageSize, dateWidth }: { item: 
       </View>
       <View style={[styles.dateBlock, { width: dateWidth }]}>
         <Text variant="labelMedium" style={styles.dateLabel}>{t("labels.estimatedArrival")}</Text>
-        <Text variant="titleLarge" style={styles.date}>{date.dayMonth}</Text>
+        {/* 到店区间分两行「起 / – 止」，窄屏日期列也放得下；旧版后端只有单日时保持大字单行 */}
+        {date.end ? <>
+          <Text variant="titleMedium" style={styles.date}>{date.start}</Text>
+          <Text variant="titleMedium" style={styles.dateEnd}>{`– ${date.end}`}</Text>
+        </> : <Text variant="titleLarge" style={styles.date}>{date.start}</Text>}
         <Text variant="bodySmall" style={styles.dateYear}>{date.year}</Text>
       </View>
     </View>
@@ -152,6 +150,7 @@ const styles = StyleSheet.create({
   dateBlock: { width: 100, borderLeftWidth: 1, borderLeftColor: HB_COLORS.outlineMuted, paddingLeft: HB_SPACING.sm },
   dateLabel: { color: HB_COLORS.textSecondary },
   date: { color: HB_COLORS.action, fontWeight: "700", marginTop: 4 },
+  dateEnd: { color: HB_COLORS.action, fontWeight: "700" },
   dateYear: { color: HB_COLORS.textSecondary, marginTop: 2 },
   pagination: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: HB_SPACING.xs },
   pageText: { color: HB_COLORS.textSecondary, flex: 1, textAlign: "center" },

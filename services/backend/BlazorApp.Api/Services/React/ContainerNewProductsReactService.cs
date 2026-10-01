@@ -44,10 +44,10 @@ public sealed class ContainerNewProductsReactService(
         }
 
         var localToday = GetLocalToday(stateCode);
-        // 窗口按「预计到店日」算；到店日 = 货柜日期 + N 个工作日，所以先按放宽后的货柜日期粗筛，再逐柜精确过滤
+        // 窗口按「预计到店区间」算；区间 = 货柜日期 + [起, 止] 个工作日，所以先按放宽后的货柜日期粗筛，再逐柜精确过滤
         var (from, toExclusive) = BuildWindow(localToday);
         var (containerFrom, containerToExclusive) = BuildContainerQueryWindow(from, toExclusive);
-        var storeArrivalWeekdays = stateCode == "NSW" ? 3 : 7;
+        var (startWeekdays, endWeekdays) = GetStoreArrivalWeekdayRange(stateCode);
         var candidateContainers = await _db.Queryable<Container>()
             .Where(x => !x.IsDeleted)
             .Where(x =>
@@ -61,12 +61,14 @@ public sealed class ContainerNewProductsReactService(
                 EstimatedArrivalDate = x.EstimatedArrivalDate,
             })
             .ToListAsync(cancellationToken);
-        var storeArrivalByContainer = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        var storeArrivalByContainer = new Dictionary<string, (DateTime Start, DateTime End)>(StringComparer.OrdinalIgnoreCase);
         var containers = new List<ContainerDateRow>();
         foreach (var candidate in candidateContainers)
         {
-            var storeArrival = AddWeekdays((candidate.ActualArrivalDate ?? candidate.EstimatedArrivalDate)!.Value.Date, storeArrivalWeekdays);
-            if (storeArrival < from || storeArrival >= toExclusive) continue;
+            var containerDate = (candidate.ActualArrivalDate ?? candidate.EstimatedArrivalDate)!.Value.Date;
+            var storeArrival = (Start: AddWeekdays(containerDate, startWeekdays), End: AddWeekdays(containerDate, endWeekdays));
+            // 到店区间与窗口有交集就显示：区间跨过窗口边界的货柜也可能在窗口内到店
+            if (!OverlapsWindow(storeArrival.Start, storeArrival.End, from, toExclusive)) continue;
             storeArrivalByContainer[candidate.ContainerCode] = storeArrival;
             containers.Add(candidate);
         }
@@ -167,7 +169,8 @@ public sealed class ContainerNewProductsReactService(
                     group.Select(x => x.DetailRetailPrice).FirstOrDefault(x => PositiveOrNull(x) != null)),
                 ContainerCode = detail.ContainerCode,
                 ContainerNumber = container.ContainerNumber,
-                EstimatedStoreArrivalDate = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode]),
+                EstimatedStoreArrivalDate = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].Start),
+                EstimatedStoreArrivalDateEnd = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].End),
                 Basis = container.ActualArrivalDate.HasValue ? "actual" : "estimated",
             });
         }
@@ -177,7 +180,7 @@ public sealed class ContainerNewProductsReactService(
             StoreCode = normalizedStoreCode,
             StateCode = stateCode,
             LocalToday = DateOnly.FromDateTime(localToday),
-            // 同一到店日按 HB 货号排；没有货号的排在该日末尾，最后用 ProductCode 保证顺序稳定
+            // 按到店区间起始日排（同一门店各柜区间长度相同，起始日相同则结束日也相同），同一到店日按 HB 货号排；没有货号的排在该日末尾，最后用 ProductCode 保证顺序稳定
             Items = items
                 .OrderBy(x => x.EstimatedStoreArrivalDate)
                 .ThenBy(x => x.HbProductNo == null)
@@ -218,12 +221,20 @@ public sealed class ContainerNewProductsReactService(
         return date;
     }
 
+    // 预计到店区间（货柜到仓库日期之后的工作日数，含两端）：NSW 当天至 3 个工作日，QLD 3 至 7 个工作日
+    internal static (int Start, int End) GetStoreArrivalWeekdayRange(string stateCode) =>
+        stateCode == "NSW" ? (0, 3) : (3, 7);
+
+    // 到店区间 [start, end] 与窗口 [from, toExclusive) 是否有交集
+    internal static bool OverlapsWindow(DateTime start, DateTime end, DateTime from, DateTime toExclusive) =>
+        end >= from && start < toExclusive;
+
     // 预计到店日窗口：过去 1 周至未来 2 周，含今天前 7 天与后 14 天，上界为开区间
     internal static (DateTime From, DateTime ToExclusive) BuildWindow(DateTime localToday) =>
         (localToday.Date.AddDays(-7), localToday.Date.AddDays(15));
 
-    // 货柜日期粗筛窗口：到店日比货柜日期晚 3~7 个工作日（最多跨 11 个自然日），下界多放 14 天保证不漏；
-    // 到店日一定晚于货柜日期，所以上界沿用到店窗口上界即可
+    // 货柜日期粗筛窗口：到店区间结束日比货柜日期最多晚 7 个工作日（最多跨 11 个自然日），下界多放 14 天保证不漏；
+    // 到店区间起始日不早于货柜日期，所以上界沿用到店窗口上界即可
     internal static (DateTime From, DateTime ToExclusive) BuildContainerQueryWindow(DateTime storeFrom, DateTime storeToExclusive) =>
         (storeFrom.AddDays(-14), storeToExclusive);
 

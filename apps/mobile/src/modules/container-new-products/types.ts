@@ -13,7 +13,10 @@ export interface ContainerNewProductItem {
   retailPrice: number | null;
   containerNumber: string | null;
   containerCode: string;
+  /** 预计到店区间起始日（YYYY-MM-DD 开头） */
   estimatedStoreArrivalDate: string;
+  /** 预计到店区间结束日（含当天）；旧版后端不返回时为 null，按单一到店日显示 */
+  estimatedStoreArrivalDateEnd: string | null;
   basis: ContainerNewProductBasis;
 }
 
