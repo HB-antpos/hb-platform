@@ -89,6 +89,10 @@
       "name": "Attendance Leave View Managed Store",
       "description": "Allows access to Attendance Leave View Managed Store."
     },
+    "Attendance.Punch.AdjustManagedStore": {
+      "name": "Attendance Punch Adjust Managed Store",
+      "description": "Allows access to Attendance Punch Adjust Managed Store."
+    },
     "Attendance.Punch.Self": {
       "name": "Attendance Punch Self",
       "description": "Allows access to Attendance Punch Self."

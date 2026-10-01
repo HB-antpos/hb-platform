@@ -23,7 +23,8 @@
     "weeklySchedule": "Weekly schedule",
     "scheduleManagement": "Schedule",
     "holidayManagement": "Holidays",
-    "leaveManagement": "Leave"
+    "leaveManagement": "Leave",
+    "managedPunchRecords": "Punch records"
   },
   "today": {
     "schedules": "Today's shifts",
@@ -94,7 +95,8 @@
       "finalClockOutStatusOnly": "Final clock-out: {{status}}",
       "onBreak": "On break",
       "overtimeTitle": "Overtime",
-      "overtimeSummary": "Raw {{raw}} min · candidate {{candidate}} min · approved {{approved}} min"
+      "overtimeSummary": "Raw {{raw}} min · candidate {{candidate}} min · approved {{approved}} min",
+      "statusWithMinutes": "{{status}} {{minutes}} min"
     },
     "qrResult": {
       "title": "Latest QR punch",
@@ -105,7 +107,26 @@
       "serverTime": "Server time: {{time}}",
       "deviceTime": "Punch time (device timezone): {{time}}",
       "status": "Attendance status: {{status}}"
-    }
+    },
+    "statusShort": {
+      "readyToClockIn": "Not clocked in",
+      "readyToClockOut": "On shift",
+      "completed": "Done for today",
+      "holiday": "Holiday",
+      "viewOnly": "History"
+    },
+    "hero": {
+      "shift": "Shift {{start}} – {{end}}",
+      "noShift": "No shift today",
+      "worked": "Worked {{duration}}"
+    },
+    "summary": {
+      "worked": "Worked",
+      "break": "Break",
+      "overtime": "Overtime"
+    },
+    "lastScan": "Last scan: {{action}} {{time}} · {{status}}",
+    "lastScanDevice": "POS {{device}}"
   },
   "scanner": {
     "waitingForFreshCode": "Keep pointing at the POS. Waiting for the refreshed QR code…",
@@ -337,6 +358,31 @@
       "submitFailed": "Correction submission failed.",
       "invalid": "This correction cannot be saved.",
       "previewRevisionMissing": "The server preview did not include a revision. Run preview again before submitting."
+    },
+    "entryHint": "Missed or wrong punch? Request a correction within 2 days",
+    "entryHintManager": "You can adjust punches, so your own corrections apply immediately",
+    "open": "Correct punch",
+    "sheetSubtitle": "{{date}} · {{store}}",
+    "punchTypeTitle": "Punch type",
+    "time": "Time",
+    "nextDay": "Next day",
+    "reason": "Reason",
+    "note": "Note (optional)",
+    "noteRequired": "Add a note when you choose Other",
+    "stepper": {
+      "minusHour": "1 hour earlier",
+      "minus5": "5 minutes earlier",
+      "plus5": "5 minutes later",
+      "plusHour": "1 hour later"
+    },
+    "reasons": {
+      "forgot": "Forgot to punch",
+      "scanFailed": "Scan failed",
+      "phoneDead": "Phone died",
+      "missed": "Employee missed punch",
+      "device": "Device fault",
+      "shiftChanged": "Shift changed",
+      "other": "Other"
     }
   },
   "datePicker": {
@@ -376,7 +422,9 @@
     "rejectOvertime": "Reject overtime",
     "createSchedule": "Create schedule",
     "publishWeek": "Publish week",
-    "viewLocation": "View location"
+    "viewLocation": "View location",
+    "scanClockIn": "Scan to clock in",
+    "scanClockOut": "Scan to clock out"
   },
   "punchTypes": {
     "ClockIn": "Clock in",
@@ -473,5 +521,37 @@
     "holidaySyncSuccess": "Synced {{count}} public holidays.",
     "adjustmentSubmitted": "Punch correction submitted.",
     "adjustmentApplied": "Punch correction applied."
+  },
+  "managedRecords": {
+    "filterAll": "All {{count}}",
+    "filterException": "Exceptions {{count}}",
+    "empty": "No shifts on this day",
+    "emptyException": "No exceptions on this day",
+    "noStore": "Select a store first",
+    "previousDay": "Previous day",
+    "nextDay": "Next day",
+    "today": "Today",
+    "punchSummary": "In {{clockIn}} · Out {{clockOut}}",
+    "issues": {
+      "missingClockOut": "Missed clock-out",
+      "noPunch": "No punches",
+      "late": "Late",
+      "earlyLeave": "Left early",
+      "inProgress": "On shift",
+      "notStarted": "Not started",
+      "normal": "Normal"
+    },
+    "editTitle": "Edit punches",
+    "viewTitle": "Punch details",
+    "editSubtitle": "{{date}} · Shift {{start}}–{{end}}",
+    "selectHint": "Pick a punch to edit, or add a missing one",
+    "addMissing": "Add {{punchType}}",
+    "editing": "Editing",
+    "auditNotice": "Applies immediately and records who changed it, the original value, and the reason",
+    "outsideWindow": "Only this week's punches can be edited; on Monday and Tuesday you can still edit last week",
+    "readOnly": "You can't adjust punches, so this view is read-only",
+    "save": "Save changes",
+    "saved": "Punch updated",
+    "loadFailed": "Couldn't load punch records"
   }
 }

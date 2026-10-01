@@ -123,6 +123,18 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> GetMyPunchAdjustments() =>
             Ok(await _service.GetMyPunchAdjustmentsAsync());
 
+        [HttpPost("managed/punch-adjustments/preview")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> PreviewManagedPunchAdjustment(
+            [FromBody] CreateManagedAttendancePunchAdjustmentDto request
+        ) => Ok(await _service.PreviewManagedPunchAdjustmentAsync(request));
+
+        [HttpPost("managed/punch-adjustments")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> CreateManagedPunchAdjustment(
+            [FromBody] CreateManagedAttendancePunchAdjustmentDto request
+        ) => Ok(await _service.CreateManagedPunchAdjustmentAsync(request));
+
         [HttpPost("qr/resolve")]
         [Authorize(Policy = Permissions.Attendance.Punch.Self)]
         public async Task<IActionResult> ResolveQr([FromBody] AttendanceQrResolveRequestDto request) =>

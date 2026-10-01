@@ -101,6 +101,8 @@ export interface AccessControl {
   canReviewAttendance: boolean;
   canEditAttendanceHoliday: boolean;
   canEditAttendanceSettings: boolean;
+  canViewAttendancePunchRecords: boolean;
+  canAdjustAttendancePunch: boolean;
   canViewLocalPurchase: boolean;
   canEditLocalPurchase: boolean;
   canPushLocalPurchaseToHq: boolean;

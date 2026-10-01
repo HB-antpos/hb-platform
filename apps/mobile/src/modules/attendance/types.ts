@@ -156,6 +156,11 @@ export interface AttendancePunchAdjustmentPayload {
   previewRevision?: string;
 }
 
+/** 店长代员工补录/修改打卡：在本人补卡字段基础上指定员工。 */
+export interface AttendanceManagedPunchAdjustmentPayload extends AttendancePunchAdjustmentPayload {
+  userGuid: string;
+}
+
 export interface AttendancePunchAdjustment {
   adjustmentGuid: string;
   storeCode: string;

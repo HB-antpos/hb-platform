@@ -23,7 +23,8 @@
     "weeklySchedule": "周表",
     "scheduleManagement": "排班管理",
     "holidayManagement": "公共假期管理",
-    "leaveManagement": "病假年假管理"
+    "leaveManagement": "病假年假管理",
+    "managedPunchRecords": "打卡记录"
   },
   "today": {
     "schedules": "今日班次",
@@ -94,7 +95,8 @@
       "finalClockOutStatusOnly": "最终下班：{{status}}",
       "onBreak": "休息中",
       "overtimeTitle": "加班",
-      "overtimeSummary": "原始 {{raw}} 分钟 · 候选 {{candidate}} 分钟 · 已批准 {{approved}} 分钟"
+      "overtimeSummary": "原始 {{raw}} 分钟 · 候选 {{candidate}} 分钟 · 已批准 {{approved}} 分钟",
+      "statusWithMinutes": "{{status}} {{minutes}} 分钟"
     },
     "qrResult": {
       "title": "最近一次扫码打卡",
@@ -105,7 +107,26 @@
       "serverTime": "服务器时间：{{time}}",
       "deviceTime": "打卡时间（本机时区）：{{time}}",
       "status": "考勤状态：{{status}}"
-    }
+    },
+    "statusShort": {
+      "readyToClockIn": "未上班",
+      "readyToClockOut": "工作中",
+      "completed": "今日已完成",
+      "holiday": "假期",
+      "viewOnly": "历史记录"
+    },
+    "hero": {
+      "shift": "班次 {{start}} – {{end}}",
+      "noShift": "今天没有排班",
+      "worked": "已工作 {{duration}}"
+    },
+    "summary": {
+      "worked": "工时",
+      "break": "休息",
+      "overtime": "加班"
+    },
+    "lastScan": "最近扫码：{{action}} {{time}} · {{status}}",
+    "lastScanDevice": "POS {{device}}"
   },
   "scanner": {
     "waitingForFreshCode": "请继续对准 POS，正在等待刷新的二维码…",
@@ -337,6 +358,31 @@
       "submitFailed": "补卡提交失败。",
       "invalid": "当前补卡内容无法保存。",
       "previewRevisionMissing": "服务端预览未返回版本号，请重新预览后再提交。"
+    },
+    "entryHint": "漏打卡或时间打错，可申请 2 天内补卡",
+    "entryHintManager": "你有补卡修改权限，本人补卡保存后直接生效",
+    "open": "补卡",
+    "sheetSubtitle": "{{date}} · {{store}}",
+    "punchTypeTitle": "补卡类型",
+    "time": "时间",
+    "nextDay": "次日",
+    "reason": "原因",
+    "note": "补充说明（选填）",
+    "noteRequired": "选择「其他」时请填写说明",
+    "stepper": {
+      "minusHour": "提前 1 小时",
+      "minus5": "提前 5 分钟",
+      "plus5": "推后 5 分钟",
+      "plusHour": "推后 1 小时"
+    },
+    "reasons": {
+      "forgot": "忘记打卡",
+      "scanFailed": "扫码失败",
+      "phoneDead": "手机没电",
+      "missed": "员工漏打卡",
+      "device": "设备故障",
+      "shiftChanged": "班次调整",
+      "other": "其他"
     }
   },
   "datePicker": {
@@ -376,7 +422,9 @@
     "rejectOvertime": "拒绝加班",
     "createSchedule": "创建排班",
     "publishWeek": "发布本周",
-    "viewLocation": "查看位置"
+    "viewLocation": "查看位置",
+    "scanClockIn": "扫码上班打卡",
+    "scanClockOut": "扫码下班打卡"
   },
   "punchTypes": {
     "ClockIn": "上班",
@@ -473,5 +521,37 @@
     "holidaySyncSuccess": "已同步 {{count}} 条公共假期",
     "adjustmentSubmitted": "补卡申请已提交",
     "adjustmentApplied": "补卡修改已直接应用"
+  },
+  "managedRecords": {
+    "filterAll": "全部 {{count}}",
+    "filterException": "异常 {{count}}",
+    "empty": "当天没有排班",
+    "emptyException": "当天没有异常记录",
+    "noStore": "请先选择分店",
+    "previousDay": "前一天",
+    "nextDay": "后一天",
+    "today": "今天",
+    "punchSummary": "上 {{clockIn}} · 下 {{clockOut}}",
+    "issues": {
+      "missingClockOut": "漏下班",
+      "noPunch": "未打卡",
+      "late": "迟到",
+      "earlyLeave": "早退",
+      "inProgress": "工作中",
+      "notStarted": "未开始",
+      "normal": "正常"
+    },
+    "editTitle": "修改打卡",
+    "viewTitle": "打卡明细",
+    "editSubtitle": "{{date}} · 班次 {{start}}–{{end}}",
+    "selectHint": "点选要修改的打卡，或补录缺失的打卡",
+    "addMissing": "补录{{punchType}}",
+    "editing": "修改中",
+    "auditNotice": "保存后直接生效，并记录修改人、原值和原因",
+    "outsideWindow": "只能修改本周的打卡；周一、周二仍可修改上周",
+    "readOnly": "你没有补卡修改权限，只能查看",
+    "save": "保存修改",
+    "saved": "打卡已修改",
+    "loadFailed": "打卡记录加载失败"
   }
 }

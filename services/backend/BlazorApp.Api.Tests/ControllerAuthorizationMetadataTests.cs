@@ -793,6 +793,14 @@ public class ControllerAuthorizationMetadataTests
             nameof(ReactAttendanceController.ResolveQr),
             Permissions.Attendance.Punch.Self
         );
+        yield return Policy<ReactAttendanceController>(
+            nameof(ReactAttendanceController.PreviewManagedPunchAdjustment),
+            Permissions.Attendance.Punch.AdjustManagedStore
+        );
+        yield return Policy<ReactAttendanceController>(
+            nameof(ReactAttendanceController.CreateManagedPunchAdjustment),
+            Permissions.Attendance.Punch.AdjustManagedStore
+        );
     }
 
     [Theory]

@@ -318,6 +318,14 @@ namespace BlazorApp.Shared.DTOs
         public string Reason { get; set; } = string.Empty;
     }
 
+    /// <summary>
+    /// 店长代员工补录/修改打卡：在本人补卡字段基础上指定被修改的员工。
+    /// </summary>
+    public class CreateManagedAttendancePunchAdjustmentDto : CreateAttendancePunchAdjustmentDto
+    {
+        public string UserGuid { get; set; } = string.Empty;
+    }
+
     public class AttendancePunchAdjustmentDto
     {
         public string AdjustmentGuid { get; set; } = string.Empty;

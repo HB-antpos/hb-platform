@@ -80,6 +80,7 @@ export const PERMISSIONS = {
     AvailabilityViewManagedStore: "Attendance.Availability.ViewManagedStore",
     PunchSelf: "Attendance.Punch.Self",
     PunchViewManagedStore: "Attendance.Punch.ViewManagedStore",
+    PunchAdjustManagedStore: "Attendance.Punch.AdjustManagedStore",
     ApprovalViewManagedStore: "Attendance.Approval.ViewManagedStore",
     ApprovalReviewManagedStore: "Attendance.Approval.ReviewManagedStore",
     HolidayViewStore: "Attendance.Holiday.ViewStore",
@@ -209,6 +210,8 @@ function createEmptyAccess(): AccessControl {
     canReviewAttendance: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
+    canViewAttendancePunchRecords: false,
+    canAdjustAttendancePunch: false,
     canViewLocalPurchase: false,
     canEditLocalPurchase: false,
     canPushLocalPurchaseToHq: false,
@@ -370,6 +373,11 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin || hasPermission(PERMISSIONS.Attendance.HolidayEditManagedStore);
   const canEditAttendanceSettings =
     isAdmin || hasPermission(PERMISSIONS.Attendance.SettingsEdit);
+  const canViewAttendancePunchRecords =
+    isAdmin || hasPermission(PERMISSIONS.Attendance.PunchViewManagedStore);
+  // 代员工补录/修改打卡并直接生效；后端还会校验管理分店与工资周窗口。
+  const canAdjustAttendancePunch =
+    isAdmin || hasPermission(PERMISSIONS.Attendance.PunchAdjustManagedStore);
   const canViewLocalPurchase = hasPermission(PERMISSIONS.LocalPurchase.View);
   const canEditLocalPurchase = hasPermission(PERMISSIONS.LocalPurchase.Edit);
   const canPushLocalPurchaseToHq = hasPermission(PERMISSIONS.LocalPurchase.PushToHq);
@@ -434,6 +442,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canReviewAttendance,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
+    canViewAttendancePunchRecords,
+    canAdjustAttendancePunch,
     canViewLocalPurchase,
     canEditLocalPurchase,
     canPushLocalPurchaseToHq,

@@ -182,6 +182,7 @@ export const P = {
     AvailabilityViewManagedStore: 'Attendance.Availability.ViewManagedStore',
     PunchSelf: 'Attendance.Punch.Self',
     PunchViewManagedStore: 'Attendance.Punch.ViewManagedStore',
+    PunchAdjustManagedStore: 'Attendance.Punch.AdjustManagedStore',
     ApprovalViewManagedStore: 'Attendance.Approval.ViewManagedStore',
     ApprovalReviewManagedStore: 'Attendance.Approval.ReviewManagedStore',
     HolidayViewStore: 'Attendance.Holiday.ViewStore',
