@@ -63,7 +63,7 @@ public sealed class CatalogFileController(ICatalogFileSyncService fileSyncServic
 
         Log(response is null
             ? $"sync-plan response store={storeCode} status=404 elapsedMs={stopwatch.ElapsedMilliseconds}"
-            : $"sync-plan response store={response.StoreCode} status=200 mode={response.Mode} target={response.TargetCatalogVersion} total={response.TargetTotal} file={response.File?.Kind ?? "none"} bytes={response.File?.Bytes ?? 0} deltaOperations={response.DeltaOperationCount?.ToString() ?? "-"} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            : $"sync-plan response store={response.StoreCode} status=200 mode={response.Mode} target={response.TargetCatalogVersion} total={response.TargetTotal} file={response.File?.Kind ?? "none"} bytes={response.File?.Bytes ?? 0} deltaOperations={response.DeltaOperationCount?.ToString() ?? "-"} elapsedMs={stopwatch.ElapsedMilliseconds} heapMb={GC.GetGCMemoryInfo().HeapSizeBytes / (1024 * 1024)}");
         return response is null
             ? NotFound(ApiResult<CatalogFileSyncPlanResponse>.Fail("STORE_NOT_FOUND", "store was not found or inactive"))
             : Ok(ApiResult<CatalogFileSyncPlanResponse>.Ok(response));

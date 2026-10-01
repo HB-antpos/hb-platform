@@ -25,7 +25,8 @@ public sealed class CatalogFileSyncService(
     ICatalogTargetIndexSource targetIndexSource,
     ICatalogDownloadFileStore fileStore,
     IOptions<CatalogDownloadFileOptions> fileOptions,
-    IOptions<CatalogSyncOptions>? catalogSyncOptions = null) : ICatalogFileSyncService
+    IOptions<CatalogSyncOptions>? catalogSyncOptions = null,
+    ICatalogIndexCache? catalogIndexCache = null) : ICatalogFileSyncService
 {
     public bool IsEnabled => fileOptions.Value.Enabled;
 
@@ -36,6 +37,15 @@ public sealed class CatalogFileSyncService(
         string? baseCatalogVersion,
         CancellationToken cancellationToken)
     {
+        // 中文注释：先只看版本号；该版本的文件已发布时整个计划从磁盘得出，不为取版本号把整份索引（每店约 600 MB）载入内存。
+        var peek = catalogIndexCache?.PeekLatestVersion(storeCode);
+        if (peek is not null && fileStore.FindVersion(storeCode, peek.CatalogVersion) is { } published)
+        {
+            Log($"file plan source=disk store={published.StoreCode} version={published.CatalogVersion} stale={peek.IsStale}");
+            return await PlanFromDiskAsync(published, baseCatalogVersion, cancellationToken);
+        }
+
+        Log($"file plan source=index store={storeCode} peek={(peek is null ? "none" : "unpublished")}");
         var target = await targetIndexSource.GetCurrentIndexAsync(storeCode, cancellationToken);
         if (target is null)
         {
@@ -75,6 +85,48 @@ public sealed class CatalogFileSyncService(
             normalizedBase, targetVersion, targetTotal,
             ToDto(fullFile, BuildFullPath(target.CatalogIndex.StoreCode, targetVersion)),
             deltaOperationCount);
+    }
+
+    private async Task<CatalogFileSyncPlanResponse> PlanFromDiskAsync(
+        CatalogDownloadVersionInfo target,
+        string? baseCatalogVersion,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBase = string.IsNullOrWhiteSpace(baseCatalogVersion) ? null : baseCatalogVersion.Trim();
+        if (normalizedBase is not null && string.Equals(normalizedBase, target.CatalogVersion, StringComparison.Ordinal))
+        {
+            return new CatalogFileSyncPlanResponse(
+                target.StoreCode, target.GeneratedAt, CatalogSyncModes.NoChange,
+                normalizedBase, target.CatalogVersion, target.TotalCount, File: null);
+        }
+
+        int? deltaOperationCount = null;
+        if (normalizedBase is not null && IsDeltaEnabled)
+        {
+            var delta = await fileStore.EnsureDeltaFileFromDiskAsync(
+                target.StoreCode, normalizedBase, target.CatalogVersion, cancellationToken);
+            if (delta is { Status: CatalogDeltaFileStatus.Ready, File: { } deltaFile })
+            {
+                return new CatalogFileSyncPlanResponse(
+                    target.StoreCode, target.GeneratedAt, CatalogSyncModes.Delta,
+                    normalizedBase, target.CatalogVersion, target.TotalCount,
+                    ToDto(deltaFile, BuildDeltaPath(target.StoreCode, normalizedBase, target.CatalogVersion)),
+                    delta.OperationCount);
+            }
+
+            deltaOperationCount = delta.Status == CatalogDeltaFileStatus.TooLarge ? delta.OperationCount : null;
+        }
+
+        return new CatalogFileSyncPlanResponse(
+            target.StoreCode, target.GeneratedAt, CatalogSyncModes.Full,
+            normalizedBase, target.CatalogVersion, target.TotalCount,
+            ToDto(target.FullFile, BuildFullPath(target.StoreCode, target.CatalogVersion)),
+            deltaOperationCount);
+    }
+
+    private static void Log(string message)
+    {
+        Console.WriteLine($"[HBPOS][Api][CatalogFiles] {DateTimeOffset.Now:O} {message}");
     }
 
     public CatalogDownloadFileInfo? FindFullFile(string storeCode, string catalogVersion) =>

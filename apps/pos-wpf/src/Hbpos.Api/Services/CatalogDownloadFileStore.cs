@@ -72,7 +72,28 @@ public interface ICatalogDownloadFileStore
     CatalogDownloadFileInfo? FindFullFile(string storeCode, string catalogVersion);
 
     CatalogDownloadFileInfo? FindDeltaFile(string storeCode, string baseCatalogVersion, string targetCatalogVersion);
+
+    /// <summary>已发布版本的身份与全量文件；未发布或文件不完整时返回 null。</summary>
+    CatalogDownloadVersionInfo? FindVersion(string storeCode, string catalogVersion);
+
+    /// <summary>
+    /// 只用磁盘上两个版本的码号版本表与目标全量文件计算增量，不需要任何一个版本的内存索引；
+    /// 目标版本必须已发布（见 <see cref="FindVersion"/>）。
+    /// </summary>
+    Task<CatalogDeltaFileResult> EnsureDeltaFileFromDiskAsync(
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>磁盘上已发布目录版本的身份；StoreCode/GeneratedAt 与生成该版本的内存索引一致。</summary>
+public sealed record CatalogDownloadVersionInfo(
+    string StoreCode,
+    string CatalogVersion,
+    DateTimeOffset GeneratedAt,
+    int TotalCount,
+    CatalogDownloadFileInfo FullFile);
 
 /// <summary>
 /// 目录下载文件的落盘布局（均在 RootPath 下，目录名取 SHA-256 以免版本号里的字符进入路径）：
@@ -229,6 +250,59 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
             : null;
     }
 
+    public CatalogDownloadVersionInfo? FindVersion(string storeCode, string catalogVersion)
+    {
+        var manifest = ReadVersionManifest(GetVersionDirectory(storeCode, catalogVersion));
+        var full = FindFullFile(storeCode, catalogVersion);
+        return manifest is null || full is null
+            ? null
+            : new CatalogDownloadVersionInfo(manifest.StoreCode, manifest.CatalogVersion, manifest.GeneratedAt, manifest.TotalCount, full);
+    }
+
+    public async Task<CatalogDeltaFileResult> EnsureDeltaFileFromDiskAsync(
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseCatalogVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetCatalogVersion);
+        var normalizedBase = baseCatalogVersion.Trim();
+        var normalizedTarget = targetCatalogVersion.Trim();
+        var existing = FindDeltaFile(storeCode, normalizedBase, normalizedTarget);
+        if (existing is not null)
+        {
+            return new CatalogDeltaFileResult(CatalogDeltaFileStatus.Ready, existing.OperationCount ?? 0, existing);
+        }
+
+        if (ReadVersionManifest(GetVersionDirectory(storeCode, normalizedBase)) is null)
+        {
+            return new CatalogDeltaFileResult(CatalogDeltaFileStatus.BaselineUnavailable, 0, null);
+        }
+
+        await EnterGenerationGateAsync(cancellationToken);
+        try
+        {
+            existing = FindDeltaFile(storeCode, normalizedBase, normalizedTarget);
+            if (existing is not null)
+            {
+                return new CatalogDeltaFileResult(CatalogDeltaFileStatus.Ready, existing.OperationCount ?? 0, existing);
+            }
+
+            var target = ReadVersionManifest(GetVersionDirectory(storeCode, normalizedTarget))
+                ?? throw new CatalogDownloadFileUnavailableException("Target catalog version files are not published.");
+            return await Task.Run(() => PublishDeltaFromDisk(target, normalizedBase), cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new CatalogDownloadFileUnavailableException("Catalog delta file could not be written.", exception);
+        }
+        finally
+        {
+            _generationGate.Release();
+        }
+    }
+
     private async Task EnterGenerationGateAsync(CancellationToken cancellationToken)
     {
         var timeout = TimeSpan.FromSeconds(Math.Max(1, _options.GenerationWaitSeconds));
@@ -317,7 +391,68 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
             return new CatalogDeltaFileResult(CatalogDeltaFileStatus.TooLarge, operationCount, null);
         }
 
-        var deltaDirectory = Path.Combine(GetVersionDirectory(target.StoreCode, target.CatalogVersion), DeltaDirectoryName);
+        return WriteDeltaFile(
+            target.StoreCode,
+            baseCatalogVersion,
+            target.CatalogVersion,
+            target.GeneratedAt,
+            target.Items.Count,
+            operations,
+            operationCount);
+    }
+
+    /// <summary>
+    /// 磁盘版增量：两侧都顺序读码号版本表归并出操作（语义同 <see cref="ComputeDeltaOperations"/>），
+    /// upsert 行再按行号从目标全量文件中取出原样反序列化；内存只占不超过阈值的操作。
+    /// </summary>
+    private CatalogDeltaFileResult PublishDeltaFromDisk(VersionManifest target, string baseCatalogVersion)
+    {
+        var storeCode = target.StoreCode;
+        var baselinePath = Path.Combine(GetVersionDirectory(storeCode, baseCatalogVersion), RowVersionFileName);
+        var targetDirectory = GetVersionDirectory(storeCode, target.CatalogVersion);
+        List<CatalogDeltaFileLine> operations;
+        int operationCount;
+        try
+        {
+            (operations, operationCount) = ComputeDeltaOperationsFromDisk(
+                storeCode,
+                target.GeneratedAt,
+                baselinePath,
+                Path.Combine(targetDirectory, RowVersionFileName),
+                Path.Combine(targetDirectory, FullFileName),
+                _options.MaxDeltaOperations);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or InvalidDataException or JsonException)
+        {
+            Log($"delta baseline unavailable store={storeCode} base={baseCatalogVersion} source=disk error={exception.GetType().Name}");
+            return new CatalogDeltaFileResult(CatalogDeltaFileStatus.BaselineUnavailable, 0, null);
+        }
+
+        if (operationCount > _options.MaxDeltaOperations)
+        {
+            return new CatalogDeltaFileResult(CatalogDeltaFileStatus.TooLarge, operationCount, null);
+        }
+
+        return WriteDeltaFile(
+            storeCode,
+            baseCatalogVersion,
+            target.CatalogVersion,
+            target.GeneratedAt,
+            target.TotalCount,
+            operations,
+            operationCount);
+    }
+
+    private CatalogDeltaFileResult WriteDeltaFile(
+        string storeCode,
+        string baseCatalogVersion,
+        string targetCatalogVersion,
+        DateTimeOffset generatedAt,
+        int targetTotal,
+        IReadOnlyList<CatalogDeltaFileLine> operations,
+        int operationCount)
+    {
+        var deltaDirectory = Path.Combine(GetVersionDirectory(storeCode, targetCatalogVersion), DeltaDirectoryName);
         Directory.CreateDirectory(deltaDirectory);
         var name = HashName(baseCatalogVersion);
         var finalPath = Path.Combine(deltaDirectory, name + ".ndjson.gz");
@@ -326,11 +461,11 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
         {
             var header = new CatalogDeltaFileHeader(
                 CatalogFileFormats.DeltaV1,
-                target.StoreCode,
+                storeCode,
                 baseCatalogVersion,
-                target.CatalogVersion,
-                target.GeneratedAt,
-                target.Items.Count,
+                targetCatalogVersion,
+                generatedAt,
+                targetTotal,
                 operationCount);
             var (bytes, sha256) = WriteNdjsonGzip(tempPath, writeLine =>
             {
@@ -344,12 +479,12 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
             // manifest 最后写入，作为增量文件的发布点。
             WriteJsonFile(Path.Combine(deltaDirectory, name + ".json"), new DeltaManifest(
                 baseCatalogVersion,
-                target.CatalogVersion,
+                targetCatalogVersion,
                 operationCount,
                 bytes,
                 sha256,
                 _timeProvider.GetUtcNow()));
-            Log($"delta file published store={target.StoreCode} base={baseCatalogVersion} target={target.CatalogVersion} operations={operationCount} bytes={bytes}");
+            Log($"delta file published store={storeCode} base={baseCatalogVersion} target={targetCatalogVersion} operations={operationCount} bytes={bytes}");
         }
         catch
         {
@@ -357,7 +492,7 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
             throw;
         }
 
-        var published = FindDeltaFile(target.StoreCode, baseCatalogVersion, target.CatalogVersion)
+        var published = FindDeltaFile(storeCode, baseCatalogVersion, targetCatalogVersion)
             ?? throw new IOException("Published catalog delta file could not be read back.");
         return new CatalogDeltaFileResult(CatalogDeltaFileStatus.Ready, operationCount, published);
     }
@@ -425,6 +560,117 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
         }
 
         return (operations, operationCount);
+    }
+
+    internal static (List<CatalogDeltaFileLine> Operations, int OperationCount) ComputeDeltaOperationsFromDisk(
+        string storeCode,
+        DateTimeOffset targetGeneratedAt,
+        string baselineRowVersionPath,
+        string targetRowVersionPath,
+        string targetFullFilePath,
+        int maxOperations)
+    {
+        // 第一遍：两份码号版本表归并，只记操作的类型与目标行号（upsert）或基准码（delete）。
+        var plan = new List<(string Code, int TargetOrdinal, RowVersionEntry? Deleted)>();
+        var operationCount = 0;
+        void Add(string code, int targetOrdinal, RowVersionEntry? deleted)
+        {
+            operationCount++;
+            if (operationCount <= maxOperations)
+            {
+                plan.Add((code, targetOrdinal, deleted));
+            }
+        }
+
+        using (var baseline = OrderedEntries(baselineRowVersionPath).GetEnumerator())
+        using (var target = OrderedEntries(targetRowVersionPath).GetEnumerator())
+        {
+            var hasBaseline = baseline.MoveNext();
+            var hasTarget = target.MoveNext();
+            var targetOrdinal = 0;
+            while (hasBaseline || hasTarget)
+            {
+                var comparison = !hasBaseline ? 1
+                    : !hasTarget ? -1
+                    : string.Compare(baseline.Current.LookupCodeNormalized, target.Current.LookupCodeNormalized, StringComparison.Ordinal);
+                if (comparison < 0)
+                {
+                    Add(baseline.Current.LookupCodeNormalized, -1, baseline.Current);
+                    hasBaseline = baseline.MoveNext();
+                }
+                else if (comparison > 0)
+                {
+                    Add(target.Current.LookupCodeNormalized, targetOrdinal, null);
+                    hasTarget = target.MoveNext();
+                    targetOrdinal++;
+                }
+                else
+                {
+                    if (!string.Equals(baseline.Current.RowVersion, target.Current.RowVersion, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Add(target.Current.LookupCodeNormalized, targetOrdinal, null);
+                    }
+
+                    hasBaseline = baseline.MoveNext();
+                    hasTarget = target.MoveNext();
+                    targetOrdinal++;
+                }
+            }
+        }
+
+        if (operationCount > maxOperations)
+        {
+            return ([], operationCount);
+        }
+
+        // 第二遍：顺序读目标全量文件，只反序列化被选中的行（全量文件第 1 行是头，之后第 i 行对应码号表第 i 行）。
+        var wanted = plan.Where(entry => entry.Deleted is null).Select(entry => entry.TargetOrdinal).ToHashSet();
+        var items = new Dictionary<int, CatalogLookupItemDto>(wanted.Count);
+        using (var input = File.OpenRead(targetFullFilePath))
+        using (var gzip = new GZipStream(input, CompressionMode.Decompress))
+        using (var reader = new StreamReader(gzip, Encoding.UTF8))
+        {
+            _ = reader.ReadLine() ?? throw new InvalidDataException("Target full file is empty.");
+            var ordinal = 0;
+            while (items.Count < wanted.Count && reader.ReadLine() is { } line)
+            {
+                if (wanted.Contains(ordinal))
+                {
+                    items[ordinal] = JsonSerializer.Deserialize<CatalogLookupItemDto>(line, JsonOptions)
+                        ?? throw new InvalidDataException("Target full file contains an empty row.");
+                }
+
+                ordinal++;
+            }
+        }
+
+        if (items.Count != wanted.Count)
+        {
+            throw new InvalidDataException("Target full file does not match its row version table.");
+        }
+
+        var operations = plan
+            .Select(entry => entry.Deleted is { } deleted
+                ? new CatalogDeltaFileLine(null, new DeletedLookupDto(storeCode, deleted.LookupCode, deleted.LookupCodeNormalized, targetGeneratedAt))
+                : new CatalogDeltaFileLine(items[entry.TargetOrdinal], null))
+            .ToList();
+        return (operations, operationCount);
+    }
+
+    /// <summary>码号版本表必须严格按序号递增，否则归并结果不可信，按基准不可用处理。</summary>
+    private static IEnumerable<RowVersionEntry> OrderedEntries(string path)
+    {
+        string? previous = null;
+        foreach (var entry in ReadRowVersionEntries(path))
+        {
+            if (previous is not null && string.Compare(previous, entry.LookupCodeNormalized, StringComparison.Ordinal) >= 0)
+            {
+                throw new InvalidDataException("Row versions are not strictly ordered.");
+            }
+
+            previous = entry.LookupCodeNormalized;
+            yield return entry;
+        }
     }
 
     private static void WriteFullLines(

@@ -217,6 +217,132 @@ public sealed class CatalogDownloadFileStoreTests : IDisposable
         Assert.Null(store.FindDeltaFile("S01", "v1", "v2"));
     }
 
+    [Fact]
+    public async Task Disk_delta_matches_in_memory_delta_for_mixed_changes()
+    {
+        var store = CreateStore(options => options.MaxDeltaOperations = 10_000);
+        var baselineRows = Enumerable.Range(0, 3_000).Select(index => ($"93{index:D10}", 1m + index)).ToArray();
+        var targetRows = baselineRows
+            .Where((_, index) => index % 7 != 0) // 删除
+            .Select((row, index) => index % 11 == 0 ? (row.Item1, row.Item2 + 0.5m) : row) // 改价
+            .Concat(Enumerable.Range(0, 400).Select(index => ($"93{index * 7:D10}5", 9m))) // 夹在中间的新增
+            .ToArray();
+        var baseline = BuildResult("v1", baselineRows);
+        var target = BuildResult("v2", targetRows);
+        await store.EnsureFullFileAsync(baseline, CancellationToken.None);
+        await store.EnsureFullFileAsync(target, CancellationToken.None);
+
+        var disk = await store.EnsureDeltaFileFromDiskAsync("S01", "v1", "v2", CancellationToken.None);
+
+        Assert.Equal(CatalogDeltaFileStatus.Ready, disk.Status);
+        var expected = target.CatalogIndex.GetDeltaOperations(baseline.CatalogIndex);
+        Assert.Equal(expected.Count, disk.OperationCount);
+        var diskLines = ReadLines(await File.ReadAllBytesAsync(disk.File!.FilePath));
+        var actual = diskLines.Skip(1).Select(line => JsonSerializer.Deserialize<CatalogDeltaFileLine>(line, JsonOptions)!).ToArray();
+        Assert.Equal(expected.Count, actual.Length);
+        for (var index = 0; index < expected.Count; index++)
+        {
+            Assert.Equal(expected[index].Item, actual[index].Item);
+            Assert.Equal(expected[index].DeletedLookup, actual[index].Deleted);
+        }
+
+        // 与内存路径生成的增量文件逐行相同（另起一个根目录，避免直接命中已发布的文件）。
+        var memoryStore = new CatalogDownloadFileStore(_root + "-memory", new CatalogDownloadFileOptions { Enabled = true, MaxDeltaOperations = 10_000 }, _time);
+        await memoryStore.EnsureFullFileAsync(baseline, CancellationToken.None);
+        var memory = await memoryStore.EnsureDeltaFileAsync(target, "v1", CancellationToken.None);
+        Assert.Equal(ReadLines(await File.ReadAllBytesAsync(memory.File!.FilePath)), diskLines);
+        Directory.Delete(_root + "-memory", recursive: true);
+    }
+
+    [Fact]
+    public async Task Disk_delta_reports_missing_baseline_and_over_threshold()
+    {
+        var store = CreateStore(options => options.MaxDeltaOperations = 1);
+        await store.EnsureFullFileAsync(BuildResult("v2", [("9300000000001", 1m), ("9300000000002", 2m)]), CancellationToken.None);
+
+        var missing = await store.EnsureDeltaFileFromDiskAsync("S01", "v-gone", "v2", CancellationToken.None);
+        Assert.Equal(CatalogDeltaFileStatus.BaselineUnavailable, missing.Status);
+
+        await store.EnsureFullFileAsync(BuildResult("v1", [("9300000000003", 3m)]), CancellationToken.None);
+        var tooLarge = await store.EnsureDeltaFileFromDiskAsync("S01", "v1", "v2", CancellationToken.None);
+        Assert.Equal((CatalogDeltaFileStatus.TooLarge, 3), (tooLarge.Status, tooLarge.OperationCount));
+        Assert.Null(store.FindDeltaFile("S01", "v1", "v2"));
+    }
+
+    [Fact]
+    public async Task Find_version_reads_identity_and_total_from_published_manifest()
+    {
+        var store = CreateStore();
+        var target = BuildResult("v1", [("9300000000001", 1m), ("9300000000002", 2m)]);
+        var file = await store.EnsureFullFileAsync(target, CancellationToken.None);
+
+        var version = store.FindVersion("s01", "v1");
+
+        Assert.NotNull(version);
+        Assert.Equal(("S01", "v1", BaseTime, 2), (version.StoreCode, version.CatalogVersion, version.GeneratedAt, version.TotalCount));
+        Assert.Equal(file, version.FullFile);
+        Assert.Null(store.FindVersion("S01", "v-missing"));
+    }
+
+    [Fact]
+    public async Task File_sync_plan_is_answered_from_disk_without_touching_the_index()
+    {
+        var store = CreateStore();
+        var scheduler = new CountingRefreshScheduler();
+        var cache = new CatalogIndexCache(_time, TimeSpan.FromMinutes(20), TimeSpan.FromHours(72), 8, scheduler);
+        var v1 = BuildResult("v1", [("9300000000001", 1m), ("9300000000002", 2m)]);
+        await cache.GetOrBuildAsync("S01", since: null, _ => Task.FromResult<CatalogIndexBuildResult?>(v1), CancellationToken.None);
+        await store.EnsureFullFileAsync(v1, CancellationToken.None);
+        var source = new CountingTargetIndexSource(v1);
+        var service = new CatalogFileSyncService(
+            source,
+            store,
+            Options.Create(new CatalogDownloadFileOptions { Enabled = true }),
+            Options.Create(new CatalogSyncOptions()),
+            cache);
+
+        var full = await service.GetFileSyncPlanAsync("S01", null, CancellationToken.None);
+        var unchanged = await service.GetFileSyncPlanAsync("S01", "v1", CancellationToken.None);
+
+        Assert.Equal((CatalogSyncModes.Full, "v1", 2), (full!.Mode, full.TargetCatalogVersion, full.TargetTotal));
+        Assert.Equal(CatalogSyncModes.NoChange, unchanged!.Mode);
+        Assert.Equal(0, source.Calls);
+
+        // 后台刷新得到 v2 并预发布文件后，旧客户端的增量同样从磁盘计算。
+        var v2 = BuildResult("v2", [("9300000000001", 1m), ("9300000000002", 2.5m)]);
+        await cache.ForceRefreshAndPublishAsync("S01", since: null, _ => Task.FromResult<CatalogIndexBuildResult?>(v2), CancellationToken.None);
+        await store.EnsureFullFileAsync(v2, CancellationToken.None);
+        source.Current = v2;
+
+        var delta = await service.GetFileSyncPlanAsync("S01", "v1", CancellationToken.None);
+
+        Assert.Equal((CatalogSyncModes.Delta, "v2", 1), (delta!.Mode, delta.TargetCatalogVersion, delta.DeltaOperationCount));
+        Assert.Equal(0, source.Calls);
+    }
+
+    [Fact]
+    public async Task File_sync_plan_falls_back_to_index_when_current_version_is_not_published()
+    {
+        var store = CreateStore();
+        var cache = new CatalogIndexCache(_time, TimeSpan.FromMinutes(20), TimeSpan.FromHours(72), 8, new CountingRefreshScheduler());
+        var v1 = BuildResult("v1", [("9300000000001", 1m)]);
+        await cache.GetOrBuildAsync("S01", since: null, _ => Task.FromResult<CatalogIndexBuildResult?>(v1), CancellationToken.None);
+        var source = new CountingTargetIndexSource(v1);
+        var service = new CatalogFileSyncService(
+            source,
+            store,
+            Options.Create(new CatalogDownloadFileOptions { Enabled = true }),
+            Options.Create(new CatalogSyncOptions()),
+            cache);
+
+        var plan = await service.GetFileSyncPlanAsync("S01", null, CancellationToken.None);
+
+        Assert.Equal((CatalogSyncModes.Full, 1), (plan!.Mode, source.Calls));
+        // 走过一次索引路径后文件已发布，下一次直接命中磁盘。
+        await service.GetFileSyncPlanAsync("S01", null, CancellationToken.None);
+        Assert.Equal(1, source.Calls);
+    }
+
     private CatalogDownloadFileStore CreateStore(Action<CatalogDownloadFileOptions>? configure = null)
     {
         var options = new CatalogDownloadFileOptions { Enabled = true };
@@ -281,6 +407,26 @@ public sealed class CatalogDownloadFileStoreTests : IDisposable
 
         public Task<CatalogIndexBuildResult?> GetCurrentIndexAsync(string storeCode, CancellationToken cancellationToken) =>
             Task.FromResult(Current);
+    }
+
+    private sealed class CountingTargetIndexSource(CatalogIndexBuildResult current) : ICatalogTargetIndexSource
+    {
+        public CatalogIndexBuildResult Current { get; set; } = current;
+
+        public int Calls { get; private set; }
+
+        public Task<CatalogIndexBuildResult?> GetCurrentIndexAsync(string storeCode, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult<CatalogIndexBuildResult?>(Current);
+        }
+    }
+
+    private sealed class CountingRefreshScheduler : ICatalogBackgroundRefreshScheduler
+    {
+        public int QueueCount { get; private set; }
+
+        public void QueueRefresh(string storeCode) => QueueCount++;
     }
 
     private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
