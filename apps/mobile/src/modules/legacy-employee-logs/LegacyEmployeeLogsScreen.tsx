@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { LegacyLogCard } from "@/components/legacy-employee-logs/LegacyLogCard";
 import { LegacyLogFilterSheet } from "@/components/legacy-employee-logs/LegacyLogFilterSheet";
 import { LegacyLogsHeader } from "@/components/legacy-employee-logs/LegacyLogsHeader";
+import { LogSourceSwitch } from "@/components/legacy-employee-logs/LogSourceSwitch";
 import { LEGACY_UI, RISK } from "@/components/legacy-employee-logs/ui";
 import { createProductInsightRequestGate } from "@/modules/product-insights/request-gate";
 import { useStores } from "@/modules/shop/use-stores";
@@ -14,17 +15,19 @@ import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
-import { fetchLegacyLogs } from "./api";
+import { fetchLegacyLogs, fetchPosLogs } from "./api";
 import {
-  LEGACY_CATEGORY_GROUPS,
-  LEGACY_DANGER_GROUPS,
-  LEGACY_RULE_CODES,
   buildLegacyLogQuery,
+  categoryGroupsFor,
+  dangerGroupsFor,
   countActiveLegacyFilters,
   createDefaultLegacyLogFilters,
   filtersFromRouteParams,
   filtersToRouteParams,
   groupLegacyLogsByHour,
+  posOperationKey,
+  resolveLogSource,
+  ruleCodesFor,
   sameOperations,
   sumOperationCounts,
   summarizeStores,
@@ -32,15 +35,16 @@ import {
   type LegacyRouteParams,
 } from "./logic";
 import { subscribeLegacyLogReviewed } from "./review-events";
-import type { LegacyLogFilters, LegacyLogItem, LegacyLogPage, LegacyRiskLens } from "./types";
+import { peekRememberedLogSource, readRememberedLogSource, rememberLogSource } from "./source-storage";
+import type { LegacyLogFilters, LegacyLogItem, LegacyLogPage, LegacyRiskLens, LogSource } from "./types";
 
 const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) ?? undefined;
 
-/** 入口守卫：审核模式与无权限直接给出说明，不发请求。 */
+/** 入口守卫：审核模式与无权限直接给出说明，不发请求。老收银或新收银任一查看权限即可进入。 */
 export function useLegacyLogsGuard() {
   const { t } = useAppTranslation("legacyEmployeeLogs");
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const canView = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  const canView = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs || state.access.canViewPosOperationAudits);
   const sessionKind = useAuthStore((state) => state.sessionKind);
   const review = useAuthStore((state) => state.iosReviewOfflineGuardActive);
   if (review || sessionKind === "iosReview") return t("messages.reviewUnavailable");
@@ -61,6 +65,7 @@ export function LegacyScreenMessage({ message, onBack }: { message: string; onBa
 export function useLegacyRouteParams(): LegacyRouteParams {
   const params = useLocalSearchParams<Record<keyof LegacyRouteParams, string | string[]>>();
   return {
+    source: first(params.source),
     stores: first(params.stores),
     preset: first(params.preset),
     device: first(params.device),
@@ -70,23 +75,92 @@ export function useLegacyRouteParams(): LegacyRouteParams {
   };
 }
 
+/**
+ * 当前数据来源：地址参数优先，其次上次的选择（AsyncStorage），都没有时默认老收银；只取有权限的来源。
+ * 记忆还没读出来时 ready=false，页面先不渲染，避免先查一遍默认来源再切换。
+ */
+export function useLogSource(requested: string | undefined) {
+  const canLegacy = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  const canPos = useAuthStore((state) => state.access.canViewPosOperationAudits);
+  const [remembered, setRemembered] = useState(() => peekRememberedLogSource());
+  const [ready, setReady] = useState(() => Boolean(requested) || peekRememberedLogSource() !== null);
+  useEffect(() => {
+    if (ready) return;
+    let disposed = false;
+    void readRememberedLogSource().then((value) => {
+      if (disposed) return;
+      setRemembered(value);
+      setReady(true);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [ready]);
+  const source = resolveLogSource({ requested, remembered, canLegacy, canPos });
+  useEffect(() => {
+    if (ready && source) rememberLogSource(source);
+  }, [ready, source]);
+  return { source, ready, canSwitch: canLegacy && canPos };
+}
+
+/** 两个来源都有权限时的切换控件；切换时保留分店与时间，重建页面。 */
+export function useSourceSwitch(source: LogSource, canSwitch: boolean, onSwitch: (next: LogSource) => void) {
+  const { t } = useAppTranslation("legacyEmployeeLogs");
+  if (!canSwitch) return undefined;
+  return (
+    <LogSourceSwitch
+      value={source}
+      labels={{ legacy: t("source.legacy"), pos: t("source.pos") }}
+      accessibilityLabel={t("source.label")}
+      onChange={onSwitch}
+    />
+  );
+}
+
+/** 新收银事件类型的本地化名称；未收录的类型显示原始代码。 */
+export function usePosOperationLabel() {
+  const { t } = useAppTranslation("legacyEmployeeLogs");
+  return useCallback((operationType: string) => t(`posOperations.${posOperationKey(operationType)}`, { defaultValue: operationType }), [t]);
+}
+
 export function LegacyEmployeeLogsScreen() {
   const router = useRouter();
   const userGuid = useAuthStore((state) => state.user?.userGUID);
   const blocked = useLegacyLogsGuard();
   const routeParams = useLegacyRouteParams();
+  const { source, ready, canSwitch } = useLogSource(routeParams.source);
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(shell)/workbench"));
   if (blocked) return <LegacyScreenMessage message={blocked} onBack={goBack} />;
-  // 账号或深链参数变化时重建页面状态，避免把上一身份 / 上一条件的日志留在屏幕上。
-  return <LegacyLogsContent key={`${userGuid}:${JSON.stringify(routeParams)}`} routeParams={routeParams} onBack={goBack} />;
+  if (!ready || !source) return <SafeAreaView style={styles.safe} />;
+  // 账号、来源或深链参数变化时重建页面状态，避免把上一身份 / 上一条件的日志留在屏幕上。
+  return (
+    <LegacyLogsContent
+      key={`${userGuid}:${source}:${JSON.stringify(routeParams)}`}
+      routeParams={routeParams}
+      source={source}
+      canSwitch={canSwitch}
+      onBack={goBack}
+    />
+  );
 }
 
-function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRouteParams; onBack: () => void }) {
+function LegacyLogsContent({
+  routeParams,
+  source,
+  canSwitch,
+  onBack,
+}: {
+  routeParams: LegacyRouteParams;
+  source: LogSource;
+  canSwitch: boolean;
+  onBack: () => void;
+}) {
   const { t, language } = useAppTranslation("legacyEmployeeLogs");
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { stores, selectedStoreCode } = useStores();
-  const [filters, setFilters] = useState<LegacyLogFilters>(() => filtersFromRouteParams(routeParams));
+  const [filters, setFilters] = useState<LegacyLogFilters>(() => filtersFromRouteParams(routeParams, source));
+  const posOperationLabel = usePosOperationLabel();
   const [page, setPage] = useState<LegacyLogPage | null>(null);
   const [items, setItems] = useState<LegacyLogItem[]>([]);
   const [pageNumber, setPageNumber] = useState(1);
@@ -112,7 +186,7 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
       else setLoading(true);
       setError(null);
       try {
-        const result = await fetchLegacyLogs(params, lease.signal);
+        const result = next.source === "pos" ? await fetchPosLogs(params, posOperationLabel, lease.signal) : await fetchLegacyLogs(params, lease.signal);
         if (!lease.isCurrent()) return;
         setPage(result);
         setItems(result.items);
@@ -128,7 +202,7 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
         }
       }
     },
-    [formatError, gate],
+    [formatError, gate, posOperationLabel],
   );
 
   const total = page?.total ?? 0;
@@ -139,7 +213,7 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
     const lease = gate.begin();
     setLoadingMore(true);
     try {
-      const result = await fetchLegacyLogs(params, lease.signal);
+      const result = filters.source === "pos" ? await fetchPosLogs(params, posOperationLabel, lease.signal) : await fetchLegacyLogs(params, lease.signal);
       if (!lease.isCurrent()) return;
       // 翻页期间可能有新日志上传造成重复，按编号去重。
       setItems((current) => {
@@ -152,7 +226,7 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
     } finally {
       if (lease.isCurrent()) setLoadingMore(false);
     }
-  }, [filters, formatError, gate, items.length, loading, loadingMore, pageNumber, total]);
+  }, [filters, formatError, gate, items.length, loading, loadingMore, pageNumber, posOperationLabel, total]);
 
   const apply = useCallback(
     (next: LegacyLogFilters) => {
@@ -187,7 +261,11 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
   const sections = useMemo(() => groupLegacyLogsByHour(items), [items]);
   const counts = page?.operationCounts ?? [];
   const summary = page?.riskSummary;
-  const allTotal = counts.reduce((sum, row) => sum + row.count, 0);
+  const allTotal = page?.allTotal ?? counts.reduce((sum, row) => sum + row.count, 0);
+  // 切换来源：保留分店与时间范围，其余条件清空（员工、设备、关键字在两个来源里含义不同）。
+  const sourceSwitch = useSourceSwitch(source, canSwitch, (next) =>
+    router.replace({ pathname: "/(shell)/legacy-employee-logs", params: { source: next, stores: filters.storeCodes.join(","), preset: filters.preset } }),
+  );
   const storeSummary = summarizeStores(filters.storeCodes, storeNames);
   const scopeLabel = `${t(`presets.${filters.preset}`)} · ${t(storeSummary.key, storeSummary.params)}${filters.employeeName ? ` · ${filters.employeeName}` : ""}`;
 
@@ -213,10 +291,11 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
     );
   };
 
-  const chip = (key: string, label: string, count: number, active: boolean, onPress: () => void) => (
+  // 新收银没有按操作类型的计数，危险细分不显示数字（count 为 undefined）。
+  const chip = (key: string, label: string, count: number | undefined, active: boolean, onPress: () => void) => (
     <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[LEGACY_UI.chip, active ? LEGACY_UI.chipOn : null]}>
       <Text style={[LEGACY_UI.chipText, active ? LEGACY_UI.chipTextOn : null]}>{label}</Text>
-      <Text style={[LEGACY_UI.chipCount, active ? LEGACY_UI.chipCountOn : null]}>{count.toLocaleString("en-US")}</Text>
+      {count === undefined ? null : <Text style={[LEGACY_UI.chipCount, active ? LEGACY_UI.chipCountOn : null]}>{count.toLocaleString("en-US")}</Text>}
     </Pressable>
   );
 
@@ -226,17 +305,17 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
     const pendingOn = filters.reviewStatus === "pending";
     chips = [
       chip("pending", t("lens.onlyPending"), summary?.pendingReview ?? 0, pendingOn, () => apply({ ...filters, reviewStatus: pendingOn ? "all" : "pending" })),
-      ...LEGACY_RULE_CODES.map((code) => {
+      ...ruleCodesFor(source).map((code) => {
         const active = filters.ruleCode === code;
         return chip(code, t(`rules.${code}.label`), byRule.get(code) ?? 0, active, () => apply({ ...filters, ruleCode: active ? null : code }));
       }),
     ];
   } else {
-    const groups = filters.lens === "danger" ? LEGACY_DANGER_GROUPS : LEGACY_CATEGORY_GROUPS;
-    const prefix = filters.lens === "danger" ? "dangerGroups" : "categories";
+    const groups = filters.lens === "danger" ? dangerGroupsFor(source) : categoryGroupsFor(source);
+    const prefix = filters.lens === "danger" ? (source === "pos" ? "dangerGroupsPos" : "dangerGroups") : "categories";
     chips = groups.map((group) => {
       const active = sameOperations(group.operations, filters.subOperations);
-      return chip(group.key, t(`${prefix}.${group.key}`), sumOperationCounts(counts, group.operations), active, () =>
+      return chip(group.key, t(`${prefix}.${group.key}`), source === "pos" ? undefined : sumOperationCounts(counts, group.operations), active, () =>
         apply({ ...filters, subOperations: active ? [] : [...group.operations] }),
       );
     });
@@ -266,6 +345,7 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
         onBack={onBack}
         onOpenFilters={() => setFilterVisible(true)}
         onSwitchTab={() => router.replace({ pathname: "/(shell)/legacy-employee-logs/employees", params: { ...filtersToRouteParams(filters) } })}
+        sourceSwitch={sourceSwitch}
       />
 
       <View style={styles.lensRow}>
@@ -281,9 +361,11 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
         )}
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chipRow} keyboardShouldPersistTaps="handled">
-        {chips}
-      </ScrollView>
+      {chips.length > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chipRow} keyboardShouldPersistTaps="handled">
+          {chips}
+        </ScrollView>
+      ) : null}
 
       <Text style={styles.caption}>{t("caption", { lens: t(`lens.${filters.lens}`), count: total.toLocaleString("en-US") })}</Text>
 
@@ -309,7 +391,7 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
               item={item}
               storeNames={storeNames}
               t={t}
-              onPress={(target) => router.push({ pathname: "/(shell)/legacy-employee-logs/detail", params: { id: target.id } })}
+              onPress={(target) => router.push({ pathname: "/(shell)/legacy-employee-logs/detail", params: { id: target.id, source } })}
             />
           )}
           renderSectionHeader={({ section }) => (
@@ -340,7 +422,7 @@ function LegacyLogsContent({ routeParams, onBack }: { routeParams: LegacyRoutePa
         devices={page?.devices ?? []}
         onClose={() => setFilterVisible(false)}
         onApply={apply}
-        onReset={() => apply(createDefaultLegacyLogFilters(filters.storeCodes))}
+        onReset={() => apply(createDefaultLegacyLogFilters(filters.storeCodes, source))}
       />
     </SafeAreaView>
   );

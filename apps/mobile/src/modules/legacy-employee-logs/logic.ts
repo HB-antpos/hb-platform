@@ -6,6 +6,7 @@ import type {
   LegacyRangePreset,
   LegacyRiskLens,
   LegacyRuleCode,
+  LogSource,
 } from "./types";
 
 export const LEGACY_LOG_PAGE_SIZE = 50;
@@ -54,8 +55,70 @@ export const LEGACY_DANGER_GROUPS: { key: string; operations: string[] }[] = [
   { key: "return", operations: ["退货授权", "无小票退货成功"] },
 ];
 
+/** 新收银的异常规则：编号与老收银相同，另加「紧急覆盖」；与后端 PosOperationAuditRiskCatalog.AllRules 一致。 */
+export const POS_RULE_CODES: string[] = [...LEGACY_RULE_CODES, "emergencyOverride"];
+
+/** 新收银「危险」入口的操作细分（与 Web 端一致；后端按危险口径过滤，开钱箱只算手动开钱箱）。 */
+export const POS_DANGER_GROUPS: { key: string; operations: string[] }[] = [
+  { key: "delete", operations: ["CART_ITEM_REMOVE", "CART_CLEAR"] },
+  { key: "drawer", operations: ["CASH_DRAWER_OPEN"] },
+  { key: "price", operations: ["CART_ITEM_PRICE_CHANGE"] },
+  { key: "discount", operations: ["CART_LINE_DISCOUNT_CHANGE", "CART_ORDER_DISCOUNT_CHANGE"] },
+  { key: "refund", operations: ["RETURN_REFUND_COMPLETE", "SALE_VOID", "ORDER_CANCEL"] },
+  { key: "override", operations: ["CARD_PAYMENT_SUPERVISOR_RESOLUTION", "PERMISSION_OVERRIDE"] },
+  { key: "system", operations: ["API_SERVER_CHANGE", "DEVICE_REREGISTER", "REMOTE_MAINTENANCE_INSTALL", "CATALOG_RESET", "TEST_SALES_DATA_RESET"] },
+];
+
+export function ruleCodesFor(source: LogSource) {
+  return source === "pos" ? POS_RULE_CODES : LEGACY_RULE_CODES;
+}
+
+/** 「全部」入口的类别细分：新收银没有按操作名的计数，不显示细分。 */
+export function categoryGroupsFor(source: LogSource) {
+  return source === "pos" ? [] : LEGACY_CATEGORY_GROUPS;
+}
+
+export function dangerGroupsFor(source: LogSource) {
+  return source === "pos" ? POS_DANGER_GROUPS : LEGACY_DANGER_GROUPS;
+}
+
 /** 操作标签配色分类（与 Web 端 CATEGORY_TAG_COLOR 同一归类）。 */
 export type LegacyOperationTone = "item" | "price" | "delete" | "payment" | "return" | "auth" | "other";
+
+/** 新收银事件类型的配色归类，与老收银同一套颜色语义。 */
+const POS_OPERATION_TONE: Record<string, LegacyOperationTone> = {
+  CART_ITEM_ADD: "item",
+  CART_ITEM_QUANTITY_CHANGE: "item",
+  CART_ITEM_PRICE_CHANGE: "price",
+  CART_LINE_DISCOUNT_CHANGE: "price",
+  CART_ORDER_DISCOUNT_CHANGE: "price",
+  CART_ITEM_REMOVE: "delete",
+  CART_CLEAR: "delete",
+  ORDER_CANCEL: "delete",
+  SALE_VOID: "delete",
+  PAYMENT_TENDER_ADD: "payment",
+  PAYMENT_TENDER_REMOVE: "payment",
+  PAYMENT_CANCEL: "payment",
+  SALE_COMPLETE: "payment",
+  ORDER_HOLD: "payment",
+  ORDER_RECALL: "payment",
+  RECEIPT_REPRINT: "payment",
+  RETURN_REFUND_COMPLETE: "return",
+  CASH_DRAWER_OPEN: "auth",
+  CASHIER_LOGIN: "auth",
+  CASHIER_LOGOUT: "auth",
+  PERMISSION_OVERRIDE: "auth",
+  CARD_PAYMENT_SUPERVISOR_RESOLUTION: "auth",
+};
+
+export function posOperationTone(operationType: string | null | undefined): LegacyOperationTone {
+  return (operationType && POS_OPERATION_TONE[operationType]) || "other";
+}
+
+/** 新收银事件类型的文案键（screens/legacyEmployeeLogs 的 posOperations 下）：CART_ITEM_ADD → cartItemAdd。 */
+export function posOperationKey(operationType: string) {
+  return operationType.toLowerCase().replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
 
 export function operationTone(operation: string | null | undefined): LegacyOperationTone {
   const name = operation?.trim();
@@ -68,8 +131,9 @@ export function isDangerOperation(operation: string | null | undefined) {
   return Boolean(operation && LEGACY_DANGER_OPERATIONS.includes(operation.trim()));
 }
 
-export function createDefaultLegacyLogFilters(storeCodes: string[] = []): LegacyLogFilters {
+export function createDefaultLegacyLogFilters(storeCodes: string[] = [], source: LogSource = "legacy"): LegacyLogFilters {
   return {
+    source,
     preset: "today",
     storeCodes,
     employeeId: null,
@@ -110,10 +174,55 @@ export function resolveLegacyRange(preset: LegacyRangePreset, now: Date = new Da
   return { from: `${formatWallClockDate(start)}T00:00:00`, to: `${formatWallClockDate(end)}T00:00:00` };
 }
 
+/**
+ * 新收银的查询区间：同一组「今天 / 昨天 / 近 7 天 / 近 31 天」按设备本地零点换算成 UTC（后端按 UTC 比较）。
+ */
+export function resolvePosRange(preset: LegacyRangePreset, now: Date = new Date()) {
+  const { from, to } = resolveLegacyRange(preset, now);
+  const toUtc = (wallClock: string) => {
+    const [date, time] = wallClock.split("T");
+    const [year, month, day] = date.split("-").map(Number);
+    const [hour, minute, second] = time.split(":").map(Number);
+    return new Date(year, month - 1, day, hour, minute, second).toISOString();
+  };
+  return { fromUtc: toUtc(from), toUtc: toUtc(to) };
+}
+
+/** UTC 时间按设备本地时区转成墙钟字符串 YYYY-MM-DDTHH:mm:ss，与老收银时间同一格式，列表按小时分组共用。 */
+export function toLocalWallClock(isoUtc: string | null | undefined) {
+  const time = isoUtc ? Date.parse(isoUtc) : Number.NaN;
+  if (!Number.isFinite(time)) return "";
+  const date = new Date(time);
+  return `${formatWallClockDate(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** 新收银列表 / 汇总查询参数：员工下钻用收银员编号精确匹配，细分操作类型按重复键展开。 */
+function buildPosLogQuery(filters: LegacyLogFilters, storeCodes: string[], pageNumber: number | null, now: Date) {
+  const { fromUtc, toUtc } = resolvePosRange(filters.preset, now);
+  const params = new URLSearchParams({ fromUtc, toUtc });
+  if (pageNumber !== null) {
+    params.set("pageNumber", String(pageNumber));
+    params.set("pageSize", String(LEGACY_LOG_PAGE_SIZE));
+    params.set("sortBy", "occurredAtUtc");
+    params.set("sortOrder", "desc");
+  }
+  storeCodes.forEach((code) => params.append("storeCodes", code));
+  if (filters.employeeId) params.set("cashierId", filters.employeeId);
+  if (filters.deviceCode) params.set("deviceCode", filters.deviceCode);
+  const keyword = filters.keyword.trim();
+  if (keyword) params.set("keyword", keyword);
+  if (filters.lens !== "all") params.set("riskLens", filters.lens);
+  if (filters.lens !== "abnormal") filters.subOperations.forEach((operation) => params.append("operationTypes", operation));
+  if (filters.lens === "abnormal" && filters.ruleCode) params.append("ruleCodes", filters.ruleCode);
+  if (filters.lens === "abnormal" && filters.reviewStatus !== "all") params.set("reviewStatus", filters.reviewStatus);
+  return params;
+}
+
 /** 列表查询参数：数组用重复键（storeCodes=a&storeCodes=b），与后端 List<string> 绑定一致；没选分店不查。 */
 export function buildLegacyLogQuery(filters: LegacyLogFilters, pageNumber: number, now: Date = new Date()) {
   const storeCodes = [...new Set(filters.storeCodes.map((code) => code.trim()).filter(Boolean))];
   if (storeCodes.length === 0) return null;
+  if (filters.source === "pos") return buildPosLogQuery(filters, storeCodes, pageNumber, now);
   const { from, to } = resolveLegacyRange(filters.preset, now);
   const params = new URLSearchParams({ from, to, pageNumber: String(pageNumber), pageSize: String(LEGACY_LOG_PAGE_SIZE), sortOrder: "desc" });
   storeCodes.forEach((code) => params.append("storeCodes", code));
@@ -128,10 +237,17 @@ export function buildLegacyLogQuery(filters: LegacyLogFilters, pageNumber: numbe
   return params;
 }
 
-/** 按员工汇总只用分店、时间、设备条件。 */
+/** 按员工汇总只用分店、时间、设备条件（新收银后端另外忽略收银员、操作类型与风险入口）。 */
 export function buildLegacyEmployeeSummaryQuery(filters: LegacyLogFilters, now: Date = new Date()) {
   const storeCodes = [...new Set(filters.storeCodes.map((code) => code.trim()).filter(Boolean))];
   if (storeCodes.length === 0) return null;
+  if (filters.source === "pos") {
+    const { fromUtc, toUtc } = resolvePosRange(filters.preset, now);
+    const params = new URLSearchParams({ fromUtc, toUtc });
+    storeCodes.forEach((code) => params.append("storeCodes", code));
+    if (filters.deviceCode) params.set("deviceCode", filters.deviceCode);
+    return params;
+  }
   const { from, to } = resolveLegacyRange(filters.preset, now);
   const params = new URLSearchParams({ from, to });
   storeCodes.forEach((code) => params.append("storeCodes", code));
@@ -194,29 +310,41 @@ export function describeFlagEvidence(flag: Pick<LegacyLogFlag, "ruleCode" | "evi
       parts.push({ key: "noSaleWindow", params: { seconds: e.windowSeconds ?? "120" } });
       if (e.previousCheckoutAt) parts.push({ key: "noSalePrevious", params: { at: e.previousCheckoutAt, minutes: e.minutesSincePreviousCheckout ?? "-" } });
       if (e.nextCheckoutAt) parts.push({ key: "noSaleNext", params: { at: e.nextCheckoutAt } });
-      parts.push({ key: e.identityConfirmed === "true" ? "identityConfirmed" : "identityMissing" });
+      // 身份确认只有老收银记录；新收银没有该字段时不显示。
+      if (e.identityConfirmed !== undefined) parts.push({ key: e.identityConfirmed === "true" ? "identityConfirmed" : "identityMissing" });
       break;
     case "deleteAfterCheckout":
-      parts.push({ key: "deleteAfterCheckout", params: { at: e.checkoutAt ?? "-", seconds: e.secondsAfterCheckout ?? "-", amount: e.deletedAmount ?? "-" } });
-      if (e.product) parts.push({ key: "product", params: { product: e.product, quantity: e.quantity ?? "-" } });
+      // 新收银以「开始收款」为锚点（anchor = tender）。
+      parts.push({
+        key: e.anchor === "tender" ? "deleteAfterTender" : "deleteAfterCheckout",
+        params: { at: e.checkoutAt ?? "-", seconds: e.secondsAfterCheckout ?? "-", amount: e.deletedAmount ?? "-" },
+      });
+      if (e.product) parts.push(e.quantity ? { key: "product", params: { product: e.product, quantity: e.quantity } } : { key: "productOnly", params: { product: e.product } });
       break;
     case "bigDiscount":
       if (e.kind === "cart") parts.push({ key: "discountCart", params: { percent: e.percent ?? "-", count: e.itemCount ?? "-", total: e.originalTotal ?? "-" } });
       else if (e.kind === "price") parts.push({ key: "discountPrice", params: { from: e.originalPrice ?? "-", to: e.newPrice ?? "-", percent: e.percent ?? "-" } });
       else parts.push({ key: "discountItem", params: { percent: e.percent ?? "-", previous: e.previousPercent ?? "0" } });
       if (e.product && e.kind !== "cart") parts.push({ key: "productOnly", params: { product: e.product } });
+      if (e.amount) parts.push({ key: "discountAmount", params: { amount: e.amount } });
       break;
     case "burstDelete":
       parts.push({ key: "burstDelete", params: { from: e.firstAt ?? "-", to: e.lastAt ?? "-", count: e.count ?? "-", amount: e.totalAmount ?? "-", threshold: e.threshold ?? "-" } });
       break;
     case "repeatReprint":
-      parts.push({ key: "repeatReprint", params: { order: shortOrder(e.orderId), count: e.count ?? "-", first: e.firstAt ?? "-" } });
+      parts.push(e.orderId || !e.count
+        ? { key: "repeatReprint", params: { order: shortOrder(e.orderId), count: e.count ?? "-", first: e.firstAt ?? "-" } }
+        : { key: "repeatReprintDay", params: { count: e.count, first: e.firstAt ?? "-" } });
       break;
     case "offHours":
       parts.push({
         key: e.segment === "beforeOpen" ? "offHoursBeforeOpen" : "offHoursAfterClose",
         params: { count: e.count ?? "-", from: e.firstAt ?? "-", to: e.lastAt ?? "-", open: e.open ?? "07:00", close: e.close ?? "22:00" },
       });
+      break;
+    case "emergencyOverride":
+      parts.push({ key: "emergencyOverride", params: { outcome: e.outcome ?? "-" } });
+      if (e.reason) parts.push({ key: "reason", params: { reason: e.reason } });
       break;
     default:
       break;
@@ -240,6 +368,8 @@ export function shortFlagEvidence(flag: Pick<LegacyLogFlag, "ruleCode" | "eviden
       return { key: "short.repeatReprint", params: { count: e.count ?? "-" } };
     case "offHours":
       return { key: e.segment === "beforeOpen" ? "short.beforeOpen" : "short.afterClose", params: { at: e.firstAt ?? "-" } };
+    case "emergencyOverride":
+      return { key: "short.emergencyOverride", params: { outcome: e.outcome ?? "-" } };
     default:
       return null;
   }
@@ -268,6 +398,7 @@ export function dangerRate(dangerCount: number, total: number) {
 
 /** 两个页签（操作记录 / 按员工汇总）之间、员工下钻时，用路由参数传递共用条件。 */
 export interface LegacyRouteParams {
+  source?: string;
   stores?: string;
   preset?: string;
   device?: string;
@@ -277,14 +408,25 @@ export interface LegacyRouteParams {
 }
 
 export function filtersToRouteParams(filters: LegacyLogFilters, extra: Partial<LegacyRouteParams> = {}): LegacyRouteParams {
-  const params: LegacyRouteParams = { stores: filters.storeCodes.join(","), preset: filters.preset };
+  const params: LegacyRouteParams = { source: filters.source, stores: filters.storeCodes.join(","), preset: filters.preset };
   if (filters.deviceCode) params.device = filters.deviceCode;
   return { ...params, ...extra };
 }
 
-export function filtersFromRouteParams(params: LegacyRouteParams): LegacyLogFilters {
+/** 来源只能是有权限的那一个：地址参数优先，其次上次的选择，都没有时默认老收银；两个都没权限返回 null。 */
+export function resolveLogSource(input: { requested?: string | null; remembered?: string | null; canLegacy: boolean; canPos: boolean }): LogSource | null {
+  const allowed = (source: string | null | undefined): source is LogSource =>
+    (source === "legacy" && input.canLegacy) || (source === "pos" && input.canPos);
+  if (allowed(input.requested)) return input.requested;
+  if (allowed(input.remembered)) return input.remembered;
+  if (input.canLegacy) return "legacy";
+  return input.canPos ? "pos" : null;
+}
+
+export function filtersFromRouteParams(params: LegacyRouteParams, source: LogSource = "legacy"): LegacyLogFilters {
   const base = createDefaultLegacyLogFilters(
     (params.stores ?? "").split(",").map((code) => code.trim()).filter(Boolean),
+    source,
   );
   const preset = LEGACY_RANGE_PRESETS.find((item) => item === params.preset) ?? base.preset;
   const lens = (["all", "danger", "abnormal"] as LegacyRiskLens[]).find((item) => item === params.lens) ?? base.lens;

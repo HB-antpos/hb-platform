@@ -204,6 +204,7 @@ function createEmptyAccess(): AccessControl {
     canViewReports: false,
     canViewDeviceRegistration: false,
     canViewLegacyEmployeeLogs: false,
+    canViewPosOperationAudits: false,
     canReviewLegacyEmployeeLogs: false,
     canManageDeviceRegistration: false,
     canManageDeviceActivationCodes: false,
@@ -351,6 +352,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   // 员工操作日志（老收银）：后端还会按可管理分店收口，这里只判断入口与核查权限。
   const canViewLegacyEmployeeLogs = hasPermission(PERMISSIONS.LegacyEmployeeLogs.View);
   const canReviewLegacyEmployeeLogs = hasPermission(PERMISSIONS.LegacyEmployeeLogs.Review);
+  // 员工操作日志（新收银）：后端只放行管理员与店长类角色并按可管理分店收口；核查与老收银共用同一权限。
+  const canViewPosOperationAudits = hasPermission(PERMISSIONS.PosTerminal.AuditView);
   const canViewDeviceRegistration =
     canManageDeviceRegistration ||
     hasPermission(PERMISSIONS.DeviceRegistration.View) ||
@@ -438,6 +441,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewReports,
     canViewDeviceRegistration,
     canViewLegacyEmployeeLogs,
+    canViewPosOperationAudits,
     canReviewLegacyEmployeeLogs,
     canManageDeviceRegistration,
     canManageDeviceActivationCodes,

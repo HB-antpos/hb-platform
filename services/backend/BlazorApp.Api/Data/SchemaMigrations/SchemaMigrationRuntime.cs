@@ -99,6 +99,10 @@ internal interface ISchemaMigrationRuntime
     Task ApplyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken);
 
     Task VerifyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken);
+
+    Task ApplyPosOperationAuditRiskAsync(CancellationToken cancellationToken);
+
+    Task VerifyPosOperationAuditRiskAsync(CancellationToken cancellationToken);
 }
 
 internal interface ISchemaMigrationSession : IAsyncDisposable
@@ -131,6 +135,8 @@ internal sealed class MobileOtaRuntimeTargetsSchemaMismatchException : Exception
 internal sealed class LocalSupplierCategorySchemaMismatchException : Exception;
 
 internal sealed class LegacyEmployeeLogRiskSchemaMismatchException : Exception;
+
+internal sealed class PosOperationAuditRiskSchemaMismatchException : Exception;
 
 internal sealed class SchemaBaselineSqlFailureException(string stepId) : Exception
 {
@@ -762,6 +768,35 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         catch (SqlException exception) when (exception.Number is >= 51950 and <= 51969)
         {
             throw new LegacyEmployeeLogRiskSchemaMismatchException();
+        }
+    }
+
+    public async Task ApplyPosOperationAuditRiskAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _posmDatabase.ConnectionString,
+            PosOperationAuditRiskSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记 POSM 账本，已有同名但结构错误的表不会被误标为完成。
+        await VerifyPosOperationAuditRiskAsync(cancellationToken);
+    }
+
+    public async Task VerifyPosOperationAuditRiskAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+                _posmDatabase.ConnectionString,
+                PosOperationAuditRiskSchema.VerifySql,
+                _commandTimeoutSeconds,
+                cancellationToken
+            );
+        }
+        catch (SqlException exception) when (exception.Number is >= 51970 and <= 51989)
+        {
+            throw new PosOperationAuditRiskSchemaMismatchException();
         }
     }
 

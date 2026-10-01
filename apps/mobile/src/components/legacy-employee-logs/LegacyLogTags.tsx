@@ -1,12 +1,13 @@
 import { View } from "react-native";
 import { Icon, Text } from "react-native-paper";
-import { activeReview, operationTone } from "@/modules/legacy-employee-logs/logic";
+import { activeReview, operationTone, type LegacyOperationTone } from "@/modules/legacy-employee-logs/logic";
 import type { LegacyLogItem } from "@/modules/legacy-employee-logs/types";
 import { HB_COLORS } from "@/shared/theme/tokens";
 import { LEGACY_UI, OPERATION_TONES, RISK } from "./ui";
 
-export function OperationTag({ operation }: { operation: string | null }) {
-  const tone = OPERATION_TONES[operationTone(operation)];
+/** tone 由新收银条目带入（按事件类型归类）；老收银按操作名称归类。 */
+export function OperationTag({ operation, tone: toneKey }: { operation: string | null; tone?: LegacyOperationTone }) {
+  const tone = OPERATION_TONES[toneKey ?? operationTone(operation)];
   return (
     <View style={[LEGACY_UI.tag, { backgroundColor: tone.background, borderColor: tone.border }]}>
       <Text style={[LEGACY_UI.tagText, { color: tone.text }]}>{operation || "-"}</Text>

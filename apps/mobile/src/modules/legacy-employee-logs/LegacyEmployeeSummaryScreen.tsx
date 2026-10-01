@@ -13,8 +13,8 @@ import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
-import { fetchLegacyEmployeeSummary } from "./api";
-import { LegacyScreenMessage, useLegacyLogsGuard, useLegacyRouteParams } from "./LegacyEmployeeLogsScreen";
+import { fetchLegacyEmployeeSummary, fetchPosEmployeeSummary } from "./api";
+import { LegacyScreenMessage, useLegacyLogsGuard, useLegacyRouteParams, useLogSource, useSourceSwitch } from "./LegacyEmployeeLogsScreen";
 import {
   buildLegacyEmployeeSummaryQuery,
   countActiveLegacyFilters,
@@ -28,7 +28,7 @@ import {
   type LegacyEmployeeSort,
   type LegacyRouteParams,
 } from "./logic";
-import type { LegacyEmployeeSummary, LegacyEmployeeSummaryResult, LegacyLogFilters } from "./types";
+import type { LegacyEmployeeSummary, LegacyEmployeeSummaryResult, LegacyLogFilters, LogSource } from "./types";
 
 const SORTS: LegacyEmployeeSort[] = ["abnormal", "rate", "amount"];
 
@@ -37,17 +37,37 @@ export function LegacyEmployeeSummaryScreen() {
   const userGuid = useAuthStore((state) => state.user?.userGUID);
   const blocked = useLegacyLogsGuard();
   const routeParams = useLegacyRouteParams();
+  const { source, ready, canSwitch } = useLogSource(routeParams.source);
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(shell)/workbench"));
   if (blocked) return <LegacyScreenMessage message={blocked} onBack={goBack} />;
-  return <SummaryContent key={`${userGuid}:${JSON.stringify(routeParams)}`} routeParams={routeParams} onBack={goBack} />;
+  if (!ready || !source) return <SafeAreaView style={styles.safe} />;
+  return (
+    <SummaryContent
+      key={`${userGuid}:${source}:${JSON.stringify(routeParams)}`}
+      routeParams={routeParams}
+      source={source}
+      canSwitch={canSwitch}
+      onBack={goBack}
+    />
+  );
 }
 
-function SummaryContent({ routeParams, onBack }: { routeParams: LegacyRouteParams; onBack: () => void }) {
+function SummaryContent({
+  routeParams,
+  source,
+  canSwitch,
+  onBack,
+}: {
+  routeParams: LegacyRouteParams;
+  source: LogSource;
+  canSwitch: boolean;
+  onBack: () => void;
+}) {
   const { t, language } = useAppTranslation("legacyEmployeeLogs");
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { stores, selectedStoreCode } = useStores();
-  const [filters, setFilters] = useState<LegacyLogFilters>(() => filtersFromRouteParams(routeParams));
+  const [filters, setFilters] = useState<LegacyLogFilters>(() => filtersFromRouteParams(routeParams, source));
   const [data, setData] = useState<LegacyEmployeeSummaryResult | null>(null);
   const [sort, setSort] = useState<LegacyEmployeeSort>("abnormal");
   const [loading, setLoading] = useState(false);
@@ -66,7 +86,7 @@ function SummaryContent({ routeParams, onBack }: { routeParams: LegacyRouteParam
       else setLoading(true);
       setError(null);
       try {
-        const result = await fetchLegacyEmployeeSummary(params, lease.signal);
+        const result = next.source === "pos" ? await fetchPosEmployeeSummary(params, lease.signal) : await fetchLegacyEmployeeSummary(params, lease.signal);
         if (lease.isCurrent()) setData(result);
       } catch (cause) {
         if (!lease.isCurrent()) return;
@@ -110,6 +130,9 @@ function SummaryContent({ routeParams, onBack }: { routeParams: LegacyRouteParam
   const maxDanger = Math.max(1, ...employees.map((row) => row.dangerCount));
   const storeSummary = summarizeStores(filters.storeCodes, storeNames);
   const scopeLabel = `${t(`presets.${filters.preset}`)} · ${t(storeSummary.key, storeSummary.params)}`;
+  const sourceSwitch = useSourceSwitch(source, canSwitch, (next) =>
+    router.replace({ pathname: "/(shell)/legacy-employee-logs/employees", params: { source: next, stores: filters.storeCodes.join(","), preset: filters.preset } }),
+  );
 
   // 点员工：回到记录页并带上该员工；有异常看异常入口，否则看危险入口。
   const openEmployee = (row: LegacyEmployeeSummary) => {
@@ -183,6 +206,7 @@ function SummaryContent({ routeParams, onBack }: { routeParams: LegacyRouteParam
         onBack={onBack}
         onOpenFilters={() => setFilterVisible(true)}
         onSwitchTab={() => router.replace({ pathname: "/(shell)/legacy-employee-logs", params: { ...filtersToRouteParams(filters) } })}
+        sourceSwitch={sourceSwitch}
       />
       <View style={styles.sortRow}>
         <Text style={styles.sortLabel}>{t("employees.sortLabel")}</Text>
@@ -217,7 +241,7 @@ function SummaryContent({ routeParams, onBack }: { routeParams: LegacyRouteParam
             </View>
           }
           ListFooterComponent={
-            employees.length > 0 ? <Text style={[styles.note, { paddingBottom: HB_SPACING.lg + insets.bottom }]}>{t("employees.amountNote")}</Text> : null
+            employees.length > 0 ? <Text style={[styles.note, { paddingBottom: HB_SPACING.lg + insets.bottom }]}>{t(source === "pos" ? "employees.amountNotePos" : "employees.amountNote")}</Text> : null
           }
           style={styles.list}
         />
@@ -231,7 +255,7 @@ function SummaryContent({ routeParams, onBack }: { routeParams: LegacyRouteParam
         devices={[]}
         onClose={() => setFilterVisible(false)}
         onApply={apply}
-        onReset={() => apply(createDefaultLegacyLogFilters(filters.storeCodes))}
+        onReset={() => apply(createDefaultLegacyLogFilters(filters.storeCodes, source))}
       />
     </SafeAreaView>
   );

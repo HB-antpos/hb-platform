@@ -123,18 +123,21 @@
       "all": {
         "title": "All operations",
         "hint": "Browse by category: items, price & discount, deletes, checkout, returns, drawer & identity",
-        "scope": "{{people}} staff · {{devices}} devices"
+        "scope": "{{people}} staff · {{devices}} devices",
+        "hintPos": "All operations uploaded by the new POS (WPF / handheld / iPad)"
       },
       "danger": {
         "title": "Risky operations",
         "hint": "By type: deletes, price changes, discounts, cash drawer, returns — directly change takings or cash",
-        "share": "{{percent}}% of all"
+        "share": "{{percent}}% of all",
+        "hintPos": "Removals, price changes, discounts, manual drawer, refunds/voids, overrides and system operations"
       },
       "abnormal": {
         "title": "Anomalies",
         "hint": "By behaviour rule: no-sale drawer, delete after checkout, big discount, burst deletes, repeated reprints, off-hours",
         "people": "{{count}} staff",
-        "pending": "{{count}} to review"
+        "pending": "{{count}} to review",
+        "hintPos": "Behaviour rules: no-sale drawer, delete after checkout, big discount, burst removal, repeat reprint, off hours, emergency override"
       },
       "unit": "rows",
       "byCategory": "By category",
@@ -174,6 +177,10 @@
       "offHours": {
         "label": "Off-hours",
         "desc": "Operations outside 07:00–22:00; the first one per device and period is flagged."
+      },
+      "emergencyOverride": {
+        "label": "Emergency override",
+        "desc": "Operations performed under a new-POS emergency override (offline or permission bypass); every one needs review."
       }
     },
     "reviewStatuses": {
@@ -197,7 +204,12 @@
       "burstDelete": "{{count}} deletes {{from}}–{{to}}, total {{amount}} (threshold {{threshold}})",
       "repeatReprint": "Order {{order}} reprinted {{count}} times today, first at {{first}}",
       "offHoursBeforeOpen": "{{count}} operations before opening ({{from}}–{{to}}); hours {{open}}–{{close}}",
-      "offHoursAfterClose": "{{count}} operations after closing ({{from}}–{{to}}); hours {{open}}–{{close}}"
+      "offHoursAfterClose": "{{count}} operations after closing ({{from}}–{{to}}); hours {{open}}–{{close}}",
+      "deleteAfterTender": "Removed {{seconds}}s after payment started at {{at}}, amount {{amount}}",
+      "discountAmount": "Saving {{amount}}",
+      "repeatReprintDay": "Reprinted {{count}} times on this device today, first at {{first}}",
+      "emergencyOverride": "Performed under emergency override (outcome: {{outcome}})",
+      "reason": "Reason {{reason}}"
     },
     "badges": {
       "danger": "Risky",
@@ -223,7 +235,8 @@
       "view": "View records",
       "footnote": "Takings reduced = deletes, price changes, cart discounts and no-receipt returns; same store, time and device filters as above.",
       "loadFailed": "Failed to load staff summary",
-      "empty": "No staff operations in this range"
+      "empty": "No staff operations in this range",
+      "footnotePos": "Amount = total reduction from removals, cart clears, price changes, discounts and refunds (successful operations only), using the store, time, device and keyword filters above."
     },
     "review": {
       "title": "Review",
@@ -243,6 +256,47 @@
     },
     "abnormalTitle": "Anomaly evidence",
     "dangerOnly": "Risky operation: changes takings or cash directly; no anomaly rule matched.",
-    "contextSameDevice": "Same device ±{{minutes}} min"
+    "contextSameDevice": "Same device ±{{minutes}} min",
+    "rulesPos": {
+      "noSaleDrawer": "Manual drawer open (no order) with no completed sale or refund on the same device within 2 minutes.",
+      "deleteAfterCheckout": "For the new POS, checkout starts when payment starts: item removed, cart cleared or quantity reduced after payment started and before the sale completed, reducing the total by ≥ 10.",
+      "bigDiscount": "Item or order discount ≥ 50%, or price cut ≥ 50%, saving ≥ 10 (small one-tap 50% discounts are ignored).",
+      "burstDelete": "Same cashier removed ≥ 8 items within 10 minutes; one flag per burst.",
+      "repeatReprint": "Same receipt reprinted ≥ 3 times (grouped by the previous sale on the device); flags the 3rd.",
+      "offHours": "Operations outside 07:00–22:00 store local time; first one per device and period.",
+      "emergencyOverride": "Operations performed under a new-POS emergency override (offline or permission bypass); every one needs review."
+    },
+    "dangerGroupsPos": {
+      "delete": "Remove / clear",
+      "drawer": "Manual drawer",
+      "price": "Price change",
+      "discount": "Discount",
+      "refund": "Refund / void",
+      "override": "Supervisor override",
+      "system": "System"
+    },
+    "source": {
+      "title": "Employee Operation Logs",
+      "legacy": "Legacy POS",
+      "pos": "New POS",
+      "switchLabel": "Data source",
+      "legacySubtitle": "Operations uploaded by the legacy POS (store local time).",
+      "posSubtitle": "Operation audits from the new POS (WPF / handheld / iPad), shown in your browser time zone."
+    },
+    "pos": {
+      "allScope": "Outcomes · succeeded {{succeeded}} · denied {{denied}} · failed {{failed}}",
+      "onlyCashier": "Only {{name}}",
+      "operationTypesPlaceholder": "All events (multi-select)",
+      "storesPlaceholder": "All stores you can view",
+      "riskColumn": "Risk",
+      "amountImpact": "Reduction",
+      "contextTitle": "Nearby operations",
+      "contextHint": "Same device ±{{minutes}} min",
+      "contextEmpty": "No other operations in this window",
+      "contextFailed": "Failed to load nearby operations",
+      "contextTruncated": "Too many operations; showing the first {{count}}",
+      "onlyCashierDay": "Only this cashier's operations that day",
+      "dangerOnly": "Danger operation: directly changes the amount due, cash or POS setup; no abnormal rule hit."
+    }
   }
 }

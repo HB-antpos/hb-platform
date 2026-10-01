@@ -70,6 +70,10 @@
     "offHours": {
       "label": "非营业时间",
       "desc": "营业时间（07:00–22:00）之外的操作，每台设备每段只标第一条。"
+    },
+    "emergencyOverride": {
+      "label": "紧急覆盖",
+      "desc": "新收银在紧急覆盖（离线或权限受阻时的应急放行）下发生的操作，每条都需要核查。"
     }
   },
   "caption": "{{lens}} · {{count}} 条",
@@ -86,7 +90,8 @@
     "burstDelete": "一段删除 {{count}} 次",
     "repeatReprint": "同单第 {{count}} 次",
     "beforeOpen": "开门前 {{at}}",
-    "afterClose": "打烊后 {{at}}"
+    "afterClose": "打烊后 {{at}}",
+    "emergencyOverride": "紧急覆盖 · {{outcome}}"
   },
   "evidence": {
     "noSaleWindow": "前后 {{seconds}} 秒内同设备没有结账",
@@ -103,7 +108,12 @@
     "burstDelete": "{{from}}–{{to}} 共删除 {{count}} 次，合计 {{amount}}（阈值 {{threshold}} 次）",
     "repeatReprint": "订单 {{order}} 当天重打印 {{count}} 次，第 1 次在 {{first}}",
     "offHoursBeforeOpen": "开门前共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}",
-    "offHoursAfterClose": "打烊后共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}"
+    "offHoursAfterClose": "打烊后共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}",
+    "deleteAfterTender": "{{at}} 开始收款后 {{seconds}} 秒删除，金额 {{amount}}",
+    "discountAmount": "让利 {{amount}}",
+    "repeatReprintDay": "同一设备当天重打印 {{count}} 次，第 1 次在 {{first}}",
+    "emergencyOverride": "紧急覆盖下的操作（结果：{{outcome}}）",
+    "reason": "原因 {{reason}}"
   },
   "states": {
     "loading": "正在加载…",
@@ -139,7 +149,22 @@
     "contextEmpty": "前后没有其他操作",
     "current": "当前记录",
     "onlyEmployeeDay": "只看{{name}}当天",
-    "dangerOnly": "危险操作：直接改变应收金额或现金，未命中异常规则。"
+    "dangerOnly": "危险操作：直接改变应收金额或现金，未命中异常规则。",
+    "pos": {
+      "outcome": "结果",
+      "reason": "原因代码",
+      "payment": "付款",
+      "actual": "实收（前 → 后）",
+      "order": "订单号",
+      "platform": "平台",
+      "flags": "会话标记",
+      "emergency": "紧急覆盖",
+      "offline": "离线缓存登录",
+      "message": "失败原因",
+      "receivedTime": "接收时间",
+      "localTimeNote": "时间按本机时区显示",
+      "dangerOnly": "危险操作：直接改变应收金额、现金或收银环境，未命中异常规则。"
+    }
   },
   "review": {
     "title": "核查",
@@ -190,6 +215,71 @@
     "noAbnormal": "无异常",
     "amountNote": "右上角金额 = 删除、改价、整单折扣、无小票退货带来的应收减少合计。点员工卡片查看该员工的记录。",
     "empty": "该范围内没有员工操作",
-    "loadFailed": "员工汇总加载失败"
+    "loadFailed": "员工汇总加载失败",
+    "amountNotePos": "右上角金额 = 删除、清空、改价、折扣与退款带来的应收减少合计（只计成功的操作）。点员工卡片查看该收银员的记录。"
+  },
+  "posOperations": {
+    "cashierLogin": "收银员登录",
+    "cashierLogout": "收银员登出",
+    "cartItemAdd": "添加商品",
+    "cartItemRemove": "删除商品",
+    "cartItemQuantityChange": "修改数量",
+    "cartItemPriceChange": "修改价格",
+    "cartLineDiscountChange": "修改行折扣",
+    "cartOrderDiscountChange": "修改整单折扣",
+    "cartClear": "清空购物车",
+    "orderHold": "暂存订单",
+    "orderRecall": "取回订单",
+    "orderCancel": "取消订单",
+    "cashDrawerOpen": "打开钱箱",
+    "paymentTenderAdd": "添加付款",
+    "paymentTenderRemove": "移除付款",
+    "paymentCancel": "取消付款",
+    "saleComplete": "完成销售",
+    "returnRefundComplete": "完成退货退款",
+    "saleVoid": "作废销售",
+    "receiptReprint": "补打小票",
+    "installmentRepaymentComplete": "完成分期还款",
+    "installmentRepaymentCancel": "取消分期还款",
+    "dailyCloseSave": "保存日结",
+    "dailyCloseReprint": "补打日结",
+    "linklySettlement": "Linkly 结算",
+    "linklySettlementReprint": "补打 Linkly 结算单",
+    "cardPaymentSupervisorResolution": "主管付款结案",
+    "permissionOverride": "主管授权",
+    "installmentPickupConfirm": "分期确认提货",
+    "catalogReset": "重置商品目录",
+    "testSalesDataReset": "重置测试销售数据",
+    "deviceReregister": "设备换绑门店",
+    "apiServerChange": "切换服务器地址",
+    "remoteMaintenanceInstall": "安装远程维护"
+  },
+  "outcomes": {
+    "Succeeded": "成功",
+    "Denied": "已拒绝",
+    "Failed": "失败"
+  },
+  "source": {
+    "legacy": "老收银",
+    "pos": "新收银",
+    "label": "数据来源"
+  },
+  "rulesPos": {
+    "noSaleDrawer": "手动开钱箱（不关联订单）前后 2 分钟内，同一设备没有完成销售或退款。",
+    "deleteAfterCheckout": "新收银以开始收款为「结账」：收款开始后、销售完成前删除商品、清空购物车或减少数量，且应收减少 ≥ 10。",
+    "bigDiscount": "单品或整单折扣 ≥ 50%，或改价降幅 ≥ 50%，且让利 ≥ 10。",
+    "burstDelete": "同一收银员 10 分钟内删除商品 ≥ 8 次，每段只标一条。",
+    "repeatReprint": "同一张小票重打印 ≥ 3 次，标第 3 次。",
+    "offHours": "营业时间（门店本地 07:00–22:00）之外的操作，每台设备每段只标第一条。",
+    "emergencyOverride": "新收银在紧急覆盖（离线或权限受阻时的应急放行）下发生的操作，每条都需要核查。"
+  },
+  "dangerGroupsPos": {
+    "delete": "删除 / 清空",
+    "drawer": "手动开钱箱",
+    "price": "改价",
+    "discount": "折扣",
+    "refund": "退款 / 作废",
+    "override": "主管覆盖",
+    "system": "系统操作"
   }
 }

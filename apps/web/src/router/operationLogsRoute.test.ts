@@ -48,26 +48,43 @@ const access = buildRolePreviewAccess({
 const routeSource = readFileSync(join(process.cwd(), 'src/router/routes.tsx'), 'utf8')
 
 assertEqual(
-  routeSource.includes("const PosAdminOperationLogsPage = lazy(() => import('../pages/PosAdmin/OperationLogs'))") &&
+  routeSource.includes("const PosAdminEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/EmployeeLogs'))") &&
     routeSource.includes("path: '/pos-admin/operation-logs'") &&
     routeSource.includes("title: 'menu.operationLogs'") &&
-    routeSource.includes("accessKey: 'canViewOperationAudits'") &&
-    routeSource.includes('element: <PosAdminOperationLogsPage />'),
+    routeSource.includes("accessKey: 'canViewEmployeeOperationLogs'") &&
+    routeSource.includes('element: <PosAdminEmployeeLogsPage />'),
   true,
-  '操作日志路由应注册页面和独立权限',
+  '员工操作日志路由应注册合并页和合并权限',
 )
 
 assertEqual(
-  getAccessKeyPermissionCodes('canViewOperationAudits').join(','),
-  P.PosTerminal.AuditView,
-  '操作日志菜单应映射到查看审计权限',
+  getAccessKeyPermissionCodes('canViewEmployeeOperationLogs').join(','),
+  [P.LegacyEmployeeLogs.View, P.PosTerminal.AuditView].join(','),
+  '合并页菜单应映射到老收银、新收银两个查看权限（任一可见）',
 )
 
 const preview = buildWebRoleMenuPreview(access, (key) => key, { includeHidden: true })
 assertEqual(
   Boolean(findNode(preview, '/pos-admin/operation-logs')),
   true,
-  '角色菜单预览应包含操作日志入口',
+  '只有新收银权限的角色菜单预览应包含员工操作日志入口',
 )
+assertEqual(
+  Boolean(findNode(preview, '/pos-admin/legacy-employee-logs')),
+  false,
+  '菜单不再单列老系统操作日志',
+)
+
+// 后端 Web 菜单同一入口，任一权限可见。
+const navigationSource = readFileSync(
+  join(process.cwd(), '../../services/backend/BlazorApp.Api/Services/NavigationService.cs'),
+  'utf8',
+)
+assertEqual(
+  /Path = "\/pos-admin\/operation-logs".*AnyPermissions = new List<string> \{ Permissions\.LegacyEmployeeLogs\.View, Permissions\.PosTerminal\.Audit\.View \}/.test(navigationSource),
+  true,
+  '后端 FullMenu 应把员工操作日志登记为任一权限可见',
+)
+assertEqual(navigationSource.includes('Path = "/pos-admin/legacy-employee-logs"'), false, '后端菜单不再单列老系统操作日志')
 
 console.log('operationLogsRoute.test: ok')

@@ -91,6 +91,8 @@ export interface AccessControl {
   canViewReports: boolean;
   canViewDeviceRegistration: boolean;
   canViewLegacyEmployeeLogs: boolean;
+  /** 新收银操作审计（员工操作日志页的「新收银」来源）。 */
+  canViewPosOperationAudits: boolean;
   canReviewLegacyEmployeeLogs: boolean;
   canManageDeviceRegistration: boolean;
   canManageDeviceActivationCodes: boolean;

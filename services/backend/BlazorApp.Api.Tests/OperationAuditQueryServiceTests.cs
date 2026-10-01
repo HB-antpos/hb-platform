@@ -31,7 +31,11 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
             IsAutoCloseConnection = false,
             InitKeyType = InitKeyType.Attribute,
         });
-        _db.CodeFirst.InitTables(typeof(PosOperationAudit), typeof(PosOperationAuditItem));
+        _db.CodeFirst.InitTables(
+            typeof(PosOperationAudit),
+            typeof(PosOperationAuditItem),
+            typeof(PosOperationAuditFlag),
+            typeof(PosOperationAuditReview));
     }
 
     [Fact]

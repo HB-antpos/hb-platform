@@ -90,6 +90,8 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageStoreOps: [P.Store.ManageOperations],
   canViewOperationAudits: [P.PosTerminal.AuditView],
   canViewLegacyEmployeeLogs: [P.LegacyEmployeeLogs.View],
+  // 合并页任一权限可见；从菜单授予时只补第一个（老收银查看），移除时两个来源权限一并撤销。
+  canViewEmployeeOperationLogs: [P.LegacyEmployeeLogs.View, P.PosTerminal.AuditView],
   canReadOrder: [P.Orders.View],
   canManageLocalPurchase: [P.LocalPurchase.View, 'LocalInvocie.View'],
   canEditLocalPurchase: [P.LocalPurchase.Edit, 'LocalInvocie.Edit'],
@@ -168,8 +170,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/pos-admin/advertisements', title: 'menu.advertisements', accessKey: 'canManageAdvertisements' },
       { path: '/pos-admin/schedule-attendance', title: 'menu.scheduleAttendance', accessKey: 'canViewAttendanceSchedule' },
       { path: '/pos-admin/cash-register-users', title: 'menu.cashRegisterUsers', accessKey: 'canManageStoreOps' },
-      { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewOperationAudits' },
-      { path: '/pos-admin/legacy-employee-logs', title: 'menu.legacyEmployeeLogs', accessKey: 'canViewLegacyEmployeeLogs' },
+      { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewEmployeeOperationLogs' },
       { path: '/pos-admin/linkly-settlements', title: 'menu.linklySettlements', accessKey: 'isAdmin' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },
       { path: '/pos-admin/local-supplier-invoices', title: 'menu.localSupplierInvoices', accessKey: 'canManageLocalPurchase' },

@@ -16,10 +16,14 @@ interface EmployeeSummaryTableProps {
   storeNames: ReadonlyMap<string, string>
   onRetry: () => void
   onViewEmployee: (row: LegacyEmployeeLogEmployeeSummary) => void
+  /** 表格埋点编号；新收银复用本组件时传自己的编号。 */
+  metricId?: string
+  /** 页脚说明里金额让利的口径（新收银与老收银不同）。 */
+  footnote?: string
 }
 
 /** 按员工汇总：危险占比高于整体均值标红；排序在前端做（员工数最多几十人）。 */
-export default function EmployeeSummaryTable({ data, loading, error, storeNames, onRetry, onViewEmployee }: EmployeeSummaryTableProps) {
+export default function EmployeeSummaryTable({ data, loading, error, storeNames, onRetry, onViewEmployee, metricId, footnote }: EmployeeSummaryTableProps) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const average = data ? dangerRate(data.dangerTotal, data.total) : 0
@@ -153,7 +157,7 @@ export default function EmployeeSummaryTable({ data, loading, error, storeNames,
   return (
     <>
       <MeasuredTable<LegacyEmployeeLogEmployeeSummary>
-        metricId="pos-admin.legacy-employee-logs.table-2"
+        metricId={metricId ?? 'pos-admin.legacy-employee-logs.table-2'}
         rowKey={(row) => row.employeeId ?? `name:${row.employeeName ?? ''}`}
         size="middle"
         loading={loading}
@@ -164,7 +168,7 @@ export default function EmployeeSummaryTable({ data, loading, error, storeNames,
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('legacyEmployeeLogs.employees.empty')} /> }}
       />
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '12px 16px' }}>
-        {t('legacyEmployeeLogs.employees.footnote')}
+        {footnote ?? t('legacyEmployeeLogs.employees.footnote')}
       </Typography.Paragraph>
     </>
   )

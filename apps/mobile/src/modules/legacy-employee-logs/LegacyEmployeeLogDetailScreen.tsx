@@ -13,11 +13,11 @@ import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { fetchLegacyLogContext, reviewLegacyLog } from "./api";
-import { LegacyScreenMessage, useLegacyLogsGuard } from "./LegacyEmployeeLogsScreen";
+import { fetchLegacyLogContext, fetchPosLogContext, reviewLegacyLog, reviewPosLog } from "./api";
+import { LegacyScreenMessage, useLegacyLogsGuard, usePosOperationLabel } from "./LegacyEmployeeLogsScreen";
 import { activeReview, clockOf, describeFlagEvidence, formatAmountImpact, storeDisplayName } from "./logic";
 import { notifyLegacyLogReviewed } from "./review-events";
-import type { LegacyLogContext, LegacyLogItem } from "./types";
+import type { LegacyLogContext, LegacyLogItem, LogSource } from "./types";
 
 const NOTE_MAX_LENGTH = 500;
 const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value)?.trim() || "";
@@ -26,15 +26,17 @@ export function LegacyEmployeeLogDetailScreen() {
   const { t } = useAppTranslation("legacyEmployeeLogs");
   const router = useRouter();
   const blocked = useLegacyLogsGuard();
-  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const params = useLocalSearchParams<{ id?: string | string[]; source?: string | string[] }>();
   const id = first(params.id);
+  // 来源由列表带入；缺省按老收银（旧版本的深链只有 id）。
+  const source: LogSource = first(params.source) === "pos" ? "pos" : "legacy";
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(shell)/legacy-employee-logs"));
   if (blocked) return <LegacyScreenMessage message={blocked} onBack={goBack} />;
   if (!id) return <LegacyScreenMessage message={t("states.detailNotFound")} onBack={goBack} />;
-  return <DetailContent key={id} id={id} onBack={goBack} />;
+  return <DetailContent key={`${source}:${id}`} id={id} source={source} onBack={goBack} />;
 }
 
-function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
+function DetailContent({ id, source, onBack }: { id: string; source: LogSource; onBack: () => void }) {
   const { t, language } = useAppTranslation("legacyEmployeeLogs");
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -49,13 +51,14 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
   const [toast, setToast] = useState<string | null>(null);
   const gate = useRef(createProductInsightRequestGate()).current;
   const storeNames = new Map(stores.map((store) => [store.storeCode, store.storeName || store.storeCode]));
+  const posOperationLabel = usePosOperationLabel();
 
   const load = useCallback(async () => {
     const lease = gate.begin();
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchLegacyLogContext(id, lease.signal);
+      const result = source === "pos" ? await fetchPosLogContext(id, posOperationLabel, lease.signal) : await fetchLegacyLogContext(id, lease.signal);
       if (lease.isCurrent()) setContext(result);
     } catch (cause) {
       if (!lease.isCurrent()) return;
@@ -70,7 +73,7 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
     } finally {
       if (lease.isCurrent()) setLoading(false);
     }
-  }, [gate, id, language, t]);
+  }, [gate, id, language, posOperationLabel, source, t]);
 
   useEffect(() => {
     void load();
@@ -83,13 +86,13 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
     if (!target) return;
     setSubmitting(result);
     try {
-      const review = await reviewLegacyLog({
-        logId: target.id,
+      const body = {
         result,
         note: result === "revoked" ? undefined : note.trim() || undefined,
         // 撤销后再核查也要带上次的版本号；从未核查过时为 null。
         expectedVersion: target.review?.version ?? null,
-      });
+      };
+      const review = source === "pos" ? await reviewPosLog({ eventId: target.id, ...body }) : await reviewLegacyLog({ logId: target.id, ...body });
       setContext((current) => (current ? { ...current, target: { ...current.target, review } } : current));
       setNote("");
       setToast(t(result === "revoked" ? "review.revoked" : "review.saved"));
@@ -129,13 +132,13 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
         <>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <View style={styles.tags}>
-              <OperationTag operation={target.operation} />
+              <OperationTag operation={target.operation} tone={target.tone} />
               {target.isDanger ? <DangerBadge label={t("badges.danger")} /> : null}
               {target.flags.map((flag) => <RuleBadge key={flag.ruleCode} label={t(`rules.${flag.ruleCode}.label`)} />)}
               <ReviewBadge item={target} reviewedLabel={t("badges.reviewed")} followUpLabel={t("badges.followUp")} />
             </View>
             <View style={styles.titleRow}>
-              <Text style={styles.headline}>{productTitle(target.operationDetail) ?? target.operation ?? "-"}</Text>
+              <Text style={styles.headline}>{target.title ?? productTitle(target.operationDetail) ?? target.operation ?? "-"}</Text>
               {formatAmountImpact(target.amountImpact) ? (
                 <Text style={[styles.amount, LEGACY_UI.mono]}>{formatAmountImpact(target.amountImpact)}</Text>
               ) : null}
@@ -153,10 +156,10 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
                 <Text style={styles.calloutBody}>
                   {describeFlagEvidence(flag).map((part) => t(`evidence.${part.key}`, part.params)).join("；")}
                 </Text>
-                <Text style={styles.calloutRule}>{t(`rules.${flag.ruleCode}.desc`)}</Text>
+                <Text style={styles.calloutRule}>{t(source === "pos" ? `rulesPos.${flag.ruleCode}` : `rules.${flag.ruleCode}.desc`)}</Text>
               </View>
             ))}
-            {target.flags.length === 0 && target.isDanger ? <Text style={styles.dangerOnly}>{t("detail.dangerOnly")}</Text> : null}
+            {target.flags.length === 0 && target.isDanger ? <Text style={styles.dangerOnly}>{t(source === "pos" ? "detail.pos.dangerOnly" : "detail.dangerOnly")}</Text> : null}
 
             {target.flags.length > 0 ? (
               <View style={[LEGACY_UI.card, styles.panel]}>
@@ -197,14 +200,40 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
               </View>
             ) : null}
 
-            <View style={[LEGACY_UI.card, styles.panel]}>
-              <Info label={t("detail.operationTime")} value={target.operationTime.replace("T", " ")} />
-              <Info label={t("detail.uploadTime")} value={`${target.lastUploadTime.replace("T", " ").slice(11, 19)} · ${t("detail.lag", { minutes: lagMinutes(target) })}`} />
-              <Info label={t("detail.store")} value={`${storeDisplayName(target.storeCode, storeNames)} ${target.storeCode ?? ""}`} />
-              <Info label={t("detail.device")} value={target.deviceCode ?? "-"} />
-              <Info label={t("detail.employee")} value={target.employeeName ?? "-"} />
-              <Info label={t("detail.raw")} value={target.operationDetail ?? "-"} />
-            </View>
+            {target.pos ? (
+              <View style={[LEGACY_UI.card, styles.panel]}>
+                <Info label={t("detail.operationTime")} value={`${target.operationTime.replace("T", " ")}（${t("detail.pos.localTimeNote")}）`} />
+                <Info label={t("detail.pos.receivedTime")} value={target.lastUploadTime.replace("T", " ").slice(11, 19)} />
+                <Info label={t("detail.store")} value={`${storeDisplayName(target.storeCode, storeNames)} ${target.storeCode ?? ""}`} />
+                <Info label={t("detail.device")} value={[target.deviceCode ?? "-", target.pos.deviceSystem].filter(Boolean).join(" · ")} />
+                <Info label={t("detail.employee")} value={[target.employeeName ?? "-", target.employeeId].filter(Boolean).join(" · ")} />
+                <Info label={t("detail.pos.outcome")} value={t(`outcomes.${target.pos.outcome}`, { defaultValue: target.pos.outcome || "-" })} />
+                {target.pos.reasonCode ? <Info label={t("detail.pos.reason")} value={target.pos.reasonCode} /> : null}
+                {target.pos.paymentMethod || target.pos.paymentAmount !== null ? (
+                  <Info label={t("detail.pos.payment")} value={[target.pos.paymentMethod, target.pos.paymentAmount?.toFixed(2)].filter(Boolean).join(" · ")} />
+                ) : null}
+                {target.pos.beforeActual !== null ? (
+                  <Info label={t("detail.pos.actual")} value={`${target.pos.beforeActual.toFixed(2)} → ${target.pos.afterActual?.toFixed(2) ?? "-"}`} />
+                ) : null}
+                {target.pos.orderGuid ? <Info label={t("detail.pos.order")} value={target.pos.orderGuid} /> : null}
+                {target.pos.isEmergencyOverride || target.pos.isOfflineCached ? (
+                  <Info
+                    label={t("detail.pos.flags")}
+                    value={[target.pos.isEmergencyOverride ? t("detail.pos.emergency") : null, target.pos.isOfflineCached ? t("detail.pos.offline") : null].filter(Boolean).join(" · ")}
+                  />
+                ) : null}
+                {target.pos.safeMessage ? <Info label={t("detail.pos.message")} value={target.pos.safeMessage} /> : null}
+              </View>
+            ) : (
+              <View style={[LEGACY_UI.card, styles.panel]}>
+                <Info label={t("detail.operationTime")} value={target.operationTime.replace("T", " ")} />
+                <Info label={t("detail.uploadTime")} value={`${target.lastUploadTime.replace("T", " ").slice(11, 19)} · ${t("detail.lag", { minutes: lagMinutes(target) })}`} />
+                <Info label={t("detail.store")} value={`${storeDisplayName(target.storeCode, storeNames)} ${target.storeCode ?? ""}`} />
+                <Info label={t("detail.device")} value={target.deviceCode ?? "-"} />
+                <Info label={t("detail.employee")} value={target.employeeName ?? "-"} />
+                <Info label={t("detail.raw")} value={target.operationDetail ?? "-"} />
+              </View>
+            )}
 
             <View style={[LEGACY_UI.card, styles.panel]}>
               <View style={styles.panelHead}>
@@ -224,6 +253,7 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
                     router.replace({
                       pathname: "/(shell)/legacy-employee-logs",
                       params: {
+                        source,
                         stores: target.storeCode ?? "",
                         preset: "today",
                         employeeId: target.employeeId!,
@@ -288,7 +318,7 @@ function TimelineRow({ item, current, currentLabel }: { item: LegacyLogItem; cur
       <View style={[styles.dot, current ? styles.dotCurrent : null]} />
       <View style={styles.timelineBody}>
         <View style={styles.tags}>
-          <OperationTag operation={item.operation} />
+          <OperationTag operation={item.operation} tone={item.tone} />
           <Text style={styles.muted}>{item.employeeName ?? "-"}</Text>
         </View>
         <Text numberOfLines={2} style={[styles.body, current ? styles.bold : null]}>

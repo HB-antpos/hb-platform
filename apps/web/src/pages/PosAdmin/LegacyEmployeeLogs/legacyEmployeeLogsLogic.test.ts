@@ -8,6 +8,8 @@ import {
   HIGH_RISK_OPERATIONS,
   LEGACY_RULE_CODES,
   KNOWN_LEGACY_OPERATIONS,
+  POS_DANGER_GROUP_OPERATIONS,
+  POS_RULE_CODES,
   QUICK_FILTER_OPERATIONS,
   buildLegacyLogQuery,
   buildOperationOptions,
@@ -281,5 +283,63 @@ const first = guard.begin()
 const second = guard.begin()
 assertEqual(guard.isLatest(first), false, '旧请求结果丢弃')
 assertEqual(guard.isLatest(second), true, '最新请求结果采用')
+
+// —— 新收银口径契约：规则编号、危险分组与 PosOperationAuditRiskCatalog 一致 ——
+const posCatalogSource = readFileSync(
+  join(process.cwd(), '../../services/backend/BlazorApp.Api/Services/OperationAudits/Risk/PosOperationAuditRiskCatalog.cs'),
+  'utf8',
+)
+// 常量可能是字面量，也可能引用老收银规则（Rules.X = LegacyRules.X）。
+const posConst = (name: string): string | undefined => {
+  const literal = new RegExp(`public const string ${name} = "([^"]+)";`).exec(posCatalogSource)?.[1]
+  if (literal) return literal
+  const legacyName = new RegExp(`public const string ${name} = LegacyRules\\.(\\w+);`).exec(posCatalogSource)?.[1]
+  return legacyName ? constValue(legacyName) : undefined
+}
+const posListOf = (name: string) =>
+  (new RegExp(`${name} =\\s*\\[([\\s\\S]*?)\\];`).exec(posCatalogSource)?.[1] ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => (item.startsWith('"') ? item.slice(1, -1) : posConst(item.replace(/^Rules\./, '')) ?? item))
+assertDeepEqual(POS_RULE_CODES, posListOf('AllRules'), '新收银规则编号与顺序与后端一致')
+assertDeepEqual(POS_RULE_CODES.slice(0, LEGACY_RULE_CODES.length), LEGACY_RULE_CODES, '新收银规则以老收银规则开头，文案共用')
+assertDeepEqual(
+  Object.values(POS_DANGER_GROUP_OPERATIONS).flat().sort(),
+  [...posListOf('DangerOperations'), 'CASH_DRAWER_OPEN'].sort(),
+  '新收银危险分组并集 = 后端危险清单 + 手动开钱箱',
+)
+
+// —— 新收银依据：没有身份确认字段、以开始收款为锚点、紧急覆盖 ——
+assertDeepEqual(
+  describeFlagEvidence({ ruleCode: 'noSaleDrawer', evidence: { windowSeconds: '120', nextCheckoutAt: '12:16:39', reason: 'MANUAL' } }).map((part) => part.key),
+  ['noSaleWindow', 'noSaleNext'],
+  '新收银开钱箱依据不显示身份确认',
+)
+assertDeepEqual(
+  describeFlagEvidence({ ruleCode: 'deleteAfterCheckout', evidence: { anchor: 'tender', checkoutAt: '11:00:00', secondsAfterCheckout: '40', deletedAmount: '15.00', product: 'Widget' } }).map((part) => part.key),
+  ['deleteAfterTender', 'productOnly'],
+  '新收银以开始收款为锚点，没有数量时只显示商品',
+)
+assertEqual(
+  describeFlagEvidence({ ruleCode: 'bigDiscount', evidence: { kind: 'item', percent: '50', amount: '20.00', product: 'Big Bear' } }).slice(-1)[0]?.key,
+  'discountAmount',
+  '新收银大额折扣带让利金额',
+)
+assertDeepEqual(
+  describeFlagEvidence({ ruleCode: 'emergencyOverride', evidence: { operationType: 'CASHIER_LOGIN', outcome: 'Denied', reason: 'LOGIN_REJECTED' } }).map((part) => part.key),
+  ['emergencyOverride', 'reason'],
+  '紧急覆盖依据含结果与原因',
+)
+assertEqual(
+  describeFlagEvidence({ ruleCode: 'repeatReprint', evidence: { count: '3', firstAt: '10:00:00' } })[0].key,
+  'repeatReprintDay',
+  '没有订单号时按设备当天描述重打印',
+)
+assertDeepEqual(
+  orderRuleCounts([{ ruleCode: 'emergencyOverride' }, { ruleCode: 'noSaleDrawer' }]).map((row) => row.ruleCode),
+  ['noSaleDrawer', 'emergencyOverride'],
+  '紧急覆盖排在老收银规则之后',
+)
 
 console.log('legacy employee logs logic tests passed')

@@ -50,6 +50,8 @@ import {
   filterStoreOptionsByManagedCodes,
 } from '../../../utils/managedStoreScope'
 
+import type { EmployeeLogsHeader } from '../EmployeeLogs/employeeLogsSource'
+
 import EmployeeSummaryTable from './EmployeeSummaryTable'
 import {
   CATEGORY_TAG_COLOR,
@@ -109,7 +111,8 @@ function errorText(error: unknown) {
   return error instanceof Error && error.message ? error.message : undefined
 }
 
-export default function PosAdminLegacyEmployeeLogsPage() {
+/** header 由员工操作日志合并页传入（统一标题与来源切换）；单独使用时沿用本页标题。 */
+export default function PosAdminLegacyEmployeeLogsPage({ header }: { header?: EmployeeLogsHeader } = {}) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const [form] = Form.useForm<LegacyLogFormValues>()
@@ -652,12 +655,15 @@ export default function PosAdminLegacyEmployeeLogsPage() {
 
   return (
     <PageContainer
-      title={t('legacyEmployeeLogs.pageTitle')}
-      subtitle={t('legacyEmployeeLogs.pageSubtitle')}
+      title={header?.title ?? t('legacyEmployeeLogs.pageTitle')}
+      subtitle={header?.subtitle ?? t('legacyEmployeeLogs.pageSubtitle')}
       extra={(
-        <Button icon={<ReloadOutlined />} disabled={!hasStores} onClick={() => void loadData(pageNumber, pageSize, sortOrder)}>
-          {t('common.refresh')}
-        </Button>
+        <Space wrap>
+          {header?.switcher}
+          <Button icon={<ReloadOutlined />} disabled={!hasStores} onClick={() => void loadData(pageNumber, pageSize, sortOrder)}>
+            {t('common.refresh')}
+          </Button>
+        </Space>
       )}
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
