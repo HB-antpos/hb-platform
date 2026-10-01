@@ -24,7 +24,13 @@
     "scheduleManagement": "Schedule",
     "holidayManagement": "Holidays",
     "leaveManagement": "Leave",
-    "managedPunchRecords": "Punch records"
+    "managedPunchRecords": "Punch records",
+    "short": {
+      "schedule": "Shifts",
+      "holidays": "Holiday",
+      "leave": "Leave",
+      "punches": "Punch"
+    }
   },
   "today": {
     "schedules": "Today's shifts",

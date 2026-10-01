@@ -1459,6 +1459,40 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           />
         ) : null}
 
+        {/* 页签栏不随单个页签的加载错误消失，否则其他页签（如打卡记录）也无法进入 */}
+        {isManagementTab && managerStores.length > 0 ? (
+          <>
+            <SegmentedButtons
+              value={activeManagementTab}
+              onValueChange={(value) =>
+                setActiveManagementTab(value as AttendanceManagementTab)
+              }
+              buttons={[
+                {
+                  value: "schedule",
+                  label: t("tabs.short.schedule"),
+                  labelStyle: styles.managementTabLabel,
+                },
+                {
+                  value: "holidays",
+                  label: t("tabs.short.holidays"),
+                  labelStyle: styles.managementTabLabel,
+                },
+                {
+                  value: "leave",
+                  label: t("tabs.short.leave"),
+                  labelStyle: styles.managementTabLabel,
+                },
+                // 打卡记录依赖 Punch.ViewManagedStore；无权限时不出现该页签。
+                ...(canViewManagedPunches
+                  ? [{ value: "punches", label: t("tabs.short.punches"), labelStyle: styles.managementTabLabel }]
+                  : []),
+              ]}
+              style={styles.sectionTabs}
+            />
+          </>
+        ) : null}
+
         {isManagementTab && managerStores.length > 0 && managerLoadError ? (
           <EmptyState
             title={t("messages.managerLoadFailedTitle")}
@@ -1482,31 +1516,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 
         {isManagementTab && managerStores.length > 0 && !managerLoadError ? (
           <>
-            <SegmentedButtons
-              value={activeManagementTab}
-              onValueChange={(value) =>
-                setActiveManagementTab(value as AttendanceManagementTab)
-              }
-              buttons={[
-                {
-                  value: "schedule",
-                  label: t("tabs.scheduleManagement"),
-                },
-                {
-                  value: "holidays",
-                  label: t("tabs.holidayManagement"),
-                },
-                {
-                  value: "leave",
-                  label: t("tabs.leaveManagement"),
-                },
-                // 打卡记录依赖 Punch.ViewManagedStore；无权限时不出现该页签。
-                ...(canViewManagedPunches
-                  ? [{ value: "punches", label: t("tabs.managedPunchRecords") }]
-                  : []),
-              ]}
-              style={styles.sectionTabs}
-            />
             {isManagementContentLoading ? (
               <View style={styles.inlineLoading}>
                 <ActivityIndicator />
@@ -1706,6 +1715,10 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 export default AttendanceScreen;
 
 const styles = StyleSheet.create({
+  // 管理端四个页签在 375pt 宽屏上平分，字号收小以免英文标签被截断。
+  managementTabLabel: {
+    fontSize: 13,
+  },
   storePickerCode: {
     color: "#6B7280",
   },
