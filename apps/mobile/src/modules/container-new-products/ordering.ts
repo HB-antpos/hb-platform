@@ -1,6 +1,6 @@
 import type { ContainerNewProductItem } from "./types";
 
-// 与后端一致：到店日升序 → HB 货号（忽略大小写，没有货号的排在该日末尾）→ ProductCode 兜底保证顺序稳定
+// 与后端一致：到店区间起始日升序（同一门店区间长度相同） → HB 货号（忽略大小写，没有货号的排在该日末尾）→ ProductCode 兜底保证顺序稳定
 export function compareByArrivalThenProductNo(a: ContainerNewProductItem, b: ContainerNewProductItem): number {
   const byDate = compareOrdinal(a.estimatedStoreArrivalDate, b.estimatedStoreArrivalDate);
   if (byDate !== 0) return byDate;

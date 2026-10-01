@@ -71,17 +71,19 @@ public sealed class ContainerNewProductsRulesTests
     [Fact]
     public void ContainerQueryWindow_CoversEveryContainerWhoseStoreArrivalFallsInWindow()
     {
-        // 逐日枚举（覆盖一周内每个星期几起算）：凡到店日落在窗口内的货柜日期，都必须在粗筛窗口内，否则会漏柜
+        // 逐日枚举（覆盖一周内每个星期几起算）：凡到店区间与窗口有交集的货柜日期，都必须在粗筛窗口内，否则会漏柜
         for (var today = new DateTime(2026, 9, 21); today < new DateTime(2026, 10, 5); today = today.AddDays(1))
         {
             var (from, toExclusive) = ContainerNewProductsReactService.BuildWindow(today);
             var (containerFrom, containerToExclusive) = ContainerNewProductsReactService.BuildContainerQueryWindow(from, toExclusive);
             for (var containerDate = today.AddDays(-40); containerDate < today.AddDays(40); containerDate = containerDate.AddDays(1))
             {
-                foreach (var weekdays in new[] { 3, 7 })
+                foreach (var state in new[] { "NSW", "QLD" })
                 {
-                    var storeArrival = ContainerNewProductsReactService.AddWeekdays(containerDate, weekdays);
-                    if (storeArrival >= from && storeArrival < toExclusive)
+                    var (startWeekdays, endWeekdays) = ContainerNewProductsReactService.GetStoreArrivalWeekdayRange(state);
+                    var start = ContainerNewProductsReactService.AddWeekdays(containerDate, startWeekdays);
+                    var end = ContainerNewProductsReactService.AddWeekdays(containerDate, endWeekdays);
+                    if (ContainerNewProductsReactService.OverlapsWindow(start, end, from, toExclusive))
                     {
                         Assert.InRange(containerDate, containerFrom, containerToExclusive.AddDays(-1));
                     }
@@ -102,6 +104,28 @@ public sealed class ContainerNewProductsRulesTests
     }
 
     [Theory]
+    [InlineData("NSW", 0, 3)]
+    [InlineData("QLD", 3, 7)]
+    public void StoreArrivalWeekdayRange_NswSameDayToThree_QldThreeToSeven(string state, int start, int end)
+    {
+        Assert.Equal((start, end), ContainerNewProductsReactService.GetStoreArrivalWeekdayRange(state));
+    }
+
+    [Theory]
+    // 窗口 [09-21, 10-13)：区间只要有一天落在窗口内就算
+    [InlineData("2026-09-17", "2026-09-20", false)]
+    [InlineData("2026-09-17", "2026-09-21", true)]
+    [InlineData("2026-10-12", "2026-10-15", true)]
+    [InlineData("2026-10-13", "2026-10-16", false)]
+    public void OverlapsWindow_IncludesRangeCrossingWindowEdge(string start, string end, bool expected)
+    {
+        Assert.Equal(expected, ContainerNewProductsReactService.OverlapsWindow(
+            DateTime.Parse(start), DateTime.Parse(end), new DateTime(2026, 9, 21), new DateTime(2026, 10, 13)));
+    }
+
+    [Theory]
+    [InlineData("2026-09-18", 0, "2026-09-18")]
+    [InlineData("2026-09-19", 0, "2026-09-19")]
     [InlineData("2026-09-18", 3, "2026-09-23")]
     [InlineData("2026-09-18", 7, "2026-09-29")]
     [InlineData("2026-09-19", 3, "2026-09-23")]
