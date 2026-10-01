@@ -45,6 +45,13 @@ public interface ICustomerDisplayWindowService
         remove { }
     }
 
+    /// <summary>客显窗口上点了互换屏幕按钮（标题栏或全屏右上角），请求主窗口与客显互换屏幕。</summary>
+    event EventHandler? SwapScreensRequested
+    {
+        add { }
+        remove { }
+    }
+
     void Prewarm(CustomerDisplayViewModel viewModel)
     {
     }
@@ -91,6 +98,8 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
     public event EventHandler? Closed;
 
     public event EventHandler? FullscreenRequested;
+
+    public event EventHandler? SwapScreensRequested;
 
     internal sealed record CustomerDisplayLayoutPlan(
         bool TitleBarVisibleDuringPlacement,
@@ -267,6 +276,7 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
         _displayTopology.AttachWorkAreaConstraint(_window);
         _window.Closed += OnWindowClosed;
         _window.FullscreenRequested += OnWindowFullscreenRequested;
+        _window.SwapScreensRequested += OnWindowSwapScreensRequested;
         _window.MoveOrResizeCompleted += OnWindowMoveOrResizeCompleted;
         stopwatch.Stop();
         ConsoleLog.Write(
@@ -455,6 +465,7 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
         {
             _window.Closed -= OnWindowClosed;
             _window.FullscreenRequested -= OnWindowFullscreenRequested;
+            _window.SwapScreensRequested -= OnWindowSwapScreensRequested;
             _window.MoveOrResizeCompleted -= OnWindowMoveOrResizeCompleted;
             _window = null;
         }
@@ -501,6 +512,26 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
 
         FullscreenRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    private void OnWindowSwapScreensRequested(object? sender, EventArgs e)
+    {
+        OnSwapScreensRequested();
+    }
+
+    internal void OnSwapScreensRequested()
+    {
+        ConsoleLog.Write("CustomerDisplay", $"window swap-screens requested currentMode={_mode}");
+        if (!ShouldForwardSwapScreensRequest(_mode))
+        {
+            return;
+        }
+
+        SwapScreensRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // 窗口模式和全屏都有互换按钮；关闭状态下的迟到点击直接忽略。
+    internal static bool ShouldForwardSwapScreensRequest(CustomerDisplayWindowMode mode) =>
+        mode != CustomerDisplayWindowMode.Closed;
 
     // 只有带标题栏的普通模式能双击；全屏已无标题栏，关闭状态下的迟到事件直接忽略。
     internal static bool ShouldForwardFullscreenRequest(CustomerDisplayWindowMode mode) =>
