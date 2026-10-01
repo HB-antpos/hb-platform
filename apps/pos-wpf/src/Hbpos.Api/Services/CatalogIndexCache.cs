@@ -40,7 +40,20 @@ public interface ICatalogIndexCache
     CatalogDownloadLease CreateFullLease(CatalogIndexBuildResult target);
 
     CatalogDownloadLease CreateDeltaLease(CatalogIndexBuildResult baseline, CatalogIndexBuildResult target, IReadOnlyList<CatalogDeltaOperation> operations);
+
+    /// <summary>
+    /// 只读出门店当前应提供的目录版本号，绝不加载快照正文；返回 null 表示调用方必须走完整取用/构建路径。
+    /// 默认实现即“不知道”，既有测试替身无需实现。
+    /// </summary>
+    CatalogVersionPeek? PeekLatestVersion(string storeCode) => null;
 }
+
+/// <summary>门店当前目录版本的身份；IsStale 表示已排队后台刷新、当前返回的是最后一次已发布版本。</summary>
+public sealed record CatalogVersionPeek(
+    string StoreCode,
+    string CatalogVersion,
+    DateTimeOffset GeneratedAt,
+    bool IsStale);
 
 public sealed record CatalogIndexBuildResult(
     string StoreCode,
@@ -620,6 +633,78 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
             }
         }
     }
+
+    /// <summary>
+    /// 与 <see cref="GetOrBuildAsync"/>（允许旧版本）同一套判定，但只返回版本号：
+    /// 刷新中且有旧结果 → 旧结果；已完成未过期且未被容量拒绝 → 本次结果；否则取按发布序号最新的已发布快照
+    /// （驻留或磁盘描述，均不读取正文）并排队后台刷新。整文件同步据此直接查磁盘上的文件，不再为取版本号载入整份索引。
+    /// </summary>
+    public CatalogVersionPeek? PeekLatestVersion(string storeCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        var key = new CatalogIndexCacheKey(NormalizeStoreCode(storeCode), Since: null);
+        var now = _timeProvider.GetUtcNow();
+        if (_entries.TryGetValue(key, out var existing))
+        {
+            if (IsBuildRunning(existing))
+            {
+                // 首次构建（没有旧结果）必须等构建完成，交回完整路径。
+                return existing.StaleResult is { } stale ? ToPeek(stale, isStale: true) : null;
+            }
+
+            if (existing.ExpiresAt > now &&
+                existing.PublicationCompletion.Task.Result.Status != PublicationStatus.CapacityRejected &&
+                existing.BuildTask.IsValueCreated &&
+                existing.BuildTask.Value.IsCompletedSuccessfully)
+            {
+                var completed = existing.BuildTask.Value.Result;
+                return completed is null ? null : ToPeek(completed, isStale: false);
+            }
+        }
+
+        if (_backgroundRefreshScheduler is null)
+        {
+            // 没有后台刷新器时原路径会同步构建，不能在这里返回过期版本。
+            return null;
+        }
+
+        CatalogVersionPeek? latest;
+        lock (_snapshotGate)
+        {
+            PruneExpiredSnapshots(now);
+            latest = _snapshots
+                .Where(pair => string.Equals(pair.Key.StoreCode, key.StoreCode, StringComparison.OrdinalIgnoreCase)
+                    && pair.Key.Since is null)
+                .Select(pair => (pair.Value.Sequence, Peek: ToPeek(pair.Value.Result, isStale: true)))
+                .Concat(_lazySnapshotDescriptors
+                    .Where(pair => string.Equals(pair.Key.StoreCode, key.StoreCode, StringComparison.OrdinalIgnoreCase)
+                        && pair.Key.Since is null)
+                    .Select(pair => (pair.Value.Sequence, Peek: new CatalogVersionPeek(
+                        key.StoreCode,
+                        pair.Key.CatalogVersion,
+                        pair.Value.Descriptor.GeneratedAt,
+                        IsStale: true))))
+                .OrderByDescending(candidate => candidate.Sequence)
+                .Select(candidate => candidate.Peek)
+                .FirstOrDefault();
+        }
+
+        if (latest is null)
+        {
+            return null;
+        }
+
+        _backgroundRefreshScheduler.QueueRefresh(key.StoreCode);
+        Log($"peek stale refresh queued store={key.StoreCode} version={latest.CatalogVersion}");
+        return latest;
+    }
+
+    private static CatalogVersionPeek ToPeek(CatalogIndexBuildResult result, bool isStale) =>
+        new(
+            NormalizeStoreCode(result.StoreCode),
+            result.CatalogIndex.CatalogVersion,
+            result.CatalogIndex.GeneratedAt,
+            isStale);
 
     public CatalogIndexBuildResult? GetByVersion(
         string storeCode,

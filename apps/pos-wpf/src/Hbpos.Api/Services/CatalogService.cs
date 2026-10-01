@@ -152,7 +152,9 @@ public sealed class CatalogService(
     IPriceIndexBuilder priceIndexBuilder,
     ICatalogIndexCache catalogIndexCache,
     ICatalogBaseDataCache catalogBaseDataCache,
-    IOptions<CatalogSyncOptions>? catalogSyncOptions = null)
+    IOptions<CatalogSyncOptions>? catalogSyncOptions = null,
+    ICatalogDownloadFileStore? downloadFileStore = null,
+    IOptions<CatalogDownloadFileOptions>? downloadFileOptions = null)
     : ICatalogService, ICatalogIndexRefreshWorker, ICatalogTargetIndexSource
 {
     private const int CatalogSourceBatchSize = 100_000;
@@ -1179,11 +1181,24 @@ public sealed class CatalogService(
         CancellationToken cancellationToken)
     {
         var normalizedStoreCode = NormalizeStoreCode(storeCode);
-        _ = await catalogIndexCache.ForceRefreshAndPublishAsync(
+        var refreshed = await catalogIndexCache.ForceRefreshAndPublishAsync(
             normalizedStoreCode,
             since: null,
             token => BuildSellableIndexCoreAsync(normalizedStoreCode, since: null, token),
             cancellationToken);
+        if (refreshed is not null && downloadFileStore is not null && downloadFileOptions?.Value.Enabled == true)
+        {
+            try
+            {
+                // 中文注释：后台刷新/每日预构建刚建好的索引还在内存里，顺手写出下载文件，
+                // 之后的整文件同步计划直接命中磁盘，不必再为这个版本载入索引。
+                await downloadFileStore.EnsureFullFileAsync(refreshed, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Log($"download file prepublish failed store={normalizedStoreCode} error={exception.GetType().Name}");
+            }
+        }
     }
 
     /// <summary>
