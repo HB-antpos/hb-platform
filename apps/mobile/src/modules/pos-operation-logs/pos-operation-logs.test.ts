@@ -7,6 +7,7 @@ import {
 } from "./api-normalization";
 import {
   POS_OPERATION_LOG_MAX_RANGE_DAYS,
+  POS_OPERATION_TYPE_GROUPS,
   POS_OPERATION_TYPES,
   applyDeepLinkParams,
   applyQuickFilter,
@@ -80,9 +81,12 @@ test("操作类型文案键映射与清单完整性", () => {
   assert.equal(operationTypeI18nKey("CART_ITEM_ADD"), "cartItemAdd");
   assert.equal(operationTypeI18nKey("LINKLY_SETTLEMENT_REPRINT"), "linklySettlementReprint");
   assert.equal(operationTypeI18nKey("CARD_PAYMENT_SUPERVISOR_RESOLUTION"), "cardPaymentSupervisorResolution");
-  // 与 Web 端 OPERATION_TYPE_KEYS 的 27 种保持一致。
-  assert.equal(POS_OPERATION_TYPES.length, 27);
-  assert.equal(new Set(POS_OPERATION_TYPES).size, 27);
+  // 与 Web 端 OPERATION_TYPE_KEYS 的 34 种保持一致。
+  assert.equal(POS_OPERATION_TYPES.length, 34);
+  assert.equal(new Set(POS_OPERATION_TYPES).size, 34);
+  assert.equal(operationTypeI18nKey("API_SERVER_CHANGE"), "apiServerChange");
+  // 高风险组在筛选面板默认展开，主管授权必须落在其中。
+  assert.ok(POS_OPERATION_TYPE_GROUPS[0].types.includes("PERMISSION_OVERRIDE"));
 });
 
 test("预设区间按设备本地日推导", () => {

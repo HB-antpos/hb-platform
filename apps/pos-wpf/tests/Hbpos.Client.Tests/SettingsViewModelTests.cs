@@ -1,4 +1,5 @@
-﻿using Hbpos.Client.Wpf.Models;
+﻿using BlazorApp.Shared.DTOs;
+using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.Client.Wpf.Localization;
@@ -665,6 +666,111 @@ public sealed class SettingsViewModelTests
 
         Assert.Equal(1, resetCallCount);
         Assert.Equal("Catalog data reset completed.", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task ResetCatalogCommand_records_catalog_reset_operation_audit()
+    {
+        var logger = new RecordingOperationAuditLogger();
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            resetCatalogAsync: _ => Task.CompletedTask,
+            session: CreateAuditSession(),
+            operationAuditLogger: logger);
+
+        await viewModel.ResetCatalogCommand.ExecuteAsync(null);
+
+        // 重置商品目录会清空本机价格与商品，必须留下谁在何时执行的审计。
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("CATALOG_RESET", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("SETTINGS", auditEvent.ReasonCode);
+        Assert.Equal("C001", auditEvent.CashierId);
+    }
+
+    [Fact]
+    public async Task ResetCatalogCommand_failure_records_failed_audit_and_keeps_status_handling()
+    {
+        var logger = new RecordingOperationAuditLogger();
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            resetCatalogAsync: _ => Task.FromException(new InvalidOperationException("catalog store locked")),
+            session: CreateAuditSession(),
+            operationAuditLogger: logger);
+
+        await viewModel.ResetCatalogCommand.ExecuteAsync(null);
+
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("CATALOG_RESET", auditEvent.OperationType);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal(nameof(InvalidOperationException), auditEvent.SafeMessage);
+        Assert.False(viewModel.IsBusy);
+    }
+
+    [Theory]
+    [InlineData(true, "Succeeded")]
+    [InlineData(false, "Failed")]
+    public async Task InstallRemoteMaintenanceCommand_records_install_result_audit(bool succeeded, string expectedOutcome)
+    {
+        var logger = new RecordingOperationAuditLogger();
+        var remoteService = new FakeRemoteMaintenanceService
+        {
+            InstallResult = new RemoteMaintenanceProvisionResult(
+                succeeded,
+                succeeded
+                    ? "settings.remoteMaintenance.result.configured"
+                    : "settings.remoteMaintenance.result.configurationFailed",
+                new RemoteMaintenanceStatus(succeeded, succeeded ? "rustdesk-test-id" : string.Empty, string.Empty, succeeded ? "running" : "notInstalled"))
+        };
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            session: CreateAuditSession(),
+            remoteMaintenanceService: remoteService,
+            operationAuditLogger: logger);
+
+        await viewModel.InstallRemoteMaintenanceCommand.ExecuteAsync(null);
+
+        // 安装远程维护会开放远程控制，按真实安装结果留痕。
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("REMOTE_MAINTENANCE_INSTALL", auditEvent.OperationType);
+        Assert.Equal(expectedOutcome, auditEvent.Outcome);
+        Assert.Equal(remoteService.InstallResult.Message, auditEvent.SafeMessage);
+        Assert.Equal("C001", auditEvent.CashierId);
+    }
+
+    [Fact]
+    public async Task InstallRemoteMaintenanceCommand_exception_records_failed_audit()
+    {
+        var logger = new RecordingOperationAuditLogger();
+        var remoteService = new FakeRemoteMaintenanceService
+        {
+            InstallHandler = _ => Task.FromException<RemoteMaintenanceProvisionResult>(new IOException("disk full"))
+        };
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            session: CreateAuditSession(),
+            remoteMaintenanceService: remoteService,
+            operationAuditLogger: logger);
+
+        await viewModel.InstallRemoteMaintenanceCommand.ExecuteAsync(null);
+
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("REMOTE_MAINTENANCE_INSTALL", auditEvent.OperationType);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal(nameof(IOException), auditEvent.SafeMessage);
+    }
+
+    private static PosSessionState CreateAuditSession() =>
+        new("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+    private sealed class RecordingOperationAuditLogger : IOperationAuditLogger
+    {
+        public List<OperationAuditEventDto> Events { get; } = [];
+
+        public void Record(OperationAuditEventDto auditEvent)
+        {
+            Events.Add(auditEvent);
+        }
     }
 
     [Theory]

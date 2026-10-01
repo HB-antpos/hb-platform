@@ -1554,6 +1554,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             DeviceRegistration.StatusMessage = _localization.T("startup.stage.loadingProducts");
         }
 
+        // 换绑前的会话即发起换绑的收银员与原门店终端，必须在会话被替换前捕获。
+        var sessionBeforeActivation = Session;
         if (args.IsReregistered)
         {
             // 换店成功后旧设备和旧分店收银员会话均不可复用；购物车已由前置门禁保证为空。
@@ -1582,6 +1584,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 args.StoreCode,
                 args.HardwareId,
                 args.AuthorizationCode);
+        }
+
+        if (args.IsReregistered)
+        {
+            // 审计上传只发送与当前设备一致的事件；换绑后设备号必然改变，所以在新授权生效后
+            // 以新终端身份记录，操作人仍是发起换绑的收银员，原门店终端写入说明。
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.DeviceReregister,
+                "Succeeded",
+                sessionBeforeActivation,
+                reasonCode: "ACTIVATION_REBIND",
+                safeMessage: $"{sessionBeforeActivation.StoreCode}/{sessionBeforeActivation.DeviceCode} -> {args.StoreCode}/{args.DeviceCode}");
         }
 
         await InitializePosExperienceAsync(startupOptions);
@@ -2598,6 +2613,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyDeviceReregistered()
     {
+        // 审批制换绑提交后立即清除授权，只能以原终端身份记录；审批通过后设备号会变，
+        // 这条记录可能无法再上传，但仍保留在本机审计库中。
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.DeviceReregister,
+            "Succeeded",
+            Session,
+            reasonCode: "SUBMITTED_PENDING_APPROVAL");
         _deviceReregistrationCoordinator.ClearAuthorization();
         _posPostShowStartupTask = null;
         CancelStartupCatalogIndexLoad();

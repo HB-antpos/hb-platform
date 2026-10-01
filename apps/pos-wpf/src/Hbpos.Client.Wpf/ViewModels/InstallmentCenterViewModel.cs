@@ -446,7 +446,11 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             !IsSelectedOrderLocked &&
             selectedOrder.CanConfirmPickup)
         {
-            var result = await RunOrderActionAsync(() => _installmentOrderService.ConfirmPickupAsync(selectedOrder.OrderId, Session));
+            var result = await RunOrderActionAsync(
+                () => _installmentOrderService.ConfirmPickupAsync(selectedOrder.OrderId, Session),
+                OperationAuditTypes.InstallmentPickupConfirm,
+                "PICKUP",
+                orderGuid: selectedOrder.OrderId);
             if (result.RequiresReview)
             {
                 // durable operation 已落盘；同步内存锁，避免等待下一次加载期间再次点击。

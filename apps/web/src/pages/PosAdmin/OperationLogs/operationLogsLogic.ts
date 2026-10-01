@@ -146,6 +146,13 @@ export const OPERATION_TYPE_KEYS: Record<string, string> = {
   LINKLY_SETTLEMENT: 'operationLogs.operations.linklySettlement',
   LINKLY_SETTLEMENT_REPRINT: 'operationLogs.operations.linklySettlementReprint',
   CARD_PAYMENT_SUPERVISOR_RESOLUTION: 'operationLogs.operations.cardPaymentSupervisorResolution',
+  PERMISSION_OVERRIDE: 'operationLogs.operations.permissionOverride',
+  INSTALLMENT_PICKUP_CONFIRM: 'operationLogs.operations.installmentPickupConfirm',
+  CATALOG_RESET: 'operationLogs.operations.catalogReset',
+  TEST_SALES_DATA_RESET: 'operationLogs.operations.testSalesDataReset',
+  DEVICE_REREGISTER: 'operationLogs.operations.deviceReregister',
+  API_SERVER_CHANGE: 'operationLogs.operations.apiServerChange',
+  REMOTE_MAINTENANCE_INSTALL: 'operationLogs.operations.remoteMaintenanceInstall',
 }
 
 export function normalizeOperationAuditPage<T>(payload: {

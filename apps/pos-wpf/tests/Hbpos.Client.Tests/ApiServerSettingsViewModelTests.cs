@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using BlazorApp.Shared.DTOs;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
+using Hbpos.Contracts.Cashiers;
 using Hbpos.Contracts.Common;
 using Hbpos.Contracts.Health;
 
@@ -22,6 +24,70 @@ public sealed class ApiServerSettingsViewModelTests
         viewModel.UseReleaseAddressCommand.Execute(null);
         Assert.Equal(ApiServerSettingsService.ReleaseApiBaseAddress, viewModel.ServerAddressText);
         Assert.Empty(savedAddresses);
+    }
+
+    [Fact]
+    public async Task Runtime_switch_records_server_change_with_cashier_captured_before_session_is_cleared()
+    {
+        var currentAddress = "https://prod.example.com/pos-api/";
+        var cashierContext = new CashierSessionContext();
+        cashierContext.SetCurrent(CreateCashier());
+        var logger = new RecordingOperationAuditLogger();
+        var coordinator = new FakeSwitchCoordinator(target =>
+        {
+            // 模拟真实切换：提交后地址变更，并在 PostCommit 中清空收银员会话。
+            currentAddress = target;
+            cashierContext.Clear();
+            return new ApiServerSwitchResult(ApiServerSwitchStatus.Success);
+        });
+        var viewModel = CreateSwitchViewModel(() => currentAddress, coordinator, logger, cashierContext);
+        viewModel.ServerAddressText = "https://test.example.com/pos-api/";
+
+        await viewModel.SaveCommand.ExecuteAsync(null);
+
+        // 切换服务器决定收银数据发往哪个后台，审计必须记下操作人和前后地址。
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("API_SERVER_CHANGE", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("RUNTIME_SWITCH", auditEvent.ReasonCode);
+        Assert.Equal("C001", auditEvent.CashierId);
+        Assert.Equal("Alice", auditEvent.CashierName);
+        Assert.Equal(
+            "https://prod.example.com/pos-api/ -> https://test.example.com/pos-api/",
+            auditEvent.SafeMessage);
+    }
+
+    [Fact]
+    public async Task Blocked_runtime_switch_records_denied_server_change()
+    {
+        var cashierContext = new CashierSessionContext();
+        cashierContext.SetCurrent(CreateCashier());
+        var logger = new RecordingOperationAuditLogger();
+        var coordinator = new FakeSwitchCoordinator(_ =>
+            new ApiServerSwitchResult(ApiServerSwitchStatus.Blocked, "settings.serverAddress.status.blocked"));
+        var viewModel = CreateSwitchViewModel(() => "https://prod.example.com/pos-api/", coordinator, logger, cashierContext);
+        viewModel.ServerAddressText = "https://test.example.com/pos-api/";
+
+        await viewModel.SaveCommand.ExecuteAsync(null);
+
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("API_SERVER_CHANGE", auditEvent.OperationType);
+        Assert.Equal("Denied", auditEvent.Outcome);
+        Assert.Equal("BLOCKED", auditEvent.ReasonCode);
+        Assert.Equal("C001", auditEvent.CashierId);
+    }
+
+    [Fact]
+    public async Task Same_address_switch_does_not_record_server_change()
+    {
+        var logger = new RecordingOperationAuditLogger();
+        var coordinator = new FakeSwitchCoordinator(_ => new ApiServerSwitchResult(ApiServerSwitchStatus.SameAddress));
+        var viewModel = CreateSwitchViewModel(() => "https://prod.example.com/pos-api/", coordinator, logger, new CashierSessionContext());
+        viewModel.ServerAddressText = "https://prod.example.com/pos-api/";
+
+        await viewModel.SaveCommand.ExecuteAsync(null);
+
+        Assert.Empty(logger.Events);
     }
 
     [Fact]
@@ -193,6 +259,43 @@ public sealed class ApiServerSettingsViewModelTests
                 savedAddresses?.Add(address);
             });
         return new ApiServerSettingsViewModel(service, new LocalizationService());
+    }
+
+    private static ApiServerSettingsViewModel CreateSwitchViewModel(
+        Func<string> currentAddress,
+        IApiServerSwitchCoordinator coordinator,
+        IOperationAuditLogger logger,
+        ICashierSessionContext cashierSessionContext)
+    {
+        var service = new ApiServerSettingsService(
+            new HttpClient(new StubHttpMessageHandler(_ => OnlineResponse())),
+            currentAddress,
+            _ => { });
+        return new ApiServerSettingsViewModel(
+            service,
+            new LocalizationService(),
+            coordinator,
+            logger,
+            cashierSessionContext);
+    }
+
+    private static CashierSessionDto CreateCashier() =>
+        new("C001", "user-guid-001", "Alice", "S001", "POS-01", [], [], ["S001"], false, false, false);
+
+    private sealed class FakeSwitchCoordinator(Func<string, ApiServerSwitchResult> switchHandler) : IApiServerSwitchCoordinator
+    {
+        public Task<ApiServerSwitchResult> SwitchAsync(string targetAddress, CancellationToken cancellationToken = default) =>
+            Task.FromResult(switchHandler(targetAddress));
+    }
+
+    private sealed class RecordingOperationAuditLogger : IOperationAuditLogger
+    {
+        public List<OperationAuditEventDto> Events { get; } = [];
+
+        public void Record(OperationAuditEventDto auditEvent)
+        {
+            Events.Add(auditEvent);
+        }
     }
 
     private static HttpResponseMessage OnlineResponse()

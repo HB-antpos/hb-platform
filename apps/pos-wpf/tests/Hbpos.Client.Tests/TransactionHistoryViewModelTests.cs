@@ -2602,12 +2602,14 @@ public sealed class TransactionHistoryViewModelTests
             Orders = [order],
             LocalOrders = { [order.OrderId] = CreateLocalInstallmentOrder(order) }
         };
+        var auditLogger = new RecordingOperationAuditLogger();
         var viewModel = new TransactionHistoryViewModel(
             new CapturingReceiptQueryService(),
             new CapturingSuspendedOrderService(),
             new CapturingRemoteOrderHistoryService(),
             CreateSession(),
-            installmentOrderService: installmentService);
+            installmentOrderService: installmentService,
+            operationAuditLogger: auditLogger);
 
         viewModel.IsInstallmentSourceSelected = true;
         await viewModel.LoadAsync();
@@ -2627,6 +2629,12 @@ public sealed class TransactionHistoryViewModelTests
 
         Assert.Equal(order.OrderId, installmentService.LastConfirmPickupOrderId);
         Assert.Equal("confirmed", viewModel.StatusMessage);
+        // 历史页提货入口与分期中心使用同一事件类型和原因码。
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("INSTALLMENT_PICKUP_CONFIRM", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("PICKUP", auditEvent.ReasonCode);
+        Assert.Equal(order.OrderId.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]
@@ -2638,12 +2646,14 @@ public sealed class TransactionHistoryViewModelTests
             Orders = [order],
             ConfirmPickupException = new TaskCanceledException("request timeout")
         };
+        var auditLogger = new RecordingOperationAuditLogger();
         var viewModel = new TransactionHistoryViewModel(
             new CapturingReceiptQueryService(),
             new CapturingSuspendedOrderService(),
             new CapturingRemoteOrderHistoryService(),
             CreateSession(),
-            installmentOrderService: installmentService);
+            installmentOrderService: installmentService,
+            operationAuditLogger: auditLogger);
 
         viewModel.IsInstallmentSourceSelected = true;
         await viewModel.LoadAsync();
@@ -2658,6 +2668,10 @@ public sealed class TransactionHistoryViewModelTests
         Assert.False(viewModel.ConfirmInstallmentPickupCommand.CanExecute(row));
         await viewModel.ConfirmInstallmentPickupCommand.ExecuteAsync(row);
         Assert.Equal(1, installmentService.ConfirmPickupCallCount);
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("INSTALLMENT_PICKUP_CONFIRM", auditEvent.OperationType);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal(nameof(TaskCanceledException), auditEvent.SafeMessage);
     }
 
     [Fact]

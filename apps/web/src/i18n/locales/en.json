@@ -4122,7 +4122,14 @@
       "dailyCloseReprint": "Reprint Daily Close",
       "linklySettlement": "Linkly Settlement",
       "linklySettlementReprint": "Reprint Linkly Settlement",
-      "cardPaymentSupervisorResolution": "Card Payment Supervisor Resolution"
+      "cardPaymentSupervisorResolution": "Card Payment Supervisor Resolution",
+      "permissionOverride": "Supervisor Authorization",
+      "installmentPickupConfirm": "Installment Pickup Confirmed",
+      "catalogReset": "Catalog Reset",
+      "testSalesDataReset": "Test Sales Data Reset",
+      "deviceReregister": "Device Reregistered",
+      "apiServerChange": "API Server Changed",
+      "remoteMaintenanceInstall": "Remote Maintenance Install"
     }
   },
   "performanceBaseline": {

@@ -190,6 +190,13 @@ assertDeepEqual(
     'LINKLY_SETTLEMENT',
     'LINKLY_SETTLEMENT_REPRINT',
     'CARD_PAYMENT_SUPERVISOR_RESOLUTION',
+    'PERMISSION_OVERRIDE',
+    'INSTALLMENT_PICKUP_CONFIRM',
+    'CATALOG_RESET',
+    'TEST_SALES_DATA_RESET',
+    'DEVICE_REREGISTER',
+    'API_SERVER_CHANGE',
+    'REMOTE_MAINTENANCE_INSTALL',
   ],
   '固定事件代码应完整覆盖核心收银链路',
 )
@@ -222,6 +229,25 @@ assertDeepEqual(
 const operationLogsPageSource = readFileSync('src/pages/PosAdmin/OperationLogs/index.tsx', 'utf8')
 const zhLocale = JSON.parse(readFileSync('src/i18n/locales/zh.json', 'utf8'))
 const enLocale = JSON.parse(readFileSync('src/i18n/locales/en.json', 'utf8'))
+// 每个事件代码都必须有中英文案，否则页面和筛选下拉会直接显示原始代码。
+for (const [operationType, i18nKey] of Object.entries(operationTypeKeys)) {
+  const leafKey = i18nKey.replace('operationLogs.operations.', '')
+  assertEqual(
+    typeof zhLocale.operationLogs.operations[leafKey],
+    'string',
+    `${operationType} 应提供中文文案`,
+  )
+  assertEqual(
+    typeof enLocale.operationLogs.operations[leafKey],
+    'string',
+    `${operationType} 应提供英文文案`,
+  )
+}
+assertEqual(
+  zhLocale.operationLogs.operations.apiServerChange,
+  '切换服务器地址',
+  '切换服务器地址应提供中文文案',
+)
 assertEqual(
   zhLocale.operationLogs.operations.linklySettlement,
   'Linkly 结算',
