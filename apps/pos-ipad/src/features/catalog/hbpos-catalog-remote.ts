@@ -505,6 +505,18 @@ function normalizePromotionProduct(
   };
 }
 
+/** 整文件导入逐行复用分页同一套字段校验；入参来自 JSON.parse，类型未知。 */
+export function normalizeCatalogFileItem(item: unknown): CatalogLookupItem {
+  if (item === null || typeof item !== "object") throw invalidPage("file.item");
+  return normalizeItem(item as GeneratedCatalogItem);
+}
+
+/** 整文件增量的删除行复用分页同一套字段校验。 */
+export function normalizeCatalogFileDeletedLookup(item: unknown): CatalogDeletedLookup {
+  if (item === null || typeof item !== "object") throw invalidPage("file.deletedLookup");
+  return normalizeDeletedLookup(item as GeneratedDeletedLookup);
+}
+
 function normalizeItem(item: GeneratedCatalogItem): CatalogLookupItem {
   return {
     storeCode: requiredText(item.storeCode, "item.storeCode"),
