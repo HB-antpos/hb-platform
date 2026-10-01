@@ -102,6 +102,7 @@ public static class ServiceRegistration
                 configuration.GetSection(PosIpadAppReviewOptions.SectionName));
             services.Configure<CatalogSnapshotOptions>(configuration.GetSection("CatalogSnapshot"));
             services.Configure<CatalogSyncOptions>(configuration.GetSection("CatalogSync"));
+            services.Configure<CatalogDownloadFileOptions>(configuration.GetSection(CatalogDownloadFileOptions.SectionName));
             services.Configure<CatalogDailyPrebuildOptions>(configuration.GetSection("CatalogDailyPrebuild"));
             services.Configure<InstallmentRepaymentClaimOptions>(configuration.GetSection("InstallmentRepaymentClaims"));
             services.Configure<InstallmentCancelClaimOptions>(configuration.GetSection("InstallmentCancelClaims"));
@@ -136,6 +137,8 @@ public static class ServiceRegistration
         services.AddScoped<CatalogService>();
         services.AddScoped<ICatalogService>(sp => sp.GetRequiredService<CatalogService>());
         services.AddScoped<ICatalogIndexRefreshWorker>(sp => sp.GetRequiredService<CatalogService>());
+        services.AddScoped<ICatalogTargetIndexSource>(sp => sp.GetRequiredService<CatalogService>());
+        services.AddScoped<ICatalogFileSyncService, CatalogFileSyncService>();
         services.AddScoped<IPromotionRuleService, PromotionRuleService>();
         services.AddScoped<IAdvertisementPlaybackService, AdvertisementPlaybackService>();
         services.AddScoped<IStoreSchemaSqlExecutor, SqlSugarStoreSchemaSqlExecutor>();
@@ -243,6 +246,20 @@ public static class ServiceRegistration
                 ? Path.Combine(AppContext.BaseDirectory, "App_Data", "CatalogSnapshots")
                 : options.RootPath;
             return new GzipCatalogSnapshotStore(rootPath, options.MaxSnapshotsPerStore);
+        });
+        services.AddSingleton<ICatalogDownloadFileStore>(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CatalogDownloadFileOptions>>().Value;
+            var snapshotOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CatalogSnapshotOptions>>().Value;
+            // 默认与目录快照同卷：生产快照目录已挂持久卷，无需改 compose 挂载。
+            var rootPath = string.IsNullOrWhiteSpace(options.RootPath)
+                ? Path.Combine(
+                    string.IsNullOrWhiteSpace(snapshotOptions.RootPath)
+                        ? Path.Combine(AppContext.BaseDirectory, "App_Data", "CatalogSnapshots")
+                        : snapshotOptions.RootPath,
+                    "download-files")
+                : options.RootPath;
+            return new CatalogDownloadFileStore(rootPath, options, sp.GetRequiredService<TimeProvider>());
         });
         services.AddSingleton<CatalogBackgroundRefreshService>();
         services.AddSingleton<ICatalogBackgroundRefreshScheduler>(

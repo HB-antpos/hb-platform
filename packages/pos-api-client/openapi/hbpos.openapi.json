@@ -781,6 +781,114 @@
         }
       }
     },
+    "/api/v1/catalog/files/sync-plan": {
+      "get": {
+        "tags": [
+          "CatalogFile"
+        ],
+        "parameters": [
+          {
+            "name": "storeCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "baseCatalogVersion",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogFileSyncPlanResponseApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogFileSyncPlanResponseApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogFileSyncPlanResponseApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/catalog/files/full": {
+      "get": {
+        "tags": [
+          "CatalogFile"
+        ],
+        "parameters": [
+          {
+            "name": "storeCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "catalogVersion",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/catalog/files/delta": {
+      "get": {
+        "tags": [
+          "CatalogFile"
+        ],
+        "parameters": [
+          {
+            "name": "storeCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "baseCatalogVersion",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "targetCatalogVersion",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/devices/activation-code/preview": {
       "post": {
         "tags": [
@@ -7090,6 +7198,90 @@
           },
           "data": {
             "$ref": "#/components/schemas/CatalogDeltaPageResponse"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogDownloadFileDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "format": {
+            "type": "string",
+            "nullable": true
+          },
+          "path": {
+            "type": "string",
+            "nullable": true
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogFileSyncPlanResponse": {
+        "type": "object",
+        "properties": {
+          "storeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mode": {
+            "type": "string",
+            "nullable": true
+          },
+          "baseCatalogVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetCatalogVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetTotal": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "file": {
+            "$ref": "#/components/schemas/CatalogDownloadFileDto"
+          },
+          "deltaOperationCount": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogFileSyncPlanResponseApiResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CatalogFileSyncPlanResponse"
           },
           "errorCode": {
             "type": "string",
