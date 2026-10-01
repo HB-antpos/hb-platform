@@ -80,6 +80,7 @@ const PAYMENT_METHODS = Object.freeze([
   "cash",
   "square",
   "linkly-cloud",
+  "manual-card",
   "voucher",
 ] as const satisfies readonly PaymentUiMethod[]);
 
@@ -134,6 +135,7 @@ export function PaymentScreen({
 
   const closePaymentEntry = (): void => {
     if (state.busy) return;
+    presenter.setManualCardConfirmed?.(false);
     setPaymentEntryOpen(false);
   };
 
@@ -146,6 +148,11 @@ export function PaymentScreen({
     void presenter.initialize();
     return () => presenter.destroy();
   }, [presenter]);
+
+  useEffect(() => {
+    // 核对只适用于本次进入时的金额；切换方式、尾款或结账流程都必须重新确认。
+    presenter.setManualCardConfirmed?.(false);
+  }, [presenter, state.selectedMethod, state.remaining.cents, state.checkout.flow]);
 
   useEffect(() => {
     setFullInstallmentConfirmationOpen(false);
@@ -490,7 +497,7 @@ export function PaymentScreen({
                     <Text style={styles.inputLabel}>{t("amount.label")}</Text>
                     <PosTextInput
                       accessibilityLabel={t("amount.label")}
-                      editable={!state.busy}
+                      editable={!state.busy && state.selectedMethod !== "manual-card"}
                       keyboardType="decimal-pad"
                       onChangeText={(value) => presenter.setAmountText(value)}
                       placeholder="0.00"
@@ -502,7 +509,9 @@ export function PaymentScreen({
                         shortLandscape && styles.amountInputShort,
                       ]}
                       testID="payment-amount"
-                      value={state.amountText}
+                      value={state.selectedMethod === "manual-card"
+                        ? (state.remaining.cents / 100).toFixed(2)
+                        : state.amountText}
                     />
                     <Text
                       style={[
@@ -510,14 +519,36 @@ export function PaymentScreen({
                         shortLandscape && styles.inputHintShort,
                       ]}
                     >
-                      {t("amount.hint")}
+                      {t(state.selectedMethod === "manual-card" ? "manualCard.amountHint" : "amount.hint")}
                     </Text>
+                    {state.selectedMethod === "manual-card" ? (
+                      <View style={styles.manualCardConfirmation} testID="payment-manual-card-confirmation">
+                        <Text style={styles.manualCardInstructions}>{t("manualCard.instructions")}</Text>
+                        <PosPressable
+                          accessibilityRole="checkbox"
+                          accessibilityLabel={t("manualCard.checked")}
+                          accessibilityState={{ checked: state.manualCardConfirmed === true, disabled: state.busy }}
+                          disabled={state.busy}
+                          onPress={() => presenter.setManualCardConfirmed?.(state.manualCardConfirmed !== true)}
+                          sound="key"
+                          style={({ pressed }) => [styles.manualCardCheckRow, pressed && styles.pressed]}
+                          testID="payment-manual-card-check"
+                        >
+                          <View style={[styles.manualCardCheckbox, state.manualCardConfirmed === true && styles.manualCardCheckboxChecked]}>
+                            {state.manualCardConfirmed === true ? <Text style={styles.manualCardCheckmark}>✓</Text> : null}
+                          </View>
+                          <Text style={styles.manualCardCheckLabel}>{t("manualCard.checked")}</Text>
+                        </PosPressable>
+                        <Text style={styles.inputHint}>{t("manualCard.uncertain")}</Text>
+                      </View>
+                    ) : (
                     <PaymentKeypad
                       amountText={state.amountText}
                       dense={shortLandscape}
                       disabled={state.busy}
                       onChange={(value) => presenter.setAmountText(value)}
                     />
+                    )}
 
                     {state.selectedMethod === "cash" ? (
                       <View
@@ -620,7 +651,9 @@ export function PaymentScreen({
                         !canSubmitPaymentMethod(state, state.selectedMethod)
                       }
                       label={
-                        state.checkout.flow === "installment-repayment" &&
+                        state.selectedMethod === "manual-card"
+                          ? t("manualCard.confirm")
+                          : state.checkout.flow === "installment-repayment" &&
                         state.selectedMethod === "cash"
                           ? t("action.prepareCashRepayment")
                           : state.orderGuid
@@ -1325,8 +1358,13 @@ function ProviderBlockers({
   state: PaymentPresenterState;
   t: Translate;
 }>) {
+  const manualCardAvailable = state.providers.some(
+    (provider) => provider.provider === "manual-card" && provider.available,
+  );
   const blockers = state.providers.filter(
-    (provider) => !provider.available && provider.blocker,
+    (provider) => !provider.available && provider.blocker &&
+      provider.blocker !== "MANUAL_CARD_CONFIGURATION_DISABLED" &&
+      !(manualCardAvailable && (provider.provider === "square" || provider.provider === "linkly-cloud")),
   );
   if (!blockers.length) return null;
   return (
@@ -1647,6 +1685,9 @@ function PaymentSummary({
     0,
     state.total.cents - state.remaining.cents,
   );
+  const manualCardAvailable = state.providers.some(
+    (entry) => entry.provider === "manual-card" && entry.available,
+  );
   const preparedCashCancellation = canCancelPreparedCash(state);
   const showPreparedCashCancellationInFooter =
     preparedCashCancellation && state.phase !== "recovery-required";
@@ -1680,7 +1721,11 @@ function PaymentSummary({
       >
         <Text style={styles.sectionTitle}>{t("method.title")}</Text>
         <View style={styles.methodGrid}>
-          {PAYMENT_METHODS.map((method) => (
+          {PAYMENT_METHODS.filter((method) =>
+            method === "manual-card"
+              ? manualCardAvailable && state.checkout.flow === "regular"
+              : !(manualCardAvailable && (method === "square" || method === "linkly-cloud")),
+          ).map((method) => (
             <PaymentMethodButton
               active={state.selectedMethod === method}
               disabled={!canSelectPaymentMethod(state, method)}
@@ -3248,6 +3293,49 @@ const styles = StyleSheet.create({
   },
   voucherInputGroup: {
     marginTop: 16,
+  },
+  manualCardConfirmation: {
+    marginTop: 14,
+    gap: 12,
+  },
+  manualCardInstructions: {
+    color: posColors.ink,
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  manualCardCheckRow: {
+    minHeight: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: posColors.border,
+    backgroundColor: "#F4F8FF",
+  },
+  manualCardCheckbox: {
+    width: 26,
+    height: 26,
+    borderWidth: 2,
+    borderColor: posColors.blue,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  manualCardCheckboxChecked: {
+    backgroundColor: posColors.blue,
+  },
+  manualCardCheckmark: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  manualCardCheckLabel: {
+    flex: 1,
+    color: posColors.ink,
+    fontSize: 16,
+    fontWeight: "700",
+    lineHeight: 23,
   },
   voucherInput: {
     minHeight: 52,

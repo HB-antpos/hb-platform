@@ -34,7 +34,11 @@ test("M45 从 M44 增量新增码冲突候选表，主键前缀即门店 + 查�
     await applyMigrations(connection, () => T1);
     await applyMigrations(connection, () => T1);
 
-    assert.equal(await schemaVersion(connection), 45);
+    // 从 M44 一路升到最新版本（M45 之后还有 M46 等），断言跟随迁移清单末尾，避免新增迁移后误报。
+    assert.equal(
+      await schemaVersion(connection),
+      POS_DATABASE_MIGRATIONS.at(-1)!.version,
+    );
     const columns = await connection.getAll<{ name: string; pk: number }>(
       "PRAGMA table_info('catalog_code_conflicts')",
     );

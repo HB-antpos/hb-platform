@@ -2306,13 +2306,13 @@ export function SalesScreen({
           />
           <HandheldStateSurface
             slug="open-item-keypad"
-            style={[styles.numericModal, styles.openItemModalSurface]}
+            style={[styles.numericModal, styles.numericModalSurface]}
           >
             <ScrollView
               accessibilityViewIsModal
               bounces={false}
               showsVerticalScrollIndicator={false}
-              style={styles.openItemModalScroll}
+              style={styles.numericModalScroll}
               testID="sales-open-item-modal"
             >
               <Text style={styles.modalTitle}>{t("openItem.title")}</Text>
@@ -2346,12 +2346,12 @@ export function SalesScreen({
                 </View>
               </View>
               {/* TC26 纵向空间有限：操作并排，额外文案过高时仍可滚动到按钮。 */}
-              <View style={[styles.modalActions, styles.openItemModalActions]}>
+              <View style={[styles.modalActions, styles.numericModalActions]}>
                 <ActionButton
                   label={t("discount.cancel")}
                   onPress={closeOpenItemInput}
                   sound="navigate"
-                  style={[styles.modalAction, styles.openItemModalAction]}
+                  style={[styles.modalAction, styles.numericModalAction]}
                   tone="secondary"
                 />
                 {state.errorCode === "terminal-recovery-required" ? (
@@ -2363,7 +2363,7 @@ export function SalesScreen({
                         onOpenHeldOrders();
                       }}
                       sound="navigate"
-                      style={[styles.modalAction, styles.openItemModalAction]}
+                      style={[styles.modalAction, styles.numericModalAction]}
                       testID="sales-open-item-recovery-action"
                     />
                   ) : null
@@ -2377,7 +2377,7 @@ export function SalesScreen({
                           if (added) closeOpenItemInput();
                         });
                     }}
-                    style={[styles.modalAction, styles.openItemModalAction]}
+                    style={[styles.modalAction, styles.numericModalAction]}
                     testID="sales-open-item-confirm"
                   />
                 )}
@@ -2504,77 +2504,84 @@ export function SalesScreen({
           />
           <View
             accessibilityViewIsModal
-            style={styles.numericModal}
+            style={[styles.numericModal, styles.numericModalSurface]}
             testID="sales-line-edit-modal"
           >
             <Text style={styles.modalTitle}>{t("editLine.title")}</Text>
-            <View style={styles.editModeGrid}>
-              <ActionButton
-                label={t("editLine.quantity")}
-                onPress={() => selectLineEditMode("quantity")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-quantity"
-                tone={lineEdit?.mode === "quantity" ? "primary" : "secondary"}
-              />
-              <ActionButton
-                label={t("editLine.price")}
-                onPress={() => selectLineEditMode("price")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-price"
-                tone={lineEdit?.mode === "price" ? "primary" : "secondary"}
-              />
-              <ActionButton
-                label={t("editLine.discountAmount")}
-                onPress={() => selectLineEditMode("discount-amount")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-discount-amount"
-                tone={
-                  lineEdit?.mode === "discount-amount" ? "primary" : "secondary"
-                }
-              />
-              <ActionButton
-                label={t("editLine.discountPercent")}
-                onPress={() => selectLineEditMode("discount-percent")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-discount-percent"
-                tone={
-                  lineEdit?.mode === "discount-percent"
-                    ? "primary"
-                    : "secondary"
-                }
-              />
-            </View>
-            <View style={styles.numericEditorBody}>
-              <View style={styles.numericEditorSummary}>
-                <Text style={styles.fieldLabel}>{t("editLine.value")}</Text>
-                <NumericValueDisplay
-                  accessibilityLabel={t("editLine.value")}
-                  placeholder={lineEdit?.mode === "quantity" ? "0" : "0.00"}
-                  testID="sales-line-edit-value"
-                  value={lineEdit?.value ?? ""}
+            {/* 中间内容滚动，底部操作始终留在小屏可视区域内。 */}
+            <ScrollView
+              bounces={false}
+              style={styles.numericModalScroll}
+              testID="sales-line-edit-scroll"
+            >
+              <View style={styles.editModeGrid}>
+                <ActionButton
+                  label={t("editLine.quantity")}
+                  onPress={() => selectLineEditMode("quantity")}
+                  style={styles.editModeButton}
+                  testID="sales-line-edit-quantity"
+                  tone={lineEdit?.mode === "quantity" ? "primary" : "secondary"}
+                />
+                <ActionButton
+                  label={t("editLine.price")}
+                  onPress={() => selectLineEditMode("price")}
+                  style={styles.editModeButton}
+                  testID="sales-line-edit-price"
+                  tone={lineEdit?.mode === "price" ? "primary" : "secondary"}
+                />
+                <ActionButton
+                  label={t("editLine.discountAmount")}
+                  onPress={() => selectLineEditMode("discount-amount")}
+                  style={styles.editModeButton}
+                  testID="sales-line-edit-discount-amount"
+                  tone={
+                    lineEdit?.mode === "discount-amount" ? "primary" : "secondary"
+                  }
+                />
+                <ActionButton
+                  label={t("editLine.discountPercent")}
+                  onPress={() => selectLineEditMode("discount-percent")}
+                  style={styles.editModeButton}
+                  testID="sales-line-edit-discount-percent"
+                  tone={
+                    lineEdit?.mode === "discount-percent"
+                      ? "primary"
+                      : "secondary"
+                  }
                 />
               </View>
-              <View style={styles.numericKeypadColumn}>
-                <SalesNumberKeypad
-                  labels={keypadLabels}
-                  mode={lineEdit?.mode === "quantity" ? "integer" : "decimal"}
-                  onKeyPress={handleLineEditKey}
-                  testIDPrefix="sales-line-edit"
-                />
+              <View style={styles.numericEditorBody}>
+                <View style={styles.numericEditorSummary}>
+                  <Text style={styles.fieldLabel}>{t("editLine.value")}</Text>
+                  <NumericValueDisplay
+                    accessibilityLabel={t("editLine.value")}
+                    placeholder={lineEdit?.mode === "quantity" ? "0" : "0.00"}
+                    testID="sales-line-edit-value"
+                    value={lineEdit?.value ?? ""}
+                  />
+                </View>
+                <View style={styles.numericKeypadColumn}>
+                  <SalesNumberKeypad
+                    labels={keypadLabels}
+                    mode={lineEdit?.mode === "quantity" ? "integer" : "decimal"}
+                    onKeyPress={handleLineEditKey}
+                    testIDPrefix="sales-line-edit"
+                  />
+                </View>
               </View>
-            </View>
-            <View style={styles.modalActions}>
+            </ScrollView>
+            <View style={[styles.modalActions, styles.numericModalActions]}>
               <ActionButton
                 label={t("discount.cancel")}
                 onPress={closeLineEditInput}
                 sound="navigate"
-                style={styles.modalAction}
+                style={[styles.modalAction, styles.numericModalAction]}
                 tone="secondary"
               />
               <ActionButton
                 label={t("editLine.confirm")}
                 onPress={submitLineEdit}
-                style={styles.modalAction}
+                style={[styles.modalAction, styles.numericModalAction]}
                 testID="sales-line-edit-confirm"
               />
             </View>
@@ -4367,16 +4374,16 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     textAlign: "right",
   },
-  openItemModalAction: {
+  numericModalAction: {
     flex: 1,
   },
-  openItemModalActions: {
+  numericModalActions: {
     flexDirection: "row",
   },
-  openItemModalScroll: {
+  numericModalScroll: {
     width: "100%",
   },
-  openItemModalSurface: {
+  numericModalSurface: {
     overflow: "hidden",
   },
   mutedText: {

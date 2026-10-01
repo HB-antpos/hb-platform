@@ -642,10 +642,10 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
-  it("320×568 折扣与商品行编辑弹窗的底部按钮保持自然高度且不溢出", async () => {
+  it.each([[320, 568], [360, 592]])("%i×%i 商品行编辑内容可滚动，底部按钮固定并排", async (width, height) => {
     const compactMetrics = {
-      width: 320,
-      height: 568,
+      width,
+      height,
       scale: 2,
       fontScale: 1,
     };
@@ -689,19 +689,36 @@ describe("SalesScreen", () => {
       await fireEvent.press(screen.getByTestId("sales-discount-cancel"));
       await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
 
+      const modal = screen.getByTestId("sales-line-edit-modal");
+      const modalScroll = screen.getByTestId("sales-line-edit-scroll");
+      const confirm = screen.getByTestId("sales-line-edit-confirm");
+      expect(flattenedStyle(modal)).toMatchObject({
+        maxHeight: "94%",
+        overflow: "hidden",
+      });
+      expect(modalScroll.props.bounces).toBe(false);
+      expect(confirm.parent).not.toBeNull();
+      expect(flattenedStyle(confirm.parent!)).toMatchObject({
+        flexDirection: "row",
+      });
+
       for (const action of [
         screen.getByLabelText("取消"),
-        screen.getByTestId("sales-line-edit-confirm"),
+        confirm,
       ]) {
         const actionStyle = flattenedStyle(action);
         expect(actionStyle).toMatchObject({
           alignSelf: "stretch",
+          flex: 1,
           minHeight: MIN_TOUCH_TARGET,
         });
-        expect(actionStyle.flex).toBeUndefined();
+        expect(modal).toContainElement(action);
+        expect(modalScroll).not.toContainElement(action);
       }
 
       const valueDisplay = screen.getByTestId("sales-line-edit-value");
+      expect(modalScroll).toContainElement(valueDisplay);
+      expect(modalScroll).toContainElement(screen.getByTestId("sales-line-edit-key-0"));
       let valueSummary = valueDisplay.parent;
       while (
         valueSummary &&
@@ -712,6 +729,9 @@ describe("SalesScreen", () => {
       expect(valueSummary).not.toBeNull();
       if (!valueSummary) throw new Error("未找到商品行编辑数值摘要区");
       expect(flattenedStyle(valueSummary).flex).toBeUndefined();
+
+      await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
+      expect(modalScroll).toContainElement(screen.getByTestId("sales-line-edit-key-decimal"));
 
       await screen.unmount();
     } finally {

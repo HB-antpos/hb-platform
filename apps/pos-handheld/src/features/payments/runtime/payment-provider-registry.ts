@@ -1,3 +1,4 @@
+import { ManualCardPaymentAdapter } from "../manual/manual-card-payment-adapter";
 import type { HbposTransport } from "@/core/api";
 import type {
   OnlinePaymentPort,
@@ -68,6 +69,8 @@ export type PaymentProviderConfigurationBlocker =
   | "LINKLY_CONFIGURATION_LOAD_FAILED"
   | "VOUCHER_CONFIGURATION_DISABLED"
   | "VOUCHER_CONFIGURATION_LOAD_FAILED"
+  | "MANUAL_CARD_CONFIGURATION_DISABLED"
+  | "MANUAL_CARD_CONFIGURATION_LOAD_FAILED"
   | "PAYMENT_PROVIDER_UNKNOWN";
 
 export type PaymentProviderAvailability = Readonly<{
@@ -199,6 +202,7 @@ export class ConfiguredPaymentProviderRegistry
 }
 
 export type PaymentProviderRegistryDependencies = Readonly<{
+  manualCardConfiguration?: { load(): Promise<{ enabled: boolean }> };
   transport: HbposTransport;
   squareConfiguration: SquareRuntimeConfigurationPort;
   linklyConfiguration: LinklyRuntimeConfigurationPort;
@@ -276,6 +280,24 @@ export async function createConfiguredPaymentProviderRegistry(
   } else {
     entries.set("voucher", blocked("voucher", voucherConfiguration.blocker));
   }
+
+  const manual = await safelyLoad(
+    () => dependencies.manualCardConfiguration?.load() ?? Promise.resolve({ enabled: false }),
+  );
+  // 关闭入口仍保留已确认交易的恢复能力，新付款由 availability 门禁保护。
+  entries.set("manual-card", {
+    port: new ManualCardPaymentAdapter(),
+    availability: {
+      provider: "manual-card",
+      available: manual.kind === "loaded" && manual.value.enabled === true,
+      blocker:
+        manual.kind === "failed"
+          ? "MANUAL_CARD_CONFIGURATION_LOAD_FAILED"
+          : manual.value.enabled === true
+            ? null
+            : "MANUAL_CARD_CONFIGURATION_DISABLED",
+    },
+  });
 
   return new ConfiguredPaymentProviderRegistry(entries);
 }
@@ -422,4 +444,5 @@ const PAYMENT_PROVIDERS = [
   "square",
   "linkly-cloud",
   "voucher",
+  "manual-card",
 ] as const satisfies readonly PaymentProvider[];

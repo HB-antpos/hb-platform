@@ -118,6 +118,95 @@ test("Android OTA 使用同一严格合同，可刷新并交给 Expo installer",
   assert.equal(installs, 1);
 });
 
+test("prepare 委托给 OTA installer；旧 mock 缺少 prepare 时安全返回 unavailable", async () => {
+  let prepares = 0;
+  const androidPolicy: PosHandheldOtaUpdatePolicy = Object.freeze({
+    ...policy,
+    platform: "Android",
+    updateId: "android-prepare-42",
+  });
+  const coordinator = new OtaUpdateCoordinator({
+    platform: "Android",
+    automaticChecksEnabled: true,
+    metadata,
+    policyStore: new MemoryStore(),
+    remote: { async getPolicy() { return androidPolicy; } },
+    installer: {
+      async prepare(actual) {
+        prepares += 1;
+        assert.deepEqual(actual, androidPolicy);
+        return { state: "ready", reason: null };
+      },
+      async apply() { return { state: "reloaded", reason: null }; },
+    },
+  });
+
+  assert.deepEqual(await coordinator.prepare(androidPolicy), {
+    state: "ready",
+    reason: null,
+  });
+  assert.deepEqual(await coordinator.prepare(androidPolicy), {
+    state: "ready",
+    reason: null,
+  });
+  assert.equal(prepares, 2);
+
+  const legacy = new OtaUpdateCoordinator({
+    platform: "Android",
+    automaticChecksEnabled: true,
+    metadata,
+    policyStore: new MemoryStore(),
+    remote: { async getPolicy() { return androidPolicy; } },
+    installer: { async apply() { return { state: "reloaded", reason: null }; } },
+  });
+  assert.deepEqual(await legacy.prepare(androidPolicy), {
+    state: "unavailable",
+    reason: "updates-disabled",
+  });
+});
+
+test("不同 OTA 目标并发 prepare 不共享第一个目标的结果", async () => {
+  const androidPolicy: PosHandheldOtaUpdatePolicy = Object.freeze({
+    ...policy,
+    platform: "Android",
+    channel: "android-a",
+    updateId: "android-a",
+  });
+  const secondPolicy = Object.freeze({
+    ...androidPolicy,
+    channel: "android-b",
+    updateId: "android-b",
+  });
+  let calls = 0;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const coordinator = new OtaUpdateCoordinator({
+    platform: "Android",
+    automaticChecksEnabled: true,
+    metadata,
+    policyStore: new MemoryStore(),
+    remote: { async getPolicy() { return androidPolicy; } },
+    installer: {
+      async prepare(actual) {
+        calls += 1;
+        await pending;
+        return { state: "ready", reason: null };
+      },
+      async apply() { return { state: "reloaded", reason: null }; },
+    },
+  });
+
+  const first = coordinator.prepare(androidPolicy);
+  const second = coordinator.prepare(secondPolicy);
+  assert.notEqual(first, second);
+  assert.equal(calls, 2);
+  release();
+  assert.deepEqual(await Promise.all([first, second]), [
+    { state: "ready", reason: null },
+    { state: "ready", reason: null },
+  ]);
+});
+
 test("OTA 启动/前台/联网刷新 single-flight，远端与缓存状态独立保存", async () => {
   let calls = 0;
   let release!: () => void;

@@ -56,6 +56,7 @@ export type PaymentFieldIssue =
   | "installment-down-payment-below-minimum"
   | "installment-total-below-minimum"
   | "voucher-required"
+  | "manual-card-confirmation-required"
   | "method-unavailable"
   | "checkout-unavailable";
 
@@ -128,6 +129,7 @@ export type PaymentPresenterState = Readonly<{
   selectedMethod: PaymentUiMethod | null;
   amountText: string;
   voucherCaptured: boolean;
+  manualCardConfirmed?: boolean;
   sensitiveInputRevision: number;
   fieldIssue: PaymentFieldIssue | null;
   runtimeErrorCode: PaymentUiRuntimeErrorCode | null;
@@ -168,6 +170,7 @@ export interface PaymentScreenPresenter {
   selectMethod(method: PaymentUiMethod): boolean;
   selectLinklyTerminal?(terminalId: string): Promise<boolean>;
   setAmountText(value: string): void;
+  setManualCardConfirmed?(confirmed: boolean): void;
   setVoucherCode(value: string): void;
   dismissError(): void;
   submitSelected(): Promise<boolean>;
@@ -307,6 +310,7 @@ export class PaymentPresenter {
       selectedMethod,
       amountText: defaultAmountText(selectedMethod, total),
       voucherCaptured: false,
+      manualCardConfirmed: false,
       sensitiveInputRevision: 0,
       fieldIssue: null,
       runtimeErrorCode: null,
@@ -405,6 +409,7 @@ export class PaymentPresenter {
     this.linklyTerminalAbort.abort();
     this.linklySelectionDesiredId = null;
     this.voucherCode = "";
+    this.state = { ...this.state, manualCardConfirmed: false };
     this.listeners.clear();
   }
 
@@ -420,6 +425,7 @@ export class PaymentPresenter {
     if (method !== "voucher") this.clearVoucher();
     this.patch({
       selectedMethod: method,
+      manualCardConfirmed: false,
       amountText: defaultAmountText(method, this.state.remaining),
       fieldIssue: null,
       runtimeErrorCode: null,
@@ -603,10 +609,27 @@ export class PaymentPresenter {
 
   public setAmountText(value: string): void {
     if (this.destroyed || this.state.busy) return;
+    if (this.state.selectedMethod === "manual-card") {
+      // 人工确认绑定当前整笔尾款，不接受键盘或外部调用改写金额。
+      this.patch({
+        amountText: defaultAmountText("manual-card", this.state.remaining),
+        manualCardConfirmed: false,
+        fieldIssue: null,
+      });
+      return;
+    }
     this.patch({
       amountText: value,
+      manualCardConfirmed: false,
       fieldIssue: null,
     });
+  }
+
+  public setManualCardConfirmed(confirmed: boolean): void {
+    if (this.destroyed || this.state.busy) return;
+    const accepted = confirmed && this.state.selectedMethod === "manual-card" &&
+      canSelectPaymentMethod(this.state, "manual-card");
+    this.patch({ manualCardConfirmed: accepted, fieldIssue: null });
   }
 
   public setVoucherCode(value: string): void {
@@ -634,11 +657,17 @@ export class PaymentPresenter {
 
   public submitSelected(): Promise<boolean> {
     const method = this.state.selectedMethod;
+    if (method === "manual-card" && this.state.manualCardConfirmed !== true) {
+      this.patch({ fieldIssue: "manual-card-confirmation-required" });
+      return Promise.resolve(false);
+    }
     if (!method || !canSubmitPaymentMethod(this.state, method)) {
       this.patch({ fieldIssue: "method-unavailable" });
       return Promise.resolve(false);
     }
-    const amount = parseAudInput(this.state.amountText);
+    const amount = method === "manual-card"
+      ? copyMoney(this.state.remaining)
+      : parseAudInput(this.state.amountText);
     if (!this.state.amountText.trim()) {
       this.patch({ fieldIssue: "amount-required" });
       return Promise.resolve(false);
@@ -711,6 +740,7 @@ export class PaymentPresenter {
             actionId,
             provider: method,
             amount,
+            ...(method === "manual-card" ? { manualConfirmed: true } : {}),
             ...(linklyTerminalSelection
               ? { linklyTerminalSelection }
               : {}),
@@ -732,6 +762,7 @@ export class PaymentPresenter {
             actionId,
             provider: method,
             amount,
+            ...(method === "manual-card" ? { manualConfirmed: true } : {}),
             ...(linklyTerminalSelection
               ? { linklyTerminalSelection }
               : {}),
@@ -742,6 +773,9 @@ export class PaymentPresenter {
         }
       } finally {
         if (method === "voucher") this.clearVoucher();
+        if (method === "manual-card") {
+          this.patchIfCurrent(revision, { manualCardConfirmed: false });
+        }
       }
       if (!snapshot || !this.isCurrent(revision)) return false;
       this.applySnapshot(snapshot);
@@ -976,6 +1010,7 @@ export class PaymentPresenter {
       phase: phaseForSnapshot(snapshot),
       initialized: true,
       selectedMethod,
+      manualCardConfirmed: false,
       amountText: defaultAmountText(selectedMethod, snapshot.remaining),
       fieldIssue: null,
       runtimeErrorCode: snapshot.errorCode,
@@ -1148,6 +1183,8 @@ export function canSelectPaymentMethod(
   method: PaymentUiMethod,
 ): boolean {
   if (state.busy) return false;
+  if (method === "manual-card" &&
+      (state.checkout.flow !== "regular" || state.remaining.cents <= 0)) return false;
   if (method === "linkly-cloud" && !linklyTerminalReady(state)) return false;
   const activeMethods = state.tenders.map((tender) => tender.method);
   if (state.checkout.flow !== "regular") {
@@ -1228,6 +1265,7 @@ export function canSubmitPaymentMethod(
   state: PaymentPresenterState,
   method: PaymentUiMethod,
 ): boolean {
+  if (method === "manual-card" && state.manualCardConfirmed !== true) return false;
   return canSelectPaymentMethod(
     { ...state, busy: false },
     method,

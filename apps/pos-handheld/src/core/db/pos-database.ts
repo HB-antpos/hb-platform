@@ -36,6 +36,7 @@ import type {
 } from "@hb/pos-domain/core/contracts/repositories";
 import type { TerminalCartFence } from "@hb/pos-domain/core/contracts/terminal-cart";
 import { SqliteApplicationLogOutbox } from "../logging/application-log";
+import { PaymentMethodSettingsRepository } from "@/features/settings/payment-method-settings";
 
 import { SqliteCatalogCodeConflictRepository } from "./catalog-code-conflict-repository";
 import { SqliteCatalogLookupOverlayRepository } from "./catalog-lookup-overlay-repository";
@@ -331,6 +332,10 @@ export class PosDatabase implements DatabasePort {
   /** 设置仅经受类型约束的 facade 访问，业务层不能读写任意 app_settings JSON。 */
   public settings(): PosSettingsRepository {
     return new PosSettingsRepository(this.connection, this.nowIso);
+  }
+
+  public paymentMethodSettings(): PaymentMethodSettingsRepository {
+    return new PaymentMethodSettingsRepository(this.connection, this.nowIso);
   }
 
   /** Settings 危险动作只读取一致风险计数，不取得订单、支付、队列或裸连接。 */
@@ -1016,7 +1021,7 @@ async function appendScopedAuditEvent(
 }
 
 function tenderMethodForProvider(provider: string): "card" | "voucher" {
-  if (provider === "square" || provider === "linkly-cloud") return "card";
+  if (provider === "square" || provider === "linkly-cloud" || provider === "manual-card") return "card";
   if (provider === "voucher") return "voucher";
   throw new Error("Approved payment provider is unsupported.");
 }

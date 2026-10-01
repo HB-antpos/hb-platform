@@ -12,6 +12,7 @@ import {
   createExpoAppUpdateCacheScopes,
   readSettingsDevicePresentation,
   recordRuntimeInitializationFailure,
+  shouldEnableAppUpdates,
   shutdownExpoPosRuntimeServices,
   shutdownCompositionBeforeDatabaseClose,
 } from "./expo-pos-runtime";
@@ -43,6 +44,16 @@ jest.mock("../peripherals/attendance-security/native", () => ({
 jest.mock("./expo-printer-adapter", () => ({
   createLazyExpoPrinterAdapter: jest.fn(),
 }));
+
+it("开发/测试包不接收升级，正式包和 preview 保持更新能力", () => {
+  for (const profile of [undefined, "production", "preview", "android-internal"]) {
+    expect(shouldEnableAppUpdates(true, profile)).toBe(false);
+    expect(shouldEnableAppUpdates(false, profile)).toBe(true);
+  }
+  for (const profile of ["development", "test", "testing", " DEVELOPMENT "]) {
+    expect(shouldEnableAppUpdates(false, profile)).toBe(false);
+  }
+});
 
 describe("Expo app update cache identity", () => {
   it("从同一运行时 metadata 生成互不混用的 native/OTA scope", () => {

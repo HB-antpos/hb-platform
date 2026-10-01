@@ -979,6 +979,185 @@ test("真实 SQLite：legacy 券 token 可读，并在下一次 CAS 升级为 vo
   }
 });
 
+test("真实 SQLite：manual-card 已入账后释放终端，未入账仍阻断下一笔交易", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "hb-pos-manual-terminal-blocking-"));
+  const databasePath = join(folder, "payment.db");
+  try {
+    const connection = new SystemSqliteConnection(databasePath);
+    await connection.exec(POS_DATABASE_MIGRATIONS.map((migration) => migration.sql).join("\n"));
+    await insertDraftOrder(connection, "manual-completed", 1, 500);
+    await insertDraftOrder(connection, "manual-completed-next", 2, 500);
+    await insertDraftOrder(connection, "manual-pending", 3, 500);
+    await insertDraftOrder(connection, "manual-pending-next", 4, 500);
+    for (const orderGuid of [
+      "manual-completed",
+      "manual-completed-next",
+      "manual-pending",
+      "manual-pending-next",
+    ]) {
+      await connection.run(
+        `INSERT INTO payment_order_draft_bindings (
+          draft_id, request_fingerprint, pricing_state_json, order_guid,
+          store_code, device_code, state, created_at_iso
+        ) VALUES (?, ?, ?, ?, 'S1', 'IPAD1', 'Active', ?)`,
+        [`draft-${orderGuid}`, `fingerprint-${orderGuid}`, "{}", orderGuid, "2026-07-28T00:00:00.000Z"],
+      );
+    }
+    const encryptor = {
+      async encrypt(plaintext: string) { return new TextEncoder().encode(plaintext); },
+      async decrypt(ciphertext: Uint8Array) { return new TextDecoder().decode(ciphertext); },
+    };
+    const repositories = createSqliteRepositories(connection, {
+      nowIso: () => "2026-07-28T00:00:00.000Z",
+      createLeaseId: () => "lease-manual-terminal",
+      encryptor,
+    });
+
+    const completed = payment({
+      attemptId: "manual-completed-attempt",
+      idempotencyKey: "manual-completed-idempotency",
+      orderGuid: "manual-completed",
+      provider: "manual-card",
+    });
+    assert.equal(await repositories.payments.insertIfUnblocked(completed), null);
+    const completedApproved = {
+      ...completed,
+      state: "Approved" as const,
+      updatedAtIso: "2026-07-28T00:01:00.000Z",
+      references: { ...completed.references, txnRef: `MANUAL:${completed.attemptId}` },
+      responseCode: "MANUAL_CONFIRMED",
+    };
+    assert.equal(await repositories.payments.compareAndUpdate(completed, completedApproved), true);
+    await connection.run(
+      "INSERT INTO order_tenders (tender_guid, order_guid, method, amount_cents, payment_attempt_id, created_at_iso) VALUES (?, ?, ?, ?, ?, ?)",
+      ["manual-completed-tender", "manual-completed", "card", 500, completed.attemptId, "2026-07-28T00:01:00.000Z"],
+    );
+    const completedFacts = await connection.getFirst<{ provider: string; state: string; amount_cents: number; tender_count: number }>(
+        `SELECT p.provider, p.state, p.amount_cents,
+           (SELECT COUNT(*) FROM order_tenders t WHERE t.payment_attempt_id = p.attempt_id
+             AND t.order_guid = p.order_guid AND t.amount_cents = p.amount_cents
+             AND p.provider IN ('square', 'linkly-cloud', 'manual-card') AND t.method = 'card') AS tender_count
+        FROM payment_attempts p WHERE p.attempt_id = ?`,
+        [completed.attemptId],
+      );
+    assert.equal(completedFacts?.provider, "manual-card");
+    assert.equal(completedFacts?.state, "Approved");
+    assert.equal(completedFacts?.amount_cents, 500);
+    assert.equal(completedFacts?.tender_count, 1);
+    const next = payment({
+      attemptId: "manual-completed-next-attempt",
+      idempotencyKey: "manual-completed-next-idempotency",
+      orderGuid: "manual-completed-next",
+    });
+    assert.equal(await repositories.payments.insertIfUnblocked(next), null);
+    const nextApproved = {
+      ...next,
+      state: "Approved" as const,
+      updatedAtIso: "2026-07-28T00:01:30.000Z",
+      responseCode: "APPROVED",
+    };
+    assert.equal(await repositories.payments.compareAndUpdate(next, nextApproved), true);
+    await connection.run(
+      "INSERT INTO order_tenders (tender_guid, order_guid, method, amount_cents, payment_attempt_id, created_at_iso) VALUES (?, ?, ?, ?, ?, ?)",
+      ["manual-completed-next-tender", "manual-completed-next", "card", 500, next.attemptId, "2026-07-28T00:01:30.000Z"],
+    );
+
+    const pending = payment({
+      attemptId: "manual-pending-attempt",
+      idempotencyKey: "manual-pending-idempotency",
+      orderGuid: "manual-pending",
+      provider: "manual-card",
+    });
+    assert.equal(await repositories.payments.insertIfUnblocked(pending), null);
+    const pendingApproved = {
+      ...pending,
+      state: "Approved" as const,
+      updatedAtIso: "2026-07-28T00:02:00.000Z",
+      references: { ...pending.references, txnRef: `MANUAL:${pending.attemptId}` },
+      responseCode: "MANUAL_CONFIRMED",
+    };
+    assert.equal(await repositories.payments.compareAndUpdate(pending, pendingApproved), true);
+    const blocked = payment({
+      attemptId: "manual-pending-next-attempt",
+      idempotencyKey: "manual-pending-next-idempotency",
+      orderGuid: "manual-pending-next",
+    });
+    await assert.rejects(
+      () => repositories.payments.insertIfUnblocked(blocked),
+      /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/,
+    );
+    assert.equal(await countAttempts(connection, blocked.attemptId), 0);
+    await connection.close();
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("真实 SQLite：M46 升级前 manual-card 已入账仍误阻断，升级后允许新交易", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "hb-pos-manual-m46-upgrade-"));
+  const databasePath = join(folder, "payment.db");
+  try {
+    const connection = new SystemSqliteConnection(databasePath);
+    await connection.exec(
+      POS_DATABASE_MIGRATIONS
+        .filter((migration) => migration.version <= 45)
+        .map((migration) => migration.sql)
+        .join("\n"),
+    );
+    await insertDraftOrder(connection, "m46-manual-completed", 1, 500);
+    await insertDraftOrder(connection, "m46-manual-next", 2, 500);
+    for (const orderGuid of ["m46-manual-completed", "m46-manual-next"]) {
+      await connection.run(
+        `INSERT INTO payment_order_draft_bindings (
+          draft_id, request_fingerprint, pricing_state_json, order_guid,
+          store_code, device_code, state, created_at_iso
+        ) VALUES (?, ?, ?, ?, 'S1', 'IPAD1', 'Active', ?)`,
+        [`draft-${orderGuid}`, `fingerprint-${orderGuid}`, "{}", orderGuid, "2026-07-28T00:00:00.000Z"],
+      );
+    }
+    await insertPaymentAttemptRow(connection, {
+      attemptId: "m46-manual-attempt",
+      orderGuid: "m46-manual-completed",
+      provider: "manual-card",
+      operation: "purchase",
+      amountCents: 500,
+      state: "Approved",
+      txnRef: "MANUAL:m46-manual-attempt",
+      responseCode: "MANUAL_CONFIRMED",
+    });
+    await connection.run(
+      "INSERT INTO order_tenders (tender_guid, order_guid, method, amount_cents, payment_attempt_id, created_at_iso) VALUES (?, ?, ?, ?, ?, ?)",
+      ["m46-manual-tender", "m46-manual-completed", "card", 500, "m46-manual-attempt", "2026-07-28T00:01:00.000Z"],
+    );
+    const encryptor = {
+      async encrypt(plaintext: string) { return new TextEncoder().encode(plaintext); },
+      async decrypt(ciphertext: Uint8Array) { return new TextDecoder().decode(ciphertext); },
+    };
+    const repositories = createSqliteRepositories(connection, {
+      nowIso: () => "2026-07-28T00:00:00.000Z",
+      createLeaseId: () => "lease-m46",
+      encryptor,
+    });
+    const next = payment({
+      attemptId: "m46-next-attempt",
+      idempotencyKey: "m46-next-idempotency",
+      orderGuid: "m46-manual-next",
+    });
+    await assert.rejects(
+      () => repositories.payments.insertIfUnblocked(next),
+      /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/,
+    );
+
+    const M46 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 46);
+    assert.ok(M46);
+    await connection.exec(M46.sql);
+    assert.equal(await repositories.payments.insertIfUnblocked(next), null);
+    await connection.close();
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 async function insertDraftOrder(
   connection: SqliteConnectionPort,
   orderGuid: string,

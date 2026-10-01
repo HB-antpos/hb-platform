@@ -106,6 +106,76 @@ test("零参数工厂冻结可信权限，并在每次端口调用前后复核 c
   assert.equal(presenter.getState().kind, "failed");
 });
 
+test("生产 settings wrapper 透传手动刷卡保存且不触发 reload", async () => {
+  let saved: unknown = null;
+  let reloadCalls = 0;
+  const runtime = createProductionSettingsRuntime({
+    createSessionLease: () => ({
+      get: () => ({
+        storeCode: "S1",
+        deviceCode: "IPAD-1",
+        permissionCodes: [
+          "Permissions.PosTerminal.Settings.View",
+          "Permissions.PosTerminal.Settings.PaymentTerminal",
+        ],
+      }),
+    }),
+    control: fakeControl({
+      loadSnapshot: async () => SNAPSHOT,
+      savePaymentMethodSettings: async (settings, _signal, assertActive) => {
+        assertActive?.();
+        saved = settings;
+        return { status: "completed", kind: "change-payment-settings" };
+      },
+    }),
+    runDangerousExclusive: (operation) => operation(),
+  });
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+  presenter.setUseManualCard(true);
+  await presenter.saveManualCardSettings();
+  assert.deepEqual(saved, { useManualCard: true });
+  assert.equal(presenter.getState().statusCode, "payment-settings-saved");
+  assert.equal(reloadCalls, 0);
+});
+
+test("生产 settings wrapper 在保存提交点前复核 session", async () => {
+  let active = true;
+  let assertActive: (() => void) | undefined;
+  const runtime = createProductionSettingsRuntime({
+    createSessionLease: () => ({
+      get: () => {
+        if (!active) throw new Error("SESSION_REPLACED");
+        return {
+          storeCode: "S1",
+          deviceCode: "IPAD-1",
+          permissionCodes: [
+            "Permissions.PosTerminal.Settings.View",
+            "Permissions.PosTerminal.Settings.PaymentTerminal",
+          ],
+        };
+      },
+    }),
+    control: fakeControl({
+      loadSnapshot: async () => SNAPSHOT,
+      savePaymentMethodSettings: async (_settings, _signal, callback) => {
+        assertActive = callback;
+        await Promise.resolve();
+        active = false;
+        callback?.();
+        return { status: "completed", kind: "change-payment-settings" };
+      },
+    }),
+    runDangerousExclusive: (operation) => operation(),
+  });
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+  presenter.setUseManualCard(true);
+  await presenter.saveManualCardSettings();
+  assert.equal(typeof assertActive, "function");
+  assert.equal(presenter.getState().statusCode, "payment-settings-save-failed");
+});
+
 test("门店小票资料读取经可信 session 前后复核并原样进入 presenter 草稿", async () => {
   const events: string[] = [];
   const runtime = createProductionSettingsRuntime({
@@ -959,6 +1029,7 @@ function fakeControl(
     subscribeCatalogRefresh: () => () => undefined,
     subscribeDeviceReregistrationCommitted: () => () => undefined,
     loadSnapshot: unavailable,
+    savePaymentMethodSettings: unavailable,
     downloadCatalog: unavailable,
     testApiAddress: unavailable,
     preflightDeviceReregistration: unavailable,

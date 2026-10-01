@@ -1343,6 +1343,52 @@ test("支付配置变更仍被内存交易、通道敏感订单或在途外部�
   }
 });
 
+test("手动刷卡保存遇活动购物车时阻断且不写入配置", async () => {
+  let saves = 0;
+  let transitions = 0;
+  const subject = new ProductionSettingsControl(
+    deps({
+      pendingData: { read: async () => ({ ...CLEAR, hasActiveCart: true }) },
+      paymentConfigurationTransition: {
+        run: async (operation) => {
+          transitions += 1;
+          return operation();
+        },
+      },
+      paymentMethods: { save: async () => { saves += 1; } },
+    }),
+  );
+
+  assert.deepEqual(
+    await subject.savePaymentMethodSettings({ useManualCard: true }, new AbortController().signal),
+    pendingBlocked({ ...CLEAR, hasActiveCart: true }),
+  );
+  assert.equal(transitions, 1);
+  assert.equal(saves, 0);
+});
+
+test("手动刷卡保存允许普通耐久队列，但保留支付恢复门禁", async () => {
+  const saved: { useManualCard: boolean }[] = [];
+  const pending = { ...CLEAR, pendingDurableWriteCount: 3, pendingSaleCount: 1, pendingReturnCount: 1 };
+  const subject = new ProductionSettingsControl(deps({
+    pendingData: { read: async () => pending },
+    paymentMethods: { save: async (settings) => { saved.push(settings); } },
+  }));
+
+  assert.deepEqual(
+    await subject.savePaymentMethodSettings({ useManualCard: true }, new AbortController().signal),
+    { status: "completed", kind: "change-payment-settings" },
+  );
+  assert.deepEqual(saved, [{ useManualCard: true }]);
+
+  pending.unresolvedPaymentCount = 1;
+  assert.deepEqual(
+    await subject.savePaymentMethodSettings({ useManualCard: false }, new AbortController().signal),
+    pendingBlocked({ ...CLEAR, unresolvedPaymentCount: 1 }),
+  );
+  assert.equal(saved.length, 1);
+});
+
 test("支付配置之外的危险动作仍由完整待处理数据门禁阻断", async () => {
   const events: string[] = [];
   const subject = new ProductionSettingsControl(

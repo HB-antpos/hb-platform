@@ -143,6 +143,7 @@ export type PaymentCheckoutPreparedAction = Readonly<{
   provider: PaymentProvider;
   operation: "purchase";
   amount: Money;
+  manualConfirmed?: boolean;
 }>;
 
 export interface PaymentCheckoutDraftPort {
@@ -236,7 +237,10 @@ export type PaymentCheckoutErrorCode =
   | "SQUARE_SANDBOX_AMOUNT_LIMIT_EXCEEDED"
   | "VOUCHER_CONTEXT_NOT_PREPARED"
   | "LINKLY_ACKNOWLEDGEMENT_PENDING"
-  | "RETURN_RECOVERY_REQUIRED";
+  | "RETURN_RECOVERY_REQUIRED"
+  | "MANUAL_CARD_CONFIRMATION_REQUIRED"
+  | "MANUAL_CARD_FULL_BALANCE_REQUIRED"
+  | "MANUAL_CARD_SALE_ONLY";
 
 export type PaymentCheckoutAllowedActions = Readonly<{
   start: boolean;
@@ -289,6 +293,7 @@ export type StartPaymentCheckoutInput = Readonly<{
   actionId: string;
   provider: PaymentProvider;
   amount: Money;
+  manualConfirmed?: boolean;
   /** 仅 provider=voucher 时允许；返回快照永远不会包含该字段。 */
   voucherCode?: string;
   /** Linkly 只接收支付页已经展示并确认的安全终端选择快照。 */
@@ -299,6 +304,7 @@ export type ResumePreparedPaymentInput = Readonly<{
   actionId: string;
   provider: PaymentProvider;
   amount: Money;
+  manualConfirmed?: boolean;
   voucherCode?: string;
   linklyTerminalSelection?: LinklyPaymentTerminalSelectionExpectation;
 }>;
@@ -578,8 +584,14 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
     const attempt = await this.requireAttempt(input.attemptId, input.orderGuid);
     await this.assertProviderAction(attempt.provider);
     const lease = await this.acquireDraftLease(draft);
-    // Created 尚未越过 provider 边界，恢复会首次扣款；其他状态只处理既有交易。
-    await this.assertExact(lease, attempt.state === "Created");
+    const durableManualCardAction =
+      attempt.provider === "manual-card" && attempt.state === "Created"
+        ? await this.cancelPreparedActionOrNull(draft, attempt)
+        : null;
+    await this.assertExact(
+      lease,
+      attempt.state === "Created" && durableManualCardAction?.manualConfirmed !== true,
+    );
 
     const mixed = await this.options.mixed.recoverOnlineAttempt({
       orderGuid: draft.orderGuid,
@@ -694,6 +706,7 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
       !recovery ||
       recovery.draft.orderGuid !== input.orderGuid ||
       recovery.attemptId !== null ||
+      recovery.preparedAction?.provider === "manual-card" ||
       recovery.draft.tenders.length !== 0 ||
       !canAbandonDraft(recovery.draft)
     ) {
@@ -773,6 +786,7 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
     await this.assertProviderAction(input.provider);
     this.assertProviderAvailable(input.provider);
     assertPositiveAud(input.amount);
+    assertManualConfirmation(input);
     const lease = await this.options.cartLease.acquireExact({
       checkoutIntentId: input.checkoutIntentId,
       expectedRevision: input.expectedCartRevision,
@@ -799,15 +813,29 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
     },
   ): Promise<PaymentCheckoutPublicSnapshot> {
     await this.assertProviderAction(input.provider);
-    this.assertProviderAvailable(input.provider);
+    if (!recovery.voucherContextAlreadyPrepared) {
+      this.assertProviderAvailable(input.provider);
+    }
     assertPositiveAud(input.amount);
+    assertManualConfirmation(input);
+    if (input.provider === "manual-card") {
+      if (lease.cart.mode !== "sale" || lease.cart.lines.some((line) => line.kind !== "sale")) {
+        throw new PaymentCheckoutRuntimeError("MANUAL_CARD_SALE_ONLY");
+      }
+      if (input.amount.cents !== draft.remaining.cents) {
+        throw new PaymentCheckoutRuntimeError("MANUAL_CARD_FULL_BALANCE_REQUIRED");
+      }
+    }
     assertWithinRemaining(input.amount, draft.remaining);
     assertNoActiveTenderMethod(
       draft,
       input.provider === "voucher" ? "voucher" : "card",
     );
-    // Prepared 只有动作意图，尚无 provider 结果；恢复时仍属于新金融动作。
-    await this.assertExact(lease, true);
+    const durableManualCardRecovery =
+      recovery.voucherContextAlreadyPrepared &&
+      input.provider === "manual-card" &&
+      input.manualConfirmed === true;
+    await this.assertExact(lease, !durableManualCardRecovery);
 
     if (input.provider === "voucher") {
       if (!recovery.voucherContextAlreadyPrepared) {
@@ -839,6 +867,7 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
       orderGuid: draft.orderGuid,
       provider: input.provider,
       amount: input.amount,
+      ...(input.manualConfirmed === undefined ? {} : { manualConfirmed: input.manualConfirmed }),
     });
     const result =
       input.provider === "linkly-cloud" &&
@@ -1288,10 +1317,12 @@ function publicSnapshot(
       cancel:
         !completed &&
         ((attempt !== null &&
+          attempt.provider !== "manual-card" &&
           (["Created", "Submitted", "Pending"].includes(attempt.state) ||
             canCloseCancelled)) ||
           (attempt === null &&
             (status === "draft-prepared" || preparedAction !== null) &&
+            preparedAction?.provider !== "manual-card" &&
             draft.tenders.length === 0 &&
             canAbandonDraft(draft))),
       addCash: !completed && !blocking && draft.remaining.cents > 0,
@@ -1430,6 +1461,7 @@ function startSignature(
     input.amount.currency,
     input.amount.cents,
     input.expectedCartRevision,
+    input.manualConfirmed === true ? "confirmed" : "",
     input.linklyTerminalSelection?.environment ?? "",
     input.linklyTerminalSelection?.mode ?? "",
     input.linklyTerminalSelection?.mode === "Active"
@@ -1439,6 +1471,15 @@ function startSignature(
       ? input.linklyTerminalSelection.selectionRevision
       : "",
   ].join("|");
+}
+
+function assertManualConfirmation(input: ResumePreparedPaymentInput): void {
+  if (input.provider === "manual-card" && input.manualConfirmed !== true) {
+    throw new PaymentCheckoutRuntimeError("MANUAL_CARD_CONFIRMATION_REQUIRED");
+  }
+  if (input.provider !== "manual-card" && input.manualConfirmed !== undefined) {
+    throw new PaymentCheckoutRuntimeError("PAYMENT_DRAFT_CONFLICT");
+  }
 }
 
 function assertLease(

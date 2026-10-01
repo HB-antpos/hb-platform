@@ -13,6 +13,10 @@ import {
 } from "react-native";
 
 import {
+  isAndroidInstallPermissionRequiredError,
+  type AndroidInstallPermissionStatus,
+} from "./android-native-update-adapter";
+import {
   resolveAppUpdateCopy,
   type AppUpdateCopyKey,
 } from "./app-update-copy";
@@ -20,10 +24,6 @@ import type {
   AppUpdateOrchestrator,
   AppUpdatePresentation,
 } from "./app-update-orchestrator";
-import {
-  isAndroidInstallPermissionRequiredError,
-  type AndroidInstallPermissionStatus,
-} from "./android-native-update-adapter";
 
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import { PosPressable } from "@/ui/controls/pos-pressable";
@@ -82,6 +82,14 @@ export function AppUpdateGateBridge() {
     setWorking(false);
     setErrorKey(null);
   }, [presentation.key]);
+
+  useEffect(() => {
+    if (presentation.downloadState === "ready") {
+      setDismissedKey((current) =>
+        current?.endsWith(":pending") ? null : current,
+      );
+    }
+  }, [presentation.downloadState, presentation.downloadTargetKey, presentation.key]);
 
   useEffect(() => {
     let active = true;
@@ -147,6 +155,36 @@ export function AppUpdateGateBridge() {
     }
   }, [androidInstallPermission, updates, working]);
 
+  const dismissalTargetKey = presentation.downloadTargetKey ?? presentation.key;
+  const dismissalKey = `${dismissalTargetKey}:${presentation.downloadState === "ready" ? "ready" : presentation.downloadState ? "pending" : "store"}`;
+  const downloading = presentation.downloadState === "idle" ||
+    presentation.downloadState === "downloading";
+  const downloadFailed = presentation.downloadState === "failed";
+  if ((downloading || downloadFailed) && presentation.requirement === "optional" && !presentation.blocking && dismissedKey !== dismissalKey) {
+    return (
+      <View pointerEvents="box-none" style={styles.optionalLayer} testID="app-update-download-status">
+        <View style={[styles.card, styles.downloadCard]}>
+          <Text accessibilityLiveRegion="polite" style={styles.body}>
+            {copy[downloadFailed ? "download.failed" : "download.running"]}
+          </Text>
+          {downloadFailed ? (
+            <PosPressable accessibilityRole="button" testID="app-update-download-retry"
+              style={styles.secondaryButton} onPress={() => { void updates?.prepareSelectedUpdate(); }}>
+              <Text style={styles.secondaryButtonText}>{copy["action.retry"]}</Text>
+            </PosPressable>
+          ) : null}
+          <PosPressable
+            accessibilityRole="button"
+            testID="app-update-dismiss"
+            style={styles.secondaryButton}
+            onPress={() => setDismissedKey(dismissalKey)}
+          >
+            <Text style={styles.secondaryButtonText}>{copy["action.later"]}</Text>
+          </PosPressable>
+        </View>
+      </View>
+    );
+  }
   if (
     presentation.phase === "hidden" ||
     presentation.phase === "unchecked" ||
@@ -156,7 +194,7 @@ export function AppUpdateGateBridge() {
   }
   if (
     presentation.requirement === "optional" &&
-    dismissedKey === presentation.key
+    dismissedKey === dismissalKey
   ) {
     return null;
   }
@@ -165,7 +203,11 @@ export function AppUpdateGateBridge() {
   const preserveRecoveryAccess =
     required && RECOVERY_ACCESS_PATHS.has(normalizePathname(pathname));
   const titleKey: AppUpdateCopyKey =
-    presentation.kind === "native"
+    downloadFailed ? "download.failed"
+      : downloading ? "download.required"
+      : presentation.downloadState === "ready" && !required
+      ? presentation.kind === "native" ? "download.apkReady" : "download.otaReady"
+      : presentation.kind === "native"
       ? required
         ? "required.nativeTitle"
         : "optional.nativeTitle"
@@ -179,7 +221,7 @@ export function AppUpdateGateBridge() {
           ? "action.openInstallSettings"
           : "action.installOta"
         : "action.openStore"
-      : "action.installOta";
+      : "action.restart";
 
   const gateCard = (
     <View
@@ -202,7 +244,8 @@ export function AppUpdateGateBridge() {
         {androidInstallPermission === "denied"
           ? copy["permission.required"]
           : presentation.releaseMessage ??
-          copy[required ? "required.body" : "optional.body"]}
+          copy[required ? "required.body" : presentation.downloadState === "ready"
+            ? "download.readyBody" : "optional.body"]}
       </Text>
       {errorKey ? (
         <Text accessibilityRole="alert" style={styles.error}>
@@ -258,7 +301,7 @@ export function AppUpdateGateBridge() {
         {!required ? (
           <PosPressable
             accessibilityRole="button"
-            onPress={() => setDismissedKey(presentation.key)}
+            onPress={() => setDismissedKey(dismissalKey)}
             sound="navigate"
             style={styles.secondaryButton}
             testID="app-update-dismiss"
@@ -268,7 +311,12 @@ export function AppUpdateGateBridge() {
             </Text>
           </PosPressable>
         ) : null}
-        <PosPressable
+        {downloading ? null : downloadFailed ? (
+          <PosPressable accessibilityRole="button" testID="app-update-download-retry"
+            style={styles.primaryButton} onPress={() => { void updates?.prepareSelectedUpdate(); }}>
+            <Text style={styles.primaryButtonText}>{copy["action.retry"]}</Text>
+          </PosPressable>
+        ) : <PosPressable
           accessibilityRole="button"
           disabled={working}
           onPress={performUpdate}
@@ -281,7 +329,7 @@ export function AppUpdateGateBridge() {
           <Text style={styles.primaryButtonText}>
             {copy[working ? "action.working" : actionKey]}
           </Text>
-        </PosPressable>
+        </PosPressable>}
       </View>
     </View>
   );
@@ -385,6 +433,10 @@ const styles = StyleSheet.create({
   },
   optionalCard: {
     maxWidth: 480,
+  },
+  downloadCard: {
+    paddingVertical: 8,
+    gap: 8,
   },
   recoveryAccessCard: {
     maxWidth: 420,

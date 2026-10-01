@@ -88,6 +88,7 @@ export type RecoveredPaymentBoundAction = Readonly<{
   provider: PaymentProvider;
   operation: PaymentOperation;
   amount: Money;
+  manualConfirmed?: boolean;
 }>;
 
 type RecoveryBase = Readonly<{
@@ -602,7 +603,7 @@ implements PersistedOrderDraftPort {
                    AND consumed.order_guid = candidate.order_guid
                    AND consumed.amount_cents = candidate.amount_cents
                    AND (
-                     (candidate.provider IN ('square', 'linkly-cloud')
+                     (candidate.provider IN ('square', 'linkly-cloud', 'manual-card')
                        AND consumed.method = 'card')
                      OR (candidate.provider = 'voucher'
                        AND consumed.method = 'voucher')
@@ -861,7 +862,11 @@ implements PersistedOrderDraftPort {
       const actionCount = integer(usage?.action_count, "draft action count");
       // 单个 binding 尚无 attempt 时，Abandoned 与 attempt INSERT 在同一排他事务序列化；
       // 旧异步流程之后会被 abandoned-draft 触发器拒绝，无法越过首次 provider 调用门。
-      const untouchedBoundAction = attemptCount === 0 && actionCount === 1 && unresolvedBoundAction !== null;
+      const untouchedBoundAction =
+        attemptCount === 0 &&
+        actionCount === 1 &&
+        unresolvedBoundAction !== null &&
+        unresolvedBoundAction.provider !== "manual-card";
       const resolvedHistory = attemptCount === actionCount && unresolvedBoundAction === null;
       if (
         tenderCount !== 0 ||
@@ -1528,7 +1533,7 @@ async function findBlockingRecoveryInTransaction(
                AND t.order_guid = p.order_guid
                AND t.amount_cents = p.amount_cents
                AND (
-                 (p.provider IN ('square', 'linkly-cloud') AND t.method = 'card')
+                 (p.provider IN ('square', 'linkly-cloud', 'manual-card') AND t.method = 'card')
                  OR (p.provider = 'voucher' AND t.method = 'voucher')
                )
            )
@@ -1749,7 +1754,7 @@ async function readBoundAction(
            AND tender.order_guid = attempt.order_guid
            AND tender.amount_cents = attempt.amount_cents
            AND (
-             (attempt.provider IN ('square', 'linkly-cloud') AND tender.method = 'card')
+             (attempt.provider IN ('square', 'linkly-cloud', 'manual-card') AND tender.method = 'card')
              OR (attempt.provider = 'voucher' AND tender.method = 'voucher')
            )
        ) AS matching_tender_count
@@ -1862,7 +1867,7 @@ function parseBoundActionSignature(
   value: string,
 ): Pick<
   RecoveredPaymentBoundAction,
-  "provider" | "operation" | "amount"
+  "provider" | "operation" | "amount" | "manualConfirmed"
 > {
   let decoded: unknown;
   try {
@@ -1870,12 +1875,22 @@ function parseBoundActionSignature(
   } catch {
     throw new Error("Payment action request signature is invalid JSON.");
   }
-  if (!Array.isArray(decoded) || decoded.length !== 4) {
+  if (!Array.isArray(decoded) || (decoded.length !== 4 && decoded.length !== 5)) {
     throw new Error("Payment action request signature shape is invalid.");
   }
   const [providerValue, operationValue, currency, amountValue] = decoded;
   const provider = paymentProvider(providerValue);
   const operation = paymentOperation(operationValue);
+  const manualConfirmed = decoded.length === 5 ? decoded[4] === "confirmed" : undefined;
+  if (
+    provider === "manual-card" &&
+    (decoded.length !== 5 || manualConfirmed !== true || operation !== "purchase")
+  ) {
+    throw new Error("Manual card payment action confirmation is invalid.");
+  }
+  if (provider !== "manual-card" && decoded.length !== 4) {
+    throw new Error("Payment action request signature shape is invalid.");
+  }
   if (
     currency !== "AUD" ||
     !Number.isSafeInteger(amountValue) ||
@@ -1890,6 +1905,7 @@ function parseBoundActionSignature(
     provider,
     operation,
     amount: createAud(Number(amountValue)),
+    ...(manualConfirmed !== undefined ? { manualConfirmed } : {}),
   };
 }
 
@@ -2145,7 +2161,8 @@ function paymentProvider(value: unknown): PaymentProvider {
   if (
     provider === "square" ||
     provider === "linkly-cloud" ||
-    provider === "voucher"
+    provider === "voucher" ||
+    provider === "manual-card"
   ) {
     return provider;
   }

@@ -180,6 +180,7 @@ test("Android APK 决策独立于 iOS OTA/App Store 分支", async () => {
       },
     },
     androidNative: {
+      async prepare() {},
       async getInstallPermissionStatus() {
         return "granted" as const;
       },
@@ -196,6 +197,7 @@ test("Android APK 决策独立于 iOS OTA/App Store 分支", async () => {
     safety: { getSafetySnapshot: () => safeSnapshot() },
   });
 
+  await orchestrator.prepareSelectedUpdate();
   assert.deepEqual(await orchestrator.performSelectedUpdate(), {
     action: "install-android-apk",
   });
@@ -214,7 +216,7 @@ test("Android APK 决策独立于 iOS OTA/App Store 分支", async () => {
   );
 });
 
-test("Android 授权设置与返回前台只查询策略，绝不自动重放 APK 传输", async () => {
+test("Android 返回前台可后台准备 APK，但授权设置与安装始终由用户触发", async () => {
   const events: string[] = [];
   const native = new FakeNative(androidRequired);
   const ota = new FakeOta(androidOtaRequired);
@@ -225,6 +227,7 @@ test("Android 授权设置与返回前台只查询策略，绝不自动重放 AP
     ...transitionDependencies(),
     safety: { getSafetySnapshot: () => safeSnapshot() },
     androidNative: {
+      async prepare() { events.push("download"); },
       async getInstallPermissionStatus() {
         events.push("permission");
         return "denied" as const;
@@ -243,7 +246,8 @@ test("Android 授权设置与返回前台只查询策略，绝不自动重放 AP
   await orchestrator.openAndroidInstallPermissionSettings();
   await orchestrator.refreshOnForeground();
 
-  assert.deepEqual(events, ["permission", "settings"]);
+  await orchestrator.prepareSelectedUpdate();
+  assert.deepEqual(events, ["permission", "settings", "download"]);
   assert.equal(native.refreshes, 1);
   assert.equal(ota.refreshes, 1);
 });
@@ -265,6 +269,7 @@ test("Android 可选择同平台 OTA，且不会调用 APK installer 或 App Sto
       },
     },
     androidNative: {
+      async prepare() {},
       async getInstallPermissionStatus() {
         return "granted" as const;
       },
@@ -278,6 +283,7 @@ test("Android 可选择同平台 OTA，且不会调用 APK installer 或 App Sto
 
   assert.equal(orchestrator.getPresentation().kind, "ota");
   assert.equal(orchestrator.getPresentation().platform, "Android");
+  await orchestrator.prepareSelectedUpdate();
   assert.deepEqual(await orchestrator.performSelectedUpdate(), {
     action: "ota",
     result: { state: "unavailable", reason: "not-available" },
@@ -468,6 +474,7 @@ test("安全快照 await 期间策略变化时 fail-closed，绝不使用已过�
     },
   });
 
+  await orchestrator.prepareSelectedUpdate();
   const action = orchestrator.performSelectedUpdate();
   native.setPolicy(
     Object.freeze({
@@ -503,6 +510,7 @@ test("原生 App Store handoff 完成前持续持有 transition lease", async ()
       open: () => handoff.promise,
     },
     androidNative: {
+      async prepare() {},
       async getInstallPermissionStatus() {
         return "granted" as const;
       },
@@ -516,6 +524,7 @@ test("原生 App Store handoff 完成前持续持有 transition lease", async ()
     },
   });
 
+  await orchestrator.prepareSelectedUpdate();
   const action = orchestrator.performSelectedUpdate();
   await Promise.resolve();
   await Promise.resolve();
@@ -568,6 +577,7 @@ test("OTA 使用冻结策略，并在 fetch 后 reload 前发现策略替换时�
       : { state: "rejected", reason: "selection-changed" };
   };
 
+  await orchestrator.prepareSelectedUpdate();
   assert.deepEqual(await orchestrator.performSelectedUpdate(), {
     action: "ota",
     result: {
@@ -608,6 +618,7 @@ test("OTA fetch 期间安全状态变坏时 reload 前再次核验并拒绝", as
       : { state: "rejected", reason: decision };
   };
 
+  await orchestrator.prepareSelectedUpdate();
   assert.deepEqual(await orchestrator.performSelectedUpdate(), {
     action: "ota",
     result: {
@@ -657,6 +668,9 @@ class FakeNative {
 }
 
 class FakeOta {
+  public async prepare() {
+    return { state: "ready" as const, reason: null };
+  }
   public refreshes = 0;
   public onApply:
     | ((
@@ -762,3 +776,105 @@ function deferred<T>(): Readonly<{
   });
   return { promise, resolve };
 }
+
+for (const kind of ["native", "ota"] as const) {
+  test(`${kind} 后台下载不持交易租约，完成前禁止安装，完成后才允许用户确认`, async () => {
+    const download = deferred<void>();
+    let downloads = 0;
+    let installs = 0;
+    const native = new FakeNative(kind === "native"
+      ? { ...androidRequired, state: "optional", required: false }
+      : { ...nativeEnabled, platform: "Android" });
+    const ota = new FakeOta(kind === "ota"
+      ? { ...androidOtaRequired, state: "optional", required: false }
+      : { state: "none", platform: "Android", policyVersion: "none" } as PosHandheldOtaUpdatePolicy);
+    const prepare = async () => { downloads++; await download.promise; };
+    ota.prepare = async () => { await prepare(); return { state: "ready", reason: null }; };
+    ota.onApply = async (_policy, beforeReload) => {
+      assert.equal(await beforeReload(), true);
+      installs++;
+      return { state: "reloaded", reason: null };
+    };
+    const transition = configuredTransition();
+    const orchestrator = new AppUpdateOrchestrator({
+      installedVersion: "1.0.0", native, ota, transition,
+      safety: { getSafetySnapshot: () => safeSnapshot() },
+      appStore: { async open() { throw new Error("Android cannot open App Store"); } },
+      androidNative: {
+        prepare,
+        async getInstallPermissionStatus() { return "granted"; },
+        async openInstallPermissionSettings() {},
+        async install() { installs++; return { launched: true, packageName: "com.hbweb.poshandheld", versionCode: 200 }; },
+      },
+    });
+    await orchestrator.refreshOnStartup();
+    const duplicate = orchestrator.prepareSelectedUpdate();
+    assert.equal(orchestrator.getPresentation().downloadState, "downloading");
+    assert.equal(transition.isTransitionActive(), false);
+    assert.equal(orchestrator.getGate().canStartNewTransaction, true);
+    assert.equal((await orchestrator.performSelectedUpdate()).action, "blocked");
+    assert.equal(installs, 0);
+    download.resolve();
+    await duplicate;
+    assert.equal(orchestrator.getPresentation().downloadState, "ready");
+    await orchestrator.refreshOnForeground();
+    assert.equal(downloads, 1);
+    await orchestrator.performSelectedUpdate();
+    assert.equal(installs, 1);
+    assert.equal(transition.isTransitionActive(), false);
+  });
+}
+
+test("下载失败可重试，同版本元数据变化必须重新下载", async () => {
+  const native = new FakeNative({ ...androidRequired, state: "optional", required: false });
+  const ota = new FakeOta({ ...otaOptional, platform: "Android" });
+  let downloads = 0;
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0", native, ota, ...transitionDependencies(),
+    safety: { getSafetySnapshot: () => safeSnapshot() },
+    androidNative: {
+      async prepare() { if (++downloads === 1) throw new Error("offline"); },
+      async getInstallPermissionStatus() { return "granted"; },
+      async openInstallPermissionSettings() {},
+      async install() { throw new Error("must not install"); },
+    },
+  });
+  await orchestrator.prepareSelectedUpdate();
+  assert.equal(orchestrator.getPresentation().downloadState, "failed");
+  await orchestrator.prepareSelectedUpdate();
+  assert.equal(orchestrator.getPresentation().downloadState, "ready");
+  const previousTargetKey = orchestrator.getPresentation().downloadTargetKey;
+  assert.ok(previousTargetKey);
+  native.setPolicy({ ...native.getPolicy()!, sha256: "c".repeat(64) });
+  assert.equal(orchestrator.getPresentation().downloadState, "idle");
+  assert.notEqual(orchestrator.getPresentation().downloadTargetKey, previousTargetKey);
+  assert.equal((await orchestrator.performSelectedUpdate()).action, "blocked");
+  await orchestrator.prepareSelectedUpdate();
+  assert.equal(downloads, 3);
+  await assert.rejects(orchestrator.performSelectedUpdate(), /must not install/);
+  assert.equal(orchestrator.getPresentation().downloadState, "failed");
+  assert.equal((await orchestrator.performSelectedUpdate()).action, "blocked");
+  assert.equal(downloads, 3, "安装失败后先展示重试，不能再次点击安装就隐式下载");
+});
+
+test("用户确认时重新检查策略，已撤回的下载目标不能安装", async () => {
+  const native = new FakeNative(androidRequired);
+  const ota = new FakeOta(androidOtaRequired);
+  let installs = 0;
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0", native, ota, ...transitionDependencies(),
+    safety: { getSafetySnapshot: () => safeSnapshot() },
+    androidNative: {
+      async prepare() {},
+      async getInstallPermissionStatus() { return "granted"; },
+      async openInstallPermissionSettings() {},
+      async install() { installs++; return { launched: true, packageName: "com.hbweb.poshandheld", versionCode: 200 }; },
+    },
+  });
+  await orchestrator.prepareSelectedUpdate();
+  native.refreshOnForeground = async () => {
+    native.setPolicy({ ...nativeEnabled, platform: "Android" });
+  };
+  assert.deepEqual(await orchestrator.performSelectedUpdate(), { action: "blocked", reason: "selection-changed" });
+  assert.equal(installs, 0);
+});

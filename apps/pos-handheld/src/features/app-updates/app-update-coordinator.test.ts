@@ -6,9 +6,10 @@ import {
   decideAppUpdateRestart,
 } from "./app-update-coordinator";
 
-import type {
-  PosHandheldUpdatePolicy,
-  PosHandheldUpdatePolicyStorePort,
+import {
+  normalizePosHandheldUpdatePolicy,
+  type PosHandheldUpdatePolicy,
+  type PosHandheldUpdatePolicyStorePort,
 } from "@/core/contracts/app-updates";
 
 const metadata = Object.freeze({
@@ -51,6 +52,36 @@ class MemoryPolicyStore implements PosHandheldUpdatePolicyStorePort {
     return policy;
   }
 }
+
+test("开发包忽略远端和缓存升级，但仍保留设备交易权限", async () => {
+  for (const enabled of [true, false]) {
+    for (const offline of [true, false]) {
+      const policy: PosHandheldUpdatePolicy = {
+        ...enabledPolicy, enabled, state: "required", required: true,
+      };
+      const store = new MemoryPolicyStore(policy);
+      const coordinator = new AppUpdateCoordinator({
+        updatesEnabled: false,
+        metadata,
+        policyStore: store,
+        remote: { async getPolicy() {
+          if (offline) throw new Error("offline");
+          return policy;
+        } },
+      });
+      for (const refresh of ["refreshOnStartup", "refreshOnForeground", "refreshOnNetworkAvailable"] as const) {
+        await coordinator[refresh]();
+        const selected = coordinator.getPolicy();
+        assert.equal(selected?.state, "none");
+        assert.equal(selected?.downloadUrl, null);
+        assert.equal(selected?.required, false);
+        assert.deepEqual(normalizePosHandheldUpdatePolicy(selected), selected);
+        assert.equal(coordinator.getGate().canStartNewTransaction, enabled);
+        assert.deepEqual(await store.get(), policy);
+      }
+    }
+  }
+});
 
 test("启动、前台和联网刷新共享 single-flight，并向订阅者发布可开始交易的门禁", async () => {
   let calls = 0;

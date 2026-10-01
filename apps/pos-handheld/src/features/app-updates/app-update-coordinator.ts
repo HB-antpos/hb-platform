@@ -53,6 +53,7 @@ export interface AppUpdateRestartPort {
 }
 
 export type AppUpdateCoordinatorOptions = Readonly<{
+  updatesEnabled?: boolean;
   metadata: PosHandheldUpdateClientMetadata;
   policyStore: PosHandheldUpdatePolicyStorePort;
   remote: PosHandheldUpdatePolicyRemotePort;
@@ -183,6 +184,28 @@ export class AppUpdateCoordinator {
   }
 
   private apply(policy: PosHandheldUpdatePolicy | null): void {
+    // 开发包不安装正式发布包；仍读取并保留认证响应中的设备交易权限。
+    if (policy && this.options.updatesEnabled === false) {
+      policy = Object.freeze({
+        enabled: policy.enabled,
+        platform: policy.platform,
+        state: "none",
+        policyVersion: "none",
+        required: false,
+        latestVersion: null,
+        latestBuild: null,
+        minimumSupportedVersion: null,
+        distribution: null,
+        downloadUrl: null,
+        fileSize: null,
+        sha256: null,
+        packageName: null,
+        signingCertificateSha256: null,
+        bundleIdentifier: null,
+        appStoreId: null,
+        releaseMessage: null,
+      });
+    }
     this.policy = policy;
     this.gate = deriveNewTransactionGate(policy);
     for (const listener of this.listeners) {

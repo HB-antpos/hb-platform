@@ -2,6 +2,7 @@ import type { AppUpdateRefreshReason } from "./app-update-coordinator";
 import type {
   ExpoOtaBeforeReloadDecision,
   ExpoOtaUpdateApplyResult,
+  ExpoOtaUpdatePrepareResult,
 } from "./expo-ota-update-port";
 import type {
   PosHandheldOtaUpdateClientMetadata,
@@ -29,6 +30,7 @@ export type OtaUpdateCoordinatorOptions = Readonly<{
   policyStore: PosHandheldOtaUpdatePolicyStorePort;
   remote: PosHandheldOtaUpdatePolicyRemotePort;
   installer?: Readonly<{
+    prepare?(policy: PosHandheldOtaUpdatePolicy): Promise<ExpoOtaUpdatePrepareResult>;
     apply(
       policy: PosHandheldOtaUpdatePolicy,
       beforeReload?: () =>
@@ -133,6 +135,29 @@ export class OtaUpdateCoordinator {
     });
     this.installInFlight = operation;
     return operation;
+  }
+
+  public prepare(
+    policy: PosHandheldOtaUpdatePolicy,
+  ): Promise<ExpoOtaUpdatePrepareResult> {
+    if (!this.isEnabled()) {
+      return Promise.resolve(
+        Object.freeze({
+          state: "unavailable",
+          reason: "updates-disabled",
+        }),
+      );
+    }
+    if (!this.options.installer?.prepare) {
+      return Promise.resolve(
+        Object.freeze({
+          state: "unavailable",
+          reason: "updates-disabled",
+        }),
+      );
+    }
+    const selected = this.normalizeForPlatform(policy);
+    return this.options.installer.prepare(selected);
   }
 
   private async applyOnce(

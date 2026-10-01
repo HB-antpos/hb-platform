@@ -13,6 +13,7 @@ import {
   type DownloadedAndroidApk,
   type InstallVerifiedApkRequest,
   type InstallVerifiedApkResult,
+  type VerifyDownloadedApkRequest,
 } from "./android-native-update-adapter";
 
 export type HbAppInstallerNativeContract =
@@ -57,6 +58,10 @@ export class ExpoHbAppInstallerBridge implements AndroidAppInstallerPort {
     request: InstallVerifiedApkRequest,
   ): Promise<InstallVerifiedApkResult> {
     return (await this.load()).installVerifiedApk(request);
+  }
+
+  public async verifyDownloadedApk(request: VerifyDownloadedApkRequest): Promise<void> {
+    await (await this.load()).verifyDownloadedApk(request);
   }
 
   private load(): Promise<HbAppInstallerNativeContract> {

@@ -31,6 +31,7 @@ import {
   type SettingsSnapshot,
 } from "@/features/settings/settings-presenter";
 import type { SettingsRuntimeFactory } from "@/features/settings/settings-runtime";
+import type { PaymentMethodSettings } from "@/features/settings/payment-method-settings";
 import type { SettingsSquareSetupPort } from "@hb/pos-domain/features/settings/settings-square-setup";
 
 type TerminalScope = Readonly<{
@@ -121,6 +122,10 @@ export type ProductionSettingsCompositionInput = Readonly<{
     ): Promise<void>;
     save(input: SettingsPaymentSettingsInput): Promise<void>;
   }>;
+  paymentMethods?: Readonly<{
+    load(): Promise<PaymentMethodSettings>;
+    save(settings: PaymentMethodSettings): Promise<void>;
+  }>;
   paymentConfigurationTransition: Readonly<{
     run<T>(operation: () => Promise<T>): Promise<T>;
   }>;
@@ -200,12 +205,16 @@ export function createProductionSettingsComposition(
         stage: SettingsSnapshotStage,
         operation: () => Promise<T>,
       ): Promise<T> => readSnapshotStage(input, stage, operation);
-      const [device, catalog, printer, printerStatus] =
+      const [device, catalog, printer, printerStatus, paymentMethods] =
         await Promise.all([
           readStage("device", () => input.readDevicePresentation()),
           readStage("catalog", () => input.catalog.getActiveMetadata()),
           readStage("receipt-settings", () => input.receiptSettings.get()),
           readStage("printer-status", () => input.printer.getStatus()),
+          readStage("payment-methods", () =>
+            input.paymentMethods?.load() ??
+              Promise.resolve({ useManualCard: false }),
+          ),
         ]);
       throwIfAborted(signal);
       try {
@@ -236,6 +245,7 @@ export function createProductionSettingsComposition(
         },
         paymentProvider:
           input.paymentConfiguration.current?.provider ?? null,
+        paymentMethods,
         printer,
         square: {
           ...input.paymentConfiguration.availability.square,
@@ -279,6 +289,7 @@ export function createProductionSettingsComposition(
       save: (configuration) =>
         input.paymentConfiguration.save(configuration),
     },
+    ...(input.paymentMethods ? { paymentMethods: input.paymentMethods } : {}),
     paymentConfigurationTransition: input.paymentConfigurationTransition,
     ...(input.linklySetup
       ? {
