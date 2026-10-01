@@ -29,7 +29,12 @@
       "schedule": "排班",
       "holidays": "假期",
       "leave": "请假",
-      "punches": "打卡记录"
+      "punches": "打卡记录",
+      "punchSelf": "打卡",
+      "mySchedule": "排班",
+      "myRequests": "申请",
+      "approvals": "审核",
+      "approvalsWithCount": "审核 {{count}}"
     }
   },
   "today": {
@@ -246,7 +251,20 @@
       "outOfRange": "批准加班必须在 0 到候选分钟之间。",
       "invalidIncrement": "批准加班必须为 15 分钟倍数。",
       "remarkRequired": "下调或拒绝加班时必须填写审核备注。"
-    }
+    },
+    "filterAll": "全部",
+    "filterA11y": "按审核类型筛选",
+    "summary": {
+      "PunchAdjustment": "补卡{{punchType}} {{time}}",
+      "Overtime": "加班 {{minutes}} 分钟",
+      "Leave": "{{leaveType}} {{start}}–{{end}}",
+      "Punch": "打卡异常 · {{punchType}}"
+    },
+    "shortDate": "{{month}}/{{day}}",
+    "quickMinutes": "{{minutes}} 分",
+    "addRemark": "添加备注",
+    "fixMissingClockOut": "补录下班",
+    "needsFix": "待补录"
   },
   "holidayManagement": {
     "noStore": "请先选择分店",
@@ -267,7 +285,14 @@
       "Open": "营业",
       "Closed": "休业",
       "Partial": "部分营业"
-    }
+    },
+    "syncPanelTitle": "{{store}} 公共假期",
+    "syncHint": "按分店所在州（NSW / QLD）同步官方公共假期",
+    "editTitle": "编辑假期",
+    "regularHours": "正常营业时间",
+    "monthGroup": "{{month}} 月",
+    "monthGroupWithYear": "{{year}} 年 {{month}} 月",
+    "unknownMonth": "其他日期"
   },
   "leaveManagement": {
     "empty": "暂无病假年假待审核事项",
@@ -296,7 +321,10 @@
       "title": "拍照上传医嘱",
       "permissionTitle": "需要相机权限",
       "permissionDescription": "允许相机权限后即可拍照并上传病假医嘱照片。"
-    }
+    },
+    "registerAction": "登记请假",
+    "registerHint": "代员工登记年假或病假（病假需拍医嘱）",
+    "hideRegister": "收起"
   },
   "scheduleManagement": {
     "employeeColumn": "分店/员工",
@@ -559,5 +587,50 @@
     "save": "保存修改",
     "saved": "打卡已修改",
     "loadFailed": "打卡记录加载失败"
+  },
+  "myAttendance": {
+    "today": "今天",
+    "done": "已完成",
+    "availableAt": "可上班 {{time}}",
+    "unfilled": "未填可上班",
+    "rest": "休息",
+    "weekHours": "本周排班 {{hours}} 小时",
+    "fillAvailability": "填写可上班时间",
+    "availabilitySheet": {
+      "earlier": "{{label}}提前 30 分钟",
+      "later": "{{label}}推后 30 分钟",
+      "remove": "删除这天",
+      "willSubmit": "将提交",
+      "submit_one": "提交 {{count}} 天",
+      "submit_other": "提交 {{count}} 天"
+    },
+    "requests": {
+      "adjustmentTitle": "补卡 · {{punchType}} {{time}}",
+      "leaveTitle": "{{leaveType}} · {{range}}",
+      "applyLeave": "请假",
+      "pending": "进行中",
+      "done": "已处理",
+      "empty": "还没有补卡或请假申请",
+      "reviewedBy": "{{name}} 已处理",
+      "reviewedWithRemark": "{{name}}：{{remark}}",
+      "withdraw": "撤回",
+      "status": {
+        "pending": "待审核",
+        "approved": "已生效",
+        "rejected": "已驳回",
+        "cancelled": "已撤回"
+      },
+      "days_one": "{{count}} 天",
+      "days_other": "{{count}} 天"
+    },
+    "leaveSheet": {
+      "previousDay": "{{label}}前一天",
+      "nextDay": "{{label}}后一天",
+      "submitted": "请假申请已提交",
+      "invalidRange": "结束日期不能早于开始日期",
+      "sickHint": "病假需要向店长提交医嘱，由店长登记附件。",
+      "submit_one": "提交 {{count}} 天",
+      "submit_other": "提交 {{count}} 天"
+    }
   }
 }

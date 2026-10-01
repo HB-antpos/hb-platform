@@ -176,6 +176,8 @@ export interface AttendancePunchAdjustment {
   isDirectAdjustment?: boolean;
   submittedAt?: string;
   reviewedAt?: string;
+  reviewedByName?: string;
+  reviewRemark?: string;
 }
 
 export interface AttendanceAdjustmentPreview {
@@ -377,6 +379,9 @@ export interface AttendanceLeaveRequest {
   attachmentUrl?: string;
   status: AttendanceApprovalStatus;
   submittedAt?: string;
+  reviewedAt?: string;
+  reviewedByName?: string;
+  reviewRemark?: string;
 }
 
 export interface AttendanceLeaveRequestPayload {

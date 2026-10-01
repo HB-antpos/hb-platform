@@ -343,8 +343,21 @@ namespace BlazorApp.Shared.DTOs
         public bool IsManagerSelfDirect { get; set; }
         public string RequestedByUserGuid { get; set; } = string.Empty;
         public string? ReviewedByUserGuid { get; set; }
+        /// <summary>审核人显示名，仅「我的补卡」列表填充。</summary>
+        public string? ReviewedByName { get; set; }
+        /// <summary>审核备注（驳回原因），来自对应审核记录，仅「我的补卡」列表填充。</summary>
+        public string? ReviewRemark { get; set; }
         public DateTime? ReviewedAt { get; set; }
         public DateTime CreatedAt { get; set; }
+    }
+
+    /// <summary>考勤用的本店员工精简信息：排班与登记请假只需要身份和用工类型。</summary>
+    public class AttendanceEmployeeDto
+    {
+        public string UserGuid { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string? FullName { get; set; }
+        public string? EmploymentType { get; set; }
     }
 
     public class AttendancePunchAdjustmentPreviewDto
@@ -478,6 +491,8 @@ namespace BlazorApp.Shared.DTOs
         public string? AttachmentUrl { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? ReviewedBy { get; set; }
+        /// <summary>审核人显示名，仅「我的请假」列表填充。</summary>
+        public string? ReviewedByName { get; set; }
         public DateTime? ReviewedAt { get; set; }
         public string? ReviewRemark { get; set; }
     }

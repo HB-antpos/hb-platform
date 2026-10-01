@@ -323,7 +323,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewAttendanceSchedule =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
-    hasPermission(P.Attendance.ScheduleViewStore)
+    hasPermission(P.Attendance.ScheduleViewStore) ||
+    // 与后端权限包含关系一致：能编辑管理分店排班即可查看排班
+    hasPermission(P.Attendance.ScheduleEditManagedStore)
   const canEditAttendanceSchedule =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||

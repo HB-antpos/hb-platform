@@ -178,6 +178,12 @@ namespace BlazorApp.Api.Controllers.React
             [FromBody] DirectUploadRequest request
         ) => Ok(await _service.GetLeaveAttachmentUploadSignatureAsync(request));
 
+        // 页面级可见性由服务层按任一考勤管理权限判断，见 GetStoreEmployeesAsync。
+        [HttpGet("employees")]
+        [Authorize]
+        public async Task<IActionResult> GetStoreEmployees([FromQuery] string? storeCode) =>
+            Ok(await _service.GetStoreEmployeesAsync(storeCode));
+
         [HttpGet("availability")]
         [Authorize(Policy = Permissions.Attendance.Availability.ViewManagedStore)]
         public async Task<IActionResult> GetAvailability([FromQuery] AttendanceAvailabilityQueryDto query) =>

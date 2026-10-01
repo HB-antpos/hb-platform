@@ -1,4 +1,5 @@
 import { apiClient } from "@/shared/api/client";
+import type { StoreUserListItem } from "@/modules/users/types";
 import {
   normalizeAttendancePunchMutationResult,
   normalizeAttendanceQrResolveResult,
@@ -333,6 +334,9 @@ function normalizeLeaveRequest(raw: ApiRecord): AttendanceLeaveRequest {
     attachmentUrl: asOptionalString(pick(raw, "attachmentUrl", "AttachmentUrl")),
     status: asString(pick(raw, "status", "Status"), "Pending"),
     submittedAt: asOptionalString(pick(raw, "submittedAt", "SubmittedAt", "createdAt", "CreatedAt")),
+    reviewedAt: asOptionalString(pick(raw, "reviewedAt", "ReviewedAt")),
+    reviewedByName: asOptionalString(pick(raw, "reviewedByName", "ReviewedByName")),
+    reviewRemark: asOptionalString(pick(raw, "reviewRemark", "ReviewRemark")),
   };
 }
 
@@ -649,6 +653,23 @@ export async function createMyAttendancePunchAdjustment(
   );
   const rows = getArray(response.data);
   return normalizeAttendancePunchAdjustment(rows[0] ?? response.data);
+}
+
+/**
+ * 考勤用的本店员工列表（排班、登记请假）。后端只返回身份与用工类型，
+ * 这里补齐为 StoreUserListItem 形状，便于沿用现有组件。
+ */
+export async function getAttendanceEmployees(storeCode: string): Promise<StoreUserListItem[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/employees`, { params: { storeCode } });
+  return getArray(response.data).map((raw) => ({
+    userGUID: asString(pick(raw, "userGuid", "UserGuid", "userGUID")),
+    username: asString(pick(raw, "username", "Username")),
+    fullName: asOptionalString(pick(raw, "fullName", "FullName")),
+    employmentType: asOptionalString(pick(raw, "employmentType", "EmploymentType")),
+    status: 1,
+    storeCode,
+    roleNames: [],
+  }));
 }
 
 /** 店长查看某天管理分店的打卡记录（含班段打卡），只保留生效排班。 */

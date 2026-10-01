@@ -1576,6 +1576,105 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("ADJUSTMENT_WINDOW_EXPIRED", result.ErrorCode);
         }
 
+        [Fact]
+        public void ScheduleViewStore_IsImpliedByEditManagedStore()
+        {
+            // 能编辑排班就能看排班；反向不成立，查看权限不能借此获得编辑权。
+            Assert.Contains(
+                Permissions.Attendance.Schedule.EditManagedStore,
+                Permissions.GetEquivalentPermissionCodes(Permissions.Attendance.Schedule.ViewStore));
+            Assert.DoesNotContain(
+                Permissions.Attendance.Schedule.ViewStore,
+                Permissions.GetEquivalentPermissionCodes(Permissions.Attendance.Schedule.EditManagedStore));
+        }
+
+        [Fact]
+        public async Task GetStoreEmployeesAsync_ReturnsStoreStaffWithoutContactFields()
+        {
+            await SeedStoreScopeAsync();
+            await _db.Insertable(new Role
+            {
+                RoleGUID = "store-staff-role",
+                RoleName = "StoreStaff",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new UserRole
+            {
+                UserRoleGUID = "staff-user-store-staff",
+                UserGUID = "staff-user",
+                RoleGUID = "store-staff-role",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await SeedEmployeeProfileAsync("staff-user", EmployeeType.PartTime);
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetStoreEmployeesAsync("BRI");
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            var employee = Assert.Single(result.Data!);
+            Assert.Equal("staff-user", employee.UserGuid);
+            Assert.Equal("partTime", employee.EmploymentType);
+        }
+
+        [Fact]
+        public async Task GetStoreEmployeesAsync_WithoutAnyAttendanceManagementPermission_IsForbidden()
+        {
+            await SeedStoreScopeAsync();
+            foreach (var permission in new[]
+            {
+                Permissions.Attendance.Schedule.ViewStore,
+                Permissions.Attendance.Schedule.EditManagedStore,
+                Permissions.Attendance.Leave.ViewManagedStore,
+                Permissions.Attendance.Leave.ReviewManagedStore,
+                Permissions.Attendance.Admin.View,
+            })
+            {
+                _deniedPermissions.Add(permission);
+            }
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetStoreEmployeesAsync("BRI");
+
+            Assert.False(result.Success);
+            Assert.Equal("FORBIDDEN", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task GetMyPunchAdjustmentsAsync_RejectedAdjustment_ReturnsRemarkAndReviewerName()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await _db.Updateable<User>()
+                .SetColumns(item => item.FullName == "店长 Sean")
+                .Where(item => item.UserGUID == "manager-user")
+                .ExecuteCommandAsync();
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 8, 0, 0, DateTimeKind.Utc));
+            var created = await SubmitPunchAdjustmentAfterPreviewAsync(
+                CreateService("staff-user", "staff", "StoreStaff"),
+                new CreateAttendancePunchAdjustmentDto
+                {
+                    StoreCode = "BRI",
+                    ScheduleGuid = "schedule-1",
+                    PunchType = "ClockIn",
+                    RequestedPunchTimeLocal = new DateTime(2026, 5, 18, 9, 0, 0),
+                    Reason = "忘记打卡",
+                });
+            Assert.True(created.Success, $"{created.ErrorCode}: {created.Message}");
+            var approval = await _db.Queryable<AttendanceApproval>()
+                .FirstAsync(item => item.SourceGuid == created.Data!.AdjustmentGuid);
+            var rejected = await CreateService("manager-user", "manager", "StoreManager")
+                .RejectAsync(approval.ApprovalGuid, new ReviewAttendanceApprovalDto { ReviewRemark = "监控显示 9:31 到店" });
+            Assert.True(rejected.Success, $"{rejected.ErrorCode}: {rejected.Message}");
+
+            var mine = await CreateService("staff-user", "staff", "StoreStaff").GetMyPunchAdjustmentsAsync();
+
+            var item = Assert.Single(mine.Data!);
+            Assert.Equal("Rejected", item.Status);
+            Assert.Equal("监控显示 9:31 到店", item.ReviewRemark);
+            Assert.Equal("店长 Sean", item.ReviewedByName);
+        }
+
         [Theory]
         // 2026-05-18 是周一：周一、周二可改上周一（5-11）起，周三起只能改本周。
         [InlineData("2026-05-18", "2026-05-11", true)]
