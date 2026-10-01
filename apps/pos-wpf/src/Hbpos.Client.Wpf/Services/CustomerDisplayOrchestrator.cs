@@ -17,6 +17,13 @@ public interface ICustomerDisplayOrchestrator
         remove { }
     }
 
+    /// <summary>客显窗口上点了互换屏幕按钮。</summary>
+    event EventHandler? SwapScreensRequested
+    {
+        add { }
+        remove { }
+    }
+
     void LoadFromCart(
         CustomerDisplayViewModel customerDisplay,
         PosSessionState session,
@@ -117,6 +124,12 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
     {
         add => customerDisplayWindowService.FullscreenRequested += value;
         remove => customerDisplayWindowService.FullscreenRequested -= value;
+    }
+
+    public event EventHandler? SwapScreensRequested
+    {
+        add => customerDisplayWindowService.SwapScreensRequested += value;
+        remove => customerDisplayWindowService.SwapScreensRequested -= value;
     }
 
     public void LoadFromCart(

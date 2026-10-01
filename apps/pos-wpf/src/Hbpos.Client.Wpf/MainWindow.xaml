@@ -328,18 +328,6 @@
                            Panel.ZIndex="1" />
 
                 <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center" Panel.ZIndex="2">
-                    <!-- 主窗口与客显互换屏幕：客显打开时才显示，与客显按钮同一权限。 -->
-                    <Button Command="{Binding SwapCustomerDisplayScreensCommand}"
-                            Style="{StaticResource HeaderUtilityButtonStyle}"
-                            Width="34"
-                            Padding="0"
-                            Margin="0,0,2,0"
-                            Visibility="{Binding IsCustomerDisplayOpen, Converter={StaticResource BoolToVis}}"
-                            ToolTip="{loc:Loc shell.swapCustomerDisplayScreens}"
-                            AutomationProperties.AutomationId="SwapCustomerDisplayScreensButton"
-                            AutomationProperties.Name="{loc:Loc shell.swapCustomerDisplayScreens}">
-                        <materialDesign:PackIcon Kind="SwapHorizontal" Width="18" Height="18" />
-                    </Button>
                     <Button Command="{Binding ToggleCustomerDisplayWindowCommand}"
                             Style="{StaticResource CustomerDisplayModeIconButtonStyle}"
                             ToolTip="{loc:Loc shell.customerDisplayWindow}">

@@ -4774,6 +4774,25 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task CustomerDisplaySwapScreensRequest_goes_through_customer_display_permission()
+    {
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService();
+        var cashierContext = new CashierSessionContext();
+        cashierContext.SetCurrent(CreateCashierSession(Permissions.PosTerminal.Sales.AddItem));
+        var viewModel = CreateAuthorizedMainViewModel(
+            customerDisplayWindow,
+            cashierSessionContext: cashierContext,
+            enforceCashierPermissions: true);
+
+        customerDisplayWindow.RaiseSwapScreensRequested();
+        await (viewModel.SwapCustomerDisplayScreensCommand.ExecutionTask ?? Task.CompletedTask);
+
+        Assert.Equal(0, customerDisplayWindow.SwapCallCount);
+        Assert.False(cashierContext.RequirePermission(Permissions.PosTerminal.CustomerDisplay.Manage, out var deniedMessage));
+        Assert.Equal(deniedMessage, viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task ToggleCustomerDisplayWindow_CyclesClosedNormalFullscreenClosed()
     {
         var customerDisplayWindow = new FakeCustomerDisplayWindowService();
@@ -9719,6 +9738,10 @@ public sealed class MainViewModelScannerTests
         public event EventHandler? FullscreenRequested;
 
         public void RaiseFullscreenRequested() => FullscreenRequested?.Invoke(this, EventArgs.Empty);
+
+        public event EventHandler? SwapScreensRequested;
+
+        public void RaiseSwapScreensRequested() => SwapScreensRequested?.Invoke(this, EventArgs.Empty);
 
         public int SwapCallCount { get; private set; }
 

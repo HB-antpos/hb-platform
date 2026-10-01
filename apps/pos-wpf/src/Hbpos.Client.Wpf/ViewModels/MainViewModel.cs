@@ -613,6 +613,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _localization.CultureChanged += OnCultureChanged;
         _customerDisplayOrchestrator.Closed += OnCustomerDisplayClosed;
         _customerDisplayOrchestrator.FullscreenRequested += OnCustomerDisplayFullscreenRequested;
+        _customerDisplayOrchestrator.SwapScreensRequested += OnCustomerDisplaySwapScreensRequested;
         _clockTimer.Tick += OnClockTimerTick;
         _connectivityTimer.Tick += OnConnectivityTimerTick;
         _catalogDownloadHideTimer.Tick += OnCatalogDownloadHideTimerTick;
@@ -1066,6 +1067,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _localization.CultureChanged -= OnCultureChanged;
         _customerDisplayOrchestrator.Closed -= OnCustomerDisplayClosed;
         _customerDisplayOrchestrator.FullscreenRequested -= OnCustomerDisplayFullscreenRequested;
+        _customerDisplayOrchestrator.SwapScreensRequested -= OnCustomerDisplaySwapScreensRequested;
         if (_operationAuthorizationService is not null)
         {
             _operationAuthorizationService.RevokeAll();
@@ -2991,6 +2993,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (ShowCustomerDisplayFullscreenCommand.CanExecute(null))
         {
             ShowCustomerDisplayFullscreenCommand.Execute(null);
+        }
+    }
+
+    private void OnCustomerDisplaySwapScreensRequested(object? sender, EventArgs e)
+    {
+        // 客显上的互换按钮走同一条命令：先过客显管理权限，再互换并记住主窗口所在屏。
+        if (SwapCustomerDisplayScreensCommand.CanExecute(null))
+        {
+            SwapCustomerDisplayScreensCommand.Execute(null);
         }
     }
 

@@ -17,6 +17,46 @@
         FontFamily="{StaticResource PosFontFamily}"
         Background="{StaticResource PosCustomerDisplayBackgroundBrush}">
     <Window.Resources>
+        <Style x:Key="CustomerDisplayTitleBarButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource TitleBarButtonStyle}">
+            <Setter Property="Foreground" Value="{StaticResource PosCustomerDisplayTextBrush}" />
+        </Style>
+        <!-- 全屏时常显在右上角的互换按钮：半透明深底，与促销区右下角终端名徽标同一风格。 -->
+        <Style x:Key="CustomerDisplayCornerButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="#B309111F" />
+            <Setter Property="BorderBrush" Value="{StaticResource PosCustomerDisplayDividerBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource PosCustomerDisplayTextBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextBlock.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Opacity" Value="0.88" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Opacity" Value="0.72" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="CustomerDisplayTitleBarCloseButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource TitleBarCloseButtonStyle}">
@@ -47,6 +87,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Text="{loc:Loc CustomerDisplay}"
@@ -56,6 +97,17 @@
                            VerticalAlignment="Center" />
 
                 <Button Grid.Column="1"
+                        Margin="0,0,4,0"
+                        Click="SwapScreensButton_Click"
+                        Style="{StaticResource CustomerDisplayTitleBarButtonStyle}"
+                        ToolTip="{loc:Loc shell.swapCustomerDisplayScreens}"
+                        AutomationProperties.AutomationId="CustomerDisplayTitleBarSwapScreensButton"
+                        AutomationProperties.Name="{loc:Loc shell.swapCustomerDisplayScreens}"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <materialDesign:PackIcon Kind="SwapHorizontal" Width="18" Height="18" />
+                </Button>
+
+                <Button Grid.Column="2"
                         Click="CloseButton_Click"
                         Style="{StaticResource CustomerDisplayTitleBarCloseButtonStyle}"
                         ToolTip="{loc:Loc shell.window.close}"
@@ -66,5 +118,20 @@
         </Border>
 
         <views:CustomerDisplayView x:Name="CustomerDisplayContent" Grid.Row="1" />
+
+        <!-- 全屏没有标题栏：互换按钮常显在右上角；窗口模式由 SetTitleBarVisible 收起，改用标题栏按钮。 -->
+        <Button x:Name="FullscreenSwapScreensButton"
+                Grid.Row="1"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,16,16,0"
+                Visibility="Collapsed"
+                Click="SwapScreensButton_Click"
+                Style="{StaticResource CustomerDisplayCornerButtonStyle}"
+                ToolTip="{loc:Loc shell.swapCustomerDisplayScreens}"
+                AutomationProperties.AutomationId="CustomerDisplayFullscreenSwapScreensButton"
+                AutomationProperties.Name="{loc:Loc shell.swapCustomerDisplayScreens}">
+            <materialDesign:PackIcon Kind="SwapHorizontal" Width="20" Height="20" />
+        </Button>
     </Grid>
 </Window>

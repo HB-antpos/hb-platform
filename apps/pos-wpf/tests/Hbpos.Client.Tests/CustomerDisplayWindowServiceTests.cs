@@ -70,6 +70,45 @@ public sealed class CustomerDisplayWindowServiceTests
         Assert.Equal(0, raised);
     }
 
+    [Theory]
+    [InlineData(CustomerDisplayWindowMode.Normal, true)]
+    [InlineData(CustomerDisplayWindowMode.Fullscreen, true)]
+    [InlineData(CustomerDisplayWindowMode.Closed, false)]
+    public void Swap_screens_request_is_forwarded_in_normal_and_fullscreen(CustomerDisplayWindowMode mode, bool expected)
+    {
+        Assert.Equal(expected, CustomerDisplayWindowService.ShouldForwardSwapScreensRequest(mode));
+    }
+
+    [Fact]
+    public void Late_swap_screens_request_after_close_is_ignored()
+    {
+        var service = new CustomerDisplayWindowService(new DeterministicDisplayTopologyService());
+        var raised = 0;
+        service.SwapScreensRequested += (_, _) => raised++;
+
+        service.OnSwapScreensRequested();
+
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
+    public void Swap_screens_button_lives_in_customer_display_window_not_main_window()
+    {
+        var wpfRoot = Path.Combine(FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf");
+        var customerXaml = File.ReadAllText(Path.Combine(wpfRoot, "Views", "Windows", "CustomerDisplayWindow.xaml"));
+        var customerCodeBehind = File.ReadAllText(Path.Combine(wpfRoot, "Views", "Windows", "CustomerDisplayWindow.xaml.cs"));
+        var mainXaml = File.ReadAllText(Path.Combine(wpfRoot, "MainWindow.xaml"));
+
+        // 窗口模式在标题栏、全屏在右上角常显，两处共用同一个点击处理。
+        Assert.Equal(2, customerXaml.Split("Click=\"SwapScreensButton_Click\"").Length - 1);
+        Assert.Contains("x:Name=\"FullscreenSwapScreensButton\"", customerXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "FullscreenSwapScreensButton.Visibility = isVisible ? Visibility.Collapsed : Visibility.Visible;",
+            customerCodeBehind,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("SwapCustomerDisplayScreensCommand", mainXaml, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Title_bar_double_click_requests_fullscreen_instead_of_maximizing_to_work_area()
     {
