@@ -613,8 +613,9 @@ public sealed class DailyCloseViewModelTests
     public async Task Save_and_reprint_record_daily_close_operation_audits()
     {
         var logger = new RecordingOperationAuditLogger();
+        var service = new FakeDailyCloseService();
         var viewModel = new DailyCloseViewModel(
-            new FakeDailyCloseService(),
+            service,
             new FakeDailyClosePrintService(),
             CreateSession(),
             operationAuditLogger: logger);
@@ -624,12 +625,20 @@ public sealed class DailyCloseViewModelTests
         await viewModel.LoadHistoryCommand.ExecuteAsync(null);
         await viewModel.ReprintSelectedArchiveCommand.ExecuteAsync(null);
 
+        var savedArchive = Assert.IsType<DailyCloseArchive>(service.LastSavedArchive);
         Assert.Collection(
             logger.Events,
             auditEvent =>
             {
                 Assert.Equal("DAILY_CLOSE_SAVE", auditEvent.OperationType);
                 Assert.Equal("Succeeded", auditEvent.Outcome);
+                // 日结审计必须带系统应有现金、实点现金与长短款，后台按“金额变化”列即可筛查差异。
+                Assert.Equal(savedArchive.DailyCloseGuid.ToString("D"), auditEvent.OrderGuid);
+                Assert.Equal("Cash", auditEvent.PaymentMethod);
+                Assert.Equal(145.35m, auditEvent.BeforeActual);
+                Assert.Equal(savedArchive.CountedCashAmount, auditEvent.AfterActual);
+                Assert.Equal(savedArchive.CashDifference, auditEvent.AmountDelta);
+                Assert.NotEqual(0m, auditEvent.AmountDelta);
             },
             auditEvent =>
             {

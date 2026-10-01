@@ -576,15 +576,16 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         try
         {
             var archive = await _dailyCloseService.SaveAsync(Session, BusinessDate, BuildCashCounts(), cancellationToken);
-            OperationAuditEvents.RecordAction(
+            // 以存档金额为准记录应有、实点与差异，避免界面草稿值与实际保存值不一致。
+            OperationAuditEvents.RecordDailyCloseSave(
                 _operationAuditLogger,
-                OperationAuditTypes.DailyCloseSave,
-                "Succeeded",
                 Session,
-                reasonCode: "SAVED",
-                orderGuid: archive.DailyCloseGuid.ToString("D"),
-                correlationId: correlation.CorrelationId,
-                traceId: correlation.TraceId);
+                archive.DailyCloseGuid,
+                archive.Report.SystemCashAmount,
+                archive.CountedCashAmount,
+                archive.CashDifference,
+                correlation.CorrelationId,
+                correlation.TraceId);
             auditRecorded = true;
             ClearDailyCloseDraft(clearReportSnapshot: true);
             SelectedTabIndex = HistoryTabIndex;

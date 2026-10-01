@@ -59,7 +59,7 @@ internal sealed class MainReceiptCoordinator
         return result;
     }
 
-    public async Task PrintSuccessAsync(Guid orderGuid) =>
+    public async Task<ReceiptPrintResult> PrintSuccessAsync(Guid orderGuid) =>
         await PrintReceiptAsync(orderGuid, ReceiptPrintReason.Manual);
 
     public async Task PrintHistoryAsync(Guid orderGuid) =>

@@ -142,6 +142,11 @@ public partial class PaymentViewModel
                     _manualCardConfirmationId);
                 if (!result.Succeeded || result.Tender is null)
                 {
+                    // 人工确认被拒（金额/状态校验不通过）同样是员工收款操作，需留痕。
+                    OperationAuditEvents.RecordAction(_operationAuditLogger, OperationAuditTypes.PaymentTenderAdd,
+                        "Failed", Session, OperationAuditEvents.CaptureCart(_cart.Lines),
+                        reasonCode: "MANUAL_CARD_REJECTED", safeMessage: result.StatusKey, paymentMethod: "Card",
+                        paymentAmount: ManualCardAmount, orderGuid: _manualCardConfirmationId.ToString("D"));
                     SetStatus(result.StatusKey, result.StatusMessage);
                     return;
                 }
