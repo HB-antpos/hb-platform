@@ -19,6 +19,7 @@ const responseSchema = z.object({
     containerNumber: z.string().nullable().optional().transform((value) => value ?? null),
     containerCode: z.string(),
     estimatedStoreArrivalDate: z.string().min(1),
+    estimatedStoreArrivalDateEnd: z.string().nullable().optional().transform((value) => value || null),
     basis: z.enum(["actual", "estimated"]),
   })),
 });

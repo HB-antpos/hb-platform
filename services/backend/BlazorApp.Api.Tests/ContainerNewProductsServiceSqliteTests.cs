@@ -37,14 +37,14 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         database.Insertable(new Store { StoreGUID = "store-1", StoreCode = "S-1", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
         database.Insertable(new UserStore { UserStoreGUID = "rel-1", UserGUID = "user-1", StoreGUID = "store-1", IsPrimary = false }).ExecuteCommand();
 
-        // 窗口按预计到店日（QLD = 货柜日期 + 7 个工作日，跨 9~11 个自然日）算：
-        // C-EARLY 12 天前到仓库 → 到店日在今天前 1~3 天（按货柜日期算已超 1 周，按到店日仍应显示）
+        // 窗口按预计到店区间（QLD = 货柜日期 + 3~7 个工作日，结束日跨 9~11 个自然日）算：
+        // C-EARLY 12 天前到仓库 → 区间结束日在今天前 1~3 天（按货柜日期算已超 1 周，按到店区间仍应显示）
         database.Insertable(new Container { ContainerCode = "C-LATE", ContainerNumber = "LATE", ActualArrivalDate = today.AddDays(-5), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
         database.Insertable(new Container { ContainerCode = "C-EARLY", ContainerNumber = "EARLY", ActualArrivalDate = today.AddDays(-12), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
         database.Insertable(new Container { ContainerCode = "C-FALL", ContainerNumber = "FALL", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(2) }).ExecuteCommand();
-        // 窗口外：到店日在 9~11 天前、17~19 天后，都不应出现
+        // 窗口外：区间结束日在 9~11 天前、起始日在 15~17 天后，都不应出现
         database.Insertable(new Container { ContainerCode = "C-OLD", ContainerNumber = "OLD", ActualArrivalDate = today.AddDays(-20) }).ExecuteCommand();
-        database.Insertable(new Container { ContainerCode = "C-FAR", ContainerNumber = "FAR", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(8) }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-FAR", ContainerNumber = "FAR", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(12) }).ExecuteCommand();
         database.Insertable(new[]
         {
             new ContainerDetail { DetailCode = "D1", ContainerCode = "C-LATE", ProductCode = "P-AUDIT" },
@@ -71,10 +71,49 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.DoesNotContain(result.Items, x => x.ProductCode == "P-WRONG");
         var storeFrom = DateOnly.FromDateTime(today.AddDays(-7));
         var storeTo = DateOnly.FromDateTime(today.AddDays(14));
-        Assert.All(result.Items, x => Assert.InRange(x.EstimatedStoreArrivalDate, storeFrom, storeTo));
+        Assert.All(result.Items, x =>
+        {
+            // 区间与窗口有交集，且结束日 = 起始日 + 4 个工作日
+            Assert.True(x.EstimatedStoreArrivalDateEnd >= storeFrom && x.EstimatedStoreArrivalDate <= storeTo);
+            Assert.Equal(
+                DateOnly.FromDateTime(ContainerNewProductsReactService.AddWeekdays(x.EstimatedStoreArrivalDate.ToDateTime(TimeOnly.MinValue), 4)),
+                x.EstimatedStoreArrivalDateEnd);
+        });
         Assert.Contains(result.Items, x => x.ProductCode == "P-AUDIT" && x.Basis == "actual");
         Assert.Contains(result.Items, x => x.ProductCode == "P-NONE");
         Assert.Contains(result.Items, x => x.ProductCode == "P-FALLBACK" && x.Basis == "estimated");
+    }
+
+    [Fact]
+    public async Task GetAsync_NSW到店区间为仓库日期当天至3个工作日_区间跨窗口下界仍显示()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Sydney")).Date;
+        database.Insertable(new Store { StoreGUID = "store-6", StoreCode = "S-6", StoreName = "S", Address = "Sydney NSW 2000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-6", UserGUID = "user-6", StoreGUID = "store-6", IsPrimary = false }).ExecuteCommand();
+        // C-EDGE：起始日 8 天前已出窗口，结束日（+3 个工作日）在 3~5 天前仍在窗口内；C-GONE：结束日最晚 9 天前，不显示
+        database.Insertable(new[]
+        {
+            new Container { ContainerCode = "C-NOW", ContainerNumber = "NOW", ActualArrivalDate = today },
+            new Container { ContainerCode = "C-EDGE", ContainerNumber = "EDGE", ActualArrivalDate = today.AddDays(-8) },
+            new Container { ContainerCode = "C-GONE", ContainerNumber = "GONE", ActualArrivalDate = today.AddDays(-14) },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "N1", ContainerCode = "C-NOW", ProductCode = "P-NOW" },
+            new ContainerDetail { DetailCode = "N2", ContainerCode = "C-EDGE", ProductCode = "P-EDGE" },
+            new ContainerDetail { DetailCode = "N3", ContainerCode = "C-GONE", ProductCode = "P-GONE" },
+        }).ExecuteCommand();
+
+        var result = await CreateService("user-6").GetAsync("S-6");
+
+        Assert.Equal("NSW", result.StateCode);
+        Assert.Equal(new[] { "P-EDGE", "P-NOW" }, result.Items.Select(x => x.ProductCode));
+        var now = result.Items.Single(x => x.ProductCode == "P-NOW");
+        Assert.Equal(DateOnly.FromDateTime(today), now.EstimatedStoreArrivalDate);
+        Assert.Equal(DateOnly.FromDateTime(ContainerNewProductsReactService.AddWeekdays(today, 3)), now.EstimatedStoreArrivalDateEnd);
+        var edge = result.Items.Single(x => x.ProductCode == "P-EDGE");
+        Assert.Equal(DateOnly.FromDateTime(today.AddDays(-8)), edge.EstimatedStoreArrivalDate);
     }
 
     [Fact]

@@ -26,6 +26,9 @@ public sealed class ContainerNewProductItemDto
     public decimal? RetailPrice { get; init; }
     public string ContainerCode { get; init; } = string.Empty;
     public string? ContainerNumber { get; init; }
+    /// <summary>预计到店区间起始日（NSW = 货柜日期 + 0 个工作日，QLD = + 3 个工作日）；旧版 App 只读这个字段当单一到店日。</summary>
     public DateOnly EstimatedStoreArrivalDate { get; init; }
+    /// <summary>预计到店区间结束日（含当天；NSW = 货柜日期 + 3 个工作日，QLD = + 7 个工作日）。</summary>
+    public DateOnly EstimatedStoreArrivalDateEnd { get; init; }
     public string Basis { get; init; } = string.Empty;
 }

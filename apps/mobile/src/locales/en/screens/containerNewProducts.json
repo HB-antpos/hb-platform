@@ -17,7 +17,7 @@
     "notAllowed": "You do not have access to HB new arrivals.",
     "storesFailed": "Stores could not be loaded.",
     "selectStore": "Select a store first.",
-    "dateNotice": "Store arrival dates are estimates based on the container's warehouse arrival date, or its estimated port arrival if it has not reached the warehouse yet."
+    "dateNotice": "Store arrival is an estimated range: NSW within 0–3 business days and QLD within 3–7 business days of the container's warehouse arrival, or of its estimated port arrival if it has not reached the warehouse yet."
   },
   "states": { "loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new products arriving in store in the past week or next 2 weeks.", "noImage": "No image", "emptyPast": "No new products arrived in store in the past week.", "emptyUpcoming": "No new products arriving in store in the next 2 weeks." },
   "filters": { "all": "All {{count}}", "past": "Past week {{count}}", "upcoming": "Next 2 weeks {{count}}" }
