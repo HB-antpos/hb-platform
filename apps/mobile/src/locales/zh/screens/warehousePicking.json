@@ -52,7 +52,9 @@
     "join": "一起拣",
     "emptyTitle": "暂无待拣订单",
     "emptyHint": "分店提交订单后会出现在这里",
-    "unknownCode": "未识别的订单条码"
+    "unknownCode": "未识别的订单条码",
+    "filterMine": "派给我 {{count}}",
+    "claimable": "待领取"
   },
   "picking": {
     "subtitle": "{{store}} · 共 {{count}} 行",
@@ -138,7 +140,13 @@
     "stockoutAutoCleared": "又拣到货，没货标记已自动取消",
     "noteStockout": "没货 · {{reason}} · {{name}}",
     "hintStockout": "已标记没货，缺 {{count}} 件 · 找到货扫码即可计入",
-    "noLocationSearch": "未绑定货位 · 按商品找"
+    "noLocationSearch": "未绑定货位 · 按商品找",
+    "scopeMine": "我的",
+    "slipClaimedNow": "已领取第 {{no}}/{{count}} 段",
+    "slipMine": "这是你的第 {{no}}/{{count}} 段",
+    "slipOther": "第 {{no}} 段已由 {{name}} 领取",
+    "slipOtherHint": "你也可以帮忙拣，记录记在你名下",
+    "slipLines": "这一段 {{lines}} 个品种，已切到“我的”"
   },
   "minOrder": {
     "title": "设置中包数",
@@ -205,7 +213,11 @@
     "stockoutGroup": "货位没货 · 缺 {{count}} 件",
     "shortGroup": "少拣 · 缺 {{count}} 件",
     "overGroup": "超拣 · 多 {{count}} 件",
-    "stockoutMeta": "{{reason}} · {{name}}"
+    "stockoutMeta": "{{reason}} · {{name}}",
+    "segmentsTitle": "分段进度",
+    "segmentClaimable": "待领取",
+    "segmentLine": "拣齐 {{done}}/{{total}} 品种",
+    "segmentStockout": "没货 {{count}}"
   },
   "time": {
     "justNow": "刚刚",
@@ -268,6 +280,7 @@
     "CODE_NOT_FOUND": "找不到该条码对应的商品",
     "INVALID_REQUEST": "请求无效",
     "LINE_ALREADY_COMPLETE": "这一行已经拣齐，不需要标记没货",
+    "SLIP_STALE": "这张分单已重新分配或撤销，请找仓库经理要新打印的分单",
     "generic": "操作失败，请重试"
   }
 }

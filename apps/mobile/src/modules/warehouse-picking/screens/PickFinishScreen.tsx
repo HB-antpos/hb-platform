@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { fetchPickSheet, submitPickOrder } from "../api";
 import { readPickingError } from "../api-normalization";
-import { hasLocation, isStockout, lineStatus, sortLinesByLocation, summarizeLines, summarizePickers } from "../pick-math";
+import { hasLocation, isStockout, lineStatus, sortLinesByLocation, summarizeLines, summarizePickers, summarizeSegments } from "../pick-math";
 import { usePickPreferences } from "../pick-preferences";
 import { activeTeammates, relativeMinutes, shortPickerName, stockoutReasonKey } from "../pick-view-model";
 import { usePickerStore } from "../picker-store";
@@ -16,7 +16,7 @@ import { PICK_SESSION_STATUS } from "../types";
 import type { PickSheet, PickSheetLine } from "../types";
 import { Avatar, PickHeader } from "../components/PickHeader";
 import { ProductThumb } from "../components/ProductThumb";
-import { MONO_FONT, PICK_COLORS } from "../components/pick-theme";
+import { MONO_FONT, PICK_COLORS, segmentColor } from "../components/pick-theme";
 import { PICKING_HOME } from "./PickOrderListView";
 
 /** 5 分钟内还有操作的同事视为“还在拣”，提交前提醒。 */
@@ -85,6 +85,8 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
   const overLines = variances.filter((line) => lineStatus(line) === "over");
   const shortPieces = (items: PickSheetLine[]) => items.reduce((sum, line) => sum + (line.orderedQuantity - line.pickedTotal), 0);
   const pickers = summarizePickers(sheet.lines);
+  // 有拣货分配时按段汇总，提交前一眼看出哪段还没拣完、哪段还没人领。
+  const segments = summarizeSegments(sheet.lines);
   const stillPicking = activeTeammates(sheet.participants, picker?.userGuid ?? null, nowMs, STILL_PICKING_MS);
   const submitted = sheet.session.status === PICK_SESSION_STATUS.submitted;
 
@@ -161,6 +163,35 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
             </Text>
           ) : null}
         </View>
+
+        {segments.length > 0 ? (
+          <View style={styles.segmentCard}>
+            <Text style={styles.sectionTitle}>{t("finish.segmentsTitle")}</Text>
+            {segments.map((segment) => {
+              const done = segment.completeLineCount + segment.stockoutLineCount;
+              const ratio = segment.lineCount > 0 ? Math.min(1, done / segment.lineCount) : 0;
+              return (
+                <View key={segment.segmentNo} style={styles.segmentRow}>
+                  <View style={[styles.segmentBadge, { backgroundColor: segmentColor(segment.segmentNo) }]}>
+                    <Text style={styles.segmentBadgeText}>{segment.segmentNo}</Text>
+                  </View>
+                  <View style={styles.segmentText}>
+                    <Text style={[styles.segmentName, !segment.assigneeName ? styles.segmentClaimable : null]}>
+                      {segment.assigneeName ? shortPickerName(segment.assigneeName) : t("finish.segmentClaimable")}
+                    </Text>
+                    <View style={styles.segmentTrack}>
+                      <View style={[styles.segmentFill, { width: `${Math.round(ratio * 100)}%`, backgroundColor: segmentColor(segment.segmentNo) }]} />
+                    </View>
+                  </View>
+                  <Text style={styles.segmentMeta}>
+                    {t("finish.segmentLine", { done: segment.completeLineCount, total: segment.lineCount })}
+                    {segment.stockoutLineCount > 0 ? ` · ${t("finish.segmentStockout", { count: segment.stockoutLineCount })}` : ""}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{t("finish.variances")}</Text>
@@ -295,6 +326,16 @@ const styles = StyleSheet.create({
   metricValue: { fontSize: 16, lineHeight: 24, fontWeight: "700", fontVariant: ["tabular-nums"] },
   pickers: { fontSize: 12, lineHeight: 16, color: PICK_COLORS.textSecondary, fontVariant: ["tabular-nums"] },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
+  segmentCard: { backgroundColor: PICK_COLORS.white, borderWidth: 1, borderColor: PICK_COLORS.outlineMuted, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  segmentRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  segmentBadge: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  segmentBadgeText: { fontSize: 12, fontWeight: "700", color: PICK_COLORS.white },
+  segmentText: { flex: 1, minWidth: 0, gap: 4 },
+  segmentName: { fontSize: 14, lineHeight: 20, fontWeight: "600", color: PICK_COLORS.ink },
+  segmentClaimable: { color: PICK_COLORS.warning },
+  segmentTrack: { height: 5, borderRadius: 3, backgroundColor: PICK_COLORS.outlineMuted, overflow: "hidden" },
+  segmentFill: { height: 5 },
+  segmentMeta: { fontSize: 12, lineHeight: 16, color: PICK_COLORS.textSecondary, fontVariant: ["tabular-nums"] },
   sectionTitle: { fontSize: 14, lineHeight: 20, fontWeight: "700", color: PICK_COLORS.ink },
   sectionHint: { fontSize: 12, lineHeight: 16, color: PICK_COLORS.textSecondary },
   groupTitle: { marginTop: 4, fontSize: 13, lineHeight: 18, fontWeight: "700", color: PICK_COLORS.ink },

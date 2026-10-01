@@ -8,6 +8,7 @@ import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner"
 import { playScanFeedbackSound, preloadScanFeedbackSounds } from "@/modules/scanner/scan-sound";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import {
+  claimPickSlip,
   deletePickStockout,
   fetchPickProgress,
   joinPickOrder,
@@ -23,9 +24,11 @@ import { readPickingError } from "../api-normalization";
 import { buildPickCodeIndex, resolvePickScan } from "../code-resolver";
 import {
   firstOpenLine,
+  hasAssignments,
   hasLocation,
   hasMinOrderQuantity,
   isOpenLine,
+  isMyLine,
   isStockout,
   lineInScope,
   mergeProgressLines,
@@ -34,9 +37,17 @@ import {
   sortLinesByLocation,
   summarizeLines,
   upNextLines,
+  type MineContext,
 } from "../pick-math";
 import { hydratePickPreferences, usePickPreferences } from "../pick-preferences";
-import { activeTeammates, shortPickerName, teammateByLine } from "../pick-view-model";
+import {
+  activeTeammates,
+  claimNoticeFromClaim,
+  claimRouteParams,
+  shortPickerName,
+  teammateByLine,
+  type ClaimNotice,
+} from "../pick-view-model";
 import { usePickerStore } from "../picker-store";
 import { PICKER_RECONFIRM_CODES, pickingErrorMessage } from "../picking-errors";
 import { PICK_MATCH, PICK_SESSION_STATUS, PICK_SOURCE } from "../types";
@@ -48,20 +59,31 @@ import { ManualQtySheet } from "../components/ManualQtySheet";
 import { MinOrderQtySheet } from "../components/MinOrderQtySheet";
 import { PickCameraSheet } from "../components/PickCameraSheet";
 import { PickHeader, PickerChip } from "../components/PickHeader";
-import { PickScopeTabs } from "../components/PickScopeTabs";
+import { ASSIGNED_HEADER_SCOPES, ASSIGNED_SHEET_SCOPES, DEFAULT_SCOPES, PickScopeTabs } from "../components/PickScopeTabs";
 import { RouteSheet } from "../components/RouteSheet";
 import { ScanStatusBanner, type ScanBannerState } from "../components/ScanStatusBanner";
 import { StockoutSheet } from "../components/StockoutSheet";
 import { UpNextList } from "../components/UpNextList";
 import { PICK_COLORS } from "../components/pick-theme";
-import { PICKING_HOME, pickingRoute } from "./PickOrderListView";
+import { PICKING_HOME, pickingRoute, pickingSlipRoute } from "./PickOrderListView";
 
 const PROGRESS_POLL_MS = 8000;
 const NETWORK_RETRY_DELAYS_MS = [800, 2000];
 
 type PendingScan = { code: string; matchedBy: number | null; label: string | null };
 
-export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: string; focusDetailGuid: string | null }) {
+export function PickingScreen({
+  orderGuid,
+  focusDetailGuid,
+  focusSegmentNo = null,
+  claimNotice = null,
+}: {
+  orderGuid: string;
+  focusDetailGuid: string | null;
+  /** 扫分单进入时的段号：“我的”就是这一段。 */
+  focusSegmentNo?: number | null;
+  claimNotice?: ClaimNotice | null;
+}) {
   const { t, language } = useAppTranslation("warehousePicking");
   const router = useRouter();
   const focused = useIsFocused();
@@ -69,9 +91,12 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
   const clearPicker = usePickerStore((state) => state.clearPicker);
   const myGuid = picker?.userGuid ?? null;
   const route = usePickPreferences((state) => state.route);
-  const scope = usePickPreferences((state) => state.scope);
+  const prefScope = usePickPreferences((state) => state.scope);
   const setRoute = usePickPreferences((state) => state.setRoute);
-  const setScope = usePickPreferences((state) => state.setScope);
+  const setPrefScope = usePickPreferences((state) => state.setScope);
+  // 有拣货分配的订单：范围是本单临时状态（默认“我的”），不改本机偏好；分段来自扫的分单。
+  const [segmentNo, setSegmentNo] = useState<number | null>(focusSegmentNo);
+  const [assignedScope, setAssignedScope] = useState<PickScope | null>(focusSegmentNo ? "mine" : null);
 
   const [sheet, setSheet] = useState<PickSheet | null>(null);
   const [lines, setLines] = useState<PickSheetLine[]>([]);
@@ -119,8 +144,8 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
     [clearPicker, router],
   );
   // 加载与轮询只依赖订单；回调与文案经 ref 取最新值，避免引用变化导致重复加入或定时器被反复重置。
-  const latestRef = useRef({ handleAuthError, t, language });
-  latestRef.current = { handleAuthError, t, language };
+  const latestRef = useRef({ handleAuthError, t, language, myGuid, segmentNo });
+  latestRef.current = { handleAuthError, t, language, myGuid, segmentNo };
 
   // 加入拣货（已提交的订单转为配货中、登记参与人）并取回拣货单；重复进入是幂等的。
   useEffect(() => {
@@ -134,9 +159,14 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
         setParticipants(result.participants);
         setSession(result.session);
         // 默认落在当前范围、当前走位下第一条还要拣的行；范围里没有行时退回全部。
+        // 有分配的订单默认看“我的”（派给我 / 扫分单领取的那段），没有我的行就看全部。
         const preferences = usePickPreferences.getState();
         const sorted = sortLinesByLocation(result.lines, preferences.route);
-        const scoped = sorted.filter((line) => lineInScope(line, preferences.scope));
+        const mineInit: MineContext = { pickerUserGuid: latestRef.current.myGuid, segmentNo: latestRef.current.segmentNo };
+        const initScope: PickScope = hasAssignments(result.lines)
+          ? result.lines.some((line) => isMyLine(line, mineInit)) ? "mine" : "all"
+          : preferences.scope === "mine" ? "all" : preferences.scope;
+        const scoped = sorted.filter((line) => lineInScope(line, initScope, mineInit));
         setCurrentGuid((current) => current ?? firstOpenLine(scoped.length > 0 ? scoped : sorted)?.detailGuid ?? null);
       })
       .catch((error) => {
@@ -285,8 +315,54 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
 
   const codeIndex = useMemo(() => buildPickCodeIndex(sheet?.codes ?? []), [sheet]);
   const sortedLines = useMemo(() => sortLinesByLocation(lines, route), [lines, route]);
-  const scopedLines = useMemo(() => sortedLines.filter((line) => lineInScope(line, scope)), [scope, sortedLines]);
-  const counts = useMemo(() => scopeCounts(lines), [lines]);
+  const assigned = useMemo(() => hasAssignments(lines), [lines]);
+  const mine = useMemo<MineContext>(() => ({ pickerUserGuid: myGuid, segmentNo }), [myGuid, segmentNo]);
+  const counts = useMemo(() => scopeCounts(lines, mine), [lines, mine]);
+  // 有分配：我的 / 全部（全部明细里还能切有货位 / 无货位）；没有分配：沿用本机偏好（全部 / 有货位 / 无货位）。
+  const scope: PickScope = assigned
+    ? assignedScope ?? (counts.mine > 0 ? "mine" : "all")
+    : prefScope === "mine" ? "all" : prefScope;
+  const scopedLines = useMemo(() => sortedLines.filter((line) => lineInScope(line, scope, mine)), [mine, scope, sortedLines]);
+
+  /**
+   * 领取（或确认）某一段后：“我的”切到这段、定位到这段第一条待拣行，并提示领取结果。
+   * 已被别人领取时只提示，照样可以帮忙拣，记录记在扫码人名下。
+   */
+  const applyClaim = useCallback(
+    (notice: ClaimNotice) => {
+      setSegmentNo(notice.segmentNo);
+      setAssignedScope("mine");
+      const segmentLines = sortLinesByLocation(linesRef.current, route).filter((line) => line.assignmentSegmentNo === notice.segmentNo);
+      const target = firstOpenLine(segmentLines);
+      if (target) {
+        setCurrentGuid(target.detailGuid);
+        setScannedChildCode(null);
+      }
+      const values = { no: notice.segmentNo, count: notice.segmentCount, lines: notice.lineCount };
+      if (notice.kind === "other") {
+        setBanner({
+          kind: "warning",
+          title: t("picking.slipOther", { ...values, name: notice.claimerName ?? "—" }),
+          message: t("picking.slipOtherHint"),
+        });
+      } else {
+        setBanner({
+          kind: "success",
+          title: notice.kind === "now" ? t("picking.slipClaimedNow", values) : t("picking.slipMine", values),
+          message: t("picking.slipLines", values),
+        });
+      }
+    },
+    [route, t],
+  );
+
+  // 从订单列表扫分单进来：拣货单加载后应用一次领取提示。
+  const appliedNoticeRef = useRef<ClaimNotice | null>(null);
+  useEffect(() => {
+    if (!sheet || !claimNotice || appliedNoticeRef.current === claimNotice) return;
+    appliedNoticeRef.current = claimNotice;
+    applyClaim(claimNotice);
+  }, [applyClaim, claimNotice, sheet]);
 
   const handleScan = useCallback(
     (raw: string) => {
@@ -300,6 +376,25 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
 
       const resolution = resolvePickScan(raw, codeIndex, currentGuid);
       switch (resolution.kind) {
+        case "slip": {
+          // 拣货中扫到分单：领取这一段；是别的订单的分单就切过去。
+          playScanFeedbackSound("found");
+          claimPickSlip(resolution.code)
+            .then((claim) => {
+              if (claim.orderGuid.toLowerCase() !== orderGuid.toLowerCase()) {
+                router.replace(pickingSlipRoute(claim.orderGuid, claimRouteParams(claim)));
+                return;
+              }
+              applyClaim(claimNoticeFromClaim(claim));
+              void refreshProgress();
+            })
+            .catch((error) => {
+              if (handleAuthError(error)) return;
+              playScanFeedbackSound("not_found");
+              setBanner({ kind: "error", title: pickingErrorMessage(error, t, language), message: null, code: resolution.code, product: null });
+            });
+          return;
+        }
         case "order": {
           if (sheet.orderNo && resolution.orderNo === sheet.orderNo.toUpperCase()) {
             playScanFeedbackSound("found");
@@ -356,7 +451,7 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
         }
       }
     },
-    [codeIndex, currentGuid, language, readonly, router, scanLine, session?.submittedByName, sheet, t],
+    [applyClaim, codeIndex, currentGuid, handleAuthError, language, orderGuid, readonly, refreshProgress, router, scanLine, session?.submittedByName, sheet, t],
   );
 
   const sheetsOpen = Boolean(minOrderSheet || manualGuid || chooser || allLinesVisible || cameraVisible || routeVisible || stockoutGuid);
@@ -374,9 +469,10 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
   const upNext = upNextLines(scopedLines, currentGuid, 3);
 
   const changeScope = (next: PickScope) => {
-    setScope(next);
-    const nextScoped = sortedLines.filter((line) => lineInScope(line, next));
-    if (currentLine && !lineInScope(currentLine, next)) {
+    if (assigned) setAssignedScope(next);
+    else setPrefScope(next);
+    const nextScoped = sortedLines.filter((line) => lineInScope(line, next, mine));
+    if (currentLine && !lineInScope(currentLine, next, mine)) {
       const target = firstOpenLine(nextScoped);
       if (target) {
         setCurrentGuid(target.detailGuid);
@@ -569,13 +665,13 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
         }
       >
         <View style={styles.progressBlock}>
-          <PickScopeTabs value={scope} counts={counts} onChange={changeScope} />
+          <PickScopeTabs value={scope} counts={counts} scopes={assigned ? ASSIGNED_HEADER_SCOPES : DEFAULT_SCOPES} onChange={changeScope} />
           <View style={styles.progressRow}>
             <Text numberOfLines={1} style={[styles.progressText, styles.progressMain]}>
               {scope === "all"
                 ? progressText
                 : t("picking.scopeProgress", {
-                    scope: t(scope === "located" ? "picking.scopeLocated" : "picking.scopeUnlocated"),
+                    scope: t(scope === "mine" ? "picking.scopeMine" : scope === "located" ? "picking.scopeLocated" : "picking.scopeUnlocated"),
                     progress: progressText,
                   })}
             </Text>
@@ -708,6 +804,7 @@ export function PickingScreen({ orderGuid, focusDetailGuid }: { orderGuid: strin
         lines={scopedLines}
         scope={scope}
         scopeCounts={counts}
+        scopes={assigned ? ASSIGNED_SHEET_SCOPES : DEFAULT_SCOPES}
         route={route}
         onScopeChange={changeScope}
         onRoutePress={() => setRoute(route === "m" ? "s" : "m")}

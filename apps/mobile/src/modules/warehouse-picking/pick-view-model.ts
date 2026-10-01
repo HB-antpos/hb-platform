@@ -1,4 +1,4 @@
-import { PICK_STOCKOUT_REASON, type PickParticipant, type PickSheetLine } from "./types";
+import { PICK_STOCKOUT_REASON, type PickParticipant, type PickSheetLine, type PickSlipClaim } from "./types";
 
 /** 同事最后一次操作在这个时间窗内视为“还在拣”。 */
 export const PARTICIPANT_ACTIVE_MS = 10 * 60 * 1000;
@@ -102,4 +102,55 @@ export function stockoutReasonKey(reason: number, located: boolean, short = fals
     default:
       return located ? `${prefix}LocationEmpty` : `${prefix}NotFound`;
   }
+}
+
+/** 扫分单领取后带到拣货页的提示：刚领到 / 本来就是我的 / 已被别人领取（只提示，仍可帮忙拣）。 */
+export interface ClaimNotice {
+  kind: "now" | "mine" | "other";
+  segmentNo: number;
+  segmentCount: number;
+  lineCount: number;
+  claimerName: string | null;
+}
+
+export function claimNoticeFromClaim(claim: PickSlipClaim): ClaimNotice {
+  return {
+    kind: claim.claimedNow ? "now" : claim.claimedByMe ? "mine" : "other",
+    segmentNo: claim.segmentNo,
+    segmentCount: claim.segmentCount,
+    lineCount: claim.lineCount,
+    claimerName: claim.pickerName,
+  };
+}
+
+/** 领取结果写进拣货页路由参数（只放展示用的字段，订单 GUID 走路径）。 */
+export function claimRouteParams(claim: PickSlipClaim): Record<string, string> {
+  const notice = claimNoticeFromClaim(claim);
+  return {
+    segment: String(notice.segmentNo),
+    claim: notice.kind,
+    segments: String(notice.segmentCount),
+    lines: String(notice.lineCount),
+    ...(notice.claimerName ? { claimer: notice.claimerName } : {}),
+  };
+}
+
+/** 从路由参数读回分段与领取提示；参数缺失或不合法时返回 null，不影响正常进单。 */
+export function parseClaimRouteParams(params: Record<string, string | undefined>): { segmentNo: number | null; notice: ClaimNotice | null } {
+  const segmentNo = Number.parseInt(params.segment ?? "", 10);
+  if (!Number.isInteger(segmentNo) || segmentNo <= 0) return { segmentNo: null, notice: null };
+  const kind = params.claim;
+  if (kind !== "now" && kind !== "mine" && kind !== "other") return { segmentNo, notice: null };
+  const segmentCount = Number.parseInt(params.segments ?? "", 10);
+  const lineCount = Number.parseInt(params.lines ?? "", 10);
+  return {
+    segmentNo,
+    notice: {
+      kind,
+      segmentNo,
+      segmentCount: Number.isInteger(segmentCount) && segmentCount > 0 ? segmentCount : segmentNo,
+      lineCount: Number.isInteger(lineCount) && lineCount >= 0 ? lineCount : 0,
+      claimerName: params.claimer?.trim() || null,
+    },
+  };
 }
