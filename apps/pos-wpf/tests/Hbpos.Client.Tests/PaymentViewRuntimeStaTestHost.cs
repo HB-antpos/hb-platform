@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
@@ -216,6 +217,7 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
 
     private static Application CreateTestApplication()
     {
+        UseClientResourceAssembly();
         var application = new Application
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown
@@ -240,5 +242,25 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
                 UriKind.Absolute)
         });
         return application;
+    }
+
+    /// <summary>
+    /// 测试进程的入口程序集是 testhost，pack://application:,,,/Resources/... 这类不带程序集名的资源
+    /// （窗口图标、品牌图片）默认会去 testhost 里找而失败。生产上入口程序集就是 WPF 客户端，
+    /// 这里在创建 Application 前把应用资源程序集改指向客户端，并丢弃可能已按 testhost 建好的资源包装器缓存，
+    /// 使宿主内所有界面测试与生产一致，测试本身不再需要各自改写进程级状态。
+    /// </summary>
+    private static void UseClientResourceAssembly()
+    {
+        var clientAssembly = typeof(Hbpos.Client.Wpf.StartupSplashWindow).Assembly;
+        var resourceAssemblyField = typeof(Application).GetField("_resourceAssembly", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WPF Application._resourceAssembly 字段不存在，无法设置测试资源程序集。");
+        resourceAssemblyField.SetValue(null, clientAssembly);
+        var resourceContainer = typeof(Application).Assembly.GetType("MS.Internal.AppModel.ResourceContainer")
+            ?? throw new InvalidOperationException("WPF ResourceContainer 类型不存在，无法重置应用资源缓存。");
+        var wrapperField = resourceContainer.GetField("_applicationResourceManagerWrapper", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("WPF ResourceContainer._applicationResourceManagerWrapper 字段不存在。");
+        wrapperField.SetValue(null, null);
+        _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
     }
 }

@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -13,15 +12,15 @@ namespace Hbpos.Client.Tests;
 // 中文注释：进程内只能有一个 WPF Application，且共享宿主在本集合结束时会将其关闭。
 // 窗口 InitializeComponent 依赖这个 Application，所以必须在共享宿主的集合与 Dispatcher 内运行，
 // 否则排在集合之后执行时会遇到“Application 正在关闭”（发版工作流单进程全量运行时必现）。
+// 窗口图标、品牌图片等 pack://application 资源由宿主统一指向客户端程序集，与生产一致。
 [Collection(WpfViewLifecycleTestCollection.Name)]
 public sealed class StartupSplashWindowRuntimeTests(PaymentViewRuntimeStaTestHost host)
 {
     [Fact]
     public Task Splash_window_renders_bound_text_progress_and_step_names()
     {
-        return host.RunAsync(_ =>
+        return host.RunAsync(application =>
         {
-            using var resourceAssembly = UseWpfResourceAssembly();
             Assert.True(LocalizationService.TryGetSupportedCulture("zh-CN", out var culture));
             var state = new StartupProgressState(key => LocalizationService.Translate(key, culture), culture, "Morayfield · POS-03");
             state.SetVersion("1.9.0", new AppLaunchVersionNotice("1.9.0", false));
@@ -94,25 +93,5 @@ public sealed class StartupSplashWindowRuntimeTests(PaymentViewRuntimeStaTestHos
                 yield return descendant;
             }
         }
-    }
-
-    /// <summary>
-    /// 测试进程的入口程序集是 testhost，pack://application 会去那里找图标；改指向 WPF 客户端程序集，与真实运行一致。
-    /// 共享宿主内其他测试依赖原值，所以测完必须恢复。
-    /// </summary>
-    private static IDisposable UseWpfResourceAssembly()
-    {
-        var wpfAssembly = typeof(StartupSplashWindow).Assembly;
-        var field = typeof(Application).GetField("_resourceAssembly", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        var previous = field.GetValue(null);
-        field.SetValue(null, wpfAssembly);
-        _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
-        return new RestoreResourceAssembly(field, previous);
-    }
-
-    private sealed class RestoreResourceAssembly(FieldInfo field, object? previous) : IDisposable
-    {
-        public void Dispose() => field.SetValue(null, previous);
     }
 }
