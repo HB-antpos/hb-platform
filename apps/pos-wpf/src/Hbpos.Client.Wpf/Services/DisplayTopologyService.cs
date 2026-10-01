@@ -13,7 +13,10 @@ public sealed record DisplayBounds(
     int WorkAreaLeft,
     int WorkAreaTop,
     int WorkAreaWidth,
-    int WorkAreaHeight);
+    int WorkAreaHeight)
+{
+    public MonitorIdentity Identity => new(MonitorLeft, MonitorTop, MonitorWidth, MonitorHeight);
+}
 
 internal readonly record struct WindowSizeLimits(
     double MinWidth,
@@ -32,6 +35,9 @@ public interface IDisplayTopologyService
     void FitToDisplayWorkArea(Window window, DisplayBounds display);
 
     void FitToDisplayBounds(Window window, DisplayBounds display);
+
+    /// <summary>窗口当前所在的显示器；窗口句柄未创建时返回 null。</summary>
+    DisplayBounds? GetDisplayForWindow(Window window) => null;
 }
 
 public sealed class DisplayTopologyService : IDisplayTopologyService
@@ -91,6 +97,67 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
     }
 
     internal static bool UsesFullMonitorBounds(Window window) => (bool)window.GetValue(UsesFullMonitorBoundsProperty);
+
+    public DisplayBounds? GetDisplayForWindow(Window window) => FindDisplayForWindow(window);
+
+    /// <summary>把设备像素矩形换成该窗口的 WPF 逻辑单位（DIP）矩形。</summary>
+    internal static System.Windows.Rect ToDipRect(Window window, int left, int top, int width, int height)
+    {
+        // 类内有同名的 Win32 RECT 结构体，这里显式用 WPF 的 Rect。
+        var topLeft = FromDevice(window, left, top);
+        var bottomRight = FromDevice(window, left + width, top + height);
+        return new System.Windows.Rect(topLeft, bottomRight);
+    }
+
+    /// <summary>
+    /// 按指定显示器的工作区重设窗口尺寸上下限：窗口挪到另一块屏时用，
+    /// 否则上限仍停留在原屏（窗口创建时只按当时所在的屏设过一次）。
+    /// </summary>
+    internal static void ApplyWorkAreaLimit(Window window, DisplayBounds display)
+    {
+        var workArea = ToDipRect(window, display.WorkAreaLeft, display.WorkAreaTop, display.WorkAreaWidth, display.WorkAreaHeight);
+        var limits = ResolveSizeLimits(window.MinWidth, window.MinHeight, workArea.Width, workArea.Height);
+        ApplySizeLimits(window, limits);
+        if (window.Width > limits.MaxWidth)
+        {
+            window.Width = limits.MaxWidth;
+        }
+
+        if (window.Height > limits.MaxHeight)
+        {
+            window.Height = limits.MaxHeight;
+        }
+    }
+
+    /// <summary>取窗口当前所在显示器的整屏与工作区（设备像素）；窗口句柄未创建或查询失败时返回 null。</summary>
+    internal static DisplayBounds? FindDisplayForWindow(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref monitorInfo))
+        {
+            return null;
+        }
+
+        var monitorArea = monitorInfo.Monitor;
+        var workArea = monitorInfo.WorkArea;
+        return new DisplayBounds(
+            monitor,
+            monitorArea.Left,
+            monitorArea.Top,
+            monitorArea.Right - monitorArea.Left,
+            monitorArea.Bottom - monitorArea.Top,
+            workArea.Left,
+            workArea.Top,
+            workArea.Right - workArea.Left,
+            workArea.Bottom - workArea.Top);
+    }
 
     internal static (int Width, int Height) ResolveMaxTrackSize(
         int monitorWidth,

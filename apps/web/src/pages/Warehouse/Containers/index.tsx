@@ -1,6 +1,5 @@
 import {
   BarChartOutlined,
-  CloudSyncOutlined,
   CloudUploadOutlined,
   EyeOutlined,
   PlusOutlined,
@@ -36,13 +35,11 @@ import PageContainer from '../../../components/PageContainer'
 import {
   createContainer,
   getContainerList,
-  getDateFilterOptions,
   pushContainersToHbSales,
-  syncContainersFromHq,
   updateContainer,
 } from '../../../services/containerService'
 import { useAuthStore } from '../../../store/auth'
-import type { ContainerMain, CreateContainerRequest, DateFilterOption } from '../../../types/container'
+import type { ContainerMain, CreateContainerRequest } from '../../../types/container'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
@@ -147,6 +144,8 @@ function getDateOptionLabel(value: string, t: TFunction) {
   }
   return map[value] ? t(map[value]) : value
 }
+
+const dateTypeOptions = ['预计到岸日期', '实际到货日期', '装柜日期']
 
 function getContainerDateWeekKey(value?: string) {
   if (!value) return undefined
@@ -282,14 +281,9 @@ export default function ContainersPage() {
   const [dateRange, setDateRange] = useState<RangeValue>(null)
   const [itemNumberFilter, setItemNumberFilter] = useState('')
   const [columnFilters, setColumnFilters] = useState<ContainerColumnFilters>({})
-  const [dateOptions, setDateOptions] = useState<DateFilterOption[]>([
-    { value: '预计到岸日期', label: t('containers.fields.estimatedArrivalDate') },
-    { value: '实际到货日期', label: t('containers.fields.actualArrivalDate') },
-  ])
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [statusUpdatingKeys, setStatusUpdatingKeys] = useState<string[]>([])
   const listRequestGuardRef = useRef(createLatestRequestGuard())
@@ -424,10 +418,6 @@ export default function ContainersPage() {
   })
 
   useEffect(() => {
-    getDateFilterOptions().then(setDateOptions).catch(() => undefined)
-  }, [])
-
-  useEffect(() => {
     const pendingRequest = pendingFirstPageRequestRef.current
     if (page === 1 && pendingRequest) {
       pendingFirstPageRequestRef.current = null
@@ -456,36 +446,7 @@ export default function ContainersPage() {
     }
   }
 
-  const handleSync = () => {
-    Modal.confirm({
-      title: t('containers.modals.syncTitle'),
-      content: t('containers.modals.syncContent'),
-      okText: t('containers.actions.confirmSync'),
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        setSyncing(true)
-        try {
-          const result = await syncContainersFromHq()
-          const success = result.isSuccess ?? result.IsSuccess ?? true
-          const msg = result.message ?? result.Message ?? t('containers.messages.syncComplete')
-          // 只有同步真正成功时才提示成功并刷新第一页，失败分支只展示后端消息。
-          if (success) {
-            message.success(msg)
-            await latestRequestFirstPageRef.current()
-          } else {
-            message.error(msg)
-          }
-        } catch (error) {
-          console.error(error)
-          const errorMessage = error instanceof Error ? error.message : t('containers.messages.syncFailed')
-          message.error(errorMessage)
-        } finally {
-          setSyncing(false)
-        }
-      },
-    })
-  }
-
+  // 「从HQ同步」（HQ 货柜 → HBweb）已于 2026-09-29 停用；「推送到 HBSales」方向相反，继续保留。
   const handlePush = () => {
     if (!selectedRowKeys.length) {
       message.warning(t('containers.messages.selectContainersToPush'))
@@ -854,7 +815,7 @@ export default function ContainersPage() {
         <Card>
           <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
             <Space wrap>
-              <Select value={dateType} style={{ width: 160 }} options={dateOptions.map((option) => ({ ...option, label: getDateOptionLabel(option.value, t) }))} onChange={setDateType} />
+              <Select value={dateType} style={{ width: 160 }} options={dateTypeOptions.map((value) => ({ value, label: getDateOptionLabel(value, t) }))} onChange={setDateType} />
               <DatePicker.RangePicker value={dateRange} onChange={setDateRange} />
               <Input
                 allowClear
@@ -890,13 +851,10 @@ export default function ContainersPage() {
             <Space wrap>
               {access.canEditContainer ? (
                 <>
-                  <Button icon={<CloudSyncOutlined />} loading={syncing} disabled={pushing} onClick={handleSync}>
-                    {t('containers.actions.syncFromHq')}
-                  </Button>
                   <Button
                     icon={<CloudUploadOutlined />}
                     loading={pushing}
-                    disabled={syncing || !selectedRowKeys.length}
+                    disabled={!selectedRowKeys.length}
                     onClick={handlePush}
                   >
                     {t('containers.actions.pushToHbSales')}{selectedRowKeys.length ? ` (${selectedRowKeys.length})` : ''}

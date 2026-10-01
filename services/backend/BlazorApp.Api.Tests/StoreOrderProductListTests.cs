@@ -2695,15 +2695,307 @@ public sealed class StoreOrderProductListTests : IDisposable
     }
 
     [Fact]
-    public async Task SubmitOrderAsync_购物车含加购后才下架的商品_分店提交被拦截并指出货号()
+    public async Task SubmitOrderAsync_购物车含加购后才下架的商品_只提交在供货行并把下架行留在新购物车()
     {
         await SeedProductAsync("P-OK", "ITEM-OK");
         await SeedProductAsync("P-GONE", "ITEM-GONE");
         await SeedWarehouseProductAsync("P-OK", oemPrice: 3m, importPrice: 2m);
         await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
         var store = CreateService("store-user");
-        foreach (var code in new[] { "P-OK", "P-GONE" })
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
         {
+            StoreCode = "S001",
+            ProductCode = "P-OK",
+            Quantity = 2,
+        });
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-GONE",
+            Quantity = 1,
+        });
+        await SetWarehouseProductActiveAsync("P-GONE", false);
+        var before = await _db.Queryable<WareHouseOrder>()
+            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
+        var goneDetail = await _db.Queryable<WareHouseOrderDetails>()
+            .SingleAsync(item => item.OrderGUID == before.OrderGUID && item.ProductCode == "P-GONE");
+
+        var result = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto
+        {
+            StoreCode = "S001",
+            Remarks = "partial",
+        });
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(result.Data);
+        Assert.Equal(before.OrderGUID, result.Data!.OrderGUID);
+        Assert.Equal("ORD-store-user", result.Data.OrderNo);
+        Assert.Equal(1, result.Data.SubmittedLineCount);
+        Assert.Equal(1, result.Data.KeptLineCount);
+        var kept = Assert.Single(result.Data.KeptLines);
+        Assert.Equal("P-GONE", kept.ProductCode);
+        Assert.Equal("ITEM-GONE", kept.ItemNumber);
+        Assert.Equal(goneDetail.DetailGUID, kept.DetailGUID);
+        Assert.Equal(1m, kept.Quantity);
+        // 测试库没有建供货说明表：缺表时不识别计划，按普通暂停供货处理。
+        Assert.Null(kept.SupplyPlan);
+        Assert.Contains("ITEM-GONE", result.Message);
+        Assert.DoesNotContain("ITEM-OK", result.Message);
+
+        // 原购物车原地变成订单、只剩在供货行；下架行搬进同店的新购物车，两边合计各自重算。
+        var orders = await _db.Queryable<WareHouseOrder>()
+            .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+            .ToListAsync();
+        Assert.Equal(2, orders.Count);
+        var submitted = Assert.Single(orders, item => item.OrderGUID == before.OrderGUID);
+        var newCart = Assert.Single(orders, item => item.OrderGUID != before.OrderGUID);
+        Assert.Equal(1, submitted.FlowStatus);
+        Assert.Equal("ORD-store-user", submitted.OrderNo);
+        Assert.Equal("partial", submitted.Remarks);
+        Assert.Equal(6m, submitted.OEMTotalAmount);
+        Assert.Equal(4m, submitted.ImportTotalAmount);
+        Assert.Equal(0, newCart.FlowStatus);
+        Assert.Equal(newCart.OrderGUID, result.Data.KeptCartOrderGUID);
+        Assert.True(string.IsNullOrWhiteSpace(newCart.CartOwnerUserGuid));
+        Assert.Equal(3m, newCart.OEMTotalAmount);
+        Assert.Equal(2m, newCart.ImportTotalAmount);
+        // 新车版本号不能倒退，否则移动端会把它当成旧数据丢掉。
+        Assert.True(newCart.UpdatedAt >= before.UpdatedAt);
+
+        var submittedLine = Assert.Single(
+            await _db.Queryable<WareHouseOrderDetails>()
+                .Where(item => item.OrderGUID == submitted.OrderGUID && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal("P-OK", submittedLine.ProductCode);
+        var keptLine = Assert.Single(
+            await _db.Queryable<WareHouseOrderDetails>()
+                .Where(item => item.OrderGUID == newCart.OrderGUID && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal("P-GONE", keptLine.ProductCode);
+        Assert.Equal(goneDetail.DetailGUID, keptLine.DetailGUID);
+
+        var cart = await store.GetActiveCartAsync("S001");
+        Assert.Equal(newCart.OrderGUID, cart.Data?.OrderGUID);
+        var cartItem = Assert.Single(cart.Data!.Items);
+        Assert.False(cartItem.IsActive);
+        Assert.Null(cartItem.SupplyPlan);
+
+        // 仓库恢复供货后，保留的行可以直接再提交，不需要分店重新加购。
+        await SetWarehouseProductActiveAsync("P-GONE", true);
+        var resubmitted = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+        Assert.True(resubmitted.Success, resubmitted.Message);
+        Assert.Equal(1, resubmitted.Data?.SubmittedLineCount);
+        Assert.Empty(resubmitted.Data!.KeptLines);
+        Assert.Null(resubmitted.Data.KeptCartOrderGUID);
+        Assert.Equal(
+            0,
+            await _db.Queryable<WareHouseOrder>()
+                .CountAsync(item => item.StoreCode == "S001" && !item.IsDeleted && item.FlowStatus == 0)
+        );
+    }
+
+    [Fact]
+    public async Task SubmitOrderAsync_购物车全部下架_提交失败且不写入()
+    {
+        await SeedProductAsync("P-GONE", "ITEM-GONE");
+        await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
+        var store = CreateService("store-user");
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-GONE",
+            Quantity = 1,
+        });
+        await SetWarehouseProductActiveAsync("P-GONE", false);
+        var before = await _db.Queryable<WareHouseOrder>()
+            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
+
+        var blocked = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+
+        Assert.False(blocked.Success);
+        Assert.Equal("SUPPLY_PAUSED", blocked.ErrorCode);
+        Assert.Contains("没有可提交的商品", blocked.Message);
+        Assert.Contains("ITEM-GONE", blocked.Message);
+        var labels = Assert.IsAssignableFrom<IEnumerable<string>>(blocked.Details);
+        Assert.Equal(new[] { "ITEM-GONE" }, labels);
+        Assert.Equal(0, blocked.Data?.SubmittedLineCount);
+        Assert.Equal("P-GONE", Assert.Single(blocked.Data!.KeptLines).ProductCode);
+
+        // 没有一行能进单时什么都不写：购物车原样保留，不建新车、不发订单号。
+        var cart = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal(before.OrderGUID, cart.OrderGUID);
+        Assert.Equal(0, cart.FlowStatus);
+        Assert.True(string.IsNullOrWhiteSpace(cart.OrderNo));
+        Assert.Equal(before.UpdatedAt, cart.UpdatedAt);
+        Assert.Equal(
+            1,
+            await _db.Queryable<WareHouseOrderDetails>()
+                .CountAsync(item => item.OrderGUID == cart.OrderGUID && !item.IsDeleted)
+        );
+    }
+
+    /// <summary>
+    /// 提交是写操作：取消发生在最后一步（CAS 翻状态）时，前面的拆车写入已在事务里执行，
+    /// 必须整体回滚。客户端中止（调用方令牌已取消）时处理器上抛交给控制器按 499 处理；
+    /// 其他来源的取消（服务端超时）仍返回失败并走错误日志，两种情况都不能留下部分写入。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SubmitOrderAsync_最后一步写入时被取消_事务整体回滚且仅客户端中止时上抛(bool clientAborted)
+    {
+        await SeedProductAsync("P-OK", "ITEM-OK");
+        await SeedProductAsync("P-GONE", "ITEM-GONE");
+        await SeedWarehouseProductAsync("P-OK", oemPrice: 3m, importPrice: 2m);
+        await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
+        var store = CreateService("store-user");
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-OK",
+            Quantity = 2,
+        });
+        await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-GONE",
+            Quantity = 1,
+        });
+        // 让提交先把下架行挪进新购物车（事务内的第一批写入），再执行 CAS。
+        await SetWarehouseProductActiveAsync("P-GONE", false);
+        var before = await _db.Queryable<WareHouseOrder>()
+            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
+        var placementSlice = (BlazorApp.Api.Features.StoreOrders.OrderPlacement.IStoreOrderPlacementSlice)
+            typeof(StoreOrderReactService)
+                .GetField("_orderPlacementSlice", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(store)!;
+
+        using var requestAborted = new CancellationTokenSource();
+        using var serverTimeout = new CancellationTokenSource();
+        var adoTokenSource = clientAborted ? requestAborted : serverTimeout;
+        var callerToken = clientAborted ? requestAborted.Token : CancellationToken.None;
+        var splitCartInserted = false;
+        // 生产中认证阶段已把 RequestAborted 留在同一 ADO 上；服务端超时场景则是另一只令牌。
+        _db.Ado.CancellationToken = adoTokenSource.Token;
+        _db.Aop.OnLogExecuting = (sql, _) =>
+        {
+            var trimmed = sql.TrimStart();
+            if (trimmed.StartsWith("INSERT", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("WareHouseOrder", StringComparison.OrdinalIgnoreCase))
+            {
+                splitCartInserted = true;
+            }
+
+            // CAS 是唯一同时写 FlowStatus 与 OrderNo 的 UPDATE：在它执行前取消。
+            if (trimmed.StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("OrderNo", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("FlowStatus", StringComparison.OrdinalIgnoreCase))
+            {
+                adoTokenSource.Cancel();
+            }
+        };
+
+        try
+        {
+            var request = new SubmitStoreOrderRequestDto { StoreCode = "S001" };
+            if (clientAborted)
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    () => placementSlice.SubmitOrderAsync(request, callerToken)
+                );
+            }
+            else
+            {
+                var result = await placementSlice.SubmitOrderAsync(request, callerToken);
+                Assert.False(result.Success);
+                Assert.Equal("订单提交失败，请稍后重试", result.Message);
+            }
+        }
+        finally
+        {
+            _db.Aop.OnLogExecuting = (sql, parameters) =>
+                _sqlLogs.Add(FormatSqlLog(parameters, sql));
+            _db.Ado.RemoveCancellationToken();
+        }
+
+        Assert.True(adoTokenSource.IsCancellationRequested);
+        Assert.True(splitCartInserted);
+        // 回滚后：没有新购物车、原购物车未提交、两行明细都还在原购物车里。
+        var cart = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal(before.OrderGUID, cart.OrderGUID);
+        Assert.Equal(0, cart.FlowStatus);
+        Assert.True(string.IsNullOrWhiteSpace(cart.OrderNo));
+        Assert.Equal(
+            2,
+            await _db.Queryable<WareHouseOrderDetails>()
+                .CountAsync(item => item.OrderGUID == before.OrderGUID && !item.IsDeleted)
+        );
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubmitOrderAsync_仓库商品缺行或软删_购物车仍标可提交且能进单(bool softDelete)
+    {
+        await SeedProductAsync("P-MISSING", "ITEM-MISSING");
+        await SeedWarehouseProductAsync("P-MISSING", oemPrice: 3m, importPrice: 2m);
+        var store = CreateService("store-user");
+        var added = await store.AddToCartMutationAsync(new AddToCartRequestDto
+        {
+            StoreCode = "S001",
+            ProductCode = "P-MISSING",
+            Quantity = 1,
+        });
+        Assert.True(added.Success, added.Message);
+
+        if (softDelete)
+        {
+            await SetWarehouseProductActiveAsync("P-MISSING", false);
+            await _db.Updateable<WarehouseProduct>()
+                .SetColumns(item => item.IsDeleted == true)
+                .Where(item => item.ProductCode == "P-MISSING")
+                .ExecuteCommandAsync();
+        }
+        else
+        {
+            await _db.Deleteable<WarehouseProduct>()
+                .Where(item => item.ProductCode == "P-MISSING")
+                .ExecuteCommandAsync();
+        }
+
+        var cart = await store.GetActiveCartAsync("S001");
+        Assert.True(Assert.Single(cart.Data!.Items).IsActive);
+
+        var submitted = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+        Assert.True(submitted.Success, submitted.Message);
+        Assert.Equal(1, submitted.Data?.SubmittedLineCount);
+        Assert.Equal(0, submitted.Data?.KeptLineCount);
+        Assert.Empty(submitted.Data!.KeptLines);
+        Assert.Single(await _db.Queryable<WareHouseOrder>().Where(item => item.FlowStatus == 1).ToListAsync());
+        Assert.Equal(0, await _db.Queryable<WareHouseOrder>().CountAsync(item => item.FlowStatus == 0));
+    }
+
+    [Fact]
+    public async Task SubmitOrderAsync_保留行有未关闭的不再供应说明_购物车与结果都标出SupplyPlan()
+    {
+        await WarehouseProductSupplyNoticeSchemaMigrator.EnsureAsync(_db, NullLogger.Instance);
+        await SeedProductAsync("P-OK", "ITEM-OK");
+        await SeedProductAsync("P-STOP", "ITEM-STOP");
+        await SeedProductAsync("P-CLOSED", "ITEM-CLOSED");
+        var store = CreateService("store-user");
+        foreach (var code in new[] { "P-OK", "P-STOP", "P-CLOSED" })
+        {
+            await SeedWarehouseProductAsync(code, oemPrice: 3m, importPrice: 2m);
             await store.AddToCartMutationAsync(new AddToCartRequestDto
             {
                 StoreCode = "S001",
@@ -2711,32 +3003,92 @@ public sealed class StoreOrderProductListTests : IDisposable
                 Quantity = 1,
             });
         }
+        await SetWarehouseProductActiveAsync("P-STOP", false);
+        await SetWarehouseProductActiveAsync("P-CLOSED", false);
+        var nowUtc = DateTime.UtcNow;
+        await _db.Insertable(new WarehouseProductSupplyNotice
+        {
+            ProductCode = "P-STOP",
+            SupplyPlan = WarehouseProductSupplyPlans.Discontinued,
+            Source = "Test",
+            CreatedAtUtc = nowUtc,
+            UpdatedAtUtc = nowUtc,
+        }).ExecuteCommandAsync();
+        // 已关闭的说明不算数：这行只是普通暂停供货。
+        await _db.Insertable(new WarehouseProductSupplyNotice
+        {
+            ProductCode = "P-CLOSED",
+            SupplyPlan = WarehouseProductSupplyPlans.Discontinued,
+            Source = "Test",
+            CreatedAtUtc = nowUtc,
+            UpdatedAtUtc = nowUtc,
+            ClosedAtUtc = nowUtc,
+            ClosedBy = "Test",
+        }).ExecuteCommandAsync();
+
+        var cart = await store.GetActiveCartAsync("S001");
+        Assert.NotNull(cart.Data);
+        Assert.Equal(
+            WarehouseProductSupplyPlans.Discontinued,
+            cart.Data!.Items.Single(item => item.ProductCode == "P-STOP").SupplyPlan
+        );
+        Assert.Null(cart.Data.Items.Single(item => item.ProductCode == "P-CLOSED").SupplyPlan);
+        Assert.Null(cart.Data.Items.Single(item => item.ProductCode == "P-OK").SupplyPlan);
+
+        var result = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(1, result.Data?.SubmittedLineCount);
+        Assert.Equal(2, result.Data?.KeptLineCount);
+        Assert.Equal(
+            WarehouseProductSupplyPlans.Discontinued,
+            result.Data!.KeptLines.Single(line => line.ProductCode == "P-STOP").SupplyPlan
+        );
+        Assert.Null(result.Data.KeptLines.Single(line => line.ProductCode == "P-CLOSED").SupplyPlan);
+        Assert.Contains("不再供应", result.Message);
+        Assert.Contains("ITEM-STOP", result.Message);
+        Assert.Contains("ITEM-CLOSED", result.Message);
+    }
+
+    [Fact]
+    public async Task SubmitOrderAsync_仓库侧整车提交不拆分下架行()
+    {
+        await SeedProductAsync("P-OK", "ITEM-OK");
+        await SeedProductAsync("P-GONE", "ITEM-GONE");
+        await SeedWarehouseProductAsync("P-OK", oemPrice: 3m, importPrice: 2m);
+        await SeedWarehouseProductAsync("P-GONE", oemPrice: 3m, importPrice: 2m);
         await SetWarehouseProductActiveAsync("P-GONE", false);
+        var staff = CreateService("warehouse-a", "WarehouseStaff");
+        foreach (var code in new[] { "P-OK", "P-GONE" })
+        {
+            var added = await staff.AddToCartMutationAsync(new AddToCartRequestDto
+            {
+                StoreCode = "S001",
+                ProductCode = code,
+                Quantity = 1,
+            });
+            Assert.True(added.Success, added.Message);
+        }
 
-        var blocked = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
+        var result = await staff.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
 
-        Assert.False(blocked.Success);
-        Assert.Equal("SUPPLY_PAUSED", blocked.ErrorCode);
-        Assert.Contains("ITEM-GONE", blocked.Message);
-        Assert.DoesNotContain("ITEM-OK", blocked.Message);
-        // 系统不悄悄删除：被拦截后购物车原样保留，由分店自己移除。
-        var cart = await _db.Queryable<WareHouseOrder>()
-            .SingleAsync(item => item.StoreCode == "S001" && !item.IsDeleted);
-        Assert.Equal(0, cart.FlowStatus);
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2, result.Data?.SubmittedLineCount);
+        Assert.Equal(0, result.Data?.KeptLineCount);
+        Assert.Empty(result.Data!.KeptLines);
+        Assert.Null(result.Data.KeptCartOrderGUID);
+        var order = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == "S001" && !item.IsDeleted)
+                .ToListAsync()
+        );
+        Assert.Equal("warehouse-a", order.CartOwnerUserGuid);
+        Assert.Equal(1, order.FlowStatus);
         Assert.Equal(
             2,
             await _db.Queryable<WareHouseOrderDetails>()
-                .CountAsync(item => item.OrderGUID == cart.OrderGUID && !item.IsDeleted)
+                .CountAsync(item => item.OrderGUID == order.OrderGUID && !item.IsDeleted)
         );
-
-        await store.UpdateCartItemMutationAsync(new AddToCartRequestDto
-        {
-            StoreCode = "S001",
-            ProductCode = "P-GONE",
-            Quantity = 0,
-        });
-        var submitted = await store.SubmitOrderAsync(new SubmitStoreOrderRequestDto { StoreCode = "S001" });
-        Assert.True(submitted.Success, submitted.Message);
     }
 
     private Task SetWarehouseProductActiveAsync(string productCode, bool isActive) =>
@@ -2987,6 +3339,102 @@ public sealed class StoreOrderProductListTests : IDisposable
 
         static (bool Success, string? ErrorCode) ToGateResult<T>(ApiResponse<T> response) =>
             (response.Success, response.ErrorCode);
+    }
+
+    /// <summary>
+    /// 生产 09-24 分店 1020 两次提交：门禁等 Store 行锁时客户端中止，驱动抛用户取消 SqlException，
+    /// 旧逻辑按“门禁不可用”fail-open 放行继续写单。现在调用方令牌已触发时取消原样上抛、事务回滚、购物车保持未提交；
+    /// 未传请求令牌时（旧入口）仍沿用 fail-open 契约，订单照常提交。门禁的两个数据库步骤（解析锁资源、取行锁）都要覆盖。
+    /// </summary>
+    [Theory]
+    [InlineData("行锁", true)]
+    [InlineData("行锁", false)]
+    [InlineData("解析锁资源", true)]
+    [InlineData("解析锁资源", false)]
+    public async Task SubmitOrderAsync_门禁数据库步骤中客户端中止_不再fail_open放行且事务回滚(
+        string abortedStage,
+        bool passRequestToken
+    )
+    {
+        const string targetStoreCode = "S-ABORT";
+        await _db.Insertable(new Store
+        {
+            StoreGUID = "store-abort",
+            StoreCode = targetStoreCode,
+            StoreName = "门禁中止店",
+            IsActive = true,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new WareHouseOrder
+        {
+            OrderGUID = "abort-cart",
+            StoreCode = targetStoreCode,
+            OrderNo = "DRAFT-ABORT",
+            FlowStatus = 0,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new WareHouseOrderDetails
+        {
+            DetailGUID = "abort-cart-detail",
+            OrderGUID = "abort-cart",
+            StoreCode = targetStoreCode,
+            ProductCode = "P-ABORT",
+            Quantity = 1,
+        }).ExecuteCommandAsync();
+        var placementSlice = (BlazorApp.Api.Features.StoreOrders.OrderPlacement.IStoreOrderPlacementSlice)
+            typeof(StoreOrderReactService)
+                .GetField("_orderPlacementSlice", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(CreateService())!;
+
+        using var requestAborted = new CancellationTokenSource();
+        var injected = false;
+        _db.Aop.OnLogExecuting = (sql, _) =>
+        {
+            var trimmed = sql.TrimStart();
+            var isTargetStage = abortedStage == "行锁"
+                // SQLite 下门禁取 Store 身份行锁是 no-op UPDATE；生产 SQL Server 对应 UPDATE [Store] WITH (UPDLOCK, HOLDLOCK)。
+                ? trimmed.StartsWith("UPDATE \"Store\"", StringComparison.Ordinal)
+                // 门禁第一步按 StoreCode 查 Store 解析不可变 StoreGuid 锁键。
+                : trimmed.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                    && System.Text.RegularExpressions.Regex.IsMatch(sql, "FROM\\s+[`\"\\[]?Store[`\"\\]]?(\\s|$)");
+            if (!injected && isTargetStage)
+            {
+                injected = true;
+                // 客户端在该语句执行中途断开：请求令牌先触发，驱动随即抛出用户取消 SqlException。
+                requestAborted.Cancel();
+                throw SqlClientExceptionShapes.UserCancellationWhileWaitingRowLock();
+            }
+        };
+        var request = new SubmitStoreOrderRequestDto { StoreCode = targetStoreCode };
+        var callerToken = passRequestToken ? requestAborted.Token : CancellationToken.None;
+
+        try
+        {
+            if (passRequestToken)
+            {
+                var thrown = await Assert.ThrowsAsync<Microsoft.Data.SqlClient.SqlException>(
+                    () => placementSlice.SubmitOrderAsync(request, callerToken)
+                );
+                Assert.True(BlazorApp.Api.Utils.ClientAbortDetector.IsClientAbort(thrown, callerToken));
+            }
+            else
+            {
+                var result = await placementSlice.SubmitOrderAsync(request, callerToken);
+                Assert.True(result.Success, result.Message);
+            }
+        }
+        finally
+        {
+            _db.Aop.OnLogExecuting = (sql, parameters) =>
+                _sqlLogs.Add(FormatSqlLog(parameters, sql));
+        }
+
+        Assert.True(injected);
+        var cart = Assert.Single(
+            await _db.Queryable<WareHouseOrder>()
+                .Where(item => item.StoreCode == targetStoreCode && !item.IsDeleted)
+                .ToListAsync()
+        );
+        // 客户端中止：门禁不放行、事务回滚，购物车仍是草稿；未传令牌：沿用 fail-open，订单已提交。
+        Assert.Equal(passRequestToken ? 0 : 1, cart.FlowStatus);
     }
 
     [Fact]
@@ -3241,12 +3689,31 @@ public sealed class StoreOrderProductListTests : IDisposable
                 log.Contains("SUM", StringComparison.OrdinalIgnoreCase)
                 && log.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)
         );
-        Assert.Contains(
+        // 最近订货日期与历史明细合并为一次扫描：窗口 MAX 在数据库侧只留最近日期的明细行，
+        // 不再单独执行一条 MAX + GROUP BY；商品编码以 JSON 参数传入而非内联 IN 列表。
+        // 该请求默认 IncludeSales=true，最近来货查询也会读订单明细；这里只看购物车与最近订单两条。
+        var orderSqlLogs = _sqlLogs
+            .Where(log => log.Contains("d.[ProductCode] IN (", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, orderSqlLogs.Count);
+        Assert.DoesNotContain(
             _sqlLogs,
             log =>
-                log.Contains("MAX", StringComparison.OrdinalIgnoreCase)
+                log.Contains("MAX(", StringComparison.OrdinalIgnoreCase)
                 && log.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)
+                && log.Contains("WareHouseOrder", StringComparison.OrdinalIgnoreCase)
+                && log.Contains("OrderDate", StringComparison.OrdinalIgnoreCase)
         );
+        Assert.Contains(
+            orderSqlLogs,
+            log => log.Contains("MAX(o.[OrderDate]) OVER (PARTITION BY d.[ProductCode])", StringComparison.Ordinal)
+        );
+        // 日志已把参数名替换成参数值：商品编码来自 @ProductCode0 参数（替换后不带引号），不是 IN ('P001') 字面量。
+        Assert.All(orderSqlLogs, log =>
+        {
+            Assert.Contains("d.[ProductCode] IN (P001)", log, StringComparison.Ordinal);
+            Assert.DoesNotContain("'P001'", log, StringComparison.Ordinal);
+        });
     }
 
     [Fact]
@@ -4114,8 +4581,8 @@ public sealed class StoreOrderProductListTests : IDisposable
             statsSql[(groupByIndex + "GROUP BY".Length)..],
             StringComparison.OrdinalIgnoreCase
         );
-        // 全流程固定 6 次查询：门店校验、购物车、最近订单日期、历史候选、最近来货、销售统计。
-        Assert.Equal(6, _sqlLogs.Count);
+        // 全流程固定 5 次查询：门店校验、购物车、最近订单（最近日期与历史明细合并为一次扫描）、最近来货、销售统计。
+        Assert.Equal(5, _sqlLogs.Count);
     }
 
     [Fact]

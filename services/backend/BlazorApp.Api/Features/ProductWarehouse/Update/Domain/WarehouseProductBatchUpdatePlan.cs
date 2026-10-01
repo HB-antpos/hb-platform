@@ -1,15 +1,17 @@
+using BlazorApp.Api.Features.SupplyNotices;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 
 namespace BlazorApp.Api.Features.ProductWarehouse;
 
 /// <summary>
-/// 批量写入开始前一次性固化操作人、批次号和图片配置，避免工作流内重复解释请求。
+/// 批量写入开始前一次性固化操作人、批次号、图片配置和供货说明，避免工作流内重复解释请求。
 /// </summary>
 internal sealed record WarehouseProductBatchUpdatePlan(
     string UpdatedBy,
     Guid BatchGuid,
-    string? NormalizedImageBaseUrl
+    string? NormalizedImageBaseUrl,
+    NormalizedSupplyNotice? SupplyNotice = null
 )
 {
     internal static bool TryCreate(
@@ -41,10 +43,27 @@ internal sealed record WarehouseProductBatchUpdatePlan(
             return false;
         }
 
+        // 供货说明录入有误要在开事务前整批拒绝，避免“已下架但说明没记上”的半截状态。
+        NormalizedSupplyNotice? supplyNotice = null;
+        if (options.SupplyNotice != null)
+        {
+            var (normalizedNotice, noticeError) = WarehouseProductSupplyNoticeRules.Normalize(
+                options.SupplyNotice
+            );
+            if (noticeError != null)
+            {
+                plan = null;
+                error = noticeError;
+                return false;
+            }
+            supplyNotice = normalizedNotice;
+        }
+
         plan = new WarehouseProductBatchUpdatePlan(
             ProductWarehouseSliceBase.ResolveUpdatedBy(updatedBy),
             Guid.NewGuid(),
-            normalizedImageBaseUrl
+            normalizedImageBaseUrl,
+            supplyNotice
         );
         return true;
     }

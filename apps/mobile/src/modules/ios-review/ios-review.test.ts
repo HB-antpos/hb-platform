@@ -227,8 +227,18 @@ assert.equal(
   true
 );
 
-assert.equal(IOS_REVIEW_MENU_ITEMS.length, 19);
-assert.equal(new Set(IOS_REVIEW_ROUTE_NAMES).size, 19);
+assert.equal(IOS_REVIEW_MENU_ITEMS.length, 20);
+assert.equal(new Set(IOS_REVIEW_ROUTE_NAMES).size, 20);
+assert.equal(
+  IOS_REVIEW_EXCLUDED_ROUTE_NAMES.includes("container-new-products"),
+  true,
+  "货柜新品依赖真实接口，审核菜单必须明确排除该入口",
+);
+assert.equal(
+  IOS_REVIEW_EXCLUDED_ROUTE_NAMES.includes("app-install"),
+  true,
+  "App 安装依赖真实版本数据，审核菜单必须明确排除该入口",
+);
 assert.deepEqual(
   IOS_REVIEW_MENU_ITEMS.map((item) => item.routeName),
   IOS_REVIEW_ROUTE_NAMES,

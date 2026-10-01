@@ -23,7 +23,19 @@
     "weeklySchedule": "周表",
     "scheduleManagement": "排班管理",
     "holidayManagement": "公共假期管理",
-    "leaveManagement": "病假年假管理"
+    "leaveManagement": "病假年假管理",
+    "managedPunchRecords": "打卡记录",
+    "short": {
+      "schedule": "排班",
+      "holidays": "假期",
+      "leave": "请假",
+      "punches": "打卡记录",
+      "punchSelf": "打卡",
+      "mySchedule": "排班",
+      "myRequests": "申请",
+      "approvals": "审核",
+      "approvalsWithCount": "审核 {{count}}"
+    }
   },
   "today": {
     "schedules": "今日班次",
@@ -94,7 +106,8 @@
       "finalClockOutStatusOnly": "最终下班：{{status}}",
       "onBreak": "休息中",
       "overtimeTitle": "加班",
-      "overtimeSummary": "原始 {{raw}} 分钟 · 候选 {{candidate}} 分钟 · 已批准 {{approved}} 分钟"
+      "overtimeSummary": "原始 {{raw}} 分钟 · 候选 {{candidate}} 分钟 · 已批准 {{approved}} 分钟",
+      "statusWithMinutes": "{{status}} {{minutes}} 分钟"
     },
     "qrResult": {
       "title": "最近一次扫码打卡",
@@ -105,7 +118,26 @@
       "serverTime": "服务器时间：{{time}}",
       "deviceTime": "打卡时间（本机时区）：{{time}}",
       "status": "考勤状态：{{status}}"
-    }
+    },
+    "statusShort": {
+      "readyToClockIn": "未上班",
+      "readyToClockOut": "工作中",
+      "completed": "今日已完成",
+      "holiday": "假期",
+      "viewOnly": "历史记录"
+    },
+    "hero": {
+      "shift": "班次 {{start}} – {{end}}",
+      "noShift": "今天没有排班",
+      "worked": "已工作 {{duration}}"
+    },
+    "summary": {
+      "worked": "工时",
+      "break": "休息",
+      "overtime": "加班"
+    },
+    "lastScan": "最近扫码：{{action}} {{time}} · {{status}}",
+    "lastScanDevice": "POS {{device}}"
   },
   "scanner": {
     "waitingForFreshCode": "请继续对准 POS，正在等待刷新的二维码…",
@@ -219,7 +251,20 @@
       "outOfRange": "批准加班必须在 0 到候选分钟之间。",
       "invalidIncrement": "批准加班必须为 15 分钟倍数。",
       "remarkRequired": "下调或拒绝加班时必须填写审核备注。"
-    }
+    },
+    "filterAll": "全部",
+    "filterA11y": "按审核类型筛选",
+    "summary": {
+      "PunchAdjustment": "补卡{{punchType}} {{time}}",
+      "Overtime": "加班 {{minutes}} 分钟",
+      "Leave": "{{leaveType}} {{start}}–{{end}}",
+      "Punch": "打卡异常 · {{punchType}}"
+    },
+    "shortDate": "{{month}}/{{day}}",
+    "quickMinutes": "{{minutes}} 分",
+    "addRemark": "添加备注",
+    "fixMissingClockOut": "补录下班",
+    "needsFix": "待补录"
   },
   "holidayManagement": {
     "noStore": "请先选择分店",
@@ -240,7 +285,14 @@
       "Open": "营业",
       "Closed": "休业",
       "Partial": "部分营业"
-    }
+    },
+    "syncPanelTitle": "{{store}} 公共假期",
+    "syncHint": "按分店所在州（NSW / QLD）同步官方公共假期",
+    "editTitle": "编辑假期",
+    "regularHours": "正常营业时间",
+    "monthGroup": "{{month}} 月",
+    "monthGroupWithYear": "{{year}} 年 {{month}} 月",
+    "unknownMonth": "其他日期"
   },
   "leaveManagement": {
     "empty": "暂无病假年假待审核事项",
@@ -249,13 +301,17 @@
     "attachmentRequired": "病假必须上传医嘱照片。",
     "fields": {
       "employee": "员工",
-      "attachment": "病假医嘱照片"
+      "attachment": "病假医嘱照片",
+      "selectEmployee": "选择员工",
+      "specifyTime": "指定时段"
     },
     "actions": {
       "takePhoto": "拍照上传",
       "retakePhoto": "重新拍照",
       "grantCameraPermission": "允许相机权限",
-      "capture": "拍照"
+      "capture": "拍照",
+      "save": "保存",
+      "reset": "清空"
     },
     "messages": {
       "permissionRequired": "需要相机权限才能拍照上传。",
@@ -269,6 +325,25 @@
       "title": "拍照上传医嘱",
       "permissionTitle": "需要相机权限",
       "permissionDescription": "允许相机权限后即可拍照并上传病假医嘱照片。"
+    },
+    "registerAction": "登记请假",
+    "registerHint": "代员工登记年假或病假（病假需拍医嘱）",
+    "hideRegister": "收起",
+    "employmentTypes": {
+      "fulltime": "全职",
+      "parttime": "兼职"
+    },
+    "dayCount_one": "共 {{count}} 天",
+    "dayCount_other": "共 {{count}} 天",
+    "attachment": {
+      "captureTitle": "拍摄医嘱",
+      "captureHint": "病假必须上传",
+      "uploaded": "已上传"
+    },
+    "a11y": {
+      "previousDay": "{{label}}前一天",
+      "nextDay": "{{label}}后一天",
+      "pickDate": "从日历选择{{label}}"
     }
   },
   "scheduleManagement": {
@@ -297,7 +372,11 @@
       "totalPeople": "总人数",
       "plannedHours": "预计总工时",
       "peopleUnit": "人",
-      "hoursUnit": "小时"
+      "hoursUnit": "小时",
+      "weekHours": "周工时",
+      "weekdayHours": "工作日",
+      "weekendHours": "周末",
+      "scheduledPeople": "排班人数"
     },
     "quickShiftTitle": "常用班次",
     "quickShifts": {
@@ -308,7 +387,45 @@
     "timePicker": {
       "hour": "小时",
       "minute": "分钟"
-    }
+    },
+    "hoursShort": "{{hours}}h",
+    "uncoveredDays": "空缺 {{count}} 天",
+    "publishState": {
+      "draft": "草稿·未发布",
+      "published": "已发布",
+      "empty": "本周未排班"
+    },
+    "cell": {
+      "leave": "假",
+      "available": "可"
+    },
+    "legend": {
+      "shift": "班次",
+      "leave": "请假",
+      "available": "可上班",
+      "draft": "草稿",
+      "employmentTypes": "F 全职 · P 兼职 · C 临时工"
+    },
+    "gridHint": "点格子排班或修改",
+    "editor": {
+      "availabilityLabel": "可上班",
+      "noAvailability": "未填写",
+      "weekHoursLabel": "本周已排",
+      "hoursValue": "{{hours}} 小时",
+      "leaveNotice": "当天已批准请假：{{type}}",
+      "stepMinus": "{{label}}提前 30 分钟",
+      "stepPlus": "{{label}}推后 30 分钟",
+      "setRest": "设为休息",
+      "save": "保存（{{hours}} 小时）",
+      "addShift": "再加一班"
+    },
+    "copyPreviousWeek": "复制上周",
+    "copyConfirmTitle": "复制上周排班",
+    "copyConfirmMessage": "把上周排班复制到本周，新班次为草稿；已有班次的员工和日期会跳过。",
+    "copyConfirm": "复制",
+    "copyWeekResult": "已复制 {{created}} 个班次，跳过 {{skipped}} 个",
+    "copyWeekFailed": "复制上周排班失败",
+    "ageBadge": "{{age}}岁"
   },
   "adjustment": {
     "title": "补卡与修改",
@@ -337,6 +454,31 @@
       "submitFailed": "补卡提交失败。",
       "invalid": "当前补卡内容无法保存。",
       "previewRevisionMissing": "服务端预览未返回版本号，请重新预览后再提交。"
+    },
+    "entryHint": "漏打卡或时间打错，可申请 2 天内补卡",
+    "entryHintManager": "你有补卡修改权限，本人补卡保存后直接生效",
+    "open": "补卡",
+    "sheetSubtitle": "{{date}} · {{store}}",
+    "punchTypeTitle": "补卡类型",
+    "time": "时间",
+    "nextDay": "次日",
+    "reason": "原因",
+    "note": "补充说明（选填）",
+    "noteRequired": "选择「其他」时请填写说明",
+    "stepper": {
+      "minusHour": "提前 1 小时",
+      "minus5": "提前 5 分钟",
+      "plus5": "推后 5 分钟",
+      "plusHour": "推后 1 小时"
+    },
+    "reasons": {
+      "forgot": "忘记打卡",
+      "scanFailed": "扫码失败",
+      "phoneDead": "手机没电",
+      "missed": "员工漏打卡",
+      "device": "设备故障",
+      "shiftChanged": "班次调整",
+      "other": "其他"
     }
   },
   "datePicker": {
@@ -376,7 +518,9 @@
     "rejectOvertime": "拒绝加班",
     "createSchedule": "创建排班",
     "publishWeek": "发布本周",
-    "viewLocation": "查看位置"
+    "viewLocation": "查看位置",
+    "scanClockIn": "扫码上班打卡",
+    "scanClockOut": "扫码下班打卡"
   },
   "punchTypes": {
     "ClockIn": "上班",
@@ -473,5 +617,84 @@
     "holidaySyncSuccess": "已同步 {{count}} 条公共假期",
     "adjustmentSubmitted": "补卡申请已提交",
     "adjustmentApplied": "补卡修改已直接应用"
+  },
+  "managedRecords": {
+    "filterAll": "全部 {{count}}",
+    "filterException": "异常 {{count}}",
+    "empty": "当天没有排班",
+    "emptyException": "当天没有异常记录",
+    "noStore": "请先选择分店",
+    "previousDay": "前一天",
+    "nextDay": "后一天",
+    "today": "今天",
+    "punchSummary": "上 {{clockIn}} · 下 {{clockOut}}",
+    "issues": {
+      "missingClockOut": "漏下班",
+      "noPunch": "未打卡",
+      "late": "迟到",
+      "earlyLeave": "早退",
+      "inProgress": "工作中",
+      "notStarted": "未开始",
+      "normal": "正常",
+      "onLeave": "请假"
+    },
+    "editTitle": "修改打卡",
+    "viewTitle": "打卡明细",
+    "editSubtitle": "{{date}} · 班次 {{start}}–{{end}}",
+    "selectHint": "点选要修改的打卡，或补录缺失的打卡",
+    "addMissing": "补录{{punchType}}",
+    "editing": "修改中",
+    "auditNotice": "保存后直接生效，并记录修改人、原值和原因",
+    "outsideWindow": "只能修改本周的打卡；周一、周二仍可修改上周",
+    "readOnly": "你没有补卡修改权限，只能查看",
+    "save": "保存修改",
+    "saved": "打卡已修改",
+    "loadFailed": "打卡记录加载失败"
+  },
+  "myAttendance": {
+    "today": "今天",
+    "done": "已完成",
+    "availableAt": "可上班 {{time}}",
+    "unfilled": "未填可上班",
+    "rest": "休息",
+    "weekHours": "本周排班 {{hours}} 小时",
+    "fillAvailability": "填写可上班时间",
+    "availabilitySheet": {
+      "earlier": "{{label}}提前 30 分钟",
+      "later": "{{label}}推后 30 分钟",
+      "remove": "删除这天",
+      "willSubmit": "将提交",
+      "submit_one": "提交 {{count}} 天",
+      "submit_other": "提交 {{count}} 天"
+    },
+    "requests": {
+      "adjustmentTitle": "补卡 · {{punchType}} {{time}}",
+      "leaveTitle": "{{leaveType}} · {{range}}",
+      "applyLeave": "请假",
+      "pending": "进行中",
+      "done": "已处理",
+      "empty": "还没有补卡或请假申请",
+      "reviewedBy": "{{name}} 已处理",
+      "reviewedWithRemark": "{{name}}：{{remark}}",
+      "withdraw": "撤回",
+      "status": {
+        "pending": "待审核",
+        "approved": "已生效",
+        "rejected": "已驳回",
+        "cancelled": "已撤回"
+      },
+      "days_one": "{{count}} 天",
+      "days_other": "{{count}} 天"
+    },
+    "leaveSheet": {
+      "previousDay": "{{label}}前一天",
+      "nextDay": "{{label}}后一天",
+      "submitted": "请假申请已提交",
+      "invalidRange": "结束日期不能早于开始日期",
+      "sickHint": "病假需要向店长提交医嘱，由店长登记附件。",
+      "submit_one": "提交 {{count}} 天",
+      "submit_other": "提交 {{count}} 天"
+    },
+    "weekHoursSplit": "工作日 {{weekday}} · 周末 {{weekend}} 小时"
   }
 }

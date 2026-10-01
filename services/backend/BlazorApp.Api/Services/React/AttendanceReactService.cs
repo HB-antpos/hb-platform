@@ -12,6 +12,7 @@ using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using SqlSugar;
@@ -32,6 +33,7 @@ namespace BlazorApp.Api.Services.React
         private readonly TimeProvider _timeProvider;
         private readonly AttendanceQrKeyProtector _attendanceQrKeyProtector;
         private readonly AttendancePunchAuthorizationProtector _punchAuthorizationProtector;
+        private readonly IAuthorizationService? _authorizationService;
 
         public AttendanceReactService(
             SqlSugarContext context,
@@ -43,7 +45,8 @@ namespace BlazorApp.Api.Services.React
             IAttendancePosDeviceStatusProvider? attendancePosDeviceStatusProvider = null,
             TimeProvider? timeProvider = null,
             AttendanceQrKeyProtector? attendanceQrKeyProtector = null,
-            AttendancePunchAuthorizationProtector? punchAuthorizationProtector = null
+            AttendancePunchAuthorizationProtector? punchAuthorizationProtector = null,
+            IAuthorizationService? authorizationService = null
         )
         {
             _db = context.Db;
@@ -58,6 +61,7 @@ namespace BlazorApp.Api.Services.React
                 ?? throw new ArgumentNullException(nameof(attendanceQrKeyProtector));
             _punchAuthorizationProtector = punchAuthorizationProtector
                 ?? throw new ArgumentNullException(nameof(punchAuthorizationProtector));
+            _authorizationService = authorizationService;
         }
 
         public async Task<ApiResponse<List<AttendanceScheduleDto>>> GetSchedulesAsync(
@@ -176,6 +180,90 @@ namespace BlazorApp.Api.Services.React
 
             await _db.Insertable(model).ExecuteCommandAsync();
             return ApiResponse<AttendanceScheduleDto>.OK(ToDto(model), "排班已创建");
+        }
+
+        /// <summary>
+        /// 复制上周排班：来源周未取消的排班按星期平移到目标周，新排班为草稿（需再发布）。
+        /// 目标周同员工同一天已有排班就整天跳过，避免与店长已手工排的班重叠。
+        /// </summary>
+        public async Task<ApiResponse<CopyAttendanceScheduleWeekResultDto>> CopyScheduleWeekAsync(
+            CopyAttendanceScheduleWeekDto request)
+        {
+            if (string.IsNullOrWhiteSpace(request.StoreCode))
+            {
+                return ApiResponse<CopyAttendanceScheduleWeekResultDto>.Error("分店代码不能为空", "STORE_REQUIRED");
+            }
+            var storeCode = request.StoreCode.Trim();
+            var storeAccess = await ResolveManagedStoreAccessAsync(storeCode);
+            if (!storeAccess.Success)
+            {
+                return ApiResponse<CopyAttendanceScheduleWeekResultDto>.Error(storeAccess.Message, storeAccess.ErrorCode);
+            }
+
+            var sourceStart = GetWeekStart(request.SourceWeekStartDate.Date);
+            var targetStart = GetWeekStart(request.TargetWeekStartDate.Date);
+            if (sourceStart == targetStart)
+            {
+                return ApiResponse<CopyAttendanceScheduleWeekResultDto>.Error("来源周与目标周不能相同", "SAME_WEEK");
+            }
+
+            var sourceRows = await _db.Queryable<AttendanceSchedule>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.Status != "Cancelled"
+                    && item.StoreCode == storeCode
+                    && item.WorkDate >= sourceStart
+                    && item.WorkDate < sourceStart.AddDays(7))
+                .ToListAsync();
+            var targetRows = await _db.Queryable<AttendanceSchedule>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.Status != "Cancelled"
+                    && item.StoreCode == storeCode
+                    && item.WorkDate >= targetStart
+                    && item.WorkDate < targetStart.AddDays(7))
+                .ToListAsync();
+            var occupied = targetRows
+                .Select(item => $"{item.UserGuid}|{item.WorkDate:yyyy-MM-dd}")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var now = DateTime.UtcNow;
+            var username = _currentUserService.GetCurrentUsername();
+            var offset = (targetStart - sourceStart).Days;
+            var created = new List<AttendanceSchedule>();
+            var skipped = 0;
+            foreach (var source in sourceRows.OrderBy(item => item.WorkDate).ThenBy(item => item.StartTime))
+            {
+                var workDate = source.WorkDate.Date.AddDays(offset);
+                if (occupied.Contains($"{source.UserGuid}|{workDate:yyyy-MM-dd}"))
+                {
+                    skipped++;
+                    continue;
+                }
+                created.Add(new AttendanceSchedule
+                {
+                    ScheduleGuid = Guid.NewGuid().ToString(),
+                    StoreCode = storeCode,
+                    UserGuid = source.UserGuid,
+                    WorkDate = workDate,
+                    StartTime = source.StartTime,
+                    EndTime = source.EndTime,
+                    Status = "Draft",
+                    Remark = source.Remark,
+                    CreatedAt = now,
+                    CreatedBy = username,
+                    UpdatedAt = now,
+                    UpdatedBy = username,
+                });
+            }
+
+            if (created.Count > 0)
+            {
+                await _db.Insertable(created).ExecuteCommandAsync();
+            }
+            return ApiResponse<CopyAttendanceScheduleWeekResultDto>.OK(
+                new CopyAttendanceScheduleWeekResultDto { CreatedCount = created.Count, SkippedCount = skipped },
+                $"已复制 {created.Count} 个班次");
         }
 
         public async Task<ApiResponse<AttendanceScheduleDto>> UpdateScheduleAsync(
@@ -1009,10 +1097,26 @@ namespace BlazorApp.Api.Services.React
             }
         }
 
-        public async Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewMyPunchAdjustmentAsync(
-            CreateAttendancePunchAdjustmentDto request)
+        public Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewMyPunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request) =>
+            PreviewPunchAdjustmentAsync(request, managedTargetUserGuid: null);
+
+        public async Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewManagedPunchAdjustmentAsync(
+            CreateManagedAttendancePunchAdjustmentDto request)
         {
-            var context = await BuildPunchAdjustmentContextAsync(request);
+            if (string.IsNullOrWhiteSpace(request.UserGuid))
+            {
+                return ApiResponse<AttendancePunchAdjustmentPreviewDto>.Error("员工不能为空", "USER_REQUIRED");
+            }
+
+            return await PreviewPunchAdjustmentAsync(request, request.UserGuid.Trim());
+        }
+
+        private async Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewPunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request,
+            string? managedTargetUserGuid)
+        {
+            var context = await BuildPunchAdjustmentContextAsync(request, managedTargetUserGuid);
             if (!context.Success)
             {
                 return ApiResponse<AttendancePunchAdjustmentPreviewDto>.Error(
@@ -1037,14 +1141,181 @@ namespace BlazorApp.Api.Services.React
                 .Where(item => !item.IsDeleted && item.UserGuid == userGuid)
                 .OrderByDescending(item => item.CreatedAt)
                 .ToListAsync();
-            return ApiResponse<List<AttendancePunchAdjustmentDto>>.OK(
-                rows.Select(item => ToDto(item)).ToList());
+            var adjustmentGuids = rows.Select(item => item.AdjustmentGuid).ToList();
+            // 驳回原因记在审核记录上；同一补卡只取最近一次已处理的审核。
+            var remarks = adjustmentGuids.Count == 0
+                ? new Dictionary<string, string?>()
+                : (await _db.Queryable<AttendanceApproval>()
+                    .Where(item =>
+                        !item.IsDeleted
+                        && item.SourceType == "PunchAdjustment"
+                        && adjustmentGuids.Contains(item.SourceGuid)
+                        && item.ReviewedAt != null)
+                    .ToListAsync())
+                    .GroupBy(item => item.SourceGuid, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group.OrderByDescending(item => item.ReviewedAt).First().ReviewRemark,
+                        StringComparer.OrdinalIgnoreCase);
+            var reviewerNames = await ResolveUserDisplayNamesAsync(
+                rows.Select(item => item.ReviewedByUserGuid));
+            return ApiResponse<List<AttendancePunchAdjustmentDto>>.OK(rows.Select(item =>
+            {
+                var dto = ToDto(item);
+                dto.ReviewRemark = remarks.GetValueOrDefault(item.AdjustmentGuid);
+                dto.ReviewedByName = item.ReviewedByUserGuid != null
+                    ? reviewerNames.GetValueOrDefault(item.ReviewedByUserGuid)
+                    : null;
+                return dto;
+            }).ToList());
         }
 
-        public async Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateMyPunchAdjustmentAsync(
-            CreateAttendancePunchAdjustmentDto request)
+        /// <summary>
+        /// 考勤排班、登记请假用的本店员工列表。不复用用户管理接口（需要 Users.View 且返回联系方式），
+        /// 只返回身份与用工类型；口径与店员列表一致（StoreStaff 角色 + 关联该店）。
+        /// </summary>
+        public async Task<ApiResponse<List<AttendanceEmployeeDto>>> GetStoreEmployeesAsync(string? storeCode)
         {
-            var context = await BuildPunchAdjustmentContextAsync(request);
+            var allowed = IsAdmin();
+            foreach (var permission in new[]
+            {
+                Permissions.Attendance.Schedule.ViewStore,
+                Permissions.Attendance.Schedule.EditManagedStore,
+                Permissions.Attendance.Leave.ViewManagedStore,
+                Permissions.Attendance.Leave.ReviewManagedStore,
+                Permissions.Attendance.Admin.View,
+            })
+            {
+                if (allowed) break;
+                allowed = await CurrentUserHasPermissionAsync(permission);
+            }
+            if (!allowed)
+            {
+                return ApiResponse<List<AttendanceEmployeeDto>>.Error("没有权限查看分店员工", "FORBIDDEN");
+            }
+            if (string.IsNullOrWhiteSpace(storeCode))
+            {
+                return ApiResponse<List<AttendanceEmployeeDto>>.Error("分店代码不能为空", "STORE_REQUIRED");
+            }
+
+            var normalizedStoreCode = storeCode.Trim();
+            var access = await ResolveManagedStoreAccessAsync(normalizedStoreCode);
+            if (!access.Success)
+            {
+                return ApiResponse<List<AttendanceEmployeeDto>>.Error(access.Message, access.ErrorCode);
+            }
+
+            var rows = await _db.Queryable<User>()
+                .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
+                .InnerJoin<Role>((u, ur, r) => ur.RoleGUID == r.RoleGUID)
+                .InnerJoin<UserStore>((u, ur, r, us) => u.UserGUID == us.UserGUID)
+                .InnerJoin<Store>((u, ur, r, us, s) => us.StoreGUID == s.StoreGUID)
+                .LeftJoin<EmployeeProfile>((u, ur, r, us, s, profile) => u.UserGUID == profile.UserGUID)
+                .Where((u, ur, r, us, s) =>
+                    !u.IsDeleted
+                    && !ur.IsDeleted
+                    && !r.IsDeleted
+                    && !us.IsDeleted
+                    && !s.IsDeleted
+                    && r.RoleName == "StoreStaff"
+                    && s.StoreCode == normalizedStoreCode)
+                .Select((u, ur, r, us, s, profile) => new
+                {
+                    u.UserGUID,
+                    u.Username,
+                    u.FullName,
+                    profile.EmployeeType,
+                    profile.Birthday,
+                })
+                .ToListAsync();
+            // 年龄按门店当地日期计算，避免跨时区在生日前后差一天。
+            var storeToday = ConvertUtcToStoreLocal(
+                _timeProvider.GetUtcNow().UtcDateTime,
+                await ResolveStoreTimeZoneAsync(normalizedStoreCode, null)).Date;
+            var employees = rows
+                .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Select(item => new AttendanceEmployeeDto
+                {
+                    UserGuid = item.UserGUID,
+                    Username = item.Username,
+                    FullName = item.FullName,
+                    EmploymentType = item.EmployeeType switch
+                    {
+                        EmployeeType.FullTime => "fullTime",
+                        EmployeeType.PartTime => "partTime",
+                        EmployeeType.Temporary => "casual",
+                        _ => null,
+                    },
+                    Age = ResolveMinorAge(item.Birthday, storeToday),
+                })
+                .OrderBy(item => item.FullName ?? item.Username, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return ApiResponse<List<AttendanceEmployeeDto>>.OK(employees);
+        }
+
+        /// <summary>未满 18 岁返回周岁，否则（含生日缺失、未来日期）返回 null。</summary>
+        internal static int? ResolveMinorAge(DateTime? birthday, DateTime today)
+        {
+            if (birthday == null || birthday.Value.Date > today.Date)
+            {
+                return null;
+            }
+
+            var age = today.Year - birthday.Value.Year;
+            if (birthday.Value.Date > today.AddYears(-age).Date)
+            {
+                age--;
+            }
+            return age < 18 ? age : null;
+        }
+
+        private async Task<Dictionary<string, string>> ResolveUserDisplayNamesAsync(IEnumerable<string?> userGuids)
+        {
+            var guids = userGuids
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (guids.Count == 0)
+            {
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var users = await _db.Queryable<User>()
+                .Where(item => guids.Contains(item.UserGUID))
+                .Select(item => new { item.UserGUID, item.FullName, item.Username })
+                .ToListAsync();
+            return users.ToDictionary(
+                item => item.UserGUID,
+                item => string.IsNullOrWhiteSpace(item.FullName) ? item.Username : item.FullName!,
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        public Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateMyPunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request) =>
+            CreatePunchAdjustmentAsync(request, managedTargetUserGuid: null);
+
+        public async Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateManagedPunchAdjustmentAsync(
+            CreateManagedAttendancePunchAdjustmentDto request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserGuid))
+            {
+                return ApiResponse<AttendancePunchAdjustmentDto>.Error("员工不能为空", "USER_REQUIRED");
+            }
+
+            return await CreatePunchAdjustmentAsync(request, request.UserGuid.Trim());
+        }
+
+        /// <summary>
+        /// 补卡写入的公共实现。managedTargetUserGuid 为空表示员工本人补卡；
+        /// 非空表示持「补卡与修改管理分店打卡」权限的店长代员工补录/修改，直接生效。
+        /// </summary>
+        private async Task<ApiResponse<AttendancePunchAdjustmentDto>> CreatePunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request,
+            string? managedTargetUserGuid)
+        {
+            var context = await BuildPunchAdjustmentContextAsync(request, managedTargetUserGuid);
             if (!context.Success)
             {
                 return ApiResponse<AttendancePunchAdjustmentDto>.Error(
@@ -1059,7 +1330,9 @@ namespace BlazorApp.Api.Services.React
             }
 
             var now = _timeProvider.GetUtcNow().UtcDateTime;
-            var userGuid = ResolveCurrentUserGuid();
+            var requesterUserGuid = ResolveCurrentUserGuid();
+            // 卡序属于被补卡员工，锁与落库都以员工为准；申请人/审核人记录操作者，作为审计依据。
+            var userGuid = managedTargetUserGuid ?? requesterUserGuid;
             var mutationResource = AttendanceDailyMutationLock.BuildResource(
                 userGuid,
                 context.Schedule!.StoreCode,
@@ -1074,7 +1347,7 @@ namespace BlazorApp.Api.Services.React
             {
                 await AttendanceDailyMutationLock.AcquireDatabaseAsync(_db, mutationResource);
                 // 补卡无论待审还是店长直生效，都会改变同一员工的有效卡序，必须锁内重算。
-                var lockedContext = await BuildPunchAdjustmentContextAsync(request);
+                var lockedContext = await BuildPunchAdjustmentContextAsync(request, managedTargetUserGuid);
                 if (!lockedContext.Success)
                 {
                     await _db.Ado.RollbackTranAsync();
@@ -1107,9 +1380,11 @@ namespace BlazorApp.Api.Services.React
                     RequestedPunchTimeUtc = context.ProposedPunch!.PunchTimeUtc,
                     Reason = request.Reason.Trim(),
                     Status = context.Preview!.WouldAutoApprove ? "Applied" : "Pending",
-                    IsManagerSelfDirect = context.Preview.WouldAutoApprove,
-                    RequestedByUserGuid = userGuid,
-                    ReviewedByUserGuid = context.Preview.WouldAutoApprove ? userGuid : null,
+                    // 仅本人直生效才算「店长自补」；代员工修改通过 RequestedBy ≠ UserGuid 区分。
+                    IsManagerSelfDirect = context.Preview.WouldAutoApprove
+                        && string.Equals(userGuid, requesterUserGuid, StringComparison.OrdinalIgnoreCase),
+                    RequestedByUserGuid = requesterUserGuid,
+                    ReviewedByUserGuid = context.Preview.WouldAutoApprove ? requesterUserGuid : null,
                     ReviewedAt = context.Preview.WouldAutoApprove ? now : null,
                     CreatedAt = now,
                     CreatedBy = _currentUserService.GetCurrentUsername(),
@@ -1396,7 +1671,15 @@ namespace BlazorApp.Api.Services.React
                 .Where(item => !item.IsDeleted && item.UserGuid == userGuid)
                 .OrderByDescending(item => item.CreatedAt)
                 .ToListAsync();
-            return ApiResponse<List<AttendanceLeaveRequestDto>>.OK(rows.Select(ToDto).ToList());
+            var reviewerNames = await ResolveUserDisplayNamesAsync(rows.Select(item => item.ReviewedBy));
+            return ApiResponse<List<AttendanceLeaveRequestDto>>.OK(rows.Select(item =>
+            {
+                var dto = ToDto(item);
+                dto.ReviewedByName = item.ReviewedBy != null
+                    ? reviewerNames.GetValueOrDefault(item.ReviewedBy)
+                    : null;
+                return dto;
+            }).ToList());
         }
 
         public async Task<ApiResponse<AttendanceLeaveRequestDto>> CreateMyLeaveRequestAsync(
@@ -2576,9 +2859,11 @@ namespace BlazorApp.Api.Services.React
         }
 
         private async Task<PunchAdjustmentContext> BuildPunchAdjustmentContextAsync(
-            CreateAttendancePunchAdjustmentDto request)
+            CreateAttendancePunchAdjustmentDto request,
+            string? managedTargetUserGuid = null)
         {
-            var userGuid = ResolveCurrentUserGuid();
+            var isManaged = !string.IsNullOrWhiteSpace(managedTargetUserGuid);
+            var userGuid = isManaged ? managedTargetUserGuid!.Trim() : ResolveCurrentUserGuid();
             if (string.IsNullOrWhiteSpace(userGuid))
             {
                 return PunchAdjustmentContext.Error("无法识别当前员工", "USER_NOT_FOUND");
@@ -2593,10 +2878,17 @@ namespace BlazorApp.Api.Services.React
             }
 
             var storeCode = request.StoreCode.Trim();
-            var access = await ResolveRelatedStoreAccessAsync(userGuid, storeCode);
+            // 代员工补卡校验操作者的管理分店范围；员工归属由下方「该员工在该店有排班」保证。
+            var access = isManaged
+                ? await ResolveManagedStoreAccessAsync(storeCode)
+                : await ResolveRelatedStoreAccessAsync(userGuid, storeCode);
             if (!access.Success)
             {
                 return PunchAdjustmentContext.Error(access.Message, access.ErrorCode);
+            }
+            if (isManaged && !await IsCurrentUserManagerForStoreAsync(storeCode))
+            {
+                return PunchAdjustmentContext.Error("只能修改自己管理分店的打卡", "FORBIDDEN_STORE");
             }
 
             var punchType = NormalizePunchType(request.PunchType);
@@ -2660,16 +2952,36 @@ namespace BlazorApp.Api.Services.React
 
             var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
             var nowLocal = ConvertUtcToStoreLocal(nowUtc, storeTimeZone);
-            var wouldAutoApprove = await IsCurrentUserManagerForStoreAsync(storeCode);
+            // 直接生效只认「补卡与修改管理分店打卡」权限：代员工修改本身已由接口策略校验，
+            // 店长本人补卡则需同时持有该权限并管理该分店，否则与普通员工一样进入审核。
+            var wouldAutoApprove = isManaged
+                || (await IsCurrentUserManagerForStoreAsync(storeCode)
+                    && await CurrentUserHasPermissionAsync(Permissions.Attendance.Punch.AdjustManagedStore));
             if (!IsAdmin())
             {
-                var ageDays = (nowLocal.Date - requestedPunchTimeLocal.Date).Days;
-                if (ageDays < 0 || ageDays > 2)
+                if (isManaged)
                 {
-                    return PunchAdjustmentContext.Error(
-                        "非 Admin 员工只能申请两天内的补卡",
-                        "ADJUSTMENT_WINDOW_EXPIRED");
+                    if (!IsWithinManagedAdjustmentWindow(schedule.WorkDate, nowLocal.Date))
+                    {
+                        return PunchAdjustmentContext.Error(
+                            "只能修改本周的打卡；周一、周二仍可修改上周",
+                            "ADJUSTMENT_WINDOW_EXPIRED");
+                    }
                 }
+                else
+                {
+                    var ageDays = (nowLocal.Date - requestedPunchTimeLocal.Date).Days;
+                    if (ageDays < 0 || ageDays > 2)
+                    {
+                        return PunchAdjustmentContext.Error(
+                            "非 Admin 员工只能申请两天内的补卡",
+                            "ADJUSTMENT_WINDOW_EXPIRED");
+                    }
+                }
+            }
+            if (isManaged && requestedPunchTimeUtc > nowUtc)
+            {
+                return PunchAdjustmentContext.Error("补卡时间不能晚于当前时间", "PUNCH_TIME_IN_FUTURE");
             }
 
             AttendancePunch? originalPunch = null;
@@ -3177,6 +3489,30 @@ namespace BlazorApp.Api.Services.React
             return false;
         }
 
+        /// <summary>
+        /// 店长代员工补卡窗口：按单周（周一起）工资周期，可改本周至今天；
+        /// 周一、周二是上周的结算核对期，仍可改上周。
+        /// </summary>
+        internal static bool IsWithinManagedAdjustmentWindow(DateTime workDate, DateTime storeToday)
+        {
+            var today = storeToday.Date;
+            var currentWeekStart = GetWeekStart(today);
+            var isSettlementGrace = today.DayOfWeek is DayOfWeek.Monday or DayOfWeek.Tuesday;
+            var earliest = isSettlementGrace ? currentWeekStart.AddDays(-7) : currentWeekStart;
+            return workDate.Date >= earliest && workDate.Date <= today;
+        }
+
+        private async Task<bool> CurrentUserHasPermissionAsync(string permission)
+        {
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user == null || _authorizationService == null)
+            {
+                return false;
+            }
+
+            return (await _authorizationService.AuthorizeAsync(user, permission)).Succeeded;
+        }
+
         private async Task<bool> IsWithinAdjustmentWindowAsync(DateTime workDate, string? storeCode)
         {
             if (IsAdmin())
@@ -3442,9 +3778,30 @@ namespace BlazorApp.Api.Services.React
                 .ToListAsync();
             var userMap = users.ToDictionary(item => item.UserGUID, StringComparer.OrdinalIgnoreCase);
             var storeMap = stores.ToDictionary(item => item.StoreCode, StringComparer.OrdinalIgnoreCase);
+            // 已批准请假覆盖到的班次标注为请假：不改排班状态，只在返回时附加，界面据此不计工时、不算缺卡。
+            var minDate = schedules.Min(item => item.WorkDate.Date);
+            var maxDate = schedules.Max(item => item.WorkDate.Date);
+            var approvedLeaves = await _db.Queryable<AttendanceLeaveRequest>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.Status == "Approved"
+                    && userGuids.Contains(item.UserGuid)
+                    && item.StartDate <= maxDate
+                    && item.EndDate >= minDate)
+                .ToListAsync();
 
             foreach (var schedule in schedules)
             {
+                var leave = approvedLeaves.FirstOrDefault(item =>
+                    item.UserGuid.Equals(schedule.UserGuid, StringComparison.OrdinalIgnoreCase)
+                    && item.StartDate.Date <= schedule.WorkDate.Date
+                    && item.EndDate.Date >= schedule.WorkDate.Date);
+                if (leave != null)
+                {
+                    schedule.LeaveType = leave.LeaveType;
+                    schedule.LeaveGuid = leave.LeaveGuid;
+                }
+
                 if (userMap.TryGetValue(schedule.UserGuid, out var user))
                 {
                     schedule.EmployeeName = string.IsNullOrWhiteSpace(user.FullName)

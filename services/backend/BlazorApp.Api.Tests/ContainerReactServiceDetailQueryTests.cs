@@ -288,6 +288,79 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetContainersAsync_装柜日期应按装柜日期过滤结束日整天并倒序()
+    {
+        await SeedContainerAsync(
+            "C-LOADING-1",
+            "LOAD-1",
+            loadingDate: new DateTime(2026, 6, 10, 23, 59, 0),
+            estimatedArrivalDate: new DateTime(2026, 1, 1),
+            status: 1
+        );
+        await SeedContainerAsync(
+            "C-LOADING-2",
+            "LOAD-2",
+            loadingDate: new DateTime(2026, 6, 9, 8, 0, 0),
+            estimatedArrivalDate: new DateTime(2026, 12, 31),
+            status: 1
+        );
+        await SeedContainerAsync(
+            "C-LOADING-3",
+            "LOAD-3",
+            loadingDate: new DateTime(2026, 6, 11),
+            estimatedArrivalDate: new DateTime(2026, 6, 10),
+            status: 1
+        );
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest
+            {
+                Page = 1,
+                PageSize = 20,
+                DateType = "装柜日期",
+                StartDate = new DateTime(2026, 6, 9),
+                EndDate = new DateTime(2026, 6, 10),
+            }
+        );
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(new[] { "LOAD-1", "LOAD-2" }, result.Containers.Select(x => x.货柜编号).ToArray());
+    }
+
+    [Fact]
+    public async Task GetContainersAsync_装柜日期同日分页应按货柜编码稳定排序()
+    {
+        await SeedContainerAsync(
+            "C-SAME-B",
+            "SAME-B",
+            loadingDate: new DateTime(2026, 6, 10, 12, 0, 0),
+            status: 1
+        );
+        await SeedContainerAsync(
+            "C-SAME-A",
+            "SAME-A",
+            loadingDate: new DateTime(2026, 6, 10, 12, 0, 0),
+            status: 1
+        );
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest
+            {
+                Page = 1,
+                PageSize = 1,
+                DateType = "装柜日期",
+                StartDate = new DateTime(2026, 6, 10),
+                EndDate = new DateTime(2026, 6, 10),
+            }
+        );
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal("SAME-A", Assert.Single(result.Containers).货柜编号);
+    }
+
+    [Fact]
     public async Task GetContainersAsync_空列头过滤应保持原分页总数()
     {
         await SeedContainerAsync("C-EMPTY-1", "CSGU7035442", status: 1);
@@ -345,6 +418,63 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
         Assert.Equal(1, result.TagStats.AbnormalImport);
         Assert.Equal(2, result.TagStats.Active);
         Assert.Equal(1, result.TagStats.Inactive);
+    }
+
+    [Fact]
+    public async Task QueryContainerDetailsAsync_无仓库记录的新品应计为下架并可按下架筛选()
+    {
+        await SeedContainerAsync("C-WH", "CSLU6099487");
+        await SeedDetailAsync("D-WH-ACTIVE", "C-WH", "P-WH-ACTIVE", "HB601", isActive: true);
+        await SeedDetailAsync("D-WH-INACTIVE", "C-WH", "P-WH-INACTIVE", "HB602", isActive: false);
+        // 仓库未到货的新品：没有仓库商品记录，左连接后 IsActive 为 NULL。
+        await SeedDetailAsync("D-WH-MISSING", "C-WH", "P-WH-MISSING", "HB603", localExists: false);
+        await _localDb.Deleteable<WarehouseProduct>()
+            .Where(x => x.ProductCode == "P-WH-MISSING")
+            .ExecuteCommandAsync();
+        var service = CreateService();
+
+        var stats = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto { ContainerGuid = "C-WH", PageSize = 50, IncludeItems = false }
+        );
+        Assert.Equal(1, stats.TagStats.Active);
+        Assert.Equal(2, stats.TagStats.Inactive);
+
+        var inactiveTag = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-WH",
+                PageSize = 50,
+                SelectedTags = new List<string> { "inactive" },
+            }
+        );
+        Assert.Equal(2, inactiveTag.ItemsTotal);
+        Assert.Equal(
+            new[] { "D-WH-INACTIVE", "D-WH-MISSING" },
+            inactiveTag.Items.Select(x => x.HGUID).OrderBy(x => x).ToArray()
+        );
+
+        var inactiveStatus = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-WH",
+                PageSize = 50,
+                WarehouseStatus = new List<string> { "inactive" },
+            }
+        );
+        Assert.Equal(
+            new[] { "D-WH-INACTIVE", "D-WH-MISSING" },
+            inactiveStatus.Items.Select(x => x.HGUID).OrderBy(x => x).ToArray()
+        );
+
+        var activeTag = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-WH",
+                PageSize = 50,
+                SelectedTags = new List<string> { "active" },
+            }
+        );
+        Assert.Equal(new[] { "D-WH-ACTIVE" }, activeTag.Items.Select(x => x.HGUID).ToArray());
     }
 
     [Fact]

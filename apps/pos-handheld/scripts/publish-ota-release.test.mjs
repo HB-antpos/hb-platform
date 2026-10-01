@@ -897,6 +897,78 @@ test("immutable register 回包的全部不可变事实、UTC 与 source 任一�
   }
 });
 
+test("register 回包省略 null 可空字段（后端 WhenWritingNull）视同 null，存在且不同仍失败", async (t) => {
+  const basePayload = buildOtaReleasePayload(
+    parseEasUpdateOutput(createJsonOutput("android"), "android"),
+    { ...createOptions(), platform: "android", releaseBatchId: batchId, releaseChannel: androidReleaseChannel },
+  );
+  const nullFactsPayload = { ...basePayload, gitCommitHash: null, dashboardUrl: null };
+  const rollbackPayload = buildOtaReleasePayload(
+    parseEasUpdateOutput(createJsonOutput("android"), "android"),
+    {
+      ...createOptions(),
+      platform: "android",
+      releaseBatchId: batchId,
+      releaseChannel: androidReleaseChannel,
+      rollbackOfReleaseId,
+    },
+  );
+  const config = {
+    baseUrl: "https://center.example",
+    accessToken: administratorAccessToken,
+  };
+  // 模拟后端真实序列化：值为 null 的字段整体不出现在 JSON 中。
+  const respondWith = (payload, omittedFields, overrides = {}) => {
+    const release = createStoredReleaseDto(payload, overrides);
+    for (const field of omittedFields) delete release[field];
+    return async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => JSON.stringify({
+        success: true,
+        data: { release, idempotent: false },
+      }),
+    });
+  };
+
+  await t.test("非回滚发布省略 rollbackOfReleaseId 通过", async () => {
+    assert.equal(basePayload.rollbackOfReleaseId, null);
+    const result = await registerOtaRelease(
+      basePayload,
+      config,
+      respondWith(basePayload, ["rollbackOfReleaseId"]),
+    );
+    assert.equal(Object.hasOwn(result.release, "rollbackOfReleaseId"), false);
+  });
+
+  await t.test("gitCommitHash/dashboardUrl/rollbackOfReleaseId 全部省略通过", async () => {
+    await registerOtaRelease(
+      nullFactsPayload,
+      config,
+      respondWith(nullFactsPayload, ["rollbackOfReleaseId", "gitCommitHash", "dashboardUrl"]),
+    );
+  });
+
+  const mismatches = [
+    ["请求为 null、响应存在 rollbackOfReleaseId", basePayload, [], { rollbackOfReleaseId }],
+    ["回滚请求但响应省略 rollbackOfReleaseId", rollbackPayload, ["rollbackOfReleaseId"], {}],
+    ["回滚请求但响应 rollbackOfReleaseId 不同", rollbackPayload, [], { rollbackOfReleaseId: otherProjectId }],
+    ["请求为 null、响应存在 gitCommitHash", nullFactsPayload, ["rollbackOfReleaseId", "dashboardUrl"], { gitCommitHash: "abc123" }],
+    ["请求有值但响应省略 gitCommitHash", basePayload, ["rollbackOfReleaseId", "gitCommitHash"], {}],
+    ["请求为 null、响应存在 dashboardUrl", nullFactsPayload, ["rollbackOfReleaseId", "gitCommitHash"], { dashboardUrl: "https://expo.dev/x" }],
+    ["请求有值但响应省略 dashboardUrl", basePayload, ["rollbackOfReleaseId", "dashboardUrl"], {}],
+  ];
+  for (const [name, payload, omittedFields, overrides] of mismatches) {
+    await t.test(name, async () => {
+      await assert.rejects(
+        () => registerOtaRelease(payload, config, respondWith(payload, omittedFields, overrides)),
+        /identity|不匹配/i,
+      );
+    });
+  }
+});
+
 test("live 发布默认在 register 前执行同版本 channel:view 二次回读", async () => {
   const events = [];
   await runPublishPosHandheldOtaRelease(

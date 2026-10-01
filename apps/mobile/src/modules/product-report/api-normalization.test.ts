@@ -10,6 +10,7 @@ import {
   normalizeProductReportTotalRevenue,
   normalizeProductBranchRows,
   normalizeProductPage,
+  normalizeStoreOptions,
   normalizeSupplierBranchReportSnapshot,
   normalizeSupplierBranchRows,
   normalizeSupplierReportSnapshot,
@@ -575,4 +576,23 @@ assert.equal(
   }).cacheVersion,
   "batch-42",
   "分店中国货合计必须带出 cacheVersion，参与主报表同批次对齐",
+);
+
+// 门店选项带回 IANA 时区供营业额按店算截止整点；旧后端不返回时不能凭空补字段。
+assert.deepEqual(
+  normalizeStoreOptions({
+    data: [
+      { label: "Orion", value: "1013", timeZoneId: "Australia/Brisbane" },
+      { StoreName: "Glendale", StoreCode: "1012", TimeZoneId: " Australia/Sydney " },
+      { label: "Kotara", value: "1028", timeZoneId: null },
+      { label: "Kawana", value: "1014" },
+    ],
+  }),
+  [
+    { label: "Orion", value: "1013", timeZoneId: "Australia/Brisbane" },
+    { label: "Glendale", value: "1012", timeZoneId: "Australia/Sydney" },
+    { label: "Kotara", value: "1028" },
+    { label: "Kawana", value: "1014" },
+  ],
+  "门店时区只在接口返回时带出，并去掉首尾空格",
 );

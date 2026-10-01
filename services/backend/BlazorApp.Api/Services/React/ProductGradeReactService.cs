@@ -35,6 +35,40 @@ namespace BlazorApp.Api.Services.React
             _currentUserService = currentUserService;
         }
 
+        /// <summary>业务定义的固定等级（A 核心、B 观察、C 淘汰、D 清库存），与 Web 端 PRODUCT_GRADE_CONFIG 保持一致。</summary>
+        private static readonly string[] DefinedGrades = { "A", "B", "C", "D" };
+
+        public async Task<ApiResponse<List<string>>> GetGradeOptionsAsync()
+        {
+            try
+            {
+                // 直接对等级列去重：不能借用分页列表（按等级排序取前 1000 行再去重），
+                // 否则同一等级的商品超过 1000 个时，后面的等级会整个被截掉（生产上 A 级 1045 个，只剩 A）。
+                var grades = await _context.Db.Queryable<ProductGrade>()
+                    .Where(g => !g.IsDeleted && g.Grade != null && g.Grade != "")
+                    .Select(g => g.Grade)
+                    .Distinct()
+                    .ToListAsync();
+
+                // 固定四档始终列出（某档暂无商品也要能选，例如 D 级），库里出现的其他等级按字母序追加在后。
+                var extraGrades = grades
+                    .Select(grade => grade?.Trim().ToUpperInvariant())
+                    .Where(grade => !string.IsNullOrEmpty(grade))
+                    .Select(grade => grade!)
+                    .Where(grade => !DefinedGrades.Contains(grade, StringComparer.Ordinal))
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(grade => grade, StringComparer.Ordinal);
+                var options = DefinedGrades.Concat(extraGrades).ToList();
+
+                return ApiResponse<List<string>>.OK(options);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取商品等级选项失败");
+                return ApiResponse<List<string>>.Error("获取商品等级选项失败", "GET_GRADE_OPTIONS_ERROR");
+            }
+        }
+
         public async Task<ApiResponse<PagedResult<ProductGradeDto>>> GetProductGradesAsync(
             ProductGradeListQueryDto query
         )

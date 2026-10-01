@@ -1,0 +1,36 @@
+{
+  "title": "App 安装",
+  "subtitle": "扫码安装 HB 最新正式版",
+  "actions": {
+    "back": "返回",
+    "retry": "重试",
+    "openHere": "在本机打开",
+    "copy": "复制链接",
+    "share": "分享"
+  },
+  "platforms": { "ios": "iOS", "android": "Android" },
+  "labels": {
+    "version": "版本 {{version}}",
+    "build": "Build {{build}}",
+    "iosSource": "App Store 正式版",
+    "androidSource": "安卓正式版 APK",
+    "verifiedAt": "上架核验 {{time}}",
+    "builtAt": "构建完成 {{time}}",
+    "size": "安装包 {{size}}"
+  },
+  "hints": {
+    "ios": "用 iPhone 相机扫码，跳转 App Store 安装或更新。",
+    "android": "用安卓手机浏览器或相机扫码下载 APK，首次安装需允许「安装未知应用」。"
+  },
+  "messages": {
+    "notAllowed": "没有 App 安装页权限，请联系管理员授权",
+    "copied": "链接已复制",
+    "actionFailed": "操作失败，请重试"
+  },
+  "states": {
+    "loading": "正在加载…",
+    "loadFailed": "加载失败",
+    "iosEmpty": "暂无已上架的 iOS 版本",
+    "androidEmpty": "暂无可下载的安卓正式版"
+  }
+}

@@ -109,6 +109,10 @@ export interface AccessControl {
   canViewSystemLogs: boolean
   canViewPerformanceBaseline: boolean
   canViewOperationAudits: boolean
+  canViewLegacyEmployeeLogs: boolean
+  /** 员工操作日志合并页：老收银或新收银任一查看权限即可进入。 */
+  canViewEmployeeOperationLogs: boolean
+  canReviewLegacyEmployeeLogs: boolean
   canManageScheduledTasks: boolean
   canManageSystemSettings: boolean
   canViewAppDownloads: boolean

@@ -12,6 +12,7 @@ using BlazorApp.Shared.Models.HqEntities;
 using BlazorApp.Shared.Models.POSM;
 using Microsoft.Extensions.Caching.Memory;
 using SqlSugar;
+using WarehouseMinOrderQuantitySyncGuard = BlazorApp.Api.Features.DataSync.Common.WarehouseMinOrderQuantitySyncGuard;
 
 namespace BlazorApp.Api.Services.React
 {
@@ -2197,11 +2198,21 @@ namespace BlazorApp.Api.Services.React
                 var errors = 0;
 
                 var syncBatchGuid = Guid.NewGuid();
-                var existingCodes = await _localContext
+                var existingRows = await _localContext
                     .Db.Queryable<WarehouseProduct>()
-                    .Select(x => x.ProductCode)
+                    .Select(x => new WarehouseMinOrderQuantitySyncGuard.LocalMinOrderQuantityRow
+                    {
+                        ProductCode = x.ProductCode,
+                        MinOrderQuantity = x.MinOrderQuantity,
+                    })
                     .ToListAsync();
-                var existingSet = new HashSet<string>(existingCodes, StringComparer.OrdinalIgnoreCase);
+                var existingSet = new HashSet<string>(
+                    existingRows.Select(row => row.ProductCode ?? string.Empty),
+                    StringComparer.OrdinalIgnoreCase
+                );
+                // BulkUpdate 会整行覆盖：本地已有正数中包数的行在写入前回填，HQ 最小订货量只补本地空缺。
+                var localMinOrderQuantities =
+                    WarehouseMinOrderQuantitySyncGuard.BuildLocalValues(existingRows);
                 var auditedProductCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var beforeSnapshots =
                     new Dictionary<string, WarehouseProductChangeSnapshotDto>(
@@ -2282,6 +2293,7 @@ namespace BlazorApp.Api.Services.React
                             item.UpdatedAt = occurredAtUtc;
                             item.UpdatedBy = "System";
                         }
+                        WarehouseMinOrderQuantitySyncGuard.Apply(toUpdate, localMinOrderQuantities);
 
                         using var auditScope = SqlSugarAuditScope.PreserveExplicitAuditFields();
                         if (toUpdate.Any())

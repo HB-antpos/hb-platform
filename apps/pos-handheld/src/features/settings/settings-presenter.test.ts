@@ -1259,6 +1259,7 @@ for (const [nativeCode, expectedStatus] of [
   ],
   ["PRINTER_BLUETOOTH_RESTRICTED", "printer-bluetooth-restricted"],
   ["PRINTER_BLUETOOTH_POWERED_OFF", "printer-bluetooth-powered-off"],
+  ["PRINTER_BLUETOOTH_LOCATION_OFF", "printer-bluetooth-location-off"],
 ] as const) {
   test(`蓝牙扫描错误 ${nativeCode} 保留为专属界面状态`, async () => {
     const port = new FakeSettingsPort();

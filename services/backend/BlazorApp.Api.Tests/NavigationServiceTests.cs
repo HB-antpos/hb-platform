@@ -579,19 +579,38 @@ public class NavigationServiceTests
         );
     }
 
-    [Fact]
-    public void BuildMenu_ShowsOperationLogsWithAuditViewPermission()
+    [Theory]
+    [InlineData(Permissions.PosTerminal.Audit.View)]
+    [InlineData(Permissions.LegacyEmployeeLogs.View)]
+    public void BuildMenu_员工操作日志合并入口_老收银或新收银任一权限可见(string permission)
     {
-        var user = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
+        var user = CreateUser(new Claim("permission", permission));
 
         var menu = _service.BuildMenu(user);
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        var operationLogs = Assert.Single(
-            posAdmin.Children!,
-            item => item.Path == "/pos-admin/operation-logs"
+        var operationLogs = Assert.Single(posAdmin.Children!);
+        Assert.Equal("/pos-admin/operation-logs", operationLogs.Path);
+        Assert.Equal("menu.operationLogs", operationLogs.TitleKey);
+        Assert.Equal(
+            new[] { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View },
+            operationLogs.AnyPermissions
         );
-        Assert.Equal(Permissions.PosTerminal.Audit.View, operationLogs.Permission);
+    }
+
+    [Fact]
+    public void BuildMenu_不再单列老系统操作日志入口()
+    {
+        var user = CreateUser(
+            new Claim("permission", Permissions.PosTerminal.Audit.View),
+            new Claim("permission", Permissions.LegacyEmployeeLogs.View)
+        );
+
+        var menu = _service.BuildMenu(user);
+
+        var children = menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()).ToList();
+        Assert.DoesNotContain(children, child => child.Path == "/pos-admin/legacy-employee-logs");
+        Assert.Single(children, child => child.Path == "/pos-admin/operation-logs");
     }
 
     [Fact]
@@ -880,14 +899,17 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(32, menu.Count);
+        Assert.Equal(36, menu.Count);
+        Assert.Contains(menu, item => item.RouteName == "app-install");
+        Assert.Contains(menu, item => item.RouteName == "containers");
+        Assert.Contains(menu, item => item.RouteName == "warehouse-picking");
         Assert.Contains(menu, item => item.RouteName == "cash-register-users");
         Assert.Contains(menu, item => item.RouteName == "seasonal-product-insights");
         Assert.Contains(menu, item => item.RouteName == "price-updates");
         Assert.Contains(menu, item => item.RouteName == "sales-orders");
         Assert.Contains(menu, item => item.RouteName == "permissions");
         Assert.Contains(menu, item => item.RouteName == "product-query");
-        Assert.Contains(menu, item => item.RouteName == "pos-operation-logs");
+        Assert.Contains(menu, item => item.RouteName == "legacy-employee-logs");
         Assert.Contains(menu, item => item.RouteName == "product-insights");
         Assert.Contains(menu, item => item.RouteName == "warehouse-product-insights");
         Assert.Contains(menu, item => item.RouteName == "users");
@@ -921,6 +943,29 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_ShowsWarehousePickingForPickingOrWarehouseManagePermissions()
+    {
+        var pickingUser = CreateUser(new Claim("permission", Permissions.Warehouse.Picking));
+        var manageUser = CreateUser(new Claim("permission", Permissions.Warehouse.Manage));
+        var ordersUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageOrders));
+        var productsOnlyUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageProducts));
+
+        // 拣货入口按拣货权限或其别名（管理仓库、管理仓库订货）放行；只管商品的账号看不到。
+        Assert.Single(_service.BuildAppMenu(pickingUser), item => item.RouteName == "warehouse-picking");
+        Assert.Single(_service.BuildAppMenu(manageUser), item => item.RouteName == "warehouse-picking");
+        Assert.Single(_service.BuildAppMenu(ordersUser), item => item.RouteName == "warehouse-picking");
+        Assert.DoesNotContain(_service.BuildAppMenu(productsOnlyUser), item => item.RouteName == "warehouse-picking");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_ShowsWarehousePickingOnlyForWarehouseDevices()
+    {
+        // 纯设备会话没有个人账号，拣货人靠扫员工码确认；只有仓库类型设备放出入口。
+        Assert.Contains(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "warehouse-picking");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "warehouse-picking");
+    }
+
+    [Fact]
     public void BuildAppMenu_ShowsWarehouseProductInsightsOnlyWithWarehouseFlowPermission()
     {
         var flowUser = CreateUser(new Claim("permission", Permissions.SalesDashboard.WarehouseFlowView));
@@ -935,14 +980,63 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_ShowsWarehouseWithContainerViewPermission()
+    public void BuildAppMenu_ShowsContainersOnlyWithContainerViewPermission()
     {
-        var user = CreateUser(new Claim("permission", Permissions.Container.View));
+        var containerUser = CreateUser(new Claim("permission", Permissions.Container.View));
+        var productsOnlyUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageProducts));
 
-        var menu = _service.BuildAppMenu(user);
+        var containerMenu = _service.BuildAppMenu(containerUser);
+        var productsOnlyMenu = _service.BuildAppMenu(productsOnlyUser);
 
-        var item = Assert.Single(menu, item => item.RouteName == "warehouse");
-        Assert.Equal(Permissions.Warehouse.ManageProducts, item.Permission);
+        // 货柜管理是独立入口：只凭 Container.View 可见，且不再顺带放出商品和货位管理（warehouse）。
+        var item = Assert.Single(containerMenu, item => item.RouteName == "containers");
+        Assert.Equal("tabs.containers", item.TitleKey);
+        Assert.Equal(Permissions.Container.View, item.Permission);
+        Assert.DoesNotContain(containerMenu, item => item.RouteName == "warehouse");
+
+        // 只管商品的账号看得到商品和货位管理，看不到货柜管理。
+        var warehouse = Assert.Single(productsOnlyMenu, item => item.RouteName == "warehouse");
+        Assert.Equal(Permissions.Warehouse.ManageProducts, warehouse.Permission);
+        Assert.DoesNotContain(productsOnlyMenu, item => item.RouteName == "containers");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_HidesContainers()
+    {
+        // 纯设备会话没有 Container.View，仓库设备也只放出商品和货位管理与拣货。
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "containers");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "containers");
+    }
+
+    [Fact]
+    public void BuildAppMenu_ShowsContainerNewProductsOnlyWithDedicatedPermissionAfterWarehouse()
+    {
+        var authorized = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.Container.MobileNewProductsView))
+        );
+        var unauthorized = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.Container.View))
+        );
+
+        var item = Assert.Single(
+            authorized,
+            menu => menu.RouteName == "container-new-products"
+        );
+        Assert.Equal("tabs.containerNewProducts", item.TitleKey);
+        Assert.Equal(Permissions.Container.MobileNewProductsView, item.Permission);
+        Assert.Equal(41, item.Order);
+        Assert.DoesNotContain(
+            unauthorized,
+            menu => menu.RouteName == "container-new-products"
+        );
+        Assert.DoesNotContain(
+            authorized,
+            menu => menu.RouteName == "warehouse"
+        );
+        Assert.DoesNotContain(
+            authorized,
+            menu => menu.RouteName == "price-updates"
+        );
     }
 
     [Fact]
@@ -1333,23 +1427,24 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_ShowsPosOperationLogsOnlyWithAuditViewPermission()
+    public void BuildAppMenu_员工操作日志_老收银或新收银任一查看权限可见()
     {
-        var authorized = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
-        var unauthorized = CreateUser(new Claim("permission", Permissions.Users.View));
+        var legacyOnly = CreateUser(new Claim("permission", Permissions.LegacyEmployeeLogs.View));
+        var auditOnly = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
+        var neither = CreateUser(new Claim("permission", Permissions.Users.View));
 
-        // 员工操作日志入口只认审计查看权限；仅有用户查看权限的人不应看到。
-        var item = Assert.Single(
-            _service.BuildAppMenu(authorized),
-            menu => menu.RouteName == "pos-operation-logs"
-        );
-        Assert.Equal("tabs.posOperationLogs", item.TitleKey);
-        Assert.Equal("clipboard-text-clock-outline", item.Icon);
-        Assert.Equal(Permissions.PosTerminal.Audit.View, item.Permission);
-        Assert.DoesNotContain(
-            _service.BuildAppMenu(unauthorized),
-            menu => menu.RouteName == "pos-operation-logs"
-        );
+        // 移动端「员工操作日志」页内切换老收银 / 新收银，任一来源的查看权限即可进入；路由名沿用 legacy-employee-logs。
+        foreach (var user in new[] { legacyOnly, auditOnly })
+        {
+            var item = Assert.Single(
+                _service.BuildAppMenu(user),
+                menu => menu.RouteName == "legacy-employee-logs"
+            );
+            Assert.Equal("tabs.legacyEmployeeLogs", item.TitleKey);
+            Assert.Equal("clipboard-text-clock-outline", item.Icon);
+        }
+        Assert.DoesNotContain(_service.BuildAppMenu(auditOnly), menu => menu.RouteName == "pos-operation-logs");
+        Assert.DoesNotContain(_service.BuildAppMenu(neither), menu => menu.RouteName == "legacy-employee-logs");
     }
 
     [Theory]
@@ -1414,12 +1509,12 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildDeviceAppMenu_HidesPosOperationLogsForDeviceMode()
+    public void BuildDeviceAppMenu_HidesLegacyEmployeeLogsForDeviceMode()
     {
-        // 设备会话没有用户角色，后端查询服务会直接拒绝，因此设备模式菜单不应暴露该入口。
+        // 设备会话没有用户账号，老收银日志按账号可管理分店授权，因此设备模式菜单不应暴露该入口。
         var menu = _service.BuildDeviceAppMenu("Mobile");
 
-        Assert.DoesNotContain(menu, item => item.RouteName == "pos-operation-logs");
+        Assert.DoesNotContain(menu, item => item.RouteName == "legacy-employee-logs");
     }
 
     [Fact]
@@ -1439,6 +1534,35 @@ public class NavigationServiceTests
         Assert.DoesNotContain(
             _service.BuildAppMenu(unauthorized),
             menu => menu.RouteName == "permissions"
+        );
+    }
+
+    [Fact]
+    public void BuildAppMenu_ShowsAppInstallOnlyWithDedicatedPermissionWithoutAdmin()
+    {
+        var authorized = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.System.ViewMobileAppInstallLinks))
+        );
+        // 版本管理查看权限不代表安装页权限，两者独立授权。
+        var appDownloadsOnly = _service.BuildAppMenu(
+            CreateUser(new Claim("permission", Permissions.System.ViewAppDownloads))
+        );
+
+        var item = Assert.Single(authorized, menu => menu.RouteName == "app-install");
+        Assert.Equal("tabs.appInstall", item.TitleKey);
+        Assert.Equal("qrcode", item.Icon);
+        Assert.Equal(Permissions.System.ViewMobileAppInstallLinks, item.Permission);
+        Assert.Equal(59, item.Order);
+        Assert.DoesNotContain(authorized, menu => menu.RouteName == "app-downloads");
+        Assert.DoesNotContain(appDownloadsOnly, menu => menu.RouteName == "app-install");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_HidesAppInstallForDeviceMode()
+    {
+        Assert.DoesNotContain(
+            _service.BuildDeviceAppMenu("Mobile"),
+            item => item.RouteName == "app-install"
         );
     }
 

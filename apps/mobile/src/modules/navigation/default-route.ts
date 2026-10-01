@@ -4,6 +4,8 @@ export type AppTabPath =
   | "/(shell)/orders"
   | "/(shell)/cart"
   | "/(shell)/warehouse"
+  | "/(shell)/containers"
+  | "/(shell)/warehouse-picking"
   | "/(shell)/domestic-purchase"
   | "/(shell)/local-supplier-invoices"
   | "/(shell)/installment-orders"
@@ -19,6 +21,7 @@ export type AppTabPath =
   | "/(shell)/price-updates"
   | "/(shell)/warehouse-product-insights"
   | "/(shell)/seasonal-product-insights"
+  | "/(shell)/container-new-products"
   | "/(shell)/sales-orders"
   | "/(shell)/users"
   | "/(shell)/user-admin"
@@ -27,8 +30,9 @@ export type AppTabPath =
   | "/(shell)/permissions"
   | "/(shell)/employee-profile"
   | "/(shell)/employee-profile-review"
-  | "/(shell)/pos-operation-logs"
+  | "/(shell)/legacy-employee-logs"
   | "/(shell)/device-management"
+  | "/(shell)/app-install"
   | "/(shell)/app-downloads"
   | "/(shell)/wpf-versions"
   | "/(shell)/settings";
@@ -39,6 +43,9 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   orders: "/(shell)/orders",
   cart: "/(shell)/cart",
   warehouse: "/(shell)/warehouse",
+  // 货柜管理是独立菜单入口；列表页在 containers 栈内，明细页仍由根 Stack 接管。
+  containers: "/(shell)/containers",
+  "warehouse-picking": "/(shell)/warehouse-picking",
   "domestic-purchase": "/(shell)/domestic-purchase",
   "local-supplier-invoices": "/(shell)/local-supplier-invoices",
   "installment-orders": "/(shell)/installment-orders",
@@ -54,6 +61,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   "price-updates": "/(shell)/price-updates",
   "warehouse-product-insights": "/(shell)/warehouse-product-insights",
   "seasonal-product-insights": "/(shell)/seasonal-product-insights",
+  "container-new-products": "/(shell)/container-new-products",
   "sales-orders": "/(shell)/sales-orders",
   users: "/(shell)/users",
   "user-admin": "/(shell)/user-admin",
@@ -62,8 +70,9 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   permissions: "/(shell)/permissions",
   "employee-profile": "/(shell)/employee-profile",
   "employee-profile-review": "/(shell)/employee-profile-review",
-  "pos-operation-logs": "/(shell)/pos-operation-logs",
+  "legacy-employee-logs": "/(shell)/legacy-employee-logs",
   "device-management": "/(shell)/device-management",
+  "app-install": "/(shell)/app-install",
   "app-downloads": "/(shell)/app-downloads",
   "wpf-versions": "/(shell)/wpf-versions",
   settings: "/(shell)/settings",
@@ -73,13 +82,15 @@ export const SUPPORTED_TAB_ROUTE_NAMES = new Set(Object.keys(TAB_PATHS));
 export const SETTINGS_FALLBACK_ROUTE_NAME = "settings";
 
 const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
+  // 安装页按账号独立权限授权，设备会话没有该权限，接口会直接拒绝。
+  "app-install",
   "app-downloads",
   "wpf-versions",
   "attendance-personal",
   "attendance-management",
   "employee-profile-review",
-  // 设备会话没有店长/管理员角色，后端审计查询会直接拒绝，设备模式不展示入口。
-  "pos-operation-logs",
+  // 设备会话没有用户账号，老收银操作日志按账号可管理分店授权，设备模式不展示入口。
+  "legacy-employee-logs",
   // 收银用户条码按操作人账号的可管理分店授权，设备会话不展示入口。
   "cash-register-users",
   // 季节商品查询按账号独立权限授权，设备会话没有该权限，接口会直接拒绝。

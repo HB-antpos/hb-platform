@@ -110,6 +110,7 @@
     "advertisements": "Advertisements",
     "cashRegisterUsers": "Cashier Barcodes",
     "operationLogs": "Employee Operation Logs",
+    "legacyEmployeeLogs": "Legacy POS Operation Logs",
     "linklySettlements": "Linkly Settlements",
     "linklySettlementDetail": "Linkly Settlement Detail",
     "scheduleAttendance": "Schedule Attendance",
@@ -2195,6 +2196,7 @@
       "orderDate": "Order Date: ",
       "innerPackShort": "INNER Pack",
       "orderQtyShort": "Order Qty",
+      "scanToPick": "Scan to pick",
       "remarks": "Remarks: {{remarks}}",
       "totalSKU": "Total SKU: {{count}}",
       "totalOrderQty": "Total Order Qty: {{count}}",
@@ -4120,7 +4122,14 @@
       "dailyCloseReprint": "Reprint Daily Close",
       "linklySettlement": "Linkly Settlement",
       "linklySettlementReprint": "Reprint Linkly Settlement",
-      "cardPaymentSupervisorResolution": "Card Payment Supervisor Resolution"
+      "cardPaymentSupervisorResolution": "Card Payment Supervisor Resolution",
+      "permissionOverride": "Supervisor Authorization",
+      "installmentPickupConfirm": "Installment Pickup Confirmed",
+      "catalogReset": "Catalog Reset",
+      "testSalesDataReset": "Test Sales Data Reset",
+      "deviceReregister": "Device Reregistered",
+      "apiServerChange": "API Server Changed",
+      "remoteMaintenanceInstall": "Remote Maintenance Install"
     }
   },
   "performanceBaseline": {
@@ -4784,6 +4793,7 @@
         "HbwebExpo": "Mobile App",
         "hbpos_win": "WPF Client",
         "hbpos_ipad": "iPad Client",
+        "hbpos_handheld": "Handheld POS Client",
         "hbpos_api": "WPF POS Backend"
       },
       "status": {
@@ -5210,6 +5220,10 @@
         "requiredWarning": "This policy cannot be skipped, but it cannot bypass Runtime or bootstrap compatibility",
         "optionalNotice": "Clients may restart now or apply the downloaded OTA later",
         "compatibilityBoundary": "Coverage is limited to clients with a compatible Runtime, matching native channel, and the controlled updater bootstrap. The backend cannot use OTA to force legacy clients that lack the bootstrap or use an incompatible Runtime.",
+        "activeAdditional": "Active · {{runtime}}",
+        "additionalTargets": "Additional targets",
+        "additionalTargetsKept": "Additional targets (kept on save)",
+        "additionalTargetsNone": "None",
         "auditChain": "Audit chain: immutable release fact → lane candidate → policy snapshot → minimal client decision. Any environment, platform, Runtime, or target identity mismatch is rejected.",
         "revisionTitle": "Policy Revision Timeline",
         "noRevisions": "No policy revisions",

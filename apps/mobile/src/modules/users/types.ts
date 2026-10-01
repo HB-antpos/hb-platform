@@ -13,6 +13,8 @@ export interface StoreUserListItem {
   birthday?: string;
   gender?: string;
   employmentType?: string;
+  /** 仅考勤员工接口返回：未满 18 岁时的周岁。 */
+  age?: number;
   lastLoginTime?: string;
   lastLoginIp?: string;
   createdAt?: string;

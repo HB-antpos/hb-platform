@@ -1,6 +1,7 @@
 using System.Text;
 using BlazorApp.Api.Features.StoreOrders.Invoice;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services.Pdf;
 using BlazorApp.Shared.DTOs;
 using ClosedXML.Excel;
 using iTextSharp.text;
@@ -199,7 +200,8 @@ namespace BlazorApp.Api.Services.React
             PdfWriter.GetInstance(document, stream);
             document.Open();
 
-            var baseFont = BaseFont.CreateFont("STSong-Light", "UniGB-UCS2-H", BaseFont.NOT_EMBEDDED);
+            // 中文字体走线程安全的共享提供者，避免冷启动并发首次创建 CJK 字体时 iTextSharp 静态缓存重复 Add
+            var baseFont = PdfCjkFontProvider.SimplifiedChinese;
             var englishBaseFont = BaseFont.CreateFont(
                 BaseFont.HELVETICA,
                 BaseFont.WINANSI,

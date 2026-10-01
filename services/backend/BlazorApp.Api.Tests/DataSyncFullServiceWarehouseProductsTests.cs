@@ -233,7 +233,8 @@ public sealed class DataSyncFullServiceWarehouseProductsTests : IDisposable
         Assert.Equal(102m, updated.OEMPrice);
         Assert.Equal(103m, updated.ImportPrice);
         Assert.Equal(104, updated.StockQuantity);
-        Assert.Equal(105, updated.MinOrderQuantity);
+        // 中包数由仓库本地维护：本地已有正数时 HQ 的最小订货量不再覆盖。
+        Assert.Equal(5, updated.MinOrderQuantity);
         Assert.Equal(106m, updated.StockValue);
         Assert.Equal(107, updated.StockAlertQuantity);
         Assert.False(updated.IsActive);
@@ -264,6 +265,67 @@ public sealed class DataSyncFullServiceWarehouseProductsTests : IDisposable
         Assert.Equal(19, kept.PackingQuantity);
         Assert.Equal("KeepUser", kept.CreatedBy);
         Assert.False(kept.IsDeleted);
+    }
+
+    [Fact]
+    public async Task SyncWarehouseProductsFromHqAsync_本地中包数为空或零时用HQ最小订货量补位()
+    {
+        await SeedLocalWarehouseProductAsync(
+            "P-ZERO",
+            domesticPrice: 1m,
+            oemPrice: 2m,
+            importPrice: 3m,
+            stockQuantity: 4,
+            minOrderQuantity: 0,
+            stockValue: 6m,
+            stockAlertQuantity: 7,
+            isActive: true,
+            volume: 8.8m,
+            packingQuantity: 9,
+            createdAt: new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+            createdBy: "LocalUser",
+            isDeleted: false
+        );
+        await _localDb.Insertable(new WarehouseProduct
+        {
+            ProductCode = "P-NULL",
+            MinOrderQuantity = null,
+            IsActive = true,
+            CreatedAt = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+            CreatedBy = "LocalUser",
+        }).ExecuteCommandAsync();
+        await SeedHqStockAsync(
+            "P-ZERO",
+            domesticPrice: 101m,
+            oemPrice: 102m,
+            importPrice: 103m,
+            stockQuantity: 104m,
+            minOrderQuantity: 12m,
+            stockValue: 106m,
+            stockAlertQuantity: 107,
+            isActive: 1
+        );
+        await SeedHqStockAsync(
+            "P-NULL",
+            domesticPrice: 201m,
+            oemPrice: 202m,
+            importPrice: 203m,
+            stockQuantity: 204m,
+            minOrderQuantity: 6m,
+            stockValue: 206m,
+            stockAlertQuantity: 207,
+            isActive: 1
+        );
+
+        var result = await CreateService().SyncWarehouseProductsFromHqAsync(1, 1);
+
+        Assert.True(result.IsSuccess, result.Message);
+        var zero = await _localDb.Queryable<WarehouseProduct>()
+            .SingleAsync(x => x.ProductCode == "P-ZERO");
+        Assert.Equal(12, zero.MinOrderQuantity);
+        var empty = await _localDb.Queryable<WarehouseProduct>()
+            .SingleAsync(x => x.ProductCode == "P-NULL");
+        Assert.Equal(6, empty.MinOrderQuantity);
     }
 
     [Fact]

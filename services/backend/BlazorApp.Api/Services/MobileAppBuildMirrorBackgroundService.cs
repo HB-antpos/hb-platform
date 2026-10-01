@@ -8,6 +8,9 @@ namespace BlazorApp.Api.Services
         private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan StaleRunningAfter = TimeSpan.FromMinutes(30);
         private const int MaxAttempts = 3;
+        // 补算与镜像共用 CosMirrorAttempts 计数：成功镜像后的剩余次数即补算重试额度，两次尝试至少间隔 30 分钟。
+        private const int ChecksumBackfillMaxAttempts = 6;
+        private static readonly TimeSpan ChecksumBackfillRetryAfter = TimeSpan.FromMinutes(30);
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<MobileAppBuildMirrorBackgroundService> _logger;
 
@@ -54,7 +57,8 @@ namespace BlazorApp.Api.Services
 
             if (job == null)
             {
-                return false;
+                // 镜像队列空闲时才补算，新构建的镜像优先。
+                return await BackfillOneChecksumAsync(mirrorQueue, mirror, cancellationToken);
             }
 
             try
@@ -72,6 +76,45 @@ namespace BlazorApp.Api.Services
             {
                 LogMirrorFailure(job, ex);
                 await mirrorQueue.CompleteCosMirrorFailureAsync(job, ex);
+                return true;
+            }
+        }
+
+        private async Task<bool> BackfillOneChecksumAsync(
+            IMobileAppBuildMirrorQueue mirrorQueue,
+            IMobileAppBuildArtifactMirror mirror,
+            CancellationToken cancellationToken
+        )
+        {
+            var job = await mirrorQueue.ClaimNextCosChecksumBackfillJobAsync(
+                DateTime.UtcNow,
+                ChecksumBackfillMaxAttempts,
+                ChecksumBackfillRetryAfter
+            );
+            if (job == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var checksum = await mirror.ComputeMirroredChecksumAsync(job, cancellationToken);
+                await mirrorQueue.CompleteCosChecksumBackfillSuccessAsync(job, checksum);
+                return true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "APK COS 校验值补算失败，EasBuildId: {EasBuildId}, Attempts: {Attempts}",
+                    job.EasBuildId,
+                    job.CosMirrorAttempts
+                );
+                await mirrorQueue.CompleteCosChecksumBackfillFailureAsync(job, ex);
                 return true;
             }
         }

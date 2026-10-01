@@ -23,6 +23,13 @@ public sealed record CustomerDisplayWindowResult(CustomerDisplayWindowMode Mode,
     public bool IsOpen => Mode != CustomerDisplayWindowMode.Closed;
 }
 
+/// <summary>能被挪到指定显示器的外壳窗口（主窗口），供「主窗口与客显互换屏幕」使用。</summary>
+public interface IDisplayMovableWindow
+{
+    /// <summary>挪到指定显示器并保持原来的最大化/普通状态，同时记住这块屏供下次启动使用。</summary>
+    void MoveToDisplay(DisplayBounds display);
+}
+
 public interface ICustomerDisplayWindowService
 {
     bool IsOpen { get; }
@@ -38,6 +45,13 @@ public interface ICustomerDisplayWindowService
         remove { }
     }
 
+    /// <summary>客显窗口上点了互换屏幕按钮（标题栏或全屏右上角），请求主窗口与客显互换屏幕。</summary>
+    event EventHandler? SwapScreensRequested
+    {
+        add { }
+        remove { }
+    }
+
     void Prewarm(CustomerDisplayViewModel viewModel)
     {
     }
@@ -47,6 +61,10 @@ public interface ICustomerDisplayWindowService
     CustomerDisplayWindowResult Toggle(CustomerDisplayViewModel viewModel, Window? owner);
 
     CustomerDisplayWindowResult SetMode(CustomerDisplayWindowMode mode, CustomerDisplayViewModel viewModel, Window? owner);
+
+    /// <summary>主窗口与客显互换所在显示器，两边各自保持原来的显示状态。</summary>
+    CustomerDisplayWindowResult SwapDisplays(CustomerDisplayViewModel viewModel, Window owner) =>
+        new(Mode, null);
 }
 
 public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
@@ -56,14 +74,21 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
     public const string OpenedFullscreenStatusKey = "customerDisplay.window.openedFullscreen";
     public const string ClosedStatusKey = "customerDisplay.window.closed";
     public const string NoSecondDisplayStatusKey = "customerDisplay.window.noSecondDisplay";
+    public const string SwappedStatusKey = "customerDisplay.window.swapped";
+    public const string SwapRequiresOpenStatusKey = "customerDisplay.window.swapRequiresOpen";
+    public const string SwapUnavailableStatusKey = "customerDisplay.window.swapUnavailable";
 
     private readonly IDisplayTopologyService _displayTopology;
+    private readonly ICustomerDisplayWindowPreferenceStore? _preferences;
     private CustomerDisplayWindow? _window;
     private CustomerDisplayWindowMode _mode = CustomerDisplayWindowMode.Closed;
 
-    public CustomerDisplayWindowService(IDisplayTopologyService displayTopology)
+    public CustomerDisplayWindowService(
+        IDisplayTopologyService displayTopology,
+        ICustomerDisplayWindowPreferenceStore? preferences = null)
     {
         _displayTopology = displayTopology;
+        _preferences = preferences;
     }
 
     public bool IsOpen => _window?.IsVisible == true && _mode != CustomerDisplayWindowMode.Closed;
@@ -73,6 +98,8 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
     public event EventHandler? Closed;
 
     public event EventHandler? FullscreenRequested;
+
+    public event EventHandler? SwapScreensRequested;
 
     internal sealed record CustomerDisplayLayoutPlan(
         bool TitleBarVisibleDuringPlacement,
@@ -167,6 +194,57 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
         return new CustomerDisplayWindowResult(mode, GetOpenedStatusKey(mode));
     }
 
+    public CustomerDisplayWindowResult SwapDisplays(CustomerDisplayViewModel viewModel, Window owner)
+    {
+        if (_window is null || !IsOpen)
+        {
+            ConsoleLog.Write("CustomerDisplay", $"window swap blocked reason=not-open mode={_mode}");
+            return new CustomerDisplayWindowResult(_mode, SwapRequiresOpenStatusKey);
+        }
+
+        _window.DataContext = viewModel;
+        return SwapDisplaysCore(
+            _window,
+            owner,
+            _mode,
+            showWindow: _window.Show,
+            setTitleBarVisible: _window.SetTitleBarVisible,
+            refreshContentLayout: _window.RefreshContentLayout);
+    }
+
+    internal CustomerDisplayWindowResult SwapDisplaysCore(
+        Window customerWindow,
+        Window owner,
+        CustomerDisplayWindowMode mode,
+        Action showWindow,
+        Action<bool> setTitleBarVisible,
+        Action refreshContentLayout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var ownerDisplay = _displayTopology.GetDisplayForWindow(owner);
+        var customerDisplay = _displayTopology.GetDisplayForWindow(customerWindow);
+        if (ownerDisplay is null
+            || customerDisplay is null
+            || ownerDisplay.Identity == customerDisplay.Identity
+            || owner is not IDisplayMovableWindow movableOwner)
+        {
+            ConsoleLog.Write(
+                "CustomerDisplay",
+                $"window swap blocked reason=displays-unresolved ownerDisplay={ownerDisplay?.Identity.Format() ?? "none"} customerDisplay={customerDisplay?.Identity.Format() ?? "none"} ownerMovable={owner is IDisplayMovableWindow}");
+            return new CustomerDisplayWindowResult(mode, SwapUnavailableStatusKey);
+        }
+
+        // 关键逻辑：先把主窗口挪到客显所在屏，再按当前模式把客显铺到主窗口原来的屏；
+        // 客显目标屏显式传入，不走「找主窗口以外第一块屏」，三屏以上也只在这两块屏之间互换。
+        movableOwner.MoveToDisplay(customerDisplay);
+        ApplyModeCore(customerWindow, owner, ownerDisplay, mode, showWindow, setTitleBarVisible, refreshContentLayout);
+        stopwatch.Stop();
+        ConsoleLog.Write(
+            "CustomerDisplay",
+            $"window swap completed mode={mode} mainTo={customerDisplay.Identity.Format()} customerTo={ownerDisplay.Identity.Format()} elapsedMs={stopwatch.ElapsedMilliseconds}");
+        return new CustomerDisplayWindowResult(mode, SwappedStatusKey);
+    }
+
     private CustomerDisplayWindow EnsureWindow(CustomerDisplayViewModel viewModel, Window? owner)
     {
         if (_window is not null)
@@ -198,6 +276,8 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
         _displayTopology.AttachWorkAreaConstraint(_window);
         _window.Closed += OnWindowClosed;
         _window.FullscreenRequested += OnWindowFullscreenRequested;
+        _window.SwapScreensRequested += OnWindowSwapScreensRequested;
+        _window.MoveOrResizeCompleted += OnWindowMoveOrResizeCompleted;
         stopwatch.Stop();
         ConsoleLog.Write(
             "CustomerDisplay",
@@ -251,7 +331,8 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
             _displayTopology.FitToDisplayWorkArea(window, targetDisplay);
         }
 
-        if (plan.CenterAfterPlacement)
+        // 普通窗口优先回到收银员上次拖放的位置大小，没有记录或已不在该显示器上时才默认居中。
+        if (plan.CenterAfterPlacement && !TryApplyRememberedNormalBounds(window))
         {
             CenterNormalWindow(window);
         }
@@ -323,6 +404,30 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
         }, DispatcherPriority.ApplicationIdle);
     }
 
+    /// <summary>调用前窗口已铺满目标显示器工作区，因此当前位置大小即为该工作区的 DIP 边界。</summary>
+    private bool TryApplyRememberedNormalBounds(Window window)
+    {
+        var workArea = new CustomerDisplayNormalBounds(window.Left, window.Top, window.Width, window.Height);
+        var restored = CustomerDisplayWindowPreferenceStore.ResolveRestoredBounds(
+            workArea,
+            _preferences?.Current.NormalBounds,
+            window.MinWidth,
+            window.MinHeight);
+        if (restored is not { } bounds)
+        {
+            return false;
+        }
+
+        window.Left = bounds.Left;
+        window.Top = bounds.Top;
+        window.Width = bounds.Width;
+        window.Height = bounds.Height;
+        ConsoleLog.Write(
+            "CustomerDisplay",
+            $"window normal bounds restored left={bounds.Left:0} top={bounds.Top:0} width={bounds.Width:0} height={bounds.Height:0}");
+        return true;
+    }
+
     private static void CenterNormalWindow(Window window)
     {
         var fullWidth = window.Width;
@@ -360,11 +465,36 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
         {
             _window.Closed -= OnWindowClosed;
             _window.FullscreenRequested -= OnWindowFullscreenRequested;
+            _window.SwapScreensRequested -= OnWindowSwapScreensRequested;
+            _window.MoveOrResizeCompleted -= OnWindowMoveOrResizeCompleted;
             _window = null;
+        }
+
+        // 只记住收银员点关闭按钮；程序退出、断开第二屏、重新注册设备等系统关闭不改上次设置。
+        if (sender is CustomerDisplayWindow { IsClosedByUser: true })
+        {
+            _ = _preferences?.RememberModeAsync(CustomerDisplayWindowMode.Closed);
         }
 
         _mode = CustomerDisplayWindowMode.Closed;
         Closed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnWindowMoveOrResizeCompleted(object? sender, EventArgs e)
+    {
+        if (_mode != CustomerDisplayWindowMode.Normal || sender is not Window window)
+        {
+            return;
+        }
+
+        var current = window.WindowState == WindowState.Normal
+            ? new Rect(window.Left, window.Top, window.Width, window.Height)
+            : window.RestoreBounds;
+        var bounds = new CustomerDisplayNormalBounds(current.Left, current.Top, current.Width, current.Height);
+        ConsoleLog.Write(
+            "CustomerDisplay",
+            $"window normal bounds remembered left={bounds.Left:0} top={bounds.Top:0} width={bounds.Width:0} height={bounds.Height:0}");
+        _ = _preferences?.RememberNormalBoundsAsync(bounds);
     }
 
     private void OnWindowFullscreenRequested(object? sender, EventArgs e)
@@ -382,6 +512,26 @@ public sealed class CustomerDisplayWindowService : ICustomerDisplayWindowService
 
         FullscreenRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    private void OnWindowSwapScreensRequested(object? sender, EventArgs e)
+    {
+        OnSwapScreensRequested();
+    }
+
+    internal void OnSwapScreensRequested()
+    {
+        ConsoleLog.Write("CustomerDisplay", $"window swap-screens requested currentMode={_mode}");
+        if (!ShouldForwardSwapScreensRequest(_mode))
+        {
+            return;
+        }
+
+        SwapScreensRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // 窗口模式和全屏都有互换按钮；关闭状态下的迟到点击直接忽略。
+    internal static bool ShouldForwardSwapScreensRequest(CustomerDisplayWindowMode mode) =>
+        mode != CustomerDisplayWindowMode.Closed;
 
     // 只有带标题栏的普通模式能双击；全屏已无标题栏，关闭状态下的迟到事件直接忽略。
     internal static bool ShouldForwardFullscreenRequest(CustomerDisplayWindowMode mode) =>

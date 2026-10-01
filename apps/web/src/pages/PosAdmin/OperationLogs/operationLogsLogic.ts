@@ -1,5 +1,10 @@
+import type { LegacyEmployeeLogEmployeeSummary } from '../../../types/legacyEmployeeLog'
 import type {
   OperationAuditDeviceSystem,
+  OperationAuditEmployeeSummaryRow,
+  OperationAuditQueryParams,
+  OperationAuditReviewStatus,
+  OperationAuditRiskLens,
   OperationAuditSortField,
   OperationAuditSortOrder,
 } from '../../../types/operationAudit'
@@ -10,10 +15,14 @@ export interface OperationAuditQueryState {
   startUtc: string
   endUtc: string
   storeCode: string
+  /** 分店多选；与 storeCode 合并后去重。 */
+  storeCodes?: string[]
   cashierKeyword: string
+  cashierId?: string
   deviceCode: string
   deviceSystem: string
   operationType: string
+  operationTypes?: string[]
   outcome: string
   productKeyword: string
   orderGuid: string
@@ -22,25 +31,12 @@ export interface OperationAuditQueryState {
   pageSize: number
   sortBy: OperationAuditSortField
   sortOrder: OperationAuditSortOrder
+  riskLens?: OperationAuditRiskLens
+  ruleCodes?: string[]
+  reviewStatus?: OperationAuditReviewStatus
 }
 
-export interface OperationAuditQueryParams {
-  fromUtc: string
-  toUtc: string
-  storeCode?: string
-  cashierKeyword?: string
-  deviceCode?: string
-  deviceSystem?: OperationAuditDeviceSystem
-  operationType?: string
-  outcome?: string
-  productKeyword?: string
-  orderGuid?: string
-  keyword?: string
-  pageNumber: number
-  pageSize: number
-  sortBy: OperationAuditSortField
-  sortOrder: OperationAuditSortOrder
-}
+export type { OperationAuditQueryParams }
 
 export const OPERATION_AUDIT_SORT_FIELDS = [
   'occurredAtUtc',
@@ -146,6 +142,13 @@ export const OPERATION_TYPE_KEYS: Record<string, string> = {
   LINKLY_SETTLEMENT: 'operationLogs.operations.linklySettlement',
   LINKLY_SETTLEMENT_REPRINT: 'operationLogs.operations.linklySettlementReprint',
   CARD_PAYMENT_SUPERVISOR_RESOLUTION: 'operationLogs.operations.cardPaymentSupervisorResolution',
+  PERMISSION_OVERRIDE: 'operationLogs.operations.permissionOverride',
+  INSTALLMENT_PICKUP_CONFIRM: 'operationLogs.operations.installmentPickupConfirm',
+  CATALOG_RESET: 'operationLogs.operations.catalogReset',
+  TEST_SALES_DATA_RESET: 'operationLogs.operations.testSalesDataReset',
+  DEVICE_REREGISTER: 'operationLogs.operations.deviceReregister',
+  API_SERVER_CHANGE: 'operationLogs.operations.apiServerChange',
+  REMOTE_MAINTENANCE_INSTALL: 'operationLogs.operations.remoteMaintenanceInstall',
 }
 
 export function normalizeOperationAuditPage<T>(payload: {
@@ -166,18 +169,27 @@ export function normalizeOperationAuditPage<T>(payload: {
 }
 
 export function buildOperationAuditQuery(_state: OperationAuditQueryState): OperationAuditQueryParams {
-  const trim = (value: string) => value.trim() || undefined
+  const trim = (value: string | undefined) => value?.trim() || undefined
   const deviceSystem = trim(_state.deviceSystem)
+  const unique = (values: readonly (string | undefined)[] | undefined) =>
+    [...new Set((values ?? []).map((value) => value?.trim()).filter((value): value is string => Boolean(value)))]
+  const storeCodes = unique(_state.storeCodes)
+  const operationTypes = unique(_state.operationTypes)
+  const lens = _state.riskLens ?? 'all'
   return {
     fromUtc: _state.startUtc,
     toUtc: _state.endUtc,
     storeCode: trim(_state.storeCode),
+    // 多选分店与操作类型按重复键展开；空数组不传，保持与旧后端兼容。
+    ...(storeCodes.length ? { storeCodes } : {}),
     cashierKeyword: trim(_state.cashierKeyword),
+    ...(trim(_state.cashierId) ? { cashierId: trim(_state.cashierId) } : {}),
     deviceCode: trim(_state.deviceCode),
     deviceSystem: OPERATION_AUDIT_DEVICE_SYSTEM_OPTIONS.includes(
       deviceSystem as OperationAuditDeviceSystem,
     ) ? deviceSystem as OperationAuditDeviceSystem : undefined,
     operationType: trim(_state.operationType),
+    ...(operationTypes.length ? { operationTypes } : {}),
     outcome: trim(_state.outcome),
     productKeyword: trim(_state.productKeyword),
     orderGuid: trim(_state.orderGuid),
@@ -186,6 +198,10 @@ export function buildOperationAuditQuery(_state: OperationAuditQueryState): Oper
     pageSize: _state.pageSize,
     sortBy: _state.sortBy,
     sortOrder: _state.sortOrder,
+    // 默认入口不传；规则与核查状态只在「异常」入口下有意义。
+    ...(lens !== 'all' ? { riskLens: lens } : {}),
+    ...(lens === 'abnormal' && _state.ruleCodes?.length ? { ruleCodes: [..._state.ruleCodes] } : {}),
+    ...(lens === 'abnormal' && _state.reviewStatus && _state.reviewStatus !== 'all' ? { reviewStatus: _state.reviewStatus } : {}),
   }
 }
 
@@ -203,13 +219,35 @@ export function formatMoney(_value: number | null | undefined, _currencyCode: st
   return `${sign}${symbol}${Math.abs(_value).toFixed(2)}`
 }
 
-export function summarizeProducts(_summary: {
+type ProductSummarySource = {
   productCount: number
   primaryProductName?: string | null
   primaryProduct?: string | null
-} | null | undefined, _fallback = 'Product'): string {
+  primaryItemNumber?: string | null
+} | null | undefined
+
+/** 主商品名 + 剩余数量（不含货号），供图文两行的商品摘要使用；没有商品返回 '-'。 */
+export function summarizeProductName(_summary: ProductSummarySource, _fallback = 'Product'): string {
   if (!_summary || _summary.productCount <= 0) return '-'
-  const primary = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim() || _fallback
+  const name = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim() || _fallback
+  const remaining = Math.max(0, _summary.productCount - 1)
+  return remaining > 0 ? `${name} +${remaining}` : name
+}
+
+/** 主商品的货号；与商品名相同（收银端拿货号当名称）时不重复显示。 */
+export function primaryItemNumberOf(_summary: ProductSummarySource): string | undefined {
+  const itemNumber = _summary?.primaryItemNumber?.trim()
+  if (!_summary || _summary.productCount <= 0 || !itemNumber) return undefined
+  const name = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim()
+  return itemNumber === name ? undefined : itemNumber
+}
+
+/** 单行文字摘要（时间线等）：货号紧跟主商品名，“+N”仍放最后，避免误读成货号属于其余商品。 */
+export function summarizeProducts(_summary: ProductSummarySource, _fallback = 'Product'): string {
+  if (!_summary || _summary.productCount <= 0) return '-'
+  const name = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim() || _fallback
+  const itemNumber = primaryItemNumberOf(_summary)
+  const primary = itemNumber ? `${name} (${itemNumber})` : name
   const remaining = Math.max(0, _summary.productCount - 1)
   return remaining > 0 ? `${primary} +${remaining}` : primary
 }
@@ -238,4 +276,20 @@ export function buildSystemLogLink(_input: {
     params.set('toUtc', new Date(occurredAt.valueOf() + 5 * 60 * 1000).toISOString())
   }
   return `/system/center-logs?${params.toString()}`
+}
+
+/** 新收银按收银员汇总的一行转成老收银员工汇总的形状，复用同一张汇总表。 */
+export function toLegacyEmployeeSummary(row: OperationAuditEmployeeSummaryRow): LegacyEmployeeLogEmployeeSummary {
+  return {
+    employeeId: row.cashierId ?? null,
+    employeeName: row.cashierName ?? null,
+    storeCodes: row.storeCodes,
+    deviceCodes: row.deviceCodes,
+    total: row.total,
+    dangerCount: row.dangerCount,
+    abnormalCount: row.abnormalCount,
+    pendingReview: row.pendingReview,
+    abnormalByRule: row.abnormalByRule,
+    amountImpact: row.amountImpact,
+  }
 }

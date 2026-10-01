@@ -596,6 +596,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CloseCustomerDisplayWindowCommand = new AsyncRelayCommand(CloseCustomerDisplayWindowFromCommandAsync);
         ShowCustomerDisplayNormalCommand = new AsyncRelayCommand(() => SetCustomerDisplayWindowModeFromCommandAsync(CustomerDisplayWindowMode.Normal));
         ShowCustomerDisplayFullscreenCommand = new AsyncRelayCommand(() => SetCustomerDisplayWindowModeFromCommandAsync(CustomerDisplayWindowMode.Fullscreen));
+        SwapCustomerDisplayScreensCommand = new AsyncRelayCommand(SwapCustomerDisplayScreensAsync);
         ToggleCultureCommand = new AsyncRelayCommand(
             ToggleCultureAsync,
             AsyncRelayCommandOptions.AllowConcurrentExecutions);
@@ -612,6 +613,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _localization.CultureChanged += OnCultureChanged;
         _customerDisplayOrchestrator.Closed += OnCustomerDisplayClosed;
         _customerDisplayOrchestrator.FullscreenRequested += OnCustomerDisplayFullscreenRequested;
+        _customerDisplayOrchestrator.SwapScreensRequested += OnCustomerDisplaySwapScreensRequested;
         _clockTimer.Tick += OnClockTimerTick;
         _connectivityTimer.Tick += OnConnectivityTimerTick;
         _catalogDownloadHideTimer.Tick += OnCatalogDownloadHideTimerTick;
@@ -1006,6 +1008,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand ShowCustomerDisplayFullscreenCommand { get; }
 
+    public IAsyncRelayCommand SwapCustomerDisplayScreensCommand { get; }
+
     public IAsyncRelayCommand ToggleCultureCommand { get; }
 
     public IAsyncRelayCommand ResetScannerBindingCommand { get; }
@@ -1063,6 +1067,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _localization.CultureChanged -= OnCultureChanged;
         _customerDisplayOrchestrator.Closed -= OnCustomerDisplayClosed;
         _customerDisplayOrchestrator.FullscreenRequested -= OnCustomerDisplayFullscreenRequested;
+        _customerDisplayOrchestrator.SwapScreensRequested -= OnCustomerDisplaySwapScreensRequested;
         if (_operationAuthorizationService is not null)
         {
             _operationAuthorizationService.RevokeAll();
@@ -1081,7 +1086,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DisposeShutdownCancellationWhenSafe();
     }
 
-    public async Task InitializeAsync(AppStartupOptions startupOptions)
+    public async Task InitializeAsync(
+        AppStartupOptions startupOptions,
+        Action<StartupPhase>? reportStartupPhase = null)
     {
         _startupOptions = startupOptions;
         // 关键逻辑：重新初始化会创建新的页面实例，必须丢弃上一轮 post-show 任务，避免新注册页永久停在“正在加载门店”。
@@ -1089,7 +1096,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _startupActivationRecoveryMode = null;
         _startupActivationRecoveryIsUnreadable = false;
         _posPostShowStartupTask = null;
-        await _schema.InitializeAsync();
+        // Host 启动时审计回放服务已初始化过同一数据库；这里只在它失败或数据库已切换时才会真正再跑一遍。
+        await _schema.EnsureInitializedAsync();
         _schemaReady = true;
 
         await RestoreLanguageAsync(startupOptions);
@@ -1162,6 +1170,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         await ClearActivationRecoverySafeAsync();
+        // 设备已确认可营业，启动页进入"加载商品"阶段（注册页分支不会走到这里，该阶段按跳过处理）。
+        reportStartupPhase?.Invoke(StartupPhase.Catalog);
         await InitializePosExperienceAsync(startupOptions);
     }
 
@@ -1549,6 +1559,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             DeviceRegistration.StatusMessage = _localization.T("startup.stage.loadingProducts");
         }
 
+        // 换绑前的会话即发起换绑的收银员与原门店终端，必须在会话被替换前捕获。
+        var sessionBeforeActivation = Session;
         if (args.IsReregistered)
         {
             // 换店成功后旧设备和旧分店收银员会话均不可复用；购物车已由前置门禁保证为空。
@@ -1577,6 +1589,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 args.StoreCode,
                 args.HardwareId,
                 args.AuthorizationCode);
+        }
+
+        if (args.IsReregistered)
+        {
+            // 审计上传只发送与当前设备一致的事件；换绑后设备号必然改变，所以在新授权生效后
+            // 以新终端身份记录，操作人仍是发起换绑的收银员，原门店终端写入说明。
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.DeviceReregister,
+                "Succeeded",
+                sessionBeforeActivation,
+                reasonCode: "ACTIVATION_REBIND",
+                safeMessage: $"{sessionBeforeActivation.StoreCode}/{sessionBeforeActivation.DeviceCode} -> {args.StoreCode}/{args.DeviceCode}");
         }
 
         await InitializePosExperienceAsync(startupOptions);
@@ -1767,10 +1792,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             $"post-show open start store={Session.StoreCode} device={Session.DeviceCode} ownerPresent={owner is not null}");
         try
         {
-            // 诊断启动卡顿时关闭客显自动打开；手动客显按钮仍可正常打开。
-            ConsoleLog.Write(
-                "CustomerDisplay",
-                $"post-show open skipped store={Session.StoreCode} device={Session.DeviceCode} ownerPresent={owner is not null} reason=auto-open-disabled");
+            // 主窗口显示后才按本机记住的上次模式恢复客显，不阻塞首屏；从未记录或上次已关闭时不打开。
+            await _customerDisplayShellController.RestoreRememberedModeAsync(owner);
             stopwatch.Stop();
             ConsoleLog.Write(
                 "CustomerDisplay",
@@ -1779,10 +1802,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             stopwatch.Stop();
-            ConsoleLog.Write(
+            // 关键逻辑：客显恢复失败只记日志，不能中断后面的卡支付恢复、联网检测与目录同步。
+            ConsoleLog.WriteError(
                 "CustomerDisplay",
-                $"post-show open failed store={Session.StoreCode} device={Session.DeviceCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
-            throw;
+                $"post-show open failed store={Session.StoreCode} device={Session.DeviceCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}",
+                exception: ex);
         }
 
         ConsoleLog.Write(
@@ -2593,6 +2617,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyDeviceReregistered()
     {
+        // 审批制换绑提交后立即清除授权，只能以原终端身份记录；审批通过后设备号会变，
+        // 这条记录可能无法再上传，但仍保留在本机审计库中。
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.DeviceReregister,
+            "Succeeded",
+            Session,
+            reasonCode: "SUBMITTED_PENDING_APPROVAL");
         _deviceReregistrationCoordinator.ClearAuthorization();
         _posPostShowStartupTask = null;
         CancelStartupCatalogIndexLoad();
@@ -2961,6 +2993,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (ShowCustomerDisplayFullscreenCommand.CanExecute(null))
         {
             ShowCustomerDisplayFullscreenCommand.Execute(null);
+        }
+    }
+
+    private void OnCustomerDisplaySwapScreensRequested(object? sender, EventArgs e)
+    {
+        // 客显上的互换按钮走同一条命令：先过客显管理权限，再互换并记住主窗口所在屏。
+        if (SwapCustomerDisplayScreensCommand.CanExecute(null))
+        {
+            SwapCustomerDisplayScreensCommand.Execute(null);
         }
     }
 
@@ -3650,7 +3691,34 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (PaymentSuccess.TransactionId is Guid orderGuid)
         {
-            await _receiptCoordinator.PrintSuccessAsync(orderGuid);
+            ReceiptPrintResult result;
+            try
+            {
+                result = await _receiptCoordinator.PrintSuccessAsync(orderGuid);
+            }
+            catch (Exception ex)
+            {
+                // 取消类异常会穿透协调器，先留下失败审计再交给事件桥统一提示。
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    OperationAuditTypes.ReceiptReprint,
+                    "Failed",
+                    Session,
+                    reasonCode: "PAYMENT_SUCCESS_EXCEPTION",
+                    safeMessage: ex.GetType().Name,
+                    orderGuid: orderGuid.ToString("D"));
+                throw;
+            }
+
+            // 付款成功页可反复点击打印，按打印服务返回结果记录，与“打印上一张”同属小票补打审计。
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.ReceiptReprint,
+                result.Succeeded ? "Succeeded" : "Failed",
+                Session,
+                reasonCode: "PAYMENT_SUCCESS",
+                safeMessage: result.Succeeded ? null : result.Message,
+                orderGuid: orderGuid.ToString("D"));
         }
     }
 
@@ -3797,7 +3865,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         using var activation = grant.Activate();
-        SetCustomerDisplayWindowMode(mode, CurrentOwner);
+        _customerDisplayShellController.SetMode(mode, CurrentOwner, rememberChoice: true);
+    }
+
+    private async Task SwapCustomerDisplayScreensAsync()
+    {
+        using var grant = await AuthorizeShellOperationAsync(
+            Permissions.PosTerminal.CustomerDisplay.Manage,
+            "swap-customer-display-screens");
+        if (grant is null)
+        {
+            return;
+        }
+
+        var owner = CurrentOwner;
+        if (owner is null)
+        {
+            return;
+        }
+
+        using var activation = grant.Activate();
+        _customerDisplayShellController.SwapScreens(owner);
     }
 
     private async Task ResetScannerBindingAsync()

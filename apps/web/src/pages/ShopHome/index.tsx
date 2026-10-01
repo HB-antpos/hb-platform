@@ -2,7 +2,7 @@ import { ShoppingCartOutlined } from '@ant-design/icons'
 import { Breadcrumb, Button, Empty, Pagination, Select, Space, Spin, Tag, Tooltip, Typography, message } from 'antd'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   shouldIgnoreShopBarcodeSubmit,
   type ShopBarcodeSubmitSource,
@@ -88,6 +88,9 @@ export default function ShopHomePage() {
   const [searchParams] = useSearchParams()
   const categoryId = searchParams.get('category')
   const keyword = searchParams.get('keyword')
+  // 每次导航都会生成新的 location.key：再次搜索同一关键字、重复点当前分类或首页时 URL 不变，
+  // 靠它重新请求商品，避免上架、改价后回来复查仍看到旧结果。
+  const { key: navigationKey } = useLocation()
 
   const [products, setProducts] = useState<StoreOrderProductItem[]>([])
   const [dynamicDataMap, setDynamicDataMap] = useState<Record<string, StoreOrderDynamicData>>({})
@@ -289,7 +292,7 @@ export default function ShopHomePage() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [categoryId, keyword])
+  }, [categoryId, keyword, navigationKey])
 
   useEffect(() => {
     if (!cartOnlyFilter) {
@@ -427,7 +430,7 @@ export default function ShopHomePage() {
     return () => {
       cancelled = true
     }
-  }, [categoryId, currentPage, keyword, pageSize, selectedStore?.storeCode, gradeFilter, t])
+  }, [categoryId, currentPage, keyword, navigationKey, pageSize, selectedStore?.storeCode, gradeFilter, t])
 
   useEffect(() => {
     let cancelled = false
@@ -785,7 +788,7 @@ export default function ShopHomePage() {
         }
 
         const result = await withShopBarcodeRequestTimeout(
-          (signal) => lookupStoreOrderProductsByBarcode(barcode, signal),
+          (signal) => lookupStoreOrderProductsByBarcode(barcode, storeCode, signal),
         )
         if (selectedStoreCodeRef.current !== storeCode) {
           return 'ignored'

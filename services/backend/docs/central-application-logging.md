@@ -65,22 +65,27 @@ Content-Type: application/json
 
 `ApiKeyHash` 是项目日志密钥的 SHA-256 小写十六进制摘要。明文密钥只放部署环境变量或服务器配置，不提交仓库。
 
-生产 compose 已连续配置六个项目。只有已启用的外部项目需要注入合法的 64 位十六进制 SHA-256 摘要：
+生产 compose 已连续配置七个项目。只有已启用的外部项目需要注入合法的 64 位十六进制 SHA-256 摘要：
 
 ```bash
 CENTER_LOG_HBWEB_RV_KEY_SHA256=<sha256-lower-hex>
 CENTER_LOG_HBPOS_API_KEY_SHA256=<sha256-lower-hex>
 CENTER_LOG_HBPOS_IPAD_KEY_SHA256=<sha256-lower-hex>
+CENTER_LOG_HBPOS_HANDHELD_KEY_SHA256=<sha256-lower-hex>
+CENTER_LOG_HBPOS_WIN_KEY_SHA256=<sha256-lower-hex>
 ```
+
+WPF 客户端的明文写入 Key 存在 GitHub 仓库 Secret `HBPOS_WIN_CENTER_LOG_KEY`，只在 `wpf-inno-smoke-build.yml` 构建安装包时以环境变量 `HbposCenterLogApiKey` 注入，写进主程序集元数据（与上传地址 `https://hotbargain.vip/api/system/logs/ingest` 一起）作为客户端默认配置；本地与 PR 构建没有该值，客户端不上传。缺少该 Secret 时工作流直接失败。门店电脑仍可用环境变量 `HBPOS_LOG_CENTER_ENABLED=false` 关闭上传，或用 `HBPOS_LOG_CENTER_API_KEY` / `HBPOS_LOG_CENTER_INGEST_URL` 覆盖。
 
 项目清单和默认保留期：
 
 - `HBBBackend`：内部项目，启用，7 天，不配置外部写入摘要。
 - `hbweb_rv`：Web 前端，启用，7 天。
 - `HbwebExpo`：移动端，禁用，7 天。
-- `hbpos_win`：WPF 客户端，禁用，30 天。
+- `hbpos_win`：WPF 客户端，启用，30 天，`sourceType=POS`。
 - `hbpos_api`：WPF 收银后端，启用，7 天。
 - `hbpos_ipad`：iPad 客户端，启用，30 天，`sourceType=POS`。
+- `hbpos_handheld`：手持收银客户端，启用，30 天，`sourceType=POS`。
 
 清理任务会覆盖 `Projects` 中的全部项目，包括已禁用项目，避免停用后遗留日志无限保留。
 
@@ -118,6 +123,7 @@ GET /api/system/logs/summary?startUtc=2026-06-05T00:00:00Z
 - 收银端：`hbpos_win`，`sourceType=POS`
 - 收银后端：`hbpos_api`，`sourceType=Backend`
 - iPad 收银端：`hbpos_ipad`，`sourceType=POS`
+- 手持收银端：`hbpos_handheld`，`sourceType=POS`
 
 ## 上报原则
 

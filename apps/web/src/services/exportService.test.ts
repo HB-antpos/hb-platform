@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs'
 import { readFileSync } from 'node:fs'
 import {
   addContainerDetailWorksheetImages,
+  buildDatedExportFileName,
   calculateContainerExportImageSize,
   mapContainerExportProgress,
   populateContainerDetailsWorksheet,
@@ -260,4 +261,43 @@ assertEqual(
 )
 assertEqual(exportServiceSource.includes('width: 138px'), true, 'PDF 条码图片应放大显示')
 assertEqual(exportServiceSource.includes('height: 58px'), true, 'PDF 条码图片应保持足够显示高度')
-assertEqual(exportServiceSource.includes(".pdf`"), true, '货柜明细 PDF 导出文件名应使用 .pdf 后缀')
+assertEqual(
+  exportServiceSource.includes("pdf.save(buildDatedExportFileName(options.fileName || '货柜明细', 'pdf'))"),
+  true,
+  '货柜明细 PDF 导出文件名应使用 .pdf 后缀并带悉尼日期',
+)
+assertEqual(
+  exportServiceSource.includes("toISOString().split('T')[0]"),
+  false,
+  '导出文件名不得用 toISOString 截取 UTC 日期',
+)
+
+function formatMinuteOfDay(minute: number) {
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
+}
+
+// 悉尼 00:00–09:59（AEST，UTC+10）逐分钟导出：UTC 还停在前一天，文件名仍应带悉尼当天日期。
+const aestMidnightUtc = Date.parse('2026-09-28T14:00:00Z') // 悉尼 2026-09-29 00:00
+for (let minute = 0; minute < 10 * 60; minute += 1) {
+  assertEqual(
+    buildDatedExportFileName('0OLU9935964_商品明细', 'xlsx', new Date(aestMidnightUtc + minute * 60_000)),
+    '0OLU9935964_商品明细_2026-09-29.xlsx',
+    `悉尼 ${formatMinuteOfDay(minute)} 导出的货柜明细 Excel 文件名应带悉尼当天日期`,
+  )
+}
+
+// 夏令时（AEDT，UTC+11）受影响时段延长到 00:00–10:59。
+const aedtMidnightUtc = Date.parse('2026-12-14T13:00:00Z') // 悉尼 2026-12-15 00:00
+for (let minute = 0; minute < 11 * 60; minute += 1) {
+  assertEqual(
+    buildDatedExportFileName('货柜明细', 'pdf', new Date(aedtMidnightUtc + minute * 60_000)),
+    '货柜明细_2026-12-15.pdf',
+    `夏令时悉尼 ${formatMinuteOfDay(minute)} 导出的货柜明细 PDF 文件名应带悉尼当天日期`,
+  )
+}
+
+assertEqual(
+  buildDatedExportFileName('仓库商品', 'xlsx', new Date('2026-09-28T13:59:00Z')),
+  '仓库商品_2026-09-28.xlsx',
+  '悉尼前一天 23:59 导出仍应带前一天日期，不能一律加一天',
+)

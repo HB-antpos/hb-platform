@@ -174,6 +174,8 @@
   <data name="settings.receiptPrinter.phone" xml:space="preserve"><value>&#x7535;&#x8BDD;</value></data>
   <data name="settings.receiptPrinter.abn" xml:space="preserve"><value>ABN</value></data>
   <data name="settings.receiptPrinter.returnPolicy" xml:space="preserve"><value>&#x9000;&#x6362;&#x8D27;&#x653F;&#x7B56;</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt" xml:space="preserve"><value>客人小票附带银行收据</value></data>
+  <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>关闭后客人小票只保留卡类型、卡号后四位和金额，不再附带整段刷卡银行收据，小票更短。签名单、拒付单和结算单照常打印。</value></data>
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>&#x4FDD;&#x5B58;&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>&#x6D4B;&#x8BD5;&#x6253;&#x5370;</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>&#x4ECE;&#x5206;&#x5E97;&#x8D44;&#x6599;&#x8F7D;&#x5165;</value></data>

@@ -90,8 +90,10 @@ internal sealed class LegacyStoreOrderSliceAdapter(IStoreOrderReactService servi
     public Task<ApiResponse<StoreOrderCartDto?>> ClearCartAsync(string storeCode) =>
         service.ClearCartAsync(storeCode);
 
-    public Task<ApiResponse<bool>> SubmitOrderAsync(
-        SubmitStoreOrderRequestDto request
+    // 旧门面服务不接收请求令牌；客户端中止的识别只在切片路径上生效。
+    public Task<ApiResponse<SubmitStoreOrderResultDto>> SubmitOrderAsync(
+        SubmitStoreOrderRequestDto request,
+        CancellationToken cancellationToken = default
     ) => service.SubmitOrderAsync(request);
 
     public Task<ApiResponse<string>> CreateOrderAsync(CreateStoreOrderDto request) =>

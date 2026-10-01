@@ -17,13 +17,29 @@
   <data name="AmountDue" xml:space="preserve"><value>Amount Due</value></data>
   <data name="AppName" xml:space="preserve"><value>HB POS</value></data>
   <data name="startup.title" xml:space="preserve"><value>HB POS</value></data>
-  <data name="startup.loading" xml:space="preserve"><value>Preparing point of sale...</value></data>
-  <data name="startup.stage.starting" xml:space="preserve"><value>Starting...</value></data>
-  <data name="startup.stage.initializingServices" xml:space="preserve"><value>Initializing services...</value></data>
-  <data name="startup.stage.startingLocalComponents" xml:space="preserve"><value>Starting local components...</value></data>
-  <data name="startup.stage.loadingProducts" xml:space="preserve"><value>Loading local products and special products...</value></data>
-  <data name="startup.stage.preparingMainWindow" xml:space="preserve"><value>Preparing main screen...</value></data>
-  <data name="startup.stage.completed" xml:space="preserve"><value>Startup complete</value></data>
+  <data name="startup.subtitle" xml:space="preserve"><value>Point of sale</value></data>
+  <data name="startup.phase.services" xml:space="preserve"><value>Starting services</value></data>
+  <data name="startup.phase.services.detail" xml:space="preserve"><value>Preparing the local database and background services</value></data>
+  <data name="startup.phase.interface" xml:space="preserve"><value>Loading the interface</value></data>
+  <data name="startup.phase.interface.detail" xml:space="preserve"><value>Loading the checkout screen and color theme</value></data>
+  <data name="startup.phase.update" xml:space="preserve"><value>Checking for updates</value></data>
+  <data name="startup.phase.update.detail" xml:space="preserve"><value>Contacting the server for a new version</value></data>
+  <data name="startup.phase.device" xml:space="preserve"><value>Verifying this device</value></data>
+  <data name="startup.phase.device.detail" xml:space="preserve"><value>Confirming this register's authorization</value></data>
+  <data name="startup.phase.catalog" xml:space="preserve"><value>Loading products</value></data>
+  <data name="startup.phase.catalog.detail" xml:space="preserve"><value>Reading local products and special products</value></data>
+  <data name="startup.phase.display" xml:space="preserve"><value>Opening checkout</value></data>
+  <data name="startup.phase.display.detail" xml:space="preserve"><value>Almost ready</value></data>
+  <data name="startup.phase.completed" xml:space="preserve"><value>Ready</value></data>
+  <data name="startup.step" xml:space="preserve"><value>Step {0} of {1}</value></data>
+  <data name="startup.stepName.services" xml:space="preserve"><value>Services</value></data>
+  <data name="startup.stepName.interface" xml:space="preserve"><value>Interface</value></data>
+  <data name="startup.stepName.update" xml:space="preserve"><value>Updates</value></data>
+  <data name="startup.stepName.device" xml:space="preserve"><value>Device</value></data>
+  <data name="startup.stepName.catalog" xml:space="preserve"><value>Products</value></data>
+  <data name="startup.stepName.display" xml:space="preserve"><value>Checkout</value></data>
+  <data name="startup.elapsed" xml:space="preserve"><value>{0}s elapsed</value></data>
+  <data name="startup.slowNetwork" xml:space="preserve"><value>The server is slow to respond ({0}s)</value></data>
   <data name="startup.error.apiBaseAddress.title" xml:space="preserve"><value>HB POS startup configuration error</value></data>
   <data name="startup.error.apiBaseAddress.message" xml:space="preserve"><value>HBPOS_API_BASE_URL is invalid. Set it to a complete, permitted HTTP or HTTPS server address, then restart HB POS.</value></data>
   <data name="startup.versionLabel" xml:space="preserve"><value>Version</value></data>
@@ -364,15 +380,16 @@
   <data name="customer.skuCount" xml:space="preserve"><value>SKU Count</value></data>
   <data name="customer.readyForPayment" xml:space="preserve"><value>Ready for Payment</value></data>
   <data name="customer.insertOrTap" xml:space="preserve"><value>Insert or tap card</value></data>
-  <data name="customer.promotionTitle" xml:space="preserve"><value>Deal of the Week</value></data>
-  <data name="customer.promotionSubtitle" xml:space="preserve"><value>Organic Produce Up to 30% Off</value></data>
-  <data name="customer.promotionBody" xml:space="preserve"><value>Fresh market selection this weekend and member-only savings.</value></data>
   <data name="customerDisplay.window.opened" xml:space="preserve"><value>Customer display opened on the second display.</value></data>
   <data name="customerDisplay.window.openedNormal" xml:space="preserve"><value>Customer display opened in a normal window on the second display.</value></data>
   <data name="customerDisplay.window.openedFullscreen" xml:space="preserve"><value>Customer display opened full screen on the second display.</value></data>
   <data name="customerDisplay.window.closed" xml:space="preserve"><value>Customer display closed.</value></data>
   <data name="customerDisplay.window.noSecondDisplay" xml:space="preserve"><value>No second display detected. Customer display was not opened.</value></data>
+  <data name="customerDisplay.window.swapped" xml:space="preserve"><value>Main window and customer display swapped screens.</value></data>
+  <data name="customerDisplay.window.swapRequiresOpen" xml:space="preserve"><value>Open the customer display before swapping screens.</value></data>
+  <data name="customerDisplay.window.swapUnavailable" xml:space="preserve"><value>Could not detect the screens of the main window and customer display. Screens were not swapped.</value></data>
   <data name="shell.customerDisplayWindow" xml:space="preserve"><value>Customer display window</value></data>
+  <data name="shell.swapCustomerDisplayScreens" xml:space="preserve"><value>Swap screens with the customer display</value></data>
   <data name="shell.colorTheme" xml:space="preserve"><value>Color theme</value></data>
   <data name="shell.colorTheme.default" xml:space="preserve"><value>Default</value></data>
   <data name="shell.colorTheme.default.hint" xml:space="preserve"><value>Original colors</value></data>

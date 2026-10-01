@@ -51,12 +51,16 @@ export const P = {
     ManageCategories: 'Warehouse.ManageCategories',
     ManageLocations: 'Warehouse.ManageLocations',
     ManageOrders: 'Warehouse.ManageOrders',
+    // 移动端「订单拣货」专用权限；后端按别名让 Warehouse.Manage / Warehouse.ManageOrders 持有者自动具备，反向不成立。
+    Picking: 'Warehouse.Picking',
   },
   Container: {
     View: 'Container.View',
     Create: 'Container.Create',
     Edit: 'Container.Edit',
     Delete: 'Container.Delete',
+    // 移动端「新品到店」页面专用权限，与后端 Permissions.Container.MobileNewProductsView 一致。
+    MobileNewProductsView: 'Container.MobileNewProductsView',
   },
   SalesOrders: {
     View: 'SalesOrders.View',
@@ -96,6 +100,7 @@ export const P = {
     ManageSettings: 'System.ManageSettings',
     ViewAppDownloads: 'System.ViewAppDownloads',
     ManageAppDownloads: 'System.ManageAppDownloads',
+    ViewMobileAppInstallLinks: 'System.ViewMobileAppInstallLinks',
   },
   DeviceRegistration: {
     View: 'DeviceRegistration.View',
@@ -157,6 +162,11 @@ export const P = {
   PosTerminal: {
     AuditView: 'Permissions.PosTerminal.Audit.View',
   },
+  // 老系统（旧版收银 POSM.EmployeeLogs）操作日志只读页，刻意不用 Permissions.PosTerminal.* 前缀。
+  LegacyEmployeeLogs: {
+    View: 'LegacyEmployeeLogs.View',
+    Review: 'LegacyEmployeeLogs.Review',
+  },
   Dashboard: {
     View: 'Dashboard',
   },
@@ -173,6 +183,7 @@ export const P = {
     AvailabilityViewManagedStore: 'Attendance.Availability.ViewManagedStore',
     PunchSelf: 'Attendance.Punch.Self',
     PunchViewManagedStore: 'Attendance.Punch.ViewManagedStore',
+    PunchAdjustManagedStore: 'Attendance.Punch.AdjustManagedStore',
     ApprovalViewManagedStore: 'Attendance.Approval.ViewManagedStore',
     ApprovalReviewManagedStore: 'Attendance.Approval.ReviewManagedStore',
     HolidayViewStore: 'Attendance.Holiday.ViewStore',

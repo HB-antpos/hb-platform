@@ -1,30 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Image,
-  ScrollView,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import {
+  ActivityIndicator,
   Button,
   Card,
   HelperText,
+  Icon,
+  IconButton,
   Modal,
   Portal,
-  RadioButton,
   SegmentedButtons,
+  Switch,
   Text,
   TextInput,
 } from "react-native-paper";
 import {
-  MonthDatePickerField,
+  MonthDatePicker,
   normalizeMonthDate,
 } from "@/components/attendance/MonthDatePicker";
 import {
   getAttendanceLeaveAttachmentUploadSignature,
 } from "@/modules/attendance/api";
+import { leaveDayCount, shiftDate } from "@/modules/attendance/attendance-my-week";
 import { uploadAttendanceLeaveAttachmentToSignedUrl } from "@/modules/attendance/leave-attachment-upload";
 import type {
   AttendanceLeaveRequestPayload,
@@ -35,6 +33,8 @@ import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import { reviewAwareFetch } from "@/modules/ios-review/network";
+import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { ATTENDANCE_STATUS_TONES, StatusPill } from "./AdjustmentFormControls";
 
 type LeaveFormState = AttendanceLeaveRequestPayload & {
   userGuid: string;
@@ -45,6 +45,17 @@ const SUPPORTED_LEAVE_TYPES: AttendanceLeaveType[] = [
   "AnnualLeave",
   "SickLeave",
 ];
+
+/** 员工列表展开后的最大高度：超过约 6 行时在卡片内滚动，避免把保存按钮挤出屏幕。 */
+const EMPLOYEE_LIST_MAX_HEIGHT = 288;
+
+
+/** 日期框空间有限：显示「10-01 周四」，年份在请假场景里几乎总是当年。 */
+function formatShortDayLabel(value: string, weekdayLabel: (index: number) => string) {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${value.slice(5, 10)} ${weekdayLabel((date.getUTCDay() + 6) % 7)}`;
+}
 
 function createEmptyForm(storeCode?: string): LeaveFormState {
   const today = normalizeMonthDate();
@@ -65,6 +76,7 @@ function normalizeEmploymentType(value?: string) {
   return value?.trim().toLowerCase() ?? "";
 }
 
+/** 只有全职/兼职员工可登记年假、病假（临时工没有带薪假）。 */
 function isEligibleEmployee(user: StoreUserListItem) {
   const employmentType = normalizeEmploymentType(user.employmentType);
   return employmentType === "fulltime" || employmentType === "parttime";
@@ -79,9 +91,112 @@ function getEmployeeLabel(user: StoreUserListItem) {
   );
 }
 
+function getEmployeeInitial(user: StoreUserListItem) {
+  return getEmployeeLabel(user).trim().charAt(0).toUpperCase() || "?";
+}
+
 function trimToUndefined(value?: string) {
   const nextValue = value?.trim();
   return nextValue ? nextValue : undefined;
+}
+
+/** 圆形首字母头像：选择框与列表共用，未选员工时显示占位图标。 */
+function EmployeeAvatar({ user, size = 32 }: { user?: StoreUserListItem; size?: number }) {
+  return (
+    <View
+      style={[
+        styles.avatar,
+        { borderRadius: size / 2, height: size, width: size },
+        user ? null : styles.avatarEmpty,
+      ]}
+    >
+      {user ? (
+        <Text variant="labelLarge" style={styles.avatarText}>{getEmployeeInitial(user)}</Text>
+      ) : (
+        <Icon source="account-outline" size={size * 0.55} color={HB_COLORS.textSecondary} />
+      )}
+    </View>
+  );
+}
+
+/**
+ * 日期框：左右箭头按天切换（请假跨度通常很短，点按最快）；
+ * 点中间日期可弹出月历，用于跨度较长时直接跳转。
+ */
+function DateStepper({
+  label,
+  value,
+  minDate,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  minDate?: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useAppTranslation(["attendance", "common"]);
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  // 结束日期已等于下限时禁用「前一天」，从源头保证结束不早于开始。
+  const canGoBack = !disabled && (!minDate || value > minDate);
+
+  return (
+    <View style={[styles.dateBox, disabled ? styles.disabled : null]}>
+      <Text variant="labelSmall" style={styles.muted}>{label}</Text>
+      <View style={styles.dateStepRow}>
+        <IconButton
+          icon="chevron-left"
+          size={18}
+          style={styles.dateArrow}
+          disabled={!canGoBack}
+          accessibilityLabel={t("leaveManagement.a11y.previousDay", { label })}
+          onPress={() => onChange(shiftDate(value, -1))}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("leaveManagement.a11y.pickDate", { label })}
+          disabled={disabled}
+          onPress={() => setCalendarVisible(true)}
+          hitSlop={6}
+          style={({ pressed }) => [styles.dateValue, pressed ? styles.pressed : null]}
+        >
+          <Text variant="titleSmall" style={styles.tabular} numberOfLines={1}>
+            {formatShortDayLabel(value, (index) => t(`weekdays.${index}`))}
+          </Text>
+        </Pressable>
+        <IconButton
+          icon="chevron-right"
+          size={18}
+          style={styles.dateArrow}
+          disabled={disabled}
+          accessibilityLabel={t("leaveManagement.a11y.nextDay", { label })}
+          onPress={() => onChange(shiftDate(value, 1))}
+        />
+      </View>
+
+      <Portal>
+        <Modal
+          visible={calendarVisible}
+          onDismiss={() => setCalendarVisible(false)}
+          contentContainerStyle={styles.dialog}
+        >
+          <View style={styles.dialogHeader}>
+            <Text variant="titleMedium">{label}</Text>
+            <Button onPress={() => setCalendarVisible(false)}>{t("common:actions.cancel")}</Button>
+          </View>
+          <MonthDatePicker
+            value={value}
+            minDate={minDate}
+            onChange={(nextValue) => {
+              onChange(nextValue);
+              setCalendarVisible(false);
+            }}
+          />
+        </Modal>
+      </Portal>
+    </View>
+  );
 }
 
 interface LeaveManagementCardProps {
@@ -93,6 +208,10 @@ interface LeaveManagementCardProps {
   onShowMessage?: (message: string) => void;
 }
 
+/**
+ * 店长代员工登记年假/病假（审核页签内展开的紧凑表单）。
+ * 病假必须先拍医嘱并上传成功才能保存；员工只列出全职/兼职。
+ */
 export function LeaveManagementCard({
   storeCode,
   storeName,
@@ -102,9 +221,9 @@ export function LeaveManagementCard({
   onShowMessage,
 }: LeaveManagementCardProps) {
   const { t, language } = useAppTranslation(["attendance", "common"]);
-  const { height } = useWindowDimensions();
   const [form, setForm] = useState<LeaveFormState>(() => createEmptyForm(storeCode));
-  const [employeePickerVisible, setEmployeePickerVisible] = useState(false);
+  const [employeeListOpen, setEmployeeListOpen] = useState(false);
+  const [timeRangeEnabled, setTimeRangeEnabled] = useState(false);
   const [cameraVisible, setCameraVisible] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [uploadPreviewUri, setUploadPreviewUri] = useState("");
@@ -123,7 +242,10 @@ export function LeaveManagementCard({
     [eligibleUsers, form.userGuid],
   );
   const canSelectEmployee = eligibleUsers.length > 0;
+  const employeeSelectorDisabled = !storeCode || !canSelectEmployee || isBusy;
   const isSickLeave = form.leaveType === "SickLeave";
+  const hasAttachment = Boolean(uploadPreviewUri || form.attachmentUrl);
+  const dayCount = leaveDayCount(form.startDate, form.endDate);
   const canSubmit = Boolean(
     storeCode &&
       selectedEmployee &&
@@ -131,7 +253,6 @@ export function LeaveManagementCard({
       form.endDate.trim() &&
       (!isSickLeave || form.attachmentUrl?.trim()),
   );
-  const employeeListHeight = Math.max(160, Math.min(420, height * 0.5));
 
   useEffect(() => {
     setForm((current) => ({ ...current, storeCode }));
@@ -147,6 +268,13 @@ export function LeaveManagementCard({
     setForm((current) => ({ ...current, userGuid: "" }));
   }, [eligibleUsers, form.userGuid]);
 
+  // 选择框不可用（换店、员工列表为空、提交中）时收起列表，避免残留展开态。
+  useEffect(() => {
+    if (employeeSelectorDisabled) {
+      setEmployeeListOpen(false);
+    }
+  }, [employeeSelectorDisabled]);
+
   const setField = <K extends keyof LeaveFormState>(
     key: K,
     value: LeaveFormState[K],
@@ -154,9 +282,38 @@ export function LeaveManagementCard({
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const employmentTypeLabel = (user: StoreUserListItem) => {
+    const type = normalizeEmploymentType(user.employmentType);
+    return type ? t(`leaveManagement.employmentTypes.${type}`, { defaultValue: user.employmentType }) : "";
+  };
+
   const handleSelectEmployee = (user: StoreUserListItem) => {
     setField("userGuid", user.userGUID);
-    setEmployeePickerVisible(false);
+    setEmployeeListOpen(false);
+  };
+
+  const handleStartDateChange = (value: string) => {
+    // 开始日期后移超过结束日期时，结束日期跟着走，保证结束不早于开始。
+    setForm((current) => ({
+      ...current,
+      startDate: value,
+      endDate: value > current.endDate ? value : current.endDate,
+    }));
+  };
+
+  const handleEndDateChange = (value: string) => {
+    setForm((current) => ({
+      ...current,
+      endDate: value < current.startDate ? current.startDate : value,
+    }));
+  };
+
+  const handleTimeRangeToggle = (enabled: boolean) => {
+    setTimeRangeEnabled(enabled);
+    if (!enabled) {
+      // 关闭「指定时段」即按整天登记，清掉已填时间，避免隐藏字段被提交。
+      setForm((current) => ({ ...current, startTime: "", endTime: "" }));
+    }
   };
 
   const handleLeaveTypeChange = (value: string) => {
@@ -175,6 +332,8 @@ export function LeaveManagementCard({
 
   const resetForm = () => {
     setForm(createEmptyForm(storeCode));
+    setTimeRangeEnabled(false);
+    setEmployeeListOpen(false);
     setUploadPreviewUri("");
     setCameraError("");
   };
@@ -276,42 +435,102 @@ export function LeaveManagementCard({
     }
   };
 
+  const attachmentDisabled = isBusy || isUploadingAttachment;
+
   return (
     <>
       <Card mode="outlined" style={styles.card}>
-        <Card.Title
-          title={t("tabs.leaveManagement")}
-          subtitle={
-            storeName ||
-            storeCode ||
-            t("leaveManagement.noStore", {
-              defaultValue: "Select a store first",
-            })
-          }
-        />
         <Card.Content style={styles.content}>
-          <Button
-            mode="outlined"
-            icon="account-outline"
-            onPress={() => setEmployeePickerVisible(true)}
-            disabled={!canSelectEmployee || isBusy}
-            contentStyle={styles.selectionButtonContent}
-          >
-            {selectedEmployee
-              ? getEmployeeLabel(selectedEmployee)
-              : t("leaveManagement.fields.employee")}
-          </Button>
-          <HelperText type="error" visible={!storeCode}>
-            {t("leaveManagement.noStore", {
-              defaultValue: "Select a store first",
-            })}
-          </HelperText>
-          <HelperText
-            type="info"
-            visible={Boolean(storeCode && !canSelectEmployee && !isBusy)}
-          >
-            {t("leaveManagement.noEligibleEmployees")}
-          </HelperText>
+          <View style={styles.header}>
+            <Text variant="titleMedium" style={styles.title}>{t("leaveManagement.registerAction")}</Text>
+            <Text variant="bodySmall" style={styles.muted} numberOfLines={1}>
+              {storeName || storeCode || t("leaveManagement.noStore", { defaultValue: "Select a store first" })}
+            </Text>
+          </View>
+
+          {/* 员工选择：卡片内展开单行列表，不再叠加弹层 */}
+          <View style={[styles.selectorShell, employeeListOpen ? styles.selectorShellOpen : null]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("leaveManagement.fields.employee")}
+              accessibilityState={{ disabled: employeeSelectorDisabled, expanded: employeeListOpen }}
+              disabled={employeeSelectorDisabled}
+              onPress={() => setEmployeeListOpen((current) => !current)}
+              style={({ pressed }) => [
+                styles.selector,
+                pressed ? styles.pressed : null,
+                employeeSelectorDisabled ? styles.disabled : null,
+              ]}
+            >
+              <EmployeeAvatar user={selectedEmployee} />
+              <View style={styles.selectorText}>
+                {selectedEmployee ? (
+                  <>
+                    <Text variant="titleSmall" numberOfLines={1}>{getEmployeeLabel(selectedEmployee)}</Text>
+                    <Text variant="bodySmall" style={styles.muted} numberOfLines={1}>
+                      {employmentTypeLabel(selectedEmployee)}
+                    </Text>
+                  </>
+                ) : (
+                  <Text variant="bodyLarge" style={styles.placeholder}>
+                    {t("leaveManagement.fields.selectEmployee")}
+                  </Text>
+                )}
+              </View>
+              <Icon
+                source={employeeListOpen ? "chevron-up" : "chevron-down"}
+                size={22}
+                color={HB_COLORS.textSecondary}
+              />
+            </Pressable>
+
+            {employeeListOpen ? (
+              <ScrollView
+                style={styles.employeeList}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                {eligibleUsers.map((user, index) => {
+                  const selected = user.userGUID === form.userGuid;
+                  return (
+                    <Pressable
+                      key={user.userGUID}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      onPress={() => handleSelectEmployee(user)}
+                      style={({ pressed }) => [
+                        styles.employeeRow,
+                        index > 0 ? styles.employeeRowDivider : null,
+                        selected ? styles.employeeRowSelected : null,
+                        pressed ? styles.pressed : null,
+                      ]}
+                    >
+                      <EmployeeAvatar user={user} size={28} />
+                      <Text variant="bodyMedium" style={styles.employeeName} numberOfLines={1}>
+                        {getEmployeeLabel(user)}
+                      </Text>
+                      <Text variant="bodySmall" style={styles.muted}>{employmentTypeLabel(user)}</Text>
+                      <View style={styles.checkSlot}>
+                        {selected ? (
+                          <Icon source="check" size={18} color={ATTENDANCE_STATUS_TONES.accent.text} />
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+          </View>
+          {!storeCode ? (
+            <HelperText type="error" visible style={styles.helper}>
+              {t("leaveManagement.noStore", { defaultValue: "Select a store first" })}
+            </HelperText>
+          ) : null}
+          {storeCode && !canSelectEmployee && !isBusy ? (
+            <HelperText type="info" visible style={styles.helper}>
+              {t("leaveManagement.noEligibleEmployees")}
+            </HelperText>
+          ) : null}
 
           <SegmentedButtons
             value={form.leaveType}
@@ -323,44 +542,121 @@ export function LeaveManagementCard({
             }))}
           />
 
-          <View style={styles.dateRow}>
-            <MonthDatePickerField
+          <View style={styles.dateBoxes}>
+            <DateStepper
               label={t("fields.startDate")}
               value={form.startDate}
-              onChange={(value) => setField("startDate", value)}
-              style={styles.dateField}
+              disabled={isBusy}
+              onChange={handleStartDateChange}
             />
-            <MonthDatePickerField
+            <DateStepper
               label={t("fields.endDate")}
               value={form.endDate}
-              onChange={(value) => setField("endDate", value)}
-              style={styles.dateField}
+              minDate={form.startDate}
+              disabled={isBusy}
+              onChange={handleEndDateChange}
             />
           </View>
 
-          <View style={styles.timeRow}>
-            <TextInput
-              mode="outlined"
-              label={t("fields.startTimeOptional")}
-              value={form.startTime ?? ""}
-              placeholder={t("common:placeholders.time")}
-              style={styles.timeInput}
-              onChangeText={(value) => setField("startTime", value)}
+          <View style={styles.inlineRow}>
+            {dayCount > 0 ? (
+              <StatusPill label={t("leaveManagement.dayCount", { count: dayCount })} tone="accent" />
+            ) : null}
+            <View style={styles.flex} />
+            <Text variant="bodyMedium" style={styles.muted}>{t("leaveManagement.fields.specifyTime")}</Text>
+            <Switch
+              value={timeRangeEnabled}
+              onValueChange={handleTimeRangeToggle}
               disabled={isBusy}
-            />
-            <TextInput
-              mode="outlined"
-              label={t("fields.endTimeOptional")}
-              value={form.endTime ?? ""}
-              placeholder={t("common:placeholders.time")}
-              style={styles.timeInput}
-              onChangeText={(value) => setField("endTime", value)}
-              disabled={isBusy}
+              accessibilityLabel={t("leaveManagement.fields.specifyTime")}
             />
           </View>
+          {timeRangeEnabled ? (
+            <View style={styles.timeRow}>
+              <TextInput
+                mode="outlined"
+                dense
+                label={t("fields.startTimeOptional")}
+                value={form.startTime ?? ""}
+                placeholder={t("common:placeholders.time")}
+                keyboardType="numbers-and-punctuation"
+                style={styles.flex}
+                onChangeText={(value) => setField("startTime", value)}
+                disabled={isBusy}
+              />
+              <TextInput
+                mode="outlined"
+                dense
+                label={t("fields.endTimeOptional")}
+                value={form.endTime ?? ""}
+                placeholder={t("common:placeholders.time")}
+                keyboardType="numbers-and-punctuation"
+                style={styles.flex}
+                onChangeText={(value) => setField("endTime", value)}
+                disabled={isBusy}
+              />
+            </View>
+          ) : null}
+
+          {isSickLeave ? (
+            hasAttachment ? (
+              <View style={styles.attachmentDone}>
+                {uploadPreviewUri ? (
+                  <Image source={{ uri: uploadPreviewUri }} style={styles.thumbnail} />
+                ) : (
+                  <View style={[styles.thumbnail, styles.thumbnailFallback]}>
+                    <Icon source="file-image-outline" size={24} color={HB_COLORS.textSecondary} />
+                  </View>
+                )}
+                <View style={styles.attachmentText}>
+                  <Text variant="titleSmall">{t("leaveManagement.fields.attachment")}</Text>
+                  <StatusPill label={t("leaveManagement.attachment.uploaded")} tone="success" />
+                </View>
+                <Button
+                  mode="outlined"
+                  compact
+                  icon="camera-retake-outline"
+                  onPress={() => void handleOpenCamera()}
+                  disabled={attachmentDisabled}
+                  loading={isUploadingAttachment}
+                >
+                  {t("leaveManagement.actions.retakePhoto")}
+                </Button>
+              </View>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("leaveManagement.attachment.captureTitle")}
+                accessibilityHint={t("leaveManagement.attachmentRequired")}
+                disabled={attachmentDisabled}
+                onPress={() => void handleOpenCamera()}
+                style={({ pressed }) => [
+                  styles.captureBox,
+                  pressed ? styles.pressed : null,
+                  attachmentDisabled ? styles.disabled : null,
+                ]}
+              >
+                {isUploadingAttachment ? (
+                  <ActivityIndicator size={24} />
+                ) : (
+                  <Icon source="camera-outline" size={28} color={ATTENDANCE_STATUS_TONES.accent.text} />
+                )}
+                <Text variant="titleSmall" style={styles.captureTitle}>
+                  {t("leaveManagement.attachment.captureTitle")}
+                </Text>
+                <Text variant="bodySmall" style={styles.muted}>
+                  {t("leaveManagement.attachment.captureHint")}
+                </Text>
+              </Pressable>
+            )
+          ) : null}
+          {isSickLeave && cameraError && !cameraVisible ? (
+            <HelperText type="error" visible style={styles.helper}>{cameraError}</HelperText>
+          ) : null}
 
           <TextInput
             mode="outlined"
+            dense
             label={t("fields.reason")}
             value={form.reason}
             multiline
@@ -368,90 +664,24 @@ export function LeaveManagementCard({
             disabled={isBusy}
           />
 
-          {isSickLeave ? (
-            <View style={styles.attachmentSection}>
-              <Text variant="titleSmall">
-                {t("leaveManagement.fields.attachment")}
-              </Text>
-              <Button
-                mode={!form.attachmentUrl ? "contained" : "outlined"}
-                icon="camera-outline"
-                onPress={() => void handleOpenCamera()}
-                disabled={isBusy || isUploadingAttachment}
-                loading={isUploadingAttachment}
-              >
-                {uploadPreviewUri || form.attachmentUrl
-                  ? t("leaveManagement.actions.retakePhoto")
-                  : t("leaveManagement.actions.takePhoto")}
-              </Button>
-              {uploadPreviewUri ? (
-                <Image source={{ uri: uploadPreviewUri }} style={styles.previewImage} />
-              ) : null}
-              <Text variant="bodySmall" style={styles.muted}>
-                {t("leaveManagement.attachmentRequired")}
-              </Text>
-              <HelperText type="error" visible={!form.attachmentUrl}>
-                {t("leaveManagement.messages.attachmentRequired")}
-              </HelperText>
-            </View>
-          ) : null}
-
           <View style={styles.actions}>
-            <Button mode="outlined" onPress={resetForm} disabled={isBusy}>
-              {t("common:actions.cancel")}
+            <Button mode="text" onPress={resetForm} disabled={isBusy}>
+              {t("leaveManagement.actions.reset")}
             </Button>
             <Button
               mode="contained"
-              icon="send-outline"
+              icon="check"
               onPress={() => void submit()}
               disabled={!canSubmit || isBusy}
               loading={isBusy}
+              style={styles.saveButton}
+              contentStyle={styles.saveButtonContent}
             >
-              {t("actions.submitLeave")}
+              {t("leaveManagement.actions.save")}
             </Button>
           </View>
         </Card.Content>
       </Card>
-
-      <Portal>
-        <Modal
-          visible={employeePickerVisible}
-          onDismiss={() => setEmployeePickerVisible(false)}
-          contentContainerStyle={styles.modalContainer}
-        >
-          <Text variant="titleLarge" style={styles.modalTitle}>
-            {t("leaveManagement.fields.employee")}
-          </Text>
-          <ScrollView
-            style={[styles.modalList, { maxHeight: employeeListHeight }]}
-            contentContainerStyle={styles.modalListContent}
-            nestedScrollEnabled
-          >
-            {eligibleUsers.map((user) => (
-              <View key={user.userGUID} style={styles.employeeRow}>
-                <RadioButton
-                  value={user.userGUID}
-                  status={form.userGuid === user.userGUID ? "checked" : "unchecked"}
-                  onPress={() => handleSelectEmployee(user)}
-                />
-                <Button
-                  mode="text"
-                  onPress={() => handleSelectEmployee(user)}
-                  style={styles.employeeButton}
-                  contentStyle={styles.employeeButtonContent}
-                >
-                  {getEmployeeLabel(user)}
-                </Button>
-              </View>
-            ))}
-          </ScrollView>
-          <View style={styles.actions}>
-            <Button onPress={() => setEmployeePickerVisible(false)}>
-              {t("common:actions.cancel")}
-            </Button>
-          </View>
-        </Modal>
-      </Portal>
 
       <Portal>
         <Modal
@@ -463,7 +693,7 @@ export function LeaveManagementCard({
           }}
           contentContainerStyle={styles.cameraModal}
         >
-          <Text variant="titleLarge" style={styles.modalTitle}>
+          <Text variant="titleLarge">
             {t("leaveManagement.camera.title")}
           </Text>
           {!permission?.granted ? (
@@ -485,12 +715,12 @@ export function LeaveManagementCard({
                 facing="back"
                 style={styles.cameraPreview}
               />
-              <HelperText type="info" visible>
+              <Text variant="bodySmall" style={styles.muted}>
                 {t("leaveManagement.messages.cameraReady")}
-              </HelperText>
-              <HelperText type="error" visible={Boolean(cameraError)}>
-                {cameraError}
-              </HelperText>
+              </Text>
+              {cameraError ? (
+                <Text variant="bodySmall" style={styles.dangerText}>{cameraError}</Text>
+              ) : null}
               <View style={styles.actions}>
                 <Button
                   mode="outlined"
@@ -521,95 +751,221 @@ const styles = StyleSheet.create({
   actions: {
     alignItems: "center",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    gap: HB_SPACING.xs,
     justifyContent: "flex-end",
   },
-  attachmentSection: {
-    gap: 8,
+  attachmentDone: {
+    alignItems: "center",
+    borderColor: HB_COLORS.outlineMuted,
+    borderRadius: HB_RADIUS.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: HB_SPACING.sm,
+    padding: HB_SPACING.xs,
+  },
+  attachmentText: {
+    alignItems: "flex-start",
+    flex: 1,
+    gap: HB_SPACING.xxs,
+  },
+  avatar: {
+    alignItems: "center",
+    backgroundColor: ATTENDANCE_STATUS_TONES.accent.background,
+    justifyContent: "center",
+  },
+  avatarEmpty: {
+    backgroundColor: HB_COLORS.surfaceMuted,
+  },
+  avatarText: {
+    color: ATTENDANCE_STATUS_TONES.accent.text,
+    fontWeight: "600",
   },
   cameraModal: {
     alignSelf: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    gap: 12,
-    padding: 16,
+    backgroundColor: HB_COLORS.white,
+    borderRadius: HB_RADIUS.sheet,
+    gap: HB_SPACING.sm,
+    padding: HB_SPACING.md,
     width: "92%",
   },
   cameraPermissionState: {
-    gap: 12,
+    gap: HB_SPACING.sm,
   },
   cameraPreview: {
-    borderRadius: 8,
+    borderRadius: HB_RADIUS.control,
     height: 360,
     overflow: "hidden",
   },
+  captureBox: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.surface,
+    borderColor: HB_COLORS.outline,
+    borderRadius: HB_RADIUS.control,
+    borderStyle: "dashed",
+    borderWidth: 1,
+    gap: HB_SPACING.xxs,
+    justifyContent: "center",
+    minHeight: 112,
+    paddingHorizontal: HB_SPACING.md,
+    paddingVertical: HB_SPACING.sm,
+  },
+  captureTitle: {
+    color: ATTENDANCE_STATUS_TONES.accent.text,
+  },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E4E7EC",
-    borderRadius: 12,
+    backgroundColor: HB_COLORS.white,
+    borderColor: HB_COLORS.outlineMuted,
+    borderRadius: HB_RADIUS.surface,
     borderWidth: StyleSheet.hairlineWidth,
     elevation: 0,
   },
+  checkSlot: {
+    alignItems: "center",
+    width: 20,
+  },
   content: {
-    gap: 10,
+    gap: HB_SPACING.sm,
+    paddingVertical: HB_SPACING.sm,
   },
-  dateField: {
+  dangerText: {
+    color: HB_COLORS.danger,
+  },
+  dateArrow: {
+    margin: 0,
+  },
+  dateBox: {
+    borderColor: HB_COLORS.outline,
+    borderRadius: HB_RADIUS.control,
+    borderWidth: StyleSheet.hairlineWidth,
     flex: 1,
-    minWidth: 150,
+    paddingHorizontal: HB_SPACING.xxs,
+    paddingTop: HB_SPACING.xs,
   },
-  dateRow: {
+  dateBoxes: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    gap: HB_SPACING.xs,
   },
-  employeeButton: {
+  dateStepRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  dateValue: {
+    alignItems: "center",
+    borderRadius: HB_RADIUS.control,
     flex: 1,
+    paddingVertical: HB_SPACING.xxs,
   },
-  employeeButtonContent: {
-    justifyContent: "flex-start",
+  dialog: {
+    alignSelf: "center",
+    backgroundColor: HB_COLORS.white,
+    borderRadius: HB_RADIUS.sheet,
+    gap: HB_SPACING.xs,
+    padding: HB_SPACING.md,
+    width: "92%",
+  },
+  dialogHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  disabled: {
+    opacity: 0.5,
+  },
+  employeeList: {
+    borderTopColor: HB_COLORS.outlineMuted,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexGrow: 0,
+    maxHeight: EMPLOYEE_LIST_MAX_HEIGHT,
+  },
+  employeeName: {
+    color: HB_COLORS.textPrimary,
+    flex: 1,
   },
   employeeRow: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 4,
+    gap: HB_SPACING.sm,
     minHeight: 48,
+    paddingHorizontal: HB_SPACING.sm,
   },
-  modalContainer: {
-    alignSelf: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 20,
-    width: "88%",
+  employeeRowDivider: {
+    borderTopColor: HB_COLORS.outlineMuted,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  modalList: {
-    flexGrow: 0,
+  employeeRowSelected: {
+    backgroundColor: ATTENDANCE_STATUS_TONES.accent.background,
   },
-  modalListContent: {
-    paddingBottom: 4,
+  flex: {
+    flex: 1,
   },
-  modalTitle: {
-    marginBottom: 8,
+  header: {
+    gap: 2,
+  },
+  helper: {
+    marginTop: -HB_SPACING.xs,
+    paddingHorizontal: 0,
+  },
+  inlineRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
   },
   muted: {
-    color: "#475467",
+    color: HB_COLORS.textSecondary,
   },
-  previewImage: {
-    alignSelf: "flex-start",
-    borderRadius: 8,
-    height: 120,
-    width: 120,
+  placeholder: {
+    color: HB_COLORS.textSecondary,
   },
-  selectionButtonContent: {
-    justifyContent: "flex-start",
+  pressed: {
+    backgroundColor: HB_COLORS.surfaceMuted,
   },
-  timeInput: {
+  saveButton: {
     flex: 1,
-    minWidth: 140,
+  },
+  saveButtonContent: {
+    minHeight: 44,
+  },
+  selector: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: HB_SPACING.sm,
+    minHeight: 52,
+    paddingHorizontal: HB_SPACING.sm,
+  },
+  selectorShell: {
+    borderColor: HB_COLORS.outline,
+    borderRadius: HB_RADIUS.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+  },
+  selectorShellOpen: {
+    borderColor: ATTENDANCE_STATUS_TONES.accent.text,
+  },
+  selectorText: {
+    flex: 1,
+    gap: 1,
+  },
+  tabular: {
+    color: HB_COLORS.textPrimary,
+    fontVariant: ["tabular-nums"],
+  },
+  thumbnail: {
+    borderRadius: HB_RADIUS.control,
+    height: 56,
+    width: 56,
+  },
+  thumbnailFallback: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.surfaceMuted,
+    justifyContent: "center",
   },
   timeRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    gap: HB_SPACING.xs,
+  },
+  title: {
+    color: HB_COLORS.textPrimary,
+    fontWeight: "600",
   },
 });

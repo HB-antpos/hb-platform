@@ -438,12 +438,6 @@ export async function leaveContainerDetailPresence(containerGuid: string, client
   await apiClient.post(`${CONTAINERS_PATH}/${encodeURIComponent(containerGuid)}/editing-presence/leave`, { clientSessionId });
 }
 
-export async function syncContainersFromHq(startDate?: string): Promise<SyncResult> {
-  const response = await apiClient.post(`${CONTAINERS_PATH}/sync-from-hq`, { startDate: startDate || undefined });
-  ensureSuccess(response.data, "从 HQ 同步货柜失败");
-  return normalizeSyncResult(response.data);
-}
-
 export async function pushContainersToHbSales(containerGuids: string[]): Promise<SyncResult> {
   const response = await apiClient.post(`${CONTAINERS_PATH}/push-to-hbsales`, { containerGuids });
   ensureSuccess(response.data, "推送 HBSales 失败");

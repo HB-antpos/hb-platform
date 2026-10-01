@@ -82,6 +82,21 @@ namespace BlazorApp.Shared.Constants
             public const string Manage = "PosProducts.Manage";
         }
 
+        /// <summary>
+        /// 旧版收银系统（POSM.EmployeeLogs）的员工操作日志只读查询。
+        /// 刻意不放在 Permissions.PosTerminal.* 下：该前缀会被当作收银端权限下发到收银机与收银员授权。
+        /// </summary>
+        public static class LegacyEmployeeLogs
+        {
+            public const string View = "LegacyEmployeeLogs.View";
+
+            /// <summary>
+            /// 对命中异常规则的操作标记「确认正常 / 需跟进」或撤销；只读用户看得到结论但不能操作。
+            /// 老收银与新收银共用这一个核查权限（新收银不能另设 PosTerminal.* 权限，见上）。
+            /// </summary>
+            public const string Review = "LegacyEmployeeLogs.Review";
+        }
+
         public static class PosTerminal
         {
             public static class Sales
@@ -241,6 +256,8 @@ namespace BlazorApp.Shared.Constants
             public const string Create = "Container.Create";
             public const string Edit = "Container.Edit";
             public const string Delete = "Container.Delete";
+            /// <summary>移动端查看近期新品到店预告。</summary>
+            public const string MobileNewProductsView = "Container.MobileNewProductsView";
         }
 
         public static class Warehouse
@@ -250,6 +267,7 @@ namespace BlazorApp.Shared.Constants
             public const string ManageCategories = "Warehouse.ManageCategories";
             public const string ManageLocations = "Warehouse.ManageLocations";
             public const string ManageOrders = "Warehouse.ManageOrders";
+            public const string Picking = "Warehouse.Picking";
         }
 
         public static class DomesticPurchase
@@ -354,8 +372,12 @@ namespace BlazorApp.Shared.Constants
                 [Reports.ProductMovementView] = [Reports.View],
                 // 前端仓库商品页面兼容旧的仓库总管理权限，API 使用同一访问边界。
                 [Warehouse.ManageProducts] = [Warehouse.Manage],
+                // 现有仓库员工与订货管理者无需重新授权即可拣货；单独授予 Picking 不会反向获得管理权限。
+                [Warehouse.Picking] = [Warehouse.Manage, Warehouse.ManageOrders],
                 // 管理下载权限天然包含查看下载，保证菜单可见性和列表 GET 授权一致。
                 [System.ViewAppDownloads] = [System.ManageAppDownloads],
+                // 能编辑管理分店排班的人天然可以查看排班，避免「能改不能看」导致排班页 403。
+                [Attendance.Schedule.ViewStore] = [Attendance.Schedule.EditManagedStore],
             };
 
         public static class AustralianSuppliers
@@ -404,6 +426,7 @@ namespace BlazorApp.Shared.Constants
             {
                 public const string Self = "Attendance.Punch.Self";
                 public const string ViewManagedStore = "Attendance.Punch.ViewManagedStore";
+                public const string AdjustManagedStore = "Attendance.Punch.AdjustManagedStore";
             }
 
             public static class Approval
@@ -452,6 +475,8 @@ namespace BlazorApp.Shared.Constants
             public const string ManageSettings = "System.ManageSettings";
             public const string ViewAppDownloads = "System.ViewAppDownloads";
             public const string ManageAppDownloads = "System.ManageAppDownloads";
+            /// <summary>移动端「App 安装」页：查看 iOS / Android 最新正式版本及安装二维码，与版本管理权限相互独立。</summary>
+            public const string ViewMobileAppInstallLinks = "System.ViewMobileAppInstallLinks";
             public const string ViewPerformanceBaseline = "System.ViewPerformanceBaseline";
             public const string ManagePerformanceBaseline = "System.ManagePerformanceBaseline";
         }

@@ -8,6 +8,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- 共享 WaitUntilAsync：链接 Hbpos.Client.Tests 的 AsyncTestWaitSupport.cs，不要复制私有副本。 -->
+    <Using Include="Hbpos.Client.Tests.AsyncTestWaitSupport" Static="true" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Hbpos.Client.Tests\AsyncTestWaitSupport.cs" Link="AsyncTestWaitSupport.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />

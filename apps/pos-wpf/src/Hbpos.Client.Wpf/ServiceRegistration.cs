@@ -26,12 +26,31 @@ public static class ServiceRegistration
     internal const string PreviewApiBaseAddress = "http://127.0.0.1:0/";
     private const string ApplicationLogUploadClientName = "HbposApplicationLogUpload";
     private const string OperationAuditUploadClientName = "HbposOperationAuditUpload";
+#if DEBUG
+    private const bool IsDebugBuild = true;
+#else
+    private const bool IsDebugBuild = false;
+#endif
 
     public static IServiceCollection AddHbposClientServices(
         this IServiceCollection services,
-        AppStartupOptions startupOptions)
+        AppStartupOptions startupOptions,
+        StartupProgressTracker? startupProgress = null,
+        IStartupScreen? startupScreen = null)
     {
         services.AddSingleton(startupOptions);
+        // 启动页要最先出现，追踪器和启动页在服务容器建立前就已创建；这里登记同一个实例，
+        // 供主窗口上报启动阶段、启动更新提示弹框前让启动页让位。Preview 不显示启动页，两者都为空。
+        if (startupProgress is not null)
+        {
+            services.AddSingleton(startupProgress);
+        }
+
+        if (startupScreen is not null)
+        {
+            services.AddSingleton(startupScreen);
+        }
+
         services.AddSingleton<ILocalizationService, LocalizationService>();
         var initialApiAddress = GetInitialApiBaseAddress(startupOptions);
         services.AddSingleton(new ApiRuntimeEndpointState(initialApiAddress.AbsoluteUri));
@@ -347,6 +366,10 @@ public static class ServiceRegistration
         services.AddSingleton<IDeviceFingerprintService, DeviceFingerprintService>();
         services.AddSingleton<IAppUpdateDeviceCredentialProvider, AppUpdateDeviceCredentialProvider>();
         services.AddSingleton<IUiPriorityCoordinator, UiPriorityCoordinator>();
+        // 整文件目录下载的残片与已校验文件放在本地数据目录下，跨重启续传；写入本地库后即删除。
+        services.AddSingleton<ICatalogFileDownloader>(sp => new CatalogFileDownloader(
+            sp.GetRequiredService<ICatalogApiClient>(),
+            Path.Combine(localDataDirectory, "catalog-files")));
         services.AddSingleton<ILocalCatalogSyncService, LocalCatalogSyncService>();
         services.AddSingleton<IRemoteLookupRefreshService, RemoteLookupRefreshService>();
         services.AddSingleton<ISpecialProductService, SpecialProductService>();
@@ -387,6 +410,11 @@ public static class ServiceRegistration
         services.AddSingleton(sp => AppUpdateBackgroundCheckOptions.FromConfiguration(
             sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
         services.AddSingleton<AppUpdateBackgroundCheckScheduler>();
+        services.AddSingleton<IAppUpdateElevationProbe, WindowsAppUpdateElevationProbe>();
+        services.AddSingleton(sp => AppUpdateUnattendedInstallOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build(),
+            IsDebugBuild));
+        services.AddSingleton<AppUpdateUnattendedInstallScheduler>();
         services.AddSingleton(sp => new AttendanceQrPanelViewModel(
             sp.GetRequiredService<IAttendanceSigningKeyApiClient>(),
             sp.GetRequiredService<IConnectivityApiClient>(),
@@ -540,6 +568,7 @@ public static class ServiceRegistration
         services.AddSingleton<IColorThemeService, ColorThemeService>();
         services.AddSingleton<ColorThemeSwitcherViewModel>();
         services.AddSingleton<IWindowOwnerProvider, WpfWindowOwnerProvider>();
+        services.AddSingleton<ICustomerDisplayWindowPreferenceStore, CustomerDisplayWindowPreferenceStore>();
         services.AddSingleton<ICustomerDisplayWindowService, CustomerDisplayWindowService>();
         services.AddSingleton<RawScannerInputProcessor>();
         services.AddSingleton<IRawScannerService, RawScannerService>();

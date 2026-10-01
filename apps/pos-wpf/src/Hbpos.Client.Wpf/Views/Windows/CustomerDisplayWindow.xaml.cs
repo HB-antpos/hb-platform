@@ -1,13 +1,44 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 
 namespace Hbpos.Client.Wpf.Views.Windows;
 
 public partial class CustomerDisplayWindow : Window
 {
+    private const int WmExitSizeMove = 0x0232;
+
     public CustomerDisplayWindow()
     {
         InitializeComponent();
+    }
+
+    /// <summary>收银员点了标题栏关闭按钮；程序退出、断开第二屏等系统关闭不算，用于决定是否记住「已关闭」。</summary>
+    public bool IsClosedByUser { get; private set; }
+
+    /// <summary>收银员拖动或缩放窗口结束（WM_EXITSIZEMOVE）；程序代码设置位置大小不会触发。</summary>
+    public event EventHandler? MoveOrResizeCompleted;
+
+    /// <summary>点了客显上的互换屏幕按钮；由外壳走与客显按钮相同的权限校验后执行互换。</summary>
+    public event EventHandler? SwapScreensRequested;
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (PresentationSource.FromVisual(this) is HwndSource source)
+        {
+            source.AddHook(WndProc);
+        }
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WmExitSizeMove)
+        {
+            MoveOrResizeCompleted?.Invoke(this, EventArgs.Empty);
+        }
+
+        return IntPtr.Zero;
     }
 
     /// <summary>
@@ -30,8 +61,14 @@ public partial class CustomerDisplayWindow : Window
         }
     }
 
+    private void SwapScreensButton_Click(object sender, RoutedEventArgs e)
+    {
+        SwapScreensRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
+        IsClosedByUser = true;
         Close();
     }
 
@@ -40,6 +77,8 @@ public partial class CustomerDisplayWindow : Window
         TitleBar.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
         TitleBarRow.Height = isVisible ? new GridLength(44) : new GridLength(0);
         ResizeMode = isVisible ? ResizeMode.CanResize : ResizeMode.NoResize;
+        // 标题栏和右上角互换按钮二选一：窗口模式用标题栏按钮，全屏用常显的角落按钮。
+        FullscreenSwapScreensButton.Visibility = isVisible ? Visibility.Collapsed : Visibility.Visible;
         RefreshContentLayout();
     }
 

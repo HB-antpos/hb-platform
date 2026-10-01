@@ -21,7 +21,10 @@ public sealed class AdaptiveUiScaleTests
     [InlineData(1080d, 720d, 0.84d)]
     [InlineData(1366d, 600d, 0.83d)]
     [InlineData(960d, 540d, 0.75d)]
-    [InlineData(800d, 600d, 0.75d)]
+    [InlineData(960d, 492d, 0.68d)]
+    [InlineData(910d, 464d, 0.64d)]
+    [InlineData(800d, 600d, 0.62d)]
+    [InlineData(600d, 300d, 0.5d)]
     [InlineData(1280d, 720d, 1d)]
     [InlineData(1366d, 728d, 1d)]
     [InlineData(1920d, 1040d, 1d)]
@@ -41,10 +44,11 @@ public sealed class AdaptiveUiScaleTests
     }
 
     [Fact]
-    public void Scaled_logical_size_never_drops_below_the_design_size_within_supported_windows()
+    public void Scaled_logical_size_never_drops_below_the_design_size_even_when_the_screen_forces_a_smaller_window()
     {
-        var minWidth = AdaptiveUiScale.DesignWidth * AdaptiveUiScale.MinimumScale;
-        var minHeight = AdaptiveUiScale.DesignHeight * AdaptiveUiScale.MinimumScale;
+        // 高缩放比例屏扣掉任务栏后窗口会小于 960×540（如 1920×1080@200% 只剩 960×492），内容也必须完整放下。
+        var minWidth = AdaptiveUiScale.DesignWidth * AdaptiveUiScale.ScreenLimitedMinimumScale;
+        var minHeight = AdaptiveUiScale.DesignHeight * AdaptiveUiScale.ScreenLimitedMinimumScale;
         for (var width = minWidth; width <= 1400d; width += 7d)
         {
             for (var height = minHeight; height <= 900d; height += 5d)

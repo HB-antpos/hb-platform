@@ -56,6 +56,21 @@ public sealed class LocalSupplierCategoryPromotionalResultDto
     public int Cleared { get; set; }
 }
 
+/// <summary>
+/// 每晚重新归类的汇总：逐个供应商按已有采集记录重算，单个供应商失败不影响其他供应商。
+/// </summary>
+public sealed class LocalSupplierCategoryNightlyResolveResultDto
+{
+    public int SupplierCount { get; set; }
+    public int ProductsScanned { get; set; }
+    public int Assigned { get; set; }
+    public int Updated { get; set; }
+    public int Cleared { get; set; }
+    public int ManualSkipped { get; set; }
+    public int StaleRemoved { get; set; }
+    public List<string> FailedSuppliers { get; set; } = new();
+}
+
 public sealed class LocalSupplierCategoryResolveResultDto
 {
     public int ProductsScanned { get; set; }

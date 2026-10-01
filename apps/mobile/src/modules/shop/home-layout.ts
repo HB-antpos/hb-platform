@@ -1,6 +1,7 @@
-// 与仓库页 PDA 布局同一阈值：Zebra TC26 等 PDA 逻辑宽度约 360dp，三列卡片过挤。
-const NARROW_SCREEN_MAX_WIDTH = 390;
+// 商品改为单列行布局：手机与 Zebra TC26（约 360dp）都是一行一个商品，
+// 平板等宽屏（≥700dp）才并排两列，避免行内货号与价格被挤压。
+const WIDE_SCREEN_MIN_WIDTH = 700;
 
 export function resolveHomeProductColumns(windowWidth: number) {
-  return windowWidth <= NARROW_SCREEN_MAX_WIDTH ? 2 : 3;
+  return windowWidth >= WIDE_SCREEN_MIN_WIDTH ? 2 : 1;
 }

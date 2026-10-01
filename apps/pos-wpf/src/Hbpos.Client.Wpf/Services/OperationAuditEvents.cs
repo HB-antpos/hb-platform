@@ -36,6 +36,12 @@ internal static class OperationAuditTypes
     public const string LinklySettlement = "LINKLY_SETTLEMENT";
     public const string LinklySettlementReprint = "LINKLY_SETTLEMENT_REPRINT";
     public const string PermissionOverride = "PERMISSION_OVERRIDE";
+    public const string InstallmentPickupConfirm = "INSTALLMENT_PICKUP_CONFIRM";
+    public const string CatalogReset = "CATALOG_RESET";
+    public const string TestSalesDataReset = "TEST_SALES_DATA_RESET";
+    public const string DeviceReregister = "DEVICE_REREGISTER";
+    public const string ApiServerChange = "API_SERVER_CHANGE";
+    public const string RemoteMaintenanceInstall = "REMOTE_MAINTENANCE_INSTALL";
 }
 
 internal sealed record OperationAuditCartSnapshot(
@@ -304,6 +310,70 @@ internal static class OperationAuditEvents
         }
 
         Record(logger, auditEvent);
+    }
+
+    /// <summary>
+    /// 日结保存审计：系统应有现金记为改前实收、实点现金记为改后实收、差异记为金额变化，
+    /// 使后台操作日志列表的“金额变化”列直接显示日结长短款并可按差异排序。
+    /// </summary>
+    public static void RecordDailyCloseSave(
+        IOperationAuditLogger? logger,
+        PosSessionState session,
+        Guid dailyCloseGuid,
+        decimal expectedCashAmount,
+        decimal countedCashAmount,
+        decimal cashDifference,
+        string? correlationId = null,
+        string? traceId = null)
+    {
+        if (logger is null)
+        {
+            return;
+        }
+
+        var auditEvent = CreateBase(OperationAuditTypes.DailyCloseSave, "Succeeded", session, correlationId, traceId);
+        auditEvent.ReasonCode = "SAVED";
+        auditEvent.OrderGuid = dailyCloseGuid.ToString("D");
+        auditEvent.PaymentMethod = "Cash";
+        auditEvent.BeforeActual = RoundMoney(expectedCashAmount);
+        auditEvent.AfterActual = RoundMoney(countedCashAmount);
+        auditEvent.AmountDelta = RoundMoney(cashDifference);
+        Record(logger, auditEvent);
+    }
+
+    /// <summary>
+    /// 记录不依赖 POS 会话的系统级操作（如切换服务器地址）：操作人由调用方在会话被清空前捕获，
+    /// 门店与终端由写入器按记录时的设备授权补齐。
+    /// </summary>
+    public static void RecordActorAction(
+        IOperationAuditLogger? logger,
+        string operationType,
+        string outcome,
+        Hbpos.Contracts.Cashiers.CashierSessionDto? actor,
+        string? reasonCode = null,
+        string? safeMessage = null)
+    {
+        if (logger is null)
+        {
+            return;
+        }
+
+        Record(logger, new OperationAuditEventDto
+        {
+            EventId = Guid.NewGuid(),
+            SchemaVersion = 1,
+            OccurredAtUtc = DateTimeOffset.UtcNow,
+            OperationType = operationType,
+            Outcome = outcome,
+            CashierId = actor?.CashierId,
+            UserGuid = actor?.UserGuid,
+            CashierName = actor?.CashierName,
+            IsOfflineCached = actor?.IsOfflineCached == true,
+            IsEmergencyOverride = actor?.IsEmergencyOverride == true,
+            CurrencyCode = "AUD",
+            ReasonCode = reasonCode,
+            SafeMessage = safeMessage
+        });
     }
 
     public static (string CorrelationId, string TraceId) CreateCorrelation()

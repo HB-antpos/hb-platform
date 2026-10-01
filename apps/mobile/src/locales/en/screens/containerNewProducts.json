@@ -1,0 +1,24 @@
+{
+  "title": "HB new arrivals",
+  "pagination": { "previous": "Previous", "next": "Next", "page": "Page {{page}} of {{pageCount}} · {{total}} items" },
+  "actions": { "back": "Back", "retry": "Retry" },
+  "labels": {
+    "currentStore": "Current store",
+    "range": "Store arrival: past week · next 2 weeks",
+    "sortByArrival": "Arrival date ↑",
+    "container": "Container {{code}}",
+    "quantity": "Qty {{value}}",
+    "estimatedArrival": "Estimated arrival",
+    "actualBasis": "Based on container warehouse arrival",
+    "estimatedBasis": "Based on estimated arrival",
+    "retailPrice": "Retail ${{value}}"
+  },
+  "messages": {
+    "notAllowed": "You do not have access to HB new arrivals.",
+    "storesFailed": "Stores could not be loaded.",
+    "selectStore": "Select a store first.",
+    "dateNotice": "Store arrival is an estimated range: NSW within 0–3 business days and QLD within 3–7 business days of the container's warehouse arrival, or of its estimated port arrival if it has not reached the warehouse yet."
+  },
+  "states": { "loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new products arriving in store in the past week or next 2 weeks.", "noImage": "No image", "emptyPast": "No new products arrived in store in the past week.", "emptyUpcoming": "No new products arriving in store in the next 2 weeks." },
+  "filters": { "all": "All {{count}}", "past": "Past week {{count}}", "upcoming": "Next 2 weeks {{count}}" }
+}

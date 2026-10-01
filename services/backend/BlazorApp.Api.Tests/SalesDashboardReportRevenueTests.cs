@@ -3585,7 +3585,7 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
     [Fact]
     public void EnhancedProductDetail_搜索词参与缓存键但不写入日志()
     {
-        var logger = new RecordingLogger();
+        var logger = new ConcurrentRecordingLogger();
         SalesDashboardCacheKeys.SetLogger(logger);
 
         try
@@ -3626,9 +3626,11 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
 
             Assert.Equal(first, sameNormalized);
             Assert.NotEqual(first, otherSearch);
-            Assert.Contains(logger.Messages, message => message.Contains("HasProductSearch=True", StringComparison.Ordinal));
-            Assert.DoesNotContain(logger.Messages, message => message.Contains("SECRET-BARCODE", StringComparison.Ordinal));
-            Assert.DoesNotContain(logger.Messages, message => message.Contains("OTHER-BARCODE", StringComparison.Ordinal));
+            // 日志器是进程级静态的，并行测试类此刻仍可能写入；三条断言只针对同一份快照。
+            var messages = logger.Messages;
+            Assert.Contains(messages, message => message.Contains("HasProductSearch=True", StringComparison.Ordinal));
+            Assert.DoesNotContain(messages, message => message.Contains("SECRET-BARCODE", StringComparison.Ordinal));
+            Assert.DoesNotContain(messages, message => message.Contains("OTHER-BARCODE", StringComparison.Ordinal));
         }
         finally
         {
@@ -4034,9 +4036,10 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
             .Setup(service => service.GetExecutiveBranchPerformanceAsync(
                 It.IsAny<DateRangeDto>(),
                 It.IsAny<int?>(),
-                It.IsAny<List<string>?>()
+                It.IsAny<List<string>?>(),
+                It.IsAny<CancellationToken>()
             ))
-            .Callback<DateRangeDto, int?, List<string>?>((_, topN, branchCodes) =>
+            .Callback<DateRangeDto, int?, List<string>?, CancellationToken>((_, topN, branchCodes, _) =>
             {
                 capturedTopN = topN;
                 capturedBranchCodes = branchCodes;
@@ -4077,7 +4080,8 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
             .Setup(service => service.GetExecutiveBranchPerformanceAsync(
                 It.IsAny<DateRangeDto>(),
                 It.IsAny<int?>(),
-                It.IsAny<List<string>?>()
+                It.IsAny<List<string>?>(),
+                It.IsAny<CancellationToken>()
             ))
             .ReturnsAsync(new ExecutiveBranchPerformanceResultDto());
         serviceMock
@@ -4121,7 +4125,7 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
     {
         var serviceMock = new Mock<ISalesDashboardReactService>();
         serviceMock.Setup(service => service.GetExecutiveBranchPerformanceAsync(
-                It.IsAny<DateRangeDto>(), It.IsAny<int?>(), It.IsAny<List<string>?>()))
+                It.IsAny<DateRangeDto>(), It.IsAny<int?>(), It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExecutiveBranchPerformanceResultDto());
         serviceMock.SetupSequence(service => service.GetProductReportStatisticStatusAsync(It.IsAny<DateRangeDto>()))
             .ReturnsAsync(new ProductReportStatisticStatusDto
@@ -4167,9 +4171,10 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
         serviceMock
             .Setup(service => service.GetExecutiveHourlyTrafficAsync(
                 It.IsAny<DateRangeDto>(),
-                It.IsAny<List<string>?>()
+                It.IsAny<List<string>?>(),
+                It.IsAny<CancellationToken>()
             ))
-            .Callback<DateRangeDto, List<string>?>((_, branchCodes) =>
+            .Callback<DateRangeDto, List<string>?, CancellationToken>((_, branchCodes, _) =>
                 capturedBranchCodes = branchCodes
             )
             .ReturnsAsync(new ExecutiveReportResultDto<ExecutiveHourlyTrafficDto>());
@@ -5854,35 +5859,6 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
 
     private sealed class ConcurrentRecordingLogger<T> : ConcurrentRecordingLogger, ILogger<T>
     {
-    }
-
-    private sealed class RecordingLogger : ILogger
-    {
-        public List<string> Messages { get; } = new();
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter
-        )
-        {
-            Messages.Add(formatter(state, exception));
-        }
-
-        private sealed class NullScope : IDisposable
-        {
-            public static readonly NullScope Instance = new();
-
-            public void Dispose()
-            {
-            }
-        }
     }
 
     private static async Task<string> InvokeStatisticsCacheVersionAsync(

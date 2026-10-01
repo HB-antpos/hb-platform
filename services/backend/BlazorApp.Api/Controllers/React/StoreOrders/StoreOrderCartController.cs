@@ -6,6 +6,7 @@ using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Controllers.React.StoreOrders;
 
@@ -455,10 +456,14 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
                 return forbidden;
             }
 
-            var result = await _orderPlacementSlice.SubmitOrderAsync(request);
+            var result = await _orderPlacementSlice.SubmitOrderAsync(
+                request,
+                HttpContext.RequestAborted
+            );
             if (result.Success)
             {
-                return Ok(new { success = true, data = result.Data });
+                // data 里带保留在购物车的行；message 是同一内容的中文说明，供旧客户端直接展示。
+                return Ok(new { success = true, message = result.Message, data = result.Data });
             }
             var atomicGateError = MapPreorderGateServiceError(
                 result.ErrorCode,
@@ -471,7 +476,7 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
             }
             if (result.ErrorCode == StoreOrderSupplyGuard.PausedErrorCode)
             {
-                // 带上错误码与受影响货号，前端据此标出具体是购物车里的哪几行。
+                // 购物车里没有可提交的行：带上错误码、受影响货号与各行的供货计划，前端据此标出是哪几行。
                 return BadRequest(
                     new
                     {
@@ -479,10 +484,16 @@ public sealed class StoreOrderCartController : StoreOrderControllerBase
                         message = result.Message,
                         errorCode = result.ErrorCode,
                         details = result.Details,
+                        data = result.Data,
                     }
                 );
             }
             return BadRequest(new { success = false, message = result.Message });
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, HttpContext.RequestAborted))
+        {
+            // 客户端已断开：事务已在处理器内回滚，按 499 返回且不记错误；服务端自身超时仍走下方错误日志。
+            return StatusCode(499);
         }
         catch (Exception ex)
         {

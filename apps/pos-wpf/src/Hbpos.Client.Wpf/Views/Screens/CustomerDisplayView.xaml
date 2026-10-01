@@ -305,42 +305,6 @@
                                   MediaEnded="AdvertisementVideo_MediaEnded"
                                   MediaFailed="AdvertisementVideo_MediaFailed" />
                     <Rectangle Opacity="0.18" Fill="#FF000000" />
-                    <StackPanel x:Name="PromotionTextPanel" Margin="48,44">
-                        <Border Background="#CC09111F"
-                                BorderBrush="{StaticResource PosCustomerDisplayAccentBrush}"
-                                BorderThickness="1"
-                                CornerRadius="6"
-                                Padding="10,5"
-                                HorizontalAlignment="Left">
-                            <TextBlock Text="{loc:Loc customer.promotionTitle}" Foreground="{StaticResource PosCustomerDisplayAccentBrush}" FontSize="12" FontWeight="Black" />
-                        </Border>
-                        <TextBlock x:Name="PromotionSubtitleText"
-                                   Text="{Binding CurrentAdvertisementTitle}"
-                                   Margin="0,18,0,8"
-                                   Foreground="{StaticResource PosCustomerDisplayTextBrush}"
-                                   FontSize="34"
-                                   FontWeight="Black"
-                                   TextWrapping="Wrap"
-                                   Visibility="Collapsed" />
-                        <TextBlock x:Name="PromotionBodyText"
-                                   Text="{Binding CurrentAdvertisementDescription}"
-                                   Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}"
-                                   FontSize="16"
-                                   TextWrapping="Wrap"
-                                   Visibility="Collapsed" />
-                        <TextBlock x:Name="PromotionFallbackSubtitleText"
-                                   Text="{loc:Loc customer.promotionSubtitle}"
-                                   Margin="0,18,0,8"
-                                   Foreground="{StaticResource PosCustomerDisplayTextBrush}"
-                                   FontSize="34"
-                                   FontWeight="Black"
-                                   TextWrapping="Wrap" />
-                        <TextBlock x:Name="PromotionFallbackBodyText"
-                                   Text="{loc:Loc customer.promotionBody}"
-                                   Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}"
-                                   FontSize="16"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
                     <Border HorizontalAlignment="Right"
                             VerticalAlignment="Bottom"
                             Margin="0,0,28,28"

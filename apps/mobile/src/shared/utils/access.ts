@@ -14,6 +14,10 @@ export const PERMISSIONS = {
     // 后端常量本身带 Permissions. 前缀，与 PosTerminal.* 其余收银权限同一命名空间。
     AuditView: "Permissions.PosTerminal.Audit.View",
   },
+  LegacyEmployeeLogs: {
+    View: "LegacyEmployeeLogs.View",
+    Review: "LegacyEmployeeLogs.Review",
+  },
   EmployeeProfiles: {
     View: "EmployeeProfiles.View",
     Edit: "EmployeeProfiles.Edit",
@@ -80,6 +84,7 @@ export const PERMISSIONS = {
     AvailabilityViewManagedStore: "Attendance.Availability.ViewManagedStore",
     PunchSelf: "Attendance.Punch.Self",
     PunchViewManagedStore: "Attendance.Punch.ViewManagedStore",
+    PunchAdjustManagedStore: "Attendance.Punch.AdjustManagedStore",
     ApprovalViewManagedStore: "Attendance.Approval.ViewManagedStore",
     ApprovalReviewManagedStore: "Attendance.Approval.ReviewManagedStore",
     HolidayViewStore: "Attendance.Holiday.ViewStore",
@@ -198,7 +203,9 @@ function createEmptyAccess(): AccessControl {
     canManageStore: false,
     canViewReports: false,
     canViewDeviceRegistration: false,
-    canViewPosOperationLogs: false,
+    canViewLegacyEmployeeLogs: false,
+    canViewPosOperationAudits: false,
+    canReviewLegacyEmployeeLogs: false,
     canManageDeviceRegistration: false,
     canManageDeviceActivationCodes: false,
     canManageMobileDeviceActivationCodes: false,
@@ -209,6 +216,8 @@ function createEmptyAccess(): AccessControl {
     canReviewAttendance: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
+    canViewAttendancePunchRecords: false,
+    canAdjustAttendancePunch: false,
     canViewLocalPurchase: false,
     canEditLocalPurchase: false,
     canPushLocalPurchaseToHq: false,
@@ -340,8 +349,11 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManageMobileDeviceActivationCodes = hasPermission(
     PERMISSIONS.DeviceRegistration.MobileActivationCodesManage
   );
-  // 员工操作日志：后端还会按管理员/店长角色二次收窄门店范围，这里只判断入口权限。
-  const canViewPosOperationLogs = hasPermission(PERMISSIONS.PosTerminal.AuditView);
+  // 员工操作日志（老收银）：后端还会按可管理分店收口，这里只判断入口与核查权限。
+  const canViewLegacyEmployeeLogs = hasPermission(PERMISSIONS.LegacyEmployeeLogs.View);
+  const canReviewLegacyEmployeeLogs = hasPermission(PERMISSIONS.LegacyEmployeeLogs.Review);
+  // 员工操作日志（新收银）：后端只放行管理员与店长类角色并按可管理分店收口；核查与老收银共用同一权限。
+  const canViewPosOperationAudits = hasPermission(PERMISSIONS.PosTerminal.AuditView);
   const canViewDeviceRegistration =
     canManageDeviceRegistration ||
     hasPermission(PERMISSIONS.DeviceRegistration.View) ||
@@ -370,6 +382,11 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin || hasPermission(PERMISSIONS.Attendance.HolidayEditManagedStore);
   const canEditAttendanceSettings =
     isAdmin || hasPermission(PERMISSIONS.Attendance.SettingsEdit);
+  const canViewAttendancePunchRecords =
+    isAdmin || hasPermission(PERMISSIONS.Attendance.PunchViewManagedStore);
+  // 代员工补录/修改打卡并直接生效；后端还会校验管理分店与工资周窗口。
+  const canAdjustAttendancePunch =
+    isAdmin || hasPermission(PERMISSIONS.Attendance.PunchAdjustManagedStore);
   const canViewLocalPurchase = hasPermission(PERMISSIONS.LocalPurchase.View);
   const canEditLocalPurchase = hasPermission(PERMISSIONS.LocalPurchase.Edit);
   const canPushLocalPurchaseToHq = hasPermission(PERMISSIONS.LocalPurchase.PushToHq);
@@ -423,7 +440,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageStore,
     canViewReports,
     canViewDeviceRegistration,
-    canViewPosOperationLogs,
+    canViewLegacyEmployeeLogs,
+    canViewPosOperationAudits,
+    canReviewLegacyEmployeeLogs,
     canManageDeviceRegistration,
     canManageDeviceActivationCodes,
     canManageMobileDeviceActivationCodes,
@@ -434,6 +453,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canReviewAttendance,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
+    canViewAttendancePunchRecords,
+    canAdjustAttendancePunch,
     canViewLocalPurchase,
     canEditLocalPurchase,
     canPushLocalPurchaseToHq,

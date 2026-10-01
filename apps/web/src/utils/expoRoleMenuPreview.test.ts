@@ -46,9 +46,14 @@ assertEqual(
 )
 
 assertEqual(
-  buildPreview([P.Container.View]).visibleRoutes.some((route) => route.routeName === 'warehouse'),
+  buildPreview([P.Container.View]).visibleRoutes.some((route) => route.routeName === 'containers'),
   true,
-  'Container.View 应通过仓库入口的任选权限显示仓库菜单',
+  'Container.View 应显示独立的货柜管理入口',
+)
+assertEqual(
+  buildPreview([P.Container.View]).visibleRoutes.some((route) => route.routeName === 'warehouse'),
+  false,
+  '货柜管理拆出后，Container.View 不应再连带显示商品和货位管理',
 )
 
 const completePreview = buildPreview([
@@ -86,6 +91,9 @@ assertArrayEqual(
     'sales-orders',
     'cart',
     'warehouse',
+    'containers',
+    'container-new-products',
+    'warehouse-picking',
     'domestic-purchase',
     'local-supplier-invoices',
     'advertisements',
@@ -101,7 +109,7 @@ assertArrayEqual(
     'attendance-management',
     'seasonal-cards',
     'users',
-    'pos-operation-logs',
+    'legacy-employee-logs',
     'user-admin',
     'cash-register-users',
     'roles',
@@ -110,6 +118,7 @@ assertArrayEqual(
     'employee-profile-review',
     'device-management',
     'reports',
+    'app-install',
     'app-downloads',
     'wpf-versions',
     'settings',
@@ -191,8 +200,50 @@ assertEqual(
 const warehouseRoute = completePreview.allRoutes.find((route) => route.routeName === 'warehouse')
 assertArrayEqual(
   warehouseRoute?.permissionCodes ?? [],
-  [P.Warehouse.ManageProducts, P.Container.View],
-  '仓库入口应声明 Warehouse.ManageProducts / Container.View 任选权限',
+  [P.Warehouse.ManageProducts],
+  '商品和货位管理入口应只声明 Warehouse.ManageProducts',
+)
+const containersRoute = completePreview.allRoutes.find((route) => route.routeName === 'containers')
+assertArrayEqual(containersRoute?.permissionCodes ?? [], [P.Container.View], '货柜管理入口应只声明 Container.View')
+assertEqual(containersRoute?.path, '/(shell)/containers', '货柜管理入口应指向移动端 containers 路由')
+
+// 订单拣货入口与后端 FullAppMenu 的 AnyPermissions 同口径：拣货专用权限或两个仓库管理权限任一即可见。
+const warehousePickingRoute = completePreview.allRoutes.find((route) => route.routeName === 'warehouse-picking')
+assertArrayEqual(
+  warehousePickingRoute?.permissionCodes ?? [],
+  [P.Warehouse.Picking, P.Warehouse.Manage, P.Warehouse.ManageOrders],
+  '订单拣货入口应声明 Warehouse.Picking / Warehouse.Manage / Warehouse.ManageOrders 任选权限',
+)
+assertEqual(warehousePickingRoute?.path, '/(shell)/warehouse-picking', '订单拣货入口应指向移动端 warehouse-picking 路由')
+for (const permissionCode of [P.Warehouse.Picking, P.Warehouse.Manage, P.Warehouse.ManageOrders]) {
+  assertEqual(
+    buildPreview([permissionCode]).allRoutes.find((route) => route.routeName === 'warehouse-picking')?.visible,
+    true,
+    `仅有 ${permissionCode} 时应显示订单拣货入口`,
+  )
+}
+assertEqual(
+  buildPreview([P.Orders.View]).allRoutes.find((route) => route.routeName === 'warehouse-picking')?.visible,
+  false,
+  '只有订单查看权限时不应显示订单拣货入口',
+)
+
+// 新品到店入口与后端 FullAppMenu 同口径：只认移动端新品到店专用权限，货柜查看权限不会连带显示。
+const containerNewProductsRoute = completePreview.allRoutes.find((route) => route.routeName === 'container-new-products')
+assertArrayEqual(
+  containerNewProductsRoute?.permissionCodes ?? [],
+  [P.Container.MobileNewProductsView],
+  '新品到店入口应只声明 Container.MobileNewProductsView',
+)
+assertEqual(
+  buildPreview([P.Container.MobileNewProductsView]).allRoutes.find((route) => route.routeName === 'container-new-products')?.visible,
+  true,
+  '仅有 Container.MobileNewProductsView 时应显示新品到店入口',
+)
+assertEqual(
+  buildPreview([P.Container.View]).allRoutes.find((route) => route.routeName === 'container-new-products')?.visible,
+  false,
+  '只有货柜查看权限时不应显示新品到店入口',
 )
 
 const inheritedAndDirectPreview = buildExpoUserMenuPreview({
@@ -251,13 +302,14 @@ assertEqual(inheritedOrdersAfterRemoval?.locked, true, '仅由角色继承的菜
 const restrictedPreview = buildExpoUserMenuPreview({
   inheritedPermissionCodes: [],
   directPermissionCodes: [],
-  assignablePermissionCodes: [P.Container.View],
+  assignablePermissionCodes: [P.Warehouse.ManageOrders],
 })
-const restrictedWarehouse = restrictedPreview.allRoutes.find((route) => route.routeName === 'warehouse')
+// 用订单拣货（拣货 / 管理仓库 / 管理仓库订货任选）验证多权限任选入口的候选选择。
+const restrictedWarehouse = restrictedPreview.allRoutes.find((route) => route.routeName === 'warehouse-picking')
 
 assertArrayEqual(
   restrictedWarehouse?.addPermissionCodes ?? [],
-  [P.Container.View],
+  [P.Warehouse.ManageOrders],
   '多权限任选入口应按菜单定义顺序选择第一个当前操作者可分配的权限',
 )
 assertEqual(restrictedWarehouse?.canAdd, true, '具有候选权限的隐藏菜单应允许添加')
@@ -271,23 +323,23 @@ assertArrayEqual(
   addExpoMenuPermission({
     directPermissionCodes: [],
     route: restrictedWarehouse!,
-    assignablePermissionCodes: [P.Container.View],
+    assignablePermissionCodes: [P.Warehouse.ManageOrders],
   }),
-  [P.Container.View],
+  [P.Warehouse.ManageOrders],
   '添加菜单应只把第一个可分配候选权限加入直接权限草稿',
 )
 
 const unrestrictedWarehousePreview = buildExpoUserMenuPreview({
   inheritedPermissionCodes: [],
   directPermissionCodes: [],
-  assignablePermissionCodes: [P.Container.View, P.Warehouse.ManageProducts],
+  assignablePermissionCodes: [P.Warehouse.ManageOrders, P.Warehouse.Picking],
 })
 const unrestrictedWarehouse = unrestrictedWarehousePreview.allRoutes.find(
-  (route) => route.routeName === 'warehouse',
+  (route) => route.routeName === 'warehouse-picking',
 )
 assertArrayEqual(
   unrestrictedWarehouse?.addPermissionCodes ?? [],
-  [P.Warehouse.ManageProducts],
+  [P.Warehouse.Picking],
   '候选白名单顺序不应覆盖菜单定义中的任选权限优先级',
 )
 

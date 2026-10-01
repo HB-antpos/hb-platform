@@ -1,0 +1,13 @@
+{
+  "posAdmin": {
+    "productPrice": {
+      "multiStore": {
+        "selectStores": "请选择分店（可多选）",
+        "allStores": "全部分店（{{count}} 个）",
+        "singleStoreOnly": "所选商品需来自同一个分店",
+        "selectedRowsStores": "已选择 {{count}} 行，涉及 {{storeCount}} 个分店：{{stores}}",
+        "batchUpdatePartial": "已更新 {{done}}/{{total}} 个分店；分店 {{store}} 更新失败，其后的分店未更新"
+      }
+    }
+  }
+}

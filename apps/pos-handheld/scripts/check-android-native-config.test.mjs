@@ -169,6 +169,15 @@ test("Android printer keeps BLE and paired SPP as explicit opaque transports", a
   assert.match(source, /PRINTER_SPP_PAIRING_REQUIRED/);
   assert.match(source, /createRfcommSocketToServiceRecord/);
   assert.match(source, /BluetoothDevice\.TRANSPORT_LE/);
+  // API 30 及以下扫描前必须检查定位总开关，否则 BLE 扫描静默返回空列表。
+  assert.match(
+    source,
+    /private fun startScan[\s\S]*?requireBluetoothReady[\s\S]*?isScanLocationServiceReady\(\)[\s\S]*?PRINTER_BLUETOOTH_LOCATION_OFF[\s\S]*?scanPromise = promise/,
+  );
+  assert.match(
+    source,
+    /fun isScanLocationServiceReady\(\)[\s\S]*?VERSION_CODES\.S\) return true[\s\S]*?isLocationEnabled/,
+  );
   assert.doesNotMatch(source, /createBond\s*\(/);
   assert.doesNotMatch(source, /createInsecureRfcommSocket/);
   assert.doesNotMatch(source, /ReactPackage|WritableMap|ReadableMap/);

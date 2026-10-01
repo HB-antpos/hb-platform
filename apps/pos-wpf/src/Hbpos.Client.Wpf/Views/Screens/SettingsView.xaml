@@ -2087,6 +2087,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <DockPanel Grid.Row="0" Margin="0,0,0,18">
@@ -2197,7 +2198,42 @@
                                     </StackPanel>
                                 </Grid>
 
-                                <DockPanel Grid.Row="4">
+                                <!-- 中文注释：客人小票是否附带银行收据原文；与其他小票字段一样点“保存”后生效。 -->
+                                <Border Grid.Row="4"
+                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        BorderBrush="{DynamicResource PosDividerBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="14,10"
+                                        Margin="0,0,0,18">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,20,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource PosTextBrush}" />
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt.help}"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <ToggleButton Grid.Column="1"
+                                                      x:Name="PrintBankReceiptTextToggle"
+                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                      IsChecked="{Binding ReceiptPrintBankReceiptText, Mode=TwoWay}"
+                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.printBankReceipt}"
+                                                      MinHeight="48"
+                                                      MinWidth="56"
+                                                      VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+
+                                <DockPanel Grid.Row="5">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="18,0,0,0">
                                         <Button Command="{Binding TestReceiptPrinterCommand}"
                                                 Style="{StaticResource PosSecondaryButtonStyle}"

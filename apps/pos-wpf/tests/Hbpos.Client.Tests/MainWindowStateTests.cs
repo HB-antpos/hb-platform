@@ -37,6 +37,33 @@ public sealed class MainWindowStateTests
     }
 
     [Fact]
+    public void Display_diagnostics_shows_high_dpi_screen_content_now_fits_above_the_taskbar()
+    {
+        // 1920×1080 @200%，Win11 任务栏 48 DIP = 96 设备像素：工作区只剩 960×492 DIP。
+        var display = new DisplayBounds(IntPtr.Zero, 0, 0, 1920, 1080, 0, 0, 1920, 984);
+
+        var message = MainWindow.BuildDisplayDiagnosticsMessage(display, 2d, 960d, 492d, WindowState.Maximized);
+
+        Assert.Contains("monitor=1920x1080 workArea=1920x984 taskbarReserved=0x96", message, StringComparison.Ordinal);
+        Assert.Contains("dpiScale=2 windowDip=960x492 windowState=Maximized", message, StringComparison.Ordinal);
+        Assert.Contains("contentScale=0.68 contentLogical=1412x724 contentClipped=False", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Display_diagnostics_reveals_auto_hidden_taskbar_and_unknown_display()
+    {
+        var autoHidden = new DisplayBounds(IntPtr.Zero, 0, 0, 1366, 768, 0, 0, 1366, 768);
+
+        var autoHiddenMessage = MainWindow.BuildDisplayDiagnosticsMessage(autoHidden, 1d, 1366d, 768d, WindowState.Maximized);
+        var unknownMessage = MainWindow.BuildDisplayDiagnosticsMessage(null, 1.25d, 1092.8d, 576d, WindowState.Normal);
+
+        Assert.Contains("taskbarReserved=0x0", autoHiddenMessage, StringComparison.Ordinal);
+        Assert.Contains("contentScale=1 contentLogical=1366x768 contentClipped=False", autoHiddenMessage, StringComparison.Ordinal);
+        Assert.Contains("monitor=<unknown> workArea=<unknown> taskbarReserved=<unknown>", unknownMessage, StringComparison.Ordinal);
+        Assert.Contains("dpiScale=1.25 windowDip=1092.8x576 windowState=Normal", unknownMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LoadWindowStateAsync_falls_back_to_fullscreen_when_local_settings_fail()
     {
         var repository = new RecordingSettingsRepository { ExceptionToThrow = new InvalidOperationException("broken") };
@@ -46,6 +73,63 @@ public sealed class MainWindowStateTests
 
         Assert.Equal(WindowState.Maximized, state);
         Assert.Same(repository.ExceptionToThrow, reportedException);
+    }
+
+    [Fact]
+    public async Task LoadMainMonitorAsync_returns_null_and_reports_when_local_settings_fail()
+    {
+        var repository = new RecordingSettingsRepository { ExceptionToThrow = new InvalidOperationException("broken") };
+        Exception? reportedException = null;
+
+        var monitor = await MainWindow.LoadMainMonitorAsync(repository, ex => reportedException = ex);
+
+        Assert.Null(monitor);
+        Assert.Same(repository.ExceptionToThrow, reportedException);
+    }
+
+    [Fact]
+    public async Task PersistMainMonitorAsync_swallows_write_failure()
+    {
+        var repository = new RecordingSettingsRepository { ExceptionToThrow = new InvalidOperationException("broken") };
+        Exception? reportedException = null;
+
+        await MainWindow.PersistMainMonitorAsync(repository, new MonitorIdentity(1920, 0, 1280, 800), ex => reportedException = ex);
+
+        Assert.Equal(1, repository.SetCallCount);
+        Assert.Same(repository.ExceptionToThrow, reportedException);
+    }
+
+    [Fact]
+    public void Main_window_centers_normal_window_on_its_current_screen_and_restores_remembered_screen_before_show()
+    {
+        var codeBehind = File.ReadAllText(Path.Combine(
+            FindRepoRootForSource(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "MainWindow.xaml.cs"));
+        var center = codeBehind[codeBehind.IndexOf("private void CenterNormalWindow()", StringComparison.Ordinal)..];
+        center = center[..center.IndexOf("private void PlaceNormalWindowInWorkArea", StringComparison.Ordinal)];
+        var sourceInitialized = codeBehind[codeBehind.IndexOf("private void MainWindowSourceInitialized", StringComparison.Ordinal)..];
+
+        // 互换屏幕后主窗口可能在副屏，普通窗口不能再固定居中到主显示器。
+        Assert.Contains("_displayTopologyService.GetDisplayForWindow(this)", center, StringComparison.Ordinal);
+        Assert.Contains("ApplyRememberedMainMonitor();", sourceInitialized[..sourceInitialized.IndexOf('}')], StringComparison.Ordinal);
+        Assert.Contains("WindowStartupLocation = WindowStartupLocation.Manual;", codeBehind, StringComparison.Ordinal);
+    }
+
+    private static string FindRepoRootForSource()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, ".git")) ||
+                File.Exists(Path.Combine(current.FullName, ".git")) ||
+                File.Exists(Path.Combine(current.FullName, "hb-platform.sln")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Unable to find repository root.");
     }
 
     [Fact]

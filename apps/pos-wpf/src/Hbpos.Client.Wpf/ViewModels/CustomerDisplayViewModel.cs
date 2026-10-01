@@ -30,15 +30,6 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
     private string _terminalName = "Terminal 01";
 
     [ObservableProperty]
-    private string _promotionTitle = "customer.promotionTitle";
-
-    [ObservableProperty]
-    private string _promotionSubtitle = "customer.promotionSubtitle";
-
-    [ObservableProperty]
-    private string _promotionBody = "customer.promotionBody";
-
-    [ObservableProperty]
     private bool _isReadyForPayment;
 
     [ObservableProperty]

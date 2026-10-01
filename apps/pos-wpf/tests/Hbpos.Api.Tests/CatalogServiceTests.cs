@@ -1118,6 +1118,104 @@ public sealed class CatalogServiceTests
     }
 
     [Fact]
+    public async Task GetCodeConflictsAsync_serves_published_version_from_disk_and_backfills_missing_file()
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await fixture.SeedStoreAsync("S01");
+        await fixture.SeedProductAsync(new Product
+        {
+            UUID = "PRODUCT-FLOWER-UUID",
+            ProductCode = "P-FLOWER",
+            ProductName = "flower",
+            ItemNumber = "9040147",
+            Barcode = "6405090401470",
+            RetailPrice = 2.99m,
+            IsActive = true,
+            IsDeleted = false
+        });
+        await fixture.SeedProductAsync(new Product
+        {
+            UUID = "PRODUCT-FLY-UUID",
+            ProductCode = "P-FLY",
+            ProductName = "EXTENSION Fly Swatter",
+            ItemNumber = "HB294-002",
+            Barcode = "9300000000001",
+            RetailPrice = 3m,
+            IsActive = true,
+            IsDeleted = false
+        });
+        await fixture.SeedProductSetCodeAsync("P-FLY", "HB294-002-5363DA", "6405090401470", 8.99m, "SET-FLY-UUID");
+        var root = Path.Combine(Path.GetTempPath(), "hbpos-code-conflicts-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var fileOptions = new CatalogDownloadFileOptions { Enabled = true };
+            var fileStore = new CatalogDownloadFileStore(root, fileOptions, TimeProvider.System);
+            var cache = new CatalogIndexCache(TimeProvider.System, TimeSpan.FromMinutes(20), TimeSpan.FromHours(72), 8, new NoopRefreshScheduler());
+            var service = new CatalogService(
+                fixture.DbContext,
+                new PriceIndexBuilder(),
+                cache,
+                new CatalogBaseDataCache(),
+                catalogSyncOptions: null,
+                fileStore,
+                Microsoft.Extensions.Options.Options.Create(fileOptions));
+
+            // 版本文件未发布：走索引路径，也不会凭空生成版本目录。
+            var fromIndex = await service.GetCodeConflictsAsync("S01", CancellationToken.None);
+            Assert.NotNull(fromIndex);
+            Assert.Equal(["P-FLY", "P-FLOWER"], fromIndex!.Items.Select(item => item.ProductCode));
+            var index = (await ((ICatalogTargetIndexSource)service).GetCurrentIndexAsync("S01", CancellationToken.None))!;
+            Assert.Null(fileStore.FindCodeConflicts("S01", index.CatalogIndex.CatalogVersion));
+
+            // 发布版本后码冲突文件随之写出，内容与索引路径逐字段一致。
+            var full = await fileStore.EnsureFullFileAsync(index, CancellationToken.None);
+            var published = fileStore.FindCodeConflicts("S01", index.CatalogIndex.CatalogVersion);
+            AssertSameCodeConflicts(fromIndex, published);
+
+            // 把磁盘上的文件换成特制内容：接口原样返回它，证明走的是磁盘而不是索引。
+            var conflictsPath = Path.Combine(Path.GetDirectoryName(full.FilePath)!, "code-conflicts.json.gz");
+            var marker = fromIndex with { Items = [fromIndex.Items[0] with { DisplayName = "来自磁盘" }] };
+            await WriteGzipJsonAsync(conflictsPath, marker);
+            var fromDisk = await service.GetCodeConflictsAsync("S01", CancellationToken.None);
+            Assert.Equal("来自磁盘", Assert.Single(fromDisk!.Items).DisplayName);
+
+            // 旧版本（发布时还没有码冲突文件）：走一次索引后补写，内容与索引一致。
+            File.Delete(conflictsPath);
+            var backfillResponse = await service.GetCodeConflictsAsync("S01", CancellationToken.None);
+            AssertSameCodeConflicts(fromIndex, backfillResponse);
+            AssertSameCodeConflicts(fromIndex, fileStore.FindCodeConflicts("S01", index.CatalogIndex.CatalogVersion));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    private static void AssertSameCodeConflicts(CatalogCodeConflictsResponse expected, CatalogCodeConflictsResponse? actual)
+    {
+        Assert.NotNull(actual);
+        Assert.Equal((expected.StoreCode, expected.GeneratedAt, expected.Available), (actual!.StoreCode, actual.GeneratedAt, actual.Available));
+        Assert.Equal(expected.Items, actual.Items);
+    }
+
+    private static async Task WriteGzipJsonAsync<T>(string path, T value)
+    {
+        await using var output = File.Create(path);
+        await using var gzip = new System.IO.Compression.GZipStream(output, System.IO.Compression.CompressionLevel.Fastest);
+        await System.Text.Json.JsonSerializer.SerializeAsync(gzip, value, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+    }
+
+    private sealed class NoopRefreshScheduler : ICatalogBackgroundRefreshScheduler
+    {
+        public void QueueRefresh(string storeCode)
+        {
+        }
+    }
+
+    [Fact]
     public async Task GetCodeConflictsAsync_returns_available_empty_list_when_codes_do_not_collide()
     {
         await using var fixture = await CatalogSqliteFixture.CreateAsync();

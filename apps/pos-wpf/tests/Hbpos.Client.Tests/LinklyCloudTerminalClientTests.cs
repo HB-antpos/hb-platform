@@ -5,6 +5,7 @@ using System.Text.Json;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Linkly;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Hbpos.Client.Tests;
 
@@ -983,7 +984,6 @@ public sealed class LinklyCloudTerminalClientTests
     }
 
     [Fact]
-    [Trait("Category", "Timing")]
     public async Task PurchaseAsync_does_not_use_short_configured_timeout_before_linkly_business_wait()
     {
         var apiClient = new FakeLinklyCloudApiClient
@@ -992,7 +992,11 @@ public sealed class LinklyCloudTerminalClientTests
                 TaskCreationOptions.RunContinuationsAsynchronously),
             ObservePendingTransactionCancellation = true
         };
-        var client = new LinklyCloudTerminalClient(apiClient, new FakeLinklyCloudSecretStore());
+        var timeProvider = new FakeTimeProvider();
+        var client = new LinklyCloudTerminalClient(
+            apiClient,
+            new FakeLinklyCloudSecretStore(),
+            timeProvider: timeProvider);
         var settings = CreateSettings() with { TerminalTimeout = TimeSpan.FromMilliseconds(30) };
 
         using var cancellation = new CancellationTokenSource();
@@ -1001,7 +1005,13 @@ public sealed class LinklyCloudTerminalClientTests
         {
             // 先确认已提交再观察超时契约，避免仅因请求尚未开始就误判通过。
             await WaitUntilAsync(() => apiClient.SendTransactionCallCount == 1);
-            await Task.Delay(120);
+
+            // 中文注释：业务等待计时器在 FakeTimeProvider 上，Advance 会在本线程同步触发到期回调并级联取消链接令牌，
+            // 因此推进后立即读取交易令牌即可确定结论，不需要墙钟等待。推进到业务等待前一刻，远超 30ms 的终端超时设置。
+            timeProvider.Advance(LinklyTimeoutPolicy.BusinessWait - TimeSpan.FromMilliseconds(1));
+            Assert.False(
+                apiClient.LastTransactionCancellationToken.IsCancellationRequested,
+                "Transaction wait was cancelled before the Linkly business wait.");
             Assert.False(purchaseTask.IsCompleted);
 
             apiClient.PendingTransactionCompletion.SetResult(Approved(apiClient.LastTransactionSessionId!, "TXN-5"));
@@ -1189,6 +1199,8 @@ public sealed class LinklyCloudTerminalClientTests
 
         public string? LastTransactionSessionId { get; private set; }
 
+        public CancellationToken LastTransactionCancellationToken { get; private set; }
+
         public string? LastGetTransactionSessionId { get; private set; }
 
         public List<string> SentTransactionSessionIds { get; } = [];
@@ -1274,6 +1286,8 @@ public sealed class LinklyCloudTerminalClientTests
             string sessionId,
             CancellationToken cancellationToken = default)
         {
+            // 先记录令牌再递增计数：测试以计数作为"已提交"信号后读取令牌。
+            LastTransactionCancellationToken = cancellationToken;
             SendTransactionCallCount++;
             LastTransactionSessionId = sessionId;
             SentTransactionSessionIds.Add(sessionId);

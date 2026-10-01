@@ -25,6 +25,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Attendance.Availability.ViewManagedStore, "查看管理分店可上班时间", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店可上班时间"),
                 new(Permissions.Attendance.Punch.Self, "本人打卡", "排班考勤", "移动端「个人考勤」- 本人打卡"),
                 new(Permissions.Attendance.Punch.ViewManagedStore, "查看管理分店打卡记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店打卡记录"),
+                new(Permissions.Attendance.Punch.AdjustManagedStore, "补卡与修改管理分店打卡", "排班考勤", "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"),
                 new(Permissions.Attendance.Approval.ViewManagedStore, "查看管理分店审核记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"),
                 new(Permissions.Attendance.Approval.ReviewManagedStore, "审核管理分店考勤", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"),
                 new(Permissions.Attendance.Holiday.ViewStore, "查看分店公共假期", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看分店公共假期"),
@@ -103,6 +104,7 @@ namespace BlazorApp.Shared.Constants
                 Permissions.Users.View,
                 Permissions.Users.ManagePosTerminalPermissions,
                 Permissions.EmployeeProfiles.ReviewSensitiveManagedStore,
+                Permissions.Container.MobileNewProductsView,
             };
 
         public static IReadOnlyList<string> PosTerminalLineDiscountPermissionCodes { get; } =
@@ -250,12 +252,14 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Container.Create, "创建货柜", "货柜管理", "Web 页面 /warehouse/containers - 创建货柜"),
                 new(Permissions.Container.Edit, "编辑货柜", "货柜管理", "Web 页面 /warehouse/containers - 编辑货柜"),
                 new(Permissions.Container.Delete, "删除货柜", "货柜管理", "Web 页面 /warehouse/containers - 删除货柜"),
+                new(Permissions.Container.MobileNewProductsView, "移动端查看新品到店", "货柜管理", "移动端「新品到店」- 查看预计过去 1 周至未来 2 周到店的货柜新品"),
                 // Warehouse.Manage 是历史总权限：前端把它当作四项仓库管理权限的并集，后端预订/零售价变更/商品记录接口也直接放行。
                 new(Permissions.Warehouse.Manage, "管理仓库", "仓库管理", "仓库兼容总权限 - 等价于同时拥有仓库商品、订货、分类、标签四项管理权限，并放行预订、零售价变更、商品记录接口"),
                 new(Permissions.Warehouse.ManageProducts, "管理仓库商品", "仓库管理", "Web 页面 /warehouse/products、/warehouse/products/retail-price-changes、/warehouse/products/price-update-tasks、/warehouse/product-grade-management 与移动端「仓库」- 管理仓库商品、零售价变更、建议折扣、分店价格变更任务执行情况和等级"),
                 new(Permissions.Warehouse.ManageCategories, "管理仓库分类", "仓库管理", "Web 页面 /warehouse/categories - 管理仓库分类"),
                 new(Permissions.Warehouse.ManageLocations, "管理仓库标签", "仓库管理", "Web 页面 /warehouse/locations - 管理仓库标签"),
                 new(Permissions.Warehouse.ManageOrders, "管理仓库订货", "仓库管理", "Web 页面 /warehouse/store-orders、/warehouse/preorders、/warehouse/store-order-import-price-variance 与移动端「订货单」- 管理分店订货、预订、配货单和发票"),
+                new(Permissions.Warehouse.Picking, "仓库订单拣货", "仓库管理", "移动端「订单拣货」- 扫码拣货、补录缺失的中包数并提交配货数；持有管理仓库或管理仓库订货权限时自动具备"),
                 new(Permissions.DomesticPurchase.ManageSuppliers, "管理国内供应商", "国内采购", "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"),
                 new(Permissions.DomesticPurchase.ManageProducts, "管理国内商品", "国内采购", "Web 页面 /domestic-purchase/product-creation 与 /product-import - 创建和导入商品"),
                 new(Permissions.DomesticPurchase.ManagePrefixCodes, "管理前缀码", "国内采购", "Web 页面 /domestic-purchase/prefix-code-management - 管理商品前缀码"),
@@ -329,6 +333,9 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.PosTerminal.CustomerDisplay.Manage, "管理客显", "POS 客显", "收银端客显 - 管理客显按钮"),
                 new(Permissions.PosTerminal.System.Sync, "同步收银数据", "POS 同步", "收银端同步 - 手动同步按钮"),
                 new(Permissions.PosTerminal.Audit.View, "查看员工操作日志", "POS 审计", "收银端操作审计 - Web 页面 /pos-admin/operation-logs 与移动端工作台「员工操作日志」查看管理分店的员工操作记录"),
+                // 仅注册权限，不写入角色模板；由管理员显式授予，数据范围仍按当前账号可管理分店收口。
+                new(Permissions.LegacyEmployeeLogs.View, "查看老系统操作日志", "POS 审计", "Web 页面 /pos-admin/legacy-employee-logs - 按分店查看旧版收银系统上传的员工操作记录"),
+                new(Permissions.LegacyEmployeeLogs.Review, "核查员工操作日志异常", "POS 审计", "Web 页面 /pos-admin/operation-logs 与移动端「员工操作日志」- 对老收银、新收银命中异常规则的操作标记确认正常或需跟进，并可撤销"),
                 new(Permissions.Promotions.View, "查看促销", "促销管理", "Web 页面 /pos-admin/promotions 与移动端「促销」- 查看促销活动"),
                 // 全局促销的写接口额外要求 Admin 角色，属有意设计；分店促销仅需本权限。
                 new(Permissions.Promotions.Edit, "编辑促销", "促销管理", "Web 页面 /pos-admin/promotions - 编辑分店促销；全局促销的新增、修改、删除、启停另需管理员角色"),
@@ -358,6 +365,8 @@ namespace BlazorApp.Shared.Constants
                 // 仅注册权限，不写入角色模板，避免默认扩大 App 下载入口访问面。
                 new(Permissions.System.ViewAppDownloads, "查看 App 下载", "系统管理", "Web 页面 /system/app-downloads、/system/wpf-versions（移动端同名入口另需管理员）- 查看 App 下载与 WPF 版本"),
                 new(Permissions.System.ManageAppDownloads, "管理 App 下载", "系统管理", "系统管理 - 登记 OTA 更新和生成回撤命令"),
+                // 仅注册权限，不写入角色模板；由管理员按需授予，只读展示最新正式版安装链接。
+                new(Permissions.System.ViewMobileAppInstallLinks, "移动端查看 App 安装二维码", "系统管理", "移动端「App 安装」- 查看 iOS 与 Android 最新正式版本及安装二维码"),
                 // 仅注册权限，不写入角色模板；由管理员显式授予查看或冻结基线能力。
                 new(Permissions.System.ViewPerformanceBaseline, "查看性能与质量基线", "系统管理", "Web 页面 /system/performance-baseline - 查看性能与质量指标"),
                 new(Permissions.System.ManagePerformanceBaseline, "管理性能与质量基线", "系统管理", "Web 页面 /system/performance-baseline - 冻结已满足观察期和覆盖率的基线"),

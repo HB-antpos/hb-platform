@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -10,11 +11,12 @@ using Hbpos.Client.Wpf.ViewModels;
 
 namespace Hbpos.Client.Wpf;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IDisplayMovableWindow
 {
     private const int DisplayChangeMessageId = 0x007E;
     private const int RawInputMessageId = 0x00FF;
     private const string MainWindowModeSettingKey = "Shell:MainWindowMode";
+    internal const string MainWindowMonitorSettingKey = "Shell:MainWindowMonitor";
     internal const string FullscreenWindowModeValue = "Fullscreen";
     internal const string NormalCenteredWindowModeValue = "NormalCentered";
     private const double NormalWindowWidth = 1366;
@@ -37,6 +39,8 @@ public partial class MainWindow : Window
     private readonly IAppShutdownCoordinator _appShutdownCoordinator;
     private readonly IColorThemeService? _colorThemeService;
     private readonly AppUpdateBackgroundCheckScheduler? _appUpdateBackgroundCheckScheduler;
+    private readonly AppUpdateUnattendedInstallScheduler? _appUpdateUnattendedInstallScheduler;
+    private readonly StartupProgressTracker? _startupProgress;
     private HwndSource? _hwndSource;
     private Task? _startupInitializationTask;
     private Task _windowModeSaveTask = Task.CompletedTask;
@@ -48,6 +52,8 @@ public partial class MainWindow : Window
     private bool _isWaitingForWindowModeSaveBeforeClose;
     private bool _isClosingAfterWindowModeSave;
     private WindowState _lastNonMinimizedWindowState = WindowState.Maximized;
+    private MonitorIdentity? _rememberedMainMonitor;
+    private bool _rememberedMainMonitorPending;
 
     public bool IsStartupBlockedByAppUpdate { get; private set; }
 
@@ -64,7 +70,9 @@ public partial class MainWindow : Window
         IAppShutdownCoordinator? appShutdownCoordinator = null,
         IColorThemeService? colorThemeService = null,
         ColorThemeSwitcherViewModel? colorThemeSwitcher = null,
-        AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null)
+        AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null,
+        AppUpdateUnattendedInstallScheduler? appUpdateUnattendedInstallScheduler = null,
+        StartupProgressTracker? startupProgress = null)
     {
         _viewModel = viewModel;
         _startupOptions = startupOptions;
@@ -76,6 +84,8 @@ public partial class MainWindow : Window
         _appShutdownCoordinator = appShutdownCoordinator ?? new AppShutdownCoordinator();
         _colorThemeService = colorThemeService;
         _appUpdateBackgroundCheckScheduler = appUpdateBackgroundCheckScheduler;
+        _appUpdateUnattendedInstallScheduler = appUpdateUnattendedInstallScheduler;
+        _startupProgress = startupProgress;
 #if DEBUG
         _viewModel.AppUpdate.ConfigureDebugForceUpdateDismissed(ResumeStartupAfterDebugUpdateDismissalAsync);
 #endif
@@ -91,6 +101,7 @@ public partial class MainWindow : Window
         }
         SourceInitialized += MainWindowSourceInitialized;
         Loaded += MainWindowLoaded;
+        ContentRendered += MainWindowContentRendered;
         PreviewKeyDown += MainWindowPreviewKeyDown;
         PreviewMouseDown += MainWindowUserInput;
         PreviewMouseMove += MainWindowUserInput;
@@ -267,6 +278,7 @@ public partial class MainWindow : Window
             await _colorThemeService.InitializeAsync();
         }
 
+        _startupProgress?.Enter(StartupPhase.Update);
         var updateResult = await RunStartupAppUpdateCheckAsync();
         IsStartupBlockedByAppUpdate = !ShouldContinueStartupAfterAppUpdateCheck(updateResult);
         if (IsStartupBlockedByAppUpdate)
@@ -280,14 +292,18 @@ public partial class MainWindow : Window
 
     private async Task CompleteStartupInitializationAsync()
     {
+        _startupProgress?.Enter(StartupPhase.Device);
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
         await _rawScannerService.InitializeAsync();
         _rawScannerService.Start(hwnd);
-        await _viewModel.InitializeAsync(_startupOptions);
+        await _viewModel.InitializeAsync(
+            _startupOptions,
+            _startupProgress is null ? null : _startupProgress.Enter);
         if (!_startupOptions.PreviewMode)
         {
-            // 中文注释：启动闸门放行后才开始运行期后台检查；Preview 与真实更新链完全隔离。
+            // 中文注释：启动闸门放行后才开始运行期后台检查与夜间自动安装；Preview 与真实更新链完全隔离。
             _appUpdateBackgroundCheckScheduler?.Start();
+            _appUpdateUnattendedInstallScheduler?.Start();
         }
 
         StartupCompleted?.Invoke(this, EventArgs.Empty);
@@ -420,6 +436,8 @@ public partial class MainWindow : Window
     private void MainWindowSourceInitialized(object? sender, EventArgs e)
     {
         _displayTopologyService.AttachWorkAreaConstraint(this);
+        // 句柄刚建好、窗口还没显示：此时挪回上次所在的屏，用户看不到跳屏。
+        ApplyRememberedMainMonitor();
         WindowsShellIdentityService.ApplyWindowIdentity(this);
         WindowsShellIdentityService.ApplyWindowIcon(this);
         _hwndSource = (HwndSource?)PresentationSource.FromVisual(this);
@@ -457,6 +475,7 @@ public partial class MainWindow : Window
         IsEnabled = false;
         _viewModel.BeginShutdown();
         _appUpdateBackgroundCheckScheduler?.Stop();
+        _appUpdateUnattendedInstallScheduler?.Stop();
         try
         {
             _rawScannerService.Stop();
@@ -778,6 +797,87 @@ public partial class MainWindow : Window
                 exception: ex));
         ApplyWindowMode(state, persist: false);
         _windowModeRestored = true;
+
+        _rememberedMainMonitor = await LoadMainMonitorAsync(
+            _localAppSettingsRepository,
+            ex => ConsoleLog.WriteError(
+                "Startup",
+                $"main window monitor restore failed error={ex.GetType().Name} message={ex.Message}",
+                exception: ex));
+        _rememberedMainMonitorPending = _rememberedMainMonitor is not null;
+        if (PresentationSource.FromVisual(this) is not null)
+        {
+            ApplyRememberedMainMonitor();
+        }
+    }
+
+    /// <summary>把主窗口挪回上次（互换屏幕后）所在的屏；那块屏已拔掉或分辨率变了就留在系统默认屏。</summary>
+    private void ApplyRememberedMainMonitor()
+    {
+        if (!_rememberedMainMonitorPending || _rememberedMainMonitor is not { } remembered)
+        {
+            return;
+        }
+
+        _rememberedMainMonitorPending = false;
+        var target = _displayTopologyService.GetDisplays().FirstOrDefault(display => display.Identity == remembered);
+        if (target is null)
+        {
+            ConsoleLog.Write("Startup", $"main window monitor restore skipped reason=monitor-not-found remembered={remembered.Format()}");
+            return;
+        }
+
+        if (_displayTopologyService.GetDisplayForWindow(this)?.Identity == remembered)
+        {
+            return;
+        }
+
+        MoveToDisplay(target, persist: false);
+    }
+
+    public void MoveToDisplay(DisplayBounds display) => MoveToDisplay(display, persist: true);
+
+    private void MoveToDisplay(DisplayBounds display, bool persist)
+    {
+        var targetState = WindowState == WindowState.Minimized ? _lastNonMinimizedWindowState : WindowState;
+        _isApplyingWindowMode = true;
+        try
+        {
+            // 未显示前改位置要关掉 CenterScreen，否则 Show 时会被重新居中到鼠标所在的屏。
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            if (WindowState != WindowState.Normal)
+            {
+                WindowState = WindowState.Normal;
+            }
+
+            DisplayTopologyService.ApplyWorkAreaLimit(this, display);
+            PlaceNormalWindowInWorkArea(DisplayTopologyService.ToDipRect(
+                this,
+                display.WorkAreaLeft,
+                display.WorkAreaTop,
+                display.WorkAreaWidth,
+                display.WorkAreaHeight));
+            // 先在目标屏放好普通窗口位置，再恢复最大化：系统按普通位置所在的屏来最大化。
+            WindowState = targetState;
+        }
+        finally
+        {
+            _isApplyingWindowMode = false;
+        }
+
+        ConsoleLog.Write(
+            "WindowState",
+            $"main window moved monitor={display.Identity.Format()} state={WindowState} persist={persist}");
+        if (persist)
+        {
+            _ = PersistMainMonitorAsync(
+                _localAppSettingsRepository,
+                display.Identity,
+                ex => ConsoleLog.WriteError(
+                    "WindowState",
+                    $"main window monitor save failed error={ex.GetType().Name} message={ex.Message}",
+                    exception: ex));
+        }
     }
 
     private void MainWindowStateChanged(object? sender, EventArgs e)
@@ -821,11 +921,21 @@ public partial class MainWindow : Window
 
     private void CenterNormalWindow()
     {
-        Width = Math.Max(MinWidth, Math.Min(NormalWindowWidth, SystemParameters.WorkArea.Width));
-        Height = Math.Max(MinHeight, Math.Min(NormalWindowHeight, SystemParameters.WorkArea.Height));
+        // 在主窗口当前所在的屏居中（互换屏幕后可能在副屏）；句柄未建好时回落主显示器工作区。
+        var display = _displayTopologyService.GetDisplayForWindow(this);
+        var workArea = display is null
+            ? SystemParameters.WorkArea
+            : DisplayTopologyService.ToDipRect(this, display.WorkAreaLeft, display.WorkAreaTop, display.WorkAreaWidth, display.WorkAreaHeight);
+        PlaceNormalWindowInWorkArea(workArea);
+    }
+
+    private void PlaceNormalWindowInWorkArea(Rect workArea)
+    {
+        Width = Math.Max(MinWidth, Math.Min(NormalWindowWidth, workArea.Width));
+        Height = Math.Max(MinHeight, Math.Min(NormalWindowHeight, workArea.Height));
 
         var position = StartupSplashWindowPlacement.CenterInWorkArea(
-            SystemParameters.WorkArea,
+            workArea,
             Width,
             Height);
         Left = position.X;
@@ -867,6 +977,42 @@ public partial class MainWindow : Window
             // 窗口偏好损坏不应阻断收银启动。
             reportException(ex);
             return WindowState.Maximized;
+        }
+    }
+
+    internal static async Task<MonitorIdentity?> LoadMainMonitorAsync(
+        ILocalAppSettingsRepository settingsRepository,
+        Action<Exception> reportException)
+    {
+        try
+        {
+            var saved = await settingsRepository
+                .GetValueAsync(MainWindowMonitorSettingKey)
+                .ConfigureAwait(false);
+            return MonitorIdentity.Parse(saved);
+        }
+        catch (Exception ex)
+        {
+            // 屏幕偏好读失败只回落默认屏，不阻断收银启动。
+            reportException(ex);
+            return null;
+        }
+    }
+
+    internal static async Task PersistMainMonitorAsync(
+        ILocalAppSettingsRepository settingsRepository,
+        MonitorIdentity monitor,
+        Action<Exception> reportException)
+    {
+        try
+        {
+            await settingsRepository
+                .SetValueAsync(MainWindowMonitorSettingKey, monitor.Format())
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            reportException(ex);
         }
     }
 
@@ -955,6 +1101,56 @@ public partial class MainWindow : Window
             WindowState.Normal => NormalCenteredWindowModeValue,
             _ => null
         };
+    }
+
+    private void MainWindowContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= MainWindowContentRendered;
+        try
+        {
+            // 关键逻辑：首帧画完后窗口尺寸、最大化状态与界面缩放都已确定，记一次屏幕诊断，
+            // 用于远程判断"底部被任务栏挡住"是缩放比例过高（内容被裁）还是任务栏自动隐藏（工作区 = 整屏）。
+            ConsoleLog.Write(
+                "Startup",
+                BuildDisplayDiagnosticsMessage(
+                    DisplayTopologyService.FindDisplayForWindow(this),
+                    System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX,
+                    ActualWidth,
+                    ActualHeight,
+                    WindowState));
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteError(
+                "Startup",
+                $"main window display diagnostics failed error={ex.GetType().Name} message={ex.Message}",
+                exception: ex);
+        }
+    }
+
+    internal static string BuildDisplayDiagnosticsMessage(
+        DisplayBounds? display,
+        double dpiScale,
+        double windowWidth,
+        double windowHeight,
+        WindowState windowState)
+    {
+        var scale = AdaptiveUiScale.Calculate(windowWidth, windowHeight);
+        var logicalWidth = windowWidth / scale;
+        var logicalHeight = windowHeight / scale;
+        // 缩放后的逻辑尺寸仍低于设计基准，说明已触到缩放下限，内容右侧或底部会被裁掉。
+        var contentClipped = logicalWidth < AdaptiveUiScale.DesignWidth - 0.5d
+            || logicalHeight < AdaptiveUiScale.DesignHeight - 0.5d;
+        // 任务栏占用 = 整屏 − 工作区（设备像素）；为 0x0 通常表示任务栏自动隐藏或平板模式。
+        var displayText = display is null
+            ? "monitor=<unknown> workArea=<unknown> taskbarReserved=<unknown>"
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"monitor={display.MonitorWidth}x{display.MonitorHeight} workArea={display.WorkAreaWidth}x{display.WorkAreaHeight} taskbarReserved={display.MonitorWidth - display.WorkAreaWidth}x{display.MonitorHeight - display.WorkAreaHeight}");
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"main window display {displayText} dpiScale={dpiScale:0.##} windowDip={windowWidth:0.#}x{windowHeight:0.#} windowState={windowState} contentScale={scale:0.##} contentLogical={logicalWidth:0}x{logicalHeight:0} contentClipped={contentClipped}");
     }
 }
 

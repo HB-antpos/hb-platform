@@ -6,6 +6,7 @@ import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { resolveMinimumOrderQuantity } from "@/modules/shop/use-add-to-cart";
 import { lookupProductsByBarcode } from "@/modules/scanner/api";
 import { lookupStoreSupplyStatus } from "@/modules/supply-notice/api";
+import type { StoreSupplyStatus } from "@/modules/supply-notice/types";
 import { addToCart } from "@/modules/shop/api";
 import { playScanFeedbackSound, preloadScanFeedbackSounds } from "@/modules/scanner/scan-sound";
 import {
@@ -858,22 +859,38 @@ export function useScanResult({
             totalElapsedMs: getScanPerformanceTimestamp() - scanStartedAt,
           });
           // 扫到的是仓库暂停供货的商品，而不是扫错码：提示区分开，并在首页零结果处展示恢复计划。
-          let pausedSupply = false;
+          let supplyStatus: StoreSupplyStatus | undefined;
           try {
-            pausedSupply = (await lookupStoreSupplyStatus(activeStoreCode, result.barcode)).length > 0;
+            supplyStatus = (await lookupStoreSupplyStatus(activeStoreCode, result.barcode))[0];
           } catch {
-            pausedSupply = false;
+            supplyStatus = undefined;
           }
           if (!isCurrentStoreJob(job)) {
             logStaleStoreJob("after-supply-lookup", job);
             return;
           }
+          if (supplyStatus) {
+            // 暂停供货用独立状态：提示文案、图标和提示音都与「未找到」区分，店员不看屏幕也能听出来。
+            applyScanFeedback(
+              {
+                status: "supply_paused",
+                message: i18n.t("supplyNotice:scanPaused"),
+                barcode: result.barcode,
+                productName: supplyStatus.productName || supplyStatus.productCode,
+                itemNumber: supplyStatus.itemNumber || supplyStatus.productCode,
+                pausedSupply: true,
+                supplyStatus,
+              },
+              { isAddMode, scanTraceId }
+            );
+            return;
+          }
           applyScanFeedback(
             {
               status: "not_found",
-              message: i18n.t(pausedSupply ? "supplyNotice:scanPaused" : "common:scanner.notFound"),
+              message: i18n.t("common:scanner.notFound"),
               barcode: result.barcode,
-              pausedSupply,
+              pausedSupply: false,
             },
             { isAddMode, scanTraceId }
           );

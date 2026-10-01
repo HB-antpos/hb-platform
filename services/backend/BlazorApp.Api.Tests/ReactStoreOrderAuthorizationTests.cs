@@ -195,10 +195,11 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
         bool locationLookupEnabled
     )
     {
+        // 关键字检索已不进缓存，缓存范围改用分类浏览验证。
         var filter = new StoreOrderFilterDto
         {
             StoreCode = "S001",
-            ItemNumber = "LOCATION-CACHE",
+            CategoryGUID = "LOCATION-CACHE-CATEGORY",
             PageNumber = 1,
             PageSize = 18,
             SortBy = "Default",
@@ -274,6 +275,148 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
 
         Assert.False(cacheStore.TryGet(filter, out var cachedResult));
         Assert.Null(cachedResult);
+    }
+
+    [Theory]
+    [InlineData("itemNumber")]
+    [InlineData("productName")]
+    [InlineData("columnItemNumber")]
+    [InlineData("columnProductName")]
+    [InlineData("columnBarcode")]
+    [InlineData("columnSupplierKeyword")]
+    public void GetProducts_关键字检索既不写入也不读取缓存(string searchField)
+    {
+        // 回归 ME542-6：上架前搜出的空结果被缓存，上架后回来复查仍搜不到。
+        var filter = new StoreOrderFilterDto
+        {
+            StoreCode = "S001",
+            PageNumber = 1,
+            PageSize = 200,
+            SortBy = "Default",
+        };
+        switch (searchField)
+        {
+            case "itemNumber":
+                filter.ItemNumber = "ME542-6";
+                break;
+            case "productName":
+                filter.ProductName = "Glitter";
+                break;
+            case "columnItemNumber":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { ItemNumber = "ME542" };
+                break;
+            case "columnProductName":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { ProductName = "Glitter" };
+                break;
+            case "columnBarcode":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { Barcode = "6926393389581" };
+                break;
+            case "columnSupplierKeyword":
+                filter.ColumnFilters = new StoreOrderProductColumnFiltersDto { SupplierKeyword = "义乌" };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(searchField), searchField, null);
+        }
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var cacheStore = CreatePageCacheStore(cache);
+
+        cacheStore.Set(filter, new PagedListReactDto<StoreOrderProductDto>());
+        Assert.Equal(0, cache.Count);
+
+        // 同键下即使已有条目也必须按未命中处理，保证关键字检索总是查库。
+        cache.Set(
+            StoreOrderCacheKeys.Products(filter, locationLookupEnabled: false),
+            new PagedListReactDto<StoreOrderProductDto>()
+        );
+        Assert.False(cacheStore.TryGet(filter, out var cachedResult));
+        Assert.Null(cachedResult);
+    }
+
+    [Fact]
+    public void GetProducts_分类浏览缓存两分钟后过期()
+    {
+        var clock = new ManualSystemClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        var cacheStore = CreatePageCacheStore(cache);
+        var filter = new StoreOrderFilterDto
+        {
+            StoreCode = "S001",
+            CategoryGUID = "CATEGORY-TTL",
+            PageNumber = 1,
+            PageSize = 200,
+            SortBy = "Default",
+        };
+
+        cacheStore.Set(filter, new PagedListReactDto<StoreOrderProductDto>());
+
+        clock.UtcNow += TimeSpan.FromMinutes(2) - TimeSpan.FromSeconds(1);
+        Assert.True(cacheStore.TryGet(filter, out _));
+
+        clock.UtcNow += TimeSpan.FromSeconds(2);
+        Assert.False(cacheStore.TryGet(filter, out _));
+    }
+
+    [Fact]
+    public async Task WarmUpHomePageAsync_预热写入的首页键与分页缓存同为两分钟过期()
+    {
+        StoreOrderCacheKeys.ClearActiveKeys();
+
+        var clock = new ManualSystemClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        var productPicker = new Mock<IStoreOrderProductPickerSlice>(MockBehavior.Strict);
+        productPicker
+            .Setup(item =>
+                item.GetHomePageWarmUpPageAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()
+                )
+            )
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>());
+        productPicker
+            .Setup(item =>
+                item.GetHomePageCachePageAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()
+                )
+            )
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>());
+        var warmer = StoreOrderCacheWarmerTestFactory.Create(productPicker.Object, cache, out _);
+
+        await warmer.WarmUpHomePageAsync();
+
+        var homePageKeys = new[]
+        {
+            StoreOrderCacheKeys.GetHomePageCacheKey(50),
+            StoreOrderCacheKeys.GetHomePageCacheKey(18),
+            StoreOrderCacheKeys.GetHomePageWarmUpCacheKey(50),
+            StoreOrderCacheKeys.GetHomePageWarmUpCacheKey(18),
+        };
+
+        clock.UtcNow += TimeSpan.FromMinutes(2) - TimeSpan.FromSeconds(1);
+        Assert.All(homePageKeys, key => Assert.True(cache.TryGetValue(key, out _)));
+
+        clock.UtcNow += TimeSpan.FromSeconds(2);
+        Assert.All(homePageKeys, key => Assert.False(cache.TryGetValue(key, out _)));
+    }
+
+    private static ProductPickerPageCacheStore CreatePageCacheStore(IMemoryCache cache)
+    {
+        var locationLookup = new ProductPickerLocationLookup(
+            new StoreOrderActorContext(new HttpContextAccessor()),
+            Mock.Of<IStoreOrderLocationProductLookupService>()
+        );
+        return new ProductPickerPageCacheStore(
+            cache,
+            locationLookup,
+            new TestLogger<ProductPickerPageCacheStore>()
+        );
+    }
+
+    private sealed class ManualSystemClock : Microsoft.Extensions.Internal.ISystemClock
+    {
+        public DateTimeOffset UtcNow { get; set; } =
+            new(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
     }
 
     [Fact]
@@ -642,6 +785,167 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
 
         Assert.IsType<OkObjectResult>(result);
         service.Verify(item => item.GetPagedListAsync(filter), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetProducts_IncludeDynamicData_顶层附带本页动态数据且不改写缓存分页对象()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = "S001", IncludeDynamicData = true };
+        var cachedPage = new PagedListReactDto<StoreOrderProductDto>
+        {
+            Items = new List<StoreOrderProductDto>
+            {
+                new() { ProductCode = "P001" },
+                new() { ProductCode = "P002" },
+            },
+            Total = 12,
+            PageNumber = 1,
+            PageSize = 2,
+        };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service.Setup(item => item.GetPagedListAsync(filter)).ReturnsAsync(cachedPage);
+        service
+            .Setup(item => item.GetProductsDynamicDataAsync(It.Is<StoreOrderDynamicDataRequestDto>(request =>
+                request.StoreCode == "S001"
+                && !request.IncludeSales
+                && request.ProductCodes.SequenceEqual(new[] { "P001", "P002" })
+            )))
+            .ReturnsAsync(ApiResponse<List<StoreOrderDynamicDataDto>>.OK(new List<StoreOrderDynamicDataDto>
+            {
+                new() { ProductCode = "P001", CartQuantity = 3m },
+                new() { ProductCode = "P002", LastQuantity = 5m },
+            }));
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.OrderFront.View, Permissions.Orders.View),
+            CreateScopeService(),
+            new[] { "Order" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+        var data = json.RootElement.GetProperty("data");
+
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(12, data.GetProperty("total").GetInt32());
+        Assert.Equal(2, data.GetProperty("items").GetArrayLength());
+        var dynamicData = data.GetProperty("dynamicData");
+        Assert.Equal(2, dynamicData.GetArrayLength());
+        Assert.Equal(3m, dynamicData[0].GetProperty("cartQuantity").GetDecimal());
+        Assert.Equal(5m, dynamicData[1].GetProperty("lastQuantity").GetDecimal());
+        // 动态数据含购物车数量，只能包在新响应对象里，不能写回可能来自缓存的分页实例。
+        var payload = ok.Value!.GetType().GetProperty("data")!.GetValue(ok.Value);
+        var embeddedPage = Assert.IsType<StoreOrderProductPageReactDto>(payload);
+        Assert.NotSame(cachedPage, embeddedPage);
+        Assert.Equal(2, cachedPage.Items.Count);
+        service.Verify(item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetProducts_未请求动态数据时不查询也不输出dynamicData字段()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = "S001" };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service
+            .Setup(item => item.GetPagedListAsync(filter))
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>
+            {
+                Items = new List<StoreOrderProductDto> { new() { ProductCode = "P001" } },
+                Total = 1,
+            });
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.OrderFront.View, Permissions.Orders.View),
+            CreateScopeService(),
+            new[] { "Order" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+
+        Assert.False(json.RootElement.GetProperty("data").TryGetProperty("dynamicData", out _));
+        service.Verify(
+            item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()),
+            Times.Never
+        );
+    }
+
+    [Fact]
+    public async Task GetProducts_IncludeDynamicData但未带门店时不查询动态数据()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = null, IncludeDynamicData = true };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service
+            .Setup(item => item.GetPagedListAsync(filter))
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>
+            {
+                Items = new List<StoreOrderProductDto> { new() { ProductCode = "P001" } },
+                Total = 1,
+            });
+        // 纯仓库员工凭 Orders.Create 可不带门店读取商品列表。
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.Orders.Create),
+            CreateScopeService(),
+            new[] { "WarehouseStaff" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+
+        Assert.False(json.RootElement.GetProperty("data").TryGetProperty("dynamicData", out _));
+        service.Verify(
+            item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()),
+            Times.Never
+        );
+    }
+
+    [Fact]
+    public async Task GetProducts_动态数据读取失败时仍返回商品列表()
+    {
+        var filter = new StoreOrderFilterDto { StoreCode = "S001", IncludeDynamicData = true };
+        var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
+        service
+            .Setup(item => item.GetPagedListAsync(filter))
+            .ReturnsAsync(new PagedListReactDto<StoreOrderProductDto>
+            {
+                Items = new List<StoreOrderProductDto> { new() { ProductCode = "P001" } },
+                Total = 1,
+            });
+        service
+            .Setup(item => item.GetProductsDynamicDataAsync(It.IsAny<StoreOrderDynamicDataRequestDto>()))
+            .ReturnsAsync(new ApiResponse<List<StoreOrderDynamicDataDto>>
+            {
+                Success = false,
+                Message = "无法识别当前仓库员工",
+            });
+        var controller = CreateController(
+            service,
+            CreateAuthorizationService(Permissions.OrderFront.View, Permissions.Orders.View),
+            CreateScopeService(),
+            new[] { "Order" }
+        );
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.GetProducts(filter));
+        using var json = JsonDocument.Parse(SerializeLikeApi(ok.Value));
+        var data = json.RootElement.GetProperty("data");
+
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(1, data.GetProperty("items").GetArrayLength());
+        Assert.False(data.TryGetProperty("dynamicData", out _));
+    }
+
+    /// <summary>与 Program.cs 的 MVC JSON 配置一致：camelCase、忽略 null。</summary>
+    private static string SerializeLikeApi(object? value)
+    {
+        return JsonSerializer.Serialize(
+            value,
+            new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            }
+        );
     }
 
     [Fact]
@@ -1313,7 +1617,9 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
     {
         var request = new SubmitStoreOrderRequestDto { StoreCode = "S001" };
         var service = new Mock<IStoreOrderReactService>(MockBehavior.Strict);
-        service.Setup(item => item.SubmitOrderAsync(request)).ReturnsAsync(ApiResponse<bool>.OK(true));
+        service
+            .Setup(item => item.SubmitOrderAsync(request))
+            .ReturnsAsync(ApiResponse<SubmitStoreOrderResultDto>.OK(new SubmitStoreOrderResultDto()));
         var scopeService = CreateScopeService();
         var controller = CreateController(
             service,
@@ -1337,7 +1643,7 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
         var gate = new PreorderGateResult { IsBlocked = true, PendingCount = 1 };
         service
             .Setup(item => item.SubmitOrderAsync(request))
-            .ReturnsAsync(new ApiResponse<bool>
+            .ReturnsAsync(new ApiResponse<SubmitStoreOrderResultDto>
             {
                 Success = false,
                 ErrorCode = "PREORDER_REQUIRED",
@@ -1478,7 +1784,9 @@ public class ReactStoreOrderAuthorizationTests : IDisposable
             var request = new SubmitStoreOrderRequestDto { StoreCode = "1024" };
             service
                 .Setup(item => item.SubmitOrderAsync(request))
-                .ReturnsAsync(ApiResponse<bool>.OK(true));
+                .ReturnsAsync(
+                    ApiResponse<SubmitStoreOrderResultDto>.OK(new SubmitStoreOrderResultDto())
+                );
             result = await controller.SubmitOrder(request);
             service.Verify(item => item.SubmitOrderAsync(request), Times.Once);
         }

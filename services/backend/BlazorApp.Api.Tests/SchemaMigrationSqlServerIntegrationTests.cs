@@ -889,6 +889,80 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         Assert.Equal(51930, missing.Number);
     }
 
+    [SchemaMigrationSqlServerFact]
+    public async Task 老系统日志风险四表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var posm = databases.PosmConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql));
+        Assert.Equal(51950, missing.Number);
+
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql);
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql);
+
+        // 非聚集索引被删后门禁必须报索引漂移，重跑 ApplySql 可补回。
+        await ExecuteNonQueryAsync(posm,
+            "DROP INDEX [IX_LegacyEmployeeLogReviewHistory_LogId] ON dbo.LegacyEmployeeLogReviewHistory;");
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql));
+        Assert.Equal(51954, missingIndex.Number);
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql);
+
+        // 金额精度漂移由 precision/scale 段识别（Amount 在索引 INCLUDE 中，改列前须先删索引，校验先于索引段报错）。
+        await ExecuteNonQueryAsync(posm, """
+            DROP INDEX [IX_LegacyEmployeeLogImpacts_StoreCode_OperationTime] ON dbo.LegacyEmployeeLogImpacts;
+            ALTER TABLE dbo.LegacyEmployeeLogImpacts ALTER COLUMN Amount decimal(18,4) NOT NULL;
+            """);
+        var driftedDecimal = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql));
+        Assert.Equal(51952, driftedDecimal.Number);
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.LegacyEmployeeLogImpacts ALTER COLUMN Amount decimal(18,2) NOT NULL;");
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql);
+
+        // nvarchar 长度按字节核对：nvarchar(500) 改成 nvarchar(250) 必须被识别。
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.LegacyEmployeeLogReviews ALTER COLUMN Note nvarchar(250) NULL;");
+        var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, LegacyEmployeeLogRiskSchema.VerifySql));
+        Assert.Equal(51951, driftedColumn.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 新收银审计风险三表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var posm = databases.PosmConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql));
+        Assert.Equal(51970, missing.Number);
+
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql);
+
+        // 非聚集索引被删后门禁必须报索引漂移，重跑 ApplySql 可补回。
+        await ExecuteNonQueryAsync(posm,
+            "DROP INDEX [IX_PosOperationAuditReviewHistory_EventId] ON dbo.PosOperationAuditReviewHistory;");
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql));
+        Assert.Equal(51974, missingIndex.Number);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql);
+
+        // nvarchar 长度按字节核对：nvarchar(500) 改成 nvarchar(250) 必须被识别。
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.PosOperationAuditReviews ALTER COLUMN Note nvarchar(250) NULL;");
+        var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql));
+        Assert.Equal(51971, driftedColumn.Number);
+    }
+
     private static async Task<string> RunApiUntilListeningAsync(
         IsolatedSchemaDatabases databases
     )

@@ -72,7 +72,8 @@ const PosAdminSupplierManagementPage = lazy(() => import('../pages/PosAdmin/Supp
 const PosAdminProductManagementPage = lazy(() => import('../pages/PosAdmin/ProductManagement'))
 const PosAdminStoreProductPricePage = lazy(() => import('../pages/PosAdmin/StoreProductPrice'))
 const PosAdminAdvertisementsPage = lazy(() => import('../pages/PosAdmin/Advertisements'))
-const PosAdminOperationLogsPage = lazy(() => import('../pages/PosAdmin/OperationLogs'))
+// 员工操作日志合并页：老收银 / 新收银两个来源在页内切换。
+const PosAdminEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/EmployeeLogs'))
 const LinklySettlementsPage = lazy(() => import('../pages/PosAdmin/LinklySettlements'))
 const LinklySettlementDetailPage = lazy(() => import('../pages/PosAdmin/LinklySettlementDetail'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
@@ -793,9 +794,20 @@ export const appRoutes: AppRouteItem[] = [
           title: 'menu.operationLogs',
           icon: 'FileTextOutlined',
           keepAlive: true,
-          accessKey: 'canViewOperationAudits',
+          accessKey: 'canViewEmployeeOperationLogs',
         },
-        element: <PosAdminOperationLogsPage />,
+        element: <PosAdminEmployeeLogsPage />,
+      },
+      {
+        // 旧「老系统操作日志」地址（书签、分享链接）转到合并页的老收银来源。
+        path: '/pos-admin/legacy-employee-logs',
+        meta: {
+          title: 'menu.operationLogs',
+          hidden: true,
+          accessKey: 'canViewLegacyEmployeeLogs',
+          activeMenu: '/pos-admin/operation-logs',
+        },
+        element: <Navigate to="/pos-admin/operation-logs?source=legacy" replace />,
       },
       {
         path: '/pos-admin/linkly-settlements',

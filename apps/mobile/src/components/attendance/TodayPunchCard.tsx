@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { Card, Chip, Text } from "react-native-paper";
+import { Card, Icon, Text } from "react-native-paper";
 import type {
-  AttendancePunchVerificationState,
   AttendancePunch,
+  AttendancePunchVerificationState,
   AttendanceToday,
 } from "@/modules/attendance/types";
 import { canOpenAttendanceQrScanner } from "@/modules/attendance/attendance-qr";
@@ -14,6 +14,8 @@ import {
 import { resolveAttendanceTodayStatus } from "@/modules/attendance/attendance-today-status";
 import { resolveAttendancePunchDisplayTime } from "@/modules/attendance/attendance-device-time";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { type AttendanceStatusTone, StatusPill } from "./AdjustmentFormControls";
 
 function formatTime(value?: string) {
   if (!value) {
@@ -30,6 +32,25 @@ function formatClockTime(value: Date) {
     second: "2-digit",
     hour12: false,
   });
+}
+
+/** 分钟数显示为 h:mm，工时汇总比「xxx 分钟」更易扫读。 */
+function formatDuration(minutes?: number) {
+  const total = Math.max(0, Math.round(minutes ?? 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+const STATUS_TONES: Record<string, AttendanceStatusTone> = {
+  readyToClockIn: "accent",
+  readyToClockOut: "success",
+  completed: "neutral",
+  holiday: "warning",
+  viewOnly: "neutral",
+};
+
+function punchTone(status?: string): AttendanceStatusTone {
+  if (!status || status === "Normal") return "success";
+  return status === "Late" || status === "EarlyLeave" ? "warning" : "danger";
 }
 
 export function TodayPunchCard({
@@ -82,91 +103,66 @@ export function TodayPunchCard({
   const cardSubtitle =
     subtitle ?? selectedDate ?? today?.workDate ?? t("common:loading");
   const display = useMemo(() => buildAttendanceTodayDisplay(today), [today]);
-  const statusLabel = useMemo(
-    () => t(`today.status.${resolveAttendanceTodayStatus(today, allowPunch)}`),
-    [allowPunch, t, today],
-  );
+  const status = resolveAttendanceTodayStatus(today, allowPunch);
+  const allSessions = display.stores.flatMap((store) => store.sessions);
+  const primarySession = allSessions.find((session) => session.scheduleState !== "NoSchedule");
+  const workedTotal = allSessions.reduce((sum, session) => sum + (session.workedMinutes ?? 0), 0);
 
-  const networkValue = useMemo(() => {
-    if (verification.network.status === "available") {
-      return today?.storeTimeZone
-        ? t("today.info.networkAvailableWithTimeZone", {
-            timeZone: today.storeTimeZone,
-          })
-        : t("today.info.networkAvailable");
-    }
+  // 主按钮文案跟随当前状态，员工不用先读状态再判断该打哪种卡。
+  const scanLabel = isPunching
+    ? t(processingStage ? `actions.punchStages.${processingStage}` : "actions.processingPunch")
+    : status === "readyToClockIn"
+      ? t("actions.scanClockIn")
+      : status === "readyToClockOut"
+        ? t("actions.scanClockOut")
+        : t("actions.scanPunch");
 
-    if (verification.network.reason === "networkUnreachable") {
-      return t("today.info.networkUnavailable");
-    }
-
-    return t("today.info.networkUnknown");
-  }, [t, today?.storeTimeZone, verification.network.reason, verification.network.status]);
-
-  const networkChipLabel = t(
-    `today.verification.statuses.${verification.network.status}`,
-  );
-
+  // 前台只展示网络校验；定位仅用于后台采集与打卡提交，不在今日卡显示（见二维码契约测试）。
+  const networkStatus = verification.network.status;
+  const networkTone: AttendanceStatusTone = networkStatus === "available" ? "success" : "warning";
+  const networkLabel = `${t("today.info.network")} · ${
+    isVerificationRefreshing ? t("today.verification.refreshing") : t(`today.verification.statuses.${networkStatus}`)
+  }`;
+  // 只在需要员工处理时给出说明；校验齐全时不再重复「将携带校验信息」之类的提示。
+  const verificationIssue = !allowPunch || isVerificationRefreshing || networkStatus === "available"
+    ? undefined
+    : verification.network.reason === "networkUnreachable"
+      ? t("today.info.networkUnavailable")
+      : t("today.info.networkUnknown");
   const alertMessage = !allowPunch
     ? t("today.dailyRecords.alertSelectedDate")
     : today?.holidayName
       ? t("today.dailyRecords.alertHoliday", { holidayName: today.holidayName })
-      : verification.location.status === "available" &&
-          verification.network.status === "available"
-        ? t("today.dailyRecords.alertVerificationCaptured")
-        : today?.schedules.length
-          ? t("today.dailyRecords.alertVerificationSentForReview")
-        : t("today.dailyRecords.alertNoSchedule");
+      : !today?.schedules.length && !isLoading
+        ? t("today.dailyRecords.alertNoSchedule")
+        : undefined;
 
   return (
     <Card mode="outlined" style={styles.card}>
       <Card.Content style={styles.content}>
-        <View style={styles.heroCard}>
-          <View style={styles.heroHeader}>
-            <Text variant="titleMedium">{title ?? t("sections.today")}</Text>
-            <Text variant="bodyMedium" style={styles.muted}>
-              {cardSubtitle}
+        <View style={styles.hero}>
+          <View style={styles.rowBetween}>
+            <StatusPill label={t(`today.statusShort.${status}`)} tone={STATUS_TONES[status] ?? "neutral"} />
+            <Text variant="labelMedium" style={styles.muted}>
+              {title ?? t("sections.today")} · {cardSubtitle}
             </Text>
           </View>
-          <Text variant="displaySmall" style={styles.clockText}>
-            {formatClockTime(currentTime)}
-          </Text>
-          <Chip
-            compact
-            style={styles.statusChip}
-            textStyle={styles.statusChipText}
-          >
-            {statusLabel}
-          </Chip>
-          {today?.holidayName ? (
-            <Chip icon="calendar-alert" style={styles.holidayChip}>
-              {today.holidayName}
-            </Chip>
-          ) : null}
-          {display.stores.length ? (
-            <View style={styles.shiftSummary}>
-              <Text variant="labelLarge">{t("today.schedules")}</Text>
-              {display.stores.map((store) => store.sessions.map((session) => (
-                  <View
-                    key={session.scheduleGuid || `${store.storeCode}-${session.startTime}`}
-                    style={styles.shiftRow}
-                  >
-                    <Text variant="bodyMedium" style={styles.flexText}>
-                      {store.storeName || store.storeCode || storeName || t("common:na")}
-                    </Text>
-                    <Text variant="bodyMedium">
-                      {session.scheduleState === "NoSchedule"
-                        ? t("today.timeline.unscheduledPunches")
-                        : `${formatTime(session.startTime)} - ${formatTime(session.endTime)}`}
-                    </Text>
-                  </View>
-                ))) }
-            </View>
-          ) : (
-            <Text variant="bodyMedium" style={styles.muted}>
-              {isLoading ? t("common:loading") : t("today.noSchedule")}
+          <Text variant="displaySmall" style={styles.clockText} accessibilityRole="timer">
+            {formatClockTime(currentTime).slice(0, 5)}
+            <Text variant="titleMedium" style={styles.clockSeconds}>
+              {formatClockTime(currentTime).slice(5)}
             </Text>
-          )}
+          </Text>
+          <Text variant="bodyMedium" style={styles.muted}>
+            {primarySession
+              ? t("today.hero.shift", {
+                  start: formatTime(primarySession.startTime),
+                  end: formatTime(primarySession.endTime),
+                })
+              : isLoading ? t("common:loading") : t("today.hero.noShift")}
+            {status === "readyToClockOut" ? ` · ${t("today.hero.worked", { duration: formatDuration(workedTotal) })}` : ""}
+          </Text>
+
           <Pressable
             accessibilityRole="button"
             accessibilityState={{
@@ -180,39 +176,46 @@ export function TodayPunchCard({
             ]}
             onPress={onScan}
           >
-            <Text variant="headlineSmall" style={styles.punchButtonText}>
-              {isPunching
-                ? t(processingStage ? `actions.punchStages.${processingStage}` : "actions.processingPunch")
-                : t("actions.scanPunch")}
+            <Icon source="qrcode-scan" size={22} color={HB_COLORS.white} />
+            <Text variant="titleMedium" style={styles.punchButtonText}>
+              {scanLabel}
             </Text>
           </Pressable>
+
+          <View style={styles.pillRow}>
+            <StatusPill label={networkLabel} tone={networkTone} />
+            {today?.storeTimeZone ? <StatusPill label={today.storeTimeZone} tone="neutral" /> : null}
+          </View>
+          {verificationIssue ? (
+            <Text variant="bodySmall" style={styles.warningText}>{verificationIssue}</Text>
+          ) : null}
+          {alertMessage ? (
+            <View style={styles.banner}>
+              <Icon source="information-outline" size={16} color={HB_COLORS.warning} />
+              <Text variant="bodySmall" style={styles.bannerText}>{alertMessage}</Text>
+            </View>
+          ) : null}
           {lastQrPunch ? (
-            <View style={styles.qrResult}>
-              <Text variant="titleSmall" selectable>
-                {t("today.qrResult.title")}
+            <View style={styles.lastScan}>
+              <Text variant="bodySmall" selectable style={styles.tabularText}>
+                {t("today.lastScan", {
+                  action: t(`punchTypes.${lastQrPunch.punchType}`, lastQrPunch.punchType),
+                  time: formatTime(resolveAttendancePunchDisplayTime({
+                    punchTimeUtc: lastQrPunch.punchTimeUtc || lastQrPunch.serverTimeUtc,
+                  })),
+                  status: t(`statuses.${lastQrPunch.status}`, lastQrPunch.status),
+                })}
               </Text>
-              <Text selectable>{t("today.qrResult.employee", {
-                employee: lastQrPunch.employeeName || lastQrPunch.userGuid || t("common:na"),
-              })}</Text>
-              <Text selectable>{t("today.qrResult.store", {
-                store: lastQrPunch.storeName || lastQrPunch.storeCode || t("common:na"),
-              })}</Text>
-              <Text selectable>{t("today.qrResult.posDevice", {
-                device: lastQrPunch.posDeviceCode || t("common:na"),
-              })}</Text>
-              <Text selectable>{t("today.qrResult.action", {
-                action: t(`punchTypes.${lastQrPunch.punchType}`, lastQrPunch.punchType),
-              })}</Text>
-              <Text selectable style={styles.tabularText}>{t("today.qrResult.deviceTime", {
-                time: resolveAttendancePunchDisplayTime({
-                  punchTimeUtc: lastQrPunch.punchTimeUtc || lastQrPunch.serverTimeUtc,
-                }) || t("common:na"),
-              })}</Text>
-              <Text selectable>{t("today.qrResult.status", {
-                status: t(`statuses.${lastQrPunch.status}`, lastQrPunch.status),
-              })}</Text>
+              <Text variant="bodySmall" selectable style={styles.muted}>
+                {[
+                  lastQrPunch.storeName || lastQrPunch.storeCode,
+                  lastQrPunch.posDeviceCode
+                    ? t("today.lastScanDevice", { device: lastQrPunch.posDeviceCode })
+                    : undefined,
+                ].filter(Boolean).join(" · ")}
+              </Text>
               {trackingWarning ? (
-                <Text selectable style={styles.trackingWarning}>
+                <Text variant="bodySmall" selectable style={styles.dangerText}>
                   {trackingWarning}
                 </Text>
               ) : null}
@@ -220,445 +223,232 @@ export function TodayPunchCard({
           ) : null}
         </View>
 
-        <View style={styles.metaCard}>
-          <View style={styles.metaHeader}>
-            <Text variant="labelMedium" style={styles.muted}>
-              {t("today.info.network")}
+        {display.relatedStoreAlerts.map((alert) => (
+          <View key={`${alert.missingStoreCode}-${alert.activeStoreCode}`} style={styles.banner}>
+            <Icon source="store-alert-outline" size={16} color={HB_COLORS.warning} />
+            <Text variant="bodySmall" style={styles.bannerText}>
+              {t("today.timeline.relatedStoreConflict", {
+                missingStore: alert.missingStoreName || alert.missingStoreCode,
+                activeStore: alert.activeStoreName || alert.activeStoreCode,
+              })}
             </Text>
-            <Chip compact style={styles.metaChip} textStyle={styles.metaChipText}>
-              {isVerificationRefreshing
-                ? t("today.verification.refreshing")
-                : networkChipLabel}
-            </Chip>
           </View>
-          <Text variant="bodyMedium">{networkValue}</Text>
-        </View>
+        ))}
+        {display.relatedStoreReminders.map((reminder) => (
+          <View key={reminder} style={styles.banner}>
+            <Icon source="store-alert-outline" size={16} color={HB_COLORS.warning} />
+            <Text variant="bodySmall" style={styles.bannerText}>{reminder}</Text>
+          </View>
+        ))}
 
-        <View style={styles.recordsCard}>
-          <Text variant="titleMedium">{t("today.dailyRecords.title")}</Text>
-          <View style={styles.recordList}>
-            {display.relatedStoreAlerts.map((alert) => (
+        {display.stores.map((store) => (
+          <View key={store.storeCode || store.storeName} style={styles.storeGroup}>
+            <View style={styles.rowBetween}>
+              <Text variant="titleSmall">
+                {store.storeName || store.storeCode || storeName || t("common:na")}
+              </Text>
+              <Text variant="labelSmall" style={styles.muted}>
+                {t("today.timeline.shiftCount", { count: store.sessions.length })}
+              </Text>
+            </View>
+            {store.relatedReminder && !display.relatedStoreReminders.includes(store.relatedReminder) ? (
+              <Text variant="bodySmall" style={styles.warningText}>{store.relatedReminder}</Text>
+            ) : null}
+            {store.sessions.map((session) => (
               <View
-                key={`${alert.missingStoreCode}-${alert.activeStoreCode}`}
-                style={styles.relatedAlert}
+                key={session.scheduleGuid || `${store.storeCode}-${session.startTime}`}
+                style={styles.session}
               >
-                <Text variant="labelMedium" style={styles.relatedAlertTitle}>
-                  {t("today.timeline.relatedStoreAlert")}
-                </Text>
-                <Text variant="bodySmall">
-                  {t("today.timeline.relatedStoreConflict", {
-                    missingStore: alert.missingStoreName || alert.missingStoreCode,
-                    activeStore: alert.activeStoreName || alert.activeStoreCode,
-                  })}
-                </Text>
-              </View>
-            ))}
-            {display.relatedStoreReminders.map((reminder) => (
-              <View key={reminder} style={styles.relatedAlert}>
-                <Text variant="labelMedium" style={styles.relatedAlertTitle}>
-                  {t("today.timeline.relatedStoreAlert")}
-                </Text>
-                <Text variant="bodySmall">{reminder}</Text>
-              </View>
-            ))}
-            {display.stores.map((store) => (
-              <View key={store.storeCode || store.storeName} style={styles.storeGroup}>
-                <View style={styles.storeHeader}>
-                  <Text variant="titleSmall">
-                    {store.storeName || store.storeCode || storeName || t("common:na")}
+                <View style={styles.rowBetween}>
+                  <Text variant="labelLarge" style={styles.tabularText}>
+                    {session.scheduleState === "NoSchedule"
+                      ? t("today.timeline.unscheduledPunches")
+                      : `${formatTime(session.startTime)} – ${formatTime(session.endTime)}`}
                   </Text>
-                  <Chip compact>{t("today.timeline.shiftCount", { count: store.sessions.length })}</Chip>
+                  <Text variant="labelSmall" style={styles.muted}>
+                    {t("today.timeline.segmentProgress", {
+                      completed: session.completedSegmentCount ?? session.segments.filter((item) => item.clockOut).length,
+                      limit: session.segmentLimit ?? session.segments.length,
+                    })}
+                  </Text>
                 </View>
-                {store.relatedReminder && !display.relatedStoreReminders.includes(store.relatedReminder) ? (
-                  <Text variant="bodySmall" style={styles.relatedAlertTitle}>
-                    {store.relatedReminder}
+                {session.hasMissingClockOut ? (
+                  <Text variant="bodySmall" style={styles.dangerText}>
+                    {t("today.timeline.missingClockOut")}
                   </Text>
                 ) : null}
-                {store.sessions.map((session) => (
-                  <View
-                    key={session.scheduleGuid || `${store.storeCode}-${session.startTime}`}
-                    style={styles.sessionCard}
-                  >
-                    <View style={styles.sessionHeader}>
-                      <View style={styles.flexText}>
-                        <Text variant="labelLarge">
-                          {session.scheduleState === "NoSchedule"
-                            ? t("today.timeline.unscheduledPunches")
-                            : `${formatTime(session.startTime)} - ${formatTime(session.endTime)}`}
-                        </Text>
-                        <Text variant="bodySmall" style={styles.muted}>
-                          {t("today.timeline.segmentProgress", {
-                            completed: session.completedSegmentCount ?? session.segments.filter((item) => item.clockOut).length,
-                            limit: session.segmentLimit ?? session.segments.length,
-                          })}
-                        </Text>
-                      </View>
-                      {session.scheduleState ? <Chip compact>{session.scheduleState}</Chip> : null}
-                    </View>
-                    <View style={styles.metricsRow}>
-                      <Text variant="bodySmall">
-                        {t("today.timeline.workedMinutes", { minutes: session.workedMinutes })}
-                      </Text>
-                      {session.breakMinutes !== undefined ? (
-                        <Text variant="bodySmall" style={styles.muted}>
-                          {t("today.timeline.breakMinutes", { minutes: session.breakMinutes })}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {session.hasMissingClockOut ? (
-                      <Text variant="bodySmall" style={styles.exceptionText}>
-                        {t("today.timeline.missingClockOut")}
-                      </Text>
-                    ) : null}
-                    <View style={styles.segmentList}>
-                      {session.segments.map((segment) => {
-                        const clockInException = segment.clockIn && segment.clockIn.status !== "Normal";
-                        const clockOutException = segment.clockOut && segment.clockOut.status !== "Normal";
-                        const clockInMinutes = segment.clockIn
-                          ? resolveAttendancePunchExceptionMinutes(segment.clockIn)
-                          : undefined;
-                        const clockOutMinutes = segment.clockOut
-                          ? resolveAttendancePunchExceptionMinutes(segment.clockOut)
-                          : undefined;
-                        return (
-                          <View key={segment.segmentIndex} style={styles.segmentRow}>
-                            <View style={styles.segmentHeader}>
-                              <Text variant="labelMedium">
-                                {t("today.timeline.segment", { number: segment.segmentNumber })}
-                              </Text>
-                              <Text variant="labelMedium" style={styles.muted}>
-                                {segment.workedMinutes ?? segment.durationMinutes ?? 0} min
-                              </Text>
-                            </View>
-                            <View style={styles.punchPair}>
-                              <Text variant="bodySmall" style={styles.flexText}>
-                                {t("today.timeline.clockIn", {
-                                  time: formatTime(resolveAttendancePunchDisplayTime(segment.clockIn)),
-                                })}
-                              </Text>
-                              <Text variant="bodySmall" style={styles.flexText}>
-                                {t("today.timeline.clockOut", {
-                                  time: formatTime(resolveAttendancePunchDisplayTime(segment.clockOut)),
-                                })}
-                              </Text>
-                            </View>
-                            {segment.showClockInException && segment.clockIn ? (
-                              <Text variant="bodySmall" style={clockInException ? styles.exceptionText : styles.muted}>
-                                {clockInMinutes !== undefined
-                                  ? t("today.timeline.firstClockInStatus", {
-                                      status: t(`statuses.${segment.clockIn.status}`, segment.clockIn.status),
-                                      minutes: clockInMinutes,
-                                    })
-                                  : t("today.timeline.firstClockInStatusOnly", {
-                                      status: t(`statuses.${segment.clockIn.status}`, segment.clockIn.status),
-                                    })}
-                              </Text>
-                            ) : null}
-                            {segment.showClockOutException && segment.clockOut ? (
-                              <Text variant="bodySmall" style={clockOutException ? styles.exceptionText : styles.muted}>
-                                {clockOutMinutes !== undefined
-                                  ? t("today.timeline.finalClockOutStatus", {
-                                      status: t(`statuses.${segment.clockOut.status}`, segment.clockOut.status),
-                                      minutes: clockOutMinutes,
-                                    })
-                                  : t("today.timeline.finalClockOutStatusOnly", {
-                                      status: t(`statuses.${segment.clockOut.status}`, segment.clockOut.status),
-                                    })}
-                              </Text>
-                            ) : null}
-                            {segment.isBreakAfter ? (
-                              <Chip compact icon="coffee-outline" style={styles.breakChip}>
-                                {t("today.timeline.onBreak")}
-                              </Chip>
-                            ) : null}
+
+                <View style={styles.timeline}>
+                  {session.segments.map((segment) => {
+                    const clockInMinutes = segment.clockIn
+                      ? resolveAttendancePunchExceptionMinutes(segment.clockIn)
+                      : undefined;
+                    const clockOutMinutes = segment.clockOut
+                      ? resolveAttendancePunchExceptionMinutes(segment.clockOut)
+                      : undefined;
+                    const clockInStatus = segment.clockIn
+                      ? t(`statuses.${segment.clockIn.status}`, segment.clockIn.status)
+                      : "";
+                    const clockOutStatus = segment.clockOut
+                      ? t(`statuses.${segment.clockOut.status}`, segment.clockOut.status)
+                      : "";
+                    return (
+                      <View key={segment.segmentIndex} style={styles.segment}>
+                        <View style={styles.timelineRow}>
+                          <Text variant="bodyMedium" style={styles.timelineTime}>
+                            {formatTime(resolveAttendancePunchDisplayTime(segment.clockIn))}
+                          </Text>
+                          <View style={[styles.dot, segment.clockIn ? styles.dotFilled : styles.dotEmpty]} />
+                          <Text variant="bodyMedium" style={styles.flexText}>{t("punchTypes.ClockIn")}</Text>
+                          {segment.showClockInException && segment.clockIn ? (
+                            <StatusPill
+                              tone={punchTone(segment.clockIn.status)}
+                              label={clockInMinutes !== undefined
+                                ? t("today.timeline.statusWithMinutes", { status: clockInStatus, minutes: clockInMinutes })
+                                : clockInStatus}
+                            />
+                          ) : null}
+                        </View>
+                        <View style={styles.timelineRow}>
+                          <Text
+                            variant="bodyMedium"
+                            style={[styles.timelineTime, !segment.clockOut ? styles.mutedTime : null]}
+                          >
+                            {formatTime(resolveAttendancePunchDisplayTime(segment.clockOut))}
+                          </Text>
+                          <View style={[styles.dot, segment.clockOut ? styles.dotFilled : styles.dotEmpty]} />
+                          <Text variant="bodyMedium" style={[styles.flexText, !segment.clockOut ? styles.muted : null]}>
+                            {t("punchTypes.ClockOut")}
+                          </Text>
+                          {segment.showClockOutException && segment.clockOut ? (
+                            <StatusPill
+                              tone={punchTone(segment.clockOut.status)}
+                              label={clockOutMinutes !== undefined
+                                ? t("today.timeline.statusWithMinutes", { status: clockOutStatus, minutes: clockOutMinutes })
+                                : clockOutStatus}
+                            />
+                          ) : null}
+                        </View>
+                        {segment.isBreakAfter ? (
+                          <View style={styles.breakRow}>
+                            <Icon source="coffee-outline" size={14} color={HB_COLORS.textSecondary} />
+                            <Text variant="labelSmall" style={styles.muted}>{t("today.timeline.onBreak")}</Text>
                           </View>
-                        );
-                      })}
-                    </View>
-                    {(session.overtime.rawMinutes > 0 ||
-                      session.overtime.candidateMinutes > 0 ||
-                      session.overtime.approvedMinutes > 0) ? (
-                      <View style={styles.overtimeBox}>
-                        <Text variant="labelMedium">{t("today.timeline.overtimeTitle")}</Text>
-                        <Text variant="bodySmall">
-                          {t("today.timeline.overtimeSummary", {
-                            raw: session.overtime.rawMinutes,
-                            candidate: session.overtime.candidateMinutes,
-                            approved: session.overtime.approvedMinutes,
-                          })}
-                        </Text>
-                        {session.overtime.status ? (
-                          <Text variant="bodySmall" style={styles.muted}>{session.overtime.status}</Text>
                         ) : null}
                       </View>
-                    ) : null}
+                    );
+                  })}
+                </View>
+
+                <View style={styles.summary}>
+                  <View style={styles.summaryTile}>
+                    <Text variant="titleMedium" style={styles.tabularText}>{formatDuration(session.workedMinutes)}</Text>
+                    <Text variant="labelSmall" style={styles.muted}>{t("today.summary.worked")}</Text>
                   </View>
-                ))}
+                  <View style={styles.summaryTile}>
+                    <Text variant="titleMedium" style={styles.tabularText}>{formatDuration(session.breakMinutes)}</Text>
+                    <Text variant="labelSmall" style={styles.muted}>{t("today.summary.break")}</Text>
+                  </View>
+                  <View style={styles.summaryTile}>
+                    <Text variant="titleMedium" style={styles.tabularText}>
+                      {formatDuration(session.overtime.approvedMinutes || session.overtime.candidateMinutes)}
+                    </Text>
+                    <Text variant="labelSmall" style={styles.muted}>{t("today.summary.overtime")}</Text>
+                  </View>
+                </View>
+                {(session.overtime.rawMinutes > 0 ||
+                  session.overtime.candidateMinutes > 0 ||
+                  session.overtime.approvedMinutes > 0) ? (
+                  <Text variant="bodySmall" style={styles.muted}>
+                    {t("today.timeline.overtimeSummary", {
+                      raw: session.overtime.rawMinutes,
+                      candidate: session.overtime.candidateMinutes,
+                      approved: session.overtime.approvedMinutes,
+                    })}
+                  </Text>
+                ) : null}
               </View>
             ))}
-            {!display.stores.length && !isLoading ? (
-              <Text variant="bodySmall" style={styles.muted}>{t("today.dailyRecords.noSchedule")}</Text>
-            ) : null}
-            <View style={styles.alertItem}>
-              <View style={styles.alertIcon}>
-                <Text variant="labelSmall" style={styles.alertIconText}>
-                  !
-                </Text>
-              </View>
-              <View style={styles.recordBody}>
-                <View style={styles.recordHeader}>
-                  <Text variant="titleSmall" style={styles.alertTitle}>
-                    {t("today.dailyRecords.systemAlertTitle")}
-                  </Text>
-                  <Text variant="labelMedium" style={styles.alertTime}>
-                    {formatClockTime(currentTime).slice(0, 5)}
-                  </Text>
-                </View>
-                <Text variant="bodySmall" style={styles.muted}>
-                  {alertMessage}
-                </Text>
-              </View>
-            </View>
           </View>
-        </View>
+        ))}
       </Card.Content>
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
+  banner: {
+    alignItems: "flex-start",
+    alignSelf: "stretch",
+    backgroundColor: "#FFFAEB",
+    borderRadius: HB_RADIUS.control,
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
+    padding: HB_SPACING.xs,
+  },
+  bannerText: { color: HB_COLORS.warning, flex: 1 },
+  breakRow: { alignItems: "center", flexDirection: "row", gap: 4, paddingLeft: 64 },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E4E7EC",
-    borderRadius: 12,
+    backgroundColor: HB_COLORS.white,
+    borderColor: HB_COLORS.outlineMuted,
+    borderRadius: HB_RADIUS.surface,
     borderWidth: StyleSheet.hairlineWidth,
     elevation: 0,
   },
-  content: {
-    gap: 12,
+  clockSeconds: { color: HB_COLORS.textSecondary, fontVariant: ["tabular-nums"] },
+  clockText: { color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"], fontWeight: "700" },
+  content: { gap: HB_SPACING.md },
+  dangerText: { color: HB_COLORS.danger },
+  dot: { borderRadius: 5, height: 10, width: 10 },
+  dotEmpty: { borderColor: HB_COLORS.outline, borderStyle: "dashed", borderWidth: 1.5 },
+  dotFilled: { backgroundColor: HB_COLORS.success },
+  flexText: { flex: 1 },
+  hero: { gap: HB_SPACING.xs },
+  lastScan: {
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderRadius: HB_RADIUS.control,
+    gap: 2,
+    padding: HB_SPACING.xs,
   },
-  alertIcon: {
-    alignItems: "center",
-    backgroundColor: "#FEE2E2",
-    borderRadius: 16,
-    height: 32,
-    justifyContent: "center",
-    width: 32,
-  },
-  alertIconText: {
-    color: "#B42318",
-  },
-  alertItem: {
-    alignItems: "flex-start",
-    backgroundColor: "#FFF5F5",
-    borderLeftColor: "#EF4444",
-    borderLeftWidth: 3,
-    borderRadius: 8,
-    flexDirection: "row",
-    gap: 10,
-    padding: 12,
-  },
-  alertTime: {
-    color: "#B42318",
-  },
-  alertTitle: {
-    color: "#B42318",
-  },
-  breakChip: {
-    alignSelf: "flex-start",
-    backgroundColor: "#E8F1F8",
-  },
-  exceptionText: {
-    color: "#B42318",
-  },
-  flexText: {
-    flex: 1,
-  },
-  heroCard: {
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E4E7EC",
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  heroHeader: {
-    alignItems: "center",
-    gap: 4,
-  },
-  holidayChip: {
-    alignSelf: "flex-start",
-  },
-  clockText: {
-    color: "#111827",
-    fontWeight: "700",
-  },
-  metaCard: {
-    backgroundColor: "#F2F4F7",
-    borderRadius: 8,
-    flex: 1,
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  metaChip: {
-    backgroundColor: "#FFFFFF",
-  },
-  metaChipText: {
-    color: "#4B5563",
-  },
-  metaHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  muted: {
-    color: "#6B7280",
-  },
-  metricsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-  overtimeBox: {
-    backgroundColor: "#FFF7E6",
-    borderRadius: 8,
-    gap: 3,
-    padding: 10,
-  },
-  punchPair: {
-    flexDirection: "row",
-    gap: 8,
-  },
+  muted: { color: HB_COLORS.textSecondary },
+  mutedTime: { color: HB_COLORS.outline },
+  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   punchButton: {
     alignItems: "center",
     alignSelf: "stretch",
-    backgroundColor: "#0958D9",
-    borderRadius: 8,
+    backgroundColor: HB_COLORS.action,
+    borderRadius: HB_RADIUS.control,
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
     justifyContent: "center",
+    marginTop: HB_SPACING.xs,
     minHeight: 52,
-    paddingHorizontal: 16,
+    paddingHorizontal: HB_SPACING.md,
   },
-  punchButtonDisabled: {
-    backgroundColor: "#9CA3AF",
+  punchButtonDisabled: { backgroundColor: "#98A2B3" },
+  punchButtonPressed: { opacity: 0.85 },
+  punchButtonText: { color: HB_COLORS.white, fontWeight: "700" },
+  rowBetween: { alignItems: "center", flexDirection: "row", gap: HB_SPACING.xs, justifyContent: "space-between" },
+  segment: { gap: 2 },
+  session: {
+    borderColor: HB_COLORS.outlineMuted,
+    borderRadius: HB_RADIUS.control,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: HB_SPACING.xs,
+    padding: HB_SPACING.sm,
   },
-  punchButtonPressed: {
-    opacity: 0.85,
-  },
-  punchButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-  qrResult: {
-    alignSelf: "stretch",
-    backgroundColor: "#F5F7FA",
-    borderRadius: 10,
-    gap: 4,
-    padding: 12,
-  },
-  tabularText: {
-    fontVariant: ["tabular-nums"],
-  },
-  trackingWarning: {
-    color: "#B42318",
-    fontWeight: "600",
-  },
-  recordBody: {
+  storeGroup: { gap: HB_SPACING.xs },
+  summary: { flexDirection: "row", gap: 6 },
+  summaryTile: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderRadius: HB_RADIUS.control,
     flex: 1,
-    gap: 4,
+    paddingVertical: 6,
   },
-  recordHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  recordIcon: {
-    alignItems: "center",
-    borderRadius: 16,
-    height: 32,
-    justifyContent: "center",
-    width: 32,
-  },
-  recordItem: {
-    alignItems: "flex-start",
-    backgroundColor: "#F5F7FA",
-    borderLeftWidth: 3,
-    borderRadius: 8,
-    flexDirection: "row",
-    gap: 10,
-    padding: 12,
-  },
-  recordList: {
-    gap: 8,
-  },
-  relatedAlert: {
-    backgroundColor: "#FFF7E6",
-    borderLeftColor: "#F59E0B",
-    borderLeftWidth: 3,
-    borderRadius: 8,
-    gap: 3,
-    padding: 10,
-  },
-  relatedAlertTitle: {
-    color: "#92400E",
-  },
-  recordsCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E4E7EC",
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 12,
-    padding: 14,
-  },
-  shiftRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  shiftSummary: {
-    alignSelf: "stretch",
-    gap: 8,
-  },
-  segmentHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  segmentList: {
-    gap: 8,
-  },
-  segmentRow: {
-    backgroundColor: "#F5F7FA",
-    borderRadius: 8,
-    gap: 5,
-    padding: 10,
-  },
-  sessionCard: {
-    borderColor: "#E4E7EC",
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 9,
-    padding: 10,
-  },
-  sessionHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  storeGroup: {
-    gap: 8,
-  },
-  storeHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  statusChip: {
-    backgroundColor: "#F3F4F6",
-  },
-  statusChipText: {
-    color: "#4B5563",
-  },
+  tabularText: { fontVariant: ["tabular-nums"] },
+  timeline: { gap: 4 },
+  timelineRow: { alignItems: "center", flexDirection: "row", gap: HB_SPACING.xs, minHeight: 28 },
+  timelineTime: { fontVariant: ["tabular-nums"], width: 48 },
+  warningText: { color: HB_COLORS.warning },
 });

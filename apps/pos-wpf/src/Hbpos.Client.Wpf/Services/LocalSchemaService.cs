@@ -5,16 +5,47 @@ namespace Hbpos.Client.Wpf.Services;
 public interface ILocalSchemaService
 {
     Task InitializeAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 启动链路专用：同一进程内对同一个数据库文件只完整初始化一次；默认实现等同于 <see cref="InitializeAsync"/>。
+    /// </summary>
+    Task EnsureInitializedAsync(CancellationToken cancellationToken = default) => InitializeAsync(cancellationToken);
 }
 
 public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaService
 {
     private readonly TaskCompletionSource schemaReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _initializedPathGate = new();
+    private string? _initializedDatabasePath;
 
     public Task WaitUntilReadyAsync(CancellationToken cancellationToken = default) =>
         schemaReady.Task.WaitAsync(cancellationToken);
 
     public void SignalReady() => schemaReady.TrySetResult();
+
+    /// <summary>
+    /// 启动时 Host 的审计回放服务和主界面初始化都要确保表结构就绪；原先两处各跑一遍完整初始化，
+    /// 其中包含对商品表的全表回填扫描和订单上传状态恢复，且都在 UI 线程同步执行。
+    /// 这里按"当前数据库文件"记住成功结果：同一文件第二次调用直接返回；失败不记忆，下一次调用照常重试；
+    /// 服务器热切换到别的分区文件时路径不同，会重新完整初始化。
+    /// </summary>
+    public async Task EnsureInitializedAsync(CancellationToken cancellationToken = default)
+    {
+        var databasePath = store.ActiveDatabasePath;
+        lock (_initializedPathGate)
+        {
+            if (string.Equals(_initializedDatabasePath, databasePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        await InitializeAsync(cancellationToken);
+        lock (_initializedPathGate)
+        {
+            _initializedDatabasePath = databasePath;
+        }
+    }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {

@@ -336,10 +336,21 @@ assertEqual(
     currentRouteName: "containers",
     hasAppliedDefaultRoute: true,
     isDeviceMode: false,
-    routeNames: ["warehouse", "attendance-personal", "settings"],
+    routeNames: ["containers", "attendance-personal", "settings"],
   }),
   null,
-  "root stack container list is not redirected by tab default correction"
+  "后端下发 containers 时货柜列表不能被默认页纠偏抢走"
+);
+
+assertEqual(
+  resolveTabRouteCorrection({
+    currentRouteName: "containers",
+    hasAppliedDefaultRoute: true,
+    isDeviceMode: false,
+    routeNames: ["warehouse", "attendance-personal", "settings"],
+  }),
+  "/(shell)/workbench",
+  "货柜管理已是独立菜单入口，后端未下发 containers 时必须纠偏回工作台"
 );
 
 assertEqual(

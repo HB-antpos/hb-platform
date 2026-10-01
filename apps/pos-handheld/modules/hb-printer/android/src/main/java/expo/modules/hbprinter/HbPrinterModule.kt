@@ -19,6 +19,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Build
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
@@ -437,6 +438,16 @@ class HbPrinterModule : Module() {
   @SuppressLint("MissingPermission")
   private fun startScan(durationMs: Int, includeAll: Boolean, promise: Promise) {
     val adapter = requireBluetoothReady(promise) ?: return
+    if (!isScanLocationServiceReady()) {
+      // Android 10/11 定位总开关关闭时 BLE 扫描不报错、只返回空结果，这里提前明确拒绝。
+      promise.reject(
+        PrinterException(
+          "PRINTER_BLUETOOTH_LOCATION_OFF",
+          "定位服务已关闭；Android 10/11 需开启定位才能扫描蓝牙设备。",
+        ),
+      )
+      return
+    }
     if (scanPromise != null) {
       promise.reject(
         PrinterException("PRINTER_SCAN_IN_PROGRESS", "蓝牙打印机扫描正在进行。"),
@@ -1087,6 +1098,18 @@ class HbPrinterModule : Module() {
       return null
     }
     return adapter
+  }
+
+  /**
+   * 仅 API 30 及以下需要定位服务；API 31+ 的 BLUETOOTH_SCAN 声明了 neverForLocation，不受定位开关影响。
+   * 读不到 LocationManager 时放行，避免误拦截。
+   */
+  private fun isScanLocationServiceReady(): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return true
+    val context = appContext.reactContext?.applicationContext ?: return true
+    val locationManager =
+      context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return true
+    return runCatching { locationManager.isLocationEnabled }.getOrDefault(true)
   }
 
   private fun requiredPermissions(): List<String> =

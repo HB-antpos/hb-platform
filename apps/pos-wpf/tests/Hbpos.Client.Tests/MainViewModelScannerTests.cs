@@ -2467,17 +2467,26 @@ public sealed class MainViewModelScannerTests
     public async Task Payment_success_print_button_prints_current_receipt()
     {
         var printService = new RecordingReceiptPrintService();
-        var viewModel = CreateAuthorizedMainViewModel(new FakeCustomerDisplayWindowService(), printService);
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            operationAuditLogger: auditLogger);
         await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
         var order = CreateReceiptPrintOrder(PaymentMethodKind.Cash);
         viewModel.PaymentSuccess.LoadFromOrder(order);
 
         viewModel.PaymentSuccess.PrintReceiptCommand.Execute(null);
 
-        await WaitUntilAsync(() => printService.Calls.Count == 1);
+        await WaitUntilAsync(() => auditLogger.Events.Any(auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT"));
         var call = Assert.Single(printService.Calls);
         Assert.Equal(order.OrderGuid, call.OrderGuid);
         Assert.Equal(ReceiptPrintReason.Manual, call.Reason);
+        // 付款成功页的打印按钮可反复点击，必须与其他补打入口一样留下审计。
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("PAYMENT_SUCCESS", auditEvent.ReasonCode);
+        Assert.Equal(order.OrderGuid.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]
@@ -2488,7 +2497,11 @@ public sealed class MainViewModelScannerTests
             // 协调器会把普通异常转换成失败结果；取消类异常才会穿透到事件桥，复现原闪退路径。
             PrintReceiptException = new TaskCanceledException("printer detail must stay out of the UI")
         };
-        var viewModel = CreateAuthorizedMainViewModel(new FakeCustomerDisplayWindowService(), printService);
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            operationAuditLogger: auditLogger);
         await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
         var order = CreateReceiptPrintOrder(PaymentMethodKind.Cash);
         viewModel.PaymentSuccess.LoadFromOrder(order);
@@ -2499,6 +2512,10 @@ public sealed class MainViewModelScannerTests
             printService.Calls.Count == 1 &&
             viewModel.StatusMessage.Contains(nameof(TaskCanceledException), StringComparison.Ordinal));
         Assert.Single(printService.Calls);
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal("PAYMENT_SUCCESS_EXCEPTION", auditEvent.ReasonCode);
+        Assert.Equal(nameof(TaskCanceledException), auditEvent.SafeMessage);
         Assert.DoesNotContain("printer detail must stay out of the UI", viewModel.StatusMessage, StringComparison.Ordinal);
         var handler = typeof(MainViewModel).GetMethod(
             "OnPaymentSuccessPrintReceiptRequested",
@@ -4553,7 +4570,7 @@ public sealed class MainViewModelScannerTests
         Assert.Equal(CustomerDisplayWindowMode.Closed, viewModel.CustomerDisplayWindowMode);
         Assert.False(viewModel.IsCustomerDisplayOpen);
         Assert.Contains(logs.Lines, line => line.Contains("[CustomerDisplay]") && line.Contains("startup prewarm skipped") && line.Contains("reason=auto-open-disabled"));
-        Assert.Contains(logs.Lines, line => line.Contains("[CustomerDisplay]") && line.Contains("post-show open skipped") && line.Contains("reason=auto-open-disabled"));
+        Assert.Contains(logs.Lines, line => line.Contains("[CustomerDisplay]") && line.Contains("startup restore skipped") && line.Contains("reason=remembered-closed"));
     }
 
     [Fact]
@@ -4739,6 +4756,43 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task SwapCustomerDisplayScreensCommand_requires_customer_display_permission()
+    {
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService();
+        var cashierContext = new CashierSessionContext();
+        cashierContext.SetCurrent(CreateCashierSession(Permissions.PosTerminal.Sales.AddItem));
+        var viewModel = CreateAuthorizedMainViewModel(
+            customerDisplayWindow,
+            cashierSessionContext: cashierContext,
+            enforceCashierPermissions: true);
+
+        await viewModel.SwapCustomerDisplayScreensCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, customerDisplayWindow.SwapCallCount);
+        Assert.False(cashierContext.RequirePermission(Permissions.PosTerminal.CustomerDisplay.Manage, out var deniedMessage));
+        Assert.Equal(deniedMessage, viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task CustomerDisplaySwapScreensRequest_goes_through_customer_display_permission()
+    {
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService();
+        var cashierContext = new CashierSessionContext();
+        cashierContext.SetCurrent(CreateCashierSession(Permissions.PosTerminal.Sales.AddItem));
+        var viewModel = CreateAuthorizedMainViewModel(
+            customerDisplayWindow,
+            cashierSessionContext: cashierContext,
+            enforceCashierPermissions: true);
+
+        customerDisplayWindow.RaiseSwapScreensRequested();
+        await (viewModel.SwapCustomerDisplayScreensCommand.ExecutionTask ?? Task.CompletedTask);
+
+        Assert.Equal(0, customerDisplayWindow.SwapCallCount);
+        Assert.False(cashierContext.RequirePermission(Permissions.PosTerminal.CustomerDisplay.Manage, out var deniedMessage));
+        Assert.Equal(deniedMessage, viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task ToggleCustomerDisplayWindow_CyclesClosedNormalFullscreenClosed()
     {
         var customerDisplayWindow = new FakeCustomerDisplayWindowService();
@@ -4816,6 +4870,96 @@ public sealed class MainViewModelScannerTests
 
         Assert.False(viewModel.IsCustomerDisplayOpen);
         Assert.Equal(CustomerDisplayWindowMode.Closed, viewModel.CustomerDisplayWindowMode);
+    }
+
+    [Fact]
+    public async Task ContinueStartupAfterShownAsync_RestoresRememberedCustomerDisplayModeOnce()
+    {
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService();
+        var preferences = new FakeCustomerDisplayWindowPreferenceStore { StoredMode = CustomerDisplayWindowMode.Fullscreen };
+        var viewModel = CreateAuthorizedMainViewModel(customerDisplayWindow, customerDisplayPreferences: preferences);
+        var startupOptions = new AppStartupOptions([], false, null, null);
+
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+
+        Assert.Equal(1, customerDisplayWindow.SetModeCallCount);
+        Assert.Equal(CustomerDisplayWindowMode.Fullscreen, customerDisplayWindow.LastSetMode);
+        Assert.Equal(CustomerDisplayWindowMode.Fullscreen, viewModel.CustomerDisplayWindowMode);
+        // 启动恢复本身不改记录。
+        Assert.Empty(preferences.RememberedModes);
+    }
+
+    [Fact]
+    public async Task ContinueStartupAfterShownAsync_WhenRememberedModeLoadFails_KeepsDisplayClosedAndDoesNotThrow()
+    {
+        using var logs = new ConsoleLogCapture();
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService();
+        var preferences = new FakeCustomerDisplayWindowPreferenceStore { LoadException = new InvalidOperationException("db locked") };
+        var viewModel = CreateAuthorizedMainViewModel(customerDisplayWindow, customerDisplayPreferences: preferences);
+        var startupOptions = new AppStartupOptions([], false, null, null);
+
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+
+        Assert.Equal(0, customerDisplayWindow.SetModeCallCount);
+        Assert.Equal(CustomerDisplayWindowMode.Closed, viewModel.CustomerDisplayWindowMode);
+        Assert.Contains(logs.Lines, line => line.Contains("[CustomerDisplay]") && line.Contains("post-show open failed") && line.Contains("db locked"));
+    }
+
+    [Fact]
+    public async Task ToggleCustomerDisplayWindow_RemembersManualModes_ButNotSystemClose()
+    {
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService();
+        var preferences = new FakeCustomerDisplayWindowPreferenceStore();
+        var viewModel = CreateAuthorizedMainViewModel(customerDisplayWindow, customerDisplayPreferences: preferences);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        await viewModel.ToggleCustomerDisplayWindow(null);
+        await viewModel.ToggleCustomerDisplayWindow(null);
+        // 程序退出、断开第二屏、重新注册设备都走这条系统关闭路径，不能把「上次设置」改成关闭。
+        viewModel.SetCustomerDisplayWindowMode(CustomerDisplayWindowMode.Closed, owner: null);
+
+        Assert.Equal(CustomerDisplayWindowMode.Closed, viewModel.CustomerDisplayWindowMode);
+        Assert.Equal(
+            [CustomerDisplayWindowMode.Normal, CustomerDisplayWindowMode.Fullscreen],
+            preferences.RememberedModes);
+    }
+
+    [Fact]
+    public async Task CustomerDisplayModeCommands_RememberManualOpenAndClose()
+    {
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService();
+        var preferences = new FakeCustomerDisplayWindowPreferenceStore();
+        var viewModel = CreateAuthorizedMainViewModel(customerDisplayWindow, customerDisplayPreferences: preferences);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        await viewModel.ShowCustomerDisplayFullscreenCommand.ExecuteAsync(null);
+        await viewModel.CloseCustomerDisplayWindowCommand.ExecuteAsync(null);
+
+        Assert.Equal(
+            [CustomerDisplayWindowMode.Fullscreen, CustomerDisplayWindowMode.Closed],
+            preferences.RememberedModes);
+    }
+
+    [Fact]
+    public async Task ToggleCustomerDisplayWindow_WithSingleDisplay_KeepsPreviousRememberedMode()
+    {
+        var customerDisplayWindow = new FakeCustomerDisplayWindowService
+        {
+            SetModeResult = new CustomerDisplayWindowResult(
+                CustomerDisplayWindowMode.Closed,
+                CustomerDisplayWindowService.NoSecondDisplayStatusKey)
+        };
+        var preferences = new FakeCustomerDisplayWindowPreferenceStore();
+        var viewModel = CreateAuthorizedMainViewModel(customerDisplayWindow, customerDisplayPreferences: preferences);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        await viewModel.ToggleCustomerDisplayWindow(null);
+
+        Assert.Equal(CustomerDisplayWindowMode.Closed, viewModel.CustomerDisplayWindowMode);
+        Assert.Empty(preferences.RememberedModes);
     }
 
     [Fact]
@@ -6362,16 +6506,20 @@ public sealed class MainViewModelScannerTests
                 CardPaymentRecoveryOutcome.OrderCompleted,
                 "Recovered approved payment.",
                 order)));
+        var auditLogger = new RecordingOperationAuditLogger();
         var viewModel = CreateAuthorizedMainViewModel(
             new FakeCustomerDisplayWindowService(),
             receiptPrintService: printService,
-            cardPaymentRecoveryService: recovery);
+            cardPaymentRecoveryService: recovery,
+            operationAuditLogger: auditLogger);
 
         await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
         var recovered = await InvokeRecoverCardPaymentAttemptAsync(viewModel, navigateToPaymentOnDraft: false);
 
         Assert.True(recovered);
         Assert.True(IsShowingCompletedSale(viewModel));
+        // 恢复完成时的自动打印不是员工操作，不记补打审计。
+        Assert.DoesNotContain(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
         var call = Assert.Single(printService.Calls);
         Assert.Equal(order.OrderGuid, call.OrderGuid);
         Assert.Equal(ReceiptPrintReason.CardAuto, call.Reason);
@@ -6388,6 +6536,11 @@ public sealed class MainViewModelScannerTests
         await viewModel.PrintRecoveredReceiptCommand.ExecuteAsync(null);
         await WaitUntilAsync(() => printService.Calls.Count == 2);
         Assert.Equal(ReceiptPrintReason.CardAuto, printService.Calls[1].Reason);
+        // 恢复弹窗里的“打印小票”由员工手动点击，必须记补打审计。
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("CARD_RECOVERY", auditEvent.ReasonCode);
+        Assert.Equal(order.OrderGuid.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]
@@ -7080,7 +7233,8 @@ public sealed class MainViewModelScannerTests
         ILinklySettlementUploadExecutionService? linklySettlementUploadExecutionService = null,
         IRemoteOrderHistoryService? remoteOrderHistoryService = null,
         IDeviceRegistrationWorkflowService? deviceRegistrationWorkflowService = null,
-        IPaymentMethodSettingsService? paymentMethodSettingsService = null)
+        IPaymentMethodSettingsService? paymentMethodSettingsService = null,
+        ICustomerDisplayWindowPreferenceStore? customerDisplayPreferences = null)
     {
         var priceIndex = new LocalSellableItemIndex();
         var effectiveCart = cart ?? new PosCartService();
@@ -7120,7 +7274,9 @@ public sealed class MainViewModelScannerTests
             orderRepository,
             new ShellSyncCenterService(syncQueue),
             localization,
-            new CustomerDisplayOrchestrator(customerDisplayWindow),
+            customerDisplayPreferences is null
+                ? new CustomerDisplayOrchestrator(customerDisplayWindow)
+                : new CustomerDisplayOrchestrator(customerDisplayWindow, customerDisplayPreferences),
             new ReceiptQueryService(orderRepository),
             new CashPaymentWorkflowService(checkout, orderRepository, syncQueue),
             deviceRegistrationWorkflowService
@@ -7186,6 +7342,59 @@ public sealed class MainViewModelScannerTests
                 cart,
                 remoteLookupRefreshAsync,
                 reloadCatalogAsync));
+    }
+
+    [Fact]
+    public async Task Device_rebind_activation_records_reregister_audit_with_previous_cashier_and_store()
+    {
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            operationAuditLogger: auditLogger);
+        var startupOptions = new AppStartupOptions([], false, null, null);
+        await viewModel.InitializeAsync(startupOptions);
+        var sessionBefore = viewModel.Session;
+
+        var method = typeof(MainViewModel).GetMethod(
+            "ActivateDeviceAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var exception = await Record.ExceptionAsync(() => (Task)method!.Invoke(
+            viewModel,
+            [new DeviceActivatedEventArgs("POS_2001_NEW", "2001", "New Store", "HW-001", IsReregistered: true), startupOptions])!);
+
+        Assert.Null(exception);
+        // 换绑后设备号必然改变，审计以新终端身份记录，但操作人仍是发起换绑的收银员，原门店终端写入说明。
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "DEVICE_REREGISTER");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("ACTIVATION_REBIND", auditEvent.ReasonCode);
+        Assert.Equal(sessionBefore.CashierSession?.CashierId ?? sessionBefore.CashierId, auditEvent.CashierId);
+        Assert.Equal(
+            $"{sessionBefore.StoreCode}/{sessionBefore.DeviceCode} -> 2001/POS_2001_NEW",
+            auditEvent.SafeMessage);
+    }
+
+    [Fact]
+    public async Task Device_reregistration_submitted_for_approval_records_audit_before_authorization_is_cleared()
+    {
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            operationAuditLogger: auditLogger);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var sessionBefore = viewModel.Session;
+
+        var method = typeof(MainViewModel).GetMethod(
+            "ApplyDeviceReregistered",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method!.Invoke(viewModel, null);
+
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "DEVICE_REREGISTER");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("SUBMITTED_PENDING_APPROVAL", auditEvent.ReasonCode);
+        Assert.Equal(sessionBefore.CashierSession?.CashierId ?? sessionBefore.CashierId, auditEvent.CashierId);
+        Assert.Equal(sessionBefore.DeviceCode, auditEvent.DeviceCode);
     }
 
     private static async Task<bool> InvokeRecoverCardPaymentAttemptAsync(
@@ -9467,6 +9676,41 @@ public sealed class MainViewModelScannerTests
             Task.FromResult(new LinklySettlementUploadExecutionResult(1, 1, 0, 0, false));
     }
 
+    private sealed class FakeCustomerDisplayWindowPreferenceStore : ICustomerDisplayWindowPreferenceStore
+    {
+        public CustomerDisplayWindowMode StoredMode { get; init; } = CustomerDisplayWindowMode.Closed;
+
+        public Exception? LoadException { get; init; }
+
+        public List<CustomerDisplayWindowMode> RememberedModes { get; } = [];
+
+        public CustomerDisplayWindowPreference Current { get; private set; } = CustomerDisplayWindowPreference.Default;
+
+        public Task<CustomerDisplayWindowPreference> LoadAsync(CancellationToken cancellationToken = default)
+        {
+            if (LoadException is not null)
+            {
+                return Task.FromException<CustomerDisplayWindowPreference>(LoadException);
+            }
+
+            Current = Current with { Mode = StoredMode };
+            return Task.FromResult(Current);
+        }
+
+        public Task RememberModeAsync(CustomerDisplayWindowMode mode)
+        {
+            RememberedModes.Add(mode);
+            Current = Current with { Mode = mode };
+            return Task.CompletedTask;
+        }
+
+        public Task RememberNormalBoundsAsync(CustomerDisplayNormalBounds bounds)
+        {
+            Current = Current with { NormalBounds = bounds };
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class FakeCustomerDisplayWindowService : ICustomerDisplayWindowService
     {
         public CustomerDisplayWindowResult SetModeResult { get; init; } = new(
@@ -9494,6 +9738,18 @@ public sealed class MainViewModelScannerTests
         public event EventHandler? FullscreenRequested;
 
         public void RaiseFullscreenRequested() => FullscreenRequested?.Invoke(this, EventArgs.Empty);
+
+        public event EventHandler? SwapScreensRequested;
+
+        public void RaiseSwapScreensRequested() => SwapScreensRequested?.Invoke(this, EventArgs.Empty);
+
+        public int SwapCallCount { get; private set; }
+
+        public CustomerDisplayWindowResult SwapDisplays(CustomerDisplayViewModel viewModel, Window owner)
+        {
+            SwapCallCount++;
+            return new CustomerDisplayWindowResult(Mode, CustomerDisplayWindowService.SwappedStatusKey);
+        }
 
         public void Prewarm(CustomerDisplayViewModel viewModel)
         {

@@ -211,6 +211,7 @@ test('PR workflow 每个 PR 都启动，并按 Brisbane 周日 02:23 周更全�
   const source = readFileSync(workflowPath, 'utf8')
   const linuxNode = workflowJobBlock(source, 'linux_node')
   assert.match(source, /pull_request:/)
+  assert.match(source, /^  merge_group:\s*\n\s+types:\s*\n\s+- checks_requested\s*$/m)
   assert.match(source, /cron:\s*['"]23 16 \* \* 6['"]/) // UTC Saturday 16:23
   assert.doesNotMatch(source, /^env:\s*\n\s+TZ:\s*Australia\/Brisbane\s*$/m)
   assert.match(linuxNode, /^\s{6}TZ:\s*Australia\/Brisbane\s*$/m)
@@ -218,7 +219,7 @@ test('PR workflow 每个 PR 都启动，并按 Brisbane 周日 02:23 周更全�
   assert.doesNotMatch(source, /nightly/i)
 })
 
-test('只有 pull_request 能产出分支保护使用的 required 检查名', () => {
+test('只有 pull_request 与 merge_group 能产出分支保护使用的 required 检查名', () => {
   const source = readFileSync(workflowPath, 'utf8')
   const required = workflowJobBlock(source, 'required')
   const requiredNameOccurrences = readdirSync(workflowDirectoryPath, { withFileTypes: true })
@@ -232,8 +233,25 @@ test('只有 pull_request 能产出分支保护使用的 required 检查名', ()
   assert.doesNotMatch(required, /^    name:\s*PR CI \/ required\s*$/m)
   assert.match(
     required,
-    /name:\s*>-\s*\n\s*\$\{\{\s*github\.event_name == 'pull_request'\s*\n\s*&& 'PR CI \/ required'\s*\n\s*\|\| 'Non-PR CI \/ matrix required'\s*\}\}/,
+    /name:\s*>-\s*\n\s*\$\{\{\s*\(github\.event_name == 'pull_request' \|\| github\.event_name == 'merge_group'\)\s*\n\s*&& 'PR CI \/ required'\s*\n\s*\|\| 'Non-PR CI \/ matrix required'\s*\}\}/,
   )
+})
+
+test('合并队列按组合提交增量规划，并与 PR 一样执行 Backend schema SQL', () => {
+  const source = readFileSync(workflowPath, 'utf8')
+  const plan = workflowJobBlock(source, 'plan')
+  const schemaSql = workflowJobBlock(source, 'schema_sql')
+  const prEvent = "(github.event_name == 'pull_request' || github.event_name == 'merge_group')"
+
+  assert.match(plan, /BASE_SHA:\s*\$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.merge_group\.base_sha \}\}/)
+  assert.match(plan, /HEAD_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.event\.merge_group\.head_sha \}\}/)
+  assert.match(plan, /if \[\[ "\$EVENT_NAME" == "pull_request" \|\| "\$EVENT_NAME" == "merge_group" \]\]; then/)
+  // schema_sql 里每个按事件判定的条件都必须同时认 merge_group，否则队列里的后端改动会跳过真实 SQL。
+  const eventConditions = [...schemaSql.matchAll(/^\s+(?:- )?if:.*github\.event_name.*$/gm)].map(([line]) => line)
+  assert.equal(eventConditions.length, 6)
+  for (const line of eventConditions) {
+    assert.ok(line.includes(prEvent), line)
+  }
 })
 
 test('Backend PR 的真实 Schema SQL 独立执行并纳入 required 门禁', () => {
@@ -274,15 +292,20 @@ test('PR/weekly 使用 15/45 分钟端到端预算并为稳定 gate 预留时间
   assert.match(source, /timeout-minutes:\s*\$\{\{ matrix\.timeout \}\}/)
   assert.match(source, /budget_seconds:\s*\$\{\{ steps\.plan\.outputs\.budget_seconds \}\}/)
   assert.equal([...source.matchAll(/CI_RUN_ATTEMPT:\s*\$\{\{ github\.run_attempt \}\}/g)].length, 2)
-  assert.equal([...source.matchAll(/CI_RUN_BUDGET_SECONDS:\s*\$\{\{ needs\.plan\.outputs\.budget_seconds \}\}/g)].length, 2)
+  assert.equal([...source.matchAll(/CI_RUN_BUDGET_SECONDS:\s*\$\{\{ [^\n]*needs\.plan\.outputs\.budget_seconds \}\}/g)].length, 2)
   for (const gate of [required, weeklyRequired]) {
     assert.match(gate, /GITHUB_TOKEN:\s*\$\{\{ github\.token \}\}/)
     assert.match(gate, /CI_API_URL:\s*\$\{\{ github\.api_url \}\}/)
     assert.match(gate, /CI_REPOSITORY:\s*\$\{\{ github\.repository \}\}/)
     assert.match(gate, /CI_RUN_ID:\s*\$\{\{ github\.run_id \}\}/)
     assert.match(gate, /CI_RUN_ATTEMPT:\s*\$\{\{ github\.run_attempt \}\}/)
-    assert.match(gate, /CI_RUN_BUDGET_SECONDS:\s*\$\{\{ needs\.plan\.outputs\.budget_seconds \}\}/)
   }
+  // PR 与每周全量沿用 plan 预算；只有合并队列（含 runner 排队的并行组构建）放宽到 45 分钟。
+  assert.match(
+    required,
+    /CI_RUN_BUDGET_SECONDS:\s*\$\{\{ github\.event_name == 'merge_group' && '2700' \|\| needs\.plan\.outputs\.budget_seconds \}\}/,
+  )
+  assert.match(weeklyRequired, /CI_RUN_BUDGET_SECONDS:\s*\$\{\{ needs\.plan\.outputs\.budget_seconds \}\}/)
   assert.equal(plan.match(/^    timeout-minutes:/gm)?.length, 1)
   assert.match(plan, /^    timeout-minutes:[ \t]*4[ \t]*$/m)
   assert.match(source, /timeout-minutes:\s*40/g)

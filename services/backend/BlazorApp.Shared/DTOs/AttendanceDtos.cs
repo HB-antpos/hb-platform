@@ -62,7 +62,24 @@ namespace BlazorApp.Shared.DTOs
         public int CandidateOvertimeMinutes { get; set; }
         public int ApprovedOvertimeMinutes { get; set; }
         public string? OvertimeApprovalStatus { get; set; }
+        /// <summary>当天已批准的请假类型；有值表示该班次员工请假，不计工时、不计缺卡。</summary>
+        public string? LeaveType { get; set; }
+        public string? LeaveGuid { get; set; }
         public List<AttendanceShiftSegmentDto> Segments { get; set; } = new();
+    }
+
+    /// <summary>把来源周的排班复制到目标周（作为草稿），已有排班的员工当天跳过。</summary>
+    public class CopyAttendanceScheduleWeekDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        public DateTime SourceWeekStartDate { get; set; }
+        public DateTime TargetWeekStartDate { get; set; }
+    }
+
+    public class CopyAttendanceScheduleWeekResultDto
+    {
+        public int CreatedCount { get; set; }
+        public int SkippedCount { get; set; }
     }
 
     public class AttendanceShiftSegmentDto
@@ -318,6 +335,14 @@ namespace BlazorApp.Shared.DTOs
         public string Reason { get; set; } = string.Empty;
     }
 
+    /// <summary>
+    /// 店长代员工补录/修改打卡：在本人补卡字段基础上指定被修改的员工。
+    /// </summary>
+    public class CreateManagedAttendancePunchAdjustmentDto : CreateAttendancePunchAdjustmentDto
+    {
+        public string UserGuid { get; set; } = string.Empty;
+    }
+
     public class AttendancePunchAdjustmentDto
     {
         public string AdjustmentGuid { get; set; } = string.Empty;
@@ -335,8 +360,23 @@ namespace BlazorApp.Shared.DTOs
         public bool IsManagerSelfDirect { get; set; }
         public string RequestedByUserGuid { get; set; } = string.Empty;
         public string? ReviewedByUserGuid { get; set; }
+        /// <summary>审核人显示名，仅「我的补卡」列表填充。</summary>
+        public string? ReviewedByName { get; set; }
+        /// <summary>审核备注（驳回原因），来自对应审核记录，仅「我的补卡」列表填充。</summary>
+        public string? ReviewRemark { get; set; }
         public DateTime? ReviewedAt { get; set; }
         public DateTime CreatedAt { get; set; }
+    }
+
+    /// <summary>考勤用的本店员工精简信息：排班与登记请假只需要身份和用工类型。</summary>
+    public class AttendanceEmployeeDto
+    {
+        public string UserGuid { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string? FullName { get; set; }
+        public string? EmploymentType { get; set; }
+        /// <summary>仅未满 18 岁时返回年龄（排班需关注未成年工时），成年员工为空，不下发生日。</summary>
+        public int? Age { get; set; }
     }
 
     public class AttendancePunchAdjustmentPreviewDto
@@ -470,6 +510,8 @@ namespace BlazorApp.Shared.DTOs
         public string? AttachmentUrl { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? ReviewedBy { get; set; }
+        /// <summary>审核人显示名，仅「我的请假」列表填充。</summary>
+        public string? ReviewedByName { get; set; }
         public DateTime? ReviewedAt { get; set; }
         public string? ReviewRemark { get; set; }
     }

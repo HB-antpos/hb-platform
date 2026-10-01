@@ -18,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 using SqlSugar;
 using ScheduledTaskStatus = BlazorApp.Shared.Models.HBweb.TaskStatus;
+using BlazorApp.Api.Utils;
 
 namespace BlazorApp.Api.Services.React
 {
@@ -393,6 +394,9 @@ namespace BlazorApp.Api.Services.React
         // 测试专用：在分店统计补算键清理完成后触发，避免测试依赖不确定的轮询延迟。
         internal Action? StoreStatisticsRefreshCompletedTestInterceptor { get; set; }
 
+        // 测试专用：在紧凑看板共享立方体构建读库之前挂起，让并发请求确定地搭上同一次构建。
+        internal Func<Task>? CompactSalesBoardCubeBuildTestInterceptor { get; set; }
+
         private static readonly TimeSpan SUMMARY_CACHE_DURATION = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan RANKING_CACHE_DURATION = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan BEST_SELLERS_CACHE_DURATION = TimeSpan.FromMinutes(30);
@@ -428,6 +432,8 @@ namespace BlazorApp.Api.Services.React
         > COMPACT_SALES_BOARD_CUBE_BUILDS = new();
         // 立方体按统计水位分代：统计刷新会换缓存键，因此 Fresh 状态下可以放心缓存较长时间。
         private static readonly TimeSpan COMPACT_SALES_BOARD_CUBE_CACHE_DURATION = TimeSpan.FromMinutes(10);
+        // 共享构建的兜底时长：内存立方体冷构建最长约 1 分钟（2026-09-24），只防卡死的构建让所有搭车请求一直挂起。
+        private static readonly TimeSpan COMPACT_SALES_BOARD_CUBE_BUILD_TIMEOUT = TimeSpan.FromMinutes(5);
         /// <summary>看板最长区间：两年（含闰日），与销售明细 SalesDetailReportController.MaxReportDays 一致。</summary>
         internal const int CompactSalesBoardMaxDays = 731;
         // 商品明细每页上限与带图导出上限一致（500 行），导出全部结果也按 500 行一页分批读取。
@@ -3593,11 +3599,13 @@ namespace BlazorApp.Api.Services.React
         /// <param name="dateRange">日期范围</param>
         /// <param name="topN">返回前N条记录</param>
         /// <param name="branchCodes">分店代码列表（可选）</param>
+        /// <param name="cancellationToken">调用方请求令牌，仅用于识别客户端中止</param>
         /// <returns>分店业绩排名及统计完整性状态</returns>
         public async Task<ExecutiveBranchPerformanceResultDto> GetExecutiveBranchPerformanceAsync(
             DateRangeDto dateRange,
             int? topN = null,
-            List<string>? branchCodes = null
+            List<string>? branchCodes = null,
+            CancellationToken cancellationToken = default
         )
         {
             try
@@ -3868,6 +3876,12 @@ namespace BlazorApp.Api.Services.React
                     return response;
                 });
             }
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+            {
+                // 调用方已取消（HTTP 请求被客户端中止）：直接上抛交给控制器按 499 处理，不在此记错误。
+                // 认证阶段已把同一请求令牌留在 SqlSugar ADO 上，本方法内的查询都会随它取消。
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "GetExecutiveBranchPerformanceAsync failed");
@@ -3881,10 +3895,12 @@ namespace BlazorApp.Api.Services.React
         /// </summary>
         /// <param name="dateRange">日期范围</param>
         /// <param name="branchCodes">分店代码列表（可选）</param>
+        /// <param name="cancellationToken">调用方请求令牌，仅用于识别客户端中止</param>
         /// <returns>每小时流量密度及统计完整性状态</returns>
         public async Task<ExecutiveReportResultDto<ExecutiveHourlyTrafficDto>> GetExecutiveHourlyTrafficAsync(
             DateRangeDto dateRange,
-            List<string>? branchCodes = null
+            List<string>? branchCodes = null,
+            CancellationToken cancellationToken = default
         )
         {
             try
@@ -4144,6 +4160,11 @@ namespace BlazorApp.Api.Services.React
 
                     return response;
                 });
+            }
+            catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+            {
+                // 同 GetExecutiveBranchPerformanceAsync：客户端中止只上抛，不记错误。
+                throw;
             }
             catch (Exception ex)
             {
@@ -7543,9 +7564,12 @@ namespace BlazorApp.Api.Services.React
             var lazyBuild = builds.GetOrAdd(
                 buildKey,
                 _ => new Lazy<Task<CompactSalesBoardCubeRead>>(
-                    async () =>
+                    () => RunSharedCompactSalesBoardCubeBuild(async executor =>
                     {
-                        var read = await BuildCompactSalesBoardCubeAsync(dateRange, precheckStates, forceRefresh, expectedGeneration);
+                        if (CompactSalesBoardCubeBuildTestInterceptor is { } interceptor)
+                            await interceptor();
+                        // 读库（含统计快照与分片缓存）在构建自己的上下文里完成，代数仍用发起请求捕获的 expectedGeneration。
+                        var read = await executor.BuildCompactSalesBoardCubeAsync(dateRange, precheckStates, forceRefresh, expectedGeneration);
                         // 按快照自身的水位写缓存；快照未完成（发布期间状态变为失败等）的结果不缓存。
                         if (read.Status.StatisticStatus == SalesStatisticRefreshStatus.Fresh)
                         {
@@ -7556,7 +7580,7 @@ namespace BlazorApp.Api.Services.React
                             );
                         }
                         return read;
-                    },
+                    }),
                     LazyThreadSafetyMode.ExecutionAndPublication
                 )
             );
@@ -7570,6 +7594,49 @@ namespace BlazorApp.Api.Services.React
                 // 只移除本次等待的那一项；失败的构建不会留在字典里，下一个请求会重新尝试。
                 ((ICollection<KeyValuePair<string, Lazy<Task<CompactSalesBoardCubeRead>>>>)builds).Remove(
                     new KeyValuePair<string, Lazy<Task<CompactSalesBoardCubeRead>>>(buildKey, lazyBuild)
+                );
+            }
+        }
+
+        /// <summary>
+        /// 在独立 DI scope 上执行共享立方体构建。构建结果供同一区间的所有并发请求使用，不能借用发起请求的 scoped 上下文：
+        /// 认证阶段 ToListAsync(RequestAborted) 会把请求令牌残留在该请求的 SqlSugar ADO 上，发起请求的客户端一中止，
+        /// 构建里的查询随之取消，所有仍在线的搭车请求都会失败（生产 2026-09-24 一例 TaskCanceledException）。
+        /// 与 ScheduledTaskLogService.PersistTerminalAsync 同一做法：抑制 HTTP 执行上下文流动，构建上下文只挂有限时长的兜底令牌。
+        /// </summary>
+        private Task<CompactSalesBoardCubeRead> RunSharedCompactSalesBoardCubeBuild(
+            Func<SalesDashboardReactService, Task<CompactSalesBoardCubeRead>> build
+        )
+        {
+            // 直接构造的测试夹具没有 DI scope：沿用本实例（与改动前一致）。
+            if (_serviceScopeFactory == null)
+                return build(this);
+
+            // 只在创建构建任务的同步块内抑制流动：Lazy 工厂立即返回，离开 using 后恢复。
+            using (ExecutionContext.SuppressFlow())
+            {
+                return Task.Run(
+                    async () =>
+                    {
+                        using var scope = _serviceScopeFactory.CreateScope();
+                        var executor = scope?.ServiceProvider.GetService<ISalesDashboardReactService>() as SalesDashboardReactService;
+                        // 取不到独立实例（测试替身的空 scope 等）时退回本实例，行为与改动前一致；绝不改写发起请求的 ADO 令牌。
+                        if (executor == null || ReferenceEquals(executor, this))
+                            return await build(this);
+
+                        using var deadline = new CancellationTokenSource(COMPACT_SALES_BOARD_CUBE_BUILD_TIMEOUT);
+                        // deadline 直接进入构建上下文的 ADO；独立非 MARS 连接上的读取仍按命令超时约束。
+                        executor._context.Db.Ado.CancellationToken = deadline.Token;
+                        try
+                        {
+                            return await build(executor);
+                        }
+                        finally
+                        {
+                            executor._context.Db.Ado.RemoveCancellationToken();
+                        }
+                    },
+                    CancellationToken.None
                 );
             }
         }

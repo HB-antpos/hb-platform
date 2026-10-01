@@ -28,6 +28,16 @@ namespace BlazorApp.Shared.DTOs
         public DateTime? 实际到货日期 { get; set; }
 
         /// <summary>
+        /// 为 true 时把预计到岸日期清空；不能与 预计到岸日期 同时传值
+        /// </summary>
+        public bool? ClearEstimatedArrivalDate { get; set; }
+
+        /// <summary>
+        /// 为 true 时把实际到货日期清空；不能与 实际到货日期 同时传值
+        /// </summary>
+        public bool? ClearActualArrivalDate { get; set; }
+
+        /// <summary>
         /// 汇率
         /// </summary>
         public decimal? 汇率 { get; set; }

@@ -17,6 +17,8 @@ using AttendanceQrKeyDataProtection = BlazorApp.Api.Security.AttendanceQrKeyData
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Security;
+using BlazorApp.Shared.Constants;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
@@ -39,6 +41,8 @@ namespace BlazorApp.Api.Tests
         private readonly AttendanceQrKeyProtector _attendanceProtector;
         private readonly AttendancePunchAuthorizationProtector _punchAuthorizationProtector;
         private readonly MutableTimeProvider _timeProvider = new(DateTimeOffset.UtcNow);
+        // 授权桩默认放行全部权限；个别用例把权限码加入此集合来模拟「未授予」。
+        private readonly HashSet<string> _deniedPermissions = new(StringComparer.Ordinal);
 
         public AttendanceReactServiceTests()
         {
@@ -1440,6 +1444,368 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(45, overtime.CandidateOvertimeMinutes);
             Assert.Equal(45, overtime.ApprovedOvertimeMinutes);
             Assert.Equal("system", overtime.ReviewerUserGuid);
+        }
+
+        [Fact]
+        public async Task CreateMyPunchAdjustmentAsync_ManagerWithoutAdjustPermission_GoesToReview()
+        {
+            await SeedStoreScopeAsync();
+            await SeedStoreManagerRoleAsync("manager-user");
+            await SeedScheduleAsync("manager-schedule", "BRI", "manager-user", new DateTime(2026, 5, 18), "Active");
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 8, 0, 0, DateTimeKind.Utc));
+            _deniedPermissions.Add(Permissions.Attendance.Punch.AdjustManagedStore);
+
+            var result = await SubmitPunchAdjustmentAfterPreviewAsync(
+                CreateService("manager-user", "manager", "StoreManager"),
+                new CreateAttendancePunchAdjustmentDto
+                {
+                    StoreCode = "BRI",
+                    ScheduleGuid = "manager-schedule",
+                    PunchType = "ClockIn",
+                    RequestedPunchTimeLocal = new DateTime(2026, 5, 18, 9, 0, 0),
+                    Reason = "忘记打卡",
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal("Pending", result.Data!.Status);
+            Assert.False(result.Data.IsManagerSelfDirect);
+            Assert.Equal(0, await _db.Queryable<AttendancePunch>().CountAsync());
+        }
+
+        [Fact]
+        public async Task CreateManagedPunchAdjustmentAsync_补录员工上班_直接生效并记录操作人()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 8, 0, 0, DateTimeKind.Utc));
+            var service = CreateService("manager-user", "manager", "StoreManager");
+            var request = new CreateManagedAttendancePunchAdjustmentDto
+            {
+                UserGuid = "staff-user",
+                StoreCode = "BRI",
+                ScheduleGuid = "schedule-1",
+                PunchType = "ClockIn",
+                RequestedPunchTimeUtc = new DateTimeOffset(2026, 5, 17, 23, 0, 0, TimeSpan.Zero),
+                Reason = "员工漏打卡",
+            };
+
+            var preview = await service.PreviewManagedPunchAdjustmentAsync(request);
+            Assert.True(preview.Success, $"{preview.ErrorCode}: {preview.Message}");
+            Assert.True(preview.Data!.WouldAutoApprove);
+            request.PreviewRevision = preview.Data.PreviewRevision;
+            var result = await service.CreateManagedPunchAdjustmentAsync(request);
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal("Applied", result.Data!.Status);
+            Assert.Equal("staff-user", result.Data.UserGuid);
+            Assert.Equal("manager-user", result.Data.RequestedByUserGuid);
+            Assert.Equal("manager-user", result.Data.ReviewedByUserGuid);
+            Assert.False(result.Data.IsManagerSelfDirect);
+            var punch = await _db.Queryable<AttendancePunch>().SingleAsync();
+            Assert.Equal("staff-user", punch.UserGuid);
+            Assert.Equal("ManualAdjustment", punch.Source);
+            Assert.Equal(result.Data.AdjustmentGuid, punch.AdjustmentGuid);
+            Assert.Equal(0, await _db.Queryable<AttendanceApproval>()
+                .CountAsync(item => item.SourceType == "PunchAdjustment"));
+        }
+
+        [Fact]
+        public async Task PreviewManagedPunchAdjustmentAsync_非管理分店_拒绝()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("other-schedule", "OTHER", "staff-user", new DateTime(2026, 5, 18), "Active");
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 8, 0, 0, DateTimeKind.Utc));
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .PreviewManagedPunchAdjustmentAsync(new CreateManagedAttendancePunchAdjustmentDto
+                {
+                    UserGuid = "staff-user",
+                    StoreCode = "OTHER",
+                    ScheduleGuid = "other-schedule",
+                    PunchType = "ClockIn",
+                    RequestedPunchTimeUtc = new DateTimeOffset(2026, 5, 17, 23, 0, 0, TimeSpan.Zero),
+                    Reason = "员工漏打卡",
+                });
+
+            Assert.False(result.Success);
+            Assert.Equal("FORBIDDEN_STORE", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task PreviewManagedPunchAdjustmentAsync_晚于当前时间_拒绝()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            // 布里斯班本地 5-18 12:00，补 17:00 下班属于未来时间。
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 2, 0, 0, DateTimeKind.Utc));
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .PreviewManagedPunchAdjustmentAsync(new CreateManagedAttendancePunchAdjustmentDto
+                {
+                    UserGuid = "staff-user",
+                    StoreCode = "BRI",
+                    ScheduleGuid = "schedule-1",
+                    PunchType = "ClockOut",
+                    RequestedPunchTimeUtc = new DateTimeOffset(2026, 5, 18, 7, 0, 0, TimeSpan.Zero),
+                    Reason = "员工漏打卡",
+                });
+
+            Assert.False(result.Success);
+            Assert.Equal("PUNCH_TIME_IN_FUTURE", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task PreviewManagedPunchAdjustmentAsync_周三不能再改上周()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("last-sunday", "BRI", "staff-user", new DateTime(2026, 5, 17), "Active");
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 20, 8, 0, 0, DateTimeKind.Utc));
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .PreviewManagedPunchAdjustmentAsync(new CreateManagedAttendancePunchAdjustmentDto
+                {
+                    UserGuid = "staff-user",
+                    StoreCode = "BRI",
+                    ScheduleGuid = "last-sunday",
+                    PunchType = "ClockIn",
+                    RequestedPunchTimeUtc = new DateTimeOffset(2026, 5, 16, 23, 0, 0, TimeSpan.Zero),
+                    Reason = "员工漏打卡",
+                });
+
+            Assert.False(result.Success);
+            Assert.Equal("ADJUSTMENT_WINDOW_EXPIRED", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task CopyScheduleWeekAsync_CopiesAsDraftAndSkipsOccupiedDays()
+        {
+            await SeedStoreScopeAsync();
+            // 来源周 5-11：员工周一、店长周二；目标周 5-18 员工周一已有 schedule-1。
+            await SeedScheduleAsync("src-staff-mon", "BRI", "staff-user", new DateTime(2026, 5, 11), "Active");
+            await SeedScheduleAsync("src-manager-tue", "BRI", "manager-user", new DateTime(2026, 5, 12), "Active",
+                new TimeSpan(10, 0, 0), new TimeSpan(18, 0, 0));
+            await SeedScheduleAsync("src-cancelled", "BRI", "staff-user", new DateTime(2026, 5, 13), "Cancelled");
+            await SeedScheduleAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .CopyScheduleWeekAsync(new CopyAttendanceScheduleWeekDto
+                {
+                    StoreCode = "BRI",
+                    SourceWeekStartDate = new DateTime(2026, 5, 11),
+                    TargetWeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal(1, result.Data!.CreatedCount);
+            Assert.Equal(1, result.Data.SkippedCount);
+            var copied = await _db.Queryable<AttendanceSchedule>()
+                .SingleAsync(item => item.UserGuid == "manager-user" && item.WorkDate == new DateTime(2026, 5, 19));
+            Assert.Equal("Draft", copied.Status);
+            Assert.Equal(new TimeSpan(10, 0, 0), copied.StartTime);
+            Assert.Equal(new TimeSpan(18, 0, 0), copied.EndTime);
+        }
+
+        [Fact]
+        public async Task CopyScheduleWeekAsync_OtherStore_IsForbidden()
+        {
+            await SeedStoreScopeAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .CopyScheduleWeekAsync(new CopyAttendanceScheduleWeekDto
+                {
+                    StoreCode = "OTHER",
+                    SourceWeekStartDate = new DateTime(2026, 5, 11),
+                    TargetWeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.False(result.Success);
+            Assert.Equal(0, await _db.Queryable<AttendanceSchedule>().CountAsync());
+        }
+
+        [Fact]
+        public async Task GetWeekSchedulesAsync_ApprovedLeave_AnnotatesSchedule()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await SeedScheduleAsync("schedule-2", "BRI", "staff-user", new DateTime(2026, 5, 20), "Active");
+            await _db.Insertable(new[]
+            {
+                new AttendanceLeaveRequest
+                {
+                    LeaveGuid = "leave-approved",
+                    StoreCode = "BRI",
+                    UserGuid = "staff-user",
+                    LeaveType = "SickLeave",
+                    StartDate = new DateTime(2026, 5, 18),
+                    EndDate = new DateTime(2026, 5, 19),
+                    Status = "Approved",
+                    CreatedAt = DateTime.UtcNow,
+                },
+                new AttendanceLeaveRequest
+                {
+                    LeaveGuid = "leave-pending",
+                    StoreCode = "BRI",
+                    UserGuid = "staff-user",
+                    LeaveType = "AnnualLeave",
+                    StartDate = new DateTime(2026, 5, 20),
+                    EndDate = new DateTime(2026, 5, 20),
+                    Status = "Pending",
+                    CreatedAt = DateTime.UtcNow,
+                },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetWeekSchedulesAsync(new AttendanceScheduleQueryDto
+                {
+                    StoreCode = "BRI",
+                    WeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            var onLeave = Assert.Single(result.Data!, item => item.ScheduleGuid == "schedule-1");
+            Assert.Equal("SickLeave", onLeave.LeaveType);
+            Assert.Equal("leave-approved", onLeave.LeaveGuid);
+            var pendingOnly = Assert.Single(result.Data!, item => item.ScheduleGuid == "schedule-2");
+            Assert.Null(pendingOnly.LeaveType);
+        }
+
+        [Theory]
+        [InlineData("2010-05-18", "2026-05-18", 16)]
+        [InlineData("2010-05-19", "2026-05-18", 15)]
+        [InlineData("2008-05-18", "2026-05-18", null)]
+        [InlineData("2008-05-19", "2026-05-18", 17)]
+        [InlineData("2030-01-01", "2026-05-18", null)]
+        public void ResolveMinorAge_OnlyReturnsAgeUnder18(string birthday, string today, int? expected)
+        {
+            Assert.Equal(
+                expected,
+                AttendanceReactService.ResolveMinorAge(DateTime.Parse(birthday), DateTime.Parse(today)));
+        }
+
+        [Fact]
+        public void ScheduleViewStore_IsImpliedByEditManagedStore()
+        {
+            // 能编辑排班就能看排班；反向不成立，查看权限不能借此获得编辑权。
+            Assert.Contains(
+                Permissions.Attendance.Schedule.EditManagedStore,
+                Permissions.GetEquivalentPermissionCodes(Permissions.Attendance.Schedule.ViewStore));
+            Assert.DoesNotContain(
+                Permissions.Attendance.Schedule.ViewStore,
+                Permissions.GetEquivalentPermissionCodes(Permissions.Attendance.Schedule.EditManagedStore));
+        }
+
+        [Fact]
+        public async Task GetStoreEmployeesAsync_ReturnsStoreStaffWithoutContactFields()
+        {
+            await SeedStoreScopeAsync();
+            await _db.Insertable(new Role
+            {
+                RoleGUID = "store-staff-role",
+                RoleName = "StoreStaff",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new UserRole
+            {
+                UserRoleGUID = "staff-user-store-staff",
+                UserGUID = "staff-user",
+                RoleGUID = "store-staff-role",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await SeedEmployeeProfileAsync("staff-user", EmployeeType.PartTime);
+            await _db.Updateable<EmployeeProfile>()
+                .SetColumns(item => item.Birthday == new DateTime(2010, 6, 1))
+                .Where(item => item.UserGUID == "staff-user")
+                .ExecuteCommandAsync();
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 2, 0, 0, DateTimeKind.Utc));
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetStoreEmployeesAsync("BRI");
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            var employee = Assert.Single(result.Data!);
+            Assert.Equal("staff-user", employee.UserGuid);
+            Assert.Equal("partTime", employee.EmploymentType);
+            Assert.Equal(15, employee.Age);
+        }
+
+        [Fact]
+        public async Task GetStoreEmployeesAsync_WithoutAnyAttendanceManagementPermission_IsForbidden()
+        {
+            await SeedStoreScopeAsync();
+            foreach (var permission in new[]
+            {
+                Permissions.Attendance.Schedule.ViewStore,
+                Permissions.Attendance.Schedule.EditManagedStore,
+                Permissions.Attendance.Leave.ViewManagedStore,
+                Permissions.Attendance.Leave.ReviewManagedStore,
+                Permissions.Attendance.Admin.View,
+            })
+            {
+                _deniedPermissions.Add(permission);
+            }
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetStoreEmployeesAsync("BRI");
+
+            Assert.False(result.Success);
+            Assert.Equal("FORBIDDEN", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task GetMyPunchAdjustmentsAsync_RejectedAdjustment_ReturnsRemarkAndReviewerName()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await _db.Updateable<User>()
+                .SetColumns(item => item.FullName == "店长 Sean")
+                .Where(item => item.UserGUID == "manager-user")
+                .ExecuteCommandAsync();
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 8, 0, 0, DateTimeKind.Utc));
+            var created = await SubmitPunchAdjustmentAfterPreviewAsync(
+                CreateService("staff-user", "staff", "StoreStaff"),
+                new CreateAttendancePunchAdjustmentDto
+                {
+                    StoreCode = "BRI",
+                    ScheduleGuid = "schedule-1",
+                    PunchType = "ClockIn",
+                    RequestedPunchTimeLocal = new DateTime(2026, 5, 18, 9, 0, 0),
+                    Reason = "忘记打卡",
+                });
+            Assert.True(created.Success, $"{created.ErrorCode}: {created.Message}");
+            var approval = await _db.Queryable<AttendanceApproval>()
+                .FirstAsync(item => item.SourceGuid == created.Data!.AdjustmentGuid);
+            var rejected = await CreateService("manager-user", "manager", "StoreManager")
+                .RejectAsync(approval.ApprovalGuid, new ReviewAttendanceApprovalDto { ReviewRemark = "监控显示 9:31 到店" });
+            Assert.True(rejected.Success, $"{rejected.ErrorCode}: {rejected.Message}");
+
+            var mine = await CreateService("staff-user", "staff", "StoreStaff").GetMyPunchAdjustmentsAsync();
+
+            var item = Assert.Single(mine.Data!);
+            Assert.Equal("Rejected", item.Status);
+            Assert.Equal("监控显示 9:31 到店", item.ReviewRemark);
+            Assert.Equal("店长 Sean", item.ReviewedByName);
+        }
+
+        [Theory]
+        // 2026-05-18 是周一：周一、周二可改上周一（5-11）起，周三起只能改本周。
+        [InlineData("2026-05-18", "2026-05-11", true)]
+        [InlineData("2026-05-19", "2026-05-11", true)]
+        [InlineData("2026-05-18", "2026-05-10", false)]
+        [InlineData("2026-05-20", "2026-05-17", false)]
+        [InlineData("2026-05-20", "2026-05-18", true)]
+        [InlineData("2026-05-24", "2026-05-18", true)]
+        [InlineData("2026-05-20", "2026-05-21", false)]
+        public void IsWithinManagedAdjustmentWindow_按单周工资周期与周二宽限(
+            string today,
+            string workDate,
+            bool expected)
+        {
+            Assert.Equal(
+                expected,
+                AttendanceReactService.IsWithinManagedAdjustmentWindow(
+                    DateTime.Parse(workDate),
+                    DateTime.Parse(today)));
         }
 
         [Fact]
@@ -3901,7 +4267,8 @@ namespace BlazorApp.Api.Tests
                 new StubAttendancePosDeviceStatusProvider(posDeviceActive),
                 _timeProvider,
                 _attendanceProtector,
-                _punchAuthorizationProtector
+                _punchAuthorizationProtector,
+                new StubAuthorizationService(_deniedPermissions)
             );
         }
 
@@ -3946,6 +4313,24 @@ namespace BlazorApp.Api.Tests
                 item.SourceType == "Overtime"
                 && item.SourceGuid == scheduleGuid
                 && item.ReviewStatus == "Pending");
+        }
+
+        private sealed class StubAuthorizationService(IReadOnlySet<string> deniedPermissions)
+            : IAuthorizationService
+        {
+            public Task<AuthorizationResult> AuthorizeAsync(
+                ClaimsPrincipal user,
+                object? resource,
+                IEnumerable<IAuthorizationRequirement> requirements) =>
+                Task.FromResult(AuthorizationResult.Success());
+
+            public Task<AuthorizationResult> AuthorizeAsync(
+                ClaimsPrincipal user,
+                object? resource,
+                string policyName) =>
+                Task.FromResult(deniedPermissions.Contains(policyName)
+                    ? AuthorizationResult.Failed()
+                    : AuthorizationResult.Success());
         }
 
         private sealed class StubAttendancePosDeviceStatusProvider(bool isActive)

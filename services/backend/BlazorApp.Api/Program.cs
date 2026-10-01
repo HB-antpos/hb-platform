@@ -119,6 +119,9 @@ if (schemaCommand.Mode != SchemaCommandMode.Server)
     }
 
     Environment.ExitCode = explicitSchemaResult.ExitCode;
+    // 关键位置：默认控制台日志由后台线程异步写出，只有释放 host（连带 LoggerFactory）才会排空队列；
+    // 不释放直接 return，进程退出时上面的诊断日志可能整条丢失。退出码已先写入，释放不改变其语义。
+    await schemaApp.DisposeAsync();
     return;
 }
 
@@ -647,12 +650,41 @@ builder.Services.AddScoped<OperationAuditQueryService>(sp =>
     new OperationAuditQueryService(
         sp.GetRequiredService<POSMSqlSugarContext>().Db,
         sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
-        sp.GetRequiredService<IHttpContextAccessor>()
+        sp.GetRequiredService<IHttpContextAccessor>(),
+        // 商品图片在 HBweb 主档里。
+        sp.GetRequiredService<SqlSugarContext>().Db,
+        sp.GetRequiredService<ILogger<OperationAuditQueryService>>()
+    )
+);
+builder.Services.AddScoped<OperationAuditReviewService>(sp =>
+    new OperationAuditReviewService(
+        sp.GetRequiredService<POSMSqlSugarContext>().Db,
+        sp.GetRequiredService<OperationAuditQueryService>(),
+        sp.GetRequiredService<BlazorApp.Api.Services.ICurrentUserService>()
     )
 );
 builder.Services.AddScoped<OperationAuditRetentionService>(sp =>
     new OperationAuditRetentionService(sp.GetRequiredService<POSMSqlSugarContext>().Db)
 );
+builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService>(sp =>
+    new BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService(
+        sp.GetRequiredService<POSMSqlSugarContext>().Db,
+        sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
+        sp.GetRequiredService<ILogger<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService>>()
+    )
+);
+builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogReviewService>(sp =>
+    new BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogReviewService(
+        sp.GetRequiredService<POSMSqlSugarContext>().Db,
+        sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
+        sp.GetRequiredService<BlazorApp.Api.Services.ICurrentUserService>()
+    )
+);
+// 员工操作日志异常扫描（老收银 + 新收银）：默认关闭，迁移执行并观察后在配置 LegacyEmployeeLogRisk:Enabled 打开；
+// 新收银部分另受 LegacyEmployeeLogRisk:PosAuditEnabled（默认开）控制。
+builder.Services.Configure<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskOptions.SectionName));
+builder.Services.AddHostedService<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskScanWorker>();
 builder.Services.AddScoped<ILinklySettlementQueryService, LinklySettlementQueryService>();
 builder.Services.AddSingleton<ILinklySettlementAmountParser, LinklySettlementAmountParser>();
 builder.Services.AddSingleton<LinklySettlementExcelExporter>();
@@ -761,6 +793,9 @@ builder.Services.AddHttpClient<TencentCosMobileAppBuildArtifactMirror>()
 builder.Services.AddScoped<IMobileAppBuildArtifactMirror>(sp =>
     sp.GetRequiredService<TencentCosMobileAppBuildArtifactMirror>()
 );
+// 商品图片版本号：HEAD 探测 COS 图片修改时间；禁止跳转，防止白名单域名 302 到内网。
+builder.Services.AddHttpClient<ProductImageVersionService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<IChinaSupplierService, ChinaSupplierService>(); // 国内供应商管理服务
 builder.Services.AddScoped<IDomesticSupplierService, DomesticSupplierService>(); // 义乌采购国内供应商服务
 builder.Services.AddScoped<IWarehouseCategoryService, WarehouseCategoryService>(); // 仓库分类服务
@@ -918,6 +953,16 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.SupplyNotices.IWarehouseProductSupplyNoticeService,
     BlazorApp.Api.Features.SupplyNotices.WarehouseProductSupplyNoticeService
 >();
+// 仓库 PDA 订单拣货：拣货记录、一起拣、扫员工码确认拣货人（凭证用应用 DataProtection 密钥环签名）。
+builder.Services.AddSingleton<BlazorApp.Api.Features.WarehousePicking.WarehousePickerTicketProtector>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.WarehousePicking.IWarehousePickerService,
+    BlazorApp.Api.Features.WarehousePicking.WarehousePickerService
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.WarehousePicking.IWarehousePickingService,
+    BlazorApp.Api.Features.WarehousePicking.WarehousePickingService
+>();
 builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.React.IWarehouseRetailPriceChangeService,
     BlazorApp.Api.Services.React.WarehouseRetailPriceChangeService
@@ -951,6 +996,7 @@ builder.Services.AddScoped<TencentCloudUploadService>();
 
 // ===================== React 专用服务注册（与原有服务解耦） =====================
 builder.Services.AddScoped<IContainerReactService, ContainerReactService>();
+builder.Services.AddScoped<IContainerNewProductsReactService, ContainerNewProductsReactService>();
 builder.Services.AddScoped<IContainerDetailCollaborationService, ContainerDetailCollaborationService>();
 builder.Services.AddScoped<IContainerAllocationSalesReportService, ContainerAllocationSalesReportService>();
 builder.Services.AddScoped<IWarehouseProductRecordQueryService, WarehouseProductRecordQueryService>();
@@ -1159,6 +1205,9 @@ if (!startupSchemaResult.Success)
         startupSchemaResult.ExitCode
     );
     Environment.ExitCode = startupSchemaResult.ExitCode;
+    // 与显式 schema 分支相同：host 尚未 Run，不会自动释放，须手动释放以排空控制台日志队列，
+    // 否则容器启动失败时 docker logs 可能看不到诊断码。
+    await app.DisposeAsync();
     return;
 }
 

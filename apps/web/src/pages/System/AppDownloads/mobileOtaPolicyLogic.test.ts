@@ -4,6 +4,7 @@ import {
   formatMobileOtaReleaseLabel,
   isMobileOtaReleaseCompatibleWithLane,
   parseMobileOtaRevisionSnapshot,
+  resolveMobileOtaReleaseActivation,
 } from './mobileOtaPolicyLogic'
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
@@ -179,6 +180,37 @@ assertEqual(
   'Mobile OTA 浏览器组件不得包含 EAS 凭据或直接发布命令',
 )
 
+// 主目标与按 Runtime 的附加目标都在投放；只比对主目标会把附加目标误显示为「已登记」。
+const activePolicy = {
+  enabled: true,
+  targetReleaseId: 'release-105',
+  additionalTargets: [
+    { targetReleaseId: 'release-106', targetRuntimeVersion: '1.0.6' },
+    { targetReleaseId: 'release-107', targetRuntimeVersion: '1.0.7' },
+  ],
+}
+assertDeepEqual(
+  resolveMobileOtaReleaseActivation('release-105', activePolicy),
+  { kind: 'primary' },
+  '主目标必须识别为已激活',
+)
+assertDeepEqual(
+  resolveMobileOtaReleaseActivation('release-107', activePolicy),
+  { kind: 'additional', runtimeVersion: '1.0.7' },
+  '附加目标必须识别为已激活并带上所属 Runtime',
+)
+assertEqual(
+  resolveMobileOtaReleaseActivation('release-old', activePolicy),
+  null,
+  '未被策略引用的发布只算已登记',
+)
+assertEqual(
+  resolveMobileOtaReleaseActivation('release-107', { ...activePolicy, enabled: false }),
+  null,
+  '策略停用时主目标与附加目标都不再投放',
+)
+assertEqual(resolveMobileOtaReleaseActivation('release-105', null), null, '策略未加载时不标记激活')
+
 for (const localePath of ['src/i18n/locales/zh.json', 'src/i18n/locales/en.json']) {
   const locale = JSON.parse(readFileSync(localePath, 'utf8'))
   assertEqual(
@@ -191,6 +223,13 @@ for (const localePath of ['src/i18n/locales/zh.json', 'src/i18n/locales/en.json'
     'string',
     '中英文必须明确 required 的 Runtime/bootstrap 覆盖边界',
   )
+  for (const key of ['activeAdditional', 'additionalTargets', 'additionalTargetsKept', 'additionalTargetsNone']) {
+    assertEqual(
+      typeof locale.system.appDownloads.updatePolicy.mobileOta[key],
+      'string',
+      `中英文必须提供附加目标文案 ${key}`,
+    )
+  }
 }
 
 console.log('mobileOtaPolicyLogic.test.ts: ok')

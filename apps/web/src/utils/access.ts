@@ -114,6 +114,9 @@ function createEmptyAccess(): AccessControl {
     canViewSystemLogs: false,
     canViewPerformanceBaseline: false,
     canViewOperationAudits: false,
+    canViewLegacyEmployeeLogs: false,
+    canViewEmployeeOperationLogs: false,
+    canReviewLegacyEmployeeLogs: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
     canViewAppDownloads: false,
@@ -322,7 +325,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewAttendanceSchedule =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
-    hasPermission(P.Attendance.ScheduleViewStore)
+    hasPermission(P.Attendance.ScheduleViewStore) ||
+    // 与后端权限包含关系一致：能编辑管理分店排班即可查看排班
+    hasPermission(P.Attendance.ScheduleEditManagedStore)
   const canEditAttendanceSchedule =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
@@ -350,6 +355,10 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewPerformanceBaseline =
     isAdmin || hasPermission(P.System.ViewPerformanceBaseline)
   const canViewOperationAudits = isAdmin || hasPermission(P.PosTerminal.AuditView)
+  const canViewLegacyEmployeeLogs = isAdmin || hasPermission(P.LegacyEmployeeLogs.View)
+  const canReviewLegacyEmployeeLogs = isAdmin || hasPermission(P.LegacyEmployeeLogs.Review)
+  // 合并页只要能看其中一个来源即可进入，页内只显示有权限的来源。
+  const canViewEmployeeOperationLogs = canViewOperationAudits || canViewLegacyEmployeeLogs
   const canManageScheduledTasks = isAdmin || hasPermission(P.System.ManageScheduledTasks)
   const canManageSystemSettings = isAdmin || hasPermission(P.System.ManageSettings)
   // OTA 登记和回撤命令属于发布管理动作，和只读下载页权限分开控制。
@@ -477,6 +486,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewSystemLogs,
     canViewPerformanceBaseline,
     canViewOperationAudits,
+    canViewLegacyEmployeeLogs,
+    canViewEmployeeOperationLogs,
+    canReviewLegacyEmployeeLogs,
     canManageScheduledTasks,
     canManageSystemSettings,
     canViewAppDownloads,

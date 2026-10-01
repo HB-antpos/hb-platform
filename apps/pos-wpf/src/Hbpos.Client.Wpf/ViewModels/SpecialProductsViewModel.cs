@@ -32,6 +32,8 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     private readonly ICashierSessionContext _cashierSessionContext;
     private readonly bool _enforcePermissions;
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
+    private readonly PosCartService _cart;
+    private readonly IOperationAuditLogger? _operationAuditLogger;
     private readonly object _specialItemsGate = new();
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly Func<IEnumerable<string?>, int, CancellationToken, Task<int>> _thumbnailPreloadAsync;
@@ -97,8 +99,11 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         Func<IEnumerable<string?>, int, CancellationToken, Task<int>>? thumbnailPreloadAsync = null,
         ICashierSessionContext? cashierSessionContext = null,
         bool enforcePermissionsWhenNoCashier = false,
-        IOperationAuthorizationService? operationAuthorizationService = null)
+        IOperationAuthorizationService? operationAuthorizationService = null,
+        IOperationAuditLogger? operationAuditLogger = null)
     {
+        _cart = cart;
+        _operationAuditLogger = operationAuditLogger;
         _workflowService = workflowService ?? new SpecialProductsWorkflowService(
             priceIndex,
             cart,
@@ -548,9 +553,25 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         }
 
         var stopwatch = Stopwatch.StartNew();
+        var before = OperationAuditEvents.CaptureCart(_cart.Lines);
+        var cartAuditRecorded = false;
         try
         {
             var result = _workflowService.AddToCart(itemSnapshot);
+            // 特价区直接写购物车，不经过收银台的变更入口，需在此补记加购审计。
+            var after = OperationAuditEvents.CaptureCart(_cart.Lines);
+            if (OperationAuditEvents.HasChanged(before, after))
+            {
+                OperationAuditEvents.RecordCartChange(
+                    _operationAuditLogger,
+                    OperationAuditTypes.CartItemAdd,
+                    Session,
+                    before,
+                    after,
+                    reasonCode: "special-products");
+            }
+
+            cartAuditRecorded = true;
             SetStatus("specialProducts.status.addedToCart", itemSnapshot.DisplayName);
             Back();
             _onCartLineAdded?.Invoke(result.Line);
@@ -560,6 +581,20 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         catch (Exception ex)
         {
             stopwatch.Stop();
+            // 加购成功后的返回/定位回调异常不能把已成功的加购再记成失败。
+            if (!cartAuditRecorded)
+            {
+                OperationAuditEvents.RecordCartChange(
+                    _operationAuditLogger,
+                    OperationAuditTypes.CartItemAdd,
+                    Session,
+                    before,
+                    OperationAuditEvents.CaptureCart(_cart.Lines),
+                    outcome: "Failed",
+                    reasonCode: "special-products",
+                    safeMessage: ex.GetType().Name);
+            }
+
             Log($"operation=add-to-cart store={Session.StoreCode} productCode={itemSnapshot.ProductCode} lookupCode={itemSnapshot.LookupCode} success=false totalElapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
             throw;
         }

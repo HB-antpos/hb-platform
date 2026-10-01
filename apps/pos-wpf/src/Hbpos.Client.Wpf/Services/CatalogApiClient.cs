@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Hbpos.Contracts.Catalog;
@@ -82,7 +84,35 @@ public interface ICatalogApiClient
     {
         return Task.FromException<CatalogDeltaPageResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
     }
+
+    // 中文注释：整文件下载协议（服务端开关打开后才可用）。默认实现同样按"不支持"处理，
+    // 同步服务据此直接走分页协议，既有测试替身无需实现。
+    Task<CatalogFileSyncPlanResponse> GetCatalogFileSyncPlanAsync(
+        string storeCode,
+        string? baseCatalogVersion,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogFileSyncPlanResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
+
+    /// <summary>
+    /// 把目录文件从 offset 起写入 destination。offset 大于 0 时带 Range 与 If-Range（内容 SHA-256 ETag）续传；
+    /// 服务端回 200 表示内容已变或不支持续传，此时先清空 destination 再写整份。
+    /// </summary>
+    Task<CatalogFileRangeResult> DownloadCatalogFileRangeAsync(
+        string relativePath,
+        Stream destination,
+        long offset,
+        string? ifRangeEntityTag,
+        IProgress<long>? bytesWritten,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogFileRangeResult>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
 }
+
+/// <summary>Restarted 为 true 表示服务端回了整份内容（destination 已从 0 重写）；BytesWritten 为本次写入的字节数。</summary>
+public sealed record CatalogFileRangeResult(bool Restarted, long BytesWritten);
 
 public sealed class CatalogApiClient : ICatalogApiClient
 {
@@ -458,6 +488,133 @@ public sealed class CatalogApiClient : ICatalogApiClient
             throw;
         }
     }
+
+    public async Task<CatalogFileSyncPlanResponse> GetCatalogFileSyncPlanAsync(
+        string storeCode,
+        string? baseCatalogVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var requestUri = BuildUri(
+            "api/v1/catalog/files/sync-plan",
+            ("storeCode", storeCode),
+            ("baseCatalogVersion", baseCatalogVersion));
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"GET {requestUri} start base={_httpClient.BaseAddress}");
+        try
+        {
+            var responseResult = await ExecuteWithTransientRetryAsync(
+                $"GET {requestUri}",
+                async token =>
+                {
+                    using var response = await _httpClient.GetAsync(requestUri, token);
+                    var result = await ReadApiResultAsync<CatalogFileSyncPlanResponse>(response, token);
+                    return (Result: result, response.StatusCode);
+                },
+                cancellationToken);
+            stopwatch.Stop();
+            var plan = responseResult.Result;
+            Log($"GET {requestUri} completed status={(int)responseResult.StatusCode} mode={plan.Mode} target={plan.TargetCatalogVersion} total={plan.TargetTotal} file={plan.File?.Kind ?? "<none>"} bytes={plan.File?.Bytes.ToString(CultureInfo.InvariantCulture) ?? "<none>"} deltaOperations={plan.DeltaOperationCount?.ToString(CultureInfo.InvariantCulture) ?? "<none>"} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return plan;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task<CatalogFileRangeResult> DownloadCatalogFileRangeAsync(
+        string relativePath,
+        Stream destination,
+        long offset,
+        string? ifRangeEntityTag,
+        IProgress<long>? bytesWritten,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        ArgumentNullException.ThrowIfNull(destination);
+        using var request = new HttpRequestMessage(HttpMethod.Get, relativePath);
+        if (offset > 0)
+        {
+            request.Headers.Range = new RangeHeaderValue(offset, null);
+            if (!string.IsNullOrWhiteSpace(ifRangeEntityTag))
+            {
+                request.Headers.IfRange = new RangeConditionHeaderValue(new EntityTagHeaderValue(ifRangeEntityTag));
+            }
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"GET {relativePath} start offset={offset}");
+        try
+        {
+            // 中文注释：只等响应头，正文按块流入本地文件；HttpClient 本身不设超时，改用"读不到数据"的空闲超时防挂死。
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                // 错误响应是小 JSON：解析出业务错误码后抛出（如 CATALOG_FILE_NOT_FOUND）。
+                await ReadApiResultAsync<object>(response, cancellationToken);
+                throw new CatalogApiException(
+                    $"Catalog file request failed with HTTP {(int)response.StatusCode}.",
+                    response.StatusCode);
+            }
+
+            var restarted = offset == 0 || response.StatusCode != HttpStatusCode.PartialContent;
+            if (restarted)
+            {
+                destination.SetLength(0);
+                destination.Position = 0;
+            }
+            else if (response.Content.Headers.ContentRange?.From != offset)
+            {
+                throw new CatalogApiException(
+                    $"Catalog file range does not match the requested offset. offset={offset} range={response.Content.Headers.ContentRange}",
+                    response.StatusCode,
+                    "CATALOG_FILE_RANGE_INVALID");
+            }
+
+            await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var buffer = new byte[81920];
+            long written = 0;
+            using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            while (true)
+            {
+                idleCts.CancelAfter(FileReadIdleTimeout);
+                int read;
+                try
+                {
+                    read = await body.ReadAsync(buffer, idleCts.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"Catalog file download stalled for {FileReadIdleTimeout.TotalSeconds:0} seconds.");
+                }
+
+                if (read == 0)
+                {
+                    break;
+                }
+
+                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                written += read;
+                bytesWritten?.Report(written);
+            }
+
+            await destination.FlushAsync(cancellationToken);
+            stopwatch.Stop();
+            Log($"GET {relativePath} completed status={(int)response.StatusCode} offset={offset} restarted={restarted} bytes={written} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return new CatalogFileRangeResult(restarted, written);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"GET {relativePath} failed offset={offset} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    internal static readonly TimeSpan FileReadIdleTimeout = TimeSpan.FromSeconds(60);
 
     internal static CatalogApiException CreateProtocolNotSupportedException()
     {

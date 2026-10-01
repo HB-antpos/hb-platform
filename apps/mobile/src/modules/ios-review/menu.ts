@@ -10,12 +10,18 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "permissions",
   "product-insights",
   "warehouse-product-insights",
+  // 订单拣货依赖真实分店订单与拣货记录，审核模式没有离线演示数据。
+  "warehouse-picking",
   // 季节商品查询依赖真实进销与其他分店库存，审核模式没有离线演示数据。
   "seasonal-product-insights",
   "sales-orders",
-  "pos-operation-logs",
+  "legacy-employee-logs",
   // 价格更新依赖真实分店任务与改价接口，审核模式没有对应的离线演示数据。
   "price-updates",
+  // 货柜新品依赖真实到店数据与接口，审核模式没有离线演示数据。
+  "container-new-products",
+  // App 安装页依赖真实版本登记与构建记录，审核模式没有离线演示数据。
+  "app-install",
   // 收银用户条码是真实员工登录凭据，审核模式不展示。
   "cash-register-users",
   "workbench",
@@ -26,6 +32,7 @@ export const IOS_REVIEW_MENU_ITEMS: ReadonlyArray<AppNavigationMenuItem> = [
   { routeName: "orders", titleKey: "tabs.orders", icon: "clipboard-list", permission: "Orders.View", order: 20 },
   { routeName: "cart", titleKey: "tabs.cart", icon: "cart-outline", permission: "Orders.Create", order: 30 },
   { routeName: "warehouse", titleKey: "tabs.warehouse", icon: "warehouse", permission: "Warehouse.ManageProducts", order: 40 },
+  { routeName: "containers", titleKey: "tabs.containers", icon: "archive-outline", permission: "Container.View", order: 40 },
   { routeName: "domestic-purchase", titleKey: "tabs.domesticPurchase", icon: "shopping-outline", permission: "DomesticPurchase.ManageProducts", order: 45 },
   { routeName: "local-supplier-invoices", titleKey: "tabs.localSupplierInvoices", icon: "receipt-text-outline", permission: "LocalPurchase.View", order: 46 },
   { routeName: "advertisements", titleKey: "tabs.advertisements", icon: "image-multiple", permission: "Advertisements.View", order: 47 },

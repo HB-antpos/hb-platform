@@ -57,6 +57,11 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> PublishWeek([FromBody] PublishAttendanceWeekDto request) =>
             Ok(await _service.PublishWeekAsync(request));
 
+        [HttpPost("schedules/copy-week")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+        public async Task<IActionResult> CopyScheduleWeek([FromBody] CopyAttendanceScheduleWeekDto request) =>
+            Ok(await _service.CopyScheduleWeekAsync(request));
+
         [HttpDelete("schedules/{scheduleGuid}")]
         [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
         public async Task<IActionResult> DeleteSchedule(string scheduleGuid) =>
@@ -123,6 +128,18 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> GetMyPunchAdjustments() =>
             Ok(await _service.GetMyPunchAdjustmentsAsync());
 
+        [HttpPost("managed/punch-adjustments/preview")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> PreviewManagedPunchAdjustment(
+            [FromBody] CreateManagedAttendancePunchAdjustmentDto request
+        ) => Ok(await _service.PreviewManagedPunchAdjustmentAsync(request));
+
+        [HttpPost("managed/punch-adjustments")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> CreateManagedPunchAdjustment(
+            [FromBody] CreateManagedAttendancePunchAdjustmentDto request
+        ) => Ok(await _service.CreateManagedPunchAdjustmentAsync(request));
+
         [HttpPost("qr/resolve")]
         [Authorize(Policy = Permissions.Attendance.Punch.Self)]
         public async Task<IActionResult> ResolveQr([FromBody] AttendanceQrResolveRequestDto request) =>
@@ -165,6 +182,12 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> GetLeaveAttachmentUploadSignature(
             [FromBody] DirectUploadRequest request
         ) => Ok(await _service.GetLeaveAttachmentUploadSignatureAsync(request));
+
+        // 页面级可见性由服务层按任一考勤管理权限判断，见 GetStoreEmployeesAsync。
+        [HttpGet("employees")]
+        [Authorize]
+        public async Task<IActionResult> GetStoreEmployees([FromQuery] string? storeCode) =>
+            Ok(await _service.GetStoreEmployeesAsync(storeCode));
 
         [HttpGet("availability")]
         [Authorize(Policy = Permissions.Attendance.Availability.ViewManagedStore)]

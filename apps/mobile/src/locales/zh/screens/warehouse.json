@@ -1,13 +1,8 @@
 {
-  "title": "仓库",
+  "title": "商品和货位管理",
   "segments": {
     "product": "仓库商品",
     "location": "货位信息"
-  },
-  "containers": {
-    "entryTitle": "货柜管理",
-    "entryDescription": "查看货柜列表和货柜明细。",
-    "entryAction": "进入"
   },
   "messages": {
     "noAccessTitle": "暂无仓库访问权限",

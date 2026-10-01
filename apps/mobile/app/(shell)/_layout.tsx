@@ -22,8 +22,12 @@ import {
 } from "@/modules/employee-profile-review/access";
 import { getEmployeeProfileReviewRequestsApi } from "@/modules/employee-profile-review/api";
 import { AppNavigationAccessProvider } from "@/modules/navigation/access-context";
+import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
 import { getPriceUpdatePendingCount } from "@/modules/price-updates/api";
 import { priceUpdateCountQueryKey } from "@/modules/price-updates/query-keys";
+import { canViewContainerNewProducts } from "@/modules/container-new-products/access";
+import { containerNewProductsQueryKey, getContainerNewProducts } from "@/modules/container-new-products/api";
+import { countNewProductKinds } from "@/modules/container-new-products/summary";
 import { useCartStore } from "@/store/cart-store";
 import { canAccessVersionManagement, filterVersionManagementRoutes } from "@/modules/navigation/version-management-access";
 import { resolveIdentityAdminRouteNames } from "@/modules/navigation/identity-admin-access";
@@ -36,6 +40,7 @@ export const unstable_settings = {
 /** 离线设备会话补校验的重试间隔：网络恢复前不断重试，恢复后立刻补上设备校验。 */
 const OFFLINE_DEVICE_REVALIDATE_INTERVAL_MS = 60_000;
 const PRICE_UPDATES_ROUTE = "price-updates";
+const CONTAINER_NEW_PRODUCTS_ROUTE = "container-new-products";
 
 export default function ShellLayout() {
   const router = useRouter();
@@ -426,6 +431,22 @@ export default function ShellLayout() {
     queryFn: () => getPriceUpdatePendingCount(priceUpdateStoreCode!),
     staleTime: 30_000,
   });
+  // HB新品角标与页面共用查询和缓存；清单一天内变化很少，5 分钟内回到工作台不重复拉取
+  const hasNewProductsPermission = useAuthStore((state) => state.access.hasPermission);
+  const newProductsQuery = useQuery({
+    queryKey: containerNewProductsQueryKey(priceUpdateStoreCode),
+    enabled:
+      navigationReady
+      && Boolean(priceUpdateStoreCode)
+      && visibleRouteNames.has(CONTAINER_NEW_PRODUCTS_ROUTE)
+      && canViewContainerNewProducts(isAuthenticated, hasNewProductsPermission, iosReviewOfflineGuardActive),
+    queryFn: () => getContainerNewProducts(priceUpdateStoreCode!),
+    staleTime: 5 * 60_000,
+  });
+  const newProductKindCount = useMemo(
+    () => countNewProductKinds(newProductsQuery.data?.items ?? []),
+    [newProductsQuery.data?.items]
+  );
   const shouldWaitForNavigation =
     (hasUserSession || isDeviceMode) && (!navigationReady || navigationLoading);
   const preferredDefaultRoute = resolvePreferredDefaultTabRoute({
@@ -526,6 +547,7 @@ export default function ShellLayout() {
         navigationLoading,
         pendingProfileReviewCount: pendingReviewQuery.data?.total ?? 0,
         pendingPriceUpdateCount: pendingPriceUpdateQuery.data ?? 0,
+        newProductKindCount,
         isDeviceMode,
         isWarehouseStaffOnly,
       }}
@@ -539,7 +561,7 @@ export default function ShellLayout() {
             }}
           />
         </View>
-        <PrimaryTabBar activeRouteName={currentRouteName} />
+        {shouldHidePrimaryTabBar(pathname) ? null : <PrimaryTabBar activeRouteName={currentRouteName} />}
       </View>
     </AppNavigationAccessProvider>
   );

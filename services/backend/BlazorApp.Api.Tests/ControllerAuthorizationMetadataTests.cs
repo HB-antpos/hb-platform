@@ -320,6 +320,18 @@ public class ControllerAuthorizationMetadataTests
             nameof(MobileAppBuildsController.CreateOtaRollbackCommand),
             Permissions.System.ManageAppDownloads
         );
+        yield return Policy<MobileAppInstallLinksController>(
+            nameof(MobileAppInstallLinksController.Get),
+            Permissions.System.ViewMobileAppInstallLinks
+        );
+        yield return Policy<LegacyEmployeeLogsController>(
+            nameof(LegacyEmployeeLogsController.GetList),
+            Permissions.LegacyEmployeeLogs.View
+        );
+        yield return Policy<LegacyEmployeeLogsController>(
+            nameof(LegacyEmployeeLogsController.GetContext),
+            Permissions.LegacyEmployeeLogs.View
+        );
         yield return Policy<MobileAppDeviceStatusController>(
             nameof(MobileAppDeviceStatusController.GetPaged),
             Permissions.DeviceRegistration.View
@@ -780,6 +792,18 @@ public class ControllerAuthorizationMetadataTests
         yield return Policy<ReactAttendanceController>(
             nameof(ReactAttendanceController.ResolveQr),
             Permissions.Attendance.Punch.Self
+        );
+        yield return Policy<ReactAttendanceController>(
+            nameof(ReactAttendanceController.CopyScheduleWeek),
+            Permissions.Attendance.Schedule.EditManagedStore
+        );
+        yield return Policy<ReactAttendanceController>(
+            nameof(ReactAttendanceController.PreviewManagedPunchAdjustment),
+            Permissions.Attendance.Punch.AdjustManagedStore
+        );
+        yield return Policy<ReactAttendanceController>(
+            nameof(ReactAttendanceController.CreateManagedPunchAdjustment),
+            Permissions.Attendance.Punch.AdjustManagedStore
         );
     }
 

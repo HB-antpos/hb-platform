@@ -20,7 +20,8 @@ internal sealed class StoreOrderPlacementGateCoordinator(
         string storeCode,
         bool bypassPreorderGate,
         string entryPoint,
-        Func<StoreOrderPlacementGateContext, Task<ApiResponse<T>>> command
+        Func<StoreOrderPlacementGateContext, Task<ApiResponse<T>>> command,
+        CancellationToken requestAborted = default
     )
     {
         if (bypassPreorderGate)
@@ -33,7 +34,8 @@ internal sealed class StoreOrderPlacementGateCoordinator(
                 _db,
                 storeCode,
                 entryPoint,
-                logger
+                logger,
+                requestAborted
             );
         if (resource == null)
         {
@@ -49,7 +51,8 @@ internal sealed class StoreOrderPlacementGateCoordinator(
     public async Task<StoreOrderPlacementGateDecision> IsBlockedInsideTransactionAsync(
         StoreOrderPlacementGateContext context,
         string storeCode,
-        string entryPoint
+        string entryPoint,
+        CancellationToken requestAborted = default
     )
     {
         if (!context.RequiresEvaluation)
@@ -64,7 +67,8 @@ internal sealed class StoreOrderPlacementGateCoordinator(
                 storeCode,
                 TimeProvider.System,
                 entryPoint,
-                logger
+                logger,
+                requestAborted
             );
         if (evaluation?.IsBlocked != true)
         {

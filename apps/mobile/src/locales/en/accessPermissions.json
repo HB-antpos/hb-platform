@@ -89,6 +89,10 @@
       "name": "Attendance Leave View Managed Store",
       "description": "Allows access to Attendance Leave View Managed Store."
     },
+    "Attendance.Punch.AdjustManagedStore": {
+      "name": "Attendance Punch Adjust Managed Store",
+      "description": "Allows access to Attendance Punch Adjust Managed Store."
+    },
     "Attendance.Punch.Self": {
       "name": "Attendance Punch Self",
       "description": "Allows access to Attendance Punch Self."
@@ -132,6 +136,10 @@
     "Container.Edit": {
       "name": "Edit containers",
       "description": "Edit container records."
+    },
+    "Container.MobileNewProductsView": {
+      "name": "View new arrivals on mobile",
+      "description": "View new products from containers in the last 2 weeks and next 4 weeks, including estimated store arrival dates."
     },
     "Container.View": {
       "name": "View containers",
@@ -236,6 +244,14 @@
     "Permissions.PosTerminal.Audit.View": {
       "name": "View POS audit logs",
       "description": "View POS operation audit logs for managed stores on the web admin and the mobile workbench."
+    },
+    "LegacyEmployeeLogs.View": {
+      "name": "View legacy POS operation logs",
+      "description": "View employee operation logs uploaded by the legacy POS for a selected store on the web admin."
+    },
+    "LegacyEmployeeLogs.Review": {
+      "name": "Review employee operation anomalies",
+      "description": "Mark flagged legacy or new POS operations as normal or needing follow-up, or revoke the review, on the web admin and the mobile employee operation logs page."
     },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",
@@ -665,6 +681,10 @@
       "name": "System Manage Settings",
       "description": "Allows access to System Manage Settings."
     },
+    "System.ViewMobileAppInstallLinks": {
+      "name": "View app install QR codes on mobile",
+      "description": "View the latest iOS and Android releases and their install QR codes on mobile."
+    },
     "System.ViewAppDownloads": {
       "name": "System View App Downloads",
       "description": "Allows access to System View App Downloads."
@@ -728,6 +748,10 @@
     "Warehouse.ManageOrders": {
       "name": "Warehouse Manage Orders",
       "description": "Allows access to Warehouse Manage Orders."
+    },
+    "Warehouse.Picking": {
+      "name": "Warehouse Order Picking",
+      "description": "Mobile Order picking - scan to pick, fill in a missing min order qty and submit ship quantities. Included with Warehouse Manage or Warehouse Manage Orders."
     },
     "Warehouse.ManageProducts": {
       "name": "Warehouse Manage Products",

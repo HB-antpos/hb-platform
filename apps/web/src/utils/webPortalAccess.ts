@@ -124,9 +124,10 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.canViewDeviceRegistration,
   },
   {
+    // 员工操作日志合并页：新收银或老收银任一查看权限；旧老系统地址重定向到这里。
     defaultPath: '/pos-admin/operation-logs',
-    targetPrefixes: ['/pos-admin/operation-logs'],
-    canAccess: (access) => access.canViewOperationAudits,
+    targetPrefixes: ['/pos-admin/operation-logs', '/pos-admin/legacy-employee-logs'],
+    canAccess: (access) => access.canViewOperationAudits || access.hasPermission(P.LegacyEmployeeLogs.View),
   },
   {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。

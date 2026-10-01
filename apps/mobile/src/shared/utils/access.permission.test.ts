@@ -23,21 +23,41 @@ function createUser(
   };
 }
 
-const auditViewerAccess = buildAccess(createUser([PERMISSIONS.PosTerminal.AuditView]));
+const legacyLogViewer = buildAccess(createUser([PERMISSIONS.LegacyEmployeeLogs.View]));
 assertEqual(
-  auditViewerAccess.canViewPosOperationLogs,
+  legacyLogViewer.canViewLegacyEmployeeLogs,
   true,
-  "Permissions.PosTerminal.Audit.View enables POS operation logs entrance"
+  "LegacyEmployeeLogs.View enables the employee operation logs entrance"
 );
 assertEqual(
-  buildAccess(createUser(["PosTerminal.Audit.View"])).canViewPosOperationLogs,
+  legacyLogViewer.canReviewLegacyEmployeeLogs,
+  false,
+  "viewing legacy logs does not imply reviewing anomalies"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.LegacyEmployeeLogs.Review])).canReviewLegacyEmployeeLogs,
+  true,
+  "LegacyEmployeeLogs.Review enables anomaly review"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.PosTerminal.AuditView])).canViewLegacyEmployeeLogs,
+  false,
+  "new POS audit permission does not unlock the legacy POS source"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.PosTerminal.AuditView])).canViewPosOperationAudits,
+  true,
+  "new POS audit permission unlocks the new POS source of the employee operation logs"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.LegacyEmployeeLogs.View])).canViewPosOperationAudits,
+  false,
+  "legacy log permission does not unlock the new POS source"
+);
+assertEqual(
+  buildAccess(createUser(["PosTerminal.Audit.View"])).hasPermission(PERMISSIONS.PosTerminal.AuditView),
   true,
   "legacy PosTerminal.Audit.View without prefix is treated as the same permission"
-);
-assertEqual(
-  buildAccess(createUser(["Users.View"])).canViewPosOperationLogs,
-  false,
-  "Users.View alone does not enable POS operation logs"
 );
 
 const purchaseLegacyAccess = buildAccess(

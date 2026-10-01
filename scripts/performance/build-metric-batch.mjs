@@ -25,7 +25,7 @@ import {
 } from "./lib/validation.mjs";
 
 const QUALITY_LANES = ["backend", "web", "pos-ipad", "pos-handheld"];
-const QUALITY_EVENTS = ["pull_request", "push", "schedule", "workflow_dispatch"];
+const QUALITY_EVENTS = ["pull_request", "merge_group", "push", "schedule", "workflow_dispatch"];
 const MAX_RESULT_BYTES = 64 * 1024;
 const MAX_WEB_BUNDLE_REPORT_BYTES = 8 * 1024 * 1024;
 
@@ -114,7 +114,8 @@ function validateBuildContext(context) {
 
 export function resolveMetricEnvironment(context) {
   validateBuildContext(context);
-  if (context.eventName === "pull_request") return "PullRequest";
+  // 合并队列运行的是尚未进入 main 的组合提交，与 PR 同口径，不能记为正式基线。
+  if (context.eventName === "pull_request" || context.eventName === "merge_group") return "PullRequest";
   if (context.eventName === "push" && context.ref !== "refs/heads/main") {
     throw new ValidationError("push 质量基线只允许 refs/heads/main 使用 Production 环境");
   }

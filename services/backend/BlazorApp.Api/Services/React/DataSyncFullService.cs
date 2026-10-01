@@ -12,6 +12,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
 using SqlSugar;
 using System.Runtime.ExceptionServices;
+using WarehouseMinOrderQuantitySyncGuard = BlazorApp.Api.Features.DataSync.Common.WarehouseMinOrderQuantitySyncGuard;
 
 namespace BlazorApp.Api.Services.React
 {
@@ -3017,11 +3018,19 @@ namespace BlazorApp.Api.Services.React
                     .Where(x => SqlFunc.HasValue(x.H商品编码))
                     .CountAsync();
                 var pages = (int)Math.Ceiling(total / (double)hqBatchSize);
-                var existingCodes = await _localContext
+                var existingRows = await _localContext
                     .Db.Queryable<WarehouseProduct>()
-                    .Select(x => x.ProductCode)
+                    .Select(x => new WarehouseMinOrderQuantitySyncGuard.LocalMinOrderQuantityRow
+                    {
+                        ProductCode = x.ProductCode,
+                        MinOrderQuantity = x.MinOrderQuantity,
+                    })
                     .ToListAsync();
-                var existingCodeMap = existingCodes
+                // 中包数由仓库本地维护：HQ 最小订货量只补本地空缺，已有正数的行更新时回填本地值。
+                var localMinOrderQuantities =
+                    WarehouseMinOrderQuantitySyncGuard.BuildLocalValues(existingRows);
+                var existingCodeMap = existingRows
+                    .Select(row => row.ProductCode ?? string.Empty)
                     .Select(code => new
                     {
                         Original = code,
@@ -3124,6 +3133,7 @@ namespace BlazorApp.Api.Services.React
                                 toInsert.Add(item);
                             }
                         }
+                        WarehouseMinOrderQuantitySyncGuard.Apply(toUpdate, localMinOrderQuantities);
 
                         using (SqlSugarAuditScope.PreserveExplicitAuditFields())
                         {

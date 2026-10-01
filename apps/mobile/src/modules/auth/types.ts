@@ -90,7 +90,10 @@ export interface AccessControl {
   canManageStore: boolean;
   canViewReports: boolean;
   canViewDeviceRegistration: boolean;
-  canViewPosOperationLogs: boolean;
+  canViewLegacyEmployeeLogs: boolean;
+  /** 新收银操作审计（员工操作日志页的「新收银」来源）。 */
+  canViewPosOperationAudits: boolean;
+  canReviewLegacyEmployeeLogs: boolean;
   canManageDeviceRegistration: boolean;
   canManageDeviceActivationCodes: boolean;
   canManageMobileDeviceActivationCodes: boolean;
@@ -101,6 +104,8 @@ export interface AccessControl {
   canReviewAttendance: boolean;
   canEditAttendanceHoliday: boolean;
   canEditAttendanceSettings: boolean;
+  canViewAttendancePunchRecords: boolean;
+  canAdjustAttendancePunch: boolean;
   canViewLocalPurchase: boolean;
   canEditLocalPurchase: boolean;
   canPushLocalPurchaseToHq: boolean;

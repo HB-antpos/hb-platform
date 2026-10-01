@@ -73,6 +73,9 @@ export interface AttendanceSchedule {
   candidateOvertimeMinutes?: number;
   approvedOvertimeMinutes?: number;
   overtimeApprovalStatus?: string;
+  /** 当天已批准请假的类型；有值表示员工请假，不计工时、不算缺卡。 */
+  leaveType?: string;
+  leaveGuid?: string;
   segments?: AttendancePunchSegment[];
 }
 
@@ -156,6 +159,11 @@ export interface AttendancePunchAdjustmentPayload {
   previewRevision?: string;
 }
 
+/** 店长代员工补录/修改打卡：在本人补卡字段基础上指定员工。 */
+export interface AttendanceManagedPunchAdjustmentPayload extends AttendancePunchAdjustmentPayload {
+  userGuid: string;
+}
+
 export interface AttendancePunchAdjustment {
   adjustmentGuid: string;
   storeCode: string;
@@ -171,6 +179,8 @@ export interface AttendancePunchAdjustment {
   isDirectAdjustment?: boolean;
   submittedAt?: string;
   reviewedAt?: string;
+  reviewedByName?: string;
+  reviewRemark?: string;
 }
 
 export interface AttendanceAdjustmentPreview {
@@ -283,6 +293,7 @@ export interface AttendanceWeek {
 
 export interface AttendanceAvailability {
   availabilityGuid: string;
+  userGuid?: string;
   storeCode?: string;
   storeName?: string;
   workDate: string;
@@ -372,6 +383,9 @@ export interface AttendanceLeaveRequest {
   attachmentUrl?: string;
   status: AttendanceApprovalStatus;
   submittedAt?: string;
+  reviewedAt?: string;
+  reviewedByName?: string;
+  reviewRemark?: string;
 }
 
 export interface AttendanceLeaveRequestPayload {

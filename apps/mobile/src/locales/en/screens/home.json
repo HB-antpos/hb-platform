@@ -1,8 +1,8 @@
 {
   "title": "Products",
-  "filterTitle": "Filters",
+  "filterTitle": "Choose category",
   "gradeFilterTitle": "Grade filter",
-  "scanResultHint": "Showing scan results. Clear the filter to return to the full product list.",
+  "scanResultHint": "Scanning again replaces these results. Tap Clear to show all products.",
   "searchPlaceholder": "Search by item number/barcode",
   "locationSearchPlaceholder": "Search item/barcode/location",
   "searchToggleOpen": "Expand search",
@@ -24,7 +24,8 @@
     "allGrades": "All grades",
     "noStores": "No stores are available for this account.",
     "noGrades": "No grade options are available.",
-    "gradesLoadFailed": "Failed to load product grades. Please try again later."
+    "gradesLoadFailed": "Failed to load product grades. Please try again later.",
+    "clearCategory": "Clear category filter"
   },
   "empty": {
     "noProductsTitle": "No products yet",
@@ -39,7 +40,8 @@
   "pagination": {
     "previous": "Previous",
     "next": "Next",
-    "page": "Page {{page}}"
+    "page": "Page {{page}}",
+    "pageOf": "{{page}} / {{pages}}"
   },
   "camera": {
     "title": "Camera product lookup",
@@ -52,7 +54,8 @@
     "title": "Edit order quantity",
     "product": "Product: {{name}}",
     "inputLabel": "Order quantity",
-    "invalidQuantity": "Enter 0 or a whole number"
+    "invalidQuantity": "Enter 0 or a whole number",
+    "helper": "Currently {{current}} pcs · enter 0 to clear"
   },
   "messages": {
     "storesLoadFailed": "Failed to load stores. Please try again later.",
@@ -64,5 +67,31 @@
   },
   "cartSummary": {
     "total": "Total"
+  },
+  "storeCaption": "Store ordering",
+  "storeSwitchAccessibility": "Switch ordering store, current {{store}}",
+  "resetScanFocusShort": "Refocus",
+  "autoAddOnDetail": "A single match is added to the cart right away",
+  "autoAddOffDetail": "Scanning only finds the product; add it manually",
+  "gradeMenu": {
+    "gradeValue": "Grade {{grade}}"
+  },
+  "scanResult": {
+    "title": "Scan result · {{count}}",
+    "clear": "Clear"
+  },
+  "listMeta": {
+    "total": "{{count}} products",
+    "page": "Page {{page}} / {{pages}}"
+  },
+  "actionBar": {
+    "summary": "{{sku}} SKUs · {{quantity}} pcs",
+    "importTotal": "Import total {{amount}}",
+    "cart": "Cart"
+  },
+  "storePicker": {
+    "title": "Switch store",
+    "current": "Current",
+    "note": "Switching stores clears the current scan result. Each store keeps its own cart."
   }
 }

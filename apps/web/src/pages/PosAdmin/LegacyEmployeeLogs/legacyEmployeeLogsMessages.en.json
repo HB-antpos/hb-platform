@@ -1,0 +1,302 @@
+{
+  "legacyEmployeeLogs": {
+    "pageTitle": "Legacy POS Operation Logs",
+    "pageSubtitle": "Employee operations uploaded by the legacy POS: adding items, price changes, deletions, cash drawer, returns and payments.",
+    "wallClockNotice": "All times are store local time (wall-clock time written by the legacy POS, no time-zone conversion). Terminals upload logs in batches, usually 10 to 60 minutes late, so the latest operations may not appear yet.",
+    "filters": {
+      "timeRange": "Operation time (up to 31 days)",
+      "store": "Store",
+      "storePlaceholder": "Select stores (multiple)",
+      "device": "Device",
+      "devicePlaceholder": "All devices",
+      "employee": "Employee",
+      "employeePlaceholder": "All employees, multi-select",
+      "operation": "Operation",
+      "operationPlaceholder": "All operations",
+      "keyword": "Detail keyword",
+      "keywordPlaceholder": "Order ID / barcode / product code / amount",
+      "optionsHint": "Device and employee options come from the last queried store and time range",
+      "selectAllStores": "Select all ({{count}})",
+      "clearStores": "Clear"
+    },
+    "presets": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "last7Days": "Last 7 days",
+      "last31Days": "Last 31 days"
+    },
+    "validation": {
+      "storeRequired": "Select at least one store",
+      "rangeRequired": "Select an operation time range",
+      "rangeReversed": "End time must be later than start time",
+      "rangeTooLong": "The time range can be at most 31 days"
+    },
+    "quick": {
+      "label": "Quick filters",
+      "highRisk": "High-risk",
+      "price": "Price & discount",
+      "return": "Returns",
+      "auth": "Cash drawer & identity",
+      "payment": "Payment & hold"
+    },
+    "categories": {
+      "item": "Item",
+      "price": "Price",
+      "delete": "Delete",
+      "payment": "Payment",
+      "return": "Return",
+      "auth": "Drawer & identity",
+      "window": "Window",
+      "other": "Other"
+    },
+    "stats": {
+      "total": "Matching",
+      "deleted": "Items deleted",
+      "priceChanges": "Price / discount changes",
+      "cashDrawer": "Cash drawer opened",
+      "scope": "Employees / devices in range",
+      "unitRows": "rows",
+      "unitPeople": "people",
+      "unitDevices": "devices",
+      "basisHint": "Counts ignore the Operation filter"
+    },
+    "table": {
+      "title": "Operations",
+      "hint": "Click a row to see details and surrounding operations",
+      "empty": "No matching operations",
+      "selectStoreFirst": "Select a store to search",
+      "paginationTotal": "{{total}} rows"
+    },
+    "columns": {
+      "time": "Time",
+      "device": "Device",
+      "employee": "Employee",
+      "operation": "Operation",
+      "detail": "Detail",
+      "lag": "Upload delay",
+      "action": "Action",
+      "store": "Store",
+      "amount": "Takings impact",
+      "risk": "Risk"
+    },
+    "lag": {
+      "minutes": "{{minutes}} min",
+      "hours": "{{hours}} h {{minutes}} min",
+      "days": "{{days}} d {{hours}} h",
+      "unknown": "-"
+    },
+    "detail": {
+      "title": "Operation detail",
+      "highRisk": "High-risk",
+      "operationTime": "Operation time",
+      "localTime": "store local",
+      "uploadTime": "Uploaded at",
+      "lagSuffix": "{{lag}} late",
+      "storeDevice": "Store / device",
+      "employee": "Employee",
+      "operation": "Operation",
+      "parsedTitle": "Parsed fields",
+      "parsedHint": "Extracted from key:value pairs in the detail text",
+      "product": "Product",
+      "order": "Order ID",
+      "rawTitle": "Raw detail",
+      "contextTitle": "Surrounding operations",
+      "contextHint": "Same device ±{{minutes}} min",
+      "contextTruncated": "Too many operations in the window; showing the first {{count}}",
+      "contextEmpty": "No other operations in the window",
+      "contextFailed": "Failed to load surrounding operations",
+      "onlyEmployeeDay": "Show only this employee on that day"
+    },
+    "loadFailed": "Failed to load legacy POS operation logs",
+    "retry": "Retry",
+    "loadStoresFailed": "Failed to load stores",
+    "weekdays": [
+      "Sun",
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat"
+    ],
+    "lens": {
+      "all": {
+        "title": "All operations",
+        "hint": "Browse by category: items, price & discount, deletes, checkout, returns, drawer & identity",
+        "scope": "{{people}} staff · {{devices}} devices",
+        "hintPos": "All operations uploaded by the new POS (WPF / handheld / iPad)"
+      },
+      "danger": {
+        "title": "Risky operations",
+        "hint": "By type: deletes, price changes, discounts, cash drawer, returns — directly change takings or cash",
+        "share": "{{percent}}% of all",
+        "hintPos": "Removals, price changes, discounts, manual drawer, refunds/voids, overrides and system operations"
+      },
+      "abnormal": {
+        "title": "Anomalies",
+        "hint": "By behaviour rule: no-sale drawer, delete after checkout, big discount, burst deletes, repeated reprints, off-hours",
+        "people": "{{count}} staff",
+        "pending": "{{count}} to review",
+        "hintPos": "Behaviour rules: no-sale drawer, delete after checkout, big discount, burst removal, repeat reprint, off hours, emergency override"
+      },
+      "unit": "rows",
+      "byCategory": "By category",
+      "byDangerType": "By type",
+      "byRule": "By rule",
+      "clearSub": "Clear",
+      "reviewStatus": "Review"
+    },
+    "dangerGroups": {
+      "delete": "Delete item",
+      "drawer": "Open drawer",
+      "price": "Price change",
+      "discount": "Discount",
+      "return": "Return"
+    },
+    "rules": {
+      "noSaleDrawer": {
+        "label": "No-sale drawer",
+        "desc": "Manual cash drawer opening with no checkout on the same device within 2 minutes either side."
+      },
+      "deleteAfterCheckout": {
+        "label": "Delete after checkout",
+        "desc": "Item deleted within 2 minutes after checkout started, before the next sale, worth at least 10."
+      },
+      "bigDiscount": {
+        "label": "Big discount / price cut",
+        "desc": "Item or cart discount of 50% or more, or a price cut of 50% or more."
+      },
+      "burstDelete": {
+        "label": "Burst deletes",
+        "desc": "Same staff member deleting items 8 or more times within 10 minutes; one flag per burst."
+      },
+      "repeatReprint": {
+        "label": "Repeated reprint",
+        "desc": "Same order reprinted 3 or more times in a day; the 3rd reprint is flagged."
+      },
+      "offHours": {
+        "label": "Off-hours",
+        "desc": "Operations outside 07:00–22:00; the first one per device and period is flagged."
+      },
+      "emergencyOverride": {
+        "label": "Emergency override",
+        "desc": "Operations performed under a new-POS emergency override (offline or permission bypass); every one needs review."
+      }
+    },
+    "reviewStatuses": {
+      "all": "All",
+      "pending": "To review",
+      "reviewed": "Reviewed",
+      "followUp": "Follow-up"
+    },
+    "evidence": {
+      "noSaleWindow": "No checkout on this device within {{seconds}}s",
+      "noSalePrevious": "Previous checkout {{at}} ({{minutes}} min before)",
+      "noSaleNext": "Next checkout {{at}}",
+      "identityConfirmed": "Identity confirmed at opening",
+      "identityMissing": "No identity confirmation at opening",
+      "deleteAfterCheckout": "Deleted {{seconds}}s after checkout started at {{at}}, amount {{amount}}",
+      "product": "Item {{product}} × {{quantity}}",
+      "productOnly": "Item {{product}}",
+      "discountItem": "Item discount {{percent}}% (was {{previous}}%)",
+      "discountCart": "Cart discount {{percent}}%, {{count}} items, original total {{total}}",
+      "discountPrice": "Price {{from}} → {{to}}, cut {{percent}}%",
+      "burstDelete": "{{count}} deletes {{from}}–{{to}}, total {{amount}} (threshold {{threshold}})",
+      "repeatReprint": "Order {{order}} reprinted {{count}} times today, first at {{first}}",
+      "offHoursBeforeOpen": "{{count}} operations before opening ({{from}}–{{to}}); hours {{open}}–{{close}}",
+      "offHoursAfterClose": "{{count}} operations after closing ({{from}}–{{to}}); hours {{open}}–{{close}}",
+      "deleteAfterTender": "Removed {{seconds}}s after payment started at {{at}}, amount {{amount}}",
+      "discountAmount": "Saving {{amount}}",
+      "repeatReprintDay": "Reprinted {{count}} times on this device today, first at {{first}}",
+      "emergencyOverride": "Performed under emergency override (outcome: {{outcome}})",
+      "reason": "Reason {{reason}}"
+    },
+    "badges": {
+      "danger": "Risky",
+      "reviewed": "Reviewed",
+      "followUp": "Follow-up"
+    },
+    "tabs": {
+      "records": "Records",
+      "employees": "By staff"
+    },
+    "employees": {
+      "hint": "Sorted by anomalies and risky share · open a staff member to see their records",
+      "employee": "Staff",
+      "stores": "Stores",
+      "total": "Operations",
+      "danger": "Risky",
+      "dangerRate": "Risky share",
+      "dangerRateAvg": " (avg {{percent}}%)",
+      "abnormal": "Anomalies · top rules",
+      "abnormalTag": "{{count}} · {{pending}} to review",
+      "noAbnormal": "None",
+      "amount": "Takings reduced",
+      "view": "View records",
+      "footnote": "Takings reduced = deletes, price changes, cart discounts and no-receipt returns; same store, time and device filters as above.",
+      "loadFailed": "Failed to load staff summary",
+      "empty": "No staff operations in this range",
+      "footnotePos": "Amount = total reduction from removals, cart clears, price changes, discounts and refunds (successful operations only), using the store, time, device and keyword filters above."
+    },
+    "review": {
+      "title": "Review",
+      "pending": "To review",
+      "reviewer": "Reviewer: {{name}}",
+      "noteLabel": "Note (optional, recommended for follow-up)",
+      "notePlaceholder": "e.g. checked CCTV, customer returned the item",
+      "normal": "Mark normal",
+      "followUp": "Needs follow-up",
+      "revoke": "Revoke",
+      "by": "{{name}} · {{at}}",
+      "saved": "Review saved",
+      "revoked": "Review revoked",
+      "conflict": "Someone just reviewed or changed this record; refreshed to the latest state",
+      "failed": "Failed to save review",
+      "readOnly": "You can view the review result but cannot review"
+    },
+    "abnormalTitle": "Anomaly evidence",
+    "dangerOnly": "Risky operation: changes takings or cash directly; no anomaly rule matched.",
+    "contextSameDevice": "Same device ±{{minutes}} min",
+    "rulesPos": {
+      "noSaleDrawer": "Manual drawer open (no order) with no completed sale or refund on the same device within 2 minutes.",
+      "deleteAfterCheckout": "For the new POS, checkout starts when payment starts: item removed, cart cleared or quantity reduced after payment started and before the sale completed, reducing the total by ≥ 10.",
+      "bigDiscount": "Item or order discount ≥ 50%, or price cut ≥ 50%, saving ≥ 10 (small one-tap 50% discounts are ignored).",
+      "burstDelete": "Same cashier removed ≥ 8 items within 10 minutes; one flag per burst.",
+      "repeatReprint": "Same receipt reprinted ≥ 3 times (grouped by the previous sale on the device); flags the 3rd.",
+      "offHours": "Operations outside 07:00–22:00 store local time; first one per device and period.",
+      "emergencyOverride": "Operations performed under a new-POS emergency override (offline or permission bypass); every one needs review."
+    },
+    "dangerGroupsPos": {
+      "delete": "Remove / clear",
+      "drawer": "Manual drawer",
+      "price": "Price change",
+      "discount": "Discount",
+      "refund": "Refund / void",
+      "override": "Supervisor override",
+      "system": "System"
+    },
+    "source": {
+      "title": "Employee Operation Logs",
+      "legacy": "Legacy POS",
+      "pos": "New POS",
+      "switchLabel": "Data source",
+      "legacySubtitle": "Operations uploaded by the legacy POS (store local time).",
+      "posSubtitle": "Operation audits from the new POS (WPF / handheld / iPad), shown in your browser time zone."
+    },
+    "pos": {
+      "allScope": "Outcomes · succeeded {{succeeded}} · denied {{denied}} · failed {{failed}}",
+      "onlyCashier": "Only {{name}}",
+      "operationTypesPlaceholder": "All events (multi-select)",
+      "storesPlaceholder": "All stores you can view",
+      "riskColumn": "Risk",
+      "amountImpact": "Reduction",
+      "contextTitle": "Nearby operations",
+      "contextHint": "Same device ±{{minutes}} min",
+      "contextEmpty": "No other operations in this window",
+      "contextFailed": "Failed to load nearby operations",
+      "contextTruncated": "Too many operations; showing the first {{count}}",
+      "onlyCashierDay": "Only this cashier's operations that day",
+      "dangerOnly": "Danger operation: directly changes the amount due, cash or POS setup; no abnormal rule hit."
+    }
+  }
+}

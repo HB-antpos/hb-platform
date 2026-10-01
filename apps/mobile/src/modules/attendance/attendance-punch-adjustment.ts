@@ -232,5 +232,7 @@ export function normalizeAttendancePunchAdjustment(
     isDirectAdjustment: asBoolean(pick(raw, "isDirectAdjustment", "IsDirectAdjustment", "isManagerSelfDirect", "IsManagerSelfDirect")),
     submittedAt: asOptionalString(pick(raw, "submittedAt", "SubmittedAt", "createdAt", "CreatedAt")),
     reviewedAt: asOptionalString(pick(raw, "reviewedAt", "ReviewedAt", "appliedAt", "AppliedAt")),
+    reviewedByName: asOptionalString(pick(raw, "reviewedByName", "ReviewedByName")),
+    reviewRemark: asOptionalString(pick(raw, "reviewRemark", "ReviewRemark")),
   };
 }

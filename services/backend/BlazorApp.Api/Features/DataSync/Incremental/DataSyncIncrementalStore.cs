@@ -440,6 +440,9 @@ internal sealed class DataSyncIncrementalStore : DataSyncSliceBase
                         new Dictionary<string, WarehouseProductChangeSnapshotDto>(
                             StringComparer.OrdinalIgnoreCase
                         );
+                    // Storageable 命中即整行更新：先记下本地中包数，写入前回填，HQ 只补本地空缺。
+                    var localMinOrderQuantities =
+                        await WarehouseMinOrderQuantitySyncGuard.LoadLocalValuesAsync(LocalContext.Db);
 
                     while (true)
                     {
@@ -462,6 +465,10 @@ internal sealed class DataSyncIncrementalStore : DataSyncSliceBase
                         );
 
                         var warehouseProducts = Mapper.Map<List<WarehouseProduct>>(hqStocksBatch);
+                        WarehouseMinOrderQuantitySyncGuard.Apply(
+                            warehouseProducts,
+                            localMinOrderQuantities
+                        );
 
                         try
                         {

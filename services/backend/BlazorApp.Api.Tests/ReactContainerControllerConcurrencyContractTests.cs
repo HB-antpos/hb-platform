@@ -151,6 +151,27 @@ public sealed class ReactContainerControllerConcurrencyContractTests
         );
     }
 
+    [Fact]
+    public async Task 删除明细成功响应必须同时返回删除数与范围内请求数()
+    {
+        // 前端 deleteContainerDetailsByScope 要求 totalDeleted 与 totalRequested 都是整数，
+        // 缺 totalRequested 会在数据已物理删除后抛「返回数据不完整」，确认框不关、列表不更新。
+        var service = new Mock<IContainerReactService>();
+        service
+            .Setup(item => item.BatchDeleteDetailsScopedAsync("C-1", It.IsAny<ContainerDetailBatchScopeDto>()))
+            .ReturnsAsync((TotalDeleted: 2, TotalRequested: 3));
+        var controller = CreateController(service.Object);
+
+        var result = await controller.BatchDeleteDetailsScoped("C-1", new ContainerDetailBatchScopeDto());
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        // data 是匿名类型，不能用按精确类型断言的 ReadProperty<object> 读取
+        var data = ok.Value!.GetType().GetProperty("data")?.GetValue(ok.Value);
+        Assert.NotNull(data);
+        Assert.Equal(2, ReadProperty<int>(data!, "totalDeleted"));
+        Assert.Equal(3, ReadProperty<int>(data!, "totalRequested"));
+    }
+
     private static ReactContainerController CreateController(
         IContainerReactService service,
         IAuthorizationService? authorizationService = null

@@ -20,6 +20,11 @@ services:
       # 日统计直写国内供应商编码：读取侧与写入侧都上线、且季度任务跑完后再开启。
       # 关闭后新重算的日期写回 200；已经直写的日期不用处理，读取侧两种行都认。
       - SalesStatistics__WriteDirectChinaSupplierCode=${SALES_STATISTICS_WRITE_DIRECT_CHINA_SUPPLIER_CODE:-false}
+      # 老收银操作日志异常扫描：POSM 风险表迁移执行后再开启。首次回填可临时把深度回看调到 31 天、
+      # 深度扫描 UTC 小时调到 0（当天立即跑一次深度轮），回填完成后改回 7 与 17（悉尼凌晨 3–4 点）。
+      - LegacyEmployeeLogRisk__Enabled=${LEGACY_EMPLOYEE_LOG_RISK_ENABLED:-false}
+      - LegacyEmployeeLogRisk__DeepLookbackDays=${LEGACY_EMPLOYEE_LOG_RISK_DEEP_LOOKBACK_DAYS:-7}
+      - LegacyEmployeeLogRisk__DeepScanUtcHour=${LEGACY_EMPLOYEE_LOG_RISK_DEEP_SCAN_UTC_HOUR:-17}
       # 生产连接字符串只从服务器 .env 注入，避免把敏感值写入 compose。
       - ConnectionStrings__DefaultConnection=${CONNECTION_STRING_DEFAULT}
       - ConnectionStrings__StoreHzgHQConnection=${CONNECTION_STRING_STORE_HQ}
@@ -80,8 +85,10 @@ services:
       - ApplicationLogging__Projects__2__RetentionDays=7
       - ApplicationLogging__Projects__3__ProjectCode=hbpos_win
       - ApplicationLogging__Projects__3__DisplayName=WPF客户端
-      - ApplicationLogging__Projects__3__Enabled=false
+      # WPF 收银使用独立写入 Key（安装包构建时由仓库 Secret 写入），泄露时可单独吊销，不影响手持与 iPad。
+      - ApplicationLogging__Projects__3__Enabled=true
       - ApplicationLogging__Projects__3__RetentionDays=30
+      - ApplicationLogging__Projects__3__ApiKeyHash=${CENTER_LOG_HBPOS_WIN_KEY_SHA256:?required}
       - ApplicationLogging__Projects__4__ProjectCode=hbpos_api
       - ApplicationLogging__Projects__4__DisplayName=WPF收银后端
       - ApplicationLogging__Projects__4__Enabled=true
@@ -92,6 +99,12 @@ services:
       - ApplicationLogging__Projects__5__Enabled=true
       - ApplicationLogging__Projects__5__RetentionDays=30
       - ApplicationLogging__Projects__5__ApiKeyHash=${CENTER_LOG_HBPOS_IPAD_KEY_SHA256:?required}
+      # 手持收银使用独立写入 Key，泄露时可单独吊销，不影响 iPad 与 WPF。
+      - ApplicationLogging__Projects__6__ProjectCode=hbpos_handheld
+      - ApplicationLogging__Projects__6__DisplayName=手持收银客户端
+      - ApplicationLogging__Projects__6__Enabled=true
+      - ApplicationLogging__Projects__6__RetentionDays=30
+      - ApplicationLogging__Projects__6__ApiKeyHash=${CENTER_LOG_HBPOS_HANDHELD_KEY_SHA256:?required}
       # SMTP 密码密文依赖 DataProtection key ring，必须落到宿主机目录以跨容器重建保留。
       - DataProtection__KeysPath=/app/App_Data/DataProtectionKeys
       # 考勤二维码使用独立 key ring，仅向需要互通的考勤服务共享。
@@ -112,6 +125,8 @@ services:
       - PosHandheldUpdatePolicy__AndroidPackageName=com.hbweb.poshandheld
       - PosHandheldUpdatePolicy__AndroidSigningCertificateSha256=${POS_HANDHELD_ANDROID_SIGNING_CERTIFICATE_SHA256:?required}
       - PosHandheldUpdatePolicy__OtaChannel=pos-handheld-production
+      # 手持端按 release channel 发布 OTA 的服务端放行闸门；默认关闭，由服务器 .env 显式开启。
+      - EasWebhook__PosHandheldReleaseChannelPublishingEnabled=${EAS_WEBHOOK_POS_HANDHELD_RELEASE_CHANNEL_PUBLISHING_ENABLED:-false}
       - EasWebhook__AcceptedProfiles__0=preview
       - EasWebhook__AcceptedProfiles__1=production
       - Translation__Provider=deepseek

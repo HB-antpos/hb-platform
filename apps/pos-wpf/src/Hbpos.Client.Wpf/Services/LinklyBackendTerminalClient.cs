@@ -142,7 +142,8 @@ public sealed class LinklyBackendTerminalClient(
     ILocalizationService? localization = null,
     ILinklyPaymentAttemptContextAccessor? paymentAttemptContextAccessor = null,
     TimeSpan? businessWait = null,
-    ILinklyBankReceiptPrinter? bankReceiptPrinter = null) : ILinklyBackendTerminalClient
+    ILinklyBankReceiptPrinter? bankReceiptPrinter = null,
+    TimeProvider? timeProvider = null) : ILinklyBackendTerminalClient
 {
     private const string ProcessorName = "ANZ";
     private const string CloudBackendInvalidRequestErrorCode = "LINKLY_CLOUD_BACKEND_REQUEST_INVALID";
@@ -158,6 +159,8 @@ public sealed class LinklyBackendTerminalClient(
     private readonly TimeSpan _pollInterval = pollInterval.GetValueOrDefault(DefaultPollInterval);
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync = delayAsync ?? Task.Delay;
     private readonly TimeSpan _businessWait = businessWait.GetValueOrDefault(LinklyTimeoutPolicy.BusinessWait);
+    // 业务等待计时器走 TimeProvider，测试可注入 FakeTimeProvider 直接推进虚拟时间，不靠墙钟窗口判断是否超时。
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly object _terminalDirectorySync = new();
     private readonly Dictionary<CardTerminalEnvironment, LinklyCloudTerminalListResponse> _terminalDirectories = [];
 
@@ -424,8 +427,9 @@ public sealed class LinklyBackendTerminalClient(
                 ProviderSubmissionState: ProviderSubmissionState.NotSubmitted);
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_businessWait);
+        // CancelAfter 不接受 TimeProvider，改为独立的业务等待计时 CTS 再与外部令牌链接，语义不变。
+        using var businessWaitCts = new CancellationTokenSource(_businessWait, _timeProvider);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, businessWaitCts.Token);
         LinklyCloudBackendSessionResponse? status = null;
         var settlementStartRequested = false;
         var submitted = false;
@@ -639,6 +643,7 @@ public sealed class LinklyBackendTerminalClient(
         var activeSessionConflictDetected = false;
         var activeSessionTakeoverAttempted = false;
         string? lastTakenOverSessionId = null;
+        CancellationTokenSource? transactionBusinessWaitCts = null;
         CancellationTokenSource? transactionTimeoutCts = null;
         Log($"transaction request start txnType={txnType} environment={settings.Environment} componentVersion={GetComponentVersion()}");
 
@@ -700,9 +705,12 @@ public sealed class LinklyBackendTerminalClient(
             LinklyCloudBackendSessionResponse status;
             try
             {
-                transactionTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 // 交易提交后使用完整业务等待窗口，避免过早中断已提交交易。
-                transactionTimeoutCts.CancelAfter(_businessWait);
+                // 计时 CTS 走 TimeProvider 后再与外部令牌链接，语义与 CancelAfter 相同。
+                transactionBusinessWaitCts = new CancellationTokenSource(_businessWait, _timeProvider);
+                transactionTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    transactionBusinessWaitCts.Token);
 
                 while (true)
                 {
@@ -959,6 +967,7 @@ public sealed class LinklyBackendTerminalClient(
         finally
         {
             transactionTimeoutCts?.Dispose();
+            transactionBusinessWaitCts?.Dispose();
             // 闂傚倷鑳堕幊鎾绘偤閵娾晛绀夐柡鍥╁枑閸欏繑绻涢幋鐐垫噮妞も晜鐓￠弻鏇㈠醇濠靛浂妫″銈庡亝缁捇寮婚妶鍡欓檮濠㈣泛顦遍惄搴㈢節濞堝灝鏋撻柡鍛Т椤曪綁濡搁埡浣虹暰闂佺粯顨呴悧鍡涙⒒椤栨稐绻嗛柣鎰典簻閳ь剚顨婂顐ゆ嫚瀹割喚鍔烽梺鍝勵槹椤戞瑩宕甸弴銏＄厱闁挎棁顕ч獮妯尖偓瑙勬礀閻栧ジ寮婚妸銉㈡婵炲棙鍨熷Σ鍫ユ⒑闂堟稒澶勯柛銊ョ秺楠炲繗銇愰幒鎳炽劑鏌ㄩ弮鈧崹婵堝垝椤栨粎纾介柛灞剧懅椤︼箓鏌ｅΔ鈧换鎴﹀箞閵娾晛绠瑰ù锝呮憸閻ｈ鲸绻涙潏鍓хМ妞ゃ儲鎸剧划缁樼鐎ｎ偆鍘介梺鎸庣箓濡盯骞婇崨顖滅＜妞ゆ棁顕у畵鍡欌偓娈垮枔閸旀垵鐣锋總绋垮嵆闁绘梻顭堝▓蹇涙⒒娴ｅ憡鍟炵紒瀣浮閳ワ箓宕堕鈧悘铏繆椤栨艾鎮戝┑顖氥偢閺屾洟宕煎┑鍡樻疁闂?
             if (!keepDialogOpen)
             {
@@ -988,9 +997,9 @@ public sealed class LinklyBackendTerminalClient(
         LinklyCloudBackendSessionResponse activeStatus,
         CancellationToken cancellationToken)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // 恢复上一笔交易也只等待一个业务窗口，超时后必须保留未知结果。
-        timeoutCts.CancelAfter(_businessWait);
+        using var businessWaitCts = new CancellationTokenSource(_businessWait, _timeProvider);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, businessWaitCts.Token);
         var lastStatus = activeStatus;
         try
         {

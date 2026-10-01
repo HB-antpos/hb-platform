@@ -1,4 +1,5 @@
 import { apiClient } from "@/shared/api/client";
+import type { StoreUserListItem } from "@/modules/users/types";
 import {
   normalizeAttendancePunchMutationResult,
   normalizeAttendanceQrResolveResult,
@@ -17,6 +18,7 @@ import type {
   AttendanceLeaveRequest,
   AttendanceLeaveRequestPayload,
   AttendanceLocationSamplePayload,
+  AttendanceManagedPunchAdjustmentPayload,
   AttendancePublishWeekPayload,
   AttendancePunch,
   AttendancePunchMutationResult,
@@ -27,6 +29,7 @@ import type {
   AttendanceQrResolveResult,
   AttendancePunchType,
   AttendanceSchedule,
+  AttendanceScheduleSession,
   AttendanceSchedulePayload,
   AttendanceScheduleUpdatePayload,
   AttendanceScheduleWeekParams,
@@ -172,6 +175,8 @@ function normalizeSchedule(raw: ApiRecord): AttendanceSchedule {
     isMine: asBoolean(pick(raw, "isMine", "IsMine", "mine", "Mine")),
     holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")),
     holidayBusinessStatus: asOptionalString(pick(raw, "holidayBusinessStatus", "HolidayBusinessStatus")),
+    leaveType: asOptionalString(pick(raw, "leaveType", "LeaveType")),
+    leaveGuid: asOptionalString(pick(raw, "leaveGuid", "LeaveGuid")),
   };
 }
 
@@ -307,6 +312,7 @@ function normalizeWeek(payload: unknown, fallbackWeekStart?: string): Attendance
 function normalizeAvailability(raw: ApiRecord): AttendanceAvailability {
   return {
     availabilityGuid: asString(pick(raw, "availabilityGuid", "AvailabilityGuid", "guid", "Guid")),
+    userGuid: asOptionalString(pick(raw, "userGuid", "UserGuid")),
     storeCode: asOptionalString(pick(raw, "storeCode", "StoreCode")),
     storeName: asOptionalString(pick(raw, "storeName", "StoreName")),
     workDate: asDateString(pick(raw, "workDate", "WorkDate", "availableDate", "AvailableDate")),
@@ -331,6 +337,9 @@ function normalizeLeaveRequest(raw: ApiRecord): AttendanceLeaveRequest {
     attachmentUrl: asOptionalString(pick(raw, "attachmentUrl", "AttachmentUrl")),
     status: asString(pick(raw, "status", "Status"), "Pending"),
     submittedAt: asOptionalString(pick(raw, "submittedAt", "SubmittedAt", "createdAt", "CreatedAt")),
+    reviewedAt: asOptionalString(pick(raw, "reviewedAt", "ReviewedAt")),
+    reviewedByName: asOptionalString(pick(raw, "reviewedByName", "ReviewedByName")),
+    reviewRemark: asOptionalString(pick(raw, "reviewRemark", "ReviewRemark")),
   };
 }
 
@@ -649,6 +658,63 @@ export async function createMyAttendancePunchAdjustment(
   return normalizeAttendancePunchAdjustment(rows[0] ?? response.data);
 }
 
+/**
+ * 考勤用的本店员工列表（排班、登记请假）。后端只返回身份与用工类型，
+ * 这里补齐为 StoreUserListItem 形状，便于沿用现有组件。
+ */
+export async function getAttendanceEmployees(storeCode: string): Promise<StoreUserListItem[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/employees`, { params: { storeCode } });
+  return getArray(response.data).map((raw) => ({
+    userGUID: asString(pick(raw, "userGuid", "UserGuid", "userGUID")),
+    username: asString(pick(raw, "username", "Username")),
+    fullName: asOptionalString(pick(raw, "fullName", "FullName")),
+    employmentType: asOptionalString(pick(raw, "employmentType", "EmploymentType")),
+    age: asOptionalNumber(pick(raw, "age", "Age")),
+    status: 1,
+    storeCode,
+    roleNames: [],
+  }));
+}
+
+/** 店长查看某天管理分店的打卡记录（含班段打卡），只保留生效排班。 */
+export async function getManagedAttendanceRecords(params: {
+  storeCode: string;
+  workDate: string;
+}): Promise<AttendanceScheduleSession[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/records`, {
+    params: {
+      storeCode: params.storeCode,
+      fromDate: params.workDate,
+      toDate: params.workDate,
+      page: 1,
+      pageSize: 200,
+    },
+  });
+  return normalizeAttendanceToday({ schedules: getArray(response.data) }).scheduleSessions
+    .filter((session) => session.status.toLowerCase() === "active");
+}
+
+export async function previewManagedAttendancePunchAdjustment(
+  payload: AttendanceManagedPunchAdjustmentPayload,
+): Promise<AttendanceAdjustmentPreview> {
+  const response = await apiClient.post(
+    `${ATTENDANCE_BASE}/managed/punch-adjustments/preview`,
+    sanitizePayload({ ...payload, reason: payload.reason.trim() }),
+  );
+  return normalizeAttendancePunchAdjustmentPreview(response.data);
+}
+
+export async function createManagedAttendancePunchAdjustment(
+  payload: AttendanceManagedPunchAdjustmentPayload,
+): Promise<AttendancePunchAdjustment> {
+  const response = await apiClient.post(
+    `${ATTENDANCE_BASE}/managed/punch-adjustments`,
+    sanitizePayload({ ...payload, reason: payload.reason.trim() }),
+  );
+  const rows = getArray(response.data);
+  return normalizeAttendancePunchAdjustment(rows[0] ?? response.data);
+}
+
 export async function createLeaveRequest(payload: AttendanceLeaveRequestPayload): Promise<AttendanceLeaveRequest> {
   const response = await apiClient.post(`${ATTENDANCE_BASE}/my/leave-requests`, toLeaveRequestPayload(payload));
   return normalizeLeaveRequest(isRecord(response.data) ? response.data : {});
@@ -687,6 +753,33 @@ export async function rejectAttendanceApproval(payload: AttendanceApprovalPayloa
     `${ATTENDANCE_BASE}/approvals/${encodeURIComponent(payload.approvalGuid)}/reject`,
     buildAttendanceApprovalReviewRequest(payload),
   );
+}
+
+/** 店长查看本店员工某周填报的可上班时间，用于排班网格叠加显示。 */
+export async function getManagedAvailability(params: {
+  storeCode: string;
+  weekStartDate: string;
+}): Promise<AttendanceAvailability[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/availability`, {
+    params: { storeCode: params.storeCode, weekStartDate: params.weekStartDate },
+  });
+  return getArray(response.data).map(normalizeAvailability);
+}
+
+/** 复制来源周排班到目标周（草稿），返回新建与跳过的班次数。 */
+export async function copyAttendanceScheduleWeek(params: {
+  storeCode: string;
+  sourceWeekStartDate: string;
+  targetWeekStartDate: string;
+}): Promise<{ createdCount: number; skippedCount: number }> {
+  const response = await apiClient.post(`${ATTENDANCE_BASE}/schedules/copy-week`, params);
+  const raw = isRecord(response.data)
+    ? (isRecord(pick(response.data, "data", "Data")) ? pick(response.data, "data", "Data") as ApiRecord : response.data)
+    : {};
+  return {
+    createdCount: Number(pick(raw, "createdCount", "CreatedCount") ?? 0),
+    skippedCount: Number(pick(raw, "skippedCount", "SkippedCount") ?? 0),
+  };
 }
 
 export async function getAttendanceSchedulesWeek(params: AttendanceScheduleWeekParams): Promise<AttendanceSchedule[]> {

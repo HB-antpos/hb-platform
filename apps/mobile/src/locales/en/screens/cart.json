@@ -9,7 +9,7 @@
   "filters": {
     "title": "Filters",
     "currentStore": "Store: {{store}}",
-    "searchPlaceholder": "Search cart items",
+    "searchPlaceholder": "Search this page: name / item / barcode",
     "clearSearch": "Clear search",
     "applySearch": "Apply search",
     "items": "Items: {{count}}",
@@ -25,14 +25,16 @@
     "cartEmptyTitle": "Cart is empty",
     "cartEmptyDescription": "You can scan products into the cart from this page.",
     "selectStoreTitle": "Select a store first",
-    "selectStoreDescription": "Choose a store on the product page first."
+    "selectStoreDescription": "Choose a store on the product page first.",
+    "goHome": "Go to products"
   },
   "confirm": {
     "clearTitle": "Clear cart",
     "clearMessage": "Clear the cart for the current store?",
     "clearAction": "Clear",
     "submitTitle": "Submit cart",
-    "submitMessage": "Submit the cart for the current store?"
+    "submitMessage": "Submit the cart for the current store?",
+    "submitAction": "Submit"
   },
   "remarks": {
     "label": "Order remarks (optional)",
@@ -44,12 +46,14 @@
     "product": "Product: {{name}}",
     "inputLabel": "Order quantity",
     "invalidQuantity": "Enter 0 or a whole number",
-    "itemUnavailable": "This cart item changed. Edit its quantity again."
+    "itemUnavailable": "This cart item changed. Edit its quantity again.",
+    "helper": "Currently {{current}} pcs · enter 0 to clear"
   },
   "pagination": {
     "previous": "Previous",
     "next": "Next",
-    "page": "Page {{page}}"
+    "page": "Page {{page}}",
+    "pageOf": "{{page}} / {{pages}}"
   },
   "messages": {
     "updateQtyFailed": "Failed to update the cart quantity.",
@@ -76,10 +80,35 @@
     "subtotal": "Subtotal",
     "totalAmount": "Total Order Amount",
     "submit": "Submit Order",
-    "clear": "Clear Cart"
+    "clear": "Clear Cart",
+    "summaryLine": "Order total · {{sku}} SKUs · {{quantity}} pcs",
+    "syncing": "Syncing quantities…",
+    "preorderBlocked": "Finish the preorder before submitting a normal order",
+    "preorderFirst": "Finish preorder",
+    "submitting": "Submitting",
+    "pausedLines": "Some items have paused supply. Remove them before submitting."
   },
   "actions": {
     "submit": "Submit",
     "clear": "Clear"
+  },
+  "header": {
+    "back": "Back to products",
+    "more": "More actions",
+    "clearCart": "Clear cart…"
+  },
+  "listMeta": {
+    "summary": "{{count}} SKUs · page {{page}} / {{pages}}",
+    "pageSize": "{{size}} per page",
+    "pageSizeOption": "{{size}} per page",
+    "searchScope": "Filtering this page only for “{{keyword}}”"
+  },
+  "submitSheet": {
+    "store": "Ordering store",
+    "totalLabel": "Order total (import price)",
+    "sku": "SKUs",
+    "quantity": "Pieces",
+    "salesAmount": "Sales total",
+    "volume": "Volume total"
   }
 }

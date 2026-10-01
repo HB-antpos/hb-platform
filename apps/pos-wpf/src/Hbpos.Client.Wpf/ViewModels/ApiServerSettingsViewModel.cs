@@ -10,6 +10,8 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     private readonly ApiServerSettingsService _settingsService;
     private readonly ILocalizationService _localization;
     private readonly IApiServerSwitchCoordinator? _switchCoordinator;
+    private readonly IOperationAuditLogger? _operationAuditLogger;
+    private readonly ICashierSessionContext? _cashierSessionContext;
 
     [ObservableProperty]
     private string _serverAddressText = string.Empty;
@@ -26,11 +28,15 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     public ApiServerSettingsViewModel(
         ApiServerSettingsService settingsService,
         ILocalizationService localization,
-        IApiServerSwitchCoordinator? switchCoordinator = null)
+        IApiServerSwitchCoordinator? switchCoordinator = null,
+        IOperationAuditLogger? operationAuditLogger = null,
+        ICashierSessionContext? cashierSessionContext = null)
     {
         _settingsService = settingsService;
         _localization = localization;
         _switchCoordinator = switchCoordinator;
+        _operationAuditLogger = operationAuditLogger;
+        _cashierSessionContext = cashierSessionContext;
         TestConnectionCommand = new AsyncRelayCommand(TestConnectionAsync, CanRun);
         SaveCommand = new AsyncRelayCommand(SaveAsync, CanRun);
         UseDevelopmentAddressCommand = new RelayCommand(
@@ -130,6 +136,7 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
             }
 
             var currentAddress = _settingsService.GetCurrentAddress();
+            var actor = _cashierSessionContext?.CurrentSession;
             try
             {
                 _settingsService.SaveUserAddress(normalized);
@@ -141,6 +148,7 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
                 System.Security.SecurityException)
             {
                 // 持久化失败不是地址校验失败，避免异步命令故障或误导用户修改合法地址。
+                RecordServerChange("Failed", "SAVE_FAILED", actor, currentAddress, normalized);
                 SetStatus("settings.serverAddress.status.saveFailed");
                 return;
             }
@@ -150,6 +158,10 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
                 normalized,
                 currentAddress,
                 StringComparison.Ordinal);
+            if (RestartRequired)
+            {
+                RecordServerChange("Succeeded", "SAVED_RESTART_REQUIRED", actor, currentAddress, normalized);
+            }
             SetStatus(RestartRequired
                 ? "settings.serverAddress.status.savedRestartRequired"
                 : "settings.serverAddress.status.saved");
@@ -171,12 +183,18 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     private async Task SwitchRuntimeAsync(CancellationToken cancellationToken)
     {
         SetStatus("settings.serverAddress.status.switching");
+        // 切换提交后会清空收银员会话，操作人和原地址必须在切换前捕获。
+        var actor = _cashierSessionContext?.CurrentSession;
+        var previousAddress = _settingsService.GetCurrentAddress();
+        var targetAddress = ServerAddressText;
         var result = await _switchCoordinator!.SwitchAsync(ServerAddressText, cancellationToken);
         RestartRequired = false;
         switch (result.Status)
         {
             case ApiServerSwitchStatus.Success:
                 ServerAddressText = _settingsService.GetCurrentAddress();
+                // 上传按上传时的服务器与设备身份发送，切换成功后记录的事件会进入新服务器。
+                RecordServerChange("Succeeded", "RUNTIME_SWITCH", actor, previousAddress, ServerAddressText);
                 SetStatus("settings.serverAddress.status.switched");
                 break;
             case ApiServerSwitchStatus.SameAddress:
@@ -184,17 +202,39 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
                 SetStatus("settings.serverAddress.status.sameAddress");
                 break;
             case ApiServerSwitchStatus.Blocked:
+                RecordServerChange("Denied", "BLOCKED", actor, previousAddress, targetAddress);
                 SetStatus(result.BlockReason ?? "settings.serverAddress.status.blocked");
                 break;
             case ApiServerSwitchStatus.PostCommitFailed:
+                RecordServerChange("Failed", "POST_COMMIT_FAILED", actor, previousAddress, _settingsService.GetCurrentAddress());
                 SetStatus("settings.serverAddress.status.postCommitFailed");
                 break;
             default:
+                RecordServerChange("Failed", "PRE_COMMIT_FAILED", actor, previousAddress, targetAddress);
                 SetStatus(result.ErrorMessage?.StartsWith("settings.", StringComparison.Ordinal) == true
                     ? result.ErrorMessage
                     : "settings.serverAddress.status.preCommitFailed");
                 break;
         }
+    }
+
+    /// <summary>
+    /// 切换服务器地址决定收银数据发往哪个后台，属于系统级高风险操作；地址只含主机与路径，不含凭据。
+    /// </summary>
+    private void RecordServerChange(
+        string outcome,
+        string reasonCode,
+        Hbpos.Contracts.Cashiers.CashierSessionDto? actor,
+        string previousAddress,
+        string targetAddress)
+    {
+        OperationAuditEvents.RecordActorAction(
+            _operationAuditLogger,
+            OperationAuditTypes.ApiServerChange,
+            outcome,
+            actor,
+            reasonCode,
+            $"{previousAddress} -> {targetAddress}");
     }
 
     private void SetStatus(string key)

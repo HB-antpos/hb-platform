@@ -294,6 +294,67 @@ public sealed class RoleServicePermissionTests : IDisposable
     }
 
     [Fact]
+    public void PermissionSeedData_NewContainerProductsPermission_IsOnlyInEnglishStoreManagerTemplate()
+    {
+        Assert.Contains(
+            PermissionSeedData.AllPermissions,
+            seed => seed.Code == Permissions.Container.MobileNewProductsView
+        );
+
+        var english = Assert.Single(
+            PermissionSeedData.RolePermissionTemplates,
+            item => item.RoleName.Equals("StoreManager", StringComparison.OrdinalIgnoreCase)
+        );
+        Assert.Contains(Permissions.Container.MobileNewProductsView, english.PermissionCodes);
+
+        foreach (var roleName in new[] { "店长", "经理" })
+        {
+            var template = Assert.Single(
+                PermissionSeedData.RolePermissionTemplates,
+                item => item.RoleName.Equals(roleName, StringComparison.OrdinalIgnoreCase)
+            );
+            Assert.DoesNotContain(Permissions.Container.MobileNewProductsView, template.PermissionCodes);
+        }
+    }
+
+    [Fact]
+    public void PermissionSeedData_MobileAppInstallLinksPermission_IsRegisteredWithoutRoleTemplates()
+    {
+        Assert.Contains(
+            PermissionSeedData.AllPermissions,
+            seed => seed.Code == Permissions.System.ViewMobileAppInstallLinks
+        );
+        // 只登记权限，不随任何角色模板默认下发，由管理员显式授予。
+        Assert.All(
+            PermissionSeedData.RolePermissionTemplates,
+            template => Assert.DoesNotContain(
+                Permissions.System.ViewMobileAppInstallLinks,
+                template.PermissionCodes
+            )
+        );
+    }
+
+    [Fact]
+    public void PermissionSeedData_LegacyEmployeeLogsPermission_IsRegisteredWithoutRoleTemplates()
+    {
+        var seed = Assert.Single(
+            PermissionSeedData.AllPermissions,
+            item => item.Code == Permissions.LegacyEmployeeLogs.View
+        );
+        Assert.Equal("POS 审计", seed.Category);
+        // 不能落在 Permissions.PosTerminal.* 前缀下：该前缀会被当作收银端权限下发到收银机。
+        Assert.DoesNotContain("PosTerminal", Permissions.LegacyEmployeeLogs.View);
+        // 只登记权限，不随任何角色模板默认下发，由管理员显式授予。
+        Assert.All(
+            PermissionSeedData.RolePermissionTemplates,
+            template => Assert.DoesNotContain(
+                Permissions.LegacyEmployeeLogs.View,
+                template.PermissionCodes
+            )
+        );
+    }
+
+    [Fact]
     public async Task UserHasPermissionAsync_AdminRoleImplicitlyGrantsAnyPermission()
     {
         await SeedUserWithRoleAsync("user-1", "role-admin", "Admin");

@@ -25,6 +25,7 @@ public sealed class StoreProductScanLabelAccessTests : IDisposable
     private readonly SqlSugarClient database;
     private readonly ReactStoreProductMaintenanceController controller;
     private List<string>? resolvedScope;
+    private CancellationToken resolvedToken;
     private int queryCount;
 
     public StoreProductScanLabelAccessTests()
@@ -40,11 +41,11 @@ public sealed class StoreProductScanLabelAccessTests : IDisposable
         var context = (SqlSugarContext)RuntimeHelpers.GetUninitializedObject(typeof(SqlSugarContext));
         typeof(SqlSugarContext).GetField("_db", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(context, database);
         var service = new Mock<IStoreProductMaintenanceReactService>(MockBehavior.Strict);
-        service.Setup(value => value.ScanLabelAsync(It.IsAny<StoreProductLookupRequestDto>(), It.IsAny<List<string>?>()))
-            .Callback<StoreProductLookupRequestDto, List<string>?>((_, scope) => resolvedScope = scope)
+        service.Setup(value => value.ScanLabelAsync(It.IsAny<StoreProductLookupRequestDto>(), It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
+            .Callback<StoreProductLookupRequestDto, List<string>?, CancellationToken>((_, scope, token) => (resolvedScope, resolvedToken) = (scope, token))
             .ReturnsAsync(ApiResponse<StoreProductScanLabelResultDto>.OK(new()));
-        service.Setup(value => value.LookupAsync(It.IsAny<StoreProductLookupRequestDto>(), It.IsAny<List<string>?>()))
-            .Callback<StoreProductLookupRequestDto, List<string>?>((_, scope) => resolvedScope = scope)
+        service.Setup(value => value.LookupAsync(It.IsAny<StoreProductLookupRequestDto>(), It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
+            .Callback<StoreProductLookupRequestDto, List<string>?, CancellationToken>((_, scope, token) => (resolvedScope, resolvedToken) = (scope, token))
             .ReturnsAsync(ApiResponse<List<StoreProductLookupItemDto>>.OK(new()));
         controller = new ReactStoreProductMaintenanceController(
             service.Object, Mock.Of<IDeviceRegistrationService>(), Mock.Of<IMapper>(), context,
@@ -95,6 +96,23 @@ public sealed class StoreProductScanLabelAccessTests : IDisposable
         Assert.IsType<OkObjectResult>(await controller.Lookup(new() { Keyword = "barcode" }));
         Assert.Equal(1, queryCount);
         Assert.Equal("live-store", Assert.Single(resolvedScope!));
+    }
+
+    [Fact]
+    public async Task 扫码与查询_把RequestAborted交给服务层以识别客户端中止()
+    {
+        // 服务层没有 HttpContext，只能靠这只令牌区分客户端中止与服务端取消（生产 09-24 扫码快详情即此）。
+        using var requestAborted = new CancellationTokenSource();
+        controller.HttpContext.RequestAborted = requestAborted.Token;
+        controller.HttpContext.Items[typeof(AuthMobileDeviceValidationResult)] =
+            new AuthMobileDeviceValidationResult(true, [], ["validated-store"], "user-id");
+
+        await controller.ScanLabel(new() { Keyword = "barcode" });
+        Assert.Equal(requestAborted.Token, resolvedToken);
+
+        resolvedToken = default;
+        await controller.Lookup(new() { Keyword = "barcode" });
+        Assert.Equal(requestAborted.Token, resolvedToken);
     }
 
     public void Dispose()

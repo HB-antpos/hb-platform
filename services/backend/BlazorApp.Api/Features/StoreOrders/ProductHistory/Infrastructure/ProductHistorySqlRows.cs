@@ -111,3 +111,9 @@ internal sealed class ProductHistorySalesContext
     public string StoreCode { get; init; } = string.Empty;
     public DateTime EndDate { get; init; }
 }
+
+internal sealed class ProductHistoryDynamicCartRow
+{
+    public string? ProductCode { get; set; }
+    public decimal? CartQuantity { get; set; }
+}

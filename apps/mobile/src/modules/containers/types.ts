@@ -303,6 +303,10 @@ export interface UpdateContainerRequest {
   装柜日期?: string;
   预计到岸日期?: string;
   实际到货日期?: string;
+  /** 显式清空预计到岸日期；与 预计到岸日期 互斥 */
+  ClearEstimatedArrivalDate?: boolean;
+  /** 显式清空实际到货日期；与 实际到货日期 互斥 */
+  ClearActualArrivalDate?: boolean;
   汇率?: number;
   运费?: number;
   备注?: string;

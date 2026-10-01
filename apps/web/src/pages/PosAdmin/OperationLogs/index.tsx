@@ -1,9 +1,12 @@
 import {
+  AlertOutlined,
+  CheckOutlined,
   EyeOutlined,
+  FlagOutlined,
   HolderOutlined,
   ReloadOutlined,
   SearchOutlined,
-  ToolOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
 import {
   DndContext,
@@ -27,16 +30,17 @@ import {
   Card,
   Col,
   DatePicker,
-  Descriptions,
   Drawer,
   Form,
   Input,
   Row,
   Select,
   Space,
+  Tabs,
   Tag,
   Typography,
   message,
+  theme,
 } from 'antd'
 import type { RangePickerProps } from 'antd/es/date-picker'
 import type { ColumnsType, TableProps } from 'antd/es/table'
@@ -51,39 +55,56 @@ import {
   type HTMLAttributes,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router-dom'
+
+import { MeasuredTable } from '../../../components/MeasuredTable'
 import PageContainer from '../../../components/PageContainer'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
+  getOperationAuditContext,
   getOperationAuditDetail,
+  getOperationAuditEmployeeSummary,
   getOperationAudits,
+  getOperationAuditSummary,
 } from '../../../services/operationAuditService'
 import { getActiveStores, type StoreOption } from '../../../services/storeService'
 import { useAuthStore } from '../../../store/auth'
 import type {
+  LegacyEmployeeLogEmployeeSummary,
+  LegacyEmployeeLogEmployeeSummaryResult,
+  LegacyEmployeeLogReview,
+  LegacyReviewStatus,
+  LegacyRiskLens,
+} from '../../../types/legacyEmployeeLog'
+import type {
+  OperationAuditContext,
   OperationAuditDetail,
-  OperationAuditDetailItem,
   OperationAuditDeviceSystem,
+  OperationAuditEmployeeSummaryResult,
   OperationAuditListItem,
   OperationAuditOutcome,
   OperationAuditSortField,
+  OperationAuditSummary,
 } from '../../../types/operationAudit'
 import {
   buildStoreOptionsFromUserStores,
   filterStoreOptionsByManagedCodes,
 } from '../../../utils/managedStoreScope'
+import type { EmployeeLogsHeader } from '../EmployeeLogs/employeeLogsSource'
+import EmployeeSummaryTable from '../LegacyEmployeeLogs/EmployeeSummaryTable'
 import {
-  OPERATION_TYPE_KEYS,
-  OPERATION_AUDIT_DEVICE_SYSTEM_OPTIONS,
-  DEFAULT_OPERATION_AUDIT_SORT,
-  buildOperationAuditQuery,
-  buildSystemLogLink,
-  createLatestOperationAuditRequestGuard,
-  formatMoney,
-  formatSignedMoney,
-  resolveOperationAuditTableChange,
-  summarizeProducts,
-  type OperationAuditTableSortOrder,
-} from './operationLogsLogic'
+  DEFAULT_RISK_FILTER,
+  POS_DANGER_GROUP_OPERATIONS,
+  POS_RULE_CODES,
+  buildStoreNameMap,
+  formatStoreLabel,
+  sameOperations,
+  type LegacyRiskFilter,
+  type PosDangerGroupKey,
+} from '../LegacyEmployeeLogs/legacyEmployeeLogsLogic'
+import legacyEmployeeLogsMessagesEn from '../LegacyEmployeeLogs/legacyEmployeeLogsMessages.en.json'
+import legacyEmployeeLogsMessagesZh from '../LegacyEmployeeLogs/legacyEmployeeLogsMessages.zh.json'
+import RiskLensBar from '../LegacyEmployeeLogs/RiskLensBar'
+
 import {
   DEFAULT_OPERATION_LOG_COLUMN_ORDER,
   createOperationLogDndAccessibility,
@@ -93,15 +114,33 @@ import {
   parseOperationLogColumnOrder,
   type OperationLogColumnKey,
 } from './operationLogColumnOrder'
-import { MeasuredTable } from '../../../components/MeasuredTable'
+import {
+  OPERATION_TYPE_KEYS,
+  OPERATION_AUDIT_DEVICE_SYSTEM_OPTIONS,
+  DEFAULT_OPERATION_AUDIT_SORT,
+  buildOperationAuditQuery,
+  createLatestOperationAuditRequestGuard,
+  formatSignedMoney,
+  resolveOperationAuditTableChange,
+  toLegacyEmployeeSummary,
+  type OperationAuditTableSortOrder,
+} from './operationLogsLogic'
+import PosLogDetailPanel from './PosLogDetailPanel'
+import PosProductSummary from './PosProductSummary'
+
+// 风险、核查文案与老收银共用（规则编号相同），随页面代码块懒加载。
+registerPageMessages({ zh: legacyEmployeeLogsMessagesZh, en: legacyEmployeeLogsMessagesEn })
+
+const POS_DANGER_KEYS = Object.keys(POS_DANGER_GROUP_OPERATIONS) as PosDangerGroupKey[]
+type ResultView = 'records' | 'employees'
 
 interface OperationAuditFormValues {
   timeRange: [Dayjs, Dayjs]
-  storeCode?: string
+  storeCodes?: string[]
   cashierKeyword?: string
   deviceCode?: string
   deviceSystem?: OperationAuditDeviceSystem
-  operationType?: string
+  operationTypes?: string[]
   outcome?: string
   productKeyword?: string
   orderGuid?: string
@@ -204,27 +243,10 @@ function getOutcomeColor(outcome: OperationAuditOutcome) {
   }
 }
 
-function formatValue(value: unknown) {
-  if (value === null || value === undefined || value === '') {
-    return '-'
-  }
-  return String(value)
-}
-
-function formatSafeProperties(value?: string) {
-  if (!value) {
-    return '-'
-  }
-
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2)
-  } catch {
-    return value
-  }
-}
-
-export default function PosAdminOperationLogsPage() {
+/** header 由员工操作日志合并页传入（统一标题与来源切换）；单独使用时沿用本页标题。 */
+export default function PosAdminOperationLogsPage({ header }: { header?: EmployeeLogsHeader } = {}) {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const [form] = Form.useForm<OperationAuditFormValues>()
   const access = useAuthStore((state) => state.access)
   const currentUser = useAuthStore((state) => state.currentUser)
@@ -252,15 +274,37 @@ export default function PosAdminOperationLogsPage() {
       return [...DEFAULT_OPERATION_LOG_COLUMN_ORDER]
     }
   })
-  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailRecord, setDetailRecord] = useState<OperationAuditListItem | null>(null)
+  const [detail, setDetail] = useState<OperationAuditDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [detailRecord, setDetailRecord] = useState<OperationAuditDetail | null>(null)
+  const [context, setContext] = useState<OperationAuditContext | null>(null)
+  const [contextLoading, setContextLoading] = useState(false)
+  const [contextError, setContextError] = useState(false)
+  const [summary, setSummary] = useState<OperationAuditSummary | null>(null)
   const requestGuardRef = useRef(createLatestOperationAuditRequestGuard())
+  const detailGuardRef = useRef(createLatestOperationAuditRequestGuard())
+  const employeesGuardRef = useRef(createLatestOperationAuditRequestGuard())
+  // 风险入口与细分、收银员下钻：状态驱动界面，ref 让查询函数立即读到最新值。
+  const [risk, setRiskState] = useState<LegacyRiskFilter>(DEFAULT_RISK_FILTER)
+  const riskRef = useRef<LegacyRiskFilter>(DEFAULT_RISK_FILTER)
+  const [cashier, setCashierState] = useState<{ id: string; name: string } | null>(null)
+  const cashierRef = useRef<{ id: string; name: string } | null>(null)
+  const [view, setView] = useState<ResultView>('records')
+  const viewRef = useRef<ResultView>('records')
+  const [employeeSummary, setEmployeeSummary] = useState<OperationAuditEmployeeSummaryResult | null>(null)
+  const [employeeLoading, setEmployeeLoading] = useState(false)
+  const [employeeError, setEmployeeError] = useState<string | null>(null)
+  const selectedOperationTypes = Form.useWatch('operationTypes', form)
 
   const visibleStoreOptions = useMemo(
-    () => filterStoreOptionsByManagedCodes(storeOptions, managedStoreCodes),
+    () =>
+      filterStoreOptionsByManagedCodes(storeOptions, managedStoreCodes).map((option) => ({
+        value: option.value,
+        label: option.label && option.label !== option.value ? `${option.value} · ${option.label}` : option.value,
+      })),
     [managedStoreCodes, storeOptions],
   )
+  const storeNames = useMemo(() => buildStoreNameMap(storeOptions), [storeOptions])
 
   useEffect(() => {
     if (managedStoreCodes !== null) {
@@ -287,6 +331,38 @@ export default function PosAdminOperationLogsPage() {
     }
   }, [currentUser?.stores, managedStoreCodeKey, t])
 
+  // 当前表单、风险入口与收银员下钻组装成查询参数；查询范围最终仍由服务端按可管理门店收窄。
+  const buildQuery = useCallback(
+    (page: number, size: number, nextSortBy: OperationAuditSortField, nextSortOrder: OperationAuditTableSortOrder) => {
+      const values = form.getFieldsValue()
+      const [from, to] = values.timeRange ?? getDefaultTimeRange()
+      return buildOperationAuditQuery({
+        startUtc: from.toISOString(),
+        endUtc: to.toISOString(),
+        storeCode: '',
+        storeCodes: values.storeCodes,
+        cashierKeyword: values.cashierKeyword ?? '',
+        cashierId: cashierRef.current?.id,
+        deviceCode: values.deviceCode ?? '',
+        deviceSystem: values.deviceSystem ?? '',
+        operationType: '',
+        operationTypes: values.operationTypes,
+        outcome: values.outcome ?? '',
+        productKeyword: values.productKeyword ?? '',
+        orderGuid: values.orderGuid ?? '',
+        keyword: values.keyword ?? '',
+        page,
+        pageSize: size,
+        sortBy: nextSortBy,
+        sortOrder: nextSortOrder === 'descend' ? 'desc' : 'asc',
+        riskLens: riskRef.current.riskLens,
+        ruleCodes: riskRef.current.ruleCodes,
+        reviewStatus: riskRef.current.reviewStatus,
+      })
+    },
+    [form],
+  )
+
   const loadData = useCallback(
     async (
       nextPage = pageNumber,
@@ -296,36 +372,26 @@ export default function PosAdminOperationLogsPage() {
     ) => {
       // 只有最新查询可提交结果，避免旧页码或旧排序请求晚到后覆盖当前表格。
       const requestId = requestGuardRef.current.begin()
-      const values = form.getFieldsValue()
-      const [from, to] = values.timeRange ?? getDefaultTimeRange()
+      const query = buildQuery(nextPage, nextPageSize, nextSortBy, nextSortOrder)
       setLoading(true)
       setLoadError(false)
       try {
-        // 查询范围最终仍由服务端按当前用户可管理门店强制收窄。
-        const result = await getOperationAudits(
-          buildOperationAuditQuery({
-            startUtc: from.toISOString(),
-            endUtc: to.toISOString(),
-            storeCode: values.storeCode ?? '',
-            cashierKeyword: values.cashierKeyword ?? '',
-            deviceCode: values.deviceCode ?? '',
-            deviceSystem: values.deviceSystem ?? '',
-            operationType: values.operationType ?? '',
-            outcome: values.outcome ?? '',
-            productKeyword: values.productKeyword ?? '',
-            orderGuid: values.orderGuid ?? '',
-            keyword: values.keyword ?? '',
-            page: nextPage,
-            pageSize: nextPageSize,
-            sortBy: nextSortBy,
-            sortOrder: nextSortOrder === 'descend' ? 'desc' : 'asc',
+        // 列表与入口计数并行取；计数失败不影响列表显示。
+        const [result, nextSummary] = await Promise.all([
+          getOperationAudits(query),
+          getOperationAuditSummary(query).catch((error) => {
+            console.error(error)
+            return null
           }),
-        )
+        ])
         if (!requestGuardRef.current.isLatest(requestId)) return
         setData(result.items)
         setTotal(result.total)
         setPageNumber(result.pageNumber)
         setPageSize(result.pageSize)
+        setSummary(nextSummary)
+        // 打开中的详情换成最新数据（核查结论、命中规则可能已变）。
+        setDetailRecord((current) => (current ? result.items.find((item) => item.eventId === current.eventId) ?? current : current))
       } catch (error) {
         if (!requestGuardRef.current.isLatest(requestId)) return
         console.error(error)
@@ -335,8 +401,25 @@ export default function PosAdminOperationLogsPage() {
         if (requestGuardRef.current.isLatest(requestId)) setLoading(false)
       }
     },
-    [form, pageNumber, pageSize, sortBy, sortOrder, t],
+    [buildQuery, pageNumber, pageSize, sortBy, sortOrder, t],
   )
+
+  // 按员工汇总只用分店、时间、设备与关键字等基础条件，后端忽略收银员、操作类型、结果与风险入口。
+  const loadEmployees = useCallback(async () => {
+    const requestId = employeesGuardRef.current.begin()
+    setEmployeeLoading(true)
+    setEmployeeError(null)
+    try {
+      const result = await getOperationAuditEmployeeSummary(buildQuery(1, DEFAULT_PAGE_SIZE, DEFAULT_OPERATION_AUDIT_SORT.sortBy, DEFAULT_OPERATION_AUDIT_SORT.sortOrder))
+      if (employeesGuardRef.current.isLatest(requestId)) setEmployeeSummary(result)
+    } catch (error) {
+      if (!employeesGuardRef.current.isLatest(requestId)) return
+      console.error(error)
+      setEmployeeError(error instanceof Error && error.message ? error.message : t('legacyEmployeeLogs.employees.loadFailed'))
+    } finally {
+      if (employeesGuardRef.current.isLatest(requestId)) setEmployeeLoading(false)
+    }
+  }, [buildQuery, t])
 
   useEffect(() => {
     form.setFieldsValue({ timeRange: getDefaultTimeRange() })
@@ -350,9 +433,77 @@ export default function PosAdminOperationLogsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const setRisk = (next: LegacyRiskFilter) => {
+    riskRef.current = next
+    setRiskState(next)
+  }
+
+  const setCashier = (next: { id: string; name: string } | null) => {
+    cashierRef.current = next
+    setCashierState(next)
+  }
+
+  const switchView = (next: ResultView) => {
+    viewRef.current = next
+    setView(next)
+    if (next === 'employees') void loadEmployees()
+  }
+
+  const runQuery = () => {
+    setPageNumber(1)
+    void loadData(1, pageSize, sortBy, sortOrder)
+    if (viewRef.current === 'employees') void loadEmployees()
+  }
+
+  // 切换入口时清掉上一个入口的细分（操作类型 / 规则 / 核查状态），并回到记录页。
+  const changeLens = (lens: LegacyRiskLens) => {
+    form.setFieldsValue({ operationTypes: undefined })
+    setRisk({ riskLens: lens, ruleCodes: [], reviewStatus: 'all' })
+    viewRef.current = 'records'
+    setView('records')
+    runQuery()
+  }
+
+  const changeOperations = (operationTypes: string[] | undefined) => {
+    form.setFieldsValue({ operationTypes })
+    runQuery()
+  }
+
+  const changeRule = (ruleCode: string | null) => {
+    setRisk({ ...riskRef.current, ruleCodes: ruleCode ? [ruleCode] : [] })
+    runQuery()
+  }
+
+  const changeReviewStatus = (reviewStatus: LegacyReviewStatus) => {
+    setRisk({ ...riskRef.current, reviewStatus })
+    runQuery()
+  }
+
+  // 员工汇总「查看明细」：只看该收银员，有异常停在异常入口，否则停在危险入口。
+  const viewEmployee = useCallback((row: LegacyEmployeeLogEmployeeSummary) => {
+    if (!row.employeeId) return
+    setCashier({ id: row.employeeId, name: row.employeeName || row.employeeId })
+    form.setFieldsValue({ operationTypes: undefined, cashierKeyword: undefined })
+    setRisk({ riskLens: row.abnormalCount > 0 ? 'abnormal' : 'danger', ruleCodes: [], reviewStatus: 'all' })
+    viewRef.current = 'records'
+    setView('records')
+    setPageNumber(1)
+    void loadData(1, pageSize, sortBy, sortOrder)
+  }, [form, loadData, pageSize, sortBy, sortOrder])
+
+  const clearCashier = () => {
+    setCashier(null)
+    runQuery()
+  }
+
   const handleReset = () => {
+    const storeCodes = form.getFieldValue('storeCodes') as string[] | undefined
     form.resetFields()
-    form.setFieldsValue({ timeRange: getDefaultTimeRange() })
+    // 重置只清筛选条件，保留所选分店。
+    form.setFieldsValue({ storeCodes, timeRange: getDefaultTimeRange() })
+    setRisk(DEFAULT_RISK_FILTER)
+    setCashier(null)
+    if (viewRef.current === 'employees') void loadEmployees()
     setPageNumber(1)
     setPageSize(DEFAULT_PAGE_SIZE)
     setSortBy(DEFAULT_OPERATION_AUDIT_SORT.sortBy)
@@ -365,23 +516,70 @@ export default function PosAdminOperationLogsPage() {
     )
   }
 
-  const handleQuery = () => {
-    setPageNumber(1)
-    void loadData(1, pageSize, sortBy, sortOrder)
-  }
+  const handleQuery = runQuery
 
   const handleOpenDetail = async (record: OperationAuditListItem) => {
-    setDetailOpen(true)
+    // 列表行立即显示，详情（商品明细）与前后操作并行补齐。
+    const requestId = detailGuardRef.current.begin()
+    setDetailRecord(record)
+    setDetail(null)
+    setContext(null)
     setDetailLoading(true)
-    setDetailRecord(null)
-    try {
-      setDetailRecord(await getOperationAuditDetail(record.eventId))
-    } catch (error) {
-      console.error(error)
+    setContextLoading(true)
+    setContextError(false)
+    const [detailResult, contextResult] = await Promise.allSettled([
+      getOperationAuditDetail(record.eventId),
+      // 命中异常的记录看更长的上下文（例如开钱箱前最近一次销售）。
+      getOperationAuditContext(record.eventId, record.flags?.length ? 15 : undefined),
+    ])
+    if (!detailGuardRef.current.isLatest(requestId)) return
+    if (detailResult.status === 'fulfilled') {
+      setDetail(detailResult.value)
+    } else {
+      console.error(detailResult.reason)
       message.error(t('operationLogs.loadDetailFailed'))
-    } finally {
-      setDetailLoading(false)
     }
+    if (contextResult.status === 'fulfilled') {
+      setContext(contextResult.value)
+    } else {
+      console.error(contextResult.reason)
+      setContextError(true)
+    }
+    setDetailLoading(false)
+    setContextLoading(false)
+  }
+
+  const closeDetail = () => {
+    detailGuardRef.current.begin()
+    setDetailRecord(null)
+    setDetail(null)
+  }
+
+  // 核查后：本地先更新这一行，再静默刷新当前页与计数；冲突时直接刷新。
+  const handleReviewChanged = (record: OperationAuditListItem, review: LegacyEmployeeLogReview | null) => {
+    if (review) {
+      const patch = (item: OperationAuditListItem) => (item.eventId === record.eventId ? { ...item, review } : item)
+      setDetailRecord((current) => (current ? patch(current) : current))
+      setData((current) => current.map(patch))
+    }
+    void loadData(pageNumber, pageSize, sortBy, sortOrder)
+    if (viewRef.current === 'employees') void loadEmployees()
+  }
+
+  const showCashierDay = (record: OperationAuditListItem) => {
+    if (!record.cashierId) return
+    const day = dayjs(record.occurredAtUtc)
+    form.setFieldsValue({
+      timeRange: [day.startOf('day'), day.endOf('day')],
+      deviceCode: undefined,
+      operationTypes: undefined,
+      keyword: undefined,
+      cashierKeyword: undefined,
+    })
+    setCashier({ id: record.cashierId, name: record.cashierName || record.cashierId })
+    setRisk(DEFAULT_RISK_FILTER)
+    closeDetail()
+    runQuery()
   }
 
   const operationLabel = useCallback(
@@ -395,6 +593,13 @@ export default function PosAdminOperationLogsPage() {
   const outcomeLabel = useCallback(
     (outcome: OperationAuditOutcome) => t(`operationLogs.outcomes.${outcome.toLowerCase()}`),
     [t],
+  )
+
+  const outcomeTag = useCallback(
+    (outcome: OperationAuditOutcome) => (
+      <Tag color={getOutcomeColor(outcome)} style={{ marginInlineEnd: 0 }}>{outcomeLabel(outcome)}</Tag>
+    ),
+    [outcomeLabel],
   )
 
   const deviceSystemLabel = useCallback(
@@ -457,9 +662,12 @@ export default function PosAdminOperationLogsPage() {
         title: t('operationLogs.columns.store'),
         dataIndex: 'storeCode',
         key: 'storeCode',
-        width: 100,
+        width: 150,
         sorter: true,
         sortOrder: sortBy === 'storeCode' ? sortOrder : null,
+        render: (value: string) => (
+          <Typography.Text ellipsis={{ tooltip: true }} style={{ maxWidth: 140 }}>{formatStoreLabel(value, storeNames)}</Typography.Text>
+        ),
       },
       {
         title: t('operationLogs.columns.employee'),
@@ -483,11 +691,9 @@ export default function PosAdminOperationLogsPage() {
       {
         title: t('operationLogs.columns.products'),
         key: 'products',
-        minWidth: 180,
+        minWidth: 220,
         render: (_, record) => (
-          <span style={WRAPPED_TABLE_CELL_STYLE}>
-            {summarizeProducts(record, t('operationLogs.detail.productFallback'))}
-          </span>
+          <PosProductSummary record={record} fallbackName={t('operationLogs.detail.productFallback')} imageSize={40} />
         ),
       },
       {
@@ -527,9 +733,33 @@ export default function PosAdminOperationLogsPage() {
         width: 105,
         sorter: true,
         sortOrder: sortBy === 'outcome' ? sortOrder : null,
-        render: (value: OperationAuditOutcome) => (
-          <Tag color={getOutcomeColor(value)}>{outcomeLabel(value)}</Tag>
-        ),
+        render: (value: OperationAuditOutcome) => outcomeTag(value),
+      },
+      {
+        title: t('legacyEmployeeLogs.pos.riskColumn'),
+        key: 'risk',
+        width: 190,
+        // 与操作列一起固定在右侧：表格横向滚动时风险标签始终可见。
+        fixed: 'right',
+        render: (_, record) => {
+          const review = record.review && record.review.result !== 'revoked' ? record.review : null
+          if (!record.isDanger && !record.flags?.length) return null
+          return (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {record.isDanger ? <Tag color="error" icon={<WarningOutlined />} style={{ marginInlineEnd: 0 }}>{t('legacyEmployeeLogs.badges.danger')}</Tag> : null}
+              {(record.flags ?? []).map((flag) => (
+                <Tag key={flag.ruleCode} color="warning" icon={<AlertOutlined />} style={{ marginInlineEnd: 0 }}>
+                  {t(`legacyEmployeeLogs.rules.${flag.ruleCode}.label`)}
+                </Tag>
+              ))}
+              {review ? (
+                <Tag color={review.result === 'followUp' ? 'purple' : 'default'} icon={review.result === 'followUp' ? <FlagOutlined /> : <CheckOutlined />} style={{ marginInlineEnd: 0 }}>
+                  {t(review.result === 'followUp' ? 'legacyEmployeeLogs.badges.followUp' : 'legacyEmployeeLogs.badges.reviewed')}
+                </Tag>
+              ) : null}
+            </div>
+          )
+        },
       },
       {
         title: t('common.action'),
@@ -537,24 +767,34 @@ export default function PosAdminOperationLogsPage() {
         width: 90,
         fixed: 'right',
         render: (_, record) => (
-          <Button type="link" icon={<EyeOutlined />} onClick={() => void handleOpenDetail(record)}>
+          <Button
+            type="link"
+            icon={<EyeOutlined />}
+            onClick={(event) => {
+              event.stopPropagation()
+              void handleOpenDetail(record)
+            }}
+          >
             {t('common.view')}
           </Button>
         ),
       },
     ],
-    [deviceSystemLabel, operationLabel, outcomeLabel, sortBy, sortOrder, t],
+    // handleOpenDetail 只读 ref 与 setState，不随渲染变化影响列定义。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deviceSystemLabel, operationLabel, outcomeTag, sortBy, sortOrder, storeNames, t],
   )
 
   const isColumnOrderCustomized = isOperationLogColumnOrderCustomized(columnOrder)
 
   const columns = useMemo<ColumnsType<OperationAuditListItem>>(() => {
+    const fixedKeys = new Set(['risk', 'actions'])
     const businessColumnMap = new Map(
       baseColumns
-        .filter((column) => column.key !== 'actions')
+        .filter((column) => !fixedKeys.has(String(column.key)))
         .map((column) => [String(column.key), column]),
     )
-    const actionColumn = baseColumns.find((column) => column.key === 'actions')
+    const fixedColumns = baseColumns.filter((column) => fixedKeys.has(String(column.key)))
     const orderedBusinessColumns = columnOrder
       .map((key) => businessColumnMap.get(key))
       .filter((column): column is ColumnsType<OperationAuditListItem>[number] => Boolean(column))
@@ -566,7 +806,7 @@ export default function PosAdminOperationLogsPage() {
         } as DraggableHeaderCellProps),
       }))
 
-    return actionColumn ? [...orderedBusinessColumns, actionColumn] : orderedBusinessColumns
+    return [...orderedBusinessColumns, ...fixedColumns]
   }, [baseColumns, columnOrder, t])
 
   const handleColumnDragEnd = ({ active, over }: DragEndEvent) => {
@@ -623,86 +863,41 @@ export default function PosAdminOperationLogsPage() {
     )
   }
 
-  const itemColumns = useMemo<ColumnsType<OperationAuditDetailItem>>(
-    () => [
-      {
-        title: t('operationLogs.detail.product'),
-        key: 'product',
-        width: 230,
-        render: (_, item) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text>{item.displayName || item.productCode || '-'}</Typography.Text>
-            <Typography.Text type="secondary">
-              {[
-                item.productCode,
-                item.itemNumber ? `${t('operationLogs.detail.itemNumber')}: ${item.itemNumber}` : null,
-                item.referenceCode,
-                item.lookupCode,
-                item.lineKind ? `${t('operationLogs.detail.lineKind')}: ${item.lineKind}` : null,
-              ].filter(Boolean).join(' / ') || '-'}
-            </Typography.Text>
-          </Space>
-        ),
-      },
-      {
-        title: t('operationLogs.detail.quantity'),
-        key: 'quantity',
-        width: 165,
-        render: (_, item) => `${formatValue(item.beforeQuantity)} → ${formatValue(item.afterQuantity)} (${formatValue(item.quantityDelta)})`,
-      },
-      {
-        title: t('operationLogs.detail.unitPrice'),
-        key: 'unitPrice',
-        width: 190,
-        render: (_, item) => `${formatMoney(item.beforeUnitPrice, detailRecord?.currencyCode || 'AUD')} → ${formatMoney(item.afterUnitPrice, detailRecord?.currencyCode || 'AUD')} (${formatSignedMoney(item.unitPriceDelta, detailRecord?.currencyCode || 'AUD')})`,
-      },
-      {
-        title: t('operationLogs.detail.discount'),
-        key: 'discount',
-        width: 190,
-        render: (_, item) => `${formatMoney(item.beforeDiscountAmount, detailRecord?.currencyCode || 'AUD')} → ${formatMoney(item.afterDiscountAmount, detailRecord?.currencyCode || 'AUD')} (${formatSignedMoney(item.discountAmountDelta, detailRecord?.currencyCode || 'AUD')})`,
-      },
-      {
-        title: t('operationLogs.detail.gross'),
-        key: 'gross',
-        width: 190,
-        render: (_, item) => `${formatMoney(item.beforeGrossAmount, detailRecord?.currencyCode || 'AUD')} → ${formatMoney(item.afterGrossAmount, detailRecord?.currencyCode || 'AUD')} (${formatSignedMoney(item.grossAmountDelta, detailRecord?.currencyCode || 'AUD')})`,
-      },
-      {
-        title: t('operationLogs.detail.actual'),
-        key: 'actual',
-        width: 190,
-        render: (_, item) => `${formatMoney(item.beforeActualAmount, detailRecord?.currencyCode || 'AUD')} → ${formatMoney(item.afterActualAmount, detailRecord?.currencyCode || 'AUD')} (${formatSignedMoney(item.actualAmountDelta, detailRecord?.currencyCode || 'AUD')})`,
-      },
-    ],
-    [detailRecord?.currencyCode, t],
-  )
-
   const timeRangePresets: RangePickerProps['presets'] = [
     { label: t('operationLogs.presets.today'), value: [dayjs().startOf('day'), dayjs()] },
     { label: t('operationLogs.presets.last7Days'), value: [dayjs().subtract(7, 'day'), dayjs()] },
     { label: t('operationLogs.presets.last30Days'), value: [dayjs().subtract(30, 'day'), dayjs()] },
   ]
-  const systemLogLink = detailRecord
-    ? buildSystemLogLink({
-        deviceCode: detailRecord.deviceCode,
-        deviceSystem: detailRecord.deviceSystem,
-        traceId: detailRecord.traceId,
-        occurredAtUtc: detailRecord.occurredAtUtc,
-      })
-    : undefined
+  const currentUserName = currentUser?.fullName || currentUser?.username || ''
+  const lensName = t(`legacyEmployeeLogs.lens.${risk.riskLens}.title`)
+  const dangerChips = POS_DANGER_KEYS.map((key) => {
+    const expected = POS_DANGER_GROUP_OPERATIONS[key]
+    const active = sameOperations(expected, selectedOperationTypes)
+    return {
+      key,
+      label: t(`legacyEmployeeLogs.dangerGroupsPos.${key}`),
+      active,
+      onClick: () => changeOperations(active ? undefined : [...expected]),
+    }
+  })
+  const legacySummaryShape: LegacyEmployeeLogEmployeeSummaryResult | null = employeeSummary
+    ? { ...employeeSummary, employees: employeeSummary.employees.map(toLegacyEmployeeSummary) }
+    : null
 
   return (
     <PageContainer
-      title={t('operationLogs.pageTitle')}
-      subtitle={t('operationLogs.pageSubtitle')}
+      title={header?.title ?? t('operationLogs.pageTitle')}
+      subtitle={header?.subtitle ?? t('operationLogs.pageSubtitle')}
       extra={
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => void loadData(pageNumber, pageSize, sortBy, sortOrder)}
-        >
-          {t('common.refresh')}
-        </Button>
+        <Space wrap>
+          {header?.switcher}
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => void loadData(pageNumber, pageSize, sortBy, sortOrder)}
+          >
+            {t('common.refresh')}
+          </Button>
+        </Space>
       }
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -723,13 +918,14 @@ export default function PosAdminOperationLogsPage() {
                 </Form.Item>
               </Col>
               <Col xs={24} sm={12} lg={4}>
-                <Form.Item label={t('operationLogs.filters.store')} name="storeCode">
+                <Form.Item label={t('operationLogs.filters.store')} name="storeCodes">
                   <Select
+                    mode="multiple"
                     allowClear
-                    showSearch
+                    maxTagCount="responsive"
                     optionFilterProp="label"
                     options={visibleStoreOptions}
-                    placeholder={t('operationLogs.filters.storePlaceholder')}
+                    placeholder={t('legacyEmployeeLogs.pos.storesPlaceholder')}
                   />
                 </Form.Item>
               </Col>
@@ -766,11 +962,13 @@ export default function PosAdminOperationLogsPage() {
                 </Form.Item>
               </Col>
               <Col xs={24} sm={12} lg={6}>
-                <Form.Item label={t('operationLogs.filters.operation')} name="operationType">
+                <Form.Item label={t('operationLogs.filters.operation')} name="operationTypes">
                   <Select
+                    mode="multiple"
                     allowClear
-                    showSearch
+                    maxTagCount="responsive"
                     optionFilterProp="label"
+                    placeholder={t('legacyEmployeeLogs.pos.operationTypesPlaceholder')}
                     options={Object.keys(OPERATION_TYPE_KEYS).map((value) => ({
                       value,
                       label: operationLabel(value),
@@ -794,11 +992,16 @@ export default function PosAdminOperationLogsPage() {
                 </Form.Item>
               </Col>
             </Row>
-            <Space>
+            <Space wrap>
               <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>
                 {t('common.query')}
               </Button>
               <Button onClick={handleReset}>{t('common.reset')}</Button>
+              {cashier ? (
+                <Tag closable color="processing" onClose={(event) => { event.preventDefault(); clearCashier() }}>
+                  {t('legacyEmployeeLogs.pos.onlyCashier', { name: cashier.name })}
+                </Tag>
+              ) : null}
             </Space>
           </Form>
         </Card>
@@ -816,159 +1019,139 @@ export default function PosAdminOperationLogsPage() {
           />
         ) : null}
 
-        <Card>
-          {isColumnOrderCustomized ? (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-              <Button size="small" icon={<ReloadOutlined />} onClick={resetColumnOrder}>
-                {t('operationLogs.resetColumns')}
-              </Button>
-            </div>
-          ) : null}
-          <DndContext
-            sensors={columnDragSensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleColumnDragEnd}
-            accessibility={dndAccessibility}
-          >
-            <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
-              <MeasuredTable<OperationAuditListItem> metricId="pos-admin.operation-logs.table-1"
-                rowKey="eventId"
-                loading={loading}
-                components={{ header: { cell: DraggableHeaderCell } }}
-                columns={columns}
-                dataSource={data}
-                scroll={{ x: 1390 }}
-                locale={{ emptyText: t('operationLogs.empty') }}
-                sortDirections={['descend', 'ascend', 'descend']}
-                pagination={{
-                  current: pageNumber,
-                  pageSize,
-                  total,
-                  showSizeChanger: true,
-                  pageSizeOptions: [20, 50, 100, 200],
-                  showTotal: (value) => t('operationLogs.paginationTotal', { total: value }),
-                }}
-                onChange={handleTableChange}
-              />
-            </SortableContext>
-          </DndContext>
+        {summary ? (
+          <RiskLensBar
+            variant="pos"
+            risk={risk}
+            operations={selectedOperationTypes}
+            total={total}
+            counts={[]}
+            summary={summary}
+            people={0}
+            devices={0}
+            allTotal={summary.total}
+            allScope={(
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                · {t('legacyEmployeeLogs.pos.allScope', { succeeded: summary.succeeded, denied: summary.denied, failed: summary.failed })}
+              </Typography.Text>
+            )}
+            ruleCodes={POS_RULE_CODES}
+            allChips={[]}
+            dangerChips={dangerChips}
+            onLensChange={changeLens}
+            onOperationsChange={changeOperations}
+            onRuleChange={changeRule}
+            onReviewStatusChange={changeReviewStatus}
+          />
+        ) : null}
+
+        <Card styles={{ body: { padding: view === 'records' ? undefined : 0 } }}>
+          <Tabs
+            activeKey={view}
+            onChange={(key) => switchView(key as ResultView)}
+            tabBarStyle={view === 'employees' ? { paddingInline: 16, marginBottom: 0 } : undefined}
+            tabBarExtraContent={view === 'records' ? (
+              <Space size={8}>
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                  {`${lensName} · ${t('operationLogs.paginationTotal', { total })}`}
+                </Typography.Text>
+                {isColumnOrderCustomized ? (
+                  <Button size="small" icon={<ReloadOutlined />} onClick={resetColumnOrder}>
+                    {t('operationLogs.resetColumns')}
+                  </Button>
+                ) : null}
+              </Space>
+            ) : (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('legacyEmployeeLogs.employees.hint')}</Typography.Text>
+            )}
+            items={[
+              {
+                key: 'records',
+                label: t('legacyEmployeeLogs.tabs.records'),
+                children: (
+                  <DndContext
+                    sensors={columnDragSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleColumnDragEnd}
+                    accessibility={dndAccessibility}
+                  >
+                    <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+                      <MeasuredTable<OperationAuditListItem> metricId="pos-admin.operation-logs.table-1"
+                        rowKey="eventId"
+                        loading={loading}
+                        components={{ header: { cell: DraggableHeaderCell } }}
+                        columns={columns}
+                        dataSource={data}
+                        scroll={{ x: 1600 }}
+                        locale={{ emptyText: t('operationLogs.empty') }}
+                        sortDirections={['descend', 'ascend', 'descend']}
+                        pagination={{
+                          current: pageNumber,
+                          pageSize,
+                          total,
+                          showSizeChanger: true,
+                          pageSizeOptions: [20, 50, 100, 200],
+                          showTotal: (value) => t('operationLogs.paginationTotal', { total: value }),
+                        }}
+                        onChange={handleTableChange}
+                        onRow={(record) => ({
+                          onClick: () => void handleOpenDetail(record),
+                          style: {
+                            cursor: 'pointer',
+                            background: detailRecord?.eventId === record.eventId ? token.colorPrimaryBg : undefined,
+                          },
+                        })}
+                      />
+                    </SortableContext>
+                  </DndContext>
+                ),
+              },
+              {
+                key: 'employees',
+                label: t('legacyEmployeeLogs.tabs.employees'),
+                children: (
+                  <EmployeeSummaryTable
+                    data={legacySummaryShape}
+                    loading={employeeLoading}
+                    error={employeeError}
+                    storeNames={storeNames}
+                    metricId="pos-admin.operation-logs.table-3"
+                    footnote={t('legacyEmployeeLogs.employees.footnotePos')}
+                    onRetry={() => void loadEmployees()}
+                    onViewEmployee={viewEmployee}
+                  />
+                ),
+              },
+            ]}
+          />
         </Card>
       </Space>
 
       <Drawer
         title={t('operationLogs.detailTitle')}
-        width={960}
-        open={detailOpen}
-        onClose={() => {
-          setDetailOpen(false)
-          setDetailRecord(null)
-        }}
+        width="min(720px, 100vw)"
+        open={Boolean(detailRecord)}
+        onClose={closeDetail}
         destroyOnHidden
       >
-        {detailLoading ? <Typography.Text type="secondary">{t('operationLogs.loadingDetail')}</Typography.Text> : null}
         {detailRecord ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions bordered column={2} size="small">
-              <Descriptions.Item label={t('operationLogs.columns.time')}>
-                {dayjs(detailRecord.occurredAtUtc).format('YYYY-MM-DD HH:mm:ss')}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.receivedAt')}>
-                {dayjs(detailRecord.receivedAtUtc).format('YYYY-MM-DD HH:mm:ss')}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.columns.store')}>
-                {detailRecord.storeCode}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.columns.device')}>
-                {detailRecord.deviceCode}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.columns.platform')}>
-                {deviceSystemLabel(detailRecord.deviceSystem)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.columns.employee')}>
-                {detailRecord.cashierName || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.cashierId')}>
-                {detailRecord.cashierId || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.userGuid')}>
-                <Typography.Text copyable={Boolean(detailRecord.userGuid)}>{detailRecord.userGuid || '-'}</Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.sessionFlags')}>
-                <Space wrap size={[4, 4]}>
-                  {detailRecord.isOfflineCached ? <Tag>{t('operationLogs.detail.offlineCached')}</Tag> : null}
-                  {detailRecord.isEmergencyOverride ? <Tag color="warning">{t('operationLogs.detail.emergencyOverride')}</Tag> : null}
-                  {!detailRecord.isOfflineCached && !detailRecord.isEmergencyOverride ? '-' : null}
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.columns.outcome')}>
-                <Tag color={getOutcomeColor(detailRecord.outcome)}>{outcomeLabel(detailRecord.outcome)}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.columns.operation')}>
-                {operationLabel(detailRecord.operationType)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.reason')}>
-                {detailRecord.reasonCode || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.orderGuid')}>
-                <Typography.Text copyable={Boolean(detailRecord.orderGuid)}>{detailRecord.orderGuid || '-'}</Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.receiptNumber')}>
-                {detailRecord.receiptNumber || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.paymentMethod')}>
-                {detailRecord.paymentMethod || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.paymentAmount')}>
-                {formatMoney(detailRecord.paymentAmount, detailRecord.currencyCode || 'AUD')}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.beforeAfterActual')}>
-                {formatMoney(detailRecord.beforeActual, detailRecord.currencyCode || 'AUD')} →{' '}
-                {formatMoney(detailRecord.afterActual, detailRecord.currencyCode || 'AUD')}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.columns.amountChange')}>
-                {formatSignedMoney(detailRecord.amountDelta, detailRecord.currencyCode || 'AUD')}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.appVersion')}>
-                {detailRecord.appVersion || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.instanceId')}>
-                {detailRecord.instanceId || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.correlationId')}>
-                <Typography.Text copyable={Boolean(detailRecord.correlationId)}>{detailRecord.correlationId || '-'}</Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.traceId')}>
-                <Space>
-                  <Typography.Text copyable={Boolean(detailRecord.traceId)}>{detailRecord.traceId || '-'}</Typography.Text>
-                  {access.canViewSystemLogs && systemLogLink ? (
-                    <Link to={systemLogLink}>
-                      <ToolOutlined /> {t('operationLogs.detail.openSystemLogs')}
-                    </Link>
-                  ) : null}
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.safeMessage')} span={2}>
-                <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                  {detailRecord.safeMessage || '-'}
-                </Typography.Paragraph>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('operationLogs.detail.safeProperties')} span={2}>
-                <Typography.Paragraph code style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                  {formatSafeProperties(detailRecord.propertiesJson)}
-                </Typography.Paragraph>
-              </Descriptions.Item>
-            </Descriptions>
-
-            <MeasuredTable<OperationAuditDetailItem> metricId="pos-admin.operation-logs.table-2"
-              rowKey={(item) => `${item.eventId}-${item.lineIndex}`}
-              size="small"
-              columns={itemColumns}
-              dataSource={detailRecord.items ?? []}
-              pagination={false}
-              scroll={{ x: 1155 }}
-              locale={{ emptyText: t('operationLogs.detail.noItems') }}
-            />
-          </Space>
+          <PosLogDetailPanel
+            record={detailRecord}
+            detail={detail}
+            detailLoading={detailLoading}
+            context={context}
+            contextLoading={contextLoading}
+            contextError={contextError}
+            storeLabel={formatStoreLabel(detailRecord.storeCode, storeNames)}
+            canReview={access.canReviewLegacyEmployeeLogs}
+            canViewSystemLogs={Boolean(access.canViewSystemLogs)}
+            currentUserName={currentUserName}
+            operationLabel={operationLabel}
+            outcomeTag={outcomeTag}
+            deviceSystemLabel={deviceSystemLabel}
+            onShowCashierDay={showCashierDay}
+            onReviewChanged={handleReviewChanged}
+          />
         ) : null}
       </Drawer>
     </PageContainer>

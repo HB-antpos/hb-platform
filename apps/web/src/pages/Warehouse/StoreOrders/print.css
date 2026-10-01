@@ -31,8 +31,10 @@
 
 .store-order-picking-header {
   display: grid;
-  /* 右侧只保留订单日期，打印时间已取消，避免打印/PDF 页头信息过密。 */
-  grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr) minmax(120px, 1fr);
+  /* 左栏标题 + 订货日期，中栏店名和单号，右栏订单条码；打印时间已取消，避免打印/PDF 页头信息过密。
+     右栏最小宽度取内容宽度：现行四位流水号（如 2026-1789）的条码 178px，窄于 1fr 份额，布局不变；
+     若流水号到五位（条码 189px），由中栏让出宽度，条码不溢出右栏，左侧保留 12px 栏间距作为静区。 */
+  grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr) minmax(max-content, 1fr);
   align-items: start;
   gap: 12px;
   margin-bottom: 6px;
@@ -40,10 +42,25 @@
   border-bottom: 2px solid #000;
 }
 
+.store-order-picking-heading {
+  /* 标题在上、订货日期在下；左栏随表头行高拉伸，让日期与右栏条码说明文字底边对齐。 */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-self: stretch;
+  gap: 3px;
+  min-width: 0;
+}
+
 .store-order-picking-title {
   font-size: 21px;
   font-weight: 700;
   line-height: 1.1;
+}
+
+.store-order-picking-order-date {
+  font-size: 12px;
+  line-height: 1.15;
 }
 
 .store-order-picking-primary {
@@ -86,6 +103,29 @@
   font-size: 12px;
   line-height: 1.15;
   text-align: right;
+}
+
+.store-order-picking-barcode {
+  /* 订单条码贴右上角：36px 条高 + 一行小字约 50px，不超过店名两行时的主信息区，只在店名单行时让表头略增高。 */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.store-order-picking-barcode-bars {
+  /* 条码按 1px 模块原尺寸输出，禁止被容器压缩或拉伸，否则模块宽度失真会影响 PDA 识读。 */
+  display: block;
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.store-order-picking-barcode-caption {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .store-order-picking-table {

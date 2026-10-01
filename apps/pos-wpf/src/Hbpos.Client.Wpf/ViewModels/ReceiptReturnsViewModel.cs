@@ -36,6 +36,8 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
     private readonly ICashierSessionContext _cashierSessionContext;
     private readonly bool _enforcePermissions;
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
+    private readonly PosCartService? _cart;
+    private readonly IOperationAuditLogger? _operationAuditLogger;
     private ViewModelAuthorizationGrant? _openItemAuthorizationGrant;
     private ReceiptReturnOrder? _currentOrder;
     private CancellationTokenSource? _noReceiptLookupCts;
@@ -83,7 +85,9 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         ILocalizationService? localization = null,
         ICashierSessionContext? cashierSessionContext = null,
         bool enforcePermissionsWhenNoCashier = false,
-        IOperationAuthorizationService? operationAuthorizationService = null)
+        IOperationAuthorizationService? operationAuthorizationService = null,
+        PosCartService? cart = null,
+        IOperationAuditLogger? operationAuditLogger = null)
     {
         _workflowService = workflowService;
         _session = session;
@@ -94,6 +98,8 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         _cashierSessionContext = cashierSessionContext ?? new CashierSessionContext();
         _enforcePermissions = enforcePermissionsWhenNoCashier;
         _operationAuthorizationService = operationAuthorizationService;
+        _cart = cart;
+        _operationAuditLogger = operationAuditLogger;
         if (session.CashierSession is not null)
         {
             _cashierSessionContext.SetCurrent(session.CashierSession);
@@ -701,9 +707,52 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
             return;
         }
 
-        var added = _workflowService.AddReturnLinesToCart(
-            pendingLinesSnapshot,
-            _currentOrder?.PaymentCapacities);
+        // 退货行不经过收银台购物车变更入口，这里自行记录前后快照；授权激活期内记录会附带授权人。
+        var before = _cart is null ? null : OperationAuditEvents.CaptureCart(_cart.Lines);
+        var reasonCode = ResolveReturnAuditReason(pendingLinesSnapshot);
+        var originalOrderGuid = ResolveSingleOriginalOrderGuid(pendingLinesSnapshot);
+        IReadOnlyList<CartLine> added;
+        try
+        {
+            added = _workflowService.AddReturnLinesToCart(
+                pendingLinesSnapshot,
+                _currentOrder?.PaymentCapacities);
+        }
+        catch (Exception ex)
+        {
+            if (before is not null)
+            {
+                OperationAuditEvents.RecordCartChange(
+                    _operationAuditLogger,
+                    OperationAuditTypes.CartItemAdd,
+                    Session,
+                    before,
+                    OperationAuditEvents.CaptureCart(_cart!.Lines),
+                    outcome: "Failed",
+                    reasonCode: reasonCode,
+                    safeMessage: ex.GetType().Name,
+                    orderGuid: originalOrderGuid);
+            }
+
+            throw;
+        }
+
+        if (before is not null)
+        {
+            var after = OperationAuditEvents.CaptureCart(_cart!.Lines);
+            if (OperationAuditEvents.HasChanged(before, after))
+            {
+                OperationAuditEvents.RecordCartChange(
+                    _operationAuditLogger,
+                    OperationAuditTypes.CartItemAdd,
+                    Session,
+                    before,
+                    after,
+                    reasonCode: reasonCode,
+                    orderGuid: originalOrderGuid);
+            }
+        }
+
         var lastAdded = added.LastOrDefault();
         ResetToDefault();
         if (lastAdded is not null)
@@ -712,6 +761,30 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
         }
 
         _onBack();
+    }
+
+    /// <summary>
+    /// 区分按小票退货与无小票退货（含开放价退货），便于后台筛查无小票退货。
+    /// </summary>
+    private static string ResolveReturnAuditReason(IReadOnlyList<PendingReturnLine> lines)
+    {
+        var withReceipt = lines.Count(line => line.OriginalOrderGuid is not null);
+        if (withReceipt == lines.Count)
+        {
+            return "return-receipt";
+        }
+
+        return withReceipt == 0 ? "return-no-receipt" : "return-mixed";
+    }
+
+    private static string? ResolveSingleOriginalOrderGuid(IReadOnlyList<PendingReturnLine> lines)
+    {
+        var originalOrders = lines
+            .Select(line => line.OriginalOrderGuid)
+            .Where(guid => guid is not null)
+            .Distinct()
+            .ToArray();
+        return originalOrders.Length == 1 ? originalOrders[0]!.Value.ToString("D") : null;
     }
 
     private void Back()

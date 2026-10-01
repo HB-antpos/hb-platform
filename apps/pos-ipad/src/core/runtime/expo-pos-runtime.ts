@@ -26,6 +26,8 @@ import {
 import {
   CustomerDisplayAdvertisementCache,
 } from "../../features/customer-display";
+import { HbposCatalogFileSync } from "../../features/catalog/catalog-file-sync";
+import { ExpoCatalogFileStore } from "../../features/catalog/expo-catalog-file-store";
 import type { SettingsPaymentSettingsInput } from "../../features/settings";
 import {
   createAxiosHbposTransport,
@@ -920,6 +922,13 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       createId,
       random: Math.random,
       sha256Hex,
+      // 整文件目录下载：残片放在缓存目录，跨重启续传；服务端开关未开时自动回退分页。
+      catalogFileSync: new HbposCatalogFileSync({
+        transport,
+        store: new ExpoCatalogFileStore("catalog-files"),
+        digest: async (bytes) =>
+          bytesToLowerHex(new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes))),
+      }),
       // 仅返回惰性 adapter；requireNativeModule("HbPrinter") 要到实际硬件动作才会调用。
       createPrinter: () => printer,
       externalDisplay,
@@ -983,6 +992,16 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         printer,
         readDevicePresentation: () =>
           readSettingsDevicePresentation(publicDeviceSession),
+        // 设置页读取失败原本只显示 load-failed；把失败阶段与异常写入中心日志。
+        reportSnapshotFailure: (stage, error) => {
+          applicationLog?.record({
+            level: "Error",
+            message: "Settings snapshot load failed.",
+            category: "settings.load",
+            error,
+            properties: { stage },
+          });
+        },
         paymentConfiguration: {
           current: currentPaymentSettings,
           availability: {
@@ -1294,4 +1313,10 @@ function throwIfRuntimeAborted(signal: AbortSignal): void {
       { name: "AbortError" },
     );
   }
+}
+
+function bytesToLowerHex(bytes: Uint8Array): string {
+  let hex = "";
+  for (const byte of bytes) hex += byte.toString(16).padStart(2, "0");
+  return hex;
 }

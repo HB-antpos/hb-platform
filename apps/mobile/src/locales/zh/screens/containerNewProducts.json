@@ -1,0 +1,24 @@
+{
+  "title": "HB新品",
+  "pagination": { "previous": "上一页", "next": "下一页", "page": "第 {{page}} / {{pageCount}} 页 · 共 {{total}} 款" },
+  "actions": { "back": "返回", "retry": "重试" },
+  "labels": {
+    "currentStore": "当前门店",
+    "range": "预计到店：过去 1 周 · 未来 2 周",
+    "sortByArrival": "到店日 ↑",
+    "container": "货柜 {{code}}",
+    "quantity": "数量 {{value}}",
+    "estimatedArrival": "预计到店",
+    "actualBasis": "货柜到仓库日期推算",
+    "estimatedBasis": "预计到岸推算",
+    "retailPrice": "零售价 ${{value}}"
+  },
+  "messages": {
+    "notAllowed": "没有 HB新品 权限，请联系管理员授权",
+    "storesFailed": "门店列表加载失败",
+    "selectStore": "请先选择门店",
+    "dateNotice": "到店日期为推算区间：NSW 为到仓库当天至 3 个工作日，QLD 为到仓库后 3 至 7 个工作日；优先按货柜到仓库日期，未到仓库的按预计到岸日期"
+  },
+  "states": { "loading": "正在加载…", "loadFailed": "加载失败", "stateUnknown": "门店州别未知，无法计算到店日期", "empty": "过去 1 周至未来 2 周暂无到店新品", "noImage": "暂无图片", "emptyPast": "过去 1 周没有到店新品", "emptyUpcoming": "未来 2 周暂无到店新品" },
+  "filters": { "all": "全部 {{count}}", "past": "过去 1 周 {{count}}", "upcoming": "未来 2 周 {{count}}" }
+}

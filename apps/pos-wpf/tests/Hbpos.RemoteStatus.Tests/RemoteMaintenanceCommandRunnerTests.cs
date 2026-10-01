@@ -68,7 +68,11 @@ public sealed class RemoteMaintenanceCommandRunnerTests
             try { Directory.Delete(directory, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
 
-        Assert.False(runner.IsDetachedProcessRunning(installed));
+        // 进程已退出，但 Windows 进程表可能短暂仍枚举到同名条目（例如还有其它句柄未释放），
+        // 立即断言会偶发失败；轮询到不再识别为止，超出预算才算真的漏判。
+        await WaitUntilAsync(() => !runner.IsDetachedProcessRunning(installed),
+            diagnostics: () => "仍枚举到的同名进程 PID：" +
+                string.Join(", ", Process.GetProcessesByName(name).Select(p => { using (p) return p.Id; })));
     }
 
     [Fact]

@@ -1,7 +1,17 @@
 import type { StoreOrderDetail, StoreOrderDetailLine } from '../../../types/storeOrder'
 import fs from 'node:fs'
 import path from 'node:path'
-import { buildPickingListExcelData, buildPickingListPdfPages, formatInnerPackCount, formatPickingOrderQuantity } from './pickingListLogic'
+import { buildBarcodeSvgPath, encodeBarcodeModules, isValidEAN13 } from '../../../utils/barcode'
+import {
+  PICKING_ORDER_BARCODE_HEIGHT,
+  PICKING_ORDER_BARCODE_MODULE_WIDTH,
+  buildPickingListExcelData,
+  buildPickingListPdfPages,
+  buildPickingOrderBarcode,
+  buildPickingOrderBarcodeValue,
+  formatInnerPackCount,
+  formatPickingOrderQuantity,
+} from './pickingListLogic'
 import { formatStoreOrderVolume } from './volumeFormat'
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -188,6 +198,47 @@ runTest('配货单 Excel 数据应包含固定列顺序、备注和总计信息'
   )
 })
 
+runTest('配货单订单条码内容应为 HBSO:订单号，订单号为空时不生成条码', () => {
+  assertEqual(buildPickingOrderBarcodeValue('2026-0418'), 'HBSO:2026-0418', '条码内容应为 HBSO: 前缀加订单号')
+  assertEqual(buildPickingOrderBarcodeValue(' 2026-0418 '), 'HBSO:2026-0418', '订单号首尾空白不应进入条码')
+  for (const emptyOrderNo of ['', '   ', undefined, null]) {
+    assertEqual(buildPickingOrderBarcodeValue(emptyOrderNo), null, `订单号为 ${JSON.stringify(emptyOrderNo)} 时不应生成条码内容`)
+    assertEqual(buildPickingOrderBarcode(emptyOrderNo), null, `订单号为 ${JSON.stringify(emptyOrderNo)} 时表头不应渲染条码`)
+  }
+  assertEqual(buildPickingOrderBarcode('订单'), null, 'CODE128 无法编码的订单号不应渲染条码')
+
+  const excelData = buildPickingListExcelData(excelOrder, excelItems, excelTexts)
+  assertEqual(JSON.stringify(excelData).includes('HBSO:'), false, 'Excel 导出不需要订单条码内容')
+})
+
+runTest('配货单订单条码应强制 CODE128 并按 1px 模块输出单个矢量路径', () => {
+  const modules = encodeBarcodeModules('HBSO:2026-0418', 'CODE128')
+  assertEqual(modules?.length, 178, 'HBSO:2026-0418 按 CODE128 自动分段应为 178 个模块')
+  assertEqual(modules?.startsWith('11010010000'), true, '条码应以 CODE128 Start B 开头')
+  assertEqual(modules?.endsWith('1100011101011'), true, '条码应以 CODE128 Stop 结尾')
+
+  // 合法 EAN13 内容强制 CODE128 时也必须输出 CODE128（Start C），不能被自动判断改成 EAN13。
+  assertEqual(isValidEAN13('9310000000001'), true, '样例应是合法 EAN13')
+  assertEqual(encodeBarcodeModules('9310000000001', 'CODE128')?.startsWith('11010011100'), true, '强制 CODE128 不应走 EAN13 自动判断')
+  assertEqual(encodeBarcodeModules('HBSO:订单', 'CODE128'), null, 'CODE128 无法编码时应返回 null 而不是抛异常')
+  assertEqual(buildBarcodeSvgPath('1101', 1, 36), 'M0 0h2v36h-2zM3 0h1v36h-1z', '相邻黑条模块应合并为一个矩形子路径')
+
+  const barcode = buildPickingOrderBarcode('2026-0418')
+  assertEqual(barcode?.value, 'HBSO:2026-0418', '表头条码应使用 HBSO:订单号')
+  assertEqual(PICKING_ORDER_BARCODE_MODULE_WIDTH, 1, '条码模块宽应为 1px')
+  assertEqual(PICKING_ORDER_BARCODE_HEIGHT >= 36 && PICKING_ORDER_BARCODE_HEIGHT <= 40, true, '条高应在 36-40px 之间')
+  assertEqual(barcode?.width, 178, '条码宽度应等于模块数乘以 1px 模块宽')
+  assertEqual(barcode?.height, PICKING_ORDER_BARCODE_HEIGHT, '条码高度应使用统一条高常量')
+
+  // 把矢量路径还原成模块序列，确认绘制结果与 CODE128 编码逐模块一致。
+  const redrawnModules = Array.from({ length: barcode?.width ?? 0 }, () => '0')
+  for (const match of (barcode?.path ?? '').matchAll(/M(\d+) 0h(\d+)v(\d+)h-\2z/g)) {
+    assertEqual(Number(match[3]), PICKING_ORDER_BARCODE_HEIGHT, '每根黑条都应画满条高')
+    redrawnModules.fill('1', Number(match[1]), Number(match[1]) + Number(match[2]))
+  }
+  assertEqual(redrawnModules.join(''), modules, '矢量路径还原后应与 CODE128 模块序列完全一致')
+})
+
 runTest('配货单订货数为空或为 0 时应使用发货数兜底', () => {
   assertEqual(formatPickingOrderQuantity(12, 9), 12, '订货数有效时应优先显示订货数')
   assertEqual(formatPickingOrderQuantity(0, 12), 12, '订货数为 0 时应显示发货数')
@@ -337,16 +388,17 @@ runTest('配货单页头应将店名和单号同一行居中放大显示', () =>
   assertEqual(headerSource.includes('className="store-order-picking-store"'), true, '店名应挂载主字号样式')
   assertEqual(headerSource.includes('{displayStoreText}'), true, '主信息行应显示店名')
   assertEqual(headerSource.includes('className="store-order-picking-order-no"'), true, '单号应挂载主字号样式')
-  assertEqual(headerSource.includes('className="store-order-picking-meta"'), true, '页头应显示订单日期容器')
+  assertEqual(headerSource.includes('className="store-order-picking-meta"'), true, '页头右栏应保留辅助信息容器（订单条码）')
+  assertEqual(headerSource.includes('className="store-order-picking-order-date"'), true, '订货日期应移到标题下方的左栏')
   assertEqual(headerSource.includes("t('warehouse.pickingList.printTime')"), false, '页头不应继续显示打印时间')
   assertEqual(headerSource.includes("t('warehouse.pickingList.orderDate')"), true, '页头应显示订货日期')
   assertEqual(headerSource.includes('formatPrintDate(order.orderDate, false, printLocale)'), true, '页头应格式化订单日期')
   assertEqual(headerSource.includes('formatPrintDate(undefined, true, printLocale)'), false, '页头不应继续计算打印时间')
-  assertEqual(printCssSource.includes('.store-order-picking-meta'), true, '打印样式应保留订单日期元信息样式')
+  assertEqual(printCssSource.includes('.store-order-picking-meta'), true, '打印样式应保留右栏辅助信息样式')
   assertEqual(headerSource.includes("t('warehouse.pickingList.orderNoLabel')"), false, '主信息行不应继续显示订单号文字标签')
   assertEqual(headerSource.includes('#{orderNoText}'), true, '主信息行应使用 # 前缀显示单号')
   assertEqual(headerSource.includes("t('warehouse.pickingList.storeLabel')"), false, '店名不应继续作为右侧小号元数据显示')
-  assertEqual(/grid-template-columns:\s*minmax\(80px,\s*1fr\)\s*minmax\(0,\s*2fr\)\s*minmax\(120px,\s*1fr\)/.test(headerRule), true, '页头应使用三栏布局承载居中主信息')
+  assertEqual(/grid-template-columns:\s*minmax\(80px,\s*1fr\)\s*minmax\(0,\s*2fr\)\s*minmax\(max-content,\s*1fr\)/.test(headerRule), true, '页头应使用三栏布局承载居中主信息，右栏至少容纳订单条码（五位流水号时条码也不溢出右栏）')
   assertEqual(/text-align:\s*center/.test(primaryRule), true, '主信息区应居中')
   assertEqual(/display:\s*inline-flex/.test(primaryLineRule), true, '店名和单号应水平排列')
   assertEqual(/white-space:\s*nowrap/.test(primaryLineRule), false, '主信息行不应强制店名和单号整体单行显示')
@@ -363,6 +415,34 @@ runTest('配货单页头应将店名和单号同一行居中放大显示', () =>
   assertEqual(readCssNumber(storeRule, 'font-size') > readCssNumber(metaRule, 'font-size'), true, '店名字号应大于右侧辅助信息')
   assertEqual(/flex-direction:\s*column/.test(metaRule), true, '右侧辅助信息应保持单列显示')
   assertEqual(/align-items:\s*flex-end/.test(metaRule), true, '右侧辅助信息应右对齐')
+})
+
+runTest('配货单页头右上角应渲染 SVG 订单条码且不额外占用表头行', () => {
+  const pickingListSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/PickingList.tsx'), 'utf8')
+  const printCssSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/print.css'), 'utf8')
+  const zhLocale = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'src/i18n/locales/zh.json'), 'utf8'))
+  const enLocale = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'src/i18n/locales/en.json'), 'utf8'))
+  const headerStart = pickingListSource.indexOf('const renderPickingHeader')
+  const headerSource = pickingListSource.slice(headerStart, pickingListSource.indexOf('return (', headerStart))
+  const metaSource = headerSource.slice(headerSource.indexOf('className="store-order-picking-meta"'))
+  const headingRule = readCssRule(printCssSource, '.store-order-picking-heading')
+  const barcodeBarsRule = readCssRule(printCssSource, '.store-order-picking-barcode-bars')
+  const captionRule = readCssRule(printCssSource, '.store-order-picking-barcode-caption')
+
+  assertEqual(pickingListSource.includes('buildPickingOrderBarcode(order?.orderNo)'), true, '条码只能用真实订单号生成，不能拿 orderGUID 兜底')
+  assertEqual(headerSource.includes('{orderBarcode ? ('), true, '订单号为空时页头不应渲染条码')
+  assertEqual(metaSource.includes('className="store-order-picking-barcode"'), true, '条码应放在页头右栏（与标题、店名同一行右侧）')
+  assertEqual(metaSource.includes('<svg'), true, '条码应用 SVG 矢量绘制，保证 html2canvas 2 倍截图仍然锐利')
+  assertEqual(headerSource.includes('<canvas'), false, '页头条码不应使用 1 倍位图 canvas')
+  assertEqual(metaSource.includes("{orderBarcode.value} · {t('warehouse.pickingList.scanToPick')}"), true, '条码下方应显示 HBSO:订单号 · 扫码拣货')
+  assertEqual(/align-self:\s*stretch/.test(headingRule), true, '左栏应随表头行高拉伸')
+  assertEqual(/justify-content:\s*space-between/.test(headingRule), true, '订货日期应与右栏条码说明文字底边对齐')
+  assertEqual(/max-width:\s*none/.test(barcodeBarsRule), true, '条码不能被容器按比例压缩')
+  assertEqual(/flex:\s*0 0 auto/.test(barcodeBarsRule), true, '条码应保持 1px 模块原尺寸')
+  assertEqual(readCssNumber(captionRule, 'font-size'), 10, '条码说明文字应使用 10px 小字')
+  assertEqual(/white-space:\s*nowrap/.test(captionRule), true, '条码说明文字应保持单行')
+  assertEqual(zhLocale.warehouse.pickingList.scanToPick, '扫码拣货', '中文条码说明应存在')
+  assertEqual(enLocale.warehouse.pickingList.scanToPick, 'Scan to pick', '英文条码说明应存在')
 })
 
 runTest('配货单打印行高和字体应按 9mm 明细行稳定分页', () => {

@@ -134,6 +134,14 @@ public sealed class CatalogSnapshotExpiredException(
 public sealed class CatalogSnapshotIsolationUnavailableException(Exception innerException)
     : Exception("SQL Server SNAPSHOT isolation is required for catalog reads.", innerException);
 
+/// <summary>当前完整目录索引的只读入口，供整文件同步复用分页链路的缓存与构建。</summary>
+public interface ICatalogTargetIndexSource
+{
+    Task<CatalogIndexBuildResult?> GetCurrentIndexAsync(
+        string storeCode,
+        CancellationToken cancellationToken);
+}
+
 public sealed class CatalogSyncOptions
 {
     public bool DeltaEnabled { get; init; } = true;
@@ -144,8 +152,10 @@ public sealed class CatalogService(
     IPriceIndexBuilder priceIndexBuilder,
     ICatalogIndexCache catalogIndexCache,
     ICatalogBaseDataCache catalogBaseDataCache,
-    IOptions<CatalogSyncOptions>? catalogSyncOptions = null)
-    : ICatalogService, ICatalogIndexRefreshWorker
+    IOptions<CatalogSyncOptions>? catalogSyncOptions = null,
+    ICatalogDownloadFileStore? downloadFileStore = null,
+    IOptions<CatalogDownloadFileOptions>? downloadFileOptions = null)
+    : ICatalogService, ICatalogIndexRefreshWorker, ICatalogTargetIndexSource
 {
     private const int CatalogSourceBatchSize = 100_000;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> StoreRetailPriceEnsureLocks = new(StringComparer.Ordinal);
@@ -809,6 +819,17 @@ public sealed class CatalogService(
         string storeCode,
         CancellationToken cancellationToken)
     {
+        var filesEnabled = downloadFileStore is not null && downloadFileOptions?.Value.Enabled == true;
+        if (filesEnabled &&
+            catalogIndexCache.PeekLatestVersion(storeCode) is { } peek &&
+            downloadFileStore!.FindCodeConflicts(storeCode, peek.CatalogVersion) is { } fromDisk)
+        {
+            // 中文注释：当前版本的码冲突候选已随版本文件落盘时直接读文件（约几百 KB），
+            // 不为取 5 千多行候选把整份索引（每店约 600 MB）载入内存。
+            Log($"code conflicts source=disk store={fromDisk.StoreCode} version={peek.CatalogVersion} stale={peek.IsStale} items={fromDisk.Items.Count}");
+            return fromDisk;
+        }
+
         // 与特殊商品分页一样读取共享缓存的完整工件，不单独查库；门店不存在时返回 null。
         var index = await BuildSellableIndexAsync(storeCode, since: null, cancellationToken);
         if (index is null)
@@ -816,14 +837,13 @@ public sealed class CatalogService(
             return null;
         }
 
-        var codeConflicts = index.CodeConflicts;
-        return new CatalogCodeConflictsResponse(
-            index.StoreCode,
-            index.GeneratedAt,
-            codeConflicts is not null,
-            codeConflicts is null
-                ? []
-                : codeConflicts.Select(CatalogSellableIndex.ToLookupItem).ToArray());
+        if (filesEnabled)
+        {
+            // 该版本文件已发布但缺码冲突文件时顺带补写，下次请求即可命中磁盘。
+            downloadFileStore!.EnsureCodeConflictsFile(index);
+        }
+
+        return CatalogDownloadFileStore.CreateCodeConflictsResponse(index);
     }
 
     public async Task<CatalogSpecialProductMarkServiceResult> MarkSpecialProductAsync(
@@ -1160,16 +1180,35 @@ public sealed class CatalogService(
                 cancellationToken);
     }
 
+    /// <summary>整文件同步只需要当前完整目录；与分页 sync-plan 共用同一份缓存与构建闸门。</summary>
+    public Task<CatalogIndexBuildResult?> GetCurrentIndexAsync(
+        string storeCode,
+        CancellationToken cancellationToken) =>
+        BuildSellableIndexAsync(storeCode, since: null, cancellationToken);
+
     public async Task RefreshCatalogIndexAsync(
         string storeCode,
         CancellationToken cancellationToken)
     {
         var normalizedStoreCode = NormalizeStoreCode(storeCode);
-        _ = await catalogIndexCache.ForceRefreshAndPublishAsync(
+        var refreshed = await catalogIndexCache.ForceRefreshAndPublishAsync(
             normalizedStoreCode,
             since: null,
             token => BuildSellableIndexCoreAsync(normalizedStoreCode, since: null, token),
             cancellationToken);
+        if (refreshed is not null && downloadFileStore is not null && downloadFileOptions?.Value.Enabled == true)
+        {
+            try
+            {
+                // 中文注释：后台刷新/每日预构建刚建好的索引还在内存里，顺手写出下载文件，
+                // 之后的整文件同步计划直接命中磁盘，不必再为这个版本载入索引。
+                await downloadFileStore.EnsureFullFileAsync(refreshed, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Log($"download file prepublish failed store={normalizedStoreCode} error={exception.GetType().Name}");
+            }
+        }
     }
 
     /// <summary>

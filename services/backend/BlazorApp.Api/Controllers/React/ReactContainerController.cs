@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
@@ -371,6 +372,17 @@ namespace BlazorApp.Api.Controllers.React
                 if (dto == null)
                 {
                     return BadRequest(new { success = false, message = "更新数据不能为空" });
+                }
+
+                // 同一日期既赋值又要求清空属于矛盾请求，直接拒绝而不是猜测调用方意图。
+                if (
+                    (dto.ClearEstimatedArrivalDate == true && dto.预计到岸日期.HasValue)
+                    || (dto.ClearActualArrivalDate == true && dto.实际到货日期.HasValue)
+                )
+                {
+                    return BadRequest(
+                        new { success = false, message = "同一日期不能同时设置和清空" }
+                    );
                 }
 
                 if (!ModelState.IsValid)
@@ -1517,8 +1529,9 @@ namespace BlazorApp.Api.Controllers.React
         {
             try
             {
-                var totalDeleted = await _containerReactService.BatchDeleteDetailsScopedAsync(containerGuid, request ?? new());
-                return Ok(new { success = true, data = new { totalDeleted } });
+                var (totalDeleted, totalRequested) = await _containerReactService.BatchDeleteDetailsScopedAsync(containerGuid, request ?? new());
+                // 前端要求 totalDeleted 与 totalRequested 都返回，缺一个会在删除成功后报「返回数据不完整」。
+                return Ok(new { success = true, data = new { totalDeleted, totalRequested } });
             }
             catch (ContainerDetailConcurrencyTokenRequiredException)
             {
@@ -1749,8 +1762,10 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        // 2026-09-29 起停用：HQ 货柜表 → 本地 Container/ContainerDetail 属于 HQ → HBweb 方向，统一返回 410。
         [HttpPost("sync-from-hq")]
         [Authorize(Policy = Permissions.Container.Edit)]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> SyncContainersFromHq(
             [FromBody] SyncFromHqRequestDto? request
         )

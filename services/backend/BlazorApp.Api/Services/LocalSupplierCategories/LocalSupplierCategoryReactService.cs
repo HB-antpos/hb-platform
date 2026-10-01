@@ -223,6 +223,8 @@ public sealed class LocalSupplierCategoryReactService : ILocalSupplierCategoryRe
                 .Where(item => item.CategoryGUID == guid && item.IsDeleted == false)
                 .FirstAsync()
                 ?? throw new KeyNotFoundException("供应商分类不存在或已删除。");
+            // 与采集、重新解析共用供应商锁，避免并发重算同一批商品。
+            await LocalSupplierCategorySupplierLock.AcquireAsync(_db, category.LocalSupplierCode);
 
             // 人工切换后标记来源为 manual，之后按规则重算时不再覆盖。
             var now = _timeProvider.GetUtcNow().UtcDateTime;
@@ -264,10 +266,15 @@ public sealed class LocalSupplierCategoryReactService : ILocalSupplierCategoryRe
     )
     {
         LocalSupplierCategoryResolveResultDto? result = null;
+        var supplier = LocalSupplierCategoryAssignmentService.NormalizeSupplierCode(supplierCode);
         var transaction = await _db.Ado.UseTranAsync(async () =>
         {
+            if (!LocalSupplierCategoryConstants.IsHotBargain(supplier))
+            {
+                await LocalSupplierCategorySupplierLock.AcquireAsync(_db, supplier);
+            }
             result = await new LocalSupplierCategoryAssignmentService(_db, _timeProvider)
-                .ResolveSupplierAsync(supplierCode, actor);
+                .ResolveSupplierAsync(supplier, actor);
         });
         if (!transaction.IsSuccess)
         {
@@ -275,6 +282,59 @@ public sealed class LocalSupplierCategoryReactService : ILocalSupplierCategoryRe
         }
 
         return result!;
+    }
+
+    public async Task<LocalSupplierCategoryNightlyResolveResultDto> ResolveAllSuppliersAsync(
+        string? actor,
+        CancellationToken cancellationToken = default
+    )
+    {
+        // 采集时只能给当时已存在的商品归类；HQ 同步随后批量写入的新商品要靠这里按已有采集记录补上。
+        // 有归属但已无采集记录的供应商也要跑一遍，用来清理商品换供应商或已删除留下的陈旧归属。
+        var captureSuppliers = await _db.Queryable<LocalSupplierCategoryCapture>()
+            .GroupBy(capture => capture.LocalSupplierCode)
+            .Select(capture => capture.LocalSupplierCode)
+            .ToListAsync();
+        var assignmentSuppliers = await _db.Queryable<LocalSupplierCategoryProductAssignment>()
+            .GroupBy(assignment => assignment.LocalSupplierCode)
+            .Select(assignment => assignment.LocalSupplierCode)
+            .ToListAsync();
+        var suppliers = captureSuppliers
+            .Concat(assignmentSuppliers)
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code.Trim())
+            .Where(code => !LocalSupplierCategoryConstants.IsHotBargain(code))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var summary = new LocalSupplierCategoryNightlyResolveResultDto();
+        foreach (var supplier in suppliers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                // 每个供应商独立事务与锁，缩短持锁时间，也让单个供应商失败不回滚其他供应商。
+                var result = await ResolveSupplierAsync(supplier, actor, cancellationToken);
+                summary.SupplierCount++;
+                summary.ProductsScanned += result.ProductsScanned;
+                summary.Assigned += result.Assigned;
+                summary.Updated += result.Updated;
+                summary.Cleared += result.Cleared;
+                summary.ManualSkipped += result.ManualSkipped;
+                summary.StaleRemoved += result.StaleRemoved;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                summary.FailedSuppliers.Add($"{supplier}: {ex.Message}");
+            }
+        }
+
+        return summary;
     }
 
     private async Task<LocalSupplierCategorySupplierSummaryDto> BuildHotBargainSummaryAsync(

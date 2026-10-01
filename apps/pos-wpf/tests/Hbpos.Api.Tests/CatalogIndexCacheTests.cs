@@ -2148,6 +2148,90 @@ public sealed class CatalogIndexCacheTests
                 backgroundRefreshScheduler: scheduler);
     }
 
+    [Fact]
+    public async Task PeekLatestVersion_ReturnsFreshBuiltVersionWithoutQueueingRefresh()
+    {
+        var time = new MutableTimeProvider(GeneratedAt);
+        var scheduler = new RecordingRefreshScheduler();
+        var cache = new CatalogIndexCache(time, TimeSpan.FromMinutes(20), TimeSpan.FromHours(72), 8, scheduler);
+        await cache.GetOrBuildAsync(
+            "S01",
+            since: null,
+            _ => Task.FromResult<CatalogIndexBuildResult?>(CreateResult("S01", "catalog-v1:a")),
+            CancellationToken.None);
+
+        var peek = cache.PeekLatestVersion(" s01 ");
+
+        Assert.NotNull(peek);
+        Assert.Equal(("S01", "catalog-v1:a", false), (peek.StoreCode, peek.CatalogVersion, peek.IsStale));
+        Assert.Equal(0, scheduler.QueueCount);
+    }
+
+    [Fact]
+    public async Task PeekLatestVersion_AfterTtlReturnsLastPublishedVersionAndQueuesRefresh()
+    {
+        var time = new MutableTimeProvider(GeneratedAt);
+        var scheduler = new RecordingRefreshScheduler();
+        var cache = new CatalogIndexCache(time, TimeSpan.FromMinutes(20), TimeSpan.FromHours(72), 8, scheduler);
+        await cache.GetOrBuildAsync(
+            "S01",
+            since: null,
+            _ => Task.FromResult<CatalogIndexBuildResult?>(CreateResult("S01", "catalog-v1:a")),
+            CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(21));
+
+        var peek = cache.PeekLatestVersion("S01");
+
+        // 与 GetOrBuildAsync 允许旧版本的分支一致：返回最后一次已发布版本，并排队后台刷新。
+        Assert.NotNull(peek);
+        Assert.Equal(("catalog-v1:a", true), (peek.CatalogVersion, peek.IsStale));
+        Assert.Equal(1, scheduler.QueueCount);
+    }
+
+    [Fact]
+    public void PeekLatestVersion_UsesPersistedDescriptorWithoutLoadingSnapshotBody()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var loads = 0;
+        var store = new RecordingSnapshotStore(
+            [
+                new CatalogSnapshotDescriptor("S01", null, now.AddMinutes(-30), now.AddHours(1), "catalog-v1:old"),
+                new CatalogSnapshotDescriptor("S01", null, now.AddMinutes(-5), now.AddHours(1), "catalog-v1:new"),
+                new CatalogSnapshotDescriptor("S02", null, now, now.AddHours(1), "catalog-v1:other-store")
+            ],
+            _ =>
+            {
+                loads++;
+                return null;
+            });
+        var scheduler = new RecordingRefreshScheduler();
+        var cache = new CatalogIndexCache(store, scheduler);
+
+        var peek = cache.PeekLatestVersion("S01");
+
+        // 重启后只有磁盘描述：取按生成时间恢复的最新版本，且绝不读取 600 MB 级的快照正文。
+        Assert.NotNull(peek);
+        Assert.Equal(("catalog-v1:new", true), (peek.CatalogVersion, peek.IsStale));
+        Assert.Equal(0, loads);
+        Assert.Equal(1, scheduler.QueueCount);
+    }
+
+    [Fact]
+    public void PeekLatestVersion_ReturnsNullWhenNothingIsKnownOrNoRefresherExists()
+    {
+        var scheduler = new RecordingRefreshScheduler();
+        var empty = new CatalogIndexCache(new RecordingSnapshotStore([], _ => null), scheduler);
+        Assert.Null(empty.PeekLatestVersion("S01"));
+        Assert.Equal(0, scheduler.QueueCount);
+
+        var now = DateTimeOffset.UtcNow;
+        var withoutRefresher = new CatalogIndexCache(new RecordingSnapshotStore(
+            [new CatalogSnapshotDescriptor("S01", null, now, now.AddHours(1), "catalog-v1:a")],
+            _ => null));
+        // 没有后台刷新器时原路径会同步构建，不能返回过期版本。
+        Assert.Null(withoutRefresher.PeekLatestVersion("S01"));
+    }
+
     private static CatalogIndexBuildResult CreateResult(
         string storeCode,
         string? catalogVersion = null,

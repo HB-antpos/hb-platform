@@ -1,8 +1,8 @@
 {
   "title": "商品列表",
-  "filterTitle": "过滤面板",
+  "filterTitle": "选择分类",
   "gradeFilterTitle": "等级筛选",
-  "scanResultHint": "当前为扫码结果，点清除按钮恢复全部商品",
+  "scanResultHint": "继续扫码会替换当前结果；点「清除」恢复全部商品",
   "searchPlaceholder": "按货号/条码搜索",
   "locationSearchPlaceholder": "按货号、商品条码或货位搜索",
   "searchToggleOpen": "展开搜索框",
@@ -24,7 +24,8 @@
     "allGrades": "全部等级",
     "noStores": "当前账号没有可用门店。",
     "noGrades": "暂无可选等级。",
-    "gradesLoadFailed": "商品等级加载失败，请稍后重试。"
+    "gradesLoadFailed": "商品等级加载失败，请稍后重试。",
+    "clearCategory": "清除分类筛选"
   },
   "empty": {
     "noProductsTitle": "暂无商品",
@@ -39,7 +40,8 @@
   "pagination": {
     "previous": "上一页",
     "next": "下一页",
-    "page": "第 {{page}} 页"
+    "page": "第 {{page}} 页",
+    "pageOf": "{{page}} / {{pages}}"
   },
   "camera": {
     "title": "相机扫码查询",
@@ -52,7 +54,8 @@
     "title": "编辑订货数量",
     "product": "商品: {{name}}",
     "inputLabel": "订货数量",
-    "invalidQuantity": "请输入 0 或正整数"
+    "invalidQuantity": "请输入 0 或正整数",
+    "helper": "当前 {{current}} 件 · 输入 0 表示清零"
   },
   "messages": {
     "storesLoadFailed": "门店加载失败，请稍后重试",
@@ -64,5 +67,31 @@
   },
   "cartSummary": {
     "total": "总数"
+  },
+  "storeCaption": "门店订货",
+  "storeSwitchAccessibility": "切换订货门店，当前 {{store}}",
+  "resetScanFocusShort": "重置焦点",
+  "autoAddOnDetail": "扫到唯一商品时直接加入购物车",
+  "autoAddOffDetail": "扫码只定位商品，需手动加购",
+  "gradeMenu": {
+    "gradeValue": "{{grade}} 级"
+  },
+  "scanResult": {
+    "title": "扫码结果 · {{count}} 件",
+    "clear": "清除"
+  },
+  "listMeta": {
+    "total": "共 {{count}} 件商品",
+    "page": "第 {{page}} / {{pages}} 页"
+  },
+  "actionBar": {
+    "summary": "{{sku}} 款 · {{quantity}} 件",
+    "importTotal": "进货合计 {{amount}}",
+    "cart": "购物车"
+  },
+  "storePicker": {
+    "title": "切换门店",
+    "current": "当前",
+    "note": "切换门店后会清空当前扫码结果；购物车按门店分别保存，切回来仍在。"
   }
 }

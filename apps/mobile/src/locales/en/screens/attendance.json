@@ -23,7 +23,19 @@
     "weeklySchedule": "Weekly schedule",
     "scheduleManagement": "Schedule",
     "holidayManagement": "Holidays",
-    "leaveManagement": "Leave"
+    "leaveManagement": "Leave",
+    "managedPunchRecords": "Punch records",
+    "short": {
+      "schedule": "Shifts",
+      "holidays": "Holiday",
+      "leave": "Leave",
+      "punches": "Punch",
+      "punchSelf": "Punch",
+      "mySchedule": "Schedule",
+      "myRequests": "Requests",
+      "approvals": "Inbox",
+      "approvalsWithCount": "Inbox {{count}}"
+    }
   },
   "today": {
     "schedules": "Today's shifts",
@@ -94,7 +106,8 @@
       "finalClockOutStatusOnly": "Final clock-out: {{status}}",
       "onBreak": "On break",
       "overtimeTitle": "Overtime",
-      "overtimeSummary": "Raw {{raw}} min · candidate {{candidate}} min · approved {{approved}} min"
+      "overtimeSummary": "Raw {{raw}} min · candidate {{candidate}} min · approved {{approved}} min",
+      "statusWithMinutes": "{{status}} {{minutes}} min"
     },
     "qrResult": {
       "title": "Latest QR punch",
@@ -105,7 +118,26 @@
       "serverTime": "Server time: {{time}}",
       "deviceTime": "Punch time (device timezone): {{time}}",
       "status": "Attendance status: {{status}}"
-    }
+    },
+    "statusShort": {
+      "readyToClockIn": "Not clocked in",
+      "readyToClockOut": "On shift",
+      "completed": "Done for today",
+      "holiday": "Holiday",
+      "viewOnly": "History"
+    },
+    "hero": {
+      "shift": "Shift {{start}} – {{end}}",
+      "noShift": "No shift today",
+      "worked": "Worked {{duration}}"
+    },
+    "summary": {
+      "worked": "Worked",
+      "break": "Break",
+      "overtime": "Overtime"
+    },
+    "lastScan": "Last scan: {{action}} {{time}} · {{status}}",
+    "lastScanDevice": "POS {{device}}"
   },
   "scanner": {
     "waitingForFreshCode": "Keep pointing at the POS. Waiting for the refreshed QR code…",
@@ -219,7 +251,20 @@
       "outOfRange": "Approved overtime must be between 0 and the candidate minutes.",
       "invalidIncrement": "Approved overtime must be a multiple of 15 minutes.",
       "remarkRequired": "A review note is required when reducing or rejecting overtime."
-    }
+    },
+    "filterAll": "All",
+    "filterA11y": "Filter approvals by type",
+    "summary": {
+      "PunchAdjustment": "{{punchType}} correction {{time}}",
+      "Overtime": "Overtime {{minutes}} min",
+      "Leave": "{{leaveType}} {{start}}–{{end}}",
+      "Punch": "{{punchType}} exception"
+    },
+    "shortDate": "{{day}}/{{month}}",
+    "quickMinutes": "{{minutes}} min",
+    "addRemark": "Add note",
+    "fixMissingClockOut": "Add clock-out",
+    "needsFix": "Needs fix"
   },
   "holidayManagement": {
     "noStore": "Select a store first",
@@ -240,7 +285,14 @@
       "Open": "Open",
       "Closed": "Closed",
       "Partial": "Partial"
-    }
+    },
+    "syncPanelTitle": "{{store}} public holidays",
+    "syncHint": "Imports official public holidays for the store's state (NSW / QLD).",
+    "editTitle": "Edit holiday",
+    "regularHours": "Regular hours",
+    "monthGroup": "{{month}}",
+    "monthGroupWithYear": "{{month}} {{year}}",
+    "unknownMonth": "Other dates"
   },
   "leaveManagement": {
     "empty": "No sick or annual leave approvals pending",
@@ -249,13 +301,17 @@
     "attachmentRequired": "Sick leave requires a medical certificate photo.",
     "fields": {
       "employee": "Employee",
-      "attachment": "Medical certificate photo"
+      "attachment": "Medical certificate photo",
+      "selectEmployee": "Select employee",
+      "specifyTime": "Specific hours"
     },
     "actions": {
       "takePhoto": "Take photo",
       "retakePhoto": "Retake photo",
       "grantCameraPermission": "Allow camera",
-      "capture": "Capture"
+      "capture": "Capture",
+      "save": "Save",
+      "reset": "Clear"
     },
     "messages": {
       "permissionRequired": "Camera permission is required to take a photo.",
@@ -269,6 +325,25 @@
       "title": "Take medical certificate photo",
       "permissionTitle": "Camera access required",
       "permissionDescription": "Allow camera access to take and upload a medical certificate photo for sick leave."
+    },
+    "registerAction": "Record leave",
+    "registerHint": "Record annual or sick leave for an employee (sick leave needs a medical certificate photo)",
+    "hideRegister": "Hide",
+    "employmentTypes": {
+      "fulltime": "Full-time",
+      "parttime": "Part-time"
+    },
+    "dayCount_one": "{{count}} day",
+    "dayCount_other": "{{count}} days",
+    "attachment": {
+      "captureTitle": "Photograph certificate",
+      "captureHint": "Required for sick leave",
+      "uploaded": "Uploaded"
+    },
+    "a11y": {
+      "previousDay": "{{label}}: previous day",
+      "nextDay": "{{label}}: next day",
+      "pickDate": "Pick {{label}} from calendar"
     }
   },
   "scheduleManagement": {
@@ -297,7 +372,11 @@
       "totalPeople": "Total people",
       "plannedHours": "Planned hours",
       "peopleUnit": "staff",
-      "hoursUnit": "hrs"
+      "hoursUnit": "hrs",
+      "weekHours": "Total",
+      "weekdayHours": "Weekdays",
+      "weekendHours": "Weekend",
+      "scheduledPeople": "Staffed"
     },
     "quickShiftTitle": "Common shifts",
     "quickShifts": {
@@ -308,7 +387,45 @@
     "timePicker": {
       "hour": "HH",
       "minute": "MM"
-    }
+    },
+    "hoursShort": "{{hours}}h",
+    "uncoveredDays": "{{count}} day(s) unstaffed",
+    "publishState": {
+      "draft": "Draft · not published",
+      "published": "Published",
+      "empty": "No shifts this week"
+    },
+    "cell": {
+      "leave": "Leave",
+      "available": "Avail"
+    },
+    "legend": {
+      "shift": "Shift",
+      "leave": "On leave",
+      "available": "Available",
+      "draft": "Draft",
+      "employmentTypes": "F full-time · P part-time · C casual"
+    },
+    "gridHint": "Tap a cell to add or edit a shift",
+    "editor": {
+      "availabilityLabel": "Available",
+      "noAvailability": "Not provided",
+      "weekHoursLabel": "Scheduled this week",
+      "hoursValue": "{{hours}} h",
+      "leaveNotice": "Approved leave: {{type}}",
+      "stepMinus": "{{label}} 30 minutes earlier",
+      "stepPlus": "{{label}} 30 minutes later",
+      "setRest": "Set as rest day",
+      "save": "Save ({{hours}} h)",
+      "addShift": "Add another shift"
+    },
+    "copyPreviousWeek": "Copy last week",
+    "copyConfirmTitle": "Copy last week's schedule",
+    "copyConfirmMessage": "Copy last week's shifts into this week as drafts. Employees who already have a shift on a day are skipped.",
+    "copyConfirm": "Copy",
+    "copyWeekResult": "Copied {{created}} shift(s), skipped {{skipped}}",
+    "copyWeekFailed": "Failed to copy last week's schedule",
+    "ageBadge": "{{age}}y"
   },
   "adjustment": {
     "title": "Punch correction",
@@ -337,6 +454,31 @@
       "submitFailed": "Correction submission failed.",
       "invalid": "This correction cannot be saved.",
       "previewRevisionMissing": "The server preview did not include a revision. Run preview again before submitting."
+    },
+    "entryHint": "Missed or wrong punch? Request a correction within 2 days",
+    "entryHintManager": "You can adjust punches, so your own corrections apply immediately",
+    "open": "Correct punch",
+    "sheetSubtitle": "{{date}} · {{store}}",
+    "punchTypeTitle": "Punch type",
+    "time": "Time",
+    "nextDay": "Next day",
+    "reason": "Reason",
+    "note": "Note (optional)",
+    "noteRequired": "Add a note when you choose Other",
+    "stepper": {
+      "minusHour": "1 hour earlier",
+      "minus5": "5 minutes earlier",
+      "plus5": "5 minutes later",
+      "plusHour": "1 hour later"
+    },
+    "reasons": {
+      "forgot": "Forgot to punch",
+      "scanFailed": "Scan failed",
+      "phoneDead": "Phone died",
+      "missed": "Employee missed punch",
+      "device": "Device fault",
+      "shiftChanged": "Shift changed",
+      "other": "Other"
     }
   },
   "datePicker": {
@@ -376,7 +518,9 @@
     "rejectOvertime": "Reject overtime",
     "createSchedule": "Create schedule",
     "publishWeek": "Publish week",
-    "viewLocation": "View location"
+    "viewLocation": "View location",
+    "scanClockIn": "Scan to clock in",
+    "scanClockOut": "Scan to clock out"
   },
   "punchTypes": {
     "ClockIn": "Clock in",
@@ -473,5 +617,84 @@
     "holidaySyncSuccess": "Synced {{count}} public holidays.",
     "adjustmentSubmitted": "Punch correction submitted.",
     "adjustmentApplied": "Punch correction applied."
+  },
+  "managedRecords": {
+    "filterAll": "All {{count}}",
+    "filterException": "Exceptions {{count}}",
+    "empty": "No shifts on this day",
+    "emptyException": "No exceptions on this day",
+    "noStore": "Select a store first",
+    "previousDay": "Previous day",
+    "nextDay": "Next day",
+    "today": "Today",
+    "punchSummary": "In {{clockIn}} · Out {{clockOut}}",
+    "issues": {
+      "missingClockOut": "Missed clock-out",
+      "noPunch": "No punches",
+      "late": "Late",
+      "earlyLeave": "Left early",
+      "inProgress": "On shift",
+      "notStarted": "Not started",
+      "normal": "Normal",
+      "onLeave": "On leave"
+    },
+    "editTitle": "Edit punches",
+    "viewTitle": "Punch details",
+    "editSubtitle": "{{date}} · Shift {{start}}–{{end}}",
+    "selectHint": "Pick a punch to edit, or add a missing one",
+    "addMissing": "Add {{punchType}}",
+    "editing": "Editing",
+    "auditNotice": "Applies immediately and records who changed it, the original value, and the reason",
+    "outsideWindow": "Only this week's punches can be edited; on Monday and Tuesday you can still edit last week",
+    "readOnly": "You can't adjust punches, so this view is read-only",
+    "save": "Save changes",
+    "saved": "Punch updated",
+    "loadFailed": "Couldn't load punch records"
+  },
+  "myAttendance": {
+    "today": "Today",
+    "done": "Done",
+    "availableAt": "Available {{time}}",
+    "unfilled": "Availability missing",
+    "rest": "Off",
+    "weekHours": "{{hours}} h scheduled this week",
+    "fillAvailability": "Add availability",
+    "availabilitySheet": {
+      "earlier": "{{label}} 30 min earlier",
+      "later": "{{label}} 30 min later",
+      "remove": "Remove this day",
+      "willSubmit": "Will submit",
+      "submit_one": "Submit {{count}} day",
+      "submit_other": "Submit {{count}} days"
+    },
+    "requests": {
+      "adjustmentTitle": "Correction · {{punchType}} {{time}}",
+      "leaveTitle": "{{leaveType}} · {{range}}",
+      "applyLeave": "Request leave",
+      "pending": "In progress",
+      "done": "Processed",
+      "empty": "No corrections or leave requests yet",
+      "reviewedBy": "Processed by {{name}}",
+      "reviewedWithRemark": "{{name}}: {{remark}}",
+      "withdraw": "Withdraw",
+      "status": {
+        "pending": "Pending",
+        "approved": "Applied",
+        "rejected": "Rejected",
+        "cancelled": "Withdrawn"
+      },
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days"
+    },
+    "leaveSheet": {
+      "previousDay": "{{label}} previous day",
+      "nextDay": "{{label}} next day",
+      "submitted": "Leave request submitted",
+      "invalidRange": "End date can't be before start date",
+      "sickHint": "Give your manager a medical certificate; they attach it when recording sick leave.",
+      "submit_one": "Submit {{count}} day",
+      "submit_other": "Submit {{count}} days"
+    },
+    "weekHoursSplit": "Weekdays {{weekday}} · Weekend {{weekend}} h"
   }
 }

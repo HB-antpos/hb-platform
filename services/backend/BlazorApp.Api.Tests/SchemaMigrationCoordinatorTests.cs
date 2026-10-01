@@ -97,6 +97,10 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
         Assert.Contains("VerifyMobileDeviceActivationSchemaAsync", runtimeMethods);
         Assert.Contains("VerifyLinklyMultiTerminalSchemaAsync", runtimeMethods);
+        Assert.Contains("ApplyLegacyEmployeeLogRiskAsync", runtimeMethods);
+        Assert.Contains("VerifyLegacyEmployeeLogRiskAsync", runtimeMethods);
+        Assert.Contains("ApplyPosOperationAuditRiskAsync", runtimeMethods);
+        Assert.Contains("VerifyPosOperationAuditRiskAsync", runtimeMethods);
         Assert.Contains("ValidatePrerequisitesAsync", runtimeMethods);
         Assert.DoesNotContain("ApplyMigrationAsync", runtimeMethods);
     }
@@ -349,6 +353,20 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Equal(1, CountOccurrences(checkMethod, "VerifyMobileDeviceActivationSchemaAsync"));
         Assert.Equal(1, CountOccurrences(checkMethod, "VerifyLinklyMultiTerminalSchemaAsync"));
         Assert.Equal(1, CountOccurrences(checkMethod, "VerifyLocalSupplierCategoryAsync"));
+        Assert.Equal(1, CountOccurrences(checkMethod, "VerifyLegacyEmployeeLogRiskAsync"));
+        Assert.Equal(1, CountOccurrences(checkMethod, "VerifyPosOperationAuditRiskAsync"));
+        Assert.Contains("PosOperationAuditRiskSchema.VerifySql", runtimeSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "exception.Number is >= 51970 and <= 51989",
+            runtimeSource,
+            StringComparison.Ordinal
+        );
+        Assert.Contains("LegacyEmployeeLogRiskSchema.VerifySql", runtimeSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "exception.Number is >= 51950 and <= 51969",
+            runtimeSource,
+            StringComparison.Ordinal
+        );
         Assert.Contains("LocalSupplierCategorySchema.VerifySql", runtimeSource, StringComparison.Ordinal);
         Assert.Contains(
             "exception.Number is >= 51930 and <= 51939",
@@ -425,6 +443,14 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId
         );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId
+        );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
             SchemaDatabase.Posm,
@@ -433,6 +459,14 @@ public sealed class SchemaMigrationCoordinatorTests
         runtime.MarkApplied(
             SchemaDatabase.Posm,
             SchemaMigrationCoordinator.LinklyMultiTerminalMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Posm,
+            SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Posm,
+            SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId
         );
         var coordinator = CreateCoordinator(runtime);
 
@@ -827,6 +861,14 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaDatabase.Posm,
             SchemaMigrationCoordinator.LinklyMultiTerminalMigrationId
         );
+        runtime.MarkApplied(
+            SchemaDatabase.Posm,
+            SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Posm,
+            SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId
+        );
 
         var result = await CreateCoordinator(runtime).CheckAsync(CancellationToken.None);
 
@@ -849,10 +891,16 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20260922.001-sales-detail-query-monthly",
                 "Check:Main:20260923.001-local-supplier-category",
                 "Check:Main:20260924.001-compact-board-monthly",
+                "Check:Main:20260929.001-warehouse-order-picking",
+                "Check:Main:20260930.001-warehouse-order-pick-stockout",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
+                "Check:Posm:20261001.001-legacy-employee-log-risk",
+                "Check:Posm:20261002.001-pos-operation-audit-risk",
                 "VerifyLinkly",
+                "VerifyLegacyEmployeeLogRisk",
+                "VerifyPosOperationAuditRisk",
                 "Verify",
                 "VerifyMobile",
             ],
@@ -888,6 +936,14 @@ public sealed class SchemaMigrationCoordinatorTests
         runtime.MarkApplied(
             SchemaDatabase.Posm,
             SchemaMigrationCoordinator.LinklyMultiTerminalMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Posm,
+            SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Posm,
+            SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId
         );
 
         var result = await CreateCoordinator(runtime).CheckAsync(CancellationToken.None);
@@ -1067,13 +1123,21 @@ public sealed class SchemaMigrationCoordinatorTests
         var runtime = new FakeSchemaMigrationRuntime();
         var coordinator = CreateCoordinator(runtime);
 
-        // 新迁移按日期追加：供应商分类（09-23）之后是看板月投影（09-24）。
+        // 新迁移按日期追加：供应商分类（09-23）、看板月投影（09-24）、订单拣货（09-29），再是拣货货位没货（09-30）。
         Assert.Equal(
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
@@ -1081,6 +1145,8 @@ public sealed class SchemaMigrationCoordinatorTests
         {
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
+            SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
+            SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -1088,6 +1154,216 @@ public sealed class SchemaMigrationCoordinatorTests
             Assert.True(runtime.Events.IndexOf(apply) < runtime.Events.IndexOf(record));
         }
         Assert.Contains("VerifyLocalSupplierCategory", runtime.Events);
+    }
+
+    [Fact]
+    public async Task MigrateAsync_老系统日志风险迁移追加在POSM末尾且签名通过后才登记()
+    {
+        var runtime = new FakeSchemaMigrationRuntime();
+        var coordinator = CreateCoordinator(runtime);
+
+        // POSM 新迁移按日期追加在 Linkly 多终端（09-03）之后，新收银审计风险（10-02）之前。
+        Assert.Equal(
+            SchemaMigrationCoordinator.LinklyMultiTerminalMigrationId,
+            SchemaMigrationCoordinator.PosmMigrationSteps[^3].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId,
+            SchemaMigrationCoordinator.PosmMigrationSteps[^2].MigrationId
+        );
+
+        Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
+        var apply = $"Apply:Posm:{SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId}";
+        var record = $"Record:Posm:{SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId}";
+        var applyIndex = runtime.Events.IndexOf(apply);
+        var verifyIndex = runtime.Events.IndexOf("VerifyLegacyEmployeeLogRisk", applyIndex);
+        Assert.True(applyIndex >= 0);
+        Assert.True(applyIndex < verifyIndex && verifyIndex < runtime.Events.IndexOf(record));
+
+        runtime.Events.Clear();
+        Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
+        Assert.DoesNotContain(apply, runtime.Events);
+        Assert.DoesNotContain(record, runtime.Events);
+        Assert.Contains("VerifyLegacyEmployeeLogRisk", runtime.Events);
+    }
+
+    [Fact]
+    public async Task MigrateAsync_老系统日志风险签名失败不得登记新版本()
+    {
+        var runtime = new FakeSchemaMigrationRuntime
+        {
+            LegacyEmployeeLogRiskVerifyException = new LegacyEmployeeLogRiskSchemaMismatchException(),
+        };
+        foreach (var step in SchemaMigrationCoordinator.MainMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Main, step.MigrationId);
+        foreach (var step in SchemaMigrationCoordinator.PosmMigrationSteps
+                     .Where(step => step.MigrationId != SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId))
+            runtime.MarkApplied(SchemaDatabase.Posm, step.MigrationId);
+
+        var result = await CreateCoordinator(runtime).MigrateAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SchemaExitCodes.SchemaNotReady, result.ExitCode);
+        Assert.Equal(SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible, result.DiagnosticCode);
+        Assert.Contains(
+            $"Apply:Posm:{SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId}",
+            runtime.Events
+        );
+        Assert.Contains("VerifyLegacyEmployeeLogRisk", runtime.Events);
+        Assert.DoesNotContain(
+            $"Record:Posm:{SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId}",
+            runtime.Events
+        );
+    }
+
+    [Fact]
+    public async Task CheckAsync_老系统日志风险账本缺失_保留PosmMissing且跳过签名门禁()
+    {
+        var runtime = new FakeSchemaMigrationRuntime
+        {
+            LegacyEmployeeLogRiskVerifyException = new LegacyEmployeeLogRiskSchemaMismatchException(),
+        };
+        foreach (var step in SchemaMigrationCoordinator.MainMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Main, step.MigrationId);
+        foreach (var step in SchemaMigrationCoordinator.PosmMigrationSteps
+                     .Where(step => step.MigrationId != SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId))
+            runtime.MarkApplied(SchemaDatabase.Posm, step.MigrationId);
+
+        var result = await CreateCoordinator(runtime).CheckAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SchemaExitCodes.SchemaNotReady, result.ExitCode);
+        Assert.Equal(SchemaDiagnosticCodes.PosmMigrationMissing, result.DiagnosticCode);
+        Assert.DoesNotContain("VerifyLegacyEmployeeLogRisk", runtime.Events);
+    }
+
+    [Fact]
+    public async Task CheckAsync_老系统日志风险账本已登记但签名漂移_返回稳定不兼容诊断且不写库()
+    {
+        var runtime = new FakeSchemaMigrationRuntime
+        {
+            LegacyEmployeeLogRiskVerifyException = new LegacyEmployeeLogRiskSchemaMismatchException(),
+        };
+        foreach (var step in SchemaMigrationCoordinator.MainMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Main, step.MigrationId);
+        foreach (var step in SchemaMigrationCoordinator.PosmMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Posm, step.MigrationId);
+
+        var result = await CreateCoordinator(runtime).CheckAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SchemaExitCodes.SchemaNotReady, result.ExitCode);
+        Assert.Equal(SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible, result.DiagnosticCode);
+        Assert.Contains("VerifyLegacyEmployeeLogRisk", runtime.Events);
+        Assert.DoesNotContain(
+            runtime.Events,
+            entry => entry.StartsWith("Apply:") || entry.StartsWith("Record:")
+        );
+    }
+
+    [Fact]
+    public async Task MigrateAsync_新收银审计风险迁移追加在POSM末尾且签名通过后才登记()
+    {
+        var runtime = new FakeSchemaMigrationRuntime();
+        var coordinator = CreateCoordinator(runtime);
+
+        // POSM 新迁移按日期追加在老系统日志风险（10-01）之后。
+        Assert.Equal(
+            SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId,
+            SchemaMigrationCoordinator.PosmMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId,
+            SchemaMigrationCoordinator.PosmMigrationSteps[^1].MigrationId
+        );
+
+        Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
+        var apply = $"Apply:Posm:{SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId}";
+        var record = $"Record:Posm:{SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId}";
+        var applyIndex = runtime.Events.IndexOf(apply);
+        var verifyIndex = runtime.Events.IndexOf("VerifyPosOperationAuditRisk", applyIndex);
+        Assert.True(applyIndex >= 0);
+        Assert.True(applyIndex < verifyIndex && verifyIndex < runtime.Events.IndexOf(record));
+
+        runtime.Events.Clear();
+        Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
+        Assert.DoesNotContain(apply, runtime.Events);
+        Assert.DoesNotContain(record, runtime.Events);
+        Assert.Contains("VerifyPosOperationAuditRisk", runtime.Events);
+    }
+
+    [Fact]
+    public async Task MigrateAsync_新收银审计风险签名失败不得登记新版本()
+    {
+        var runtime = new FakeSchemaMigrationRuntime
+        {
+            PosOperationAuditRiskVerifyException = new PosOperationAuditRiskSchemaMismatchException(),
+        };
+        foreach (var step in SchemaMigrationCoordinator.MainMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Main, step.MigrationId);
+        foreach (var step in SchemaMigrationCoordinator.PosmMigrationSteps
+                     .Where(step => step.MigrationId != SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId))
+            runtime.MarkApplied(SchemaDatabase.Posm, step.MigrationId);
+
+        var result = await CreateCoordinator(runtime).MigrateAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SchemaExitCodes.SchemaNotReady, result.ExitCode);
+        Assert.Equal(SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible, result.DiagnosticCode);
+        Assert.Contains(
+            $"Apply:Posm:{SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId}",
+            runtime.Events
+        );
+        Assert.Contains("VerifyPosOperationAuditRisk", runtime.Events);
+        Assert.DoesNotContain(
+            $"Record:Posm:{SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId}",
+            runtime.Events
+        );
+    }
+
+    [Fact]
+    public async Task CheckAsync_新收银审计风险账本缺失_保留PosmMissing且跳过签名门禁()
+    {
+        var runtime = new FakeSchemaMigrationRuntime
+        {
+            PosOperationAuditRiskVerifyException = new PosOperationAuditRiskSchemaMismatchException(),
+        };
+        foreach (var step in SchemaMigrationCoordinator.MainMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Main, step.MigrationId);
+        foreach (var step in SchemaMigrationCoordinator.PosmMigrationSteps
+                     .Where(step => step.MigrationId != SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId))
+            runtime.MarkApplied(SchemaDatabase.Posm, step.MigrationId);
+
+        var result = await CreateCoordinator(runtime).CheckAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SchemaExitCodes.SchemaNotReady, result.ExitCode);
+        Assert.Equal(SchemaDiagnosticCodes.PosmMigrationMissing, result.DiagnosticCode);
+        Assert.DoesNotContain("VerifyPosOperationAuditRisk", runtime.Events);
+    }
+
+    [Fact]
+    public async Task CheckAsync_新收银审计风险账本已登记但签名漂移_返回稳定不兼容诊断且不写库()
+    {
+        var runtime = new FakeSchemaMigrationRuntime
+        {
+            PosOperationAuditRiskVerifyException = new PosOperationAuditRiskSchemaMismatchException(),
+        };
+        foreach (var step in SchemaMigrationCoordinator.MainMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Main, step.MigrationId);
+        foreach (var step in SchemaMigrationCoordinator.PosmMigrationSteps)
+            runtime.MarkApplied(SchemaDatabase.Posm, step.MigrationId);
+
+        var result = await CreateCoordinator(runtime).CheckAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SchemaExitCodes.SchemaNotReady, result.ExitCode);
+        Assert.Equal(SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible, result.DiagnosticCode);
+        Assert.Contains("VerifyPosOperationAuditRisk", runtime.Events);
+        Assert.DoesNotContain(
+            runtime.Events,
+            entry => entry.StartsWith("Apply:") || entry.StartsWith("Record:")
+        );
     }
 
     [Fact]
@@ -1124,6 +1400,8 @@ public sealed class SchemaMigrationCoordinatorTests
         public Exception? LinklyVerifyException { get; init; }
         public Exception? MobileOtaRuntimeTargetsVerifyException { get; init; }
         public Exception? LocalSupplierCategoryVerifyException { get; init; }
+        public Exception? LegacyEmployeeLogRiskVerifyException { get; init; }
+        public Exception? PosOperationAuditRiskVerifyException { get; init; }
 
         public void MarkApplied(SchemaDatabase database, string migrationId) =>
             _applied.Add((database, migrationId));
@@ -1270,6 +1548,34 @@ public sealed class SchemaMigrationCoordinatorTests
             return Task.CompletedTask;
         }
 
+        public Task ApplyWarehouseOrderPickingAsync(CancellationToken cancellationToken) =>
+            ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
+                cancellationToken
+            );
+
+        public Task VerifyWarehouseOrderPickingAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyWarehouseOrderPicking");
+            return Task.CompletedTask;
+        }
+
+        public Task ApplyWarehouseOrderPickStockoutAsync(CancellationToken cancellationToken) =>
+            ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
+                cancellationToken
+            );
+
+        public Task VerifyWarehouseOrderPickStockoutAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyWarehouseOrderPickStockout");
+            return Task.CompletedTask;
+        }
+
         public Task VerifyMobileOtaRuntimeTargetsAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1341,6 +1647,52 @@ public sealed class SchemaMigrationCoordinatorTests
                 cancellationToken
             );
             await VerifyLinklyMultiTerminalSchemaAsync(cancellationToken);
+        }
+
+        // 与真实 runtime 一致：建表后立刻核验签名，失败时协调器不得登记账本。
+        public async Task ApplyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Posm,
+                SchemaMigrationCoordinator.LegacyEmployeeLogRiskMigrationId,
+                cancellationToken
+            );
+            await VerifyLegacyEmployeeLogRiskAsync(cancellationToken);
+        }
+
+        public Task VerifyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyLegacyEmployeeLogRisk");
+            if (LegacyEmployeeLogRiskVerifyException is not null)
+            {
+                throw LegacyEmployeeLogRiskVerifyException;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        // 与真实 runtime 一致：建表后立刻核验签名，失败时协调器不得登记账本。
+        public async Task ApplyPosOperationAuditRiskAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Posm,
+                SchemaMigrationCoordinator.PosOperationAuditRiskMigrationId,
+                cancellationToken
+            );
+            await VerifyPosOperationAuditRiskAsync(cancellationToken);
+        }
+
+        public Task VerifyPosOperationAuditRiskAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyPosOperationAuditRisk");
+            if (PosOperationAuditRiskVerifyException is not null)
+            {
+                throw PosOperationAuditRiskVerifyException;
+            }
+
+            return Task.CompletedTask;
         }
 
         public Task ApplyMainAppendAsync(

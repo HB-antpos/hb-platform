@@ -151,7 +151,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/promotions",            TitleKey = "menu.promotions",             Icon = "GiftOutlined",               Permission = Permissions.Promotions.View },
                     new() { Path = "/pos-admin/advertisements",        TitleKey = "menu.advertisements",         Icon = "PictureOutlined",            Permission = Permissions.Advertisements.View },
                     new() { Path = "/pos-admin/cash-register-users",   TitleKey = "menu.cashRegisterUsers",      Icon = "UserOutlined",               Permission = Permissions.Store.ManageOperations },
-                    new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           Permission = Permissions.PosTerminal.Audit.View },
+                    // 员工操作日志合并页：老收银 / 新收银在页内切换，任一查看权限即可见。
+                    new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
                     new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
@@ -204,16 +205,44 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 商品和货位管理：仓库商品与货位维护；货柜管理已拆为独立入口，不再凭 Container.View 放行。
                 RouteName = "warehouse",
                 TitleKey = "tabs.warehouse",
                 Icon = "warehouse",
                 Permission = Permissions.Warehouse.ManageProducts,
+                Order = 40,
+            },
+            new()
+            {
+                // 货柜管理：原先是仓库页内的卡片，现为工作台「仓库与采购」组下的独立入口，只看 Container.View。
+                RouteName = "containers",
+                TitleKey = "tabs.containers",
+                Icon = "archive-outline",
+                Permission = Permissions.Container.View,
+                Order = 40,
+            },
+            new()
+            {
+                RouteName = "container-new-products",
+                TitleKey = "tabs.containerNewProducts",
+                Icon = "package-variant-closed",
+                Permission = Permissions.Container.MobileNewProductsView,
+                Order = 41,
+            },
+            new()
+            {
+                RouteName = "warehouse-picking",
+                TitleKey = "tabs.warehousePicking",
+                Icon = "clipboard-check-outline",
+                // 拣货权限按别名覆盖管理仓库与管理订货；菜单显式列出，避免依赖客户端别名展开。
+                Permission = Permissions.Warehouse.Picking,
                 AnyPermissions = new[]
                 {
-                    Permissions.Warehouse.ManageProducts,
-                    Permissions.Container.View,
+                    Permissions.Warehouse.Picking,
+                    Permissions.Warehouse.Manage,
+                    Permissions.Warehouse.ManageOrders,
                 },
-                Order = 40,
+                Order = 42,
             },
             new()
             {
@@ -352,12 +381,13 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
-                RouteName = "pos-operation-logs",
-                TitleKey = "tabs.posOperationLogs",
+                RouteName = "legacy-employee-logs",
+                TitleKey = "tabs.legacyEmployeeLogs",
                 Icon = "clipboard-text-clock-outline",
-                // 与 Web 后台 /pos-admin/operation-logs 共用审计查看权限，两端可见范围保持一致。
+                // 移动端「员工操作日志」：页内切换老收银 / 新收银，与 Web /pos-admin/operation-logs 同一组查看权限，任一即可见。
+                // 路由名沿用 legacy-employee-logs，旧版本 App 收到新菜单仍能打开。
                 // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
-                Permission = Permissions.PosTerminal.Audit.View,
+                AnyPermissions = new[] { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View },
                 Order = 57,
             },
             new()
@@ -433,6 +463,15 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 普通员工安装入口：只读最新正式版安装二维码，不需要管理员身份。
+                RouteName = "app-install",
+                TitleKey = "tabs.appInstall",
+                Icon = "qrcode",
+                Permission = Permissions.System.ViewMobileAppInstallLinks,
+                Order = 59,
+            },
+            new()
+            {
                 RouteName = "app-downloads",
                 TitleKey = "tabs.appDownloads",
                 Icon = "download-outline",
@@ -461,6 +500,12 @@ namespace BlazorApp.Api.Services
         private static readonly HashSet<string> DeviceBaseRouteNames = new(
             // price-updates：绑定分店的设备同样要处理本店的价格更新与换标签通知。
             new[] { "home", "orders", "cart", "product-query", "price-updates", "product-insights", "settings" },
+            StringComparer.OrdinalIgnoreCase
+        );
+
+        // 仓库设备（纯设备会话，无个人账号）额外可见的入口；拣货人通过扫员工码确认。
+        private static readonly HashSet<string> WarehouseDeviceRouteNames = new(
+            new[] { "warehouse", "warehouse-picking" },
             StringComparer.OrdinalIgnoreCase
         );
 
@@ -568,7 +613,7 @@ namespace BlazorApp.Api.Services
             return FullAppMenu
                 .Where(node =>
                     DeviceBaseRouteNames.Contains(node.RouteName)
-                    || (isWarehouseDevice && node.RouteName.Equals("warehouse", StringComparison.OrdinalIgnoreCase))
+                    || (isWarehouseDevice && WarehouseDeviceRouteNames.Contains(node.RouteName))
                 )
                 .OrderBy(node => node.Order)
                 .Select(ToAppNavigationMenuDto)
@@ -683,6 +728,7 @@ namespace BlazorApp.Api.Services
                 Permissions.System.ViewAppDownloads,
                 Permissions.System.ManageAppDownloads,
                 Permissions.PosTerminal.Audit.View,
+                Permissions.LegacyEmployeeLogs.View,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage
             );

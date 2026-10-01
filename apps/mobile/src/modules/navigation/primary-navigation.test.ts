@@ -6,8 +6,16 @@ import {
   buildPrimaryNavigation,
   resolveMeTabLabel,
   resolvePrimaryNavigationAction,
+  shouldHidePrimaryTabBar,
 } from "./primary-navigation";
-import { buildWorkbenchSections } from "./workbench";
+import {
+  areAllWorkbenchSectionsCollapsed,
+  buildWorkbenchSections,
+  formatWorkbenchBadgeCount,
+  summarizeWorkbenchSectionBadge,
+  toggleAllWorkbenchSections,
+  toggleWorkbenchSectionCollapsed,
+} from "./workbench";
 
 const localeRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -28,6 +36,10 @@ const enOrders = JSON.parse(
 
 assert.equal(zhWorkbench.routes.orders, "HB订单", "中文工作台必须显示 HB订单");
 assert.equal(enWorkbench.routes.orders, "HB Orders", "英文工作台必须显示 HB Orders");
+assert.equal(zhWorkbench.routes.containerNewProducts, "HB新品", "中文工作台必须显示 HB新品");
+assert.equal(enWorkbench.routes.containerNewProducts, "HB new arrivals", "英文工作台必须显示 HB new arrivals");
+assert.equal(zhWorkbench.routes.appInstall, "App 安装", "中文工作台必须显示 App 安装");
+assert.equal(enWorkbench.routes.appInstall, "Install app", "英文工作台必须显示 Install app");
 assert.equal(zhOrders.title, "订单列表", "中文订单业务页标题不得随工作台入口改名");
 assert.equal(enOrders.title, "Orders", "英文订单业务页标题不得随工作台入口改名");
 
@@ -169,7 +181,16 @@ assert.equal(
   "销售订单查询从工作台进入，不能新增一级导航"
 );
 assert.equal(
-  compactPrimaryItems("pos-operation-logs", [...fullMenu, "pos-operation-logs"])[0]?.active,
+  compactPrimaryItems("warehouse-picking", [...fullMenu, "warehouse-picking"])[0]?.active,
+  true,
+  "订单拣货从工作台进入，不能新增一级导航"
+);
+assert.equal(shouldHidePrimaryTabBar("/warehouse-picking"), true, "拣货入口是 PDA 全屏作业，不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/warehouse-picking/abc123/finish"), true, "拣货子页同样不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/warehouse"), false, "仓库页等其它页面仍显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/warehouse-pickingx"), false, "只按完整路径段匹配，避免误伤相似路由");
+assert.equal(
+  compactPrimaryItems("legacy-employee-logs", [...fullMenu, "legacy-employee-logs"])[0]?.active,
   true,
   "员工操作日志从工作台进入，不能新增一级导航"
 );
@@ -350,12 +371,12 @@ assert.deepEqual(
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
   [
-    { key: "sales-product", itemRouteNames: ["orders"] },
+    { key: "product-purchasing", itemRouteNames: ["orders"] },
     { key: "warehouse-purchase", itemRouteNames: ["warehouse"] },
     { key: "operations-reports", itemRouteNames: ["reports"] },
     { key: "people-management", itemRouteNames: ["users", "user-admin", "roles"] },
   ],
-  "工作台仅按显式可见路由显示四类业务入口"
+  "工作台仅按显式可见路由显示各类业务入口"
 );
 
 const salesAndSupplierInvoiceSections = buildWorkbenchSections([
@@ -370,28 +391,47 @@ assert.deepEqual(
   })),
   [
     {
-      key: "sales-product",
+      key: "product-purchasing",
       itemRouteNames: ["orders", "local-supplier-invoices"],
     },
     { key: "warehouse-purchase", itemRouteNames: ["warehouse"] },
   ],
-  "供应商发票必须归入销售与商品并紧跟 HB订单，仓库与采购不得再包含该入口"
+  "供应商发票必须归入商品进货并紧跟 HB订单，仓库与采购不得再包含该入口"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["container-new-products"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [{ key: "product-purchasing", itemRouteNames: ["container-new-products"] }],
+  "HB新品必须在工作台商品进货分区显示"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["app-install", "app-downloads"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [{ key: "people-management", itemRouteNames: ["app-install", "app-downloads"] }],
+  "App 安装必须在人员与管理分区、紧挨版本管理之前显示"
 );
 assert.deepEqual(
   buildWorkbenchSections(["product-query", "product-insights"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
-  [{ key: "sales-product", itemRouteNames: ["product-query", "product-insights"] }],
-  "商品查询与商品进销查询必须同属销售与商品，并且只依赖后端显式菜单"
+  [{ key: "product-sales", itemRouteNames: ["product-query", "product-insights"] }],
+  "商品查询与商品进销查询必须同属商品销售，并且只依赖后端显式菜单"
 );
 assert.deepEqual(
   buildWorkbenchSections(["orders", "sales-orders"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
-  [{ key: "sales-product", itemRouteNames: ["orders", "sales-orders"] }],
-  "销售订单查询必须归入销售与商品并紧跟 HB订单，同样只依赖后端显式菜单"
+  [
+    { key: "product-purchasing", itemRouteNames: ["orders"] },
+    { key: "product-sales", itemRouteNames: ["sales-orders"] },
+  ],
+  "HB订单归入商品进货、销售订单归入商品销售，同样只依赖后端显式菜单"
 );
 assert.equal(
   buildWorkbenchSections(["orders"]).some((section) =>
@@ -414,14 +454,48 @@ assert.deepEqual(
   "仓库商品进销查询必须归入仓库与采购并紧跟仓库入口，同样只依赖后端显式菜单"
 );
 assert.deepEqual(
-  buildWorkbenchSections(["reports", "pos-operation-logs"]).map((section) => ({
+  buildWorkbenchSections(["warehouse", "warehouse-picking", "warehouse-product-insights"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "warehouse-purchase",
+      itemRouteNames: ["warehouse", "warehouse-picking", "warehouse-product-insights"],
+    },
+  ],
+  "订单拣货归入仓库与采购并紧跟仓库入口，只依赖后端显式菜单"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["warehouse", "containers", "warehouse-picking"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "warehouse-purchase",
+      itemRouteNames: ["warehouse", "containers", "warehouse-picking"],
+    },
+  ],
+  "货柜管理必须作为独立入口归入仓库与采购，并紧跟商品和货位管理"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["containers"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [{ key: "warehouse-purchase", itemRouteNames: ["containers"] }],
+  "只有 Container.View 的账号也要在仓库与采购分区看到货柜管理"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["reports", "legacy-employee-logs"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
   [
     {
       key: "operations-reports",
-      itemRouteNames: ["reports", "pos-operation-logs"],
+      itemRouteNames: ["reports", "legacy-employee-logs"],
     },
   ],
   "员工操作日志必须归入运营与报表并紧跟报表中心，只依赖后端显式菜单"
@@ -433,11 +507,51 @@ assert.deepEqual(
   })),
   [
     {
-      key: "sales-product",
+      key: "product-purchasing",
       itemRouteNames: ["local-supplier-invoices"],
     },
   ],
-  "只有供应商发票权限时必须只生成销售与商品分组"
+  "只有供应商发票权限时必须只生成商品进货分组"
+);
+assert.deepEqual(
+  buildWorkbenchSections([
+    "product-query",
+    "product-insights",
+    "seasonal-product-insights",
+    "container-new-products",
+    "price-updates",
+    "home",
+    "cart",
+    "orders",
+    "sales-orders",
+    "local-supplier-invoices",
+    "installment-orders",
+    "store-vouchers",
+    "seasonal-cards",
+  ]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "product-purchasing",
+      itemRouteNames: ["container-new-products", "home", "cart", "orders", "local-supplier-invoices"],
+    },
+    {
+      key: "product-sales",
+      itemRouteNames: [
+        "product-query",
+        "product-insights",
+        "seasonal-product-insights",
+        "price-updates",
+        "sales-orders",
+        "installment-orders",
+        "store-vouchers",
+        "seasonal-cards",
+      ],
+    },
+  ],
+  "原销售与商品分组拆为商品进货在前、商品销售在后，入口不得遗漏或重复"
 );
 
 const visibleSectionRoutes = sparseSections.flatMap((section) =>
@@ -484,3 +598,110 @@ assert.equal(
   "我的",
   "设备模式没有个人账号，不显示残留的用户名"
 );
+
+// 工作台分组折叠：默认全部展开；单组切换互不影响；全部折叠/展开只作用于当前可见分组。
+{
+  const sections = buildWorkbenchSections(["orders", "product-query", "warehouse"]);
+  const none = new Set<string>();
+  assert.equal(areAllWorkbenchSectionsCollapsed(sections, none), false, "默认空集合即全部展开");
+  assert.equal(areAllWorkbenchSectionsCollapsed([], none), false, "没有分组时不得显示为已全部折叠");
+
+  const oneCollapsed = toggleWorkbenchSectionCollapsed(none, "product-sales");
+  assert.deepEqual([...oneCollapsed], ["product-sales"]);
+  assert.equal(none.size, 0, "切换分组不得修改原集合");
+  assert.deepEqual(
+    [...toggleWorkbenchSectionCollapsed(oneCollapsed, "product-sales")],
+    [],
+    "再次点按同一分组恢复展开"
+  );
+
+  const allCollapsed = toggleAllWorkbenchSections(sections, oneCollapsed);
+  assert.deepEqual(
+    [...allCollapsed].sort(),
+    ["product-purchasing", "product-sales", "warehouse-purchase"],
+    "部分折叠时点全部折叠，折叠全部可见分组"
+  );
+  assert.equal(areAllWorkbenchSectionsCollapsed(sections, allCollapsed), true);
+  assert.deepEqual([...toggleAllWorkbenchSections(sections, allCollapsed)], [], "已全部折叠时点全部展开清空");
+
+  assert.equal(
+    areAllWorkbenchSectionsCollapsed(sections, new Set(["product-purchasing", "product-sales", "people-management"])),
+    false,
+    "失效分组键不得让可见分组被判定为全部折叠"
+  );
+}
+
+{
+  const workbenchScreenSource = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../workbench/workbench-screen.tsx"),
+    "utf8"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /useState<ReadonlySet<string>>\(\s*\(\) => new Set\(\)\s*\)/,
+    "工作台分组必须默认全部展开"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /accessibilityState=\{\{ expanded \}\}[\s\S]*toggleWorkbenchSectionCollapsed\(current, section\.key\)/,
+    "分组标题必须可点按折叠，并向读屏暴露展开状态"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /sections\.length > 1 \?[\s\S]*toggleAllWorkbenchSections\(sections, current\)/,
+    "多个分组时必须提供全部折叠/展开"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /\{expanded \? section\.items\.map/,
+    "折叠的分组不得渲染其功能入口"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /const collapsedBadge = expanded\s*\?\s*null\s*:\s*summarizeWorkbenchSectionBadge\(/,
+    "分组展开时标题不得重复显示汇总角标，折叠后才汇总"
+  );
+  assert.match(
+    workbenchScreenSource,
+    /\{collapsedBadgeText \? \(\s*<View style=\{styles\.countBadge\}>/,
+    "折叠分组标题必须用与入口相同的角标样式显示汇总数"
+  );
+}
+
+// 折叠分组汇总角标：累加组内入口角标，封顶值取组内最大。
+{
+  const [purchasing, sales] = buildWorkbenchSections([
+    "container-new-products",
+    "orders",
+    "product-query",
+    "price-updates",
+  ]);
+  const counts = { "container-new-products": 134, "price-updates": 3, orders: 0 };
+  const maxCounts = { "container-new-products": 999 };
+
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(purchasing, counts, maxCounts),
+    { count: 134, maxCount: 999 },
+    "含 HB新品的分组按 999 封顶，与展开时入口角标一致"
+  );
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(sales, counts, maxCounts),
+    { count: 3, maxCount: 99 },
+    "价格更新待办汇总到商品销售分组"
+  );
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(sales, {}, maxCounts),
+    { count: 0, maxCount: 99 },
+    "组内无角标时汇总为 0，不显示角标"
+  );
+  assert.deepEqual(
+    summarizeWorkbenchSectionBadge(purchasing, { "container-new-products": 0, orders: 5 }, maxCounts),
+    { count: 5, maxCount: 99 },
+    "数量为 0 的入口不得抬高封顶值"
+  );
+
+  assert.equal(formatWorkbenchBadgeCount(99), "99");
+  assert.equal(formatWorkbenchBadgeCount(100), "99+");
+  assert.equal(formatWorkbenchBadgeCount(1000, 999), "999+");
+  assert.equal(formatWorkbenchBadgeCount(137, 999), "137");
+}

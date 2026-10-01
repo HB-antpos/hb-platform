@@ -31,11 +31,19 @@ internal sealed class SchemaMigrationCoordinator
         "20260923.001-local-supplier-category";
     internal const string CompactBoardMonthlyMigrationId =
         "20260924.001-compact-board-monthly";
+    internal const string WarehouseOrderPickingMigrationId =
+        "20260929.001-warehouse-order-picking";
+    internal const string WarehouseOrderPickStockoutMigrationId =
+        "20260930.001-warehouse-order-pick-stockout";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
     internal const string LinklyMultiTerminalMigrationId =
         "20260903.001-linkly-multi-terminal";
+    internal const string LegacyEmployeeLogRiskMigrationId =
+        "20261001.001-legacy-employee-log-risk";
+    internal const string PosOperationAuditRiskMigrationId =
+        "20261002.001-pos-operation-audit-risk";
 
     internal static readonly IReadOnlyList<SchemaMigrationStep> MainMigrationSteps =
     [
@@ -98,6 +106,16 @@ internal sealed class SchemaMigrationCoordinator
             static (runtime, cancellationToken) =>
                 runtime.ApplyCompactBoardMonthlyAsync(cancellationToken)
         ),
+        new(
+            WarehouseOrderPickingMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyWarehouseOrderPickingAsync(cancellationToken)
+        ),
+        new(
+            WarehouseOrderPickStockoutMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyWarehouseOrderPickStockoutAsync(cancellationToken)
+        ),
     ];
 
     internal static readonly IReadOnlyList<SchemaMigrationStep> PosmMigrationSteps =
@@ -116,6 +134,16 @@ internal sealed class SchemaMigrationCoordinator
             LinklyMultiTerminalMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyLinklyMultiTerminalAsync(cancellationToken)
+        ),
+        new(
+            LegacyEmployeeLogRiskMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyLegacyEmployeeLogRiskAsync(cancellationToken)
+        ),
+        new(
+            PosOperationAuditRiskMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyPosOperationAuditRiskAsync(cancellationToken)
         ),
     ];
 
@@ -136,6 +164,10 @@ internal sealed class SchemaMigrationCoordinator
         "mobile-ota-runtime-targets-schema-signature";
     private const string LocalSupplierCategorySignatureId =
         "local-supplier-category-schema-signature";
+    private const string LegacyEmployeeLogRiskSignatureId =
+        "legacy-employee-log-risk-schema-signature";
+    private const string PosOperationAuditRiskSignatureId =
+        "pos-operation-audit-risk-schema-signature";
 
     private readonly ISchemaMigrationRuntime _runtime;
     private readonly ILogger<SchemaMigrationCoordinator> _logger;
@@ -270,6 +302,20 @@ internal sealed class SchemaMigrationCoordinator
                 SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible
             );
         }
+        catch (LegacyEmployeeLogRiskSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible
+            );
+        }
+        catch (PosOperationAuditRiskSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible
+            );
+        }
         catch (SchemaProviderNotSupportedException)
         {
             LogResult(
@@ -369,6 +415,20 @@ internal sealed class SchemaMigrationCoordinator
             return SchemaOperationResult.Failure(
                 SchemaExitCodes.SchemaNotReady,
                 SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible
+            );
+        }
+        catch (LegacyEmployeeLogRiskSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible
+            );
+        }
+        catch (PosOperationAuditRiskSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible
             );
         }
         catch (SchemaProviderNotSupportedException)
@@ -526,6 +586,8 @@ internal sealed class SchemaMigrationCoordinator
         {
             // 新 migration ID 尚未登记时优先返回 POSM Missing；仅在账本齐全后判断结构漂移。
             await VerifyLinklyMultiTerminalSchemaAsync(cancellationToken);
+            await VerifyLegacyEmployeeLogRiskAsync(cancellationToken);
+            await VerifyPosOperationAuditRiskAsync(cancellationToken);
         }
         await VerifyDeviceActivationSchemaAsync(cancellationToken);
         await VerifyMobileDeviceActivationSchemaAsync(cancellationToken);
@@ -855,6 +917,72 @@ internal sealed class SchemaMigrationCoordinator
                     OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
                     LinklyMultiTerminalSchemaMismatchException =>
                         SchemaDiagnosticCodes.LinklyMultiTerminalIncompatible,
+                    _ => SchemaDiagnosticCodes.DatabaseFailure,
+                }
+            );
+            throw;
+        }
+    }
+
+    private async Task VerifyLegacyEmployeeLogRiskAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await _runtime.VerifyLegacyEmployeeLogRiskAsync(cancellationToken);
+            LogResult(
+                PosmScope,
+                LegacyEmployeeLogRiskSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Ready",
+                SchemaDiagnosticCodes.Ready
+            );
+        }
+        catch (Exception exception)
+        {
+            LogResult(
+                PosmScope,
+                LegacyEmployeeLogRiskSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Failed",
+                exception switch
+                {
+                    OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
+                    LegacyEmployeeLogRiskSchemaMismatchException =>
+                        SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible,
+                    _ => SchemaDiagnosticCodes.DatabaseFailure,
+                }
+            );
+            throw;
+        }
+    }
+
+    private async Task VerifyPosOperationAuditRiskAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await _runtime.VerifyPosOperationAuditRiskAsync(cancellationToken);
+            LogResult(
+                PosmScope,
+                PosOperationAuditRiskSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Ready",
+                SchemaDiagnosticCodes.Ready
+            );
+        }
+        catch (Exception exception)
+        {
+            LogResult(
+                PosmScope,
+                PosOperationAuditRiskSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Failed",
+                exception switch
+                {
+                    OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
+                    PosOperationAuditRiskSchemaMismatchException =>
+                        SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible,
                     _ => SchemaDiagnosticCodes.DatabaseFailure,
                 }
             );

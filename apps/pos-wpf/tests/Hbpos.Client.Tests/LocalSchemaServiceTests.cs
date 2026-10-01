@@ -140,6 +140,115 @@ public sealed class LocalSchemaServiceTests
         }
     }
 
+    [Fact]
+    public async Task EnsureInitializedAsync_initializes_each_database_file_only_once_per_process()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-local-schema-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            var orderGuid = Guid.NewGuid().ToString("D");
+
+            await schema.EnsureInitializedAsync();
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                await ExecuteSqlAsync(
+                    connection,
+                    $"""
+                    INSERT INTO LocalOrders (
+                        OrderGuid, StoreCode, DeviceCode, CashierId, CashierName, SoldAt,
+                        TotalAmount, DiscountAmount, ActualAmount, SyncStatus)
+                    VALUES ('{orderGuid}', 'S001', 'POS-01', 'C001', 'Alice', '2026-09-29T08:00:00+10:00', '1.00', '0.00', '1.00', 'Syncing');
+
+                    INSERT INTO SyncQueue (EntityId, EntityType, Status, CreatedAt)
+                    VALUES ('{orderGuid}', 'Order', 'Syncing', '2026-09-29T08:00:00+10:00');
+                    """);
+            }
+
+            // 启动链路第二次调用（主界面初始化）直接返回：不再重复全表回填，也不会把进行中的上传误恢复成 Pending。
+            await schema.EnsureInitializedAsync();
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                Assert.Equal(
+                    "Syncing",
+                    await ScalarAsync(connection, $"SELECT SyncStatus FROM LocalOrders WHERE OrderGuid = '{orderGuid}';"));
+            }
+
+            // InitializeAsync 仍然每次完整执行，服务器热切换与模拟重启依赖这一点。
+            await schema.InitializeAsync();
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                Assert.Equal(
+                    "Pending",
+                    await ScalarAsync(connection, $"SELECT SyncStatus FROM LocalOrders WHERE OrderGuid = '{orderGuid}';"));
+            }
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_does_not_remember_failed_attempts()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-local-schema-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            using var canceled = new CancellationTokenSource();
+            canceled.Cancel();
+
+            // Host 启动时的初始化失败只记日志；主界面初始化时必须重新完整执行一遍。
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => schema.EnsureInitializedAsync(canceled.Token));
+            await schema.EnsureInitializedAsync();
+
+            await using var connection = await store.OpenConnectionAsync();
+            Assert.Contains(
+                "LocalOrders",
+                await QueryStringsAsync(connection, "SELECT name FROM sqlite_master WHERE type = 'table';"));
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_initializes_again_after_switching_database_file()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hbpos-local-schema-switch-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var state = new ApiRuntimeEndpointState("https://first.example.com/pos-api/");
+            var resolver = new ApiEndpointDatabasePartitionResolver(root, state.CurrentAddress.AbsoluteUri);
+            var store = new LocalSqliteStore(state, resolver);
+            var schema = new LocalSchemaService(store);
+            await schema.EnsureInitializedAsync();
+
+            var prepared = await store.PrepareSwitchAsync("https://second.example.com/pos-api/", CancellationToken.None);
+            store.Switch(prepared);
+            await schema.EnsureInitializedAsync();
+
+            Assert.Equal(prepared.TargetDatabasePath, store.ActiveDatabasePath);
+            await using var connection = await store.OpenConnectionAsync();
+            Assert.Contains(
+                "LocalOrders",
+                await QueryStringsAsync(connection, "SELECT name FROM sqlite_master WHERE type = 'table';"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static async Task<bool> HasColumnAsync(
         SqliteConnection connection,
         string tableName,

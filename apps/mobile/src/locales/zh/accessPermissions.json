@@ -89,6 +89,10 @@
       "name": "查看管理分店请假申请",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店请假申请"
     },
+    "Attendance.Punch.AdjustManagedStore": {
+      "name": "补卡与修改管理分店打卡",
+      "description": "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"
+    },
     "Attendance.Punch.Self": {
       "name": "本人打卡",
       "description": "移动端「个人考勤」- 本人打卡"
@@ -132,6 +136,10 @@
     "Container.Edit": {
       "name": "编辑货柜",
       "description": "Web 页面 /warehouse/containers - 编辑货柜"
+    },
+    "Container.MobileNewProductsView": {
+      "name": "移动端查看新品到店",
+      "description": "移动端「新品到店」- 查看预计过去 1 周至未来 2 周到店的货柜新品"
     },
     "Container.View": {
       "name": "查看货柜",
@@ -236,6 +244,14 @@
     "Permissions.PosTerminal.Audit.View": {
       "name": "查看员工操作日志",
       "description": "收银端操作审计 - Web 页面 /pos-admin/operation-logs 与移动端工作台「员工操作日志」查看管理分店的员工操作记录"
+    },
+    "LegacyEmployeeLogs.View": {
+      "name": "查看老系统操作日志",
+      "description": "Web 页面 /pos-admin/legacy-employee-logs - 按分店查看旧版收银系统上传的员工操作记录"
+    },
+    "LegacyEmployeeLogs.Review": {
+      "name": "核查员工操作日志异常",
+      "description": "Web 页面 /pos-admin/operation-logs 与移动端「员工操作日志」- 对老收银、新收银命中异常规则的操作标记确认正常或需跟进，并可撤销"
     },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "打开钱箱",
@@ -665,6 +681,10 @@
       "name": "管理设置",
       "description": "Web 页面 /system/invoice-email-settings、/system/payment-terminal-settings、/system/emergency-login-keys - 管理发票邮箱、支付终端与紧急登录密钥"
     },
+    "System.ViewMobileAppInstallLinks": {
+      "name": "移动端查看 App 安装二维码",
+      "description": "移动端「App 安装」- 查看 iOS 与 Android 最新正式版本及安装二维码"
+    },
     "System.ViewAppDownloads": {
       "name": "查看 App 下载",
       "description": "Web 页面 /system/app-downloads、/system/wpf-versions（移动端同名入口另需管理员）- 查看 App 下载与 WPF 版本"
@@ -728,6 +748,10 @@
     "Warehouse.ManageOrders": {
       "name": "管理仓库订货",
       "description": "Web 页面 /warehouse/store-orders、/warehouse/preorders、/warehouse/store-order-import-price-variance 与移动端「订货单」- 管理分店订货、预订、配货单和发票"
+    },
+    "Warehouse.Picking": {
+      "name": "仓库订单拣货",
+      "description": "移动端「订单拣货」- 扫码拣货、补录缺失的中包数并提交配货数；持有管理仓库或管理仓库订货权限时自动具备"
     },
     "Warehouse.ManageProducts": {
       "name": "管理仓库商品",

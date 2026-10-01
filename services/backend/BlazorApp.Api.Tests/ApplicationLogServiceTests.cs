@@ -85,9 +85,10 @@ public class ApplicationLogServiceTests : IDisposable
             project => Assert.Equal(("HBBBackend", "Web/移动端后端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbweb_rv", "Web前端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("HbwebExpo", "移动端", false, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
-            project => Assert.Equal(("hbpos_win", "WPF客户端", false, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
+            project => Assert.Equal(("hbpos_win", "WPF客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbpos_api", "WPF收银后端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
-            project => Assert.Equal(("hbpos_ipad", "iPad客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays))
+            project => Assert.Equal(("hbpos_ipad", "iPad客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
+            project => Assert.Equal(("hbpos_handheld", "手持收银客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays))
         );
         Assert.All(projects, project =>
             Assert.True(
@@ -95,6 +96,22 @@ public class ApplicationLogServiceTests : IDisposable
                     || project.ApiKeyHash == "<sha256-lower-hex>"
             )
         );
+    }
+
+    [Fact]
+    public void 生产Compose_手持收银中心日志使用独立摘要环境变量()
+    {
+        var composePath = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "../../../../docker-compose.yml"));
+        var compose = File.ReadAllText(composePath);
+
+        Assert.Contains("ApplicationLogging__Projects__6__ProjectCode=hbpos_handheld", compose, StringComparison.Ordinal);
+        Assert.Contains("ApplicationLogging__Projects__6__Enabled=true", compose, StringComparison.Ordinal);
+        Assert.Contains("ApplicationLogging__Projects__6__RetentionDays=30", compose, StringComparison.Ordinal);
+        Assert.Contains(
+            "ApplicationLogging__Projects__6__ApiKeyHash=${CENTER_LOG_HBPOS_HANDHELD_KEY_SHA256:?required}",
+            compose,
+            StringComparison.Ordinal);
     }
 
     [Fact]

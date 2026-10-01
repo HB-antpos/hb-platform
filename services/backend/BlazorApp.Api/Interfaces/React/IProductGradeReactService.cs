@@ -5,6 +5,8 @@ namespace BlazorApp.Api.Interfaces.React
     public interface IProductGradeReactService
     {
         Task<ApiResponse<PagedResult<ProductGradeDto>>> GetProductGradesAsync(ProductGradeListQueryDto query);
+        /// <summary>全部在用的商品等级（去重、大写、升序），供订货页等级筛选下拉使用。</summary>
+        Task<ApiResponse<List<string>>> GetGradeOptionsAsync();
         Task<ApiResponse<ProductGradeDto>> CreateOrUpdateProductGradeAsync(CreateProductGradeDto dto);
         Task<ApiResponse<bool>> BatchUpdateGradesAsync(BatchUpdateGradeDto dto);
         Task<ApiResponse<PasteImportResultDto>> PasteImportGradesAsync(PasteImportGradeDto dto);

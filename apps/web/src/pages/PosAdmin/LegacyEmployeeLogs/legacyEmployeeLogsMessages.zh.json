@@ -1,0 +1,302 @@
+{
+  "legacyEmployeeLogs": {
+    "pageTitle": "老系统操作日志",
+    "pageSubtitle": "旧版收银系统上传的员工操作记录：加购、改价、删除、开钱箱、退货与支付。",
+    "wallClockNotice": "时间均为门店本地时间（旧收银写入的墙钟时间，不做时区换算）。日志由收银机批量上传，通常滞后十几到几十分钟，最近的操作可能尚未出现。",
+    "filters": {
+      "timeRange": "操作时间（最长 31 天）",
+      "store": "分店",
+      "storePlaceholder": "选择分店，可多选",
+      "device": "设备",
+      "devicePlaceholder": "全部设备",
+      "employee": "员工",
+      "employeePlaceholder": "全部员工，可多选",
+      "operation": "操作类型",
+      "operationPlaceholder": "全部操作",
+      "keyword": "详情关键字",
+      "keywordPlaceholder": "订单号 / 条码 / 商品编码 / 金额",
+      "optionsHint": "设备与员工选项来自上次查询的分店和时间范围",
+      "selectAllStores": "全选（{{count}} 家）",
+      "clearStores": "清空"
+    },
+    "presets": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "last7Days": "最近 7 天",
+      "last31Days": "最近 31 天"
+    },
+    "validation": {
+      "storeRequired": "请至少选择一家分店",
+      "rangeRequired": "请选择操作时间范围",
+      "rangeReversed": "结束时间必须晚于开始时间",
+      "rangeTooLong": "时间范围最长 31 天"
+    },
+    "quick": {
+      "label": "快捷筛选",
+      "highRisk": "高风险操作",
+      "price": "价格与折扣",
+      "return": "退货",
+      "auth": "钱箱与身份",
+      "payment": "支付与挂单"
+    },
+    "categories": {
+      "item": "商品",
+      "price": "价格折扣",
+      "delete": "删除",
+      "payment": "结账支付",
+      "return": "退货",
+      "auth": "钱箱与身份",
+      "window": "窗口",
+      "other": "其他"
+    },
+    "stats": {
+      "total": "符合条件",
+      "deleted": "删除商品",
+      "priceChanges": "改价 / 改折扣",
+      "cashDrawer": "开钱箱",
+      "scope": "期间员工 / 设备",
+      "unitRows": "条",
+      "unitPeople": "人",
+      "unitDevices": "台",
+      "basisHint": "计数不受「操作类型」条件影响"
+    },
+    "table": {
+      "title": "操作记录",
+      "hint": "点击行查看详情与前后操作",
+      "empty": "没有符合条件的操作记录",
+      "selectStoreFirst": "请选择分店后查询",
+      "paginationTotal": "共 {{total}} 条"
+    },
+    "columns": {
+      "time": "操作时间",
+      "device": "设备",
+      "employee": "员工",
+      "operation": "操作",
+      "detail": "详情",
+      "lag": "上传滞后",
+      "action": "操作",
+      "store": "分店",
+      "amount": "金额影响",
+      "risk": "风险"
+    },
+    "lag": {
+      "minutes": "{{minutes}} 分钟",
+      "hours": "{{hours}} 小时 {{minutes}} 分",
+      "days": "{{days}} 天 {{hours}} 小时",
+      "unknown": "-"
+    },
+    "detail": {
+      "title": "操作详情",
+      "highRisk": "高风险",
+      "operationTime": "操作时间",
+      "localTime": "门店本地",
+      "uploadTime": "上传时间",
+      "lagSuffix": "滞后 {{lag}}",
+      "storeDevice": "分店 / 设备",
+      "employee": "员工",
+      "operation": "操作",
+      "parsedTitle": "解析字段",
+      "parsedHint": "由详情文本按「键:值」自动提取",
+      "product": "商品",
+      "order": "订单号",
+      "rawTitle": "原始详情",
+      "contextTitle": "前后操作",
+      "contextHint": "同设备 ±{{minutes}} 分钟",
+      "contextTruncated": "窗口内操作过多，只显示前 {{count}} 条",
+      "contextEmpty": "窗口内没有其他操作",
+      "contextFailed": "前后操作加载失败",
+      "onlyEmployeeDay": "只看该员工当天操作"
+    },
+    "loadFailed": "老收银操作日志加载失败",
+    "retry": "重试",
+    "loadStoresFailed": "分店列表加载失败",
+    "weekdays": [
+      "周日",
+      "周一",
+      "周二",
+      "周三",
+      "周四",
+      "周五",
+      "周六"
+    ],
+    "lens": {
+      "all": {
+        "title": "全部操作",
+        "hint": "按类别浏览：商品、价格折扣、删除、结账支付、退货、钱箱与身份",
+        "scope": "期间 {{people}} 人 · {{devices}} 台设备",
+        "hintPos": "新收银（WPF / 手持 / iPad）上传的全部操作"
+      },
+      "danger": {
+        "title": "危险操作",
+        "hint": "按操作类型：删除、改价、改折扣、开钱箱、退货——直接影响收款或现金",
+        "share": "占 {{percent}}%",
+        "hintPos": "删除、改价、折扣、手动开钱箱、退款作废、主管覆盖与系统操作"
+      },
+      "abnormal": {
+        "title": "异常操作",
+        "hint": "按行为规则：开钱箱无交易、结账后删除、大额折扣、频繁删除、重复重打印、非营业时间",
+        "people": "涉及 {{count}} 人",
+        "pending": "待核查 {{count}}",
+        "hintPos": "按行为规则：开钱箱无交易、结账后删除、大额折扣、频繁删除、重复重打印、非营业时间、紧急覆盖"
+      },
+      "unit": "条",
+      "byCategory": "按类别",
+      "byDangerType": "按操作类型",
+      "byRule": "按命中规则",
+      "clearSub": "清除细分",
+      "reviewStatus": "核查状态"
+    },
+    "dangerGroups": {
+      "delete": "删除商品",
+      "drawer": "开钱箱",
+      "price": "改价",
+      "discount": "改折扣",
+      "return": "退货"
+    },
+    "rules": {
+      "noSaleDrawer": {
+        "label": "开钱箱无交易",
+        "desc": "手动开钱箱前后 2 分钟内，同一设备没有「结账」。"
+      },
+      "deleteAfterCheckout": {
+        "label": "结账后删除",
+        "desc": "「结账」后 2 分钟内、尚未开始下一单时删除商品，且删除金额 ≥ 10。"
+      },
+      "bigDiscount": {
+        "label": "大额折扣 / 改价",
+        "desc": "单品或整单折扣 ≥ 50%，或改价降幅 ≥ 50%。"
+      },
+      "burstDelete": {
+        "label": "频繁删除",
+        "desc": "同一员工 10 分钟内删除商品 ≥ 8 次，每段只标一条。"
+      },
+      "repeatReprint": {
+        "label": "重复重打印",
+        "desc": "同一订单当天重打印 ≥ 3 次，标第 3 次。"
+      },
+      "offHours": {
+        "label": "非营业时间",
+        "desc": "营业时间（07:00–22:00）之外的操作，每台设备每段只标第一条。"
+      },
+      "emergencyOverride": {
+        "label": "紧急覆盖",
+        "desc": "新收银在紧急覆盖（离线或权限受阻时的应急放行）下发生的操作，每条都需要核查。"
+      }
+    },
+    "reviewStatuses": {
+      "all": "全部",
+      "pending": "待核查",
+      "reviewed": "已核查",
+      "followUp": "需跟进"
+    },
+    "evidence": {
+      "noSaleWindow": "前后 {{seconds}} 秒内同设备没有结账",
+      "noSalePrevious": "上一笔结账 {{at}}（{{minutes}} 分钟前）",
+      "noSaleNext": "下一笔结账 {{at}}",
+      "identityConfirmed": "开钱箱时有身份确认",
+      "identityMissing": "开钱箱时没有身份确认",
+      "deleteAfterCheckout": "{{at}} 开始结账后 {{seconds}} 秒删除，金额 {{amount}}",
+      "product": "商品 {{product}} × {{quantity}}",
+      "productOnly": "商品 {{product}}",
+      "discountItem": "单品折扣 {{percent}}%（原 {{previous}}%）",
+      "discountCart": "整单折扣 {{percent}}%，{{count}} 件，原总金额 {{total}}",
+      "discountPrice": "改价 {{from}} → {{to}}，降幅 {{percent}}%",
+      "burstDelete": "{{from}}–{{to}} 共删除 {{count}} 次，合计 {{amount}}（阈值 {{threshold}} 次）",
+      "repeatReprint": "订单 {{order}} 当天重打印 {{count}} 次，第 1 次在 {{first}}",
+      "offHoursBeforeOpen": "开门前共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}",
+      "offHoursAfterClose": "打烊后共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}",
+      "deleteAfterTender": "{{at}} 开始收款后 {{seconds}} 秒删除，金额 {{amount}}",
+      "discountAmount": "让利 {{amount}}",
+      "repeatReprintDay": "同一设备当天重打印 {{count}} 次，第 1 次在 {{first}}",
+      "emergencyOverride": "紧急覆盖下的操作（结果：{{outcome}}）",
+      "reason": "原因 {{reason}}"
+    },
+    "badges": {
+      "danger": "危险",
+      "reviewed": "已核查",
+      "followUp": "需跟进"
+    },
+    "tabs": {
+      "records": "操作记录",
+      "employees": "按员工汇总"
+    },
+    "employees": {
+      "hint": "按异常数、危险占比排序 · 点「查看明细」看该员工的记录",
+      "employee": "员工",
+      "stores": "分店",
+      "total": "操作总数",
+      "danger": "危险操作",
+      "dangerRate": "危险占比",
+      "dangerRateAvg": "（均值 {{percent}}%）",
+      "abnormal": "异常 · 主要规则",
+      "abnormalTag": "{{count}} 条 · 待核查 {{pending}}",
+      "noAbnormal": "无异常",
+      "amount": "金额让利",
+      "view": "查看明细",
+      "footnote": "金额让利 = 删除商品、改价、整单折扣、无小票退货带来的应收减少合计；口径与上方分店、时间、设备条件一致。",
+      "loadFailed": "员工汇总加载失败",
+      "empty": "该范围内没有员工操作",
+      "footnotePos": "金额让利 = 删除、清空、改价、折扣与退款带来的应收减少合计（只计成功的操作）；口径与上方分店、时间、设备、关键字条件一致。"
+    },
+    "review": {
+      "title": "核查",
+      "pending": "待核查",
+      "reviewer": "核查人：{{name}}",
+      "noteLabel": "核查备注（选填，「需跟进」时建议写明）",
+      "notePlaceholder": "例如：已调监控，顾客退回商品",
+      "normal": "确认正常",
+      "followUp": "有问题，需跟进",
+      "revoke": "撤销",
+      "by": "{{name}} · {{at}}",
+      "saved": "核查已保存",
+      "revoked": "已撤销核查",
+      "conflict": "该记录刚被他人核查或修改，已刷新最新状态",
+      "failed": "核查保存失败",
+      "readOnly": "你没有核查权限，只能查看结论"
+    },
+    "abnormalTitle": "异常依据",
+    "dangerOnly": "危险操作：直接改变应收金额或现金，未命中异常规则。",
+    "contextSameDevice": "同设备 ±{{minutes}} 分钟",
+    "rulesPos": {
+      "noSaleDrawer": "手动开钱箱（不关联订单）前后 2 分钟内，同一设备没有完成销售或退款。",
+      "deleteAfterCheckout": "新收银以开始收款为「结账」：收款开始后、销售完成前删除商品、清空购物车或减少数量，且应收减少 ≥ 10。",
+      "bigDiscount": "单品或整单折扣 ≥ 50%，或改价降幅 ≥ 50%，且让利 ≥ 10（新收银常用 50% 快捷折扣，小额不算）。",
+      "burstDelete": "同一收银员 10 分钟内删除商品 ≥ 8 次，每段只标一条。",
+      "repeatReprint": "同一张小票重打印 ≥ 3 次（按同设备上一笔销售归组），标第 3 次。",
+      "offHours": "营业时间（门店本地 07:00–22:00）之外的操作，每台设备每段只标第一条。",
+      "emergencyOverride": "新收银在紧急覆盖（离线或权限受阻时的应急放行）下发生的操作，每条都需要核查。"
+    },
+    "dangerGroupsPos": {
+      "delete": "删除 / 清空",
+      "drawer": "手动开钱箱",
+      "price": "改价",
+      "discount": "折扣",
+      "refund": "退款 / 作废",
+      "override": "主管 / 权限覆盖",
+      "system": "系统操作"
+    },
+    "source": {
+      "title": "员工操作日志",
+      "legacy": "老收银",
+      "pos": "新收银",
+      "switchLabel": "数据来源",
+      "legacySubtitle": "旧版收银系统上传的员工操作记录（门店本地时间）。",
+      "posSubtitle": "新收银（WPF / 手持 / iPad）的操作审计；时间按浏览器本地时区显示。"
+    },
+    "pos": {
+      "allScope": "结果 · 成功 {{succeeded}} · 拒绝 {{denied}} · 失败 {{failed}}",
+      "onlyCashier": "只看 {{name}}",
+      "operationTypesPlaceholder": "全部事件，可多选",
+      "storesPlaceholder": "全部可查看分店",
+      "riskColumn": "风险",
+      "amountImpact": "应收减少",
+      "contextTitle": "前后操作",
+      "contextHint": "同设备 ±{{minutes}} 分钟",
+      "contextEmpty": "窗口内没有其他操作",
+      "contextFailed": "前后操作加载失败",
+      "contextTruncated": "窗口内操作过多，只显示前 {{count}} 条",
+      "onlyCashierDay": "只看该收银员当天操作",
+      "dangerOnly": "危险操作：直接改变应收金额、现金或收银环境，未命中异常规则。"
+    }
+  }
+}

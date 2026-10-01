@@ -23,7 +23,8 @@
     "caption": "Based on your current access"
   },
   "groups": {
-    "salesProduct": "Sales & products",
+    "productPurchasing": "Product purchasing",
+    "productSales": "Product sales",
     "warehousePurchase": "Warehouse & purchasing",
     "operationsReports": "Operations & reports",
     "peopleManagement": "People & management"
@@ -39,15 +40,18 @@
     "installmentOrders": "Instalment orders",
     "storeVouchers": "Vouchers",
     "seasonalCards": "Seasonal cards",
-    "warehouse": "Warehouse",
+    "warehouse": "Products & locations",
+    "containers": "Containers",
+    "warehousePicking": "Order picking",
     "warehouseProductInsights": "Warehouse activity",
     "seasonalProductInsights": "Seasonal products",
+    "containerNewProducts": "HB new arrivals",
     "domesticPurchase": "Domestic purchasing",
     "localSupplierInvoices": "Supplier invoices",
     "advertisements": "Advertisements",
     "promotions": "Promotions",
     "reports": "Reports",
-    "posOperationLogs": "POS operation logs",
+    "legacyEmployeeLogs": "Employee operation logs",
     "attendancePersonal": "My attendance",
     "attendanceManagement": "Attendance management",
     "users": "Employees",
@@ -58,13 +62,16 @@
     "employeeProfile": "My profile",
     "employeeProfileReview": "Profile reviews",
     "deviceManagement": "Device management",
+    "appInstall": "Install app",
     "appDownloads": "App Downloads",
     "wpfVersions": "WPF Versions"
   },
   "allFunctions": {
     "title": "All tools",
     "caption": "Authorised by role and device",
-    "sectionCount": "{{count}} available"
+    "sectionCount": "{{count}} available",
+    "collapseAll": "Collapse all",
+    "expandAll": "Expand all"
   },
   "states": {
     "loadingTitle": "Loading your access",
@@ -79,10 +86,13 @@
   },
   "accessibility": {
     "openFunction": "Open {{title}}",
+    "toggleSectionHint": "Expands or collapses this group",
+    "sectionBadge": "{{label}}, {{badge}} alerts",
     "functionCount": "{{title}}, {{count}} available tools",
     "currentStore": "Current store, {{store}}",
     "changeStore": "Current store, {{store}}, switch store",
     "changeStoreHint": "Opens the stores authorised for this account",
-    "storesLoading": "Loading available stores"
+    "storesLoading": "Loading available stores",
+    "openCart": "Cart SKUs, {{value}}, open cart"
   }
 }

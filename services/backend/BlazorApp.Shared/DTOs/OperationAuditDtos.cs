@@ -69,7 +69,16 @@ public sealed class OperationAuditEventDto
 
     public Dictionary<string, string?>? Properties { get; set; }
 
-    public List<OperationAuditItemDto> Items { get; set; } = [];
+    // 已发布的手持/iPad 对非订单事件发送 "items": null；nullable 上下文下非可空 List
+    // 会被 MVC 隐式必填校验整批 400，客户端再把同批事件永久标为 rejected。
+    // 反序列化时把 null 归一为空列表，与 IngestAsync 的 Items ?? [] 语义一致。
+    public List<OperationAuditItemDto> Items
+    {
+        get => items;
+        set => items = value ?? [];
+    }
+
+    private List<OperationAuditItemDto> items = [];
 }
 
 public sealed class OperationAuditItemDto

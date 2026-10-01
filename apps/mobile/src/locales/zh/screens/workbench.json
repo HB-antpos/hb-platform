@@ -23,7 +23,8 @@
     "caption": "按当前权限显示"
   },
   "groups": {
-    "salesProduct": "销售与商品",
+    "productPurchasing": "商品进货",
+    "productSales": "商品销售",
     "warehousePurchase": "仓库与采购",
     "operationsReports": "运营与报表",
     "peopleManagement": "人员与管理"
@@ -39,15 +40,18 @@
     "installmentOrders": "分期订单",
     "storeVouchers": "代金券",
     "seasonalCards": "节日卡",
-    "warehouse": "仓库",
+    "warehouse": "商品和货位管理",
+    "containers": "货柜管理",
+    "warehousePicking": "订单拣货",
     "warehouseProductInsights": "仓库商品进销",
     "seasonalProductInsights": "季节商品查询",
+    "containerNewProducts": "HB新品",
     "domesticPurchase": "国内采购",
     "localSupplierInvoices": "供应商发票",
     "advertisements": "广告",
     "promotions": "促销",
     "reports": "报表中心",
-    "posOperationLogs": "员工操作日志",
+    "legacyEmployeeLogs": "员工操作日志",
     "attendancePersonal": "个人考勤",
     "attendanceManagement": "考勤管理",
     "users": "员工列表",
@@ -58,13 +62,16 @@
     "employeeProfile": "个人资料",
     "employeeProfileReview": "资料审核",
     "deviceManagement": "设备管理",
+    "appInstall": "App 安装",
     "appDownloads": "App 下载",
     "wpfVersions": "WPF 版本管理"
   },
   "allFunctions": {
     "title": "全部功能",
     "caption": "按角色与设备授权",
-    "sectionCount": "{{count}} 项可用"
+    "sectionCount": "{{count}} 项可用",
+    "collapseAll": "全部折叠",
+    "expandAll": "全部展开"
   },
   "states": {
     "loadingTitle": "正在加载功能权限",
@@ -79,10 +86,13 @@
   },
   "accessibility": {
     "openFunction": "打开{{title}}",
+    "toggleSectionHint": "点按展开或折叠该分组",
+    "sectionBadge": "{{label}}，{{badge}} 项提醒",
     "functionCount": "{{title}}，{{count}}项可用功能",
     "currentStore": "当前门店，{{store}}",
     "changeStore": "当前门店，{{store}}，切换分店",
     "changeStoreHint": "打开当前账号获权的分店列表",
-    "storesLoading": "正在加载可用分店"
+    "storesLoading": "正在加载可用分店",
+    "openCart": "购物车 SKU，{{value}}，打开购物车"
   }
 }
