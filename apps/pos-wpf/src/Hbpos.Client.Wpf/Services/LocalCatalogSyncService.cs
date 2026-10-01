@@ -66,7 +66,8 @@ public sealed class LocalCatalogSyncService(
     ICatalogApiClient catalogApiClient,
     IUiPriorityCoordinator? uiPriorityCoordinator = null,
     ILocalPromotionRepository? localPromotionRepository = null,
-    IPromotionApiClient? promotionApiClient = null) : ILocalCatalogSyncService
+    IPromotionApiClient? promotionApiClient = null,
+    ICatalogFileDownloader? catalogFileDownloader = null) : ILocalCatalogSyncService
 {
     private const int ComparePageSize = 2000;
     // 与服务端 v2 标准页大小一致，才能命中服务端缓存的标准页与摘要。
@@ -87,6 +88,20 @@ public sealed class LocalCatalogSyncService(
         var baseCatalogVersion = forceFullDownload
             ? null
             : await localCatalogRepository.GetCatalogVersionAsync(storeCode, cancellationToken);
+        if (catalogFileDownloader is not null)
+        {
+            var fileResult = await TryFileSyncAsync(
+                storeCode,
+                baseCatalogVersion,
+                progress,
+                totalStopwatch,
+                cancellationToken);
+            if (fileResult is not null)
+            {
+                return fileResult;
+            }
+        }
+
         CatalogSyncPlanResponse plan;
         try
         {
@@ -160,31 +175,14 @@ public sealed class LocalCatalogSyncService(
                     break;
             }
 
-            var codeConflictsChanged = await SyncAuxiliaryDataAsync(storeCode, cancellationToken);
-            var catalogChanged = syncMode != CatalogSyncModes.NoChange;
-            totalStopwatch.Stop();
-            Log($"planned sync completed store={storeCode} mode={syncMode} remotePages={counters.RemotePages} upserted={counters.UpsertedCount} deleted={counters.DeletedCount} catalogChanged={catalogChanged} codeConflictsChanged={codeConflictsChanged} elapsedMs={totalStopwatch.ElapsedMilliseconds}");
-            ReportProgress(
-                progress,
+            return await CompletePlannedSyncAsync(
                 storeCode,
-                CatalogSyncProgressStage.Completed,
-                counters.TotalCount,
-                counters.TotalCount == 0 ? 0 : Math.Max(counters.DownloadedCount, counters.TotalCount),
-                comparePages: 0,
-                counters.RemotePages,
-                counters.UpsertedCount,
-                counters.DeletedCount,
-                totalStopwatch,
-                forceComplete: true);
-            return new LocalCatalogSyncResult(
-                storeCode,
-                ComparePages: 0,
-                counters.RemotePages,
-                counters.UpsertedCount,
-                counters.DeletedCount,
                 syncMode,
-                catalogChanged,
-                codeConflictsChanged);
+                counters,
+                progress,
+                totalStopwatch,
+                transport: "paging",
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -210,6 +208,274 @@ public sealed class LocalCatalogSyncService(
                 ex.Message);
             throw;
         }
+    }
+
+    /// <summary>
+    /// 目录写入完成后的公共收尾：拉取附属数据、上报完成进度并生成结果。分页与整文件两种传输共用。
+    /// </summary>
+    private async Task<LocalCatalogSyncResult> CompletePlannedSyncAsync(
+        string storeCode,
+        string syncMode,
+        PlannedSyncCounters counters,
+        IProgress<CatalogSyncProgress>? progress,
+        Stopwatch totalStopwatch,
+        string transport,
+        CancellationToken cancellationToken)
+    {
+        var codeConflictsChanged = await SyncAuxiliaryDataAsync(storeCode, cancellationToken);
+        var catalogChanged = syncMode != CatalogSyncModes.NoChange;
+        totalStopwatch.Stop();
+        Log($"planned sync completed store={storeCode} mode={syncMode} transport={transport} remotePages={counters.RemotePages} upserted={counters.UpsertedCount} deleted={counters.DeletedCount} catalogChanged={catalogChanged} codeConflictsChanged={codeConflictsChanged} elapsedMs={totalStopwatch.ElapsedMilliseconds}");
+        ReportProgress(
+            progress,
+            storeCode,
+            CatalogSyncProgressStage.Completed,
+            counters.TotalCount,
+            counters.TotalCount == 0 ? 0 : Math.Max(counters.DownloadedCount, counters.TotalCount),
+            comparePages: 0,
+            counters.RemotePages,
+            counters.UpsertedCount,
+            counters.DeletedCount,
+            totalStopwatch,
+            forceComplete: true);
+        return new LocalCatalogSyncResult(
+            storeCode,
+            ComparePages: 0,
+            counters.RemotePages,
+            counters.UpsertedCount,
+            counters.DeletedCount,
+            syncMode,
+            catalogChanged,
+            codeConflictsChanged);
+    }
+
+    /// <summary>
+    /// 中文注释：整文件协议——一次下载一个不可变的 gzip 文件（断点续传、整份 SHA-256 校验），再流式写入暂存表并原子切换。
+    /// 任何一步失败（服务端未开启、旧服务端、下载或校验失败、文件内容与计划不符）都返回 null，
+    /// 调用方照旧走分页协议；暂存数据随会话丢弃，本地目录保持不变。
+    /// </summary>
+    private async Task<LocalCatalogSyncResult?> TryFileSyncAsync(
+        string storeCode,
+        string? baseCatalogVersion,
+        IProgress<CatalogSyncProgress>? progress,
+        Stopwatch totalStopwatch,
+        CancellationToken cancellationToken)
+    {
+        CatalogFileSyncPlanResponse plan;
+        try
+        {
+            plan = await catalogApiClient.GetCatalogFileSyncPlanAsync(storeCode, baseCatalogVersion, cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Log($"file sync unavailable store={storeCode} status={FormatStatus(ex)} errorCode={(ex as CatalogApiException)?.ErrorCode ?? "<none>"} fallback=paging");
+            return null;
+        }
+
+        var invalidReason = ValidateFilePlan(storeCode, baseCatalogVersion, plan);
+        if (invalidReason is not null)
+        {
+            Log($"file sync plan rejected store={storeCode} mode={plan.Mode} reason={invalidReason} fallback=paging");
+            return null;
+        }
+
+        var counters = new PlannedSyncCounters();
+        try
+        {
+            Log($"file sync start store={storeCode} mode={plan.Mode} base={baseCatalogVersion ?? "<none>"} target={plan.TargetCatalogVersion} total={plan.TargetTotal} bytes={plan.File?.Bytes.ToString(CultureInfo.InvariantCulture) ?? "<none>"} deltaOperations={plan.DeltaOperationCount?.ToString(CultureInfo.InvariantCulture) ?? "<none>"}");
+            switch (plan.Mode)
+            {
+                case CatalogSyncModes.NoChange:
+                    counters.TotalCount = plan.TargetTotal;
+                    counters.DownloadedCount = plan.TargetTotal;
+                    Log($"catalog unchanged store={storeCode} version={plan.TargetCatalogVersion} total={plan.TargetTotal}");
+                    break;
+                case CatalogSyncModes.Full:
+                    counters.TotalCount = plan.TargetTotal;
+                    await ImportFullFileAsync(
+                        storeCode,
+                        plan,
+                        await DownloadPlanFileAsync(storeCode, plan, counters, progress, totalStopwatch, cancellationToken),
+                        counters,
+                        progress,
+                        totalStopwatch,
+                        cancellationToken);
+                    break;
+                case CatalogSyncModes.Delta:
+                    counters.TotalCount = plan.DeltaOperationCount ?? 0;
+                    await ApplyDeltaFileAsync(
+                        storeCode,
+                        plan,
+                        baseCatalogVersion!,
+                        await DownloadPlanFileAsync(storeCode, plan, counters, progress, totalStopwatch, cancellationToken),
+                        counters,
+                        cancellationToken);
+                    break;
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Log($"file sync failed store={storeCode} mode={plan.Mode} error={ex.GetType().Name}: {ex.Message} fallback=paging");
+            return null;
+        }
+
+        return await CompletePlannedSyncAsync(
+            storeCode,
+            plan.Mode,
+            counters,
+            progress,
+            totalStopwatch,
+            transport: "file",
+            cancellationToken);
+    }
+
+    private static string? ValidateFilePlan(
+        string storeCode,
+        string? baseCatalogVersion,
+        CatalogFileSyncPlanResponse plan)
+    {
+        if (!string.Equals(plan.StoreCode?.Trim(), storeCode.Trim(), StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(plan.TargetCatalogVersion) ||
+            plan.TargetTotal < 0)
+        {
+            return "invalid-plan";
+        }
+
+        return plan.Mode switch
+        {
+            CatalogSyncModes.NoChange => baseCatalogVersion is not null &&
+                                         string.Equals(plan.TargetCatalogVersion, baseCatalogVersion, StringComparison.Ordinal)
+                ? null
+                : "no-change-version-mismatch",
+            CatalogSyncModes.Full => plan.File is { Kind: CatalogFileKinds.Full, Format: CatalogFileFormats.FullV1 }
+                ? null
+                : "full-file-missing",
+            CatalogSyncModes.Delta => baseCatalogVersion is not null &&
+                                      plan.DeltaOperationCount is not null &&
+                                      plan.File is { Kind: CatalogFileKinds.Delta, Format: CatalogFileFormats.DeltaV1 }
+                ? null
+                : "delta-file-missing",
+            _ => "unknown-mode"
+        };
+    }
+
+    /// <summary>下载占进度条前一半，写入本地库占后一半，数字只增不减。</summary>
+    private async Task<string> DownloadPlanFileAsync(
+        string storeCode,
+        CatalogFileSyncPlanResponse plan,
+        PlannedSyncCounters counters,
+        IProgress<CatalogSyncProgress>? progress,
+        Stopwatch totalStopwatch,
+        CancellationToken cancellationToken)
+    {
+        var file = plan.File!;
+        var downloadStopwatch = Stopwatch.StartNew();
+        var halfTotal = counters.TotalCount / 2;
+        var reportStep = Math.Max(1, counters.TotalCount / 100);
+        var lastReported = -1;
+        var bytesProgress = new InlineProgress<long>(bytes =>
+        {
+            var downloaded = file.Bytes <= 0 ? halfTotal : (int)(halfTotal * Math.Min(1d, (double)bytes / file.Bytes));
+            if (downloaded - lastReported < reportStep && downloaded != halfTotal)
+            {
+                return;
+            }
+
+            lastReported = downloaded;
+            counters.DownloadedCount = downloaded;
+            ReportPlannedDownloadProgress(progress, storeCode, counters, totalStopwatch);
+        });
+        await _uiPriorityCoordinator.WaitForUiIdleAsync(cancellationToken);
+        var path = await catalogFileDownloader!.DownloadAsync(file, bytesProgress, cancellationToken);
+        downloadStopwatch.Stop();
+        counters.RemotePages = 1;
+        counters.DownloadedCount = halfTotal;
+        Log($"file downloaded store={storeCode} kind={file.Kind} bytes={file.Bytes} elapsedMs={downloadStopwatch.ElapsedMilliseconds}");
+        return path;
+    }
+
+    private async Task ImportFullFileAsync(
+        string storeCode,
+        CatalogFileSyncPlanResponse plan,
+        string path,
+        PlannedSyncCounters counters,
+        IProgress<CatalogSyncProgress>? progress,
+        Stopwatch totalStopwatch,
+        CancellationToken cancellationToken)
+    {
+        var importStopwatch = Stopwatch.StartNew();
+        var halfTotal = counters.TotalCount / 2;
+        var imported = 0;
+        // 中文注释：复用分页全量的暂存会话——逐批写入临时表，最后在一个事务里替换并写入版本；期间收银照常读旧目录。
+        await using var replaceSession = await localCatalogRepository.BeginStoreReplaceSessionAsync(
+            storeCode,
+            cancellationToken);
+        await CatalogFileReader.ReadFullAsync(
+            path,
+            storeCode,
+            plan.TargetCatalogVersion,
+            plan.TargetTotal,
+            ApplyBatchSize,
+            async batch =>
+            {
+                await _uiPriorityCoordinator.WaitForUiIdleAsync(cancellationToken);
+                await replaceSession.StageAsync(batch.Select(item => item.ToSellableItemDto()).ToArray(), cancellationToken);
+                imported += batch.Count;
+                counters.UpsertedCount = imported;
+                counters.DownloadedCount = halfTotal + (int)((long)(counters.TotalCount - halfTotal) * imported / Math.Max(1, plan.TargetTotal));
+                ReportPlannedDownloadProgress(progress, storeCode, counters, totalStopwatch);
+            },
+            cancellationToken);
+        await _uiPriorityCoordinator.WaitForUiIdleAsync(cancellationToken);
+        var commitResult = await replaceSession.CommitAsync(
+            new LocalCatalogVersionStamp(plan.TargetCatalogVersion, plan.TargetTotal),
+            cancellationToken);
+        importStopwatch.Stop();
+        counters.DownloadedCount = counters.TotalCount;
+        counters.UpsertedCount = commitResult.InsertedCount;
+        counters.DeletedCount = commitResult.DeletedCount;
+        catalogFileDownloader!.Release(path);
+        Log($"file snapshot committed store={storeCode} version={plan.TargetCatalogVersion} inserted={commitResult.InsertedCount} deleted={commitResult.DeletedCount} importElapsedMs={importStopwatch.ElapsedMilliseconds}");
+    }
+
+    private async Task ApplyDeltaFileAsync(
+        string storeCode,
+        CatalogFileSyncPlanResponse plan,
+        string baseCatalogVersion,
+        string path,
+        PlannedSyncCounters counters,
+        CancellationToken cancellationToken)
+    {
+        var applyStopwatch = Stopwatch.StartNew();
+        var (upserts, deletes) = await CatalogFileReader.ReadDeltaAsync(
+            path,
+            storeCode,
+            baseCatalogVersion,
+            plan.TargetCatalogVersion,
+            cancellationToken);
+        if (upserts.Count + deletes.Count != plan.DeltaOperationCount)
+        {
+            throw new CatalogApiException(
+                $"Catalog delta file does not match the sync plan. expected={plan.DeltaOperationCount} received={upserts.Count + deletes.Count}",
+                HttpStatusCode.OK,
+                "CATALOG_DELTA_INCOMPLETE");
+        }
+
+        await _uiPriorityCoordinator.WaitForUiIdleAsync(cancellationToken);
+        // 本地版本不是 base 时仓储抛版本冲突且不做任何修改，由分页协议接手（它会再退回全量）。
+        var applied = await localCatalogRepository.ApplyCatalogDeltaAsync(
+            storeCode,
+            baseCatalogVersion,
+            plan.TargetCatalogVersion,
+            upserts.Select(item => item.ToSellableItemDto()).ToArray(),
+            deletes.Select(GetDeleteLookupCode).ToArray(),
+            cancellationToken);
+        applyStopwatch.Stop();
+        counters.DownloadedCount = counters.TotalCount;
+        counters.UpsertedCount = applied.UpsertedCount;
+        counters.DeletedCount = applied.DeletedCount;
+        catalogFileDownloader!.Release(path);
+        Log($"file delta applied store={storeCode} base={baseCatalogVersion} target={plan.TargetCatalogVersion} upserted={applied.UpsertedCount} deleted={applied.DeletedCount} localCount={applied.LocalItemCount} targetTotal={plan.TargetTotal} applyElapsedMs={applyStopwatch.ElapsedMilliseconds}");
     }
 
     private async Task DownloadAndApplyDeltaAsync(
@@ -466,6 +732,13 @@ public sealed class LocalCatalogSyncService(
                 apiException.ErrorCode is "CATALOG_DELTA_BASE_CHANGED" or "CATALOG_DELTA_INCOMPLETE" or "CATALOG_PAGE_CHECKSUM_MISMATCH" or "CATALOG_PAGE_VERSION_MISMATCH",
             _ => false
         };
+    }
+
+    private static string FormatStatus(Exception exception)
+    {
+        return exception is CatalogApiException apiException
+            ? FormatStatus(apiException)
+            : "<none>";
     }
 
     private static string FormatStatus(CatalogApiException exception)
@@ -1063,6 +1336,12 @@ public sealed class LocalCatalogSyncService(
     private static void Log(string message)
     {
         ConsoleLog.Write("CatalogSync", message);
+    }
+
+    /// <summary>在调用线程上直接上报；下载回调来自后台线程，进度最终由外层 IProgress 负责切回 UI。</summary>
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     private sealed class PlannedSyncCounters
