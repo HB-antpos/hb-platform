@@ -7,11 +7,15 @@ import { getContainerNewProductsErrorCode } from "./errors";
 const responseSchema = z.object({
   storeCode: z.string().min(1),
   stateCode: z.string().nullable().optional().transform((value) => value ?? null),
+  localToday: z.string().nullable().optional().transform((value) => value?.slice(0, 10) || null),
   items: z.array(z.object({
     productCode: z.string().min(1),
     hbProductNo: z.string().nullable().optional().transform((value) => value?.trim() || null),
     quantity: z.number().nullable().optional().transform((value) => value ?? null),
     imageUrl: z.string().nullable().optional().transform((value) => value ?? null),
+    barcode: z.string().nullable().optional().transform((value) => value?.trim() || null),
+    // 0 或负数按「没有零售价」处理，与后端口径一致
+    retailPrice: z.number().nullable().optional().transform((value) => (value != null && value > 0 ? value : null)),
     containerNumber: z.string().nullable().optional().transform((value) => value ?? null),
     containerCode: z.string(),
     estimatedStoreArrivalDate: z.string().min(1),
