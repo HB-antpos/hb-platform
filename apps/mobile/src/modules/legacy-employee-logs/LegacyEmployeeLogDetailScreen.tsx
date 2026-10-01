@@ -5,6 +5,7 @@ import { ActivityIndicator, Button, Icon, IconButton, Snackbar, Text, TextInput 
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { productTitle } from "@/components/legacy-employee-logs/LegacyLogCard";
+import { ProductImageBox } from "@/components/seasonal-product-insights/ProductImageBox";
 import { DangerBadge, OperationTag, ReviewBadge, RuleBadge } from "@/components/legacy-employee-logs/LegacyLogTags";
 import { LEGACY_UI, RISK } from "@/components/legacy-employee-logs/ui";
 import { createProductInsightRequestGate } from "@/modules/product-insights/request-gate";
@@ -15,7 +16,7 @@ import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { fetchLegacyLogContext, fetchPosLogContext, reviewLegacyLog, reviewPosLog } from "./api";
 import { LegacyScreenMessage, useLegacyLogsGuard, usePosOperationLabel } from "./LegacyEmployeeLogsScreen";
-import { activeReview, clockOf, describeFlagEvidence, formatAmountImpact, storeDisplayName } from "./logic";
+import { activeReview, clockOf, describeFlagEvidence, formatAmountImpact, productThumbnailUri, storeDisplayName } from "./logic";
 import { notifyLegacyLogReviewed } from "./review-events";
 import type { LegacyLogContext, LegacyLogItem, LogSource } from "./types";
 
@@ -138,7 +139,13 @@ function DetailContent({ id, source, onBack }: { id: string; source: LogSource; 
               <ReviewBadge item={target} reviewedLabel={t("badges.reviewed")} followUpLabel={t("badges.followUp")} />
             </View>
             <View style={styles.titleRow}>
-              <Text style={styles.headline}>{target.title ?? productTitle(target.operationDetail) ?? target.operation ?? "-"}</Text>
+              {target.hasProduct ? (
+                <ProductImageBox uri={productThumbnailUri(target.productImage, 112)} size={56} label={target.title ?? ""} />
+              ) : null}
+              <View style={styles.headlineBox}>
+                <Text style={styles.headline}>{target.title ?? productTitle(target.operationDetail) ?? target.operation ?? "-"}</Text>
+                {target.itemNumber ? <Text style={[styles.headlineItemNumber, LEGACY_UI.mono]}>{target.itemNumber}</Text> : null}
+              </View>
               {formatAmountImpact(target.amountImpact) ? (
                 <Text style={[styles.amount, LEGACY_UI.mono]}>{formatAmountImpact(target.amountImpact)}</Text>
               ) : null}
@@ -338,8 +345,10 @@ const styles = StyleSheet.create({
   state: { paddingTop: HB_SPACING.xl, paddingHorizontal: HB_SPACING.lg, alignItems: "center" },
   content: { paddingHorizontal: HB_SPACING.md, paddingBottom: HB_SPACING.lg, gap: HB_SPACING.sm },
   tags: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
-  titleRow: { flexDirection: "row", alignItems: "baseline", gap: HB_SPACING.xs },
-  headline: { flex: 1, fontSize: 20, fontWeight: "700", color: HB_COLORS.textPrimary },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.sm },
+  headlineBox: { flex: 1, minWidth: 0, gap: 2 },
+  headline: { fontSize: 20, fontWeight: "700", color: HB_COLORS.textPrimary },
+  headlineItemNumber: { fontSize: 13, color: HB_COLORS.textSecondary },
   amount: { fontSize: 18, fontWeight: "700", color: RISK.danger },
   meta: { fontSize: 13, color: HB_COLORS.textSecondary },
   callout: { gap: 6, padding: HB_SPACING.sm, borderRadius: HB_RADIUS.surface, borderWidth: 1, borderColor: RISK.abnormalBorder, backgroundColor: "#FFFAEB" },

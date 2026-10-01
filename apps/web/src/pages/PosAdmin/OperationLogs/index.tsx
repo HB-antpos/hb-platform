@@ -122,11 +122,11 @@ import {
   createLatestOperationAuditRequestGuard,
   formatSignedMoney,
   resolveOperationAuditTableChange,
-  summarizeProducts,
   toLegacyEmployeeSummary,
   type OperationAuditTableSortOrder,
 } from './operationLogsLogic'
 import PosLogDetailPanel from './PosLogDetailPanel'
+import PosProductSummary from './PosProductSummary'
 
 // 风险、核查文案与老收银共用（规则编号相同），随页面代码块懒加载。
 registerPageMessages({ zh: legacyEmployeeLogsMessagesZh, en: legacyEmployeeLogsMessagesEn })
@@ -691,11 +691,9 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
       {
         title: t('operationLogs.columns.products'),
         key: 'products',
-        minWidth: 180,
+        minWidth: 220,
         render: (_, record) => (
-          <span style={WRAPPED_TABLE_CELL_STYLE}>
-            {summarizeProducts(record, t('operationLogs.detail.productFallback'))}
-          </span>
+          <PosProductSummary record={record} fallbackName={t('operationLogs.detail.productFallback')} imageSize={40} />
         ),
       },
       {

@@ -5,6 +5,7 @@ using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models.POSM;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using SqlSugar;
 
 namespace BlazorApp.Api.Services.OperationAudits;
@@ -71,16 +72,23 @@ public sealed class OperationAuditQueryService
     private readonly ISqlSugarClient _db;
     private readonly ICurrentUserManageableStoreScopeService _storeScopeService;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    // 审计表在 POSM 库，商品主档（图片）在 HBweb 库，需要单独的连接；未提供时不补图片。
+    private readonly ISqlSugarClient? _productDb;
+    private readonly ILogger<OperationAuditQueryService>? _logger;
 
     public OperationAuditQueryService(
         ISqlSugarClient db,
         ICurrentUserManageableStoreScopeService storeScopeService,
-        IHttpContextAccessor httpContextAccessor
+        IHttpContextAccessor httpContextAccessor,
+        ISqlSugarClient? productDb = null,
+        ILogger<OperationAuditQueryService>? logger = null
     )
     {
         _db = db;
         _storeScopeService = storeScopeService;
         _httpContextAccessor = httpContextAccessor;
+        _productDb = productDb;
+        _logger = logger;
     }
 
     public async Task<PagedListReactDto<OperationAuditListItemDto>> QueryAsync(
@@ -112,6 +120,7 @@ public sealed class OperationAuditQueryService
 
         var items = rows.Select(MapListItem).ToList();
         await EnrichAsync(items);
+        await FillPrimaryProductInfoAsync(items);
         return new PagedListReactDto<OperationAuditListItemDto>
         {
             Items = items,
@@ -304,6 +313,7 @@ public sealed class OperationAuditQueryService
             items = items.OrderBy(item => item.OccurredAtUtc).ThenBy(item => item.EventId).ToList();
         }
         await EnrichAsync(items);
+        await FillPrimaryProductInfoAsync(items);
         return OperationAuditDetailQueryResult<OperationAuditContextDto>.Found(new OperationAuditContextDto
         {
             Target = items.First(item => item.EventId == eventId),
@@ -390,6 +400,85 @@ public sealed class OperationAuditQueryService
             flags.GroupBy(flag => flag.EventId).ToDictionary(group => group.Key, group => group.OrderBy(flag => flag.RuleCode, StringComparer.Ordinal).ToList()),
             reviews.ToDictionary(review => review.EventId)
         );
+    }
+
+    /// <summary>
+    /// 给列表行补上主商品货号与图片。入库时 PrimaryProduct 取自第 0 行明细，这里也只取第 0 行，
+    /// 保证名称、货号、图片是同一件商品；按主键 (event_id, line_index) 定位，每页最多 200 条一次查询。
+    /// 货号用审计明细里收银端上报的值，图片按商品编码回查 HBweb 主档。
+    /// </summary>
+    private async Task FillPrimaryProductInfoAsync(List<OperationAuditListItemDto> items)
+    {
+        var ids = items.Where(item => item.ProductCount > 0).Select(item => item.EventId).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+        var primaryLines = new Dictionary<Guid, (string? ProductCode, string? ItemNumber)>();
+        foreach (var batch in ids.Chunk(IdBatchSize))
+        {
+            var batchIds = batch.ToList();
+            var rows = await _db.Queryable<PosOperationAuditItem>()
+                .Where(line => batchIds.Contains(line.EventId) && line.LineIndex == 0)
+                .Select(line => new { line.EventId, line.ProductCode, line.ItemNumber })
+                .ToListAsync();
+            foreach (var row in rows)
+            {
+                primaryLines[row.EventId] = (row.ProductCode, row.ItemNumber);
+            }
+        }
+        var images = await LookupProductImagesAsync(
+            primaryLines.Values.Select(line => line.ProductCode).OfType<string>());
+        foreach (var item in items)
+        {
+            if (!primaryLines.TryGetValue(item.EventId, out var line))
+            {
+                continue;
+            }
+            item.PrimaryItemNumber = line.ItemNumber;
+            if (line.ProductCode != null && images.TryGetValue(line.ProductCode, out var image))
+            {
+                item.PrimaryProductImage = image;
+            }
+        }
+    }
+
+    /// <summary>按商品编码回查 HBweb 主档图片；图片只是展示增强，查询失败时返回空结果而不让列表失败。</summary>
+    private async Task<Dictionary<string, string>> LookupProductImagesAsync(IEnumerable<string> productCodes)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var codes = productCodes
+            .Select(code => code.Trim())
+            .Where(code => code.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (_productDb == null || codes.Count == 0)
+        {
+            return result;
+        }
+        try
+        {
+            foreach (var batch in codes.Chunk(IdBatchSize))
+            {
+                var batchCodes = batch.ToList();
+                var products = await _productDb.Queryable<BlazorApp.Shared.Models.Product>()
+                    .Where(product => product.ProductCode != null && batchCodes.Contains(product.ProductCode))
+                    .Select(product => new { product.ProductCode, product.ProductImage })
+                    .ToListAsync();
+                foreach (var product in products)
+                {
+                    if (!string.IsNullOrWhiteSpace(product.ProductCode) && !string.IsNullOrWhiteSpace(product.ProductImage))
+                    {
+                        result[product.ProductCode.Trim()] = product.ProductImage.Trim();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "操作日志回查商品主档图片失败，将只显示商品名与货号");
+        }
+        return result;
     }
 
     /// <summary>给列表行补上异常命中与核查结论（每页最多 200 条，两次按编号查询）。</summary>
@@ -753,6 +842,13 @@ public sealed class OperationAuditQueryService
             .ToListAsync();
         var detail = MapDetail(row);
         detail.Items = items.Select(MapDetailItem).ToList();
+        var primaryLine = items.FirstOrDefault(item => item.LineIndex == 0);
+        detail.PrimaryItemNumber = primaryLine?.ItemNumber;
+        if (primaryLine?.ProductCode is { } primaryCode)
+        {
+            var images = await LookupProductImagesAsync([primaryCode]);
+            detail.PrimaryProductImage = images.GetValueOrDefault(primaryCode);
+        }
         var enriched = new List<OperationAuditListItemDto> { detail };
         await EnrichAsync(enriched);
         return new OperationAuditDetailQueryResult

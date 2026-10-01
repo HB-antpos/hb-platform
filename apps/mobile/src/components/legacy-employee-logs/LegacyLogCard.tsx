@@ -1,7 +1,8 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Icon, Text } from "react-native-paper";
-import { clockOf, formatAmountImpact, shortFlagEvidence, storeDisplayName } from "@/modules/legacy-employee-logs/logic";
+import { ProductImageBox } from "@/components/seasonal-product-insights/ProductImageBox";
+import { clockOf, formatAmountImpact, productThumbnailUri, shortFlagEvidence, storeDisplayName } from "@/modules/legacy-employee-logs/logic";
 import type { LegacyLogItem } from "@/modules/legacy-employee-logs/types";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { DangerBadge, OperationTag, ReviewBadge } from "./LegacyLogTags";
@@ -25,6 +26,7 @@ export const LegacyLogCard = memo(function LegacyLogCard({
   const flag = item.flags[0];
   const short = flag ? shortFlagEvidence(flag) : null;
   const title = item.title ?? productTitle(item.operationDetail) ?? item.operationDetail ?? item.operation ?? "-";
+  const meta = [item.employeeName || "-", storeDisplayName(item.storeCode, storeNames), item.deviceCode || "-"].join(" · ");
   return (
     <Pressable
       accessibilityRole="button"
@@ -41,10 +43,24 @@ export const LegacyLogCard = memo(function LegacyLogCard({
         <View style={styles.spacer} />
         {amount ? <Text style={[styles.amount, LEGACY_UI.mono]}>{amount}</Text> : null}
       </View>
-      <Text numberOfLines={1} style={styles.title}>{title}</Text>
-      <Text numberOfLines={1} style={styles.meta}>
-        {[item.employeeName || "-", storeDisplayName(item.storeCode, storeNames), item.deviceCode || "-"].join(" · ")}
-      </Text>
+      {item.hasProduct ? (
+        // 新收银商品操作：缩略图跨标题与员工两行；货号放标题行右侧，不随长商品名一起被截断。
+        <View style={styles.productRow}>
+          <ProductImageBox uri={productThumbnailUri(item.productImage, 80)} size={40} label={title} />
+          <View style={styles.productText}>
+            <View style={styles.titleRow}>
+              <Text numberOfLines={1} style={[styles.title, styles.titleFlex]}>{title}</Text>
+              {item.itemNumber ? <Text style={[styles.itemNumber, LEGACY_UI.mono]}>{item.itemNumber}</Text> : null}
+            </View>
+            <Text numberOfLines={1} style={styles.meta}>{meta}</Text>
+          </View>
+        </View>
+      ) : (
+        <>
+          <Text numberOfLines={1} style={styles.title}>{title}</Text>
+          <Text numberOfLines={1} style={styles.meta}>{meta}</Text>
+        </>
+      )}
       {flag ? (
         <View style={styles.abnormal}>
           <Icon source="pulse" size={13} color={RISK.abnormalIcon} />
@@ -75,6 +91,11 @@ const styles = StyleSheet.create({
   amount: { fontSize: 14, fontWeight: "700", color: RISK.danger },
   outcome: { fontSize: 11, fontWeight: "600", color: "#A8071A" },
   title: { fontSize: 15, fontWeight: "500", color: HB_COLORS.textPrimary },
+  titleFlex: { flexShrink: 1 },
+  titleRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  itemNumber: { fontSize: 12, color: HB_COLORS.textSecondary },
+  productRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  productText: { flex: 1, minWidth: 0, gap: 2 },
   meta: { fontSize: 12, color: HB_COLORS.textSecondary },
   abnormal: {
     flexDirection: "row",

@@ -51,6 +51,10 @@ export interface LegacyLogItem {
   source?: LogSource;
   tone?: "item" | "price" | "delete" | "payment" | "return" | "auth" | "other";
   title?: string | null;
+  /** 新收银条目才有：是否涉及商品、主商品货号（与名称相同时为空）与主档原图地址。 */
+  hasProduct?: boolean;
+  itemNumber?: string | null;
+  productImage?: string | null;
   pos?: PosLogExtra;
   employeeId: string | null;
   employeeName: string | null;

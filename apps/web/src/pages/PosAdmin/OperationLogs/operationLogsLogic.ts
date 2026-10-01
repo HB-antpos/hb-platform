@@ -219,13 +219,35 @@ export function formatMoney(_value: number | null | undefined, _currencyCode: st
   return `${sign}${symbol}${Math.abs(_value).toFixed(2)}`
 }
 
-export function summarizeProducts(_summary: {
+type ProductSummarySource = {
   productCount: number
   primaryProductName?: string | null
   primaryProduct?: string | null
-} | null | undefined, _fallback = 'Product'): string {
+  primaryItemNumber?: string | null
+} | null | undefined
+
+/** 主商品名 + 剩余数量（不含货号），供图文两行的商品摘要使用；没有商品返回 '-'。 */
+export function summarizeProductName(_summary: ProductSummarySource, _fallback = 'Product'): string {
   if (!_summary || _summary.productCount <= 0) return '-'
-  const primary = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim() || _fallback
+  const name = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim() || _fallback
+  const remaining = Math.max(0, _summary.productCount - 1)
+  return remaining > 0 ? `${name} +${remaining}` : name
+}
+
+/** 主商品的货号；与商品名相同（收银端拿货号当名称）时不重复显示。 */
+export function primaryItemNumberOf(_summary: ProductSummarySource): string | undefined {
+  const itemNumber = _summary?.primaryItemNumber?.trim()
+  if (!_summary || _summary.productCount <= 0 || !itemNumber) return undefined
+  const name = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim()
+  return itemNumber === name ? undefined : itemNumber
+}
+
+/** 单行文字摘要（时间线等）：货号紧跟主商品名，“+N”仍放最后，避免误读成货号属于其余商品。 */
+export function summarizeProducts(_summary: ProductSummarySource, _fallback = 'Product'): string {
+  if (!_summary || _summary.productCount <= 0) return '-'
+  const name = _summary.primaryProductName?.trim() || _summary.primaryProduct?.trim() || _fallback
+  const itemNumber = primaryItemNumberOf(_summary)
+  const primary = itemNumber ? `${name} (${itemNumber})` : name
   const remaining = Math.max(0, _summary.productCount - 1)
   return remaining > 0 ? `${primary} +${remaining}` : primary
 }

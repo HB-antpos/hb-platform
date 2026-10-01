@@ -86,6 +86,10 @@ export interface OperationAuditListItem {
   amountDelta?: number
   productCount: number
   primaryProduct?: string
+  /** 主商品（第 0 行明细）的货号；旧记录或未上报时为空。 */
+  primaryItemNumber?: string | null
+  /** 主商品在商品主档里的原图地址；主档无图时为空。 */
+  primaryProductImage?: string | null
   /** 危险操作；手动开钱箱算，随收款自动开钱箱不算。 */
   isDanger?: boolean
   /** 当前有效的异常规则命中，依据键名与老收银一致。 */
