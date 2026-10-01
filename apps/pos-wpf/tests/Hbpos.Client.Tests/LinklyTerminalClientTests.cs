@@ -966,6 +966,13 @@ public sealed class LinklyTerminalClientTests
     [Fact]
     public async Task TestConnectionAsync_uses_supplied_timeout_instead_of_linkly_business_wait()
     {
+        // 中文注释：本用例只需区分"按传入的 30ms 超时结束"与"退回 BusinessWait（180 秒）"两种行为。
+        // 不能用固定墙钟窗口（如 Task.Delay(120) 后检查 IsCompleted）去赛跑：CancelAfter 回调依赖线程池，
+        // 而测试的 await 续体跑在 xUnit 同步上下文自有线程上，CI 线程池饥饿时测试会先醒来误报。
+        // 改为等待任务完成：等待预算远小于 BusinessWait，两种行为之间留有确定的间隔，与调度抖动无关。
+        Assert.True(
+            LinklyTimeoutPolicy.BusinessWait >= AsyncTestWaitSupport.DefaultTimeout * 2,
+            "等待预算必须明显小于 Linkly 业务等待，否则本用例无法区分是否使用了传入的超时。");
         using var callerCts = new CancellationTokenSource();
         var eftClient = new FakeLinklyEftClient { WaitForCancellationOnConnect = true };
         var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
@@ -975,17 +982,18 @@ public sealed class LinklyTerminalClientTests
             2011,
             TimeSpan.FromMilliseconds(30),
             callerCts.Token);
-        await Task.Delay(120);
-
-        if (!resultTask.IsCompleted)
+        try
         {
-            callerCts.Cancel();
-            Assert.Fail("Connection test ignored the supplied timeout and kept waiting.");
+            var result = await resultTask.WaitUntilCompletedAsync(
+                () => "Connection test ignored the supplied timeout and kept waiting for the Linkly business wait.");
+            Assert.False(result.Succeeded);
+            Assert.Contains("timed out", result.Message, StringComparison.OrdinalIgnoreCase);
         }
-
-        var result = await resultTask;
-        Assert.False(result.Succeeded);
-        Assert.Contains("timed out", result.Message, StringComparison.OrdinalIgnoreCase);
+        finally
+        {
+            // 失败路径也取消调用方令牌，不把挂起的连接测试带到后续用例。
+            callerCts.Cancel();
+        }
     }
 
     [Fact]
