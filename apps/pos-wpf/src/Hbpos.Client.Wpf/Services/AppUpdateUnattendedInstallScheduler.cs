@@ -10,29 +10,44 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Hbpos.Client.Wpf.Services;
 
-public sealed record AppUpdateUnattendedInstallOptions(bool IsEnabled, TimeOnly WindowStart, TimeOnly WindowEnd)
+public sealed record AppUpdateUnattendedInstallOptions(
+    bool IsEnabled,
+    TimeOnly WindowStart,
+    TimeOnly WindowEnd,
+    TimeOnly? ThursdayWindowStart = null)
 {
     public const string WindowConfigurationKey = "AppUpdate:UnattendedInstallWindow";
 
-    public static readonly TimeOnly DefaultWindowStart = new(1, 0);
+    public static readonly TimeOnly DefaultWindowStart = new(18, 0);
 
-    public static readonly TimeOnly DefaultWindowEnd = new(7, 0);
+    public static readonly TimeOnly DefaultWindowEnd = new(8, 0);
 
-    public static AppUpdateUnattendedInstallOptions Default { get; } = new(true, DefaultWindowStart, DefaultWindowEnd);
+    // 中文注释：周四晚上门店营业到更晚，当晚的窗口推迟到 20:00 开始，结束时间（次日 08:00）不变。
+    public static readonly TimeOnly DefaultThursdayWindowStart = new(20, 0);
 
-    public static AppUpdateUnattendedInstallOptions Disabled { get; } = new(false, DefaultWindowStart, DefaultWindowEnd);
+    public static AppUpdateUnattendedInstallOptions Default { get; } =
+        new(true, DefaultWindowStart, DefaultWindowEnd, DefaultThursdayWindowStart);
 
-    // 中文注释：按本机时间判断，窗口含开始不含结束；支持跨零点的窗口（例如 23:00-05:00）。
-    public bool IsWithinWindow(TimeOnly localTime)
+    public static AppUpdateUnattendedInstallOptions Disabled { get; } =
+        new(false, DefaultWindowStart, DefaultWindowEnd, DefaultThursdayWindowStart);
+
+    // 中文注释：按本机时间判断，窗口含开始不含结束；支持跨零点的窗口（例如 18:00-08:00）。
+    // 开始时间按当天星期取（周四可单独推迟），所以周四凌晨仍属于周三晚上开始的窗口。
+    public bool IsWithinWindow(DateTime localDateTime)
     {
         if (!IsEnabled)
         {
             return false;
         }
 
-        return WindowStart < WindowEnd
-            ? localTime >= WindowStart && localTime < WindowEnd
-            : localTime >= WindowStart || localTime < WindowEnd;
+        var localTime = TimeOnly.FromDateTime(localDateTime);
+        var windowStart = localDateTime.DayOfWeek == DayOfWeek.Thursday && ThursdayWindowStart is { } thursdayStart
+            ? thursdayStart
+            : WindowStart;
+
+        return windowStart < WindowEnd
+            ? localTime >= windowStart && localTime < WindowEnd
+            : localTime >= windowStart || localTime < WindowEnd;
     }
 
     public static AppUpdateUnattendedInstallOptions FromConfiguration(IConfiguration configuration, bool isDebugBuild)
@@ -49,6 +64,7 @@ public sealed record AppUpdateUnattendedInstallOptions(bool IsEnabled, TimeOnly 
             return Disabled;
         }
 
+        // 中文注释：显式配置的窗口每天一致，不再套用周四推迟，避免与自定义时段拼出意外的区间。
         return TryParseWindow(raw, out var start, out var end)
             ? new AppUpdateUnattendedInstallOptions(true, start, end)
             : isDebugBuild ? Disabled : Default;
@@ -141,7 +157,7 @@ public sealed class WindowsAppUpdateElevationProbe : IAppUpdateElevationProbe
         out int returnLength);
 }
 
-// 中文注释：夜间无人值守安装：窗口内（默认本机 01:00-07:00）只要有更新且收银机空闲，就直接拉起静默安装器，
+// 中文注释：夜间无人值守安装：窗口内（默认本机 18:00-次日 08:00，周四 20:00-次日 08:00）只要有更新且收银机空闲，就直接拉起静默安装器，
 // 不管当前是否显示强更遮罩、是否有收银员登录。白天的提示与确认流程不受影响。
 public sealed class AppUpdateUnattendedInstallScheduler(
     IAppUpdateCoordinator coordinator,
@@ -203,7 +219,7 @@ public sealed class AppUpdateUnattendedInstallScheduler(
         try
         {
             var localNow = _timeProvider.GetLocalNow();
-            if (!options.IsWithinWindow(TimeOnly.FromDateTime(localNow.DateTime)))
+            if (!options.IsWithinWindow(localNow.DateTime))
             {
                 ResetWindowState();
                 return;
