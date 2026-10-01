@@ -24,7 +24,13 @@
     "scheduleManagement": "排班管理",
     "holidayManagement": "公共假期管理",
     "leaveManagement": "病假年假管理",
-    "managedPunchRecords": "打卡记录"
+    "managedPunchRecords": "打卡记录",
+    "short": {
+      "schedule": "排班",
+      "holidays": "假期",
+      "leave": "请假",
+      "punches": "打卡记录"
+    }
   },
   "today": {
     "schedules": "今日班次",

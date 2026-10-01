@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   chipSelectedText: { color: ATTENDANCE_STATUS_TONES.accent.text },
   errorText: { color: HB_COLORS.danger },
   nextDay: { color: HB_COLORS.warning },
-  pill: { alignSelf: "flex-start", borderRadius: 999, paddingHorizontal: HB_SPACING.xs, paddingVertical: 2 },
+  pill: { borderRadius: 999, paddingHorizontal: HB_SPACING.xs, paddingVertical: 2 },
   pillText: { fontWeight: "600" },
   reasonBlock: { gap: HB_SPACING.xs },
   step: {
