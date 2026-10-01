@@ -564,6 +564,7 @@ public static class ServiceRegistration
         services.AddSingleton<IColorThemeService, ColorThemeService>();
         services.AddSingleton<ColorThemeSwitcherViewModel>();
         services.AddSingleton<IWindowOwnerProvider, WpfWindowOwnerProvider>();
+        services.AddSingleton<ICustomerDisplayWindowPreferenceStore, CustomerDisplayWindowPreferenceStore>();
         services.AddSingleton<ICustomerDisplayWindowService, CustomerDisplayWindowService>();
         services.AddSingleton<RawScannerInputProcessor>();
         services.AddSingleton<IRawScannerService, RawScannerService>();

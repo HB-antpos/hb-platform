@@ -167,6 +167,148 @@ public sealed class CustomerDisplayWindowServiceTests
         });
     }
 
+    [Theory]
+    // 上次位置完整落在目标显示器工作区内：原样恢复。
+    [InlineData(300d, 360d, 820d, 560d, 300d, 360d, 820d, 560d)]
+    // 上次窗口有一部分拖出了工作区底部：尺寸不变，位置夹回屏内。
+    [InlineData(300d, 400d, 820d, 560d, 300d, 380d, 820d, 560d)]
+    // 上次窗口在另一块显示器上（与工作区无交集）：回落默认居中。
+    [InlineData(3000d, 0d, 900d, 600d, 240d, 317d, 800d, 546d)]
+    public Task ApplyMode_normal_restores_remembered_bounds_inside_target_work_area(
+        double savedLeft,
+        double savedTop,
+        double savedWidth,
+        double savedHeight,
+        double expectedLeft,
+        double expectedTop,
+        double expectedWidth,
+        double expectedHeight)
+    {
+        return RunOnStaDispatcherAsync(() =>
+        {
+            var preferences = new FixedCustomerDisplayWindowPreferenceStore(
+                new CustomerDisplayNormalBounds(savedLeft, savedTop, savedWidth, savedHeight));
+            var service = new CustomerDisplayWindowService(new DeterministicDisplayTopologyService(), preferences);
+            var window = new Window
+            {
+                Width = 1024,
+                Height = 640,
+                MinWidth = 800,
+                MinHeight = 520,
+                WindowState = WindowState.Normal
+            };
+
+            service.ApplyModeCore(
+                window,
+                new Window(),
+                TargetDisplay,
+                CustomerDisplayWindowMode.Normal,
+                showWindow: static () => { },
+                setTitleBarVisible: static _ => { },
+                refreshContentLayout: static () => { });
+
+            Assert.Equal(expectedLeft, window.Left);
+            Assert.Equal(expectedTop, window.Top);
+            Assert.Equal(expectedWidth, window.Width);
+            Assert.Equal(expectedHeight, window.Height);
+        });
+    }
+
+    [Fact]
+    public void Close_button_marks_window_closed_by_user_and_size_move_end_is_reported()
+    {
+        var codeBehind = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Views", "Windows", "CustomerDisplayWindow.xaml.cs"));
+        var closeHandler = codeBehind[codeBehind.IndexOf("private void CloseButton_Click", StringComparison.Ordinal)..];
+
+        Assert.True(
+            closeHandler.IndexOf("IsClosedByUser = true;", StringComparison.Ordinal)
+            < closeHandler.IndexOf("Close();", StringComparison.Ordinal));
+        Assert.Contains("WmExitSizeMove = 0x0232", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("MoveOrResizeCompleted?.Invoke(this, EventArgs.Empty);", codeBehind, StringComparison.Ordinal);
+    }
+
+    private static readonly DisplayBounds MainDisplay = new(
+        new IntPtr(1),
+        MonitorLeft: 0,
+        MonitorTop: 0,
+        MonitorWidth: 1920,
+        MonitorHeight: 1080,
+        WorkAreaLeft: 0,
+        WorkAreaTop: 0,
+        WorkAreaWidth: 1920,
+        WorkAreaHeight: 1040);
+
+    private static readonly DisplayBounds SecondDisplay = new(
+        new IntPtr(2),
+        MonitorLeft: 1920,
+        MonitorTop: 0,
+        MonitorWidth: 1280,
+        MonitorHeight: 800,
+        WorkAreaLeft: 1920,
+        WorkAreaTop: 0,
+        WorkAreaWidth: 1280,
+        WorkAreaHeight: 800);
+
+    [Fact]
+    public Task SwapDisplays_moves_main_window_to_customer_screen_and_customer_display_to_main_screen()
+    {
+        return RunOnStaDispatcherAsync(() =>
+        {
+            var owner = new MovableOwnerWindow();
+            var customerWindow = new Window { MinWidth = 800, MinHeight = 520 };
+            var topology = new PerWindowDisplayTopologyService();
+            topology.Assign(owner, MainDisplay);
+            topology.Assign(customerWindow, SecondDisplay);
+            var service = new CustomerDisplayWindowService(topology);
+
+            var result = service.SwapDisplaysCore(
+                customerWindow,
+                owner,
+                CustomerDisplayWindowMode.Fullscreen,
+                showWindow: static () => { },
+                setTitleBarVisible: static _ => { },
+                refreshContentLayout: static () => { });
+
+            Assert.Equal(CustomerDisplayWindowService.SwappedStatusKey, result.StatusMessageKey);
+            Assert.Equal(CustomerDisplayWindowMode.Fullscreen, result.Mode);
+            Assert.Equal([SecondDisplay], owner.MovedTo);
+            // 客显全屏铺满主窗口原来那块屏的整屏边界。
+            Assert.Equal(0d, customerWindow.Left);
+            Assert.Equal(0d, customerWindow.Top);
+            Assert.Equal(1920d, customerWindow.Width);
+            Assert.Equal(1080d, customerWindow.Height);
+            Assert.True(customerWindow.Topmost);
+        });
+    }
+
+    [Fact]
+    public Task SwapDisplays_does_nothing_when_both_windows_are_on_the_same_screen()
+    {
+        return RunOnStaDispatcherAsync(() =>
+        {
+            var owner = new MovableOwnerWindow();
+            var customerWindow = new Window { Left = 10, Top = 20 };
+            var topology = new PerWindowDisplayTopologyService();
+            topology.Assign(owner, MainDisplay);
+            topology.Assign(customerWindow, MainDisplay);
+            var service = new CustomerDisplayWindowService(topology);
+
+            var result = service.SwapDisplaysCore(
+                customerWindow,
+                owner,
+                CustomerDisplayWindowMode.Normal,
+                showWindow: static () => { },
+                setTitleBarVisible: static _ => { },
+                refreshContentLayout: static () => { });
+
+            Assert.Equal(CustomerDisplayWindowService.SwapUnavailableStatusKey, result.StatusMessageKey);
+            Assert.Empty(owner.MovedTo);
+            Assert.Equal(10d, customerWindow.Left);
+            Assert.Equal(20d, customerWindow.Top);
+        });
+    }
+
     private static async Task RunOnStaDispatcherAsync(Action action)
     {
         var dispatcherReady = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -354,6 +496,59 @@ public sealed class CustomerDisplayWindowServiceTests
                 storeCode,
                 DateTimeOffset.UtcNow,
                 []));
+        }
+    }
+
+    private sealed class FixedCustomerDisplayWindowPreferenceStore(CustomerDisplayNormalBounds bounds)
+        : ICustomerDisplayWindowPreferenceStore
+    {
+        public CustomerDisplayWindowPreference Current { get; } =
+            new(CustomerDisplayWindowMode.Normal, bounds);
+
+        public Task<CustomerDisplayWindowPreference> LoadAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(Current);
+
+        public Task RememberModeAsync(CustomerDisplayWindowMode mode) => Task.CompletedTask;
+
+        public Task RememberNormalBoundsAsync(CustomerDisplayNormalBounds bounds) => Task.CompletedTask;
+    }
+
+    private sealed class MovableOwnerWindow : Window, IDisplayMovableWindow
+    {
+        public List<DisplayBounds> MovedTo { get; } = [];
+
+        public void MoveToDisplay(DisplayBounds display) => MovedTo.Add(display);
+    }
+
+    private sealed class PerWindowDisplayTopologyService : IDisplayTopologyService
+    {
+        private readonly Dictionary<Window, DisplayBounds> _displays = [];
+
+        public void Assign(Window window, DisplayBounds display) => _displays[window] = display;
+
+        public IReadOnlyList<DisplayBounds> GetDisplays() => _displays.Values.Distinct().ToArray();
+
+        public DisplayBounds? FindDisplayAwayFrom(Window owner) =>
+            _displays.Values.FirstOrDefault(display => display != _displays.GetValueOrDefault(owner));
+
+        public DisplayBounds? GetDisplayForWindow(Window window) => _displays.GetValueOrDefault(window);
+
+        public void AttachWorkAreaConstraint(Window window)
+        {
+        }
+
+        public void FitToDisplayWorkArea(Window window, DisplayBounds display) =>
+            ApplyBounds(window, display.WorkAreaLeft, display.WorkAreaTop, display.WorkAreaWidth, display.WorkAreaHeight);
+
+        public void FitToDisplayBounds(Window window, DisplayBounds display) =>
+            ApplyBounds(window, display.MonitorLeft, display.MonitorTop, display.MonitorWidth, display.MonitorHeight);
+
+        private static void ApplyBounds(Window window, int left, int top, int width, int height)
+        {
+            window.Left = left;
+            window.Top = top;
+            window.Width = width;
+            window.Height = height;
         }
     }
 

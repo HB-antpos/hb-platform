@@ -46,16 +46,19 @@ internal sealed class CustomerDisplayShellController
     public void Toggle(Window? owner)
     {
         var targetMode = _orchestrator.GetNextMode(_getCurrentMode());
-        SetMode(targetMode, owner);
+        SetMode(targetMode, owner, rememberChoice: true);
     }
 
-    public void Close(Window? owner) => SetMode(CustomerDisplayWindowMode.Closed, owner);
+    public void Close(Window? owner) => SetMode(CustomerDisplayWindowMode.Closed, owner, rememberChoice: true);
 
-    public void ShowNormal(Window? owner) => SetMode(CustomerDisplayWindowMode.Normal, owner);
+    public void ShowNormal(Window? owner) => SetMode(CustomerDisplayWindowMode.Normal, owner, rememberChoice: true);
 
-    public void ShowFullscreen(Window? owner) => SetMode(CustomerDisplayWindowMode.Fullscreen, owner);
+    public void ShowFullscreen(Window? owner) => SetMode(CustomerDisplayWindowMode.Fullscreen, owner, rememberChoice: true);
 
-    public void SetMode(CustomerDisplayWindowMode mode, Window? owner)
+    /// <param name="rememberChoice">
+    /// 收银员手动切换时为 true，记住结果供下次启动恢复；程序退出、断开第二屏、重新注册设备等系统关闭保持 false，不改上次设置。
+    /// </param>
+    public void SetMode(CustomerDisplayWindowMode mode, Window? owner, bool rememberChoice = false)
     {
         var session = _getSession();
         var stopwatch = Stopwatch.StartNew();
@@ -64,10 +67,51 @@ internal sealed class CustomerDisplayShellController
             $"viewmodel set-mode start requestedMode={mode} currentMode={_getCurrentMode()} ownerPresent={owner is not null} store={session.StoreCode} device={session.DeviceCode}");
         var result = _orchestrator.SetMode(mode, _getCustomerDisplay(), session, _getCart(), owner);
         ApplyResult(result);
+        // 只记住真正生效的模式：例如想打开但没有第二屏而被关闭时，保留原来的上次设置。
+        if (rememberChoice && result.Mode == mode)
+        {
+            _orchestrator.RememberMode(mode);
+        }
         stopwatch.Stop();
         ConsoleLog.Write(
             "CustomerDisplay",
             $"viewmodel set-mode completed requestedMode={mode} resultMode={result.Mode} open={result.Mode != CustomerDisplayWindowMode.Closed} elapsedMs={stopwatch.ElapsedMilliseconds}");
+    }
+
+    /// <summary>主窗口与客显互换屏幕；客显模式不变，只更新状态提示。</summary>
+    public void SwapScreens(Window owner)
+    {
+        var session = _getSession();
+        ConsoleLog.Write(
+            "CustomerDisplay",
+            $"viewmodel swap-screens start currentMode={_getCurrentMode()} store={session.StoreCode} device={session.DeviceCode}");
+        var result = _orchestrator.SwapDisplays(_getCustomerDisplay(), owner);
+        if (!string.IsNullOrWhiteSpace(result.StatusMessageKey))
+        {
+            _setStatusMessage(_localization.T(result.StatusMessageKey));
+        }
+    }
+
+    /// <summary>
+    /// 启动后按本机记住的上次模式恢复客显；上次是关闭或从未记录时不打开。
+    /// 恢复本身不改记录，没有第二屏时下次启动仍会再试。
+    /// </summary>
+    public async Task RestoreRememberedModeAsync(Window? owner)
+    {
+        var rememberedMode = await _orchestrator.LoadRememberedModeAsync();
+        var session = _getSession();
+        if (rememberedMode == CustomerDisplayWindowMode.Closed)
+        {
+            ConsoleLog.Write(
+                "CustomerDisplay",
+                $"startup restore skipped store={session.StoreCode} device={session.DeviceCode} reason=remembered-closed");
+            return;
+        }
+
+        ConsoleLog.Write(
+            "CustomerDisplay",
+            $"startup restore start store={session.StoreCode} device={session.DeviceCode} rememberedMode={rememberedMode} ownerPresent={owner is not null}");
+        SetMode(rememberedMode, owner);
     }
 
     public void Open(Window? owner)
