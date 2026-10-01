@@ -366,6 +366,10 @@ public static class ServiceRegistration
         services.AddSingleton<IDeviceFingerprintService, DeviceFingerprintService>();
         services.AddSingleton<IAppUpdateDeviceCredentialProvider, AppUpdateDeviceCredentialProvider>();
         services.AddSingleton<IUiPriorityCoordinator, UiPriorityCoordinator>();
+        // 整文件目录下载的残片与已校验文件放在本地数据目录下，跨重启续传；写入本地库后即删除。
+        services.AddSingleton<ICatalogFileDownloader>(sp => new CatalogFileDownloader(
+            sp.GetRequiredService<ICatalogApiClient>(),
+            Path.Combine(localDataDirectory, "catalog-files")));
         services.AddSingleton<ILocalCatalogSyncService, LocalCatalogSyncService>();
         services.AddSingleton<IRemoteLookupRefreshService, RemoteLookupRefreshService>();
         services.AddSingleton<ISpecialProductService, SpecialProductService>();
