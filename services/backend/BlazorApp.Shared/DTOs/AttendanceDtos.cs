@@ -375,6 +375,8 @@ namespace BlazorApp.Shared.DTOs
         public string Username { get; set; } = string.Empty;
         public string? FullName { get; set; }
         public string? EmploymentType { get; set; }
+        /// <summary>仅未满 18 岁时返回年龄（排班需关注未成年工时），成年员工为空，不下发生日。</summary>
+        public int? Age { get; set; }
     }
 
     public class AttendancePunchAdjustmentPreviewDto

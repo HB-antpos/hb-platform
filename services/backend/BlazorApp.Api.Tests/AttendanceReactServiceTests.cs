@@ -1669,6 +1669,19 @@ namespace BlazorApp.Api.Tests
             Assert.Null(pendingOnly.LeaveType);
         }
 
+        [Theory]
+        [InlineData("2010-05-18", "2026-05-18", 16)]
+        [InlineData("2010-05-19", "2026-05-18", 15)]
+        [InlineData("2008-05-18", "2026-05-18", null)]
+        [InlineData("2008-05-19", "2026-05-18", 17)]
+        [InlineData("2030-01-01", "2026-05-18", null)]
+        public void ResolveMinorAge_OnlyReturnsAgeUnder18(string birthday, string today, int? expected)
+        {
+            Assert.Equal(
+                expected,
+                AttendanceReactService.ResolveMinorAge(DateTime.Parse(birthday), DateTime.Parse(today)));
+        }
+
         [Fact]
         public void ScheduleViewStore_IsImpliedByEditManagedStore()
         {
@@ -1700,6 +1713,11 @@ namespace BlazorApp.Api.Tests
                 CreatedAt = DateTime.UtcNow,
             }).ExecuteCommandAsync();
             await SeedEmployeeProfileAsync("staff-user", EmployeeType.PartTime);
+            await _db.Updateable<EmployeeProfile>()
+                .SetColumns(item => item.Birthday == new DateTime(2010, 6, 1))
+                .Where(item => item.UserGUID == "staff-user")
+                .ExecuteCommandAsync();
+            _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 2, 0, 0, DateTimeKind.Utc));
 
             var result = await CreateService("manager-user", "manager", "StoreManager")
                 .GetStoreEmployeesAsync("BRI");
@@ -1708,6 +1726,7 @@ namespace BlazorApp.Api.Tests
             var employee = Assert.Single(result.Data!);
             Assert.Equal("staff-user", employee.UserGuid);
             Assert.Equal("partTime", employee.EmploymentType);
+            Assert.Equal(15, employee.Age);
         }
 
         [Fact]

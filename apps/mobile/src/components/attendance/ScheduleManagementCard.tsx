@@ -32,6 +32,8 @@ import {
   availabilityKey,
   classifyScheduleGridCell,
   countUncoveredDays,
+  employmentTypeCode,
+  type EmploymentTypeCode,
   formatShiftShort,
   groupAvailabilityByUserDate,
   isAllDayRange,
@@ -94,8 +96,18 @@ interface EditingTarget {
 interface ScheduleRow {
   userGuid: string;
   employeeName?: string;
+  employmentType?: EmploymentTypeCode;
+  /** 仅未成年员工有值。 */
+  age?: number;
   schedules: AttendanceSchedule[];
 }
+
+// F/P/C 用不同色系区分，未成年年龄用警示色提醒排班注意工时限制。
+const EMPLOYMENT_TYPE_TONES: Record<EmploymentTypeCode, AttendanceStatusTone> = {
+  F: "accent",
+  P: "success",
+  C: "neutral",
+};
 
 function toLocalDateString(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -275,6 +287,8 @@ export function ScheduleManagementCard({
       rowMap.set(user.userGUID, {
         userGuid: user.userGUID,
         employeeName: getUserDisplayName(user),
+        employmentType: employmentTypeCode(user.employmentType),
+        age: user.age,
         schedules: [],
       });
     });
@@ -550,6 +564,9 @@ export function ScheduleManagementCard({
       <Text variant="labelSmall" style={styles.muted}>
         {t("scheduleManagement.legend.available")}
       </Text>
+      <Text variant="labelSmall" style={styles.muted}>
+        {t("scheduleManagement.legend.employmentTypes")}
+      </Text>
     </View>
   );
 
@@ -640,9 +657,17 @@ export function ScheduleManagementCard({
                 <Text variant="labelLarge" numberOfLines={1} style={styles.employeeName}>
                   {row.employeeName || row.userGuid}
                 </Text>
-                <Text variant="labelSmall" style={styles.muted}>
-                  {hoursShort(rowMinutes.get(row.userGuid) ?? 0)}
-                </Text>
+                <View style={styles.rowMeta}>
+                  <Text variant="labelSmall" style={styles.muted}>
+                    {hoursShort(rowMinutes.get(row.userGuid) ?? 0)}
+                  </Text>
+                  {row.employmentType ? (
+                    <StatusPill label={row.employmentType} tone={EMPLOYMENT_TYPE_TONES[row.employmentType]} />
+                  ) : null}
+                  {row.age !== undefined ? (
+                    <StatusPill label={t("scheduleManagement.ageBadge", { age: row.age })} tone="warning" />
+                  ) : null}
+                </View>
               </View>
             ))}
           </View>
@@ -1175,6 +1200,12 @@ const styles = StyleSheet.create({
   },
   employeeName: {
     color: HB_COLORS.textPrimary,
+  },
+  rowMeta: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
   },
   fullscreenBody: {
     flex: 1,

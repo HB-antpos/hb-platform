@@ -403,7 +403,8 @@
       "shift": "Shift",
       "leave": "On leave",
       "available": "Available",
-      "draft": "Draft"
+      "draft": "Draft",
+      "employmentTypes": "F full-time · P part-time · C casual"
     },
     "gridHint": "Tap a cell to add or edit a shift",
     "editor": {
@@ -423,7 +424,8 @@
     "copyConfirmMessage": "Copy last week's shifts into this week as drafts. Employees who already have a shift on a day are skipped.",
     "copyConfirm": "Copy",
     "copyWeekResult": "Copied {{created}} shift(s), skipped {{skipped}}",
-    "copyWeekFailed": "Failed to copy last week's schedule"
+    "copyWeekFailed": "Failed to copy last week's schedule",
+    "ageBadge": "{{age}}y"
   },
   "adjustment": {
     "title": "Punch correction",

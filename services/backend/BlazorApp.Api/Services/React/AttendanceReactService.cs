@@ -1225,8 +1225,13 @@ namespace BlazorApp.Api.Services.React
                     u.Username,
                     u.FullName,
                     profile.EmployeeType,
+                    profile.Birthday,
                 })
                 .ToListAsync();
+            // 年龄按门店当地日期计算，避免跨时区在生日前后差一天。
+            var storeToday = ConvertUtcToStoreLocal(
+                _timeProvider.GetUtcNow().UtcDateTime,
+                await ResolveStoreTimeZoneAsync(normalizedStoreCode, null)).Date;
             var employees = rows
                 .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
@@ -1242,10 +1247,27 @@ namespace BlazorApp.Api.Services.React
                         EmployeeType.Temporary => "casual",
                         _ => null,
                     },
+                    Age = ResolveMinorAge(item.Birthday, storeToday),
                 })
                 .OrderBy(item => item.FullName ?? item.Username, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             return ApiResponse<List<AttendanceEmployeeDto>>.OK(employees);
+        }
+
+        /// <summary>未满 18 岁返回周岁，否则（含生日缺失、未来日期）返回 null。</summary>
+        internal static int? ResolveMinorAge(DateTime? birthday, DateTime today)
+        {
+            if (birthday == null || birthday.Value.Date > today.Date)
+            {
+                return null;
+            }
+
+            var age = today.Year - birthday.Value.Year;
+            if (birthday.Value.Date > today.AddYears(-age).Date)
+            {
+                age--;
+            }
+            return age < 18 ? age : null;
         }
 
         private async Task<Dictionary<string, string>> ResolveUserDisplayNamesAsync(IEnumerable<string?> userGuids)

@@ -669,6 +669,7 @@ export async function getAttendanceEmployees(storeCode: string): Promise<StoreUs
     username: asString(pick(raw, "username", "Username")),
     fullName: asOptionalString(pick(raw, "fullName", "FullName")),
     employmentType: asOptionalString(pick(raw, "employmentType", "EmploymentType")),
+    age: asOptionalNumber(pick(raw, "age", "Age")),
     status: 1,
     storeCode,
     roleNames: [],

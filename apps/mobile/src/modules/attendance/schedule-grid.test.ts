@@ -10,6 +10,7 @@ import {
   shiftEditorMinutes,
   stepClockTime,
   summarizeSchedulePublishState,
+  employmentTypeCode,
 } from "./schedule-grid";
 import type { AttendanceAvailability, AttendanceSchedule } from "./types";
 
@@ -134,5 +135,11 @@ assert.equal(summarizeSchedulePublishState([
   schedule("2026-09-28", "09:00", "17:00", "Cancelled"),
   schedule("2026-09-29", "09:00", "17:00", "Draft", "AnnualLeave"),
 ]), "empty");
+
+assert.equal(employmentTypeCode("fullTime"), "F");
+assert.equal(employmentTypeCode("partTime"), "P");
+assert.equal(employmentTypeCode("casual"), "C");
+assert.equal(employmentTypeCode("Temporary"), "C");
+assert.equal(employmentTypeCode(undefined), undefined);
 
 console.log("schedule-grid tests passed");

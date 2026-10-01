@@ -111,3 +111,14 @@ export function summarizeSchedulePublishState(schedules: AttendanceSchedule[]): 
   if (active.some((item) => item.status.toLowerCase() === "draft")) return "draft";
   return active.length ? "published" : "empty";
 }
+
+export type EmploymentTypeCode = "F" | "P" | "C";
+
+/** 用工类型缩写：全职 F、兼职 P、临时工 C；未知返回 undefined。 */
+export function employmentTypeCode(type?: string): EmploymentTypeCode | undefined {
+  const normalized = type?.replace(/[\s_-]/g, "").toLowerCase();
+  if (normalized === "fulltime") return "F";
+  if (normalized === "parttime") return "P";
+  if (normalized === "casual" || normalized === "temporary") return "C";
+  return undefined;
+}
