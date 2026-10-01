@@ -157,6 +157,21 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const hbpos = buildHbposApiConfiguration();
   const ota = buildOtaUpdateConfiguration();
   const logCenter = buildLogCenterConfiguration(ota.buildProfile);
+  // 与客户端启用条件一致：未配置 DSN 时不注入原生源码地图上传任务，
+  // 否则 EAS 上缺 SENTRY_ORG 会让 Xcode 阶段的 sentry-cli 上传直接失败。
+  const sentryPlugins: NonNullable<ExpoConfig["plugins"]> =
+    process.env.EXPO_PUBLIC_HBPOS_SENTRY_DSN?.trim()
+      ? [[
+          "@sentry/react-native/expo",
+          {
+            ...(process.env.SENTRY_ORG?.trim()
+              ? { organization: process.env.SENTRY_ORG.trim() }
+              : {}),
+            project: process.env.SENTRY_PROJECT?.trim() || "hb-pos-ipad",
+            url: process.env.SENTRY_URL?.trim() || "https://sentry.io/",
+          },
+        ]]
+      : [];
   return ({
   ...config,
   name: "HB POS",
@@ -189,16 +204,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   plugins: [
     "expo-router",
     "expo-localization",
-    [
-      "@sentry/react-native/expo",
-      {
-        ...(process.env.SENTRY_ORG?.trim()
-          ? { organization: process.env.SENTRY_ORG.trim() }
-          : {}),
-        project: process.env.SENTRY_PROJECT?.trim() || "hb-pos-ipad",
-        url: process.env.SENTRY_URL?.trim() || "https://sentry.io/",
-      },
-    ],
+    ...sentryPlugins,
     [
       "expo-audio",
       {

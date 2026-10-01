@@ -120,6 +120,35 @@ test("publish 注入的 runtimeVersion 仅接受当前 appVersion，非法值 fa
   );
 });
 
+test("仅配置 Sentry DSN 时注入原生上传插件", () => {
+  const projectId = "123e4567-e89b-42d3-a456-426614174000";
+  const environment = {
+    EAS_BUILD_PROFILE: "production",
+    EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID: projectId,
+    EXPO_PUBLIC_HBPOS_UPDATES_URL: `https://u.expo.dev/${projectId}`,
+    SENTRY_ORG: " example-org ",
+    SENTRY_PROJECT: " example-project ",
+    SENTRY_URL: " https://sentry.example.test/ ",
+  };
+  for (const dsn of [undefined, "  ", " https://public@sentry.example.test/1 "]) {
+    const config = resolveConfig({
+      ...environment,
+      ...(dsn === undefined ? {} : { EXPO_PUBLIC_HBPOS_SENTRY_DSN: dsn }),
+    });
+    const plugin = config.plugins.find(
+      (entry) => Array.isArray(entry) && entry[0] === "@sentry/react-native/expo",
+    );
+    assert.deepEqual(plugin, dsn?.trim() ? [
+      "@sentry/react-native/expo",
+      {
+        organization: "example-org",
+        project: "example-project",
+        url: "https://sentry.example.test/",
+      },
+    ] : undefined);
+  }
+});
+
 function resolveConfig(environment) {
   const result = runConfig(environment);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -128,6 +157,7 @@ function resolveConfig(environment) {
 
 function runConfig(environment) {
   const cleanEnvironment = { ...process.env };
+  delete cleanEnvironment.EXPO_PUBLIC_HBPOS_SENTRY_DSN;
   delete cleanEnvironment.EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID;
   delete cleanEnvironment.EXPO_PUBLIC_HBPOS_UPDATES_URL;
   delete cleanEnvironment.EXPO_PUBLIC_HBPOS_BUILD_PROFILE;
