@@ -129,8 +129,6 @@ public partial class CustomerDisplayView : UserControl
             Grid.SetRowSpan(PromotionPanel, 2);
             Grid.SetColumnSpan(PromotionPanel, 2);
             PromotionPanel.Margin = new Thickness(0);
-            PromotionTextPanel.Margin = new Thickness(48, 44, 48, 44);
-            ApplyPromotionTypography(44, 20);
             return;
         }
 
@@ -146,8 +144,6 @@ public partial class CustomerDisplayView : UserControl
         Grid.SetColumnSpan(PromotionPanel, 1);
         PromotionPanel.Margin = new Thickness(18, 0, 0, 0);
         Grid.SetColumnSpan(CartPanel, 1);
-        PromotionTextPanel.Margin = new Thickness(48, 44, 48, 44);
-        ApplyPromotionTypography(34, 16);
     }
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -168,16 +164,8 @@ public partial class CustomerDisplayView : UserControl
     {
         var hasAdvertisement = _viewModel?.IsAdvertisementAvailable == true;
         // 有广告素材时收起默认背景，避免图片/视频被后层渐变遮住。
+        // 已取消内置的默认促销文案：没有后台广告时广告区只保留纯底色，不再显示任何文字。
         PromotionFallbackBackground.Visibility = hasAdvertisement ? Visibility.Collapsed : Visibility.Visible;
-        // 广告素材播放时隐藏全部促销文字层，避免标签或说明覆盖媒体内容。
-        PromotionTextPanel.Visibility = hasAdvertisement ? Visibility.Collapsed : Visibility.Visible;
-        // 广告素材只展示媒体本身，避免把广告名称叠在图片/视频上。
-        PromotionSubtitleText.Visibility = Visibility.Collapsed;
-        PromotionBodyText.Visibility = hasAdvertisement && !string.IsNullOrWhiteSpace(_viewModel?.CurrentAdvertisementDescription)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        PromotionFallbackSubtitleText.Visibility = hasAdvertisement ? Visibility.Collapsed : Visibility.Visible;
-        PromotionFallbackBodyText.Visibility = hasAdvertisement ? Visibility.Collapsed : Visibility.Visible;
 
         if (_viewModel?.CurrentAdvertisementMediaUrl is not { Length: > 0 } mediaUrl)
         {
@@ -305,14 +293,6 @@ public partial class CustomerDisplayView : UserControl
     private void AdvertisementImage_ImageFailed(object sender, ExceptionRoutedEventArgs e)
     {
         SkipCurrentAdvertisementPlayback();
-    }
-
-    private void ApplyPromotionTypography(double subtitleFontSize, double bodyFontSize)
-    {
-        PromotionSubtitleText.FontSize = subtitleFontSize;
-        PromotionBodyText.FontSize = bodyFontSize;
-        PromotionFallbackSubtitleText.FontSize = subtitleFontSize;
-        PromotionFallbackBodyText.FontSize = bodyFontSize;
     }
 
     private void ScrollLatestLineIntoView()
