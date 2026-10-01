@@ -4,7 +4,7 @@ import type { ContainerNewProductItem } from "./types";
 
 const item = (productCode: string, hbProductNo: string | null, date = "2026-10-01"): ContainerNewProductItem => ({
   productCode, hbProductNo, estimatedStoreArrivalDate: date, quantity: null,
-  imageUrl: null, containerNumber: null, containerCode: "C", basis: "estimated",
+  imageUrl: null, barcode: null, retailPrice: null, containerNumber: null, containerCode: "C", basis: "estimated",
 });
 
 const sorted = [

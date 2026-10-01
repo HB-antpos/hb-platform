@@ -73,7 +73,7 @@ public sealed class ContainerNewProductsReactService(
 
         if (containers.Count == 0)
         {
-            return new ContainerNewProductsResponseDto { StoreCode = normalizedStoreCode, StateCode = stateCode };
+            return new ContainerNewProductsResponseDto { StoreCode = normalizedStoreCode, StateCode = stateCode, LocalToday = DateOnly.FromDateTime(localToday) };
         }
 
         var containerCodes = containers.Select(x => x.ContainerCode).ToList();
@@ -87,6 +87,8 @@ public sealed class ContainerNewProductsReactService(
                 HbProductNo = product.HBProductNo,
                 LoadingQuantity = detail.LoadingQuantity,
                 ImageUrl = product.ProductImage,
+                Barcode = product.Barcode,
+                DetailRetailPrice = detail.OEMPrice,
             })
             .ToListAsync(cancellationToken);
         details = details.Where(x => HasUsableProductCode(x.ProductCode)).ToList();
@@ -94,10 +96,13 @@ public sealed class ContainerNewProductsReactService(
         var productCodes = details.Select(x => x.ProductCode).Distinct().ToList();
         if (productCodes.Count == 0)
         {
-            return new ContainerNewProductsResponseDto { StoreCode = normalizedStoreCode, StateCode = stateCode };
+            return new ContainerNewProductsResponseDto { StoreCode = normalizedStoreCode, StateCode = stateCode, LocalToday = DateOnly.FromDateTime(localToday) };
         }
         var existingProducts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var historyKeys = new HashSet<HistoryKey>(HistoryKey.Comparer);
+        // 已建档商品的主档条码/零售价，以及本门店的分店零售价；同一商品多行时取第一条有效值
+        var localProducts = new Dictionary<string, LocalProductRow>(StringComparer.OrdinalIgnoreCase);
+        var storeRetailPrices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         foreach (var productCodeBatch in productCodes.Chunk(500))
         {
             foreach (var code in await _db.Queryable<WarehouseProduct>()
@@ -109,6 +114,29 @@ public sealed class ContainerNewProductsReactService(
                 .Where(x => productCodeBatch.Contains(x.ProductCode) && x.Action == "Create" && x.Source == "ContainerSubmit" && x.SourceReference != null && containerCodes.Contains(x.SourceReference))
                 .Select(x => new HistoryRow { ProductCode = x.ProductCode, ContainerCode = x.SourceReference! })
                 .ToListAsync(cancellationToken)) historyKeys.Add(new HistoryKey(row.ProductCode, row.ContainerCode));
+
+            foreach (var row in await _db.Queryable<Product>()
+                .Where(x => !x.IsDeleted && x.ProductCode != null && productCodeBatch.Contains(x.ProductCode))
+                .Select(x => new LocalProductRow { ProductCode = x.ProductCode!, Barcode = x.Barcode, RetailPrice = x.RetailPrice })
+                .ToListAsync(cancellationToken))
+            {
+                if (!localProducts.TryGetValue(row.ProductCode, out var existing)
+                    || (string.IsNullOrWhiteSpace(existing.Barcode) && !string.IsNullOrWhiteSpace(row.Barcode))
+                    || (PositiveOrNull(existing.RetailPrice) == null && PositiveOrNull(row.RetailPrice) != null))
+                {
+                    localProducts[row.ProductCode] = row;
+                }
+            }
+
+            // 分店价被停用时 POS 按总部价卖，所以只认启用中的分店价
+            foreach (var row in await _db.Queryable<StoreRetailPrice>()
+                .Where(x => !x.IsDeleted && x.IsActive && x.StoreCode == normalizedStoreCode
+                    && x.ProductCode != null && productCodeBatch.Contains(x.ProductCode))
+                .Select(x => new StoreRetailPriceRow { ProductCode = x.ProductCode!, Price = x.StoreRetailPriceValue })
+                .ToListAsync(cancellationToken))
+            {
+                if (PositiveOrNull(row.Price) is { } price) storeRetailPrices.TryAdd(row.ProductCode, price);
+            }
         }
 
         var containerByCode = containers.ToDictionary(x => x.ContainerCode, StringComparer.OrdinalIgnoreCase);
@@ -124,6 +152,7 @@ public sealed class ContainerNewProductsReactService(
             }
 
             var container = containerByCode[detail.ContainerCode];
+            localProducts.TryGetValue(detail.ProductCode, out var localProduct);
             items.Add(new ContainerNewProductItemDto
             {
                 ProductCode = detail.ProductCode,
@@ -131,6 +160,11 @@ public sealed class ContainerNewProductsReactService(
                 // 同一货柜同一商品可能拆成多行明细，数量要合计；全部为空时保持 null，前端不显示
                 Quantity = group.Any(x => x.LoadingQuantity.HasValue) ? group.Sum(x => x.LoadingQuantity ?? 0) : null,
                 ImageUrl = ProductImageUrlHelper.EnsureImageUrl(detail.ImageUrl, detail.ProductCode),
+                Barcode = FirstNonBlank(detail.Barcode, localProduct?.Barcode),
+                RetailPrice = ResolveRetailPrice(
+                    storeRetailPrices.TryGetValue(detail.ProductCode, out var storePrice) ? storePrice : null,
+                    localProduct?.RetailPrice,
+                    group.Select(x => x.DetailRetailPrice).FirstOrDefault(x => PositiveOrNull(x) != null)),
                 ContainerCode = detail.ContainerCode,
                 ContainerNumber = container.ContainerNumber,
                 EstimatedStoreArrivalDate = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode]),
@@ -142,6 +176,7 @@ public sealed class ContainerNewProductsReactService(
         {
             StoreCode = normalizedStoreCode,
             StateCode = stateCode,
+            LocalToday = DateOnly.FromDateTime(localToday),
             // 同一到店日按 HB 货号排；没有货号的排在该日末尾，最后用 ProductCode 保证顺序稳定
             Items = items
                 .OrderBy(x => x.EstimatedStoreArrivalDate)
@@ -195,6 +230,15 @@ public sealed class ContainerNewProductsReactService(
     internal static bool ShouldIncludeProduct(bool warehouseProductExists, bool matchingContainerCreateAudit) =>
         !warehouseProductExists || matchingContainerCreateAudit;
 
+    // 零售价优先级：门店分店价 → 商品主档零售价 → 货柜明细零售价（未建档新品的计划价）；0 或负数视为没有
+    internal static decimal? ResolveRetailPrice(decimal? storeRetailPrice, decimal? productRetailPrice, decimal? detailRetailPrice) =>
+        PositiveOrNull(storeRetailPrice) ?? PositiveOrNull(productRetailPrice) ?? PositiveOrNull(detailRetailPrice);
+
+    private static decimal? PositiveOrNull(decimal? value) => value > 0 ? value : null;
+
+    private static string? FirstNonBlank(params string?[] values) =>
+        values.Select(x => x?.Trim()).FirstOrDefault(x => !string.IsNullOrEmpty(x));
+
     internal static bool HasUsableProductCode(string? productCode) =>
         !string.IsNullOrWhiteSpace(productCode);
 
@@ -211,7 +255,9 @@ public sealed class ContainerNewProductsReactService(
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(state == "QLD" ? "Australia/Brisbane" : "Australia/Sydney")).Date;
 
     private sealed class ContainerDateRow { public string ContainerCode { get; init; } = string.Empty; public string? ContainerNumber { get; init; } public DateTime? ActualArrivalDate { get; init; } public DateTime? EstimatedArrivalDate { get; init; } }
-    private sealed class DetailRow { public string ContainerCode { get; init; } = string.Empty; public string ProductCode { get; init; } = string.Empty; public string? HbProductNo { get; init; } public decimal? LoadingQuantity { get; init; } public string? ImageUrl { get; init; } }
+    private sealed class DetailRow { public string ContainerCode { get; init; } = string.Empty; public string ProductCode { get; init; } = string.Empty; public string? HbProductNo { get; init; } public decimal? LoadingQuantity { get; init; } public string? ImageUrl { get; init; } public string? Barcode { get; init; } public decimal? DetailRetailPrice { get; init; } }
+    private sealed class LocalProductRow { public string ProductCode { get; init; } = string.Empty; public string? Barcode { get; init; } public decimal? RetailPrice { get; init; } }
+    private sealed class StoreRetailPriceRow { public string ProductCode { get; init; } = string.Empty; public decimal? Price { get; init; } }
     private sealed class HistoryRow { public string ProductCode { get; init; } = string.Empty; public string ContainerCode { get; init; } = string.Empty; }
     private sealed record HistoryKey(string ProductCode, string ContainerCode) { public static IEqualityComparer<HistoryKey> Comparer { get; } = new KeyComparer(); private sealed class KeyComparer : IEqualityComparer<HistoryKey> { public bool Equals(HistoryKey? x, HistoryKey? y) => x != null && y != null && string.Equals(x.ProductCode, y.ProductCode, StringComparison.OrdinalIgnoreCase) && string.Equals(x.ContainerCode, y.ContainerCode, StringComparison.OrdinalIgnoreCase); public int GetHashCode(HistoryKey obj) => HashCode.Combine(obj.ProductCode.ToUpperInvariant(), obj.ContainerCode.ToUpperInvariant()); } }
 }

@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
-import { ActivityIndicator, Button, Card, Text } from "react-native-paper";
+import { ActivityIndicator, Button, Card, SegmentedButtons, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { ProductBarcodeImage } from "@/components/product-maintenance/ProductBarcodeImage";
 import { useStores } from "@/modules/shop/use-stores";
 import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { canViewContainerNewProducts } from "./access";
+import { ARRIVAL_RANGE_FILTERS, deviceLocalToday, matchesArrivalRange, type ArrivalRangeFilter } from "./arrival-range";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "./api";
 import { compareByArrivalThenProductNo } from "./ordering";
 import { paginate } from "./pagination";
@@ -31,23 +33,32 @@ function formatQuantity(value: number) {
   return value.toLocaleString("en-AU", { maximumFractionDigits: 2 });
 }
 
+function formatPrice(value: number) {
+  return value.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function ProductCard({ item, basisLabel, basis, imageSize, dateWidth }: { item: ContainerNewProductItem; basisLabel: string; basis: ContainerNewProductItem["basis"]; imageSize: number; dateWidth: number }) {
   const { t } = useAppTranslation("containerNewProducts");
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   const date = formatDate(item.estimatedStoreArrivalDate);
   return <Card style={styles.card} contentStyle={styles.cardContent} mode="contained">
-    <View style={[styles.imageFrame, { width: imageSize, height: imageSize }]}>{item.imageUrl && item.imageUrl !== failedImageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="contain" onError={() => setFailedImageUrl(item.imageUrl)} /> : <Text style={styles.imagePlaceholder}>{t("states.noImage")}</Text>}</View>
-    <View style={styles.details}>
-      <Text variant="titleMedium" style={styles.productCode} numberOfLines={1}>{item.hbProductNo ?? item.productCode}</Text>
-      <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: item.containerNumber?.trim() || item.containerCode })}</Text>
-      {item.quantity !== null ? <Text variant="bodyMedium" style={styles.quantity} numberOfLines={1}>{t("labels.quantity", { value: formatQuantity(item.quantity) })}</Text> : null}
-      <Text variant="bodySmall" style={[styles.basis, basis === "estimated" && styles.estimatedBasis]}>{basisLabel}</Text>
+    <View style={styles.cardRow}>
+      <View style={[styles.imageFrame, { width: imageSize, height: imageSize }]}>{item.imageUrl && item.imageUrl !== failedImageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="contain" onError={() => setFailedImageUrl(item.imageUrl)} /> : <Text style={styles.imagePlaceholder}>{t("states.noImage")}</Text>}</View>
+      <View style={styles.details}>
+        <Text variant="titleMedium" style={styles.productCode} numberOfLines={1}>{item.hbProductNo ?? item.productCode}</Text>
+        {item.retailPrice !== null ? <Text variant="titleSmall" style={styles.retailPrice} numberOfLines={1}>{t("labels.retailPrice", { value: formatPrice(item.retailPrice) })}</Text> : null}
+        <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: item.containerNumber?.trim() || item.containerCode })}</Text>
+        {item.quantity !== null ? <Text variant="bodyMedium" style={styles.quantity} numberOfLines={1}>{t("labels.quantity", { value: formatQuantity(item.quantity) })}</Text> : null}
+        <Text variant="bodySmall" style={[styles.basis, basis === "estimated" && styles.estimatedBasis]}>{basisLabel}</Text>
+      </View>
+      <View style={[styles.dateBlock, { width: dateWidth }]}>
+        <Text variant="labelMedium" style={styles.dateLabel}>{t("labels.estimatedArrival")}</Text>
+        <Text variant="titleLarge" style={styles.date}>{date.dayMonth}</Text>
+        <Text variant="bodySmall" style={styles.dateYear}>{date.year}</Text>
+      </View>
     </View>
-    <View style={[styles.dateBlock, { width: dateWidth }]}>
-      <Text variant="labelMedium" style={styles.dateLabel}>{t("labels.estimatedArrival")}</Text>
-      <Text variant="titleLarge" style={styles.date}>{date.dayMonth}</Text>
-      <Text variant="bodySmall" style={styles.dateYear}>{date.year}</Text>
-    </View>
+    {/* 条码放在卡片底部整宽显示，门店可直接对着屏幕扫码；没有条码不占位 */}
+    {item.barcode ? <View style={styles.barcode}><ProductBarcodeImage value={item.barcode} compact /></View> : null}
   </Card>;
 }
 
@@ -66,11 +77,16 @@ export function ContainerNewProductsScreen() {
     enabled: canViewContainerNewProducts(isAuthenticated, hasPermission, isReview) && isStoreSelectionReady && Boolean(storeCode),
   });
   const orderedItems = useMemo(() => [...(query.data?.items ?? [])].sort(compareByArrivalThenProductNo), [query.data?.items]);
+  const [rangeFilter, setRangeFilter] = useState<ArrivalRangeFilter>("all");
+  // 过去/未来以门店所在州的今天为界；旧版后端没有该字段时退回设备日期
+  const localToday = query.data?.localToday ?? deviceLocalToday();
+  const rangeKinds = useMemo(() => Object.fromEntries(ARRIVAL_RANGE_FILTERS.map((filter) => [filter, countNewProductKinds(orderedItems.filter((item) => matchesArrivalRange(item, filter, localToday)))])) as Record<ArrivalRangeFilter, number>, [orderedItems, localToday]);
+  const filteredItems = useMemo(() => orderedItems.filter((item) => matchesArrivalRange(item, rangeFilter, localToday)), [orderedItems, rangeFilter, localToday]);
   const [requestedPage, setRequestedPage] = useState(1);
   const scrollRef = useRef<ScrollView>(null);
-  // 换门店回到第 1 页；刷新后条数变少由 paginate 夹回有效页
-  useEffect(() => setRequestedPage(1), [storeCode]);
-  const pageSlice = useMemo(() => paginate(orderedItems, requestedPage), [orderedItems, requestedPage]);
+  // 换门店、切换筛选回到第 1 页；刷新后条数变少由 paginate 夹回有效页
+  useEffect(() => setRequestedPage(1), [storeCode, rangeFilter]);
+  const pageSlice = useMemo(() => paginate(filteredItems, requestedPage), [filteredItems, requestedPage]);
   const goToPage = (page: number) => {
     setRequestedPage(page);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -90,10 +106,11 @@ export function ContainerNewProductsScreen() {
       <View style={styles.storeCard}><MaterialCommunityIcons name="store-outline" size={30} color={HB_COLORS.action} /><View style={styles.storeInfo}><Text variant="labelMedium" style={styles.muted}>{t("labels.currentStore")}</Text><Text variant="titleLarge">{selectedStore.storeName}</Text></View>{query.data?.stateCode ? <Text style={styles.state}>{query.data.stateCode}</Text> : null}</View>
       <View style={styles.note}><MaterialCommunityIcons name="clock-outline" size={22} color={HB_COLORS.action} /><Text style={styles.noteText}>{t("messages.dateNotice")}</Text></View>
       <View style={styles.rangeRow}><Text style={styles.rangeText}>{t("labels.range")}</Text><Text style={styles.sortText}>{t("labels.sortByArrival")}</Text></View>
-      {query.isLoading ? <View style={styles.center}><ActivityIndicator /><Text>{t("states.loading")}</Text></View> : query.isError ? <View style={styles.center}><Text>{(query.error as { code?: string })?.code === "STORE_STATE_UNKNOWN" ? t("states.stateUnknown") : t("states.loadFailed")}</Text><Button onPress={() => void query.refetch()}>{t("actions.retry")}</Button></View> : orderedItems.length === 0 ? <View style={styles.center}><Text>{t("states.empty")}</Text></View> : pageSlice.items.map((item, index) => <ProductCard key={`${item.containerCode}:${item.productCode}:${item.estimatedStoreArrivalDate}:${index}`} item={item} basis={item.basis} basisLabel={item.basis === "actual" ? t("labels.actualBasis") : t("labels.estimatedBasis")} imageSize={imageSize} dateWidth={dateWidth} />)}
-      {query.isSuccess && orderedItems.length > 0 ? <View style={styles.pagination}>
+      {query.isSuccess && orderedItems.length > 0 ? <SegmentedButtons value={rangeFilter} onValueChange={(value) => setRangeFilter(value as ArrivalRangeFilter)} density="small" buttons={ARRIVAL_RANGE_FILTERS.map((filter) => ({ value: filter, label: t(`filters.${filter}`, { count: rangeKinds[filter] }), labelStyle: styles.filterLabel }))} /> : null}
+      {query.isLoading ? <View style={styles.center}><ActivityIndicator /><Text>{t("states.loading")}</Text></View> : query.isError ? <View style={styles.center}><Text>{(query.error as { code?: string })?.code === "STORE_STATE_UNKNOWN" ? t("states.stateUnknown") : t("states.loadFailed")}</Text><Button onPress={() => void query.refetch()}>{t("actions.retry")}</Button></View> : orderedItems.length === 0 ? <View style={styles.center}><Text>{t("states.empty")}</Text></View> : filteredItems.length === 0 ? <View style={styles.center}><Text>{t(rangeFilter === "past" ? "states.emptyPast" : "states.emptyUpcoming")}</Text></View> : pageSlice.items.map((item, index) => <ProductCard key={`${item.containerCode}:${item.productCode}:${item.estimatedStoreArrivalDate}:${index}`} item={item} basis={item.basis} basisLabel={item.basis === "actual" ? t("labels.actualBasis") : t("labels.estimatedBasis")} imageSize={imageSize} dateWidth={dateWidth} />)}
+      {query.isSuccess && filteredItems.length > 0 ? <View style={styles.pagination}>
         <Button disabled={pageSlice.page <= 1} onPress={() => goToPage(pageSlice.page - 1)}>{t("pagination.previous")}</Button>
-        <Text variant="bodyMedium" style={styles.pageText}>{t("pagination.page", { page: pageSlice.page, pageCount: pageSlice.pageCount, total: countNewProductKinds(orderedItems) })}</Text>
+        <Text variant="bodyMedium" style={styles.pageText}>{t("pagination.page", { page: pageSlice.page, pageCount: pageSlice.pageCount, total: countNewProductKinds(filteredItems) })}</Text>
         <Button disabled={pageSlice.page >= pageSlice.pageCount} onPress={() => goToPage(pageSlice.page + 1)}>{t("pagination.next")}</Button>
       </View> : null}
     </ScrollView>
@@ -118,7 +135,10 @@ const styles = StyleSheet.create({
   rangeText: { color: HB_COLORS.textSecondary, flex: 1, minWidth: 0, flexShrink: 1 },
   sortText: { color: HB_COLORS.action, fontWeight: "700", flexShrink: 0 },
   card: { backgroundColor: HB_COLORS.white, borderRadius: HB_RADIUS.surface },
-  cardContent: { padding: HB_SPACING.sm, flexDirection: "row", alignItems: "center", minHeight: 112 },
+  cardContent: { padding: HB_SPACING.sm, gap: HB_SPACING.sm },
+  cardRow: { flexDirection: "row", alignItems: "center", minHeight: 96 },
+  barcode: { paddingTop: HB_SPACING.sm, borderTopWidth: 1, borderTopColor: HB_COLORS.outlineMuted },
+  filterLabel: { fontSize: 13, marginHorizontal: 0 },
   imageFrame: { width: 88, height: 88, borderRadius: 14, backgroundColor: HB_COLORS.surfaceMuted, justifyContent: "center", alignItems: "center", overflow: "hidden" },
   image: { width: "100%", height: "100%" },
   imagePlaceholder: { color: HB_COLORS.textSecondary, fontSize: 12 },
@@ -126,6 +146,7 @@ const styles = StyleSheet.create({
   productCode: { color: HB_COLORS.textPrimary, fontWeight: "700" },
   containerCode: { color: HB_COLORS.textSecondary },
   quantity: { color: HB_COLORS.textPrimary, fontWeight: "600" },
+  retailPrice: { color: HB_COLORS.action, fontWeight: "700" },
   basis: { color: HB_COLORS.success },
   estimatedBasis: { color: HB_COLORS.warning },
   dateBlock: { width: 100, borderLeftWidth: 1, borderLeftColor: HB_COLORS.outlineMuted, paddingLeft: HB_SPACING.sm },
