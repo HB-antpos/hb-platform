@@ -371,9 +371,6 @@ export function TodayPunchCard({
             ))}
           </View>
         ))}
-        {!display.stores.length && !isLoading ? (
-          <Text variant="bodySmall" style={styles.muted}>{t("today.dailyRecords.noSchedule")}</Text>
-        ) : null}
       </Card.Content>
     </Card>
   );

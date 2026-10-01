@@ -259,7 +259,8 @@ export function PunchAdjustmentCard({
 
   return (
     <>
-      <Card mode="outlined" style={styles.card}>
+      {/* 整行可点，避免标题与按钮重复同一文案 */}
+      <Card mode="outlined" style={styles.card} onPress={() => setSheetVisible(true)} accessibilityRole="button">
         <Card.Content style={styles.entry}>
           <Icon source="clock-edit-outline" size={20} color={HB_COLORS.action} />
           <View style={styles.flexText}>
@@ -268,9 +269,7 @@ export function PunchAdjustmentCard({
               {isManagerStore ? t("adjustment.entryHintManager") : t("adjustment.entryHint")}
             </Text>
           </View>
-          <Button mode="contained-tonal" compact onPress={() => setSheetVisible(true)}>
-            {t("adjustment.open")}
-          </Button>
+          <Icon source="chevron-right" size={20} color={HB_COLORS.textSecondary} />
         </Card.Content>
       </Card>
 
