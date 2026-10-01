@@ -374,6 +374,17 @@ namespace BlazorApp.Api.Controllers.React
                     return BadRequest(new { success = false, message = "更新数据不能为空" });
                 }
 
+                // 同一日期既赋值又要求清空属于矛盾请求，直接拒绝而不是猜测调用方意图。
+                if (
+                    (dto.ClearEstimatedArrivalDate == true && dto.预计到岸日期.HasValue)
+                    || (dto.ClearActualArrivalDate == true && dto.实际到货日期.HasValue)
+                )
+                {
+                    return BadRequest(
+                        new { success = false, message = "同一日期不能同时设置和清空" }
+                    );
+                }
+
                 if (!ModelState.IsValid)
                 {
                     var errors = ModelState.Values.SelectMany(v =>

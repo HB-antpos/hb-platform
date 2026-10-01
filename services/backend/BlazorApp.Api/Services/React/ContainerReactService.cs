@@ -1231,14 +1231,23 @@ namespace BlazorApp.Api.Services.React
                             container.LoadingDate = dto.装柜日期.Value;
                         }
 
+                        // 日期字段未传值表示不修改；清空必须显式传 Clear* 标记，避免漏传字段被误清。
                         if (dto.预计到岸日期.HasValue)
                         {
                             container.EstimatedArrivalDate = dto.预计到岸日期.Value;
+                        }
+                        else if (dto.ClearEstimatedArrivalDate == true)
+                        {
+                            container.EstimatedArrivalDate = null;
                         }
 
                         if (dto.实际到货日期.HasValue)
                         {
                             container.ActualArrivalDate = dto.实际到货日期.Value;
+                        }
+                        else if (dto.ClearActualArrivalDate == true)
+                        {
+                            container.ActualArrivalDate = null;
                         }
 
                         if (dto.汇率.HasValue)
