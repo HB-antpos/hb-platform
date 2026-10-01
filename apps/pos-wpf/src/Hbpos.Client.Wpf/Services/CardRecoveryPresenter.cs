@@ -51,6 +51,7 @@ internal sealed class CardRecoveryPresenter
     private readonly Action? _notifyPrintRecoveredReceiptCanExecuteChanged;
     private readonly Action<string>? _notifyPropertyChanged;
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
+    private readonly IOperationAuditLogger? _operationAuditLogger;
     private readonly Func<string, bool>? _requirePermission;
 
     private Task<CardPaymentRecoveryResult>? _cardPaymentRecoveryTask;
@@ -117,6 +118,7 @@ internal sealed class CardRecoveryPresenter
         _notifyPrintRecoveredReceiptCanExecuteChanged = notifyPrintRecoveredReceiptCanExecuteChanged;
         _notifyPropertyChanged = notifyPropertyChanged;
         _operationAuthorizationService = operationAuthorizationService;
+        _operationAuditLogger = operationAuditLogger;
         _requirePermission = requirePermission;
 
         CloseCardRecoveryResultDialogCommand = new RelayCommand(CloseCardRecoveryResultDialog);
@@ -1274,7 +1276,16 @@ internal sealed class CardRecoveryPresenter
             return;
         }
 
-        await PrintReceiptAsync(receipt, ReceiptPrintReason.CardAuto);
+        var result = await PrintReceiptAsync(receipt, ReceiptPrintReason.CardAuto);
+        // 恢复弹窗里的打印是员工手动触发的补打，与其他补打入口一样按打印结果留痕。
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.ReceiptReprint,
+            result.Succeeded ? "Succeeded" : "Failed",
+            GetSession(),
+            reasonCode: "CARD_RECOVERY",
+            safeMessage: result.Succeeded ? null : result.Message,
+            orderGuid: receipt.OrderGuid.ToString("D"));
     }
 
     private async Task<IReadOnlyList<ReceiptPreviewRow>> BuildReceiptPreviewRowsAsync(ReceiptDetails receipt)

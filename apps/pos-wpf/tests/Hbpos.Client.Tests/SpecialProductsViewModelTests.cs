@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using BlazorApp.Shared.DTOs;
 using CommunityToolkit.Mvvm.Input;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
@@ -164,6 +165,30 @@ public sealed class SpecialProductsViewModelTests
         Assert.Equal(1m, line.Quantity);
         Assert.Equal(1, backCallCount);
         Assert.Equal(1, repository.LoadSpecialProductItemsCallCount);
+    }
+
+    [Fact]
+    public async Task AddToCartCommand_records_cart_add_operation_audit()
+    {
+        var cart = new PosCartService();
+        var logger = new RecordingOperationAuditLogger();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var repository = new FakeCatalogRepository { SpecialItems = [item] };
+        var viewModel = CreateViewModel(cart: cart, repository: repository, operationAuditLogger: logger);
+        await viewModel.LoadAsync();
+
+        viewModel.AddToCartCommand.Execute(item);
+
+        // 特价区绕过收银台购物车变更入口直接加购，必须单独留下加购审计。
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("CART_ITEM_ADD", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("special-products", auditEvent.ReasonCode);
+        Assert.Equal("C001", auditEvent.CashierId);
+        var auditItem = Assert.Single(auditEvent.Items);
+        Assert.Equal("SKU-001", auditItem.ProductCode);
+        Assert.Equal(0m, auditItem.BeforeQuantity);
+        Assert.Equal(1m, auditItem.AfterQuantity);
     }
 
     [Fact]
@@ -1087,7 +1112,8 @@ public sealed class SpecialProductsViewModelTests
         Action? onBack = null,
         Action<CartLine>? onCartLineAdded = null,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
-        Func<IEnumerable<string?>, int, CancellationToken, Task<int>>? thumbnailPreloadAsync = null)
+        Func<IEnumerable<string?>, int, CancellationToken, Task<int>>? thumbnailPreloadAsync = null,
+        IOperationAuditLogger? operationAuditLogger = null)
     {
         return new SpecialProductsViewModel(
             index ?? new LocalSellableItemIndex(),
@@ -1100,7 +1126,18 @@ public sealed class SpecialProductsViewModelTests
             onCartLineAdded,
             workflow,
             delayAsync: delayAsync,
-            thumbnailPreloadAsync: thumbnailPreloadAsync);
+            thumbnailPreloadAsync: thumbnailPreloadAsync,
+            operationAuditLogger: operationAuditLogger);
+    }
+
+    private sealed class RecordingOperationAuditLogger : IOperationAuditLogger
+    {
+        public List<OperationAuditEventDto> Events { get; } = [];
+
+        public void Record(OperationAuditEventDto auditEvent)
+        {
+            Events.Add(auditEvent);
+        }
     }
 
     private static PosSessionState Session => new("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);

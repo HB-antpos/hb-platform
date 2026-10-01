@@ -2467,17 +2467,26 @@ public sealed class MainViewModelScannerTests
     public async Task Payment_success_print_button_prints_current_receipt()
     {
         var printService = new RecordingReceiptPrintService();
-        var viewModel = CreateAuthorizedMainViewModel(new FakeCustomerDisplayWindowService(), printService);
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            operationAuditLogger: auditLogger);
         await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
         var order = CreateReceiptPrintOrder(PaymentMethodKind.Cash);
         viewModel.PaymentSuccess.LoadFromOrder(order);
 
         viewModel.PaymentSuccess.PrintReceiptCommand.Execute(null);
 
-        await WaitUntilAsync(() => printService.Calls.Count == 1);
+        await WaitUntilAsync(() => auditLogger.Events.Any(auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT"));
         var call = Assert.Single(printService.Calls);
         Assert.Equal(order.OrderGuid, call.OrderGuid);
         Assert.Equal(ReceiptPrintReason.Manual, call.Reason);
+        // 付款成功页的打印按钮可反复点击，必须与其他补打入口一样留下审计。
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("PAYMENT_SUCCESS", auditEvent.ReasonCode);
+        Assert.Equal(order.OrderGuid.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]
@@ -2488,7 +2497,11 @@ public sealed class MainViewModelScannerTests
             // 协调器会把普通异常转换成失败结果；取消类异常才会穿透到事件桥，复现原闪退路径。
             PrintReceiptException = new TaskCanceledException("printer detail must stay out of the UI")
         };
-        var viewModel = CreateAuthorizedMainViewModel(new FakeCustomerDisplayWindowService(), printService);
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            operationAuditLogger: auditLogger);
         await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
         var order = CreateReceiptPrintOrder(PaymentMethodKind.Cash);
         viewModel.PaymentSuccess.LoadFromOrder(order);
@@ -2499,6 +2512,10 @@ public sealed class MainViewModelScannerTests
             printService.Calls.Count == 1 &&
             viewModel.StatusMessage.Contains(nameof(TaskCanceledException), StringComparison.Ordinal));
         Assert.Single(printService.Calls);
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal("PAYMENT_SUCCESS_EXCEPTION", auditEvent.ReasonCode);
+        Assert.Equal(nameof(TaskCanceledException), auditEvent.SafeMessage);
         Assert.DoesNotContain("printer detail must stay out of the UI", viewModel.StatusMessage, StringComparison.Ordinal);
         var handler = typeof(MainViewModel).GetMethod(
             "OnPaymentSuccessPrintReceiptRequested",
@@ -6362,16 +6379,20 @@ public sealed class MainViewModelScannerTests
                 CardPaymentRecoveryOutcome.OrderCompleted,
                 "Recovered approved payment.",
                 order)));
+        var auditLogger = new RecordingOperationAuditLogger();
         var viewModel = CreateAuthorizedMainViewModel(
             new FakeCustomerDisplayWindowService(),
             receiptPrintService: printService,
-            cardPaymentRecoveryService: recovery);
+            cardPaymentRecoveryService: recovery,
+            operationAuditLogger: auditLogger);
 
         await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
         var recovered = await InvokeRecoverCardPaymentAttemptAsync(viewModel, navigateToPaymentOnDraft: false);
 
         Assert.True(recovered);
         Assert.True(IsShowingCompletedSale(viewModel));
+        // 恢复完成时的自动打印不是员工操作，不记补打审计。
+        Assert.DoesNotContain(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
         var call = Assert.Single(printService.Calls);
         Assert.Equal(order.OrderGuid, call.OrderGuid);
         Assert.Equal(ReceiptPrintReason.CardAuto, call.Reason);
@@ -6388,6 +6409,11 @@ public sealed class MainViewModelScannerTests
         await viewModel.PrintRecoveredReceiptCommand.ExecuteAsync(null);
         await WaitUntilAsync(() => printService.Calls.Count == 2);
         Assert.Equal(ReceiptPrintReason.CardAuto, printService.Calls[1].Reason);
+        // 恢复弹窗里的“打印小票”由员工手动点击，必须记补打审计。
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "RECEIPT_REPRINT");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("CARD_RECOVERY", auditEvent.ReasonCode);
+        Assert.Equal(order.OrderGuid.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]

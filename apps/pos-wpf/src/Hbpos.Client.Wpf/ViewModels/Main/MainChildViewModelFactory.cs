@@ -343,7 +343,8 @@ internal sealed class MainChildViewModelFactory
             _rawScannerService,
             cashierSessionContext: _cashierSessionContext,
             enforcePermissionsWhenNoCashier: _enforceCashierPermissions,
-            operationAuthorizationService: _operationAuthorizationService);
+            operationAuthorizationService: _operationAuthorizationService,
+            operationAuditLogger: _operationAuditLogger);
     }
 
     public ReceiptReturnsViewModel CreateReceiptReturnsViewModel(
@@ -360,7 +361,9 @@ internal sealed class MainChildViewModelFactory
             _localization,
             _cashierSessionContext,
             _enforceCashierPermissions,
-            _operationAuthorizationService);
+            _operationAuthorizationService,
+            _cart,
+            _operationAuditLogger);
     }
 
     public PaymentViewModel CreatePaymentViewModel(

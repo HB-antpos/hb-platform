@@ -3655,7 +3655,34 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (PaymentSuccess.TransactionId is Guid orderGuid)
         {
-            await _receiptCoordinator.PrintSuccessAsync(orderGuid);
+            ReceiptPrintResult result;
+            try
+            {
+                result = await _receiptCoordinator.PrintSuccessAsync(orderGuid);
+            }
+            catch (Exception ex)
+            {
+                // 取消类异常会穿透协调器，先留下失败审计再交给事件桥统一提示。
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    OperationAuditTypes.ReceiptReprint,
+                    "Failed",
+                    Session,
+                    reasonCode: "PAYMENT_SUCCESS_EXCEPTION",
+                    safeMessage: ex.GetType().Name,
+                    orderGuid: orderGuid.ToString("D"));
+                throw;
+            }
+
+            // 付款成功页可反复点击打印，按打印服务返回结果记录，与“打印上一张”同属小票补打审计。
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.ReceiptReprint,
+                result.Succeeded ? "Succeeded" : "Failed",
+                Session,
+                reasonCode: "PAYMENT_SUCCESS",
+                safeMessage: result.Succeeded ? null : result.Message,
+                orderGuid: orderGuid.ToString("D"));
         }
     }
 

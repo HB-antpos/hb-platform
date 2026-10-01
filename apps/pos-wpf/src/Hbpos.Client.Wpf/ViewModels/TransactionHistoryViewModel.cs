@@ -2273,6 +2273,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private async Task RecallHeldOrderCoreAsync(HistoryOrderListItem order)
     {
         var correlation = OperationAuditEvents.CreateCorrelation();
+        var recallAuditRecorded = false;
         try
         {
             if (order.CanRemoteRecall && Session.IsOnline)
@@ -2282,9 +2283,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                     throw new InvalidOperationException(T("history.held.unavailable"));
                 }
 
-                await _sharedHeldOrderCoordinator.TakeRemoteHoldAsync(
+                var takeResult = await _sharedHeldOrderCoordinator.TakeRemoteHoldAsync(
                     order.OrderGuid,
                     Session);
+                RecordSharedHeldOrderRecall(order, takeResult, "SHARED_HELD_ORDER", correlation);
+                recallAuditRecorded = true;
             }
             else if (order.CanOfflineRecall)
             {
@@ -2293,9 +2296,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                     throw new InvalidOperationException(T("history.held.unavailable"));
                 }
 
-                await _sharedHeldOrderCoordinator.RecallLocalPublicationAsync(
+                var takeResult = await _sharedHeldOrderCoordinator.RecallLocalPublicationAsync(
                     order.OrderGuid,
                     Session);
+                RecordSharedHeldOrderRecall(order, takeResult, "SHARED_HELD_ORDER_OFFLINE", correlation);
+                recallAuditRecorded = true;
             }
             else if (order.CanLegacyRecall)
             {
@@ -2315,6 +2320,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                     orderGuid: order.OrderGuid.ToString("D"),
                     correlationId: correlation.CorrelationId,
                     traceId: correlation.TraceId);
+                recallAuditRecorded = true;
             }
             else
             {
@@ -2329,16 +2335,20 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         catch (Exception ex)
         {
             // 此入口未接收调用方取消令牌；取消异常只能来自内部超时，必须转为可见失败状态。
-            OperationAuditEvents.RecordAction(
-                _operationAuditLogger,
-                OperationAuditTypes.OrderRecall,
-                "Failed",
-                Session,
-                reasonCode: "SHARED_HELD_ORDER",
-                safeMessage: ex.GetType().Name,
-                orderGuid: order.OrderGuid.ToString("D"),
-                correlationId: correlation.CorrelationId,
-                traceId: correlation.TraceId);
+            // 取单已记审计后，刷新购物车的回调异常不能再把同一次取单记成失败。
+            if (!recallAuditRecorded)
+            {
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    OperationAuditTypes.OrderRecall,
+                    "Failed",
+                    Session,
+                    reasonCode: "SHARED_HELD_ORDER",
+                    safeMessage: ex.GetType().Name,
+                    orderGuid: order.OrderGuid.ToString("D"),
+                    correlationId: correlation.CorrelationId,
+                    traceId: correlation.TraceId);
+            }
             ConsoleLog.WriteError(
                 "OperationAudit",
                 $"held order recall failed error={ex.GetType().Name}",
@@ -2745,6 +2755,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
         using var authorizationActivation = authorization.Activate();
 
+        var correlation = OperationAuditEvents.CreateCorrelation();
+        var releaseAuditRecorded = false;
         try
         {
             await _sharedHeldOrderCoordinator.ForceReleaseAsync(
@@ -2753,6 +2765,18 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 reason,
                 Session,
                 CancellationToken.None);
+            // 强制释放把被其他设备取走的挂单退回挂单池，按“挂单”记录并保留主管填写的原因。
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.OrderHold,
+                "Succeeded",
+                Session,
+                reasonCode: "FORCE_RELEASE",
+                safeMessage: reason,
+                orderGuid: candidate.OrderGuid.ToString("D"),
+                correlationId: correlation.CorrelationId,
+                traceId: correlation.TraceId);
+            releaseAuditRecorded = true;
             await LoadAsync();
             // 刷新失败时保留具体错误；刷新成功后再显示强制释放结果，避免成功提示被 LoadAsync 清空。
             if (string.IsNullOrWhiteSpace(StatusMessage))
@@ -2763,12 +2787,63 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         catch (Exception ex)
         {
             // 强制释放使用 CancellationToken.None；内部 HTTP 超时应留在可重试状态，不能逃逸到 Dispatcher。
+            if (!releaseAuditRecorded)
+            {
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    OperationAuditTypes.OrderHold,
+                    "Failed",
+                    Session,
+                    reasonCode: "FORCE_RELEASE",
+                    safeMessage: $"{ex.GetType().Name}: {reason}",
+                    orderGuid: candidate.OrderGuid.ToString("D"),
+                    correlationId: correlation.CorrelationId,
+                    traceId: correlation.TraceId);
+            }
+
             StatusMessage = ex.Message;
         }
         finally
         {
             ForceReleaseReason = string.Empty;
         }
+    }
+
+    /// <summary>
+    /// 共享挂单取单审计：取单已在本地/服务端落定，但购物车恢复失败时记为失败，便于追查“取走却没进购物车”的挂单。
+    /// 成功时与本地挂单取单口径一致，按“空购物车 → 挂单金额”记录金额变化（列表行只有整单金额，无商品明细）。
+    /// </summary>
+    private void RecordSharedHeldOrderRecall(
+        HistoryOrderListItem order,
+        SharedHeldOrderTakeResult takeResult,
+        string reasonCode,
+        (string CorrelationId, string TraceId) correlation)
+    {
+        if (!takeResult.RestoredToCart)
+        {
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.OrderRecall,
+                "Failed",
+                Session,
+                reasonCode: reasonCode,
+                safeMessage: "CART_RESTORE_FAILED",
+                orderGuid: order.OrderGuid.ToString("D"),
+                correlationId: correlation.CorrelationId,
+                traceId: correlation.TraceId);
+            return;
+        }
+
+        OperationAuditEvents.RecordCartChange(
+            _operationAuditLogger,
+            OperationAuditTypes.OrderRecall,
+            Session,
+            new OperationAuditCartSnapshot(0m, 0m, 0m, []),
+            new OperationAuditCartSnapshot(order.TotalAmount, order.DiscountAmount, order.ActualAmount, []),
+            reasonCode: reasonCode,
+            orderGuid: order.OrderGuid.ToString("D"),
+            correlationId: correlation.CorrelationId,
+            traceId: correlation.TraceId);
     }
 
     private async Task<LocalInstallmentOrder?> LoadInstallmentPreviewDetailsAsync(Guid installmentGuid, CancellationToken cancellationToken)

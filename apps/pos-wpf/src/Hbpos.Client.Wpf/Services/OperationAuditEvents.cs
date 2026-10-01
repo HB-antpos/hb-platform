@@ -306,6 +306,35 @@ internal static class OperationAuditEvents
         Record(logger, auditEvent);
     }
 
+    /// <summary>
+    /// 日结保存审计：系统应有现金记为改前实收、实点现金记为改后实收、差异记为金额变化，
+    /// 使后台操作日志列表的“金额变化”列直接显示日结长短款并可按差异排序。
+    /// </summary>
+    public static void RecordDailyCloseSave(
+        IOperationAuditLogger? logger,
+        PosSessionState session,
+        Guid dailyCloseGuid,
+        decimal expectedCashAmount,
+        decimal countedCashAmount,
+        decimal cashDifference,
+        string? correlationId = null,
+        string? traceId = null)
+    {
+        if (logger is null)
+        {
+            return;
+        }
+
+        var auditEvent = CreateBase(OperationAuditTypes.DailyCloseSave, "Succeeded", session, correlationId, traceId);
+        auditEvent.ReasonCode = "SAVED";
+        auditEvent.OrderGuid = dailyCloseGuid.ToString("D");
+        auditEvent.PaymentMethod = "Cash";
+        auditEvent.BeforeActual = RoundMoney(expectedCashAmount);
+        auditEvent.AfterActual = RoundMoney(countedCashAmount);
+        auditEvent.AmountDelta = RoundMoney(cashDifference);
+        Record(logger, auditEvent);
+    }
+
     public static (string CorrelationId, string TraceId) CreateCorrelation()
     {
         var traceId = Activity.Current?.TraceId.ToString();

@@ -2934,6 +2934,7 @@ public sealed class TransactionHistoryViewModelTests
             ])
         };
         var returnedToPos = false;
+        var auditLogger = new RecordingOperationAuditLogger();
         var viewModel = new TransactionHistoryViewModel(
             new CapturingReceiptQueryService(),
             new CapturingSuspendedOrderService(),
@@ -2946,7 +2947,8 @@ public sealed class TransactionHistoryViewModelTests
             },
             sharedHeldOrderCoordinator: coordinator,
             sharedHeldOrderApiClient: api,
-            sharedHeldOrderRepository: new CapturingSharedHeldOrderRepository());
+            sharedHeldOrderRepository: new CapturingSharedHeldOrderRepository(),
+            operationAuditLogger: auditLogger);
 
         viewModel.IsHeldSourceSelected = true;
         await viewModel.LoadAsync();
@@ -2959,6 +2961,45 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal(holdGuid, take.HoldGuid);
         Assert.Empty(coordinator.LocalRecalls);
         Assert.True(returnedToPos);
+        // 共享挂单取单成功也要与本地挂单取单一样留下审计，金额变化为挂单实收。
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("ORDER_RECALL", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("SHARED_HELD_ORDER", auditEvent.ReasonCode);
+        Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
+        Assert.Equal(0m, auditEvent.BeforeActual);
+        Assert.Equal(10m, auditEvent.AfterActual);
+        Assert.Equal(10m, auditEvent.AmountDelta);
+    }
+
+    [Fact]
+    public async Task Held_remote_recall_without_cart_restore_records_failed_audit()
+    {
+        var holdGuid = Guid.NewGuid();
+        var coordinator = new CapturingSharedHeldOrderCoordinator
+        {
+            TakeRemoteHandler = (actualHoldGuid, _) => Task.FromResult(
+                new SharedHeldOrderTakeResult(Guid.NewGuid(), actualHoldGuid, RestoredToCart: false))
+        };
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            sharedHeldOrderCoordinator: coordinator,
+            operationAuditLogger: auditLogger);
+        var row = HeldHistoryRow(holdGuid, canRecall: true, canRemoteRecall: true);
+
+        await viewModel.RecallOrderCommand.ExecuteAsync(row);
+
+        // 挂单已被本机取走但购物车没恢复，必须记为失败，便于追查“取走却没进购物车”的挂单。
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("ORDER_RECALL", auditEvent.OperationType);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal("SHARED_HELD_ORDER", auditEvent.ReasonCode);
+        Assert.Equal("CART_RESTORE_FAILED", auditEvent.SafeMessage);
+        Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]
@@ -2989,6 +3030,7 @@ public sealed class TransactionHistoryViewModelTests
     {
         var holdGuid = Guid.NewGuid();
         var coordinator = new CapturingSharedHeldOrderCoordinator();
+        var auditLogger = new RecordingOperationAuditLogger();
         var repository = new CapturingSharedHeldOrderRepository
         {
             Publications =
@@ -3010,7 +3052,8 @@ public sealed class TransactionHistoryViewModelTests
             CreateSession() with { IsOnline = false },
             sharedHeldOrderCoordinator: coordinator,
             sharedHeldOrderApiClient: api,
-            sharedHeldOrderRepository: repository);
+            sharedHeldOrderRepository: repository,
+            operationAuditLogger: auditLogger);
 
         viewModel.IsHeldSourceSelected = true;
         await viewModel.LoadAsync();
@@ -3023,6 +3066,11 @@ public sealed class TransactionHistoryViewModelTests
         var recall = Assert.Single(coordinator.LocalRecalls);
         Assert.Equal(holdGuid, recall.HoldGuid);
         Assert.Empty(coordinator.RemoteTakes);
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("ORDER_RECALL", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("SHARED_HELD_ORDER_OFFLINE", auditEvent.ReasonCode);
+        Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]
@@ -3461,6 +3509,7 @@ public sealed class TransactionHistoryViewModelTests
             ]
         };
         (Guid HoldGuid, Guid ClaimGuid, string Reason, PosSessionState Session)? captured = null;
+        var auditLogger = new RecordingOperationAuditLogger();
         var coordinator = new CapturingSharedHeldOrderCoordinator
         {
             ForceReleaseHandler = (actualHoldGuid, actualClaimGuid, reason, session) =>
@@ -3483,7 +3532,8 @@ public sealed class TransactionHistoryViewModelTests
             CreateSession(),
             sharedHeldOrderCoordinator: coordinator,
             sharedHeldOrderApiClient: api,
-            sharedHeldOrderRepository: repository);
+            sharedHeldOrderRepository: repository,
+            operationAuditLogger: auditLogger);
 
         viewModel.DateFrom = HeldFixtureDate;
         viewModel.DateTo = HeldFixtureDate;
@@ -3510,6 +3560,13 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal("supervisor override", captured.Value.Reason);
         Assert.False(viewModel.IsForceReleaseReasonPromptOpen);
         Assert.Contains("force-released", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        // 强制释放是主管越权动作，审计须保留挂单号与主管填写的原因。
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("ORDER_HOLD", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("FORCE_RELEASE", auditEvent.ReasonCode);
+        Assert.Equal("supervisor override", auditEvent.SafeMessage);
+        Assert.Equal(holdGuid.ToString("D"), auditEvent.OrderGuid);
     }
 
     [Fact]
@@ -3528,6 +3585,7 @@ public sealed class TransactionHistoryViewModelTests
         {
             ForceReleaseHandler = (_, _, _, _) => throw new InvalidOperationException("force release failed")
         };
+        var auditLogger = new RecordingOperationAuditLogger();
         var viewModel = new TransactionHistoryViewModel(
             new CapturingReceiptQueryService(),
             new CapturingSuspendedOrderService
@@ -3537,7 +3595,8 @@ public sealed class TransactionHistoryViewModelTests
             new CapturingRemoteOrderHistoryService(),
             CreateSession(),
             sharedHeldOrderCoordinator: coordinator,
-            sharedHeldOrderRepository: repository);
+            sharedHeldOrderRepository: repository,
+            operationAuditLogger: auditLogger);
 
         viewModel.DateFrom = HeldFixtureDate;
         viewModel.DateTo = HeldFixtureDate;
@@ -3553,6 +3612,11 @@ public sealed class TransactionHistoryViewModelTests
         Assert.False(viewModel.IsForceReleaseReasonPromptOpen);
         Assert.Equal("force release failed", viewModel.StatusMessage);
         Assert.Single(coordinator.ForceReleases);
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("ORDER_HOLD", auditEvent.OperationType);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal("FORCE_RELEASE", auditEvent.ReasonCode);
+        Assert.Equal("InvalidOperationException: supervisor override", auditEvent.SafeMessage);
     }
 
     [Fact]

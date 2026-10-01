@@ -302,6 +302,43 @@ public sealed class ReceiptReturnsViewModelTests
     }
 
     [Fact]
+    public async Task ConfirmToCart_records_cart_add_audit_with_return_lines_and_original_order()
+    {
+        var cart = new PosCartService();
+        var lookupResult = CreateLookupResult();
+        var workflow = new FakeReceiptReturnsWorkflowService
+        {
+            LookupResult = lookupResult,
+            Cart = cart
+        };
+        var logger = new RecordingOperationAuditLogger();
+        var viewModel = new ReceiptReturnsViewModel(
+            workflow,
+            CreateSession(),
+            () => { },
+            cart: cart,
+            operationAuditLogger: logger);
+
+        viewModel.ScanText = "ORDER-001";
+        await viewModel.LookupCommand.ExecuteAsync(null);
+        viewModel.AddReceiptLineCommand.Execute(viewModel.OrderLines.Single());
+        viewModel.ConfirmToCartCommand.Execute(null);
+
+        // 退货行进购物车是退款的唯一前置步骤，必须留下“谁、退了哪张小票的哪件商品”的审计。
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("CART_ITEM_ADD", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("return-receipt", auditEvent.ReasonCode);
+        Assert.Equal(lookupResult.Order!.OrderGuid.ToString("D"), auditEvent.OrderGuid);
+        Assert.Equal("C01", auditEvent.CashierId);
+        Assert.Equal(-10m, auditEvent.AmountDelta);
+        var item = Assert.Single(auditEvent.Items);
+        Assert.Equal("SKU-001", item.ProductCode);
+        Assert.Equal(nameof(CartLineKind.Return), item.LineKind);
+        Assert.Equal(-1m, item.AfterQuantity);
+    }
+
+    [Fact]
     public void OpenNoReceiptOpenItemDialogCommand_opens_only_in_no_receipt_mode()
     {
         var viewModel = new ReceiptReturnsViewModel(
@@ -570,6 +607,8 @@ public sealed class ReceiptReturnsViewModelTests
 
         public ReceiptReturnPendingLineResult OpenItemResult { get; init; } = new(null, "");
 
+        public PosCartService? Cart { get; init; }
+
         public Task<ReceiptReturnLookupResult> LookupOrderAsync(
             PosSessionState session,
             string orderQuery,
@@ -610,8 +649,31 @@ public sealed class ReceiptReturnsViewModelTests
             IEnumerable<PendingReturnLine> lines,
             IReadOnlyList<OrderReturnPaymentCapacityDto>? paymentCapacities = null)
         {
-            AddedLines.AddRange(lines);
-            return [];
+            var pendingLines = lines.ToArray();
+            AddedLines.AddRange(pendingLines);
+            if (Cart is null)
+            {
+                return [];
+            }
+
+            // 与真实工作流一致地把退货行写进购物车，供审计前后快照比对。
+            return pendingLines
+                .Select(pending => Cart.AddReturnLine(new ReturnCartLineRequest(
+                    pending.StoreCode,
+                    pending.ProductCode,
+                    pending.ReferenceCode,
+                    pending.DisplayName,
+                    pending.LookupCode,
+                    pending.ItemNumber,
+                    pending.ProductImage,
+                    pending.Quantity,
+                    pending.UnitPrice,
+                    pending.PriceSource,
+                    pending.PriceSourceLabel,
+                    pending.ReturnSourceKey,
+                    pending.OriginalOrderGuid,
+                    pending.OriginalOrderLineGuid)))
+                .ToArray();
         }
     }
 
@@ -630,6 +692,16 @@ public sealed class ReceiptReturnsViewModelTests
     {
         public void Record(OperationAuditEventDto auditEvent)
         {
+        }
+    }
+
+    private sealed class RecordingOperationAuditLogger : IOperationAuditLogger
+    {
+        public List<OperationAuditEventDto> Events { get; } = [];
+
+        public void Record(OperationAuditEventDto auditEvent)
+        {
+            Events.Add(auditEvent);
         }
     }
 }
