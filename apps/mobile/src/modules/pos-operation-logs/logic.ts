@@ -28,7 +28,7 @@ export const POS_OPERATION_RANGE_PRESETS: PosOperationRangePreset[] = [
 
 /** 操作类型按审计关注度分组；高风险组在筛选面板默认展开，其余折叠。 */
 export const POS_OPERATION_TYPE_GROUPS: readonly {
-  key: "risk" | "sales" | "payment" | "session";
+  key: "risk" | "sales" | "payment" | "session" | "system";
   types: readonly string[];
 }[] = [
   {
@@ -42,6 +42,7 @@ export const POS_OPERATION_TYPE_GROUPS: readonly {
       "ORDER_CANCEL",
       "CASH_DRAWER_OPEN",
       "CARD_PAYMENT_SUPERVISOR_RESOLUTION",
+      "PERMISSION_OVERRIDE",
     ],
   },
   {
@@ -65,6 +66,7 @@ export const POS_OPERATION_TYPE_GROUPS: readonly {
       "PAYMENT_CANCEL",
       "INSTALLMENT_REPAYMENT_COMPLETE",
       "INSTALLMENT_REPAYMENT_CANCEL",
+      "INSTALLMENT_PICKUP_CONFIRM",
     ],
   },
   {
@@ -76,6 +78,17 @@ export const POS_OPERATION_TYPE_GROUPS: readonly {
       "DAILY_CLOSE_REPRINT",
       "LINKLY_SETTLEMENT",
       "LINKLY_SETTLEMENT_REPRINT",
+    ],
+  },
+  {
+    // 收银机系统级操作：影响数据去向、设备归属或远程控制，单独成组便于巡检。
+    key: "system",
+    types: [
+      "API_SERVER_CHANGE",
+      "DEVICE_REREGISTER",
+      "REMOTE_MAINTENANCE_INSTALL",
+      "CATALOG_RESET",
+      "TEST_SALES_DATA_RESET",
     ],
   },
 ];

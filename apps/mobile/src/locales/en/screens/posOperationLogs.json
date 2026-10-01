@@ -118,7 +118,8 @@
     "risk": "High risk",
     "sales": "Sales and cart",
     "payment": "Payment and installments",
-    "session": "Login and daily close"
+    "session": "Login and daily close",
+    "system": "System & device"
   },
   "operations": {
     "cashierLogin": "Cashier login",
@@ -147,7 +148,14 @@
     "dailyCloseReprint": "Reprint daily close",
     "linklySettlement": "Linkly settlement",
     "linklySettlementReprint": "Reprint Linkly settlement",
-    "cardPaymentSupervisorResolution": "Supervisor card payment resolution"
+    "cardPaymentSupervisorResolution": "Supervisor card payment resolution",
+    "permissionOverride": "Supervisor authorization",
+    "installmentPickupConfirm": "Installment pickup confirmed",
+    "catalogReset": "Catalog reset",
+    "testSalesDataReset": "Test sales data reset",
+    "deviceReregister": "Device reregistered",
+    "apiServerChange": "API server changed",
+    "remoteMaintenanceInstall": "Remote maintenance install"
   },
   "detail": {
     "reportingDelay": "Reported {{seconds}}s later",

@@ -7214,6 +7214,59 @@ public sealed class MainViewModelScannerTests
                 reloadCatalogAsync));
     }
 
+    [Fact]
+    public async Task Device_rebind_activation_records_reregister_audit_with_previous_cashier_and_store()
+    {
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            operationAuditLogger: auditLogger);
+        var startupOptions = new AppStartupOptions([], false, null, null);
+        await viewModel.InitializeAsync(startupOptions);
+        var sessionBefore = viewModel.Session;
+
+        var method = typeof(MainViewModel).GetMethod(
+            "ActivateDeviceAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var exception = await Record.ExceptionAsync(() => (Task)method!.Invoke(
+            viewModel,
+            [new DeviceActivatedEventArgs("POS_2001_NEW", "2001", "New Store", "HW-001", IsReregistered: true), startupOptions])!);
+
+        Assert.Null(exception);
+        // 换绑后设备号必然改变，审计以新终端身份记录，但操作人仍是发起换绑的收银员，原门店终端写入说明。
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "DEVICE_REREGISTER");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("ACTIVATION_REBIND", auditEvent.ReasonCode);
+        Assert.Equal(sessionBefore.CashierSession?.CashierId ?? sessionBefore.CashierId, auditEvent.CashierId);
+        Assert.Equal(
+            $"{sessionBefore.StoreCode}/{sessionBefore.DeviceCode} -> 2001/POS_2001_NEW",
+            auditEvent.SafeMessage);
+    }
+
+    [Fact]
+    public async Task Device_reregistration_submitted_for_approval_records_audit_before_authorization_is_cleared()
+    {
+        var auditLogger = new RecordingOperationAuditLogger();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            operationAuditLogger: auditLogger);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var sessionBefore = viewModel.Session;
+
+        var method = typeof(MainViewModel).GetMethod(
+            "ApplyDeviceReregistered",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method!.Invoke(viewModel, null);
+
+        var auditEvent = Assert.Single(auditLogger.Events, auditEvent => auditEvent.OperationType == "DEVICE_REREGISTER");
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("SUBMITTED_PENDING_APPROVAL", auditEvent.ReasonCode);
+        Assert.Equal(sessionBefore.CashierSession?.CashierId ?? sessionBefore.CashierId, auditEvent.CashierId);
+        Assert.Equal(sessionBefore.DeviceCode, auditEvent.DeviceCode);
+    }
+
     private static async Task<bool> InvokeRecoverCardPaymentAttemptAsync(
         MainViewModel viewModel,
         bool navigateToPaymentOnDraft)

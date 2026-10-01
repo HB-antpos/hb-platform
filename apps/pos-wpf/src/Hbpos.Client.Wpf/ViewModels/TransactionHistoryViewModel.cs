@@ -2940,13 +2940,15 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         using var authorizationActivation = authorization.Activate();
 
         InstallmentOrderActionResult result;
+        var installmentGuid = orderSnapshot!.InstallmentOrder!.OrderId;
         try
         {
             // 中文注释：历史页提货入口复用分期中心同一接口，成功后刷新列表和右侧预览状态。
-            result = await _installmentOrderService.ConfirmPickupAsync(orderSnapshot!.InstallmentOrder!.OrderId, Session);
+            result = await _installmentOrderService.ConfirmPickupAsync(installmentGuid, Session);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            RecordInstallmentPickupAudit(installmentGuid, "Failed", ex.GetType().Name);
             LockInstallmentPickup(orderSnapshot!.InstallmentOrder!.OrderId);
             if (ReferenceEquals(SelectedOrder, orderSnapshot))
             {
@@ -2956,6 +2958,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
         catch (Exception ex)
         {
+            RecordInstallmentPickupAudit(installmentGuid, "Failed", ex.GetType().Name);
             if (ReferenceEquals(SelectedOrder, orderSnapshot))
             {
                 StatusMessage = ex.Message;
@@ -2963,6 +2966,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             return;
         }
 
+        RecordInstallmentPickupAudit(
+            installmentGuid,
+            result.Succeeded ? "Succeeded" : "Failed",
+            result.Succeeded ? null : result.Message);
         StatusMessage = result.Message;
         if (result.RequiresReview)
         {
@@ -2978,6 +2985,21 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 StatusMessage = message;
             }
         }
+    }
+
+    /// <summary>
+    /// 分期提货把订单推进到终态（货物交给顾客），与分期中心入口使用同一事件类型和原因码。
+    /// </summary>
+    private void RecordInstallmentPickupAudit(Guid installmentGuid, string outcome, string? safeMessage)
+    {
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.InstallmentPickupConfirm,
+            outcome,
+            Session,
+            reasonCode: "PICKUP",
+            safeMessage: safeMessage,
+            orderGuid: installmentGuid.ToString("D"));
     }
 
     private void LockInstallmentPickup(Guid installmentGuid)

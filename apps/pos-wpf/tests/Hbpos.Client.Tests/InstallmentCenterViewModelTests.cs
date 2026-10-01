@@ -462,6 +462,30 @@ public sealed class InstallmentCenterViewModelTests
     }
 
     [Fact]
+    public async Task ConfirmPickupCommand_records_installment_pickup_operation_audit()
+    {
+        var auditLogger = new RecordingOperationAuditLogger();
+        var targetOrder = CreateOrder("IO-002", "李四", "0400222333", "待提货", canConfirmPickup: true);
+        var service = new FakeInstallmentOrderService { Orders = [targetOrder] };
+        var viewModel = new InstallmentCenterViewModel(
+            service,
+            CreateSession(),
+            _ => Task.CompletedTask,
+            () => { },
+            operationAuditLogger: auditLogger);
+
+        await viewModel.LoadAsync();
+        await viewModel.ConfirmPickupCommand.ExecuteAsync(null);
+
+        // 确认提货把分期订单推进到终态（货物交给顾客），必须留下审计。
+        var auditEvent = Assert.Single(auditLogger.Events);
+        Assert.Equal("INSTALLMENT_PICKUP_CONFIRM", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("PICKUP", auditEvent.ReasonCode);
+        Assert.Equal(targetOrder.OrderId.ToString("D"), auditEvent.OrderGuid);
+    }
+
+    [Fact]
     public async Task ConfirmPickup_unknown_result_immediately_locks_the_selected_order()
     {
         var targetOrder = CreateOrder("IO-PICKUP-UNKNOWN", "李四", "0400222333", "待提货", canConfirmPickup: true);

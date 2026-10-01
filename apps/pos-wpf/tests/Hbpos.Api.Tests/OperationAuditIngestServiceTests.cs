@@ -229,6 +229,36 @@ public sealed class OperationAuditIngestServiceTests
         Assert.Equal(reasonCode, persisted.ReasonCode);
     }
 
+    [Theory]
+    [InlineData("INSTALLMENT_PICKUP_CONFIRM", "Succeeded", "PICKUP")]
+    [InlineData("CATALOG_RESET", "Succeeded", "SETTINGS")]
+    [InlineData("TEST_SALES_DATA_RESET", "Failed", "SETTINGS")]
+    [InlineData("DEVICE_REREGISTER", "Succeeded", "ACTIVATION_REBIND")]
+    [InlineData("API_SERVER_CHANGE", "Denied", "BLOCKED")]
+    [InlineData("REMOTE_MAINTENANCE_INSTALL", "Succeeded", "SETTINGS")]
+    public async Task IngestAsync_accepts_system_operation_types(
+        string operationType,
+        string outcome,
+        string reasonCode)
+    {
+        // 客户端遇到 rejected 会永久放弃该事件，新类型必须先进服务端白名单再发布客户端。
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].OperationType = operationType.ToLowerInvariant();
+        request.Events[0].Outcome = outcome;
+        request.Events[0].ReasonCode = reasonCode;
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.AcceptedCount);
+        var persisted = Assert.Single(await fixture.PosmDb.Queryable<PosOperationAudit>().ToListAsync());
+        Assert.Equal(operationType, persisted.OperationType);
+        Assert.Equal(outcome, persisted.Outcome);
+        Assert.Equal(reasonCode, persisted.ReasonCode);
+    }
+
     [Fact]
     public async Task IngestAsync_normalizes_legacy_linkly_supervisor_outcome_to_succeeded()
     {

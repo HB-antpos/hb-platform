@@ -140,6 +140,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly bool _enforcePermissions;
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
     private readonly IRemoteMaintenanceService? _remoteMaintenanceService;
+    private readonly IOperationAuditLogger? _operationAuditLogger;
     private readonly DataMaintenanceSection _dataMaintenanceSection;
     private readonly ReceiptPrinterSection _receiptPrinterSection;
     private CardTerminalConfiguration _loadedConfiguration = CardTerminalConfiguration.Default;
@@ -297,9 +298,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         IRemoteMaintenanceService? remoteMaintenanceService = null,
         Func<string, Task<bool>>? confirmLinklyTerminalAssignmentAsync = null,
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
-        ICatalogSyncStatusService? catalogSyncStatusService = null)
+        ICatalogSyncStatusService? catalogSyncStatusService = null,
+        IOperationAuditLogger? operationAuditLogger = null)
     {
         _setupService = setupService;
+        _operationAuditLogger = operationAuditLogger;
         _paymentMethodSettingsService = paymentMethodSettingsService;
         _catalogSyncStatusService = catalogSyncStatusService;
         _localization = localization;
@@ -327,8 +330,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _dataMaintenanceSection = new DataMaintenanceSection(new DataMaintenanceContext(
             IsBusy: () => IsBusy,
             DownloadCatalogAsync: _downloadCatalogAsync,
-            ResetCatalogAsync: _resetCatalogAsync,
-            ResetTestSalesDataAsync: _resetTestSalesDataAsync,
+            ResetCatalogAsync: WithOperationAudit(_resetCatalogAsync, OperationAuditTypes.CatalogReset),
+            ResetTestSalesDataAsync: WithOperationAudit(_resetTestSalesDataAsync, OperationAuditTypes.TestSalesDataReset),
             ConfirmResetTestSalesDataAsync: _confirmResetTestSalesDataAsync,
             ReregisterDeviceAsync: _reregisterDeviceAsync,
             CheckForAppUpdateAsync: _checkForAppUpdateAsync,
@@ -2439,6 +2442,14 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             {
                 var result = await _remoteMaintenanceService.InstallAsync(Session, progress: progress);
                 acceptingProgress = false;
+                // 安装远程维护会在收银机上开放远程控制，按安装结果留痕；结果文案是稳定资源键。
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    OperationAuditTypes.RemoteMaintenanceInstall,
+                    result.Succeeded ? "Succeeded" : "Failed",
+                    Session,
+                    reasonCode: "SETTINGS",
+                    safeMessage: result.Message);
                 _remoteMaintenanceStatus = result.Status;
                 SetRemoteMaintenanceProgress(result.Message);
                 OnPropertyChanged(nameof(IsRemoteMaintenanceConfigured));
@@ -2446,14 +2457,16 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(RemoteMaintenanceStatusText));
                 OnPropertyChanged(nameof(RemoteMaintenanceDetailText));
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
                 acceptingProgress = false;
+                RecordRemoteMaintenanceInstallFailure(ex);
                 SetRemoteMaintenanceProgress("settings.status.operationCanceled");
             }
-            catch
+            catch (Exception ex)
             {
                 acceptingProgress = false;
+                RecordRemoteMaintenanceInstallFailure(ex);
                 SetRemoteMaintenanceProgress("settings.remoteMaintenance.result.configurationFailed");
             }
             finally
@@ -2462,6 +2475,57 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
                 IsRemoteMaintenanceInstalling = false;
             }
         }, "install remote maintenance");
+    }
+
+    private void RecordRemoteMaintenanceInstallFailure(Exception ex)
+    {
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.RemoteMaintenanceInstall,
+            "Failed",
+            Session,
+            reasonCode: "SETTINGS",
+            safeMessage: ex.GetType().Name);
+    }
+
+    /// <summary>
+    /// 给数据维护操作包一层审计：完成记成功，异常记失败后原样抛出，
+    /// 由 RunBusyAsync 继续负责状态提示；授权激活期内的记录会附带授权人。
+    /// </summary>
+    private Func<CancellationToken, Task>? WithOperationAudit(
+        Func<CancellationToken, Task>? action,
+        string operationType)
+    {
+        if (action is null)
+        {
+            return null;
+        }
+
+        return async cancellationToken =>
+        {
+            try
+            {
+                await action(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    operationType,
+                    "Failed",
+                    Session,
+                    reasonCode: "SETTINGS",
+                    safeMessage: ex.GetType().Name);
+                throw;
+            }
+
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                operationType,
+                "Succeeded",
+                Session,
+                reasonCode: "SETTINGS");
+        };
     }
 
     private void SetRemoteMaintenanceProgress(string key)

@@ -118,7 +118,8 @@
     "risk": "高风险",
     "sales": "销售与购物车",
     "payment": "付款与分期",
-    "session": "登录与日结"
+    "session": "登录与日结",
+    "system": "系统与设备"
   },
   "operations": {
     "cashierLogin": "收银员登录",
@@ -147,7 +148,14 @@
     "dailyCloseReprint": "补打日结",
     "linklySettlement": "Linkly 结算",
     "linklySettlementReprint": "补打 Linkly 结算单",
-    "cardPaymentSupervisorResolution": "主管付款结案"
+    "cardPaymentSupervisorResolution": "主管付款结案",
+    "permissionOverride": "主管授权",
+    "installmentPickupConfirm": "分期确认提货",
+    "catalogReset": "重置商品目录",
+    "testSalesDataReset": "重置测试销售数据",
+    "deviceReregister": "设备换绑门店",
+    "apiServerChange": "切换服务器地址",
+    "remoteMaintenanceInstall": "安装远程维护"
   },
   "detail": {
     "reportingDelay": "上报延迟 {{seconds}} 秒",

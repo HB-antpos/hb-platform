@@ -37,7 +37,11 @@ public sealed class SqlSugarOperationAuditIngestService(
         "RETURN_REFUND_COMPLETE", "SALE_VOID", "RECEIPT_REPRINT",
         "INSTALLMENT_REPAYMENT_COMPLETE", "INSTALLMENT_REPAYMENT_CANCEL",
         "DAILY_CLOSE_SAVE", "DAILY_CLOSE_REPRINT",
-        "LINKLY_SETTLEMENT", "LINKLY_SETTLEMENT_REPRINT", "PERMISSION_OVERRIDE"
+        "LINKLY_SETTLEMENT", "LINKLY_SETTLEMENT_REPRINT", "PERMISSION_OVERRIDE",
+        "INSTALLMENT_PICKUP_CONFIRM",
+        // 收银端系统级操作：重置商品目录、重置测试销售数据、设备换绑、切换服务器地址、安装远程维护。
+        "CATALOG_RESET", "TEST_SALES_DATA_RESET", "DEVICE_REREGISTER", "API_SERVER_CHANGE",
+        "REMOTE_MAINTENANCE_INSTALL"
     };
 
     private static readonly HashSet<string> AllowedPropertyKeys = new(StringComparer.OrdinalIgnoreCase)

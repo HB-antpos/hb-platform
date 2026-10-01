@@ -448,7 +448,8 @@ internal sealed class MainChildViewModelFactory
             remoteMaintenanceService: _remoteMaintenanceService,
             confirmLinklyTerminalAssignmentAsync: confirmLinklyTerminalAssignmentAsync,
             paymentMethodSettingsService: _paymentMethodSettingsService,
-            catalogSyncStatusService: _catalogSyncStatusService);
+            catalogSyncStatusService: _catalogSyncStatusService,
+            operationAuditLogger: _operationAuditLogger);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()
