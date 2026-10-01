@@ -663,6 +663,17 @@ builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmplo
         sp.GetRequiredService<ILogger<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService>>()
     )
 );
+builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogReviewService>(sp =>
+    new BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogReviewService(
+        sp.GetRequiredService<POSMSqlSugarContext>().Db,
+        sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
+        sp.GetRequiredService<BlazorApp.Api.Services.ICurrentUserService>()
+    )
+);
+// 老收银操作日志异常扫描：默认关闭，迁移执行并观察后在配置 LegacyEmployeeLogRisk:Enabled 打开。
+builder.Services.Configure<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskOptions.SectionName));
+builder.Services.AddHostedService<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskScanWorker>();
 builder.Services.AddScoped<ILinklySettlementQueryService, LinklySettlementQueryService>();
 builder.Services.AddSingleton<ILinklySettlementAmountParser, LinklySettlementAmountParser>();
 builder.Services.AddSingleton<LinklySettlementExcelExporter>();

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Data.SchemaMigrations;
 using BlazorApp.Api.Features.LegacyEmployeeLogs;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.DTOs;
@@ -28,7 +29,7 @@ public sealed class LegacyEmployeeLogSqlServerFactAttribute : FactAttribute
 /// 表结构照抄生产 EmployeeLogs（全 varchar、随机 GUID 聚集主键），索引由仓库里的 POSMSqlSugarContext.CreateIndexes 创建，
 /// 从而验证语句里的索引提示与真实索引名一致。
 /// </summary>
-public sealed class LegacyEmployeeLogSqlServerIntegrationTests
+public sealed partial class LegacyEmployeeLogSqlServerIntegrationTests
 {
     public const string ConnectionEnvironmentVariable = "HB_TEST_SQLSERVER_CONNECTION";
 
@@ -212,6 +213,8 @@ public sealed class LegacyEmployeeLogSqlServerIntegrationTests
 
     private sealed class Fixture : IAsyncDisposable
     {
+        public SqlSugarClient Db => _db;
+
         private readonly string _masterConnectionString;
         private readonly string _databaseName;
         private readonly SqlSugarClient _db;
@@ -245,6 +248,8 @@ public sealed class LegacyEmployeeLogSqlServerIntegrationTests
                 var indexCount = await fixture._db.Ado.GetIntAsync(
                     $"SELECT COUNT(*) FROM sys.indexes WHERE name = '{LegacyEmployeeLogSqlServerQuery.IndexName}' AND object_id = OBJECT_ID('EmployeeLogs')");
                 Assert.Equal(1, indexCount);
+                // 风险标记 / 金额 / 核查表与生产同一份迁移脚本；列表查询会读这些表补充风险信息。
+                await ExecuteAsync(database, LegacyEmployeeLogRiskSchema.ApplySql);
                 await fixture.SeedAsync();
                 return fixture;
             }
@@ -289,7 +294,7 @@ public sealed class LegacyEmployeeLogSqlServerIntegrationTests
             await Log("L-1022-1", Sienna, "Sienna", "删除商品", "另一分店 xmascard2", "2026-09-30 10:00:00", "POS_1022_1133", "1022");
         }
 
-        private Task Log(string id, string employeeId, string employeeName, string operation, string detail, string time, string device, string store) =>
+        public Task Log(string id, string employeeId, string employeeName, string operation, string detail, string time, string device, string store) =>
             _db.Ado.ExecuteCommandAsync(
                 "INSERT INTO EmployeeLogs (Id, EmployeeId, EmployeeName, Operation, OperationDetail, OperationTime, DeviceCode, StoreCode, LastUploadTime) VALUES (@id, @eid, @en, @op, @od, @t, @d, @s, DATEADD(minute, 20, @t))",
                 new { id, eid = employeeId, en = employeeName, op = operation, od = detail, t = DateTime.Parse(time), d = device, s = store });

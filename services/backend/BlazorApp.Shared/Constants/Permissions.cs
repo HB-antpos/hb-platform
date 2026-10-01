@@ -89,6 +89,9 @@ namespace BlazorApp.Shared.Constants
         public static class LegacyEmployeeLogs
         {
             public const string View = "LegacyEmployeeLogs.View";
+
+            /// <summary>对命中异常规则的操作标记「确认正常 / 需跟进」或撤销；只读用户看得到结论但不能操作。</summary>
+            public const string Review = "LegacyEmployeeLogs.Review";
         }
 
         public static class PosTerminal
