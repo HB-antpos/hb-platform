@@ -1,6 +1,13 @@
 import dayjs, { type Dayjs } from 'dayjs'
 
-import type { LegacyEmployeeLogOperationCount, LegacyEmployeeLogQueryParams } from '../../../types/legacyEmployeeLog'
+import type {
+  LegacyEmployeeLogFlag,
+  LegacyEmployeeLogOperationCount,
+  LegacyEmployeeLogQueryParams,
+  LegacyReviewStatus,
+  LegacyRiskLens,
+  LegacyRuleCode,
+} from '../../../types/legacyEmployeeLog'
 
 export const LEGACY_LOG_MAX_RANGE_DAYS = 31
 export const LEGACY_LOG_DEFAULT_PAGE_SIZE = 50
@@ -69,7 +76,10 @@ const OPERATION_CATEGORY = new Map<string, LegacyOperationCategory>(
 
 export const KNOWN_LEGACY_OPERATIONS = OPERATION_CATEGORY_ENTRIES.flatMap(([, names]) => names)
 
-/** 高风险：直接影响收款金额或现金的操作。 */
+/**
+ * 危险操作：直接影响收款或现金。与后端 LegacyEmployeeLogRiskCatalog.DangerOperations 一致（契约测试比对）。
+ * 重打印不算：生产一周约 2,500 次，属正常收银动作，反复重打印由异常规则兜底。
+ */
 export const HIGH_RISK_OPERATIONS = [
   '删除商品',
   '修改商品价格',
@@ -78,7 +88,6 @@ export const HIGH_RISK_OPERATIONS = [
   '开钱箱',
   '无小票退货成功',
   '退货授权',
-  '重打印',
 ]
 const HIGH_RISK_SET = new Set(HIGH_RISK_OPERATIONS)
 
@@ -93,15 +102,48 @@ export const CATEGORY_TAG_COLOR: Record<LegacyOperationCategory, string> = {
   other: 'default',
 }
 
-export type LegacyQuickFilterKey = 'highRisk' | 'price' | 'return' | 'auth' | 'payment'
+/** 「全部」入口下的类别细分。 */
+export type LegacyQuickFilterKey = 'item' | 'price' | 'delete' | 'payment' | 'return' | 'auth'
 
 export const QUICK_FILTER_OPERATIONS: Record<LegacyQuickFilterKey, string[]> = {
-  highRisk: HIGH_RISK_OPERATIONS,
+  item: operationsOf('item'),
   price: operationsOf('price'),
+  delete: operationsOf('delete'),
+  payment: operationsOf('payment'),
   return: operationsOf('return'),
   auth: operationsOf('auth'),
-  payment: operationsOf('payment'),
 }
+
+/** 「危险」入口下的操作细分（后端再与危险清单取交集）。 */
+export type LegacyDangerGroupKey = 'delete' | 'drawer' | 'price' | 'discount' | 'return'
+
+export const DANGER_GROUP_OPERATIONS: Record<LegacyDangerGroupKey, string[]> = {
+  delete: ['删除商品'],
+  drawer: ['开钱箱'],
+  price: ['修改商品价格'],
+  discount: ['修改商品折扣', '修改所有商品折扣'],
+  return: ['退货授权', '无小票退货成功'],
+}
+
+/** 异常规则，顺序即展示顺序；与后端 LegacyEmployeeLogRiskCatalog.AllRules 一致（契约测试比对）。 */
+export const LEGACY_RULE_CODES: LegacyRuleCode[] = [
+  'noSaleDrawer',
+  'deleteAfterCheckout',
+  'bigDiscount',
+  'burstDelete',
+  'repeatReprint',
+  'offHours',
+]
+
+export const LEGACY_REVIEW_STATUSES: LegacyReviewStatus[] = ['all', 'pending', 'reviewed', 'followUp']
+
+export interface LegacyRiskFilter {
+  riskLens: LegacyRiskLens
+  ruleCodes: string[]
+  reviewStatus: LegacyReviewStatus
+}
+
+export const DEFAULT_RISK_FILTER: LegacyRiskFilter = { riskLens: 'all', ruleCodes: [], reviewStatus: 'all' }
 
 function operationsOf(category: LegacyOperationCategory) {
   return OPERATION_CATEGORY_ENTRIES.find(([key]) => key === category)?.[1] ?? []
@@ -115,12 +157,15 @@ export function isHighRiskOperation(operation?: string | null) {
   return Boolean(operation && HIGH_RISK_SET.has(operation.trim()))
 }
 
-/** 快捷筛选是否与当前所选操作类型完全一致（顺序无关），用于高亮对应的筛选芯片。 */
-export function isQuickFilterActive(key: LegacyQuickFilterKey, selected: readonly string[] | undefined) {
-  const expected = QUICK_FILTER_OPERATIONS[key]
+/** 两组操作类型是否完全一致（顺序无关），用于高亮对应的细分芯片。 */
+export function sameOperations(expected: readonly string[], selected: readonly string[] | undefined) {
   if (!selected || selected.length !== expected.length) return false
   const set = new Set(selected)
   return expected.every((operation) => set.has(operation))
+}
+
+export function isQuickFilterActive(key: LegacyQuickFilterKey, selected: readonly string[] | undefined) {
+  return sameOperations(QUICK_FILTER_OPERATIONS[key], selected)
 }
 
 /** 操作类型下拉：已知名称在前（保持业务顺序），再补上服务端计数里出现的未知名称。 */
@@ -262,6 +307,7 @@ export interface LegacyLogFormValues {
 export function buildLegacyLogQuery(
   values: LegacyLogFormValues,
   page: { pageNumber: number; pageSize: number; sortOrder: 'asc' | 'desc' },
+  risk: LegacyRiskFilter = DEFAULT_RISK_FILTER,
 ): LegacyEmployeeLogQueryParams | null {
   const storeCodes = normalizeStoreCodes(values.storeCodes)
   if (storeCodes.length === 0 || !values.timeRange || validateTimeRange(values.timeRange)) return null
@@ -278,6 +324,10 @@ export function buildLegacyLogQuery(
     pageNumber: page.pageNumber,
     pageSize: page.pageSize,
     sortOrder: page.sortOrder,
+    // 默认入口不传，保持与旧后端兼容；规则与核查状态只在「异常」入口下有意义。
+    ...(risk.riskLens !== 'all' ? { riskLens: risk.riskLens } : {}),
+    ...(risk.riskLens === 'abnormal' && risk.ruleCodes.length ? { ruleCodes: [...risk.ruleCodes] } : {}),
+    ...(risk.riskLens === 'abnormal' && risk.reviewStatus !== 'all' ? { reviewStatus: risk.reviewStatus } : {}),
   }
 }
 
@@ -288,4 +338,87 @@ export function createLatestRequestGuard() {
     begin: () => ++latest,
     isLatest: (id: number) => id === latest,
   }
+}
+
+/** 分店名称表：编码 → 名称（来自页面已加载的分店选项）；名称缺失或与编码相同时不收录。 */
+export function buildStoreNameMap(options: readonly { value: string; label?: string | null }[]) {
+  const map = new Map<string, string>()
+  options.forEach((option) => {
+    const name = option.label?.trim()
+    if (option.value && name && name !== option.value) map.set(option.value, name)
+  })
+  return map
+}
+
+/** 分店展示名：「编码 · 名称」，名称缺失时只显示编码。 */
+export function formatStoreLabel(code: string | null | undefined, names: ReadonlyMap<string, string>) {
+  if (!code) return '-'
+  const name = names.get(code)
+  return name ? `${code} · ${name}` : code
+}
+
+/** 异常依据的文案片段：返回 i18n 键（legacyEmployeeLogs.evidence 下）与参数，由页面翻译后连接。 */
+export interface EvidencePart {
+  key: string
+  params?: Record<string, string>
+}
+
+export function describeFlagEvidence(flag: Pick<LegacyEmployeeLogFlag, 'ruleCode' | 'evidence'>): EvidencePart[] {
+  const e = flag.evidence ?? {}
+  const parts: EvidencePart[] = []
+  switch (flag.ruleCode) {
+    case 'noSaleDrawer':
+      parts.push({ key: 'noSaleWindow', params: { seconds: e.windowSeconds ?? '120' } })
+      if (e.previousCheckoutAt) parts.push({ key: 'noSalePrevious', params: { at: e.previousCheckoutAt, minutes: e.minutesSincePreviousCheckout ?? '-' } })
+      if (e.nextCheckoutAt) parts.push({ key: 'noSaleNext', params: { at: e.nextCheckoutAt } })
+      parts.push({ key: e.identityConfirmed === 'true' ? 'identityConfirmed' : 'identityMissing' })
+      break
+    case 'deleteAfterCheckout':
+      parts.push({ key: 'deleteAfterCheckout', params: { at: e.checkoutAt ?? '-', seconds: e.secondsAfterCheckout ?? '-', amount: e.deletedAmount ?? '-' } })
+      if (e.product) parts.push({ key: 'product', params: { product: e.product, quantity: e.quantity ?? '-' } })
+      break
+    case 'bigDiscount':
+      if (e.kind === 'cart') {
+        parts.push({ key: 'discountCart', params: { percent: e.percent ?? '-', count: e.itemCount ?? '-', total: e.originalTotal ?? '-' } })
+      } else if (e.kind === 'price') {
+        parts.push({ key: 'discountPrice', params: { from: e.originalPrice ?? '-', to: e.newPrice ?? '-', percent: e.percent ?? '-' } })
+      } else {
+        parts.push({ key: 'discountItem', params: { percent: e.percent ?? '-', previous: e.previousPercent ?? '0' } })
+      }
+      if (e.product && e.kind !== 'cart') parts.push({ key: 'productOnly', params: { product: e.product } })
+      break
+    case 'burstDelete':
+      parts.push({ key: 'burstDelete', params: { from: e.firstAt ?? '-', to: e.lastAt ?? '-', count: e.count ?? '-', amount: e.totalAmount ?? '-', threshold: e.threshold ?? '-' } })
+      break
+    case 'repeatReprint':
+      parts.push({ key: 'repeatReprint', params: { order: shortOrder(e.orderId), count: e.count ?? '-', first: e.firstAt ?? '-' } })
+      break
+    case 'offHours':
+      parts.push({
+        key: e.segment === 'beforeOpen' ? 'offHoursBeforeOpen' : 'offHoursAfterClose',
+        params: { count: e.count ?? '-', from: e.firstAt ?? '-', to: e.lastAt ?? '-', open: e.open ?? '07:00', close: e.close ?? '22:00' },
+      })
+      break
+    default:
+      break
+  }
+  return parts
+}
+
+function shortOrder(order?: string) {
+  return order && order.length > 13 ? `${order.slice(0, 8)}…${order.slice(-4)}` : order ?? '-'
+}
+
+/** 规则计数按固定顺序排列，未知规则补在最后。 */
+export function orderRuleCounts<T extends { ruleCode: string }>(rows: readonly T[]) {
+  const index = (code: string) => {
+    const position = LEGACY_RULE_CODES.indexOf(code as LegacyRuleCode)
+    return position < 0 ? LEGACY_RULE_CODES.length : position
+  }
+  return [...rows].sort((a, b) => index(a.ruleCode) - index(b.ruleCode))
+}
+
+/** 危险占比；总数为 0 时返回 0。 */
+export function dangerRate(dangerCount: number, total: number) {
+  return total > 0 ? dangerCount / total : 0
 }

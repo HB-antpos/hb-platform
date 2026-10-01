@@ -1,22 +1,20 @@
-import { EyeOutlined, ReloadOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons'
+import { AlertOutlined, CheckOutlined, EyeOutlined, FlagOutlined, ReloadOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons'
 import {
   Alert,
   Button,
   Card,
   Col,
   DatePicker,
-  Descriptions,
   Drawer,
   Empty,
   Form,
+  Grid,
   Input,
   Row,
   Select,
   Space,
-  Spin,
-  Statistic,
+  Tabs,
   Tag,
-  Timeline,
   Typography,
   message,
   theme,
@@ -30,53 +28,66 @@ import { useTranslation } from 'react-i18next'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import PageContainer from '../../../components/PageContainer'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
-import { getLegacyEmployeeLogContext, getLegacyEmployeeLogs } from '../../../services/legacyEmployeeLogService'
+import {
+  getLegacyEmployeeLogContext,
+  getLegacyEmployeeLogEmployeeSummary,
+  getLegacyEmployeeLogs,
+} from '../../../services/legacyEmployeeLogService'
 import { getActiveStores, type StoreOption } from '../../../services/storeService'
 import { useAuthStore } from '../../../store/auth'
 import type {
   LegacyEmployeeLogContext,
+  LegacyEmployeeLogEmployeeSummary,
+  LegacyEmployeeLogEmployeeSummaryResult,
   LegacyEmployeeLogItem,
   LegacyEmployeeLogListResult,
+  LegacyEmployeeLogReview,
+  LegacyReviewStatus,
+  LegacyRiskLens,
 } from '../../../types/legacyEmployeeLog'
 import {
   buildStoreOptionsFromUserStores,
   filterStoreOptionsByManagedCodes,
 } from '../../../utils/managedStoreScope'
 
+import EmployeeSummaryTable from './EmployeeSummaryTable'
 import {
   CATEGORY_TAG_COLOR,
+  DEFAULT_RISK_FILTER,
   LEGACY_LOG_DEFAULT_PAGE_SIZE,
   LEGACY_LOG_LATE_UPLOAD_MINUTES,
   LEGACY_LOG_STORE_STORAGE_KEY,
-  QUICK_FILTER_OPERATIONS,
   buildLegacyLogQuery,
   buildOperationOptions,
+  buildStoreNameMap,
   createLatestRequestGuard,
+  formatStoreLabel,
+  formatWallClock,
   getDayRange,
   getOperationCategory,
   getUploadLagMinutes,
   isHighRiskOperation,
-  isQuickFilterActive,
   normalizeStoreCodes,
   parseLegacyDetail,
   resolveInitialStores,
   splitLagMinutes,
   storeSelectionKey,
-  sumOperationCounts,
+  toQueryRange,
   validateTimeRange,
   type LegacyLogFormValues,
-  type LegacyQuickFilterKey,
+  type LegacyRiskFilter,
   type ParsedLegacyDetail,
 } from './legacyEmployeeLogsLogic'
 import legacyEmployeeLogsMessagesEn from './legacyEmployeeLogsMessages.en.json'
 import legacyEmployeeLogsMessagesZh from './legacyEmployeeLogsMessages.zh.json'
+import LegacyLogDetailPanel from './LegacyLogDetailPanel'
+import RiskLensBar from './RiskLensBar'
 
 // 页面文案随页面代码块懒加载，不进首屏 i18n 包。
 registerPageMessages({ zh: legacyEmployeeLogsMessagesZh, en: legacyEmployeeLogsMessagesEn })
 
-const QUICK_FILTER_KEYS: LegacyQuickFilterKey[] = ['highRisk', 'price', 'return', 'auth', 'payment']
-const PRICE_OPERATIONS = QUICK_FILTER_OPERATIONS.price
 type TableSortOrder = 'ascend' | 'descend'
+type ResultView = 'records' | 'employees'
 
 function readRememberedStores() {
   try {
@@ -119,6 +130,18 @@ export default function PosAdminLegacyEmployeeLogsPage() {
   const [contextError, setContextError] = useState(false)
   const listGuardRef = useRef(createLatestRequestGuard())
   const contextGuardRef = useRef(createLatestRequestGuard())
+  const employeesGuardRef = useRef(createLatestRequestGuard())
+  // 风险入口与细分：状态驱动界面，ref 让查询函数总能读到最新值（切换入口后立即查询）。
+  const [risk, setRiskState] = useState<LegacyRiskFilter>(DEFAULT_RISK_FILTER)
+  const riskRef = useRef<LegacyRiskFilter>(DEFAULT_RISK_FILTER)
+  const [view, setView] = useState<ResultView>('records')
+  const viewRef = useRef<ResultView>('records')
+  const [employeeSummary, setEmployeeSummary] = useState<LegacyEmployeeLogEmployeeSummaryResult | null>(null)
+  const [employeeLoading, setEmployeeLoading] = useState(false)
+  const [employeeError, setEmployeeError] = useState<string | null>(null)
+  // 宽屏（≥1600px）把详情常驻在表格右侧，点行即切换；窄屏仍用抽屉。
+  const screens = Grid.useBreakpoint()
+  const sidePanel = Boolean(screens.xxl)
   const selectedOperations = Form.useWatch('operations', form)
   const selectedStoreCodes = Form.useWatch('storeCodes', form)
   const selectedStoresKey = storeSelectionKey(selectedStoreCodes)
@@ -133,6 +156,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
       })),
     [managedStoreCodes, storeOptions],
   )
+  const storeNames = useMemo(() => buildStoreNameMap(storeOptions), [storeOptions])
 
   useEffect(() => {
     if (managedStoreCodes !== null) {
@@ -170,7 +194,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         pageNumber: nextPage,
         pageSize: nextPageSize,
         sortOrder: nextSortOrder === 'ascend' ? 'asc' : 'desc',
-      })
+      }, riskRef.current)
       if (!query) return
 
       const requestId = listGuardRef.current.begin()
@@ -183,6 +207,8 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         setPageNumber(data.pageNumber)
         setPageSize(data.pageSize)
         rememberStores(query.storeCodes)
+        // 详情面板里的记录换成最新数据（核查结论、命中规则可能已变）。
+        setDetailRecord((current) => (current ? data.items.find((item) => item.id === current.id) ?? current : current))
       } catch (error) {
         if (!listGuardRef.current.isLatest(requestId)) return
         console.error(error)
@@ -193,6 +219,35 @@ export default function PosAdminLegacyEmployeeLogsPage() {
     },
     [form, t],
   )
+
+  // 按员工汇总只用分店、时间、设备条件，与列表的风险入口和其余筛选无关。
+  const loadEmployees = useCallback(async () => {
+    const values = form.getFieldsValue()
+    const storeCodes = normalizeStoreCodes(values.storeCodes)
+    if (storeCodes.length === 0 || !values.timeRange || validateTimeRange(values.timeRange)) {
+      setEmployeeSummary(null)
+      return
+    }
+    const [from, to] = toQueryRange(values.timeRange)
+    const requestId = employeesGuardRef.current.begin()
+    setEmployeeLoading(true)
+    setEmployeeError(null)
+    try {
+      const data = await getLegacyEmployeeLogEmployeeSummary({
+        storeCodes,
+        from: formatWallClock(from),
+        to: formatWallClock(to),
+        deviceCode: values.deviceCode?.trim() || undefined,
+      })
+      if (employeesGuardRef.current.isLatest(requestId)) setEmployeeSummary(data)
+    } catch (error) {
+      if (!employeesGuardRef.current.isLatest(requestId)) return
+      console.error(error)
+      setEmployeeError(errorText(error) ?? t('legacyEmployeeLogs.employees.loadFailed'))
+    } finally {
+      if (employeesGuardRef.current.isLatest(requestId)) setEmployeeLoading(false)
+    }
+  }, [form, t])
 
   // 分店列表就绪后选定默认分店：恢复上次查询的分店（仍可选的部分），只有一个可选分店时直接选中。
   useEffect(() => {
@@ -216,6 +271,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
     if (!selectedStoresKey) return
     setPageNumber(1)
     void loadData(1, pageSize, sortOrder)
+    if (viewRef.current === 'employees') void loadEmployees()
     // 只在分店选择或下拉开合变化时触发；分页与排序变化各自发起查询。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStoresKey, storeDropdownOpen])
@@ -225,22 +281,66 @@ export default function PosAdminLegacyEmployeeLogsPage() {
   const runQuery = () => {
     setPageNumber(1)
     void loadData(1, pageSize, sortOrder)
+    if (viewRef.current === 'employees') void loadEmployees()
   }
+
+  const setRisk = (next: LegacyRiskFilter) => {
+    riskRef.current = next
+    setRiskState(next)
+  }
+
+  const switchView = (next: ResultView) => {
+    viewRef.current = next
+    setView(next)
+    if (next === 'employees' && hasStores) void loadEmployees()
+  }
+
+  // 切换入口时清掉上一个入口的细分（操作类型 / 规则 / 核查状态），并回到记录页。
+  const changeLens = (lens: LegacyRiskLens) => {
+    form.setFieldsValue({ operations: undefined })
+    setRisk({ riskLens: lens, ruleCodes: [], reviewStatus: 'all' })
+    switchView('records')
+    runQuery()
+  }
+
+  const changeOperations = (operations: string[] | undefined) => {
+    form.setFieldsValue({ operations })
+    runQuery()
+  }
+
+  const changeRule = (ruleCode: string | null) => {
+    setRisk({ ...riskRef.current, ruleCodes: ruleCode ? [ruleCode] : [] })
+    runQuery()
+  }
+
+  const changeReviewStatus = (reviewStatus: LegacyReviewStatus) => {
+    setRisk({ ...riskRef.current, reviewStatus })
+    runQuery()
+  }
+
+  // 员工汇总「查看明细」：带上该员工，停在有异常就看异常、否则看危险的入口。
+  const viewEmployee = useCallback((row: LegacyEmployeeLogEmployeeSummary) => {
+    if (!row.employeeId) return
+    form.setFieldsValue({ employeeIds: [row.employeeId], operations: undefined })
+    const lens: LegacyRiskLens = row.abnormalCount > 0 ? 'abnormal' : 'danger'
+    riskRef.current = { riskLens: lens, ruleCodes: [], reviewStatus: 'all' }
+    setRiskState(riskRef.current)
+    viewRef.current = 'records'
+    setView('records')
+    setPageNumber(1)
+    void loadData(1, pageSize, sortOrder)
+  }, [form, loadData, pageSize, sortOrder])
 
   const handleReset = () => {
     const storeCodes = form.getFieldValue('storeCodes') as string[] | undefined
     form.resetFields()
     // 重置只清筛选条件，保留所选分店，避免重置后页面变成空白。
     form.setFieldsValue({ storeCodes, timeRange: getDayRange(dayjs()) })
+    setRisk(DEFAULT_RISK_FILTER)
     setSortOrder('descend')
     setPageNumber(1)
     void loadData(1, pageSize, 'descend')
-  }
-
-  const applyQuickFilter = (key: LegacyQuickFilterKey) => {
-    const active = isQuickFilterActive(key, selectedOperations)
-    form.setFieldsValue({ operations: active ? undefined : [...QUICK_FILTER_OPERATIONS[key]] })
-    runQuery()
+    if (viewRef.current === 'employees') void loadEmployees()
   }
 
   const handleTableChange: NonNullable<TableProps<LegacyEmployeeLogItem>['onChange']> = (pagination, _filters, sorter) => {
@@ -263,7 +363,8 @@ export default function PosAdminLegacyEmployeeLogsPage() {
     setContextLoading(true)
     const requestId = contextGuardRef.current.begin()
     try {
-      const data = await getLegacyEmployeeLogContext(record.id)
+      // 命中异常的记录看更长的上下文（例如开钱箱前最近一次结账）。
+      const data = await getLegacyEmployeeLogContext(record.id, record.flags?.length ? 15 : undefined)
       if (contextGuardRef.current.isLatest(requestId)) setContext(data)
     } catch (error) {
       console.error(error)
@@ -278,6 +379,17 @@ export default function PosAdminLegacyEmployeeLogsPage() {
     setDetailRecord(null)
   }
 
+  // 核查后：本地先更新这一行，再静默刷新当前页，让入口计数（待核查）跟上；冲突时直接刷新。
+  const handleReviewChanged = (record: LegacyEmployeeLogItem, review: LegacyEmployeeLogReview | null) => {
+    if (review) {
+      const patch = (item: LegacyEmployeeLogItem) => (item.id === record.id ? { ...item, review } : item)
+      setDetailRecord((current) => (current ? patch(current) : current))
+      setResult((current) => (current ? { ...current, items: current.items.map(patch) } : current))
+    }
+    void loadData(pageNumber, pageSize, sortOrder)
+    if (viewRef.current === 'employees') void loadEmployees()
+  }
+
   const showEmployeeDay = (record: LegacyEmployeeLogItem) => {
     if (!record.employeeId) return
     form.setFieldsValue({
@@ -287,6 +399,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
       operations: undefined,
       keyword: undefined,
     })
+    setRisk(DEFAULT_RISK_FILTER)
     closeDetail()
     runQuery()
   }
@@ -373,19 +486,10 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         width: 130,
         sorter: true,
         sortOrder,
-        render: (value: string, record) => {
+        render: (value: string) => {
           const time = dayjs(value)
-          const risky = isHighRiskOperation(record.operation)
           return (
-            <div
-              style={{
-                borderInlineStart: `3px solid ${risky ? token.colorError : 'transparent'}`,
-                paddingInlineStart: 8,
-                marginInlineStart: -8,
-                fontVariantNumeric: 'tabular-nums',
-                whiteSpace: 'nowrap',
-              }}
-            >
+            <div style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
               <div>{time.format('HH:mm:ss')}</div>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>{`${time.format('YYYY-MM-DD')} ${weekdayLabel(time.day())}`}</Typography.Text>
             </div>
@@ -397,8 +501,10 @@ export default function PosAdminLegacyEmployeeLogsPage() {
             title: t('legacyEmployeeLogs.columns.store'),
             dataIndex: 'storeCode',
             key: 'storeCode',
-            width: 80,
-            render: (value?: string | null) => value || '-',
+            width: 170,
+            render: (value?: string | null) => (
+              <Typography.Text ellipsis={{ tooltip: true }} style={{ maxWidth: 160 }}>{formatStoreLabel(value, storeNames)}</Typography.Text>
+            ),
           }]
         : []),
       {
@@ -426,15 +532,45 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         title: t('legacyEmployeeLogs.columns.detail'),
         dataIndex: 'operationDetail',
         key: 'operationDetail',
+        // 详情列给足最小宽度：其余列都是固定宽，详情面板常驻时表格变窄，宁可横向滚动也不把详情挤成一列字。
+        width: 320,
         render: (value: string | null | undefined, record) => renderParsedDetail(parseLegacyDetail(value, record.operation), value),
       },
       {
-        title: t('legacyEmployeeLogs.columns.lag'),
-        key: 'lag',
-        width: 120,
+        title: t('legacyEmployeeLogs.columns.amount'),
+        dataIndex: 'amountImpact',
+        key: 'amountImpact',
+        width: 100,
+        align: 'right',
+        render: (value?: number | null) => value ? (
+          <span style={{ color: token.colorError, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>−{value.toFixed(2)}</span>
+        ) : <Typography.Text type="secondary">-</Typography.Text>,
+      },
+      {
+        title: t('legacyEmployeeLogs.columns.risk'),
+        key: 'risk',
+        width: 190,
+        // 与操作列一起固定在右侧：详情面板常驻、表格横向滚动时，风险标签始终可见。
+        fixed: 'right',
         render: (_, record) => {
-          const lag = formatLag(record)
-          return <span style={{ fontSize: 12, color: lag.late ? token.colorWarning : token.colorTextSecondary }}>{lag.text}</span>
+          const danger = record.isDanger ?? isHighRiskOperation(record.operation)
+          const review = record.review && record.review.result !== 'revoked' ? record.review : null
+          if (!danger && !record.flags?.length) return null
+          return (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {danger ? <Tag color="error" icon={<WarningOutlined />} style={{ marginInlineEnd: 0 }}>{t('legacyEmployeeLogs.badges.danger')}</Tag> : null}
+              {(record.flags ?? []).map((flag) => (
+                <Tag key={flag.ruleCode} color="warning" icon={<AlertOutlined />} style={{ marginInlineEnd: 0 }}>
+                  {t(`legacyEmployeeLogs.rules.${flag.ruleCode}.label`)}
+                </Tag>
+              ))}
+              {review ? (
+                <Tag color={review.result === 'followUp' ? 'purple' : 'default'} icon={review.result === 'followUp' ? <FlagOutlined /> : <CheckOutlined />} style={{ marginInlineEnd: 0 }}>
+                  {t(review.result === 'followUp' ? 'legacyEmployeeLogs.badges.followUp' : 'legacyEmployeeLogs.badges.reviewed')}
+                </Tag>
+              ) : null}
+            </div>
+          )
         },
       },
       {
@@ -457,7 +593,7 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         ),
       },
     ],
-    [formatLag, multiStore, operationTag, renderParsedDetail, sortOrder, t, token, weekdayLabel],
+    [multiStore, operationTag, renderParsedDetail, sortOrder, storeNames, t, token, weekdayLabel],
   )
 
   const operationOptions = useMemo(
@@ -493,8 +629,26 @@ export default function PosAdminLegacyEmployeeLogsPage() {
   ]
 
   const counts = result?.operationCounts ?? []
-  const detailParsed = detailRecord ? parseLegacyDetail(detailRecord.operationDetail, detailRecord.operation) : null
-  const detailLag = detailRecord ? formatLag(detailRecord) : null
+  const currentUserName = currentUser?.fullName || currentUser?.username || ''
+
+  const detailPanel = detailRecord ? (
+    <LegacyLogDetailPanel
+      record={detailRecord}
+      context={context}
+      contextLoading={contextLoading}
+      contextError={contextError}
+      storeLabel={formatStoreLabel(detailRecord.storeCode, storeNames)}
+      lag={formatLag(detailRecord)}
+      canReview={access.canReviewLegacyEmployeeLogs}
+      currentUserName={currentUserName}
+      operationTag={operationTag}
+      renderParsedDetail={renderParsedDetail}
+      onShowEmployeeDay={showEmployeeDay}
+      onReviewChanged={handleReviewChanged}
+    />
+  ) : null
+
+  const lensName = t(`legacyEmployeeLogs.lens.${risk.riskLens}.title`)
 
   return (
     <PageContainer
@@ -594,37 +748,11 @@ export default function PosAdminLegacyEmployeeLogsPage() {
                 </Form.Item>
               </Col>
             </Row>
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: 8,
-                paddingTop: 12,
-                borderTop: `1px dashed ${token.colorSplit}`,
-              }}
-            >
-              <Typography.Text type="secondary">{t('legacyEmployeeLogs.quick.label')}</Typography.Text>
-              {QUICK_FILTER_KEYS.map((key) => {
-                const active = isQuickFilterActive(key, selectedOperations)
-                return (
-                  <Tag.CheckableTag
-                    key={key}
-                    checked={active}
-                    onChange={() => applyQuickFilter(key)}
-                    style={{ border: `1px solid ${active ? token.colorPrimary : token.colorBorder}`, borderRadius: 12, paddingInline: 10 }}
-                  >
-                    {key === 'highRisk' ? <WarningOutlined style={{ marginInlineEnd: 4 }} /> : null}
-                    {t(`legacyEmployeeLogs.quick.${key}`)}
-                  </Tag.CheckableTag>
-                )
-              })}
-              <Space style={{ marginInlineStart: 'auto' }}>
-                <Button onClick={handleReset}>{t('common.reset')}</Button>
-                <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
-                  {t('common.query')}
-                </Button>
-              </Space>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 12, borderTop: `1px dashed ${token.colorSplit}` }}>
+              <Button onClick={handleReset}>{t('common.reset')}</Button>
+              <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
+                {t('common.query')}
+              </Button>
             </div>
           </Form>
         </Card>
@@ -640,229 +768,115 @@ export default function PosAdminLegacyEmployeeLogsPage() {
         ) : null}
 
         {result ? (
-          <Card styles={{ body: { padding: 0 } }}>
-            <Row>
-              {[
-                { key: 'total', value: result.total, suffix: t('legacyEmployeeLogs.stats.unitRows') },
-                { key: 'deleted', value: sumOperationCounts(counts, ['删除商品']), danger: true },
-                { key: 'priceChanges', value: sumOperationCounts(counts, PRICE_OPERATIONS), danger: true },
-                { key: 'cashDrawer', value: sumOperationCounts(counts, ['开钱箱']), danger: true },
-              ].map((item) => (
-                <Col key={item.key} xs={12} md={6} lg={5} style={{ padding: '14px 20px', borderInlineEnd: `1px solid ${token.colorSplit}` }}>
-                  <Statistic
-                    title={item.key === 'total' ? t('legacyEmployeeLogs.stats.total') : t(`legacyEmployeeLogs.stats.${item.key}`)}
-                    value={item.value}
-                    suffix={item.suffix}
-                    valueStyle={{ fontSize: 22, color: item.danger && item.value > 0 ? token.colorError : undefined }}
-                  />
-                </Col>
-              ))}
-              <Col xs={24} md={24} lg={4} style={{ padding: '14px 20px' }}>
-                <Statistic
-                  title={t('legacyEmployeeLogs.stats.scope')}
-                  valueRender={() => (
-                    <span style={{ fontSize: 22 }}>
-                      {result.employees.length}
-                      <Typography.Text type="secondary" style={{ fontSize: 13, marginInline: 4 }}>{t('legacyEmployeeLogs.stats.unitPeople')}</Typography.Text>
-                      · {result.devices.length}
-                      <Typography.Text type="secondary" style={{ fontSize: 13, marginInlineStart: 4 }}>{t('legacyEmployeeLogs.stats.unitDevices')}</Typography.Text>
-                    </span>
-                  )}
-                />
-              </Col>
-            </Row>
-          </Card>
+          <RiskLensBar
+            risk={risk}
+            operations={selectedOperations}
+            total={result.total}
+            counts={counts}
+            summary={result.riskSummary}
+            people={result.employees.length}
+            devices={result.devices.length}
+            onLensChange={changeLens}
+            onOperationsChange={changeOperations}
+            onRuleChange={changeRule}
+            onReviewStatusChange={changeReviewStatus}
+          />
         ) : null}
 
-        <Card
-          title={(
-            <Space size={8}>
-              <span>{t('legacyEmployeeLogs.table.title')}</span>
-              <Typography.Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>{t('legacyEmployeeLogs.table.hint')}</Typography.Text>
-            </Space>
-          )}
-          extra={result && selectedOperations?.length ? (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('legacyEmployeeLogs.stats.basisHint')}</Typography.Text>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+          <Card style={{ flex: 1, minWidth: 0 }} styles={{ body: { padding: view === 'records' ? undefined : 0 } }}>
+            <Tabs
+              activeKey={view}
+              onChange={(key) => switchView(key as ResultView)}
+              tabBarExtraContent={view === 'records' && result ? (
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                  {`${lensName} · ${t('legacyEmployeeLogs.table.paginationTotal', { total: result.total })}`}
+                </Typography.Text>
+              ) : view === 'employees' ? (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('legacyEmployeeLogs.employees.hint')}</Typography.Text>
+              ) : null}
+              tabBarStyle={view === 'employees' ? { paddingInline: 16, marginBottom: 0 } : undefined}
+              items={[
+                {
+                  key: 'records',
+                  label: t('legacyEmployeeLogs.tabs.records'),
+                  children: (
+                    <MeasuredTable<LegacyEmployeeLogItem>
+                      metricId="pos-admin.legacy-employee-logs.table-1"
+                      rowKey="id"
+                      size="middle"
+                      loading={loading}
+                      columns={columns}
+                      dataSource={result?.items ?? []}
+                      scroll={{ x: 1420 }}
+                      sortDirections={['descend', 'ascend', 'descend']}
+                      locale={{
+                        emptyText: (
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={hasStores ? t('legacyEmployeeLogs.table.empty') : t('legacyEmployeeLogs.table.selectStoreFirst')}
+                          />
+                        ),
+                      }}
+                      onRow={(record) => ({
+                        onClick: () => void openDetail(record),
+                        style: {
+                          cursor: 'pointer',
+                          background: detailRecord?.id === record.id ? token.colorPrimaryBg : undefined,
+                        },
+                      })}
+                      pagination={{
+                        current: pageNumber,
+                        pageSize,
+                        total: result?.total ?? 0,
+                        showSizeChanger: true,
+                        pageSizeOptions: [20, 50, 100, 200],
+                        showTotal: (value) => t('legacyEmployeeLogs.table.paginationTotal', { total: value }),
+                      }}
+                      onChange={handleTableChange}
+                    />
+                  ),
+                },
+                {
+                  key: 'employees',
+                  label: t('legacyEmployeeLogs.tabs.employees'),
+                  children: (
+                    <EmployeeSummaryTable
+                      data={employeeSummary}
+                      loading={employeeLoading}
+                      error={employeeError}
+                      storeNames={storeNames}
+                      onRetry={() => void loadEmployees()}
+                      onViewEmployee={viewEmployee}
+                    />
+                  ),
+                },
+              ]}
+            />
+          </Card>
+
+          {sidePanel && detailPanel ? (
+            <Card
+              title={t('legacyEmployeeLogs.detail.title')}
+              extra={<Button type="text" size="small" onClick={closeDetail} aria-label={t('common.close')}>×</Button>}
+              style={{ width: 440, flex: 'none', position: 'sticky', top: 16, maxHeight: 'calc(100vh - 32px)', overflow: 'auto' }}
+            >
+              {detailPanel}
+            </Card>
           ) : null}
-        >
-          <MeasuredTable<LegacyEmployeeLogItem>
-            metricId="pos-admin.legacy-employee-logs.table-1"
-            rowKey="id"
-            size="middle"
-            loading={loading}
-            columns={columns}
-            dataSource={result?.items ?? []}
-            scroll={{ x: 1000 }}
-            sortDirections={['descend', 'ascend', 'descend']}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={hasStores ? t('legacyEmployeeLogs.table.empty') : t('legacyEmployeeLogs.table.selectStoreFirst')}
-                />
-              ),
-            }}
-            onRow={(record) => ({
-              onClick: () => void openDetail(record),
-              style: {
-                cursor: 'pointer',
-                background: detailRecord?.id === record.id ? token.colorPrimaryBg : undefined,
-              },
-            })}
-            pagination={{
-              current: pageNumber,
-              pageSize,
-              total: result?.total ?? 0,
-              showSizeChanger: true,
-              pageSizeOptions: [20, 50, 100, 200],
-              showTotal: (value) => t('legacyEmployeeLogs.table.paginationTotal', { total: value }),
-            }}
-            onChange={handleTableChange}
-          />
-        </Card>
+        </div>
       </Space>
 
-      <Drawer
-        open={Boolean(detailRecord)}
-        onClose={closeDetail}
-        width="min(560px, 100vw)"
-        title={t('legacyEmployeeLogs.detail.title')}
-        extra={detailRecord && isHighRiskOperation(detailRecord.operation) ? (
-          <Tag color="error" icon={<WarningOutlined />}>{t('legacyEmployeeLogs.detail.highRisk')}</Tag>
-        ) : null}
-      >
-        {detailRecord && detailParsed && detailLag ? (
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
-            <Descriptions bordered size="small" column={1} labelStyle={{ width: 110 }}>
-              <Descriptions.Item label={t('legacyEmployeeLogs.detail.operationTime')}>
-                {dayjs(detailRecord.operationTime).format('YYYY-MM-DD HH:mm:ss')}
-                <Typography.Text type="secondary">{`（${t('legacyEmployeeLogs.detail.localTime')}）`}</Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('legacyEmployeeLogs.detail.uploadTime')}>
-                {dayjs(detailRecord.lastUploadTime).format('YYYY-MM-DD HH:mm:ss')}
-                <Typography.Text type={detailLag.late ? 'warning' : 'secondary'}>
-                  {` · ${t('legacyEmployeeLogs.detail.lagSuffix', { lag: detailLag.text })}`}
-                </Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('legacyEmployeeLogs.detail.storeDevice')}>
-                {detailRecord.storeCode || '-'} · <Typography.Text code>{detailRecord.deviceCode || '-'}</Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('legacyEmployeeLogs.detail.employee')}>
-                {detailRecord.employeeName || '-'}
-                {detailRecord.employeeId ? (
-                  <Typography.Text type="secondary" copyable={{ text: detailRecord.employeeId }} style={{ fontSize: 11, marginInlineStart: 6 }}>
-                    {detailRecord.employeeId}
-                  </Typography.Text>
-                ) : null}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('legacyEmployeeLogs.detail.operation')}>{operationTag(detailRecord.operation)}</Descriptions.Item>
-            </Descriptions>
-
-            {detailParsed.productName || detailParsed.fields.length || detailParsed.orderGuid ? (
-              <div>
-                <DrawerSectionTitle title={t('legacyEmployeeLogs.detail.parsedTitle')} hint={t('legacyEmployeeLogs.detail.parsedHint')} />
-                <Descriptions bordered size="small" column={1} labelStyle={{ width: 110 }}>
-                  {detailParsed.productName ? (
-                    <Descriptions.Item label={t('legacyEmployeeLogs.detail.product')}>{detailParsed.productName}</Descriptions.Item>
-                  ) : null}
-                  {detailParsed.orderGuid ? (
-                    <Descriptions.Item label={t('legacyEmployeeLogs.detail.order')}>
-                      <Typography.Text code copyable style={{ fontSize: 12 }}>{detailParsed.orderGuid}</Typography.Text>
-                    </Descriptions.Item>
-                  ) : null}
-                  {detailParsed.fields.map((field) => (
-                    <Descriptions.Item key={`${field.key}-${field.value}`} label={field.key}>
-                      <span
-                        style={{
-                          fontVariantNumeric: 'tabular-nums',
-                          fontWeight: field.tone ? 600 : undefined,
-                          color: field.tone === 'danger' ? token.colorError : field.tone === 'money' ? token.colorSuccess : undefined,
-                        }}
-                      >
-                        {field.value}
-                      </span>
-                    </Descriptions.Item>
-                  ))}
-                </Descriptions>
-              </div>
-            ) : null}
-
-            <div>
-              <DrawerSectionTitle title={t('legacyEmployeeLogs.detail.rawTitle')} />
-              <Typography.Paragraph
-                copyable={detailRecord.operationDetail ? { text: detailRecord.operationDetail } : false}
-                style={{
-                  background: token.colorFillQuaternary,
-                  border: `1px solid ${token.colorSplit}`,
-                  borderRadius: token.borderRadius,
-                  padding: '10px 12px',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                  marginBottom: 0,
-                }}
-              >
-                {detailRecord.operationDetail || '-'}
-              </Typography.Paragraph>
-            </div>
-
-            <div>
-              <DrawerSectionTitle
-                title={t('legacyEmployeeLogs.detail.contextTitle')}
-                hint={`${detailRecord.deviceCode || '-'} · ${t('legacyEmployeeLogs.detail.contextHint', { minutes: context?.windowMinutes ?? 5 })}`}
-              />
-              {contextLoading ? (
-                <Spin />
-              ) : contextError ? (
-                <Alert type="warning" showIcon message={t('legacyEmployeeLogs.detail.contextFailed')} />
-              ) : context && context.neighbors.length > 1 ? (
-                <>
-                  {context.truncated ? (
-                    <Alert type="info" showIcon style={{ marginBottom: 12 }} message={t('legacyEmployeeLogs.detail.contextTruncated', { count: context.neighbors.length })} />
-                  ) : null}
-                  <Timeline
-                    items={context.neighbors.map((item) => {
-                      const isCurrent = item.id === detailRecord.id
-                      const parsed = parseLegacyDetail(item.operationDetail, item.operation)
-                      return {
-                        key: item.id,
-                        color: isCurrent ? 'red' : 'gray',
-                        children: (
-                          <div style={{ fontWeight: isCurrent ? 500 : undefined, fontSize: 13 }}>
-                            <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineEnd: 8, fontVariantNumeric: 'tabular-nums' }}>
-                              {dayjs(item.operationTime).format('HH:mm:ss')}
-                            </Typography.Text>
-                            {operationTag(item.operation)}
-                            {item.employeeName && item.employeeName !== detailRecord.employeeName ? (
-                              <Typography.Text type="secondary" style={{ marginInlineStart: 6 }}>{item.employeeName}</Typography.Text>
-                            ) : null}
-                            <div style={{ marginTop: 2 }}>{renderParsedDetail(parsed, item.operationDetail)}</div>
-                          </div>
-                        ),
-                      }
-                    })}
-                  />
-                </>
-              ) : (
-                <Typography.Text type="secondary">{t('legacyEmployeeLogs.detail.contextEmpty')}</Typography.Text>
-              )}
-              {detailRecord.employeeId ? (
-                <Button size="small" onClick={() => showEmployeeDay(detailRecord)}>
-                  {t('legacyEmployeeLogs.detail.onlyEmployeeDay')} →
-                </Button>
-              ) : null}
-            </div>
-          </Space>
-        ) : null}
-      </Drawer>
+      {!sidePanel ? (
+        <Drawer
+          open={Boolean(detailRecord)}
+          onClose={closeDetail}
+          width="min(560px, 100vw)"
+          title={t('legacyEmployeeLogs.detail.title')}
+        >
+          {detailPanel}
+        </Drawer>
+      ) : null}
     </PageContainer>
-  )
-}
-
-function DrawerSectionTitle({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
-      <Typography.Text strong>{title}</Typography.Text>
-      {hint ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{hint}</Typography.Text> : null}
-    </div>
   )
 }

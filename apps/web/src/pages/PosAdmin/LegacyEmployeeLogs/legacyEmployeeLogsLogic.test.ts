@@ -1,11 +1,20 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import dayjs from 'dayjs'
 
 import {
+  DANGER_GROUP_OPERATIONS,
   HIGH_RISK_OPERATIONS,
+  LEGACY_RULE_CODES,
   KNOWN_LEGACY_OPERATIONS,
   QUICK_FILTER_OPERATIONS,
   buildLegacyLogQuery,
   buildOperationOptions,
+  buildStoreNameMap,
+  describeFlagEvidence,
+  formatStoreLabel,
+  orderRuleCounts,
   createLatestRequestGuard,
   getDayRange,
   getOperationCategory,
@@ -110,7 +119,27 @@ HIGH_RISK_OPERATIONS.forEach((operation) => {
 })
 assertEqual(isQuickFilterActive('price', ['修改所有商品折扣', '修改商品价格', '修改商品折扣']), true, '快捷筛选顺序无关')
 assertEqual(isQuickFilterActive('price', ['修改商品价格']), false, '部分选择不算命中')
-assertEqual(isQuickFilterActive('highRisk', undefined), false, '未选择不命中')
+assertEqual(isQuickFilterActive('delete', undefined), false, '未选择不命中')
+assertEqual(isHighRiskOperation('重打印'), false, '重打印不是危险操作（由重复重打印规则兜底）')
+Object.values(DANGER_GROUP_OPERATIONS).flat().forEach((operation) => {
+  assertEqual(HIGH_RISK_OPERATIONS.includes(operation), true, `危险细分 ${operation} 必须在危险清单内`)
+})
+
+// —— 与后端口径的契约：危险清单与规则编号必须和 LegacyEmployeeLogRiskCatalog 一致 ——
+// 测试在 apps/web 目录下运行（与其他读源码的契约测试一致）。
+const catalogSource = readFileSync(
+  join(process.cwd(), '../../services/backend/BlazorApp.Api/Features/LegacyEmployeeLogs/Risk/LegacyEmployeeLogRiskCatalog.cs'),
+  'utf8',
+)
+const constValue = (name: string) => new RegExp(`public const string ${name} = "([^"]+)";`).exec(catalogSource)?.[1]
+const listOf = (name: string) =>
+  (new RegExp(`${name} =\\s*\\[([\\s\\S]*?)\\];`).exec(catalogSource)?.[1] ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => constValue(item.replace(/^Rules\./, '')) ?? item)
+assertDeepEqual([...HIGH_RISK_OPERATIONS].sort(), listOf('DangerOperations').sort(), '危险清单与后端一致')
+assertDeepEqual(LEGACY_RULE_CODES, listOf('AllRules'), '规则编号与顺序与后端一致')
 assertEqual(QUICK_FILTER_OPERATIONS.return.includes('无小票退货成功'), true, '退货快捷筛选包含无小票退货')
 
 const counts = [
@@ -177,6 +206,59 @@ assertDeepEqual(
   '单日选择按墙钟传半开区间，空条件不传',
 )
 assertEqual(buildLegacyLogQuery({ timeRange: day }, { pageNumber: 1, pageSize: 50, sortOrder: 'desc' }), null, '没选分店不发请求')
+
+const page1 = { pageNumber: 1, pageSize: 50, sortOrder: 'desc' as const }
+const abnormalQuery = buildLegacyLogQuery(
+  { timeRange: day, storeCodes: ['1003'] },
+  page1,
+  { riskLens: 'abnormal', ruleCodes: ['noSaleDrawer'], reviewStatus: 'pending' },
+)
+assertEqual(abnormalQuery?.riskLens, 'abnormal', '异常入口传 riskLens')
+assertDeepEqual(abnormalQuery?.ruleCodes, ['noSaleDrawer'], '异常入口传规则')
+assertEqual(abnormalQuery?.reviewStatus, 'pending', '异常入口传核查状态')
+const dangerQuery = buildLegacyLogQuery(
+  { timeRange: day, storeCodes: ['1003'] },
+  page1,
+  { riskLens: 'danger', ruleCodes: ['noSaleDrawer'], reviewStatus: 'pending' },
+)
+assertEqual(dangerQuery?.riskLens, 'danger', '危险入口传 riskLens')
+assertEqual('ruleCodes' in (dangerQuery ?? {}), false, '规则只在异常入口下传')
+assertEqual('reviewStatus' in (dangerQuery ?? {}), false, '核查状态只在异常入口下传')
+assertEqual('riskLens' in (buildLegacyLogQuery({ timeRange: day, storeCodes: ['1003'] }, page1) ?? {}), false, '默认入口不传，兼容旧后端')
+
+// —— 分店名称 ——
+const storeNames = buildStoreNameMap([
+  { value: '1003', label: 'Peninsula Fair' },
+  { value: '1005', label: '1005' },
+  { value: '1008', label: ' ' },
+])
+assertEqual(formatStoreLabel('1003', storeNames), '1003 · Peninsula Fair', '有名称显示「编码 · 名称」')
+assertEqual(formatStoreLabel('1005', storeNames), '1005', '名称与编码相同只显示编码')
+assertEqual(formatStoreLabel('1008', storeNames), '1008', '空名称只显示编码')
+assertEqual(formatStoreLabel(null, storeNames), '-', '没有分店显示占位')
+
+// —— 异常依据 ——
+assertDeepEqual(
+  describeFlagEvidence({
+    ruleCode: 'noSaleDrawer',
+    evidence: { windowSeconds: '120', previousCheckoutAt: '21:38:10', minutesSincePreviousCheckout: '9', identityConfirmed: 'true' },
+  }).map((part) => part.key),
+  ['noSaleWindow', 'noSalePrevious', 'identityConfirmed'],
+  '开钱箱依据：窗口、上一次结账、身份确认',
+)
+assertDeepEqual(
+  describeFlagEvidence({ ruleCode: 'repeatReprint', evidence: { orderId: '01A0F5BF-C743-7437-AAA2-A9E53941770F', count: '3', firstAt: '10:00:00' } })[0].params,
+  { order: '01A0F5BF…770F', count: '3', first: '10:00:00' },
+  '重打印依据缩短订单号',
+)
+assertEqual(describeFlagEvidence({ ruleCode: 'bigDiscount', evidence: { kind: 'cart', percent: '80' } })[0].key, 'discountCart', '整单折扣依据')
+assertEqual(describeFlagEvidence({ ruleCode: 'offHours', evidence: { segment: 'beforeOpen' } })[0].key, 'offHoursBeforeOpen', '开门前依据')
+assertDeepEqual(describeFlagEvidence({ ruleCode: 'future', evidence: {} }), [], '未知规则没有依据片段')
+assertDeepEqual(
+  orderRuleCounts([{ ruleCode: 'offHours' }, { ruleCode: 'unknown' }, { ruleCode: 'noSaleDrawer' }]).map((row) => row.ruleCode),
+  ['noSaleDrawer', 'offHours', 'unknown'],
+  '规则计数按固定顺序，未知的在最后',
+)
 
 assertEqual(
   buildLegacyLogQuery({ timeRange: day, storeCodes: [' ', ''] }, { pageNumber: 1, pageSize: 50, sortOrder: 'desc' }),
