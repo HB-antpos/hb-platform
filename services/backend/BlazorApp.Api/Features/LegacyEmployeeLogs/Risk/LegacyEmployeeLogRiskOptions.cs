@@ -3,6 +3,8 @@ namespace BlazorApp.Api.Features.LegacyEmployeeLogs.Risk;
 /// <summary>
 /// 异常规则扫描配置（配置节 LegacyEmployeeLogRisk）。阈值默认值按 2026-10-01 生产抽样校准：
 /// 1003/1005/1008 三店 7 天内各规则命中 22 / 10 / 5 / 11 / 0 / 0 次，折算 25 店约每天 50 条。
+/// 新收银操作审计的扫描共用同一开关、节奏与阈值（规则编号相同，核查口径一致），
+/// 只多一个大额折扣金额下限，见 <see cref="BigDiscountMinAmount"/>。
 /// </summary>
 public sealed class LegacyEmployeeLogRiskOptions
 {
@@ -10,6 +12,9 @@ public sealed class LegacyEmployeeLogRiskOptions
 
     /// <summary>总开关；默认关闭，迁移执行并观察后再打开。</summary>
     public bool Enabled { get; set; }
+
+    /// <summary>新收银操作审计的扫描子开关（总开关打开时才生效）；新收银风险表未迁移时自动跳过。</summary>
+    public bool PosAuditEnabled { get; set; } = true;
 
     /// <summary>常规扫描间隔与回看时长：日志由收银机批量上传，通常滞后十几到几十分钟。</summary>
     public int QuickIntervalMinutes { get; set; } = 15;
@@ -33,6 +38,12 @@ public sealed class LegacyEmployeeLogRiskOptions
 
     /// <summary>改价降幅达到该比例（0.5 = 新价不高于原价一半）即命中。</summary>
     public decimal BigPriceCutMinRatio { get; set; } = 0.5m;
+
+    /// <summary>
+    /// 仅新收银：折扣 / 降价让利金额下限。新收银有 50% 快捷折扣按钮，1013 一周 70 次单品折扣里 56 次达到 50%，
+    /// 其中让利 ≥ 10 元的 13 次；只按比例判定会每天七八条，核查不过来。
+    /// </summary>
+    public decimal BigDiscountMinAmount { get; set; } = 10m;
 
     public int BurstDeleteWindowMinutes { get; set; } = 10;
 

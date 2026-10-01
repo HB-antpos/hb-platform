@@ -932,6 +932,37 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         Assert.Equal(51951, driftedColumn.Number);
     }
 
+    [SchemaMigrationSqlServerFact]
+    public async Task 新收银审计风险三表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var posm = databases.PosmConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql));
+        Assert.Equal(51970, missing.Number);
+
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql);
+
+        // 非聚集索引被删后门禁必须报索引漂移，重跑 ApplySql 可补回。
+        await ExecuteNonQueryAsync(posm,
+            "DROP INDEX [IX_PosOperationAuditReviewHistory_EventId] ON dbo.PosOperationAuditReviewHistory;");
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql));
+        Assert.Equal(51974, missingIndex.Number);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.ApplySql);
+        await ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql);
+
+        // nvarchar 长度按字节核对：nvarchar(500) 改成 nvarchar(250) 必须被识别。
+        await ExecuteNonQueryAsync(posm, "ALTER TABLE dbo.PosOperationAuditReviews ALTER COLUMN Note nvarchar(250) NULL;");
+        var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(posm, PosOperationAuditRiskSchema.VerifySql));
+        Assert.Equal(51971, driftedColumn.Number);
+    }
+
     private static async Task<string> RunApiUntilListeningAsync(
         IsolatedSchemaDatabases databases
     )

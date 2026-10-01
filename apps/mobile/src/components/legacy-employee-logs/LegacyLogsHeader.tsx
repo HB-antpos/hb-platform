@@ -1,8 +1,9 @@
+import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Icon, IconButton, Text } from "react-native-paper";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 
-/** 列表与员工汇总共用的页头：返回、标题、筛选（带角标）、页签切换、时间与分店范围按钮。 */
+/** 列表与员工汇总共用的页头：返回、标题、筛选（带角标）、来源切换（两个来源都有权限时）、页签切换、时间与分店范围按钮。 */
 export function LegacyLogsHeader({
   title,
   activeTab,
@@ -15,6 +16,7 @@ export function LegacyLogsHeader({
   onBack,
   onOpenFilters,
   onSwitchTab,
+  sourceSwitch,
 }: {
   title: string;
   activeTab: "records" | "employees";
@@ -27,6 +29,7 @@ export function LegacyLogsHeader({
   onBack: () => void;
   onOpenFilters: () => void;
   onSwitchTab: (tab: "records" | "employees") => void;
+  sourceSwitch?: ReactNode;
 }) {
   return (
     <View>
@@ -44,6 +47,7 @@ export function LegacyLogsHeader({
           ) : null}
         </View>
       </View>
+      {sourceSwitch}
       <View style={styles.tabs} accessibilityRole="tablist">
         {(["records", "employees"] as const).map((tab) => {
           const active = tab === activeTab;

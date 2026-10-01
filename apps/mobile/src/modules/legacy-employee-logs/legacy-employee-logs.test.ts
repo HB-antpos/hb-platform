@@ -5,6 +5,13 @@ import { fileURLToPath } from "node:url";
 import {
   LEGACY_DANGER_OPERATIONS,
   LEGACY_RULE_CODES,
+  POS_DANGER_GROUPS,
+  POS_RULE_CODES,
+  categoryGroupsFor,
+  posOperationKey,
+  resolveLogSource,
+  resolvePosRange,
+  toLocalWallClock,
   buildLegacyEmployeeSummaryQuery,
   buildLegacyLogQuery,
   countActiveLegacyFilters,
@@ -21,7 +28,7 @@ import {
   summarizeStores,
   switchLens,
 } from "./logic";
-import { normalizeLegacyLogItem, normalizeLegacyLogReview } from "./api-normalization";
+import { normalizeLegacyLogItem, normalizeLegacyLogReview, normalizePosEmployeeSummary, normalizePosLogItem } from "./api-normalization";
 import type { LegacyLogItem } from "./types";
 
 const now = new Date(2026, 8, 30, 15, 30); // 2026-09-30 15:30 设备本地时间
@@ -113,5 +120,99 @@ assert.equal(normalizeLegacyLogReview({ result: "ok" }), null, "未知核查结�
 assert.equal(normalizeLegacyLogReview({ result: "revoked", version: 3 })?.version, 3, "撤销结论保留版本号供再次核查");
 const normalized = normalizeLegacyLogItem({ id: "x", isDanger: true, flags: [{ ruleCode: "", evidence: {} }, { ruleCode: "offHours", evidence: null }], amountImpact: 12.5 });
 assert.deepEqual([normalized.isDanger, normalized.flags.map((flag) => flag.ruleCode), normalized.amountImpact], [true, ["offHours"], 12.5]);
+
+// —— 新收银：来源解析、查询参数、归一化与口径契约 ——
+assert.equal(resolveLogSource({ canLegacy: true, canPos: true }), "legacy", "首次默认老收银");
+assert.equal(resolveLogSource({ canLegacy: true, canPos: true, remembered: "pos" }), "pos", "记住上次的选择");
+assert.equal(resolveLogSource({ canLegacy: true, canPos: true, requested: "legacy", remembered: "pos" }), "legacy", "路由参数优先");
+assert.equal(resolveLogSource({ canLegacy: false, canPos: true, requested: "legacy" }), "pos", "无权限的来源不能通过参数进入");
+assert.equal(resolveLogSource({ canLegacy: false, canPos: false }), null, "两个都没权限");
+
+const posRange = resolvePosRange("today", now);
+assert.equal(posRange.fromUtc, new Date(2026, 8, 30).toISOString(), "新收银区间按设备本地零点换算 UTC");
+assert.equal(posRange.toUtc, new Date(2026, 9, 1).toISOString());
+const posFilters = { ...createDefaultLegacyLogFilters(["1013", "1013", "1042"], "pos"), employeeId: "c1", lens: "danger" as const, subOperations: ["CART_ITEM_REMOVE", "CART_CLEAR"] };
+const posQuery = buildLegacyLogQuery(posFilters, 2, now)!;
+assert.deepEqual(posQuery.getAll("storeCodes"), ["1013", "1042"]);
+assert.deepEqual([posQuery.get("cashierId"), posQuery.get("riskLens"), posQuery.get("pageNumber"), posQuery.get("sortBy")], ["c1", "danger", "2", "occurredAtUtc"]);
+assert.deepEqual(posQuery.getAll("operationTypes"), ["CART_ITEM_REMOVE", "CART_CLEAR"], "危险细分按操作类型传");
+assert.equal(posQuery.has("from") || posQuery.has("employeeIds") || posQuery.has("operations"), false, "不带老收银参数");
+const posAbnormal = buildLegacyLogQuery({ ...posFilters, lens: "abnormal", ruleCode: "emergencyOverride", reviewStatus: "pending" }, 1, now)!;
+assert.deepEqual([posAbnormal.getAll("operationTypes"), posAbnormal.get("ruleCodes"), posAbnormal.get("reviewStatus")], [[], "emergencyOverride", "pending"]);
+const posSummary = buildLegacyEmployeeSummaryQuery(posFilters, now)!;
+assert.deepEqual([posSummary.has("fromUtc"), posSummary.has("cashierId"), posSummary.has("pageNumber")], [true, false, false], "员工汇总只带基础条件");
+assert.equal(filtersFromRouteParams(filtersToRouteParams(posFilters), "legacy").source, "legacy", "来源由页面解析后传入，路由参数只做记录");
+assert.equal(filtersToRouteParams(posFilters).source, "pos");
+assert.deepEqual(categoryGroupsFor("pos"), [], "新收银「全部」入口没有类别细分");
+assert.equal(posOperationKey("CART_ITEM_PRICE_CHANGE"), "cartItemPriceChange");
+
+const wall = toLocalWallClock("2026-10-01T02:00:00.000Z");
+const expected = new Date(Date.UTC(2026, 9, 1, 2, 0, 0));
+assert.equal(wall, `${expected.getFullYear()}-${String(expected.getMonth() + 1).padStart(2, "0")}-${String(expected.getDate()).padStart(2, "0")}T${String(expected.getHours()).padStart(2, "0")}:00:00`, "UTC 按设备时区转墙钟");
+assert.equal(toLocalWallClock("bogus"), "", "无法解析的时间返回空串");
+
+const posItem = normalizePosLogItem(
+  {
+    eventId: "11111111-2222-3333-4444-555555555555",
+    operationType: "CART_ITEM_REMOVE",
+    outcome: "Succeeded",
+    cashierId: "c1",
+    cashierName: "Gao Jian",
+    storeCode: "1013",
+    deviceCode: "POS_1013_0222",
+    occurredAtUtc: "2026-10-01T02:00:00Z",
+    receivedAtUtc: "2026-10-01T02:00:05Z",
+    primaryProduct: "Big Bear",
+    productCount: 3,
+    beforeActual: 30,
+    afterActual: 15,
+    isDanger: true,
+    amountImpact: 15,
+    flags: [{ ruleCode: "deleteAfterCheckout", evidence: { anchor: "tender" } }],
+    review: { result: "followUp", version: 2, reviewedByName: "M" },
+  },
+  (type) => `L:${type}`,
+);
+assert.deepEqual(
+  [posItem.id, posItem.source, posItem.tone, posItem.operation, posItem.title, posItem.employeeId, posItem.amountImpact, posItem.review?.version],
+  ["11111111-2222-3333-4444-555555555555", "pos", "delete", "L:CART_ITEM_REMOVE", "Big Bear +2", "c1", 15, 2],
+);
+assert.equal(posItem.operationDetail, "Big Bear +2 · 30.00 → 15.00", "时间线摘要含商品与金额变化");
+assert.equal(posItem.pos?.outcome, "Succeeded");
+const drawer = normalizePosLogItem({ eventId: "e2", operationType: "CASH_DRAWER_OPEN", reasonCode: "MANUAL" }, (type) => `L:${type}`);
+assert.deepEqual([drawer.title, drawer.operationDetail, drawer.tone], ["L:CASH_DRAWER_OPEN", "MANUAL", "auth"], "没有商品时标题用操作名");
+assert.equal(normalizePosEmployeeSummary({ cashierId: "c9", total: 5 }).employeeName, "c9", "没有姓名时用收银员编号");
+
+// 契约：新收银规则编号与危险分组与后端 PosOperationAuditRiskCatalog 一致。
+const posCatalog = readFileSync(
+  resolve(moduleDir, "../../../../../services/backend/BlazorApp.Api/Services/OperationAudits/Risk/PosOperationAuditRiskCatalog.cs"),
+  "utf8",
+);
+const posConst = (name: string) => {
+  const literal = new RegExp(`public const string ${name} = "([^"]+)";`).exec(posCatalog)?.[1];
+  if (literal) return literal;
+  const legacyName = new RegExp(`public const string ${name} = LegacyRules\\.(\\w+);`).exec(posCatalog)?.[1];
+  return legacyName ? constValue(legacyName) : undefined;
+};
+const posListOf = (name: string) =>
+  (new RegExp(`${name} =\\s*\\[([\\s\\S]*?)\\];`).exec(posCatalog)?.[1] ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => (item.startsWith('"') ? item.slice(1, -1) : posConst(item.replace(/^Rules\./, "")) ?? item));
+assert.deepEqual(POS_RULE_CODES, posListOf("AllRules"), "新收银规则编号与后端一致");
+assert.deepEqual(
+  POS_DANGER_GROUPS.flatMap((group) => group.operations).sort(),
+  [...posListOf("DangerOperations"), "CASH_DRAWER_OPEN"].sort(),
+  "新收银危险分组并集 = 后端危险清单 + 手动开钱箱",
+);
+
+// 新收银依据：没有身份确认字段时不显示、紧急覆盖有短依据。
+assert.deepEqual(
+  describeFlagEvidence({ ruleCode: "noSaleDrawer", evidence: { windowSeconds: "120" } }).map((part) => part.key),
+  ["noSaleWindow"],
+);
+assert.equal(describeFlagEvidence({ ruleCode: "deleteAfterCheckout", evidence: { anchor: "tender" } })[0].key, "deleteAfterTender");
+assert.equal(shortFlagEvidence({ ruleCode: "emergencyOverride", evidence: { outcome: "Denied" } })?.key, "short.emergencyOverride");
 
 console.log("legacy employee logs mobile tests passed");

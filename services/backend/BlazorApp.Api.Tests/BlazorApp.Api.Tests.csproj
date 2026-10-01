@@ -292,6 +292,9 @@
     <Compile Include="LocalSupplierInvoiceBatchUpdateJobServiceTests.cs" />
     <Compile Include="ApplicationLogServiceTests.cs" />
     <Compile Include="OperationAuditQueryServiceTests.cs" />
+    <Compile Include="OperationAuditRiskQueryTests.cs" />
+    <Compile Include="PosOperationAuditRiskEvaluatorTests.cs" />
+    <Compile Include="PosOperationAuditRiskSqlServerIntegrationTests.cs" />
     <Compile Include="LinklySettlementManagementTests.cs" />
     <Compile Include="ApplicationLogSchemaMigratorTests.cs" />
     <Compile Include="ApplicationLogQueueTests.cs" />

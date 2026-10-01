@@ -1,7 +1,7 @@
-import { AlertOutlined, CheckOutlined, FlagOutlined, WarningOutlined } from '@ant-design/icons'
-import { Alert, Button, Descriptions, Input, Space, Spin, Tag, Timeline, Typography, message, theme } from 'antd'
+import { AlertOutlined, WarningOutlined } from '@ant-design/icons'
+import { Alert, Button, Descriptions, Space, Spin, Tag, Timeline, Typography, theme } from 'antd'
 import dayjs from 'dayjs'
-import { useEffect, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { reviewLegacyEmployeeLog } from '../../../services/legacyEmployeeLogService'
@@ -10,11 +10,9 @@ import type {
   LegacyEmployeeLogItem,
   LegacyEmployeeLogReview,
 } from '../../../types/legacyEmployeeLog'
-import { RequestError } from '../../../utils/request'
 
-import { describeFlagEvidence, isHighRiskOperation, parseLegacyDetail, type ParsedLegacyDetail } from './legacyEmployeeLogsLogic'
-
-const NOTE_MAX_LENGTH = 500
+import { isHighRiskOperation, parseLegacyDetail, type ParsedLegacyDetail } from './legacyEmployeeLogsLogic'
+import RiskReviewSection from './RiskReviewSection'
 
 interface LegacyLogDetailPanelProps {
   record: LegacyEmployeeLogItem
@@ -37,42 +35,9 @@ export default function LegacyLogDetailPanel(props: LegacyLogDetailPanelProps) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { record, context } = props
-  const [note, setNote] = useState('')
-  const [submitting, setSubmitting] = useState<'normal' | 'followUp' | 'revoked' | null>(null)
   const parsed = parseLegacyDetail(record.operationDetail, record.operation)
   const flags = record.flags ?? []
-  const review = record.review && record.review.result !== 'revoked' ? record.review : null
   const danger = record.isDanger ?? isHighRiskOperation(record.operation)
-
-  // 换一条记录时清空未提交的备注。
-  useEffect(() => {
-    setNote('')
-  }, [record.id])
-
-  const submit = async (result: 'normal' | 'followUp' | 'revoked') => {
-    setSubmitting(result)
-    try {
-      const saved = await reviewLegacyEmployeeLog({
-        logId: record.id,
-        result,
-        note: result === 'revoked' ? undefined : note.trim() || undefined,
-        // 撤销后再核查也要带上次的版本号；从未核查过时不传。
-        expectedVersion: record.review?.version ?? null,
-      })
-      message.success(t(result === 'revoked' ? 'legacyEmployeeLogs.review.revoked' : 'legacyEmployeeLogs.review.saved'))
-      setNote('')
-      props.onReviewChanged(record, saved)
-    } catch (error) {
-      if (error instanceof RequestError && error.status === 409) {
-        message.warning(t('legacyEmployeeLogs.review.conflict'))
-        props.onReviewChanged(record, null)
-      } else {
-        message.error(error instanceof Error && error.message ? error.message : t('legacyEmployeeLogs.review.failed'))
-      }
-    } finally {
-      setSubmitting(null)
-    }
-  }
 
   return (
     <Space direction="vertical" size={18} style={{ width: '100%' }}>
@@ -96,76 +61,16 @@ export default function LegacyLogDetailPanel(props: LegacyLogDetailPanelProps) {
       </div>
 
       {flags.length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {flags.map((flag) => (
-            <div
-              key={flag.ruleCode}
-              style={{ border: `1px solid ${token.colorWarningBorder}`, background: token.colorWarningBg, borderRadius: token.borderRadiusLG, padding: '10px 14px' }}
-            >
-              <Typography.Text strong style={{ color: token.colorWarningText }}>
-                <AlertOutlined style={{ marginInlineEnd: 6 }} />
-                {t(`legacyEmployeeLogs.rules.${flag.ruleCode}.label`)}
-              </Typography.Text>
-              <div style={{ fontSize: 13, lineHeight: 1.6, marginTop: 4 }}>
-                {describeFlagEvidence(flag).map((part) => t(`legacyEmployeeLogs.evidence.${part.key}`, part.params)).join('；')}
-              </div>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t(`legacyEmployeeLogs.rules.${flag.ruleCode}.desc`)}</Typography.Text>
-            </div>
-          ))}
-
-          <div style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              <Typography.Text strong>{t('legacyEmployeeLogs.review.title')}</Typography.Text>
-              {review ? (
-                <Space size={6}>
-                  <Tag color={review.result === 'followUp' ? 'purple' : 'default'} icon={review.result === 'followUp' ? <FlagOutlined /> : <CheckOutlined />} style={{ marginInlineEnd: 0 }}>
-                    {t(review.result === 'followUp' ? 'legacyEmployeeLogs.badges.followUp' : 'legacyEmployeeLogs.badges.reviewed')}
-                  </Tag>
-                  {props.canReview ? (
-                    <Button type="link" size="small" loading={submitting === 'revoked'} onClick={() => void submit('revoked')}>
-                      {t('legacyEmployeeLogs.review.revoke')}
-                    </Button>
-                  ) : null}
-                </Space>
-              ) : (
-                <Tag color="warning" style={{ marginInlineEnd: 0 }}>{t('legacyEmployeeLogs.review.pending')}</Tag>
-              )}
-            </div>
-            {review ? (
-              <>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('legacyEmployeeLogs.review.by', { name: review.reviewedByName, at: dayjs(review.reviewedAtUtc).format('YYYY-MM-DD HH:mm') })}
-                </Typography.Text>
-                {review.note ? <Typography.Text style={{ fontSize: 13 }}>{review.note}</Typography.Text> : null}
-              </>
-            ) : props.canReview ? (
-              <>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('legacyEmployeeLogs.review.reviewer', { name: props.currentUserName })}</Typography.Text>
-                <label htmlFor={`legacy-review-note-${record.id}`} style={{ fontSize: 12, color: token.colorTextSecondary }}>
-                  {t('legacyEmployeeLogs.review.noteLabel')}
-                </label>
-                <Input.TextArea
-                  id={`legacy-review-note-${record.id}`}
-                  value={note}
-                  maxLength={NOTE_MAX_LENGTH}
-                  autoSize={{ minRows: 2, maxRows: 5 }}
-                  placeholder={t('legacyEmployeeLogs.review.notePlaceholder')}
-                  onChange={(event) => setNote(event.target.value)}
-                />
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Button block icon={<CheckOutlined />} loading={submitting === 'normal'} disabled={submitting !== null} onClick={() => void submit('normal')}>
-                    {t('legacyEmployeeLogs.review.normal')}
-                  </Button>
-                  <Button block danger icon={<FlagOutlined />} loading={submitting === 'followUp'} disabled={submitting !== null} onClick={() => void submit('followUp')}>
-                    {t('legacyEmployeeLogs.review.followUp')}
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('legacyEmployeeLogs.review.readOnly')}</Typography.Text>
-            )}
-          </div>
-        </div>
+        <RiskReviewSection
+          recordKey={record.id}
+          flags={flags}
+          review={record.review}
+          canReview={props.canReview}
+          currentUserName={props.currentUserName}
+          ruleDescription={(code) => t(`legacyEmployeeLogs.rules.${code}.desc`)}
+          submit={(result, note, expectedVersion) => reviewLegacyEmployeeLog({ logId: record.id, result, note, expectedVersion })}
+          onReviewChanged={(review) => props.onReviewChanged(record, review)}
+        />
       ) : danger ? (
         <Alert type="error" showIcon={false} message={t('legacyEmployeeLogs.dangerOnly')} />
       ) : null}

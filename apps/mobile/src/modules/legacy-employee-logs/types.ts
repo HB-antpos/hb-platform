@@ -1,4 +1,8 @@
-/** 老收银（POSM.EmployeeLogs）操作日志；时间均为门店本地墙钟时间字符串，不带时区。 */
+/**
+ * 员工操作日志：老收银（POSM.EmployeeLogs）与新收银（pos_operation_audit）共用一套页面。
+ * 时间均为墙钟时间字符串（不带时区）：老收银是门店墙钟原样，新收银由 UTC 按设备本地时区换算。
+ */
+export type LogSource = "legacy" | "pos";
 export type LegacyRiskLens = "all" | "danger" | "abnormal";
 export type LegacyReviewStatus = "all" | "pending" | "reviewed" | "followUp";
 export type LegacyRangePreset = "today" | "yesterday" | "last7" | "last31";
@@ -25,8 +29,29 @@ export interface LegacyLogReview {
   version: number;
 }
 
+/** 新收银事件特有的字段，详情页按来源展示。 */
+export interface PosLogExtra {
+  operationType: string;
+  outcome: string;
+  reasonCode: string | null;
+  paymentMethod: string | null;
+  paymentAmount: number | null;
+  beforeActual: number | null;
+  afterActual: number | null;
+  orderGuid: string | null;
+  deviceSystem: string | null;
+  isEmergencyOverride: boolean;
+  isOfflineCached: boolean;
+  safeMessage: string | null;
+}
+
 export interface LegacyLogItem {
   id: string;
+  /** 新收银条目才有：操作配色分类、标题（主商品或操作名）与原始字段。老收银不传。 */
+  source?: LogSource;
+  tone?: "item" | "price" | "delete" | "payment" | "return" | "auth" | "other";
+  title?: string | null;
+  pos?: PosLogExtra;
   employeeId: string | null;
   employeeName: string | null;
   operation: string | null;
@@ -62,6 +87,8 @@ export interface LegacyOperationCount {
 export interface LegacyLogPage {
   items: LegacyLogItem[];
   total: number;
+  /** 新收银「全部」入口的总数（汇总接口）；老收银由 operationCounts 求和。 */
+  allTotal?: number;
   operationCounts: LegacyOperationCount[];
   employees: { employeeId: string | null; employeeName: string | null; count: number }[];
   devices: { deviceCode: string | null; count: number }[];
@@ -96,6 +123,7 @@ export interface LegacyEmployeeSummaryResult {
 
 /** 列表筛选。subOperations 是「全部 / 危险」入口下的细分；ruleCode 与 reviewStatus 只在「异常」入口下生效。 */
 export interface LegacyLogFilters {
+  source: LogSource;
   preset: LegacyRangePreset;
   storeCodes: string[];
   employeeId: string | null;

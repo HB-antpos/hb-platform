@@ -42,6 +42,8 @@ internal sealed class SchemaMigrationCoordinator
         "20260903.001-linkly-multi-terminal";
     internal const string LegacyEmployeeLogRiskMigrationId =
         "20261001.001-legacy-employee-log-risk";
+    internal const string PosOperationAuditRiskMigrationId =
+        "20261002.001-pos-operation-audit-risk";
 
     internal static readonly IReadOnlyList<SchemaMigrationStep> MainMigrationSteps =
     [
@@ -138,6 +140,11 @@ internal sealed class SchemaMigrationCoordinator
             static (runtime, cancellationToken) =>
                 runtime.ApplyLegacyEmployeeLogRiskAsync(cancellationToken)
         ),
+        new(
+            PosOperationAuditRiskMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyPosOperationAuditRiskAsync(cancellationToken)
+        ),
     ];
 
     private const string MainScope = "Main";
@@ -159,6 +166,8 @@ internal sealed class SchemaMigrationCoordinator
         "local-supplier-category-schema-signature";
     private const string LegacyEmployeeLogRiskSignatureId =
         "legacy-employee-log-risk-schema-signature";
+    private const string PosOperationAuditRiskSignatureId =
+        "pos-operation-audit-risk-schema-signature";
 
     private readonly ISchemaMigrationRuntime _runtime;
     private readonly ILogger<SchemaMigrationCoordinator> _logger;
@@ -300,6 +309,13 @@ internal sealed class SchemaMigrationCoordinator
                 SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible
             );
         }
+        catch (PosOperationAuditRiskSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible
+            );
+        }
         catch (SchemaProviderNotSupportedException)
         {
             LogResult(
@@ -406,6 +422,13 @@ internal sealed class SchemaMigrationCoordinator
             return SchemaOperationResult.Failure(
                 SchemaExitCodes.SchemaNotReady,
                 SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible
+            );
+        }
+        catch (PosOperationAuditRiskSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible
             );
         }
         catch (SchemaProviderNotSupportedException)
@@ -564,6 +587,7 @@ internal sealed class SchemaMigrationCoordinator
             // 新 migration ID 尚未登记时优先返回 POSM Missing；仅在账本齐全后判断结构漂移。
             await VerifyLinklyMultiTerminalSchemaAsync(cancellationToken);
             await VerifyLegacyEmployeeLogRiskAsync(cancellationToken);
+            await VerifyPosOperationAuditRiskAsync(cancellationToken);
         }
         await VerifyDeviceActivationSchemaAsync(cancellationToken);
         await VerifyMobileDeviceActivationSchemaAsync(cancellationToken);
@@ -926,6 +950,39 @@ internal sealed class SchemaMigrationCoordinator
                     OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
                     LegacyEmployeeLogRiskSchemaMismatchException =>
                         SchemaDiagnosticCodes.LegacyEmployeeLogRiskIncompatible,
+                    _ => SchemaDiagnosticCodes.DatabaseFailure,
+                }
+            );
+            throw;
+        }
+    }
+
+    private async Task VerifyPosOperationAuditRiskAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await _runtime.VerifyPosOperationAuditRiskAsync(cancellationToken);
+            LogResult(
+                PosmScope,
+                PosOperationAuditRiskSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Ready",
+                SchemaDiagnosticCodes.Ready
+            );
+        }
+        catch (Exception exception)
+        {
+            LogResult(
+                PosmScope,
+                PosOperationAuditRiskSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Failed",
+                exception switch
+                {
+                    OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
+                    PosOperationAuditRiskSchemaMismatchException =>
+                        SchemaDiagnosticCodes.PosOperationAuditRiskIncompatible,
                     _ => SchemaDiagnosticCodes.DatabaseFailure,
                 }
             );

@@ -250,8 +250,8 @@
       "description": "View employee operation logs uploaded by the legacy POS for a selected store on the web admin."
     },
     "LegacyEmployeeLogs.Review": {
-      "name": "Review legacy POS anomalies",
-      "description": "Mark flagged legacy POS operations as normal or needing follow-up, or revoke the review, on the web admin and the mobile employee operation logs page."
+      "name": "Review employee operation anomalies",
+      "description": "Mark flagged legacy or new POS operations as normal or needing follow-up, or revoke the review, on the web admin and the mobile employee operation logs page."
     },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",

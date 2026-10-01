@@ -653,6 +653,13 @@ builder.Services.AddScoped<OperationAuditQueryService>(sp =>
         sp.GetRequiredService<IHttpContextAccessor>()
     )
 );
+builder.Services.AddScoped<OperationAuditReviewService>(sp =>
+    new OperationAuditReviewService(
+        sp.GetRequiredService<POSMSqlSugarContext>().Db,
+        sp.GetRequiredService<OperationAuditQueryService>(),
+        sp.GetRequiredService<BlazorApp.Api.Services.ICurrentUserService>()
+    )
+);
 builder.Services.AddScoped<OperationAuditRetentionService>(sp =>
     new OperationAuditRetentionService(sp.GetRequiredService<POSMSqlSugarContext>().Db)
 );
@@ -670,7 +677,8 @@ builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmplo
         sp.GetRequiredService<BlazorApp.Api.Services.ICurrentUserService>()
     )
 );
-// 老收银操作日志异常扫描：默认关闭，迁移执行并观察后在配置 LegacyEmployeeLogRisk:Enabled 打开。
+// 员工操作日志异常扫描（老收银 + 新收银）：默认关闭，迁移执行并观察后在配置 LegacyEmployeeLogRisk:Enabled 打开；
+// 新收银部分另受 LegacyEmployeeLogRisk:PosAuditEnabled（默认开）控制。
 builder.Services.Configure<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskOptions>(
     builder.Configuration.GetSection(BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskOptions.SectionName));
 builder.Services.AddHostedService<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk.LegacyEmployeeLogRiskScanWorker>();

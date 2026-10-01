@@ -579,46 +579,38 @@ public class NavigationServiceTests
         );
     }
 
-    [Fact]
-    public void BuildMenu_ShowsOperationLogsWithAuditViewPermission()
+    [Theory]
+    [InlineData(Permissions.PosTerminal.Audit.View)]
+    [InlineData(Permissions.LegacyEmployeeLogs.View)]
+    public void BuildMenu_员工操作日志合并入口_老收银或新收银任一权限可见(string permission)
     {
-        var user = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
+        var user = CreateUser(new Claim("permission", permission));
 
         var menu = _service.BuildMenu(user);
 
         var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        var operationLogs = Assert.Single(
-            posAdmin.Children!,
-            item => item.Path == "/pos-admin/operation-logs"
+        var operationLogs = Assert.Single(posAdmin.Children!);
+        Assert.Equal("/pos-admin/operation-logs", operationLogs.Path);
+        Assert.Equal("menu.operationLogs", operationLogs.TitleKey);
+        Assert.Equal(
+            new[] { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View },
+            operationLogs.AnyPermissions
         );
-        Assert.Equal(Permissions.PosTerminal.Audit.View, operationLogs.Permission);
     }
 
     [Fact]
-    public void BuildMenu_仅凭老系统操作日志权限可见对应入口()
+    public void BuildMenu_不再单列老系统操作日志入口()
     {
-        var user = CreateUser(new Claim("permission", Permissions.LegacyEmployeeLogs.View));
-
-        var menu = _service.BuildMenu(user);
-
-        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
-        var legacyLogs = Assert.Single(posAdmin.Children!);
-        Assert.Equal("/pos-admin/legacy-employee-logs", legacyLogs.Path);
-        Assert.Equal("menu.legacyEmployeeLogs", legacyLogs.TitleKey);
-        Assert.Equal(Permissions.LegacyEmployeeLogs.View, legacyLogs.Permission);
-    }
-
-    [Fact]
-    public void BuildMenu_员工操作日志权限不连带老系统操作日志()
-    {
-        var user = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
-
-        var menu = _service.BuildMenu(user);
-
-        Assert.DoesNotContain(
-            menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
-            child => child.Path == "/pos-admin/legacy-employee-logs"
+        var user = CreateUser(
+            new Claim("permission", Permissions.PosTerminal.Audit.View),
+            new Claim("permission", Permissions.LegacyEmployeeLogs.View)
         );
+
+        var menu = _service.BuildMenu(user);
+
+        var children = menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()).ToList();
+        Assert.DoesNotContain(children, child => child.Path == "/pos-admin/legacy-employee-logs");
+        Assert.Single(children, child => child.Path == "/pos-admin/operation-logs");
     }
 
     [Fact]
@@ -1435,24 +1427,24 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_ShowsLegacyEmployeeLogsOnlyWithLegacyLogViewPermission()
+    public void BuildAppMenu_员工操作日志_老收银或新收银任一查看权限可见()
     {
-        var authorized = CreateUser(new Claim("permission", Permissions.LegacyEmployeeLogs.View));
+        var legacyOnly = CreateUser(new Claim("permission", Permissions.LegacyEmployeeLogs.View));
         var auditOnly = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
+        var neither = CreateUser(new Claim("permission", Permissions.Users.View));
 
-        // 移动端「员工操作日志」已替换为老收银日志，只认老系统日志查看权限；
-        // 只有新 POS 审计查看权限的人不再看到入口（新 POS 审计仍在 Web 后台）。
-        var item = Assert.Single(
-            _service.BuildAppMenu(authorized),
-            menu => menu.RouteName == "legacy-employee-logs"
-        );
-        Assert.Equal("tabs.legacyEmployeeLogs", item.TitleKey);
-        Assert.Equal("clipboard-text-clock-outline", item.Icon);
-        Assert.Equal(Permissions.LegacyEmployeeLogs.View, item.Permission);
-        Assert.DoesNotContain(
-            _service.BuildAppMenu(auditOnly),
-            menu => menu.RouteName == "legacy-employee-logs" || menu.RouteName == "pos-operation-logs"
-        );
+        // 移动端「员工操作日志」页内切换老收银 / 新收银，任一来源的查看权限即可进入；路由名沿用 legacy-employee-logs。
+        foreach (var user in new[] { legacyOnly, auditOnly })
+        {
+            var item = Assert.Single(
+                _service.BuildAppMenu(user),
+                menu => menu.RouteName == "legacy-employee-logs"
+            );
+            Assert.Equal("tabs.legacyEmployeeLogs", item.TitleKey);
+            Assert.Equal("clipboard-text-clock-outline", item.Icon);
+        }
+        Assert.DoesNotContain(_service.BuildAppMenu(auditOnly), menu => menu.RouteName == "pos-operation-logs");
+        Assert.DoesNotContain(_service.BuildAppMenu(neither), menu => menu.RouteName == "legacy-employee-logs");
     }
 
     [Theory]

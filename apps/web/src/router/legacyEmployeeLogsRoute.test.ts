@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { CurrentUser } from '../types/auth'
 import { P } from '../types/permissions'
 import { buildAccess } from '../utils/access'
-import { buildWebRoleMenuPreview, getAccessKeyPermissionCodes, type WebMenuPreviewNode } from '../utils/webMenuPreview'
+import { buildWebRoleMenuPreview, type WebMenuPreviewNode } from '../utils/webMenuPreview'
 import { getDefaultWebPath, resolveAuthorizedWebTarget } from '../utils/webPortalAccess'
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
@@ -36,52 +36,36 @@ function findNode(nodes: WebMenuPreviewNode[], path: string): WebMenuPreviewNode
 
 const routeSource = readFileSync(join(process.cwd(), 'src/router/routes.tsx'), 'utf8')
 assertEqual(
-  routeSource.includes("const PosAdminLegacyEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/LegacyEmployeeLogs'))") &&
-    routeSource.includes("path: '/pos-admin/legacy-employee-logs'") &&
-    routeSource.includes("title: 'menu.legacyEmployeeLogs'") &&
-    routeSource.includes("accessKey: 'canViewLegacyEmployeeLogs'") &&
-    routeSource.includes('element: <PosAdminLegacyEmployeeLogsPage />'),
+  routeSource.includes("path: '/pos-admin/legacy-employee-logs'") &&
+    routeSource.includes('element: <Navigate to="/pos-admin/operation-logs?source=legacy" replace />'),
   true,
-  '老系统操作日志路由应注册页面和独立权限',
-)
-
-// 后端菜单与 Web 路由用同一路径和权限码。
-const navigationSource = readFileSync(
-  join(process.cwd(), '../../services/backend/BlazorApp.Api/Services/NavigationService.cs'),
-  'utf8',
-)
-assertEqual(
-  /Path = "\/pos-admin\/legacy-employee-logs".*Permission = Permissions\.LegacyEmployeeLogs\.View/.test(navigationSource),
-  true,
-  '后端 FullMenu 应登记同一入口与权限',
+  '旧老系统操作日志地址应重定向到合并页的老收银来源',
 )
 assertEqual(P.LegacyEmployeeLogs.View.startsWith('Permissions.PosTerminal.'), false, '不得使用收银端权限前缀')
-assertEqual(
-  getAccessKeyPermissionCodes('canViewLegacyEmployeeLogs').join(','),
-  P.LegacyEmployeeLogs.View,
-  '菜单预览应映射到老系统操作日志权限',
-)
+assertEqual(P.LegacyEmployeeLogs.Review.startsWith('Permissions.PosTerminal.'), false, '核查权限不得使用收银端权限前缀')
 
+// 只有老收银权限：能进合并页（页内只显示老收银），登录落到合并页，旧地址仍被放行（随后重定向）。
 const legacyOnly = buildAccess(createCurrentUser([P.LegacyEmployeeLogs.View]))
-assertEqual(legacyOnly.canViewLegacyEmployeeLogs, true, '单独授予即可访问页面')
-assertEqual(legacyOnly.canViewOperationAudits, false, '不连带新系统员工操作日志')
-assertEqual(getDefaultWebPath(legacyOnly), '/pos-admin/legacy-employee-logs', '只有该权限时登录落到该页')
+assertEqual(legacyOnly.canViewLegacyEmployeeLogs, true, '单独授予即可查看老收银')
+assertEqual(legacyOnly.canViewOperationAudits, false, '不连带新收银')
+assertEqual(legacyOnly.canViewEmployeeOperationLogs, true, '可进入员工操作日志合并页')
+assertEqual(getDefaultWebPath(legacyOnly), '/pos-admin/operation-logs', '只有该权限时登录落到合并页')
 assertEqual(
   resolveAuthorizedWebTarget('/pos-admin/legacy-employee-logs', legacyOnly),
   '/pos-admin/legacy-employee-logs',
-  '可直接回到该页',
+  '旧地址仍可访问（由路由重定向）',
 )
 assertEqual(
-  Boolean(findNode(buildWebRoleMenuPreview(legacyOnly, (key) => key, { includeHidden: true }), '/pos-admin/legacy-employee-logs')),
+  Boolean(findNode(buildWebRoleMenuPreview(legacyOnly, (key) => key, { includeHidden: true }), '/pos-admin/operation-logs')),
   true,
-  '角色菜单预览应包含该入口',
+  '角色菜单预览应包含员工操作日志入口',
 )
 
-// 既有入口的默认落点不因新增规则改变。
 const auditOnly = buildAccess(createCurrentUser([P.PosTerminal.AuditView]))
-assertEqual(auditOnly.canViewLegacyEmployeeLogs, false, '员工操作日志权限不连带老系统日志')
-assertEqual(getDefaultWebPath(auditOnly), '/pos-admin/operation-logs', '员工操作日志用户落点不变')
-const both = buildAccess(createCurrentUser([P.PosTerminal.AuditView, P.LegacyEmployeeLogs.View]))
-assertEqual(getDefaultWebPath(both), '/pos-admin/operation-logs', '两个权限都有时仍落到既有入口')
+assertEqual(auditOnly.canViewLegacyEmployeeLogs, false, '新收银权限不连带老收银')
+assertEqual(auditOnly.canViewEmployeeOperationLogs, true, '新收银权限可进入合并页')
+assertEqual(getDefaultWebPath(auditOnly), '/pos-admin/operation-logs', '新收银用户落点不变')
+const neither = buildAccess(createCurrentUser([]))
+assertEqual(neither.canViewEmployeeOperationLogs, false, '两个权限都没有时不可进入')
 
 console.log('legacyEmployeeLogsRoute.test: ok')

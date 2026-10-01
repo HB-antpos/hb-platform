@@ -25,6 +25,15 @@ import {
 const CATEGORY_KEYS = Object.keys(QUICK_FILTER_OPERATIONS) as LegacyQuickFilterKey[]
 const DANGER_KEYS = Object.keys(DANGER_GROUP_OPERATIONS) as LegacyDangerGroupKey[]
 
+/** 细分标签：新收银没有按操作类型的计数，count 可省略。 */
+export interface RiskLensChip {
+  key: string
+  label: string
+  count?: number
+  active: boolean
+  onClick: () => void
+}
+
 interface RiskLensBarProps {
   risk: LegacyRiskFilter
   /** 当前所选操作类型（「全部 / 危险」入口的细分用它表示）。 */
@@ -38,6 +47,17 @@ interface RiskLensBarProps {
   onOperationsChange: (operations: string[] | undefined) => void
   onRuleChange: (ruleCode: string | null) => void
   onReviewStatusChange: (status: LegacyReviewStatus) => void
+  /** 数据来源：决定入口提示文案；默认老收银。 */
+  variant?: 'legacy' | 'pos'
+  /** 「异常」入口下的规则清单；默认老收银六条。 */
+  ruleCodes?: readonly string[]
+  /** 覆盖「全部 / 危险」入口下的细分（新收银用操作类型分组，不按老收银操作名称计数）。 */
+  allChips?: RiskLensChip[]
+  dangerChips?: RiskLensChip[]
+  /** 覆盖「全部」入口的总数（新收银取汇总接口的 total）。 */
+  allTotal?: number
+  /** 覆盖「全部」入口的范围说明（人数 / 设备数）；传 null 不显示。 */
+  allScope?: ReactNode
 }
 
 /**
@@ -48,7 +68,9 @@ export default function RiskLensBar(props: RiskLensBarProps) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { risk, operations, counts, summary } = props
-  const allTotal = counts.reduce((sum, row) => sum + row.count, 0)
+  const allTotal = props.allTotal ?? counts.reduce((sum, row) => sum + row.count, 0)
+  const hintKey = props.variant === 'pos' ? 'hintPos' : 'hint'
+  const ruleCodes = props.ruleCodes ?? LEGACY_RULE_CODES
   const dangerTotal = summary?.dangerTotal ?? 0
   const sharePercent = allTotal > 0 ? ((dangerTotal / allTotal) * 100).toFixed(1) : '0'
 
@@ -95,12 +117,12 @@ export default function RiskLensBar(props: RiskLensBarProps) {
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('legacyEmployeeLogs.lens.unit')}</Typography.Text>
           {extra}
         </span>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t(`legacyEmployeeLogs.lens.${lens}.hint`)}</Typography.Text>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t(`legacyEmployeeLogs.lens.${lens}.${hintKey}`)}</Typography.Text>
       </button>
     )
   }
 
-  const chip = (key: string, label: string, count: number, active: boolean, onClick: () => void) => (
+  const chip = (key: string, label: string, count: number | undefined, active: boolean, onClick: () => void) => (
     <Tag.CheckableTag
       key={key}
       checked={active}
@@ -116,7 +138,9 @@ export default function RiskLensBar(props: RiskLensBarProps) {
       }}
     >
       {label}
-      <span style={{ marginInlineStart: 6, opacity: 0.75, fontVariantNumeric: 'tabular-nums' }}>{count.toLocaleString('en-US')}</span>
+      {count === undefined ? null : (
+        <span style={{ marginInlineStart: 6, opacity: 0.75, fontVariantNumeric: 'tabular-nums' }}>{count.toLocaleString('en-US')}</span>
+      )}
     </Tag.CheckableTag>
   )
 
@@ -126,11 +150,19 @@ export default function RiskLensBar(props: RiskLensBarProps) {
   if (risk.riskLens === 'abnormal') {
     subLabel = t('legacyEmployeeLogs.lens.byRule')
     const byRule = new Map((summary?.abnormalByRule ?? []).map((row) => [row.ruleCode, row.count]))
-    chips = LEGACY_RULE_CODES.map((code) => {
+    chips = ruleCodes.map((code) => {
       const active = risk.ruleCodes.length === 1 && risk.ruleCodes[0] === code
       return chip(code, t(`legacyEmployeeLogs.rules.${code}.label`), byRule.get(code) ?? 0, active, () => props.onRuleChange(active ? null : code))
     })
     hasSub = risk.ruleCodes.length > 0
+  } else if (risk.riskLens === 'danger' && props.dangerChips) {
+    subLabel = t('legacyEmployeeLogs.lens.byDangerType')
+    chips = props.dangerChips.map((item) => chip(item.key, item.label, item.count, item.active, item.onClick))
+    hasSub = props.dangerChips.some((item) => item.active)
+  } else if (risk.riskLens === 'all' && props.allChips) {
+    subLabel = t('legacyEmployeeLogs.lens.byCategory')
+    chips = props.allChips.map((item) => chip(item.key, item.label, item.count, item.active, item.onClick))
+    hasSub = props.allChips.some((item) => item.active)
   } else if (risk.riskLens === 'danger') {
     subLabel = t('legacyEmployeeLogs.lens.byDangerType')
     chips = DANGER_KEYS.map((key) => {
@@ -154,7 +186,7 @@ export default function RiskLensBar(props: RiskLensBarProps) {
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-        {tile('all', token.colorPrimary, token.colorPrimaryBg, <UnorderedListOutlined style={{ color: token.colorPrimary }} />, allTotal, (
+        {tile('all', token.colorPrimary, token.colorPrimaryBg, <UnorderedListOutlined style={{ color: token.colorPrimary }} />, allTotal, props.allScope !== undefined ? props.allScope : (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             · {t('legacyEmployeeLogs.lens.all.scope', { people: props.people, devices: props.devices })}
           </Typography.Text>
@@ -173,6 +205,7 @@ export default function RiskLensBar(props: RiskLensBarProps) {
           </>
         ))}
       </div>
+      {chips.length > 0 || risk.riskLens === 'abnormal' ? (
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>{subLabel}</Typography.Text>
         {chips}
@@ -197,6 +230,7 @@ export default function RiskLensBar(props: RiskLensBarProps) {
           </Space>
         ) : null}
       </div>
+      ) : null}
     </Space>
   )
 }

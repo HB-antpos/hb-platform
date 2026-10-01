@@ -9,6 +9,7 @@ import {
   OPERATION_AUDIT_SORT_FIELDS,
   resolveOperationAuditTableChange,
   summarizeProducts,
+  toLegacyEmployeeSummary,
 } from './operationLogsLogic'
 import * as operationLogsLogic from './operationLogsLogic'
 
@@ -227,6 +228,8 @@ assertDeepEqual(
 )
 
 const operationLogsPageSource = readFileSync('src/pages/PosAdmin/OperationLogs/index.tsx', 'utf8')
+// 详情（商品明细、会话标记、平台）在独立的详情面板里，与员工操作日志合并页一起改版。
+const detailPanelSource = readFileSync('src/pages/PosAdmin/OperationLogs/PosLogDetailPanel.tsx', 'utf8')
 const zhLocale = JSON.parse(readFileSync('src/i18n/locales/zh.json', 'utf8'))
 const enLocale = JSON.parse(readFileSync('src/i18n/locales/en.json', 'utf8'))
 // 每个事件代码都必须有中英文案，否则页面和筛选下拉会直接显示原始代码。
@@ -279,30 +282,30 @@ assertEqual(
   'Unknown 应提供英文平台文案',
 )
 assertEqual(
-  operationLogsPageSource.includes('formatMoney(item.beforeUnitPrice'),
+  detailPanelSource.includes('formatMoney(item.beforeUnitPrice'),
   true,
   '商品详情单价应使用金额格式化',
 )
 assertEqual(
-  operationLogsPageSource.includes('formatSignedMoney(item.actualAmountDelta'),
+  detailPanelSource.includes('formatSignedMoney(item.actualAmountDelta'),
   true,
   '商品详情金额变化应显示正负号',
 )
 assertEqual(
-  operationLogsPageSource.includes('item.itemNumber') && operationLogsPageSource.includes('item.lineKind'),
+  detailPanelSource.includes('item.itemNumber') && detailPanelSource.includes('item.lineKind'),
   true,
   '商品详情应显示货号和行类型',
 )
 assertEqual(
-  operationLogsPageSource.includes('detailRecord.isOfflineCached') &&
-    operationLogsPageSource.includes('detailRecord.isEmergencyOverride'),
+  detailPanelSource.includes('record.isOfflineCached') &&
+    detailPanelSource.includes('record.isEmergencyOverride'),
   true,
   '员工详情应显示离线缓存和紧急授权快照',
 )
 assertEqual(
   operationLogsPageSource.includes("name=\"deviceSystem\"") &&
     operationLogsPageSource.includes("key: 'deviceSystem'") &&
-    operationLogsPageSource.includes('detailRecord.deviceSystem'),
+    detailPanelSource.includes('record.deviceSystem'),
   true,
   '操作日志应支持平台筛选、列表列和详情展示',
 )
@@ -428,5 +431,51 @@ assertDeepEqual(
   { data: 'latest-sort-result', loadError: false, loading: false },
   '旧请求晚完成或失败时不得覆盖最新数据、错误和 loading 状态',
 )
+
+// —— 风险入口、多选分店与操作类型、收银员下钻 ——
+{
+  const base = {
+    startUtc: '2026-10-01T00:00:00.000Z',
+    endUtc: '2026-10-02T00:00:00.000Z',
+    storeCode: '',
+    cashierKeyword: '',
+    deviceCode: '',
+    deviceSystem: '',
+    operationType: '',
+    outcome: '',
+    productKeyword: '',
+    orderGuid: '',
+    keyword: '',
+    page: 1,
+    pageSize: 20,
+    sortBy: 'occurredAtUtc' as const,
+    sortOrder: 'desc' as const,
+  }
+  const plain = buildOperationAuditQuery(base)
+  assertEqual('riskLens' in plain || 'storeCodes' in plain || 'operationTypes' in plain || 'cashierId' in plain, false, '默认入口不带新参数，兼容旧后端')
+  const abnormal = buildOperationAuditQuery({
+    ...base,
+    storeCodes: [' 1013', '1013', '', '1042'],
+    operationTypes: ['CART_ITEM_REMOVE', 'CART_CLEAR'],
+    cashierId: ' c1 ',
+    riskLens: 'abnormal',
+    ruleCodes: ['noSaleDrawer'],
+    reviewStatus: 'pending',
+  })
+  assertEqual(JSON.stringify(abnormal.storeCodes), JSON.stringify(['1013', '1042']), '分店去空白去重')
+  assertEqual(JSON.stringify(abnormal.operationTypes), JSON.stringify(['CART_ITEM_REMOVE', 'CART_CLEAR']), '操作类型多选')
+  assertEqual(abnormal.cashierId, 'c1', '收银员编号去空白')
+  assertEqual(abnormal.riskLens, 'abnormal', '异常入口')
+  assertEqual(JSON.stringify(abnormal.ruleCodes), JSON.stringify(['noSaleDrawer']), '异常入口带规则')
+  assertEqual(abnormal.reviewStatus, 'pending', '异常入口带核查状态')
+  const danger = buildOperationAuditQuery({ ...base, riskLens: 'danger', ruleCodes: ['noSaleDrawer'], reviewStatus: 'pending' })
+  assertEqual(danger.riskLens, 'danger', '危险入口')
+  assertEqual('ruleCodes' in danger || 'reviewStatus' in danger, false, '规则与核查状态只在异常入口下传')
+  const row = toLegacyEmployeeSummary({
+    cashierId: 'c1', cashierName: 'Gao', storeCodes: ['1013'], deviceCodes: ['POS-1'], total: 3, dangerCount: 2,
+    abnormalCount: 1, pendingReview: 1, abnormalByRule: [{ ruleCode: 'noSaleDrawer', count: 1 }], amountImpact: 19,
+  })
+  assertEqual(`${row.employeeId}/${row.employeeName}/${row.amountImpact}`, 'c1/Gao/19', '收银员汇总映射成员工汇总形状')
+}
 
 console.log('operationLogsLogic.test: ok')

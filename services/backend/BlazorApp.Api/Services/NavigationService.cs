@@ -151,8 +151,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/promotions",            TitleKey = "menu.promotions",             Icon = "GiftOutlined",               Permission = Permissions.Promotions.View },
                     new() { Path = "/pos-admin/advertisements",        TitleKey = "menu.advertisements",         Icon = "PictureOutlined",            Permission = Permissions.Advertisements.View },
                     new() { Path = "/pos-admin/cash-register-users",   TitleKey = "menu.cashRegisterUsers",      Icon = "UserOutlined",               Permission = Permissions.Store.ManageOperations },
-                    new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           Permission = Permissions.PosTerminal.Audit.View },
-                    new() { Path = "/pos-admin/legacy-employee-logs", TitleKey = "menu.legacyEmployeeLogs",     Icon = "FileTextOutlined",           Permission = Permissions.LegacyEmployeeLogs.View },
+                    // 员工操作日志合并页：老收银 / 新收银在页内切换，任一查看权限即可见。
+                    new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
                     new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
@@ -384,10 +384,10 @@ namespace BlazorApp.Api.Services
                 RouteName = "legacy-employee-logs",
                 TitleKey = "tabs.legacyEmployeeLogs",
                 Icon = "clipboard-text-clock-outline",
-                // 移动端「员工操作日志」看老收银日志（替换原新 POS 审计页，新 POS 审计仍在 Web 后台），
-                // 与 Web /pos-admin/legacy-employee-logs 同一查看权限。
+                // 移动端「员工操作日志」：页内切换老收银 / 新收银，与 Web /pos-admin/operation-logs 同一组查看权限，任一即可见。
+                // 路由名沿用 legacy-employee-logs，旧版本 App 收到新菜单仍能打开。
                 // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
-                Permission = Permissions.LegacyEmployeeLogs.View,
+                AnyPermissions = new[] { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View },
                 Order = 57,
             },
             new()

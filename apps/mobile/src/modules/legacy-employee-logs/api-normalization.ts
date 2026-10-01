@@ -1,4 +1,5 @@
-import type { LegacyLogItem, LegacyLogReview } from "./types";
+import { posOperationTone, toLocalWallClock } from "./logic";
+import type { LegacyEmployeeSummary, LegacyLogItem, LegacyLogReview } from "./types";
 
 /** 接口响应归一化（纯函数，不依赖 apiClient，便于在 Node 下测试）。 */
 export type Raw = Record<string, unknown>;
@@ -40,12 +41,86 @@ export function normalizeLegacyLogItem(r: Raw): LegacyLogItem {
     storeCode: str(r.storeCode),
     lastUploadTime: str(r.lastUploadTime) ?? "",
     isDanger: r.isDanger === true,
-    flags: arr(r.flags, (flag) => ({
-      ruleCode: str(flag.ruleCode) ?? "",
-      evidence: (flag.evidence && typeof flag.evidence === "object" ? flag.evidence : {}) as Record<string, string>,
-      detectedAtUtc: str(flag.detectedAtUtc) ?? "",
-    })).filter((flag) => flag.ruleCode),
+    flags: normalizeFlags(r.flags),
     review: normalizeLegacyLogReview(r.review),
     amountImpact: typeof r.amountImpact === "number" ? r.amountImpact : null,
+  };
+}
+
+const optionalNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+
+function normalizeFlags(value: unknown) {
+  return arr(value, (flag) => ({
+    ruleCode: str(flag.ruleCode) ?? "",
+    evidence: (flag.evidence && typeof flag.evidence === "object" ? flag.evidence : {}) as Record<string, string>,
+    detectedAtUtc: str(flag.detectedAtUtc) ?? "",
+  })).filter((flag) => flag.ruleCode);
+}
+
+/**
+ * 新收银审计事件归一成老收银列表条目的形状，列表、详情、核查共用同一套页面：
+ * 编号 = eventId，员工 = 收银员，操作 = 本地化的事件名称（由调用方传入翻译），时间按设备本地时区转墙钟。
+ */
+export function normalizePosLogItem(r: Raw, operationLabel: (operationType: string) => string): LegacyLogItem {
+  const operationType = str(r.operationType) ?? "";
+  const label = operationType ? operationLabel(operationType) : null;
+  const product = str(r.primaryProduct);
+  const productCount = num(r.productCount);
+  const title = product ? (productCount > 1 ? `${product} +${productCount - 1}` : product) : label;
+  const beforeActual = optionalNumber(r.beforeActual);
+  const afterActual = optionalNumber(r.afterActual);
+  const paymentAmount = optionalNumber(r.paymentAmount);
+  // 时间线里每条一行摘要：金额变化或付款金额，有原因代码时附上。
+  const amountText = beforeActual !== null && afterActual !== null && beforeActual !== afterActual
+    ? `${beforeActual.toFixed(2)} → ${afterActual.toFixed(2)}`
+    : paymentAmount !== null ? paymentAmount.toFixed(2) : null;
+  const detail = [title !== label ? title : null, amountText, str(r.reasonCode)].filter(Boolean).join(" · ");
+  return {
+    id: str(r.eventId) ?? "",
+    source: "pos",
+    tone: posOperationTone(operationType),
+    title,
+    employeeId: str(r.cashierId),
+    employeeName: str(r.cashierName) ?? str(r.cashierId),
+    operation: label,
+    operationDetail: detail || null,
+    operationTime: toLocalWallClock(str(r.occurredAtUtc)),
+    deviceCode: str(r.deviceCode),
+    storeCode: str(r.storeCode),
+    lastUploadTime: toLocalWallClock(str(r.receivedAtUtc)),
+    isDanger: r.isDanger === true,
+    flags: normalizeFlags(r.flags),
+    review: normalizeLegacyLogReview(r.review),
+    amountImpact: optionalNumber(r.amountImpact),
+    pos: {
+      operationType,
+      outcome: str(r.outcome) ?? "",
+      reasonCode: str(r.reasonCode),
+      paymentMethod: str(r.paymentMethod),
+      paymentAmount,
+      beforeActual,
+      afterActual,
+      orderGuid: str(r.orderGuid),
+      deviceSystem: str(r.deviceSystem),
+      isEmergencyOverride: r.isEmergencyOverride === true,
+      isOfflineCached: r.isOfflineCached === true,
+      safeMessage: str(r.safeMessage),
+    },
+  };
+}
+
+/** 新收银按收银员汇总的一行转成员工汇总形状。 */
+export function normalizePosEmployeeSummary(row: Raw): LegacyEmployeeSummary {
+  return {
+    employeeId: str(row.cashierId),
+    employeeName: str(row.cashierName) ?? str(row.cashierId),
+    storeCodes: strings(row.storeCodes),
+    deviceCodes: strings(row.deviceCodes),
+    total: num(row.total),
+    dangerCount: num(row.dangerCount),
+    abnormalCount: num(row.abnormalCount),
+    pendingReview: num(row.pendingReview),
+    abnormalByRule: arr(row.abnormalByRule, (rule) => ({ ruleCode: str(rule.ruleCode) ?? "", count: num(rule.count) })),
+    amountImpact: num(row.amountImpact),
   };
 }

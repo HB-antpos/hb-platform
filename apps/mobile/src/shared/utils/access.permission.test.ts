@@ -42,7 +42,17 @@ assertEqual(
 assertEqual(
   buildAccess(createUser([PERMISSIONS.PosTerminal.AuditView])).canViewLegacyEmployeeLogs,
   false,
-  "new POS audit permission alone no longer opens the mobile employee operation logs"
+  "new POS audit permission does not unlock the legacy POS source"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.PosTerminal.AuditView])).canViewPosOperationAudits,
+  true,
+  "new POS audit permission unlocks the new POS source of the employee operation logs"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.LegacyEmployeeLogs.View])).canViewPosOperationAudits,
+  false,
+  "legacy log permission does not unlock the new POS source"
 );
 assertEqual(
   buildAccess(createUser(["PosTerminal.Audit.View"])).hasPermission(PERMISSIONS.PosTerminal.AuditView),

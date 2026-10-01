@@ -107,7 +107,7 @@
       "contextFailed": "前后操作加载失败",
       "onlyEmployeeDay": "只看该员工当天操作"
     },
-    "loadFailed": "老系统操作日志加载失败",
+    "loadFailed": "老收银操作日志加载失败",
     "retry": "重试",
     "loadStoresFailed": "分店列表加载失败",
     "weekdays": [
@@ -123,18 +123,21 @@
       "all": {
         "title": "全部操作",
         "hint": "按类别浏览：商品、价格折扣、删除、结账支付、退货、钱箱与身份",
-        "scope": "期间 {{people}} 人 · {{devices}} 台设备"
+        "scope": "期间 {{people}} 人 · {{devices}} 台设备",
+        "hintPos": "新收银（WPF / 手持 / iPad）上传的全部操作"
       },
       "danger": {
         "title": "危险操作",
         "hint": "按操作类型：删除、改价、改折扣、开钱箱、退货——直接影响收款或现金",
-        "share": "占 {{percent}}%"
+        "share": "占 {{percent}}%",
+        "hintPos": "删除、改价、折扣、手动开钱箱、退款作废、主管覆盖与系统操作"
       },
       "abnormal": {
         "title": "异常操作",
         "hint": "按行为规则：开钱箱无交易、结账后删除、大额折扣、频繁删除、重复重打印、非营业时间",
         "people": "涉及 {{count}} 人",
-        "pending": "待核查 {{count}}"
+        "pending": "待核查 {{count}}",
+        "hintPos": "按行为规则：开钱箱无交易、结账后删除、大额折扣、频繁删除、重复重打印、非营业时间、紧急覆盖"
       },
       "unit": "条",
       "byCategory": "按类别",
@@ -174,6 +177,10 @@
       "offHours": {
         "label": "非营业时间",
         "desc": "营业时间（07:00–22:00）之外的操作，每台设备每段只标第一条。"
+      },
+      "emergencyOverride": {
+        "label": "紧急覆盖",
+        "desc": "新收银在紧急覆盖（离线或权限受阻时的应急放行）下发生的操作，每条都需要核查。"
       }
     },
     "reviewStatuses": {
@@ -197,7 +204,12 @@
       "burstDelete": "{{from}}–{{to}} 共删除 {{count}} 次，合计 {{amount}}（阈值 {{threshold}} 次）",
       "repeatReprint": "订单 {{order}} 当天重打印 {{count}} 次，第 1 次在 {{first}}",
       "offHoursBeforeOpen": "开门前共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}",
-      "offHoursAfterClose": "打烊后共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}"
+      "offHoursAfterClose": "打烊后共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}",
+      "deleteAfterTender": "{{at}} 开始收款后 {{seconds}} 秒删除，金额 {{amount}}",
+      "discountAmount": "让利 {{amount}}",
+      "repeatReprintDay": "同一设备当天重打印 {{count}} 次，第 1 次在 {{first}}",
+      "emergencyOverride": "紧急覆盖下的操作（结果：{{outcome}}）",
+      "reason": "原因 {{reason}}"
     },
     "badges": {
       "danger": "危险",
@@ -223,7 +235,8 @@
       "view": "查看明细",
       "footnote": "金额让利 = 删除商品、改价、整单折扣、无小票退货带来的应收减少合计；口径与上方分店、时间、设备条件一致。",
       "loadFailed": "员工汇总加载失败",
-      "empty": "该范围内没有员工操作"
+      "empty": "该范围内没有员工操作",
+      "footnotePos": "金额让利 = 删除、清空、改价、折扣与退款带来的应收减少合计（只计成功的操作）；口径与上方分店、时间、设备、关键字条件一致。"
     },
     "review": {
       "title": "核查",
@@ -243,6 +256,47 @@
     },
     "abnormalTitle": "异常依据",
     "dangerOnly": "危险操作：直接改变应收金额或现金，未命中异常规则。",
-    "contextSameDevice": "同设备 ±{{minutes}} 分钟"
+    "contextSameDevice": "同设备 ±{{minutes}} 分钟",
+    "rulesPos": {
+      "noSaleDrawer": "手动开钱箱（不关联订单）前后 2 分钟内，同一设备没有完成销售或退款。",
+      "deleteAfterCheckout": "新收银以开始收款为「结账」：收款开始后、销售完成前删除商品、清空购物车或减少数量，且应收减少 ≥ 10。",
+      "bigDiscount": "单品或整单折扣 ≥ 50%，或改价降幅 ≥ 50%，且让利 ≥ 10（新收银常用 50% 快捷折扣，小额不算）。",
+      "burstDelete": "同一收银员 10 分钟内删除商品 ≥ 8 次，每段只标一条。",
+      "repeatReprint": "同一张小票重打印 ≥ 3 次（按同设备上一笔销售归组），标第 3 次。",
+      "offHours": "营业时间（门店本地 07:00–22:00）之外的操作，每台设备每段只标第一条。",
+      "emergencyOverride": "新收银在紧急覆盖（离线或权限受阻时的应急放行）下发生的操作，每条都需要核查。"
+    },
+    "dangerGroupsPos": {
+      "delete": "删除 / 清空",
+      "drawer": "手动开钱箱",
+      "price": "改价",
+      "discount": "折扣",
+      "refund": "退款 / 作废",
+      "override": "主管 / 权限覆盖",
+      "system": "系统操作"
+    },
+    "source": {
+      "title": "员工操作日志",
+      "legacy": "老收银",
+      "pos": "新收银",
+      "switchLabel": "数据来源",
+      "legacySubtitle": "旧版收银系统上传的员工操作记录（门店本地时间）。",
+      "posSubtitle": "新收银（WPF / 手持 / iPad）的操作审计；时间按浏览器本地时区显示。"
+    },
+    "pos": {
+      "allScope": "结果 · 成功 {{succeeded}} · 拒绝 {{denied}} · 失败 {{failed}}",
+      "onlyCashier": "只看 {{name}}",
+      "operationTypesPlaceholder": "全部事件，可多选",
+      "storesPlaceholder": "全部可查看分店",
+      "riskColumn": "风险",
+      "amountImpact": "应收减少",
+      "contextTitle": "前后操作",
+      "contextHint": "同设备 ±{{minutes}} 分钟",
+      "contextEmpty": "窗口内没有其他操作",
+      "contextFailed": "前后操作加载失败",
+      "contextTruncated": "窗口内操作过多，只显示前 {{count}} 条",
+      "onlyCashierDay": "只看该收银员当天操作",
+      "dangerOnly": "危险操作：直接改变应收金额、现金或收银环境，未命中异常规则。"
+    }
   }
 }

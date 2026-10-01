@@ -24,7 +24,7 @@ export const LegacyLogCard = memo(function LegacyLogCard({
   const amount = formatAmountImpact(item.amountImpact);
   const flag = item.flags[0];
   const short = flag ? shortFlagEvidence(flag) : null;
-  const title = productTitle(item.operationDetail) ?? item.operationDetail ?? item.operation ?? "-";
+  const title = item.title ?? productTitle(item.operationDetail) ?? item.operationDetail ?? item.operation ?? "-";
   return (
     <Pressable
       accessibilityRole="button"
@@ -34,9 +34,10 @@ export const LegacyLogCard = memo(function LegacyLogCard({
     >
       <View style={styles.row}>
         <Text style={[styles.time, LEGACY_UI.mono]}>{clockOf(item.operationTime)}</Text>
-        <OperationTag operation={item.operation} />
+        <OperationTag operation={item.operation} tone={item.tone} />
         {item.isDanger ? <DangerBadge label={t("badges.danger")} /> : null}
         <ReviewBadge item={item} reviewedLabel={t("badges.reviewed")} followUpLabel={t("badges.followUp")} />
+        {item.pos && item.pos.outcome !== "Succeeded" ? <Text style={styles.outcome}>{t(`outcomes.${item.pos.outcome}`, { defaultValue: item.pos.outcome })}</Text> : null}
         <View style={styles.spacer} />
         {amount ? <Text style={[styles.amount, LEGACY_UI.mono]}>{amount}</Text> : null}
       </View>
@@ -72,6 +73,7 @@ const styles = StyleSheet.create({
   time: { fontSize: 13, color: HB_COLORS.textPrimary },
   spacer: { flex: 1 },
   amount: { fontSize: 14, fontWeight: "700", color: RISK.danger },
+  outcome: { fontSize: 11, fontWeight: "600", color: "#A8071A" },
   title: { fontSize: 15, fontWeight: "500", color: HB_COLORS.textPrimary },
   meta: { fontSize: 12, color: HB_COLORS.textSecondary },
   abnormal: {

@@ -2,14 +2,18 @@ using System.Data.Common;
 using System.Diagnostics;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Services.Background;
+using BlazorApp.Api.Services.OperationAudits.Risk;
+using BlazorApp.Shared.Constants;
+using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Options;
 
 namespace BlazorApp.Api.Features.LegacyEmployeeLogs.Risk;
 
 /// <summary>
-/// 老收银操作日志异常扫描。常规轮每 15 分钟回看 6 小时；每天另跑一次深度轮，按天回看 7 天，
-/// 兜住上传滞后很久的日志与阈值调整。由分布式租约保证多实例下只有一个在扫；
-/// 配置总开关、计划任务总开关任一关闭，或风险表未迁移时直接跳过。
+/// 员工操作日志异常扫描：先扫老收银（POSM.EmployeeLogs，门店墙钟），再扫新收银操作审计（pos_operation_audit，UTC）。
+/// 常规轮每 15 分钟回看 6 小时；每天另跑一次深度轮，按天回看 7 天，兜住上传滞后很久的日志与阈值调整。
+/// 由分布式租约保证多实例下只有一个在扫；配置总开关、计划任务总开关任一关闭时直接跳过；
+/// 两套风险表各自独立判断是否已迁移，未迁移的那一套跳过、不影响另一套。
 /// </summary>
 public sealed class LegacyEmployeeLogRiskScanWorker(
     IServiceScopeFactory scopes,
@@ -30,6 +34,7 @@ public sealed class LegacyEmployeeLogRiskScanWorker(
     private static readonly TimeSpan WallClockUpperOffset = TimeSpan.FromHours(12);
 
     private bool _schemaMissingLogged;
+    private bool _posAuditSchemaMissingLogged;
     private DateTime? _lastDeepScanUtcDate;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -69,13 +74,20 @@ public sealed class LegacyEmployeeLogRiskScanWorker(
             return;
         }
         var connection = (DbConnection)posm.Ado.Connection;
-        if (!await LegacyEmployeeLogRiskScanner.SchemaReadyAsync(connection, stoppingToken))
+        var legacyReady = await LegacyEmployeeLogRiskScanner.SchemaReadyAsync(connection, stoppingToken);
+        if (!legacyReady && !_schemaMissingLogged)
         {
-            if (!_schemaMissingLogged)
-            {
-                logger.LogWarning("老收银异常标记表尚未迁移，扫描跳过；请先执行 --schema=migrate（POSM 迁移 20261001.001-legacy-employee-log-risk）");
-                _schemaMissingLogged = true;
-            }
+            logger.LogWarning("老收银异常标记表尚未迁移，扫描跳过；请先执行 --schema=migrate（POSM 迁移 20261001.001-legacy-employee-log-risk）");
+            _schemaMissingLogged = true;
+        }
+        var posAuditReady = settings.PosAuditEnabled && await PosOperationAuditRiskScanner.SchemaReadyAsync(connection, stoppingToken);
+        if (settings.PosAuditEnabled && !posAuditReady && !_posAuditSchemaMissingLogged)
+        {
+            logger.LogWarning("新收银异常标记表尚未迁移，扫描跳过；请先执行 --schema=migrate（POSM 迁移 20261002.001-pos-operation-audit-risk）");
+            _posAuditSchemaMissingLogged = true;
+        }
+        if (!legacyReady && !posAuditReady)
+        {
             return;
         }
 
@@ -90,46 +102,159 @@ public sealed class LegacyEmployeeLogRiskScanWorker(
         var success = false;
         try
         {
-            var stores = await LegacyEmployeeLogRiskScanner.GetStoreCodesAsync(connection, stoppingToken);
             var windows = BuildWindows(nowUtc, settings, _lastDeepScanUtcDate, out var deep);
-            var total = new LegacyRiskScanResult(0, 0, 0, 0, 0);
-            var elapsed = Stopwatch.StartNew();
-            foreach (var storeCode in stores)
+            if (legacyReady)
             {
-                await leases.EnsureActiveAsync(LeaseTaskType, LeaseScope, leaseToken, LeaseDuration, "老收银异常扫描");
-                foreach (var (from, to) in windows)
-                {
-                    stoppingToken.ThrowIfCancellationRequested();
-                    try
-                    {
-                        var result = await LegacyEmployeeLogRiskScanner.ScanAsync(connection, storeCode, from, to, settings, DateTime.UtcNow, stoppingToken);
-                        total = new LegacyRiskScanResult(
-                            total.Inserted + result.Inserted,
-                            total.Updated + result.Updated,
-                            total.Retracted + result.Retracted,
-                            total.ImpactsWritten + result.ImpactsWritten,
-                            total.RowsRead + result.RowsRead);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        // 单店单窗口失败不影响其他门店，下一轮会重新覆盖这段时间。
-                        logger.LogWarning(ex, "老收银异常扫描失败: Store={StoreCode}, From={From:yyyy-MM-dd HH:mm}, To={To:yyyy-MM-dd HH:mm}", storeCode, from, to);
-                    }
-                }
+                await ScanLegacyAsync(connection, leases, leaseToken, windows, deep, settings, stoppingToken);
+            }
+            if (posAuditReady)
+            {
+                var timeZones = await LoadStoreTimeZonesAsync(services, stoppingToken);
+                await ScanPosAuditAsync(connection, leases, leaseToken, BuildUtcWindows(nowUtc, settings, deep), deep, timeZones, settings, stoppingToken);
             }
             if (deep)
             {
                 _lastDeepScanUtcDate = nowUtc.Date;
             }
-            logger.LogInformation(
-                "老收银异常扫描完成: Mode={Mode}, Stores={Stores}, Rows={Rows}, Inserted={Inserted}, Updated={Updated}, Retracted={Retracted}, Impacts={Impacts}, ElapsedMs={ElapsedMs}",
-                deep ? "deep" : "quick", stores.Count, total.RowsRead, total.Inserted, total.Updated, total.Retracted, total.ImpactsWritten, elapsed.ElapsedMilliseconds);
             success = true;
         }
         finally
         {
             await leases.CompleteAsync(LeaseTaskType, LeaseScope, leaseToken, success);
         }
+    }
+
+    private async Task ScanLegacyAsync(
+        DbConnection connection,
+        ScheduledTaskLeaseService leases,
+        string leaseToken,
+        List<(DateTime From, DateTime To)> windows,
+        bool deep,
+        LegacyEmployeeLogRiskOptions settings,
+        CancellationToken stoppingToken
+    )
+    {
+        var stores = await LegacyEmployeeLogRiskScanner.GetStoreCodesAsync(connection, stoppingToken);
+        var total = new LegacyRiskScanResult(0, 0, 0, 0, 0);
+        var elapsed = Stopwatch.StartNew();
+        foreach (var storeCode in stores)
+        {
+            await leases.EnsureActiveAsync(LeaseTaskType, LeaseScope, leaseToken, LeaseDuration, "老收银异常扫描");
+            foreach (var (from, to) in windows)
+            {
+                stoppingToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var result = await LegacyEmployeeLogRiskScanner.ScanAsync(connection, storeCode, from, to, settings, DateTime.UtcNow, stoppingToken);
+                    total = new LegacyRiskScanResult(
+                        total.Inserted + result.Inserted,
+                        total.Updated + result.Updated,
+                        total.Retracted + result.Retracted,
+                        total.ImpactsWritten + result.ImpactsWritten,
+                        total.RowsRead + result.RowsRead);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // 单店单窗口失败不影响其他门店，下一轮会重新覆盖这段时间。
+                    logger.LogWarning(ex, "老收银异常扫描失败: Store={StoreCode}, From={From:yyyy-MM-dd HH:mm}, To={To:yyyy-MM-dd HH:mm}", storeCode, from, to);
+                }
+            }
+        }
+        logger.LogInformation(
+            "老收银异常扫描完成: Mode={Mode}, Stores={Stores}, Rows={Rows}, Inserted={Inserted}, Updated={Updated}, Retracted={Retracted}, Impacts={Impacts}, ElapsedMs={ElapsedMs}",
+            deep ? "deep" : "quick", stores.Count, total.RowsRead, total.Inserted, total.Updated, total.Retracted, total.ImpactsWritten, elapsed.ElapsedMilliseconds);
+    }
+
+    private async Task ScanPosAuditAsync(
+        DbConnection connection,
+        ScheduledTaskLeaseService leases,
+        string leaseToken,
+        List<(DateTime From, DateTime To)> windows,
+        bool deep,
+        IReadOnlyDictionary<string, string?> timeZones,
+        LegacyEmployeeLogRiskOptions settings,
+        CancellationToken stoppingToken
+    )
+    {
+        var stores = await PosOperationAuditRiskScanner.GetStoreCodesAsync(connection, windows.Min(window => window.From), stoppingToken);
+        var total = new PosAuditRiskScanResult(0, 0, 0, 0);
+        var elapsed = Stopwatch.StartNew();
+        foreach (var storeCode in stores)
+        {
+            await leases.EnsureActiveAsync(LeaseTaskType, LeaseScope, leaseToken, LeaseDuration, "新收银异常扫描");
+            var timeZone = ResolveTimeZone(timeZones.GetValueOrDefault(storeCode));
+            foreach (var (from, to) in windows)
+            {
+                stoppingToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var result = await PosOperationAuditRiskScanner.ScanAsync(connection, storeCode, timeZone, from, to, settings, DateTime.UtcNow, stoppingToken);
+                    total = new PosAuditRiskScanResult(
+                        total.Inserted + result.Inserted,
+                        total.Updated + result.Updated,
+                        total.Retracted + result.Retracted,
+                        total.RowsRead + result.RowsRead);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "新收银异常扫描失败: Store={StoreCode}, FromUtc={From:yyyy-MM-dd HH:mm}, ToUtc={To:yyyy-MM-dd HH:mm}", storeCode, from, to);
+                }
+            }
+        }
+        logger.LogInformation(
+            "新收银异常扫描完成: Mode={Mode}, Stores={Stores}, Rows={Rows}, Inserted={Inserted}, Updated={Updated}, Retracted={Retracted}, ElapsedMs={ElapsedMs}",
+            deep ? "deep" : "quick", stores.Count, total.RowsRead, total.Inserted, total.Updated, total.Retracted, elapsed.ElapsedMilliseconds);
+    }
+
+    /// <summary>门店时区来自 HBweb dbo.Store.TimeZoneId；读不到时整轮按默认时区（悉尼）处理，不阻断扫描。</summary>
+    private async Task<IReadOnlyDictionary<string, string?>> LoadStoreTimeZonesAsync(IServiceProvider services, CancellationToken stoppingToken)
+    {
+        try
+        {
+            var rows = await services.GetRequiredService<SqlSugarContext>().Db.Queryable<Store>()
+                .Select(store => new { store.StoreCode, store.TimeZoneId })
+                .ToListAsync(stoppingToken);
+            return rows
+                .Where(row => !string.IsNullOrWhiteSpace(row.StoreCode))
+                .GroupBy(row => row.StoreCode.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().TimeZoneId, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "读取门店时区失败，新收银异常扫描按默认时区 {TimeZone} 处理", StoreTimeZonePolicy.Sydney);
+            return new Dictionary<string, string?>();
+        }
+    }
+
+    internal static TimeZoneInfo ResolveTimeZone(string? timeZoneId)
+    {
+        var id = StoreTimeZonePolicy.TryNormalize(timeZoneId, out var normalized) && normalized != null
+            ? normalized
+            : StoreTimeZonePolicy.Sydney;
+        return TimeZoneInfo.FindSystemTimeZoneById(id);
+    }
+
+    /// <summary>
+    /// 新收银的评估窗口（UTC）：常规轮回看 QuickLookbackHours，上界留 5 分钟余量给设备时钟偏差；
+    /// 深度轮按 UTC 日切成 DeepLookbackDays+1 个整天窗口。
+    /// </summary>
+    internal static List<(DateTime From, DateTime To)> BuildUtcWindows(DateTime nowUtc, LegacyEmployeeLogRiskOptions settings, bool deep)
+    {
+        var upper = nowUtc.AddMinutes(5);
+        if (!deep)
+        {
+            var lookback = TimeSpan.FromHours(Math.Clamp(settings.QuickLookbackHours, 1, 48));
+            return [(nowUtc - lookback, upper)];
+        }
+        var today = nowUtc.Date;
+        var days = Math.Clamp(settings.DeepLookbackDays, 1, 31);
+        var windows = new List<(DateTime, DateTime)>();
+        for (var day = today.AddDays(-days); day <= today; day = day.AddDays(1))
+        {
+            var end = day.AddDays(1);
+            windows.Add((day, end < upper ? end : upper));
+        }
+        return windows;
     }
 
     /// <summary>

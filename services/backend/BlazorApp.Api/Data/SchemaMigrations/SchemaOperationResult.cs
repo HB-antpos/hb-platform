@@ -30,6 +30,8 @@ internal static class SchemaDiagnosticCodes
         "SCHEMA_LOCAL_SUPPLIER_CATEGORY_INCOMPATIBLE";
     public const string LegacyEmployeeLogRiskIncompatible =
         "SCHEMA_LEGACY_EMPLOYEE_LOG_RISK_INCOMPATIBLE";
+    public const string PosOperationAuditRiskIncompatible =
+        "SCHEMA_POS_OPERATION_AUDIT_RISK_INCOMPATIBLE";
     public const string ProviderUnsupported = "SCHEMA_PROVIDER_UNSUPPORTED";
     public const string DatabaseFailure = "SCHEMA_DATABASE_FAILURE";
     public const string MigrationFailure = "SCHEMA_MIGRATION_FAILURE";

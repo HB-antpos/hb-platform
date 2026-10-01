@@ -135,6 +135,28 @@ export const LEGACY_RULE_CODES: LegacyRuleCode[] = [
   'offHours',
 ]
 
+/**
+ * 新收银的异常规则：编号与老收银相同，另加「紧急覆盖」；
+ * 与后端 PosOperationAuditRiskCatalog.AllRules 一致（契约测试比对）。
+ */
+export const POS_RULE_CODES: string[] = [...LEGACY_RULE_CODES, 'emergencyOverride']
+
+/**
+ * 新收银「危险」入口下的操作细分（后端再按危险口径过滤：开钱箱只算不关联订单的手动开钱箱）。
+ * 并集与后端 PosOperationAuditRiskCatalog.DangerOperations + CASH_DRAWER_OPEN 一致（契约测试比对）。
+ */
+export type PosDangerGroupKey = 'delete' | 'drawer' | 'price' | 'discount' | 'refund' | 'override' | 'system'
+
+export const POS_DANGER_GROUP_OPERATIONS: Record<PosDangerGroupKey, string[]> = {
+  delete: ['CART_ITEM_REMOVE', 'CART_CLEAR'],
+  drawer: ['CASH_DRAWER_OPEN'],
+  price: ['CART_ITEM_PRICE_CHANGE'],
+  discount: ['CART_LINE_DISCOUNT_CHANGE', 'CART_ORDER_DISCOUNT_CHANGE'],
+  refund: ['RETURN_REFUND_COMPLETE', 'SALE_VOID', 'ORDER_CANCEL'],
+  override: ['CARD_PAYMENT_SUPERVISOR_RESOLUTION', 'PERMISSION_OVERRIDE'],
+  system: ['API_SERVER_CHANGE', 'DEVICE_REREGISTER', 'REMOTE_MAINTENANCE_INSTALL', 'CATALOG_RESET', 'TEST_SALES_DATA_RESET'],
+}
+
 export const LEGACY_REVIEW_STATUSES: LegacyReviewStatus[] = ['all', 'pending', 'reviewed', 'followUp']
 
 export interface LegacyRiskFilter {
@@ -371,11 +393,16 @@ export function describeFlagEvidence(flag: Pick<LegacyEmployeeLogFlag, 'ruleCode
       parts.push({ key: 'noSaleWindow', params: { seconds: e.windowSeconds ?? '120' } })
       if (e.previousCheckoutAt) parts.push({ key: 'noSalePrevious', params: { at: e.previousCheckoutAt, minutes: e.minutesSincePreviousCheckout ?? '-' } })
       if (e.nextCheckoutAt) parts.push({ key: 'noSaleNext', params: { at: e.nextCheckoutAt } })
-      parts.push({ key: e.identityConfirmed === 'true' ? 'identityConfirmed' : 'identityMissing' })
+      // 身份确认只有老收银记录；新收银没有该字段时不显示，免得误报「没有身份确认」。
+      if (e.identityConfirmed !== undefined) parts.push({ key: e.identityConfirmed === 'true' ? 'identityConfirmed' : 'identityMissing' })
       break
     case 'deleteAfterCheckout':
-      parts.push({ key: 'deleteAfterCheckout', params: { at: e.checkoutAt ?? '-', seconds: e.secondsAfterCheckout ?? '-', amount: e.deletedAmount ?? '-' } })
-      if (e.product) parts.push({ key: 'product', params: { product: e.product, quantity: e.quantity ?? '-' } })
+      // 新收银以「开始收款」为锚点（anchor = tender），老收银以「结账」为锚点。
+      parts.push({
+        key: e.anchor === 'tender' ? 'deleteAfterTender' : 'deleteAfterCheckout',
+        params: { at: e.checkoutAt ?? '-', seconds: e.secondsAfterCheckout ?? '-', amount: e.deletedAmount ?? '-' },
+      })
+      if (e.product) parts.push(e.quantity ? { key: 'product', params: { product: e.product, quantity: e.quantity } } : { key: 'productOnly', params: { product: e.product } })
       break
     case 'bigDiscount':
       if (e.kind === 'cart') {
@@ -386,18 +413,25 @@ export function describeFlagEvidence(flag: Pick<LegacyEmployeeLogFlag, 'ruleCode
         parts.push({ key: 'discountItem', params: { percent: e.percent ?? '-', previous: e.previousPercent ?? '0' } })
       }
       if (e.product && e.kind !== 'cart') parts.push({ key: 'productOnly', params: { product: e.product } })
+      if (e.amount) parts.push({ key: 'discountAmount', params: { amount: e.amount } })
       break
     case 'burstDelete':
       parts.push({ key: 'burstDelete', params: { from: e.firstAt ?? '-', to: e.lastAt ?? '-', count: e.count ?? '-', amount: e.totalAmount ?? '-', threshold: e.threshold ?? '-' } })
       break
     case 'repeatReprint':
-      parts.push({ key: 'repeatReprint', params: { order: shortOrder(e.orderId), count: e.count ?? '-', first: e.firstAt ?? '-' } })
+      parts.push(e.orderId || !e.count
+        ? { key: 'repeatReprint', params: { order: shortOrder(e.orderId), count: e.count ?? '-', first: e.firstAt ?? '-' } }
+        : { key: 'repeatReprintDay', params: { count: e.count, first: e.firstAt ?? '-' } })
       break
     case 'offHours':
       parts.push({
         key: e.segment === 'beforeOpen' ? 'offHoursBeforeOpen' : 'offHoursAfterClose',
         params: { count: e.count ?? '-', from: e.firstAt ?? '-', to: e.lastAt ?? '-', open: e.open ?? '07:00', close: e.close ?? '22:00' },
       })
+      break
+    case 'emergencyOverride':
+      parts.push({ key: 'emergencyOverride', params: { outcome: e.outcome ?? '-' } })
+      if (e.reason) parts.push({ key: 'reason', params: { reason: e.reason } })
       break
     default:
       break
@@ -411,9 +445,10 @@ function shortOrder(order?: string) {
 
 /** 规则计数按固定顺序排列，未知规则补在最后。 */
 export function orderRuleCounts<T extends { ruleCode: string }>(rows: readonly T[]) {
+  // 新收银规则是老收银规则加一条，按它排序对两边都适用。
   const index = (code: string) => {
-    const position = LEGACY_RULE_CODES.indexOf(code as LegacyRuleCode)
-    return position < 0 ? LEGACY_RULE_CODES.length : position
+    const position = POS_RULE_CODES.indexOf(code)
+    return position < 0 ? POS_RULE_CODES.length : position
   }
   return [...rows].sort((a, b) => index(a.ruleCode) - index(b.ruleCode))
 }

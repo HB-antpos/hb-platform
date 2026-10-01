@@ -417,8 +417,8 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     routeName: 'legacy-employee-logs',
     titleKey: 'tabs.legacyEmployeeLogs',
     icon: 'clipboard-text-clock-outline',
-    // 与后端 FullAppMenu 一致：移动端「员工操作日志」看老收银日志，与 Web /pos-admin/legacy-employee-logs 同一查看权限。
-    permissionCodes: [P.LegacyEmployeeLogs.View],
+    // 与后端 FullAppMenu 一致：移动端「员工操作日志」页内切换老收银 / 新收银，任一查看权限即可见。
+    permissionCodes: [P.LegacyEmployeeLogs.View, P.PosTerminal.AuditView],
     order: 57,
     ...ROUTE_LABELS['legacy-employee-logs'],
   },
