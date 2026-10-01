@@ -1022,18 +1022,25 @@ public sealed class MainViewModelScannerTests
                 .GetField("_cardSession", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(payment));
         var activePayment = cardSession.BeginCardPayment();
+        var paymentCallbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var releaseCallback = new ManualResetEventSlim(false);
         using var registration = activePayment.Token.Register(() =>
         {
+            paymentCallbackStarted.TrySetResult();
             releaseCallback.Wait();
             throw fatal;
         });
-        var coordinator = new AppShutdownCoordinator(totalBudget: TimeSpan.FromSeconds(1));
+        // 中文注释：原先用 1 秒墙钟总预算，20ms 步骤超时的续体要排线程池；单进程全量运行时线程池被前序测试占满，
+        // 续体被拖到约 1 秒后才执行，总预算先耗尽、下一步被跳过而误报。这里协调器改用虚拟时钟：
+        // 总预算在虚拟时间里不会耗尽，步骤超时由测试在付款回调确实阻塞后显式触发；墙钟只作防挂死保险。
+        var stepTimeout = TimeSpan.FromMilliseconds(20);
+        var timeProvider = new StepTimeoutTimeProvider(stepTimeout);
+        var coordinator = new AppShutdownCoordinator(timeProvider, AsyncTestWaitSupport.DefaultTimeout);
         var nextStepCalled = false;
         coordinator.RegisterStep(
             "runtime-offline",
             100,
-            TimeSpan.FromMilliseconds(20),
+            stepTimeout,
             token => viewModel.ReportOfflineForShutdownAsync(token));
         coordinator.RegisterStep(
             "release-payment-callback",
@@ -1048,9 +1055,16 @@ public sealed class MainViewModelScannerTests
 
         try
         {
-            var thrown = await Record.ExceptionAsync(
-                () => Task.Run(() =>
-                    App.WaitForShutdownPreparation(coordinator, TimeSpan.FromSeconds(1))));
+            // 生产中 OnExit 在 UI 线程同步等待；这里用独立线程，避免测试自身再占一个线程池线程。
+            var exitWait = Task.Factory.StartNew(
+                () => App.WaitForShutdownPreparation(coordinator, AsyncTestWaitSupport.DefaultTimeout),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+            await paymentCallbackStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            await timeProvider.FireStepTimeoutAsync();
+
+            var thrown = await Record.ExceptionAsync(() => exitWait);
 
             Assert.Same(fatal, thrown);
             Assert.True(nextStepCalled);
@@ -7438,6 +7452,64 @@ public sealed class MainViewModelScannerTests
                 CardProcessorKind.Linkly,
                 Guid.Parse("40000000-0000-0000-0000-000000000199"));
         return InvokeHandleCardRecoveryCenterResultAsync(viewModel, selectedKey, result);
+    }
+
+    /// <summary>
+    /// 退出协调器专用虚拟时钟：时间不前进（总预算永不耗尽），只记下指定时长的步骤超时计时器，
+    /// 由测试显式触发；其余计时器（后续步骤超时、迟到异常观察预算）永不触发。
+    /// </summary>
+    private sealed class StepTimeoutTimeProvider(TimeSpan stepTimeout) : TimeProvider
+    {
+        private readonly DateTimeOffset _utcNow = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
+        private readonly TaskCompletionSource<ManualTimer> _stepTimeoutArmed =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            var timer = new ManualTimer(callback, state);
+            if (dueTime == stepTimeout)
+            {
+                _stepTimeoutArmed.TrySetResult(timer);
+            }
+
+            return timer;
+        }
+
+        /// <summary>等协调器挂上步骤超时计时器后再触发，避免先推进、后建计时器导致永不超时。</summary>
+        public async Task FireStepTimeoutAsync()
+        {
+            var timer = await _stepTimeoutArmed.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            timer.Fire();
+        }
+
+        private sealed class ManualTimer(TimerCallback callback, object? state) : ITimer
+        {
+            private int _disposed;
+
+            public void Fire()
+            {
+                if (Volatile.Read(ref _disposed) == 0)
+                {
+                    callback(state);
+                }
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+            public void Dispose() => Volatile.Write(ref _disposed, 1);
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
     }
 
     private sealed class RecordingOperationAuditLogger : IOperationAuditLogger
