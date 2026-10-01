@@ -72,14 +72,17 @@ CENTER_LOG_HBWEB_RV_KEY_SHA256=<sha256-lower-hex>
 CENTER_LOG_HBPOS_API_KEY_SHA256=<sha256-lower-hex>
 CENTER_LOG_HBPOS_IPAD_KEY_SHA256=<sha256-lower-hex>
 CENTER_LOG_HBPOS_HANDHELD_KEY_SHA256=<sha256-lower-hex>
+CENTER_LOG_HBPOS_WIN_KEY_SHA256=<sha256-lower-hex>
 ```
+
+WPF 客户端的明文写入 Key 存在 GitHub 仓库 Secret `HBPOS_WIN_CENTER_LOG_KEY`，只在 `wpf-inno-smoke-build.yml` 构建安装包时以环境变量 `HbposCenterLogApiKey` 注入，写进主程序集元数据（与上传地址 `https://hotbargain.vip/api/system/logs/ingest` 一起）作为客户端默认配置；本地与 PR 构建没有该值，客户端不上传。缺少该 Secret 时工作流直接失败。门店电脑仍可用环境变量 `HBPOS_LOG_CENTER_ENABLED=false` 关闭上传，或用 `HBPOS_LOG_CENTER_API_KEY` / `HBPOS_LOG_CENTER_INGEST_URL` 覆盖。
 
 项目清单和默认保留期：
 
 - `HBBBackend`：内部项目，启用，7 天，不配置外部写入摘要。
 - `hbweb_rv`：Web 前端，启用，7 天。
 - `HbwebExpo`：移动端，禁用，7 天。
-- `hbpos_win`：WPF 客户端，禁用，30 天。
+- `hbpos_win`：WPF 客户端，启用，30 天，`sourceType=POS`。
 - `hbpos_api`：WPF 收银后端，启用，7 天。
 - `hbpos_ipad`：iPad 客户端，启用，30 天，`sourceType=POS`。
 - `hbpos_handheld`：手持收银客户端，启用，30 天，`sourceType=POS`。

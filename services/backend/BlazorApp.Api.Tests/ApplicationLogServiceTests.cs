@@ -85,7 +85,7 @@ public class ApplicationLogServiceTests : IDisposable
             project => Assert.Equal(("HBBBackend", "Web/移动端后端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbweb_rv", "Web前端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("HbwebExpo", "移动端", false, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
-            project => Assert.Equal(("hbpos_win", "WPF客户端", false, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
+            project => Assert.Equal(("hbpos_win", "WPF客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbpos_api", "WPF收银后端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbpos_ipad", "iPad客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbpos_handheld", "手持收银客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays))

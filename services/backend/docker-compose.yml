@@ -80,8 +80,10 @@ services:
       - ApplicationLogging__Projects__2__RetentionDays=7
       - ApplicationLogging__Projects__3__ProjectCode=hbpos_win
       - ApplicationLogging__Projects__3__DisplayName=WPF客户端
-      - ApplicationLogging__Projects__3__Enabled=false
+      # WPF 收银使用独立写入 Key（安装包构建时由仓库 Secret 写入），泄露时可单独吊销，不影响手持与 iPad。
+      - ApplicationLogging__Projects__3__Enabled=true
       - ApplicationLogging__Projects__3__RetentionDays=30
+      - ApplicationLogging__Projects__3__ApiKeyHash=${CENTER_LOG_HBPOS_WIN_KEY_SHA256:?required}
       - ApplicationLogging__Projects__4__ProjectCode=hbpos_api
       - ApplicationLogging__Projects__4__DisplayName=WPF收银后端
       - ApplicationLogging__Projects__4__Enabled=true

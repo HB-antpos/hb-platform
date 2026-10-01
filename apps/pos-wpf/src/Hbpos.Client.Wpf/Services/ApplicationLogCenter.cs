@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Configuration;
 
 namespace Hbpos.Client.Wpf.Services;
@@ -60,11 +61,25 @@ internal sealed record ApplicationLogOptions(
         return new ApplicationLogDefaults(ProjectCode, Environment, SourceType);
     }
 
-    public static ApplicationLogOptions FromConfiguration(IConfiguration configuration, Uri apiBaseAddress)
+    internal const string BuildApiKeyMetadataKey = "HbposCenterLogApiKey";
+    internal const string BuildIngestUrlMetadataKey = "HbposCenterLogIngestUrl";
+
+    public static ApplicationLogOptions FromConfiguration(IConfiguration configuration, Uri apiBaseAddress) =>
+        FromConfiguration(configuration, apiBaseAddress, ReadBuildDefaults(typeof(ApplicationLogOptions).Assembly));
+
+    /// <summary>
+    /// 读取顺序：环境变量 > 配置文件 > 安装包构建时写入程序集元数据的默认值。
+    /// 门店收银机没有配置文件也不设环境变量，正式安装包靠构建默认值上传；本地与测试构建没有默认值则不上传。
+    /// </summary>
+    internal static ApplicationLogOptions FromConfiguration(
+        IConfiguration configuration,
+        Uri apiBaseAddress,
+        IReadOnlyDictionary<string, string> buildDefaults)
     {
         _ = apiBaseAddress;
         var enabled = ReadBool(configuration, "CentralLogging:Enabled", "HBPOS_LOG_CENTER_ENABLED") ?? true;
-        var ingestUrl = ReadText(configuration, "CentralLogging:IngestUrl", "HBPOS_LOG_CENTER_INGEST_URL");
+        var ingestUrl = ReadText(configuration, "CentralLogging:IngestUrl", "HBPOS_LOG_CENTER_INGEST_URL")
+            ?? BuildDefault(buildDefaults, BuildIngestUrlMetadataKey);
         var projectCode = ReadText(configuration, "CentralLogging:ProjectCode", "HBPOS_LOG_CENTER_PROJECT_CODE") ?? "hbpos_win";
         var environment = ReadText(configuration, "CentralLogging:Environment", "HBPOS_LOG_CENTER_ENVIRONMENT") ??
             System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ??
@@ -77,7 +92,8 @@ internal sealed record ApplicationLogOptions(
 
         return new ApplicationLogOptions(
             enabled,
-            ReadText(configuration, "CentralLogging:ApiKey", "HBPOS_LOG_CENTER_API_KEY"),
+            ReadText(configuration, "CentralLogging:ApiKey", "HBPOS_LOG_CENTER_API_KEY")
+                ?? BuildDefault(buildDefaults, BuildApiKeyMetadataKey),
             projectCode,
             environment,
             sourceType,
@@ -98,6 +114,17 @@ internal sealed record ApplicationLogOptions(
         // 中心日志属于 BlazorApp.Api，禁止错误回退到本机 Hbpos.Api 相对地址。
         return null;
     }
+
+    internal static IReadOnlyDictionary<string, string> ReadBuildDefaults(Assembly assembly) =>
+        assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Where(attribute =>
+                (attribute.Key == BuildApiKeyMetadataKey || attribute.Key == BuildIngestUrlMetadataKey) &&
+                !string.IsNullOrWhiteSpace(attribute.Value))
+            .GroupBy(attribute => attribute.Key)
+            .ToDictionary(group => group.Key, group => group.Last().Value!.Trim());
+
+    private static string? BuildDefault(IReadOnlyDictionary<string, string> buildDefaults, string key) =>
+        buildDefaults.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
 
     private static string? ReadText(IConfiguration configuration, string configKey, string environmentKey)
     {
