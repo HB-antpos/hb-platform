@@ -76,6 +76,12 @@ public interface ICatalogDownloadFileStore
     /// <summary>已发布版本的身份与全量文件；未发布或文件不完整时返回 null。</summary>
     CatalogDownloadVersionInfo? FindVersion(string storeCode, string catalogVersion);
 
+    /// <summary>已发布版本的码冲突候选（与接口响应同形）；版本未发布或尚无该文件时返回 null。</summary>
+    CatalogCodeConflictsResponse? FindCodeConflicts(string storeCode, string catalogVersion);
+
+    /// <summary>版本已发布但还没有码冲突文件时补写（旧版本自愈）；版本未发布时不做任何事。</summary>
+    void EnsureCodeConflictsFile(CatalogIndexBuildResult target);
+
     /// <summary>
     /// 只用磁盘上两个版本的码号版本表与目标全量文件计算增量，不需要任何一个版本的内存索引；
     /// 目标版本必须已发布（见 <see cref="FindVersion"/>）。
@@ -110,6 +116,7 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
     private const string FullFileName = "full.ndjson.gz";
     private const string RowVersionFileName = "rowversions.ndjson.gz";
     private const string VersionManifestName = "version.json";
+    private const string CodeConflictsFileName = "code-conflicts.json.gz";
     private const string DeltaDirectoryName = "delta";
     private const string TempDirectoryPrefix = ".tmp-";
     private static readonly TimeSpan StaleTempDirectoryAge = TimeSpan.FromHours(1);
@@ -155,7 +162,7 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
                 return existing;
             }
 
-            return await Task.Run(() => PublishVersion(index), cancellationToken);
+            return await Task.Run(() => PublishVersion(target), cancellationToken);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -200,7 +207,7 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
             // 增量文件挂在目标版本目录下，目标版本必须先发布。
             if (FindFullFile(index.StoreCode, index.CatalogVersion) is null)
             {
-                await Task.Run(() => PublishVersion(index), cancellationToken);
+                await Task.Run(() => PublishVersion(target), cancellationToken);
             }
 
             return await Task.Run(() => PublishDelta(index, normalizedBase), cancellationToken);
@@ -259,6 +266,91 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
             : new CatalogDownloadVersionInfo(manifest.StoreCode, manifest.CatalogVersion, manifest.GeneratedAt, manifest.TotalCount, full);
     }
 
+    public CatalogCodeConflictsResponse? FindCodeConflicts(string storeCode, string catalogVersion)
+    {
+        var versionDirectory = GetVersionDirectory(storeCode, catalogVersion);
+        var manifest = ReadVersionManifest(versionDirectory);
+        if (manifest is null || !string.Equals(manifest.CatalogVersion, catalogVersion.Trim(), StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var path = Path.Combine(versionDirectory, CodeConflictsFileName);
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            using var input = File.OpenRead(path);
+            using var gzip = new GZipStream(input, CompressionMode.Decompress);
+            return JsonSerializer.Deserialize<CatalogCodeConflictsResponse>(gzip, JsonOptions);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or JsonException or UnauthorizedAccessException)
+        {
+            // 文件损坏时按“没有”处理，调用方回到索引路径重新计算。
+            Log($"code conflicts file unreadable store={storeCode} version={catalogVersion} error={exception.GetType().Name}");
+            return null;
+        }
+    }
+
+    public void EnsureCodeConflictsFile(CatalogIndexBuildResult target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        var index = target.CatalogIndex;
+        var versionDirectory = GetVersionDirectory(index.StoreCode, index.CatalogVersion);
+        var path = Path.Combine(versionDirectory, CodeConflictsFileName);
+        if (ReadVersionManifest(versionDirectory) is null || File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            WriteCodeConflictsFile(path, CreateCodeConflictsResponse(target));
+            Log($"code conflicts file backfilled store={index.StoreCode} version={index.CatalogVersion}");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // 补写失败不影响本次响应，下次请求仍走索引路径。
+            Log($"code conflicts backfill skipped store={index.StoreCode} error={exception.GetType().Name}");
+        }
+    }
+
+    /// <summary>码冲突接口的响应内容：磁盘与索引两条路径共用，保证逐字段一致。</summary>
+    internal static CatalogCodeConflictsResponse CreateCodeConflictsResponse(CatalogIndexBuildResult index)
+    {
+        var codeConflicts = index.CodeConflicts;
+        return new CatalogCodeConflictsResponse(
+            index.StoreCode,
+            index.GeneratedAt,
+            codeConflicts is not null,
+            codeConflicts is null
+                ? []
+                : codeConflicts.Select(CatalogSellableIndex.ToLookupItem).ToArray());
+    }
+
+    private static void WriteCodeConflictsFile(string path, CatalogCodeConflictsResponse response)
+    {
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var output = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024))
+            using (var gzip = new GZipStream(output, CompressionLevel.Optimal))
+            {
+                JsonSerializer.Serialize(gzip, response, JsonOptions);
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch
+        {
+            TryDeleteFile(tempPath);
+            throw;
+        }
+    }
+
     public async Task<CatalogDeltaFileResult> EnsureDeltaFileFromDiskAsync(
         string storeCode,
         string baseCatalogVersion,
@@ -312,8 +404,9 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
         }
     }
 
-    private CatalogDownloadFileInfo PublishVersion(CatalogSellableIndex index)
+    private CatalogDownloadFileInfo PublishVersion(CatalogIndexBuildResult target)
     {
+        var index = target.CatalogIndex;
         var storeDirectory = GetStoreDirectory(index.StoreCode);
         var versionDirectory = GetVersionDirectory(index.StoreCode, index.CatalogVersion);
         Directory.CreateDirectory(storeDirectory);
@@ -335,6 +428,7 @@ public sealed class CatalogDownloadFileStore : ICatalogDownloadFileStore
             WriteNdjsonGzip(
                 Path.Combine(tempDirectory, RowVersionFileName),
                 writeLine => WriteRowVersionLines(writeLine, index.Items));
+            WriteCodeConflictsFile(Path.Combine(tempDirectory, CodeConflictsFileName), CreateCodeConflictsResponse(target));
             WriteJsonFile(Path.Combine(tempDirectory, VersionManifestName), new VersionManifest(
                 index.StoreCode,
                 index.CatalogVersion,
