@@ -52,7 +52,9 @@
     "join": "Join",
     "emptyTitle": "No orders to pick",
     "emptyHint": "Orders show up here once a store submits them",
-    "unknownCode": "That isn't a picking list barcode"
+    "unknownCode": "That isn't a picking list barcode",
+    "filterMine": "Mine {{count}}",
+    "claimable": "Unclaimed"
   },
   "picking": {
     "subtitle": "{{store}} · {{count}} lines",
@@ -138,7 +140,22 @@
     "stockoutAutoCleared": "Picked again, out-of-stock mark cleared",
     "noteStockout": "Out · {{reason}} · {{name}}",
     "hintStockout": "Marked out of stock, {{count}} short · scan it if you find it",
-    "noLocationSearch": "No location · find by product"
+    "noLocationSearch": "No location · find by product",
+    "scopeMine": "Mine",
+    "slipClaimedNow": "Claimed segment {{no}}/{{count}}",
+    "slipMine": "This is your segment {{no}}/{{count}}",
+    "slipOther": "Segment {{no}} was claimed by {{name}}",
+    "slipOtherHint": "You can still help pick; picks are recorded under your name",
+    "slipLines": "{{lines}} items in this segment, now showing Mine",
+    "scopeHelp": "Help {{name}}",
+    "helpDoneTitle": "This segment is done",
+    "helpDoneHint_other": "{{count}} segments still open — lend a hand",
+    "helpDoneHint_one": "{{count}} segment still open — lend a hand",
+    "helpStarted": "Helping {{name}} · segment {{no}}",
+    "helpStartedHint": "Your scans are recorded under your name; the assignee stays the same",
+    "segmentSettled": "{{done}}/{{total}} items done",
+    "segmentHelp": "Help",
+    "segmentContinue": "Continue"
   },
   "minOrder": {
     "title": "Set min order qty",
@@ -186,7 +203,8 @@
     "pieces": "Pieces",
     "short": "Short",
     "over": "Over",
-    "lineCount": "{{count}} lines",
+    "lineCount_other": "{{count}} lines",
+    "lineCount_one": "{{count}} line",
     "pickersSummary": "{{summary}}",
     "variances": "Variances",
     "variancesHint": "Tap a line to go back",
@@ -205,7 +223,15 @@
     "stockoutGroup": "Out of stock · {{count}} short",
     "shortGroup": "Short · {{count}} short",
     "overGroup": "Over · {{count}} extra",
-    "stockoutMeta": "{{reason}} · {{name}}"
+    "stockoutMeta": "{{reason}} · {{name}}",
+    "segmentsTitle": "Segments",
+    "segmentClaimable": "Unclaimed",
+    "segmentLine": "{{done}}/{{total}} items picked",
+    "segmentStockout": "Out {{count}}",
+    "blockTitle_other": "{{count}} segments aren't finished — can't submit",
+    "blockTitle_one": "{{count}} segment isn't finished — can't submit",
+    "blockHint": "An item counts as done once it's picked or marked out of stock. If a segment truly can't be finished, ask a manager to clear or reassign it on the order page.",
+    "blockOk": "Got it"
   },
   "time": {
     "justNow": "just now",
@@ -268,6 +294,8 @@
     "CODE_NOT_FOUND": "No product matches that barcode",
     "INVALID_REQUEST": "Invalid request",
     "LINE_ALREADY_COMPLETE": "This line is fully picked, no need to mark it out of stock",
-    "generic": "Something went wrong. Please try again."
+    "SLIP_STALE": "This slip was reassigned or cancelled. Ask the warehouse manager for the newly printed slip.",
+    "generic": "Something went wrong. Please try again.",
+    "SEGMENTS_INCOMPLETE": "Some segments aren't finished, so the order can't be submitted"
   }
 }

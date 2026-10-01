@@ -35,6 +35,8 @@ internal sealed class SchemaMigrationCoordinator
         "20260929.001-warehouse-order-picking";
     internal const string WarehouseOrderPickStockoutMigrationId =
         "20260930.001-warehouse-order-pick-stockout";
+    internal const string WarehouseOrderPickAssignmentMigrationId =
+        "20260930.002-warehouse-order-pick-assignment";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -115,6 +117,11 @@ internal sealed class SchemaMigrationCoordinator
             WarehouseOrderPickStockoutMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyWarehouseOrderPickStockoutAsync(cancellationToken)
+        ),
+        new(
+            WarehouseOrderPickAssignmentMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyWarehouseOrderPickAssignmentAsync(cancellationToken)
         ),
     ];
 

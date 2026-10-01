@@ -154,6 +154,7 @@ import {
   resolvePasteOptimisticPendingAfterJob,
   type StoreOrderPasteOptimisticPending,
 } from './pasteOptimisticRows'
+import PickingAssignmentSection, { AssigneeChip, type LineAssigneeMap } from './pickingAssignment/PickingAssignmentSection'
 import { formatStoreOrderVolume } from './volumeFormat'
 import {
   isStoreOrderDetailColumnOrderCustomized,
@@ -228,6 +229,7 @@ const STORE_ORDER_DETAIL_DEFAULT_COLUMN_WIDTHS: Record<StoreOrderDetailTableColu
   barcode: 112,
   price: 62,
   locationCode: 82,
+  assignee: 88,
   quantity: 58,
   allocQuantity: 70,
   importPrice: 70,
@@ -245,6 +247,7 @@ const STORE_ORDER_DETAIL_MIN_COLUMN_WIDTHS: Record<StoreOrderDetailTableColumnKe
   barcode: 96,
   price: 56,
   locationCode: 70,
+  assignee: 72,
   quantity: 54,
   allocQuantity: 64,
   importPrice: 64,
@@ -1518,6 +1521,8 @@ export default function StoreOrderDetailPage() {
     contactEmail: '',
   })
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([])
+  // 拣货分配卡片加载后回传每行负责人，明细表“负责人”列用。
+  const [lineAssignees, setLineAssignees] = useState<LineAssigneeMap>({})
   const [editingRows, setEditingRows] = useState<Record<string, { allocQuantity?: number; importPrice?: number }>>({})
   const initialOrderNo =
     typeof location.state === 'object' &&
@@ -3078,6 +3083,15 @@ export default function StoreOrderDetailPage() {
       render: (value: string | undefined) => <span className="store-order-nowrap">{renderZeroOrEmptyCell(value)}</span>,
     },
     {
+      title: t('storeOrders.pickingAssignment.assignee', '负责人'),
+      key: 'assignee',
+      width: STORE_ORDER_DETAIL_DEFAULT_COLUMN_WIDTHS.assignee,
+      render: (_: unknown, record: StoreOrderDetailLine) => {
+        const assignee = lineAssignees[record.detailGUID]
+        return assignee ? <AssigneeChip segmentNo={assignee.segmentNo} name={assignee.pickerName} /> : '—'
+      },
+    },
+    {
       title: t('column.orderQuantity'),
       key: 'quantity',
       dataIndex: 'quantity',
@@ -3273,7 +3287,8 @@ export default function StoreOrderDetailPage() {
       ),
     },
   ] as ColumnsType<StoreOrderDetailLine>).filter(
-    (column) => canUseWarehouseManagerActions || column.key !== 'actions',
+    // 操作列与负责人列只给仓库订货管理者（派单接口也只对他们开放）。
+    (column) => canUseWarehouseManagerActions || (column.key !== 'actions' && column.key !== 'assignee'),
   )
   const detailDraggableColumnKeys = baseDetailColumns.map(
     (column) => String(column.key) as StoreOrderDetailTableColumnKey,
@@ -3723,6 +3738,18 @@ export default function StoreOrderDetailPage() {
                 </Descriptions.Item>
               </Descriptions>
             </Card>
+
+            {canUseWarehouseManagerActions ? (
+              <PickingAssignmentSection
+                orderGuid={detail.orderGUID}
+                orderNo={detail.orderNo}
+                storeName={detail.storeName}
+                assignable={
+                  detail.flowStatus === StoreOrderFlowStatus.Submitted || detail.flowStatus === StoreOrderFlowStatus.Picking
+                }
+                onAssignmentChange={setLineAssignees}
+              />
+            ) : null}
 
             <Card
               title={t('storeOrders.orderDetailSection')}

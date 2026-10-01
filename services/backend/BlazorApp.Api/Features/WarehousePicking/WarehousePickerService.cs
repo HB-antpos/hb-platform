@@ -22,6 +22,9 @@ public interface IWarehousePickerService
     );
 
     Task<WarehousePickerEligibility?> GetEligibilityAsync(string userGuid);
+
+    /// <summary>可以派拣货任务的员工：仓库角色或持有拣货相关权限的在职账号，按姓名排序。</summary>
+    Task<List<WarehousePickerEligibility>> ListEligibleAsync();
 }
 
 /// <summary>
@@ -177,6 +180,57 @@ internal sealed class WarehousePickerService(
             isAdmin || managerRole != null,
             managerRole ?? staffRole ?? (isAdmin ? roleNames.FirstOrDefault(Permissions.IsSuperAdminRole) : null)
         );
+    }
+
+    public async Task<List<WarehousePickerEligibility>> ListEligibleAsync()
+    {
+        // 先用 SQL 粗筛候选（仓库角色、角色或本人被授予拣货相关权限），再逐个走与扫员工码相同的资格判断。
+        // 只有管理员身份的账号不在粗筛里：他们能拣但不是派单对象，避免名单被系统账号占满。
+        var roleNames = Permissions.WarehouseManagerRoleNames.Concat(WarehouseStaffRoleNames).ToList();
+        var permissionCodes = new List<string>
+        {
+            Permissions.Warehouse.Picking,
+            Permissions.Warehouse.Manage,
+            Permissions.Warehouse.ManageOrders,
+        };
+        var roleUserGuids = await _db.Queryable<UserRole>()
+            .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
+            .Where((userRole, role) =>
+                !userRole.IsDeleted
+                && role.IsActive
+                && !role.IsDeleted
+                && (roleNames.Contains(role.RoleName)
+                    || SqlFunc.Subqueryable<SysRolePermission>()
+                        .Where(permission =>
+                            permission.RoleGuid == role.RoleGUID
+                            && !permission.IsDeleted
+                            && permissionCodes.Contains(permission.PermissionCode)
+                        )
+                        .Any())
+            )
+            .Select((userRole, role) => userRole.UserGUID)
+            .ToListAsync();
+        var directUserGuids = await _db.Queryable<SysUserPermission>()
+            .Where(permission => !permission.IsDeleted && permissionCodes.Contains(permission.PermissionCode))
+            .Select(permission => permission.UserGuid)
+            .ToListAsync();
+
+        var result = new List<WarehousePickerEligibility>();
+        foreach (var userGuid in roleUserGuids
+                     .Concat(directUserGuids)
+                     .Where(guid => !string.IsNullOrWhiteSpace(guid))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var eligibility = await GetEligibilityAsync(userGuid);
+            if (eligibility is { IsAllowed: true })
+            {
+                result.Add(eligibility);
+            }
+        }
+
+        return result
+            .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
     }
 
     private sealed class UserRow

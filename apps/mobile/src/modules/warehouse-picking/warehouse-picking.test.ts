@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizePickMutation, normalizePickSheet, readPickingError } from "./api-normalization";
-import { buildPickCodeIndex, normalizeScanCode, resolvePickScan } from "./code-resolver";
+import { normalizePickMutation, normalizePickOrderList, normalizePickSheet, normalizePickSlipClaim, readPickingError } from "./api-normalization";
+import { buildPickCodeIndex, isSlipCode, normalizeScanCode, resolvePickScan } from "./code-resolver";
 import {
   firstOpenLine,
+  hasAssignments,
   hasMinOrderQuantity,
+  incompleteSegments,
+  isMyLine,
+  isMySegment,
   isOpenLine,
   isStockout,
   lineInScope,
@@ -18,9 +22,20 @@ import {
   splitIntoPacks,
   summarizeLines,
   summarizePickers,
+  summarizeSegments,
   upNextLines,
 } from "./pick-math";
-import { activeTeammates, pickedByParts, pickerInitials, relativeMinutes, stockoutReasonKey, teammateByLine } from "./pick-view-model";
+import {
+  activeTeammates,
+  claimNoticeFromClaim,
+  claimRouteParams,
+  parseClaimRouteParams,
+  pickedByParts,
+  pickerInitials,
+  relativeMinutes,
+  stockoutReasonKey,
+  teammateByLine,
+} from "./pick-view-model";
 import { isPickerUsable } from "./picker-store";
 import { PICK_MATCH, PICK_STOCKOUT_REASON, type PickCodeEntry, type PickSheetLine, type PickStockout } from "./types";
 
@@ -39,6 +54,9 @@ function line(overrides: Partial<PickSheetLine> & Pick<PickSheetLine, "detailGui
     pickedTotal: 0,
     pickedBy: [],
     stockout: null,
+    assigneeUserGuid: null,
+    assigneeName: null,
+    assignmentSegmentNo: null,
     ...overrides,
   };
 }
@@ -180,7 +198,8 @@ test("拣货范围：有货位 / 无货位按是否绑定配货位划分，计�
   assert.equal(lineInScope(located, "unlocated"), false);
   assert.equal(lineInScope(blank, "unlocated"), true);
   assert.equal(lineInScope(none, "all"), true);
-  assert.deepEqual(scopeCounts([located, blank, none]), { all: 3, located: 1, unlocated: 2 });
+  // 没有传“我的”上下文时 mine 为 0（订单没有分配）。
+  assert.deepEqual(scopeCounts([located, blank, none]), { mine: 0, help: 0, all: 3, located: 1, unlocated: 2 });
 });
 
 test("货位没货：标了且未拣齐的行不再待拣，接下来跳过它；拣齐后标记不再算数", () => {
@@ -207,6 +226,102 @@ test("没货原因文案：未绑定货位时“货位空了”说成“找不�
   assert.equal(stockoutReasonKey(PICK_STOCKOUT_REASON.wrongProduct, true, true), "stockout.shortWrongProduct");
 });
 
+test("分单条码：HBSP 前缀优先于商品码，订单码仍按 HBSO 识别", () => {
+  const index = buildPickCodeIndex([{ code: "HBSP:SO1/2/A1", target: "line", detailGuids: ["d-x"], matchedBy: 1, label: null }]);
+  assert.deepEqual(resolvePickScan(" hbsp:so1/2/a1\r", index), { kind: "slip", code: "HBSP:SO1/2/A1" });
+  assert.equal(resolvePickScan("HBSP:", index).kind, "none");
+  assert.equal(isSlipCode("hbsp:SO1/1/A"), true);
+  assert.equal(isSlipCode("HBSO:SO1"), false);
+});
+
+test("我的范围：扫了分单按段号，否则按派给我的负责人；没有分配时不出现", () => {
+  const lines = [
+    line({ detailGuid: "a", locationCode: "A-01-01", assigneeUserGuid: "U-ME", assignmentSegmentNo: 1 }),
+    line({ detailGuid: "b", locationCode: null, assigneeUserGuid: null, assignmentSegmentNo: 2 }),
+    line({ detailGuid: "c", locationCode: "A-02-01", assigneeUserGuid: "u-li", assignmentSegmentNo: 3 }),
+  ];
+  const byPicker = { pickerUserGuid: "u-me", segmentNo: null };
+  const bySegment = { pickerUserGuid: "u-me", segmentNo: 2 };
+
+  assert.equal(hasAssignments(lines), true);
+  assert.equal(hasAssignments([line({ detailGuid: "x" })]), false);
+  assert.equal(isMyLine(lines[0], byPicker), true);
+  assert.equal(isMyLine(lines[1], byPicker), false);
+  assert.equal(isMyLine(lines[1], bySegment), true);
+  assert.equal(lineInScope(lines[0], "mine"), false);
+  assert.deepEqual(scopeCounts(lines, byPicker), { mine: 1, help: 0, all: 3, located: 2, unlocated: 1 });
+  assert.deepEqual(scopeCounts(lines, bySegment).mine, 1);
+});
+
+test("完成页按段汇总：负责人或待领取、拣齐与没货品种数，没有分配的行不计", () => {
+  const segments = summarizeSegments([
+    line({ detailGuid: "a", orderedQuantity: 12, pickedTotal: 12, assigneeName: "Chen", assigneeUserGuid: "u-chen", assignmentSegmentNo: 1 }),
+    line({ detailGuid: "b", orderedQuantity: 12, pickedTotal: 6, stockout, assigneeName: "Chen", assigneeUserGuid: "u-chen", assignmentSegmentNo: 1 }),
+    line({ detailGuid: "c", orderedQuantity: 24, pickedTotal: 0, assignmentSegmentNo: 2 }),
+    line({ detailGuid: "d", orderedQuantity: 6 }),
+  ]);
+
+  assert.deepEqual(
+    segments.map((item) => [item.segmentNo, item.assigneeName, item.lineCount, item.completeLineCount, item.stockoutLineCount, item.pickedPieces]),
+    [[1, "Chen", 2, 1, 1, 18], [2, null, 1, 0, 0, 0]],
+  );
+});
+
+test("帮忙：只看要帮的那段；未完成段按拣齐或标没货判定，半拣没标算没完；我的段按段号或负责人", () => {
+  const lines = [
+    line({ detailGuid: "a", orderedQuantity: 12, pickedTotal: 12, assigneeName: "Li", assigneeUserGuid: "u-li", assignmentSegmentNo: 1 }),
+    line({ detailGuid: "b", orderedQuantity: 12, pickedTotal: 0, stockout, assigneeName: "Li", assigneeUserGuid: "u-li", assignmentSegmentNo: 1 }),
+    line({ detailGuid: "c", orderedQuantity: 12, pickedTotal: 5, assigneeName: "Chen", assigneeUserGuid: "u-chen", assignmentSegmentNo: 2 }),
+    line({ detailGuid: "d", orderedQuantity: 6, pickedTotal: 0, assignmentSegmentNo: 3 }),
+    line({ detailGuid: "e", orderedQuantity: 6, pickedTotal: 0 }),
+  ];
+  const helping = { pickerUserGuid: "u-li", segmentNo: null, helpSegmentNo: 2 };
+
+  assert.equal(lineInScope(lines[2], "help", helping), true);
+  assert.equal(lineInScope(lines[0], "help", helping), false);
+  assert.equal(lineInScope(lines[2], "help", { pickerUserGuid: "u-li", segmentNo: null }), false);
+  assert.deepEqual(scopeCounts(lines, helping), { mine: 2, help: 1, all: 5, located: 0, unlocated: 5 });
+
+  // 第 1 段拣齐 + 标没货算拣完；第 2 段半拣没标、第 3 段待领取没动都算没完；没分配的行不参与。
+  assert.deepEqual(incompleteSegments(lines).map((segment) => segment.segmentNo), [2, 3]);
+  assert.deepEqual(incompleteSegments([lines[4]]), []);
+  const [chenSegment, claimable] = incompleteSegments(lines);
+  assert.equal(isMySegment(chenSegment, { pickerUserGuid: "U-CHEN", segmentNo: null }), true);
+  assert.equal(isMySegment(chenSegment, helping), false);
+  assert.equal(isMySegment(claimable, { pickerUserGuid: "u-li", segmentNo: 3 }), true);
+});
+
+test("扫分单领取：结果转成路由参数再读回提示；参数不全时不影响进单", () => {
+  const claim = normalizePickSlipClaim({
+    success: true,
+    data: { orderGuid: "o-1", orderNo: "SO1", segmentNo: 2, segmentCount: 3, pickerUserGuid: "u-li", pickerName: "Li Na", lineCount: 11, claimedByMe: false },
+  });
+  assert.equal(claim.claimedNow, false);
+  assert.deepEqual(claimNoticeFromClaim(claim), { kind: "other", segmentNo: 2, segmentCount: 3, lineCount: 11, claimerName: "Li Na" });
+
+  const params = claimRouteParams({ ...claim, claimedNow: true, claimedByMe: true });
+  assert.deepEqual(params, { segment: "2", claim: "now", segments: "3", lines: "11", claimer: "Li Na" });
+  assert.deepEqual(parseClaimRouteParams(params).notice, { kind: "now", segmentNo: 2, segmentCount: 3, lineCount: 11, claimerName: "Li Na" });
+  assert.deepEqual(parseClaimRouteParams({ segment: "2" }), { segmentNo: 2, notice: null });
+  assert.deepEqual(parseClaimRouteParams({ segment: "abc", claim: "now" }), { segmentNo: null, notice: null });
+});
+
+test("订单列表：派给我的数量可为空，各段负责人可为待领取", () => {
+  const list = normalizePickOrderList({
+    success: true,
+    data: {
+      items: [{
+        orderGuid: "o-1", flowStatus: 1, lineCount: 3, totalQuantity: 30, pickedLineCount: 0,
+        assignees: [{ pickerUserGuid: "u-chen", pickerName: "Chen", lineCount: 2, segmentNo: 1 }, { lineCount: 1, segmentNo: 2 }],
+      }],
+      counts: { all: 1, toPick: 1, picking: 0 },
+    },
+  });
+  assert.equal(list.counts.mine, null);
+  assert.equal(list.items[0].assignees[1].pickerUserGuid, null);
+  assert.deepEqual(list.items[0].pickers, []);
+});
+
 test("合并服务端进度：只改返回的行，并更新中包数与拣货人归属", () => {
   const lines = [line({ detailGuid: "d-a" }), line({ detailGuid: "d-b", minOrderQuantity: null })];
   const merged = mergeProgressLines(lines, [
@@ -216,6 +331,9 @@ test("合并服务端进度：只改返回的行，并更新中包数与拣货�
       minOrderQuantity: 6,
       pickedBy: [{ pickerUserGuid: "u-mia", pickerName: "Mia Wong", quantity: 6 }],
       stockout,
+      assigneeUserGuid: "u-mia",
+      assigneeName: "Mia Wong",
+      assignmentSegmentNo: 2,
     },
   ]);
 
@@ -224,6 +342,9 @@ test("合并服务端进度：只改返回的行，并更新中包数与拣货�
   assert.equal(merged[1].minOrderQuantity, 6);
   // 同事标的没货随进度同步过来；没有标记时服务端返回 null，本地随之清掉。
   assert.deepEqual(merged[1].stockout, stockout);
+  // 同事扫分单领取后，负责人随进度同步过来。
+  assert.equal(merged[1].assigneeUserGuid, "u-mia");
+  assert.equal(merged[1].assignmentSegmentNo, 2);
   assert.equal(mergeProgressLines(merged, [{ ...merged[1], stockout: null }])[1].stockout, null);
   assert.deepEqual(summarizePickers(merged), [{ pickerUserGuid: "u-mia", pickerName: "Mia Wong", quantity: 6 }]);
 });

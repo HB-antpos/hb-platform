@@ -12,13 +12,14 @@ import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner"
 import { playScanFeedbackSound, preloadScanFeedbackSounds } from "@/modules/scanner/scan-sound";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocaleTag } from "@/shared/i18n/types";
-import { fetchPickOrders, resolvePickOrder } from "../api";
+import { claimPickSlip, fetchPickOrders, resolvePickOrder } from "../api";
 import { readPickingError } from "../api-normalization";
 import { pickingErrorMessage } from "../picking-errors";
-import { shortPickerName } from "../pick-view-model";
+import { isSlipCode } from "../code-resolver";
+import { claimRouteParams, shortPickerName } from "../pick-view-model";
 import { PickHeader, PickerChip } from "../components/PickHeader";
 import { PickCameraSheet } from "../components/PickCameraSheet";
-import { MONO_FONT, PICK_COLORS } from "../components/pick-theme";
+import { MONO_FONT, PICK_COLORS, segmentColor } from "../components/pick-theme";
 import type { PickerIdentity, PickOrderFilter, PickOrderListItem } from "../types";
 
 const FLOW_PICKING = 3;
@@ -28,6 +29,14 @@ export const PICKING_HOME = "/(shell)/warehouse-picking" as Href;
 
 export function pickingRoute(orderGuid: string, suffix = "") {
   return `/warehouse-picking/${encodeURIComponent(orderGuid)}${suffix}` as Href;
+}
+
+/** 扫分单后进入拣货页：带上段号与领取提示。 */
+export function pickingSlipRoute(orderGuid: string, params: Record<string, string>) {
+  return {
+    pathname: "/(shell)/warehouse-picking/[orderGuid]",
+    params: { orderGuid, ...params },
+  } as unknown as Href;
 }
 
 /** 选择订单：列表、搜索，或直接扫配货单上的订单条码进入拣货。 */
@@ -44,6 +53,8 @@ export function PickOrderListView({
   const router = useRouter();
   const focused = useIsFocused();
   const [filter, setFilter] = useState<PickOrderFilter>("all");
+  // 第一次拿到“派给我”的数量且大于 0 时默认切过去；拣货员手动选过筛选后不再自动切换。
+  const filterTouchedRef = useRef(false);
   const [keyword, setKeyword] = useState("");
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
@@ -70,6 +81,13 @@ export function PickOrderListView({
     refetchInterval: focused ? 30_000 : false,
   });
 
+  useEffect(() => {
+    const mineCount = query.data?.counts.mine;
+    if (filterTouchedRef.current || mineCount == null) return;
+    filterTouchedRef.current = true;
+    if (mineCount > 0 && filter === "all") setFilter("mine");
+  }, [filter, query.data?.counts.mine]);
+
   const openOrder = useCallback(
     (orderGuid: string) => router.push(pickingRoute(orderGuid)),
     [router],
@@ -82,6 +100,13 @@ export function PickOrderListView({
       resolvingRef.current = true;
       setResolving(true);
       try {
+        if (isSlipCode(code)) {
+          // 分单条码：领取这一段（已被领取则只提示），直接进入那张单的那一段。
+          const claim = await claimPickSlip(code);
+          playScanFeedbackSound("found");
+          router.push(pickingSlipRoute(claim.orderGuid, claimRouteParams(claim)));
+          return;
+        }
         const orderGuid = await resolvePickOrder(code);
         playScanFeedbackSound("found");
         openOrder(orderGuid);
@@ -94,7 +119,7 @@ export function PickOrderListView({
         setResolving(false);
       }
     },
-    [language, openOrder, t],
+    [language, openOrder, router, t],
   );
 
   const hid = useHidBarcodeScanner({
@@ -104,6 +129,8 @@ export function PickOrderListView({
 
   const counts = query.data?.counts;
   const filters: { key: PickOrderFilter; label: string }[] = [
+    // 认不出拣货人（设备会话）时服务端不返回 mine，不显示“派给我”。
+    ...(counts?.mine != null ? [{ key: "mine" as const, label: t("orders.filterMine", { count: counts.mine }) }] : []),
     { key: "all", label: t("orders.filterAll", { count: counts?.all ?? 0 }) },
     { key: "toPick", label: t("orders.filterToPick", { count: counts?.toPick ?? 0 }) },
     { key: "picking", label: t("orders.filterPicking", { count: counts?.picking ?? 0 }) },
@@ -168,7 +195,10 @@ export function PickOrderListView({
                 key={item.key}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: filter === item.key }}
-                onPress={() => setFilter(item.key)}
+                onPress={() => {
+                  filterTouchedRef.current = true;
+                  setFilter(item.key);
+                }}
                 style={[styles.segmentItem, index > 0 ? styles.segmentDivider : null, filter === item.key ? styles.segmentActive : null]}
               >
                 <Text numberOfLines={1} style={[styles.segmentText, filter === item.key ? styles.segmentTextActive : null]}>
@@ -200,7 +230,7 @@ export function PickOrderListView({
           )
         }
         renderItem={({ item }) => (
-          <OrderCard item={item} localeTag={localeTag} onPress={() => openOrder(item.orderGuid)} />
+          <OrderCard item={item} localeTag={localeTag} myUserGuid={picker.userGuid} onPress={() => openOrder(item.orderGuid)} />
         )}
       />
 
@@ -220,7 +250,17 @@ export function PickOrderListView({
   );
 }
 
-function OrderCard({ item, localeTag, onPress }: { item: PickOrderListItem; localeTag: string; onPress: () => void }) {
+function OrderCard({
+  item,
+  localeTag,
+  myUserGuid,
+  onPress,
+}: {
+  item: PickOrderListItem;
+  localeTag: string;
+  myUserGuid: string;
+  onPress: () => void;
+}) {
   const { t } = useAppTranslation("warehousePicking");
   const picking = item.flowStatus === FLOW_PICKING;
   const names = item.pickers.map((entry) => shortPickerName(entry.pickerName)).join("、");
@@ -240,6 +280,22 @@ function OrderCard({ item, localeTag, onPress }: { item: PickOrderListItem; loca
         {" · "}
         {t("orders.submittedAt", { time: formatOrderDate(item.orderDate ?? undefined, localeTag) })}
       </Text>
+      {item.assignees.length > 0 ? (
+        // 经理派单的各段：自己那段加粗，待领取的段标出来，方便员工拿分单去领。
+        <View style={styles.assignees}>
+          {item.assignees.map((assignee) => {
+            const isMe = Boolean(assignee.pickerUserGuid && assignee.pickerUserGuid.toLowerCase() === myUserGuid.toLowerCase());
+            return (
+              <View key={assignee.segmentNo} style={[styles.assignee, isMe ? styles.assigneeMe : null]}>
+                <View style={[styles.assigneeDot, { backgroundColor: segmentColor(assignee.segmentNo) }]} />
+                <Text style={[styles.assigneeText, isMe ? styles.assigneeTextMe : null, !assignee.pickerName ? styles.assigneeClaimable : null]}>
+                  {assignee.pickerName ? shortPickerName(assignee.pickerName) : t("orders.claimable")} {assignee.lineCount}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
       {picking ? (
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
@@ -298,6 +354,21 @@ const styles = StyleSheet.create({
   meta: { fontSize: 13, lineHeight: 18, color: PICK_COLORS.textSecondary },
   orderNo: { fontFamily: MONO_FONT, fontWeight: "700", color: PICK_COLORS.ink },
   progressTrack: { height: 6, borderRadius: 3, backgroundColor: PICK_COLORS.outlineMuted, overflow: "hidden" },
+  assignees: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  assignee: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: PICK_COLORS.neutralChipBg,
+  },
+  assigneeMe: { backgroundColor: PICK_COLORS.infoBg, borderWidth: 1, borderColor: PICK_COLORS.infoBorder },
+  assigneeDot: { width: 8, height: 8, borderRadius: 4 },
+  assigneeText: { fontSize: 12, lineHeight: 16, color: PICK_COLORS.neutralChipText, fontVariant: ["tabular-nums"] },
+  assigneeTextMe: { fontWeight: "700", color: PICK_COLORS.infoText },
+  assigneeClaimable: { color: PICK_COLORS.warning },
   progressFill: { height: 6, borderRadius: 3, backgroundColor: PICK_COLORS.warningStrong },
   cardBottom: { flexDirection: "row", alignItems: "center" },
   summary: { flex: 1, fontSize: 13, lineHeight: 20, color: PICK_COLORS.textSecondary, fontVariant: ["tabular-nums"] },

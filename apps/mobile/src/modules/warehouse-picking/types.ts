@@ -16,10 +16,14 @@ export const PICK_MATCH = {
 /** “货位没货”原因，与后端 WarehouseOrderPickStockoutReasons 一致。 */
 export const PICK_STOCKOUT_REASON = { locationEmpty: 1, wrongProduct: 2, damaged: 3 } as const;
 
-export type PickOrderFilter = "all" | "toPick" | "picking";
+export type PickOrderFilter = "mine" | "all" | "toPick" | "picking";
 
-/** 拣货范围：全部 / 有货位 / 无货位（未绑定配货位）。 */
-export type PickScope = "all" | "located" | "unlocated";
+/**
+ * 拣货范围：我的（经理派给我或我扫分单领取的那一段）/ 全部 / 有货位 / 无货位（未绑定配货位）。
+ * “我的”只在订单有拣货分配时出现。
+ */
+/** help：先拣完的人去帮另一段，只看那一段；只在有分配的订单上临时出现，不存偏好。 */
+export type PickScope = "mine" | "help" | "all" | "located" | "unlocated";
 
 /** 走位方式：M 型每排同一端进出、列号全部从小到大（默认）；S 型单数排从小到大、双数排从大到小。 */
 export type PickRoute = "m" | "s";
@@ -71,6 +75,10 @@ export interface PickSheetLine {
   pickedTotal: number;
   pickedBy: PickedByEntry[];
   stockout: PickStockout | null;
+  /** 经理派单的负责人与所属分段；没有分配时为 null，分段待领取时负责人为 null 而段号有值。 */
+  assigneeUserGuid: string | null;
+  assigneeName: string | null;
+  assignmentSegmentNo: number | null;
 }
 
 export interface PickCodeEntry {
@@ -117,6 +125,9 @@ export interface PickProgressLine {
   pickedBy: PickedByEntry[];
   minOrderQuantity: number | null;
   stockout: PickStockout | null;
+  assigneeUserGuid: string | null;
+  assigneeName: string | null;
+  assignmentSegmentNo: number | null;
 }
 
 export interface PickProgress {
@@ -144,11 +155,34 @@ export interface PickOrderListItem {
   pickedLineCount: number;
   sessionStatus: number | null;
   pickers: { pickerUserGuid: string; pickerName: string }[];
+  /** 经理派单的各段负责人（按段号）；pickerUserGuid 为空表示该段待领取。 */
+  assignees: PickOrderAssignee[];
+}
+
+export interface PickOrderAssignee {
+  pickerUserGuid: string | null;
+  pickerName: string | null;
+  lineCount: number;
+  segmentNo: number;
 }
 
 export interface PickOrderList {
   items: PickOrderListItem[];
-  counts: { all: number; toPick: number; picking: number };
+  /** mine 为空表示服务端认不出拣货人（不显示“派给我”）。 */
+  counts: { all: number; toPick: number; picking: number; mine: number | null };
+}
+
+/** 扫分单领取的结果：打开哪张单、看哪一段，以及这段现在归谁。 */
+export interface PickSlipClaim {
+  orderGuid: string;
+  orderNo: string | null;
+  segmentNo: number;
+  segmentCount: number;
+  pickerUserGuid: string | null;
+  pickerName: string | null;
+  lineCount: number;
+  claimedByMe: boolean;
+  claimedNow: boolean;
 }
 
 export interface PickerResolveResult {

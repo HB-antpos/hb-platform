@@ -7,6 +7,7 @@ import {
   normalizePickOrderList,
   normalizePickProgress,
   normalizePickSheet,
+  normalizePickSlipClaim,
   normalizePickSubmit,
 } from "./api-normalization";
 import { usePickerStore } from "./picker-store";
@@ -133,6 +134,12 @@ export async function deletePickStockout(orderGuid: string, detailGuid: string) 
 export async function submitPickOrder(orderGuid: string) {
   const response = await apiClient.post(`${BASE}/orders/${encodeURIComponent(orderGuid)}/submit`, {}, pickerConfig());
   return normalizePickSubmit(response.data);
+}
+
+/** 扫分单领取：该段还没人领时记到当前拣货人名下；已被领取时不改，只返回负责人。 */
+export async function claimPickSlip(code: string) {
+  const response = await apiClient.post(`${BASE}/slips/claim`, { code }, pickerConfig());
+  return normalizePickSlipClaim(response.data);
 }
 
 export async function lookupPickCode(code: string) {

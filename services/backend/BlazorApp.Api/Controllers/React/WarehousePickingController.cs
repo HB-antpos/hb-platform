@@ -19,6 +19,7 @@ namespace BlazorApp.Api.Controllers.React;
 public sealed class WarehousePickingController(
     IWarehousePickingService pickingService,
     IWarehousePickerService pickerService,
+    IWarehousePickingAssignmentService assignmentService,
     WarehousePickerTicketProtector ticketProtector,
     IDeviceRegistrationService deviceRegistrationService,
     IAuthorizationService authorizationService,
@@ -54,7 +55,14 @@ public sealed class WarehousePickingController(
         RunAsync(nameof(ListOrders), async () =>
         {
             var terminal = await ResolveTerminalAsync();
-            return terminal.Error ?? ToActionResult(await pickingService.ListOrdersAsync(filter, keyword));
+            if (terminal.Error != null)
+            {
+                return terminal.Error;
+            }
+
+            // 列表不强制确认拣货人：认得出（员工码凭证或账号本人）才算“派给我的”，否则只列公共订单。
+            var picker = await ResolvePickerAsync(terminal, recheckEligibility: false);
+            return ToActionResult(await pickingService.ListOrdersAsync(filter, keyword, picker.Context?.UserGuid));
         });
 
     /// <summary>解析配货单二维码（HBSO:订单号）或手输订单号。</summary>
@@ -137,6 +145,79 @@ public sealed class WarehousePickingController(
         RunWithPickerAsync(nameof(Submit), recheckEligibility: true, picker =>
             pickingService.SubmitAsync(orderGuid.Trim(), picker));
 
+    /// <summary>派单：可以派拣货任务的员工及手上在拣的订单数。</summary>
+    [HttpGet("pickers")]
+    public Task<IActionResult> ListPickerCandidates() =>
+        RunAsAssignerAsync(nameof(ListPickerCandidates), _ => assignmentService.ListCandidatesAsync());
+
+    [HttpGet("orders/{orderGuid}/assignments")]
+    public Task<IActionResult> GetAssignments(string orderGuid) =>
+        RunAsAssignerAsync(nameof(GetAssignments), _ => assignmentService.GetAsync(orderGuid.Trim()));
+
+    /// <summary>派单预览：按走位顺序把订单行按品种数切段（默认平均），不写库。</summary>
+    [HttpPost("orders/{orderGuid}/assignments/preview")]
+    public Task<IActionResult> PreviewAssignments(
+        string orderGuid,
+        [FromBody] WarehousePickingAssignmentPreviewRequestDto request
+    ) =>
+        RunAsAssignerAsync(nameof(PreviewAssignments), _ =>
+            assignmentService.PreviewAsync(orderGuid.Trim(), request ?? new WarehousePickingAssignmentPreviewRequestDto()));
+
+    /// <summary>保存派单：提交预览出来的逐行归属，整单替换本单原有分配。</summary>
+    [HttpPut("orders/{orderGuid}/assignments")]
+    public Task<IActionResult> SaveAssignments(
+        string orderGuid,
+        [FromBody] WarehousePickingAssignmentSaveRequestDto request
+    ) =>
+        RunAsAssignerAsync(nameof(SaveAssignments), assigner =>
+            assignmentService.SaveAsync(orderGuid.Trim(), request ?? new WarehousePickingAssignmentSaveRequestDto(), assigner));
+
+    [HttpDelete("orders/{orderGuid}/assignments")]
+    public Task<IActionResult> ClearAssignments(string orderGuid) =>
+        RunAsAssignerAsync(nameof(ClearAssignments), _ => assignmentService.ClearAsync(orderGuid.Trim()));
+
+    /// <summary>订单列表“拣货分配”列：多张订单的负责人与品种数。</summary>
+    [HttpPost("assignments/summaries")]
+    public Task<IActionResult> ListAssignmentSummaries([FromBody] WarehousePickingAssignmentSummariesRequestDto request) =>
+        RunAsAssignerAsync(nameof(ListAssignmentSummaries), _ =>
+            assignmentService.ListSummariesAsync(request?.OrderGuids ?? new List<string>()));
+
+    /// <summary>批量派单：每张订单都按同一组员工平均分，逐张返回结果。</summary>
+    [HttpPost("assignments/batch")]
+    public Task<IActionResult> AssignBatch([FromBody] WarehousePickingBatchAssignRequestDto request) =>
+        RunAsAssignerAsync(nameof(AssignBatch), assigner =>
+            assignmentService.AssignEvenlyAsync(request ?? new WarehousePickingBatchAssignRequestDto(), assigner));
+
+    /// <summary>分单拣货单打印数据（每段一页）；segmentNo 为空时打印全部段。</summary>
+    [HttpGet("orders/{orderGuid}/assignments/slips")]
+    public Task<IActionResult> GetAssignmentSlips(string orderGuid, [FromQuery] int? segmentNo) =>
+        RunAsAssignerAsync(nameof(GetAssignmentSlips), _ => assignmentService.GetSlipsAsync(orderGuid.Trim(), segmentNo));
+
+    /// <summary>员工扫分单领取：还没人领的段写到扫码人名下；已被领取时不改，只返回负责人。</summary>
+    [HttpPost("slips/claim")]
+    public Task<IActionResult> ClaimSlip([FromBody] WarehousePickingSlipClaimRequestDto request) =>
+        RunWithPickerAsync(nameof(ClaimSlip), recheckEligibility: false, picker =>
+            assignmentService.ClaimSlipAsync(request?.Code, picker));
+
+    /// <summary>经理改某一段的负责人；pickerUserGuid 为空表示释放为待领取。</summary>
+    [HttpPut("orders/{orderGuid}/assignments/segments/{segmentNo:int}/picker")]
+    public Task<IActionResult> SetSegmentPicker(
+        string orderGuid,
+        int segmentNo,
+        [FromBody] WarehousePickingSegmentPickerRequestDto request
+    ) =>
+        RunAsAssignerAsync(nameof(SetSegmentPicker), _ =>
+            assignmentService.SetSegmentPickerAsync(orderGuid.Trim(), segmentNo, request?.PickerUserGuid));
+
+    /// <summary>PDA 扫分单条码（HBSP:订单号/段号/版本）：返回订单与段，旧分单返回 SLIP_STALE。</summary>
+    [HttpGet("slips/resolve")]
+    public Task<IActionResult> ResolveSlip([FromQuery] string? code) =>
+        RunAsync(nameof(ResolveSlip), async () =>
+        {
+            var terminal = await ResolveTerminalAsync();
+            return terminal.Error ?? ToActionResult(await assignmentService.ResolveSlipAsync(code));
+        });
+
     /// <summary>扫到不在本单的码时查询商品信息，仅用于界面提示。</summary>
     [HttpGet("lookup")]
     public Task<IActionResult> Lookup([FromQuery] string? code) =>
@@ -168,6 +249,56 @@ public sealed class WarehousePickingController(
 
             return ToActionResult(await action(picker.Context!));
         });
+    }
+
+    /// <summary>
+    /// 派单只允许登录的仓库经理 / 管理员，或持有管理仓库、管理仓库订货权限的账号；
+    /// 纯设备会话和只有拣货权限的员工不能派单。
+    /// </summary>
+    private async Task<IActionResult> RunAsAssignerAsync<T>(
+        string operation,
+        Func<WarehousePickingAssigner, Task<WarehousePickingResult<T>>> action
+    )
+    {
+        return await RunAsync(operation, async () =>
+        {
+            var terminal = await ResolveTerminalAsync();
+            if (terminal.Error != null)
+            {
+                return terminal.Error;
+            }
+
+            if (!terminal.IsAccount || string.IsNullOrEmpty(terminal.AuthUserGuid) || !await CanAssignAsync())
+            {
+                return Forbidden(WarehousePickingErrorCodes.AssignNotAllowed, "只有仓库经理可以分配拣货");
+            }
+
+            var name = User.FindFirst("fullName")?.Value;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = User.Identity?.Name ?? terminal.AuthUserGuid;
+            }
+
+            return ToActionResult(await action(new WarehousePickingAssigner(terminal.AuthUserGuid, name.Trim())));
+        });
+    }
+
+    private async Task<bool> CanAssignAsync()
+    {
+        if (HasAnyRole(PickerManagerRoleNames))
+        {
+            return true;
+        }
+
+        foreach (var permission in new[] { Permissions.Warehouse.ManageOrders, Permissions.Warehouse.Manage })
+        {
+            if ((await authorizationService.AuthorizeAsync(User, null, permission)).Succeeded)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<IActionResult> RunAsync(string operation, Func<Task<IActionResult>> action)

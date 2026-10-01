@@ -3,8 +3,16 @@ import type { PickCodeEntry } from "./types";
 /** 配货单二维码前缀：PDA 同一个扫码入口靠它区分“订单码”和“商品条码”。 */
 export const ORDER_QR_PREFIX = "HBSO:";
 
+/** 分单拣货单条码前缀（HBSP:订单号/段号/版本）：扫到即领取并进入那一段。 */
+export const SLIP_CODE_PREFIX = "HBSP:";
+
+export function isSlipCode(raw: string): boolean {
+  return normalizeScanCode(raw).startsWith(SLIP_CODE_PREFIX);
+}
+
 export type ScanResolution =
   | { kind: "order"; code: string; orderNo: string }
+  | { kind: "slip"; code: string }
   | { kind: "location"; code: string; detailGuids: string[] }
   | { kind: "line"; code: string; detailGuid: string; matchedBy: number | null; label: string | null }
   | { kind: "multiple"; code: string; detailGuids: string[]; matchedBy: number | null; label: string | null }
@@ -33,7 +41,7 @@ export function buildPickCodeIndex(codes: readonly PickCodeEntry[]): PickCodeInd
 }
 
 /**
- * 把一次扫码解析成动作。优先级：订单二维码 → 商品码（主码/货号/多码/套装子码）→ 货位码。
+ * 把一次扫码解析成动作。优先级：分单条码 → 订单二维码 → 商品码（主码/货号/多码/套装子码）→ 货位码。
  * 同一个码命中本单多行时交给界面让拣货员选择；其中包含当前行则直接落在当前行，避免重复弹窗。
  */
 export function resolvePickScan(
@@ -42,6 +50,9 @@ export function resolvePickScan(
   currentDetailGuid?: string | null,
 ): ScanResolution {
   const code = normalizeScanCode(raw);
+  if (code.startsWith(SLIP_CODE_PREFIX) && code.length > SLIP_CODE_PREFIX.length) {
+    return { kind: "slip", code };
+  }
   if (code.startsWith(ORDER_QR_PREFIX)) {
     const orderNo = code.slice(ORDER_QR_PREFIX.length).trim();
     if (orderNo) {

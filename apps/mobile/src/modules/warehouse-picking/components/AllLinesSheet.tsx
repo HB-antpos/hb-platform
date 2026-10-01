@@ -21,6 +21,8 @@ export function AllLinesSheet({
   lines,
   scope,
   scopeCounts,
+  scopes,
+  helpName,
   route,
   onScopeChange,
   onRoutePress,
@@ -31,6 +33,9 @@ export function AllLinesSheet({
   lines: PickSheetLine[];
   scope: PickScope;
   scopeCounts: Record<PickScope, number>;
+  /** 可选的范围（有分配时多一个“我的”）。 */
+  scopes?: PickScope[];
+  helpName?: string;
   route: PickRoute;
   onScopeChange: (scope: PickScope) => void;
   onRoutePress: () => void;
@@ -74,7 +79,7 @@ export function AllLinesSheet({
       <View style={styles.body}>
         <View style={styles.controls}>
           <View style={styles.tabs}>
-            <PickScopeTabs value={scope} counts={scopeCounts} onChange={onScopeChange} />
+            <PickScopeTabs value={scope} counts={scopeCounts} scopes={scopes} helpName={helpName} onChange={onScopeChange} />
           </View>
           {scope === "unlocated" ? null : <RouteChip route={route} onPress={onRoutePress} toggle />}
         </View>

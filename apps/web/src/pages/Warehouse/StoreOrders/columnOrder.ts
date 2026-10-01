@@ -7,6 +7,7 @@ export type StoreOrderDetailTableColumnKey =
   | 'barcode'
   | 'price'
   | 'locationCode'
+  | 'assignee'
   | 'quantity'
   | 'allocQuantity'
   | 'importPrice'

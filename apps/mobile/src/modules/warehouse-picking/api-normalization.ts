@@ -7,6 +7,7 @@ import type {
   PickOrderList,
   PickProgress,
   PickSheet,
+  PickSlipClaim,
   PickSubmitResult,
 } from "./types";
 
@@ -54,6 +55,9 @@ const lineProgressSchema = z.object({
   pickedBy: z.array(pickedBySchema).nullish().transform((value) => value ?? []),
   minOrderQuantity: nullableNumber,
   stockout: stockoutSchema,
+  assigneeUserGuid: nullableText,
+  assigneeName: nullableText,
+  assignmentSegmentNo: nullableNumber,
 });
 
 const sheetSchema = z.object({
@@ -90,6 +94,9 @@ const sheetSchema = z.object({
       pickedTotal: number,
       pickedBy: z.array(pickedBySchema).nullish().transform((value) => value ?? []),
       stockout: stockoutSchema,
+      assigneeUserGuid: nullableText,
+      assigneeName: nullableText,
+      assignmentSegmentNo: nullableNumber,
     }),
   ),
   codes: z.array(
@@ -135,9 +142,25 @@ const orderListSchema = z.object({
         .array(z.object({ pickerUserGuid: text, pickerName: text }))
         .nullish()
         .transform((value) => value ?? []),
+      assignees: z
+        .array(z.object({ pickerUserGuid: nullableText, pickerName: nullableText, lineCount: number, segmentNo: number }))
+        .nullish()
+        .transform((value) => value ?? []),
     }),
   ),
-  counts: z.object({ all: number, toPick: number, picking: number }),
+  counts: z.object({ all: number, toPick: number, picking: number, mine: nullableNumber }),
+});
+
+const slipClaimSchema = z.object({
+  orderGuid: text.min(1),
+  orderNo: nullableText,
+  segmentNo: number,
+  segmentCount: number,
+  pickerUserGuid: nullableText,
+  pickerName: nullableText,
+  lineCount: number,
+  claimedByMe: z.boolean().nullish().transform((value) => value ?? false),
+  claimedNow: z.boolean().nullish().transform((value) => value ?? false),
 });
 
 const pickerResolveSchema = z.object({
@@ -186,6 +209,7 @@ export const normalizePickerResolve = (payload: unknown): PickerResolveResult =>
   parseOrThrow(pickerResolveSchema, payload, "picker");
 export const normalizePickSubmit = (payload: unknown): PickSubmitResult => parseOrThrow(submitSchema, payload, "submit");
 export const normalizePickLookup = (payload: unknown): PickCodeLookupResult => parseOrThrow(lookupSchema, payload, "lookup");
+export const normalizePickSlipClaim = (payload: unknown): PickSlipClaim => parseOrThrow(slipClaimSchema, payload, "slip claim");
 
 /** 从 axios 错误里取后端 errorCode 与冲突时附带的最新数据（409 PICKED_TOTAL_CHANGED 等）。 */
 export function readPickingError(error: unknown): { code: string | null; status: number | null; data: unknown } {

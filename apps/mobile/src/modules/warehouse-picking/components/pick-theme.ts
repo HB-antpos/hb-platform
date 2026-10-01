@@ -24,3 +24,10 @@ export const PICK_COLORS = {
 } as const;
 
 export const MONO_FONT = "monospace";
+
+/** 分段配色（与 Web 派单一致）：按段号循环，均与白字对比度 ≥ 4.5:1。 */
+const SEGMENT_COLORS = ["#1677ff", "#d46b08", "#08979c", "#9254de", "#c41d7f", "#389e0d"] as const;
+
+export function segmentColor(segmentNo: number): string {
+  return SEGMENT_COLORS[(Math.max(1, segmentNo) - 1) % SEGMENT_COLORS.length];
+}

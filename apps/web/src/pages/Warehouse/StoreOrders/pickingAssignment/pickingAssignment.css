@@ -1,0 +1,227 @@
+/* 拣货派单：分配窗口、订单详情卡片与分单打印页。普通 CSS（CI 测试把 .css 当空模块，不能用 CSS Modules）。 */
+.picking-assign-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.picking-assign-body {
+  display: flex;
+  gap: 20px;
+  min-height: 420px;
+}
+
+.picking-assign-people {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.picking-assign-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.picking-assign-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.picking-assign-list {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.picking-assign-center {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.picking-assign-person {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.picking-assign-person:last-child {
+  border-bottom: 0;
+}
+
+.picking-assign-person.is-selected {
+  background: #fafcff;
+}
+
+.picking-assign-person .ant-checkbox-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.picking-assign-person-name {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 18px;
+}
+
+.picking-assign-person-name small {
+  font-size: 12px;
+  color: #595959;
+}
+
+.picking-assign-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.picking-assign-load {
+  font-size: 12px;
+  color: #595959;
+  white-space: nowrap;
+}
+
+.picking-assign-move {
+  display: inline-flex;
+}
+
+.picking-assign-bar {
+  display: flex;
+  height: 36px;
+  border-radius: 6px;
+  overflow: hidden;
+  gap: 2px;
+  background: #fff;
+}
+
+.picking-assign-bar > div {
+  align-items: center;
+  padding: 0 10px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.picking-assign-segments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.picking-assign-segment {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 14px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.picking-assign-edge {
+  width: 4px;
+  align-self: stretch;
+}
+
+.picking-assign-segment-name {
+  width: 120px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picking-assign-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.picking-assign-count {
+  width: 36px;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.picking-assign-meta {
+  color: #595959;
+  white-space: nowrap;
+}
+
+.picking-assign-route {
+  margin-left: auto;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.picking-assign-total {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #cf1322;
+}
+
+.picking-assign-total.is-complete {
+  color: #237804;
+}
+
+.picking-assign-person-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border-radius: 12px;
+  background: #f5f5f5;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.picking-assign-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.picking-assign-mono {
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+
+.picking-assign-segment-picker {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.picking-assign-person-chip.is-claimable {
+  background: #fff7e6;
+  color: #ad4e00;
+}

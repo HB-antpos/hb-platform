@@ -1,0 +1,203 @@
+/* 分单拣货单：A4 纵向，每页 210×297mm；屏幕上预览、打印时由 printElementPagesAsPdf 按 .picking-slip-page 截图分页。 */
+.picking-slip-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.picking-slip-page {
+  padding: 10mm 11mm 12mm;
+  color: #000;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.picking-slip-failures {
+  max-width: 210mm;
+  margin: 0 auto 12px;
+  padding: 8px 12px;
+  border: 1px solid #ffd591;
+  border-radius: 6px;
+  background: #fff7e6;
+  color: #ad4e00;
+}
+
+.picking-slip-header {
+  display: flex;
+  gap: 6mm;
+  align-items: flex-start;
+}
+
+.picking-slip-heading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5mm;
+}
+
+.picking-slip-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.picking-slip-owner {
+  display: flex;
+  align-items: center;
+  gap: 3mm;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.picking-slip-segment {
+  border: 2px solid #000;
+  border-radius: 6px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.picking-slip-meta {
+  font-size: 12.5px;
+  line-height: 19px;
+  color: #262626;
+}
+
+.picking-slip-barcode {
+  width: 90mm;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1mm;
+}
+
+.picking-slip-code {
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.5px;
+}
+
+.picking-slip-scan-hint {
+  font-size: 11px;
+  color: #434343;
+}
+
+.picking-slip-facts {
+  display: flex;
+  border: 1.5px solid #000;
+  border-radius: 6px;
+}
+
+.picking-slip-facts > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2mm 3mm;
+  border-right: 1.5px solid #000;
+}
+
+.picking-slip-facts > div:last-child {
+  border-right: 0;
+}
+
+.picking-slip-facts > div.is-wide {
+  flex: 2.4;
+}
+
+.picking-slip-facts span {
+  font-size: 11px;
+  color: #262626;
+}
+
+.picking-slip-facts b {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.picking-slip-facts b.is-small {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.picking-slip-continued {
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1.5px solid #000;
+  padding-bottom: 2mm;
+}
+
+.picking-slip-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.picking-slip-table th {
+  border-bottom: 1.5px solid #000;
+  text-align: left;
+  padding: 5px 5px;
+  font-weight: 700;
+}
+
+.picking-slip-table td {
+  border-bottom: 1px solid #bfbfbf;
+  padding: 6px 5px;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picking-slip-table .picking-slip-number {
+  text-align: right;
+}
+
+.picking-slip-table tr.picking-slip-turn td {
+  background: #f0f0f0;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 5px;
+}
+
+.picking-slip-mono {
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+
+.picking-slip-box {
+  display: inline-block;
+  width: 40px;
+  height: 16px;
+  border: 1px solid #000;
+  border-radius: 3px;
+}
+
+.picking-slip-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3mm;
+  font-size: 12.5px;
+}
+
+.picking-slip-sign {
+  display: flex;
+  gap: 10mm;
+}
+
+.picking-slip-note {
+  font-size: 10.5px;
+  color: #434343;
+  border-top: 1px solid #bfbfbf;
+  padding-top: 2mm;
+}
+
+.picking-slip-claim {
+  font-size: 15px;
+  font-weight: 600;
+}

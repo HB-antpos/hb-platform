@@ -43,6 +43,9 @@ public sealed class WarehousePickingSqlServerIntegrationTests
         await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.ApplySql);
         await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.ApplySql);
         await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.VerifySql);
+        await database.ExecuteAsync(WarehouseOrderPickAssignmentSchema.ApplySql);
+        await database.ExecuteAsync(WarehouseOrderPickAssignmentSchema.ApplySql);
+        await database.ExecuteAsync(WarehouseOrderPickAssignmentSchema.VerifySql);
 
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Warehouse.Picking'"));
         Assert.Equal(
@@ -102,6 +105,153 @@ public sealed class WarehousePickingSqlServerIntegrationTests
         Assert.NotNull(row.ClearedAtUtc);
         // 自动失效时记下又拣到货的人；之后的撤销没有有效标记，不覆盖。
         Assert.Equal("Picker u-3", row.ClearedByName);
+    }
+
+    [WarehousePickingSqlServerFact]
+    public async Task SQLServer_多位经理并发派同一张单_串行整单替换_派给我的与候选在拣单数正确()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        await SeedOrderAsync(database, minOrderQuantity: 2);
+        using (var seed = database.CreateClient())
+        {
+            await seed.Insertable(Enumerable.Range(2, 5).Select(index => new WareHouseOrderDetails
+            {
+                DetailGUID = $"d-{index}",
+                OrderGUID = OrderGuid,
+                StoreCode = "1013",
+                ProductCode = $"P-{index}",
+                Quantity = 12,
+                OEMPrice = 1m,
+                ImportPrice = 1m,
+            }).ToList()).ExecuteCommandAsync();
+        }
+
+        var pickers = new Mock<IWarehousePickerService>();
+        foreach (var guid in new[] { "u-1", "u-2", "u-3" })
+        {
+            pickers.Setup(service => service.GetEligibilityAsync(guid))
+                .ReturnsAsync(new WarehousePickerEligibility(guid, $"Picker {guid}", true, false, "WarehouseStaff"));
+        }
+
+        pickers.Setup(service => service.ListEligibleAsync())
+            .ReturnsAsync(new List<WarehousePickerEligibility> { new("u-1", "Picker u-1", true, false, null), new("u-3", "Picker u-3", true, false, null) });
+        WarehousePickingAssignmentService Assignments() =>
+            new(CreateContext(database.CreateClient()), pickers.Object, NullLogger<WarehousePickingAssignmentService>.Instance);
+
+        // 6 次并发派单（两组员工交替）：订单行更新锁让它们串行，最终是其中一次的完整结果，不撞主键、不混合。
+        var results = await Task.WhenAll(Enumerable.Range(0, 6).Select(index => Assignments().AssignEvenlyAsync(
+            new WarehousePickingBatchAssignRequestDto
+            {
+                OrderGuids = new List<string> { OrderGuid },
+                PickerUserGuids = index % 2 == 0 ? new List<string> { "u-1", "u-2" } : new List<string> { "u-3" },
+            },
+            new WarehousePickingAssigner($"m-{index}", $"Manager {index}")
+        )));
+
+        Assert.All(results, result => Assert.True(result.Data!.Items.Single().Success, result.Data.Items.Single().Message));
+        using var db = database.CreateClient();
+        var rows = await db.Queryable<WarehouseOrderPickAssignment>().ToListAsync();
+        Assert.Equal(6, rows.Count);
+        Assert.Single(rows.Select(row => row.AssignedByUserGuid).Distinct());
+        var pickerSet = rows.Select(row => row.PickerUserGuid).Distinct().OrderBy(guid => guid).ToArray();
+        Assert.True(pickerSet.SequenceEqual(new[] { "u-1", "u-2" }) || pickerSet.SequenceEqual(new[] { "u-3" }));
+
+        await Assignments().SaveAsync(
+            OrderGuid,
+            new WarehousePickingAssignmentSaveRequestDto
+            {
+                Assignments = new List<WarehousePickingAssignmentInputDto>
+                {
+                    new() { PickerUserGuid = "u-1", DetailGuids = new List<string> { "d-1", "d-2" } },
+                    new() { PickerUserGuid = "u-3", DetailGuids = new List<string> { "d-3" } },
+                },
+            },
+            new WarehousePickingAssigner("m-x", "Manager X")
+        );
+        var mine = await CreateService(database).ListOrdersAsync("mine", null, "u-3");
+        Assert.Equal(1, mine.Data!.Counts.Mine);
+        Assert.Equal(new[] { ("u-1", 2), ("u-3", 1) }, mine.Data.Items.Single().Assignees.Select(item => (item.PickerUserGuid, item.LineCount)));
+        var candidates = await Assignments().ListCandidatesAsync();
+        Assert.Equal(new[] { 1, 1 }, candidates.Data!.Select(item => item.ActiveOrderCount));
+
+        var summary = await Assignments().GetAsync(OrderGuid);
+        var slipCode = summary.Data!.Assignees.Single(item => item.SegmentNo == 2).SlipCode!;
+        var resolved = await Assignments().ResolveSlipAsync(slipCode);
+        Assert.True(resolved.Success, resolved.Message);
+        Assert.Equal(("u-3", 2, 1), (resolved.Data!.PickerUserGuid, resolved.Data.SegmentCount, resolved.Data.LineCount));
+        var slips = await Assignments().GetSlipsAsync(OrderGuid, null);
+        Assert.Equal(new[] { 2, 1 }, slips.Data!.Slips.Select(slip => slip.LineCount));
+    }
+
+    [WarehousePickingSqlServerFact]
+    public async Task SQLServer_多人同时扫同一张待领取分单_只有一人领到()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        await SeedOrderAsync(database, minOrderQuantity: 2);
+        var pickers = new Mock<IWarehousePickerService>();
+        WarehousePickingAssignmentService Assignments() =>
+            new(CreateContext(database.CreateClient()), pickers.Object, NullLogger<WarehousePickingAssignmentService>.Instance);
+        await Assignments().AssignEvenlyAsync(
+            new WarehousePickingBatchAssignRequestDto { OrderGuids = new List<string> { OrderGuid }, SegmentCount = 1 },
+            new WarehousePickingAssigner("m-1", "Manager")
+        );
+        var code = (await Assignments().GetAsync(OrderGuid)).Data!.Assignees.Single().SlipCode!;
+
+        var results = await Task.WhenAll(Enumerable.Range(1, 6).Select(index =>
+            Assignments().ClaimSlipAsync(code, Picker($"u-{index}"))
+        ));
+
+        Assert.All(results, result => Assert.True(result.Success, result.Message));
+        var winner = Assert.Single(results, result => result.Data!.ClaimedNow);
+        Assert.All(results, result => Assert.Equal(winner.Data!.PickerUserGuid, result.Data!.PickerUserGuid));
+        Assert.Single(results, result => result.Data!.ClaimedByMe);
+    }
+
+    [WarehousePickingSqlServerFact]
+    public async Task SQLServer_候选员工粗筛_仓库角色与角色或本人拣货权限()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        using var db = database.CreateClient();
+        db.CodeFirst.InitTables(typeof(User), typeof(Role), typeof(UserRole), typeof(SysRolePermission), typeof(SysUserPermission));
+        foreach (var (guid, name) in new[] { ("u-staff", "Chen"), ("u-pack", "Dan"), ("u-direct", "Bo"), ("u-plain", "Pat") })
+        {
+            await db.Insertable(new User { UserGUID = guid, Username = guid, Email = $"{guid}@example.invalid", PasswordHash = "x", FullName = name, IsActive = true })
+                .ExecuteCommandAsync();
+        }
+
+        await db.Insertable(new List<Role>
+        {
+            new() { RoleGUID = "r-staff", RoleName = "仓库员工", IsActive = true },
+            new() { RoleGUID = "r-pack", RoleName = "打包组", IsActive = true },
+            new() { RoleGUID = "r-user", RoleName = "User", IsActive = true },
+        }).ExecuteCommandAsync();
+        await db.Insertable(new List<UserRole>
+        {
+            new() { UserGUID = "u-staff", RoleGUID = "r-staff" },
+            new() { UserGUID = "u-pack", RoleGUID = "r-pack" },
+            new() { UserGUID = "u-plain", RoleGUID = "r-user" },
+        }).ExecuteCommandAsync();
+        await db.Insertable(new SysRolePermission { RoleGuid = "r-pack", PermissionCode = "Warehouse.Picking" }).ExecuteCommandAsync();
+        await db.Insertable(new SysUserPermission { UserGuid = "u-direct", PermissionCode = "Warehouse.ManageOrders" }).ExecuteCommandAsync();
+        var roles = new Mock<BlazorApp.Api.Interfaces.IRoleService>();
+        roles.Setup(service => service.GetUserPermissionSnapshotAsync(It.IsAny<string>()))
+            .ReturnsAsync((string guid) => BlazorApp.Shared.DTOs.ApiResponse<BlazorApp.Shared.DTOs.UserPermissionSnapshotDto>.OK(
+                new BlazorApp.Shared.DTOs.UserPermissionSnapshotDto
+                {
+                    UserGuid = guid,
+                    RoleNames = guid == "u-staff" ? new List<string> { "仓库员工" } : new List<string>(),
+                    PermissionCodes = guid is "u-pack" or "u-direct" ? new List<string> { "Warehouse.Picking" } : new List<string>(),
+                }
+            ));
+        var service = new WarehousePickerService(
+            CreateContext(database.CreateClient()),
+            roles.Object,
+            new WarehousePickerTicketProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider())
+        );
+
+        var eligible = await service.ListEligibleAsync();
+
+        Assert.Equal(new[] { "u-direct", "u-staff", "u-pack" }, eligible.Select(item => item.UserGuid).ToArray());
     }
 
     [WarehousePickingSqlServerFact]
@@ -225,6 +375,8 @@ CREATE TABLE dbo.HbwebSysPermissions (
             await database.ExecuteAsync(WarehouseOrderPickingSchema.VerifySql);
             await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.ApplySql);
             await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.VerifySql);
+            await database.ExecuteAsync(WarehouseOrderPickAssignmentSchema.ApplySql);
+            await database.ExecuteAsync(WarehouseOrderPickAssignmentSchema.VerifySql);
             using var db = database.CreateClient();
             db.CodeFirst.InitTables(
                 typeof(WareHouseOrder),

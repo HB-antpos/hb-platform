@@ -21,6 +21,12 @@ public static class WarehousePickingErrorCodes
     public const string PickedBelowZero = "PICKED_BELOW_ZERO";
     public const string PickedTotalChanged = "PICKED_TOTAL_CHANGED";
     public const string LineAlreadyComplete = "LINE_ALREADY_COMPLETE";
+    public const string AssignNotAllowed = "ASSIGN_NOT_ALLOWED";
+    public const string AssignPickerInvalid = "ASSIGN_PICKER_INVALID";
+    public const string AssignCountsInvalid = "ASSIGN_COUNTS_INVALID";
+    public const string AssignLinesInvalid = "ASSIGN_LINES_INVALID";
+    public const string SlipStale = "SLIP_STALE";
+    public const string SegmentsIncomplete = "SEGMENTS_INCOMPLETE";
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string CodeNotFound = "CODE_NOT_FOUND";
 }
@@ -75,6 +81,97 @@ internal static class WarehousePickingRules
 {
     /// <summary>配货单二维码前缀；PDA 同一扫码入口靠它区分订单码与商品条码。</summary>
     public const string OrderQrPrefix = "HBSO:";
+
+    /// <summary>分单拣货单条码前缀：HBSP:订单号/段号/版本。</summary>
+    public const string SlipCodePrefix = "HBSP:";
+
+    /// <summary>分配版本起点：版本按距此时刻的秒数计，int 可用到 2094 年。</summary>
+    private static readonly DateTime AssignmentVersionEpochUtc = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
+    /// 新的分配版本：取当前秒数与旧版本 +1 的较大值。按时间取值，撤销分配（删行）后再派也不会与旧分单撞号；
+    /// 同一秒内连续保存靠“旧版本 +1”保证严格递增。
+    /// </summary>
+    public static int NextAssignmentVersion(int? previousMax, DateTime nowUtc)
+    {
+        var bySeconds = (int)Math.Max(1, (nowUtc - AssignmentVersionEpochUtc).TotalSeconds);
+        return Math.Max(bySeconds, (previousMax ?? 0) + 1);
+    }
+
+    /// <summary>分单条码：HBSP:订单号/段号/版本（版本转大写 36 进制，缩短条码长度）。</summary>
+    public static string FormatSlipCode(string orderNo, int segmentNo, int version) =>
+        $"{SlipCodePrefix}{orderNo.Trim().ToUpperInvariant()}/{segmentNo}/{ToBase36(version)}";
+
+    /// <summary>解析分单条码；订单号里不会有斜杠，从右往左取段号与版本。不是分单条码返回 null。</summary>
+    public static (string OrderNo, int SegmentNo, int Version)? ParseSlipCode(string? raw)
+    {
+        var code = NormalizeCode(raw);
+        if (!code.StartsWith(SlipCodePrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var parts = code[SlipCodePrefix.Length..].Split('/');
+        if (parts.Length != 3
+            || parts[0].Length == 0
+            || !int.TryParse(parts[1], out var segmentNo)
+            || segmentNo <= 0
+            || !TryParseBase36(parts[2], out var version))
+        {
+            return null;
+        }
+
+        return (parts[0], segmentNo, version);
+    }
+
+    private static string ToBase36(int value)
+    {
+        const string digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        if (value <= 0)
+        {
+            return "0";
+        }
+
+        var chars = new Stack<char>();
+        while (value > 0)
+        {
+            chars.Push(digits[value % 36]);
+            value /= 36;
+        }
+
+        return new string(chars.ToArray());
+    }
+
+    private static bool TryParseBase36(string text, out int value)
+    {
+        value = 0;
+        if (text.Length is 0 or > 6)
+        {
+            return false;
+        }
+
+        long result = 0;
+        foreach (var character in text)
+        {
+            var digit = character is >= '0' and <= '9' ? character - '0'
+                : character is >= 'A' and <= 'Z' ? character - 'A' + 10
+                : -1;
+            if (digit < 0)
+            {
+                return false;
+            }
+
+            result = result * 36 + digit;
+        }
+
+        if (result > int.MaxValue)
+        {
+            return false;
+        }
+
+        value = (int)result;
+        return true;
+    }
 
     public const int FlowStatusSubmitted = 1;
     public const int FlowStatusCompleted = 2;
@@ -224,6 +321,44 @@ internal static class WarehousePickingRules
             .ToList();
     }
 
+    /// <summary>
+    /// 分段拣货里一个品种“处理完”的口径：已拣齐（含超拣）或标了货位没货。
+    /// 拣了一部分却没标没货的品种算没处理完——缺货必须明确标出来，不能半拣就提交。
+    /// </summary>
+    public static bool IsLineSettled(decimal ordered, decimal picked, bool stockout) =>
+        picked >= ordered || stockout;
+
+    /// <summary>
+    /// 有拣货分配的订单：找出还有品种没处理完的段（按段号升序）。没有分配的品种不参与；
+    /// 段负责人取该段任一行（同段同人）。返回空表示每段都拣完了，可以提交整单。
+    /// </summary>
+    public static List<WarehouseIncompleteSegment> FindIncompleteSegments(
+        IEnumerable<(int SegmentNo, string? PickerName, decimal Ordered, decimal Picked, bool Stockout)> lines
+    )
+    {
+        return lines
+            .GroupBy(line => line.SegmentNo)
+            .Select(group => new WarehouseIncompleteSegment(
+                group.Key,
+                group.Select(line => line.PickerName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)),
+                group.Count(line => IsLineSettled(line.Ordered, line.Picked, line.Stockout)),
+                group.Count()
+            ))
+            .Where(segment => segment.SettledLineCount < segment.LineCount)
+            .OrderBy(segment => segment.SegmentNo)
+            .ToList();
+    }
+
+    /// <summary>提交被拦时给员工看的说明：哪几段没拣完，以及放行办法。</summary>
+    public static string DescribeIncompleteSegments(IReadOnlyList<WarehouseIncompleteSegment> segments)
+    {
+        var parts = segments.Select(segment =>
+            $"第 {segment.SegmentNo} 段 {(string.IsNullOrWhiteSpace(segment.PickerName) ? "待领取" : segment.PickerName)} {segment.SettledLineCount}/{segment.LineCount}"
+        );
+        return $"还有 {segments.Count} 段没拣完，不能提交整单：{string.Join("、", parts)}。"
+            + "没货的品种标“货位没货”后才算拣完；确实拣不完请经理在订单详情撤销分配或改派。";
+    }
+
     /// <summary>订单行与拣货数对比：短缺与超拣行数用于提交后的汇总。</summary>
     public static (int ShortLines, int OverLines) CountVariances(
         IEnumerable<(decimal Ordered, int Picked)> lines
@@ -246,3 +381,6 @@ internal static class WarehousePickingRules
         return (shortLines, overLines);
     }
 }
+
+/// <summary>还没拣完的分段：段号、负责人（待领取为空）、已处理品种数 / 段内品种数。</summary>
+public sealed record WarehouseIncompleteSegment(int SegmentNo, string? PickerName, int SettledLineCount, int LineCount);

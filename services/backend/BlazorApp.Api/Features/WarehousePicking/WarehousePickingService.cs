@@ -8,7 +8,12 @@ namespace BlazorApp.Api.Features.WarehousePicking;
 
 public interface IWarehousePickingService
 {
-    Task<WarehousePickingResult<WarehousePickingOrderListDto>> ListOrdersAsync(string? filter, string? keyword);
+    /// <summary>可拣订单列表；pickerUserGuid 为当前拣货人，为空时不算“派给我”的数量，mine 筛选返回空列表。</summary>
+    Task<WarehousePickingResult<WarehousePickingOrderListDto>> ListOrdersAsync(
+        string? filter,
+        string? keyword,
+        string? pickerUserGuid = null
+    );
 
     Task<WarehousePickingResult<WarehousePickingOrderResolveDto>> ResolveOrderAsync(string? code);
 
@@ -76,7 +81,8 @@ internal sealed class WarehousePickingService(
 
     public async Task<WarehousePickingResult<WarehousePickingOrderListDto>> ListOrdersAsync(
         string? filter,
-        string? keyword
+        string? keyword,
+        string? pickerUserGuid = null
     )
     {
         var normalizedKeyword = keyword?.Trim();
@@ -97,11 +103,19 @@ internal sealed class WarehousePickingService(
         var pickingCount = statusCounts
             .Where(row => row.FlowStatus == WarehousePickingRules.FlowStatusPicking)
             .Sum(row => row.Count);
+        var normalizedPicker = string.IsNullOrWhiteSpace(pickerUserGuid) ? null : pickerUserGuid.Trim();
         var counts = new WarehousePickingOrderCountsDto
         {
             All = toPickCount + pickingCount,
             ToPick = toPickCount,
             Picking = pickingCount,
+            Mine = normalizedPicker == null
+                ? null
+                : await PickableOrderQuery(normalizedKeyword)
+                    .Where((order, session) => SqlFunc.Subqueryable<WarehouseOrderPickAssignment>()
+                        .Where(assignment => assignment.OrderGUID == order.OrderGUID && assignment.PickerUserGuid == normalizedPicker)
+                        .Any())
+                    .CountAsync(),
         };
 
         var itemQuery = PickableOrderQuery(normalizedKeyword);
@@ -112,6 +126,14 @@ internal sealed class WarehousePickingService(
         else if (normalizedFilter == "picking")
         {
             itemQuery = itemQuery.Where((order, session) => order.FlowStatus == WarehousePickingRules.FlowStatusPicking);
+        }
+        else if (normalizedFilter == "mine")
+        {
+            // 派给我的：经理把本单至少一行派给了当前拣货人；认不出拣货人时为空列表。
+            var picker = normalizedPicker ?? string.Empty;
+            itemQuery = itemQuery.Where((order, session) => SqlFunc.Subqueryable<WarehouseOrderPickAssignment>()
+                .Where(assignment => assignment.OrderGUID == order.OrderGUID && assignment.PickerUserGuid == picker)
+                .Any());
         }
 
         // 与 Web 仓库订单列表默认排序一致：下单时间新的在前。
@@ -145,6 +167,7 @@ internal sealed class WarehousePickingService(
             .ToList();
         var pickedLineCounts = await CountPickedLinesAsync(pickingGuids);
         var pickers = await LoadPickersAsync(pickingGuids);
+        var assignees = await WarehousePickingQueries.LoadAssigneesAsync(_db, page.Select(row => row.OrderGUID).ToList());
 
         var items = page.Select(row => new WarehousePickingOrderListItemDto
         {
@@ -159,6 +182,7 @@ internal sealed class WarehousePickingService(
             PickedLineCount = pickedLineCounts.GetValueOrDefault(row.OrderGUID),
             SessionStatus = row.SessionStatus,
             Pickers = pickers.GetValueOrDefault(row.OrderGUID) ?? new List<WarehousePickerRefDto>(),
+            Assignees = assignees.GetValueOrDefault(row.OrderGUID) ?? new List<WarehousePickingAssigneeDto>(),
         }).ToList();
 
         return WarehousePickingResult<WarehousePickingOrderListDto>.Ok(
@@ -727,6 +751,37 @@ internal sealed class WarehousePickingService(
             var totals = (await WarehousePickingQueries.LoadPickTotalsAsync(_db, orderGuid))
                 .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Sum(total => total.Quantity), StringComparer.OrdinalIgnoreCase);
+
+            // 有拣货分配的订单：每段都拣完（拣齐或标了货位没货）才能提交整单，避免先拣完的人把别人的段一起关掉；
+            // 确实拣不完由经理在 Web 撤销分配或改派后放行。
+            var assignments = await WarehousePickingQueries.LoadAssignmentsAsync(_db, orderGuid);
+            if (assignments.Count > 0)
+            {
+                var stockouts = await WarehousePickingQueries.LoadActiveStockoutsAsync(_db, orderGuid);
+                var incomplete = WarehousePickingRules.FindIncompleteSegments(
+                    details
+                        .Where(detail => assignments.ContainsKey(detail.DetailGUID))
+                        .Select(detail =>
+                        {
+                            var assignment = assignments[detail.DetailGUID];
+                            return (
+                                assignment.SegmentNo,
+                                assignment.PickerName,
+                                detail.Quantity ?? 0,
+                                (decimal)totals.GetValueOrDefault(detail.DetailGUID),
+                                stockouts.ContainsKey(detail.DetailGUID)
+                            );
+                        })
+                );
+                if (incomplete.Count > 0)
+                {
+                    return WarehousePickingResult<WarehousePickingSubmitResultDto>.Fail(
+                        409,
+                        WarehousePickingErrorCodes.SegmentsIncomplete,
+                        WarehousePickingRules.DescribeIncompleteSegments(incomplete)
+                    );
+                }
+            }
 
             // 订单行批量改配货数经审计拦截器落库的是 UTC；这里显式写 UTC 与拣货人，保持同一口径。
             var now = DateTime.UtcNow;

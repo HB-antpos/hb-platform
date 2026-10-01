@@ -3,6 +3,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
+  TeamOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
 import {
@@ -57,6 +58,7 @@ import {
   updateStoreOrderOutboundDate,
   updateStoreOrderStatus,
 } from '../../../services/storeOrderService'
+import { listAssignmentSummaries, type Assignee } from '../../../services/warehousePickingAssignmentService'
 import { createStore, getNextStoreCode, getStores } from '../../../services/storeService'
 import { useAuthStore } from '../../../store/auth'
 import type { CreateStoreDto, StoreDto } from '../../../types/store'
@@ -84,6 +86,8 @@ import {
   moveStoreOrderListColumnOrder,
   type StoreOrderListTableColumnKey,
 } from './columnOrder'
+import BatchAssignModal from './pickingAssignment/BatchAssignModal'
+import { AssigneeChip, pickingSlipsPath } from './pickingAssignment/PickingAssignmentSection'
 import { formatStoreOrderVolume } from './volumeFormat'
 import './compact.css'
 import { MeasuredTable } from '../../../components/MeasuredTable'
@@ -881,6 +885,10 @@ export default function StoreOrdersPage() {
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend')
   const [storePickerOpen, setStorePickerOpen] = useState(false)
   const [copyModalOpen, setCopyModalOpen] = useState(false)
+  const [batchAssignOpen, setBatchAssignOpen] = useState(false)
+  // 当前页各订单的拣货分配（负责人与品种数），“拣货分配”列与批量分配的覆盖提示用。
+  const [assignmentSummaries, setAssignmentSummaries] = useState<Record<string, Assignee[]>>({})
+  const [assignmentSummaryNonce, setAssignmentSummaryNonce] = useState(0)
   const [shippingOrder, setShippingOrder] = useState<StoreOrderListItem | null>(null)
   const [shippingDate, setShippingDate] = useState<Dayjs>(() => dayjs())
   const [shippingLoading, setShippingLoading] = useState(false)
@@ -1429,6 +1437,26 @@ export default function StoreOrdersPage() {
     }),
   )
 
+  useEffect(() => {
+    if (!canUseWarehouseManagerActions || data.length === 0) {
+      setAssignmentSummaries({})
+      return
+    }
+    const controller = new AbortController()
+    listAssignmentSummaries(
+      data.map((order) => order.orderGUID),
+      controller.signal,
+    )
+      .then((summaries) => {
+        if (!controller.signal.aborted) setAssignmentSummaries(summaries)
+      })
+      .catch(() => {
+        // 分配列只是辅助信息：加载失败时留空，不打断订单列表。
+        if (!controller.signal.aborted) setAssignmentSummaries({})
+      })
+    return () => controller.abort()
+  }, [assignmentSummaryNonce, canUseWarehouseManagerActions, data])
+
   const baseColumns = useMemo<ColumnsType<StoreOrderListItem>>(
     () => [
       {
@@ -1606,6 +1634,29 @@ export default function StoreOrdersPage() {
         ...dateRangeFilterProps('updatedAtStart', 'updatedAtEnd'),
         render: (value: string | undefined) => <span className="store-order-nowrap">{formatDateTime(value, i18n.language)}</span>,
       },
+      ...(canUseWarehouseManagerActions
+        ? [
+            {
+              key: 'pickingAssignment',
+              title: t('storeOrders.pickingAssignment.listColumn', '拣货分配'),
+              width: 200,
+              render: (_: unknown, record: StoreOrderListItem) => {
+                const assignees = assignmentSummaries[record.orderGUID]
+                return assignees?.length ? (
+                  <Space size={4} wrap>
+                    {assignees.map((assignee) => (
+                      <AssigneeChip key={assignee.segmentNo} segmentNo={assignee.segmentNo} name={assignee.pickerName} lineCount={assignee.lineCount} />
+                    ))}
+                  </Space>
+                ) : (
+                  <span className="store-order-nowrap" style={{ color: '#8c8c8c' }}>
+                    {t('storeOrders.pickingAssignment.unassignedShort', '未分配')}
+                  </span>
+                )
+              },
+            },
+          ]
+        : []),
       {
         title: t('column.action'),
         key: 'action',
@@ -1649,6 +1700,7 @@ export default function StoreOrdersPage() {
       },
     ],
     [
+      assignmentSummaries,
       branchMap,
       canUseWarehouseManagerActions,
       canDeleteStoreOrder,
@@ -1892,6 +1944,15 @@ export default function StoreOrdersPage() {
               {t('storeOrders.copyOrder', { count: selectedRowKeys.length })}
             </Button>
           ) : null}
+          {canUseWarehouseManagerActions ? (
+            <Button
+              icon={<TeamOutlined />}
+              disabled={!selectedRowKeys.length}
+              onClick={() => setBatchAssignOpen(true)}
+            >
+              {t('storeOrders.pickingAssignment.batchButton', '分配拣货（{{count}}）', { count: selectedRowKeys.length })}
+            </Button>
+          ) : null}
           <Button
             icon={<ReloadOutlined />}
             onClick={() => {
@@ -2051,6 +2112,22 @@ export default function StoreOrdersPage() {
           }
         }}
       />
+
+      {batchAssignOpen ? (
+        <BatchAssignModal
+          open
+          orders={data.filter((order) => selectedRowKeys.includes(order.orderGUID))}
+          existing={assignmentSummaries}
+          onClose={() => setBatchAssignOpen(false)}
+          onDone={(_items, printOrderGuids) => {
+            setAssignmentSummaryNonce((value) => value + 1)
+            if (printOrderGuids.length > 0) {
+              setBatchAssignOpen(false)
+              navigate(pickingSlipsPath(printOrderGuids))
+            }
+          }}
+        />
+      ) : null}
 
       <CopyOrderModal
         open={copyModalOpen}

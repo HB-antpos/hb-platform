@@ -191,6 +191,7 @@ internal static class WarehousePickingQueries
         var totals = await LoadPickTotalsAsync(db, order.OrderGUID);
         var participants = await LoadParticipantsAsync(db, order.OrderGUID);
         var stockouts = await LoadActiveStockoutsAsync(db, order.OrderGUID);
+        var assignments = await LoadAssignmentsAsync(db, order.OrderGUID);
 
         var totalsByDetail = totals
             .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
@@ -255,6 +256,9 @@ internal static class WarehousePickingQueries
                 PickedTotal = lineTotals?.Sum(total => total.Quantity) ?? 0,
                 PickedBy = ToPickedBy(lineTotals),
                 Stockout = stockouts.GetValueOrDefault(line.DetailGUID),
+                AssigneeUserGuid = assignments.GetValueOrDefault(line.DetailGUID)?.PickerUserGuid,
+                AssigneeName = assignments.GetValueOrDefault(line.DetailGUID)?.PickerName,
+                AssignmentSegmentNo = assignments.GetValueOrDefault(line.DetailGUID)?.SegmentNo,
             });
 
             AddLineCodes(codeSources, line, productCode, lineSetCodes, lineMultiCodes, childNames);
@@ -302,6 +306,7 @@ internal static class WarehousePickingQueries
         var totals = await LoadPickTotalsAsync(db, orderGuid);
         var participants = await LoadParticipantsAsync(db, orderGuid);
         var stockouts = await LoadActiveStockoutsAsync(db, orderGuid);
+        var assignments = await LoadAssignmentsAsync(db, orderGuid);
         var totalsByDetail = totals
             .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
@@ -322,6 +327,9 @@ internal static class WarehousePickingQueries
                         PickedBy = ToPickedBy(lineTotals),
                         MinOrderQuantity = line.MinOrderQuantity,
                         Stockout = stockouts.GetValueOrDefault(line.DetailGUID),
+                        AssigneeUserGuid = assignments.GetValueOrDefault(line.DetailGUID)?.PickerUserGuid,
+                        AssigneeName = assignments.GetValueOrDefault(line.DetailGUID)?.PickerName,
+                        AssignmentSegmentNo = assignments.GetValueOrDefault(line.DetailGUID)?.SegmentNo,
                     };
                 })
                 .ToList(),
@@ -339,6 +347,8 @@ internal static class WarehousePickingQueries
     {
         var totals = await LoadPickTotalsAsync(db, orderGuid, detailGuid);
         var stockouts = await LoadActiveStockoutsAsync(db, orderGuid, detailGuid);
+        // 写入后回给客户端的单行进度同样带分配：客户端整行合并，缺了会把这行的段号与负责人清空。
+        var assignment = (await LoadAssignmentsAsync(db, orderGuid, detailGuid)).GetValueOrDefault(detailGuid);
         return new WarehousePickingLineProgressDto
         {
             DetailGuid = detailGuid,
@@ -346,6 +356,9 @@ internal static class WarehousePickingQueries
             PickedBy = ToPickedBy(totals),
             MinOrderQuantity = minOrderQuantity,
             Stockout = stockouts.GetValueOrDefault(detailGuid),
+            AssigneeUserGuid = assignment?.PickerUserGuid,
+            AssigneeName = assignment?.PickerName,
+            AssignmentSegmentNo = assignment?.SegmentNo,
         };
     }
 
@@ -375,6 +388,117 @@ internal static class WarehousePickingQueries
             },
             StringComparer.OrdinalIgnoreCase
         );
+    }
+
+    /// <summary>订单各行的负责人（经理派单），按订单行索引；没有分配时为空字典。</summary>
+    internal static async Task<Dictionary<string, WarehouseOrderPickAssignment>> LoadAssignmentsAsync(
+        ISqlSugarClient db,
+        string orderGuid,
+        string? detailGuid = null
+    )
+    {
+        var query = db.Queryable<WarehouseOrderPickAssignment>()
+            .Where(assignment => assignment.OrderGUID == orderGuid);
+        if (!string.IsNullOrWhiteSpace(detailGuid))
+        {
+            query = query.Where(assignment => assignment.DetailGUID == detailGuid);
+        }
+
+        var rows = await query.ToListAsync();
+        return rows
+            .GroupBy(row => row.DetailGUID, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>订单列表用：每张订单的负责人与各自行数，按段号排序。</summary>
+    internal static async Task<Dictionary<string, List<WarehousePickingAssigneeDto>>> LoadAssigneesAsync(
+        ISqlSugarClient db,
+        List<string> orderGuids
+    )
+    {
+        if (orderGuids.Count == 0)
+        {
+            return new Dictionary<string, List<WarehousePickingAssigneeDto>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var rows = await db.Queryable<WarehouseOrderPickAssignment>()
+            .Where(assignment => orderGuids.Contains(assignment.OrderGUID))
+            .GroupBy(assignment => new { assignment.OrderGUID, assignment.PickerUserGuid, assignment.SegmentNo })
+            .Select(assignment => new AssigneeCountRow
+            {
+                OrderGUID = assignment.OrderGUID,
+                PickerUserGuid = assignment.PickerUserGuid,
+                SegmentNo = assignment.SegmentNo,
+                PickerName = SqlFunc.AggregateMax(assignment.PickerName),
+                LineCount = SqlFunc.AggregateCount(assignment.DetailGUID),
+            })
+            .ToListAsync();
+        return rows
+            .GroupBy(row => row.OrderGUID, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(row => new WarehousePickingAssigneeDto
+                    {
+                        PickerUserGuid = row.PickerUserGuid,
+                        PickerName = row.PickerName,
+                        LineCount = row.LineCount,
+                        SegmentNo = row.SegmentNo,
+                    })
+                    .OrderBy(row => row.SegmentNo)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase
+            );
+    }
+
+    /// <summary>派单用：订单各行及其配货位文本（与拣货单同口径），供按走位顺序分段。</summary>
+    internal static async Task<List<WarehouseRouteLine>> LoadRouteLinesAsync(ISqlSugarClient db, string orderGuid)
+    {
+        var lines = await LoadLinesAsync(db, orderGuid);
+        var productCodes = lines
+            .Select(line => line.ProductCode?.Trim())
+            .Where(code => !string.IsNullOrEmpty(code))
+            .Select(code => code!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var locationsByProduct = (await LoadPickLocationsAsync(db, productCodes))
+            .GroupBy(location => location.ProductCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => string.Join(
+                    ", ",
+                    group
+                        .Select(location => location.LocationCode)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                ),
+                StringComparer.OrdinalIgnoreCase
+            );
+        return lines
+            .Select(line =>
+            {
+                var productCode = line.ProductCode?.Trim() ?? string.Empty;
+                return new WarehouseRouteLine(
+                    line.DetailGUID,
+                    locationsByProduct.GetValueOrDefault(productCode),
+                    line.ItemNumber,
+                    productCode,
+                    line.Quantity ?? 0,
+                    line.ProductName,
+                    line.Barcode,
+                    line.MinOrderQuantity
+                );
+            })
+            .ToList();
+    }
+
+    private sealed class AssigneeCountRow
+    {
+        public string OrderGUID { get; set; } = string.Empty;
+        public string? PickerUserGuid { get; set; }
+        public string? PickerName { get; set; }
+        public int SegmentNo { get; set; }
+        public int LineCount { get; set; }
     }
 
     /// <summary>商品的配货位文本（与拣货单同口径，多个按编码排序后以逗号连接）；未绑定时为空。</summary>

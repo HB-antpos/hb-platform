@@ -174,14 +174,93 @@ export function routeTurn(
   return { zone: to.zone, rowLabel: to.rowLabel, descending: isDescendingRow(to, route) };
 }
 
-export function lineInScope(line: Pick<PickSheetLine, "locationCode">, scope: PickScope): boolean {
+/** “我的”指谁：扫了分单就是那一段，否则是派给（或已领取到）当前拣货人的行。 */
+export interface MineContext {
+  pickerUserGuid: string | null;
+  segmentNo: number | null;
+  /** 正在帮的段号（“帮 某某”范围）；没在帮忙为空。 */
+  helpSegmentNo?: number | null;
+}
+
+type ScopeLine = Pick<PickSheetLine, "locationCode" | "assigneeUserGuid" | "assignmentSegmentNo">;
+
+export function isMyLine(line: Pick<PickSheetLine, "assigneeUserGuid" | "assignmentSegmentNo">, mine: MineContext): boolean {
+  if (mine.segmentNo != null) return line.assignmentSegmentNo === mine.segmentNo;
+  return Boolean(mine.pickerUserGuid && line.assigneeUserGuid && line.assigneeUserGuid.toLowerCase() === mine.pickerUserGuid.toLowerCase());
+}
+
+/** 订单有没有拣货分配（任意一行带段号即有）。 */
+export function hasAssignments(lines: readonly Pick<PickSheetLine, "assignmentSegmentNo">[]): boolean {
+  return lines.some((line) => line.assignmentSegmentNo != null);
+}
+
+export function lineInScope(line: ScopeLine, scope: PickScope, mine?: MineContext): boolean {
   if (scope === "all") return true;
+  if (scope === "mine") return mine ? isMyLine(line, mine) : false;
+  if (scope === "help") return mine?.helpSegmentNo != null && line.assignmentSegmentNo === mine.helpSegmentNo;
   return (scope === "located") === hasLocation(line);
 }
 
-export function scopeCounts(lines: readonly Pick<PickSheetLine, "locationCode">[]): Record<PickScope, number> {
+export function scopeCounts(lines: readonly ScopeLine[], mine?: MineContext): Record<PickScope, number> {
   const located = lines.filter(hasLocation).length;
-  return { all: lines.length, located, unlocated: lines.length - located };
+  return {
+    mine: mine ? lines.filter((line) => isMyLine(line, mine)).length : 0,
+    help: lines.filter((line) => lineInScope(line, "help", mine)).length,
+    all: lines.length,
+    located,
+    unlocated: lines.length - located,
+  };
+}
+
+export interface SegmentSummary {
+  segmentNo: number;
+  assigneeUserGuid: string | null;
+  assigneeName: string | null;
+  lineCount: number;
+  completeLineCount: number;
+  stockoutLineCount: number;
+  pickedPieces: number;
+  orderedPieces: number;
+}
+
+/** 完成页按段汇总：每段负责人（或待领取）、已拣齐与没货的品种数、件数；没有分配的行不计。 */
+export function summarizeSegments(lines: readonly PickSheetLine[]): SegmentSummary[] {
+  const bySegment = new Map<number, SegmentSummary>();
+  for (const line of lines) {
+    if (line.assignmentSegmentNo == null) continue;
+    const segment = bySegment.get(line.assignmentSegmentNo) ?? {
+      segmentNo: line.assignmentSegmentNo,
+      assigneeUserGuid: line.assigneeUserGuid,
+      assigneeName: line.assigneeName,
+      lineCount: 0,
+      completeLineCount: 0,
+      stockoutLineCount: 0,
+      pickedPieces: 0,
+      orderedPieces: 0,
+    };
+    segment.lineCount += 1;
+    segment.orderedPieces += line.orderedQuantity;
+    segment.pickedPieces += line.pickedTotal;
+    if (line.pickedTotal >= line.orderedQuantity) segment.completeLineCount += 1;
+    else if (isStockout(line)) segment.stockoutLineCount += 1;
+    bySegment.set(line.assignmentSegmentNo, segment);
+  }
+  return Array.from(bySegment.values()).sort((a, b) => a.segmentNo - b.segmentNo);
+}
+
+/** 一段处理完：段内每个品种拣齐或标了货位没货（与后端提交拦截同口径，半拣没标算没完）。 */
+export function isSegmentSettled(segment: SegmentSummary): boolean {
+  return segment.completeLineCount + segment.stockoutLineCount >= segment.lineCount;
+}
+
+/** 还没处理完的段，按段号升序；有分配的订单里这些段没完时不能提交整单。 */
+export function incompleteSegments(lines: readonly PickSheetLine[]): SegmentSummary[] {
+  return summarizeSegments(lines).filter((segment) => !isSegmentSettled(segment));
+}
+
+/** 这段是不是我的：扫分单领取进来的按段号，否则按负责人是我。 */
+export function isMySegment(segment: Pick<SegmentSummary, "segmentNo" | "assigneeUserGuid">, mine: MineContext): boolean {
+  return isMyLine({ assignmentSegmentNo: segment.segmentNo, assigneeUserGuid: segment.assigneeUserGuid }, mine);
 }
 
 /** “接下来”：从当前行之后按走位顺序取还要拣的行（不含货位没货），绕回开头，不含当前行。 */
@@ -214,6 +293,9 @@ export function mergeProgressLines(lines: readonly PickSheetLine[], progress: re
       pickedBy: next.pickedBy,
       minOrderQuantity: next.minOrderQuantity,
       stockout: next.stockout,
+      assigneeUserGuid: next.assigneeUserGuid,
+      assigneeName: next.assigneeName,
+      assignmentSegmentNo: next.assignmentSegmentNo,
     };
   });
 }
