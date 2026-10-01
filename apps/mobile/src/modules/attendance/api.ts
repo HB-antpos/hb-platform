@@ -17,6 +17,7 @@ import type {
   AttendanceLeaveRequest,
   AttendanceLeaveRequestPayload,
   AttendanceLocationSamplePayload,
+  AttendanceManagedPunchAdjustmentPayload,
   AttendancePublishWeekPayload,
   AttendancePunch,
   AttendancePunchMutationResult,
@@ -27,6 +28,7 @@ import type {
   AttendanceQrResolveResult,
   AttendancePunchType,
   AttendanceSchedule,
+  AttendanceScheduleSession,
   AttendanceSchedulePayload,
   AttendanceScheduleUpdatePayload,
   AttendanceScheduleWeekParams,
@@ -643,6 +645,45 @@ export async function createMyAttendancePunchAdjustment(
 ): Promise<AttendancePunchAdjustment> {
   const response = await apiClient.post(
     `${ATTENDANCE_BASE}/my/punch-adjustments`,
+    sanitizePayload({ ...payload, reason: payload.reason.trim() }),
+  );
+  const rows = getArray(response.data);
+  return normalizeAttendancePunchAdjustment(rows[0] ?? response.data);
+}
+
+/** 店长查看某天管理分店的打卡记录（含班段打卡），只保留生效排班。 */
+export async function getManagedAttendanceRecords(params: {
+  storeCode: string;
+  workDate: string;
+}): Promise<AttendanceScheduleSession[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/records`, {
+    params: {
+      storeCode: params.storeCode,
+      fromDate: params.workDate,
+      toDate: params.workDate,
+      page: 1,
+      pageSize: 200,
+    },
+  });
+  return normalizeAttendanceToday({ schedules: getArray(response.data) }).scheduleSessions
+    .filter((session) => session.status.toLowerCase() === "active");
+}
+
+export async function previewManagedAttendancePunchAdjustment(
+  payload: AttendanceManagedPunchAdjustmentPayload,
+): Promise<AttendanceAdjustmentPreview> {
+  const response = await apiClient.post(
+    `${ATTENDANCE_BASE}/managed/punch-adjustments/preview`,
+    sanitizePayload({ ...payload, reason: payload.reason.trim() }),
+  );
+  return normalizeAttendancePunchAdjustmentPreview(response.data);
+}
+
+export async function createManagedAttendancePunchAdjustment(
+  payload: AttendanceManagedPunchAdjustmentPayload,
+): Promise<AttendancePunchAdjustment> {
+  const response = await apiClient.post(
+    `${ATTENDANCE_BASE}/managed/punch-adjustments`,
     sanitizePayload({ ...payload, reason: payload.reason.trim() }),
   );
   const rows = getArray(response.data);

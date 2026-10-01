@@ -25,6 +25,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Attendance.Availability.ViewManagedStore, "查看管理分店可上班时间", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店可上班时间"),
                 new(Permissions.Attendance.Punch.Self, "本人打卡", "排班考勤", "移动端「个人考勤」- 本人打卡"),
                 new(Permissions.Attendance.Punch.ViewManagedStore, "查看管理分店打卡记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店打卡记录"),
+                new(Permissions.Attendance.Punch.AdjustManagedStore, "补卡与修改管理分店打卡", "排班考勤", "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"),
                 new(Permissions.Attendance.Approval.ViewManagedStore, "查看管理分店审核记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"),
                 new(Permissions.Attendance.Approval.ReviewManagedStore, "审核管理分店考勤", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"),
                 new(Permissions.Attendance.Holiday.ViewStore, "查看分店公共假期", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看分店公共假期"),

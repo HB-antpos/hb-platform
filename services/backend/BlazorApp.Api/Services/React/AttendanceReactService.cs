@@ -12,6 +12,7 @@ using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using SqlSugar;
@@ -32,6 +33,7 @@ namespace BlazorApp.Api.Services.React
         private readonly TimeProvider _timeProvider;
         private readonly AttendanceQrKeyProtector _attendanceQrKeyProtector;
         private readonly AttendancePunchAuthorizationProtector _punchAuthorizationProtector;
+        private readonly IAuthorizationService? _authorizationService;
 
         public AttendanceReactService(
             SqlSugarContext context,
@@ -43,7 +45,8 @@ namespace BlazorApp.Api.Services.React
             IAttendancePosDeviceStatusProvider? attendancePosDeviceStatusProvider = null,
             TimeProvider? timeProvider = null,
             AttendanceQrKeyProtector? attendanceQrKeyProtector = null,
-            AttendancePunchAuthorizationProtector? punchAuthorizationProtector = null
+            AttendancePunchAuthorizationProtector? punchAuthorizationProtector = null,
+            IAuthorizationService? authorizationService = null
         )
         {
             _db = context.Db;
@@ -58,6 +61,7 @@ namespace BlazorApp.Api.Services.React
                 ?? throw new ArgumentNullException(nameof(attendanceQrKeyProtector));
             _punchAuthorizationProtector = punchAuthorizationProtector
                 ?? throw new ArgumentNullException(nameof(punchAuthorizationProtector));
+            _authorizationService = authorizationService;
         }
 
         public async Task<ApiResponse<List<AttendanceScheduleDto>>> GetSchedulesAsync(
@@ -1009,10 +1013,26 @@ namespace BlazorApp.Api.Services.React
             }
         }
 
-        public async Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewMyPunchAdjustmentAsync(
-            CreateAttendancePunchAdjustmentDto request)
+        public Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewMyPunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request) =>
+            PreviewPunchAdjustmentAsync(request, managedTargetUserGuid: null);
+
+        public async Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewManagedPunchAdjustmentAsync(
+            CreateManagedAttendancePunchAdjustmentDto request)
         {
-            var context = await BuildPunchAdjustmentContextAsync(request);
+            if (string.IsNullOrWhiteSpace(request.UserGuid))
+            {
+                return ApiResponse<AttendancePunchAdjustmentPreviewDto>.Error("员工不能为空", "USER_REQUIRED");
+            }
+
+            return await PreviewPunchAdjustmentAsync(request, request.UserGuid.Trim());
+        }
+
+        private async Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewPunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request,
+            string? managedTargetUserGuid)
+        {
+            var context = await BuildPunchAdjustmentContextAsync(request, managedTargetUserGuid);
             if (!context.Success)
             {
                 return ApiResponse<AttendancePunchAdjustmentPreviewDto>.Error(
@@ -1041,10 +1061,30 @@ namespace BlazorApp.Api.Services.React
                 rows.Select(item => ToDto(item)).ToList());
         }
 
-        public async Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateMyPunchAdjustmentAsync(
-            CreateAttendancePunchAdjustmentDto request)
+        public Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateMyPunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request) =>
+            CreatePunchAdjustmentAsync(request, managedTargetUserGuid: null);
+
+        public async Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateManagedPunchAdjustmentAsync(
+            CreateManagedAttendancePunchAdjustmentDto request)
         {
-            var context = await BuildPunchAdjustmentContextAsync(request);
+            if (string.IsNullOrWhiteSpace(request.UserGuid))
+            {
+                return ApiResponse<AttendancePunchAdjustmentDto>.Error("员工不能为空", "USER_REQUIRED");
+            }
+
+            return await CreatePunchAdjustmentAsync(request, request.UserGuid.Trim());
+        }
+
+        /// <summary>
+        /// 补卡写入的公共实现。managedTargetUserGuid 为空表示员工本人补卡；
+        /// 非空表示持「补卡与修改管理分店打卡」权限的店长代员工补录/修改，直接生效。
+        /// </summary>
+        private async Task<ApiResponse<AttendancePunchAdjustmentDto>> CreatePunchAdjustmentAsync(
+            CreateAttendancePunchAdjustmentDto request,
+            string? managedTargetUserGuid)
+        {
+            var context = await BuildPunchAdjustmentContextAsync(request, managedTargetUserGuid);
             if (!context.Success)
             {
                 return ApiResponse<AttendancePunchAdjustmentDto>.Error(
@@ -1059,7 +1099,9 @@ namespace BlazorApp.Api.Services.React
             }
 
             var now = _timeProvider.GetUtcNow().UtcDateTime;
-            var userGuid = ResolveCurrentUserGuid();
+            var requesterUserGuid = ResolveCurrentUserGuid();
+            // 卡序属于被补卡员工，锁与落库都以员工为准；申请人/审核人记录操作者，作为审计依据。
+            var userGuid = managedTargetUserGuid ?? requesterUserGuid;
             var mutationResource = AttendanceDailyMutationLock.BuildResource(
                 userGuid,
                 context.Schedule!.StoreCode,
@@ -1074,7 +1116,7 @@ namespace BlazorApp.Api.Services.React
             {
                 await AttendanceDailyMutationLock.AcquireDatabaseAsync(_db, mutationResource);
                 // 补卡无论待审还是店长直生效，都会改变同一员工的有效卡序，必须锁内重算。
-                var lockedContext = await BuildPunchAdjustmentContextAsync(request);
+                var lockedContext = await BuildPunchAdjustmentContextAsync(request, managedTargetUserGuid);
                 if (!lockedContext.Success)
                 {
                     await _db.Ado.RollbackTranAsync();
@@ -1107,9 +1149,11 @@ namespace BlazorApp.Api.Services.React
                     RequestedPunchTimeUtc = context.ProposedPunch!.PunchTimeUtc,
                     Reason = request.Reason.Trim(),
                     Status = context.Preview!.WouldAutoApprove ? "Applied" : "Pending",
-                    IsManagerSelfDirect = context.Preview.WouldAutoApprove,
-                    RequestedByUserGuid = userGuid,
-                    ReviewedByUserGuid = context.Preview.WouldAutoApprove ? userGuid : null,
+                    // 仅本人直生效才算「店长自补」；代员工修改通过 RequestedBy ≠ UserGuid 区分。
+                    IsManagerSelfDirect = context.Preview.WouldAutoApprove
+                        && string.Equals(userGuid, requesterUserGuid, StringComparison.OrdinalIgnoreCase),
+                    RequestedByUserGuid = requesterUserGuid,
+                    ReviewedByUserGuid = context.Preview.WouldAutoApprove ? requesterUserGuid : null,
                     ReviewedAt = context.Preview.WouldAutoApprove ? now : null,
                     CreatedAt = now,
                     CreatedBy = _currentUserService.GetCurrentUsername(),
@@ -2576,9 +2620,11 @@ namespace BlazorApp.Api.Services.React
         }
 
         private async Task<PunchAdjustmentContext> BuildPunchAdjustmentContextAsync(
-            CreateAttendancePunchAdjustmentDto request)
+            CreateAttendancePunchAdjustmentDto request,
+            string? managedTargetUserGuid = null)
         {
-            var userGuid = ResolveCurrentUserGuid();
+            var isManaged = !string.IsNullOrWhiteSpace(managedTargetUserGuid);
+            var userGuid = isManaged ? managedTargetUserGuid!.Trim() : ResolveCurrentUserGuid();
             if (string.IsNullOrWhiteSpace(userGuid))
             {
                 return PunchAdjustmentContext.Error("无法识别当前员工", "USER_NOT_FOUND");
@@ -2593,10 +2639,17 @@ namespace BlazorApp.Api.Services.React
             }
 
             var storeCode = request.StoreCode.Trim();
-            var access = await ResolveRelatedStoreAccessAsync(userGuid, storeCode);
+            // 代员工补卡校验操作者的管理分店范围；员工归属由下方「该员工在该店有排班」保证。
+            var access = isManaged
+                ? await ResolveManagedStoreAccessAsync(storeCode)
+                : await ResolveRelatedStoreAccessAsync(userGuid, storeCode);
             if (!access.Success)
             {
                 return PunchAdjustmentContext.Error(access.Message, access.ErrorCode);
+            }
+            if (isManaged && !await IsCurrentUserManagerForStoreAsync(storeCode))
+            {
+                return PunchAdjustmentContext.Error("只能修改自己管理分店的打卡", "FORBIDDEN_STORE");
             }
 
             var punchType = NormalizePunchType(request.PunchType);
@@ -2660,16 +2713,36 @@ namespace BlazorApp.Api.Services.React
 
             var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
             var nowLocal = ConvertUtcToStoreLocal(nowUtc, storeTimeZone);
-            var wouldAutoApprove = await IsCurrentUserManagerForStoreAsync(storeCode);
+            // 直接生效只认「补卡与修改管理分店打卡」权限：代员工修改本身已由接口策略校验，
+            // 店长本人补卡则需同时持有该权限并管理该分店，否则与普通员工一样进入审核。
+            var wouldAutoApprove = isManaged
+                || (await IsCurrentUserManagerForStoreAsync(storeCode)
+                    && await CurrentUserHasPermissionAsync(Permissions.Attendance.Punch.AdjustManagedStore));
             if (!IsAdmin())
             {
-                var ageDays = (nowLocal.Date - requestedPunchTimeLocal.Date).Days;
-                if (ageDays < 0 || ageDays > 2)
+                if (isManaged)
                 {
-                    return PunchAdjustmentContext.Error(
-                        "非 Admin 员工只能申请两天内的补卡",
-                        "ADJUSTMENT_WINDOW_EXPIRED");
+                    if (!IsWithinManagedAdjustmentWindow(schedule.WorkDate, nowLocal.Date))
+                    {
+                        return PunchAdjustmentContext.Error(
+                            "只能修改本周的打卡；周一、周二仍可修改上周",
+                            "ADJUSTMENT_WINDOW_EXPIRED");
+                    }
                 }
+                else
+                {
+                    var ageDays = (nowLocal.Date - requestedPunchTimeLocal.Date).Days;
+                    if (ageDays < 0 || ageDays > 2)
+                    {
+                        return PunchAdjustmentContext.Error(
+                            "非 Admin 员工只能申请两天内的补卡",
+                            "ADJUSTMENT_WINDOW_EXPIRED");
+                    }
+                }
+            }
+            if (isManaged && requestedPunchTimeUtc > nowUtc)
+            {
+                return PunchAdjustmentContext.Error("补卡时间不能晚于当前时间", "PUNCH_TIME_IN_FUTURE");
             }
 
             AttendancePunch? originalPunch = null;
@@ -3175,6 +3248,30 @@ namespace BlazorApp.Api.Services.React
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// 店长代员工补卡窗口：按单周（周一起）工资周期，可改本周至今天；
+        /// 周一、周二是上周的结算核对期，仍可改上周。
+        /// </summary>
+        internal static bool IsWithinManagedAdjustmentWindow(DateTime workDate, DateTime storeToday)
+        {
+            var today = storeToday.Date;
+            var currentWeekStart = GetWeekStart(today);
+            var isSettlementGrace = today.DayOfWeek is DayOfWeek.Monday or DayOfWeek.Tuesday;
+            var earliest = isSettlementGrace ? currentWeekStart.AddDays(-7) : currentWeekStart;
+            return workDate.Date >= earliest && workDate.Date <= today;
+        }
+
+        private async Task<bool> CurrentUserHasPermissionAsync(string permission)
+        {
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user == null || _authorizationService == null)
+            {
+                return false;
+            }
+
+            return (await _authorizationService.AuthorizeAsync(user, permission)).Succeeded;
         }
 
         private async Task<bool> IsWithinAdjustmentWindowAsync(DateTime workDate, string? storeCode)

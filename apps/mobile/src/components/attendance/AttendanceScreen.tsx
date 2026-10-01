@@ -22,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AvailabilityForm } from "@/components/attendance/AvailabilityForm";
 import { HolidayManagementCard } from "@/components/attendance/HolidayManagementCard";
 import { LeaveManagementCard } from "@/components/attendance/LeaveManagementCard";
+import { ManagedPunchRecordsCard } from "@/components/attendance/ManagedPunchRecordsCard";
 import { ManagerApprovalList } from "@/components/attendance/ManagerApprovalList";
 import { MonthDatePickerField } from "@/components/attendance/MonthDatePicker";
 import { PunchAdjustmentCard } from "@/components/attendance/PunchAdjustmentCard";
@@ -111,7 +112,7 @@ import { useAuthStore } from "@/store/auth-store";
 
 type AttendanceMainTab = "personal" | "management";
 type PersonalAttendanceTab = "punchRecords" | "availabilityWeek";
-type AttendanceManagementTab = "schedule" | "holidays" | "leave";
+type AttendanceManagementTab = "schedule" | "holidays" | "leave" | "punches";
 export type AttendanceScreenMode = "personal" | "management" | "combined";
 
 interface AttendanceScreenProps {
@@ -297,6 +298,9 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     isManagementTab && activeManagementTab === "holidays";
   const isLeaveManagementTab =
     isManagementTab && activeManagementTab === "leave";
+  const canViewManagedPunches = access.canViewAttendancePunchRecords;
+  const isPunchManagementTab =
+    isManagementTab && canViewManagedPunches && activeManagementTab === "punches";
   const sectionStores = isManagementMode ? managerStores : posEnabledStores;
   const employeeWeekStartDate = useMemo(
     () => getWeekStartDate(selectedDate),
@@ -1376,7 +1380,10 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   today={todayQuery.data}
                   selectedDate={selectedDate}
                   storeCode={selectedStoreCode}
+                  storeName={selectedStoreName}
+                  // 本人补卡直接生效需要同时管理该店并持有补卡修改权限，与后端判定一致。
                   isManagerStore={Boolean(
+                    access.canAdjustAttendancePunch &&
                     selectedStoreCode &&
                     managerStores.some((store) => store.storeCode === selectedStoreCode),
                   )}
@@ -1493,6 +1500,10 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   value: "leave",
                   label: t("tabs.leaveManagement"),
                 },
+                // 打卡记录依赖 Punch.ViewManagedStore；无权限时不出现该页签。
+                ...(canViewManagedPunches
+                  ? [{ value: "punches", label: t("tabs.managedPunchRecords") }]
+                  : []),
               ]}
               style={styles.sectionTabs}
             />
@@ -1500,6 +1511,13 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
               <View style={styles.inlineLoading}>
                 <ActivityIndicator />
               </View>
+            ) : null}
+            {isPunchManagementTab ? (
+              <ManagedPunchRecordsCard
+                storeCode={selectedStoreCode}
+                canAdjust={access.canAdjustAttendancePunch}
+                onMessage={showMessage}
+              />
             ) : null}
             {isScheduleManagementTab ? (
               <ScheduleManagementCard

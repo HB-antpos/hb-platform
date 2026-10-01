@@ -418,6 +418,7 @@ namespace BlazorApp.Shared.Constants
             {
                 public const string Self = "Attendance.Punch.Self";
                 public const string ViewManagedStore = "Attendance.Punch.ViewManagedStore";
+                public const string AdjustManagedStore = "Attendance.Punch.AdjustManagedStore";
             }
 
             public static class Approval

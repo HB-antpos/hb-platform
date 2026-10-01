@@ -89,6 +89,10 @@
       "name": "查看管理分店请假申请",
       "description": "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店请假申请"
     },
+    "Attendance.Punch.AdjustManagedStore": {
+      "name": "补卡与修改管理分店打卡",
+      "description": "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"
+    },
     "Attendance.Punch.Self": {
       "name": "本人打卡",
       "description": "移动端「个人考勤」- 本人打卡"
