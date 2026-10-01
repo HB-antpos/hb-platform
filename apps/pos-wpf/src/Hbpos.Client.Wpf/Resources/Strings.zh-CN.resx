@@ -1089,8 +1089,20 @@
   <data name="customerDisplay.window.noSecondDisplay" xml:space="preserve">
     <value>未检测到第二个屏幕，客显窗口未打开。</value>
   </data>
+  <data name="customerDisplay.window.swapped" xml:space="preserve">
+    <value>主窗口与客显已互换屏幕。</value>
+  </data>
+  <data name="customerDisplay.window.swapRequiresOpen" xml:space="preserve">
+    <value>请先打开客显再互换屏幕。</value>
+  </data>
+  <data name="customerDisplay.window.swapUnavailable" xml:space="preserve">
+    <value>未能识别主窗口和客显所在的屏幕，未互换。</value>
+  </data>
   <data name="shell.customerDisplayWindow" xml:space="preserve">
     <value>客显窗口</value>
+  </data>
+  <data name="shell.swapCustomerDisplayScreens" xml:space="preserve">
+    <value>主窗口与客显互换屏幕</value>
   </data>
   <data name="shell.colorTheme" xml:space="preserve">
     <value>界面配色</value>

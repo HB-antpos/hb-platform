@@ -11,11 +11,12 @@ using Hbpos.Client.Wpf.ViewModels;
 
 namespace Hbpos.Client.Wpf;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IDisplayMovableWindow
 {
     private const int DisplayChangeMessageId = 0x007E;
     private const int RawInputMessageId = 0x00FF;
     private const string MainWindowModeSettingKey = "Shell:MainWindowMode";
+    internal const string MainWindowMonitorSettingKey = "Shell:MainWindowMonitor";
     internal const string FullscreenWindowModeValue = "Fullscreen";
     internal const string NormalCenteredWindowModeValue = "NormalCentered";
     private const double NormalWindowWidth = 1366;
@@ -51,6 +52,8 @@ public partial class MainWindow : Window
     private bool _isWaitingForWindowModeSaveBeforeClose;
     private bool _isClosingAfterWindowModeSave;
     private WindowState _lastNonMinimizedWindowState = WindowState.Maximized;
+    private MonitorIdentity? _rememberedMainMonitor;
+    private bool _rememberedMainMonitorPending;
 
     public bool IsStartupBlockedByAppUpdate { get; private set; }
 
@@ -433,6 +436,8 @@ public partial class MainWindow : Window
     private void MainWindowSourceInitialized(object? sender, EventArgs e)
     {
         _displayTopologyService.AttachWorkAreaConstraint(this);
+        // 句柄刚建好、窗口还没显示：此时挪回上次所在的屏，用户看不到跳屏。
+        ApplyRememberedMainMonitor();
         WindowsShellIdentityService.ApplyWindowIdentity(this);
         WindowsShellIdentityService.ApplyWindowIcon(this);
         _hwndSource = (HwndSource?)PresentationSource.FromVisual(this);
@@ -792,6 +797,87 @@ public partial class MainWindow : Window
                 exception: ex));
         ApplyWindowMode(state, persist: false);
         _windowModeRestored = true;
+
+        _rememberedMainMonitor = await LoadMainMonitorAsync(
+            _localAppSettingsRepository,
+            ex => ConsoleLog.WriteError(
+                "Startup",
+                $"main window monitor restore failed error={ex.GetType().Name} message={ex.Message}",
+                exception: ex));
+        _rememberedMainMonitorPending = _rememberedMainMonitor is not null;
+        if (PresentationSource.FromVisual(this) is not null)
+        {
+            ApplyRememberedMainMonitor();
+        }
+    }
+
+    /// <summary>把主窗口挪回上次（互换屏幕后）所在的屏；那块屏已拔掉或分辨率变了就留在系统默认屏。</summary>
+    private void ApplyRememberedMainMonitor()
+    {
+        if (!_rememberedMainMonitorPending || _rememberedMainMonitor is not { } remembered)
+        {
+            return;
+        }
+
+        _rememberedMainMonitorPending = false;
+        var target = _displayTopologyService.GetDisplays().FirstOrDefault(display => display.Identity == remembered);
+        if (target is null)
+        {
+            ConsoleLog.Write("Startup", $"main window monitor restore skipped reason=monitor-not-found remembered={remembered.Format()}");
+            return;
+        }
+
+        if (_displayTopologyService.GetDisplayForWindow(this)?.Identity == remembered)
+        {
+            return;
+        }
+
+        MoveToDisplay(target, persist: false);
+    }
+
+    public void MoveToDisplay(DisplayBounds display) => MoveToDisplay(display, persist: true);
+
+    private void MoveToDisplay(DisplayBounds display, bool persist)
+    {
+        var targetState = WindowState == WindowState.Minimized ? _lastNonMinimizedWindowState : WindowState;
+        _isApplyingWindowMode = true;
+        try
+        {
+            // 未显示前改位置要关掉 CenterScreen，否则 Show 时会被重新居中到鼠标所在的屏。
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            if (WindowState != WindowState.Normal)
+            {
+                WindowState = WindowState.Normal;
+            }
+
+            DisplayTopologyService.ApplyWorkAreaLimit(this, display);
+            PlaceNormalWindowInWorkArea(DisplayTopologyService.ToDipRect(
+                this,
+                display.WorkAreaLeft,
+                display.WorkAreaTop,
+                display.WorkAreaWidth,
+                display.WorkAreaHeight));
+            // 先在目标屏放好普通窗口位置，再恢复最大化：系统按普通位置所在的屏来最大化。
+            WindowState = targetState;
+        }
+        finally
+        {
+            _isApplyingWindowMode = false;
+        }
+
+        ConsoleLog.Write(
+            "WindowState",
+            $"main window moved monitor={display.Identity.Format()} state={WindowState} persist={persist}");
+        if (persist)
+        {
+            _ = PersistMainMonitorAsync(
+                _localAppSettingsRepository,
+                display.Identity,
+                ex => ConsoleLog.WriteError(
+                    "WindowState",
+                    $"main window monitor save failed error={ex.GetType().Name} message={ex.Message}",
+                    exception: ex));
+        }
     }
 
     private void MainWindowStateChanged(object? sender, EventArgs e)
@@ -835,11 +921,21 @@ public partial class MainWindow : Window
 
     private void CenterNormalWindow()
     {
-        Width = Math.Max(MinWidth, Math.Min(NormalWindowWidth, SystemParameters.WorkArea.Width));
-        Height = Math.Max(MinHeight, Math.Min(NormalWindowHeight, SystemParameters.WorkArea.Height));
+        // 在主窗口当前所在的屏居中（互换屏幕后可能在副屏）；句柄未建好时回落主显示器工作区。
+        var display = _displayTopologyService.GetDisplayForWindow(this);
+        var workArea = display is null
+            ? SystemParameters.WorkArea
+            : DisplayTopologyService.ToDipRect(this, display.WorkAreaLeft, display.WorkAreaTop, display.WorkAreaWidth, display.WorkAreaHeight);
+        PlaceNormalWindowInWorkArea(workArea);
+    }
+
+    private void PlaceNormalWindowInWorkArea(Rect workArea)
+    {
+        Width = Math.Max(MinWidth, Math.Min(NormalWindowWidth, workArea.Width));
+        Height = Math.Max(MinHeight, Math.Min(NormalWindowHeight, workArea.Height));
 
         var position = StartupSplashWindowPlacement.CenterInWorkArea(
-            SystemParameters.WorkArea,
+            workArea,
             Width,
             Height);
         Left = position.X;
@@ -881,6 +977,42 @@ public partial class MainWindow : Window
             // 窗口偏好损坏不应阻断收银启动。
             reportException(ex);
             return WindowState.Maximized;
+        }
+    }
+
+    internal static async Task<MonitorIdentity?> LoadMainMonitorAsync(
+        ILocalAppSettingsRepository settingsRepository,
+        Action<Exception> reportException)
+    {
+        try
+        {
+            var saved = await settingsRepository
+                .GetValueAsync(MainWindowMonitorSettingKey)
+                .ConfigureAwait(false);
+            return MonitorIdentity.Parse(saved);
+        }
+        catch (Exception ex)
+        {
+            // 屏幕偏好读失败只回落默认屏，不阻断收银启动。
+            reportException(ex);
+            return null;
+        }
+    }
+
+    internal static async Task PersistMainMonitorAsync(
+        ILocalAppSettingsRepository settingsRepository,
+        MonitorIdentity monitor,
+        Action<Exception> reportException)
+    {
+        try
+        {
+            await settingsRepository
+                .SetValueAsync(MainWindowMonitorSettingKey, monitor.Format())
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            reportException(ex);
         }
     }
 

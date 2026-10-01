@@ -30,6 +30,19 @@ public interface ICustomerDisplayOrchestrator
 
     CustomerDisplayWindowMode GetNextMode(CustomerDisplayWindowMode currentMode);
 
+    /// <summary>读取本机记住的上次客显模式；从未记录过时为关闭（保持原先启动不自动打开的行为）。</summary>
+    Task<CustomerDisplayWindowMode> LoadRememberedModeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(CustomerDisplayWindowMode.Closed);
+
+    /// <summary>记住收银员手动选择的客显模式，供下次启动恢复。</summary>
+    void RememberMode(CustomerDisplayWindowMode mode)
+    {
+    }
+
+    /// <summary>主窗口与客显互换所在显示器。</summary>
+    CustomerDisplayWindowResult SwapDisplays(CustomerDisplayViewModel customerDisplay, Window owner) =>
+        new(CustomerDisplayWindowMode.Closed, null);
+
     CustomerDisplayWindowResult SetMode(
         CustomerDisplayWindowMode mode,
         CustomerDisplayViewModel customerDisplay,
@@ -45,6 +58,7 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
     private readonly ICustomerDisplayWindowService customerDisplayWindowService;
     private readonly IAdvertisementApiClient advertisementApiClient;
     private readonly IAdvertisementMediaCache advertisementMediaCache;
+    private readonly ICustomerDisplayWindowPreferenceStore? windowPreferences;
     private readonly TimeSpan advertisementRefreshInterval;
     private readonly SemaphoreSlim _advertisementRefreshGate = new(1, 1);
     private IReadOnlyList<AdvertisementPlaybackItemDto> _cachedAdvertisements = [];
@@ -63,8 +77,16 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
     public CustomerDisplayOrchestrator(
         ICustomerDisplayWindowService customerDisplayWindowService,
         IAdvertisementApiClient advertisementApiClient,
-        IAdvertisementMediaCache? advertisementMediaCache = null)
-        : this(customerDisplayWindowService, advertisementApiClient, DefaultAdvertisementRefreshInterval, advertisementMediaCache)
+        IAdvertisementMediaCache? advertisementMediaCache = null,
+        ICustomerDisplayWindowPreferenceStore? windowPreferences = null)
+        : this(customerDisplayWindowService, advertisementApiClient, DefaultAdvertisementRefreshInterval, advertisementMediaCache, windowPreferences)
+    {
+    }
+
+    internal CustomerDisplayOrchestrator(
+        ICustomerDisplayWindowService customerDisplayWindowService,
+        ICustomerDisplayWindowPreferenceStore windowPreferences)
+        : this(customerDisplayWindowService, NullAdvertisementApiClient.Instance, DefaultAdvertisementRefreshInterval, advertisementMediaCache: null, windowPreferences)
     {
     }
 
@@ -72,11 +94,13 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
         ICustomerDisplayWindowService customerDisplayWindowService,
         IAdvertisementApiClient advertisementApiClient,
         TimeSpan advertisementRefreshInterval,
-        IAdvertisementMediaCache? advertisementMediaCache = null)
+        IAdvertisementMediaCache? advertisementMediaCache = null,
+        ICustomerDisplayWindowPreferenceStore? windowPreferences = null)
     {
         this.customerDisplayWindowService = customerDisplayWindowService;
         this.advertisementApiClient = advertisementApiClient;
         this.advertisementMediaCache = advertisementMediaCache ?? NullAdvertisementMediaCache.Instance;
+        this.windowPreferences = windowPreferences;
         this.advertisementRefreshInterval = advertisementRefreshInterval <= TimeSpan.Zero
             ? DefaultAdvertisementRefreshInterval
             : advertisementRefreshInterval;
@@ -149,6 +173,25 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
             throw;
         }
     }
+
+    public async Task<CustomerDisplayWindowMode> LoadRememberedModeAsync(CancellationToken cancellationToken = default)
+    {
+        if (windowPreferences is null)
+        {
+            return CustomerDisplayWindowMode.Closed;
+        }
+
+        var preference = await windowPreferences.LoadAsync(cancellationToken);
+        return preference.Mode;
+    }
+
+    public void RememberMode(CustomerDisplayWindowMode mode)
+    {
+        _ = windowPreferences?.RememberModeAsync(mode);
+    }
+
+    public CustomerDisplayWindowResult SwapDisplays(CustomerDisplayViewModel customerDisplay, Window owner) =>
+        customerDisplayWindowService.SwapDisplays(customerDisplay, owner);
 
     public CustomerDisplayWindowMode GetNextMode(CustomerDisplayWindowMode currentMode)
     {

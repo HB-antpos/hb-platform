@@ -385,7 +385,11 @@
   <data name="customerDisplay.window.openedFullscreen" xml:space="preserve"><value>Customer display opened full screen on the second display.</value></data>
   <data name="customerDisplay.window.closed" xml:space="preserve"><value>Customer display closed.</value></data>
   <data name="customerDisplay.window.noSecondDisplay" xml:space="preserve"><value>No second display detected. Customer display was not opened.</value></data>
+  <data name="customerDisplay.window.swapped" xml:space="preserve"><value>Main window and customer display swapped screens.</value></data>
+  <data name="customerDisplay.window.swapRequiresOpen" xml:space="preserve"><value>Open the customer display before swapping screens.</value></data>
+  <data name="customerDisplay.window.swapUnavailable" xml:space="preserve"><value>Could not detect the screens of the main window and customer display. Screens were not swapped.</value></data>
   <data name="shell.customerDisplayWindow" xml:space="preserve"><value>Customer display window</value></data>
+  <data name="shell.swapCustomerDisplayScreens" xml:space="preserve"><value>Swap screens with the customer display</value></data>
   <data name="shell.colorTheme" xml:space="preserve"><value>Color theme</value></data>
   <data name="shell.colorTheme.default" xml:space="preserve"><value>Default</value></data>
   <data name="shell.colorTheme.default.hint" xml:space="preserve"><value>Original colors</value></data>

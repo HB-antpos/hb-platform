@@ -596,6 +596,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CloseCustomerDisplayWindowCommand = new AsyncRelayCommand(CloseCustomerDisplayWindowFromCommandAsync);
         ShowCustomerDisplayNormalCommand = new AsyncRelayCommand(() => SetCustomerDisplayWindowModeFromCommandAsync(CustomerDisplayWindowMode.Normal));
         ShowCustomerDisplayFullscreenCommand = new AsyncRelayCommand(() => SetCustomerDisplayWindowModeFromCommandAsync(CustomerDisplayWindowMode.Fullscreen));
+        SwapCustomerDisplayScreensCommand = new AsyncRelayCommand(SwapCustomerDisplayScreensAsync);
         ToggleCultureCommand = new AsyncRelayCommand(
             ToggleCultureAsync,
             AsyncRelayCommandOptions.AllowConcurrentExecutions);
@@ -1005,6 +1006,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand ShowCustomerDisplayNormalCommand { get; }
 
     public IAsyncRelayCommand ShowCustomerDisplayFullscreenCommand { get; }
+
+    public IAsyncRelayCommand SwapCustomerDisplayScreensCommand { get; }
 
     public IAsyncRelayCommand ToggleCultureCommand { get; }
 
@@ -1787,10 +1790,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             $"post-show open start store={Session.StoreCode} device={Session.DeviceCode} ownerPresent={owner is not null}");
         try
         {
-            // 诊断启动卡顿时关闭客显自动打开；手动客显按钮仍可正常打开。
-            ConsoleLog.Write(
-                "CustomerDisplay",
-                $"post-show open skipped store={Session.StoreCode} device={Session.DeviceCode} ownerPresent={owner is not null} reason=auto-open-disabled");
+            // 主窗口显示后才按本机记住的上次模式恢复客显，不阻塞首屏；从未记录或上次已关闭时不打开。
+            await _customerDisplayShellController.RestoreRememberedModeAsync(owner);
             stopwatch.Stop();
             ConsoleLog.Write(
                 "CustomerDisplay",
@@ -1799,10 +1800,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             stopwatch.Stop();
-            ConsoleLog.Write(
+            // 关键逻辑：客显恢复失败只记日志，不能中断后面的卡支付恢复、联网检测与目录同步。
+            ConsoleLog.WriteError(
                 "CustomerDisplay",
-                $"post-show open failed store={Session.StoreCode} device={Session.DeviceCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
-            throw;
+                $"post-show open failed store={Session.StoreCode} device={Session.DeviceCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}",
+                exception: ex);
         }
 
         ConsoleLog.Write(
@@ -3852,7 +3854,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         using var activation = grant.Activate();
-        SetCustomerDisplayWindowMode(mode, CurrentOwner);
+        _customerDisplayShellController.SetMode(mode, CurrentOwner, rememberChoice: true);
+    }
+
+    private async Task SwapCustomerDisplayScreensAsync()
+    {
+        using var grant = await AuthorizeShellOperationAsync(
+            Permissions.PosTerminal.CustomerDisplay.Manage,
+            "swap-customer-display-screens");
+        if (grant is null)
+        {
+            return;
+        }
+
+        var owner = CurrentOwner;
+        if (owner is null)
+        {
+            return;
+        }
+
+        using var activation = grant.Activate();
+        _customerDisplayShellController.SwapScreens(owner);
     }
 
     private async Task ResetScannerBindingAsync()
