@@ -1626,5 +1626,16 @@
       "kind": "production",
       "reason": "仍依赖 App 生命周期、分叉同步组合或未共享数据库实现，保留在 App"
     }
+  ],
+  "reviewedDependencyAdditions": [
+    {
+      "name": "fflate",
+      "version": "0.8.3",
+      "workspaces": [
+        "apps/pos-ipad",
+        "apps/pos-handheld"
+      ],
+      "reason": "整文件目录下载需要在 Hermes 上流式解压 gzip；纯 JS、零依赖、MIT，不含原生代码可随 OTA 发布"
+    }
   ]
 }

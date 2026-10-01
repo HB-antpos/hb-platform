@@ -1,6 +1,7 @@
 import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
+import { Directory, Paths } from "expo-file-system";
 import * as ExpoNetwork from "expo-network";
 import * as Updates from "expo-updates";
 import { Linking } from "react-native";
@@ -26,6 +27,8 @@ import {
 import {
   CustomerDisplayAdvertisementCache,
 } from "../../features/customer-display";
+import { HbposCatalogFileSync } from "../../features/catalog/catalog-file-sync";
+import { ExpoCatalogFileStore } from "../../features/catalog/expo-catalog-file-store";
 import type { SettingsPaymentSettingsInput } from "../../features/settings";
 import {
   createAxiosHbposTransport,
@@ -920,6 +923,13 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       createId,
       random: Math.random,
       sha256Hex,
+      // 整文件目录下载：残片放在缓存目录，跨重启续传；服务端开关未开时自动回退分页。
+      catalogFileSync: new HbposCatalogFileSync({
+        transport,
+        store: new ExpoCatalogFileStore(new Directory(Paths.cache, "catalog-files").uri),
+        digest: async (bytes) =>
+          bytesToLowerHex(new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes))),
+      }),
       // 仅返回惰性 adapter；requireNativeModule("HbPrinter") 要到实际硬件动作才会调用。
       createPrinter: () => printer,
       externalDisplay,
@@ -1304,4 +1314,10 @@ function throwIfRuntimeAborted(signal: AbortSignal): void {
       { name: "AbortError" },
     );
   }
+}
+
+function bytesToLowerHex(bytes: Uint8Array): string {
+  let hex = "";
+  for (const byte of bytes) hex += byte.toString(16).padStart(2, "0");
+  return hex;
 }

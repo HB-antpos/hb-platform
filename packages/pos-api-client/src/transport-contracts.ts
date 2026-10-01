@@ -15,6 +15,8 @@ export type HbposTransportRequest = Readonly<{
   timeoutMs?: number;
   acceptedStatuses?: readonly number[];
   authenticationFailurePolicy?: "default" | "suppress-unauthorized";
+  /** 默认按 JSON 解析；"arraybuffer" 用于目录文件这类二进制下载，data 为原始字节。 */
+  responseType?: "json" | "arraybuffer";
 }>;
 
 export type HbposTransportResponse<T> = Readonly<{

@@ -29,6 +29,7 @@ import {
   type CatalogPageDigest,
 } from "../../features/catalog/hbpos-catalog-remote";
 import { CATALOG_DOWNLOAD_PERMISSION } from "@hb/pos-domain/features/catalog/maintenance/catalog-maintenance-authorization";
+import type { CatalogFileSyncPort } from "../../features/catalog/catalog-file-sync";
 import { HbposCatalogLookupApi } from "../../features/catalog/remote-catalog-fallback";
 import { DurableCashCheckoutService } from "../../features/checkout/cash";
 import {
@@ -564,6 +565,8 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   sha256Hex(material: string): Promise<string>;
   /** 测试可注入 Node 摘要；生产省略时仍使用 Expo 原生 SHA256。 */
   catalogPageDigest?: CatalogPageDigest | undefined;
+  /** 整文件目录下载；省略时只走分页协议（服务端开关未开时也会自动回退分页）。 */
+  catalogFileSync?: CatalogFileSyncPort | undefined;
   createPrinter(): FulfilmentHardwarePort;
   externalDisplay?: ExternalCustomerDisplayPort | undefined;
   customerDisplayAdvertisementCacheRootUri?: string | undefined;
@@ -898,6 +901,7 @@ export function createProductionPosRuntimeServices(
         remote: catalogPageApi,
         storage: catalogCodeConflicts,
       }),
+      ...(input.catalogFileSync ? { fileSync: input.catalogFileSync } : {}),
     },
   );
   catalogue.resumeRetiredCleanup();

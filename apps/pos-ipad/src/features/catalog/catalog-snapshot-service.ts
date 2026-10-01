@@ -3,6 +3,10 @@ import type {
   CatalogRefreshProgressObserver,
 } from "@hb/pos-domain/features/catalog/catalog-refresh-contract";
 import type {
+  CatalogFileSyncPlan,
+  CatalogFileSyncPort,
+} from "./catalog-file-sync";
+import type {
   CatalogDeletedLookup,
   CatalogLookupItem,
   VerifiedCatalogSyncPage,
@@ -152,6 +156,8 @@ export type CatalogSnapshotServiceOptions = Readonly<{
   pageSize?: number;
   yieldControl?: () => Promise<void>;
   codeConflicts?: CatalogCodeConflictRefreshPort;
+  /** 整文件下载；未提供或服务端未开启时只走分页协议。 */
+  fileSync?: CatalogFileSyncPort;
 }>;
 
 export type CatalogRefreshRequest = Readonly<{
@@ -276,6 +282,11 @@ export class CatalogSnapshotService {
     const matchingActive = active !== null && active.storeCode === input.storeCode
       ? active
       : null;
+    if (this.options.fileSync) {
+      const fileResult = await this.tryFileSync(input, matchingActive);
+      if (fileResult !== null) return fileResult;
+      throwIfAborted(input.signal);
+    }
     let plan: CatalogSyncPlan;
     try {
       plan = await getSyncPlan.call(this.remote, {
@@ -860,12 +871,379 @@ export class CatalogSnapshotService {
   /** “重置目录”不会先清空 active：它只是强制重新下载并以同一安全切换流程替换。 */
   public resetAndRedownload(input: CatalogRefreshRequest): Promise<CatalogActivationResult> {
     const operation = this.serial.then(
-      () => this.runFullWithFreshPlan(input),
-      () => this.runFullWithFreshPlan(input),
+      () => this.runReset(input),
+      () => this.runReset(input),
     );
     // 中文注释：reset 与普通刷新共用同一串行门，不能让旧 delta 在重置前插队。
     this.serial = operation.then(() => undefined, () => undefined);
     return operation;
+  }
+
+  private async runReset(input: CatalogRefreshRequest): Promise<CatalogActivationResult> {
+    if (this.options.fileSync) {
+      // 中文注释：重置不带基准版本，服务端必然给全量文件；失败照旧走分页全量。
+      const fileResult = await this.tryFileSync(input, null);
+      if (fileResult !== null) return fileResult;
+      throwIfAborted(input.signal);
+    }
+    return this.runFullWithFreshPlan(input);
+  }
+
+  /**
+   * 中文注释：整文件协议。服务端未开启、旧服务端、计划无效、下载/校验/文件内容出错时返回 null，
+   * 由调用方照旧走分页协议，active 目录保持不变；本地库写入、激活前会话核验等错误与分页一样直接抛出。
+   */
+  private async tryFileSync(
+    input: CatalogRefreshRequest,
+    matchingActive: ActiveCatalogSnapshotMetadata | null,
+  ): Promise<CatalogActivationResult | null> {
+    const fileSync = this.options.fileSync;
+    if (!fileSync) return null;
+    let plan: CatalogFileSyncPlan;
+    try {
+      plan = await fileSync.getPlan({
+        storeCode: input.storeCode,
+        baseCatalogVersion: matchingActive?.catalogVersion ?? null,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch (error) {
+      if (input.signal?.aborted) throw error;
+      return null;
+    }
+    throwIfAborted(input.signal);
+    if (!isCatalogVersion(plan.targetCatalogVersion)) return null;
+    if (plan.mode === "noChange") {
+      if (
+        matchingActive === null
+        || plan.targetCatalogVersion !== matchingActive.catalogVersion
+        || plan.targetTotal !== matchingActive.itemCount
+      ) {
+        return null;
+      }
+      return this.refreshPromotionsOnly(input, matchingActive, {
+        mode: "noChange",
+        baseCatalogVersion: plan.baseCatalogVersion,
+        targetCatalogVersion: plan.targetCatalogVersion,
+        targetTotal: plan.targetTotal,
+      });
+    }
+    if (plan.mode === "delta") {
+      if (matchingActive === null) return null;
+      return this.runFileDeltaDownloadAndActivate(input, fileSync, matchingActive, plan);
+    }
+    return this.runFileFullDownloadAndActivate(input, fileSync, plan);
+  }
+
+  /** 下载阶段计入 prepare（0–99%）；products 只报告已真实写入 staging 的条数。 */
+  private async downloadPlanFile(
+    input: CatalogRefreshRequest,
+    fileSync: CatalogFileSyncPort,
+    plan: CatalogFileSyncPlan,
+    progress: (event: Omit<CatalogRefreshProgressEvent, "elapsedMilliseconds">) => void,
+  ): Promise<string | null> {
+    const file = plan.file;
+    if (file === null) return null;
+    progress({ step: "prepare", percent: 0 });
+    try {
+      return await fileSync.download({
+        file,
+        ...(input.signal ? { signal: input.signal } : {}),
+        onBytes: (downloadedBytes, totalBytes) => {
+          progress({
+            step: "prepare",
+            percent: Math.min(99, Math.floor((downloadedBytes / Math.max(1, totalBytes)) * 100)),
+          });
+        },
+      });
+    } catch (error) {
+      if (input.signal?.aborted) throw error;
+      return null;
+    }
+  }
+
+  private async runFileFullDownloadAndActivate(
+    input: CatalogRefreshRequest,
+    fileSync: CatalogFileSyncPort,
+    plan: CatalogFileSyncPlan,
+  ): Promise<CatalogActivationResult | null> {
+    const startedAtMilliseconds = this.nowMilliseconds();
+    const progress = (event: Omit<CatalogRefreshProgressEvent, "elapsedMilliseconds">): void => {
+      reportProgress(input.onProgress, {
+        ...event,
+        elapsedMilliseconds: Math.max(0, this.nowMilliseconds() - startedAtMilliseconds),
+      });
+    };
+    // 与分页全量一致：先有界回收上次遗留的 staging 与 retired。
+    if (this.storage.cleanupStagingBatch) await this.queueStagingCleanup();
+    if (this.storage.cleanupRetiredBatch) await this.queueRetiredCleanup();
+    throwIfAborted(input.signal);
+    const fileName = await this.downloadPlanFile(input, fileSync, plan, progress);
+    if (fileName === null) return null;
+    const snapshotId = this.options.createSnapshotId();
+    let stagingStarted = false;
+    let activated = false;
+    let completedItemCount = 0;
+    try {
+      throwIfAborted(input.signal);
+      await this.storage.beginStaging({
+        snapshotId,
+        catalogVersion: plan.targetCatalogVersion,
+        checksum: `file:${plan.file!.sha256}`,
+        downloadedAtIso: this.nowIso(),
+      });
+      stagingStarted = true;
+      throwIfAborted(input.signal);
+      progress({ step: "prepare", percent: 100 });
+      progress({
+        step: "products",
+        percent: 0,
+        completedItemCount: 0,
+        totalItemCount: plan.targetTotal,
+        completedPageCount: 0,
+        totalPageCount: 1,
+      });
+      const seenLookupKeys = new Set<string>();
+      const batches = fileSync.readFull(
+        fileName,
+        {
+          storeCode: input.storeCode,
+          catalogVersion: plan.targetCatalogVersion,
+          totalCount: plan.targetTotal,
+        },
+        500,
+        input.signal,
+      )[Symbol.asyncIterator]();
+      while (true) {
+        let next: IteratorResult<readonly CatalogLookupItem[]>;
+        try {
+          next = await batches.next();
+        } catch (error) {
+          throw new CatalogFileFallback(error);
+        }
+        if (next.done) break;
+        throwIfAborted(input.signal);
+        for (const item of next.value) {
+          if (item.storeCode !== input.storeCode) {
+            throw new CatalogFileFallback(catalogVerificationError(
+              "Catalog file item store does not match the requested store.",
+              "CATALOG_ITEM_STORE_MISMATCH",
+            ));
+          }
+        }
+        const stagedItems = next.value.map(mapCatalogLookupToStagedItem);
+        assertUniqueLookupKeys(stagedItems, seenLookupKeys);
+        await this.storage.appendPage(snapshotId, stagedItems);
+        throwIfAborted(input.signal);
+        completedItemCount += stagedItems.length;
+        if (completedItemCount > plan.targetTotal) {
+          throw catalogVerificationError(
+            "Catalog file count exceeds the server total.",
+            "CATALOG_ITEM_COUNT_MISMATCH",
+          );
+        }
+        progress({
+          step: "products",
+          percent: Math.min(99, Math.floor((completedItemCount / Math.max(1, plan.targetTotal)) * 100)),
+          completedItemCount,
+          totalItemCount: plan.targetTotal,
+          completedPageCount: 0,
+          totalPageCount: 1,
+        });
+        // 中文注释：每批后让出事件循环，避免 30 万级导入独占 UI 线程。
+        await this.yieldControl();
+      }
+      if (completedItemCount !== plan.targetTotal) {
+        throw catalogVerificationError(
+          "Catalog file count does not match the server total.",
+          "CATALOG_ITEM_COUNT_MISMATCH",
+        );
+      }
+      progress({
+        step: "products",
+        percent: 100,
+        completedItemCount,
+        totalItemCount: plan.targetTotal,
+        completedPageCount: 1,
+        totalPageCount: 1,
+      });
+
+      progress({ step: "promotions", percent: 0 });
+      throwIfAborted(input.signal);
+      const promotions = await this.remote.getPromotions?.({
+        storeCode: input.storeCode,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }) ?? [];
+      throwIfAborted(input.signal);
+      await this.storage.replacePromotions(snapshotId, promotions);
+      throwIfAborted(input.signal);
+      progress({ step: "promotions", percent: 100 });
+      progress({ step: "activate", percent: 0 });
+      await input.beforeActivate?.();
+      throwIfAborted(input.signal);
+      const activatedAt = this.nowIso();
+      await this.storage.activate(snapshotId, completedItemCount, activatedAt);
+      activated = true;
+      this.resumeRetiredCleanup();
+      await fileSync.release(fileName).catch(() => undefined);
+      const result: CatalogActivationResult = {
+        snapshotId,
+        catalogVersion: plan.targetCatalogVersion,
+        itemCount: completedItemCount,
+        activatedAt,
+      };
+      await this.refreshCodeConflicts(input);
+      await input.afterActivate?.(result);
+      progress({ step: "activate", percent: 100 });
+      return result;
+    } catch (error) {
+      if (stagingStarted && !activated) await this.discardStaging(snapshotId);
+      if (error instanceof CatalogFileFallback) {
+        if (input.signal?.aborted) throw error.cause;
+        return null;
+      }
+      throw contextualizeCatalogFailure(error, {
+        pageNumber: 1,
+        completedItemCount,
+        totalItemCount: plan.targetTotal,
+      });
+    }
+  }
+
+  private async runFileDeltaDownloadAndActivate(
+    input: CatalogRefreshRequest,
+    fileSync: CatalogFileSyncPort,
+    active: ActiveCatalogSnapshotMetadata,
+    plan: CatalogFileSyncPlan,
+  ): Promise<CatalogActivationResult | null> {
+    const beginDeltaStaging = this.storage.beginDeltaStaging;
+    const appendDeltaBatch = this.storage.appendDeltaBatch;
+    const activateDelta = this.storage.activateDelta;
+    const operationCount = plan.deltaOperationCount;
+    if (!beginDeltaStaging || !appendDeltaBatch || !activateDelta || operationCount === null || operationCount > 5_000) {
+      return null;
+    }
+    const startedAtMilliseconds = this.nowMilliseconds();
+    const progress = (event: Omit<CatalogRefreshProgressEvent, "elapsedMilliseconds">): void => {
+      reportProgress(input.onProgress, {
+        ...event,
+        elapsedMilliseconds: Math.max(0, this.nowMilliseconds() - startedAtMilliseconds),
+      });
+    };
+    if (this.storage.cleanupStagingBatch) await this.queueStagingCleanup();
+    throwIfAborted(input.signal);
+    const fileName = await this.downloadPlanFile(input, fileSync, plan, progress);
+    if (fileName === null) return null;
+    let delta: Awaited<ReturnType<CatalogFileSyncPort["readDelta"]>>;
+    try {
+      delta = await fileSync.readDelta(fileName, {
+        storeCode: input.storeCode,
+        baseCatalogVersion: active.catalogVersion,
+        targetCatalogVersion: plan.targetCatalogVersion,
+        operationCount,
+      }, input.signal);
+    } catch (error) {
+      if (input.signal?.aborted) throw error;
+      return null;
+    }
+    // 与分页增量同一套身份校验：门店一致、upsert/delete 互不重复。
+    const stagedItems = delta.items.map(mapCatalogLookupToStagedItem);
+    const seenUpserts = new Set<string>();
+    const seenDeletes = new Set<string>();
+    try {
+      if (delta.items.some((item) => item.storeCode !== input.storeCode)) return null;
+      assertUniqueLookupKeys(stagedItems, seenUpserts);
+    } catch {
+      return null;
+    }
+    for (const deleted of delta.deletedLookups) {
+      if (
+        deleted.storeCode !== input.storeCode
+        || seenDeletes.has(deleted.lookupCodeNormalized)
+        || seenUpserts.has(`${deleted.storeCode}\u0000${deleted.lookupCodeNormalized}`)
+      ) {
+        return null;
+      }
+      seenDeletes.add(deleted.lookupCodeNormalized);
+    }
+
+    const snapshotId = this.options.createSnapshotId();
+    let stagingStarted = false;
+    let activated = false;
+    try {
+      throwIfAborted(input.signal);
+      await beginDeltaStaging.call(this.storage, {
+        sourceSnapshotId: active.snapshotId,
+        baseCatalogVersion: active.catalogVersion,
+        snapshotId,
+        catalogVersion: plan.targetCatalogVersion,
+        checksum: `delta-file:${plan.file!.sha256}`,
+        downloadedAtIso: this.nowIso(),
+      });
+      stagingStarted = true;
+      progress({ step: "prepare", percent: 100 });
+      progress({ step: "products", percent: 0, completedItemCount: 0, totalItemCount: plan.targetTotal, completedPageCount: 0, totalPageCount: 0 });
+      const operations = [
+        ...stagedItems.map((item) => ({ kind: "upsert" as const, key: item.lookupCodeNormalized, item })),
+        ...delta.deletedLookups.map((deleted) => ({ kind: "delete" as const, key: deleted.lookupCodeNormalized, deleted })),
+      ].sort((left, right) => left.key.localeCompare(right.key));
+      for (const batch of chunkItems(operations, 500)) {
+        throwIfAborted(input.signal);
+        await appendDeltaBatch.call(this.storage, snapshotId, {
+          items: batch.filter((operation) => operation.kind === "upsert").map((operation) => operation.item),
+          deletedLookups: batch.filter((operation) => operation.kind === "delete").map((operation) => operation.deleted),
+        });
+        await this.yieldControl();
+      }
+      progress({
+        step: "products",
+        percent: 100,
+        completedItemCount: operations.length,
+        totalItemCount: plan.targetTotal,
+        completedPageCount: 1,
+        totalPageCount: 0,
+      });
+
+      progress({ step: "promotions", percent: 0 });
+      const promotions = await this.remote.getPromotions?.({
+        storeCode: input.storeCode,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }) ?? [];
+      throwIfAborted(input.signal);
+      await this.storage.replacePromotions(snapshotId, promotions);
+      progress({ step: "promotions", percent: 100 });
+      progress({ step: "activate", percent: 0 });
+      await input.beforeActivate?.();
+      throwIfAborted(input.signal);
+      const activatedAt = this.nowIso();
+      const activatedMetadata = await activateDelta.call(this.storage, {
+        sourceSnapshotId: active.snapshotId,
+        baseCatalogVersion: active.catalogVersion,
+        stagingSnapshotId: snapshotId,
+        expectedItemCount: plan.targetTotal,
+        activatedAtIso: activatedAt,
+      });
+      activated = true;
+      await fileSync.release(fileName).catch(() => undefined);
+      const result: CatalogActivationResult = {
+        snapshotId: activatedMetadata.snapshotId,
+        catalogVersion: plan.targetCatalogVersion,
+        itemCount: plan.targetTotal,
+        activatedAt: activatedMetadata.activatedAt,
+      };
+      await this.refreshCodeConflicts(input);
+      await input.afterActivate?.(result);
+      progress({ step: "activate", percent: 100 });
+      return result;
+    } catch (error) {
+      if (stagingStarted && !activated) await this.discardStaging(snapshotId);
+      // 本地基准在下载期间被改：放弃本次文件增量，由分页协议重新判断。
+      if (isCatalogDeltaFallback(error) && !input.signal?.aborted) return null;
+      throw contextualizeCatalogFailure(error, {
+        pageNumber: 1,
+        completedItemCount: 0,
+        totalItemCount: plan.targetTotal,
+      });
+    }
   }
 
   /**
@@ -897,6 +1275,14 @@ export class CatalogSnapshotService {
       // 中文注释：失败恢复也不得让 30 万级目录的级联删除独占事件循环与 SQLite 队列。
       await this.yieldControl();
     }
+  }
+}
+
+/** 标记“文件本身有问题”的失败：丢弃 staging 后回退分页，而不是当作目录刷新失败上报。 */
+class CatalogFileFallback extends Error {
+  public constructor(public override readonly cause: unknown) {
+    super("Catalog file import failed; falling back to paged download.");
+    this.name = "CatalogFileFallback";
   }
 }
 
