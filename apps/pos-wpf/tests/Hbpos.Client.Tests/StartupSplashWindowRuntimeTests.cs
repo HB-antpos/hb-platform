@@ -1,24 +1,26 @@
-using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
-using System.Windows.Threading;
 using Hbpos.Client.Wpf;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
 
 namespace Hbpos.Client.Tests;
 
-public sealed class StartupSplashWindowRuntimeTests
+// 中文注释：进程内只能有一个 WPF Application，且共享宿主在本集合结束时会将其关闭。
+// 窗口 InitializeComponent 依赖这个 Application，所以必须在共享宿主的集合与 Dispatcher 内运行，
+// 否则排在集合之后执行时会遇到“Application 正在关闭”（发版工作流单进程全量运行时必现）。
+// 窗口图标、品牌图片等 pack://application 资源由宿主统一指向客户端程序集，与生产一致。
+[Collection(WpfViewLifecycleTestCollection.Name)]
+public sealed class StartupSplashWindowRuntimeTests(PaymentViewRuntimeStaTestHost host)
 {
     [Fact]
     public Task Splash_window_renders_bound_text_progress_and_step_names()
     {
-        return RunOnStaDispatcherAsync(() =>
+        return host.RunAsync(application =>
         {
-            EnsureWpfResourceAssembly();
             Assert.True(LocalizationService.TryGetSupportedCulture("zh-CN", out var culture));
             var state = new StartupProgressState(key => LocalizationService.Translate(key, culture), culture, "Morayfield · POS-03");
             state.SetVersion("1.9.0", new AppLaunchVersionNotice("1.9.0", false));
@@ -55,6 +57,8 @@ public sealed class StartupSplashWindowRuntimeTests
             {
                 window.Close();
             }
+
+            return Task.CompletedTask;
         });
     }
 
@@ -88,58 +92,6 @@ public sealed class StartupSplashWindowRuntimeTests
             {
                 yield return descendant;
             }
-        }
-    }
-
-    /// <summary>
-    /// 测试进程的入口程序集是 testhost，pack://application 会去那里找图标；改指向 WPF 客户端程序集，与真实运行一致。
-    /// </summary>
-    private static void EnsureWpfResourceAssembly()
-    {
-        var wpfAssembly = typeof(StartupSplashWindow).Assembly;
-        var field = typeof(Application).GetField("_resourceAssembly", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        field.SetValue(null, wpfAssembly);
-        _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
-    }
-
-    private static async Task RunOnStaDispatcherAsync(Action action)
-    {
-        var dispatcherReady = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var dispatcher = Dispatcher.CurrentDispatcher;
-                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
-                dispatcherReady.TrySetResult(dispatcher);
-                Dispatcher.Run();
-            }
-            catch (Exception ex)
-            {
-                dispatcherReady.TrySetException(ex);
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "Hbpos.Client.Tests.StartupSplashWindowDispatcher"
-        };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-
-        var dispatcher = await dispatcherReady.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
-        try
-        {
-            await dispatcher.InvokeAsync(action, DispatcherPriority.Normal).Task;
-        }
-        finally
-        {
-            if (!dispatcher.HasShutdownStarted)
-            {
-                dispatcher.BeginInvokeShutdown(DispatcherPriority.Send);
-            }
-
-            Assert.True(thread.Join(AsyncTestWaitSupport.DefaultTimeout), "WPF Dispatcher thread did not shut down.");
         }
     }
 }
