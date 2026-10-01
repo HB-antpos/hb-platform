@@ -1057,8 +1057,133 @@ namespace BlazorApp.Api.Services.React
                 .Where(item => !item.IsDeleted && item.UserGuid == userGuid)
                 .OrderByDescending(item => item.CreatedAt)
                 .ToListAsync();
-            return ApiResponse<List<AttendancePunchAdjustmentDto>>.OK(
-                rows.Select(item => ToDto(item)).ToList());
+            var adjustmentGuids = rows.Select(item => item.AdjustmentGuid).ToList();
+            // 驳回原因记在审核记录上；同一补卡只取最近一次已处理的审核。
+            var remarks = adjustmentGuids.Count == 0
+                ? new Dictionary<string, string?>()
+                : (await _db.Queryable<AttendanceApproval>()
+                    .Where(item =>
+                        !item.IsDeleted
+                        && item.SourceType == "PunchAdjustment"
+                        && adjustmentGuids.Contains(item.SourceGuid)
+                        && item.ReviewedAt != null)
+                    .ToListAsync())
+                    .GroupBy(item => item.SourceGuid, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group.OrderByDescending(item => item.ReviewedAt).First().ReviewRemark,
+                        StringComparer.OrdinalIgnoreCase);
+            var reviewerNames = await ResolveUserDisplayNamesAsync(
+                rows.Select(item => item.ReviewedByUserGuid));
+            return ApiResponse<List<AttendancePunchAdjustmentDto>>.OK(rows.Select(item =>
+            {
+                var dto = ToDto(item);
+                dto.ReviewRemark = remarks.GetValueOrDefault(item.AdjustmentGuid);
+                dto.ReviewedByName = item.ReviewedByUserGuid != null
+                    ? reviewerNames.GetValueOrDefault(item.ReviewedByUserGuid)
+                    : null;
+                return dto;
+            }).ToList());
+        }
+
+        /// <summary>
+        /// 考勤排班、登记请假用的本店员工列表。不复用用户管理接口（需要 Users.View 且返回联系方式），
+        /// 只返回身份与用工类型；口径与店员列表一致（StoreStaff 角色 + 关联该店）。
+        /// </summary>
+        public async Task<ApiResponse<List<AttendanceEmployeeDto>>> GetStoreEmployeesAsync(string? storeCode)
+        {
+            var allowed = IsAdmin();
+            foreach (var permission in new[]
+            {
+                Permissions.Attendance.Schedule.ViewStore,
+                Permissions.Attendance.Schedule.EditManagedStore,
+                Permissions.Attendance.Leave.ViewManagedStore,
+                Permissions.Attendance.Leave.ReviewManagedStore,
+                Permissions.Attendance.Admin.View,
+            })
+            {
+                if (allowed) break;
+                allowed = await CurrentUserHasPermissionAsync(permission);
+            }
+            if (!allowed)
+            {
+                return ApiResponse<List<AttendanceEmployeeDto>>.Error("没有权限查看分店员工", "FORBIDDEN");
+            }
+            if (string.IsNullOrWhiteSpace(storeCode))
+            {
+                return ApiResponse<List<AttendanceEmployeeDto>>.Error("分店代码不能为空", "STORE_REQUIRED");
+            }
+
+            var normalizedStoreCode = storeCode.Trim();
+            var access = await ResolveManagedStoreAccessAsync(normalizedStoreCode);
+            if (!access.Success)
+            {
+                return ApiResponse<List<AttendanceEmployeeDto>>.Error(access.Message, access.ErrorCode);
+            }
+
+            var rows = await _db.Queryable<User>()
+                .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
+                .InnerJoin<Role>((u, ur, r) => ur.RoleGUID == r.RoleGUID)
+                .InnerJoin<UserStore>((u, ur, r, us) => u.UserGUID == us.UserGUID)
+                .InnerJoin<Store>((u, ur, r, us, s) => us.StoreGUID == s.StoreGUID)
+                .LeftJoin<EmployeeProfile>((u, ur, r, us, s, profile) => u.UserGUID == profile.UserGUID)
+                .Where((u, ur, r, us, s) =>
+                    !u.IsDeleted
+                    && !ur.IsDeleted
+                    && !r.IsDeleted
+                    && !us.IsDeleted
+                    && !s.IsDeleted
+                    && r.RoleName == "StoreStaff"
+                    && s.StoreCode == normalizedStoreCode)
+                .Select((u, ur, r, us, s, profile) => new
+                {
+                    u.UserGUID,
+                    u.Username,
+                    u.FullName,
+                    profile.EmployeeType,
+                })
+                .ToListAsync();
+            var employees = rows
+                .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Select(item => new AttendanceEmployeeDto
+                {
+                    UserGuid = item.UserGUID,
+                    Username = item.Username,
+                    FullName = item.FullName,
+                    EmploymentType = item.EmployeeType switch
+                    {
+                        EmployeeType.FullTime => "fullTime",
+                        EmployeeType.PartTime => "partTime",
+                        EmployeeType.Temporary => "casual",
+                        _ => null,
+                    },
+                })
+                .OrderBy(item => item.FullName ?? item.Username, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return ApiResponse<List<AttendanceEmployeeDto>>.OK(employees);
+        }
+
+        private async Task<Dictionary<string, string>> ResolveUserDisplayNamesAsync(IEnumerable<string?> userGuids)
+        {
+            var guids = userGuids
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (guids.Count == 0)
+            {
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var users = await _db.Queryable<User>()
+                .Where(item => guids.Contains(item.UserGUID))
+                .Select(item => new { item.UserGUID, item.FullName, item.Username })
+                .ToListAsync();
+            return users.ToDictionary(
+                item => item.UserGUID,
+                item => string.IsNullOrWhiteSpace(item.FullName) ? item.Username : item.FullName!,
+                StringComparer.OrdinalIgnoreCase);
         }
 
         public Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateMyPunchAdjustmentAsync(
@@ -1440,7 +1565,15 @@ namespace BlazorApp.Api.Services.React
                 .Where(item => !item.IsDeleted && item.UserGuid == userGuid)
                 .OrderByDescending(item => item.CreatedAt)
                 .ToListAsync();
-            return ApiResponse<List<AttendanceLeaveRequestDto>>.OK(rows.Select(ToDto).ToList());
+            var reviewerNames = await ResolveUserDisplayNamesAsync(rows.Select(item => item.ReviewedBy));
+            return ApiResponse<List<AttendanceLeaveRequestDto>>.OK(rows.Select(item =>
+            {
+                var dto = ToDto(item);
+                dto.ReviewedByName = item.ReviewedBy != null
+                    ? reviewerNames.GetValueOrDefault(item.ReviewedBy)
+                    : null;
+                return dto;
+            }).ToList());
         }
 
         public async Task<ApiResponse<AttendanceLeaveRequestDto>> CreateMyLeaveRequestAsync(

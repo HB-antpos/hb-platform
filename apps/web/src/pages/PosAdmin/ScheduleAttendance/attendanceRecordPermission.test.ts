@@ -30,6 +30,9 @@ const scheduleAndPunches = buildAccess(createUser([
 assertEqual(scheduleAndPunches.canViewAttendanceSchedule, true, '组合权限应允许查看排班')
 assertEqual(scheduleAndPunches.canViewAttendancePunches, true, 'Punch.ViewManagedStore 应允许查看考勤记录')
 
+const editOnly = buildAccess(createUser([P.Attendance.ScheduleEditManagedStore]))
+assertEqual(editOnly.canViewAttendanceSchedule, true, 'Schedule.EditManagedStore 应隐含查看排班')
+
 const admin = buildAccess(createUser([], ['Admin']))
 assertEqual(admin.canViewAttendanceSchedule, true, 'Admin 应允许查看排班')
 assertEqual(admin.canViewAttendancePunches, true, 'Admin 应允许查看考勤记录')

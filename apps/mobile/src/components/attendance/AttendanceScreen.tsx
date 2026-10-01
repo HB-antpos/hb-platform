@@ -19,7 +19,7 @@ import {
   Text,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AvailabilityForm } from "@/components/attendance/AvailabilityForm";
+import { AvailabilitySheet } from "@/components/attendance/AvailabilitySheet";
 import { HolidayManagementCard } from "@/components/attendance/HolidayManagementCard";
 import { LeaveManagementCard } from "@/components/attendance/LeaveManagementCard";
 import { ManagedPunchRecordsCard } from "@/components/attendance/ManagedPunchRecordsCard";
@@ -28,7 +28,9 @@ import { MonthDatePickerField } from "@/components/attendance/MonthDatePicker";
 import { PunchAdjustmentCard } from "@/components/attendance/PunchAdjustmentCard";
 import { ScheduleManagementCard } from "@/components/attendance/ScheduleManagementCard";
 import { TodayPunchCard } from "@/components/attendance/TodayPunchCard";
-import { WeeklyScheduleTable } from "@/components/attendance/WeeklyScheduleTable";
+import { MyRequestsPanel } from "@/components/attendance/MyRequestsPanel";
+import { MySchedulePanel } from "@/components/attendance/MySchedulePanel";
+import { shiftDate } from "@/modules/attendance/attendance-my-week";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import {
@@ -47,6 +49,7 @@ import {
   getMyAttendanceToday,
   getMyAttendanceWeek,
   getMyAvailability,
+  getAttendanceEmployees,
   getPendingApprovals,
   punchAttendance,
   publishAttendanceSchedulesWeek,
@@ -88,6 +91,7 @@ import {
 } from "@/modules/attendance/public-holiday-sync";
 import { getAttendanceDeviceContext } from "@/modules/attendance/required-location";
 import type {
+  AttendanceAvailability,
   AttendanceAvailabilityPayload,
   AttendancePunch,
   AttendancePunchMutationResult,
@@ -105,13 +109,12 @@ import {
   getPosEnabledStores,
   resolveScopedStoreCode,
 } from "@/modules/shop/store-scope";
-import { useStoreUsers } from "@/modules/users";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { useAuthStore } from "@/store/auth-store";
 
 type AttendanceMainTab = "personal" | "management";
-type PersonalAttendanceTab = "punchRecords" | "availabilityWeek";
+type PersonalAttendanceTab = "punchRecords" | "availabilityWeek" | "requests";
 type AttendanceManagementTab = "schedule" | "holidays" | "leave" | "punches";
 export type AttendanceScreenMode = "personal" | "management" | "combined";
 
@@ -220,7 +223,15 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const [activePersonalTab, setActivePersonalTab] =
     useState<PersonalAttendanceTab>("punchRecords");
   const [activeManagementTab, setActiveManagementTab] =
-    useState<AttendanceManagementTab>("schedule");
+    useState<AttendanceManagementTab>(() =>
+      access.canViewAttendancePunchRecords ? "punches" : "schedule");
+  // 审核里「补录下班」跳到打卡记录时带上的日期；变化时重建打卡记录卡片。
+  const [managedPunchDate, setManagedPunchDate] = useState<string>();
+  const [leaveRegisterVisible, setLeaveRegisterVisible] = useState(false);
+  const [availabilitySheet, setAvailabilitySheet] = useState<{
+    dates: string[];
+    item?: AttendanceAvailability;
+  } | null>(null);
   const [selectedDate, setSelectedDate] = useState(() =>
     toDateString(new Date()),
   );
@@ -298,6 +309,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     isManagementTab && activeManagementTab === "holidays";
   const isLeaveManagementTab =
     isManagementTab && activeManagementTab === "leave";
+  const isRequestsTab = isPersonalTab && activePersonalTab === "requests";
   const canViewManagedPunches = access.canViewAttendancePunchRecords;
   const isPunchManagementTab =
     isManagementTab && canViewManagedPunches && activeManagementTab === "punches";
@@ -368,13 +380,18 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const approvalsQuery = useQuery({
     queryKey: attendanceKeys.approvals(selectedStoreCode),
     queryFn: () => getPendingApprovals(selectedStoreCode),
-    enabled: Boolean(isAuthenticated && user && isLeaveManagementTab),
+    // 页签上要显示待审数量，所以管理页任一页签都拉取。
+    enabled: Boolean(isAuthenticated && user && isManagementTab),
   });
-  const storeUsersQuery = useStoreUsers(
-    (isScheduleManagementTab || isLeaveManagementTab) && selectedStoreCode
-      ? selectedStoreCode
-      : undefined,
-  );
+  // 排班与登记请假只需要本店员工身份，走考勤自己的接口，避免要求用户管理权限 Users.View。
+  const storeUsersQuery = useQuery({
+    queryKey: ["attendance", "employees", selectedStoreCode ?? ""],
+    queryFn: () => getAttendanceEmployees(selectedStoreCode!),
+    enabled: Boolean(
+      isAuthenticated && user && selectedStoreCode
+        && (isScheduleManagementTab || (isLeaveManagementTab && leaveRegisterVisible)),
+    ),
+  });
   const managerSchedulesQuery = useQuery({
     queryKey: attendanceKeys.schedulesWeek(
       selectedStoreCode,
@@ -689,13 +706,13 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       : null;
   const isManagementContentLoading =
     (isHolidayManagementTab && holidaysQuery.isLoading) ||
-    (isLeaveManagementTab &&
-      (approvalsQuery.isLoading || storeUsersQuery.isLoading));
+    (isLeaveManagementTab && approvalsQuery.isLoading);
   const managerLoadError =
     (isScheduleManagementTab &&
       (storeUsersQuery.error || managerSchedulesQuery.error)) ||
     (isHolidayManagementTab && holidaysQuery.error) ||
-    (isLeaveManagementTab && (approvalsQuery.error || storeUsersQuery.error));
+    // 员工列表只服务「登记请假」，它的错误在登记区域内提示，不挡住审核列表。
+    (isLeaveManagementTab && approvalsQuery.error);
 
   const pendingApprovals = useMemo(
     () => approvalsQuery.data ?? [],
@@ -1338,11 +1355,15 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
               buttons={[
                 {
                   value: "punchRecords",
-                  label: t("tabs.punchRecords"),
+                  label: t("tabs.short.punchSelf"),
                 },
                 {
                   value: "availabilityWeek",
-                  label: t("tabs.personalAvailability"),
+                  label: t("tabs.short.mySchedule"),
+                },
+                {
+                  value: "requests",
+                  label: t("tabs.short.myRequests"),
                 },
               ]}
               style={styles.sectionTabs}
@@ -1402,12 +1423,23 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                     {getErrorMessage(employeeLoadError, "messages.loadFailed")}
                   </Text>
                 ) : null}
-                {employeeInitialLoading ? <ActivityIndicator /> : null}
-                <AvailabilityForm
-                  key={`${user?.userGuid ?? ""}:${selectedStoreCode ?? ""}`}
+                <MySchedulePanel
+                  weekStartDate={employeeWeekStartDate}
+                  today={todayDate}
+                  week={weekQuery.data}
                   availability={availabilityQuery.data ?? []}
-                  defaultDate={selectedDate}
-                  onWeekChange={setSelectedDate}
+                  isLoading={employeeInitialLoading}
+                  onPreviousWeek={() => setSelectedDate((current) => shiftDate(current, -7))}
+                  onNextWeek={() => setSelectedDate((current) => shiftDate(current, 7))}
+                  onFillAvailability={(dates) => setAvailabilitySheet({ dates })}
+                  onEditAvailability={(item) => setAvailabilitySheet({ dates: [item.workDate], item })}
+                />
+                <AvailabilitySheet
+                  visible={availabilitySheet !== null}
+                  weekStartDate={employeeWeekStartDate}
+                  today={todayDate}
+                  initialDates={availabilitySheet?.dates ?? []}
+                  editingItem={availabilitySheet?.item}
                   isBusy={isAvailabilityBusy}
                   onCreate={(payload) =>
                     createAvailabilityMutation.mutateAsync(
@@ -1425,12 +1457,21 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                       payload: withSelectedStore(payload),
                     })
                   }
-                  onCancel={(availabilityGuid) =>
+                  onCancelItem={(availabilityGuid) =>
                     cancelAvailabilityMutation.mutate(availabilityGuid)
                   }
+                  onDismiss={() => setAvailabilitySheet(null)}
                 />
-                <WeeklyScheduleTable week={weekQuery.data} />
               </>
+            ) : null}
+            {isRequestsTab ? (
+              <MyRequestsPanel
+                storeCode={selectedStoreCode}
+                today={todayDate}
+                canApplyLeave={access.canViewAttendancePersonal}
+                onRequestCorrection={() => setActivePersonalTab("punchRecords")}
+                onMessage={showMessage}
+              />
             ) : null}
           </>
         ) : null}
@@ -1468,9 +1509,20 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 setActiveManagementTab(value as AttendanceManagementTab)
               }
               buttons={[
+                // 打卡记录依赖 Punch.ViewManagedStore；无权限时不出现该页签。
+                ...(canViewManagedPunches
+                  ? [{ value: "punches", label: t("tabs.short.punches"), labelStyle: styles.managementTabLabel }]
+                  : []),
                 {
                   value: "schedule",
                   label: t("tabs.short.schedule"),
+                  labelStyle: styles.managementTabLabel,
+                },
+                {
+                  value: "leave",
+                  label: pendingApprovals.length
+                    ? t("tabs.short.approvalsWithCount", { count: pendingApprovals.length })
+                    : t("tabs.short.approvals"),
                   labelStyle: styles.managementTabLabel,
                 },
                 {
@@ -1478,15 +1530,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   label: t("tabs.short.holidays"),
                   labelStyle: styles.managementTabLabel,
                 },
-                {
-                  value: "leave",
-                  label: t("tabs.short.leave"),
-                  labelStyle: styles.managementTabLabel,
-                },
-                // 打卡记录依赖 Punch.ViewManagedStore；无权限时不出现该页签。
-                ...(canViewManagedPunches
-                  ? [{ value: "punches", label: t("tabs.short.punches"), labelStyle: styles.managementTabLabel }]
-                  : []),
               ]}
               style={styles.sectionTabs}
             />
@@ -1523,6 +1566,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
             ) : null}
             {isPunchManagementTab ? (
               <ManagedPunchRecordsCard
+                key={managedPunchDate ?? "today"}
+                initialWorkDate={managedPunchDate}
                 storeCode={selectedStoreCode}
                 canAdjust={access.canAdjustAttendancePunch}
                 onMessage={showMessage}
@@ -1575,6 +1620,34 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
             ) : null}
             {isLeaveManagementTab && !isManagementContentLoading ? (
               <>
+                <ManagerApprovalList
+                  title={t("sections.approvals")}
+                  emptyMessage={t("approvals.empty")}
+                  approvals={pendingApprovals}
+                  isBusy={isApprovalBusy}
+                  canReview={canReviewAttendance}
+                  onApprove={(payload) => approveMutation.mutate(payload)}
+                  onReject={(payload) => rejectMutation.mutate(payload)}
+                  onFixMissingClockOut={canViewManagedPunches ? (approval) => {
+                    // 漏下班直接去打卡记录的那一天补录，店长不必再手动找日期。
+                    setManagedPunchDate(approval.workDate?.slice(0, 10));
+                    setActiveManagementTab("punches");
+                  } : undefined}
+                />
+                <Button
+                  mode="outlined"
+                  icon={leaveRegisterVisible ? "chevron-up" : "account-plus-outline"}
+                  onPress={() => setLeaveRegisterVisible((current) => !current)}
+                  style={styles.registerLeaveButton}
+                >
+                  {leaveRegisterVisible ? t("leaveManagement.hideRegister") : t("leaveManagement.registerAction")}
+                </Button>
+                {leaveRegisterVisible && storeUsersQuery.error ? (
+                  <Text accessibilityRole="alert" style={styles.muted}>
+                    {getErrorMessage(storeUsersQuery.error, "messages.loadFailed")}
+                  </Text>
+                ) : null}
+                {leaveRegisterVisible ? (
                 <LeaveManagementCard
                   storeCode={selectedStoreCode}
                   storeName={selectedStoreName}
@@ -1587,15 +1660,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   }
                   onShowMessage={showMessage}
                 />
-                <ManagerApprovalList
-                  title={t("sections.approvals")}
-                  emptyMessage={t("approvals.empty")}
-                  approvals={pendingApprovals}
-                  isBusy={isApprovalBusy}
-                  canReview={canReviewAttendance}
-                  onApprove={(payload) => approveMutation.mutate(payload)}
-                  onReject={(payload) => rejectMutation.mutate(payload)}
-                />
+                ) : null}
               </>
             ) : null}
           </>
@@ -1718,6 +1783,9 @@ const styles = StyleSheet.create({
   // 管理端四个页签在 375pt 宽屏上平分，字号收小以免英文标签被截断。
   managementTabLabel: {
     fontSize: 13,
+  },
+  registerLeaveButton: {
+    alignSelf: "stretch",
   },
   storePickerCode: {
     color: "#6B7280",

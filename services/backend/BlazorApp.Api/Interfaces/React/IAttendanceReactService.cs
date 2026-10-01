@@ -21,6 +21,7 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewMyPunchAdjustmentAsync(CreateAttendancePunchAdjustmentDto request);
         Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateMyPunchAdjustmentAsync(CreateAttendancePunchAdjustmentDto request);
         Task<ApiResponse<List<AttendancePunchAdjustmentDto>>> GetMyPunchAdjustmentsAsync();
+        Task<ApiResponse<List<AttendanceEmployeeDto>>> GetStoreEmployeesAsync(string? storeCode);
         Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewManagedPunchAdjustmentAsync(CreateManagedAttendancePunchAdjustmentDto request);
         Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateManagedPunchAdjustmentAsync(CreateManagedAttendancePunchAdjustmentDto request);
         Task<ApiResponse<AttendanceQrResolveDto>> ResolveAttendanceQrAsync(AttendanceQrResolveRequestDto request);

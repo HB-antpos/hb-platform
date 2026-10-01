@@ -373,6 +373,8 @@ namespace BlazorApp.Shared.Constants
                 [Warehouse.Picking] = [Warehouse.Manage, Warehouse.ManageOrders],
                 // 管理下载权限天然包含查看下载，保证菜单可见性和列表 GET 授权一致。
                 [System.ViewAppDownloads] = [System.ManageAppDownloads],
+                // 能编辑管理分店排班的人天然可以查看排班，避免「能改不能看」导致排班页 403。
+                [Attendance.Schedule.ViewStore] = [Attendance.Schedule.EditManagedStore],
             };
 
         public static class AustralianSuppliers

@@ -66,10 +66,13 @@ function summarizePunches(session: AttendanceScheduleSession) {
 }
 
 export function ManagedPunchRecordsCard({
+  initialWorkDate,
   storeCode,
   canAdjust,
   onMessage,
 }: {
+  /** 从审核「补录下班」跳转时定位到的日期，默认今天。 */
+  initialWorkDate?: string;
   storeCode?: string;
   canAdjust: boolean;
   onMessage: (message: string) => void;
@@ -77,7 +80,7 @@ export function ManagedPunchRecordsCard({
   const { t } = useAppTranslation(["attendance", "common"]);
   const queryClient = useQueryClient();
   const today = useMemo(() => toDateString(new Date()), []);
-  const [workDate, setWorkDate] = useState(today);
+  const [workDate, setWorkDate] = useState(initialWorkDate ?? today);
   const [exceptionsOnly, setExceptionsOnly] = useState(false);
   const [editingSession, setEditingSession] = useState<AttendanceScheduleSession>();
 

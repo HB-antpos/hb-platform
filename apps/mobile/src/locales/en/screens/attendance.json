@@ -29,7 +29,12 @@
       "schedule": "Shifts",
       "holidays": "Holiday",
       "leave": "Leave",
-      "punches": "Punch"
+      "punches": "Punch",
+      "punchSelf": "Punch",
+      "mySchedule": "Schedule",
+      "myRequests": "Requests",
+      "approvals": "Inbox",
+      "approvalsWithCount": "Inbox {{count}}"
     }
   },
   "today": {
@@ -246,7 +251,20 @@
       "outOfRange": "Approved overtime must be between 0 and the candidate minutes.",
       "invalidIncrement": "Approved overtime must be a multiple of 15 minutes.",
       "remarkRequired": "A review note is required when reducing or rejecting overtime."
-    }
+    },
+    "filterAll": "All",
+    "filterA11y": "Filter approvals by type",
+    "summary": {
+      "PunchAdjustment": "{{punchType}} correction {{time}}",
+      "Overtime": "Overtime {{minutes}} min",
+      "Leave": "{{leaveType}} {{start}}–{{end}}",
+      "Punch": "{{punchType}} exception"
+    },
+    "shortDate": "{{day}}/{{month}}",
+    "quickMinutes": "{{minutes}} min",
+    "addRemark": "Add note",
+    "fixMissingClockOut": "Add clock-out",
+    "needsFix": "Needs fix"
   },
   "holidayManagement": {
     "noStore": "Select a store first",
@@ -267,7 +285,14 @@
       "Open": "Open",
       "Closed": "Closed",
       "Partial": "Partial"
-    }
+    },
+    "syncPanelTitle": "{{store}} public holidays",
+    "syncHint": "Imports official public holidays for the store's state (NSW / QLD).",
+    "editTitle": "Edit holiday",
+    "regularHours": "Regular hours",
+    "monthGroup": "{{month}}",
+    "monthGroupWithYear": "{{month}} {{year}}",
+    "unknownMonth": "Other dates"
   },
   "leaveManagement": {
     "empty": "No sick or annual leave approvals pending",
@@ -296,7 +321,10 @@
       "title": "Take medical certificate photo",
       "permissionTitle": "Camera access required",
       "permissionDescription": "Allow camera access to take and upload a medical certificate photo for sick leave."
-    }
+    },
+    "registerAction": "Record leave",
+    "registerHint": "Record annual or sick leave for an employee (sick leave needs a medical certificate photo)",
+    "hideRegister": "Hide"
   },
   "scheduleManagement": {
     "employeeColumn": "Store / employee",
@@ -559,5 +587,50 @@
     "save": "Save changes",
     "saved": "Punch updated",
     "loadFailed": "Couldn't load punch records"
+  },
+  "myAttendance": {
+    "today": "Today",
+    "done": "Done",
+    "availableAt": "Available {{time}}",
+    "unfilled": "Availability missing",
+    "rest": "Off",
+    "weekHours": "{{hours}} h scheduled this week",
+    "fillAvailability": "Add availability",
+    "availabilitySheet": {
+      "earlier": "{{label}} 30 min earlier",
+      "later": "{{label}} 30 min later",
+      "remove": "Remove this day",
+      "willSubmit": "Will submit",
+      "submit_one": "Submit {{count}} day",
+      "submit_other": "Submit {{count}} days"
+    },
+    "requests": {
+      "adjustmentTitle": "Correction · {{punchType}} {{time}}",
+      "leaveTitle": "{{leaveType}} · {{range}}",
+      "applyLeave": "Request leave",
+      "pending": "In progress",
+      "done": "Processed",
+      "empty": "No corrections or leave requests yet",
+      "reviewedBy": "Processed by {{name}}",
+      "reviewedWithRemark": "{{name}}: {{remark}}",
+      "withdraw": "Withdraw",
+      "status": {
+        "pending": "Pending",
+        "approved": "Applied",
+        "rejected": "Rejected",
+        "cancelled": "Withdrawn"
+      },
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days"
+    },
+    "leaveSheet": {
+      "previousDay": "{{label}} previous day",
+      "nextDay": "{{label}} next day",
+      "submitted": "Leave request submitted",
+      "invalidRange": "End date can't be before start date",
+      "sickHint": "Give your manager a medical certificate; they attach it when recording sick leave.",
+      "submit_one": "Submit {{count}} day",
+      "submit_other": "Submit {{count}} days"
+    }
   }
 }
