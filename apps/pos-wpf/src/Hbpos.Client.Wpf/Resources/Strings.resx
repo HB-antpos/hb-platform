@@ -380,9 +380,6 @@
   <data name="customer.skuCount" xml:space="preserve"><value>SKU Count</value></data>
   <data name="customer.readyForPayment" xml:space="preserve"><value>Ready for Payment</value></data>
   <data name="customer.insertOrTap" xml:space="preserve"><value>Insert or tap card</value></data>
-  <data name="customer.promotionTitle" xml:space="preserve"><value>Deal of the Week</value></data>
-  <data name="customer.promotionSubtitle" xml:space="preserve"><value>Organic Produce Up to 30% Off</value></data>
-  <data name="customer.promotionBody" xml:space="preserve"><value>Fresh market selection this weekend and member-only savings.</value></data>
   <data name="customerDisplay.window.opened" xml:space="preserve"><value>Customer display opened on the second display.</value></data>
   <data name="customerDisplay.window.openedNormal" xml:space="preserve"><value>Customer display opened in a normal window on the second display.</value></data>
   <data name="customerDisplay.window.openedFullscreen" xml:space="preserve"><value>Customer display opened full screen on the second display.</value></data>
