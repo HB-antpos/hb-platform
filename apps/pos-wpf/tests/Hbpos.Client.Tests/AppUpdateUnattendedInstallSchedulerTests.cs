@@ -9,20 +9,21 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
     [Theory]
-    [InlineData(null, false, true, "01:00", "07:00")]
-    [InlineData("", false, true, "01:00", "07:00")]
-    [InlineData(null, true, false, "01:00", "07:00")]
-    [InlineData("off", false, false, "01:00", "07:00")]
-    [InlineData("02:30-05:00", true, true, "02:30", "05:00")]
-    [InlineData("23:00-05:00", false, true, "23:00", "05:00")]
-    [InlineData("1-7", false, true, "01:00", "07:00")]
-    [InlineData("03:00-03:00", true, false, "01:00", "07:00")]
+    [InlineData(null, false, true, "18:00", "08:00", "20:00")]
+    [InlineData("", false, true, "18:00", "08:00", "20:00")]
+    [InlineData(null, true, false, "18:00", "08:00", "20:00")]
+    [InlineData("off", false, false, "18:00", "08:00", "20:00")]
+    [InlineData("02:30-05:00", true, true, "02:30", "05:00", null)]
+    [InlineData("23:00-05:00", false, true, "23:00", "05:00", null)]
+    [InlineData("1-7", false, true, "18:00", "08:00", "20:00")]
+    [InlineData("03:00-03:00", true, false, "18:00", "08:00", "20:00")]
     public void Options_read_window_from_configuration_and_default_off_in_debug(
         string? configured,
         bool isDebugBuild,
         bool expectedEnabled,
         string expectedStart,
-        string expectedEnd)
+        string expectedEnd,
+        string? expectedThursdayStart)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -36,29 +37,53 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
         Assert.Equal(expectedEnabled, options.IsEnabled);
         Assert.Equal(TimeOnly.Parse(expectedStart), options.WindowStart);
         Assert.Equal(TimeOnly.Parse(expectedEnd), options.WindowEnd);
+        Assert.Equal(expectedThursdayStart is null ? null : TimeOnly.Parse(expectedThursdayStart), options.ThursdayWindowStart);
     }
 
     [Theory]
-    [InlineData("00:59", false)]
-    [InlineData("01:00", true)]
-    [InlineData("06:59", true)]
-    [InlineData("07:00", false)]
-    [InlineData("13:00", false)]
-    public void Default_window_is_1am_to_7am_local_time(string localTime, bool expected)
+    // 中文注释：2026-09-30 是周三、10-01 周四、10-02 周五、10-05 周一。
+    [InlineData("2026-09-30 17:59", false)]
+    [InlineData("2026-09-30 18:00", true)]
+    [InlineData("2026-10-01 07:59", true)]
+    [InlineData("2026-10-01 08:00", false)]
+    [InlineData("2026-10-01 18:00", false)]
+    [InlineData("2026-10-01 19:59", false)]
+    [InlineData("2026-10-01 20:00", true)]
+    [InlineData("2026-10-02 07:59", true)]
+    [InlineData("2026-10-02 08:00", false)]
+    [InlineData("2026-10-02 18:00", true)]
+    [InlineData("2026-10-05 13:00", false)]
+    public void Default_window_is_6pm_to_8am_and_8pm_on_thursday(string localDateTime, bool expected)
     {
-        Assert.Equal(expected, AppUpdateUnattendedInstallOptions.Default.IsWithinWindow(TimeOnly.Parse(localTime)));
+        Assert.Equal(expected, AppUpdateUnattendedInstallOptions.Default.IsWithinWindow(ParseLocal(localDateTime)));
     }
 
     [Theory]
-    [InlineData("22:59", false)]
-    [InlineData("23:00", true)]
-    [InlineData("02:00", true)]
-    [InlineData("05:00", false)]
-    public void Window_can_cross_midnight(string localTime, bool expected)
+    [InlineData("2026-09-28 22:59", false)]
+    [InlineData("2026-09-28 23:00", true)]
+    [InlineData("2026-09-29 02:00", true)]
+    [InlineData("2026-09-29 05:00", false)]
+    [InlineData("2026-10-01 23:00", true)]
+    public void Window_can_cross_midnight(string localDateTime, bool expected)
     {
         var options = new AppUpdateUnattendedInstallOptions(true, new TimeOnly(23, 0), new TimeOnly(5, 0));
 
-        Assert.Equal(expected, options.IsWithinWindow(TimeOnly.Parse(localTime)));
+        Assert.Equal(expected, options.IsWithinWindow(ParseLocal(localDateTime)));
+    }
+
+    [Fact]
+    public async Task Thursday_waits_until_8pm_before_installing()
+    {
+        var harness = new Harness(localTime: new TimeOnly(18, 0), date: new DateOnly(2026, 10, 1));
+
+        await harness.TickAsync();
+        await harness.AdvanceAndTickAsync();
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(0, harness.Coordinator.CallCount);
+
+        await harness.AdvanceToAsync(new TimeOnly(20, 0));
+        await harness.AdvanceAndTickAsync();
+        Assert.Equal(1, harness.Coordinator.CallCount);
     }
 
     [Fact]
@@ -87,7 +112,7 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
     [Fact]
     public async Task Does_nothing_outside_window()
     {
-        var harness = new Harness(localTime: new TimeOnly(7, 0));
+        var harness = new Harness(localTime: new TimeOnly(8, 0));
 
         await harness.TickAsync();
         await harness.AdvanceAndTickAsync();
@@ -238,6 +263,11 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
         Assert.Equal(0, harness.Coordinator.CallCount);
     }
 
+    private static DateTime ParseLocal(string value)
+    {
+        return DateTime.ParseExact(value, "yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static AppUpdateCoordinatorResult Skipped(string errorCode)
     {
         return AppUpdateCoordinatorResult.FromStatus(AppUpdateCoordinatorStatus.UnattendedInstallSkipped) with
@@ -250,10 +280,12 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
     {
         private readonly AppUpdateUnattendedInstallScheduler _scheduler;
 
-        public Harness(TimeOnly localTime, AppUpdateUnattendedInstallOptions? options = null)
+        // 中文注释：默认日期 2026-09-28 是周一，不受周四推迟影响。
+        public Harness(TimeOnly localTime, AppUpdateUnattendedInstallOptions? options = null, DateOnly? date = null)
         {
             Options = options ?? AppUpdateUnattendedInstallOptions.Default;
-            Time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 28, localTime.Hour, localTime.Minute, 0, TimeSpan.Zero));
+            var day = date ?? new DateOnly(2026, 9, 28);
+            Time = new FakeTimeProvider(new DateTimeOffset(day.ToDateTime(localTime), TimeSpan.Zero));
             Time.SetLocalTimeZone(TimeZoneInfo.Utc);
             _scheduler = CreateScheduler(delayAsync: null);
         }
@@ -281,14 +313,20 @@ public sealed class AppUpdateUnattendedInstallSchedulerTests
             return TickAsync();
         }
 
+        public Task AdvanceToAsync(TimeOnly localTime)
+        {
+            // 中文注释：时区固定为 UTC，向前拨到当天（已过则次日）指定时刻再跑一轮。
+            var now = Time.GetUtcNow();
+            var target = new DateTimeOffset(now.Date + localTime.ToTimeSpan(), TimeSpan.Zero);
+            Time.SetUtcNow(target > now ? target : target.AddDays(1));
+            return TickAsync();
+        }
+
         public async Task AdvanceToNextNightAsync()
         {
-            // 中文注释：先走出窗口让当晚状态复位，再回到次日 01:00 连续两轮空闲。
-            Time.Advance(TimeSpan.FromHours(7));
-            await TickAsync();
-            Time.Advance(TimeSpan.FromHours(24) - TimeSpan.FromHours(7) - AppUpdateUnattendedInstallScheduler.TickInterval * 3);
-            await TickAsync();
-            await AdvanceAndTickAsync();
+            // 中文注释：先在白天走出窗口让当晚状态复位，再从下一晚窗口开始连续两轮空闲。
+            await AdvanceToAsync(new TimeOnly(12, 0));
+            await AdvanceToAsync(AppUpdateUnattendedInstallOptions.DefaultWindowStart);
             await AdvanceAndTickAsync();
         }
     }
