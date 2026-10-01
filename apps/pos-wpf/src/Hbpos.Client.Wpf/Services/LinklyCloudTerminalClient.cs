@@ -61,13 +61,16 @@ public sealed class LinklyCloudTerminalClient(
     TimeSpan? pollInterval = null,
     ILocalizationService? localization = null,
     ILinklyTerminalDialogService? dialogService = null,
-    ILinklyPaymentAttemptContextAccessor? linklyPaymentAttemptContextAccessor = null) : ILinklyCloudTerminalClient
+    ILinklyPaymentAttemptContextAccessor? linklyPaymentAttemptContextAccessor = null,
+    TimeProvider? timeProvider = null) : ILinklyCloudTerminalClient
 {
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(2);
     // 取消后仍需等待原交易结果时的让出间隔；此时不能再用已取消的令牌等待，否则会同步返回而空转。
     private static readonly TimeSpan CancelledResultWaitInterval = TimeSpan.FromMilliseconds(50);
     private const string ProcessorName = "ANZ";
     private readonly TimeSpan _pollInterval = pollInterval.GetValueOrDefault(DefaultPollInterval);
+    // 业务等待计时器走 TimeProvider，测试可注入 FakeTimeProvider 直接推进虚拟时间，不靠墙钟窗口判断是否超时。
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task<LinklyConnectionTestResult> TestConnectionAsync(
         CardTerminalSettings settings,
@@ -189,8 +192,9 @@ public sealed class LinklyCloudTerminalClient(
             return RecoveryUnknown(requestedSessionId, requestedTxnRef, endpointValidationMessage);
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(LinklyTimeoutPolicy.BusinessWait);
+        // CancelAfter 不接受 TimeProvider，改为独立的业务等待计时 CTS 再与外部令牌链接，语义不变。
+        using var businessWaitCts = new CancellationTokenSource(LinklyTimeoutPolicy.BusinessWait, _timeProvider);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, businessWaitCts.Token);
         try
         {
             Log($"transaction recovery start sessionId={requestedSessionId} txnRef={LogValue(requestedTxnRef)} amountMinor={ToMinorUnits(amount)}");
@@ -291,8 +295,9 @@ public sealed class LinklyCloudTerminalClient(
                 ProviderSubmissionState: ProviderSubmissionState.NotSubmitted);
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(LinklyTimeoutPolicy.BusinessWait);
+        // CancelAfter 不接受 TimeProvider，改为独立的业务等待计时 CTS 再与外部令牌链接，语义不变。
+        using var businessWaitCts = new CancellationTokenSource(LinklyTimeoutPolicy.BusinessWait, _timeProvider);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, businessWaitCts.Token);
         var settlementRequestSent = false;
         var sessionId = Guid.NewGuid().ToString("D");
         try
@@ -411,8 +416,9 @@ public sealed class LinklyCloudTerminalClient(
             return FallbackAllowed("linkly.cloud.configIncomplete", endpointValidationMessage);
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(LinklyTimeoutPolicy.BusinessWait);
+        // CancelAfter 不接受 TimeProvider，改为独立的业务等待计时 CTS 再与外部令牌链接，语义不变。
+        using var businessWaitCts = new CancellationTokenSource(LinklyTimeoutPolicy.BusinessWait, _timeProvider);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, businessWaitCts.Token);
         var keepDialogOpen = false;
         var transactionSubmitted = false;
         var attemptContext = linklyPaymentAttemptContextAccessor?.Current;

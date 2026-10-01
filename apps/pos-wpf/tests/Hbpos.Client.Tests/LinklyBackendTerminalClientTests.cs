@@ -5,6 +5,7 @@ using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Linkly;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Hbpos.Client.Tests;
 
@@ -5809,12 +5810,12 @@ public sealed class LinklyBackendTerminalClientTests
     }
 
     [Fact]
-    [Trait("Category", "Timing")]
     public async Task PurchaseAsync_does_not_use_short_configured_timeout_before_linkly_business_wait()
     {
         var requests = new List<string>();
         var statusWait = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var statusStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var statusToken = CancellationToken.None;
         var handler = new StubHttpMessageHandler(
             (request, cancellationToken) =>
             {
@@ -5831,27 +5832,36 @@ public sealed class LinklyBackendTerminalClientTests
 
                 if (request.RequestUri.AbsolutePath.Contains("/transactions/short-timeout-session", StringComparison.Ordinal))
                 {
+                    statusToken = cancellationToken;
                     statusStarted.TrySetResult();
                     return statusWait.Task.WaitAsync(cancellationToken);
                 }
 
                 throw new InvalidOperationException($"Unexpected request {request.RequestUri}");
             });
-        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+        var timeProvider = new FakeTimeProvider();
+        var client = CreateClient(
+            handler,
+            new FakeLinklyTerminalDialogService(),
+            TimeSpan.Zero,
+            null,
+            null,
+            timeProvider: timeProvider);
         var settings = CreateSettings() with { TerminalTimeout = TimeSpan.FromMilliseconds(30) };
 
         using var cancellation = new CancellationTokenSource();
         var purchaseTask = client.PurchaseAsync(10m, CreateSession(), settings, cancellation.Token);
         try
         {
-            // 必须进入交易查询后再计时，预检耗时不能替代业务等待的验证。
+            // 必须进入交易查询后再推进时间，预检耗时不能替代业务等待的验证。
             await statusStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
-            await Task.Delay(120);
 
-            if (purchaseTask.IsCompleted)
+            // 中文注释：业务等待计时器在 FakeTimeProvider 上，Advance 会在本线程同步触发到期回调并级联取消链接令牌，
+            // 因此推进后立即读取查询令牌即可确定结论，不需要墙钟等待。推进到业务等待前一刻，远超 30ms 的终端超时设置。
+            timeProvider.Advance(LinklyTimeoutPolicy.BusinessWait - TimeSpan.FromMilliseconds(1));
+            if (statusToken.IsCancellationRequested || purchaseTask.IsCompleted)
             {
-                var early = await purchaseTask;
-                Assert.Fail($"Purchase completed before business wait. statusKey={early.StatusKey} unknown={early.ResultUnknown} message={early.Message} requests={string.Join(" | ", requests)}");
+                Assert.Fail($"Purchase stopped waiting before business wait. statusCancelled={statusToken.IsCancellationRequested} completed={purchaseTask.IsCompleted} requests={string.Join(" | ", requests)}");
             }
 
             statusWait.SetResult(JsonResponse(ApprovedSessionJson("short-timeout-session", "TXN-SHORT")));
@@ -6036,7 +6046,8 @@ public sealed class LinklyBackendTerminalClientTests
         ILocalizationService? localization,
         ILinklyPaymentAttemptContextAccessor? paymentAttemptContextAccessor = null,
         TimeSpan? businessWait = null,
-        ILinklyBankReceiptPrinter? bankReceiptPrinter = null)
+        ILinklyBankReceiptPrinter? bankReceiptPrinter = null,
+        TimeProvider? timeProvider = null)
     {
         return new LinklyBackendTerminalClient(
             new HttpClient(handler) { BaseAddress = new Uri("https://api.example/") },
@@ -6046,7 +6057,8 @@ public sealed class LinklyBackendTerminalClientTests
             localization,
             paymentAttemptContextAccessor,
             businessWait,
-            bankReceiptPrinter);
+            bankReceiptPrinter,
+            timeProvider);
     }
 
     private static PosSessionState CreateSession()
