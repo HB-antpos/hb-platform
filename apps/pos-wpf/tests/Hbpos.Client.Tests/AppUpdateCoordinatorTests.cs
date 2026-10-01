@@ -144,8 +144,9 @@ public sealed class AppUpdateCoordinatorTests
         Assert.False(unattended.IsEnabled);
 #else
         Assert.True(unattended.IsEnabled);
-        Assert.Equal(new TimeOnly(1, 0), unattended.WindowStart);
-        Assert.Equal(new TimeOnly(7, 0), unattended.WindowEnd);
+        Assert.Equal(new TimeOnly(18, 0), unattended.WindowStart);
+        Assert.Equal(new TimeOnly(8, 0), unattended.WindowEnd);
+        Assert.Equal(new TimeOnly(20, 0), unattended.ThursdayWindowStart);
 #endif
     }
 
