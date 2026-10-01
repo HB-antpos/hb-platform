@@ -661,6 +661,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/files/sync-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    storeCode?: string;
+                    baseCatalogVersion?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CatalogFileSyncPlanResponseApiResult"];
+                        "application/json": components["schemas"]["CatalogFileSyncPlanResponseApiResult"];
+                        "text/json": components["schemas"]["CatalogFileSyncPlanResponseApiResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/files/full": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    storeCode?: string;
+                    catalogVersion?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/files/delta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    storeCode?: string;
+                    baseCatalogVersion?: string;
+                    targetCatalogVersion?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/devices/activation-code/preview": {
         parameters: {
             query?: never;
@@ -5454,6 +5567,33 @@ export interface components {
         CatalogDeltaPageResponseApiResult: {
             success?: boolean;
             data?: components["schemas"]["CatalogDeltaPageResponse"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        CatalogDownloadFileDto: {
+            kind?: string | null;
+            format?: string | null;
+            path?: string | null;
+            /** Format: int64 */
+            bytes?: number;
+            sha256?: string | null;
+        };
+        CatalogFileSyncPlanResponse: {
+            storeCode?: string | null;
+            /** Format: date-time */
+            generatedAt?: string;
+            mode?: string | null;
+            baseCatalogVersion?: string | null;
+            targetCatalogVersion?: string | null;
+            /** Format: int32 */
+            targetTotal?: number;
+            file?: components["schemas"]["CatalogDownloadFileDto"];
+            /** Format: int32 */
+            deltaOperationCount?: number | null;
+        };
+        CatalogFileSyncPlanResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["CatalogFileSyncPlanResponse"];
             errorCode?: string | null;
             message?: string | null;
         };
