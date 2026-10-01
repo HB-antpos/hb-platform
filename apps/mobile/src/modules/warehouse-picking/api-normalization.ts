@@ -37,11 +37,23 @@ const participantSchema = z.object({
   lastDetailGuid: nullableText,
 });
 
+// 没有有效标记时后端省略该字段。
+const stockoutSchema = z
+  .object({
+    reason: z.number().int(),
+    markedByName: text,
+    markedAtUtc: text,
+    pickedAtMark: number,
+  })
+  .nullish()
+  .transform((value) => value ?? null);
+
 const lineProgressSchema = z.object({
   detailGuid: text.min(1),
   pickedTotal: number,
   pickedBy: z.array(pickedBySchema).nullish().transform((value) => value ?? []),
   minOrderQuantity: nullableNumber,
+  stockout: stockoutSchema,
 });
 
 const sheetSchema = z.object({
@@ -77,6 +89,7 @@ const sheetSchema = z.object({
         .transform((value) => value ?? []),
       pickedTotal: number,
       pickedBy: z.array(pickedBySchema).nullish().transform((value) => value ?? []),
+      stockout: stockoutSchema,
     }),
   ),
   codes: z.array(

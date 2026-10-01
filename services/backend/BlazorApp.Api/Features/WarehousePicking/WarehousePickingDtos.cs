@@ -97,6 +97,24 @@ public sealed class WarehousePickingLineDto
     public List<WarehousePickingSetChildDto> SetChildren { get; set; } = new();
     public int PickedTotal { get; set; }
     public List<WarehousePickedByDto> PickedBy { get; set; } = new();
+
+    /// <summary>仍有效的“货位没货”标记；没有标记时为空（序列化时省略）。</summary>
+    public WarehousePickingStockoutDto? Stockout { get; set; }
+}
+
+/// <summary>“货位没货”标记：原因见 WarehouseOrderPickStockoutReasons，谁在什么时候标的、标记时已拣多少。</summary>
+public sealed class WarehousePickingStockoutDto
+{
+    public int Reason { get; set; }
+    public string MarkedByName { get; set; } = string.Empty;
+    public DateTime MarkedAtUtc { get; set; }
+    public int PickedAtMark { get; set; }
+}
+
+public sealed class WarehousePickingStockoutRequestDto
+{
+    /// <summary>1 货位空了 / 2 放的不是这个商品 / 3 有货但破损。</summary>
+    public int Reason { get; set; }
 }
 
 public sealed class WarehousePickingCodeDto
@@ -148,6 +166,9 @@ public sealed class WarehousePickingLineProgressDto
     public int PickedTotal { get; set; }
     public List<WarehousePickedByDto> PickedBy { get; set; } = new();
     public int? MinOrderQuantity { get; set; }
+
+    /// <summary>随进度轮询下发，一起拣的同事能看到谁把哪一行标成了没货。</summary>
+    public WarehousePickingStockoutDto? Stockout { get; set; }
 }
 
 public sealed class WarehousePickingProgressDto

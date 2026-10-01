@@ -31,6 +31,19 @@ public interface IWarehousePickingService
         WarehousePickerContext picker
     );
 
+    Task<WarehousePickingResult<WarehousePickingLineMutationDto>> MarkStockoutAsync(
+        string orderGuid,
+        string detailGuid,
+        int reason,
+        WarehousePickerContext picker
+    );
+
+    Task<WarehousePickingResult<WarehousePickingLineMutationDto>> ClearStockoutAsync(
+        string orderGuid,
+        string detailGuid,
+        WarehousePickerContext picker
+    );
+
     Task<WarehousePickingResult<WarehousePickingMinOrderQuantityResultDto>> SetMinOrderQuantityAsync(
         string orderGuid,
         string detailGuid,
@@ -444,6 +457,141 @@ internal sealed class WarehousePickingService(
         });
     }
 
+    /// <summary>
+    /// 标记“货位没货”：已拣的保留，剩余数量记为拣不到的原因；不写拣货记录、不改合计。
+    /// 同一行再次标记覆盖原因与标记人；已拣齐（含超拣）的行不需要标记。
+    /// </summary>
+    public Task<WarehousePickingResult<WarehousePickingLineMutationDto>> MarkStockoutAsync(
+        string orderGuid,
+        string detailGuid,
+        int reason,
+        WarehousePickerContext picker
+    )
+    {
+        var normalizedDetailGuid = detailGuid?.Trim();
+        if (string.IsNullOrEmpty(normalizedDetailGuid) || !WarehouseOrderPickStockoutReasons.IsKnown(reason))
+        {
+            return Task.FromResult(WarehousePickingResult<WarehousePickingLineMutationDto>.Fail(
+                400,
+                WarehousePickingErrorCodes.InvalidRequest,
+                "缺少订单行或没货原因无效"
+            ));
+        }
+
+        return ExecuteInTransactionAsync(async () =>
+        {
+            var gate = await EnterWritableSessionAsync<WarehousePickingLineMutationDto>(orderGuid);
+            if (gate != null)
+            {
+                return gate;
+            }
+
+            var line = await LoadLineAsync(orderGuid, normalizedDetailGuid);
+            if (line == null)
+            {
+                return LineNotFound<WarehousePickingLineMutationDto>();
+            }
+
+            var current = await WarehousePickingQueries.BuildLineProgressAsync(_db, orderGuid, normalizedDetailGuid, line.MinOrderQuantity);
+            if (current.PickedTotal >= (line.Quantity ?? 0))
+            {
+                return WarehousePickingResult<WarehousePickingLineMutationDto>.Fail(
+                    409,
+                    WarehousePickingErrorCodes.LineAlreadyComplete,
+                    "这一行已经拣齐，不需要标记没货",
+                    new WarehousePickingLineMutationDto { Line = current }
+                );
+            }
+
+            var now = DateTime.UtcNow;
+            var stockout = new WarehouseOrderPickStockout
+            {
+                OrderGUID = orderGuid,
+                DetailGUID = line.DetailGUID,
+                ProductCode = line.ProductCode ?? string.Empty,
+                LocationCode = Truncate(await WarehousePickingQueries.LoadPickLocationTextAsync(_db, line.ProductCode), 200),
+                Reason = reason,
+                PickedAtMark = current.PickedTotal,
+                MarkedByUserGuid = picker.UserGuid,
+                MarkedByName = picker.Name,
+                MarkedAtUtc = now,
+                ClearedAtUtc = null,
+                ClearedByName = null,
+            };
+            // 会话行已加更新锁，同一订单的写入在此串行：先查再插 / 覆盖不会并发撞主键。
+            var exists = await _db.Queryable<WarehouseOrderPickStockout>()
+                .Where(item => item.OrderGUID == orderGuid && item.DetailGUID == line.DetailGUID)
+                .AnyAsync();
+            if (exists)
+            {
+                await _db.Updateable(stockout).ExecuteCommandAsync();
+            }
+            else
+            {
+                await _db.Insertable(stockout).ExecuteCommandAsync();
+            }
+
+            await TouchParticipantAsync(orderGuid, picker, line.DetailGUID, now);
+            logger.LogInformation(
+                "拣货标记货位没货: Order={OrderGuid}, Detail={DetailGuid}, Reason={Reason}, Picked={Picked}, Picker={PickerUserGuid}",
+                orderGuid,
+                line.DetailGUID,
+                reason,
+                current.PickedTotal,
+                picker.UserGuid
+            );
+            return WarehousePickingResult<WarehousePickingLineMutationDto>.Ok(
+                new WarehousePickingLineMutationDto
+                {
+                    Line = await WarehousePickingQueries.BuildLineProgressAsync(_db, orderGuid, line.DetailGUID, line.MinOrderQuantity),
+                }
+            );
+        });
+    }
+
+    /// <summary>撤销“货位没货”标记；没有有效标记时直接返回当前行，重复撤销是幂等的。</summary>
+    public Task<WarehousePickingResult<WarehousePickingLineMutationDto>> ClearStockoutAsync(
+        string orderGuid,
+        string detailGuid,
+        WarehousePickerContext picker
+    )
+    {
+        var normalizedDetailGuid = detailGuid?.Trim();
+        if (string.IsNullOrEmpty(normalizedDetailGuid))
+        {
+            return Task.FromResult(WarehousePickingResult<WarehousePickingLineMutationDto>.Fail(
+                400,
+                WarehousePickingErrorCodes.InvalidRequest,
+                "缺少订单行"
+            ));
+        }
+
+        return ExecuteInTransactionAsync(async () =>
+        {
+            var gate = await EnterWritableSessionAsync<WarehousePickingLineMutationDto>(orderGuid);
+            if (gate != null)
+            {
+                return gate;
+            }
+
+            var line = await LoadLineAsync(orderGuid, normalizedDetailGuid);
+            if (line == null)
+            {
+                return LineNotFound<WarehousePickingLineMutationDto>();
+            }
+
+            var now = DateTime.UtcNow;
+            await ClearActiveStockoutAsync(orderGuid, line.DetailGUID, picker.Name, now);
+            await TouchParticipantAsync(orderGuid, picker, line.DetailGUID, now);
+            return WarehousePickingResult<WarehousePickingLineMutationDto>.Ok(
+                new WarehousePickingLineMutationDto
+                {
+                    Line = await WarehousePickingQueries.BuildLineProgressAsync(_db, orderGuid, line.DetailGUID, line.MinOrderQuantity),
+                }
+            );
+        });
+    }
+
     public async Task<WarehousePickingResult<WarehousePickingMinOrderQuantityResultDto>> SetMinOrderQuantityAsync(
         string orderGuid,
         string detailGuid,
@@ -849,6 +997,12 @@ internal sealed class WarehousePickingService(
             ClientRequestId = clientRequestId,
             CreatedAtUtc = now,
         }).ExecuteCommandAsync();
+        if (delta > 0)
+        {
+            // 在别处找到货又拣到了：没货标记自动失效，不需要拣货员再去撤销。
+            await ClearActiveStockoutAsync(orderGuid, line.DetailGUID, picker.Name, now);
+        }
+
         await TouchParticipantAsync(orderGuid, picker, line.DetailGUID, now);
 
         var progress = await WarehousePickingQueries.BuildLineProgressAsync(
@@ -860,6 +1014,15 @@ internal sealed class WarehousePickingService(
         return WarehousePickingResult<WarehousePickingLineMutationDto>.Ok(
             new WarehousePickingLineMutationDto { Line = progress, AppliedDelta = delta }
         );
+    }
+
+    private Task<int> ClearActiveStockoutAsync(string orderGuid, string detailGuid, string clearedByName, DateTime nowUtc)
+    {
+        return _db.Updateable<WarehouseOrderPickStockout>()
+            .SetColumns(item => item.ClearedAtUtc == nowUtc)
+            .SetColumns(item => item.ClearedByName == clearedByName)
+            .Where(item => item.OrderGUID == orderGuid && item.DetailGUID == detailGuid && item.ClearedAtUtc == null)
+            .ExecuteCommandAsync();
     }
 
     private async Task TouchParticipantAsync(
@@ -938,6 +1101,7 @@ internal sealed class WarehousePickingService(
             {
                 DetailGUID = detail.DetailGUID,
                 ProductCode = detail.ProductCode,
+                Quantity = detail.Quantity,
                 MinOrderQuantity = warehouseProduct.MinOrderQuantity,
             })
             .FirstAsync();
@@ -1024,6 +1188,7 @@ internal sealed class WarehousePickingService(
     {
         public string DetailGUID { get; set; } = string.Empty;
         public string? ProductCode { get; set; }
+        public decimal? Quantity { get; set; }
         public int? MinOrderQuantity { get; set; }
     }
 }

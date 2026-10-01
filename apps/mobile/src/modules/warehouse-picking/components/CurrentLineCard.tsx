@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
-import { hasMinOrderQuantity, lineRemaining, lineStatus } from "../pick-math";
+import { hasLocation, hasMinOrderQuantity, isStockout, lineRemaining, lineStatus } from "../pick-math";
 import { pickedByParts } from "../pick-view-model";
 import type { PickSheetLine } from "../types";
 import { MONO_FONT, PICK_COLORS } from "./pick-theme";
@@ -11,6 +11,7 @@ import { ProductThumb } from "./ProductThumb";
 /**
  * 当前拣货行：货位最醒目（拣货员先找货位再找商品），其次是订货 / 已拣 / 中包三格与“+1 中包”大按钮。
  * 中包未设置时大按钮换成“设置中包数”，扫码也不会计入。
+ * “货位没货”入口放在货位条右侧，离“+1 中包”远，避免误触；已标记的行在同一位置撤销。
  */
 export function CurrentLineCard({
   line,
@@ -22,6 +23,8 @@ export function CurrentLineCard({
   onMinus,
   onManual,
   onSetMinOrder,
+  onStockout,
+  onClearStockout,
 }: {
   line: PickSheetLine;
   myUserGuid: string | null;
@@ -32,18 +35,25 @@ export function CurrentLineCard({
   onMinus: () => void;
   onManual: () => void;
   onSetMinOrder: () => void;
+  onStockout: () => void;
+  onClearStockout: () => void;
 }) {
   const { t } = useAppTranslation("warehousePicking");
   const hasPack = hasMinOrderQuantity(line);
   const status = lineStatus(line);
   const { remaining, scans } = lineRemaining(line);
+  const located = hasLocation(line);
+  const stockout = isStockout(line);
+  const canMarkStockout = !readonly && !stockout && (status === "notStarted" || status === "partial");
   const tone =
     status === "complete"
       ? { bg: PICK_COLORS.successBg, border: PICK_COLORS.successBorder, label: PICK_COLORS.successText, value: PICK_COLORS.success }
       : status === "over"
         ? { bg: PICK_COLORS.warningBg, border: PICK_COLORS.warningBorder, label: PICK_COLORS.warningText, value: PICK_COLORS.warning }
         : { bg: PICK_COLORS.infoBg, border: PICK_COLORS.infoBorder, label: PICK_COLORS.infoText, value: PICK_COLORS.action };
-  const hint = !hasPack
+  const hint = stockout
+    ? { text: t("picking.hintStockout", { count: remaining }), color: PICK_COLORS.danger }
+    : !hasPack
     ? { text: t("picking.hintNoPack"), color: PICK_COLORS.textSecondary }
     : status === "complete"
       ? { text: t("picking.hintComplete"), color: PICK_COLORS.success }
@@ -57,12 +67,33 @@ export function CurrentLineCard({
 
   return (
     <View style={styles.card} accessibilityLabel={line.productName ?? line.productCode}>
-      <View style={styles.locationBar}>
-        <MaterialCommunityIcons name="map-marker-outline" size={20} color={PICK_COLORS.inkMuted} />
-        <Text numberOfLines={1} style={styles.location}>
-          {line.locationCode || t("picking.noLocation")}
-        </Text>
-        <Text style={styles.locationLabel}>{t("picking.pickLocation")}</Text>
+      <View style={[styles.locationBar, !located ? styles.locationBarMuted : null]}>
+        <MaterialCommunityIcons name={located ? "map-marker-outline" : "magnify"} size={20} color={PICK_COLORS.inkMuted} />
+        {located ? (
+          <Text numberOfLines={1} style={styles.location}>
+            {line.locationCode}
+          </Text>
+        ) : (
+          <Text numberOfLines={1} style={styles.noLocation}>
+            {t("picking.noLocationSearch")}
+          </Text>
+        )}
+        {stockout ? <Text style={styles.stockoutBadge}>{t("picking.stockoutBadge")}</Text> : null}
+        {stockout && !readonly ? (
+          <Pressable accessibilityRole="button" disabled={busy} onPress={onClearStockout} style={[styles.barButton, busy ? styles.disabled : null]}>
+            <MaterialCommunityIcons name="undo-variant" size={18} color={PICK_COLORS.white} />
+            <Text style={styles.barButtonText}>{t("picking.clearStockout")}</Text>
+          </Pressable>
+        ) : canMarkStockout ? (
+          <Pressable accessibilityRole="button" disabled={busy} onPress={onStockout} style={[styles.barButton, busy ? styles.disabled : null]}>
+            <MaterialCommunityIcons name="package-variant-remove" size={18} color={PICK_COLORS.dangerBorder} />
+            <Text style={[styles.barButtonText, { color: PICK_COLORS.dangerBorder }]}>
+              {located ? t("picking.markStockout") : t("picking.markNotFound")}
+            </Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.locationLabel}>{located ? t("picking.pickLocation") : ""}</Text>
+        )}
       </View>
       <View style={styles.body}>
         <View style={styles.productRow}>
@@ -215,8 +246,32 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: "hidden",
   },
-  locationBar: { height: 48, backgroundColor: PICK_COLORS.ink, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12 },
+  locationBar: { minHeight: 56, backgroundColor: PICK_COLORS.ink, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 12, paddingRight: 6 },
+  locationBarMuted: { backgroundColor: PICK_COLORS.neutralChipText },
   location: { flexShrink: 1, fontFamily: MONO_FONT, fontSize: 24, lineHeight: 28, fontWeight: "700", color: PICK_COLORS.white, letterSpacing: 0.5 },
+  noLocation: { flexShrink: 1, fontSize: 16, lineHeight: 22, fontWeight: "700", color: PICK_COLORS.neutralChipBg },
+  stockoutBadge: {
+    fontSize: 12,
+    lineHeight: 20,
+    fontWeight: "700",
+    paddingHorizontal: 6,
+    borderRadius: 4,
+    overflow: "hidden",
+    backgroundColor: PICK_COLORS.danger,
+    color: PICK_COLORS.white,
+  },
+  barButton: {
+    marginLeft: "auto",
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: PICK_COLORS.textSecondary,
+  },
+  barButtonText: { fontSize: 13, fontWeight: "600", color: PICK_COLORS.white },
   locationLabel: { marginLeft: "auto", fontSize: 12, color: PICK_COLORS.outline },
   body: { padding: 12, gap: 10 },
   productRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },

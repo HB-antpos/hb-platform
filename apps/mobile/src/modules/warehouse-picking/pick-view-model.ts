@@ -1,4 +1,4 @@
-import type { PickParticipant, PickSheetLine } from "./types";
+import { PICK_STOCKOUT_REASON, type PickParticipant, type PickSheetLine } from "./types";
 
 /** 同事最后一次操作在这个时间窗内视为“还在拣”。 */
 export const PARTICIPANT_ACTIVE_MS = 10 * 60 * 1000;
@@ -86,4 +86,20 @@ export function isSameProductLine(a: PickSheetLine, b: PickSheetLine) {
 
 function sameGuid(a: string | null | undefined, b: string | null | undefined) {
   return Boolean(a) && Boolean(b) && a!.toLowerCase() === b!.toLowerCase();
+}
+
+/**
+ * 没货原因的文案键：未绑定货位的行，“货位空了”说成“仓库里找不到”。
+ * short 用于列表里的紧凑说明（“货位空了 · 陈伟”）。
+ */
+export function stockoutReasonKey(reason: number, located: boolean, short = false): string {
+  const prefix = short ? "stockout.short" : "stockout.reason";
+  switch (reason) {
+    case PICK_STOCKOUT_REASON.wrongProduct:
+      return `${prefix}WrongProduct`;
+    case PICK_STOCKOUT_REASON.damaged:
+      return `${prefix}Damaged`;
+    default:
+      return located ? `${prefix}LocationEmpty` : `${prefix}NotFound`;
+  }
 }

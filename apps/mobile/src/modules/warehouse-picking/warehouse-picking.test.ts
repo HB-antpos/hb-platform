@@ -5,18 +5,24 @@ import { buildPickCodeIndex, normalizeScanCode, resolvePickScan } from "./code-r
 import {
   firstOpenLine,
   hasMinOrderQuantity,
+  isOpenLine,
+  isStockout,
+  lineInScope,
   lineRemaining,
   lineStatus,
   mergeProgressLines,
+  parseLocationCode,
+  routeTurn,
+  scopeCounts,
   sortLinesByLocation,
   splitIntoPacks,
   summarizeLines,
   summarizePickers,
   upNextLines,
 } from "./pick-math";
-import { activeTeammates, pickedByParts, pickerInitials, relativeMinutes, teammateByLine } from "./pick-view-model";
+import { activeTeammates, pickedByParts, pickerInitials, relativeMinutes, stockoutReasonKey, teammateByLine } from "./pick-view-model";
 import { isPickerUsable } from "./picker-store";
-import { PICK_MATCH, type PickCodeEntry, type PickSheetLine } from "./types";
+import { PICK_MATCH, PICK_STOCKOUT_REASON, type PickCodeEntry, type PickSheetLine, type PickStockout } from "./types";
 
 function line(overrides: Partial<PickSheetLine> & Pick<PickSheetLine, "detailGuid">): PickSheetLine {
   return {
@@ -32,9 +38,17 @@ function line(overrides: Partial<PickSheetLine> & Pick<PickSheetLine, "detailGui
     setChildren: [],
     pickedTotal: 0,
     pickedBy: [],
+    stockout: null,
     ...overrides,
   };
 }
+
+const stockout: PickStockout = {
+  reason: PICK_STOCKOUT_REASON.locationEmpty,
+  markedByName: "Mia Wong",
+  markedAtUtc: "2026-09-30T02:00:00Z",
+  pickedAtMark: 12,
+};
 
 const codes: PickCodeEntry[] = [
   { code: "9312345678905", target: "line", detailGuids: ["d-cup"], matchedBy: PICK_MATCH.barcode, label: null },
@@ -77,7 +91,7 @@ test("拣货数量：状态、剩余扫码次数、中包换算与汇总", () =>
   assert.deepEqual(splitIntoPacks(30, 12), { packs: 2, rest: 6 });
   assert.equal(splitIntoPacks(30, null), null);
   assert.deepEqual(summarizeLines([cup, over, missing, done]), {
-    lineCount: 4, completeLineCount: 1, shortLineCount: 2, overLineCount: 1, orderedPieces: 84, pickedPieces: 54,
+    lineCount: 4, completeLineCount: 1, shortLineCount: 2, stockoutLineCount: 0, overLineCount: 1, orderedPieces: 84, pickedPieces: 54,
   });
 });
 
@@ -91,7 +105,7 @@ test("中包数为空或为 0 都按未设置处理：不能按中包累加，�
   assert.equal(hasMinOrderQuantity(line({ detailGuid: "d-set", minOrderQuantity: 1 })), true);
 });
 
-test("按货位走一趟：自然排序、接下来只列未拣齐、默认落在第一条未拣齐", () => {
+test("按货位走一趟（默认 M 型）：自然排序、接下来只列未拣齐、默认落在第一条未拣齐", () => {
   const lines = sortLinesByLocation([
     line({ detailGuid: "d-10", locationCode: "A-10-01-01" }),
     line({ detailGuid: "d-none", locationCode: null }),
@@ -105,15 +119,112 @@ test("按货位走一趟：自然排序、接下来只列未拣齐、默认落�
   assert.deepEqual(upNextLines(lines, "d-none", 3).map((item) => item.detailGuid), ["d-3", "d-10"]);
 });
 
+test("货位编码按区-排-列-层解析：列、层可省略，多个配货位取第一个，不规范编码返回 null", () => {
+  assert.deepEqual(parseLocationCode("A-03-12-02"), { zone: "A", row: 3, rowLabel: "03", bay: 12, level: 2 });
+  assert.deepEqual(parseLocationCode("b-04-07"), { zone: "B", row: 4, rowLabel: "04", bay: 7, level: 0 });
+  assert.deepEqual(parseLocationCode("A-01"), { zone: "A", row: 1, rowLabel: "01", bay: 0, level: 0 });
+  assert.equal(parseLocationCode("A-03-12-02, B-01-01-01")?.zone, "A");
+  for (const irregular of ["OLD-A01", "LOC-PRIORITY", "A", "A-01-02-03-04", "", null]) {
+    assert.equal(parseLocationCode(irregular), null, `${irregular} 应视为不规范`);
+  }
+});
+
+test("M 型每排列号都从小到大；S 型双数排从大到小；同列按层；不规范编码在后、无货位最后", () => {
+  const input = [
+    line({ detailGuid: "d-none", locationCode: null, itemNumber: "HB1" }),
+    line({ detailGuid: "d-old", locationCode: "OLD-A01" }),
+    line({ detailGuid: "a4-07", locationCode: "A-04-07-01" }),
+    line({ detailGuid: "a4-18", locationCode: "A-04-18-03" }),
+    line({ detailGuid: "a3-15", locationCode: "A-03-15-01" }),
+    line({ detailGuid: "a3-12-l2", locationCode: "A-03-12-02" }),
+    line({ detailGuid: "a3-12-l1", locationCode: "A-03-12-01" }),
+    line({ detailGuid: "b1-02", locationCode: "B-01-02-01" }),
+  ];
+
+  assert.deepEqual(
+    sortLinesByLocation(input).map((item) => item.detailGuid),
+    ["a3-12-l1", "a3-12-l2", "a3-15", "a4-07", "a4-18", "b1-02", "d-old", "d-none"],
+  );
+  assert.deepEqual(
+    sortLinesByLocation(input, "s").map((item) => item.detailGuid),
+    ["a3-12-l1", "a3-12-l2", "a3-15", "a4-18", "a4-07", "b1-02", "d-old", "d-none"],
+  );
+  // A-10 排在 A-02 之后（数字比较，不是字符串比较）。
+  assert.deepEqual(
+    sortLinesByLocation([line({ detailGuid: "x10", locationCode: "A-10-01" }), line({ detailGuid: "x2", locationCode: "A-02-01" })]).map(
+      (item) => item.detailGuid,
+    ),
+    ["x2", "x10"],
+  );
+});
+
+test("换排提示：同一区同一排不提示，换排时给出该排走向", () => {
+  const a3 = line({ detailGuid: "a3", locationCode: "A-03-12-02" });
+  const a3b = line({ detailGuid: "a3b", locationCode: "A-03-15-01" });
+  const a4 = line({ detailGuid: "a4", locationCode: "A-04-18-03" });
+  const none = line({ detailGuid: "none", locationCode: null });
+
+  assert.equal(routeTurn(a3, a3b, "m"), null);
+  assert.deepEqual(routeTurn(a3b, a4, "m"), { zone: "A", rowLabel: "04", descending: false });
+  assert.deepEqual(routeTurn(a3b, a4, "s"), { zone: "A", rowLabel: "04", descending: true });
+  assert.deepEqual(routeTurn(null, a3, "s"), { zone: "A", rowLabel: "03", descending: false });
+  assert.equal(routeTurn(a4, none, "m"), null);
+});
+
+test("拣货范围：有货位 / 无货位按是否绑定配货位划分，计数覆盖全部行", () => {
+  const located = line({ detailGuid: "d-loc", locationCode: "A-03-12-02" });
+  const blank = line({ detailGuid: "d-blank", locationCode: "  " });
+  const none = line({ detailGuid: "d-none", locationCode: null });
+
+  assert.equal(lineInScope(located, "located"), true);
+  assert.equal(lineInScope(located, "unlocated"), false);
+  assert.equal(lineInScope(blank, "unlocated"), true);
+  assert.equal(lineInScope(none, "all"), true);
+  assert.deepEqual(scopeCounts([located, blank, none]), { all: 3, located: 1, unlocated: 2 });
+});
+
+test("货位没货：标了且未拣齐的行不再待拣，接下来跳过它；拣齐后标记不再算数", () => {
+  const out = line({ detailGuid: "d-out", locationCode: "A-03-12-02", orderedQuantity: 36, pickedTotal: 12, stockout });
+  const next = line({ detailGuid: "d-next", locationCode: "A-03-15-01" });
+  const refilled = line({ detailGuid: "d-refill", orderedQuantity: 12, pickedTotal: 12, stockout });
+
+  assert.equal(isStockout(out), true);
+  assert.equal(isOpenLine(out), false);
+  assert.equal(isStockout(refilled), false);
+  const sorted = sortLinesByLocation([next, out]);
+  assert.equal(firstOpenLine(sorted)?.detailGuid, "d-next");
+  assert.deepEqual(upNextLines(sorted, null, 3).map((item) => item.detailGuid), ["d-next"]);
+  assert.equal(summarizeLines([out, next]).stockoutLineCount, 1);
+  assert.equal(summarizeLines([out, next]).shortLineCount, 2);
+  // 全部行都没货时，默认仍落在第一行，不会没有当前行。
+  assert.equal(firstOpenLine([out])?.detailGuid, "d-out");
+});
+
+test("没货原因文案：未绑定货位时“货位空了”说成“找不到”", () => {
+  assert.equal(stockoutReasonKey(PICK_STOCKOUT_REASON.locationEmpty, true), "stockout.reasonLocationEmpty");
+  assert.equal(stockoutReasonKey(PICK_STOCKOUT_REASON.locationEmpty, false), "stockout.reasonNotFound");
+  assert.equal(stockoutReasonKey(PICK_STOCKOUT_REASON.damaged, false, true), "stockout.shortDamaged");
+  assert.equal(stockoutReasonKey(PICK_STOCKOUT_REASON.wrongProduct, true, true), "stockout.shortWrongProduct");
+});
+
 test("合并服务端进度：只改返回的行，并更新中包数与拣货人归属", () => {
   const lines = [line({ detailGuid: "d-a" }), line({ detailGuid: "d-b", minOrderQuantity: null })];
   const merged = mergeProgressLines(lines, [
-    { detailGuid: "d-b", pickedTotal: 6, minOrderQuantity: 6, pickedBy: [{ pickerUserGuid: "u-mia", pickerName: "Mia Wong", quantity: 6 }] },
+    {
+      detailGuid: "d-b",
+      pickedTotal: 6,
+      minOrderQuantity: 6,
+      pickedBy: [{ pickerUserGuid: "u-mia", pickerName: "Mia Wong", quantity: 6 }],
+      stockout,
+    },
   ]);
 
   assert.equal(merged[0], lines[0]);
   assert.equal(merged[1].pickedTotal, 6);
   assert.equal(merged[1].minOrderQuantity, 6);
+  // 同事标的没货随进度同步过来；没有标记时服务端返回 null，本地随之清掉。
+  assert.deepEqual(merged[1].stockout, stockout);
+  assert.equal(mergeProgressLines(merged, [{ ...merged[1], stockout: null }])[1].stockout, null);
   assert.deepEqual(summarizePickers(merged), [{ pickerUserGuid: "u-mia", pickerName: "Mia Wong", quantity: 6 }]);
 });
 
@@ -169,6 +280,15 @@ test("接口数据校验：缺字段报错而不是补零，省略的空字段�
     },
   });
   assert.equal(sheet.lines[0].minOrderQuantity, null);
+  assert.equal(sheet.lines[0].stockout, null);
+  const marked = normalizePickMutation({
+    success: true,
+    data: {
+      line: { detailGuid: "d-1", pickedTotal: 12, pickedBy: [], stockout: { reason: 2, markedByName: "Mia", markedAtUtc: "2026-09-30T02:00:00Z", pickedAtMark: 12 } },
+      appliedDelta: 0,
+    },
+  });
+  assert.equal(marked.line.stockout?.reason, PICK_STOCKOUT_REASON.wrongProduct);
   assert.deepEqual(sheet.lines[0].setChildren, []);
   assert.equal(sheet.storeName, null);
   assert.throws(

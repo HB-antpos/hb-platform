@@ -190,6 +190,7 @@ internal static class WarehousePickingQueries
         );
         var totals = await LoadPickTotalsAsync(db, order.OrderGUID);
         var participants = await LoadParticipantsAsync(db, order.OrderGUID);
+        var stockouts = await LoadActiveStockoutsAsync(db, order.OrderGUID);
 
         var totalsByDetail = totals
             .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
@@ -253,6 +254,7 @@ internal static class WarehousePickingQueries
                 SetChildren = children,
                 PickedTotal = lineTotals?.Sum(total => total.Quantity) ?? 0,
                 PickedBy = ToPickedBy(lineTotals),
+                Stockout = stockouts.GetValueOrDefault(line.DetailGUID),
             });
 
             AddLineCodes(codeSources, line, productCode, lineSetCodes, lineMultiCodes, childNames);
@@ -299,6 +301,7 @@ internal static class WarehousePickingQueries
             .ToListAsync();
         var totals = await LoadPickTotalsAsync(db, orderGuid);
         var participants = await LoadParticipantsAsync(db, orderGuid);
+        var stockouts = await LoadActiveStockoutsAsync(db, orderGuid);
         var totalsByDetail = totals
             .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
@@ -318,6 +321,7 @@ internal static class WarehousePickingQueries
                         PickedTotal = lineTotals?.Sum(total => total.Quantity) ?? 0,
                         PickedBy = ToPickedBy(lineTotals),
                         MinOrderQuantity = line.MinOrderQuantity,
+                        Stockout = stockouts.GetValueOrDefault(line.DetailGUID),
                     };
                 })
                 .ToList(),
@@ -334,13 +338,63 @@ internal static class WarehousePickingQueries
     )
     {
         var totals = await LoadPickTotalsAsync(db, orderGuid, detailGuid);
+        var stockouts = await LoadActiveStockoutsAsync(db, orderGuid, detailGuid);
         return new WarehousePickingLineProgressDto
         {
             DetailGuid = detailGuid,
             PickedTotal = totals.Sum(total => total.Quantity),
             PickedBy = ToPickedBy(totals),
             MinOrderQuantity = minOrderQuantity,
+            Stockout = stockouts.GetValueOrDefault(detailGuid),
         };
+    }
+
+    /// <summary>仍有效（未撤销、未因又拣到货而失效）的“货位没货”标记，按订单行索引。</summary>
+    internal static async Task<Dictionary<string, WarehousePickingStockoutDto>> LoadActiveStockoutsAsync(
+        ISqlSugarClient db,
+        string orderGuid,
+        string? detailGuid = null
+    )
+    {
+        var query = db.Queryable<WarehouseOrderPickStockout>()
+            .Where(stockout => stockout.OrderGUID == orderGuid && stockout.ClearedAtUtc == null);
+        if (!string.IsNullOrWhiteSpace(detailGuid))
+        {
+            query = query.Where(stockout => stockout.DetailGUID == detailGuid);
+        }
+
+        var rows = await query.ToListAsync();
+        return rows.ToDictionary(
+            row => row.DetailGUID,
+            row => new WarehousePickingStockoutDto
+            {
+                Reason = row.Reason,
+                MarkedByName = row.MarkedByName,
+                MarkedAtUtc = row.MarkedAtUtc,
+                PickedAtMark = row.PickedAtMark,
+            },
+            StringComparer.OrdinalIgnoreCase
+        );
+    }
+
+    /// <summary>商品的配货位文本（与拣货单同口径，多个按编码排序后以逗号连接）；未绑定时为空。</summary>
+    internal static async Task<string?> LoadPickLocationTextAsync(ISqlSugarClient db, string? productCode)
+    {
+        if (string.IsNullOrWhiteSpace(productCode))
+        {
+            return null;
+        }
+
+        var locations = await LoadPickLocationsAsync(db, new List<string> { productCode.Trim() });
+        return locations.Count == 0
+            ? null
+            : string.Join(
+                ", ",
+                locations
+                    .Select(location => location.LocationCode)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+            );
     }
 
     /// <summary>扫到不在本单的码时，给界面显示“扫到的是什么”；只取第一个命中的商品，仅用于提示。</summary>

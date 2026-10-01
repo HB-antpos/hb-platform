@@ -111,6 +111,25 @@ export async function putMinOrderQuantity(orderGuid: string, detailGuid: string,
   return typeof data?.minOrderQuantity === "number" ? data.minOrderQuantity : minOrderQuantity;
 }
 
+/** 标记“货位没货”：已拣的保留，剩余记为拣不到；同一行再次标记覆盖原因。 */
+export async function putPickStockout(orderGuid: string, detailGuid: string, reason: number) {
+  const response = await apiClient.put(
+    `${BASE}/orders/${encodeURIComponent(orderGuid)}/lines/${encodeURIComponent(detailGuid)}/stockout`,
+    { reason },
+    pickerConfig(),
+  );
+  return normalizePickMutation(response.data);
+}
+
+/** 撤销“货位没货”标记，重复撤销是幂等的。 */
+export async function deletePickStockout(orderGuid: string, detailGuid: string) {
+  const response = await apiClient.delete(
+    `${BASE}/orders/${encodeURIComponent(orderGuid)}/lines/${encodeURIComponent(detailGuid)}/stockout`,
+    pickerConfig(),
+  );
+  return normalizePickMutation(response.data);
+}
+
 export async function submitPickOrder(orderGuid: string) {
   const response = await apiClient.post(`${BASE}/orders/${encodeURIComponent(orderGuid)}/submit`, {}, pickerConfig());
   return normalizePickSubmit(response.data);

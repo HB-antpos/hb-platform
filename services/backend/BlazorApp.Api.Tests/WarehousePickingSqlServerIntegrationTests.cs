@@ -40,6 +40,9 @@ public sealed class WarehousePickingSqlServerIntegrationTests
 
         await database.ExecuteAsync(WarehouseOrderPickingSchema.ApplySql);
         await database.ExecuteAsync(WarehouseOrderPickingSchema.VerifySql);
+        await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.ApplySql);
+        await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.ApplySql);
+        await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.VerifySql);
 
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Warehouse.Picking'"));
         Assert.Equal(
@@ -70,6 +73,35 @@ public sealed class WarehousePickingSqlServerIntegrationTests
         var progress = await CreateService(database).GetProgressAsync(OrderGuid);
         Assert.Equal(80, progress.Data!.Lines.Single().PickedTotal);
         Assert.Equal(4, progress.Data.Participants.Count);
+    }
+
+    [WarehousePickingSqlServerFact]
+    public async Task SQLServer_货位没货_标记覆盖原因_又拣到货自动失效_撤销幂等()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        await SeedOrderAsync(database, minOrderQuantity: 2);
+        await CreateService(database).JoinAsync(OrderGuid, Picker("u-1"));
+        await CreateService(database).AppendRecordAsync(OrderGuid, Scan(), Picker("u-1"));
+
+        var marked = await CreateService(database).MarkStockoutAsync(OrderGuid, "d-1", WarehouseOrderPickStockoutReasons.LocationEmpty, Picker("u-1"));
+        var remarked = await CreateService(database).MarkStockoutAsync(OrderGuid, "d-1", WarehouseOrderPickStockoutReasons.Damaged, Picker("u-2"));
+
+        Assert.True(marked.Success, marked.Message);
+        Assert.Equal(WarehouseOrderPickStockoutReasons.Damaged, remarked.Data!.Line.Stockout!.Reason);
+        Assert.Equal(2, remarked.Data.Line.Stockout.PickedAtMark);
+        var progress = await CreateService(database).GetProgressAsync(OrderGuid);
+        Assert.NotNull(progress.Data!.Lines.Single().Stockout);
+
+        var scanned = await CreateService(database).AppendRecordAsync(OrderGuid, Scan(), Picker("u-3"));
+        Assert.Null(scanned.Data!.Line.Stockout);
+
+        var cleared = await CreateService(database).ClearStockoutAsync(OrderGuid, "d-1", Picker("u-1"));
+        Assert.True(cleared.Success, cleared.Message);
+        using var db = database.CreateClient();
+        var row = await db.Queryable<WarehouseOrderPickStockout>().SingleAsync();
+        Assert.NotNull(row.ClearedAtUtc);
+        // 自动失效时记下又拣到货的人；之后的撤销没有有效标记，不覆盖。
+        Assert.Equal("Picker u-3", row.ClearedByName);
     }
 
     [WarehousePickingSqlServerFact]
@@ -191,6 +223,8 @@ CREATE TABLE dbo.HbwebSysPermissions (
 """);
             await database.ExecuteAsync(WarehouseOrderPickingSchema.ApplySql);
             await database.ExecuteAsync(WarehouseOrderPickingSchema.VerifySql);
+            await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.ApplySql);
+            await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.VerifySql);
             using var db = database.CreateClient();
             db.CodeFirst.InitTables(
                 typeof(WareHouseOrder),

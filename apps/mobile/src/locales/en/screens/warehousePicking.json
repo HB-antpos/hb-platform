@@ -111,7 +111,34 @@
     "readonlyHint": "A submitted pick can't be changed",
     "syncFailed": "Couldn't sync. Check the network and try again.",
     "pickers": "Pickers: {{names}}",
-    "othersCount": "+{{count}}"
+    "othersCount": "+{{count}}",
+    "scopeLabel": "Pick scope",
+    "scopeAll": "All",
+    "scopeLocated": "With location",
+    "scopeUnlocated": "No location",
+    "scopeProgress": "{{scope}} · {{progress}}",
+    "stockoutCount": "Out {{count}}",
+    "routeM": "M route",
+    "routeS": "S route",
+    "routeSwitch": "Pick route: {{route}}, tap to change",
+    "turnM": "Turn back · row {{zone}}-{{row}} · bays low to high",
+    "turnSAsc": "Row {{zone}}-{{row}} · bays low to high",
+    "turnSDesc": "Row {{zone}}-{{row}} · bays high to low",
+    "byItemNumber": "No location · by item number",
+    "scopeEmpty": "No lines in this scope",
+    "markStockout": "Out of stock",
+    "markNotFound": "Can't find",
+    "clearStockout": "Undo out of stock",
+    "stockoutBadge": "Out",
+    "stockoutMarked": "{{location}} marked out of stock · {{count}} short",
+    "stockoutMarkedNoLocation": "Marked not found · {{count}} short",
+    "stockoutMarkedHint": "If you find it, just scan it to count",
+    "stockoutUndo": "Undo",
+    "stockoutCleared": "Out-of-stock mark removed",
+    "stockoutAutoCleared": "Picked again, out-of-stock mark cleared",
+    "noteStockout": "Out · {{reason}} · {{name}}",
+    "hintStockout": "Marked out of stock, {{count}} short · scan it if you find it",
+    "noLocationSearch": "No location · find by product"
   },
   "minOrder": {
     "title": "Set min order qty",
@@ -173,13 +200,53 @@
     "confirmTitle": "Someone is still picking",
     "confirmBody": "{{names}} is still picking and won't be able to change anything after you submit. Submit anyway?",
     "confirmSubmit": "Submit",
-    "submitted": "Ship quantities submitted"
+    "submitted": "Ship quantities submitted",
+    "stockout": "Out",
+    "stockoutGroup": "Out of stock · {{count}} short",
+    "shortGroup": "Short · {{count}} short",
+    "overGroup": "Over · {{count}} extra",
+    "stockoutMeta": "{{reason}} · {{name}}"
   },
   "time": {
     "justNow": "just now",
     "minutesAgo": "{{count}} min ago",
     "today": "today {{time}}",
     "yesterday": "yesterday {{time}}"
+  },
+  "stockout": {
+    "title": "Location out of stock",
+    "titleNoLocation": "Can't find item",
+    "ordered": "Ordered",
+    "picked": "Picked",
+    "short": "Short",
+    "reasonLabel": "What's at the location",
+    "reasonLabelNoLocation": "What happened",
+    "reasonLocationEmpty": "Location is empty",
+    "reasonNotFound": "Can't find it in the warehouse",
+    "reasonWrongProduct": "A different product is there",
+    "reasonDamaged": "Stock is damaged",
+    "shortLocationEmpty": "Empty",
+    "shortNotFound": "Not found",
+    "shortWrongProduct": "Wrong product",
+    "shortDamaged": "Damaged",
+    "hint": "If you find it later, scan it to count and the mark clears automatically.",
+    "confirm": "Mark out · Next"
+  },
+  "route": {
+    "title": "Pick route",
+    "subtitle": "Sets the order of Up next and All lines · this device only",
+    "defaultTag": "Default",
+    "mDesc": "Enter every row from the aisle end, go to the farthest pick, then come back. Bays always low to high.",
+    "sDesc": "Snake through the rows: odd rows bays low to high, even rows high to low, exit at the far end.",
+    "note": "Location codes read as zone-row-bay-level, e.g. A-03-12-02 = zone A, row 03, bay 12, level 2. Irregular codes come after, lines without a location always last.",
+    "done": "Done"
+  },
+  "allLines": {
+    "groupOpen": "To pick",
+    "groupStockout": "Out of stock",
+    "groupDone": "Picked",
+    "showDone": "Show {{count}} picked lines",
+    "hideDone": "Hide picked lines"
   },
   "errors": {
     "PICKER_REQUIRED": "Scan your staff barcode first",
@@ -200,6 +267,7 @@
     "PICKED_TOTAL_CHANGED": "A teammate just updated this line — refreshed to the latest qty",
     "CODE_NOT_FOUND": "No product matches that barcode",
     "INVALID_REQUEST": "Invalid request",
+    "LINE_ALREADY_COMPLETE": "This line is fully picked, no need to mark it out of stock",
     "generic": "Something went wrong. Please try again."
   }
 }
