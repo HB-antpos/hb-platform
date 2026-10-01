@@ -301,13 +301,17 @@
     "attachmentRequired": "病假必须上传医嘱照片。",
     "fields": {
       "employee": "员工",
-      "attachment": "病假医嘱照片"
+      "attachment": "病假医嘱照片",
+      "selectEmployee": "选择员工",
+      "specifyTime": "指定时段"
     },
     "actions": {
       "takePhoto": "拍照上传",
       "retakePhoto": "重新拍照",
       "grantCameraPermission": "允许相机权限",
-      "capture": "拍照"
+      "capture": "拍照",
+      "save": "保存",
+      "reset": "清空"
     },
     "messages": {
       "permissionRequired": "需要相机权限才能拍照上传。",
@@ -324,7 +328,23 @@
     },
     "registerAction": "登记请假",
     "registerHint": "代员工登记年假或病假（病假需拍医嘱）",
-    "hideRegister": "收起"
+    "hideRegister": "收起",
+    "employmentTypes": {
+      "fulltime": "全职",
+      "parttime": "兼职"
+    },
+    "dayCount_one": "共 {{count}} 天",
+    "dayCount_other": "共 {{count}} 天",
+    "attachment": {
+      "captureTitle": "拍摄医嘱",
+      "captureHint": "病假必须上传",
+      "uploaded": "已上传"
+    },
+    "a11y": {
+      "previousDay": "{{label}}前一天",
+      "nextDay": "{{label}}后一天",
+      "pickDate": "从日历选择{{label}}"
+    }
   },
   "scheduleManagement": {
     "employeeColumn": "分店/员工",
@@ -352,7 +372,11 @@
       "totalPeople": "总人数",
       "plannedHours": "预计总工时",
       "peopleUnit": "人",
-      "hoursUnit": "小时"
+      "hoursUnit": "小时",
+      "weekHours": "周工时",
+      "weekdayHours": "工作日",
+      "weekendHours": "周末",
+      "scheduledPeople": "排班人数"
     },
     "quickShiftTitle": "常用班次",
     "quickShifts": {
@@ -363,7 +387,43 @@
     "timePicker": {
       "hour": "小时",
       "minute": "分钟"
-    }
+    },
+    "hoursShort": "{{hours}}h",
+    "uncoveredDays": "空缺 {{count}} 天",
+    "publishState": {
+      "draft": "草稿·未发布",
+      "published": "已发布",
+      "empty": "本周未排班"
+    },
+    "cell": {
+      "leave": "假",
+      "available": "可"
+    },
+    "legend": {
+      "shift": "班次",
+      "leave": "请假",
+      "available": "可上班",
+      "draft": "草稿"
+    },
+    "gridHint": "点格子排班或修改",
+    "editor": {
+      "availabilityLabel": "可上班",
+      "noAvailability": "未填写",
+      "weekHoursLabel": "本周已排",
+      "hoursValue": "{{hours}} 小时",
+      "leaveNotice": "当天已批准请假：{{type}}",
+      "stepMinus": "{{label}}提前 30 分钟",
+      "stepPlus": "{{label}}推后 30 分钟",
+      "setRest": "设为休息",
+      "save": "保存（{{hours}} 小时）",
+      "addShift": "再加一班"
+    },
+    "copyPreviousWeek": "复制上周",
+    "copyConfirmTitle": "复制上周排班",
+    "copyConfirmMessage": "把上周排班复制到本周，新班次为草稿；已有班次的员工和日期会跳过。",
+    "copyConfirm": "复制",
+    "copyWeekResult": "已复制 {{created}} 个班次，跳过 {{skipped}} 个",
+    "copyWeekFailed": "复制上周排班失败"
   },
   "adjustment": {
     "title": "补卡与修改",
@@ -573,7 +633,8 @@
       "earlyLeave": "早退",
       "inProgress": "工作中",
       "notStarted": "未开始",
-      "normal": "正常"
+      "normal": "正常",
+      "onLeave": "请假"
     },
     "editTitle": "修改打卡",
     "viewTitle": "打卡明细",
@@ -631,6 +692,7 @@
       "sickHint": "病假需要向店长提交医嘱，由店长登记附件。",
       "submit_one": "提交 {{count}} 天",
       "submit_other": "提交 {{count}} 天"
-    }
+    },
+    "weekHoursSplit": "工作日 {{weekday}} · 周末 {{weekend}} 小时"
   }
 }

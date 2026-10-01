@@ -57,6 +57,11 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> PublishWeek([FromBody] PublishAttendanceWeekDto request) =>
             Ok(await _service.PublishWeekAsync(request));
 
+        [HttpPost("schedules/copy-week")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+        public async Task<IActionResult> CopyScheduleWeek([FromBody] CopyAttendanceScheduleWeekDto request) =>
+            Ok(await _service.CopyScheduleWeekAsync(request));
+
         [HttpDelete("schedules/{scheduleGuid}")]
         [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
         public async Task<IActionResult> DeleteSchedule(string scheduleGuid) =>

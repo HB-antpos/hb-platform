@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
-import { Button, Card, HelperText, IconButton, SegmentedButtons, Switch, Text, TextInput } from "react-native-paper";
+import { Button, Card, HelperText, IconButton, SegmentedButtons, Text, TextInput } from "react-native-paper";
 import { type AttendanceStatusTone, StatusPill } from "@/components/attendance/AdjustmentFormControls";
 import { MonthDatePicker as RawMonthDatePicker } from "@/components/attendance/MonthDatePicker";
 import type {
@@ -296,9 +296,6 @@ export function HolidayManagementCard({
           : t("holidayManagement.regularHours", { defaultValue: "Regular hours" })
       );
     }
-    if (holiday.isPaidHoliday) {
-      parts.push(t("holidayManagement.paidLabel", { defaultValue: "Paid" }));
-    }
     if (holiday.remark) {
       parts.push(holiday.remark);
     }
@@ -406,17 +403,7 @@ export function HolidayManagementCard({
             </View>
           ) : null}
 
-          <View style={styles.switchRow}>
-            <Text variant="bodyMedium" style={styles.flexText}>
-              {t("holidayManagement.fields.paidHoliday", { defaultValue: "Paid holiday" })}
-            </Text>
-            <Switch
-              value={form.isPaidHoliday}
-              onValueChange={(value) => setField("isPaidHoliday", value)}
-              disabled={isBusy}
-            />
-          </View>
-
+          {/* 门店不区分带薪，界面不展示该字段；编辑时沿用原值提交，避免改动已有数据。 */}
           <TextInput
             mode="outlined"
             dense
@@ -628,16 +615,6 @@ const styles = StyleSheet.create({
   },
   rowPressed: {
     backgroundColor: HB_COLORS.surfaceMuted,
-  },
-  switchRow: {
-    alignItems: "center",
-    borderColor: HB_COLORS.outlineMuted,
-    borderRadius: HB_RADIUS.control,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: HB_SPACING.sm,
-    paddingHorizontal: HB_SPACING.sm,
-    paddingVertical: HB_SPACING.xxs,
   },
   syncButton: {
     alignSelf: "flex-start",

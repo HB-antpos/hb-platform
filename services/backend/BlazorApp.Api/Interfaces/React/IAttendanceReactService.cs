@@ -10,6 +10,7 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<AttendanceScheduleDto>> CreateScheduleAsync(CreateAttendanceScheduleDto request);
         Task<ApiResponse<AttendanceScheduleDto>> UpdateScheduleAsync(string scheduleGuid, UpdateAttendanceScheduleDto request);
         Task<ApiResponse<int>> PublishWeekAsync(PublishAttendanceWeekDto request);
+        Task<ApiResponse<CopyAttendanceScheduleWeekResultDto>> CopyScheduleWeekAsync(CopyAttendanceScheduleWeekDto request);
         Task<ApiResponse<bool>> DeleteScheduleAsync(string scheduleGuid);
         Task<ApiResponse<AttendanceTodayDto>> GetMyTodayAsync(DateTime? workDate = null, string? storeCode = null);
         Task<ApiResponse<List<AttendanceScheduleDto>>> GetMyWeekAsync(DateTime? weekStartDate, string? storeCode = null);

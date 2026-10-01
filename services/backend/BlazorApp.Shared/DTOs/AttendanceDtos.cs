@@ -62,7 +62,24 @@ namespace BlazorApp.Shared.DTOs
         public int CandidateOvertimeMinutes { get; set; }
         public int ApprovedOvertimeMinutes { get; set; }
         public string? OvertimeApprovalStatus { get; set; }
+        /// <summary>当天已批准的请假类型；有值表示该班次员工请假，不计工时、不计缺卡。</summary>
+        public string? LeaveType { get; set; }
+        public string? LeaveGuid { get; set; }
         public List<AttendanceShiftSegmentDto> Segments { get; set; } = new();
+    }
+
+    /// <summary>把来源周的排班复制到目标周（作为草稿），已有排班的员工当天跳过。</summary>
+    public class CopyAttendanceScheduleWeekDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        public DateTime SourceWeekStartDate { get; set; }
+        public DateTime TargetWeekStartDate { get; set; }
+    }
+
+    public class CopyAttendanceScheduleWeekResultDto
+    {
+        public int CreatedCount { get; set; }
+        public int SkippedCount { get; set; }
     }
 
     public class AttendanceShiftSegmentDto

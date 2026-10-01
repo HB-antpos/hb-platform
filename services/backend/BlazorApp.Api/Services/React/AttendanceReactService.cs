@@ -182,6 +182,90 @@ namespace BlazorApp.Api.Services.React
             return ApiResponse<AttendanceScheduleDto>.OK(ToDto(model), "排班已创建");
         }
 
+        /// <summary>
+        /// 复制上周排班：来源周未取消的排班按星期平移到目标周，新排班为草稿（需再发布）。
+        /// 目标周同员工同一天已有排班就整天跳过，避免与店长已手工排的班重叠。
+        /// </summary>
+        public async Task<ApiResponse<CopyAttendanceScheduleWeekResultDto>> CopyScheduleWeekAsync(
+            CopyAttendanceScheduleWeekDto request)
+        {
+            if (string.IsNullOrWhiteSpace(request.StoreCode))
+            {
+                return ApiResponse<CopyAttendanceScheduleWeekResultDto>.Error("分店代码不能为空", "STORE_REQUIRED");
+            }
+            var storeCode = request.StoreCode.Trim();
+            var storeAccess = await ResolveManagedStoreAccessAsync(storeCode);
+            if (!storeAccess.Success)
+            {
+                return ApiResponse<CopyAttendanceScheduleWeekResultDto>.Error(storeAccess.Message, storeAccess.ErrorCode);
+            }
+
+            var sourceStart = GetWeekStart(request.SourceWeekStartDate.Date);
+            var targetStart = GetWeekStart(request.TargetWeekStartDate.Date);
+            if (sourceStart == targetStart)
+            {
+                return ApiResponse<CopyAttendanceScheduleWeekResultDto>.Error("来源周与目标周不能相同", "SAME_WEEK");
+            }
+
+            var sourceRows = await _db.Queryable<AttendanceSchedule>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.Status != "Cancelled"
+                    && item.StoreCode == storeCode
+                    && item.WorkDate >= sourceStart
+                    && item.WorkDate < sourceStart.AddDays(7))
+                .ToListAsync();
+            var targetRows = await _db.Queryable<AttendanceSchedule>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.Status != "Cancelled"
+                    && item.StoreCode == storeCode
+                    && item.WorkDate >= targetStart
+                    && item.WorkDate < targetStart.AddDays(7))
+                .ToListAsync();
+            var occupied = targetRows
+                .Select(item => $"{item.UserGuid}|{item.WorkDate:yyyy-MM-dd}")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var now = DateTime.UtcNow;
+            var username = _currentUserService.GetCurrentUsername();
+            var offset = (targetStart - sourceStart).Days;
+            var created = new List<AttendanceSchedule>();
+            var skipped = 0;
+            foreach (var source in sourceRows.OrderBy(item => item.WorkDate).ThenBy(item => item.StartTime))
+            {
+                var workDate = source.WorkDate.Date.AddDays(offset);
+                if (occupied.Contains($"{source.UserGuid}|{workDate:yyyy-MM-dd}"))
+                {
+                    skipped++;
+                    continue;
+                }
+                created.Add(new AttendanceSchedule
+                {
+                    ScheduleGuid = Guid.NewGuid().ToString(),
+                    StoreCode = storeCode,
+                    UserGuid = source.UserGuid,
+                    WorkDate = workDate,
+                    StartTime = source.StartTime,
+                    EndTime = source.EndTime,
+                    Status = "Draft",
+                    Remark = source.Remark,
+                    CreatedAt = now,
+                    CreatedBy = username,
+                    UpdatedAt = now,
+                    UpdatedBy = username,
+                });
+            }
+
+            if (created.Count > 0)
+            {
+                await _db.Insertable(created).ExecuteCommandAsync();
+            }
+            return ApiResponse<CopyAttendanceScheduleWeekResultDto>.OK(
+                new CopyAttendanceScheduleWeekResultDto { CreatedCount = created.Count, SkippedCount = skipped },
+                $"已复制 {created.Count} 个班次");
+        }
+
         public async Task<ApiResponse<AttendanceScheduleDto>> UpdateScheduleAsync(
             string scheduleGuid,
             UpdateAttendanceScheduleDto request
@@ -3672,9 +3756,30 @@ namespace BlazorApp.Api.Services.React
                 .ToListAsync();
             var userMap = users.ToDictionary(item => item.UserGUID, StringComparer.OrdinalIgnoreCase);
             var storeMap = stores.ToDictionary(item => item.StoreCode, StringComparer.OrdinalIgnoreCase);
+            // 已批准请假覆盖到的班次标注为请假：不改排班状态，只在返回时附加，界面据此不计工时、不算缺卡。
+            var minDate = schedules.Min(item => item.WorkDate.Date);
+            var maxDate = schedules.Max(item => item.WorkDate.Date);
+            var approvedLeaves = await _db.Queryable<AttendanceLeaveRequest>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.Status == "Approved"
+                    && userGuids.Contains(item.UserGuid)
+                    && item.StartDate <= maxDate
+                    && item.EndDate >= minDate)
+                .ToListAsync();
 
             foreach (var schedule in schedules)
             {
+                var leave = approvedLeaves.FirstOrDefault(item =>
+                    item.UserGuid.Equals(schedule.UserGuid, StringComparison.OrdinalIgnoreCase)
+                    && item.StartDate.Date <= schedule.WorkDate.Date
+                    && item.EndDate.Date >= schedule.WorkDate.Date);
+                if (leave != null)
+                {
+                    schedule.LeaveType = leave.LeaveType;
+                    schedule.LeaveGuid = leave.LeaveGuid;
+                }
+
                 if (userMap.TryGetValue(schedule.UserGuid, out var user))
                 {
                     schedule.EmployeeName = string.IsNullOrWhiteSpace(user.FullName)

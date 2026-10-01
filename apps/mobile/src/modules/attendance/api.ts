@@ -175,6 +175,8 @@ function normalizeSchedule(raw: ApiRecord): AttendanceSchedule {
     isMine: asBoolean(pick(raw, "isMine", "IsMine", "mine", "Mine")),
     holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")),
     holidayBusinessStatus: asOptionalString(pick(raw, "holidayBusinessStatus", "HolidayBusinessStatus")),
+    leaveType: asOptionalString(pick(raw, "leaveType", "LeaveType")),
+    leaveGuid: asOptionalString(pick(raw, "leaveGuid", "LeaveGuid")),
   };
 }
 
@@ -310,6 +312,7 @@ function normalizeWeek(payload: unknown, fallbackWeekStart?: string): Attendance
 function normalizeAvailability(raw: ApiRecord): AttendanceAvailability {
   return {
     availabilityGuid: asString(pick(raw, "availabilityGuid", "AvailabilityGuid", "guid", "Guid")),
+    userGuid: asOptionalString(pick(raw, "userGuid", "UserGuid")),
     storeCode: asOptionalString(pick(raw, "storeCode", "StoreCode")),
     storeName: asOptionalString(pick(raw, "storeName", "StoreName")),
     workDate: asDateString(pick(raw, "workDate", "WorkDate", "availableDate", "AvailableDate")),
@@ -749,6 +752,33 @@ export async function rejectAttendanceApproval(payload: AttendanceApprovalPayloa
     `${ATTENDANCE_BASE}/approvals/${encodeURIComponent(payload.approvalGuid)}/reject`,
     buildAttendanceApprovalReviewRequest(payload),
   );
+}
+
+/** 店长查看本店员工某周填报的可上班时间，用于排班网格叠加显示。 */
+export async function getManagedAvailability(params: {
+  storeCode: string;
+  weekStartDate: string;
+}): Promise<AttendanceAvailability[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/availability`, {
+    params: { storeCode: params.storeCode, weekStartDate: params.weekStartDate },
+  });
+  return getArray(response.data).map(normalizeAvailability);
+}
+
+/** 复制来源周排班到目标周（草稿），返回新建与跳过的班次数。 */
+export async function copyAttendanceScheduleWeek(params: {
+  storeCode: string;
+  sourceWeekStartDate: string;
+  targetWeekStartDate: string;
+}): Promise<{ createdCount: number; skippedCount: number }> {
+  const response = await apiClient.post(`${ATTENDANCE_BASE}/schedules/copy-week`, params);
+  const raw = isRecord(response.data)
+    ? (isRecord(pick(response.data, "data", "Data")) ? pick(response.data, "data", "Data") as ApiRecord : response.data)
+    : {};
+  return {
+    createdCount: Number(pick(raw, "createdCount", "CreatedCount") ?? 0),
+    skippedCount: Number(pick(raw, "skippedCount", "SkippedCount") ?? 0),
+  };
 }
 
 export async function getAttendanceSchedulesWeek(params: AttendanceScheduleWeekParams): Promise<AttendanceSchedule[]> {

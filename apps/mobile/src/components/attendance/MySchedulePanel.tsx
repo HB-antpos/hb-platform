@@ -3,9 +3,10 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Card, IconButton, Text } from "react-native-paper";
 import {
   buildMyWeekRows,
+  computeScheduleHourStats,
   defaultAvailabilityDates,
+  formatScheduleHours,
   type MyWeekRow,
-  sumScheduledMinutes,
 } from "@/modules/attendance/attendance-my-week";
 import { isAllDayAvailability } from "@/modules/attendance/availability-entry";
 import type { AttendanceAvailability, AttendanceWeek } from "@/modules/attendance/types";
@@ -15,11 +16,6 @@ import { ATTENDANCE_STATUS_TONES, StatusPill } from "./AdjustmentFormControls";
 
 function hhmm(value: string) {
   return value.slice(0, 5);
-}
-
-function formatHours(minutes: number) {
-  const hours = minutes / 60;
-  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
 }
 
 /**
@@ -52,7 +48,8 @@ export function MySchedulePanel({
     () => buildMyWeekRows(weekStartDate, today, week, availability),
     [availability, today, week, weekStartDate],
   );
-  const totalMinutes = sumScheduledMinutes(rows);
+  // 周工时 / 工作日 / 周末：请假班次不计入。
+  const hourStats = computeScheduleHourStats(rows.flatMap((row) => row.schedules));
   const fillDates = defaultAvailabilityDates(rows);
   const isFutureWeek = (rows[6]?.workDate ?? "") >= today;
 
@@ -66,6 +63,10 @@ export function MySchedulePanel({
   };
 
   const renderTrailing = (row: MyWeekRow) => {
+    const leaveType = row.schedules.find((schedule) => schedule.leaveType)?.leaveType;
+    if (leaveType) {
+      return <StatusPill label={t(`leaveTypes.${leaveType}`, leaveType)} tone="warning" />;
+    }
     if (row.state === "scheduled") {
       if (row.isToday) return <StatusPill label={t("myAttendance.today")} tone="accent" />;
       return row.isPast ? <StatusPill label={t("myAttendance.done")} tone="success" /> : null;
@@ -91,7 +92,13 @@ export function MySchedulePanel({
               {`${rows[0]?.workDate.slice(5) ?? ""} – ${rows[6]?.workDate.slice(5) ?? ""}`}
             </Text>
             <Text variant="labelSmall" style={styles.muted}>
-              {t("myAttendance.weekHours", { hours: formatHours(totalMinutes) })}
+              {t("myAttendance.weekHours", { hours: formatScheduleHours(hourStats.totalMinutes) })}
+            </Text>
+            <Text variant="labelSmall" style={styles.muted}>
+              {t("myAttendance.weekHoursSplit", {
+                weekday: formatScheduleHours(hourStats.weekdayMinutes),
+                weekend: formatScheduleHours(hourStats.weekendMinutes),
+              })}
             </Text>
           </View>
           <IconButton icon="chevron-right" accessibilityLabel={t("availability.nextWeek")} onPress={onNextWeek} />
