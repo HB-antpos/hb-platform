@@ -819,6 +819,17 @@ public sealed class CatalogService(
         string storeCode,
         CancellationToken cancellationToken)
     {
+        var filesEnabled = downloadFileStore is not null && downloadFileOptions?.Value.Enabled == true;
+        if (filesEnabled &&
+            catalogIndexCache.PeekLatestVersion(storeCode) is { } peek &&
+            downloadFileStore!.FindCodeConflicts(storeCode, peek.CatalogVersion) is { } fromDisk)
+        {
+            // 中文注释：当前版本的码冲突候选已随版本文件落盘时直接读文件（约几百 KB），
+            // 不为取 5 千多行候选把整份索引（每店约 600 MB）载入内存。
+            Log($"code conflicts source=disk store={fromDisk.StoreCode} version={peek.CatalogVersion} stale={peek.IsStale} items={fromDisk.Items.Count}");
+            return fromDisk;
+        }
+
         // 与特殊商品分页一样读取共享缓存的完整工件，不单独查库；门店不存在时返回 null。
         var index = await BuildSellableIndexAsync(storeCode, since: null, cancellationToken);
         if (index is null)
@@ -826,14 +837,13 @@ public sealed class CatalogService(
             return null;
         }
 
-        var codeConflicts = index.CodeConflicts;
-        return new CatalogCodeConflictsResponse(
-            index.StoreCode,
-            index.GeneratedAt,
-            codeConflicts is not null,
-            codeConflicts is null
-                ? []
-                : codeConflicts.Select(CatalogSellableIndex.ToLookupItem).ToArray());
+        if (filesEnabled)
+        {
+            // 该版本文件已发布但缺码冲突文件时顺带补写，下次请求即可命中磁盘。
+            downloadFileStore!.EnsureCodeConflictsFile(index);
+        }
+
+        return CatalogDownloadFileStore.CreateCodeConflictsResponse(index);
     }
 
     public async Task<CatalogSpecialProductMarkServiceResult> MarkSpecialProductAsync(

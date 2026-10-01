@@ -343,6 +343,44 @@ public sealed class CatalogDownloadFileStoreTests : IDisposable
         Assert.Equal(1, source.Calls);
     }
 
+    [Fact]
+    public async Task Code_conflicts_file_is_written_with_version_and_keeps_not_computed_flag()
+    {
+        var store = CreateStore();
+        var withoutConflicts = BuildResult("v1", [("9300000000001", 1m)]);
+        Assert.Null(store.FindCodeConflicts("S01", "v1"));
+
+        await store.EnsureFullFileAsync(withoutConflicts, CancellationToken.None);
+
+        // 旧快照恢复的工件没有算过候选：必须如实写成 available=false，客户端据此保留本地旧数据。
+        var notComputed = store.FindCodeConflicts("S01", "v1");
+        Assert.NotNull(notComputed);
+        Assert.Equal((false, 0), (notComputed!.Available, notComputed.Items.Count));
+
+        var conflict = withoutConflicts.SellableItems[0] with { ProductCode = "P-OTHER", DisplayName = "另一个商品" };
+        var withConflicts = BuildResult("v2", [("9300000000001", 1m)]) with
+        {
+            CodeConflicts = [withoutConflicts.SellableItems[0], conflict]
+        };
+        await store.EnsureFullFileAsync(withConflicts, CancellationToken.None);
+        var computed = store.FindCodeConflicts("S01", "v2");
+        var expected = CatalogDownloadFileStore.CreateCodeConflictsResponse(withConflicts);
+        Assert.Equal((expected.StoreCode, expected.GeneratedAt, true), (computed!.StoreCode, computed.GeneratedAt, computed.Available));
+        Assert.Equal(expected.Items, computed.Items);
+    }
+
+    [Fact]
+    public void Code_conflicts_backfill_never_creates_an_unpublished_version()
+    {
+        var store = CreateStore();
+        var target = BuildResult("v1", [("9300000000001", 1m)]);
+
+        store.EnsureCodeConflictsFile(target);
+
+        Assert.Null(store.FindCodeConflicts("S01", "v1"));
+        Assert.Null(store.FindVersion("S01", "v1"));
+    }
+
     private CatalogDownloadFileStore CreateStore(Action<CatalogDownloadFileOptions>? configure = null)
     {
         var options = new CatalogDownloadFileOptions { Enabled = true };
