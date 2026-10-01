@@ -115,6 +115,7 @@ function createEmptyAccess(): AccessControl {
     canViewPerformanceBaseline: false,
     canViewOperationAudits: false,
     canViewLegacyEmployeeLogs: false,
+    canReviewLegacyEmployeeLogs: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
     canViewAppDownloads: false,
@@ -352,6 +353,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin || hasPermission(P.System.ViewPerformanceBaseline)
   const canViewOperationAudits = isAdmin || hasPermission(P.PosTerminal.AuditView)
   const canViewLegacyEmployeeLogs = isAdmin || hasPermission(P.LegacyEmployeeLogs.View)
+  const canReviewLegacyEmployeeLogs = isAdmin || hasPermission(P.LegacyEmployeeLogs.Review)
   const canManageScheduledTasks = isAdmin || hasPermission(P.System.ManageScheduledTasks)
   const canManageSystemSettings = isAdmin || hasPermission(P.System.ManageSettings)
   // OTA 登记和回撤命令属于发布管理动作，和只读下载页权限分开控制。
@@ -480,6 +482,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewPerformanceBaseline,
     canViewOperationAudits,
     canViewLegacyEmployeeLogs,
+    canReviewLegacyEmployeeLogs,
     canManageScheduledTasks,
     canManageSystemSettings,
     canViewAppDownloads,

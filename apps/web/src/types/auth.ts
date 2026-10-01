@@ -110,6 +110,7 @@ export interface AccessControl {
   canViewPerformanceBaseline: boolean
   canViewOperationAudits: boolean
   canViewLegacyEmployeeLogs: boolean
+  canReviewLegacyEmployeeLogs: boolean
   canManageScheduledTasks: boolean
   canManageSystemSettings: boolean
   canViewAppDownloads: boolean
