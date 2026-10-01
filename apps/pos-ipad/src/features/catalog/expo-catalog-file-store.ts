@@ -1,13 +1,21 @@
-import { Directory, File } from "expo-file-system";
+import type { File as ExpoFile } from "expo-file-system";
 
 import type { CatalogFileStorePort } from "./catalog-file-sync";
 
+type ExpoFileSystemModule = typeof import("expo-file-system");
+
+function expoFileSystem(): ExpoFileSystemModule {
+  // 同步 require 让 Metro 将原生文件系统放入主 bundle，同时避免 Node / Jest 测试在未调用时解析原生入口。
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("expo-file-system") as ExpoFileSystemModule;
+}
+
 /**
- * 整文件目录下载的缓存目录：只按文件名在同一目录下读写，追加与分块读取都走 FileHandle，
- * 内存只占一个分段或一个读取块。
+ * 整文件目录下载的缓存目录（位于系统缓存目录下）：只按文件名在同一目录下读写，
+ * 追加与分块读取都走 FileHandle，内存只占一个分段或一个读取块。
  */
 export class ExpoCatalogFileStore implements CatalogFileStorePort {
-  public constructor(private readonly directoryUri: string) {}
+  public constructor(private readonly directoryName: string) {}
 
   public async size(name: string): Promise<number | null> {
     const file = this.file(name);
@@ -61,16 +69,19 @@ export class ExpoCatalogFileStore implements CatalogFileStorePort {
   }
 
   public async list(): Promise<readonly string[]> {
-    const directory = new Directory(this.directoryUri);
+    const { Directory, File, Paths } = expoFileSystem();
+    const directory = new Directory(Paths.cache, this.directoryName);
     if (!directory.exists) return [];
     return directory
       .list()
-      .filter((entry): entry is File => entry instanceof File)
+      .filter((entry): entry is ExpoFile => entry instanceof File)
       .map((file) => file.name);
   }
 
-  private file(name: string): File {
-    new Directory(this.directoryUri).create({ idempotent: true, intermediates: true });
-    return new File(this.directoryUri, name);
+  private file(name: string): ExpoFile {
+    const { Directory, File, Paths } = expoFileSystem();
+    const directory = new Directory(Paths.cache, this.directoryName);
+    directory.create({ idempotent: true, intermediates: true });
+    return new File(directory, name);
   }
 }

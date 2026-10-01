@@ -1,7 +1,6 @@
 import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
-import { Directory, Paths } from "expo-file-system";
 import * as ExpoNetwork from "expo-network";
 import * as Updates from "expo-updates";
 import { Linking } from "react-native";
@@ -1004,7 +1003,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       // 整文件目录下载：残片放在缓存目录，跨重启续传；服务端开关未开时自动回退分页。
       catalogFileSync: new HbposCatalogFileSync({
         transport,
-        store: new ExpoCatalogFileStore(new Directory(Paths.cache, "catalog-files").uri),
+        store: new ExpoCatalogFileStore("catalog-files"),
         digest: async (bytes) =>
           bytesToLowerHex(new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes))),
       }),
