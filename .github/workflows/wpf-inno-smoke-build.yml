@@ -136,7 +136,13 @@ jobs:
 
       - name: 构建 Inno 内部烟测安装包
         shell: pwsh
+        env:
+          # 中心日志（hbpos_win）写入 Key：只在这一步注入，MSBuild 把同名环境变量当属性读入并写进程序集元数据。
+          HbposCenterLogApiKey: ${{ secrets.HBPOS_WIN_CENTER_LOG_KEY }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:HbposCenterLogApiKey)) {
+            throw '缺少仓库 Secret HBPOS_WIN_CENTER_LOG_KEY：安装包将不会上传中心日志，拒绝构建。'
+          }
           $version = '${{ steps.version.outputs.normalized }}'
           $logsDir = Join-Path $PWD '.artifacts\wpf-release\logs'
           New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
@@ -160,6 +166,8 @@ jobs:
 
       - name: 核验版本、哈希、签名和 Git 状态
         shell: pwsh
+        env:
+          HbposCenterLogApiKey: ${{ secrets.HBPOS_WIN_CENTER_LOG_KEY }}
         run: |
           $version = '${{ steps.version.outputs.normalized }}'
           $versionParts = $version.Split('.')
@@ -201,6 +209,14 @@ jobs:
             throw "内部烟测包预期未签名，实际状态：$($signature.Status)"
           }
 
+          # 中心日志写入 Key 必须已写进主程序集元数据（只比对是否存在，不输出 Key）。
+          $appDllPath = Join-Path $releaseDir 'publish\Hbpos.Client.Wpf.dll'
+          $appDllText = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($appDllPath))
+          $centerLogKeyEmbedded = $appDllText.Contains('HbposCenterLogApiKey') -and $appDllText.Contains($env:HbposCenterLogApiKey) -and $appDllText.Contains('https://hotbargain.vip/api/system/logs/ingest')
+          if (!$centerLogKeyEmbedded) {
+            throw '主程序集里没有中心日志写入 Key 或上传地址，安装包不会上传中心日志。'
+          }
+
           $shaPath = Join-Path $releaseDir "$installerName.sha256"
           "$hash  $installerName" | Set-Content -LiteralPath $shaPath -Encoding ascii
 
@@ -233,6 +249,7 @@ jobs:
             installerSignatureStatus = $signature.Status.ToString()
             appFileVersion = $appInfo.FileVersion
             appProductVersion = $appInfo.ProductVersion
+            centerLogKeyEmbedded = $centerLogKeyEmbedded
             gitStatusClean = $true
             productionReady = $false
           }
@@ -251,6 +268,7 @@ jobs:
           - 安装包 ProductVersion：``$installerProductVersion``
           - Authenticode：``$($signature.Status)``
           - 运行时要求：``.NET 8 Desktop Runtime x64``
+          - 中心日志写入 Key：已写入（hbpos_win）
           - 发布属性：内部烟测、framework-dependent、未签名、非正式生产包
           "@ >> $env:GITHUB_STEP_SUMMARY
 

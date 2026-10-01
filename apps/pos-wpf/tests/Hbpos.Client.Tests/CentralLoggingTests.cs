@@ -56,6 +56,71 @@ public sealed class CentralLoggingTests
         Assert.True(options.IsConfigured);
     }
 
+    [Fact]
+    public void ApplicationLogOptions_uses_build_embedded_key_and_ingest_url_when_store_pc_has_no_configuration()
+    {
+        // 门店收银机没有配置文件也不设环境变量，正式安装包靠构建时写入的默认值上传中心日志。
+        using var variables = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["HBPOS_LOG_CENTER_INGEST_URL"] = null,
+            ["HBPOS_LOG_CENTER_API_KEY"] = null,
+            ["HBPOS_LOG_CENTER_ENABLED"] = null
+        });
+        var configuration = new ConfigurationBuilder().Build();
+        var buildDefaults = new Dictionary<string, string>
+        {
+            [ApplicationLogOptions.BuildApiKeyMetadataKey] = "build-key",
+            [ApplicationLogOptions.BuildIngestUrlMetadataKey] = "https://hotbargain.vip/api/system/logs/ingest"
+        };
+
+        var options = ApplicationLogOptions.FromConfiguration(configuration, new Uri("https://pos-api.example.com/"), buildDefaults);
+
+        Assert.True(options.IsConfigured);
+        Assert.Equal("build-key", options.ApiKey);
+        Assert.Equal("hbpos_win", options.ProjectCode);
+        Assert.Equal(new Uri("https://hotbargain.vip/api/system/logs/ingest"), options.IngestUri);
+    }
+
+    [Fact]
+    public void ApplicationLogOptions_configuration_and_environment_override_build_defaults()
+    {
+        using var variables = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["HBPOS_LOG_CENTER_INGEST_URL"] = null,
+            ["HBPOS_LOG_CENTER_API_KEY"] = "env-key",
+            ["HBPOS_LOG_CENTER_ENABLED"] = null
+        });
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CentralLogging:IngestUrl"] = "https://logs.example.com/api/system/logs/ingest"
+            })
+            .Build();
+        var buildDefaults = new Dictionary<string, string>
+        {
+            [ApplicationLogOptions.BuildApiKeyMetadataKey] = "build-key",
+            [ApplicationLogOptions.BuildIngestUrlMetadataKey] = "https://hotbargain.vip/api/system/logs/ingest"
+        };
+
+        var options = ApplicationLogOptions.FromConfiguration(configuration, new Uri("https://pos-api.example.com/"), buildDefaults);
+
+        Assert.Equal("env-key", options.ApiKey);
+        Assert.Equal(new Uri("https://logs.example.com/api/system/logs/ingest"), options.IngestUri);
+
+        // 现场可以用环境变量关闭上传，构建默认值不能把它重新打开。
+        using var disabled = new EnvironmentVariableScope(new Dictionary<string, string?> { ["HBPOS_LOG_CENTER_ENABLED"] = "false" });
+        Assert.False(ApplicationLogOptions.FromConfiguration(configuration, new Uri("https://pos-api.example.com/"), buildDefaults).IsConfigured);
+    }
+
+    [Fact]
+    public void ApplicationLogOptions_local_and_test_builds_have_no_embedded_key()
+    {
+        // 只有 CI 安装包构建注入 HbposCenterLogApiKey；测试程序集引用的客户端构建不能带真实 Key。
+        var defaults = ApplicationLogOptions.ReadBuildDefaults(typeof(ApplicationLogOptions).Assembly);
+
+        Assert.False(defaults.ContainsKey(ApplicationLogOptions.BuildApiKeyMetadataKey));
+    }
+
     [Theory]
     [InlineData("/api/system/logs/ingest")]
     [InlineData("file:///C:/temp/logs.json")]
