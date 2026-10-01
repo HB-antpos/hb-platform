@@ -25,7 +25,7 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
             InitKeyType = InitKeyType.Attribute, IsAutoCloseConnection = false,
         });
         database.CodeFirst.InitTables(typeof(Store), typeof(UserStore), typeof(Container), typeof(ContainerDetail),
-            typeof(DomesticProduct), typeof(WarehouseProduct));
+            typeof(DomesticProduct), typeof(WarehouseProduct), typeof(Product), typeof(StoreRetailPrice));
         database.Ado.ExecuteCommand("CREATE TABLE WarehouseProductChangeHistory (Id INTEGER PRIMARY KEY, EventGuid TEXT NOT NULL, ProductCode TEXT NOT NULL, Action TEXT NOT NULL, Source TEXT NOT NULL, SourceReference TEXT NULL, BatchGuid TEXT NULL, ActorUserGuid TEXT NULL, ActorName TEXT NOT NULL, ActorType TEXT NOT NULL, OccurredAtUtc TEXT NOT NULL, ChangesJson TEXT NOT NULL)");
     }
 
@@ -109,6 +109,56 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.Equal(new string?[] { "HB038-XM-017", "hb150-568", "HB150-574", null }, result.Items.Select(x => x.HbProductNo));
         Assert.Equal(2400m, result.Items.Single(x => x.ProductCode == "P-B").Quantity);
         Assert.Null(result.Items.Single(x => x.ProductCode == "P-A").Quantity);
+    }
+
+    [Fact]
+    public async Task GetAsync_返回条码与零售价_分店价优先_停用分店价回退主档_未建档取明细价()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+        database.Insertable(new Store { StoreGUID = "store-5", StoreCode = "S-5", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-5", UserGUID = "user-5", StoreGUID = "store-5", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-PRICE", ContainerNumber = "PRICE", ActualArrivalDate = today.AddDays(1) }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "R1", ContainerCode = "C-PRICE", ProductCode = "P-STORE", OEMPrice = 1.00m },
+            new ContainerDetail { DetailCode = "R2", ContainerCode = "C-PRICE", ProductCode = "P-INACTIVE", OEMPrice = 1.00m },
+            // 同一商品多行明细：第一行零售价为 0 视为没有，取下一行的有效价
+            new ContainerDetail { DetailCode = "R3", ContainerCode = "C-PRICE", ProductCode = "P-NEW", OEMPrice = 0m },
+            new ContainerDetail { DetailCode = "R3B", ContainerCode = "C-PRICE", ProductCode = "P-NEW", OEMPrice = 2.50m },
+            new ContainerDetail { DetailCode = "R4", ContainerCode = "C-PRICE", ProductCode = "P-NONE" },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new DomesticProduct { ProductCode = "P-STORE", HBProductNo = "HB-1", Barcode = " 9300000000017 " },
+            new DomesticProduct { ProductCode = "P-INACTIVE", HBProductNo = "HB-2", Barcode = "  " },
+            new DomesticProduct { ProductCode = "P-NEW", HBProductNo = "HB-3", Barcode = "HB0001" },
+            new DomesticProduct { ProductCode = "P-NONE", HBProductNo = "HB-4" },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new Product { ProductCode = "P-STORE", Barcode = "IGNORED", RetailPrice = 4.99m },
+            new Product { ProductCode = "P-INACTIVE", Barcode = "9300000000024", RetailPrice = 3.50m },
+            // 已软删的主档不参与
+            new Product { ProductCode = "P-NONE", Barcode = "DELETED", RetailPrice = 9.99m, IsDeleted = true },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new StoreRetailPrice { StoreCode = "S-5", ProductCode = "P-STORE", StoreRetailPriceValue = 5.99m },
+            new StoreRetailPrice { StoreCode = "S-5", ProductCode = "P-INACTIVE", StoreRetailPriceValue = 7.00m, IsActive = false },
+            // 其他门店的分店价不应串到本门店
+            new StoreRetailPrice { StoreCode = "S-OTHER", ProductCode = "P-NONE", StoreRetailPriceValue = 8.00m },
+        }).ExecuteCommand();
+
+        var result = await CreateService("user-5").GetAsync("S-5");
+
+        Assert.Equal(DateOnly.FromDateTime(today), result.LocalToday);
+        var byCode = result.Items.ToDictionary(x => x.ProductCode);
+        Assert.Equal(("9300000000017", 5.99m), (byCode["P-STORE"].Barcode, byCode["P-STORE"].RetailPrice));
+        Assert.Equal(("9300000000024", 3.50m), (byCode["P-INACTIVE"].Barcode, byCode["P-INACTIVE"].RetailPrice));
+        Assert.Equal(("HB0001", 2.50m), (byCode["P-NEW"].Barcode, byCode["P-NEW"].RetailPrice));
+        Assert.Null(byCode["P-NONE"].Barcode);
+        Assert.Null(byCode["P-NONE"].RetailPrice);
     }
 
     [Fact]

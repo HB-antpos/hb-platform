@@ -10,7 +10,8 @@
     "quantity": "数量 {{value}}",
     "estimatedArrival": "预计到店",
     "actualBasis": "货柜到仓库日期推算",
-    "estimatedBasis": "预计到岸推算"
+    "estimatedBasis": "预计到岸推算",
+    "retailPrice": "零售价 ${{value}}"
   },
   "messages": {
     "notAllowed": "没有 HB新品 权限，请联系管理员授权",
@@ -18,5 +19,6 @@
     "selectStore": "请先选择门店",
     "dateNotice": "到店日期为推算，优先按货柜到仓库日期，未到仓库的按预计到岸日期"
   },
-  "states": { "loading": "正在加载…", "loadFailed": "加载失败", "stateUnknown": "门店州别未知，无法计算到店日期", "empty": "过去 1 周至未来 2 周暂无到店新品", "noImage": "暂无图片" }
+  "states": { "loading": "正在加载…", "loadFailed": "加载失败", "stateUnknown": "门店州别未知，无法计算到店日期", "empty": "过去 1 周至未来 2 周暂无到店新品", "noImage": "暂无图片", "emptyPast": "过去 1 周没有到店新品", "emptyUpcoming": "未来 2 周暂无到店新品" },
+  "filters": { "all": "全部 {{count}}", "past": "过去 1 周 {{count}}", "upcoming": "未来 2 周 {{count}}" }
 }
