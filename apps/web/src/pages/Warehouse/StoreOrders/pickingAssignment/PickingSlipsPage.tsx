@@ -9,7 +9,7 @@ import { getPickingSlips, type PickingSlip, type PickingSlipLine, type PickingSl
 import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../../../utils/barcode'
 import { printElementPagesAsPdf } from '../printUtils'
 
-import { buildSlipRows, paginateSlipRows, type SlipRow } from './pickingAssignmentLogic'
+import { buildSlipRows, formatUtcShort, paginateSlipRows, type SlipRow } from './pickingAssignmentLogic'
 import '../print.css'
 import './messages'
 import './pickingSlips.css'
@@ -221,7 +221,7 @@ export default function PickingSlipsPage() {
                         <br />
                         {t('storeOrders.pickingSlips.assignedLine', '{{name}} 分配于 {{assignedAt}} · 打印 {{printedAt}}', {
                           name: page.order.assignedByName ?? '—',
-                          assignedAt: page.order.assignedAtUtc ? dayjs(page.order.assignedAtUtc).format('MM-DD HH:mm') : '—',
+                          assignedAt: formatUtcShort(page.order.assignedAtUtc),
                           printedAt: dayjs().format('MM-DD HH:mm'),
                         })}
                       </div>

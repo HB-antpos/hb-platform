@@ -752,6 +752,37 @@ internal sealed class WarehousePickingService(
                 .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Sum(total => total.Quantity), StringComparer.OrdinalIgnoreCase);
 
+            // 有拣货分配的订单：每段都拣完（拣齐或标了货位没货）才能提交整单，避免先拣完的人把别人的段一起关掉；
+            // 确实拣不完由经理在 Web 撤销分配或改派后放行。
+            var assignments = await WarehousePickingQueries.LoadAssignmentsAsync(_db, orderGuid);
+            if (assignments.Count > 0)
+            {
+                var stockouts = await WarehousePickingQueries.LoadActiveStockoutsAsync(_db, orderGuid);
+                var incomplete = WarehousePickingRules.FindIncompleteSegments(
+                    details
+                        .Where(detail => assignments.ContainsKey(detail.DetailGUID))
+                        .Select(detail =>
+                        {
+                            var assignment = assignments[detail.DetailGUID];
+                            return (
+                                assignment.SegmentNo,
+                                assignment.PickerName,
+                                detail.Quantity ?? 0,
+                                (decimal)totals.GetValueOrDefault(detail.DetailGUID),
+                                stockouts.ContainsKey(detail.DetailGUID)
+                            );
+                        })
+                );
+                if (incomplete.Count > 0)
+                {
+                    return WarehousePickingResult<WarehousePickingSubmitResultDto>.Fail(
+                        409,
+                        WarehousePickingErrorCodes.SegmentsIncomplete,
+                        WarehousePickingRules.DescribeIncompleteSegments(incomplete)
+                    );
+                }
+            }
+
             // 订单行批量改配货数经审计拦截器落库的是 UTC；这里显式写 UTC 与拣货人，保持同一口径。
             var now = DateTime.UtcNow;
             foreach (var detail in details)

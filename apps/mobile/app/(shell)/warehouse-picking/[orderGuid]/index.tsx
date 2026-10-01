@@ -22,12 +22,20 @@ export default function WarehousePickingOrderRoute() {
       }),
     [params.claim, params.claimer, params.lines, params.segment, params.segments],
   );
+  // 完成页“去帮忙”带回的段号；helpAt 区分同一段的两次点击。
+  const help = Number.parseInt(firstParam(params.help), 10);
+  const helpAt = firstParam(params.helpAt);
+  const helpRequest = useMemo(
+    () => (Number.isInteger(help) && help > 0 && helpAt ? { segmentNo: help, nonce: helpAt } : null),
+    [help, helpAt],
+  );
   return (
     <PickingScreen
       orderGuid={firstParam(params.orderGuid)}
       focusDetailGuid={focus || null}
       focusSegmentNo={claim.segmentNo}
       claimNotice={claim.notice}
+      helpRequest={helpRequest}
     />
   );
 }

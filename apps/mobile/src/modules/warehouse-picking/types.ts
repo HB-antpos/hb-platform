@@ -22,7 +22,8 @@ export type PickOrderFilter = "mine" | "all" | "toPick" | "picking";
  * 拣货范围：我的（经理派给我或我扫分单领取的那一段）/ 全部 / 有货位 / 无货位（未绑定配货位）。
  * “我的”只在订单有拣货分配时出现。
  */
-export type PickScope = "mine" | "all" | "located" | "unlocated";
+/** help：先拣完的人去帮另一段，只看那一段；只在有分配的订单上临时出现，不存偏好。 */
+export type PickScope = "mine" | "help" | "all" | "located" | "unlocated";
 
 /** 走位方式：M 型每排同一端进出、列号全部从小到大（默认）；S 型单数排从小到大、双数排从大到小。 */
 export type PickRoute = "m" | "s";

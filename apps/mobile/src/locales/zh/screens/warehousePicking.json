@@ -146,7 +146,16 @@
     "slipMine": "这是你的第 {{no}}/{{count}} 段",
     "slipOther": "第 {{no}} 段已由 {{name}} 领取",
     "slipOtherHint": "你也可以帮忙拣，记录记在你名下",
-    "slipLines": "这一段 {{lines}} 个品种，已切到“我的”"
+    "slipLines": "这一段 {{lines}} 个品种，已切到“我的”",
+    "scopeHelp": "帮 {{name}}",
+    "helpDoneTitle": "这段拣完了",
+    "helpDoneHint_other": "还有 {{count}} 段没拣完，可以去帮忙",
+    "helpDoneHint_one": "还有 {{count}} 段没拣完，可以去帮忙",
+    "helpStarted": "去帮 {{name}} · 第 {{no}} 段",
+    "helpStartedHint": "扫码照常记在你名下，这段负责人不变",
+    "segmentSettled": "已处理 {{done}}/{{total}} 品种",
+    "segmentHelp": "去帮忙",
+    "segmentContinue": "继续拣"
   },
   "minOrder": {
     "title": "设置中包数",
@@ -194,7 +203,8 @@
     "pieces": "件数",
     "short": "少拣",
     "over": "超拣",
-    "lineCount": "{{count}} 行",
+    "lineCount_other": "{{count}} 行",
+    "lineCount_one": "{{count}} 行",
     "pickersSummary": "{{summary}}",
     "variances": "差异明细",
     "variancesHint": "点一行回去补拣",
@@ -217,7 +227,11 @@
     "segmentsTitle": "分段进度",
     "segmentClaimable": "待领取",
     "segmentLine": "拣齐 {{done}}/{{total}} 品种",
-    "segmentStockout": "没货 {{count}}"
+    "segmentStockout": "没货 {{count}}",
+    "blockTitle_other": "还有 {{count}} 段没拣完，不能提交",
+    "blockTitle_one": "还有 {{count}} 段没拣完，不能提交",
+    "blockHint": "没货的品种标「货位没货」后才算拣完；确实拣不完请经理在订单详情撤销分配或改派。",
+    "blockOk": "知道了"
   },
   "time": {
     "justNow": "刚刚",
@@ -281,6 +295,7 @@
     "INVALID_REQUEST": "请求无效",
     "LINE_ALREADY_COMPLETE": "这一行已经拣齐，不需要标记没货",
     "SLIP_STALE": "这张分单已重新分配或撤销，请找仓库经理要新打印的分单",
-    "generic": "操作失败，请重试"
+    "generic": "操作失败，请重试",
+    "SEGMENTS_INCOMPLETE": "还有段没拣完，不能提交整单"
   }
 }

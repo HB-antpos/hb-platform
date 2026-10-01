@@ -486,6 +486,84 @@ public sealed class WarehousePickingAssignmentServiceTests : IDisposable
     }
 
     [Fact]
+    public void 段已拣完口径_拣齐或超拣或标没货算处理完_半拣没标算没完_段号升序()
+    {
+        var incomplete = WarehousePickingRules.FindIncompleteSegments(new (int, string?, decimal, decimal, bool)[]
+        {
+            (2, null, 12, 12, false),
+            (2, null, 12, 5, false),
+            (1, "Chen Wei", 12, 13, false),
+            (1, "Chen Wei", 12, 0, true),
+            (3, "Wang Fang", 6, 0, false),
+        });
+
+        Assert.Equal(new[] { new WarehouseIncompleteSegment(2, null, 1, 2), new WarehouseIncompleteSegment(3, "Wang Fang", 0, 1) }, incomplete);
+        Assert.Equal(
+            "还有 2 段没拣完，不能提交整单：第 2 段 待领取 1/2、第 3 段 Wang Fang 0/1。没货的品种标“货位没货”后才算拣完；确实拣不完请经理在订单详情撤销分配或改派。",
+            WarehousePickingRules.DescribeIncompleteSegments(incomplete)
+        );
+    }
+
+    [Fact]
+    public async Task 有分配的订单每段拣完才能提交_拦下时不回写_帮拣算进段进度不改负责人_未分配品种不参与()
+    {
+        await SeedOrderAsync();
+        var service = CreateService();
+        await service.SaveAsync(
+            OrderGuid,
+            Assign(("u-chen", new[] { "d-a3-12", "d-a3-15" }), ("u-li", new[] { "d-a4-07", "d-a4-18" })),
+            Manager
+        );
+        var picking = CreatePickingService();
+        var chen = new WarehousePickerContext("u-chen", "Chen Wei", false, "u-chen", null);
+        await picking.JoinAsync(OrderGuid, chen);
+        await SetTotalAsync(picking, "d-a3-12", 12, chen);
+        await SetTotalAsync(picking, "d-a3-15", 5, chen);
+
+        var blocked = await picking.SubmitAsync(OrderGuid, chen);
+
+        Assert.Equal((409, WarehousePickingErrorCodes.SegmentsIncomplete), (blocked.StatusCode, blocked.ErrorCode));
+        Assert.Contains("第 1 段 Chen Wei 1/2、第 2 段 Li Na 0/2", blocked.Message);
+        Assert.Equal(WarehouseOrderPickSessionStatuses.Picking, (await _db.Queryable<WarehouseOrderPickSession>().SingleAsync()).Status);
+        Assert.All(await _db.Queryable<WareHouseOrderDetails>().ToListAsync(), detail => Assert.True((detail.AllocQuantity ?? 0) == 0));
+
+        // 自己那段：半拣的标没货才算拣完；再去帮李娜把她那段拣齐。没分配的 3 个品种没拣也不拦。
+        await picking.MarkStockoutAsync(OrderGuid, "d-a3-15", WarehouseOrderPickStockoutReasons.LocationEmpty, chen);
+        var helped = await SetTotalAsync(picking, "d-a4-07", 12, chen);
+        // 写入后回给客户端的单行进度带分配，帮拣不改负责人；缺了客户端会把这行移出“帮 某某”。
+        Assert.Equal((2, "u-li", "Li Na"), (helped.AssignmentSegmentNo, helped.AssigneeUserGuid, helped.AssigneeName));
+        Assert.Equal(WarehousePickingErrorCodes.SegmentsIncomplete, (await picking.SubmitAsync(OrderGuid, chen)).ErrorCode);
+        await SetTotalAsync(picking, "d-a4-18", 12, chen);
+
+        var summary = (await service.GetAsync(OrderGuid)).Data!;
+        Assert.Equal("u-li", summary.Assignees[1].PickerUserGuid);
+        Assert.Equal(new[] { ("Chen Wei", 2) }, summary.Assignees[1].Helpers!.Select(helper => (helper.PickerName, helper.LineCount)));
+        Assert.Empty(summary.Assignees[0].Helpers!);
+        Assert.Equal(2, summary.Assignees[1].CompletedLineCount);
+
+        var submitted = await picking.SubmitAsync(OrderGuid, chen);
+        Assert.True(submitted.Success, submitted.Message);
+    }
+
+    [Fact]
+    public async Task 段拣不完时经理撤销分配后可以提交()
+    {
+        await SeedOrderAsync();
+        var service = CreateService();
+        await service.SaveAsync(OrderGuid, Assign(("u-chen", new[] { "d-a3-12" }), ("u-li", new[] { "d-a4-07" })), Manager);
+        var picking = CreatePickingService();
+        var chen = new WarehousePickerContext("u-chen", "Chen Wei", false, "u-chen", null);
+        await picking.JoinAsync(OrderGuid, chen);
+        await SetTotalAsync(picking, "d-a3-12", 12, chen);
+        Assert.Equal(WarehousePickingErrorCodes.SegmentsIncomplete, (await picking.SubmitAsync(OrderGuid, chen)).ErrorCode);
+
+        await service.ClearAsync(OrderGuid);
+        var submitted = await picking.SubmitAsync(OrderGuid, chen);
+
+        Assert.True(submitted.Success, submitted.Message);
+    }
+
+    [Fact]
     public async Task 候选员工附带手上仍在拣的已派订单数()
     {
         await SeedOrderAsync();
@@ -502,6 +580,19 @@ public sealed class WarehousePickingAssignmentServiceTests : IDisposable
         var candidates = await service.ListCandidatesAsync();
 
         Assert.Equal(new[] { ("u-chen", 1), ("u-li", 0) }, candidates.Data!.Select(item => (item.PickerUserGuid, item.ActiveOrderCount)));
+    }
+
+    private static async Task<WarehousePickingLineProgressDto> SetTotalAsync(WarehousePickingService picking, string detailGuid, int total, WarehousePickerContext picker)
+    {
+        var line = (await picking.GetSheetAsync(OrderGuid)).Data!.Lines.Single(item => item.DetailGuid == detailGuid);
+        var result = await picking.SetLineTotalAsync(
+            OrderGuid,
+            detailGuid,
+            new WarehousePickingSetTotalRequestDto { Total = total, ExpectedTotal = line.PickedTotal, ClientRequestId = Guid.NewGuid() },
+            picker
+        );
+        Assert.True(result.Success, result.Message);
+        return result.Data!.Line;
     }
 
     private static WarehouseRouteLine RouteLine(string detailGuid, string? location, string? itemNumber = null) =>

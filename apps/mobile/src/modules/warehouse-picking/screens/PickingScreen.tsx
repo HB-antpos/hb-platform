@@ -27,6 +27,8 @@ import {
   hasAssignments,
   hasLocation,
   hasMinOrderQuantity,
+  incompleteSegments,
+  isMySegment,
   isOpenLine,
   isMyLine,
   isStockout,
@@ -38,6 +40,7 @@ import {
   summarizeLines,
   upNextLines,
   type MineContext,
+  type SegmentSummary,
 } from "../pick-math";
 import { hydratePickPreferences, usePickPreferences } from "../pick-preferences";
 import {
@@ -59,7 +62,15 @@ import { ManualQtySheet } from "../components/ManualQtySheet";
 import { MinOrderQtySheet } from "../components/MinOrderQtySheet";
 import { PickCameraSheet } from "../components/PickCameraSheet";
 import { PickHeader, PickerChip } from "../components/PickHeader";
-import { ASSIGNED_HEADER_SCOPES, ASSIGNED_SHEET_SCOPES, DEFAULT_SCOPES, PickScopeTabs } from "../components/PickScopeTabs";
+import { HelpOthersCard } from "../components/IncompleteSegments";
+import {
+  ASSIGNED_HEADER_SCOPES,
+  ASSIGNED_SHEET_SCOPES,
+  DEFAULT_SCOPES,
+  HELPING_HEADER_SCOPES,
+  HELPING_SHEET_SCOPES,
+  PickScopeTabs,
+} from "../components/PickScopeTabs";
 import { RouteSheet } from "../components/RouteSheet";
 import { ScanStatusBanner, type ScanBannerState } from "../components/ScanStatusBanner";
 import { StockoutSheet } from "../components/StockoutSheet";
@@ -77,12 +88,15 @@ export function PickingScreen({
   focusDetailGuid,
   focusSegmentNo = null,
   claimNotice = null,
+  helpRequest = null,
 }: {
   orderGuid: string;
   focusDetailGuid: string | null;
   /** 扫分单进入时的段号：“我的”就是这一段。 */
   focusSegmentNo?: number | null;
   claimNotice?: ClaimNotice | null;
+  /** 从完成页拦截框点“去帮忙”回来：要帮的段号；nonce 让连点同一段也能重新定位。 */
+  helpRequest?: { segmentNo: number; nonce: string } | null;
 }) {
   const { t, language } = useAppTranslation("warehousePicking");
   const router = useRouter();
@@ -97,6 +111,8 @@ export function PickingScreen({
   // 有拣货分配的订单：范围是本单临时状态（默认“我的”），不改本机偏好；分段来自扫的分单。
   const [segmentNo, setSegmentNo] = useState<number | null>(focusSegmentNo);
   const [assignedScope, setAssignedScope] = useState<PickScope | null>(focusSegmentNo ? "mine" : null);
+  // 正在帮的段：页头临时多一档“帮 某某”，只看那一段；帮忙不改负责人。
+  const [helpSegmentNo, setHelpSegmentNo] = useState<number | null>(null);
 
   const [sheet, setSheet] = useState<PickSheet | null>(null);
   const [lines, setLines] = useState<PickSheetLine[]>([]);
@@ -316,7 +332,7 @@ export function PickingScreen({
   const codeIndex = useMemo(() => buildPickCodeIndex(sheet?.codes ?? []), [sheet]);
   const sortedLines = useMemo(() => sortLinesByLocation(lines, route), [lines, route]);
   const assigned = useMemo(() => hasAssignments(lines), [lines]);
-  const mine = useMemo<MineContext>(() => ({ pickerUserGuid: myGuid, segmentNo }), [myGuid, segmentNo]);
+  const mine = useMemo<MineContext>(() => ({ pickerUserGuid: myGuid, segmentNo, helpSegmentNo }), [helpSegmentNo, myGuid, segmentNo]);
   const counts = useMemo(() => scopeCounts(lines, mine), [lines, mine]);
   // 有分配：我的 / 全部（全部明细里还能切有货位 / 无货位）；没有分配：沿用本机偏好（全部 / 有货位 / 无货位）。
   const scope: PickScope = assigned
@@ -355,6 +371,39 @@ export function PickingScreen({
     },
     [route, t],
   );
+
+  /** 去帮某一段：切到“帮 某某”，定位到那段第一条待拣行，并说明记录记在自己名下。 */
+  const startHelp = useCallback(
+    (targetSegmentNo: number) => {
+      const segmentLines = sortLinesByLocation(linesRef.current, route).filter((line) => line.assignmentSegmentNo === targetSegmentNo);
+      if (segmentLines.length === 0) return;
+      setHelpSegmentNo(targetSegmentNo);
+      setAssignedScope("help");
+      const target = firstOpenLine(segmentLines);
+      if (target) {
+        setCurrentGuid(target.detailGuid);
+        setScannedChildCode(null);
+      }
+      const assignee = segmentLines.find((line) => line.assigneeName)?.assigneeName;
+      setBanner({
+        kind: "info",
+        title: t("picking.helpStarted", {
+          name: assignee ? shortPickerName(assignee) : t("finish.segmentClaimable"),
+          no: targetSegmentNo,
+        }),
+        message: t("picking.helpStartedHint"),
+      });
+    },
+    [route, t],
+  );
+
+  // 从完成页点“去帮忙”回来：拣货单加载后应用一次。
+  const appliedHelpRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sheet || !helpRequest || appliedHelpRef.current === helpRequest.nonce) return;
+    appliedHelpRef.current = helpRequest.nonce;
+    startHelp(helpRequest.segmentNo);
+  }, [helpRequest, sheet, startHelp]);
 
   // 从订单列表扫分单进来：拣货单加载后应用一次领取提示。
   const appliedNoticeRef = useRef<ClaimNotice | null>(null);
@@ -467,6 +516,15 @@ export function PickingScreen({
   const teammates = activeTeammates(participants, myGuid, nowMs);
   const teammateMap = teammateByLine(participants, myGuid, nowMs);
   const upNext = upNextLines(scopedLines, currentGuid, 3);
+  // 我的（或正在帮的）那段拣完了：列出别人还没拣完的段，提示去帮忙。
+  const helpTargets: SegmentSummary[] =
+    assigned && !readonly && (scope === "mine" || scope === "help") && scopedLines.length > 0 && openCount === 0
+      ? incompleteSegments(lines).filter((segment) => !isMySegment(segment, mine) && segment.segmentNo !== helpSegmentNo)
+      : [];
+  const helpAssignee = helpSegmentNo == null ? null : lines.find((line) => line.assignmentSegmentNo === helpSegmentNo && line.assigneeName)?.assigneeName;
+  const helpName = helpAssignee ? shortPickerName(helpAssignee) : t("finish.segmentClaimable");
+  const headerScopes = !assigned ? DEFAULT_SCOPES : helpSegmentNo != null ? HELPING_HEADER_SCOPES : ASSIGNED_HEADER_SCOPES;
+  const sheetScopes = !assigned ? DEFAULT_SCOPES : helpSegmentNo != null ? HELPING_SHEET_SCOPES : ASSIGNED_SHEET_SCOPES;
 
   const changeScope = (next: PickScope) => {
     if (assigned) setAssignedScope(next);
@@ -665,13 +723,16 @@ export function PickingScreen({
         }
       >
         <View style={styles.progressBlock}>
-          <PickScopeTabs value={scope} counts={counts} scopes={assigned ? ASSIGNED_HEADER_SCOPES : DEFAULT_SCOPES} onChange={changeScope} />
+          <PickScopeTabs value={scope} counts={counts} scopes={headerScopes} helpName={helpName} onChange={changeScope} />
           <View style={styles.progressRow}>
             <Text numberOfLines={1} style={[styles.progressText, styles.progressMain]}>
               {scope === "all"
                 ? progressText
                 : t("picking.scopeProgress", {
-                    scope: t(scope === "mine" ? "picking.scopeMine" : scope === "located" ? "picking.scopeLocated" : "picking.scopeUnlocated"),
+                    scope:
+                      scope === "help"
+                        ? t("picking.scopeHelp", { name: helpName })
+                        : t(scope === "mine" ? "picking.scopeMine" : scope === "located" ? "picking.scopeLocated" : "picking.scopeUnlocated"),
                     progress: progressText,
                   })}
             </Text>
@@ -725,6 +786,10 @@ export function PickingScreen({
             onStockout={() => setStockoutGuid(currentLine.detailGuid)}
             onClearStockout={() => void clearStockout(currentLine.detailGuid)}
           />
+        ) : null}
+
+        {helpTargets.length > 0 ? (
+          <HelpOthersCard segments={helpTargets} mine={mine} onHelp={(segment) => startHelp(segment.segmentNo)} />
         ) : null}
 
         <UpNextList
@@ -804,7 +869,8 @@ export function PickingScreen({
         lines={scopedLines}
         scope={scope}
         scopeCounts={counts}
-        scopes={assigned ? ASSIGNED_SHEET_SCOPES : DEFAULT_SCOPES}
+        scopes={sheetScopes}
+        helpName={helpName}
         route={route}
         onScopeChange={changeScope}
         onRoutePress={() => setRoute(route === "m" ? "s" : "m")}

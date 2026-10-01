@@ -1,7 +1,6 @@
 import { PrinterOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
 import { Button, Card, Empty, Popconfirm, Progress, Select, Space, Spin, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -18,7 +17,7 @@ import {
 } from '../../../../services/warehousePickingAssignmentService'
 
 import AssignPickingModal from './AssignPickingModal'
-import { assigneeStatus, segmentColor } from './pickingAssignmentLogic'
+import { assigneeStatus, formatUtcShort, segmentColor } from './pickingAssignmentLogic'
 import './messages'
 import './pickingAssignment.css'
 
@@ -215,6 +214,19 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
                 ? ` · ${t('storeOrders.pickingAssignment.stockoutCount', '没货 {{count}}', { count: assignee.stockoutLineCount })}`
                 : ''}
             </Typography.Text>
+            {assignee.helpers?.length ? (
+              // 帮忙不改负责人，只在这里标出谁来帮过、帮了几个品种。
+              <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                {assignee.helpers
+                  .map((helper) =>
+                    t('storeOrders.pickingAssignment.helpedBy', '{{name}} 帮拣 {{count}} 品种', {
+                      name: helper.pickerName,
+                      count: helper.lineCount,
+                    }),
+                  )
+                  .join('、')}
+              </Typography.Text>
+            ) : null}
           </div>
         )
       },
@@ -245,6 +257,9 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
                 : t('storeOrders.pickingAssignment.pickingMinutes', '拣货中 · {{count}} 分钟前', { count: status.minutesAgo })}
             </Tag>
           )
+        }
+        if (status.kind === 'helped') {
+          return <Tag color="processing">{t('storeOrders.pickingAssignment.helped', '有人帮拣中')}</Tag>
         }
         return <Tag>{t('storeOrders.pickingAssignment.notStarted', '未开始')}</Tag>
       },
@@ -278,7 +293,7 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
             <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
               {t('storeOrders.pickingAssignment.assignedBy', '{{name}} 于 {{time}} 分配 · {{count}} 份 · 按 M 型走位分段', {
                 name: summary.assignedByName,
-                time: summary.assignedAtUtc ? dayjs(summary.assignedAtUtc).format('MM-DD HH:mm') : '—',
+                time: formatUtcShort(summary.assignedAtUtc),
                 count: assignees.length,
               })}
             </Typography.Text>

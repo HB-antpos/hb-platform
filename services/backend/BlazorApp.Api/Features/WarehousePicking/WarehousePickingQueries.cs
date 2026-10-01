@@ -347,6 +347,8 @@ internal static class WarehousePickingQueries
     {
         var totals = await LoadPickTotalsAsync(db, orderGuid, detailGuid);
         var stockouts = await LoadActiveStockoutsAsync(db, orderGuid, detailGuid);
+        // 写入后回给客户端的单行进度同样带分配：客户端整行合并，缺了会把这行的段号与负责人清空。
+        var assignment = (await LoadAssignmentsAsync(db, orderGuid, detailGuid)).GetValueOrDefault(detailGuid);
         return new WarehousePickingLineProgressDto
         {
             DetailGuid = detailGuid,
@@ -354,6 +356,9 @@ internal static class WarehousePickingQueries
             PickedBy = ToPickedBy(totals),
             MinOrderQuantity = minOrderQuantity,
             Stockout = stockouts.GetValueOrDefault(detailGuid),
+            AssigneeUserGuid = assignment?.PickerUserGuid,
+            AssigneeName = assignment?.PickerName,
+            AssignmentSegmentNo = assignment?.SegmentNo,
         };
     }
 
@@ -388,12 +393,18 @@ internal static class WarehousePickingQueries
     /// <summary>订单各行的负责人（经理派单），按订单行索引；没有分配时为空字典。</summary>
     internal static async Task<Dictionary<string, WarehouseOrderPickAssignment>> LoadAssignmentsAsync(
         ISqlSugarClient db,
-        string orderGuid
+        string orderGuid,
+        string? detailGuid = null
     )
     {
-        var rows = await db.Queryable<WarehouseOrderPickAssignment>()
-            .Where(assignment => assignment.OrderGUID == orderGuid)
-            .ToListAsync();
+        var query = db.Queryable<WarehouseOrderPickAssignment>()
+            .Where(assignment => assignment.OrderGUID == orderGuid);
+        if (!string.IsNullOrWhiteSpace(detailGuid))
+        {
+            query = query.Where(assignment => assignment.DetailGUID == detailGuid);
+        }
+
+        var rows = await query.ToListAsync();
         return rows
             .GroupBy(row => row.DetailGUID, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);

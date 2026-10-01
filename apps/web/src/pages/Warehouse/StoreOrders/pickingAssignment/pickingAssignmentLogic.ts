@@ -94,21 +94,42 @@ export function slipTurnMarkers(lines: readonly SlipLineLocation[]): ({ kind: 'r
   })
 }
 
+/**
+ * 解析后端的 *AtUtc 字段：库里读出的 DateTime 序列化时不带 Z，直接 Date.parse 会被当成浏览器本地时间
+ * （悉尼差 10 小时）。缺时区标记时按 UTC 解析；无效值返回 NaN。
+ */
+export function parseUtcMs(value: string | null | undefined): number {
+  if (!value) return Number.NaN
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`
+  return Date.parse(normalized)
+}
+
+/** UTC 时间按浏览器本地时区格式化成 MM-DD HH:mm；空值或无效值显示 —。 */
+export function formatUtcShort(value: string | null | undefined): string {
+  const ms = parseUtcMs(value)
+  if (!Number.isFinite(ms)) return '—'
+  const date = new Date(ms)
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 export interface AssigneeProgressInput {
   lineCount: number
   completedLineCount?: number | null
   stockoutLineCount?: number | null
   lastActiveAtUtc?: string | null
+  pickedPieces?: number | null
 }
 
 export type AssigneeStatus =
   | { kind: 'done'; stockoutLineCount: number }
   | { kind: 'picking'; minutesAgo: number }
+  | { kind: 'helped' }
   | { kind: 'idle' }
 
 /**
  * 每人进度状态：拣齐与标了没货的品种合计覆盖整段即“已拣完”；否则有过拣货操作即“拣货中”（几分钟前），
- * 还没操作过为“未开始”。
+ * 负责人没动过但已有人帮拣为“有人帮拣中”，都没有为“未开始”。
  */
 export function assigneeStatus(assignee: AssigneeProgressInput, nowMs: number): AssigneeStatus {
   const completed = assignee.completedLineCount ?? 0
@@ -116,10 +137,12 @@ export function assigneeStatus(assignee: AssigneeProgressInput, nowMs: number): 
   if (assignee.lineCount > 0 && completed + stockout >= assignee.lineCount) {
     return { kind: 'done', stockoutLineCount: stockout }
   }
-  const activeAt = assignee.lastActiveAtUtc ? Date.parse(assignee.lastActiveAtUtc) : Number.NaN
+  const activeAt = parseUtcMs(assignee.lastActiveAtUtc)
   if (Number.isFinite(activeAt)) {
     return { kind: 'picking', minutesAgo: Math.max(0, Math.floor((nowMs - activeAt) / 60000)) }
   }
+  // 负责人自己没动过，但这段已经有人拣了（先拣完的同事来帮忙）：不能显示“未开始”。
+  if ((assignee.pickedPieces ?? 0) > 0) return { kind: 'helped' }
   return { kind: 'idle' }
 }
 

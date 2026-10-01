@@ -146,7 +146,16 @@
     "slipMine": "This is your segment {{no}}/{{count}}",
     "slipOther": "Segment {{no}} was claimed by {{name}}",
     "slipOtherHint": "You can still help pick; picks are recorded under your name",
-    "slipLines": "{{lines}} items in this segment, now showing Mine"
+    "slipLines": "{{lines}} items in this segment, now showing Mine",
+    "scopeHelp": "Help {{name}}",
+    "helpDoneTitle": "This segment is done",
+    "helpDoneHint_other": "{{count}} segments still open — lend a hand",
+    "helpDoneHint_one": "{{count}} segment still open — lend a hand",
+    "helpStarted": "Helping {{name}} · segment {{no}}",
+    "helpStartedHint": "Your scans are recorded under your name; the assignee stays the same",
+    "segmentSettled": "{{done}}/{{total}} items done",
+    "segmentHelp": "Help",
+    "segmentContinue": "Continue"
   },
   "minOrder": {
     "title": "Set min order qty",
@@ -194,7 +203,8 @@
     "pieces": "Pieces",
     "short": "Short",
     "over": "Over",
-    "lineCount": "{{count}} lines",
+    "lineCount_other": "{{count}} lines",
+    "lineCount_one": "{{count}} line",
     "pickersSummary": "{{summary}}",
     "variances": "Variances",
     "variancesHint": "Tap a line to go back",
@@ -217,7 +227,11 @@
     "segmentsTitle": "Segments",
     "segmentClaimable": "Unclaimed",
     "segmentLine": "{{done}}/{{total}} items picked",
-    "segmentStockout": "Out {{count}}"
+    "segmentStockout": "Out {{count}}",
+    "blockTitle_other": "{{count}} segments aren't finished — can't submit",
+    "blockTitle_one": "{{count}} segment isn't finished — can't submit",
+    "blockHint": "An item counts as done once it's picked or marked out of stock. If a segment truly can't be finished, ask a manager to clear or reassign it on the order page.",
+    "blockOk": "Got it"
   },
   "time": {
     "justNow": "just now",
@@ -281,6 +295,7 @@
     "INVALID_REQUEST": "Invalid request",
     "LINE_ALREADY_COMPLETE": "This line is fully picked, no need to mark it out of stock",
     "SLIP_STALE": "This slip was reassigned or cancelled. Ask the warehouse manager for the newly printed slip.",
-    "generic": "Something went wrong. Please try again."
+    "generic": "Something went wrong. Please try again.",
+    "SEGMENTS_INCOMPLETE": "Some segments aren't finished, so the order can't be submitted"
   }
 }

@@ -55,6 +55,8 @@ export interface Assignee {
   completedLineCount?: number | null
   stockoutLineCount?: number | null
   lastActiveAtUtc?: string | null
+  /** 负责人以外在这段拣过货的人（先拣完来帮忙的）；订单列表里不下发。 */
+  helpers?: { pickerName: string; lineCount: number }[] | null
 }
 
 export interface AssignmentSummary {

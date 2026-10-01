@@ -7,13 +7,24 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { fetchPickSheet, submitPickOrder } from "../api";
 import { readPickingError } from "../api-normalization";
-import { hasLocation, isStockout, lineStatus, sortLinesByLocation, summarizeLines, summarizePickers, summarizeSegments } from "../pick-math";
+import {
+  hasLocation,
+  incompleteSegments,
+  isStockout,
+  lineStatus,
+  sortLinesByLocation,
+  summarizeLines,
+  summarizePickers,
+  summarizeSegments,
+  type MineContext,
+} from "../pick-math";
 import { usePickPreferences } from "../pick-preferences";
 import { activeTeammates, relativeMinutes, shortPickerName, stockoutReasonKey } from "../pick-view-model";
 import { usePickerStore } from "../picker-store";
 import { PICKER_RECONFIRM_CODES, pickingErrorMessage } from "../picking-errors";
 import { PICK_SESSION_STATUS } from "../types";
 import type { PickSheet, PickSheetLine } from "../types";
+import { IncompleteSegmentRows } from "../components/IncompleteSegments";
 import { Avatar, PickHeader } from "../components/PickHeader";
 import { ProductThumb } from "../components/ProductThumb";
 import { MONO_FONT, PICK_COLORS, segmentColor } from "../components/pick-theme";
@@ -37,6 +48,7 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [blockVisible, setBlockVisible] = useState(false);
   const [snackbar, setSnackbar] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -54,10 +66,12 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
     load();
   }, [load]);
 
-  const backToPicking = (focus?: string) =>
+  const backToPicking = (focus?: string, help?: number) =>
     router.navigate({
       pathname: "/(shell)/warehouse-picking/[orderGuid]",
-      params: focus ? { orderGuid, focus } : { orderGuid },
+      params: help != null
+        ? { orderGuid, help: String(help), helpAt: String(Date.now()) }
+        : focus ? { orderGuid, focus } : { orderGuid },
     } as Parameters<typeof router.navigate>[0]);
 
   if (!sheet) {
@@ -88,6 +102,9 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
   // 有拣货分配时按段汇总，提交前一眼看出哪段还没拣完、哪段还没人领。
   const segments = summarizeSegments(sheet.lines);
   const stillPicking = activeTeammates(sheet.participants, picker?.userGuid ?? null, nowMs, STILL_PICKING_MS);
+  // 有分配的订单：每段都拣完（拣齐或标了没货）才能提交整单，后端同样拦截；拣不完由经理撤销分配或改派。
+  const blockingSegments = incompleteSegments(sheet.lines);
+  const mine: MineContext = { pickerUserGuid: picker?.userGuid ?? null, segmentNo: null };
   const submitted = sheet.session.status === PICK_SESSION_STATUS.submitted;
 
   const submit = async () => {
@@ -102,6 +119,12 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
       if (code && PICKER_RECONFIRM_CODES.has(code)) {
         clearPicker();
         router.dismissTo(PICKING_HOME);
+        return;
+      }
+      if (code === "SEGMENTS_INCOMPLETE") {
+        // 本机看到的进度过时（别人刚撤销了标记等）：重新取拣货单，弹出最新的未完成段。
+        load();
+        setBlockVisible(true);
         return;
       }
       setSnackbar(pickingErrorMessage(error, t, language));
@@ -234,7 +257,11 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
         <Pressable
           accessibilityRole="button"
           disabled={submitted || submitting}
-          onPress={() => (stillPicking.length > 0 ? setConfirmVisible(true) : void submit())}
+          onPress={() => {
+            if (blockingSegments.length > 0) setBlockVisible(true);
+            else if (stillPicking.length > 0) setConfirmVisible(true);
+            else void submit();
+          }}
           style={[styles.primaryButton, submitted || submitting ? styles.disabled : null]}
         >
           {submitting ? <ActivityIndicator color={PICK_COLORS.white} /> : <Text style={styles.primaryText}>{t("finish.submit")}</Text>}
@@ -242,6 +269,27 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
       </View>
 
       <Portal>
+        <Dialog visible={blockVisible && blockingSegments.length > 0} onDismiss={() => setBlockVisible(false)}>
+          <Dialog.Title>{t("finish.blockTitle", { count: blockingSegments.length })}</Dialog.Title>
+          <Dialog.Content style={styles.blockContent}>
+            <IncompleteSegmentRows
+              segments={blockingSegments}
+              mine={mine}
+              onHelp={(segment) => {
+                setBlockVisible(false);
+                backToPicking(undefined, segment.segmentNo);
+              }}
+              onContinue={() => {
+                setBlockVisible(false);
+                backToPicking();
+              }}
+            />
+            <Text style={styles.blockHint}>{t("finish.blockHint")}</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setBlockVisible(false)}>{t("finish.blockOk")}</Button>
+          </Dialog.Actions>
+        </Dialog>
         <Dialog visible={confirmVisible} onDismiss={() => setConfirmVisible(false)}>
           <Dialog.Title>{t("finish.confirmTitle")}</Dialog.Title>
           <Dialog.Content>
@@ -302,7 +350,10 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
   return (
     <View style={[styles.metric, { backgroundColor: palette.bg, borderColor: palette.border }]}>
       <Text style={[styles.metricLabel, { color: palette.label }]}>{label}</Text>
-      <Text style={[styles.metricValue, { color: palette.value }]}>{value}</Text>
+      {/* 有没货时一排四格，“72/316 件”这类长值单行缩字，不折成两行。 */}
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={[styles.metricValue, { color: palette.value }]}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -321,6 +372,8 @@ const styles = StyleSheet.create({
   big: { fontSize: 32, lineHeight: 38, fontWeight: "700", color: PICK_COLORS.ink, fontVariant: ["tabular-nums"] },
   bigLabel: { fontSize: 15, lineHeight: 22, color: PICK_COLORS.textSecondary },
   grid: { flexDirection: "row", gap: 8 },
+  blockContent: { gap: 12 },
+  blockHint: { fontSize: 13, lineHeight: 18, color: PICK_COLORS.textSecondary },
   metric: { flex: 1, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   metricLabel: { fontSize: 12, lineHeight: 16 },
   metricValue: { fontSize: 16, lineHeight: 24, fontWeight: "700", fontVariant: ["tabular-nums"] },

@@ -178,6 +178,8 @@ export function routeTurn(
 export interface MineContext {
   pickerUserGuid: string | null;
   segmentNo: number | null;
+  /** 正在帮的段号（“帮 某某”范围）；没在帮忙为空。 */
+  helpSegmentNo?: number | null;
 }
 
 type ScopeLine = Pick<PickSheetLine, "locationCode" | "assigneeUserGuid" | "assignmentSegmentNo">;
@@ -195,6 +197,7 @@ export function hasAssignments(lines: readonly Pick<PickSheetLine, "assignmentSe
 export function lineInScope(line: ScopeLine, scope: PickScope, mine?: MineContext): boolean {
   if (scope === "all") return true;
   if (scope === "mine") return mine ? isMyLine(line, mine) : false;
+  if (scope === "help") return mine?.helpSegmentNo != null && line.assignmentSegmentNo === mine.helpSegmentNo;
   return (scope === "located") === hasLocation(line);
 }
 
@@ -202,6 +205,7 @@ export function scopeCounts(lines: readonly ScopeLine[], mine?: MineContext): Re
   const located = lines.filter(hasLocation).length;
   return {
     mine: mine ? lines.filter((line) => isMyLine(line, mine)).length : 0,
+    help: lines.filter((line) => lineInScope(line, "help", mine)).length,
     all: lines.length,
     located,
     unlocated: lines.length - located,
@@ -242,6 +246,21 @@ export function summarizeSegments(lines: readonly PickSheetLine[]): SegmentSumma
     bySegment.set(line.assignmentSegmentNo, segment);
   }
   return Array.from(bySegment.values()).sort((a, b) => a.segmentNo - b.segmentNo);
+}
+
+/** 一段处理完：段内每个品种拣齐或标了货位没货（与后端提交拦截同口径，半拣没标算没完）。 */
+export function isSegmentSettled(segment: SegmentSummary): boolean {
+  return segment.completeLineCount + segment.stockoutLineCount >= segment.lineCount;
+}
+
+/** 还没处理完的段，按段号升序；有分配的订单里这些段没完时不能提交整单。 */
+export function incompleteSegments(lines: readonly PickSheetLine[]): SegmentSummary[] {
+  return summarizeSegments(lines).filter((segment) => !isSegmentSettled(segment));
+}
+
+/** 这段是不是我的：扫分单领取进来的按段号，否则按负责人是我。 */
+export function isMySegment(segment: Pick<SegmentSummary, "segmentNo" | "assigneeUserGuid">, mine: MineContext): boolean {
+  return isMyLine({ assignmentSegmentNo: segment.segmentNo, assigneeUserGuid: segment.assigneeUserGuid }, mine);
 }
 
 /** “接下来”：从当前行之后按走位顺序取还要拣的行（不含货位没货），绕回开头，不含当前行。 */

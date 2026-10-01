@@ -6,7 +6,9 @@ import {
   firstOpenLine,
   hasAssignments,
   hasMinOrderQuantity,
+  incompleteSegments,
   isMyLine,
+  isMySegment,
   isOpenLine,
   isStockout,
   lineInScope,
@@ -197,7 +199,7 @@ test("拣货范围：有货位 / 无货位按是否绑定配货位划分，计�
   assert.equal(lineInScope(blank, "unlocated"), true);
   assert.equal(lineInScope(none, "all"), true);
   // 没有传“我的”上下文时 mine 为 0（订单没有分配）。
-  assert.deepEqual(scopeCounts([located, blank, none]), { mine: 0, all: 3, located: 1, unlocated: 2 });
+  assert.deepEqual(scopeCounts([located, blank, none]), { mine: 0, help: 0, all: 3, located: 1, unlocated: 2 });
 });
 
 test("货位没货：标了且未拣齐的行不再待拣，接下来跳过它；拣齐后标记不再算数", () => {
@@ -247,7 +249,7 @@ test("我的范围：扫了分单按段号，否则按派给我的负责人；�
   assert.equal(isMyLine(lines[1], byPicker), false);
   assert.equal(isMyLine(lines[1], bySegment), true);
   assert.equal(lineInScope(lines[0], "mine"), false);
-  assert.deepEqual(scopeCounts(lines, byPicker), { mine: 1, all: 3, located: 2, unlocated: 1 });
+  assert.deepEqual(scopeCounts(lines, byPicker), { mine: 1, help: 0, all: 3, located: 2, unlocated: 1 });
   assert.deepEqual(scopeCounts(lines, bySegment).mine, 1);
 });
 
@@ -263,6 +265,30 @@ test("完成页按段汇总：负责人或待领取、拣齐与没货品种数�
     segments.map((item) => [item.segmentNo, item.assigneeName, item.lineCount, item.completeLineCount, item.stockoutLineCount, item.pickedPieces]),
     [[1, "Chen", 2, 1, 1, 18], [2, null, 1, 0, 0, 0]],
   );
+});
+
+test("帮忙：只看要帮的那段；未完成段按拣齐或标没货判定，半拣没标算没完；我的段按段号或负责人", () => {
+  const lines = [
+    line({ detailGuid: "a", orderedQuantity: 12, pickedTotal: 12, assigneeName: "Li", assigneeUserGuid: "u-li", assignmentSegmentNo: 1 }),
+    line({ detailGuid: "b", orderedQuantity: 12, pickedTotal: 0, stockout, assigneeName: "Li", assigneeUserGuid: "u-li", assignmentSegmentNo: 1 }),
+    line({ detailGuid: "c", orderedQuantity: 12, pickedTotal: 5, assigneeName: "Chen", assigneeUserGuid: "u-chen", assignmentSegmentNo: 2 }),
+    line({ detailGuid: "d", orderedQuantity: 6, pickedTotal: 0, assignmentSegmentNo: 3 }),
+    line({ detailGuid: "e", orderedQuantity: 6, pickedTotal: 0 }),
+  ];
+  const helping = { pickerUserGuid: "u-li", segmentNo: null, helpSegmentNo: 2 };
+
+  assert.equal(lineInScope(lines[2], "help", helping), true);
+  assert.equal(lineInScope(lines[0], "help", helping), false);
+  assert.equal(lineInScope(lines[2], "help", { pickerUserGuid: "u-li", segmentNo: null }), false);
+  assert.deepEqual(scopeCounts(lines, helping), { mine: 2, help: 1, all: 5, located: 0, unlocated: 5 });
+
+  // 第 1 段拣齐 + 标没货算拣完；第 2 段半拣没标、第 3 段待领取没动都算没完；没分配的行不参与。
+  assert.deepEqual(incompleteSegments(lines).map((segment) => segment.segmentNo), [2, 3]);
+  assert.deepEqual(incompleteSegments([lines[4]]), []);
+  const [chenSegment, claimable] = incompleteSegments(lines);
+  assert.equal(isMySegment(chenSegment, { pickerUserGuid: "U-CHEN", segmentNo: null }), true);
+  assert.equal(isMySegment(chenSegment, helping), false);
+  assert.equal(isMySegment(claimable, { pickerUserGuid: "u-li", segmentNo: 3 }), true);
 });
 
 test("扫分单领取：结果转成路由参数再读回提示；参数不全时不影响进单", () => {

@@ -411,7 +411,8 @@ internal sealed class WarehousePickingAssignmentService(
         var order = await WarehousePickingQueries.LoadOrderAsync(_db, orderGuid);
         var sortedLines = WarehousePickingRoute.SortByRoute(await WarehousePickingQueries.LoadRouteLinesAsync(_db, orderGuid));
         var assignments = await WarehousePickingQueries.LoadAssignmentsAsync(_db, orderGuid);
-        var pickedByDetail = (await WarehousePickingQueries.LoadPickTotalsAsync(_db, orderGuid))
+        var pickTotals = await WarehousePickingQueries.LoadPickTotalsAsync(_db, orderGuid);
+        var pickedByDetail = pickTotals
             .GroupBy(total => total.DetailGUID, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Sum(total => total.Quantity), StringComparer.OrdinalIgnoreCase);
         var stockouts = await WarehousePickingQueries.LoadActiveStockoutsAsync(_db, orderGuid);
@@ -448,6 +449,7 @@ internal sealed class WarehousePickingAssignmentService(
                     LastActiveAtUtc = first.PickerUserGuid != null && lastActive.TryGetValue(first.PickerUserGuid, out var activeAt)
                         ? activeAt
                         : null,
+                    Helpers = BuildHelpers(lines, first.PickerUserGuid, pickTotals),
                 };
             })
             .ToList();
@@ -465,6 +467,33 @@ internal sealed class WarehousePickingAssignmentService(
                 .Select(item => new WarehousePickingAssignmentLineDto { DetailGuid = item.DetailGUID, SegmentNo = item.SegmentNo })
                 .ToList(),
         };
+    }
+
+    /// <summary>
+    /// 帮拣的人：负责人以外在这段里净拣过货的人，各算拣过几个品种。帮忙不改负责人，只在卡片上标出来；
+    /// 待领取的段没有负责人，拣过的人都算帮拣。
+    /// </summary>
+    private static List<WarehousePickingHelperDto> BuildHelpers(
+        IReadOnlyCollection<WarehouseRouteLine> segmentLines,
+        string? assigneeUserGuid,
+        IEnumerable<WarehousePickingQueries.PickTotalRow> pickTotals
+    )
+    {
+        var segmentDetails = segmentLines.Select(line => line.DetailGuid).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return pickTotals
+            .Where(total =>
+                segmentDetails.Contains(total.DetailGUID)
+                && total.Quantity > 0
+                && !string.Equals(total.PickerUserGuid, assigneeUserGuid, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(total => total.PickerUserGuid, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new WarehousePickingHelperDto
+            {
+                PickerName = group.Select(total => total.PickerName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty,
+                LineCount = group.Select(total => total.DetailGUID).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            })
+            .OrderByDescending(helper => helper.LineCount)
+            .ThenBy(helper => helper.PickerName, StringComparer.Ordinal)
+            .ToList();
     }
 
     public async Task<WarehousePickingResult<WarehousePickingSlipResolveDto>> ResolveSlipAsync(string? code)

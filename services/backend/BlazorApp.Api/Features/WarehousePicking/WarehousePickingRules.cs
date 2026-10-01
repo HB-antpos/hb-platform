@@ -26,6 +26,7 @@ public static class WarehousePickingErrorCodes
     public const string AssignCountsInvalid = "ASSIGN_COUNTS_INVALID";
     public const string AssignLinesInvalid = "ASSIGN_LINES_INVALID";
     public const string SlipStale = "SLIP_STALE";
+    public const string SegmentsIncomplete = "SEGMENTS_INCOMPLETE";
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string CodeNotFound = "CODE_NOT_FOUND";
 }
@@ -320,6 +321,44 @@ internal static class WarehousePickingRules
             .ToList();
     }
 
+    /// <summary>
+    /// 分段拣货里一个品种“处理完”的口径：已拣齐（含超拣）或标了货位没货。
+    /// 拣了一部分却没标没货的品种算没处理完——缺货必须明确标出来，不能半拣就提交。
+    /// </summary>
+    public static bool IsLineSettled(decimal ordered, decimal picked, bool stockout) =>
+        picked >= ordered || stockout;
+
+    /// <summary>
+    /// 有拣货分配的订单：找出还有品种没处理完的段（按段号升序）。没有分配的品种不参与；
+    /// 段负责人取该段任一行（同段同人）。返回空表示每段都拣完了，可以提交整单。
+    /// </summary>
+    public static List<WarehouseIncompleteSegment> FindIncompleteSegments(
+        IEnumerable<(int SegmentNo, string? PickerName, decimal Ordered, decimal Picked, bool Stockout)> lines
+    )
+    {
+        return lines
+            .GroupBy(line => line.SegmentNo)
+            .Select(group => new WarehouseIncompleteSegment(
+                group.Key,
+                group.Select(line => line.PickerName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)),
+                group.Count(line => IsLineSettled(line.Ordered, line.Picked, line.Stockout)),
+                group.Count()
+            ))
+            .Where(segment => segment.SettledLineCount < segment.LineCount)
+            .OrderBy(segment => segment.SegmentNo)
+            .ToList();
+    }
+
+    /// <summary>提交被拦时给员工看的说明：哪几段没拣完，以及放行办法。</summary>
+    public static string DescribeIncompleteSegments(IReadOnlyList<WarehouseIncompleteSegment> segments)
+    {
+        var parts = segments.Select(segment =>
+            $"第 {segment.SegmentNo} 段 {(string.IsNullOrWhiteSpace(segment.PickerName) ? "待领取" : segment.PickerName)} {segment.SettledLineCount}/{segment.LineCount}"
+        );
+        return $"还有 {segments.Count} 段没拣完，不能提交整单：{string.Join("、", parts)}。"
+            + "没货的品种标“货位没货”后才算拣完；确实拣不完请经理在订单详情撤销分配或改派。";
+    }
+
     /// <summary>订单行与拣货数对比：短缺与超拣行数用于提交后的汇总。</summary>
     public static (int ShortLines, int OverLines) CountVariances(
         IEnumerable<(decimal Ordered, int Picked)> lines
@@ -342,3 +381,6 @@ internal static class WarehousePickingRules
         return (shortLines, overLines);
     }
 }
+
+/// <summary>还没拣完的分段：段号、负责人（待领取为空）、已处理品种数 / 段内品种数。</summary>
+public sealed record WarehouseIncompleteSegment(int SegmentNo, string? PickerName, int SettledLineCount, int LineCount);

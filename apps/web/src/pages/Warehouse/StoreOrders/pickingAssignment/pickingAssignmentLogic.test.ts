@@ -3,9 +3,11 @@ import {
   adjustSegmentCount,
   assignSegmentPicker,
   assigneeStatus,
+  formatUtcShort,
   buildSlipRows,
   evenSegmentCounts,
   paginateSlipRows,
+  parseUtcMs,
   resizeSegmentPickers,
   segmentColor,
   segmentCountsValid,
@@ -87,7 +89,29 @@ assertDeepEqual(
   '拣货中，按整分钟向下取',
 )
 assertDeepEqual(assigneeStatus({ lineCount: 10, completedLineCount: 0 }, now), { kind: 'idle' }, '没有操作过为未开始')
+assertDeepEqual(
+  assigneeStatus({ lineCount: 4, completedLineCount: 1, pickedPieces: 28 }, now),
+  { kind: 'helped' },
+  '负责人没动过但已有人帮拣，不显示未开始',
+)
 assertDeepEqual(assigneeStatus({ lineCount: 0 }, now), { kind: 'idle' }, '空段不算已拣完')
+assertDeepEqual(
+  assigneeStatus({ lineCount: 11, completedLineCount: 7, lastActiveAtUtc: '2026-10-01T01:57:30.123' }, now),
+  { kind: 'picking', minutesAgo: 2 },
+  '后端不带 Z 的时间按 UTC 算，不能被当成本地时间',
+)
+
+// UTC 字段解析与本地显示。
+assertDeepEqual(parseUtcMs('2026-10-01T02:04:56.263'), Date.parse('2026-10-01T02:04:56.263Z'), '缺时区标记按 UTC')
+assertDeepEqual(parseUtcMs('2026-10-01T12:04:56+10:00'), Date.parse('2026-10-01T02:04:56Z'), '带偏移的保持原意')
+assertDeepEqual(Number.isNaN(parseUtcMs(null)), true, '空值为 NaN')
+{
+  const local = new Date(Date.parse('2026-10-01T02:04:56Z'))
+  const pad = (part: number) => String(part).padStart(2, '0')
+  const expected = `${pad(local.getMonth() + 1)}-${pad(local.getDate())} ${pad(local.getHours())}:${pad(local.getMinutes())}`
+  assertDeepEqual(formatUtcShort('2026-10-01T02:04:56.263'), expected, 'UTC 时间按本地时区显示')
+}
+assertDeepEqual(formatUtcShort(undefined), '—', '空值显示破折号')
 
 // 分单明细行与分页。
 const slipRows = buildSlipRows([

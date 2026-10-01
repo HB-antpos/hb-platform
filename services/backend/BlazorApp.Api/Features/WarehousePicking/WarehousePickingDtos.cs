@@ -66,6 +66,17 @@ public sealed class WarehousePickingAssigneeDto
 
     /// <summary>负责人在本单最后一次拣货操作时间；还没扫分单开始拣时为空。</summary>
     public DateTime? LastActiveAtUtc { get; set; }
+
+    /// <summary>负责人以外在这段拣过货的人（先拣完来帮忙的），按帮拣品种数从多到少；订单列表里不下发。</summary>
+    public List<WarehousePickingHelperDto>? Helpers { get; set; }
+}
+
+public sealed class WarehousePickingHelperDto
+{
+    public string PickerName { get; set; } = string.Empty;
+
+    /// <summary>在这段里拣过（净件数大于 0）的品种数。</summary>
+    public int LineCount { get; set; }
 }
 
 public sealed class WarehousePickingAssignmentLineDto
