@@ -30,7 +30,7 @@ export type AppTabPath =
   | "/(shell)/permissions"
   | "/(shell)/employee-profile"
   | "/(shell)/employee-profile-review"
-  | "/(shell)/pos-operation-logs"
+  | "/(shell)/legacy-employee-logs"
   | "/(shell)/device-management"
   | "/(shell)/app-install"
   | "/(shell)/app-downloads"
@@ -70,7 +70,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   permissions: "/(shell)/permissions",
   "employee-profile": "/(shell)/employee-profile",
   "employee-profile-review": "/(shell)/employee-profile-review",
-  "pos-operation-logs": "/(shell)/pos-operation-logs",
+  "legacy-employee-logs": "/(shell)/legacy-employee-logs",
   "device-management": "/(shell)/device-management",
   "app-install": "/(shell)/app-install",
   "app-downloads": "/(shell)/app-downloads",
@@ -89,8 +89,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "attendance-personal",
   "attendance-management",
   "employee-profile-review",
-  // 设备会话没有店长/管理员角色，后端审计查询会直接拒绝，设备模式不展示入口。
-  "pos-operation-logs",
+  // 设备会话没有用户账号，老收银操作日志按账号可管理分店授权，设备模式不展示入口。
+  "legacy-employee-logs",
   // 收银用户条码按操作人账号的可管理分店授权，设备会话不展示入口。
   "cash-register-users",
   // 季节商品查询按账号独立权限授权，设备会话没有该权限，接口会直接拒绝。

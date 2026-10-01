@@ -51,7 +51,7 @@
     "advertisements": "广告",
     "promotions": "促销",
     "reports": "报表中心",
-    "posOperationLogs": "员工操作日志",
+    "legacyEmployeeLogs": "员工操作日志",
     "attendancePersonal": "个人考勤",
     "attendanceManagement": "考勤管理",
     "users": "员工列表",

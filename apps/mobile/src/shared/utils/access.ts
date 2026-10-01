@@ -14,6 +14,10 @@ export const PERMISSIONS = {
     // 后端常量本身带 Permissions. 前缀，与 PosTerminal.* 其余收银权限同一命名空间。
     AuditView: "Permissions.PosTerminal.Audit.View",
   },
+  LegacyEmployeeLogs: {
+    View: "LegacyEmployeeLogs.View",
+    Review: "LegacyEmployeeLogs.Review",
+  },
   EmployeeProfiles: {
     View: "EmployeeProfiles.View",
     Edit: "EmployeeProfiles.Edit",
@@ -199,7 +203,8 @@ function createEmptyAccess(): AccessControl {
     canManageStore: false,
     canViewReports: false,
     canViewDeviceRegistration: false,
-    canViewPosOperationLogs: false,
+    canViewLegacyEmployeeLogs: false,
+    canReviewLegacyEmployeeLogs: false,
     canManageDeviceRegistration: false,
     canManageDeviceActivationCodes: false,
     canManageMobileDeviceActivationCodes: false,
@@ -343,8 +348,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManageMobileDeviceActivationCodes = hasPermission(
     PERMISSIONS.DeviceRegistration.MobileActivationCodesManage
   );
-  // 员工操作日志：后端还会按管理员/店长角色二次收窄门店范围，这里只判断入口权限。
-  const canViewPosOperationLogs = hasPermission(PERMISSIONS.PosTerminal.AuditView);
+  // 员工操作日志（老收银）：后端还会按可管理分店收口，这里只判断入口与核查权限。
+  const canViewLegacyEmployeeLogs = hasPermission(PERMISSIONS.LegacyEmployeeLogs.View);
+  const canReviewLegacyEmployeeLogs = hasPermission(PERMISSIONS.LegacyEmployeeLogs.Review);
   const canViewDeviceRegistration =
     canManageDeviceRegistration ||
     hasPermission(PERMISSIONS.DeviceRegistration.View) ||
@@ -431,7 +437,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageStore,
     canViewReports,
     canViewDeviceRegistration,
-    canViewPosOperationLogs,
+    canViewLegacyEmployeeLogs,
+    canReviewLegacyEmployeeLogs,
     canManageDeviceRegistration,
     canManageDeviceActivationCodes,
     canManageMobileDeviceActivationCodes,

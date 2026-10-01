@@ -190,7 +190,7 @@ assert.equal(shouldHidePrimaryTabBar("/warehouse-picking/abc123/finish"), true, 
 assert.equal(shouldHidePrimaryTabBar("/warehouse"), false, "仓库页等其它页面仍显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse-pickingx"), false, "只按完整路径段匹配，避免误伤相似路由");
 assert.equal(
-  compactPrimaryItems("pos-operation-logs", [...fullMenu, "pos-operation-logs"])[0]?.active,
+  compactPrimaryItems("legacy-employee-logs", [...fullMenu, "legacy-employee-logs"])[0]?.active,
   true,
   "员工操作日志从工作台进入，不能新增一级导航"
 );
@@ -488,14 +488,14 @@ assert.deepEqual(
   "只有 Container.View 的账号也要在仓库与采购分区看到货柜管理"
 );
 assert.deepEqual(
-  buildWorkbenchSections(["reports", "pos-operation-logs"]).map((section) => ({
+  buildWorkbenchSections(["reports", "legacy-employee-logs"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
   [
     {
       key: "operations-reports",
-      itemRouteNames: ["reports", "pos-operation-logs"],
+      itemRouteNames: ["reports", "legacy-employee-logs"],
     },
   ],
   "员工操作日志必须归入运营与报表并紧跟报表中心，只依赖后端显式菜单"

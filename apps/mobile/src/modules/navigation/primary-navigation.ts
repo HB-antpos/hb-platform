@@ -75,7 +75,7 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
     routeName === "warehouse-picking" ||
     routeName === "warehouse-product-insights" ||
     routeName === "sales-orders" ||
-    routeName === "pos-operation-logs"
+    routeName === "legacy-employee-logs"
   ) {
     return "workbench";
   }

@@ -15,7 +15,7 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   // 季节商品查询依赖真实进销与其他分店库存，审核模式没有离线演示数据。
   "seasonal-product-insights",
   "sales-orders",
-  "pos-operation-logs",
+  "legacy-employee-logs",
   // 价格更新依赖真实分店任务与改价接口，审核模式没有对应的离线演示数据。
   "price-updates",
   // 货柜新品依赖真实到店数据与接口，审核模式没有离线演示数据。
