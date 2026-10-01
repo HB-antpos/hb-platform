@@ -308,6 +308,7 @@ function toAxiosRequest(request: HbposTransportRequest): AxiosRequestConfig {
     ...(request.headers ? { headers: request.headers } : {}),
     ...(request.signal ? { signal: request.signal } : {}),
     ...(request.timeoutMs === undefined ? {} : { timeout: request.timeoutMs }),
+    ...(request.responseType === "arraybuffer" ? { responseType: "arraybuffer" as const } : {}),
     ...(acceptedStatuses.size > 0
       ? {
           validateStatus: (status: number) =>

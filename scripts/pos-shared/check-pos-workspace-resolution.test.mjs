@@ -183,11 +183,18 @@ test("从任一 POS App 运行 npm 都以根 workspace 为安装锚点", () => {
   }
 });
 
-test("根 lockfile 的第三方版本全部来自当前整合基线的双端 lock", () => {
-  const { baseline } = readJson(
+test("根 lockfile 的第三方版本全部来自当前整合基线的双端 lock 或已审查的新增依赖", () => {
+  const { baseline, reviewedDependencyAdditions = [] } = readJson(
     join(repositoryRoot, "scripts", "pos-shared", "pos-shared-migration-state.json"),
   );
   const allowedVersions = new Map();
+  // 基线之后新增的第三方依赖必须逐条登记名称、精确版本、使用方与理由，不能借此放开整个 lockfile。
+  for (const addition of reviewedDependencyAdditions) {
+    assert.ok(addition.name && addition.version && addition.reason, "新增依赖登记缺少名称、版本或理由");
+    const versions = allowedVersions.get(addition.name) ?? new Set();
+    versions.add(addition.version);
+    allowedVersions.set(addition.name, versions);
+  }
   for (const app of ["pos-ipad", "pos-handheld"]) {
     const source = execFileSync(
       "git",
@@ -218,6 +225,22 @@ test("根 lockfile 的第三方版本全部来自当前整合基线的双端 loc
     [],
     `根 lockfile 出现基线外版本：\n${unexpectedVersions.sort().join("\n")}`,
   );
+
+  // 反向核对：登记项必须真实存在于根 lockfile，且由所列 workspace 直接声明，避免留下过期放行。
+  for (const addition of reviewedDependencyAdditions) {
+    assert.equal(
+      lock.packages?.[`node_modules/${addition.name}`]?.version,
+      addition.version,
+      `${addition.name}@${addition.version} 已登记但不在根 lockfile 中`,
+    );
+    for (const workspace of addition.workspaces ?? []) {
+      const manifest = readJson(join(repositoryRoot, workspace, "package.json"));
+      assert.ok(
+        manifest.dependencies?.[addition.name] ?? manifest.devDependencies?.[addition.name],
+        `${workspace} 未声明已登记的新增依赖 ${addition.name}`,
+      );
+    }
+  }
 });
 
 test("两个 POS App 从同一 hoisted 拓扑解析关键原生依赖", () => {
