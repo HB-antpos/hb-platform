@@ -134,6 +134,14 @@ public sealed class CatalogSnapshotExpiredException(
 public sealed class CatalogSnapshotIsolationUnavailableException(Exception innerException)
     : Exception("SQL Server SNAPSHOT isolation is required for catalog reads.", innerException);
 
+/// <summary>当前完整目录索引的只读入口，供整文件同步复用分页链路的缓存与构建。</summary>
+public interface ICatalogTargetIndexSource
+{
+    Task<CatalogIndexBuildResult?> GetCurrentIndexAsync(
+        string storeCode,
+        CancellationToken cancellationToken);
+}
+
 public sealed class CatalogSyncOptions
 {
     public bool DeltaEnabled { get; init; } = true;
@@ -145,7 +153,7 @@ public sealed class CatalogService(
     ICatalogIndexCache catalogIndexCache,
     ICatalogBaseDataCache catalogBaseDataCache,
     IOptions<CatalogSyncOptions>? catalogSyncOptions = null)
-    : ICatalogService, ICatalogIndexRefreshWorker
+    : ICatalogService, ICatalogIndexRefreshWorker, ICatalogTargetIndexSource
 {
     private const int CatalogSourceBatchSize = 100_000;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> StoreRetailPriceEnsureLocks = new(StringComparer.Ordinal);
@@ -1159,6 +1167,12 @@ public sealed class CatalogService(
                 buildAsync,
                 cancellationToken);
     }
+
+    /// <summary>整文件同步只需要当前完整目录；与分页 sync-plan 共用同一份缓存与构建闸门。</summary>
+    public Task<CatalogIndexBuildResult?> GetCurrentIndexAsync(
+        string storeCode,
+        CancellationToken cancellationToken) =>
+        BuildSellableIndexAsync(storeCode, since: null, cancellationToken);
 
     public async Task RefreshCatalogIndexAsync(
         string storeCode,
