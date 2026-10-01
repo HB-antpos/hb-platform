@@ -31,8 +31,10 @@ test("M45 从 M44 增量新增码冲突候选表，主键前缀即门店 + 查�
       () => T0,
       POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 44),
     );
-    await applyMigrations(connection, () => T1);
-    await applyMigrations(connection, () => T1);
+    // 只截到 M45，验证 M44→M45 的增量本身；后续迁移（如 M46）不影响本断言。
+    const throughM45 = POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 45);
+    await applyMigrations(connection, () => T1, throughM45);
+    await applyMigrations(connection, () => T1, throughM45);
 
     assert.equal(await schemaVersion(connection), 45);
     const columns = await connection.getAll<{ name: string; pk: number }>(
