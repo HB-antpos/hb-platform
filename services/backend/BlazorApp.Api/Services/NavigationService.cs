@@ -381,12 +381,13 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
-                RouteName = "pos-operation-logs",
-                TitleKey = "tabs.posOperationLogs",
+                RouteName = "legacy-employee-logs",
+                TitleKey = "tabs.legacyEmployeeLogs",
                 Icon = "clipboard-text-clock-outline",
-                // 与 Web 后台 /pos-admin/operation-logs 共用审计查看权限，两端可见范围保持一致。
+                // 移动端「员工操作日志」看老收银日志（替换原新 POS 审计页，新 POS 审计仍在 Web 后台），
+                // 与 Web /pos-admin/legacy-employee-logs 同一查看权限。
                 // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
-                Permission = Permissions.PosTerminal.Audit.View,
+                Permission = Permissions.LegacyEmployeeLogs.View,
                 Order = 57,
             },
             new()

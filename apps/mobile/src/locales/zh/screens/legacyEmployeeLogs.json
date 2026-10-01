@@ -1,0 +1,195 @@
+{
+  "title": "员工操作日志",
+  "tabs": {
+    "records": "操作记录",
+    "employees": "按员工汇总"
+  },
+  "actions": {
+    "back": "返回",
+    "openFilters": "筛选",
+    "retry": "重试",
+    "apply": "查看结果",
+    "reset": "重置",
+    "cancel": "取消",
+    "search": "搜索订单号、条码或金额"
+  },
+  "scope": {
+    "noStore": "请选择分店",
+    "oneStore": "{{store}}",
+    "manyStores": "{{store}} 等 {{count}} 家"
+  },
+  "presets": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "last7": "近 7 天",
+    "last31": "近 31 天"
+  },
+  "lens": {
+    "all": "全部",
+    "danger": "危险",
+    "abnormal": "异常",
+    "pending": "待核查 {{count}}",
+    "onlyPending": "仅待核查"
+  },
+  "categories": {
+    "item": "商品",
+    "price": "价格折扣",
+    "delete": "删除",
+    "payment": "结账支付",
+    "return": "退货",
+    "auth": "钱箱与身份"
+  },
+  "dangerGroups": {
+    "delete": "删除商品",
+    "drawer": "开钱箱",
+    "price": "改价",
+    "discount": "改折扣",
+    "return": "退货"
+  },
+  "rules": {
+    "noSaleDrawer": {
+      "label": "开钱箱无交易",
+      "desc": "手动开钱箱前后 2 分钟内，同一设备没有「结账」。"
+    },
+    "deleteAfterCheckout": {
+      "label": "结账后删除",
+      "desc": "「结账」后 2 分钟内、尚未开始下一单时删除商品，且删除金额 ≥ 10。"
+    },
+    "bigDiscount": {
+      "label": "大额折扣",
+      "desc": "单品或整单折扣 ≥ 50%，或改价降幅 ≥ 50%。"
+    },
+    "burstDelete": {
+      "label": "频繁删除",
+      "desc": "同一员工 10 分钟内删除商品 ≥ 8 次，每段只标一条。"
+    },
+    "repeatReprint": {
+      "label": "重复重打印",
+      "desc": "同一订单当天重打印 ≥ 3 次，标第 3 次。"
+    },
+    "offHours": {
+      "label": "非营业时间",
+      "desc": "营业时间（07:00–22:00）之外的操作，每台设备每段只标第一条。"
+    }
+  },
+  "caption": "{{lens}} · {{count}} 条",
+  "hour": "{{hour}}:00 – {{hour}}:59",
+  "badges": {
+    "danger": "危险",
+    "reviewed": "已核查",
+    "followUp": "需跟进"
+  },
+  "short": {
+    "noSaleDrawer": "前后 {{seconds}} 秒无结账",
+    "deleteAfterCheckout": "结账后 {{seconds}} 秒删除",
+    "bigDiscount": "折扣 {{percent}}%",
+    "burstDelete": "一段删除 {{count}} 次",
+    "repeatReprint": "同单第 {{count}} 次",
+    "beforeOpen": "开门前 {{at}}",
+    "afterClose": "打烊后 {{at}}"
+  },
+  "evidence": {
+    "noSaleWindow": "前后 {{seconds}} 秒内同设备没有结账",
+    "noSalePrevious": "上一笔结账 {{at}}（{{minutes}} 分钟前）",
+    "noSaleNext": "下一笔结账 {{at}}",
+    "identityConfirmed": "开钱箱时有身份确认",
+    "identityMissing": "开钱箱时没有身份确认",
+    "deleteAfterCheckout": "{{at}} 开始结账后 {{seconds}} 秒删除，金额 {{amount}}",
+    "product": "商品 {{product}} × {{quantity}}",
+    "productOnly": "商品 {{product}}",
+    "discountItem": "单品折扣 {{percent}}%（原 {{previous}}%）",
+    "discountCart": "整单折扣 {{percent}}%，{{count}} 件，原总金额 {{total}}",
+    "discountPrice": "改价 {{from}} → {{to}}，降幅 {{percent}}%",
+    "burstDelete": "{{from}}–{{to}} 共删除 {{count}} 次，合计 {{amount}}（阈值 {{threshold}} 次）",
+    "repeatReprint": "订单 {{order}} 当天重打印 {{count}} 次，第 1 次在 {{first}}",
+    "offHoursBeforeOpen": "开门前共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}",
+    "offHoursAfterClose": "打烊后共 {{count}} 条操作（{{from}}–{{to}}），营业时间 {{open}}–{{close}}"
+  },
+  "states": {
+    "loading": "正在加载…",
+    "loadFailed": "加载失败",
+    "emptyTitle": "没有符合条件的记录",
+    "emptyDescription": "换个时间、分店或入口试试",
+    "selectStore": "请先在筛选里选择分店",
+    "detailNotFound": "这条记录不存在",
+    "detailForbidden": "无权查看该分店的记录"
+  },
+  "list": {
+    "loadingMore": "正在加载更多…",
+    "loadedOf": "已显示 {{shown}} / {{total}} 条",
+    "end": "共 {{total}} 条"
+  },
+  "messages": {
+    "notAllowed": "你没有查看员工操作日志的权限",
+    "reviewUnavailable": "审核模式下不提供员工操作日志",
+    "loadFailed": "员工操作日志加载失败",
+    "detailFailed": "记录详情加载失败"
+  },
+  "detail": {
+    "title": "操作详情",
+    "operationTime": "操作时间",
+    "uploadTime": "上传时间",
+    "lag": "滞后 {{minutes}} 分钟",
+    "store": "分店",
+    "device": "设备",
+    "employee": "员工",
+    "raw": "原始详情",
+    "context": "前后操作",
+    "contextHint": "同设备 ±{{minutes}} 分钟",
+    "contextEmpty": "前后没有其他操作",
+    "current": "当前记录",
+    "onlyEmployeeDay": "只看{{name}}当天",
+    "dangerOnly": "危险操作：直接改变应收金额或现金，未命中异常规则。"
+  },
+  "review": {
+    "title": "核查",
+    "pending": "待核查",
+    "reviewer": "核查人 {{name}}",
+    "noteLabel": "核查备注（选填）",
+    "notePlaceholder": "例如：已调监控，属正常找零",
+    "normal": "确认正常",
+    "followUp": "有问题，需跟进",
+    "revoke": "撤销",
+    "by": "{{name}} · {{at}}",
+    "saved": "核查已保存",
+    "revoked": "已撤销核查",
+    "conflict": "该记录刚被他人核查或修改，已刷新",
+    "failed": "核查保存失败",
+    "readOnly": "你没有核查权限，只能查看结论"
+  },
+  "filters": {
+    "title": "筛选",
+    "timeRange": "操作时间",
+    "timeHint": "门店本地时间，最长 31 天",
+    "stores": "分店",
+    "storesSelected": "已选 {{count}} 家",
+    "selectAll": "全选",
+    "clear": "清空",
+    "searchStore": "搜索分店名称或编码",
+    "employee": "员工",
+    "employeeAll": "全部员工",
+    "device": "设备",
+    "deviceAll": "全部设备",
+    "keyword": "详情关键字",
+    "keywordPlaceholder": "订单号 / 条码 / 商品编码 / 金额",
+    "storeRequired": "至少选择一家分店",
+    "optionsHint": "员工与设备选项来自上一次查询的分店和时间"
+  },
+  "employees": {
+    "sort": {
+      "abnormal": "异常数",
+      "rate": "危险占比",
+      "amount": "金额让利"
+    },
+    "sortLabel": "排序",
+    "average": "危险占比均值 {{percent}}%",
+    "total": "操作总数",
+    "danger": "危险操作",
+    "rate": "危险占比",
+    "abnormalLine": "异常 {{count}} · 待核查 {{pending}}",
+    "noAbnormal": "无异常",
+    "amountNote": "右上角金额 = 删除、改价、整单折扣、无小票退货带来的应收减少合计。点员工卡片查看该员工的记录。",
+    "empty": "该范围内没有员工操作",
+    "loadFailed": "员工汇总加载失败"
+  }
+}

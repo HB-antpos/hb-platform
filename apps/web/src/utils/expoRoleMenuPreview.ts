@@ -159,7 +159,7 @@ const TAB_PATHS: Record<string, string> = {
   'warehouse-product-insights': '/(shell)/warehouse-product-insights',
   'seasonal-product-insights': '/(shell)/seasonal-product-insights',
   users: '/(shell)/users',
-  'pos-operation-logs': '/(shell)/pos-operation-logs',
+  'legacy-employee-logs': '/(shell)/legacy-employee-logs',
   'user-admin': '/(shell)/user-admin',
   'cash-register-users': '/(shell)/cash-register-users',
   roles: '/(shell)/roles',
@@ -198,7 +198,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'warehouse-product-insights': { zhTitle: '仓库商品进销', enTitle: 'Warehouse Insights' },
   'seasonal-product-insights': { zhTitle: '季节商品查询', enTitle: 'Seasonal Products' },
   users: { zhTitle: '用户', enTitle: 'Users' },
-  'pos-operation-logs': { zhTitle: '员工操作日志', enTitle: 'POS Operation Logs' },
+  'legacy-employee-logs': { zhTitle: '员工操作日志', enTitle: 'Employee Operation Logs' },
   'user-admin': { zhTitle: '用户管理', enTitle: 'User Management' },
   'cash-register-users': { zhTitle: '收银用户条码', enTitle: 'Cashier Barcodes' },
   roles: { zhTitle: '角色管理', enTitle: 'Role Management' },
@@ -414,13 +414,13 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     ...ROUTE_LABELS.users,
   },
   {
-    routeName: 'pos-operation-logs',
-    titleKey: 'tabs.posOperationLogs',
+    routeName: 'legacy-employee-logs',
+    titleKey: 'tabs.legacyEmployeeLogs',
     icon: 'clipboard-text-clock-outline',
-    // 与后端 FullAppMenu 一致：复用 Web 后台 /pos-admin/operation-logs 的审计查看权限，两端可见范围保持相同。
-    permissionCodes: [P.PosTerminal.AuditView],
+    // 与后端 FullAppMenu 一致：移动端「员工操作日志」看老收银日志，与 Web /pos-admin/legacy-employee-logs 同一查看权限。
+    permissionCodes: [P.LegacyEmployeeLogs.View],
     order: 57,
-    ...ROUTE_LABELS['pos-operation-logs'],
+    ...ROUTE_LABELS['legacy-employee-logs'],
   },
   {
     routeName: 'user-admin',

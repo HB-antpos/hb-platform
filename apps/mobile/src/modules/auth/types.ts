@@ -90,7 +90,8 @@ export interface AccessControl {
   canManageStore: boolean;
   canViewReports: boolean;
   canViewDeviceRegistration: boolean;
-  canViewPosOperationLogs: boolean;
+  canViewLegacyEmployeeLogs: boolean;
+  canReviewLegacyEmployeeLogs: boolean;
   canManageDeviceRegistration: boolean;
   canManageDeviceActivationCodes: boolean;
   canManageMobileDeviceActivationCodes: boolean;

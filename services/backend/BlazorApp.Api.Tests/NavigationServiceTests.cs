@@ -917,7 +917,7 @@ public class NavigationServiceTests
         Assert.Contains(menu, item => item.RouteName == "sales-orders");
         Assert.Contains(menu, item => item.RouteName == "permissions");
         Assert.Contains(menu, item => item.RouteName == "product-query");
-        Assert.Contains(menu, item => item.RouteName == "pos-operation-logs");
+        Assert.Contains(menu, item => item.RouteName == "legacy-employee-logs");
         Assert.Contains(menu, item => item.RouteName == "product-insights");
         Assert.Contains(menu, item => item.RouteName == "warehouse-product-insights");
         Assert.Contains(menu, item => item.RouteName == "users");
@@ -1435,22 +1435,23 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_ShowsPosOperationLogsOnlyWithAuditViewPermission()
+    public void BuildAppMenu_ShowsLegacyEmployeeLogsOnlyWithLegacyLogViewPermission()
     {
-        var authorized = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
-        var unauthorized = CreateUser(new Claim("permission", Permissions.Users.View));
+        var authorized = CreateUser(new Claim("permission", Permissions.LegacyEmployeeLogs.View));
+        var auditOnly = CreateUser(new Claim("permission", Permissions.PosTerminal.Audit.View));
 
-        // 员工操作日志入口只认审计查看权限；仅有用户查看权限的人不应看到。
+        // 移动端「员工操作日志」已替换为老收银日志，只认老系统日志查看权限；
+        // 只有新 POS 审计查看权限的人不再看到入口（新 POS 审计仍在 Web 后台）。
         var item = Assert.Single(
             _service.BuildAppMenu(authorized),
-            menu => menu.RouteName == "pos-operation-logs"
+            menu => menu.RouteName == "legacy-employee-logs"
         );
-        Assert.Equal("tabs.posOperationLogs", item.TitleKey);
+        Assert.Equal("tabs.legacyEmployeeLogs", item.TitleKey);
         Assert.Equal("clipboard-text-clock-outline", item.Icon);
-        Assert.Equal(Permissions.PosTerminal.Audit.View, item.Permission);
+        Assert.Equal(Permissions.LegacyEmployeeLogs.View, item.Permission);
         Assert.DoesNotContain(
-            _service.BuildAppMenu(unauthorized),
-            menu => menu.RouteName == "pos-operation-logs"
+            _service.BuildAppMenu(auditOnly),
+            menu => menu.RouteName == "legacy-employee-logs" || menu.RouteName == "pos-operation-logs"
         );
     }
 
@@ -1516,12 +1517,12 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildDeviceAppMenu_HidesPosOperationLogsForDeviceMode()
+    public void BuildDeviceAppMenu_HidesLegacyEmployeeLogsForDeviceMode()
     {
-        // 设备会话没有用户角色，后端查询服务会直接拒绝，因此设备模式菜单不应暴露该入口。
+        // 设备会话没有用户账号，老收银日志按账号可管理分店授权，因此设备模式菜单不应暴露该入口。
         var menu = _service.BuildDeviceAppMenu("Mobile");
 
-        Assert.DoesNotContain(menu, item => item.RouteName == "pos-operation-logs");
+        Assert.DoesNotContain(menu, item => item.RouteName == "legacy-employee-logs");
     }
 
     [Fact]

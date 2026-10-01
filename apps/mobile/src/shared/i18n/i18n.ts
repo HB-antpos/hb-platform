@@ -27,7 +27,7 @@ import seasonalProductInsightsEn from "@/locales/en/screens/seasonalProductInsig
 import containerNewProductsEn from "@/locales/en/screens/containerNewProducts.json";
 import appInstallEn from "@/locales/en/screens/appInstall.json";
 import salesOrdersEn from "@/locales/en/screens/salesOrders.json";
-import posOperationLogsEn from "@/locales/en/screens/posOperationLogs.json";
+import legacyEmployeeLogsEn from "@/locales/en/screens/legacyEmployeeLogs.json";
 import preorderEn from "@/locales/en/screens/preorder.json";
 import supplyNoticeEn from "@/locales/en/screens/supplyNotice.json";
 import seasonalCardsEn from "@/locales/en/screens/seasonalCards.json";
@@ -60,7 +60,7 @@ import seasonalProductInsightsZh from "@/locales/zh/screens/seasonalProductInsig
 import containerNewProductsZh from "@/locales/zh/screens/containerNewProducts.json";
 import appInstallZh from "@/locales/zh/screens/appInstall.json";
 import salesOrdersZh from "@/locales/zh/screens/salesOrders.json";
-import posOperationLogsZh from "@/locales/zh/screens/posOperationLogs.json";
+import legacyEmployeeLogsZh from "@/locales/zh/screens/legacyEmployeeLogs.json";
 import preorderZh from "@/locales/zh/screens/preorder.json";
 import supplyNoticeZh from "@/locales/zh/screens/supplyNotice.json";
 import seasonalCardsZh from "@/locales/zh/screens/seasonalCards.json";
@@ -107,7 +107,7 @@ const resources = {
     containerNewProducts: containerNewProductsZh,
     appInstall: appInstallZh,
     salesOrders: salesOrdersZh,
-    posOperationLogs: posOperationLogsZh,
+    legacyEmployeeLogs: legacyEmployeeLogsZh,
     preorder: preorderZh,
     supplyNotice: supplyNoticeZh,
     userManagement: userManagementZh,
@@ -144,7 +144,7 @@ const resources = {
     containerNewProducts: containerNewProductsEn,
     appInstall: appInstallEn,
     salesOrders: salesOrdersEn,
-    posOperationLogs: posOperationLogsEn,
+    legacyEmployeeLogs: legacyEmployeeLogsEn,
     preorder: preorderEn,
     supplyNotice: supplyNoticeEn,
     userManagement: userManagementEn,
@@ -176,7 +176,7 @@ if (!i18n.isInitialized) {
     lng: DEFAULT_APP_LANGUAGE,
     fallbackLng: DEFAULT_APP_LANGUAGE,
     defaultNS: "common",
-    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "warehousePicking", "seasonalProductInsights", "containerNewProducts", "appInstall", "salesOrders", "posOperationLogs", "userManagement", "cashRegisterUsers", "warehouse", "workbench"],
+    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "warehousePicking", "seasonalProductInsights", "containerNewProducts", "appInstall", "salesOrders", "legacyEmployeeLogs", "userManagement", "cashRegisterUsers", "warehouse", "workbench"],
     interpolation: {
       escapeValue: false,
     },

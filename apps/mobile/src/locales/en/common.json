@@ -46,7 +46,7 @@
     "warehouseProductInsights": "Warehouse activity",
     "seasonalProductInsights": "Seasonal products",
     "containerNewProducts": "HB new arrivals",
-    "posOperationLogs": "POS logs",
+    "legacyEmployeeLogs": "Operation logs",
     "domesticPurchase": "China Purchase",
     "localSupplierInvoices": "AU Invoices",
     "installmentOrders": "Installments",
