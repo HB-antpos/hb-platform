@@ -176,6 +176,12 @@ public sealed class WarehousePickingController(
     public Task<IActionResult> ClearAssignments(string orderGuid) =>
         RunAsAssignerAsync(nameof(ClearAssignments), _ => assignmentService.ClearAsync(orderGuid.Trim()));
 
+    /// <summary>订单列表“拣货分配”列：多张订单的负责人与品种数。</summary>
+    [HttpPost("assignments/summaries")]
+    public Task<IActionResult> ListAssignmentSummaries([FromBody] WarehousePickingAssignmentSummariesRequestDto request) =>
+        RunAsAssignerAsync(nameof(ListAssignmentSummaries), _ =>
+            assignmentService.ListSummariesAsync(request?.OrderGuids ?? new List<string>()));
+
     /// <summary>批量派单：每张订单都按同一组员工平均分，逐张返回结果。</summary>
     [HttpPost("assignments/batch")]
     public Task<IActionResult> AssignBatch([FromBody] WarehousePickingBatchAssignRequestDto request) =>
@@ -186,6 +192,22 @@ public sealed class WarehousePickingController(
     [HttpGet("orders/{orderGuid}/assignments/slips")]
     public Task<IActionResult> GetAssignmentSlips(string orderGuid, [FromQuery] int? segmentNo) =>
         RunAsAssignerAsync(nameof(GetAssignmentSlips), _ => assignmentService.GetSlipsAsync(orderGuid.Trim(), segmentNo));
+
+    /// <summary>员工扫分单领取：还没人领的段写到扫码人名下；已被领取时不改，只返回负责人。</summary>
+    [HttpPost("slips/claim")]
+    public Task<IActionResult> ClaimSlip([FromBody] WarehousePickingSlipClaimRequestDto request) =>
+        RunWithPickerAsync(nameof(ClaimSlip), recheckEligibility: false, picker =>
+            assignmentService.ClaimSlipAsync(request?.Code, picker));
+
+    /// <summary>经理改某一段的负责人；pickerUserGuid 为空表示释放为待领取。</summary>
+    [HttpPut("orders/{orderGuid}/assignments/segments/{segmentNo:int}/picker")]
+    public Task<IActionResult> SetSegmentPicker(
+        string orderGuid,
+        int segmentNo,
+        [FromBody] WarehousePickingSegmentPickerRequestDto request
+    ) =>
+        RunAsAssignerAsync(nameof(SetSegmentPicker), _ =>
+            assignmentService.SetSegmentPickerAsync(orderGuid.Trim(), segmentNo, request?.PickerUserGuid));
 
     /// <summary>PDA 扫分单条码（HBSP:订单号/段号/版本）：返回订单与段，旧分单返回 SLIP_STALE。</summary>
     [HttpGet("slips/resolve")]

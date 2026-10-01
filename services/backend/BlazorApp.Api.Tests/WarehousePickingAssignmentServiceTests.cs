@@ -277,6 +277,130 @@ public sealed class WarehousePickingAssignmentServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task 分配概况带每行所属段与每人进度_列表批量查询返回各单负责人()
+    {
+        await SeedOrderAsync();
+        var service = CreateService();
+        var preview = await service.PreviewAsync(OrderGuid, Pickers(("u-chen", 4), ("u-li", 3)));
+        await service.SaveAsync(OrderGuid, FromPreview(preview.Data!), Manager);
+        var picking = CreatePickingService();
+        var chen = new WarehousePickerContext("u-chen", "Chen Wei", false, "u-chen", null);
+        await picking.JoinAsync(OrderGuid, chen);
+        await picking.SetLineTotalAsync(OrderGuid, "d-a3-12", new WarehousePickingSetTotalRequestDto { Total = 12, ExpectedTotal = 0, ClientRequestId = Guid.NewGuid() }, chen);
+        await picking.SetLineTotalAsync(OrderGuid, "d-a3-15", new WarehousePickingSetTotalRequestDto { Total = 5, ExpectedTotal = 0, ClientRequestId = Guid.NewGuid() }, chen);
+        await picking.MarkStockoutAsync(OrderGuid, "d-a3-15", WarehouseOrderPickStockoutReasons.LocationEmpty, chen);
+
+        var summary = (await service.GetAsync(OrderGuid)).Data!;
+        var first = summary.Assignees[0];
+        var second = summary.Assignees[1];
+
+        Assert.Equal((48m, 17, 1, 1), (first.Pieces!.Value, first.PickedPieces!.Value, first.CompletedLineCount!.Value, first.StockoutLineCount!.Value));
+        Assert.Equal(("A-03-12-02", "A-04-18-03"), (first.FirstLocation, first.LastLocation));
+        Assert.NotNull(first.LastActiveAtUtc);
+        Assert.Null(second.LastActiveAtUtc);
+        Assert.Equal(("B-01-02-01", "OLD-A01"), (second.FirstLocation, second.LastLocation));
+        Assert.Equal(7, summary.Lines.Count);
+        Assert.Equal(2, summary.Lines.Single(line => line.DetailGuid == "d-none").SegmentNo);
+
+        var summaries = await service.ListSummariesAsync(new[] { OrderGuid, "order-none", OrderGuid });
+        Assert.Equal(new[] { ("Chen Wei", 1, 4), ("Li Na", 2, 3) }, summaries.Data![OrderGuid].Select(item => (item.PickerName, item.SegmentNo, item.LineCount)));
+        Assert.False(summaries.Data.ContainsKey("order-none"));
+        Assert.Equal(
+            WarehousePickingErrorCodes.InvalidRequest,
+            (await service.ListSummariesAsync(Enumerable.Range(0, 201).Select(index => $"o-{index}"))).ErrorCode
+        );
+    }
+
+    [Fact]
+    public async Task 不选员工按份数分段_分单印待领取_员工扫码领取_别人再扫不改负责人()
+    {
+        await SeedOrderAsync();
+        var service = CreateService();
+        var preview = await service.PreviewAsync(OrderGuid, Pickers((null, null), (null, null), (null, null)));
+        Assert.True(preview.Success, preview.Message);
+        Assert.All(preview.Data!.Segments, segment => Assert.Null(segment.PickerUserGuid));
+        var saved = await service.SaveAsync(OrderGuid, FromPreview(preview.Data), Manager);
+
+        Assert.Equal(new[] { 1, 2, 3 }, saved.Data!.Assignees.Select(item => item.SegmentNo));
+        Assert.All(saved.Data.Assignees, item => Assert.Null(item.PickerUserGuid));
+        var slips = (await service.GetSlipsAsync(OrderGuid, 2)).Data!.Slips.Single();
+        Assert.Null(slips.PickerName);
+        Assert.Equal(new[] { "第1段待领取", "第3段待领取" }, slips.OtherPickerNames);
+        var code = saved.Data.Assignees[1].SlipCode!;
+
+        var alex = new WarehousePickerContext("u-chen", "Chen Wei", false, "u-chen", null);
+        var li = new WarehousePickerContext("u-li", "Li Na", false, null, "PDA-02");
+        var claimed = await service.ClaimSlipAsync(code, alex);
+        var again = await service.ClaimSlipAsync(code, alex);
+        var other = await service.ClaimSlipAsync(code, li);
+
+        Assert.True(claimed.Success, claimed.Message);
+        Assert.Equal((true, true, "Chen Wei", 2), (claimed.Data!.ClaimedNow, claimed.Data.ClaimedByMe, claimed.Data.PickerName, claimed.Data.SegmentNo));
+        Assert.Equal((false, true), (again.Data!.ClaimedNow, again.Data.ClaimedByMe));
+        Assert.Equal((false, false, "u-chen"), (other.Data!.ClaimedNow, other.Data.ClaimedByMe, other.Data.PickerUserGuid));
+        var picking = CreatePickingService();
+        Assert.Equal(1, (await picking.ListOrdersAsync("mine", null, "u-chen")).Data!.Counts.Mine);
+        Assert.Equal(0, (await picking.ListOrdersAsync("mine", null, "u-li")).Data!.Counts.Mine);
+        var sheet = (await picking.GetSheetAsync(OrderGuid)).Data!;
+        Assert.All(sheet.Lines.Where(line => line.AssignmentSegmentNo == 2), line => Assert.Equal("u-chen", line.AssigneeUserGuid));
+        Assert.All(sheet.Lines.Where(line => line.AssignmentSegmentNo != 2), line => Assert.Null(line.AssigneeUserGuid));
+
+        // 重新分配后旧分单领取不了。
+        await service.SaveAsync(OrderGuid, FromPreview(preview.Data), Manager);
+        Assert.Equal(WarehousePickingErrorCodes.SlipStale, (await service.ClaimSlipAsync(code, li)).ErrorCode);
+    }
+
+    [Fact]
+    public async Task 经理改领取人或释放_不改版本分单仍有效_指定部分员工混合分段()
+    {
+        await SeedOrderAsync();
+        var service = CreateService();
+        var mixed = await service.PreviewAsync(OrderGuid, Pickers(("u-chen", null), (null, null)));
+        Assert.Equal(new[] { "u-chen", null }, mixed.Data!.Segments.Select(segment => segment.PickerUserGuid));
+        var saved = await service.SaveAsync(OrderGuid, FromPreview(mixed.Data), Manager);
+        var code = saved.Data!.Assignees[1].SlipCode!;
+
+        var assigned = await service.SetSegmentPickerAsync(OrderGuid, 2, "u-li");
+        Assert.Equal("Li Na", assigned.Data!.Assignees[1].PickerName);
+        Assert.Equal(code, assigned.Data.Assignees[1].SlipCode);
+        var released = await service.SetSegmentPickerAsync(OrderGuid, 1, null);
+        Assert.Null(released.Data!.Assignees[0].PickerUserGuid);
+        Assert.Equal(WarehousePickingErrorCodes.AssignPickerInvalid, (await service.SetSegmentPickerAsync(OrderGuid, 1, "u-gone")).ErrorCode);
+        Assert.Equal(WarehousePickingErrorCodes.InvalidRequest, (await service.SetSegmentPickerAsync(OrderGuid, 9, "u-li")).ErrorCode);
+
+        var claim = await service.ClaimSlipAsync(code, new WarehousePickerContext("u-wang", "Wang Fang", false, null, null));
+        Assert.True(claim.Success, claim.Message);
+        Assert.Equal(("u-li", false), (claim.Data!.PickerUserGuid, claim.Data.ClaimedByMe));
+    }
+
+    [Fact]
+    public async Task 批量按份数分_全部待领取_份数为零或超过十份时拒绝()
+    {
+        await SeedOrderAsync();
+        var service = CreateService();
+
+        var batch = await service.AssignEvenlyAsync(
+            new WarehousePickingBatchAssignRequestDto { OrderGuids = new List<string> { OrderGuid }, SegmentCount = 3 },
+            Manager
+        );
+        var none = await service.AssignEvenlyAsync(
+            new WarehousePickingBatchAssignRequestDto { OrderGuids = new List<string> { OrderGuid }, SegmentCount = 0 },
+            Manager
+        );
+        var tooMany = await service.AssignEvenlyAsync(
+            new WarehousePickingBatchAssignRequestDto { OrderGuids = new List<string> { OrderGuid }, SegmentCount = 11 },
+            Manager
+        );
+
+        Assert.True(batch.Data!.Items.Single().Success);
+        var rows = await _db.Queryable<WarehouseOrderPickAssignment>().ToListAsync();
+        Assert.Equal(new[] { 1, 2, 3 }, rows.Select(row => row.SegmentNo).Distinct().OrderBy(no => no));
+        Assert.All(rows, row => Assert.Null(row.PickerUserGuid));
+        Assert.Equal(WarehousePickingErrorCodes.AssignPickerInvalid, none.ErrorCode);
+        Assert.Equal(WarehousePickingErrorCodes.AssignPickerInvalid, tooMany.ErrorCode);
+    }
+
+    [Fact]
     public async Task 批量派单_品种比人少时跳过空段_段号保持连续()
     {
         await _db.Insertable(new Store { StoreGUID = "store-guid", StoreCode = StoreCode, StoreName = "Morayfield" }).ExecuteCommandAsync();
@@ -383,7 +507,7 @@ public sealed class WarehousePickingAssignmentServiceTests : IDisposable
     private static WarehouseRouteLine RouteLine(string detailGuid, string? location, string? itemNumber = null) =>
         new(detailGuid, location, itemNumber ?? detailGuid, detailGuid.ToUpperInvariant(), 12);
 
-    private static WarehousePickingAssignmentPreviewRequestDto Pickers(params (string Guid, int? Count)[] pickers) => new()
+    private static WarehousePickingAssignmentPreviewRequestDto Pickers(params (string? Guid, int? Count)[] pickers) => new()
     {
         Pickers = pickers
             .Select(picker => new WarehousePickingAssignmentPickerInputDto { PickerUserGuid = picker.Guid, LineCount = picker.Count })

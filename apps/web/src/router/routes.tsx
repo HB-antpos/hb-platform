@@ -106,6 +106,7 @@ const WarehouseProductRecordsPage = lazy(() => import('../pages/Warehouse/Produc
 const StoreOrderDetailPage = lazy(() => import('../pages/Warehouse/StoreOrders/Detail'))
 const StoreOrderInvoicePage = lazy(() => import('../pages/Warehouse/StoreOrders/Invoice'))
 const StoreOrderPickingListPage = lazy(() => import('../pages/Warehouse/StoreOrders/PickingList'))
+const StoreOrderPickingSlipsPage = lazy(() => import('../pages/Warehouse/StoreOrders/pickingAssignment/PickingSlipsPage'))
 const StoreOrdersPage = lazy(() => import('../pages/Warehouse/StoreOrders'))
 const StoreOrderImportPriceVariancePage = lazy(() => import('../pages/Warehouse/StoreOrderImportPriceVariance'))
 const PreordersPage = lazy(() => import('../pages/Warehouse/Preorders'))
@@ -457,6 +458,18 @@ export const appRoutes: AppRouteItem[] = [
           dynamicTitle: () => i18n.t('menu.pickingList'),
         },
         element: <StoreOrderPickingListPage />,
+      },
+      {
+        // 分单拣货单（A4 每人一页）：?orders=订单GUID[,…]&segment=段号，由拣货分配卡片与批量分配打开。
+        path: '/warehouse/store-order/picking-slips',
+        meta: {
+          title: 'menu.pickingSlips',
+          hidden: true,
+          accessKey: 'canManageWarehouseOrders',
+          activeMenu: '/warehouse/store-orders',
+          dynamicTitle: () => i18n.t('menu.pickingSlips'),
+        },
+        element: <StoreOrderPickingSlipsPage />,
       },
       {
         path: '/warehouse/store-order/invoice/:id',

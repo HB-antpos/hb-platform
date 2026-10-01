@@ -96,6 +96,7 @@
     "containerDetail": "货柜明细",
     "storeOrderDetail": "订货明细",
     "pickingList": "配货单",
+    "pickingSlips": "分单拣货单",
     "invoice": "发票",
     "warehouseProducts": "仓库商品管理",
     "categories": "分类管理",

@@ -103,6 +103,28 @@ public sealed class WarehousePickingControllerTests
     }
 
     [Fact]
+    public async Task 扫分单领取需要先确认拣货人_按凭证记领取人()
+    {
+        WarehousePickerContext? claimer = null;
+        _assignments
+            .Setup(service => service.ClaimSlipAsync("HBSP:SO1/1/A", It.IsAny<WarehousePickerContext>()))
+            .Callback<string?, WarehousePickerContext>((_, picker) => claimer = picker)
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingSlipResolveDto>.Ok(new WarehousePickingSlipResolveDto()));
+        var (ticket, _) = _tickets.Issue(new WarehousePickerTicketIdentity("u-mia", "Mia Wong", false), "hw:DEV-1", DateTime.UtcNow);
+        var headers = DeviceHeaders();
+        headers[WarehousePickingController.PickerTicketHeader] = ticket;
+
+        var withoutPicker = await CreateController(user: null, headers: DeviceHeaders())
+            .ClaimSlip(new WarehousePickingSlipClaimRequestDto { Code = "HBSP:SO1/1/A" });
+        var withPicker = await CreateController(user: null, headers)
+            .ClaimSlip(new WarehousePickingSlipClaimRequestDto { Code = "HBSP:SO1/1/A" });
+
+        Assert.Equal(WarehousePickingErrorCodes.PickerRequired, ErrorCodeOf(withoutPicker));
+        Assert.Equal(200, StatusOf(withPicker));
+        Assert.Equal("u-mia", claimer!.UserGuid);
+    }
+
+    [Fact]
     public async Task 订单列表认得出拣货人时传入拣货人_认不出时不传()
     {
         string? capturedPicker = "unset";

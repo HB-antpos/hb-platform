@@ -16,13 +16,13 @@ BEGIN TRANSACTION;
 BEGIN TRY
     IF OBJECT_ID(N'dbo.WarehouseOrderPickAssignment', N'U') IS NULL
     BEGIN
-        -- 每张订单每行一条负责人；重新分配时整单替换。
+        -- 每张订单每行一条负责人（可空＝待扫分单领取）；重新分配时整单替换。
         CREATE TABLE [dbo].[WarehouseOrderPickAssignment]
         (
             [OrderGUID] nvarchar(50) NOT NULL,
             [DetailGUID] nvarchar(50) NOT NULL,
-            [PickerUserGuid] nvarchar(50) NOT NULL,
-            [PickerName] nvarchar(100) NOT NULL,
+            [PickerUserGuid] nvarchar(50) NULL,
+            [PickerName] nvarchar(100) NULL,
             [SegmentNo] int NOT NULL,
             [AssignmentVersion] int NOT NULL,
             [AssignedByUserGuid] nvarchar(50) NOT NULL,
@@ -60,8 +60,8 @@ IF EXISTS (
     SELECT 1 FROM (VALUES
       (N'OrderGUID', N'nvarchar', 100, 0),
       (N'DetailGUID', N'nvarchar', 100, 0),
-      (N'PickerUserGuid', N'nvarchar', 100, 0),
-      (N'PickerName', N'nvarchar', 200, 0),
+      (N'PickerUserGuid', N'nvarchar', 100, 1),
+      (N'PickerName', N'nvarchar', 200, 1),
       (N'SegmentNo', N'int', 0, 0),
       (N'AssignmentVersion', N'int', 0, 0),
       (N'AssignedByUserGuid', N'nvarchar', 100, 0),

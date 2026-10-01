@@ -40,10 +40,11 @@ public sealed class WarehousePickingOrderListItemDto
     public List<WarehousePickingAssigneeDto> Assignees { get; set; } = new();
 }
 
+/// <summary>一段的负责人；PickerUserGuid 为空表示待员工扫分单领取。</summary>
 public sealed class WarehousePickingAssigneeDto
 {
-    public string PickerUserGuid { get; set; } = string.Empty;
-    public string PickerName { get; set; } = string.Empty;
+    public string? PickerUserGuid { get; set; }
+    public string? PickerName { get; set; }
     public int LineCount { get; set; }
 
     /// <summary>第几段（从 1 起）。</summary>
@@ -51,6 +52,31 @@ public sealed class WarehousePickingAssigneeDto
 
     /// <summary>该段分单条码（HBSP:订单号/段号/版本）；订单列表里不下发。</summary>
     public string? SlipCode { get; set; }
+
+    // 以下为订单详情“拣货分配”卡片用的进度，订单列表里不下发。
+    public string? FirstLocation { get; set; }
+    public string? LastLocation { get; set; }
+    public decimal? Pieces { get; set; }
+    public int? PickedPieces { get; set; }
+
+    /// <summary>已拣齐（含超拣）的品种数。</summary>
+    public int? CompletedLineCount { get; set; }
+
+    public int? StockoutLineCount { get; set; }
+
+    /// <summary>负责人在本单最后一次拣货操作时间；还没扫分单开始拣时为空。</summary>
+    public DateTime? LastActiveAtUtc { get; set; }
+}
+
+public sealed class WarehousePickingAssignmentLineDto
+{
+    public string DetailGuid { get; set; } = string.Empty;
+    public int SegmentNo { get; set; }
+}
+
+public sealed class WarehousePickingAssignmentSummariesRequestDto
+{
+    public List<string> OrderGuids { get; set; } = new();
 }
 
 public sealed class WarehousePickingOrderCountsDto
@@ -282,6 +308,7 @@ public sealed class WarehousePickingPickerCandidateDto
     public int ActiveOrderCount { get; set; }
 }
 
+/// <summary>一段的输入：员工可空（空＝打印分单后由员工扫码领取）。</summary>
 public sealed class WarehousePickingAssignmentPickerInputDto
 {
     public string? PickerUserGuid { get; set; }
@@ -297,8 +324,8 @@ public sealed class WarehousePickingAssignmentPreviewRequestDto
 
 public sealed class WarehousePickingAssignmentSegmentDto
 {
-    public string PickerUserGuid { get; set; } = string.Empty;
-    public string PickerName { get; set; } = string.Empty;
+    public string? PickerUserGuid { get; set; }
+    public string? PickerName { get; set; }
     public int LineCount { get; set; }
     public decimal Pieces { get; set; }
 
@@ -339,12 +366,19 @@ public sealed class WarehousePickingAssignmentSummaryDto
     public List<WarehousePickingAssigneeDto> Assignees { get; set; } = new();
     public string? AssignedByName { get; set; }
     public DateTime? AssignedAtUtc { get; set; }
+
+    /// <summary>每行所属段，订单明细表“负责人”列用。</summary>
+    public List<WarehousePickingAssignmentLineDto> Lines { get; set; } = new();
 }
 
 public sealed class WarehousePickingBatchAssignRequestDto
 {
     public List<string> OrderGuids { get; set; } = new();
+
+    /// <summary>指定员工时按员工人数分段；为空时按 SegmentCount 分段、全部待扫码领取。</summary>
     public List<string> PickerUserGuids { get; set; } = new();
+
+    public int? SegmentCount { get; set; }
 }
 
 public sealed class WarehousePickingBatchAssignItemDto
@@ -368,9 +402,28 @@ public sealed class WarehousePickingSlipResolveDto
     public string? OrderNo { get; set; }
     public int SegmentNo { get; set; }
     public int SegmentCount { get; set; }
-    public string PickerUserGuid { get; set; } = string.Empty;
-    public string PickerName { get; set; } = string.Empty;
+
+    /// <summary>该段当前负责人；为空表示还没人领取。</summary>
+    public string? PickerUserGuid { get; set; }
+    public string? PickerName { get; set; }
     public int LineCount { get; set; }
+
+    /// <summary>扫码人就是该段负责人（刚领取或早已领取）。</summary>
+    public bool ClaimedByMe { get; set; }
+
+    /// <summary>这次扫码刚把该段领到扫码人名下。</summary>
+    public bool ClaimedNow { get; set; }
+}
+
+public sealed class WarehousePickingSlipClaimRequestDto
+{
+    public string? Code { get; set; }
+}
+
+/// <summary>经理改某一段的负责人；为空表示释放，回到待领取。</summary>
+public sealed class WarehousePickingSegmentPickerRequestDto
+{
+    public string? PickerUserGuid { get; set; }
 }
 
 public sealed class WarehousePickingSlipLineDto
@@ -395,8 +448,10 @@ public sealed class WarehousePickingSlipDto
     public int SegmentNo { get; set; }
     public int SegmentCount { get; set; }
     public string SlipCode { get; set; } = string.Empty;
-    public string PickerUserGuid { get; set; } = string.Empty;
-    public string PickerName { get; set; } = string.Empty;
+
+    /// <summary>负责人；为空时分单上印“待领取”，员工扫码领取。</summary>
+    public string? PickerUserGuid { get; set; }
+    public string? PickerName { get; set; }
     public int LineCount { get; set; }
     public decimal Pieces { get; set; }
     public string? FirstLocation { get; set; }

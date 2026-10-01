@@ -430,7 +430,7 @@ internal static class WarehousePickingQueries
                     .Select(row => new WarehousePickingAssigneeDto
                     {
                         PickerUserGuid = row.PickerUserGuid,
-                        PickerName = row.PickerName ?? string.Empty,
+                        PickerName = row.PickerName,
                         LineCount = row.LineCount,
                         SegmentNo = row.SegmentNo,
                     })
@@ -484,7 +484,7 @@ internal static class WarehousePickingQueries
     private sealed class AssigneeCountRow
     {
         public string OrderGUID { get; set; } = string.Empty;
-        public string PickerUserGuid { get; set; } = string.Empty;
+        public string? PickerUserGuid { get; set; }
         public string? PickerName { get; set; }
         public int SegmentNo { get; set; }
         public int LineCount { get; set; }

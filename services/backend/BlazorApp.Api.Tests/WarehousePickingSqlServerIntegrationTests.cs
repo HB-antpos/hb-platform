@@ -184,6 +184,30 @@ public sealed class WarehousePickingSqlServerIntegrationTests
     }
 
     [WarehousePickingSqlServerFact]
+    public async Task SQLServer_多人同时扫同一张待领取分单_只有一人领到()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        await SeedOrderAsync(database, minOrderQuantity: 2);
+        var pickers = new Mock<IWarehousePickerService>();
+        WarehousePickingAssignmentService Assignments() =>
+            new(CreateContext(database.CreateClient()), pickers.Object, NullLogger<WarehousePickingAssignmentService>.Instance);
+        await Assignments().AssignEvenlyAsync(
+            new WarehousePickingBatchAssignRequestDto { OrderGuids = new List<string> { OrderGuid }, SegmentCount = 1 },
+            new WarehousePickingAssigner("m-1", "Manager")
+        );
+        var code = (await Assignments().GetAsync(OrderGuid)).Data!.Assignees.Single().SlipCode!;
+
+        var results = await Task.WhenAll(Enumerable.Range(1, 6).Select(index =>
+            Assignments().ClaimSlipAsync(code, Picker($"u-{index}"))
+        ));
+
+        Assert.All(results, result => Assert.True(result.Success, result.Message));
+        var winner = Assert.Single(results, result => result.Data!.ClaimedNow);
+        Assert.All(results, result => Assert.Equal(winner.Data!.PickerUserGuid, result.Data!.PickerUserGuid));
+        Assert.Single(results, result => result.Data!.ClaimedByMe);
+    }
+
+    [WarehousePickingSqlServerFact]
     public async Task SQLServer_候选员工粗筛_仓库角色与角色或本人拣货权限()
     {
         await using var database = await IsolatedDatabase.CreateAsync();
