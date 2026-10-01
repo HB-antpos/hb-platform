@@ -9,6 +9,8 @@ import {
   OPERATION_AUDIT_SORT_FIELDS,
   resolveOperationAuditTableChange,
   summarizeProducts,
+  summarizeProductName,
+  primaryItemNumberOf,
   toLegacyEmployeeSummary,
 } from './operationLogsLogic'
 import * as operationLogsLogic from './operationLogsLogic'
@@ -104,6 +106,24 @@ assertEqual(
   'Milk +2',
   '多商品应显示首个商品和剩余数量',
 )
+assertEqual(
+  summarizeProducts({ productCount: 2, primaryProduct: 'Halloween Napkins', primaryItemNumber: ' XH0001640 ' }),
+  'Halloween Napkins (XH0001640) +1',
+  '有货号时应紧跟主商品名显示，剩余数量放最后',
+)
+assertEqual(
+  summarizeProducts({ productCount: 1, primaryProduct: 'XH0001640', primaryItemNumber: 'XH0001640' }),
+  'XH0001640',
+  '商品名与货号相同时不应重复显示',
+)
+assertEqual(
+  summarizeProductName({ productCount: 3, primaryProduct: 'Halloween Napkins', primaryItemNumber: 'XH0001640' }),
+  'Halloween Napkins +2',
+  '图文摘要的名称行不含货号（货号单独一行）',
+)
+assertEqual(primaryItemNumberOf({ productCount: 1, primaryProduct: 'Napkins', primaryItemNumber: ' XH0001640 ' }), 'XH0001640', '货号去除首尾空白')
+assertEqual(primaryItemNumberOf({ productCount: 1, primaryProduct: 'XH1', primaryItemNumber: 'XH1' }), undefined, '货号与名称相同时不单独显示')
+assertEqual(primaryItemNumberOf({ productCount: 0, primaryItemNumber: 'XH1' }), undefined, '没有商品时不显示货号')
 assertEqual(
   summarizeProducts({ productCount: 1 }, '商品'),
   '商品',
@@ -280,6 +300,11 @@ assertEqual(
   enLocale.operationLogs.platforms.Unknown,
   'Unknown',
   'Unknown 应提供英文平台文案',
+)
+assertEqual(
+  operationLogsPageSource.includes('<PosProductSummary record={record}') && detailPanelSource.includes('<PosProductSummary'),
+  true,
+  '列表商品列与详情标题应使用带图片和货号的商品摘要',
 )
 assertEqual(
   detailPanelSource.includes('formatMoney(item.beforeUnitPrice'),

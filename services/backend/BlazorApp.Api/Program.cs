@@ -650,7 +650,10 @@ builder.Services.AddScoped<OperationAuditQueryService>(sp =>
     new OperationAuditQueryService(
         sp.GetRequiredService<POSMSqlSugarContext>().Db,
         sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
-        sp.GetRequiredService<IHttpContextAccessor>()
+        sp.GetRequiredService<IHttpContextAccessor>(),
+        // 商品图片在 HBweb 主档里。
+        sp.GetRequiredService<SqlSugarContext>().Db,
+        sp.GetRequiredService<ILogger<OperationAuditQueryService>>()
     )
 );
 builder.Services.AddScoped<OperationAuditReviewService>(sp =>

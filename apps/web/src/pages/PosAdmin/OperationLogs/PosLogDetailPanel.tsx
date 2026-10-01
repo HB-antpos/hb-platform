@@ -19,6 +19,7 @@ import type {
 import RiskReviewSection from '../LegacyEmployeeLogs/RiskReviewSection'
 
 import { buildSystemLogLink, formatMoney, formatSignedMoney, summarizeProducts } from './operationLogsLogic'
+import PosProductSummary from './PosProductSummary'
 
 interface PosLogDetailPanelProps {
   /** 列表行（立即可显示）；详情加载完成后用 detail 补齐商品明细与安全属性。 */
@@ -128,11 +129,18 @@ export default function PosLogDetailPanel(props: PosLogDetailPanelProps) {
           ))}
         </Space>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-          <Typography.Text strong style={{ fontSize: 17 }}>
-            {summarizeProducts(record, t('operationLogs.detail.productFallback')) !== '-'
-              ? summarizeProducts(record, t('operationLogs.detail.productFallback'))
-              : props.operationLabel(record.operationType)}
-          </Typography.Text>
+          {record.productCount > 0 ? (
+            <PosProductSummary
+              record={record}
+              fallbackName={t('operationLogs.detail.productFallback')}
+              imageSize={48}
+              nameStyle={{ fontSize: 17, fontWeight: 600 }}
+            />
+          ) : (
+            <Typography.Text strong style={{ fontSize: 17 }}>
+              {props.operationLabel(record.operationType)}
+            </Typography.Text>
+          )}
           {record.amountImpact ? (
             <span style={{ color: token.colorError, fontWeight: 600, fontSize: 17, fontVariantNumeric: 'tabular-nums' }}>
               −{record.amountImpact.toFixed(2)}

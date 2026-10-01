@@ -23,6 +23,7 @@ import {
   isDangerOperation,
   operationTone,
   orderLegacyEmployees,
+  productThumbnailUri,
   resolveLegacyRange,
   shortFlagEvidence,
   summarizeStores,
@@ -179,6 +180,38 @@ assert.deepEqual(
 );
 assert.equal(posItem.operationDetail, "Big Bear +2 · 30.00 → 15.00", "时间线摘要含商品与金额变化");
 assert.equal(posItem.pos?.outcome, "Succeeded");
+const withItemNumber = normalizePosLogItem(
+  { eventId: "e3", operationType: "CART_ITEM_REMOVE", primaryProduct: "Halloween Napkins", primaryItemNumber: "XH0001640", productCount: 2 },
+  (type) => `L:${type}`,
+);
+assert.deepEqual(
+  [withItemNumber.title, withItemNumber.itemNumber, withItemNumber.hasProduct, withItemNumber.productImage],
+  ["Halloween Napkins +1", "XH0001640", true, null],
+  "卡片标题不含货号（货号单独显示，避免长名称截断后看不到）",
+);
+assert.equal(withItemNumber.operationDetail, "Halloween Napkins (XH0001640) +1", "时间线一行文字里货号紧跟主商品名，剩余数量放最后");
+const withImage = normalizePosLogItem(
+  { eventId: "e5", operationType: "CART_ITEM_REMOVE", primaryProduct: "Napkins", productCount: 1, primaryProductImage: " https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/257/XH0001640.jpg " },
+  (type) => `L:${type}`,
+);
+assert.equal(withImage.productImage, "https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/257/XH0001640.jpg", "主档图片地址去除空白");
+assert.equal(
+  productThumbnailUri(withImage.productImage, 80),
+  "https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com/257/XH0001640.jpg?imageMogr2/thumbnail/80x80/format/webp",
+  "COS 图片走缩略图",
+);
+assert.equal(productThumbnailUri("https://example.com/a.jpg", 80), "https://example.com/a.jpg", "非 COS 图片原样返回");
+assert.equal(productThumbnailUri("https://x-1.cos.ap-singapore.myqcloud.com/a.jpg?v=1", 80), "https://x-1.cos.ap-singapore.myqcloud.com/a.jpg?v=1", "已带查询参数的不追加");
+assert.equal(productThumbnailUri(null, 80), null, "没有图片返回 null");
+const sameAsName = normalizePosLogItem(
+  { eventId: "e4", operationType: "CART_ITEM_REMOVE", primaryProduct: "XH0001640", primaryItemNumber: "XH0001640", productCount: 1 },
+  (type) => `L:${type}`,
+);
+assert.deepEqual([sameAsName.title, sameAsName.itemNumber], ["XH0001640", null], "商品名与货号相同时不重复显示");
+assert.equal(drawerHasNoProduct(), true, "没有商品的操作不显示缩略图");
+function drawerHasNoProduct() {
+  return normalizePosLogItem({ eventId: "e6", operationType: "CASH_DRAWER_OPEN" }, (type) => type).hasProduct === false;
+}
 const drawer = normalizePosLogItem({ eventId: "e2", operationType: "CASH_DRAWER_OPEN", reasonCode: "MANUAL" }, (type) => `L:${type}`);
 assert.deepEqual([drawer.title, drawer.operationDetail, drawer.tone], ["L:CASH_DRAWER_OPEN", "MANUAL", "auth"], "没有商品时标题用操作名");
 assert.equal(normalizePosEmployeeSummary({ cashierId: "c9", total: 5 }).employeeName, "c9", "没有姓名时用收银员编号");

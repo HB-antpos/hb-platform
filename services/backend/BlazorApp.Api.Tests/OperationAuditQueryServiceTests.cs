@@ -35,7 +35,8 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
             typeof(PosOperationAudit),
             typeof(PosOperationAuditItem),
             typeof(PosOperationAuditFlag),
-            typeof(PosOperationAuditReview));
+            typeof(PosOperationAuditReview),
+            typeof(BlazorApp.Shared.Models.Product));
     }
 
     [Fact]
@@ -554,6 +555,62 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ListContextAndDetail_ReturnPrimaryItemNumberAndImageFromFirstLineOnly()
+    {
+        var now = DateTime.UtcNow;
+        var withNumber = await InsertAuditAsync("with-number", "BRI", now.AddMinutes(-1));
+        var firstLineWithoutNumber = await InsertAuditAsync("first-line-without-number", "BRI", now.AddMinutes(-2));
+        await _db.Insertable(new[]
+        {
+            new PosOperationAuditItem { EventId = withNumber, LineIndex = 0, ProductCode = "P-1", ItemNumber = "XH0001640", DisplayName = "Napkins" },
+            new PosOperationAuditItem { EventId = withNumber, LineIndex = 1, ProductCode = "P-2", ItemNumber = "XH0009999", DisplayName = "Cups" },
+            // 主商品（第 0 行）没有货号时，不能拿第 1 行的货号冒充，否则名称和货号对不上。
+            new PosOperationAuditItem { EventId = firstLineWithoutNumber, LineIndex = 0, ProductCode = "P-3", DisplayName = "Open item" },
+            new PosOperationAuditItem { EventId = firstLineWithoutNumber, LineIndex = 1, ProductCode = "P-4", ItemNumber = "XH0005555", DisplayName = "Bag" },
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
+            new BlazorApp.Shared.Models.Product { ProductCode = "P-1", ItemNumber = "XH0001640", ProductImage = " https://cos.example/XH0001640.jpg " },
+            new BlazorApp.Shared.Models.Product { ProductCode = "P-2", ItemNumber = "XH0009999", ProductImage = "https://cos.example/XH0009999.jpg" },
+            // 第 0 行商品主档没有图片，也不能拿第 1 行商品的图片冒充。
+            new BlazorApp.Shared.Models.Product { ProductCode = "P-4", ItemNumber = "XH0005555", ProductImage = "https://cos.example/XH0005555.jpg" },
+        }).ExecuteCommandAsync();
+        var service = CreateService("Admin", withProductDb: true);
+
+        var list = await service.QueryAsync(new OperationAuditQueryDto(), now);
+        var context = await service.GetContextAsync(withNumber, null);
+        var detail = await service.GetDetailAsync(withNumber);
+
+        Assert.Equal("XH0001640", list.Items.Single(item => item.EventId == withNumber).PrimaryItemNumber);
+        Assert.Null(list.Items.Single(item => item.EventId == firstLineWithoutNumber).PrimaryItemNumber);
+        Assert.NotNull(context.Data);
+        Assert.Equal("XH0001640", context.Data.Target.PrimaryItemNumber);
+        Assert.Null(context.Data.Neighbors.Single(item => item.EventId == firstLineWithoutNumber).PrimaryItemNumber);
+        Assert.NotNull(detail.Data);
+        Assert.Equal("XH0001640", detail.Data.PrimaryItemNumber);
+        Assert.Equal("https://cos.example/XH0001640.jpg", list.Items.Single(item => item.EventId == withNumber).PrimaryProductImage);
+        Assert.Null(list.Items.Single(item => item.EventId == firstLineWithoutNumber).PrimaryProductImage);
+        Assert.Equal("https://cos.example/XH0001640.jpg", context.Data.Target.PrimaryProductImage);
+        Assert.Equal("https://cos.example/XH0001640.jpg", detail.Data.PrimaryProductImage);
+    }
+
+    [Fact]
+    public async Task QueryAsync_WithoutProductDb_ReturnsItemNumberButNoImage()
+    {
+        var now = DateTime.UtcNow;
+        var eventId = await InsertAuditAsync("no-product-db", "BRI", now.AddMinutes(-1));
+        await _db.Insertable(new PosOperationAuditItem { EventId = eventId, LineIndex = 0, ProductCode = "P-1", ItemNumber = "XH0001640" })
+            .ExecuteCommandAsync();
+        await _db.Insertable(new BlazorApp.Shared.Models.Product { ProductCode = "P-1", ProductImage = "https://cos.example/XH0001640.jpg" })
+            .ExecuteCommandAsync();
+
+        var item = Assert.Single((await CreateService("Admin").QueryAsync(new OperationAuditQueryDto(), now)).Items);
+
+        Assert.Equal("XH0001640", item.PrimaryItemNumber);
+        Assert.Null(item.PrimaryProductImage);
+    }
+
+    [Fact]
     public async Task GetDetailAsync_RejectsEventOutsideStoreManagerScope()
     {
         var now = DateTime.UtcNow;
@@ -569,7 +626,8 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
     private OperationAuditQueryService CreateService(
         string role,
         IReadOnlyList<string>? storeCodes = null,
-        bool scopeAllowed = true
+        bool scopeAllowed = true,
+        bool withProductDb = false
     )
     {
         var identity = new ClaimsIdentity(
@@ -588,7 +646,7 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
                 StoreCodes = storeCodes ?? [],
             }
         );
-        return new OperationAuditQueryService(_db, scope, accessor);
+        return new OperationAuditQueryService(_db, scope, accessor, withProductDb ? _db : null);
     }
 
     private async Task<Guid> InsertAuditAsync(string receiptNumber, string storeCode, DateTime occurredAtUtc)

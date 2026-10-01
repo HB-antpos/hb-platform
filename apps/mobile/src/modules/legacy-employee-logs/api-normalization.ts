@@ -66,7 +66,14 @@ export function normalizePosLogItem(r: Raw, operationLabel: (operationType: stri
   const label = operationType ? operationLabel(operationType) : null;
   const product = str(r.primaryProduct);
   const productCount = num(r.productCount);
-  const title = product ? (productCount > 1 ? `${product} +${productCount - 1}` : product) : label;
+  const more = productCount > 1 ? ` +${productCount - 1}` : "";
+  // 货号与商品名相同（收银端拿货号当名称）时不重复显示。
+  const rawItemNumber = str(r.primaryItemNumber)?.trim() || null;
+  const itemNumber = product && rawItemNumber && rawItemNumber !== product ? rawItemNumber : null;
+  // 卡片与详情标题：商品名 +N，货号单独显示（避免长商品名截断后看不到货号）。
+  const title = product ? `${product}${more}` : label;
+  // 时间线只有一行文字：货号紧跟主商品名、"+N" 放最后，与 Web 一致。
+  const textTitle = product ? `${product}${itemNumber ? ` (${itemNumber})` : ""}${more}` : label;
   const beforeActual = optionalNumber(r.beforeActual);
   const afterActual = optionalNumber(r.afterActual);
   const paymentAmount = optionalNumber(r.paymentAmount);
@@ -74,12 +81,15 @@ export function normalizePosLogItem(r: Raw, operationLabel: (operationType: stri
   const amountText = beforeActual !== null && afterActual !== null && beforeActual !== afterActual
     ? `${beforeActual.toFixed(2)} → ${afterActual.toFixed(2)}`
     : paymentAmount !== null ? paymentAmount.toFixed(2) : null;
-  const detail = [title !== label ? title : null, amountText, str(r.reasonCode)].filter(Boolean).join(" · ");
+  const detail = [product ? textTitle : null, amountText, str(r.reasonCode)].filter(Boolean).join(" · ");
   return {
     id: str(r.eventId) ?? "",
     source: "pos",
     tone: posOperationTone(operationType),
     title,
+    hasProduct: Boolean(product) && productCount > 0,
+    itemNumber,
+    productImage: str(r.primaryProductImage)?.trim() || null,
     employeeId: str(r.cashierId),
     employeeName: str(r.cashierName) ?? str(r.cashierId),
     operation: label,

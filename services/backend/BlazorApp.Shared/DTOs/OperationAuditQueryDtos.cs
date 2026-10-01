@@ -251,6 +251,12 @@ public class OperationAuditListItemDto
 
     public string? PrimaryProduct { get; set; }
 
+    /// <summary>主商品（第 0 行明细，与 PrimaryProduct 同源）的货号；明细未上报货号时为 null。</summary>
+    public string? PrimaryItemNumber { get; set; }
+
+    /// <summary>主商品在 HBweb 商品主档里的图片地址（原图）；主档无图或查不到时为 null。</summary>
+    public string? PrimaryProductImage { get; set; }
+
     /// <summary>危险操作（直接影响收款、现金或收银环境）；手动开钱箱算，随收款自动开钱箱不算。</summary>
     public bool IsDanger { get; set; }
 
