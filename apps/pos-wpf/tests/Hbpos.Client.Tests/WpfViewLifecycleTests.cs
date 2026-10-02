@@ -534,7 +534,7 @@ public sealed class WpfViewLifecycleTests
             var toolbar = Assert.IsType<Border>(tabControl.Template.FindName("DailyCloseToolbar", tabControl));
             var toolbarLayout = Assert.IsType<Grid>(tabControl.Template.FindName("DailyCloseToolbarLayout", tabControl));
             var navigationTabs = Assert.IsType<Border>(tabControl.Template.FindName("DailyCloseNavigationTabsBorder", tabControl));
-            var refreshHistoryButton = Assert.IsType<Button>(tabControl.Template.FindName("DailyCloseRefreshHistoryButton", tabControl));
+            Assert.Null(tabControl.Template.FindName("DailyCloseRefreshHistoryButton", tabControl));
             var createDraftButton = Assert.IsType<Button>(tabControl.Template.FindName("DailyCloseCreateDraftButton", tabControl));
             var continueDraftButton = Assert.IsType<Button>(tabControl.Template.FindName("DailyCloseContinueDraftButton", tabControl));
             var historyTab = Assert.IsType<TabItem>(tabControl.Items[0]);
@@ -542,6 +542,8 @@ public sealed class WpfViewLifecycleTests
 
             PumpDispatcher();
 
+            // 刷新历史收进历史列表卡片，不再挤在顶栏里。
+            var refreshHistoryButton = Assert.IsType<Button>(view.FindName("DailyCloseRefreshHistoryButton"));
             Assert.Empty(toolbarLayout.RowDefinitions);
             Assert.InRange(toolbar.ActualHeight, 60, 82);
             Assert.InRange(navigationTabs.ActualWidth, 307.5, double.MaxValue);
@@ -550,7 +552,8 @@ public sealed class WpfViewLifecycleTests
             Assert.True(createDraftButton.IsVisible);
             Assert.False(continueDraftButton.IsVisible);
             AssertFullyContained(navigationTabs, toolbar);
-            AssertFullyContained(refreshHistoryButton, toolbar);
+            Assert.True(refreshHistoryButton.IsVisible);
+            AssertFullyContained(refreshHistoryButton, view);
             AssertFullyContained(createDraftButton, toolbar);
 
             viewModel.HasDailyCloseDraft = true;
@@ -568,6 +571,7 @@ public sealed class WpfViewLifecycleTests
             var workspaceBody = Assert.IsType<Grid>(view.FindName("DailyCloseCashWorkspaceBody"));
             var cashCountPanel = Assert.IsType<Border>(view.FindName("CashCountPanel"));
             var zReportPanel = Assert.IsType<Border>(view.FindName("DailyCloseZReportPanel"));
+            var keypadPanel = Assert.IsType<Border>(view.FindName("CashCountKeypadPanel"));
             var discardButton = Assert.IsType<Button>(view.FindName("DailyCloseDiscardDraftButton"));
             var returnButton = Assert.IsType<Button>(view.FindName("DailyCloseCashWorkspaceReturnButton"));
             var saveButton = Assert.IsType<Button>(view.FindName("DailyCloseSaveAndFinalizeButton"));
@@ -577,26 +581,24 @@ public sealed class WpfViewLifecycleTests
             AssertFullyContained(workspaceSurface, workspace);
             AssertFullyContained(workspaceBody, workspaceSurface);
             AssertFullyContained(cashCountPanel, workspaceBody);
+            AssertFullyContained(keypadPanel, workspaceBody);
             AssertFullyContained(zReportPanel, workspaceBody);
             AssertFullyContained(discardButton, workspaceSurface);
             AssertFullyContained(returnButton, workspaceSurface);
             AssertFullyContained(saveButton, workspaceSurface);
 
-            viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.First());
-            PumpDispatcher();
+            // 数字键盘常驻工作区：打开即选中第一个面额，键盘与“应用 · 下一项”都在屏内可点。
+            Assert.True(viewModel.IsCashCountDialogOpen);
+            Assert.Same(viewModel.Denominations.First(), viewModel.SelectedCashDenomination);
+            var applyButton = Assert.IsType<Button>(view.FindName("CashCountApplyButton"));
+            var nineGrid = Assert.IsType<System.Windows.Controls.Primitives.UniformGrid>(view.FindName("CashCountNineGrid"));
+            Assert.True(applyButton.IsVisible);
+            AssertFullyContained(applyButton, keypadPanel);
+            AssertFullyContained(nineGrid, keypadPanel);
+            Assert.InRange(applyButton.ActualHeight, 44, double.MaxValue);
+            Assert.All(nineGrid.Children.OfType<Button>(), key => Assert.InRange(key.ActualHeight, 44, double.MaxValue));
 
-            var keypad = Assert.IsType<Grid>(view.FindName("CashCountDialogOverlay"));
-            var keypadCancel = Assert.IsType<Button>(view.FindName("CashCountDialogCancelButton"));
-            Assert.Equal(KeyboardNavigationMode.Cycle, KeyboardNavigation.GetTabNavigation(keypad));
-            Assert.Same(keypadCancel, Keyboard.FocusedElement);
-
-            RaiseEscapeFromFocusedElement();
-
-            Assert.False(viewModel.IsCashCountDialogOpen);
-            Assert.True(viewModel.IsCashCountWorkspaceOpen);
-            Assert.True(viewModel.HasDailyCloseDraft);
-            Assert.Same(returnButton, Keyboard.FocusedElement);
-
+            // 键盘不再是二层弹窗：一次 Escape 即关闭工作区并保留草稿。
             RaiseEscapeFromFocusedElement();
 
             Assert.False(viewModel.IsCashCountWorkspaceOpen);
@@ -635,6 +637,7 @@ public sealed class WpfViewLifecycleTests
             AssertFullyContained(workspaceSurface, workspace);
             AssertFullyContained(workspaceBody, workspaceSurface);
             AssertFullyContained(cashCountPanel, workspaceBody);
+            AssertFullyContained(keypadPanel, workspaceBody);
             AssertFullyContained(zReportPanel, workspaceBody);
             AssertFullyContained(discardButton, workspaceSurface);
             AssertFullyContained(returnButton, workspaceSurface);

@@ -3190,4 +3190,79 @@
   <data name="payment.settings.methodDisabled" xml:space="preserve"><value>此付款方式已在支付设置中关闭。</value></data>
   <data name="settings.payment.activeProvider.manual" xml:space="preserve"><value>当前使用手动刷卡。</value></data>
   <data name="settings.payment.activeProvider.manual.detail" xml:space="preserve"><value>由收银员确认独立刷卡机已付款成功。保存下方终端配置不会切换手动刷卡模式；如需使用信用卡 / 借记卡，请关闭“使用手动刷卡”并保存付款方式。</value></data>
+  <data name="dailyClose.today" xml:space="preserve">
+    <value>今天</value>
+  </data>
+  <data name="dailyClose.history.newestFirst" xml:space="preserve">
+    <value>最新在上</value>
+  </data>
+  <data name="dailyClose.history.selectHint" xml:space="preserve">
+    <value>选择一条日结记录查看详情。</value>
+  </data>
+  <data name="dailyClose.archive.titlePrefix" xml:space="preserve">
+    <value>日结</value>
+  </data>
+  <data name="dailyClose.archive.savedAt" xml:space="preserve">
+    <value>保存于</value>
+  </data>
+  <data name="dailyClose.archive.id" xml:space="preserve">
+    <value>编号</value>
+  </data>
+  <data name="dailyClose.difference.short" xml:space="preserve">
+    <value>短款</value>
+  </data>
+  <data name="dailyClose.difference.over" xml:space="preserve">
+    <value>长款</value>
+  </data>
+  <data name="dailyClose.difference.balanced" xml:space="preserve">
+    <value>平账</value>
+  </data>
+  <data name="dailyClose.keypad.counting" xml:space="preserve">
+    <value>正在清点</value>
+  </data>
+  <data name="dailyClose.keypad.idle" xml:space="preserve">
+    <value>点选左侧面额开始清点。</value>
+  </data>
+  <data name="dailyClose.cashCountDialog.applyNext" xml:space="preserve">
+    <value>应用 · 下一项</value>
+  </data>
+  <data name="dailyClose.reconciliation" xml:space="preserve">
+    <value>现金对账</value>
+  </data>
+  <data name="dailyClose.cashWorkspace.returnHistoryHint" xml:space="preserve">
+    <value>返回历史并保留当前草稿。</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.pending" xml:space="preserve">
+    <value>待确认</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.succeeded" xml:space="preserve">
+    <value>成功</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.failed" xml:space="preserve">
+    <value>失败</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.unknown" xml:space="preserve">
+    <value>结果未知</value>
+  </data>
+  <data name="dailyClose.linklySettlement.mode.localIp" xml:space="preserve">
+    <value>本地直连</value>
+  </data>
+  <data name="dailyClose.linklySettlement.mode.cloudDirectSync" xml:space="preserve">
+    <value>云端直连</value>
+  </data>
+  <data name="dailyClose.linklySettlement.mode.cloudBackendAsync" xml:space="preserve">
+    <value>云端后台</value>
+  </data>
+  <data name="dailyClose.linklySettlement.submission.notSubmitted" xml:space="preserve">
+    <value>未提交</value>
+  </data>
+  <data name="dailyClose.linklySettlement.submission.submitted" xml:space="preserve">
+    <value>已提交</value>
+  </data>
+  <data name="dailyClose.linklySettlement.submission.unknown" xml:space="preserve">
+    <value>未知</value>
+  </data>
+  <data name="dailyClose.linklySettlement.noReceiptPreview" xml:space="preserve">
+    <value>该记录没有银行回单。</value>
+  </data>
 </root>

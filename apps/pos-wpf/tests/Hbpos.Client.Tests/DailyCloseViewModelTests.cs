@@ -93,11 +93,13 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
-    public async Task ApplyDenominationCommand_from_dialog_updates_count_totals_and_closes_dialog()
+    public async Task ApplyDenominationCommand_updates_totals_and_advances_to_next_denomination()
     {
         var viewModel = new DailyCloseViewModel(new FakeDailyCloseService(), new FakeDailyClosePrintService(), CreateSession());
         var denomination = viewModel.Denominations.Single(item => item.Label == "$10");
+        var next = viewModel.Denominations.Single(item => item.Label == "$5");
         await OpenNewDailyCloseDraftAsync(viewModel);
+        next.Count = 4;
 
         viewModel.OpenCashCountDialogCommand.Execute(denomination);
         viewModel.KeypadInputCommand.Execute("1");
@@ -106,12 +108,122 @@ public sealed class DailyCloseViewModelTests
 
         Assert.Equal(12, denomination.Count);
         Assert.Equal(120m, denomination.Subtotal);
-        Assert.Equal(120m, viewModel.NoteSubtotal);
-        Assert.Equal(120m, viewModel.CountedCashAmount);
+        Assert.Equal(140m, viewModel.NoteSubtotal);
+        Assert.Equal(140m, viewModel.CountedCashAmount);
+        Assert.False(denomination.IsSelected);
+        // 应用后自动进入下一面额，并像点选一样预填已有数量、下一次按键整体替换。
+        Assert.True(viewModel.IsCashCountDialogOpen);
+        Assert.Same(next, viewModel.SelectedCashDenomination);
+        Assert.True(next.IsSelected);
+        Assert.Equal(5, viewModel.SelectedCashDenominationPosition);
+        Assert.Equal("4", viewModel.KeypadBuffer);
+
+        viewModel.KeypadInputCommand.Execute("7");
+
+        Assert.Equal("7", viewModel.KeypadBuffer);
+        Assert.Equal(4, next.Count);
+    }
+
+    [Fact]
+    public async Task Applying_the_last_denomination_ends_the_selection()
+    {
+        var viewModel = new DailyCloseViewModel(new FakeDailyCloseService(), new FakeDailyClosePrintService(), CreateSession());
+        var last = viewModel.Denominations.Last();
+        await OpenNewDailyCloseDraftAsync(viewModel);
+
+        viewModel.OpenCashCountDialogCommand.Execute(last);
+        viewModel.KeypadInputCommand.Execute("3");
+        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
+
+        Assert.Equal(3, last.Count);
         Assert.False(viewModel.IsCashCountDialogOpen);
         Assert.Null(viewModel.SelectedCashDenomination);
-        Assert.False(denomination.IsSelected);
+        Assert.False(last.IsSelected);
         Assert.Equal(string.Empty, viewModel.KeypadBuffer);
+        Assert.Equal(0, viewModel.SelectedCashDenominationPosition);
+    }
+
+    [Fact]
+    public async Task Opening_the_cash_workspace_selects_the_first_denomination_and_rows_switch_selection()
+    {
+        var viewModel = new DailyCloseViewModel(new FakeDailyCloseService(), new FakeDailyClosePrintService(), CreateSession());
+        var first = viewModel.Denominations.First();
+        var coin = viewModel.Denominations.Single(item => item.Label == "50c");
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+
+        Assert.Same(first, viewModel.SelectedCashDenomination);
+        Assert.Equal(1, viewModel.SelectedCashDenominationPosition);
+        Assert.Equal(11, viewModel.DenominationCount);
+
+        // 常驻键盘下点另一个面额直接切换，未应用的输入随之放弃。
+        viewModel.KeypadInputCommand.Execute("9");
+        Assert.True(viewModel.OpenCashCountDialogCommand.CanExecute(coin));
+        viewModel.OpenCashCountDialogCommand.Execute(coin);
+
+        Assert.Same(coin, viewModel.SelectedCashDenomination);
+        Assert.False(first.IsSelected);
+        Assert.True(coin.IsSelected);
+        Assert.Equal(0, first.Count);
+        Assert.Equal(string.Empty, viewModel.KeypadBuffer);
+
+        viewModel.CloseCashCountWorkspaceCommand.Execute(null);
+        Assert.Null(viewModel.SelectedCashDenomination);
+
+        await viewModel.CreateOrResumeDailyCloseCommand.ExecuteAsync(null);
+        Assert.Same(first, viewModel.SelectedCashDenomination);
+    }
+
+    [Fact]
+    public async Task Cash_difference_status_and_business_date_flag_follow_the_draft()
+    {
+        var viewModel = new DailyCloseViewModel(new FakeDailyCloseService(), new FakeDailyClosePrintService(), CreateSession());
+        var changes = new List<string?>();
+        viewModel.PropertyChanged += (_, args) => changes.Add(args.PropertyName);
+        Assert.True(viewModel.IsBusinessDateToday);
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+
+        // 应有现金 145.35，未点钞时为短款。
+        Assert.Equal(CashDifferenceStatus.Short, viewModel.CashDifferenceStatus);
+
+        viewModel.Denominations.Single(item => item.Label == "$100").Count = 1;
+        viewModel.Denominations.Single(item => item.Label == "$20").Count = 2;
+        viewModel.Denominations.Single(item => item.Label == "$5").Count = 1;
+        viewModel.Denominations.Single(item => item.Label == "20c").Count = 1;
+        viewModel.Denominations.Single(item => item.Label == "10c").Count = 1;
+        viewModel.Denominations.Single(item => item.Label == "5c").Count = 1;
+        Assert.Equal(145.35m, viewModel.CountedCashAmount);
+        Assert.Equal(CashDifferenceStatus.Balanced, viewModel.CashDifferenceStatus);
+
+        viewModel.Denominations.Single(item => item.Label == "$1").Count = 1;
+        Assert.Equal(CashDifferenceStatus.Over, viewModel.CashDifferenceStatus);
+        Assert.Contains(nameof(DailyCloseViewModel.CashDifferenceStatus), changes);
+
+        viewModel.SelectedDate = DateTime.Today.AddDays(-1);
+
+        Assert.False(viewModel.IsBusinessDateToday);
+        Assert.Contains(nameof(DailyCloseViewModel.IsBusinessDateToday), changes);
+    }
+
+    [Fact]
+    public async Task History_detail_exposes_selected_archive_summary_fields()
+    {
+        var viewModel = new DailyCloseViewModel(new FakeDailyCloseService(), new FakeDailyClosePrintService(), CreateSession());
+        Assert.False(viewModel.HasSelectedArchive);
+
+        await viewModel.LoadHistoryCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.HasSelectedArchive);
+        var archive = viewModel.SelectedArchive!;
+        Assert.Equal(145.35m, archive.ExpectedCashAmount);
+        Assert.Equal(955.20m, archive.NetAmount);
+        Assert.Equal(18, archive.OrderCount);
+        Assert.Equal(CashDifferenceStatus.Short, archive.DifferenceStatus);
+        Assert.Equal(archive.Archive.ShortArchiveId, archive.ShortArchiveId);
+        Assert.Equal(archive.SavedAt.ToLocalTime().ToString("HH:mm"), archive.ClosedTimeDisplay);
+        Assert.Equal(CashDifferenceStatus.Over, CashDifferenceStatusResolver.From(0.05m));
+        Assert.Equal(CashDifferenceStatus.Balanced, CashDifferenceStatusResolver.From(0m));
     }
 
     [Fact]
