@@ -280,11 +280,12 @@ class HBAppInstallerModule : Module() {
 
   private fun readArchiveInfo(manager: PackageManager, file: File): PackageInfo {
     val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-      val flags = PackageManager.GET_SIGNING_CERTIFICATES.toLong()
+      // Android 9/10 必须额外带 GET_SIGNATURES，否则 APK 的 signingInfo 恒为 null。
+      val flags = archiveSigningCertificateFlags(Build.VERSION.SDK_INT)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        manager.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(flags))
+        manager.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(flags.toLong()))
       } else {
-        @Suppress("DEPRECATION") manager.getPackageArchiveInfo(file.absolutePath, flags.toInt())
+        @Suppress("DEPRECATION") manager.getPackageArchiveInfo(file.absolutePath, flags)
       }
     } else {
       // API 24–27 没有 signing lineage；保守地只接受当前证书完全一致。

@@ -388,15 +388,16 @@ class HBAppInstallerModule : Module() {
   }
 
   private fun readArchiveInfo(packageManager: PackageManager, file: File): PackageInfo {
-    val flags = PackageManager.GET_SIGNING_CERTIFICATES.toLong()
+    // Android 10 及以下必须额外带 GET_SIGNATURES，否则 APK 的 signingInfo 恒为 null。
+    val flags = archiveSigningCertificateFlags(Build.VERSION.SDK_INT)
     val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       packageManager.getPackageArchiveInfo(
         file.absolutePath,
-        PackageManager.PackageInfoFlags.of(flags),
+        PackageManager.PackageInfoFlags.of(flags.toLong()),
       )
     } else {
       @Suppress("DEPRECATION")
-      packageManager.getPackageArchiveInfo(file.absolutePath, flags.toInt())
+      packageManager.getPackageArchiveInfo(file.absolutePath, flags)
     }
     return info ?: throw InstallerException(
       "APP_INSTALL_ARCHIVE_INVALID",
