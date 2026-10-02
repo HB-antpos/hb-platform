@@ -123,6 +123,11 @@ export function getFriendlyLoginErrorDescriptor(error: unknown): LoginErrorDescr
     return { key: "errors.invalidCredentials" };
   }
 
+  // 本机步骤（Keychain 读写等）卡住，与网络超时区分：提示重试或重启 App。
+  if (code === "LOGIN_STEP_TIMEOUT") {
+    return { key: "errors.stepTimeout" };
+  }
+
   if (code === "ECONNABORTED" || code === "ETIMEDOUT" || includesAny(message, ["timeout", "timed out", "超时"])) {
     return withOrigin("errors.timeout");
   }
