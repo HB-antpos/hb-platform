@@ -3896,7 +3896,16 @@ const styles = StyleSheet.create({
     padding: 16,
     width: "100%",
   },
-  printerPickerState: { maxHeight: "100%", width: "100%" },
+  printerPickerState: {
+    alignItems: "center",
+    // 建立确定高度链：overlay(flex:1) → stateSurface(flex:1) → picker(maxHeight 82%)。
+    // 包装层随内容自适应时，82% 会按卡片自身内容高度计算，底部按钮被挤出卡片。
+    flex: 1,
+    justifyContent: "center",
+    // 包装层铺满遮罩后不能拦截卡片外的点击，背景关闭仍由 backdrop 处理。
+    pointerEvents: "box-none",
+    width: "100%",
+  },
   squarePicker: {
     backgroundColor: posColors.surface,
     borderColor: posColors.border,
