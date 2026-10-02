@@ -179,6 +179,7 @@ public sealed class CardPaymentResultPolicyTests
 
     [Theory]
     [InlineData("linkly.local.connectionFailed", CardPaymentErrorKind.ConnectionFailed)]
+    [InlineData("linkly.local.pinpadOffline", CardPaymentErrorKind.PinpadOffline)]
     [InlineData("payment.card.linklyUnavailable", CardPaymentErrorKind.ConnectionFailed)]
     [InlineData("linkly.cloud.communicationFailed", CardPaymentErrorKind.CloudCommunicationFailed)]
     [InlineData("linkly.backend.communicationFailed", CardPaymentErrorKind.CloudCommunicationFailed)]

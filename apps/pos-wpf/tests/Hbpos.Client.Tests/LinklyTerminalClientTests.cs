@@ -396,6 +396,101 @@ public sealed class LinklyTerminalClientTests
     }
 
     [Fact]
+    public async Task PurchaseAsync_maps_pinpad_offline_rejection_to_definitive_failure()
+    {
+        // 生产实测形态：EFT-Client 连不上 PIN pad 时回 PF、16 个空格的 TxnRef、金额 0。
+        var eftClient = new FakeLinklyEftClient(new EFTTransactionResponse
+        {
+            Success = false,
+            TxnRef = new string(' ', 16),
+            AmtPurchase = 0m,
+            ResponseCode = "PF",
+            ResponseText = "PINpad Offline      "
+        });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.False(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.False(result.FallbackAllowed);
+        Assert.Equal("linkly.local.pinpadOffline", result.StatusKey);
+        Assert.Equal("PF", result.ResponseCode);
+        Assert.Equal("PINpad Offline", result.ResponseText);
+        Assert.Equal("P", result.TxnType);
+    }
+
+    [Theory]
+    [InlineData(10, false)]
+    [InlineData(0, true)]
+    public async Task PurchaseAsync_keeps_pf_responses_with_transaction_evidence_unknown(int amount, bool echoReference)
+    {
+        // 带回显引用或金额的 PF 可能是刷卡中途断线，不能当作确定未提交。
+        var eftClient = new FakeLinklyEftClient(new EFTTransactionResponse
+        {
+            Success = false,
+            TxnRef = new string(' ', 16),
+            TxnType = TransactionType.Refund,
+            AmtPurchase = amount,
+            ResponseCode = "PF",
+            ResponseText = "PINpad Offline"
+        })
+        {
+            EchoTransactionReference = echoReference
+        };
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+        Assert.NotEqual("linkly.local.pinpadOffline", result.StatusKey);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_keeps_pf_response_after_receipt_unknown()
+    {
+        var eftClient = new FakeLinklyEftClient(
+            new EFTReceiptResponse { Type = ReceiptType.Customer, ReceiptText = ["CUSTOMER COPY"] },
+            new EFTTransactionResponse
+            {
+                Success = false,
+                TxnRef = new string(' ', 16),
+                AmtPurchase = 0m,
+                ResponseCode = "PF",
+                ResponseText = "PINpad Offline"
+            });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+    }
+
+    [Fact]
+    public async Task RecoverLastTransactionAsync_keeps_pinpad_offline_unknown_with_offline_message()
+    {
+        var eftClient = new FakeLinklyEftClient(new EFTGetLastTransactionResponse
+        {
+            Success = false,
+            LastTransactionSuccess = false,
+            TxnRef = new string(' ', 16),
+            AmtPurchase = 0m,
+            ResponseCode = "PF",
+            ResponseText = "PINpad Offline      "
+        });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.RecoverLastTransactionAsync(10m, CreateSession(), CreateSettings(), "P123456789012345");
+
+        // 上一笔仍无法核对，必须保持未知；只是提示要说明刷卡机离线。
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+        Assert.Contains("offline", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PurchaseAsync_marks_transaction_type_and_amount_conflicts_as_unknown()
     {
         var eftClient = new FakeLinklyEftClient(new EFTTransactionResponse

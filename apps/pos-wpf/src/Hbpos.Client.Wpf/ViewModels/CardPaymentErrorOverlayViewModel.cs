@@ -47,6 +47,13 @@ public partial class CardPaymentErrorOverlayViewModel : ObservableObject
             MessageKey = "payment.card.error.overlay.connectionFailed.message"
         };
 
+    public static CardPaymentErrorOverlayViewModel PinpadOffline()
+        => new()
+        {
+            TitleKey = "payment.card.error.overlay.pinpadOffline.title",
+            MessageKey = "payment.card.error.overlay.pinpadOffline.message"
+        };
+
     public static CardPaymentErrorOverlayViewModel CloudCommunicationFailed()
         => new()
         {

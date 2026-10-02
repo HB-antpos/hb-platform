@@ -2019,6 +2019,48 @@ public sealed class CashPaymentWorkflowServiceTests
     }
 
     [Fact]
+    public async Task Local_linkly_pinpad_offline_fails_without_recovery_lock()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-PINPAD-OFFLINE", "Pinpad Offline Tea", "930PINPADOFF", 10m));
+        var attempts = new RecordingCardPaymentAttemptRepository();
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 0),
+            cardTerminalClient: new ObservingCardTerminalClient(
+                () => { },
+                new PaymentAuthorizationResult(
+                    false,
+                    null,
+                    "The card terminal (PINpad) is offline. No payment was taken.",
+                    TxnType: "P",
+                    ResponseCode: "PF",
+                    ResponseText: "PINpad Offline",
+                    StatusKey: "linkly.local.pinpadOffline")),
+            cardPaymentAttemptRepository: attempts,
+            cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(CreateLocalLinklySettings()),
+            linklyPaymentAttemptContextAccessor: new LinklyPaymentAttemptContextAccessor());
+
+        var tenderResult = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0),
+            10m,
+            [],
+            "10.00",
+            cartSnapshot: cart.CreateSnapshot());
+
+        // 刷卡机离线是确定未提交：付款页提示离线，不能留下需进恢复中心的记录。
+        Assert.False(tenderResult.Succeeded);
+        Assert.Equal("linkly.local.pinpadOffline", tenderResult.StatusKey);
+        Assert.NotEqual(true, tenderResult.CardResult?.RequiresRecovery);
+        // 终端响应码 PF 按现有口径记为 Declined（确定终态），与 TM 等终端拒绝一致。
+        var attempt = Assert.Single(attempts.Attempts);
+        Assert.Equal(LocalCardPaymentAttemptStatus.Declined, attempt.Status);
+        Assert.NotNull(attempt.CompletedAt);
+    }
+
+    [Fact]
     public async Task Square_card_tender_terminal_exception_after_checkout_requires_recovery()
     {
         var cart = new PosCartService();
