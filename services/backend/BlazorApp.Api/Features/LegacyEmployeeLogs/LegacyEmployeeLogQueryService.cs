@@ -66,7 +66,7 @@ public sealed class LegacyEmployeeLogQueryService
             return LegacyEmployeeLogResult<LegacyEmployeeLogListResultDto>.Invalid(error!);
         }
         // 多选时每家分店都必须在当前账号可管理范围内，任一越权整次拒绝，不静默剔除。
-        var scope = await _storeScopeService.GetScopeAsync();
+        var scope = await _storeScopeService.GetAssignedStoreScopeAsync();
         if (!scope.IsAllowed || query.StoreCodes.Any(code => !scope.CanAccessStoreCode(code)))
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogListResultDto>.Forbidden();
@@ -177,7 +177,7 @@ public sealed class LegacyEmployeeLogQueryService
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogEmployeeSummaryResultDto>.Invalid(error!);
         }
-        var scope = await _storeScopeService.GetScopeAsync();
+        var scope = await _storeScopeService.GetAssignedStoreScopeAsync();
         if (!scope.IsAllowed || query.StoreCodes.Any(code => !scope.CanAccessStoreCode(code)))
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogEmployeeSummaryResultDto>.Forbidden();
@@ -229,9 +229,11 @@ public sealed class LegacyEmployeeLogQueryService
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogContextDto>.NotFound();
         }
-        // 先取行再校验分店：没有分店的日志只有管理员范围才可见。
+        // 先取行再校验分店：没有分店的日志一律不可见；店长按全部关联分店判断，与列表口径一致。
+        var scope = await _storeScopeService.GetAssignedStoreScopeAsync();
         if (string.IsNullOrWhiteSpace(target.StoreCode)
-            || !await _storeScopeService.CanAccessStoreCodeAsync(target.StoreCode))
+            || !scope.IsAllowed
+            || !scope.CanAccessStoreCode(target.StoreCode.Trim()))
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogContextDto>.Forbidden();
         }

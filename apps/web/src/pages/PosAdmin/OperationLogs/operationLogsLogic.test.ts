@@ -503,4 +503,21 @@ assertDeepEqual(
   assertEqual(`${row.employeeId}/${row.employeeName}/${row.amountImpact}`, 'c1/Gao/19', '收银员汇总映射成员工汇总形状')
 }
 
+// 店长查看员工操作日志按全部关联分店（与后端 GetAssignedStoreScopeAsync 一致），新老收银两页都不能只列主分店。
+{
+  const legacyEmployeeLogsPageSource = readFileSync('src/pages/PosAdmin/LegacyEmployeeLogs/index.tsx', 'utf8')
+  for (const [name, source] of [
+    ['新收银', operationLogsPageSource],
+    ['老收银', legacyEmployeeLogsPageSource],
+  ] as const) {
+    assertEqual(
+      source.includes('buildStoreOptionsFromUserStores(currentUser?.stores)') &&
+        !source.includes('manageableOnly: true') &&
+        !source.includes('filterStoreOptionsByManagedCodes('),
+      true,
+      `${name}员工日志页店长分店选项应为全部关联分店，不只主分店`,
+    )
+  }
+}
+
 console.log('operationLogsLogic.test: ok')
