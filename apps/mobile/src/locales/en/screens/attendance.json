@@ -391,6 +391,21 @@
       "minute": "MM"
     },
     "hoursShort": "{{hours}}h",
+    "export": {
+      "action": "Export image",
+      "title": "Export roster image",
+      "subtitle": "Create an image of this week's published roster to send via WeChat or other chat apps",
+      "hint": "Tap Share image, then pick WeChat or another app.",
+      "share": "Share image",
+      "imageTitle": "{{store}} Roster",
+      "employee": "Staff",
+      "rest": "Off",
+      "onDuty": "On duty",
+      "footerNote": "{{count}} staff",
+      "generatedAt": "Generated {{time}}",
+      "unavailable": "Sharing is not available on this device",
+      "failed": "Could not export the image. Please try again."
+    },
     "uncoveredDays": "{{count}} day(s) unstaffed",
     "publishState": {
       "draft": "Draft · not published",

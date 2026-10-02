@@ -391,6 +391,21 @@
       "minute": "分钟"
     },
     "hoursShort": "{{hours}}h",
+    "export": {
+      "action": "导出图片",
+      "title": "导出排班图片",
+      "subtitle": "生成本周已发布排班的图片，可发到微信等聊天工具",
+      "hint": "点「分享图片」后选择微信等应用发送。",
+      "share": "分享图片",
+      "imageTitle": "{{store}} 排班表",
+      "employee": "员工",
+      "rest": "休",
+      "onDuty": "在岗人数",
+      "footerNote": "共 {{count}} 人",
+      "generatedAt": "生成于 {{time}}",
+      "unavailable": "当前设备不支持分享",
+      "failed": "导出图片失败，请重试"
+    },
     "uncoveredDays": "空缺 {{count}} 天",
     "publishState": {
       "draft": "草稿·未发布",
