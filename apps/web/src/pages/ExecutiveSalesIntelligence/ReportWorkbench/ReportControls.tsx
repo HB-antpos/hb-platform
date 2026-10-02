@@ -1,4 +1,4 @@
-import { Button, DatePicker, Segmented, Select, Switch } from 'antd'
+import { Button, DatePicker, Segmented, Select, Switch, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
@@ -11,8 +11,10 @@ export function useReportText() {
   return (zh: string, en: string) => english ? en : zh
 }
 
-export function ReportControls({ value, onChange, onRefresh, loading }: {
+export function ReportControls({ value, onChange, onRefresh, loading, compact = false }: {
   value: DateSelection; onChange: (value: DateSelection) => void; onRefresh: () => void; loading: boolean
+  /** 紧凑模式：快捷日期、同比方式各收成一个下拉，刷新只留图标，整组控件能和页签放进同一行。 */
+  compact?: boolean
 }) {
   const text = useReportText()
   const period = reportPeriod(value)
@@ -21,6 +23,30 @@ export function ReportControls({ value, onChange, onRefresh, loading }: {
     ['thisWeek', text('本周', 'This week')], ['lastWeek', text('上周', 'Last week')],
     ['thisMonth', text('本月', 'This month')], ['lastMonth', text('上月', 'Last month')],
   ]
+  const quickChange = (key: Exclude<QuickRange, 'custom'>) => onChange({ ...quickDateSelection(key), compare: value.compare, compareMode: value.compareMode })
+  if (compact) {
+    return <div className={styles.controls}>
+      <DatePicker.RangePicker size="small" allowClear={false} value={[dayjs(value.startDate), dayjs(value.endDate)]}
+        disabledDate={(date, info) => date.isAfter(dayjs(), 'day') || Boolean(info.from && Math.abs(date.diff(info.from, 'day')) >= MAX_REPORT_DAYS)}
+        onChange={range => {
+          if (!range?.[0] || !range[1]) return
+          const startDate = range[0].format('YYYY-MM-DD'), endDate = range[1].format('YYYY-MM-DD')
+          if (validPeriod(startDate, endDate)) onChange({ ...value, startDate, endDate, quick: 'custom' })
+        }}
+        aria-label={text('日期范围，最多两年', 'Date range, up to two years')} />
+      <Select size="small" popupMatchSelectWidth={false} aria-label={text('快捷日期', 'Quick range')} placeholder={text('快捷', 'Quick')}
+        value={value.quick === 'custom' ? undefined : value.quick} options={ranges.map(([key, label]) => ({ value: key, label }))}
+        onChange={key => quickChange(key as Exclude<QuickRange, 'custom'>)} />
+      {/* 「不对比」与两种同比方式合成一个下拉，等价于原来的开关 + 同比方式 */}
+      <Select size="small" popupMatchSelectWidth={false} aria-label={text('同比方式', 'Comparison mode')}
+        value={value.compare ? value.compareMode : 'none'}
+        options={[{ value: 'ByWeek', label: text('按周同比', 'Same ISO week') }, { value: 'ByDate', label: text('按日期同比', 'Same date') }, { value: 'none', label: text('不对比', 'No comparison') }]}
+        onChange={mode => onChange(mode === 'none' ? { ...value, compare: false } : { ...value, compare: true, compareMode: mode as DateSelection['compareMode'] })} />
+      <Tooltip title={text('刷新数据', 'Refresh')}>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onRefresh} aria-label={text('刷新数据', 'Refresh')} />
+      </Tooltip>
+    </div>
+  }
   return <div className={styles.controls}>
     <DatePicker.RangePicker allowClear={false} value={[dayjs(value.startDate), dayjs(value.endDate)]}
       disabledDate={(date, info) => date.isAfter(dayjs(), 'day') || Boolean(info.from && Math.abs(date.diff(info.from, 'day')) >= MAX_REPORT_DAYS)}
@@ -31,7 +57,7 @@ export function ReportControls({ value, onChange, onRefresh, loading }: {
       }}
       aria-label={text('日期范围，最多两年', 'Date range, up to two years')} />
     <Segmented value={value.quick} options={ranges.map(([key, label]) => ({ value: key, label }))}
-      onChange={key => onChange({ ...quickDateSelection(key as Exclude<QuickRange, 'custom'>), compare: value.compare, compareMode: value.compareMode })} />
+      onChange={key => quickChange(key as Exclude<QuickRange, 'custom'>)} />
     <div className={styles.compareControls}>
       <Select aria-label={text('同比方式', 'Comparison mode')} value={value.compareMode} disabled={!value.compare}
         options={[{ value: 'ByWeek', label: text('按周同比', 'Same ISO week') }, { value: 'ByDate', label: text('按日期同比', 'Same date') }]}

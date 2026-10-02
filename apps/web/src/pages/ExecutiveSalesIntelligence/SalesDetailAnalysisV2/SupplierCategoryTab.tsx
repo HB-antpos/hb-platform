@@ -17,7 +17,6 @@ const money = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD
 const moneyCents = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const percent = new Intl.NumberFormat('en-AU', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 })
 const integer = new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 })
-const SUMMARY_COLLAPSED_KEY = 'hb.sales-detail.category.summary-collapsed'
 /** 分类树请求顺带返回默认节点第一页商品时使用的页大小；改每页条数不应重算分类树。 */
 const DEFAULT_PAGE_SIZE = 20
 
@@ -56,10 +55,12 @@ function ShareBar({ value, tone = 'normal' }: { value: number | null; tone?: 'su
   </span>
 }
 
-export default function SupplierCategoryTab({ active, allowed, userGuid, branches, dates, supplierCodes, selectedBranchCode, refresh, onLoadingChange, onSelectSuppliers }: {
+export default function SupplierCategoryTab({ active, allowed, userGuid, branches, dates, supplierCodes, selectedBranchCode, refresh, onLoadingChange, summaryCollapsed, onSummaryCollapsedChange: toggleSummary, onSelectSuppliers }: {
   active: boolean; allowed: boolean; userGuid?: string; branches?: string[]; dates: DateSelection
   supplierCodes: string[]; selectedBranchCode?: string; refresh: number
   onLoadingChange: (loading: boolean) => void; onSelectSuppliers: () => void
+  /** 汇总条收起状态由页面统一持有，三个页签共用同一偏好 */
+  summaryCollapsed: boolean; onSummaryCollapsedChange: (collapsed: boolean) => void
 }) {
   const text = useReportText()
   const period = useMemo(() => reportPeriod(dates), [dates])
@@ -73,16 +74,11 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [exporting, setExporting] = useState(false)
   const [treeSort, setTreeSort] = useState<CategorySort>(DEFAULT_CATEGORY_SORT)
-  // 统计提示默认单行省略，可展开或关闭（关闭只对同一条提示生效）；汇总条可收起为一行摘要，偏好存本机。
+  // 统计提示默认单行省略，可展开或关闭（关闭只对同一条提示生效）。
   const [noticeOpen, setNoticeOpen] = useState(false)
   const [dismissedNotice, setDismissedNotice] = useState<string>()
-  const [summaryCollapsed, setSummaryCollapsed] = useState(() => { try { return window.localStorage.getItem(SUMMARY_COLLAPSED_KEY) === '1' } catch { return false } })
-  const toggleSummary = (collapsed: boolean) => {
-    setSummaryCollapsed(collapsed)
-    try { window.localStorage.setItem(SUMMARY_COLLAPSED_KEY, collapsed ? '1' : '0') } catch { /* 仅本次会话生效 */ }
-  }
   const [productSort, setProductSort] = useState<CategorySort>(DEFAULT_CATEGORY_SORT)
-  // 放大其中一个面板：另一个隐藏、放大的占满工作区；Esc 收起（正在看商品大图时 Esc 只关闭大图）。
+  // 放大其中一个面板：另一个隐藏，放大的铺满整个视口（宽、高都放大）；Esc 收起（正在看商品大图时 Esc 只关闭大图）。
   const [enlarged, setEnlarged] = useState<'tree' | 'detail' | null>(null)
   useEffect(() => {
     if (!active || !enlarged) return

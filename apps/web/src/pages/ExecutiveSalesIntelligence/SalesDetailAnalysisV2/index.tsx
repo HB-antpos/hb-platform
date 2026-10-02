@@ -1,6 +1,6 @@
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Alert, Button, Image, Input, message, Pagination, Segmented, Select, Skeleton, Tag, Tooltip, TreeSelect, type RefSelectProps } from 'antd'
-import { CloseOutlined, DownOutlined, DownloadOutlined, FilterOutlined, UpOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ShopOutlined } from '@ant-design/icons'
+import { CloseOutlined, DownOutlined, DownloadOutlined, FilterOutlined, UpOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, LineChartOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ShopOutlined } from '@ant-design/icons'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../../hooks/useIsMobile'
@@ -36,6 +36,8 @@ const SIDE_WIDTHS: Record<ProductMetric, [string, string]> = { revenue: ['9%', '
 const GROWTH_WIDTH = { stack: '9%', side: '6%' }
 const VIEW_STORAGE_KEY = 'hb.sales-detail.view'
 const AU_FILTERS_COLLAPSED_KEY = 'hb.sales-detail.category.filters-collapsed'
+// 三个页签共用一个「汇总条收起」偏好：切换页签时保持同一种密度。
+const SUMMARY_COLLAPSED_KEY = 'hb.sales-detail.summary-collapsed'
 
 // 展示偏好只是本机便利项：存储不可用（隐私模式、被禁用）时按默认展示，不影响查询。
 function readViewPreference(): DetailViewPreference {
@@ -139,6 +141,11 @@ export default function SalesDetailAnalysisV2() {
   const onAuLoadingChange = useCallback((value: boolean) => setAuLoading(value), [])
   // 收起筛选后只留一行条件摘要，把高度让给数据表；偏好只存本机，读写失败时按展开处理。
   const [auFiltersCollapsed, setAuFiltersCollapsed] = useState(() => { try { return window.localStorage.getItem(AU_FILTERS_COLLAPSED_KEY) === '1' } catch { return false } })
+  const [summaryCollapsed, setSummaryCollapsed] = useState(() => { try { return window.localStorage.getItem(SUMMARY_COLLAPSED_KEY) === '1' } catch { return false } })
+  const toggleSummary = useCallback((collapsed: boolean) => {
+    setSummaryCollapsed(collapsed)
+    try { window.localStorage.setItem(SUMMARY_COLLAPSED_KEY, collapsed ? '1' : '0') } catch { /* 仅本次会话生效 */ }
+  }, [])
   const toggleAuFilters = (collapsed: boolean) => {
     setAuFiltersCollapsed(collapsed)
     try { window.localStorage.setItem(AU_FILTERS_COLLAPSED_KEY, collapsed ? '1' : '0') } catch { /* 仅本次会话生效 */ }
@@ -523,7 +530,7 @@ export default function SalesDetailAnalysisV2() {
     style={pageOffset === undefined ? undefined : { '--page-offset': `${pageOffset}px` } as CSSProperties}>
     <div className={styles.topBar}>
       <div className={styles.titleGroup}>
-        <h1 title={text('供应商、分店与商品双向联动，从任意一栏开始分析。', 'Explore from any supplier, store or product.')}>{text('销售明细', 'Sales detail')}</h1>
+        <h1 className={styles.visuallyHidden}>{text('销售明细', 'Sales detail')}</h1>
         <div role="tablist" aria-label={text('供应商类别', 'Supplier type')} className={styles.tabs}>
           {(['australia', 'china', 'category'] as const).map(value => <button role="tab" key={value} aria-selected={currentTab === value} onClick={() => switchKind(value)}>{value === 'china' ? text('HB 仓库 · 国内供应商', 'HB warehouse · China') : value === 'category' ? text('澳洲供应商分类', 'AU supplier categories') : text('澳洲供应商', 'Australian suppliers')}</button>)}
         </div>
@@ -540,8 +547,8 @@ export default function SalesDetailAnalysisV2() {
         </button>
       </div> : categoryTab ? <div className={styles.headerControls}>
         <Select ref={auSupplierSelect} mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
-          aria-label={text('选择澳洲供应商', 'Select Australian suppliers')} placeholder={text('澳洲供应商（可多选）', 'Australian suppliers (multiple)')}
-          style={{ minWidth: 240, maxWidth: 420 }} value={auSuppliers} loading={!auOptions && !auOptionsError}
+          aria-label={text('选择澳洲供应商', 'Select Australian suppliers')} placeholder={text('澳洲供应商（可多选）', 'AU suppliers')}
+          style={{ minWidth: 180, maxWidth: 360 }} value={auSuppliers} loading={!auOptions && !auOptionsError}
           notFoundContent={auOptionsError || text('没有供应商', 'No suppliers')} popupClassName={styles.categoryTreePopup}
           options={(auOptions?.suppliers ?? []).map(option => ({ value: option.supplierCode, label: `${option.supplierName} · ${option.supplierCode}`,
             categoryCount: option.categoryCount, assigned: option.assignedProductCount, warehouse: option.categorySource === 'warehouse' }))}
@@ -555,18 +562,18 @@ export default function SalesDetailAnalysisV2() {
             }
             setAuSuppliers(values)
           }} />
-        <Select allowClear showSearch optionFilterProp="label" size="small" style={{ width: 150 }}
+        <Select allowClear showSearch optionFilterProp="label" size="small" style={{ width: 130 }}
           aria-label={text('选择分店', 'Select store')} placeholder={text('全部分店', 'All stores')} value={auBranch}
           options={(auOptions?.stores ?? []).map(store => ({ value: store.storeCode, label: store.storeName }))}
           onChange={value => setAuBranch(value || undefined)} />
-        <ReportControls value={dates} onChange={setDates} onRefresh={() => setAuRefresh(value => value + 1)} loading={auLoading} />
+        <ReportControls compact value={dates} onChange={setDates} onRefresh={() => setAuRefresh(value => value + 1)} loading={auLoading} />
         <Tooltip title={text('收起筛选，把空间留给数据', 'Collapse filters to show more data')}>
           <Button size="small" type="text" icon={<UpOutlined />} aria-label={text('收起筛选', 'Collapse filters')} onClick={() => toggleAuFilters(true)} />
         </Tooltip>
       </div> : <div className={styles.headerControls}>
         <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
-          aria-label={text('选择供应商', 'Select suppliers')} placeholder={text('供应商（可多选）', 'Suppliers (multiple)')}
-          style={{ minWidth: 210, maxWidth: 340 }} value={selection.supplierCodes} options={supplierOptions}
+          aria-label={text('选择供应商', 'Select suppliers')} placeholder={text('供应商', 'Suppliers')}
+          style={{ minWidth: 150, maxWidth: 300 }} value={selection.supplierCodes} options={supplierOptions}
           onChange={values => {
             if (exceedsSalesDetailSelectionLimit(values, MAX_SUPPLIER_SELECTIONS)) {
               message.warning(text(`最多选择 ${MAX_SUPPLIER_SELECTIONS} 个供应商`, `Select up to ${MAX_SUPPLIER_SELECTIONS} suppliers.`))
@@ -578,8 +585,8 @@ export default function SalesDetailAnalysisV2() {
           showCheckedStrategy={TreeSelect.SHOW_PARENT} maxTagCount={0} size="small"
           maxTagPlaceholder={() => text(`已选 ${selection.supplierCategoryGuids.length} 项`, `${selection.supplierCategoryGuids.length} selected`)}
           aria-label={text('选择供应商分类', 'Select supplier categories')}
-          placeholder={text('供应商分类（可多选）', 'Supplier categories (multiple)')}
-          style={{ minWidth: 220, maxWidth: 360 }} popupClassName={styles.categoryTreePopup}
+          placeholder={text('供应商分类', 'Supplier categories')}
+          style={{ minWidth: 160, maxWidth: 300 }} popupClassName={styles.categoryTreePopup}
           loading={categoryLoading} disabled={!selection.supplierCodes.length}
           value={selection.supplierCategoryGuids} treeData={supplierCategoryTree}
           filterTreeNode={(input, node) => ((node as SalesDetailCategoryTreeNode).searchText || '').toLocaleLowerCase().includes(input.trim().toLocaleLowerCase())}
@@ -590,15 +597,17 @@ export default function SalesDetailAnalysisV2() {
             showCheckedStrategy={TreeSelect.SHOW_PARENT} maxTagCount={0} size="small"
             maxTagPlaceholder={() => text(`已选 ${selection.warehouseCategoryGuids.length} 项`, `${selection.warehouseCategoryGuids.length} selected`)}
             aria-label={text('选择仓库分类', 'Select warehouse categories')}
-            placeholder={text('仓库分类（可多选）', 'Warehouse categories (multiple)')}
-            style={{ minWidth: 220, maxWidth: 360 }} popupClassName={styles.categoryTreePopup} loading={categoryLoading}
+            placeholder={text('仓库分类', 'Warehouse categories')}
+            style={{ minWidth: 160, maxWidth: 300 }} popupClassName={styles.categoryTreePopup} loading={categoryLoading}
             value={selection.warehouseCategoryGuids} treeData={warehouseCategoryTree}
             filterTreeNode={(input, node) => ((node as SalesDetailCategoryTreeNode).searchText || '').toLocaleLowerCase().includes(input.trim().toLocaleLowerCase())}
             notFoundContent={categoryError || text('暂无分类', 'No categories')}
             popupRender={menu => <><div className={styles.categoryTreeHint}>{text('选择父级包含子分类，可展开选择具体分类。', 'A parent includes its subcategories. Expand to select individual categories.')}</div>{menu}</>}
             onChange={values => changeCategories(Array.isArray(values) ? values.map(String) : [])} />}
-        <ReportControls value={dates} onChange={value => { setDates(value); setSelection(current => ({ ...current, page: 1 })) }} onRefresh={refreshAll} loading={loading} />
-        {access.canViewSalesData && <Button onClick={() => navigate(`/executive-sales-intelligence/overview?branch=${encodeURIComponent(selection.branch ?? '')}&startDate=${dates.startDate}&endDate=${dates.endDate}&compare=${dates.compare}&compareMode=${dates.compareMode}`)}>{text('营业额报告', 'Revenue report')}</Button>}
+        <ReportControls compact value={dates} onChange={value => { setDates(value); setSelection(current => ({ ...current, page: 1 })) }} onRefresh={refreshAll} loading={loading} />
+        {access.canViewSalesData && <Tooltip title={text('营业额报告', 'Revenue report')}>
+          <Button size="small" icon={<LineChartOutlined />} aria-label={text('营业额报告', 'Revenue report')}
+            onClick={() => navigate(`/executive-sales-intelligence/overview?branch=${encodeURIComponent(selection.branch ?? '')}&startDate=${dates.startDate}&endDate=${dates.endDate}&compare=${dates.compare}&compareMode=${dates.compareMode}`)} /></Tooltip>}
       </div>}
     </div>
     {categoryTab ? <>
@@ -606,16 +615,17 @@ export default function SalesDetailAnalysisV2() {
       <Suspense fallback={<div className={styles.skeleton}><Skeleton active paragraph={{ rows: 8 }} title={false} /></div>}>
         <SupplierCategoryTab active={active} allowed={allowed} userGuid={currentUser?.userGUID} branches={branches} dates={dates}
           supplierCodes={auSuppliers} selectedBranchCode={auBranch} refresh={auRefresh}
-          onLoadingChange={onAuLoadingChange} onSelectSuppliers={() => { toggleAuFilters(false); window.setTimeout(() => auSupplierSelect.current?.focus(), 0) }} />
+          onLoadingChange={onAuLoadingChange} summaryCollapsed={summaryCollapsed} onSummaryCollapsedChange={toggleSummary} onSelectSuppliers={() => { toggleAuFilters(false); window.setTimeout(() => auSupplierSelect.current?.focus(), 0) }} />
       </Suspense>
     </> : <>
     {categoryError && <Alert type="warning" showIcon message={categoryError} />}
     {!allowed && <Alert type="warning" message={text('当前账号没有可查询的分店范围', 'No stores are available for this account')} />}
     {summary.error && <Alert type="warning" message={summary.error} action={<Button onClick={() => retrySection('summary')}>{text('重试汇总', 'Retry totals')}</Button>} />}
     {bundle.data && bundle.snapshot?.statisticMessage && <Alert type="warning" showIcon message={bundle.snapshot.statisticMessage} />}
-    <section className={styles.summary} aria-label={text('全量筛选汇总', 'All matching totals')} data-testid="detail-summary"
+    <section className={`${styles.summary} ${summaryCollapsed ? styles.summaryCollapsed : ''}`} aria-label={text('全量筛选汇总', 'All matching totals')} data-testid="detail-summary"
       style={{ '--previous-label': JSON.stringify(text('同期 ', 'Prev ')) } as CSSProperties}>
-      {(['revenue', 'quantity', 'averageUnitPrice', 'grossProfit', 'grossMarginRate'] as MetricKey[]).map(field => {
+      {/* 收起后只留营业额、数量、均价与筛选标签一行，把高度让给数据表 */}
+      {(summaryCollapsed ? ['revenue', 'quantity', 'averageUnitPrice'] as MetricKey[] : ['revenue', 'quantity', 'averageUnitPrice', 'grossProfit', 'grossMarginRate'] as MetricKey[]).map(field => {
         const current = total?.[field]
         // 毛利受成本补全影响，汇总条只给销售类指标显示增长率。
         const showGrowth = total && dates.compare && current != null && (field === 'revenue' || field === 'quantity' || field === 'averageUnitPrice')
@@ -644,6 +654,9 @@ export default function SalesDetailAnalysisV2() {
           </Tooltip>
         </div>
       </div>
+      <Button type="text" size="small" className={styles.summaryToggle} icon={summaryCollapsed ? <DownOutlined /> : <UpOutlined />}
+        aria-expanded={!summaryCollapsed} onClick={() => toggleSummary(!summaryCollapsed)}>
+        {summaryCollapsed ? text('展开汇总', 'Show totals') : text('收起汇总', 'Collapse')}</Button>
     </section>
     <div ref={workspace} className={`${styles.workspace} ${view.railCollapsed ? styles.railCollapsed : ''} ${expanded ? styles.hasExpanded : ''}`}
       style={{ '--rail-width': `${railWidth}%` } as CSSProperties}>

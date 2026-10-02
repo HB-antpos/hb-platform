@@ -1,17 +1,19 @@
 .page,.productDrawer { --navy:#003670; --ink:#1c344f; --muted:#5c7088; --line:#dfe7f0; }
-.page { position:relative; z-index:0; display:flex; flex-direction:column; gap:8px; color:var(--ink); background:#f4f6f9; padding:12px 14px; min-width:0; font-size:12px; font-variant-numeric:tabular-nums; }
+.page { position:relative; z-index:0; display:flex; flex-direction:column; gap:6px; color:var(--ink); background:#f4f6f9; padding:6px 12px 8px; min-width:0; font-size:12px; font-variant-numeric:tabular-nums; }
 .page * { box-sizing:border-box; }
-.topBar { flex:none; display:flex; align-items:center; flex-wrap:wrap; gap:8px 16px; }
-.titleGroup { display:flex; align-items:stretch; gap:16px; min-height:36px; }
+.topBar { flex:none; display:flex; align-items:center; flex-wrap:wrap; gap:6px 16px; }
+/* 标题只给读屏：面包屑和外壳标签页已显示「销售明细」，省出的宽度让页签与筛选放进同一行 */
+.visuallyHidden { position:absolute!important; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+.titleGroup { display:flex; align-items:stretch; gap:16px; min-height:28px; }
 .titleGroup h1 { align-self:center; margin:0; font-size:18px; font-weight:700; line-height:1.3; letter-spacing:-.2px; color:#143452; white-space:nowrap; cursor:default; }
 .tabs { display:flex; gap:18px; }
-.tabs button { border:0; background:transparent; color:var(--muted); padding:4px 0 0; font:inherit; font-size:13px; font-weight:600; border-bottom:2px solid transparent; cursor:pointer; white-space:nowrap; }
+.tabs button { border:0; background:transparent; color:var(--muted); padding:2px 0 0; font:inherit; font-size:13px; font-weight:600; border-bottom:2px solid transparent; cursor:pointer; white-space:nowrap; }
 .tabs button[aria-selected=true] { color:var(--navy); border-bottom-color:var(--navy); }
 /* 日期控件并入顶栏：去掉 ReportControls 自带的卡片外框，同期区间改在汇总条图例里显示 */
-.headerControls { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; min-width:0; }
-.headerControls > div { margin:0; padding:0; border:0; background:transparent; gap:8px; }
+.headerControls { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:6px; min-width:0; }
+.headerControls > div { margin:0; padding:0; border:0; background:transparent; gap:6px; }
 .headerControls > div > small { display:none; }
-.headerControls > div :global(.ant-picker-range) { width:216px; padding-inline:8px; }
+.headerControls > div :global(.ant-picker-range) { width:206px; padding-inline:8px; }
 .headerControls > div :global(.ant-picker-range input) { font-size:12.5px; }
 .headerControls :global(.ant-segmented-item-label) { padding-inline:7px; }
 .headerControls > div > div > :global(.ant-btn) { padding-inline:10px; }
@@ -41,6 +43,13 @@
 .kpiValue > span > small::before { content:var(--previous-label); }
 .kpiGrowth { font-size:11px; font-weight:600; }
 .pendingTotal { display:block; font-size:18px; color:var(--navy); }
+.summaryToggle { flex:none; align-self:center; margin-right:6px; color:var(--muted)!important; font-size:11px!important; }
+/* 汇总条收起：只留一行（营业额、数量、均价 + 筛选标签），本期与同期同行 */
+.summaryCollapsed { min-height:32px; }
+.summaryCollapsed .kpi { flex-direction:row; align-items:baseline; gap:8px; padding:4px 14px; }
+.summaryCollapsed .kpiValue > span > strong,.summaryCollapsed .pendingTotal { font-size:13px; line-height:18px; }
+.summaryCollapsed .scopeBlock { flex-direction:row; align-items:center; padding:2px 8px; }
+.summaryCollapsed .legend { display:none; }
 .scopeBlock { flex:1 1 240px; margin-left:auto; display:flex; flex-direction:column; justify-content:center; align-items:flex-end; gap:5px; padding:6px 14px; min-width:0; overflow:hidden; color:var(--muted); font-size:11px; }
 .chips { display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap; min-width:0; max-width:100%; }
 .chips :global(.ant-tag) { margin:0; max-width:220px; overflow:hidden; text-overflow:ellipsis; }
@@ -172,7 +181,10 @@
 .resizer::after { content:''; width:2px; height:24px; background:#c2cfdd; position:absolute; left:4px; top:45%; }
 .resizer:hover { background:#e2ecf9; }
 .hasExpanded .panel:not(.expanded) { display:none; }
-.expanded { height:650px; }
+/* 放大：面板铺满整个视口（宽和高都放大），盖住外壳顶栏与侧栏；Esc 或收起按钮还原。
+   页面自身是 z-index:0 的层叠上下文，放大期间把整页抬到外壳顶栏之上、antd 弹层（1000+）之下。 */
+.panel.expanded { position:fixed; inset:0; z-index:20; height:auto; border:0; border-radius:0; }
+.page:has(.expanded),.page:has([data-enlarged]) { z-index:900; }
 .slow { color:#805c20; background:#fff9e9; padding:8px 12px; font-size:11px; }
 .empty { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:230px; gap:15px; padding:18px; color:var(--muted); white-space:normal; }
 .skeleton { padding:24px 16px; }
@@ -213,12 +225,10 @@
   .railCollapsed { grid-template-columns:44px 10px minmax(0,1fr); }
   .railCollapsed .rail,.railCollapsed .resizer { display:none; }
   .railCollapsed .railStrip { display:flex; grid-column:1; grid-row:1; }
-  /* 展开：面板覆盖整个页面区域（含顶栏与汇总条），Esc 或收起按钮还原 */
-  .expanded { position:absolute; inset:0; z-index:20; height:auto; box-shadow:0 12px 32px rgba(15,35,60,.16); }
 }
 @media(max-width:1440px) { .kpi { padding:6px 12px; } .kpiValue > span > strong { font-size:16px; } .titleGroup { gap:14px; } .tabs { gap:14px; } }
 @media(max-width:1280px) { .page { padding:10px 12px; } }
 @media(max-width:992px) { .headerControls { margin-left:0; justify-content:flex-start; width:100%; } .scopeBlock { margin-left:0; width:100%; align-items:flex-start; border-top:1px solid #edf1f6; } .chips { justify-content:flex-start; } .legend { flex-wrap:wrap; white-space:normal; } }
-@media(max-width:600px) { .page { padding:12px 10px; } .titleGroup { flex-wrap:wrap; gap:10px; } .titleGroup h1 { font-size:20px; } .tabs { gap:16px; } .tabs button { font-size:12px; } .kpi { flex:1 1 50%; border-left:0; padding:8px 10px; } .kpi:nth-child(2n) { border-left:1px solid #edf1f6; } .kpi:nth-child(5) { flex-basis:100%; } .kpiValue,.kpiValue > span:first-child { flex-wrap:wrap; row-gap:2px; } .panel { height:450px; } .panelHeader { flex-wrap:wrap; } .panelFilter { order:3; flex-basis:100%; } .panelActions { margin-left:auto; flex-wrap:wrap; justify-content:flex-end; max-width:100%; } .expanded { height:600px; } .productTable { min-width:640px; } .productTable[data-view=side] { min-width:1100px; } }
+@media(max-width:600px) { .page { padding:12px 10px; } .titleGroup { flex-wrap:wrap; gap:10px; } .titleGroup h1 { font-size:20px; } .tabs { gap:16px; } .tabs button { font-size:12px; } .kpi { flex:1 1 50%; border-left:0; padding:8px 10px; } .kpi:nth-child(2n) { border-left:1px solid #edf1f6; } .kpi:nth-child(5) { flex-basis:100%; } .kpiValue,.kpiValue > span:first-child { flex-wrap:wrap; row-gap:2px; } .panel { height:450px; } .panelHeader { flex-wrap:wrap; } .panelFilter { order:3; flex-basis:100%; } .panelActions { margin-left:auto; flex-wrap:wrap; justify-content:flex-end; max-width:100%; } .productTable { min-width:640px; } .productTable[data-view=side] { min-width:1100px; } }
 @media(max-width:760px) { .productDrawer :global(.ant-drawer-content-wrapper) { width:100%!important; } .productDrawer :global(.ant-drawer-header) { padding-inline:16px; } .drawerIntro { padding-inline:16px; } }
 @media(prefers-reduced-motion:reduce) { .page *,.productDrawer * { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
