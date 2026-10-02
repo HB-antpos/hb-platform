@@ -253,6 +253,17 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
     public decimal CashDifference => CountedCashAmount - ExpectedCashAmount;
 
+    public CashDifferenceStatus CashDifferenceStatus => CashDifferenceStatusResolver.From(CashDifference);
+
+    public bool IsBusinessDateToday => BusinessDate == DateTime.Today;
+
+    public bool HasSelectedArchive => SelectedArchive is not null;
+
+    public int DenominationCount => Denominations.Count;
+
+    public int SelectedCashDenominationPosition =>
+        SelectedCashDenomination is null ? 0 : Denominations.IndexOf(SelectedCashDenomination) + 1;
+
     public string BusinessDateText => BusinessDate.ToString("ddd, dd MMM yyyy", CultureInfo.CurrentCulture);
 
     public DailyCloseArchiveListItemViewModel? SelectedArchive
@@ -1109,6 +1120,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         ClearPendingSettlementManualResolution();
         SettlementReceiptPreviewLines.Clear();
         OnPropertyChanged(nameof(BusinessDateText));
+        OnPropertyChanged(nameof(IsBusinessDateToday));
         StatusMessage = Format(
             "dailyClose.status.dateChanged",
             "Switched to {0:yyyy-MM-dd}. Refresh history or create a new daily close.",
@@ -1147,6 +1159,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         }
 
         OnPropertyChanged(nameof(IsCashCountDialogOpen));
+        OnPropertyChanged(nameof(SelectedCashDenominationPosition));
         OnPropertyChanged(nameof(CashCountDialogQuantity));
         OnPropertyChanged(nameof(CashCountDialogSubtotal));
         OpenCashCountDialogCommand.NotifyCanExecuteChanged();
@@ -1199,6 +1212,11 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             CloseCashCountDialog();
             IsDiscardDailyCloseDraftConfirmationOpen = false;
         }
+        else if (HasDailyCloseDraft && SelectedCashDenomination is null && Denominations.Count > 0)
+        {
+            // 数字键盘常驻在工作区内，打开时直接从第一个面额开始清点。
+            SelectCashDenomination(Denominations[0]);
+        }
 
         CloseCashCountWorkspaceCommand.NotifyCanExecuteChanged();
         RequestDiscardDailyCloseDraftCommand.NotifyCanExecuteChanged();
@@ -1215,6 +1233,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     partial void OnExpectedCashAmountChanged(decimal value)
     {
         OnPropertyChanged(nameof(CashDifference));
+        OnPropertyChanged(nameof(CashDifferenceStatus));
     }
 
     private void ApplyReport(DailyCloseReport report)
@@ -1340,6 +1359,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         CancellationToken cancellationToken)
     {
         var previewVersion = Interlocked.Increment(ref _archivePreviewVersion);
+        OnPropertyChanged(nameof(HasSelectedArchive));
         ArchivePreviewRows.Clear();
         SelectedArchiveNoteCounts.Clear();
         SelectedArchiveCoinCounts.Clear();
@@ -1379,10 +1399,10 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
     private bool CanOpenCashCountDialog(CashDenominationEntryViewModel? denomination)
     {
+        // 键盘常驻后点另一个面额即切换，未应用的输入随之放弃。
         return !IsBusy &&
                HasDailyCloseDraft &&
                IsCashCountWorkspaceOpen &&
-               !IsCashCountDialogOpen &&
                denomination is not null;
     }
 
@@ -1393,8 +1413,13 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             return;
         }
 
+        SelectCashDenomination(denomination!);
+    }
+
+    private void SelectCashDenomination(CashDenominationEntryViewModel denomination)
+    {
         SelectedCashDenomination = denomination;
-        KeypadBuffer = denomination!.Count == 0
+        KeypadBuffer = denomination.Count == 0
             ? string.Empty
             : denomination.Count.ToString(CultureInfo.InvariantCulture);
         _replaceKeypadOnNextInput = true;
@@ -1484,8 +1509,18 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         }
 
         target.Count = count;
-        CloseCashCountDialog();
         RaiseCashTotalsChanged();
+
+        // 应用后自动进入下一面额；最后一个面额应用完即结束选择。
+        var nextIndex = Denominations.IndexOf(target) + 1;
+        if (nextIndex > 0 && nextIndex < Denominations.Count)
+        {
+            SelectCashDenomination(Denominations[nextIndex]);
+        }
+        else
+        {
+            CloseCashCountDialog();
+        }
     }
 
     private IReadOnlyList<CashDenominationCount> BuildCashCounts()
@@ -1531,6 +1566,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CoinSubtotal));
         OnPropertyChanged(nameof(CountedCashAmount));
         OnPropertyChanged(nameof(CashDifference));
+        OnPropertyChanged(nameof(CashDifferenceStatus));
         SaveAndPrintCommand.NotifyCanExecuteChanged();
     }
 
@@ -1647,4 +1683,36 @@ public sealed record DailyCloseArchiveListItemViewModel(DailyCloseArchive Archiv
     public decimal CashDifference => Archive.CashDifference;
 
     public string ClosedAtDisplay => SavedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture);
+
+    public string ClosedTimeDisplay => SavedAt.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture);
+
+    public string SavedAtDisplay => Archive.SavedAtDisplay;
+
+    public string ShortArchiveId => Archive.ShortArchiveId;
+
+    public decimal ExpectedCashAmount => Archive.Report.SystemCashAmount;
+
+    public decimal NetAmount => Archive.Report.NetAmount;
+
+    public int OrderCount => Archive.Report.OrderCount;
+
+    public CashDifferenceStatus DifferenceStatus => CashDifferenceStatusResolver.From(CashDifference);
+}
+
+public enum CashDifferenceStatus
+{
+    Balanced,
+    Over,
+    Short
+}
+
+public static class CashDifferenceStatusResolver
+{
+    // 现金差额 = 实盘 - 应有：负数为短款，正数为长款。
+    public static CashDifferenceStatus From(decimal cashDifference) => cashDifference switch
+    {
+        < 0m => CashDifferenceStatus.Short,
+        > 0m => CashDifferenceStatus.Over,
+        _ => CashDifferenceStatus.Balanced
+    };
 }

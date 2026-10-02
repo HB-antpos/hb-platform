@@ -27,9 +27,21 @@ public sealed class DailyCloseViewLayoutTests
         var toolbarTemplate = Assert.Single(view.Descendants(Presentation + "ControlTemplate").Where(template =>
             template.Descendants(Presentation + "ContentPresenter").Any(presenter =>
                 (string?)presenter.Attribute(Xaml + "Name") == "PART_SelectedContentHost")));
-        var historyRefresh = Assert.Single(toolbarTemplate.Descendants(Presentation + "Button").Where(button =>
+        // 顶栏只保留返回、营业日期、页签和主操作；刷新历史收进历史列表卡片，避免两个同功能按钮。
+        Assert.Empty(toolbarTemplate.Descendants(Presentation + "Button").Where(button =>
             ((string?)button.Attribute("Command"))?.Contains("LoadHistoryCommand", StringComparison.Ordinal) == true));
+        var historyRefresh = Assert.Single(tabs[0].Descendants(Presentation + "Button").Where(button =>
+            ((string?)button.Attribute("Command"))?.Contains("LoadHistoryCommand", StringComparison.Ordinal) == true));
+        Assert.Equal("DailyCloseRefreshHistoryButton", (string?)historyRefresh.Attribute(Xaml + "Name"));
         Assert.Contains("dailyClose.refreshHistory", historyRefresh.ToString(SaveOptions.DisableFormatting));
+
+        // 营业日期旁的“今天”标签只在日期等于今天时显示。
+        var todayChipStyle = Assert.Single(view.Descendants(Presentation + "Style").Where(style =>
+            (string?)style.Attribute(Xaml + "Key") == "TodayChipStyle"));
+        Assert.Contains(todayChipStyle.Descendants(Presentation + "DataTrigger"), trigger =>
+            (string?)trigger.Attribute("Binding") == "{Binding IsBusinessDateToday}" &&
+            (string?)trigger.Attribute("Value") == "True");
+        Assert.Contains("dailyClose.today", toolbarTemplate.ToString(SaveOptions.DisableFormatting));
 
         var createOrResumeButtons = toolbarTemplate.Descendants(Presentation + "Button").Where(button =>
             ((string?)button.Attribute("Command"))?.Contains("CreateOrResumeDailyCloseCommand", StringComparison.Ordinal) == true).ToArray();
@@ -124,7 +136,7 @@ public sealed class DailyCloseViewLayoutTests
     {
         var view = LoadView();
         var workspace = FindNamedElement(view, "DailyCloseCashWorkspaceOverlay");
-        var keypad = FindNamedElement(view, "CashCountDialogOverlay");
+        var keypad = FindNamedElement(view, "CashCountKeypadPanel");
         var discard = FindNamedElement(view, "DailyCloseDiscardDraftOverlay");
 
         AssertOverlayContract(
@@ -140,13 +152,11 @@ public sealed class DailyCloseViewLayoutTests
         Assert.Single(workspace.Descendants(Presentation + "Button").Where(button =>
             ((string?)button.Attribute("Command"))?.Contains("SaveAndPrintCommand", StringComparison.Ordinal) == true));
 
-        AssertOverlayContract(
-            keypad,
-            zIndex: "200",
-            visibility: "{Binding IsCashCountDialogOpen, Converter={StaticResource BoolToVis}}",
-            visibleChanged: "CashCountDialogOverlayIsVisibleChanged",
-            previewKeyDown: "CashCountDialogOverlayPreviewKeyDown");
-        Assert.NotNull(FindNamedElement(view, "CashCountDialogCancelButton"));
+        // 数字键盘常驻在工作区第二栏，不再是覆盖整屏的二层弹窗。
+        Assert.Contains(keypad, FindNamedElement(view, "DailyCloseCashWorkspaceBody").Descendants());
+        Assert.Null(keypad.Attribute("Panel.ZIndex"));
+        Assert.Empty(view.Descendants().Where(element =>
+            (string?)element.Attribute(Xaml + "Name") is "CashCountDialogOverlay" or "CashCountDialogCancelButton"));
 
         AssertOverlayContract(
             discard,
@@ -158,18 +168,11 @@ public sealed class DailyCloseViewLayoutTests
     }
 
     [Fact]
-    public void Cash_count_dialog_uses_strict_nine_grid_and_separate_zero_clear_backspace_row()
+    public void Cash_count_keypad_uses_strict_nine_grid_and_separate_zero_clear_backspace_row()
     {
         var view = LoadView();
-        var overlay = FindNamedElement(view, "CashCountDialogOverlay");
-        Assert.Equal(
-            "{Binding IsCashCountDialogOpen, Converter={StaticResource BoolToVis}}",
-            (string?)overlay.Attribute("Visibility"));
-        Assert.Equal("DailyCloseCashCountDialog", (string?)overlay.Attribute("AutomationProperties.AutomationId"));
-        Assert.Equal("CashCountDialogOverlayIsVisibleChanged", (string?)overlay.Attribute("IsVisibleChanged"));
-        Assert.Equal("CashCountDialogOverlayPreviewKeyDown", (string?)overlay.Attribute("PreviewKeyDown"));
-        Assert.Equal("Cycle", (string?)overlay.Attribute("KeyboardNavigation.TabNavigation"));
-        Assert.NotNull(FindNamedElement(view, "CashCountDialogCancelButton"));
+        var overlay = FindNamedElement(view, "CashCountKeypadPanel");
+        Assert.Equal("DailyCloseCashCountKeypad", (string?)overlay.Attribute("AutomationProperties.AutomationId"));
 
         var nineGrid = FindNamedElement(view, "CashCountNineGrid");
         Assert.Equal("3", (string?)nineGrid.Attribute("Rows"));
@@ -193,27 +196,34 @@ public sealed class DailyCloseViewLayoutTests
         var applyButton = Assert.Single(overlay.Descendants(Presentation + "Button").Where(button =>
             ((string?)button.Attribute("Command"))?.Contains("ApplyDenominationCommand", StringComparison.Ordinal) == true));
         Assert.Equal("{Binding SelectedCashDenomination}", (string?)applyButton.Attribute("CommandParameter"));
+        Assert.Contains("dailyClose.cashCountDialog.applyNext", applyButton.ToString(SaveOptions.DisableFormatting));
     }
 
     [Fact]
-    public void Cash_count_dialog_run_bindings_are_one_way_for_read_only_display_values()
+    public void Daily_close_run_bindings_are_one_way_for_read_only_display_values()
     {
         var view = LoadView();
-        var overlay = FindNamedElement(view, "CashCountDialogOverlay");
-
-        var runBindings = overlay.Descendants(Presentation + "Run")
-            .Select(run => (string?)run.Attribute("Text"))
-            .Where(text => text?.StartsWith("{Binding ", StringComparison.Ordinal) == true)
-            .ToArray();
+        var keypad = FindNamedElement(view, "CashCountKeypadPanel");
 
         Assert.Equal(
             [
-                "{Binding SelectedCashDenomination.Label, Mode=OneWay}",
-                "{Binding SelectedCashDenomination.Label, Mode=OneWay}",
+                "{Binding SelectedCashDenominationPosition, Mode=OneWay}",
+                "{Binding DenominationCount, Mode=OneWay}",
                 "{Binding CashCountDialogQuantity, Mode=OneWay}",
                 "{Binding SelectedCashDenomination.Label, Mode=OneWay}",
+                "{Binding CashCountDialogSubtotal, Mode=OneWay, StringFormat={}{0:C2}}",
             ],
-            runBindings);
+            keypad.Descendants(Presentation + "Run")
+                .Select(run => (string?)run.Attribute("Text"))
+                .Where(text => text?.StartsWith("{Binding ", StringComparison.Ordinal) == true)
+                .ToArray());
+
+        // Run.Text 默认双向绑定，绑定到只读属性会在运行时抛异常；整页所有 Run 绑定都必须声明 OneWay。
+        Assert.All(
+            view.Descendants(Presentation + "Run")
+                .Select(run => (string?)run.Attribute("Text"))
+                .Where(text => text?.StartsWith("{Binding ", StringComparison.Ordinal) == true),
+            text => Assert.Contains("Mode=OneWay", text, StringComparison.Ordinal));
 
         var workspace = FindNamedElement(view, "DailyCloseCashWorkspaceOverlay");
         Assert.Contains(
@@ -251,7 +261,32 @@ public sealed class DailyCloseViewLayoutTests
             "dailyClose.status.draftResumed",
             "dailyClose.status.draftPreserved",
             "dailyClose.status.draftDiscarded",
-            "dailyClose.status.draftIdentityChanged"
+            "dailyClose.status.draftIdentityChanged",
+            "dailyClose.today",
+            "dailyClose.history.newestFirst",
+            "dailyClose.history.selectHint",
+            "dailyClose.archive.titlePrefix",
+            "dailyClose.archive.savedAt",
+            "dailyClose.archive.id",
+            "dailyClose.difference.short",
+            "dailyClose.difference.over",
+            "dailyClose.difference.balanced",
+            "dailyClose.keypad.counting",
+            "dailyClose.keypad.idle",
+            "dailyClose.cashCountDialog.applyNext",
+            "dailyClose.reconciliation",
+            "dailyClose.cashWorkspace.returnHistoryHint",
+            "dailyClose.linklySettlement.status.pending",
+            "dailyClose.linklySettlement.status.succeeded",
+            "dailyClose.linklySettlement.status.failed",
+            "dailyClose.linklySettlement.status.unknown",
+            "dailyClose.linklySettlement.mode.localIp",
+            "dailyClose.linklySettlement.mode.cloudDirectSync",
+            "dailyClose.linklySettlement.mode.cloudBackendAsync",
+            "dailyClose.linklySettlement.submission.notSubmitted",
+            "dailyClose.linklySettlement.submission.submitted",
+            "dailyClose.linklySettlement.submission.unknown",
+            "dailyClose.linklySettlement.noReceiptPreview"
         };
 
         foreach (var resourceName in new[] { "Strings.resx", "Strings.zh-CN.resx" })

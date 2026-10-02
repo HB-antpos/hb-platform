@@ -9,7 +9,6 @@ namespace Hbpos.Client.Wpf.Views.Screens;
 public partial class DailyCloseView : UserControl
 {
     private IInputElement? _focusBeforeCashCountWorkspace;
-    private IInputElement? _focusBeforeCashCountDialog;
     private IInputElement? _focusBeforeDiscardDraftConfirmation;
 
     public DailyCloseView()
@@ -39,8 +38,8 @@ public partial class DailyCloseView : UserControl
             return;
         }
 
-        // 中文注释：二层弹窗各自处理 Escape，主弹窗只在没有子弹窗时关闭并保留草稿。
-        if (viewModel.IsCashCountDialogOpen || viewModel.IsDiscardDailyCloseDraftConfirmationOpen)
+        // 中文注释：数字键盘已常驻工作区；只有放弃确认框打开时由它处理 Escape，否则关闭工作区并保留草稿。
+        if (viewModel.IsDiscardDailyCloseDraftConfirmationOpen)
         {
             return;
         }
@@ -48,39 +47,6 @@ public partial class DailyCloseView : UserControl
         if (viewModel.CloseCashCountWorkspaceCommand.CanExecute(null))
         {
             viewModel.CloseCashCountWorkspaceCommand.Execute(null);
-            e.Handled = true;
-        }
-    }
-
-    private void CashCountDialogOverlayIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
-    {
-        if (e.NewValue is true)
-        {
-            _focusBeforeCashCountDialog = Keyboard.FocusedElement;
-            _ = Dispatcher.BeginInvoke(
-                DispatcherPriority.Input,
-                new Action(() =>
-                {
-                    // 弹窗打开后默认聚焦取消，Enter 保持安全分支，Tab 只在弹窗内循环。
-                    FocusDefaultButton(CashCountDialogCancelButton);
-                }));
-            return;
-        }
-
-        RestoreFocus(_focusBeforeCashCountDialog);
-        _focusBeforeCashCountDialog = null;
-    }
-
-    private void CashCountDialogOverlayPreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Escape || DataContext is not DailyCloseViewModel viewModel)
-        {
-            return;
-        }
-
-        if (viewModel.CancelCashCountDialogCommand.CanExecute(null))
-        {
-            viewModel.CancelCashCountDialogCommand.Execute(null);
             e.Handled = true;
         }
     }

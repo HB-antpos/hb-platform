@@ -1376,4 +1376,79 @@
   <data name="payment.settings.methodDisabled" xml:space="preserve"><value>This payment method is disabled in payment settings.</value></data>
   <data name="settings.payment.activeProvider.manual" xml:space="preserve"><value>Manual card payment is active.</value></data>
   <data name="settings.payment.activeProvider.manual.detail" xml:space="preserve"><value>The cashier confirms payment on the standalone terminal. Saving the terminal settings below keeps manual card mode active. Turn off Use manual card payment and save payment methods to use Credit/Debit Card.</value></data>
+  <data name="dailyClose.today" xml:space="preserve">
+    <value>Today</value>
+  </data>
+  <data name="dailyClose.history.newestFirst" xml:space="preserve">
+    <value>newest first</value>
+  </data>
+  <data name="dailyClose.history.selectHint" xml:space="preserve">
+    <value>Select a daily close record to view its details.</value>
+  </data>
+  <data name="dailyClose.archive.titlePrefix" xml:space="preserve">
+    <value>Daily close</value>
+  </data>
+  <data name="dailyClose.archive.savedAt" xml:space="preserve">
+    <value>Saved</value>
+  </data>
+  <data name="dailyClose.archive.id" xml:space="preserve">
+    <value>Archive</value>
+  </data>
+  <data name="dailyClose.difference.short" xml:space="preserve">
+    <value>Short</value>
+  </data>
+  <data name="dailyClose.difference.over" xml:space="preserve">
+    <value>Over</value>
+  </data>
+  <data name="dailyClose.difference.balanced" xml:space="preserve">
+    <value>Balanced</value>
+  </data>
+  <data name="dailyClose.keypad.counting" xml:space="preserve">
+    <value>Counting</value>
+  </data>
+  <data name="dailyClose.keypad.idle" xml:space="preserve">
+    <value>Select a denomination on the left to count it.</value>
+  </data>
+  <data name="dailyClose.cashCountDialog.applyNext" xml:space="preserve">
+    <value>Apply · Next</value>
+  </data>
+  <data name="dailyClose.reconciliation" xml:space="preserve">
+    <value>Cash Reconciliation</value>
+  </data>
+  <data name="dailyClose.cashWorkspace.returnHistoryHint" xml:space="preserve">
+    <value>Return to history and keep this draft.</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.pending" xml:space="preserve">
+    <value>Pending</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.succeeded" xml:space="preserve">
+    <value>Succeeded</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.failed" xml:space="preserve">
+    <value>Failed</value>
+  </data>
+  <data name="dailyClose.linklySettlement.status.unknown" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+  <data name="dailyClose.linklySettlement.mode.localIp" xml:space="preserve">
+    <value>Local IP</value>
+  </data>
+  <data name="dailyClose.linklySettlement.mode.cloudDirectSync" xml:space="preserve">
+    <value>Cloud Direct</value>
+  </data>
+  <data name="dailyClose.linklySettlement.mode.cloudBackendAsync" xml:space="preserve">
+    <value>Cloud Backend</value>
+  </data>
+  <data name="dailyClose.linklySettlement.submission.notSubmitted" xml:space="preserve">
+    <value>Not submitted</value>
+  </data>
+  <data name="dailyClose.linklySettlement.submission.submitted" xml:space="preserve">
+    <value>Submitted</value>
+  </data>
+  <data name="dailyClose.linklySettlement.submission.unknown" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+  <data name="dailyClose.linklySettlement.noReceiptPreview" xml:space="preserve">
+    <value>No bank receipt for this record.</value>
+  </data>
 </root>
