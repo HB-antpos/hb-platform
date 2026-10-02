@@ -1243,6 +1243,12 @@ describe("SettingsScreen", () => {
     expect(
       screen.getByTestId("handheld-state-pda-printer-connect"),
     ).toBeTruthy();
+    // 百分比 maxHeight 需要确定高度的父级，否则按钮会溢出卡片底部。
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("handheld-state-pda-printer-connect").props.style,
+      ),
+    ).toMatchObject({ flex: 1, pointerEvents: "box-none" });
     expect(
       screen.getByTestId("settings-printer-picker-modal").props.visible,
     ).toBe(true);
