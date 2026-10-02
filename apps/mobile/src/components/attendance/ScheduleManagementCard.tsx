@@ -22,6 +22,7 @@ import {
   StatusPill,
   type AttendanceStatusTone,
 } from "./AdjustmentFormControls";
+import { ScheduleExportSheet } from "./ScheduleExportSheet";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { useAuthStore } from "@/store/auth-store";
 import {
@@ -370,6 +371,7 @@ export function ScheduleManagementCard({
   // 员工模式存日期、日期模式存员工 GUID。
   const [batchSelection, setBatchSelection] = useState<ReadonlySet<string>>(() => new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   // 网格容器宽度：宽屏（横屏全屏）时把 7 天均分铺满，窄屏保持最小列宽并横向滚动。
   const [gridWidths, setGridWidths] = useState<Record<GridVariant, number>>({
     card: 0,
@@ -485,6 +487,14 @@ export function ScheduleManagementCard({
     : weekRangeLabel;
   const hoursShort = (minutes: number) =>
     t("scheduleManagement.hoursShort", { hours: formatScheduleHours(minutes) });
+  // 本周班次全部发布后才能导出图片，避免把草稿发到群里。
+  const canExportImage =
+    publishState === "published" && Boolean(storeCode) && !isLoading;
+
+  // 切周或又出现草稿时收起导出弹层，避免条件恢复后弹层意外重新出现。
+  useEffect(() => {
+    if (!canExportImage) setIsExportOpen(false);
+  }, [canExportImage]);
 
   const describeAvailability = (items: AttendanceAvailability[]) =>
     items.length
@@ -810,6 +820,17 @@ export function ScheduleManagementCard({
         label={t(`scheduleManagement.publishState.${publishState}`)}
         tone={PUBLISH_STATE_TONES[publishState]}
       />
+      {canExportImage ? (
+        <Button
+          compact
+          mode="text"
+          icon="image-outline"
+          onPress={() => setIsExportOpen(true)}
+          disabled={isBusy}
+        >
+          {t("scheduleManagement.export.action")}
+        </Button>
+      ) : null}
       {uncoveredDays > 0 && rows.length > 0 ? (
         <Text variant="labelSmall" style={styles.uncoveredText}>
           {t("scheduleManagement.uncoveredDays", { count: uncoveredDays })}
@@ -1333,6 +1354,16 @@ export function ScheduleManagementCard({
     </View>
   );
 
+  const exportSheetProps = {
+    days,
+    rows,
+    storeCode,
+    storeLabel,
+    weekStartDate,
+    weekLabel: `${weekNumberLabel} · ${weekRangeLabel}`,
+    onDismiss: () => setIsExportOpen(false),
+  };
+
   return (
     <>
       <Card mode="outlined" style={styles.card}>
@@ -1398,9 +1429,19 @@ export function ScheduleManagementCard({
         {batchTarget ? renderBatchBody() : renderEditorBody()}
       </BusinessSheet>
 
+      <ScheduleExportSheet
+        visible={isExportOpen && canExportImage && !isFullscreen}
+        presentation="sheet"
+        {...exportSheetProps}
+      />
+
       <Modal
         animationType="slide"
         onRequestClose={() => {
+          if (isExportOpen) {
+            setIsExportOpen(false);
+            return;
+          }
           if (isEditorOpen) {
             closeEditor();
             return;
@@ -1505,6 +1546,12 @@ export function ScheduleManagementCard({
               </View>
             </View>
           ) : null}
+
+          <ScheduleExportSheet
+            visible={isFullscreen && isExportOpen && canExportImage}
+            presentation="overlay"
+            {...exportSheetProps}
+          />
         </View>
       </Modal>
     </>
