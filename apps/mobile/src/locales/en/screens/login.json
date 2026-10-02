@@ -103,6 +103,7 @@
     "server": "The server is temporarily unavailable. Please try again later.",
     "http": "Login failed. Try again later or ask an administrator. Error code: {{status}}",
     "locationRequired": "Login requires your current precise location. Allow location access and try again.",
+    "stepTimeout": "Login is taking too long on this device. Please try again; if it keeps happening, fully close and reopen the app.",
     "default": "Login failed. Please try again later."
   }
 }

@@ -124,6 +124,14 @@ namespace BlazorApp.Api.Services.Logging
             return Task.FromResult(matched ? project : null);
         }
 
+        /// <summary>
+        /// 项目在配置中存在且已启用。供不走 Key 鉴权的写入通道（如已登录移动端补传诊断）做总开关。
+        /// </summary>
+        public bool IsProjectEnabled(string? projectCode)
+        {
+            return FindProject(projectCode)?.Enabled == true;
+        }
+
         public async Task<ApplicationLogIngestResultDto> IngestAsync(
             string projectCode,
             ApplicationLogIngestRequestDto request,

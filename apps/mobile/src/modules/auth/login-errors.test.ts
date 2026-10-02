@@ -38,3 +38,11 @@ assertEqual(
   "device.loginUnauthorized",
   "device auth failure gets device-specific guidance"
 );
+
+assertEqual(
+  getFriendlyLoginErrorDescriptor(
+    Object.assign(new Error("LOGIN_STEP_TIMEOUT: saveAccessToken 超过 8000ms 未完成"), { code: "LOGIN_STEP_TIMEOUT" }),
+  ).key,
+  "errors.stepTimeout",
+  "local login step timeout is not reported as a server/network timeout"
+);

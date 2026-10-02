@@ -81,7 +81,8 @@ services:
       - ApplicationLogging__Projects__1__ApiKeyHash=${CENTER_LOG_HBWEB_RV_KEY_SHA256:?required}
       - ApplicationLogging__Projects__2__ProjectCode=HbwebExpo
       - ApplicationLogging__Projects__2__DisplayName=移动端
-      - ApplicationLogging__Projects__2__Enabled=false
+      # 移动端不内置日志 Key：只经已登录接口 /api/mobile/diagnostics/logs 写入；不配 ApiKeyHash，X-Log-Key 通道保持关闭
+      - ApplicationLogging__Projects__2__Enabled=true
       - ApplicationLogging__Projects__2__RetentionDays=7
       - ApplicationLogging__Projects__3__ProjectCode=hbpos_win
       - ApplicationLogging__Projects__3__DisplayName=WPF客户端

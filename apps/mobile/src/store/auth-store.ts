@@ -8,6 +8,18 @@ import { SecureStorage } from "@/shared/storage/secure";
 import { queryClient } from "@/shared/api/query-client";
 import { clearSensitiveQueryCache } from "@/modules/auth/sensitive-query-cache";
 import { subscribeUnauthenticatedSession } from "@/modules/auth/auth-session-events";
+import {
+  LOGIN_LOCAL_STEP_TIMEOUT_MS,
+  LOGIN_MENU_TIMEOUT_MS,
+  LOGIN_NETWORK_STEP_TIMEOUT_MS,
+  LoginStepTimeoutError,
+  withLoginStepTimeout,
+} from "@/modules/auth/login-diagnostics";
+import {
+  flushLoginDiagnostics,
+  startLoginTrace,
+  type LoginTraceRecorder,
+} from "@/modules/auth/login-diagnostics-runtime";
 import { stopAttendanceLocationTracking } from "@/modules/attendance/location-tracking-control";
 import {
   loginApi,
@@ -123,7 +135,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // 必须在第一个 await 前同步恢复 fail-closed；设备模式残留不能放行审核凭据。
       get().rearmIosReviewPreAuth();
     }
+    // 普通账号登录全程记录各阶段（审核账号走本地离线认证，不记录）：卡住时下次登录可补传定位。
+    const trace: LoginTraceRecorder | null = isReviewUsername ? null : startLoginTrace(payload.username);
     await waitForLocalSessionClear();
+    trace?.mark("localClear");
     if (isReviewUsername) {
       // 在途清理可能于等待期间改变 gate，认证判断前再次同步隔离。
       get().rearmIosReviewPreAuth();
@@ -180,18 +195,45 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     get().beginStandardAuth();
     set({ isLoading: true });
     try {
-      const tokenRes = await loginApi({
-        ...payload,
-        // 登录密码输入框容易混入首尾空格，提交前统一按用户实际输入意图归一化。
-        password: payload.password.trim(),
-        passwordFormat: "raw",
-      });
-      await SecureStorage.setToken(tokenRes.accessToken);
-      await SecureStorage.setRefreshToken(tokenRes.refreshToken);
+      // 每一步都加超时：本机 Keychain 读写或请求拦截器若卡住，登录会报错恢复按钮，而不是一直转圈到重启 App。
+      const tokenRes = await withLoginStepTimeout(
+        loginApi({
+          ...payload,
+          // 登录密码输入框容易混入首尾空格，提交前统一按用户实际输入意图归一化。
+          password: payload.password.trim(),
+          passwordFormat: "raw",
+        }),
+        "loginApi",
+        LOGIN_NETWORK_STEP_TIMEOUT_MS,
+      );
+      trace?.mark("loginApi");
+      await withLoginStepTimeout(
+        SecureStorage.setToken(tokenRes.accessToken),
+        "saveAccessToken",
+        LOGIN_LOCAL_STEP_TIMEOUT_MS,
+      );
+      trace?.mark("saveAccessToken");
+      await withLoginStepTimeout(
+        SecureStorage.setRefreshToken(tokenRes.refreshToken),
+        "saveRefreshToken",
+        LOGIN_LOCAL_STEP_TIMEOUT_MS,
+      );
+      trace?.mark("saveRefreshToken");
 
-      const user = await getCurrentUserApi();
-      await SecureStorage.setUser(user);
-      await setAuthSessionMarker("account");
+      const user = await withLoginStepTimeout(
+        getCurrentUserApi(),
+        "currentUser",
+        LOGIN_NETWORK_STEP_TIMEOUT_MS,
+      );
+      trace?.mark("currentUser");
+      await withLoginStepTimeout(SecureStorage.setUser(user), "saveUser", LOGIN_LOCAL_STEP_TIMEOUT_MS);
+      trace?.mark("saveUser");
+      await withLoginStepTimeout(
+        setAuthSessionMarker("account"),
+        "sessionMarker",
+        LOGIN_LOCAL_STEP_TIMEOUT_MS,
+      );
+      trace?.mark("sessionMarker");
 
       set({
         user,
@@ -202,9 +244,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
       });
-      await useAppNavigationStore.getState().fetchMenu();
+      try {
+        await withLoginStepTimeout(
+          useAppNavigationStore.getState().fetchMenu(),
+          "menu",
+          LOGIN_MENU_TIMEOUT_MS,
+        );
+      } catch (menuError) {
+        // 菜单自带降级与后台重试：超时不拦登录，继续进入首页，只记一笔诊断。
+        if (!(menuError instanceof LoginStepTimeoutError)) throw menuError;
+        trace?.markMenuTimedOut();
+      }
+      trace?.mark("menu");
+      trace?.finish("success");
+      void flushLoginDiagnostics();
     } catch (error) {
-      await SecureStorage.clearAll().catch(() => undefined);
+      trace?.finish(error instanceof LoginStepTimeoutError ? "timeout" : "failed", error);
+      // 清理同样可能卡在 Keychain：超时就放弃等待，保证登录页能恢复。
+      await withLoginStepTimeout(
+        SecureStorage.clearAll(),
+        "localClear",
+        LOGIN_LOCAL_STEP_TIMEOUT_MS,
+      ).catch(() => undefined);
       get().rearmIosReviewPreAuth();
       set({
         user: null,
@@ -447,6 +508,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
       });
       await useAppNavigationStore.getState().fetchMenu();
+      // 已保存账号会话恢复成功：顺带补传上次异常登录（如登录途中被关闭的 App）的诊断记录。
+      void flushLoginDiagnostics();
       return true;
     } catch {
       await get().clearLocalSession();

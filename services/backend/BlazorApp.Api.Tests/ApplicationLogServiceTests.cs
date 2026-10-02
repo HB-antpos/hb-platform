@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -84,7 +85,7 @@ public class ApplicationLogServiceTests : IDisposable
             projects,
             project => Assert.Equal(("HBBBackend", "Web/移动端后端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbweb_rv", "Web前端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
-            project => Assert.Equal(("HbwebExpo", "移动端", false, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
+            project => Assert.Equal(("HbwebExpo", "移动端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbpos_win", "WPF客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbpos_api", "WPF收银后端", true, 7), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
             project => Assert.Equal(("hbpos_ipad", "iPad客户端", true, 30), (project.ProjectCode, project.DisplayName, project.Enabled, project.RetentionDays)),
@@ -2439,6 +2440,141 @@ public class ApplicationLogServiceTests : IDisposable
 
         Assert.Equal(6, deleted);
         Assert.Equal(0, await _db.Queryable<ApplicationLog>().CountAsync());
+    }
+
+    [Fact]
+    public void MobileDiagnosticsController_要求登录()
+    {
+        Assert.NotNull(
+            typeof(MobileDiagnosticsController).GetCustomAttributes(typeof(AuthorizeAttribute), true).SingleOrDefault()
+        );
+    }
+
+    [Fact]
+    public async Task MobileDiagnosticsController_身份与项目只信服务端token并写入HbwebExpo()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var controller = CreateMobileDiagnosticsController(CreateMobileDiagnosticsOptions(enabled: true), cache);
+        var item = CreateIngestItem("登录卡在 setToken");
+        // 客户端伪造的项目、来源、身份与 IP 都必须被覆盖。
+        item.ProjectCode = "hbpos_win";
+        item.SourceType = "Backend";
+        item.UserId = "spoofed-user";
+        item.UserName = "spoofed";
+        item.ClientIp = "10.0.0.1";
+        item.Category = "auth.login";
+
+        var response = await controller.UploadLogs(new ApplicationLogIngestRequestDto { Logs = [item] });
+
+        Assert.IsType<OkObjectResult>(response.Result);
+        var saved = Assert.Single(await _db.Queryable<ApplicationLog>().ToListAsync());
+        Assert.Equal("HbwebExpo", saved.ProjectCode);
+        Assert.Equal("Mobile", saved.SourceType);
+        Assert.Equal("59e591b0-ff43-4197-90ab-8d644659e71b", saved.UserId);
+        Assert.Equal("admin", saved.UserName);
+        Assert.Equal("203.0.113.9", saved.ClientIp);
+        Assert.Equal("auth.login", saved.Category);
+    }
+
+    [Fact]
+    public async Task MobileDiagnosticsController_项目未启用时拒绝且不写库()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var controller = CreateMobileDiagnosticsController(CreateMobileDiagnosticsOptions(enabled: false), cache);
+
+        var response = await controller.UploadLogs(
+            new ApplicationLogIngestRequestDto { Logs = [CreateIngestItem("未启用")] }
+        );
+
+        var forbidden = Assert.IsType<ObjectResult>(response.Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        Assert.Empty(await _db.Queryable<ApplicationLog>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task MobileDiagnosticsController_单次超过二十条拒绝()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var controller = CreateMobileDiagnosticsController(CreateMobileDiagnosticsOptions(enabled: true), cache);
+        var logs = Enumerable.Range(0, 21).Select(index => CreateIngestItem($"第 {index} 条")).ToList();
+
+        var response = await controller.UploadLogs(new ApplicationLogIngestRequestDto { Logs = logs });
+
+        Assert.IsType<BadRequestObjectResult>(response.Result);
+        Assert.Empty(await _db.Queryable<ApplicationLog>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task MobileDiagnosticsController_token缺少用户标识返回401()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var controller = CreateMobileDiagnosticsController(
+            CreateMobileDiagnosticsOptions(enabled: true),
+            cache,
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin")], "Bearer"))
+        );
+
+        var response = await controller.UploadLogs(
+            new ApplicationLogIngestRequestDto { Logs = [CreateIngestItem("无用户")] }
+        );
+
+        Assert.IsType<UnauthorizedObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task HbwebExpo启用但未配Key时_XLogKey通道仍然关闭()
+    {
+        var service = CreateService(CreateMobileDiagnosticsOptions(enabled: true));
+
+        Assert.True(service.IsProjectEnabled("HbwebExpo"));
+        Assert.Null(await service.AuthenticateProjectAsync("HbwebExpo", "any-key"));
+    }
+
+    private static ApplicationLoggingOptions CreateMobileDiagnosticsOptions(bool enabled)
+    {
+        return new ApplicationLoggingOptions
+        {
+            DefaultProjectCode = "HBBBackend",
+            Projects =
+            [
+                new ApplicationLoggingProjectOptions
+                {
+                    ProjectCode = "HbwebExpo",
+                    DisplayName = "移动端",
+                    Enabled = enabled,
+                },
+            ],
+        };
+    }
+
+    private MobileDiagnosticsController CreateMobileDiagnosticsController(
+        ApplicationLoggingOptions options,
+        IMemoryCache cache,
+        ClaimsPrincipal? user = null
+    )
+    {
+        var optionsMonitor = new Mock<IOptionsMonitor<ApplicationLoggingOptions>>();
+        optionsMonitor.SetupGet(item => item.CurrentValue).Returns(options);
+        var controller = new MobileDiagnosticsController(
+            CreateService(options),
+            new ApplicationLogRateLimiter(cache, optionsMonitor.Object),
+            NullLogger<MobileDiagnosticsController>.Instance
+        );
+        var context = new DefaultHttpContext
+        {
+            User = user ?? new ClaimsPrincipal(
+                new ClaimsIdentity(
+                    [
+                        new Claim("userId", "59e591b0-ff43-4197-90ab-8d644659e71b"),
+                        new Claim(ClaimTypes.Name, "admin"),
+                    ],
+                    "Bearer"
+                )
+            ),
+        };
+        context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.9");
+        controller.ControllerContext = new ControllerContext { HttpContext = context };
+        return controller;
     }
 
     private ApplicationLogService CreateService(params ApplicationLoggingProjectOptions[] projects)
