@@ -10,6 +10,8 @@ export interface AvailabilityDraft {
   startTime: string;
   endTime: string;
   note: string;
+  /** true＝填写的是不能上班时间。 */
+  unavailable?: boolean;
 }
 
 export function isAllDayAvailability(startTime: string, endTime: string) {
@@ -37,5 +39,6 @@ export function buildAvailabilityBatchPayload(draft: AvailabilityDraft): Attenda
     startTime: draft.allDay ? ALL_DAY_START : draft.startTime,
     endTime: draft.allDay ? ALL_DAY_END : draft.endTime,
     note: draft.note.trim() || undefined,
+    isUnavailable: Boolean(draft.unavailable),
   };
 }

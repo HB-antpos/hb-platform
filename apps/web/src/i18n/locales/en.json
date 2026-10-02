@@ -3099,6 +3099,10 @@
         "locationSamples": "Shift Location Samples",
         "locationTrajectory": "Shift Location Trajectory"
       },
+      "availabilityTypes": {
+        "available": "Available",
+        "unavailable": "Unavailable"
+      },
       "fields": {
         "store": "Store",
         "stores": "Stores",
@@ -3115,6 +3119,7 @@
         "weekStartDate": "Week Start",
         "availableDate": "Available Date",
         "availableTime": "Available Time",
+        "availabilityType": "Type",
         "punchType": "Punch Type",
         "punchTimeLocal": "Local Punch Time",
         "adjustmentMode": "Adjustment Mode",

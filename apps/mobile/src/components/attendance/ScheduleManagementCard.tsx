@@ -70,6 +70,7 @@ const STEP_MINUTES = 30;
 const SIDE_PANEL_WIDTH = 380;
 const ACCENT = ATTENDANCE_STATUS_TONES.accent;
 const LEAVE = ATTENDANCE_STATUS_TONES.warning;
+const UNAVAILABLE = ATTENDANCE_STATUS_TONES.danger;
 const QUICK_SHIFTS = [
   { key: "nineToFiveThirty", startTime: "09:00", endTime: "17:30" },
   { key: "tenToFour", startTime: "10:00", endTime: "16:00" },
@@ -496,14 +497,18 @@ export function ScheduleManagementCard({
     if (!canExportImage) setIsExportOpen(false);
   }, [canExportImage]);
 
+  // 不能上班的时段加前缀标明，店长排班时一眼看到员工不能到岗的时间。
   const describeAvailability = (items: AttendanceAvailability[]) =>
     items.length
       ? items
-          .map((item) =>
-            isAllDayRange(item.startTime, item.endTime)
+          .map((item) => {
+            const range = isAllDayRange(item.startTime, item.endTime)
               ? t("availability.allDay")
-              : `${normalizeClockTime(item.startTime)}–${normalizeClockTime(item.endTime)}`,
-          )
+              : `${normalizeClockTime(item.startTime)}–${normalizeClockTime(item.endTime)}`;
+            return item.isUnavailable
+              ? `${t("availability.unavailableLabel")} ${range}`
+              : range;
+          })
           .join(" · ")
       : t("scheduleManagement.editor.noAvailability");
 
@@ -524,8 +529,10 @@ export function ScheduleManagementCard({
       weekdayIndex,
     });
     // 员工只填了一段非全天的可上班时间时，直接用它作为默认班次，少点几下。
-    const dayAvailability =
-      availabilityMap.get(availabilityKey(row.userGuid, workDate)) ?? [];
+    // 只参考可上班时段；不能上班的时段不能拿来当默认班次。
+    const dayAvailability = (
+      availabilityMap.get(availabilityKey(row.userGuid, workDate)) ?? []
+    ).filter((item) => !item.isUnavailable);
     const single = dayAvailability.length === 1 ? dayAvailability[0] : undefined;
     setForm(
       single && !isAllDayRange(single.startTime, single.endTime)
@@ -802,6 +809,10 @@ export function ScheduleManagementCard({
       <Text variant="labelSmall" style={styles.muted}>
         {t("scheduleManagement.legend.available")}
       </Text>
+      <View style={[styles.legendSwatch, styles.legendUnavailable]} />
+      <Text variant="labelSmall" style={styles.muted}>
+        {t("scheduleManagement.legend.unavailable")}
+      </Text>
       {EMPLOYMENT_TYPE_LEGEND.map((item) => (
         <View key={item.code} style={styles.legendType}>
           <EmploymentTypeBadge code={item.code} />
@@ -886,6 +897,15 @@ export function ScheduleManagementCard({
         <View style={[styles.cellChip, styles.availableChip]}>
           <Text style={styles.availableText} numberOfLines={1}>
             {t("scheduleManagement.cell.available")}
+          </Text>
+        </View>
+      );
+    }
+    if (cell.kind === "unavailable") {
+      return (
+        <View style={[styles.cellChip, styles.unavailableChip]}>
+          <Text style={styles.unavailableText} numberOfLines={1}>
+            {t("scheduleManagement.cell.unavailable")}
           </Text>
         </View>
       );
@@ -1569,6 +1589,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  unavailableChip: {
+    backgroundColor: UNAVAILABLE.background,
+  },
+  unavailableText: {
+    color: UNAVAILABLE.text,
+    fontSize: 12,
+    fontWeight: "600",
+  },
   bodyCell: {
     borderColor: HB_COLORS.outlineMuted,
     borderRightWidth: StyleSheet.hairlineWidth,
@@ -1728,6 +1756,9 @@ const styles = StyleSheet.create({
     borderColor: HB_COLORS.outline,
     borderStyle: "dashed",
     borderWidth: 1,
+  },
+  legendUnavailable: {
+    backgroundColor: UNAVAILABLE.background,
   },
   legendLeave: {
     backgroundColor: LEAVE.background,

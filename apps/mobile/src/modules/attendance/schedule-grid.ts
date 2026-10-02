@@ -2,7 +2,7 @@ import { schedulePaidMinutes } from "./attendance-my-week";
 import type { AttendanceAvailability, AttendanceSchedule } from "./types";
 
 /** 店长排班周网格单元格类型：有班 / 已批准请假 / 员工可上班 / 空。 */
-export type ScheduleGridCellKind = "shift" | "leave" | "available" | "empty";
+export type ScheduleGridCellKind = "shift" | "leave" | "available" | "unavailable" | "empty";
 
 export interface ScheduleGridCell {
   kind: ScheduleGridCellKind;
@@ -51,11 +51,15 @@ export function classifyScheduleGridCell(
     .filter((item) => isNotCancelled(item.status))
     .sort((left, right) => left.startTime.localeCompare(right.startTime));
   const dayAvailability = availability.filter((item) => isNotCancelled(item.status));
+  // 同一天有可上班时段就按可上班；只填了不能上班时才标不能上班。
+  const hasAvailable = dayAvailability.some((item) => !item.isUnavailable);
   const kind: ScheduleGridCellKind = daySchedules.some((item) => item.leaveType)
     ? "leave"
     : daySchedules.length
       ? "shift"
-      : dayAvailability.length ? "available" : "empty";
+      : hasAvailable
+        ? "available"
+        : dayAvailability.length ? "unavailable" : "empty";
   return { kind, schedules: daySchedules, availability: dayAvailability };
 }
 
@@ -145,7 +149,10 @@ export function filterScheduleUsers<T extends { userGUID: string; isStoreManager
   return { visible, otherManagerCount };
 }
 
-/** 批量排班只给空格与仅有「可上班」标记的格子建班；已有班次或请假的格子跳过，与「复制上周」的跳过口径一致。 */
+/**
+ * 批量排班只给空格与仅有「可上班」标记的格子建班；已有班次、请假或员工标了不能上班的格子跳过，
+ * 与「复制上周」的跳过口径一致（不能上班的格子仍可点开单独排班）。
+ */
 export function isBatchSchedulableCell(cell: Pick<ScheduleGridCell, "kind">) {
   return cell.kind === "empty" || cell.kind === "available";
 }

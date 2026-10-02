@@ -96,6 +96,8 @@ export interface AttendanceAvailabilityDto {
   status: AttendanceAvailabilityStatus
   remark?: string
   createdAt?: string
+  /** true＝员工标记的不能上班时段，false/缺省＝可上班 */
+  isUnavailable?: boolean
 }
 
 export interface AttendancePunchDto {

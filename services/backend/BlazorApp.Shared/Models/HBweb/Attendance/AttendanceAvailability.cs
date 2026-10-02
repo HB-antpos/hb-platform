@@ -29,6 +29,10 @@ namespace BlazorApp.Shared.Models
         [SugarColumn(IsNullable = false)]
         public TimeSpan EndTime { get; set; }
 
+        // 时间段类型：false＝可上班（历史数据默认），true＝不能上班（全天或时段）。
+        [SugarColumn(IsNullable = false, DefaultValue = "0")]
+        public bool IsUnavailable { get; set; }
+
         [SugarColumn(IsNullable = false, Length = 30)]
         public string Status { get; set; } = "Active";
 

@@ -3099,6 +3099,10 @@
         "locationSamples": "班中定位样本",
         "locationTrajectory": "班中位置轨迹"
       },
+      "availabilityTypes": {
+        "available": "可上班",
+        "unavailable": "不能上班"
+      },
       "fields": {
         "store": "分店",
         "stores": "分店",
@@ -3115,6 +3119,7 @@
         "weekStartDate": "周开始日期",
         "availableDate": "可上班日期",
         "availableTime": "可上班时间",
+        "availabilityType": "类型",
         "punchType": "打卡类型",
         "punchTimeLocal": "本地打卡时间",
         "adjustmentMode": "处理方式",

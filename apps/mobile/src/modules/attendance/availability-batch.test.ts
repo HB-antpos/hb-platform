@@ -169,7 +169,24 @@ async function testReadOnlyVerify() {
   assert.equal(calls.createCalls.length, 0, "verify 只能 GET，不能写入");
 }
 
+// 不能上班：请求带类型标记；后端回读类型不一致（例如旧后端存成可上班）时不能当作已保存。
+async function testUnavailableTypeMustMatch() {
+  const unavailablePayload = { ...basePayload, isUnavailable: true };
+  const saved = dependencySet({
+    createWeek: async (payload) => payload.segments.map((segment) =>
+      availability(segment.availableDate, { isUnavailable: true })),
+  });
+  await createAvailabilityBatch(unavailablePayload, saved.dependencies);
+  assert.equal(saved.createCalls[0].segments[0].isUnavailable, true, "提交请求必须带不能上班标记");
+
+  const verified = await verifyAvailabilityBatch(unavailablePayload, dependencySet({
+    getWeek: async () => [availability("2026-03-02", { isUnavailable: false })],
+  }).dependencies);
+  assert.deepEqual(verified, [], "回读到同时段的可上班记录不能确认为不能上班已保存");
+}
+
 async function main() {
+  await testUnavailableTypeMustMatch();
   await testSingleRequestAndCanonicalMatching();
   await testCrossWeekGroupingAndOrdering();
   await testPost500ReadbackConfirmsWithoutRetry();

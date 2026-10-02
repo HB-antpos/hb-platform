@@ -130,6 +130,8 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan StartTime { get; set; }
         public TimeSpan EndTime { get; set; }
         public string? Remark { get; set; }
+        // true＝不能上班；旧客户端不传即 false＝可上班。
+        public bool IsUnavailable { get; set; }
     }
 
     public class CreateAttendanceAvailabilityDto
@@ -145,6 +147,8 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan StartTime { get; set; }
         public TimeSpan EndTime { get; set; }
         public string? Remark { get; set; }
+        // null＝保持原类型（兼容不传该字段的旧 App），有值才覆盖。
+        public bool? IsUnavailable { get; set; }
     }
 
     public class AttendanceAvailabilityDto
@@ -156,6 +160,7 @@ namespace BlazorApp.Shared.DTOs
         public DateTime AvailableDate { get; set; }
         public TimeSpan StartTime { get; set; }
         public TimeSpan EndTime { get; set; }
+        public bool IsUnavailable { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? Remark { get; set; }
     }
