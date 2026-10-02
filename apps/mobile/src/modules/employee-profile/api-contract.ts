@@ -58,6 +58,11 @@ export function normalizeSensitiveChangeRequest(
   }
   const data = asRecord(payload);
   const rawStatus = asString(data.status ?? data.Status);
+  // 后端没有申请时返回 Ok(null)，ASP.NET Core 会转成 204 空响应体，axios 的 data 是空串而非 null；
+  // 没有状态就不是一条有效申请，按「没有申请」处理，否则界面会拼出 status. 这种原样翻译键。
+  if (!rawStatus) {
+    return null;
+  }
   const status = (
     rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase()
   ) as EmployeeProfileSensitiveChangeRequest["status"];

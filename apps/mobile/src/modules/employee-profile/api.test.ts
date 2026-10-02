@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { createEmployeeProfileApi, normalizeEmployeeProfile } from "./api-contract";
+import { createEmployeeProfileApi, normalizeEmployeeProfile, normalizeSensitiveChangeRequest } from "./api-contract";
 
 const calls: Array<{ method: string; path: string; payload?: unknown }> = [];
 assert.equal(normalizeEmployeeProfile({ UserName: "legacy" }).email, "", "旧 API 缺少 Email 时必须兼容为空字符串");
+// 后端 Ok(null) 会变成 204 No Content，axios 拿到的 data 是空串；必须视为「没有申请」，不能拼出 status. 这种原样翻译键。
+assert.equal(normalizeSensitiveChangeRequest(""), null, "204 空响应必须视为没有敏感资料申请");
+assert.equal(normalizeSensitiveChangeRequest({}), null, "缺少状态的响应必须视为没有敏感资料申请");
 
 async function main() {
   const api = createEmployeeProfileApi({
