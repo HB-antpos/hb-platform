@@ -94,6 +94,31 @@ public sealed class DailyCloseViewLayoutTests
     }
 
     [Fact]
+    public void Daily_close_status_is_visible_below_the_tabs_and_inside_the_cash_workspace()
+    {
+        var view = LoadView();
+        var statusBar = FindNamedElement(view, "DailyCloseStatusBar");
+        var tabControl = FindNamedElement(view, "DailyCloseTabControl");
+        var workspace = FindNamedElement(view, "DailyCloseCashWorkspaceOverlay");
+        var discard = FindNamedElement(view, "DailyCloseDiscardDraftOverlay");
+
+        // 状态栏独立于顶栏，位于页签内容下方；保存、打印、结算的提示都要让收银员看得到。
+        Assert.Equal("1", (string?)statusBar.Attribute("Grid.Row"));
+        Assert.Null(tabControl.Attribute("Grid.Row"));
+        Assert.Equal("{Binding StatusMessage}", (string?)FindNamedElement(view, "DailyCloseStatusText").Attribute("Text"));
+        Assert.Equal(
+            "{Binding StatusMessage, Converter={StaticResource StringHasValueToVis}}",
+            (string?)statusBar.Attribute("Visibility"));
+
+        // 工作区覆盖整页（含状态栏行），其底栏同样显示状态。
+        Assert.Equal("2", (string?)workspace.Attribute("Grid.RowSpan"));
+        Assert.Equal("2", (string?)discard.Attribute("Grid.RowSpan"));
+        var workspaceStatus = FindNamedElement(view, "DailyCloseWorkspaceStatusText");
+        Assert.Contains(workspaceStatus, workspace.Descendants());
+        Assert.Equal("{Binding StatusMessage}", (string?)workspaceStatus.Attribute("Text"));
+    }
+
+    [Fact]
     public void Daily_close_tabs_keep_spacing_inside_the_template_so_both_outer_corners_render()
     {
         var view = LoadView();
@@ -286,7 +311,8 @@ public sealed class DailyCloseViewLayoutTests
             "dailyClose.linklySettlement.submission.notSubmitted",
             "dailyClose.linklySettlement.submission.submitted",
             "dailyClose.linklySettlement.submission.unknown",
-            "dailyClose.linklySettlement.noReceiptPreview"
+            "dailyClose.linklySettlement.noReceiptPreview",
+            "dailyClose.linklySettlement.notToday"
         };
 
         foreach (var resourceName in new[] { "Strings.resx", "Strings.zh-CN.resx" })

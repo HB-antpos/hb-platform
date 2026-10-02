@@ -789,6 +789,17 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
     private async Task SettleAndPrintAsync(CancellationToken cancellationToken = default)
     {
+        if (!IsBusy && _linklySettlementService is not null && BusinessDate != DateTime.Today)
+        {
+            // 页面跨过零点后按钮状态可能过时：明确提示只能结算今天，而不是静默不响应；也不先弹授权。
+            StatusMessage = Format(
+                "dailyClose.linklySettlement.notToday",
+                "Linkly settlement is only available when the business date is today. Change the business date to {0:yyyy-MM-dd} and try again.",
+                DateTime.Today);
+            SettleAndPrintCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
         using var authorization = await ViewModelOperationAuthorization.AuthorizeAsync(
             _operationAuthorizationService,
             TryRequirePermission,
@@ -1133,6 +1144,8 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(IsHistoryTabSelected));
         OnPropertyChanged(nameof(IsLinklySettlementTabSelected));
+        // “是否今天”随时间变化，切换页签时重新评估结算按钮，避免跨零点后仍显示可点。
+        SettleAndPrintCommand?.NotifyCanExecuteChanged();
     }
 
     partial void OnKeypadBufferChanged(string value)

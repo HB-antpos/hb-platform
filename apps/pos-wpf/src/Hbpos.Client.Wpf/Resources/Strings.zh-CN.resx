@@ -3265,4 +3265,7 @@
   <data name="dailyClose.linklySettlement.noReceiptPreview" xml:space="preserve">
     <value>该记录没有银行回单。</value>
   </data>
+  <data name="dailyClose.linklySettlement.notToday" xml:space="preserve">
+    <value>Linkly 结算只能在营业日期为今天时进行。请把营业日期改为 {0:yyyy-MM-dd} 后再试。</value>
+  </data>
 </root>
