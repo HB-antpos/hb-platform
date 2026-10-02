@@ -335,8 +335,13 @@ public sealed class AppShutdownCoordinatorTests
         Exception fatal = fatalKind == "oom"
             ? new OutOfMemoryException("late fatal shutdown cancellation")
             : new StackOverflowException("late fatal shutdown cancellation");
-        var coordinator = new AppShutdownCoordinator(totalBudget: TimeSpan.FromSeconds(1));
+        // 中文注释：协调器用虚拟时钟（原因见 ShutdownStepTimeoutTimeProvider），总预算不会被墙钟耗尽；
+        // 步骤超时由测试在步骤已注册取消回调后显式触发。
+        var stepTimeout = TimeSpan.FromMilliseconds(20);
+        var timeProvider = new ShutdownStepTimeoutTimeProvider(stepTimeout);
+        var coordinator = new AppShutdownCoordinator(timeProvider, AsyncTestWaitSupport.DefaultTimeout);
         var neverCompletes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackRegistered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var releaseCallback = new ManualResetEventSlim(false);
         var timedOutStepCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -344,7 +349,7 @@ public sealed class AppShutdownCoordinatorTests
         coordinator.RegisterStep(
             "late-fatal-cancel",
             100,
-            TimeSpan.FromMilliseconds(20),
+            stepTimeout,
             async token =>
             {
                 using var registration = token.Register(() =>
@@ -353,6 +358,7 @@ public sealed class AppShutdownCoordinatorTests
                     releaseCallback.Wait();
                     throw fatal;
                 });
+                callbackRegistered.TrySetResult();
                 try
                 {
                     await neverCompletes.Task;
@@ -375,9 +381,17 @@ public sealed class AppShutdownCoordinatorTests
 
         try
         {
-            var thrown = await Record.ExceptionAsync(
-                () => Task.Run(() =>
-                    App.WaitForShutdownPreparation(coordinator, TimeSpan.FromSeconds(1))));
+            // 生产中 OnExit 在 UI 线程同步等待；这里用独立线程，避免测试自身再占一个线程池线程。
+            var exitWait = Task.Factory.StartNew(
+                () => App.WaitForShutdownPreparation(coordinator, AsyncTestWaitSupport.DefaultTimeout),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+            // 先确认回调已挂在步骤 token 上，致命异常才来自"超时取消回调"而不是步骤体内的同步 Register。
+            await callbackRegistered.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            await timeProvider.FireStepTimeoutAsync();
+
+            var thrown = await Record.ExceptionAsync(() => exitWait);
 
             Assert.Same(fatal, thrown);
             Assert.True(nextStepCalled);
