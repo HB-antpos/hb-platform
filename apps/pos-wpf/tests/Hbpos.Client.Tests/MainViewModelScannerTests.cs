@@ -7452,64 +7452,6 @@ public sealed class MainViewModelScannerTests
         return InvokeHandleCardRecoveryCenterResultAsync(viewModel, selectedKey, result);
     }
 
-    /// <summary>
-    /// 退出协调器专用虚拟时钟：时间不前进（总预算永不耗尽），只记下指定时长的步骤超时计时器，
-    /// 由测试显式触发；其余计时器（后续步骤超时、迟到异常观察预算）永不触发。
-    /// </summary>
-    private sealed class StepTimeoutTimeProvider(TimeSpan stepTimeout) : TimeProvider
-    {
-        private readonly DateTimeOffset _utcNow = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
-        private readonly TaskCompletionSource<ManualTimer> _stepTimeoutArmed =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public override DateTimeOffset GetUtcNow() => _utcNow;
-
-        public override ITimer CreateTimer(
-            TimerCallback callback,
-            object? state,
-            TimeSpan dueTime,
-            TimeSpan period)
-        {
-            var timer = new ManualTimer(callback, state);
-            if (dueTime == stepTimeout)
-            {
-                _stepTimeoutArmed.TrySetResult(timer);
-            }
-
-            return timer;
-        }
-
-        /// <summary>等协调器挂上步骤超时计时器后再触发，避免先推进、后建计时器导致永不超时。</summary>
-        public async Task FireStepTimeoutAsync()
-        {
-            var timer = await _stepTimeoutArmed.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
-            timer.Fire();
-        }
-
-        private sealed class ManualTimer(TimerCallback callback, object? state) : ITimer
-        {
-            private int _disposed;
-
-            public void Fire()
-            {
-                if (Volatile.Read(ref _disposed) == 0)
-                {
-                    callback(state);
-                }
-            }
-
-            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
-
-            public void Dispose() => Volatile.Write(ref _disposed, 1);
-
-            public ValueTask DisposeAsync()
-            {
-                Dispose();
-                return ValueTask.CompletedTask;
-            }
-        }
-    }
-
     private sealed class RecordingOperationAuditLogger : IOperationAuditLogger
     {
         public List<OperationAuditEventDto> Events { get; } = [];
