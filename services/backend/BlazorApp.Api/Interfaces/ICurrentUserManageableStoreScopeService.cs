@@ -28,6 +28,10 @@ namespace BlazorApp.Api.Interfaces
     public interface ICurrentUserManageableStoreScopeService
     {
         Task<CurrentUserManageableStoreScope> GetScopeAsync();
+
+        // 只读查看类功能（员工操作日志）用：店长取 UserStore 中全部关联分店，而不只是主分店。
+        // 默认实现沿用可管理分店口径，既有测试替身无需改动；真实服务覆盖为全部关联分店。
+        Task<CurrentUserManageableStoreScope> GetAssignedStoreScopeAsync() => GetScopeAsync();
         Task<IReadOnlyList<string>> GetAccessibleStoreCodesAsync();
         Task<bool> CanAccessStoreCodeAsync(string storeCode);
         Task<bool> CanAccessOrderAsync(string orderGuid);

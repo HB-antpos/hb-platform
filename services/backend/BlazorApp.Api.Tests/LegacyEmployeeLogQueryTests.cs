@@ -177,8 +177,9 @@ public sealed class LegacyEmployeeLogQueryTests
     [Fact]
     public async Task QueryAsync_越权分店在访问数据库前返回Forbidden()
     {
-        var scope = new Mock<ICurrentUserManageableStoreScopeService>();
-        scope.Setup(service => service.GetScopeAsync()).ReturnsAsync(new CurrentUserManageableStoreScope
+        // 严格模式只配置查看口径：服务若仍走可管理分店（主分店）口径会直接抛异常。
+        var scope = new Mock<ICurrentUserManageableStoreScopeService>(MockBehavior.Strict);
+        scope.Setup(service => service.GetAssignedStoreScopeAsync()).ReturnsAsync(new CurrentUserManageableStoreScope
         {
             IsAllowed = true,
             IsAuthenticated = true,

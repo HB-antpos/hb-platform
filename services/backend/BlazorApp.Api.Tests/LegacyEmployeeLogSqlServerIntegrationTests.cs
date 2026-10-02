@@ -267,10 +267,8 @@ public sealed partial class LegacyEmployeeLogSqlServerIntegrationTests
         )
         {
             var accessible = new[] { accessibleStoreCode }.Concat(moreAccessibleStoreCodes).ToArray();
-            var scope = new Mock<ICurrentUserManageableStoreScopeService>();
-            scope.Setup(service => service.CanAccessStoreCodeAsync(It.IsAny<string>()))
-                .ReturnsAsync((string code) => accessible.Contains(code));
-            scope.Setup(service => service.GetScopeAsync()).ReturnsAsync(new CurrentUserManageableStoreScope
+            var scope = new Mock<ICurrentUserManageableStoreScopeService>(MockBehavior.Strict);
+            scope.Setup(service => service.GetAssignedStoreScopeAsync()).ReturnsAsync(new CurrentUserManageableStoreScope
             {
                 IsAllowed = true,
                 IsAuthenticated = true,

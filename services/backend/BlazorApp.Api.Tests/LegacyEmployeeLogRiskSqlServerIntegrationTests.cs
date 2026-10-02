@@ -219,9 +219,14 @@ public sealed partial class LegacyEmployeeLogSqlServerIntegrationTests
 
     private static LegacyEmployeeLogReviewService CreateReviewService(Fixture fixture, string accessibleStore = RiskStore)
     {
-        var scope = new Mock<ICurrentUserManageableStoreScopeService>();
-        scope.Setup(service => service.CanAccessStoreCodeAsync(It.IsAny<string>()))
-            .ReturnsAsync((string code) => code == accessibleStore);
+        var scope = new Mock<ICurrentUserManageableStoreScopeService>(MockBehavior.Strict);
+        scope.Setup(service => service.GetAssignedStoreScopeAsync()).ReturnsAsync(new CurrentUserManageableStoreScope
+        {
+            IsAllowed = true,
+            IsAuthenticated = true,
+            IsStoreManager = true,
+            StoreCodes = [accessibleStore],
+        });
         var user = new Mock<ICurrentUserService>();
         user.Setup(service => service.GetCurrentUserGuid()).Returns("8C1D2E3F-0000-4000-8000-00000000A001");
         user.Setup(service => service.GetCurrentUsername()).Returns("周倩");

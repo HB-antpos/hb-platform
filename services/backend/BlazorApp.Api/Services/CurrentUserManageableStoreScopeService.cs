@@ -33,7 +33,13 @@ namespace BlazorApp.Api.Services
             _httpContextAccessor = httpContextAccessor;
         }
 
-        public async Task<CurrentUserManageableStoreScope> GetScopeAsync()
+        public Task<CurrentUserManageableStoreScope> GetScopeAsync() => GetScopeCoreAsync(primaryOnly: true);
+
+        // 店长可查看的分店：UserStore 全部关联分店（含非主分店）；管理员与仓库经理仍为不限分店。
+        public Task<CurrentUserManageableStoreScope> GetAssignedStoreScopeAsync() => GetScopeCoreAsync(primaryOnly: false);
+
+        // primaryOnly=true 为可管理分店口径（只认主分店），供店员管理等写操作使用，行为保持不变。
+        private async Task<CurrentUserManageableStoreScope> GetScopeCoreAsync(bool primaryOnly)
         {
             var user = _httpContextAccessor.HttpContext?.User;
             var actorLabel = _currentUserService.GetCurrentUsername();
@@ -85,8 +91,9 @@ namespace BlazorApp.Api.Services
             var stores = await _context.Db.Queryable<UserStore>()
                 .InnerJoin<Store>((us, s) => us.StoreGUID == s.StoreGUID)
                 .Where((us, s) =>
-                    us.UserGUID == userGuid && !us.IsDeleted && us.IsPrimary && !s.IsDeleted
+                    us.UserGUID == userGuid && !us.IsDeleted && !s.IsDeleted
                 )
+                .WhereIF(primaryOnly, (us, s) => us.IsPrimary)
                 .Select((us, s) => new { us.StoreGUID, s.StoreCode })
                 .ToListAsync();
 

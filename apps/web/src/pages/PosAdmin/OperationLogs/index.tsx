@@ -87,7 +87,6 @@ import type {
 } from '../../../types/operationAudit'
 import {
   buildStoreOptionsFromUserStores,
-  filterStoreOptionsByManagedCodes,
 } from '../../../utils/managedStoreScope'
 import type { EmployeeLogsHeader } from '../EmployeeLogs/employeeLogsSource'
 import EmployeeSummaryTable from '../LegacyEmployeeLogs/EmployeeSummaryTable'
@@ -298,18 +297,20 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
 
   const visibleStoreOptions = useMemo(
     () =>
-      filterStoreOptionsByManagedCodes(storeOptions, managedStoreCodes).map((option) => ({
+      // 店长的选项已限定为本人全部关联分店，管理员为全部启用分店，这里不再按可管理（主）分店过滤。
+      storeOptions.map((option) => ({
         value: option.value,
         label: option.label && option.label !== option.value ? `${option.value} · ${option.label}` : option.value,
       })),
-    [managedStoreCodes, storeOptions],
+    [storeOptions],
   )
   const storeNames = useMemo(() => buildStoreNameMap(storeOptions), [storeOptions])
 
   useEffect(() => {
     if (managedStoreCodes !== null) {
-      // 店长直接使用当前会话已授权的可管理门店，避免依赖 Stores.View 全店列表权限。
-      setStoreOptions(buildStoreOptionsFromUserStores(currentUser?.stores, { manageableOnly: true }))
+      // 店长按会话中全部关联分店查看日志（不只主分店），与后端 GetAssignedStoreScopeAsync 一致，服务端仍会再次校验；
+      // 直接用会话分店，避免依赖 Stores.View 全店列表权限。
+      setStoreOptions(buildStoreOptionsFromUserStores(currentUser?.stores))
       return
     }
 
