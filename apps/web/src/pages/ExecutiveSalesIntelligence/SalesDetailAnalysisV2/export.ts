@@ -198,6 +198,14 @@ export async function buildSalesDetailWorkbook(rows: readonly SalesDetailRow[], 
 export async function exportSalesDetailProducts(query: SalesDetailQuery, currentPage: SalesDetailPage,
   options: SalesDetailWorkbookOptions) {
   const rows = selectCurrentPageExportRows(currentPage, options.signal)
+  const fileName = `${options.english ? 'Sales_Product_Detail' : '销售商品明细'}_${options.startDate}_${options.endDate}_page-${query.pageIndex}.xlsx`
+  return exportSalesDetailRows(rows, fileName, options)
+}
+
+/** 当前页商品生成带图工作簿并下载；销售明细与澳洲供应商分类页签共用。 */
+export async function exportSalesDetailRows(rows: readonly SalesDetailRow[], fileName: string, options: SalesDetailWorkbookOptions) {
+  checkCancelled(options.signal)
+  if (rows.length > MAX_PRODUCT_IMAGE_EXPORT_ROWS) throw new Error('带图导出最多 500 件商品')
   const result = await buildSalesDetailWorkbook(rows, options)
   checkCancelled(options.signal)
   options.onProgress?.(options.english ? 'Generating Excel file…' : '正在生成 Excel 文件…')
@@ -208,7 +216,7 @@ export async function exportSalesDetailProducts(query: SalesDetailQuery, current
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${options.english ? 'Sales_Product_Detail' : '销售商品明细'}_${options.startDate}_${options.endDate}_page-${query.pageIndex}.xlsx`
+  link.download = fileName
   document.body.appendChild(link)
   link.click()
   link.remove()

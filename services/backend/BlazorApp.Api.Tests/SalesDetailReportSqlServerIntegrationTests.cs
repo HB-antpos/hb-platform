@@ -1094,6 +1094,67 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
         Assert.Equal(SalesDetailQueryMonthlyProjection.MissingSchemaErrorNumber, error.Number);
     }
 
+    [SalesDetailReportSqlServerFact]
+    public async Task 澳洲供应商分类汇总各节点与分类筛选口径一致且商品页不受重复资料放大()
+    {
+        await using var fixture = await SalesDetailSqlServerFixture.CreateAsync();
+        await fixture.SeedChinaSupplierAsync("C1", "国内一");
+        await fixture.SeedLocalSupplierAsync("A1", "澳洲一");
+        await fixture.SeedLocalSupplierAsync("200", "Hot Bargain");
+        await fixture.ExecuteSqlAsync("""
+            INSERT INTO [dbo].[LocalSupplierCategory] ([CategoryGUID],[LocalSupplierCode],[ParentGUID],[CategoryName],[IsActive],[SortOrder],[IsDeleted]) VALUES
+              (N'cat-p',N'A1',NULL,N'父分类',1,NULL,0),(N'cat-a',N'A1',N'cat-p',N'子分类',1,NULL,0),(N'cat-x',N'A1',NULL,N'已删分类',1,NULL,1);
+            INSERT INTO [dbo].[WarehouseCategory] ([CategoryGUID],[ParentGUID],[CategoryName],[IsActive],[SortOrder],[IsDeleted]) VALUES
+              (N'WC-ROOT',NULL,N'仓库父类',1,1,0),(N'WC-1',N'WC-ROOT',N'仓库子类',1,1,0);
+            """);
+        await fixture.SeedCategorizedProductAsync("P-A1", "子分类商品", "A1", null, "cat-a");
+        await fixture.SeedCategorizedProductAsync("P-A2", "父分类商品", "A1", null, "cat-p");
+        await fixture.SeedCategorizedProductAsync("P-X", "已删分类商品", "A1", null, "cat-x");
+        await fixture.SeedCategorizedProductAsync("P-WH", "仓库商品", "200", "wc-1"); // 商品上的仓库分类大小写与分类表不同
+        await fixture.SeedCategorizedProductAsync("P-WH", "仓库商品重复资料", "200", "wc-1");
+        await fixture.SeedCategorizedProductAsync("P-CN", "国内商品", null, "WC-1");
+        foreach (var (day, factor) in new[] { (SeedDate, 1m), (CompareDate, 2m) })
+        {
+            await fixture.SeedFreshStateAsync(day);
+            await fixture.SeedFactAsync(day, "B1", "A1", "P-A1", 1, 10m * factor);
+            await fixture.SeedFactAsync(day, "B2", "A1", "P-A1 ", 1, 1m * factor); // 尾随空格的商品码合并到同一商品
+            await fixture.SeedFactAsync(day, "B1", "A1", "P-A2", 2, 20m * factor);
+            await fixture.SeedFactAsync(day, "B1", "A1", "P-X", 3, 30m * factor);
+            await fixture.SeedFactAsync(day, "B1", "200", "P-WH", 4, 40m * factor);
+            await fixture.SeedFactAsync(day, "B1", "C1", "P-CN", 5, 50m * factor);
+            await fixture.SeedFactAsync(day, "B1", "A9", "P-OTHER", 9, 900m * factor);
+        }
+        var range = Range(SeedDate, CompareDate);
+        var service = fixture.CreateService();
+
+        var tree = await service.GetSalesDetailCategoryReportAsync(range, new[] { "A1", "200" }, new() { "B1", "B2" });
+
+        Assert.Equal(SalesStatisticRefreshStatus.Fresh, tree.StatisticStatus);
+        Assert.Equal(151m, tree.Data!.Summary.Revenue);
+        Assert.Equal(302m, tree.Data.Summary.CompareRevenue);
+        var a1 = tree.Data.Suppliers.Single(item => item.SupplierCode == "A1");
+        Assert.Equal(30m, a1.Unassigned!.Revenue);
+        var nodes = tree.Data.Suppliers.SelectMany(supplier => supplier.Categories.SelectMany(node => new[] { node }.Concat(node.Children))
+            .Select(node => (Supplier: supplier.SupplierCode, Node: node))).ToList();
+        Assert.Equal(new[] { "WC-1", "WC-ROOT", "cat-a", "cat-p" }, nodes.Select(item => item.Node.CategoryGuid).OrderBy(guid => guid, StringComparer.Ordinal));
+        foreach (var (supplier, node) in nodes)
+        {
+            var detail = await service.GetSalesDetailReportFilteredAsync(range, SalesDetailKind.Australia, new() { "B1", "B2" },
+                selectedSupplierCodes: new() { supplier }, supplierCategoryGuids: new() { node.CategoryGuid },
+                sections: new[] { SalesDetailSection.Summary });
+            Assert.True(detail.Data!.Summary!.Summary!.Revenue == node.Revenue && detail.Data.Summary.Summary.CompareRevenue == node.CompareRevenue,
+                $"{supplier}/{node.CategoryGuid}: 分类汇总 {node.Revenue}/{node.CompareRevenue}，销售明细 {detail.Data.Summary.Summary.Revenue}/{detail.Data.Summary.Summary.CompareRevenue}");
+        }
+
+        var products = await service.GetSalesDetailCategoryReportAsync(range, new[] { "A1", "200" }, new() { "B1", "B2" },
+            nodeSupplierCode: "200", nodeCategoryGuid: "WC-ROOT", includeTree: false);
+        Assert.Equal(new[] { ("P-CN", 50m), ("P-WH", 40m) }, products.Data!.Products!.Rows.Select(row => (row.Code, row.Revenue)));
+        Assert.Equal(2, products.Data.Products.Total);
+        var unassigned = await service.GetSalesDetailCategoryReportAsync(range, new[] { "A1" }, new() { "B1" },
+            nodeSupplierCode: "A1", nodeCategoryGuid: SalesDetailCategorySources.UnassignedKey, search: "已删", includeTree: false);
+        Assert.Equal("P-X", Assert.Single(unassigned.Data!.Products!.Rows).Code);
+    }
+
     private static DateRangeDto Range() => Range(SeedDate, null);
 
     private static DateRangeDto Range(DateTime currentDate, DateTime? compareDate)
@@ -1681,6 +1742,8 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
             WHERE [Month] = @month;
             """, ("@month", month), ("@delta", delta));
 
+        public Task ExecuteSqlAsync(string sql) => ExecuteNonQueryAsync(_databaseConnectionString, sql);
+
         public Task SeedCategorizedProductAsync(string code, string name, string? localSupplierCode, string? warehouseCategory, string? supplierCategory = null)
             => ExecuteNonQueryAsync(_databaseConnectionString, """
                 INSERT INTO [dbo].[Product] ([UUID], [ProductCode], [ProductName], [LocalSupplierCode], [WarehouseCategoryGUID])
@@ -1829,6 +1892,23 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
                 [ProductImage] nvarchar(200) NULL,
                 [WarehouseCategoryGUID] nvarchar(100) NULL,
                 [IsDeleted] bit NOT NULL CONSTRAINT [DF_Product_IsDeleted] DEFAULT (0)
+            );
+            CREATE TABLE [dbo].[LocalSupplierCategory] (
+                [CategoryGUID] nvarchar(50) NOT NULL PRIMARY KEY,
+                [LocalSupplierCode] nvarchar(64) NOT NULL,
+                [ParentGUID] nvarchar(50) NULL,
+                [CategoryName] nvarchar(200) NOT NULL,
+                [IsActive] bit NOT NULL,
+                [SortOrder] int NULL,
+                [IsDeleted] bit NOT NULL
+            );
+            CREATE TABLE [dbo].[WarehouseCategory] (
+                [CategoryGUID] nvarchar(50) NOT NULL PRIMARY KEY,
+                [ParentGUID] nvarchar(50) NULL,
+                [CategoryName] nvarchar(100) NOT NULL,
+                [IsActive] bit NOT NULL,
+                [SortOrder] int NOT NULL,
+                [IsDeleted] bit NOT NULL
             );
             CREATE TABLE [dbo].[LocalSupplierCategoryProductAssignment] (
                 [ProductCode] nvarchar(100) NOT NULL,

@@ -152,6 +152,7 @@
     <Compile Include="SalesDetailQueryProjectionTests.cs" />
     <Compile Include="RevenueReportSnapshotTests.cs" />
     <Compile Include="RevenueReportSnapshotSqlServerIntegrationTests.cs" />
+    <Compile Include="SalesDetailCategoryReportTests.cs" />
     <Compile Include="SalesDetailReportTests.cs" />
     <Compile Include="ProductStoreDailyColumnstoreMaintenancePolicyTests.cs" />
     <Compile Include="SalesDetailMonthlyProjectionTests.cs" />

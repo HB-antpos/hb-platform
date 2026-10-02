@@ -20,6 +20,7 @@ public sealed class SalesDetailReportController : ControllerBase
 {
     private const int MaxSelectedSupplierCodes = 200;
     private const int MaxCategoryGuids = 500;
+    private const int MaxCategoryReportSuppliers = 100;
     private readonly ISalesDashboardReactService _service;
     private readonly IUserService _userService;
     private readonly ILogger<SalesDetailReportController> _logger;
@@ -118,6 +119,111 @@ public sealed class SalesDetailReportController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "GetSalesDetailReport failed");
+            return StatusCode(500, new { success = false, message = "服务器内部错误" });
+        }
+    }
+
+    /// <summary>
+    /// 「澳洲供应商分类」页签：所选供应商按分类树汇总；带 nodeSupplierCode 时附带该节点商品分页
+    /// （nodeCategoryGuid 为空 = 该供应商全部商品，"__unassigned__" = 未归类）。分店范围与销售明细相同。
+    /// </summary>
+    [HttpGet("sales-detail-category-report")]
+    public async Task<IActionResult> GetSalesDetailCategoryReport(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] List<string>? supplierCodes,
+        [FromQuery] DateTime? compareStartDate = null,
+        [FromQuery] DateTime? compareEndDate = null,
+        [FromQuery] CompareMode compareMode = CompareMode.ByDate,
+        [FromQuery] List<string>? branchCodes = null,
+        [FromQuery] string? selectedBranchCode = null,
+        [FromQuery] string? nodeSupplierCode = null,
+        [FromQuery] string? nodeCategoryGuid = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int pageIndex = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] bool includeTree = true,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!Enum.IsDefined(compareMode))
+                return BadRequest(new { success = false, message = "compareMode 无效" });
+            if (pageIndex < 1 || pageSize < 1 || pageSize > 500)
+                return BadRequest(new { success = false, message = "分页参数无效" });
+            if (Normalize(supplierCodes).Count == 0)
+                return BadRequest(new { success = false, message = "请至少选择一个供应商" });
+            ValidateMultiSelectLimit(supplierCodes, MaxCategoryReportSuppliers, "供应商");
+            ValidateDateRange(startDate, endDate, compareStartDate, compareEndDate);
+
+            var scope = await ResolveBranchScopeAsync(branchCodes);
+            if (!scope.HasAccess || (selectedBranchCode != null && scope.BranchCodes != null
+                && !scope.BranchCodes.Contains(selectedBranchCode.Trim(), StringComparer.OrdinalIgnoreCase)))
+            {
+                return Ok(new ProductReportResponseDto<SalesDetailCategoryReportDto>
+                {
+                    StatisticStatus = SalesStatisticRefreshStatus.Fresh,
+                    StatisticMessage = "当前账号没有可访问的分店范围",
+                    CacheVersion = "no-access",
+                    Data = new SalesDetailCategoryReportDto(),
+                });
+            }
+
+            var result = await _service.GetSalesDetailCategoryReportAsync(
+                new DateRangeDto
+                {
+                    StartDate = startDate,
+                    EndDate = endDate,
+                    CompareStartDate = compareStartDate,
+                    CompareEndDate = compareEndDate,
+                    CompareMode = compareMode,
+                },
+                Normalize(supplierCodes),
+                scope.BranchCodes,
+                selectedBranchCode,
+                nodeSupplierCode,
+                nodeCategoryGuid,
+                search,
+                pageIndex,
+                pageSize,
+                includeTree,
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Ok(result);
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetSalesDetailCategoryReport failed");
+            return StatusCode(500, new { success = false, message = "服务器内部错误" });
+        }
+    }
+
+    /// <summary>「澳洲供应商分类」页签的筛选选项：供应商（含分类数）与账号可见分店。</summary>
+    [HttpGet("sales-detail-category-options")]
+    public async Task<IActionResult> GetSalesDetailCategoryOptions(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var scope = await ResolveBranchScopeAsync(null);
+            var options = await _service.GetSalesDetailCategoryOptionsAsync(scope.HasAccess ? scope.BranchCodes : new List<string>(), cancellationToken);
+            return Ok(new { success = true, data = options });
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetSalesDetailCategoryOptions failed");
             return StatusCode(500, new { success = false, message = "服务器内部错误" });
         }
     }

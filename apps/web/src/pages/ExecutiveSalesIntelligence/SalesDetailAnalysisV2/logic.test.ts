@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_SUPPLIER_SELECTIONS, parseDetailView, productBranchDrawerQuery, RAIL_DEFAULT_WIDTH, selectDimension, sumProductPage } from './logic'
+import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_SUPPLIER_SELECTIONS, parseDetailView, productBranchDrawerQuery, RAIL_DEFAULT_WIDTH, selectDimension, sumProductPage } from './logic'
 import { normalizeSalesDetailRow, sectionQuery, type SalesDetailQuery } from './reportService'
 
 const selected = { ...emptySelection, branch: 'OR', supplier: 'HB215', supplierCodes: ['HB215'], supplierCategoryGuids: ['CAT1'], product: 'P1', page: 3 }
@@ -68,3 +68,8 @@ assert.equal(exceedsSalesDetailSelectionLimit(Array.from({ length: 101 }, (_, in
 assert.equal(exceedsSalesDetailSelectionLimit(Array.from({ length: 500 }, (_, index) => String(index)), MAX_CATEGORY_SELECTIONS), false)
 assert.equal(exceedsSalesDetailSelectionLimit(Array.from({ length: 501 }, (_, index) => String(index)), MAX_CATEGORY_SELECTIONS), true)
 console.log('销售明细双向筛选、全量查询参数、本页合计、左栏宽度与展示偏好：通过')
+
+assert.deepEqual(initialCategoryState('?kind=category&supplier=240&supplier=%20200%20&supplier=240&branch=OR'),
+  { active: true, supplierCodes: ['240', '200'], branch: 'OR' }, '分类页签从 URL 恢复去重后的供应商与分店')
+assert.deepEqual(initialCategoryState('?kind=australia&supplier=240'), { active: false, supplierCodes: [], branch: undefined },
+  '其他页签的供应商参数不带进分类页签')

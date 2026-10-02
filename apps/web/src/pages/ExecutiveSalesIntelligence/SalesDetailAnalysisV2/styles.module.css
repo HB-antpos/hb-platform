@@ -16,6 +16,9 @@
 .headerControls :global(.ant-segmented-item-label) { padding-inline:7px; }
 .headerControls > div > div > :global(.ant-btn) { padding-inline:10px; }
 .categoryTreePopup { width:min(400px,calc(100vw - 32px))!important; }
+.auSupplierOption { display:flex; align-items:baseline; justify-content:space-between; gap:12px; min-width:0; }
+.auSupplierOption > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.auSupplierOption > small { flex:none; color:#5c7088; font-size:11px; }
 .categoryTreeHint { padding:8px 12px; border-bottom:1px solid #e8edf3; color:#5c7088; font-size:12px; line-height:1.45; }
 .categoryTreePopup :global(.ant-select-tree) { max-height:360px; overflow-y:auto; }
 .categoryTreePopup :global(.ant-select-tree-node-content-wrapper) { height:auto; min-height:32px; padding-top:6px; padding-bottom:6px; white-space:normal; line-height:18px; }

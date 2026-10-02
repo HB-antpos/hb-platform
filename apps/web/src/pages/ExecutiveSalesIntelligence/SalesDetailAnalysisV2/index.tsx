@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, Image, Input, message, Pagination, Segmented, Select, Skeleton, Tag, Tooltip, TreeSelect } from 'antd'
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Alert, Button, Image, Input, message, Pagination, Segmented, Select, Skeleton, Tag, Tooltip, TreeSelect, type RefSelectProps } from 'antd'
 import { CloseOutlined, DownloadOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ShopOutlined } from '@ant-design/icons'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -10,11 +10,16 @@ import { toProductImagePreviewUrl, toProductThumbnailUrl } from '../../../utils/
 import { MetricPair, ReportControls, useReportText } from '../ReportWorkbench/ReportControls'
 import { growth, normalizeKeyword, reportPeriod } from '../ReportWorkbench/logic'
 import { useReportQuery, type ReportQueryState } from '../ReportWorkbench/useReportQuery'
-import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_PRODUCT_IMAGE_EXPORT_ROWS, MAX_SUPPLIER_SELECTIONS, parseDetailView, RAIL_DEFAULT_WIDTH, selectDimension, sumProductPage, type CompareView, type DetailTotals, type DetailViewPreference } from './logic'
+import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_PRODUCT_IMAGE_EXPORT_ROWS, MAX_SUPPLIER_SELECTIONS, parseDetailView, RAIL_DEFAULT_WIDTH, selectDimension, sumProductPage, type CompareView, type DetailTotals, type DetailViewPreference } from './logic'
 import ProductBranchDrawer from './ProductBranchDrawer'
-import { fetchSalesDetailReport, type ReportSection, type SalesDetailPage, type SalesDetailQuery, type SalesDetailReport, type SalesDetailRow } from './reportService'
+import { fetchSalesDetailReport, type ReportSection, type SalesDetailPage, type SalesDetailQuery, type SalesDetailReport, type SalesDetailRow, type SupplierKind } from './reportService'
 import { buildSalesDetailSupplierCategoryTree, fetchSalesDetailCategoryOptions, type SalesDetailCategoryGroup, type SalesDetailCategoryTreeNode } from './categoryOptionsService'
+import { fetchSalesDetailCategoryOptions as fetchAuCategoryOptions, type CategoryOptions } from './categoryReportService'
 import styles from './styles.module.css'
+
+// 「澳洲供应商分类」页签按需加载，不增加销售明细首屏包体。
+const SupplierCategoryTab = lazy(() => import('./SupplierCategoryTab'))
+type DetailTab = SupplierKind | 'category'
 
 type MetricKey = 'revenue' | 'grossProfit' | 'grossMarginRate' | 'quantity' | 'averageUnitPrice' | 'share' | 'chinaShare'
 type ProductMetric = Exclude<MetricKey, 'share' | 'chinaShare'>
@@ -120,6 +125,17 @@ export default function SalesDetailAnalysisV2() {
   const selectedNames = useRef<Record<string, string>>({})
   const searchClear = useRef(false)
   const appliedSearch = useRef(location.search)
+  // 「澳洲供应商分类」页签：所选供应商、分店与刷新各自独立，日期与其他页签共用。
+  const initialCategory = useMemo(() => initialCategoryState(location.search), [location.search])
+  const [categoryTab, setCategoryTab] = useState(initialCategory.active)
+  const [auSuppliers, setAuSuppliers] = useState(initialCategory.supplierCodes)
+  const [auBranch, setAuBranch] = useState(initialCategory.branch)
+  const [auOptions, setAuOptions] = useState<CategoryOptions>()
+  const [auOptionsError, setAuOptionsError] = useState<string>()
+  const [auRefresh, setAuRefresh] = useState(0)
+  const [auLoading, setAuLoading] = useState(false)
+  const auSupplierSelect = useRef<RefSelectProps>(null)
+  const onAuLoadingChange = useCallback((value: boolean) => setAuLoading(value), [])
 
   useEffect(() => {
     // 抽屉与大图预览都挂载在 body；页面切换或账号变化时关闭，避免覆盖其他保活页面。
@@ -148,7 +164,9 @@ export default function SalesDetailAnalysisV2() {
     if (!active || !location.pathname.endsWith('/sales-detail-v2') || appliedSearch.current === location.search) return
     appliedSearch.current = location.search
     setDates(initial.dates); setKind(initial.kind); setSelection(initial.selection); setKeywordDraft(''); setSupplierSearch('')
-  }, [active, initial, location.pathname, location.search])
+    setCategoryTab(initialCategory.active)
+    if (initialCategory.active) { setAuSuppliers(initialCategory.supplierCodes); setAuBranch(initialCategory.branch) }
+  }, [active, initial, initialCategory, location.pathname, location.search])
   useEffect(() => {
     if (composing) return
     const timer = window.setTimeout(() => {
@@ -208,12 +226,23 @@ export default function SalesDetailAnalysisV2() {
         ? value : { ...value, supplierCategoryGuids, warehouseCategoryGuids, page: 1 }
     })
   }, [categoryGroups])
+  useEffect(() => {
+    if (!active || !categoryTab || auOptions || !currentUser) return
+    const controller = new AbortController()
+    setAuOptionsError(undefined)
+    fetchAuCategoryOptions(controller.signal)
+      .then(options => { if (!controller.signal.aborted) setAuOptions(options) })
+      .catch(error => { if (!controller.signal.aborted) setAuOptionsError(error instanceof Error ? error.message : text('供应商加载失败', 'Failed to load suppliers')) })
+    return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, categoryTab, auOptions, currentUser])
   // 分页也读取四栏同一次快照，避免供应商归属变更后将新商品页拼到旧汇总上。
   const bundleKey = JSON.stringify([currentUser?.userGUID, branches, query])
   const bundle = useReportQuery<SalesDetailReport>(
     `sales-detail:bundle:${bundleKey}`,
     signal => fetchSalesDetailReport(query, signal),
-    { active, enabled: allowed, refresh: bundleRefresh, metricId: 'sales-detail-whole-page' },
+    // 分类页签不需要四栏数据，切过去时不读取。
+    { active, enabled: allowed && !categoryTab, refresh: bundleRefresh, metricId: 'sales-detail-whole-page' },
   )
   const suppliers = projectSection(bundle, 'suppliers')
   const stores = projectSection(bundle, 'branches')
@@ -270,12 +299,18 @@ export default function SalesDetailAnalysisV2() {
     return code ? selectedNames.current[`${dimension}:${code}`] || code : undefined
   }
   const clear = () => { setSelection({ ...emptySelection, pageSize: selection.pageSize }); setKeywordDraft(''); setSupplierSearch('') }
-  const switchKind = (value: typeof kind) => {
-    if (value === kind) return
-    setKind(value); clear()
+  const currentTab: DetailTab = categoryTab ? 'category' : kind
+  const switchKind = (value: DetailTab) => {
+    if (value === currentTab) return
+    if (value === 'category') setCategoryTab(true)
+    else {
+      setCategoryTab(false)
+      if (value !== kind) { setKind(value); clear() }
+    }
     // 类别切换会清空三维筛选，日期与对比设置保持；刷新页面仍回到当前类别。
     const params = new URLSearchParams({ kind: value, startDate: dates.startDate, endDate: dates.endDate,
       compare: String(dates.compare), compareMode: dates.compareMode })
+    if (value === 'category') auSuppliers.forEach(code => params.append('supplier', code))
     appliedSearch.current = `?${params}`
     navigate({ pathname: location.pathname, search: appliedSearch.current }, { replace: true })
   }
@@ -483,10 +518,32 @@ export default function SalesDetailAnalysisV2() {
       <div className={styles.titleGroup}>
         <h1 title={text('供应商、分店与商品双向联动，从任意一栏开始分析。', 'Explore from any supplier, store or product.')}>{text('销售明细', 'Sales detail')}</h1>
         <div role="tablist" aria-label={text('供应商类别', 'Supplier type')} className={styles.tabs}>
-          {(['australia', 'china'] as const).map(value => <button role="tab" key={value} aria-selected={kind === value} onClick={() => switchKind(value)}>{value === 'china' ? text('HB 仓库 · 国内供应商', 'HB warehouse · China') : text('澳洲供应商', 'Australian suppliers')}</button>)}
+          {(['australia', 'china', 'category'] as const).map(value => <button role="tab" key={value} aria-selected={currentTab === value} onClick={() => switchKind(value)}>{value === 'china' ? text('HB 仓库 · 国内供应商', 'HB warehouse · China') : value === 'category' ? text('澳洲供应商分类', 'AU supplier categories') : text('澳洲供应商', 'Australian suppliers')}</button>)}
         </div>
       </div>
-      <div className={styles.headerControls}>
+      {categoryTab ? <div className={styles.headerControls}>
+        <Select ref={auSupplierSelect} mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
+          aria-label={text('选择澳洲供应商', 'Select Australian suppliers')} placeholder={text('澳洲供应商（可多选）', 'Australian suppliers (multiple)')}
+          style={{ minWidth: 240, maxWidth: 420 }} value={auSuppliers} loading={!auOptions && !auOptionsError}
+          notFoundContent={auOptionsError || text('没有供应商', 'No suppliers')} popupClassName={styles.categoryTreePopup}
+          options={(auOptions?.suppliers ?? []).map(option => ({ value: option.supplierCode, label: `${option.supplierName} · ${option.supplierCode}`,
+            categoryCount: option.categoryCount, assigned: option.assignedProductCount, warehouse: option.categorySource === 'warehouse' }))}
+          optionRender={option => <span className={styles.auSupplierOption}><span>{option.label}</span>
+            <small>{option.data.categoryCount ? text(`${option.data.warehouse ? '仓库分类 ' : ''}${option.data.categoryCount} 类 · 已归类 ${option.data.assigned}`,
+              `${option.data.categoryCount} categories · ${option.data.assigned} assigned`) : text('无分类', 'No categories')}</small></span>}
+          onChange={values => {
+            if (exceedsSalesDetailSelectionLimit(values, MAX_SUPPLIER_SELECTIONS)) {
+              message.warning(text(`最多选择 ${MAX_SUPPLIER_SELECTIONS} 个供应商`, `Select up to ${MAX_SUPPLIER_SELECTIONS} suppliers.`))
+              return
+            }
+            setAuSuppliers(values)
+          }} />
+        <Select allowClear showSearch optionFilterProp="label" size="small" style={{ width: 150 }}
+          aria-label={text('选择分店', 'Select store')} placeholder={text('全部分店', 'All stores')} value={auBranch}
+          options={(auOptions?.stores ?? []).map(store => ({ value: store.storeCode, label: store.storeName }))}
+          onChange={value => setAuBranch(value || undefined)} />
+        <ReportControls value={dates} onChange={setDates} onRefresh={() => setAuRefresh(value => value + 1)} loading={auLoading} />
+      </div> : <div className={styles.headerControls}>
         <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
           aria-label={text('选择供应商', 'Select suppliers')} placeholder={text('供应商（可多选）', 'Suppliers (multiple)')}
           style={{ minWidth: 210, maxWidth: 340 }} value={selection.supplierCodes} options={supplierOptions}
@@ -522,8 +579,16 @@ export default function SalesDetailAnalysisV2() {
             onChange={values => changeCategories(Array.isArray(values) ? values.map(String) : [])} />}
         <ReportControls value={dates} onChange={value => { setDates(value); setSelection(current => ({ ...current, page: 1 })) }} onRefresh={refreshAll} loading={loading} />
         {access.canViewSalesData && <Button onClick={() => navigate(`/executive-sales-intelligence/overview?branch=${encodeURIComponent(selection.branch ?? '')}&startDate=${dates.startDate}&endDate=${dates.endDate}&compare=${dates.compare}&compareMode=${dates.compareMode}`)}>{text('营业额报告', 'Revenue report')}</Button>}
-      </div>
+      </div>}
     </div>
+    {categoryTab ? <>
+      {!allowed && <Alert type="warning" message={text('当前账号没有可查询的分店范围', 'No stores are available for this account')} />}
+      <Suspense fallback={<div className={styles.skeleton}><Skeleton active paragraph={{ rows: 8 }} title={false} /></div>}>
+        <SupplierCategoryTab active={active} allowed={allowed} userGuid={currentUser?.userGUID} branches={branches} dates={dates}
+          supplierCodes={auSuppliers} selectedBranchCode={auBranch} refresh={auRefresh}
+          onLoadingChange={onAuLoadingChange} onSelectSuppliers={() => auSupplierSelect.current?.focus()} />
+      </Suspense>
+    </> : <>
     {categoryError && <Alert type="warning" showIcon message={categoryError} />}
     {!allowed && <Alert type="warning" message={text('当前账号没有可查询的分店范围', 'No stores are available for this account')} />}
     {summary.error && <Alert type="warning" message={summary.error} action={<Button onClick={() => retrySection('summary')}>{text('重试汇总', 'Retry totals')}</Button>} />}
@@ -620,5 +685,6 @@ export default function SalesDetailAnalysisV2() {
           return <span className={styles.previewCaption}><span>{current} / {total}</span>
             {row && <><small>{row.itemNumber || row.code}</small><strong>{row.name || row.code}</strong></>}</span>
         } }} />
+    </>}
   </main>
 }
