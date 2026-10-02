@@ -376,13 +376,15 @@
       "weekHours": "Total",
       "weekdayHours": "Weekdays",
       "weekendHours": "Weekend",
+      "equivalentHours": "Equiv.",
       "scheduledPeople": "Staffed"
     },
     "quickShiftTitle": "Common shifts",
     "quickShifts": {
       "nineToFiveThirty": "09:00 - 17:30",
       "tenToFour": "10:00 - 16:00",
-      "nineToSeven": "09:00 - 19:00"
+      "nineToSeven": "09:00 - 19:00",
+      "nineToNine": "09:00 - 21:00"
     },
     "timePicker": {
       "hour": "HH",
@@ -404,9 +406,24 @@
       "leave": "On leave",
       "available": "Available",
       "draft": "Draft",
-      "employmentTypes": "F full-time · P part-time · C casual"
+      "fullTime": "Full-time",
+      "partTime": "Part-time",
+      "casual": "Casual"
     },
-    "gridHint": "Tap a cell to add or edit a shift",
+    "gridHint": "Tap a cell to add or edit a shift; tap a name or date to schedule in bulk",
+    "batch": {
+      "employeeSubtitle": "Schedule several days",
+      "dateSubtitle": "Schedule several employees",
+      "pickDays": "Days",
+      "pickEmployees": "Employees",
+      "selectAll": "Select all",
+      "clearAll": "Clear",
+      "skipDaysHint": "Days that already have a shift or approved leave can't be selected.",
+      "skipEmployeesHint": "Employees who already have a shift or approved leave that day can't be selected.",
+      "save": "Add {{count}} shift(s) ({{hours}} h each)",
+      "employeeA11y": "Schedule several days for {{name}}",
+      "dateA11y": "Schedule several employees on {{date}}"
+    },
     "editor": {
       "availabilityLabel": "Available",
       "noAvailability": "Not provided",
@@ -416,6 +433,13 @@
       "stepMinus": "{{label}} 30 minutes earlier",
       "stepPlus": "{{label}} 30 minutes later",
       "setRest": "Set as rest day",
+      "mealBreakLabel": "Meal breaks",
+      "mealBreakValue": "{{count}} × {{minutes}} min",
+      "mealBreakNone": "No meal break",
+      "mealBreakDefault": "Default",
+      "mealBreakReset": "Reset to default",
+      "mealBreakMinus": "One fewer meal break",
+      "mealBreakPlus": "One more meal break",
       "save": "Save ({{hours}} h)",
       "addShift": "Add another shift"
     },
@@ -425,6 +449,8 @@
     "copyConfirm": "Copy",
     "copyWeekResult": "Copied {{created}} shift(s), skipped {{skipped}}",
     "copyWeekFailed": "Failed to copy last week's schedule",
+    "showRelatedManagers": "Other managers ({{count}})",
+    "managerBadge": "Mgr",
     "ageBadge": "{{age}}y"
   },
   "adjustment": {
@@ -609,6 +635,8 @@
     "approvalFailed": "Approval action failed.",
     "selectStoreFirst": "Please select a store first.",
     "scheduleSaved": "Schedule saved.",
+    "scheduleBatchSaved": "Added {{count}} shift(s).",
+    "scheduleBatchPartial": "Added {{succeeded}} shift(s), {{failed}} failed: {{reason}}",
     "scheduleDeleted": "Schedule deleted.",
     "weekPublished": "This week's schedule was published.",
     "publishFailed": "Publish failed.",

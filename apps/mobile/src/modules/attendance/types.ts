@@ -58,6 +58,8 @@ export interface AttendanceSchedule {
   endTime: string;
   status: AttendanceScheduleStatus;
   remark?: string;
+  /** 店长指定的用餐次数（每次 30 分钟，0 = 不扣用餐）；为空表示按班次时长默认。 */
+  mealBreakCount?: number | null;
   isMine: boolean;
   holidayName?: string;
   holidayBusinessStatus?: string;
@@ -454,6 +456,8 @@ export interface AttendanceSchedulePayload {
   endTime: string;
   status?: AttendanceScheduleStatus;
   remark?: string;
+  /** 为空按时长默认用餐次数。 */
+  mealBreakCount?: number | null;
 }
 
 export interface AttendanceScheduleUpdatePayload {
@@ -462,6 +466,10 @@ export interface AttendanceScheduleUpdatePayload {
   endTime: string;
   status?: AttendanceScheduleStatus;
   remark?: string;
+  /** 有值即覆盖用餐次数；为空且 resetMealBreakCount 为 true 时恢复按时长默认。 */
+  mealBreakCount?: number | null;
+  /** 恢复按时长默认（后端置空）；不传则保持原有设置，兼容旧客户端。 */
+  resetMealBreakCount?: boolean;
 }
 
 export interface AttendancePublishWeekPayload {

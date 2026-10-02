@@ -172,6 +172,7 @@ function normalizeSchedule(raw: ApiRecord): AttendanceSchedule {
     endTime: asString(pick(raw, "endTime", "EndTime")),
     status: asString(pick(raw, "status", "Status"), "Scheduled"),
     remark: asOptionalString(pick(raw, "remark", "Remark", "note", "Note")),
+    mealBreakCount: asOptionalNumber(pick(raw, "mealBreakCount", "MealBreakCount")) ?? null,
     isMine: asBoolean(pick(raw, "isMine", "IsMine", "mine", "Mine")),
     holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")),
     holidayBusinessStatus: asOptionalString(pick(raw, "holidayBusinessStatus", "HolidayBusinessStatus")),
@@ -441,6 +442,7 @@ function toCreateSchedulePayload(payload: AttendanceSchedulePayload) {
     endTime: payload.endTime,
     status: payload.status ?? "Draft",
     remark: payload.remark,
+    mealBreakCount: payload.mealBreakCount ?? undefined,
   });
 }
 
@@ -451,6 +453,8 @@ function toUpdateSchedulePayload(payload: AttendanceScheduleUpdatePayload) {
     endTime: payload.endTime,
     status: payload.status,
     remark: payload.remark,
+    mealBreakCount: payload.mealBreakCount ?? undefined,
+    resetMealBreakCount: payload.resetMealBreakCount || undefined,
   });
 }
 
@@ -670,6 +674,8 @@ export async function getAttendanceEmployees(storeCode: string): Promise<StoreUs
     fullName: asOptionalString(pick(raw, "fullName", "FullName")),
     employmentType: asOptionalString(pick(raw, "employmentType", "EmploymentType")),
     age: asOptionalNumber(pick(raw, "age", "Age")),
+    isStoreManager: asBoolean(pick(raw, "isStoreManager", "IsStoreManager")),
+    managesStore: asBoolean(pick(raw, "managesStore", "ManagesStore")),
     status: 1,
     storeCode,
     roleNames: [],

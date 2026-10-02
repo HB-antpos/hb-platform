@@ -1623,6 +1623,191 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CreateScheduleAsync_WithMealBreakCount_PersistsAndReturnsOverride()
+        {
+            await SeedStoreScopeAsync();
+            var service = CreateService("manager-user", "manager", "StoreManager");
+
+            var result = await service.CreateScheduleAsync(new CreateAttendanceScheduleDto
+            {
+                StoreCode = "BRI",
+                UserGuid = "staff-user",
+                WorkDate = new DateTime(2026, 5, 18),
+                StartTime = new TimeSpan(9, 0, 0),
+                EndTime = new TimeSpan(17, 0, 0),
+                MealBreakCount = 0,
+            });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal(0, result.Data!.MealBreakCount);
+            var stored = await _db.Queryable<AttendanceSchedule>()
+                .SingleAsync(item => item.ScheduleGuid == result.Data.ScheduleGuid);
+            Assert.Equal(0, stored.MealBreakCount);
+        }
+
+        [Fact]
+        public async Task CreateScheduleAsync_WithoutMealBreakCount_KeepsAutomatic()
+        {
+            await SeedStoreScopeAsync();
+            var service = CreateService("manager-user", "manager", "StoreManager");
+
+            var result = await service.CreateScheduleAsync(new CreateAttendanceScheduleDto
+            {
+                StoreCode = "BRI",
+                UserGuid = "staff-user",
+                WorkDate = new DateTime(2026, 5, 18),
+                StartTime = new TimeSpan(9, 0, 0),
+                EndTime = new TimeSpan(17, 0, 0),
+            });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Null(result.Data!.MealBreakCount);
+            Assert.Null((await _db.Queryable<AttendanceSchedule>()
+                .SingleAsync(item => item.ScheduleGuid == result.Data.ScheduleGuid)).MealBreakCount);
+        }
+
+        [Theory]
+        [InlineData(-1)]
+        [InlineData(4)]
+        public async Task CreateScheduleAsync_WhenMealBreakCountOutOfRange_ReturnsInvalid(int mealBreakCount)
+        {
+            await SeedStoreScopeAsync();
+            var service = CreateService("manager-user", "manager", "StoreManager");
+
+            var result = await service.CreateScheduleAsync(new CreateAttendanceScheduleDto
+            {
+                StoreCode = "BRI",
+                UserGuid = "staff-user",
+                WorkDate = new DateTime(2026, 5, 18),
+                StartTime = new TimeSpan(9, 0, 0),
+                EndTime = new TimeSpan(17, 0, 0),
+                MealBreakCount = mealBreakCount,
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal("INVALID_MEAL_BREAK_COUNT", result.ErrorCode);
+            Assert.Equal(0, await _db.Queryable<AttendanceSchedule>().CountAsync());
+        }
+
+        [Fact]
+        public async Task UpdateScheduleAsync_WithoutMealBreakCount_KeepsExistingOverride()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await SetScheduleMealBreakCountAsync("schedule-1", 2);
+
+            // 旧版 App 不传用餐次数：必须保持店长已设置的值。
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
+                {
+                    WorkDate = new DateTime(2026, 5, 18),
+                    StartTime = new TimeSpan(10, 0, 0),
+                    EndTime = new TimeSpan(17, 0, 0),
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal(2, result.Data!.MealBreakCount);
+            Assert.Equal(2, await GetScheduleMealBreakCountAsync("schedule-1"));
+        }
+
+        [Fact]
+        public async Task UpdateScheduleAsync_WithMealBreakCount_OverridesValue()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await SetScheduleMealBreakCountAsync("schedule-1", 2);
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
+                {
+                    WorkDate = new DateTime(2026, 5, 18),
+                    StartTime = new TimeSpan(9, 0, 0),
+                    EndTime = new TimeSpan(17, 0, 0),
+                    MealBreakCount = 0,
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal(0, result.Data!.MealBreakCount);
+            Assert.Equal(0, await GetScheduleMealBreakCountAsync("schedule-1"));
+        }
+
+        [Fact]
+        public async Task UpdateScheduleAsync_ResetMealBreakCount_RestoresAutomatic()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await SetScheduleMealBreakCountAsync("schedule-1", 1);
+
+            // 恢复自动优先于同时传入的次数（即便次数越界也不校验）。
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
+                {
+                    WorkDate = new DateTime(2026, 5, 18),
+                    StartTime = new TimeSpan(9, 0, 0),
+                    EndTime = new TimeSpan(17, 0, 0),
+                    MealBreakCount = 9,
+                    ResetMealBreakCount = true,
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Null(result.Data!.MealBreakCount);
+            Assert.Null(await GetScheduleMealBreakCountAsync("schedule-1"));
+        }
+
+        [Theory]
+        [InlineData(-1)]
+        [InlineData(4)]
+        public async Task UpdateScheduleAsync_WhenMealBreakCountOutOfRange_ReturnsInvalidAndKeepsValue(int mealBreakCount)
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            await SetScheduleMealBreakCountAsync("schedule-1", 1);
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
+                {
+                    WorkDate = new DateTime(2026, 5, 18),
+                    StartTime = new TimeSpan(9, 0, 0),
+                    EndTime = new TimeSpan(17, 0, 0),
+                    MealBreakCount = mealBreakCount,
+                });
+
+            Assert.False(result.Success);
+            Assert.Equal("INVALID_MEAL_BREAK_COUNT", result.ErrorCode);
+            Assert.Equal(1, await GetScheduleMealBreakCountAsync("schedule-1"));
+        }
+
+        [Fact]
+        public async Task CopyScheduleWeekAsync_CopiesMealBreakCount()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("src-staff-mon", "BRI", "staff-user", new DateTime(2026, 5, 11), "Active");
+            await SeedScheduleAsync("src-manager-tue", "BRI", "manager-user", new DateTime(2026, 5, 12), "Active");
+            await SetScheduleMealBreakCountAsync("src-staff-mon", 0);
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .CopyScheduleWeekAsync(new CopyAttendanceScheduleWeekDto
+                {
+                    StoreCode = "BRI",
+                    SourceWeekStartDate = new DateTime(2026, 5, 11),
+                    TargetWeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal(2, result.Data!.CreatedCount);
+            var targetWeekStart = new DateTime(2026, 5, 18);
+            var copies = await _db.Queryable<AttendanceSchedule>()
+                .Where(item => item.WorkDate >= targetWeekStart)
+                .ToListAsync();
+            var staffCopy = Assert.Single(copies, item => item.UserGuid == "staff-user");
+            var managerCopy = Assert.Single(copies, item => item.UserGuid == "manager-user");
+            Assert.Equal(new DateTime(2026, 5, 18), staffCopy.WorkDate.Date);
+            Assert.Equal(new DateTime(2026, 5, 19), managerCopy.WorkDate.Date);
+            Assert.Equal(0, staffCopy.MealBreakCount);
+            Assert.Null(managerCopy.MealBreakCount);
+        }
+
+        [Fact]
         public async Task GetWeekSchedulesAsync_ApprovedLeave_AnnotatesSchedule()
         {
             await SeedStoreScopeAsync();
@@ -1727,6 +1912,110 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("staff-user", employee.UserGuid);
             Assert.Equal("partTime", employee.EmploymentType);
             Assert.Equal(15, employee.Age);
+        }
+
+        [Fact]
+        public async Task GetStoreEmployeesAsync_IncludesStoreManagersWithManagementRelation()
+        {
+            // 店长也要上班：绑定本店的店长与店员一起返回；本店为主分店的标记为管理本店，仅关联的不标记。
+            await SeedStoreScopeAsync();
+            await SeedStoreManagerRoleAsync("manager-user");
+            await _db.Insertable(new Role
+            {
+                RoleGUID = "store-staff-role",
+                RoleName = "StoreStaff",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new UserRole
+            {
+                UserRoleGUID = "staff-user-store-staff",
+                UserGUID = "staff-user",
+                RoleGUID = "store-staff-role",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            // 另一位店长只是关联 BRI（非主分店）。
+            await _db.Insertable(new User
+            {
+                UserGUID = "related-manager",
+                Username = "related",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new UserRole
+            {
+                UserRoleGUID = "related-manager-store-manager-role",
+                UserGUID = "related-manager",
+                RoleGUID = "store-manager-role",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            var briStoreGuid = (await _db.Queryable<Store>().FirstAsync(item => item.StoreCode == "BRI")).StoreGUID;
+            await _db.Insertable(new UserStore
+            {
+                UserStoreGUID = "related-manager-store-bri",
+                UserGUID = "related-manager",
+                StoreGUID = briStoreGuid,
+                IsPrimary = false,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetStoreEmployeesAsync("BRI");
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            var byGuid = result.Data!.ToDictionary(item => item.UserGuid);
+            Assert.Equal(new[] { "manager-user", "related-manager", "staff-user" }, byGuid.Keys.OrderBy(item => item).ToArray());
+            Assert.True(byGuid["manager-user"].IsStoreManager);
+            Assert.True(byGuid["manager-user"].ManagesStore);
+            Assert.True(byGuid["related-manager"].IsStoreManager);
+            Assert.False(byGuid["related-manager"].ManagesStore);
+            Assert.False(byGuid["staff-user"].IsStoreManager);
+            Assert.False(byGuid["staff-user"].ManagesStore);
+        }
+
+        [Fact]
+        public async Task CreateScheduleAsync_EmployeeNotBoundToStore_IsRejected()
+        {
+            // 无效或不属于本店的员工 GUID 不能建班，避免生产出现无主班次。
+            await SeedStoreScopeAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .CreateScheduleAsync(new CreateAttendanceScheduleDto
+                {
+                    StoreCode = "BRI",
+                    UserGuid = "ghost-user",
+                    WorkDate = new DateTime(2026, 5, 18),
+                    StartTime = TimeSpan.FromHours(9),
+                    EndTime = TimeSpan.FromHours(17),
+                });
+
+            Assert.False(result.Success);
+            Assert.Equal("EMPLOYEE_NOT_IN_STORE", result.ErrorCode);
+            Assert.Equal(0, await _db.Queryable<AttendanceSchedule>().CountAsync(item => item.UserGuid == "ghost-user"));
+        }
+
+        [Fact]
+        public async Task CopyScheduleWeekAsync_SkipsEmployeesNotBoundToStore()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("src-staff", "BRI", "staff-user", new DateTime(2026, 5, 11), "Active");
+            await SeedScheduleAsync("src-ghost", "BRI", "ghost-user", new DateTime(2026, 5, 12), "Active");
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .CopyScheduleWeekAsync(new CopyAttendanceScheduleWeekDto
+                {
+                    StoreCode = "BRI",
+                    SourceWeekStartDate = new DateTime(2026, 5, 11),
+                    TargetWeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.Equal(1, result.Data!.CreatedCount);
+            Assert.Equal(1, result.Data.SkippedCount);
+            var targetWeekStart = new DateTime(2026, 5, 18);
+            var copies = await _db.Queryable<AttendanceSchedule>()
+                .Where(item => item.WorkDate >= targetWeekStart)
+                .ToListAsync();
+            Assert.Equal("staff-user", Assert.Single(copies).UserGuid);
         }
 
         [Fact]
@@ -4525,6 +4814,18 @@ namespace BlazorApp.Api.Tests
                 CreatedAt = DateTime.UtcNow,
             }).ExecuteCommandAsync();
         }
+
+        private async Task SetScheduleMealBreakCountAsync(string scheduleGuid, int? mealBreakCount)
+        {
+            await _db.Updateable<AttendanceSchedule>()
+                .SetColumns(item => item.MealBreakCount == mealBreakCount)
+                .Where(item => item.ScheduleGuid == scheduleGuid)
+                .ExecuteCommandAsync();
+        }
+
+        private async Task<int?> GetScheduleMealBreakCountAsync(string scheduleGuid) =>
+            (await _db.Queryable<AttendanceSchedule>()
+                .SingleAsync(item => item.ScheduleGuid == scheduleGuid)).MealBreakCount;
 
         private async Task SeedPendingScheduleDerivedApprovalsAsync(
             string scheduleGuid,

@@ -1,4 +1,4 @@
-import { scheduleDurationMinutes } from "./attendance-my-week";
+import { schedulePaidMinutes } from "./attendance-my-week";
 import type { AttendanceAvailability, AttendanceSchedule } from "./types";
 
 /** 店长排班周网格单元格类型：有班 / 已批准请假 / 员工可上班 / 空。 */
@@ -87,12 +87,15 @@ export function stepClockTime(value: string, deltaMinutes: number) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/** 编辑中班次的时长（分钟）；开始等于结束视为 0，跨午夜按次日结束。 */
-export function shiftEditorMinutes(startTime: string, endTime: string) {
+/**
+ * 编辑中班次的计薪时长（分钟，扣除用餐时间）；mealBreakCount 为空时按时长默认次数。
+ * 开始等于结束视为 0，跨午夜按次日结束。
+ */
+export function shiftEditorMinutes(startTime: string, endTime: string, mealBreakCount?: number | null) {
   const start = normalizeClockTime(startTime);
   const end = normalizeClockTime(endTime);
   if (!start || !end || start === end) return 0;
-  return scheduleDurationMinutes({ startTime: start, endTime: end });
+  return schedulePaidMinutes({ startTime: start, endTime: end, mealBreakCount });
 }
 
 /** 空缺日：一周中没有任何人上班（不含请假、已取消）的日期数。 */
@@ -110,6 +113,50 @@ export function summarizeSchedulePublishState(schedules: AttendanceSchedule[]): 
   const active = schedules.filter((item) => isNotCancelled(item.status) && !item.leaveType);
   if (active.some((item) => item.status.toLowerCase() === "draft")) return "draft";
   return active.length ? "published" : "empty";
+}
+
+/** 仅关联本店、并非管理本店的店长。 */
+export function isRelatedOnlyManager(user: { isStoreManager?: boolean; managesStore?: boolean }) {
+  return Boolean(user.isStoreManager && !user.managesStore);
+}
+
+/**
+ * 排班表员工过滤：店员与管理本店的店长默认显示；仅关联本店的店长默认隐藏，打开筛选后显示。
+ * 本周已有班次的员工始终显示，避免班次被藏起来而与周合计对不上。
+ */
+export function filterScheduleUsers<T extends { userGUID: string; isStoreManager?: boolean; managesStore?: boolean }>(
+  users: T[],
+  scheduledUserGuids: ReadonlySet<string>,
+  showRelatedManagers: boolean,
+) {
+  const relatedManagerCount = users.filter(isRelatedOnlyManager).length;
+  const visible = showRelatedManagers
+    ? users
+    : users.filter((user) => !isRelatedOnlyManager(user) || scheduledUserGuids.has(user.userGUID));
+  return { visible, relatedManagerCount };
+}
+
+/** 批量排班只给空格与仅有「可上班」标记的格子建班；已有班次或请假的格子跳过，与「复制上周」的跳过口径一致。 */
+export function isBatchSchedulableCell(cell: Pick<ScheduleGridCell, "kind">) {
+  return cell.kind === "empty" || cell.kind === "available";
+}
+
+/**
+ * 批量排班依次提交：上一条完成才发下一条。后端按「员工+日期」加锁并校验重叠，并发提交会互相争锁；
+ * 单条失败不中断其余，最后统一汇总成功数与失败明细。
+ */
+export async function runSequentialBatch<T>(items: readonly T[], run: (item: T) => Promise<unknown>) {
+  let succeeded = 0;
+  const failures: { item: T; error: unknown }[] = [];
+  for (const item of items) {
+    try {
+      await run(item);
+      succeeded += 1;
+    } catch (error) {
+      failures.push({ item, error });
+    }
+  }
+  return { succeeded, failures };
 }
 
 export type EmploymentTypeCode = "F" | "P" | "C";
