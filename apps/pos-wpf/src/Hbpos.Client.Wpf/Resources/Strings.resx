@@ -1451,4 +1451,7 @@
   <data name="dailyClose.linklySettlement.noReceiptPreview" xml:space="preserve">
     <value>No bank receipt for this record.</value>
   </data>
+  <data name="dailyClose.linklySettlement.notToday" xml:space="preserve">
+    <value>Linkly settlement is only available when the business date is today. Change the business date to {0:yyyy-MM-dd} and try again.</value>
+  </data>
 </root>

@@ -673,8 +673,13 @@
     </UserControl.Resources>
 
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
         <TabControl x:Name="DailyCloseTabControl"
-                    Margin="16"
+                    Margin="16,16,16,10"
                     SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                     Style="{StaticResource DailyCloseTabControlStyle}">
             <TabItem Header="{loc:Loc dailyClose.tab.history}">
@@ -1275,7 +1280,35 @@
             </TabItem>
         </TabControl>
 
+        <!-- 日结页状态栏：保存、打印、刷卡机结算的结果与提示都显示在这里（含“结算结果未知，请勿再次提交”）。 -->
+        <Border x:Name="DailyCloseStatusBar"
+                Grid.Row="1"
+                Margin="16,0,16,12"
+                Padding="12,7"
+                Background="{DynamicResource PosSurfaceBrush}"
+                BorderBrush="{DynamicResource PosDividerBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Visibility="{Binding StatusMessage, Converter={StaticResource StringHasValueToVis}}"
+                AutomationProperties.LiveSetting="Polite">
+            <StackPanel Orientation="Horizontal">
+                <materialDesign:PackIcon Kind="InformationOutline"
+                                         Width="18"
+                                         Height="18"
+                                         Margin="0,0,8,0"
+                                         VerticalAlignment="Center"
+                                         Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                <TextBlock x:Name="DailyCloseStatusText"
+                           Text="{Binding StatusMessage}"
+                           VerticalAlignment="Center"
+                           FontSize="14"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource PosTextBrush}" />
+            </StackPanel>
+        </Border>
+
         <Grid x:Name="DailyCloseCashWorkspaceOverlay"
+              Grid.RowSpan="2"
               Panel.ZIndex="100"
               Background="#660F172A"
               Visibility="{Binding IsCashCountWorkspaceOpen, Converter={StaticResource BoolToVis}}"
@@ -1769,6 +1802,19 @@
                                     <TextBlock Text="{loc:Loc dailyClose.cashWorkspace.discard}" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource PosDangerTextBrush}" />
                                 </StackPanel>
                             </Button>
+                            <TextBlock x:Name="DailyCloseWorkspaceStatusText"
+                                       Grid.Column="1"
+                                       Margin="14,0"
+                                       VerticalAlignment="Center"
+                                       HorizontalAlignment="Center"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       MaxHeight="40"
+                                       TextTrimming="CharacterEllipsis"
+                                       FontSize="13"
+                                       Text="{Binding StatusMessage}"
+                                       Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                       AutomationProperties.LiveSetting="Polite" />
                             <Button x:Name="DailyCloseCashWorkspaceReturnButton"
                                     Grid.Column="2"
                                     Command="{Binding CloseCashCountWorkspaceCommand}"
@@ -1803,6 +1849,7 @@
         </Grid>
 
         <Grid x:Name="DailyCloseDiscardDraftOverlay"
+              Grid.RowSpan="2"
               Panel.ZIndex="300"
               Background="#660F172A"
               Visibility="{Binding IsDiscardDailyCloseDraftConfirmationOpen, Converter={StaticResource BoolToVis}}"
