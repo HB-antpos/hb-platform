@@ -115,25 +115,34 @@ export function summarizeSchedulePublishState(schedules: AttendanceSchedule[]): 
   return active.length ? "published" : "empty";
 }
 
-/** 仅关联本店、并非管理本店的店长。 */
-export function isRelatedOnlyManager(user: { isStoreManager?: boolean; managesStore?: boolean }) {
-  return Boolean(user.isStoreManager && !user.managesStore);
+/** 当前登录用户以外的店长（GUID 忽略大小写比较）。 */
+export function isOtherManager(
+  user: { userGUID: string; isStoreManager?: boolean },
+  currentUserGuid: string | undefined,
+) {
+  return Boolean(
+    user.isStoreManager
+    && user.userGUID.toLowerCase() !== (currentUserGuid ?? "").toLowerCase(),
+  );
 }
 
 /**
- * 排班表员工过滤：店员与管理本店的店长默认显示；仅关联本店的店长默认隐藏，打开筛选后显示。
+ * 排班表员工过滤：店员与当前登录的店长自己默认显示；其他店长（无论是否管理本店）默认隐藏，打开筛选后显示。
  * 本周已有班次的员工始终显示，避免班次被藏起来而与周合计对不上。
  */
-export function filterScheduleUsers<T extends { userGUID: string; isStoreManager?: boolean; managesStore?: boolean }>(
+export function filterScheduleUsers<T extends { userGUID: string; isStoreManager?: boolean }>(
   users: T[],
   scheduledUserGuids: ReadonlySet<string>,
-  showRelatedManagers: boolean,
+  showOtherManagers: boolean,
+  currentUserGuid: string | undefined,
 ) {
-  const relatedManagerCount = users.filter(isRelatedOnlyManager).length;
-  const visible = showRelatedManagers
+  const otherManagerCount = users.filter((user) => isOtherManager(user, currentUserGuid)).length;
+  const visible = showOtherManagers
     ? users
-    : users.filter((user) => !isRelatedOnlyManager(user) || scheduledUserGuids.has(user.userGUID));
-  return { visible, relatedManagerCount };
+    : users.filter(
+        (user) => !isOtherManager(user, currentUserGuid) || scheduledUserGuids.has(user.userGUID),
+      );
+  return { visible, otherManagerCount };
 }
 
 /** 批量排班只给空格与仅有「可上班」标记的格子建班；已有班次或请假的格子跳过，与「复制上周」的跳过口径一致。 */
