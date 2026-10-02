@@ -23,24 +23,47 @@ public sealed class DailyClosePrintingTests
         var result = await service.PrintAsync(CreateArchive(), ReceiptPrintReason.Manual);
 
         Assert.True(result.Succeeded);
+        Assert.Equal("Daily close report and cash slip printed.", result.Message);
         Assert.Equal("COM5", driver.LastSettings?.PrinterPort);
-        Assert.NotNull(driver.LastDocument);
-        Assert.Contains(driver.LastDocument!.PreviewRows, row => row.Text == "==== DAILY CLOSE ====" && row.IsCentered && row.IsEmphasized);
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text == "Daily Close Date: 2026-05-27");
-        Assert.Contains(driver.LastDocument.Elements, element => element.Text == "Store: Sunnybank (S001)");
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text == "Store: Sunnybank (S001)");
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text == "Terminal: POS-01");
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text == "Cashier: Alice");
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("Cash Counted", StringComparison.Ordinal) && row.Text.Contains("$287.00", StringComparison.Ordinal));
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("Cash Difference", StringComparison.Ordinal) && row.Text.Contains("+$7.00", StringComparison.Ordinal));
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("Refund Amount", StringComparison.Ordinal) && row.Text.Contains("$25.50", StringComparison.Ordinal));
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("Return Qty", StringComparison.Ordinal) && row.Text.Contains("3", StringComparison.Ordinal));
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("Cash", StringComparison.Ordinal) && row.Text.Contains("$300.00", StringComparison.Ordinal));
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("Notes Total", StringComparison.Ordinal) && row.Text.Contains("$260.00", StringComparison.Ordinal));
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("Coins Total", StringComparison.Ordinal) && row.Text.Contains("$27.00", StringComparison.Ordinal));
-        AssertAllDenominationsArePrinted(driver.LastDocument);
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("$5", StringComparison.Ordinal) && row.Text.Contains("x0", StringComparison.Ordinal) && row.Text.Contains("$0.00", StringComparison.Ordinal));
-        Assert.Contains(driver.LastDocument.PreviewRows, row => row.Text.Contains("5c", StringComparison.Ordinal) && row.Text.Contains("x0", StringComparison.Ordinal) && row.Text.Contains("$0.00", StringComparison.Ordinal));
+        // 驱动每次打印末尾都会切纸：日结单与现金单分两次下发即两张独立纸条。
+        Assert.Equal(2, driver.Documents.Count);
+        var report = driver.Documents[0];
+        Assert.Contains(report.PreviewRows, row => row.Text == "==== DAILY CLOSE ====" && row.IsCentered && row.IsEmphasized);
+        AssertProminentBusinessDate(report, "2026-05-27 WED");
+        Assert.DoesNotContain(report.PreviewRows, row => row.Text.Contains("CHECK DATE", StringComparison.Ordinal));
+        Assert.Contains(report.Elements, element => element.Text == "Store: Sunnybank (S001)");
+        Assert.Contains(report.PreviewRows, row => row.Text == "Store: Sunnybank (S001)");
+        Assert.Contains(report.PreviewRows, row => row.Text == "Terminal: POS-01");
+        Assert.Contains(report.PreviewRows, row => row.Text == "Cashier: Alice");
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Cash Counted", StringComparison.Ordinal) && row.Text.Contains("$287.00", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Cash Difference", StringComparison.Ordinal) && row.Text.Contains("+$7.00", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Refund Amount", StringComparison.Ordinal) && row.Text.Contains("$25.50", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Return Qty", StringComparison.Ordinal) && row.Text.Contains("3", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Cash", StringComparison.Ordinal) && row.Text.Contains("$300.00", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Notes Total", StringComparison.Ordinal) && row.Text.Contains("$260.00", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("Coins Total", StringComparison.Ordinal) && row.Text.Contains("$27.00", StringComparison.Ordinal));
+        AssertAllDenominationsArePrinted(report);
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("$5", StringComparison.Ordinal) && row.Text.Contains("x0", StringComparison.Ordinal) && row.Text.Contains("$0.00", StringComparison.Ordinal));
+        Assert.Contains(report.PreviewRows, row => row.Text.Contains("5c", StringComparison.Ordinal) && row.Text.Contains("x0", StringComparison.Ordinal) && row.Text.Contains("$0.00", StringComparison.Ordinal));
+
+        var cashSlip = driver.Documents[1];
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text == "==== CASH COUNT ====" && row.IsCentered && row.IsEmphasized);
+        AssertProminentBusinessDate(cashSlip, "2026-05-27 WED");
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text == "Terminal: POS-01");
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text == "Cashier: Alice");
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text.Contains("Notes Total", StringComparison.Ordinal) && row.Text.Contains("$260.00", StringComparison.Ordinal));
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text.Contains("Coins Total", StringComparison.Ordinal) && row.Text.Contains("$27.00", StringComparison.Ordinal));
+        Assert.Contains(cashSlip.PreviewRows, row => row.IsEmphasized && row.Text.Contains("Cash Counted", StringComparison.Ordinal) && row.Text.Contains("$287.00", StringComparison.Ordinal));
+        AssertAllDenominationsArePrinted(cashSlip);
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text == "KEEP THIS SLIP" && row.IsCentered && row.IsEmphasized);
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text == "WITH THE CASH" && row.IsCentered && row.IsEmphasized);
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text.StartsWith("Counted by:", StringComparison.Ordinal));
+        Assert.Contains(cashSlip.PreviewRows, row => row.Text.StartsWith("Checked by:", StringComparison.Ordinal));
+        // 现金单只随现金交接，不含销售汇总与长短款。
+        Assert.DoesNotContain(cashSlip.PreviewRows, row => row.Text.StartsWith("Payment", StringComparison.Ordinal));
+        Assert.DoesNotContain(cashSlip.PreviewRows, row => row.Text.Contains("Cash Expected", StringComparison.Ordinal));
+        Assert.DoesNotContain(cashSlip.PreviewRows, row => row.Text.Contains("Cash Difference", StringComparison.Ordinal));
+        Assert.All(cashSlip.PreviewRows, row => Assert.True(row.Text.Length <= 42, $"Cash slip line exceeds 42 characters: {row.Text}"));
     }
 
     [Fact]
@@ -56,8 +79,50 @@ public sealed class DailyClosePrintingTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("printer offline", result.Message);
-        Assert.NotNull(driver.LastDocument);
-        Assert.Contains(driver.LastDocument!.PreviewRows, row => row.Text == "==== DAILY CLOSE REPRINT ====");
+        var report = Assert.Single(driver.Documents);
+        Assert.Contains(report.PreviewRows, row => row.Text == "==== DAILY CLOSE REPRINT ====");
+    }
+
+    [Fact]
+    public async Task Daily_close_print_service_reports_cash_slip_failure_after_the_report_printed()
+    {
+        var driver = new RecordingReceiptPrinterDriver
+        {
+            PrintResults = new Queue<ReceiptPrinterDriverResult>(
+            [
+                new ReceiptPrinterDriverResult(true, "printed"),
+                new ReceiptPrinterDriverResult(false, "paper out")
+            ])
+        };
+        var service = new DailyClosePrintService(new FakeReceiptPrinterSettingsStore(), driver);
+
+        var result = await service.PrintAsync(CreateArchive(), ReceiptPrintReason.Reprint);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Daily close report printed, but the cash slip failed: paper out", result.Message);
+        Assert.Equal(2, driver.Documents.Count);
+        Assert.Contains(driver.Documents[1].PreviewRows, row => row.Text == "==== CASH COUNT REPRINT ====");
+    }
+
+    [Fact]
+    public void Business_date_that_differs_from_the_saved_day_prints_a_check_date_warning_on_both_slips()
+    {
+        // 模拟 1013 事故：10-01 晚上保存，但营业日期仍是 09-30。
+        var archive = CreateArchive(
+            businessDate: new DateTime(2026, 9, 30),
+            savedAt: new DateTimeOffset(new DateTime(2026, 10, 1, 20, 42, 15, DateTimeKind.Local)));
+
+        foreach (var document in new[]
+                 {
+                     DailyCloseTextFormatter.Build(archive, ReceiptPrinterSettings.Default),
+                     DailyCloseTextFormatter.BuildCashSlip(archive, ReceiptPrinterSettings.Default)
+                 })
+        {
+            AssertProminentBusinessDate(document, "2026-09-30 WED");
+            Assert.Contains(document.PreviewRows, row => row.Text == "** CHECK DATE **" && row.IsCentered && row.IsEmphasized);
+            Assert.Contains(document.PreviewRows, row => row.Text == "Saved on 2026-10-01, not the business date");
+            Assert.All(document.PreviewRows, row => Assert.True(row.Text.Length <= 42, $"Line exceeds 42 characters: {row.Text}"));
+        }
     }
 
     [Fact]
@@ -72,8 +137,12 @@ public sealed class DailyClosePrintingTests
 
         var document = await service.BuildDocumentAsync(CreateArchive(), ReceiptPrintReason.Reprint);
 
-        Assert.Null(driver.LastDocument);
-        Assert.Contains(document.PreviewRows, row => row.Text == "==== DAILY CLOSE REPRINT ====");
+        Assert.Empty(driver.Documents);
+        var rows = document.PreviewRows.Select(row => row.Text).ToList();
+        var reportTitle = rows.IndexOf("==== DAILY CLOSE REPRINT ====");
+        var cut = rows.IndexOf(DailyCloseTextFormatter.CutMarker);
+        var cashTitle = rows.IndexOf("==== CASH COUNT REPRINT ====");
+        Assert.True(reportTitle >= 0 && reportTitle < cut && cut < cashTitle, "预览应按日结单、切纸、现金单的顺序展示。");
         Assert.Contains(document.Elements, element => element.Text == "Store: Sunnybank (S001)");
         Assert.Contains(document.PreviewRows, row => row.Text == "Store: Sunnybank (S001)");
         AssertAllDenominationsArePrinted(document);
@@ -113,10 +182,10 @@ public sealed class DailyClosePrintingTests
         Assert.All(storeLines, line => Assert.True(line.Length <= 42, $"Store line exceeds 42 characters: {line}"));
     }
 
-    private static DailyCloseArchive CreateArchive()
+    private static DailyCloseArchive CreateArchive(DateTime? businessDate = null, DateTimeOffset? savedAt = null)
     {
         var report = new DailyCloseReport(
-            new DateTime(2026, 5, 27),
+            businessDate ?? new DateTime(2026, 5, 27),
             new DateTimeOffset(2026, 5, 27, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 5, 28, 0, 0, 0, TimeSpan.Zero),
             "S001",
@@ -148,7 +217,7 @@ public sealed class DailyClosePrintingTests
             Guid.NewGuid(),
             report,
             counts,
-            new DateTimeOffset(2026, 5, 27, 18, 30, 0, TimeSpan.Zero),
+            savedAt ?? new DateTimeOffset(new DateTime(2026, 5, 27, 18, 30, 0, DateTimeKind.Local)),
             260m,
             27m,
             287m,
@@ -159,6 +228,18 @@ public sealed class DailyClosePrintingTests
     {
         var denomination = DailyCloseService.AustralianDenominations.Single(item => item.Value == value);
         return new CashDenominationCount(denomination.Value, denomination.Label, denomination.Kind, quantity);
+    }
+
+    private static void AssertProminentBusinessDate(ReceiptPrintDocument document, string expectedDate)
+    {
+        var rows = document.PreviewRows.ToList();
+        var label = rows.FindIndex(row => row.Text == "BUSINESS DATE" && row.IsCentered);
+        Assert.True(label >= 0, "缺少营业日期标签。");
+        var date = rows[label + 1];
+        Assert.Equal(expectedDate, date.Text);
+        Assert.True(date.IsEmphasized && date.IsCentered, "营业日期应居中加粗单独成行。");
+        Assert.True(rows[label - 1].IsSeparator, "营业日期块上方应有分隔线。");
+        Assert.DoesNotContain(rows, row => row.Text.StartsWith("Daily Close Date:", StringComparison.Ordinal));
     }
 
     private static void AssertAllDenominationsArePrinted(ReceiptPrintDocument document)
@@ -186,20 +267,22 @@ public sealed class DailyClosePrintingTests
 
     private sealed class RecordingReceiptPrinterDriver : IReceiptPrinterDriver
     {
-        public ReceiptPrintDocument? LastDocument { get; private set; }
+        public List<ReceiptPrintDocument> Documents { get; } = [];
 
         public ReceiptPrinterSettings? LastSettings { get; private set; }
 
         public ReceiptPrinterDriverResult PrintResult { get; init; } = new(true, "printed");
+
+        public Queue<ReceiptPrinterDriverResult>? PrintResults { get; init; }
 
         public Task<ReceiptPrinterDriverResult> PrintAsync(
             ReceiptPrintDocument document,
             ReceiptPrinterSettings settings,
             CancellationToken cancellationToken = default)
         {
-            LastDocument = document;
+            Documents.Add(document);
             LastSettings = settings;
-            return Task.FromResult(PrintResult);
+            return Task.FromResult(PrintResults is { Count: > 0 } ? PrintResults.Dequeue() : PrintResult);
         }
 
         public Task<ReceiptPrinterDriverResult> TestAsync(
