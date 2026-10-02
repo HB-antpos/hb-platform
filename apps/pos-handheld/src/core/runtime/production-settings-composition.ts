@@ -93,6 +93,11 @@ export type ProductionSettingsCompositionInput = Readonly<{
   reportSnapshotFailure?:
     | ((stage: SettingsSnapshotStage, error: unknown) => void)
     | undefined;
+  /**
+   * 打印机扫描异常上报（中心日志）：原生扫描失败，或个别设备名被清洗、坏 ID 被跳过。
+   * 只上报计数，不带设备名与地址。
+   */
+  reportPrinterScanIssue?: ((issue: PrinterScanIssue) => void) | undefined;
   catalog: Readonly<{
     getActiveMetadata(): Promise<SettingsCatalogSnapshot | null>;
     getRefreshState(): CatalogRefreshState;
@@ -321,17 +326,31 @@ export function createProductionSettingsComposition(
       },
       scan: async (signal) => {
         throwIfAborted(signal);
-        const devices = await input.printer.scan(8_000);
+        let devices: Awaited<ReturnType<typeof input.printer.scan>>;
+        try {
+          devices = await input.printer.scan(8_000);
+        } catch (error) {
+          reportPrinterScanIssue(input, { kind: "failed", error });
+          throw error;
+        }
         throwIfAborted(signal);
+        // 设置页列出附近全部 BLE 设备；单个设备的异常广播名/ID 不能让整次扫描失败。
+        const scanned = sanitizeScannedPrinters(devices);
+        if (scanned.sanitizedCount > 0 || scanned.skippedCount > 0) {
+          reportPrinterScanIssue(input, {
+            kind: "sanitized",
+            sanitizedCount: scanned.sanitizedCount,
+            skippedCount: scanned.skippedCount,
+            totalCount: devices.length,
+          });
+        }
         return Object.freeze(
-          devices.map((device) =>
+          scanned.devices.map((device) =>
             Object.freeze({
               id: device.id,
               name: device.name,
               transport: "bluetooth-le",
-              preferred:
-                device.name.trim().toLowerCase() ===
-                "printer001",
+              preferred: device.name.toLowerCase() === "printer001",
             }),
           ),
         );
@@ -527,6 +546,85 @@ function reportSnapshotFailure(
   } catch {
     // 日志旁路失败不能改变设置页原有的失败语义。
   }
+}
+
+export type PrinterScanIssue =
+  | Readonly<{ kind: "failed"; error: unknown }>
+  | Readonly<{
+      kind: "sanitized";
+      sanitizedCount: number;
+      skippedCount: number;
+      totalCount: number;
+    }>;
+
+function reportPrinterScanIssue(
+  input: Pick<ProductionSettingsCompositionInput, "reportPrinterScanIssue">,
+  issue: PrinterScanIssue,
+): void {
+  try {
+    input.reportPrinterScanIssue?.(issue);
+  } catch {
+    // 日志旁路失败不能改变扫描结果或失败语义。
+  }
+}
+
+// 与设置 presenter 的公开文本/标识校验保持一致：名称 ≤120、标识 ≤128，均不含控制字符。
+const SCANNED_PRINTER_NAME_MAX_LENGTH = 120;
+const SCANNED_PRINTER_ID_MAX_LENGTH = 128;
+const SCANNED_PRINTER_FALLBACK_NAME = "Bluetooth Printer";
+// 判定用不带 g 的正则，避免 test() 受 lastIndex 状态影响；替换用全局版本。
+const CONTROL_CHARACTER = /[\u0000-\u001F\u007F-\u009F]/u;
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/gu;
+
+/**
+ * 逐条清洗原生扫描结果：名称去控制字符、按代码点截断到上限，清洗后为空用原生同款兜底名；
+ * ID 不合规（非字符串、超长、含控制字符）的设备直接跳过，因为连接时无法安全回传。
+ */
+export function sanitizeScannedPrinters(
+  devices: readonly Readonly<{ id: unknown; name: unknown }>[],
+): Readonly<{
+  devices: readonly Readonly<{ id: string; name: string }>[];
+  sanitizedCount: number;
+  skippedCount: number;
+}> {
+  let sanitizedCount = 0;
+  let skippedCount = 0;
+  const usable: Readonly<{ id: string; name: string }>[] = [];
+  for (const device of devices) {
+    const id = typeof device.id === "string" ? device.id.trim() : "";
+    if (
+      !id ||
+      id.length > SCANNED_PRINTER_ID_MAX_LENGTH ||
+      CONTROL_CHARACTER.test(id)
+    ) {
+      skippedCount += 1;
+      continue;
+    }
+    const rawName = typeof device.name === "string" ? device.name : "";
+    const cleaned = truncateByCodePoint(
+      rawName.replace(CONTROL_CHARACTERS, "").trim(),
+      SCANNED_PRINTER_NAME_MAX_LENGTH,
+    ).trim();
+    const name = cleaned || SCANNED_PRINTER_FALLBACK_NAME;
+    if (name !== rawName.trim()) sanitizedCount += 1;
+    usable.push(Object.freeze({ id, name }));
+  }
+  return Object.freeze({
+    devices: Object.freeze(usable),
+    sanitizedCount,
+    skippedCount,
+  });
+}
+
+/** 按 UTF-16 长度截断但不拆开代理对，避免留下半个 emoji。 */
+function truncateByCodePoint(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  let result = "";
+  for (const codePoint of value) {
+    if (result.length + codePoint.length > maxLength) break;
+    result += codePoint;
+  }
+  return result;
 }
 
 function assertDeviceScope(

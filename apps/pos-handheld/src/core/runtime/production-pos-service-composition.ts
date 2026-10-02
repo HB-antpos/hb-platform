@@ -482,6 +482,7 @@ export type ProductionSettingsRuntimeConfiguration = Pick<
   | "linklySetup"
   | "readDevicePresentation"
   | "reportSnapshotFailure"
+  | "reportPrinterScanIssue"
   | "paymentConfiguration"
   | "paymentMethods"
   | "apiConfiguration"

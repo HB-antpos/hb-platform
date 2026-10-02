@@ -624,6 +624,88 @@ test("打印机扫描仅把 trim 后精确匹配 printer001 的设备标记为 p
   ]);
 });
 
+test("扫描结果中个别设备名/ID 异常时逐条容错：清洗名称、跳过坏 ID，并上报统计", async () => {
+  const issues: unknown[] = [];
+  const runtime = createProductionSettingsComposition(
+    dependencies({
+      printer: {
+        getStatus: async () => "ready",
+        scan: async () => [
+          // BLE 广播名常用 \u0000 补齐长度；门店周边设备多时极易出现。
+          { id: "padded", name: "printer001\u0000\u0000\u0000", rssi: null },
+          { id: "long", name: "x".repeat(200), rssi: null },
+          { id: "blank", name: "\u0000\u0001", rssi: null },
+          { id: "bad\u0000id", name: "Ghost", rssi: null },
+          { id: "ok", name: "N160", rssi: null },
+        ],
+        connect: async () => undefined,
+        disconnect: async () => undefined,
+        print: async () => ({ status: "printed", errorCode: null }),
+        subscribe: () => () => undefined,
+        open: async () => ({ status: "completed", errorCode: null }),
+      },
+      reportPrinterScanIssue: (issue) => {
+        issues.push(issue);
+      },
+    }),
+  );
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+
+  await presenter.scanPrinters();
+
+  assert.equal(presenter.getState().statusCode, "printer-scan-finished");
+  assert.deepEqual(
+    presenter.getState().printerDevices.map(({ id, name, preferred }) => ({
+      id,
+      name,
+      preferred,
+    })),
+    [
+      { id: "padded", name: "printer001", preferred: true },
+      { id: "blank", name: "Bluetooth Printer", preferred: false },
+      { id: "ok", name: "N160", preferred: false },
+      { id: "long", name: "x".repeat(120), preferred: false },
+    ],
+  );
+  assert.deepEqual(issues, [
+    { kind: "sanitized", sanitizedCount: 3, skippedCount: 1, totalCount: 5 },
+  ]);
+});
+
+test("原生扫描抛错时上报 failed 并保持原有失败状态", async () => {
+  const issues: Array<{ kind: string; error?: unknown }> = [];
+  const scanError = Object.assign(new Error("BLE 扫描失败，系统错误码：2。"), {
+    code: "PRINTER_BLE_SCAN_FAILED",
+  });
+  const runtime = createProductionSettingsComposition(
+    dependencies({
+      printer: {
+        getStatus: async () => "ready",
+        scan: async () => {
+          throw scanError;
+        },
+        connect: async () => undefined,
+        disconnect: async () => undefined,
+        print: async () => ({ status: "printed", errorCode: null }),
+        subscribe: () => () => undefined,
+        open: async () => ({ status: "completed", errorCode: null }),
+      },
+      reportPrinterScanIssue: (issue) => {
+        issues.push(issue);
+        throw new Error("log sink unavailable");
+      },
+    }),
+  );
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+
+  await presenter.scanPrinters();
+
+  assert.equal(presenter.getState().statusCode, "printer-scan-failed");
+  assert.deepEqual(issues, [{ kind: "failed", error: scanError }]);
+});
+
 test("组合层把当前门店小票资料载入能力接入设置呈现器", async () => {
   const runtime = createProductionSettingsComposition(
     dependencies({
