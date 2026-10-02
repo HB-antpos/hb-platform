@@ -9,7 +9,7 @@ import {
   normalizeClockTime,
   shiftEditorMinutes,
   filterScheduleUsers,
-  isRelatedOnlyManager,
+  isOtherManager,
   isBatchSchedulableCell,
   runSequentialBatch,
   stepClockTime,
@@ -148,26 +148,33 @@ assert.equal(employmentTypeCode("casual"), "C");
 assert.equal(employmentTypeCode("Temporary"), "C");
 assert.equal(employmentTypeCode(undefined), undefined);
 
-// 排班名单过滤：管理本店的店长默认在表中，仅关联本店的店长默认不在；有班次的始终显示。
+// 排班名单过滤：店长默认只显示自己，其他店长（无论是否管理本店）收进筛选；本周已有班次的始终显示。
 const scheduleUsers = [
   { userGUID: "staff" },
-  { userGUID: "own-manager", isStoreManager: true, managesStore: true },
+  { userGUID: "Me-Manager", isStoreManager: true, managesStore: true },
+  { userGUID: "other-manager", isStoreManager: true, managesStore: true },
   { userGUID: "related-manager", isStoreManager: true, managesStore: false },
-  { userGUID: "related-scheduled", isStoreManager: true, managesStore: false },
+  { userGUID: "other-scheduled", isStoreManager: true, managesStore: true },
 ];
-assert.equal(isRelatedOnlyManager(scheduleUsers[1]), false);
-assert.equal(isRelatedOnlyManager(scheduleUsers[2]), true);
-const hiddenByDefault = filterScheduleUsers(scheduleUsers, new Set(["related-scheduled"]), false);
+assert.equal(isOtherManager(scheduleUsers[0], "me-manager"), false, "店员不算其他店长");
+assert.equal(isOtherManager(scheduleUsers[1], "me-manager"), false, "当前登录的店长自己不算（GUID 忽略大小写）");
+assert.equal(isOtherManager(scheduleUsers[2], "me-manager"), true);
+const hiddenByDefault = filterScheduleUsers(scheduleUsers, new Set(["other-scheduled"]), false, "me-manager");
 assert.deepEqual(
   hiddenByDefault.visible.map((user) => user.userGUID),
-  ["staff", "own-manager", "related-scheduled"],
-  "仅关联本店的店长默认隐藏，但本周已有班次的仍显示",
+  ["staff", "Me-Manager", "other-scheduled"],
+  "其他店长默认隐藏，但本周已有班次的仍显示",
 );
-assert.equal(hiddenByDefault.relatedManagerCount, 2);
+assert.equal(hiddenByDefault.otherManagerCount, 3);
 assert.deepEqual(
-  filterScheduleUsers(scheduleUsers, new Set(), true).visible.map((user) => user.userGUID),
-  ["staff", "own-manager", "related-manager", "related-scheduled"],
-  "打开筛选后显示全部相关店长",
+  filterScheduleUsers(scheduleUsers, new Set(), true, "me-manager").visible.map((user) => user.userGUID),
+  ["staff", "Me-Manager", "other-manager", "related-manager", "other-scheduled"],
+  "打开筛选后显示全部店长",
+);
+assert.equal(
+  filterScheduleUsers(scheduleUsers, new Set(), false, undefined).visible.length,
+  1,
+  "取不到当前用户时所有店长都按其他店长处理",
 );
 
 // 批量排班：只给空格与仅有「可上班」标记的格子建班，已有班次或请假的跳过。

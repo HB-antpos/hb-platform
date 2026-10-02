@@ -1239,7 +1239,9 @@ namespace BlazorApp.Api.Services.React
             }
 
             // 可排班员工：店员与绑定在本店的店长（店长也要上班，需要给自己排班）。
+            // 仓库管理员不排门店班：一并查出其角色，下面整人剔除（即使同时是店长）。
             var schedulableRoleNames = Permissions.StoreManagerRoleNames.Append("StoreStaff").ToArray();
+            var queriedRoleNames = schedulableRoleNames.Concat(Permissions.WarehouseManagerRoleNames).ToArray();
             var rows = await _db.Queryable<User>()
                 .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
                 .InnerJoin<Role>((u, ur, r) => ur.RoleGUID == r.RoleGUID)
@@ -1252,7 +1254,7 @@ namespace BlazorApp.Api.Services.React
                     && !r.IsDeleted
                     && !us.IsDeleted
                     && !s.IsDeleted
-                    && schedulableRoleNames.Contains(r.RoleName)
+                    && queriedRoleNames.Contains(r.RoleName)
                     && s.StoreCode == normalizedStoreCode)
                 .Select((u, ur, r, us, s, profile) => new
                 {
@@ -1271,6 +1273,11 @@ namespace BlazorApp.Api.Services.React
                 await ResolveStoreTimeZoneAsync(normalizedStoreCode, null)).Date;
             var employees = rows
                 .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
+                .Where(group =>
+                    group.Any(row => schedulableRoleNames.Contains(row.RoleName, StringComparer.OrdinalIgnoreCase))
+                    && !group.Any(row => Permissions.WarehouseManagerRoleNames.Contains(
+                        row.RoleName,
+                        StringComparer.OrdinalIgnoreCase)))
                 .Select(group =>
                 {
                     var item = group.First();
