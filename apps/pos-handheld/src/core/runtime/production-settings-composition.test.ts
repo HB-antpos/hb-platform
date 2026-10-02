@@ -485,6 +485,32 @@ test("设备范围不一致时上报 device-scope，上报钩子抛错不改变�
   assert.deepEqual(stages, ["device-scope"]);
 });
 
+test("更新快照校验失败时上报 app-update 阶段，页面仍显示 load-failed", async () => {
+  const reported: Array<{ stage: string; error: unknown }> = [];
+  const updateError = new Error("Settings public metadata is invalid.");
+  const runtime = createProductionSettingsComposition(
+    dependencies({
+      appUpdate: {
+        check: async () => {
+          throw updateError;
+        },
+        snapshot: () => {
+          throw updateError;
+        },
+        restart: async () => true,
+      },
+      reportSnapshotFailure: (stage, error) => {
+        reported.push({ stage, error });
+      },
+    }),
+  );
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+
+  assert.equal(presenter.getState().statusCode, "load-failed");
+  assert.deepEqual(reported, [{ stage: "app-update", error: updateError }]);
+});
+
 test("数据库、退货或支付恢复任一未清零时，危险设置动作保持阻断", async () => {
   let saved = false;
   const runtime = createProductionSettingsComposition(

@@ -195,3 +195,26 @@ test("设置 reload 成功后保持 terminal pending，失败时仍向上抛出"
     /RELOAD_FAILED/u,
   );
 });
+
+test("后端生成的 release channel（68 字符）可读；超过后端上限 160 仍拒绝", () => {
+  // 线上手持 OTA v8 的真实 channel；旧上限 64 曾让套用 OTA 的设备设置页整页 load-failed。
+  const releaseChannel =
+    "pos-handheld-production-android-release-20261001t212714325z-be17639f";
+  assert.equal(
+    settingsAppUpdateSnapshot({
+      channel: releaseChannel,
+      currentVersion: "0.1.0",
+      policy: null,
+      restartAvailable: true,
+    }).channel,
+    releaseChannel,
+  );
+  assert.throws(() =>
+    settingsAppUpdateSnapshot({
+      channel: `release-${"x".repeat(153)}`,
+      currentVersion: "0.1.0",
+      policy: null,
+      restartAvailable: true,
+    }),
+  );
+});
