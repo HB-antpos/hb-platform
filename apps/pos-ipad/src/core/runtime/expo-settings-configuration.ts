@@ -40,6 +40,8 @@ export function settingsPaymentConfiguration(
   return null;
 }
 
+const RELEASE_CHANNEL_MAX_LENGTH = 160;
+
 export function settingsAppUpdateSnapshot(input: Readonly<{
   channel: string;
   currentVersion: string;
@@ -47,7 +49,9 @@ export function settingsAppUpdateSnapshot(input: Readonly<{
   restartAvailable: boolean;
 }>): SettingsAppUpdateSnapshot {
   return Object.freeze({
-    channel: requiredText(input.channel, 64),
+    // release channel 由后端生成（如 pos-handheld-production-android-release-<时间戳>-<哈希>，68 字符），
+    // 上限须与后端 ReleaseChannel 校验（160）一致，否则套用 OTA 后设置页整页读取失败。
+    channel: requiredText(input.channel, RELEASE_CHANNEL_MAX_LENGTH),
     currentVersion: requiredText(input.currentVersion, 64),
     availableVersion: input.policy?.latestVersion ?? null,
     updateRequired: input.policy?.forceUpdate === true,

@@ -217,3 +217,26 @@ test("健康检查失败不误报在线，取消后的成功响应不再被采�
   });
   await assert.rejects(probe("https://pos.example.test/api/v1/health", controller.signal), /abort/i);
 });
+
+test("后端生成的 release channel（68 字符）可读；超过后端上限 160 仍拒绝", () => {
+  // 线上手持 OTA v8 的真实 channel；旧上限 64 曾让套用 OTA 的设备设置页整页 load-failed。
+  const releaseChannel =
+    "pos-handheld-production-android-release-20261001t212714325z-be17639f";
+  assert.equal(
+    settingsAppUpdateSnapshot({
+      channel: releaseChannel,
+      currentVersion: "0.1.0",
+      policy: null,
+      restartAvailable: true,
+    }).channel,
+    releaseChannel,
+  );
+  assert.throws(() =>
+    settingsAppUpdateSnapshot({
+      channel: `release-${"x".repeat(153)}`,
+      currentVersion: "0.1.0",
+      policy: null,
+      restartAvailable: true,
+    }),
+  );
+});

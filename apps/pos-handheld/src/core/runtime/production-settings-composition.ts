@@ -223,9 +223,17 @@ export function createProductionSettingsComposition(
         reportSnapshotFailure(input, "device-scope", error);
         throw error;
       }
+      // 更新快照会校验 channel 等公开元数据；失败同样上报阶段，避免只剩无上下文的 load-failed。
+      let appUpdate: SettingsSnapshot["appUpdate"];
+      try {
+        appUpdate = input.appUpdate.snapshot();
+      } catch (error) {
+        reportSnapshotFailure(input, "app-update", error);
+        throw error;
+      }
       return Object.freeze({
         apiBaseUrl: input.apiBaseUrl,
-        appUpdate: input.appUpdate.snapshot(),
+        appUpdate,
         catalog: catalog ?? emptyCatalog(),
         device,
         hardware: {
@@ -493,7 +501,8 @@ export type SettingsSnapshotStage =
   | "receipt-settings"
   | "printer-status"
   | "payment-methods"
-  | "device-scope";
+  | "device-scope"
+  | "app-update";
 
 async function readSnapshotStage<T>(
   input: Pick<ProductionSettingsCompositionInput, "reportSnapshotFailure">,
