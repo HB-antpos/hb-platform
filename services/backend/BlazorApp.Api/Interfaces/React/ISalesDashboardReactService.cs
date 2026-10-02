@@ -191,7 +191,7 @@ namespace BlazorApp.Api.Interfaces.React
             DateRangeDto dateRange, IReadOnlyCollection<string> supplierCodes, List<string>? branchCodes = null,
             string? selectedBranchCode = null, string? nodeSupplierCode = null, string? nodeCategoryGuid = null,
             string? search = null, int pageIndex = 1, int pageSize = 20, bool includeTree = true,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default, string? sortBy = null, bool sortAscending = false);
 
         /// <summary>「澳洲供应商分类」页签的筛选选项：全部未删除的澳洲供应商（含分类数、已归类商品数）与范围内的启用分店。</summary>
         Task<SalesDetailCategoryOptionsDto> GetSalesDetailCategoryOptionsAsync(List<string>? branchCodes, CancellationToken cancellationToken = default);

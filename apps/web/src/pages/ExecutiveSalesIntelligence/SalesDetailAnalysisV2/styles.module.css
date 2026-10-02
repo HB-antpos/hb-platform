@@ -16,6 +16,11 @@
 .headerControls :global(.ant-segmented-item-label) { padding-inline:7px; }
 .headerControls > div > div > :global(.ant-btn) { padding-inline:10px; }
 .categoryTreePopup { width:min(400px,calc(100vw - 32px))!important; }
+.auFilterSummary { display:inline-flex; align-items:center; gap:8px; max-width:min(720px,100%); height:28px; padding:0 10px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); font:inherit; cursor:pointer; }
+.auFilterSummary > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.auFilterSummary :global(.anticon) { flex:none; color:var(--muted); font-size:11px; }
+.auFilterSummary:hover { border-color:#8fb0da; }
+.auFilterSummary:focus-visible { outline:2px solid #4c7ee8; outline-offset:1px; }
 .auSupplierOption { display:flex; align-items:baseline; justify-content:space-between; gap:12px; min-width:0; }
 .auSupplierOption > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .auSupplierOption > small { flex:none; color:#5c7088; font-size:11px; }
