@@ -777,6 +777,12 @@
   <data name="payment.card.error.overlay.connectionFailed.message" xml:space="preserve">
     <value>无法连接到刷卡机。请检查刷卡机电源和网络连接，确认正常后重试。</value>
   </data>
+  <data name="payment.card.error.overlay.pinpadOffline.title" xml:space="preserve">
+    <value>刷卡机已离线</value>
+  </data>
+  <data name="payment.card.error.overlay.pinpadOffline.message" xml:space="preserve">
+    <value>刷卡机（PIN pad）已掉线，本次没有扣款。请检查刷卡机电源和连接线，或重启刷卡机，恢复后再刷卡。</value>
+  </data>
   <data name="payment.card.error.overlay.cloudCommunicationFailed.title" xml:space="preserve">
     <value>云刷卡通讯失败</value>
   </data>
@@ -2457,6 +2463,12 @@
   </data>
   <data name="linkly.local.connectionFailed" xml:space="preserve">
     <value>ANZ Linkly EFT-Client 连接失败。</value>
+  </data>
+  <data name="linkly.local.pinpadOffline" xml:space="preserve">
+    <value>刷卡机（PIN pad）已离线，本次没有扣款。</value>
+  </data>
+  <data name="linkly.local.recoveryPinpadOffline" xml:space="preserve">
+    <value>刷卡机（PIN pad）已离线，无法核对上一笔交易。请先恢复刷卡机连接再重试。</value>
   </data>
   <data name="linkly.local.requestSendFailed" xml:space="preserve">
     <value>ANZ Linkly 交易请求发送失败。</value>

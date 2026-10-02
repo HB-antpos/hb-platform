@@ -710,6 +710,7 @@ internal sealed class CardPaymentSession
         var overlay = result.CardResult?.ErrorKind switch
         {
             CardPaymentErrorKind.ConnectionFailed => CardPaymentErrorOverlayViewModel.ConnectionFailed(),
+            CardPaymentErrorKind.PinpadOffline => CardPaymentErrorOverlayViewModel.PinpadOffline(),
             CardPaymentErrorKind.CloudCommunicationFailed => CardPaymentErrorOverlayViewModel.CloudCommunicationFailed(),
             CardPaymentErrorKind.ActiveSessionRequiresRecovery => CreateUnqualifiedRecoveryOverlay(),
             CardPaymentErrorKind.SquareCommunicationFailed => CardPaymentErrorOverlayViewModel.SquareCommunicationFailed(),

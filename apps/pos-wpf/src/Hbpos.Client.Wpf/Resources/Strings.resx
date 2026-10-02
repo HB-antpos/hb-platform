@@ -281,6 +281,8 @@
   <data name="payment.card.squareRefundStatus" xml:space="preserve"><value>Square refund status is {0}.</value></data>
   <data name="payment.card.error.overlay.connectionFailed.title" xml:space="preserve"><value>Card Terminal Connection Failed</value></data>
   <data name="payment.card.error.overlay.connectionFailed.message" xml:space="preserve"><value>Unable to connect to the card terminal. Please check the terminal's power and network connection, then try again.</value></data>
+  <data name="payment.card.error.overlay.pinpadOffline.title" xml:space="preserve"><value>Card Terminal Offline</value></data>
+  <data name="payment.card.error.overlay.pinpadOffline.message" xml:space="preserve"><value>The card terminal (PINpad) is offline and no payment was taken. Check the card terminal power and cable, or restart it, then try the card payment again.</value></data>
   <data name="payment.card.error.overlay.cloudCommunicationFailed.title" xml:space="preserve"><value>Cloud Card Communication Failed</value></data>
   <data name="payment.card.error.overlay.cloudCommunicationFailed.message" xml:space="preserve"><value>Communication with the cloud card service failed. Please check your network and try again.</value></data>
   <data name="payment.card.error.overlay.timeout.title" xml:space="preserve"><value>Card Transaction Timed Out</value></data>
@@ -886,6 +888,8 @@
   <data name="linkly.local.amountMustBePositive" xml:space="preserve"><value>Card amount must be greater than zero.</value></data>
   <data name="linkly.local.cancelled" xml:space="preserve"><value>ANZ Linkly transaction was cancelled.</value></data>
   <data name="linkly.local.connectionFailed" xml:space="preserve"><value>ANZ Linkly EFT-Client connection failed.</value></data>
+  <data name="linkly.local.pinpadOffline" xml:space="preserve"><value>The card terminal (PINpad) is offline. No payment was taken.</value></data>
+  <data name="linkly.local.recoveryPinpadOffline" xml:space="preserve"><value>The card terminal (PINpad) is offline, so the previous transaction could not be checked. Reconnect the card terminal and try again.</value></data>
   <data name="linkly.local.requestSendFailed" xml:space="preserve"><value>ANZ Linkly transaction request could not be sent.</value></data>
   <data name="linkly.local.timeout" xml:space="preserve"><value>ANZ Linkly transaction timed out.</value></data>
   <data name="linkly.local.connectionClosed" xml:space="preserve"><value>ANZ Linkly connection was closed.</value></data>

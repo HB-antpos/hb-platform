@@ -12,6 +12,7 @@ public enum CardPaymentErrorKind
 {
     None,
     ConnectionFailed,
+    PinpadOffline,
     CloudCommunicationFailed,
     ActiveSessionRequiresRecovery,
     SquareCommunicationFailed,
@@ -73,6 +74,9 @@ public sealed class LinklyCardPaymentResultPolicy : ICardPaymentResultPolicy
             "linkly.local.connectionFailed" or "payment.card.linklyUnavailable" => new(
                 CardPaymentTerminalOutcome.None,
                 CardPaymentErrorKind.ConnectionFailed),
+            "linkly.local.pinpadOffline" => new(
+                CardPaymentTerminalOutcome.None,
+                CardPaymentErrorKind.PinpadOffline),
             "linkly.cloud.communicationFailed" or "linkly.backend.communicationFailed" => new(
                 CardPaymentTerminalOutcome.None,
                 CardPaymentErrorKind.CloudCommunicationFailed),

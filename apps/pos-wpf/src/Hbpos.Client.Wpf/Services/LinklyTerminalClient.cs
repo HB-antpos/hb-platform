@@ -185,6 +185,8 @@ public sealed class LinklyTerminalClient(
     private const string ProcessorName = "ANZ";
     private const string Merchant = "00";
     private const string CancelledMessage = "ANZ Linkly transaction was cancelled.";
+    // EFT-Client 无法与 PIN pad 通信时的响应码（生产实测 ResponseText 为 "PINpad Offline"）。
+    private const string PinpadOfflineResponseCode = "PF";
 
     public async Task<LinklyConnectionTestResult> TestConnectionAsync(
         string host,
@@ -1381,6 +1383,20 @@ public sealed class LinklyTerminalClient(
     {
         var amount = response.AmtPurchase == 0m ? (decimal?)null : response.AmtPurchase;
         var returnedTxnRef = LinklyLocalTxnRef.TrimProtocolPadding(response.TxnRef);
+        if (IsPinpadOfflineRejection(response.Success, response.ResponseCode, returnedTxnRef, response.AmtPurchase, receipts))
+        {
+            // 中文注释：EFT-Client 连不上 PIN pad 时立即回 PF、空 TxnRef、金额 0，交易从未进入刷卡机，
+            // 属于确定未提交；不能因 TxnRef 对不上而误判为结果未知，否则付款页会要求“恢复上一笔”。
+            return new PaymentAuthorizationResult(
+                false,
+                null,
+                T("linkly.local.pinpadOffline", "The card terminal (PINpad) is offline. No payment was taken."),
+                TxnType: ToResultTxnType(transactionType),
+                ResponseCode: NormalizeOptional(response.ResponseCode),
+                ResponseText: NormalizeOptional(response.ResponseText),
+                StatusKey: "linkly.local.pinpadOffline");
+        }
+
         var referenceMatches = string.Equals(returnedTxnRef, requestedTxnRef, StringComparison.Ordinal);
         var amountMatches = response.Success
             ? response.AmtPurchase == requestedAmount
@@ -1421,10 +1437,19 @@ public sealed class LinklyTerminalClient(
             response.TxnType == transactionType;
         if (!response.Success || !referenceMatches || !amountMatches || !transactionTypeMatches)
         {
+            // 中文注释：查询上一笔时刷卡机离线，上一笔仍无法核对，必须保持结果未知；只把原因说清楚。
+            var pinpadOffline = IsPinpadOfflineRejection(
+                response.Success,
+                response.ResponseCode,
+                returnedTxnRef,
+                response.AmtPurchase,
+                receipts);
             return new PaymentAuthorizationResult(
                 false,
                 null,
-                T("linkly.local.recoveryFailed", "ANZ Linkly recovery could not confirm the previous transaction."),
+                pinpadOffline
+                    ? T("linkly.local.recoveryPinpadOffline", "The card terminal (PINpad) is offline, so the previous transaction could not be checked. Reconnect the card terminal and try again.")
+                    : T("linkly.local.recoveryFailed", "ANZ Linkly recovery could not confirm the previous transaction."),
                 TxnType: ToResultTxnType(transactionType),
                 ResultUnknown: true);
         }
@@ -1489,6 +1514,22 @@ public sealed class LinklyTerminalClient(
                     throw new InvalidOperationException(T("linkly.local.emptyResponse", "ANZ Linkly returned an empty response."));
             }
         }
+    }
+
+    private static bool IsPinpadOfflineRejection(
+        bool success,
+        string? responseCode,
+        string? returnedTxnRef,
+        decimal amountPurchase,
+        IReadOnlyCollection<string> receipts)
+    {
+        // 中文注释：只认 EFT-Client 的“PINpad Offline”即时拒绝形态（PF、未回显 TxnRef、金额 0、无小票）；
+        // 任何带回显引用、金额或小票的回包都可能是刷卡中途断线，仍按身份核对规则走结果未知。
+        return !success &&
+            string.Equals(responseCode?.Trim(), PinpadOfflineResponseCode, StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrEmpty(returnedTxnRef) &&
+            amountPurchase == 0m &&
+            receipts.Count == 0;
     }
 
     private static bool HasExplicitLinklyRejection(string? responseCode, string? responseText)
