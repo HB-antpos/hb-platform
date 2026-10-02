@@ -156,6 +156,51 @@ public sealed class SalesDetailCategoryReportTests : IDisposable
     }
 
     [Fact]
+    public async Task 商品页支持按数量升降序且非法排序字段明确拒绝()
+    {
+        await SeedScenarioAsync();
+        await SeedStatisticAsync(Current, "S2", "A1", "P-A2", 30, 1m); // 另一家店的 P-A2：数量最多、营业额仍低
+        var service = CreateService();
+
+        var byQuantity = await service.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1" }, new() { "S1", "S2" },
+            nodeSupplierCode: "A1", includeTree: false, sortBy: "quantity");
+        Assert.Equal("P-A2", byQuantity.Data!.Products!.Rows[0].Code);
+        var ascending = await service.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1" }, new() { "S1", "S2" },
+            nodeSupplierCode: "A1", includeTree: false, sortBy: "quantity", sortAscending: true);
+        Assert.Equal("P-A1", ascending.Data!.Products!.Rows[0].Code);
+        var byRevenue = await service.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1" }, new() { "S1", "S2" },
+            nodeSupplierCode: "A1", includeTree: false);
+        Assert.Equal("P-A5", byRevenue.Data!.Products!.Rows[0].Code);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.GetSalesDetailCategoryReportAsync(
+            Period(), new[] { "A1" }, nodeSupplierCode: "A1", sortBy: "margin"));
+    }
+
+    [Fact]
+    public async Task 同一请求按统计版本命中缓存且统计重新发布后重新读取()
+    {
+        await SeedScenarioAsync();
+        var service = CreateService();
+        var first = await service.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1" }, new() { "S1" });
+        Assert.Same(first, await service.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1" }, new() { "S1" }));
+
+        // 统计重新发布：补一笔销售并刷新发布时间，版本号变化后必须读到新数据。
+        var current = Current;
+        await _localDb.Insertable(new ProductStoreDailySalesStatistic
+        {
+            Date = Current, BranchCode = "S2", SupplierCode = "A1", ProductCode = "P-A1", ProductName = "P-A1",
+            TotalQuantity = 1, TotalAmount = 100m, OrderCount = 1, CostSource = "Test", UpdateTime = DateTime.UtcNow,
+        }).ExecuteCommandAsync();
+        await _localDb.Updateable<SalesStatisticRefreshState>()
+            .SetColumns(row => new SalesStatisticRefreshState { LastAggregatedAtUtc = DateTime.UtcNow.AddMinutes(1) })
+            .Where(row => row.Date == current).ExecuteCommandAsync();
+        var refreshed = await service.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1" }, new() { "S1", "S2" });
+        var again = await service.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1" }, new() { "S1" });
+        Assert.NotSame(first, again);
+        Assert.NotEqual(first.CacheVersion, again.CacheVersion);
+        Assert.Equal(280m, refreshed.Data!.Summary.Revenue);
+    }
+
+    [Fact]
     public async Task 不在范围内的节点供应商与空供应商明确拒绝()
     {
         var service = CreateService();

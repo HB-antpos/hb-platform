@@ -4,7 +4,20 @@ import { UNASSIGNED_CATEGORY_KEY, type CategoryMetrics, type CategoryNode, type 
 export interface CategorySelection { supplierCode: string; categoryGuid?: string }
 
 export const MAX_CATEGORY_SUPPLIERS = 100
-/** 每一层默认只列营业额最高的若干项，其余收成「另外 N 个」一行，金额照样显示。 */
+/** 分类树与商品表的排序：营业额或数量，默认降序。 */
+export type CategorySortKey = 'revenue' | 'quantity'
+export interface CategorySort { key: CategorySortKey; ascending: boolean }
+export const DEFAULT_CATEGORY_SORT: CategorySort = { key: 'revenue', ascending: false }
+
+/** 按排序键比较，同值时以营业额、名称兜底，保证顺序稳定。 */
+function compareMetrics<T extends CategoryMetrics & { name?: string }>(sort: CategorySort) {
+  return (left: T, right: T) => {
+    const primary = (left[sort.key] - right[sort.key]) * (sort.ascending ? 1 : -1)
+    return primary || right.revenue - left.revenue || (left.name ?? '').localeCompare(right.name ?? '')
+  }
+}
+
+/** 每一层默认只列排在前面的若干项，其余收成「另外 N 个」一行，金额照样显示。 */
 export const CATEGORY_ROW_LIMIT = 8
 
 export function nodeKey(supplierCode: string, categoryGuid?: string): string {
@@ -50,14 +63,15 @@ function subtreeMatches(node: CategoryNode, filter: string): boolean {
  * 把「供应商 → 分类树」展开成表格行。筛选分类名时忽略折叠与收起，只保留命中的节点及其祖先。
  */
 export function flattenCategoryTree(report: CategoryReport, options: {
-  expanded: ReadonlySet<string>; showAll: ReadonlySet<string>; filter?: string; limit?: number
+  expanded: ReadonlySet<string>; showAll: ReadonlySet<string>; filter?: string; limit?: number; sort?: CategorySort
 }): CategoryTreeRow[] {
   const filter = options.filter?.trim().toLocaleLowerCase() ?? ''
   const limit = options.limit ?? CATEGORY_ROW_LIMIT
+  const sort = options.sort ?? DEFAULT_CATEGORY_SORT
   const rows: CategoryTreeRow[] = []
 
   const pushList = (supplier: CategorySupplier, parentKey: string, nodes: CategoryNode[], parentRevenue: number, depth: number, filtering: boolean) => {
-    const visible = filtering ? nodes.filter(node => subtreeMatches(node, filter)) : nodes
+    const visible = (filtering ? nodes.filter(node => subtreeMatches(node, filter)) : [...nodes]).sort(compareMetrics(sort))
     const limited = !filtering && !options.showAll.has(parentKey) && visible.length > limit + 1
     const shown = limited ? visible.slice(0, limit) : visible
     for (const node of shown) {
@@ -78,7 +92,8 @@ export function flattenCategoryTree(report: CategoryReport, options: {
     }
   }
 
-  for (const supplier of report.suppliers) {
+  const suppliers = [...report.suppliers].sort(compareMetrics<CategorySupplier & { name?: string }>(sort))
+  for (const supplier of suppliers) {
     const key = nodeKey(supplier.supplierCode)
     const supplierMatched = !filter || matches(`${supplier.supplierName} ${supplier.supplierCode}`, filter)
     const filtering = !supplierMatched
