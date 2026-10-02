@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -19,6 +20,13 @@ public partial class SalesDashboardReactService
     internal const int MaxCategoryReportSuppliers = 100;
     /// <summary>响应按统计版本缓存；分类归属调整不改统计版本，所以只保留较短时间。</summary>
     internal static readonly TimeSpan CategoryReportCacheDuration = TimeSpan.FromMinutes(5);
+    /// <summary>后台预取商品级数据集的供应商上限，避免一次多选几十家时给数据库压太多冷读。</summary>
+    internal const int MaxCategoryDatasetPrefetchSuppliers = 5;
+    /// <summary>同一份商品级数据集只允许一个在途查询（请求与后台预取共用），跨请求实例共享。</summary>
+    private static readonly ConcurrentDictionary<string, Lazy<Task<List<SalesDetailReportSqlRow>?>>> CategoryDatasetLoads = new();
+    /// <summary>测试可关闭：只翻商品时改走 SQL 分页路径，用于两条路径的口径对照。</summary>
+    internal bool CategoryProductDatasetEnabled { get; set; } = true;
+    internal bool CategoryProductDatasetPrefetchEnabled { get; set; } = true;
     /// <summary>与 <see cref="ReadSectionRow"/> 第 5 列起的读取顺序一致。</summary>
     private static readonly string[] MetricColumns =
     {
@@ -179,6 +187,28 @@ public partial class SalesDashboardReactService
             throw new ArgumentException("筛选条件过多，请减少供应商、分店或关键词后重试");
         cancellationToken.ThrowIfCancellationRequested();
 
+        // 只翻商品（点分类、换排序、翻页）且没有关键词时，用缓存的商品级数据集在内存里筛选、排序、分页；
+        // 打开分类树后已在后台预取，命中时只需再查当前页商品的名称与图片。
+        if (!includeTree && nodeSupplier != null && tokens.Length == 0 && CategoryProductDatasetEnabled)
+        {
+            var dataset = await GetCategoryProductDatasetAsync(preStatus.CacheVersion!, dateRange, branches, selectedBranchCode, nodeSupplier, cancellationToken);
+            if (dataset != null)
+            {
+                var fromDataset = new ProductReportResponseDto<SalesDetailCategoryReportDto>
+                {
+                    StatisticStatus = preStatus.StatisticStatus, StatisticMessage = preStatus.StatisticMessage,
+                    StatisticUpdatedAt = preStatus.StatisticUpdatedAt, CacheVersion = preStatus.CacheVersion,
+                    Data = new SalesDetailCategoryReportDto
+                    {
+                        Products = await BuildCategoryProductPageAsync(dataset, nodeGuid, nodeGuids, unassignedNode,
+                            sortByQuantity, sortAscending, pageIndex, pageSize, HasCompare(dateRange), cancellationToken),
+                    },
+                };
+                _cache.Set(cacheKey, fromDataset, CategoryReportCacheDuration);
+                return fromDataset;
+            }
+        }
+
         var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
         // 只翻商品时只读节点所属供应商的事实；分类树才需要全部所选供应商。
         var factSuppliers = includeTree || nodeSupplier == null ? suppliers : new List<string> { nodeSupplier };
@@ -229,7 +259,12 @@ public partial class SalesDashboardReactService
         }
         // 读取期间统计刚好发布了新版本时不缓存，避免把新数据挂在旧版本键下。
         if (string.Equals(response.CacheVersion, preStatus.CacheVersion, StringComparison.Ordinal))
+        {
             _cache.Set(cacheKey, response, CategoryReportCacheDuration);
+            // 分类树出来后，用户下一步多半是点分类或换排序：后台按顺序预取所选供应商的商品级数据集。
+            if (includeTree) PrefetchCategoryProductDatasets(preStatus.CacheVersion!, dateRange, branches, selectedBranchCode,
+                nodeSupplier == null ? suppliers : new[] { nodeSupplier }.Concat(suppliers.Where(code => code != nodeSupplier)).ToList());
+        }
         return response;
     }
 
@@ -298,6 +333,138 @@ public partial class SalesDashboardReactService
             .OrderByDescending(item => item.CategoryCount > 0).ThenByDescending(item => item.AssignedProductCount)
             .ThenBy(item => item.SupplierName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static string CategoryDatasetKey(string version, DateRangeDto range, IReadOnlyList<string>? branches, string? selectedBranch, string supplier)
+        => "sales-detail-category-dataset:" + version + ":" + string.Join("|",
+            range.StartDate.ToString("yyyyMMdd"), range.EndDate.ToString("yyyyMMdd"),
+            range.CompareStartDate?.ToString("yyyyMMdd"), range.CompareEndDate?.ToString("yyyyMMdd"),
+            branches == null ? "*" : string.Join(",", branches.Select(code => code.ToUpperInvariant()).OrderBy(code => code, StringComparer.Ordinal)),
+            selectedBranch?.Trim().ToUpperInvariant(), supplier.ToUpperInvariant());
+
+    /// <summary>
+    /// 某供应商在当前日期、分店范围下的商品级数据集（每个商品的本期/同期指标与叶分类）。
+    /// 命中缓存直接返回；已有在途查询（含后台预取）就等它；读取期间统计版本变了返回 null，由调用方改走 SQL 分页。
+    /// </summary>
+    private async Task<List<SalesDetailReportSqlRow>?> GetCategoryProductDatasetAsync(string version, DateRangeDto range,
+        List<string>? branches, string? selectedBranch, string supplier, CancellationToken cancellationToken)
+    {
+        var key = CategoryDatasetKey(version, range, branches, selectedBranch, supplier);
+        if (_cache.TryGetValue<List<SalesDetailReportSqlRow>>(key, out var cached) && cached != null) return cached;
+        var target = CurrentCategoryBatchTarget();
+        // 共享连接（外部事务或 SQLite）不能跨请求复用，不进单飞表。
+        if (!target.OwnsTransaction)
+            return await LoadCategoryProductDatasetAsync(target, _logger, _cache, key, version, range, branches, selectedBranch, supplier);
+        var logger = _logger; var cache = _cache;
+        var load = CategoryDatasetLoads.GetOrAdd(key, _ => new Lazy<Task<List<SalesDetailReportSqlRow>?>>(
+            () => LoadCategoryProductDatasetAsync(target, logger, cache, key, version, range, branches, selectedBranch, supplier)));
+        // 调用方取消只停止等待，不取消共享的读取。
+        return await load.Value.WaitAsync(cancellationToken);
+    }
+
+    private static async Task<List<SalesDetailReportSqlRow>?> LoadCategoryProductDatasetAsync(CategoryBatchTarget target, ILogger logger, IMemoryCache cache,
+        string key, string version, DateRangeDto range, List<string>? branches, string? selectedBranch, string supplier)
+    {
+        try
+        {
+            var factSuppliers = new List<string> { supplier };
+            var useMonthly = target.OwnsTransaction && branches == null && string.IsNullOrWhiteSpace(selectedBranch) && !MonthlyProjectionRecentlyMissing();
+            SalesDetailCategoryReportRead read;
+            try
+            {
+                read = await ExecuteSalesDetailCategoryBatchAsync(target, logger,
+                    BuildSalesDetailCategoryReportSql(target.SqlServer, range, factSuppliers, branches, selectedBranch, false, null, null, false,
+                        Array.Empty<string>(), 1, 1, useMonthly, productDataset: true),
+                    range, factSuppliers, branches, selectedBranch, null, Array.Empty<string>(), Array.Empty<string>(), true, false, useMonthly, CancellationToken.None);
+            }
+            catch (SqlException ex) when (useMonthly && ex.Number == SalesDetailQueryMonthlyProjection.MissingSchemaErrorNumber)
+            {
+                RememberMonthlyProjectionMissing();
+                read = await ExecuteSalesDetailCategoryBatchAsync(target, logger,
+                    BuildSalesDetailCategoryReportSql(target.SqlServer, range, factSuppliers, branches, selectedBranch, false, null, null, false,
+                        Array.Empty<string>(), 1, 1, false, productDataset: true),
+                    range, factSuppliers, branches, selectedBranch, null, Array.Empty<string>(), Array.Empty<string>(), true, false, false, CancellationToken.None);
+            }
+            var status = BuildSalesDetailReportStatus(read.Status, range, false, skipFailedDates: true);
+            if (!string.Equals(status.CacheVersion, version, StringComparison.Ordinal)
+                || !status.StatisticStatus.Equals(SalesStatisticRefreshStatus.Fresh, StringComparison.OrdinalIgnoreCase))
+                return null;
+            cache.Set(key, read.Categories, CategoryReportCacheDuration);
+            return read.Categories;
+        }
+        finally
+        {
+            CategoryDatasetLoads.TryRemove(key, out _);
+        }
+    }
+
+    private void PrefetchCategoryProductDatasets(string version, DateRangeDto range, List<string>? branches, string? selectedBranch, IReadOnlyList<string> suppliers)
+    {
+        var target = CurrentCategoryBatchTarget();
+        if (!CategoryProductDatasetEnabled || !CategoryProductDatasetPrefetchEnabled || !target.OwnsTransaction) return;
+        var logger = _logger; var cache = _cache;
+        var queue = suppliers.Take(MaxCategoryDatasetPrefetchSuppliers).ToList();
+        // 逐家顺序读取，避免并发冷读挤占数据库；请求随后若要同一份数据会直接等这里的在途查询。
+        _ = Task.Run(async () =>
+        {
+            foreach (var supplier in queue)
+            {
+                var key = CategoryDatasetKey(version, range, branches, selectedBranch, supplier);
+                if (cache.TryGetValue<List<SalesDetailReportSqlRow>>(key, out var cached) && cached != null) continue;
+                try
+                {
+                    await CategoryDatasetLoads.GetOrAdd(key, _ => new Lazy<Task<List<SalesDetailReportSqlRow>?>>(
+                        () => LoadCategoryProductDatasetAsync(target, logger, cache, key, version, range, branches, selectedBranch, supplier))).Value;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "销售明细分类汇总：预取供应商 {Supplier} 的商品数据失败", supplier);
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// 在商品级数据集上做与 SQL 分页相同的筛选、排序与分页，再只为当前页商品读取名称、货号与图片。
+    /// 节点口径：普通节点 = 自身及子孙分类；未归类 = 无分类或分类不在该供应商的树里；无节点 = 该供应商全部商品。
+    /// </summary>
+    private async Task<SalesDetailSectionResultDto> BuildCategoryProductPageAsync(List<SalesDetailReportSqlRow> dataset,
+        string? nodeGuid, IReadOnlyList<string> nodeGuids, bool unassignedNode, bool sortByQuantity, bool sortAscending,
+        int pageIndex, int pageSize, bool compare, CancellationToken cancellationToken)
+    {
+        var guidSet = nodeGuids.Select(guid => guid.ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
+        IEnumerable<SalesDetailReportSqlRow> rows = nodeGuid == null ? dataset
+            : unassignedNode ? dataset.Where(row => row.Name.Length == 0 || !guidSet.Contains(row.Name))
+            : dataset.Where(row => guidSet.Contains(row.Name));
+        var direction = sortAscending ? 1 : -1;
+        var ordered = rows.ToList();
+        ordered.Sort((left, right) =>
+        {
+            var primary = sortByQuantity ? left.Quantity.CompareTo(right.Quantity) : left.Revenue.CompareTo(right.Revenue);
+            if (primary != 0) return primary * direction;
+            var secondary = sortByQuantity ? left.CompareQuantity.CompareTo(right.CompareQuantity) : left.CompareRevenue.CompareTo(right.CompareRevenue);
+            return secondary != 0 ? secondary * direction : string.CompareOrdinal(left.Code, right.Code);
+        });
+        var page = ordered.Skip((pageIndex - 1) * pageSize).Take(pageSize).ToList();
+        var codes = page.Select(row => row.Code).ToList();
+        var metadata = codes.Count == 0 ? new Dictionary<string, (string? Name, string? Item, string? Image)>(StringComparer.Ordinal)
+            : (await _context.Db.Queryable<Product>().Where(product => codes.Contains(product.ProductCode))
+                .Select(product => new { product.ProductCode, product.ProductName, product.ItemNumber, product.ProductImage }).ToListAsync())
+                .GroupBy(item => item.ProductCode, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key,
+                    group => (Name: group.Select(item => item.ProductName).Where(name => !string.IsNullOrEmpty(name)).Max(StringComparer.Ordinal),
+                              Item: group.Select(item => item.ItemNumber).Where(item => !string.IsNullOrEmpty(item)).Max(StringComparer.Ordinal),
+                              Image: group.Select(item => item.ProductImage).Where(image => !string.IsNullOrEmpty(image)).Max(StringComparer.Ordinal)),
+                    StringComparer.Ordinal);
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = page.Select(row =>
+        {
+            metadata.TryGetValue(row.Code, out var meta);
+            var dto = ToRow(row, SalesDetailSection.Products, SalesDetailKind.Australia, null, compare);
+            dto.Name = meta.Name ?? row.Code; dto.ItemNumber = meta.Item; dto.ProductImage = meta.Image;
+            return dto;
+        }).ToList();
+        return new SalesDetailSectionResultDto { Rows = result, Total = ordered.Count, Summary = SumSalesDetailRows(result, "page", "当前页商品") };
     }
 
     private async Task<List<SalesDetailReportStatusSqlRow>> ReadSalesDetailCategoryStatusRowsAsync(DateRangeDto range)
@@ -484,7 +651,7 @@ public partial class SalesDashboardReactService
     private static string BuildSalesDetailCategoryReportSql(bool sqlServer, DateRangeDto range, IReadOnlyList<string> suppliers,
         IReadOnlyList<string>? branches, string? selectedBranch, bool includeTree, string? nodeSupplier,
         IReadOnlyList<string>? nodeGuids, bool unassignedNode, IReadOnlyList<string> tokens, int pageIndex, int pageSize, bool useMonthly = false,
-        bool sortByQuantity = false, bool sortAscending = false)
+        bool sortByQuantity = false, bool sortAscending = false, bool productDataset = false)
     {
         var hasCompare = HasCompare(range);
         string table(string name) => sqlServer ? $"[#{name}]" : $"[{name}]";
@@ -611,6 +778,9 @@ GROUP BY r.[Period], sup.[SupplierCode], r.[ProductCode]
         sql.Append(create("SdcProducts", productCategories));
         if (includeTree)
             sql.Append($"SELECT f.[SupplierCode] [Code], COALESCE(k.[CategoryGuid],'') [Name], NULL [ItemNumber], NULL [ProductImage],{metrics("f")} {join} GROUP BY f.[SupplierCode], k.[CategoryGuid];\n");
+        // 商品级数据集：每个商品一行（Code=商品，Name=叶分类 GUID），供 API 缓存后在内存里筛选、排序、分页。
+        if (productDataset)
+            sql.Append($"SELECT f.[ProductCode] [Code], COALESCE(k.[CategoryGuid],'') [Name], NULL [ItemNumber], NULL [ProductImage],{metrics("f")} {join} GROUP BY f.[ProductCode], k.[CategoryGuid];\n");
         if (nodeSupplier != null)
         {
             var nodeFilter = nodeGuids == null ? string.Empty
@@ -648,20 +818,40 @@ SELECT COUNT(*) FROM (SELECT f.[ProductCode] {join} {where} GROUP BY f.[ProductC
         return sql.ToString();
     }
 
-    private async Task<SalesDetailCategoryReportRead> ReadSalesDetailCategoryReportAsync(string sql, DateRangeDto range,
+    /// <summary>批次执行目标：SQL Server 且无外部事务时自开连接（后台预取也能用）；否则沿用请求上下文的连接与事务。</summary>
+    private sealed record CategoryBatchTarget(string ConnectionString, bool SqlServer, DbConnection? SharedConnection, DbTransaction? Transaction, int CommandTimeout)
+    {
+        public bool OwnsTransaction => SqlServer && Transaction == null;
+    }
+
+    private CategoryBatchTarget CurrentCategoryBatchTarget()
+    {
+        var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
+        var transaction = _context.Db.Ado.Transaction as DbTransaction;
+        return new CategoryBatchTarget(_context.Db.CurrentConnectionConfig.ConnectionString, sqlServer,
+            sqlServer && transaction == null ? null : (DbConnection)_context.Db.Ado.Connection, transaction, Math.Max(1, _context.Db.Ado.CommandTimeOut));
+    }
+
+    private Task<SalesDetailCategoryReportRead> ReadSalesDetailCategoryReportAsync(string sql, DateRangeDto range,
+        IReadOnlyList<string> suppliers, IReadOnlyList<string>? branches, string? selectedBranch, string? nodeSupplier,
+        IReadOnlyList<string> nodeGuids, IReadOnlyList<string> tokens, bool includeTree, bool includeProducts, bool useMonthly,
+        CancellationToken cancellationToken)
+        => ExecuteSalesDetailCategoryBatchAsync(CurrentCategoryBatchTarget(), _logger, sql, range, suppliers, branches, selectedBranch, nodeSupplier,
+            nodeGuids, tokens, includeTree, includeProducts, useMonthly, cancellationToken);
+
+    private static async Task<SalesDetailCategoryReportRead> ExecuteSalesDetailCategoryBatchAsync(CategoryBatchTarget target, ILogger logger, string sql, DateRangeDto range,
         IReadOnlyList<string> suppliers, IReadOnlyList<string>? branches, string? selectedBranch, string? nodeSupplier,
         IReadOnlyList<string> nodeGuids, IReadOnlyList<string> tokens, bool includeTree, bool includeProducts, bool useMonthly,
         CancellationToken cancellationToken)
     {
-        var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
         var elapsed = Stopwatch.StartNew();
-        var ownsTransaction = sqlServer && _context.Db.Ado.Transaction == null;
+        var ownsTransaction = target.OwnsTransaction;
         // 与销售明细相同：自管快照只执行一个批次，使用独立的非 MARS 连接；已有外部事务时沿用其连接。
         await using var dedicatedConnection = ownsTransaction
-            ? new SqlConnection(new SqlConnectionStringBuilder(_context.Db.CurrentConnectionConfig.ConnectionString)
+            ? new SqlConnection(new SqlConnectionStringBuilder(target.ConnectionString)
                 { MultipleActiveResultSets = false, MinPoolSize = 1 }.ConnectionString)
             : null;
-        var connection = (DbConnection?)dedicatedConnection ?? (DbConnection)_context.Db.Ado.Connection;
+        var connection = (DbConnection?)dedicatedConnection ?? target.SharedConnection!;
         var close = connection.State != ConnectionState.Open;
         if (close) await connection.OpenAsync(cancellationToken);
         var failed = true;
@@ -686,8 +876,8 @@ SELECT COUNT(*) FROM (SELECT f.[ProductCode] {join} {where} GROUP BY f.[ProductC
                     THROW;
                 END CATCH;
                 """;
-            command.CommandTimeout = Math.Max(1, _context.Db.Ado.CommandTimeOut);
-            if (_context.Db.Ado.Transaction is DbTransaction tx) command.Transaction = tx;
+            command.CommandTimeout = target.CommandTimeout;
+            if (target.Transaction is DbTransaction tx) command.Transaction = tx;
             void Add(string name, object value, DbType type)
             {
                 var parameter = command.CreateParameter(); parameter.ParameterName = name; parameter.Value = value; parameter.DbType = type; command.Parameters.Add(parameter);
@@ -729,7 +919,7 @@ SELECT COUNT(*) FROM (SELECT f.[ProductCode] {join} {where} GROUP BY f.[ProductC
             while (await reader.NextResultAsync(cancellationToken))
                 while (await reader.ReadAsync(cancellationToken)) { }
             failed = false;
-            _logger.LogInformation(
+            logger.LogInformation(
                 "销售明细分类汇总读取完成：首结果 {FirstResultMs}ms，共 {TotalMs}ms，供应商 {Suppliers} 个，分类行 {CategoryRows}，商品页 {ProductRows}，预汇总 {Monthly}",
                 firstResultAt, elapsed.ElapsedMilliseconds, suppliers.Count, read.Categories.Count, read.Products.Count, useMonthly);
             return read;

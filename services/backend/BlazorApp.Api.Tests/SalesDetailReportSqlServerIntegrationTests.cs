@@ -1192,6 +1192,17 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
             Assert.Equal(SalesStatisticRefreshStatus.Fresh, projected.StatisticStatus);
             Assert.True(Json(projected.Data) == Json(facts.Data), $"{node}/{guid}/{sortBy}\n预汇总: {Json(projected.Data)}\n日事实: {Json(facts.Data)}");
         }
+        // 只翻商品的内存分页（数据集，预汇总路径）与 SQL 分页逐项一致。
+        using var separateCache = new MemoryCache(new MemoryCacheOptions());
+        var viaSql = fixture.CreateService(separateCache);
+        viaSql.CategoryProductDatasetEnabled = false;
+        foreach (var (node, guid) in new (string, string?)[] { ("200", null), ("200", "WC-ROOT"), ("A1", SalesDetailCategorySources.UnassignedKey), ("A1", "cat-a") })
+        foreach (var sortBy in new string?[] { null, "quantity" })
+        {
+            var expected = await viaSql.GetSalesDetailCategoryReportAsync(ScopedRange, suppliers, null, nodeSupplierCode: node, nodeCategoryGuid: guid, includeTree: false, sortBy: sortBy);
+            var actual = await service.GetSalesDetailCategoryReportAsync(ScopedRange, suppliers, null, nodeSupplierCode: node, nodeCategoryGuid: guid, includeTree: false, sortBy: sortBy);
+            Assert.True(Json(expected.Data) == Json(actual.Data), $"{node}/{guid}/{sortBy}\nSQL: {Json(expected.Data)}\n数据集: {Json(actual.Data)}");
+        }
         var tree = await service.GetSalesDetailCategoryReportAsync(ScopedRange, suppliers, null);
         Assert.Contains(tree.Data!.Suppliers.Single(item => item.SupplierCode == "200").Categories, node => node.CategoryGuid == "WC-ROOT" && node.Revenue > 0);
         Assert.True(tree.Data.Summary.Revenue > 0 && tree.Data.Summary.CompareRevenue > 0);
@@ -1499,11 +1510,14 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
             }
         }
 
-        public SalesDashboardReactService CreateService()
+        public SalesDashboardReactService CreateService() => CreateService(_cache);
+
+        /// <summary>指定独立缓存：对照两条读取路径时避免后一个实例直接命中前一个实例写入的响应缓存。</summary>
+        public SalesDashboardReactService CreateService(IMemoryCache cache)
         {
             return new SalesDashboardReactService(
                 CreateSqlSugarContext(_db), CreatePosmSqlSugarContext(_posmDb), Mock.Of<IMapper>(),
-                NullLogger<SalesDashboardReactService>.Instance, _cache);
+                NullLogger<SalesDashboardReactService>.Instance, cache);
         }
 
         // 所有测试数据都使用参数写入，避免把测试输入拼接进 SQL。

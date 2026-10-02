@@ -201,6 +201,27 @@ public sealed class SalesDetailCategoryReportTests : IDisposable
     }
 
     [Fact]
+    public async Task 商品数据集内存分页与SQL分页逐项一致()
+    {
+        await SeedScenarioAsync();
+        await SeedStatisticAsync(Current, "S2", "A1", "P-A2", 30, 1m);
+        var viaDataset = CreateService();
+        var viaSql = CreateService();
+        viaSql.CategoryProductDatasetEnabled = false;
+        static string Json(object? value) => System.Text.Json.JsonSerializer.Serialize(value);
+        foreach (var (supplier, guid) in new (string, string?)[] { ("A1", null), ("A1", "cat-p"), ("A1", "cat-a"), ("A1", SalesDetailCategorySources.UnassignedKey), ("200", null), ("200", "WC-ROOT") })
+        foreach (var (sortBy, ascending) in new (string?, bool)[] { (null, false), ("quantity", false), ("quantity", true), ("revenue", true) })
+        foreach (var (pageIndex, pageSize) in new[] { (1, 20), (1, 2), (2, 2) })
+        {
+            var expected = await viaSql.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1", "200" }, new() { "S1", "S2" },
+                nodeSupplierCode: supplier, nodeCategoryGuid: guid, pageIndex: pageIndex, pageSize: pageSize, includeTree: false, sortBy: sortBy, sortAscending: ascending);
+            var actual = await viaDataset.GetSalesDetailCategoryReportAsync(Period(), new[] { "A1", "200" }, new() { "S1", "S2" },
+                nodeSupplierCode: supplier, nodeCategoryGuid: guid, pageIndex: pageIndex, pageSize: pageSize, includeTree: false, sortBy: sortBy, sortAscending: ascending);
+            Assert.True(Json(expected.Data) == Json(actual.Data), $"{supplier}/{guid}/{sortBy}/{ascending}/{pageIndex}x{pageSize}\nSQL: {Json(expected.Data)}\n数据集: {Json(actual.Data)}");
+        }
+    }
+
+    [Fact]
     public async Task 不在范围内的节点供应商与空供应商明确拒绝()
     {
         var service = CreateService();
