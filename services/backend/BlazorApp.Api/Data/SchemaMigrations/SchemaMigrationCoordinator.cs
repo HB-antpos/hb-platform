@@ -37,6 +37,8 @@ internal sealed class SchemaMigrationCoordinator
         "20260930.001-warehouse-order-pick-stockout";
     internal const string WarehouseOrderPickAssignmentMigrationId =
         "20260930.002-warehouse-order-pick-assignment";
+    internal const string AttendanceScheduleMealBreakMigrationId =
+        "20261002.002-attendance-schedule-meal-break-count";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -122,6 +124,11 @@ internal sealed class SchemaMigrationCoordinator
             WarehouseOrderPickAssignmentMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyWarehouseOrderPickAssignmentAsync(cancellationToken)
+        ),
+        new(
+            AttendanceScheduleMealBreakMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendanceScheduleMealBreakAsync(cancellationToken)
         ),
     ];
 

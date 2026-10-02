@@ -20,6 +20,8 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan EndTime { get; set; }
         public string? Status { get; set; }
         public string? Remark { get; set; }
+        /// <summary>用餐次数覆盖值（0–3）；null 表示按班次时长自动计算。</summary>
+        public int? MealBreakCount { get; set; }
     }
 
     public class PublishAttendanceWeekDto
@@ -35,6 +37,13 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan EndTime { get; set; }
         public string? Status { get; set; }
         public string? Remark { get; set; }
+        /// <summary>
+        /// 用餐次数覆盖值（0–3）；null 表示不修改、保持原值，
+        /// 避免旧版 App 不传该字段时把店长已设置的次数冲掉。
+        /// </summary>
+        public int? MealBreakCount { get; set; }
+        /// <summary>true 表示恢复按时长自动计算（写回 null），优先级高于 MealBreakCount。</summary>
+        public bool ResetMealBreakCount { get; set; }
     }
 
     public class AttendanceScheduleDto
@@ -50,6 +59,8 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan EndTime { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? Remark { get; set; }
+        /// <summary>店长指定的用餐次数；null 表示按班次时长自动计算。</summary>
+        public int? MealBreakCount { get; set; }
         public string ScheduleState { get; set; } = "NotStarted";
         public int SegmentLimit { get; set; } = 2;
         public int CompletedSegmentCount { get; set; }
@@ -377,6 +388,10 @@ namespace BlazorApp.Shared.DTOs
         public string? EmploymentType { get; set; }
         /// <summary>仅未满 18 岁时返回年龄（排班需关注未成年工时），成年员工为空，不下发生日。</summary>
         public int? Age { get; set; }
+        /// <summary>是否店长角色（店长也要排班）。</summary>
+        public bool IsStoreManager { get; set; }
+        /// <summary>店长且本店是其主分店（管理本店）；排班表默认只显示管理本店的店长，仅关联本店的店长需筛选后显示。</summary>
+        public bool ManagesStore { get; set; }
     }
 
     public class AttendancePunchAdjustmentPreviewDto

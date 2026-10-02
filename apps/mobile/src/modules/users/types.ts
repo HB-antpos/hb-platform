@@ -15,6 +15,10 @@ export interface StoreUserListItem {
   employmentType?: string;
   /** 仅考勤员工接口返回：未满 18 岁时的周岁。 */
   age?: number;
+  /** 仅考勤员工接口返回：是否店长角色。 */
+  isStoreManager?: boolean;
+  /** 仅考勤员工接口返回：店长且本店是其主分店（管理本店）。 */
+  managesStore?: boolean;
   lastLoginTime?: string;
   lastLoginIp?: string;
   createdAt?: string;

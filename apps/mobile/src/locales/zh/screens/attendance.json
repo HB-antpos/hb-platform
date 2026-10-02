@@ -376,13 +376,15 @@
       "weekHours": "周工时",
       "weekdayHours": "工作日",
       "weekendHours": "周末",
+      "equivalentHours": "等效",
       "scheduledPeople": "排班人数"
     },
     "quickShiftTitle": "常用班次",
     "quickShifts": {
       "nineToFiveThirty": "09:00 - 17:30",
       "tenToFour": "10:00 - 16:00",
-      "nineToSeven": "09:00 - 19:00"
+      "nineToSeven": "09:00 - 19:00",
+      "nineToNine": "09:00 - 21:00"
     },
     "timePicker": {
       "hour": "小时",
@@ -404,9 +406,24 @@
       "leave": "请假",
       "available": "可上班",
       "draft": "草稿",
-      "employmentTypes": "F 全职 · P 兼职 · C 临时工"
+      "fullTime": "全职",
+      "partTime": "兼职",
+      "casual": "临时工"
     },
-    "gridHint": "点格子排班或修改",
+    "gridHint": "点格子排班或修改；点员工名或日期可批量排班",
+    "batch": {
+      "employeeSubtitle": "批量排多天",
+      "dateSubtitle": "批量排多人",
+      "pickDays": "选择日期",
+      "pickEmployees": "选择员工",
+      "selectAll": "全选",
+      "clearAll": "清空",
+      "skipDaysHint": "已有班次或已批准请假的日期不可选。",
+      "skipEmployeesHint": "当天已有班次或已批准请假的员工不可选。",
+      "save": "新增 {{count}} 个班次（每班 {{hours}} 小时）",
+      "employeeA11y": "给 {{name}} 批量排多天",
+      "dateA11y": "给 {{date}} 批量排多位员工"
+    },
     "editor": {
       "availabilityLabel": "可上班",
       "noAvailability": "未填写",
@@ -416,6 +433,13 @@
       "stepMinus": "{{label}}提前 30 分钟",
       "stepPlus": "{{label}}推后 30 分钟",
       "setRest": "设为休息",
+      "mealBreakLabel": "用餐",
+      "mealBreakValue": "{{count}} 次 × {{minutes}} 分钟",
+      "mealBreakNone": "不扣用餐",
+      "mealBreakDefault": "默认",
+      "mealBreakReset": "恢复默认",
+      "mealBreakMinus": "减少一次用餐",
+      "mealBreakPlus": "增加一次用餐",
       "save": "保存（{{hours}} 小时）",
       "addShift": "再加一班"
     },
@@ -425,6 +449,8 @@
     "copyConfirm": "复制",
     "copyWeekResult": "已复制 {{created}} 个班次，跳过 {{skipped}} 个",
     "copyWeekFailed": "复制上周排班失败",
+    "showRelatedManagers": "相关经理（{{count}}）",
+    "managerBadge": "经理",
     "ageBadge": "{{age}}岁"
   },
   "adjustment": {
@@ -609,6 +635,8 @@
     "approvalFailed": "审核操作失败",
     "selectStoreFirst": "请先选择分店",
     "scheduleSaved": "排班已保存",
+    "scheduleBatchSaved": "已新增 {{count}} 个班次",
+    "scheduleBatchPartial": "已新增 {{succeeded}} 个班次，{{failed}} 个失败：{{reason}}",
     "scheduleDeleted": "排班已删除",
     "weekPublished": "本周排班已发布",
     "publishFailed": "发布失败",

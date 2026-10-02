@@ -92,6 +92,8 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifyMobileOtaRuntimeTargetsAsync", runtimeMethods);
         Assert.Contains("ApplyLocalSupplierCategoryAsync", runtimeMethods);
         Assert.Contains("VerifyLocalSupplierCategoryAsync", runtimeMethods);
+        Assert.Contains("ApplyAttendanceScheduleMealBreakAsync", runtimeMethods);
+        Assert.Contains("VerifyAttendanceScheduleMealBreakAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -454,6 +456,10 @@ public sealed class SchemaMigrationCoordinatorTests
         runtime.MarkApplied(
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId
         );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
@@ -898,6 +904,7 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20260929.001-warehouse-order-picking",
                 "Check:Main:20260930.001-warehouse-order-pick-stockout",
                 "Check:Main:20260930.002-warehouse-order-pick-assignment",
+                "Check:Main:20261002.002-attendance-schedule-meal-break-count",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1128,25 +1135,30 @@ public sealed class SchemaMigrationCoordinatorTests
         var runtime = new FakeSchemaMigrationRuntime();
         var coordinator = CreateCoordinator(runtime);
 
-        // 新迁移按日期追加：供应商分类（09-23）、看板月投影（09-24）、订单拣货（09-29），再是拣货货位没货与拣货分配（09-30）。
+        // 新迁移按日期追加：供应商分类（09-23）、看板月投影（09-24）、订单拣货（09-29），再是拣货货位没货与拣货分配（09-30），
+        // 最后是排班用餐次数（10-02）。
         Assert.Equal(
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
@@ -1157,6 +1169,7 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
             SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId,
+            SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -1164,6 +1177,13 @@ public sealed class SchemaMigrationCoordinatorTests
             Assert.True(runtime.Events.IndexOf(apply) < runtime.Events.IndexOf(record));
         }
         Assert.Contains("VerifyLocalSupplierCategory", runtime.Events);
+        // 用餐次数列 Apply 后必须先过签名校验，协调器才登记账本。
+        var mealBreakApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId}");
+        var mealBreakVerify = runtime.Events.IndexOf("VerifyAttendanceScheduleMealBreak", mealBreakApply);
+        var mealBreakRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId}");
+        Assert.True(mealBreakApply >= 0 && mealBreakApply < mealBreakVerify && mealBreakVerify < mealBreakRecord);
     }
 
     [Fact]
@@ -1597,6 +1617,24 @@ public sealed class SchemaMigrationCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Events.Add("VerifyWarehouseOrderPickAssignment");
+            return Task.CompletedTask;
+        }
+
+        // 与真实实现一致：Apply 之后立即校验签名，校验通过才由协调器登记。
+        public async Task ApplyAttendanceScheduleMealBreakAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
+                cancellationToken
+            );
+            await VerifyAttendanceScheduleMealBreakAsync(cancellationToken);
+        }
+
+        public Task VerifyAttendanceScheduleMealBreakAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyAttendanceScheduleMealBreak");
             return Task.CompletedTask;
         }
 

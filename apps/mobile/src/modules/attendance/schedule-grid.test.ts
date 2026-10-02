@@ -8,6 +8,10 @@ import {
   isAllDayRange,
   normalizeClockTime,
   shiftEditorMinutes,
+  filterScheduleUsers,
+  isRelatedOnlyManager,
+  isBatchSchedulableCell,
+  runSequentialBatch,
   stepClockTime,
   summarizeSchedulePublishState,
   employmentTypeCode,
@@ -107,7 +111,9 @@ assert.equal(stepClockTime("00:00", -30), "23:30");
 assert.equal(stepClockTime("bad", 30), "bad");
 
 // 编辑时长：相等为 0，跨午夜按次日
-assert.equal(shiftEditorMinutes("09:00", "17:30"), 510);
+assert.equal(shiftEditorMinutes("09:00", "17:30"), 480, "编辑弹层按计薪工时显示：8.5 小时班默认扣 1 次用餐");
+assert.equal(shiftEditorMinutes("09:00", "17:30", 0), 510, "店长取消用餐后按全时长显示");
+assert.equal(shiftEditorMinutes("09:00", "17:30", 2), 450, "店长指定 2 次用餐");
 assert.equal(shiftEditorMinutes("09:00", "09:00:00"), 0);
 assert.equal(shiftEditorMinutes("22:00", "02:00"), 240);
 assert.equal(shiftEditorMinutes("", "02:00"), 0);
@@ -142,4 +148,54 @@ assert.equal(employmentTypeCode("casual"), "C");
 assert.equal(employmentTypeCode("Temporary"), "C");
 assert.equal(employmentTypeCode(undefined), undefined);
 
-console.log("schedule-grid tests passed");
+// 排班名单过滤：管理本店的店长默认在表中，仅关联本店的店长默认不在；有班次的始终显示。
+const scheduleUsers = [
+  { userGUID: "staff" },
+  { userGUID: "own-manager", isStoreManager: true, managesStore: true },
+  { userGUID: "related-manager", isStoreManager: true, managesStore: false },
+  { userGUID: "related-scheduled", isStoreManager: true, managesStore: false },
+];
+assert.equal(isRelatedOnlyManager(scheduleUsers[1]), false);
+assert.equal(isRelatedOnlyManager(scheduleUsers[2]), true);
+const hiddenByDefault = filterScheduleUsers(scheduleUsers, new Set(["related-scheduled"]), false);
+assert.deepEqual(
+  hiddenByDefault.visible.map((user) => user.userGUID),
+  ["staff", "own-manager", "related-scheduled"],
+  "仅关联本店的店长默认隐藏，但本周已有班次的仍显示",
+);
+assert.equal(hiddenByDefault.relatedManagerCount, 2);
+assert.deepEqual(
+  filterScheduleUsers(scheduleUsers, new Set(), true).visible.map((user) => user.userGUID),
+  ["staff", "own-manager", "related-manager", "related-scheduled"],
+  "打开筛选后显示全部相关店长",
+);
+
+// 批量排班：只给空格与仅有「可上班」标记的格子建班，已有班次或请假的跳过。
+assert.equal(isBatchSchedulableCell({ kind: "empty" }), true);
+assert.equal(isBatchSchedulableCell({ kind: "available" }), true);
+assert.equal(isBatchSchedulableCell({ kind: "shift" }), false);
+assert.equal(isBatchSchedulableCell({ kind: "leave" }), false);
+
+async function batchTests() {
+  // 依次提交：上一条完成才发下一条（后端按员工+日期加锁并校验重叠），单条失败不影响其余。
+  const order: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const outcome = await runSequentialBatch(["a", "b", "c"], async (item) => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    inFlight -= 1;
+    order.push(item);
+    if (item === "b") throw new Error("overlap");
+  });
+  assert.deepEqual(order, ["a", "b", "c"]);
+  assert.equal(maxInFlight, 1, "批量排班必须依次提交");
+  assert.equal(outcome.succeeded, 2);
+  assert.equal(outcome.failures.length, 1);
+  assert.equal(outcome.failures[0].item, "b");
+  assert.equal((outcome.failures[0].error as Error).message, "overlap");
+  console.log("schedule-grid tests passed");
+}
+
+void batchTests();

@@ -26,7 +26,10 @@ import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import {
   buildWeekDates,
   computeScheduleHourStats,
+  defaultMealBreakCount,
   formatScheduleHours,
+  MAX_MEAL_BREAK_COUNT,
+  MEAL_BREAK_MINUTES,
 } from "@/modules/attendance/attendance-my-week";
 import {
   availabilityKey,
@@ -34,6 +37,8 @@ import {
   countUncoveredDays,
   employmentTypeCode,
   type EmploymentTypeCode,
+  filterScheduleUsers,
+  isBatchSchedulableCell,
   formatShiftShort,
   groupAvailabilityByUserDate,
   isAllDayRange,
@@ -67,12 +72,15 @@ const QUICK_SHIFTS = [
   { key: "nineToFiveThirty", startTime: "09:00", endTime: "17:30" },
   { key: "tenToFour", startTime: "10:00", endTime: "16:00" },
   { key: "nineToSeven", startTime: "09:00", endTime: "19:00" },
+  { key: "nineToNine", startTime: "09:00", endTime: "21:00" },
 ];
 const EMPTY_FORM = {
   startTime: "09:00",
   endTime: "17:30",
   status: "Draft" as AttendanceScheduleStatus,
   remark: "",
+  /** 店长指定的用餐次数；null 表示按班次时长默认。 */
+  mealBreakCount: null as number | null,
 };
 const PUBLISH_STATE_TONES: Record<SchedulePublishState, AttendanceStatusTone> = {
   draft: "warning",
@@ -81,6 +89,10 @@ const PUBLISH_STATE_TONES: Record<SchedulePublishState, AttendanceStatusTone> = 
 };
 
 type ScheduleDraft = typeof EMPTY_FORM;
+/** 批量排班入口：点员工选多天，或点日期选多位员工。 */
+type BatchTarget =
+  | { mode: "employee"; userGuid: string; employeeName?: string }
+  | { mode: "date"; workDate: string; weekdayIndex: number };
 type GridVariant = "card" | "fullscreen";
 
 interface EditingTarget {
@@ -99,15 +111,32 @@ interface ScheduleRow {
   employmentType?: EmploymentTypeCode;
   /** 仅未成年员工有值。 */
   age?: number;
+  isStoreManager?: boolean;
   schedules: AttendanceSchedule[];
 }
 
 // F/P/C 用不同色系区分，未成年年龄用警示色提醒排班注意工时限制。
-const EMPLOYMENT_TYPE_TONES: Record<EmploymentTypeCode, AttendanceStatusTone> = {
-  F: "accent",
-  P: "success",
-  C: "neutral",
+// F/P/C 用实心色块区分（蓝/绿/紫、白字），与浅底的状态、经理、年龄标签明显不同，一眼可辨。
+const EMPLOYMENT_TYPE_COLORS: Record<EmploymentTypeCode, string> = {
+  F: "#175CD3",
+  P: "#079455",
+  C: "#7A5AF8",
 };
+const EMPLOYMENT_TYPE_LEGEND: { code: EmploymentTypeCode; labelKey: string }[] = [
+  { code: "F", labelKey: "fullTime" },
+  { code: "P", labelKey: "partTime" },
+  { code: "C", labelKey: "casual" },
+];
+
+function EmploymentTypeBadge({ code }: { code: EmploymentTypeCode }) {
+  return (
+    <View style={[styles.typeBadge, { backgroundColor: EMPLOYMENT_TYPE_COLORS[code] }]}>
+      <Text variant="labelSmall" style={styles.typeBadgeText}>
+        {code}
+      </Text>
+    </View>
+  );
+}
 
 function toLocalDateString(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -206,6 +235,88 @@ function TimeStepField({
   );
 }
 
+/**
+ * 用餐次数步进：默认按班次时长推算（超过 4.5 小时 1 次、超过 9 小时 2 次），店长可增减（0 次＝不扣用餐）。
+ * 改过后显示「恢复默认」，回到按时长自动计算。
+ */
+function MealBreakStepField({
+  label,
+  count,
+  isDefault,
+  valueText,
+  defaultText,
+  resetText,
+  minusLabel,
+  plusLabel,
+  disabled,
+  onChange,
+  onReset,
+}: {
+  label: string;
+  count: number;
+  isDefault: boolean;
+  valueText: string;
+  defaultText: string;
+  resetText: string;
+  minusLabel: string;
+  plusLabel: string;
+  disabled?: boolean;
+  onChange: (count: number) => void;
+  onReset: () => void;
+}) {
+  const renderStep = (delta: number, text: string, a11y: string) => {
+    const next = count + delta;
+    const outOfRange = next < 0 || next > MAX_MEAL_BREAK_COUNT;
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={a11y}
+        disabled={disabled || outOfRange}
+        onPress={() => onChange(next)}
+        style={({ pressed }) => [
+          styles.stepButton,
+          outOfRange ? styles.stepButtonDisabled : null,
+          pressed ? styles.stepButtonPressed : null,
+        ]}
+      >
+        <Text variant="labelLarge" style={outOfRange ? styles.muted : styles.stepButtonText}>
+          {text}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  return (
+    <View style={styles.stepField}>
+      <View style={styles.mealLabelRow}>
+        <Text variant="labelMedium" style={styles.muted}>
+          {label}
+        </Text>
+        {isDefault ? (
+          <Text variant="labelSmall" style={styles.muted}>
+            {defaultText}
+          </Text>
+        ) : (
+          <Pressable accessibilityRole="button" disabled={disabled} onPress={onReset} hitSlop={8}>
+            <Text variant="labelMedium" style={styles.stepButtonText}>
+              {resetText}
+            </Text>
+          </Pressable>
+        )}
+      </View>
+      <View style={styles.stepRow}>
+        {renderStep(-1, "−1", minusLabel)}
+        <View style={styles.stepValue} accessibilityLiveRegion="polite">
+          <Text variant="titleMedium" style={styles.stepValueText}>
+            {valueText}
+          </Text>
+        </View>
+        {renderStep(1, "+1", plusLabel)}
+      </View>
+    </View>
+  );
+}
+
 export function ScheduleManagementCard({
   weekStartDate,
   storeCode,
@@ -219,6 +330,7 @@ export function ScheduleManagementCard({
   onPreviousWeek,
   onNextWeek,
   onCreate,
+  onCreateBatch,
   onUpdate,
   onDelete,
   onPublishWeek,
@@ -237,6 +349,8 @@ export function ScheduleManagementCard({
   onPreviousWeek: () => void;
   onNextWeek: () => void;
   onCreate: (payload: AttendanceSchedulePayload) => void;
+  /** 批量新建（依次提交、统一汇总提示）。 */
+  onCreateBatch: (payloads: AttendanceSchedulePayload[]) => void;
   onUpdate: (
     scheduleGuid: string,
     payload: AttendanceScheduleUpdatePayload,
@@ -251,6 +365,9 @@ export function ScheduleManagementCard({
     null,
   );
   const [form, setForm] = useState<ScheduleDraft>(EMPTY_FORM);
+  const [batchTarget, setBatchTarget] = useState<BatchTarget | null>(null);
+  // 员工模式存日期、日期模式存员工 GUID。
+  const [batchSelection, setBatchSelection] = useState<ReadonlySet<string>>(() => new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
   // 网格容器宽度：宽屏（横屏全屏）时把 7 天均分铺满，窄屏保持最小列宽并横向滚动。
   const [gridWidths, setGridWidths] = useState<Record<GridVariant, number>>({
@@ -281,14 +398,27 @@ export function ScheduleManagementCard({
   const days = useMemo(() => buildWeekDates(weekStartDate), [weekStartDate]);
   const today = toLocalDateString(new Date());
 
+  // 仅关联本店的店长默认不进排班表，由筛选开关控制；管理本店的店长与店员默认在表中。
+  const [showRelatedManagers, setShowRelatedManagers] = useState(false);
+  const { visible: visibleUsers, relatedManagerCount } = useMemo(
+    () =>
+      filterScheduleUsers(
+        users,
+        new Set(schedules.map((schedule) => schedule.userGuid)),
+        showRelatedManagers,
+      ),
+    [schedules, showRelatedManagers, users],
+  );
+
   const rows = useMemo<ScheduleRow[]>(() => {
     const rowMap = new Map<string, ScheduleRow>();
-    users.forEach((user) => {
+    visibleUsers.forEach((user) => {
       rowMap.set(user.userGUID, {
         userGuid: user.userGUID,
         employeeName: getUserDisplayName(user),
         employmentType: employmentTypeCode(user.employmentType),
         age: user.age,
+        isStoreManager: user.isStoreManager,
         schedules: [],
       });
     });
@@ -309,7 +439,7 @@ export function ScheduleManagementCard({
         right.employeeName || right.userGuid,
       ),
     );
-  }, [schedules, users]);
+  }, [schedules, visibleUsers]);
 
   const availabilityMap = useMemo(
     () => groupAvailabilityByUserDate(availability),
@@ -413,6 +543,7 @@ export function ScheduleManagementCard({
       endTime: normalizeClockTime(schedule.endTime),
       status: schedule.status || "Draft",
       remark: schedule.remark ?? "",
+      mealBreakCount: schedule.mealBreakCount ?? null,
     });
   };
 
@@ -432,7 +563,80 @@ export function ScheduleManagementCard({
 
   const closeEditor = () => {
     setEditingTarget(null);
+    setBatchTarget(null);
+    setBatchSelection(new Set());
     setForm(EMPTY_FORM);
+  };
+
+  const openBatch = (target: BatchTarget) => {
+    if (!storeCode) {
+      return;
+    }
+    setEditingTarget(null);
+    setBatchTarget(target);
+    setBatchSelection(new Set());
+    setForm(EMPTY_FORM);
+  };
+
+  const cellOf = (row: ScheduleRow, day: string) =>
+    classifyScheduleGridCell(
+      row.schedules.filter((item) => item.workDate.slice(0, 10) === day),
+      availabilityMap.get(availabilityKey(row.userGuid, day)),
+    );
+
+  // 批量候选：员工模式列本周 7 天，日期模式列表内员工；已有班次或请假的格子置灰不可选。
+  const getBatchOptions = () => {
+    if (!batchTarget) {
+      return [];
+    }
+    if (batchTarget.mode === "employee") {
+      const row = rows.find((item) => item.userGuid === batchTarget.userGuid);
+      return days.map((day, index) => ({
+        key: day,
+        label: `${t(`weekdays.${index}`)} ${shortDate(day)}`,
+        enabled: Boolean(row) && isBatchSchedulableCell(cellOf(row!, day)),
+      }));
+    }
+    return rows.map((row) => ({
+      key: row.userGuid,
+      label: row.employeeName || row.userGuid,
+      enabled: isBatchSchedulableCell(cellOf(row, batchTarget.workDate)),
+    }));
+  };
+  const batchOptions = getBatchOptions();
+  const batchEnabledKeys = batchOptions.filter((item) => item.enabled).map((item) => item.key);
+  const batchSelectedKeys = batchEnabledKeys.filter((key) => batchSelection.has(key));
+
+  const toggleBatchKey = (key: string) =>
+    setBatchSelection((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+
+  // 批量新建一律为草稿，与单个新建一致；只提交可排的选中项。
+  const submitBatch = () => {
+    if (!batchTarget || !storeCode || !batchSelectedKeys.length) {
+      return;
+    }
+    const shift = {
+      startTime: form.startTime.trim(),
+      endTime: form.endTime.trim(),
+      status: "Draft" as AttendanceScheduleStatus,
+      remark: form.remark.trim() || undefined,
+      mealBreakCount: form.mealBreakCount,
+      storeCode,
+    };
+    onCreateBatch(
+      batchTarget.mode === "employee"
+        ? batchSelectedKeys.map((workDate) => ({ ...shift, userGuid: batchTarget.userGuid, workDate }))
+        : batchSelectedKeys.map((userGuid) => ({ ...shift, userGuid, workDate: batchTarget.workDate })),
+    );
+    closeEditor();
   };
 
   // 提交逻辑沿用原规则：新建一律为草稿，编辑保留原状态。
@@ -450,7 +654,12 @@ export function ScheduleManagementCard({
     };
 
     if (editingTarget.schedule?.scheduleGuid) {
-      onUpdate(editingTarget.schedule.scheduleGuid, normalized);
+      onUpdate(editingTarget.schedule.scheduleGuid, {
+        ...normalized,
+        // 指定了次数就覆盖；回到默认时显式要求后端置空。不传两者时后端保持原值（兼容旧客户端）。
+        mealBreakCount: form.mealBreakCount,
+        resetMealBreakCount: form.mealBreakCount == null,
+      });
     } else {
       onCreate({
         workDate: normalized.workDate,
@@ -458,6 +667,7 @@ export function ScheduleManagementCard({
         endTime: normalized.endTime,
         status: "Draft",
         remark: normalized.remark,
+        mealBreakCount: form.mealBreakCount,
         storeCode,
         userGuid: editingTarget.userGuid,
       });
@@ -503,19 +713,33 @@ export function ScheduleManagementCard({
   };
 
   const canSubmit = Boolean(form.startTime.trim() && form.endTime.trim());
+  // 编辑器显示的用餐次数：店长指定值优先，否则按当前起止时间（不扣用餐的总时长）推算默认次数，调时间时实时变化。
+  const mealBreakCount = form.mealBreakCount
+    ?? defaultMealBreakCount(shiftEditorMinutes(form.startTime, form.endTime, 0));
   const canOperateWeek = Boolean(storeCode) && !isBusy;
-  const editorTitle = editingTarget
-    ? `${editingTarget.employeeName || editingTarget.userGuid} · ${t(`weekdays.${editingTarget.weekdayIndex}`)} ${shortDate(editingTarget.workDate)}`
-    : "";
-  const editorSubtitle = editingTarget?.schedule
-    ? t("scheduleManagement.editTitle")
-    : t("scheduleManagement.createTitle");
+  const editorTitle = batchTarget
+    ? batchTarget.mode === "employee"
+      ? batchTarget.employeeName || batchTarget.userGuid
+      : `${t(`weekdays.${batchTarget.weekdayIndex}`)} ${shortDate(batchTarget.workDate)}`
+    : editingTarget
+      ? `${editingTarget.employeeName || editingTarget.userGuid} · ${t(`weekdays.${editingTarget.weekdayIndex}`)} ${shortDate(editingTarget.workDate)}`
+      : "";
+  const editorSubtitle = batchTarget
+    ? t(batchTarget.mode === "employee"
+      ? "scheduleManagement.batch.employeeSubtitle"
+      : "scheduleManagement.batch.dateSubtitle")
+    : editingTarget?.schedule
+      ? t("scheduleManagement.editTitle")
+      : t("scheduleManagement.createTitle");
+  const isEditorOpen = Boolean(editingTarget || batchTarget);
 
   const renderStats = (compact = false) => {
     const items = [
       { key: "week", label: t("scheduleManagement.stats.weekHours"), value: hoursShort(hourStats.totalMinutes) },
       { key: "weekday", label: t("scheduleManagement.stats.weekdayHours"), value: hoursShort(hourStats.weekdayMinutes) },
       { key: "weekend", label: t("scheduleManagement.stats.weekendHours"), value: hoursShort(hourStats.weekendMinutes) },
+      // 等效工时：周六 ×1.25、周日 ×1.5，便于估算周末加价后的人工成本。
+      { key: "equivalent", label: t("scheduleManagement.stats.equivalentHours"), value: hoursShort(hourStats.equivalentMinutes) },
       {
         key: "people",
         label: t("scheduleManagement.stats.scheduledPeople"),
@@ -564,9 +788,14 @@ export function ScheduleManagementCard({
       <Text variant="labelSmall" style={styles.muted}>
         {t("scheduleManagement.legend.available")}
       </Text>
-      <Text variant="labelSmall" style={styles.muted}>
-        {t("scheduleManagement.legend.employmentTypes")}
-      </Text>
+      {EMPLOYMENT_TYPE_LEGEND.map((item) => (
+        <View key={item.code} style={styles.legendType}>
+          <EmploymentTypeBadge code={item.code} />
+          <Text variant="labelSmall" style={styles.muted}>
+            {t(`scheduleManagement.legend.${item.labelKey}`)}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 
@@ -581,6 +810,16 @@ export function ScheduleManagementCard({
         <Text variant="labelSmall" style={styles.uncoveredText}>
           {t("scheduleManagement.uncoveredDays", { count: uncoveredDays })}
         </Text>
+      ) : null}
+      {relatedManagerCount > 0 ? (
+        <Chip
+          compact
+          selected={showRelatedManagers}
+          showSelectedCheck
+          onPress={() => setShowRelatedManagers((current) => !current)}
+        >
+          {t("scheduleManagement.showRelatedManagers", { count: relatedManagerCount })}
+        </Chip>
       ) : null}
       {withLegend ? <View style={styles.legendPush}>{renderLegend()}</View> : null}
     </View>
@@ -653,7 +892,23 @@ export function ScheduleManagementCard({
               </Text>
             </View>
             {rows.map((row) => (
-              <View key={row.userGuid} style={[styles.bodyCell, styles.rowHeader]}>
+              // 点员工名：给该员工批量排多天。
+              <Pressable
+                key={row.userGuid}
+                accessibilityRole="button"
+                accessibilityLabel={t("scheduleManagement.batch.employeeA11y", {
+                  name: row.employeeName || row.userGuid,
+                })}
+                disabled={!storeCode || isBusy}
+                onPress={() =>
+                  openBatch({ mode: "employee", userGuid: row.userGuid, employeeName: row.employeeName })
+                }
+                style={({ pressed }) => [
+                  styles.bodyCell,
+                  styles.rowHeader,
+                  pressed ? styles.cellPressed : null,
+                ]}
+              >
                 <Text variant="labelLarge" numberOfLines={1} style={styles.employeeName}>
                   {row.employeeName || row.userGuid}
                 </Text>
@@ -661,14 +916,15 @@ export function ScheduleManagementCard({
                   <Text variant="labelSmall" style={styles.muted}>
                     {hoursShort(rowMinutes.get(row.userGuid) ?? 0)}
                   </Text>
-                  {row.employmentType ? (
-                    <StatusPill label={row.employmentType} tone={EMPLOYMENT_TYPE_TONES[row.employmentType]} />
+                  {row.employmentType ? <EmploymentTypeBadge code={row.employmentType} /> : null}
+                  {row.isStoreManager ? (
+                    <StatusPill label={t("scheduleManagement.managerBadge")} tone="neutral" />
                   ) : null}
                   {row.age !== undefined ? (
                     <StatusPill label={t("scheduleManagement.ageBadge", { age: row.age })} tone="warning" />
                   ) : null}
                 </View>
-              </View>
+              </Pressable>
             ))}
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -677,13 +933,21 @@ export function ScheduleManagementCard({
                 {days.map((day, index) => {
                   const isToday = day === today;
                   return (
-                    <View
+                    // 点日期：给当天多位员工批量排同一班。
+                    <Pressable
                       key={day || index}
-                      style={[
+                      accessibilityRole="button"
+                      accessibilityLabel={t("scheduleManagement.batch.dateA11y", {
+                        date: `${t(`weekdays.${index}`)} ${shortDate(day)}`,
+                      })}
+                      disabled={!storeCode || isBusy || !rows.length}
+                      onPress={() => openBatch({ mode: "date", workDate: day, weekdayIndex: index })}
+                      style={({ pressed }) => [
                         styles.headerCell,
                         styles.dayHeader,
                         { width: cellWidth },
                         isToday ? styles.todayHeader : null,
+                        pressed ? styles.cellPressed : null,
                       ]}
                     >
                       <Text
@@ -698,7 +962,7 @@ export function ScheduleManagementCard({
                       >
                         {shortDate(day)}
                       </Text>
-                    </View>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -795,6 +1059,148 @@ export function ScheduleManagementCard({
     </>
   );
 
+  // 班次设置（常用时间段、起止时间、用餐、备注）：单个编辑与批量排班共用。
+  const renderShiftFields = () => (
+    <>
+        <View style={styles.editorSection}>
+          <Text variant="labelMedium" style={styles.muted}>
+            {t("scheduleManagement.quickShiftTitle")}
+          </Text>
+          <View style={styles.chipRow}>
+            {QUICK_SHIFTS.map((shift) => (
+              <Chip
+                key={shift.key}
+                compact
+                selected={
+                  form.startTime === shift.startTime &&
+                  form.endTime === shift.endTime
+                }
+                onPress={() =>
+                  setForm((current) => ({
+                    ...current,
+                    startTime: shift.startTime,
+                    endTime: shift.endTime,
+                  }))
+                }
+              >
+                {t(`scheduleManagement.quickShifts.${shift.key}`)}
+              </Chip>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.timeRow}>
+          <TimeStepField
+            label={t("fields.startTime")}
+            value={form.startTime}
+            minusLabel={t("scheduleManagement.editor.stepMinus", { label: t("fields.startTime") })}
+            plusLabel={t("scheduleManagement.editor.stepPlus", { label: t("fields.startTime") })}
+            disabled={isBusy}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, startTime: value }))
+            }
+          />
+          <TimeStepField
+            label={t("fields.endTime")}
+            value={form.endTime}
+            minusLabel={t("scheduleManagement.editor.stepMinus", { label: t("fields.endTime") })}
+            plusLabel={t("scheduleManagement.editor.stepPlus", { label: t("fields.endTime") })}
+            disabled={isBusy}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, endTime: value }))
+            }
+          />
+        </View>
+
+        <MealBreakStepField
+          label={t("scheduleManagement.editor.mealBreakLabel")}
+          count={mealBreakCount}
+          isDefault={form.mealBreakCount == null}
+          valueText={mealBreakCount
+            ? t("scheduleManagement.editor.mealBreakValue", {
+                count: mealBreakCount,
+                minutes: MEAL_BREAK_MINUTES,
+              })
+            : t("scheduleManagement.editor.mealBreakNone")}
+          defaultText={t("scheduleManagement.editor.mealBreakDefault")}
+          resetText={t("scheduleManagement.editor.mealBreakReset")}
+          minusLabel={t("scheduleManagement.editor.mealBreakMinus")}
+          plusLabel={t("scheduleManagement.editor.mealBreakPlus")}
+          disabled={isBusy}
+          onChange={(count) =>
+            setForm((current) => ({ ...current, mealBreakCount: count }))
+          }
+          onReset={() =>
+            setForm((current) => ({ ...current, mealBreakCount: null }))
+          }
+        />
+
+        <TextInput
+          mode="outlined"
+          dense
+          label={t("fields.note")}
+          value={form.remark}
+          onChangeText={(value) =>
+            setForm((current) => ({ ...current, remark: value }))
+          }
+        />
+    </>
+  );
+
+  const renderBatchBody = () => {
+    if (!batchTarget) {
+      return null;
+    }
+    const allSelected =
+      batchEnabledKeys.length > 0 && batchSelectedKeys.length === batchEnabledKeys.length;
+    return (
+      <>
+        <View style={styles.editorSection}>
+          <View style={styles.mealLabelRow}>
+            <Text variant="labelMedium" style={styles.muted}>
+              {t(batchTarget.mode === "employee"
+                ? "scheduleManagement.batch.pickDays"
+                : "scheduleManagement.batch.pickEmployees")}
+            </Text>
+            {batchEnabledKeys.length ? (
+              <Pressable
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() =>
+                  setBatchSelection(allSelected ? new Set() : new Set(batchEnabledKeys))
+                }
+              >
+                <Text variant="labelMedium" style={styles.stepButtonText}>
+                  {t(allSelected ? "scheduleManagement.batch.clearAll" : "scheduleManagement.batch.selectAll")}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={styles.chipRow}>
+            {batchOptions.map((option) => (
+              <Chip
+                key={option.key}
+                compact
+                showSelectedCheck
+                selected={option.enabled && batchSelection.has(option.key)}
+                disabled={!option.enabled}
+                onPress={() => toggleBatchKey(option.key)}
+              >
+                {option.label}
+              </Chip>
+            ))}
+          </View>
+          <Text variant="labelSmall" style={styles.muted}>
+            {t(batchTarget.mode === "employee"
+              ? "scheduleManagement.batch.skipDaysHint"
+              : "scheduleManagement.batch.skipEmployeesHint")}
+          </Text>
+        </View>
+        {renderShiftFields()}
+      </>
+    );
+  };
+
   const renderEditorBody = () => {
     if (!editingTarget) {
       return null;
@@ -869,70 +1275,31 @@ export function ScheduleManagementCard({
           </View>
         ) : null}
 
-        <View style={styles.editorSection}>
-          <Text variant="labelMedium" style={styles.muted}>
-            {t("scheduleManagement.quickShiftTitle")}
-          </Text>
-          <View style={styles.chipRow}>
-            {QUICK_SHIFTS.map((shift) => (
-              <Chip
-                key={shift.key}
-                compact
-                selected={
-                  form.startTime === shift.startTime &&
-                  form.endTime === shift.endTime
-                }
-                onPress={() =>
-                  setForm((current) => ({
-                    ...current,
-                    startTime: shift.startTime,
-                    endTime: shift.endTime,
-                  }))
-                }
-              >
-                {t(`scheduleManagement.quickShifts.${shift.key}`)}
-              </Chip>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.timeRow}>
-          <TimeStepField
-            label={t("fields.startTime")}
-            value={form.startTime}
-            minusLabel={t("scheduleManagement.editor.stepMinus", { label: t("fields.startTime") })}
-            plusLabel={t("scheduleManagement.editor.stepPlus", { label: t("fields.startTime") })}
-            disabled={isBusy}
-            onChange={(value) =>
-              setForm((current) => ({ ...current, startTime: value }))
-            }
-          />
-          <TimeStepField
-            label={t("fields.endTime")}
-            value={form.endTime}
-            minusLabel={t("scheduleManagement.editor.stepMinus", { label: t("fields.endTime") })}
-            plusLabel={t("scheduleManagement.editor.stepPlus", { label: t("fields.endTime") })}
-            disabled={isBusy}
-            onChange={(value) =>
-              setForm((current) => ({ ...current, endTime: value }))
-            }
-          />
-        </View>
-
-        <TextInput
-          mode="outlined"
-          dense
-          label={t("fields.note")}
-          value={form.remark}
-          onChangeText={(value) =>
-            setForm((current) => ({ ...current, remark: value }))
-          }
-        />
+        {renderShiftFields()}
       </>
     );
   };
 
-  const renderEditorFooter = () => (
+  const renderEditorFooter = () => batchTarget ? (
+    <View style={styles.editorFooter}>
+      <Button
+        mode="contained"
+        onPress={submitBatch}
+        disabled={!canSubmit || !batchSelectedKeys.length || isBusy}
+        loading={isBusy}
+        buttonColor={HB_COLORS.action}
+        textColor={HB_COLORS.white}
+        style={styles.primaryAction}
+      >
+        {t("scheduleManagement.batch.save", {
+          count: batchSelectedKeys.length,
+          hours: formatScheduleHours(
+            shiftEditorMinutes(form.startTime, form.endTime, form.mealBreakCount),
+          ),
+        })}
+      </Button>
+    </View>
+  ) : (
     <View style={styles.editorFooter}>
       {editingTarget?.schedule ? (
         <Button
@@ -954,7 +1321,9 @@ export function ScheduleManagementCard({
         style={styles.primaryAction}
       >
         {t("scheduleManagement.editor.save", {
-          hours: formatScheduleHours(shiftEditorMinutes(form.startTime, form.endTime)),
+          hours: formatScheduleHours(
+            shiftEditorMinutes(form.startTime, form.endTime, form.mealBreakCount),
+          ),
         })}
       </Button>
     </View>
@@ -1016,19 +1385,19 @@ export function ScheduleManagementCard({
       </Card>
 
       <BusinessSheet
-        visible={Boolean(editingTarget) && !isFullscreen}
+        visible={isEditorOpen && !isFullscreen}
         title={editorTitle}
         subtitle={editorSubtitle}
         onDismiss={closeEditor}
         footer={renderEditorFooter()}
       >
-        {renderEditorBody()}
+        {batchTarget ? renderBatchBody() : renderEditorBody()}
       </BusinessSheet>
 
       <Modal
         animationType="slide"
         onRequestClose={() => {
-          if (editingTarget) {
+          if (isEditorOpen) {
             closeEditor();
             return;
           }
@@ -1091,7 +1460,7 @@ export function ScheduleManagementCard({
           </ScrollView>
 
           {/* 横屏全屏内用右侧面板编辑：不在全屏 Modal 上再叠原生 Modal（方向与层级都会冲突）。 */}
-          {isFullscreen && editingTarget ? (
+          {isFullscreen && isEditorOpen ? (
             <View style={StyleSheet.absoluteFill}>
               <Pressable
                 style={styles.panelBackdrop}
@@ -1126,7 +1495,7 @@ export function ScheduleManagementCard({
                   contentContainerStyle={styles.sidePanelBody}
                   keyboardShouldPersistTaps="handled"
                 >
-                  {renderEditorBody()}
+                  {batchTarget ? renderBatchBody() : renderEditorBody()}
                 </ScrollView>
                 <View style={styles.sidePanelFooter}>{renderEditorFooter()}</View>
               </View>
@@ -1406,6 +1775,23 @@ const styles = StyleSheet.create({
     borderLeftColor: HB_COLORS.outlineMuted,
     borderLeftWidth: StyleSheet.hairlineWidth,
   },
+  typeBadge: {
+    alignItems: "center",
+    borderRadius: 4,
+    justifyContent: "center",
+    minWidth: 18,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  typeBadgeText: {
+    color: HB_COLORS.white,
+    fontWeight: "700",
+  },
+  legendType: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4,
+  },
   statItem: {
     flex: 1,
     gap: 2,
@@ -1449,6 +1835,14 @@ const styles = StyleSheet.create({
   },
   stepButtonPressed: {
     backgroundColor: ACCENT.background,
+  },
+  stepButtonDisabled: {
+    opacity: 0.5,
+  },
+  mealLabelRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   stepButtonText: {
     color: HB_COLORS.action,

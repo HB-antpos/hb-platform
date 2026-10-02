@@ -88,6 +88,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyWarehouseOrderPickAssignmentAsync(CancellationToken cancellationToken);
 
+    Task ApplyAttendanceScheduleMealBreakAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceScheduleMealBreakAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -486,6 +490,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             WarehouseOrderPickAssignmentSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendanceScheduleMealBreakAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceScheduleMealBreakSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但结构错误的列不会被误标为完成。
+        await VerifyAttendanceScheduleMealBreakAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceScheduleMealBreakAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceScheduleMealBreakSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

@@ -42,6 +42,38 @@ export function scheduleDurationMinutes(schedule: Pick<AttendanceSchedule, "star
   return end > start ? end - start : end + 1440 - start;
 }
 
+/** 每次用餐时长：30 分钟。 */
+export const MEAL_BREAK_MINUTES = 30;
+/** 店长可指定的用餐次数上限（与后端校验一致）。 */
+export const MAX_MEAL_BREAK_COUNT = 3;
+
+/**
+ * 按班次时长推算的默认用餐次数：超过 9 小时 2 次、超过 4.5 小时 1 次，否则 0 次。
+ * 门槛均为「超过」，正好 4.5 / 9 小时按低一档。
+ */
+export function defaultMealBreakCount(durationMinutes: number) {
+  if (durationMinutes > 9 * 60) return 2;
+  if (durationMinutes > 4.5 * 60) return 1;
+  return 0;
+}
+
+/** 实际扣除的用餐次数：店长在排班上指定过（含 0 次＝取消）就用指定值，否则按时长默认。 */
+export function effectiveMealBreakCount(mealBreakCount: number | null | undefined, durationMinutes: number) {
+  return mealBreakCount ?? defaultMealBreakCount(durationMinutes);
+}
+
+/**
+ * 班次计薪工时（分钟）：总时长减去用餐次数 × 30 分钟，最少为 0。
+ * 所有排班工时展示（编辑弹层、每人/全店周合计、我的排班）都走这里，保证同一口径。
+ */
+export function schedulePaidMinutes(
+  schedule: Pick<AttendanceSchedule, "startTime" | "endTime" | "mealBreakCount">,
+) {
+  const minutes = scheduleDurationMinutes(schedule);
+  const meals = effectiveMealBreakCount(schedule.mealBreakCount, minutes);
+  return Math.max(0, minutes - meals * MEAL_BREAK_MINUTES);
+}
+
 export type MyWeekDayState = "scheduled" | "available" | "unfilled" | "rest";
 
 export interface MyWeekRow {
@@ -100,29 +132,49 @@ export interface ScheduleHourStats {
   totalMinutes: number;
   weekdayMinutes: number;
   weekendMinutes: number;
+  saturdayMinutes: number;
+  sundayMinutes: number;
+  /** 等效工时：工作日 ×1、周六 ×1.25、周日 ×1.5。 */
+  equivalentMinutes: number;
 }
 
+/** 等效工时倍率：周六 1.25、周日 1.5，工作日 1。 */
+export const SATURDAY_HOUR_RATE = 1.25;
+export const SUNDAY_HOUR_RATE = 1.5;
+
 /**
- * 排班工时统计：周合计、工作日（周一至五）、周末（周六日）。
- * 已取消的班次与已批准请假的班次不计入。
+ * 排班工时统计：周合计、工作日（周一至五）、周末（周六日），以及按周六 ×1.25、周日 ×1.5 加权的等效工时。
+ * 已取消的班次与已批准请假的班次不计入；按计薪工时累计（扣除用餐时间）。
  */
 export function computeScheduleHourStats(
-  schedules: Pick<AttendanceSchedule, "workDate" | "startTime" | "endTime" | "status" | "leaveType">[],
+  schedules: Pick<AttendanceSchedule, "workDate" | "startTime" | "endTime" | "status" | "leaveType" | "mealBreakCount">[],
 ): ScheduleHourStats {
   return schedules.reduce<ScheduleHourStats>((stats, schedule) => {
     if (schedule.status.toLowerCase() === "cancelled" || schedule.leaveType) return stats;
     const day = parseDay(schedule.workDate);
     if (day === undefined) return stats;
-    const minutes = scheduleDurationMinutes(schedule);
-    // 1970-01-01 是周四；换算成周一=0 的序号，5、6 为周末。
+    const minutes = schedulePaidMinutes(schedule);
+    // 1970-01-01 是周四；换算成周一=0 的序号，5 为周六、6 为周日。
     const weekdayIndex = (((day + 3) % 7) + 7) % 7;
-    const isWeekend = weekdayIndex >= 5;
+    const isSaturday = weekdayIndex === 5;
+    const isSunday = weekdayIndex === 6;
+    const rate = isSunday ? SUNDAY_HOUR_RATE : isSaturday ? SATURDAY_HOUR_RATE : 1;
     return {
       totalMinutes: stats.totalMinutes + minutes,
-      weekdayMinutes: stats.weekdayMinutes + (isWeekend ? 0 : minutes),
-      weekendMinutes: stats.weekendMinutes + (isWeekend ? minutes : 0),
+      weekdayMinutes: stats.weekdayMinutes + (isSaturday || isSunday ? 0 : minutes),
+      weekendMinutes: stats.weekendMinutes + (isSaturday || isSunday ? minutes : 0),
+      saturdayMinutes: stats.saturdayMinutes + (isSaturday ? minutes : 0),
+      sundayMinutes: stats.sundayMinutes + (isSunday ? minutes : 0),
+      equivalentMinutes: stats.equivalentMinutes + minutes * rate,
     };
-  }, { totalMinutes: 0, weekdayMinutes: 0, weekendMinutes: 0 });
+  }, {
+    totalMinutes: 0,
+    weekdayMinutes: 0,
+    weekendMinutes: 0,
+    saturdayMinutes: 0,
+    sundayMinutes: 0,
+    equivalentMinutes: 0,
+  });
 }
 
 /** 分钟转小时文本：整数不带小数，否则保留 1 位。 */
@@ -133,7 +185,7 @@ export function formatScheduleHours(minutes: number) {
 
 export function sumScheduledMinutes(rows: MyWeekRow[]) {
   return rows.reduce(
-    (sum, row) => sum + row.schedules.reduce((inner, schedule) => inner + scheduleDurationMinutes(schedule), 0),
+    (sum, row) => sum + row.schedules.reduce((inner, schedule) => inner + schedulePaidMinutes(schedule), 0),
     0,
   );
 }

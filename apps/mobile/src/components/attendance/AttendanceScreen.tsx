@@ -92,6 +92,7 @@ import {
   resolveAustralianHolidayJurisdiction,
 } from "@/modules/attendance/public-holiday-sync";
 import { getAttendanceDeviceContext } from "@/modules/attendance/required-location";
+import { runSequentialBatch } from "@/modules/attendance/schedule-grid";
 import type {
   AttendanceAvailability,
   AttendanceAvailabilityPayload,
@@ -568,6 +569,30 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       ),
   });
 
+  // 批量排班：依次新建（后端按员工+日期加锁并校验重叠），全部完成后只刷新一次、只提示一次。
+  const createScheduleBatchMutation = useMutation({
+    mutationFn: (payloads: AttendanceSchedulePayload[]) =>
+      runSequentialBatch(payloads, createAttendanceSchedule),
+    onSuccess: async ({ succeeded, failures }) => {
+      await invalidateScheduleManagementData();
+      if (!failures.length) {
+        showMessage(t("messages.scheduleBatchSaved", { count: succeeded }));
+        return;
+      }
+      showMessage(
+        t("messages.scheduleBatchPartial", {
+          succeeded,
+          failed: failures.length,
+          reason: getErrorMessage(failures[0].error, "messages.saveFailed"),
+        }),
+      );
+    },
+    onError: (error) =>
+      showMessage(
+        getErrorMessage(error, "messages.saveFailed"),
+      ),
+  });
+
   const updateScheduleMutation = useMutation({
     mutationFn: ({
       scheduleGuid,
@@ -723,6 +748,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const isApprovalBusy = approveMutation.isPending || rejectMutation.isPending;
   const isScheduleBusy =
     createScheduleMutation.isPending ||
+    createScheduleBatchMutation.isPending ||
     updateScheduleMutation.isPending ||
     deleteScheduleMutation.isPending ||
     publishWeekMutation.isPending;
@@ -1635,6 +1661,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   setManagerWeekStartDate((current) => addWeeks(current, 1))
                 }
                 onCreate={handleCreateSchedule}
+                onCreateBatch={(payloads) => createScheduleBatchMutation.mutate(payloads)}
                 onUpdate={(scheduleGuid, payload) =>
                   updateScheduleMutation.mutate({ scheduleGuid, payload })
                 }

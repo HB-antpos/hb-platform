@@ -149,11 +149,22 @@ namespace BlazorApp.Api.Services.React
             {
                 return ApiResponse<AttendanceScheduleDto>.Error(validation.Message, validation.ErrorCode);
             }
+            if (!IsValidMealBreakCount(request.MealBreakCount))
+            {
+                return InvalidMealBreakCountError();
+            }
 
             var storeAccess = await ResolveManagedStoreAccessAsync(request.StoreCode);
             if (!storeAccess.Success)
             {
                 return ApiResponse<AttendanceScheduleDto>.Error(storeAccess.Message, storeAccess.ErrorCode);
+            }
+
+            // 被排班人必须是绑定本店的有效账号：防止误传或伪造的员工 GUID 在库里建出无主班次。
+            var boundUsers = await LoadStoreBoundUserGuidsAsync(request.StoreCode.Trim(), new[] { request.UserGuid.Trim() });
+            if (!boundUsers.Contains(request.UserGuid.Trim()))
+            {
+                return ApiResponse<AttendanceScheduleDto>.Error("员工不存在或不属于该分店", "EMPLOYEE_NOT_IN_STORE");
             }
 
             if (await HasOverlappingScheduleAsync(null, request.StoreCode, request.UserGuid, request.WorkDate.Date, request.StartTime, request.EndTime))
@@ -172,6 +183,7 @@ namespace BlazorApp.Api.Services.React
                 EndTime = request.EndTime,
                 Status = "Draft",
                 Remark = request.Remark,
+                MealBreakCount = request.MealBreakCount,
                 CreatedAt = now,
                 CreatedBy = _currentUserService.GetCurrentUsername(),
                 UpdatedAt = now,
@@ -226,6 +238,10 @@ namespace BlazorApp.Api.Services.React
             var occupied = targetRows
                 .Select(item => $"{item.UserGuid}|{item.WorkDate:yyyy-MM-dd}")
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // 来源周里已不属于本店（离职、解绑或无效 GUID）的员工不再复制。
+            var boundUsers = await LoadStoreBoundUserGuidsAsync(
+                storeCode,
+                sourceRows.Select(item => item.UserGuid).Distinct(StringComparer.OrdinalIgnoreCase));
 
             var now = DateTime.UtcNow;
             var username = _currentUserService.GetCurrentUsername();
@@ -235,7 +251,8 @@ namespace BlazorApp.Api.Services.React
             foreach (var source in sourceRows.OrderBy(item => item.WorkDate).ThenBy(item => item.StartTime))
             {
                 var workDate = source.WorkDate.Date.AddDays(offset);
-                if (occupied.Contains($"{source.UserGuid}|{workDate:yyyy-MM-dd}"))
+                if (!boundUsers.Contains(source.UserGuid)
+                    || occupied.Contains($"{source.UserGuid}|{workDate:yyyy-MM-dd}"))
                 {
                     skipped++;
                     continue;
@@ -250,6 +267,8 @@ namespace BlazorApp.Api.Services.React
                     EndTime = source.EndTime,
                     Status = "Draft",
                     Remark = source.Remark,
+                    // 店长对来源班次指定的用餐次数随班次一起复制，null（自动）仍保持自动。
+                    MealBreakCount = source.MealBreakCount,
                     CreatedAt = now,
                     CreatedBy = username,
                     UpdatedAt = now,
@@ -288,6 +307,11 @@ namespace BlazorApp.Api.Services.React
             {
                 return ApiResponse<AttendanceScheduleDto>.Error("排班结束时间必须晚于开始时间", "INVALID_TIME_RANGE");
             }
+            // 恢复自动时忽略 MealBreakCount，不做范围校验。
+            if (!request.ResetMealBreakCount && !IsValidMealBreakCount(request.MealBreakCount))
+            {
+                return InvalidMealBreakCountError();
+            }
 
             var mutationResource = AttendanceDailyMutationLock.BuildResource(
                 model.UserGuid,
@@ -325,6 +349,15 @@ namespace BlazorApp.Api.Services.React
                 model.EndTime = request.EndTime;
                 model.Status = NormalizeScheduleStatus(request.Status, defaultStatus: model.Status);
                 model.Remark = request.Remark;
+                // 用餐次数三态：显式恢复自动 → null；传了次数 → 覆盖；都没传（含旧版 App）→ 保持原值。
+                if (request.ResetMealBreakCount)
+                {
+                    model.MealBreakCount = null;
+                }
+                else if (request.MealBreakCount.HasValue)
+                {
+                    model.MealBreakCount = request.MealBreakCount;
+                }
                 model.UpdatedAt = DateTime.UtcNow;
                 model.UpdatedBy = _currentUserService.GetCurrentUsername();
                 await _db.Updateable(model).ExecuteCommandAsync();
@@ -1205,6 +1238,8 @@ namespace BlazorApp.Api.Services.React
                 return ApiResponse<List<AttendanceEmployeeDto>>.Error(access.Message, access.ErrorCode);
             }
 
+            // 可排班员工：店员与绑定在本店的店长（店长也要上班，需要给自己排班）。
+            var schedulableRoleNames = Permissions.StoreManagerRoleNames.Append("StoreStaff").ToArray();
             var rows = await _db.Queryable<User>()
                 .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
                 .InnerJoin<Role>((u, ur, r) => ur.RoleGUID == r.RoleGUID)
@@ -1217,7 +1252,7 @@ namespace BlazorApp.Api.Services.React
                     && !r.IsDeleted
                     && !us.IsDeleted
                     && !s.IsDeleted
-                    && r.RoleName == "StoreStaff"
+                    && schedulableRoleNames.Contains(r.RoleName)
                     && s.StoreCode == normalizedStoreCode)
                 .Select((u, ur, r, us, s, profile) => new
                 {
@@ -1226,6 +1261,8 @@ namespace BlazorApp.Api.Services.React
                     u.FullName,
                     profile.EmployeeType,
                     profile.Birthday,
+                    r.RoleName,
+                    us.IsPrimary,
                 })
                 .ToListAsync();
             // 年龄按门店当地日期计算，避免跨时区在生日前后差一天。
@@ -1234,24 +1271,62 @@ namespace BlazorApp.Api.Services.React
                 await ResolveStoreTimeZoneAsync(normalizedStoreCode, null)).Date;
             var employees = rows
                 .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .Select(item => new AttendanceEmployeeDto
+                .Select(group =>
                 {
-                    UserGuid = item.UserGUID,
-                    Username = item.Username,
-                    FullName = item.FullName,
-                    EmploymentType = item.EmployeeType switch
+                    var item = group.First();
+                    // 店长分两类：本店是其主分店（管理本店）与仅关联本店。口径与三段打卡上限一致（店长角色 + 主分店关系）。
+                    // 每行的 IsPrimary 都是该员工与本店的绑定关系（已按本店过滤）。
+                    var isStoreManager = group.Any(row => Permissions.StoreManagerRoleNames.Contains(
+                        row.RoleName,
+                        StringComparer.OrdinalIgnoreCase));
+                    return new AttendanceEmployeeDto
                     {
-                        EmployeeType.FullTime => "fullTime",
-                        EmployeeType.PartTime => "partTime",
-                        EmployeeType.Temporary => "casual",
-                        _ => null,
-                    },
-                    Age = ResolveMinorAge(item.Birthday, storeToday),
+                        UserGuid = item.UserGUID,
+                        Username = item.Username,
+                        FullName = item.FullName,
+                        EmploymentType = item.EmployeeType switch
+                        {
+                            EmployeeType.FullTime => "fullTime",
+                            EmployeeType.PartTime => "partTime",
+                            EmployeeType.Temporary => "casual",
+                            _ => null,
+                        },
+                        Age = ResolveMinorAge(item.Birthday, storeToday),
+                        IsStoreManager = isStoreManager,
+                        ManagesStore = isStoreManager && group.Any(row => row.IsPrimary),
+                    };
                 })
                 .OrderBy(item => item.FullName ?? item.Username, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             return ApiResponse<List<AttendanceEmployeeDto>>.OK(employees);
+        }
+
+        /// <summary>返回给定员工中「账号有效且绑定该分店」的 GUID 集合（忽略大小写）。</summary>
+        private async Task<HashSet<string>> LoadStoreBoundUserGuidsAsync(
+            string storeCode,
+            IEnumerable<string> userGuids)
+        {
+            var guids = userGuids
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (guids.Count == 0)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var bound = await _db.Queryable<User>()
+                .InnerJoin<UserStore>((u, us) => u.UserGUID == us.UserGUID)
+                .InnerJoin<Store>((u, us, s) => us.StoreGUID == s.StoreGUID)
+                .Where((u, us, s) =>
+                    !u.IsDeleted
+                    && !us.IsDeleted
+                    && !s.IsDeleted
+                    && s.StoreCode == storeCode
+                    && guids.Contains(u.UserGUID))
+                .Select((u, us, s) => u.UserGUID)
+                .ToListAsync();
+            return bound.ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>未满 18 岁返回周岁，否则（含生日缺失、未来日期）返回 null。</summary>
@@ -4340,6 +4415,15 @@ namespace BlazorApp.Api.Services.React
             return ValidationResult.OK();
         }
 
+        // 用餐次数覆盖值只允许 0–3 次；null 表示按时长自动，不受限制。
+        private const int MaxMealBreakCount = 3;
+
+        private static bool IsValidMealBreakCount(int? mealBreakCount) =>
+            mealBreakCount is null or (>= 0 and <= MaxMealBreakCount);
+
+        private static ApiResponse<AttendanceScheduleDto> InvalidMealBreakCountError() =>
+            ApiResponse<AttendanceScheduleDto>.Error("用餐次数必须在 0 到 3 之间", "INVALID_MEAL_BREAK_COUNT");
+
         private static ValidationResult ValidateHolidayBatchPayload(
             List<string> storeCodes,
             DateTime holidayDate,
@@ -4660,6 +4744,7 @@ namespace BlazorApp.Api.Services.React
             EndTime = item.EndTime,
             Status = item.Status,
             Remark = item.Remark,
+            MealBreakCount = item.MealBreakCount,
         };
 
         private static AttendanceAvailabilityDto ToDto(AttendanceAvailability item) => new()
