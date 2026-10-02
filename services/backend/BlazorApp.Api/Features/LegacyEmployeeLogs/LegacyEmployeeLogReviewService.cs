@@ -71,7 +71,11 @@ public sealed class LegacyEmployeeLogReviewService
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogReviewDto>.NotFound();
         }
-        if (string.IsNullOrWhiteSpace(target.StoreCode) || !await _storeScopeService.CanAccessStoreCodeAsync(target.StoreCode))
+        // 核查与查看同一分店口径：店长可核查全部关联分店的日志（另需 Review 权限）。
+        var scope = await _storeScopeService.GetAssignedStoreScopeAsync();
+        if (string.IsNullOrWhiteSpace(target.StoreCode)
+            || !scope.IsAllowed
+            || !scope.CanAccessStoreCode(target.StoreCode.Trim()))
         {
             return LegacyEmployeeLogResult<LegacyEmployeeLogReviewDto>.Forbidden();
         }

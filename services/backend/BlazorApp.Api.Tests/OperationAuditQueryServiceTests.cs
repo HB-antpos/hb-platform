@@ -106,6 +106,25 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         Assert.Equal(0, blockedRequested.Total);
     }
 
+    [Fact]
+    public async Task QueryAsync_StoreManagerSeesAllAssignedStoresNotOnlyPrimary()
+    {
+        var now = DateTime.UtcNow;
+        await InsertAuditAsync("primary", "BRI", now.AddMinutes(-3));
+        var linkedId = await InsertAuditAsync("linked", "SYD", now.AddMinutes(-2));
+        await InsertAuditAsync("unlinked", "OTHER", now.AddMinutes(-1));
+        // 中文注释：可管理分店只有主分店 BRI，全部关联分店还有 SYD；查看日志按全部关联分店。
+        var service = CreateService("StoreManager", ["BRI"], assignedStoreCodes: ["BRI", "SYD"]);
+
+        var all = await service.QueryAsync(new OperationAuditQueryDto(), now);
+        var linked = await service.QueryAsync(new OperationAuditQueryDto { StoreCode = "SYD" }, now);
+        var detail = await service.GetDetailAsync(linkedId);
+
+        Assert.Equal(["BRI", "SYD"], all.Items.Select(item => item.StoreCode).Order(StringComparer.Ordinal));
+        Assert.Single(linked.Items);
+        Assert.Equal(OperationAuditDetailAccessStatus.Found, detail.Status);
+    }
+
     [Theory]
     [InlineData("StoreManager")]
     [InlineData("店长")]
@@ -627,7 +646,8 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         string role,
         IReadOnlyList<string>? storeCodes = null,
         bool scopeAllowed = true,
-        bool withProductDb = false
+        bool withProductDb = false,
+        IReadOnlyList<string>? assignedStoreCodes = null
     )
     {
         var identity = new ClaimsIdentity(
@@ -644,7 +664,15 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
                 IsAllowed = scopeAllowed,
                 IsAuthenticated = true,
                 StoreCodes = storeCodes ?? [],
-            }
+            },
+            assignedStoreCodes is null
+                ? null
+                : new CurrentUserManageableStoreScope
+                {
+                    IsAllowed = scopeAllowed,
+                    IsAuthenticated = true,
+                    StoreCodes = assignedStoreCodes,
+                }
         );
         return new OperationAuditQueryService(_db, scope, accessor, withProductDb ? _db : null);
     }
@@ -687,10 +715,15 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         _connection.Dispose();
     }
 
-    private sealed class FakeStoreScopeService(CurrentUserManageableStoreScope scope)
+    private sealed class FakeStoreScopeService(
+        CurrentUserManageableStoreScope scope,
+        CurrentUserManageableStoreScope? assignedScope = null)
         : ICurrentUserManageableStoreScopeService
     {
         public Task<CurrentUserManageableStoreScope> GetScopeAsync() => Task.FromResult(scope);
+
+        public Task<CurrentUserManageableStoreScope> GetAssignedStoreScopeAsync() =>
+            Task.FromResult(assignedScope ?? scope);
 
         public Task<IReadOnlyList<string>> GetAccessibleStoreCodesAsync() =>
             Task.FromResult(scope.StoreCodes);

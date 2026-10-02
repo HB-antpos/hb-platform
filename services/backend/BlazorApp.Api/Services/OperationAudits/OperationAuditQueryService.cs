@@ -876,7 +876,8 @@ public sealed class OperationAuditQueryService
             return OperationAuditStoreAccess.Denied;
         }
 
-        var scope = await _storeScopeService.GetScopeAsync();
+        // 店长按 UserStore 全部关联分店查看（不只主分店），与移动端/Web 分店列表一致。
+        var scope = await _storeScopeService.GetAssignedStoreScopeAsync();
         var storeCodes = scope.StoreCodes
             .Where(code => !string.IsNullOrWhiteSpace(code))
             .Select(code => code.Trim())
