@@ -336,6 +336,15 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             ClearDailyCloseDraft(clearReportSnapshot: true);
         }
 
+        // 日结页面实例会跨天复用，进入页面时没有未完成草稿就回到当天，
+        // 避免客户端隔夜不重启时把今天的点钞存成首次打开那天的日结。
+        if (!HasDailyCloseDraft && SelectedDate?.Date != DateTime.Today)
+        {
+            SelectedDate = DateTime.Today;
+        }
+
+        // 每次进入都默认选中最新存档，避免沿用上次选中的旧存档导致重打错单。
+        await SelectArchiveAsync(null, cancellationToken);
         await LoadHistoryAsync(cancellationToken);
         try
         {

@@ -436,6 +436,69 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
+    public async Task LoadAsync_resets_stale_business_date_to_today_when_no_draft()
+    {
+        // 模拟客户端隔夜不重启：页面实例保留着前一天的营业日期。
+        var service = new FakeDailyCloseService();
+        var viewModel = new DailyCloseViewModel(service, new FakeDailyClosePrintService(), CreateSession())
+        {
+            SelectedDate = DateTime.Today.AddDays(-1)
+        };
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal(DateTime.Today, viewModel.SelectedDate);
+        Assert.Equal(DateTime.Today, service.LastArchivesRequestedDate);
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(DateTime.Today, service.LastRequestedDate);
+        Assert.Equal(DateTime.Today, service.LastSavedDate);
+    }
+
+    [Fact]
+    public async Task LoadAsync_keeps_business_date_of_preserved_draft()
+    {
+        var service = new FakeDailyCloseService();
+        var yesterday = DateTime.Today.AddDays(-1);
+        var viewModel = new DailyCloseViewModel(service, new FakeDailyClosePrintService(), CreateSession())
+        {
+            SelectedDate = yesterday
+        };
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        var note = viewModel.Denominations.Single(item => item.Label == "$50");
+        note.Count = 2;
+        viewModel.CloseCashCountWorkspaceCommand.Execute(null);
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal(yesterday, viewModel.SelectedDate);
+        Assert.True(viewModel.HasDailyCloseDraft);
+        Assert.Equal(2, note.Count);
+    }
+
+    [Fact]
+    public async Task LoadAsync_selects_newest_archive_after_save_returned_to_pos()
+    {
+        var service = new FakeDailyCloseService();
+        var viewModel = new DailyCloseViewModel(
+            service,
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            returnToPos: () => { });
+        await viewModel.LoadAsync();
+        var previousArchiveGuid = viewModel.SelectedArchive!.DailyCloseGuid;
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+        await viewModel.LoadAsync();
+
+        Assert.NotEqual(previousArchiveGuid, viewModel.SelectedArchive!.DailyCloseGuid);
+        Assert.Equal(service.LastSavedArchive!.DailyCloseGuid, viewModel.SelectedArchive.DailyCloseGuid);
+    }
+
+    [Fact]
     public async Task Online_and_pending_sync_changes_do_not_discard_daily_close_draft()
     {
         var viewModel = new DailyCloseViewModel(new FakeDailyCloseService(), new FakeDailyClosePrintService(), CreateSession());
@@ -849,6 +912,8 @@ public sealed class DailyCloseViewModelTests
 
         public DateTime LastRequestedDate { get; private set; }
 
+        public DateTime LastArchivesRequestedDate { get; private set; }
+
         public DateTime LastSavedDate { get; private set; }
 
         public IReadOnlyList<CashDenominationCount>? LastSavedCashCounts { get; private set; }
@@ -909,6 +974,7 @@ public sealed class DailyCloseViewModelTests
             CancellationToken cancellationToken = default)
         {
             GetArchivesCallCount++;
+            LastArchivesRequestedDate = businessDate;
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<IReadOnlyList<DailyCloseArchive>>(_archives.ToArray());
         }
