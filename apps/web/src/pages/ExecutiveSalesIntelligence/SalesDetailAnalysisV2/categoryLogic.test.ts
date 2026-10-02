@@ -45,6 +45,17 @@ const nine = { ...report, suppliers: [{ ...report.suppliers[0], categories: [kit
 assert.equal(flattenCategoryTree(nine, { expanded: new Set(['240']), showAll: new Set() }).filter(row => row.kind === 'more').length, 0,
   '只多出 1 项时直接显示，不出现「另外 1 个」')
 
+const byQuantity = { ...report, suppliers: [{ ...report.suppliers[0], categories: [
+  { ...node('a', 'Low qty high revenue', 90), quantity: 1 }, { ...node('b', 'High qty low revenue', 10), quantity: 50 }] }] }
+assert.deepEqual(flattenCategoryTree(byQuantity, { expanded: new Set(['240']), showAll: new Set(), sort: { key: 'quantity', ascending: false } })
+  .filter(row => row.kind === 'category').map(row => row.name), ['High qty low revenue', 'Low qty high revenue'], '按数量降序')
+assert.deepEqual(flattenCategoryTree(byQuantity, { expanded: new Set(['240']), showAll: new Set(), sort: { key: 'revenue', ascending: true } })
+  .filter(row => row.kind === 'category').map(row => row.name), ['High qty low revenue', 'Low qty high revenue'], '按营业额升序')
+assert.equal(last(flattenCategoryTree(byQuantity, { expanded: new Set(['240']), showAll: new Set(), sort: { key: 'quantity', ascending: true } })).kind,
+  'unassigned', '任何排序下未归类都排在供应商最后')
+assert.deepEqual(flattenCategoryTree(report, { expanded: new Set(), showAll: new Set(), sort: { key: 'revenue', ascending: true } }).map(row => row.key),
+  ['200', '240'], '供应商行同样参与排序')
+
 const filtered = flattenCategoryTree(report, { expanded: new Set(), showAll: new Set(), filter: 'food' })
 assert.deepEqual(filtered.map(row => row.name), ['Dats', 'Kitchen And Household', 'Food Storage'], '筛选只保留命中节点及其祖先，自动展开')
 assert.deepEqual(flattenCategoryTree(report, { expanded: new Set(), showAll: new Set(), filter: 'hot bargain' }).map(row => row.key), ['200'],

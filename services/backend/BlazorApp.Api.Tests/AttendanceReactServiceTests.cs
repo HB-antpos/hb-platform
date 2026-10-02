@@ -1973,6 +1973,48 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetStoreEmployeesAsync_ExcludesWarehouseManagers()
+        {
+            // 仓库管理员不排门店班：即使同时是店长并绑定本店，也不进排班名单。
+            await SeedStoreScopeAsync();
+            await SeedStoreManagerRoleAsync("manager-user");
+            await _db.Insertable(new User
+            {
+                UserGUID = "warehouse-manager",
+                Username = "whm",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new Role
+            {
+                RoleGUID = "warehouse-manager-role",
+                RoleName = "WarehouseManager",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                new UserRole { UserRoleGUID = "whm-store-manager", UserGUID = "warehouse-manager", RoleGUID = "store-manager-role", CreatedAt = DateTime.UtcNow },
+                new UserRole { UserRoleGUID = "whm-warehouse-manager", UserGUID = "warehouse-manager", RoleGUID = "warehouse-manager-role", CreatedAt = DateTime.UtcNow },
+            }).ExecuteCommandAsync();
+            var briStoreGuid = (await _db.Queryable<Store>().FirstAsync(item => item.StoreCode == "BRI")).StoreGUID;
+            await _db.Insertable(new UserStore
+            {
+                UserStoreGUID = "whm-store-bri",
+                UserGUID = "warehouse-manager",
+                StoreGUID = briStoreGuid,
+                IsPrimary = true,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetStoreEmployeesAsync("BRI");
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            Assert.DoesNotContain(result.Data!, item => item.UserGuid == "warehouse-manager");
+            Assert.Contains(result.Data!, item => item.UserGuid == "manager-user");
+        }
+
+        [Fact]
         public async Task CreateScheduleAsync_EmployeeNotBoundToStore_IsRejected()
         {
             // 无效或不属于本店的员工 GUID 不能建班，避免生产出现无主班次。

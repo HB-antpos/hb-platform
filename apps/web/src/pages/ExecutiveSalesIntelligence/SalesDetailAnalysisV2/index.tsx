@@ -1,6 +1,6 @@
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Alert, Button, Image, Input, message, Pagination, Segmented, Select, Skeleton, Tag, Tooltip, TreeSelect, type RefSelectProps } from 'antd'
-import { CloseOutlined, DownloadOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ShopOutlined } from '@ant-design/icons'
+import { CloseOutlined, DownOutlined, DownloadOutlined, FilterOutlined, UpOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined, ShopOutlined } from '@ant-design/icons'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../../hooks/useIsMobile'
@@ -35,6 +35,7 @@ const STACK_WIDTHS: Record<ProductMetric, string> = { revenue: '11%', quantity: 
 const SIDE_WIDTHS: Record<ProductMetric, [string, string]> = { revenue: ['9%', '8%'], quantity: ['5.5%', '5%'], averageUnitPrice: ['5.5%', '5%'], grossProfit: ['8.5%', '8%'], grossMarginRate: ['6%', '8%'] }
 const GROWTH_WIDTH = { stack: '9%', side: '6%' }
 const VIEW_STORAGE_KEY = 'hb.sales-detail.view'
+const AU_FILTERS_COLLAPSED_KEY = 'hb.sales-detail.category.filters-collapsed'
 
 // 展示偏好只是本机便利项：存储不可用（隐私模式、被禁用）时按默认展示，不影响查询。
 function readViewPreference(): DetailViewPreference {
@@ -136,6 +137,12 @@ export default function SalesDetailAnalysisV2() {
   const [auLoading, setAuLoading] = useState(false)
   const auSupplierSelect = useRef<RefSelectProps>(null)
   const onAuLoadingChange = useCallback((value: boolean) => setAuLoading(value), [])
+  // 收起筛选后只留一行条件摘要，把高度让给数据表；偏好只存本机，读写失败时按展开处理。
+  const [auFiltersCollapsed, setAuFiltersCollapsed] = useState(() => { try { return window.localStorage.getItem(AU_FILTERS_COLLAPSED_KEY) === '1' } catch { return false } })
+  const toggleAuFilters = (collapsed: boolean) => {
+    setAuFiltersCollapsed(collapsed)
+    try { window.localStorage.setItem(AU_FILTERS_COLLAPSED_KEY, collapsed ? '1' : '0') } catch { /* 仅本次会话生效 */ }
+  }
 
   useEffect(() => {
     // 抽屉与大图预览都挂载在 body；页面切换或账号变化时关闭，避免覆盖其他保活页面。
@@ -521,7 +528,17 @@ export default function SalesDetailAnalysisV2() {
           {(['australia', 'china', 'category'] as const).map(value => <button role="tab" key={value} aria-selected={currentTab === value} onClick={() => switchKind(value)}>{value === 'china' ? text('HB 仓库 · 国内供应商', 'HB warehouse · China') : value === 'category' ? text('澳洲供应商分类', 'AU supplier categories') : text('澳洲供应商', 'Australian suppliers')}</button>)}
         </div>
       </div>
-      {categoryTab ? <div className={styles.headerControls}>
+      {categoryTab && auFiltersCollapsed ? <div className={styles.headerControls}>
+        <button type="button" className={styles.auFilterSummary} onClick={() => toggleAuFilters(false)}
+          aria-label={text('展开筛选', 'Show filters')} title={text('展开筛选', 'Show filters')}>
+          <FilterOutlined />
+          <span>{[auSuppliers.map(code => auOptions?.suppliers.find(item => item.supplierCode === code)?.supplierName || code).join('、') || text('未选供应商', 'No suppliers'),
+            auBranch ? auOptions?.stores.find(store => store.storeCode === auBranch)?.storeName || auBranch : text('全部分店', 'All stores'),
+            dates.startDate === dates.endDate ? dates.startDate : `${dates.startDate} — ${dates.endDate}`,
+            dates.compare ? text('含同期', 'vs previous') : text('无同期', 'no comparison')].join(' · ')}</span>
+          <DownOutlined />
+        </button>
+      </div> : categoryTab ? <div className={styles.headerControls}>
         <Select ref={auSupplierSelect} mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
           aria-label={text('选择澳洲供应商', 'Select Australian suppliers')} placeholder={text('澳洲供应商（可多选）', 'Australian suppliers (multiple)')}
           style={{ minWidth: 240, maxWidth: 420 }} value={auSuppliers} loading={!auOptions && !auOptionsError}
@@ -543,6 +560,9 @@ export default function SalesDetailAnalysisV2() {
           options={(auOptions?.stores ?? []).map(store => ({ value: store.storeCode, label: store.storeName }))}
           onChange={value => setAuBranch(value || undefined)} />
         <ReportControls value={dates} onChange={setDates} onRefresh={() => setAuRefresh(value => value + 1)} loading={auLoading} />
+        <Tooltip title={text('收起筛选，把空间留给数据', 'Collapse filters to show more data')}>
+          <Button size="small" type="text" icon={<UpOutlined />} aria-label={text('收起筛选', 'Collapse filters')} onClick={() => toggleAuFilters(true)} />
+        </Tooltip>
       </div> : <div className={styles.headerControls}>
         <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
           aria-label={text('选择供应商', 'Select suppliers')} placeholder={text('供应商（可多选）', 'Suppliers (multiple)')}
@@ -586,7 +606,7 @@ export default function SalesDetailAnalysisV2() {
       <Suspense fallback={<div className={styles.skeleton}><Skeleton active paragraph={{ rows: 8 }} title={false} /></div>}>
         <SupplierCategoryTab active={active} allowed={allowed} userGuid={currentUser?.userGUID} branches={branches} dates={dates}
           supplierCodes={auSuppliers} selectedBranchCode={auBranch} refresh={auRefresh}
-          onLoadingChange={onAuLoadingChange} onSelectSuppliers={() => auSupplierSelect.current?.focus()} />
+          onLoadingChange={onAuLoadingChange} onSelectSuppliers={() => { toggleAuFilters(false); window.setTimeout(() => auSupplierSelect.current?.focus(), 0) }} />
       </Suspense>
     </> : <>
     {categoryError && <Alert type="warning" showIcon message={categoryError} />}

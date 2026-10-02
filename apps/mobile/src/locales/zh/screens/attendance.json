@@ -464,7 +464,7 @@
     "copyConfirm": "复制",
     "copyWeekResult": "已复制 {{created}} 个班次，跳过 {{skipped}} 个",
     "copyWeekFailed": "复制上周排班失败",
-    "showRelatedManagers": "相关经理（{{count}}）",
+    "showOtherManagers": "其他店长（{{count}}）",
     "managerBadge": "经理",
     "ageBadge": "{{age}}岁"
   },

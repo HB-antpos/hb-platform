@@ -50,6 +50,9 @@ export interface CategoryReportQuery extends ReportPeriod {
   pageIndex?: number
   pageSize?: number
   includeTree?: boolean
+  /** 商品分页排序：营业额或数量，默认营业额降序。 */
+  sortBy?: 'revenue' | 'quantity'
+  sortDirection?: 'asc' | 'desc'
 }
 export interface CategorySupplierOption {
   supplierCode: string

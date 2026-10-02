@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Alert, Button, Image, Input, message, Pagination, Skeleton, Tooltip } from 'antd'
-import { DownloadOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
+import { CaretDownOutlined, CaretRightOutlined, CloseOutlined, DownOutlined, DownloadOutlined, ExclamationCircleOutlined, UpOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
 import { useProductImageVersions } from '../../../hooks/useProductImageVersion'
 import { toProductImagePreviewUrl, toProductThumbnailUrl } from '../../../utils/productImageThumbnail'
 import { MetricPair, useReportText } from '../ReportWorkbench/ReportControls'
 import { growth, normalizeKeyword, reportPeriod, type DateSelection } from '../ReportWorkbench/logic'
 import { useReportQuery } from '../ReportWorkbench/useReportQuery'
-import { ancestorKeys, flattenCategoryTree, nodeKey, resolveCategoryFocus, supplierOpenKeys, type CategorySelection, type CategoryTreeRow } from './categoryLogic'
+import { ancestorKeys, DEFAULT_CATEGORY_SORT, flattenCategoryTree, nodeKey, resolveCategoryFocus, supplierOpenKeys, type CategorySelection, type CategorySort, type CategorySortKey, type CategoryTreeRow } from './categoryLogic'
 import { fetchSalesDetailCategoryReport, UNASSIGNED_CATEGORY_KEY, type CategoryMetrics, type CategoryReport, type CategoryReportQuery } from './categoryReportService'
 import { MAX_PRODUCT_IMAGE_EXPORT_ROWS } from './logic'
 import type { SalesDetailRow } from './reportService'
@@ -17,6 +17,7 @@ const money = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD
 const moneyCents = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const percent = new Intl.NumberFormat('en-AU', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 })
 const integer = new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 })
+const SUMMARY_COLLAPSED_KEY = 'hb.sales-detail.category.summary-collapsed'
 /** 分类树请求顺带返回默认节点第一页商品时使用的页大小；改每页条数不应重算分类树。 */
 const DEFAULT_PAGE_SIZE = 20
 
@@ -24,7 +25,7 @@ function Growth({ current, previous, compare }: { current: number; previous: num
   const text = useReportText()
   const value = compare ? growth(current, previous) : null
   return <span className={typeof value === 'number' ? value > 0 ? styles.positive : value < 0 ? styles.negative : styles.muted : styles.muted}>
-    {value === null ? '—' : value === 'new' ? text('新增', 'New') : `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)}%`}
+    {value === null ? '—' : value === 'new' ? text('新增', 'New') : `${value > 0 ? '+' : ''}${(value * 100).toFixed(Math.abs(value) >= 1 ? 0 : 1)}%`}
   </span>
 }
 
@@ -35,6 +36,16 @@ function Margin({ metrics }: { metrics: { revenue: number; grossMarginRate: numb
   return metrics.revenue !== 0
     ? <Tooltip title={text('部分商品成本尚未补全，暂不计算毛利', 'Some product costs are still pending')}><span className={tab.costPending}>{text('待补全', 'Pending')}</span></Tooltip>
     : <>—</>
+}
+
+/** 可排序表头：点当前列切换升降序，点其他列按该列降序。 */
+function SortHeader({ sort, onChange, field, label, title }: {
+  sort: CategorySort; onChange: (next: CategorySort) => void; field: CategorySortKey; label: string; title?: string
+}) {
+  const active = sort.key === field
+  return <button type="button" className={tab.sortButton} data-active={active} title={title} aria-label={label}
+    onClick={() => onChange(active ? { key: field, ascending: !sort.ascending } : { key: field, ascending: false })}>
+    {label}<span aria-hidden>{active ? sort.ascending ? '↑' : '↓' : '↕'}</span></button>
 }
 
 function ShareBar({ value, tone = 'normal' }: { value: number | null; tone?: 'supplier' | 'normal' | 'warn' }) {
@@ -61,6 +72,26 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [exporting, setExporting] = useState(false)
+  const [treeSort, setTreeSort] = useState<CategorySort>(DEFAULT_CATEGORY_SORT)
+  // 统计提示默认单行省略，可展开或关闭（关闭只对同一条提示生效）；汇总条可收起为一行摘要，偏好存本机。
+  const [noticeOpen, setNoticeOpen] = useState(false)
+  const [dismissedNotice, setDismissedNotice] = useState<string>()
+  const [summaryCollapsed, setSummaryCollapsed] = useState(() => { try { return window.localStorage.getItem(SUMMARY_COLLAPSED_KEY) === '1' } catch { return false } })
+  const toggleSummary = (collapsed: boolean) => {
+    setSummaryCollapsed(collapsed)
+    try { window.localStorage.setItem(SUMMARY_COLLAPSED_KEY, collapsed ? '1' : '0') } catch { /* 仅本次会话生效 */ }
+  }
+  const [productSort, setProductSort] = useState<CategorySort>(DEFAULT_CATEGORY_SORT)
+  // 放大其中一个面板：另一个隐藏、放大的占满工作区；Esc 收起（正在看商品大图时 Esc 只关闭大图）。
+  const [enlarged, setEnlarged] = useState<'tree' | 'detail' | null>(null)
+  useEffect(() => {
+    if (!active || !enlarged) return
+    const handle = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !document.querySelector('.ant-image-preview-wrap:not([style*="display: none"])')) setEnlarged(null)
+    }
+    window.addEventListener('keydown', handle)
+    return () => window.removeEventListener('keydown', handle)
+  }, [active, enlarged])
   const exportAbort = useRef<AbortController | null>(null)
   useEffect(() => () => exportAbort.current?.abort(), [])
 
@@ -69,7 +100,7 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
   useEffect(() => {
     setSelected(current => current && supplierCodes.includes(current.supplierCode) ? current : defaultSelection)
   }, [supplierCodes, defaultSelection])
-  useEffect(() => { setPage(1) }, [selected, keyword, dates, selectedBranchCode, supplierCodes])
+  useEffect(() => { setPage(1) }, [selected, keyword, dates, selectedBranchCode, supplierCodes, productSort])
   useEffect(() => {
     const timer = window.setTimeout(() => setKeyword(normalizeKeyword(keywordDraft)), 300)
     return () => window.clearTimeout(timer)
@@ -82,9 +113,12 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
     signal => fetchSalesDetailCategoryReport(treeQuery, signal), { active, enabled, refresh, metricId: 'sales-detail-category-tree' })
   const report = tree.snapshot?.data
   // 默认节点的第一页已随分类树返回；其余节点、翻页或搜索才单独请求商品，且不再重复汇总分类树。
-  const usesTreeProducts = !!selected && !selected.categoryGuid && selected.supplierCode === defaultSelection?.supplierCode && page === 1 && pageSize === DEFAULT_PAGE_SIZE && !keyword
+  const defaultProductSort = productSort.key === DEFAULT_CATEGORY_SORT.key && productSort.ascending === DEFAULT_CATEGORY_SORT.ascending
+  const usesTreeProducts = !!selected && !selected.categoryGuid && selected.supplierCode === defaultSelection?.supplierCode && page === 1
+    && pageSize === DEFAULT_PAGE_SIZE && !keyword && defaultProductSort
   const productQuery: CategoryReportQuery = { ...base, nodeSupplierCode: selected?.supplierCode, nodeCategoryGuid: selected?.categoryGuid,
-    search: keyword || undefined, pageIndex: page, pageSize, includeTree: false }
+    search: keyword || undefined, pageIndex: page, pageSize, includeTree: false,
+    sortBy: productSort.key, sortDirection: productSort.ascending ? 'asc' : 'desc' }
   const products = useReportQuery<CategoryReport>(`sales-detail:category-products:${JSON.stringify([userGuid, productQuery])}`,
     signal => fetchSalesDetailCategoryReport(productQuery, signal),
     { active, enabled: enabled && !!selected && !!report && !usesTreeProducts, refresh, metricId: 'sales-detail-category-products' })
@@ -103,7 +137,7 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report])
 
-  const rows = report ? flattenCategoryTree(report, { expanded, showAll, filter }) : []
+  const rows = report ? flattenCategoryTree(report, { expanded, showAll, filter, sort: treeSort }) : []
   const select = (next: CategorySelection) => {
     setSelected(next)
     if (report) setExpanded(current => new Set([...current, ...ancestorKeys(report, next)]))
@@ -126,8 +160,14 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
   const isSelected = (row: CategoryTreeRow) => !!selected && row.kind !== 'more' && row.supplierCode === selected.supplierCode
     && (row.kind === 'supplier' ? !selected.categoryGuid : row.categoryGuid?.toLowerCase() === selected.categoryGuid?.toLowerCase())
 
-  const pageRows = useMemo(() => [...(productPage?.rows ?? [])].sort((left, right) => right.revenue - left.revenue
-    || (right.compareRevenue ?? 0) - (left.compareRevenue ?? 0) || left.code.localeCompare(right.code)), [productPage])
+  // 服务端已按所选列排好整份分页；前端只对当前页再排一次，兼容缓存返回的旧顺序。
+  const pageRows = useMemo(() => {
+    const key = productSort.key
+    const compareKey = key === 'quantity' ? 'compareQuantity' : 'compareRevenue'
+    const direction = productSort.ascending ? 1 : -1
+    return [...(productPage?.rows ?? [])].sort((left, right) => (left[key] - right[key]) * direction
+      || ((left[compareKey] ?? 0) - (right[compareKey] ?? 0)) * direction || left.code.localeCompare(right.code))
+  }, [productPage, productSort])
   const imageVersion = useProductImageVersions(pageRows.map(row => row.productImage))
   const nodeName = focus ? focus.node ? focus.node.categoryGuid === UNASSIGNED_CATEGORY_KEY ? labels.unassigned : focus.node.name
     : text(`${focus.supplier.supplierName || focus.supplier.supplierCode} · 全部商品`, `${focus.supplier.supplierName || focus.supplier.supplierCode} · All products`) : ''
@@ -171,13 +211,34 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
         compare={dates.compare && !!previousField} format={format} /> : <strong className={styles.pendingTotal}>—</strong>}</div>
     </div>
   const unassignedShare = summary && summary.revenue > 0 ? (report!.unassigned.revenue / summary.revenue) : null
+  const notice = tree.snapshot?.statisticMessage ?? undefined
   const biggestUnassigned = report?.suppliers.filter(item => item.unassigned).sort((a, b) => b.unassigned!.revenue - a.unassigned!.revenue)[0]
-  const colSpan = dates.compare ? 6 : 4
+  // 普通视图同期值作为第二行，表格放得下；放大后同期与占比单独成列。
+  const treeWide = enlarged === 'tree'
+  const productWide = enlarged === 'detail'
+  const colSpan = 6 + (dates.compare ? 0 : -1) + (treeWide && dates.compare ? 2 : 0)
+  const enlargeButton = (panel: 'tree' | 'detail', title: string) => <Tooltip title={enlarged === panel ? text('收起（Esc）', 'Collapse (Esc)') : text('放大', 'Enlarge')}>
+    <Button type="text" size="small" icon={enlarged === panel ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+      aria-label={enlarged === panel ? text(`收起${title}`, `Collapse ${title}`) : text(`放大${title}`, `Enlarge ${title}`)}
+      aria-pressed={enlarged === panel} onClick={() => setEnlarged(current => current === panel ? null : panel)} /></Tooltip>
 
   return <>
     {tree.error && <Alert type="warning" showIcon message={tree.error} />}
-    {tree.snapshot?.statisticMessage && <Alert type="warning" showIcon message={tree.snapshot.statisticMessage} />}
-    <section className={styles.summary} aria-label={text('所选供应商汇总', 'Selected supplier totals')}
+    {notice && notice !== dismissedNotice && <div className={tab.notice} role="status" data-open={noticeOpen}>
+      <ExclamationCircleOutlined aria-hidden />
+      <span title={noticeOpen ? undefined : notice}>{notice}</span>
+      <button type="button" onClick={() => setNoticeOpen(value => !value)}>{noticeOpen ? text('收起', 'Less') : text('详情', 'More')}</button>
+      <button type="button" aria-label={text('关闭提示', 'Dismiss notice')} onClick={() => setDismissedNotice(notice)}><CloseOutlined /></button>
+    </div>}
+    {summaryCollapsed ? <section className={tab.summaryLine} aria-label={text('所选供应商汇总', 'Selected supplier totals')}>
+      <span>{text('营业额', 'Revenue')} <strong>{summary ? money.format(summary.revenue) : '—'}</strong>
+        {summary && dates.compare && <> <Growth current={summary.revenue} previous={summary.compareRevenue} compare /></>}</span>
+      <span>{text('数量', 'Qty')} <strong>{summary ? integer.format(summary.quantity) : '—'}</strong></span>
+      <span>{text('动销商品', 'Products sold')} <strong>{summary ? integer.format(summary.productCount) : '—'}</strong></span>
+      <span className={tab.summaryWarn}>{text('未归类', 'Uncategorised')} <strong>{report ? money.format(report.unassigned.revenue) : '—'}</strong>
+        {unassignedShare != null && <small> {percent.format(unassignedShare)}</small>}</span>
+      <Button type="text" size="small" icon={<DownOutlined />} onClick={() => toggleSummary(false)}>{text('展开汇总', 'Show totals')}</Button>
+    </section> : <section className={styles.summary} aria-label={text('所选供应商汇总', 'Selected supplier totals')}
       style={{ '--previous-label': JSON.stringify(text('同期 ', 'Prev ')) } as CSSProperties}>
       {kpi(text('所选供应商营业额', 'Selected supplier revenue'), 'revenue', 'compareRevenue', 'money')}
       {kpi(text('商品数量', 'Product quantity'), 'quantity', 'compareQuantity', 'integer')}
@@ -199,10 +260,11 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
             {text('只看未归类', 'View')}</Button>}</div>
       </div>
       <div className={styles.scopeBlock}><span>{dates.startDate === dates.endDate ? dates.startDate : `${dates.startDate} — ${dates.endDate}`}
-        {dates.compare && period.compareStartDate ? ` · ${text('同期', 'Previous')} ${period.compareStartDate} — ${period.compareEndDate}` : ''} · AUD</span></div>
-    </section>
+        {dates.compare && period.compareStartDate ? ` · ${text('同期', 'Previous')} ${period.compareStartDate} — ${period.compareEndDate}` : ''} · AUD</span>
+        <Button type="text" size="small" icon={<UpOutlined />} onClick={() => toggleSummary(true)}>{text('收起汇总', 'Collapse')}</Button></div>
+    </section>}
 
-    <div className={tab.split}>
+    <div className={tab.split} data-enlarged={enlarged ?? undefined}>
       <section className={tab.panel} aria-label={text('分类汇总', 'Category totals')} aria-busy={tree.loading}>
         <header className={tab.panelHeader}>
           <h2><span>01</span>{text('分类汇总', 'Category totals')}</h2>
@@ -210,16 +272,25 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
             placeholder={text('筛选分类名', 'Filter categories')} aria-label={text('筛选分类名', 'Filter categories')} />
           <Button size="small" disabled={!report} onClick={() => setExpanded(fullyExpanded ? new Set() : new Set(allKeys()))}>
             {fullyExpanded ? text('全部收起', 'Collapse all') : text('全部展开', 'Expand all')}</Button>
+          {enlargeButton('tree', text('分类汇总', 'category totals'))}
         </header>
         {tree.slow && tree.loading && <div className={styles.slow} role="status">{text('查询超过 3 秒，正在读取完整数据…', 'Over 3 seconds. Loading complete data…')}</div>}
         <div className={tab.scroll}>
           {tree.loading && !report ? <div className={styles.skeleton}><Skeleton active paragraph={{ rows: 8 }} title={false} /></div>
             : !rows.length ? <div className={styles.empty}>{filter ? text('没有匹配的分类', 'No matching categories') : text('当前条件下没有数据', 'No data for these filters')}</div>
               : <table className={tab.treeTable} data-compare={dates.compare}>
-                <colgroup><col /><col className={tab.moneyCol} />{dates.compare && <><col className={tab.compareCol} /><col className={tab.growthCol} /></>}
-                  <col className={tab.shareCol} /><col className={tab.marginCol} /></colgroup>
-                <thead><tr><th>{text('供应商 / 分类', 'Supplier / category')}</th><th>{text('营业额', 'Revenue')} ↓</th>
-                  {dates.compare && <><th>{text('同期', 'Previous')}</th><th>{text('增长率', 'Growth')}</th></>}
+                <colgroup><col className={tab.nameCol} /><col className={tab.moneyCol} /><col className={tab.treeQtyCol} />
+                  {treeWide && dates.compare && <><col className={tab.compareCol} /><col className={tab.treeQtyCol} /></>}
+                  {dates.compare && <col className={tab.growthCol} />}<col className={tab.shareCol} /><col className={tab.marginCol} /></colgroup>
+                <thead><tr><th>{text('供应商 / 分类', 'Supplier / category')}</th>
+                  <th aria-sort={treeSort.key === 'revenue' ? treeSort.ascending ? 'ascending' : 'descending' : undefined}>
+                    <SortHeader sort={treeSort} onChange={setTreeSort} field="revenue" label={text('营业额', 'Revenue')}
+                      title={dates.compare && !treeWide ? text('第二行为同期营业额', 'Second line: previous revenue') : undefined} /></th>
+                  <th aria-sort={treeSort.key === 'quantity' ? treeSort.ascending ? 'ascending' : 'descending' : undefined}>
+                    <SortHeader sort={treeSort} onChange={setTreeSort} field="quantity" label={text('数量', 'Qty')}
+                      title={dates.compare && !treeWide ? text('第二行为同期数量', 'Second line: previous quantity') : undefined} /></th>
+                  {treeWide && dates.compare && <><th>{text('同期营业额', 'Prev revenue')}</th><th>{text('同期数量', 'Prev qty')}</th></>}
+                  {dates.compare && <th><Tooltip title={text('营业额同比增长', 'Revenue growth')}><span>{text('增长率', 'Growth')}</span></Tooltip></th>}
                   <th><Tooltip title={text('供应商占所选供应商合计；一级分类占所属供应商；子分类占父分类', 'Supplier vs selected total; category vs its parent')}>
                     <span>{text('占上级', 'Of parent')}</span></Tooltip></th><th>{text('毛利率', 'Margin')}</th></tr></thead>
                 <tbody>{rows.map(row => row.kind === 'more'
@@ -230,7 +301,7 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
                     <td><div className={tab.nameCell} style={{ paddingLeft: row.depth * 16 }}>
                       {row.expandable ? <button type="button" className={tab.caret} aria-expanded={row.expanded}
                         aria-label={row.expanded ? text(`收起${row.name}`, `Collapse ${row.name}`) : text(`展开${row.name}`, `Expand ${row.name}`)}
-                        onClick={() => toggle(row)}>{row.expanded ? '▾' : '▸'}</button> : <span className={tab.caretSpacer} />}
+                        onClick={() => toggle(row)}>{row.expanded ? <CaretDownOutlined /> : <CaretRightOutlined />}</button> : <span className={tab.caretSpacer} />}
                       <button type="button" className={tab.nodeButton} aria-pressed={isSelected(row)}
                         title={row.kind === 'supplier' ? `${row.name} · ${row.supplierCode}${row.source === 'warehouse' ? ` · ${text('按仓库分类', 'Warehouse categories')}` : ''}` : row.name}
                         onClick={() => select({ supplierCode: row.supplierCode, categoryGuid: row.kind === 'supplier' ? undefined : row.categoryGuid })}>
@@ -243,9 +314,13 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
                         <span className={tab.warnTag} aria-label={text(`未归类 ${percent.format(row.unassignedShare)}`, `${percent.format(row.unassignedShare)} uncategorised`)}>
                           {percent.format(row.unassignedShare)}</span></Tooltip>}
                     </div></td>
-                    <td>{money.format(row.metrics!.revenue)}</td>
-                    {dates.compare && <><td className={styles.muted}>{row.metrics!.compareRevenue == null ? '—' : money.format(row.metrics!.compareRevenue)}</td>
-                      <td><Growth current={row.metrics!.revenue} previous={row.metrics!.compareRevenue} compare /></td></>}
+                    <td><span className={tab.stack}><span>{money.format(row.metrics!.revenue)}</span>
+                      {dates.compare && !treeWide && <small>{row.metrics!.compareRevenue == null ? '—' : money.format(row.metrics!.compareRevenue)}</small>}</span></td>
+                    <td><span className={tab.stack}><span>{integer.format(row.metrics!.quantity)}</span>
+                      {dates.compare && !treeWide && <small>{row.metrics!.compareQuantity == null ? '—' : integer.format(row.metrics!.compareQuantity)}</small>}</span></td>
+                    {treeWide && dates.compare && <><td className={styles.muted}>{row.metrics!.compareRevenue == null ? '—' : money.format(row.metrics!.compareRevenue)}</td>
+                      <td className={styles.muted}>{row.metrics!.compareQuantity == null ? '—' : integer.format(row.metrics!.compareQuantity)}</td></>}
+                    {dates.compare && <td><Growth current={row.metrics!.revenue} previous={row.metrics!.compareRevenue} compare /></td>}
                     <td><ShareBar value={row.share} tone={row.kind === 'supplier' ? 'supplier' : row.kind === 'unassigned' ? 'warn' : 'normal'} /></td>
                     <td className={row.metrics!.grossMarginRate != null && row.metrics!.grossMarginRate < 0 ? styles.negative : undefined}>
                       <Margin metrics={row.metrics!} /></td>
@@ -279,6 +354,7 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
               placeholder={text('货号 / 条码 / 品名', 'Item / barcode / name')} aria-label={text('搜索本分类商品', 'Search products in this category')} />
             <Button size="small" icon={<DownloadOutlined />} loading={exporting} disabled={!pageRows.length || productsLoading}
               onClick={() => { void runExport() }}>{text('导出本页 Excel', 'Export page Excel')}</Button>
+            {enlargeButton('detail', text('分类商品明细', 'category products'))}
           </div>
         </header>
         <div className={tab.scroll}>
@@ -287,9 +363,17 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
               : !pageRows.length ? <div className={styles.empty}>{keyword ? text('没有匹配的商品', 'No matching products') : text('当前分类没有销售', 'No sales in this category')}</div>
                 : <table className={tab.productTable}>
                   <colgroup><col className={tab.rankCol} /><col /><col className={tab.priceCol} /><col className={tab.qtyCol} /><col className={tab.moneyCol} />
-                    {dates.compare && <><col className={tab.compareCol} /><col className={tab.growthCol} /></>}<col className={tab.marginCol} /></colgroup>
-                  <thead><tr><th>#</th><th>{text('货号 / 商品名称', 'Item / product')}</th><th>{text('均价', 'Unit price')}</th><th>{text('数量', 'Qty')}</th>
-                    <th><Tooltip title={text('第二行为占本分类营业额', 'Second line: share of this category')}><span>{text('营业额', 'Revenue')} ↓</span></Tooltip></th>{dates.compare && <><th>{text('同期', 'Previous')}</th><th>{text('增长率', 'Growth')}</th></>}
+                    {productWide && dates.compare && <col className={tab.compareCol} />}{productWide && <col className={tab.shareCol} />}
+                    {dates.compare && <col className={tab.growthCol} />}<col className={tab.marginCol} /></colgroup>
+                  <thead><tr><th>#</th><th>{text('货号 / 商品名称', 'Item / product')}</th><th>{text('均价', 'Unit price')}</th>
+                    <th aria-sort={productSort.key === 'quantity' ? productSort.ascending ? 'ascending' : 'descending' : undefined}>
+                      <SortHeader sort={productSort} onChange={setProductSort} field="quantity" label={text('数量', 'Qty')} title={text('第二行为同期数量', 'Second line: previous quantity')} /></th>
+                    <th aria-sort={productSort.key === 'revenue' ? productSort.ascending ? 'ascending' : 'descending' : undefined}>
+                      <SortHeader sort={productSort} onChange={setProductSort} field="revenue" label={text('营业额', 'Revenue')}
+                        title={productWide ? undefined : dates.compare ? text('第二行为同期营业额', 'Second line: previous revenue') : undefined} /></th>
+                    {productWide && dates.compare && <th>{text('同期营业额', 'Prev revenue')}</th>}
+                    {productWide && <th>{text('占本分类', 'Of category')}</th>}
+                    {dates.compare && <th>{text('增长率', 'Growth')}</th>}
                     <th>{text('毛利率', 'Margin')}</th></tr></thead>
                   <tbody>{pageRows.map((row: SalesDetailRow, index) => <tr key={row.code}>
                     <td className={styles.muted}>{(page - 1) * pageSize + index + 1}</td>
@@ -303,10 +387,12 @@ export default function SupplierCategoryTab({ active, allowed, userGuid, branche
                     <td>{row.averageUnitPrice == null ? '—' : moneyCents.format(row.averageUnitPrice)}</td>
                     <td><span className={tab.stack}><span>{integer.format(row.quantity)}</span>
                       {dates.compare && <small>{row.compareQuantity == null ? '—' : integer.format(row.compareQuantity)}</small>}</span></td>
-                    <td><span className={tab.stack}><strong>{moneyCents.format(row.revenue)}</strong>
-                      <small>{focus && focus.metrics.revenue > 0 ? percent.format(row.revenue / focus.metrics.revenue) : '—'}</small></span></td>
-                    {dates.compare && <><td className={styles.muted}>{row.compareRevenue == null ? '—' : moneyCents.format(row.compareRevenue)}</td>
-                      <td><Growth current={row.revenue} previous={row.compareRevenue} compare /></td></>}
+                    <td title={productWide || !focus || focus.metrics.revenue <= 0 ? undefined : `${text('占本分类', 'Of category')} ${percent.format(row.revenue / focus.metrics.revenue)}`}>
+                      <span className={tab.stack}><strong>{moneyCents.format(row.revenue)}</strong>
+                      {dates.compare && !productWide && <small>{row.compareRevenue == null ? '—' : moneyCents.format(row.compareRevenue)}</small>}</span></td>
+                    {productWide && dates.compare && <td className={styles.muted}>{row.compareRevenue == null ? '—' : moneyCents.format(row.compareRevenue)}</td>}
+                    {productWide && <td><ShareBar value={focus && focus.metrics.revenue > 0 ? row.revenue / focus.metrics.revenue : null} /></td>}
+                    {dates.compare && <td><Growth current={row.revenue} previous={row.compareRevenue} compare /></td>}
                     <td><Margin metrics={row} /></td>
                   </tr>)}</tbody>
                 </table>}

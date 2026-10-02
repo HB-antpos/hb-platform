@@ -24,6 +24,7 @@ import {
 } from "./AdjustmentFormControls";
 import { ScheduleExportSheet } from "./ScheduleExportSheet";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
+import { useAuthStore } from "@/store/auth-store";
 import {
   buildWeekDates,
   computeScheduleHourStats,
@@ -400,16 +401,19 @@ export function ScheduleManagementCard({
   const days = useMemo(() => buildWeekDates(weekStartDate), [weekStartDate]);
   const today = toLocalDateString(new Date());
 
-  // 仅关联本店的店长默认不进排班表，由筛选开关控制；管理本店的店长与店员默认在表中。
-  const [showRelatedManagers, setShowRelatedManagers] = useState(false);
-  const { visible: visibleUsers, relatedManagerCount } = useMemo(
+  // 店长默认只看到自己；其他店长由筛选开关控制，店员始终在表中。
+  const currentUser = useAuthStore((state) => state.user);
+  const currentUserGuid = currentUser?.userGUID || currentUser?.userGuid;
+  const [showOtherManagers, setShowOtherManagers] = useState(false);
+  const { visible: visibleUsers, otherManagerCount } = useMemo(
     () =>
       filterScheduleUsers(
         users,
         new Set(schedules.map((schedule) => schedule.userGuid)),
-        showRelatedManagers,
+        showOtherManagers,
+        currentUserGuid,
       ),
-    [schedules, showRelatedManagers, users],
+    [currentUserGuid, schedules, showOtherManagers, users],
   );
 
   const rows = useMemo<ScheduleRow[]>(() => {
@@ -832,14 +836,14 @@ export function ScheduleManagementCard({
           {t("scheduleManagement.uncoveredDays", { count: uncoveredDays })}
         </Text>
       ) : null}
-      {relatedManagerCount > 0 ? (
+      {otherManagerCount > 0 ? (
         <Chip
           compact
-          selected={showRelatedManagers}
+          selected={showOtherManagers}
           showSelectedCheck
-          onPress={() => setShowRelatedManagers((current) => !current)}
+          onPress={() => setShowOtherManagers((current) => !current)}
         >
-          {t("scheduleManagement.showRelatedManagers", { count: relatedManagerCount })}
+          {t("scheduleManagement.showOtherManagers", { count: otherManagerCount })}
         </Chip>
       ) : null}
       {withLegend ? <View style={styles.legendPush}>{renderLegend()}</View> : null}

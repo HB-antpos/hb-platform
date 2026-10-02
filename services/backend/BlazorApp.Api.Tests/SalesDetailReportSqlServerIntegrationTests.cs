@@ -1155,6 +1155,48 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
         Assert.Equal("P-X", Assert.Single(unassigned.Data!.Products!.Rows).Code);
     }
 
+    [SalesDetailReportSqlServerFact]
+    public async Task 澳洲供应商分类汇总不限分店时走月表日表预汇总且与日事实逐项一致()
+    {
+        await using var fixture = await SalesDetailSqlServerFixture.CreateAsync();
+        await SeedScopedFactsAsync(fixture);
+        await fixture.ExecuteSqlAsync("""
+            INSERT INTO [dbo].[LocalSupplierCategory] ([CategoryGUID],[LocalSupplierCode],[ParentGUID],[CategoryName],[IsActive],[SortOrder],[IsDeleted]) VALUES
+              (N'cat-a',N'A1',NULL,N'A分类',1,NULL,0);
+            INSERT INTO [dbo].[WarehouseCategory] ([CategoryGUID],[ParentGUID],[CategoryName],[IsActive],[SortOrder],[IsDeleted]) VALUES
+              (N'WC-ROOT',NULL,N'仓库父类',1,1,0),(N'WC-1',N'WC-ROOT',N'仓库子类',1,1,0);
+            UPDATE [dbo].[Product] SET [WarehouseCategoryGUID]=N'WC-1' WHERE [ProductCode] IN (N'P-ONE',N'P-TWO');
+            UPDATE [dbo].[Product] SET [LocalSupplierCode]=N'A1' WHERE [ProductCode]=N'P-THREE';
+            INSERT INTO [dbo].[LocalSupplierCategoryProductAssignment] ([ProductCode],[LocalSupplierCode],[CategoryGUID]) VALUES (N'P-THREE',N'A1',N'cat-a');
+            """);
+        await fixture.EnableMonthlyProjectionAsync();
+        await fixture.CatchUpProjectionAsync();
+        // 投影之后才补进来的日期没有日表状态，预汇总路径必须对这一天回退读日事实。
+        var lateDay = new DateTime(2025, 8, 5);
+        await fixture.SeedFreshStateAsync(lateDay);
+        await fixture.SeedFactAsync(lateDay, "B1", "200", "P-ONE", 7, 70m);
+        await fixture.SeedFactAsync(lateDay, "B3", "A1", "P-SIX", 2, 9m);
+        var service = fixture.CreateService();
+        var allStores = new List<string> { "B1", "B2", "B3" };
+        var suppliers = new[] { "200", "A1" };
+        static string Json(object? value) => JsonSerializer.Serialize(value);
+
+        // branchCodes=null 走预汇总；显式列出全部分店则走日事实，二者口径必须完全相同。
+        foreach (var (node, guid, sortBy) in new (string Node, string? Guid, string? SortBy)[]
+                 { ("200", null, null), ("200", "WC-ROOT", "quantity"), ("A1", SalesDetailCategorySources.UnassignedKey, null), ("A1", "cat-a", "quantity") })
+        {
+            var projected = await service.GetSalesDetailCategoryReportAsync(ScopedRange, suppliers, null,
+                nodeSupplierCode: node, nodeCategoryGuid: guid, sortBy: sortBy);
+            var facts = await service.GetSalesDetailCategoryReportAsync(ScopedRange, suppliers, allStores,
+                nodeSupplierCode: node, nodeCategoryGuid: guid, sortBy: sortBy);
+            Assert.Equal(SalesStatisticRefreshStatus.Fresh, projected.StatisticStatus);
+            Assert.True(Json(projected.Data) == Json(facts.Data), $"{node}/{guid}/{sortBy}\n预汇总: {Json(projected.Data)}\n日事实: {Json(facts.Data)}");
+        }
+        var tree = await service.GetSalesDetailCategoryReportAsync(ScopedRange, suppliers, null);
+        Assert.Contains(tree.Data!.Suppliers.Single(item => item.SupplierCode == "200").Categories, node => node.CategoryGuid == "WC-ROOT" && node.Revenue > 0);
+        Assert.True(tree.Data.Summary.Revenue > 0 && tree.Data.Summary.CompareRevenue > 0);
+    }
+
     private static DateRangeDto Range() => Range(SeedDate, null);
 
     private static DateRangeDto Range(DateTime currentDate, DateTime? compareDate)

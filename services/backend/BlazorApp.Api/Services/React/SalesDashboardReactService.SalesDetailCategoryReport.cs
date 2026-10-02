@@ -4,6 +4,7 @@ using System.Diagnostics;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Caching.Memory;
 using DbType = System.Data.DbType;
 
 namespace BlazorApp.Api.Services.React;
@@ -16,6 +17,8 @@ namespace BlazorApp.Api.Services.React;
 public partial class SalesDashboardReactService
 {
     internal const int MaxCategoryReportSuppliers = 100;
+    /// <summary>响应按统计版本缓存；分类归属调整不改统计版本，所以只保留较短时间。</summary>
+    internal static readonly TimeSpan CategoryReportCacheDuration = TimeSpan.FromMinutes(5);
     /// <summary>与 <see cref="ReadSectionRow"/> 第 5 列起的读取顺序一致。</summary>
     private static readonly string[] MetricColumns =
     {
@@ -107,9 +110,17 @@ public partial class SalesDashboardReactService
         int pageIndex = 1,
         int pageSize = 20,
         bool includeTree = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? sortBy = null,
+        bool sortAscending = false)
     {
         ValidateDateRange(dateRange);
+        var sortByQuantity = sortBy switch
+        {
+            null or "" or "revenue" => false,
+            "quantity" => true,
+            _ => throw new ArgumentException("sortBy 只支持 revenue 或 quantity", nameof(sortBy)),
+        };
         if (pageIndex < 1) throw new ArgumentException("pageIndex 必须大于 0", nameof(pageIndex));
         pageSize = Math.Clamp(pageSize, 1, 500);
         var suppliers = (supplierCodes ?? Array.Empty<string>()).Where(code => !string.IsNullOrWhiteSpace(code))
@@ -128,6 +139,22 @@ public partial class SalesDashboardReactService
         var nodeGuid = string.IsNullOrWhiteSpace(nodeCategoryGuid) ? null : nodeCategoryGuid.Trim();
         if (nodeGuid != null && nodeSupplier == null)
             throw new ArgumentException("指定分类时必须同时指定供应商", nameof(nodeSupplierCode));
+
+        // 先读统计状态（毫秒级）：未发布时直接返回，不跑重查询；已发布时按统计版本命中缓存，同一视图重复打开、切回分类都不再查库。
+        var preStatus = BuildSalesDetailReportStatus(await ReadSalesDetailCategoryStatusRowsAsync(dateRange), dateRange, false, skipFailedDates: true);
+        if (!preStatus.StatisticStatus.Equals(SalesStatisticRefreshStatus.Fresh, StringComparison.OrdinalIgnoreCase))
+            return new() { StatisticStatus = preStatus.StatisticStatus, StatisticMessage = preStatus.StatisticMessage,
+                StatisticUpdatedAt = preStatus.StatisticUpdatedAt, CacheVersion = preStatus.CacheVersion, Data = new() };
+        var cacheKey = "sales-detail-category:" + preStatus.CacheVersion + ":" + string.Join("|",
+            dateRange.StartDate.ToString("yyyyMMdd"), dateRange.EndDate.ToString("yyyyMMdd"),
+            dateRange.CompareStartDate?.ToString("yyyyMMdd"), dateRange.CompareEndDate?.ToString("yyyyMMdd"),
+            string.Join(",", suppliers.Select(code => code.ToUpperInvariant()).OrderBy(code => code, StringComparer.Ordinal)),
+            branches == null ? "*" : string.Join(",", branches.Select(code => code.ToUpperInvariant()).OrderBy(code => code, StringComparer.Ordinal)),
+            selectedBranchCode?.Trim().ToUpperInvariant(), includeTree, nodeSupplier, nodeGuid?.ToUpperInvariant(),
+            string.Join(" ", (search ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(token => token.ToUpperInvariant())),
+            pageIndex, pageSize, sortByQuantity, sortAscending);
+        if (_cache.TryGetValue<ProductReportResponseDto<SalesDetailCategoryReportDto>>(cacheKey, out var cached) && cached != null)
+            return cached;
 
         var trees = await LoadSalesDetailCategoryTreesAsync(suppliers, cancellationToken);
         // 节点筛选在 C# 里展开成叶分类集合：普通节点取自身与全部子孙；未归类取「不在该供应商分类树里」。
@@ -153,10 +180,29 @@ public partial class SalesDashboardReactService
         cancellationToken.ThrowIfCancellationRequested();
 
         var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
-        var sql = BuildSalesDetailCategoryReportSql(sqlServer, dateRange, suppliers, branches, selectedBranchCode,
-            includeTree, nodeSupplier, nodeGuid == null ? null : nodeGuids, unassignedNode, tokens, pageIndex, pageSize);
-        var read = await ReadSalesDetailCategoryReportAsync(sql, dateRange, suppliers, branches, selectedBranchCode,
-            nodeSupplier, nodeGuids, tokens, includeTree, nodeSupplier != null, cancellationToken);
+        // 只翻商品时只读节点所属供应商的事实；分类树才需要全部所选供应商。
+        var factSuppliers = includeTree || nodeSupplier == null ? suppliers : new List<string> { nodeSupplier };
+        // 不限分店时商品粒度可读月表/日表预汇总（长区间快一个数量级）；有分店范围时预汇总没有门店维度，读日事实。
+        var useMonthly = sqlServer && branches == null && string.IsNullOrWhiteSpace(selectedBranchCode)
+            && _context.Db.Ado.Transaction == null && !MonthlyProjectionRecentlyMissing();
+        SalesDetailCategoryReportRead read;
+        try
+        {
+            read = await ReadSalesDetailCategoryReportAsync(
+                BuildSalesDetailCategoryReportSql(sqlServer, dateRange, factSuppliers, branches, selectedBranchCode, includeTree, nodeSupplier,
+                    nodeGuid == null ? null : nodeGuids, unassignedNode, tokens, pageIndex, pageSize, useMonthly, sortByQuantity, sortAscending),
+                dateRange, factSuppliers, branches, selectedBranchCode, nodeSupplier, nodeGuids, tokens, includeTree, nodeSupplier != null, useMonthly, cancellationToken);
+        }
+        catch (SqlException ex) when (useMonthly && ex.Number == SalesDetailQueryMonthlyProjection.MissingSchemaErrorNumber)
+        {
+            // 预汇总表尚未部署时退回日事实，5 分钟内不再尝试。
+            RememberMonthlyProjectionMissing();
+            _logger.LogInformation("销售明细分类汇总：预汇总投影尚未建立，改读日事实：{Reason}", ex.Number);
+            read = await ReadSalesDetailCategoryReportAsync(
+                BuildSalesDetailCategoryReportSql(sqlServer, dateRange, factSuppliers, branches, selectedBranchCode, includeTree, nodeSupplier,
+                    nodeGuid == null ? null : nodeGuids, unassignedNode, tokens, pageIndex, pageSize, false, sortByQuantity, sortAscending),
+                dateRange, factSuppliers, branches, selectedBranchCode, nodeSupplier, nodeGuids, tokens, includeTree, nodeSupplier != null, false, cancellationToken);
+        }
 
         var status = BuildSalesDetailReportStatus(read.Status, dateRange, false, skipFailedDates: true);
         var response = new ProductReportResponseDto<SalesDetailCategoryReportDto>
@@ -181,6 +227,9 @@ public partial class SalesDashboardReactService
                 Rows = rows, Total = read.ProductTotal, Summary = SumSalesDetailRows(rows, "page", "当前页商品"),
             };
         }
+        // 读取期间统计刚好发布了新版本时不缓存，避免把新数据挂在旧版本键下。
+        if (string.Equals(response.CacheVersion, preStatus.CacheVersion, StringComparison.Ordinal))
+            _cache.Set(cacheKey, response, CategoryReportCacheDuration);
         return response;
     }
 
@@ -249,6 +298,28 @@ public partial class SalesDashboardReactService
             .OrderByDescending(item => item.CategoryCount > 0).ThenByDescending(item => item.AssignedProductCount)
             .ThenBy(item => item.SupplierName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private async Task<List<SalesDetailReportStatusSqlRow>> ReadSalesDetailCategoryStatusRowsAsync(DateRangeDto range)
+    {
+        var currentStart = range.StartDate.Date; var currentEnd = range.EndDate.Date.AddDays(1);
+        var hasCompare = HasCompare(range);
+        var compareStart = range.CompareStartDate?.Date ?? DateTime.MinValue; var compareEnd = range.CompareEndDate?.Date.AddDays(1) ?? DateTime.MinValue;
+        // 布尔变量不能直接放进表达式（SqlSugar 会生成 SQL Server 不接受的「@p AND …」），无同期时把同期区间收成空区间。
+        if (!hasCompare) { compareStart = currentStart; compareEnd = currentStart; }
+        var rows = await _context.Db.Queryable<SalesStatisticRefreshState>()
+            .Where(row => row.StatisticType == SalesStatisticType.ProductStoreDaily
+                && ((row.Date >= currentStart && row.Date < currentEnd) || (row.Date >= compareStart && row.Date < compareEnd)))
+            .Select(row => new { row.StatisticType, row.Date, row.Status, row.LastAggregatedAtUtc, row.CompletedAtUtc, row.SourceProductVersion })
+            .ToListAsync();
+        // 与批次内状态结果集一样按 UTC 解释，保证两处算出的版本号一致。
+        return rows.Select(row => new SalesDetailReportStatusSqlRow
+        {
+            Type = row.StatisticType, Date = row.Date, Status = row.Status,
+            LastAggregatedAtUtc = row.LastAggregatedAtUtc is { } aggregated ? DateTime.SpecifyKind(aggregated, DateTimeKind.Utc) : null,
+            CompletedAtUtc = row.CompletedAtUtc is { } completed ? DateTime.SpecifyKind(completed, DateTimeKind.Utc) : null,
+            SourceProductVersion = row.SourceProductVersion,
+        }).ToList();
     }
 
     private static IEnumerable<SalesDetailCategoryTreeNode> EnumerateSubtree(SalesDetailCategoryTreeNode root)
@@ -412,7 +483,8 @@ public partial class SalesDashboardReactService
     /// </summary>
     private static string BuildSalesDetailCategoryReportSql(bool sqlServer, DateRangeDto range, IReadOnlyList<string> suppliers,
         IReadOnlyList<string>? branches, string? selectedBranch, bool includeTree, string? nodeSupplier,
-        IReadOnlyList<string>? nodeGuids, bool unassignedNode, IReadOnlyList<string> tokens, int pageIndex, int pageSize)
+        IReadOnlyList<string>? nodeGuids, bool unassignedNode, IReadOnlyList<string> tokens, int pageIndex, int pageSize, bool useMonthly = false,
+        bool sortByQuantity = false, bool sortAscending = false)
     {
         var hasCompare = HasCompare(range);
         string table(string name) => sqlServer ? $"[#{name}]" : $"[{name}]";
@@ -477,6 +549,7 @@ FROM {table("SdcProductMeta")} m
 LEFT JOIN [LocalSupplierCategoryProductAssignment] assignment
   ON assignment.[ProductCode]=m.[ProductCode] AND assignment.[LocalSupplierCode]=m.[ProductSupplierCode] AND m.[ProductSupplierCode]=m.[SupplierCode]
 """;
+        // #SdcFacts 已按 (期间, 供应商, 商品) 聚合、#SdcProducts 每个 (供应商, 商品) 一行：每个商品在每期至多一行，商品数直接计行数，免去重排序。
         string metrics(string alias) => $"""
  COALESCE(SUM(CASE WHEN {alias}.[Period]=0 THEN {alias}.[Revenue] ELSE 0 END),0) [Revenue], {(hasCompare ? $"COALESCE(SUM(CASE WHEN {alias}.[Period]=1 THEN {alias}.[Revenue] ELSE 0 END),0)" : "0")} [CompareRevenue],
  COALESCE(SUM(CASE WHEN {alias}.[Period]=0 THEN {alias}.[Quantity] ELSE 0 END),0) [Quantity], {(hasCompare ? $"COALESCE(SUM(CASE WHEN {alias}.[Period]=1 THEN {alias}.[Quantity] ELSE 0 END),0)" : "0")} [CompareQuantity],
@@ -484,7 +557,7 @@ LEFT JOIN [LocalSupplierCategoryProductAssignment] assignment
  SUM(CASE WHEN {alias}.[Period]=0 THEN {alias}.[GrossProfit] END) [GrossProfit], {(hasCompare ? $"SUM(CASE WHEN {alias}.[Period]=1 THEN {alias}.[GrossProfit] END)" : "NULL")} [CompareGrossProfit],
  COALESCE(SUM(CASE WHEN {alias}.[Period]=0 THEN {alias}.[StatisticRowCount] ELSE 0 END),0) [StatisticRowCount], COALESCE(SUM(CASE WHEN {alias}.[Period]=0 THEN {alias}.[CostedRowCount] ELSE 0 END),0) [CostedRowCount], COALESCE(SUM(CASE WHEN {alias}.[Period]=0 THEN {alias}.[GrossProfitRowCount] ELSE 0 END),0) [GrossProfitRowCount],
  COALESCE(SUM(CASE WHEN {alias}.[Period]=1 THEN {alias}.[StatisticRowCount] ELSE 0 END),0) [CompareStatisticRowCount], COALESCE(SUM(CASE WHEN {alias}.[Period]=1 THEN {alias}.[CostedRowCount] ELSE 0 END),0) [CompareCostedRowCount], COALESCE(SUM(CASE WHEN {alias}.[Period]=1 THEN {alias}.[GrossProfitRowCount] ELSE 0 END),0) [CompareGrossProfitRowCount],
- COUNT(DISTINCT CASE WHEN {alias}.[Period]=0 THEN {alias}.[ProductCode] END) [CurrentProductCount], COUNT(DISTINCT CASE WHEN {alias}.[Period]=1 THEN {alias}.[ProductCode] END) [CompareProductCount]
+ SUM(CASE WHEN {alias}.[Period]=0 THEN 1 ELSE 0 END) [CurrentProductCount], SUM(CASE WHEN {alias}.[Period]=1 THEN 1 ELSE 0 END) [CompareProductCount]
 """;
         var join = $"FROM {table("SdcFacts")} f INNER JOIN {table("SdcProducts")} k ON k.[SupplierCode]=f.[SupplierCode] AND k.[ProductCode]=f.[ProductCode]";
 
@@ -492,7 +565,48 @@ LEFT JOIN [LocalSupplierCategoryProductAssignment] assignment
         if (sqlServer) sql.Append("SET NOCOUNT ON;\n");
         sql.Append("SELECT [StatisticType],[Date],[Status],[LastAggregatedAtUtc],[CompletedAtUtc],[SourceProductVersion] FROM [SalesStatisticRefreshState] WHERE [StatisticType]='ProductStoreDaily' AND (([Date]>=@sdcCurrentStart AND [Date]<@sdcCurrentEnd) OR (@sdcHasCompare=1 AND [Date]>=@sdcCompareStart AND [Date]<@sdcCompareEnd)) ORDER BY [Date],[StatisticType];\n");
         sql.Append(create("SdcSuppliers", string.Join(" UNION ALL ", supplierRows)));
-        sql.Append(create("SdcFacts", facts));
+        if (useMonthly)
+        {
+            // 月份与零头日期的有效性复用销售明细月投影：整月有效读月表，其余日期按日身份读日表，都无效的日期才读日事实；
+            // 统计失败日两条路径一样排除。映射签名只影响分店粒度，这里用常量占位。
+            var monthly = BuildSalesDetailMonthlyBranchFactsSql("POSM", branchEdgesOnly: false);
+            sql.Append($"""
+IF OBJECT_ID(N'dbo.SalesDetailQueryMonthlyProduct', N'U') IS NULL OR OBJECT_ID(N'dbo.SalesDetailQueryMonthlyState', N'U') IS NULL
+ OR OBJECT_ID(N'dbo.SalesDetailQueryDailyProduct', N'U') IS NULL OR OBJECT_ID(N'dbo.SalesDetailQueryDailyState', N'U') IS NULL
+ THROW {SalesDetailQueryMonthlyProjection.MissingSchemaErrorNumber}, N'销售明细预聚合投影尚未建立。', 1;
+DECLARE @sdmMappingVersion varchar(64) = '';
+DECLARE @sdrCurrentStart datetime = @sdcCurrentStart, @sdrCurrentEnd datetime = @sdcCurrentEnd, @sdrHasCompare int = @sdcHasCompare,
+        @sdrCompareStart datetime = @sdcCompareStart, @sdrCompareEnd datetime = @sdcCompareEnd;
+
+""");
+            sql.Append(monthly.Months).Append(monthly.Days);
+            const string projected = "[Revenue], [Quantity], [OrderCount], [GrossProfit], [StatisticRowCount], [CostedRowCount], [GrossProfitRowCount]";
+            sql.Append(create("SdcFacts", $"""
+SELECT r.[Period], sup.[SupplierCode], r.[ProductCode],
+       SUM(r.[Revenue]) [Revenue], SUM(r.[Quantity]) [Quantity], SUM(r.[OrderCount]) [OrderCount], SUM(r.[GrossProfit]) [GrossProfit],
+       SUM(r.[StatisticRowCount]) [StatisticRowCount], SUM(r.[CostedRowCount]) [CostedRowCount], SUM(r.[GrossProfitRowCount]) [GrossProfitRowCount]
+FROM (
+ SELECT mo.[Period], mp.[RawSupplierCode], mp.[ProductCode], {projected.Replace("[", "mp.[")}
+ FROM [dbo].[SalesDetailQueryMonthlyProduct] mp
+ INNER JOIN #sdmMonths mo ON mo.[Month]=mp.[Month] AND mo.[ProductValid]=1
+ WHERE mp.[RawSupplierCode] IN (SELECT [RawSupplierCode] FROM {table("SdcSuppliers")})
+ UNION ALL
+ SELECT d.[Period], dp.[RawSupplierCode], dp.[ProductCode], {projected.Replace("[", "dp.[")}
+ FROM [dbo].[SalesDetailQueryDailyProduct] dp
+ INNER JOIN #sdmDays d ON d.[Day]=dp.[Date] AND d.[ProductSource]=1
+ WHERE dp.[RawSupplierCode] IN (SELECT [RawSupplierCode] FROM {table("SdcSuppliers")})
+ UNION ALL
+ SELECT d.[Period], LTRIM(RTRIM(s.[SupplierCode])), LTRIM(RTRIM(s.[ProductCode])), {SdmFactMeasures}
+ FROM #sdmDays d
+ INNER JOIN [ProductStoreDailySalesStatistic] s ON s.[Date]>=d.[DayStart] AND s.[Date]<d.[DayEnd]
+ WHERE d.[ProductSource]=2 AND s.[SupplierCode] IN (SELECT [RawSupplierCode] FROM {table("SdcSuppliers")})
+ GROUP BY d.[Period], LTRIM(RTRIM(s.[SupplierCode])), LTRIM(RTRIM(s.[ProductCode]))
+) r
+INNER JOIN {table("SdcSuppliers")} sup ON sup.[RawSupplierCode]=r.[RawSupplierCode]
+GROUP BY r.[Period], sup.[SupplierCode], r.[ProductCode]
+"""));
+        }
+        else sql.Append(create("SdcFacts", facts));
         sql.Append(create("SdcProductMeta", productMeta));
         sql.Append(create("SdcProducts", productCategories));
         if (includeTree)
@@ -506,6 +620,10 @@ LEFT JOIN [LocalSupplierCategoryProductAssignment] assignment
             var searchFilter = string.Concat(tokens.Select((_, i) => $" AND (f.[ProductCode] LIKE @sdcSearch{i} OR EXISTS (SELECT 1 FROM [Product] productSearch WHERE productSearch.[ProductCode]=f.[ProductCode] AND (productSearch.[ProductName] LIKE @sdcSearch{i} OR productSearch.[EnglishName] LIKE @sdcSearch{i} OR productSearch.[ItemNumber] LIKE @sdcSearch{i} OR productSearch.[Barcode] LIKE @sdcSearch{i})))"));
             var where = $"WHERE f.[SupplierCode]=@sdcNodeSupplier{nodeFilter}{searchFilter}";
             var offset = ((long)pageIndex - 1L) * pageSize;
+            // 排序键：营业额或数量（同期作次键），编码兜底保证翻页稳定。
+            var direction = sortAscending ? "ASC" : "DESC";
+            var primary = sortByQuantity ? "Quantity" : "Revenue";
+            string order(string alias) => $"{alias}[{primary}] {direction}, {alias}[Compare{primary}] {direction}, {alias}[Code] ASC";
             var paging = sqlServer ? $"OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY" : $"LIMIT {pageSize} OFFSET {offset}";
             // 先分页再取商品资料：资料只读当前页的几十个编码，重复资料也不会参与求和。
             string product(string column) => $"(SELECT MAX(p.[{column}]) FROM [Product] p WHERE p.[ProductCode]=page.[Code])";
@@ -517,21 +635,22 @@ FROM (
  {join}
  {where}
  GROUP BY f.[ProductCode]
- ORDER BY [Revenue] DESC, [CompareRevenue] DESC, [Code] ASC {paging}
+ ORDER BY {order("")} {paging}
 ) page
-ORDER BY page.[Revenue] DESC, page.[CompareRevenue] DESC, page.[Code] ASC;
+ORDER BY {order("page.")};
 SELECT COUNT(*) FROM (SELECT f.[ProductCode] {join} {where} GROUP BY f.[ProductCode]) productKeys;
 
 """);
         }
         foreach (var name in new[] { "SdcProducts", "SdcProductMeta", "SdcFacts", "SdcSuppliers" })
             sql.Append($"DROP TABLE {table(name)};\n");
+        if (useMonthly) sql.Append("DROP TABLE #sdmMonths;DROP TABLE #sdmDays;\n");
         return sql.ToString();
     }
 
     private async Task<SalesDetailCategoryReportRead> ReadSalesDetailCategoryReportAsync(string sql, DateRangeDto range,
         IReadOnlyList<string> suppliers, IReadOnlyList<string>? branches, string? selectedBranch, string? nodeSupplier,
-        IReadOnlyList<string> nodeGuids, IReadOnlyList<string> tokens, bool includeTree, bool includeProducts,
+        IReadOnlyList<string> nodeGuids, IReadOnlyList<string> tokens, bool includeTree, bool includeProducts, bool useMonthly,
         CancellationToken cancellationToken)
     {
         var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
@@ -611,8 +730,8 @@ SELECT COUNT(*) FROM (SELECT f.[ProductCode] {join} {where} GROUP BY f.[ProductC
                 while (await reader.ReadAsync(cancellationToken)) { }
             failed = false;
             _logger.LogInformation(
-                "销售明细分类汇总读取完成：首结果 {FirstResultMs}ms，共 {TotalMs}ms，供应商 {Suppliers} 个，分类行 {CategoryRows}，商品页 {ProductRows}",
-                firstResultAt, elapsed.ElapsedMilliseconds, suppliers.Count, read.Categories.Count, read.Products.Count);
+                "销售明细分类汇总读取完成：首结果 {FirstResultMs}ms，共 {TotalMs}ms，供应商 {Suppliers} 个，分类行 {CategoryRows}，商品页 {ProductRows}，预汇总 {Monthly}",
+                firstResultAt, elapsed.ElapsedMilliseconds, suppliers.Count, read.Categories.Count, read.Products.Count, useMonthly);
             return read;
 
             async Task NextResult()

@@ -886,6 +886,52 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
+    public async Task Linkly_settlement_on_a_past_business_date_explains_instead_of_doing_nothing()
+    {
+        // 模拟页面跨过零点：营业日期仍是前一天，按钮状态尚未刷新时被点击。
+        var settlementService = new FakeLinklySettlementService();
+        var confirmations = 0;
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            linklySettlementService: settlementService,
+            confirmLinklySettlementAsync: _ =>
+            {
+                confirmations++;
+                return Task.FromResult(true);
+            });
+        await viewModel.LoadAsync();
+        viewModel.SelectedDate = DateTime.Today.AddDays(-1);
+
+        Assert.False(viewModel.SettleAndPrintCommand.CanExecute(null));
+        await viewModel.SettleAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, settlementService.SettleCallCount);
+        Assert.Equal(0, confirmations);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal(
+            $"Linkly settlement is only available when the business date is today. Change the business date to {DateTime.Today:yyyy-MM-dd} and try again.",
+            viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public void Switching_tabs_reevaluates_whether_linkly_settlement_is_available()
+    {
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            linklySettlementService: new FakeLinklySettlementService());
+        var notifications = 0;
+        viewModel.SettleAndPrintCommand.CanExecuteChanged += (_, _) => notifications++;
+
+        viewModel.SelectedTabIndex = 1;
+
+        Assert.True(notifications > 0);
+    }
+
+    [Fact]
     public async Task Linkly_settlement_cancelled_at_confirmation_does_not_submit()
     {
         var settlementService = new FakeLinklySettlementService();

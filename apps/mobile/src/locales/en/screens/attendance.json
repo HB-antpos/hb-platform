@@ -464,7 +464,7 @@
     "copyConfirm": "Copy",
     "copyWeekResult": "Copied {{created}} shift(s), skipped {{skipped}}",
     "copyWeekFailed": "Failed to copy last week's schedule",
-    "showRelatedManagers": "Other managers ({{count}})",
+    "showOtherManagers": "Other managers ({{count}})",
     "managerBadge": "Mgr",
     "ageBadge": "{{age}}y"
   },

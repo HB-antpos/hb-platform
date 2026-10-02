@@ -143,6 +143,8 @@ public sealed class SalesDetailReportController : ControllerBase
         [FromQuery] int pageIndex = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] bool includeTree = true,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDirection = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -188,7 +190,9 @@ public sealed class SalesDetailReportController : ControllerBase
                 pageIndex,
                 pageSize,
                 includeTree,
-                cancellationToken);
+                cancellationToken,
+                sortBy?.Trim().ToLowerInvariant(),
+                string.Equals(sortDirection?.Trim(), "asc", StringComparison.OrdinalIgnoreCase));
             cancellationToken.ThrowIfCancellationRequested();
             return Ok(result);
         }
