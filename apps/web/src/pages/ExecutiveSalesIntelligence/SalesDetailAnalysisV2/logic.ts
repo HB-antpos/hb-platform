@@ -29,6 +29,14 @@ export function initialDetailState(search: string): { dates: DateSelection; kind
       warehouseCategoryGuids: params.getAll('warehouseCategory').map(value => value.trim()).filter(Boolean) } }
 }
 
+/** 「澳洲供应商分类」页签的初始状态：kind=category 时启用，并从 URL 读取供应商与分店。 */
+export function initialCategoryState(search: string): { active: boolean; supplierCodes: string[]; branch?: string } {
+  const params = new URLSearchParams(search)
+  const active = params.get('kind') === 'category'
+  return { active, supplierCodes: active ? [...new Set(params.getAll('supplier').map(value => value.trim()).filter(Boolean))] : [],
+    branch: active ? params.get('branch')?.trim() || undefined : undefined }
+}
+
 export function selectDimension(state: DetailSelection, dimension: 'supplier' | 'branch' | 'product', code: string): DetailSelection {
   if (dimension === 'supplier') {
     const supplierCodes = state.supplierCodes.includes(code) ? state.supplierCodes.filter(value => value !== code) : [...state.supplierCodes, code]
