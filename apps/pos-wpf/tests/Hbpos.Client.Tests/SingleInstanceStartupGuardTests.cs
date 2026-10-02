@@ -95,39 +95,62 @@ public sealed class SingleInstanceStartupGuardTests
     }
 
     [Fact]
-    public async Task TryAcquire_returns_acquired_when_running_mutex_was_abandoned_and_lease_release_allows_reacquire()
+    public Task TryAcquire_returns_acquired_when_running_mutex_was_abandoned_and_lease_release_allows_reacquire()
     {
-        // Thread.Join 返回时 OS 线程可能尚未退出完毕，互斥体还没被标记为遗弃；
-        // 等待预算只作防挂死兜底，让守卫轮询到遗弃发生，而不是 1ms 后误判为超时。
-        var options = CreateOptions() with { RunningInstanceWaitTimeout = AsyncTestWaitSupport.DefaultTimeout };
-        var process = new FakeRunningProcess(11, @"C:\HBPOS\Hbpos.Client.Wpf.exe");
-        var provider = new FakeProcessProvider(10, @"C:\HBPOS\Hbpos.Client.Wpf.exe", [process]);
-        var guard = new SingleInstanceStartupGuard(provider, options);
-
-        // 让另一个线程持有真实命名互斥体并在退出前不释放所有权，模拟 Windows 的 abandoned mutex。
-        using var threadStarted = new ManualResetEventSlim();
-        Mutex? abandonedOwner = null;
-        var abandoningThread = new Thread(() =>
+        // 互斥体所有权归属线程：守卫获取与 lease 释放必须在同一线程，生产上由 WPF Dispatcher 保证。
+        // 原先直接在 xUnit 同步上下文里 await，续体会被投到任意线程池线程：守卫可能在线程 A 上接管遗弃的
+        // 所有权、却在线程 B 上 Dispose；A 退出时互斥体被再次遗弃，最后的获取偶发 AbandonedMutexException
+        // （CI 运行 36971189562、36943671269）。因此与生产一致，在单线程 Dispatcher 上执行获取与释放。
+        return RunOnStaDispatcherAsync(async () =>
         {
-            abandonedOwner = new Mutex(true, options.RunningInstanceMutexName);
-            threadStarted.Set();
+            // 等待预算只作防挂死兜底，让守卫轮询到遗弃发生。
+            var options = CreateOptions() with { RunningInstanceWaitTimeout = AsyncTestWaitSupport.DefaultTimeout };
+            var process = new FakeRunningProcess(11, @"C:\HBPOS\Hbpos.Client.Wpf.exe");
+            var provider = new FakeProcessProvider(10, @"C:\HBPOS\Hbpos.Client.Wpf.exe", [process]);
+            var guard = new SingleInstanceStartupGuard(provider, options);
+
+            // 另一个线程持有真实命名互斥体，收到信号后不释放所有权直接退出，模拟 Windows 的 abandoned mutex。
+            using var ownerReady = new ManualResetEventSlim();
+            using var exitOwner = new ManualResetEventSlim();
+            Mutex? abandonedOwner = null;
+            var abandoningThread = new Thread(() =>
+            {
+                abandonedOwner = new Mutex(true, options.RunningInstanceMutexName);
+                ownerReady.Set();
+                exitOwner.Wait();
+            });
+            abandoningThread.Start();
+            ownerReady.Wait();
+
+            try
+            {
+                var acquireTask = guard.TryAcquireAsync(previewMode: false);
+
+                // 所有者仍存活，首轮零等待必然失败，守卫进入 await 轮询：这正是依赖线程亲和的路径，
+                // 不再取决于 Thread.Join 返回时 OS 线程是否已退出完毕。
+                Assert.False(acquireTask.IsCompleted, $"所有者退出前守卫不应获得互斥体：status={acquireTask.Status}");
+                exitOwner.Set();
+                Assert.True(abandoningThread.Join(AsyncTestWaitSupport.DefaultTimeout), "Abandoning thread did not exit.");
+
+                var result = await acquireTask.WaitUntilCompletedAsync();
+
+                Assert.Equal(SingleInstanceStartupStatus.Acquired, result.Status);
+                Assert.True(result.CanStart);
+                Assert.NotNull(result.Lease);
+
+                result.Lease!.Dispose();
+
+                // 必须换线程验证：互斥体可重入，原所有者线程自己再次获取总会成功，证明不了所有权已归还。
+                // 另一线程能立即正常获得（而非遗弃），说明守卫接管了遗弃的所有权、且 lease 正常释放。
+                Assert.Equal(MutexAcquireOutcome.Acquired, TryAcquireOnSeparateThread(options.RunningInstanceMutexName));
+            }
+            finally
+            {
+                exitOwner.Set();
+                abandoningThread.Join(AsyncTestWaitSupport.DefaultTimeout);
+                abandonedOwner?.Dispose();
+            }
         });
-        abandoningThread.Start();
-        threadStarted.Wait();
-        abandoningThread.Join();
-
-        var result = await guard.TryAcquireAsync(previewMode: false);
-
-        Assert.Equal(SingleInstanceStartupStatus.Acquired, result.Status);
-        Assert.True(result.CanStart);
-        Assert.NotNull(result.Lease);
-
-        // lease 释放后，同一命名互斥体可再次获得（所有权已归还）。
-        result.Lease!.Dispose();
-        using var reacquired = new Mutex(false, options.RunningInstanceMutexName);
-        Assert.True(reacquired.WaitOne(TimeSpan.FromSeconds(5)));
-        reacquired.ReleaseMutex();
-        abandonedOwner!.Dispose();
     }
 
     [Fact]
@@ -241,6 +264,51 @@ public sealed class SingleInstanceStartupGuardTests
             TimeSpan.FromMilliseconds(1),
             TimeSpan.FromMilliseconds(1),
             TimeSpan.FromMilliseconds(1));
+    }
+
+    private enum MutexAcquireOutcome
+    {
+        Acquired,
+        Abandoned,
+        HeldByAnotherThread
+    }
+
+    // 在独立线程上零等待获取并立即释放；调用前 lease 已同步释放，所以零等待的结果是确定的。
+    private static MutexAcquireOutcome TryAcquireOnSeparateThread(string mutexName)
+    {
+        var outcome = MutexAcquireOutcome.HeldByAnotherThread;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var mutex = new Mutex(false, mutexName);
+                try
+                {
+                    if (!mutex.WaitOne(TimeSpan.Zero))
+                    {
+                        return;
+                    }
+
+                    outcome = MutexAcquireOutcome.Acquired;
+                }
+                catch (AbandonedMutexException)
+                {
+                    // 遗弃同样把所有权交给了本线程，记下结果后照常释放。
+                    outcome = MutexAcquireOutcome.Abandoned;
+                }
+
+                mutex.ReleaseMutex();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.Start();
+        Assert.True(thread.Join(AsyncTestWaitSupport.DefaultTimeout), "Mutex reacquire thread did not finish.");
+        Assert.Null(failure);
+        return outcome;
     }
 
     private static async Task RunOnStaDispatcherAsync(Func<Task> action)
