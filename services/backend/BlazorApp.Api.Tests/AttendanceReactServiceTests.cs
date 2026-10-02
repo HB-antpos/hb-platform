@@ -698,6 +698,149 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CreateMyAvailabilityAsync_StoresUnavailableFlagPerSegment()
+        {
+            await SeedStoreScopeAsync();
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            var result = await service.CreateMyAvailabilityAsync(
+                new CreateAttendanceAvailabilityDto
+                {
+                    StoreCode = "BRI",
+                    WeekStartDate = new DateTime(2026, 5, 18),
+                    Segments = new List<AttendanceAvailabilitySegmentDto>
+                    {
+                        // 不能上班（全天）
+                        new()
+                        {
+                            AvailableDate = new DateTime(2026, 5, 19),
+                            StartTime = TimeSpan.Zero,
+                            EndTime = new TimeSpan(23, 59, 0),
+                            IsUnavailable = true,
+                        },
+                        // 旧客户端不传类型，默认可上班
+                        new()
+                        {
+                            AvailableDate = new DateTime(2026, 5, 20),
+                            StartTime = new TimeSpan(9, 0, 0),
+                            EndTime = new TimeSpan(12, 0, 0),
+                        },
+                    },
+                }
+            );
+
+            Assert.True(result.Success);
+            Assert.True(result.Data![0].IsUnavailable);
+            Assert.False(result.Data[1].IsUnavailable);
+
+            // 回读数据库与「我的可上班时间」接口，类型必须落库。
+            var mine = await service.GetMyAvailabilityAsync(new DateTime(2026, 5, 18), "BRI");
+            Assert.True(mine.Success);
+            Assert.True(Assert.Single(mine.Data!, item => item.AvailableDate == new DateTime(2026, 5, 19)).IsUnavailable);
+            Assert.False(Assert.Single(mine.Data!, item => item.AvailableDate == new DateTime(2026, 5, 20)).IsUnavailable);
+            var stored = await _db.Queryable<AttendanceAvailability>()
+                .FirstAsync(item => item.AvailabilityGuid == result.Data[0].AvailabilityGuid);
+            Assert.True(stored.IsUnavailable);
+        }
+
+        [Fact]
+        public async Task UpdateMyAvailabilityAsync_KeepsUnavailableFlagWhenOmittedAndOverridesWhenProvided()
+        {
+            await SeedStoreScopeAsync();
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+            var created = await service.CreateMyAvailabilityAsync(
+                new CreateAttendanceAvailabilityDto
+                {
+                    StoreCode = "BRI",
+                    WeekStartDate = new DateTime(2026, 5, 18),
+                    Segments = new List<AttendanceAvailabilitySegmentDto>
+                    {
+                        new()
+                        {
+                            AvailableDate = new DateTime(2026, 5, 19),
+                            StartTime = new TimeSpan(9, 0, 0),
+                            EndTime = new TimeSpan(12, 0, 0),
+                            IsUnavailable = true,
+                        },
+                    },
+                }
+            );
+            var availabilityGuid = Assert.Single(created.Data!).AvailabilityGuid;
+
+            // 旧 App 不传 IsUnavailable：只改时间，类型保持不能上班。
+            var kept = await service.UpdateMyAvailabilityAsync(
+                availabilityGuid,
+                new UpdateAttendanceAvailabilityDto
+                {
+                    AvailableDate = new DateTime(2026, 5, 19),
+                    StartTime = new TimeSpan(10, 0, 0),
+                    EndTime = new TimeSpan(13, 0, 0),
+                }
+            );
+            Assert.True(kept.Success);
+            Assert.True(kept.Data!.IsUnavailable);
+            Assert.True((await _db.Queryable<AttendanceAvailability>()
+                .FirstAsync(item => item.AvailabilityGuid == availabilityGuid)).IsUnavailable);
+
+            // 显式传 false：改回可上班。
+            var overridden = await service.UpdateMyAvailabilityAsync(
+                availabilityGuid,
+                new UpdateAttendanceAvailabilityDto
+                {
+                    AvailableDate = new DateTime(2026, 5, 19),
+                    StartTime = new TimeSpan(10, 0, 0),
+                    EndTime = new TimeSpan(13, 0, 0),
+                    IsUnavailable = false,
+                }
+            );
+            Assert.True(overridden.Success);
+            Assert.False(overridden.Data!.IsUnavailable);
+            Assert.False((await _db.Queryable<AttendanceAvailability>()
+                .FirstAsync(item => item.AvailabilityGuid == availabilityGuid)).IsUnavailable);
+        }
+
+        [Fact]
+        public async Task GetAvailabilityAsync_ReturnsUnavailableFlagToManager()
+        {
+            await SeedStoreScopeAsync();
+            await CreateService("staff-user", "staff", "StoreStaff").CreateMyAvailabilityAsync(
+                new CreateAttendanceAvailabilityDto
+                {
+                    StoreCode = "BRI",
+                    WeekStartDate = new DateTime(2026, 5, 18),
+                    Segments = new List<AttendanceAvailabilitySegmentDto>
+                    {
+                        new()
+                        {
+                            AvailableDate = new DateTime(2026, 5, 18),
+                            StartTime = new TimeSpan(9, 0, 0),
+                            EndTime = new TimeSpan(12, 0, 0),
+                        },
+                        new()
+                        {
+                            AvailableDate = new DateTime(2026, 5, 21),
+                            StartTime = new TimeSpan(14, 0, 0),
+                            EndTime = new TimeSpan(18, 0, 0),
+                            IsUnavailable = true,
+                        },
+                    },
+                }
+            );
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetAvailabilityAsync(new AttendanceAvailabilityQueryDto
+                {
+                    StoreCode = "BRI",
+                    WeekStartDate = new DateTime(2026, 5, 18),
+                });
+
+            Assert.True(result.Success);
+            Assert.Equal(2, result.Data!.Count);
+            Assert.False(result.Data[0].IsUnavailable);
+            Assert.True(result.Data[1].IsUnavailable);
+        }
+
+        [Fact]
         public async Task CreateScheduleAsync_WhenSameStoreUserDateOverlaps_ReturnsConflict()
         {
             await SeedStoreScopeAsync();

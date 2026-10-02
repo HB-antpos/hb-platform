@@ -82,6 +82,15 @@ const rows = buildMyWeekRows("2026-09-28", "2026-10-01", week, [
 assert.deepEqual(rows.map((row) => row.state), [
   "scheduled", "available", "rest", "scheduled", "unfilled", "available", "unfilled",
 ], "已取消的排班与可上班时间不计入");
+// 不能上班：只有不能上班记录的日期标为 unavailable；同一天既有可上班又有不能上班时段，按可上班处理。
+const unavailableRows = buildMyWeekRows("2026-09-28", "2026-10-01", undefined, [
+  { ...availability("2026-10-02"), isUnavailable: true },
+  { ...availability("2026-10-03"), isUnavailable: true },
+  { ...availability("2026-10-03"), availabilityGuid: "a-2026-10-03-am", startTime: "09:00:00", endTime: "12:00:00" },
+]);
+assert.equal(unavailableRows[4].state, "unavailable");
+assert.equal(unavailableRows[5].state, "available");
+assert.equal(unavailableRows[5].availability.filter((item) => !item.isUnavailable)[0].startTime, "09:00:00");
 assert.equal(rows[3].isToday, true);
 assert.equal(rows[0].isPast, true);
 assert.equal(sumScheduledMinutes(rows), 2 * (8 * 60 - 30), "两个 8 小时班各扣 1 次用餐");

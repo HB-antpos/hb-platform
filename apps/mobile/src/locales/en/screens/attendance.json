@@ -167,6 +167,12 @@
     "specificTime": "Specific hours",
     "timeRange": "Available hours",
     "allDayHint": "Available all day. No times required.",
+    "typeAvailable": "Available",
+    "typeUnavailable": "Unavailable",
+    "unavailableAllDayHint": "Unavailable all day. Your manager will see this when scheduling.",
+    "unavailableEditTitle": "Edit unavailable time",
+    "unavailableLabel": "Unavailable",
+    "unavailableShort": "No",
     "optionalNote": "Note (optional)",
     "notePlaceholder": "Add any scheduling restrictions.",
     "add": "Add availability",
@@ -414,12 +420,14 @@
     },
     "cell": {
       "leave": "Leave",
-      "available": "Avail"
+      "available": "Avail",
+      "unavailable": "No"
     },
     "legend": {
       "shift": "Shift",
       "leave": "On leave",
       "available": "Available",
+      "unavailable": "Unavailable",
       "draft": "Draft",
       "fullTime": "Full-time",
       "partTime": "Part-time",
@@ -433,8 +441,8 @@
       "pickEmployees": "Employees",
       "selectAll": "Select all",
       "clearAll": "Clear",
-      "skipDaysHint": "Days that already have a shift or approved leave can't be selected.",
-      "skipEmployeesHint": "Employees who already have a shift or approved leave that day can't be selected.",
+      "skipDaysHint": "Days that already have a shift, approved leave or are marked unavailable can't be selected.",
+      "skipEmployeesHint": "Employees who already have a shift, approved leave or are unavailable that day can't be selected.",
       "save": "Add {{count}} shift(s) ({{hours}} h each)",
       "employeeA11y": "Schedule several days for {{name}}",
       "dateA11y": "Schedule several employees on {{date}}"
@@ -524,6 +532,7 @@
   },
   "datePicker": {
     "selectDate": "Select date",
+    "backToToday": "Today",
     "openDatePicker": "Open date picker",
     "close": "Close",
     "done": "Done"
@@ -698,6 +707,7 @@
     "today": "Today",
     "done": "Done",
     "availableAt": "Available {{time}}",
+    "unavailableAt": "Unavailable {{time}}",
     "unfilled": "Availability missing",
     "rest": "Off",
     "weekHours": "{{hours}} h scheduled this week",
@@ -708,6 +718,8 @@
       "remove": "Remove this day",
       "willSubmit": "Will submit",
       "submit_one": "Submit {{count}} day",
+      "submitUnavailable_one": "Submit {{count}} unavailable day",
+      "submitUnavailable_other": "Submit {{count}} unavailable days",
       "submit_other": "Submit {{count}} days"
     },
     "requests": {

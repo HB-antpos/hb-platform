@@ -303,6 +303,8 @@ export interface AttendanceAvailability {
   endTime: string;
   note?: string;
   status: AttendanceAvailabilityStatus;
+  /** true＝不能上班（员工标记的不可排班时段），false/缺省＝可上班。 */
+  isUnavailable?: boolean;
 }
 
 export interface AttendanceAvailabilityPayload {
@@ -311,6 +313,8 @@ export interface AttendanceAvailabilityPayload {
   startTime: string;
   endTime: string;
   note?: string;
+  /** true＝不能上班；缺省按可上班提交。 */
+  isUnavailable?: boolean;
 }
 
 export interface AttendanceAvailabilityBatchPayload

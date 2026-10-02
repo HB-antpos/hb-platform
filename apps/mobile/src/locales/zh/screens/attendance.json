@@ -167,6 +167,12 @@
     "specificTime": "指定时段",
     "timeRange": "可上班时段",
     "allDayHint": "全天可安排，无需填写时间。",
+    "typeAvailable": "可上班",
+    "typeUnavailable": "不能上班",
+    "unavailableAllDayHint": "全天不能上班，店长排班时会看到提示。",
+    "unavailableEditTitle": "修改不能上班时间",
+    "unavailableLabel": "不能上班",
+    "unavailableShort": "不可",
     "optionalNote": "备注（选填）",
     "notePlaceholder": "如有安排限制，可在这里说明。",
     "add": "添加可上班时间",
@@ -414,12 +420,14 @@
     },
     "cell": {
       "leave": "假",
-      "available": "可"
+      "available": "可",
+      "unavailable": "不可"
     },
     "legend": {
       "shift": "班次",
       "leave": "请假",
       "available": "可上班",
+      "unavailable": "不能上班",
       "draft": "草稿",
       "fullTime": "全职",
       "partTime": "兼职",
@@ -433,8 +441,8 @@
       "pickEmployees": "选择员工",
       "selectAll": "全选",
       "clearAll": "清空",
-      "skipDaysHint": "已有班次或已批准请假的日期不可选。",
-      "skipEmployeesHint": "当天已有班次或已批准请假的员工不可选。",
+      "skipDaysHint": "已有班次、已批准请假或员工标了不能上班的日期不可选。",
+      "skipEmployeesHint": "当天已有班次、已批准请假或标了不能上班的员工不可选。",
       "save": "新增 {{count}} 个班次（每班 {{hours}} 小时）",
       "employeeA11y": "给 {{name}} 批量排多天",
       "dateA11y": "给 {{date}} 批量排多位员工"
@@ -524,6 +532,7 @@
   },
   "datePicker": {
     "selectDate": "选择日期",
+    "backToToday": "回到今天",
     "openDatePicker": "打开日期选择",
     "close": "关闭",
     "done": "完成"
@@ -698,6 +707,7 @@
     "today": "今天",
     "done": "已完成",
     "availableAt": "可上班 {{time}}",
+    "unavailableAt": "不能上班 {{time}}",
     "unfilled": "未填可上班",
     "rest": "休息",
     "weekHours": "本周排班 {{hours}} 小时",
@@ -708,6 +718,8 @@
       "remove": "删除这天",
       "willSubmit": "将提交",
       "submit_one": "提交 {{count}} 天",
+      "submitUnavailable_one": "提交 {{count}} 天不能上班",
+      "submitUnavailable_other": "提交 {{count}} 天不能上班",
       "submit_other": "提交 {{count}} 天"
     },
     "requests": {

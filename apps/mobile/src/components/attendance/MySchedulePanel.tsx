@@ -71,12 +71,17 @@ export function MySchedulePanel({
       if (row.isToday) return <StatusPill label={t("myAttendance.today")} tone="accent" />;
       return row.isPast ? <StatusPill label={t("myAttendance.done")} tone="success" /> : null;
     }
-    if (row.state === "available") {
-      const item = row.availability[0];
+    if (row.state === "available" || row.state === "unavailable") {
+      // 可上班取第一段可上班时段；只填了不能上班的取第一段不能上班时段，用醒目色提示。
+      const unavailable = row.state === "unavailable";
+      const item = row.availability.find((entry) => Boolean(entry.isUnavailable) === unavailable)
+        ?? row.availability[0];
       const time = isAllDayAvailability(item.startTime, item.endTime)
         ? t("availability.allDay")
         : `${hhmm(item.startTime)}–${hhmm(item.endTime)}`;
-      return <StatusPill label={t("myAttendance.availableAt", { time })} tone="neutral" />;
+      return unavailable
+        ? <StatusPill label={t("myAttendance.unavailableAt", { time })} tone="danger" />
+        : <StatusPill label={t("myAttendance.availableAt", { time })} tone="neutral" />;
     }
     if (row.state === "unfilled") return <StatusPill label={t("myAttendance.unfilled")} tone="warning" />;
     return null;

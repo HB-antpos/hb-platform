@@ -1437,11 +1437,26 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
               style={styles.sectionTabs}
             />
             {isPunchRecordsTab ? (
-              <MonthDatePickerField
-                label={t("datePicker.selectDate")}
-                value={selectedDate}
-                onChange={setSelectedDate}
-              />
+              // 看过往日期后一键回到今天（今天才能打卡），与店长端打卡记录的「今天」快捷一致。
+              <View style={styles.punchDateRow}>
+                <MonthDatePickerField
+                  label={t("datePicker.selectDate")}
+                  value={selectedDate}
+                  onChange={setSelectedDate}
+                  style={styles.punchDateField}
+                />
+                {selectedDate !== todayDate ? (
+                  <Button
+                    mode="outlined"
+                    icon="calendar-today"
+                    compact
+                    onPress={() => setSelectedDate(todayDate)}
+                    accessibilityLabel={t("datePicker.backToToday")}
+                  >
+                    {t("datePicker.backToToday")}
+                  </Button>
+                ) : null}
+              </View>
             ) : null}
             {isPunchRecordsTab ? (
               <>
@@ -1862,6 +1877,14 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 export default AttendanceScreen;
 
 const styles = StyleSheet.create({
+  punchDateRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  punchDateField: {
+    flex: 1,
+  },
   // 管理端四个页签在 375pt 宽屏上平分，字号收小以免英文标签被截断。
   managementTabLabel: {
     fontSize: 13,

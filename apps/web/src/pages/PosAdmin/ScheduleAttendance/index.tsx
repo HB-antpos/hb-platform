@@ -1555,6 +1555,15 @@ export default function ScheduleAttendancePage() {
     { title: t('posAdmin.scheduleAttendance.fields.weekStartDate'), dataIndex: 'weekStartDate', width: 130, render: (value?: string) => renderBusinessDisplay(formatDate(value)) },
     { title: t('posAdmin.scheduleAttendance.fields.availableDate'), dataIndex: 'availableDate', width: 130, render: (value?: string) => renderBusinessDisplay(formatDate(value)) },
     { title: t('posAdmin.scheduleAttendance.fields.availableTime'), key: 'time', width: 150, render: (_, record) => `${formatTime(record.startTime)} - ${formatTime(record.endTime)}` },
+    // 员工可同时上报可上班与不能上班时段，类型用颜色区分，避免把不能上班误当成可排班。
+    {
+      title: t('posAdmin.scheduleAttendance.fields.availabilityType'),
+      dataIndex: 'isUnavailable',
+      width: 110,
+      render: (value?: boolean) => value
+        ? <Tag color="red">{t('posAdmin.scheduleAttendance.availabilityTypes.unavailable')}</Tag>
+        : <Tag color="green">{t('posAdmin.scheduleAttendance.availabilityTypes.available')}</Tag>,
+    },
     { title: t('common.status'), dataIndex: 'status', width: 120, render: scheduleStatusTag },
     { title: t('column.remarks'), dataIndex: 'remark', ellipsis: true },
   ]

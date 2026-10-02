@@ -103,6 +103,7 @@ export function AvailabilitySheet({
     startTime: "09:00",
     endTime: "17:30",
     note: "",
+    unavailable: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -127,9 +128,10 @@ export function AvailabilitySheet({
         startTime: allDay ? "09:00" : editingItem.startTime.slice(0, 5),
         endTime: allDay ? "17:30" : editingItem.endTime.slice(0, 5),
         note: editingItem.note ?? "",
+        unavailable: Boolean(editingItem.isUnavailable),
       });
     } else {
-      setForm({ workDates: initialDates, allDay: true, startTime: "09:00", endTime: "17:30", note: "" });
+      setForm({ workDates: initialDates, allDay: true, startTime: "09:00", endTime: "17:30", note: "", unavailable: false });
     }
     setSaveFailed(false);
     setVerification(null);
@@ -213,7 +215,9 @@ export function AvailabilitySheet({
   return (
     <BusinessSheet
       visible={visible}
-      title={editingItem ? t("availability.editTitle") : t("sections.availability")}
+      title={editingItem
+        ? t(form.unavailable ? "availability.unavailableEditTitle" : "availability.editTitle")
+        : t("sections.availability")}
       subtitle={`${weekDates[0] ?? ""} – ${weekDates[6] ?? ""}`}
       onDismiss={onDismiss}
       footer={(
@@ -246,12 +250,24 @@ export function AvailabilitySheet({
           >
             {editingItem
               ? t("common:actions.save")
-              : t("myAttendance.availabilitySheet.submit", { count: form.workDates.length })}
+              : t(form.unavailable
+                ? "myAttendance.availabilitySheet.submitUnavailable"
+                : "myAttendance.availabilitySheet.submit", { count: form.workDates.length })}
           </Button>
         </View>
       )}
     >
       <View style={styles.content}>
+        {/* 先选类型：可上班，或员工无法到岗的不能上班时间（店长排班时据此避开）。 */}
+        <SegmentedButtons
+          value={form.unavailable ? "unavailable" : "available"}
+          onValueChange={(value) => setForm((current) => ({ ...current, unavailable: value === "unavailable" }))}
+          buttons={[
+            { value: "available", label: t("availability.typeAvailable"), icon: "check-circle-outline", disabled: locked },
+            { value: "unavailable", label: t("availability.typeUnavailable"), icon: "close-circle-outline", disabled: locked },
+          ]}
+          density="small"
+        />
         <View style={styles.dayRow}>
           {weekDates.map((date, index) => {
             const selected = form.workDates.includes(date);
@@ -296,7 +312,9 @@ export function AvailabilitySheet({
           density="small"
         />
         {form.allDay ? (
-          <Text variant="bodySmall" style={styles.muted}>{t("availability.allDayHint")}</Text>
+          <Text variant="bodySmall" style={styles.muted}>
+            {t(form.unavailable ? "availability.unavailableAllDayHint" : "availability.allDayHint")}
+          </Text>
         ) : (
           <View style={styles.timeBoxes}>
             <TimeStepperBox

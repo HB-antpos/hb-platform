@@ -65,6 +65,11 @@ assert.equal(formatShiftShort("", "17:00"), "--–5");
 // 单元格分类：请假 > 班次 > 可上班 > 空；已取消视同不存在
 assert.equal(classifyScheduleGridCell([], []).kind, "empty");
 assert.equal(classifyScheduleGridCell([], [availability("u1", "2026-09-28")]).kind, "available");
+// 不能上班：只有不能上班记录时格子标为 unavailable；同天还有可上班时段则仍按可上班；有班次时以班次为准。
+const unavailableItem = { ...availability("u1", "2026-09-28"), isUnavailable: true };
+assert.equal(classifyScheduleGridCell([], [unavailableItem]).kind, "unavailable");
+assert.equal(classifyScheduleGridCell([], [unavailableItem, availability("u1", "2026-09-28", "13:00", "17:00")]).kind, "available");
+assert.equal(isBatchSchedulableCell({ kind: "unavailable" }), false, "批量排班跳过不能上班的格子");
 assert.equal(
   classifyScheduleGridCell([], [availability("u1", "2026-09-28", "09:00", "12:00", "Cancelled")]).kind,
   "empty",

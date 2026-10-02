@@ -321,6 +321,7 @@ function normalizeAvailability(raw: ApiRecord): AttendanceAvailability {
     endTime: asString(pick(raw, "endTime", "EndTime")),
     note: asOptionalString(pick(raw, "note", "Note", "remark", "Remark")),
     status: asString(pick(raw, "status", "Status"), "Submitted"),
+    isUnavailable: asBoolean(pick(raw, "isUnavailable", "IsUnavailable")),
   };
 }
 
@@ -419,6 +420,7 @@ function toCreateAvailabilityPayload(payload: AttendanceAvailabilityPayload) {
         startTime: payload.startTime,
         endTime: payload.endTime,
         remark: payload.note,
+        isUnavailable: Boolean(payload.isUnavailable),
       },
     ],
   };
@@ -430,6 +432,7 @@ function toUpdateAvailabilityPayload(payload: AttendanceAvailabilityPayload) {
     startTime: payload.startTime,
     endTime: payload.endTime,
     remark: payload.note,
+    isUnavailable: Boolean(payload.isUnavailable),
   };
 }
 

@@ -9,6 +9,8 @@ export interface AvailabilityBatchSegment {
   startTime: string;
   endTime: string;
   remark?: string;
+  /** true＝不能上班。 */
+  isUnavailable?: boolean;
 }
 
 export interface AvailabilityBatchWeekPayload {
@@ -85,7 +87,9 @@ function matchesAvailability(
     && canonicalDate(row.workDate) === segment.availableDate
     && canonicalTime(row.startTime) === canonicalTime(segment.startTime)
     && canonicalTime(row.endTime) === canonicalTime(segment.endTime)
-    && canonicalNote(row.note) === canonicalNote(segment.remark);
+    && canonicalNote(row.note) === canonicalNote(segment.remark)
+    // 类型也要一致：旧后端会把「不能上班」存成可上班，回读不一致时按未确认处理，绝不当作已保存。
+    && Boolean(row.isUnavailable) === Boolean(segment.isUnavailable);
 }
 
 function groupPayloadByWeek(payload: AttendanceAvailabilityBatchPayload): AvailabilityWeek[] {
@@ -110,6 +114,7 @@ function getSegment(payload: AttendanceAvailabilityBatchPayload, date: string): 
     startTime: payload.startTime,
     endTime: payload.endTime,
     remark: payload.note,
+    isUnavailable: Boolean(payload.isUnavailable),
   };
 }
 

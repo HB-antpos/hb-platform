@@ -74,7 +74,7 @@ export function schedulePaidMinutes(
   return Math.max(0, minutes - meals * MEAL_BREAK_MINUTES);
 }
 
-export type MyWeekDayState = "scheduled" | "available" | "unfilled" | "rest";
+export type MyWeekDayState = "scheduled" | "available" | "unavailable" | "unfilled" | "rest";
 
 export interface MyWeekRow {
   workDate: string;
@@ -110,11 +110,15 @@ export function buildMyWeekRows(
       .sort((left, right) => left.startTime.localeCompare(right.startTime));
     const dayNumber = parseDay(workDate);
     const isPast = dayNumber !== undefined && todayDay !== undefined && dayNumber < todayDay;
+    // 同一天有可上班时段就按可上班；只填了不能上班的才标不能上班。
+    const hasAvailable = dayAvailability.some((item) => !item.isUnavailable);
     const state: MyWeekDayState = schedules.length
       ? "scheduled"
-      : dayAvailability.length
+      : hasAvailable
         ? "available"
-        : isPast ? "rest" : "unfilled";
+        : dayAvailability.length
+          ? "unavailable"
+          : isPast ? "rest" : "unfilled";
     return {
       workDate,
       weekdayIndex,

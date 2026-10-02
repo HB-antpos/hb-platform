@@ -661,6 +661,8 @@ namespace BlazorApp.Api.Services.React
                 AvailableDate = segment.AvailableDate.Date,
                 StartTime = segment.StartTime,
                 EndTime = segment.EndTime,
+                // 同一张表区分可上班与不能上班，旧客户端不传即为可上班。
+                IsUnavailable = segment.IsUnavailable,
                 Status = "Active",
                 Remark = segment.Remark,
                 CreatedAt = now,
@@ -697,6 +699,11 @@ namespace BlazorApp.Api.Services.React
             model.StartTime = request.StartTime;
             model.EndTime = request.EndTime;
             model.Remark = request.Remark;
+            // 旧 App 更新时不带类型字段，保持原值，避免把不能上班误改回可上班。
+            if (request.IsUnavailable.HasValue)
+            {
+                model.IsUnavailable = request.IsUnavailable.Value;
+            }
             model.UpdatedAt = DateTime.UtcNow;
             model.UpdatedBy = _currentUserService.GetCurrentUsername();
             await _db.Updateable(model).ExecuteCommandAsync();
@@ -4763,6 +4770,7 @@ namespace BlazorApp.Api.Services.React
             AvailableDate = item.AvailableDate,
             StartTime = item.StartTime,
             EndTime = item.EndTime,
+            IsUnavailable = item.IsUnavailable,
             Status = item.Status,
             Remark = item.Remark,
         };
