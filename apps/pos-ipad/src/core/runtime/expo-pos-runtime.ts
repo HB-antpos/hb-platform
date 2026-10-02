@@ -1002,6 +1002,30 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
             properties: { stage },
           });
         },
+        // 打印机扫描失败、或个别设备名被清洗/坏 ID 被跳过时留痕；只记计数，不记设备名与地址。
+        reportPrinterScanIssue: (issue) => {
+          if (issue.kind === "failed") {
+            applicationLog?.record({
+              level: "Warning",
+              message: "Printer scan failed.",
+              category: "settings.printer-scan",
+              error: issue.error,
+              properties: { kind: issue.kind },
+            });
+            return;
+          }
+          applicationLog?.record({
+            level: "Information",
+            message: "Printer scan results sanitized.",
+            category: "settings.printer-scan",
+            properties: {
+              kind: issue.kind,
+              sanitizedCount: issue.sanitizedCount,
+              skippedCount: issue.skippedCount,
+              totalCount: issue.totalCount,
+            },
+          });
+        },
         paymentConfiguration: {
           current: currentPaymentSettings,
           availability: {
