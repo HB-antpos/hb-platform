@@ -293,6 +293,8 @@ export function WorkbenchScreen() {
   const cartSkuLabel = cartSkuCount == null
     ? "—"
     : t("summary.skuCount", { count: cartSkuCount });
+  // 没有购物车入口（未获授 Orders.Create，如普通员工）时整格不显示，避免出现与权限无关的购物车指标。
+  const showCartMetric = itemsByRoute.has("cart");
   // 与 navigateTo 的守卫一致：只有菜单就绪且账号获授购物车时，指标才可点击。
   const canOpenCart = itemsByRoute.has("cart")
     && !navigationLoading
@@ -497,46 +499,50 @@ export function WorkbenchScreen() {
                 {t("summary.functionCount", { count: allItems.length })}
               </Text>
             </View>
-            <View style={styles.metricDivider} />
-            {/* 购物车 SKU 指标可直接点进购物车；无购物车权限或菜单未就绪时保持纯展示，不暴露伪入口。 */}
-            <Pressable
-              accessibilityRole={canOpenCart ? "button" : undefined}
-              accessibilityLabel={canOpenCart
-                ? t("accessibility.openCart", { value: cartSkuLabel })
-                : undefined}
-              disabled={!canOpenCart}
-              onPress={() => navigateTo("cart")}
-              style={({ pressed }) => [
-                styles.metric,
-                styles.cartMetric,
-                pressed && canOpenCart ? styles.storeSummaryPressed : null,
-              ]}
-            >
-              <View style={styles.cartMetricCopy}>
-                <Text variant="labelMedium" style={styles.summaryLabel}>
-                  {t("summary.cartSku")}
-                </Text>
-                {cartSummaryLoading ? (
-                  <ActivityIndicator
-                    accessibilityLabel={t("summary.cartLoading")}
-                    color={HB_COLORS.action}
-                    size={20}
-                    style={styles.metricActivity}
-                  />
-                ) : (
-                  <Text variant="titleMedium" style={styles.metricValue}>
-                    {cartSkuLabel}
-                  </Text>
-                )}
-              </View>
-              {canOpenCart ? (
-                <MaterialCommunityIcons
-                  name="chevron-right"
-                  color={HB_COLORS.action}
-                  size={20}
-                />
-              ) : null}
-            </Pressable>
+            {showCartMetric ? (
+              <>
+                <View style={styles.metricDivider} />
+                {/* 购物车 SKU 指标可直接点进购物车；菜单刷新未就绪时保持纯展示，不暴露伪入口。 */}
+                <Pressable
+                  accessibilityRole={canOpenCart ? "button" : undefined}
+                  accessibilityLabel={canOpenCart
+                    ? t("accessibility.openCart", { value: cartSkuLabel })
+                    : undefined}
+                  disabled={!canOpenCart}
+                  onPress={() => navigateTo("cart")}
+                  style={({ pressed }) => [
+                    styles.metric,
+                    styles.cartMetric,
+                    pressed && canOpenCart ? styles.storeSummaryPressed : null,
+                  ]}
+                >
+                  <View style={styles.cartMetricCopy}>
+                    <Text variant="labelMedium" style={styles.summaryLabel}>
+                      {t("summary.cartSku")}
+                    </Text>
+                    {cartSummaryLoading ? (
+                      <ActivityIndicator
+                        accessibilityLabel={t("summary.cartLoading")}
+                        color={HB_COLORS.action}
+                        size={20}
+                        style={styles.metricActivity}
+                      />
+                    ) : (
+                      <Text variant="titleMedium" style={styles.metricValue}>
+                        {cartSkuLabel}
+                      </Text>
+                    )}
+                  </View>
+                  {canOpenCart ? (
+                    <MaterialCommunityIcons
+                      name="chevron-right"
+                      color={HB_COLORS.action}
+                      size={20}
+                    />
+                  ) : null}
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </Surface>
 

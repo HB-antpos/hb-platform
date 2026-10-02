@@ -731,9 +731,11 @@ export default function EmployeeProfileScreen() {
               <View style={styles.heroCopy}>
                 <Text variant="titleLarge" style={styles.displayName}>{readonlyDisplayName}</Text>
                 <Text variant="bodySmall" style={styles.metaText}>{readonlyUsername || t("common:na")}</Text>
-                <Text variant="labelMedium" style={styles.employmentType}>
-                  {formValues.employmentType ? t(`employmentTypeOptions.${formValues.employmentType}`, formValues.employmentType) : t("common:na")}
-                </Text>
+                {formValues.employmentType ? (
+                  <Text variant="labelMedium" style={styles.employmentType}>
+                    {t(`employmentTypeOptions.${formValues.employmentType}`, formValues.employmentType)}
+                  </Text>
+                ) : null}
               </View>
             </Surface>
 
@@ -761,7 +763,7 @@ export default function EmployeeProfileScreen() {
                 <ProfileSummaryRow inline icon="email-outline" label={t("fields.email")} value={formValues.email || t("common:na")} />
                 <ProfileSummaryRow inline icon="calendar-blank-outline" label={t("fields.birthday")} value={formValues.birthday || t("common:na")} />
                 <ProfileSummaryRow inline icon="account-outline" label={t("fields.gender")} value={formValues.gender ? t(`genderOptions.${formValues.gender}`, formValues.gender) : t("common:na")} />
-                <ProfileSummaryRow inline icon="briefcase-outline" label={t("fields.employmentType")} value={formValues.employmentType ? t(`employmentTypeOptions.${formValues.employmentType}`, formValues.employmentType) : t("common:na")} />
+                {formValues.employmentType ? <ProfileSummaryRow inline icon="briefcase-outline" label={t("fields.employmentType")} value={t(`employmentTypeOptions.${formValues.employmentType}`, formValues.employmentType)} /> : null}
                 <ProfileSummaryRow inline icon="map-marker-outline" label={t("fields.address")} value={formValues.address || t("common:na")} isLast />
               </View>
             </Surface>
@@ -812,11 +814,14 @@ export default function EmployeeProfileScreen() {
               <Text variant="labelLarge">{t("fields.gender")}</Text>
               <SegmentedButtons value={formValues.gender} onValueChange={(value) => setFieldValue("gender", value)} buttons={GENDERS.map((value) => ({ value, label: t(`genderOptions.${value}`) }))} />
             </View>
-            <View style={styles.segmentBlock}>
-              <Text variant="labelLarge">{t("fields.employmentType")}</Text>
-              <SegmentedButtons value={formValues.employmentType ?? ""} onValueChange={(value) => setFieldValue("employmentType", value)} buttons={EMPLOYMENT_TYPES.map((value) => ({ value, label: t(`employmentTypeOptions.${value}`), disabled: !canEditPositionType }))} />
-              {!canEditPositionType ? <HelperText type="info">{t("messages.positionTypeReadonly")}</HelperText> : null}
-            </View>
+            {/* 有权限才列出全部工作类型供选择；无权限只展示已有的那一个，没有就整块不显示。 */}
+            {canEditPositionType || formValues.employmentType ? (
+              <View style={styles.segmentBlock}>
+                <Text variant="labelLarge">{t("fields.employmentType")}</Text>
+                <SegmentedButtons value={formValues.employmentType ?? ""} onValueChange={(value) => setFieldValue("employmentType", value)} buttons={(canEditPositionType ? EMPLOYMENT_TYPES : [formValues.employmentType ?? ""]).map((value) => ({ value, label: t(`employmentTypeOptions.${value}`, value), disabled: !canEditPositionType }))} />
+                {!canEditPositionType ? <HelperText type="info">{t("messages.positionTypeReadonly")}</HelperText> : null}
+              </View>
+            ) : null}
             <TextInput mode="outlined" label={t("fields.address")} placeholder={t("placeholders.address")} value={formValues.address} onChangeText={(value) => setFieldValue("address", value)} multiline numberOfLines={4} />
             <View style={styles.formActions}>
               <Button mode="outlined" onPress={resetEditor} disabled={savePendingForCurrentIdentity} style={styles.actionButton}>{t("common:actions.cancel")}</Button>
