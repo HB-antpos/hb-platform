@@ -39,6 +39,14 @@ assert.deepEqual(tree.map(group => [group.title, group.disableCheckbox, group.ch
 assert.equal(tree[1]?.children?.[0]?.children?.[0]?.title, 'Birthday', '子分类应显示自己的名称而非重复完整路径')
 assert.equal(tree[1]?.children?.[0]?.children?.[0]?.searchText, 'Dats · 240 Cards / Birthday', '树搜索仍可匹配完整路径')
 
+const warehouseTree = buildSalesDetailSupplierCategoryTree(warehouse, () => '').flatMap(group => group.children ?? [])
+assert.deepEqual(warehouseTree.map(node => [node.value, node.title, node.children?.map(child => [child.value, child.title])]), [
+  ['ROOT', '家居', [['CHILD', '收纳']]],
+], '仓库树直接展示真实分类层级，每个节点保留分类 GUID')
+assert.ok(warehouseTree[0]?.children?.[0]?.searchText.includes('家居 / 收纳'), '仓库树搜索应匹配完整分类路径')
+const activeWarehouseTree = buildSalesDetailSupplierCategoryTree(inactiveParent, () => '').flatMap(group => group.children ?? [])
+assert.equal(activeWarehouseTree[0]?.value, 'ACTIVE', '启用的孤立子分类仍可作为树根选择')
+
 const originalFetch = globalThis.fetch
 globalThis.fetch = (async (input: RequestInfo | URL) => {
   const url = new URL(String(input), 'http://localhost')

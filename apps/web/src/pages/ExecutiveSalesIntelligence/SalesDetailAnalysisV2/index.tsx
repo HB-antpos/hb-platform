@@ -288,13 +288,10 @@ export default function SalesDetailAnalysisV2() {
   })
   const supplierRows = sortedRows('suppliers', (suppliers.data?.rows ?? []).filter(row => `${row.name} ${row.code}`.toLowerCase().includes(supplierSearch.trim().toLowerCase())))
   const supplierOptions = (suppliers.data?.rows ?? []).map(row => ({ value: row.code, label: `${row.name || row.code} · ${row.code}` }))
-  const categoryOptions = (categoryGroups ?? []).map(group => ({
-    label: kind === 'china' ? text('仓库分类', 'Warehouse categories')
-      : group.supplierName || supplierOptions.find(option => option.value === group.supplierCode)?.label || group.supplierCode || text('供应商分类', 'Supplier categories'),
-    options: group.options.map(option => ({ value: option.guid, label: option.name })),
-  }))
   const supplierCategoryTree = buildSalesDetailSupplierCategoryTree(categoryGroups ?? [], code =>
     supplierOptions.find(option => option.value === code)?.label || code || text('供应商分类', 'Supplier categories'))
+  // 复用分类父子关系，仓库树直接从分类根节点展示，不添加供应商分组。
+  const warehouseCategoryTree = supplierCategoryTree.flatMap(group => group.children ?? [])
   const changeCategories = (values: string[]) => {
     if (exceedsSalesDetailSelectionLimit(values, MAX_CATEGORY_SELECTIONS)) {
       message.warning(text(`最多选择 ${MAX_CATEGORY_SELECTIONS} 个分类`, `Select up to ${MAX_CATEGORY_SELECTIONS} categories.`))
@@ -512,13 +509,17 @@ export default function SalesDetailAnalysisV2() {
           notFoundContent={categoryError || text('暂无分类', 'No categories')}
           popupRender={menu => <><div className={styles.categoryTreeHint}>{text('按所选供应商分类筛选；选择父级包含子分类。', 'Filter by the selected suppliers’ categories. A parent includes its subcategories.')}</div>{menu}</>}
           onChange={values => changeCategories(Array.isArray(values) ? values.map(String) : [])} />
-          : <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
+          : <TreeSelect treeCheckable multiple allowClear showSearch
+            showCheckedStrategy={TreeSelect.SHOW_PARENT} maxTagCount={0} size="small"
+            maxTagPlaceholder={() => text(`已选 ${selection.warehouseCategoryGuids.length} 项`, `${selection.warehouseCategoryGuids.length} selected`)}
             aria-label={text('选择仓库分类', 'Select warehouse categories')}
             placeholder={text('仓库分类（可多选）', 'Warehouse categories (multiple)')}
-            style={{ minWidth: 220, maxWidth: 360 }} loading={categoryLoading}
-            value={selection.warehouseCategoryGuids} options={categoryOptions}
+            style={{ minWidth: 220, maxWidth: 360 }} popupClassName={styles.categoryTreePopup} loading={categoryLoading}
+            value={selection.warehouseCategoryGuids} treeData={warehouseCategoryTree}
+            filterTreeNode={(input, node) => ((node as SalesDetailCategoryTreeNode).searchText || '').toLocaleLowerCase().includes(input.trim().toLocaleLowerCase())}
             notFoundContent={categoryError || text('暂无分类', 'No categories')}
-            onChange={changeCategories} />}
+            popupRender={menu => <><div className={styles.categoryTreeHint}>{text('选择父级包含子分类，可展开选择具体分类。', 'A parent includes its subcategories. Expand to select individual categories.')}</div>{menu}</>}
+            onChange={values => changeCategories(Array.isArray(values) ? values.map(String) : [])} />}
         <ReportControls value={dates} onChange={value => { setDates(value); setSelection(current => ({ ...current, page: 1 })) }} onRefresh={refreshAll} loading={loading} />
         {access.canViewSalesData && <Button onClick={() => navigate(`/executive-sales-intelligence/overview?branch=${encodeURIComponent(selection.branch ?? '')}&startDate=${dates.startDate}&endDate=${dates.endDate}&compare=${dates.compare}&compareMode=${dates.compareMode}`)}>{text('营业额报告', 'Revenue report')}</Button>}
       </div>
