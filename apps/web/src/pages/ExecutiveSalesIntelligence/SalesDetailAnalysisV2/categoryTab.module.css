@@ -120,7 +120,8 @@
 
 /* 放大：另一个面板隐藏，放大的面板在窄屏上也撑高 */
 .split[data-enlarged=tree] > .detailPanel,.split[data-enlarged=detail] > .panel:not(.detailPanel) { display:none; }
-@media(max-width:992px) { .split[data-enlarged] > .panel { height:calc(100dvh - 160px); } }
+/* 放大的面板铺满整个视口，和澳洲/国内页签的放大一致 */
+.split[data-enlarged] > .panel { position:fixed; inset:0; z-index:20; height:auto; border:0; border-radius:0; }
 
 /* 统计提示：默认单行省略，展开后换行显示全文 */
 .notice { display:flex; align-items:center; gap:8px; min-height:30px; padding:4px 8px 4px 12px; border:1px solid #f3dca6; border-radius:6px; background:#fffaeb; color:#6f4a00; font-size:12px; }
