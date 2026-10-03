@@ -419,7 +419,7 @@ public sealed class SetChildPurchasePriceSqlServerIntegrationTests
                 logger: NullLogger.Instance,
                 delayAsync: async delay =>
                 {
-                    Assert.Equal(TimeSpan.FromSeconds(1), delay);
+                    Assert.Equal(SalesStatisticsProductStoreDailyCommandWriter.LockRetryDelays[0], delay);
                     Assert.Equal(1, attempts);
                     Assert.True(rollbackConfirmed);
                     Assert.Null(writerDb.Ado.Transaction);

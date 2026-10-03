@@ -12,6 +12,21 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
 {
     private const int BatchSize = 5000;
 
+    /// <summary>
+    /// 成本锁等待超时后的退避间隔。另一笔商品日统计持有整日商品锁通常 1–2.5 分钟
+    /// （2026-10-03 生产实测 ≥41 秒、≥136 秒），7 次尝试（每次最多等 10 秒）合计覆盖约 4.5 分钟；
+    /// 每次重试前整笔事务已回滚，间隔期间不持有总闸或任何商品锁，不额外阻塞前台成本编辑。
+    /// </summary>
+    internal static readonly TimeSpan[] LockRetryDelays =
+    [
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(15),
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromSeconds(60),
+        TimeSpan.FromSeconds(90),
+    ];
+
     internal sealed record PersistResult(
         SalesStatisticsProductStoreDailyStateSlice.ProductStatisticStatusResult Status,
         ProductStoreDailyBatchFence? BatchFence);
@@ -41,9 +56,10 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
                     validateExecutionOwnershipBeforeCommitAsync,
                     () => rollbackCompleted = true);
             },
-            // 仅恢复当日报表；历史批次的来源签名回调可能持有跨调用状态，保留其原有失败边界。
-            canRetryAfterRollback: () => input.TargetDate.Date == SalesStatisticsBusinessDate.Today()
-                && rollbackCompleted && context.Db.Ado.Transaction == null,
+            // 当日与历史日期都重试：历史补算（HBSales 窗口的全分店原子刷新）与当日半点统计、
+            // 持久队列会争同一批商品成本锁，一次 10 秒等不到就整日失败。来源签名回调重入是安全的：
+            // 2025 原子入口第二次起改走"重新查询两来源"的 post 复核，只会更严格；队列 owner 校验幂等。
+            canRetryAfterRollback: () => rollbackCompleted && context.Db.Ado.Transaction == null,
             targetDate: input.TargetDate,
             logger: logger);
     }
@@ -56,7 +72,7 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
         Func<TimeSpan, Task>? delayAsync = null)
     {
         delayAsync ??= delay => Task.Delay(delay);
-        const int maxAttempts = 3;
+        var maxAttempts = LockRetryDelays.Length + 1;
         for (var attempt = 1; ; attempt++)
         {
             try
@@ -68,7 +84,7 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
             {
                 // 部分商品锁可能已获取，必须确认整笔事务回滚后才重试；不能在原事务内继续。
                 // 只重试等待超时，取消、死锁及调用错误保留原有失败语义。
-                var delay = TimeSpan.FromSeconds(attempt == 1 ? 1 : 3);
+                var delay = LockRetryDelays[attempt - 1];
                 logger.LogWarning(ex,
                     "商品分店每日统计成本锁等待超时，事务已回滚后重试 Date={Date:yyyy-MM-dd} Attempt={Attempt} MaxAttempts={MaxAttempts} ResultCode={ResultCode} Resource={Resource} RetryDelayMs={RetryDelayMs}",
                     targetDate, attempt, maxAttempts, ex.ResultCode, ex.Resource, delay.TotalMilliseconds);

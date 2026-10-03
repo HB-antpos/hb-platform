@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -738,6 +739,76 @@ public sealed class SalesDashboardReportRevenueTests : IDisposable
         Assert.Equal(2, completed.Items.Count);
         Assert.Contains(completed.Items, row => row.BranchCode == "S1" && row.Revenue == 10m);
         Assert.Contains(completed.Items, row => row.BranchCode == "S2" && row.Revenue == 80m);
+    }
+
+    [Fact]
+    public async Task GetExecutiveBranchPerformanceAsync_不同请求的HBSales窗口原子补算按日期串行()
+    {
+        // 两个请求各缺一个 HBSales 历史窗口日期；全分店原子补算会锁整日商品成本，必须进程内串行。
+        var firstDate = new DateTime(2025, 3, 11);
+        var secondDate = new DateTime(2025, 3, 12);
+        await SeedStoreAsync("S1", "Store A");
+        await SeedHbSalesOrderAsync("serial-atomic-1", firstDate.AddHours(10), "S1", 50m, 1m);
+        await SeedHbSalesOrderAsync("serial-atomic-2", secondDate.AddHours(10), "S1", 60m, 1m);
+
+        var active = 0;
+        var maxActive = 0;
+        var startedDates = new ConcurrentQueue<DateTime>();
+        var firstStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bothFinished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishedCount = 0;
+        Func<DateTime, Task> interceptor = async refreshDate =>
+        {
+            var nowActive = Interlocked.Increment(ref active);
+            InterlockedMax(ref maxActive, nowActive);
+            startedDates.Enqueue(refreshDate.Date);
+            try
+            {
+                if (startedDates.Count == 1)
+                {
+                    firstStarted.TrySetResult(true);
+                    await releaseFirst.Task;
+                }
+                await SeedStoreSalesStatisticAsync(refreshDate, "S1", "Store A", 1m, 1);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref active);
+                if (Interlocked.Increment(ref finishedCount) == 2)
+                    bothFinished.TrySetResult(true);
+            }
+        };
+        var firstService = CreateService();
+        var secondService = CreateService();
+        firstService.StoreStatisticsRefreshTestInterceptor = interceptor;
+        secondService.StoreStatisticsRefreshTestInterceptor = interceptor;
+
+        var firstResult = await firstService.GetExecutiveBranchPerformanceAsync(
+            new DateRangeDto { StartDate = firstDate, EndDate = firstDate });
+        await firstStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        var secondResult = await secondService.GetExecutiveBranchPerformanceAsync(
+            new DateRangeDto { StartDate = secondDate, EndDate = secondDate });
+        // 第二个请求已返回 Pending、补算链已派发；首个日期未完成前，第二个日期不能进入补算。
+        await Task.Delay(200);
+        Assert.Single(startedDates);
+
+        releaseFirst.TrySetResult(true);
+        await bothFinished.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        Assert.True(firstResult.StatisticsPending);
+        Assert.True(secondResult.StatisticsPending);
+        Assert.Equal(1, maxActive);
+        Assert.Equal(new[] { firstDate, secondDate }, startedDates.ToArray());
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int current;
+        while ((current = Volatile.Read(ref target)) < value
+            && Interlocked.CompareExchange(ref target, value, current) != current)
+        {
+        }
     }
 
     [Fact]

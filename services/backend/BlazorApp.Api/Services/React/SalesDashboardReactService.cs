@@ -417,6 +417,10 @@ namespace BlazorApp.Api.Services.React
         private const string REPORT_STATISTICS_CACHE_GENERATION_KEY =
             "SalesDashboard:ReportStatisticsCacheGeneration";
         private static readonly ConcurrentDictionary<string, byte> REPORT_STATISTICS_REFRESHING_KEYS = new();
+        // HBSales 历史窗口的全分店原子补算会一次锁住当天出现的全部商品成本锁（7–10k 个）并持有 1–2 分钟；
+        // 不同报表请求各自起的补算链并发时只会互相挤掉（2026-10-03 生产三条链 17 分钟内失败 14 天），
+        // 因此进程内所有报表触发的原子补算一次只跑一个日期，其余排队等待。
+        private static readonly SemaphoreSlim REPORT_ATOMIC_STATISTICS_REFRESH_GATE = new(1, 1);
         private static readonly ConditionalWeakTable<IMemoryCache, object>
             REPORT_STATISTICS_CACHE_GENERATION_LOCKS = new();
         private static readonly ConditionalWeakTable<
@@ -5790,8 +5794,14 @@ namespace BlazorApp.Api.Services.React
 
                     foreach (var item in pendingItems)
                     {
+                        var gateAcquired = false;
                         try
                         {
+                            if (requiresAllBranchRefresh?.Invoke(item.Date) == true)
+                            {
+                                await REPORT_ATOMIC_STATISTICS_REFRESH_GATE.WaitAsync();
+                                gateAcquired = true;
+                            }
                             // 报表请求只触发缺口日期重算，实际统计口径复用后台统计任务。
                             await refreshAsync(statisticsJobService, item.Date);
                         }
@@ -5799,6 +5809,11 @@ namespace BlazorApp.Api.Services.React
                         {
                             allSucceeded = false;
                             _logger.LogWarning(ex, "{Label}统计自动重算失败: {Date}", label, item.Date);
+                        }
+                        finally
+                        {
+                            if (gateAcquired)
+                                REPORT_ATOMIC_STATISTICS_REFRESH_GATE.Release();
                         }
                     }
                 }
