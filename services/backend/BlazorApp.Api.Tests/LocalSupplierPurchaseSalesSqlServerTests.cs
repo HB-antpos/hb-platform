@@ -189,7 +189,10 @@ ProductStoreDailySalesStatistic (BranchCode, ProductCode, Date, TotalQuantity, U
                 Page = page,
                 PageSize = 100,
             },
-            scopedStoreCodes
+            scopedStoreCodes,
+            // 固定"今天"早于 P1 的 90 天窗口末端（06-30），窗口上界即 06-30；
+            // 不传则取 UtcNow，"今天"晚于窗口末端时 06-30 的统计会被纳入，断言随墙钟漂移。
+            referenceToday: new DateTime(2026, 6, 15)
         );
 
         return new LocalSupplierPurchaseSalesAnalysisSqlBuildResult

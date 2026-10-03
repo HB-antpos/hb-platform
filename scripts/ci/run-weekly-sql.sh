@@ -17,6 +17,10 @@ required_variables=(
   HB_TEST_SQLSERVER_CONNECTION
   CONTAINER_MUTATION_SQLSERVER_TEST_CONNECTION
   COST_BACKFILL_SQLSERVER_TEST_CONNECTION
+  BATCH_SALES_SQLSERVER_TEST_CONNECTION
+  PURCHASE_SALES_SQLSERVER_TEST_CONNECTION
+  LSPA_SQLSERVER_TEST_CONNECTION
+  SALES_STATISTICS_RECOVERY_SQLSERVER_TEST_CONNECTION
   CI_SQL_PASSWORD
 )
 for variable in "${required_variables[@]}"; do
@@ -61,12 +65,18 @@ docker exec "$CI_SQLSERVER_CONTAINER_ID" "$sqlcmd" \
   -Q "CREATE DATABASE [$preflight_database]; DROP DATABASE [$preflight_database];"
 
 project="services/backend/BlazorApp.Api.Tests/BlazorApp.Api.Tests.csproj"
+# 批量销量的容量基准与 HTTP 常驻调试服务是手动测量工具（需显式开关、常驻默认 900 秒），
+# 只因与集成用例同属一个 Category=SQL 的 partial class 而被筛中，周跑须排除以免被判 Skip。
+weekly_sql_filter='Category=SQL'
+weekly_sql_filter+='&FullyQualifiedName!~BlazorApp.Api.Tests.SchemaMigrationSqlServerIntegrationTests'
+weekly_sql_filter+='&FullyQualifiedName!~BatchProductSalesAnalysisSqlServerIntegrationTests.Overview_Performance_SQLServer'
+weekly_sql_filter+='&FullyQualifiedName!~BatchProductSalesAnalysisSqlServerIntegrationTests.BatchProductSalesHttpHarness'
 dotnet restore "$project"
 dotnet build "$project" --configuration Release --no-restore
 dotnet test "$project" \
   --configuration Release \
   --no-build \
-  --filter 'Category=SQL&FullyQualifiedName!~BlazorApp.Api.Tests.SchemaMigrationSqlServerIntegrationTests' \
+  --filter "$weekly_sql_filter" \
   --logger 'trx;LogFileName=weekly-sql.trx' \
   --results-directory "$results_root"
 node scripts/ci/assert-trx-tests.mjs "$results_root/weekly-sql.trx" 'Weekly SQL tests'
