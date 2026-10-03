@@ -9,6 +9,7 @@ import {
   normalizeHourlyRevenueRows,
   pollExecutiveBranchPerformance,
   pollRevenueDetailSnapshot,
+  resolveCurrentPeriodFallback,
 } from "./api";
 
 const branchRows = normalizeBranchRevenueRows([
@@ -355,4 +356,56 @@ async function runPollingAssertions() {
   ), "分时/逐日轮询在请求晚返回后仍必须服从取消信号");
 }
 
-void runPollingAssertions();
+async function runCurrentPeriodFallbackAssertions() {
+  const exhausted = { ...createBranchSnapshot(26, true), pollingExhausted: true, pollingAttemptCount: 6 };
+  const currentComplete = createBranchSnapshot(26, false, 26);
+  let currentOnlyCalls = 0;
+
+  // 带同期已完整：不应发出本期回退请求。
+  const fullyComplete = createBranchSnapshot(28, false);
+  const untouched = await resolveCurrentPeriodFallback(fullyComplete, async () => {
+    currentOnlyCalls += 1;
+    return currentComplete;
+  });
+  assert.equal(untouched, fullyComplete);
+  assert.equal(currentOnlyCalls, 0, "带同期已完整时不得追加本期回退请求");
+
+  // 还在轮询中（未耗尽）也不回退，保持原有追数语义。
+  const stillPolling = createBranchSnapshot(5, true);
+  assert.equal(await resolveCurrentPeriodFallback(stillPolling, async () => currentComplete), stillPolling);
+
+  // 同期补算拖住整体：本期完整即先展示本期，每行标记同期未知。
+  const fallback = await resolveCurrentPeriodFallback(exhausted, async () => {
+    currentOnlyCalls += 1;
+    return currentComplete;
+  });
+  assert.equal(currentOnlyCalls, 1);
+  assert.equal(fallback.isComplete, true, "本期可证明完整时应先展示本期排行");
+  assert.equal(fallback.pollingExhausted, false);
+  assert.equal(fallback.pollingAttemptCount, 7);
+  assert.equal(fallback.rows.length, 26);
+  assert.ok(fallback.rows.every((row) => row.compareUnavailable === true), "回退结果每行都必须标记同期未知");
+  assert.equal(currentComplete.rows[0]?.compareUnavailable, undefined, "不得改写本期请求的原始快照");
+
+  // 本期同样未完成：仍返回原 Pending 结果，保持 fail-closed。
+  const currentPending = createBranchSnapshot(10, true, 26);
+  assert.equal(await resolveCurrentPeriodFallback(exhausted, async () => currentPending), exhausted);
+
+  // 本期请求失败：不覆盖原状态。
+  assert.equal(
+    await resolveCurrentPeriodFallback(exhausted, async () => {
+      throw new Error("network");
+    }),
+    exhausted,
+  );
+
+  // 已取消：必须继续抛出，让页面丢弃过期请求。
+  const abortController = new AbortController();
+  abortController.abort();
+  await assert.rejects(
+    resolveCurrentPeriodFallback(exhausted, async () => currentComplete, abortController.signal),
+    (error: unknown) => error instanceof Error && error.name === "AbortError",
+  );
+}
+
+void runPollingAssertions().then(runCurrentPeriodFallbackAssertions);
