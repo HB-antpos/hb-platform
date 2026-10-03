@@ -196,9 +196,24 @@ test("Android printer drops a ready SPP session when its ACL link or the adapter
     source,
     /private fun startConnect[\s\S]*?ensureLinkStateReceiverRegistered\(\)[\s\S]*?connectPromise = promise/,
   );
+  // 与移动端一致：断开先等 250ms，同设备 ACL_CONNECTED 取消，到期再核对 socket 身份。
+  assert.match(source, /BluetoothDevice\.ACTION_ACL_CONNECTED/);
+  assert.match(source, /ACL_DISCONNECT_SETTLE_MS = 250L/);
   assert.match(
     source,
-    /private fun handleSppLinkLost[\s\S]*?connectedTransport != TransportKind\.SPP[\s\S]*?token\.address != address[\s\S]*?finishPendingOperation\([\s\S]*?"unknown"[\s\S]*?clearConnectedTransport\(\)[\s\S]*?connectionState = "disconnected"/,
+    /ACTION_ACL_DISCONNECTED ->[\s\S]*?scheduleSppLinkLoss\(address\)[\s\S]*?ACTION_ACL_CONNECTED ->[\s\S]*?cancelPendingSppLinkLoss\(address\)/,
+  );
+  assert.match(
+    source,
+    /private fun scheduleSppLinkLoss[\s\S]*?isReadySppConnection\(address\)[\s\S]*?scheduler\.schedule\([\s\S]*?handleSppLinkLost\(address, socket\)[\s\S]*?ACL_DISCONNECT_SETTLE_MS/,
+  );
+  assert.match(
+    source,
+    /private fun isReadySppConnection[\s\S]*?connectedTransport == TransportKind\.SPP[\s\S]*?connectedToken\?\.address == address/,
+  );
+  assert.match(
+    source,
+    /private fun handleSppLinkLost\(address: String, socket: BluetoothSocket\)[\s\S]*?pendingSppLinkLossSocket !== socket[\s\S]*?sppSocket !== socket[\s\S]*?finishPendingOperation\([\s\S]*?"unknown"[\s\S]*?clearConnectedTransport\(\)[\s\S]*?connectionState = "disconnected"/,
   );
   assert.match(
     source,
