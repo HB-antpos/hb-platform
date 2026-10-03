@@ -7,6 +7,9 @@ mkdir -p "$results_root"
 cd "$repository_root"
 
 project="apps/pos-wpf/tests/Hbpos.Api.Tests/Hbpos.Api.Tests.csproj"
+# 28 店目录规模回放默认跳过（日常太重），周跑必须真正执行：
+# TRX 断言要求 total == executed == passed，跳过会被判失败。
+export HBPOS_CATALOG_SCALE_RUN=1
 dotnet restore "$project"
 dotnet build "$project" --configuration Release --no-restore
 dotnet test "$project" \
