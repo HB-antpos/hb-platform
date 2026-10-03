@@ -41,7 +41,7 @@ const androidUpdateId = "523e4567-e89b-42d3-a456-426614174000";
 const rollbackOfReleaseId = "623e4567-e89b-42d3-a456-426614174000";
 const otherProjectId = "723e4567-e89b-42d3-a456-426614174000";
 const registeredReleaseId = "823e4567-e89b-42d3-a456-426614174000";
-const currentRuntimeVersion = "0.1.0";
+const currentRuntimeVersion = "0.1.1";
 const administratorAccessToken =
   "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.signature";
 const iosReleaseChannel =
