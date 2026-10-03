@@ -354,6 +354,8 @@ export function createProductionSettingsComposition(
               transport: classic ? "bluetooth-classic" : "bluetooth-le",
               preferred:
                 !classic && device.name.toLowerCase() === "printer001",
+              // BLE 无需配对；经典蓝牙取原生配对状态，旧原生包没有该字段时为 null（未知）。
+              paired: classic ? device.paired : null,
             });
           }),
         );
@@ -586,13 +588,13 @@ const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/gu;
 export function sanitizeScannedPrinters(
   devices: readonly Readonly<{ id: unknown; name: unknown }>[],
 ): Readonly<{
-  devices: readonly Readonly<{ id: string; name: string }>[];
+  devices: readonly Readonly<{ id: string; name: string; paired: boolean | null }>[];
   sanitizedCount: number;
   skippedCount: number;
 }> {
   let sanitizedCount = 0;
   let skippedCount = 0;
-  const usable: Readonly<{ id: string; name: string }>[] = [];
+  const usable: Readonly<{ id: string; name: string; paired: boolean | null }>[] = [];
   for (const device of devices) {
     const id = typeof device.id === "string" ? device.id.trim() : "";
     if (
@@ -610,7 +612,14 @@ export function sanitizeScannedPrinters(
     ).trim();
     const name = cleaned || SCANNED_PRINTER_FALLBACK_NAME;
     if (name !== rawName.trim()) sanitizedCount += 1;
-    usable.push(Object.freeze({ id, name }));
+    const bonded = "bonded" in device ? device.bonded : null;
+    usable.push(
+      Object.freeze({
+        id,
+        name,
+        paired: typeof bonded === "boolean" ? bonded : null,
+      }),
+    );
   }
   return Object.freeze({
     devices: Object.freeze(usable),

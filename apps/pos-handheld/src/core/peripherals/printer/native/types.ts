@@ -13,6 +13,8 @@ export type BluetoothPrinterDevice = {
   name: string;
   rssi: number | null;
   isXprinter: boolean;
+  /** 经典蓝牙是否已在系统中配对；BLE 或旧原生包为 null/缺失。 */
+  bonded?: boolean | null;
 };
 
 export type BluetoothPrinterStatus = {

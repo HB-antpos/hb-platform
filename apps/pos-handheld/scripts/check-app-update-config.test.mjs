@@ -221,11 +221,11 @@ test("production 只接受显式 HTTPS updates URL 与 EAS projectId 注入", ()
     EAS_BUILD_PROFILE: "production",
     EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID: projectId,
     EXPO_PUBLIC_HBPOS_UPDATES_URL: updatesUrl,
-    EXPO_PUBLIC_HBPOS_RUNTIME_VERSION: "0.1.0",
+    EXPO_PUBLIC_HBPOS_RUNTIME_VERSION: "0.1.1",
   });
   assert.equal(config.updates?.url, updatesUrl);
   assert.equal(config.updates?.checkAutomatically, "NEVER");
-  assert.equal(config.runtimeVersion, "0.1.0");
+  assert.equal(config.runtimeVersion, "0.1.1");
   assert.equal(config.extra?.eas?.projectId, projectId);
   assert.equal(config.extra?.hbpos?.automaticOtaChecks, true);
 });

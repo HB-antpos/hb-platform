@@ -78,12 +78,15 @@ private data class DiscoveredPrinter(
   val name: String,
   val rssi: Int?,
   val isXprinter: Boolean,
+  // 仅经典蓝牙有意义：SPP 必须先在系统设置配对；BLE 直接连接，恒为 null。
+  val bonded: Boolean?,
 ) {
   fun payload(): Map<String, Any?> = mapOf(
     "id" to token.value,
     "name" to name,
     "rssi" to rssi,
     "isXprinter" to isXprinter,
+    "bonded" to bonded,
   )
 }
 
@@ -565,6 +568,11 @@ class HbPrinterModule : Module() {
       name = name,
       rssi = rssi,
       isXprinter = isXprinter(name),
+      bonded = if (transport == TransportKind.SPP) {
+        runCatching { device.bondState == BluetoothDevice.BOND_BONDED }.getOrNull()
+      } else {
+        null
+      },
     )
   }
 

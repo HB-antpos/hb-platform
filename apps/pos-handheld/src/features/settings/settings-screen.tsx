@@ -25,6 +25,7 @@ import {
   type SettingsDangerousConfirmation,
   type SettingsPane,
   type SettingsPresenter,
+  type SettingsPrinterDevice,
   type SettingsState,
   type SettingsStatusCode,
 } from "./settings-presenter";
@@ -2056,6 +2057,8 @@ function PeripheralsPane({
     printerPickerError === "printer-bluetooth-permission-required";
   const printerPickerLocationOff =
     printerPickerError === "printer-bluetooth-location-off";
+  const printerPickerPairingRequired =
+    printerPickerError === "printer-pairing-required";
 
   const scanPrinterDevices = async () => {
     setPrinterPickerVisible(true);
@@ -2294,6 +2297,21 @@ function PeripheralsPane({
                     </View>
                   </>
                 ) : null}
+                {printerPickerPairingRequired ? (
+                  <>
+                    <Text style={styles.printerPickerPermissionHint}>
+                      {t("printer.pairingRequiredHint")}
+                    </Text>
+                    <View style={styles.printerPickerPermissionAction}>
+                      <ActionButton
+                        label={t("action.openBluetoothSettings")}
+                        onPress={() => void openBluetoothSettings()}
+                        testID="settings-printer-open-bluetooth-settings"
+                        tone="secondary"
+                      />
+                    </View>
+                  </>
+                ) : null}
                 {printerPickerLocationOff ? (
                   <>
                     <Text style={styles.printerPickerPermissionHint}>
@@ -2361,14 +2379,15 @@ function PeripheralsPane({
                           </Text>
                         </View>
                         <Text
-                          style={styles.deviceTransport}
+                          style={[
+                            styles.deviceTransport,
+                            device.transport === "bluetooth-classic" &&
+                              device.paired === false &&
+                              styles.deviceTransportWarning,
+                          ]}
                           testID={`settings-printer-device-transport-${device.id}`}
                         >
-                          {device.transport === "bluetooth-le"
-                            ? t("printer.transport.ble")
-                            : device.transport === "bluetooth-classic"
-                              ? t("printer.transport.classic")
-                              : device.transport}
+                          {printerTransportHint(device, t)}
                         </Text>
                       </View>
                       <ActionButton
@@ -3210,6 +3229,29 @@ function bluetoothPermissionHintKey(): SettingsCopyKey {
     : "printer.bluetoothPermissionHintLocation";
 }
 
+/**
+ * 与移动端一致：BLE 直接连接；经典蓝牙按系统配对状态提示，未知（旧原生包）时统一提示先配对。
+ */
+function printerTransportHint(
+  device: SettingsPrinterDevice,
+  t: (key: SettingsCopyKey) => string,
+): string {
+  if (device.transport === "bluetooth-le") return t("printer.transport.ble");
+  if (device.transport !== "bluetooth-classic") return device.transport;
+  if (device.paired === true) return t("printer.transport.classicPaired");
+  if (device.paired === false) return t("printer.transport.classicUnpaired");
+  return t("printer.transport.classic");
+}
+
+/** 经典蓝牙打印机需在系统里配对；个别 ROM 不支持该 Intent 时退回应用详情页。 */
+async function openBluetoothSettings(): Promise<void> {
+  try {
+    await Linking.sendIntent("android.settings.BLUETOOTH_SETTINGS");
+  } catch {
+    await Linking.openSettings();
+  }
+}
+
 /** 直达系统定位开关页；个别 ROM 不支持该 Intent 时退回应用详情页。 */
 async function openLocationSettings(): Promise<void> {
   try {
@@ -3892,6 +3934,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginLeft: 0,
     marginTop: 2,
+  },
+  deviceTransportWarning: {
+    color: posColors.orange,
+    fontWeight: "700",
   },
   printerPicker: {
     backgroundColor: posColors.surface,

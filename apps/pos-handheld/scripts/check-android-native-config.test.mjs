@@ -167,6 +167,12 @@ test("Android printer keeps BLE and paired SPP as explicit opaque transports", a
   assert.match(source, /bondedDevices/);
   assert.match(source, /BluetoothDevice\.BOND_BONDED/);
   assert.match(source, /PRINTER_SPP_PAIRING_REQUIRED/);
+  // 扫描结果带经典蓝牙系统配对状态，设置页据此提示「已配对 / 未配对」；BLE 恒为 null。
+  assert.match(source, /"bonded" to bonded/);
+  assert.match(
+    source,
+    /bonded = if \(transport == TransportKind\.SPP\)[\s\S]*?BOND_BONDED[\s\S]*?else \{\s*null/,
+  );
   assert.match(source, /createRfcommSocketToServiceRecord/);
   assert.match(source, /BluetoothDevice\.TRANSPORT_LE/);
   // API 30 及以下扫描前必须检查定位总开关，否则 BLE 扫描静默返回空列表。
