@@ -83,6 +83,41 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                             continue;
                         }
 
+                        if (col == "IsProductChecked")
+                        {
+                            // 口径与列表展示一致：至少一条有效明细，且有效明细的 ExistingProductCount 全部非空才算已检测。
+                            // 无法解析的值直接忽略，不缩小结果。
+                            if (bool.TryParse(f.Filter?.Trim(), out var productChecked))
+                            {
+                                query = productChecked
+                                    ? query.Where((h, st, sup) =>
+                                        SqlFunc.Subqueryable<StoreLocalSupplierInvoiceDetails>()
+                                            .Where(d => d.IsDeleted == false && d.InvoiceGUID == h.InvoiceGUID)
+                                            .Any()
+                                        && SqlFunc.Subqueryable<StoreLocalSupplierInvoiceDetails>()
+                                            .Where(d =>
+                                                d.IsDeleted == false
+                                                && d.InvoiceGUID == h.InvoiceGUID
+                                                && d.ExistingProductCount == null
+                                            )
+                                            .NotAny()
+                                    )
+                                    : query.Where((h, st, sup) =>
+                                        SqlFunc.Subqueryable<StoreLocalSupplierInvoiceDetails>()
+                                            .Where(d => d.IsDeleted == false && d.InvoiceGUID == h.InvoiceGUID)
+                                            .NotAny()
+                                        || SqlFunc.Subqueryable<StoreLocalSupplierInvoiceDetails>()
+                                            .Where(d =>
+                                                d.IsDeleted == false
+                                                && d.InvoiceGUID == h.InvoiceGUID
+                                                && d.ExistingProductCount == null
+                                            )
+                                            .Any()
+                                    );
+                            }
+                            continue;
+                        }
+
                         if (type == "text" && f.Filter != null)
                         {
                             var v = f.Filter?.ToString()?.Trim();
@@ -1071,6 +1106,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 "remarks" => "Remarks",
                 "createdby" => "CreatedBy",
                 "productkeyword" => "ProductKeyword",
+                "isproductchecked" => "IsProductChecked",
                 "totalamount" => "TotalAmount",
                 "receivedtotalamount" => "ReceivedTotalAmount",
                 "pricechange" => "PriceChange",

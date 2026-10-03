@@ -319,6 +319,7 @@ export default function LocalSupplierInvoicesPage() {
   const [supplierCode, setSupplierCode] = useState<string | undefined>(undefined)
   const [invoiceNo, setInvoiceNo] = useState('')
   const [keyword, setKeyword] = useState('')
+  const [productChecked, setProductChecked] = useState<boolean | undefined>(undefined)
 
   // 下拉选项
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
@@ -420,6 +421,10 @@ export default function LocalSupplierInvoicesPage() {
     }
     if (keyword) {
       filterModel.productKeyword = { filterType: 'text', filter: keyword }
+    }
+    if (productChecked !== undefined) {
+      // 后端按有效明细是否全部完成检测筛选，口径与「是否检测商品」列一致。
+      filterModel.isProductChecked = { filterType: 'text', type: 'equals', filter: String(productChecked) }
     }
     const sortField = SORT_FIELD_MAP[sortBy] || sortBy
     const sortModel = [{ colId: sortField, sort: sortOrder === 'ascend' ? 'asc' : 'desc' }]
@@ -612,6 +617,7 @@ export default function LocalSupplierInvoicesPage() {
     setSupplierCode(undefined)
     setInvoiceNo('')
     setKeyword('')
+    setProductChecked(undefined)
     setSortBy('createdAt')
     setSortOrder('descend')
     requestFirstPage(true, reloadFromDependencies)
@@ -1063,6 +1069,17 @@ export default function LocalSupplierInvoicesPage() {
               style={{ width: 180 }}
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
+            />
+            <Select
+              allowClear
+              placeholder={t('posAdmin.invoices.isProductChecked')}
+              style={{ width: 150 }}
+              value={productChecked}
+              onChange={(v?: boolean) => setProductChecked(v)}
+              options={[
+                { label: t('common.yes'), value: true },
+                { label: t('common.no'), value: false },
+              ]}
             />
             <Button type="primary" onClick={handleSearch}>
               {t('common.query')}

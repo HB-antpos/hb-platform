@@ -541,6 +541,45 @@ namespace BlazorApp.Api.Tests
             Assert.False(checkedByInvoice["invoice-deleted-only"]);
             Assert.True(checkedByInvoice["invoice-mixed-deleted"]);
             Assert.False(checkedByInvoice["invoice-isolated"]);
+
+            // 筛选口径必须与列表展示一致：按 true/false 筛出的订单正好是上面展示为是/否的两组。
+            async Task<string[]> FilterByCheckedAsync(string value)
+            {
+                var filtered = await CreateService().GetGridDataAsync(new GridRequestDto
+                {
+                    StartRow = 0,
+                    PageSize = 20,
+                    FilterModel = new Dictionary<string, FilterModelDto>
+                    {
+                        ["isProductChecked"] = new() { FilterType = "text", Type = "equals", Filter = value },
+                    },
+                });
+                Assert.True(filtered.Success, filtered.Message);
+                Assert.Equal(filtered.Items!.Count, filtered.Total);
+                Assert.All(filtered.Items!, item => Assert.Equal(value == "true", item.IsProductChecked));
+                return filtered.Items!.Select(item => item.InvoiceGUID).OrderBy(guid => guid).ToArray();
+            }
+
+            Assert.Equal(
+                new[] { "invoice-complete", "invoice-mixed-deleted", "invoice-zero" },
+                await FilterByCheckedAsync("true")
+            );
+            Assert.Equal(
+                new[] { "invoice-deleted-only", "invoice-empty", "invoice-isolated", "invoice-partial", "invoice-unchecked" },
+                await FilterByCheckedAsync("false")
+            );
+
+            // 无法解析的值不缩小结果。
+            var ignored = await CreateService().GetGridDataAsync(new GridRequestDto
+            {
+                StartRow = 0,
+                PageSize = 20,
+                FilterModel = new Dictionary<string, FilterModelDto>
+                {
+                    ["isProductChecked"] = new() { FilterType = "text", Filter = "maybe" },
+                },
+            });
+            Assert.Equal(result.Total, ignored.Total);
         }
 
         [Fact]
