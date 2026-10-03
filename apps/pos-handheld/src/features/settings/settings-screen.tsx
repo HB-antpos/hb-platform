@@ -2360,8 +2360,15 @@ function PeripheralsPane({
                             {device.id}
                           </Text>
                         </View>
-                        <Text style={styles.deviceTransport}>
-                          {device.transport}
+                        <Text
+                          style={styles.deviceTransport}
+                          testID={`settings-printer-device-transport-${device.id}`}
+                        >
+                          {device.transport === "bluetooth-le"
+                            ? t("printer.transport.ble")
+                            : device.transport === "bluetooth-classic"
+                              ? t("printer.transport.classic")
+                              : device.transport}
                         </Text>
                       </View>
                       <ActionButton

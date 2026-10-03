@@ -184,6 +184,30 @@ test("Android printer keeps BLE and paired SPP as explicit opaque transports", a
   assert.doesNotMatch(source, /buildProductLabel|Bitmap|Canvas|ZXing/);
 });
 
+test("Android printer drops a ready SPP session when its ACL link or the adapter goes away", async () => {
+  const source = await read(
+    "modules/hb-printer/android/src/main/java/expo/modules/hbprinter/HbPrinterModule.kt",
+  );
+
+  // SPP socket.isConnected 只看本地状态；不听 ACL 断开，打印机重启后第一张小票会写进死连接。
+  assert.match(source, /BluetoothDevice\.ACTION_ACL_DISCONNECTED/);
+  assert.match(source, /BluetoothAdapter\.ACTION_STATE_CHANGED/);
+  assert.match(
+    source,
+    /private fun startConnect[\s\S]*?ensureLinkStateReceiverRegistered\(\)[\s\S]*?connectPromise = promise/,
+  );
+  assert.match(
+    source,
+    /private fun handleSppLinkLost[\s\S]*?connectedTransport != TransportKind\.SPP[\s\S]*?token\.address != address[\s\S]*?finishPendingOperation\([\s\S]*?"unknown"[\s\S]*?clearConnectedTransport\(\)[\s\S]*?connectionState = "disconnected"/,
+  );
+  assert.match(
+    source,
+    /private fun handleBluetoothTurnedOff[\s\S]*?failConnect\([\s\S]*?clearConnectedTransport\(\)[\s\S]*?connectionState = "disconnected"/,
+  );
+  assert.match(source, /OnDestroy[\s\S]*?unregisterLinkStateReceiver\(\)/);
+  assert.match(source, /registerReceiver\(linkStateReceiver, filter, Context\.RECEIVER_NOT_EXPORTED\)/);
+});
+
 test("printer operation ids are exclusive and uncertain writes never switch or replay transports", async () => {
   const source = await read(
     "modules/hb-printer/android/src/main/java/expo/modules/hbprinter/HbPrinterModule.kt",

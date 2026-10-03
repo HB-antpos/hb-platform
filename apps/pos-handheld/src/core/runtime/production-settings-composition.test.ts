@@ -624,6 +624,38 @@ test("打印机扫描仅把 trim 后精确匹配 printer001 的设备标记为 p
   ]);
 });
 
+test("打印机扫描按原生前缀区分经典蓝牙 SPP，双模同名设备只推荐 BLE 那条", async () => {
+  const runtime = createProductionSettingsComposition(
+    dependencies({
+      printer: {
+        getStatus: async () => "ready",
+        scan: async () => [
+          { id: "ble:DC:0D:30:00:00:01", name: "Printer001", rssi: -60 },
+          { id: "SPP:DC:0D:30:00:00:01", name: "Printer001", rssi: null },
+        ],
+        connect: async () => undefined,
+        disconnect: async () => undefined,
+        print: async () => ({ status: "printed", errorCode: null }),
+        subscribe: () => () => undefined,
+        open: async () => ({ status: "completed", errorCode: null }),
+      },
+    }),
+  );
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+
+  await presenter.scanPrinters();
+
+  const devices = presenter.getState().printerDevices;
+  assert.deepEqual(
+    devices.map(({ id, transport, preferred }) => ({ id, transport, preferred })),
+    [
+      { id: "ble:DC:0D:30:00:00:01", transport: "bluetooth-le", preferred: true },
+      { id: "SPP:DC:0D:30:00:00:01", transport: "bluetooth-classic", preferred: false },
+    ],
+  );
+});
+
 test("扫描结果中个别设备名/ID 异常时逐条容错：清洗名称、跳过坏 ID，并上报统计", async () => {
   const issues: unknown[] = [];
   const runtime = createProductionSettingsComposition(

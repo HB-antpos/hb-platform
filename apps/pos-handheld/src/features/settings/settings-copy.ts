@@ -186,6 +186,9 @@ export const settingsEnglishCopy = {
   "printer.locale.en": "English",
   "printer.locale.zhCN": "Chinese",
   "printer.preferredN160": "Recommended target · printer001",
+  "printer.transport.ble": "Bluetooth LE · recommended",
+  "printer.transport.classic":
+    "Classic Bluetooth (SPP) · no print confirmation, prefer the BLE entry",
   "printer.deviceName": "Name",
   "printer.deviceAddress": "Device address",
   "field.peripheralId": "Peripheral ID",
@@ -578,6 +581,8 @@ export const settingsChineseCopy = {
   "printer.locale.en": "英文",
   "printer.locale.zhCN": "中文",
   "printer.preferredN160": "推荐目标",
+  "printer.transport.ble": "低功耗蓝牙 BLE，推荐使用",
+  "printer.transport.classic": "经典蓝牙 SPP · 无打印确认，建议选同名的 BLE 设备",
   "printer.deviceName": "名称",
   "printer.deviceAddress": "设备地址",
   "field.peripheralId": "设备 ID",
