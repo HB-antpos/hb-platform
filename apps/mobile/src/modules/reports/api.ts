@@ -22,6 +22,8 @@ export interface BranchRevenueRow {
   compareTransactions: number;
   averageTransaction: number;
   compareAverageTransaction: number;
+  /** 同期统计仍在补算：同期各列未知（接口按 0 返回），不能参与增长率或同期汇总。 */
+  compareUnavailable?: boolean;
 }
 
 export interface ExecutiveBranchPerformanceSnapshot {
@@ -106,6 +108,8 @@ export interface DailyRevenueRow {
   compareTransactions: number;
   averageTransaction: number;
   compareAverageTransaction: number;
+  /** 同期统计仍在补算：同期各列未知，与 BranchRevenueRow 同义。 */
+  compareUnavailable?: boolean;
 }
 
 async function getApiClient() {
@@ -283,14 +287,17 @@ function asNonNegativeInteger(value: unknown) {
     : null;
 }
 
-function buildParams(query: RevenueReportQuery) {
+function buildParams(query: RevenueReportQuery, options: { includeCompare?: boolean } = {}) {
   const params = new URLSearchParams({
     startDate: query.startDate,
     endDate: query.endDate,
-    compareStartDate: query.compareStartDate,
-    compareEndDate: query.compareEndDate,
     compareMode: query.compareMode,
   });
+  // 后端在缺少同期日期时只核验并补算本期，用于“本期先出、同期补算中”的回退请求。
+  if (options.includeCompare !== false) {
+    params.set("compareStartDate", query.compareStartDate);
+    params.set("compareEndDate", query.compareEndDate);
+  }
   query.branchCodes?.filter(Boolean).forEach((branchCode) => {
     params.append("branchCodes", branchCode);
   });
@@ -578,21 +585,59 @@ export function normalizeBranchHourlyRevenueSnapshot(payload: unknown) {
   return normalizeRevenueDetailSnapshot(payload, normalizeBranchHourlyRow);
 }
 
+interface CurrentPeriodFallbackSnapshot {
+  rows: { compareUnavailable?: boolean }[];
+  isComplete: boolean;
+  pollingExhausted: boolean;
+  pollingAttemptCount: number;
+}
+
+/**
+ * 同期补算可能远慢于本期（如去年同期从未汇总，需逐日全分店补算），带同期的有界轮询会先耗尽。
+ * 此时不带同期日期单独核验一次本期：本期可证明完整就先返回本期，每行标记同期未知；
+ * 本期同样未完成或核验请求失败时，仍返回原 Pending 结果，保持 fail-closed。
+ */
+export async function resolveCurrentPeriodFallback<Snapshot extends CurrentPeriodFallbackSnapshot>(
+  primary: Snapshot,
+  loadCurrentOnly: (signal?: AbortSignal) => Promise<Snapshot>,
+  signal?: AbortSignal,
+): Promise<Snapshot> {
+  if (primary.isComplete || !primary.pollingExhausted) return primary;
+
+  let currentOnly: Snapshot;
+  try {
+    throwIfRevenueRequestAborted(signal);
+    currentOnly = await loadCurrentOnly(signal);
+  } catch (error) {
+    // 取消必须继续向上抛，让页面丢弃过期请求；其他失败只是回退不可用，不覆盖原 Pending 状态。
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+    return primary;
+  }
+  throwIfRevenueRequestAborted(signal);
+  if (!currentOnly.isComplete) return primary;
+
+  return {
+    ...currentOnly,
+    rows: currentOnly.rows.map((row) => ({ ...row, compareUnavailable: true })),
+    pollingExhausted: false,
+    pollingAttemptCount: primary.pollingAttemptCount + 1,
+  } as Snapshot;
+}
+
 export async function fetchExecutiveBranchPerformance(
   query: RevenueReportQuery,
   options: Pick<ExecutiveBranchPerformancePollingOptions, "signal"> = {},
 ) {
   const apiClient = await getApiClient();
-  return pollExecutiveBranchPerformance(
-    async (signal) => {
-      const response = await apiClient.get("/react/v1/dashboard/executive-branch-performance", {
-        params: buildParams(query),
-        ...getRevenueReportRequestConfig(signal),
-      });
-      return normalizeExecutiveBranchPerformance(response.data);
-    },
-    options,
-  );
+  const loadSnapshot = (includeCompare: boolean) => async (signal?: AbortSignal) => {
+    const response = await apiClient.get("/react/v1/dashboard/executive-branch-performance", {
+      params: buildParams(query, { includeCompare }),
+      ...getRevenueReportRequestConfig(signal),
+    });
+    return normalizeExecutiveBranchPerformance(response.data);
+  };
+  const primary = await pollExecutiveBranchPerformance(loadSnapshot(true), options);
+  return resolveCurrentPeriodFallback(primary, loadSnapshot(false), options.signal);
 }
 
 export async function fetchExecutiveHourlyTraffic(
@@ -635,16 +680,16 @@ export async function fetchBranchDailyPerformance(
   options: Pick<RevenueDetailPollingOptions, "signal"> = {},
 ) {
   const apiClient = await getApiClient();
-  return pollRevenueDetailSnapshot(
-    async (signal) => {
-      const response = await apiClient.get("/react/v1/dashboard/branch-daily-performance", {
-        params: buildParams(query),
-        ...getRevenueReportRequestConfig(signal),
-      });
-      return normalizeDailyRevenueSnapshot(response.data);
-    },
-    options,
-  );
+  const loadSnapshot = (includeCompare: boolean) => async (signal?: AbortSignal) => {
+    const response = await apiClient.get("/react/v1/dashboard/branch-daily-performance", {
+      params: buildParams(query, { includeCompare }),
+      ...getRevenueReportRequestConfig(signal),
+    });
+    return normalizeDailyRevenueSnapshot(response.data);
+  };
+  const primary = await pollRevenueDetailSnapshot(loadSnapshot(true), options);
+  // 逐日明细与分店排行同口径回退；分时明细含累计曲线，仍保持同期不全即不展示。
+  return resolveCurrentPeriodFallback(primary, loadSnapshot(false), options.signal);
 }
 
 export function getRevenueReportRequestConfig(signal?: AbortSignal) {

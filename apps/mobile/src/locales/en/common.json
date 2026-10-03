@@ -202,6 +202,8 @@
       "noCashierEnabledStores": "No cashier-enabled stores",
       "refreshingStatistics": "Refreshing statistics automatically...",
       "statisticsIncomplete": "Statistics are still being prepared. Please retry.",
+      "comparePending": "Comparison backfilling",
+      "comparePendingNotice": "Last-year figures are still being backfilled and show as “—”. Refresh later to fill them in.",
       "errorTitle": "Failed to load revenue data",
       "showingSnapshot": "Showing complete snapshot from {{time}} while refreshing"
     },
