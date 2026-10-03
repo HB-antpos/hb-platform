@@ -39,7 +39,7 @@ public sealed class SalesStatisticsProductStoreDailyCommandWriterTests
     }
 
     [Fact]
-    public async Task 成本锁重试_短暂冲突后成功且仅退避一秒三秒()
+    public async Task 成本锁重试_短暂冲突后成功且按退避表依次等待()
     {
         var attempts = 0;
         var delays = new List<TimeSpan>();
@@ -64,12 +64,13 @@ public sealed class SalesStatisticsProductStoreDailyCommandWriterTests
 
         Assert.Same(expected, actual);
         Assert.Equal(3, attempts);
-        Assert.Equal(new[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3) }, delays);
+        Assert.Equal(new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5) }, delays);
     }
 
     [Fact]
-    public async Task 成本锁重试_三次仍冲突时原样抛出最后异常()
+    public async Task 成本锁重试_退避表用尽仍冲突时原样抛出最后异常()
     {
+        var maxAttempts = SalesStatisticsProductStoreDailyCommandWriter.LockRetryDelays.Length + 1;
         var attempts = 0;
         var delays = new List<TimeSpan>();
         var finalError = LockException(-1);
@@ -79,7 +80,7 @@ public sealed class SalesStatisticsProductStoreDailyCommandWriterTests
                 persistOnceAsync: () =>
                 {
                     attempts++;
-                    throw attempts == 3 ? finalError : LockException(-1);
+                    throw attempts == maxAttempts ? finalError : LockException(-1);
                 },
                 canRetryAfterRollback: () => true,
                 targetDate: RetryTargetDate,
@@ -91,8 +92,11 @@ public sealed class SalesStatisticsProductStoreDailyCommandWriterTests
                 }));
 
         Assert.Same(finalError, actual);
-        Assert.Equal(3, attempts);
-        Assert.Equal(new[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3) }, delays);
+        Assert.Equal(7, attempts);
+        // 7 次尝试各等 10 秒 + 退避合计 202 秒，覆盖另一笔日统计约 4.5 分钟的锁持有。
+        Assert.Equal(
+            new[] { 2, 5, 15, 30, 60, 90 }.Select(seconds => TimeSpan.FromSeconds(seconds)),
+            delays);
     }
 
     [Theory]
@@ -213,7 +217,7 @@ public sealed class SalesStatisticsProductStoreDailyCommandWriterTests
             });
 
         Assert.Same(expected, actual);
-        Assert.Equal(new[] { "begin-1", "work-1", "rollback-1", "delay-1", "begin-2", "work-2", "commit-2" }, steps);
+        Assert.Equal(new[] { "begin-1", "work-1", "rollback-1", "delay-2", "begin-2", "work-2", "commit-2" }, steps);
     }
 
     [Theory]
