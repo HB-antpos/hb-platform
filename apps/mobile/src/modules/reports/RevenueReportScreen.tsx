@@ -135,11 +135,12 @@ interface RevenueReportScreenProps {
 
 interface RevenueSummary {
   revenue: number;
-  compareRevenue: number;
+  /** 同期仍在补算时为 null，汇总卡显示“—”而不是按 0 算出“新增”。 */
+  compareRevenue: number | null;
   transactions: number;
-  compareTransactions: number;
+  compareTransactions: number | null;
   averageTransaction: number;
-  compareAverageTransaction: number;
+  compareAverageTransaction: number | null;
 }
 
 type SummaryListItem =
@@ -206,10 +207,23 @@ function buildRevenueSummary(rows: BranchRevenueRow[]): RevenueSummary | null {
     { revenue: 0, compareRevenue: 0, transactions: 0, compareTransactions: 0 }
   );
 
+  const averageTransaction = totals.transactions > 0 ? totals.revenue / totals.transactions : 0;
+  // 任一分店同期未知时同期合计不可信，整组同期置空，避免把部分同期当成全部。
+  if (rows.some((row) => row.compareUnavailable)) {
+    return {
+      revenue: totals.revenue,
+      compareRevenue: null,
+      transactions: totals.transactions,
+      compareTransactions: null,
+      averageTransaction,
+      compareAverageTransaction: null,
+    };
+  }
+
   return {
     ...totals,
     // 汇总客单价必须用汇总营业额/客单数计算，不能平均各分店客单价。
-    averageTransaction: totals.transactions > 0 ? totals.revenue / totals.transactions : 0,
+    averageTransaction,
     compareAverageTransaction:
       totals.compareTransactions > 0 ? totals.compareRevenue / totals.compareTransactions : 0,
   };
@@ -1042,6 +1056,8 @@ export function RevenueReportScreen({
   }, [cumulativeCardReady, revenueLoadTimer, summaryQuery.dataUpdatedAt]);
   const summaryPending = summaryQuery.data !== undefined && !summaryQuery.data.isComplete;
   const summaryPollingExhausted = summaryPending && Boolean(summaryQuery.data?.pollingExhausted);
+  // 本期已出、同期仍在补算：排行照常显示，状态栏提示并保留手动重试入口。
+  const summaryComparePending = rows.some((row) => row.compareUnavailable);
   const selectedBranch = useMemo(
     () => rows.find((row) => row.branchCode === selectedBranchCode) ?? null,
     [rows, selectedBranchCode],
@@ -1083,6 +1099,7 @@ export function RevenueReportScreen({
     && (detailQuery.isFetching || !detailQuery.data?.isComplete || detailQuery.isError);
   const detailPending = detailQuery.data !== undefined && !detailQuery.data.isComplete;
   const detailPollingExhausted = detailPending && Boolean(detailQuery.data?.pollingExhausted);
+  const detailComparePending = detailRows.some((row) => isDailyRow(row) && Boolean(row.compareUnavailable));
   // 分时下钻是单店本地小时（未平移）：截止、高亮与「实时」时刻都换算到该店自己的时间，
   // 否则夏令时期间从全部分店点进布里斯班店，会按悉尼时间把本地进行中的小时当成已完整。
   const detailBranchCode = drilldown?.branch.branchCode ?? null;
@@ -1246,21 +1263,31 @@ export function RevenueReportScreen({
       </View>
       <View style={styles.amountColumn}>
         <TableText numeric style={styles.strongText}>{formatWholeMoney(item.revenue)}</TableText>
-        <TableText numeric style={styles.muted}>{formatWholeMoney(item.compareRevenue)}</TableText>
-        <TableText
-          numeric
-          style={[styles.compactGrowthText, { color: GROWTH_COLORS[getGrowthTone(item.revenue, item.compareRevenue)] }]}
-        >
-          {formatGrowthRate(item.revenue, item.compareRevenue, growthNewLabel)}
+        <TableText numeric style={styles.muted}>
+          {item.compareUnavailable ? "—" : formatWholeMoney(item.compareRevenue)}
         </TableText>
+        {item.compareUnavailable ? (
+          <TableText numeric style={[styles.compactGrowthText, styles.muted]}>—</TableText>
+        ) : (
+          <TableText
+            numeric
+            style={[styles.compactGrowthText, { color: GROWTH_COLORS[getGrowthTone(item.revenue, item.compareRevenue)] }]}
+          >
+            {formatGrowthRate(item.revenue, item.compareRevenue, growthNewLabel)}
+          </TableText>
+        )}
       </View>
       <View style={styles.countColumn}>
         <TableText numeric style={styles.strongText}>{formatCount(item.transactions)}</TableText>
-        <TableText numeric style={styles.muted}>{formatCount(item.compareTransactions)}</TableText>
+        <TableText numeric style={styles.muted}>
+          {item.compareUnavailable ? "—" : formatCount(item.compareTransactions)}
+        </TableText>
       </View>
       <View style={styles.averageColumn}>
         <TableText numeric style={styles.strongText}>{formatMoney(item.averageTransaction)}</TableText>
-        <TableText numeric style={styles.muted}>{formatMoney(item.compareAverageTransaction)}</TableText>
+        <TableText numeric style={styles.muted}>
+          {item.compareUnavailable ? "—" : formatMoney(item.compareAverageTransaction)}
+        </TableText>
       </View>
       <Text style={styles.chevronText} accessibilityElementsHidden>›</Text>
     </Pressable>
@@ -1291,6 +1318,8 @@ export function RevenueReportScreen({
     const hourlyView = isHourlyDetailView(item) ? item : null;
     const upcoming = hourlyView?.status === "upcoming";
     const inProgress = hourlyView?.status === "live";
+    // 只有逐日明细会走“本期先出”回退；同期未知时同期与增长率都显示“—”。
+    const compareUnavailable = isDailyRow(item) && Boolean(item.compareUnavailable);
     // 进行中的小时只有半截数据，数值弱化显示且不算增长率；未到的小时只保留去年值。
     const currentStyle = inProgress ? styles.detailLiveValue : styles.strongText;
     return (
@@ -1326,9 +1355,11 @@ export function RevenueReportScreen({
           <TableText numeric style={upcoming ? styles.muted : currentStyle}>
             {upcoming ? "—" : formatWholeMoney(item.revenue)}
           </TableText>
-          <TableText numeric style={styles.muted}>{formatWholeMoney(item.compareRevenue)}</TableText>
+          <TableText numeric style={styles.muted}>
+            {compareUnavailable ? "—" : formatWholeMoney(item.compareRevenue)}
+          </TableText>
         </View>
-        {inProgress || upcoming ? (
+        {inProgress || upcoming || compareUnavailable ? (
           <View style={[styles.growthColumn, styles.detailGrowthColumn]}>
             <TableText numeric style={[styles.compactGrowthText, styles.muted]}>
               {inProgress && hourlyView
@@ -1341,13 +1372,17 @@ export function RevenueReportScreen({
           <TableText numeric style={upcoming ? styles.muted : currentStyle}>
             {upcoming ? "—" : formatCount(item.transactions)}
           </TableText>
-          <TableText numeric style={styles.muted}>{formatCount(item.compareTransactions)}</TableText>
+          <TableText numeric style={styles.muted}>
+            {compareUnavailable ? "—" : formatCount(item.compareTransactions)}
+          </TableText>
         </View>
         <View style={styles.detailAmountColumn}>
           <TableText numeric style={upcoming ? styles.muted : currentStyle}>
             {upcoming ? "—" : formatMoney(item.averageTransaction)}
           </TableText>
-          <TableText numeric style={styles.muted}>{formatMoney(item.compareAverageTransaction)}</TableText>
+          <TableText numeric style={styles.muted}>
+            {compareUnavailable ? "—" : formatMoney(item.compareAverageTransaction)}
+          </TableText>
         </View>
       </View>
     );
@@ -1494,6 +1529,8 @@ export function RevenueReportScreen({
                     ? t(summaryPollingExhausted
                         ? "reports.states.statisticsIncomplete"
                         : "reports.states.refreshingStatistics")
+                    : summaryComparePending
+                    ? `${t("reports.branchCount", { count: visibleRows.length })} · ${t("reports.states.comparePending")}`
                     : `${t("reports.branchCount", { count: visibleRows.length })} · ${t("reports.metrics.revenue")} ↓`}
                 </Text>
                 {completeSummarySnapshotsRef.has(summarySnapshotKey) && (summaryRefreshing || summaryError || summaryPending) ? (
@@ -1505,7 +1542,9 @@ export function RevenueReportScreen({
                     })}
                   </Text>
                 ) : null}
-                {summaryPollingExhausted && summaryQueryEnabled && !summaryError ? (
+                {(summaryPollingExhausted || (summaryComparePending && !summaryRefreshing && !summaryLoading))
+                  && summaryQueryEnabled
+                  && !summaryError ? (
                   <IconButton
                     icon="refresh"
                     size={18}
@@ -1705,6 +1744,12 @@ export function RevenueReportScreen({
                       { value: "perHour", label: t("reports.cumulative.perHour") },
                     ]}
                   />
+                ) : null}
+
+                {detailComparePending ? (
+                  <Text variant="labelSmall" style={styles.snapshotNotice}>
+                    {t("reports.states.comparePendingNotice")}
+                  </Text>
                 ) : null}
 
                 {detailShowingSnapshot && detailRows.length > 0 ? (
