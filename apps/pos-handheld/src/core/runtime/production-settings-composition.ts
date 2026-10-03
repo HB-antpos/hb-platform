@@ -345,14 +345,17 @@ export function createProductionSettingsComposition(
           });
         }
         return Object.freeze(
-          scanned.devices.map((device) =>
-            Object.freeze({
+          scanned.devices.map((device) => {
+            // 原生标识前缀即通道：spp: 是已配对经典蓝牙，没有打印确认；双模打印机会同名出现两条，只推荐 BLE 那条。
+            const classic = device.id.toLowerCase().startsWith("spp:");
+            return Object.freeze({
               id: device.id,
               name: device.name,
-              transport: "bluetooth-le",
-              preferred: device.name.toLowerCase() === "printer001",
-            }),
-          ),
+              transport: classic ? "bluetooth-classic" : "bluetooth-le",
+              preferred:
+                !classic && device.name.toLowerCase() === "printer001",
+            });
+          }),
         );
       },
       connect: async (peripheralId, signal) => {

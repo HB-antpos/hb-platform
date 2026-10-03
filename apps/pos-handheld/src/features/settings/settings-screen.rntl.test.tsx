@@ -1397,6 +1397,21 @@ describe("SettingsScreen", () => {
     expect(screen.getByText("Recommended target · printer001")).toBeTruthy();
     expect(screen.getByText("Backup Xprinter")).toBeTruthy();
     expect(screen.getByText("Stockroom temperature sensor")).toBeTruthy();
+    // 经典蓝牙 SPP 与 BLE 必须能区分；未知通道原样显示。
+    expect(
+      screen.getByTestId("settings-printer-device-transport-printer-2").props
+        .children,
+    ).toBe(
+      "Classic Bluetooth (SPP) · no print confirmation, prefer the BLE entry",
+    );
+    expect(
+      screen.getByTestId("settings-printer-device-transport-sensor-1").props
+        .children,
+    ).toBe("Bluetooth LE · recommended");
+    expect(
+      screen.getByTestId("settings-printer-device-transport-printer001").props
+        .children,
+    ).toBe("bluetooth");
 
     const deviceList = screen.getByTestId("settings-printer-device-list");
     expect(deviceList.props.scrollEnabled).not.toBe(false);
@@ -2345,7 +2360,7 @@ class ScreenSettingsPort implements SettingsControlPort {
       id: "printer-2",
       name: "Backup Xprinter",
       preferred: false,
-      transport: "bluetooth",
+      transport: "bluetooth-classic",
     },
     {
       id: "sensor-1",

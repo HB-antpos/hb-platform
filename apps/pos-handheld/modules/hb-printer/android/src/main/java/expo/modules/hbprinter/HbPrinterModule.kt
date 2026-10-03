@@ -41,6 +41,7 @@ private const val BLE_PREFIX = "ble:"
 private const val SPP_PREFIX = "spp:"
 private const val MAX_REMEMBERED_OPERATION_IDS = 512
 private const val BLE_CHUNK_SIZE = 20
+private const val ACL_DISCONNECT_SETTLE_MS = 250L
 private val SPP_UUID: UUID =
   UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
@@ -108,6 +109,10 @@ class HbPrinterModule : Module() {
   private var scanIncludeAll = true
   private var scanTimeout: ScheduledFuture<*>? = null
   private var scanReceiverRegistered = false
+  private var linkReceiverRegistered = false
+  private var pendingSppLinkLoss: ScheduledFuture<*>? = null
+  private var pendingSppLinkLossAddress: String? = null
+  private var pendingSppLinkLossSocket: BluetoothSocket? = null
   private val discoveredDevices = linkedMapOf<String, DiscoveredPrinter>()
 
   private var connectPromise: Promise? = null
@@ -191,6 +196,34 @@ class HbPrinterModule : Module() {
 
           BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
             // BLE 仍按调用方时限继续；统一由 scanTimeout 收口两条扫描通道。
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * SPP 的 BluetoothSocket.isConnected 只反映本地状态，打印机关机/走出范围后仍是 true；
+   * 不监听 ACL 断开，状态会一直停在 ready，下一张小票就写进死连接并变成 unknown。
+   * 这里把链路断开和蓝牙关闭同步成 disconnected，下一次打印前的 connect() 才会真正重连。
+   */
+  private val linkStateReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      when (intent?.action) {
+        BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+          val address = aclAddress(intent) ?: return
+          postState { scheduleSppLinkLoss(address) }
+        }
+
+        BluetoothDevice.ACTION_ACL_CONNECTED -> {
+          val address = aclAddress(intent) ?: return
+          postState { cancelPendingSppLinkLoss(address) }
+        }
+
+        BluetoothAdapter.ACTION_STATE_CHANGED -> {
+          val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+          if (state == BluetoothAdapter.STATE_TURNING_OFF || state == BluetoothAdapter.STATE_OFF) {
+            postState { handleBluetoothTurnedOff() }
           }
         }
       }
@@ -321,6 +354,7 @@ class HbPrinterModule : Module() {
             message = "打印模块已卸载，无法确认打印或开箱结果。",
           )
           clearConnectedTransport()
+          unregisterLinkStateReceiver()
           scheduler.shutdownNow()
           ioExecutor.shutdownNow()
           stateExecutor.shutdown()
@@ -621,6 +655,7 @@ class HbPrinterModule : Module() {
       return
     }
 
+    ensureLinkStateReceiverRegistered()
     connectPromise = promise
     connectingToken = token
     connectionState = "connecting"
@@ -706,6 +741,117 @@ class HbPrinterModule : Module() {
         }
       }
     }
+  }
+
+  private fun ensureLinkStateReceiverRegistered() {
+    if (linkReceiverRegistered) return
+    val context = appContext.reactContext?.applicationContext ?: return
+    val filter = IntentFilter().apply {
+      addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+      addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+      addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+    }
+    // 两个都是系统受保护广播，NOT_EXPORTED 仍可收到，且不接受其他 App 伪造。
+    runCatching {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.registerReceiver(linkStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+      } else {
+        @Suppress("DEPRECATION")
+        context.registerReceiver(linkStateReceiver, filter)
+      }
+      linkReceiverRegistered = true
+    }
+  }
+
+  private fun unregisterLinkStateReceiver() {
+    if (!linkReceiverRegistered) return
+    val context = appContext.reactContext?.applicationContext
+    if (context != null) {
+      runCatching { context.unregisterReceiver(linkStateReceiver) }
+    }
+    linkReceiverRegistered = false
+  }
+
+  private fun aclAddress(intent: Intent): String? {
+    val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+    } else {
+      @Suppress("DEPRECATION")
+      intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+    }
+    return device?.address?.uppercase(Locale.US)
+  }
+
+  /**
+   * 只处理已就绪的 SPP 连接：BLE 由 GATT 回调权威判定断开，避免双模打印机另一条
+   * ACL 的断开误伤当前 BLE 会话；连接中的 SPP 由 socket.connect 自身失败收口。
+   * 与移动端一致先等 250ms：期间同设备 ACL_CONNECTED 到达就取消，并在到期时核对 socket
+   * 身份，避免重连刚完成时迟到的旧断开广播把新连接清掉。
+   */
+  private fun scheduleSppLinkLoss(address: String) {
+    if (!isReadySppConnection(address)) return
+    val socket = sppSocket ?: return
+    pendingSppLinkLoss?.cancel(false)
+    pendingSppLinkLossAddress = address
+    pendingSppLinkLossSocket = socket
+    pendingSppLinkLoss = try {
+      scheduler.schedule(
+        { postState { handleSppLinkLost(address, socket) } },
+        ACL_DISCONNECT_SETTLE_MS,
+        TimeUnit.MILLISECONDS,
+      )
+    } catch (_: RejectedExecutionException) {
+      null
+    }
+  }
+
+  private fun cancelPendingSppLinkLoss(address: String) {
+    if (pendingSppLinkLossAddress != address) return
+    pendingSppLinkLoss?.cancel(false)
+    clearPendingSppLinkLoss()
+  }
+
+  private fun clearPendingSppLinkLoss() {
+    pendingSppLinkLoss = null
+    pendingSppLinkLossAddress = null
+    pendingSppLinkLossSocket = null
+  }
+
+  private fun isReadySppConnection(address: String): Boolean =
+    connectedTransport == TransportKind.SPP &&
+      connectionState == "ready" &&
+      connectedToken?.address == address
+
+  private fun handleSppLinkLost(address: String, socket: BluetoothSocket) {
+    // 已被 ACL_CONNECTED 取消或被更新的断开替换时，pending socket 不再是这一次的 socket。
+    if (pendingSppLinkLossSocket !== socket) return
+    clearPendingSppLinkLoss()
+    if (!isReadySppConnection(address) || sppSocket !== socket) return
+    finishPendingOperation(
+      state = "unknown",
+      message = "SPP 打印机在操作期间断开，无法确认打印或开箱结果。",
+    )
+    clearConnectedTransport()
+    connectionState = "disconnected"
+    emitStatus("spp-link-lost")
+  }
+
+  private fun handleBluetoothTurnedOff() {
+    if (connectPromise != null) {
+      failConnect(
+        "PRINTER_BLUETOOTH_POWERED_OFF",
+        "蓝牙已关闭，打印机连接未完成。",
+      )
+      return
+    }
+    if (connectedToken == null && connectionState != "ready") return
+    finishPendingOperation(
+      state = "unknown",
+      message = "蓝牙已关闭，无法确认打印或开箱结果。",
+    )
+    clearConnectedTransport()
+    connectionState = "disconnected"
+    emitStatus("bluetooth-off")
   }
 
   private fun failConnect(code: String, message: String, cause: Throwable? = null) {
