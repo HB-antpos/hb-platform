@@ -13,7 +13,8 @@
 .headerControls { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:6px; min-width:0; }
 .headerControls > div { margin:0; padding:0; border:0; background:transparent; gap:6px; }
 .headerControls > div > small { display:none; }
-.headerControls > div :global(.ant-picker-range) { width:206px; padding-inline:8px; }
+/* 实测 12.5px 下「2025-10-02」需约 71px 输入宽度；206px 只剩 69px 会截掉末位，220px 留出不同系统字体的余量 */
+.headerControls > div :global(.ant-picker-range) { width:220px; padding-inline:8px; }
 .headerControls > div :global(.ant-picker-range input) { font-size:12.5px; }
 .headerControls :global(.ant-segmented-item-label) { padding-inline:7px; }
 .headerControls > div > div > :global(.ant-btn) { padding-inline:10px; }
