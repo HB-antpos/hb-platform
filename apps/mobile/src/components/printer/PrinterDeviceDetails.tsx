@@ -2,10 +2,12 @@ import { Platform, StyleSheet, View } from "react-native";
 import { Icon, Text } from "react-native-paper";
 
 import {
+  getDisplayPrinterTransport,
   getPrinterDeviceIcon,
-  getPrinterTransport,
   isUnsupportedPrinterTransport,
+  requiresSystemPairing,
 } from "@/modules/printer/device-list";
+import { isBlePrintingSupported } from "@/modules/printer/native";
 import type { PrinterDevice } from "@/modules/printer/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
@@ -24,8 +26,13 @@ const TRANSPORT_LABEL_KEYS = {
 /** 显示地址与系统报告的能力，不以同名设备或图标猜测打印通道。 */
 export function PrinterDeviceDetails({ device }: PrinterDeviceDetailsProps) {
   const { t } = useAppTranslation(["settings"]);
-  const transport = getPrinterTransport(device);
-  const unsupported = isUnsupportedPrinterTransport(device, Platform.OS);
+  const transport = getDisplayPrinterTransport(device, Platform.OS);
+  const unsupported = isUnsupportedPrinterTransport(device, Platform.OS, isBlePrintingSupported());
+  const needsSystemPairing = requiresSystemPairing(device, Platform.OS);
+  // BLE 不看配对状态，直接连接；经典蓝牙未配对时提示去系统蓝牙设置配对。
+  const connectHint = transport === "ble"
+    ? t("printer.bleDirectConnect")
+    : device.bonded ? t("printer.bonded") : needsSystemPairing ? t("printer.systemPairingRequired") : t("printer.unbonded");
   const icon = getPrinterDeviceIcon(device) === "printer" ? "printer-outline" : "bluetooth";
 
   return (
@@ -42,11 +49,12 @@ export function PrinterDeviceDetails({ device }: PrinterDeviceDetailsProps) {
         </Text>
         <Text
           variant="bodySmall"
-          style={[styles.secondary, !device.bonded && styles.unbonded]}
+          style={[styles.secondary, needsSystemPairing && styles.unbonded]}
           numberOfLines={2}
         >
-          {Platform.OS === "android" ? `${t(TRANSPORT_LABEL_KEYS[transport])} · ` : ""}
-          {device.bonded ? t("printer.bonded") : t("printer.unbonded")}
+          {unsupported
+            ? t(TRANSPORT_LABEL_KEYS[transport])
+            : `${t(TRANSPORT_LABEL_KEYS[transport])} · ${connectHint}`}
         </Text>
         {unsupported ? (
           <Text variant="bodySmall" style={styles.unsupported} numberOfLines={2}>

@@ -66,7 +66,7 @@ test("诊断、设备与双打印机详情入口可操作且共享原生打印�
   }
   assert.match(source, /const handleConnectReceiptPrinter\s*=\s*\(device: PrinterDevice\)/);
   assert.match(source, /onSelect=\{handleConnectReceiptPrinter\}/);
-  assert.match(source, /handleConnectReceiptPrinter[\s\S]{0,900}dialogs\.printerPairingTitle/);
+  assert.match(source, /handleConnectReceiptPrinter[\s\S]{0,600}showSystemPairingRequiredAlert\(t, device\)/);
 });
 
 test("详情弹窗使用原生可访问模态并管理进入与返回焦点", () => {
@@ -109,38 +109,44 @@ test("打印机列表明确区分配对状态并复用已配对优先排序", ()
   assert.match(settings, /<PrinterDeviceDetails device=\{printer\}/);
   assert.match(setupSheet, /filterPrinterDevices/);
   assert.match(setupSheet, /<PrinterDeviceDetails device=\{device\}/);
-  assert.match(details, /device\.bonded\s*\?\s*t\("printer\.bonded"\)\s*:\s*t\("printer\.unbonded"\)/);
-  assert.match(details, /!device\.bonded\s*&&\s*styles\.unbonded/);
+  // BLE 显示“可直接连接”，经典蓝牙按配对状态显示，未配对时提示去系统设置配对并高亮。
+  assert.match(details, /transport === "ble"\s*\?\s*t\("printer\.bleDirectConnect"\)/);
+  assert.match(details, /device\.bonded \? t\("printer\.bonded"\) : needsSystemPairing \? t\("printer\.systemPairingRequired"\)/);
+  assert.match(details, /needsSystemPairing\s*&&\s*styles\.unbonded/);
 
   assert.equal(zh.printer.bonded, "已配对");
   assert.equal(zh.printer.unbonded, "未配对");
   assert.equal(en.printer.bonded, "Paired");
   assert.equal(en.printer.unbonded, "Not paired");
+  assert.equal(zh.printer.bleDirectConnect, "无需配对，可直接连接");
+  assert.match(zh.printer.systemPairingRequired, /系统蓝牙设置/);
+  assert.match(en.printer.systemPairingRequired, /system Bluetooth settings/);
 });
 
-test("未配对打印机连接前明确说明系统配对步骤", () => {
+test("未配对经典蓝牙引导去系统设置配对，BLE 直接连接", () => {
   const settings = read("app/(shell)/settings.tsx");
   const setupSheet = read("src/components/printer/LabelPrinterSetupSheet.tsx");
+  const alert = read("src/components/printer/system-pairing-alert.ts");
   const zh = JSON.parse(read("src/locales/zh/screens/settings.json"));
   const en = JSON.parse(read("src/locales/en/screens/settings.json"));
 
   for (const source of [settings, setupSheet]) {
-    assert.match(source, /Platform\.OS\s*!==\s*"android"\s*\|\|\s*device\.bonded/);
-    assert.match(source, /device\.bonded/);
-    assert.match(source, /dialogs\.printerPairingTitle/);
-    assert.match(source, /dialogs\.printerPairingMessage/);
-    assert.match(source, /dialogs\.printerPairingAction/);
+    assert.match(source, /if \(requiresSystemPairing\(device, Platform\.OS\)\) \{\s*showSystemPairingRequiredAlert\(t, device\);\s*return;/);
+    assert.doesNotMatch(source, /dialogs\.printerPairingAction/, "App 内不再代为发起配对");
   }
+  assert.match(alert, /dialogs\.printerPairingTitle/);
+  assert.match(alert, /dialogs\.printerPairingMessage/);
+  assert.match(alert, /dialogs\.printerPairingAction[\s\S]{0,80}openBluetoothSettings\(\)/);
 
-  assert.equal(zh.dialogs.printerPairingTitle, "需要先配对打印机");
-  assert.match(zh.dialogs.printerPairingMessage, /系统配对窗口/);
-  assert.equal(zh.dialogs.printerPairingAction, "开始配对");
-  assert.equal(en.dialogs.printerPairingTitle, "Pair printer first");
-  assert.match(en.dialogs.printerPairingMessage, /system pairing prompt/i);
-  assert.equal(en.dialogs.printerPairingAction, "Start pairing");
+  assert.equal(zh.dialogs.printerPairingTitle, "请先在系统中配对");
+  assert.match(zh.dialogs.printerPairingMessage, /系统蓝牙设置[\s\S]*BLE[\s\S]*直接连接/);
+  assert.equal(zh.dialogs.printerPairingAction, "打开蓝牙设置");
+  assert.equal(en.dialogs.printerPairingTitle, "Pair in system settings first");
+  assert.match(en.dialogs.printerPairingMessage, /system Bluetooth settings[\s\S]*BLE[\s\S]*connect directly/i);
+  assert.equal(en.dialogs.printerPairingAction, "Open Bluetooth settings");
 });
 
-test("安卓标签打印机按蓝牙类型筛选并阻止选择 BLE 设备", () => {
+test("安卓标签打印机按蓝牙类型筛选，仅旧原生包阻止选择 BLE 设备", () => {
   const settings = read("app/(shell)/settings.tsx");
   const setupSheet = read("src/components/printer/LabelPrinterSetupSheet.tsx");
   const filters = read("src/components/printer/PrinterTransportFilterControls.tsx");
@@ -149,7 +155,7 @@ test("安卓标签打印机按蓝牙类型筛选并阻止选择 BLE 设备", () 
   for (const source of [settings, setupSheet]) {
     assert.match(source, /DEFAULT_PRINTER_TRANSPORT_FILTERS/);
     assert.match(source, /filterPrinterDevices\(/);
-    assert.match(source, /isUnsupportedPrinterTransport\(device, Platform\.OS\)/);
+    assert.match(source, /isUnsupportedPrinterTransport\(device, Platform\.OS, isBlePrintingSupported\(\)\)/);
     assert.match(source, /<PrinterTransportFilterControls/);
     assert.match(source, /<PrinterDeviceDetails/);
     assert.match(source, /printer\.emptyTransportFiltered/);

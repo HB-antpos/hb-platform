@@ -1,16 +1,17 @@
-import type { PrinterDevice } from "@/modules/printer/types";
+import type { PrinterDevice, PrinterTransport } from "@/modules/printer/types";
 
 export interface PrinterTransportFilters {
   showClassic: boolean;
   showBle: boolean;
 }
 
+// 经典蓝牙与 BLE 都可连接，默认同时列出，由每行的提示区分“需系统配对”和“可直接连接”。
 export const DEFAULT_PRINTER_TRANSPORT_FILTERS: Readonly<PrinterTransportFilters> = {
   showClassic: true,
-  showBle: false,
+  showBle: true,
 };
 
-export function getPrinterTransport(device: PrinterDevice) {
+export function getPrinterTransport(device: PrinterDevice): PrinterTransport {
   switch (device.transport) {
     case "classic":
     case "ble":
@@ -22,8 +23,19 @@ export function getPrinterTransport(device: PrinterDevice) {
   }
 }
 
-export function isUnsupportedPrinterTransport(device: PrinterDevice, platform: string) {
-  return platform === "android" && getPrinterTransport(device) === "ble";
+/** 列表展示用的通道：iOS 只能走 BLE，扫描结果不带类型字段。 */
+export function getDisplayPrinterTransport(device: PrinterDevice, platform: string): PrinterTransport {
+  return platform === "ios" ? "ble" : getPrinterTransport(device);
+}
+
+/** 只有旧安卓原生包（无 BLE GATT 通道）才拒绝 BLE-only 设备。 */
+export function isUnsupportedPrinterTransport(device: PrinterDevice, platform: string, bleSupported: boolean) {
+  return platform === "android" && !bleSupported && getPrinterTransport(device) === "ble";
+}
+
+/** 安卓经典/双模/未知类型设备走 RFCOMM，必须先在系统蓝牙设置中配对；BLE 直接连接。 */
+export function requiresSystemPairing(device: PrinterDevice, platform: string) {
+  return platform === "android" && !device.bonded && getPrinterTransport(device) !== "ble";
 }
 
 export function getPrinterDeviceIcon(device: PrinterDevice): "printer" | "bluetooth" {

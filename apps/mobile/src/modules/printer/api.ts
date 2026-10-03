@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
 import type { ProductDetail } from "@/modules/product-maintenance/types";
-import { isUnsupportedPrinterTransport } from "@/modules/printer/device-list";
+import { isUnsupportedPrinterTransport, requiresSystemPairing } from "@/modules/printer/device-list";
 import {
   buildCashRegisterUserBarcodeLabelCommand,
   buildEmployeeCashierBarcodeLabelCommand,
@@ -9,7 +9,7 @@ import {
   connectPrinter,
   disconnectPrinter,
   getPrinterStatus as getNativePrinterStatus,
-  pairPrinter,
+  isBlePrintingSupported,
   printNativeBigDiscountLabel,
   printNativeClearanceLabel,
   printNativeDiscountLabel,
@@ -96,7 +96,22 @@ function toSavedPrinter(device: PrinterDevice | SavedPrinter): SavedPrinter {
   return {
     name: device.name ?? null,
     address: device.address,
+    ...(device.transport ? { transport: device.transport } : {}),
   };
+}
+
+// 选择前的统一校验：旧安卓包不支持 BLE；经典蓝牙未在系统中配对时不进入连接流程。
+function assertPrinterSelectable(device: PrinterDevice) {
+  if (isUnsupportedPrinterTransport(device, Platform.OS, isBlePrintingSupported())) {
+    throw Object.assign(new Error("This app build does not support BLE printers. Install the updated app or select the classic Bluetooth device with the same name."), {
+      code: "PRINTER_BLE_UNSUPPORTED",
+    });
+  }
+  if (requiresSystemPairing(device, Platform.OS)) {
+    throw Object.assign(new Error("Pair the classic Bluetooth printer in Android Bluetooth settings first, then connect it in the app."), {
+      code: "PRINTER_PAIRING_REQUIRED",
+    });
+  }
 }
 
 function buildPayload(detail: ProductDetail, overrides?: ProductLabelOverrides) {
@@ -215,7 +230,7 @@ async function ensureConnectedPrinter(options?: { status?: "connecting" | "recon
   store.setStatus(options?.status ?? "connecting");
   store.setLastError(null);
   try {
-    const connected = await connectPrinter(savedPrinter.address);
+    const connected = await connectPrinter(savedPrinter.address, savedPrinter.transport);
     if (!connected) {
       throw new Error("Unable to connect to the saved label printer.");
     }
@@ -258,12 +273,8 @@ export async function getPrinterStatus() {
 }
 
 export async function selectPrinter(device: PrinterDevice) {
-  // 明确不支持的设备必须在恢复自动重连或修改保存/连接状态前拒绝。
-  if (isUnsupportedPrinterTransport(device, Platform.OS)) {
-    throw Object.assign(new Error("Android printing does not support BLE-only devices. Select the classic Bluetooth device with the same name."), {
-      code: "PRINTER_BLE_UNSUPPORTED",
-    });
-  }
+  // 不可连接的设备必须在恢复自动重连或修改保存/连接状态前拒绝。
+  assertPrinterSelectable(device);
   if (isIosReviewSessionActive()) {
     const store = usePrinterStore.getState();
     store.setSavedPrinter(toSavedPrinter(device));
@@ -281,11 +292,6 @@ export async function selectPrinter(device: PrinterDevice) {
     store.setLastError(null);
 
     try {
-      // 只允许手动点选未配对设备时唤起 Android 系统配对；后台重连仍只连接已保存设备。
-      if (!device.bonded) {
-        await pairPrinter(selectedPrinter.address);
-      }
-
       if (autoReconnectIntent !== selectionIntent || usePrinterStore.getState().autoReconnectPaused) {
         throw new Error("Printer connection was cancelled.");
       }
@@ -296,7 +302,7 @@ export async function selectPrinter(device: PrinterDevice) {
       }
       const connected = currentStatus.connected && currentStatus.address === selectedPrinter.address
         ? true
-        : await connectPrinter(selectedPrinter.address);
+        : await connectPrinter(selectedPrinter.address, selectedPrinter.transport);
       if (!connected) {
         throw new Error("Unable to connect to the selected label printer.");
       }
@@ -305,7 +311,7 @@ export async function selectPrinter(device: PrinterDevice) {
         throw new Error("Printer connection was cancelled.");
       }
 
-      // 配对与连接都成功后才保存，避免取消配对的同名地址进入自动重连。
+      // 连接成功后才保存，避免连不上的地址进入自动重连。
       await PrinterStorage.setPrinter(selectedPrinter);
       store.setSavedPrinter(selectedPrinter);
       labelConnectionInvalidated = false;
@@ -502,12 +508,8 @@ export async function testPrinterConnection() {
 }
 
 export async function selectReceiptPrinter(device: PrinterDevice) {
-  // Android 只支持经典蓝牙小票机；必须在读取状态、断开连接或写入存储前拒绝 BLE-only 设备。
-  if (isUnsupportedPrinterTransport(device, Platform.OS)) {
-    throw Object.assign(new Error("Android printing does not support BLE-only devices. Select the classic Bluetooth device with the same name."), {
-      code: "PRINTER_BLE_UNSUPPORTED",
-    });
-  }
+  // 必须在读取状态、断开连接或写入存储前拒绝不可连接的设备。
+  assertPrinterSelectable(device);
   if (isIosReviewSessionActive()) {
     const store = useReceiptPrinterStore.getState();
     store.setSavedPrinter(toSavedPrinter(device));
@@ -516,37 +518,8 @@ export async function selectReceiptPrinter(device: PrinterDevice) {
     return true;
   }
   const nextPrinter = toSavedPrinter(device);
-  if (Platform.OS === "android" && !device.bonded) {
-    return runPrinterOperation(async () => {
-      const store = useReceiptPrinterStore.getState();
-      const previousPrinter = store.hydrated
-        ? store.savedPrinter
-        : await PrinterStorage.getReceiptPrinter();
-      store.setStatus("connecting");
-      store.setLastError(null);
 
-      try {
-        // 未配对设备只先交给系统完成配对；小票选择沿用原有“仅保存”逻辑，不抢占标签 socket。
-        const paired = await pairPrinter(nextPrinter.address);
-        if (!paired) {
-          throw new Error("Unable to pair with the selected receipt printer.");
-        }
-        await PrinterStorage.setReceiptPrinter(nextPrinter);
-        store.setSavedPrinter(nextPrinter);
-        store.setAutoReconnectPaused(false);
-        store.setLastError(null);
-        store.setStatus("idle");
-        return true;
-      } catch (error) {
-        store.setSavedPrinter(previousPrinter);
-        store.setLastError(error instanceof Error ? error.message : String(error));
-        store.setStatus("error");
-        throw error;
-      }
-    });
-  }
-
-  // Android 已配对设备和 iOS 保持原有行为：选择只写入小票机配置，不连接原生 socket。
+  // 选择只写入小票机配置，不连接原生 socket；BLE 设备在测试打印时按保存的类型直连。
   await PrinterStorage.setReceiptPrinter(nextPrinter);
   const store = useReceiptPrinterStore.getState();
   store.setSavedPrinter(nextPrinter);
@@ -609,7 +582,7 @@ export async function testReceiptPrinterConnection() {
     let cleanupError: unknown = null;
 
     try {
-      const connected = await connectPrinter(savedPrinter.address);
+      const connected = await connectPrinter(savedPrinter.address, savedPrinter.transport);
       if (!connected) {
         receiptStore.setStatus("error");
         throw new Error("Unable to connect to the saved receipt printer.");

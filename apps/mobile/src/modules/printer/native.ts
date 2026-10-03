@@ -1,4 +1,4 @@
-import { NativeEventEmitter, NativeModules, PermissionsAndroid, Platform } from "react-native";
+import { Linking, NativeEventEmitter, NativeModules, PermissionsAndroid, Platform } from "react-native";
 import {
   buildBigDiscountLabelCommand,
   buildClearanceLabelCommand,
@@ -10,6 +10,7 @@ import {
 import type {
   PrinterDevice,
   PrinterStatus,
+  PrinterTransport,
   ProductLabelPrintPayload,
   WarehouseLocationLabelPrintPayload,
   WarehouseProductLabelPrintPayload,
@@ -20,8 +21,9 @@ type NativePrinterModule = {
   removeListeners?(count: number): void;
   getStatus(): Promise<PrinterStatus>;
   scanPrinters(durationMs?: number): Promise<PrinterDevice[]>;
-  pair?(address: string): Promise<boolean>;
   connect(address: string): Promise<boolean>;
+  /** 新安卓原生包才有：按传输类型选择 RFCOMM 或 BLE GATT，同时作为“支持 BLE 打印”的能力标记。 */
+  connectWithTransport?(address: string, transport: PrinterTransport | null): Promise<boolean>;
   disconnect(): Promise<boolean>;
   print(command: string, encoding?: string): Promise<boolean>;
   printProductLabel(payload: ProductLabelPrintPayload, printType?: string | null): Promise<boolean>;
@@ -124,25 +126,33 @@ export async function scanPrinters(durationMs = 5000) {
   return getModule().scanPrinters(durationMs);
 }
 
-export async function connectPrinter(address: string) {
-  await ensureBluetoothPermissions();
-  return getModule().connect(address);
-}
-
-export async function pairPrinter(address: string) {
-  await ensureBluetoothPermissions();
-  if (Platform.OS !== "android") {
+/** iOS 只有 BLE；安卓需新原生包才能走 BLE GATT，OTA 推到旧安装包时仍按不支持处理。 */
+export function isBlePrintingSupported() {
+  if (Platform.OS === "ios") {
     return true;
   }
+  return Platform.OS === "android" && typeof nativeModule?.connectWithTransport === "function";
+}
 
+export async function connectPrinter(address: string, transport?: PrinterTransport | null) {
+  await ensureBluetoothPermissions();
   const module = getModule();
-  if (typeof module.pair !== "function") {
-    throw Object.assign(
-      new Error("This app build does not support Android Bluetooth printer pairing."),
-      { code: "PRINTER_PAIRING_UNAVAILABLE" }
-    );
+  if (Platform.OS === "android" && typeof module.connectWithTransport === "function") {
+    return module.connectWithTransport(address, transport ?? null);
   }
-  return module.pair(address);
+  return module.connect(address);
+}
+
+/** 经典蓝牙必须先在系统中配对；打不开蓝牙设置页时退回本应用设置页。 */
+export async function openBluetoothSettings() {
+  if (Platform.OS !== "android") {
+    return Linking.openSettings();
+  }
+  try {
+    await Linking.sendIntent("android.settings.BLUETOOTH_SETTINGS");
+  } catch {
+    await Linking.openSettings();
+  }
 }
 
 export async function disconnectPrinter() {

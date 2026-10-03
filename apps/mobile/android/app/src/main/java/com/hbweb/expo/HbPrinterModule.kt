@@ -58,8 +58,9 @@ class HbPrinterModule(
   private val labelHeight = 400
   private val warehouseLabelHeight = 208
 
+  // 当前唯一打印连接：经典蓝牙为 RFCOMM，BLE 为 GATT；清理时按对象身份比对，防止过期回调误清新连接。
   @Volatile
-  private var socket: BluetoothSocket? = null
+  private var connection: PrinterConnection? = null
 
   @Volatile
   private var connectedAddress: String? = null
@@ -86,8 +87,9 @@ class HbPrinterModule(
             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
           }
           val disconnectedAddress = device?.address
+          // BLE 断线由 GATT 回调负责，这里只处理 RFCOMM，避免两条路径重复清理。
           val activeSocket = synchronized(connectionLock) {
-            if (disconnectedAddress == connectedAddress) socket else null
+            if (disconnectedAddress == connectedAddress) connection as? RfcommPrinterConnection else null
           }
           if (activeSocket != null && disconnectedAddress != null) {
             pendingAclDisconnect?.let(handler::removeCallbacks)
@@ -199,8 +201,9 @@ class HbPrinterModule(
       return
     }
 
-    // BLE-only 地址没有 RFCOMM/SPP 通道，必须在 createBond 前结束，避免系统配对后仍然超时。
-    if (rejectBleOnlyDevice(device, promise)) {
+    // BLE 打印走 GATT 直连，无需系统绑定；旧 JS 仍可能调用 pair，直接放行。
+    if (device.type == BluetoothDevice.DEVICE_TYPE_LE) {
+      promise.resolve(true)
       return
     }
 
@@ -270,9 +273,9 @@ class HbPrinterModule(
       val map = Arguments.createMap()
       map.putBoolean("supported", adapter != null)
       map.putBoolean("enabled", adapter?.isEnabled == true)
-      val connection = synchronized(connectionLock) { socket to connectedAddress }
-      map.putBoolean("connected", connection.first?.isConnected == true)
-      map.putString("address", connection.second)
+      val current = synchronized(connectionLock) { connection to connectedAddress }
+      map.putBoolean("connected", current.first?.isConnected == true)
+      map.putString("address", current.second)
       promise.resolve(map)
     } catch (error: Exception) {
       promise.reject("STATUS_ERROR", error.message, error)
@@ -299,7 +302,7 @@ class HbPrinterModule(
         name = device.name,
         address = device.address,
         bonded = true,
-        connected = device.address == connectedAddress && socket?.isConnected == true,
+        connected = device.address == connectedAddress && connection?.isConnected == true,
         transport = bluetoothTransport(device),
         deviceClass = device.bluetoothClass?.deviceClass,
       )
@@ -361,7 +364,7 @@ class HbPrinterModule(
                 name = device.name,
                 address = device.address,
                 bonded = device.bondState == BluetoothDevice.BOND_BONDED,
-                connected = device.address == connectedAddress && socket?.isConnected == true,
+                connected = device.address == connectedAddress && connection?.isConnected == true,
                 transport = bluetoothTransport(device),
                 deviceClass = device.bluetoothClass?.deviceClass,
               )
@@ -400,9 +403,16 @@ class HbPrinterModule(
     }
   }
 
-  @SuppressLint("MissingPermission")
   @ReactMethod
   fun connect(address: String, promise: Promise) {
+    // 旧 JS 不传类型：按系统缓存的设备类型选择通道。
+    connectWithTransport(address, null, promise)
+  }
+
+  /** JS 传入扫描/保存时记录的传输类型；重启后系统可能已忘记未绑定 BLE 地址的类型，不能只靠 device.type。 */
+  @SuppressLint("MissingPermission")
+  @ReactMethod
+  fun connectWithTransport(address: String, transport: String?, promise: Promise) {
     val adapter = bluetoothAdapter
     if (adapter == null) {
       promise.reject("BLUETOOTH_UNSUPPORTED", "Bluetooth is not supported on this device.")
@@ -421,13 +431,15 @@ class HbPrinterModule(
       return
     }
 
-    // 在 beginConnectionAttempt 清理旧 socket 前拒绝 BLE，后台重连旧地址也不会打断当前连接。
-    if (rejectBleOnlyDevice(device, promise)) {
-      return
+    val useBle = when (transport) {
+      "ble" -> true
+      "classic", "dual" -> false
+      else -> device.type == BluetoothDevice.DEVICE_TYPE_LE
     }
 
-    // RFCOMM connect() 会隐式触发配对并一直阻塞到 socket 超时；必须由手动选择流程先完成配对。
-    if (device.bondState != BluetoothDevice.BOND_BONDED) {
+    // RFCOMM connect() 会隐式触发配对并一直阻塞到 socket 超时；经典蓝牙必须先在系统蓝牙设置中配对。
+    // BLE 走 GATT 直连，不要求绑定。
+    if (!useBle && device.bondState != BluetoothDevice.BOND_BONDED) {
       promise.reject(
         "PRINTER_PAIRING_REQUIRED",
         "Pair the Bluetooth printer before starting the RFCOMM connection.",
@@ -436,20 +448,34 @@ class HbPrinterModule(
     }
 
     Thread {
-      var nextSocket: BluetoothSocket? = null
+      var nextConnection: PrinterConnection? = null
       try {
         val attemptGeneration = beginConnectionAttempt()
         if (adapter.isDiscovering) {
           adapter.cancelDiscovery()
         }
 
-        nextSocket = device.createRfcommSocketToServiceRecord(printerUuid)
-        nextSocket.connect()
+        nextConnection = if (useBle) {
+          BlePrinterConnection.open(appContext, device, BLE_CONNECT_TIMEOUT_MS) { lost ->
+            if (clearConnection(lost)) {
+              emitStatusChanged()
+            }
+          }
+        } else {
+          val socket = device.createRfcommSocketToServiceRecord(printerUuid)
+          try {
+            socket.connect()
+          } catch (error: Exception) {
+            closeQuietly(socket)
+            throw error
+          }
+          RfcommPrinterConnection(socket)
+        }
         val installed = synchronized(connectionLock) {
           if (connectionGeneration != attemptGeneration || adapter.isEnabled != true) {
             false
           } else {
-            socket = nextSocket
+            connection = nextConnection
             connectedAddress = address
             true
           }
@@ -457,15 +483,12 @@ class HbPrinterModule(
         if (!installed) {
           throw IllegalStateException("Bluetooth printer connection was cancelled.")
         }
-        nextSocket = null
+        nextConnection = null
         emitStatusChanged()
         promise.resolve(true)
       } catch (error: Exception) {
-        // connect() 失败时 socket 尚未写入共享状态，必须单独关闭，避免 RFCOMM 资源泄漏。
-        try {
-          nextSocket?.close()
-        } catch (_: Exception) {
-        }
+        // 连接未写入共享状态时必须单独关闭，避免 RFCOMM/GATT 资源泄漏。
+        nextConnection?.close()
         promise.reject("CONNECT_ERROR", error.message, error)
       }
     }.start()
@@ -582,19 +605,17 @@ class HbPrinterModule(
   }
 
   private fun writePrinterCommand(command: String, encoding: String) {
-    val activeSocket = synchronized(connectionLock) { socket }
-    if (activeSocket == null || !activeSocket.isConnected) {
+    val activeConnection = synchronized(connectionLock) { connection }
+    if (activeConnection == null || !activeConnection.isConnected) {
       throw IllegalStateException("No Bluetooth printer is connected.")
     }
 
     val charset = Charset.forName(encoding)
     try {
-      val outputStream = activeSocket.outputStream
-      outputStream.write(command.toByteArray(charset))
-      outputStream.flush()
+      activeConnection.write(command.toByteArray(charset))
     } catch (error: Exception) {
       // 数据是否已被打印机接收不可判定：只失效连接并保留原始异常，禁止自动重放。
-      if (clearConnection(activeSocket)) {
+      if (clearConnection(activeConnection)) {
         emitStatusChanged()
       }
       throw error
@@ -1338,16 +1359,16 @@ class HbPrinterModule(
   }
 
   private fun beginConnectionAttempt(): Long {
-    val previousSocket: BluetoothSocket?
+    val previousConnection: PrinterConnection?
     val generation: Long
     synchronized(connectionLock) {
-      previousSocket = socket
-      socket = null
+      previousConnection = connection
+      connection = null
       connectedAddress = null
       connectionGeneration += 1
       generation = connectionGeneration
     }
-    closeSocket(previousSocket)
+    previousConnection?.close()
     return generation
   }
 
@@ -1357,25 +1378,25 @@ class HbPrinterModule(
     }
   }
 
-  private fun clearConnection(expectedSocket: BluetoothSocket? = null): Boolean {
-    val socketToClose: BluetoothSocket?
+  private fun clearConnection(expectedConnection: PrinterConnection? = null): Boolean {
+    val connectionToClose: PrinterConnection?
     synchronized(connectionLock) {
-      if (expectedSocket != null && socket !== expectedSocket) {
+      if (expectedConnection != null && connection !== expectedConnection) {
         return false
       }
-      socketToClose = socket
-      if (socketToClose == null && connectedAddress == null) {
+      connectionToClose = connection
+      if (connectionToClose == null && connectedAddress == null) {
         return false
       }
-      socket = null
+      connection = null
       connectedAddress = null
       connectionGeneration += 1
     }
-    closeSocket(socketToClose)
+    connectionToClose?.close()
     return true
   }
 
-  private fun closeSocket(target: BluetoothSocket?) {
+  private fun closeQuietly(target: BluetoothSocket?) {
     try {
       target?.close()
     } catch (_: Exception) {
@@ -1388,18 +1409,6 @@ class HbPrinterModule(
     BluetoothDevice.DEVICE_TYPE_LE -> "ble"
     BluetoothDevice.DEVICE_TYPE_DUAL -> "dual"
     else -> "unknown"
-  }
-
-  @SuppressLint("MissingPermission")
-  private fun rejectBleOnlyDevice(device: BluetoothDevice, promise: Promise): Boolean {
-    if (device.type != BluetoothDevice.DEVICE_TYPE_LE) {
-      return false
-    }
-    promise.reject(
-      "PRINTER_BLE_UNSUPPORTED",
-      "This address only supports Bluetooth Low Energy. Select the classic Bluetooth address for this printer.",
-    )
-    return true
   }
 
   private fun completePendingPairing(address: String) {
@@ -1496,6 +1505,7 @@ class HbPrinterModule(
     private const val STATUS_EVENT = "HbPrinterStatusChanged"
     private const val ACL_DISCONNECT_SETTLE_MS = 250L
     private const val PAIRING_TIMEOUT_MS = 45_000L
+    private const val BLE_CONNECT_TIMEOUT_MS = 15_000L
   }
 
   data class PendingPairing(

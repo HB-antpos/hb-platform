@@ -1,8 +1,12 @@
 export type PrinterBarcodeKind = "EAN13" | "CODE128";
 
+export type PrinterTransport = "classic" | "ble" | "dual" | "unknown";
+
 export interface SavedPrinter {
   name?: string | null;
   address: string;
+  /** 选择时记录的蓝牙类型；安卓重连时据此选择 RFCOMM 或 BLE GATT，旧保存记录没有此字段。 */
+  transport?: PrinterTransport;
 }
 
 export interface PrinterDevice {
@@ -10,7 +14,7 @@ export interface PrinterDevice {
   address: string;
   bonded: boolean;
   connected: boolean;
-  transport?: "classic" | "ble" | "dual" | "unknown";
+  transport?: PrinterTransport;
   deviceClass?: number | null;
 }
 

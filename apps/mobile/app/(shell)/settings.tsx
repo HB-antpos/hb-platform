@@ -28,6 +28,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PrinterDeviceDetails } from "@/components/printer/PrinterDeviceDetails";
 import { PrinterTransportFilterControls } from "@/components/printer/PrinterTransportFilterControls";
+import { showSystemPairingRequiredAlert } from "@/components/printer/system-pairing-alert";
 import {
   clearSavedReceiptPrinter,
   clearSavedPrinter,
@@ -46,7 +47,9 @@ import {
   filterPrinterDevices,
   isUnsupportedPrinterTransport,
   orderPrinterDevices,
+  requiresSystemPairing,
 } from "@/modules/printer/device-list";
+import { isBlePrintingSupported } from "@/modules/printer/native";
 import { usePrinterStore, useReceiptPrinterStore, type PrinterConnectionState } from "@/modules/printer/state";
 import type { PrinterDevice } from "@/modules/printer/types";
 import { i18n, setAppLanguage } from "@/shared/i18n/i18n";
@@ -351,7 +354,7 @@ function PrinterDeviceList({
     <View style={styles.printerList}>
       {devices.map((printer) => {
         const selected = selectedAddress === printer.address;
-        const unsupported = isUnsupportedPrinterTransport(printer, Platform.OS);
+        const unsupported = isUnsupportedPrinterTransport(printer, Platform.OS, isBlePrintingSupported());
         return (
           <View key={printer.address} style={styles.printerRow}>
             <PrinterDeviceDetails device={printer} />
@@ -929,29 +932,17 @@ export default function Settings() {
   };
 
   const handleConnectPrinter = (device: PrinterDevice) => {
-    if (isUnsupportedPrinterTransport(device, Platform.OS)) {
+    if (isUnsupportedPrinterTransport(device, Platform.OS, isBlePrintingSupported())) {
       return;
     }
 
-    if (Platform.OS !== "android" || device.bonded) {
-      void connectPrinterDevice(device);
+    // 经典蓝牙须先在系统蓝牙设置中配对；BLE 与已配对设备直接连接。
+    if (requiresSystemPairing(device, Platform.OS)) {
+      showSystemPairingRequiredAlert(t, device);
       return;
     }
 
-    Alert.alert(
-      t("dialogs.printerPairingTitle"),
-      t("dialogs.printerPairingMessage", {
-        printer: device.name || device.address,
-        address: device.address,
-      }),
-      [
-        { text: t("common:actions.cancel"), style: "cancel" },
-        {
-          text: t("dialogs.printerPairingAction"),
-          onPress: () => void connectPrinterDevice(device),
-        },
-      ]
-    );
+    void connectPrinterDevice(device);
   };
 
   const handleTestPrinter = async () => {
@@ -1031,30 +1022,17 @@ export default function Settings() {
   };
 
   const handleConnectReceiptPrinter = (device: PrinterDevice) => {
-    if (isUnsupportedPrinterTransport(device, Platform.OS)) {
+    if (isUnsupportedPrinterTransport(device, Platform.OS, isBlePrintingSupported())) {
       return;
     }
 
-    if (Platform.OS !== "android" || device.bonded) {
-      void handleSaveReceiptPrinter(device);
+    // 小票机同样：经典蓝牙先去系统配对，BLE 直接保存。
+    if (requiresSystemPairing(device, Platform.OS)) {
+      showSystemPairingRequiredAlert(t, device);
       return;
     }
 
-    // 小票打印机复用标签打印机的系统配对确认，避免用户点击保存后才看到原生失败。
-    Alert.alert(
-      t("dialogs.printerPairingTitle"),
-      t("dialogs.printerPairingMessage", {
-        printer: device.name || device.address,
-        address: device.address,
-      }),
-      [
-        { text: t("common:actions.cancel"), style: "cancel" },
-        {
-          text: t("dialogs.printerPairingAction"),
-          onPress: () => void handleSaveReceiptPrinter(device),
-        },
-      ]
-    );
+    void handleSaveReceiptPrinter(device);
   };
 
   const handleTestReceiptPrinter = async () => {
