@@ -93,6 +93,7 @@ printf 'HB_TEST_SQLSERVER_CONNECTION=%s\\n' "\${HB_TEST_SQLSERVER_CONNECTION:-}"
 printf 'CONTAINER_MUTATION_SQLSERVER_TEST_CONNECTION=%s\\n' "\${CONTAINER_MUTATION_SQLSERVER_TEST_CONNECTION:-}" >> "$CI_SQL_CAPTURE"
 printf 'COST_BACKFILL_SQLSERVER_TEST_CONNECTION=%s\\n' "\${COST_BACKFILL_SQLSERVER_TEST_CONNECTION:-}" >> "$CI_SQL_CAPTURE"
 printf 'LINKLY_LINE_SQLSERVER_TEST_CONNECTION=%s\\n' "\${LINKLY_LINE_SQLSERVER_TEST_CONNECTION:-}" >> "$CI_SQL_CAPTURE"
+printf 'DOTNET_ARGS=%s\\n' "$*" >> "$CI_SQL_CAPTURE"
 exit 0
 `);
   makeExecutable(join(bin, "node"), "#!/usr/bin/env bash\nexit 0\n");
@@ -116,6 +117,15 @@ exit 0
     DEVICE_ACTIVATION_SQLSERVER_TEST_CONNECTION: connection,
     LINKLY_LINE_SQLSERVER_TEST_CONNECTION: connection,
     HBWEB_SCHEMA_SQLSERVER_TEST_CONNECTION: connection,
+    BATCH_SALES_SQLSERVER_TEST_CONNECTION: connection,
+    PURCHASE_SALES_SQLSERVER_TEST_CONNECTION: connection,
+    LSPA_SQLSERVER_TEST_CONNECTION: connection,
+    SALES_STATISTICS_RECOVERY_SQLSERVER_TEST_CONNECTION: connection.replace("localhost,1433", "127.0.0.1,15438"),
+  };
+  // 夹具带端口护栏的测试只认专用端口，其余连接统一指向 CI 容器默认端口。
+  const dedicatedEndpoints = {
+    COST_BACKFILL_SQLSERVER_TEST_CONNECTION: { endpoint: "127.0.0.1,11439", port: 11439 },
+    SALES_STATISTICS_RECOVERY_SQLSERVER_TEST_CONNECTION: { endpoint: "127.0.0.1,15438", port: 15438 },
   };
 
   for (const missingVariable of [
@@ -123,16 +133,20 @@ exit 0
     "CONTAINER_MUTATION_SQLSERVER_TEST_CONNECTION",
     "COST_BACKFILL_SQLSERVER_TEST_CONNECTION",
     "LINKLY_LINE_SQLSERVER_TEST_CONNECTION",
+    "BATCH_SALES_SQLSERVER_TEST_CONNECTION",
+    "PURCHASE_SALES_SQLSERVER_TEST_CONNECTION",
+    "LSPA_SQLSERVER_TEST_CONNECTION",
+    "SALES_STATISTICS_RECOVERY_SQLSERVER_TEST_CONNECTION",
   ]) {
     const workflow = readFileSync(join(repositoryRoot, ".github/workflows/pr-ci.yml"), "utf8");
     const weeklyJob = workflow.slice(workflow.indexOf("  weekly_sql:"), workflow.indexOf("  weekly_performance:"));
-    const endpoint = missingVariable === "COST_BACKFILL_SQLSERVER_TEST_CONNECTION"
-      ? "127.0.0.1,11439" : "localhost,1433";
+    const dedicated = dedicatedEndpoints[missingVariable];
+    const endpoint = dedicated?.endpoint ?? "localhost,1433";
     assert.ok(weeklyJob.includes(`      ${missingVariable}: Server=${endpoint};`),
-      "GitHub weekly 必须为测试提供专用 SQL Server 容器连接");
-    if (missingVariable === "COST_BACKFILL_SQLSERVER_TEST_CONNECTION") {
-      assert.match(weeklyJob, /^          - 11439:1433$/m,
-        "成本回填测试的专用端口必须映射到临时 CI SQL Server 容器");
+      `GitHub weekly 必须为 ${missingVariable} 提供专用 SQL Server 容器连接`);
+    if (dedicated) {
+      assert.match(weeklyJob, new RegExp(`^          - ${dedicated.port}:1433$`, "m"),
+        `${missingVariable} 的专用端口必须映射到临时 CI SQL Server 容器`);
     }
     const missingResult = run(weeklySqlScript, {
       ...baseEnv,
@@ -156,4 +170,11 @@ exit 0
   );
   assert.match(readFileSync(capture, "utf8"), /COST_BACKFILL_SQLSERVER_TEST_CONNECTION=Server=127\.0\.0\.1,11439/);
   assert.match(readFileSync(capture, "utf8"), /LINKLY_LINE_SQLSERVER_TEST_CONNECTION=Server=localhost,1433/);
+  // 手动容量基准与 HTTP 常驻调试服务必须被周跑筛掉，否则 Skip 会让 TRX 断言失败。
+  const backendTestArgs = readFileSync(capture, "utf8")
+    .split("\n")
+    .find((line) => line.startsWith("DOTNET_ARGS=test ") && line.includes("Category=SQL&"));
+  assert.ok(backendTestArgs, "weekly SQL 必须按 Category=SQL 运行后端集成测试");
+  assert.match(backendTestArgs, /FullyQualifiedName!~BatchProductSalesAnalysisSqlServerIntegrationTests\.Overview_Performance_SQLServer/);
+  assert.match(backendTestArgs, /FullyQualifiedName!~BatchProductSalesAnalysisSqlServerIntegrationTests\.BatchProductSalesHttpHarness/);
 });
