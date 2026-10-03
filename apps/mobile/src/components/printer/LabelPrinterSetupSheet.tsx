@@ -5,6 +5,7 @@ import { Button, HelperText, Switch, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { PrinterDeviceDetails } from "@/components/printer/PrinterDeviceDetails";
 import { PrinterTransportFilterControls } from "@/components/printer/PrinterTransportFilterControls";
+import { showSystemPairingRequiredAlert } from "@/components/printer/system-pairing-alert";
 import {
   clearSavedPrinter,
   connectSavedPrinter,
@@ -17,7 +18,9 @@ import {
   DEFAULT_PRINTER_TRANSPORT_FILTERS,
   filterPrinterDevices,
   isUnsupportedPrinterTransport,
+  requiresSystemPairing,
 } from "@/modules/printer/device-list";
+import { isBlePrintingSupported } from "@/modules/printer/native";
 import { usePrinterStore, type PrinterConnectionState } from "@/modules/printer/state";
 import type { PrinterDevice } from "@/modules/printer/types";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
@@ -120,29 +123,17 @@ export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetup
     }, "dialogs.printerConnectFailedTitle", getPrinterErrorMessage);
 
   const handleSelect = (device: PrinterDevice) => {
-    if (isUnsupportedPrinterTransport(device, Platform.OS)) {
+    if (isUnsupportedPrinterTransport(device, Platform.OS, isBlePrintingSupported())) {
       return;
     }
 
-    if (Platform.OS !== "android" || device.bonded) {
-      void connectPrinterDevice(device);
+    // 经典蓝牙须先在系统蓝牙设置中配对；BLE 与已配对设备直接连接。
+    if (requiresSystemPairing(device, Platform.OS)) {
+      showSystemPairingRequiredAlert(t, device);
       return;
     }
 
-    Alert.alert(
-      t("dialogs.printerPairingTitle"),
-      t("dialogs.printerPairingMessage", {
-        printer: device.name || device.address,
-        address: device.address,
-      }),
-      [
-        { text: t("common:actions.cancel"), style: "cancel" },
-        {
-          text: t("dialogs.printerPairingAction"),
-          onPress: () => void connectPrinterDevice(device),
-        },
-      ]
-    );
+    void connectPrinterDevice(device);
   };
 
   const handleConnectSaved = () =>
@@ -232,7 +223,7 @@ export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetup
               </Text>
               {visibleDevices.map((device) => {
                 const selected = savedPrinter?.address === device.address;
-                const unsupported = isUnsupportedPrinterTransport(device, Platform.OS);
+                const unsupported = isUnsupportedPrinterTransport(device, Platform.OS, isBlePrintingSupported());
                 return (
                   <View key={device.address} style={styles.deviceRow}>
                     <PrinterDeviceDetails device={device} />

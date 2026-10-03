@@ -25,7 +25,8 @@ async function run() {
   let events: string[];
   let writeError: Error | null;
   let connectError: Error | null;
-  let pairError: Error | null;
+  let connectTransports: (string | null | undefined)[];
+  let bleSupported: boolean;
   let disconnectError: Error | null;
   let statusReads: number;
   let storageReads: number;
@@ -46,18 +47,16 @@ async function run() {
   mockModule("react-native", { Platform: platform });
   mockModule("./native", {
     getPrinterStatus: async () => { statusReads += 1; return { ...nativeStatus }; },
-    connectPrinter: async (address: string) => {
+    connectPrinter: async (address: string, transport?: string | null) => {
       events.push(`connect:${address}`);
+      connectTransports.push(transport);
       await connectGate?.promise;
       if (connectError) throw connectError;
       nativeStatus = { ...nativeStatus, connected: true, address };
       return true;
     },
-    pairPrinter: async (address: string) => {
-      events.push(`pair:${address}`);
-      if (pairError) throw pairError;
-      return true;
-    },
+    // 新安卓原生包有 BLE GATT 通道；iOS 恒为 BLE。
+    isBlePrintingSupported: () => platform.OS === "ios" || bleSupported,
     disconnectPrinter: async () => {
       events.push("disconnect");
       if (disconnectError) throw disconnectError;
@@ -93,7 +92,8 @@ async function run() {
     events = [];
     writeError = null;
     connectError = null;
-    pairError = null;
+    connectTransports = [];
+    bleSupported = true;
     disconnectError = null;
     statusReads = 0;
     storageReads = 0;
@@ -105,7 +105,8 @@ async function run() {
     useReceiptPrinterStore.setState({ savedPrinter: receipt, status: "idle", autoReconnectPaused: false, lastError: null, hydrated: true });
   });
 
-  test("Android BLE-only 选择在任何配对、断连、状态或存储变更前拒绝", async () => {
+  test("旧安卓原生包不支持 BLE：在任何断连、状态或存储变更前拒绝", async () => {
+    bleSupported = false;
     usePrinterStore.setState({ autoReconnectPaused: true, status: "paused" });
     const before = usePrinterStore.getState();
     for (const bonded of [true, false]) {
@@ -119,6 +120,18 @@ async function run() {
     assert.equal(nativeStatus.address, "label");
   });
 
+  test("安卓 BLE 打印机无需配对直接连接，并保存传输类型供重连使用", async () => {
+    await api.selectPrinter({ name: "XP BLE", address: "ble", bonded: false, connected: false, transport: "ble" });
+    assert.deepEqual(events, ["disconnect", "connect:ble"]);
+    assert.deepEqual(connectTransports, ["ble"]);
+    assert.deepEqual(saved, { name: "XP BLE", address: "ble", transport: "ble" });
+
+    // 重启后自动重连沿用保存的类型，不依赖系统是否还缓存该地址是 BLE。
+    nativeStatus = { ...nativeStatus, connected: false, address: null };
+    await api.connectSavedPrinter();
+    assert.deepEqual(connectTransports, ["ble", "ble"]);
+  });
+
   test("iOS BLE 选择继续沿用现有连接与保存路径", async () => {
     platform.OS = "ios";
     await api.selectPrinter({ name: "XP BLE", address: "ble", bonded: true, connected: false, transport: "ble" });
@@ -126,7 +139,8 @@ async function run() {
     assert.equal(saved?.address, "ble");
   });
 
-  test("Android BLE-only 小票打印机选择在任何配对、断连、状态或存储变更前拒绝", async () => {
+  test("旧安卓原生包的 BLE 小票打印机选择在任何断连、状态或存储变更前拒绝", async () => {
+    bleSupported = false;
     useReceiptPrinterStore.setState({ status: "connected" });
     const before = useReceiptPrinterStore.getState();
     await assert.rejects(
@@ -140,13 +154,15 @@ async function run() {
     assert.equal(receiptSaved?.address, "receipt");
   });
 
-  test("未配对经典小票打印机先完成系统配对，成功后才保存", async () => {
-    await api.selectReceiptPrinter({ name: "New receipt", address: "unpaired-receipt", bonded: false, connected: false, transport: "classic" });
-    assert.deepEqual(events, ["pair:unpaired-receipt"]);
-    assert.equal(receiptSaved?.address, "unpaired-receipt");
-    assert.equal(useReceiptPrinterStore.getState().savedPrinter?.address, "unpaired-receipt");
-    assert.equal(useReceiptPrinterStore.getState().status, "idle");
-    assert.equal(nativeStatus.address, "label");
+  test("未配对经典小票打印机要求先去系统配对，不保存也不连接", async () => {
+    const before = useReceiptPrinterStore.getState();
+    await assert.rejects(
+      api.selectReceiptPrinter({ name: "New receipt", address: "unpaired-receipt", bonded: false, connected: false, transport: "classic" }),
+      { code: "PRINTER_PAIRING_REQUIRED" }
+    );
+    assert.deepEqual(events, []);
+    assert.equal(receiptSaved?.address, "receipt");
+    assert.deepEqual(useReceiptPrinterStore.getState(), before);
   });
 
   test("已配对小票打印机选择只保存，不连接或断开现有标签 socket", async () => {
@@ -157,24 +173,21 @@ async function run() {
     assert.equal(useReceiptPrinterStore.getState().status, "idle");
   });
 
+  test("BLE 小票打印机无需配对直接保存，测试打印按 BLE 连接", async () => {
+    await api.selectReceiptPrinter({ name: "BLE receipt", address: "ble-receipt", bonded: false, connected: false, transport: "ble" });
+    assert.deepEqual(events, []);
+    assert.deepEqual(receiptSaved, { name: "BLE receipt", address: "ble-receipt", transport: "ble" });
+
+    await api.testReceiptPrinterConnection();
+    assert.deepEqual(connectTransports, ["ble"]);
+  });
+
   test("iOS 小票打印机选择保持仅保存行为", async () => {
     platform.OS = "ios";
     await api.selectReceiptPrinter({ name: "iOS receipt", address: "ios-receipt", bonded: false, connected: false, transport: "ble" });
     assert.deepEqual(events, []);
     assert.equal(receiptSaved?.address, "ios-receipt");
     assert.equal(nativeStatus.address, "label");
-  });
-
-  test("小票打印机配对失败保留旧选择", async () => {
-    pairError = Object.assign(new Error("Pairing was cancelled."), { code: "PRINTER_PAIRING_REJECTED" });
-    await assert.rejects(
-      api.selectReceiptPrinter({ name: "New receipt", address: "unpaired-receipt", bonded: false, connected: false, transport: "classic" }),
-      /Pairing was cancelled/
-    );
-    assert.deepEqual(events, ["pair:unpaired-receipt"]);
-    assert.equal(receiptSaved?.address, "receipt");
-    assert.equal(useReceiptPrinterStore.getState().savedPrinter?.address, "receipt");
-    assert.equal(useReceiptPrinterStore.getState().status, "error");
   });
 
   test("broken pipe 清除假连接，保留原始失败且不自动重印，下一次打印恢复", async () => {
@@ -217,39 +230,32 @@ async function run() {
     assert.equal(storageReads, 0);
   });
 
-  test("未配对设备先完成系统配对，连接成功后才保存", async () => {
-    connectGate = deferred();
-    const selecting = api.selectPrinter({
-      name: "New printer",
-      address: "unpaired",
-      bonded: false,
-      connected: false,
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
+  test("未配对经典蓝牙标签打印机要求先去系统配对，不断开当前连接也不覆盖保存", async () => {
+    for (const transport of ["classic", "dual", undefined] as const) {
+      await assert.rejects(
+        api.selectPrinter({ name: "New printer", address: "unpaired", bonded: false, connected: false, transport }),
+        { code: "PRINTER_PAIRING_REQUIRED" }
+      );
+    }
+    assert.deepEqual(events, []);
+    assert.equal(statusReads, 0);
     assert.equal(saved?.address, "label");
-    assert.deepEqual(events, ["pair:unpaired", "disconnect", "connect:unpaired"]);
-
-    connectGate.resolve();
-    await selecting;
-    assert.equal(saved?.address, "unpaired");
-    assert.equal(usePrinterStore.getState().savedPrinter?.address, "unpaired");
+    assert.equal(usePrinterStore.getState().savedPrinter?.address, "label");
     assert.equal(usePrinterStore.getState().status, "connected");
   });
 
-  test("系统配对失败不覆盖当前打印机，也不尝试 RFCOMM 连接", async () => {
-    pairError = Object.assign(new Error("Pairing was cancelled."), {
-      code: "PRINTER_PAIRING_REJECTED",
-    });
+  test("已在系统配对的经典蓝牙连接成功后才保存", async () => {
+    connectGate = deferred();
+    const selecting = api.selectPrinter({ name: "Paired printer", address: "paired", bonded: true, connected: false, transport: "classic" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
-    await assert.rejects(
-      api.selectPrinter({ name: "New printer", address: "unpaired", bonded: false, connected: false }),
-      /Pairing was cancelled/
-    );
-
-    assert.deepEqual(events, ["pair:unpaired"]);
     assert.equal(saved?.address, "label");
-    assert.equal(usePrinterStore.getState().savedPrinter?.address, "label");
+    assert.deepEqual(events, ["disconnect", "connect:paired"]);
+    assert.deepEqual(connectTransports, ["classic"]);
+
+    connectGate.resolve();
+    await selecting;
+    assert.equal(saved?.address, "paired");
     assert.equal(usePrinterStore.getState().status, "connected");
   });
 
