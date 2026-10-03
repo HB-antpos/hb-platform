@@ -302,6 +302,8 @@ export type SettingsPrinterDevice = Readonly<{
   name: string;
   transport: string;
   preferred: boolean;
+  /** 经典蓝牙是否已在系统配对；BLE 或未知为 null/缺失。 */
+  paired?: boolean | null;
 }>;
 
 export const SETTINGS_PRINTER_TEST_OUTCOME_UNKNOWN =
@@ -494,6 +496,7 @@ export type SettingsStatusCode =
   | "pending-local-data"
   | "permission-required"
   | "printer-connect-failed"
+  | "printer-pairing-required"
   | "printer-connected"
   | "printer-connected-save-failed"
   | "printer-clear-failed"
@@ -1889,8 +1892,14 @@ export class SettingsPresenter {
           normalizedId,
           this.lifetime.signal,
         );
-      } catch {
-        this.patch({ statusCode: "printer-connect-failed" });
+      } catch (error) {
+        // 经典蓝牙未配对时原生层在建立 RFCOMM 前拒绝；单独提示去系统蓝牙设置配对。
+        this.patch({
+          statusCode:
+            errorCodeOf(error) === "PRINTER_SPP_PAIRING_REQUIRED"
+              ? "printer-pairing-required"
+              : "printer-connect-failed",
+        });
         return;
       }
 
@@ -3722,6 +3731,7 @@ function normalizePrinterDevice(
     name: boundedPublicText(device.name, 120),
     transport: boundedPublicText(device.transport, 32),
     preferred: device.preferred === true,
+    paired: typeof device.paired === "boolean" ? device.paired : null,
   });
 }
 
@@ -3766,6 +3776,11 @@ function cashDrawerTestStatus(
     case "failed":
       return "cash-drawer-test-failed";
   }
+}
+
+function errorCodeOf(error: unknown): string {
+  if (!error || typeof error !== "object" || !("code" in error)) return "";
+  return typeof error.code === "string" ? error.code.trim() : "";
 }
 
 function printerScanFailureStatus(error: unknown): SettingsStatusCode {

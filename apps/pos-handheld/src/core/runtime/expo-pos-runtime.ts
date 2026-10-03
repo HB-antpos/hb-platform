@@ -936,6 +936,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       settingsAppUpdateSnapshot({
         channel: updateChannel,
         currentVersion: appVersion,
+        currentBuild: installedBuild,
         policy: appUpdates.getPolicy(),
         restartAvailable: Updates.isEnabled,
       });

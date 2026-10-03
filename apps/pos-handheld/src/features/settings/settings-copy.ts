@@ -186,9 +186,16 @@ export const settingsEnglishCopy = {
   "printer.locale.en": "English",
   "printer.locale.zhCN": "Chinese",
   "printer.preferredN160": "Recommended target · printer001",
-  "printer.transport.ble": "Bluetooth LE · recommended",
+  "printer.transport.ble":
+    "Bluetooth Low Energy (BLE) · no pairing needed, connects directly",
   "printer.transport.classic":
-    "Classic Bluetooth (SPP) · no print confirmation, prefer the BLE entry",
+    "Classic Bluetooth · pair it in system Bluetooth settings first",
+  "printer.transport.classicPaired": "Classic Bluetooth · paired",
+  "printer.transport.classicUnpaired":
+    "Classic Bluetooth · not paired. Pair it in system Bluetooth settings first",
+  "printer.pairingRequiredHint":
+    "This is a classic Bluetooth printer. Pair it in system Bluetooth settings first, then return to the app, scan again and tap Connect. BLE printers need no pairing and connect directly.",
+  "action.openBluetoothSettings": "Open Bluetooth settings",
   "printer.deviceName": "Name",
   "printer.deviceAddress": "Device address",
   "field.peripheralId": "Peripheral ID",
@@ -210,7 +217,7 @@ export const settingsEnglishCopy = {
   "action.connect": "Connect & Save",
   "printer.pickerTitle": "Choose a nearby Bluetooth device",
   "printer.pickerHint":
-    "The scan shows every nearby Bluetooth Low Energy device. printer001 is the recommended target for the receipt printer.",
+    "The scan lists nearby classic Bluetooth and Bluetooth Low Energy (BLE) devices. BLE connects directly; classic Bluetooth must be paired in system settings first. printer001 is the recommended target for the receipt printer.",
   "printer.scanning": "Scanning for nearby Bluetooth devices…",
   "printer.connecting": "Connecting and saving printer…",
   "printer.noneFound":
@@ -365,6 +372,8 @@ export const settingsEnglishCopy = {
   "status.permission-required": "Settings permission required",
   "status.printer-connect-failed":
     "Printer connection failed; settings were not saved",
+  "status.printer-pairing-required":
+    "Pair this printer in system Bluetooth settings first",
   "status.printer-connected": "Printer connected and saved",
   "status.printer-connected-save-failed":
     "Printer connected, but settings could not be saved",
@@ -581,8 +590,13 @@ export const settingsChineseCopy = {
   "printer.locale.en": "英文",
   "printer.locale.zhCN": "中文",
   "printer.preferredN160": "推荐目标",
-  "printer.transport.ble": "低功耗蓝牙 BLE，推荐使用",
-  "printer.transport.classic": "经典蓝牙 SPP · 无打印确认，建议选同名的 BLE 设备",
+  "printer.transport.ble": "低功耗蓝牙 BLE · 无需配对，可直接连接",
+  "printer.transport.classic": "经典蓝牙 · 需先在系统蓝牙设置中配对",
+  "printer.transport.classicPaired": "经典蓝牙 · 已配对",
+  "printer.transport.classicUnpaired": "经典蓝牙 · 未配对，请先在系统蓝牙设置中配对",
+  "printer.pairingRequiredHint":
+    "这是经典蓝牙打印机，需要先在系统蓝牙设置中完成配对，再回到应用重新扫描并点击连接。低功耗蓝牙打印机无需配对，可直接连接。",
+  "action.openBluetoothSettings": "打开蓝牙设置",
   "printer.deviceName": "名称",
   "printer.deviceAddress": "设备地址",
   "field.peripheralId": "设备 ID",
@@ -604,7 +618,7 @@ export const settingsChineseCopy = {
   "action.connect": "连接并保存",
   "printer.pickerTitle": "选择附近的蓝牙设备",
   "printer.pickerHint":
-    "扫描结果会显示附近所有低功耗蓝牙设备；printer001 是推荐目标。",
+    "附近的经典蓝牙和低功耗蓝牙设备都会列出：低功耗蓝牙无需配对，可直接连接；经典蓝牙需先在系统蓝牙设置中配对。printer001 是推荐目标。",
   "printer.scanning": "正在扫描附近的蓝牙设备…",
   "printer.connecting": "正在连接并保存打印机…",
   "printer.noneFound":
@@ -748,6 +762,7 @@ export const settingsChineseCopy = {
   "status.pending-local-data": "存在本地待处理业务，操作已阻断且数据保持不变",
   "status.permission-required": "需要相应设置权限",
   "status.printer-connect-failed": "打印机连接失败，设置未保存",
+  "status.printer-pairing-required": "请先在系统蓝牙设置中配对这台打印机",
   "status.printer-connected": "打印机已连接并保存",
   "status.printer-connected-save-failed": "打印机已连接，但设置保存失败",
   "status.printer-clear-failed": "未能清除已保存的打印机",

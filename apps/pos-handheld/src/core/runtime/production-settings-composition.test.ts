@@ -608,18 +608,21 @@ test("打印机扫描仅把 trim 后精确匹配 printer001 的设备标记为 p
       name: "pRiNtEr001",
       transport: "bluetooth-le",
       preferred: true,
+      paired: null,
     },
     {
       id: "backup",
       name: "printer001 backup",
       transport: "bluetooth-le",
       preferred: false,
+      paired: null,
     },
     {
       id: "similar",
       name: "printer001-x",
       transport: "bluetooth-le",
       preferred: false,
+      paired: null,
     },
   ]);
 });
@@ -631,8 +634,12 @@ test("打印机扫描按原生前缀区分经典蓝牙 SPP，双模同名设备�
         getStatus: async () => "ready",
         scan: async () => [
           { id: "ble:DC:0D:30:00:00:01", name: "Printer001", rssi: -60 },
-          { id: "SPP:DC:0D:30:00:00:01", name: "Printer001", rssi: null },
-        ],
+          // 原生经典蓝牙结果带系统配对状态；BLE 即使带了也不采用。
+          { id: "SPP:DC:0D:30:00:00:01", name: "Printer001", rssi: null, bonded: true },
+          { id: "spp:00:11:22:33:44:55", name: "Kitchen", rssi: null, bonded: false },
+          { id: "spp:00:11:22:33:44:66", name: "Old native", rssi: null },
+          { id: "ble:00:11:22:33:44:77", name: "Label", rssi: null, bonded: true },
+        ] as never,
         connect: async () => undefined,
         disconnect: async () => undefined,
         print: async () => ({ status: "printed", errorCode: null }),
@@ -647,13 +654,21 @@ test("打印机扫描按原生前缀区分经典蓝牙 SPP，双模同名设备�
   await presenter.scanPrinters();
 
   const devices = presenter.getState().printerDevices;
+  const byId = new Map(devices.map((device) => [device.id, device]));
   assert.deepEqual(
-    devices.map(({ id, transport, preferred }) => ({ id, transport, preferred })),
+    ["ble:DC:0D:30:00:00:01", "SPP:DC:0D:30:00:00:01"].map((id) => {
+      const { transport, preferred } = byId.get(id)!;
+      return { id, transport, preferred };
+    }),
     [
       { id: "ble:DC:0D:30:00:00:01", transport: "bluetooth-le", preferred: true },
       { id: "SPP:DC:0D:30:00:00:01", transport: "bluetooth-classic", preferred: false },
     ],
   );
+  assert.equal(byId.get("SPP:DC:0D:30:00:00:01")?.paired, true);
+  assert.equal(byId.get("spp:00:11:22:33:44:55")?.paired, false);
+  assert.equal(byId.get("spp:00:11:22:33:44:66")?.paired, null);
+  assert.equal(byId.get("ble:00:11:22:33:44:77")?.paired, null);
 });
 
 test("扫描结果中个别设备名/ID 异常时逐条容错：清洗名称、跳过坏 ID，并上报统计", async () => {

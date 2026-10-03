@@ -42,18 +42,38 @@ const RELEASE_CHANNEL_MAX_LENGTH = 160;
 export function settingsAppUpdateSnapshot(input: Readonly<{
   channel: string;
   currentVersion: string;
+  /** 原生构建号（Android versionCode）；同一 appVersion 下各原生包只能靠它区分。 */
+  currentBuild?: string | null | undefined;
   policy: PosHandheldUpdatePolicy | null;
   restartAvailable: boolean;
 }>): SettingsAppUpdateSnapshot {
+  const latestVersion = input.policy?.latestVersion ?? null;
   return Object.freeze({
     // release channel 由后端生成（如 pos-handheld-production-android-release-<时间戳>-<哈希>，68 字符），
     // 上限须与后端 ReleaseChannel 校验（160）一致，否则套用 OTA 后设置页整页读取失败。
     channel: requiredText(input.channel, RELEASE_CHANNEL_MAX_LENGTH),
-    currentVersion: requiredText(input.currentVersion, 64),
-    availableVersion: input.policy?.latestVersion ?? null,
+    currentVersion: requiredText(
+      versionWithBuild(input.currentVersion, input.currentBuild),
+      64,
+    ),
+    availableVersion:
+      latestVersion === null
+        ? null
+        : versionWithBuild(latestVersion, input.policy?.latestBuild),
     updateRequired: input.policy?.required === true,
     restartAvailable: input.restartAvailable,
   });
+}
+
+/** 显示为「0.1.0 (9)」；构建号缺失或不是纯数字（如 "unknown" 哨兵）时只显示版本。 */
+function versionWithBuild(
+  version: string,
+  build: string | null | undefined,
+): string {
+  const normalizedBuild = build?.trim() ?? "";
+  return /^\d{1,9}$/u.test(normalizedBuild)
+    ? `${version.trim()} (${normalizedBuild})`
+    : version;
 }
 
 export function createSettingsApiHealthProbe(

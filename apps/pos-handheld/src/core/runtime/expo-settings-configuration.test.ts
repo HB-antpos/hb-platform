@@ -82,7 +82,7 @@ test("更新策略只映射公开版本字段，restart 可用性由受保护协
     {
       channel: "preview",
       currentVersion: "1.0.0",
-      availableVersion: "1.1.0",
+      availableVersion: "1.1.0 (110)",
       updateRequired: true,
       restartAvailable: true,
     },
@@ -194,6 +194,21 @@ test("设置 reload 成功后保持 terminal pending，失败时仍向上抛出"
       }),
     /RELOAD_FAILED/u,
   );
+});
+
+test("设置页版本带原生构建号显示，构建号缺失或为哨兵值时只显示版本", () => {
+  const snapshot = (currentBuild: string | null | undefined) =>
+    settingsAppUpdateSnapshot({
+      channel: "pos-handheld-production",
+      currentVersion: "0.1.0",
+      currentBuild,
+      policy: null,
+      restartAvailable: true,
+    }).currentVersion;
+  assert.equal(snapshot("9"), "0.1.0 (9)");
+  assert.equal(snapshot("unknown"), "0.1.0");
+  assert.equal(snapshot(null), "0.1.0");
+  assert.equal(snapshot(undefined), "0.1.0");
 });
 
 test("后端生成的 release channel（68 字符）可读；超过后端上限 160 仍拒绝", () => {

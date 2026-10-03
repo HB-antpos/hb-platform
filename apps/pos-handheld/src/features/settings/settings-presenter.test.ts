@@ -1226,24 +1226,28 @@ test("扫描打印机时 preferred 优先，其余按名称和 ID 稳定排序",
       name: "Printer001",
       transport: "bluetooth-le",
       preferred: true,
+      paired: null,
     },
     {
       id: "printer-a",
       name: "Alpha",
       transport: "bluetooth-le",
       preferred: false,
+      paired: null,
     },
     {
       id: "printer-b",
       name: "Alpha",
       transport: "bluetooth-le",
       preferred: false,
+      paired: null,
     },
     {
       id: "printer-z",
       name: "Beta",
       transport: "bluetooth-le",
       preferred: false,
+      paired: null,
     },
   ]);
 });
@@ -1331,6 +1335,18 @@ test("连接失败与已连接但保存失败使用不同状态且保留真实�
     connectFailurePresenter.getState().statusCode,
     "printer-connect-failed",
   );
+
+  // 经典蓝牙未配对：原生在 RFCOMM 前拒绝，状态单独提示去系统配对，且不保存设置。
+  const pairingPort = new FakeSettingsPort();
+  pairingPort.printerConnectErrorCode = "PRINTER_SPP_PAIRING_REQUIRED";
+  const pairingPresenter = createPresenter(pairingPort);
+  await pairingPresenter.load();
+  await pairingPresenter.connectPrinter("spp:00:11:22:33:44:55");
+  assert.equal(
+    pairingPresenter.getState().statusCode,
+    "printer-pairing-required",
+  );
+  assert.deepEqual(pairingPort.savedPrinters, []);
 
   const saveFailurePort = new FakeSettingsPort();
   saveFailurePort.failPrinterSave = true;
@@ -2597,6 +2613,7 @@ class FakeSettingsPort implements SettingsControlPort {
   public holdScannerUntilAbort = false;
   public scannerAbortObserved = false;
   public failPrinterConnect = false;
+  public printerConnectErrorCode: string | null = null;
   public failPrinterSave = false;
   public failClearSavedPrinter = false;
   public failReceiptProfile = false;
@@ -2851,6 +2868,11 @@ class FakeSettingsPort implements SettingsControlPort {
 
   public async connectPrinter(peripheralId: string): Promise<void> {
     this.connectedPrinterIds.push(peripheralId);
+    if (this.printerConnectErrorCode) {
+      throw Object.assign(new Error("printer connect failed"), {
+        code: this.printerConnectErrorCode,
+      });
+    }
     if (this.failPrinterConnect) {
       throw new Error("printer connect failed");
     }

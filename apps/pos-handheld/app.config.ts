@@ -12,7 +12,9 @@ const legacyLocalHbposApiBaseUrl = "http://192.168.31.246:5159";
 const defaultTrustedApkOrigin =
   "https://hb-sales-2019-1300114625.cos.ap-singapore.myqcloud.com";
 const posHandheldProductionChannel = "pos-handheld-production";
-const posHandheldAppVersion = "0.1.0";
+// 原生包升版时必须同步升：runtime 按 appVersion 生成，受控 OTA 会把渠道覆盖成 release channel，
+// runtime 不变时新 APK 的内置 JS 会被旧 OTA 盖掉（与移动端 #495 同因）。
+const posHandheldAppVersion = "0.1.1";
 
 function buildOtaUpdateConfiguration(): Readonly<{
   buildProfile: string;

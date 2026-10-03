@@ -1381,7 +1381,7 @@ describe("SettingsScreen", () => {
     expect(screen.getByText("Choose a nearby Bluetooth device")).toBeTruthy();
     expect(
       screen.getByText(
-        /shows every nearby Bluetooth Low Energy device.*printer001 is the recommended target/,
+        /classic Bluetooth and Bluetooth Low Energy \(BLE\) devices.*printer001 is the recommended target/,
       ),
     ).toBeTruthy();
     expect(screen.getAllByText("Name")).toHaveLength(3);
@@ -1402,12 +1402,12 @@ describe("SettingsScreen", () => {
       screen.getByTestId("settings-printer-device-transport-printer-2").props
         .children,
     ).toBe(
-      "Classic Bluetooth (SPP) · no print confirmation, prefer the BLE entry",
+      "Classic Bluetooth · not paired. Pair it in system Bluetooth settings first",
     );
     expect(
       screen.getByTestId("settings-printer-device-transport-sensor-1").props
         .children,
-    ).toBe("Bluetooth LE · recommended");
+    ).toBe("Bluetooth Low Energy (BLE) · no pairing needed, connects directly");
     expect(
       screen.getByTestId("settings-printer-device-transport-printer001").props
         .children,
@@ -1452,7 +1452,7 @@ describe("SettingsScreen", () => {
     expect(chineseScreen.getAllByText("设备地址")).toHaveLength(3);
     expect(
       chineseScreen.getByText(
-        /显示附近所有低功耗蓝牙设备.*printer001 是推荐目标/,
+        /经典蓝牙和低功耗蓝牙设备都会列出.*printer001 是推荐目标/,
       ),
     ).toBeTruthy();
     expect(chineseScreen.getAllByText("连接并保存")).toHaveLength(3);
@@ -1631,6 +1631,33 @@ describe("SettingsScreen", () => {
     expect(
       screen.queryByTestId("settings-printer-open-system-settings"),
     ).toBeNull();
+  });
+
+  it("经典蓝牙未配对时提示去系统蓝牙设置配对，并提供打开蓝牙设置按钮", async () => {
+    const port = new ScreenSettingsPort();
+    port.printerConnectionErrorCode = "PRINTER_SPP_PAIRING_REQUIRED";
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-pane-content-general");
+    await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+    await fireEvent.press(screen.getByTestId("settings-printer-scan"));
+    await screen.findByTestId("settings-printer-device-printer-2");
+    expect(
+      screen.getByTestId("settings-printer-device-transport-printer-2").props
+        .children,
+    ).toBe("经典蓝牙 · 未配对，请先在系统蓝牙设置中配对");
+
+    await fireEvent.press(
+      screen.getByTestId("settings-printer-connect-printer-2"),
+    );
+    await screen.findByTestId("settings-printer-open-bluetooth-settings");
+    expect(
+      screen.getByText(/这是经典蓝牙打印机，需要先在系统蓝牙设置中完成配对/),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("settings-printer-open-location-settings")).toBeNull();
   });
 
   it("连接失败与已连接但保存失败显示不同的本地化状态", async () => {
@@ -2349,6 +2376,7 @@ class ScreenSettingsPort implements SettingsControlPort {
   public cashDrawerTests = 0;
   public clearedPrinterSettings = 0;
   public printerConnectionFailure = false;
+  public printerConnectionErrorCode: string | null = null;
   public printerDevices: readonly SettingsPrinterDevice[] = [
     {
       id: "printer001",
@@ -2361,6 +2389,7 @@ class ScreenSettingsPort implements SettingsControlPort {
       name: "Backup Xprinter",
       preferred: false,
       transport: "bluetooth-classic",
+      paired: false,
     },
     {
       id: "sensor-1",
@@ -2492,6 +2521,11 @@ class ScreenSettingsPort implements SettingsControlPort {
   }
 
   public async connectPrinter(peripheralId: string): Promise<void> {
+    if (this.printerConnectionErrorCode) {
+      throw Object.assign(new Error("printer connection failed"), {
+        code: this.printerConnectionErrorCode,
+      });
+    }
     if (this.printerConnectionFailure) {
       throw new Error("printer connection failed");
     }
