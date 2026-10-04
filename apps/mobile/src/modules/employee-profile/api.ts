@@ -81,6 +81,14 @@ export async function upsertMySensitiveChangeRequestApi(
   return employeeProfileApi.upsertMySensitiveChangeRequest(payload);
 }
 
+export async function withdrawMySensitiveChangeRequestApi(requestId?: number) {
+  return employeeProfileApi.withdrawMySensitiveChangeRequest(requestId);
+}
+
+export async function getMySensitiveChangeHistoryApi(take = 20) {
+  return employeeProfileApi.getMySensitiveChangeHistory(take);
+}
+
 export async function getEmployeeProfileImageUploadSignature(
   kind: EmployeeProfileImageKind,
   request: DirectUploadRequest

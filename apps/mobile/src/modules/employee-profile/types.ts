@@ -34,10 +34,10 @@ export interface EmployeeProfile {
   sensitiveRevision: number;
 }
 
+// 生日属于敏感资料，只能经 SensitiveEmployeeProfilePayload 提交审核，基本资料保存不得携带。
 export interface UpdateEmployeeProfilePayload {
   phone: string;
   email?: string;
-  birthday: string;
   gender: string;
   employmentType?: string;
   address: string;
@@ -47,9 +47,12 @@ export type EmployeeProfileSensitiveChangeStatus =
   | "Pending"
   | "Approved"
   | "Rejected"
-  | "Superseded";
+  | "Superseded"
+  | "Withdrawn";
 
 export interface SensitiveEmployeeProfilePayload {
+  /** YYYY-MM-DD；空串表示不填，提交时转为 null。 */
+  birthday: string;
   bankBsb: string;
   bankAccountNumber: string;
   superannuationCompanyName: string;
@@ -73,6 +76,16 @@ export interface EmployeeProfileSensitiveChangeRequest extends SensitiveEmployee
   reviewedBy?: string;
   reviewReason?: string;
   changedFields: string[];
+}
+
+/** 本人申请历史条目：后端只返回状态与字段标识，不含任何敏感值。 */
+export interface EmployeeProfileSensitiveChangeHistoryItem {
+  requestId: number;
+  status: EmployeeProfileSensitiveChangeStatus;
+  changedFields: string[];
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewReason?: string;
 }
 
 export interface DirectUploadRequest {

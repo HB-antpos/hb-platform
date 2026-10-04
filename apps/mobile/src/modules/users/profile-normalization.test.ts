@@ -30,6 +30,7 @@ const profile: StoreUserProfile = normalizeStoreUserProfile({
   CreatedAt: "2024-01-01T08:00:00Z",
   LastLoginTime: "2024-05-01T09:15:00Z",
   LastLoginIp: "203.0.113.9",
+  MustChangePassword: true,
 });
 
 assertEqual(profile.userGUID, "user-1", "normalizes user guid");
@@ -45,3 +46,5 @@ assertEqual(profile.bankBsb, "062000", "normalizes bank bsb");
 assertEqual(profile.superannuationAccountNumber, "SUPER-001", "normalizes super account");
 assertEqual(profile.lastLoginTime, "2024-05-01T09:15:00Z", "normalizes last login");
 assertEqual(profile.lastLoginIp, "203.0.113.9", "normalizes last login ip");
+assertEqual(profile.mustChangePassword, true, "normalizes must-change-password flag");
+assertEqual(normalizeStoreUserProfile({ UserGuid: "user-2" }).mustChangePassword, false, "missing flag defaults to false");

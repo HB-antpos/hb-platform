@@ -9,7 +9,13 @@
     "empty": "暂无待审核申请",
     "emptyDescription": "员工提交的新申请会显示在这里。",
     "openRequest": "审核 {{name}} 的申请",
-    "storeUnavailable": "分店信息不可用"
+    "storeUnavailable": "分店信息不可用",
+    "searchPlaceholder": "搜索员工姓名或用户名",
+    "processedCount": "{{count}} 条已处理申请",
+    "processedEmpty": "暂无已处理申请",
+    "processedEmptyDescription": "批准、驳回、撤回或失效的申请会显示在这里。",
+    "searchEmpty": "没有匹配的申请",
+    "searchEmptyDescription": "换个关键词再试试。"
   },
   "detail": {
     "title": "审核敏感资料",
@@ -20,9 +26,15 @@
     "proposedValue": "员工填报资料",
     "noPhoto": "无证件照片",
     "previewUnavailable": "已有证件照片，安全预览暂不可用",
-    "reviewReason": "审核原因"
+    "reviewReason": "审核原因",
+    "birthdayWithAge": "{{date}} · {{age}} 岁",
+    "unchangedFields_one": "未变更字段 {{count}} 项",
+    "unchangedFields_other": "未变更字段 {{count}} 项",
+    "hideUnchanged": "收起未变更字段",
+    "processedNotice": "这条申请已处理，无需再审核。"
   },
   "fields": {
+    "birthday": "生日",
     "bankBsb": "BSB",
     "bankAccountNumber": "银行账号",
     "superannuationCompanyName": "养老金公司",
@@ -36,7 +48,8 @@
     "Pending": "待审核",
     "Approved": "已批准",
     "Rejected": "已拒绝",
-    "Superseded": "已失效"
+    "Superseded": "已失效",
+    "Withdrawn": "已撤回"
   },
   "actions": {
     "review": "审核",
@@ -48,7 +61,8 @@
     "reject": "拒绝",
     "confirm": "确认",
     "cancel": "取消",
-    "back": "返回"
+    "back": "返回",
+    "view": "查看"
   },
   "dialog": {
     "approveTitle": "确认批准申请？",
@@ -75,5 +89,9 @@
     "refreshing": "正在重新核验审核权限",
     "refreshFailed": "暂时无法重新核验权限，敏感资料继续隐藏。",
     "retry": "重新核验权限"
+  },
+  "segments": {
+    "pending": "待审核",
+    "processed": "已处理"
   }
 }

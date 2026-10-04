@@ -32,6 +32,13 @@ public sealed class EmployeeProfileSensitiveChangeRequest
     [SugarColumn(IsNullable = true, Length = 100)]
     public string? IdentityId { get; set; }
 
+    /// <summary>
+    /// 申请中的生日。只有 ChangedFieldsJson 含 birthday 时才代表员工的修改意图；
+    /// 加列前的历史申请此列为空，审批时不得据此清空正式生日。
+    /// </summary>
+    [SugarColumn(IsNullable = true, ColumnDataType = "date")]
+    public DateTime? Birthday { get; set; }
+
     [SugarColumn(IsNullable = true, Length = 500)]
     public string? IdentityPhotoObjectKey { get; set; }
 
@@ -69,4 +76,6 @@ public enum EmployeeProfileSensitiveChangeStatus
     Approved = 1,
     Rejected = 2,
     Superseded = 3,
+    /// <summary>员工本人撤回。ReviewedAt/ReviewedBy 记录撤回时间与撤回人，ReviewReason 为空。</summary>
+    Withdrawn = 4,
 }

@@ -28,6 +28,9 @@ import {
   type StaffAttendanceRecord,
 } from "@/modules/users";
 import { calculateAge, maskTrailingFour } from "@/modules/users/profile-display";
+import { getEmployeeProfileReviewAccess } from "@/modules/employee-profile-review/access";
+import { getEmployeeProfileReviewRequestsApi } from "@/modules/employee-profile-review/api";
+import { useAppNavigationStore } from "@/modules/navigation/store";
 import { hasDeliverableEmail } from "@/modules/users/staff-email-username";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
@@ -144,6 +147,33 @@ export default function StaffDetailScreen() {
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("personal");
+  const currentUser = useAuthStore((state) => state.user);
+  const sessionKind = useAuthStore((state) => state.sessionKind);
+  const navigationItems = useAppNavigationStore((state) => state.items);
+  const navigationReady = useAppNavigationStore((state) => state.isReady);
+  // 与审核列表同一套前端门禁；无审核权限时不显示敏感资料行，也不发请求，最终范围由后端裁决。
+  const reviewAccess = useMemo(
+    () => getEmployeeProfileReviewAccess({
+      roleNames: currentUser?.roleNames,
+      permissions: currentUser?.permissions,
+      menuRouteNames: navigationItems.map((item) => item.routeName),
+      sessionKind,
+    }),
+    [currentUser?.permissions, currentUser?.roleNames, navigationItems, sessionKind]
+  );
+  const pendingSensitiveQuery = useQuery({
+    queryKey: ["employeeProfileReview", "requests", "byUser", userGuid ?? ""],
+    enabled: Boolean(userGuid) && navigationReady && reviewAccess.allowed,
+    // 只取一条摘要：列表接口不含任何敏感值，超出审核范围时后端返回空列表。
+    queryFn: () => getEmployeeProfileReviewRequestsApi({
+      page: 1,
+      pageSize: 1,
+      status: "Pending",
+      userGuid: userGuid ?? "",
+    }),
+    staleTime: 30_000,
+  });
+  const pendingSensitiveRequest = pendingSensitiveQuery.data?.items[0];
   const access = useAuthStore((state) => state.access);
   // 按钮可见性与后端授权一致：本店店员专用权限或全局用户权限任一即可，后端仍会校验分店与目标范围。
   const canEditUsers = access.isAdmin
@@ -631,6 +661,69 @@ export default function StaffDetailScreen() {
           </Card.Content>
         </Card>
 
+        {/* A4 资料状态：首次改密 + 敏感资料是否有待审申请（无审核权限不显示该行）。 */}
+        <Card mode="elevated" style={styles.sectionCard}>
+          <Card.Content style={styles.sectionContent}>
+            <Text variant="titleMedium">
+              {t("detail.sections.profileStatus")}
+            </Text>
+            <View style={styles.statusRow}>
+              <Avatar.Icon size={34} icon="lock-reset" style={styles.detailIcon} />
+              <View style={styles.detailCopy}>
+                <Text variant="bodyLarge">
+                  {t("detail.profileStatus.password")}
+                </Text>
+              </View>
+              <Chip
+                compact
+                style={profile?.mustChangePassword ? styles.warningChip : styles.okChip}
+                textStyle={profile?.mustChangePassword ? styles.warningChipText : styles.okChipText}
+              >
+                {profile?.mustChangePassword
+                  ? t("detail.profileStatus.passwordPending")
+                  : t("detail.profileStatus.passwordDone")}
+              </Chip>
+            </View>
+            {reviewAccess.allowed ? (
+              <View style={styles.statusRow}>
+                <Avatar.Icon size={34} icon="shield-account-outline" style={styles.detailIcon} />
+                <View style={styles.detailCopy}>
+                  <Text variant="labelMedium" style={styles.muted}>
+                    {t("detail.profileStatus.sensitive")}
+                  </Text>
+                  <Text variant="bodyLarge">
+                    {pendingSensitiveQuery.isLoading
+                      ? t("detail.profileStatus.sensitiveLoading")
+                      : pendingSensitiveQuery.isError
+                        ? t("detail.profileStatus.sensitiveFailed")
+                        : pendingSensitiveRequest
+                          ? t("detail.profileStatus.sensitivePending")
+                          : t("detail.profileStatus.sensitiveNone")}
+                  </Text>
+                </View>
+                {pendingSensitiveRequest ? (
+                  <Button
+                    compact
+                    mode="contained-tonal"
+                    onPress={() => router.push({
+                      pathname: "/employee-profile-review/[requestId]",
+                      params: { requestId: String(pendingSensitiveRequest.requestId) },
+                    })}
+                  >
+                    {t("detail.profileStatus.goReview")}
+                  </Button>
+                ) : pendingSensitiveQuery.isError ? (
+                  <IconButton
+                    icon="refresh"
+                    accessibilityLabel={t("common:actions.retry")}
+                    onPress={() => void pendingSensitiveQuery.refetch()}
+                  />
+                ) : null}
+              </View>
+            ) : null}
+          </Card.Content>
+        </Card>
+
         <Card mode="elevated" style={styles.sectionCard}>
           <Card.Content style={styles.sectionContent}>
             <Text variant="titleMedium">
@@ -678,9 +771,13 @@ export default function StaffDetailScreen() {
     isActive,
     locale,
     openSchedule,
+    pendingSensitiveQuery,
+    pendingSensitiveRequest,
     profile,
     renderRecordsTab,
     renderScheduleTab,
+    reviewAccess.allowed,
+    router,
     statusMutation.isPending,
     t,
   ]);
@@ -955,6 +1052,15 @@ const styles = StyleSheet.create({
   stateCardContent: {
     alignItems: "center",
   },
+  statusRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: HB_SPACING.sm,
+  },
+  warningChip: { backgroundColor: "#FEF0C7" },
+  warningChipText: { color: "#7A2E0E" },
+  okChip: { backgroundColor: "#ECFDF3" },
+  okChipText: { color: HB_COLORS.success },
   topBar: {
     alignItems: "center",
     flexDirection: "row",

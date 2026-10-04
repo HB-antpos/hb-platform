@@ -41,6 +41,8 @@ internal sealed class SchemaMigrationCoordinator
         "20261002.002-attendance-schedule-meal-break-count";
     internal const string AttendanceAvailabilityUnavailableMigrationId =
         "20261003.001-attendance-availability-unavailable";
+    internal const string EmployeeProfileSensitiveBirthdayMigrationId =
+        "20261004.001-employee-profile-sensitive-birthday";
     internal const string UserPasswordChangeRequirementMigrationId =
         "20261004.002-user-password-change-requirement";
     internal const string EmployeeMinorComplianceMigrationId =
@@ -142,6 +144,11 @@ internal sealed class SchemaMigrationCoordinator
             AttendanceAvailabilityUnavailableMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAttendanceAvailabilityUnavailableAsync(cancellationToken)
+        ),
+        new(
+            EmployeeProfileSensitiveBirthdayMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyEmployeeProfileSensitiveBirthdayAsync(cancellationToken)
         ),
         new(
             UserPasswordChangeRequirementMigrationId,

@@ -59,8 +59,9 @@ export interface SaveEmployeeProfilePayload {
   expectedSensitiveRevision?: number
 }
 
-export type EmployeeProfileSensitiveChangeStatus = 'Pending' | 'Approved' | 'Rejected' | 'Superseded'
+export type EmployeeProfileSensitiveChangeStatus = 'Pending' | 'Approved' | 'Rejected' | 'Superseded' | 'Withdrawn'
 export type EmployeeProfileSensitiveField =
+  | 'birthday'
   | 'bankBsb'
   | 'bankAccountNumber'
   | 'superannuationCompanyName'
@@ -90,6 +91,7 @@ export interface EmployeeProfileSensitiveChangeSummaryDto {
 }
 
 export interface EmployeeProfileSensitiveChangeDetailDto extends EmployeeProfileSensitiveChangeSummaryDto {
+  birthday?: string
   bankBsb?: string
   bankAccountNumber?: string
   superannuationCompanyName?: string

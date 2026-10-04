@@ -827,6 +827,195 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Birthday_提交后需审核_批准才写回正式生日_驳回不改()
+    {
+        await SeedFormalBirthdayAsync(new DateTime(1998, 6, 21));
+        var self = CreateService("user-self", "self_user");
+
+        var submitted = await self.UpsertSelfAsync(new()
+        {
+            BankAccountNumber = "formal-old",
+            Birthday = new DateTime(1998, 6, 12),
+        });
+
+        Assert.True(submitted.Success);
+        Assert.Equal(["birthday"], submitted.Data!.ChangedFields);
+        Assert.Equal(new DateTime(1998, 6, 12), submitted.Data.Birthday);
+        Assert.Equal(new DateTime(1998, 6, 21), submitted.Data.CurrentSnapshot!.Birthday);
+        // 待审期间正式生日不变。
+        Assert.Equal(new DateTime(1998, 6, 21), (await _db.Queryable<EmployeeProfile>().FirstAsync()).Birthday);
+
+        var approved = await CreateService("admin-user", "admin").ApproveAsync(
+            submitted.Data.RequestId,
+            new EmployeeProfileSensitiveReviewDto()
+        );
+        Assert.True(approved.Success);
+        var afterApprove = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        Assert.Equal(new DateTime(1998, 6, 12), afterApprove.Birthday);
+        Assert.Equal(4, afterApprove.SensitiveRevision);
+
+        var second = await self.UpsertSelfAsync(new()
+        {
+            BankAccountNumber = "formal-old",
+            Birthday = new DateTime(2000, 1, 1),
+        });
+        var rejected = await CreateService("admin-user", "admin").RejectAsync(
+            second.Data!.RequestId,
+            new EmployeeProfileSensitiveRejectDto { Reason = "与证件不符" }
+        );
+        Assert.True(rejected.Success);
+        Assert.Equal(new DateTime(1998, 6, 12), (await _db.Queryable<EmployeeProfile>().FirstAsync()).Birthday);
+    }
+
+    [Fact]
+    public async Task Birthday_旧版客户端不传生日_提交与批准都不清空正式生日()
+    {
+        await SeedFormalBirthdayAsync(new DateTime(1998, 6, 21));
+
+        var submitted = await CreateService("user-self", "self_user").UpsertSelfAsync(new()
+        {
+            BankAccountNumber = "new-account",
+        });
+
+        Assert.True(submitted.Success);
+        Assert.Equal(["bankAccountNumber"], submitted.Data!.ChangedFields);
+        var pending = await _db.Queryable<EmployeeProfileSensitiveChangeRequest>().FirstAsync();
+        Assert.Equal(new DateTime(1998, 6, 21), pending.Birthday);
+
+        var approved = await CreateService("admin-user", "admin").ApproveAsync(
+            submitted.Data.RequestId,
+            new EmployeeProfileSensitiveReviewDto()
+        );
+        Assert.True(approved.Success);
+        var profile = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        Assert.Equal("new-account", profile.BankACC);
+        Assert.Equal(new DateTime(1998, 6, 21), profile.Birthday);
+    }
+
+    [Fact]
+    public async Task Birthday_加列前的历史待审申请生日为空_批准时不得清空正式生日()
+    {
+        await SeedFormalBirthdayAsync(new DateTime(1998, 6, 21));
+        var legacy = CreatePendingRequest("user-self", "legacy-account", DateTime.UtcNow);
+        legacy.BaseSensitiveRevision = 3;
+        var requestId = await _db.Insertable(legacy).ExecuteReturnIdentityAsync();
+
+        var detail = await CreateService("admin-user", "admin").GetAdminDetailAsync(requestId);
+        Assert.True(detail.Success);
+        Assert.DoesNotContain("birthday", detail.Data!.ChangedFields);
+        // 未变更生日时详情展示正式生日，不能把空值显示成「改为空」。
+        Assert.Equal(new DateTime(1998, 6, 21), detail.Data.Birthday);
+
+        var approved = await CreateService("admin-user", "admin").ApproveAsync(
+            requestId,
+            new EmployeeProfileSensitiveReviewDto()
+        );
+        Assert.True(approved.Success);
+        var profile = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        Assert.Equal("legacy-account", profile.BankACC);
+        Assert.Equal(new DateTime(1998, 6, 21), profile.Birthday);
+    }
+
+    [Fact]
+    public async Task Birthday_待审含生日时旧版客户端重提_保留待审中的生日意图()
+    {
+        await SeedFormalBirthdayAsync(new DateTime(1998, 6, 21));
+        var self = CreateService("user-self", "self_user");
+        await self.UpsertSelfAsync(new()
+        {
+            BankAccountNumber = "formal-old",
+            Birthday = new DateTime(1998, 6, 12),
+        });
+
+        var resubmitted = await self.UpsertSelfAsync(new()
+        {
+            BankAccountNumber = "new-account",
+        });
+
+        Assert.True(resubmitted.Success);
+        Assert.Equal(["birthday", "bankAccountNumber"], resubmitted.Data!.ChangedFields);
+        var pending = await _db.Queryable<EmployeeProfileSensitiveChangeRequest>()
+            .FirstAsync(item => item.Status == EmployeeProfileSensitiveChangeStatus.Pending);
+        Assert.Equal(new DateTime(1998, 6, 12), pending.Birthday);
+    }
+
+    [Fact]
+    public async Task Birthday_员工自助保存不能直接改生日_等值或不传照常保存()
+    {
+        await SeedFormalBirthdayAsync(new DateTime(1998, 6, 21));
+        var sensitive = CreateService("user-self", "self_user");
+        var profileService = CreateProfileService("user-self", "self_user", sensitive);
+
+        var changed = await profileService.UpsertSelfAsync(new EmployeeProfileUpsertDto
+        {
+            Address = "must-not-save",
+            Birthday = new DateTime(1998, 6, 12),
+        });
+        Assert.False(changed.Success);
+        Assert.Equal(EmployeeProfileService.BirthdayRequiresReviewCode, changed.ErrorCode);
+        var afterRejected = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        Assert.Null(afterRejected.Address);
+        Assert.Equal(new DateTime(1998, 6, 21), afterRejected.Birthday);
+        Assert.False(await _db.Queryable<EmployeeProfileSensitiveChangeRequest>().AnyAsync());
+
+        // 旧版客户端回传当前生日：其余字段照常保存。
+        var sameValue = await profileService.UpsertSelfAsync(new EmployeeProfileUpsertDto
+        {
+            Address = "legacy address",
+            Birthday = new DateTime(1998, 6, 21),
+        });
+        Assert.True(sameValue.Success);
+        Assert.Equal("legacy address", (await _db.Queryable<EmployeeProfile>().FirstAsync()).Address);
+
+        // 新版客户端不再传生日：保存基本资料不得清空正式生日。
+        var omitted = await profileService.UpsertSelfAsync(new EmployeeProfileUpsertDto
+        {
+            Address = "new address",
+        });
+        Assert.True(omitted.Success);
+        var afterOmitted = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        Assert.Equal("new address", afterOmitted.Address);
+        Assert.Equal(new DateTime(1998, 6, 21), afterOmitted.Birthday);
+    }
+
+    [Fact]
+    public async Task Birthday_管理员直改免审_递增版本并作废员工待审申请()
+    {
+        await SeedFormalBirthdayAsync(new DateTime(1998, 6, 21));
+        await CreateService("user-self", "self_user").UpsertSelfAsync(new()
+        {
+            BankAccountNumber = "formal-old",
+            Birthday = new DateTime(1998, 6, 12),
+        });
+        var adminSensitive = CreateService("admin-user", "admin");
+
+        var adminResult = await CreateProfileService("admin-user", "admin", adminSensitive)
+            .UpsertAdminAsync("user-self", new EmployeeProfileUpsertDto
+            {
+                BankAccountNumber = "formal-old",
+                Birthday = new DateTime(1999, 2, 3),
+                ConfirmSupersedePendingSensitiveChangeRequest = true,
+            });
+
+        Assert.True(adminResult.Success);
+        var profile = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        Assert.Equal(new DateTime(1999, 2, 3), profile.Birthday);
+        Assert.Equal(4, profile.SensitiveRevision);
+        Assert.Equal(
+            EmployeeProfileSensitiveChangeStatus.Superseded,
+            (await _db.Queryable<EmployeeProfileSensitiveChangeRequest>().FirstAsync()).Status
+        );
+    }
+
+    private async Task SeedFormalBirthdayAsync(DateTime birthday)
+    {
+        await SeedAsync();
+        var profile = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        profile.Birthday = birthday;
+        await _db.Updateable(profile).ExecuteCommandAsync();
+    }
+
+    [Fact]
     public async Task LegacySelfPut_NoOpSensitiveSnapshot_PreservesRealPendingButSameSuffixDifferenceReplacesIt()
     {
         await SeedAsync();
@@ -1637,10 +1826,17 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
             "services/backend/BlazorApp.Api/Services/EmployeeProfileSensitiveChangeService.cs"
         ));
 
+        // 批准、驳回、员工撤回三处终结待审申请的事务都必须是 Serializable。
         Assert.Equal(
-            2,
+            3,
             source.Split("BeginTranAsync(IsolationLevel.Serializable)", StringSplitOptions.None).Length - 1
         );
+        foreach (var signature in new[] { "ApproveAsync(", "RejectAsync(", "WithdrawSelfAsync(" })
+        {
+            var body = ExtractMethodBody(source, $"public async Task<ApiResponse<EmployeeProfileSensitiveChangeDetailDto>> {signature}");
+            Assert.Contains("BeginTranAsync(IsolationLevel.Serializable)", body);
+            Assert.Contains("EmployeeProfileMediaLock.AcquireAsync(", body);
+        }
     }
 
     [Theory]
@@ -1947,6 +2143,202 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
         _db.Dispose();
         _connection.Dispose();
         SqliteTempFileCleanup.DeleteIfExists(_dbPath);
+    }
+
+    [Fact]
+    public async Task Withdraw_员工撤回待审申请后状态为Withdrawn且可以重新提交()
+    {
+        await SeedAsync();
+        var self = CreateService("user-self", "self_user");
+        var submitted = await self.UpsertSelfAsync(new() { BankAccountNumber = "withdraw-me" });
+        Assert.True(submitted.Success);
+        var requestId = submitted.Data!.RequestId;
+
+        var withdrawn = await self.WithdrawSelfAsync(new() { RequestId = requestId });
+
+        Assert.True(withdrawn.Success);
+        Assert.Equal("Withdrawn", withdrawn.Data!.Status);
+        var row = await _db.Queryable<EmployeeProfileSensitiveChangeRequest>()
+            .FirstAsync(item => item.RequestId == requestId);
+        Assert.Equal(EmployeeProfileSensitiveChangeStatus.Withdrawn, row.Status);
+        Assert.Equal("self_user", row.ReviewedBy);
+        Assert.NotNull(row.ReviewedAt);
+        Assert.Null(row.ReviewReason);
+        Assert.Equal("formal-old", (await _db.Queryable<EmployeeProfile>().FirstAsync()).BankACC);
+        Assert.Equal(0, await _db.Queryable<EmployeeProfileSensitiveChangeRequest>()
+            .CountAsync(item => item.Status == EmployeeProfileSensitiveChangeStatus.Pending));
+
+        var resubmitted = await self.UpsertSelfAsync(new() { BankAccountNumber = "second-try" });
+        Assert.True(resubmitted.Success);
+        Assert.NotEqual(requestId, resubmitted.Data!.RequestId);
+        Assert.Equal("Pending", resubmitted.Data.Status);
+        // 重提的新申请不受撤回影响；携带旧申请编号的撤回必须拒绝，避免误撤其他设备上的新申请。
+        var stale = await self.WithdrawSelfAsync(new() { RequestId = requestId });
+        Assert.Equal("REQUEST_NOT_PENDING", stale.ErrorCode);
+        Assert.Equal(EmployeeProfileSensitiveChangeStatus.Pending, (await _db.Queryable<EmployeeProfileSensitiveChangeRequest>()
+            .FirstAsync(item => item.RequestId == resubmitted.Data.RequestId)).Status);
+    }
+
+    [Fact]
+    public async Task Withdraw_非Pending或无申请时返回冲突且不改动数据()
+    {
+        await SeedAsync();
+        var self = CreateService("user-self", "self_user");
+        var none = await self.WithdrawSelfAsync();
+        Assert.False(none.Success);
+        Assert.Equal("REQUEST_NOT_PENDING", none.ErrorCode);
+
+        var submitted = await self.UpsertSelfAsync(new() { BankAccountNumber = "approved-account" });
+        Assert.True((await CreateService("admin-user", "admin").ApproveAsync(
+            submitted.Data!.RequestId,
+            new EmployeeProfileSensitiveReviewDto()
+        )).Success);
+
+        var afterApprove = await self.WithdrawSelfAsync(new() { RequestId = submitted.Data.RequestId });
+        Assert.Equal("REQUEST_NOT_PENDING", afterApprove.ErrorCode);
+        var row = await _db.Queryable<EmployeeProfileSensitiveChangeRequest>()
+            .FirstAsync(item => item.RequestId == submitted.Data.RequestId);
+        Assert.Equal(EmployeeProfileSensitiveChangeStatus.Approved, row.Status);
+        Assert.Equal("admin", row.ReviewedBy);
+
+        var controller = CreateController(self, new FakeStorage());
+        Assert.IsType<ConflictObjectResult>(await controller.WithdrawSelfSensitiveChangeRequest(null));
+        var attributes = typeof(EmployeeProfilesController)
+            .GetMethod(nameof(EmployeeProfilesController.WithdrawSelfSensitiveChangeRequest))!
+            .GetCustomAttributes<AuthorizeAttribute>()
+            .ToList();
+        Assert.Contains(attributes, item => item.Policy == Permissions.EmployeeProfiles.Edit);
+    }
+
+    [Fact]
+    public async Task Withdraw_清理待审证件照但保留仍被正式资料引用的照片()
+    {
+        await SeedAsync();
+        const string formalKey = "employee-profiles/user-self/identity/formal.png";
+        const string pendingKey = "employee-profiles/user-self/identity/pending.png";
+        var profile = await _db.Queryable<EmployeeProfile>().FirstAsync();
+        profile.IdentityPhotoObjectKey = formalKey;
+        await _db.Updateable(profile).ExecuteCommandAsync();
+        var storage = new FakeStorage();
+        var self = CreateService("user-self", "self_user", storage);
+
+        var photo = await self.ReplacePendingIdentityPhotoAsync(pendingKey);
+        Assert.True(photo.Success);
+        var withdrawn = await self.WithdrawSelfAsync(new() { RequestId = photo.Data!.RequestId });
+
+        Assert.True(withdrawn.Success);
+        Assert.Contains(pendingKey, storage.DeletedKeys);
+        Assert.DoesNotContain(formalKey, storage.DeletedKeys);
+        Assert.Null(withdrawn.Data!.IdentityPhotoUrl);
+        Assert.Equal(formalKey, (await _db.Queryable<EmployeeProfile>().FirstAsync()).IdentityPhotoObjectKey);
+
+        // 普通字段申请沿用正式证件照：撤回时不得删除正式资料仍引用的对象。
+        var fieldOnly = await self.UpsertSelfAsync(new() { BankAccountNumber = "field-only" });
+        Assert.True((await self.WithdrawSelfAsync(new() { RequestId = fieldOnly.Data!.RequestId })).Success);
+        Assert.DoesNotContain(formalKey, storage.DeletedKeys);
+    }
+
+    [Fact]
+    public async Task Withdraw_即时删除失败时保留Pending清理票据供后台重试()
+    {
+        await SeedAsync();
+        const string pendingKey = "employee-profiles/user-self/identity/pending-retry.png";
+        var storage = new FakeStorage { DeleteSucceeds = false };
+        var self = CreateService("user-self", "self_user", storage);
+        var photo = await self.ReplacePendingIdentityPhotoAsync(pendingKey);
+
+        Assert.True((await self.WithdrawSelfAsync()).Success);
+
+        var ticket = await _db.Queryable<EmployeeImageUploadTicket>()
+            .FirstAsync(item => item.SensitiveChangeRequestId == photo.Data!.RequestId
+                && item.PreviousObjectKey == pendingKey);
+        Assert.NotNull(ticket);
+        Assert.Equal(EmployeeImageObjectCleanupStatus.Pending, ticket.PreviousObjectCleanupStatus);
+    }
+
+    [Fact]
+    public async Task SelfHistory_按提交时间倒序只返回状态字段与审核信息且不含敏感值()
+    {
+        await SeedAsync();
+        var self = CreateService("user-self", "self_user");
+        var first = await self.UpsertSelfAsync(new() { BankAccountNumber = "history-one" });
+        var second = await self.UpsertSelfAsync(new() { BankAccountNumber = "history-two" });
+        Assert.True((await self.WithdrawSelfAsync()).Success);
+        var third = await self.UpsertSelfAsync(new() { BankAccountNumber = "history-three", IdentityId = "ID-3" });
+        Assert.True((await CreateService("admin-user", "admin").RejectAsync(
+            third.Data!.RequestId,
+            new EmployeeProfileSensitiveRejectDto { Reason = "账号与姓名不符" }
+        )).Success);
+        // 强制拉开提交时间，验证排序依据是提交时间而不是自增编号。
+        var baseTime = DateTime.UtcNow.AddHours(-3);
+        foreach (var (requestId, offset) in new[]
+        {
+            (first.Data!.RequestId, 0), (second.Data!.RequestId, 1), (third.Data.RequestId, 2),
+        })
+        {
+            var submittedAt = baseTime.AddMinutes(offset);
+            await _db.Updateable<EmployeeProfileSensitiveChangeRequest>()
+                .SetColumns(item => item.SubmittedAt == submittedAt)
+                .Where(item => item.RequestId == requestId)
+                .ExecuteCommandAsync();
+        }
+        await _db.Insertable(CreatePendingRequest("other-user", "other-secret", DateTime.UtcNow))
+            .ExecuteCommandAsync();
+
+        var history = await self.GetSelfHistoryAsync(20);
+
+        Assert.True(history.Success);
+        var items = history.Data!;
+        Assert.Equal(
+            [third.Data.RequestId, second.Data.RequestId, first.Data.RequestId],
+            items.Select(item => item.RequestId).ToArray()
+        );
+        Assert.Equal(["Rejected", "Withdrawn", "Superseded"], items.Select(item => item.Status).ToArray());
+        Assert.Equal("账号与姓名不符", items[0].ReviewReason);
+        Assert.Equal(["bankAccountNumber", "identityId"], items[0].ChangedFields);
+        Assert.All(items, item => Assert.NotNull(item.ReviewedAt));
+        var serialized = JsonSerializer.Serialize(items);
+        foreach (var secret in new[] { "history-one", "history-two", "history-three", "ID-3", "formal-old", "other-secret" })
+        {
+            Assert.DoesNotContain(secret, serialized);
+        }
+        Assert.DoesNotContain("BankAccountNumber", serialized);
+        Assert.Equal(2, (await self.GetSelfHistoryAsync(2)).Data!.Count);
+    }
+
+    [Fact]
+    public async Task ReviewList_按UserGuid过滤仍遵守审核范围且支持已处理分段()
+    {
+        await SeedReviewScopeAsync();
+        var storeManager = CreateService(
+            "manager-a",
+            "manager_a",
+            roles: ["StoreManager"],
+            storeGuids: ["store-a"]
+        );
+
+        var own = await storeManager.GetReviewListAsync(new() { Status = "Pending", UserGuid = "employee-a" });
+        Assert.True(own.Success);
+        Assert.Equal("employee-a", Assert.Single(own.Data!.Items!).UserGuid);
+        foreach (var outOfScope in new[] { "employee-b", "manager-a", "privileged-manager" })
+        {
+            var filtered = await storeManager.GetReviewListAsync(new() { UserGuid = outOfScope });
+            Assert.True(filtered.Success);
+            Assert.Equal(0, filtered.Data!.Total);
+            Assert.Empty(filtered.Data.Items!);
+        }
+        var admin = CreateService("admin-user", "admin", roles: ["Admin"]);
+        var adminFiltered = await admin.GetAdminListAsync(new() { UserGuid = "employee-b" });
+        Assert.Equal("employee-b", Assert.Single(adminFiltered.Data!.Items!).UserGuid);
+
+        var requestA = own.Data.Items![0].RequestId;
+        Assert.True((await storeManager.ApproveAsync(requestA, new EmployeeProfileSensitiveReviewDto())).Success);
+        var processed = await storeManager.GetReviewListAsync(new() { Status = "Processed" });
+        Assert.Equal("Approved", Assert.Single(processed.Data!.Items!).Status);
+        var pending = await storeManager.GetReviewListAsync(new() { Status = "Pending", UserGuid = "employee-a" });
+        Assert.Equal(0, pending.Data!.Total);
+        var adminProcessed = await admin.GetAdminListAsync(new() { Status = "processed" });
+        Assert.Equal(requestA, Assert.Single(adminProcessed.Data!.Items!).RequestId);
     }
 
     private async Task SeedAsync()

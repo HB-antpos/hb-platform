@@ -42,6 +42,7 @@ const formal: EmployeeProfile = {
 const pending: EmployeeProfileSensitiveChangeRequest = {
   requestId: 42,
   status: "Pending",
+  birthday: "1990-03-04",
   bankBsb: "654-321",
   bankAccountNumber: "999988883333",
   superannuationCompanyName: "Future Super",
@@ -59,6 +60,7 @@ const pending: EmployeeProfileSensitiveChangeRequest = {
 assert.deepEqual(
   selectSensitiveDraft(formal, pending),
   {
+    birthday: pending.birthday,
     bankBsb: pending.bankBsb,
     bankAccountNumber: pending.bankAccountNumber,
     superannuationCompanyName: pending.superannuationCompanyName,
@@ -73,6 +75,7 @@ assert.deepEqual(
 assert.deepEqual(
   selectSensitiveDraft(formal, { ...pending, status: "Rejected" }),
   {
+    birthday: formal.birthday,
     bankBsb: formal.bankBsb,
     bankAccountNumber: formal.bankAccountNumber,
     superannuationCompanyName: formal.superannuationCompanyName,
@@ -82,6 +85,21 @@ assert.deepEqual(
     identityId: formal.identityId,
   },
   "非 Pending 状态重新填报时必须回退正式资料"
+);
+
+// 正式生日来自后端的日期时间字符串，比较前只取日期部分，未改生日不能被误判为变更。
+assert.deepEqual(
+  getChangedSensitiveFields(
+    { ...formal, birthday: "1990-01-02T00:00:00" },
+    selectSensitiveDraft(formal, null)
+  ),
+  [],
+  "正式生日带时间部分时，未修改的草稿不得算作变更"
+);
+assert.deepEqual(
+  getChangedSensitiveFields(formal, { ...selectSensitiveDraft(formal, null), birthday: "1990-01-03" }),
+  ["birthday"],
+  "修改生日必须进入敏感变更字段"
 );
 
 const sameLastFourDraft: SensitiveEmployeeProfilePayload = {
@@ -114,7 +132,6 @@ assert.equal(
 const nonSensitivePayload = buildNonSensitiveProfilePayload({
   phone: " 0400000000 ",
   email: " test@example.com ",
-  birthday: " 1990-01-02 ",
   gender: " female ",
   employmentType: " fullTime ",
   address: " 1 Queen Street ",
@@ -122,7 +139,6 @@ const nonSensitivePayload = buildNonSensitiveProfilePayload({
 assert.deepEqual(nonSensitivePayload, {
   phone: "0400000000",
   email: "test@example.com",
-  birthday: "1990-01-02",
   gender: "female",
   employmentType: "fullTime",
   address: "1 Queen Street",
@@ -138,12 +154,13 @@ assert.equal(
 );
 assert.equal(
   "employmentType" in buildNonSensitiveProfilePayload({
-    phone: "", email: "", birthday: "", gender: "", employmentType: "casual", address: "",
+    phone: "", email: "", gender: "", employmentType: "casual", address: "",
   }, { canEditPositionType: false }),
   false,
   "没有职位类型权限时保存 payload 不得携带 employmentType"
 );
 for (const sensitiveKey of [
+  "birthday",
   "bankBsb",
   "bankAccountNumber",
   "superannuationCompanyName",

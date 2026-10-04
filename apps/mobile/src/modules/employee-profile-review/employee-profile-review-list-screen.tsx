@@ -1,27 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
-import { ActivityIndicator, Badge, Button, Card, Chip, Text, useTheme } from "react-native-paper";
+import { ActivityIndicator, Badge, Button, Card, Chip, Searchbar, SegmentedButtons, Text, useTheme } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getEmployeeProfileReviewAccess } from "./access";
 import { getEmployeeProfileReviewRequestsApi } from "./api";
+import {
+  EMPLOYEE_PROFILE_REVIEW_SEARCH_DEBOUNCE_MS,
+  EMPLOYEE_PROFILE_REVIEW_SEGMENTS,
+  getEmployeeProfileReviewListQueryKey,
+  getEmployeeProfileReviewStatusFilter,
+  normalizeEmployeeProfileReviewSearch,
+  type EmployeeProfileReviewSegment,
+} from "./list-filters";
 import { clearEmployeeProfileReviewListCache } from "./review-cache";
 import { getReviewFailureKind } from "./review-logic";
 import { mergeUniqueEmployeeProfileReviewPages } from "./pagination";
-import type { EmployeeProfileReviewSummary } from "./types";
+import type { EmployeeProfileReviewStatus, EmployeeProfileReviewSummary } from "./types";
 import { useAppNavigationStore } from "@/modules/navigation/store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 
-export const employeeProfileReviewListQueryKey = [
-  "employeeProfileReview",
-  "requests",
-  "Pending",
-] as const;
+const STATUS_ICONS: Record<EmployeeProfileReviewStatus, string> = {
+  Pending: "clock-outline",
+  Approved: "check-circle-outline",
+  Rejected: "close-circle-outline",
+  Superseded: "minus-circle-outline",
+  Withdrawn: "undo-variant",
+};
 
 function formatDateTime(value: string, language: string) {
   const date = new Date(value);
@@ -45,6 +55,22 @@ export function EmployeeProfileReviewListScreen() {
   const navigationReady = useAppNavigationStore((state) => state.isReady);
   const mountedRef = useRef(true);
   const [listPrivacyHidden, setListPrivacyHidden] = useState(false);
+  const [segment, setSegment] = useState<EmployeeProfileReviewSegment>("pending");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const listQueryKey = useMemo(
+    () => getEmployeeProfileReviewListQueryKey(segment, search),
+    [search, segment]
+  );
+  const listQueryKeyRef = useRef(listQueryKey);
+  listQueryKeyRef.current = listQueryKey;
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setSearch(normalizeEmployeeProfileReviewSearch(searchInput)),
+      EMPLOYEE_PROFILE_REVIEW_SEARCH_DEBOUNCE_MS
+    );
+    return () => clearTimeout(timer);
+  }, [searchInput]);
   const reviewAccess = useMemo(
     () => getEmployeeProfileReviewAccess({
       roleNames: currentUser?.roleNames,
@@ -55,13 +81,16 @@ export function EmployeeProfileReviewListScreen() {
     [currentUser?.permissions, currentUser?.roleNames, navigationItems, sessionKind]
   );
   const reviewQuery = useInfiniteQuery({
-    queryKey: employeeProfileReviewListQueryKey,
+    queryKey: listQueryKey,
     enabled: navigationReady && reviewAccess.allowed,
+    // 切换分段/搜索时保留上一屏结果，避免整页转圈导致搜索框失焦。
+    placeholderData: keepPreviousData,
     initialPageParam: 1,
     queryFn: ({ pageParam }) => getEmployeeProfileReviewRequestsApi({
       page: pageParam,
       pageSize: 50,
-      status: "Pending",
+      status: getEmployeeProfileReviewStatusFilter(segment),
+      search: search || undefined,
     }),
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.pageSize < lastPage.total
@@ -101,8 +130,9 @@ export function EmployeeProfileReviewListScreen() {
     }
     setListPrivacyHidden(false);
     // offset 分页重新聚焦时丢弃旧后续页，从新首页重新建立稳定分页窗口。
+    // 只在聚焦时重置当前分段/搜索的列表；切换分段或搜索由新的查询键自然触发首屏请求，不重复请求。
     void queryClient.resetQueries({
-      queryKey: employeeProfileReviewListQueryKey,
+      queryKey: listQueryKeyRef.current,
       exact: true,
     });
   }, [listScopeInvalidated, navigationReady, queryClient, reviewAccess.allowed]));
@@ -152,14 +182,20 @@ export function EmployeeProfileReviewListScreen() {
 
   const items = mergeUniqueEmployeeProfileReviewPages(reviewQuery.data?.pages ?? []);
   const total = reviewQuery.data?.pages[0]?.total ?? 0;
+  const isProcessed = segment === "processed";
+  const emptyTitle = search ? t("list.searchEmpty") : t(isProcessed ? "list.processedEmpty" : "list.empty");
+  const emptyDescription = search
+    ? t("list.searchEmptyDescription")
+    : t(isProcessed ? "list.processedEmptyDescription" : "list.emptyDescription");
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={["top"]}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text variant="headlineSmall" selectable>{t("list.title")}</Text>
-          <Badge accessibilityLabel={t("list.pendingCount", { count: total })}>
+          <Badge accessibilityLabel={t(isProcessed ? "list.processedCount" : "list.pendingCount", { count: total })}>
             {total}
           </Badge>
+          {reviewQuery.isPlaceholderData ? <ActivityIndicator size="small" /> : null}
         </View>
         <Button
           icon="shield-account-outline"
@@ -172,6 +208,22 @@ export function EmployeeProfileReviewListScreen() {
         <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
           {t("list.subtitle")}
         </Text>
+        <SegmentedButtons
+          value={segment}
+          onValueChange={(value) => setSegment(value as EmployeeProfileReviewSegment)}
+          buttons={EMPLOYEE_PROFILE_REVIEW_SEGMENTS.map((value) => ({
+            value,
+            label: t(`segments.${value}`),
+          }))}
+        />
+        <Searchbar
+          value={searchInput}
+          onChangeText={setSearchInput}
+          placeholder={t("list.searchPlaceholder")}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.searchbar}
+        />
       </View>
       <FlatList
         data={items}
@@ -206,8 +258,8 @@ export function EmployeeProfileReviewListScreen() {
         ) : null}
         ListEmptyComponent={(
           <EmptyState
-            title={t("list.empty")}
-            description={t("list.emptyDescription")}
+            title={emptyTitle}
+            description={emptyDescription}
             primaryAction={{
               label: t("actions.refresh"),
               icon: "refresh",
@@ -232,7 +284,7 @@ export function EmployeeProfileReviewListScreen() {
                     {item.storeNames.length ? item.storeNames.join(" · ") : t("list.storeUnavailable")}
                   </Text>
                 </View>
-                <Chip compact icon="clock-outline">{t(`statuses.${item.status}`)}</Chip>
+                <Chip compact icon={STATUS_ICONS[item.status]}>{t(`statuses.${item.status}`)}</Chip>
               </View>
               <View style={styles.chips}>
                 {item.changedFields.map((field) => (
@@ -249,7 +301,7 @@ export function EmployeeProfileReviewListScreen() {
                   contentStyle={styles.touchTarget}
                   onPress={() => openDetail(item)}
                 >
-                  {t("actions.review")}
+                  {t(item.status === "Pending" ? "actions.review" : "actions.view")}
                 </Button>
               </View>
             </Card.Content>
@@ -265,6 +317,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: HB_SPACING.lg },
   header: { ...BUSINESS_UI.header, backgroundColor: HB_COLORS.white, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HB_COLORS.outlineMuted },
   titleRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
+  searchbar: { backgroundColor: HB_COLORS.surfaceMuted, elevation: 0 },
   list: { ...BUSINESS_UI.content, paddingBottom: HB_SPACING.xl },
   emptyList: { flexGrow: 1, justifyContent: "center", padding: HB_SPACING.md },
   requestCard: BUSINESS_UI.section,

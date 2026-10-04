@@ -290,7 +290,8 @@
       "employeeDetails": "员工资料",
       "accountInfo": "账号信息",
       "payroll": "薪资资料",
-      "quickActions": "快捷操作"
+      "quickActions": "快捷操作",
+      "profileStatus": "资料状态"
     },
     "fields": {
       "employeeId": "员工编号",
@@ -349,6 +350,17 @@
       "male": "男",
       "female": "女",
       "other": "其他"
+    },
+    "profileStatus": {
+      "password": "首次改密",
+      "passwordPending": "尚未修改初始密码",
+      "passwordDone": "已修改",
+      "sensitive": "敏感资料",
+      "sensitivePending": "有待审核的修改申请",
+      "sensitiveNone": "无待审核申请",
+      "sensitiveLoading": "正在查询…",
+      "sensitiveFailed": "查询失败",
+      "goReview": "去审核"
     }
   },
   "dialogs": {

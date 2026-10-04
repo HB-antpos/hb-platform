@@ -122,7 +122,7 @@ function asBoolean(value: unknown) {
   return value === true
 }
 
-function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatus {
+export function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatus {
   switch (asString(value)?.toLowerCase()) {
     case 'pending':
       return 'Pending'
@@ -132,6 +132,9 @@ function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatu
       return 'Rejected'
     case 'superseded':
       return 'Superseded'
+    case 'withdrawn':
+      // 员工本人撤回，与作废一样是不可操作的终态。
+      return 'Withdrawn'
     default:
       // 未知状态必须保持不可操作，不能误判为待审核。
       return 'Superseded'
@@ -139,6 +142,7 @@ function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatu
 }
 
 const SENSITIVE_FIELD_NAMES = new Set<EmployeeProfileSensitiveField>([
+  'birthday',
   'bankBsb',
   'bankAccountNumber',
   'superannuationCompanyName',
@@ -176,6 +180,7 @@ function mapSensitiveChangeSummary(raw: BackendEmployeeProfile): EmployeeProfile
 function mapSensitiveChangeDetail(raw: BackendEmployeeProfile): EmployeeProfileSensitiveChangeDetailDto {
   return {
     ...mapSensitiveChangeSummary(raw),
+    birthday: asString(raw.birthday) ?? asString(raw.Birthday),
     bankBsb: asString(raw.bankBsb) ?? asString(raw.BankBsb),
     bankAccountNumber: asString(raw.bankAccountNumber) ?? asString(raw.BankAccountNumber),
     superannuationCompanyName: asString(raw.superannuationCompanyName) ?? asString(raw.SuperannuationCompanyName),
