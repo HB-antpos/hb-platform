@@ -877,6 +877,33 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 须改密标记表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.UserPasswordChangeRequirement (UserGUID, Reason, RequiredAtUtc, RequiredBy)
+            VALUES (N'user-1', N'created', SYSUTCDATETIME(), N'manager-1');
+            """);
+        // 重复执行不得丢失已有标记。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.UserPasswordChangeRequirement WHERE UserGUID = N'user-1') <> 1
+                THROW 51873, 'Existing password change requirement row was lost.', 1;
+            """);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "ALTER TABLE dbo.UserPasswordChangeRequirement ALTER COLUMN Reason nvarchar(64) NOT NULL;"
+        );
+        var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.VerifySql));
+        Assert.Equal(51871, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商分类三表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
@@ -912,6 +939,53 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         var driftedColumn = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(databases.MainConnectionString, LocalSupplierCategorySchema.VerifySql));
         Assert.Equal(51931, driftedColumn.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 未成年用工六表_可重复执行且未完成请求唯一并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.VerifySql));
+        Assert.Equal(51980, missing.Number);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.VerifySql);
+
+        // 同一员工只能有一条 open 请求；已完成的历史请求不受限制。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.EmployeeMinorComplianceRequest (UserGUID, Status, CreatedAt) VALUES
+                (N'u1', N'open', SYSUTCDATETIME()),
+                (N'u1', N'completed', SYSUTCDATETIME()),
+                (N'u1', N'cancelled', SYSUTCDATETIME());
+            """);
+        var duplicateOpen = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString,
+                "INSERT dbo.EmployeeMinorComplianceRequest (UserGUID, Status, CreatedAt) VALUES (N'u1', N'open', SYSUTCDATETIME());"));
+        Assert.Contains(duplicateOpen.Number, new[] { 2601, 2627 });
+
+        // 验证码计数列有默认值，旧代码插入不带这些列也不会失败。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.EmployeeMinorCompliance (UserGUID, Version, Status, StateCode, FormType, GuardianName, CreatedAt)
+            VALUES (N'u1', 1, N'draft', N'QLD', N'QLD_CE1', N'Parent', SYSUTCDATETIME());
+            """);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "DROP INDEX [UX_MinorRequest_OpenPerUser] ON dbo.EmployeeMinorComplianceRequest;");
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.VerifySql));
+        Assert.Equal(51984, missingIndex.Number);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString,
+            "ALTER TABLE dbo.EmployeeMinorCompliance ALTER COLUMN GuardianOtpHash nvarchar(32) NULL;");
+        var drifted = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeMinorComplianceSchema.VerifySql));
+        Assert.Equal(51981, drifted.Number);
     }
 
     [SchemaMigrationSqlServerFact]

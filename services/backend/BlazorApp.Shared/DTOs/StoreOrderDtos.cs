@@ -1703,6 +1703,12 @@ public class SendStoreOrderInvoiceEmailDto
     /// </summary>
     [StringLength(10000, ErrorMessage = "邮件正文长度不能超过10000个字符")]
     public string? Body { get; set; }
+
+    /// <summary>
+    /// 发件邮箱账号 ID；为空时使用默认发件账号
+    /// </summary>
+    [StringLength(50, ErrorMessage = "发件邮箱账号 ID 长度不能超过50个字符")]
+    public string? FromAccountId { get; set; }
 }
 
 /// <summary>
@@ -1871,6 +1877,11 @@ public class StoreOrderInvoiceEmailMessage
     /// 邮件附件集合
     /// </summary>
     public List<StoreOrderInvoiceEmailAttachment> Attachments { get; set; } = new();
+
+    /// <summary>
+    /// 发件邮箱账号 ID；为空时使用默认发件账号
+    /// </summary>
+    public string? FromAccountId { get; set; }
 }
 
 /// <summary>

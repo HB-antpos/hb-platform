@@ -139,6 +139,15 @@ namespace BlazorApp.Api.Services.React
                     })
                     .OrderBy(item => item.FullName ?? item.Username, StringComparer.OrdinalIgnoreCase)
                     .ToList();
+                // 一次批量查询标注「待首次改密」，供列表显示状态与筛选。
+                var mustChange = await UserPasswordChangeRequirements.GetRequiredUserGuidsAsync(
+                    _db,
+                    grouped.Select(item => item.UserGuid).ToList()
+                );
+                foreach (var item in grouped)
+                {
+                    item.MustChangePassword = mustChange.Contains(item.UserGuid);
+                }
 
                 return GridResponseDto<StoreUserListDto>.OK(grouped, grouped.Count, "获取店员列表成功");
             }
@@ -280,6 +289,17 @@ namespace BlazorApp.Api.Services.React
                             UpdatedBy = createdBy,
                         }
                     ).ExecuteCommandAsync();
+                    if (dto.RequirePasswordChange ?? true)
+                    {
+                        // 与建号同事务：员工拿到初始密码后首次登录必须先改成自己的密码。
+                        await UserPasswordChangeRequirements.RequireAsync(
+                            _db,
+                            userGuid,
+                            UserPasswordChangeRequirement.ReasonCreated,
+                            createdBy,
+                            now
+                        );
+                    }
 
                     await _db.Ado.CommitTranAsync();
                 }
@@ -479,15 +499,38 @@ namespace BlazorApp.Api.Services.React
                     return await BuildMissingUserResponseAsync<bool>(userGuid, "未找到可管理的店员账号");
                 }
 
-                var result = await _db.Updateable<User>()
-                    .SetColumns(item => new User
+                var now = DateTime.UtcNow;
+                int result;
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    result = await _db.Updateable<User>()
+                        .SetColumns(item => new User
+                        {
+                            PasswordHash = PasswordHasher.HashSubmittedPassword(dto.NewPassword, dto.PasswordFormat),
+                            UpdatedAt = now,
+                            UpdatedBy = updatedBy,
+                        })
+                        .Where(item => item.UserGUID == userGuid)
+                        .ExecuteCommandAsync();
+                    if (result > 0 && (dto.RequirePasswordChange ?? true))
                     {
-                        PasswordHash = PasswordHasher.HashSubmittedPassword(dto.NewPassword, dto.PasswordFormat),
-                        UpdatedAt = DateTime.UtcNow,
-                        UpdatedBy = updatedBy,
-                    })
-                    .Where(item => item.UserGUID == userGuid)
-                    .ExecuteCommandAsync();
+                        // 重置后的密码由店长掌握，员工下次进入 App 须先改成自己的密码。
+                        await UserPasswordChangeRequirements.RequireAsync(
+                            _db,
+                            userGuid,
+                            UserPasswordChangeRequirement.ReasonReset,
+                            updatedBy,
+                            now
+                        );
+                    }
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
 
                 return result > 0
                     ? ApiResponse<bool>.OK(true, "店员密码重置成功")
@@ -598,6 +641,10 @@ namespace BlazorApp.Api.Services.React
                     };
                 })
                 .FirstOrDefault();
+            if (detail != null)
+            {
+                detail.MustChangePassword = await UserPasswordChangeRequirements.IsRequiredAsync(_db, detail.UserGuid);
+            }
 
             return detail;
         }

@@ -47,3 +47,12 @@ export interface InvoiceEmailSettingsTestResult {
   success: boolean
   message?: string
 }
+
+/** 发送邮件时可选的发件账号，只含名称与发件地址，不含 SMTP 凭据。 */
+export interface InvoiceEmailSenderAccountDto {
+  id: string
+  name: string
+  fromEmail: string
+  fromName?: string | null
+  isDefault: boolean
+}

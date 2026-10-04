@@ -161,6 +161,14 @@ export function EmployeeProfileReviewListScreen() {
             {total}
           </Badge>
         </View>
+        <Button
+          icon="shield-account-outline"
+          mode="outlined"
+          compact
+          onPress={() => router.push("/(shell)/employee-minor-employment-review" as never)}
+        >
+          未成年用工合规
+        </Button>
         <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
           {t("list.subtitle")}
         </Text>

@@ -109,6 +109,7 @@ function normalizeCurrentUser(payload: unknown): CurrentUser {
         ? (data.StoreNames as string[])
         : [],
     stores: normalizeUserStores(data.stores ?? data.Stores),
+    mustChangePassword: data.mustChangePassword === true || data.MustChangePassword === true,
   };
 }
 
@@ -132,6 +133,15 @@ export async function getCurrentUserApi(): Promise<CurrentUser> {
 export async function getUserStoresApi(userGuid: string): Promise<UserStoreDto[]> {
   const res = await apiClient.get(`/Users/guid/${encodeURIComponent(userGuid)}/stores`);
   return normalizeUserStores(res.data);
+}
+
+/** 改密成功后后端清除须改密标记，并吊销本账号其他会话，当前会话保留。 */
+export async function changePasswordApi(payload: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}): Promise<void> {
+  await apiClient.post("/auth/change-password", payload);
 }
 
 export async function logoutApi(refreshToken: string): Promise<void> {

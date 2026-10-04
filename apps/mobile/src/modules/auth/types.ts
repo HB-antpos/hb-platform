@@ -52,6 +52,8 @@ export interface CurrentUser {
   roleNames: string[];
   storeNames: string[];
   stores: UserStoreDto[];
+  /** 店长新建或重置密码后须先改成自己的密码；旧后端不返回时视为 false。 */
+  mustChangePassword?: boolean;
 }
 
 export interface AccessControl {

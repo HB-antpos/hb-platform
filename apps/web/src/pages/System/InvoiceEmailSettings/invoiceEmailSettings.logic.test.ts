@@ -5,10 +5,13 @@ import { buildAccess } from '../../../utils/access'
 import { buildWebRoleMenuPreview } from '../../../utils/webMenuPreview'
 import type { CurrentUser } from '../../../types/auth'
 import { P } from '../../../types/permissions'
+import invoiceEmailSettingsMessagesEn from './invoiceEmailSettingsMessages.en.json'
+import invoiceEmailSettingsMessagesZh from './invoiceEmailSettingsMessages.zh.json'
 import { RequestError } from '../../../utils/request'
 import {
   buildInvoiceEmailSettingsSavePayload,
   buildInvoiceEmailSettingsTestPayload,
+  collectInvoiceEmailAccountErrorIndexes,
   createInvoiceEmailSettingsFormValues,
   createNewInvoiceEmailAccountFormValue,
   ensureInvoiceEmailDefaultAccount,
@@ -72,11 +75,11 @@ assertEqual(hiddenInvoiceEmailMenu?.visible, false, '缺少权限时发票邮箱
 
 assertEqual(zhLocale.menu.invoiceEmailSettings, '发票邮箱配置', '中文菜单文案应存在')
 assertEqual(enLocale.menu.invoiceEmailSettings, 'Invoice Email Settings', '英文菜单文案应存在')
-assertEqual(zhLocale.invoiceEmailSettings.testToEmail, '测试收件邮箱', '中文页面文案应存在')
-assertEqual(enLocale.invoiceEmailSettings.testToEmail, 'Test recipient email', '英文页面文案应存在')
-assertEqual(zhLocale.invoiceEmailSettings.addAccount, '新增发件账号', '中文新增账号文案应存在')
-assertEqual(enLocale.invoiceEmailSettings.defaultAccount, 'Default account', '英文默认账号文案应存在')
-assertEqual(zhLocale.invoiceEmailSettings.maxAttachmentBytes, '附件大小上限（MB）', '附件大小中文文案应按 MB 显示')
+assertEqual(invoiceEmailSettingsMessagesZh.invoiceEmailSettings.testToEmail, '测试收件邮箱', '中文页面文案应存在')
+assertEqual(invoiceEmailSettingsMessagesEn.invoiceEmailSettings.testToEmail, 'Test recipient email', '英文页面文案应存在')
+assertEqual(invoiceEmailSettingsMessagesZh.invoiceEmailSettings.addAccount, '新增发件账号', '中文新增账号文案应存在')
+assertEqual(invoiceEmailSettingsMessagesEn.invoiceEmailSettings.defaultAccount, 'Default account', '英文默认账号文案应存在')
+assertEqual(invoiceEmailSettingsMessagesZh.invoiceEmailSettings.maxAttachmentBytes, '附件大小上限（MB）', '附件大小中文文案应按 MB 显示')
 
 const formValues = createInvoiceEmailSettingsFormValues({
   accounts: [
@@ -206,6 +209,28 @@ assertEqual(
   resolveInvoiceEmailSettingsErrorMessage(new Error(''), '发送测试邮件失败'),
   '发送测试邮件失败',
   '错误消息为空时应回退到页面默认文案',
+)
+
+assertEqual(
+  collectInvoiceEmailAccountErrorIndexes([
+    { name: ['accounts', 2, 'host'], errors: ['请输入 SMTP 主机'] },
+    { name: ['accounts', 0, 'fromEmail'], errors: ['请输入发件邮箱'] },
+    { name: ['accounts', 2, 'port'], errors: ['请输入 SMTP 端口'] },
+    { name: ['accounts', 1, 'name'], errors: [] },
+    { name: ['other', 3], errors: ['x'] },
+  ]).join(','),
+  '0,2',
+  '出错账号序号应升序去重，并忽略无错误字段与非账号字段',
+)
+
+// 配置页文案已改为页面级懒注册：全局语言文件不应再包含该块，否则又会进首屏包。
+assert(!('invoiceEmailSettings' in zhLocale), '全局中文语言文件不应再包含 invoiceEmailSettings 文案块')
+assert(!('invoiceEmailSettings' in enLocale), '全局英文语言文件不应再包含 invoiceEmailSettings 文案块')
+assert(
+  readFileSync('src/pages/System/InvoiceEmailSettings/index.tsx', 'utf8').includes(
+    'registerPageMessages({ zh: invoiceEmailSettingsMessagesZh, en: invoiceEmailSettingsMessagesEn })',
+  ),
+  '配置页应在模块顶层懒注册页面文案',
 )
 
 const routeSource = readFileSync('src/router/routes.tsx', 'utf8')

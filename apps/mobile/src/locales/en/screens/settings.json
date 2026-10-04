@@ -48,7 +48,9 @@
     "deviceModeHelper": "The app is using device authorization, so personal profile is hidden.",
     "logoutToLogin": "Logout and return to login",
     "expandPersonalCode": "Tap to enlarge · View and print your code",
-    "personalCodeBusy": "A personal code is printing. Wait for the current job to finish."
+    "personalCodeBusy": "A personal code is printing. Wait for the current job to finish.",
+    "changePassword": "Change password",
+    "changePasswordHelper": "Use a password only you know"
   },
   "language": {
     "description": "Change the app display language and apply it immediately."

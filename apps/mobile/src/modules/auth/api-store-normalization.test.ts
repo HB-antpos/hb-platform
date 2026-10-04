@@ -10,6 +10,7 @@ test("认证门店响应保留严格布尔 POS 启用状态", async () => {
       "/auth/current",
       {
         UserGUID: "user-1",
+        MustChangePassword: true,
         Stores: [
           { StoreCode: "PASCAL_FALSE", StoreName: "Pascal false", IsActive: false },
           { StoreCode: "CAMEL_FALSE", StoreName: "Camel false", isActive: false },
@@ -44,6 +45,8 @@ test("认证门店响应保留严格布尔 POS 启用状态", async () => {
     const { getCurrentUserApi, getUserStoresApi } = loadModule("./api") as typeof import("./api");
     const currentUser = await getCurrentUserApi();
     const userStores = await getUserStoresApi("user/1");
+
+    assert.equal(currentUser.mustChangePassword, true, "须改密标记必须从 PascalCase 响应映射出来");
 
     assert.deepEqual(
       currentUser.stores.map((store) => store.isActive),

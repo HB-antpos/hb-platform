@@ -122,6 +122,7 @@ namespace BlazorApp.Api.Services.React
                         Subject = subject,
                         Body = body,
                         Attachments = bundle.Attachments,
+                        FromAccountId = jobState.Request.FromAccountId,
                     }
                 );
 
@@ -227,6 +228,9 @@ namespace BlazorApp.Api.Services.React
                 ToEmail = request.ToEmail,
                 Subject = request.Subject,
                 Body = request.Body,
+                FromAccountId = string.IsNullOrWhiteSpace(request.FromAccountId)
+                    ? null
+                    : request.FromAccountId.Trim(),
             };
         }
 

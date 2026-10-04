@@ -45,7 +45,8 @@ namespace BlazorApp.Api.Tests
                 typeof(UserRole),
                 typeof(Store),
                 typeof(UserStore),
-                typeof(EmployeeProfile)
+                typeof(EmployeeProfile),
+                typeof(UserPasswordChangeRequirement)
             );
         }
 
@@ -121,6 +122,63 @@ namespace BlazorApp.Api.Tests
                 .FirstAsync(item => item.UserGUID == result.Data.UserGuid);
             Assert.NotNull(createdProfile);
             Assert.Equal(EmployeeType.Temporary, createdProfile!.EmployeeType);
+
+            // 未传 RequirePasswordChange 时默认要求首次登录改密，列表与详情都能看到。
+            var requirement = await _db.Queryable<UserPasswordChangeRequirement>()
+                .FirstAsync(item => item.UserGUID == result.Data.UserGuid);
+            Assert.NotNull(requirement);
+            Assert.Equal(UserPasswordChangeRequirement.ReasonCreated, requirement!.Reason);
+            Assert.Equal("manager-1", requirement.RequiredBy);
+            Assert.True(result.Data.MustChangePassword);
+            Assert.True(gridResult.Items!.Single(item => item.UserGuid == result.Data.UserGuid).MustChangePassword);
+            Assert.False(gridResult.Items!.Single(item => item.UserGuid == "staff-1").MustChangePassword);
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenRequirePasswordChangeFalse_DoesNotMarkAccount()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "staff_no_force",
+                    Password = "Secret123",
+                    StoreCode = "S001",
+                    Status = 1,
+                    RequirePasswordChange = false,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success);
+            Assert.False(result.Data!.MustChangePassword);
+            Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+        }
+
+        [Fact]
+        public async Task UpdatePasswordAsync_WhenStoreManagerResetsManagedStaff_RequiresPasswordChange()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdatePasswordAsync(
+                "staff-1",
+                new UpdateStoreUserPasswordDto
+                {
+                    StoreCode = "S001",
+                    NewPassword = "Changed123",
+                    PasswordFormat = "raw",
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success);
+            var requirement = await _db.Queryable<UserPasswordChangeRequirement>()
+                .FirstAsync(item => item.UserGUID == "staff-1");
+            Assert.NotNull(requirement);
+            Assert.Equal(UserPasswordChangeRequirement.ReasonReset, requirement!.Reason);
         }
 
         [Fact]

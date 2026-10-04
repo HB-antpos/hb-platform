@@ -43,6 +43,10 @@ internal sealed class SchemaMigrationCoordinator
         "20261003.001-attendance-availability-unavailable";
     internal const string EmployeeProfileSensitiveBirthdayMigrationId =
         "20261004.001-employee-profile-sensitive-birthday";
+    internal const string UserPasswordChangeRequirementMigrationId =
+        "20261004.002-user-password-change-requirement";
+    internal const string EmployeeMinorComplianceMigrationId =
+        "20261004.003-employee-minor-compliance";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -143,6 +147,16 @@ internal sealed class SchemaMigrationCoordinator
             EmployeeProfileSensitiveBirthdayMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyEmployeeProfileSensitiveBirthdayAsync(cancellationToken)
+        ),
+        new(
+            UserPasswordChangeRequirementMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyUserPasswordChangeRequirementAsync(cancellationToken)
+        ),
+        new(
+            EmployeeMinorComplianceMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyEmployeeMinorComplianceAsync(cancellationToken)
         ),
     ];
 

@@ -76,6 +76,7 @@ namespace BlazorApp.Api.Tests
                 typeof(AttendanceLeaveRequest),
                 typeof(AttendanceSettings),
                 typeof(EmployeeProfile),
+                typeof(EmployeeMinorCompliance),
                 typeof(AttendancePosQrKey)
                 ,typeof(Role)
                 ,typeof(UserRole)
@@ -695,6 +696,81 @@ namespace BlazorApp.Api.Tests
 
             Assert.True(result.Success);
             Assert.Equal(2, result.Data!.Count);
+        }
+
+        [Theory]
+        [InlineData("2010-09-13", "2026-09-12", true)]
+        [InlineData("2010-09-13", "2026-09-13", false)]
+        public void ResolveQldSchoolAgedChild_UsesEvaluationDateForSixteenthBirthday(string birthday, string anchor, bool expected)
+        {
+            var profile = new EmployeeMinorCompliance
+            {
+                StateCode = "QLD", DateOfBirth = DateTime.Parse(birthday), RequiredToBeEnrolled = true,
+            };
+            var method = typeof(AttendanceReactService).GetMethod("ResolveQldSchoolAgedChild", BindingFlags.NonPublic | BindingFlags.Static);
+
+            var actual = (bool?)method!.Invoke(null, new object[] { profile, DateTime.Parse(anchor) });
+
+            Assert.Equal(expected, actual);
+        }
+
+        [Fact]
+        public void ResolveQldSchoolAgedChild_CompletedYearTenExcludesQldNumericLimits()
+        {
+            var profile = new EmployeeMinorCompliance
+            {
+                StateCode = "QLD", DateOfBirth = new DateTime(2011, 1, 1), RequiredToBeEnrolled = true, CompletedYear10 = true,
+            };
+            var method = typeof(AttendanceReactService).GetMethod("ResolveQldSchoolAgedChild", BindingFlags.NonPublic | BindingFlags.Static);
+
+            var actual = (bool?)method!.Invoke(null, new object[] { profile, new DateTime(2026, 9, 13) });
+
+            Assert.False(actual);
+        }
+
+        [Fact]
+        public async Task CreateScheduleAsync_QldWorkerAfterSixteenthBirthday_DoesNotApplySchoolAgedNumericLimits()
+        {
+            await SeedStoreScopeAsync();
+            await _db.Insertable(new EmployeeMinorCompliance
+            {
+                UserGUID = "staff-user", Version = 1, Revision = 1, Status = "approved", StateCode = "QLD",
+                DateOfBirth = new DateTime(2010, 9, 15), RequiredToBeEnrolled = true,
+            }).ExecuteCommandAsync();
+            var service = CreateService("manager-user", "manager", "StoreManager");
+
+            var result = await service.CreateScheduleAsync(new CreateAttendanceScheduleDto
+            {
+                StoreCode = "BRI", UserGuid = "staff-user", WorkDate = new DateTime(2026, 9, 16),
+                StartTime = new TimeSpan(8, 0, 0), EndTime = new TimeSpan(17, 0, 0),
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.DoesNotContain(result.Data!.MinorCompliance!.Findings, item => item.RuleId.StartsWith("QLD_SCHOOL_") || item.RuleId == "QLD_NON_SCHOOL_DAY_DAILY_LIMIT");
+        }
+
+        [Fact]
+        public async Task CreateScheduleAsync_WhenMinorComplianceEvaluationFails_PersistsScheduleAndReturnsSuccess()
+        {
+            await SeedStoreScopeAsync();
+            await _db.Insertable(new EmployeeMinorCompliance
+            {
+                UserGUID = "staff-user", Version = 1, Revision = 1, Status = "approved", StateCode = "QLD",
+                DateOfBirth = new DateTime(2011, 1, 1), RequiredToBeEnrolled = true,
+                // 模拟历史资料损坏：评估必须降级，不能让已写入的排班返回 500。
+                SchoolCalendarJson = "{not-json",
+            }).ExecuteCommandAsync();
+            var service = CreateService("manager-user", "manager", "StoreManager");
+
+            var result = await service.CreateScheduleAsync(new CreateAttendanceScheduleDto
+            {
+                StoreCode = "BRI", UserGuid = "staff-user", WorkDate = new DateTime(2026, 5, 18),
+                StartTime = new TimeSpan(9, 0, 0), EndTime = new TimeSpan(13, 0, 0),
+            });
+
+            Assert.True(result.Success);
+            Assert.Null(result.Data!.MinorCompliance);
+            Assert.True(await _db.Queryable<AttendanceSchedule>().AnyAsync(item => item.ScheduleGuid == result.Data.ScheduleGuid));
         }
 
         [Fact]

@@ -24,6 +24,7 @@ const ShopLayout = lazy(loadShopLayout)
 const BrowserExtensionPrivacyPage = lazy(() => import('./pages/BrowserExtensionPrivacy'))
 const HbSupplierOrderSupportPage = lazy(() => import('./pages/HbSupplierOrderSupport'))
 const MobilePrivacyPage = lazy(() => import('./pages/MobilePrivacy'))
+const MinorEmploymentParentSignaturePage = lazy(() => import('./pages/MinorEmployment/ParentSignature'))
 const ShopBestSellersPage = lazy(() => import('./pages/ShopBestSellers'))
 const ShopComingSoonPage = lazy(() => import('./pages/ShopComingSoon'))
 const ShopSupplyWatchesPage = lazy(() => import('./pages/ShopSupplyWatches'))
@@ -91,6 +92,14 @@ function AppBootstrap() {
       <Route
         path="/privacy/mobile"
         element={<RouteLoadBoundary resetKey="mobile-privacy"><MobilePrivacyPage /></RouteLoadBoundary>}
+      />
+      <Route
+        path="/minor-employment/sign"
+        element={<RouteLoadBoundary resetKey="minor-employment-sign"><MinorEmploymentParentSignaturePage /></RouteLoadBoundary>}
+      />
+      <Route
+        path="/minor-employment/guardian/:token"
+        element={<RouteLoadBoundary resetKey="minor-employment-guardian"><MinorEmploymentParentSignaturePage /></RouteLoadBoundary>}
       />
       <Route
         path="/support/hb-supplier-order"

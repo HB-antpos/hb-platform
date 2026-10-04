@@ -186,5 +186,10 @@
       "future": "Birthday cannot be later than today",
       "tooOld": "Please check the birth year"
     }
+  },
+  "minorEmployment": {
+    "title": "Minor employment compliance",
+    "description": "Maintain school days, holidays, parent signature and commute reminders.",
+    "open": "Open minor employment form"
   }
 }

@@ -8,6 +8,7 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<List<AttendanceScheduleDto>>> GetWeekSchedulesAsync(AttendanceScheduleQueryDto query);
         Task<ApiResponse<PagedResult<AttendanceScheduleDto>>> GetAttendanceRecordsAsync(AttendanceScheduleQueryDto query);
         Task<ApiResponse<AttendanceScheduleDto>> CreateScheduleAsync(CreateAttendanceScheduleDto request);
+        Task<ApiResponse<MinorEmploymentComplianceEvaluationDto>> PreviewMinorEmploymentComplianceAsync(CreateAttendanceScheduleDto request);
         Task<ApiResponse<AttendanceScheduleDto>> UpdateScheduleAsync(string scheduleGuid, UpdateAttendanceScheduleDto request);
         Task<ApiResponse<int>> PublishWeekAsync(PublishAttendanceWeekDto request);
         Task<ApiResponse<CopyAttendanceScheduleWeekResultDto>> CopyScheduleWeekAsync(CopyAttendanceScheduleWeekDto request);

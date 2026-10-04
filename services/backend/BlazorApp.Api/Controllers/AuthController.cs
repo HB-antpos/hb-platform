@@ -327,6 +327,10 @@ namespace BlazorApp.Api.Controllers
                     ExactPermissions = snapshot.ExactPermissionCodes?.ToList() ?? new List<string>(),
                     StoreNames = userStores.Select(s => s.StoreName).ToList(),
                     Stores = userStores,
+                    MustChangePassword = await UserPasswordChangeRequirements.IsRequiredAsync(
+                        _dbContext.Db,
+                        user.UserGUID
+                    ),
                 };
 
                 return ApiResponse<UserDto>.OK(userDto, "获取用户信息成功");
@@ -469,7 +473,12 @@ namespace BlazorApp.Api.Controllers
                     return ApiResponse<bool>.Error("无法获取用户信息");
                 }
 
-                var success = await _authService.ChangePasswordAsync(userIdClaim.Value, dto);
+                // 当前会话保留，其余会话吊销：改密后旧设备上的登录随即失效。
+                var success = await _authService.ChangePasswordAsync(
+                    userIdClaim.Value,
+                    dto,
+                    User.FindFirst("sessionId")?.Value
+                );
                 if (success)
                 {
                     return ApiResponse<bool>.OK(true, "密码修改成功");

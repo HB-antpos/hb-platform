@@ -28,6 +28,7 @@ import type {
   AttendancePunchPayload,
   AttendanceQrResolveResult,
   AttendancePunchType,
+  MinorEmploymentComplianceEvaluation,
   AttendanceSchedule,
   AttendanceScheduleSession,
   AttendanceSchedulePayload,
@@ -160,6 +161,17 @@ function getArray(payload: unknown): ApiRecord[] {
   return Array.isArray(candidate) ? candidate.filter(isRecord) : [];
 }
 
+function normalizeMinorCompliance(raw: unknown): MinorEmploymentComplianceEvaluation | undefined {
+  if (!isRecord(raw)) return undefined;
+  const rawFindings = pick(raw, "findings", "Findings");
+  const findings = Array.isArray(rawFindings) ? rawFindings.filter(isRecord).map((finding) => ({
+    ruleId: asString(pick(finding, "ruleId", "RuleId")), severity: asString(pick(finding, "severity", "Severity"), "review"), message: asString(pick(finding, "message", "Message")),
+    workDate: asOptionalString(pick(finding, "workDate", "WorkDate")), actualMinutes: asOptionalNumber(pick(finding, "actualMinutes", "ActualMinutes")), limitMinutes: asOptionalNumber(pick(finding, "limitMinutes", "LimitMinutes")),
+    ruleCategory: asOptionalString(pick(finding, "ruleCategory", "RuleCategory")), sourceUrl: asOptionalString(pick(finding, "sourceUrl", "SourceUrl")),
+  })) : [];
+  return { findings, hasFindings: asBoolean(pick(raw, "hasFindings", "HasFindings"), findings.length > 0) };
+}
+
 function normalizeSchedule(raw: ApiRecord): AttendanceSchedule {
   return {
     scheduleGuid: asString(pick(raw, "scheduleGuid", "ScheduleGuid", "guid", "Guid")),
@@ -173,6 +185,7 @@ function normalizeSchedule(raw: ApiRecord): AttendanceSchedule {
     status: asString(pick(raw, "status", "Status"), "Scheduled"),
     remark: asOptionalString(pick(raw, "remark", "Remark", "note", "Note")),
     mealBreakCount: asOptionalNumber(pick(raw, "mealBreakCount", "MealBreakCount")) ?? null,
+    minorCompliance: normalizeMinorCompliance(pick(raw, "minorCompliance", "MinorCompliance")),
     isMine: asBoolean(pick(raw, "isMine", "IsMine", "mine", "Mine")),
     holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")),
     holidayBusinessStatus: asOptionalString(pick(raw, "holidayBusinessStatus", "HolidayBusinessStatus")),
@@ -202,6 +215,7 @@ function normalizePunch(raw: ApiRecord): AttendancePunch {
     employeeName: asOptionalString(pick(raw, "employeeName", "EmployeeName")),
     posDeviceCode: asOptionalString(pick(raw, "posDeviceCode", "PosDeviceCode")),
     serverTimeUtc: asOptionalString(pick(raw, "serverTimeUtc", "ServerTimeUtc")),
+    minorCompliance: normalizeMinorCompliance(pick(raw, "minorCompliance", "MinorCompliance")),
   };
 }
 

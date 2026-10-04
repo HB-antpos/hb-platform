@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ActivityIndicator, AppState, View } from "react-native";
-import { Stack, usePathname, useRouter } from "expo-router";
+import { Redirect, Stack, usePathname, useRouter } from "expo-router";
 import { PrimaryTabBar } from "@/components/navigation";
 import { useAuthStore } from "@/store/auth-store";
 import { useDeviceStore } from "@/store/device-store";
@@ -15,6 +15,7 @@ import {
   TAB_PATHS,
 } from "@/modules/navigation/default-route";
 import { prepareStoredDeviceSession } from "@/modules/auth/device-login-session";
+import { shouldForcePasswordChange } from "@/modules/auth/password-change";
 import {
   EMPLOYEE_PROFILE_REVIEW_ROUTE,
   filterEmployeeProfileReviewRouteNames,
@@ -90,6 +91,8 @@ export default function ShellLayout() {
     accountBinding?.hardwareId && accountBinding.credential
   );
   const isIosReviewSession = sessionKind === "iosReview";
+  // 店长新建或重置密码的账号：改成自己的密码前不进入任何业务页面。
+  const mustChangePassword = shouldForcePasswordChange({ user: currentUser, sessionKind, isAuthenticated });
   useAppDeviceStatusHeartbeat({
     enabled:
       !isIosReviewSession &&
@@ -461,7 +464,8 @@ export default function ShellLayout() {
   );
 
   useEffect(() => {
-    if (shouldWaitForNavigation || visibleRouteNames.size === 0) {
+    // 须改密时本次渲染会重定向到改密页，默认入口纠偏不能在同一轮把页面又导回壳层。
+    if (mustChangePassword || shouldWaitForNavigation || visibleRouteNames.size === 0) {
       return;
     }
 
@@ -510,6 +514,7 @@ export default function ShellLayout() {
   }, [
     isDeviceMode,
     isWarehouseStaffOnly,
+    mustChangePassword,
     orderedVisibleRouteNames,
     currentRouteName,
     preferredDefaultRoute,
@@ -537,6 +542,10 @@ export default function ShellLayout() {
         <ActivityIndicator size="large" color="#1677FF" />
       </View>
     );
+  }
+
+  if (mustChangePassword) {
+    return <Redirect href={"/(auth)/change-password" as unknown as Parameters<typeof router.replace>[0]} />;
   }
 
   return (

@@ -1,5 +1,6 @@
 import type {
   AttendancePunch,
+  MinorEmploymentComplianceEvaluation,
   AttendancePunchSegment,
   AttendancePunchType,
   AttendanceSchedule,
@@ -68,6 +69,21 @@ function records(value: unknown): ApiRecord[] {
   if (!isRecord(value)) return [];
   const nested = pick(value, "items", "Items", "rows", "Rows", "data", "Data");
   return Array.isArray(nested) ? nested.filter(isRecord) : [];
+}
+
+function normalizeMinorCompliance(raw: unknown): MinorEmploymentComplianceEvaluation | undefined {
+  if (!isRecord(raw)) return undefined;
+  const findings = records(pick(raw, "findings", "Findings")).map((finding) => ({
+    ruleId: asString(pick(finding, "ruleId", "RuleId")),
+    severity: asString(pick(finding, "severity", "Severity"), "review"),
+    message: asString(pick(finding, "message", "Message")),
+    workDate: asOptionalString(pick(finding, "workDate", "WorkDate")),
+    actualMinutes: asOptionalNumber(pick(finding, "actualMinutes", "ActualMinutes")),
+    limitMinutes: asOptionalNumber(pick(finding, "limitMinutes", "LimitMinutes")),
+    ruleCategory: asOptionalString(pick(finding, "ruleCategory", "RuleCategory")),
+    sourceUrl: asOptionalString(pick(finding, "sourceUrl", "SourceUrl")),
+  }));
+  return { findings, hasFindings: asBoolean(pick(raw, "hasFindings", "HasFindings"), findings.length > 0) };
 }
 
 function normalizePunch(raw: ApiRecord, fallbackType?: AttendancePunchType): AttendancePunch {
@@ -411,6 +427,7 @@ export function normalizeAttendanceToday(payload: unknown): AttendanceToday {
 
   return {
     workDate: asDateString(pick(raw, "workDate", "WorkDate")),
+    minorCompliance: normalizeMinorCompliance(pick(raw, "minorCompliance", "MinorCompliance")),
     storeTimeZone: asOptionalString(pick(raw, "storeTimeZone", "StoreTimeZone")),
     holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")) ?? primaryHoliday?.holidayName,
     holidayBusinessStatus: asOptionalString(pick(raw, "holidayBusinessStatus", "HolidayBusinessStatus"))

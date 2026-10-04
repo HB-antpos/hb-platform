@@ -859,6 +859,11 @@ export default function EmployeeProfileScreen() {
                 <Button mode="text" icon="refresh" onPress={() => void sensitiveQuery.refetch()}>{t("common:actions.retry")}</Button>
               ) : null}
             </Surface>
+            <Surface style={styles.card} elevation={0}>
+              <Text variant="titleMedium" style={styles.sectionTitle}>{t("minorEmployment.title")}</Text>
+              <Text variant="bodySmall" style={styles.metaText}>{t("minorEmployment.description")}</Text>
+              <Button mode="outlined" icon="shield-account-outline" onPress={() => router.push("/(shell)/minor-employment" as never)}>{t("minorEmployment.open")}</Button>
+            </Surface>
             <Text variant="bodySmall" style={styles.updatedAt}>{t("overview.updatedAt", { time: updatedAtText })}</Text>
           </>
         ) : view === "basic" ? (
