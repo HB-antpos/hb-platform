@@ -105,7 +105,6 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
     children: [
       { path: '/system/stores', title: 'menu.systemStores', accessKey: 'canReadStore' },
       { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles' },
-      { path: '/system/minor-employment-review', title: 'menu.systemMinorEmploymentReview', accessKey: 'canViewEmployeeProfiles' },
       { path: '/system/center-logs', title: 'menu.systemCenterLogs', accessKey: 'canViewSystemLogs' },
       { path: '/system/performance-baseline', title: 'menu.performanceBaseline', accessKey: 'canViewPerformanceBaseline' },
       { path: '/system/scheduled-statistics', title: 'menu.scheduledStatistics', accessKey: 'canManageScheduledTasks' },
