@@ -931,6 +931,40 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 验证码表新邮箱列_依赖原表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        // 原表不存在时拒绝执行，提示先跑 20261004.004。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeTargetEmailSchema.ApplySql));
+        Assert.Equal(51880, missing.Number);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.UserPasswordResetCode (Id, UserGUID, Purpose, CodeHash, ExpiresAtUtc, CreatedAtUtc)
+            VALUES (N'code-1', N'user-1', N'invite', REPLICATE(N'a', 64), DATEADD(HOUR, 72, SYSUTCDATETIME()), SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeTargetEmailSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeTargetEmailSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeTargetEmailSchema.VerifySql);
+        // 原表门禁不受新增列影响；历史行保留且新列为空。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeSchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.UserPasswordResetCode WHERE Id = N'code-1' AND TargetEmail IS NULL) <> 1
+                THROW 51879, 'Existing password reset code row was lost.', 1;
+            """);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "ALTER TABLE dbo.UserPasswordResetCode ALTER COLUMN TargetEmail nvarchar(100) NULL;"
+        );
+        var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeTargetEmailSchema.VerifySql));
+        Assert.Equal(51881, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商分类三表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

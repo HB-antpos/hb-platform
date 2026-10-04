@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import * as Clipboard from "expo-clipboard";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -39,6 +40,8 @@ export default function ResetPasswordScreen() {
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [resendIn, setResendIn] = useState(0);
+  const [loginName, setLoginName] = useState("");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -52,6 +55,21 @@ export default function ResetPasswordScreen() {
   const goToLogin = () => {
     if (router.canGoBack()) router.back();
     else router.replace("/(auth)/login");
+  };
+
+  // 设好密码后回到登录页并预填登录名：navigate 会回到栈里已有的登录页并更新参数。
+  const goToLoginWithName = () => {
+    if (!loginName) {
+      goToLogin();
+      return;
+    }
+    router.navigate({ pathname: "/(auth)/login", params: { username: loginName } } as unknown as Parameters<typeof router.navigate>[0]);
+  };
+
+  const copyLoginName = async () => {
+    if (!loginName) return;
+    await Clipboard.setStringAsync(loginName);
+    setCopied(true);
   };
 
   const sendCode = async () => {
@@ -77,12 +95,13 @@ export default function ResetPasswordScreen() {
     setBusy(true);
     setErrorMessage("");
     try {
-      await confirmPasswordResetApi({
+      const result = await confirmPasswordResetApi({
         email: email.trim(),
         code: normalizeResetCode(code),
         newPassword: newPassword.trim(),
         confirmPassword: confirmPassword.trim(),
       });
+      setLoginName(result.loginName);
       setStep("done");
     } catch (error) {
       setErrorMessage(resolveLocalizedErrorMessage(error, { language, t, fallbackKey: "resetPassword.errors.confirmFailed" }));
@@ -107,8 +126,22 @@ export default function ResetPasswordScreen() {
               </View>
               <Text variant="headlineSmall" style={styles.title}>{t("resetPassword.doneTitle")}</Text>
               <Text variant="bodyMedium" style={styles.centerSecondary}>{t("resetPassword.doneDescription")}</Text>
-              <Button mode="contained" buttonColor={HB_COLORS.action} onPress={goToLogin} style={styles.fullButton} contentStyle={styles.buttonContent}>
-                {t("resetPassword.backToLogin")}
+              {loginName ? (
+                <>
+                  <View style={styles.loginNameCard}>
+                    <View style={styles.loginNameText}>
+                      <Text variant="bodySmall" style={styles.secondary}>{t("resetPassword.loginNameLabel")}</Text>
+                      <Text variant="titleLarge" style={styles.loginNameValue} selectable>{loginName}</Text>
+                    </View>
+                    <Button mode="outlined" compact icon={copied ? "check" : "content-copy"} onPress={() => void copyLoginName()}>
+                      {copied ? t("resetPassword.copied") : t("resetPassword.copy")}
+                    </Button>
+                  </View>
+                  <Text variant="bodySmall" style={styles.loginNameHint}>{t("resetPassword.loginNameHint")}</Text>
+                </>
+              ) : null}
+              <Button mode="contained" buttonColor={HB_COLORS.action} onPress={goToLoginWithName} style={styles.fullButton} contentStyle={styles.buttonContent}>
+                {loginName ? t("resetPassword.backToLoginPrefilled") : t("resetPassword.backToLogin")}
               </Button>
             </View>
           ) : (
@@ -248,6 +281,21 @@ const styles = StyleSheet.create({
   fullButton: { borderRadius: HB_RADIUS.control },
   buttonContent: { minHeight: 48 },
   doneBlock: { alignItems: "center", gap: HB_SPACING.sm, paddingTop: HB_SPACING.xl },
+  loginNameCard: {
+    alignSelf: "stretch",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.sm,
+    marginTop: HB_SPACING.sm,
+    padding: HB_SPACING.md,
+    borderRadius: HB_RADIUS.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: HB_COLORS.outlineMuted,
+    backgroundColor: HB_COLORS.white,
+  },
+  loginNameText: { flex: 1, gap: 2 },
+  loginNameValue: { fontWeight: "700", fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) },
+  loginNameHint: { alignSelf: "stretch", color: HB_COLORS.textSecondary },
   doneIcon: {
     width: 64,
     height: 64,

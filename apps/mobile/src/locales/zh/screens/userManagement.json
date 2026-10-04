@@ -24,7 +24,8 @@
     "disable": "停用",
     "resetPassword": "重置密码",
     "confirmReset": "重置密码",
-    "sendPasswordSetupEmail": "发送设置密码邮件"
+    "sendPasswordSetupEmail": "发送设置密码邮件",
+    "saveEmailAndSend": "保存邮箱并发送"
   },
   "posPermissions": {
     "title": "POS 收银权限",
@@ -212,7 +213,8 @@
     "statusAllCount": "全部 {{count}}",
     "statusActiveCount": "启用 {{count}}",
     "statusDisabledCount": "停用 {{count}}",
-    "statusPendingFirstLoginCount": "待首次登录 {{count}}"
+    "statusPendingFirstLoginCount": "待首次登录 {{count}}",
+    "statusNoEmailCount": "无邮箱 {{count}}"
   },
   "staffBarcode": {
     "title": "员工个人码",
@@ -361,7 +363,8 @@
       "sensitiveLoading": "正在查询…",
       "sensitiveFailed": "查询失败",
       "goReview": "去审核"
-    }
+    },
+    "emailNotSetCannotRecover": "未设置 · 无法找回密码"
   },
   "dialogs": {
     "createTitle": "新建店员账号",
@@ -370,7 +373,12 @@
     "resetPasswordDescription": "为 {{username}} 设置新密码。保存后请通知该店员使用新密码登录。",
     "statusConfirmMessage": "确认要{{action}} {{username}} 吗？",
     "resetPasswordEmailDescription": "将给 {{username}}（{{email}}）发送设置密码验证码，员工在登录页「设置 / 忘记密码」用它设置新密码。设置之前旧密码仍然可用。",
-    "resetPasswordNoEmail": "该员工没有可用邮箱，请先编辑员工补充邮箱后再发送。"
+    "resetPasswordNoEmail": "系统里存的是分店占位邮箱，发不出验证码。填上员工本人的邮箱，就能把验证码发过去。",
+    "resetPasswordNoEmailTitle": "这个账号还没有可用邮箱",
+    "staffEmailLabel": "员工邮箱",
+    "staffEmailHelper": "登录名 {{username}} 保持不变；以后员工也可以在登录页用这个邮箱找回密码。",
+    "setupStepSave": "保存邮箱，同时发送 6 位验证码（72 小时有效）",
+    "setupStepEmployee": "员工打开登录页「设置 / 忘记密码」，输入验证码自己设置新密码"
   },
   "messages": {
     "noAccessTitle": "暂无店员查看权限",
@@ -403,7 +411,8 @@
     "passwordReset": "密码已重置",
     "phoneInvalid": "请输入澳洲手机号（04 开头共 10 位）",
     "emailRequired": "请输入员工邮箱",
-    "passwordSetupEmailSent": "设置密码邮件已发送到 {{email}}"
+    "passwordSetupEmailSent": "设置密码邮件已发送到 {{email}}",
+    "emailNotDeliverable": "请填写员工本人能收信的邮箱"
   },
   "create": {
     "assignmentSection": "账号归属",

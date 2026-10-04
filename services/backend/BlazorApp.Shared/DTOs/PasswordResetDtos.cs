@@ -30,6 +30,37 @@ namespace BlazorApp.Shared.DTOs
         public string ConfirmPassword { get; set; } = string.Empty;
     }
 
+    /// <summary>设置密码成功：回传登录名（老账号的登录名不是邮箱），客户端用于完成页与预填登录框。</summary>
+    public sealed class PasswordResetConfirmResultDto
+    {
+        public string LoginName { get; set; } = string.Empty;
+    }
+
+    /// <summary>员工绑定 / 更换邮箱第一步：给新邮箱发验证码。</summary>
+    public sealed class AccountEmailChangeRequestDto
+    {
+        [Required(ErrorMessage = "请输入邮箱")]
+        [StringLength(254)]
+        public string NewEmail { get; set; } = string.Empty;
+    }
+
+    /// <summary>第二步：新邮箱 + 验证码。</summary>
+    public sealed class AccountEmailChangeConfirmDto
+    {
+        [Required(ErrorMessage = "请输入邮箱")]
+        [StringLength(254)]
+        public string NewEmail { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "请输入验证码")]
+        [StringLength(16)]
+        public string Code { get; set; } = string.Empty;
+    }
+
+    public sealed class AccountEmailChangeResultDto
+    {
+        public string Email { get; set; } = string.Empty;
+    }
+
     /// <summary>店长发送设置密码邮件的结果：只回传打码邮箱与有效期，不回传验证码。</summary>
     public sealed class PasswordSetupEmailResultDto
     {

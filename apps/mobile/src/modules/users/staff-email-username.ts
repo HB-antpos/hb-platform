@@ -13,3 +13,8 @@ export function hasDeliverableEmail(email: string | null | undefined) {
   const normalized = email?.trim().toLowerCase() ?? "";
   return normalized.includes("@") && !normalized.endsWith(".store.local");
 }
+
+/** 界面展示用：占位邮箱一律当作「未设置」，不把系统生成的地址展示给店长和员工。 */
+export function getDisplayableEmail(email: string | null | undefined) {
+  return hasDeliverableEmail(email) ? (email ?? "").trim() : "";
+}

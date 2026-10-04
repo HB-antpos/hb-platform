@@ -48,6 +48,7 @@ namespace BlazorApp.Api.Tests
                 typeof(UserStore),
                 typeof(EmployeeProfile),
                 typeof(UserPasswordChangeRequirement),
+                typeof(UserPasswordResetCode),
                 typeof(SysRolePermission),
                 typeof(SysUserPermission)
             );
@@ -461,6 +462,57 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task SendPasswordSetupEmailAsync_WithEmail_SavesEmailInvalidatesOldCodesThenInvites()
+        {
+            await SeedStoreUserDataAsync();
+            await _db.Updateable<User>()
+                .SetColumns(item => item.Email == "staff_1@s001.store.local")
+                .Where(item => item.UserGUID == "staff-1")
+                .ExecuteCommandAsync();
+            await _db.Insertable(new UserPasswordResetCode
+            {
+                UserGUID = "staff-1",
+                Purpose = UserPasswordResetCode.PurposeInvite,
+                CodeHash = "x",
+                ExpiresAtUtc = DateTime.UtcNow.AddHours(1),
+                CreatedAtUtc = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            var invites = new FakePasswordResetService();
+            var service = CreateService("manager-1", invites, "StoreManager");
+
+            var placeholder = await service.SendPasswordSetupEmailAsync(
+                "staff-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", Email = "x@s001.store.local" }, "manager-1");
+            var taken = await service.SendPasswordSetupEmailAsync(
+                "staff-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", Email = "Staff2@Example.com" }, "manager-1");
+            var saved = await service.SendPasswordSetupEmailAsync(
+                "staff-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", Email = " W.Worker@Example.com " }, "manager-1");
+
+            Assert.Equal("INVALID_EMAIL", placeholder.ErrorCode);
+            Assert.Equal("EMAIL_EXISTS", taken.ErrorCode);
+            Assert.True(saved.Success, saved.Message);
+            Assert.Equal(new[] { "staff-1" }, invites.Invited);
+            var user = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "staff-1");
+            Assert.Equal("w.worker@example.com", user.Email);
+            Assert.Equal("manager-1", user.UpdatedBy);
+            Assert.False(await _db.Queryable<UserPasswordResetCode>().AnyAsync(item => item.ConsumedAtUtc == null));
+        }
+
+        [Fact]
+        public async Task SendPasswordSetupEmailAsync_WithEmailForForeignStaff_DoesNotTouchEmail()
+        {
+            await SeedStoreUserDataAsync();
+            var invites = new FakePasswordResetService();
+            var service = CreateService("manager-1", invites, "StoreManager");
+
+            var foreign = await service.SendPasswordSetupEmailAsync(
+                "staff-2", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", Email = "hijack@example.com" }, "manager-1");
+
+            Assert.False(foreign.Success);
+            Assert.Empty(invites.Invited);
+            Assert.Equal("staff2@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "staff-2")).Email);
+        }
+
+        [Fact]
         public async Task UpdatePasswordAsync_WhenStoreManagerTargetsForeignStore_ReturnsScopeError()
         {
             await SeedStoreUserDataAsync();
@@ -543,8 +595,8 @@ namespace BlazorApp.Api.Tests
                 }));
             }
 
-            public Task<ApiResponse<bool>> ConfirmAsync(string email, string code, string newPassword, string? requestIp) =>
-                Task.FromResult(ApiResponse<bool>.OK(true));
+            public Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(string email, string code, string newPassword, string? requestIp) =>
+                Task.FromResult(ApiResponse<PasswordResetConfirmResultDto>.OK(new PasswordResetConfirmResultDto()));
         }
 
         private async Task SeedStoreUserDataAsync()

@@ -102,6 +102,8 @@ public sealed class PasswordResetServiceTests : IDisposable
         var reused = await service.ConfirmAsync("staff@example.com", code, "Another999", null);
 
         Assert.True(confirmed.Success, confirmed.Message);
+        // 老账号登录名不是邮箱，完成页靠回传的登录名提示与预填。
+        Assert.Equal("staff", confirmed.Data!.LoginName);
         Assert.False(reused.Success);
         Assert.Equal(PasswordResetService.ResetCodeInvalidCode, reused.ErrorCode);
         var stored = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == user.UserGUID);
@@ -196,6 +198,103 @@ public sealed class PasswordResetServiceTests : IDisposable
         Assert.Empty(_sender.Sent);
     }
 
+    [Fact]
+    public async Task EmailChange_验证通过才替换邮箱_并作废发往旧邮箱的设置密码验证码()
+    {
+        var user = await SeedUserAsync("legacy", "legacy@s001.store.local");
+        var service = CreateEmailChangeService();
+        // 先让店长发过一次邀请：占位邮箱发不出，这里直接造一条未用的邀请码代表「发往旧邮箱的码」。
+        await _db.Insertable(new UserPasswordResetCode
+        {
+            UserGUID = user.UserGUID,
+            Purpose = UserPasswordResetCode.PurposeInvite,
+            CodeHash = "x",
+            ExpiresAtUtc = DateTime.UtcNow.AddHours(1),
+            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+        }).ExecuteCommandAsync();
+
+        var request = await service.RequestAsync(user.UserGUID, " New.Mail@Example.com ", "1.1.1.1");
+
+        Assert.True(request.Success, request.Message);
+        var sent = Assert.Single(_sender.EmailChangeSent);
+        Assert.Equal("new.mail@example.com", sent.To);
+        Assert.Equal("legacy", sent.LoginName);
+        // 发码不影响进行中的邀请码，也不改邮箱。
+        Assert.Equal(1, await _db.Queryable<UserPasswordResetCode>()
+            .CountAsync(item => item.Purpose == UserPasswordResetCode.PurposeInvite && item.ConsumedAtUtc == null));
+        Assert.Equal("legacy@s001.store.local", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == user.UserGUID)).Email);
+
+        var wrongTarget = await service.ConfirmAsync(user.UserGUID, "other@example.com", sent.Code);
+        Assert.False(wrongTarget.Success);
+        Assert.Equal(PasswordResetService.ResetCodeInvalidCode, wrongTarget.ErrorCode);
+
+        var confirmed = await service.ConfirmAsync(user.UserGUID, "new.mail@example.com", sent.Code);
+        var reused = await service.ConfirmAsync(user.UserGUID, "new.mail@example.com", sent.Code);
+
+        Assert.True(confirmed.Success, confirmed.Message);
+        Assert.Equal("new.mail@example.com", confirmed.Data!.Email);
+        Assert.False(reused.Success);
+        Assert.Equal("new.mail@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == user.UserGUID)).Email);
+        Assert.False(await _db.Queryable<UserPasswordResetCode>().AnyAsync(item => item.ConsumedAtUtc == null));
+    }
+
+    [Fact]
+    public async Task EmailChange_换邮箱验证码不能用来设置密码()
+    {
+        var user = await SeedUserAsync("staff", "staff@example.com");
+        var emailChange = CreateEmailChangeService();
+        var reset = CreateService();
+        await emailChange.RequestAsync(user.UserGUID, "next@example.com", null);
+        var code = _sender.EmailChangeSent.Single().Code;
+
+        // 用当前邮箱 + 换邮箱验证码去设密码：必须失败，且换邮箱验证码仍然有效。
+        var hijack = await reset.ConfirmAsync("staff@example.com", code, "Hijack999", null);
+
+        Assert.False(hijack.Success);
+        Assert.Equal(PasswordResetService.ResetCodeInvalidCode, hijack.ErrorCode);
+        var stored = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == user.UserGUID);
+        Assert.True(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash));
+        Assert.True((await emailChange.ConfirmAsync(user.UserGUID, "next@example.com", code)).Success);
+    }
+
+    [Fact]
+    public async Task EmailChange_拒绝占位邮箱_相同邮箱_已被占用_并有60秒冷却()
+    {
+        var user = await SeedUserAsync("staff", "staff@example.com");
+        await SeedUserAsync("other", "Taken@Example.com");
+        var service = CreateEmailChangeService();
+
+        var placeholder = await service.RequestAsync(user.UserGUID, "staff@s001.store.local", null);
+        var same = await service.RequestAsync(user.UserGUID, "STAFF@example.com", null);
+        var taken = await service.RequestAsync(user.UserGUID, "taken@example.com", null);
+        var first = await service.RequestAsync(user.UserGUID, "fresh@example.com", null);
+        var second = await service.RequestAsync(user.UserGUID, "fresh2@example.com", null);
+
+        Assert.Equal("INVALID_EMAIL", placeholder.ErrorCode);
+        Assert.Equal(AccountEmailChangeService.EmailUnchangedCode, same.ErrorCode);
+        Assert.Equal(AccountEmailChangeService.EmailExistsCode, taken.ErrorCode);
+        Assert.True(first.Success, first.Message);
+        Assert.Equal(PasswordResetService.ResendCooldownCode, second.ErrorCode);
+        Assert.Single(_sender.EmailChangeSent);
+    }
+
+    [Fact]
+    public async Task EmailChange_密码类验证码的冷却不挡换邮箱_换邮箱也不作废密码类验证码()
+    {
+        var user = await SeedUserAsync("staff", "staff@example.com");
+        var reset = CreateService();
+        await reset.RequestSelfServiceAsync("staff@example.com", null);
+
+        var request = await CreateEmailChangeService().RequestAsync(user.UserGUID, "next@example.com", null);
+
+        Assert.True(request.Success, request.Message);
+        var resetCode = _sender.Sent.Single().Code;
+        Assert.True((await reset.ConfirmAsync("staff@example.com", resetCode, "MyOwn4567", null)).Success);
+    }
+
+    private AccountEmailChangeService CreateEmailChangeService() =>
+        new(CreateContext(_db), _sender, NullLogger<AccountEmailChangeService>.Instance);
+
     private PasswordResetService CreateService() =>
         new(CreateContext(_db), _sender, NullLogger<PasswordResetService>.Instance);
 
@@ -250,6 +349,7 @@ public sealed class PasswordResetServiceTests : IDisposable
     private sealed class FakeEmailSender : IAccountPasswordEmailSender
     {
         public List<(string To, string Code, bool Invite)> Sent { get; } = new();
+        public List<(string To, string LoginName, string Code)> EmailChangeSent { get; } = new();
         public bool FailNext { get; set; }
 
         public Task<ApiResponse<bool>> SendPasswordCodeAsync(
@@ -268,6 +368,19 @@ public sealed class PasswordResetServiceTests : IDisposable
                 return Task.FromResult(ApiResponse<bool>.Error("邮件发送失败，请稍后重试", "ACCOUNT_EMAIL_SEND_FAILED"));
             }
             Sent.Add((toEmail, code, invite));
+            return Task.FromResult(ApiResponse<bool>.OK(true));
+        }
+
+        public Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
+            string toEmail,
+            string displayName,
+            string loginName,
+            string code,
+            DateTime expiresAtUtc,
+            CancellationToken cancellationToken = default
+        )
+        {
+            EmailChangeSent.Add((toEmail, loginName, code));
             return Task.FromResult(ApiResponse<bool>.OK(true));
         }
     }

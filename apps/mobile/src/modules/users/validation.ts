@@ -73,3 +73,10 @@ export function validateNewStaffEmail(email: string, t: Translate) {
   }
   return EMAIL_PATTERN.test(trimmed) ? null : t("messages.emailInvalid");
 }
+
+/** 店长给老账号补的找回密码邮箱：必填、格式正确，且不能是分店占位邮箱（收不到信）。 */
+export function validateStaffRecoveryEmail(email: string, t: Translate) {
+  const formatError = validateNewStaffEmail(email, t);
+  if (formatError) return formatError;
+  return email.trim().toLowerCase().endsWith(".store.local") ? t("messages.emailNotDeliverable") : null;
+}

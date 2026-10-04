@@ -253,5 +253,34 @@
     "historyEmpty": "No earlier requests.",
     "historyLoadFailed": "Could not load earlier requests.",
     "emptyDescription": "You have not submitted any sensitive detail changes yet."
+  },
+  "emailBinding": {
+    "title": "Link email",
+    "bindEntry": "Link email",
+    "changeEntry": "Change email",
+    "bindEntryHelper": "Not set · link one to reset your password from the sign-in screen",
+    "notSet": "Not set",
+    "basicHint": "Your email is used to reset your password. Change it in \"Account & security → Link email\" after verifying it.",
+    "stepEmail": "New email",
+    "stepVerify": "Verify",
+    "stepLabel": "Step {{step}} of 2",
+    "loginName": "Sign-in name",
+    "currentEmail": "Current email",
+    "newEmail": "New email",
+    "changeEmail": "Edit email",
+    "code": "6-digit code",
+    "codeSent": "Sent to {{email}}, valid for 30 minutes",
+    "resend": "Resend",
+    "resendIn": "Resend in {{seconds}}s",
+    "notice": "Your email only changes after you verify the new one; until then your current email keeps working. If you forget your password, you can reset it with the new email. Your sign-in name stays the same.",
+    "sendCode": "Send code",
+    "submit": "Verify and link",
+    "bound": "Email linked: {{email}}",
+    "errors": {
+      "email": "Enter an email address you can receive mail at",
+      "same": "The new email is the same as your current one",
+      "sendFailed": "Could not send the code. Try again later.",
+      "confirmFailed": "Could not link the email. Check the code and try again."
+    }
   }
 }

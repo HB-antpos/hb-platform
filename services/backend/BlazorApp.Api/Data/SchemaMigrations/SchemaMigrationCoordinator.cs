@@ -49,6 +49,8 @@ internal sealed class SchemaMigrationCoordinator
         "20261004.003-employee-minor-compliance";
     internal const string UserPasswordResetCodeMigrationId =
         "20261004.004-user-password-reset-code";
+    internal const string UserPasswordResetCodeTargetEmailMigrationId =
+        "20261005.001-user-password-reset-code-target-email";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -164,6 +166,11 @@ internal sealed class SchemaMigrationCoordinator
             UserPasswordResetCodeMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyUserPasswordResetCodeAsync(cancellationToken)
+        ),
+        new(
+            UserPasswordResetCodeTargetEmailMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyUserPasswordResetCodeTargetEmailAsync(cancellationToken)
         ),
     ];
 

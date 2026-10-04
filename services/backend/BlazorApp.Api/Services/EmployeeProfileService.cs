@@ -14,6 +14,7 @@ namespace BlazorApp.Api.Services
         public const string PendingChangeConfirmationRequiredCode =
             "EMPLOYEE_PROFILE_PENDING_CHANGE_CONFIRMATION_REQUIRED";
         public const string BirthdayRequiresReviewCode = "BIRTHDAY_REQUIRES_REVIEW";
+        public const string EmailRequiresVerificationCode = "EMAIL_REQUIRES_VERIFICATION";
 
         private readonly SqlSugarContext _context;
         private readonly ICurrentUserService _currentUserService;
@@ -628,6 +629,8 @@ namespace BlazorApp.Api.Services
                                 .SetColumns(item => item.UpdatedBy == actor)
                                 .Where(item => item.UserGUID == userGuid && !item.IsDeleted)
                                 .ExecuteCommandAsync();
+                            // 发往旧邮箱的设置密码验证码、进行中的换邮箱验证码随之作废。
+                            await PasswordResetService.InvalidateOutstandingCodesAsync(db, userGuid, now);
                             user.Email = requestedEmail!;
                         }
                         if (sensitiveChanged && _sensitiveChangeService is not null)
@@ -675,6 +678,17 @@ namespace BlazorApp.Api.Services
                             return ApiResponse<EmployeeProfileDetailDto>.Error(
                                 "生日需要提交审核，请更新 App 后在敏感资料中修改",
                                 BirthdayRequiresReviewCode
+                            );
+                        }
+                        if (dto.HasEmail
+                            && !string.Equals(user.Email?.Trim(), requestedEmail, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // 邮箱是找回密码的渠道：员工自助更换须先给新邮箱发验证码（api/Auth/email-change）。
+                            // 旧版客户端会回传当前邮箱，等值（忽略大小写）时照常保存其余字段。
+                            await db.Ado.RollbackTranAsync();
+                            return ApiResponse<EmployeeProfileDetailDto>.Error(
+                                "更换邮箱需要先验证新邮箱，请更新 App 后在「绑定邮箱」中修改",
+                                EmailRequiresVerificationCode
                             );
                         }
                         var existingEmployeeType = profile?.EmployeeType;
@@ -750,23 +764,6 @@ namespace BlazorApp.Api.Services
                             await profileUpdate.Where(item => item.EmployeeInfoId == profile.EmployeeInfoId).ExecuteCommandAsync();
                             profile = await db.Queryable<EmployeeProfile>()
                                 .FirstAsync(item => item.EmployeeInfoId == profile.EmployeeInfoId);
-                        }
-                        if (dto.HasEmail && !string.Equals(user.Email, requestedEmail, StringComparison.Ordinal))
-                        {
-                            var duplicate = await db.Queryable<User>().AnyAsync(item =>
-                                item.UserGUID != userGuid && !item.IsDeleted && item.Email == requestedEmail);
-                            if (duplicate)
-                            {
-                                await db.Ado.RollbackTranAsync();
-                                return ApiResponse<EmployeeProfileDetailDto>.Error("邮箱已存在", "EMAIL_EXISTS");
-                            }
-                            await db.Updateable<User>()
-                                .SetColumns(item => item.Email == requestedEmail!)
-                                .SetColumns(item => item.UpdatedAt == now)
-                                .SetColumns(item => item.UpdatedBy == actor)
-                                .Where(item => item.UserGUID == userGuid && !item.IsDeleted)
-                                .ExecuteCommandAsync();
-                            user.Email = requestedEmail!;
                         }
                         if (HasLegacySensitivePayload(dto) && HasLegacySensitiveChanges(profile, dto))
                         {

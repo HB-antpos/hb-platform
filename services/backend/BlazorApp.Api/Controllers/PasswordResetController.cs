@@ -38,12 +38,12 @@ namespace BlazorApp.Api.Controllers
 
         [HttpPost("confirm")]
         [EnableRateLimiting(PasswordResetRateLimits.PolicyName)]
-        public async Task<ApiResponse<bool>> Confirm([FromBody] PasswordResetConfirmDto dto)
+        public async Task<ApiResponse<PasswordResetConfirmResultDto>> Confirm([FromBody] PasswordResetConfirmDto dto)
         {
             NoStore();
             if (!ModelState.IsValid)
             {
-                return ApiResponse<bool>.Error("请求参数验证失败", "VALIDATION_ERROR", ModelState);
+                return ApiResponse<PasswordResetConfirmResultDto>.Error("请求参数验证失败", "VALIDATION_ERROR", ModelState);
             }
             return await _service.ConfirmAsync(dto.Email, dto.Code, dto.NewPassword, ResolveIp());
         }

@@ -97,6 +97,10 @@ namespace BlazorApp.Shared.DTOs
     {
         [Required(ErrorMessage = "分店代码不能为空")]
         public string StoreCode { get; set; } = string.Empty;
+
+        /// <summary>可选：老账号没有可用邮箱时，店长在此填写员工邮箱，先保存再发送。</summary>
+        [StringLength(254)]
+        public string? Email { get; set; }
     }
 
     public class UpdateStoreUserDto

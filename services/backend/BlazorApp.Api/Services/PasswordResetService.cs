@@ -15,8 +15,8 @@ public interface IPasswordResetService
     /// <summary>店长新建或重置后给员工发邀请验证码；调用方负责权限与目标范围校验。</summary>
     Task<ApiResponse<PasswordSetupEmailResultDto>> SendInviteAsync(string userGuid, string requestedBy, string? requestIp);
 
-    /// <summary>用邮箱 + 验证码设置新密码。成功后清除须改密标记并吊销该账号全部登录会话。</summary>
-    Task<ApiResponse<bool>> ConfirmAsync(string email, string code, string newPassword, string? requestIp);
+    /// <summary>用邮箱 + 验证码设置新密码。成功后清除须改密标记并吊销该账号全部登录会话，并回传登录名。</summary>
+    Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(string email, string code, string newPassword, string? requestIp);
 }
 
 /// <summary>
@@ -112,7 +112,7 @@ public sealed class PasswordResetService : IPasswordResetService
         return ApiResponse<PasswordSetupEmailResultDto>.OK(issued.Data!, $"设置密码邮件已发送到 {MaskEmail(user.Email)}");
     }
 
-    public async Task<ApiResponse<bool>> ConfirmAsync(
+    public async Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(
         string email,
         string code,
         string newPassword,
@@ -128,7 +128,7 @@ public sealed class PasswordResetService : IPasswordResetService
         }
         if (password.Length is < 6 or > 100)
         {
-            return ApiResponse<bool>.Error("密码长度必须在6-100个字符之间", "VALIDATION_ERROR");
+            return ApiResponse<PasswordResetConfirmResultDto>.Error("密码长度必须在6-100个字符之间", "VALIDATION_ERROR");
         }
 
         var db = _context.Db;
@@ -139,8 +139,11 @@ public sealed class PasswordResetService : IPasswordResetService
         }
 
         var now = DateTime.UtcNow;
+        // 关键逻辑：只认密码类验证码；换邮箱验证码发到的是待验证的新邮箱，绝不能拿来设置密码。
         var row = await db.Queryable<UserPasswordResetCode>()
-            .Where(item => item.UserGUID == user.UserGUID && item.ConsumedAtUtc == null)
+            .Where(item => item.UserGUID == user.UserGUID
+                && item.ConsumedAtUtc == null
+                && item.Purpose != UserPasswordResetCode.PurposeEmailChange)
             .OrderBy(item => item.CreatedAtUtc, SqlSugar.OrderByType.Desc)
             .FirstAsync();
         if (row is null || row.ExpiresAtUtc < now || row.FailedAttempts >= MaxFailedAttempts)
@@ -161,9 +164,7 @@ public sealed class PasswordResetService : IPasswordResetService
                 .Where(item => item.Id == row.Id && item.FailedAttempts == failed && item.ConsumedAtUtc == null)
                 .ExecuteCommandAsync();
             var remaining = Math.Max(0, MaxFailedAttempts - failed - 1);
-            return remaining > 0
-                ? ApiResponse<bool>.Error($"验证码不正确，还可尝试 {remaining} 次", ResetCodeInvalidCode)
-                : ApiResponse<bool>.Error("验证码错误次数过多，请重新获取", ResetCodeInvalidCode);
+            return WrongCode<PasswordResetConfirmResultDto>(failed);
         }
 
         await db.Ado.BeginTranAsync();
@@ -201,7 +202,11 @@ public sealed class PasswordResetService : IPasswordResetService
         }
 
         _logger.LogInformation("邮箱验证码设置密码成功，用途：{Purpose}", row.Purpose);
-        return ApiResponse<bool>.OK(true, "密码已设置，请用新密码登录");
+        // 老账号的登录名不是邮箱，回传登录名供完成页展示并预填登录框。
+        return ApiResponse<PasswordResetConfirmResultDto>.OK(
+            new PasswordResetConfirmResultDto { LoginName = user.Username },
+            "密码已设置，请用新密码登录"
+        );
     }
 
     private async Task<ApiResponse<PasswordSetupEmailResultDto>> IssueAndSendAsync(
@@ -213,8 +218,9 @@ public sealed class PasswordResetService : IPasswordResetService
     {
         var db = _context.Db;
         var now = DateTime.UtcNow;
+        // 冷却与作废只在密码类验证码之间生效，不影响进行中的换邮箱验证。
         var latest = await db.Queryable<UserPasswordResetCode>()
-            .Where(item => item.UserGUID == user.UserGUID)
+            .Where(item => item.UserGUID == user.UserGUID && item.Purpose != UserPasswordResetCode.PurposeEmailChange)
             .OrderBy(item => item.CreatedAtUtc, SqlSugar.OrderByType.Desc)
             .FirstAsync();
         if (latest is not null && latest.CreatedAtUtc.AddSeconds(ResendCooldownSeconds) > now)
@@ -239,10 +245,12 @@ public sealed class PasswordResetService : IPasswordResetService
         await db.Ado.BeginTranAsync();
         try
         {
-            // 发新码即作废旧码，保证同一账号只有一个有效验证码。
+            // 发新码即作废同类旧码，保证同一账号只有一个有效的密码类验证码。
             await db.Updateable<UserPasswordResetCode>()
                 .SetColumns(item => item.ConsumedAtUtc == now)
-                .Where(item => item.UserGUID == user.UserGUID && item.ConsumedAtUtc == null)
+                .Where(item => item.UserGUID == user.UserGUID
+                    && item.ConsumedAtUtc == null
+                    && item.Purpose != UserPasswordResetCode.PurposeEmailChange)
                 .ExecuteCommandAsync();
             await db.Insertable(row).ExecuteCommandAsync();
             await db.Ado.CommitTranAsync();
@@ -289,17 +297,36 @@ public sealed class PasswordResetService : IPasswordResetService
         return candidates.Count == 1 ? candidates[0] : null;
     }
 
-    private static string? NormalizeEmail(string? email)
+    /// <summary>
+    /// 账号邮箱被改掉后调用（店长改、员工换绑、管理员改），作废该账号所有未用验证码：
+    /// 发往旧邮箱的设置密码码、进行中的换邮箱码都不能再用。须在改邮箱的同一事务内调用。
+    /// </summary>
+    internal static Task<int> InvalidateOutstandingCodesAsync(SqlSugar.ISqlSugarClient db, string userGuid, DateTime now) =>
+        db.Updateable<UserPasswordResetCode>()
+            .SetColumns(item => item.ConsumedAtUtc == now)
+            .Where(item => item.UserGUID == userGuid && item.ConsumedAtUtc == null)
+            .ExecuteCommandAsync();
+
+    /// <summary>验证码不匹配时的提示：失败次数由调用方以乐观锁累加后传入累加前的值。</summary>
+    internal static ApiResponse<T> WrongCode<T>(int failedBefore)
+    {
+        var remaining = Math.Max(0, MaxFailedAttempts - failedBefore - 1);
+        return remaining > 0
+            ? ApiResponse<T>.Error($"验证码不正确，还可尝试 {remaining} 次", ResetCodeInvalidCode)
+            : ApiResponse<T>.Error("验证码错误次数过多，请重新获取", ResetCodeInvalidCode);
+    }
+
+    internal static string? NormalizeEmail(string? email)
     {
         var normalized = email?.Trim().ToLowerInvariant();
         return string.IsNullOrWhiteSpace(normalized) || !normalized.Contains('@') ? null : normalized;
     }
 
-    private static string HashCode(string id, string code) =>
+    internal static string HashCode(string id, string code) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{id}:{code}"))).ToLowerInvariant();
 
-    private static ApiResponse<bool> InvalidCode() =>
-        ApiResponse<bool>.Error("验证码无效或已过期，请重新获取", ResetCodeInvalidCode);
+    private static ApiResponse<PasswordResetConfirmResultDto> InvalidCode() =>
+        ApiResponse<PasswordResetConfirmResultDto>.Error("验证码无效或已过期，请重新获取", ResetCodeInvalidCode);
 
     internal static string MaskEmail(string? email)
     {

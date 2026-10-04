@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { HB_COLORS } from "@/shared/theme/tokens";
@@ -142,6 +142,14 @@ export default function Login() {
   const refreshAccountBinding = useDeviceStore((s) => s.refreshAccountBinding);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  // 「设置 / 忘记密码」完成后带回登录名（老账号的登录名不是邮箱），在这里预填。
+  const { username: usernameParam } = useLocalSearchParams<{ username?: string }>();
+  useEffect(() => {
+    const value = typeof usernameParam === "string" ? usernameParam.trim() : "";
+    if (!value) return;
+    setUsername(value);
+    setPassword("");
+  }, [usernameParam]);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deviceLoginLoading, setDeviceLoginLoading] = useState(false);

@@ -20,6 +20,16 @@ public interface IAccountPasswordEmailSender
         bool invite,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>发送绑定 / 更换邮箱验证码到待验证的新邮箱。</summary>
+    Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
+        string toEmail,
+        string displayName,
+        string loginName,
+        string code,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken = default
+    );
 }
 
 /// <summary>
@@ -79,6 +89,40 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
             $"<p>登录账号：<b>{Encode(loginName)}</b><br/>验证码：<b>{Encode(code)}</b>（{Encode(FormatValidityZh(expiresAtUtc))}内有效）</p>" +
             "<p>请打开 HB App，在登录页点「设置 / 忘记密码」，输入本邮箱和验证码，然后设置你自己的密码。请勿把验证码告诉任何人（包括店长）。</p>";
         return SendAsync(toEmail, subject, text, html, invite ? "password-invite" : "password-reset", cancellationToken);
+    }
+
+    public Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
+        string toEmail,
+        string displayName,
+        string loginName,
+        string code,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var validFor = FormatValidity(expiresAtUtc);
+        var validForZh = FormatValidityZh(expiresAtUtc);
+        var subject = $"Confirm your email for the Hot Bargain app: {code} / 验证 HB 账号邮箱";
+        var text =
+            $"Hi {displayName},\n\n" +
+            $"You asked to use this email address for your Hot Bargain staff app account ({loginName}).\n" +
+            $"Verification code: {code} (valid for {validFor})\n\n" +
+            "Enter this code in the HB app to finish. After that you can reset your password with this email on the sign-in screen.\n" +
+            "If you did not ask for this, ignore this email and your account will not change.\n\n" +
+            $"{displayName} 你好：\n你正在把本邮箱绑定到 Hot Bargain 员工 App 账号（登录名 {loginName}）。\n" +
+            $"验证码：{code}（{validForZh}内有效）\n" +
+            "请在 HB App 中输入验证码完成绑定。绑定后，忘记密码时可以在登录页用本邮箱找回。\n" +
+            "如果这不是你本人的操作，忽略本邮件即可，账号不会有任何变化。\n";
+        var html =
+            $"<p>Hi {Encode(displayName)},</p>" +
+            $"<p>You asked to use this email address for your Hot Bargain staff app account (<b>{Encode(loginName)}</b>).</p>" +
+            $"<p>Verification code (valid for {Encode(validFor)}):</p>" +
+            $"<p style=\"font-size:24px;font-weight:700;letter-spacing:4px\">{Encode(code)}</p>" +
+            "<p>Enter this code in the HB app to finish. If you did not ask for this, ignore this email and your account will not change.</p>" +
+            $"<hr/><p>{Encode(displayName)} 你好：</p>" +
+            $"<p>你正在把本邮箱绑定到 Hot Bargain 员工 App 账号（登录名 <b>{Encode(loginName)}</b>）。</p>" +
+            $"<p>验证码：<b>{Encode(code)}</b>（{Encode(validForZh)}内有效）。请在 HB App 中输入验证码完成绑定。如果这不是你本人的操作，忽略本邮件即可。</p>";
+        return SendAsync(toEmail, subject, text, html, "email-change", cancellationToken);
     }
 
     private async Task<ApiResponse<bool>> SendAsync(

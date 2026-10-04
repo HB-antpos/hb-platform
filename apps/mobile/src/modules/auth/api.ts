@@ -150,14 +150,35 @@ export async function requestPasswordResetCodeApi(email: string): Promise<string
   return typeof res.data === "string" ? res.data : "";
 }
 
-/** 第二步：邮箱 + 验证码 + 新密码；成功后该账号所有已登录设备都会退出。 */
+/** 第二步：邮箱 + 验证码 + 新密码；成功后该账号所有已登录设备都会退出。回传登录名（老账号的登录名不是邮箱）。 */
 export async function confirmPasswordResetApi(payload: {
   email: string;
   code: string;
   newPassword: string;
   confirmPassword: string;
-}): Promise<void> {
-  await apiClient.post("/auth/password-reset/confirm", payload);
+}): Promise<{ loginName: string }> {
+  const res = await apiClient.post("/auth/password-reset/confirm", payload);
+  return { loginName: readStringField(res.data, "loginName") };
+}
+
+/** 绑定 / 更换邮箱第一步：给新邮箱发验证码，返回打码后的邮箱。验证通过前当前邮箱不变。 */
+export async function requestEmailChangeCodeApi(newEmail: string): Promise<{ maskedEmail: string }> {
+  const res = await apiClient.post("/auth/email-change/request", { newEmail });
+  return { maskedEmail: readStringField(res.data, "maskedEmail") };
+}
+
+/** 第二步：新邮箱 + 验证码，通过后替换账号邮箱。 */
+export async function confirmEmailChangeApi(payload: { newEmail: string; code: string }): Promise<{ email: string }> {
+  const res = await apiClient.post("/auth/email-change/confirm", payload);
+  return { email: readStringField(res.data, "email") || payload.newEmail.trim().toLowerCase() };
+}
+
+/** 兼容驼峰与帕斯卡命名的字符串字段读取；缺失时返回空串。 */
+function readStringField(data: unknown, camelName: string) {
+  if (!data || typeof data !== "object") return "";
+  const record = data as Record<string, unknown>;
+  const value = record[camelName] ?? record[camelName.charAt(0).toUpperCase() + camelName.slice(1)];
+  return typeof value === "string" ? value : "";
 }
 
 export async function logoutApi(refreshToken: string): Promise<void> {

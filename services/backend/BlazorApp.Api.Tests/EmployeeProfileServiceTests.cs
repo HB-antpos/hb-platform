@@ -50,7 +50,7 @@ namespace BlazorApp.Api.Tests
                 typeof(User), typeof(EmployeeProfile), typeof(CashRegisterUser),
                 typeof(CashierBarcodeReservation), typeof(EmployeeCashierBarcode),
                 typeof(EmployeeCashierBarcodePrintAttempt), typeof(EmployeeImageUploadTicket),
-                typeof(EmployeeProfileSensitiveChangeRequest)
+                typeof(EmployeeProfileSensitiveChangeRequest), typeof(UserPasswordResetCode)
             );
         }
 
@@ -356,18 +356,47 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task UpsertSelfAsync_WhenEmailIsExplicit_TrimAndUpdateOnlyCurrentUser()
+        public async Task UpsertSelfAsync_WhenEmailChanges_RequiresVerificationWithoutPartialWrite()
         {
             await SeedUsersAsync();
+            await _db.Insertable(new EmployeeProfile
+            {
+                UserGUID = "user-self",
+                Phone = "0400000000",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            // 邮箱是找回密码渠道：自助资料保存不能直接改，须走 api/Auth/email-change 验证新邮箱。
+            var result = await CreateService("user-self", "self_user").UpsertSelfAsync(new()
+            {
+                Email = "self-new@example.com",
+                Phone = "0499999999",
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal(EmployeeProfileService.EmailRequiresVerificationCode, result.ErrorCode);
+            Assert.Equal("self@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-self")).Email);
+            Assert.Equal("0400000000", (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).Phone);
+        }
+
+        [Fact]
+        public async Task UpsertSelfAsync_WhenLegacyClientEchoesCurrentEmail_SavesOtherFields()
+        {
+            await SeedUsersAsync();
+
+            // 旧版客户端会回传当前邮箱（大小写、空格可能不同），等值时照常保存其余字段。
             var result = await CreateService("user-self", "self_user").UpsertSelfAsync(new()
             {
                 UserGUID = "user-other",
-                Email = "  self-new@example.com  ",
+                Email = "  SELF@example.com  ",
+                Phone = "0499999999",
             });
 
-            Assert.True(result.Success);
-            Assert.Equal("self-new@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-self")).Email);
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("self@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-self")).Email);
             Assert.Equal("other@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-other")).Email);
+            Assert.Equal("0499999999", (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).Phone);
         }
 
         [Theory]
@@ -404,60 +433,6 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task UpsertSelfAsync_WhenEmailAlreadyExists_ReturnsEmailExistsWithoutPartialProfileWrite()
-        {
-            await SeedUsersAsync();
-            await _db.Insertable(new EmployeeProfile
-            {
-                UserGUID = "user-self",
-                Phone = "0400000000",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            }).ExecuteCommandAsync();
-
-            var result = await CreateService("user-self", "self_user").UpsertSelfAsync(new()
-            {
-                Email = "other@example.com",
-                Phone = "0499999999",
-            });
-
-            Assert.False(result.Success);
-            Assert.Equal("EMAIL_EXISTS", result.ErrorCode);
-            var profile = await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self");
-            Assert.Equal("0400000000", profile.Phone);
-            Assert.Equal("self@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-self")).Email);
-        }
-
-        [Fact]
-        public async Task UpsertSelfAsync_WhenSoftDeletedEmailHitsUnfilteredUniqueIndex_RollsBackAndReturnsEmailExists()
-        {
-            await SeedUsersAsync();
-            await _db.Ado.ExecuteCommandAsync("CREATE UNIQUE INDEX UX_User_Email ON User(Email);");
-            await _db.Updateable<User>()
-                .SetColumns(item => item.IsDeleted == true)
-                .Where(item => item.UserGUID == "user-other")
-                .ExecuteCommandAsync();
-            await _db.Insertable(new EmployeeProfile
-            {
-                UserGUID = "user-self",
-                Phone = "0400000000",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            }).ExecuteCommandAsync();
-
-            var result = await CreateService("user-self", "self_user").UpsertSelfAsync(new()
-            {
-                Email = "other@example.com",
-                Phone = "0499999999",
-            });
-
-            Assert.False(result.Success);
-            Assert.Equal("EMAIL_EXISTS", result.ErrorCode);
-            Assert.Equal("self@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-self")).Email);
-            Assert.Equal("0400000000", (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).Phone);
-        }
-
-        [Fact]
         public async Task UpsertSelfAsync_WhenPositionChangesWithoutPermission_ReturnsForbiddenWithoutOtherChanges()
         {
             await SeedUsersAsync();
@@ -472,7 +447,6 @@ namespace BlazorApp.Api.Tests
             var result = await CreateService("user-self", "self_user", _db, omitRoleService: true).UpsertSelfAsync(new()
             {
                 EmploymentType = "partTime",
-                Email = "changed@example.com",
                 Phone = "0499999999",
             });
 
@@ -553,31 +527,6 @@ namespace BlazorApp.Api.Tests
 
             Assert.True(result.Success);
             Assert.Equal(EmployeeType.Temporary, (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).EmployeeType);
-        }
-
-        [Fact]
-        public async Task UpsertSelfAsync_WhenEmailWriteFails_RollsBackProfileAndEmailTogether()
-        {
-            await SeedUsersAsync();
-            await _db.Insertable(new EmployeeProfile
-            {
-                UserGUID = "user-self",
-                Phone = "0400000000",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            }).ExecuteCommandAsync();
-            await _db.Ado.ExecuteCommandAsync("CREATE TRIGGER fail_profile_email AFTER UPDATE OF Email ON User BEGIN SELECT RAISE(ABORT, 'email write failed'); END;");
-
-            var result = await CreateService("user-self", "self_user").UpsertSelfAsync(new()
-            {
-                Email = "changed@example.com",
-                Phone = "0499999999",
-            });
-
-            Assert.False(result.Success);
-            Assert.Equal("UPSERT_EMPLOYEE_PROFILE_FAILED", result.ErrorCode);
-            Assert.Equal("self@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-self")).Email);
-            Assert.Equal("0400000000", (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).Phone);
         }
 
         [Fact]
@@ -755,6 +704,30 @@ namespace BlazorApp.Api.Tests
                 EmployeeProfileSensitiveChangeStatus.Superseded,
                 (await _db.Queryable<EmployeeProfileSensitiveChangeRequest>().FirstAsync()).Status
             );
+        }
+
+        [Fact]
+        public async Task UpsertAdminAsync_WhenEmailChanges_UpdatesDirectlyAndInvalidatesOutstandingCodes()
+        {
+            await SeedUsersAsync();
+            await _db.Insertable(new UserPasswordResetCode
+            {
+                UserGUID = "user-self",
+                Purpose = UserPasswordResetCode.PurposeInvite,
+                CodeHash = "x",
+                ExpiresAtUtc = DateTime.UtcNow.AddHours(1),
+                CreatedAtUtc = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            // 管理员后台直改邮箱不需要验证，但发往旧邮箱的验证码必须随之作废。
+            var result = await CreateService("admin-user", "admin").UpsertAdminAsync("user-self", new()
+            {
+                Email = "admin-set@example.com",
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("admin-set@example.com", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "user-self")).Email);
+            Assert.False(await _db.Queryable<UserPasswordResetCode>().AnyAsync(item => item.ConsumedAtUtc == null));
         }
 
         [Fact]

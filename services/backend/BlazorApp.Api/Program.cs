@@ -754,9 +754,10 @@ builder.Services.AddScoped<EmployeeMinorComplianceService>(); // 未成年用工
 builder.Services.AddScoped<MinorEmploymentReminderService>(); // 经理待办只记录提醒，不阻断排班或打卡
 builder.Services.AddScoped<IEmployeeMinorDocumentStore, CosEmployeeMinorDocumentStore>();
 builder.Services.Configure<MinorEmploymentOptions>(builder.Configuration.GetSection(MinorEmploymentOptions.SectionName));
-builder.Services.AddScoped<IMinorGuardianEmailSender, MinorGuardianEmailSender>();
+builder.Services.AddScoped<IMinorGuardianEmailSender, MinorGuardianEmailSender>(); // 监护人签署链接与验证码邮件，复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<IAccountPasswordEmailSender, AccountPasswordEmailSender>(); // 员工设置 / 找回密码验证码邮件，同样复用发票邮箱的公司 SMTP 账号
-builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // 监护人签署链接与验证码邮件，复用发票邮箱的公司 SMTP 账号
+builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // 员工邮箱验证码设置 / 找回密码
+builder.Services.AddScoped<IAccountEmailChangeService, AccountEmailChangeService>(); // 员工绑定 / 更换账号邮箱（验证码发到新邮箱）
 builder.Services.AddHttpClient("minor-employment-documents");
 builder.Services.AddScoped<EmployeeProfileSensitiveChangeService>();
 builder.Services.AddScoped<EmployeeProfileMediaService>();
