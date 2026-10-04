@@ -45,6 +45,7 @@ public sealed class AuthSessionControllerTests : IDisposable
 
         _db.CodeFirst.InitTables<User, Role, UserRole, SysRolePermission>();
         _db.CodeFirst.InitTables<SysUserPermission, SysPermission>();
+        _db.CodeFirst.InitTables<UserPasswordChangeRequirement, RefreshToken>();
     }
 
     [Fact]
@@ -536,6 +537,32 @@ public sealed class AuthSessionControllerTests : IDisposable
         Assert.True(result.Success);
         Assert.Contains(Permissions.Reports.ProductMovementView, result.Data!.ExactPermissions);
         Assert.Contains(Permissions.Reports.ProductMovementView, result.Data.Permissions);
+    }
+
+    [Fact]
+    public async Task GetCurrentUser_WhenPasswordChangeRequired_ReturnsMustChangePassword()
+    {
+        await SeedAuthUserAsync("first-login-user", "role-user-first", "User");
+        var controller = CreateController(
+            Mock.Of<IAuthService>(),
+            roleService: CreateRoleService(),
+            userService: CreateEmptyUserService()
+        );
+        SetCurrentUser(controller, "first-login-user");
+
+        var before = await controller.GetCurrentUser();
+        await _db.Insertable(new UserPasswordChangeRequirement
+        {
+            UserGUID = "first-login-user",
+            Reason = UserPasswordChangeRequirement.ReasonCreated,
+            RequiredAtUtc = DateTime.UtcNow,
+        }).ExecuteCommandAsync();
+        var after = await controller.GetCurrentUser();
+
+        Assert.True(before.Success);
+        Assert.False(before.Data!.MustChangePassword);
+        Assert.True(after.Success);
+        Assert.True(after.Data!.MustChangePassword);
     }
 
     [Fact]

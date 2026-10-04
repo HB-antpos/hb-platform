@@ -96,6 +96,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyAttendanceAvailabilityUnavailableAsync(CancellationToken cancellationToken);
 
+    Task ApplyUserPasswordChangeRequirementAsync(CancellationToken cancellationToken);
+
+    Task VerifyUserPasswordChangeRequirementAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -538,6 +542,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             AttendanceAvailabilityUnavailableSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyUserPasswordChangeRequirementAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPasswordChangeRequirementSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但结构错误的表不会被误标为完成。
+        await VerifyUserPasswordChangeRequirementAsync(cancellationToken);
+    }
+
+    public async Task VerifyUserPasswordChangeRequirementAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPasswordChangeRequirementSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

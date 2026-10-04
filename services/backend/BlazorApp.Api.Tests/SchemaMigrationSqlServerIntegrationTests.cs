@@ -841,6 +841,33 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 须改密标记表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.UserPasswordChangeRequirement (UserGUID, Reason, RequiredAtUtc, RequiredBy)
+            VALUES (N'user-1', N'created', SYSUTCDATETIME(), N'manager-1');
+            """);
+        // 重复执行不得丢失已有标记。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.UserPasswordChangeRequirement WHERE UserGUID = N'user-1') <> 1
+                THROW 51873, 'Existing password change requirement row was lost.', 1;
+            """);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "ALTER TABLE dbo.UserPasswordChangeRequirement ALTER COLUMN Reason nvarchar(64) NOT NULL;"
+        );
+        var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordChangeRequirementSchema.VerifySql));
+        Assert.Equal(51871, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商分类三表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

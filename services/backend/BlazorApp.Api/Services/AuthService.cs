@@ -33,7 +33,7 @@ namespace BlazorApp.Api.Services
         );
         Task<TokenResponse?> RefreshTokensAsync(HttpContext context, string ipAddress, string userAgent);
         Task<bool> RevokeRefreshTokenAsync(string refreshToken);
-        Task<bool> ChangePasswordAsync(string userGuid, ChangePasswordDto dto);
+        Task<bool> ChangePasswordAsync(string userGuid, ChangePasswordDto dto, string? currentSessionId = null);
     }
 
     public class AuthService : IAuthService
@@ -645,10 +645,15 @@ namespace BlazorApp.Api.Services
         /// <summary>
         /// 修改用户密码
         /// </summary>
-        public async Task<bool> ChangePasswordAsync(string userGuid, ChangePasswordDto dto)
+        public async Task<bool> ChangePasswordAsync(
+            string userGuid,
+            ChangePasswordDto dto,
+            string? currentSessionId = null
+        )
         {
-            var user = await _dbContext.Db.Queryable<User>()
-                .FirstAsync(u => u.UserGUID == userGuid);
+            var db = _dbContext.Db;
+            var user = await db.Queryable<User>()
+                .FirstAsync(u => u.UserGUID == userGuid && !u.IsDeleted);
 
             if (user == null) return false;
 
@@ -657,14 +662,46 @@ namespace BlazorApp.Api.Services
             {
                 throw new Exception("当前密码错误");
             }
+            // 强制改密的目的是换掉店长掌握的密码，新旧相同等于没改。
+            if (VerifyPassword(dto.NewPassword, user.PasswordHash, PasswordHasher.PasswordFormatRaw, out _))
+            {
+                throw new Exception("新密码不能与当前密码相同");
+            }
 
-            // 更新新密码
+            var now = DateTime.UtcNow;
             user.PasswordHash = HashPassword(dto.NewPassword);
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = now;
 
-            return await _dbContext.Db.Updateable(user)
-                .UpdateColumns(u => new { u.PasswordHash, u.UpdatedAt })
-                .ExecuteCommandAsync() > 0;
+            await db.Ado.BeginTranAsync();
+            try
+            {
+                var updated = await db.Updateable(user)
+                    .UpdateColumns(u => new { u.PasswordHash, u.UpdatedAt })
+                    .ExecuteCommandAsync();
+                if (updated <= 0)
+                {
+                    await db.Ado.RollbackTranAsync();
+                    return false;
+                }
+                // 关键逻辑：改密、清除须改密标记、吊销其他会话同事务完成，避免标记残留或旧会话继续可用。
+                await UserPasswordChangeRequirements.ClearAsync(db, userGuid);
+                await db.Updateable<RefreshToken>()
+                    .SetColumns(token => token.IsRevoked == true)
+                    .SetColumns(token => token.UpdatedAt == now)
+                    .Where(token => token.UserGUID == userGuid && !token.IsRevoked)
+                    .WhereIF(
+                        !string.IsNullOrWhiteSpace(currentSessionId),
+                        token => token.RefreshTokenGUID != currentSessionId
+                    )
+                    .ExecuteCommandAsync();
+                await db.Ado.CommitTranAsync();
+                return true;
+            }
+            catch
+            {
+                await db.Ado.RollbackTranAsync();
+                throw;
+            }
         }
 
         /// <summary>
