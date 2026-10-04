@@ -143,6 +143,8 @@ public sealed class EmployeeMinorComplianceDto
     public DateTime? GuardianInviteEmailSentAtUtc { get; set; }
     /// <summary>监护人通过邮箱验证码核验身份的时间；签署证据的一部分。</summary>
     public DateTime? GuardianEmailVerifiedAtUtc { get; set; }
+    /// <summary>监护人在签署页现场修改过的字段分组：guardianDetails / childDetails / education / schoolCalendar / otherWork / commute / backupContact。</summary>
+    public List<string> GuardianAmendedFields { get; set; } = new();
     public string? DocumentSha256 { get; set; }
     public string? ReviewActor { get; set; }
     public DateTime? ReviewedAtUtc { get; set; }
@@ -161,6 +163,35 @@ public sealed class EmployeeMinorComplianceGuardianSignDto
     [Required] public bool ConfirmConsent { get; set; }
     [Required] public bool ConfirmBackupContact { get; set; }
     [Required, StringLength(1000)] public string ConsentScope { get; set; } = string.Empty;
+    /// <summary>监护人签署前现场修改的资料；为空表示未修改。</summary>
+    public EmployeeMinorComplianceGuardianAmendDto? Amendments { get; set; }
+}
+
+/// <summary>
+/// 监护人在签署页可现场修改的资料：每项为 null 表示不改，非 null 表示以此为准（服务端逐项比对，只记录真正变化的）。
+/// 不含监护人邮箱（验证码身份依据）、出生日期（以员工正式资料为准）、雇主信息（公司维护）、州与表单类型。
+/// </summary>
+public sealed class EmployeeMinorComplianceGuardianAmendDto
+{
+    [StringLength(200)] public string? GuardianName { get; set; }
+    [StringLength(50)] public string? GuardianPhone { get; set; }
+    [StringLength(100)] public string? GuardianRelationship { get; set; }
+    [StringLength(500)] public string? GuardianAddress { get; set; }
+    [StringLength(20)] public string? GuardianPostcode { get; set; }
+    [StringLength(200)] public string? ChildGivenName { get; set; }
+    [StringLength(200)] public string? ChildFamilyName { get; set; }
+    [StringLength(500)] public string? ChildAddress { get; set; }
+    [StringLength(20)] public string? ChildPostcode { get; set; }
+    [StringLength(50)] public string? ChildPhone { get; set; }
+    [StringLength(254)] public string? ChildEmail { get; set; }
+    [StringLength(200)] public string? SchoolName { get; set; }
+    [StringLength(100)] public string? YearLevel { get; set; }
+    public bool? CompletedYear10 { get; set; }
+    public bool? FlexibleSchoolingQualifiedTeacher { get; set; }
+    public EmployeeMinorSchoolCalendarDto? SchoolCalendar { get; set; }
+    public EmployeeMinorOtherWorkDto? OtherWork { get; set; }
+    public EmployeeMinorCommuteDto? Commute { get; set; }
+    [MaxLength(2)] public List<EmployeeMinorComplianceContactDto>? Contacts { get; set; }
 }
 
 public sealed class EmployeeMinorComplianceGuardianPreviewDto
@@ -181,12 +212,13 @@ public sealed class EmployeeMinorComplianceGuardianSignRequestDto
     [Required] public bool ConfirmConsent { get; set; }
     [Required] public bool ConfirmBackupContact { get; set; }
     [Required, StringLength(1000)] public string ConsentScope { get; set; } = string.Empty;
+    public EmployeeMinorComplianceGuardianAmendDto? Amendments { get; set; }
 
     public EmployeeMinorComplianceGuardianSignDto ToSignDto() => new()
     {
         Version = Version, SignedName = SignedName, SignatureData = SignatureData,
         ConfirmRelationship = ConfirmRelationship, ConfirmConsent = ConfirmConsent,
-        ConfirmBackupContact = ConfirmBackupContact, ConsentScope = ConsentScope
+        ConfirmBackupContact = ConfirmBackupContact, ConsentScope = ConsentScope, Amendments = Amendments
     };
 }
 

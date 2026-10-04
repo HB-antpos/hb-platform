@@ -103,6 +103,7 @@ export function mapDetail(raw: Raw): MinorEmploymentReviewDetail {
     signatureEvidenceId: text(raw.signatureEvidenceId ?? raw.SignatureEvidenceId),
     documentUrl: text(raw.documentUrl ?? raw.DocumentUrl), documentSha256: text(raw.documentSha256 ?? raw.DocumentSha256),
     reviewReason: text(raw.reviewComment ?? raw.ReviewComment ?? raw.reviewReason ?? raw.ReviewReason), reviewFields: Array.isArray(raw.returnFields ?? raw.ReturnFields) ? (raw.returnFields ?? raw.ReturnFields) as string[] : [],
+    guardianAmendedFields: Array.isArray(raw.guardianAmendedFields ?? raw.GuardianAmendedFields) ? (raw.guardianAmendedFields ?? raw.GuardianAmendedFields) as string[] : [],
     updatedBy: text(raw.updatedBy ?? raw.UpdatedBy), revision: number(raw.revision ?? raw.Revision ?? raw.version ?? raw.Version) ?? 0,
   }
 }
@@ -207,9 +208,9 @@ export async function getParentSignatureDocument(token: string, sessionKey?: str
   return mapParentDocument(unwrapApiData(response) as unknown as Raw)
 }
 
-export async function submitParentSignature(token: string, payload: ParentSignatureSubmit, sessionKey?: string) {
+export async function submitParentSignature(token: string, payload: ParentSignatureSubmit, sessionKey?: string, amendments?: Record<string, unknown>) {
   const response = await request.post<ApiResponse<ParentSignatureDocument>>(
-    `${PUBLIC_SIGNATURE_PATH}/sign`, buildGuardianSignRequest(token, payload, sessionKey), { skipAuthRedirect: true },
+    `${PUBLIC_SIGNATURE_PATH}/sign`, buildGuardianSignRequest(token, payload, sessionKey, amendments), { skipAuthRedirect: true },
   )
   return mapParentDocument(unwrapApiData(response) as unknown as Raw)
 }
@@ -262,7 +263,8 @@ export function buildGuardianSignPayload(payload: ParentSignatureSubmit) {
 }
 
 export function buildGuardianPreviewPayload(token: string, sessionKey?: string) { return sessionKey ? { token, sessionKey } : { token } }
-export function buildGuardianSignRequest(token: string, payload: ParentSignatureSubmit, sessionKey?: string) { return { token, ...(sessionKey ? { sessionKey } : {}), ...buildGuardianSignPayload(payload) } }
+// amendments：监护人在签署页现场修改的资料，只带改过的分区；没改时不发送该字段。
+export function buildGuardianSignRequest(token: string, payload: ParentSignatureSubmit, sessionKey?: string, amendments?: Record<string, unknown>) { return { token, ...(sessionKey ? { sessionKey } : {}), ...buildGuardianSignPayload(payload), ...(amendments ? { amendments } : {}) } }
 
 export function mapHistory(value: unknown): MinorEmploymentHistoryEntry[] {
   if (!Array.isArray(value)) return []

@@ -1,10 +1,13 @@
 import { FileSearchOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, List, Modal, Pagination, Select, Space, Spin, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
-import RecordDetails from '../../MinorEmployment/RecordDetails'
+
 import PageContainer from '../../../components/PageContainer'
 import { decideMinorEmploymentReview, fetchMinorEmploymentDocument, getMinorEmploymentHistory, getMinorEmploymentReview, getMinorEmploymentReviews } from '../../../services/minorEmploymentService'
 import type { MinorEmploymentHistoryEntry, MinorEmploymentReviewDetail, MinorEmploymentReviewSummary, MinorEmploymentState, MinorEmploymentStateCode } from '../../../types/minorEmployment'
+import type { AmendableSection } from '../../MinorEmployment/ParentSignature/guardianAmendments'
+import { AMENDABLE_SECTIONS } from '../../MinorEmployment/ParentSignature/guardianAmendments'
+import RecordDetails from '../../MinorEmployment/RecordDetails'
 
 const statusLabel: Record<MinorEmploymentState, string> = {
   Draft: '草稿', AwaitingParentSignature: '待家长签字', SignedAwaitingSubmission: '已签待提交', PendingReview: '待审核',
@@ -93,6 +96,8 @@ export default function MinorEmploymentReviewPage() {
       {drawerLoading ? <Spin /> : selected ? <>
         <Alert type="warning" showIcon message="风险提醒不等于排班门禁" description="即使资料退回、工时超限或通勤安排待确认，店长仍可继续发布排班；本次审核不会清除这些提醒。" style={{ marginBottom: 16 }} />
         <Descriptions bordered size="small" column={2} items={[{ label: '员工', children: `${selected.employeeName}（${selected.age ?? '--'}岁）` }, { label: '门店 / 岗位', children: `${selected.storeName || '--'} / ${selected.roleName || '--'}` }, { label: '表单', children: selected.formType === 'QLD_CE1' ? 'QLD 官方 CE1（产品在线填写映射）' : 'NSW 公司未成年员工同意书' }, { label: '版本 / 修订', children: `v${selected.version} / ${selected.revision}` }, { label: '家长电话', children: selected.parent.phone || <Typography.Text type="danger">必填缺失</Typography.Text> }, { label: '家长邮箱', children: selected.parent.email || <Typography.Text type="danger">必填缺失</Typography.Text> }, { label: '备用联系人', children: `${selected.backupContact.name || '--'} · ${selected.backupContact.phone || '--'}` }, { label: '其他工作', children: selected.otherWork ? (selected.otherWork.hasOtherWork === true ? `已声明${selected.otherWork.hoursUnknown ? '（时数未知）' : ''}，雇主 ${selected.otherWork.employers?.length ?? 0} 个` : selected.otherWork.hasOtherWork === false ? '未声明其他工作' : '资料未返回') : '资料未返回' }]} />
+        {/* 监护人在签署页现场改过资料：提示 HR 到「历史 / 审计」核对修改前后内容。 */}
+        {selected.guardianAmendedFields.length ? <Alert type="warning" showIcon message={`监护人签署时修改了：${selected.guardianAmendedFields.map((key) => AMENDABLE_SECTIONS[key as AmendableSection] ?? key).join('、')}`} description="下方为修改后的内容；修改前后的完整值记录在历史中的「guardian_amended」审计里，请核对是否合理。" style={{ marginBottom: 16 }} /> : null}
         <RecordDetails snapshot={selected.snapshot} />
         <Card size="small" title="学校与排班事实" style={{ marginTop: 16 }}><Descriptions size="small" column={2} items={[{ label: '学校', children: selected.education?.schoolProvider || selected.education?.schoolName || '--' }, { label: '学校联系人', children: selected.education?.schoolContactName || '--' }, { label: '学期日期', children: selected.education?.termRanges?.length ? `${selected.education.termRanges.length} 段` : '--' }, { label: '学校假期', children: selected.education?.holidays?.length ? `${selected.education.holidays.length} 段` : '--' }, { label: '通勤', children: selected.rosterEvidence ? `${selected.rosterEvidence.afterSchoolToStoreMinutes ?? '--'} 分钟到店 · ${selected.rosterEvidence.homewardMinutes ?? '--'} 分钟回家` : '--' }, { label: '交通 / 接送', children: selected.rosterEvidence ? `${selected.rosterEvidence.transportMode || '--'} · ${selected.rosterEvidence.pickupPerson || '--'}` : '--' }]} /></Card>
         <Card size="small" title="风险提醒" style={{ marginTop: 16 }}>{selected.risks ? <List size="small" dataSource={selected.risks} locale={{ emptyText: '当前版本未计算出提醒' }} renderItem={(risk) => <List.Item><Space><Tag color={risk.level === 'high' ? 'red' : 'gold'}>{risk.level === 'high' ? '高风险提醒' : '提醒'}</Tag><span>{risk.title}：{risk.detail}</span><Typography.Text type="secondary">可继续发布</Typography.Text></Space></List.Item>} /> : <Alert type="info" showIcon message="风险计算结果未返回" description="当前页面不会推断为无风险；排班限制和提醒仍由后端规则持续计算。" />}</Card>

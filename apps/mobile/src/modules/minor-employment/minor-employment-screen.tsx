@@ -18,6 +18,7 @@ import { getStoredApiHost } from "@/shared/api/config";
 import { useAuthStore } from "@/store/auth-store";
 import { minorEmploymentApi } from "./api";
 import {
+  describeGuardianAmendments,
   emptyDraft,
   type MinorContact,
   type MinorEmploymentDraft,
@@ -892,6 +893,18 @@ export function MinorEmploymentScreen() {
         >
           保存草稿
         </Button>
+        {query.data?.parentSignedAt &&
+        query.data.guardianAmendedFields.length ? (
+          <Surface style={styles.requestBanner} elevation={0}>
+            <Text variant="titleSmall" style={styles.requestTitle}>
+              监护人签署时修改了：
+              {describeGuardianAmendments(query.data.guardianAmendedFields)}
+            </Text>
+            <Text style={styles.muted}>
+              下面的资料已更新为监护人修改后的内容，不需要你重新填写。
+            </Text>
+          </Surface>
+        ) : null}
         {query.data?.status === "AwaitingParentSignature" ? (
           <Surface style={styles.info} elevation={0}>
             <Text variant="titleMedium">等待监护人签署</Text>

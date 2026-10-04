@@ -116,11 +116,8 @@ public sealed class EmployeeMinorComplianceService
         if (row.StateCode is not ("QLD" or "NSW")) return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error("请先确认工作门店属于 NSW 或 QLD，再选择对应的同意书", "MINOR_COMPLIANCE_STATE_UNCONFIRMED");
         var contactError = ValidateGuardianContact(row);
         if (contactError is not null) return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error(contactError, InvalidGuardianContactCode);
-        var form = Parse<EmployeeMinorCe1FormDto>(row.FormDataJson);
-        var school = Parse<EmployeeMinorSchoolCalendarDto>(row.SchoolCalendarJson);
-        if (form is null || string.IsNullOrWhiteSpace(form.ChildGivenName) || string.IsNullOrWhiteSpace(form.ChildFamilyName) || string.IsNullOrWhiteSpace(form.EmployerCompanyName)
-            || (row.RequiredToBeEnrolled != false && (school is null || string.IsNullOrWhiteSpace(school.SchoolProvider))))
-            return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error("请先完整填写孩子、雇主和学校资料后再邀请签署", "MINOR_COMPLIANCE_FORM_INCOMPLETE");
+        var formError = ValidateFormCompleteness(row);
+        if (formError is not null) return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error(formError, "MINOR_COMPLIANCE_FORM_INCOMPLETE");
         var backupError = await ValidateBackupContactsAsync(row);
         if (backupError is not null) return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error(backupError, "MINOR_COMPLIANCE_BACKUP_CONTACT_REQUIRED");
         if (row.Status != "draft") return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error("请先保存新版本的草稿，再发起签字；已签版本保留原件", "INVALID_STATUS");
@@ -179,10 +176,27 @@ public sealed class EmployeeMinorComplianceService
             .Where(x => !x.IsDeleted && x.GuardianTokenHash == Hash(token) && !x.GuardianTokenUsed).FirstAsync();
         if (row is null || row.GuardianTokenExpiresAtUtc < DateTime.UtcNow) return ApiResponse<EmployeeMinorComplianceDto>.Error("签署链接无效或已过期", "GUARDIAN_TOKEN_INVALID");
         if (!IsGuardianSessionValid(row, sessionKey)) return ApiResponse<EmployeeMinorComplianceDto>.Error("请先用发到监护人邮箱的验证码完成验证", GuardianNotVerifiedCode);
+        // 监护人现场修改：先合并到当前版本（内存），后面所有校验、签名姓名比对与 PDF 都基于修改后的内容。
+        var currentContacts = (await ContactsAsync(row.Id)).Select(ToContactDto).ToList();
+        EmployeeMinorGuardianAmendments.Result? amended = null;
+        if (dto.Amendments is not null)
+        {
+            amended = EmployeeMinorGuardianAmendments.Apply(row, currentContacts, dto.Amendments, JsonOptions);
+            var calendarError = EmployeeMinorGuardianAmendments.ValidateSchoolCalendar(Parse<EmployeeMinorSchoolCalendarDto>(row.SchoolCalendarJson));
+            if (calendarError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(calendarError, "MINOR_COMPLIANCE_SCHOOL_CALENDAR_INVALID");
+            var formError = ValidateFormCompleteness(row);
+            if (formError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(formError, "MINOR_COMPLIANCE_FORM_INCOMPLETE");
+        }
+        var effectiveContacts = amended?.Contacts ?? currentContacts;
         var contactError = ValidateGuardianContact(row);
         if (contactError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(contactError, InvalidGuardianContactCode);
-        var backupError = await ValidateBackupContactsAsync(row);
+        var backupError = ValidateBackupContacts(row, effectiveContacts);
         if (backupError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(backupError, "MINOR_COMPLIANCE_BACKUP_CONTACT_REQUIRED");
+        if (amended?.HasChanges == true)
+        {
+            row.Revision += 1;
+            row.GuardianAmendedFieldsJson = JsonSerializer.Serialize(amended.Groups, JsonOptions);
+        }
         var latest = await LatestAsync(row.UserGUID);
         if (latest?.Id != row.Id) return ApiResponse<EmployeeMinorComplianceDto>.Error("旧版本签署链接已失效", VersionConflictCode);
         if (!string.Equals(Regex.Replace(dto.SignedName?.Trim() ?? string.Empty, @"\s+", " "), Regex.Replace(row.GuardianName.Trim(), @"\s+", " "), StringComparison.OrdinalIgnoreCase))
@@ -199,6 +213,8 @@ public sealed class EmployeeMinorComplianceService
         try
         {
             var mapped = await MapAsync(row);
+            // 联系人尚未落库，PDF 用修改后的名单。
+            mapped.Contacts = effectiveContacts;
             var bytes = EmployeeMinorComplianceDocumentBuilder.Build(EmployeeMinorComplianceDocumentBuilder.FromProfile(mapped, dto.SignatureData, ServerConsentScope));
             if (_storage is null) return ApiResponse<EmployeeMinorComplianceDto>.Error("原件存储未配置，暂不能完成签署", "DOCUMENT_STORAGE_UNAVAILABLE");
             var objectKey = $"minor-employment/{row.UserGUID}/v{row.Version}/{Guid.NewGuid():N}.pdf";
@@ -216,10 +232,21 @@ public sealed class EmployeeMinorComplianceService
         {
             var affected = await _context.Db.Updateable(row).Where(x => x.Id == row.Id && x.Version == dto.Version && x.Status == "awaiting_guardian_signature" && x.GuardianTokenHash == Hash(token) && !x.GuardianTokenUsed).ExecuteCommandAsync();
             if (affected != 1) throw new InvalidOperationException("GUARDIAN_TOKEN_CONFLICT");
+            if (amended?.HasChanges == true)
+            {
+                if (amended.Contacts is not null) await ReplaceContactsAsync(row.Id, amended.Contacts);
+                // 修改前后完整值留在审计，HR 审核时可逐项核对监护人改了什么。
+                await AuditAsync(row.Id, "guardian_amended", new
+                {
+                    groups = amended.Groups,
+                    changes = amended.Changes.Select(x => new { x.Group, x.Field, x.Before, x.After }),
+                });
+            }
             // 签署证据：邮箱核验时间、核验邮箱（打码）、来源 IP 与浏览器标识（截断），供 HR 审核与留档。
             await AuditAsync(row.Id, "guardian_signed", new
             {
                 row.GuardianSignedAtUtc,
+                amendedGroups = amended?.Groups,
                 emailVerifiedAtUtc,
                 verifiedEmail = MaskEmail(row.GuardianEmail),
                 ip = Truncate(clientIp, 64),
@@ -586,6 +613,7 @@ public sealed class EmployeeMinorComplianceService
         row.GuardianOtpHash = null; row.GuardianOtpExpiresAtUtc = null; row.GuardianOtpSentAtUtc = null;
         row.GuardianOtpSendCount = 0; row.GuardianOtpFailedAttempts = 0; row.GuardianEmailVerifiedAtUtc = null;
         row.GuardianSessionHash = null; row.GuardianSessionExpiresAtUtc = null;
+        row.GuardianAmendedFieldsJson = null;
     }
 
     private static EmployeeMinorComplianceGuardianSessionDto MapSession(EmployeeMinorCompliance row, bool verified) => new()
@@ -659,9 +687,22 @@ public sealed class EmployeeMinorComplianceService
     private static void Apply(EmployeeMinorCompliance row, EmployeeMinorComplianceUpsertDto dto) { row.StateCode = (dto.StateCode ?? "QLD").Trim().ToUpperInvariant(); row.FormType = (dto.FormType ?? "QLD_CE1").Trim(); row.DateOfBirth = dto.DateOfBirth; row.SchoolName = dto.SchoolName?.Trim(); row.YearLevel = dto.YearLevel?.Trim(); row.CompletedYear10 = dto.CompletedYear10; row.EducationStatus = dto.EducationStatus?.Trim(); row.RequiredToBeEnrolled = dto.RequiredToBeEnrolled; row.EducationExemptionVerified = dto.EducationExemptionVerified; row.ParticipationEndDate = dto.ParticipationEndDate; row.SchoolCalendarJson = JsonSerializer.Serialize(dto.SchoolCalendar, JsonOptions); row.OtherWorkJson = JsonSerializer.Serialize(dto.OtherWork, JsonOptions); row.CommuteJson = JsonSerializer.Serialize(dto.Commute, JsonOptions); row.FormDataJson = JsonSerializer.Serialize(dto.FormData, JsonOptions); row.GuardianName = dto.GuardianName?.Trim() ?? string.Empty; row.GuardianPhone = string.IsNullOrWhiteSpace(dto.GuardianPhone) ? null : dto.GuardianPhone.Trim(); row.GuardianEmail = string.IsNullOrWhiteSpace(dto.GuardianEmail) ? null : dto.GuardianEmail.Trim(); row.GuardianRelationship = dto.GuardianRelationship?.Trim(); }
     private async Task ReplaceContactsAsync(int id, IEnumerable<EmployeeMinorComplianceContactDto> contacts) { await _context.Db.Deleteable<EmployeeMinorComplianceContact>().Where(x => x.ComplianceId == id).ExecuteCommandAsync(); var rows = contacts.Select((x, i) => new EmployeeMinorComplianceContact { ComplianceId = id, ContactType = i == 0 ? "backup" : "additional", FullName = x.FullName.Trim(), Phone = x.Phone.Trim(), Mobile = x.Mobile?.Trim(), Email = x.Email?.Trim(), Address = x.Address?.Trim(), Postcode = x.Postcode?.Trim(), Relationship = x.Relationship?.Trim() }).ToList(); if (rows.Count > 0) await _context.Db.Insertable(rows).ExecuteCommandAsync(); }
     private async Task<List<EmployeeMinorComplianceContact>> ContactsAsync(int id) => await _context.Db.Queryable<EmployeeMinorComplianceContact>().Where(x => x.ComplianceId == id && !x.IsDeleted).ToListAsync();
-    private async Task<string?> ValidateBackupContactsAsync(EmployeeMinorCompliance row)
+    private async Task<string?> ValidateBackupContactsAsync(EmployeeMinorCompliance row) =>
+        ValidateBackupContacts(row, (await ContactsAsync(row.Id)).Select(ToContactDto).ToList());
+    private static EmployeeMinorComplianceContactDto ToContactDto(EmployeeMinorComplianceContact x) => new()
+    { FullName = x.FullName, Phone = x.Phone, Mobile = x.Mobile, Email = x.Email, Address = x.Address, Postcode = x.Postcode, Relationship = x.Relationship };
+    /// <summary>孩子姓名、雇主、需在校时的学校名称必填（邀请签署与监护人修改后共用）。</summary>
+    private static string? ValidateFormCompleteness(EmployeeMinorCompliance row)
     {
-        var contacts = await ContactsAsync(row.Id);
+        var form = Parse<EmployeeMinorCe1FormDto>(row.FormDataJson);
+        var school = Parse<EmployeeMinorSchoolCalendarDto>(row.SchoolCalendarJson);
+        if (form is null || string.IsNullOrWhiteSpace(form.ChildGivenName) || string.IsNullOrWhiteSpace(form.ChildFamilyName) || string.IsNullOrWhiteSpace(form.EmployerCompanyName)
+            || (row.RequiredToBeEnrolled != false && (school is null || string.IsNullOrWhiteSpace(school.SchoolProvider))))
+            return "请先完整填写孩子、雇主和学校资料后再邀请签署";
+        return null;
+    }
+    private static string? ValidateBackupContacts(EmployeeMinorCompliance row, IReadOnlyList<EmployeeMinorComplianceContactDto> contacts)
+    {
         if (contacts.Count < 1) return "必须填写至少一名独立备用紧急联系人（家长之外）";
         if (contacts.Any(x => string.IsNullOrWhiteSpace(x.FullName) || string.IsNullOrWhiteSpace(x.Phone) || !ValidPhone(x.Phone))) return "备用联系人必须填写有效电话";
         var guardianPhone = NormalizePhone(row.GuardianPhone);
@@ -700,6 +741,7 @@ public sealed class EmployeeMinorComplianceService
             ConsentScope = ServerConsentScope, GuardianTokenActive = !row.GuardianTokenUsed && row.GuardianTokenExpiresAtUtc > DateTime.UtcNow,
             GuardianInviteChannel = row.GuardianInviteChannel, GuardianInviteEmailSentAtUtc = row.GuardianInviteEmailSentAtUtc,
             GuardianEmailVerifiedAtUtc = row.GuardianEmailVerifiedAtUtc,
+            GuardianAmendedFields = Parse<List<string>>(row.GuardianAmendedFieldsJson) ?? new(),
             DocumentSha256 = row.DocumentSha256, ReviewActor = row.ReviewActor, ReviewedAtUtc = row.ReviewedAtUtc, ReviewComment = row.ReviewComment,
             ReturnFields = Parse<List<string>>(row.ReturnFieldsJson) ?? new(), SubmittedAtUtc = row.SubmittedAtUtc,
             Contacts = contacts.Select(x => new EmployeeMinorComplianceContactDto

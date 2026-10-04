@@ -28,7 +28,11 @@ import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { downloadMinorDocument } from "./api";
 import { minorEmploymentHrApi, type HrReviewStatus } from "./hr-api";
-import { MINOR_RETURN_FIELDS, type MinorReturnField } from "./types";
+import {
+  describeGuardianAmendments,
+  MINOR_RETURN_FIELDS,
+  type MinorReturnField,
+} from "./types";
 
 const tabs: { value: HrReviewStatus; label: string }[] = [
   { value: "Submitted", label: "待审核" },
@@ -441,6 +445,12 @@ function ReviewDetail({
               : "未签署"
           }
         />
+        {detail.guardianAmendedFields.length ? (
+          <Line
+            label="监护人现场修改"
+            value={`${describeGuardianAmendments(detail.guardianAmendedFields)}（修改前后内容见历史记录）`}
+          />
+        ) : null}
         <Line
           label="备用联系人"
           value={`${detail.backupContact.fullName} · ${detail.backupContact.relationship} · ${detail.backupContact.phone} · ${detail.backupContact.email}`}

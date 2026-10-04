@@ -91,6 +91,9 @@ BEGIN TRY
         ALTER TABLE [dbo].[EmployeeMinorCompliance] ADD [GuardianSessionHash] nvarchar(64) NULL;
     IF COL_LENGTH(N'dbo.EmployeeMinorCompliance', N'GuardianSessionExpiresAtUtc') IS NULL
         ALTER TABLE [dbo].[EmployeeMinorCompliance] ADD [GuardianSessionExpiresAtUtc] datetime2 NULL;
+    -- 监护人在签署页现场修改过的字段分组（JSON 数组），供员工与 HR 查看；修改前后值记在审计里。
+    IF COL_LENGTH(N'dbo.EmployeeMinorCompliance', N'GuardianAmendedFieldsJson') IS NULL
+        ALTER TABLE [dbo].[EmployeeMinorCompliance] ADD [GuardianAmendedFieldsJson] nvarchar(1000) NULL;
 
     IF OBJECT_ID(N'dbo.EmployeeMinorComplianceContact', N'U') IS NULL
     BEGIN
@@ -121,7 +124,7 @@ BEGIN TRY
             [Action] nvarchar(50) NOT NULL,
             [ActorUserGuid] nvarchar(50) NULL,
             [ActorLabel] nvarchar(200) NULL,
-            [MetadataJson] nvarchar(1000) NULL,
+            [MetadataJson] nvarchar(max) NULL,
             [CreatedAt] datetime2 NOT NULL,
             [CreatedBy] nvarchar(200) NULL,
             [UpdatedAt] datetime2 NULL,
@@ -129,6 +132,10 @@ BEGIN TRY
             [IsDeleted] bit NULL
         );
     END;
+
+    -- 审计元数据要容纳监护人修改前后的完整资料，早期按 1000 建过的表一并放宽。
+    IF COL_LENGTH(N'dbo.EmployeeMinorComplianceAudit', N'MetadataJson') <> -1
+        ALTER TABLE [dbo].[EmployeeMinorComplianceAudit] ALTER COLUMN [MetadataJson] nvarchar(max) NULL;
 
     IF OBJECT_ID(N'dbo.EmployeeMinorComplianceRequest', N'U') IS NULL
     BEGIN
@@ -258,8 +265,9 @@ IF (
          OR (c.[name] = N'GuardianOtpFailedAttempts' AND ty.[name] = N'int' AND c.[is_nullable] = 0)
          OR (c.[name] = N'GuardianEmailVerifiedAtUtc' AND ty.[name] = N'datetime2')
          OR (c.[name] = N'GuardianSessionHash' AND ty.[name] = N'nvarchar' AND c.[max_length] = 128)
+         OR (c.[name] = N'GuardianAmendedFieldsJson' AND ty.[name] = N'nvarchar' AND c.[max_length] = 2000)
       )
-) <> 11
+) <> 12
     THROW 51981, N'Employee minor compliance column signature is incompatible.', 1;
 
 IF NOT EXISTS (
@@ -289,6 +297,14 @@ IF NOT EXISTS (
       AND [name] = N'UX_MinorRequest_OpenPerUser' AND [is_unique] = 1 AND [has_filter] = 1
 )
     THROW 51984, N'Employee minor compliance open request index is missing.', 1;
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    INNER JOIN sys.types ty ON ty.[user_type_id] = c.[user_type_id]
+    WHERE c.[object_id] = OBJECT_ID(N'dbo.EmployeeMinorComplianceAudit')
+      AND c.[name] = N'MetadataJson' AND ty.[name] = N'nvarchar' AND c.[max_length] = -1
+)
+    THROW 51986, N'Employee minor compliance audit metadata must be nvarchar(max).', 1;
 
 IF NOT EXISTS (
     SELECT 1 FROM sys.indexes

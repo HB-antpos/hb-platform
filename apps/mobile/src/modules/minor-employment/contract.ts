@@ -181,6 +181,9 @@ export function mapProfile(payload: unknown): MinorEmploymentProfile {
     guardianEmailVerifiedAt:
       str(get(v, "guardianEmailVerifiedAtUtc")) || undefined,
     guardianLinkActive: get(v, "guardianTokenActive") === true,
+    guardianAmendedFields: Array.isArray(get(v, "guardianAmendedFields"))
+      ? (get(v, "guardianAmendedFields") as string[])
+      : [],
     status: status(get(v, "status")),
     version: num(get(v, "version")) || 1,
     revision: num(get(v, "revision") ?? get(v, "rowVersion")) || undefined,

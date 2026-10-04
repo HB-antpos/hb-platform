@@ -47,6 +47,8 @@ export interface MinorEmploymentReviewSummary {
 
 export interface MinorEmploymentReviewDetail extends MinorEmploymentReviewSummary {
   snapshot: Record<string, unknown>
+  /** 监护人在签署页现场修改过的分区键（guardianDetails / schoolCalendar / backupContact 等）。 */
+  guardianAmendedFields: string[]
   age?: number
   storeName?: string
   roleName?: string

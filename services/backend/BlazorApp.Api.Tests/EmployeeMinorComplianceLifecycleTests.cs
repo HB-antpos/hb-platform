@@ -346,6 +346,105 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         Assert.Equal("FORBIDDEN", (await outsider.CancelRequestAsync(open.Id)).ErrorCode);
     }
 
+    [Fact]
+    public async Task 监护人签署前现场修改_写回同一版本并留痕_原件按修改后内容生成()
+    {
+        var row = await SeedAsync("employee", 1, "amend-token");
+        var otherWork = JsonSerializer.Serialize(new EmployeeMinorOtherWorkDto { HasOtherWork = true, PlannedIntervals = [new() { StartUtc = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc), EndUtc = new DateTime(2026, 10, 3, 3, 0, 0, DateTimeKind.Utc), Hours = 3 }] }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        await _db.Updateable<EmployeeMinorCompliance>().SetColumns(x => x.OtherWorkJson == otherWork).Where(x => x.Id == row.Id).ExecuteCommandAsync();
+        var storage = new MemoryStore();
+        var service = Service("employee", storage);
+        var session = await VerifyAsync(service, "amend-token");
+        var sign = SignDto(1);
+        sign.Amendments = new()
+        {
+            GuardianPhone = "0499 888 777",
+            SchoolCalendar = new() { SchoolProvider = "Fixed High School", WeeklySchedule = [new() { DayOfWeek = DayOfWeek.Monday, MustAttend = true, StartLocalTime = "08:30", EndLocalTime = "15:10" }] },
+            OtherWork = new() { HasOtherWork = false },
+            Contacts = [new() { FullName = "Uncle Sam", Phone = "0400 555 666", Relationship = "Uncle" }],
+        };
+        var result = await service.SignGuardianAsync("amend-token", sign, session);
+        Assert.True(result.Success, result.Message);
+
+        var stored = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id);
+        Assert.Equal("0499 888 777", stored.GuardianPhone);
+        Assert.Equal(2, stored.Revision);
+        Assert.Contains("Fixed High School", stored.SchoolCalendarJson);
+        // 计划工时区间不归监护人改，原样保留。
+        Assert.Contains("2026-10-03", stored.OtherWorkJson);
+        Assert.Equal(["guardianDetails", "schoolCalendar", "otherWork", "backupContact"], result.Data!.GuardianAmendedFields);
+        Assert.Equal("Uncle Sam", Assert.Single(await _db.Queryable<EmployeeMinorComplianceContact>().Where(x => x.ComplianceId == row.Id).ToListAsync()).FullName);
+        var audit = await _db.Queryable<EmployeeMinorComplianceAudit>().Where(x => x.ComplianceId == row.Id && x.Action == "guardian_amended").FirstAsync();
+        Assert.Contains("0400 111 222", audit.MetadataJson); // 修改前的电话
+        Assert.Contains("0499 888 777", audit.MetadataJson); // 修改后的电话
+        Assert.Contains("Aunt", audit.MetadataJson);         // 修改前的备用联系人
+        using var pdf = UglyToad.PdfPig.PdfDocument.Open((await storage.ReadAsync(stored.DocumentObjectKey!)).Data!);
+        var text = string.Join("\n", pdf.GetPages().Select(x => x.Text));
+        Assert.Contains("Uncle Sam", text);
+        Assert.Contains("Fixed High School", text);
+        Assert.DoesNotContain("Aunt", text);
+    }
+
+    [Fact]
+    public async Task 监护人改了自己姓名后须用新姓名签署()
+    {
+        await SeedAsync("employee", 1, "rename-token");
+        var service = Service("employee", new MemoryStore());
+        var session = await VerifyAsync(service, "rename-token");
+        var oldName = SignDto(1);
+        oldName.Amendments = new() { GuardianName = "Parent Corrected" };
+        Assert.Equal("SIGNER_NAME_MISMATCH", (await service.SignGuardianAsync("rename-token", oldName, session)).ErrorCode);
+        var newName = SignDto(1); newName.SignedName = "Parent Corrected";
+        newName.Amendments = new() { GuardianName = "Parent Corrected" };
+        var signed = await service.SignGuardianAsync("rename-token", newName, session);
+        Assert.True(signed.Success, signed.Message);
+        Assert.Equal("Parent Corrected", signed.Data!.GuardianName);
+    }
+
+    [Fact]
+    public async Task 修改后校验不过则整单不写入()
+    {
+        var row = await SeedAsync("employee", 1, "invalid-token");
+        var service = Service("employee", new MemoryStore());
+        var session = await VerifyAsync(service, "invalid-token");
+        // 备用联系人与监护人同一个号码。
+        var sameNumber = SignDto(1);
+        sameNumber.Amendments = new() { Contacts = [new() { FullName = "Someone", Phone = "0400 111 222" }] };
+        Assert.Equal("MINOR_COMPLIANCE_BACKUP_CONTACT_REQUIRED", (await service.SignGuardianAsync("invalid-token", sameNumber, session)).ErrorCode);
+        // 上学时间格式错误。
+        var badTime = SignDto(1);
+        badTime.Amendments = new() { SchoolCalendar = new() { SchoolProvider = "Example School", WeeklySchedule = [new() { DayOfWeek = DayOfWeek.Monday, MustAttend = true, StartLocalTime = "15:00", EndLocalTime = "09:00" }] } };
+        Assert.Equal("MINOR_COMPLIANCE_SCHOOL_CALENDAR_INVALID", (await service.SignGuardianAsync("invalid-token", badTime, session)).ErrorCode);
+        // 清空孩子姓名。
+        var noName = SignDto(1);
+        noName.Amendments = new() { ChildGivenName = " " };
+        Assert.Equal("MINOR_COMPLIANCE_FORM_INCOMPLETE", (await service.SignGuardianAsync("invalid-token", noName, session)).ErrorCode);
+        var stored = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id);
+        Assert.Equal("awaiting_guardian_signature", stored.Status);
+        Assert.Equal(1, stored.Revision);
+        Assert.Null(stored.GuardianAmendedFieldsJson);
+        Assert.Equal("Aunt", (await _db.Queryable<EmployeeMinorComplianceContact>().Where(x => x.ComplianceId == row.Id).FirstAsync()).FullName);
+    }
+
+    [Fact]
+    public async Task 原样提交不算修改()
+    {
+        var row = await SeedAsync("employee", 1, "same-token");
+        var service = Service("employee", new MemoryStore());
+        var session = await VerifyAsync(service, "same-token");
+        var sign = SignDto(1);
+        sign.Amendments = new()
+        {
+            GuardianName = " Parent ", GuardianPhone = "0400 111 222", ChildGivenName = "Child", ChildFamilyName = "Person",
+            Contacts = [new() { FullName = "Aunt", Phone = "0400 333 444", Email = "aunt@example.test" }],
+        };
+        var result = await service.SignGuardianAsync("same-token", sign, session);
+        Assert.True(result.Success, result.Message);
+        Assert.Empty(result.Data!.GuardianAmendedFields);
+        Assert.Equal(1, (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).Revision);
+        Assert.False(await _db.Queryable<EmployeeMinorComplianceAudit>().AnyAsync(x => x.ComplianceId == row.Id && x.Action == "guardian_amended"));
+    }
+
     private EmployeeMinorComplianceGuardianSignDto SignDto(int version) => new() { Version = version, SignedName = "Parent", SignatureData = EmployeeMinorComplianceDocumentTests.Signature(), ConfirmRelationship = true, ConfirmConsent = true, ConfirmBackupContact = true, ConsentScope = EmployeeMinorComplianceService.ServerConsentScope };
     private static EmployeeMinorComplianceUpsertDto Draft()
     {

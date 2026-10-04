@@ -132,6 +132,8 @@ export interface MinorEmploymentProfile extends MinorEmploymentDraft {
   /** 监护人用邮箱验证码核验身份的时间。 */
   guardianEmailVerifiedAt?: string;
   guardianLinkActive: boolean;
+  /** 监护人在签署页现场修改过的分区键。 */
+  guardianAmendedFields: string[];
   status: MinorEmploymentState;
   version: number;
   revision?: number;
@@ -280,4 +282,18 @@ export interface MinorManagerCandidate {
   complianceVersion?: number;
   stateCode?: string;
   openRequest?: MinorComplianceRequest;
+}
+
+/** 监护人现场修改的分区键 → 中文名（与 Web 签署页一致）。 */
+export const GUARDIAN_AMENDED_LABELS: Record<string, string> = {
+  childDetails: "孩子资料",
+  guardianDetails: "监护人资料",
+  education: "就读情况",
+  schoolCalendar: "学校安排",
+  otherWork: "其他工作",
+  commute: "通勤与接送",
+  backupContact: "备用联系人",
+};
+export function describeGuardianAmendments(keys: string[]) {
+  return keys.map((key) => GUARDIAN_AMENDED_LABELS[key] ?? key).join("、");
 }

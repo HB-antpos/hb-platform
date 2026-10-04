@@ -6,6 +6,7 @@ import {
   mapSummary,
   toPayload,
 } from "./contract";
+import { describeGuardianAmendments } from "./types";
 
 const fixture = {
   Id: 42,
@@ -132,4 +133,18 @@ assert.equal(candidate.age, 15);
 assert.equal(candidate.openRequest?.id, 7);
 assert.equal(candidate.openRequest?.status, "open");
 assert.equal(mapCandidate({ UserGUID: "u2", Age: 16 }).openRequest, undefined);
+// 监护人现场修改过的分区。
+const amendedProfile = mapProfile({
+  ...fixture,
+  GuardianAmendedFields: ["schoolCalendar", "backupContact"],
+});
+assert.deepEqual(amendedProfile.guardianAmendedFields, [
+  "schoolCalendar",
+  "backupContact",
+]);
+assert.deepEqual(mapProfile(fixture).guardianAmendedFields, []);
+assert.equal(
+  describeGuardianAmendments(amendedProfile.guardianAmendedFields),
+  "学校安排、备用联系人",
+);
 console.log("minor employment API contract mapping passed");

@@ -70,6 +70,9 @@ public sealed class EmployeeMinorCompliance : BaseEntity
     [SugarColumn(IsNullable = true, Length = 64)] public string? GuardianSessionHash { get; set; }
     [SugarColumn(IsNullable = true)] public DateTime? GuardianSessionExpiresAtUtc { get; set; }
 
+    /// <summary>监护人在签署页现场修改过的字段分组（JSON 数组，如 ["schoolCalendar","backupContact"]）；修改前后值见审计 guardian_amended。</summary>
+    [SugarColumn(IsNullable = true, Length = 1000)] public string? GuardianAmendedFieldsJson { get; set; }
+
     [SugarColumn(IsNullable = true, Length = 500)] public string? DocumentObjectKey { get; set; }
     [SugarColumn(IsNullable = true, Length = 64)] public string? DocumentSha256 { get; set; }
     [SugarColumn(IsNullable = true, Length = 100)] public string? ReviewActor { get; set; }
@@ -103,7 +106,8 @@ public sealed class EmployeeMinorComplianceAudit : BaseEntity
     [SugarColumn(IsNullable = false, Length = 50)] public string Action { get; set; } = string.Empty;
     [SugarColumn(IsNullable = true, Length = 50)] public string? ActorUserGuid { get; set; }
     [SugarColumn(IsNullable = true, Length = 200)] public string? ActorLabel { get; set; }
-    [SugarColumn(IsNullable = true, Length = 1000)] public string? MetadataJson { get; set; }
+    /// <summary>审计元数据：监护人修改前后的完整资料也记在这里。SQL Server 列类型由迁移定为 nvarchar(max)，实体不限长度。</summary>
+    [SugarColumn(IsNullable = true)] public string? MetadataJson { get; set; }
 }
 
 /// <summary>店长发起的未成年用工资料填写请求；员工提交 HR 审核后自动完成。</summary>

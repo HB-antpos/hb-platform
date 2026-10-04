@@ -29,6 +29,11 @@ assert(guardianSession.maskedGuardianEmail === 'p***@example.test' && !guardianS
 assert(guardianSession.remainingSends === 4 && guardianSession.resendAvailableAt === '2026-10-04T01:01:00Z', 'resend pacing must be mapped')
 assert(guardianErrorCode(new RequestError('GUARDIAN_EMAIL_NOT_VERIFIED: 请先验证', 200, { success: false, errorCode: 'GUARDIAN_EMAIL_NOT_VERIFIED' })) === 'GUARDIAN_EMAIL_NOT_VERIFIED', 'business error code must be readable from the request error')
 assert(guardianErrorCode(new Error('network')) === undefined, 'non-request errors have no business code')
+// 监护人现场修改：签署请求带 amendments；HR 详情能读到修改过的分区。
+const signWithAmendments = buildGuardianSignRequest('opaque-token', { revision: 7, version: 3, consentScope: 'Server scope', parentName: 'Pat Chen', relationship: 'Parent', parentPhone: '0400000001', parentEmail: 'pat@example.test', signature: 'sig', confirmRelationship: true, confirmBackupContact: true, confirmConsent: true }, 'session-key', { guardianPhone: '0499 888 777' }) as Record<string, unknown>
+assert(JSON.stringify(signWithAmendments.amendments) === JSON.stringify({ guardianPhone: '0499 888 777' }), 'sign request must carry guardian amendments')
+assert(!('amendments' in buildGuardianSignRequest('opaque-token', { revision: 7, version: 3, consentScope: 'Server scope', parentName: 'Pat Chen', relationship: 'Parent', parentPhone: '0400000001', parentEmail: 'pat@example.test', signature: 'sig', confirmRelationship: true, confirmBackupContact: true, confirmConsent: true }, 'session-key')), 'unchanged signing must not send amendments')
+assert(JSON.stringify(mapDetail({ ...fixture, GuardianAmendedFields: ['schoolCalendar', 'backupContact'] }).guardianAmendedFields) === JSON.stringify(['schoolCalendar', 'backupContact']), 'HR detail must expose guardian amended sections')
 console.log('minorEmploymentService.contract.test: ok')
 
 assert(payload.version === 3 && payload.consentScope === 'Server scope', 'immutable version and server consent must not use draft revision or a different declaration')
