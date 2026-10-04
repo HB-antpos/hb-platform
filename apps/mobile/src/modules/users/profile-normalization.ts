@@ -55,6 +55,7 @@ export function normalizeStoreUser(raw: ApiRecord): StoreUserListItem {
     lastLoginIp: asString(raw.lastLoginIp ?? raw.LastLoginIp),
     createdAt: asString(raw.createdAt ?? raw.CreatedAt),
     updatedAt: asString(raw.updatedAt ?? raw.UpdatedAt),
+    mustChangePassword: raw.mustChangePassword === true || raw.MustChangePassword === true,
   };
 }
 

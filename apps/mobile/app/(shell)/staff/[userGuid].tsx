@@ -28,7 +28,11 @@ import {
   type StaffAttendanceRecord,
 } from "@/modules/users";
 import { calculateAge, maskTrailingFour } from "@/modules/users/profile-display";
+import { generateInitialPassword } from "@/modules/users/initial-password";
 import { validatePasswordValue } from "@/modules/users/validation";
+import { PERMISSIONS } from "@/shared/utils/access";
+import { useAuthStore } from "@/store/auth-store";
+import * as Crypto from "expo-crypto";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocaleTag } from "@/shared/i18n/types";
@@ -143,6 +147,14 @@ export default function StaffDetailScreen() {
   const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [activeTab, setActiveTab] = useState<DetailTab>("personal");
+  const access = useAuthStore((state) => state.access);
+  // 按钮可见性与后端授权一致：本店店员专用权限或全局用户权限任一即可，后端仍会校验分店与目标范围。
+  const canEditUsers = access.isAdmin
+    || access.hasPermission(PERMISSIONS.Users.Edit)
+    || access.hasPermission(PERMISSIONS.Users.EditStoreStaff);
+  const canResetPasswords = access.isAdmin
+    || access.hasPermission(PERMISSIONS.Users.ResetPassword)
+    || access.hasPermission(PERMISSIONS.Users.ResetStoreStaffPassword);
 
   const profile = profileQuery.data;
   const title = profile?.fullName || profile?.username || t("detail.title");
@@ -645,21 +657,25 @@ export default function StaffDetailScreen() {
             >
               {t("detail.actions.viewFullSchedule")}
             </Button>
-            <Button
-              mode="outlined"
-              icon="key-outline"
-              onPress={() => setResetPasswordVisible(true)}
-            >
-              {t("actions.resetPassword")}
-            </Button>
-            <Button
-              mode={isActive ? "outlined" : "contained-tonal"}
-              icon={isActive ? "block-helper" : "check-circle-outline"}
-              onPress={handleToggleStatus}
-              loading={statusMutation.isPending}
-            >
-              {isActive ? t("actions.disable") : t("actions.enable")}
-            </Button>
+            {canResetPasswords ? (
+              <Button
+                mode="outlined"
+                icon="key-outline"
+                onPress={() => setResetPasswordVisible(true)}
+              >
+                {t("actions.resetPassword")}
+              </Button>
+            ) : null}
+            {canEditUsers ? (
+              <Button
+                mode={isActive ? "outlined" : "contained-tonal"}
+                icon={isActive ? "block-helper" : "check-circle-outline"}
+                onPress={handleToggleStatus}
+                loading={statusMutation.isPending}
+              >
+                {isActive ? t("actions.disable") : t("actions.enable")}
+              </Button>
+            ) : null}
           </Card.Content>
         </Card>
       </>
@@ -667,6 +683,8 @@ export default function StaffDetailScreen() {
   }, [
     activeTab,
     age,
+    canEditUsers,
+    canResetPasswords,
     employmentType,
     emptyValue,
     gender,
@@ -761,12 +779,17 @@ export default function StaffDetailScreen() {
                     )
                   : t("fields.positionValue")}
               </Text>
-              <Chip
-                compact
-                style={isActive ? styles.activeChip : styles.inactiveChip}
-              >
-                {isActive ? t("statuses.active") : t("statuses.disabled")}
-              </Chip>
+              <View style={styles.heroChips}>
+                <Chip
+                  compact
+                  style={isActive ? styles.activeChip : styles.inactiveChip}
+                >
+                  {isActive ? t("statuses.active") : t("statuses.disabled")}
+                </Chip>
+                {profile?.mustChangePassword ? (
+                  <Chip compact style={styles.pendingChip}>{t("statuses.pendingFirstLogin")}</Chip>
+                ) : null}
+              </View>
             </View>
           </Card.Content>
         </Card>
@@ -811,10 +834,12 @@ export default function StaffDetailScreen() {
               label={t("fields.newPassword")}
               value={resetPasswordValue}
               onChangeText={setResetPasswordValue}
-              secureTextEntry
               autoCapitalize="none"
+              autoCorrect={false}
               disabled={passwordMutation.isPending}
+              right={<TextInput.Icon icon="refresh" accessibilityLabel={t("create.regeneratePassword")} onPress={() => setResetPasswordValue(generateInitialPassword((count) => Crypto.getRandomBytes(count)))} />}
             />
+            <Text variant="bodySmall" style={styles.muted}>{t("dialogs.resetPasswordRequireChangeHint")}</Text>
           </Dialog.Content>
           <Dialog.Actions>
             <Button
@@ -896,6 +921,14 @@ const styles = StyleSheet.create({
   inactiveChip: {
     alignSelf: "flex-start",
     backgroundColor: "#FDECEC",
+  },
+  pendingChip: {
+    backgroundColor: "#EAF2FF",
+  },
+  heroChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: HB_SPACING.xs,
   },
   muted: {
     color: HB_COLORS.textSecondary,

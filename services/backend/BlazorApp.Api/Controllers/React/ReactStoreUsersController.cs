@@ -68,28 +68,28 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpGet("{userGuid}/cashier-barcode")]
-        [Authorize(Policy = Permissions.Users.Edit)]
+        [Authorize(Policy = Permissions.Users.EditStoreStaff)]
         public async Task<IActionResult> GetCashierBarcode(
             string userGuid,
             [FromQuery] string? storeCode
         ) => Ok(await _cashierBarcodeService.GetAsync(userGuid, storeCode));
 
         [HttpPost("{userGuid}/cashier-barcode/ensure")]
-        [Authorize(Policy = Permissions.Users.Edit)]
+        [Authorize(Policy = Permissions.Users.EditStoreStaff)]
         public async Task<IActionResult> EnsureCashierBarcode(
             string userGuid,
             [FromBody] StoreUserCashierBarcodeEnsureRequest request
         ) => Ok(await _cashierBarcodeService.EnsureAsync(userGuid, request.StoreCode));
 
         [HttpPost("{userGuid}/cashier-barcode/print-confirmation")]
-        [Authorize(Policy = Permissions.Users.Edit)]
+        [Authorize(Policy = Permissions.Users.EditStoreStaff)]
         public async Task<IActionResult> ConfirmCashierBarcodePrint(
             string userGuid,
             [FromBody] StoreUserCashierBarcodePrintConfirmationRequest request
         ) => Ok(await _cashierBarcodeService.ConfirmPrintAsync(userGuid, request));
 
         [HttpPost]
-        [Authorize(Policy = Permissions.Users.Create)]
+        [Authorize(Policy = Permissions.Users.CreateStoreStaff)]
         public async Task<IActionResult> Create([FromBody] CreateStoreUserDto dto)
         {
             if (!ModelState.IsValid)
@@ -108,7 +108,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPut("{userGuid}")]
-        [Authorize(Policy = Permissions.Users.Edit)]
+        [Authorize(Policy = Permissions.Users.EditStoreStaff)]
         public async Task<IActionResult> Update(string userGuid, [FromBody] UpdateStoreUserDto dto)
         {
             if (!ModelState.IsValid)
@@ -127,7 +127,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPut("{userGuid}/status")]
-        [Authorize(Policy = Permissions.Users.Edit)]
+        [Authorize(Policy = Permissions.Users.EditStoreStaff)]
         public async Task<IActionResult> UpdateStatus(
             string userGuid,
             [FromBody] UpdateStoreUserStatusDto dto
@@ -142,7 +142,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPut("{userGuid}/password")]
-        [Authorize(Policy = Permissions.Users.ResetPassword)]
+        [Authorize(Policy = Permissions.Users.ResetStoreStaffPassword)]
         public async Task<IActionResult> UpdatePassword(
             string userGuid,
             [FromBody] UpdateStoreUserPasswordDto dto

@@ -725,6 +725,18 @@
       "name": "重置密码",
       "description": "Web 页面 /system/users - 重置用户登录密码"
     },
+    "Users.CreateStoreStaff": {
+      "name": "新建本店店员",
+      "description": "移动端「员工列表」- 为本人主分店新建店员账号（不含 Web 全局用户管理）"
+    },
+    "Users.EditStoreStaff": {
+      "name": "编辑本店店员",
+      "description": "移动端「员工列表」- 编辑、停用本人主分店店员并管理其个人码（不含 Web 全局用户管理）"
+    },
+    "Users.ResetStoreStaffPassword": {
+      "name": "重置本店店员密码",
+      "description": "移动端「员工列表」- 重置本人主分店店员密码并要求其首次登录改密（不含 Web 全局用户管理）"
+    },
     "Users.View": {
       "name": "查看用户",
       "description": "移动端「员工列表」「用户管理」与用户查询接口 - 查看用户列表与详情；Web 后台 /system/users 菜单另由 Users.ViewWebConsole 控制"

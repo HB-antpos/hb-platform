@@ -28,6 +28,10 @@ export const PERMISSIONS = {
     Create: "Users.Create",
     Edit: "Users.Edit",
     ResetPassword: "Users.ResetPassword",
+    // 移动端「员工列表」本店店员管理专用权限；店长只授予这三项，不获得 Web 全局用户管理。
+    CreateStoreStaff: "Users.CreateStoreStaff",
+    EditStoreStaff: "Users.EditStoreStaff",
+    ResetStoreStaffPassword: "Users.ResetStoreStaffPassword",
     ManageRoles: "Users.ManageRoles",
     ManageStores: "Users.ManageStores",
     ManagePos: "Users.ManagePosTerminalPermissions",

@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
+using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.AspNetCore.Http;
@@ -46,7 +47,9 @@ namespace BlazorApp.Api.Tests
                 typeof(Store),
                 typeof(UserStore),
                 typeof(EmployeeProfile),
-                typeof(UserPasswordChangeRequirement)
+                typeof(UserPasswordChangeRequirement),
+                typeof(SysRolePermission),
+                typeof(SysUserPermission)
             );
         }
 
@@ -313,6 +316,85 @@ namespace BlazorApp.Api.Tests
 
             Assert.False(result.Success);
             Assert.Equal("FORBIDDEN", result.Code);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenStaffBelongsToSeveralStores_KeepsOtherStoresAndPrimaryFlag()
+        {
+            await SeedStoreUserDataAsync();
+            // staff-1 同时挂在 store-2，且 store-2 是其主分店。
+            await _db.Insertable(CreateUserStore("staff-1", "store-2", true)).ExecuteCommandAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdateAsync(
+                "staff-1",
+                new UpdateStoreUserDto
+                {
+                    FullName = "Renamed Staff",
+                    Phone = "0412999888",
+                    StoreCode = "S001",
+                    Status = 1,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("Renamed Staff", result.Data!.FullName);
+            var stores = await _db.Queryable<UserStore>()
+                .Where(item => item.UserGUID == "staff-1" && !item.IsDeleted)
+                .ToListAsync();
+            Assert.Equal(2, stores.Count);
+            Assert.False(stores.Single(item => item.StoreGUID == "store-1").IsPrimary);
+            Assert.True(stores.Single(item => item.StoreGUID == "store-2").IsPrimary);
+        }
+
+        [Fact]
+        public async Task StoreManagerMutations_RejectSelfAndHighPrivilegeTargets()
+        {
+            await SeedStoreUserDataAsync();
+            // manager-1 本人也挂了店员角色；staff-1 被额外授予用户管理权限（视为高权限账号）。
+            await _db.Insertable(CreateUserRole("manager-1", "role-staff")).ExecuteCommandAsync();
+            await _db.Insertable(new SysUserPermission
+            {
+                Id = "staff-1-users-edit",
+                UserGuid = "staff-1",
+                PermissionCode = Permissions.Users.EditStoreStaff,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var selfPassword = await service.UpdatePasswordAsync(
+                "manager-1",
+                new UpdateStoreUserPasswordDto { StoreCode = "S001", NewPassword = "Changed123", PasswordFormat = "raw" },
+                "manager-1"
+            );
+            var selfStatus = await service.UpdateStatusAsync(
+                "manager-1",
+                new UpdateStoreUserStatusDto { StoreCode = "S001", Status = 0 },
+                "manager-1"
+            );
+            var protectedUpdate = await service.UpdateAsync(
+                "staff-1",
+                new UpdateStoreUserDto { FullName = "Hijacked", StoreCode = "S001", Status = 1 },
+                "manager-1"
+            );
+            var protectedPassword = await service.UpdatePasswordAsync(
+                "staff-1",
+                new UpdateStoreUserPasswordDto { StoreCode = "S001", NewPassword = "Changed123", PasswordFormat = "raw" },
+                "manager-1"
+            );
+
+            Assert.All(new[] { selfPassword, selfStatus, protectedPassword }, result =>
+            {
+                Assert.False(result.Success);
+                Assert.Equal("FORBIDDEN", result.Code);
+            });
+            Assert.False(protectedUpdate.Success);
+            Assert.Equal("FORBIDDEN", protectedUpdate.Code);
+            var manager = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "manager-1");
+            Assert.True(manager.IsActive);
+            Assert.NotEqual("Hijacked", (await _db.Queryable<User>().FirstAsync(item => item.UserGUID == "staff-1")).FullName);
+            Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
         }
 
         [Fact]
