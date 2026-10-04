@@ -263,7 +263,7 @@ function UserEditor({ userGuid, partial }: { userGuid: string; partial: string }
       {validation ? <Text style={{ color: C.danger }}>{validation}</Text> : null}{error ? <AdminError error={error} /> : null}
     </Dialog.Content><Dialog.Actions><Button disabled={busy} onPress={() => setPasswordDialog(false)}>{c.cancel}</Button><Button disabled={busy || forbidden || passwordUncertain} loading={busy} onPress={() => void resetPassword()}>{c.confirm}</Button></Dialog.Actions></Dialog></Portal>
     {cashierPicker ? <IdentitySelectionSheet title={c.chooseStore} options={linked.filter(store => !scoped || managedIdentityStores(user).some(managed => managed.storeGUID === store.storeGUID)).map(store => ({ value: store.storeGUID, label: `${store.storeName} · ${store.storeCode}` }))}
-      onDismiss={() => setCashierPicker(false)} onSelect={storeGuid => { const store = linked.find(item => item.storeGUID === storeGuid); setCashierPicker(false); router.push({ pathname: "/(shell)/users/[userGuid]/pos-terminal-permissions", params: { userGuid, storeGuid, userName: target?.fullName || target?.username, storeName: store?.storeName } }); }} /> : null}
+      onDismiss={() => setCashierPicker(false)} onSelect={storeGuid => { const store = linked.find(item => item.storeGUID === storeGuid); setCashierPicker(false); router.push({ pathname: "/(shell)/users/[userGuid]/pos-terminal-permissions", params: { userGuid, storeGuid, storeCode: store?.storeCode, userName: target?.fullName || target?.username, storeName: store?.storeName, roleNames: target?.roleNames?.join("|") } }); }} /> : null}
     <Snackbar visible={!!snack} onDismiss={() => setSnack("")}>{snack}</Snackbar>
   </AdminScreen>;
 }

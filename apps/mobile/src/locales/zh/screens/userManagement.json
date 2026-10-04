@@ -26,22 +26,113 @@
     "confirmReset": "重置密码"
   },
   "posPermissions": {
-    "title": "POS 收银权限",
+    "title": "POS 授权",
     "unknownUser": "未知员工",
     "unknownStore": "未知分店",
     "loading": "正在加载 POS 权限...",
-    "selectedCount": "已选 {{selected}} / {{total}}",
+    "storeRole": "{{store}} · {{role}}",
+    "roleLabels": {
+      "storeStaff": "店员"
+    },
     "mode": {
-      "inherited": "继承",
-      "override": "独立设置"
+      "inherited": "按角色默认",
+      "override": "本店自定义"
     },
     "actions": {
-      "open": "POS 授权",
       "back": "返回",
+      "more": "更多操作",
       "save": "保存",
-      "restore": "恢复继承",
-      "selectGroup": "全选",
-      "clearGroup": "清空"
+      "restore": "恢复角色默认",
+      "reviewChanges": "查看改动",
+      "backToEdit": "返回修改",
+      "confirmSave": "确认保存",
+      "close": "关闭"
+    },
+    "presets": {
+      "title": "快速套用",
+      "basic": "基础收银",
+      "senior": "资深收银",
+      "all": "全部",
+      "none": "清空",
+      "copy": "复制同事"
+    },
+    "stats": {
+      "enabledLabel": "已开",
+      "ofTotal": "/ {{total}}",
+      "highRiskEnabled": "已开高风险 {{value}}",
+      "progressLabel": "已开 {{selected}} / {{total}} 项 POS 权限"
+    },
+    "search": {
+      "placeholder": "搜索权限名或分组"
+    },
+    "filters": {
+      "label": "筛选",
+      "all": "全部",
+      "enabled": "已开 {{value}}",
+      "highRisk": "高风险 {{value}}",
+      "changed": "本次改动 {{value}}"
+    },
+    "groups": {
+      "sales": "销售",
+      "discount": "折扣",
+      "payment": "收款",
+      "returns": "退货",
+      "history": "历史订单",
+      "dailyClose": "日结",
+      "installments": "分期",
+      "drawerReceipt": "钱箱与小票",
+      "other": "其他"
+    },
+    "group": {
+      "notEnabled": "未开放",
+      "previewMore": "{{names}} 等 {{value}} 项",
+      "toggleAll": "{{group}}：全选或清空本组",
+      "expand": "展开{{group}}",
+      "collapse": "收起{{group}}"
+    },
+    "entryHint": "没开「{{name}}」，下面几项在 POS 上用不到",
+    "badges": {
+      "highRisk": "高风险",
+      "changed": "本次改动"
+    },
+    "discount": {
+      "line": "单行折扣",
+      "order": "整单折扣",
+      "levels": {
+        "10": "九折",
+        "20": "八折",
+        "30": "七折",
+        "40": "六折",
+        "50": "五折",
+        "manual": "手工"
+      }
+    },
+    "footer": {
+      "pending": "{{value}} 项改动未保存",
+      "upToDate": "已是最新，没有未保存的改动"
+    },
+    "confirm": {
+      "title": "确认 {{value}} 项改动",
+      "subtitle": "{{user}} · {{store}}",
+      "added": "开启",
+      "removed": "关闭",
+      "highRiskWarning": "新开了 {{value}} 项高风险权限，请确认这位员工确实需要。",
+      "scopeNotice": "只对 {{store}} 生效，员工在其他分店的 POS 权限不变。"
+    },
+    "copy": {
+      "title": "复制同事的权限",
+      "subtitle": "{{store}} 的同事",
+      "searchPlaceholder": "搜索同事姓名或账号",
+      "help": "套用后先停在编辑页，可以继续调整，点「保存」才生效。只会复制你有权分配的权限。",
+      "apply": "套用 {{name}} 的 {{value}} 项权限",
+      "applyIdle": "先选择一位同事",
+      "loadingColleague": "正在读取权限...",
+      "permissionCount": "{{value}} 项可复制",
+      "loadFailed": "读取这位同事的权限失败，请重试或换一位同事。",
+      "listFailed": "同事列表加载失败，请稍后重试。",
+      "empty": "本店没有可以复制的同事",
+      "noMatch": "没有匹配的同事",
+      "unavailable": "缺少分店编号，无法列出同事。请从店员管理重新打开本页。"
     },
     "unsaved": {
       "title": "放弃未保存的更改？",
@@ -49,20 +140,22 @@
       "discard": "放弃更改"
     },
     "restore": {
-      "title": "恢复继承权限？",
-      "description": "这会删除当前分店的独立设置，并恢复使用继承的 POS 权限。"
+      "title": "恢复角色默认权限？",
+      "description": "这会删除本店的自定义设置，改回按角色默认的 POS 权限。"
     },
     "busy": {
       "title": "操作处理中",
       "description": "正在保存或恢复权限，请等待操作完成后再离开。"
     },
     "messages": {
-      "missingStoreGuid": "分店资料缺少授权标识，请刷新分店资料或重新登录。",
       "saved": "POS 权限已保存",
-      "restored": "已恢复继承权限",
+      "restored": "已恢复角色默认权限",
       "saveFailed": "保存 POS 权限失败，未保存的选择已保留",
-      "restoreFailed": "恢复继承失败，当前选择已保留"
+      "restoreFailed": "恢复角色默认失败，当前选择已保留",
+      "presetApplied": "已套用「{{name}}」，点「保存」后生效",
+      "copyApplied": "已套用 {{name}} 的权限，点「保存」后生效"
     },
+    "noResults": "没有符合条件的权限",
     "errors": {
       "invalidTitle": "授权参数不完整",
       "invalidDescription": "缺少员工或分店标识，请从店员管理页面重新打开。",
@@ -76,7 +169,7 @@
       "networkDescription": "暂时无法连接服务器，请检查网络后重试。"
     },
     "emptyTitle": "没有可分配的 POS 权限",
-    "emptyDescription": "服务器目前没有为此员工和分店提供可分配权限。你仍可在独立设置模式下恢复继承。"
+    "emptyDescription": "服务器目前没有为此员工和分店提供可分配权限。如为本店自定义，仍可在「更多」里恢复角色默认。"
   },
   "accessManagement": {
     "title": "账号授权",
