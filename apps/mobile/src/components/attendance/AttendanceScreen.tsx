@@ -559,9 +559,10 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 
   const createScheduleMutation = useMutation({
     mutationFn: createAttendanceSchedule,
-    onSuccess: async () => {
+    onSuccess: async (schedule) => {
       await invalidateScheduleManagementData();
-      showMessage(t("messages.scheduleSaved"));
+      const count = schedule.minorCompliance?.findings.length ?? 0;
+      showMessage(count > 0 ? `排班已保存；保留 ${count} 条未成年用工提醒` : t("messages.scheduleSaved"));
     },
     onError: (error) =>
       showMessage(
@@ -601,9 +602,10 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       scheduleGuid: string;
       payload: AttendanceScheduleUpdatePayload;
     }) => updateAttendanceSchedule(scheduleGuid, payload),
-    onSuccess: async () => {
+    onSuccess: async (schedule) => {
       await invalidateScheduleManagementData();
-      showMessage(t("messages.scheduleSaved"));
+      const count = schedule.minorCompliance?.findings.length ?? 0;
+      showMessage(count > 0 ? `排班已保存；保留 ${count} 条未成年用工提醒` : t("messages.scheduleSaved"));
     },
     onError: (error) =>
       showMessage(
@@ -1642,6 +1644,20 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 
         {isManagementTab && managerStores.length > 0 && !managerLoadError ? (
           <>
+            {isScheduleManagementTab ? (
+              <Button
+                mode="outlined"
+                icon="clipboard-alert-outline"
+                style={styles.minorReminderLink}
+                onPress={() =>
+                  router.push(
+                    (`/(shell)/minor-employment-reminders${selectedStoreCode ? `?storeCode=${encodeURIComponent(selectedStoreCode)}` : ""}`) as never,
+                  )
+                }
+              >
+                未成年用工提醒待办
+              </Button>
+            ) : null}
             {isManagementContentLoading ? (
               <View style={styles.inlineLoading}>
                 <ActivityIndicator />
@@ -1979,6 +1995,10 @@ const styles = StyleSheet.create({
   },
   muted: {
     color: "#475467",
+  },
+  minorReminderLink: {
+    alignSelf: "flex-end",
+    marginBottom: 8,
   },
   sectionTabs: {
     backgroundColor: "#EEF2F6",

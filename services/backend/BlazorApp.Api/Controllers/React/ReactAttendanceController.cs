@@ -40,6 +40,11 @@ namespace BlazorApp.Api.Controllers.React
             [FromQuery] AttendanceScheduleQueryDto query) =>
             Ok(await _service.GetAttendanceRecordsAsync(query));
 
+        [HttpPost("schedules/compliance-preview")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+        public async Task<IActionResult> PreviewMinorEmploymentCompliance([FromBody] CreateAttendanceScheduleDto request) =>
+            Ok(await _service.PreviewMinorEmploymentComplianceAsync(request));
+
         [HttpPost("schedules")]
         [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
         public async Task<IActionResult> CreateSchedule([FromBody] CreateAttendanceScheduleDto request) =>

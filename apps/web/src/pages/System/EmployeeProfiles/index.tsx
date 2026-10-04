@@ -43,6 +43,7 @@ import {
   runLatestGuardedRequest,
 } from '../../../utils/latestRequestGuard'
 import SensitiveChangeReviewPanel from './SensitiveChangeReviewPanel'
+import MinorEmploymentReviewPage from '../MinorEmploymentReview'
 import {
   getExpectedSensitiveRevision,
   maskSensitiveSummary,
@@ -461,7 +462,12 @@ export default function SystemEmployeeProfilesPage() {
                   <Badge count={pendingCount} overflowCount={99} />
                 </Space>
               ),
-              children: <SensitiveChangeReviewPanel refreshPendingCount={loadPendingCount} />,
+              children: <Tabs
+                items={[
+                  { key: 'sensitive', label: '敏感资料变更', children: <SensitiveChangeReviewPanel refreshPendingCount={loadPendingCount} /> },
+                  { key: 'minor-employment', label: '未成年用工合规', children: <MinorEmploymentReviewPage /> },
+                ]}
+              />,
             },
           ]}
         />

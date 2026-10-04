@@ -173,5 +173,10 @@
       "connectionFailed": "The saved label printer could not be connected. Check the printer and try again.",
       "unknown": "The label could not be printed. Check printer settings and try again."
     }
+  },
+  "minorEmployment": {
+    "title": "Minor employment compliance",
+    "description": "Maintain school days, holidays, parent signature and commute reminders.",
+    "open": "Open minor employment form"
   }
 }

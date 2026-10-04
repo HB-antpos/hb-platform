@@ -195,6 +195,23 @@ export function TodayPunchCard({
               <Text variant="bodySmall" style={styles.bannerText}>{alertMessage}</Text>
             </View>
           ) : null}
+          {/* 未成年用工合规只提醒、不影响打卡；最多展示两条，完整内容由主管在提醒待办跟进。 */}
+          {today?.minorCompliance?.hasFindings ? (
+            <View accessibilityRole="alert" style={styles.banner}>
+              <Icon source="shield-alert-outline" size={16} color={HB_COLORS.warning} />
+              <View style={styles.flexText}>
+                <Text variant="labelLarge" style={styles.bannerText}>
+                  未成年用工提醒（{today.minorCompliance.findings.length}）
+                </Text>
+                {today.minorCompliance.findings.slice(0, 2).map((finding) => (
+                  <Text key={`${finding.ruleId}-${finding.workDate ?? "current"}`} variant="bodySmall" style={styles.bannerText}>
+                    {finding.message}
+                  </Text>
+                ))}
+                <Text variant="bodySmall" style={styles.muted}>提醒不影响本次打卡；主管可在提醒待办继续跟进。</Text>
+              </View>
+            </View>
+          ) : null}
           {lastQrPunch ? (
             <View style={styles.lastScan}>
               <Text variant="bodySmall" selectable style={styles.tabularText}>
