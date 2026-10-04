@@ -36,7 +36,8 @@ import {
 import { StaffBarcodeBatchDialog, StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
 import { getUserAccessEligibility } from "@/modules/users/access-management";
-import { hasDeliverableEmail } from "@/modules/users/staff-email-username";
+import { getDisplayableEmail, hasDeliverableEmail } from "@/modules/users/staff-email-username";
+import { StaffPasswordSetupDialog } from "@/modules/users/staff-password-setup-dialog";
 import { validateStoreUserForm } from "@/modules/users/validation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -45,7 +46,7 @@ import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 
-type StatusFilter = "all" | "active" | "disabled" | "pendingFirstLogin";
+type StatusFilter = "all" | "active" | "disabled" | "pendingFirstLogin" | "noEmail";
 
 const EMPTY_FORM: StoreUserFormValues = {
   username: "",
@@ -218,7 +219,7 @@ export default function UsersScreen() {
     setFormValues({
       username: detailQuery.data.username,
       fullName: detailQuery.data.fullName ?? "",
-      email: detailQuery.data.email ?? "",
+      email: getDisplayableEmail(detailQuery.data.email),
       phone: detailQuery.data.phone ?? "",
       status: detailQuery.data.status === 1,
     });
@@ -261,7 +262,7 @@ export default function UsersScreen() {
       setFormValues({
         username: user.username,
         fullName: user.fullName ?? "",
-        email: user.email ?? "",
+        email: getDisplayableEmail(user.email),
         phone: user.phone ?? "",
         status: user.status === 1,
       });
@@ -449,7 +450,7 @@ export default function UsersScreen() {
     [canResetUserPassword, t]
   );
 
-  const handleResetPassword = useCallback(async () => {
+  const handleResetPassword = useCallback(async (email?: string) => {
     if (!passwordUser) {
       return;
     }
@@ -466,9 +467,11 @@ export default function UsersScreen() {
 
     // 店长不再手动设新密码：给员工邮箱发验证码，员工在登录页自己设置。
     try {
+      // 老账号没有可用邮箱时 email 为店长就地补填的邮箱，后端先保存再发送。
       const result = await setupEmailMutation.mutateAsync({
         userGuid: passwordUser.userGUID,
         storeCode: targetStoreCode,
+        email,
       });
       setSnackbarMessage(t("messages.passwordSetupEmailSent", { email: result.maskedEmail }));
       closeResetPasswordDialog();
@@ -499,6 +502,10 @@ export default function UsersScreen() {
       if (statusFilter === "pendingFirstLogin") {
         return item.mustChangePassword === true;
       }
+      if (statusFilter === "noEmail") {
+        // 没有可用邮箱的账号收不到设置密码验证码，筛出来方便店长逐个补邮箱。
+        return !hasDeliverableEmail(item.email);
+      }
       return true;
     });
 
@@ -511,7 +518,8 @@ export default function UsersScreen() {
     const items = usersQuery.data ?? [];
     const active = items.filter((item) => item.status === 1).length;
     const pendingFirstLogin = items.filter((item) => item.mustChangePassword === true).length;
-    return { all: items.length, active, disabled: items.length - active, pendingFirstLogin };
+    const noEmail = items.filter((item) => !hasDeliverableEmail(item.email)).length;
+    return { all: items.length, active, disabled: items.length - active, pendingFirstLogin, noEmail };
   }, [usersQuery.data]);
 
   const selectedUsers = useMemo(
@@ -745,6 +753,7 @@ export default function UsersScreen() {
                   { value: "active", label: t("filters.statusActiveCount", { count: statusCounts.active }) },
                   { value: "disabled", label: t("filters.statusDisabledCount", { count: statusCounts.disabled }) },
                   { value: "pendingFirstLogin", label: t("filters.statusPendingFirstLoginCount", { count: statusCounts.pendingFirstLogin }) },
+                  { value: "noEmail", label: t("filters.statusNoEmailCount", { count: statusCounts.noEmail }) },
                 ] as const).map((option) => (
                   <Chip
                     key={option.value}
@@ -889,33 +898,15 @@ export default function UsersScreen() {
           </Dialog.Actions>
         </Dialog>
 
-        <Dialog visible={resetPasswordVisible} onDismiss={closeResetPasswordDialog}>
-          <Dialog.Title>{t("dialogs.resetPasswordTitle")}</Dialog.Title>
-          <Dialog.Content style={styles.dialogContent}>
-            {hasDeliverableEmail(passwordUser?.email) ? (
-              <Text variant="bodyMedium">
-                {t("dialogs.resetPasswordEmailDescription", {
-                  username: passwordUser?.fullName || passwordUser?.username || "",
-                  email: passwordUser?.email ?? "",
-                })}
-              </Text>
-            ) : (
-              <Text variant="bodyMedium" style={styles.readOnlyHint}>{t("dialogs.resetPasswordNoEmail")}</Text>
-            )}
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={closeResetPasswordDialog} disabled={setupEmailMutation.isPending}>
-              {t("actions.cancel")}
-            </Button>
-            <Button
-              onPress={handleResetPassword}
-              loading={setupEmailMutation.isPending}
-              disabled={setupEmailMutation.isPending || !hasDeliverableEmail(passwordUser?.email)}
-            >
-              {t("actions.sendPasswordSetupEmail")}
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
+        <StaffPasswordSetupDialog
+          visible={resetPasswordVisible}
+          staffName={passwordUser?.fullName || passwordUser?.username || ""}
+          loginName={passwordUser?.username ?? ""}
+          email={passwordUser?.email}
+          pending={setupEmailMutation.isPending}
+          onDismiss={closeResetPasswordDialog}
+          onSubmit={(email) => void handleResetPassword(email)}
+        />
 
         <Dialog visible={Boolean(moreUser)} onDismiss={() => setMoreUser(null)}>
           <Dialog.Title>{moreUser?.fullName || moreUser?.username}</Dialog.Title>

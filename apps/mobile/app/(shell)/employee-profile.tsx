@@ -30,6 +30,7 @@ import {
   withdrawMySensitiveChangeRequestApi,
 } from "@/modules/employee-profile/api";
 import { AvatarEditorField } from "@/modules/employee-profile/AvatarEditorField";
+import { EmailBindingView } from "@/modules/employee-profile/email-binding-view";
 import { BirthdayPickerField } from "@/modules/employee-profile/BirthdayPickerField";
 import { calculateAge, normalizeBirthday, validateBirthday } from "@/modules/employee-profile/birthday";
 import {
@@ -72,7 +73,6 @@ import {
   getSensitiveStatusView,
   isEmailChangeValid,
   isSensitiveVersionConflict,
-  isValidEmail,
   refreshEmployeeProfileAfterIdentityMutation,
   selectSensitiveDraft,
   shouldRefreshSensitiveProfile,
@@ -97,6 +97,7 @@ import { resolveLocaleTag } from "@/shared/i18n/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { PERMISSIONS } from "@/shared/utils/access";
+import { getDisplayableEmail, hasDeliverableEmail } from "@/modules/users/staff-email-username";
 import { useAuthStore } from "@/store/auth-store";
 
 const PROFILE_BLUE = "#1256DB";
@@ -1000,7 +1001,9 @@ export default function EmployeeProfileScreen() {
             ? t("title")
             : view === "basic"
               ? t("edit.basicTitle")
-              : view === "progress" ? t("progress.title") : t("edit.sensitiveTitle")}
+              : view === "progress"
+                ? t("progress.title")
+                : view === "email" ? t("emailBinding.title") : t("edit.sensitiveTitle")}
         </Text>
         <View style={styles.headerSpacer} />
       </View>
@@ -1082,7 +1085,7 @@ export default function EmployeeProfileScreen() {
               </View>
               <View style={styles.summaryGrid}>
                 <ProfileSummaryRow inline icon="phone-outline" label={t("fields.phone")} value={formValues.phone || t("common:na")} />
-                <ProfileSummaryRow inline icon="email-outline" label={t("fields.email")} value={formValues.email || t("common:na")} />
+                <ProfileSummaryRow inline icon="email-outline" label={t("fields.email")} value={getDisplayableEmail(profileQuery.data?.email) || t("emailBinding.notSet")} />
                 <ProfileSummaryRow inline icon="account-outline" label={t("fields.gender")} value={formValues.gender ? t(`genderOptions.${formValues.gender}`, formValues.gender) : t("common:na")} />
                 {formValues.employmentType ? <ProfileSummaryRow inline icon="briefcase-outline" label={t("fields.employmentType")} value={t(`employmentTypeOptions.${formValues.employmentType}`, formValues.employmentType)} /> : null}
                 <ProfileSummaryRow inline icon="map-marker-outline" label={t("fields.address")} value={formValues.address || t("common:na")} isLast />
@@ -1137,6 +1140,14 @@ export default function EmployeeProfileScreen() {
                 <Text variant="titleMedium" style={styles.sectionTitle}>{t("security.title")}</Text>
                 {sessionKind === "account" ? (
                   <ProfileSummaryRow
+                    icon="email-check-outline"
+                    label={hasDeliverableEmail(profileQuery.data?.email) ? t("emailBinding.changeEntry") : t("emailBinding.bindEntry")}
+                    value={getDisplayableEmail(profileQuery.data?.email) || t("emailBinding.bindEntryHelper")}
+                    onPress={() => setView("email")}
+                  />
+                ) : null}
+                {sessionKind === "account" ? (
+                  <ProfileSummaryRow
                     icon="lock-reset"
                     label={t("security.changePassword")}
                     value={t("security.changePasswordHelper")}
@@ -1161,11 +1172,30 @@ export default function EmployeeProfileScreen() {
           </>
         ) : view === "progress" ? (
           renderProgressView()
+        ) : view === "email" ? (
+          <EmailBindingView
+            loginName={user?.username ?? ""}
+            currentEmail={profileQuery.data?.email}
+            onBound={(email) => {
+              setView("overview");
+              showMessage(t("emailBinding.bound", { email }));
+              void profileQuery.refetch();
+            }}
+            onCancel={() => setView("overview")}
+          />
         ) : view === "basic" ? (
           <Surface style={styles.card} elevation={0}>
             <Text variant="bodySmall" style={styles.editHint}>{t("edit.basicHint")}</Text>
             <TextInput mode="outlined" label={t("fields.phone")} value={formValues.phone} onChangeText={(value) => setFieldValue("phone", value)} keyboardType="phone-pad" />
-            <TextInput mode="outlined" label={t("fields.email")} value={formValues.email} onChangeText={(value) => setFieldValue("email", value)} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} maxLength={254} error={Boolean(formValues.email && !isValidEmail(formValues.email))} />
+            {/* 邮箱是找回密码的渠道：这里只读，更换须在「账户与安全 → 绑定邮箱」里验证新邮箱。 */}
+            <TextInput
+              mode="outlined"
+              label={t("fields.email")}
+              value={getDisplayableEmail(profileQuery.data?.email) || t("emailBinding.notSet")}
+              editable={false}
+              right={<TextInput.Icon icon="lock-outline" />}
+            />
+            <HelperText type="info" visible style={styles.readonlyHintText}>{t("emailBinding.basicHint")}</HelperText>
             {/* 生日属于敏感资料：这里只读，修改须到敏感资料提交审核。 */}
             <TextInput
               mode="outlined"

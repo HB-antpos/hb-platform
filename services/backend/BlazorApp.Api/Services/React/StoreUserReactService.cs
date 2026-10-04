@@ -431,6 +431,7 @@ namespace BlazorApp.Api.Services.React
                         return ApiResponse<StoreUserDetailDto>.Error("用户不存在", "USER_NOT_FOUND");
                     }
 
+                    var emailChanged = !string.Equals(user.Email?.Trim(), nextEmail, StringComparison.OrdinalIgnoreCase);
                     user.Username = nextUsername;
                     user.Email = nextEmail;
                     user.FullName = dto.FullName?.Trim();
@@ -438,6 +439,11 @@ namespace BlazorApp.Api.Services.React
                     user.UpdatedAt = now;
                     user.UpdatedBy = updatedBy;
                     await _db.Updateable(user).ExecuteCommandAsync();
+                    if (emailChanged)
+                    {
+                        // 邮箱换了，发往旧邮箱的设置密码验证码不能再用。
+                        await PasswordResetService.InvalidateOutstandingCodesAsync(_db, userGuid, now);
+                    }
                     await UpsertEmployeeProfilePhoneAsync(userGuid, dto.Phone, updatedBy, now);
                     // 关键逻辑：编辑只改账号资料，不动分店关联。LoadManagedUserAsync 已确认员工属于目标分店；
                     // 旧实现会硬删该员工全部分店关联再插回一条非主分店记录，导致多分店员工丢失其他分店和主分店标记。
@@ -713,12 +719,77 @@ namespace BlazorApp.Api.Services.React
                     return ApiResponse<PasswordSetupEmailResultDto>.Error("邮件服务未配置", "ACCOUNT_EMAIL_NOT_CONFIGURED");
                 }
 
+                if (!string.IsNullOrWhiteSpace(dto.Email))
+                {
+                    // 老账号补邮箱：先写入员工邮箱再发验证码，一步完成。验证码只发到这个邮箱，
+                    // 只有邮箱本人收得到、设得了密码，所以店长写入邮箱不需要另做验证。
+                    var saved = await SaveStaffEmailAsync(userGuid, dto.Email, requestedBy);
+                    if (saved != null)
+                    {
+                        return saved;
+                    }
+                }
+
                 return await _passwordResetService.SendInviteAsync(userGuid, requestedBy, null);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "发送店员设置密码邮件失败，UserGuid: {UserGuid}", userGuid);
                 return ApiResponse<PasswordSetupEmailResultDto>.Error("发送设置密码邮件失败", "SEND_PASSWORD_SETUP_EMAIL_FAILED");
+            }
+        }
+
+        /// <summary>写入店员邮箱（已通过范围与目标保护校验）；成功返回 null，失败返回错误响应。</summary>
+        private async Task<ApiResponse<PasswordSetupEmailResultDto>?> SaveStaffEmailAsync(
+            string userGuid,
+            string email,
+            string updatedBy
+        )
+        {
+            var normalized = AccountEmailChangeService.NormalizeTargetEmail(email);
+            if (normalized == null)
+            {
+                return ApiResponse<PasswordSetupEmailResultDto>.Error("请输入员工本人的有效邮箱", "INVALID_EMAIL");
+            }
+
+            var now = DateTime.UtcNow;
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                var user = await _db.Queryable<User>()
+                    .FirstAsync(item => item.UserGUID == userGuid && !item.IsDeleted);
+                if (user == null)
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    return ApiResponse<PasswordSetupEmailResultDto>.Error("用户不存在", "USER_NOT_FOUND");
+                }
+                if (string.Equals(user.Email?.Trim(), normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    // 邮箱没变：直接重发即可。
+                    await _db.Ado.RollbackTranAsync();
+                    return null;
+                }
+                var duplicate = await _db.Queryable<User>().AnyAsync(item =>
+                    item.UserGUID != userGuid && !item.IsDeleted && item.Email.ToLower() == normalized);
+                if (duplicate)
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    return ApiResponse<PasswordSetupEmailResultDto>.Error("该邮箱已被其他账号使用", "EMAIL_EXISTS");
+                }
+                await _db.Updateable<User>()
+                    .SetColumns(item => item.Email == normalized)
+                    .SetColumns(item => item.UpdatedAt == now)
+                    .SetColumns(item => item.UpdatedBy == updatedBy)
+                    .Where(item => item.UserGUID == userGuid && !item.IsDeleted)
+                    .ExecuteCommandAsync();
+                await PasswordResetService.InvalidateOutstandingCodesAsync(_db, userGuid, now);
+                await _db.Ado.CommitTranAsync();
+                return null;
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
             }
         }
 

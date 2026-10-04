@@ -1319,6 +1319,21 @@ export function registerIosReviewAppRoutes(
   register(transport, ["POST"], "/auth/logout", () => ({
     data: { success: true },
   }));
+  // 绑定 / 更换邮箱：审核模式不发邮件，任意 6 位验证码即通过，并写回演示个人资料。
+  register(transport, ["POST"], "/auth/email-change/request", ({ body }) => {
+    const email = String(asRecord(body).newEmail ?? "").trim().toLowerCase();
+    if (!email.includes("@")) throw new Error("IOS_REVIEW_EMAIL_REQUIRED");
+    return { data: { maskedEmail: maskReviewEmail(email), expiresAtUtc: state().now } };
+  });
+  register(transport, ["POST"], "/auth/email-change/confirm", ({ body }) => {
+    const record = asRecord(body);
+    const email = String(record.newEmail ?? "").trim().toLowerCase();
+    if (!email.includes("@") || !/^\d{6}$/.test(String(record.code ?? ""))) {
+      throw new Error("IOS_REVIEW_EMAIL_CODE_INVALID");
+    }
+    Object.assign(state().employeeProfile, { email, updatedAt: state().now });
+    return { data: { email } };
+  });
   register(transport, ["GET"], "/react/v1/preorders/active", ({ query }) => ({
     // iOS 审核离线数据不创建 Preorder，必须显式返回已解锁，避免 fail-closed 门禁锁死演示流程。
     data: {
@@ -4237,12 +4252,17 @@ function registerUserRoutes(
     transport,
     ["POST"],
     /^\/react\/v1\/store-users\/([^/]+)\/password-setup-email$/i,
-    ({ match }) => {
+    ({ match, body }) => {
       const id = decodeURIComponent(match?.[1] ?? "");
       const user = findByAnyId(state().users, id);
       if (!user) throw new Error(`IOS_REVIEW_USER_NOT_FOUND: ${id}`);
+      // 老账号补邮箱：与正式接口一致，先写入店长填写的邮箱再「发送」。
+      const suppliedEmail = String(asRecord(body).email ?? "").trim().toLowerCase();
+      if (suppliedEmail) {
+        Object.assign(user, { email: suppliedEmail, updatedAt: state().now });
+      }
       const email = String(user.email ?? "");
-      if (!email.includes("@")) throw new Error("IOS_REVIEW_USER_EMAIL_REQUIRED");
+      if (!email.includes("@") || email.endsWith(".store.local")) throw new Error("IOS_REVIEW_USER_EMAIL_REQUIRED");
       return { data: { maskedEmail: maskReviewEmail(email), expiresAtUtc: state().now } };
     },
   );

@@ -8,12 +8,10 @@ import {
   Button,
   Card,
   Chip,
-  Dialog,
   IconButton,
   Portal,
   Snackbar,
   Text,
-  TextInput,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WeeklyScheduleTable } from "@/components/attendance/WeeklyScheduleTable";
@@ -31,7 +29,8 @@ import { calculateAge, maskTrailingFour } from "@/modules/users/profile-display"
 import { getEmployeeProfileReviewAccess } from "@/modules/employee-profile-review/access";
 import { getEmployeeProfileReviewRequestsApi } from "@/modules/employee-profile-review/api";
 import { useAppNavigationStore } from "@/modules/navigation/store";
-import { hasDeliverableEmail } from "@/modules/users/staff-email-username";
+import { getDisplayableEmail, hasDeliverableEmail } from "@/modules/users/staff-email-username";
+import { StaffPasswordSetupDialog } from "@/modules/users/staff-password-setup-dialog";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
@@ -205,14 +204,15 @@ export default function StaffDetailScreen() {
     router.replace("/(shell)/users" as unknown as Parameters<typeof router.replace>[0]);
   }, [router]);
 
-  const handleResetPassword = useCallback(async () => {
+  const handleResetPassword = useCallback(async (email?: string) => {
     if (!userGuid || !storeCode) {
       return;
     }
 
     // 店长不再手动设新密码：给员工邮箱发验证码，员工在登录页自己设置。
+    // 老账号没有可用邮箱时，email 为店长就地补填的邮箱，后端先保存再发送。
     try {
-      const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode });
+      const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode, email });
       setResetPasswordVisible(false);
       setSnackbarMessage(t("messages.passwordSetupEmailSent", { email: result.maskedEmail }));
     } catch (error) {
@@ -588,7 +588,9 @@ export default function StaffDetailScreen() {
               emptyValue={emptyValue}
               icon="email-outline"
               label={t("detail.fields.email")}
-              value={profile?.email}
+              value={hasDeliverableEmail(profile?.email)
+                ? getDisplayableEmail(profile?.email)
+                : t("detail.emailNotSetCannotRecover")}
             />
             <DetailRow
               emptyValue={emptyValue}
@@ -901,39 +903,15 @@ export default function StaffDetailScreen() {
       </ScrollView>
 
       <Portal>
-        <Dialog
+        <StaffPasswordSetupDialog
           visible={resetPasswordVisible}
+          staffName={profile?.fullName || profile?.username || ""}
+          loginName={profile?.username ?? ""}
+          email={profile?.email}
+          pending={setupEmailMutation.isPending}
           onDismiss={() => setResetPasswordVisible(false)}
-        >
-          <Dialog.Title>{t("dialogs.resetPasswordTitle")}</Dialog.Title>
-          <Dialog.Content style={styles.dialogContent}>
-            {hasDeliverableEmail(profile?.email) ? (
-              <Text variant="bodyMedium">
-                {t("dialogs.resetPasswordEmailDescription", {
-                  username: profile?.fullName || profile?.username || "",
-                  email: profile?.email ?? "",
-                })}
-              </Text>
-            ) : (
-              <Text variant="bodyMedium" style={styles.muted}>{t("dialogs.resetPasswordNoEmail")}</Text>
-            )}
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button
-              onPress={() => setResetPasswordVisible(false)}
-              disabled={setupEmailMutation.isPending}
-            >
-              {t("actions.cancel")}
-            </Button>
-            <Button
-              onPress={handleResetPassword}
-              loading={setupEmailMutation.isPending}
-              disabled={setupEmailMutation.isPending || !hasDeliverableEmail(profile?.email)}
-            >
-              {t("actions.sendPasswordSetupEmail")}
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
+          onSubmit={(email) => void handleResetPassword(email)}
+        />
       </Portal>
 
       <Snackbar
@@ -977,9 +955,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: HB_SPACING.sm,
-  },
-  dialogContent: {
-    gap: 12,
   },
   heroAvatar: {
     backgroundColor: HB_COLORS.action,

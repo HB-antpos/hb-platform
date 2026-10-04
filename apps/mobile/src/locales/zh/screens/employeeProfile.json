@@ -253,5 +253,34 @@
     "historyEmpty": "暂无更早的申请。",
     "historyLoadFailed": "加载历史申请失败。",
     "emptyDescription": "还没有提交过敏感资料修改申请。"
+  },
+  "emailBinding": {
+    "title": "绑定邮箱",
+    "bindEntry": "绑定邮箱",
+    "changeEntry": "更换邮箱",
+    "bindEntryHelper": "未设置 · 绑定后可在登录页找回密码",
+    "notSet": "未设置",
+    "basicHint": "邮箱用于找回密码，请在「账户与安全 → 绑定邮箱」中验证后更换。",
+    "stepEmail": "填写新邮箱",
+    "stepVerify": "验证",
+    "stepLabel": "第 {{step}} 步，共 2 步",
+    "loginName": "登录名",
+    "currentEmail": "当前邮箱",
+    "newEmail": "新邮箱",
+    "changeEmail": "修改邮箱",
+    "code": "6 位验证码",
+    "codeSent": "已发送到 {{email}}，30 分钟内有效",
+    "resend": "重新发送",
+    "resendIn": "{{seconds}} 秒后重发",
+    "notice": "验证通过后才会换成新邮箱，没验证前旧邮箱照常可用。以后忘记密码，可以在登录页用新邮箱找回，登录名不变。",
+    "sendCode": "发送验证码",
+    "submit": "验证并绑定",
+    "bound": "邮箱已绑定：{{email}}",
+    "errors": {
+      "email": "请输入你本人能收信的邮箱",
+      "same": "新邮箱与当前邮箱相同",
+      "sendFailed": "验证码发送失败，请稍后重试",
+      "confirmFailed": "绑定失败，请检查验证码后重试"
+    }
   }
 }

@@ -111,6 +111,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyUserPasswordResetCodeAsync(CancellationToken cancellationToken);
 
+    Task ApplyUserPasswordResetCodeTargetEmailAsync(CancellationToken cancellationToken);
+
+    Task VerifyUserPasswordResetCodeTargetEmailAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -641,6 +645,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             UserPasswordResetCodeSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyUserPasswordResetCodeTargetEmailAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPasswordResetCodeTargetEmailSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 列签名通过后协调器才登记账本。
+        await VerifyUserPasswordResetCodeTargetEmailAsync(cancellationToken);
+    }
+
+    public async Task VerifyUserPasswordResetCodeTargetEmailAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserPasswordResetCodeTargetEmailSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
