@@ -54,6 +54,8 @@ export interface LoginTrace {
   errorCode?: string;
   errorMessage?: string;
   httpStatus?: number;
+  /** 服务端以 HTTP 200 + success:false 明确拒绝（如密码错误），拦截器解包后没有 HTTP 状态码。 */
+  apiBusinessError?: boolean;
   menuTimedOut?: boolean;
   totalMs?: number;
 }
@@ -130,23 +132,26 @@ export function finishLoginTrace(
   const finished: LoginTrace = { ...trace, outcome, totalMs: nowMs - trace.startedAtMs };
   if (outcome === "success") return finished;
 
-  const record = (error ?? {}) as { code?: unknown; message?: unknown; stage?: unknown };
+  const record = (error ?? {}) as { code?: unknown; message?: unknown; stage?: unknown; apiBusinessError?: unknown };
   return {
     ...finished,
     failedStage: error instanceof LoginStepTimeoutError ? error.stage : undefined,
     errorCode: typeof record.code === "string" ? record.code : undefined,
     errorMessage: typeof record.message === "string" ? record.message.slice(0, 300) : undefined,
     httpStatus: readHttpStatus(error),
+    apiBusinessError: record.apiBusinessError === true ? true : undefined,
   };
 }
 
-/** 账号原因（登录接口返回 4xx，如密码错误、账号停用）属于正常业务失败，不上传。 */
+/**
+ * 账号原因（如密码错误、账号停用）属于正常业务失败，不上传。
+ * 登录接口的拒绝有两种形状：HTTP 4xx，或 HTTP 200 + success:false（生产的密码错误即此种）。
+ * 只认登录接口这一步：登录成功之后的步骤再出业务失败，不是账号原因，仍要上传。
+ */
 function isCredentialRejection(trace: LoginTrace) {
-  return trace.outcome === "failed"
-    && !trace.stages.some((stage) => stage.stage === "loginApi")
-    && trace.httpStatus !== undefined
-    && trace.httpStatus >= 400
-    && trace.httpStatus < 500;
+  if (trace.outcome !== "failed" || trace.stages.some((stage) => stage.stage === "loginApi")) return false;
+  if (trace.apiBusinessError) return true;
+  return trace.httpStatus !== undefined && trace.httpStatus >= 400 && trace.httpStatus < 500;
 }
 
 /**
