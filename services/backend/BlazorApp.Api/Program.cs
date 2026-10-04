@@ -437,6 +437,7 @@ builder.Services.AddRateLimiter(MobileDeviceActivationRateLimits.Configure);
 // 浏览器扩展一次性授权按父会话限流，匿名兑换按可信客户端 IP 限流。
 builder.Services.AddRateLimiter(BrowserExtensionSessionGrantRateLimits.Configure);
 builder.Services.AddRateLimiter(RustDeskLoginRateLimits.Configure);
+builder.Services.AddRateLimiter(MinorGuardianRateLimits.Configure);
 builder.Services.AddRateLimiter(BrowserExtensionCaptureRateLimits.Configure);
 
 // --------------------- JWT认证配置 ---------------------
@@ -751,6 +752,8 @@ builder.Services.AddScoped<IEmployeeProfileService, EmployeeProfileService>(); /
 builder.Services.AddScoped<EmployeeMinorComplianceService>(); // 未成年用工档案、家长签署和 HR 审核
 builder.Services.AddScoped<MinorEmploymentReminderService>(); // 经理待办只记录提醒，不阻断排班或打卡
 builder.Services.AddScoped<IEmployeeMinorDocumentStore, CosEmployeeMinorDocumentStore>();
+builder.Services.Configure<MinorEmploymentOptions>(builder.Configuration.GetSection(MinorEmploymentOptions.SectionName));
+builder.Services.AddScoped<IMinorGuardianEmailSender, MinorGuardianEmailSender>(); // 监护人签署链接与验证码邮件，复用发票邮箱的公司 SMTP 账号
 builder.Services.AddHttpClient("minor-employment-documents");
 builder.Services.AddScoped<EmployeeProfileSensitiveChangeService>();
 builder.Services.AddScoped<EmployeeProfileMediaService>();

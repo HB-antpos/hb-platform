@@ -21,6 +21,7 @@ import {
   emptyDraft,
   type MinorContact,
   type MinorEmploymentDraft,
+  type MinorGuardianInviteResult,
   type MinorOtherEmployer,
 } from "./types";
 const days = [
@@ -62,10 +63,19 @@ export function MinorEmploymentScreen() {
   const [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState("");
   const [link, setLink] = useState("");
+  const [inviteResult, setInviteResult] =
+    useState<MinorGuardianInviteResult | null>(null);
   const [dirty, setDirty] = useState(false);
+  // 店长发来的填写请求，用于页面顶部提示。
+  const requests = useQuery({
+    queryKey: ["minorEmployment", "me", "requests", actor] as const,
+    queryFn: minorEmploymentApi.getMyRequests,
+    staleTime: 30_000,
+  });
   useEffect(() => {
     setDraft(emptyDraft());
     setLink("");
+    setInviteResult(null);
     setError("");
     setDirty(false);
   }, [actor]);
@@ -94,8 +104,9 @@ export function MinorEmploymentScreen() {
     },
     onError: (error) => setError(`保存失败：${serverMessage(error)}`),
   });
+  // 发起签署：先保存草稿（等待签署中再发起会生成新版本、旧链接作废），再由后端发邮件或返回转发链接。
   const invite = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (deliverByEmail: boolean) => {
       const saved = await minorEmploymentApi.saveDraft({
         ...draft,
         version: query.data?.version,
@@ -104,20 +115,31 @@ export function MinorEmploymentScreen() {
       qc.setQueryData(key, saved);
       setDraft(saved);
       setDirty(false);
-      return minorEmploymentApi.inviteParent(saved.version, saved.revision);
+      return minorEmploymentApi.inviteParent(
+        saved.version,
+        saved.revision,
+        deliverByEmail,
+      );
     },
     onSuccess: async (x) => {
-      const raw = x.signingUrl ?? x.SigningUrl ?? "";
-      const host = await getStoredApiHost();
-      setLink(
-        /^https?:\/\//i.test(raw)
-          ? raw
-          : `https://${host}${raw.startsWith("/") ? raw : `/${raw}`}`,
-      );
+      setInviteResult(x);
+      setError("");
+      const raw = x.signingUrl ?? "";
+      if (raw) {
+        const host = await getStoredApiHost();
+        setLink(
+          /^https?:\/\//i.test(raw)
+            ? raw
+            : `https://${host}${raw.startsWith("/") ? raw : `/${raw}`}`,
+        );
+      } else {
+        // 邮件已直达监护人，员工手机上不保留链接。
+        setLink("");
+      }
       await qc.invalidateQueries({ queryKey: key });
       await query.refetch();
     },
-    onError: (error) => setError(`生成链接失败：${serverMessage(error)}`),
+    onError: (error) => setError(`发起签署失败：${serverMessage(error)}`),
   });
   const submit = useMutation({
     mutationFn: () => minorEmploymentApi.submit(query.data?.version ?? 0),
@@ -127,6 +149,18 @@ export function MinorEmploymentScreen() {
     },
     onError: (error) => setError(`提交失败：${serverMessage(error)}`),
   });
+  const validateBeforeInvite = () => {
+    if (
+      !draft.parentPhone.trim() ||
+      !draft.parentEmail.trim() ||
+      !draft.emergencyContact.fullName.trim() ||
+      !draft.emergencyContact.phone.trim()
+    ) {
+      setError("签署前必须填写家长电话、邮箱及一名完整备用联系人");
+      return false;
+    }
+    return true;
+  };
   const set = (patch: Partial<MinorEmploymentDraft>) => {
     setDirty(true);
     setDraft((d) => ({ ...d, ...patch }));
@@ -187,6 +221,20 @@ export function MinorEmploymentScreen() {
           完整填写 CE1 / NSW
           企业同意书资料。草稿可保存不完整，家长电话和邮箱在签署前必填。
         </Text>
+        {(requests.data ?? []).map((request) => (
+          <Surface key={request.id} style={styles.requestBanner} elevation={0}>
+            <Text variant="titleSmall" style={styles.requestTitle}>
+              {request.requestedByName
+                ? `${request.requestedByName} 请你填写未成年用工资料`
+                : "店长请你填写未成年用工资料"}
+            </Text>
+            {request.note ? <Text>{request.note}</Text> : null}
+            <Text style={styles.muted}>
+              填好后发送签署邮件给监护人，监护人签字后再提交 HR
+              审核，这条待办会自动完成。
+            </Text>
+          </Surface>
+        ))}
         {query.data ? (
           <View style={styles.rowBetween}>
             <Text style={styles.status}>
@@ -844,34 +892,77 @@ export function MinorEmploymentScreen() {
         >
           保存草稿
         </Button>
+        {query.data?.status === "AwaitingParentSignature" ? (
+          <Surface style={styles.info} elevation={0}>
+            <Text variant="titleMedium">等待监护人签署</Text>
+            <Text>
+              {query.data.guardianInviteChannel === "email"
+                ? query.data.guardianInviteEmailSentAt
+                  ? "签署邮件已发送到监护人邮箱。"
+                  : "签署邮件未能发出，请改为转发链接或重新发送。"
+                : "已生成转发链接，请发给监护人。"}
+            </Text>
+            <Text style={styles.muted}>
+              {query.data.guardianEmailVerifiedAt
+                ? "监护人已打开链接并通过邮箱验证码核验，等待签字。"
+                : "监护人打开链接后，需要输入发到其邮箱的验证码才能查看和签署。"}
+            </Text>
+            {!query.data.guardianLinkActive ? (
+              <HelperText type="error">链接已过期，请重新发送。</HelperText>
+            ) : null}
+          </Surface>
+        ) : null}
         {!locked &&
         (!query.data ||
           query.data.status === "Draft" ||
           query.data.status === "Returned" ||
-          query.data.status === "Signed") ? (
+          query.data.status === "Signed" ||
+          query.data.status === "AwaitingParentSignature") ? (
           <>
             <Button
               mode="contained"
+              icon="email-fast-outline"
               onPress={() => {
-                if (
-                  !draft.parentPhone.trim() ||
-                  !draft.parentEmail.trim() ||
-                  !draft.emergencyContact.fullName.trim() ||
-                  !draft.emergencyContact.phone.trim()
-                ) {
-                  setError("签署前必须填写家长电话、邮箱及一名完整备用联系人");
-                  return;
-                }
-                invite.mutate();
+                if (!validateBeforeInvite()) return;
+                invite.mutate(true);
               }}
-              loading={invite.isPending}
+              loading={invite.isPending && invite.variables === true}
               disabled={invite.isPending || save.isPending}
             >
-              生成家长独立签署链接
+              {query.data?.status === "AwaitingParentSignature"
+                ? "重新发送签署邮件（旧链接作废）"
+                : "发送签署邮件给监护人"}
             </Button>
+            <Button
+              mode="text"
+              icon="share-variant"
+              onPress={() => {
+                if (!validateBeforeInvite()) return;
+                invite.mutate(false);
+              }}
+              loading={invite.isPending && invite.variables === false}
+              disabled={invite.isPending || save.isPending}
+            >
+              监护人收不到邮件？改为转发链接
+            </Button>
+            {inviteResult?.emailSent ? (
+              <HelperText type="info">
+                {`签署邮件已发送到 ${inviteResult.maskedGuardianEmail ?? "监护人邮箱"}。请提醒监护人查收（可能在垃圾邮件里），打开链接后会再收到一封验证码邮件。`}
+              </HelperText>
+            ) : null}
+            {inviteResult &&
+            !inviteResult.emailSent &&
+            inviteResult.emailError ? (
+              <HelperText type="error">
+                {`邮件发送失败：${inviteResult.emailError}。可以把下面的链接转发给监护人。`}
+              </HelperText>
+            ) : null}
             {link ? (
               <>
                 <Text selectable>{link}</Text>
+                <Text style={styles.muted}>
+                  监护人打开后仍需输入发到其邮箱的验证码，只有监护人本人能完成签署。
+                </Text>
                 <Button
                   icon="share-variant"
                   onPress={() => void Share.share({ message: link })}
@@ -1030,6 +1121,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   line: { gap: 4 },
+  // 店长请求提示：浅黄底 + 警示色标题，与提醒类卡片保持一致。
+  requestBanner: {
+    padding: HB_SPACING.sm,
+    gap: 4,
+    backgroundColor: "#FFFAEB",
+    borderRadius: 10,
+  },
+  requestTitle: { color: HB_COLORS.warning },
   muted: { color: "#667085" },
   status: { color: "#1677FF" },
   rowBetween: {

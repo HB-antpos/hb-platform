@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mapProfile, mapSummary, toPayload } from "./contract";
+import {
+  mapCandidate,
+  mapInviteResult,
+  mapProfile,
+  mapSummary,
+  toPayload,
+} from "./contract";
 
 const fixture = {
   Id: 42,
@@ -81,4 +87,49 @@ assert.equal(payload.schoolCalendar.weeklySchedule[0]?.startLocalTime, "09:00");
 assert.equal(payload.otherWork.employers[0]?.weeklyHours.Tuesday, 3);
 assert.equal(payload.contacts[1]?.address, null);
 assert.equal(mapSummary(fixture).state, "NSW");
+// 邮件直发与验证状态字段（后端 PascalCase）。
+const signing = mapProfile({
+  ...fixture,
+  Status: "awaiting_guardian_signature",
+  GuardianInviteChannel: "Email",
+  GuardianInviteEmailSentAtUtc: "2026-10-04T01:00:00Z",
+  GuardianEmailVerifiedAtUtc: "2026-10-04T02:00:00Z",
+  GuardianTokenActive: true,
+});
+assert.equal(signing.status, "AwaitingParentSignature");
+assert.equal(signing.guardianInviteChannel, "email");
+assert.equal(signing.guardianEmailVerifiedAt, "2026-10-04T02:00:00Z");
+assert.equal(signing.guardianLinkActive, true);
+assert.equal(mapProfile(fixture).guardianLinkActive, false);
+// 邮件已发：不回传链接；失败：带回链接与原因。
+const emailed = mapInviteResult({
+  Version: 2,
+  DeliveryChannel: "email",
+  EmailSent: true,
+  MaskedGuardianEmail: "p***@example.com",
+  SigningUrl: "",
+});
+assert.equal(emailed.emailSent, true);
+assert.equal(emailed.signingUrl, undefined);
+assert.equal(emailed.maskedGuardianEmail, "p***@example.com");
+const failed = mapInviteResult({
+  deliveryChannel: "email",
+  emailSent: false,
+  emailError: "邮件发送失败",
+  signingUrl: "https://hotbargain.vip/minor-employment/sign#token=abc",
+});
+assert.equal(failed.emailSent, false);
+assert.equal(failed.emailError, "邮件发送失败");
+assert.ok(failed.signingUrl?.includes("#token="));
+const candidate = mapCandidate({
+  UserGUID: "u1",
+  EmployeeName: "Teen",
+  Age: 15,
+  ComplianceStatus: "draft",
+  OpenRequest: { Id: 7, UserGUID: "u1", Status: "open", Note: "本周内" },
+});
+assert.equal(candidate.age, 15);
+assert.equal(candidate.openRequest?.id, 7);
+assert.equal(candidate.openRequest?.status, "open");
+assert.equal(mapCandidate({ UserGUID: "u2", Age: 16 }).openRequest, undefined);
 console.log("minor employment API contract mapping passed");

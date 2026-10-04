@@ -1,6 +1,7 @@
 using System.Globalization;
 using iTextSharp.text;
 using iTextSharp.text.pdf;
+using BlazorApp.Api.Services.Pdf;
 
 namespace BlazorApp.Api.Services;
 
@@ -32,7 +33,8 @@ public static partial class EmployeeMinorComplianceDocumentBuilder
         {
             stamper.Writer.CloseStream = false;
             var font = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED);
-            var cjkFont = BaseFont.CreateFont("STSong-Light", "UniGB-UCS2-H", BaseFont.NOT_EMBEDDED);
+            // 中文字体统一经 PdfCjkFontProvider 取，避免冷启动并发首次创建时的重复键异常。
+            var cjkFont = PdfCjkFontProvider.SimplifiedChinese;
             stamper.AcroFields.AddSubstitutionFont(cjkFont);
             foreach (var field in input.Ce1Fields)
             {
@@ -108,7 +110,7 @@ public static partial class EmployeeMinorComplianceDocumentBuilder
             writer.CloseStream = false;
             document.Open();
             var latin = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED);
-            var cjk = BaseFont.CreateFont("STSong-Light", "UniGB-UCS2-H", BaseFont.NOT_EMBEDDED);
+            var cjk = PdfCjkFontProvider.SimplifiedChinese;
             var bodyFont = new Font(latin, 9);
             var selector = new FontSelector();
             selector.AddFont(bodyFont);

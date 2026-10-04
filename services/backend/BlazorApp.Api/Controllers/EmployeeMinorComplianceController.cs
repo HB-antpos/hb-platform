@@ -4,6 +4,7 @@ using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace BlazorApp.Api.Controllers;
 
@@ -14,7 +15,8 @@ namespace BlazorApp.Api.Controllers;
 public sealed class EmployeeMinorComplianceController : ControllerBase
 {
     private readonly EmployeeMinorComplianceService _service;
-    public EmployeeMinorComplianceController(EmployeeMinorComplianceService service) => _service = service;
+    private readonly IClientIpResolver? _clientIp;
+    public EmployeeMinorComplianceController(EmployeeMinorComplianceService service, IClientIpResolver? clientIp = null) { _service = service; _clientIp = clientIp; }
 
     [HttpGet("me")]
     [Authorize(Policy = Permissions.EmployeeProfiles.View)]
@@ -36,24 +38,76 @@ public sealed class EmployeeMinorComplianceController : ControllerBase
     [Authorize(Policy = Permissions.EmployeeProfiles.View)]
     public Task<ApiResponse<List<EmployeeMinorComplianceHistoryItemDto>>> SelfHistory() => _service.GetSelfHistoryAsync();
 
+    /// <summary>员工本人未完成的店长填写请求。</summary>
+    [HttpGet("me/requests")]
+    [Authorize(Policy = Permissions.EmployeeProfiles.View)]
+    public Task<ApiResponse<List<EmployeeMinorComplianceRequestDto>>> SelfRequests() => _service.GetSelfRequestsAsync();
+
+    // 店长端：沿用排班提醒待办的权限口径（查看门店排班 / 编辑可管理门店排班），门店范围由服务按可管理门店校验。
+    [HttpGet("manager/candidates")]
+    [Authorize(Policy = Permissions.Attendance.Schedule.ViewStore)]
+    public Task<ApiResponse<List<EmployeeMinorManagerCandidateDto>>> ManagerCandidates([FromQuery] string? storeCode) => _service.GetManagerCandidatesAsync(storeCode);
+
+    [HttpPost("manager/requests")]
+    [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+    public Task<ApiResponse<EmployeeMinorComplianceRequestDto>> CreateRequest([FromBody] EmployeeMinorComplianceRequestCreateDto dto) => _service.CreateRequestAsync(dto);
+
+    [HttpPost("manager/requests/{id:int}/cancel")]
+    [Authorize(Policy = Permissions.Attendance.Schedule.EditManagedStore)]
+    public Task<ApiResponse<EmployeeMinorComplianceRequestDto>> CancelRequest(int id) => _service.CancelRequestAsync(id);
+
+    [HttpPost("guardian/session")]
+    [AllowAnonymous]
+    [EnableRateLimiting(MinorGuardianRateLimits.PolicyName)]
+    public async Task<ApiResponse<EmployeeMinorComplianceGuardianSessionDto>> GuardianSession([FromBody] EmployeeMinorComplianceGuardianPreviewDto request)
+    {
+        NoStore();
+        return await _service.GetGuardianSessionAsync(request.Token, request.SessionKey);
+    }
+
+    [HttpPost("guardian/send-code")]
+    [AllowAnonymous]
+    [EnableRateLimiting(MinorGuardianRateLimits.PolicyName)]
+    public async Task<ApiResponse<EmployeeMinorComplianceGuardianSessionDto>> GuardianSendCode([FromBody] EmployeeMinorComplianceGuardianPreviewDto request)
+    {
+        NoStore();
+        return await _service.SendGuardianCodeAsync(request.Token);
+    }
+
+    [HttpPost("guardian/verify")]
+    [AllowAnonymous]
+    [EnableRateLimiting(MinorGuardianRateLimits.PolicyName)]
+    public async Task<ApiResponse<string>> GuardianVerify([FromBody] EmployeeMinorComplianceGuardianVerifyDto request)
+    {
+        NoStore();
+        return await _service.VerifyGuardianCodeAsync(request.Token, request.Code);
+    }
+
     [HttpPost("guardian/preview")]
     [AllowAnonymous]
+    [EnableRateLimiting(MinorGuardianRateLimits.PolicyName)]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public async Task<ApiResponse<EmployeeMinorComplianceDto>> GetGuardian([FromBody] EmployeeMinorComplianceGuardianPreviewDto request)
     {
-        Response.Headers.CacheControl = "no-store";
-        Response.Headers["Referrer-Policy"] = "no-referrer";
-        return await _service.GetGuardianAsync(request.Token);
+        NoStore();
+        return await _service.GetGuardianAsync(request.Token, request.SessionKey);
     }
 
     [HttpPost("guardian/sign")]
     [AllowAnonymous]
+    [EnableRateLimiting(MinorGuardianRateLimits.PolicyName)]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public async Task<ApiResponse<EmployeeMinorComplianceDto>> SignGuardian([FromBody] EmployeeMinorComplianceGuardianSignRequestDto request)
     {
+        NoStore();
+        var ip = _clientIp?.Resolve(HttpContext) ?? HttpContext.Connection.RemoteIpAddress?.ToString();
+        return await _service.SignGuardianAsync(request.Token, request.ToSignDto(), request.SessionKey, ip, Request.Headers.UserAgent.ToString());
+    }
+
+    private void NoStore()
+    {
         Response.Headers.CacheControl = "no-store";
         Response.Headers["Referrer-Policy"] = "no-referrer";
-        return await _service.SignGuardianAsync(request.Token, request.ToSignDto());
     }
 
     [HttpGet("hr")]

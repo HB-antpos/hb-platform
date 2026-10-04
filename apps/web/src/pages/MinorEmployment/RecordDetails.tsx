@@ -1,4 +1,5 @@
 import { Card, Descriptions, Typography } from 'antd'
+
 import { MeasuredTable } from '../../components/MeasuredTable'
 
 type RecordValue = Record<string, unknown>
@@ -9,7 +10,7 @@ const array = (value: unknown): RecordValue[] => Array.isArray(value) ? value.ma
 const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const dayKeys = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 function dayLabel(value: unknown) { const index = typeof value === 'number' ? value : dayKeys.indexOf(String(value)); return days[index] ?? text(value) }
-function Fields({ source, fields }: { source: RecordValue; fields: Array<[string, string]> }) {
+function Fields({ source, fields }: { source: RecordValue; fields: [string, string][] }) {
   return <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }} items={fields.map(([key, label]) => ({ key, label, children: text(get(source, key)) }))} />
 }
 function Ranges({ title, value }: { title: string; value: unknown }) {

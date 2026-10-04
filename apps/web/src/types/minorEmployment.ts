@@ -120,6 +120,16 @@ export interface ParentSignatureDocument {
   revision: number
 }
 
+/** 监护人邮箱验证会话：验证前只返回打码邮箱与验证码发送节奏。 */
+export interface GuardianSession {
+  maskedGuardianEmail: string
+  emailVerified: boolean
+  codeSentAt?: string
+  codeExpiresAt?: string
+  resendAvailableAt?: string
+  remainingSends: number
+}
+
 export interface ParentSignatureSubmit {
   version: number
   consentScope: string

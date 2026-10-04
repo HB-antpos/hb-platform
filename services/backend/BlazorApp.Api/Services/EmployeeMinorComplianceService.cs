@@ -9,6 +9,7 @@ using BlazorApp.Api.Services.Attendance;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
+using Microsoft.Extensions.Options;
 using SqlSugar;
 
 namespace BlazorApp.Api.Services;
@@ -22,6 +23,13 @@ public sealed class EmployeeMinorComplianceService
     public const string ServerConsentScope = "I consent to the employer collecting and using this signed minor employment record for lawful employment administration, safety and roster risk reminders.";
     public const string VersionConflictCode = "MINOR_COMPLIANCE_VERSION_CONFLICT";
     public const string InvalidGuardianContactCode = "MINOR_COMPLIANCE_GUARDIAN_CONTACT_REQUIRED";
+    public const string GuardianNotVerifiedCode = "GUARDIAN_EMAIL_NOT_VERIFIED";
+    // 监护人邮箱验证码：10 分钟有效、同一链接最多发 5 次、两次间隔 60 秒、错 5 次作废需重发；验证后会话 2 小时。
+    internal const int GuardianCodeTtlMinutes = 10;
+    internal const int GuardianCodeMaxSends = 5;
+    internal const int GuardianCodeResendSeconds = 60;
+    internal const int GuardianCodeMaxFailures = 5;
+    internal const int GuardianSessionHours = 2;
     private static readonly Regex PhonePattern = new(@"^[0-9+() .-]{6,30}$", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SqlSugarContext _context;
@@ -29,9 +37,11 @@ public sealed class EmployeeMinorComplianceService
     private readonly ICurrentUserManageableStoreScopeService _storeScope;
     private readonly ILogger<EmployeeMinorComplianceService> _logger;
     private readonly IEmployeeMinorDocumentStore? _storage;
+    private readonly IMinorGuardianEmailSender? _emailSender;
+    private readonly MinorEmploymentOptions _options;
 
-    public EmployeeMinorComplianceService(SqlSugarContext context, ICurrentUserService currentUser, ILogger<EmployeeMinorComplianceService> logger, ICurrentUserManageableStoreScopeService storeScope, IEmployeeMinorDocumentStore? storage = null)
-    { _context = context; _currentUser = currentUser; _logger = logger; _storeScope = storeScope; _storage = storage; }
+    public EmployeeMinorComplianceService(SqlSugarContext context, ICurrentUserService currentUser, ILogger<EmployeeMinorComplianceService> logger, ICurrentUserManageableStoreScopeService storeScope, IEmployeeMinorDocumentStore? storage = null, IMinorGuardianEmailSender? emailSender = null, IOptions<MinorEmploymentOptions>? options = null)
+    { _context = context; _currentUser = currentUser; _logger = logger; _storeScope = storeScope; _storage = storage; _emailSender = emailSender; _options = options?.Value ?? new MinorEmploymentOptions(); }
 
     public async Task<ApiResponse<EmployeeMinorComplianceDto?>> GetSelfAsync()
     {
@@ -119,23 +129,56 @@ public sealed class EmployeeMinorComplianceService
         row.GuardianTokenExpiresAtUtc = DateTime.UtcNow.AddMinutes(Math.Clamp(dto.ExpiryMinutes, 5, 60 * 24 * 7));
         row.GuardianTokenUsed = false;
         row.Status = "awaiting_guardian_signature";
+        row.GuardianInviteChannel = dto.DeliverByEmail ? "email" : "share";
+        row.GuardianInviteEmailSentAtUtc = null;
+        ResetGuardianVerification(row);
         var inviteTransaction = await _context.Db.Ado.UseTranAsync(async () =>
         {
             var inviteAffected = await _context.Db.Updateable(row).Where(x => x.Id == row.Id && x.Version == dto.Version && x.Revision == dto.Revision && x.Status == "draft").ExecuteCommandAsync();
             if (inviteAffected != 1) throw new InvalidOperationException(VersionConflictCode);
-            await AuditAsync(row.Id, "guardian_invite_created", new { expiresAtUtc = row.GuardianTokenExpiresAtUtc });
+            await AuditAsync(row.Id, "guardian_invite_created", new { expiresAtUtc = row.GuardianTokenExpiresAtUtc, channel = row.GuardianInviteChannel });
         });
         if (!inviteTransaction.IsSuccess) return ApiResponse<EmployeeMinorComplianceInviteResultDto>.Error("档案版本或状态已变化，请刷新后重试", VersionConflictCode);
-        // 仅返回可由调用方交给邮件/SMS 通道的链接；本服务不会发送真实消息。
-        return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(new()
-        { Id = row.Id, Version = row.Version, Revision = row.Revision, SigningUrl = $"/minor-employment/sign#token={raw}", ExpiresAtUtc = row.GuardianTokenExpiresAtUtc.Value });
+        var signingUrl = BuildSigningUrl(raw);
+        var result = new EmployeeMinorComplianceInviteResultDto
+        {
+            Id = row.Id, Version = row.Version, Revision = row.Revision, ExpiresAtUtc = row.GuardianTokenExpiresAtUtc.Value,
+            DeliveryChannel = row.GuardianInviteChannel, MaskedGuardianEmail = MaskEmail(row.GuardianEmail),
+        };
+        if (!dto.DeliverByEmail)
+        {
+            // 备用方式：员工自己转发链接。监护人打开后仍须用发到监护人邮箱的验证码核验，员工拿到链接也无法代签。
+            result.SigningUrl = signingUrl;
+            return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(result);
+        }
+        var send = _emailSender is null
+            ? ApiResponse<bool>.Error("邮件服务未配置", "GUARDIAN_EMAIL_NOT_CONFIGURED")
+            : await _emailSender.SendSigningLinkAsync(row.GuardianEmail!, row.GuardianName, ChildDisplayName(row), signingUrl, row.GuardianTokenExpiresAtUtc.Value);
+        if (send.Success)
+        {
+            // 邮件已直达监护人，不再把链接回传到员工手机。
+            var sentAt = DateTime.UtcNow;
+            await _context.Db.Updateable<EmployeeMinorCompliance>()
+                .SetColumns(x => x.GuardianInviteEmailSentAtUtc == sentAt)
+                .Where(x => x.Id == row.Id && x.GuardianTokenHash == row.GuardianTokenHash)
+                .ExecuteCommandAsync();
+            await AuditAsync(row.Id, "guardian_invite_emailed", new { to = result.MaskedGuardianEmail });
+            result.EmailSent = true;
+            return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(result, "签署链接已发送到监护人邮箱");
+        }
+        // 发信失败不回滚邀请：链接照样有效，回传给员工转发，验证码仍发到监护人邮箱。
+        await AuditAsync(row.Id, "guardian_invite_email_failed", new { send.ErrorCode });
+        result.SigningUrl = signingUrl;
+        result.EmailError = send.Message;
+        return ApiResponse<EmployeeMinorComplianceInviteResultDto>.OK(result, "邮件发送失败，可改为转发链接给监护人");
     }
 
-    public async Task<ApiResponse<EmployeeMinorComplianceDto>> SignGuardianAsync(string token, EmployeeMinorComplianceGuardianSignDto dto)
+    public async Task<ApiResponse<EmployeeMinorComplianceDto>> SignGuardianAsync(string token, EmployeeMinorComplianceGuardianSignDto dto, string? sessionKey = null, string? clientIp = null, string? userAgent = null)
     {
         var row = await _context.Db.Queryable<EmployeeMinorCompliance>()
             .Where(x => !x.IsDeleted && x.GuardianTokenHash == Hash(token) && !x.GuardianTokenUsed).FirstAsync();
         if (row is null || row.GuardianTokenExpiresAtUtc < DateTime.UtcNow) return ApiResponse<EmployeeMinorComplianceDto>.Error("签署链接无效或已过期", "GUARDIAN_TOKEN_INVALID");
+        if (!IsGuardianSessionValid(row, sessionKey)) return ApiResponse<EmployeeMinorComplianceDto>.Error("请先用发到监护人邮箱的验证码完成验证", GuardianNotVerifiedCode);
         var contactError = ValidateGuardianContact(row);
         if (contactError is not null) return ApiResponse<EmployeeMinorComplianceDto>.Error(contactError, InvalidGuardianContactCode);
         var backupError = await ValidateBackupContactsAsync(row);
@@ -150,6 +193,9 @@ public sealed class EmployeeMinorComplianceService
         row.GuardianSignatureHash = Hash($"{row.Id}:{row.Version}:{row.GuardianSignedName}:{dto.SignatureData}:{dto.ConsentScope}:{row.GuardianSignedAtUtc:O}");
         row.GuardianTokenUsed = true;
         row.Status = "signed_pending_employee_submit";
+        var emailVerifiedAtUtc = row.GuardianEmailVerifiedAtUtc;
+        row.GuardianSessionHash = null;
+        row.GuardianSessionExpiresAtUtc = null;
         try
         {
             var mapped = await MapAsync(row);
@@ -170,7 +216,15 @@ public sealed class EmployeeMinorComplianceService
         {
             var affected = await _context.Db.Updateable(row).Where(x => x.Id == row.Id && x.Version == dto.Version && x.Status == "awaiting_guardian_signature" && x.GuardianTokenHash == Hash(token) && !x.GuardianTokenUsed).ExecuteCommandAsync();
             if (affected != 1) throw new InvalidOperationException("GUARDIAN_TOKEN_CONFLICT");
-            await AuditAsync(row.Id, "guardian_signed", new { row.GuardianSignedAtUtc });
+            // 签署证据：邮箱核验时间、核验邮箱（打码）、来源 IP 与浏览器标识（截断），供 HR 审核与留档。
+            await AuditAsync(row.Id, "guardian_signed", new
+            {
+                row.GuardianSignedAtUtc,
+                emailVerifiedAtUtc,
+                verifiedEmail = MaskEmail(row.GuardianEmail),
+                ip = Truncate(clientIp, 64),
+                userAgent = Truncate(userAgent, 200),
+            });
         });
         if (!signTransaction.IsSuccess)
         {
@@ -190,13 +244,103 @@ public sealed class EmployeeMinorComplianceService
         return ApiResponse<EmployeeMinorComplianceDto>.OK(await MapAsync(row), "家长签署已完成");
     }
 
-    public async Task<ApiResponse<EmployeeMinorComplianceDto>> GetGuardianAsync(string token)
+    public async Task<ApiResponse<EmployeeMinorComplianceDto>> GetGuardianAsync(string token, string? sessionKey = null)
     {
-        var row = await _context.Db.Queryable<EmployeeMinorCompliance>().Where(x => !x.IsDeleted && x.GuardianTokenHash == Hash(token) && !x.GuardianTokenUsed).FirstAsync();
-        if (row is null || row.GuardianTokenExpiresAtUtc < DateTime.UtcNow) return ApiResponse<EmployeeMinorComplianceDto>.Error("签署链接无效或已过期", "GUARDIAN_TOKEN_INVALID");
-        var latest = await LatestAsync(row.UserGUID);
-        if (latest?.Id != row.Id) return ApiResponse<EmployeeMinorComplianceDto>.Error("签署链接已因新版本失效", VersionConflictCode);
+        var (row, error) = await LoadGuardianRowAsync<EmployeeMinorComplianceDto>(token);
+        if (row is null) return error!;
+        // 未通过邮箱验证前不返回孩子的任何资料，转发出去的链接只能看到打码邮箱。
+        if (!IsGuardianSessionValid(row, sessionKey)) return ApiResponse<EmployeeMinorComplianceDto>.Error("请先用发到监护人邮箱的验证码完成验证", GuardianNotVerifiedCode);
         return ApiResponse<EmployeeMinorComplianceDto>.OK(await MapAsync(row));
+    }
+
+    /// <summary>监护人打开链接后的会话状态，只含打码邮箱与验证码发送节奏。</summary>
+    public async Task<ApiResponse<EmployeeMinorComplianceGuardianSessionDto>> GetGuardianSessionAsync(string token, string? sessionKey = null)
+    {
+        var (row, error) = await LoadGuardianRowAsync<EmployeeMinorComplianceGuardianSessionDto>(token);
+        if (row is null) return error!;
+        return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.OK(MapSession(row, IsGuardianSessionValid(row, sessionKey)));
+    }
+
+    /// <summary>向当前版本登记的监护人邮箱发送一次性验证码；验证码只存哈希，与签署 token 绑定。</summary>
+    public async Task<ApiResponse<EmployeeMinorComplianceGuardianSessionDto>> SendGuardianCodeAsync(string token)
+    {
+        var (row, error) = await LoadGuardianRowAsync<EmployeeMinorComplianceGuardianSessionDto>(token);
+        if (row is null) return error!;
+        var contactError = ValidateGuardianContact(row);
+        if (contactError is not null) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error(contactError, InvalidGuardianContactCode);
+        var now = DateTime.UtcNow;
+        if (row.GuardianOtpSendCount >= GuardianCodeMaxSends)
+            return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("验证码发送次数已达上限，请联系员工重新发起签署", "GUARDIAN_CODE_SEND_LIMIT");
+        if (row.GuardianOtpSentAtUtc.HasValue && row.GuardianOtpSentAtUtc.Value.AddSeconds(GuardianCodeResendSeconds) > now)
+            return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("验证码刚刚发送，请稍后再试", "GUARDIAN_CODE_COOLDOWN", MapSession(row, false));
+        if (_emailSender is null) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("邮件服务未配置，暂不能发送验证码", "GUARDIAN_EMAIL_NOT_CONFIGURED");
+        var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
+        var expectedSends = row.GuardianOtpSendCount;
+        row.GuardianOtpHash = CodeHash(row, code);
+        row.GuardianOtpExpiresAtUtc = now.AddMinutes(GuardianCodeTtlMinutes);
+        row.GuardianOtpSentAtUtc = now;
+        row.GuardianOtpSendCount = expectedSends + 1;
+        row.GuardianOtpFailedAttempts = 0;
+        // 以发送次数做乐观锁，并发重复点击只有一次生效，避免同时存在两个有效验证码。
+        var affected = await _context.Db.Updateable<EmployeeMinorCompliance>()
+            .SetColumns(x => new EmployeeMinorCompliance
+            {
+                GuardianOtpHash = row.GuardianOtpHash,
+                GuardianOtpExpiresAtUtc = row.GuardianOtpExpiresAtUtc,
+                GuardianOtpSentAtUtc = row.GuardianOtpSentAtUtc,
+                GuardianOtpSendCount = row.GuardianOtpSendCount,
+                GuardianOtpFailedAttempts = 0,
+            })
+            .Where(x => x.Id == row.Id && x.GuardianTokenHash == row.GuardianTokenHash && !x.GuardianTokenUsed && x.GuardianOtpSendCount == expectedSends)
+            .ExecuteCommandAsync();
+        if (affected != 1) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error("验证码状态已变化，请刷新后重试", "GUARDIAN_CODE_CONFLICT");
+        var send = await _emailSender.SendVerificationCodeAsync(row.GuardianEmail!, row.GuardianName, code, row.GuardianOtpExpiresAtUtc.Value);
+        await AuditAsync(row.Id, send.Success ? "guardian_code_sent" : "guardian_code_send_failed", new { to = MaskEmail(row.GuardianEmail), attempt = row.GuardianOtpSendCount });
+        if (!send.Success) return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.Error(send.Message, send.ErrorCode ?? "GUARDIAN_EMAIL_SEND_FAILED", MapSession(row, false));
+        return ApiResponse<EmployeeMinorComplianceGuardianSessionDto>.OK(MapSession(row, false), $"验证码已发送到 {MaskEmail(row.GuardianEmail)}");
+    }
+
+    /// <summary>校验验证码；通过后签发一次性会话密钥（只存哈希），查看与签署都要带上。</summary>
+    public async Task<ApiResponse<string>> VerifyGuardianCodeAsync(string token, string code)
+    {
+        var (row, error) = await LoadGuardianRowAsync<string>(token);
+        if (row is null) return error!;
+        var now = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(row.GuardianOtpHash) || row.GuardianOtpExpiresAtUtc is null || row.GuardianOtpExpiresAtUtc < now)
+            return ApiResponse<string>.Error("验证码已过期，请重新发送", "GUARDIAN_CODE_EXPIRED");
+        if (row.GuardianOtpFailedAttempts >= GuardianCodeMaxFailures)
+            return ApiResponse<string>.Error("验证码错误次数过多，请重新发送", "GUARDIAN_CODE_LOCKED");
+        var normalized = new string((code ?? string.Empty).Where(char.IsDigit).ToArray());
+        var matches = normalized.Length == 6 && CryptographicOperations.FixedTimeEquals(
+            Encoding.ASCII.GetBytes(CodeHash(row, normalized)), Encoding.ASCII.GetBytes(row.GuardianOtpHash));
+        if (!matches)
+        {
+            var failed = row.GuardianOtpFailedAttempts;
+            await _context.Db.Updateable<EmployeeMinorCompliance>()
+                .SetColumns(x => x.GuardianOtpFailedAttempts == failed + 1)
+                .Where(x => x.Id == row.Id && x.GuardianOtpHash == row.GuardianOtpHash && x.GuardianOtpFailedAttempts == failed)
+                .ExecuteCommandAsync();
+            var remaining = Math.Max(0, GuardianCodeMaxFailures - failed - 1);
+            return ApiResponse<string>.Error(remaining > 0 ? $"验证码不正确，还可尝试 {remaining} 次" : "验证码错误次数过多，请重新发送", remaining > 0 ? "GUARDIAN_CODE_INVALID" : "GUARDIAN_CODE_LOCKED");
+        }
+        var sessionKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        var sessionHash = Hash($"{row.Id}:{sessionKey}");
+        var sessionExpires = Min(now.AddHours(GuardianSessionHours), row.GuardianTokenExpiresAtUtc ?? now.AddHours(GuardianSessionHours));
+        // 验证码一次性：通过即清空，同一码不能再换第二个会话。
+        var affected = await _context.Db.Updateable<EmployeeMinorCompliance>()
+            .SetColumns(x => new EmployeeMinorCompliance
+            {
+                GuardianOtpHash = null,
+                GuardianOtpExpiresAtUtc = null,
+                GuardianEmailVerifiedAtUtc = now,
+                GuardianSessionHash = sessionHash,
+                GuardianSessionExpiresAtUtc = sessionExpires,
+            })
+            .Where(x => x.Id == row.Id && x.GuardianOtpHash == row.GuardianOtpHash && !x.GuardianTokenUsed)
+            .ExecuteCommandAsync();
+        if (affected != 1) return ApiResponse<string>.Error("验证码已被使用，请重新发送", "GUARDIAN_CODE_EXPIRED");
+        await AuditAsync(row.Id, "guardian_email_verified", new { email = MaskEmail(row.GuardianEmail) });
+        return ApiResponse<string>.OK(sessionKey, "邮箱验证成功");
     }
 
     public async Task<ApiResponse<EmployeeMinorComplianceDto>> SubmitAsync(int version)
@@ -218,6 +362,12 @@ public sealed class EmployeeMinorComplianceService
                 && x.Version == SqlFunc.Subqueryable<EmployeeMinorCompliance>().Where(y => y.UserGUID == x.UserGUID && !y.IsDeleted).Max(y => y.Version)).ExecuteCommandAsync();
             if (affected != 1) throw new InvalidOperationException(VersionConflictCode);
             await AuditAsync(row.Id, "submitted_for_hr_review", null);
+            // 店长发起的填写请求随员工提交自动完成。
+            var completedAt = DateTime.UtcNow;
+            await _context.Db.Updateable<EmployeeMinorComplianceRequest>()
+                .SetColumns(x => new EmployeeMinorComplianceRequest { Status = EmployeeMinorComplianceRequest.StatusCompleted, CompletedAtUtc = completedAt, CompletedComplianceId = row.Id, UpdatedAt = completedAt })
+                .Where(x => x.UserGUID == userGuid && x.Status == EmployeeMinorComplianceRequest.StatusOpen)
+                .ExecuteCommandAsync();
         });
         if (!submitTransaction.IsSuccess) return ApiResponse<EmployeeMinorComplianceDto>.Error("档案版本或状态已变化，请刷新后重试", VersionConflictCode);
         return ApiResponse<EmployeeMinorComplianceDto>.OK(await MapAsync(row), "已提交 HR 审核");
@@ -305,6 +455,195 @@ public sealed class EmployeeMinorComplianceService
         return ApiResponse<List<EmployeeMinorComplianceHistoryItemDto>>.OK(await MapHistoryAsync(rows));
     }
 
+    // ───────────── 店长发起填写请求 ─────────────
+
+    /// <summary>店长可管理门店里按员工资料生日判定未满 18 岁的员工，附最新档案状态与未完成请求。管理员须指定门店。</summary>
+    public async Task<ApiResponse<List<EmployeeMinorManagerCandidateDto>>> GetManagerCandidatesAsync(string? storeCode)
+    {
+        var scope = await _storeScope.GetScopeAsync();
+        if (!scope.IsAuthenticated || !scope.IsAllowed) return ApiResponse<List<EmployeeMinorManagerCandidateDto>>.Error("当前账号没有门店管理权限", "FORBIDDEN");
+        if (!string.IsNullOrWhiteSpace(storeCode) && !scope.CanAccessStoreCode(storeCode)) return ApiResponse<List<EmployeeMinorManagerCandidateDto>>.Error("无权查看该门店员工", "FORBIDDEN");
+        if (scope.IsAdmin && string.IsNullOrWhiteSpace(storeCode)) return ApiResponse<List<EmployeeMinorManagerCandidateDto>>.Error("请选择门店", "STORE_REQUIRED");
+        var storeCodes = string.IsNullOrWhiteSpace(storeCode) ? scope.StoreCodes.ToList() : new List<string> { storeCode.Trim() };
+        if (storeCodes.Count == 0) return ApiResponse<List<EmployeeMinorManagerCandidateDto>>.OK(new());
+        // 生日早于此日期的已满 18 岁；以悉尼当天为准，避免 UTC 跨日把生日当天算错。
+        var today = SydneyToday();
+        var adultCutoff = today.AddYears(-18);
+        var rows = await _context.Db.Queryable<UserStore>()
+            .InnerJoin<Store>((us, st) => us.StoreGUID == st.StoreGUID)
+            .InnerJoin<EmployeeProfile>((us, st, ep) => ep.UserGUID == us.UserGUID)
+            .InnerJoin<User>((us, st, ep, u) => u.UserGUID == us.UserGUID)
+            .Where((us, st, ep, u) => us.IsPrimary && !us.IsDeleted && !st.IsDeleted && !ep.IsDeleted && !u.IsDeleted && u.IsActive
+                && storeCodes.Contains(st.StoreCode) && ep.Birthday != null && ep.Birthday > adultCutoff)
+            .Select((us, st, ep, u) => new { u.UserGUID, u.FullName, u.Username, st.StoreCode, ep.Birthday })
+            .ToListAsync();
+        var userGuids = rows.Select(x => x.UserGUID).Distinct().ToArray();
+        var compliances = userGuids.Length == 0 ? new List<EmployeeMinorCompliance>() : await _context.Db.Queryable<EmployeeMinorCompliance>()
+            .Where(x => userGuids.Contains(x.UserGUID) && !x.IsDeleted).ToListAsync();
+        var requests = userGuids.Length == 0 ? new List<EmployeeMinorComplianceRequest>() : await _context.Db.Queryable<EmployeeMinorComplianceRequest>()
+            .Where(x => userGuids.Contains(x.UserGUID) && x.Status == EmployeeMinorComplianceRequest.StatusOpen && !x.IsDeleted).ToListAsync();
+        var result = rows.Select(x =>
+        {
+            var latest = compliances.Where(c => c.UserGUID == x.UserGUID).OrderByDescending(c => c.Version).FirstOrDefault();
+            var name = string.IsNullOrWhiteSpace(x.FullName) ? x.Username : x.FullName!;
+            var open = requests.FirstOrDefault(r => r.UserGUID == x.UserGUID);
+            return new EmployeeMinorManagerCandidateDto
+            {
+                UserGUID = x.UserGUID, EmployeeName = name, StoreCode = x.StoreCode, Birthday = x.Birthday!.Value.Date,
+                Age = AgeOn(x.Birthday.Value.Date, today), ComplianceStatus = latest?.Status, ComplianceVersion = latest?.Version,
+                StateCode = latest?.StateCode, OpenRequest = open is null ? null : MapRequest(open, name),
+            };
+        }).OrderBy(x => x.ComplianceStatus == "approved").ThenBy(x => x.EmployeeName).ToList();
+        return ApiResponse<List<EmployeeMinorManagerCandidateDto>>.OK(result);
+    }
+
+    /// <summary>店长请员工填写未成年用工资料；同一员工只保留一条未完成请求，重复发起直接返回已有请求。</summary>
+    public async Task<ApiResponse<EmployeeMinorComplianceRequestDto>> CreateRequestAsync(EmployeeMinorComplianceRequestCreateDto dto)
+    {
+        var scope = await _storeScope.GetScopeAsync();
+        if (!scope.IsAuthenticated || !scope.IsAllowed) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("当前账号没有门店管理权限", "FORBIDDEN");
+        var userGuid = dto.UserGUID?.Trim() ?? string.Empty;
+        var store = await ResolveEmploymentStoreAsync(userGuid);
+        if (store is null || !scope.CanAccessStoreGuid(store.StoreGUID)) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("该员工不在你管理的门店", "FORBIDDEN");
+        var profile = await _context.Db.Queryable<EmployeeProfile>().Where(x => x.UserGUID == userGuid && !x.IsDeleted).FirstAsync();
+        if (profile?.Birthday is null) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("员工资料缺少出生日期，请先补充", "DOB_REQUIRED");
+        if (AgeOn(profile.Birthday.Value.Date, SydneyToday()) >= 18) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("该员工已满 18 岁，无需填写未成年用工资料", "NOT_MINOR");
+        var user = await _context.Db.Queryable<User>().Where(x => x.UserGUID == userGuid && !x.IsDeleted).FirstAsync();
+        var name = string.IsNullOrWhiteSpace(user?.FullName) ? user?.Username : user!.FullName;
+        var existing = await _context.Db.Queryable<EmployeeMinorComplianceRequest>()
+            .Where(x => x.UserGUID == userGuid && x.Status == EmployeeMinorComplianceRequest.StatusOpen && !x.IsDeleted).FirstAsync();
+        if (existing is not null) return ApiResponse<EmployeeMinorComplianceRequestDto>.OK(MapRequest(existing, name), "该员工已有未完成的填写请求");
+        var row = new EmployeeMinorComplianceRequest
+        {
+            UserGUID = userGuid, StoreGUID = store.StoreGUID, StoreCode = store.StoreCode, Status = EmployeeMinorComplianceRequest.StatusOpen,
+            Note = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim(), DueDate = dto.DueDate?.Date,
+            RequestedByUserGuid = _currentUser.GetCurrentUserGuid(), RequestedByName = _currentUser.GetCurrentUsername(), CreatedBy = _currentUser.GetCurrentUsername(),
+        };
+        try
+        {
+            row.Id = await _context.Db.Insertable(row).ExecuteReturnIdentityAsync();
+        }
+        catch (Exception ex) when (ex.Message.Contains("UX_MinorRequest_OpenPerUser", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase))
+        {
+            // 两位店长同时发起：唯一索引兜底，返回胜出的那条。
+            var winner = await _context.Db.Queryable<EmployeeMinorComplianceRequest>()
+                .Where(x => x.UserGUID == userGuid && x.Status == EmployeeMinorComplianceRequest.StatusOpen && !x.IsDeleted).FirstAsync();
+            if (winner is null) throw;
+            return ApiResponse<EmployeeMinorComplianceRequestDto>.OK(MapRequest(winner, name), "该员工已有未完成的填写请求");
+        }
+        return ApiResponse<EmployeeMinorComplianceRequestDto>.OK(MapRequest(row, name), "已通知员工填写");
+    }
+
+    public async Task<ApiResponse<EmployeeMinorComplianceRequestDto>> CancelRequestAsync(int id)
+    {
+        var scope = await _storeScope.GetScopeAsync();
+        var row = await _context.Db.Queryable<EmployeeMinorComplianceRequest>().FirstAsync(x => x.Id == id && !x.IsDeleted);
+        if (row is null || !scope.IsAuthenticated || !scope.IsAllowed || !scope.CanAccessStoreGuid(row.StoreGUID ?? string.Empty))
+            return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("请求不存在或无权处理", "FORBIDDEN");
+        if (row.Status != EmployeeMinorComplianceRequest.StatusOpen) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("该请求已完成或已撤销", "REQUEST_CLOSED");
+        var now = DateTime.UtcNow;
+        var actor = _currentUser.GetCurrentUsername();
+        var affected = await _context.Db.Updateable<EmployeeMinorComplianceRequest>()
+            .SetColumns(x => new EmployeeMinorComplianceRequest { Status = EmployeeMinorComplianceRequest.StatusCancelled, CancelledAtUtc = now, CancelledBy = actor, UpdatedAt = now })
+            .Where(x => x.Id == id && x.Status == EmployeeMinorComplianceRequest.StatusOpen)
+            .ExecuteCommandAsync();
+        if (affected != 1) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("该请求已完成或已撤销", "REQUEST_CLOSED");
+        row.Status = EmployeeMinorComplianceRequest.StatusCancelled; row.CancelledAtUtc = now; row.CancelledBy = actor;
+        return ApiResponse<EmployeeMinorComplianceRequestDto>.OK(MapRequest(row, null), "已撤销");
+    }
+
+    /// <summary>员工本人未完成的填写请求，用于工作台待办与资料页提示。</summary>
+    public async Task<ApiResponse<List<EmployeeMinorComplianceRequestDto>>> GetSelfRequestsAsync()
+    {
+        var userGuid = _currentUser.GetCurrentUserGuid();
+        if (string.IsNullOrWhiteSpace(userGuid)) return ApiResponse<List<EmployeeMinorComplianceRequestDto>>.Error("未找到当前用户", "CURRENT_USER_NOT_FOUND");
+        var rows = await _context.Db.Queryable<EmployeeMinorComplianceRequest>()
+            .Where(x => x.UserGUID == userGuid && x.Status == EmployeeMinorComplianceRequest.StatusOpen && !x.IsDeleted)
+            .OrderBy(x => x.CreatedAt, OrderByType.Desc).ToListAsync();
+        return ApiResponse<List<EmployeeMinorComplianceRequestDto>>.OK(rows.Select(x => MapRequest(x, null)).ToList());
+    }
+
+    // ───────────── 监护人链接与验证码辅助 ─────────────
+
+    private async Task<(EmployeeMinorCompliance? Row, ApiResponse<T>? Error)> LoadGuardianRowAsync<T>(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return (null, ApiResponse<T>.Error("签署链接无效或已过期", "GUARDIAN_TOKEN_INVALID"));
+        var row = await _context.Db.Queryable<EmployeeMinorCompliance>().Where(x => !x.IsDeleted && x.GuardianTokenHash == Hash(token) && !x.GuardianTokenUsed).FirstAsync();
+        if (row is null || row.GuardianTokenExpiresAtUtc < DateTime.UtcNow) return (null, ApiResponse<T>.Error("签署链接无效或已过期", "GUARDIAN_TOKEN_INVALID"));
+        var latest = await LatestAsync(row.UserGUID);
+        if (latest?.Id != row.Id) return (null, ApiResponse<T>.Error("签署链接已因新版本失效", VersionConflictCode));
+        return (row, null);
+    }
+
+    private static bool IsGuardianSessionValid(EmployeeMinorCompliance row, string? sessionKey)
+    {
+        if (string.IsNullOrWhiteSpace(sessionKey) || string.IsNullOrWhiteSpace(row.GuardianSessionHash) || row.GuardianSessionExpiresAtUtc is null || row.GuardianSessionExpiresAtUtc < DateTime.UtcNow) return false;
+        return CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Hash($"{row.Id}:{sessionKey}")), Encoding.ASCII.GetBytes(row.GuardianSessionHash));
+    }
+
+    private static void ResetGuardianVerification(EmployeeMinorCompliance row)
+    {
+        row.GuardianOtpHash = null; row.GuardianOtpExpiresAtUtc = null; row.GuardianOtpSentAtUtc = null;
+        row.GuardianOtpSendCount = 0; row.GuardianOtpFailedAttempts = 0; row.GuardianEmailVerifiedAtUtc = null;
+        row.GuardianSessionHash = null; row.GuardianSessionExpiresAtUtc = null;
+    }
+
+    private static EmployeeMinorComplianceGuardianSessionDto MapSession(EmployeeMinorCompliance row, bool verified) => new()
+    {
+        MaskedGuardianEmail = MaskEmail(row.GuardianEmail) ?? string.Empty, EmailVerified = verified,
+        LinkExpiresAtUtc = row.GuardianTokenExpiresAtUtc ?? DateTime.UtcNow, CodeSentAtUtc = row.GuardianOtpSentAtUtc,
+        CodeExpiresAtUtc = row.GuardianOtpHash is null ? null : row.GuardianOtpExpiresAtUtc,
+        ResendAvailableAtUtc = row.GuardianOtpSentAtUtc?.AddSeconds(GuardianCodeResendSeconds),
+        RemainingSends = Math.Max(0, GuardianCodeMaxSends - row.GuardianOtpSendCount),
+    };
+
+    private string BuildSigningUrl(string rawToken)
+    {
+        // token 放在 # 之后，浏览器不会把它发给服务器或写进访问日志 / Referer。
+        var baseUrl = (_options.SigningBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+        return $"{baseUrl}/minor-employment/sign#token={rawToken}";
+    }
+
+    private static string CodeHash(EmployeeMinorCompliance row, string code) => Hash($"{row.Id}:{row.GuardianTokenHash}:{code}");
+
+    internal static string? MaskEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var at = email.IndexOf('@');
+        if (at <= 0) return "***";
+        var local = email[..at];
+        return $"{local[0]}***{email[at..]}";
+    }
+
+    private static string ChildDisplayName(EmployeeMinorCompliance row)
+    {
+        var form = Parse<EmployeeMinorCe1FormDto>(row.FormDataJson);
+        var name = string.Join(" ", new[] { form?.ChildGivenName, form?.ChildFamilyName }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        return string.IsNullOrWhiteSpace(name) ? "your child" : name;
+    }
+
+    private static EmployeeMinorComplianceRequestDto MapRequest(EmployeeMinorComplianceRequest x, string? employeeName) => new()
+    {
+        Id = x.Id, UserGUID = x.UserGUID, EmployeeName = employeeName, StoreCode = x.StoreCode, Status = x.Status, Note = x.Note,
+        DueDate = x.DueDate, RequestedByName = x.RequestedByName, CreatedAt = x.CreatedAt, CompletedAtUtc = x.CompletedAtUtc,
+    };
+
+    private static DateTime SydneyToday()
+    {
+        try { return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Australia/Sydney")).Date; }
+        catch (TimeZoneNotFoundException) { return DateTime.UtcNow.Date; }
+    }
+
+    private static int AgeOn(DateTime birthday, DateTime day)
+    {
+        var age = day.Year - birthday.Year;
+        if (birthday.Date > day.AddYears(-age)) age--;
+        return age;
+    }
+
+    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
+    private static string? Truncate(string? value, int max) => string.IsNullOrEmpty(value) ? value : value.Length <= max ? value : value[..max];
+
     private async Task<EmployeeMinorCompliance?> LatestAsync(string userGuid) => await _context.Db.Queryable<EmployeeMinorCompliance>().Where(x => x.UserGUID == userGuid && !x.IsDeleted).OrderBy(x => x.Version, OrderByType.Desc).FirstAsync();
     private async Task<EmployeeMinorCompliance?> GetVersionAsync(string userGuid, int version) => await _context.Db.Queryable<EmployeeMinorCompliance>().Where(x => x.UserGUID == userGuid && x.Version == version && !x.IsDeleted).FirstAsync();
     private EmployeeMinorCompliance NewVersion(string userGuid, EmployeeMinorCompliance? prior, EmployeeMinorComplianceUpsertDto dto) { var row = new EmployeeMinorCompliance { UserGUID = userGuid, Version = (prior?.Version ?? 0) + 1 }; Apply(row, dto); return row; }
@@ -359,6 +698,8 @@ public sealed class EmployeeMinorComplianceService
             GuardianName = row.GuardianName, GuardianPhone = row.GuardianPhone, GuardianEmail = row.GuardianEmail,
             GuardianRelationship = row.GuardianRelationship, GuardianSignedAtUtc = row.GuardianSignedAtUtc, GuardianSignedName = row.GuardianSignedName,
             ConsentScope = ServerConsentScope, GuardianTokenActive = !row.GuardianTokenUsed && row.GuardianTokenExpiresAtUtc > DateTime.UtcNow,
+            GuardianInviteChannel = row.GuardianInviteChannel, GuardianInviteEmailSentAtUtc = row.GuardianInviteEmailSentAtUtc,
+            GuardianEmailVerifiedAtUtc = row.GuardianEmailVerifiedAtUtc,
             DocumentSha256 = row.DocumentSha256, ReviewActor = row.ReviewActor, ReviewedAtUtc = row.ReviewedAtUtc, ReviewComment = row.ReviewComment,
             ReturnFields = Parse<List<string>>(row.ReturnFieldsJson) ?? new(), SubmittedAtUtc = row.SubmittedAtUtc,
             Contacts = contacts.Select(x => new EmployeeMinorComplianceContactDto

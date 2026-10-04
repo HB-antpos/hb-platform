@@ -1,5 +1,12 @@
 import { apiClient } from "@/shared/api/client";
-import { mapProfile, mapSummary, toPayload } from "./contract";
+import {
+  mapCandidate,
+  mapInviteResult,
+  mapProfile,
+  mapRequest,
+  mapSummary,
+  toPayload,
+} from "./contract";
 import type {
   MinorEmploymentDraft,
   MinorEmploymentReviewDetail,
@@ -16,14 +23,55 @@ export const minorEmploymentApi = {
   ) {
     return mapProfile((await apiClient.put(`${BASE}/me`, toPayload(d))).data);
   },
-  async inviteParent(version: number, revision?: number) {
-    return (
-      await apiClient.post(`${BASE}/me/guardian-invite`, {
-        version,
-        revision: revision == null ? undefined : Number(revision),
-        expiryMinutes: 1440,
+  /**
+   * 发起监护人签署。默认由后端直接发邮件到监护人邮箱（不回传链接）；
+   * deliverByEmail=false 是备用方式，只返回链接供员工转发，监护人打开后仍须邮箱验证码。
+   */
+  async inviteParent(
+    version: number,
+    revision?: number,
+    deliverByEmail = true,
+  ) {
+    return mapInviteResult(
+      (
+        await apiClient.post(`${BASE}/me/guardian-invite`, {
+          version,
+          revision: revision == null ? undefined : Number(revision),
+          // 带回家给监护人处理，链接给 72 小时。
+          expiryMinutes: 4320,
+          deliverByEmail,
+        })
+      ).data,
+    );
+  },
+  /** 店长发给我的未完成填写请求。 */
+  async getMyRequests() {
+    const data = (await apiClient.get(`${BASE}/me/requests`)).data;
+    return Array.isArray(data) ? data.map(mapRequest) : [];
+  },
+  /** 店长：可管理门店里未满 18 岁的员工及其档案状态。 */
+  async getManagerCandidates(storeCode?: string) {
+    const data = (
+      await apiClient.get(`${BASE}/manager/candidates`, {
+        params: { storeCode: storeCode || undefined },
       })
     ).data;
+    return Array.isArray(data) ? data.map(mapCandidate) : [];
+  },
+  async createRequest(userGUID: string, note?: string) {
+    return mapRequest(
+      (
+        await apiClient.post(`${BASE}/manager/requests`, {
+          userGUID,
+          note: note?.trim() || null,
+        })
+      ).data,
+    );
+  },
+  async cancelRequest(id: number) {
+    return mapRequest(
+      (await apiClient.post(`${BASE}/manager/requests/${id}/cancel`)).data,
+    );
   },
   async submit(version: number) {
     return mapProfile(

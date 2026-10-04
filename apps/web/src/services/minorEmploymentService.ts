@@ -1,5 +1,6 @@
 import type { ApiResponse, PagedResult } from '../types/api'
 import type {
+  GuardianSession,
   MinorEmploymentReviewDecision,
   MinorEmploymentReviewDetail,
   MinorEmploymentReviewQuery,
@@ -200,17 +201,52 @@ export async function decideMinorEmploymentReview(id: string, payload: MinorEmpl
   return mapDetail(unwrapApiData(response) as unknown as Raw)
 }
 
-export async function getParentSignatureDocument(token: string) {
-  // token 只放在 POST body，不加入 URL 或埋点。
-  const response = await request.post<ApiResponse<ParentSignatureDocument>>(`${PUBLIC_SIGNATURE_PATH}/preview`, buildGuardianPreviewPayload(token), { skipAuthRedirect: true })
+export async function getParentSignatureDocument(token: string, sessionKey?: string) {
+  // token 只放在 POST body，不加入 URL 或埋点；未通过邮箱验证码时后端不返回任何资料。
+  const response = await request.post<ApiResponse<ParentSignatureDocument>>(`${PUBLIC_SIGNATURE_PATH}/preview`, buildGuardianPreviewPayload(token, sessionKey), { skipAuthRedirect: true })
   return mapParentDocument(unwrapApiData(response) as unknown as Raw)
 }
 
-export async function submitParentSignature(token: string, payload: ParentSignatureSubmit) {
+export async function submitParentSignature(token: string, payload: ParentSignatureSubmit, sessionKey?: string) {
   const response = await request.post<ApiResponse<ParentSignatureDocument>>(
-    `${PUBLIC_SIGNATURE_PATH}/sign`, buildGuardianSignRequest(token, payload), { skipAuthRedirect: true },
+    `${PUBLIC_SIGNATURE_PATH}/sign`, buildGuardianSignRequest(token, payload, sessionKey), { skipAuthRedirect: true },
   )
   return mapParentDocument(unwrapApiData(response) as unknown as Raw)
+}
+
+/** 监护人会话：只含打码邮箱与验证码节奏，验证前不暴露孩子资料。 */
+export async function getGuardianSession(token: string, sessionKey?: string) {
+  const response = await request.post<ApiResponse<Raw>>(`${PUBLIC_SIGNATURE_PATH}/session`, buildGuardianPreviewPayload(token, sessionKey), { skipAuthRedirect: true })
+  return mapGuardianSession(unwrapApiData(response) as unknown as Raw)
+}
+
+export async function sendGuardianCode(token: string) {
+  const response = await request.post<ApiResponse<Raw>>(`${PUBLIC_SIGNATURE_PATH}/send-code`, { token }, { skipAuthRedirect: true })
+  return mapGuardianSession(unwrapApiData(response) as unknown as Raw)
+}
+
+/** 校验通过返回会话密钥，查看与签署都要带上。 */
+export async function verifyGuardianCode(token: string, code: string) {
+  const response = await request.post<ApiResponse<string>>(`${PUBLIC_SIGNATURE_PATH}/verify`, { token, code: code.replace(/\D/g, '') }, { skipAuthRedirect: true })
+  return String(unwrapApiData(response) ?? '')
+}
+
+export function mapGuardianSession(raw: Raw): GuardianSession {
+  return {
+    maskedGuardianEmail: text(raw.maskedGuardianEmail ?? raw.MaskedGuardianEmail) ?? '',
+    emailVerified: (raw.emailVerified ?? raw.EmailVerified) === true,
+    codeSentAt: text(raw.codeSentAtUtc ?? raw.CodeSentAtUtc),
+    codeExpiresAt: text(raw.codeExpiresAtUtc ?? raw.CodeExpiresAtUtc),
+    resendAvailableAt: text(raw.resendAvailableAtUtc ?? raw.ResendAvailableAtUtc),
+    remainingSends: Number(raw.remainingSends ?? raw.RemainingSends ?? 0) || 0,
+  }
+}
+
+/** 从请求异常里取后端 errorCode（如 GUARDIAN_EMAIL_NOT_VERIFIED、GUARDIAN_CODE_COOLDOWN）。 */
+export function guardianErrorCode(error: unknown) {
+  if (!(error instanceof RequestError)) return undefined
+  const payload = error.payload as Raw | undefined
+  return text(payload?.errorCode ?? payload?.ErrorCode)
 }
 
 export function buildGuardianSignPayload(payload: ParentSignatureSubmit) {
@@ -225,8 +261,8 @@ export function buildGuardianSignPayload(payload: ParentSignatureSubmit) {
   }
 }
 
-export function buildGuardianPreviewPayload(token: string) { return { token } }
-export function buildGuardianSignRequest(token: string, payload: ParentSignatureSubmit) { return { token, ...buildGuardianSignPayload(payload) } }
+export function buildGuardianPreviewPayload(token: string, sessionKey?: string) { return sessionKey ? { token, sessionKey } : { token } }
+export function buildGuardianSignRequest(token: string, payload: ParentSignatureSubmit, sessionKey?: string) { return { token, ...(sessionKey ? { sessionKey } : {}), ...buildGuardianSignPayload(payload) } }
 
 export function mapHistory(value: unknown): MinorEmploymentHistoryEntry[] {
   if (!Array.isArray(value)) return []

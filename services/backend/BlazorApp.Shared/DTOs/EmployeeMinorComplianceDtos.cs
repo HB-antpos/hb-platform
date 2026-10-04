@@ -138,6 +138,11 @@ public sealed class EmployeeMinorComplianceDto
     public string? GuardianSignedName { get; set; }
     public string ConsentScope { get; set; } = string.Empty;
     public bool GuardianTokenActive { get; set; }
+    /// <summary>签署链接送达方式：email / share；未发起时为空。</summary>
+    public string? GuardianInviteChannel { get; set; }
+    public DateTime? GuardianInviteEmailSentAtUtc { get; set; }
+    /// <summary>监护人通过邮箱验证码核验身份的时间；签署证据的一部分。</summary>
+    public DateTime? GuardianEmailVerifiedAtUtc { get; set; }
     public string? DocumentSha256 { get; set; }
     public string? ReviewActor { get; set; }
     public DateTime? ReviewedAtUtc { get; set; }
@@ -161,11 +166,14 @@ public sealed class EmployeeMinorComplianceGuardianSignDto
 public sealed class EmployeeMinorComplianceGuardianPreviewDto
 {
     [Required, StringLength(500)] public string Token { get; set; } = string.Empty;
+    /// <summary>邮箱验证码通过后签发的会话密钥；会话查询时可空。</summary>
+    [StringLength(200)] public string? SessionKey { get; set; }
 }
 
 public sealed class EmployeeMinorComplianceGuardianSignRequestDto
 {
     [Required, StringLength(500)] public string Token { get; set; } = string.Empty;
+    [StringLength(200)] public string? SessionKey { get; set; }
     [Required] public int Version { get; set; }
     [Required, StringLength(200)] public string SignedName { get; set; } = string.Empty;
     [Required, StringLength(400000)] public string SignatureData { get; set; } = string.Empty;
@@ -194,6 +202,8 @@ public sealed class EmployeeMinorComplianceInviteDto
     [Required] public int Version { get; set; }
     [Required] public int Revision { get; set; }
     public int ExpiryMinutes { get; set; } = 60 * 24;
+    /// <summary>默认由后端直接把签署链接发到监护人邮箱；false 时只返回链接供员工转发（备用方式）。</summary>
+    public bool DeliverByEmail { get; set; } = true;
 }
 
 public sealed class EmployeeMinorComplianceInviteResultDto
@@ -203,6 +213,12 @@ public sealed class EmployeeMinorComplianceInviteResultDto
     public int Revision { get; set; }
     public string SigningUrl { get; set; } = string.Empty;
     public DateTime ExpiresAtUtc { get; set; }
+    public string DeliveryChannel { get; set; } = "share";
+    public bool EmailSent { get; set; }
+    /// <summary>打码后的监护人邮箱，例如 m***@example.com；只用于提示员工发到了哪里。</summary>
+    public string? MaskedGuardianEmail { get; set; }
+    /// <summary>邮件发送失败原因；失败时链接仍有效，员工可改用转发。</summary>
+    public string? EmailError { get; set; }
 }
 
 public sealed class EmployeeMinorComplianceDocumentDto
@@ -234,4 +250,58 @@ public sealed class EmployeeMinorComplianceAuditDto
     public string? ActorLabel { get; set; }
     public DateTime CreatedAt { get; set; }
     public object? Metadata { get; set; }
+}
+
+/// <summary>监护人打开链接后看到的会话状态：未验证邮箱前不返回孩子的任何资料。</summary>
+public sealed class EmployeeMinorComplianceGuardianSessionDto
+{
+    public string MaskedGuardianEmail { get; set; } = string.Empty;
+    public bool EmailVerified { get; set; }
+    public DateTime LinkExpiresAtUtc { get; set; }
+    public DateTime? CodeSentAtUtc { get; set; }
+    public DateTime? CodeExpiresAtUtc { get; set; }
+    public DateTime? ResendAvailableAtUtc { get; set; }
+    public int RemainingSends { get; set; }
+}
+
+public sealed class EmployeeMinorComplianceGuardianVerifyDto
+{
+    [Required, StringLength(500)] public string Token { get; set; } = string.Empty;
+    [Required, StringLength(10)] public string Code { get; set; } = string.Empty;
+}
+
+/// <summary>店长发起的资料填写请求。</summary>
+public sealed class EmployeeMinorComplianceRequestDto
+{
+    public int Id { get; set; }
+    public string UserGUID { get; set; } = string.Empty;
+    public string? EmployeeName { get; set; }
+    public string? StoreCode { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Note { get; set; }
+    public DateTime? DueDate { get; set; }
+    public string? RequestedByName { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+}
+
+public sealed class EmployeeMinorComplianceRequestCreateDto
+{
+    [Required, StringLength(50)] public string UserGUID { get; set; } = string.Empty;
+    [StringLength(500)] public string? Note { get; set; }
+    public DateTime? DueDate { get; set; }
+}
+
+/// <summary>店长视角的未成年员工：按员工资料生日现算年龄，附最新档案状态与未完成请求。</summary>
+public sealed class EmployeeMinorManagerCandidateDto
+{
+    public string UserGUID { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? StoreCode { get; set; }
+    public DateTime Birthday { get; set; }
+    public int Age { get; set; }
+    public string? ComplianceStatus { get; set; }
+    public int? ComplianceVersion { get; set; }
+    public string? StateCode { get; set; }
+    public EmployeeMinorComplianceRequestDto? OpenRequest { get; set; }
 }

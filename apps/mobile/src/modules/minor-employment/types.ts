@@ -126,6 +126,12 @@ export interface MinorEmploymentProfile extends MinorEmploymentDraft {
   formType?: string;
   parentSignedAt?: string;
   parentSignatureName?: string;
+  /** 签署链接送达方式：email＝后端直发监护人邮箱，share＝员工转发。 */
+  guardianInviteChannel?: "email" | "share";
+  guardianInviteEmailSentAt?: string;
+  /** 监护人用邮箱验证码核验身份的时间。 */
+  guardianEmailVerifiedAt?: string;
+  guardianLinkActive: boolean;
   status: MinorEmploymentState;
   version: number;
   revision?: number;
@@ -240,3 +246,38 @@ export const emptyDraft = (): MinorEmploymentDraft => ({
     fields: {},
   },
 });
+
+/** 发起签署的结果：邮件直发成功时不回传链接，失败或选择转发时才有 signingUrl。 */
+export interface MinorGuardianInviteResult {
+  version: number;
+  revision?: number;
+  deliveryChannel: "email" | "share";
+  emailSent: boolean;
+  maskedGuardianEmail?: string;
+  emailError?: string;
+  signingUrl?: string;
+  expiresAt?: string;
+}
+/** 店长发起的资料填写请求。 */
+export interface MinorComplianceRequest {
+  id: number;
+  userGUID: string;
+  employeeName?: string;
+  storeCode?: string;
+  status: "open" | "completed" | "cancelled";
+  note?: string;
+  dueDate?: string;
+  requestedByName?: string;
+  createdAt?: string;
+}
+/** 店长视角的未成年员工。 */
+export interface MinorManagerCandidate {
+  userGUID: string;
+  employeeName: string;
+  storeCode?: string;
+  age: number;
+  complianceStatus?: string;
+  complianceVersion?: number;
+  stateCode?: string;
+  openRequest?: MinorComplianceRequest;
+}

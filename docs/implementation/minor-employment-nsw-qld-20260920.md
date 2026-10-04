@@ -40,12 +40,11 @@
 
 先遵循现有项目 runbook 备份、检查环境，再执行：
 
-1. `services/backend/BlazorApp.Api/Data/Migrations/20260920_CreateEmployeeMinorCompliance.sql`
-2. `services/backend/BlazorApp.Api/Data/Migrations/20260920_CreateEmployeeMinorReminders.sql`
+`dotnet run -- --schema=migrate`（独立版本号步骤 `20261004.001-employee-minor-compliance`，见 `Data/SchemaMigrations/EmployeeMinorComplianceSchema.cs`）。
 
-两份 SQL 可重复执行，用独立表保存档案、联系人、审计、提醒和动作。生产迁移和回滚应保留已签档案，不能以删表回滚。
+2026-10-04 起原两份裸 SQL 已改为版本化迁移：一次建好档案、联系人、审计、店长请求、提醒、提醒事件六张表及监护人邮箱验证列，索引按名称幂等补建，签名门禁核对关键列与唯一索引。实体不在 `SqlSugarContext` 的 `tableTypes` 里，API 普通启动只做只读检查。生产迁移和回滚应保留已签档案，不能以删表回滚。
 
-复用已有员工资料查看/编辑权限及 HR 敏感资料角色限制；没有扩大到所有门店经理。存储复用现有腾讯 COS 配置并要求支持私有对象上传/授权下载。App 分享链接使用当前 API host 的 Web 同源地址，部署时须确保该 host 能路由到 `/minor-employment/sign`。
+复用已有员工资料查看/编辑权限及 HR 敏感资料角色限制；没有扩大到所有门店经理。存储复用现有腾讯 COS 配置并要求支持私有对象上传/授权下载。签署链接默认由后端发到监护人邮箱，地址取 `MinorEmployment:SigningBaseUrl`（默认 `https://hotbargain.vip`，可用环境变量 `MinorEmployment__SigningBaseUrl` 覆盖），部署时须确保该站点能路由到 `/minor-employment/sign`。
 
 ## 验证记录
 
@@ -58,3 +57,11 @@
 - 可复核页面截图位于 `docs/design/minor-employment-implementation-20260920/`；家长签署页和 Web HR 列表、详情、历史由实际页面运行截图生成。
 - Web 浏览器实际点击家长签署、HR 通过和带字段/意见的退回均验证请求；审核请求各发送一次，均带当前档案版本。本地拦截 API 返回模拟数据，不代表生产环境已启用。
 - 尚未进行生产 COS 往返、SQL Server 实际迁移或 iOS/Android 真机业务验收。纯服务测试使用隔离 SQLite 与内存对象存储，不能替代生产部署验收。
+
+## 2026-10-04 店长发起与监护人邮箱验证
+
+- **店长发起**：考勤管理 › 未成年用工提醒 › 「未成年员工资料」列出可管理门店里按生日未满 18 岁的员工及档案进度，可「通知员工填写」/撤销。接口 `GET manager/candidates`、`POST manager/requests`、`POST manager/requests/{id}/cancel`，权限沿用排班提醒的 `Schedule.ViewStore` / `Schedule.EditManagedStore`，门店范围按可管理门店校验。同一员工只有一条未完成请求（过滤唯一索引兜底），员工提交 HR 审核时自动完成。员工端在未成年用工页顶部看到请求（`GET me/requests`）。
+- **监护人邮箱链接**：发起签署默认 `deliverByEmail=true`，后端用发票邮箱后台配置的公司 SMTP 账号把签署链接直接发到监护人邮箱，成功时不把链接回传员工手机；发信失败或员工选择「改为转发链接」时才返回链接。链接有效期 App 默认 72 小时。
+- **验证码与会话**：监护人打开链接后先看到只含打码邮箱的验证页（`POST guardian/session`），发验证码（`guardian/send-code`，10 分钟有效、60 秒冷却、每个链接最多 5 次）并校验（`guardian/verify`，错 5 次作废），通过后得到会话密钥（只存哈希、2 小时、存本标签页 sessionStorage）。`guardian/preview` 与 `guardian/sign` 都必须带会话密钥，转发出去的链接没有验证码也看不到孩子资料、无法代签。匿名接口按 IP 每分钟 30 次限流。
+- **签署证据**：审计 `guardian_signed` 记录邮箱核验时间、打码邮箱、来源 IP、浏览器标识（截断）；`guardian_invite_emailed` / `guardian_code_sent` / `guardian_email_verified` 分别留痕。
+- **未做**：监护人在签署页自行修改资料（目前仍由员工填写、监护人核对签字）、推送通知、PDF 证据页、纸质兜底上传。

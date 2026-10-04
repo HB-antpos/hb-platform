@@ -19,10 +19,11 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"minor-lifecycle-{Guid.NewGuid():N}.db");
     private readonly SqlSugarClient _db;
+    private readonly FakeGuardianEmail _mail = new();
     public EmployeeMinorComplianceLifecycleTests()
     {
         _db = new(new ConnectionConfig { ConnectionString = $"Data Source={_path}", DbType = DbType.Sqlite, IsAutoCloseConnection = true, InitKeyType = InitKeyType.Attribute });
-        _db.CodeFirst.InitTables(typeof(EmployeeMinorCompliance), typeof(EmployeeMinorComplianceContact), typeof(EmployeeMinorComplianceAudit), typeof(EmployeeProfile), typeof(UserStore), typeof(Store));
+        _db.CodeFirst.InitTables(typeof(EmployeeMinorCompliance), typeof(EmployeeMinorComplianceContact), typeof(EmployeeMinorComplianceAudit), typeof(EmployeeMinorComplianceRequest), typeof(EmployeeProfile), typeof(UserStore), typeof(Store), typeof(User));
     }
 
     [Fact]
@@ -58,10 +59,12 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         Assert.True(saved.Success, saved.Message);
         var invite = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision });
         Assert.True(invite.Success, invite.Message);
-        var token = invite.Data!.SigningUrl.Split("#token=")[1];
-        Assert.False((await service.SignGuardianAsync(token, SignDto(1))).Success); // 签署人不能改成另一个姓名。
+        Assert.True(invite.Data!.EmailSent);
+        var token = _mail.LastSigningUrl!.Split("#token=")[1];
+        var session = await VerifyAsync(service, token);
+        Assert.False((await service.SignGuardianAsync(token, SignDto(1), session)).Success); // 签署人不能改成另一个姓名。
         var signature = SignDto(1); signature.SignedName = saved.Data.GuardianName;
-        var signedResult = await service.SignGuardianAsync(token, signature);
+        var signedResult = await service.SignGuardianAsync(token, signature, session);
         Assert.True(signedResult.Success, signedResult.Message);
         Assert.True((await service.SubmitAsync(1)).Success);
         Assert.True((await service.ReviewAsync(saved.Data.Id, new() { Version = 1, Comment = "Confirm school dates", ReturnFields = ["schoolCalendar"] }, false)).Success);
@@ -79,7 +82,7 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         Assert.Equal(signed.DocumentSha256, original.DocumentSha256);
         Assert.Equal(signed.GuardianPhone, original.GuardianPhone);
         Assert.Equal("returned", original.Status);
-        Assert.False((await service.GetGuardianAsync(token)).Success);
+        Assert.False((await service.GetGuardianAsync(token, session)).Success);
         Assert.Equal(2, (await service.GetSelfHistoryAsync()).Data!.Count);
         Assert.NotEmpty((await service.DownloadDocumentAsync(signed.Id)).Data!);
         await storage.SaveAsync(signed.DocumentObjectKey!, Encoding.UTF8.GetBytes("replaced-object"));
@@ -118,8 +121,8 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         var row = await SeedAsync("employee", 1, "token");
         var storage = new MemoryStore();
         var service = Service("employee", storage);
-        var sign = await service.SignGuardianAsync("token", SignDto(1));
-        Assert.True(sign.Success);
+        var sign = await service.SignGuardianAsync("token", SignDto(1), await VerifyAsync(service, "token"));
+        Assert.True(sign.Success, sign.Message);
         Assert.Equal("signed_pending_employee_submit", (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).Status);
         Assert.True((await service.SubmitAsync(1)).Success);
         Assert.True((await service.ReviewAsync(row.Id, new() { Version = 1 }, true)).Success);
@@ -146,7 +149,8 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         var store = new MemoryStore();
         store.AfterSave = async () => await _db.Updateable<EmployeeMinorCompliance>()
             .SetColumns(x => x.GuardianTokenUsed == true).Where(x => x.Id == row.Id).ExecuteCommandAsync();
-        var result = await Service("employee", store).SignGuardianAsync("raced-token", SignDto(1));
+        var service = Service("employee", store);
+        var result = await service.SignGuardianAsync("raced-token", SignDto(1), await VerifyAsync(service, "raced-token"));
         Assert.False(result.Success);
         Assert.Equal(0, store.Count);
         Assert.Null((await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).DocumentObjectKey);
@@ -156,9 +160,190 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
     public async Task MissingDocumentStoreDoesNotMarkSigned()
     {
         var row = await SeedAsync("employee", 1, "no-store");
-        var result = await Service("employee", null).SignGuardianAsync("no-store", SignDto(1));
+        var service = Service("employee", null);
+        var result = await service.SignGuardianAsync("no-store", SignDto(1), await VerifyAsync(service, "no-store"));
         Assert.False(result.Success);
+        Assert.Equal("DOCUMENT_STORAGE_UNAVAILABLE", result.ErrorCode);
         Assert.Equal("awaiting_guardian_signature", (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).Status);
+    }
+
+    [Fact]
+    public async Task 邀请默认直发监护人邮箱且不把链接回传员工_转发方式才返回链接()
+    {
+        await SeedEmploymentAsync();
+        var service = Service("employee", new MemoryStore());
+        var saved = await service.UpsertSelfAsync(Draft());
+        var invite = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision });
+        Assert.True(invite.Success, invite.Message);
+        Assert.True(invite.Data!.EmailSent);
+        Assert.Equal("email", invite.Data.DeliveryChannel);
+        Assert.Equal(string.Empty, invite.Data.SigningUrl);
+        Assert.Equal(saved.Data.GuardianEmail, _mail.LastTo);
+        Assert.StartsWith("https://hotbargain.vip/minor-employment/sign#token=", _mail.LastSigningUrl);
+        Assert.NotNull((await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id)).GuardianInviteEmailSentAtUtc);
+
+        // 改为转发：重新编辑生成新版本后，以 share 方式发起，只返回链接、不发邮件。
+        var edited = Draft(); edited.ExpectedVersion = 1; edited.ExpectedRevision = (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id)).Revision;
+        var next = await service.UpsertSelfAsync(edited);
+        var linksBefore = _mail.LinksSent;
+        var share = await service.InviteGuardianAsync(new() { Version = next.Data!.Version, Revision = next.Data.Revision, DeliverByEmail = false });
+        Assert.True(share.Success, share.Message);
+        Assert.False(share.Data!.EmailSent);
+        Assert.Contains("#token=", share.Data.SigningUrl);
+        Assert.Equal(linksBefore, _mail.LinksSent);
+    }
+
+    [Fact]
+    public async Task 邮件发送失败时邀请仍有效并回传链接供转发()
+    {
+        await SeedEmploymentAsync();
+        var failing = new FakeGuardianEmail { Fail = true };
+        var service = Service("employee", new MemoryStore(), mail: failing);
+        var saved = await service.UpsertSelfAsync(Draft());
+        var invite = await service.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision });
+        Assert.True(invite.Success, invite.Message);
+        Assert.False(invite.Data!.EmailSent);
+        Assert.NotNull(invite.Data.EmailError);
+        Assert.Contains("#token=", invite.Data.SigningUrl);
+        Assert.Equal("awaiting_guardian_signature", (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(saved.Data.Id)).Status);
+    }
+
+    [Fact]
+    public async Task 未通过邮箱验证不能查看或签署_会话只返回打码邮箱()
+    {
+        var row = await SeedAsync("employee", 1, "fresh-token");
+        var service = Service("employee", new MemoryStore());
+        var session = await service.GetGuardianSessionAsync("fresh-token");
+        Assert.True(session.Success, session.Message);
+        Assert.False(session.Data!.EmailVerified);
+        Assert.Equal("p***@example.test", session.Data.MaskedGuardianEmail);
+        var preview = await service.GetGuardianAsync("fresh-token");
+        Assert.Equal(EmployeeMinorComplianceService.GuardianNotVerifiedCode, preview.ErrorCode);
+        var sign = await service.SignGuardianAsync("fresh-token", SignDto(1), "forged-session");
+        Assert.Equal(EmployeeMinorComplianceService.GuardianNotVerifiedCode, sign.ErrorCode);
+        Assert.Equal("awaiting_guardian_signature", (await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id)).Status);
+    }
+
+    [Fact]
+    public async Task 验证码错五次作废_冷却期内不能重发_通过后同码不能再用()
+    {
+        var row = await SeedAsync("employee", 1, "otp-token");
+        var service = Service("employee", new MemoryStore());
+        Assert.True((await service.SendGuardianCodeAsync("otp-token")).Success);
+        Assert.Equal("GUARDIAN_CODE_COOLDOWN", (await service.SendGuardianCodeAsync("otp-token")).ErrorCode);
+        var correct = _mail.LastCode!;
+        var wrong = correct == "000000" ? "111111" : "000000";
+        for (var i = 0; i < 4; i++) Assert.Equal("GUARDIAN_CODE_INVALID", (await service.VerifyGuardianCodeAsync("otp-token", wrong)).ErrorCode);
+        Assert.Equal("GUARDIAN_CODE_LOCKED", (await service.VerifyGuardianCodeAsync("otp-token", wrong)).ErrorCode);
+        // 锁定后正确的码也不再接受，必须重发。
+        Assert.Equal("GUARDIAN_CODE_LOCKED", (await service.VerifyGuardianCodeAsync("otp-token", correct)).ErrorCode);
+
+        await _db.Updateable<EmployeeMinorCompliance>().SetColumns(x => x.GuardianOtpSentAtUtc == DateTime.UtcNow.AddMinutes(-2)).Where(x => x.Id == row.Id).ExecuteCommandAsync();
+        Assert.True((await service.SendGuardianCodeAsync("otp-token")).Success);
+        var fresh = _mail.LastCode!;
+        var ok = await service.VerifyGuardianCodeAsync("otp-token", fresh);
+        Assert.True(ok.Success, ok.Message);
+        Assert.Equal("GUARDIAN_CODE_EXPIRED", (await service.VerifyGuardianCodeAsync("otp-token", fresh)).ErrorCode);
+        Assert.True((await service.GetGuardianAsync("otp-token", ok.Data)).Success);
+        Assert.False((await service.GetGuardianAsync("otp-token", ok.Data + "x")).Success);
+        var stored = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id);
+        Assert.NotNull(stored.GuardianEmailVerifiedAtUtc);
+        Assert.NotEqual(fresh, stored.GuardianSessionHash);
+    }
+
+    [Fact]
+    public async Task 同一链接最多发送五次验证码()
+    {
+        var row = await SeedAsync("employee", 1, "limit-token");
+        var service = Service("employee", new MemoryStore());
+        for (var i = 0; i < EmployeeMinorComplianceService.GuardianCodeMaxSends; i++)
+        {
+            await _db.Updateable<EmployeeMinorCompliance>().SetColumns(x => x.GuardianOtpSentAtUtc == DateTime.UtcNow.AddMinutes(-5)).Where(x => x.Id == row.Id).ExecuteCommandAsync();
+            Assert.True((await service.SendGuardianCodeAsync("limit-token")).Success);
+        }
+        await _db.Updateable<EmployeeMinorCompliance>().SetColumns(x => x.GuardianOtpSentAtUtc == DateTime.UtcNow.AddMinutes(-5)).Where(x => x.Id == row.Id).ExecuteCommandAsync();
+        Assert.Equal("GUARDIAN_CODE_SEND_LIMIT", (await service.SendGuardianCodeAsync("limit-token")).ErrorCode);
+        Assert.Equal(EmployeeMinorComplianceService.GuardianCodeMaxSends, _mail.CodesSent);
+    }
+
+    [Fact]
+    public async Task 签署审计记录邮箱核验时间与来源()
+    {
+        var row = await SeedAsync("employee", 1, "audit-token");
+        var service = Service("employee", new MemoryStore());
+        var session = await VerifyAsync(service, "audit-token");
+        var sign = await service.SignGuardianAsync("audit-token", SignDto(1), session, "203.0.113.9", "Mozilla/5.0 Test");
+        Assert.True(sign.Success, sign.Message);
+        var audit = await _db.Queryable<EmployeeMinorComplianceAudit>().Where(x => x.ComplianceId == row.Id && x.Action == "guardian_signed").FirstAsync();
+        Assert.Contains("203.0.113.9", audit.MetadataJson);
+        Assert.Contains("emailVerifiedAtUtc", audit.MetadataJson);
+        Assert.Contains("p***@example.test", audit.MetadataJson);
+        var stored = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(row.Id);
+        Assert.Null(stored.GuardianSessionHash);
+        Assert.NotNull(stored.GuardianEmailVerifiedAtUtc);
+    }
+
+    [Fact]
+    public async Task 店长发起请求_只列可管理门店未成年员工_重复发起幂等_提交审核后自动完成()
+    {
+        await SeedEmploymentAsync();
+        await _db.Insertable(new User { UserGUID = "employee", Username = "teen", FullName = "Teen Worker", IsActive = true }).ExecuteCommandAsync();
+        await _db.Insertable(new User { UserGUID = "adult", Username = "adult", FullName = "Adult Worker", IsActive = true }).ExecuteCommandAsync();
+        await _db.Insertable(new UserStore { UserGUID = "adult", StoreGUID = "store-01", IsPrimary = true }).ExecuteCommandAsync();
+        await _db.Insertable(new EmployeeProfile { UserGUID = "adult", Birthday = new DateTime(1990, 1, 1) }).ExecuteCommandAsync();
+        await _db.Insertable(new Store { StoreGUID = "store-02", StoreCode = "02", Address = "2 Other St, Sydney NSW 2000" }).ExecuteCommandAsync();
+        await _db.Insertable(new User { UserGUID = "other-teen", Username = "other", FullName = "Other Teen", IsActive = true }).ExecuteCommandAsync();
+        await _db.Insertable(new UserStore { UserGUID = "other-teen", StoreGUID = "store-02", IsPrimary = true }).ExecuteCommandAsync();
+        await _db.Insertable(new EmployeeProfile { UserGUID = "other-teen", Birthday = new DateTime(2011, 6, 1) }).ExecuteCommandAsync();
+        var managerScope = new CurrentUserManageableStoreScope { IsAllowed = true, IsAuthenticated = true, IsStoreManager = true, StoreGuids = ["store-01"], StoreCodes = ["01"] };
+        var manager = Service("manager", new MemoryStore(), managerScope);
+
+        var candidates = await manager.GetManagerCandidatesAsync(null);
+        Assert.True(candidates.Success, candidates.Message);
+        var only = Assert.Single(candidates.Data!);
+        Assert.Equal("employee", only.UserGUID);
+        Assert.Equal("Teen Worker", only.EmployeeName);
+        Assert.Equal("FORBIDDEN", (await manager.GetManagerCandidatesAsync("02")).ErrorCode);
+        Assert.Equal("FORBIDDEN", (await manager.CreateRequestAsync(new() { UserGUID = "other-teen" })).ErrorCode);
+        Assert.Equal("NOT_MINOR", (await manager.CreateRequestAsync(new() { UserGUID = "adult" })).ErrorCode);
+
+        var created = await manager.CreateRequestAsync(new() { UserGUID = "employee", Note = "本周内填好" });
+        Assert.True(created.Success, created.Message);
+        var again = await manager.CreateRequestAsync(new() { UserGUID = "employee" });
+        Assert.Equal(created.Data!.Id, again.Data!.Id);
+        Assert.Equal(1, await _db.Queryable<EmployeeMinorComplianceRequest>().CountAsync());
+        Assert.NotNull((await manager.GetManagerCandidatesAsync(null)).Data!.Single().OpenRequest);
+
+        var employee = Service("employee", new MemoryStore());
+        var mine = await employee.GetSelfRequestsAsync();
+        Assert.Equal("本周内填好", Assert.Single(mine.Data!).Note);
+        var saved = await employee.UpsertSelfAsync(Draft());
+        await employee.InviteGuardianAsync(new() { Version = saved.Data!.Version, Revision = saved.Data.Revision });
+        var token = _mail.LastSigningUrl!.Split("#token=")[1];
+        var sign = SignDto(1); sign.SignedName = saved.Data.GuardianName;
+        Assert.True((await employee.SignGuardianAsync(token, sign, await VerifyAsync(employee, token))).Success);
+        Assert.True((await employee.SubmitAsync(1)).Success);
+        var closed = await _db.Queryable<EmployeeMinorComplianceRequest>().InSingleAsync(created.Data.Id);
+        Assert.Equal(EmployeeMinorComplianceRequest.StatusCompleted, closed.Status);
+        Assert.Equal(saved.Data.Id, closed.CompletedComplianceId);
+        Assert.Empty((await employee.GetSelfRequestsAsync()).Data!);
+    }
+
+    [Fact]
+    public async Task 店长可撤销未完成请求_撤销后不能重复撤销()
+    {
+        await SeedEmploymentAsync();
+        await _db.Insertable(new User { UserGUID = "employee", Username = "teen", IsActive = true }).ExecuteCommandAsync();
+        var managerScope = new CurrentUserManageableStoreScope { IsAllowed = true, IsAuthenticated = true, StoreGuids = ["store-01"], StoreCodes = ["01"] };
+        var manager = Service("manager", new MemoryStore(), managerScope);
+        var created = await manager.CreateRequestAsync(new() { UserGUID = "employee" });
+        Assert.True((await manager.CancelRequestAsync(created.Data!.Id)).Success);
+        Assert.Equal("REQUEST_CLOSED", (await manager.CancelRequestAsync(created.Data.Id)).ErrorCode);
+        // 撤销后可以重新发起。
+        Assert.True((await manager.CreateRequestAsync(new() { UserGUID = "employee" })).Success);
+        var outsider = Service("outsider", new MemoryStore(), new CurrentUserManageableStoreScope { IsAllowed = true, IsAuthenticated = true, StoreGuids = ["store-99"], StoreCodes = ["99"] });
+        var open = await _db.Queryable<EmployeeMinorComplianceRequest>().Where(x => x.Status == "open").FirstAsync();
+        Assert.Equal("FORBIDDEN", (await outsider.CancelRequestAsync(open.Id)).ErrorCode);
     }
 
     private EmployeeMinorComplianceGuardianSignDto SignDto(int version) => new() { Version = version, SignedName = "Parent", SignatureData = EmployeeMinorComplianceDocumentTests.Signature(), ConfirmRelationship = true, ConfirmConsent = true, ConfirmBackupContact = true, ConsentScope = EmployeeMinorComplianceService.ServerConsentScope };
@@ -175,14 +360,24 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         await _db.Insertable(new UserStore { UserGUID = "employee", StoreGUID = "store-01", IsPrimary = true }).ExecuteCommandAsync();
         await _db.Insertable(new EmployeeProfile { UserGUID = "employee", Birthday = new DateTime(2012, 1, 1) }).ExecuteCommandAsync();
     }
-    private EmployeeMinorComplianceService Service(string actor, IEmployeeMinorDocumentStore? storage)
+    private EmployeeMinorComplianceService Service(string actor, IEmployeeMinorDocumentStore? storage, CurrentUserManageableStoreScope? scopeValue = null, IMinorGuardianEmailSender? mail = null)
     {
         var context = (SqlSugarContext)RuntimeHelpers.GetUninitializedObject(typeof(SqlSugarContext));
         typeof(SqlSugarContext).GetField("_db", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(context, _db);
         var current = Mock.Of<ICurrentUserService>(x => x.GetCurrentUserGuid() == actor && x.GetCurrentUsername() == actor);
         var scope = new Mock<ICurrentUserManageableStoreScopeService>();
-        scope.Setup(x => x.GetScopeAsync()).ReturnsAsync(new CurrentUserManageableStoreScope { IsAllowed = true, IsAdmin = true, IsAuthenticated = true });
-        return new(context, current, NullLogger<EmployeeMinorComplianceService>.Instance, scope.Object, storage);
+        scope.Setup(x => x.GetScopeAsync()).ReturnsAsync(scopeValue ?? new CurrentUserManageableStoreScope { IsAllowed = true, IsAdmin = true, IsAuthenticated = true });
+        return new(context, current, NullLogger<EmployeeMinorComplianceService>.Instance, scope.Object, storage, mail ?? _mail);
+    }
+
+    /// <summary>走完监护人邮箱验证：发验证码 → 从假邮箱取码 → 校验，返回会话密钥。</summary>
+    private async Task<string> VerifyAsync(EmployeeMinorComplianceService service, string token)
+    {
+        var sent = await service.SendGuardianCodeAsync(token);
+        Assert.True(sent.Success, sent.Message);
+        var verified = await service.VerifyGuardianCodeAsync(token, _mail.LastCode!);
+        Assert.True(verified.Success, verified.Message);
+        return verified.Data!;
     }
     private async Task<EmployeeMinorCompliance> SeedAsync(string user, int version, string token)
     {
@@ -192,6 +387,28 @@ public sealed class EmployeeMinorComplianceLifecycleTests : IDisposable
         return row;
     }
     public void Dispose() { _db.Dispose(); File.Delete(_path); }
+
+    private sealed class FakeGuardianEmail : IMinorGuardianEmailSender
+    {
+        public bool Fail { get; set; }
+        public string? LastTo { get; private set; }
+        public string? LastSigningUrl { get; private set; }
+        public string? LastCode { get; private set; }
+        public int CodesSent { get; private set; }
+        public int LinksSent { get; private set; }
+        public Task<ApiResponse<bool>> SendSigningLinkAsync(string toEmail, string guardianName, string childName, string signingUrl, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+        {
+            if (Fail) return Task.FromResult(ApiResponse<bool>.Error("smtp down", "GUARDIAN_EMAIL_SEND_FAILED"));
+            LastTo = toEmail; LastSigningUrl = signingUrl; LinksSent++;
+            return Task.FromResult(ApiResponse<bool>.OK(true));
+        }
+        public Task<ApiResponse<bool>> SendVerificationCodeAsync(string toEmail, string guardianName, string code, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+        {
+            if (Fail) return Task.FromResult(ApiResponse<bool>.Error("smtp down", "GUARDIAN_EMAIL_SEND_FAILED"));
+            LastTo = toEmail; LastCode = code; CodesSent++;
+            return Task.FromResult(ApiResponse<bool>.OK(true));
+        }
+    }
 
     private sealed class MemoryStore : IEmployeeMinorDocumentStore
     {

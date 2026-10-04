@@ -31,6 +31,7 @@ import {
   getMinorReminders,
   type MinorReminder,
 } from "./api";
+import { MinorEmployeeRequestsPanel } from "./minor-employee-requests";
 
 export function MinorRemindersScreen() {
   const { language } = useAppTranslation("attendance");
@@ -40,6 +41,8 @@ export function MinorRemindersScreen() {
   const user = useAuthStore((state) => state.user);
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("open");
+  // 顶部切换：排班提醒待办 / 未成年员工资料（店长发起填写）。
+  const [view, setView] = useState<"reminders" | "employees">("reminders");
   const [selected, setSelected] = useState<{
     row: MinorReminder;
     action: "acknowledge" | "escalate";
@@ -91,17 +94,33 @@ export function MinorRemindersScreen() {
         </Text>
         {storeCode ? <Chip>{storeCode}</Chip> : null}
         <SegmentedButtons
-          value={status}
-          onValueChange={setStatus}
+          value={view}
+          onValueChange={(value) => setView(value as "reminders" | "employees")}
           buttons={[
-            { value: "open", label: label("待处理", "Open") },
-            { value: "escalated", label: label("已升级", "Escalated") },
-            { value: "acknowledged", label: label("已知悉", "Noted") },
-            { value: "resolved", label: label("已解除", "Resolved") },
+            { value: "reminders", label: label("排班提醒", "Reminders") },
+            {
+              value: "employees",
+              label: label("未成年员工资料", "Under-18 staff"),
+            },
           ]}
         />
+        {view === "reminders" ? (
+          <SegmentedButtons
+            value={status}
+            onValueChange={setStatus}
+            buttons={[
+              { value: "open", label: label("待处理", "Open") },
+              { value: "escalated", label: label("已升级", "Escalated") },
+              { value: "acknowledged", label: label("已知悉", "Noted") },
+              { value: "resolved", label: label("已解除", "Resolved") },
+            ]}
+          />
+        ) : null}
       </View>
-      {query.isError ? (
+      {view === "employees" ? (
+        <MinorEmployeeRequestsPanel storeCode={storeCode} en={en} />
+      ) : null}
+      {view === "reminders" && query.isError ? (
         <View style={styles.header}>
           <Text accessibilityRole="alert">{query.error.message}</Text>
           <Button onPress={() => query.refetch()}>
@@ -109,101 +128,104 @@ export function MinorRemindersScreen() {
           </Button>
         </View>
       ) : null}
-      <FlatList
-        data={rows}
-        keyExtractor={(row) => String(row.id)}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl
-            refreshing={query.isRefetching}
-            onRefresh={() => query.refetch()}
-          />
-        }
-        ListEmptyComponent={
-          query.isPending ? (
-            <ActivityIndicator />
-          ) : !query.isError ? (
-            <Text style={styles.muted}>
-              {label("当前没有此状态的提醒", "No reminders with this status")}
-            </Text>
-          ) : null
-        }
-        ListFooterComponent={
-          query.hasNextPage ? (
-            <Button
-              loading={query.isFetchingNextPage}
-              onPress={() => query.fetchNextPage()}
-            >
-              {label("加载更多", "Load more")}
-            </Button>
-          ) : null
-        }
-        renderItem={({ item }) => (
-          <Card mode="outlined" style={styles.card}>
-            <Card.Content style={styles.content}>
-              <Text variant="titleMedium">
-                {item.employeeName || item.userGUID}
-              </Text>
+      {view === "reminders" ? (
+        <FlatList
+          data={rows}
+          keyExtractor={(row) => String(row.id)}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={query.isRefetching}
+              onRefresh={() => query.refetch()}
+            />
+          }
+          ListEmptyComponent={
+            query.isPending ? (
+              <ActivityIndicator />
+            ) : !query.isError ? (
               <Text style={styles.muted}>
-                {item.storeCode} ·{" "}
-                {item.workDate?.slice(0, 10) ??
-                  label("日期待确认", "Date unconfirmed")}
+                {label("当前没有此状态的提醒", "No reminders with this status")}
               </Text>
-              <Text style={styles.category}>
-                {categories[item.ruleCategory] ?? item.ruleCategory}
-              </Text>
-              <Text>{item.message}</Text>
-              {item.actualMinutes != null && item.limitMinutes != null ? (
-                <Text>
-                  {label("已计算", "Calculated")}:{" "}
-                  {(item.actualMinutes / 60).toFixed(1)}h /{" "}
-                  {label("参考上限", "Limit")}:{" "}
-                  {(item.limitMinutes / 60).toFixed(1)}h
+            ) : null
+          }
+          ListFooterComponent={
+            query.hasNextPage ? (
+              <Button
+                loading={query.isFetchingNextPage}
+                onPress={() => query.fetchNextPage()}
+              >
+                {label("加载更多", "Load more")}
+              </Button>
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <Card mode="outlined" style={styles.card}>
+              <Card.Content style={styles.content}>
+                <Text variant="titleMedium">
+                  {item.employeeName || item.userGUID}
                 </Text>
-              ) : null}
-              {item.actionActor ? (
                 <Text style={styles.muted}>
-                  {item.actionActor}
-                  {item.actionComment ? ` · ${item.actionComment}` : ""}
+                  {item.storeCode} ·{" "}
+                  {item.workDate?.slice(0, 10) ??
+                    label("日期待确认", "Date unconfirmed")}
                 </Text>
-              ) : null}
-              {item.sourceUrl?.startsWith("https://") ? (
-                <Button
-                  icon="open-in-new"
-                  onPress={() => Linking.openURL(item.sourceUrl!)}
-                >
-                  {label("查看规则依据", "View source")}
-                </Button>
-              ) : null}
-            </Card.Content>
-            <Card.Actions>
-              {item.status !== "acknowledged" && item.status !== "resolved" ? (
-                <Button
-                  onPress={() => {
-                    mutation.reset();
-                    setComment("");
-                    setSelected({ row: item, action: "acknowledge" });
-                  }}
-                >
-                  {label("确认知悉", "Acknowledge")}
-                </Button>
-              ) : null}
-              {item.status !== "escalated" && item.status !== "resolved" ? (
-                <Button
-                  mode="contained-tonal"
-                  onPress={() => {
-                    mutation.reset();
-                    setComment("");
-                    setSelected({ row: item, action: "escalate" });
-                  }}
-                >
-                  {label("升级跟进", "Escalate")}
-                </Button>
-              ) : null}
-            </Card.Actions>
-          </Card>
-        )}
-      />
+                <Text style={styles.category}>
+                  {categories[item.ruleCategory] ?? item.ruleCategory}
+                </Text>
+                <Text>{item.message}</Text>
+                {item.actualMinutes != null && item.limitMinutes != null ? (
+                  <Text>
+                    {label("已计算", "Calculated")}:{" "}
+                    {(item.actualMinutes / 60).toFixed(1)}h /{" "}
+                    {label("参考上限", "Limit")}:{" "}
+                    {(item.limitMinutes / 60).toFixed(1)}h
+                  </Text>
+                ) : null}
+                {item.actionActor ? (
+                  <Text style={styles.muted}>
+                    {item.actionActor}
+                    {item.actionComment ? ` · ${item.actionComment}` : ""}
+                  </Text>
+                ) : null}
+                {item.sourceUrl?.startsWith("https://") ? (
+                  <Button
+                    icon="open-in-new"
+                    onPress={() => Linking.openURL(item.sourceUrl!)}
+                  >
+                    {label("查看规则依据", "View source")}
+                  </Button>
+                ) : null}
+              </Card.Content>
+              <Card.Actions>
+                {item.status !== "acknowledged" &&
+                item.status !== "resolved" ? (
+                  <Button
+                    onPress={() => {
+                      mutation.reset();
+                      setComment("");
+                      setSelected({ row: item, action: "acknowledge" });
+                    }}
+                  >
+                    {label("确认知悉", "Acknowledge")}
+                  </Button>
+                ) : null}
+                {item.status !== "escalated" && item.status !== "resolved" ? (
+                  <Button
+                    mode="contained-tonal"
+                    onPress={() => {
+                      mutation.reset();
+                      setComment("");
+                      setSelected({ row: item, action: "escalate" });
+                    }}
+                  >
+                    {label("升级跟进", "Escalate")}
+                  </Button>
+                ) : null}
+              </Card.Actions>
+            </Card>
+          )}
+        />
+      ) : null}
       <Portal>
         <Dialog
           visible={selected !== null}

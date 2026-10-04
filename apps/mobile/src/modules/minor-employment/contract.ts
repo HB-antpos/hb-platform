@@ -4,6 +4,9 @@ import type {
   MinorEmploymentDraft,
   MinorEmploymentProfile,
   MinorEmploymentState,
+  MinorComplianceRequest,
+  MinorGuardianInviteResult,
+  MinorManagerCandidate,
   MinorOtherEmployer,
 } from "./types";
 type Raw = Record<string, unknown>;
@@ -118,8 +121,7 @@ export function mapProfile(payload: unknown): MinorEmploymentProfile {
     educationStatus: str(get(v, "educationStatus")),
     requiredToBeEnrolled: get(v, "requiredToBeEnrolled") as boolean | undefined,
     educationExemptionVerified: get(v, "educationExemptionVerified") as
-      | boolean
-      | undefined,
+      boolean | undefined,
     participationEndDate: str(get(v, "participationEndDate")).slice(0, 10),
     parentName: str(get(v, "guardianName") ?? get(v, "parentName")),
     parentPhone: str(get(v, "guardianPhone") ?? get(v, "parentPhone")),
@@ -173,6 +175,12 @@ export function mapProfile(payload: unknown): MinorEmploymentProfile {
     pickupPlan: str(get(co, "pickupPerson")),
     parentSignedAt: str(get(v, "guardianSignedAtUtc")) || undefined,
     parentSignatureName: str(get(v, "guardianSignedName")) || undefined,
+    guardianInviteChannel: inviteChannel(get(v, "guardianInviteChannel")),
+    guardianInviteEmailSentAt:
+      str(get(v, "guardianInviteEmailSentAtUtc")) || undefined,
+    guardianEmailVerifiedAt:
+      str(get(v, "guardianEmailVerifiedAtUtc")) || undefined,
+    guardianLinkActive: get(v, "guardianTokenActive") === true,
     status: status(get(v, "status")),
     version: num(get(v, "version")) || 1,
     revision: num(get(v, "revision") ?? get(v, "rowVersion")) || undefined,
@@ -278,5 +286,55 @@ export function mapSummary(payload: unknown) {
     warningCodes: Array.isArray(get(v, "warningCodes"))
       ? (get(v, "warningCodes") as string[])
       : [],
+  };
+}
+
+function inviteChannel(x: unknown): "email" | "share" | undefined {
+  const value = String(x ?? "").toLowerCase();
+  return value === "email" || value === "share" ? value : undefined;
+}
+
+export function mapInviteResult(x: unknown): MinorGuardianInviteResult {
+  const v = obj(x);
+  return {
+    version: num(get(v, "version")) || 1,
+    revision: num(get(v, "revision")) || undefined,
+    deliveryChannel: inviteChannel(get(v, "deliveryChannel")) ?? "share",
+    emailSent: get(v, "emailSent") === true,
+    maskedGuardianEmail: str(get(v, "maskedGuardianEmail")) || undefined,
+    emailError: str(get(v, "emailError")) || undefined,
+    signingUrl: str(get(v, "signingUrl")) || undefined,
+    expiresAt: str(get(v, "expiresAtUtc")) || undefined,
+  };
+}
+
+export function mapRequest(x: unknown): MinorComplianceRequest {
+  const v = obj(x);
+  const status = String(get(v, "status") ?? "open");
+  return {
+    id: num(get(v, "id")),
+    userGUID: str(get(v, "userGUID")),
+    employeeName: str(get(v, "employeeName")) || undefined,
+    storeCode: str(get(v, "storeCode")) || undefined,
+    status: status === "completed" || status === "cancelled" ? status : "open",
+    note: str(get(v, "note")) || undefined,
+    dueDate: str(get(v, "dueDate")) || undefined,
+    requestedByName: str(get(v, "requestedByName")) || undefined,
+    createdAt: str(get(v, "createdAt")) || undefined,
+  };
+}
+
+export function mapCandidate(x: unknown): MinorManagerCandidate {
+  const v = obj(x);
+  const open = get(v, "openRequest");
+  return {
+    userGUID: str(get(v, "userGUID")),
+    employeeName: str(get(v, "employeeName")),
+    storeCode: str(get(v, "storeCode")) || undefined,
+    age: num(get(v, "age")),
+    complianceStatus: str(get(v, "complianceStatus")) || undefined,
+    complianceVersion: num(get(v, "complianceVersion")) || undefined,
+    stateCode: str(get(v, "stateCode")) || undefined,
+    openRequest: open == null ? undefined : mapRequest(open),
   };
 }

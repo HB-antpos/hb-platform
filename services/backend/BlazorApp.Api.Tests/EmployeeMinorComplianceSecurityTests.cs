@@ -56,7 +56,9 @@ public sealed class EmployeeMinorComplianceSecurityTests : IDisposable
         var old = await SeedRecord("employee-self", "store-local", "awaiting_guardian_signature", token: token);
         await SeedRecord("employee-self", "store-local", "draft", version: 2);
         var service = Service("", allowed: false);
-        Assert.False((await service.GetGuardianAsync(token)).Success);
+        // 旧版本链接在会话校验之前就被拒绝，连验证码都不能申请。
+        Assert.Equal(EmployeeMinorComplianceService.VersionConflictCode, (await service.GetGuardianAsync(token)).ErrorCode);
+        Assert.Equal(EmployeeMinorComplianceService.VersionConflictCode, (await service.SendGuardianCodeAsync(token)).ErrorCode);
         Assert.False((await service.SignGuardianAsync(token, new() { Version = 1, SignedName = "Parent", SignatureData = EmployeeMinorComplianceDocumentTests.Signature(), ConfirmRelationship = true, ConfirmBackupContact = true, ConfirmConsent = true, ConsentScope = "Lawful employment only" })).Success);
         var saved = await _db.Queryable<EmployeeMinorCompliance>().InSingleAsync(old.Id);
         Assert.Null(saved.GuardianSignedAtUtc);
@@ -74,8 +76,9 @@ public sealed class EmployeeMinorComplianceSecurityTests : IDisposable
         second.GuardianTokenUsed = true;
         await _db.Updateable(second).ExecuteCommandAsync();
         var service = Service("", allowed: false);
-        Assert.False((await service.GetGuardianAsync(expired)).Success);
-        Assert.False((await service.GetGuardianAsync(used)).Success);
+        Assert.Equal("GUARDIAN_TOKEN_INVALID", (await service.GetGuardianAsync(expired)).ErrorCode);
+        Assert.Equal("GUARDIAN_TOKEN_INVALID", (await service.GetGuardianAsync(used)).ErrorCode);
+        Assert.Equal("GUARDIAN_TOKEN_INVALID", (await service.GetGuardianSessionAsync(expired)).ErrorCode);
     }
 
     [Fact]
