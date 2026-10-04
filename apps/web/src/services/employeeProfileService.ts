@@ -122,7 +122,7 @@ function asBoolean(value: unknown) {
   return value === true
 }
 
-function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatus {
+export function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatus {
   switch (asString(value)?.toLowerCase()) {
     case 'pending':
       return 'Pending'
@@ -132,6 +132,9 @@ function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatu
       return 'Rejected'
     case 'superseded':
       return 'Superseded'
+    case 'withdrawn':
+      // 员工本人撤回，与作废一样是不可操作的终态。
+      return 'Withdrawn'
     default:
       // 未知状态必须保持不可操作，不能误判为待审核。
       return 'Superseded'

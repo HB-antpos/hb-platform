@@ -143,6 +143,125 @@ public sealed class EmployeeProfileSensitiveChangeService
         return await ReplacePendingAsync(userGuid, snapshot, identityPhotoObjectKey: null, preservePendingPhoto: false);
     }
 
+    /// <summary>
+    /// 员工撤回本人待审申请。与驳回共用同一把媒体锁、Serializable 事务和 Status==Pending 条件更新，
+    /// 撤回后不存在 Pending，员工可以重新提交。
+    /// </summary>
+    public async Task<ApiResponse<EmployeeProfileSensitiveChangeDetailDto>> WithdrawSelfAsync(
+        EmployeeProfileSensitiveWithdrawDto? dto = null
+    )
+    {
+        var userGuid = _currentUser.GetCurrentUserGuid();
+        if (string.IsNullOrWhiteSpace(userGuid))
+        {
+            return ApiResponse<EmployeeProfileSensitiveChangeDetailDto>.Error(
+                "未找到当前用户",
+                "CURRENT_USER_NOT_FOUND"
+            );
+        }
+        var db = _context.Db;
+        var actor = _currentUser.GetCurrentUsername();
+        var now = DateTime.UtcNow;
+        EmployeeProfileSensitiveChangeRequest? request;
+        EmployeeProfile? profile;
+        await using (await EmployeeProfileMediaLock.AcquireAsync(
+            db,
+            userGuid,
+            "sensitive-change",
+            _logger
+        ))
+        {
+            await db.Ado.BeginTranAsync(IsolationLevel.Serializable);
+            try
+            {
+                // 关键逻辑：锁内重读本人当前待审申请，不能撤回取得锁之前读到的旧快照。
+                request = await db.Queryable<EmployeeProfileSensitiveChangeRequest>()
+                    .FirstAsync(item => item.UserGUID == userGuid
+                        && item.Status == EmployeeProfileSensitiveChangeStatus.Pending);
+                if (request is null
+                    || (dto?.RequestId is int expectedId && expectedId != request.RequestId))
+                {
+                    // 没有待审申请，或页面上的申请已被审核/覆盖：统一按「申请已处理」返回，交由客户端刷新。
+                    await db.Ado.RollbackTranAsync();
+                    return RequestNotPending();
+                }
+                profile = await db.Queryable<EmployeeProfile>()
+                    .FirstAsync(item => item.UserGUID == userGuid && !item.IsDeleted);
+                var changed = await db.Updateable<EmployeeProfileSensitiveChangeRequest>()
+                    .SetColumns(item => new EmployeeProfileSensitiveChangeRequest
+                    {
+                        Status = EmployeeProfileSensitiveChangeStatus.Withdrawn,
+                        // 撤回复用审核时间/操作人两列记录终结时间与撤回人，不写审核原因。
+                        ReviewedAt = now,
+                        ReviewedBy = actor,
+                    })
+                    .Where(item => item.RequestId == request.RequestId
+                        && item.UserGUID == userGuid
+                        && item.Status == EmployeeProfileSensitiveChangeStatus.Pending)
+                    .ExecuteCommandAsync();
+                if (changed != 1)
+                {
+                    await db.Ado.RollbackTranAsync();
+                    return RequestNotPending();
+                }
+                // 待审证件照随申请终结进入清理队列；提交后的即时删除失败时由后台 worker 重试。
+                await ScheduleTicketCleanupAsync(
+                    request.RequestId,
+                    request.IdentityPhotoObjectKey,
+                    userGuid
+                );
+                await db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await db.Ado.RollbackTranAsync();
+                throw;
+            }
+        }
+        request.Status = EmployeeProfileSensitiveChangeStatus.Withdrawn;
+        request.ReviewedAt = now;
+        request.ReviewedBy = actor;
+        await CleanupObjectAsync(request.IdentityPhotoObjectKey, null, userGuid, "撤回待审证件照", request.RequestId);
+        return ApiResponse<EmployeeProfileSensitiveChangeDetailDto>.OK(MapDetail(request, profile), "申请已撤回");
+    }
+
+    /// <summary>本人申请历史，按提交时间倒序；只返回状态、字段标识与审核信息，不返回任何敏感值。</summary>
+    public async Task<ApiResponse<List<EmployeeProfileSensitiveChangeHistoryItemDto>>> GetSelfHistoryAsync(int take)
+    {
+        var userGuid = _currentUser.GetCurrentUserGuid();
+        if (string.IsNullOrWhiteSpace(userGuid))
+        {
+            return ApiResponse<List<EmployeeProfileSensitiveChangeHistoryItemDto>>.Error(
+                "未找到当前用户",
+                "CURRENT_USER_NOT_FOUND"
+            );
+        }
+        var limit = Math.Clamp(take, 1, 50);
+        var requests = await _context.Db.Queryable<EmployeeProfileSensitiveChangeRequest>()
+            .Where(item => item.UserGUID == userGuid)
+            .OrderBy(item => item.SubmittedAt, SqlSugar.OrderByType.Desc)
+            .OrderBy(item => item.RequestId, SqlSugar.OrderByType.Desc)
+            .Take(limit)
+            .ToListAsync();
+        // 正式资料只用于兼容缺少字段快照的历史申请，绝不进入响应。
+        var profile = requests.Any(item => string.IsNullOrWhiteSpace(item.ChangedFieldsJson))
+            ? await _context.Db.Queryable<EmployeeProfile>()
+                .FirstAsync(item => item.UserGUID == userGuid && !item.IsDeleted)
+            : null;
+        return ApiResponse<List<EmployeeProfileSensitiveChangeHistoryItemDto>>.OK(
+            requests.Select(item => new EmployeeProfileSensitiveChangeHistoryItemDto
+            {
+                RequestId = item.RequestId,
+                Status = FormatStatus(item.Status),
+                ChangedFields = ResolveChangedFields(profile, item),
+                SubmittedAt = item.SubmittedAt,
+                // 被覆盖/作废的申请没有审核时间，用作废时间作为终结时间供时间线展示。
+                ReviewedAt = item.ReviewedAt ?? item.SupersededAt,
+                ReviewReason = item.ReviewReason,
+            }).ToList()
+        );
+    }
+
     public async Task<ApiResponse<PagedResult<EmployeeProfileSensitiveChangeSummaryDto>>> GetAdminListAsync(
         EmployeeProfileSensitiveChangeQueryDto query
     ) => await GetReviewListAsync(query);
@@ -159,7 +278,10 @@ public sealed class EmployeeProfileSensitiveChangeService
         var db = _context.Db;
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize, 1, 100);
-        var status = ParseStatus(query.Status);
+        // Processed 表示「已处理」分段：除 Pending 外的全部终态（批准/驳回/作废/撤回）。
+        var processedOnly = string.Equals(query.Status?.Trim(), "Processed", StringComparison.OrdinalIgnoreCase);
+        var status = processedOnly ? null : ParseStatus(query.Status);
+        var userGuidFilter = Normalize(query.UserGuid);
         var source = db.Queryable<EmployeeProfileSensitiveChangeRequest, User, EmployeeProfile>(
             (request, user, profile) => new object[]
             {
@@ -194,6 +316,16 @@ public sealed class EmployeeProfileSensitiveChangeService
         if (status.HasValue)
         {
             source = source.Where((request, user, profile) => request.Status == status.Value);
+        }
+        else if (processedOnly)
+        {
+            source = source.Where((request, user, profile) =>
+                request.Status != EmployeeProfileSensitiveChangeStatus.Pending);
+        }
+        if (userGuidFilter is not null)
+        {
+            // 关键逻辑：按员工过滤叠加在上方审核范围之后，超范围员工只会得到空列表，不泄露是否存在申请。
+            source = source.Where((request, user, profile) => request.UserGUID == userGuidFilter);
         }
         if (!string.IsNullOrWhiteSpace(query.Search))
         {

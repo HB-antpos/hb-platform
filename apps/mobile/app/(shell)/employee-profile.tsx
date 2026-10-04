@@ -10,6 +10,7 @@ import {
   Chip,
   HelperText,
   IconButton,
+  ProgressBar,
   SegmentedButtons,
   Snackbar,
   Surface,
@@ -22,18 +23,34 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import {
   deleteEmployeeProfileImageApi,
   getMyEmployeeProfileApi,
+  getMySensitiveChangeHistoryApi,
   getMySensitiveChangeRequestApi,
   updateMyEmployeeProfileApi,
   upsertMySensitiveChangeRequestApi,
+  withdrawMySensitiveChangeRequestApi,
 } from "@/modules/employee-profile/api";
 import { AvatarEditorField } from "@/modules/employee-profile/AvatarEditorField";
+import { BirthdayPickerField } from "@/modules/employee-profile/BirthdayPickerField";
 import { calculateAge, normalizeBirthday, validateBirthday } from "@/modules/employee-profile/birthday";
 import {
   getEmployeeProfileQueryKey,
   getEmployeeSensitiveChangeQueryKey,
+  getEmployeeSensitiveHistoryQueryKey,
   resolveEmployeeProfileIdentity,
   shouldResetEmployeeProfileDraft,
 } from "@/modules/employee-profile/cache-keys";
+import {
+  PROFILE_COMPLETENESS_LABEL_KEYS,
+  getProfileCompleteness,
+} from "@/modules/employee-profile/profile-completeness";
+import {
+  buildSensitiveReviewTimeline,
+  canResubmitSensitiveRequest,
+  canWithdrawSensitiveRequest,
+  getEarlierSensitiveRequests,
+  getResubmitSection,
+  type ReviewTimelineStepState,
+} from "@/modules/employee-profile/review-progress";
 import { ProfileSummaryRow } from "@/modules/employee-profile/ProfileSummaryRow";
 import {
   buildSensitiveReviewPayload,
@@ -54,6 +71,7 @@ import {
   getSensitiveAccountSummary,
   getSensitiveStatusView,
   isEmailChangeValid,
+  isSensitiveVersionConflict,
   isValidEmail,
   refreshEmployeeProfileAfterIdentityMutation,
   selectSensitiveDraft,
@@ -66,6 +84,7 @@ import {
   EMPLOYMENT_TYPES,
   GENDERS,
   type EmployeeProfile,
+  type EmployeeProfileSensitiveChangeStatus,
   type SensitiveEmployeeProfilePayload,
   type UpdateEmployeeProfilePayload,
 } from "@/modules/employee-profile/types";
@@ -106,6 +125,22 @@ function formatDateTime(value: string | undefined, locale: string) {
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(parsed);
 }
 
+// 审核状态与时间线配色：待审蓝、批准绿、驳回红、撤回/失效灰。
+const STATUS_TONES: Record<EmployeeProfileSensitiveChangeStatus, { background: string; text: string }> = {
+  Pending: { background: "#EAF1FF", text: PROFILE_BLUE },
+  Approved: { background: "#ECFDF3", text: HB_COLORS.success },
+  Rejected: { background: "#FEF3F2", text: HB_COLORS.danger },
+  Withdrawn: { background: HB_COLORS.surfaceMuted, text: HB_COLORS.textSecondary },
+  Superseded: { background: HB_COLORS.surfaceMuted, text: HB_COLORS.textSecondary },
+};
+const TIMELINE_DOT_COLORS: Record<ReviewTimelineStepState, string> = {
+  done: HB_COLORS.success,
+  current: PROFILE_BLUE,
+  upcoming: HB_COLORS.outlineMuted,
+  failed: HB_COLORS.danger,
+  stopped: HB_COLORS.textSecondary,
+};
+
 function getInitials(value: string) {
   const words = value.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return "?";
@@ -125,6 +160,7 @@ export default function EmployeeProfileScreen() {
     access.hasPermission(PERMISSIONS.EmployeeProfiles.Edit) &&
     access.hasPermission(PERMISSIONS.EmployeeProfiles.EditPositionType);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const sessionKind = useAuthStore((state) => state.sessionKind);
   const [view, setView] = useState<EmployeeProfileView>("overview");
   const [avatarEditing, setAvatarEditing] = useState(false);
   const [activeSensitiveSection, setActiveSensitiveSection] = useState<SensitiveProfileSection>("banking");
@@ -177,6 +213,7 @@ export default function EmployeeProfileScreen() {
   const formValues = formIdentityRef.current === userIdentity ? storedFormValues : EMPTY_FORM;
   const profileQueryKey = useMemo(() => getEmployeeProfileQueryKey(userIdentity), [userIdentity]);
   const sensitiveQueryKey = useMemo(() => getEmployeeSensitiveChangeQueryKey(userIdentity), [userIdentity]);
+  const historyQueryKey = useMemo(() => getEmployeeSensitiveHistoryQueryKey(userIdentity), [userIdentity]);
   const isOperationCurrent = useCallback((submittedIdentity: string, submittedScope: number) => {
     const auth = useAuthStore.getState();
     return shouldApplyEmployeeProfileOperation({
@@ -201,6 +238,12 @@ export default function EmployeeProfileScreen() {
     queryFn: getMySensitiveChangeRequestApi,
     enabled: Boolean(isAuthenticated && user),
     refetchInterval: (query) => getIdentityPhotoRefetchDelay(query.state.data?.identityPhotoUrlExpiresAt),
+  });
+  // 历史只含状态与字段标识，仅在审核进度页加载。
+  const historyQuery = useQuery({
+    queryKey: historyQueryKey,
+    queryFn: () => getMySensitiveChangeHistoryApi(20),
+    enabled: Boolean(isAuthenticated && user) && view === "progress",
   });
   const isBasicDirty = useMemo(
     () => hasBasicProfileChanges(formValues, profileQuery.data, { canEditPositionType }),
@@ -299,8 +342,12 @@ export default function EmployeeProfileScreen() {
 
   const refreshProfileQueries = useCallback(async () => {
     if (!shouldRefreshSensitiveProfile("manual", isAuthenticated, AppState.currentState)) return;
-    await Promise.all([profileQuery.refetch(), sensitiveQuery.refetch()]);
-  }, [isAuthenticated, profileQuery, sensitiveQuery]);
+    await Promise.all([
+      profileQuery.refetch(),
+      sensitiveQuery.refetch(),
+      view === "progress" ? historyQuery.refetch() : Promise.resolve(),
+    ]);
+  }, [historyQuery, isAuthenticated, profileQuery, sensitiveQuery, view]);
 
   const refreshAfterSensitiveConflict = useCallback(async (
     conflictIdentity: string,
@@ -348,7 +395,8 @@ export default function EmployeeProfileScreen() {
     if (!shouldRefreshSensitiveProfile("focus", isAuthenticated, AppState.currentState)) return;
     void queryClient.invalidateQueries({ queryKey: profileQueryKey });
     void queryClient.invalidateQueries({ queryKey: sensitiveQueryKey });
-  }, [isAuthenticated, profileQueryKey, queryClient, sensitiveQueryKey]));
+    void queryClient.invalidateQueries({ queryKey: historyQueryKey });
+  }, [historyQueryKey, isAuthenticated, profileQueryKey, queryClient, sensitiveQueryKey]));
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
@@ -407,7 +455,9 @@ export default function EmployeeProfileScreen() {
     },
     onSuccess: (_request, variables) => {
       if (!isOperationCurrent(variables.identity, variables.scope)) return;
-      setView("overview");
+      void queryClient.invalidateQueries({ queryKey: getEmployeeSensitiveHistoryQueryKey(variables.identity) });
+      // 提交后直接进入审核进度页，员工能立刻看到时间线与本次变更。
+      setView("progress");
       showMessage(t("messages.sensitiveSubmitSuccess"));
     },
     onError: (error, variables) => {
@@ -429,6 +479,30 @@ export default function EmployeeProfileScreen() {
       showMessage(getErrorMessage(error, "messages.sensitiveSubmitFailed"));
     },
   });
+  const withdrawMutation = useMutation({
+    mutationFn: ({ requestId }: { identity: string; scope: number; requestId: number }) =>
+      withdrawMySensitiveChangeRequestApi(requestId),
+    onSuccess: (request, variables) => {
+      if (!isOperationCurrent(variables.identity, variables.scope)) return;
+      queryClient.setQueryData(getEmployeeSensitiveChangeQueryKey(variables.identity), request);
+      void queryClient.invalidateQueries({ queryKey: getEmployeeSensitiveHistoryQueryKey(variables.identity) });
+      showMessage(t("progress.withdrawSuccess"));
+    },
+    onError: (error, variables) => {
+      if (!isOperationCurrent(variables.identity, variables.scope)) return;
+      if (isSensitiveVersionConflict(error)) {
+        // 409：申请已被审核或覆盖，刷新为服务端最新状态，不再重试旧申请编号。
+        void queryClient.invalidateQueries({ queryKey: getEmployeeSensitiveChangeQueryKey(variables.identity) });
+        void queryClient.invalidateQueries({ queryKey: getEmployeeSensitiveHistoryQueryKey(variables.identity) });
+        showMessage(t("progress.withdrawConflict"));
+        return;
+      }
+      showMessage(getErrorMessage(error, "progress.withdrawFailed"));
+    },
+  });
+  const withdrawPendingForCurrentIdentity = withdrawMutation.isPending
+    && withdrawMutation.variables?.identity === userIdentity
+    && withdrawMutation.variables?.scope === currentIdentityScope;
   const savePendingForCurrentIdentity = saveMutation.isPending && isSavingCurrentIdentity;
   const sensitivePendingForCurrentIdentity = sensitiveMutation.isPending
     && isSubmittingSensitiveCurrentIdentity;
@@ -450,7 +524,12 @@ export default function EmployeeProfileScreen() {
   }, [t]);
   const birthdayError = validateBirthday(sensitiveFormValues.birthday);
   const isBirthdayChanged = sensitiveFormValues.birthday.trim() !== formalBirthday;
-  const draftBirthdayAge = birthdayError ? null : calculateAge(sensitiveFormValues.birthday);
+  // 「已修改」标记与提交按钮的变更项数都以正式资料为基线，与后端固化的 ChangedFields 口径一致。
+  const draftChangedFields = useMemo(
+    () => new Set<string>(profileQuery.data ? getChangedSensitiveFields(profileQuery.data, sensitiveFormValues) : []),
+    [profileQuery.data, sensitiveFormValues]
+  );
+  const completeness = useMemo(() => getProfileCompleteness(profileQuery.data), [profileQuery.data]);
   const pendingIdentityPhotoRemoval = sensitiveQuery.data?.status === "Pending" && shouldShowPendingIdentityPhotoRemoval({
     changedFields: sensitiveChangedFields,
     pendingHasIdentityPhoto: sensitiveQuery.data.hasIdentityPhoto,
@@ -475,6 +554,30 @@ export default function EmployeeProfileScreen() {
     sensitiveEditRevisionRef.current = profileQuery.data.sensitiveRevision;
     setActiveSensitiveSection(section);
     setView("sensitive");
+  };
+
+  const handleWithdraw = () => {
+    const request = sensitiveQuery.data;
+    if (!canWithdrawSensitiveRequest(request) || !request) return;
+    const submittedIdentity = userIdentity;
+    const submittedScope = currentIdentityScope;
+    Alert.alert(t("progress.withdrawTitle"), t("progress.withdrawDescription"), [
+      { text: t("common:actions.cancel"), style: "cancel" },
+      {
+        text: t("progress.withdraw"),
+        style: "destructive",
+        onPress: () => withdrawMutation.mutate({
+          identity: submittedIdentity,
+          scope: submittedScope,
+          requestId: request.requestId,
+        }),
+      },
+    ]);
+  };
+
+  const handleResubmit = () => {
+    if (!canEditSensitive) return;
+    handleStartSensitiveEdit(getResubmitSection(sensitiveChangedFields));
   };
 
   const handleGoToBirthdayReview = () => {
@@ -636,6 +739,163 @@ export default function EmployeeProfileScreen() {
     );
   }
 
+  const renderSensitiveInput = (
+    field: Exclude<keyof SensitiveEmployeeProfilePayload, "birthday" | "expectedSensitiveRevision">,
+    options: { secureTextEntry?: boolean } = {}
+  ) => (
+    <View key={field} style={styles.fieldBlock}>
+      <TextInput
+        mode="outlined"
+        label={t(`fields.${field}`)}
+        value={sensitiveFormValues[field]}
+        onChangeText={(value) => setSensitiveFieldValue(field, value)}
+        secureTextEntry={options.secureTextEntry}
+      />
+      {/* 与正式资料不同的字段标记「已修改」，与生日的标记一致。 */}
+      {draftChangedFields.has(field) ? (
+        <Chip compact style={[styles.changedChip, styles.fieldChangedChip]} textStyle={styles.changedChipText}>
+          {t("birthday.changed")}
+        </Chip>
+      ) : null}
+    </View>
+  );
+
+  const renderStatusChip = (status: EmployeeProfileSensitiveChangeStatus) => (
+    <Chip compact style={{ backgroundColor: STATUS_TONES[status].background }} textStyle={{ color: STATUS_TONES[status].text }}>
+      {t(`status.${status.toLowerCase()}`)}
+    </Chip>
+  );
+
+  const renderFieldChips = (fields: readonly string[]) => (
+    <View style={styles.chipRow}>
+      {fields.length
+        ? fields.map((field) => <Chip key={field} compact style={styles.fieldChip}>{t(`fields.${field}`, field)}</Chip>)
+        : <Text variant="bodySmall" style={styles.metaText}>{t("progress.noChangedFields")}</Text>}
+    </View>
+  );
+
+  // B5 审核进度：状态卡、时间线、本次变更与操作、历史申请（只含状态与字段标识）。
+  const renderProgressView = () => {
+    const request = sensitiveQuery.data;
+    if (sensitiveQuery.isLoading && !request) {
+      return <View style={styles.centeredBlock}><ActivityIndicator /></View>;
+    }
+    if (!request) {
+      return (
+        <Surface style={styles.card} elevation={0}>
+          <Text variant="titleMedium" style={styles.sectionTitle}>{t("status.empty")}</Text>
+          <Text variant="bodySmall" style={styles.metaText}>{t("progress.emptyDescription")}</Text>
+          <Button mode="contained" buttonColor={PROFILE_BLUE} disabled={!canEditSensitive} onPress={() => handleStartSensitiveEdit("personal")}>
+            {t("actions.editSensitive")}
+          </Button>
+        </Surface>
+      );
+    }
+    const timeline = buildSensitiveReviewTimeline(request);
+    const earlier = getEarlierSensitiveRequests(historyQuery.data ?? [], request.requestId);
+    const canWithdraw = canWithdrawSensitiveRequest(request);
+    const canResubmit = canResubmitSensitiveRequest(request);
+    return (
+      <>
+        <Surface style={styles.reviewNotice} elevation={0}>
+          <View style={[styles.sectionHeader, usesLargeTextLayout && styles.sectionHeaderLargeText]}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>{t("progress.statusTitle")}</Text>
+            {renderStatusChip(request.status)}
+          </View>
+          <Text variant="bodySmall" style={styles.metaText}>{t(`progress.statusDescription.${request.status.toLowerCase()}`)}</Text>
+          {request.status === "Rejected" && request.reviewReason ? (
+            <View style={styles.rejectBox}>
+              <Text variant="labelMedium" style={styles.rejectTitle}>{t("progress.rejectReason")}</Text>
+              <Text variant="bodyMedium" style={styles.rejectText} selectable>{request.reviewReason}</Text>
+            </View>
+          ) : null}
+        </Surface>
+
+        <Surface style={styles.card} elevation={0}>
+          <Text variant="titleMedium" style={styles.sectionTitle}>{t("progress.timelineTitle")}</Text>
+          {timeline.map((step, index) => (
+            <View key={step.key} style={styles.timelineRow}>
+              <View style={styles.timelineRail}>
+                <View style={[styles.timelineDot, { backgroundColor: TIMELINE_DOT_COLORS[step.state] }]} />
+                {index < timeline.length - 1 ? <View style={styles.timelineLine} /> : null}
+              </View>
+              <View style={styles.timelineCopy}>
+                <Text variant="bodyMedium" style={step.state === "upcoming" ? styles.metaText : styles.timelineLabel}>{t(step.labelKey)}</Text>
+                {step.time ? <Text variant="bodySmall" style={styles.metaText}>{formatDateTime(step.time, locale) ?? step.time}</Text> : null}
+              </View>
+            </View>
+          ))}
+        </Surface>
+
+        <Surface style={styles.card} elevation={0}>
+          <Text variant="titleMedium" style={styles.sectionTitle}>{t("progress.changedTitle")}</Text>
+          {renderFieldChips(sensitiveChangedFields)}
+          {canWithdraw || canResubmit ? (
+            <View style={styles.formActions}>
+              {canWithdraw ? (
+                <Button
+                  mode="outlined"
+                  icon="undo-variant"
+                  textColor={HB_COLORS.danger}
+                  onPress={handleWithdraw}
+                  loading={withdrawPendingForCurrentIdentity}
+                  disabled={withdrawPendingForCurrentIdentity}
+                  style={styles.actionButton}
+                >
+                  {t("progress.withdraw")}
+                </Button>
+              ) : null}
+              {canResubmit ? (
+                <Button
+                  mode="contained"
+                  buttonColor={PROFILE_BLUE}
+                  icon="pencil-outline"
+                  onPress={handleResubmit}
+                  disabled={!canEditSensitive || withdrawPendingForCurrentIdentity}
+                  style={styles.actionButton}
+                >
+                  {t(request.status === "Pending" ? "progress.editPending" : "progress.resubmit")}
+                </Button>
+              ) : null}
+            </View>
+          ) : null}
+        </Surface>
+
+        <Surface style={styles.card} elevation={0}>
+          <Text variant="titleMedium" style={styles.sectionTitle}>{t("progress.historyTitle")}</Text>
+          {historyQuery.isLoading ? <ActivityIndicator /> : null}
+          {historyQuery.isError ? (
+            <>
+              <HelperText type="error" visible>{getErrorMessage(historyQuery.error, "progress.historyLoadFailed")}</HelperText>
+              <Button mode="text" icon="refresh" onPress={() => void historyQuery.refetch()}>{t("common:actions.retry")}</Button>
+            </>
+          ) : null}
+          {!historyQuery.isLoading && !historyQuery.isError && earlier.length === 0 ? (
+            <Text variant="bodySmall" style={styles.metaText}>{t("progress.historyEmpty")}</Text>
+          ) : null}
+          {earlier.map((item, index) => (
+            <View key={item.requestId} style={[styles.historyItem, index === earlier.length - 1 && styles.historyItemLast]}>
+              <View style={styles.sectionHeader}>
+                <Text variant="bodySmall" style={styles.metaText}>
+                  {t("sensitive.submittedAt", { time: formatDateTime(item.submittedAt, locale) ?? item.submittedAt })}
+                </Text>
+                {renderStatusChip(item.status)}
+              </View>
+              {renderFieldChips(item.changedFields)}
+              {/* 驳回原因醒目显示，方便员工按原因修正后重提。 */}
+              {item.status === "Rejected" && item.reviewReason ? (
+                <View style={styles.rejectBox}>
+                  <Text variant="labelMedium" style={styles.rejectTitle}>{t("progress.rejectReason")}</Text>
+                  <Text variant="bodySmall" style={styles.rejectText} selectable>{item.reviewReason}</Text>
+                </View>
+              ) : null}
+            </View>
+          ))}
+        </Surface>
+      </>
+    );
+  };
+
   const renderSensitiveEditorSection = (section: SensitiveProfileSection) => {
     if (section === "personal") {
       return (
@@ -644,27 +904,14 @@ export default function EmployeeProfileScreen() {
             <Text variant="titleMedium" style={styles.sectionTitle}>{t("sections.personal")}</Text>
             {isBirthdayChanged ? <Chip compact style={styles.changedChip} textStyle={styles.changedChipText}>{t("birthday.changed")}</Chip> : null}
           </View>
-          <TextInput
-            mode="outlined"
+          {/* 纯 JS 年/月/日选择器，不依赖原生日期组件；校验与年龄仍走 birthday.ts。 */}
+          <BirthdayPickerField
             label={t("fields.birthday")}
-            placeholder={t("placeholders.birthday")}
             value={sensitiveFormValues.birthday}
-            onChangeText={(value) => setSensitiveFieldValue("birthday", value)}
-            keyboardType="numbers-and-punctuation"
-            autoCapitalize="none"
-            autoCorrect={false}
-            maxLength={10}
-            error={Boolean(birthdayError)}
+            onChange={(value) => setSensitiveFieldValue("birthday", value)}
+            confirmedLabel={t("birthday.confirmed", { date: formalBirthday || t("overview.notProvided") })}
+            disabled={sensitivePendingForCurrentIdentity}
           />
-          {/* 有错误时提示格式，否则实时显示年龄并附上已确认的生日供对照。 */}
-          <HelperText type={birthdayError ? "error" : "info"} visible>
-            {birthdayError
-              ? t(`birthday.errors.${birthdayError}`)
-              : [
-                draftBirthdayAge === null ? null : t("birthday.age", { age: draftBirthdayAge }),
-                t("birthday.confirmed", { date: formalBirthday || t("overview.notProvided") }),
-              ].filter(Boolean).join(" · ")}
-          </HelperText>
         </Surface>
       );
     }
@@ -672,8 +919,8 @@ export default function EmployeeProfileScreen() {
       return (
         <Surface key={section} style={styles.card} elevation={0}>
           <Text variant="titleMedium" style={styles.sectionTitle}>{t("sections.banking")}</Text>
-          <TextInput mode="outlined" label={t("fields.bankBsb")} value={sensitiveFormValues.bankBsb} onChangeText={(value) => setSensitiveFieldValue("bankBsb", value)} />
-          <TextInput mode="outlined" label={t("fields.bankAccountNumber")} value={sensitiveFormValues.bankAccountNumber} onChangeText={(value) => setSensitiveFieldValue("bankAccountNumber", value)} secureTextEntry />
+          {renderSensitiveInput("bankBsb")}
+          {renderSensitiveInput("bankAccountNumber", { secureTextEntry: true })}
         </Surface>
       );
     }
@@ -681,9 +928,9 @@ export default function EmployeeProfileScreen() {
       return (
         <Surface key={section} style={styles.card} elevation={0}>
           <Text variant="titleMedium" style={styles.sectionTitle}>{t("sections.superannuation")}</Text>
-          <TextInput mode="outlined" label={t("fields.superannuationCompanyName")} value={sensitiveFormValues.superannuationCompanyName} onChangeText={(value) => setSensitiveFieldValue("superannuationCompanyName", value)} />
-          <TextInput mode="outlined" label={t("fields.superannuationCompanyCode")} value={sensitiveFormValues.superannuationCompanyCode} onChangeText={(value) => setSensitiveFieldValue("superannuationCompanyCode", value)} />
-          <TextInput mode="outlined" label={t("fields.superannuationAccountNumber")} value={sensitiveFormValues.superannuationAccountNumber} onChangeText={(value) => setSensitiveFieldValue("superannuationAccountNumber", value)} secureTextEntry />
+          {renderSensitiveInput("superannuationCompanyName")}
+          {renderSensitiveInput("superannuationCompanyCode")}
+          {renderSensitiveInput("superannuationAccountNumber", { secureTextEntry: true })}
         </Surface>
       );
     }
@@ -730,8 +977,8 @@ export default function EmployeeProfileScreen() {
             ) : <Text variant="bodySmall" style={styles.metaText}>{t("preview.empty")}</Text>}
           </View>
         ) : null}
-        <TextInput mode="outlined" label={t("fields.identityType")} value={sensitiveFormValues.identityType} onChangeText={(value) => setSensitiveFieldValue("identityType", value)} />
-        <TextInput mode="outlined" label={t("fields.identityId")} value={sensitiveFormValues.identityId} onChangeText={(value) => setSensitiveFieldValue("identityId", value)} secureTextEntry />
+        {renderSensitiveInput("identityType")}
+        {renderSensitiveInput("identityId", { secureTextEntry: true })}
         <AvatarEditorField
           kind="identityPhoto"
           label={t("fields.identityPhotoUrl")}
@@ -749,7 +996,11 @@ export default function EmployeeProfileScreen() {
       <View style={styles.header}>
         <IconButton icon="arrow-left" size={22} accessibilityLabel={t("common:actions.back")} onPress={handleHeaderBack} style={styles.headerBack} />
         <Text variant="titleLarge" style={styles.headerTitle} numberOfLines={1}>
-          {view === "overview" ? t("title") : view === "basic" ? t("edit.basicTitle") : t("edit.sensitiveTitle")}
+          {view === "overview"
+            ? t("title")
+            : view === "basic"
+              ? t("edit.basicTitle")
+              : view === "progress" ? t("progress.title") : t("edit.sensitiveTitle")}
         </Text>
         <View style={styles.headerSpacer} />
       </View>
@@ -757,9 +1008,9 @@ export default function EmployeeProfileScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        refreshControl={view === "overview" ? (
+        refreshControl={view === "overview" || view === "progress" ? (
           <RefreshControl
-            refreshing={profileQuery.isRefetching || sensitiveQuery.isRefetching}
+            refreshing={profileQuery.isRefetching || sensitiveQuery.isRefetching || (view === "progress" && historyQuery.isRefetching)}
             onRefresh={() => void handleManualRefresh()}
             tintColor={PROFILE_BLUE}
           />
@@ -805,6 +1056,24 @@ export default function EmployeeProfileScreen() {
                 <Button mode="text" onPress={() => setAvatarEditing(false)}>{t("common:actions.cancel")}</Button>
               </Surface>
             ) : null}
+
+            {/* 资料完整度只按已确认的正式资料计算，待审内容批准后才计入。 */}
+            <Surface style={styles.card} elevation={0}>
+              <View style={styles.sectionHeader}>
+                <Text variant="titleMedium" style={styles.sectionTitle}>{t("completeness.title")}</Text>
+                <Text variant="titleMedium" style={styles.completenessCount}>
+                  {t("completeness.count", { filled: completeness.filled, total: completeness.total })}
+                </Text>
+              </View>
+              <ProgressBar progress={completeness.filled / completeness.total} color={completeness.isComplete ? HB_COLORS.success : PROFILE_BLUE} style={styles.progressBar} />
+              <Text variant="bodySmall" style={styles.metaText}>
+                {completeness.isComplete
+                  ? t("completeness.complete")
+                  : t("completeness.missing", {
+                    items: completeness.missing.map((item) => t(PROFILE_COMPLETENESS_LABEL_KEYS[item])).join(t("sensitive.fieldSeparator")),
+                  })}
+              </Text>
+            </Surface>
 
             <Surface style={styles.card} elevation={0}>
               <View style={[styles.sectionHeader, usesLargeTextLayout && styles.sectionHeaderLargeText]}>
@@ -858,7 +1127,31 @@ export default function EmployeeProfileScreen() {
               {sensitiveQuery.isError ? (
                 <Button mode="text" icon="refresh" onPress={() => void sensitiveQuery.refetch()}>{t("common:actions.retry")}</Button>
               ) : null}
+              {sensitiveQuery.data ? (
+                <Button mode="text" icon="timeline-clock-outline" onPress={() => setView("progress")}>{t("progress.open")}</Button>
+              ) : null}
             </Surface>
+            {/* 账户与安全：修改密码复用自助改密页；个人码沿用设置页里的卡片，避免同屏挂两份打印状态。 */}
+            {sessionKind !== "device" ? (
+              <Surface style={styles.card} elevation={0}>
+                <Text variant="titleMedium" style={styles.sectionTitle}>{t("security.title")}</Text>
+                {sessionKind === "account" ? (
+                  <ProfileSummaryRow
+                    icon="lock-reset"
+                    label={t("security.changePassword")}
+                    value={t("security.changePasswordHelper")}
+                    onPress={() => router.push("/(auth)/change-password?mode=voluntary" as unknown as Parameters<typeof router.push>[0])}
+                  />
+                ) : null}
+                <ProfileSummaryRow
+                  icon="barcode"
+                  label={t("cashierBarcode.title")}
+                  value={t("security.personalCodeHelper")}
+                  onPress={() => router.navigate("/(shell)/settings")}
+                  isLast
+                />
+              </Surface>
+            ) : null}
             <Surface style={styles.card} elevation={0}>
               <Text variant="titleMedium" style={styles.sectionTitle}>{t("minorEmployment.title")}</Text>
               <Text variant="bodySmall" style={styles.metaText}>{t("minorEmployment.description")}</Text>
@@ -866,6 +1159,8 @@ export default function EmployeeProfileScreen() {
             </Surface>
             <Text variant="bodySmall" style={styles.updatedAt}>{t("overview.updatedAt", { time: updatedAtText })}</Text>
           </>
+        ) : view === "progress" ? (
+          renderProgressView()
         ) : view === "basic" ? (
           <Surface style={styles.card} elevation={0}>
             <Text variant="bodySmall" style={styles.editHint}>{t("edit.basicHint")}</Text>
@@ -918,7 +1213,9 @@ export default function EmployeeProfileScreen() {
             {getSensitiveSectionOrder(activeSensitiveSection).map(renderSensitiveEditorSection)}
             <Surface style={styles.card} elevation={0}>
               <Button mode="contained" buttonColor={PROFILE_BLUE} onPress={() => void handleSensitiveSubmit()} loading={sensitivePendingForCurrentIdentity} disabled={!isSensitiveDirty || Boolean(birthdayError) || sensitivePendingForCurrentIdentity || currentSavingImageKind !== null}>
-                {t("actions.submitSensitive")}
+                {draftChangedFields.size
+                  ? t("actions.submitSensitiveWithCount", { count: draftChangedFields.size })
+                  : t("actions.submitSensitive")}
               </Button>
               <Button mode="text" onPress={resetEditor} disabled={sensitivePendingForCurrentIdentity}>{t("common:actions.cancel")}</Button>
             </Surface>
@@ -1017,4 +1314,34 @@ const styles = StyleSheet.create({
   readonlyHintText: { flex: 1, paddingHorizontal: 0 },
   pendingSnapshot: { gap: HB_SPACING.xs, padding: HB_SPACING.sm, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.surfaceMuted },
   identityPreview: { width: "100%", height: 180, borderRadius: 12, backgroundColor: HB_COLORS.surfaceMuted },
+  centeredBlock: { paddingVertical: HB_SPACING.xl, alignItems: "center" },
+  fieldBlock: { gap: HB_SPACING.xxs },
+  fieldChangedChip: { alignSelf: "flex-end" },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
+  fieldChip: { backgroundColor: HB_COLORS.surfaceMuted },
+  completenessCount: { color: PROFILE_BLUE, fontWeight: "700" },
+  progressBar: { height: 6, borderRadius: 3, backgroundColor: HB_COLORS.surfaceMuted },
+  rejectBox: {
+    gap: HB_SPACING.xxs,
+    padding: HB_SPACING.sm,
+    borderRadius: HB_RADIUS.control,
+    borderLeftWidth: 3,
+    borderLeftColor: HB_COLORS.danger,
+    backgroundColor: "#FEF3F2",
+  },
+  rejectTitle: { color: HB_COLORS.danger, fontWeight: "700" },
+  rejectText: { color: "#7A271A" },
+  timelineRow: { flexDirection: "row", gap: HB_SPACING.sm, minHeight: 48 },
+  timelineRail: { width: 14, alignItems: "center" },
+  timelineDot: { width: 12, height: 12, borderRadius: 6, marginTop: 4 },
+  timelineLine: { flex: 1, width: 2, marginTop: 2, backgroundColor: HB_COLORS.outlineMuted },
+  timelineCopy: { flex: 1, gap: 2, paddingBottom: HB_SPACING.sm },
+  timelineLabel: { color: HB_COLORS.textPrimary, fontWeight: "600" },
+  historyItem: {
+    gap: HB_SPACING.xs,
+    paddingBottom: HB_SPACING.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HB_COLORS.outlineMuted,
+  },
+  historyItemLast: { borderBottomWidth: 0, paddingBottom: 0 },
 });

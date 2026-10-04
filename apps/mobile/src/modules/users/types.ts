@@ -23,6 +23,8 @@ export interface StoreUserListItem {
   lastLoginIp?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** 员工还未把店长给的初始/重置密码改成自己的密码。 */
+  mustChangePassword?: boolean;
 }
 
 export interface StoreUserDetail extends StoreUserListItem {

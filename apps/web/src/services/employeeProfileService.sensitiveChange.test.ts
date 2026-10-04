@@ -3,6 +3,7 @@ import {
   getAdminSensitiveChangeRequest,
   getAdminSensitiveChangeRequests,
   getAdminEmployeeProfile,
+  mapSensitiveStatus,
   rejectAdminSensitiveChangeRequest,
   saveAdminEmployeeProfile,
 } from './employeeProfileService'
@@ -116,6 +117,10 @@ try {
 
   const employeeDetail = await getAdminEmployeeProfile('user-guid-7')
   assertEqual(employeeDetail.sensitiveRevision, 4, '管理员详情必须映射敏感 revision')
+
+  assertEqual(mapSensitiveStatus('Withdrawn'), 'Withdrawn', '员工撤回状态必须识别为 Withdrawn')
+  assertEqual(mapSensitiveStatus('withdrawn'), 'Withdrawn', '状态映射应忽略大小写')
+  assertEqual(mapSensitiveStatus('SomethingNew'), 'Superseded', '未知状态仍按不可操作的 Superseded 处理')
 
   console.log('employeeProfileService.sensitiveChange.test: ok')
 } finally {

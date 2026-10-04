@@ -62,7 +62,9 @@
     "grantCameraPermission": "允许相机权限",
     "capture": "拍照",
     "switchCamera": "切换镜头",
-    "openSettings": "打开系统设置"
+    "openSettings": "打开系统设置",
+    "submitSensitiveWithCount_one": "提交审核 · {{count}} 项变更",
+    "submitSensitiveWithCount_other": "提交审核 · {{count}} 项变更"
   },
   "overview": {
     "completed": "已填写",
@@ -112,7 +114,8 @@
     "pending": "待审核",
     "approved": "已批准",
     "rejected": "已拒绝",
-    "superseded": "已被新申请或管理员更新替代"
+    "superseded": "已被新申请或管理员更新替代",
+    "withdrawn": "已撤回"
   },
   "sensitive": {
     "confirmed": "已确认资料",
@@ -191,5 +194,64 @@
     "title": "未成年用工合规",
     "description": "维护学校日、假期、家长签署和通勤提醒。",
     "open": "填写未成年用工资料"
+  },
+  "completeness": {
+    "title": "资料完整度",
+    "count": "{{filled}}/{{total}}",
+    "missing": "还差：{{items}}",
+    "complete": "资料已全部填写，感谢配合。"
+  },
+  "security": {
+    "title": "账户与安全",
+    "changePassword": "修改密码",
+    "changePasswordHelper": "定期更换登录密码",
+    "personalCodeHelper": "在设置页查看、刷新或打印个人码"
+  },
+  "birthdayPicker": {
+    "title": "选择生日",
+    "placeholder": "点击选择生日",
+    "year": "年",
+    "month": "月",
+    "day": "日",
+    "clear": "清除"
+  },
+  "progress": {
+    "title": "审核进度",
+    "open": "查看审核进度",
+    "statusTitle": "当前申请",
+    "statusDescription": {
+      "pending": "已提交给店长审核，审核通过前继续显示已确认资料。",
+      "approved": "申请已批准，新的资料已经生效。",
+      "rejected": "申请被驳回，已确认资料保持不变。请按原因修改后重新提交。",
+      "withdrawn": "你已撤回这次申请，已确认资料保持不变。",
+      "superseded": "这次申请已被新的申请或管理员修改替代。"
+    },
+    "rejectReason": "驳回原因",
+    "timelineTitle": "进度",
+    "timeline": {
+      "submitted": "已提交",
+      "reviewing": "店长审核中",
+      "reviewed": "店长已审核",
+      "notReviewed": "未进入审核",
+      "result": "等待审核结果",
+      "approved": "已批准，资料已生效",
+      "rejected": "已驳回",
+      "withdrawn": "已撤回",
+      "superseded": "已失效"
+    },
+    "changedTitle": "本次变更",
+    "noChangedFields": "这次申请没有字段变化。",
+    "withdraw": "撤回申请",
+    "withdrawTitle": "撤回这次申请？",
+    "withdrawDescription": "撤回后店长将无法审核这次申请，已确认资料保持不变。你可以随时重新提交。",
+    "withdrawSuccess": "申请已撤回。",
+    "withdrawFailed": "撤回申请失败，请重试。",
+    "withdrawConflict": "申请已被处理，已刷新为最新状态。",
+    "editPending": "修改申请",
+    "resubmit": "修改后重提",
+    "historyTitle": "历史申请",
+    "historyEmpty": "暂无更早的申请。",
+    "historyLoadFailed": "加载历史申请失败。",
+    "emptyDescription": "还没有提交过敏感资料修改申请。"
   }
 }

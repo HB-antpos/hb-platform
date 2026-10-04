@@ -59,7 +59,7 @@ export interface SaveEmployeeProfilePayload {
   expectedSensitiveRevision?: number
 }
 
-export type EmployeeProfileSensitiveChangeStatus = 'Pending' | 'Approved' | 'Rejected' | 'Superseded'
+export type EmployeeProfileSensitiveChangeStatus = 'Pending' | 'Approved' | 'Rejected' | 'Superseded' | 'Withdrawn'
 export type EmployeeProfileSensitiveField =
   | 'birthday'
   | 'bankBsb'

@@ -287,7 +287,8 @@
       "employeeDetails": "Employee Details",
       "accountInfo": "Account Info",
       "payroll": "Payroll",
-      "quickActions": "Quick Actions"
+      "quickActions": "Quick Actions",
+      "profileStatus": "Profile status"
     },
     "fields": {
       "employeeId": "Employee ID",
@@ -346,6 +347,17 @@
       "male": "Male",
       "female": "Female",
       "other": "Other"
+    },
+    "profileStatus": {
+      "password": "First password change",
+      "passwordPending": "Initial password not changed yet",
+      "passwordDone": "Changed",
+      "sensitive": "Sensitive details",
+      "sensitivePending": "A change request is waiting for review",
+      "sensitiveNone": "No pending request",
+      "sensitiveLoading": "Checking…",
+      "sensitiveFailed": "Could not check",
+      "goReview": "Review"
     }
   },
   "dialogs": {

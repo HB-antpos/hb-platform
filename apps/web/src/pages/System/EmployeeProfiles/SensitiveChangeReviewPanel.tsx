@@ -68,6 +68,7 @@ const STATUS_COLORS: Record<EmployeeProfileSensitiveChangeStatus, string> = {
   Approved: 'green',
   Rejected: 'red',
   Superseded: 'default',
+  Withdrawn: 'default',
 }
 
 function formatSensitiveValue(value: unknown) {

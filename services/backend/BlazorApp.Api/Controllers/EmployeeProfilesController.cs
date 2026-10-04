@@ -190,6 +190,26 @@ namespace BlazorApp.Api.Controllers
             return Ok(await _sensitiveChangeService.UpsertSelfAsync(dto));
         }
 
+        [HttpPost("me/sensitive-change-request/withdraw")]
+        [Authorize(Policy = Permissions.EmployeeProfiles.Edit)]
+        public async Task<IActionResult> WithdrawSelfSensitiveChangeRequest(
+            [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
+            EmployeeProfileSensitiveWithdrawDto? dto
+        )
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ApiResponse<object>.Error("请求参数验证失败", "VALIDATION_ERROR", ModelState));
+            }
+            // 无待审申请或页面申请已被处理时返回 409，客户端据此刷新审核进度。
+            return MapSensitiveReviewResult(await _sensitiveChangeService.WithdrawSelfAsync(dto));
+        }
+
+        [HttpGet("me/sensitive-change-requests")]
+        [Authorize(Policy = Permissions.EmployeeProfiles.View)]
+        public async Task<IActionResult> GetSelfSensitiveChangeRequestHistory([FromQuery] int take = 20) =>
+            Ok(await _sensitiveChangeService.GetSelfHistoryAsync(take));
+
         [HttpGet("admin/change-requests")]
         [EmployeeProfileSensitiveRoles]
         [Authorize(Policy = Permissions.EmployeeProfiles.Edit)]

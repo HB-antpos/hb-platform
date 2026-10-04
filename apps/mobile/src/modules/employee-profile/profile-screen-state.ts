@@ -10,7 +10,8 @@ import {
 } from "./sensitive-profile";
 import { toEmployeeProfileDraft } from "./profile-draft";
 
-export type EmployeeProfileView = "overview" | "basic" | "sensitive";
+// progress 为审核进度页（只读视图，返回时直接回到概览）。
+export type EmployeeProfileView = "overview" | "basic" | "sensitive" | "progress";
 export type SensitiveProfileSection = "personal" | "banking" | "superannuation" | "identity";
 
 function areValuesEqual(
