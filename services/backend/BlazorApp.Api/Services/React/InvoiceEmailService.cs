@@ -29,7 +29,21 @@ namespace BlazorApp.Api.Services.React
             InvoiceEmailOptions options;
             try
             {
-                options = await _settingsService.GetEffectiveOptionsAsync();
+                // 指定了发件账号就用该账号，未指定时沿用默认账号。
+                options = await _settingsService.GetAccountOptionsAsync(message.FromAccountId);
+            }
+            catch (InvoiceEmailAccountNotFoundException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "发票邮件指定的发件账号不存在，收件人：{ToEmail}，账号：{FromAccountId}",
+                    message.ToEmail,
+                    message.FromAccountId
+                );
+                return ApiResponse<bool>.Error(
+                    "所选发件邮箱账号不存在或已被删除，请刷新后重新选择发件账号",
+                    "INVOICE_EMAIL_ACCOUNT_NOT_FOUND"
+                );
             }
             catch (InvoiceEmailPasswordDecryptException ex)
             {

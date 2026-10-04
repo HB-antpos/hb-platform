@@ -1,5 +1,6 @@
 import type { ApiResponse } from '../types/api'
 import type {
+  InvoiceEmailSenderAccountDto,
   InvoiceEmailSettingsDto,
   InvoiceEmailSettingsSaveRequest,
   InvoiceEmailSettingsTestRequest,
@@ -21,5 +22,10 @@ export async function saveInvoiceEmailSettings(payload: InvoiceEmailSettingsSave
 
 export async function sendInvoiceEmailSettingsTestEmail(payload: InvoiceEmailSettingsTestRequest) {
   const response = await request.post<ApiResponse<InvoiceEmailSettingsTestResult>>(`${API_BASE}/test`, payload)
+  return unwrapApiData(response)
+}
+
+export async function getInvoiceEmailSenderAccounts() {
+  const response = await request.get<ApiResponse<InvoiceEmailSenderAccountDto[]>>(`${API_BASE}/sender-accounts`)
   return unwrapApiData(response)
 }

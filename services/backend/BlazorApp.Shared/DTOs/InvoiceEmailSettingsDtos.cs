@@ -32,6 +32,18 @@ namespace BlazorApp.Shared.DTOs
     }
 
     /// <summary>
+    /// 发送邮件时可选的发件账号。只暴露名称与发件地址，不含 SMTP 主机、用户名和密码。
+    /// </summary>
+    public class InvoiceEmailSenderAccountDto
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string FromEmail { get; set; } = string.Empty;
+        public string? FromName { get; set; }
+        public bool IsDefault { get; set; }
+    }
+
+    /// <summary>
     /// 发票邮件 SMTP 配置保存请求。
     /// </summary>
     public class UpdateInvoiceEmailSettingsDto

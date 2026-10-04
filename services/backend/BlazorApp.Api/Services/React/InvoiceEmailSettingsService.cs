@@ -175,20 +175,70 @@ namespace BlazorApp.Api.Services.React
                 throw new InvoiceEmailDefaultAccountException("发票邮件默认发件账号配置异常");
             }
 
-            // 发送链路只认默认账号；异常默认标记会显式报错，避免从错误 SMTP 账号发出发票。
-            var model = defaultModels.Single();
-            return new InvoiceEmailOptions
+            // 未指定发件账号时只认默认账号；异常默认标记会显式报错，避免从错误 SMTP 账号发出发票。
+            return ToOptions(defaultModels.Single());
+        }
+
+        public async Task<InvoiceEmailOptions> GetAccountOptionsAsync(
+            string? accountId,
+            CancellationToken cancellationToken = default
+        )
+        {
+            var normalizedId = NormalizeOptional(accountId);
+            if (normalizedId == null)
             {
-                Host = model.Host,
-                Port = model.Port,
-                UseSsl = model.UseSsl,
-                CheckCertificateRevocation = model.CheckCertificateRevocation,
-                Username = model.Username,
-                Password = ReadStoredPassword(model.EncryptedPassword),
-                FromEmail = model.FromEmail,
-                FromName = model.FromName,
-                MaxAttachmentBytes = model.MaxAttachmentBytes,
-            };
+                return await GetEffectiveOptionsAsync(cancellationToken);
+            }
+
+            var model = await QueryModelAsync(normalizedId);
+            if (model != null)
+            {
+                return ToOptions(model);
+            }
+
+            // 尚未落库时页面只展示 appsettings fallback 的 default 账号，允许按该 ID 发送。
+            if (IsDefaultAccountId(normalizedId) && !await HasSavedAccountsAsync())
+            {
+                return CloneOptions(_fallbackOptions);
+            }
+
+            // 指定账号已被删除或 ID 错误时显式失败，不能悄悄改用默认账号，避免用错发件人。
+            throw new InvoiceEmailAccountNotFoundException($"发件邮箱账号不存在：{normalizedId}");
+        }
+
+        public async Task<List<InvoiceEmailSenderAccountDto>> GetSenderAccountsAsync(
+            CancellationToken cancellationToken = default
+        )
+        {
+            var models = await QueryModelsAsync();
+            if (models.Count == 0)
+            {
+                // 未落库且 appsettings 也没配发件邮箱时返回空列表，前端按默认账号发送并由发送链路报未配置。
+                return string.IsNullOrWhiteSpace(_fallbackOptions.FromEmail)
+                    ? new List<InvoiceEmailSenderAccountDto>()
+                    : new List<InvoiceEmailSenderAccountDto>
+                    {
+                        new()
+                        {
+                            Id = InvoiceEmailConfiguration.DefaultId,
+                            Name = "默认发件账号",
+                            FromEmail = _fallbackOptions.FromEmail!,
+                            FromName = _fallbackOptions.FromName,
+                            IsDefault = true,
+                        },
+                    };
+            }
+
+            return models
+                .Select(model => new InvoiceEmailSenderAccountDto
+                {
+                    Id = model.Id,
+                    Name = string.IsNullOrWhiteSpace(model.Name) ? model.FromEmail : model.Name,
+                    FromEmail = model.FromEmail,
+                    FromName = model.FromName,
+                    IsDefault = model.IsDefault,
+                })
+                .ToList();
         }
 
         public async Task<InvoiceEmailOptions> BuildTransientOptionsAsync(
@@ -361,6 +411,19 @@ namespace BlazorApp.Api.Services.React
             UpdatedBy = model.UpdatedBy,
         };
 
+        private InvoiceEmailOptions ToOptions(InvoiceEmailConfiguration model) => new()
+        {
+            Host = model.Host,
+            Port = model.Port,
+            UseSsl = model.UseSsl,
+            CheckCertificateRevocation = model.CheckCertificateRevocation,
+            Username = model.Username,
+            Password = ReadStoredPassword(model.EncryptedPassword),
+            FromEmail = model.FromEmail,
+            FromName = model.FromName,
+            MaxAttachmentBytes = model.MaxAttachmentBytes,
+        };
+
         private static InvoiceEmailOptions CloneOptions(InvoiceEmailOptions options) => new()
         {
             Host = options.Host,
@@ -419,6 +482,14 @@ namespace BlazorApp.Api.Services.React
     {
         public InvoiceEmailPasswordDecryptException(string message, Exception innerException)
             : base(message, innerException)
+        {
+        }
+    }
+
+    public sealed class InvoiceEmailAccountNotFoundException : Exception
+    {
+        public InvoiceEmailAccountNotFoundException(string message)
+            : base(message)
         {
         }
     }

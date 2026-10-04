@@ -1,4 +1,5 @@
 import {
+  getInvoiceEmailSenderAccounts,
   getInvoiceEmailSettings,
   saveInvoiceEmailSettings,
   sendInvoiceEmailSettingsTestEmail,
@@ -29,6 +30,19 @@ const calls: Array<{ url: string; init?: RequestInit }> = []
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input)
   calls.push({ url, init })
+
+  if (url.endsWith('/sender-accounts')) {
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: [
+          { id: 'primary', name: 'Primary', fromEmail: 'from@test.com', fromName: null, isDefault: true },
+          { id: 'backup', name: 'Backup', fromEmail: 'backup@test.com', fromName: null, isDefault: false },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
 
   if (url.endsWith('/test')) {
     return new Response(
@@ -149,6 +163,12 @@ try {
   assertEqual(readBody(calls[2]).testToEmail, 'qa@test.com', '测试邮件应传递测试邮箱')
   assertEqual(readBody(calls[2]).password, 'top-secret', '测试邮件应允许携带临时密码')
   assert(sendResult.success, '测试邮件接口应返回成功结果')
+
+  const senderAccounts = await getInvoiceEmailSenderAccounts()
+  assertEqual(calls[3]?.url, '/api/react/v1/invoice-email-settings/sender-accounts', '发件账号列表接口路径应正确')
+  assertEqual(calls[3]?.init?.method, 'GET', '发件账号列表接口应使用 GET')
+  assertEqual(senderAccounts.length, 2, '发件账号列表应返回全部账号')
+  assertEqual(senderAccounts[1]?.id, 'backup', '发件账号列表应保留账号 ID')
 
   console.log('invoiceEmailSettingsService.test: ok')
 } finally {
