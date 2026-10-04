@@ -126,6 +126,10 @@ namespace BlazorApp.Shared.DTOs
         /// JSON 序列化为 exactPermissions，供前端精确权限契约使用。
         /// </summary>
         public List<string> ExactPermissions { get; set; } = new();
+        /// <summary>
+        /// 账号须先修改密码才能继续使用（店长新建或重置密码后）；客户端据此进入强制改密页。
+        /// </summary>
+        public bool MustChangePassword { get; set; }
     }
 
     /// <summary>

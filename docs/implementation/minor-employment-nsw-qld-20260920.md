@@ -40,7 +40,7 @@
 
 先遵循现有项目 runbook 备份、检查环境，再执行：
 
-`dotnet run -- --schema=migrate`（独立版本号步骤 `20261004.001-employee-minor-compliance`，见 `Data/SchemaMigrations/EmployeeMinorComplianceSchema.cs`）。
+`dotnet run -- --schema=migrate`（独立版本号步骤 `20261004.003-employee-minor-compliance`，见 `Data/SchemaMigrations/EmployeeMinorComplianceSchema.cs`）。
 
 2026-10-04 起原两份裸 SQL 已改为版本化迁移：一次建好档案、联系人、审计、店长请求、提醒、提醒事件六张表及监护人邮箱验证列，索引按名称幂等补建，签名门禁核对关键列与唯一索引。实体不在 `SqlSugarContext` 的 `tableTypes` 里，API 普通启动只做只读检查。生产迁移和回滚应保留已签档案，不能以删表回滚。
 

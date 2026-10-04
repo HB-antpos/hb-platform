@@ -30,6 +30,8 @@ namespace BlazorApp.Shared.DTOs
         public string? LastLoginIp { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        /// <summary>员工还未把店长给的初始/重置密码改成自己的密码。</summary>
+        public bool MustChangePassword { get; set; }
     }
 
     public class StoreUserDetailDto : StoreUserListDto
@@ -76,6 +78,9 @@ namespace BlazorApp.Shared.DTOs
         public List<string>? RoleNames { get; set; }
 
         public string? EmploymentType { get; set; }
+
+        /// <summary>员工首次登录须先改密；未传时默认要求（旧客户端建号同样生效）。</summary>
+        public bool? RequirePasswordChange { get; set; }
     }
 
     public class UpdateStoreUserDto
@@ -120,5 +125,8 @@ namespace BlazorApp.Shared.DTOs
         /// 新密码格式：raw 表示 HTTPS 原始密码；clientSha256 表示旧客户端 SHA256。
         /// </summary>
         public string PasswordFormat { get; set; } = string.Empty;
+
+        /// <summary>重置后员工须先改密；未传时默认要求。</summary>
+        public bool? RequirePasswordChange { get; set; }
     }
 }

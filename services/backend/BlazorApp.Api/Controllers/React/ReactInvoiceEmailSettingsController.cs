@@ -1,3 +1,4 @@
+using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
@@ -20,19 +21,39 @@ namespace BlazorApp.Api.Controllers.React
         private readonly IInvoiceEmailSettingsService _settingsService;
         private readonly IInvoiceEmailService _invoiceEmailService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IStoreOrderAccessPolicy _storeOrderAccessPolicy;
         private readonly ILogger<ReactInvoiceEmailSettingsController> _logger;
 
         public ReactInvoiceEmailSettingsController(
             IInvoiceEmailSettingsService settingsService,
             IInvoiceEmailService invoiceEmailService,
             ICurrentUserService currentUserService,
+            IStoreOrderAccessPolicy storeOrderAccessPolicy,
             ILogger<ReactInvoiceEmailSettingsController> logger
         )
         {
             _settingsService = settingsService;
             _invoiceEmailService = invoiceEmailService;
             _currentUserService = currentUserService;
+            _storeOrderAccessPolicy = storeOrderAccessPolicy;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// 发送发票邮件时可选的发件账号列表，只返回名称与发件地址。
+        /// </summary>
+        [HttpGet("sender-accounts")]
+        public async Task<IActionResult> GetSenderAccounts(CancellationToken cancellationToken)
+        {
+            // 与发送发票邮件接口同一权限门槛：能编辑订单（即能发发票）的人才能看到可选发件账号。
+            var decision = await _storeOrderAccessPolicy.RequireOrderManagementEditAsync();
+            if (decision.IsForbidden)
+            {
+                return Forbid();
+            }
+
+            var accounts = await _settingsService.GetSenderAccountsAsync(cancellationToken);
+            return Ok(ApiResponse<List<InvoiceEmailSenderAccountDto>>.OK(accounts, "查询成功"));
         }
 
         [HttpGet]

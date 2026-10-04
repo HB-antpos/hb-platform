@@ -105,5 +105,30 @@
     "locationRequired": "Login requires your current precise location. Allow location access and try again.",
     "stepTimeout": "Login is taking too long on this device. Please try again; if it keeps happening, fully close and reopen the app.",
     "default": "Login failed. Please try again later."
+  },
+  "changePassword": {
+    "forcedTitle": "Set your new password",
+    "forcedDescription": "You are using the initial password from your manager. Set your own password to continue.",
+    "voluntaryTitle": "Change password",
+    "initialPassword": "Initial password from your manager",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Re-enter new password",
+    "togglePassword": "Show or hide password",
+    "rules": {
+      "minLength": "At least {{min}} characters",
+      "differentFromCurrent": "Different from the current password",
+      "confirmed": "Both entries match"
+    },
+    "submitForced": "Save and continue",
+    "submitVoluntary": "Save new password",
+    "logout": "Sign out",
+    "successTitle": "Password changed",
+    "successVoluntary": "Your new password is active. Sign-ins on other devices have been signed out.",
+    "failed": "Could not change the password. Please try again later.",
+    "errors": {
+      "wrongCurrent": "The current password is incorrect.",
+      "sameAsCurrent": "The new password must be different from the current one."
+    }
   }
 }

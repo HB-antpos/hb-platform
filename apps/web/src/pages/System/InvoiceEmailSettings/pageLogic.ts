@@ -115,6 +115,26 @@ export function buildInvoiceEmailSettingsTestPayload(
   }
 }
 
+/**
+ * 从表单校验错误里找出出错的账号序号（升序去重）。
+ * 页面一次只展示一个账号，保存失败时要靠它跳到第一个出错账号并在左侧列表标红。
+ */
+export function collectInvoiceEmailAccountErrorIndexes(
+  errorFields: { name: (string | number)[]; errors?: string[] }[],
+): number[] {
+  const indexes = new Set<number>()
+  for (const field of errorFields) {
+    if (field.errors && field.errors.length === 0) {
+      continue
+    }
+    const [listName, index] = field.name
+    if (listName === 'accounts' && typeof index === 'number') {
+      indexes.add(index)
+    }
+  }
+  return [...indexes].sort((left, right) => left - right)
+}
+
 export function resolveInvoiceEmailSettingsErrorMessage(error: unknown, fallback: string) {
   // 请求层会把后端 ApiResponse.message 放入 Error.message，这里优先展示具体 SMTP/TLS 失败原因。
   return error instanceof Error && error.message.trim() ? error.message : fallback
