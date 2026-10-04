@@ -49,19 +49,26 @@ async function run() {
   const abandoned = trace("abandoned", { stages: [...current.stages] });
   // 与真实流程一致：登录接口 401 时最后完成的是 localClear
   const wrongPassword = finishLoginTrace(appendLoginStage(trace("wrong"), "localClear", t0 + 5, false), "failed", t0 + 80, { response: { status: 401 } });
+  // 生产实际形状：密码错误时登录接口返回 HTTP 200 + success:false，拦截器解包成带 apiBusinessError 的 Error，没有 response.status
+  const businessError = (message: string) => Object.assign(new Error(message), { apiBusinessError: true });
+  const wrongPasswordEnvelope = finishLoginTrace(appendLoginStage(trace("wrong-envelope"), "localClear", t0 + 5, false), "failed", t0 + 80, businessError("用户名或密码错误"));
+  assert.equal(wrongPasswordEnvelope.httpStatus, undefined);
+  assert.equal(wrongPasswordEnvelope.apiBusinessError, true);
   const serverError = finishLoginTrace(appendLoginStage(trace("server"), "localClear", t0 + 5, false), "failed", t0 + 80, { response: { status: 500 } });
   // 登录接口已成功、之后的 auth/current 返回 403：不是账号原因，要上传
   const laterForbidden = finishLoginTrace(appendLoginStage(trace("later403"), "loginApi", t0 + 70, false), "failed", t0 + 90, { response: { status: 403 } });
+  // 登录接口已成功、之后的步骤返回业务失败：同样不是账号原因，要上传
+  const laterBusiness = finishLoginTrace(appendLoginStage(trace("laterBusiness"), "loginApi", t0 + 70, false), "failed", t0 + 90, businessError("门店未分配"));
   const fast = finishLoginTrace(trace("fast"), "success", t0 + 300);
   const slow = finishLoginTrace(trace("slow"), "success", t0 + SLOW_LOGIN_THRESHOLD_MS);
   const menuSlow = { ...finishLoginTrace(trace("menu"), "success", t0 + 500), menuTimedOut: true };
   const inProgress = trace("in-progress");
   assert.deepEqual(
     selectLoginTracesToUpload(
-      [abandoned, timedOut, wrongPassword, serverError, laterForbidden, fast, slow, menuSlow, inProgress],
+      [abandoned, timedOut, wrongPassword, wrongPasswordEnvelope, serverError, laterForbidden, laterBusiness, fast, slow, menuSlow, inProgress],
       "in-progress",
     ).map((item) => item.traceId),
-    ["abandoned", "t-1", "server", "later403", "slow", "menu"],
+    ["abandoned", "t-1", "server", "later403", "laterBusiness", "slow", "menu"],
   );
 
   // 只保留最近几条，同一 traceId 覆盖
