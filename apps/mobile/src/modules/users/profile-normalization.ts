@@ -1,5 +1,5 @@
 import { STORE_STAFF_ROLE } from "@/modules/users/types";
-import type { StoreUserDetail, StoreUserListItem, StoreUserProfile } from "@/modules/users/types";
+import type { PasswordSetupEmailResult, StoreUserDetail, StoreUserListItem, StoreUserProfile } from "@/modules/users/types";
 
 type ApiRecord = Record<string, unknown>;
 
@@ -59,12 +59,25 @@ export function normalizeStoreUser(raw: ApiRecord): StoreUserListItem {
   };
 }
 
+export function normalizePasswordSetupEmailResult(payload: unknown): PasswordSetupEmailResult | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const raw = payload as ApiRecord;
+  const maskedEmail = asString(raw.maskedEmail ?? raw.MaskedEmail);
+  if (!maskedEmail) return undefined;
+  return { maskedEmail, expiresAtUtc: asString(raw.expiresAtUtc ?? raw.ExpiresAtUtc) };
+}
+
 export function normalizeStoreUserDetail(payload: unknown): StoreUserDetail {
   if (!payload || typeof payload !== "object") {
     throw new Error("Invalid user detail payload");
   }
 
-  return normalizeStoreUser(payload as ApiRecord);
+  const raw = payload as ApiRecord;
+  return {
+    ...normalizeStoreUser(raw),
+    passwordSetupEmail: normalizePasswordSetupEmailResult(raw.passwordSetupEmail ?? raw.PasswordSetupEmail),
+    passwordSetupEmailError: asString(raw.passwordSetupEmailError ?? raw.PasswordSetupEmailError),
+  };
 }
 
 export function normalizeStoreUserProfile(payload: unknown): StoreUserProfile {

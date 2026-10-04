@@ -100,6 +100,8 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifyUserPasswordChangeRequirementAsync", runtimeMethods);
         Assert.Contains("ApplyEmployeeMinorComplianceAsync", runtimeMethods);
         Assert.Contains("VerifyEmployeeMinorComplianceAsync", runtimeMethods);
+        Assert.Contains("ApplyUserPasswordResetCodeAsync", runtimeMethods);
+        Assert.Contains("VerifyUserPasswordResetCodeAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -478,6 +480,10 @@ public sealed class SchemaMigrationCoordinatorTests
         runtime.MarkApplied(
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId
         );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
@@ -926,6 +932,7 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20261003.001-attendance-availability-unavailable",
                 "Check:Main:20261004.002-user-password-change-requirement",
                 "Check:Main:20261004.003-employee-minor-compliance",
+                "Check:Main:20261004.004-user-password-reset-code",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1157,41 +1164,45 @@ public sealed class SchemaMigrationCoordinatorTests
         var coordinator = CreateCoordinator(runtime);
 
         // 新迁移按日期追加：供应商分类（09-23）、看板月投影（09-24）、订单拣货（09-29），再是拣货货位没货与拣货分配（09-30），
-        // 然后是排班用餐次数（10-02）、可上班时间的不能上班类型（10-03）、须改密标记表（10-04），最后是未成年用工合规（10-04）。
+        // 然后是排班用餐次数（10-02）、可上班时间的不能上班类型（10-03）、须改密标记表（10-04），未成年用工合规（10-04），最后是找回密码验证码表（10-04）。
         Assert.Equal(
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceAvailabilityUnavailableMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordChangeRequirementMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
@@ -1206,6 +1217,7 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.AttendanceAvailabilityUnavailableMigrationId,
             SchemaMigrationCoordinator.UserPasswordChangeRequirementMigrationId,
             SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId,
+            SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -1241,6 +1253,13 @@ public sealed class SchemaMigrationCoordinatorTests
         var minorRecord = runtime.Events.IndexOf(
             $"Record:Main:{SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId}");
         Assert.True(minorApply >= 0 && minorApply < minorVerify && minorVerify < minorRecord);
+        // 找回密码验证码表同样 Apply → 签名校验 → 登记。
+        var resetApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId}");
+        var resetVerify = runtime.Events.IndexOf("VerifyUserPasswordResetCode", resetApply);
+        var resetRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId}");
+        Assert.True(resetApply >= 0 && resetApply < resetVerify && resetVerify < resetRecord);
     }
 
     [Fact]
@@ -1726,6 +1745,23 @@ public sealed class SchemaMigrationCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Events.Add("VerifyUserPasswordChangeRequirement");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyUserPasswordResetCodeAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
+                cancellationToken
+            );
+            await VerifyUserPasswordResetCodeAsync(cancellationToken);
+        }
+
+        public Task VerifyUserPasswordResetCodeAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyUserPasswordResetCode");
             return Task.CompletedTask;
         }
 

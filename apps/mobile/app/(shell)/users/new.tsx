@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
-import * as Crypto from "expo-crypto";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Button, Chip, HelperText, IconButton, Snackbar, Switch, Text, TextInput } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -15,27 +14,22 @@ import {
   STORE_STAFF_ROLE,
   toSafeStoreUserErrorLog,
   useStoreUserMutations,
-  type StoreUserListItem,
+  type PasswordSetupEmailResult,
+  type StoreUserDetail,
 } from "@/modules/users";
-import { buildLoginCredentialText, generateInitialPassword } from "@/modules/users/initial-password";
+import { resolveUsernameFromEmail } from "@/modules/users/staff-email-username";
 import { StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
-import { validateNewStaffPhone, validatePasswordValue, validateStoreUserForm } from "@/modules/users/validation";
+import { validateNewStaffEmail, validateNewStaffPhone, validateStoreUserForm } from "@/modules/users/validation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
 
-const createPassword = () => generateInitialPassword((count) => Crypto.getRandomBytes(count));
-
-interface CreatedCredential {
-  user: StoreUserListItem;
-  password: string;
-}
-
 /**
- * 店长新建本店店员（整页）。成功后在同一页展示一次性登录信息，离开即无法再查看初始密码。
+ * 店长新建本店店员（整页）。邮箱必填，默认作为用户名；创建后系统给员工邮箱发设置密码验证码，
+ * 员工在登录页「设置 / 忘记密码」里自己设密码，店长全程不经手密码。
  * 账号固定为本店店员、临时工，前后端都强制；页面只做只读说明，不提供角色或分店选择。
  */
 export default function CreateStaffScreen() {
@@ -49,17 +43,18 @@ export default function CreateStaffScreen() {
   const actorGuid = currentUser?.userGUID || currentUser?.userGuid || "";
   const { stores, selectedStoreCode, isDeviceMode } = useStores();
 
+  const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState(createPassword);
-  const [passwordVisible, setPasswordVisible] = useState(true);
-  const [requirePasswordChange, setRequirePasswordChange] = useState(true);
+  // 店长手动改过用户名后，不再跟随邮箱自动覆盖。
+  const [usernameEdited, setUsernameEdited] = useState(false);
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [snackbarMessage, setSnackbarMessage] = useState("");
-  const [created, setCreated] = useState<CreatedCredential | null>(null);
+  const [created, setCreated] = useState<StoreUserDetail | null>(null);
+  const [inviteResult, setInviteResult] = useState<PasswordSetupEmailResult | null>(null);
+  const [inviteError, setInviteError] = useState("");
   const [barcodeVisible, setBarcodeVisible] = useState(false);
 
   const canCreateUsers = access.isAdmin
@@ -78,7 +73,12 @@ export default function CreateStaffScreen() {
   const posEnabledStores = useMemo(() => getPosEnabledStores(stores), [stores]);
   const store = stores.find((item) => item.storeCode === requestedStoreCode) ?? null;
   const storeAllowed = canCreateUsers && Boolean(requestedStoreCode) && isStoreManageable(requestedStoreCode, manageableStores);
-  const { createMutation } = useStoreUserMutations(requestedStoreCode, "");
+  const { createMutation, setupEmailMutation } = useStoreUserMutations(requestedStoreCode, "");
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    if (!usernameEdited) setUsername(resolveUsernameFromEmail(value));
+  };
 
   const handleClose = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -87,8 +87,8 @@ export default function CreateStaffScreen() {
 
   const handleSubmit = async () => {
     setErrorMessage("");
-    const formMessage = validateStoreUserForm({ username, fullName, email, phone, status: enabled }, t)
-      ?? validatePasswordValue(password, t)
+    const formMessage = validateNewStaffEmail(email, t)
+      ?? validateStoreUserForm({ username, fullName, email, phone, status: enabled }, t)
       ?? validateNewStaffPhone(phone, t);
     if (formMessage) {
       setErrorMessage(formMessage);
@@ -98,18 +98,19 @@ export default function CreateStaffScreen() {
       const user = await createMutation.mutateAsync({
         username: username.trim(),
         fullName: fullName.trim() || undefined,
-        email: email.trim() || undefined,
+        email: email.trim(),
         phone: phone.trim() || undefined,
         status: enabled ? 1 : 0,
         storeCode: requestedStoreCode,
         roleNames: [STORE_STAFF_ROLE],
-        password: password.trim(),
         passwordFormat: "raw",
         employmentType: "casual",
-        requirePasswordChange,
+        // 关键逻辑：不提交任何密码，后端写入随机密码并给员工邮箱发设置密码验证码。
+        sendPasswordSetupEmail: true,
       });
-      // 关键逻辑：初始密码只保存在本页内存，用于这一次交付；离开页面后无法再次查看。
-      setCreated({ user, password: password.trim() });
+      setCreated(user);
+      setInviteResult(user.passwordSetupEmail ?? null);
+      setInviteError(user.passwordSetupEmail ? "" : user.passwordSetupEmailError || t("create.inviteFailedFallback"));
     } catch (error) {
       console.warn("[store-users] save failed", toSafeStoreUserErrorLog(error));
       setErrorMessage(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "messages.saveFailed" }));
@@ -119,6 +120,18 @@ export default function CreateStaffScreen() {
   const copyText = async (text: string, messageKey: string) => {
     await Clipboard.setStringAsync(text);
     setSnackbarMessage(t(messageKey));
+  };
+
+  const resendInvite = async () => {
+    if (!created) return;
+    try {
+      const result = await setupEmailMutation.mutateAsync({ userGuid: created.userGUID, storeCode: requestedStoreCode });
+      setInviteResult(result);
+      setInviteError("");
+      setSnackbarMessage(t("create.inviteResent"));
+    } catch (error) {
+      setInviteError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "create.inviteFailedFallback" }));
+    }
   };
 
   if (!storeAllowed) {
@@ -134,7 +147,7 @@ export default function CreateStaffScreen() {
   }
 
   if (created) {
-    const createdName = created.user.fullName || created.user.username;
+    const createdName = created.fullName || created.username;
     const canPrintBarcode = canManageStaffBarcode({
       authenticated,
       deviceOnly: isDeviceMode,
@@ -143,17 +156,9 @@ export default function CreateStaffScreen() {
         && posEnabledStores.some((item) => item.storeCode === requestedStoreCode),
       actorGuid,
       actorRoles: currentUser?.roleNames ?? [],
-      targetGuid: created.user.userGUID,
-      targetStatus: created.user.status,
-      targetRoles: created.user.roleNames,
-    });
-    const credentialText = buildLoginCredentialText({
-      heading: t("create.credentialHeading"),
-      usernameLabel: t("fields.username"),
-      passwordLabel: t("fields.initialPassword"),
-      username: created.user.username,
-      password: created.password,
-      footer: requirePasswordChange ? t("create.credentialFooterForced") : t("create.credentialFooter"),
+      targetGuid: created.userGUID,
+      targetStatus: created.status,
+      targetRoles: created.roleNames,
     });
 
     return (
@@ -169,19 +174,14 @@ export default function CreateStaffScreen() {
               <MaterialCommunityIcons name="check" size={32} color={HB_COLORS.success} />
             </View>
             <Text variant="headlineSmall" style={styles.successTitle}>{t("create.successHeadline")}</Text>
-            <Text variant="bodyMedium" style={styles.centerSecondary}>{t("create.successDescription", { name: createdName })}</Text>
+            <Text variant="bodyMedium" style={styles.centerSecondary}>{t("create.successDescriptionEmail", { name: createdName })}</Text>
           </View>
 
           <View style={styles.card}>
             <View style={styles.credentialRow}>
               <Text variant="bodyMedium" style={styles.rowLabel}>{t("fields.username")}</Text>
-              <Text variant="titleMedium" style={styles.credentialValue} selectable>{created.user.username}</Text>
-              <IconButton icon="content-copy" size={20} accessibilityLabel={t("create.copyUsername")} onPress={() => void copyText(created.user.username, "create.copiedUsername")} />
-            </View>
-            <View style={[styles.credentialRow, styles.rowDivider]}>
-              <Text variant="bodyMedium" style={styles.rowLabel}>{t("fields.initialPassword")}</Text>
-              <Text variant="titleMedium" style={styles.credentialValue} selectable>{created.password}</Text>
-              <IconButton icon="content-copy" size={20} accessibilityLabel={t("create.copyPassword")} onPress={() => void copyText(created.password, "create.copiedPassword")} />
+              <Text variant="titleMedium" style={styles.credentialValue} selectable numberOfLines={1}>{created.username}</Text>
+              <IconButton icon="content-copy" size={20} accessibilityLabel={t("create.copyUsername")} onPress={() => void copyText(created.username, "create.copiedUsername")} />
             </View>
             <View style={[styles.credentialRow, styles.rowDivider]}>
               <Text variant="bodyMedium" style={styles.rowLabel}>{t("create.assignment")}</Text>
@@ -189,42 +189,46 @@ export default function CreateStaffScreen() {
             </View>
           </View>
 
-          <View style={styles.warning}>
-            <MaterialCommunityIcons name="alert-outline" size={20} color="#7A2E0E" />
-            <Text variant="bodySmall" style={styles.warningText}>{t("create.passwordOnceWarning")}</Text>
-          </View>
-
-          {requirePasswordChange ? (
-            <View style={styles.card}>
-              <Text variant="titleSmall" style={styles.cardTitle}>{t("create.nextStepsTitle")}</Text>
-              {["create.nextStepPassword", "create.nextStepBasic", "create.nextStepSensitive"].map((key, index) => (
-                <View key={key} style={styles.stepRow}>
-                  <View style={styles.stepBadge}><Text variant="labelSmall" style={styles.stepBadgeText}>{index + 1}</Text></View>
-                  <Text variant="bodyMedium" style={styles.flex}>{t(key)}</Text>
-                </View>
-              ))}
+          {/* 邮件状态：发送成功显示打码邮箱与有效期；失败显示原因，可重发。 */}
+          {inviteResult ? (
+            <View style={styles.inviteSent}>
+              <MaterialCommunityIcons name="email-check-outline" size={20} color="#054F31" />
+              <Text variant="bodySmall" style={styles.inviteSentText}>{t("create.inviteSent", { email: inviteResult.maskedEmail })}</Text>
             </View>
-          ) : null}
-        </ScrollView>
-        <View style={styles.footerColumn}>
-          <Button mode="contained-tonal" icon="content-copy" onPress={() => void copyText(credentialText, "create.copiedAll")} contentStyle={styles.buttonContent}>
-            {t("create.copyAll")}
+          ) : (
+            <View style={styles.warning}>
+              <MaterialCommunityIcons name="alert-outline" size={20} color="#7A2E0E" />
+              <Text variant="bodySmall" style={styles.warningText}>{t("create.inviteFailed", { reason: inviteError })}</Text>
+            </View>
+          )}
+          <Button mode="text" icon="email-sync-outline" onPress={() => void resendInvite()} loading={setupEmailMutation.isPending} disabled={setupEmailMutation.isPending}>
+            {t("create.resendInvite")}
           </Button>
-          <View style={styles.footerRow}>
-            {canPrintBarcode ? (
-              <Button mode="outlined" icon="printer-outline" onPress={() => setBarcodeVisible(true)} style={styles.flex} contentStyle={styles.buttonContent}>
-                {t("create.printBarcode")}
-              </Button>
-            ) : null}
-            <Button mode="contained" buttonColor={HB_COLORS.action} onPress={handleClose} style={styles.flex} contentStyle={styles.buttonContent}>
-              {t("create.done")}
-            </Button>
+
+          <View style={styles.card}>
+            <Text variant="titleSmall" style={styles.cardTitle}>{t("create.nextStepsTitle")}</Text>
+            {["create.nextStepEmail", "create.nextStepBasic", "create.nextStepSensitive"].map((key, index) => (
+              <View key={key} style={styles.stepRow}>
+                <View style={styles.stepBadge}><Text variant="labelSmall" style={styles.stepBadgeText}>{index + 1}</Text></View>
+                <Text variant="bodyMedium" style={styles.flex}>{t(key)}</Text>
+              </View>
+            ))}
           </View>
+        </ScrollView>
+        <View style={styles.footerRowBar}>
+          {canPrintBarcode ? (
+            <Button mode="outlined" icon="printer-outline" onPress={() => setBarcodeVisible(true)} style={styles.flex} contentStyle={styles.buttonContent}>
+              {t("create.printBarcode")}
+            </Button>
+          ) : null}
+          <Button mode="contained" buttonColor={HB_COLORS.action} onPress={handleClose} style={styles.flex} contentStyle={styles.buttonContent}>
+            {t("create.done")}
+          </Button>
         </View>
         <StaffBarcodeDialog
           actorGuid={actorGuid}
           storeCode={requestedStoreCode}
-          user={barcodeVisible ? created.user : null}
+          user={barcodeVisible ? created : null}
           visible={barcodeVisible}
           onDismiss={() => setBarcodeVisible(false)}
         />
@@ -264,37 +268,26 @@ export default function CreateStaffScreen() {
           <View style={[styles.card, styles.cardPadded]}>
             <TextInput
               mode="outlined"
+              label={t("create.emailRequired")}
+              value={email}
+              onChangeText={handleEmailChange}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="emailAddress"
+              maxLength={254}
+            />
+            <HelperText type="info" visible style={styles.helper}>{t("create.emailHelper")}</HelperText>
+            <TextInput
+              mode="outlined"
               label={t("fields.username")}
               value={username}
-              onChangeText={setUsername}
+              onChangeText={(value) => { setUsername(value); setUsernameEdited(true); }}
               autoCapitalize="none"
               autoCorrect={false}
               maxLength={50}
             />
-            <HelperText type="info" visible style={styles.helper}>{t("create.usernameHelper")}</HelperText>
-            <TextInput
-              mode="outlined"
-              label={t("fields.initialPassword")}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!passwordVisible}
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={100}
-              style={styles.monoInput}
-              right={<TextInput.Icon icon={passwordVisible ? "eye-off-outline" : "eye-outline"} accessibilityLabel={t("create.togglePassword")} onPress={() => setPasswordVisible((value) => !value)} />}
-            />
-            <View style={styles.passwordHelperRow}>
-              <HelperText type="info" visible style={[styles.helper, styles.flex]}>{t("create.passwordHelper")}</HelperText>
-              <Button compact mode="text" icon="refresh" onPress={() => setPassword(createPassword())}>{t("create.regeneratePassword")}</Button>
-            </View>
-            <View style={styles.switchRow}>
-              <View style={styles.flex}>
-                <Text variant="bodyLarge">{t("create.requirePasswordChange")}</Text>
-                <Text variant="bodySmall" style={styles.secondary}>{t("create.requirePasswordChangeHelper")}</Text>
-              </View>
-              <Switch value={requirePasswordChange} onValueChange={setRequirePasswordChange} />
-            </View>
+            <HelperText type="info" visible style={styles.helper}>{t("create.usernameFromEmailHelper")}</HelperText>
           </View>
 
           <Text variant="labelLarge" style={styles.sectionTitle}>{t("create.contactSection")}</Text>
@@ -302,7 +295,6 @@ export default function CreateStaffScreen() {
             <TextInput mode="outlined" label={t("fields.fullName")} value={fullName} onChangeText={setFullName} maxLength={100} />
             <TextInput mode="outlined" label={t("fields.phone")} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="04xx xxx xxx" />
             <HelperText type="info" visible style={styles.helper}>{t("create.phoneHelper")}</HelperText>
-            <TextInput mode="outlined" label={t("fields.email")} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} placeholder={t("create.emailPlaceholder")} />
           </View>
 
           <View style={[styles.card, styles.switchCard]}>
@@ -357,16 +349,6 @@ const styles = StyleSheet.create({
   rowLabel: { width: 80, color: HB_COLORS.textSecondary },
   storeChip: { backgroundColor: "#EAF2FF" },
   helper: { paddingHorizontal: 0, marginTop: -2 },
-  passwordHelperRow: { flexDirection: "row", alignItems: "center" },
-  monoInput: { fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) },
-  switchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: HB_SPACING.sm,
-    paddingTop: HB_SPACING.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HB_COLORS.outlineMuted,
-  },
   switchCard: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.sm, padding: HB_SPACING.md },
   secondary: { color: HB_COLORS.textSecondary },
   footerRowBar: {
@@ -377,14 +359,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: HB_COLORS.outlineMuted,
   },
-  footerColumn: {
-    gap: HB_SPACING.sm,
-    padding: HB_SPACING.md,
-    backgroundColor: HB_COLORS.white,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HB_COLORS.outlineMuted,
-  },
-  footerRow: { flexDirection: "row", gap: HB_SPACING.sm },
   cancelButton: { minWidth: 104 },
   buttonContent: { minHeight: 48 },
   successIntro: { alignItems: "center", gap: HB_SPACING.xs, paddingVertical: HB_SPACING.sm },
@@ -410,6 +384,16 @@ const styles = StyleSheet.create({
     borderColor: "#FEDF89",
   },
   warningText: { flex: 1, color: "#7A2E0E" },
+  inviteSent: {
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
+    padding: HB_SPACING.sm,
+    borderRadius: HB_RADIUS.surface,
+    backgroundColor: "#E7F6EC",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#A6F4C5",
+  },
+  inviteSentText: { flex: 1, color: "#054F31" },
   stepRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.sm, paddingHorizontal: HB_SPACING.md, paddingBottom: HB_SPACING.sm },
   stepBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#EAF2FF", alignItems: "center", justifyContent: "center" },
   stepBadgeText: { color: "#073B83", fontWeight: "700" },

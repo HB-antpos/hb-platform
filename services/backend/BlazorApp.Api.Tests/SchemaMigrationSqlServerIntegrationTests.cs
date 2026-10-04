@@ -868,6 +868,33 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 找回密码验证码表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeSchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.UserPasswordResetCode (Id, UserGUID, Purpose, CodeHash, ExpiresAtUtc, CreatedAtUtc)
+            VALUES (N'code-1', N'user-1', N'invite', REPLICATE(N'a', 64), DATEADD(HOUR, 72, SYSUTCDATETIME()), SYSUTCDATETIME());
+            """);
+        // 重复执行不得丢失已有验证码记录；FailedAttempts 默认 0。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.UserPasswordResetCode WHERE Id = N'code-1' AND FailedAttempts = 0) <> 1
+                THROW 51878, 'Existing password reset code row was lost.', 1;
+            """);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "DROP INDEX [IX_UserPasswordResetCode_User_Created] ON dbo.UserPasswordResetCode;"
+        );
+        var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, UserPasswordResetCodeSchema.VerifySql));
+        Assert.Equal(51877, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商分类三表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

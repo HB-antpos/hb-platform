@@ -28,11 +28,9 @@ import {
   type StaffAttendanceRecord,
 } from "@/modules/users";
 import { calculateAge, maskTrailingFour } from "@/modules/users/profile-display";
-import { generateInitialPassword } from "@/modules/users/initial-password";
-import { validatePasswordValue } from "@/modules/users/validation";
+import { hasDeliverableEmail } from "@/modules/users/staff-email-username";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
-import * as Crypto from "expo-crypto";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocaleTag } from "@/shared/i18n/types";
@@ -139,13 +137,12 @@ export default function StaffDetailScreen() {
   const userGuid = firstParam(params.userGuid);
   const storeCode = firstParam(params.storeCode);
   const profileQuery = useStoreUserProfile(userGuid, storeCode);
-  const { statusMutation, passwordMutation } = useStoreUserMutations(
+  const { statusMutation, setupEmailMutation } = useStoreUserMutations(
     storeCode,
     undefined,
   );
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
-  const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [activeTab, setActiveTab] = useState<DetailTab>("personal");
   const access = useAuthStore((state) => state.access);
   // 按钮可见性与后端授权一致：本店店员专用权限或全局用户权限任一即可，后端仍会校验分店与目标范围。
@@ -183,22 +180,11 @@ export default function StaffDetailScreen() {
       return;
     }
 
-    const validationMessage = validatePasswordValue(resetPasswordValue, t);
-    if (validationMessage) {
-      setSnackbarMessage(validationMessage);
-      return;
-    }
-
+    // 店长不再手动设新密码：给员工邮箱发验证码，员工在登录页自己设置。
     try {
-      await passwordMutation.mutateAsync({
-        userGuid,
-        storeCode,
-        newPassword: resetPasswordValue.trim(),
-        passwordFormat: "raw",
-      });
+      const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode });
       setResetPasswordVisible(false);
-      setResetPasswordValue("");
-      setSnackbarMessage(t("messages.passwordReset"));
+      setSnackbarMessage(t("messages.passwordSetupEmailSent", { email: result.maskedEmail }));
     } catch (error) {
       console.warn("[staff-profile] password reset failed", error);
       setSnackbarMessage(
@@ -209,7 +195,7 @@ export default function StaffDetailScreen() {
         }),
       );
     }
-  }, [language, passwordMutation, resetPasswordValue, storeCode, t, userGuid]);
+  }, [language, setupEmailMutation, storeCode, t, userGuid]);
 
   const handleToggleStatus = useCallback(() => {
     if (!profile || !storeCode) {
@@ -824,35 +810,30 @@ export default function StaffDetailScreen() {
         >
           <Dialog.Title>{t("dialogs.resetPasswordTitle")}</Dialog.Title>
           <Dialog.Content style={styles.dialogContent}>
-            <Text variant="bodyMedium">
-              {t("dialogs.resetPasswordDescription", {
-                username: profile?.username ?? "",
-              })}
-            </Text>
-            <TextInput
-              mode="outlined"
-              label={t("fields.newPassword")}
-              value={resetPasswordValue}
-              onChangeText={setResetPasswordValue}
-              autoCapitalize="none"
-              autoCorrect={false}
-              disabled={passwordMutation.isPending}
-              right={<TextInput.Icon icon="refresh" accessibilityLabel={t("create.regeneratePassword")} onPress={() => setResetPasswordValue(generateInitialPassword((count) => Crypto.getRandomBytes(count)))} />}
-            />
-            <Text variant="bodySmall" style={styles.muted}>{t("dialogs.resetPasswordRequireChangeHint")}</Text>
+            {hasDeliverableEmail(profile?.email) ? (
+              <Text variant="bodyMedium">
+                {t("dialogs.resetPasswordEmailDescription", {
+                  username: profile?.fullName || profile?.username || "",
+                  email: profile?.email ?? "",
+                })}
+              </Text>
+            ) : (
+              <Text variant="bodyMedium" style={styles.muted}>{t("dialogs.resetPasswordNoEmail")}</Text>
+            )}
           </Dialog.Content>
           <Dialog.Actions>
             <Button
               onPress={() => setResetPasswordVisible(false)}
-              disabled={passwordMutation.isPending}
+              disabled={setupEmailMutation.isPending}
             >
               {t("actions.cancel")}
             </Button>
             <Button
               onPress={handleResetPassword}
-              loading={passwordMutation.isPending}
+              loading={setupEmailMutation.isPending}
+              disabled={setupEmailMutation.isPending || !hasDeliverableEmail(profile?.email)}
             >
-              {t("actions.confirmReset")}
+              {t("actions.sendPasswordSetupEmail")}
             </Button>
           </Dialog.Actions>
         </Dialog>

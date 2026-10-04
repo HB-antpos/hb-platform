@@ -4180,8 +4180,11 @@ function registerUserRoutes(
     if (!username) {
       throw new Error("IOS_REVIEW_USER_USERNAME_REQUIRED");
     }
-    if (password.trim().length < 6 || password.length > 100) {
-      throw new Error("IOS_REVIEW_USER_PASSWORD_INVALID");
+    // 新版用邮件验证码设置密码，不提交密码；旧方式仍校验初始密码长度。
+    const sendSetupEmail = payload.sendPasswordSetupEmail === true;
+    const email = String(payload.email ?? "").trim();
+    if (sendSetupEmail ? !email.includes("@") : password.trim().length < 6 || password.length > 100) {
+      throw new Error(sendSetupEmail ? "IOS_REVIEW_USER_EMAIL_REQUIRED" : "IOS_REVIEW_USER_PASSWORD_INVALID");
     }
     if (!store) {
       throw new Error(`IOS_REVIEW_STORE_NOT_FOUND: ${storeCode}`);
@@ -4224,8 +4227,25 @@ function registerUserRoutes(
       id,
       String(user.fullName ?? username),
     );
-    return { data: clone(user), status: 201 };
+    // 审核模式不真发邮件，只回传与正式接口同形的发送结果。
+    const created = sendSetupEmail
+      ? { ...clone(user), passwordSetupEmail: { maskedEmail: maskReviewEmail(email), expiresAtUtc: current.now } }
+      : clone(user);
+    return { data: created, status: 201 };
   });
+  register(
+    transport,
+    ["POST"],
+    /^\/react\/v1\/store-users\/([^/]+)\/password-setup-email$/i,
+    ({ match }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const user = findByAnyId(state().users, id);
+      if (!user) throw new Error(`IOS_REVIEW_USER_NOT_FOUND: ${id}`);
+      const email = String(user.email ?? "");
+      if (!email.includes("@")) throw new Error("IOS_REVIEW_USER_EMAIL_REQUIRED");
+      return { data: { maskedEmail: maskReviewEmail(email), expiresAtUtc: state().now } };
+    },
+  );
   register(
     transport,
     ["GET", "PUT"],
@@ -5257,4 +5277,10 @@ function registerReportRoutes(
       },
     }),
   );
+}
+
+/** 审核模式回传的打码邮箱，与后端 PasswordResetService.MaskEmail 口径一致。 */
+function maskReviewEmail(email: string) {
+  const [name = "", domain = ""] = email.split("@");
+  return `${name.slice(0, name.length <= 2 ? 1 : 2)}***@${domain}`;
 }

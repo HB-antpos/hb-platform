@@ -56,12 +56,16 @@ assert.match(
 );
 assert.match(source, /t\("actions\.create"\)/, "新增入口必须使用本地化文案");
 assert.match(createSource, /t\("dialogs\.createTitle"\)/, "新建页必须使用创建标题");
-assert.match(createSource, /t\("fields\.initialPassword"\)/, "新建页必须要求初始密码");
+assert.doesNotMatch(createSource, /password:/, "新建页不得提交任何密码，员工用邮件验证码自己设置");
+assert.match(createSource, /sendPasswordSetupEmail: true/, "新建后必须给员工邮箱发设置密码验证码");
+assert.match(createSource, /validateNewStaffEmail\(email, t\)/, "新建时邮箱必填");
+assert.match(createSource, /resolveUsernameFromEmail\(value\)/, "用户名默认跟随邮箱");
 assert.match(createSource, /createMutation\.mutateAsync/, "保存创建表单必须调用创建接口");
-assert.match(createSource, /requirePasswordChange,/, "新建页必须提交首次登录改密开关");
 assert.match(createSource, /t\("create\.submit"\)/, "新建页主按钮必须显示创建文案");
 assert.match(createSource, /t\("create\.successHeadline"\)/, "创建成功必须给出明确反馈");
-assert.match(createSource, /t\("create\.passwordOnceWarning"\)/, "创建成功页必须提示初始密码只显示一次");
+assert.match(createSource, /t\("create\.inviteSent"/, "创建成功页必须显示设置密码邮件的发送状态");
+assert.match(createSource, /resendInvite/, "邮件没发出时店长必须能重发");
+assert.match(source, /setupEmailMutation\.mutateAsync/, "店长重置密码必须改为发送设置密码邮件");
 assert.match(createSource, /validateNewStaffPhone\(phone, t\)/, "新建时必须校验澳洲手机号");
 assert.doesNotMatch(source, /createMutation/, "列表页不再承载创建表单");
 for (const screenSource of [source, createSource]) {

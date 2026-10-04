@@ -438,6 +438,7 @@ builder.Services.AddRateLimiter(MobileDeviceActivationRateLimits.Configure);
 builder.Services.AddRateLimiter(BrowserExtensionSessionGrantRateLimits.Configure);
 builder.Services.AddRateLimiter(RustDeskLoginRateLimits.Configure);
 builder.Services.AddRateLimiter(MinorGuardianRateLimits.Configure);
+builder.Services.AddRateLimiter(PasswordResetRateLimits.Configure);
 builder.Services.AddRateLimiter(BrowserExtensionCaptureRateLimits.Configure);
 
 // --------------------- JWT认证配置 ---------------------
@@ -753,7 +754,9 @@ builder.Services.AddScoped<EmployeeMinorComplianceService>(); // 未成年用工
 builder.Services.AddScoped<MinorEmploymentReminderService>(); // 经理待办只记录提醒，不阻断排班或打卡
 builder.Services.AddScoped<IEmployeeMinorDocumentStore, CosEmployeeMinorDocumentStore>();
 builder.Services.Configure<MinorEmploymentOptions>(builder.Configuration.GetSection(MinorEmploymentOptions.SectionName));
-builder.Services.AddScoped<IMinorGuardianEmailSender, MinorGuardianEmailSender>(); // 监护人签署链接与验证码邮件，复用发票邮箱的公司 SMTP 账号
+builder.Services.AddScoped<IMinorGuardianEmailSender, MinorGuardianEmailSender>();
+builder.Services.AddScoped<IAccountPasswordEmailSender, AccountPasswordEmailSender>(); // 员工设置 / 找回密码验证码邮件，同样复用发票邮箱的公司 SMTP 账号
+builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // 监护人签署链接与验证码邮件，复用发票邮箱的公司 SMTP 账号
 builder.Services.AddHttpClient("minor-employment-documents");
 builder.Services.AddScoped<EmployeeProfileSensitiveChangeService>();
 builder.Services.AddScoped<EmployeeProfileMediaService>();

@@ -398,6 +398,69 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CreateAsync_WithPasswordSetupEmail_RequiresEmailAndSendsInviteWithoutPassword()
+        {
+            await SeedStoreUserDataAsync();
+            var invites = new FakePasswordResetService();
+            var service = CreateService("manager-1", invites, "StoreManager");
+
+            var missingEmail = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "no_email",
+                    StoreCode = "S001",
+                    Status = 1,
+                    SendPasswordSetupEmail = true,
+                },
+                "manager-1"
+            );
+            var created = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "new.staff@example.com",
+                    Email = "New.Staff@Example.com",
+                    StoreCode = "S001",
+                    Status = 1,
+                    SendPasswordSetupEmail = true,
+                },
+                "manager-1"
+            );
+
+            Assert.False(missingEmail.Success);
+            Assert.True(created.Success, created.Message);
+            Assert.Equal("new.staff@example.com", created.Data!.Username);
+            Assert.Equal("new.staff@example.com", created.Data.Email);
+            Assert.Equal(new[] { created.Data.UserGuid }, invites.Invited);
+            Assert.NotNull(created.Data.PasswordSetupEmail);
+            Assert.Null(created.Data.PasswordSetupEmailError);
+            // 员工自己设密码，不再要求首次改密。
+            Assert.False(created.Data.MustChangePassword);
+            Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+        }
+
+        [Fact]
+        public async Task SendPasswordSetupEmailAsync_SendsForManagedStaffButRejectsSelfAndForeignStore()
+        {
+            await SeedStoreUserDataAsync();
+            await _db.Insertable(CreateUserRole("manager-1", "role-staff")).ExecuteCommandAsync();
+            var invites = new FakePasswordResetService();
+            var service = CreateService("manager-1", invites, "StoreManager");
+
+            var managed = await service.SendPasswordSetupEmailAsync(
+                "staff-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001" }, "manager-1");
+            var self = await service.SendPasswordSetupEmailAsync(
+                "manager-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001" }, "manager-1");
+            var foreign = await service.SendPasswordSetupEmailAsync(
+                "staff-2", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001" }, "manager-1");
+
+            Assert.True(managed.Success, managed.Message);
+            Assert.False(self.Success);
+            Assert.Equal("FORBIDDEN", self.Code);
+            Assert.False(foreign.Success);
+            Assert.Equal(new[] { "staff-1" }, invites.Invited);
+        }
+
+        [Fact]
         public async Task UpdatePasswordAsync_WhenStoreManagerTargetsForeignStore_ReturnsScopeError()
         {
             await SeedStoreUserDataAsync();
@@ -428,7 +491,14 @@ namespace BlazorApp.Api.Tests
             }
         }
 
-        private StoreUserReactService CreateService(string userGuid, params string[] roles)
+        private StoreUserReactService CreateService(string userGuid, params string[] roles) =>
+            CreateService(userGuid, null, roles);
+
+        private StoreUserReactService CreateService(
+            string userGuid,
+            IPasswordResetService? passwordResetService,
+            params string[] roles
+        )
         {
             var httpContextAccessor = new HttpContextAccessor
             {
@@ -451,8 +521,30 @@ namespace BlazorApp.Api.Tests
             return new StoreUserReactService(
                 context,
                 NullLogger<StoreUserReactService>.Instance,
-                scopeService
+                scopeService,
+                passwordResetService
             );
+        }
+
+        private sealed class FakePasswordResetService : IPasswordResetService
+        {
+            public List<string> Invited { get; } = new();
+
+            public Task<ApiResponse<bool>> RequestSelfServiceAsync(string email, string? requestIp) =>
+                Task.FromResult(ApiResponse<bool>.OK(true));
+
+            public Task<ApiResponse<PasswordSetupEmailResultDto>> SendInviteAsync(string userGuid, string requestedBy, string? requestIp)
+            {
+                Invited.Add(userGuid);
+                return Task.FromResult(ApiResponse<PasswordSetupEmailResultDto>.OK(new PasswordSetupEmailResultDto
+                {
+                    MaskedEmail = "st***@example.com",
+                    ExpiresAtUtc = DateTime.UtcNow.AddHours(72),
+                }));
+            }
+
+            public Task<ApiResponse<bool>> ConfirmAsync(string email, string code, string newPassword, string? requestIp) =>
+                Task.FromResult(ApiResponse<bool>.OK(true));
         }
 
         private async Task SeedStoreUserDataAsync()

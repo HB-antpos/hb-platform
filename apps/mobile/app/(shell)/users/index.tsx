@@ -36,15 +36,14 @@ import {
 import { StaffBarcodeBatchDialog, StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
 import { getUserAccessEligibility } from "@/modules/users/access-management";
-import { generateInitialPassword } from "@/modules/users/initial-password";
-import { validatePasswordValue, validateStoreUserForm } from "@/modules/users/validation";
+import { hasDeliverableEmail } from "@/modules/users/staff-email-username";
+import { validateStoreUserForm } from "@/modules/users/validation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
-import * as Crypto from "expo-crypto";
 
 type StatusFilter = "all" | "active" | "disabled" | "pendingFirstLogin";
 
@@ -96,7 +95,6 @@ export default function UsersScreen() {
   const [editingStoreCode, setEditingStoreCode] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<StoreUserFormValues>(EMPTY_FORM);
   const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
-  const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [passwordUser, setPasswordUser] = useState<StoreUserListItem | null>(null);
   const [moreUser, setMoreUser] = useState<StoreUserListItem | null>(null);
   const [barcodeUser, setBarcodeUser] = useState<StoreUserListItem | null>(null);
@@ -175,13 +173,13 @@ export default function UsersScreen() {
     editingUserGuid,
     editingStoreCode
   );
-  const { updateMutation, statusMutation, passwordMutation } =
+  const { updateMutation, statusMutation, setupEmailMutation } =
     useStoreUserMutations(managedStoreCode, keyword);
 
   const isBusy =
     updateMutation.isPending ||
     statusMutation.isPending ||
-    passwordMutation.isPending;
+    setupEmailMutation.isPending;
 
   const resolveUserStoreCode = useCallback(
     (user: StoreUserListItem) => managedStoreCode || user.storeCode || null,
@@ -306,7 +304,6 @@ export default function UsersScreen() {
 
   const closeResetPasswordDialog = useCallback(() => {
     setPasswordUser(null);
-    setResetPasswordValue("");
     setResetPasswordVisible(false);
   }, []);
 
@@ -447,7 +444,6 @@ export default function UsersScreen() {
       }
 
       setPasswordUser(user);
-      setResetPasswordValue("");
       setResetPasswordVisible(true);
     },
     [canResetUserPassword, t]
@@ -468,20 +464,13 @@ export default function UsersScreen() {
       return;
     }
 
-    const validationMessage = validatePasswordValue(resetPasswordValue, t);
-    if (validationMessage) {
-      setSnackbarMessage(validationMessage);
-      return;
-    }
-
+    // 店长不再手动设新密码：给员工邮箱发验证码，员工在登录页自己设置。
     try {
-      await passwordMutation.mutateAsync({
+      const result = await setupEmailMutation.mutateAsync({
         userGuid: passwordUser.userGUID,
         storeCode: targetStoreCode,
-        newPassword: resetPasswordValue.trim(),
-        passwordFormat: "raw",
       });
-      setSnackbarMessage(t("messages.passwordReset"));
+      setSnackbarMessage(t("messages.passwordSetupEmailSent", { email: result.maskedEmail }));
       closeResetPasswordDialog();
     } catch (error) {
       console.warn("[store-users] password reset failed", toSafeStoreUserErrorLog(error));
@@ -492,10 +481,9 @@ export default function UsersScreen() {
     canResetPasswords,
     language,
     manageableStores,
-    passwordMutation,
     passwordUser,
     resolveUserStoreCode,
-    resetPasswordValue,
+    setupEmailMutation,
     t,
   ]);
 
@@ -904,27 +892,27 @@ export default function UsersScreen() {
         <Dialog visible={resetPasswordVisible} onDismiss={closeResetPasswordDialog}>
           <Dialog.Title>{t("dialogs.resetPasswordTitle")}</Dialog.Title>
           <Dialog.Content style={styles.dialogContent}>
-            <Text variant="bodyMedium">
-              {t("dialogs.resetPasswordDescription", { username: passwordUser?.username ?? "" })}
-            </Text>
-            <TextInput
-              mode="outlined"
-              label={t("fields.newPassword")}
-              value={resetPasswordValue}
-              onChangeText={setResetPasswordValue}
-              autoCapitalize="none"
-              autoCorrect={false}
-              disabled={passwordMutation.isPending}
-              right={<TextInput.Icon icon="refresh" accessibilityLabel={t("create.regeneratePassword")} onPress={() => setResetPasswordValue(generateInitialPassword((count) => Crypto.getRandomBytes(count)))} />}
-            />
-            <Text variant="bodySmall" style={styles.secondaryText}>{t("dialogs.resetPasswordRequireChangeHint")}</Text>
+            {hasDeliverableEmail(passwordUser?.email) ? (
+              <Text variant="bodyMedium">
+                {t("dialogs.resetPasswordEmailDescription", {
+                  username: passwordUser?.fullName || passwordUser?.username || "",
+                  email: passwordUser?.email ?? "",
+                })}
+              </Text>
+            ) : (
+              <Text variant="bodyMedium" style={styles.readOnlyHint}>{t("dialogs.resetPasswordNoEmail")}</Text>
+            )}
           </Dialog.Content>
           <Dialog.Actions>
-            <Button onPress={closeResetPasswordDialog} disabled={passwordMutation.isPending}>
+            <Button onPress={closeResetPasswordDialog} disabled={setupEmailMutation.isPending}>
               {t("actions.cancel")}
             </Button>
-            <Button onPress={handleResetPassword} loading={passwordMutation.isPending}>
-              {t("actions.confirmReset")}
+            <Button
+              onPress={handleResetPassword}
+              loading={setupEmailMutation.isPending}
+              disabled={setupEmailMutation.isPending || !hasDeliverableEmail(passwordUser?.email)}
+            >
+              {t("actions.sendPasswordSetupEmail")}
             </Button>
           </Dialog.Actions>
         </Dialog>

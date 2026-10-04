@@ -23,7 +23,8 @@
     "enable": "Enable",
     "disable": "Disable",
     "resetPassword": "Reset password",
-    "confirmReset": "Reset"
+    "confirmReset": "Reset",
+    "sendPasswordSetupEmail": "Send password set-up email"
   },
   "posPermissions": {
     "title": "POS Terminal Permissions",
@@ -356,7 +357,8 @@
     "resetPasswordTitle": "Reset staff password",
     "resetPasswordDescription": "Set a new password for {{username}}. Share it with this staff member after saving.",
     "statusConfirmMessage": "Are you sure you want to {{action}} {{username}}?",
-    "resetPasswordRequireChangeHint": "After the reset, the employee must set their own password the next time they open the app."
+    "resetPasswordEmailDescription": "A password set-up code will be emailed to {{username}} ({{email}}). They can use it via \"Set up / forgot password\" on the sign-in screen. The old password keeps working until then.",
+    "resetPasswordNoEmail": "This employee has no usable email. Edit the employee to add an email first."
   },
   "messages": {
     "noAccessTitle": "No staff view access",
@@ -387,7 +389,9 @@
     "userEnabled": "Staff account enabled",
     "userDisabled": "Staff account disabled",
     "passwordReset": "Password reset successfully",
-    "phoneInvalid": "Enter an Australian mobile (10 digits starting with 04)"
+    "phoneInvalid": "Enter an Australian mobile (10 digits starting with 04)",
+    "emailRequired": "Enter the staff email",
+    "passwordSetupEmailSent": "Password set-up email sent to {{email}}"
   },
   "create": {
     "assignmentSection": "Account assignment",
@@ -397,38 +401,31 @@
     "employmentType": "Employment",
     "assignmentHint": "Accounts created by a store manager are always store staff of this store. Contact an administrator for other roles or stores.",
     "loginSection": "Sign-in details",
-    "usernameHelper": "3–50 characters, saved in lowercase. The employee signs in with it.",
-    "passwordHelper": "At least 6 characters. Shown only once after creation.",
-    "regeneratePassword": "Regenerate",
-    "togglePassword": "Show or hide password",
-    "requirePasswordChange": "Require password change on first sign-in",
-    "requirePasswordChangeHelper": "After signing in with the initial password, the employee sets their own",
     "contactSection": "Contact details (optional)",
     "phoneHelper": "Australian mobile, 10 digits starting with 04",
-    "emailPlaceholder": "Optional; an internal email is generated if left empty",
     "enableNow": "Enable now",
     "enableNowHelper": "If off, the account is created but cannot sign in yet",
     "submit": "Create account",
     "successTitle": "Account created",
     "successHeadline": "Account created",
-    "successDescription": "Give these sign-in details to {{name}} to sign in to the HB app.",
     "assignment": "Assignment",
     "assignmentValue": "{{store}} · Store staff · Casual",
     "copyUsername": "Copy username",
-    "copyPassword": "Copy initial password",
-    "copyAll": "Copy sign-in details",
     "copiedUsername": "Username copied",
-    "copiedPassword": "Initial password copied",
-    "copiedAll": "Sign-in details copied",
-    "passwordOnceWarning": "The initial password can't be viewed again after leaving this page. If forgotten, reset it from the staff details.",
     "nextStepsTitle": "After the first sign-in, the employee will",
-    "nextStepPassword": "Set their own password",
     "nextStepBasic": "Complete phone, address and other basic details",
     "nextStepSensitive": "Submit birthday, bank, super and ID for your review",
     "printBarcode": "Print personal code",
     "done": "Done",
-    "credentialHeading": "HB app sign-in details",
-    "credentialFooter": "Please keep the password safe.",
-    "credentialFooterForced": "You will set your own password after the first sign-in."
+    "emailRequired": "Staff email (required)",
+    "emailHelper": "Used to sign in, receive the password set-up code and reset the password",
+    "usernameFromEmailHelper": "Same as the email by default; the employee signs in with it. Edit if needed (3–50 characters)",
+    "successDescriptionEmail": "A password set-up code has been emailed to {{name}}. They can tap \"Set up / forgot password\" on the app sign-in screen to choose their own password — you don't need to hand over any password.",
+    "inviteSent": "Password set-up email sent to {{email}}, valid for 72 hours.",
+    "inviteFailed": "The account was created, but the password set-up email was not sent: {{reason}}. You can resend it later.",
+    "inviteFailedFallback": "Email could not be sent",
+    "resendInvite": "Resend password set-up email",
+    "inviteResent": "Password set-up email resent",
+    "nextStepEmail": "Check their email and set their own password with the code via \"Set up / forgot password\" on the sign-in screen"
   }
 }

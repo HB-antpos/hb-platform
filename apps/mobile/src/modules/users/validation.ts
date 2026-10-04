@@ -64,3 +64,12 @@ export function validateNewStaffPhone(phone: string, t: Translate) {
   }
   return AU_MOBILE_PATTERN.test(normalized) ? null : t("messages.phoneInvalid");
 }
+
+/** 新建店员时邮箱必填：它是默认用户名，也是收设置 / 找回密码验证码的唯一渠道。 */
+export function validateNewStaffEmail(email: string, t: Translate) {
+  const trimmed = email.trim();
+  if (!trimmed) {
+    return t("messages.emailRequired");
+  }
+  return EMAIL_PATTERN.test(trimmed) ? null : t("messages.emailInvalid");
+}

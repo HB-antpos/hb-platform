@@ -221,6 +221,7 @@
     <Compile Include="LocalPurchaseDashboardSqlServerIntegrationTests.cs" />
     <Compile Include="ClientIpResolverTests.cs" />
     <Compile Include="AuthServiceTests.cs" />
+    <Compile Include="PasswordResetServiceTests.cs" />
     <Compile Include="AuthSessionValidatorMobileDeviceTests.cs" />
     <Compile Include="AuthSessionValidatorWebTests.cs" />
     <Compile Include="AuthSessionControllerTests.cs" />

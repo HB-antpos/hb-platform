@@ -130,5 +130,27 @@
       "wrongCurrent": "The current password is incorrect.",
       "sameAsCurrent": "The new password must be different from the current one."
     }
+  },
+  "resetPassword": {
+    "entry": "Set up / forgot password",
+    "title": "Set up or reset password",
+    "emailDescription": "Enter your staff email and we will send a 6-digit code. The email you received when your manager created your account also contains a code.",
+    "codeDescription": "A code has been sent to {{email}} (if an account exists for it). Check your email, then choose a new password.",
+    "email": "Staff email",
+    "changeEmail": "Change email",
+    "code": "6-digit code",
+    "codeHelper": "Didn't get it? Check your spam folder",
+    "resend": "Resend",
+    "resendIn": "Resend in {{seconds}}s",
+    "sendCode": "Send code",
+    "submit": "Set new password",
+    "doneTitle": "Password set",
+    "doneDescription": "Sign in with your email and new password. Other devices have been signed out.",
+    "backToLogin": "Back to sign in",
+    "errors": {
+      "email": "Enter a valid email address",
+      "sendFailed": "Could not send the code. Please try again later.",
+      "confirmFailed": "Could not set the password. Check the code and try again."
+    }
   }
 }
