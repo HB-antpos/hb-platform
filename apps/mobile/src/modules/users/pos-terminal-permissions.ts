@@ -48,6 +48,13 @@ function normalizeIdentityValue(value: string) {
   return value.trim().toLowerCase();
 }
 
+/** 目标是否持有高权限角色；这类账号的 POS 授权不由本页管理（复制同事候选同样排除）。 */
+export function hasPrivilegedPosPermissionRole(roleNames: string[]) {
+  return roleNames.some((roleName) =>
+    PRIVILEGED_ROLE_NAMES.has(normalizeIdentityValue(roleName))
+  );
+}
+
 function uniquePermissionCodes(permissionCodes: string[]) {
   return Array.from(new Set(permissionCodes));
 }

@@ -27,22 +27,113 @@
     "sendPasswordSetupEmail": "Send password set-up email"
   },
   "posPermissions": {
-    "title": "POS Terminal Permissions",
+    "title": "POS access",
     "unknownUser": "Unknown staff member",
     "unknownStore": "Unknown store",
     "loading": "Loading POS permissions...",
-    "selectedCount": "{{selected}} of {{total}} selected",
+    "storeRole": "{{store}} · {{role}}",
+    "roleLabels": {
+      "storeStaff": "Store staff"
+    },
     "mode": {
-      "inherited": "Inherited",
-      "override": "Override"
+      "inherited": "Role default",
+      "override": "Store custom"
     },
     "actions": {
-      "open": "POS access",
       "back": "Back",
+      "more": "More actions",
       "save": "Save",
-      "restore": "Restore inheritance",
-      "selectGroup": "Select all",
-      "clearGroup": "Clear"
+      "restore": "Restore role default",
+      "reviewChanges": "Review changes",
+      "backToEdit": "Keep editing",
+      "confirmSave": "Confirm and save",
+      "close": "Close"
+    },
+    "presets": {
+      "title": "Quick apply",
+      "basic": "Basic cashier",
+      "senior": "Senior cashier",
+      "all": "All",
+      "none": "Clear",
+      "copy": "Copy colleague"
+    },
+    "stats": {
+      "enabledLabel": "Enabled",
+      "ofTotal": "/ {{total}}",
+      "highRiskEnabled": "High risk on: {{value}}",
+      "progressLabel": "{{selected}} of {{total}} POS permissions enabled"
+    },
+    "search": {
+      "placeholder": "Search permissions or groups"
+    },
+    "filters": {
+      "label": "Filter",
+      "all": "All",
+      "enabled": "On {{value}}",
+      "highRisk": "High risk {{value}}",
+      "changed": "Changed {{value}}"
+    },
+    "groups": {
+      "sales": "Sales",
+      "discount": "Discounts",
+      "payment": "Payment",
+      "returns": "Returns",
+      "history": "Order history",
+      "dailyClose": "Daily close",
+      "installments": "Installments",
+      "drawerReceipt": "Cash drawer & receipt",
+      "other": "Other"
+    },
+    "group": {
+      "notEnabled": "Not enabled",
+      "previewMore": "{{names}} and {{value}} more",
+      "toggleAll": "{{group}}: select or clear the whole group",
+      "expand": "Expand {{group}}",
+      "collapse": "Collapse {{group}}"
+    },
+    "entryHint": "\"{{name}}\" is off, so the items below cannot be used on the POS",
+    "badges": {
+      "highRisk": "High risk",
+      "changed": "Changed"
+    },
+    "discount": {
+      "line": "Line discount",
+      "order": "Order discount",
+      "levels": {
+        "10": "10%",
+        "20": "20%",
+        "30": "30%",
+        "40": "40%",
+        "50": "50%",
+        "manual": "Manual"
+      }
+    },
+    "footer": {
+      "pending": "Unsaved changes: {{value}}",
+      "upToDate": "Up to date. No unsaved changes."
+    },
+    "confirm": {
+      "title": "Confirm changes ({{value}})",
+      "subtitle": "{{user}} · {{store}}",
+      "added": "On",
+      "removed": "Off",
+      "highRiskWarning": "High-risk permissions newly enabled: {{value}}. Make sure this staff member really needs them.",
+      "scopeNotice": "Applies to {{store}} only. POS permissions at the staff member's other stores stay the same."
+    },
+    "copy": {
+      "title": "Copy a colleague's permissions",
+      "subtitle": "Colleagues at {{store}}",
+      "searchPlaceholder": "Search colleague name or username",
+      "help": "After applying you stay on the edit page and can keep adjusting. Nothing takes effect until you tap Save. Only permissions you are allowed to assign are copied.",
+      "apply": "Apply {{name}}'s permissions ({{value}})",
+      "applyIdle": "Select a colleague first",
+      "loadingColleague": "Loading permissions...",
+      "permissionCount": "Copyable: {{value}}",
+      "loadFailed": "Could not load this colleague's permissions. Try again or choose someone else.",
+      "listFailed": "Could not load colleagues. Try again later.",
+      "empty": "No colleagues at this store can be copied",
+      "noMatch": "No matching colleagues",
+      "unavailable": "The store code is missing, so colleagues cannot be listed. Reopen this page from Staff Management."
     },
     "unsaved": {
       "title": "Discard unsaved changes?",
@@ -50,20 +141,22 @@
       "discard": "Discard changes"
     },
     "restore": {
-      "title": "Restore inherited permissions?",
-      "description": "This removes the store-specific override and restores inherited POS permissions."
+      "title": "Restore role default permissions?",
+      "description": "This removes the custom setting for this store and returns to the role's default POS permissions."
     },
     "busy": {
       "title": "Operation in progress",
       "description": "Wait for the save or restore to finish before leaving this page."
     },
     "messages": {
-      "missingStoreGuid": "The store access identifier is missing. Refresh stores or sign in again.",
       "saved": "POS permissions saved",
-      "restored": "Inherited permissions restored",
+      "restored": "Role default permissions restored",
       "saveFailed": "POS permissions could not be saved. Your unsaved selection has been kept.",
-      "restoreFailed": "Inherited permissions could not be restored. Your current selection has been kept."
+      "restoreFailed": "Role defaults could not be restored. Your current selection has been kept.",
+      "presetApplied": "Applied \"{{name}}\". Tap Save to make it take effect.",
+      "copyApplied": "Applied {{name}}'s permissions. Tap Save to make them take effect."
     },
+    "noResults": "No permissions match",
     "errors": {
       "invalidTitle": "Permission details are incomplete",
       "invalidDescription": "The staff member or store identifier is missing. Open this page again from Staff Management.",
@@ -77,7 +170,7 @@
       "networkDescription": "The server cannot be reached right now. Check your connection and try again."
     },
     "emptyTitle": "No POS permissions are assignable",
-    "emptyDescription": "The server has no assignable permissions for this staff member and store. You can still restore inheritance while an override is active."
+    "emptyDescription": "The server has no assignable permissions for this staff member and store. If this store has a custom setting, you can still restore the role default from More."
   },
   "accessManagement": {
     "title": "Access Management",

@@ -743,12 +743,15 @@ export default function AccessManagementScreen() {
         params: {
           userGuid,
           storeGuid,
+          // storeCode 供「复制同事」按分店列出同事，roleNames 用于顶部「分店 · 角色」展示。
+          storeCode: store.storeCode,
           userName,
           storeName: store.storeName || store.storeCode,
+          roleNames: routeRoleNames.join("|"),
         },
       } as unknown as Parameters<typeof router.push>[0]);
     },
-    [router, t, userGuid, userName],
+    [routeRoleNames, router, t, userGuid, userName],
   );
 
   const retryQueries = useCallback(() => {
