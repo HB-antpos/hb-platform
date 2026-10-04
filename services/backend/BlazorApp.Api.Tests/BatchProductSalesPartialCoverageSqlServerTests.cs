@@ -489,21 +489,34 @@ public sealed partial class BatchProductSalesAnalysisSqlServerIntegrationTests
         await _catalog!.Insertable(new Store { StoreCode = "S1", StoreName = "一店", IsDeleted = false }).ExecuteCommandAsync();
         await _catalog.Insertable(new[] { State(day28, "Fresh", "v28"), State(day29, "Fresh", "v29") }).ExecuteCommandAsync();
         await _catalog.Insertable(new[] { Stat(day28, "P1", "S1", 2), Stat(day29, "P1", "S1", 3) }).ExecuteCommandAsync();
+        // 按阶段注入而非按分组查询序号：摘要聚合拆成几条 SQL 都不影响注入时机。
+        // C1 前改 day29 → C1 只保留 day28 为稳定日期；C1 之后的稳定重读期间改 day28 → C2 必须报冲突。
         var grouped = 0;
+        var coverageReads = 0;
+        var c2Injected = false;
         _catalog.Aop.OnLogExecuted = (sql, _) =>
         {
+            if (sql.Contains("SalesStatisticRefreshState", StringComparison.OrdinalIgnoreCase)
+                && sql.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                coverageReads++;
+                return;
+            }
             if (!sql.Contains("ProductStoreDailySalesStatistic", StringComparison.OrdinalIgnoreCase) || !sql.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)) return;
             grouped++;
             using var writer = Client(WithDatabase(_master!, CatalogName));
             if (grouped == 1)
                 writer.Updateable<SalesStatisticRefreshState>().SetColumns(x => x.SourceProductVersion == "v29-c1").Where(x => x.Date == day29).ExecuteCommand();
-            else if (grouped == 3)
+            else if (coverageReads >= 2 && !c2Injected)
+            {
+                c2Injected = true;
                 writer.Updateable<SalesStatisticRefreshState>().SetColumns(x => x.SourceProductVersion == "v28-c2").Where(x => x.Date == day28).ExecuteCommand();
+            }
         };
         try
         {
             await Assert.ThrowsAsync<BatchProductSalesCoverageVersionConflictException>(() => CreateAnalysisService().QueryAsync(new() { ItemNumbers = ["001"], StartDate = day28, EndDate = day29 }, ["S1"]));
-            Assert.True(grouped >= 3);
+            Assert.True(c2Injected, "C1 之后的稳定日期重读必须发生，才能验证 C2 冲突");
         }
         finally { _catalog.Aop.OnLogExecuted = null; }
     }
