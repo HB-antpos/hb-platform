@@ -712,6 +712,8 @@ export interface SendStoreOrderInvoiceEmailPayload {
   toEmail: string
   subject?: string
   body?: string
+  /** 发件邮箱账号 ID；不传时后端使用默认发件账号 */
+  fromAccountId?: string
 }
 
 export interface TranslateStoreOrderInvoiceEmailTextPayload {

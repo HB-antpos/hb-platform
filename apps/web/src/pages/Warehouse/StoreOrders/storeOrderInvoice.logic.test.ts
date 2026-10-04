@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
+import { formatInvoiceEmailSenderAccountLabel, resolveInvoiceEmailSenderAccountId } from './invoiceEmailSender'
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
@@ -212,6 +214,9 @@ async function main() {
       'emailLanguageChinese',
       'emailLanguageEnglish',
       'emailTranslateFailed',
+      'senderAccount',
+      'senderAccountDefault',
+      'senderAccountsLoadFailed',
     ]) {
       assert(zhSource.includes(`\"${key}\"`), `中文翻译缺少 ${key}`)
       assert(enSource.includes(`\"${key}\"`), `英文翻译缺少 ${key}`)
@@ -220,6 +225,38 @@ async function main() {
     assert(enMessages?.warehouse?.invoice?.excel?.rrp === 'RRP', '英文发票 Excel 翻译缺少 warehouse.invoice.excel.rrp')
   })
   if (translationFailure) failures.push(translationFailure)
+
+  const senderAccounts = [
+    { id: 'sender-a', name: 'Warehouse', fromEmail: 'warehouse@example.com', isDefault: false },
+    { id: 'sender-b', name: 'Accounts', fromEmail: 'accounts@example.com', isDefault: true },
+  ]
+
+  const senderSelectionFailure = await runTest('发件账号默认选中：沿用仍存在的上次选择，否则默认账号', () => {
+    assert(resolveInvoiceEmailSenderAccountId(senderAccounts) === 'sender-b', '未选择过时应选中默认账号')
+    assert(resolveInvoiceEmailSenderAccountId(senderAccounts, 'sender-a') === 'sender-a', '上次选择仍存在时应保留')
+    assert(resolveInvoiceEmailSenderAccountId(senderAccounts, 'deleted') === 'sender-b', '上次选择已删除时应回到默认账号')
+    assert(
+      resolveInvoiceEmailSenderAccountId([{ ...senderAccounts[0], isDefault: false }]) === 'sender-a',
+      '没有默认标记时应取第一个账号',
+    )
+    assert(resolveInvoiceEmailSenderAccountId([]) === undefined, '没有账号时不传发件账号，由后端用默认账号')
+  })
+  if (senderSelectionFailure) failures.push(senderSelectionFailure)
+
+  const senderLabelFailure = await runTest('发件账号选项同时显示名称与发件地址', () => {
+    assert(formatInvoiceEmailSenderAccountLabel(senderAccounts[0]) === 'Warehouse <warehouse@example.com>', '名称与地址应同时展示')
+    assert(
+      formatInvoiceEmailSenderAccountLabel({ ...senderAccounts[0], name: 'warehouse@example.com' }) === 'warehouse@example.com',
+      '名称就是地址时不重复展示',
+    )
+  })
+  if (senderLabelFailure) failures.push(senderLabelFailure)
+
+  const senderPayloadFailure = await runTest('发送发票邮件应携带所选发件账号', () => {
+    assert(invoiceSource.includes('fromAccountId: senderAccountId'), '发送请求应传递 fromAccountId')
+    assert(invoiceSource.includes('getInvoiceEmailSenderAccounts()'), '打开弹窗应加载发件账号列表')
+  })
+  if (senderPayloadFailure) failures.push(senderPayloadFailure)
 
   if (failures.length > 0) {
     throw new Error(`共有 ${failures.length} 个测试失败\n- ${failures.join('\n- ')}`)

@@ -9,6 +9,7 @@ import { RequestError } from '../../../utils/request'
 import {
   buildInvoiceEmailSettingsSavePayload,
   buildInvoiceEmailSettingsTestPayload,
+  collectInvoiceEmailAccountErrorIndexes,
   createInvoiceEmailSettingsFormValues,
   createNewInvoiceEmailAccountFormValue,
   ensureInvoiceEmailDefaultAccount,
@@ -206,6 +207,18 @@ assertEqual(
   resolveInvoiceEmailSettingsErrorMessage(new Error(''), '发送测试邮件失败'),
   '发送测试邮件失败',
   '错误消息为空时应回退到页面默认文案',
+)
+
+assertEqual(
+  collectInvoiceEmailAccountErrorIndexes([
+    { name: ['accounts', 2, 'host'], errors: ['请输入 SMTP 主机'] },
+    { name: ['accounts', 0, 'fromEmail'], errors: ['请输入发件邮箱'] },
+    { name: ['accounts', 2, 'port'], errors: ['请输入 SMTP 端口'] },
+    { name: ['accounts', 1, 'name'], errors: [] },
+    { name: ['other', 3], errors: ['x'] },
+  ]).join(','),
+  '0,2',
+  '出错账号序号应升序去重，并忽略无错误字段与非账号字段',
 )
 
 const routeSource = readFileSync('src/router/routes.tsx', 'utf8')

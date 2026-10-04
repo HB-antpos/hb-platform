@@ -1281,6 +1281,126 @@ public sealed class StoreOrderContactAndInvoiceTests : IDisposable
     }
 
     [Fact]
+    public async Task InvoiceEmailService_WhenFromAccountIdGiven_SendsWithSelectedAccount()
+    {
+        var settingsService = CreateSettingsService();
+        await settingsService.UpdateSettingsAsync(
+            new UpdateInvoiceEmailSettingsDto
+            {
+                Accounts = new List<UpdateInvoiceEmailAccountDto>
+                {
+                    CreateAccountRequest("sender-a", "a", isDefault: true),
+                    CreateAccountRequest("sender-b", "b", isDefault: false),
+                },
+            },
+            "admin"
+        );
+        var service = new SendingCaptureInvoiceEmailService(settingsService);
+
+        var result = await service.SendInvoiceAsync(CreateSimpleInvoiceMessage("sender-b"));
+
+        Assert.True(result.Success);
+        Assert.Equal("b.smtp.example.com", service.ConnectedHost);
+        Assert.Equal("b-user", service.AuthenticatedUsername);
+        Assert.Equal("b-secret", service.AuthenticatedPassword);
+        Assert.Equal("b@example.com", service.SentMessage!.From.Mailboxes.Single().Address);
+    }
+
+    [Fact]
+    public async Task InvoiceEmailService_WhenFromAccountMissing_ReturnsAccountNotFoundWithoutSending()
+    {
+        var settingsService = CreateSettingsService();
+        await settingsService.UpdateSettingsAsync(
+            new UpdateInvoiceEmailSettingsDto
+            {
+                Accounts = new List<UpdateInvoiceEmailAccountDto>
+                {
+                    CreateAccountRequest("sender-a", "a", isDefault: true),
+                },
+            },
+            "admin"
+        );
+        var service = new SendingCaptureInvoiceEmailService(settingsService);
+
+        var result = await service.SendInvoiceAsync(CreateSimpleInvoiceMessage("deleted-sender"));
+
+        Assert.False(result.Success);
+        Assert.Equal("INVOICE_EMAIL_ACCOUNT_NOT_FOUND", result.ErrorCode);
+        Assert.Null(service.ConnectedHost);
+        Assert.Null(service.SentMessage);
+    }
+
+    [Fact]
+    public async Task StoreOrderInvoiceEmailJobService_PassesSelectedFromAccountToMessage()
+    {
+        var attachmentService = new Mock<IStoreOrderInvoiceAttachmentService>(MockBehavior.Strict);
+        attachmentService
+            .Setup(item => item.GenerateAttachmentsAsync("order-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ApiResponse<StoreOrderInvoiceAttachmentBundle>.OK(
+                new StoreOrderInvoiceAttachmentBundle
+                {
+                    OrderGUID = "order-1",
+                    OrderNo = "SO001",
+                    StoreCode = "S001",
+                    Attachments = CreateSimpleInvoiceMessage(null).Attachments,
+                }
+            ));
+        StoreOrderInvoiceEmailMessage? capturedMessage = null;
+        var invoiceEmailService = new Mock<IInvoiceEmailService>(MockBehavior.Strict);
+        invoiceEmailService
+            .Setup(item => item.SendInvoiceAsync(It.IsAny<StoreOrderInvoiceEmailMessage>()))
+            .Callback<StoreOrderInvoiceEmailMessage>(message => capturedMessage = message)
+            .ReturnsAsync(ApiResponse<bool>.OK(true, "发票邮件发送成功"));
+        var jobService = CreateInvoiceEmailJobService(attachmentService, invoiceEmailService);
+
+        var started = await jobService.StartJobAsync(
+            new SendStoreOrderInvoiceEmailDto
+            {
+                OrderGUID = "order-1",
+                ToEmail = "customer@example.com",
+                FromAccountId = " sender-b ",
+            }
+        );
+        var completed = await WaitForInvoiceEmailJobAsync(jobService, started.JobId);
+
+        Assert.Equal(StoreOrderInvoiceEmailJobStatusConstants.Succeeded, completed.Status);
+        Assert.Equal("sender-b", capturedMessage!.FromAccountId);
+    }
+
+    private static UpdateInvoiceEmailAccountDto CreateAccountRequest(string id, string key, bool isDefault) =>
+        new()
+        {
+            Id = id,
+            Name = $"Sender {key}",
+            Host = $"{key}.smtp.example.com",
+            Port = 587,
+            UseSsl = false,
+            Username = $"{key}-user",
+            Password = $"{key}-secret",
+            FromEmail = $"{key}@example.com",
+            MaxAttachmentBytes = 5_242_880,
+            IsDefault = isDefault,
+        };
+
+    private static StoreOrderInvoiceEmailMessage CreateSimpleInvoiceMessage(string? fromAccountId) =>
+        new()
+        {
+            ToEmail = "customer@example.com",
+            Subject = "invoice",
+            Body = "body",
+            FromAccountId = fromAccountId,
+            Attachments = new List<StoreOrderInvoiceEmailAttachment>
+            {
+                new()
+                {
+                    FileName = "invoice.pdf",
+                    ContentType = "application/pdf",
+                    Bytes = new byte[] { 1, 2, 3, 4 },
+                },
+            },
+        };
+
+    [Fact]
     public async Task InvoiceEmailService_UsesDatabaseSettingsForSmtpAndSender()
     {
         var settingsService = CreateSettingsService();

@@ -413,6 +413,105 @@ public sealed class InvoiceEmailSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAccountOptionsAsync_WhenAccountIdGiven_ReturnsThatAccountInsteadOfDefault()
+    {
+        var service = CreateService();
+        await SeedConfigurationAsync("sender-a", isDefault: true);
+        await SeedConfigurationAsync("sender-b", isDefault: false);
+
+        var options = await service.GetAccountOptionsAsync(" sender-b ");
+
+        Assert.Equal("sender-b.smtp.example.com", options.Host);
+        Assert.Equal("sender-b@example.com", options.FromEmail);
+    }
+
+    [Fact]
+    public async Task GetAccountOptionsAsync_WhenAccountIdBlank_UsesDefaultAccount()
+    {
+        var service = CreateService();
+        await SeedConfigurationAsync("sender-a", isDefault: false);
+        await SeedConfigurationAsync("sender-b", isDefault: true);
+
+        var options = await service.GetAccountOptionsAsync("  ");
+
+        Assert.Equal("sender-b@example.com", options.FromEmail);
+    }
+
+    [Fact]
+    public async Task GetAccountOptionsAsync_WhenAccountMissing_ThrowsInsteadOfFallingBackToDefault()
+    {
+        var service = CreateService();
+        await SeedConfigurationAsync("sender-a", isDefault: true);
+
+        await Assert.ThrowsAsync<InvoiceEmailAccountNotFoundException>(
+            () => service.GetAccountOptionsAsync("deleted-sender")
+        );
+    }
+
+    [Fact]
+    public async Task GetAccountOptionsAsync_WhenDatabaseEmptyAndDefaultIdGiven_UsesAppsettingsFallback()
+    {
+        var service = CreateService(new InvoiceEmailOptions
+        {
+            Host = "fallback.smtp.example.com",
+            Port = 465,
+            FromEmail = "fallback@example.com",
+        });
+
+        var options = await service.GetAccountOptionsAsync(InvoiceEmailConfiguration.DefaultId);
+
+        Assert.Equal("fallback.smtp.example.com", options.Host);
+        Assert.Equal("fallback@example.com", options.FromEmail);
+    }
+
+    [Fact]
+    public async Task GetSenderAccountsAsync_ReturnsDefaultFirstWithoutSmtpCredentials()
+    {
+        var service = CreateService();
+        await SeedConfigurationAsync("sender-a", isDefault: false);
+        await SeedConfigurationAsync("sender-b", isDefault: true);
+
+        var accounts = await service.GetSenderAccountsAsync();
+
+        Assert.Collection(
+            accounts,
+            account =>
+            {
+                Assert.Equal("sender-b", account.Id);
+                Assert.True(account.IsDefault);
+                Assert.Equal("sender-b@example.com", account.FromEmail);
+            },
+            account =>
+            {
+                Assert.Equal("sender-a", account.Id);
+                Assert.False(account.IsDefault);
+            }
+        );
+        // 发件账号选项 DTO 只允许名称与发件地址，防止把 SMTP 凭据下发给普通发票操作员。
+        Assert.Equal(
+            new[] { "FromEmail", "FromName", "Id", "IsDefault", "Name" },
+            typeof(InvoiceEmailSenderAccountDto).GetProperties().Select(item => item.Name).Order().ToArray()
+        );
+    }
+
+    [Fact]
+    public async Task GetSenderAccountsAsync_WhenDatabaseEmpty_ReturnsFallbackOnlyWhenFromEmailConfigured()
+    {
+        var unconfigured = await CreateService().GetSenderAccountsAsync();
+        var configured = await CreateService(new InvoiceEmailOptions
+        {
+            FromEmail = "fallback@example.com",
+            FromName = "HOT BARGAIN",
+        }).GetSenderAccountsAsync();
+
+        Assert.Empty(unconfigured);
+        var account = Assert.Single(configured);
+        Assert.Equal(InvoiceEmailConfiguration.DefaultId, account.Id);
+        Assert.True(account.IsDefault);
+        Assert.Equal("fallback@example.com", account.FromEmail);
+    }
+
+    [Fact]
     public void EnsureInvoiceEmailConfigurationMultiAccountSchema_AddsColumnsAndBackfillsDefault()
     {
         using var connection = new SqliteConnection($"Data Source={Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db")}");

@@ -1,5 +1,5 @@
 import { DownloadOutlined, FileExcelOutlined, MailOutlined, PrinterOutlined, RollbackOutlined } from '@ant-design/icons'
-import { Button, Empty, Image, Input, Modal, Segmented, Space, Spin, Switch, message } from 'antd'
+import { Button, Empty, Image, Input, Modal, Segmented, Select, Space, Spin, Switch, message } from 'antd'
 import type { TFunction } from 'i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import BarcodePreview from '../../../components/BarcodePreview'
 import { useDynamicTabTitle } from '../../../hooks/useDynamicTabTitle'
 import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
+import { getInvoiceEmailSenderAccounts } from '../../../services/invoiceEmailSettingsService'
 import { getStores } from '../../../services/storeService'
 import {
   getStoreOrderDetail,
@@ -15,6 +16,7 @@ import {
   translateStoreOrderInvoiceEmailText,
   updateStoreOrderStoreContact,
 } from '../../../services/storeOrderService'
+import type { InvoiceEmailSenderAccountDto } from '../../../types/invoiceEmailSettings'
 import type { StoreDto } from '../../../types/store'
 import type { StoreOrderDetail, StoreOrderDetailLine } from '../../../types/storeOrder'
 import { shouldSkipDetailAutoReload } from '../../../utils/detailLoadState'
@@ -23,6 +25,7 @@ import {
   StoreOrderInvoiceEmailPollingTimeoutError,
   createStoreOrderInvoiceEmailJobPoller,
 } from './invoiceEmailJobPolling'
+import { formatInvoiceEmailSenderAccountLabel, resolveInvoiceEmailSenderAccountId } from './invoiceEmailSender'
 import { InvoiceEmailSentStatusText } from './invoiceEmailSentInfo'
 import {
   buildDocumentFileName,
@@ -218,6 +221,11 @@ export default function StoreOrderInvoicePage() {
   const [emailSubjectTouched, setEmailSubjectTouched] = useState(false)
   const [emailBodyTouched, setEmailBodyTouched] = useState(false)
   const [translatingEmailText, setTranslatingEmailText] = useState(false)
+  const [senderAccounts, setSenderAccounts] = useState<InvoiceEmailSenderAccountDto[]>([])
+  const [senderAccountId, setSenderAccountId] = useState<string | undefined>()
+  const [loadingSenderAccounts, setLoadingSenderAccounts] = useState(false)
+  // 每次打开弹窗都重新拉取发件账号，只采纳最后一次请求的结果，避免快速开关弹窗时旧响应覆盖新列表。
+  const senderAccountsRequestRef = useRef(0)
 
   useDynamicTabTitle(
     order?.orderNo
@@ -399,6 +407,34 @@ export default function StoreOrderInvoicePage() {
     setEmailBodyTouched(false)
     setSaveAsStoreDefault(true)
     setEmailModalOpen(true)
+    void loadSenderAccounts()
+  }
+
+  const loadSenderAccounts = async () => {
+    const requestId = senderAccountsRequestRef.current + 1
+    senderAccountsRequestRef.current = requestId
+    setLoadingSenderAccounts(true)
+    try {
+      const accounts = await getInvoiceEmailSenderAccounts()
+      if (senderAccountsRequestRef.current !== requestId) {
+        return
+      }
+      setSenderAccounts(accounts)
+      setSenderAccountId((current) => resolveInvoiceEmailSenderAccountId(accounts, current))
+    } catch (error) {
+      if (senderAccountsRequestRef.current !== requestId) {
+        return
+      }
+      // 列表拉取失败不阻断发送：清空选择后不传 fromAccountId，由后端使用默认发件账号。
+      console.error(error)
+      setSenderAccounts([])
+      setSenderAccountId(undefined)
+      message.warning(t('warehouse.invoice.senderAccountsLoadFailed'))
+    } finally {
+      if (senderAccountsRequestRef.current === requestId) {
+        setLoadingSenderAccounts(false)
+      }
+    }
   }
 
   const handleEmailModalLanguageChange = async (nextLanguage: InvoiceEmailModalLanguage) => {
@@ -505,6 +541,7 @@ export default function StoreOrderInvoicePage() {
         toEmail: normalizedRecipientEmail,
         subject: emailSubject.trim() || undefined,
         body: emailBody.trim() || undefined,
+        fromAccountId: senderAccountId,
       })
 
       message.success(t('warehouse.invoice.emailJobSubmitted'))
@@ -747,7 +784,8 @@ export default function StoreOrderInvoicePage() {
         okText={t('warehouse.invoice.sendEmail', { lng: emailModalLanguage })}
         cancelText={t('common.cancel', { lng: emailModalLanguage })}
         confirmLoading={sendingEmail || translatingEmailText}
-        okButtonProps={{ disabled: translatingEmailText }}
+        // 发件账号列表加载完成前禁止发送，避免还没选上账号就按默认账号发出。
+        okButtonProps={{ disabled: translatingEmailText || loadingSenderAccounts }}
         onCancel={() => setEmailModalOpen(false)}
         onOk={() => void handleSendInvoiceEmail()}
       >
@@ -764,6 +802,23 @@ export default function StoreOrderInvoicePage() {
             onChange={(value) => void handleEmailModalLanguageChange(value)}
           />
           <InvoiceEmailSentStatusText info={order?.invoiceEmailSentInfo} t={t} lng={emailModalLanguage} />
+          {(loadingSenderAccounts || senderAccounts.length > 0) && (
+            <Select
+              aria-label={t('warehouse.invoice.senderAccount', { lng: emailModalLanguage })}
+              style={{ width: '100%' }}
+              value={senderAccountId}
+              loading={loadingSenderAccounts}
+              disabled={translatingEmailText || loadingSenderAccounts}
+              placeholder={t('warehouse.invoice.senderAccount', { lng: emailModalLanguage })}
+              options={senderAccounts.map((account) => ({
+                value: account.id,
+                label: account.isDefault
+                  ? `${formatInvoiceEmailSenderAccountLabel(account)} · ${t('warehouse.invoice.senderAccountDefault', { lng: emailModalLanguage })}`
+                  : formatInvoiceEmailSenderAccountLabel(account),
+              }))}
+              onChange={setSenderAccountId}
+            />
+          )}
           <Input
             type="email"
             value={recipientEmail}
