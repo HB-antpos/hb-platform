@@ -841,6 +841,42 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 敏感申请生日列_保留历史申请可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            CREATE TABLE dbo.EmployeeProfileSensitiveChangeRequest (
+                RequestId int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                UserGUID nvarchar(50) NOT NULL,
+                BankAccountNumber nvarchar(50) NULL
+            );
+            INSERT dbo.EmployeeProfileSensitiveChangeRequest (UserGUID, BankAccountNumber)
+            VALUES (N'user-legacy', N'legacy-account');
+            """);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeProfileSensitiveBirthdaySchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeProfileSensitiveBirthdaySchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeProfileSensitiveBirthdaySchema.ApplySql);
+
+        // 历史申请不回填生日，审批侧据此不改动正式生日。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.EmployeeProfileSensitiveChangeRequest
+                WHERE UserGUID = N'user-legacy'
+                  AND BankAccountNumber = N'legacy-account'
+                  AND Birthday IS NULL) <> 1
+                THROW 51863, 'Existing sensitive change request row was changed.', 1;
+            """);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            ALTER TABLE dbo.EmployeeProfileSensitiveChangeRequest DROP COLUMN Birthday;
+            ALTER TABLE dbo.EmployeeProfileSensitiveChangeRequest ADD Birthday datetime NULL;
+            """);
+        var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeProfileSensitiveBirthdaySchema.VerifySql));
+        Assert.Equal(51862, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商分类三表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

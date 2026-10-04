@@ -4,8 +4,10 @@ import type {
   SensitiveEmployeeProfilePayload,
   UpdateEmployeeProfilePayload,
 } from "./types";
+import { normalizeBirthday } from "./birthday";
 
 const SENSITIVE_FIELDS = [
+  "birthday",
   "bankBsb",
   "bankAccountNumber",
   "superannuationCompanyName",
@@ -21,6 +23,7 @@ function normalizeSensitiveValue(value: string | null | undefined) {
 
 function toFormalSensitiveDraft(profile: EmployeeProfile): SensitiveEmployeeProfilePayload {
   return {
+    birthday: normalizeBirthday(profile.birthday),
     bankBsb: profile.bankBsb,
     bankAccountNumber: profile.bankAccountNumber,
     superannuationCompanyName: profile.superannuationCompanyName,
@@ -55,7 +58,6 @@ export function buildNonSensitiveProfilePayload(
 ): UpdateEmployeeProfilePayload {
   const payload: UpdateEmployeeProfilePayload = {
     phone: draft.phone.trim(),
-    birthday: draft.birthday.trim(),
     gender: draft.gender.trim(),
     address: draft.address.trim(),
   };

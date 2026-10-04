@@ -4,6 +4,7 @@ import type {
   SensitiveEmployeeProfilePayload,
   UpdateEmployeeProfilePayload,
 } from "./types";
+import { normalizeBirthday } from "./birthday";
 
 type ApiRecord = Record<string, unknown>;
 type EmployeeProfileHttpClient = {
@@ -69,6 +70,7 @@ export function normalizeSensitiveChangeRequest(
   return {
     requestId: Number(data.requestId ?? data.RequestId) || 0,
     status,
+    birthday: normalizeBirthday(asString(data.birthday ?? data.Birthday)),
     bankBsb: asString(data.bankBsb ?? data.BankBsb),
     bankAccountNumber: asString(data.bankAccountNumber ?? data.BankAccountNumber),
     superannuationCompanyName: asString(data.superannuationCompanyName ?? data.SuperannuationCompanyName),
@@ -104,7 +106,11 @@ export function createEmployeeProfileApi(client: EmployeeProfileHttpClient) {
       return normalizeSensitiveChangeRequest(response.data);
     },
     async upsertMySensitiveChangeRequest(payload: SensitiveEmployeeProfilePayload) {
-      const response = await client.put("/EmployeeProfiles/me/sensitive-change-request", payload);
+      // 后端生日是 DateTime?，空串无法反序列化，不填时显式提交 null。
+      const response = await client.put("/EmployeeProfiles/me/sensitive-change-request", {
+        ...payload,
+        birthday: payload.birthday.trim() || null,
+      });
       const normalized = normalizeSensitiveChangeRequest(response.data);
       if (!normalized) {
         throw new Error("Sensitive change request response is empty");

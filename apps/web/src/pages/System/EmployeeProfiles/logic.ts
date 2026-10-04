@@ -5,6 +5,7 @@ import type {
 } from '../../../types/employeeProfile'
 
 export const SENSITIVE_PROFILE_FIELDS = [
+  'birthday',
   'bankBsb',
   'bankAccountNumber',
   'superannuationCompanyName',
@@ -19,8 +20,13 @@ export type SensitiveProfileField = EmployeeProfileSensitiveField
 
 export type SensitiveProfileSnapshot = Partial<Record<SensitiveProfileField, unknown>>
 
-function normalizeSensitiveValue(value: unknown) {
-  return typeof value === 'string' ? value.trim() : value ?? null
+function normalizeSensitiveValue(field: SensitiveProfileField, value: unknown) {
+  if (typeof value !== 'string') {
+    return value ?? null
+  }
+  const trimmed = value.trim()
+  // 生日来自后端是 1998-06-21T00:00:00，表单是 1998-06-21，只比较日期部分。
+  return field === 'birthday' ? trimmed.slice(0, 10) || null : trimmed
 }
 
 export function getChangedSensitiveFields<
@@ -31,7 +37,7 @@ export function getChangedSensitiveFields<
   next: TNext,
 ): SensitiveProfileField[] {
   return SENSITIVE_PROFILE_FIELDS.filter(
-    (field) => normalizeSensitiveValue(current[field]) !== normalizeSensitiveValue(next[field]),
+    (field) => normalizeSensitiveValue(field, current[field]) !== normalizeSensitiveValue(field, next[field]),
   )
 }
 

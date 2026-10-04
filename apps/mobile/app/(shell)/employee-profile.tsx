@@ -27,6 +27,7 @@ import {
   upsertMySensitiveChangeRequestApi,
 } from "@/modules/employee-profile/api";
 import { AvatarEditorField } from "@/modules/employee-profile/AvatarEditorField";
+import { calculateAge, normalizeBirthday, validateBirthday } from "@/modules/employee-profile/birthday";
 import {
   getEmployeeProfileQueryKey,
   getEmployeeSensitiveChangeQueryKey,
@@ -83,12 +84,12 @@ const PROFILE_BLUE = "#1256DB";
 const EMPTY_FORM: UpdateEmployeeProfilePayload = {
   phone: "",
   email: "",
-  birthday: "",
   gender: "",
   employmentType: "",
   address: "",
 };
 const EMPTY_SENSITIVE_FORM: SensitiveEmployeeProfilePayload = {
+  birthday: "",
   bankBsb: "",
   bankAccountNumber: "",
   superannuationCompanyName: "",
@@ -442,6 +443,14 @@ export default function EmployeeProfileScreen() {
       ? sensitiveQuery.data.changedFields
       : getChangedSensitiveFields(profileQuery.data, selectSensitiveDraft(profileQuery.data, sensitiveQuery.data));
   }, [profileQuery.data, sensitiveQuery.data]);
+  const formalBirthday = normalizeBirthday(profileQuery.data?.birthday);
+  const formatBirthdayWithAge = useCallback((value: string) => {
+    const age = calculateAge(value);
+    return age === null ? value : t("birthday.withAge", { date: value, age });
+  }, [t]);
+  const birthdayError = validateBirthday(sensitiveFormValues.birthday);
+  const isBirthdayChanged = sensitiveFormValues.birthday.trim() !== formalBirthday;
+  const draftBirthdayAge = birthdayError ? null : calculateAge(sensitiveFormValues.birthday);
   const pendingIdentityPhotoRemoval = sensitiveQuery.data?.status === "Pending" && shouldShowPendingIdentityPhotoRemoval({
     changedFields: sensitiveChangedFields,
     pendingHasIdentityPhoto: sensitiveQuery.data.hasIdentityPhoto,
@@ -468,6 +477,15 @@ export default function EmployeeProfileScreen() {
     setView("sensitive");
   };
 
+  const handleGoToBirthdayReview = () => {
+    const openBirthdayEditor = () => {
+      if (profileQuery.data) setFormValues(toEmployeeProfileDraft(profileQuery.data));
+      handleStartSensitiveEdit("personal");
+    };
+    if (isBasicDirty) confirmDiscard(openBirthdayEditor);
+    else openBirthdayEditor();
+  };
+
   const handleSave = async () => {
     if (!isEmailChangeValid(profileQuery.data?.email, formValues.email)) {
       showMessage(t("messages.invalidEmail"));
@@ -488,6 +506,10 @@ export default function EmployeeProfileScreen() {
     }
   };
   const handleSensitiveSubmit = async () => {
+    if (birthdayError) {
+      showMessage(t(`birthday.errors.${birthdayError}`));
+      return;
+    }
     const submittedIdentity = userIdentity;
     const submittedScope = currentIdentityScope;
     sensitiveMutationIdentityRef.current = submittedIdentity;
@@ -615,6 +637,37 @@ export default function EmployeeProfileScreen() {
   }
 
   const renderSensitiveEditorSection = (section: SensitiveProfileSection) => {
+    if (section === "personal") {
+      return (
+        <Surface key={section} style={styles.card} elevation={0}>
+          <View style={styles.sectionHeader}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>{t("sections.personal")}</Text>
+            {isBirthdayChanged ? <Chip compact style={styles.changedChip} textStyle={styles.changedChipText}>{t("birthday.changed")}</Chip> : null}
+          </View>
+          <TextInput
+            mode="outlined"
+            label={t("fields.birthday")}
+            placeholder={t("placeholders.birthday")}
+            value={sensitiveFormValues.birthday}
+            onChangeText={(value) => setSensitiveFieldValue("birthday", value)}
+            keyboardType="numbers-and-punctuation"
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxLength={10}
+            error={Boolean(birthdayError)}
+          />
+          {/* 有错误时提示格式，否则实时显示年龄并附上已确认的生日供对照。 */}
+          <HelperText type={birthdayError ? "error" : "info"} visible>
+            {birthdayError
+              ? t(`birthday.errors.${birthdayError}`)
+              : [
+                draftBirthdayAge === null ? null : t("birthday.age", { age: draftBirthdayAge }),
+                t("birthday.confirmed", { date: formalBirthday || t("overview.notProvided") }),
+              ].filter(Boolean).join(" · ")}
+          </HelperText>
+        </Surface>
+      );
+    }
     if (section === "banking") {
       return (
         <Surface key={section} style={styles.card} elevation={0}>
@@ -761,7 +814,6 @@ export default function EmployeeProfileScreen() {
               <View style={styles.summaryGrid}>
                 <ProfileSummaryRow inline icon="phone-outline" label={t("fields.phone")} value={formValues.phone || t("common:na")} />
                 <ProfileSummaryRow inline icon="email-outline" label={t("fields.email")} value={formValues.email || t("common:na")} />
-                <ProfileSummaryRow inline icon="calendar-blank-outline" label={t("fields.birthday")} value={formValues.birthday || t("common:na")} />
                 <ProfileSummaryRow inline icon="account-outline" label={t("fields.gender")} value={formValues.gender ? t(`genderOptions.${formValues.gender}`, formValues.gender) : t("common:na")} />
                 {formValues.employmentType ? <ProfileSummaryRow inline icon="briefcase-outline" label={t("fields.employmentType")} value={t(`employmentTypeOptions.${formValues.employmentType}`, formValues.employmentType)} /> : null}
                 <ProfileSummaryRow inline icon="map-marker-outline" label={t("fields.address")} value={formValues.address || t("common:na")} isLast />
@@ -773,6 +825,11 @@ export default function EmployeeProfileScreen() {
                 <Text variant="titleMedium" style={styles.sectionTitle}>{t("sections.sensitive")}</Text>
                 {sensitiveQuery.isLoading ? <ActivityIndicator size="small" /> : <Chip compact style={styles.statusChip}>{t(sensitiveStatus.statusKey)}</Chip>}
               </View>
+              <ProfileSummaryRow
+                label={t("fields.birthday")}
+                value={formalBirthday ? formatBirthdayWithAge(formalBirthday) : t("overview.notProvided")}
+                onPress={canEditSensitive ? () => handleStartSensitiveEdit("personal") : undefined}
+              />
               <ProfileSummaryRow
                 label={t("sections.banking")}
                 value={getSensitiveAccountSummary(profileQuery.data?.bankAccountNumber) || t("overview.notProvided")}
@@ -809,7 +866,20 @@ export default function EmployeeProfileScreen() {
             <Text variant="bodySmall" style={styles.editHint}>{t("edit.basicHint")}</Text>
             <TextInput mode="outlined" label={t("fields.phone")} value={formValues.phone} onChangeText={(value) => setFieldValue("phone", value)} keyboardType="phone-pad" />
             <TextInput mode="outlined" label={t("fields.email")} value={formValues.email} onChangeText={(value) => setFieldValue("email", value)} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} maxLength={254} error={Boolean(formValues.email && !isValidEmail(formValues.email))} />
-            <TextInput mode="outlined" label={t("fields.birthday")} placeholder={t("placeholders.birthday")} value={formValues.birthday} onChangeText={(value) => setFieldValue("birthday", value)} autoCapitalize="none" />
+            {/* 生日属于敏感资料：这里只读，修改须到敏感资料提交审核。 */}
+            <TextInput
+              mode="outlined"
+              label={t("fields.birthday")}
+              value={formalBirthday ? formatBirthdayWithAge(formalBirthday) : t("overview.notProvided")}
+              editable={false}
+              right={<TextInput.Icon icon="lock-outline" disabled />}
+            />
+            <View style={styles.readonlyHintRow}>
+              <HelperText type="info" visible style={styles.readonlyHintText}>{t("birthday.requiresReview")}</HelperText>
+              <Button compact mode="text" onPress={handleGoToBirthdayReview} disabled={!canEditSensitive || savePendingForCurrentIdentity}>
+                {t("birthday.goToReview")}
+              </Button>
+            </View>
             <View style={styles.segmentBlock}>
               <Text variant="labelLarge">{t("fields.gender")}</Text>
               <SegmentedButtons value={formValues.gender} onValueChange={(value) => setFieldValue("gender", value)} buttons={GENDERS.map((value) => ({ value, label: t(`genderOptions.${value}`) }))} />
@@ -842,7 +912,7 @@ export default function EmployeeProfileScreen() {
             </Surface>
             {getSensitiveSectionOrder(activeSensitiveSection).map(renderSensitiveEditorSection)}
             <Surface style={styles.card} elevation={0}>
-              <Button mode="contained" buttonColor={PROFILE_BLUE} onPress={() => void handleSensitiveSubmit()} loading={sensitivePendingForCurrentIdentity} disabled={!isSensitiveDirty || sensitivePendingForCurrentIdentity || currentSavingImageKind !== null}>
+              <Button mode="contained" buttonColor={PROFILE_BLUE} onPress={() => void handleSensitiveSubmit()} loading={sensitivePendingForCurrentIdentity} disabled={!isSensitiveDirty || Boolean(birthdayError) || sensitivePendingForCurrentIdentity || currentSavingImageKind !== null}>
                 {t("actions.submitSensitive")}
               </Button>
               <Button mode="text" onPress={resetEditor} disabled={sensitivePendingForCurrentIdentity}>{t("common:actions.cancel")}</Button>
@@ -936,6 +1006,10 @@ const styles = StyleSheet.create({
     padding: HB_SPACING.md,
     gap: HB_SPACING.xs,
   },
+  changedChip: { backgroundColor: "#FEF0C7" },
+  changedChipText: { color: "#7A2E0E" },
+  readonlyHintRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: -HB_SPACING.xs },
+  readonlyHintText: { flex: 1, paddingHorizontal: 0 },
   pendingSnapshot: { gap: HB_SPACING.xs, padding: HB_SPACING.sm, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.surfaceMuted },
   identityPreview: { width: "100%", height: 180, borderRadius: 12, backgroundColor: HB_COLORS.surfaceMuted },
 });

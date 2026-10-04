@@ -75,7 +75,7 @@
     "avatarTitle": "更换头像",
     "basicHint": "修改后保存，资料会立即更新。",
     "reviewNoticeTitle": "提交后需要审核",
-    "reviewNoticeDescription": "银行、养老金和身份信息会作为一份完整申请提交。审核通过前继续显示已确认资料。"
+    "reviewNoticeDescription": "生日、银行、养老金和身份信息会作为一份完整申请提交。审核通过前继续显示已确认资料。"
   },
   "unsaved": {
     "title": "放弃未保存的修改？",
@@ -172,6 +172,19 @@
       "permissionDenied": "蓝牙权限已被拒绝，请在系统设置中允许后重试。",
       "connectionFailed": "无法连接已保存的标签打印机，请检查打印机后重试。",
       "unknown": "标签打印失败，请检查打印机设置后重试。"
+    }
+  },
+  "birthday": {
+    "age": "{{age}} 岁",
+    "withAge": "{{date}} · {{age}} 岁",
+    "confirmed": "已确认：{{date}}",
+    "changed": "已修改",
+    "requiresReview": "生日属于敏感资料，修改需提交审核",
+    "goToReview": "去填报",
+    "errors": {
+      "format": "请按 YYYY-MM-DD 输入有效日期",
+      "future": "生日不能晚于今天",
+      "tooOld": "请检查出生年份"
     }
   }
 }

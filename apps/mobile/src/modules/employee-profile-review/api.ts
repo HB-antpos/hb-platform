@@ -9,6 +9,7 @@ import type {
   EmployeeProfileSensitiveSnapshot,
 } from "./types";
 import { EMPLOYEE_PROFILE_SENSITIVE_FIELDS } from "./types";
+import { normalizeBirthday } from "@/modules/employee-profile/birthday";
 
 type ApiRecord = Record<string, unknown>;
 type ReviewHttpClient = {
@@ -101,6 +102,7 @@ function normalizeSummary(payload: unknown): EmployeeProfileReviewSummary | null
 function normalizeSnapshot(payload: unknown): EmployeeProfileSensitiveSnapshot {
   const data = asRecord(payload);
   return {
+    birthday: normalizeBirthday(asString(read(data, "birthday", "Birthday"))),
     bankBsb: asString(read(data, "bankBsb", "BankBsb")),
     bankAccountNumber: asString(read(data, "bankAccountNumber", "BankAccountNumber")),
     superannuationCompanyName: asString(

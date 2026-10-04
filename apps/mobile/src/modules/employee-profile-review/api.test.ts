@@ -51,9 +51,10 @@ const detail = normalizeEmployeeProfileReviewDetail({
   status: "Pending",
   baseSensitiveRevision: 3,
   submittedAt: "2026-07-16T10:00:00Z",
-  changedFields: ["bankAccountNumber", "identityPhotoUrl"],
+  changedFields: ["birthday", "bankAccountNumber", "identityPhotoUrl"],
   storeCodes: ["BNE"],
   storeNames: ["Brisbane"],
+  birthday: "1998-06-12T00:00:00",
   bankBsb: "064000",
   bankAccountNumber: "123456789",
   superannuationCompanyName: "Demo Super",
@@ -66,6 +67,7 @@ const detail = normalizeEmployeeProfileReviewDetail({
   identityPhotoUrlExpiresAt: "2026-07-16T10:05:00Z",
   submittedBy: "employee42",
   currentSnapshot: {
+    Birthday: "1998-06-21T00:00:00",
     bankBsb: "062000",
     bankAccountNumber: "987654321",
     superannuationCompanyName: "Old Super",
@@ -80,6 +82,10 @@ const detail = normalizeEmployeeProfileReviewDetail({
 
 assert.equal(detail.bankAccountNumber, "123456789");
 assert.equal(detail.currentSnapshot.bankAccountNumber, "987654321");
+// 生日纳入敏感字段白名单，只保留日期部分。
+assert.deepEqual(detail.changedFields, ["birthday", "bankAccountNumber", "identityPhotoUrl"]);
+assert.equal(detail.birthday, "1998-06-12");
+assert.equal(detail.currentSnapshot.birthday, "1998-06-21");
 assert.equal(detail.identityPhotoUrl, "https://signed.example/proposed");
 
 const calls: Array<{ method: string; path: string; payload?: unknown; params?: unknown }> = [];

@@ -139,6 +139,7 @@ function mapSensitiveStatus(value: unknown): EmployeeProfileSensitiveChangeStatu
 }
 
 const SENSITIVE_FIELD_NAMES = new Set<EmployeeProfileSensitiveField>([
+  'birthday',
   'bankBsb',
   'bankAccountNumber',
   'superannuationCompanyName',
@@ -176,6 +177,7 @@ function mapSensitiveChangeSummary(raw: BackendEmployeeProfile): EmployeeProfile
 function mapSensitiveChangeDetail(raw: BackendEmployeeProfile): EmployeeProfileSensitiveChangeDetailDto {
   return {
     ...mapSensitiveChangeSummary(raw),
+    birthday: asString(raw.birthday) ?? asString(raw.Birthday),
     bankBsb: asString(raw.bankBsb) ?? asString(raw.BankBsb),
     bankAccountNumber: asString(raw.bankAccountNumber) ?? asString(raw.BankAccountNumber),
     superannuationCompanyName: asString(raw.superannuationCompanyName) ?? asString(raw.SuperannuationCompanyName),

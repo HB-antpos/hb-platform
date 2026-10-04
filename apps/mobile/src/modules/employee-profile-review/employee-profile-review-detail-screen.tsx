@@ -45,6 +45,7 @@ import {
   createEmployeeProfileSensitiveDetailActivityGuard,
   isSensitiveDetailFetchBlockedError,
 } from "./sensitive-detail-activity-guard";
+import { calculateAge } from "@/modules/employee-profile/birthday";
 import { useAppNavigationStore } from "@/modules/navigation/store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -474,11 +475,17 @@ export function EmployeeProfileReviewDetailScreen() {
   }
 
   const detail = detailQuery.data;
+  const formatBirthday = (value: string) => {
+    const age = calculateAge(value);
+    return age === null ? value : t("detail.birthdayWithAge", { date: value, age });
+  };
   const definitions: Array<{
     key: EmployeeProfileSensitiveField;
     current: string;
     proposed: string;
   }> = [
+    // 生日不遮挡，并附上年龄，便于店长直接核对前后差异。
+    { key: "birthday", current: formatBirthday(detail.currentSnapshot.birthday), proposed: formatBirthday(detail.birthday) },
     { key: "bankBsb", current: detail.currentSnapshot.bankBsb, proposed: detail.bankBsb },
     { key: "bankAccountNumber", current: detail.currentSnapshot.bankAccountNumber, proposed: detail.bankAccountNumber },
     { key: "superannuationCompanyName", current: detail.currentSnapshot.superannuationCompanyName, proposed: detail.superannuationCompanyName },

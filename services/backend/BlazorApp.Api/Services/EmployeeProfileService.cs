@@ -13,6 +13,7 @@ namespace BlazorApp.Api.Services
     {
         public const string PendingChangeConfirmationRequiredCode =
             "EMPLOYEE_PROFILE_PENDING_CHANGE_CONFIRMATION_REQUIRED";
+        public const string BirthdayRequiresReviewCode = "BIRTHDAY_REQUIRES_REVIEW";
 
         private readonly SqlSugarContext _context;
         private readonly ICurrentUserService _currentUserService;
@@ -666,6 +667,16 @@ namespace BlazorApp.Api.Services
                         }
                         profile = await db.Queryable<EmployeeProfile>()
                             .FirstAsync(item => item.UserGUID == userGuid && !item.IsDeleted);
+                        if (dto.HasBirthday && profile?.Birthday?.Date != dto.Birthday?.Date)
+                        {
+                            // 生日属于敏感资料：员工自助保存不能直接改，须在敏感资料中提交审核。
+                            // 旧版客户端会回传当前生日，等值时照常保存其余字段。
+                            await db.Ado.RollbackTranAsync();
+                            return ApiResponse<EmployeeProfileDetailDto>.Error(
+                                "生日需要提交审核，请更新 App 后在敏感资料中修改",
+                                BirthdayRequiresReviewCode
+                            );
+                        }
                         var existingEmployeeType = profile?.EmployeeType;
                         var createdProfile = false;
                         if (profile == null)
@@ -724,11 +735,9 @@ namespace BlazorApp.Api.Services
                         }
                         if (!createdProfile)
                         {
-                            // 员工自助保存只更新非敏感白名单列，绝不写回敏感字段或 revision。
-                            var birthday = dto.Birthday?.Date;
+                            // 员工自助保存只更新非敏感白名单列，绝不写回敏感字段（含生日）或 revision。
                             var profileUpdate = db.Updateable<EmployeeProfile>()
                                 .SetColumns(item => item.Phone == Normalize(dto.Phone))
-                                .SetColumns(item => item.Birthday == birthday)
                                 .SetColumns(item => item.Gender == ParseGender(dto.Gender))
                                 .SetColumns(item => item.Address == Normalize(dto.Address))
                                 .SetColumns(item => item.UpdatedAt == now)
@@ -824,7 +833,10 @@ namespace BlazorApp.Api.Services
                 profile.SuperannuationCompanyCode = Normalize(dto.SuperannuationCompanyCode);
                 profile.SuperannuationAccount = Normalize(dto.SuperannuationAccountNumber);
             }
-            profile.Birthday = dto.Birthday?.Date;
+            if (allowSensitiveChanges)
+            {
+                profile.Birthday = dto.Birthday?.Date;
+            }
             profile.Gender = ParseGender(dto.Gender);
             if (dto.HasEmploymentType)
             {
@@ -955,8 +967,10 @@ namespace BlazorApp.Api.Services
             || (dto.IdentityId is not null
                 && !string.Equals(profile?.IdentityId, Normalize(dto.IdentityId), StringComparison.Ordinal));
 
+        // 管理员直改生日免审，但同样递增 revision 并作废员工的待审申请，避免旧申请审批后覆盖新生日。
         private static bool HasSensitiveChanges(EmployeeProfile? profile, EmployeeProfileUpsertDto dto) =>
-            !string.Equals(profile?.BankBSB, Normalize(dto.BankBsb), StringComparison.Ordinal)
+            profile?.Birthday?.Date != dto.Birthday?.Date
+            || !string.Equals(profile?.BankBSB, Normalize(dto.BankBsb), StringComparison.Ordinal)
             || !string.Equals(profile?.BankACC, Normalize(dto.BankAccountNumber), StringComparison.Ordinal)
             || !string.Equals(profile?.SuperannuationCompanyName, Normalize(dto.SuperannuationCompanyName), StringComparison.Ordinal)
             || !string.Equals(profile?.SuperannuationCompanyCode, Normalize(dto.SuperannuationCompanyCode), StringComparison.Ordinal)

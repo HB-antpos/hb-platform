@@ -30,8 +30,11 @@ public sealed class EmployeeProfileSensitiveChangeService
         "WarehouseManager", "仓库经理", "StoreManager", "店长", "经理",
     ];
 
+    private const string BirthdayFieldName = "birthday";
+
     private static readonly string[] SensitiveFieldNames =
     [
+        BirthdayFieldName,
         "bankBsb",
         "bankAccountNumber",
         "superannuationCompanyName",
@@ -340,7 +343,11 @@ public sealed class EmployeeProfileSensitiveChangeService
                         profile.IdentityPhotoObjectKey,
                         request.IdentityPhotoObjectKey
                     );
+                // 关键逻辑：只有申请明确携带生日变更才写回生日；加列前的历史申请生日为空，不能清空正式生日。
+                var birthdayIncluded = RequestCarriesBirthday(profile, request);
+                var birthdayChanged = birthdayIncluded && !DateEquals(profile.Birthday, request.Birthday);
                 var sensitiveValuesChanged = HasSensitiveValueChanges(profile, request)
+                    || birthdayChanged
                     || photoChanged;
                 // 关键逻辑：revision 条件更新是防止锁外数据库写入静默覆盖资料的最终防线。
                 int updated;
@@ -357,6 +364,10 @@ public sealed class EmployeeProfileSensitiveChangeService
                         .SetColumns(item => item.SensitiveRevision == request.BaseSensitiveRevision + 1)
                         .SetColumns(item => item.UpdatedAt == now)
                         .SetColumns(item => item.UpdatedBy == actor);
+                    if (birthdayIncluded)
+                    {
+                        profileUpdate = profileUpdate.SetColumns(item => item.Birthday == request.Birthday);
+                    }
                     if (photoChanged)
                     {
                         // 证件照上传或显式删除时同步清理旧式 URL，普通字段审批不得误清。
@@ -774,6 +785,10 @@ public sealed class EmployeeProfileSensitiveChangeService
                 SuperannuationAccountNumber = Normalize(dto.SuperannuationAccountNumber),
                 IdentityType = Normalize(dto.IdentityType),
                 IdentityId = Normalize(dto.IdentityId),
+                // 未传生日（旧版客户端或证件照流程）时沿用基线：待审申请里的生日意图优先，其次正式生日。
+                Birthday = dto.HasBirthday
+                    ? dto.Birthday?.Date
+                    : old is not null && RequestCarriesBirthday(profile, old) ? old.Birthday : profile.Birthday?.Date,
                 IdentityPhotoObjectKey = retainedPhoto,
                 RemoveIdentityPhoto = removeIdentityPhoto,
                 Status = EmployeeProfileSensitiveChangeStatus.Pending,
@@ -782,7 +797,9 @@ public sealed class EmployeeProfileSensitiveChangeService
                 SubmittedBy = actor,
             };
             // 关键逻辑：变更字段以提交瞬间的正式资料为基线固化，终态后不随正式资料继续漂移。
-            request.ChangedFieldsJson = JsonSerializer.Serialize(GetChangedFields(profile, request));
+            request.ChangedFieldsJson = JsonSerializer.Serialize(
+                GetChangedFields(profile, request, includeBirthday: true)
+            );
             if (old is not null)
             {
                 var superseded = await db.Updateable<EmployeeProfileSensitiveChangeRequest>()
@@ -851,10 +868,13 @@ public sealed class EmployeeProfileSensitiveChangeService
         var pending = await _context.Db.Queryable<EmployeeProfileSensitiveChangeRequest>()
             .FirstAsync(item => item.UserGUID == userGuid
                 && item.Status == EmployeeProfileSensitiveChangeStatus.Pending);
+        var profile = await _context.Db.Queryable<EmployeeProfile>()
+            .FirstAsync(item => item.UserGUID == userGuid && !item.IsDeleted);
         if (pending is not null)
         {
             return new()
             {
+                Birthday = RequestCarriesBirthday(profile, pending) ? pending.Birthday : profile?.Birthday?.Date,
                 BankBsb = pending.BankBsb,
                 BankAccountNumber = pending.BankAccountNumber,
                 SuperannuationCompanyName = pending.SuperannuationCompanyName,
@@ -864,10 +884,9 @@ public sealed class EmployeeProfileSensitiveChangeService
                 IdentityId = pending.IdentityId,
             };
         }
-        var profile = await _context.Db.Queryable<EmployeeProfile>()
-            .FirstAsync(item => item.UserGUID == userGuid && !item.IsDeleted);
         return new()
         {
+            Birthday = profile?.Birthday?.Date,
             BankBsb = profile?.BankBSB,
             BankAccountNumber = profile?.BankACC,
             SuperannuationCompanyName = profile?.SuperannuationCompanyName,
@@ -1246,6 +1265,8 @@ public sealed class EmployeeProfileSensitiveChangeService
             SuperannuationAccountNumber = request.SuperannuationAccountNumber,
             IdentityType = request.IdentityType,
             IdentityId = request.IdentityId,
+            // 未变更生日的申请（含加列前的历史申请）展示正式生日，避免把空值误显示为「改成空」。
+            Birthday = RequestCarriesBirthday(profile, request) ? request.Birthday : profile?.Birthday,
             HasIdentityPhoto = !string.IsNullOrWhiteSpace(request.IdentityPhotoObjectKey),
             BaseSensitiveRevision = request.BaseSensitiveRevision,
             SubmittedAt = request.SubmittedAt,
@@ -1300,6 +1321,7 @@ public sealed class EmployeeProfileSensitiveChangeService
             SuperannuationAccountNumber = profile?.SuperannuationAccount,
             IdentityType = profile?.IdentityType,
             IdentityId = profile?.IdentityId,
+            Birthday = profile?.Birthday,
             HasIdentityPhoto = HasFormalIdentityPhoto(profile),
         };
         if (_storage is not null && !string.IsNullOrWhiteSpace(profile?.IdentityPhotoObjectKey))
@@ -1432,8 +1454,8 @@ public sealed class EmployeeProfileSensitiveChangeService
     {
         if (string.IsNullOrWhiteSpace(request.ChangedFieldsJson))
         {
-            // 兼容加列前的历史申请；新申请均读取持久化快照。
-            return GetChangedFields(profile, request);
+            // 兼容加列前的历史申请；新申请均读取持久化快照。历史申请不含生日意图，不参与生日比较。
+            return GetChangedFields(profile, request, includeBirthday: false);
         }
 
         try
@@ -1456,10 +1478,15 @@ public sealed class EmployeeProfileSensitiveChangeService
 
     private static List<string> GetChangedFields(
         EmployeeProfile? profile,
-        EmployeeProfileSensitiveChangeRequest request
+        EmployeeProfileSensitiveChangeRequest request,
+        bool includeBirthday
     )
     {
         var fields = new List<string>();
+        if (includeBirthday && !DateEquals(profile?.Birthday, request.Birthday))
+        {
+            fields.Add(BirthdayFieldName);
+        }
         AddChanged(fields, "bankBsb", profile?.BankBSB, request.BankBsb);
         AddChanged(fields, "bankAccountNumber", profile?.BankACC, request.BankAccountNumber);
         AddChanged(fields, "superannuationCompanyName", profile?.SuperannuationCompanyName, request.SuperannuationCompanyName);
@@ -1480,6 +1507,14 @@ public sealed class EmployeeProfileSensitiveChangeService
         }
         return fields;
     }
+
+    /// <summary>申请是否携带生日修改意图，以提交时固化的变更字段为准。</summary>
+    private static bool RequestCarriesBirthday(
+        EmployeeProfile? profile,
+        EmployeeProfileSensitiveChangeRequest request
+    ) => ResolveChangedFields(profile, request).Contains(BirthdayFieldName, StringComparer.Ordinal);
+
+    private static bool DateEquals(DateTime? left, DateTime? right) => left?.Date == right?.Date;
 
     private static void AddChanged(List<string> fields, string field, string? current, string? proposed)
     {

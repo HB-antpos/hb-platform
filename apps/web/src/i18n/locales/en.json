@@ -4718,6 +4718,7 @@
         "terminalConflict": "This request was already processed. Details, the list, and the pending count were refreshed.",
         "statuses": { "Pending": "Pending", "Approved": "Approved", "Rejected": "Rejected", "Superseded": "Invalidated" },
         "fields": {
+          "birthday": "Birthday",
           "bankBsb": "BSB", "bankAccountNumber": "Bank account number", "superannuationCompanyName": "Superannuation company",
           "superannuationCompanyCode": "Superannuation code", "superannuationAccountNumber": "Superannuation account number",
           "identityType": "Identity type", "identityId": "Identity number", "identityPhotoUrl": "Identity photo"
