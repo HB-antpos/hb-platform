@@ -23,6 +23,7 @@ const REVIEW_STATUSES = new Set<EmployeeProfileReviewStatus>([
   "Approved",
   "Rejected",
   "Superseded",
+  "Withdrawn",
 ]);
 const SENSITIVE_FIELD_SET = new Set<string>(EMPLOYEE_PROFILE_SENSITIVE_FIELDS);
 
@@ -176,6 +177,7 @@ export function createEmployeeProfileReviewApi(client: ReviewHttpClient) {
           pageSize: query.pageSize ?? 20,
           status: query.status,
           search: query.search?.trim() || undefined,
+          userGuid: query.userGuid?.trim() || undefined,
         },
       });
       return normalizeEmployeeProfileReviewList(response.data);

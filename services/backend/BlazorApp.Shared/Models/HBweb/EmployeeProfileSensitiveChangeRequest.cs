@@ -76,4 +76,6 @@ public enum EmployeeProfileSensitiveChangeStatus
     Approved = 1,
     Rejected = 2,
     Superseded = 3,
+    /// <summary>员工本人撤回。ReviewedAt/ReviewedBy 记录撤回时间与撤回人，ReviewReason 为空。</summary>
+    Withdrawn = 4,
 }

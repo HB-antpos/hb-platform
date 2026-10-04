@@ -49,6 +49,8 @@ test("基本资料仅在规范化后的草稿变化时阻止离页", () => {
   assert.equal(hasBasicProfileChanges(changedDraft, profile), true);
   assert.equal(getBackAction({ view: "basic", hasUnsavedChanges: true }), "confirm-discard");
   assert.equal(getBackAction({ view: "overview", hasUnsavedChanges: false }), "navigate");
+  // 审核进度页没有草稿，返回直接回到概览。
+  assert.equal(getBackAction({ view: "progress", hasUnsavedChanges: false }), "show-overview");
   assert.equal(hasBasicProfileChanges({ ...sameDraft, email: " employee@example.com " }, profile), false);
   assert.equal(hasBasicProfileChanges({ ...sameDraft, email: "other@example.com" }, profile), true);
   assert.equal(hasBasicProfileChanges({ ...sameDraft, employmentType: "casual" }, profile, { canEditPositionType: false }), false);

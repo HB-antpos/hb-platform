@@ -62,7 +62,9 @@
     "grantCameraPermission": "Allow camera",
     "capture": "Capture",
     "switchCamera": "Switch camera",
-    "openSettings": "Open settings"
+    "openSettings": "Open settings",
+    "submitSensitiveWithCount_one": "Submit for review · {{count}} change",
+    "submitSensitiveWithCount_other": "Submit for review · {{count}} changes"
   },
   "overview": {
     "completed": "Completed",
@@ -112,7 +114,8 @@
     "pending": "Pending review",
     "approved": "Approved",
     "rejected": "Rejected",
-    "superseded": "Replaced by a newer request or administrator update"
+    "superseded": "Replaced by a newer request or administrator update",
+    "withdrawn": "Withdrawn"
   },
   "sensitive": {
     "confirmed": "Confirmed details",
@@ -191,5 +194,64 @@
     "title": "Minor employment compliance",
     "description": "Maintain school days, holidays, parent signature and commute reminders.",
     "open": "Open minor employment form"
+  },
+  "completeness": {
+    "title": "Profile completeness",
+    "count": "{{filled}}/{{total}}",
+    "missing": "Still missing: {{items}}",
+    "complete": "Your profile is complete. Thank you."
+  },
+  "security": {
+    "title": "Account & security",
+    "changePassword": "Change password",
+    "changePasswordHelper": "Update your sign-in password regularly",
+    "personalCodeHelper": "View, refresh or print your personal code in Settings"
+  },
+  "birthdayPicker": {
+    "title": "Select birthday",
+    "placeholder": "Tap to select your birthday",
+    "year": "Year",
+    "month": "Month",
+    "day": "Day",
+    "clear": "Clear"
+  },
+  "progress": {
+    "title": "Review progress",
+    "open": "View review progress",
+    "statusTitle": "Current request",
+    "statusDescription": {
+      "pending": "Sent to your store manager. Your confirmed details stay in use until it is approved.",
+      "approved": "Approved. Your new details are now in effect.",
+      "rejected": "Rejected. Your confirmed details are unchanged. Fix the issue below and submit again.",
+      "withdrawn": "You withdrew this request. Your confirmed details are unchanged.",
+      "superseded": "This request was replaced by a newer request or an administrator update."
+    },
+    "rejectReason": "Rejection reason",
+    "timelineTitle": "Progress",
+    "timeline": {
+      "submitted": "Submitted",
+      "reviewing": "Store manager reviewing",
+      "reviewed": "Reviewed by store manager",
+      "notReviewed": "Not reviewed",
+      "result": "Waiting for the result",
+      "approved": "Approved and in effect",
+      "rejected": "Rejected",
+      "withdrawn": "Withdrawn",
+      "superseded": "Invalidated"
+    },
+    "changedTitle": "Changes in this request",
+    "noChangedFields": "This request has no field changes.",
+    "withdraw": "Withdraw request",
+    "withdrawTitle": "Withdraw this request?",
+    "withdrawDescription": "Your store manager will no longer be able to review it, and your confirmed details stay unchanged. You can submit again at any time.",
+    "withdrawSuccess": "Request withdrawn.",
+    "withdrawFailed": "Could not withdraw the request. Please try again.",
+    "withdrawConflict": "The request has already been handled. Showing the latest status.",
+    "editPending": "Edit request",
+    "resubmit": "Edit and resubmit",
+    "historyTitle": "Earlier requests",
+    "historyEmpty": "No earlier requests.",
+    "historyLoadFailed": "Could not load earlier requests.",
+    "emptyDescription": "You have not submitted any sensitive detail changes yet."
   }
 }

@@ -264,8 +264,30 @@ namespace BlazorApp.Shared.DTOs
         public int Page { get; set; } = 1;
         [Range(1, 100)]
         public int PageSize { get; set; } = 20;
+        /// <summary>状态筛选：枚举名（Pending/Approved/…）或 Processed（除 Pending 外的全部终态）。</summary>
         public string? Status { get; set; }
         public string? Search { get; set; }
+        /// <summary>按员工精确过滤；仍叠加审核范围，超范围员工返回空列表。</summary>
+        [StringLength(50)]
+        public string? UserGuid { get; set; }
+    }
+
+    public sealed class EmployeeProfileSensitiveWithdrawDto
+    {
+        /// <summary>可选：员工页面上看到的申请编号；与当前待审申请不一致时拒绝撤回，避免误撤另一台设备的新申请。</summary>
+        [Range(1, int.MaxValue)]
+        public int? RequestId { get; set; }
+    }
+
+    /// <summary>员工本人申请历史条目：只含状态与字段标识，不含任何敏感值。</summary>
+    public sealed class EmployeeProfileSensitiveChangeHistoryItemDto
+    {
+        public int RequestId { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public List<string> ChangedFields { get; set; } = new();
+        public DateTime SubmittedAt { get; set; }
+        public DateTime? ReviewedAt { get; set; }
+        public string? ReviewReason { get; set; }
     }
 
     public class EmployeeProfileSensitiveChangeSummaryDto

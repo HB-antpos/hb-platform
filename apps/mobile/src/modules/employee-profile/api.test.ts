@@ -11,6 +11,25 @@ async function main() {
   const api = createEmployeeProfileApi({
   get: async (path: string) => {
     calls.push({ method: "GET", path });
+    if (path.includes("sensitive-change-requests?")) {
+      return {
+        data: [
+          {
+            RequestId: 9,
+            Status: "Rejected",
+            ChangedFields: ["bankAccountNumber"],
+            SubmittedAt: "2026-10-02T00:00:00Z",
+            ReviewedAt: "2026-10-03T00:00:00Z",
+            ReviewReason: "账号与姓名不符",
+            // 历史即使意外带回敏感值也必须被白名单丢弃。
+            BankAccountNumber: "must-not-leak",
+          },
+          { RequestId: 8, Status: "withdrawn", ChangedFields: [], SubmittedAt: "2026-10-01T00:00:00Z" },
+          { RequestId: 7, Status: "SomethingNew", SubmittedAt: "2026-09-30T00:00:00Z" },
+          { RequestId: 0, Status: "Pending", SubmittedAt: "2026-09-29T00:00:00Z" },
+        ],
+      };
+    }
     if (path.endsWith("sensitive-change-request")) {
       return {
         data: {
@@ -49,6 +68,11 @@ async function main() {
       };
     }
     return { data: { username: "employee-a", phone: "0499999999" } };
+  },
+
+  post: async (path: string, payload?: unknown) => {
+    calls.push({ method: "POST", path, payload });
+    return { data: { RequestId: 43, Status: "Withdrawn", ChangedFields: ["bankAccountNumber"], SubmittedAt: "2026-10-04T00:00:00Z" } };
   },
   });
 
@@ -95,6 +119,16 @@ async function main() {
     address: "",
   });
 
+  const withdrawn = await api.withdrawMySensitiveChangeRequest(43);
+  assert.equal(withdrawn.status, "Withdrawn", "撤回响应必须识别 Withdrawn 状态");
+  assert.deepEqual(calls[4]?.payload, { requestId: 43 }, "撤回必须携带页面上的申请编号");
+
+  const history = await api.getMySensitiveChangeHistory(20);
+  assert.deepEqual(history.map((item) => item.requestId), [9, 8, 7], "无效编号的历史条目必须丢弃");
+  assert.deepEqual(history.map((item) => item.status), ["Rejected", "Withdrawn", "Superseded"], "未知状态按失效处理");
+  assert.equal(history[0]?.reviewReason, "账号与姓名不符");
+  assert.ok(!JSON.stringify(history).includes("must-not-leak"), "历史不得保留敏感值");
+
   assert.deepEqual(
     calls.map(({ method, path }) => ({ method, path })),
     [
@@ -102,6 +136,8 @@ async function main() {
       { method: "GET", path: "/EmployeeProfiles/me/sensitive-change-request" },
       { method: "PUT", path: "/EmployeeProfiles/me/sensitive-change-request" },
       { method: "PUT", path: "/EmployeeProfiles/me" },
+      { method: "POST", path: "/EmployeeProfiles/me/sensitive-change-request/withdraw" },
+      { method: "GET", path: "/EmployeeProfiles/me/sensitive-change-requests?take=20" },
     ],
     "员工资料 API 必须使用约定路径和方法"
   );

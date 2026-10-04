@@ -1,5 +1,6 @@
 import type {
   EmployeeProfile,
+  EmployeeProfileSensitiveChangeHistoryItem,
   EmployeeProfileSensitiveChangeRequest,
   SensitiveEmployeeProfilePayload,
   UpdateEmployeeProfilePayload,
@@ -10,7 +11,16 @@ type ApiRecord = Record<string, unknown>;
 type EmployeeProfileHttpClient = {
   get: (path: string) => Promise<{ data: unknown }>;
   put: (path: string, payload: unknown) => Promise<{ data: unknown }>;
+  post: (path: string, payload?: unknown) => Promise<{ data: unknown }>;
 };
+
+const SENSITIVE_CHANGE_STATUSES = new Set<EmployeeProfileSensitiveChangeRequest["status"]>([
+  "Pending",
+  "Approved",
+  "Rejected",
+  "Superseded",
+  "Withdrawn",
+]);
 
 function asRecord(payload: unknown): ApiRecord {
   return payload && typeof payload === "object" ? payload as ApiRecord : {};
@@ -51,6 +61,38 @@ export function normalizeEmployeeProfile(payload: unknown): EmployeeProfile {
   };
 }
 
+function normalizeSensitiveStatus(value: unknown) {
+  const rawStatus = asString(value);
+  if (!rawStatus) return null;
+  const status = (
+    rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase()
+  ) as EmployeeProfileSensitiveChangeRequest["status"];
+  // 未知状态按「已失效」展示：不可撤回、不可当作待审恢复草稿。
+  return SENSITIVE_CHANGE_STATUSES.has(status) ? status : "Superseded";
+}
+
+/** 历史条目逐字段白名单构造，即使服务端意外多返回字段也不会把敏感值带进缓存。 */
+export function normalizeSensitiveChangeHistory(
+  payload: unknown
+): EmployeeProfileSensitiveChangeHistoryItem[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((item) => {
+    const data = asRecord(item);
+    const requestId = Number(data.requestId ?? data.RequestId) || 0;
+    const status = normalizeSensitiveStatus(data.status ?? data.Status);
+    const submittedAt = asString(data.submittedAt ?? data.SubmittedAt);
+    if (!requestId || !status || !submittedAt) return [];
+    return [{
+      requestId,
+      status,
+      changedFields: asStringArray(data.changedFields ?? data.ChangedFields),
+      submittedAt,
+      reviewedAt: asString(data.reviewedAt ?? data.ReviewedAt) || undefined,
+      reviewReason: asString(data.reviewReason ?? data.ReviewReason) || undefined,
+    }];
+  });
+}
+
 export function normalizeSensitiveChangeRequest(
   payload: unknown
 ): EmployeeProfileSensitiveChangeRequest | null {
@@ -58,15 +100,12 @@ export function normalizeSensitiveChangeRequest(
     return null;
   }
   const data = asRecord(payload);
-  const rawStatus = asString(data.status ?? data.Status);
   // 后端没有申请时返回 Ok(null)，ASP.NET Core 会转成 204 空响应体，axios 的 data 是空串而非 null；
   // 没有状态就不是一条有效申请，按「没有申请」处理，否则界面会拼出 status. 这种原样翻译键。
-  if (!rawStatus) {
+  const status = normalizeSensitiveStatus(data.status ?? data.Status);
+  if (!status) {
     return null;
   }
-  const status = (
-    rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase()
-  ) as EmployeeProfileSensitiveChangeRequest["status"];
   return {
     requestId: Number(data.requestId ?? data.RequestId) || 0,
     status,
@@ -116,6 +155,22 @@ export function createEmployeeProfileApi(client: EmployeeProfileHttpClient) {
         throw new Error("Sensitive change request response is empty");
       }
       return normalized;
+    },
+    async withdrawMySensitiveChangeRequest(requestId?: number) {
+      // 带上页面看到的申请编号，后端发现已被审核或覆盖时返回 409，避免误撤另一台设备的新申请。
+      const response = await client.post("/EmployeeProfiles/me/sensitive-change-request/withdraw", {
+        requestId: requestId && requestId > 0 ? requestId : undefined,
+      });
+      const normalized = normalizeSensitiveChangeRequest(response.data);
+      if (!normalized) {
+        throw new Error("Sensitive change withdraw response is empty");
+      }
+      return normalized;
+    },
+    async getMySensitiveChangeHistory(take = 20) {
+      const limit = Math.min(Math.max(Math.trunc(take) || 20, 1), 50);
+      const response = await client.get(`/EmployeeProfiles/me/sensitive-change-requests?take=${limit}`);
+      return normalizeSensitiveChangeHistory(response.data);
     },
   };
 }

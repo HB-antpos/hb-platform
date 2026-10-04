@@ -9,7 +9,13 @@
     "empty": "No pending requests",
     "emptyDescription": "New employee submissions will appear here.",
     "openRequest": "Review request from {{name}}",
-    "storeUnavailable": "Store unavailable"
+    "storeUnavailable": "Store unavailable",
+    "searchPlaceholder": "Search employee name or username",
+    "processedCount": "{{count}} processed requests",
+    "processedEmpty": "No processed requests",
+    "processedEmptyDescription": "Approved, rejected, withdrawn or invalidated requests appear here.",
+    "searchEmpty": "No matching requests",
+    "searchEmptyDescription": "Try a different keyword."
   },
   "detail": {
     "title": "Review sensitive details",
@@ -21,7 +27,11 @@
     "noPhoto": "No identity photo",
     "previewUnavailable": "Photo on file; secure preview is unavailable",
     "reviewReason": "Review reason",
-    "birthdayWithAge": "{{date}} · {{age}} years old"
+    "birthdayWithAge": "{{date}} · {{age}} years old",
+    "unchangedFields_one": "{{count}} unchanged field",
+    "unchangedFields_other": "{{count}} unchanged fields",
+    "hideUnchanged": "Hide unchanged fields",
+    "processedNotice": "This request has already been handled."
   },
   "fields": {
     "birthday": "Birthday",
@@ -38,7 +48,8 @@
     "Pending": "Pending",
     "Approved": "Approved",
     "Rejected": "Rejected",
-    "Superseded": "Superseded"
+    "Superseded": "Superseded",
+    "Withdrawn": "Withdrawn"
   },
   "actions": {
     "review": "Review",
@@ -50,7 +61,8 @@
     "reject": "Reject",
     "confirm": "Confirm",
     "cancel": "Cancel",
-    "back": "Back"
+    "back": "Back",
+    "view": "View"
   },
   "dialog": {
     "approveTitle": "Approve this request?",
@@ -77,5 +89,9 @@
     "refreshing": "Rechecking review access",
     "refreshFailed": "The details remain hidden because access could not be rechecked.",
     "retry": "Check access again"
+  },
+  "segments": {
+    "pending": "Pending",
+    "processed": "Processed"
   }
 }

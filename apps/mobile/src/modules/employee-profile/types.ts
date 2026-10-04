@@ -47,7 +47,8 @@ export type EmployeeProfileSensitiveChangeStatus =
   | "Pending"
   | "Approved"
   | "Rejected"
-  | "Superseded";
+  | "Superseded"
+  | "Withdrawn";
 
 export interface SensitiveEmployeeProfilePayload {
   /** YYYY-MM-DD；空串表示不填，提交时转为 null。 */
@@ -75,6 +76,16 @@ export interface EmployeeProfileSensitiveChangeRequest extends SensitiveEmployee
   reviewedBy?: string;
   reviewReason?: string;
   changedFields: string[];
+}
+
+/** 本人申请历史条目：后端只返回状态与字段标识，不含任何敏感值。 */
+export interface EmployeeProfileSensitiveChangeHistoryItem {
+  requestId: number;
+  status: EmployeeProfileSensitiveChangeStatus;
+  changedFields: string[];
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewReason?: string;
 }
 
 export interface DirectUploadRequest {

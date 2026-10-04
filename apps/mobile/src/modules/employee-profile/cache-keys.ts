@@ -21,6 +21,10 @@ export function getEmployeeSensitiveChangeQueryKey(identity: string) {
   return ["employee-profile", "sensitive-change-request", "me", identity] as const;
 }
 
+export function getEmployeeSensitiveHistoryQueryKey(identity: string) {
+  return ["employee-profile", "sensitive-change-requests", "me", identity] as const;
+}
+
 export function shouldResetEmployeeProfileDraft(previousIdentity: string, nextIdentity: string) {
   return previousIdentity !== nextIdentity;
 }

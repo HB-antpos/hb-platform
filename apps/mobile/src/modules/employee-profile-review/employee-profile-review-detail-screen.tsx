@@ -139,6 +139,8 @@ export function EmployeeProfileReviewDetailScreen() {
   const [staleAfterConflict, setStaleAfterConflict] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [isLeavingSensitiveDetail, setIsLeavingSensitiveDetail] = useState(false);
+  // 未变更字段默认折叠，审核者先聚焦本次变更。
+  const [showUnchanged, setShowUnchanged] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -153,6 +155,7 @@ export function EmployeeProfileReviewDetailScreen() {
       return;
     }
     setRevealedFields(new Set());
+    setShowUnchanged(false);
     setDialogAction(null);
     setReason("");
     setSnackbarMessage("");
@@ -496,6 +499,99 @@ export function EmployeeProfileReviewDetailScreen() {
   ];
   const actionsDisabled = shouldDisableReviewActions(detail.status, staleAfterConflict);
   const rejectReasonInvalid = dialogAction === "reject" && !isRejectReasonValid(reason);
+  const changedDefinitions = definitions.filter(({ key }) => detail.changedFields.includes(key));
+  const unchangedDefinitions = definitions.filter(({ key }) => !detail.changedFields.includes(key));
+  const photoChanged = detail.changedFields.includes("identityPhotoUrl");
+  const unchangedCount = unchangedDefinitions.length + (photoChanged ? 0 : 1);
+
+  const renderComparison = ({ key, current, proposed }: (typeof definitions)[number]) => {
+    const changed = detail.changedFields.includes(key);
+    const masked = MASKED_FIELDS.has(key) && !revealedFields.has(key);
+    return (
+      <Card
+        mode="outlined"
+        key={key}
+        style={[styles.comparisonSurface, changed ? { backgroundColor: theme.colors.secondaryContainer } : undefined]}
+      >
+        <Card.Content style={styles.comparisonCard}>
+          <View style={styles.fieldTitleRow}>
+            <Text variant="titleMedium" selectable>{t(`fields.${key}`)}</Text>
+            <View style={styles.fieldActions}>
+              {changed ? <Chip compact icon="swap-horizontal">{t("detail.changed")}</Chip> : null}
+              {MASKED_FIELDS.has(key) ? (
+                <Button
+                  compact
+                  mode="text"
+                  icon={masked ? "eye-outline" : "eye-off-outline"}
+                  contentStyle={styles.touchTarget}
+                  accessibilityLabel={t(masked ? "actions.reveal" : "actions.hide")}
+                  onPress={() => toggleReveal(key)}
+                >
+                  {t(masked ? "actions.reveal" : "actions.hide")}
+                </Button>
+              ) : null}
+            </View>
+          </View>
+          <Divider />
+          <View style={styles.valueRow}>
+            <View style={styles.valueColumn}>
+              <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
+                {t("detail.currentValue")}
+              </Text>
+              <Text variant="bodyLarge" selectable>
+                {masked ? maskSensitiveValue(current) : formatValue(current)}
+              </Text>
+            </View>
+            <View style={styles.valueColumn}>
+              <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
+                {t("detail.proposedValue")}
+              </Text>
+              <Text variant="bodyLarge" selectable style={changed ? { fontWeight: "700" } : undefined}>
+                {masked ? maskSensitiveValue(proposed) : formatValue(proposed)}
+              </Text>
+            </View>
+          </View>
+        </Card.Content>
+      </Card>
+    );
+  };
+
+  // 证件照新旧并排对比；未变更时随其他未变更字段一起折叠。
+  const renderPhotoComparison = () => (
+    <Card
+      mode="outlined"
+      style={[styles.comparisonSurface, photoChanged
+        ? { backgroundColor: theme.colors.secondaryContainer }
+        : undefined]}
+    >
+      <Card.Content style={styles.comparisonCard}>
+        <View style={styles.fieldTitleRow}>
+          <Text variant="titleMedium" selectable>{t("fields.identityPhotoUrl")}</Text>
+          {photoChanged
+            ? <Chip compact icon="swap-horizontal">{t("detail.changed")}</Chip>
+            : null}
+        </View>
+        <View style={styles.photoRow}>
+          <PhotoPreview
+            label={t("detail.currentValue")}
+            hasPhoto={detail.currentSnapshot.hasIdentityPhoto}
+            uri={detail.currentSnapshot.identityPhotoUrl}
+            emptyLabel={t("detail.noPhoto")}
+            unavailableLabel={t("detail.previewUnavailable")}
+            onError={handlePhotoError}
+          />
+          <PhotoPreview
+            label={t("detail.proposedValue")}
+            hasPhoto={detail.hasIdentityPhoto}
+            uri={detail.identityPhotoUrl}
+            emptyLabel={t("detail.noPhoto")}
+            unavailableLabel={t("detail.previewUnavailable")}
+            onError={handlePhotoError}
+          />
+        </View>
+      </Card.Content>
+    </Card>
+  );
 
   return (
     <>
@@ -519,91 +615,27 @@ export function EmployeeProfileReviewDetailScreen() {
           </Card.Content>
         </Card>
 
-        {definitions.map(({ key, current, proposed }) => {
-          const changed = detail.changedFields.includes(key);
-          const masked = MASKED_FIELDS.has(key) && !revealedFields.has(key);
-          return (
-            <Card
-              mode="outlined"
-              key={key}
-              style={[styles.comparisonSurface, changed ? { backgroundColor: theme.colors.secondaryContainer } : undefined]}
-            >
-              <Card.Content style={styles.comparisonCard}>
-                <View style={styles.fieldTitleRow}>
-                  <Text variant="titleMedium" selectable>{t(`fields.${key}`)}</Text>
-                  <View style={styles.fieldActions}>
-                    {changed ? <Chip compact icon="swap-horizontal">{t("detail.changed")}</Chip> : null}
-                    {MASKED_FIELDS.has(key) ? (
-                      <Button
-                        compact
-                        mode="text"
-                        icon={masked ? "eye-outline" : "eye-off-outline"}
-                        contentStyle={styles.touchTarget}
-                        accessibilityLabel={t(masked ? "actions.reveal" : "actions.hide")}
-                        onPress={() => toggleReveal(key)}
-                      >
-                        {t(masked ? "actions.reveal" : "actions.hide")}
-                      </Button>
-                    ) : null}
-                  </View>
-                </View>
-                <Divider />
-                <View style={styles.valueRow}>
-                  <View style={styles.valueColumn}>
-                    <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
-                      {t("detail.currentValue")}
-                    </Text>
-                    <Text variant="bodyLarge" selectable>
-                      {masked ? maskSensitiveValue(current) : formatValue(current)}
-                    </Text>
-                  </View>
-                  <View style={styles.valueColumn}>
-                    <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
-                      {t("detail.proposedValue")}
-                    </Text>
-                    <Text variant="bodyLarge" selectable style={changed ? { fontWeight: "700" } : undefined}>
-                      {masked ? maskSensitiveValue(proposed) : formatValue(proposed)}
-                    </Text>
-                  </View>
-                </View>
-              </Card.Content>
-            </Card>
-          );
-        })}
+        {changedDefinitions.map(renderComparison)}
+        {photoChanged ? renderPhotoComparison() : null}
 
-        <Card
-          mode="outlined"
-          style={[styles.comparisonSurface, detail.changedFields.includes("identityPhotoUrl")
-            ? { backgroundColor: theme.colors.secondaryContainer }
-            : undefined]}
-        >
-          <Card.Content style={styles.comparisonCard}>
-            <View style={styles.fieldTitleRow}>
-              <Text variant="titleMedium" selectable>{t("fields.identityPhotoUrl")}</Text>
-              {detail.changedFields.includes("identityPhotoUrl")
-                ? <Chip compact icon="swap-horizontal">{t("detail.changed")}</Chip>
-                : null}
-            </View>
-            <View style={styles.photoRow}>
-              <PhotoPreview
-                label={t("detail.currentValue")}
-                hasPhoto={detail.currentSnapshot.hasIdentityPhoto}
-                uri={detail.currentSnapshot.identityPhotoUrl}
-                emptyLabel={t("detail.noPhoto")}
-                unavailableLabel={t("detail.previewUnavailable")}
-                onError={handlePhotoError}
-              />
-              <PhotoPreview
-                label={t("detail.proposedValue")}
-                hasPhoto={detail.hasIdentityPhoto}
-                uri={detail.identityPhotoUrl}
-                emptyLabel={t("detail.noPhoto")}
-                unavailableLabel={t("detail.previewUnavailable")}
-                onError={handlePhotoError}
-              />
-            </View>
-          </Card.Content>
-        </Card>
+        {unchangedCount > 0 ? (
+          <Button
+            mode="text"
+            icon={showUnchanged ? "chevron-up" : "chevron-down"}
+            contentStyle={styles.touchTarget}
+            onPress={() => setShowUnchanged((current) => !current)}
+          >
+            {showUnchanged
+              ? t("detail.hideUnchanged")
+              : t("detail.unchangedFields", { count: unchangedCount })}
+          </Button>
+        ) : null}
+        {showUnchanged ? (
+          <>
+            {unchangedDefinitions.map(renderComparison)}
+            {photoChanged ? null : renderPhotoComparison()}
+          </>
+        ) : null}
 
         {detail.reviewReason ? (
           <Card mode="outlined" style={styles.comparisonSurface}>
@@ -627,6 +659,12 @@ export function EmployeeProfileReviewDetailScreen() {
       </ScrollView>
 
       <Surface style={styles.reviewFooter} elevation={3}>
+        {detail.status !== "Pending" ? (
+          // 已处理的申请（从「已处理」分段进入）只读查看，提示无需再审核。
+          <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, textAlign: "center" }} selectable>
+            {t("detail.processedNotice")}
+          </Text>
+        ) : null}
         <View style={styles.reviewActions}>
           <Button
             mode="outlined"

@@ -115,7 +115,7 @@ assert.deepEqual(calls, [
   {
     method: "GET",
     path: "/EmployeeProfiles/review/change-requests",
-    params: { page: 2, pageSize: 10, status: "Pending", search: undefined },
+    params: { page: 2, pageSize: 10, status: "Pending", search: undefined, userGuid: undefined },
   },
   { method: "GET", path: "/EmployeeProfiles/review/change-requests/42", params: undefined },
   {
@@ -129,6 +129,18 @@ assert.deepEqual(calls, [
     payload: { reason: "incorrect account" },
   },
 ]);
+
+// 「已处理」分段与员工详情页按 userGuid 过滤：参数原样传给后端，后端仍按审核范围裁决。
+calls.length = 0;
+await api.getRequests({ status: "Processed", search: " amy ", userGuid: " user-42 " });
+assert.deepEqual(calls[0]?.params, { page: 1, pageSize: 20, status: "Processed", search: "amy", userGuid: "user-42" });
+
+// 员工撤回的申请必须保留在已处理列表中，不能因未知状态被丢弃。
+const withdrawnList = normalizeEmployeeProfileReviewList({
+  items: [{ requestId: 5, userGuid: "user-5", status: "Withdrawn", submittedAt: "2026-10-01T00:00:00Z" }],
+  total: 1,
+});
+assert.equal(withdrawnList.items[0]?.status, "Withdrawn");
 
 }
 

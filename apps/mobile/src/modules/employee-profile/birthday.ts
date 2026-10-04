@@ -4,8 +4,8 @@ const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export type BirthdayValidationError = "format" | "future" | "tooOld";
 
-/** 最早允许的出生年份，防止误输入如 0998 之类的年份。 */
-const MIN_BIRTH_YEAR = 1900;
+/** 最早允许的出生年份，防止误输入如 0998 之类的年份；日期选择器的年份下限也取此值。 */
+export const MIN_BIRTH_YEAR = 1900;
 
 function parseDateOnly(value: string) {
   const match = DATE_ONLY_PATTERN.exec(value);
