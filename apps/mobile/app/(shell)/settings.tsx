@@ -1113,6 +1113,20 @@ export default function Settings() {
             }
             accessibilityLabel={t("account.profileButton")}
           />
+          {/* 只有个人账号能改自己的密码；设备授权与设备绑定账号没有个人密码可改。 */}
+          {isAuthenticated && user && sessionKind === "account" ? (
+            <CompactRow
+              icon="lock-reset"
+              label={t("account.changePassword")}
+              meta={t("account.changePasswordHelper")}
+              onPress={() => {
+                router.push(
+                  "/(auth)/change-password?mode=voluntary" as unknown as Parameters<typeof router.push>[0]
+                );
+              }}
+              accessibilityLabel={t("account.changePassword")}
+            />
+          ) : null}
           {isAuthenticated && user && sessionKind !== "device" ? (
             <CashierBarcodeCard
               key={resolveEmployeeProfileIdentity(user)}

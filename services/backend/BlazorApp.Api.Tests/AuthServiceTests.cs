@@ -677,6 +677,97 @@ namespace BlazorApp.Api.Tests
             );
         }
 
+        [Fact]
+        public async Task ChangePasswordAsync_WhenCurrentPasswordValid_ClearsRequirementAndRevokesOtherSessions()
+        {
+            await CreateCurrentAuthSchemaAsync();
+            _db.CodeFirst.InitTables<UserPasswordChangeRequirement>();
+            var user = await SeedCurrentUserAsync("first-login");
+            await _db.Insertable(new UserPasswordChangeRequirement
+            {
+                UserGUID = user.UserGUID,
+                Reason = UserPasswordChangeRequirement.ReasonCreated,
+                RequiredAtUtc = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await SeedRefreshTokenAsync(user.UserGUID, "session-current");
+            await SeedRefreshTokenAsync(user.UserGUID, "session-other");
+            var service = new AuthService(CreateSqlSugarContext(_db), CreateJwtConfiguration(), new HttpContextAccessor());
+
+            var changed = await service.ChangePasswordAsync(
+                user.UserGUID,
+                new ChangePasswordDto
+                {
+                    CurrentPassword = "Secret123",
+                    NewPassword = "MyOwn4567",
+                    ConfirmPassword = "MyOwn4567",
+                },
+                "session-current"
+            );
+
+            Assert.True(changed);
+            Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+            var stored = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == user.UserGUID);
+            Assert.True(PasswordHasher.VerifyPassword("MyOwn4567", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+            // 当前会话保留，其余会话吊销。
+            var tokens = await _db.Queryable<RefreshToken>().ToListAsync();
+            Assert.False(tokens.Single(item => item.RefreshTokenGUID == "session-current").IsRevoked);
+            Assert.True(tokens.Single(item => item.RefreshTokenGUID == "session-other").IsRevoked);
+        }
+
+        [Theory]
+        [InlineData("Wrong999", "MyOwn4567", "当前密码错误")]
+        [InlineData("Secret123", "Secret123", "新密码不能与当前密码相同")]
+        public async Task ChangePasswordAsync_WhenRejected_KeepsPasswordRequirementAndSessions(
+            string currentPassword,
+            string newPassword,
+            string expectedMessage
+        )
+        {
+            await CreateCurrentAuthSchemaAsync();
+            _db.CodeFirst.InitTables<UserPasswordChangeRequirement>();
+            var user = await SeedCurrentUserAsync("rejected-change");
+            await _db.Insertable(new UserPasswordChangeRequirement
+            {
+                UserGUID = user.UserGUID,
+                Reason = UserPasswordChangeRequirement.ReasonReset,
+                RequiredAtUtc = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await SeedRefreshTokenAsync(user.UserGUID, "session-other");
+            var service = new AuthService(CreateSqlSugarContext(_db), CreateJwtConfiguration(), new HttpContextAccessor());
+
+            var error = await Assert.ThrowsAsync<Exception>(() => service.ChangePasswordAsync(
+                user.UserGUID,
+                new ChangePasswordDto
+                {
+                    CurrentPassword = currentPassword,
+                    NewPassword = newPassword,
+                    ConfirmPassword = newPassword,
+                },
+                "session-current"
+            ));
+
+            Assert.Equal(expectedMessage, error.Message);
+            Assert.True(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+            Assert.False((await _db.Queryable<RefreshToken>().FirstAsync()).IsRevoked);
+            var stored = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == user.UserGUID);
+            Assert.True(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+        }
+
+        private async Task SeedRefreshTokenAsync(string userGuid, string sessionId)
+        {
+            await _db.Insertable(new RefreshToken
+            {
+                RefreshTokenGUID = sessionId,
+                UserGUID = userGuid,
+                Token = $"token-{sessionId}",
+                ExpiresAt = DateTime.UtcNow.AddDays(1),
+                IsRevoked = false,
+                IsDeleted = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+        }
+
         private async Task<string> SeedLegacyUserAsync()
         {
             var legacyHash = PasswordHasher.HashLegacyPassword(PasswordHasher.ComputeSha256("Secret123"));

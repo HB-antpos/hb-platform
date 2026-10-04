@@ -48,7 +48,9 @@
     "deviceModeHelper": "当前使用设备授权进入 App，不显示个人资料入口。",
     "logoutToLogin": "退出并回登录页",
     "expandPersonalCode": "点击放大 · 查看与打印个人码",
-    "personalCodeBusy": "个人码正在打印，请等待当前任务完成。"
+    "personalCodeBusy": "个人码正在打印，请等待当前任务完成。",
+    "changePassword": "修改密码",
+    "changePasswordHelper": "改成只有你自己知道的密码"
   },
   "language": {
     "description": "切换 App 显示语言，立即生效。"

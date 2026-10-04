@@ -105,5 +105,30 @@
     "locationRequired": "登录需要采集当前位置。请允许精确定位后再登录。",
     "stepTimeout": "登录处理超时，请再试一次；多次出现请完全关闭并重新打开 App。",
     "default": "登录失败，请稍后重试。"
+  },
+  "changePassword": {
+    "forcedTitle": "设置你的新密码",
+    "forcedDescription": "你正在使用店长给的初始密码。设置自己的密码后才能继续使用。",
+    "voluntaryTitle": "修改密码",
+    "initialPassword": "店长给的初始密码",
+    "currentPassword": "当前密码",
+    "newPassword": "新密码",
+    "confirmPassword": "再次输入新密码",
+    "togglePassword": "显示或隐藏密码",
+    "rules": {
+      "minLength": "至少 {{min}} 个字符",
+      "differentFromCurrent": "与当前密码不同",
+      "confirmed": "两次输入一致"
+    },
+    "submitForced": "保存并进入",
+    "submitVoluntary": "保存新密码",
+    "logout": "退出登录",
+    "successTitle": "密码已修改",
+    "successVoluntary": "新密码已生效，其他设备上的登录已退出。",
+    "failed": "修改密码失败，请稍后重试。",
+    "errors": {
+      "wrongCurrent": "当前密码不正确。",
+      "sameAsCurrent": "新密码不能与当前密码相同。"
+    }
   }
 }
