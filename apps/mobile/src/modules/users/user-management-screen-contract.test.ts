@@ -8,21 +8,28 @@ const source = readFileSync(
   resolve(currentDirectory, "../../../app/(shell)/users/index.tsx"),
   "utf8"
 );
+const createSource = readFileSync(
+  resolve(currentDirectory, "../../../app/(shell)/users/new.tsx"),
+  "utf8"
+);
 
+// 店长只持有本店店员专用权限；全局用户权限同样放行，两者任一即可。
+for (const screenSource of [source, createSource]) {
+  assert.match(
+    screenSource,
+    /const canCreateUsers = access\.isAdmin\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.Create\)\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.CreateStoreStaff\)/,
+    "新增店员必须使用 Users.Create 或 Users.CreateStoreStaff 权限门槛"
+  );
+  assert.match(
+    screenSource,
+    /const canEditUsers = access\.isAdmin\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.Edit\)\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.EditStoreStaff\)/,
+    "编辑店员必须使用 Users.Edit 或 Users.EditStoreStaff 权限门槛"
+  );
+}
 assert.match(
   source,
-  /const canCreateUsers = access\.isAdmin \|\| access\.hasPermission\(PERMISSIONS\.Users\.Create\)/,
-  "新增店员必须使用独立 Users.Create 权限门槛"
-);
-assert.match(
-  source,
-  /const canEditUsers = access\.isAdmin \|\| access\.hasPermission\(PERMISSIONS\.Users\.Edit\)/,
-  "编辑店员必须使用独立 Users.Edit 权限门槛"
-);
-assert.match(
-  source,
-  /const canResetPasswords = access\.isAdmin \|\| access\.hasPermission\(PERMISSIONS\.Users\.ResetPassword\)/,
-  "重置店员密码必须使用独立 Users.ResetPassword 权限门槛"
+  /const canResetPasswords = access\.isAdmin\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.ResetPassword\)\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.ResetStoreStaffPassword\)/,
+  "重置店员密码必须使用 Users.ResetPassword 或 Users.ResetStoreStaffPassword 权限门槛"
 );
 assert.match(
   source,
@@ -39,28 +46,31 @@ assert.match(
   /disabled=\{!moreUser \|\| !canResetUserPassword\(moreUser\)\}/,
   "密码重置按钮必须按 Users.ResetPassword 独立禁用"
 );
-assert.match(source, /createMutation/, "用户页必须接入创建 mutation");
-assert.match(source, /onPress=\{openCreateDialog\}/, "标题区必须提供新增店员入口");
+assert.match(createSource, /createMutation/, "新建页必须接入创建 mutation");
+assert.match(source, /onPress=\{openCreatePage\}/, "标题区必须提供新增店员入口");
+assert.match(source, /pathname: "\/users\/new"/, "新增入口必须进入整页新建员工");
 assert.match(
   source,
   /disabled=\{!selectedStoreCanCreate \|\| isBusy\}/,
   "未选择可管理分店时必须禁用新增入口"
 );
 assert.match(source, /t\("actions\.create"\)/, "新增入口必须使用本地化文案");
-assert.match(source, /t\("dialogs\.createTitle"\)/, "创建弹窗必须使用创建标题");
-assert.match(source, /t\("fields\.initialPassword"\)/, "创建弹窗必须要求初始密码");
-assert.match(source, /createMutation\.mutateAsync/, "保存创建表单必须调用创建接口");
-assert.match(
-  source,
-  /editingUserGuid \? t\("actions\.save"\) : t\("actions\.create"\)/,
-  "创建弹窗的主按钮必须显示新增文案"
-);
-assert.match(source, /t\("messages\.userCreated"\)/, "创建成功必须给出明确反馈");
-assert.match(
-  source,
-  /console\.warn\("\[store-users\] save failed", toSafeStoreUserErrorLog\(error\)\)/,
-  "创建或编辑失败只能记录脱敏后的错误元数据"
-);
+assert.match(createSource, /t\("dialogs\.createTitle"\)/, "新建页必须使用创建标题");
+assert.match(createSource, /t\("fields\.initialPassword"\)/, "新建页必须要求初始密码");
+assert.match(createSource, /createMutation\.mutateAsync/, "保存创建表单必须调用创建接口");
+assert.match(createSource, /requirePasswordChange,/, "新建页必须提交首次登录改密开关");
+assert.match(createSource, /t\("create\.submit"\)/, "新建页主按钮必须显示创建文案");
+assert.match(createSource, /t\("create\.successHeadline"\)/, "创建成功必须给出明确反馈");
+assert.match(createSource, /t\("create\.passwordOnceWarning"\)/, "创建成功页必须提示初始密码只显示一次");
+assert.match(createSource, /validateNewStaffPhone\(phone, t\)/, "新建时必须校验澳洲手机号");
+assert.doesNotMatch(source, /createMutation/, "列表页不再承载创建表单");
+for (const screenSource of [source, createSource]) {
+  assert.match(
+    screenSource,
+    /console\.warn\("\[store-users\] save failed", toSafeStoreUserErrorLog\(error\)\)/,
+    "创建或编辑失败只能记录脱敏后的错误元数据"
+  );
+}
 assert.match(
   source,
   /console\.warn\("\[store-users\] password reset failed", toSafeStoreUserErrorLog\(error\)\)/,
@@ -74,6 +84,7 @@ assert.doesNotMatch(
 assert.match(source, /testID="compact-staff-row"/, "员工列表必须使用紧凑行布局");
 assert.doesNotMatch(source, /lastLoginIpValue/, "低频登录 IP 不应继续占用员工列表首屏");
 assert.match(source, /statusAllCount/, "状态筛选必须显示计数");
+assert.match(source, /statusPendingFirstLoginCount/, "状态筛选必须包含待首次登录");
 assert.match(source, /StaffBarcodeDialog/, "员工行必须接入单人个人码弹层");
 assert.match(source, /StaffBarcodeBatchDialog/, "可管理的明确分店必须接入批量打印弹层");
 assert.match(source, /!isDeviceMode && canEditUsers && managedStoreCode/, "纯设备模式或无编辑权限不得显示批量写入口");

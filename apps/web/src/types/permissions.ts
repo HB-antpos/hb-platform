@@ -17,6 +17,10 @@ export const P = {
     ManageStores: 'Users.ManageStores',
     ManagePosTerminalPermissions: 'Users.ManagePosTerminalPermissions',
     ResetPassword: 'Users.ResetPassword',
+    // 移动端「员工列表」本店店员管理专用权限（店长模板授予）；不放行 Web 全局用户管理。
+    CreateStoreStaff: 'Users.CreateStoreStaff',
+    EditStoreStaff: 'Users.EditStoreStaff',
+    ResetStoreStaffPassword: 'Users.ResetStoreStaffPassword',
   },
   Roles: {
     View: 'Roles.View',

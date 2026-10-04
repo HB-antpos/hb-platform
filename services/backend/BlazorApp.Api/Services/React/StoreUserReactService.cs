@@ -341,6 +341,11 @@ namespace BlazorApp.Api.Services.React
                         "未找到可管理的店员账号"
                     );
                 }
+                var protectedTarget = await RejectProtectedTargetAsync<StoreUserDetailDto>(userGuid, scope);
+                if (protectedTarget != null)
+                {
+                    return protectedTarget;
+                }
 
                 var targetStore = await ResolveTargetStoreAsync(dto.StoreCode, scope);
                 if (targetStore == null)
@@ -401,25 +406,8 @@ namespace BlazorApp.Api.Services.React
                     user.UpdatedBy = updatedBy;
                     await _db.Updateable(user).ExecuteCommandAsync();
                     await UpsertEmployeeProfilePhoneAsync(userGuid, dto.Phone, updatedBy, now);
-
-                    await _db.Deleteable<UserStore>()
-                        .Where(item => item.UserGUID == userGuid)
-                        .ExecuteCommandAsync();
-                    await _db.Insertable(
-                        new UserStore
-                        {
-                            UserStoreGUID = Guid.NewGuid().ToString(),
-                            UserGUID = userGuid,
-                            StoreGUID = targetStore.StoreGUID,
-                            IsPrimary = false,
-                            AssignedAt = now,
-                            AssignedByGUID = scope.UserGuid,
-                            CreatedAt = now,
-                            UpdatedAt = now,
-                            CreatedBy = updatedBy,
-                            UpdatedBy = updatedBy,
-                        }
-                    ).ExecuteCommandAsync();
+                    // 关键逻辑：编辑只改账号资料，不动分店关联。LoadManagedUserAsync 已确认员工属于目标分店；
+                    // 旧实现会硬删该员工全部分店关联再插回一条非主分店记录，导致多分店员工丢失其他分店和主分店标记。
 
                     await _db.Ado.CommitTranAsync();
                 }
@@ -457,6 +445,11 @@ namespace BlazorApp.Api.Services.React
                 if (current == null)
                 {
                     return await BuildMissingUserResponseAsync<bool>(userGuid, "未找到可管理的店员账号");
+                }
+                var protectedTarget = await RejectProtectedTargetAsync<bool>(userGuid, scope);
+                if (protectedTarget != null)
+                {
+                    return protectedTarget;
                 }
 
                 var nextIsActive = dto.Status == 1;
@@ -497,6 +490,11 @@ namespace BlazorApp.Api.Services.React
                 if (current == null)
                 {
                     return await BuildMissingUserResponseAsync<bool>(userGuid, "未找到可管理的店员账号");
+                }
+                var protectedTarget = await RejectProtectedTargetAsync<bool>(userGuid, scope);
+                if (protectedTarget != null)
+                {
+                    return protectedTarget;
                 }
 
                 var now = DateTime.UtcNow;
@@ -647,6 +645,31 @@ namespace BlazorApp.Api.Services.React
             }
 
             return detail;
+        }
+
+        /// <summary>
+        /// 写操作的目标保护：店长不能改本人账号（改本人密码须走需要旧密码的改密接口），
+        /// 也不能改同时持有高权限角色或用户管理类权限的账号（例如兼任店员的管理员或外店店长）。
+        /// LoadManagedUserAsync 只校验「店员角色 + 本店」，这里补齐与店员条码服务一致的排除规则。
+        /// </summary>
+        private async Task<ApiResponse<T>?> RejectProtectedTargetAsync<T>(
+            string userGuid,
+            CurrentUserManageableStoreScope scope
+        )
+        {
+            if (scope.IsAdmin)
+            {
+                return null;
+            }
+            if (userGuid.Equals(scope.UserGuid, StringComparison.OrdinalIgnoreCase))
+            {
+                return ApiResponse<T>.Error("不能在员工列表中修改本人账号", "FORBIDDEN");
+            }
+            if (await UserAccessMutationSecurity.IsHighPrivilegeTargetAsync(_db, userGuid))
+            {
+                return ApiResponse<T>.Error("没有权限管理该账号", "FORBIDDEN");
+            }
+            return null;
         }
 
         private async Task<Role?> GetStoreStaffRoleAsync()

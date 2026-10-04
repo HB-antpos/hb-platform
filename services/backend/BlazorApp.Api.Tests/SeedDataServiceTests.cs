@@ -244,6 +244,42 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public void StoreStaffManagementPermissionSeeds_店长模板只授予店员管理权限不授予全局用户权限()
+        {
+            var storeStaffCodes = new[]
+            {
+                Permissions.Users.CreateStoreStaff,
+                Permissions.Users.EditStoreStaff,
+                Permissions.Users.ResetStoreStaffPassword,
+            };
+            var seedCodes = PermissionSeedData.AllPermissions
+                .Select(item => item.Code)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.All(storeStaffCodes, code => Assert.Contains(code, seedCodes));
+
+            foreach (var roleName in new[] { "StoreManager", "店长", "经理" })
+            {
+                var template = Assert.Single(
+                    PermissionSeedData.RolePermissionTemplates,
+                    item => item.RoleName == roleName
+                );
+                Assert.All(storeStaffCodes, code => Assert.Contains(code, template.PermissionCodes));
+                // 全局用户权限会放行 Web 用户接口，店长模板不得包含。
+                Assert.DoesNotContain(Permissions.Users.Create, template.PermissionCodes);
+                Assert.DoesNotContain(Permissions.Users.Edit, template.PermissionCodes);
+                Assert.DoesNotContain(Permissions.Users.ResetPassword, template.PermissionCodes);
+            }
+
+            // 全局权限通过别名包含店员权限，反向不成立。
+            Assert.Contains(Permissions.Users.Create, Permissions.GetEquivalentPermissionCodes(Permissions.Users.CreateStoreStaff));
+            Assert.Contains(Permissions.Users.Edit, Permissions.GetEquivalentPermissionCodes(Permissions.Users.EditStoreStaff));
+            Assert.Contains(Permissions.Users.ResetPassword, Permissions.GetEquivalentPermissionCodes(Permissions.Users.ResetStoreStaffPassword));
+            Assert.DoesNotContain(Permissions.Users.CreateStoreStaff, Permissions.GetEquivalentPermissionCodes(Permissions.Users.Create));
+            Assert.DoesNotContain(Permissions.Users.EditStoreStaff, Permissions.GetEquivalentPermissionCodes(Permissions.Users.Edit));
+            Assert.DoesNotContain(Permissions.Users.ResetStoreStaffPassword, Permissions.GetEquivalentPermissionCodes(Permissions.Users.ResetPassword));
+        }
+
+        [Fact]
         public async Task InitializePermissionSeedsAsync_迁移旧折扣关联后停用旧定义且保持幂等()
         {
             var role = CreateRole("role-store", "StoreManager", "Store manager");

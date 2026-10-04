@@ -23,6 +23,8 @@ export interface StoreUserListItem {
   lastLoginIp?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** 员工还没把店长给的初始/重置密码改成自己的密码。 */
+  mustChangePassword?: boolean;
 }
 
 export interface StoreUserDetail extends StoreUserListItem {
@@ -66,6 +68,8 @@ export interface StoreUserCreatePayload extends StoreUserMutationInput {
   storeCode: string;
   roleNames?: string[];
   employmentType?: "casual";
+  /** 员工首次登录须先改密；不传时后端默认要求。 */
+  requirePasswordChange?: boolean;
 }
 
 export interface StoreUserStatusPayload {
