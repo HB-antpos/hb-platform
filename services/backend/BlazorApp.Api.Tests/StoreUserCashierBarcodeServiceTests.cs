@@ -261,7 +261,7 @@ public sealed class StoreUserCashierBarcodeServiceTests : IDisposable
         Assert.Equal(3, methods.Count);
         Assert.All(methods, method => Assert.Contains(
             method.GetCustomAttributes<AuthorizeAttribute>(),
-            attribute => attribute.Policy == Permissions.Users.Edit
+            attribute => attribute.Policy == Permissions.Users.EditStoreStaff
         ));
     }
 

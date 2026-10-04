@@ -180,19 +180,19 @@ public class ControllerAuthorizationMetadataTests
         );
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.Create),
-            Permissions.Users.Create
+            Permissions.Users.CreateStoreStaff
         );
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.Update),
-            Permissions.Users.Edit
+            Permissions.Users.EditStoreStaff
         );
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.UpdateStatus),
-            Permissions.Users.Edit
+            Permissions.Users.EditStoreStaff
         );
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.UpdatePassword),
-            Permissions.Users.ResetPassword
+            Permissions.Users.ResetStoreStaffPassword
         );
 
         yield return Policy<ReactPromotionsController>(

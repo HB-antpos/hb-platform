@@ -179,7 +179,8 @@
   },
   "statuses": {
     "active": "Active",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "pendingFirstLogin": "First sign-in pending"
   },
   "fields": {
     "username": "Username",
@@ -209,7 +210,8 @@
     "statusDisabled": "Disabled",
     "statusAllCount": "All {{count}}",
     "statusActiveCount": "Active {{count}}",
-    "statusDisabledCount": "Disabled {{count}}"
+    "statusDisabledCount": "Disabled {{count}}",
+    "statusPendingFirstLoginCount": "First sign-in pending {{count}}"
   },
   "staffBarcode": {
     "title": "Staff personal code",
@@ -365,7 +367,8 @@
     "editTitle": "Edit staff account",
     "resetPasswordTitle": "Reset staff password",
     "resetPasswordDescription": "Set a new password for {{username}}. Share it with this staff member after saving.",
-    "statusConfirmMessage": "Are you sure you want to {{action}} {{username}}?"
+    "statusConfirmMessage": "Are you sure you want to {{action}} {{username}}?",
+    "resetPasswordRequireChangeHint": "After the reset, the employee must set their own password the next time they open the app."
   },
   "messages": {
     "noAccessTitle": "No staff view access",
@@ -395,6 +398,49 @@
     "userUpdated": "Staff account updated",
     "userEnabled": "Staff account enabled",
     "userDisabled": "Staff account disabled",
-    "passwordReset": "Password reset successfully"
+    "passwordReset": "Password reset successfully",
+    "phoneInvalid": "Enter an Australian mobile (10 digits starting with 04)"
+  },
+  "create": {
+    "assignmentSection": "Account assignment",
+    "store": "Store",
+    "role": "Role",
+    "roleValue": "Store staff",
+    "employmentType": "Employment",
+    "assignmentHint": "Accounts created by a store manager are always store staff of this store. Contact an administrator for other roles or stores.",
+    "loginSection": "Sign-in details",
+    "usernameHelper": "3–50 characters, saved in lowercase. The employee signs in with it.",
+    "passwordHelper": "At least 6 characters. Shown only once after creation.",
+    "regeneratePassword": "Regenerate",
+    "togglePassword": "Show or hide password",
+    "requirePasswordChange": "Require password change on first sign-in",
+    "requirePasswordChangeHelper": "After signing in with the initial password, the employee sets their own",
+    "contactSection": "Contact details (optional)",
+    "phoneHelper": "Australian mobile, 10 digits starting with 04",
+    "emailPlaceholder": "Optional; an internal email is generated if left empty",
+    "enableNow": "Enable now",
+    "enableNowHelper": "If off, the account is created but cannot sign in yet",
+    "submit": "Create account",
+    "successTitle": "Account created",
+    "successHeadline": "Account created",
+    "successDescription": "Give these sign-in details to {{name}} to sign in to the HB app.",
+    "assignment": "Assignment",
+    "assignmentValue": "{{store}} · Store staff · Casual",
+    "copyUsername": "Copy username",
+    "copyPassword": "Copy initial password",
+    "copyAll": "Copy sign-in details",
+    "copiedUsername": "Username copied",
+    "copiedPassword": "Initial password copied",
+    "copiedAll": "Sign-in details copied",
+    "passwordOnceWarning": "The initial password can't be viewed again after leaving this page. If forgotten, reset it from the staff details.",
+    "nextStepsTitle": "After the first sign-in, the employee will",
+    "nextStepPassword": "Set their own password",
+    "nextStepBasic": "Complete phone, address and other basic details",
+    "nextStepSensitive": "Submit birthday, bank, super and ID for your review",
+    "printBarcode": "Print personal code",
+    "done": "Done",
+    "credentialHeading": "HB app sign-in details",
+    "credentialFooter": "Please keep the password safe.",
+    "credentialFooterForced": "You will set your own password after the first sign-in."
   }
 }

@@ -38,6 +38,13 @@ namespace BlazorApp.Shared.Constants
             public const string ManagePosTerminalPermissions =
                 "Users.ManagePosTerminalPermissions";
             public const string ResetPassword = "Users.ResetPassword";
+
+            // 移动端「员工列表」只管理本人主分店的普通店员（/react/v1/store-users）。
+            // 与上面的全局用户权限分开：店长只授予这三项，Web 全局用户接口仍不可用。
+            // 原全局权限通过别名自动包含对应店员权限，已授权的角色无需重新授权。
+            public const string CreateStoreStaff = "Users.CreateStoreStaff";
+            public const string EditStoreStaff = "Users.EditStoreStaff";
+            public const string ResetStoreStaffPassword = "Users.ResetStoreStaffPassword";
         }
 
         public static class EmployeeProfiles
@@ -378,6 +385,10 @@ namespace BlazorApp.Shared.Constants
                 [System.ViewAppDownloads] = [System.ManageAppDownloads],
                 // 能编辑管理分店排班的人天然可以查看排班，避免「能改不能看」导致排班页 403。
                 [Attendance.Schedule.ViewStore] = [Attendance.Schedule.EditManagedStore],
+                // 全局用户权限天然包含对应的店员管理权限；反向不成立，店员权限不会获得全局用户接口。
+                [Users.CreateStoreStaff] = [Users.Create],
+                [Users.EditStoreStaff] = [Users.Edit],
+                [Users.ResetStoreStaffPassword] = [Users.ResetPassword],
             };
 
         public static class AustralianSuppliers

@@ -13,7 +13,6 @@ import {
   IconButton,
   Portal,
   Searchbar,
-  SegmentedButtons,
   Snackbar,
   Switch,
   Text,
@@ -37,6 +36,7 @@ import {
 import { StaffBarcodeBatchDialog, StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
 import { getUserAccessEligibility } from "@/modules/users/access-management";
+import { generateInitialPassword } from "@/modules/users/initial-password";
 import { validatePasswordValue, validateStoreUserForm } from "@/modules/users/validation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -44,8 +44,9 @@ import { PERMISSIONS } from "@/shared/utils/access";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
+import * as Crypto from "expo-crypto";
 
-type StatusFilter = "all" | "active" | "disabled";
+type StatusFilter = "all" | "active" | "disabled" | "pendingFirstLogin";
 
 const EMPTY_FORM: StoreUserFormValues = {
   username: "",
@@ -94,13 +95,11 @@ export default function UsersScreen() {
   const [editingUserGuid, setEditingUserGuid] = useState<string | null>(null);
   const [editingStoreCode, setEditingStoreCode] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<StoreUserFormValues>(EMPTY_FORM);
-  const [initialPassword, setInitialPassword] = useState("");
   const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [passwordUser, setPasswordUser] = useState<StoreUserListItem | null>(null);
   const [moreUser, setMoreUser] = useState<StoreUserListItem | null>(null);
   const [barcodeUser, setBarcodeUser] = useState<StoreUserListItem | null>(null);
-  const [createdUser, setCreatedUser] = useState<StoreUserListItem | null>(null);
   const [batchSelecting, setBatchSelecting] = useState(false);
   const [batchVisible, setBatchVisible] = useState(false);
   const [selectedUserGuids, setSelectedUserGuids] = useState<Set<string>>(new Set());
@@ -110,9 +109,16 @@ export default function UsersScreen() {
   });
 
   const canViewUsers = access.isAdmin || access.canReadUser;
-  const canCreateUsers = access.isAdmin || access.hasPermission(PERMISSIONS.Users.Create);
-  const canEditUsers = access.isAdmin || access.hasPermission(PERMISSIONS.Users.Edit);
-  const canResetPasswords = access.isAdmin || access.hasPermission(PERMISSIONS.Users.ResetPassword);
+  // 店长持有本店店员专用权限；全局用户权限（Users.Create 等）同样可以管理店员。
+  const canCreateUsers = access.isAdmin
+    || access.hasPermission(PERMISSIONS.Users.Create)
+    || access.hasPermission(PERMISSIONS.Users.CreateStoreStaff);
+  const canEditUsers = access.isAdmin
+    || access.hasPermission(PERMISSIONS.Users.Edit)
+    || access.hasPermission(PERMISSIONS.Users.EditStoreStaff);
+  const canResetPasswords = access.isAdmin
+    || access.hasPermission(PERMISSIONS.Users.ResetPassword)
+    || access.hasPermission(PERMISSIONS.Users.ResetStoreStaffPassword);
   const canManageUserRoles = access.hasPermission(PERMISSIONS.Users.ManageRoles);
   const canManageUserStores = access.hasPermission(PERMISSIONS.Users.ManageStores);
   const canManagePosTerminalPermissions = access.hasPermission(PERMISSIONS.Users.ManagePos);
@@ -169,11 +175,10 @@ export default function UsersScreen() {
     editingUserGuid,
     editingStoreCode
   );
-  const { createMutation, updateMutation, statusMutation, passwordMutation } =
+  const { updateMutation, statusMutation, passwordMutation } =
     useStoreUserMutations(managedStoreCode, keyword);
 
   const isBusy =
-    createMutation.isPending ||
     updateMutation.isPending ||
     statusMutation.isPending ||
     passwordMutation.isPending;
@@ -226,22 +231,20 @@ export default function UsersScreen() {
     setEditingUserGuid(null);
     setEditingStoreCode(null);
     setFormValues(EMPTY_FORM);
-    setInitialPassword("");
   }, []);
 
-  const openCreateDialog = useCallback(() => {
+  const openCreatePage = useCallback(() => {
     // 创建必须绑定当前已选且可管理的分店，不能回落到“全部已分配分店”。
     if (!managedStoreCode || !selectedStoreCanCreate) {
       setSnackbarMessage(t("messages.selectManageableStoreFirst"));
       return;
     }
 
-    setEditingUserGuid(null);
-    setEditingStoreCode(managedStoreCode);
-    setFormValues(EMPTY_FORM);
-    setInitialPassword("");
-    setDialogVisible(true);
-  }, [managedStoreCode, selectedStoreCanCreate, t]);
+    router.push({
+      pathname: "/users/new",
+      params: { storeCode: managedStoreCode },
+    } as unknown as Parameters<typeof router.push>[0]);
+  }, [managedStoreCode, router, selectedStoreCanCreate, t]);
 
   const openEditDialog = useCallback(
     (user: StoreUserListItem) => {
@@ -347,32 +350,20 @@ export default function UsersScreen() {
     return true;
   }, [formValues, t]);
 
+  // 新建已移到独立页面（users/new），弹窗只用于编辑。
   const handleSubmit = useCallback(async () => {
     const targetStoreCode = editingStoreCode;
-    const isCreating = !editingUserGuid;
-    if (!targetStoreCode) {
+    if (!targetStoreCode || !editingUserGuid) {
       setSnackbarMessage(t("messages.selectStoreFirst"));
       return;
     }
-    if (isCreating && (!canCreateUsers || !isStoreManageable(targetStoreCode, manageableStores))) {
-      setSnackbarMessage(t("messages.storeReadOnly"));
-      return;
-    }
-    if (!isCreating && (!canEditUsers || !isStoreManageable(targetStoreCode, manageableStores))) {
+    if (!canEditUsers || !isStoreManageable(targetStoreCode, manageableStores)) {
       setSnackbarMessage(t("messages.storeReadOnly"));
       return;
     }
 
     if (!validateForm()) {
       return;
-    }
-
-    if (isCreating) {
-      const passwordValidationMessage = validatePasswordValue(initialPassword, t);
-      if (passwordValidationMessage) {
-        setSnackbarMessage(passwordValidationMessage);
-        return;
-      }
     }
 
     const payload = {
@@ -386,33 +377,18 @@ export default function UsersScreen() {
     };
 
     try {
-      if (isCreating) {
-        const created = await createMutation.mutateAsync({
-          ...payload,
-          password: initialPassword.trim(),
-          passwordFormat: "raw",
-          employmentType: "casual",
-        });
-        setCreatedUser(created);
-        setSnackbarMessage(t("messages.userCreated"));
-      } else {
-        await updateMutation.mutateAsync({ ...payload, userGuid: editingUserGuid });
-        setSnackbarMessage(t("messages.userUpdated"));
-      }
-
+      await updateMutation.mutateAsync({ ...payload, userGuid: editingUserGuid });
+      setSnackbarMessage(t("messages.userUpdated"));
       resetDialogState();
     } catch (error) {
       console.warn("[store-users] save failed", toSafeStoreUserErrorLog(error));
       setSnackbarMessage(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "messages.saveFailed" }));
     }
   }, [
-    canCreateUsers,
     canEditUsers,
-    createMutation,
     editingStoreCode,
     editingUserGuid,
     formValues,
-    initialPassword,
     manageableStores,
     resetDialogState,
     language,
@@ -532,6 +508,9 @@ export default function UsersScreen() {
       if (statusFilter === "disabled") {
         return item.status !== 1;
       }
+      if (statusFilter === "pendingFirstLogin") {
+        return item.mustChangePassword === true;
+      }
       return true;
     });
 
@@ -543,7 +522,8 @@ export default function UsersScreen() {
   const statusCounts = useMemo(() => {
     const items = usersQuery.data ?? [];
     const active = items.filter((item) => item.status === 1).length;
-    return { all: items.length, active, disabled: items.length - active };
+    const pendingFirstLogin = items.filter((item) => item.mustChangePassword === true).length;
+    return { all: items.length, active, disabled: items.length - active, pendingFirstLogin };
   }, [usersQuery.data]);
 
   const selectedUsers = useMemo(
@@ -659,9 +639,13 @@ export default function UsersScreen() {
                 </View>
               </View>
               <View style={styles.cardMenuActions}>
-                <Chip compact style={item.status === 1 ? styles.activeChip : styles.inactiveChip}>
-                  {item.status === 1 ? t("statuses.active") : t("statuses.disabled")}
-                </Chip>
+                {item.mustChangePassword && item.status === 1 ? (
+                  <Chip compact style={styles.pendingChip}>{t("statuses.pendingFirstLogin")}</Chip>
+                ) : (
+                  <Chip compact style={item.status === 1 ? styles.activeChip : styles.inactiveChip}>
+                    {item.status === 1 ? t("statuses.active") : t("statuses.disabled")}
+                  </Chip>
+                )}
                 {canUseBarcode && !batchSelecting ? (
                   <Pressable
                     style={styles.codeAction}
@@ -740,7 +724,7 @@ export default function UsersScreen() {
                   compact
                   mode="contained"
                   icon="account-plus-outline"
-                  onPress={openCreateDialog}
+                  onPress={openCreatePage}
                   disabled={!selectedStoreCanCreate || isBusy}
                 >
                   {t("actions.create")}
@@ -766,16 +750,27 @@ export default function UsersScreen() {
                 style={styles.searchbar}
                 inputStyle={styles.searchInput}
               />
-              <SegmentedButtons
-                value={statusFilter}
-                onValueChange={(value) => setStatusFilter(value as StatusFilter)}
-                buttons={[
+              {/* 状态筛选用可换行的芯片：四个选项在窄屏上放不下分段按钮。 */}
+              <View style={styles.filterChips}>
+                {([
                   { value: "all", label: t("filters.statusAllCount", { count: statusCounts.all }) },
                   { value: "active", label: t("filters.statusActiveCount", { count: statusCounts.active }) },
                   { value: "disabled", label: t("filters.statusDisabledCount", { count: statusCounts.disabled }) },
-                ]}
-                theme={{ colors: { secondaryContainer: "#E8F1FF", onSecondaryContainer: HB_COLORS.action } }}
-              />
+                  { value: "pendingFirstLogin", label: t("filters.statusPendingFirstLoginCount", { count: statusCounts.pendingFirstLogin }) },
+                ] as const).map((option) => (
+                  <Chip
+                    key={option.value}
+                    selected={statusFilter === option.value}
+                    showSelectedCheck={false}
+                    onPress={() => setStatusFilter(option.value)}
+                    style={statusFilter === option.value ? styles.filterChipSelected : styles.filterChip}
+                    textStyle={statusFilter === option.value ? styles.filterChipSelectedText : undefined}
+                    accessibilityState={{ selected: statusFilter === option.value }}
+                  >
+                    {option.label}
+                  </Chip>
+                ))}
+              </View>
               {!isDeviceMode && canEditUsers && managedStoreCode && isStoreManageable(managedStoreCode, manageableStores) ? (
                 <View style={styles.batchActions}>
                   <Button
@@ -843,7 +838,7 @@ export default function UsersScreen() {
 
       <Portal>
         <Dialog visible={dialogVisible} onDismiss={resetDialogState}>
-          <Dialog.Title>{editingUserGuid ? t("dialogs.editTitle") : t("dialogs.createTitle")}</Dialog.Title>
+          <Dialog.Title>{t("dialogs.editTitle")}</Dialog.Title>
           <Dialog.ScrollArea>
             <ScrollView contentContainerStyle={styles.dialogContent}>
               <TextInput
@@ -852,19 +847,8 @@ export default function UsersScreen() {
                 value={formValues.username}
                 onChangeText={(value) => setFormValues((current) => ({ ...current, username: value }))}
                 autoCapitalize="none"
-                disabled={Boolean(editingUserGuid) || isBusy}
+                disabled
               />
-              {!editingUserGuid ? (
-                <TextInput
-                  mode="outlined"
-                  label={t("fields.initialPassword")}
-                  value={initialPassword}
-                  onChangeText={setInitialPassword}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  disabled={isBusy}
-                />
-              ) : null}
               <TextInput
                 mode="outlined"
                 label={t("fields.fullName")}
@@ -900,7 +884,7 @@ export default function UsersScreen() {
               <Text variant="bodySmall" style={styles.secondaryText}>
                 {t("fields.fixedRoleHint")}
               </Text>
-              {editingUserGuid && detailQuery.isFetching ? (
+              {detailQuery.isFetching ? (
                 <View style={styles.inlineLoading}>
                   <ActivityIndicator />
                 </View>
@@ -911,8 +895,8 @@ export default function UsersScreen() {
             <Button onPress={resetDialogState} disabled={isBusy}>
               {t("actions.cancel")}
             </Button>
-            <Button onPress={handleSubmit} loading={editingUserGuid ? updateMutation.isPending : createMutation.isPending}>
-              {editingUserGuid ? t("actions.save") : t("actions.create")}
+            <Button onPress={handleSubmit} loading={updateMutation.isPending}>
+              {t("actions.save")}
             </Button>
           </Dialog.Actions>
         </Dialog>
@@ -928,10 +912,12 @@ export default function UsersScreen() {
               label={t("fields.newPassword")}
               value={resetPasswordValue}
               onChangeText={setResetPasswordValue}
-              secureTextEntry
               autoCapitalize="none"
+              autoCorrect={false}
               disabled={passwordMutation.isPending}
+              right={<TextInput.Icon icon="refresh" accessibilityLabel={t("create.regeneratePassword")} onPress={() => setResetPasswordValue(generateInitialPassword((count) => Crypto.getRandomBytes(count)))} />}
             />
+            <Text variant="bodySmall" style={styles.secondaryText}>{t("dialogs.resetPasswordRequireChangeHint")}</Text>
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={closeResetPasswordDialog} disabled={passwordMutation.isPending}>
@@ -970,18 +956,6 @@ export default function UsersScreen() {
           </Dialog.Content>
         </Dialog>
 
-        <Dialog visible={Boolean(createdUser)} onDismiss={() => setCreatedUser(null)} testID="staff-created-actions-dialog">
-          <Dialog.Title>{t("staffBarcode.created.title")}</Dialog.Title>
-          <Dialog.Content><Text>{t("staffBarcode.created.description", { name: createdUser?.fullName || createdUser?.username })}</Text></Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setCreatedUser(null)}>{t("staffBarcode.actions.done")}</Button>
-            {createdUser && canManageUserBarcode(createdUser) ? (
-              <Button mode="contained" onPress={() => { setBarcodeUser(createdUser); setCreatedUser(null); }}>
-                {t("staffBarcode.actions.createAndPrint")}
-              </Button>
-            ) : null}
-          </Dialog.Actions>
-        </Dialog>
       </Portal>
 
       <StaffBarcodeDialog
@@ -1076,6 +1050,28 @@ const styles = StyleSheet.create({
   },
   inactiveChip: {
     backgroundColor: "#FEE2E2",
+  },
+  pendingChip: {
+    backgroundColor: "#EAF2FF",
+  },
+  filterChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  filterChip: {
+    backgroundColor: HB_COLORS.white,
+    borderColor: HB_COLORS.outline,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  filterChipSelected: {
+    backgroundColor: "#E8F1FF",
+    borderColor: "#84ADFF",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  filterChipSelectedText: {
+    color: HB_COLORS.action,
+    fontWeight: "600",
   },
   inlineLoading: {
     alignItems: "center",

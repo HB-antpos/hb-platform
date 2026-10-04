@@ -179,7 +179,8 @@
   },
   "statuses": {
     "active": "启用中",
-    "disabled": "已停用"
+    "disabled": "已停用",
+    "pendingFirstLogin": "待首次登录"
   },
   "fields": {
     "username": "账号",
@@ -209,7 +210,8 @@
     "statusDisabled": "停用",
     "statusAllCount": "全部 {{count}}",
     "statusActiveCount": "启用 {{count}}",
-    "statusDisabledCount": "停用 {{count}}"
+    "statusDisabledCount": "停用 {{count}}",
+    "statusPendingFirstLoginCount": "待首次登录 {{count}}"
   },
   "staffBarcode": {
     "title": "员工个人码",
@@ -365,7 +367,8 @@
     "editTitle": "编辑店员账号",
     "resetPasswordTitle": "重置店员密码",
     "resetPasswordDescription": "为 {{username}} 设置新密码。保存后请通知该店员使用新密码登录。",
-    "statusConfirmMessage": "确认要{{action}} {{username}} 吗？"
+    "statusConfirmMessage": "确认要{{action}} {{username}} 吗？",
+    "resetPasswordRequireChangeHint": "重置后员工下次进入 App 需先设置自己的密码，其他设备上的登录不受影响。"
   },
   "messages": {
     "noAccessTitle": "暂无店员查看权限",
@@ -395,6 +398,49 @@
     "userUpdated": "店员账号已更新",
     "userEnabled": "店员账号已启用",
     "userDisabled": "店员账号已停用",
-    "passwordReset": "密码已重置"
+    "passwordReset": "密码已重置",
+    "phoneInvalid": "请输入澳洲手机号（04 开头共 10 位）"
+  },
+  "create": {
+    "assignmentSection": "账号归属",
+    "store": "分店",
+    "role": "角色",
+    "roleValue": "店员",
+    "employmentType": "员工类型",
+    "assignmentHint": "店长创建的账号固定为本店店员。需要其他角色或多个分店，请联系管理员。",
+    "loginSection": "登录信息",
+    "usernameHelper": "3–50 个字符，保存时转为小写。员工用它登录。",
+    "passwordHelper": "至少 6 位。创建后只显示这一次。",
+    "regeneratePassword": "重新生成",
+    "togglePassword": "显示或隐藏密码",
+    "requirePasswordChange": "首次登录须修改密码",
+    "requirePasswordChangeHelper": "员工用初始密码登录后，先设置自己的密码",
+    "contactSection": "联系资料（选填）",
+    "phoneHelper": "澳洲手机号，04 开头共 10 位",
+    "emailPlaceholder": "可留空，系统会生成内部邮箱",
+    "enableNow": "立即启用",
+    "enableNowHelper": "关闭后账号会创建，但暂时不能登录",
+    "submit": "创建账号",
+    "successTitle": "创建完成",
+    "successHeadline": "账号已创建",
+    "successDescription": "把下面的登录信息交给{{name}}，对方即可登录 HB 移动端。",
+    "assignment": "归属",
+    "assignmentValue": "{{store}} · 店员 · 临时工",
+    "copyUsername": "复制用户名",
+    "copyPassword": "复制初始密码",
+    "copyAll": "复制登录信息",
+    "copiedUsername": "用户名已复制",
+    "copiedPassword": "初始密码已复制",
+    "copiedAll": "登录信息已复制",
+    "passwordOnceWarning": "离开本页后无法再查看初始密码。员工忘记时，可在员工详情里重置。",
+    "nextStepsTitle": "员工首次登录后会",
+    "nextStepPassword": "设置自己的密码",
+    "nextStepBasic": "补全电话、地址等基本资料",
+    "nextStepSensitive": "填报生日、银行、养老金和证件，提交后由你审核",
+    "printBarcode": "打印个人码",
+    "done": "完成",
+    "credentialHeading": "HB 移动端登录信息",
+    "credentialFooter": "请妥善保管密码。",
+    "credentialFooterForced": "首次登录后需要设置自己的密码。"
   }
 }

@@ -725,6 +725,18 @@
       "name": "Reset passwords",
       "description": "Reset user login passwords."
     },
+    "Users.CreateStoreStaff": {
+      "name": "Create store staff",
+      "description": "Mobile staff list - create staff accounts for your primary store (excludes web user management)."
+    },
+    "Users.EditStoreStaff": {
+      "name": "Edit store staff",
+      "description": "Mobile staff list - edit or disable staff of your primary store and manage their personal codes (excludes web user management)."
+    },
+    "Users.ResetStoreStaffPassword": {
+      "name": "Reset store staff passwords",
+      "description": "Mobile staff list - reset passwords for staff of your primary store and require a change on first sign-in (excludes web user management)."
+    },
     "Users.View": {
       "name": "View users",
       "description": "View user lists and details in the mobile staff and user management pages."

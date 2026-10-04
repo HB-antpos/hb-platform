@@ -45,3 +45,22 @@ export function validateStoreUserForm(
 
   return null;
 }
+
+/** 澳洲手机号：04 开头共 10 位，或 +61 4 开头；允许中间空格和连字符。 */
+const AU_MOBILE_PATTERN = /^(?:04\d{8}|\+614\d{8})$/;
+
+export function normalizePhoneInput(value: string) {
+  return value.replace(/[\s-]/g, "");
+}
+
+/**
+ * 只在新建店员时校验：编辑时历史号码可能不是这个格式，不能因此挡住改姓名等其他保存。
+ * 空值允许（手机号选填）。
+ */
+export function validateNewStaffPhone(phone: string, t: Translate) {
+  const normalized = normalizePhoneInput(phone.trim());
+  if (!normalized) {
+    return null;
+  }
+  return AU_MOBILE_PATTERN.test(normalized) ? null : t("messages.phoneInvalid");
+}

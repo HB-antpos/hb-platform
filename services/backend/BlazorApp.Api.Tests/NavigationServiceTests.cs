@@ -1741,7 +1741,7 @@ public class NavigationServiceTests
             nameof(ReactStoreUsersController.Create)
         );
 
-        Assert.Equal(Permissions.Users.Create, authorizeAttribute.Policy);
+        Assert.Equal(Permissions.Users.CreateStoreStaff, authorizeAttribute.Policy);
     }
 
     [Fact]
@@ -1752,7 +1752,7 @@ public class NavigationServiceTests
             nameof(ReactStoreUsersController.Update)
         );
 
-        Assert.Equal(Permissions.Users.Edit, authorizeAttribute.Policy);
+        Assert.Equal(Permissions.Users.EditStoreStaff, authorizeAttribute.Policy);
     }
 
     [Fact]
@@ -1763,7 +1763,7 @@ public class NavigationServiceTests
             nameof(ReactStoreUsersController.UpdatePassword)
         );
 
-        Assert.Equal(Permissions.Users.ResetPassword, authorizeAttribute.Policy);
+        Assert.Equal(Permissions.Users.ResetStoreStaffPassword, authorizeAttribute.Policy);
     }
 
     [Theory]
