@@ -748,6 +748,10 @@ builder.Services.AddScoped<
     UserStorePosTerminalPermissionService
 >();
 builder.Services.AddScoped<IEmployeeProfileService, EmployeeProfileService>(); // 员工个人信息服务
+builder.Services.AddScoped<EmployeeMinorComplianceService>(); // 未成年用工档案、家长签署和 HR 审核
+builder.Services.AddScoped<MinorEmploymentReminderService>(); // 经理待办只记录提醒，不阻断排班或打卡
+builder.Services.AddScoped<IEmployeeMinorDocumentStore, CosEmployeeMinorDocumentStore>();
+builder.Services.AddHttpClient("minor-employment-documents");
 builder.Services.AddScoped<EmployeeProfileSensitiveChangeService>();
 builder.Services.AddScoped<EmployeeProfileMediaService>();
 builder.Services.AddScoped<EmployeeCashierBarcodeService>();

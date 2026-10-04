@@ -47,6 +47,22 @@ export type AttendanceScheduleStatus = "Draft" | "Active" | "Cancelled" | string
 export type AttendanceHolidayBusinessStatus = "Open" | "Closed" | "Partial" | string;
 export type AttendanceHolidayJurisdiction = "NSW" | "QLD";
 
+export interface MinorEmploymentComplianceFinding {
+  ruleId: string;
+  severity: "warning" | "review" | "incomplete" | string;
+  message: string;
+  workDate?: string;
+  actualMinutes?: number;
+  limitMinutes?: number;
+  ruleCategory?: string;
+  sourceUrl?: string;
+}
+
+export interface MinorEmploymentComplianceEvaluation {
+  findings: MinorEmploymentComplianceFinding[];
+  hasFindings: boolean;
+}
+
 export interface AttendanceSchedule {
   scheduleGuid: string;
   storeCode: string;
@@ -60,6 +76,7 @@ export interface AttendanceSchedule {
   remark?: string;
   /** 店长指定的用餐次数（每次 30 分钟，0 = 不扣用餐）；为空表示按班次时长默认。 */
   mealBreakCount?: number | null;
+  minorCompliance?: MinorEmploymentComplianceEvaluation;
   isMine: boolean;
   holidayName?: string;
   holidayBusinessStatus?: string;
@@ -111,6 +128,7 @@ export interface AttendancePunch {
   lateMinutes?: number;
   earlyLeaveMinutes?: number;
   lateDepartureMinutes?: number;
+  minorCompliance?: MinorEmploymentComplianceEvaluation;
 }
 
 export interface AttendancePunchMutationResult extends AttendancePunch {
@@ -264,6 +282,7 @@ export interface AttendancePunchVerificationState {
 
 export interface AttendanceToday {
   workDate: string;
+  minorCompliance?: MinorEmploymentComplianceEvaluation;
   storeTimeZone?: string;
   holidayName?: string;
   holidayBusinessStatus?: string;

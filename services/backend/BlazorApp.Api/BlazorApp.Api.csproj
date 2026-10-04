@@ -37,5 +37,6 @@
     <Content Include="..\BlazorApp.Shared\Helper\logo\HB_logo(1).png" Link="Assets\invoice-logo.png" CopyToOutputDirectory="PreserveNewest" />
     <!-- 促销海报嵌入字体（OFL 开源，许可证同目录），随程序发布 -->
     <Content Include="Assets\Fonts\PromoPosters\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Assets/minor-employment-ce1-v4.pdf" />
   </ItemGroup>
 </Project>

@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
@@ -88,6 +89,7 @@ namespace BlazorApp.Api.Services.React
 
             var result = rows.Select(item => ToDto(item)).ToList();
             await PopulateScheduleDisplayFieldsAsync(result);
+            await PopulateMinorEmploymentComplianceAsync(result);
             return ApiResponse<List<AttendanceScheduleDto>>.OK(result);
         }
 
@@ -130,6 +132,7 @@ namespace BlazorApp.Api.Services.React
                 .ToListAsync();
             var items = rows.Select(item => ToDto(item)).ToList();
             await PopulateScheduleDisplayFieldsAsync(items);
+            await PopulateMinorEmploymentComplianceAsync(items);
             await PopulateWorkSessionFieldsAsync(items, rows, reconcileDerivedApprovals: false);
             return ApiResponse<PagedResult<AttendanceScheduleDto>>.OK(new PagedResult<AttendanceScheduleDto>
             {
@@ -138,6 +141,22 @@ namespace BlazorApp.Api.Services.React
                 Page = page,
                 PageSize = pageSize,
             });
+        }
+
+        public async Task<ApiResponse<MinorEmploymentComplianceEvaluationDto>> PreviewMinorEmploymentComplianceAsync(CreateAttendanceScheduleDto request)
+        {
+            var validation = ValidateSchedulePayload(request.StoreCode, request.UserGuid, request.StartTime, request.EndTime);
+            if (!validation.Success)
+                return ApiResponse<MinorEmploymentComplianceEvaluationDto>.Error(validation.Message, validation.ErrorCode);
+            var storeAccess = await ResolveManagedStoreAccessAsync(request.StoreCode);
+            if (!storeAccess.Success)
+                return ApiResponse<MinorEmploymentComplianceEvaluationDto>.Error(storeAccess.Message, storeAccess.ErrorCode);
+            var evaluation = await EvaluateMinorEmploymentAsync(request.UserGuid.Trim(), new AttendanceSchedule
+            {
+                ScheduleGuid = string.Empty, StoreCode = request.StoreCode.Trim(), UserGuid = request.UserGuid.Trim(),
+                WorkDate = request.WorkDate.Date, StartTime = request.StartTime, EndTime = request.EndTime, Status = "Draft",
+            });
+            return ApiResponse<MinorEmploymentComplianceEvaluationDto>.OK(evaluation ?? new(), "预检完成；所有提醒均不阻断排班保存或发布");
         }
 
         public async Task<ApiResponse<AttendanceScheduleDto>> CreateScheduleAsync(
@@ -191,7 +210,11 @@ namespace BlazorApp.Api.Services.React
             };
 
             await _db.Insertable(model).ExecuteCommandAsync();
-            return ApiResponse<AttendanceScheduleDto>.OK(ToDto(model), "排班已创建");
+            var result = ToDto(model);
+            result.MinorCompliance = await EvaluateMinorEmploymentAsync(model.UserGuid, model);
+            if (result.MinorCompliance != null)
+                await RecordMinorEmploymentEvaluationAsync(model.UserGuid, model.StoreCode, model.ScheduleGuid, "schedule_created", result.MinorCompliance);
+            return ApiResponse<AttendanceScheduleDto>.OK(result, "排班已创建");
         }
 
         /// <summary>
@@ -378,7 +401,11 @@ namespace BlazorApp.Api.Services.React
                 await _db.Ado.RollbackTranAsync();
                 throw;
             }
-            return ApiResponse<AttendanceScheduleDto>.OK(ToDto(model), "排班已更新");
+            var result = ToDto(model);
+            result.MinorCompliance = await EvaluateMinorEmploymentAsync(model.UserGuid, model);
+            if (result.MinorCompliance != null)
+                await RecordMinorEmploymentEvaluationAsync(model.UserGuid, model.StoreCode, model.ScheduleGuid, "schedule_updated", result.MinorCompliance);
+            return ApiResponse<AttendanceScheduleDto>.OK(result, "排班已更新");
         }
 
         public async Task<ApiResponse<int>> PublishWeekAsync(PublishAttendanceWeekDto request)
@@ -412,7 +439,23 @@ namespace BlazorApp.Api.Services.React
                 )
                 .ExecuteCommandAsync();
 
-            return ApiResponse<int>.OK(affected, "排班已发布");
+            var publishedSchedules = await _db.Queryable<AttendanceSchedule>()
+                .Where(item => !item.IsDeleted && item.StoreCode == storeCode && item.Status == "Active"
+                    && item.WorkDate >= weekStart && item.WorkDate <= weekEnd)
+                .ToListAsync();
+            var findings = new List<MinorEmploymentComplianceFindingDto>();
+            foreach (var schedule in publishedSchedules)
+            {
+                var evaluation = await EvaluateMinorEmploymentAsync(schedule.UserGuid, schedule);
+                if (evaluation != null)
+                {
+                    findings.AddRange(evaluation.Findings);
+                    await RecordMinorEmploymentEvaluationAsync(schedule.UserGuid, schedule.StoreCode, schedule.ScheduleGuid, "schedule_published", evaluation);
+                }
+            }
+            return ApiResponse<int>.OK(affected, findings.Count == 0
+                ? "排班已发布"
+                : $"排班已发布；保留 {findings.Count} 条未成年用工提醒");
         }
 
         public async Task<ApiResponse<bool>> DeleteScheduleAsync(string scheduleGuid)
@@ -550,9 +593,14 @@ namespace BlazorApp.Api.Services.React
                 : punchDtos.Where(item => access.StoreCodes.Contains(
                     item.StoreCode,
                     StringComparer.OrdinalIgnoreCase)).ToList();
+            // 刷新首页时也重新计算未下班的实际班段；评估和待办归档都是最佳努力，绝不影响考勤查询。
+            var minorCompliance = await EvaluateMinorEmploymentAsync(userGuid, referenceDate: today);
+            if (minorCompliance != null && !string.IsNullOrWhiteSpace(scheduleDtos.FirstOrDefault()?.StoreCode ?? storeCode))
+                await RecordMinorEmploymentReminderAsync(userGuid, scheduleDtos.FirstOrDefault()?.StoreCode ?? storeCode!, scheduleDtos.FirstOrDefault()?.ScheduleGuid, "actual_ongoing", minorCompliance);
             var todayDto = new AttendanceTodayDto
             {
                 WorkDate = today,
+                MinorCompliance = minorCompliance,
                 Schedules = scheduleDtos,
                 Punches = requestedStorePunchDtos,
                 Holidays = holidays.Select(ToDto).ToList(),
@@ -1086,6 +1134,11 @@ namespace BlazorApp.Api.Services.React
             }
             await _db.Ado.CommitTranAsync();
             var resultDto = ToDto(punch, employeeName, storeName, serverNow);
+            resultDto.MinorCompliance = await EvaluateMinorEmploymentAsync(userGuid, schedule, punch);
+            if (resultDto.MinorCompliance != null)
+            {
+                await RecordMinorEmploymentEvaluationAsync(userGuid, punch.StoreCode, punch.ScheduleGuid, "punch_recorded", resultDto.MinorCompliance);
+            }
             if (schedule != null)
             {
                 var updatedSession = AttendanceWorkSessionCalculator.Calculate(
@@ -3905,6 +3958,16 @@ namespace BlazorApp.Api.Services.React
             }
         }
 
+        private async Task PopulateMinorEmploymentComplianceAsync(List<AttendanceScheduleDto> schedules)
+        {
+            foreach (var schedule in schedules)
+                schedule.MinorCompliance = await EvaluateMinorEmploymentAsync(schedule.UserGuid, new AttendanceSchedule
+                {
+                    ScheduleGuid = schedule.ScheduleGuid, StoreCode = schedule.StoreCode, UserGuid = schedule.UserGuid,
+                    WorkDate = schedule.WorkDate, StartTime = schedule.StartTime, EndTime = schedule.EndTime, Status = schedule.Status,
+                });
+        }
+
         private async Task<List<AttendanceStorePunchStateDto>> BuildRelatedStorePunchStatesAsync(
             List<AttendanceScheduleDto> scheduleDtos,
             List<AttendancePunch> punches,
@@ -4744,6 +4807,260 @@ namespace BlazorApp.Api.Services.React
         {
             var diff = ((int)date.DayOfWeek + 6) % 7;
             return date.Date.AddDays(-diff);
+        }
+
+        /// <summary>
+        /// 读取当前不可变档案版本与关联门店班次。任何资料缺失都会成为提醒，绝不回写或阻断排班/打卡。
+        /// </summary>
+        private async Task<MinorEmploymentComplianceEvaluationDto?> EvaluateMinorEmploymentAsync(
+            string userGuid,
+            AttendanceSchedule? changedSchedule = null,
+            AttendancePunch? newPunch = null,
+            DateTime? referenceDate = null)
+        {
+            try
+            {
+                return await EvaluateMinorEmploymentCoreAsync(userGuid, changedSchedule, newPunch, referenceDate);
+            }
+            catch (Exception exception)
+            {
+                // 合规资料反序列化、迁移或规则计算故障只能降级为无结果，绝不能把已保存的排班/打卡变成失败响应。
+                _logger.LogWarning(exception, "未成年用工提醒计算失败；核心考勤动作已保留。用户 {UserGuid}", userGuid);
+                return null;
+            }
+        }
+
+        private async Task<MinorEmploymentComplianceEvaluationDto?> EvaluateMinorEmploymentCoreAsync(
+            string userGuid,
+            AttendanceSchedule? changedSchedule,
+            AttendancePunch? newPunch,
+            DateTime? referenceDate)
+        {
+            var profileRow = await _db.Queryable<EmployeeMinorCompliance>()
+                .Where(item => !item.IsDeleted && item.UserGUID == userGuid)
+                .OrderBy(item => item.Version, OrderByType.Desc)
+                .FirstAsync();
+            if (profileRow == null)
+            {
+                var birthday = await _db.Queryable<EmployeeProfile>().Where(item => !item.IsDeleted && item.UserGUID == userGuid).Select(item => item.Birthday).FirstAsync();
+                var reference = referenceDate ?? changedSchedule?.WorkDate ?? newPunch?.WorkDate ?? DateTime.Today;
+                if (birthday.HasValue && birthday.Value.AddYears(18) <= reference) return null;
+                return MapMinorEvaluation(MinorEmploymentComplianceCalculator.Evaluate(new()
+                {
+                    WorkItems = changedSchedule == null ? [] : [ToMinorWorkItem(changedSchedule)],
+                }));
+            }
+
+            var school = DeserializeMinor<EmployeeMinorSchoolCalendarDto>(profileRow.SchoolCalendarJson);
+            var otherWork = DeserializeMinor<EmployeeMinorOtherWorkDto>(profileRow.OtherWorkJson);
+            var commute = DeserializeMinor<EmployeeMinorCommuteDto>(profileRow.CommuteJson);
+            var relatedStores = await GetRelatedStoreCodesAsync(userGuid);
+            var anchorDate = referenceDate ?? changedSchedule?.WorkDate ?? newPunch?.WorkDate ?? DateTime.Today;
+            var sunday = anchorDate.Date.AddDays(-(int)anchorDate.DayOfWeek);
+            var weekEnd = sunday.AddDays(7);
+            // 多取目标周前后各一天，仅供跨周的同雇主 12 小时间隔判断；周累计仍严格以 sunday..weekEnd 计算。
+            var boundaryStart = sunday.AddDays(-1);
+            var boundaryEnd = weekEnd.AddDays(1);
+            var schedules = await _db.Queryable<AttendanceSchedule>()
+                .Where(item => !item.IsDeleted && item.UserGuid == userGuid
+                    && relatedStores.Contains(item.StoreCode)
+                    && item.Status != "Cancelled"
+                    && item.WorkDate >= boundaryStart && item.WorkDate < boundaryEnd)
+                .ToListAsync();
+            if (changedSchedule != null)
+            {
+                schedules.RemoveAll(item => !string.IsNullOrWhiteSpace(changedSchedule.ScheduleGuid)
+                    && item.ScheduleGuid == changedSchedule.ScheduleGuid);
+                schedules.Add(changedSchedule);
+            }
+
+            var items = schedules.Select(ToMinorWorkItem).ToList();
+            if (otherWork?.PlannedIntervals != null)
+            {
+                foreach (var interval in otherWork.PlannedIntervals.Where(interval => IntervalTouchesWindow(interval, boundaryStart, boundaryEnd, school?.TimeZoneId)))
+                    AddExternalWorkItem(items, interval, school?.TimeZoneId);
+            }
+            var actualWork = await BuildActualWorkItemsAsync(userGuid, relatedStores, boundaryStart, boundaryEnd, newPunch);
+            if (actualWork.Count > 0)
+            {
+                // 已完成的实际段替换对应计划；进行中段拆成“已工作 + 同一排班剩余预测”，避免漏掉尚未发生的尾段。
+                var ongoingTailPlans = new List<MinorEmploymentWorkItem>();
+                foreach (var actual in actualWork.Where(item => item.IsOngoing && !string.IsNullOrWhiteSpace(item.ScheduleGuid)))
+                {
+                    var scheduled = items.FirstOrDefault(item => string.Equals(item.EmployerId, "HB", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(item.ScheduleGuid, actual.ScheduleGuid, StringComparison.OrdinalIgnoreCase));
+                    if (scheduled != null && actual.EndLocal < scheduled.EndLocal)
+                        ongoingTailPlans.Add(new MinorEmploymentWorkItem
+                        {
+                            EmployerId = "HB", ScheduleGuid = scheduled.ScheduleGuid, WorkDate = scheduled.WorkDate,
+                            StartLocal = actual.EndLocal, EndLocal = scheduled.EndLocal, IsTimeKnown = true,
+                        });
+                }
+                items.RemoveAll(item => string.Equals(item.EmployerId, "HB", StringComparison.OrdinalIgnoreCase)
+                    && actualWork.Any(actual => !string.IsNullOrWhiteSpace(actual.ScheduleGuid)
+                        ? string.Equals(item.ScheduleGuid, actual.ScheduleGuid, StringComparison.OrdinalIgnoreCase)
+                        : item.StartLocal < actual.EndLocal && item.EndLocal > actual.StartLocal));
+                items.AddRange(actualWork);
+                items.AddRange(ongoingTailPlans);
+            }
+            if (otherWork?.ActualIntervals?.Count > 0)
+            {
+                // 外部实际申报只取目标窗口并替换时间重叠的计划，避免与未来或下月计划重复累计。
+                foreach (var interval in otherWork.ActualIntervals.Where(interval => IntervalTouchesWindow(interval, boundaryStart, boundaryEnd, school?.TimeZoneId)))
+                {
+                    var actual = ToExternalWorkItem(interval, school?.TimeZoneId, "external:actual");
+                    if (actual == null) continue;
+                    items.RemoveAll(item => item.EmployerId?.StartsWith("external", StringComparison.OrdinalIgnoreCase) == true
+                        && item.StartLocal < actual.EndLocal && item.EndLocal > actual.StartLocal);
+                    items.Add(actual);
+                }
+            }
+            else if (otherWork?.HasOtherWork == true && otherWork.Employers.Count > 0 && otherWork.PlannedIntervals.Count == 0)
+            {
+                foreach (var employer in otherWork.Employers)
+                    foreach (var day in Enumerable.Range(0, 7).Select(offset => sunday.AddDays(offset)))
+                        if (employer.WeeklyHours.TryGetValue(day.DayOfWeek, out var hours) && hours > 0)
+                            items.Add(new MinorEmploymentWorkItem { EmployerId = $"external:weekly:{employer.CompanyName ?? employer.TradingName ?? "unknown"}", WorkDate = day, StartLocal = day, EndLocal = day.AddMinutes((double)hours * 60), ActualWorkedMinutes = (int)Math.Round(hours * 60m), IsTimeKnown = false });
+            }
+
+            var input = new MinorEmploymentComplianceInput
+            {
+                Profile = new MinorEmploymentProfile
+                {
+                    DateOfBirth = profileRow.DateOfBirth,
+                    WorkState = profileRow.StateCode,
+                    IsQldSchoolAgedChild = ResolveQldSchoolAgedChild(profileRow, anchorDate),
+                    ConsentStatus = profileRow.GuardianSignedAtUtc.HasValue ? "Signed" : profileRow.Status,
+                    ReviewStatus = profileRow.Status,
+                    AwardCode = null,
+                    ExternalWorkKnown = otherWork is not { HoursUnknown: true }
+                        && (otherWork is not { HasOtherWork: true }
+                            || otherWork.PlannedIntervals.Count > 0 || otherWork.ActualIntervals.Count > 0 || otherWork.Employers.Any(item => item.WeeklyHours.Count > 0)),
+                    CommuteFromSchoolMinutes = commute?.AfterSchoolToStoreMinutes,
+                    HomewardMinutes = commute?.HomewardMinutes,
+                    LatestTransportLocalTime = ParseMinorTime(commute?.LatestTransportLocalTime),
+                    LatestWorkEndLocalTime = ParseMinorTime(commute?.LatestWorkEndLocalTime),
+                    RequiredSchoolDays = BuildSchoolDays(school, boundaryStart, boundaryEnd),
+                },
+                AssessmentDate = anchorDate,
+                TargetWeekStart = sunday,
+                WorkItems = items,
+            };
+            return MapMinorEvaluation(MinorEmploymentComplianceCalculator.Evaluate(input));
+        }
+
+        private async Task<List<MinorEmploymentWorkItem>> BuildActualWorkItemsAsync(
+            string userGuid, IReadOnlyCollection<string> stores, DateTime from, DateTime to, AttendancePunch? newPunch)
+        {
+            var punches = await _db.Queryable<AttendancePunch>()
+                .Where(item => !item.IsDeleted && item.UserGuid == userGuid && stores.Contains(item.StoreCode)
+                    && item.WorkDate >= from && item.WorkDate < to)
+                .OrderBy(item => item.PunchTimeUtc).ToListAsync();
+            if (newPunch != null && !punches.Any(item => item.PunchGuid == newPunch.PunchGuid)) punches.Add(newPunch);
+            var results = new List<MinorEmploymentWorkItem>();
+            foreach (var group in punches.GroupBy(item => item.StoreCode, StringComparer.OrdinalIgnoreCase))
+            {
+                AttendancePunch? clockIn = null;
+                foreach (var punch in group.OrderBy(item => item.PunchTimeUtc))
+                {
+                    if (punch.PunchType.Equals("ClockIn", StringComparison.OrdinalIgnoreCase)) { clockIn = punch; continue; }
+                    if (!punch.PunchType.Equals("ClockOut", StringComparison.OrdinalIgnoreCase) || clockIn == null || punch.PunchTimeUtc <= clockIn.PunchTimeUtc) continue;
+                    results.Add(new MinorEmploymentWorkItem { EmployerId = "HB", ScheduleGuid = clockIn.ScheduleGuid, WorkDate = clockIn.WorkDate, StartLocal = clockIn.PunchTimeLocal, EndLocal = punch.PunchTimeLocal, ActualWorkedMinutes = (int)Math.Round((punch.PunchTimeUtc - clockIn.PunchTimeUtc).TotalMinutes), IsActual = true });
+                    clockIn = null;
+                }
+                // 未下班班段要按门店时区计到现在；ClockIn/ClockOut 之间的间隔天然不计为工作时间。
+                if (clockIn != null)
+                {
+                    var nowLocal = ConvertUtcToStoreLocal(_timeProvider.GetUtcNow().UtcDateTime, string.IsNullOrWhiteSpace(clockIn.StoreTimeZone) ? DefaultStoreTimeZone : clockIn.StoreTimeZone);
+                    if (nowLocal > clockIn.PunchTimeLocal)
+                        results.Add(new MinorEmploymentWorkItem { EmployerId = "HB", ScheduleGuid = clockIn.ScheduleGuid, WorkDate = clockIn.WorkDate, StartLocal = clockIn.PunchTimeLocal, EndLocal = nowLocal, ActualWorkedMinutes = (int)Math.Round((nowLocal - clockIn.PunchTimeLocal).TotalMinutes), IsActual = true, IsOngoing = true });
+                }
+            }
+            return results;
+        }
+
+        private static MinorEmploymentWorkItem ToMinorWorkItem(AttendanceSchedule item) => new()
+        { EmployerId = "HB", ScheduleGuid = item.ScheduleGuid, WorkDate = item.WorkDate, StartLocal = item.WorkDate.Date.Add(item.StartTime), EndLocal = item.WorkDate.Date.Add(item.EndTime) };
+        private static void AddExternalWorkItem(List<MinorEmploymentWorkItem> items, EmployeeMinorWorkIntervalDto interval, string? timezone)
+        {
+            var item = ToExternalWorkItem(interval, timezone, "external:planned");
+            if (item != null) items.Add(item);
+        }
+        private static MinorEmploymentWorkItem? ToExternalWorkItem(EmployeeMinorWorkIntervalDto interval, string? timezone, string employerId)
+        {
+            if (interval.EndUtc <= interval.StartUtc) return null;
+            var zone = string.IsNullOrWhiteSpace(timezone) ? "Australia/Brisbane" : timezone;
+            var local = ConvertUtcToStoreLocal(interval.StartUtc, zone);
+            var end = ConvertUtcToStoreLocal(interval.EndUtc, zone);
+            return new MinorEmploymentWorkItem { EmployerId = employerId, WorkDate = local.Date, StartLocal = local, EndLocal = end, ActualWorkedMinutes = interval.Hours > 0 ? (int)Math.Round(interval.Hours * 60m) : null, IsActual = employerId.EndsWith("actual", StringComparison.Ordinal) };
+        }
+        private static bool IntervalTouchesWindow(EmployeeMinorWorkIntervalDto interval, DateTime from, DateTime to, string? timezone)
+        {
+            var zone = string.IsNullOrWhiteSpace(timezone) ? "Australia/Brisbane" : timezone;
+            var localStart = ConvertUtcToStoreLocal(interval.StartUtc, zone);
+            var localEnd = ConvertUtcToStoreLocal(interval.EndUtc, zone);
+            return localEnd > from && localStart < to;
+        }
+        private static bool? ResolveQldSchoolAgedChild(EmployeeMinorCompliance profile, DateTime anchorDate)
+        {
+            if (!string.Equals(profile.StateCode, "QLD", StringComparison.OrdinalIgnoreCase)) return null;
+            // 评估日已满 16 岁、已完成 Year 10 或有已核验豁免时，不能把 QLD 学龄儿童数值限额套用到该员工。
+            // 其余未满 16 岁且档案明确要求入学时才启用 4/8/12/38 小时提醒；资料不足则返回未知。
+            if (!profile.DateOfBirth.HasValue) return null;
+            if (profile.DateOfBirth.Value.Date.AddYears(16) <= anchorDate.Date) return false;
+            if (profile.CompletedYear10 == true || profile.EducationExemptionVerified == true) return false;
+            return profile.RequiredToBeEnrolled == true ? true : null;
+        }
+        private static Dictionary<DateTime, MinorEmploymentSchoolDay> BuildSchoolDays(EmployeeMinorSchoolCalendarDto? school, DateTime from, DateTime to)
+        {
+            var days = new Dictionary<DateTime, MinorEmploymentSchoolDay>();
+            if (school == null) return days;
+            for (var day = from.Date; day < to.Date; day = day.AddDays(1))
+            {
+                var excluded = school.Holidays.Concat(school.PupilFreeDays).Any(range => range.StartDate.Date <= day && range.EndDate.Date >= day);
+                var attendance = school.WeeklySchedule.FirstOrDefault(item => item.DayOfWeek == day.DayOfWeek && item.MustAttend);
+                if (excluded) { days[day] = new() { IsRequired = false }; continue; }
+                if (attendance != null) { days[day] = new() { IsRequired = true, Start = ParseMinorTime(attendance.StartLocalTime), End = ParseMinorTime(attendance.EndLocalTime) }; continue; }
+                if (day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) { days[day] = new() { IsRequired = false }; continue; }
+                var inTerm = school.TermRanges.Any(range => range.StartDate.Date <= day && range.EndDate.Date >= day);
+                if (!inTerm) continue;
+                // 学期内工作日没有具体周课表时仍保留“学校日”状态，但不虚构上下课时间。
+                days[day] = new() { IsRequired = true };
+            }
+            return days;
+        }
+        private static TimeSpan? ParseMinorTime(string? value) => TimeSpan.TryParse(value, out var result) ? result : null;
+        private static T? DeserializeMinor<T>(string? json) where T : class => string.IsNullOrWhiteSpace(json) || json == "null" ? null : JsonSerializer.Deserialize<T>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        private static MinorEmploymentComplianceEvaluationDto MapMinorEvaluation(MinorEmploymentComplianceEvaluation evaluation) => new()
+        {
+            Findings = evaluation.Findings.Select(item => new MinorEmploymentComplianceFindingDto { RuleId = item.RuleId, Severity = item.Severity, Message = item.Message, WorkDate = item.WorkDate, ActualMinutes = item.ActualMinutes, LimitMinutes = item.LimitMinutes, RuleCategory = item.RuleCategory, SourceUrl = item.SourceUrl }).ToList(),
+        };
+        private async Task RecordMinorEmploymentEvaluationAsync(string userGuid, string storeCode, string? scheduleGuid, string trigger, MinorEmploymentComplianceEvaluationDto evaluation)
+        {
+            // 提醒审计或待办记录失败不能撤销已成功的排班、发布和真实打卡。
+            await RecordMinorEmploymentReminderAsync(userGuid, storeCode, scheduleGuid, trigger, evaluation);
+            try
+            {
+                var profile = await _db.Queryable<EmployeeMinorCompliance>().Where(item => !item.IsDeleted && item.UserGUID == userGuid).OrderBy(item => item.Version, OrderByType.Desc).FirstAsync();
+                if (profile == null) return;
+                await _db.Insertable(new EmployeeMinorComplianceAudit { ComplianceId = profile.Id, Action = trigger, ActorUserGuid = _currentUserService.GetCurrentUserGuid(), ActorLabel = _currentUserService.GetCurrentUsername(), MetadataJson = JsonSerializer.Serialize(new { count = evaluation.Findings.Count, ruleIds = evaluation.Findings.Select(item => item.RuleId).Distinct().Take(20).ToArray() }, new JsonSerializerOptions(JsonSerializerDefaults.Web)) }).ExecuteCommandAsync();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "未成年用工评估审计失败；核心考勤动作已保留。用户 {UserGuid}，触发 {Trigger}", userGuid, trigger);
+            }
+        }
+
+        private async Task RecordMinorEmploymentReminderAsync(string userGuid, string storeCode, string? scheduleGuid, string trigger, MinorEmploymentComplianceEvaluationDto evaluation)
+        {
+            try
+            {
+                await MinorEmploymentReminderService.RecordAsync(_db, userGuid, storeCode, scheduleGuid, trigger, evaluation, _currentUserService.GetCurrentUsername());
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "未成年用工提醒待办记录失败；核心考勤动作已保留。用户 {UserGuid}，触发 {Trigger}", userGuid, trigger);
+            }
         }
 
         private static AttendanceScheduleDto ToDto(AttendanceSchedule item, string? currentUserGuid = null) => new()

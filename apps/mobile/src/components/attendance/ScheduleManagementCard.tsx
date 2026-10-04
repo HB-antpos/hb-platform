@@ -876,6 +876,9 @@ export function ScheduleManagementCard({
       const isDraft = cell.schedules.some(
         (item) => item.status.toLowerCase() === "draft",
       );
+      const hasMinorFindings = cell.schedules.some(
+        (item) => item.minorCompliance?.hasFindings,
+      );
       return (
         <View style={[styles.cellChip, styles.shiftChip, isDraft ? styles.shiftChipDraft : null]}>
           <Text
@@ -888,6 +891,10 @@ export function ScheduleManagementCard({
           </Text>
           {cell.schedules.length > 1 ? (
             <Text style={styles.moreText}>+{cell.schedules.length - 1}</Text>
+          ) : null}
+          {/* 未成年用工合规只提醒不拦截：格子里用小标记提示店长，详情在提醒待办里看。 */}
+          {hasMinorFindings ? (
+            <Text style={styles.minorWarning} accessibilityLabel="未成年用工提醒">!</Text>
           ) : null}
         </View>
       );
@@ -1805,6 +1812,7 @@ const styles = StyleSheet.create({
     borderColor: "#B2DDFF",
     borderWidth: StyleSheet.hairlineWidth,
   },
+  minorWarning: { color: "#B54708", fontSize: 11, fontWeight: "700", marginLeft: 2 },
   // 草稿班次：同样浅蓝底，用虚线描边区分未发布。
   shiftChipDraft: {
     borderColor: "#53B1FD",

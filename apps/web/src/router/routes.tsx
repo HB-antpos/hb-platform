@@ -22,6 +22,7 @@ import {
   QrcodeOutlined,
   ReconciliationOutlined,
   ScheduleOutlined,
+  SafetyCertificateOutlined,
   SettingOutlined,
   ShopOutlined,
   ShoppingCartOutlined,
@@ -92,6 +93,7 @@ const SystemWpfVersionsPage = lazy(() => import('../pages/System/WpfVersions'))
 const SystemRolesPage = lazy(() => import('../pages/System/Roles'))
 const SystemStoresPage = lazy(() => import('../pages/System/Stores'))
 const SystemEmployeeProfilesPage = lazy(() => import('../pages/System/EmployeeProfiles'))
+const SystemMinorEmploymentReviewPage = lazy(() => import('../pages/System/MinorEmploymentReview'))
 const SystemUsersPage = lazy(() => import('../pages/System/Users'))
 const SystemPermissionsPage = lazy(() => import('../pages/System/Permissions'))
 const WarehouseCategoriesPage = lazy(() => import('../pages/Warehouse/Categories'))
@@ -144,6 +146,7 @@ const iconMap = {
   NumberOutlined: <NumberOutlined />,
   ReconciliationOutlined: <ReconciliationOutlined />,
   ScheduleOutlined: <ScheduleOutlined />,
+  SafetyCertificateOutlined: <SafetyCertificateOutlined />,
   SettingOutlined: <SettingOutlined />,
   ShopOutlined: <ShopOutlined />,
   ShoppingCartOutlined: <ShoppingCartOutlined />,
@@ -195,6 +198,16 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewEmployeeProfiles',
         },
         element: <SystemEmployeeProfilesPage />,
+      },
+      {
+        path: '/system/minor-employment-review',
+        meta: {
+          title: 'menu.systemMinorEmploymentReview',
+          icon: 'SafetyCertificateOutlined',
+          keepAlive: true,
+          accessKey: 'canViewEmployeeProfiles',
+        },
+        element: <SystemMinorEmploymentReviewPage />,
       },
       {
         path: '/system/center-logs',

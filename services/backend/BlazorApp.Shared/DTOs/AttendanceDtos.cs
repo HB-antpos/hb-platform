@@ -30,6 +30,25 @@ namespace BlazorApp.Shared.DTOs
         public DateTime WeekStartDate { get; set; }
     }
 
+    /// <summary>未成年用工规则只提供可继续操作的提醒，不改变排班或打卡成功状态。</summary>
+    public class MinorEmploymentComplianceFindingDto
+    {
+        public string RuleId { get; set; } = string.Empty;
+        public string Severity { get; set; } = "review";
+        public string Message { get; set; } = string.Empty;
+        public DateTime? WorkDate { get; set; }
+        public int? ActualMinutes { get; set; }
+        public int? LimitMinutes { get; set; }
+        public string RuleCategory { get; set; } = "incomplete";
+        public string? SourceUrl { get; set; }
+    }
+
+    public class MinorEmploymentComplianceEvaluationDto
+    {
+        public List<MinorEmploymentComplianceFindingDto> Findings { get; set; } = new();
+        public bool HasFindings => Findings.Count > 0;
+    }
+
     public class UpdateAttendanceScheduleDto
     {
         public DateTime WorkDate { get; set; }
@@ -61,6 +80,8 @@ namespace BlazorApp.Shared.DTOs
         public string? Remark { get; set; }
         /// <summary>店长指定的用餐次数；null 表示按班次时长自动计算。</summary>
         public int? MealBreakCount { get; set; }
+        /// <summary>只读合规提醒；存在提醒时排班仍可保存和发布。</summary>
+        public MinorEmploymentComplianceEvaluationDto? MinorCompliance { get; set; }
         public string ScheduleState { get; set; } = "NotStarted";
         public int SegmentLimit { get; set; } = 2;
         public int CompletedSegmentCount { get; set; }
@@ -232,6 +253,8 @@ namespace BlazorApp.Shared.DTOs
         public string? StoreName { get; set; }
         public DateTime? ServerTimeUtc { get; set; }
         public string? Remark { get; set; }
+        /// <summary>打卡已保存后的未成年用工提醒，不能作为打卡失败条件。</summary>
+        public MinorEmploymentComplianceEvaluationDto? MinorCompliance { get; set; }
         public int? SegmentIndex { get; set; }
         public string? SegmentStatus { get; set; }
         public bool IsBreakBoundary { get; set; }
@@ -286,6 +309,7 @@ namespace BlazorApp.Shared.DTOs
     public class AttendanceTodayDto
     {
         public DateTime WorkDate { get; set; }
+        public MinorEmploymentComplianceEvaluationDto? MinorCompliance { get; set; }
         public List<AttendanceScheduleDto> Schedules { get; set; } = new();
         public List<AttendancePunchDto> Punches { get; set; } = new();
         public List<AttendanceStoreHolidayDto> Holidays { get; set; } = new();
