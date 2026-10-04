@@ -465,12 +465,16 @@ public sealed class PosTerminalCashPaymentViewModelTests
         await WaitUntilAsync(() => viewModel.Matches.Count == 1 && viewModel.Matches[0].DisplayName == "Catalog Item 099999");
     }
 
+    // 以下两条原先用 Task.Delay(10) 打点、断言最大间隔 < 100ms 的"心跳"：测试里没有 Dispatcher，
+    // 打点测到的是 xUnit 同步上下文与线程池的调度争用（CI 并行时可达 160ms 误报），而搜索若退回同步执行，
+    // 打点要等搜索结束才开始，反而测不出回归。改为闸门阻塞搜索，断言调用方返回时搜索仍未完成。
     [Fact]
-    [Trait("Category", "Performance")]
     public async Task Pos_terminal_catalog_match_refresh_does_not_block_ui_heartbeat_when_search_is_slow()
     {
         var item = CreateItem("SKU-SLOW", "Slow Catalog", "930SLOW", PriceSourceKind.StoreRetailPrice, 1m);
         var searchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseSearch = new ManualResetEventSlim(false);
+        var searchFinished = 0;
         using var viewModel = new PosTerminalViewModel(
             new LocalSellableItemIndex(),
             new PosCartService(),
@@ -479,33 +483,33 @@ public sealed class PosTerminalCashPaymentViewModelTests
             searchCatalogMatches: (_, _, _) =>
             {
                 searchStarted.TrySetResult();
-                Thread.Sleep(500);
+                // 超时只为同步回归时不挂死：那时 setter 会等满超时才返回，下面的断言必然失败。
+                releaseSearch.Wait(AsyncTestWaitSupport.DefaultTimeout);
+                Volatile.Write(ref searchFinished, 1);
                 return [item];
             })
         {
             IsMatchesPopupOpen = true
         };
 
-        var stopwatch = Stopwatch.StartNew();
-        viewModel.ScanText = "slow";
-        await searchStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
-
-        var maxHeartbeatGap = TimeSpan.Zero;
-        var previousHeartbeat = stopwatch.Elapsed;
-        while (stopwatch.Elapsed < TimeSpan.FromMilliseconds(500))
+        try
         {
-            await Task.Delay(10);
-            var currentHeartbeat = stopwatch.Elapsed;
-            maxHeartbeatGap = TimeSpan.FromTicks(Math.Max(maxHeartbeatGap.Ticks, (currentHeartbeat - previousHeartbeat).Ticks));
-            previousHeartbeat = currentHeartbeat;
+            viewModel.ScanText = "slow";
+            Assert.Equal(0, Volatile.Read(ref searchFinished));
+
+            await searchStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            Assert.Equal(0, Volatile.Read(ref searchFinished));
+            Assert.DoesNotContain(viewModel.Matches, match => match.DisplayName == item.DisplayName);
+        }
+        finally
+        {
+            releaseSearch.Set();
         }
 
-        Assert.True(maxHeartbeatGap < TimeSpan.FromMilliseconds(100), $"UI heartbeat gap was {maxHeartbeatGap.TotalMilliseconds:F0}ms.");
         await WaitUntilAsync(() => viewModel.Matches.Count == 1 && viewModel.Matches[0].DisplayName == item.DisplayName);
     }
 
     [Fact]
-    [Trait("Category", "Performance")]
     public async Task Pos_terminal_manual_search_keeps_heartbeat_running_and_never_adds_a_stale_result()
     {
         var index = new LocalSellableItemIndex();
@@ -519,12 +523,15 @@ public sealed class PosTerminalCashPaymentViewModelTests
                 1m))
             .Append(secondItem));
         var firstSearchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseFirstSearch = new ManualResetEventSlim(false);
+        var firstSearchResumed = 0;
         index.SearchProgressForTests = (query, progress) =>
         {
             if (query == "first" && progress == 0)
             {
                 firstSearchStarted.TrySetResult();
-                Thread.Sleep(300);
+                releaseFirstSearch.Wait(AsyncTestWaitSupport.DefaultTimeout);
+                Volatile.Write(ref firstSearchResumed, 1);
             }
         };
         using var viewModel = new PosTerminalViewModel(index, new PosCartService(), Session, onOpenPayment: null)
@@ -535,29 +542,22 @@ public sealed class PosTerminalCashPaymentViewModelTests
         try
         {
             viewModel.NumberInputCommand.Execute("Enter");
+            Assert.Equal(0, Volatile.Read(ref firstSearchResumed));
+
             await firstSearchStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            Assert.Equal(0, Volatile.Read(ref firstSearchResumed));
 
-            var stopwatch = Stopwatch.StartNew();
-            var previousHeartbeat = stopwatch.Elapsed;
-            var maxHeartbeatGap = TimeSpan.Zero;
-            while (stopwatch.Elapsed < TimeSpan.FromMilliseconds(200))
-            {
-                await Task.Delay(10);
-                var currentHeartbeat = stopwatch.Elapsed;
-                maxHeartbeatGap = TimeSpan.FromTicks(Math.Max(maxHeartbeatGap.Ticks, (currentHeartbeat - previousHeartbeat).Ticks));
-                previousHeartbeat = currentHeartbeat;
-            }
-
-            Assert.True(maxHeartbeatGap < TimeSpan.FromMilliseconds(100), $"UI heartbeat gap was {maxHeartbeatGap.TotalMilliseconds:F0}ms.");
-
+            // 第一次搜索仍被闸门挡住时发起第二次，再放行第一次：迟到的旧结果不得进购物车。
             viewModel.ScanText = "second";
             viewModel.NumberInputCommand.Execute("Enter");
+            releaseFirstSearch.Set();
             await WaitUntilAsync(() => viewModel.CartLines.Count == 1);
 
             Assert.Equal(secondItem.ProductCode, Assert.Single(viewModel.CartLines).ProductCode);
         }
         finally
         {
+            releaseFirstSearch.Set();
             index.SearchProgressForTests = null;
         }
     }
