@@ -752,6 +752,17 @@ export default function Login() {
                   >
                     {t("common:actions.login")}
                   </Button>
+                  {/* 店长新建账号后员工用邮件验证码设置密码；忘记密码也走同一页面。 */}
+                  <Button
+                    mode="text"
+                    textColor={BRAND_RED}
+                    onPress={() => router.push({
+                      pathname: "/(auth)/reset-password",
+                      params: username.includes("@") ? { email: username.trim() } : {},
+                    } as unknown as Parameters<typeof router.push>[0])}
+                  >
+                    {t("resetPassword.entry")}
+                  </Button>
                   {registeredDevice ? (
                     <Button mode="text" textColor={BRAND_RED} onPress={handleSelectDeviceMode}>
                       {t("device.switchToDevice")}

@@ -130,5 +130,27 @@
       "wrongCurrent": "当前密码不正确。",
       "sameAsCurrent": "新密码不能与当前密码相同。"
     }
+  },
+  "resetPassword": {
+    "entry": "设置 / 忘记密码",
+    "title": "设置 / 找回密码",
+    "emailDescription": "输入你的员工邮箱，我们会发送 6 位验证码。店长新建账号后，你收到的邮件里也有验证码。",
+    "codeDescription": "验证码已发送到 {{email}}（如果该邮箱已开通账号）。请查收邮件，然后设置新密码。",
+    "email": "员工邮箱",
+    "changeEmail": "修改邮箱",
+    "code": "6 位验证码",
+    "codeHelper": "没收到？请检查垃圾邮件",
+    "resend": "重新发送",
+    "resendIn": "{{seconds}} 秒后可重发",
+    "sendCode": "发送验证码",
+    "submit": "设置新密码",
+    "doneTitle": "密码已设置",
+    "doneDescription": "请用邮箱和新密码登录。其他设备上的登录已退出。",
+    "backToLogin": "返回登录",
+    "errors": {
+      "email": "请输入有效的邮箱地址",
+      "sendFailed": "验证码发送失败，请稍后重试",
+      "confirmFailed": "设置密码失败，请检查验证码后重试"
+    }
   }
 }

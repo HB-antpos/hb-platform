@@ -162,5 +162,28 @@ namespace BlazorApp.Api.Controllers.React
             );
             return Ok(result);
         }
+
+        /// <summary>给本店店员邮箱发设置密码验证码：新建后重发，或代替店长手动重置密码。</summary>
+        [HttpPost("{userGuid}/password-setup-email")]
+        [Authorize(Policy = Permissions.Users.ResetStoreStaffPassword)]
+        public async Task<IActionResult> SendPasswordSetupEmail(
+            string userGuid,
+            [FromBody] SendStoreUserPasswordSetupEmailDto dto
+        )
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(
+                    ApiResponse<PasswordSetupEmailResultDto>.Error("请求参数验证失败", "VALIDATION_ERROR", ModelState)
+                );
+            }
+
+            var result = await _service.SendPasswordSetupEmailAsync(
+                userGuid,
+                dto,
+                User.Identity?.Name ?? "system"
+            );
+            return Ok(result);
+        }
     }
 }

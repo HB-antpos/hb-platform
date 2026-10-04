@@ -45,6 +45,10 @@ namespace BlazorApp.Shared.DTOs
         public string? SuperannuationCompanyCode { get; set; }
         public string? SuperannuationAccountNumber { get; set; }
         public string? Remarks { get; set; }
+        /// <summary>仅新建时返回：设置密码邮件已发送（打码邮箱与有效期）。</summary>
+        public PasswordSetupEmailResultDto? PasswordSetupEmail { get; set; }
+        /// <summary>仅新建时返回：账号已建好但设置密码邮件没发出去的原因，店长可稍后重发。</summary>
+        public string? PasswordSetupEmailError { get; set; }
     }
 
     public class CreateStoreUserDto
@@ -56,9 +60,12 @@ namespace BlazorApp.Shared.DTOs
         [EmailAddress(ErrorMessage = "邮箱格式不正确")]
         public string? Email { get; set; }
 
-        [Required(ErrorMessage = "密码不能为空")]
+        /// <summary>
+        /// 初始密码。SendPasswordSetupEmail=true 时可不传，由员工通过邮件验证码自己设置；
+        /// 旧客户端仍按原方式提交初始密码。
+        /// </summary>
         [StringLength(100, MinimumLength = 6, ErrorMessage = "密码长度必须在6-100个字符之间")]
-        public string Password { get; set; } = string.Empty;
+        public string? Password { get; set; }
 
         /// <summary>
         /// 密码格式：raw 表示 HTTPS 原始密码；clientSha256 表示旧客户端 SHA256。
@@ -81,6 +88,15 @@ namespace BlazorApp.Shared.DTOs
 
         /// <summary>员工首次登录须先改密；未传时默认要求（旧客户端建号同样生效）。</summary>
         public bool? RequirePasswordChange { get; set; }
+
+        /// <summary>创建后给员工邮箱发设置密码验证码，店长不再经手密码；此时邮箱必填。</summary>
+        public bool? SendPasswordSetupEmail { get; set; }
+    }
+
+    public class SendStoreUserPasswordSetupEmailDto
+    {
+        [Required(ErrorMessage = "分店代码不能为空")]
+        public string StoreCode { get; set; } = string.Empty;
     }
 
     public class UpdateStoreUserDto

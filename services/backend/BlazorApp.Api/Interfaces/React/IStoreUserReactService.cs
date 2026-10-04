@@ -25,5 +25,10 @@ namespace BlazorApp.Api.Interfaces.React
             UpdateStoreUserPasswordDto dto,
             string updatedBy
         );
+        Task<ApiResponse<PasswordSetupEmailResultDto>> SendPasswordSetupEmailAsync(
+            string userGuid,
+            SendStoreUserPasswordSetupEmailDto dto,
+            string requestedBy
+        );
     }
 }

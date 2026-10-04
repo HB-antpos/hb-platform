@@ -144,6 +144,22 @@ export async function changePasswordApi(payload: {
   await apiClient.post("/auth/change-password", payload);
 }
 
+/** 登录页「设置 / 忘记密码」第一步：后端对未注册邮箱返回同一结果，不透露账号是否存在。 */
+export async function requestPasswordResetCodeApi(email: string): Promise<string> {
+  const res = await apiClient.post("/auth/password-reset/request", { email });
+  return typeof res.data === "string" ? res.data : "";
+}
+
+/** 第二步：邮箱 + 验证码 + 新密码；成功后该账号所有已登录设备都会退出。 */
+export async function confirmPasswordResetApi(payload: {
+  email: string;
+  code: string;
+  newPassword: string;
+  confirmPassword: string;
+}): Promise<void> {
+  await apiClient.post("/auth/password-reset/confirm", payload);
+}
+
 export async function logoutApi(refreshToken: string): Promise<void> {
   await apiClient.post("/auth/logout", { refreshToken });
 }

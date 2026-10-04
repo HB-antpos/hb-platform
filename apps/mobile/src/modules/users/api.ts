@@ -1,6 +1,7 @@
 import { isAxiosError } from "axios";
 import { apiClient } from "@/shared/api/client";
 import type {
+  PasswordSetupEmailResult,
   StoreUserCreatePayload,
   StoreUserDetail,
   StoreUserGridParams,
@@ -12,6 +13,7 @@ import type {
   StaffCashierBarcodeResponse,
 } from "@/modules/users/types";
 import {
+  normalizePasswordSetupEmailResult,
   normalizeStoreUserDetail,
   normalizeStoreUserList,
   normalizeStoreUserProfile,
@@ -93,6 +95,22 @@ export async function createStoreUser(payload: StoreUserCreatePayload): Promise<
   });
 
   return normalizeStoreUserDetail(response.data);
+}
+
+/** 给店员邮箱发设置密码验证码（新建后重发，或代替手动重置密码）。 */
+export async function sendStoreUserPasswordSetupEmail(payload: {
+  userGuid: string;
+  storeCode: string;
+}): Promise<PasswordSetupEmailResult> {
+  const response = await apiClient.post(
+    "/react/v1/store-users/" + encodeURIComponent(payload.userGuid) + "/password-setup-email",
+    { storeCode: payload.storeCode }
+  );
+  const result = normalizePasswordSetupEmailResult(response.data);
+  if (!result) {
+    throw new Error("Password setup email response is empty");
+  }
+  return result;
 }
 
 export async function updateStoreUserStatus(payload: StoreUserStatusPayload): Promise<void> {

@@ -5,6 +5,7 @@ import {
   fetchStoreUserProfile,
   fetchStoreUsers,
   resetStoreUserPassword,
+  sendStoreUserPasswordSetupEmail,
   updateStoreUser,
   updateStoreUserStatus,
 } from "@/modules/users/api";
@@ -92,10 +93,16 @@ export function useStoreUserMutations(storeCode?: string | null, keyword?: strin
     mutationFn: (payload: StoreUserPasswordPayload) => resetStoreUserPassword(payload),
   });
 
+  // 店长重置密码改为给员工发设置密码验证码邮件，店长不再经手新密码。
+  const setupEmailMutation = useMutation({
+    mutationFn: (payload: { userGuid: string; storeCode: string }) => sendStoreUserPasswordSetupEmail(payload),
+  });
+
   return {
     createMutation,
     updateMutation,
     statusMutation,
     passwordMutation,
+    setupEmailMutation,
   };
 }

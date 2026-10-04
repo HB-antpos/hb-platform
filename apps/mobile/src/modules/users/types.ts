@@ -27,8 +27,17 @@ export interface StoreUserListItem {
   mustChangePassword?: boolean;
 }
 
+export interface PasswordSetupEmailResult {
+  maskedEmail: string;
+  expiresAtUtc?: string;
+}
+
 export interface StoreUserDetail extends StoreUserListItem {
   remarks?: string;
+  /** 仅新建时返回：设置密码邮件已发送。 */
+  passwordSetupEmail?: PasswordSetupEmailResult;
+  /** 仅新建时返回：账号已建好但邮件没发出去的原因。 */
+  passwordSetupEmailError?: string;
 }
 
 export interface StoreUserProfile extends StoreUserDetail {
@@ -64,12 +73,15 @@ export interface StoreUserUpdatePayload extends StoreUserMutationInput {
 }
 
 export interface StoreUserCreatePayload extends StoreUserMutationInput {
-  password: string;
+  /** 邮件设置密码时不传，员工用验证码自己设密码。 */
+  password?: string;
   storeCode: string;
   roleNames?: string[];
   employmentType?: "casual";
   /** 员工首次登录须先改密；不传时后端默认要求。 */
   requirePasswordChange?: boolean;
+  /** 创建后给员工邮箱发设置密码验证码，店长不经手密码。 */
+  sendPasswordSetupEmail?: boolean;
 }
 
 export interface StoreUserStatusPayload {
