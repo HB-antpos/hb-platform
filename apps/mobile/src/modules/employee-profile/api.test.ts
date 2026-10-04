@@ -16,6 +16,7 @@ async function main() {
         data: {
           RequestId: 42,
           Status: "Pending",
+          Birthday: "1990-03-04T00:00:00",
           BankBsb: "123-456",
           BankAccountNumber: "111122223333",
           SuperannuationCompanyName: "Future Super",
@@ -62,8 +63,10 @@ async function main() {
   assert.equal(request?.status, "Pending");
   assert.deepEqual(request?.changedFields, ["bankAccountNumber", "identityPhotoUrl"]);
   assert.equal(request?.hasIdentityPhoto, true);
+  assert.equal(request?.birthday, "1990-03-04", "待审生日必须只保留日期部分");
 
   const updated = await api.upsertMySensitiveChangeRequest({
+    birthday: " ",
     bankBsb: "",
     bankAccountNumber: "999988887777",
     superannuationCompanyName: "",
@@ -79,10 +82,14 @@ async function main() {
     3,
     "敏感申请必须提交打开表单时的 revision"
   );
+  assert.equal(
+    (calls[2]?.payload as { birthday?: unknown }).birthday,
+    null,
+    "生日不填时必须提交 null，空串无法被后端 DateTime? 反序列化"
+  );
 
   await api.updateMyEmployeeProfile({
     phone: "0499999999",
-    birthday: "",
     gender: "",
     employmentType: "",
     address: "",

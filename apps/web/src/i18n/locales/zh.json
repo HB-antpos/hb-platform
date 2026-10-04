@@ -4676,6 +4676,7 @@
         "terminalConflict": "该申请已被处理，已刷新详情、列表和待审数量。",
         "statuses": { "Pending": "待审核", "Approved": "已批准", "Rejected": "已拒绝", "Superseded": "已作废" },
         "fields": {
+          "birthday": "生日",
           "bankBsb": "BSB", "bankAccountNumber": "银行账号", "superannuationCompanyName": "公积金公司",
           "superannuationCompanyCode": "公积金代码", "superannuationAccountNumber": "公积金账号",
           "identityType": "证件类型", "identityId": "证件号码", "identityPhotoUrl": "证件照片"

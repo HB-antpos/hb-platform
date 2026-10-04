@@ -50,6 +50,22 @@ const changed = getChangedSensitiveFields(current, proposed)
 assertEqual(changed.join(','), 'bankAccountNumber,superannuationAccountNumber,identityPhotoUrl', '应只计算真正变化的敏感字段')
 assertEqual(getChangedSensitiveFields(current, { ...current, bankBsb: ' 123-456 ' }).length, 0, '比较前应规范化首尾空白')
 assertEqual(
+  getChangedSensitiveFields(
+    { ...current, birthday: '1998-06-21T00:00:00' },
+    { ...current, birthday: '1998-06-21' },
+  ).length,
+  0,
+  '生日只比较日期部分，后端日期时间与表单日期相同时不算变更',
+)
+assertEqual(
+  getChangedSensitiveFields(
+    { ...current, birthday: '1998-06-21T00:00:00' },
+    { ...current, birthday: '1998-06-12T00:00:00' },
+  ).join(','),
+  'birthday',
+  '生日变化必须进入敏感变更字段',
+)
+assertEqual(
   getReviewChangedFields(
     { ...current, identityPhotoUrl: 'https://cdn/photo.jpg?signature=old' },
     { ...current, identityPhotoUrl: 'https://cdn/photo.jpg?signature=new' },

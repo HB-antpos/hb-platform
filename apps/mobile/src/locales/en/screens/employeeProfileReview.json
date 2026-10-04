@@ -20,9 +20,11 @@
     "proposedValue": "Submitted value",
     "noPhoto": "No identity photo",
     "previewUnavailable": "Photo on file; secure preview is unavailable",
-    "reviewReason": "Review reason"
+    "reviewReason": "Review reason",
+    "birthdayWithAge": "{{date}} · {{age}} years old"
   },
   "fields": {
+    "birthday": "Birthday",
     "bankBsb": "BSB",
     "bankAccountNumber": "Bank account number",
     "superannuationCompanyName": "Super company",

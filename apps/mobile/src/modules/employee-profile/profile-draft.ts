@@ -4,7 +4,6 @@ export function toEmployeeProfileDraft(profile: EmployeeProfile): UpdateEmployee
   return {
     phone: profile.phone ?? "",
     email: profile.email ?? "",
-    birthday: profile.birthday,
     gender: profile.gender,
     employmentType: profile.employmentType ?? "",
     address: profile.address,

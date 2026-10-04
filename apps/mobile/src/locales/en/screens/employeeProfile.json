@@ -75,7 +75,7 @@
     "avatarTitle": "Change avatar",
     "basicHint": "Save your changes to update these details immediately.",
     "reviewNoticeTitle": "Review required",
-    "reviewNoticeDescription": "Banking, superannuation, and identity details are submitted together. Confirmed details remain visible until approval."
+    "reviewNoticeDescription": "Birthday, banking, superannuation, and identity details are submitted together. Confirmed details remain visible until approval."
   },
   "unsaved": {
     "title": "Discard unsaved changes?",
@@ -172,6 +172,19 @@
       "permissionDenied": "Bluetooth permission was denied. Allow it in system settings and try again.",
       "connectionFailed": "The saved label printer could not be connected. Check the printer and try again.",
       "unknown": "The label could not be printed. Check printer settings and try again."
+    }
+  },
+  "birthday": {
+    "age": "{{age}} years old",
+    "withAge": "{{date}} · {{age}} years old",
+    "confirmed": "Confirmed: {{date}}",
+    "changed": "Changed",
+    "requiresReview": "Birthday is sensitive information and changes need review",
+    "goToReview": "Submit change",
+    "errors": {
+      "format": "Enter a valid date as YYYY-MM-DD",
+      "future": "Birthday cannot be later than today",
+      "tooOld": "Please check the birth year"
     }
   },
   "minorEmployment": {

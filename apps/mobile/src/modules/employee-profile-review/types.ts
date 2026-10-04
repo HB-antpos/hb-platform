@@ -1,4 +1,5 @@
 export const EMPLOYEE_PROFILE_SENSITIVE_FIELDS = [
+  "birthday",
   "bankBsb",
   "bankAccountNumber",
   "superannuationCompanyName",
@@ -40,6 +41,8 @@ export interface EmployeeProfileReviewPage {
 }
 
 export interface EmployeeProfileSensitiveSnapshot {
+  /** YYYY-MM-DD，空串表示未填写。 */
+  birthday: string;
   bankBsb: string;
   bankAccountNumber: string;
   superannuationCompanyName: string;

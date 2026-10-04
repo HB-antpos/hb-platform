@@ -20,9 +20,11 @@
     "proposedValue": "员工填报资料",
     "noPhoto": "无证件照片",
     "previewUnavailable": "已有证件照片，安全预览暂不可用",
-    "reviewReason": "审核原因"
+    "reviewReason": "审核原因",
+    "birthdayWithAge": "{{date}} · {{age}} 岁"
   },
   "fields": {
+    "birthday": "生日",
     "bankBsb": "BSB",
     "bankAccountNumber": "银行账号",
     "superannuationCompanyName": "养老金公司",

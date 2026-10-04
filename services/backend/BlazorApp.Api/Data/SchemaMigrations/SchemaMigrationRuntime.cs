@@ -96,6 +96,9 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyAttendanceAvailabilityUnavailableAsync(CancellationToken cancellationToken);
 
+    Task ApplyEmployeeProfileSensitiveBirthdayAsync(CancellationToken cancellationToken);
+
+    Task VerifyEmployeeProfileSensitiveBirthdayAsync(CancellationToken cancellationToken);
     Task ApplyUserPasswordChangeRequirementAsync(CancellationToken cancellationToken);
 
     Task VerifyUserPasswordChangeRequirementAsync(CancellationToken cancellationToken);
@@ -546,6 +549,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             AttendanceAvailabilityUnavailableSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyEmployeeProfileSensitiveBirthdayAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            EmployeeProfileSensitiveBirthdaySchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但结构错误的列不会被误标为完成。
+        await VerifyEmployeeProfileSensitiveBirthdayAsync(cancellationToken);
+    }
+
+    public async Task VerifyEmployeeProfileSensitiveBirthdayAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            EmployeeProfileSensitiveBirthdaySchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

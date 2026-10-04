@@ -23,7 +23,6 @@ const profile = {
 const draft = {
   phone: "draft-phone",
   email: "",
-  birthday: "",
   gender: "",
   employmentType: "",
   address: "draft-address",

@@ -34,10 +34,10 @@ export interface EmployeeProfile {
   sensitiveRevision: number;
 }
 
+// 生日属于敏感资料，只能经 SensitiveEmployeeProfilePayload 提交审核，基本资料保存不得携带。
 export interface UpdateEmployeeProfilePayload {
   phone: string;
   email?: string;
-  birthday: string;
   gender: string;
   employmentType?: string;
   address: string;
@@ -50,6 +50,8 @@ export type EmployeeProfileSensitiveChangeStatus =
   | "Superseded";
 
 export interface SensitiveEmployeeProfilePayload {
+  /** YYYY-MM-DD；空串表示不填，提交时转为 null。 */
+  birthday: string;
   bankBsb: string;
   bankAccountNumber: string;
   superannuationCompanyName: string;

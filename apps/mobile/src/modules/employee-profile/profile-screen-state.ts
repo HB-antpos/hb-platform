@@ -11,7 +11,7 @@ import {
 import { toEmployeeProfileDraft } from "./profile-draft";
 
 export type EmployeeProfileView = "overview" | "basic" | "sensitive";
-export type SensitiveProfileSection = "banking" | "superannuation" | "identity";
+export type SensitiveProfileSection = "personal" | "banking" | "superannuation" | "identity";
 
 function areValuesEqual(
   left: object,
@@ -62,7 +62,7 @@ export function getBackAction(input: {
 }
 
 export function getSensitiveSectionOrder(selected: SensitiveProfileSection) {
-  const sections: SensitiveProfileSection[] = ["banking", "superannuation", "identity"];
+  const sections: SensitiveProfileSection[] = ["personal", "banking", "superannuation", "identity"];
   return [selected, ...sections.filter((section) => section !== selected)];
 }
 

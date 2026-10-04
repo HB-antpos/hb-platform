@@ -38,7 +38,6 @@ test("基本资料仅在规范化后的草稿变化时阻止离页", () => {
   const sameDraft = {
     phone: "0400 000 000",
     email: "employee@example.com",
-    birthday: "1990-01-02",
     gender: "female",
     employmentType: "fullTime",
     address: "Brisbane",
@@ -57,6 +56,7 @@ test("基本资料仅在规范化后的草稿变化时阻止离页", () => {
 
 test("敏感资料保留完整 Pending 草稿并带进入编辑时的 revision 提交", () => {
   const pendingDraft: SensitiveEmployeeProfilePayload = {
+    birthday: " 1990-03-04 ",
     bankBsb: " 064-000 ",
     bankAccountNumber: " 99887766 ",
     superannuationCompanyName: " Pending Super ",
@@ -70,6 +70,7 @@ test("敏感资料保留完整 Pending 草稿并带进入编辑时的 revision �
   assert.equal(hasSensitiveProfileChanges(pendingDraft, pendingDraft), false);
   assert.equal(hasSensitiveProfileChanges(editedDraft, pendingDraft), true);
   assert.deepEqual(buildSensitiveReviewPayload(editedDraft, 7), {
+    birthday: "1990-03-04",
     bankBsb: "064-000",
     bankAccountNumber: "99887766",
     superannuationCompanyName: "Pending Super",
@@ -84,6 +85,7 @@ test("敏感资料保留完整 Pending 草稿并带进入编辑时的 revision �
 test("敏感编辑视图把用户选择的分组放在首位且仍保留全部分组", () => {
   assert.deepEqual(getSensitiveSectionOrder("identity"), [
     "identity",
+    "personal",
     "banking",
     "superannuation",
   ]);
@@ -92,6 +94,7 @@ test("敏感编辑视图把用户选择的分组放在首位且仍保留全部�
 test("概览状态沿用审核申请的 Pending 状态", () => {
   assert.equal(getSensitiveStatusView({
     ...buildSensitiveReviewPayload({
+      birthday: "1990-03-04",
       bankBsb: "064000",
       bankAccountNumber: "99887766",
       superannuationCompanyName: "Pending Super",

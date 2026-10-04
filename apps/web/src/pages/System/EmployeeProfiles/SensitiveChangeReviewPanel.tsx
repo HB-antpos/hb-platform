@@ -313,6 +313,8 @@ export default function SensitiveChangeReviewPanel({
       current: unknown
       proposed: unknown
     }> = [
+      // 生日只展示日期部分，与员工端填报格式一致。
+      { key: 'birthday', current: currentProfile.birthday?.slice(0, 10), proposed: reviewDetail.birthday?.slice(0, 10) },
       { key: 'bankBsb', current: currentProfile.bankBsb, proposed: reviewDetail.bankBsb },
       { key: 'bankAccountNumber', current: currentProfile.bankAccountNumber, proposed: reviewDetail.bankAccountNumber },
       { key: 'superannuationCompanyName', current: currentProfile.superannuationCompanyName, proposed: reviewDetail.superannuationCompanyName },

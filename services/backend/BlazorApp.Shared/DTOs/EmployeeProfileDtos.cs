@@ -106,7 +106,22 @@ namespace BlazorApp.Shared.DTOs
         [StringLength(100)]
         public string? SuperannuationAccountNumber { get; set; }
 
-        public DateTime? Birthday { get; set; }
+        private DateTime? _birthday;
+        /// <summary>
+        /// 管理员保存沿用「未传即清空」语义；员工自助保存只在显式传入时校验，生日修改须走敏感资料审核。
+        /// </summary>
+        public DateTime? Birthday
+        {
+            get => _birthday;
+            set
+            {
+                _birthday = value;
+                HasBirthday = true;
+            }
+        }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool HasBirthday { get; private set; }
 
         public string? Gender { get; set; }
 
@@ -211,6 +226,22 @@ namespace BlazorApp.Shared.DTOs
         public string? IdentityType { get; set; }
         [StringLength(100)]
         public string? IdentityId { get; set; }
+
+        private DateTime? _birthday;
+        /// <summary>生日属于敏感资料；未传入时沿用基线值，旧版客户端提交不会清空生日。</summary>
+        public DateTime? Birthday
+        {
+            get => _birthday;
+            set
+            {
+                _birthday = value;
+                HasBirthday = true;
+            }
+        }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool HasBirthday { get; private set; }
+
         [Range(0, int.MaxValue)]
         public int? ExpectedSensitiveRevision { get; set; }
     }
@@ -260,6 +291,7 @@ namespace BlazorApp.Shared.DTOs
         public string? SuperannuationAccountNumber { get; set; }
         public string? IdentityType { get; set; }
         public string? IdentityId { get; set; }
+        public DateTime? Birthday { get; set; }
         public bool HasIdentityPhoto { get; set; }
         public string? IdentityPhotoUrl { get; set; }
     }
@@ -274,6 +306,7 @@ namespace BlazorApp.Shared.DTOs
         public string? SuperannuationAccountNumber { get; set; }
         public string? IdentityType { get; set; }
         public string? IdentityId { get; set; }
+        public DateTime? Birthday { get; set; }
         public bool HasIdentityPhoto { get; set; }
         public string? IdentityPhotoUrl { get; set; }
         public DateTime? IdentityPhotoUrlExpiresAt { get; set; }
