@@ -34,6 +34,9 @@ async function run() {
   mockModule("../../shared/i18n/i18n", { i18n: { t: (key: string) => key } });
   mockModule("../../shared/i18n/use-app-translation", { useAppTranslation: () => ({ t: (key: string) => key }) });
   mockModule("../../shared/api/client", { apiClient: { defaults: { baseURL: "https://hotbargain.vip/api" } } });
+  mockModule("../../shared/storage/async-storage", {
+    AppAsyncStorage: { getString: async () => null, setString: async () => {}, removeItem: async () => {} },
+  });
   mockModule("../../../modules/hb-app-installer/src/HBAppInstallerModule", { default: null });
   mockModule("expo-constants", { default: { expoConfig: { extra: { nativeAppInstallerEnabled: true } } } });
   mockModule("expo-application", { nativeBuildVersion: "56", applicationId: "com.hbweb.expo" });
