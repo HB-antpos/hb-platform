@@ -5,6 +5,7 @@ namespace BlazorApp.Shared.DTOs;
 public static class AppUpdateApps
 {
     public const string MobileIos = "mobile-ios";
+    public const string MobileAndroid = "mobile-android";
     public const string PosIpad = "pos-ipad";
     public const string PosHandheld = "pos-handheld";
 }
@@ -118,6 +119,89 @@ public sealed class NativeUpdatePolicyDto
     public List<string> TargetStoreGuids { get; set; } = new();
     public DateTime? UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
+}
+
+/// <summary>
+/// Mobile 安卓原生最低构建号策略保存错误码（版本冲突沿用 <see cref="AppUpdatePolicyErrorCodes"/>）。
+/// </summary>
+public static class MobileAndroidNativeUpdatePolicyErrorCodes
+{
+    public const string ReleaseMessageTooLong = "RELEASE_MESSAGE_TOO_LONG";
+    public const string MinimumBuildRequired = "MINIMUM_BUILD_REQUIRED";
+    public const string MinimumBuildInvalid = "MINIMUM_BUILD_INVALID";
+    public const string MinimumBuildAboveLatest = "MINIMUM_BUILD_ABOVE_LATEST";
+    public const string SaveFailed = "MOBILE_ANDROID_NATIVE_POLICY_SAVE_FAILED";
+}
+
+public sealed class MobileAndroidNativeUpdatePolicyRequest
+{
+    public long? ExpectedPolicyVersion { get; set; }
+    public bool Enabled { get; set; }
+    public int? MinimumSupportedBuildNumber { get; set; }
+    public string? ReleaseMessage { get; set; }
+}
+
+/// <summary>
+/// 管理端读取 / 保存后的安卓原生策略。可空字段显式输出 null，避免全局 WhenWritingNull 吞掉字段。
+/// </summary>
+public sealed class MobileAndroidNativeUpdatePolicyDto
+{
+    public bool Enabled { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? MinimumSupportedBuildNumber { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ReleaseMessage { get; set; }
+
+    public long PolicyVersion { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public DateTime? UpdatedAt { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? UpdatedBy { get; set; }
+
+    /// <summary>
+    /// 当前公开 production 安卓包（与匿名 android-latest 同一筛选）；没有时为 null。
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public MobileAndroidLatestBuildDto? LatestBuild { get; set; }
+}
+
+public sealed class MobileAndroidLatestBuildDto
+{
+    public string EasBuildId { get; set; } = string.Empty;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? AppVersion { get; set; }
+
+    /// <summary>安卓 versionCode（表里是字符串，这里已解析为正整数）。</summary>
+    public int AppBuildVersion { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public DateTime? CompletedAt { get; set; }
+}
+
+/// <summary>
+/// 匿名判定结果。state 只有 none / required；所有字段即使为 null 也必须输出。
+/// </summary>
+public sealed class MobileAndroidNativeUpdateDecisionDto
+{
+    public string State { get; set; } = AppUpdateStates.None;
+    public string PolicyVersion { get; set; } = AppUpdateStates.None;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? MinimumSupportedBuildNumber { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? LatestVersion { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? LatestBuildNumber { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ReleaseMessage { get; set; }
 }
 
 public sealed class AppUpdateTargetStoreOptionDto

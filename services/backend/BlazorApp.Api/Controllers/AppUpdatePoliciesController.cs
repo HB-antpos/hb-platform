@@ -12,7 +12,8 @@ namespace BlazorApp.Api.Controllers;
 public sealed class AppUpdatePoliciesController(
     INativeAppUpdatePolicyService service,
     IPosHandheldUpdatePolicyService? posHandheldService = null,
-    IMobileOtaPolicyService? mobileOtaService = null
+    IMobileOtaPolicyService? mobileOtaService = null,
+    IMobileAndroidNativeUpdatePolicyService? mobileAndroidService = null
 )
     : ControllerBase
 {
@@ -33,6 +34,27 @@ public sealed class AppUpdatePoliciesController(
             request,
             User.Identity?.Name ?? "System"
         );
+        return ToMutationResult(response);
+    }
+
+    [HttpGet("mobile-android")]
+    [Authorize(Policy = Permissions.System.ViewAppDownloads)]
+    public async Task<IActionResult> GetMobileAndroid()
+    {
+        return Ok(await MobileAndroidService.GetPolicyAsync());
+    }
+
+    [HttpPut("mobile-android")]
+    [Authorize(Policy = Permissions.System.ManageAppDownloads)]
+    public async Task<IActionResult> PutMobileAndroid(
+        [FromBody] MobileAndroidNativeUpdatePolicyRequest request
+    )
+    {
+        var response = await MobileAndroidService.SetPolicyAsync(
+            request,
+            User.Identity?.Name ?? "System"
+        );
+        // 版本缺失 / 冲突返回 409，其余校验错误沿用 iOS 的 200 + success:false。
         return ToMutationResult(response);
     }
 
@@ -169,6 +191,10 @@ public sealed class AppUpdatePoliciesController(
     private IMobileOtaPolicyService MobileOtaService =>
         mobileOtaService
         ?? throw new InvalidOperationException("Mobile OTA 更新策略服务未注册");
+
+    private IMobileAndroidNativeUpdatePolicyService MobileAndroidService =>
+        mobileAndroidService
+        ?? throw new InvalidOperationException("Mobile 安卓原生更新策略服务未注册");
 
     private IActionResult ToMutationResult<T>(ApiResponse<T> response) =>
         response.ErrorCode

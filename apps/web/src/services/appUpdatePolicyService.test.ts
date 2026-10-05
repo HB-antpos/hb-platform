@@ -79,6 +79,25 @@ const transport: AppUpdatePolicyTransport = {
         }],
       }
     }
+    if (url === '/api/app-update-policies/mobile-android') {
+      return {
+        success: true,
+        data: {
+          enabled: true,
+          minimumSupportedBuildNumber: 60,
+          releaseMessage: ' 请安装新版 ',
+          policyVersion: '3',
+          updatedAt: '2026-10-05T01:00:00Z',
+          updatedBy: 'admin',
+          latestBuild: {
+            easBuildId: 'build-63',
+            appVersion: '1.0.10',
+            appBuildVersion: 63,
+            completedAt: '2026-10-03T05:06:00Z',
+          },
+        },
+      }
+    }
     if (url === '/api/pos-ipad/ota-rollout') {
       return {
         success: true,
@@ -137,6 +156,21 @@ const transport: AppUpdatePolicyTransport = {
   },
   async put(url, payload, options) {
     calls.push({ method: 'put', url, payload, signal: options?.signal })
+    if (url === '/api/app-update-policies/mobile-android') {
+      // 后端返回无公开包、策略已停用的默认形态，校验 latestBuild=null 的规范化。
+      return {
+        success: true,
+        data: {
+          enabled: false,
+          minimumSupportedBuildNumber: null,
+          releaseMessage: null,
+          policyVersion: 4,
+          updatedAt: null,
+          updatedBy: null,
+          latestBuild: null,
+        },
+      }
+    }
     return {
       success: true,
       data: url === '/api/pos-ipad/ota-rollout'
@@ -293,6 +327,79 @@ async function run() {
     releaseMessage: '升级后继续',
   })
   assertEqual(calls[calls.length - 1]?.url, '/api/pos-ipad/ota-rollout', 'OTA rollout PUT 路径应固定')
+
+  const androidPolicy = await service.getMobileAndroidNativePolicy(controller.signal)
+  assertDeepEqual(
+    calls[calls.length - 1],
+    {
+      method: 'get',
+      url: '/api/app-update-policies/mobile-android',
+      params: undefined,
+      signal: controller.signal,
+    },
+    'Mobile 安卓原生策略 GET 路径应固定并透传 AbortSignal',
+  )
+  assertDeepEqual(
+    androidPolicy,
+    {
+      enabled: true,
+      minimumSupportedBuildNumber: 60,
+      releaseMessage: '请安装新版',
+      policyVersion: 3,
+      updatedAt: '2026-10-05T01:00:00Z',
+      updatedBy: 'admin',
+      latestBuild: {
+        easBuildId: 'build-63',
+        appVersion: '1.0.10',
+        appBuildVersion: 63,
+        completedAt: '2026-10-03T05:06:00Z',
+      },
+    },
+    'Mobile 安卓原生策略必须规范化为数字策略版本、整数构建号与公开安卓包',
+  )
+
+  const savedAndroidPolicy = await service.saveMobileAndroidNativePolicy({
+    expectedPolicyVersion: 3,
+    enabled: true,
+    minimumSupportedBuildNumber: 63,
+    releaseMessage: '请安装新版',
+  })
+  assertDeepEqual(
+    calls[calls.length - 1],
+    {
+      method: 'put',
+      url: '/api/app-update-policies/mobile-android',
+      payload: {
+        expectedPolicyVersion: 3,
+        enabled: true,
+        minimumSupportedBuildNumber: 63,
+        releaseMessage: '请安装新版',
+      },
+    },
+    'Mobile 安卓原生策略 PUT 必须只携带契约约定的四个字段',
+  )
+  assertEqual(savedAndroidPolicy.latestBuild, null, '无公开安卓包时 latestBuild 必须为 null')
+  assertEqual(savedAndroidPolicy.policyVersion, 4, 'PUT 返回的策略版本必须回填')
+
+  const malformedAndroidService = createAppUpdatePolicyService({
+    ...transport,
+    async get() {
+      return {
+        success: true,
+        data: {
+          enabled: false,
+          latestBuild: { easBuildId: 'build-x', appVersion: '1.0.0', appBuildVersion: 0 },
+        },
+      }
+    },
+  })
+  const malformedAndroidPolicy = await malformedAndroidService.getMobileAndroidNativePolicy()
+  assertEqual(
+    malformedAndroidPolicy.latestBuild,
+    null,
+    '公开安卓包构建号非正整数时必须视为无可用公开包',
+  )
+  assertEqual(malformedAndroidPolicy.policyVersion, 0, '缺失策略版本时回退为 0')
 
   const failingService = createAppUpdatePolicyService({
     ...transport,

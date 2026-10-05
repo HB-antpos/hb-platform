@@ -5059,11 +5059,12 @@
         "retry": "Retry",
         "readOnly": "Your account has view-only access. Policies and rollout settings cannot be changed.",
       "tabs": {
-        "mobile": "Mobile Native",
+        "mobile": "Mobile iOS Native",
         "mobileOta": "Mobile OTA",
         "ipadNative": "iPad Native",
         "ipadOta": "iPad OTA",
-        "posHandheld": "Handheld POS"
+        "posHandheld": "Handheld POS",
+        "mobileAndroidNative": "Mobile Android Native"
         },
         "releaseFacts": "Release Facts",
         "policy": "Native Update Policy",
@@ -5165,6 +5166,24 @@
         "iosUpdateId": "iOS Update ID",
         "updateGroupId": "Update Group ID",
       "publishedAt": "Published At",
+      "mobileAndroid": {
+        "boundaryTitle": "Mobile Android native requires updates by minimum supported build (versionCode)",
+        "boundaryDescription": "When enabled, Android devices with a build lower than the minimum supported build are blocked with a full-screen gate (including the login page) and can only continue after installing the current public production Android package. Optional update prompts are still handled by the Android package flow and are not affected by this policy.",
+        "loadFailed": "Failed to load the Mobile Android native update policy",
+        "latestBuildTitle": "Current Public Android Package",
+        "latestBuild": "Public Android package",
+        "completedAt": "Build completed at",
+        "noLatestBuild": "There is no public production Android package, so the required update cannot be enabled.",
+        "minimumBuild": "Minimum Supported Build",
+        "minimumBuildHelp": "Android versionCode, from 1 to {{max}} (the current public package build). Devices below this value must update.",
+        "minimumBuildRequired": "Enter the minimum supported build before enabling",
+        "minimumBuildInvalid": "The minimum supported build must be an integer of at least 1",
+        "minimumBuildAboveLatest": "The minimum supported build cannot be higher than the current public Android package build, otherwise devices would have nothing to install",
+        "releaseMessageTooLong": "The release message cannot exceed 1000 characters",
+        "confirmTitle": "Enable the required Android update?",
+        "blockWarning": "Android devices with a build lower than {{build}} will be blocked with a full-screen gate and must install the latest package before they can continue.",
+        "disableConfirmDescription": "After disabling, Android devices are no longer blocked. This save also clears the minimum supported build and release message."
+      },
       "mobileOta": {
         "boundaryTitle": "Mobile OTA is registered and activated independently by environment and platform",
         "boundaryDescription": "production/preview and Android/iOS form four independent lanes. Web selects immutable registered releases only; it never runs EAS, and registration never activates a policy.",

@@ -101,3 +101,29 @@ export interface PosIpadOtaRollout {
   updatedAt: string | null
   updatedBy: string | null
 }
+
+// Mobile 安卓原生「最低支持构建号」策略：只按 versionCode 判定，不登记发布事实，
+// 目标包固定为当前公开的 production 安卓包（latestBuild）。
+export interface MobileAndroidLatestBuild {
+  easBuildId: string
+  appVersion: string
+  appBuildVersion: number
+  completedAt: string | null
+}
+
+export interface MobileAndroidNativeUpdatePolicy {
+  enabled: boolean
+  minimumSupportedBuildNumber: number | null
+  releaseMessage: string | null
+  policyVersion: number
+  updatedAt: string | null
+  updatedBy: string | null
+  latestBuild: MobileAndroidLatestBuild | null
+}
+
+export interface MobileAndroidNativeUpdatePolicyRequest {
+  expectedPolicyVersion: number
+  enabled: boolean
+  minimumSupportedBuildNumber: number | null
+  releaseMessage: string | null
+}

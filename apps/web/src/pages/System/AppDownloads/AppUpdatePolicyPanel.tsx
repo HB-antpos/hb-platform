@@ -75,6 +75,7 @@ import {
 import { formatAppDownloadLocalDateTime } from './time'
 import PosHandheldUpdatePolicyTab from './PosHandheldUpdatePolicyTab'
 import MobileOtaPolicyTab from './MobileOtaPolicyTab'
+import MobileAndroidNativePolicyTab from './MobileAndroidNativePolicyTab'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
 interface AppUpdatePolicyPanelProps {
@@ -216,6 +217,7 @@ export default function AppUpdatePolicyPanel({ canManage }: AppUpdatePolicyPanel
   const [qrRelease, setQrRelease] = useState<IosAppStoreRelease | null>(null)
   const [handheldRefreshVersion, setHandheldRefreshVersion] = useState(0)
   const [mobileOtaRefreshVersion, setMobileOtaRefreshVersion] = useState(0)
+  const [mobileAndroidRefreshVersion, setMobileAndroidRefreshVersion] = useState(0)
   const laneRequestsRef = useRef<Record<LoadLaneKey, LatestRequestLane>>({
     mobileNative: new LatestRequestLane(),
     ipadNative: new LatestRequestLane(),
@@ -338,6 +340,7 @@ export default function AppUpdatePolicyPanel({ canManage }: AppUpdatePolicyPanel
   const refreshAll = useCallback(async () => {
     setHandheldRefreshVersion((version) => version + 1)
     setMobileOtaRefreshVersion((version) => version + 1)
+    setMobileAndroidRefreshVersion((version) => version + 1)
     await Promise.allSettled([
       loadMobileNativeLane(),
       loadIpadNativeLane(),
@@ -1377,6 +1380,17 @@ export default function AppUpdatePolicyPanel({ canManage }: AppUpdatePolicyPanel
         mobileSaving,
         mobileLoadState,
         loadMobileNativeLane,
+      ),
+    },
+    {
+      // 安卓原生只按 versionCode 设最低支持构建号，独立组件自管加载与保存。
+      key: 'mobile-android-native',
+      label: t('system.appDownloads.updatePolicy.tabs.mobileAndroidNative'),
+      children: (
+        <MobileAndroidNativePolicyTab
+          canManage={canManage}
+          refreshVersion={mobileAndroidRefreshVersion}
+        />
       ),
     },
     {
