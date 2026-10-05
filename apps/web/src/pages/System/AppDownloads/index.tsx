@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { Alert, Button, Card, Space, Typography, theme } from 'antd'
@@ -17,18 +17,24 @@ import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import WpfVersionsPage from '../WpfVersions'
 import AppUpdatePolicyPanel from './AppUpdatePolicyPanel'
 import AndroidApkBuildsPanel from './AndroidApkBuildsPanel'
+import LanePolicyCard from './LanePolicyCard'
 import ReleaseOverview from './ReleaseOverview'
 import ServiceApiTokensPanel from './ServiceApiTokensPanel'
 import RustDeskDownloadEntry from './RustDeskDownloadEntry'
 import {
+  RELEASE_LANE_DEFINITIONS,
   RELEASE_TERMINAL_LANES,
   RELEASE_TERMINALS,
   buildReleaseCenterSearch,
+  findReleaseLaneKey,
   isReleaseTerminal,
   resolveReleaseCenterLocation,
   type ReleaseCenterView,
+  type ReleaseLaneKey,
   type ReleaseTerminal,
 } from './releaseCenterLogic'
+import { useReleaseLaneSummaries } from './useReleaseLaneSummaries'
+import type { PosHandheldPolicyLane } from '../../../types/posHandheldUpdatePolicy'
 import releaseCenterMessagesEn from './releaseCenterMessages.en.json'
 import releaseCenterMessagesZh from './releaseCenterMessages.zh.json'
 
@@ -53,6 +59,11 @@ export default function AppDownloadsPage() {
   const canViewTools = isAdmin || canManageAppDownloads
   const [searchParams, setSearchParams] = useSearchParams()
   const [refreshVersion, setRefreshVersion] = useState(0)
+  // 轨道内保存成功只需刷新摘要（策略卡、矩阵、状态点），不必重挂载正在编辑的轨道。
+  const [summaryVersion, setSummaryVersion] = useState(0)
+  const laneSummaries = useReleaseLaneSummaries(`${refreshVersion}:${summaryVersion}`)
+  const laneContentRef = useRef<HTMLDivElement>(null)
+  const handleLaneChanged = () => setSummaryVersion((value) => value + 1)
   // 手机宽度下导航改为一行横向滑动的紧凑按钮，不占满首屏。
   const compactNav = useIsMobile()
   const { view, lane } = resolveReleaseCenterLocation(searchParams, { canViewTools })
@@ -65,7 +76,51 @@ export default function AppDownloadsPage() {
     }
   }
 
-  const navButton = (key: ReleaseCenterView, icon: ReactNode, label: string, sub?: string) => {
+  // 状态点颜色：有待处理 = 警示色，已激活 = 成功色，未启用 = 中性色；加载中或失败不显示。
+  const laneDotColor = (key: ReleaseLaneKey) => {
+    const state = laneSummaries[key]
+    if (state.state !== 'ready') {
+      return null
+    }
+    if (state.summary.attentions.length) {
+      return token.colorWarning
+    }
+    return state.summary.status === 'active' ? token.colorSuccess : token.colorTextQuaternary
+  }
+  const terminalNeedsAttention = (terminal: ReleaseTerminal) => RELEASE_LANE_DEFINITIONS
+    .filter((definition) => definition.terminal === terminal)
+    .some((definition) => {
+      const state = laneSummaries[definition.key]
+      return state.state === 'ready' && state.summary.attentions.length > 0
+    })
+  const statusDot = (color: string, label?: string) => (
+    <span
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, background: color, flex: 'none' }}
+    />
+  )
+
+  // 「调整策略」定位到轨道里的策略表单并聚焦第一个可编辑控件；表单与二次确认逻辑保持原样。
+  const scrollToLaneEditor = () => {
+    const form = laneContentRef.current?.querySelector('form')
+    if (!form) {
+      return
+    }
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    form.querySelector<HTMLElement>(
+      'input:not([disabled]), button[role="switch"]:not([disabled]), textarea:not([disabled])',
+    )?.focus({ preventScroll: true })
+  }
+
+  const navButton = (
+    key: ReleaseCenterView,
+    icon: ReactNode,
+    label: string,
+    sub?: string,
+    attention = false,
+  ) => {
     const active = view === key
     return (
       <button
@@ -101,6 +156,11 @@ export default function AppDownloadsPage() {
             <span style={{ fontSize: 12, fontWeight: 400, color: token.colorTextSecondary }}>{sub}</span>
           ) : null}
         </span>
+        {attention ? (
+          <span style={{ marginInlineStart: 'auto', display: 'inline-flex' }}>
+            {statusDot(token.colorWarning, t('system.releaseCenter.legendAttention'))}
+          </span>
+        ) : null}
       </button>
     )
   }
@@ -110,7 +170,11 @@ export default function AppDownloadsPage() {
   ))
 
   const renderLane = (terminal: ReleaseTerminal, currentLane: string) => {
-    const common = { canManage: canManageAppDownloads, refreshVersion }
+    const common = {
+      canManage: canManageAppDownloads,
+      refreshVersion,
+      onChanged: handleLaneChanged,
+    }
     switch (`${terminal}:${currentLane}`) {
       case 'mobile:ios-native':
         return <AppUpdatePolicyPanel {...common} lane="mobile-native" />
@@ -122,19 +186,30 @@ export default function AppDownloadsPage() {
             <AndroidApkBuildsPanel appKey="mobile" refreshVersion={refreshVersion} />
           </Space>
         )
-      case 'mobile:ota':
-        return <AppUpdatePolicyPanel {...common} lane="mobile-ota" />
+      case 'mobile:ota-ios':
+        return <AppUpdatePolicyPanel {...common} lane="mobile-ota" mobileOtaPlatform="ios" />
+      case 'mobile:ota-android':
+        return <AppUpdatePolicyPanel {...common} lane="mobile-ota" mobileOtaPlatform="android" />
       case 'ipad:ios-native':
         return <AppUpdatePolicyPanel {...common} lane="ipad-native" />
       case 'ipad:ota':
         return <AppUpdatePolicyPanel {...common} lane="ipad-ota" />
-      case 'handheld:policy':
-        return <AppUpdatePolicyPanel {...common} lane="pos-handheld" />
+      case 'handheld:android-native':
+      case 'handheld:ios-native':
+      case 'handheld:android-ota':
+      case 'handheld:ios-ota':
+        return (
+          <AppUpdatePolicyPanel
+            {...common}
+            lane="pos-handheld"
+            handheldLane={currentLane as PosHandheldPolicyLane}
+          />
+        )
       case 'handheld:apk':
         return <AndroidApkBuildsPanel appKey="pos-handheld" refreshVersion={refreshVersion} />
       case 'wpf:installer':
         // WPF 页自管加载与刷新；外部刷新时整体重挂载即可拿到最新数据。
-        return <WpfVersionsPage key={refreshVersion} />
+        return <WpfVersionsPage key={refreshVersion} onChanged={handleLaneChanged} />
       default:
         return null
     }
@@ -143,6 +218,17 @@ export default function AppDownloadsPage() {
   const renderTerminal = (terminal: ReleaseTerminal) => {
     const lanes: readonly string[] = RELEASE_TERMINAL_LANES[terminal]
     const currentLane = lane && lanes.includes(lane) ? lane : lanes[0]
+    const laneKey = findReleaseLaneKey(terminal, currentLane)
+    const laneTabLabel = (key: string) => {
+      const definitionKey = findReleaseLaneKey(terminal, key)
+      const color = definitionKey ? laneDotColor(definitionKey) : null
+      return (
+        <Space size={6}>
+          {color ? statusDot(color) : null}
+          {t(`system.releaseCenter.lanes.${key}`)}
+        </Space>
+      )
+    }
     return (
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card
@@ -153,7 +239,7 @@ export default function AppDownloadsPage() {
             </Space>
           )}
           tabList={lanes.length > 1
-            ? lanes.map((key) => ({ key, label: t(`system.releaseCenter.lanes.${key}`) }))
+            ? lanes.map((key) => ({ key, label: laneTabLabel(key) }))
             : undefined}
           activeTabKey={currentLane}
           onTabChange={(key) => navigate(terminal, key)}
@@ -161,8 +247,17 @@ export default function AppDownloadsPage() {
         >
           <Typography.Text type="secondary">{t(`system.releaseCenter.terminalDesc.${terminal}`)}</Typography.Text>
         </Card>
+        {laneKey ? (
+          <LanePolicyCard
+            laneKey={laneKey}
+            state={laneSummaries[laneKey]}
+            onAdjust={canManageAppDownloads ? scrollToLaneEditor : undefined}
+          />
+        ) : null}
         {/* key 让切换轨道时卸载旧轨道，旧请求随之失效，不会串到新轨道。 */}
-        <div key={`${terminal}:${currentLane}`}>{renderLane(terminal, currentLane)}</div>
+        <div key={`${terminal}:${currentLane}`} ref={laneContentRef}>
+          {renderLane(terminal, currentLane)}
+        </div>
       </Space>
     )
   }
@@ -205,6 +300,7 @@ export default function AppDownloadsPage() {
           TERMINAL_ICONS[terminal],
           t(`system.releaseCenter.nav.${terminal}`),
           t(`system.releaseCenter.nav.${terminal}Sub`),
+          terminalNeedsAttention(terminal),
         ))}
         {canViewTools ? (
           <>
@@ -247,7 +343,7 @@ export default function AppDownloadsPage() {
 
           {view === 'overview' ? (
             <ReleaseOverview
-              refreshVersion={refreshVersion}
+              lanes={laneSummaries}
               onOpenLane={(terminal, nextLane) => navigate(terminal, nextLane)}
             />
           ) : null}

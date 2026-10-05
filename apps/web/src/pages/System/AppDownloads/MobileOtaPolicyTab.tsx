@@ -58,6 +58,10 @@ import { formatAppDownloadLocalDateTime } from './time'
 interface MobileOtaPolicyTabProps {
   canManage: boolean
   refreshVersion?: number
+  /** 固定平台时不再显示平台页签（版本发布中心按平台拆成独立轨道）。 */
+  platform?: MobileOtaPlatform
+  /** 策略保存成功后通知外层刷新摘要。 */
+  onChanged?: () => void
 }
 
 interface LoadStatus {
@@ -93,11 +97,13 @@ function MobileOtaLane({
   environment,
   platform,
   refreshVersion,
+  onChanged,
 }: {
   canManage: boolean
   environment: MobileOtaEnvironment
   platform: MobileOtaPlatform
   refreshVersion: number
+  onChanged?: () => void
 }) {
   const { t } = useTranslation()
   const [form] = Form.useForm<MobileOtaPolicyFormValue>()
@@ -304,6 +310,7 @@ function MobileOtaLane({
         return
       }
       message.success(t('system.appDownloads.updatePolicy.saveSuccess'))
+      onChanged?.()
       await loadLane()
     } catch (error) {
       console.error('Failed to save Mobile OTA policy', error)
@@ -731,10 +738,13 @@ function MobileOtaLegacyHistory({
 export default function MobileOtaPolicyTab({
   canManage,
   refreshVersion = 0,
+  platform: fixedPlatform,
+  onChanged,
 }: MobileOtaPolicyTabProps) {
   const { t } = useTranslation()
   const [environment, setEnvironment] = useState<MobileOtaEnvironment>('production')
-  const [platform, setPlatform] = useState<MobileOtaPlatform>('android')
+  const [selectedPlatform, setPlatform] = useState<MobileOtaPlatform>('android')
+  const platform = fixedPlatform ?? selectedPlatform
 
   const lane = (
     <MobileOtaLane
@@ -743,6 +753,7 @@ export default function MobileOtaPolicyTab({
       environment={environment}
       platform={platform}
       refreshVersion={refreshVersion}
+      onChanged={onChanged}
     />
   )
 
@@ -762,15 +773,17 @@ export default function MobileOtaPolicyTab({
           { value: 'preview', label: t('system.appDownloads.updatePolicy.mobileOta.preview') },
         ]}
       />
-      <Tabs
-        activeKey={platform}
-        onChange={(key) => setPlatform(key as MobileOtaPlatform)}
-        destroyInactiveTabPane={false}
-        items={[
-          { key: 'android', label: 'Android', children: platform === 'android' ? lane : null },
-          { key: 'ios', label: 'iOS', children: platform === 'ios' ? lane : null },
-        ]}
-      />
+      {fixedPlatform ? lane : (
+        <Tabs
+          activeKey={platform}
+          onChange={(key) => setPlatform(key as MobileOtaPlatform)}
+          destroyInactiveTabPane={false}
+          items={[
+            { key: 'android', label: 'Android', children: platform === 'android' ? lane : null },
+            { key: 'ios', label: 'iOS', children: platform === 'ios' ? lane : null },
+          ]}
+        />
+      )}
       <MobileOtaLegacyHistory environment={environment} refreshVersion={refreshVersion} />
     </Space>
   )

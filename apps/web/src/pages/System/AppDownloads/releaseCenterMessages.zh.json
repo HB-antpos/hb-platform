@@ -29,7 +29,10 @@
         "ios-native": "iOS 原生",
         "android-native": "Android 原生",
         "ota": "OTA 热更新",
-        "policy": "更新策略",
+        "ota-ios": "OTA · iOS",
+        "ota-android": "OTA · Android",
+        "ios-ota": "OTA · iOS",
+        "android-ota": "OTA · Android",
         "apk": "APK 构建",
         "installer": "Windows 安装包"
       },
@@ -94,6 +97,43 @@
         "handheld-ios-ota": "手持 POS · OTA iOS",
         "handheld-android-ota": "手持 POS · OTA Android",
         "wpf-windows": "WPF 收银端 · Windows"
+      },
+      "card": {
+        "title": "当前生效策略",
+        "active": "已激活",
+        "adjust": "调整策略",
+        "failedHint": "当前策略加载失败，可点页头刷新重试；下方表单不受影响。",
+        "target": "目标版本",
+        "minimum": "最低支持",
+        "mode": "更新方式",
+        "scope": "投放范围",
+        "updated": "最后更新"
+      },
+      "ladder": {
+        "title": "设备决策预览",
+        "hint": "客户端按自身版本落在哪一段，就收到哪种提示",
+        "outOfScope": "范围外的分店 / 机器保持现状，不会收到提示。",
+        "kind": {
+          "force": "强制更新",
+          "optional": "可选提醒",
+          "latest": "无需更新",
+          "unaffected": "不受本策略影响",
+          "not-covered": "不覆盖",
+          "rollback": "提示回退",
+          "off": "不下发"
+        },
+        "range": {
+          "below": "低于 {{bound}}",
+          "between": "不低于最低版本、未到 {{bound}}",
+          "equal": "= {{bound}}",
+          "latestOta": "已应用目标 OTA",
+          "otaRequired": "同 Runtime、未到目标：不可跳过",
+          "otaOptional": "同 Runtime、未到目标：可稍后应用",
+          "unaffected": "≥ {{bound}}：可选提醒由安装包流程负责",
+          "notCovered": "Runtime 不兼容或未接入受控更新器的旧客户端",
+          "rollback": "高于 {{bound}}：开启强制更新时必须回退",
+          "off": "策略未启用，客户端不会收到更新提示"
+        }
       }
     }
   }

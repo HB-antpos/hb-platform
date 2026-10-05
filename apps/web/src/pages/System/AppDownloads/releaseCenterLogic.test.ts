@@ -11,7 +11,9 @@ import {
   RELEASE_LANE_DEFINITIONS,
   RELEASE_MATRIX_COLUMNS,
   RELEASE_TERMINAL_LANES,
+  buildDecisionLadder,
   buildRecentLaneChanges,
+  findReleaseLaneKey,
   buildReleaseCenterSearch,
   resolveReleaseCenterLocation,
   summarizeHandheldLane,
@@ -34,9 +36,13 @@ assert.deepEqual(
   '终端未带 lane 时落到第一条轨道',
 )
 assert.deepEqual(
-  resolveReleaseCenterLocation(search('view=MOBILE&lane=OTA'), { canViewTools: false }),
-  { view: 'mobile', lane: 'ota' },
+  resolveReleaseCenterLocation(search('view=MOBILE&lane=OTA-IOS'), { canViewTools: false }),
+  { view: 'mobile', lane: 'ota-ios' },
   '大小写不敏感',
+)
+assert.deepEqual(
+  resolveReleaseCenterLocation(search('view=handheld'), { canViewTools: false }),
+  { view: 'handheld', lane: 'android-native' },
 )
 assert.deepEqual(
   resolveReleaseCenterLocation(search('view=ipad&lane=apk'), { canViewTools: false }),
@@ -52,7 +58,8 @@ assert.deepEqual(
 
 assert.equal(buildReleaseCenterSearch('overview'), '')
 assert.equal(buildReleaseCenterSearch('mobile', 'ios-native'), '?view=mobile', '默认轨道不写进 URL')
-assert.equal(buildReleaseCenterSearch('mobile', 'ota'), '?view=mobile&lane=ota')
+assert.equal(buildReleaseCenterSearch('mobile', 'ota-android'), '?view=mobile&lane=ota-android')
+assert.equal(buildReleaseCenterSearch('handheld', 'apk'), '?view=handheld&lane=apk')
 assert.equal(buildReleaseCenterSearch('wpf', 'whatever'), '?view=wpf')
 assert.equal(buildReleaseCenterSearch('tools', 'ota'), '?view=tools')
 
@@ -67,6 +74,14 @@ for (const definition of RELEASE_LANE_DEFINITIONS) {
   cellKeys.add(cell)
 }
 assert.equal(RELEASE_LANE_DEFINITIONS.length, 11)
+// 页签与轨道一一对应：除 APK 外每个页签恰好对应一条轨道。
+for (const terminal of ['mobile', 'ipad', 'handheld', 'wpf'] as const) {
+  for (const lane of RELEASE_TERMINAL_LANES[terminal]) {
+    const matches = RELEASE_LANE_DEFINITIONS.filter((item) => item.terminal === terminal && item.lane === lane)
+    assert.equal(matches.length, lane === 'apk' ? 0 : 1, `${terminal}/${lane} 应对应 ${lane === 'apk' ? 0 : 1} 条轨道`)
+    assert.equal(findReleaseLaneKey(terminal, lane), matches[0]?.key ?? null)
+  }
+}
 
 // ---- 时间 ----
 assert.equal(toReleaseTimestamp('2026-10-05 07:19:00'), Date.parse('2026-10-05T07:19:00Z'), '不带时区按 UTC')
@@ -241,5 +256,26 @@ assert.equal(summarizeWpfLane([]).status, 'disabled')
 // ---- 最近变更 ----
 const recent = buildRecentLaneChanges([handheldNative, wpfSummary, ota, native], 2)
 assert.deepEqual(recent.map((item) => item.key), ['wpf-windows', 'handheld-android-native'], '按时间倒序且跳过无时间的轨道')
+
+// ---- 设备决策阶梯 ----
+const kinds = (summary: Parameters<typeof buildDecisionLadder>[0]) =>
+  buildDecisionLadder(summary).map((segment) => `${segment.kind}:${segment.bound ?? ''}`).join(' | ')
+
+assert.equal(kinds(nativeDisabled), 'off:', '未启用：不下发')
+assert.equal(kinds(native), 'force:1.1.0 (27) | optional:1.1.2 (31) | latest:1.1.2 (31)', '原生最低版本：低于最低强制，之间可选')
+assert.equal(kinds(nativeOptional), 'optional:1.1.3 (33) | latest:1.1.3 (33)', '原生无最低版本：低于目标只提醒')
+assert.equal(kinds(android), 'force:build 60 | unaffected:build 60', '安卓原生只拦截低于最低构建号，其余不受本策略影响')
+assert.equal(kinds(ota), 'not-covered: | force:runtime 1.0.7 | latest:runtime 1.0.7', 'OTA 强制：不突破 Runtime 边界')
+assert.equal(buildDecisionLadder(ota)[1].variant, 'ota-required')
+assert.equal(kinds(ipad), 'not-covered: | optional:runtime 1.1.2 | latest:runtime 1.1.2')
+assert.equal(kinds(handheldNative), 'force:1.0.8 (8) | optional:1.0.9 (9) | latest:1.0.9 (9)')
+assert.equal(kinds(handheldOta), 'not-covered: | force:runtime 0.1.1 | latest:runtime 0.1.1', '手持 OTA 以 lane 后缀识别')
+assert.equal(
+  kinds(wpfSummary),
+  'force:1.0.44 | optional:1.0.45 | latest:1.0.45 | rollback:1.0.45',
+  'WPF 额外说明高于目标的机器会收到回退',
+)
+assert.equal(kinds(wpfMinimumEqualsTarget), 'force:1.0.45 | latest:1.0.45 | rollback:1.0.45')
+assert.equal(buildDecisionLadder(wpfMinimumEqualsTarget)[0].variant, 'below-target')
 
 console.log('releaseCenterLogic.test: ok')

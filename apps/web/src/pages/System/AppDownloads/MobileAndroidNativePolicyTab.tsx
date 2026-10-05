@@ -50,6 +50,8 @@ registerPageMessages({ zh: mobileAndroidMessagesZh, en: mobileAndroidMessagesEn 
 interface MobileAndroidNativePolicyTabProps {
   canManage: boolean
   refreshVersion?: number
+  /** 策略保存成功后通知外层刷新摘要。 */
+  onChanged?: () => void
 }
 
 interface LoadStatus {
@@ -67,6 +69,7 @@ const INITIAL_LOAD_STATUS: LoadStatus = {
 export default function MobileAndroidNativePolicyTab({
   canManage,
   refreshVersion = 0,
+  onChanged,
 }: MobileAndroidNativePolicyTabProps) {
   const { t } = useTranslation()
   const [form] = Form.useForm<MobileAndroidNativePolicyFormValue>()
@@ -133,6 +136,7 @@ export default function MobileAndroidNativePolicyTab({
         return
       }
       message.success(t('system.appDownloads.updatePolicy.saveSuccess'))
+      onChanged?.()
       await loadPolicy()
     } catch (error) {
       console.error('Failed to save Mobile Android native update policy', error)
