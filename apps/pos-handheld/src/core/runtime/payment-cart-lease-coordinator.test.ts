@@ -189,6 +189,53 @@ test("冷启动先恢复 promotion/asOf/手工折扣状态并立即持有写锁"
   assert.deepEqual(active.read().cart, recovered);
 });
 
+test("冷启动比较持久化购物车时允许缺少定价引擎生成的折扣展示来源", async () => {
+  const cart = cartWithPromotionAndManualDiscount();
+  const snapshot = cart.snapshot();
+  const material: PaymentCartRecoveryMaterial = {
+    checkoutIntentId: "checkout-persisted-projection",
+    cart: {
+      ...snapshot,
+      lines: snapshot.lines.map(({ discountSource: _displayOnly, ...line }) => line),
+    },
+    pricingState: cart.stateSnapshot(),
+    recallBinding: null,
+  };
+  const active = session();
+  const coordinator = createCoordinator(active, material);
+  const recovered = await coordinator.initializeRecovery();
+  assert.ok(recovered);
+  assert.deepEqual(recovered.total, material.cart.actualAmount);
+  assert.deepEqual(recovered.pricingState, material.pricingState);
+  await coordinator.releaseAfterSafeCancel(recovered, "order-persisted-projection");
+});
+
+for (const field of ["quantity", "productCode", "actualAmount", "discount", "syncProvenance"] as const) {
+  test(`冷启动仍拒绝持久化商品 ${field} 与定价状态不一致`, async () => {
+    const cart = cartWithDiscount();
+    const snapshot = cart.snapshot();
+    const changed = field === "quantity" ? "2"
+      : field === "productCode" ? "different-product"
+      : field === "syncProvenance" ? { referenceCode: "changed", priceSource: 0 }
+      : { currency: "AUD", cents: 1 };
+    const material: PaymentCartRecoveryMaterial = {
+      checkoutIntentId: `checkout-tampered-${field}`,
+      cart: {
+        ...snapshot,
+        lines: snapshot.lines.map(({ discountSource: _displayOnly, ...line }) => ({
+          ...line, [field]: changed,
+        })),
+      },
+      pricingState: cart.stateSnapshot(),
+      recallBinding: null,
+    };
+    await assert.rejects(
+      () => createCoordinator(session(), material).initializeRecovery(),
+      hasCode("PAYMENT_CART_LEASE_CONFLICT"),
+    );
+  });
+}
+
 test("恢复材料不能覆盖普通购物车，RecallActive 只接纳精确耐久 binding", async () => {
   const source = cartWithDiscount();
   const material: PaymentCartRecoveryMaterial = {

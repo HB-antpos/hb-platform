@@ -376,12 +376,26 @@ function assertCartValueMatches(
   actual: CartSnapshot,
   expected: CartSnapshot,
 ): void {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  if (persistedCartValue(actual) !== persistedCartValue(expected)) {
     throw paymentLeaseError(
       "PAYMENT_CART_LEASE_CONFLICT",
       "Recovered pricing state does not reproduce the persisted cart.",
     );
   }
+}
+
+function persistedCartValue(cart: CartSnapshot): string {
+  return JSON.stringify({
+    ...cart,
+    lines: cart.lines.map((line) => {
+      // discountSource 是 PricingCart 重算生成的展示字段，草稿存储的 normalizeLine 不持久化它；
+      // 原先整体比较会让任何"收款中途重启"的冷启动恢复必然失败、设备卡在启动页（门店 1013）。
+      // 仅排除此字段，商品、数量、金额、折扣和来源仍必须与耐久快照完全一致（与平板端 #130 同一修法）。
+      const persisted = { ...line } as typeof line & { discountSource?: unknown };
+      delete persisted.discountSource;
+      return persisted;
+    }),
+  });
 }
 
 function requiredText(value: string, label: string): string {
