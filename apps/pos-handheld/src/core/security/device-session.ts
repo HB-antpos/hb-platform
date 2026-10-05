@@ -674,14 +674,23 @@ export class DeviceSessionCoordinator {
         "Device activation recovery response is missing.",
       );
     }
-    if (
-      mode === "rebind" &&
-      (response.isAllowed !== true ||
-        !hasExactActivationReasonCode(response, "ACTIVATION_RECOVERED"))
-    ) {
-      throw new DeviceActivationOutcomeUnknownError(
-        "Device activation recovery response must be ACTIVATION_RECOVERED.",
-      );
+    if (mode === "rebind") {
+      if (
+        response.isAllowed === false &&
+        activationRejectionReasonCode(response)
+      ) {
+        // recoveryOnly 的明确拒绝码（主要是 NOT_AVAILABLE）既可能表示“码未被本硬件消费”，
+        // 也可能表示“已被本硬件消费、但新注册已停用或门店不可用”，不能直接据此清除 pending。
+        return this.resolveRebindRecoveryRejection(generation, hardwareId);
+      }
+      if (
+        response.isAllowed !== true ||
+        !hasExactActivationReasonCode(response, "ACTIVATION_RECOVERED")
+      ) {
+        throw new DeviceActivationOutcomeUnknownError(
+          "Device activation recovery response must be ACTIVATION_RECOVERED.",
+        );
+      }
     }
     if (
       response.isAllowed === false &&
@@ -710,6 +719,67 @@ export class DeviceSessionCoordinator {
         mode === "rebind" ? "rebind" : "activate",
         generation,
       ),
+      generation,
+    );
+  }
+
+  /**
+   * 换绑 pending 的匿名恢复被明确拒绝后，用旧凭据 verify 判定换绑是否在本硬件生效。
+   *
+   * 服务端 rebind 在同一事务里消费开通码并停用旧注册（DisableSourceRegistrationAsync），
+   * 且要求本硬件没有其他启用注册；因此旧设备号 + 旧门店 + 本硬件在 verify 中仍为启用，
+   * 即证明这次换绑没有在本硬件生效，可以安全清除 pending，设备继续使用旧凭据。
+   * verify 未启用（旧注册已停用/待审批）时无法排除“已消费但新注册不可恢复”，保留 pending，
+   * 并按普通 verify 结果锁机或展示状态，避免启动反复进入 failed。
+   * 网络、5xx 等异常原样抛出且保留 pending，由启动闸门按“待恢复、需联网”处理。
+   */
+  private async resolveRebindRecoveryRejection(
+    generation: number,
+    hardwareId: string,
+  ): Promise<DeviceSessionState> {
+    const previous = await this.credentials.load();
+    if (!this.isCurrentOperation(generation)) return this.state;
+    if (!previous) {
+      throw new DeviceActivationOutcomeUnknownError(
+        "Device activation rebind recovery could not confirm the previous device binding.",
+      );
+    }
+    this.state = {
+      status: "verifying",
+      deviceCode: previous.deviceCode,
+      storeCode: previous.storeCode,
+    };
+    const verification = await this.api.verify({
+      deviceCode: previous.deviceCode,
+      storeCode: previous.storeCode,
+      hardwareId,
+    });
+    if (!this.isCurrentOperation(generation)) return this.state;
+    if (
+      typeof verification !== "object" ||
+      verification === null ||
+      typeof verification.isAllowed !== "boolean"
+    ) {
+      throw new DeviceActivationOutcomeUnknownError(
+        "Device activation rebind recovery could not confirm the previous device binding.",
+      );
+    }
+    if (verification.isAllowed) {
+      const confirmsPreviousBinding =
+        Boolean(verification.authorizationCode) &&
+        verification.deviceCode?.trim() === previous.deviceCode &&
+        verification.storeCode?.trim() === previous.storeCode;
+      if (!confirmsPreviousBinding) {
+        // 允许但身份或授权码不完整，不能作为“旧注册仍启用”的证据。
+        throw new DeviceActivationOutcomeUnknownError(
+          "Device activation rebind recovery could not confirm the previous device binding.",
+        );
+      }
+      await this.clearPendingActivationBestEffort();
+      if (!this.isCurrentOperation(generation)) return this.state;
+    }
+    return this.updateState(
+      this.resolve(Promise.resolve(verification), "verify", generation),
       generation,
     );
   }
