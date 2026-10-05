@@ -1,23 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Alert, Card, Empty, Space, Tag, Typography, theme } from 'antd'
 import { RightOutlined } from '@ant-design/icons'
-import { appUpdatePolicyService } from '../../../services/appUpdatePolicyService'
-import { mobileOtaPolicyService } from '../../../services/mobileOtaPolicyService'
-import { posHandheldUpdatePolicyService } from '../../../services/posHandheldUpdatePolicyService'
-import { getWpfAppReleases } from '../../../services/wpfVersionService'
 import {
   RELEASE_LANE_DEFINITIONS,
   RELEASE_MATRIX_COLUMNS,
   RELEASE_TERMINALS,
   buildRecentLaneChanges,
   getReleaseLaneDefinition,
-  summarizeHandheldLane,
-  summarizeIpadOtaLane,
-  summarizeMobileAndroidNativeLane,
-  summarizeMobileOtaLane,
-  summarizeNativeLane,
-  summarizeWpfLane,
   type ReleaseLaneAttention,
   type ReleaseLaneKey,
   type ReleaseLaneScope,
@@ -25,130 +15,21 @@ import {
   type ReleaseTerminal,
 } from './releaseCenterLogic'
 import { formatAppDownloadLocalDateTime } from './time'
-
-type LaneState =
-  | { state: 'loading' }
-  | { state: 'failed' }
-  | { state: 'ready'; summary: ReleaseLaneSummary }
+import type { ReleaseLaneState, ReleaseLaneStates } from './useReleaseLaneSummaries'
 
 interface ReleaseOverviewProps {
-  refreshVersion: number
+  lanes: ReleaseLaneStates
   onOpenLane: (terminal: ReleaseTerminal, lane: string) => void
 }
 
-const HANDHELD_KEYS: ReleaseLaneKey[] = [
-  'handheld-ios-native',
-  'handheld-android-native',
-  'handheld-ios-ota',
-  'handheld-android-ota',
-]
-
-function initialLaneStates(): Record<ReleaseLaneKey, LaneState> {
-  return Object.fromEntries(
-    RELEASE_LANE_DEFINITIONS.map((definition) => [definition.key, { state: 'loading' }]),
-  ) as Record<ReleaseLaneKey, LaneState>
-}
-
-/** 投放总览：并行读取各轨道当前策略；单条轨道失败只影响自己的格子。 */
-export default function ReleaseOverview({ refreshVersion, onOpenLane }: ReleaseOverviewProps) {
+/** 投放总览：矩阵、待处理与最近变更；数据由外壳统一加载（单条轨道失败只影响自己的格子）。 */
+export default function ReleaseOverview({ lanes, onOpenLane }: ReleaseOverviewProps) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const [lanes, setLanes] = useState<Record<ReleaseLaneKey, LaneState>>(initialLaneStates)
-  const requestIdRef = useRef(0)
-
-  useEffect(() => {
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
-    const controller = new AbortController()
-    const { signal } = controller
-    setLanes(initialLaneStates())
-
-    // 只回写本次刷新的结果：刷新或卸载后，旧请求晚到也不会覆盖界面。
-    const commit = (keys: ReleaseLaneKey[], task: Promise<ReleaseLaneSummary[]>) => {
-      task.then(
-        (summaries) => {
-          if (requestIdRef.current !== requestId) {
-            return
-          }
-          setLanes((current) => {
-            const next = { ...current }
-            for (const key of keys) {
-              const summary = summaries.find((item) => item.key === key)
-              next[key] = summary ? { state: 'ready', summary } : { state: 'failed' }
-            }
-            return next
-          })
-        },
-        (error: unknown) => {
-          if (requestIdRef.current !== requestId) {
-            return
-          }
-          console.error('Failed to load release lanes', keys, error)
-          setLanes((current) => {
-            const next = { ...current }
-            for (const key of keys) {
-              next[key] = { state: 'failed' }
-            }
-            return next
-          })
-        },
-      )
-    }
-
-    commit(
-      ['mobile-ios-native'],
-      Promise.all([
-        appUpdatePolicyService.getMobileIosNativePolicy(signal),
-        appUpdatePolicyService.getIosAppStoreReleases('mobile-ios', signal),
-      ]).then(([policy, releases]) => [summarizeNativeLane('mobile-ios-native', policy, releases)]),
-    )
-    commit(
-      ['mobile-android-native'],
-      appUpdatePolicyService.getMobileAndroidNativePolicy(signal)
-        .then((policy) => [summarizeMobileAndroidNativeLane(policy)]),
-    )
-    commit(
-      ['mobile-android-ota'],
-      mobileOtaPolicyService.getPolicy('production', 'android', signal)
-        .then((policy) => [summarizeMobileOtaLane('mobile-android-ota', policy)]),
-    )
-    commit(
-      ['mobile-ios-ota'],
-      mobileOtaPolicyService.getPolicy('production', 'ios', signal)
-        .then((policy) => [summarizeMobileOtaLane('mobile-ios-ota', policy)]),
-    )
-    commit(
-      ['ipad-ios-native'],
-      Promise.all([
-        appUpdatePolicyService.getPosIpadNativePolicy(signal),
-        appUpdatePolicyService.getIosAppStoreReleases('pos-ipad', signal),
-      ]).then(([policy, releases]) => [summarizeNativeLane('ipad-ios-native', policy, releases)]),
-    )
-    commit(
-      ['ipad-ios-ota'],
-      appUpdatePolicyService.getPosIpadOtaRollout(signal)
-        .then((rollout) => [summarizeIpadOtaLane(rollout)]),
-    )
-    commit(
-      HANDHELD_KEYS,
-      posHandheldUpdatePolicyService.getPolicies(signal)
-        .then((policies) => policies.map(summarizeHandheldLane)),
-    )
-    commit(
-      ['wpf-windows'],
-      getWpfAppReleases({ channel: 'production', page: 1, pageSize: 50 })
-        .then((result) => [summarizeWpfLane(result.items)]),
-    )
-
-    return () => {
-      controller.abort()
-      requestIdRef.current += 1
-    }
-  }, [refreshVersion])
 
   const readySummaries = useMemo(
     () => Object.values(lanes)
-      .filter((lane): lane is Extract<LaneState, { state: 'ready' }> => lane.state === 'ready')
+      .filter((lane): lane is Extract<ReleaseLaneState, { state: 'ready' }> => lane.state === 'ready')
       .map((lane) => lane.summary),
     [lanes],
   )

@@ -158,7 +158,12 @@ function formatTargetDeviceLabel(item: WpfTargetDeviceSummary) {
   ].filter(Boolean).join(' · ')
 }
 
-export default function WpfVersionsPage() {
+interface WpfVersionsPageProps {
+  /** 策略、版本状态或上传变更成功后通知外层（版本发布中心）刷新摘要。 */
+  onChanged?: () => void
+}
+
+export default function WpfVersionsPage({ onChanged }: WpfVersionsPageProps = {}) {
   const { t } = useTranslation()
   const canManageAppDownloads = useAuthStore((state) => state.access.canManageAppDownloads)
   const [uploadForm] = Form.useForm<UploadFormValues>()
@@ -716,6 +721,7 @@ export default function WpfVersionsPage() {
           ? t('system.wpfVersions.rollbackSuccess', '回退策略已保存')
           : t('system.wpfVersions.policySaved', '版本策略已保存'),
       )
+      onChanged?.()
       await refreshLatestReleaseQuery(payload.channel, refreshQuery)
     } catch (error) {
       console.error('Failed to save WPF release policy', error)
@@ -817,6 +823,7 @@ export default function WpfVersionsPage() {
           ? t('system.wpfVersions.restoreSuccess', 'WPF 版本已恢复')
           : t('system.wpfVersions.disableSuccess', 'WPF 版本已禁用'),
       )
+      onChanged?.()
       await refreshLatestReleaseQuery(undefined, refreshQuery)
     } catch (error) {
       console.error('Failed to update WPF release status', error)
@@ -941,6 +948,7 @@ export default function WpfVersionsPage() {
       })
 
       message.success(t('system.wpfVersions.uploadSuccess', 'WPF 版本已上传并登记'))
+      onChanged?.()
       closeUploadDrawer()
       uploadForm.resetFields()
       const uploadedChannel = normalizeWpfReleaseChannel(values.channel)

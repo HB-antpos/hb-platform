@@ -18,11 +18,14 @@ export const RELEASE_TERMINALS = ['mobile', 'ipad', 'handheld', 'wpf'] as const
 export type ReleaseTerminal = (typeof RELEASE_TERMINALS)[number]
 export type ReleaseCenterView = 'overview' | ReleaseTerminal | 'tools'
 
-/** 每类终端在工作区里的轨道页签，顺序即展示顺序，第一个为默认。 */
+/**
+ * 每类终端在工作区里的轨道页签，顺序即展示顺序，第一个为默认。
+ * 除 APK 构建页签外，每个页签与总览矩阵的一格一一对应。
+ */
 export const RELEASE_TERMINAL_LANES = {
-  mobile: ['ios-native', 'android-native', 'ota'],
+  mobile: ['ios-native', 'android-native', 'ota-ios', 'ota-android'],
   ipad: ['ios-native', 'ota'],
-  handheld: ['policy', 'apk'],
+  handheld: ['android-native', 'ios-native', 'android-ota', 'ios-ota', 'apk'],
   wpf: ['installer'],
 } as const satisfies Record<ReleaseTerminal, readonly string[]>
 
@@ -110,14 +113,14 @@ export interface ReleaseLaneDefinition {
 export const RELEASE_LANE_DEFINITIONS: readonly ReleaseLaneDefinition[] = [
   { key: 'mobile-ios-native', terminal: 'mobile', lane: 'ios-native', column: 'ios-native' },
   { key: 'mobile-android-native', terminal: 'mobile', lane: 'android-native', column: 'android-native' },
-  { key: 'mobile-ios-ota', terminal: 'mobile', lane: 'ota', column: 'ios-ota' },
-  { key: 'mobile-android-ota', terminal: 'mobile', lane: 'ota', column: 'android-ota' },
+  { key: 'mobile-ios-ota', terminal: 'mobile', lane: 'ota-ios', column: 'ios-ota' },
+  { key: 'mobile-android-ota', terminal: 'mobile', lane: 'ota-android', column: 'android-ota' },
   { key: 'ipad-ios-native', terminal: 'ipad', lane: 'ios-native', column: 'ios-native' },
   { key: 'ipad-ios-ota', terminal: 'ipad', lane: 'ota', column: 'ios-ota' },
-  { key: 'handheld-ios-native', terminal: 'handheld', lane: 'policy', column: 'ios-native' },
-  { key: 'handheld-android-native', terminal: 'handheld', lane: 'policy', column: 'android-native' },
-  { key: 'handheld-ios-ota', terminal: 'handheld', lane: 'policy', column: 'ios-ota' },
-  { key: 'handheld-android-ota', terminal: 'handheld', lane: 'policy', column: 'android-ota' },
+  { key: 'handheld-ios-native', terminal: 'handheld', lane: 'ios-native', column: 'ios-native' },
+  { key: 'handheld-android-native', terminal: 'handheld', lane: 'android-native', column: 'android-native' },
+  { key: 'handheld-ios-ota', terminal: 'handheld', lane: 'ios-ota', column: 'ios-ota' },
+  { key: 'handheld-android-ota', terminal: 'handheld', lane: 'android-ota', column: 'android-ota' },
   { key: 'wpf-windows', terminal: 'wpf', lane: 'installer', column: 'windows' },
 ]
 
@@ -412,4 +415,78 @@ export function buildRecentLaneChanges(
 
 export function getReleaseLaneDefinition(key: ReleaseLaneKey) {
   return RELEASE_LANE_DEFINITIONS.find((definition) => definition.key === key)!
+}
+
+/** 工作区页签对应的轨道；APK 构建等没有策略的页签返回 null。 */
+export function findReleaseLaneKey(terminal: ReleaseTerminal, lane: string): ReleaseLaneKey | null {
+  return RELEASE_LANE_DEFINITIONS
+    .find((definition) => definition.terminal === terminal && definition.lane === lane)?.key ?? null
+}
+
+// ---------------------------------------------------------------------------
+// 设备决策阶梯：客户端按自身版本落在哪一段，就收到哪种提示。口径与各后端判定一致：
+// - 原生 / 安装包：低于最低支持版本强制；required 时低于目标全部强制；其余可选提醒。
+// - Mobile 安卓原生：只拦截低于最低构建号的设备，可选提醒由安装包流程负责，与本策略无关。
+// - OTA：只覆盖 Runtime 兼容且接入受控更新器的客户端，不能突破 Runtime 边界。
+// - WPF：高于目标的机器会收到回退（后端 IsRollback），开启强制更新开关时回退也必须执行。
+// ---------------------------------------------------------------------------
+
+export type DecisionSegmentKind =
+  | 'force'
+  | 'optional'
+  | 'latest'
+  | 'unaffected'
+  | 'not-covered'
+  | 'rollback'
+  | 'off'
+
+export interface DecisionSegment {
+  kind: DecisionSegmentKind
+  /** 区间的边界值，由界面拼成「低于 X」「= X」等文字；off / not-covered 为 null。 */
+  bound: string | null
+  /** 同一 kind 的细分口径，界面据此选择文案。 */
+  variant?: 'ota-required' | 'ota-optional' | 'below-target' | 'below-minimum' | 'between'
+}
+
+export function buildDecisionLadder(summary: ReleaseLaneSummary): DecisionSegment[] {
+  if (summary.status === 'disabled' || !summary.mode) {
+    return [{ kind: 'off', bound: null }]
+  }
+  const target = summary.target ?? '--'
+
+  if (summary.key === 'mobile-android-native') {
+    return [
+      { kind: 'force', bound: summary.minimum, variant: 'below-minimum' },
+      { kind: 'unaffected', bound: summary.minimum },
+    ]
+  }
+
+  if (summary.key.endsWith('-ota')) {
+    const required = summary.mode === 'required'
+    return [
+      { kind: 'not-covered', bound: null },
+      {
+        kind: required ? 'force' : 'optional',
+        bound: target,
+        variant: required ? 'ota-required' : 'ota-optional',
+      },
+      { kind: 'latest', bound: target },
+    ]
+  }
+
+  const segments: DecisionSegment[] = []
+  if (summary.mode === 'required') {
+    segments.push({ kind: 'force', bound: target, variant: 'below-target' })
+  } else if (summary.mode === 'minimum' && summary.minimum) {
+    segments.push({ kind: 'force', bound: summary.minimum, variant: 'below-minimum' })
+    segments.push({ kind: 'optional', bound: target, variant: 'between' })
+  } else {
+    segments.push({ kind: 'optional', bound: target, variant: 'below-target' })
+  }
+  segments.push({ kind: 'latest', bound: target })
+  if (summary.key === 'wpf-windows') {
+    // 回退是否强制只取决于策略的强制更新开关（与最低版本无关），文案统一说明，不在这里区分。
+    segments.push({ kind: 'rollback', bound: target })
+  }
+  return segments
 }

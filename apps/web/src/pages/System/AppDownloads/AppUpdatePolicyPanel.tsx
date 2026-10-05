@@ -38,6 +38,8 @@ import {
 } from '@ant-design/icons'
 import { QRCodeSVG } from '@rc-component/qrcode'
 import { appUpdatePolicyService } from '../../../services/appUpdatePolicyService'
+import type { MobileOtaPlatform } from '../../../types/mobileOtaPolicy'
+import type { PosHandheldPolicyLane } from '../../../types/posHandheldUpdatePolicy'
 import type {
   AppUpdateApp,
   AppUpdateTargetStoreOption,
@@ -90,6 +92,12 @@ interface AppUpdatePolicyPanelProps {
   lane: AppUpdatePolicyLane
   /** 外部刷新信号：数值变化时重新加载当前轨道。 */
   refreshVersion?: number
+  /** lane 为 mobile-ota 时固定的平台。 */
+  mobileOtaPlatform?: MobileOtaPlatform
+  /** lane 为 pos-handheld 时固定的手持轨道。 */
+  handheldLane?: PosHandheldPolicyLane
+  /** 策略保存或登记发布成功后通知外层刷新摘要。 */
+  onChanged?: () => void
 }
 
 interface PolicySaveConfirmation {
@@ -198,6 +206,9 @@ export default function AppUpdatePolicyPanel({
   canManage,
   lane,
   refreshVersion = 0,
+  mobileOtaPlatform,
+  handheldLane,
+  onChanged,
 }: AppUpdatePolicyPanelProps) {
   const { t } = useTranslation()
   const [mobileForm] = Form.useForm<NativeUpdatePolicyFormValue>()
@@ -518,6 +529,7 @@ export default function AppUpdatePolicyPanel({
         ...summary,
       })
       message.success(t('system.appDownloads.updatePolicy.registerSuccess'))
+      onChanged?.()
       setRegisterApp(null)
       registerForm.resetFields()
       if (isHandheld) {
@@ -716,6 +728,7 @@ export default function AppUpdatePolicyPanel({
       }
 
       message.success(t('system.appDownloads.updatePolicy.saveSuccess'))
+      onChanged?.()
       await loadLane()
     } catch (error) {
       console.error('Failed to save native update policy', error)
@@ -795,6 +808,7 @@ export default function AppUpdatePolicyPanel({
       }
 
       message.success(t('system.appDownloads.updatePolicy.saveSuccess'))
+      onChanged?.()
       await loadIpadOtaLane()
     } catch (error) {
       console.error('Failed to save iPad OTA rollout', error)
@@ -1406,6 +1420,7 @@ export default function AppUpdatePolicyPanel({
         <MobileAndroidNativePolicyTab
           canManage={canManage}
           refreshVersion={mobileAndroidRefreshVersion}
+          onChanged={onChanged}
         />
       ),
     },
@@ -1416,6 +1431,8 @@ export default function AppUpdatePolicyPanel({
         <MobileOtaPolicyTab
           canManage={canManage}
           refreshVersion={mobileOtaRefreshVersion}
+          platform={mobileOtaPlatform}
+          onChanged={onChanged}
         />
       ),
     },
@@ -1583,6 +1600,8 @@ export default function AppUpdatePolicyPanel({
           canManage={canManage}
           refreshVersion={handheldRefreshVersion}
           onRegisterIosRelease={() => openRegisterModal('pos-handheld')}
+          lane={handheldLane}
+          onChanged={onChanged}
         />
       ),
     },

@@ -29,7 +29,10 @@
         "ios-native": "iOS native",
         "android-native": "Android native",
         "ota": "OTA updates",
-        "policy": "Update policy",
+        "ota-ios": "OTA · iOS",
+        "ota-android": "OTA · Android",
+        "ios-ota": "OTA · iOS",
+        "android-ota": "OTA · Android",
         "apk": "APK builds",
         "installer": "Windows installer"
       },
@@ -94,6 +97,43 @@
         "handheld-ios-ota": "Handheld POS · OTA iOS",
         "handheld-android-ota": "Handheld POS · OTA Android",
         "wpf-windows": "WPF POS · Windows"
+      },
+      "card": {
+        "title": "Active policy",
+        "active": "Active",
+        "adjust": "Adjust policy",
+        "failedHint": "Failed to load the active policy. Refresh the page header to retry; the form below is unaffected.",
+        "target": "Target",
+        "minimum": "Minimum",
+        "mode": "Update mode",
+        "scope": "Scope",
+        "updated": "Last updated"
+      },
+      "ladder": {
+        "title": "Device decision preview",
+        "hint": "What each client receives depends on its current version",
+        "outOfScope": "Stores or devices outside the scope stay as they are and get no prompt.",
+        "kind": {
+          "force": "Required",
+          "optional": "Optional prompt",
+          "latest": "Up to date",
+          "unaffected": "Not affected",
+          "not-covered": "Not covered",
+          "rollback": "Rollback prompt",
+          "off": "Not delivered"
+        },
+        "range": {
+          "below": "Below {{bound}}",
+          "between": "At least the minimum, below {{bound}}",
+          "equal": "= {{bound}}",
+          "latestOta": "Target OTA applied",
+          "otaRequired": "Same runtime, not on target: cannot skip",
+          "otaOptional": "Same runtime, not on target: can apply later",
+          "unaffected": "≥ {{bound}}: optional prompts come from the installer flow",
+          "notCovered": "Older clients with an incompatible runtime or no managed updater",
+          "rollback": "Above {{bound}}: must roll back when force update is on",
+          "off": "Policy disabled; clients get no update prompt"
+        }
       }
     }
   }

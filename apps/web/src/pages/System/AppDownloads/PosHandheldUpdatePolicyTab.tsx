@@ -71,6 +71,10 @@ interface PosHandheldUpdatePolicyTabProps {
   canManage: boolean
   refreshVersion?: number
   onRegisterIosRelease: () => void
+  /** 固定为单条轨道：版本目录只列该轨道候选，策略区只显示该轨道（版本发布中心按轨道拆页签）。 */
+  lane?: PosHandheldPolicyLane
+  /** 策略保存成功后通知外层刷新摘要。 */
+  onChanged?: () => void
 }
 
 interface LoadStatus {
@@ -194,6 +198,8 @@ export default function PosHandheldUpdatePolicyTab({
   canManage,
   refreshVersion = 0,
   onRegisterIosRelease,
+  lane: fixedLane,
+  onChanged,
 }: PosHandheldUpdatePolicyTabProps) {
   const { t } = useTranslation()
   const [androidNativeForm] = Form.useForm<PosHandheldPolicyFormValue>()
@@ -394,14 +400,25 @@ export default function PosHandheldUpdatePolicyTab({
     ),
     [policyList],
   )
+  // 固定轨道时平台与类型由轨道决定，用户只能再按状态与关键字筛选。
+  const effectiveFilters = useMemo<PosHandheldCandidateFilters>(
+    () => (fixedLane
+      ? {
+        ...filters,
+        platform: lanePlatform(fixedLane),
+        kind: isNativeLane(fixedLane) ? 'native' : 'ota',
+      }
+      : filters),
+    [filters, fixedLane],
+  )
   const filteredCandidates = useMemo(
     () => filterPosHandheldCandidates(
       allCandidates,
-      filters,
+      effectiveFilters,
       activeCandidateIds,
       blockedCandidateIds,
     ),
-    [activeCandidateIds, allCandidates, blockedCandidateIds, filters],
+    [activeCandidateIds, allCandidates, blockedCandidateIds, effectiveFilters],
   )
   const anyLoading = policyLoadStatus.loading
     || POLICY_LANES.some((lane) => candidateLoadStatus[lane].loading)
@@ -602,6 +619,7 @@ export default function PosHandheldUpdatePolicyTab({
   const handleSaveResult = useCallback((result: Awaited<ReturnType<typeof savePolicyWithConflictReload>>) => {
     if (result === 'saved') {
       message.success(t('system.appDownloads.updatePolicy.posHandheld.saveSuccess'))
+      onChanged?.()
       return
     }
     const key = result === 'conflict-reloaded'
@@ -610,7 +628,7 @@ export default function PosHandheldUpdatePolicyTab({
         ? 'versionConflictReloadSuperseded'
         : 'versionConflictReloadFailed'
     message.warning(t(`system.appDownloads.updatePolicy.${key}`))
-  }, [t])
+  }, [onChanged, t])
 
   const saveLane = useCallback(async (
     lane: PosHandheldPolicyLane,
@@ -1017,7 +1035,7 @@ export default function PosHandheldUpdatePolicyTab({
         title={t('system.appDownloads.updatePolicy.posHandheld.catalogTitle')}
         extra={(
           <Space wrap>
-            {canManage ? (
+            {canManage && (!fixedLane || fixedLane === 'ios-native') ? (
               <Button icon={<AppstoreAddOutlined />} onClick={onRegisterIosRelease}>
                 {t('system.appDownloads.updatePolicy.posHandheld.registerIosRelease')}
               </Button>
@@ -1029,30 +1047,34 @@ export default function PosHandheldUpdatePolicyTab({
         )}
       >
         <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
-          <Col xs={24} sm={12} lg={5}>
-            <Select
-              value={filters.platform}
-              style={{ width: '100%' }}
-              onChange={(platform) => setFilters((current) => ({ ...current, platform }))}
-              options={[
-                { value: 'all', label: t('system.appDownloads.updatePolicy.posHandheld.allPlatforms') },
-                { value: 'android', label: 'Android' },
-                { value: 'ios', label: 'iOS' },
-              ]}
-            />
-          </Col>
-          <Col xs={24} sm={12} lg={5}>
-            <Select
-              value={filters.kind}
-              style={{ width: '100%' }}
-              onChange={(kind) => setFilters((current) => ({ ...current, kind }))}
-              options={[
-                { value: 'all', label: t('system.appDownloads.updatePolicy.posHandheld.allTypes') },
-                { value: 'native', label: t('system.appDownloads.updatePolicy.posHandheld.native') },
-                { value: 'ota', label: 'OTA' },
-              ]}
-            />
-          </Col>
+          {fixedLane ? null : (
+            <Col xs={24} sm={12} lg={5}>
+              <Select
+                value={filters.platform}
+                style={{ width: '100%' }}
+                onChange={(platform) => setFilters((current) => ({ ...current, platform }))}
+                options={[
+                  { value: 'all', label: t('system.appDownloads.updatePolicy.posHandheld.allPlatforms') },
+                  { value: 'android', label: 'Android' },
+                  { value: 'ios', label: 'iOS' },
+                ]}
+              />
+            </Col>
+          )}
+          {fixedLane ? null : (
+            <Col xs={24} sm={12} lg={5}>
+              <Select
+                value={filters.kind}
+                style={{ width: '100%' }}
+                onChange={(kind) => setFilters((current) => ({ ...current, kind }))}
+                options={[
+                  { value: 'all', label: t('system.appDownloads.updatePolicy.posHandheld.allTypes') },
+                  { value: 'native', label: t('system.appDownloads.updatePolicy.posHandheld.native') },
+                  { value: 'ota', label: 'OTA' },
+                ]}
+              />
+            </Col>
+          )}
           <Col xs={24} sm={12} lg={5}>
             <Select
               value={filters.status}
@@ -1091,14 +1113,16 @@ export default function PosHandheldUpdatePolicyTab({
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
         />
       </Card>
-      <Card size="small" title={t('system.appDownloads.updatePolicy.posHandheld.strategyTitle')}>
-        <Tabs
-          activeKey={activePlatform}
-          onChange={(key) => setActivePlatform(key as PosHandheldPlatform)}
-          items={platformTabs}
-          destroyInactiveTabPane={false}
-        />
-      </Card>
+      {fixedLane ? renderPolicyEditor(fixedLane) : (
+        <Card size="small" title={t('system.appDownloads.updatePolicy.posHandheld.strategyTitle')}>
+          <Tabs
+            activeKey={activePlatform}
+            onChange={(key) => setActivePlatform(key as PosHandheldPlatform)}
+            items={platformTabs}
+            destroyInactiveTabPane={false}
+          />
+        </Card>
+      )}
     </Space>
   )
 }
