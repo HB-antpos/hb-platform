@@ -3,6 +3,7 @@ import type {
   PaymentCartLeasePort,
 } from "../../features/payments/runtime/payment-checkout-runtime";
 import { PaymentCheckoutRuntimeError } from "../../features/payments/runtime/payment-checkout-runtime";
+import { PricingCart } from "../../features/sales/domain";
 import {
   ACTIVE_PRICING_CART_BUSY,
   ACTIVE_PRICING_CART_TERMINAL_RECOVERY_REQUIRED,
@@ -30,12 +31,30 @@ export interface PaymentCartRecoveryMaterialPort {
   findBlockingCart(): Promise<PaymentCartRecoveryMaterial | null>;
 }
 
+/**
+ * 冷启动时耐久草稿无法由当前定价引擎精确复现，已改按耐久购物车持有支付 lease。
+ * differences 只含字段路径，不含商品或金额值，可直接进入中心日志。
+ */
+export type PaymentCartDurableRecoveryFallback = Readonly<{
+  checkoutIntentId: string;
+  differences: readonly string[];
+}>;
+
 type HeldPaymentCartLease = {
   readonly publicLease: PaymentCartLease;
   readonly sessionLease: ActivePricingCartLease;
+  /** 取得 lease 时销售会话的快照引用；普通 lease 与 publicLease 是同一对象。 */
+  readonly sessionCart: CartSnapshot;
+  readonly sessionPricingState: PricingCartStateSnapshot;
   release(): void;
   operation: Promise<void> | null;
 };
+
+type HeldLeaseMaterial = Readonly<{
+  publicLease: PaymentCartLease;
+  sessionCart: CartSnapshot;
+  sessionPricingState: PricingCartStateSnapshot;
+}>;
 
 /**
  * 把跨多个终端请求的支付生命周期映射到 ActivePricingCartSession 的单个
@@ -52,6 +71,9 @@ implements PaymentCartLeasePort {
     private readonly activeCart: ActivePricingCartSession,
     private readonly recovery: PaymentCartRecoveryMaterialPort,
     private readonly createLeaseId: () => string,
+    private readonly onDurableRecoveryFallback: (
+      fallback: PaymentCartDurableRecoveryFallback,
+    ) => void = () => undefined,
   ) {}
 
   /**
@@ -107,9 +129,9 @@ implements PaymentCartLeasePort {
     const held = this.requireHeld(lease);
     const current = held.sessionLease.read();
     if (
-      current.cart !== held.publicLease.cart ||
-      current.pricingState !== held.publicLease.pricingState ||
-      current.cart.revision !== held.publicLease.revision
+      current.cart !== held.sessionCart ||
+      current.pricingState !== held.sessionPricingState ||
+      current.cart.revision !== held.sessionCart.revision
     ) {
       throw paymentLeaseError(
         "PAYMENT_CART_LEASE_CONFLICT",
@@ -165,36 +187,86 @@ implements PaymentCartLeasePort {
       );
     }
 
+    const lease = await this.restoreRecoveryLease(normalized);
+    this.initialized = true;
+    return lease;
+  }
+
+  /**
+   * 把耐久恢复材料恢复为支付 lease。可精确重算时恢复原购物车；否则改按耐久购物车持有 lease，
+   * 不抛出让 runtime 初始化失败（门店 1013 设备曾因此永久卡在启动页）。
+   */
+  private async restoreRecoveryLease(
+    normalized: PaymentCartRecoveryMaterial,
+  ): Promise<PaymentCartLease> {
+    // 先在隔离的 PricingCart 中重算，不可复现时销售会话保持原样，再走耐久降级。
+    const differences = replayDifferences(normalized);
+    if (differences.length > 0) {
+      const lease = await this.acquireDurableRecovery(normalized);
+      try {
+        this.onDurableRecoveryFallback(Object.freeze({
+          checkoutIntentId: normalized.checkoutIntentId,
+          differences: Object.freeze(differences),
+        }));
+      } catch {
+        // 诊断旁路故障不能撤销已取得的恢复 lease。
+      }
+      return lease;
+    }
+
     const restored = this.activeCart.replace(
       normalized.pricingState,
       normalized.recallBinding,
     );
     assertCartValueMatches(restored.cart, normalized.cart);
-    const lease = await this.acquireExactCore({
+    return this.acquireExactCore({
       checkoutIntentId: normalized.checkoutIntentId,
       expectedRevision: normalized.cart.revision,
     }, true);
-    this.initialized = true;
-    return lease;
+  }
+
+  /**
+   * 耐久草稿无法被当前代码精确重算时（例如定价快照新增派生字段、定价引擎跨版本变化），
+   * 不能让 runtime 初始化失败把设备永久卡在启动页，也不能把重算出的不同金额展示给收银员。
+   * 这里以 SQLCipher 中已与订单行核对过的耐久 cart 作为支付 lease 内容，销售车清空并由该 lease
+   * 独占锁住；后续恢复、安全取消、放弃草稿仍由支付运行时按草稿金额逐步交叉核对。
+   */
+  private acquireDurableRecovery(
+    material: PaymentCartRecoveryMaterial,
+  ): Promise<PaymentCartLease> {
+    return this.acquireHeld((sessionLease) => {
+      if (sessionLease.read().cart.lines.length > 0) {
+        throw paymentLeaseError(
+          ACTIVE_PRICING_CART_BUSY,
+          "Payment recovery cannot replace a non-empty active cart.",
+        );
+      }
+      // 空车（与生产组合根的空车工厂一致）承接耐久挂单 binding：解除 RecallActive 围栏后，
+      // 完成订单时才能正常清车；不读取可能已不被接受的 pricingState。
+      const session = sessionLease.replace(
+        new PricingCart().stateSnapshot(),
+        material.recallBinding,
+      );
+      return {
+        publicLease: Object.freeze({
+          leaseId: requiredText(this.createLeaseId(), "payment lease id"),
+          checkoutIntentId: material.checkoutIntentId,
+          revision: material.cart.revision,
+          total: material.cart.actualAmount,
+          cart: material.cart,
+          pricingState: material.pricingState,
+        }) satisfies PaymentCartLease,
+        sessionCart: session.cart,
+        sessionPricingState: session.pricingState,
+      };
+    });
   }
 
   private acquireNew(input: {
     checkoutIntentId: string;
     expectedRevision: number;
   }, allowRecoveryQuantity: boolean): Promise<PaymentCartLease> {
-    let acquiredResolve!: (lease: PaymentCartLease) => void;
-    let acquiredReject!: (error: unknown) => void;
-    let settled = false;
-    const acquired = new Promise<PaymentCartLease>((resolve, reject) => {
-      acquiredResolve = resolve;
-      acquiredReject = reject;
-    });
-    let releaseResolve!: () => void;
-    const releaseGate = new Promise<void>((resolve) => {
-      releaseResolve = resolve;
-    });
-
-    const operation = this.activeCart.runExclusive(async (sessionLease) => {
+    return this.acquireHeld((sessionLease) => {
       const snapshot = sessionLease.read();
       if (
         snapshot.cart.revision !== input.expectedRevision ||
@@ -224,23 +296,50 @@ implements PaymentCartLeasePort {
           throw new PaymentCheckoutRuntimeError("PAYMENT_QUANTITY_UNSUPPORTED");
         }
       }
-      const publicLease = Object.freeze({
-        leaseId: requiredText(this.createLeaseId(), "payment lease id"),
-        checkoutIntentId: input.checkoutIntentId,
-        revision: input.expectedRevision,
-        total: snapshot.cart.actualAmount,
-        cart: snapshot.cart,
-        pricingState: snapshot.pricingState,
-      }) satisfies PaymentCartLease;
+      return {
+        publicLease: Object.freeze({
+          leaseId: requiredText(this.createLeaseId(), "payment lease id"),
+          checkoutIntentId: input.checkoutIntentId,
+          revision: input.expectedRevision,
+          total: snapshot.cart.actualAmount,
+          cart: snapshot.cart,
+          pricingState: snapshot.pricingState,
+        }) satisfies PaymentCartLease,
+        sessionCart: snapshot.cart,
+        sessionPricingState: snapshot.pricingState,
+      };
+    });
+  }
+
+  /** 在单个 exclusive callback 内准备 lease，并持有到完成或安全取消才释放。 */
+  private acquireHeld(
+    prepare: (sessionLease: ActivePricingCartLease) => HeldLeaseMaterial,
+  ): Promise<PaymentCartLease> {
+    let acquiredResolve!: (lease: PaymentCartLease) => void;
+    let acquiredReject!: (error: unknown) => void;
+    let settled = false;
+    const acquired = new Promise<PaymentCartLease>((resolve, reject) => {
+      acquiredResolve = resolve;
+      acquiredReject = reject;
+    });
+    let releaseResolve!: () => void;
+    const releaseGate = new Promise<void>((resolve) => {
+      releaseResolve = resolve;
+    });
+
+    const operation = this.activeCart.runExclusive(async (sessionLease) => {
+      const prepared = prepare(sessionLease);
       const held: HeldPaymentCartLease = {
-        publicLease,
+        publicLease: prepared.publicLease,
         sessionLease,
+        sessionCart: prepared.sessionCart,
+        sessionPricingState: prepared.sessionPricingState,
         release: releaseResolve,
         operation: null,
       };
       this.held = held;
       settled = true;
-      acquiredResolve(publicLease);
+      acquiredResolve(prepared.publicLease);
       await releaseGate;
     });
 
@@ -370,6 +469,54 @@ function assertPublicLeaseMatches(
     );
   }
   return lease;
+}
+
+/**
+ * 返回耐久 cart 与当前定价引擎重算结果不一致的字段路径；空数组表示可精确复现。
+ * 重算本身抛错（定价快照已不被当前代码接受）也视为不可复现，交给耐久降级处理。
+ */
+function replayDifferences(material: PaymentCartRecoveryMaterial): string[] {
+  let replayed: CartSnapshot;
+  try {
+    replayed = PricingCart.restore(material.pricingState).snapshot();
+  } catch {
+    return ["pricingState"];
+  }
+  if (persistedCartValue(replayed) === persistedCartValue(material.cart)) {
+    return [];
+  }
+  const differences: string[] = [];
+  const replayedRecord = replayed as unknown as Record<string, unknown>;
+  const persistedRecord = material.cart as unknown as Record<string, unknown>;
+  for (const key of unionKeys(replayedRecord, persistedRecord)) {
+    if (key === "lines") continue;
+    if (JSON.stringify(replayedRecord[key]) !== JSON.stringify(persistedRecord[key])) {
+      differences.push(key);
+    }
+  }
+  if (replayed.lines.length !== material.cart.lines.length) {
+    differences.push("lines.length");
+  }
+  const lineCount = Math.min(replayed.lines.length, material.cart.lines.length);
+  for (let index = 0; index < lineCount; index += 1) {
+    const replayedLine = replayed.lines[index] as unknown as Record<string, unknown>;
+    const persistedLine = material.cart.lines[index] as unknown as Record<string, unknown>;
+    for (const key of unionKeys(replayedLine, persistedLine)) {
+      if (key === "discountSource") continue;
+      if (JSON.stringify(replayedLine[key]) !== JSON.stringify(persistedLine[key])) {
+        differences.push(`lines[${index}].${key}`);
+      }
+    }
+  }
+  // 仅字段顺序不同也会让整体字符串不等；此时保留一个可识别的路径而不是空数组。
+  return differences.length > 0 ? differences.slice(0, 20) : ["fieldOrder"];
+}
+
+function unionKeys(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): string[] {
+  return [...new Set([...Object.keys(left), ...Object.keys(right)])];
 }
 
 function assertCartValueMatches(

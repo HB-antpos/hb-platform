@@ -5,6 +5,7 @@ import {
 } from "./current-cashier-session";
 import {
   ActivePricingCartPaymentLeaseCoordinator,
+  type PaymentCartDurableRecoveryFallback,
   type PaymentCartRecoveryMaterialPort,
 } from "./payment-cart-lease-coordinator";
 import {
@@ -168,6 +169,10 @@ export type ProductionPaymentRuntimeDependencies = Readonly<{
   hasReturnRecoveryRequired?: (() => Promise<boolean>) | undefined;
   /** 缺失时 Blocked 撤券仍保持阻断（失败关闭），不提供人工作废入口。 */
   authorizeTenderReversalVoid?: TenderReversalVoidAuthorizer | undefined;
+  /** 冷启动支付草稿无法精确重算、已改按耐久购物车恢复时的诊断旁路（只含字段路径）。 */
+  reportPaymentRecoveryFallback?:
+    | ((fallback: PaymentCartDurableRecoveryFallback) => void)
+    | undefined;
   drainFulfilment(): Promise<unknown>;
 }>;
 
@@ -227,6 +232,7 @@ export function createProductionPaymentRuntime(
     input.activeCart,
     paymentCartRecovery(drafts, terminalScope),
     input.createId,
+    input.reportPaymentRecoveryFallback,
   );
   let recoveryInitialized = false;
   let returnRefund: ProductionReturnRefundAdapter | null = null;
