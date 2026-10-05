@@ -1,12 +1,24 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  jest,
+} from "@jest/globals";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
-import { Alert } from "react-native";
+import { Alert, StyleSheet } from "react-native";
 
 import { BootstrapScreen } from "./bootstrap-screen";
 
 import { PosSoundContext } from "@/ui/feedback/pos-sound-context";
 
 const mockRetry = jest.fn<() => Promise<void>>();
+const mockLoadOtaRecovery = jest.fn<
+  (input: { canReload(): boolean }) => Promise<unknown>
+>();
+let mockRuntimePhase = "failed";
+let mockRuntimeError = "bootstrap.error";
 const mockAbandonPendingDeviceActivation = jest.fn<() => Promise<void>>();
 const mockServerTest =
   jest.fn<(address: string, signal: AbortSignal) => Promise<boolean>>();
@@ -28,8 +40,8 @@ jest.mock("@/core/runtime/pos-runtime-context", () => ({
       backend: "unreachable",
       database: "failed",
       device: "unauthorized",
-      error: "bootstrap.error",
-      phase: "failed",
+      error: mockRuntimeError,
+      phase: mockRuntimePhase,
     },
   }),
 }));
@@ -42,6 +54,11 @@ jest.mock("@/core/runtime/expo-bootstrap-server-diagnostics", () => ({
       currentApiBaseUrl: "https://hotbargain.vip/pos-api",
       test: mockServerTest,
     }),
+}));
+
+jest.mock("@/core/runtime/expo-startup-ota-recovery", () => ({
+  loadExpoStartupOtaRecovery: (input: { canReload(): boolean }) =>
+    mockLoadOtaRecovery(input),
 }));
 
 jest.mock("@/ui/shell/pos-shell-store", () => ({
@@ -57,10 +74,45 @@ describe("BootstrapScreen", () => {
   beforeEach(() => {
     mockRetry.mockReset();
     mockRetry.mockResolvedValue(undefined);
+    mockRuntimePhase = "failed";
+    mockRuntimeError = "bootstrap.error";
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    mockLoadOtaRecovery.mockReset();
+    mockLoadOtaRecovery.mockRejectedValue(new Error("not under test"));
     mockAbandonPendingDeviceActivation.mockReset();
     mockAbandonPendingDeviceActivation.mockResolvedValue(undefined);
     mockServerTest.mockReset();
     mockServerTest.mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("SecureStore 原始英文错误只写诊断日志，操作员只看到本地化安全摘要", async () => {
+    mockRuntimeError =
+      "SecureStore: missing keychain-access-groups entitlement for getItemAsync";
+
+    const screen = await render(<BootstrapScreen />);
+
+    expect(screen.getByText("bootstrap.error.secureStorage")).toBeTruthy();
+    expect(screen.queryByText(mockRuntimeError)).toBeNull();
+    await waitFor(() =>
+      expect(console.error).toHaveBeenCalledWith(
+        "[HBPOS][iPad][Bootstrap] Runtime initialization failed.",
+        mockRuntimeError,
+      ),
+    );
+  });
+
+  it("其他初始化异常显示通用本地化摘要，不暴露原始英文报错", async () => {
+    mockRuntimeError =
+      "Recovered pricing state does not reproduce the persisted cart.";
+
+    const screen = await render(<BootstrapScreen />);
+
+    expect(screen.getByText("bootstrap.error.generic")).toBeTruthy();
+    expect(screen.queryByText(mockRuntimeError)).toBeNull();
   });
 
   it("失败时重试保留原有调用，并发出 tap 触控音", async () => {
@@ -181,5 +233,44 @@ describe("BootstrapScreen", () => {
     expect(
       screen.getByTestId("server-connection-save-disabled-reason"),
     ).toBeTruthy();
+  });
+
+  it("失败页加载修复更新通道；安装进行中禁用重试，reload 只在 runtime 仍失败时放行", async () => {
+    let listener: ((state: unknown) => void) | null = null;
+    const recovery = {
+      check: jest.fn(async () => {
+        listener?.({ phase: "applying" });
+        return { phase: "applying" };
+      }),
+      apply: jest.fn(),
+      getState: () => ({ phase: "applying" }),
+      subscribe: (next: (state: unknown) => void) => {
+        listener = next;
+        return () => {
+          listener = null;
+        };
+      },
+    };
+    mockLoadOtaRecovery.mockResolvedValue(recovery);
+
+    const screen = await render(<BootstrapScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByText("bootstrap.otaRecovery.applying")).toBeTruthy(),
+    );
+    const retryButton = screen.getByRole("button", { name: "bootstrap.retry" });
+    expect(retryButton.props.accessibilityState.disabled).toBe(true);
+    // 禁用时外观同步变灰，避免店员误以为按钮无响应。
+    expect(StyleSheet.flatten(retryButton.props.style).opacity).toBe(0.4);
+    await fireEvent.press(retryButton);
+    expect(mockRetry).not.toHaveBeenCalled();
+
+    const [{ canReload }] = mockLoadOtaRecovery.mock.calls[0] as [
+      { canReload(): boolean },
+    ];
+    expect(canReload()).toBe(true);
+    mockRuntimePhase = "starting";
+    await screen.rerender(<BootstrapScreen />);
+    expect(canReload()).toBe(false);
   });
 });

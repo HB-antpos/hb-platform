@@ -1,10 +1,11 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
   Image,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -16,7 +17,9 @@ import {
   loadExpoBootstrapServerDiagnostics,
   type BootstrapServerDiagnostics,
 } from "@/core/runtime/expo-bootstrap-server-diagnostics";
+import { loadExpoStartupOtaRecovery } from "@/core/runtime/expo-startup-ota-recovery";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
+import { StartupOtaRecoveryPanel } from "@/features/app-updates/startup-ota-recovery-panel";
 import { serverConnectionPanelCopy } from "@/features/device-registration/server-connection-copy";
 import { ServerConnectionPanel } from "@/features/device-registration/server-connection-panel";
 import { PosPressable } from "@/ui/controls/pos-pressable";
@@ -80,6 +83,7 @@ export function BootstrapScreen() {
   >(null);
   const serverProbe = useRef<AbortController | null>(null);
   const startupActionInFlight = useRef(false);
+  const lastLoggedError = useRef<string | null>(null);
   const display = usePosShellStore((state) => state.display);
   const compact = width < 900;
   const backendReady = runtime.backend === "reachable";
@@ -91,10 +95,24 @@ export function BootstrapScreen() {
     runtime.phase === "failed" &&
     serverDiagnostics?.canAbandonPendingDeviceActivation === true &&
     !pendingActivationAbandoned;
-  const startupActionBusy = abandoningPendingActivation || retryingStartup;
+  const [otaRecoveryBusy, setOtaRecoveryBusy] = useState(false);
+  const startupActionBusy =
+    abandoningPendingActivation || retryingStartup || otaRecoveryBusy;
+  // reload 前读取最新相位：只有 runtime 仍失败（SQLite 已在失败收尾关闭）且未在重试/放弃激活时才允许套用 OTA。
+  const runtimePhase = useRef(runtime.phase);
+  runtimePhase.current = runtime.phase;
+  const loadOtaRecovery = useCallback(
+    () =>
+      loadExpoStartupOtaRecovery({
+        canReload: () =>
+          runtimePhase.current === "failed" &&
+          !startupActionInFlight.current,
+      }),
+    [],
+  );
 
   const retryStartup = async () => {
-    if (startupActionInFlight.current) return;
+    if (startupActionInFlight.current || otaRecoveryBusy) return;
     startupActionInFlight.current = true;
     setRetryingStartup(true);
     try {
@@ -149,6 +167,22 @@ export function BootstrapScreen() {
   };
 
   useEffect(() => {
+    if (
+      runtime.phase !== "failed" ||
+      !runtime.error ||
+      lastLoggedError.current === runtime.error
+    ) {
+      return;
+    }
+    lastLoggedError.current = runtime.error;
+    // 原始初始化异常只进入开发/设备日志；操作员界面使用稳定的本地化摘要。
+    console.error(
+      "[HBPOS][iPad][Bootstrap] Runtime initialization failed.",
+      runtime.error,
+    );
+  }, [runtime.error, runtime.phase]);
+
+  useEffect(() => {
     let active = true;
     void loadExpoBootstrapServerDiagnostics()
       .then((diagnostics) => {
@@ -167,7 +201,12 @@ export function BootstrapScreen() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <PosStatusStrip />
-      <View style={[styles.page, compact && styles.pageCompact]}>
+      {/* 失败态同时展示服务器检查与修复更新时会超出横屏高度，必须可滚动以保证重试按钮可达。 */}
+      <ScrollView
+        contentContainerStyle={[styles.page, compact && styles.pageCompact]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.brandRail}>
           <Image
             accessibilityIgnoresInvertColors
@@ -236,11 +275,21 @@ export function BootstrapScreen() {
           </View>
         ) : null}
 
+        {runtime.phase === "failed" ? (
+          <StartupOtaRecoveryPanel
+            load={loadOtaRecovery}
+            onBusyChange={setOtaRecoveryBusy}
+          />
+        ) : null}
+
         <View style={styles.footer}>
           <View style={styles.footerDot} />
           <View style={styles.footerCopy}>
             <Text style={styles.footerText}>
-              {pendingActivationError ?? runtime.error ?? t("bootstrap.footer")}
+              {pendingActivationError ??
+                (runtime.phase === "failed"
+                  ? bootstrapErrorSummary(runtime.error, t)
+                  : t("bootstrap.footer"))}
             </Text>
             {runtime.phase === "failed" ? (
               <View style={styles.footerActions}>
@@ -256,6 +305,7 @@ export function BootstrapScreen() {
                     style={({ pressed }) => [
                       styles.abandonPendingButton,
                       pressed && styles.retryButtonPressed,
+                      startupActionBusy && styles.retryButtonDisabled,
                     ]}
                     testID="bootstrap-abandon-pending-activation"
                   >
@@ -277,6 +327,7 @@ export function BootstrapScreen() {
                   style={({ pressed }) => [
                     styles.retryButton,
                     pressed && styles.retryButtonPressed,
+                    startupActionBusy && styles.retryButtonDisabled,
                   ]}
                 >
                   <Text style={styles.retryLabel}>{t("bootstrap.retry")}</Text>
@@ -285,9 +336,24 @@ export function BootstrapScreen() {
             ) : null}
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
+}
+
+function bootstrapErrorSummary(
+  error: string | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (
+    error &&
+    /secure\s*store|securestore|keychain|entitlement|keychain-access-groups/iu.test(
+      error,
+    )
+  ) {
+    return t("bootstrap.error.secureStorage");
+  }
+  return t("bootstrap.error.generic");
 }
 
 const styles = StyleSheet.create({
@@ -296,7 +362,7 @@ const styles = StyleSheet.create({
     backgroundColor: posColors.canvas,
   },
   page: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 48,
     paddingVertical: 30,
   },
@@ -412,6 +478,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 9,
     marginTop: "auto",
+    // 内容超出一屏时 auto 间距归零，保留固定留白避免贴住上方面板。
+    paddingTop: 20,
   },
   footerCopy: {
     flex: 1,
@@ -462,6 +530,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 18,
     backgroundColor: posColors.ink,
+  },
+  // 任一启动动作进行中时按钮禁用，外观须同步变灰，避免误以为无响应。
+  retryButtonDisabled: {
+    opacity: 0.4,
   },
   retryButtonPressed: {
     opacity: 0.78,

@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ScrollView,
@@ -14,7 +14,9 @@ import {
   loadExpoBootstrapServerDiagnostics,
   type BootstrapServerDiagnostics,
 } from "@/core/runtime/expo-bootstrap-server-diagnostics";
+import { loadExpoStartupOtaRecovery } from "@/core/runtime/expo-startup-ota-recovery";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
+import { StartupOtaRecoveryPanel } from "@/features/app-updates/startup-ota-recovery-panel";
 import { serverConnectionPanelCopy } from "@/features/device-registration/server-connection-copy";
 import { ServerConnectionPanel } from "@/features/device-registration/server-connection-panel";
 import { PosPressable } from "@/ui/controls/pos-pressable";
@@ -63,6 +65,17 @@ export function BootstrapScreen() {
     useState<BootstrapServerDiagnostics | null>(null);
   const serverProbe = useRef<AbortController | null>(null);
   const lastLoggedError = useRef<string | null>(null);
+  const [otaRecoveryBusy, setOtaRecoveryBusy] = useState(false);
+  // reload 前读取最新相位：只有 runtime 仍失败（SQLite 已在失败收尾关闭）才允许套用 OTA。
+  const runtimePhase = useRef(runtime.phase);
+  runtimePhase.current = runtime.phase;
+  const loadOtaRecovery = useCallback(
+    () =>
+      loadExpoStartupOtaRecovery({
+        canReload: () => runtimePhase.current === "failed",
+      }),
+    [],
+  );
   const backendReady = runtime.backend === "reachable";
   const databaseReady = runtime.database === "ready";
   const deviceReady =
@@ -165,6 +178,13 @@ export function BootstrapScreen() {
             </View>
           ) : null}
 
+          {runtime.phase === "failed" ? (
+            <StartupOtaRecoveryPanel
+              load={loadOtaRecovery}
+              onBusyChange={setOtaRecoveryBusy}
+            />
+          ) : null}
+
           <View style={styles.footer}>
             <View style={styles.footerDot} />
             <View style={styles.footerCopy}>
@@ -176,6 +196,8 @@ export function BootstrapScreen() {
               {runtime.phase === "failed" ? (
                 <PosPressable
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: otaRecoveryBusy }}
+                  disabled={otaRecoveryBusy}
                   onPress={() => {
                     void retry().catch(() => undefined);
                   }}
@@ -183,6 +205,7 @@ export function BootstrapScreen() {
                   style={({ pressed }) => [
                     styles.retryButton,
                     pressed && styles.retryButtonPressed,
+                    otaRecoveryBusy && styles.retryButtonDisabled,
                   ]}
                 >
                   <Text style={styles.retryLabel}>{t("bootstrap.retry")}</Text>
@@ -342,6 +365,10 @@ const styles = StyleSheet.create({
   },
   retryButtonPressed: {
     opacity: 0.78,
+  },
+  // 修复更新检查/安装期间禁用重试，外观须同步变灰，避免店员误以为按钮无响应。
+  retryButtonDisabled: {
+    opacity: 0.4,
   },
   retryLabel: {
     color: "#FFFFFF",
