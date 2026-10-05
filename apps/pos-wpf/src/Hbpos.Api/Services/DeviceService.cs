@@ -793,7 +793,10 @@ public sealed class DeviceService : IDeviceService
             device.DeviceStatus == EnabledStatus,
             GetStatusMessage(device.DeviceStatus),
             device.DeviceStatus == EnabledStatus ? device.AuthorizationCode : null,
-            ExactIdentityMatched: DeviceSystems.IsIpadOs(submittedDeviceSystem));
+            // 关键逻辑：走到这里的非 Windows 平台（iPadOS/iOS/Android）已按门店+设备码+硬件码精确命中，
+            // 且平台一致、硬件码通过校验，才算精确身份证明；客户端「清除设备注册」中断后的
+            // 启动恢复依赖它确认终态。Windows 只按设备码查询，永远不给该证明。
+            ExactIdentityMatched: requiresExactHardwareId);
     }
 
     public async Task<DeviceReregisterResponse> ReregisterAsync(

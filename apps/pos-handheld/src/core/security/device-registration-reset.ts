@@ -37,6 +37,8 @@ export interface DeviceRegistrationResetApi {
 export type DeviceRegistrationResetRecoveryResult =
   | "none"
   | "completed"
+  /** 服务端仍精确启用本机：重置未生效，已撤销本次重置标记与恢复锁，保留注册。 */
+  | "restored"
   | "pending";
 
 export type DeviceRegistrationResetDependencies = Readonly<{
@@ -61,7 +63,7 @@ export type DeviceRegistrationResetDependencies = Readonly<{
 
 /**
  * prepared marker 必须先于服务端写入；任何不确定结果都保持 fail-closed，
- * 直到匿名 verify 给出精确的停用终态。
+ * 直到匿名 verify 给出精确终态：精确停用则完成本机清理，精确仍启用则撤销本次重置。
  */
 export class DeviceRegistrationResetCoordinator {
   public constructor(
@@ -173,8 +175,54 @@ export class DeviceRegistrationResetCoordinator {
       }
     }
 
+    if (
+      response.exactIdentityMatched === true &&
+      response.deviceStatus === 1 &&
+      response.isAllowed === true
+    ) {
+      // 服务端对本机精确硬件身份仍是“启用且允许”：重置请求没有生效（未到达服务端），
+      // 或生效后已被管理员重新启用。两种情况服务端的当前授权都覆盖本机，继续锁机不增加
+      // 任何安全性（匿名 verify 本就会把授权码下发给同一身份），只会让设备永久不可用。
+      return this.restoreUnappliedReset(marker);
+    }
+
     await this.lockForRecovery();
     return "pending";
+  }
+
+  /**
+   * 撤销一次未生效的重置：只在本机凭据仍完整且与 marker 身份一致时进行，
+   * 仅移除本次重置写入的恢复锁，其他原因的设备锁（服务端停用、设备 403）原样保留。
+   */
+  private async restoreUnappliedReset(
+    marker: DeviceRegistrationResetMarker,
+  ): Promise<DeviceRegistrationResetRecoveryResult> {
+    try {
+      const [current, installationId] = await Promise.all([
+        this.input.credentials.load(),
+        this.input.installation.getOrCreate(),
+      ]);
+      if (
+        !current ||
+        current.deviceCode !== marker.deviceCode ||
+        current.storeCode !== marker.storeCode ||
+        current.hardwareId !== marker.hardwareId ||
+        current.hardwareId !== installationId
+      ) {
+        // 本机清理已部分执行或凭据被替换：不能把残缺注册恢复成可营业状态。
+        // 管理员在后台停用该设备后，下次启动会按“精确停用”完成清理。
+        await this.lockForRecovery();
+        return "pending";
+      }
+      // 先解除持久恢复锁再删 marker：删 marker 失败时下次启动仍会重新核对。
+      await this.input.lock.unlockIfReason(recoveryLockReason);
+      await this.input.marker.clear();
+      this.input.lock.releaseRecoveryProcessLock();
+      return "restored";
+    } catch {
+      await this.lockForRecovery();
+      return "pending";
+    }
   }
 
   public async isResetRecoveryPending(): Promise<boolean> {
