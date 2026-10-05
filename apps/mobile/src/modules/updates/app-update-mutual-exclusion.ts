@@ -15,6 +15,8 @@ export interface AppUpdateMutualExclusion {
   setOtaInitializationPending(pending: boolean): void;
   setOtaRequiredGate(active: boolean): void;
   isOtaRequiredGateActive(): boolean;
+  setNativeRequiredGate(active: boolean): void;
+  isNativeRequiredGateActive(): boolean;
 }
 
 export interface UpdateLaneRetryGate {
@@ -48,6 +50,9 @@ export function createAppUpdateMutualExclusion(options?: Readonly<{
   let nativeInstallerActive = false;
   let otaInitializationPending = options?.otaInitializationPending ?? true;
   let otaRequiredGate = false;
+  // 安卓原生强制更新：旧原生包本身无法再承接后续 OTA，因此 required 时原生通道优先，
+  // 不再等待 OTA 初始化或 OTA required，同时禁止 OTA 抢占与 reload。
+  let nativeRequiredGate = false;
   let generation = 0;
   const listeners = new Set<() => void>();
   const notify = () => {
@@ -59,7 +64,8 @@ export function createAppUpdateMutualExclusion(options?: Readonly<{
       if (
         operation
         || nativeInstallerActive
-        || (owner === "native" && (otaInitializationPending || otaRequiredGate))
+        || (owner === "native" && !nativeRequiredGate && (otaInitializationPending || otaRequiredGate))
+        || (owner === "ota" && nativeRequiredGate)
         || (promptOwner !== null && promptOwner !== owner)
       ) {
         return null;
@@ -80,7 +86,8 @@ export function createAppUpdateMutualExclusion(options?: Readonly<{
     tryOwnPrompt(owner) {
       if (
         nativeInstallerActive
-        || (owner === "native" && (otaInitializationPending || otaRequiredGate))
+        || (owner === "native" && !nativeRequiredGate && (otaInitializationPending || otaRequiredGate))
+        || (owner === "ota" && nativeRequiredGate)
         || (operation !== null && operation.owner !== owner)
         || (promptOwner !== null && promptOwner !== owner)
       ) {
@@ -110,6 +117,7 @@ export function createAppUpdateMutualExclusion(options?: Readonly<{
     canReloadOta() {
       return (
         !nativeInstallerActive
+        && !nativeRequiredGate
         && (operation === null || operation.owner === "ota")
         && (promptOwner === null || promptOwner === "ota")
       );
@@ -132,6 +140,15 @@ export function createAppUpdateMutualExclusion(options?: Readonly<{
     },
     isOtaRequiredGateActive() {
       return otaRequiredGate;
+    },
+    setNativeRequiredGate(active) {
+      if (nativeRequiredGate !== active) {
+        nativeRequiredGate = active;
+        notify();
+      }
+    },
+    isNativeRequiredGateActive() {
+      return nativeRequiredGate;
     },
   };
 }
