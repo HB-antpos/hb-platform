@@ -39,76 +39,61 @@ function findNode(nodes: WebMenuPreviewNode[], path: string): WebMenuPreviewNode
 const translate = (key: string, fallback?: string) => fallback ?? key
 
 const viewAccess = buildRolePreviewAccess({
-  roleGuid: 'wpf-view-role',
-  roleName: 'WpfViewRole',
+  roleGuid: 'release-view-role',
+  roleName: 'ReleaseViewRole',
   isSuperAdmin: false,
   implicitAllPermissions: false,
   explicitPermissionCodes: [P.System.ViewAppDownloads],
   effectivePermissionCodes: [P.System.ViewAppDownloads],
 })
 
-const noWpfAccess = buildRolePreviewAccess({
-  roleGuid: 'wpf-hidden-role',
-  roleName: 'WpfHiddenRole',
-  isSuperAdmin: false,
-  implicitAllPermissions: false,
-  explicitPermissionCodes: [],
-  effectivePermissionCodes: [],
-})
-
 const routeSource = readFileSync(join(process.cwd(), 'src/router/routes.tsx'), 'utf8')
 
+// WPF 版本已并入版本发布中心：旧地址只做重定向，不再单独懒加载页面。
 assertEqual(
-  routeSource.includes("const SystemWpfVersionsPage = lazy(() => import('../pages/System/WpfVersions'))"),
-  true,
-  'Routes should lazy import the WPF versions page',
+  routeSource.includes("import('../pages/System/WpfVersions')"),
+  false,
+  'Routes should no longer lazy import the standalone WPF versions page',
 )
-
 assertEqual(
   routeSource.includes("path: '/system/wpf-versions'") &&
-    routeSource.includes("title: 'menu.wpfVersions'") &&
-    routeSource.includes("accessKey: 'canViewAppDownloads'") &&
-    routeSource.includes('element: <SystemWpfVersionsPage />'),
+    routeSource.includes('<Navigate replace to="/system/app-downloads?view=wpf" />') &&
+    routeSource.includes("activeMenu: '/system/app-downloads'"),
   true,
-  'WPF versions route should be registered with reused App Downloads view permission',
+  'Legacy WPF versions URL should redirect to the WPF terminal of the release center',
+)
+assertEqual(
+  routeSource.includes("const SystemAppDownloadsPage = lazy(() => import('../pages/System/AppDownloads'))") &&
+    routeSource.includes("path: '/system/app-downloads'") &&
+    routeSource.includes("accessKey: 'canViewAppDownloads'") &&
+    routeSource.includes('element: <SystemAppDownloadsPage />'),
+  true,
+  'Release center route should keep the App Downloads path and view permission',
 )
 
 assertEqual(
   getAccessKeyPermissionCodes('canViewAppDownloads').join(','),
   `${P.System.ViewAppDownloads},${P.System.ManageAppDownloads}`,
-  'WPF versions menu should document view and manage permissions accepted by the route',
+  'Release center menu should document view and manage permissions accepted by the route',
 )
 
 const preview = buildWebRoleMenuPreview(viewAccess, translate, { includeHidden: true })
-const wpfVersionsMenu = findNode(preview, '/system/wpf-versions')
-
-assertEqual(Boolean(wpfVersionsMenu), true, 'Web role preview should include the WPF versions menu')
 assertEqual(
-  wpfVersionsMenu?.permissionCodes.join(','),
-  `${P.System.ViewAppDownloads},${P.System.ManageAppDownloads}`,
-  'WPF versions menu preview should display both accepted WPF version permissions',
-)
-
-const hiddenPreview = buildWebRoleMenuPreview(noWpfAccess, translate, {
-  includeHidden: true,
-  explicitPermissionCodes: [],
-})
-const hiddenWpfVersionsMenu = findNode(hiddenPreview, '/system/wpf-versions')
-
-assertEqual(
-  hiddenWpfVersionsMenu?.edit.addPermissionCodes.includes(P.System.ViewAppDownloads),
-  true,
-  'Adding the hidden WPF versions menu should grant only the view permission',
-)
-assertEqual(
-  hiddenWpfVersionsMenu?.edit.addPermissionCodes.includes(P.System.ManageAppDownloads),
+  Boolean(findNode(preview, '/system/wpf-versions')),
   false,
-  'Adding the hidden WPF versions menu should not promote the role to manage permission',
+  'Web role preview should no longer list a separate WPF versions menu',
+)
+const releaseCenterMenu = findNode(preview, '/system/app-downloads')
+assertEqual(Boolean(releaseCenterMenu), true, 'Web role preview should include the release center menu')
+assertEqual(
+  releaseCenterMenu?.permissionCodes.join(','),
+  `${P.System.ViewAppDownloads},${P.System.ManageAppDownloads}`,
+  'Release center menu preview should display both accepted permissions',
 )
 assertEqual(
-  wpfVersionsMenu?.edit.removePermissionCodes.join(','),
-  P.System.ViewAppDownloads,
-  'Removing the WPF versions menu should not delete manage permission together with view permission',
+  releaseCenterMenu?.edit.removePermissionCodes.join(','),
+  `${P.System.ViewAppDownloads},${P.System.ManageAppDownloads}`,
+  'Removing the release center menu should revoke both permissions, otherwise manage alone keeps it visible',
 )
 
 console.log('wpfVersionsRoute.test: ok')

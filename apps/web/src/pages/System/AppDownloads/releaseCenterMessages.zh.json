@@ -1,0 +1,100 @@
+{
+  "system": {
+    "releaseCenter": {
+      "title": "版本发布中心",
+      "subtitle": "发布登记 ≠ 策略激活：构建、OTA、安装包先登记为发布事实，管理员激活策略后客户端才会收到更新。",
+      "navLabel": "发布中心导航",
+      "nav": {
+        "overview": "投放总览",
+        "terminals": "终端",
+        "tools": "工具",
+        "mobile": "Mobile 员工端",
+        "mobileSub": "iOS · Android · OTA",
+        "ipad": "iPad POS",
+        "ipadSub": "iOS · OTA",
+        "handheld": "手持 POS",
+        "handheldSub": "Android · iOS · OTA",
+        "wpf": "WPF 收银端",
+        "wpfSub": "Windows 安装包",
+        "toolsItem": "组件与凭据",
+        "toolsSub": "RustDesk · 服务 Token"
+      },
+      "terminalDesc": {
+        "mobile": "店员 / 店长移动 App。原生包与 OTA 分轨投放，OTA 区分 production / preview。",
+        "ipad": "iPad 收银端。App Store 原生 + EAS OTA。",
+        "handheld": "手持收银端。OTA 仅管理 production，设备认证后才下发决策。",
+        "wpf": "Windows 收银客户端。安装包由 Web 上传，支持按分店 / 机器定向灰度。"
+      },
+      "lanes": {
+        "ios-native": "iOS 原生",
+        "android-native": "Android 原生",
+        "ota": "OTA 热更新",
+        "policy": "更新策略",
+        "apk": "APK 构建",
+        "installer": "Windows 安装包"
+      },
+      "readOnly": "当前账号只有查看权限，策略、上传与投放配置均为只读。",
+      "refresh": "刷新",
+      "columns": {
+        "terminal": "终端",
+        "nativeGroup": "原生包 / 安装包",
+        "otaGroup": "OTA 热更新",
+        "ios-native": "iOS",
+        "android-native": "Android",
+        "windows": "Windows",
+        "ios-ota": "iOS",
+        "android-ota": "Android"
+      },
+      "matrixTitle": "投放矩阵",
+      "matrixHint": "每格是一条独立轨道当前生效的策略（OTA 为 production），点击进入轨道管理",
+      "legendActive": "已激活",
+      "legendAttention": "待处理",
+      "legendDisabled": "未启用",
+      "notApplicable": "不适用",
+      "loadFailed": "加载失败",
+      "loadFailedHint": "部分轨道加载失败，可点刷新重试；不影响进入各终端管理。",
+      "enterLaneAria": "{{lane}}，进入轨道管理",
+      "noTarget": "未选择目标",
+      "notEnabled": "未启用",
+      "modes": {
+        "optional": "可选更新",
+        "minimum": "最低版本强制",
+        "required": "强制更新"
+      },
+      "minimum": "最低 {{value}}",
+      "scope": {
+        "all": "全部",
+        "stores": "{{count}} 个分店",
+        "devices": "{{count}} 台机器"
+      },
+      "attentionTitle": "待处理",
+      "attentionHint": "需要管理员决策的发布事项，点击直达对应轨道",
+      "attentionEmpty": "暂无待处理事项",
+      "attention": {
+        "pendingRelease": "{{latest}} 等 {{count}} 个新版本未投放",
+        "pendingReleaseDesc": "已登记但当前策略仍指向旧版本，确认后在轨道内激活",
+        "bindingInvalid": "策略绑定失效",
+        "bindingInvalidDesc": "设备会拒绝当前绑定，需重新选择候选版本",
+        "partialRollout": "灰度中：仅 {{scope}}",
+        "partialRolloutDesc": "确认无误后可扩大到全部范围",
+        "go": "去处理"
+      },
+      "recentTitle": "最近策略变更",
+      "recentHint": "各轨道最后一次策略保存，按时间倒序",
+      "recentEmpty": "暂无策略变更记录",
+      "laneNames": {
+        "mobile-ios-native": "Mobile · iOS 原生",
+        "mobile-android-native": "Mobile · Android 原生",
+        "mobile-ios-ota": "Mobile · OTA iOS",
+        "mobile-android-ota": "Mobile · OTA Android",
+        "ipad-ios-native": "iPad POS · iOS 原生",
+        "ipad-ios-ota": "iPad POS · OTA iOS",
+        "handheld-ios-native": "手持 POS · iOS 原生",
+        "handheld-android-native": "手持 POS · Android 原生",
+        "handheld-ios-ota": "手持 POS · OTA iOS",
+        "handheld-android-ota": "手持 POS · OTA Android",
+        "wpf-windows": "WPF 收银端 · Windows"
+      }
+    }
+  }
+}

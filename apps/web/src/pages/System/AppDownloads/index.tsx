@@ -1,519 +1,267 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
+import { Alert, Button, Card, Space, Typography, theme } from 'antd'
 import {
-  Alert,
-  Button,
-  Card,
-  Descriptions,
-  Empty,
-  Modal,
-  QRCode,
-  Segmented,
-  Space,
-  Tag,
-  Typography,
-  message,
-} from 'antd'
-import type { ColumnsType } from 'antd/es/table'
-import {
-  CopyOutlined,
-  LinkOutlined,
-  QrcodeOutlined,
+  AppstoreOutlined,
+  DesktopOutlined,
+  MobileOutlined,
   ReloadOutlined,
+  ScanOutlined,
+  TabletOutlined,
+  ToolOutlined,
 } from '@ant-design/icons'
-import {
-  getLatestMobileAppBuild,
-  getMobileAppBuilds,
-} from '../../../services/mobileAppBuildService'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 import { useAuthStore } from '../../../store/auth'
-import type { MobileAppBuild } from '../../../types/mobileAppBuild'
-import {
-  APP_DOWNLOAD_PROFILES,
-  APP_DOWNLOAD_APP_KEYS,
-  DEFAULT_APP_DOWNLOAD_APP_KEY,
-  DEFAULT_APP_DOWNLOAD_PROFILE,
-  buildAppDownloadQuery,
-  normalizeAppDownloadAppKey,
-  normalizeAppDownloadProfile,
-  resolveAppDownloadMirrorStatus,
-  resolveAppDownloadSource,
-  resolveAppDownloadContentState,
-  type AppDownloadMirrorStatus,
-  type AppDownloadAppKey,
-  type AppDownloadProfile,
-} from './logic'
-import { formatAppDownloadLocalDateTime } from './time'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import WpfVersionsPage from '../WpfVersions'
 import AppUpdatePolicyPanel from './AppUpdatePolicyPanel'
+import AndroidApkBuildsPanel from './AndroidApkBuildsPanel'
+import ReleaseOverview from './ReleaseOverview'
 import ServiceApiTokensPanel from './ServiceApiTokensPanel'
 import RustDeskDownloadEntry from './RustDeskDownloadEntry'
-import { MeasuredTable } from '../../../components/MeasuredTable'
+import {
+  RELEASE_TERMINAL_LANES,
+  RELEASE_TERMINALS,
+  buildReleaseCenterSearch,
+  isReleaseTerminal,
+  resolveReleaseCenterLocation,
+  type ReleaseCenterView,
+  type ReleaseTerminal,
+} from './releaseCenterLogic'
+import releaseCenterMessagesEn from './releaseCenterMessages.en.json'
+import releaseCenterMessagesZh from './releaseCenterMessages.zh.json'
 
-function formatVersion(build?: MobileAppBuild | null) {
-  if (!build) {
-    return '--'
-  }
-  const version = build.appVersion || '--'
-  const buildVersion = build.appBuildVersion ? ` (${build.appBuildVersion})` : ''
-  return `${version}${buildVersion}`
+registerPageMessages({ zh: releaseCenterMessagesZh, en: releaseCenterMessagesEn })
+
+const TERMINAL_ICONS: Record<ReleaseTerminal, ReactNode> = {
+  mobile: <MobileOutlined />,
+  ipad: <TabletOutlined />,
+  handheld: <ScanOutlined />,
+  wpf: <DesktopOutlined />,
 }
 
-function formatShortCommit(value?: string | null) {
-  return value ? value.slice(0, 8) : '--'
-}
-
-function getStatusColor(status?: string | null) {
-  switch ((status ?? '').toLowerCase()) {
-    case 'finished':
-    case 'success':
-    case 'completed':
-      return 'green'
-    case 'errored':
-    case 'failed':
-    case 'canceled':
-    case 'cancelled':
-      return 'red'
-    case 'in-progress':
-    case 'running':
-    case 'pending':
-      return 'processing'
-    default:
-      return 'default'
-  }
-}
-
-function getMirrorStatusColor(status: AppDownloadMirrorStatus) {
-  switch (status) {
-    case 'succeeded':
-      return 'green'
-    case 'running':
-      return 'processing'
-    case 'failed':
-      return 'orange'
-    case 'unsafe':
-      return 'red'
-    case 'pending':
-      return 'default'
-    default:
-      return 'default'
-  }
-}
-
+/**
+ * 版本发布中心：原「App 下载」与「WPF 版本」合并页。
+ * 左侧按终端导航，总览矩阵汇总全部轨道当前策略；位置写进地址栏（view / lane），刷新与分享都能还原。
+ */
 export default function AppDownloadsPage() {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const canManageAppDownloads = useAuthStore((state) => state.access.canManageAppDownloads)
   const isAdmin = useAuthStore((state) => state.access.isAdmin)
-  const [latest, setLatest] = useState<MobileAppBuild | null>(null)
-  const [items, setItems] = useState<MobileAppBuild[]>([])
-  const [buildLoading, setBuildLoading] = useState(false)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const [total, setTotal] = useState(0)
-  const [appKey, setAppKey] = useState<AppDownloadAppKey>(DEFAULT_APP_DOWNLOAD_APP_KEY)
-  const [profile, setProfile] = useState<AppDownloadProfile>(DEFAULT_APP_DOWNLOAD_PROFILE)
-  const [loadFailed, setLoadFailed] = useState(false)
-  const [qrBuild, setQrBuild] = useState<MobileAppBuild | null>(null)
-  const buildLoadRequestIdRef = useRef(0)
+  const canViewTools = isAdmin || canManageAppDownloads
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  // 手机宽度下导航改为一行横向滑动的紧凑按钮，不占满首屏。
+  const compactNav = useIsMobile()
+  const { view, lane } = resolveReleaseCenterLocation(searchParams, { canViewTools })
 
-  async function copyText(
-    value: string | null | undefined,
-    successMessage: string,
-    failedMessage: string,
-  ) {
-    if (!value) {
-      return
-    }
-
-    try {
-      await navigator.clipboard.writeText(value)
-      message.success(successMessage)
-    } catch (error) {
-      console.error(failedMessage, error)
-      message.error(failedMessage)
+  const navigate = (nextView: ReleaseCenterView, nextLane?: string | null) => {
+    setSearchParams(new URLSearchParams(buildReleaseCenterSearch(nextView, nextLane)), { replace: true })
+    if (nextView !== view) {
+      // 换到另一个视图时回到顶部，否则会停在上一视图的滚动位置（同一页签内滚动不会自动复位）。
+      window.scrollTo({ top: 0 })
     }
   }
 
-  async function copyLink(url?: string | null) {
-    await copyText(
-      url,
-      t('system.appDownloads.copySuccess'),
-      t('system.appDownloads.copyFailed'),
+  const navButton = (key: ReleaseCenterView, icon: ReactNode, label: string, sub?: string) => {
+    const active = view === key
+    return (
+      <button
+        key={key}
+        type="button"
+        className="release-center-nav"
+        aria-current={active ? 'page' : undefined}
+        onClick={() => navigate(key)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: compactNav ? 6 : 10,
+          width: compactNav ? 'auto' : '100%',
+          flex: compactNav ? 'none' : undefined,
+          whiteSpace: compactNav ? 'nowrap' : undefined,
+          minHeight: 44,
+          padding: '8px 10px',
+          border: 'none',
+          borderRadius: token.borderRadius,
+          background: active ? token.colorPrimaryBg : 'transparent',
+          color: active ? token.colorPrimaryText : token.colorText,
+          fontWeight: active ? 600 : 400,
+          textAlign: 'left',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          fontSize: 'inherit',
+        }}
+      >
+        <span style={{ fontSize: 16, display: 'inline-flex' }}>{icon}</span>
+        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <span>{label}</span>
+          {sub && !compactNav ? (
+            <span style={{ fontSize: 12, fontWeight: 400, color: token.colorTextSecondary }}>{sub}</span>
+          ) : null}
+        </span>
+      </button>
     )
   }
 
-  function openLink(url?: string | null) {
-    if (!url) {
-      return
-    }
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
+  const sectionLabel = (text: string) => (compactNav ? null : (
+    <div style={{ padding: '14px 10px 4px', fontSize: 12, color: token.colorTextSecondary }}>{text}</div>
+  ))
 
-  async function loadBuildData(
-    nextPage = page,
-    nextPageSize = pageSize,
-    nextProfile: AppDownloadProfile = profile,
-    nextAppKey: AppDownloadAppKey = appKey,
-  ) {
-    const query = buildAppDownloadQuery(nextProfile, nextPage, nextPageSize, nextAppKey)
-    const requestId = buildLoadRequestIdRef.current + 1
-    buildLoadRequestIdRef.current = requestId
-    setBuildLoading(true)
-    setLoadFailed(false)
-    try {
-      const [latestBuild, history] = await Promise.all([
-        getLatestMobileAppBuild(query.profile, query.appKey),
-        getMobileAppBuilds(query),
-      ])
-      if (requestId !== buildLoadRequestIdRef.current) {
-        return
-      }
-      setLatest(latestBuild)
-      setItems(history.items)
-      setTotal(history.total)
-      setPage(history.page)
-      setPageSize(history.pageSize)
-      setAppKey(query.appKey)
-      setProfile(query.profile)
-    } catch (error) {
-      if (requestId !== buildLoadRequestIdRef.current) {
-        return
-      }
-      console.error(t('system.appDownloads.loadFailed'), error)
-      setLatest(null)
-      setItems([])
-      setTotal(0)
-      setPage(1)
-      setLoadFailed(true)
-      message.error(t('system.appDownloads.loadFailed'))
-    } finally {
-      // 只允许最后一次请求收尾，避免旧请求晚返回时关闭新请求的 loading 或覆盖状态。
-      if (requestId === buildLoadRequestIdRef.current) {
-        setBuildLoading(false)
-      }
-    }
-  }
-
-  function handleAppKeyChange(value: string | number) {
-    const nextAppKey = normalizeAppDownloadAppKey(value)
-    if (nextAppKey === appKey) {
-      return
-    }
-
-    // 切换应用时先清空 APK 展示状态并使旧请求失效，避免跨应用短暂串数据。
-    buildLoadRequestIdRef.current += 1
-    setAppKey(nextAppKey)
-    setLatest(null)
-    setItems([])
-    setTotal(0)
-    setPage(1)
-    setLoadFailed(false)
-    setQrBuild(null)
-    void loadBuildData(1, pageSize, profile, nextAppKey)
-  }
-
-  function handleProfileChange(value: string | number) {
-    const nextProfile = normalizeAppDownloadProfile(value)
-    setProfile(nextProfile)
-    void loadBuildData(1, pageSize, nextProfile, appKey)
-  }
-
-  useEffect(() => {
-    void loadBuildData(1, pageSize, DEFAULT_APP_DOWNLOAD_PROFILE, DEFAULT_APP_DOWNLOAD_APP_KEY)
-  }, [])
-
-  const profileOptions = useMemo(
-    () =>
-      APP_DOWNLOAD_PROFILES.map((value) => ({
-        label: t(`system.appDownloads.profiles.${value}`),
-        value,
-      })),
-    [t],
-  )
-
-  const appKeyOptions = useMemo(
-    () =>
-      APP_DOWNLOAD_APP_KEYS.map((value) => ({
-        label: t(`system.appDownloads.apps.${value}`),
-        value,
-      })),
-    [t],
-  )
-
-  const columns = useMemo<ColumnsType<MobileAppBuild>>(
-    () => [
-      {
-        title: t('system.appDownloads.profile'),
-        dataIndex: 'buildProfile',
-        width: 130,
-        render: (value: string | null | undefined) => value || '--',
-      },
-      {
-        title: t('system.appDownloads.versionBuild'),
-        key: 'version',
-        width: 160,
-        render: (_value, record) => formatVersion(record),
-      },
-      {
-        title: t('system.appDownloads.status'),
-        dataIndex: 'status',
-        width: 130,
-        render: (value: string | null | undefined) => (
-          <Tag color={getStatusColor(value)}>{value || '--'}</Tag>
-        ),
-      },
-      {
-        title: t('system.appDownloads.completedAt'),
-        dataIndex: 'completedAt',
-        width: 190,
-        render: (value: string | null | undefined) => formatAppDownloadLocalDateTime(value),
-      },
-      {
-        title: t('system.appDownloads.expirationDate'),
-        dataIndex: 'expirationDate',
-        width: 190,
-        render: (value: string | null | undefined) => formatAppDownloadLocalDateTime(value),
-      },
-      {
-        title: t('system.appDownloads.downloadSource'),
-        key: 'downloadSource',
-        width: 130,
-        render: (_value, record) => (
-          <Tag>{t(`system.appDownloads.downloadSources.${resolveAppDownloadSource(record)}`)}</Tag>
-        ),
-      },
-      {
-        title: t('system.appDownloads.mirrorStatus'),
-        key: 'mirrorStatus',
-        width: 140,
-        render: (_value, record) => {
-          const mirrorStatus = resolveAppDownloadMirrorStatus(record)
-          return (
-            <Tag color={getMirrorStatusColor(mirrorStatus)}>
-              {t(`system.appDownloads.mirrorStatuses.${mirrorStatus}`)}
-            </Tag>
-          )
-        },
-      },
-      {
-        title: t('system.appDownloads.mirrorError'),
-        dataIndex: 'cosMirrorError',
-        width: 220,
-        render: (value: string | null | undefined) => (
-          <Typography.Text
-            type={value ? 'danger' : undefined}
-            ellipsis={{ tooltip: value || undefined }}
-            style={{ maxWidth: 200 }}
-          >
-            {value || '--'}
-          </Typography.Text>
-        ),
-      },
-      {
-        title: t('system.appDownloads.commit'),
-        dataIndex: 'gitCommitHash',
-        width: 160,
-        render: (value: string | null | undefined, record) => (
-          <Typography.Text title={record.gitCommitMessage || undefined}>
-            {formatShortCommit(value)}
-          </Typography.Text>
-        ),
-      },
-      {
-        title: t('column.action'),
-        key: 'actions',
-        width: 280,
-        fixed: 'right',
-        render: (_value, record) => (
-          <Space wrap>
-            <Button
-              size="small"
-              icon={<LinkOutlined />}
-              disabled={!record.artifactUrl}
-              onClick={() => openLink(record.artifactUrl)}
-            >
-              {t('system.appDownloads.openDownload')}
-            </Button>
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              disabled={!record.artifactUrl}
-              onClick={() => void copyLink(record.artifactUrl)}
-            >
-              {t('system.appDownloads.copyLink')}
-            </Button>
-            <Button
-              size="small"
-              icon={<QrcodeOutlined />}
-              disabled={!record.artifactUrl}
-              onClick={() => setQrBuild(record)}
-            >
-              {t('system.appDownloads.viewQrCode')}
-            </Button>
+  const renderLane = (terminal: ReleaseTerminal, currentLane: string) => {
+    const common = { canManage: canManageAppDownloads, refreshVersion }
+    switch (`${terminal}:${currentLane}`) {
+      case 'mobile:ios-native':
+        return <AppUpdatePolicyPanel {...common} lane="mobile-native" />
+      case 'mobile:android-native':
+        // 安卓原生策略只设最低支持构建号，目标就是最新公开 APK，所以两块放在同一轨道。
+        return (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <AppUpdatePolicyPanel {...common} lane="mobile-android-native" />
+            <AndroidApkBuildsPanel appKey="mobile" refreshVersion={refreshVersion} />
           </Space>
-        ),
-      },
-    ],
-    [t],
-  )
+        )
+      case 'mobile:ota':
+        return <AppUpdatePolicyPanel {...common} lane="mobile-ota" />
+      case 'ipad:ios-native':
+        return <AppUpdatePolicyPanel {...common} lane="ipad-native" />
+      case 'ipad:ota':
+        return <AppUpdatePolicyPanel {...common} lane="ipad-ota" />
+      case 'handheld:policy':
+        return <AppUpdatePolicyPanel {...common} lane="pos-handheld" />
+      case 'handheld:apk':
+        return <AndroidApkBuildsPanel appKey="pos-handheld" refreshVersion={refreshVersion} />
+      case 'wpf:installer':
+        // WPF 页自管加载与刷新；外部刷新时整体重挂载即可拿到最新数据。
+        return <WpfVersionsPage key={refreshVersion} />
+      default:
+        return null
+    }
+  }
 
-  const latestActions = (
-    <Space wrap>
-      <Segmented
-        value={appKey}
-        options={appKeyOptions}
-        onChange={handleAppKeyChange}
-      />
-      <Segmented
-        size="small"
-        value={profile}
-        options={profileOptions}
-        onChange={handleProfileChange}
-      />
-      <Button
-        icon={<CopyOutlined />}
-        disabled={!latest?.artifactUrl}
-        onClick={() => void copyLink(latest?.artifactUrl)}
-      >
-        {t('system.appDownloads.copyLink')}
-      </Button>
-      <Button
-        type="primary"
-        icon={<LinkOutlined />}
-        disabled={!latest?.artifactUrl}
-        onClick={() => openLink(latest?.artifactUrl)}
-      >
-        {t('system.appDownloads.openDownload')}
-      </Button>
-      <Button
-        disabled={!latest?.buildDetailsPageUrl}
-        onClick={() => openLink(latest?.buildDetailsPageUrl)}
-      >
-        {t('system.appDownloads.buildDetails')}
-      </Button>
-      <Button icon={<ReloadOutlined />} loading={buildLoading} onClick={() => void loadBuildData(1, pageSize, profile, appKey)}>
-        {t('common.refresh')}
-      </Button>
-    </Space>
-  )
-
-  const contentState = resolveAppDownloadContentState(
-    loadFailed,
-    Boolean(latest?.artifactUrl),
-    items.length,
-  )
+  const renderTerminal = (terminal: ReleaseTerminal) => {
+    const lanes: readonly string[] = RELEASE_TERMINAL_LANES[terminal]
+    const currentLane = lane && lanes.includes(lane) ? lane : lanes[0]
+    return (
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Card
+          title={(
+            <Space size={8}>
+              {TERMINAL_ICONS[terminal]}
+              {t(`system.releaseCenter.nav.${terminal}`)}
+            </Space>
+          )}
+          tabList={lanes.length > 1
+            ? lanes.map((key) => ({ key, label: t(`system.releaseCenter.lanes.${key}`) }))
+            : undefined}
+          activeTabKey={currentLane}
+          onTabChange={(key) => navigate(terminal, key)}
+          styles={{ body: { padding: '12px 24px' } }}
+        >
+          <Typography.Text type="secondary">{t(`system.releaseCenter.terminalDesc.${terminal}`)}</Typography.Text>
+        </Card>
+        {/* key 让切换轨道时卸载旧轨道，旧请求随之失效，不会串到新轨道。 */}
+        <div key={`${terminal}:${currentLane}`}>{renderLane(terminal, currentLane)}</div>
+      </Space>
+    )
+  }
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      {isAdmin ? <RustDeskDownloadEntry /> : null}
-      <AppUpdatePolicyPanel canManage={canManageAppDownloads} />
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'flex-start',
+        gap: 16,
+      }}
+    >
+      {/* 导航按钮的悬停与键盘焦点样式：内联样式无法表达伪类。 */}
+      <style>{`
+        .release-center-nav:hover { background: ${token.colorFillTertiary} !important; }
+        .release-center-nav[aria-current="page"]:hover { background: ${token.colorPrimaryBgHover} !important; }
+        .release-center-nav:focus-visible { outline: 2px solid ${token.colorPrimary}; outline-offset: 1px; }
+      `}</style>
 
-      <Card title={t('system.appDownloads.latestTitle')} extra={latestActions} loading={buildLoading}>
-        {contentState === 'error' ? (
-          <Alert
-            type="error"
-            showIcon
-            message={t('system.appDownloads.loadFailed')}
-            description={t('system.appDownloads.loadFailedDescription')}
-          />
-        ) : latest?.artifactUrl ? (
-          <Space align="start" size={24} wrap>
-            <QRCode value={latest.artifactUrl} size={180} />
-            <Descriptions column={2} bordered size="small" style={{ minWidth: 520 }}>
-              <Descriptions.Item label={t('system.appDownloads.version')}>
-                {formatVersion(latest)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.profile')}>
-                {latest.buildProfile || profile}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.channel')}>
-                {latest.channel || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.runtime')}>
-                {latest.runtimeVersion || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.completedAt')}>
-                {formatAppDownloadLocalDateTime(latest.completedAt)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.expirationDate')}>
-                {formatAppDownloadLocalDateTime(latest.expirationDate)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.downloadSource')}>
-                <Tag>{t(`system.appDownloads.downloadSources.${resolveAppDownloadSource(latest)}`)}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.mirrorStatus')}>
-                {(() => {
-                  const mirrorStatus = resolveAppDownloadMirrorStatus(latest)
-                  return (
-                    <Tag color={getMirrorStatusColor(mirrorStatus)}>
-                      {t(`system.appDownloads.mirrorStatuses.${mirrorStatus}`)}
-                    </Tag>
-                  )
-                })()}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.mirrorError')} span={2}>
-                <Typography.Text
-                  type={latest.cosMirrorError ? 'danger' : undefined}
-                  ellipsis={{ tooltip: latest.cosMirrorError || undefined }}
-                  style={{ maxWidth: 480 }}
-                >
-                  {latest.cosMirrorError || '--'}
-                </Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.appDownloads.commit')}>
-                {formatShortCommit(latest.gitCommitHash)}
-              </Descriptions.Item>
-            </Descriptions>
-          </Space>
-        ) : (
-          <Empty description={t('system.appDownloads.empty')} />
-        )}
-      </Card>
-
-      <Card title={t('system.appDownloads.historyTitle')}>
-        <MeasuredTable<MobileAppBuild>
-          metricId="system.app-downloads.table-1"
-          rowKey="id"
-          loading={buildLoading}
-          columns={columns}
-          dataSource={items}
-          scroll={{ x: 1730 }}
-          locale={{
-            emptyText: (
-              <Empty
-                description={
-                  loadFailed
-                    ? t('system.appDownloads.loadFailed')
-                    : t('system.appDownloads.empty')
-                }
-              />
-            ),
-          }}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            onChange: (nextPage, nextPageSize) => void loadBuildData(nextPage, nextPageSize, profile, appKey),
-          }}
-        />
-      </Card>
-
-      {canManageAppDownloads ? <ServiceApiTokensPanel /> : null}
-
-      <Modal
-        open={!!qrBuild}
-        title={t('system.appDownloads.qrCodeTitle')}
-        footer={null}
-        onCancel={() => setQrBuild(null)}
-        destroyOnHidden
+      <nav
+        aria-label={t('system.releaseCenter.navLabel')}
+        style={{
+          flex: compactNav ? '1 1 100%' : '1 1 220px',
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: compactNav ? 'row' : 'column',
+          overflowX: compactNav ? 'auto' : undefined,
+          gap: 2,
+          padding: 10,
+          background: token.colorBgContainer,
+          border: `1px solid ${token.colorBorderSecondary}`,
+          borderRadius: token.borderRadiusLG,
+        }}
       >
-        {qrBuild?.artifactUrl ? (
-          <Space direction="vertical" size={16} style={{ width: '100%', alignItems: 'center' }}>
-            <QRCode value={qrBuild.artifactUrl} size={220} />
-            <Typography.Text copyable>{qrBuild.artifactUrl}</Typography.Text>
-          </Space>
+        {navButton('overview', <AppstoreOutlined />, t('system.releaseCenter.nav.overview'))}
+        {sectionLabel(t('system.releaseCenter.nav.terminals'))}
+        {RELEASE_TERMINALS.map((terminal) => navButton(
+          terminal,
+          TERMINAL_ICONS[terminal],
+          t(`system.releaseCenter.nav.${terminal}`),
+          t(`system.releaseCenter.nav.${terminal}Sub`),
+        ))}
+        {canViewTools ? (
+          <>
+            {sectionLabel(t('system.releaseCenter.nav.tools'))}
+            {navButton(
+              'tools',
+              <ToolOutlined />,
+              t('system.releaseCenter.nav.toolsItem'),
+              t('system.releaseCenter.nav.toolsSub'),
+            )}
+          </>
         ) : null}
-      </Modal>
+      </nav>
 
-    </Space>
+      <main style={{ flex: '999 1 560px', minWidth: 0 }}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <Typography.Title level={4} style={{ margin: 0 }}>
+                {t('system.releaseCenter.title')}
+              </Typography.Title>
+              <Typography.Text type="secondary">{t('system.releaseCenter.subtitle')}</Typography.Text>
+            </div>
+            <Button icon={<ReloadOutlined />} onClick={() => setRefreshVersion((value) => value + 1)}>
+              {t('system.releaseCenter.refresh')}
+            </Button>
+          </div>
+
+          {!canManageAppDownloads ? (
+            <Alert type="info" showIcon message={t('system.releaseCenter.readOnly')} />
+          ) : null}
+
+          {view === 'overview' ? (
+            <ReleaseOverview
+              refreshVersion={refreshVersion}
+              onOpenLane={(terminal, nextLane) => navigate(terminal, nextLane)}
+            />
+          ) : null}
+
+          {isReleaseTerminal(view) ? renderTerminal(view) : null}
+
+          {view === 'tools' ? (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              {isAdmin ? <RustDeskDownloadEntry /> : null}
+              {canManageAppDownloads ? <ServiceApiTokensPanel /> : null}
+            </Space>
+          ) : null}
+        </Space>
+      </main>
+    </div>
   )
 }

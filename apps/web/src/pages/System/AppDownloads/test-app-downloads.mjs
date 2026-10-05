@@ -50,6 +50,10 @@ const tests = [
     define: { 'import.meta.env': '{}' },
   },
   {
+    name: 'release-center-logic',
+    entryPoint: 'src/pages/System/AppDownloads/releaseCenterLogic.test.ts',
+  },
+  {
     name: 'service-api-token-panel-logic',
     entryPoint: 'src/pages/System/AppDownloads/serviceApiTokenPanelLogic.test.ts',
   },

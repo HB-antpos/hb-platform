@@ -32,7 +32,7 @@ import {
   WalletOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
-import { lazy } from 'react'
+import { isValidElement, lazy } from 'react'
 import { matchPath, Navigate } from 'react-router-dom'
 import i18n from '../i18n'
 import {
@@ -88,7 +88,6 @@ const EmergencyLoginKeysPage = lazy(() => import('../pages/System/EmergencyLogin
 const InvoiceEmailSettingsPage = lazy(() => import('../pages/System/InvoiceEmailSettings'))
 const PaymentTerminalSettingsPage = lazy(() => import('../pages/System/PaymentTerminalSettings'))
 const SystemScheduledStatisticsPage = lazy(() => import('../pages/System/ScheduledStatistics'))
-const SystemWpfVersionsPage = lazy(() => import('../pages/System/WpfVersions'))
 const SystemRolesPage = lazy(() => import('../pages/System/Roles'))
 const SystemStoresPage = lazy(() => import('../pages/System/Stores'))
 const SystemEmployeeProfilesPage = lazy(() => import('../pages/System/EmployeeProfiles'))
@@ -318,14 +317,15 @@ export const appRoutes: AppRouteItem[] = [
         element: <SystemRemoteMaintenancePage />,
       },
       {
+        // 旧地址兼容：WPF 版本已并入版本发布中心，书签与历史链接跳到 WPF 终端。
         path: '/system/wpf-versions',
         meta: {
-          title: 'menu.wpfVersions',
-          icon: 'DownloadOutlined',
-          keepAlive: true,
+          title: 'menu.appDownloads',
+          hidden: true,
           accessKey: 'canViewAppDownloads',
+          activeMenu: '/system/app-downloads',
         },
-        element: <SystemWpfVersionsPage />,
+        element: <Navigate replace to="/system/app-downloads?view=wpf" />,
       },
     ],
   },
@@ -1093,6 +1093,10 @@ export function getBreadcrumbItems(pathname: string, access: AccessControl, curr
 export function toTabItem(pathname: string, access: AccessControl): TabItem | null {
   const route = getCurrentRoute(pathname, access)
   if (!route) {
+    return null
+  }
+  // 旧地址兼容路由只做跳转：不生成页签，否则跳转后会留下一个与目标页同名的多余页签。
+  if (isValidElement(route.element) && route.element.type === Navigate) {
     return null
   }
 

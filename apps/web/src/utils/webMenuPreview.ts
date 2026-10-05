@@ -116,7 +116,6 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole' },
       { path: '/system/device-registration', title: 'menu.deviceRegistration', accessKey: 'canViewDeviceRegistration' },
       { path: '/system/app-downloads', title: 'menu.appDownloads', accessKey: 'canViewAppDownloads' },
-      { path: '/system/wpf-versions', title: 'menu.wpfVersions', accessKey: 'canViewAppDownloads' },
     ],
   },
   {
@@ -221,18 +220,6 @@ function buildAddPermissionCodes(
   return nextCodes
 }
 
-function buildRemovePermissionCodes(
-  route: WebMenuPreviewRoute,
-  permissionCodes: string[],
-): string[] {
-  if (route.path === '/system/wpf-versions' && permissionCodes.length) {
-    // 中文注释：WPF 版本页移除只撤销只读入口，不连带删除发布管理权限。
-    return [permissionCodes[0]]
-  }
-
-  return permissionCodes
-}
-
 function buildPreviewNodes(
   routes: WebMenuPreviewRoute[],
   access: AccessControl,
@@ -264,7 +251,7 @@ function buildPreviewNodes(
 
     const permissionCodes = route.accessKey ? getAccessKeyPermissionCodes(route.accessKey) : []
     const addPermissionCodes = buildAddPermissionCodes(route, permissionCodes, explicitPermissionCodeSet)
-    const removePermissionCodes = buildRemovePermissionCodes(route, permissionCodes)
+    const removePermissionCodes = permissionCodes
     const isEditableRoute = permissionCodes.length > 0
     const isReadOnly = Boolean(options.readOnly)
 
