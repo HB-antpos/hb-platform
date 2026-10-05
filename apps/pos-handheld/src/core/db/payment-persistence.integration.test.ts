@@ -15,6 +15,7 @@ import type {
   PricingCartStateSnapshot,
   RecallActiveBinding,
 } from "../contracts";
+import { ActivePricingCartPaymentLeaseCoordinator } from "../runtime/payment-cart-lease-coordinator";
 import { HbposOrderSyncAdapter } from "@hb/pos-sync/core/sync/hbpos-sync-adapters";
 
 import { applyMigrations, POS_DATABASE_MIGRATIONS } from "./migrations";
@@ -39,6 +40,9 @@ import type {
   SqlRunResult,
   SqlValue,
 } from "@hb/pos-db/core/db/types";
+
+import { PricingCart } from "@/features/sales/domain";
+import { ActivePricingCartSession } from "@/features/sales/runtime";
 
 const T0 = "2026-07-28T00:00:00.000Z";
 const T1 = "2026-07-28T00:01:00.000Z";
@@ -988,6 +992,59 @@ test("真实 SQLite：M27 只恢复旧 payment 行号触发的同步 Guid 拒绝
       returnRequest.lines[0]?.originalOrderDetailGuid,
       request.lines[0]?.orderLineGuid,
     );
+  });
+});
+
+test("真实 SQLite：收款中途重启后冷启动能按耐久草稿恢复购物车并持有支付写锁", async () => {
+  // 回归：草稿存储不持久化 PricingCart 生成的 discountSource，恢复比较曾因此必然失败、
+  // 设备永久卡在启动页（门店 1013 POS_1013_0125）。这里把真实存储与恢复协调器接在一起跑。
+  await withDatabase("draft-cold-start-recovery", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("order-guid", "audit-draft");
+    const store = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const cart = new PricingCart({ asOfIso: T0 });
+    cart.addItem({
+      lineId: "line-1",
+      productCode: "P1",
+      itemNumber: "1001",
+      lookupCode: "930000000001",
+      displayName: "Tea",
+      unitPrice: { currency: "AUD", cents: 1_000 },
+      syncProvenance: TEST_SYNC_PROVENANCE,
+    });
+    cart.setLineDiscountPercentBps("line-1", 2_000);
+    const input = draftInput({
+      cart: cart.snapshot(),
+      pricingState: cart.stateSnapshot(),
+    });
+    await store.createOrReuseDraft(input);
+
+    const recovery = await store.findBlockingRecovery(input.identity);
+    assert.ok(recovery?.draftId);
+    const active = new ActivePricingCartSession(
+      new PricingCart(),
+      () => new PricingCart(),
+    );
+    const coordinator = new ActivePricingCartPaymentLeaseCoordinator(
+      active,
+      {
+        async findBlockingCart() {
+          return {
+            checkoutIntentId: recovery.draftId!,
+            cart: recovery.cart,
+            pricingState: recovery.pricingState,
+            recallBinding: recovery.recallBinding,
+          };
+        },
+      },
+      () => "lease-cold-start",
+    );
+    const lease = await coordinator.initializeRecovery();
+    assert.ok(lease);
+    assert.equal(lease.checkoutIntentId, input.draftId);
+    assert.equal(lease.total.cents, 800);
+    assert.deepEqual(active.read().pricingState, input.pricingState);
+    await coordinator.releaseAfterSafeCancel(lease, recovery.orderGuid);
   });
 });
 
