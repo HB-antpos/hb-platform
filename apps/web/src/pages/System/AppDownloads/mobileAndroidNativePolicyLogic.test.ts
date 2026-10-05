@@ -220,8 +220,17 @@ assertEqual(
 )
 
 // 文案契约：中英文都必须定义页签、表单与确认文案。
-const zhLocale = JSON.parse(readFileSync('src/i18n/locales/zh.json', 'utf8'))
-const enLocale = JSON.parse(readFileSync('src/i18n/locales/en.json', 'utf8'))
+// 页签名在全局语言包；安卓原生策略文案在页面级懒注册文件里，这里合并后断言。
+function loadLocale(language: 'zh' | 'en') {
+  const global = JSON.parse(readFileSync(`src/i18n/locales/${language}.json`, 'utf8'))
+  const page = JSON.parse(
+    readFileSync(`src/pages/System/AppDownloads/mobileAndroidNativePolicyMessages.${language}.json`, 'utf8'),
+  )
+  global.system.appDownloads.updatePolicy.mobileAndroid = page.system.appDownloads.updatePolicy.mobileAndroid
+  return global
+}
+const zhLocale = loadLocale('zh')
+const enLocale = loadLocale('en')
 const errorCodes: MobileAndroidNativePolicyValidationError[] = [
   'NO_LATEST_BUILD',
   'MINIMUM_BUILD_REQUIRED',

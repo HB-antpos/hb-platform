@@ -19,6 +19,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { appUpdatePolicyService } from '../../../services/appUpdatePolicyService'
 import type { MobileAndroidNativeUpdatePolicy } from '../../../types/appUpdatePolicy'
 
@@ -39,7 +40,12 @@ import {
   validateMobileAndroidNativePolicy,
   type MobileAndroidNativePolicyFormValue,
 } from './mobileAndroidNativePolicyLogic'
+import mobileAndroidMessagesEn from './mobileAndroidNativePolicyMessages.en.json'
+import mobileAndroidMessagesZh from './mobileAndroidNativePolicyMessages.zh.json'
 import { formatAppDownloadLocalDateTime } from './time'
+
+// 页签文案随懒加载页面注册，不进入首屏 i18n 包（首屏 gzip 预算很紧）。
+registerPageMessages({ zh: mobileAndroidMessagesZh, en: mobileAndroidMessagesEn })
 
 interface MobileAndroidNativePolicyTabProps {
   canManage: boolean
