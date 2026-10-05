@@ -83,6 +83,7 @@ export function BootstrapScreen() {
   >(null);
   const serverProbe = useRef<AbortController | null>(null);
   const startupActionInFlight = useRef(false);
+  const lastLoggedError = useRef<string | null>(null);
   const display = usePosShellStore((state) => state.display);
   const compact = width < 900;
   const backendReady = runtime.backend === "reachable";
@@ -164,6 +165,22 @@ export function BootstrapScreen() {
       ],
     );
   };
+
+  useEffect(() => {
+    if (
+      runtime.phase !== "failed" ||
+      !runtime.error ||
+      lastLoggedError.current === runtime.error
+    ) {
+      return;
+    }
+    lastLoggedError.current = runtime.error;
+    // 原始初始化异常只进入开发/设备日志；操作员界面使用稳定的本地化摘要。
+    console.error(
+      "[HBPOS][iPad][Bootstrap] Runtime initialization failed.",
+      runtime.error,
+    );
+  }, [runtime.error, runtime.phase]);
 
   useEffect(() => {
     let active = true;
@@ -269,7 +286,10 @@ export function BootstrapScreen() {
           <View style={styles.footerDot} />
           <View style={styles.footerCopy}>
             <Text style={styles.footerText}>
-              {pendingActivationError ?? runtime.error ?? t("bootstrap.footer")}
+              {pendingActivationError ??
+                (runtime.phase === "failed"
+                  ? bootstrapErrorSummary(runtime.error, t)
+                  : t("bootstrap.footer"))}
             </Text>
             {runtime.phase === "failed" ? (
               <View style={styles.footerActions}>
@@ -319,6 +339,21 @@ export function BootstrapScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function bootstrapErrorSummary(
+  error: string | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (
+    error &&
+    /secure\s*store|securestore|keychain|entitlement|keychain-access-groups/iu.test(
+      error,
+    )
+  ) {
+    return t("bootstrap.error.secureStorage");
+  }
+  return t("bootstrap.error.generic");
 }
 
 const styles = StyleSheet.create({

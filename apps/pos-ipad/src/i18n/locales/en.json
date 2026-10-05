@@ -10,6 +10,8 @@
   "bootstrap.ready": "Architecture ready",
   "bootstrap.pending": "Adapter pending",
   "bootstrap.retry": "Retry startup",
+  "bootstrap.error.secureStorage": "Device security storage is unavailable. Check this build and try startup again.",
+  "bootstrap.error.generic": "Startup could not complete. Check the device and network, then try again.",
   "bootstrap.otaRecovery.eyebrow": "RECOVERY UPDATE",
   "bootstrap.otaRecovery.title": "Fix startup with an app update",
   "bootstrap.otaRecovery.checking": "Checking the server for an update for this terminal…",

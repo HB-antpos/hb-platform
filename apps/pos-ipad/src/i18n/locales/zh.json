@@ -10,6 +10,8 @@
   "bootstrap.ready": "架构已就绪",
   "bootstrap.pending": "适配器待接入",
   "bootstrap.retry": "重试启动",
+  "bootstrap.error.secureStorage": "设备安全存储暂不可用，请检查当前构建后重试启动。",
+  "bootstrap.error.generic": "启动未完成，请检查设备与网络后重试。",
   "bootstrap.otaRecovery.eyebrow": "修复更新",
   "bootstrap.otaRecovery.title": "通过应用更新修复启动问题",
   "bootstrap.otaRecovery.checking": "正在向后台查询本机可用的更新…",
