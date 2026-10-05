@@ -388,8 +388,15 @@ public sealed class PosHandheldDevicePlatformTests
         public Task<DeviceRegistrationRecord?> FindByDeviceCodeAsync(
             string deviceCode,
             string storeCode,
+            string? preferredHardwareId,
             CancellationToken cancellationToken) =>
             Task.FromResult(DeviceByCode);
+
+        public Task<bool> IsDeviceCodeTakenForRegistrationAsync(
+            string storeCode,
+            string deviceCode,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(false);
 
         public Task<DeviceRegistrationRecord?> FindLatestByDeviceCodeAndHardwareIdAsync(
             string deviceCode,
