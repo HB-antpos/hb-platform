@@ -209,6 +209,7 @@ import {
   createProductionInstallmentRuntime,
   type InstallmentPerformanceRecorder,
 } from "./production-installment-runtime";
+import type { PaymentCartDurableRecoveryFallback } from "./payment-cart-lease-coordinator";
 import {
   createProductionPaymentRuntime,
   type PosPaymentRuntimeService,
@@ -520,6 +521,10 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   syncSecurity: SyncSecurityPort;
   auditMetadata: HbposAuditMetadata;
   supportAppId: string;
+  /** 支付草稿冷启动降级为耐久购物车恢复时上报；缺省时静默。 */
+  reportPaymentRecoveryFallback?:
+    | ((fallback: PaymentCartDurableRecoveryFallback) => void)
+    | undefined;
   clock: RuntimeClock;
   systemUptimeMilliseconds?: (() => number) | undefined;
   installmentPerformanceRecorder?: InstallmentPerformanceRecorder | undefined;
@@ -1336,6 +1341,7 @@ export function createProductionPosRuntimeServices(
     // 金融操作前调用，届时 probe 已就绪，避免活动退货期间启动新的扣款/退款。
     hasReturnRecoveryRequired: () =>
       returnRecoveryProbe.hasRecoveryRequired(),
+    reportPaymentRecoveryFallback: input.reportPaymentRecoveryFallback,
     drainFulfilment: postCommitWork,
     // Blocked 礼券撤券的人工作废必须走现有主管扫码授权，且强制第二人复核；
     // 主管身份只取自授权回调，绝不使用当前登录员工或 UI 勾选。

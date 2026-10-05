@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ActivePricingCartPaymentLeaseCoordinator,
+  type PaymentCartDurableRecoveryFallback,
   type PaymentCartRecoveryMaterial,
 } from "./payment-cart-lease-coordinator";
 
@@ -211,7 +212,7 @@ test("冷启动比较持久化购物车时允许缺少定价引擎生成的折�
 });
 
 for (const field of ["quantity", "productCode", "actualAmount", "discount", "syncProvenance"] as const) {
-  test(`冷启动仍拒绝持久化商品 ${field} 与定价状态不一致`, async () => {
+  test(`冷启动耐久商品 ${field} 无法由定价状态复现时降级为按耐久购物车持有 lease，不让启动失败`, async () => {
     const cart = cartWithDiscount();
     const snapshot = cart.snapshot();
     const changed = field === "quantity" ? "2"
@@ -219,7 +220,7 @@ for (const field of ["quantity", "productCode", "actualAmount", "discount", "syn
       : field === "syncProvenance" ? { referenceCode: "changed", priceSource: 0 }
       : { currency: "AUD", cents: 1 };
     const material: PaymentCartRecoveryMaterial = {
-      checkoutIntentId: `checkout-tampered-${field}`,
+      checkoutIntentId: `checkout-drift-${field}`,
       cart: {
         ...snapshot,
         lines: snapshot.lines.map(({ discountSource: _displayOnly, ...line }) => ({
@@ -229,12 +230,148 @@ for (const field of ["quantity", "productCode", "actualAmount", "discount", "syn
       pricingState: cart.stateSnapshot(),
       recallBinding: null,
     };
-    await assert.rejects(
-      () => createCoordinator(session(), material).initializeRecovery(),
-      hasCode("PAYMENT_CART_LEASE_CONFLICT"),
+    const active = session();
+    const fallbacks: PaymentCartDurableRecoveryFallback[] = [];
+    const coordinator = createCoordinator(active, material, fallbacks);
+
+    const lease = await coordinator.initializeRecovery();
+    assert.ok(lease);
+    // lease 以耐久 cart 为准：金额与草稿订单行一致，绝不把重算出的不同金额交给支付运行时。
+    assert.equal(lease.cart, material.cart);
+    assert.equal(lease.pricingState, material.pricingState);
+    assert.deepEqual(lease.total, material.cart.actualAmount);
+    assert.equal(lease.revision, material.cart.revision);
+    assert.deepEqual(fallbacks, [{
+      checkoutIntentId: material.checkoutIntentId,
+      differences: field === "actualAmount" || field === "discount"
+        ? [...cartTotalsDiffering(material), `lines[0].${field}`]
+        : [`lines[0].${field}`],
+    }]);
+    // 销售车保持为空并被支付 lease 独占，收银员不能在恢复完成前开新单。
+    assert.equal(active.read().cart.lines.length, 0);
+    assert.throws(
+      () => active.addItem(lateItem()),
+      hasCode("ACTIVE_PRICING_CART_BUSY"),
     );
+    assert.equal(await coordinator.readExact(lease), lease);
+    assert.equal(await coordinator.initializeRecovery(), lease);
+    assert.equal(
+      await coordinator.acquireExact({
+        checkoutIntentId: material.checkoutIntentId,
+        expectedRevision: material.cart.revision,
+      }),
+      lease,
+    );
+
+    // 安全取消后释放写锁，销售车为空、可重新扫码。
+    await coordinator.releaseAfterSafeCancel(lease, `order-drift-${field}`);
+    assert.equal(active.read().cart.lines.length, 0);
+    active.addItem(lateItem());
+    assert.equal(active.read().cart.lines.length, 1);
   });
 }
+
+test("冷启动耐久降级后订单完成仍能清车并释放 lease", async () => {
+  const cart = cartWithDiscount();
+  const snapshot = cart.snapshot();
+  const material: PaymentCartRecoveryMaterial = {
+    checkoutIntentId: "checkout-drift-complete",
+    cart: {
+      ...snapshot,
+      lines: snapshot.lines.map((line) => ({ ...line, priceSource: "manual" as const })),
+    },
+    pricingState: cart.stateSnapshot(),
+    recallBinding: null,
+  };
+  const active = session();
+  const coordinator = createCoordinator(active, material);
+  const lease = await coordinator.initializeRecovery();
+  assert.ok(lease);
+  await coordinator.clearAfterCompleted(lease, "order-drift-complete");
+  assert.equal(active.hasPendingExclusiveOperation(), false);
+  assert.equal(active.read().cart.lines.length, 0);
+  await assert.rejects(
+    () => coordinator.readExact(lease),
+    hasCode("PAYMENT_CART_LEASE_CONFLICT"),
+  );
+});
+
+test("定价快照已不被当前定价引擎接受时同样降级为耐久 lease", async () => {
+  const cart = cartWithDiscount();
+  const pricingState = cart.stateSnapshot();
+  const material: PaymentCartRecoveryMaterial = {
+    checkoutIntentId: "checkout-unrestorable",
+    cart: cart.snapshot(),
+    // 模拟新版本定价引擎拒绝旧快照（例如校验规则收紧）。
+    pricingState: {
+      ...pricingState,
+      lines: pricingState.lines.map((line) => ({ ...line, unitPriceCents: Number.NaN })),
+    },
+    recallBinding: null,
+  };
+  const fallbacks: PaymentCartDurableRecoveryFallback[] = [];
+  const active = session();
+  const lease = await createCoordinator(active, material, fallbacks).initializeRecovery();
+  assert.ok(lease);
+  assert.equal(lease.cart, material.cart);
+  assert.deepEqual(fallbacks.map((fallback) => fallback.differences), [["pricingState"]]);
+  assert.equal(active.read().cart.lines.length, 0);
+});
+
+test("RecallActive 挂单的耐久降级由空车承接 binding，完成后解除挂单围栏", async () => {
+  const binding = {
+    kind: "recalled",
+    scope: { storeCode: "S1", deviceCode: "D1" },
+    holdId: "hold-drift",
+    recallAttemptId: "recall-drift",
+  } as const;
+  const cart = cartWithDiscount();
+  const snapshot = cart.snapshot();
+  const material: PaymentCartRecoveryMaterial = {
+    checkoutIntentId: "checkout-drift-recall",
+    cart: {
+      ...snapshot,
+      lines: snapshot.lines.map((line) => ({ ...line, displayName: "Tea (v0.1.0)" })),
+    },
+    pricingState: cart.stateSnapshot(),
+    recallBinding: binding,
+  };
+  const active = session();
+  active.blockForRecallRecovery(binding);
+  const coordinator = createCoordinator(active, material);
+  const lease = await coordinator.initializeRecovery();
+  assert.ok(lease);
+  assert.equal(active.read().terminalRecoveryRequired, false);
+  assert.deepEqual(active.read().recallBinding, binding);
+  assert.equal(active.read().cart.lines.length, 0);
+
+  await coordinator.clearAfterCompleted(lease, "order-drift-recall");
+  assert.equal(active.read().recallBinding, null);
+  assert.equal(active.read().cart.lines.length, 0);
+});
+
+test("降级诊断回调抛错不撤销已取得的恢复 lease", async () => {
+  const cart = cartWithDiscount();
+  const snapshot = cart.snapshot();
+  const material: PaymentCartRecoveryMaterial = {
+    checkoutIntentId: "checkout-drift-logger",
+    cart: { ...snapshot, lines: snapshot.lines.map((line) => ({ ...line, itemNumber: null })) },
+    pricingState: cart.stateSnapshot(),
+    recallBinding: null,
+  };
+  const active = session();
+  const coordinator = new ActivePricingCartPaymentLeaseCoordinator(
+    active,
+    { async findBlockingCart() { return material; } },
+    () => "payment-lease-logger",
+    () => {
+      throw new Error("log sink offline");
+    },
+  );
+  const lease = await coordinator.initializeRecovery();
+  assert.ok(lease);
+  assert.equal(await coordinator.readExact(lease), lease);
+});
 
 test("恢复材料不能覆盖普通购物车，RecallActive 只接纳精确耐久 binding", async () => {
   const source = cartWithDiscount();
@@ -295,6 +432,7 @@ test("恢复材料不能覆盖普通购物车，RecallActive 只接纳精确耐�
 function createCoordinator(
   active: ActivePricingCartSession,
   material: PaymentCartRecoveryMaterial | null,
+  fallbacks: PaymentCartDurableRecoveryFallback[] = [],
 ): ActivePricingCartPaymentLeaseCoordinator {
   let lease = 0;
   return new ActivePricingCartPaymentLeaseCoordinator(
@@ -305,7 +443,27 @@ function createCoordinator(
       },
     },
     () => `payment-lease-${++lease}`,
+    (fallback) => fallbacks.push(fallback),
   );
+}
+
+function lateItem() {
+  return {
+    lineId: "late-line",
+    productCode: "P2",
+    itemNumber: null,
+    lookupCode: "2",
+    displayName: "Late",
+    unitPrice: { currency: "AUD" as const, cents: 100 },
+    syncProvenance: { referenceCode: null, priceSource: 0 as const },
+  };
+}
+
+/** 手工篡改行金额时购物车合计不会随之变化，这里只列出与重算结果不同的合计字段。 */
+function cartTotalsDiffering(material: PaymentCartRecoveryMaterial): string[] {
+  const replayed = PricingCart.restore(material.pricingState).snapshot();
+  return (["subtotal", "discount", "actualAmount"] as const).filter((key) =>
+    JSON.stringify(replayed[key]) !== JSON.stringify(material.cart[key]));
 }
 
 function session(cart = new PricingCart()): ActivePricingCartSession {

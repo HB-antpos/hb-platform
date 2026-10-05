@@ -992,6 +992,18 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         instanceId: installationId,
       },
       supportAppId: POS_APP_ID,
+      reportPaymentRecoveryFallback(fallback) {
+        // 设备仍可启动，但说明耐久草稿已无法被当前代码重算；须人工在支付页完成恢复或安全取消。
+        applicationLog?.record({
+          level: "Warning",
+          message: "Payment recovery fell back to the durable cart.",
+          category: "runtime.payment-recovery",
+          properties: {
+            checkoutIntentId: fallback.checkoutIntentId,
+            differences: fallback.differences.join(","),
+          },
+        });
+      },
       clock: {
         now,
         nowIso: () => now().toISOString(),

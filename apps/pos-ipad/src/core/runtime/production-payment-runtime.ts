@@ -5,6 +5,7 @@ import {
 } from "./current-cashier-session";
 import {
   ActivePricingCartPaymentLeaseCoordinator,
+  type PaymentCartDurableRecoveryFallback,
   type PaymentCartRecoveryMaterialPort,
 } from "./payment-cart-lease-coordinator";
 import {
@@ -197,6 +198,10 @@ export type ProductionPaymentRuntimeDependencies = Readonly<{
   hasReturnRecoveryRequired?: (() => Promise<boolean>) | undefined;
   /** 缺失时 Blocked 撤券仍保持阻断（失败关闭），不提供人工作废入口。 */
   authorizeTenderReversalVoid?: TenderReversalVoidAuthorizer | undefined;
+  /** 冷启动支付草稿无法精确重算、已改按耐久购物车恢复时的诊断旁路（只含字段路径）。 */
+  reportPaymentRecoveryFallback?:
+    | ((fallback: PaymentCartDurableRecoveryFallback) => void)
+    | undefined;
   drainFulfilment(): Promise<unknown>;
   /** 人工支付结论必须在回调内完成；UI checkbox 永远不能作为主管身份。 */
   authorizeRecovery?<T>(
@@ -268,6 +273,7 @@ export function createProductionPaymentRuntime(
     input.activeCart,
     paymentCartRecovery(drafts, terminalScope),
     input.createId,
+    input.reportPaymentRecoveryFallback,
   );
   let recoveryInitialized = false;
   let recoverParkedPayment: ((recordId: string) => Promise<void | "completed">) | null = null;

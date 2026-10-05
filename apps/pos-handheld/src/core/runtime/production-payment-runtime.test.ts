@@ -693,6 +693,95 @@ test("生产 draft port 的 durable close 是唯一提交屏障，提交后不�
   }
 });
 
+test("冷启动草稿无法被当前代码重算时 runtime 仍能启动，支付页按耐久草稿安全取消并解锁销售车", async () => {
+  const cart = pricedCart();
+  const cashier = activeCashier();
+  const draft: PaymentCheckoutDraft = {
+    checkoutIntentId: "checkout-1",
+    orderGuid: "order-1",
+    cartRevision: cart.snapshot().revision,
+    state: "DraftPrepared",
+    total: aud(1_000),
+    remaining: aud(1_000),
+    cancellableAfterReversal: false,
+    tenders: [],
+  };
+  const recovery = draftRecovery(cart);
+  const durable = durableCloseDatabase({
+    draft,
+    // 模拟旧版本写入的耐久快照：金额与订单行一致，但价格来源推导已在新版本改变。
+    recovery: {
+      ...recovery,
+      cart: {
+        ...recovery.cart,
+        lines: recovery.cart.lines.map((line) => ({ ...line, priceSource: "manual" as const })),
+      },
+    },
+    onCommitted: () => undefined,
+  });
+  const activeCart = new ActivePricingCartSession(
+    new PricingCart(),
+    () => new PricingCart(),
+  );
+  const fallbacks: unknown[] = [];
+  const runtime = createProductionPaymentRuntime({
+    database: durable.database,
+    repositories: repositories(),
+    encryptor,
+    activeCart,
+    currentCashier: cashier,
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: {
+      now: () => new Date("2026-07-28T00:00:00.000Z"),
+      nowIso: () => "2026-07-28T00:00:00.000Z",
+    },
+    createId: idFactory(),
+    connectivity: { async isOnline() { return true; } },
+    bootstrap: bootstrap(() => undefined),
+    reportPaymentRecoveryFallback: (fallback) => fallbacks.push(fallback),
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  assert.deepEqual(fallbacks, [{
+    checkoutIntentId: "checkout-1",
+    differences: ["lines[0].priceSource"],
+  }]);
+  assert.equal(activeCart.read().cart.lines.length, 0);
+  assert.throws(
+    () => activeCart.addItem({
+      lineId: "line-new",
+      productCode: "P2",
+      itemNumber: null,
+      lookupCode: "2",
+      displayName: "New",
+      unitPrice: aud(100),
+      syncProvenance: { referenceCode: null, priceSource: 0 },
+    }),
+    { code: "ACTIVE_PRICING_CART_BUSY" },
+  );
+  assert.equal(runtime.service.status, "available");
+  if (runtime.service.status !== "available") return;
+  const presenter = runtime.service.createPresenter(null);
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(presenter.getState().total.cents, 1_000);
+  assert.equal(presenter.getState().allowedActions.cancel, true);
+
+  assert.equal(await presenter.cancel(), true);
+  assert.equal(durable.abandonPreparedCalls, 1);
+  activeCart.addItem({
+    lineId: "line-new",
+    productCode: "P2",
+    itemNumber: null,
+    lookupCode: "2",
+    displayName: "New",
+    unitPrice: aud(100),
+    syncProvenance: { referenceCode: null, priceSource: 0 },
+  });
+  assert.equal(activeCart.read().cart.lines.length, 1);
+  presenter.destroy();
+});
+
 test("礼券 reversal Unknown 后即时关闭换 provider、加现金和再次移除，provider/cash 均零新增调用", async () => {
   let releaseCalls = 0;
   let providerCalls = 0;
