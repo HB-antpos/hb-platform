@@ -7,6 +7,12 @@ function assertIncludes(source: string, expected: string, label: string) {
   }
 }
 
+function assertNotIncludes(source: string, unexpected: string, label: string) {
+  if (source.includes(unexpected)) {
+    throw new Error(`${label}. Unexpected: ${unexpected}`)
+  }
+}
+
 function assertOccurrenceAtLeast(source: string, expected: string, count: number, label: string) {
   const actual = source.split(expected).length - 1
   if (actual < count) {
@@ -22,19 +28,27 @@ function assertOccurrenceExactly(source: string, expected: string, count: number
 }
 
 const pageSource = readFileSync(resolve('src/pages/System/Stores/index.tsx'), 'utf8')
+// 新建与编辑弹窗共用 StoreFormFields：字段定义与前端校验集中在这里，页面只负责渲染两次。
+const formFieldsSource = readFileSync(resolve('src/pages/System/Stores/StoreFormFields.tsx'), 'utf8')
 const detailPageSource = readFileSync(resolve('src/pages/System/Stores/Detail.tsx'), 'utf8')
 const timeZoneOptionsSource = readFileSync(resolve('src/pages/System/Stores/timeZoneOptions.ts'), 'utf8')
 const storeTypesSource = readFileSync(resolve('src/types/store.ts'), 'utf8')
 const zhSource = readFileSync(resolve('src/i18n/locales/zh.json'), 'utf8')
 const enSource = readFileSync(resolve('src/i18n/locales/en.json'), 'utf8')
 
-assertIncludes(
+assertOccurrenceAtLeast(
   pageSource,
+  '<StoreFormFields',
+  2,
+  '创建和编辑分店弹窗都必须使用共用表单，保证两处字段与校验一致',
+)
+assertIncludes(
+  formFieldsSource,
   "max: 20",
   '分店编辑表单应在前端限制联系电话最大长度，避免提交后才收到 400',
 )
 assertIncludes(
-  pageSource,
+  formFieldsSource,
   "t('system.stores.contactPhoneMaxLength'",
   '联系电话长度校验应使用分店模块自己的友好提示文案',
 )
@@ -50,13 +64,17 @@ assertIncludes(
 )
 assertIncludes(
   pageSource,
-  "dataIndex: 'abn'",
-  '分店列表应显示 ABN 列，方便列表直接核对商业号码',
+  'record.abn',
+  '分店列表应显示 ABN（并入「品牌 / ABN」列第二行），方便列表直接核对商业号码',
 )
-assertOccurrenceAtLeast(
+assertIncludes(
   pageSource,
+  "t('system.stores.brandAbn')",
+  '品牌与 ABN 合并列应使用分店模块统一文案',
+)
+assertIncludes(
+  formFieldsSource,
   'name="abn"',
-  2,
   '创建和编辑分店表单应提供 ABN 输入项',
 )
 assertIncludes(
@@ -128,18 +146,12 @@ assertOccurrenceExactly(
   '列表查询、StoreDto、CreateStoreDto、UpdateStoreDto 和批量请求都应声明可选时区字段',
 )
 assertIncludes(
-  pageSource,
+  formFieldsSource,
   'name="timeZoneId"',
   '创建和编辑分店表单应提供时区选择项',
 )
-assertOccurrenceAtLeast(
-  pageSource,
-  'name="timeZoneId"',
-  2,
-  '创建和编辑分店表单都应要求选择时区',
-)
 assertIncludes(
-  pageSource,
+  formFieldsSource,
   "t('system.stores.timeZoneRequired')",
   '分店时区必填应使用模块自己的提示文案',
 )
@@ -156,8 +168,8 @@ assertIncludes(
 assertOccurrenceExactly(
   pageSource,
   "fixed: 'left'",
-  3,
-  '序号、分店名称和分店编码应固定在表格左侧',
+  2,
+  '分店名称和分店编码应固定在表格左侧（序号列已移除）',
 )
 assertIncludes(
   pageSource,
@@ -176,7 +188,12 @@ assertIncludes(
 )
 assertIncludes(
   pageSource,
-  'filterMultiple: false',
+  'value={timeZoneFilter}',
+  '时区筛选应是绑定单个值的下拉',
+)
+assertNotIncludes(
+  pageSource,
+  'mode="multiple"',
   '时区筛选应限制为单选',
 )
 assertIncludes(
@@ -186,7 +203,7 @@ assertIncludes(
 )
 assertIncludes(
   pageSource,
-  'timeZoneId: nextTimeZoneFilter',
+  'timeZoneId: query.timeZone',
   '时区筛选应作为服务端分页查询参数提交',
 )
 assertIncludes(
@@ -230,19 +247,18 @@ assertIncludes(
   '英文文案应包含未设置时区筛选项',
 )
 
-assertOccurrenceAtLeast(
-  pageSource,
+assertIncludes(
+  formFieldsSource,
   'name="returnPolicy"',
-  2,
   '创建和编辑分店表单都应提供退换货政策文本域',
 )
 assertIncludes(
-  pageSource,
+  formFieldsSource,
   "t('system.stores.returnPolicy'",
   '退换货政策表单标签应使用分店模块统一文案',
 )
 assertIncludes(
-  pageSource,
+  formFieldsSource,
   "t('system.stores.returnPolicyMaxLength'",
   '退换货政策长度校验应使用分店模块自己的友好提示文案',
 )
@@ -372,6 +388,19 @@ assertIncludes(
   enSource,
   '"batchCashRegisterDisableWarning"',
   '英文文案应包含批量停用收银警告',
+)
+
+// 筛选/排序用「对象合并」传入查询：显式传 undefined 表示清除该筛选。
+// 若退回「默认参数 = 当前筛选」的写法，undefined 会被默认值吞掉，清除品牌/时区/收银筛选就不会生效。
+assertIncludes(
+  pageSource,
+  '...overrides',
+  '列表查询应用对象合并，保证显式 undefined 能清除筛选',
+)
+assertNotIncludes(
+  pageSource,
+  'nextBrandFilter = brandFilter',
+  '不得用默认参数承载筛选值，否则清除筛选会被默认值吞掉',
 )
 
 console.log('storeFormValidation.test: ok')

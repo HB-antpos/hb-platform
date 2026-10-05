@@ -1,0 +1,37 @@
+{
+  "system": {
+    "employeeProfiles": {
+      "totalCount": "共 {{count}} 名员工",
+      "pendingEntry": "{{count}} 条敏感资料待审核",
+      "maskedHint": "银行 / 公积金账号已脱敏，完整值仅在编辑中查看",
+      "employee": "员工",
+      "bankAccount": "银行账户",
+      "superannuation": "公积金",
+      "notFilled": "未填写",
+      "notSet": "未设置",
+      "completion": {
+        "title": "资料状态",
+        "noProfile": "未建档",
+        "incomplete": "待补全",
+        "complete": "完整",
+        "missingBank": "缺银行",
+        "missingSuper": "缺公积金"
+      },
+      "drawer": {
+        "sensitive": "敏感资料",
+        "nav": {
+          "basic": "基本信息",
+          "bankSuper": "银行与公积金",
+          "identity": "身份与证件"
+        },
+        "copyId": "复制 ID",
+        "copied": "已复制",
+        "copyFailed": "复制失败，请手动选择后复制",
+        "createdOn": "创建于 {{date}}",
+        "updatedOn": "最近更新 {{date}}",
+        "dirty": "已修改 {{count}} 项",
+        "sensitiveNotice": "管理员直接修改的敏感资料立即生效并记入审计日志；若该员工有待审核的修改申请，保存时会提示确认并将其作废。"
+      }
+    }
+  }
+}

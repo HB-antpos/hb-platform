@@ -12,6 +12,8 @@ export interface EmployeeProfileSummaryDto {
   id?: string
   userId?: string
   userGUID?: string
+  /** 列表接口返回：该用户是否已有员工资料记录（未建档的用户所有资料字段都为空）。 */
+  hasProfile?: boolean
   username?: string
   displayName?: string
   bankBsb?: string

@@ -1,18 +1,29 @@
-import { CloudSyncOutlined, EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import {
+  CloudSyncOutlined,
+  EditOutlined,
+  EllipsisOutlined,
+  LoadingOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  TeamOutlined,
+} from '@ant-design/icons'
 import {
   Alert,
   Button,
   Card,
   Checkbox,
-  Descriptions,
   Drawer,
+  Dropdown,
   Form,
   Input,
   Modal,
+  Segmented,
   Select,
   Space,
   Switch,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -22,10 +33,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HasPermission, usePermission } from '../../../components/Access'
 import PageContainer from '../../../components/PageContainer'
+import ActiveFilterBar from '../../../components/listToolbar/ActiveFilterBar'
+import type { ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
+import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
 import { P } from '../../../types/permissions'
 import { batchUpdateStores, createStore, getNextStoreCode, getStoreByGuid, getStores, syncStoreToHq, updateStore } from '../../../services/storeService'
 import type { CreateStoreDto, StoreDetailDto, StoreDto, UpdateStoreDto } from '../../../types/store'
 import { RequestError } from '../../../utils/request'
+import StoreFormFields from './StoreFormFields'
 import StoreUserManagement from './StoreUserManagement'
 import {
   BatchUpdateRequestError,
@@ -34,8 +49,17 @@ import {
   type BatchUpdateStoreFormValues,
 } from './batchUpdateLogic'
 import {
+  KNOWN_STORE_BRANDS,
+  cashRegisterFilterFromValue,
+  cashRegisterFilterToValue,
+  formatTimestampText,
+  mergeBrandNames,
+  type CashRegisterFilterValue,
+} from './storeListLogic'
+import {
   UNSET_STORE_TIME_ZONE_FILTER,
   formatStoreTimeZoneId,
+  formatStoreTimeZoneShort,
   storeTimeZoneOptions,
 } from './timeZoneOptions'
 import {
@@ -45,6 +69,13 @@ import {
   runLatestGuardedRequest,
 } from '../listPagination'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import './stores.css'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import storesMessagesEn from './storesMessages.en.json'
+import storesMessagesZh from './storesMessages.zh.json'
+
+// 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
+registerPageMessages({ zh: storesMessagesZh, en: storesMessagesEn })
 
 const brandTagPalette = [
   { background: '#e6f4ff', borderColor: '#91caff', color: '#0958d9' },
@@ -81,13 +112,26 @@ function renderBrandName(value?: string) {
   }
 
   return (
-    <Tag bordered={false} style={getBrandTagStyle(brandName)}>
+    <Tag bordered={false} style={{ ...getBrandTagStyle(brandName), marginInlineEnd: 0 }}>
       {brandName}
     </Tag>
   )
 }
 
 type StoreSortOrder = 'ascend' | 'descend' | null
+
+/** 列表查询条件。overrides 里显式写 undefined 表示「清除该筛选」，所以用对象合并而不是默认参数。 */
+interface StoreListQuery {
+  page: number
+  pageSize: number
+  brand?: string
+  isActive?: boolean
+  timeZone?: string
+  sortBy?: string
+  sortOrder: StoreSortOrder
+}
+
+type StoreFilterPatch = Partial<Pick<StoreListQuery, 'brand' | 'isActive' | 'timeZone'>>
 
 function getApiErrorCode(error: unknown) {
   if (!(error instanceof RequestError)) {
@@ -115,6 +159,8 @@ export default function SystemStoresPage() {
   const [timeZoneFilter, setTimeZoneFilter] = useState<string | undefined>()
   const [sortBy, setSortBy] = useState<string | undefined>()
   const [sortOrder, setSortOrder] = useState<StoreSortOrder>(null)
+  const [knownBrands, setKnownBrands] = useState<string[]>(() => [...KNOWN_STORE_BRANDS])
+  const [overview, setOverview] = useState<{ total: number; enabled: number } | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailStore, setDetailStore] = useState<StoreDetailDto | null>(null)
@@ -140,24 +186,27 @@ export default function SystemStoresPage() {
   const batchIsActive = Form.useWatch('isActive', batchEditForm)
   const applyReturnPolicy = Form.useWatch('applyReturnPolicy', batchEditForm)
 
-  const loadData = async (
-    nextPage = page,
-    nextPageSize = pageSize,
-    nextBrandFilter = brandFilter,
-    nextIsActiveFilter = isActiveFilter,
-    nextSortBy = sortBy,
-    nextSortOrder = sortOrder,
-    nextTimeZoneFilter = timeZoneFilter,
-  ) => {
+  const loadData = async (overrides: Partial<StoreListQuery> = {}) => {
+    const query: StoreListQuery = {
+      page,
+      pageSize,
+      brand: brandFilter,
+      isActive: isActiveFilter,
+      timeZone: timeZoneFilter,
+      sortBy,
+      sortOrder,
+      ...overrides,
+    }
+
     await runLatestGuardedRequest(mainListRequestGuardRef.current, () => getStores({
-        page: nextPage,
-        pageSize: nextPageSize,
+        page: query.page,
+        pageSize: query.pageSize,
         search: keyword || undefined,
-        brandName: nextBrandFilter || undefined,
-        isActive: nextIsActiveFilter,
-        timeZoneId: nextTimeZoneFilter,
-        sortField: nextSortBy,
-        sortOrder: nextSortOrder === 'ascend' ? 'asc' : nextSortOrder === 'descend' ? 'desc' : undefined,
+        brandName: query.brand || undefined,
+        isActive: query.isActive,
+        timeZoneId: query.timeZone,
+        sortField: query.sortBy,
+        sortOrder: query.sortOrder === 'ascend' ? 'asc' : query.sortOrder === 'descend' ? 'desc' : undefined,
       }), {
       onStart: () => setLoading(true),
       onSuccess: (result) => {
@@ -165,11 +214,12 @@ export default function SystemStoresPage() {
         setTotal(result.total)
         setPage(result.page)
         setPageSize(result.pageSize)
-        setBrandFilter(nextBrandFilter)
-        setIsActiveFilter(nextIsActiveFilter)
-        setTimeZoneFilter(nextTimeZoneFilter)
-        setSortBy(nextSortBy)
-        setSortOrder(nextSortOrder ?? null)
+        setBrandFilter(query.brand)
+        setIsActiveFilter(query.isActive)
+        setTimeZoneFilter(query.timeZone)
+        setSortBy(query.sortBy)
+        setSortOrder(query.sortOrder ?? null)
+        setKnownBrands((previous) => mergeBrandNames(previous, result.items))
       },
       onError: (error) => {
         console.error(error)
@@ -180,8 +230,23 @@ export default function SystemStoresPage() {
     })
   }
 
+  // 页头「共 N 家 · 已启用收银 M」：与当前筛选无关的全局概览，用两个 pageSize=1 的轻量请求取 total。
+  const loadOverview = async () => {
+    try {
+      const [all, enabled] = await Promise.all([
+        getStores({ page: 1, pageSize: 1 }),
+        getStores({ page: 1, pageSize: 1, isActive: true }),
+      ])
+      setOverview({ total: all.total, enabled: enabled.total })
+    } catch (error) {
+      // 概览只是辅助信息，失败时保持页面可用，不打扰用户。
+      console.error(error)
+    }
+  }
+
   useEffect(() => {
-    void loadData(1, pageSize)
+    void loadData({ page: 1, pageSize })
+    void loadOverview()
     return () => {
       mainListRequestGuardRef.current.invalidate()
     }
@@ -193,7 +258,15 @@ export default function SystemStoresPage() {
     if (shouldClearStoreSelection('query')) {
       clearStoreSelection()
     }
-    void loadData(1, pageSize, brandFilter, isActiveFilter, sortBy, sortOrder)
+    void loadData({ page: 1, pageSize })
+  }
+
+  // 工具栏筛选：改变数据集，回到第一页并清空（可能已被筛掉的）隐藏选择。
+  const applyFilters = (patch: StoreFilterPatch) => {
+    if (shouldClearStoreSelection('filter')) {
+      clearStoreSelection()
+    }
+    void loadData({ page: 1, pageSize, ...patch })
   }
 
   const reloadStoreDetail = async (storeGuid: string) => {
@@ -233,7 +306,8 @@ export default function SystemStoresPage() {
       createForm.resetFields()
       setDetailStore(created)
       setDetailOpen(true)
-      void loadData(1, pageSize, brandFilter, isActiveFilter, sortBy, sortOrder)
+      void loadData({ page: 1, pageSize })
+      void loadOverview()
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) {
         return
@@ -312,7 +386,8 @@ export default function SystemStoresPage() {
       if (detailStore?.storeGUID === updated.storeGUID) {
         setDetailStore((current) => (current ? { ...current, ...updated } : updated))
       }
-      void loadData(page, pageSize)
+      void loadData()
+      void loadOverview()
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) {
         return
@@ -360,7 +435,8 @@ export default function SystemStoresPage() {
       setBatchEditOpen(false)
       batchEditForm.resetFields()
       clearStoreSelection()
-      await loadData(page, pageSize, brandFilter, isActiveFilter, sortBy, sortOrder)
+      await loadData()
+      void loadOverview()
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) {
         return
@@ -412,30 +488,63 @@ export default function SystemStoresPage() {
   }
 
   const brandFilterOptions = useMemo(() => {
-    const brands = new Set<string>()
-    data.forEach((store) => {
-      const brandName = store.brandName?.trim()
-      if (brandName) {
-        brands.add(brandName)
-      }
-    })
+    const brands = new Set(knownBrands)
     if (brandFilter) {
       brands.add(brandFilter)
     }
 
     return Array.from(brands)
       .sort((a, b) => a.localeCompare(b))
-      .map((brandName) => ({ text: brandName, value: brandName }))
-  }, [brandFilter, data])
+      .map((brandName) => ({ label: brandName, value: brandName }))
+  }, [brandFilter, knownBrands])
 
+  // 下拉里展示全称便于区分，选中后输入框里用短名，避免挤掉前缀文字。
   const timeZoneFilterOptions = useMemo(() => [
-    ...storeTimeZoneOptions.map((option) => ({ text: option.label, value: option.value })),
-    { text: t('system.stores.timeZoneUnset'), value: UNSET_STORE_TIME_ZONE_FILTER },
+    ...storeTimeZoneOptions.map((option) => ({
+      label: option.label,
+      short: formatStoreTimeZoneShort(option.value),
+      value: option.value,
+    })),
+    { label: t('system.stores.timeZoneUnset'), short: t('system.stores.timeZoneUnset'), value: UNSET_STORE_TIME_ZONE_FILTER },
   ], [t])
 
+  // 不用 useMemo：onRemove 会走到 loadData，它读取 keyword / 排序等状态；缓存会让回调拿到旧值。
+  const activeFilterItems = (() => {
+    const items: ActiveFilterItem[] = []
+    if (brandFilter) {
+      items.push({
+        key: 'brand',
+        label: t('system.stores.brandName'),
+        value: brandFilter,
+        source: 'toolbar',
+        onRemove: () => applyFilters({ brand: undefined }),
+      })
+    }
+    if (timeZoneFilter) {
+      items.push({
+        key: 'timeZone',
+        label: t('system.stores.timeZone'),
+        value: timeZoneFilter === UNSET_STORE_TIME_ZONE_FILTER ? t('system.stores.timeZoneUnset') : formatStoreTimeZoneShort(timeZoneFilter),
+        source: 'toolbar',
+        onRemove: () => applyFilters({ timeZone: undefined }),
+      })
+    }
+    if (isActiveFilter !== undefined) {
+      items.push({
+        key: 'isActive',
+        label: t('system.stores.cashRegisterShort'),
+        value: isActiveFilter ? t('system.stores.cashEnabled') : t('system.stores.cashDisabled'),
+        source: 'toolbar',
+        onRemove: () => applyFilters({ isActive: undefined }),
+      })
+    }
+    return items
+  })()
+
+  // 表头只保留排序；筛选都在工具栏里，生效条件有统一的标签条展示。
   const handleTableChange = (
     pagination: TablePaginationConfig,
-    filters: Record<string, FilterValue | null>,
+    _filters: Record<string, FilterValue | null>,
     sorter: SorterResult<StoreDto> | SorterResult<StoreDto>[],
     extra: { action: 'paginate' | 'sort' | 'filter' },
   ) => {
@@ -446,207 +555,241 @@ export default function SystemStoresPage() {
     const nextSortBy = field && order ? field : undefined
     const nextSortOrder = field && order ? order : null
 
-    const nextBrandValue = filters.brandName?.[0]
-    const nextBrandFilter = typeof nextBrandValue === 'string' ? nextBrandValue : undefined
-    const nextIsActiveValue = filters.isActive?.[0]
-    const nextIsActiveFilter =
-      nextIsActiveValue === 'true' ? true : nextIsActiveValue === 'false' ? false : undefined
-    const nextTimeZoneValue = filters.timeZoneId?.[0]
-    const nextTimeZoneFilter = typeof nextTimeZoneValue === 'string' ? nextTimeZoneValue : undefined
-
-    if (extra.action === 'filter' && shouldClearStoreSelection('filter')) {
-      clearStoreSelection()
-    }
-
-    // 表格筛选和排序都走服务端查询，避免分页后只在当前页内处理数据。
+    // 表格排序都走服务端查询，避免分页后只在当前页内处理数据。
     const nextPagination = resolveSystemListPagination(extra.action, pagination, pageSize)
-    void loadData(
-      nextPagination.page,
-      nextPagination.pageSize,
-      nextBrandFilter,
-      nextIsActiveFilter,
-      nextSortBy,
-      nextSortOrder,
-      nextTimeZoneFilter,
-    )
+    void loadData({
+      page: nextPagination.page,
+      pageSize: nextPagination.pageSize,
+      sortBy: nextSortBy,
+      sortOrder: nextSortOrder,
+    })
   }
 
   const columns: ColumnsType<StoreDto> = [
     {
-      title: t('common.index'),
-      key: 'rowIndex',
-      width: 64,
-      fixed: 'left',
-      render: (_value, _record, index) => (page - 1) * pageSize + index + 1,
-    },
-    {
       title: t('system.stores.storeName'),
       dataIndex: 'storeName',
-      width: 190,
+      width: 156,
       fixed: 'left',
       sorter: true,
       sortOrder: sortBy === 'storeName' ? sortOrder : null,
+      render: (value: string) => <span className="sys-store-name">{value}</span>,
     },
     {
-      title: t('system.stores.storeCode'),
+      title: t('system.stores.codeColumn'),
       dataIndex: 'storeCode',
-      width: 96,
+      width: 72,
       fixed: 'left',
       sorter: true,
       sortOrder: sortBy === 'storeCode' ? sortOrder : null,
+      render: (value: string) => <span className="sys-store-mono">{value}</span>,
     },
     {
-      title: t('system.stores.brandName'),
+      // 品牌与 ABN 同属「主体信息」，合并成两行；ABN 不再占独立列，列表照样能核对商业号码。
+      title: t('system.stores.brandAbn'),
       dataIndex: 'brandName',
-      width: 140,
-      filters: brandFilterOptions,
-      filteredValue: brandFilter ? [brandFilter] : null,
+      width: 152,
       sorter: true,
       sortOrder: sortBy === 'brandName' ? sortOrder : null,
-      render: renderBrandName,
-    },
-    {
-      title: t('system.stores.abn'),
-      dataIndex: 'abn',
-      width: 130,
-      render: (value?: string) => value || '--',
+      render: (value: string | undefined, record) => (
+        !value?.trim() && !record.abn ? (
+          <span className="sys-store-faint">--</span>
+        ) : (
+          <div className="sys-store-two">
+            {renderBrandName(value)}
+            <span className={record.abn ? 'sys-store-sub sys-store-mono' : 'sys-store-sub sys-store-faint'}>{record.abn || '--'}</span>
+          </div>
+        )
+      ),
     },
     {
       title: t('system.stores.timeZone'),
       dataIndex: 'timeZoneId',
-      width: 220,
-      filters: timeZoneFilterOptions,
-      filterMultiple: false,
-      filteredValue: timeZoneFilter ? [timeZoneFilter] : null,
-      render: formatStoreTimeZoneId,
+      width: 132,
+      render: (value?: string) => (
+        value ? (
+          <Tooltip title={formatStoreTimeZoneId(value)}>
+            <span style={{ whiteSpace: 'nowrap' }}>{formatStoreTimeZoneShort(value)}</span>
+          </Tooltip>
+        ) : (
+          <span className="sys-store-faint">{t('system.stores.timeZoneUnset')}</span>
+        )
+      ),
     },
     {
       title: t('system.stores.contactPhone'),
       dataIndex: 'contactPhone',
-      width: 130,
+      width: 120,
       sorter: true,
       sortOrder: sortBy === 'contactPhone' ? sortOrder : null,
-      render: (value) => value || '--',
+      render: (value?: string) => (value ? <span className="sys-store-mono sys-store-ellipsis" title={value}>{value}</span> : <span className="sys-store-faint">--</span>),
     },
     {
       title: t('system.stores.address'),
       dataIndex: 'address',
-      width: 300,
       sorter: true,
       sortOrder: sortBy === 'address' ? sortOrder : null,
-      // 地址列按业务要求完整展示；控制列宽并允许换行，避免撑开整张表。
-      render: (value?: string) => value ? (
-        <Typography.Text style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
-          {value}
-        </Typography.Text>
-      ) : '--',
+      // 地址列按业务要求完整展示；不设固定宽度，吃掉其它列之外的剩余空间并允许换行。
+      render: (value?: string) => (value ? <span className="sys-store-address">{value}</span> : <span className="sys-store-faint">--</span>),
     },
     {
-      title: t('system.stores.linkedUserCount'),
+      title: t('system.stores.usersColumn'),
       dataIndex: 'totalUsers',
-      width: 92,
+      width: 76,
       sorter: true,
       sortOrder: sortBy === 'totalUsers' ? sortOrder : null,
       render: (value: number | undefined, record) => (
-        <Button type="link" style={{ paddingInline: 0 }} onClick={() => handleOpenStoreUsers(record)}>
-          {value ?? 0}
-        </Button>
+        <Tooltip title={t('system.stores.detailUsers')}>
+          <Button type="link" size="small" icon={<TeamOutlined />} style={{ paddingInline: 0 }} onClick={() => handleOpenStoreUsers(record)}>
+            {record.activeUsers ?? 0} / {value ?? 0}
+          </Button>
+        </Tooltip>
       ),
     },
     {
-      title: t('system.stores.cashRegisterEnabled'),
+      title: t('system.stores.cashRegisterColumn'),
       dataIndex: 'isActive',
-      width: 112,
-      filters: [
-        { text: t('common.active'), value: 'true' },
-        { text: t('common.inactive'), value: 'false' },
-      ],
-      filteredValue: isActiveFilter === undefined ? null : [String(isActiveFilter)],
+      width: 84,
       sorter: true,
       sortOrder: sortBy === 'isActive' ? sortOrder : null,
       render: (value: boolean) => (
-        <Tag color={value ? 'success' : 'default'}>{value ? t('common.active') : t('common.inactive')}</Tag>
+        <span className={value ? 'sys-store-status sys-store-status-on' : 'sys-store-status'}>
+          {value ? t('system.stores.cashEnabled') : t('system.stores.cashDisabled')}
+        </span>
       ),
     },
     {
       title: t('column.action'),
       key: 'action',
-      width: 220,
+      width: 124,
       fixed: 'right',
+      align: 'right',
       render: (_, record) => (
-        <Space size={4}>
-          <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => void handleViewDetail(record)}>
-            {t('common.view')}
+        <div className="sys-store-actions">
+          <Button size="small" type="link" onClick={() => void handleViewDetail(record)}>
+            {t('system.stores.viewDetail')}
           </Button>
           <HasPermission code={P.Stores.Edit}>
-            <Space size={4}>
-              <Button size="small" type="link" icon={<EditOutlined />} onClick={() => void handleEdit(record)}>
-                {t('common.edit')}
-              </Button>
-              <Button
-                size="small"
-                type="link"
-                icon={<CloudSyncOutlined />}
-                loading={syncingStoreGuids.has(record.storeGUID)}
-                onClick={() => void handleSyncStoreToHq(record)}
-              >
-                {t('system.stores.syncHq')}
-              </Button>
-            </Space>
+            <Button size="small" type="link" onClick={() => void handleEdit(record)}>
+              {t('common.edit')}
+            </Button>
           </HasPermission>
-        </Space>
+          {/* 低频操作收进「更多」：同步到 HQ 需要编辑权限；管理用户与点击用户数入口等价，所有人可见。 */}
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                ...(canEditStores
+                  ? [{
+                      key: 'sync',
+                      label: t('system.stores.syncHq'),
+                      icon: syncingStoreGuids.has(record.storeGUID) ? <LoadingOutlined /> : <CloudSyncOutlined />,
+                      disabled: syncingStoreGuids.has(record.storeGUID),
+                    }]
+                  : []),
+                { key: 'users', label: t('system.stores.manageUsers'), icon: <TeamOutlined /> },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'sync') {
+                  void handleSyncStoreToHq(record)
+                } else if (key === 'users') {
+                  handleOpenStoreUsers(record)
+                }
+              },
+            }}
+          >
+            <Button size="small" type="link" icon={<EllipsisOutlined />} aria-label={t('system.stores.moreActions')} />
+          </Dropdown>
+        </div>
       ),
     },
   ]
 
   return (
     <PageContainer
+      compact
       title={t('system.stores.pageTitle')}
-      subtitle={t('system.stores.pageSubtitle')}
+      subtitle={overview ? t('system.stores.totalSummary', { total: overview.total, enabled: overview.enabled }) : undefined}
+      extra={(
+        <HasPermission code={P.Stores.Create}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
+            {t('system.stores.createStore')}
+          </Button>
+        </HasPermission>
+      )}
     >
       <Card>
-        <Space wrap style={{ marginBottom: 16 }}>
+        <div className="sys-store-toolbar">
           <Input
-            placeholder={t('system.stores.searchPlaceholder')}
+            placeholder={`${t('system.stores.searchPlaceholder')} · ${t('common.listToolbar.searchEnterHint', '回车查询')}`}
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
+            onPressEnter={handleQuery}
             prefix={<SearchOutlined />}
-            style={{ width: 260 }}
+            style={{ width: 300 }}
             allowClear
           />
-          <Button type="primary" onClick={handleQuery}>
-            {t('common.query')}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void loadData(page, pageSize, brandFilter, isActiveFilter, sortBy, sortOrder)}>
-            {t('common.refresh')}
-          </Button>
-          <HasPermission code={P.Stores.Create}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
-              {t('system.stores.createStore')}
-            </Button>
-          </HasPermission>
-          <HasPermission code={P.Stores.Edit}>
-            <Space size={8}>
-              <Button
-                icon={<EditOutlined />}
-                disabled={selectedStoreGuids.length === 0}
-                onClick={handleOpenBatchEdit}
-              >
-                {t('system.stores.batchEdit')}
-              </Button>
-              <Typography.Text type={selectedStoreGuids.length > 0 ? undefined : 'secondary'}>
-                {t('system.stores.selectedStoreCount', { count: selectedStoreGuids.length })}
-              </Typography.Text>
-            </Space>
-          </HasPermission>
-        </Space>
+          <Select
+            allowClear
+            prefix={t('system.stores.brandName')}
+            placeholder={t('system.stores.filterAll')}
+            style={{ width: 210 }}
+            value={brandFilter}
+            options={brandFilterOptions}
+            onChange={(value?: string) => applyFilters({ brand: value || undefined })}
+          />
+          <Select
+            allowClear
+            prefix={t('system.stores.timeZone')}
+            placeholder={t('system.stores.filterAll')}
+            style={{ width: 210 }}
+            optionLabelProp="short"
+            value={timeZoneFilter}
+            options={timeZoneFilterOptions}
+            onChange={(value?: string) => applyFilters({ timeZone: value || undefined })}
+          />
+          {/* 标签与分段控件包成一组，窄屏换行时不会把「收银」孤零零留在上一行 */}
+          <span className="sys-store-filter-group">
+            <span className="sys-store-sub">{t('system.stores.cashRegisterShort')}</span>
+            <Segmented<CashRegisterFilterValue>
+              value={cashRegisterFilterToValue(isActiveFilter)}
+              options={[
+                { label: t('system.stores.filterAll'), value: 'all' },
+                { label: t('system.stores.cashEnabled'), value: 'enabled' },
+                { label: t('system.stores.cashDisabled'), value: 'disabled' },
+              ]}
+              onChange={(value) => applyFilters({ isActive: cashRegisterFilterFromValue(value) })}
+            />
+          </span>
+          <Tooltip title={t('common.refresh')}>
+            <Button icon={<ReloadOutlined />} aria-label={t('common.refresh')} onClick={() => void loadData()} />
+          </Tooltip>
+        </div>
+
+        {activeFilterItems.length > 0 || selectedStoreGuids.length > 0 ? (
+          <div className="sys-store-bars">
+            {activeFilterItems.length > 0 ? (
+              <ActiveFilterBar items={activeFilterItems} onClearAll={() => applyFilters({ brand: undefined, isActive: undefined, timeZone: undefined })} />
+            ) : null}
+            {/* 勾选后才出现的批量操作条：原先常驻的灰色「批量修改」和「已选 0 家分店」不再占位。 */}
+            <SelectionActionBar selectedCount={selectedStoreGuids.length} onClearSelection={clearStoreSelection}>
+              <HasPermission code={P.Stores.Edit}>
+                <Button size="small" icon={<EditOutlined />} onClick={handleOpenBatchEdit}>
+                  {t('system.stores.batchEdit')}
+                </Button>
+              </HasPermission>
+            </SelectionActionBar>
+          </div>
+        ) : null}
 
         <MeasuredTable metricId="system.stores.table-1"
+          className="sys-store-table"
           rowKey="storeGUID"
           rowSelection={canEditStores ? {
             selectedRowKeys: selectedStoreGuids,
             preserveSelectedRowKeys: true,
             fixed: true,
+            columnWidth: 44,
             onChange: (selectedRowKeys) => {
               const nextStoreGuids = selectedRowKeys.map(String)
               if (nextStoreGuids.length > 100) {
@@ -659,10 +802,19 @@ export default function SystemStoresPage() {
           loading={loading}
           columns={columns}
           dataSource={data}
-          size="small"
           tableLayout="fixed"
-          scroll={{ x: 1760 }}
+          scroll={{ x: 1160 }}
           onChange={handleTableChange}
+          rowClassName={() => 'sys-store-row-clickable'}
+          onRow={(record) => ({
+            // 整行可点开详情；行内按钮、勾选框、下拉菜单等自带交互的元素不触发，避免重复打开。
+            onClick: (event) => {
+              if ((event.target as HTMLElement).closest('button, a, .ant-checkbox-wrapper, .ant-table-selection-column, .ant-dropdown')) {
+                return
+              }
+              void handleViewDetail(record)
+            },
+          })}
           pagination={{
             current: page,
             pageSize,
@@ -807,18 +959,33 @@ export default function SystemStoresPage() {
       </Modal>
 
       <Drawer
-        title={detailStore ? t('system.stores.detailTitle', { name: detailStore.storeCode }) : t('system.stores.detailTitleShort')}
-        width={860}
+        rootClassName="sys-store-drawer"
+        title={
+          detailStore ? (
+            <div className="sys-store-drawer-head">
+              <span className="sys-store-drawer-title">{detailStore.storeName}</span>
+              <div className="sys-store-drawer-meta">
+                <Tag bordered={false} className="sys-store-mono" style={{ marginInlineEnd: 0 }}>{detailStore.storeCode}</Tag>
+                {renderBrandName(detailStore.brandName)}
+                <span className={detailStore.isActive ? 'sys-store-status sys-store-status-on' : 'sys-store-status'}>
+                  {detailStore.isActive ? t('system.stores.cashRegisterOn') : t('system.stores.cashRegisterOff')}
+                </span>
+              </div>
+            </div>
+          ) : t('system.stores.detailTitleShort')
+        }
+        width={660}
         open={detailOpen}
         onClose={() => {
           setDetailOpen(false)
           setDetailStore(null)
         }}
         destroyOnHidden
-        extra={
+        closable={{ placement: 'end' }}
+        footer={
           detailStore ? (
-            <HasPermission code={P.Stores.Edit}>
-              <Space>
+            <div className="sys-store-drawer-footer">
+              <HasPermission code={P.Stores.Edit}>
                 <Button
                   icon={<CloudSyncOutlined />}
                   loading={syncingStoreGuids.has(detailStore.storeGUID)}
@@ -826,11 +993,18 @@ export default function SystemStoresPage() {
                 >
                   {t('system.stores.syncHq')}
                 </Button>
-                <Button type="primary" onClick={() => handleOpenStoreUsers(detailStore)}>
+                <Button icon={<TeamOutlined />} onClick={() => handleOpenStoreUsers(detailStore)}>
                   {t('system.stores.manageUsers')}
                 </Button>
-              </Space>
-            </HasPermission>
+              </HasPermission>
+              <span className="sys-store-drawer-footer-spacer" />
+              <Button onClick={() => { setDetailOpen(false); setDetailStore(null) }}>{t('common.close')}</Button>
+              <HasPermission code={P.Stores.Edit}>
+                <Button type="primary" icon={<EditOutlined />} onClick={() => void handleEdit(detailStore)}>
+                  {t('system.stores.editTitleShort')}
+                </Button>
+              </HasPermission>
+            </div>
           ) : null
         }
       >
@@ -839,43 +1013,54 @@ export default function SystemStoresPage() {
         ) : !detailStore ? (
           <Typography.Text type="danger">{t('system.stores.notFound')}</Typography.Text>
         ) : (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions
-              bordered
-              column={2}
-              size="small"
-              labelStyle={{ width: 96, whiteSpace: 'nowrap' }}
-            >
-              <Descriptions.Item label={t('system.stores.storeName')}>{detailStore.storeName}</Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.storeCode')}>{detailStore.storeCode}</Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.brandName')}>{detailStore.brandName || '--'}</Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.abn')}>{detailStore.abn || '--'}</Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.timeZone')}>{formatStoreTimeZoneId(detailStore.timeZoneId)}</Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.contactPhone')}>{detailStore.contactPhone || '--'}</Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.contactEmail')}>{detailStore.contactEmail || '--'}</Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.cashRegisterEnabled')}>
-                <Tag color={detailStore.isActive ? 'success' : 'default'}>
-                  {detailStore.isActive ? t('common.active') : t('common.inactive')}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.userCount')}>
-                <Button type="link" style={{ paddingInline: 0 }} onClick={() => handleOpenStoreUsers(detailStore)}>
-                  {detailStore.activeUsers ?? 0} / {detailStore.totalUsers ?? 0}
-                </Button>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.address')} span={2}>
-                {detailStore.address || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('column.description')} span={2}>
-                {detailStore.description || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.stores.returnPolicy')} span={2}>
-                <div style={{ whiteSpace: 'pre-wrap' }}>{detailStore.returnPolicy || '--'}</div>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('column.createTime')}>{detailStore.createdAt}</Descriptions.Item>
-              <Descriptions.Item label={t('system.users.updatedAt')}>{detailStore.updatedAt}</Descriptions.Item>
-            </Descriptions>
-          </Space>
+          <>
+            <div className="sys-store-stats">
+              <div>
+                <div className="sys-store-stat-key">{t('system.stores.detailUsers')}</div>
+                <div className="sys-store-stat-value">
+                  <Button type="link" style={{ paddingInline: 0, fontSize: 18, fontWeight: 650, height: 'auto' }} onClick={() => handleOpenStoreUsers(detailStore)}>
+                    {detailStore.activeUsers ?? 0}
+                  </Button>
+                  <small> / {detailStore.totalUsers ?? 0} {t('system.stores.peopleUnit')}</small>
+                </div>
+              </div>
+              <div>
+                <div className="sys-store-stat-key">{t('system.stores.timeZone')}</div>
+                <div className="sys-store-stat-value sys-store-stat-value-sm">
+                  <Tooltip title={formatStoreTimeZoneId(detailStore.timeZoneId)}>
+                    <span>{formatStoreTimeZoneShort(detailStore.timeZoneId)}</span>
+                  </Tooltip>
+                </div>
+              </div>
+              <div>
+                <div className="sys-store-stat-key">{t('system.users.updatedAt')}</div>
+                <div className="sys-store-stat-value sys-store-stat-value-sm">{formatTimestampText(detailStore.updatedAt)}</div>
+              </div>
+            </div>
+
+            <section className="sys-store-detail-section">
+              <h4 className="sys-store-section-title">{t('system.stores.detailBasic')}</h4>
+              <dl className="sys-store-dl">
+                <dt>{t('system.stores.abn')}</dt>
+                <dd className="sys-store-mono">{detailStore.abn || '--'}</dd>
+                <dt>{t('system.stores.contactPhone')}</dt>
+                <dd>{detailStore.contactPhone || '--'}</dd>
+                <dt>{t('system.stores.contactEmail')}</dt>
+                <dd>{detailStore.contactEmail || '--'}</dd>
+                <dt>{t('system.stores.address')}</dt>
+                <dd>{detailStore.address || '--'}</dd>
+                <dt>{t('column.description')}</dt>
+                <dd>{detailStore.description || '--'}</dd>
+                <dt>{t('column.createTime')}</dt>
+                <dd>{formatTimestampText(detailStore.createdAt)}</dd>
+              </dl>
+            </section>
+
+            <section className="sys-store-detail-section">
+              <h4 className="sys-store-section-title">{t('system.stores.returnPolicy')}</h4>
+              <div className="sys-store-panel" style={{ whiteSpace: 'pre-wrap' }}>{detailStore.returnPolicy || '--'}</div>
+            </section>
+          </>
         )}
       </Drawer>
 
@@ -887,76 +1072,16 @@ export default function SystemStoresPage() {
           createForm.resetFields()
         }}
         onOk={() => void handleCreateSubmit()}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
         confirmLoading={createSaving}
-        width={720}
+        width={780}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto', paddingInline: 4 } }}
         destroyOnHidden
       >
         <Form form={createForm} layout="vertical" initialValues={{ isActive: false }} autoComplete="off">
-          {/* 新建与编辑使用同一套前端校验，尽量在提交前拦住后端必填和长度错误。 */}
-          <Form.Item
-            label={t('system.stores.storeName')}
-            name="storeName"
-            rules={[
-              { required: true, message: t('system.stores.storeNameRequired') },
-              { max: 100, message: t('system.stores.storeNameMaxLength') },
-            ]}
-          >
-            <Input autoComplete="off" />
-          </Form.Item>
-          <Form.Item
-            label={t('system.stores.storeCode')}
-            name="storeCode"
-            rules={[
-              { required: true, message: t('system.stores.storeCodeRequired') },
-              { max: 20, message: t('system.stores.storeCodeMaxLength') },
-            ]}
-          >
-            <Input
-              autoComplete="off"
-              addonAfter={(
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  loading={storeCodeLoading}
-                  onClick={() => void loadNextStoreCode()}
-                >
-                  {t('system.stores.regenerateStoreCode')}
-                </Button>
-              )}
-            />
-          </Form.Item>
-          <Form.Item
-            label={t('system.stores.timeZone')}
-            name="timeZoneId"
-            rules={[{ required: true, message: t('system.stores.timeZoneRequired') }]}
-          >
-            <Select options={storeTimeZoneOptions} />
-          </Form.Item>
-          <Form.Item label={t('system.stores.brandName')} name="brandName" rules={[{ max: 100, message: t('system.stores.brandNameMaxLength') }]}>
-            <Input autoComplete="off" />
-          </Form.Item>
-          <Form.Item label={t('system.stores.abn')} name="abn" rules={[{ max: 20, message: t('system.stores.abnMaxLength') }]}>
-            <Input autoComplete="off" />
-          </Form.Item>
-          <Form.Item label={t('system.stores.contactPhone')} name="contactPhone" rules={[{ max: 20, message: t('system.stores.contactPhoneMaxLength') }]}>
-            <Input autoComplete="off" />
-          </Form.Item>
-          <Form.Item label={t('system.stores.contactEmail')} name="contactEmail" rules={[{ type: 'email', message: t('system.users.emailInvalid') }]}>
-            <Input autoComplete="off" />
-          </Form.Item>
-          <Form.Item label={t('system.stores.address')} name="address" rules={[{ max: 200, message: t('system.stores.addressMaxLength') }]}>
-            <Input autoComplete="off" />
-          </Form.Item>
-          <Form.Item label={t('column.description')} name="description" rules={[{ max: 500, message: t('system.stores.descriptionMaxLength') }]}>
-            <Input.TextArea rows={4} autoComplete="off" />
-          </Form.Item>
-          <Form.Item label={t('system.stores.returnPolicy')} name="returnPolicy" rules={[{ max: 500, message: t('system.stores.returnPolicyMaxLength') }]}>
-            <Input.TextArea rows={4} autoComplete="off" />
-          </Form.Item>
-          <Form.Item label={t('system.stores.cashRegisterEnabled')} name="isActive" valuePropName="checked">
-            <Switch checkedChildren={t('common.active')} unCheckedChildren={t('common.inactive')} />
-          </Form.Item>
+          {/* 新建与编辑共用同一套表单分区与前端校验。 */}
+          <StoreFormFields onRegenerateStoreCode={() => void loadNextStoreCode()} storeCodeLoading={storeCodeLoading} />
         </Form>
       </Modal>
 
@@ -969,63 +1094,15 @@ export default function SystemStoresPage() {
           form.resetFields()
         }}
         onOk={() => void handleEditSubmit()}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
         confirmLoading={editLoading}
-        width={720}
+        width={780}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto', paddingInline: 4 } }}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical">
-          {/* 前端长度限制与后端 UpdateStoreDto 保持一致，避免提交后才收到 400。 */}
-          <Form.Item
-            label={t('system.stores.storeName')}
-            name="storeName"
-            rules={[
-              { required: true, message: t('system.stores.storeNameRequired') },
-              { max: 100, message: t('system.stores.storeNameMaxLength') },
-            ]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label={t('system.stores.storeCode')}
-            name="storeCode"
-            rules={[
-              { required: true, message: t('system.stores.storeCodeRequired') },
-              { max: 20, message: t('system.stores.storeCodeMaxLength') },
-            ]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label={t('system.stores.timeZone')}
-            name="timeZoneId"
-            rules={[{ required: true, message: t('system.stores.timeZoneRequired') }]}
-          >
-            <Select options={storeTimeZoneOptions} />
-          </Form.Item>
-          <Form.Item label={t('system.stores.brandName')} name="brandName" rules={[{ max: 100, message: t('system.stores.brandNameMaxLength') }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label={t('system.stores.abn')} name="abn" rules={[{ max: 20, message: t('system.stores.abnMaxLength') }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label={t('system.stores.contactPhone')} name="contactPhone" rules={[{ max: 20, message: t('system.stores.contactPhoneMaxLength') }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label={t('system.stores.contactEmail')} name="contactEmail" rules={[{ type: 'email', message: t('system.users.emailInvalid') }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label={t('system.stores.address')} name="address" rules={[{ max: 200, message: t('system.stores.addressMaxLength') }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label={t('column.description')} name="description" rules={[{ max: 500, message: t('system.stores.descriptionMaxLength') }]}>
-            <Input.TextArea rows={4} />
-          </Form.Item>
-          <Form.Item label={t('system.stores.returnPolicy')} name="returnPolicy" rules={[{ max: 500, message: t('system.stores.returnPolicyMaxLength') }]}>
-            <Input.TextArea rows={4} />
-          </Form.Item>
-          <Form.Item label={t('system.stores.cashRegisterEnabled')} name="isActive" valuePropName="checked">
-            <Switch checkedChildren={t('common.active')} unCheckedChildren={t('common.inactive')} />
-          </Form.Item>
+        <Form form={form} layout="vertical" autoComplete="off">
+          <StoreFormFields />
         </Form>
       </Modal>
 
@@ -1041,7 +1118,7 @@ export default function SystemStoresPage() {
             if (detailStore?.storeGUID === storeUserTarget.storeGUID) {
               void reloadStoreDetail(storeUserTarget.storeGUID)
             }
-            void loadData(page, pageSize)
+            void loadData()
           }
         }}
       />

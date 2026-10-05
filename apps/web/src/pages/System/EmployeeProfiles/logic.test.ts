@@ -1,10 +1,15 @@
 import { RequestError } from '../../../utils/request'
 import { readFileSync } from 'node:fs'
 import {
+  countChangedFormFields,
   createLatestRequestGuard,
   getExpectedSensitiveRevision,
   getChangedSensitiveFields,
+  getProfileCompletion,
+  getProfileInitials,
   getReviewChangedFields,
+  getStablePaletteIndex,
+  shortenIdentifier,
   handleSensitiveReviewFailure,
   isRejectReasonValid,
   isSensitiveRequestReviewable,
@@ -198,6 +203,75 @@ const genericHandled = await handleSensitiveReviewFailure(
   async () => { pendingCountRefreshes += 1 },
 )
 assertEqual(genericHandled, false, '普通错误不得误判为版本冲突')
+
+// ---- 列表资料状态：未建档 / 待补全 / 完整 ----
+const fullProfile = {
+  hasProfile: true,
+  bankBsb: '062-000',
+  bankAccountNumber: '10473821',
+  superannuationCompanyName: 'AustralianSuper',
+  superannuationAccountNumber: '5008145520',
+}
+assertEqual(getProfileCompletion(fullProfile).status, 'complete', '银行与公积金齐全应为完整')
+assertEqual(getProfileCompletion(fullProfile).missing.length, 0, '完整资料不应有缺失项')
+assertEqual(getProfileCompletion({ hasProfile: false }).status, 'noProfile', 'hasProfile=false 应为未建档')
+assertEqual(
+  getProfileCompletion({ ...fullProfile, bankAccountNumber: '  ' }).missing.join(','),
+  'bank',
+  'BSB 有、账号为空白时银行仍算缺失，且不影响公积金判断',
+)
+assertEqual(
+  getProfileCompletion({ ...fullProfile, superannuationCompanyName: undefined }).missing.join(','),
+  'superannuation',
+  '公积金缺公司名应算缺失',
+)
+assertEqual(
+  getProfileCompletion({ hasProfile: true }).missing.join(','),
+  'bank,superannuation',
+  '已建档但全部为空应同时缺银行与公积金',
+)
+// 旧后端不返回 hasProfile 时不得误判为未建档，按字段内容判断。
+assertEqual(getProfileCompletion({ ...fullProfile, hasProfile: undefined }).status, 'complete', 'hasProfile 缺失时按字段判断')
+assertEqual(getProfileCompletion({ bankBsb: '062-000' }).status, 'incomplete', 'hasProfile 缺失且字段不全应为待补全而非未建档')
+
+// ---- 头像首字 / 稳定配色 / 标识缩写 ----
+assertEqual(getProfileInitials('Adam Wong', 'adam'), 'AW', '西文姓名取前两个单词首字母')
+assertEqual(getProfileInitials('陈雨桐'), '陈', '中文姓名取第一个字')
+assertEqual(getProfileInitials('', '  ', 'liam'), 'LI', '姓名为空时回退到后续候选且单词时取前两个字母')
+assertEqual(getProfileInitials(undefined, null, ''), '?', '全部为空时给占位符')
+assertEqual(getProfileInitials('𠮷野'), '𠮷', '生僻字按码点切分，不拆代理对')
+assertEqual(getStablePaletteIndex('adam', 6), getStablePaletteIndex('adam', 6), '同一名称配色必须稳定')
+assert(getStablePaletteIndex('adam', 6) >= 0 && getStablePaletteIndex('adam', 6) < 6, '配色下标必须落在调色板范围内')
+assertEqual(getStablePaletteIndex('adam', 0), 0, '空调色板不得除零')
+assertEqual(shortenIdentifier('90bb2880-ee1e-43c7-97be-587cd7ad97c6'), '90bb2880…ad97c6', '长 GUID 应保留头尾')
+assertEqual(shortenIdentifier('short-id'), 'short-id', '短标识原样展示')
+assertEqual(shortenIdentifier('  '), '', '空白标识返回空串')
+
+// ---- 抽屉「已修改 N 项」 ----
+const dayjsLike = (text: string) => ({ format: () => text })
+assertEqual(
+  countChangedFormFields(
+    { displayName: 'Adam', birthday: dayjsLike('1998-06-21'), address: '' },
+    { displayName: ' Adam ', birthday: dayjsLike('1998-06-21'), address: undefined },
+    ['displayName', 'birthday', 'address'],
+  ),
+  0,
+  '首尾空白、空串与 undefined、同日期对象都不算修改',
+)
+assertEqual(
+  countChangedFormFields(
+    { displayName: 'Adam', birthday: dayjsLike('1998-06-21'), bankBsb: '062-000' },
+    { displayName: 'Adam W', birthday: dayjsLike('1998-06-22'), bankBsb: '062-000' },
+    ['displayName', 'birthday', 'bankBsb'],
+  ),
+  2,
+  '姓名与生日变化应计为 2 项',
+)
+assertEqual(
+  countChangedFormFields({ userGUID: 'a' }, { userGUID: 'b' }, ['displayName']),
+  0,
+  '只统计白名单内的字段',
+)
 
 const pageSource = readFileSync('src/pages/System/EmployeeProfiles/index.tsx', 'utf8')
 const editSource = pageSource.slice(pageSource.indexOf('const handleEdit'), pageSource.indexOf('const handleSubmit'))

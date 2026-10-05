@@ -1,0 +1,25 @@
+{
+  "system": {
+    "stores": {
+      "totalSummary": "共 {{total}} 家 · 已启用收银 {{enabled}}",
+      "filterAll": "全部",
+      "cashRegisterShort": "收银",
+      "cashRegisterColumn": "收银",
+      "codeColumn": "编码",
+      "cashEnabled": "已启用",
+      "cashDisabled": "未启用",
+      "brandAbn": "品牌 / ABN",
+      "usersColumn": "用户",
+      "viewDetail": "详情",
+      "moreActions": "更多操作",
+      "peopleUnit": "人",
+      "detailUsers": "关联用户（启用 / 全部）",
+      "detailBasic": "基本信息",
+      "cashRegisterOn": "收银系统已启用",
+      "cashRegisterOff": "收银系统未启用",
+      "formContact": "联系方式",
+      "formNotes": "说明",
+      "cashRegisterToggleHint": "停用后，该分店的收银系统将不可用"
+    }
+  }
+}

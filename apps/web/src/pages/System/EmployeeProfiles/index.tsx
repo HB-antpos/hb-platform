@@ -1,21 +1,28 @@
-import { EditOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import {
+  ArrowRightOutlined,
+  CopyOutlined,
+  EditOutlined,
+  LockOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
+import {
+  Alert,
+  Avatar,
   Badge,
   Button,
   Card,
-  Col,
   DatePicker,
   Drawer,
   Form,
   Image,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Tabs,
   Tag,
-  Typography,
+  Tooltip,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -45,11 +52,23 @@ import {
 import SensitiveChangeReviewPanel from './SensitiveChangeReviewPanel'
 import MinorEmploymentReviewPage from '../MinorEmploymentReview'
 import {
+  countChangedFormFields,
   getExpectedSensitiveRevision,
+  getProfileCompletion,
+  getProfileInitials,
+  getStablePaletteIndex,
   maskSensitiveSummary,
   saveAdminProfileWithPendingConfirmation,
+  shortenIdentifier,
 } from './logic'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import './employeeProfiles.css'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import employeeProfilesMessagesEn from './employeeProfilesMessages.en.json'
+import employeeProfilesMessagesZh from './employeeProfilesMessages.zh.json'
+
+// 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
+registerPageMessages({ zh: employeeProfilesMessagesZh, en: employeeProfilesMessagesEn })
 
 interface EmployeeProfileFormValues {
   userGUID?: string
@@ -76,6 +95,43 @@ type DesiredEmployeeProfileQuery = EmployeeProfileQueryDto & {
   pageSize: number
 }
 
+type SectionKey = 'basic' | 'bankSuper' | 'identity'
+
+const SECTION_KEYS: SectionKey[] = ['basic', 'bankSuper', 'identity']
+
+// 「已修改 N 项」只统计管理员可编辑的字段，GUID / 用户 ID 只读不参与。
+const PROFILE_FORM_FIELDS = [
+  'username',
+  'displayName',
+  'employmentType',
+  'gender',
+  'address',
+  'avatarUrl',
+  'bankBsb',
+  'bankAccountNumber',
+  'superannuationCompanyName',
+  'superannuationCompanyCode',
+  'superannuationAccountNumber',
+  'birthday',
+  'identityType',
+  'identityId',
+  'identityPhotoUrl',
+] as const
+
+const AVATAR_TONES = [
+  { background: '#e3edff', color: '#1554c0' },
+  { background: '#efe7ff', color: '#5a3fc0' },
+  { background: '#e1f5ef', color: '#0b7a6c' },
+  { background: '#fff0dd', color: '#a35a00' },
+  { background: '#ffe9ec', color: '#c4283c' },
+]
+
+const EMPLOYMENT_TAG_COLORS: Record<EmployeeEmploymentType, string> = {
+  fullTime: 'blue',
+  partTime: 'cyan',
+  casual: 'orange',
+}
+
 function formatDateTime(value?: string, language?: string) {
   if (!value) {
     return '--'
@@ -89,22 +145,22 @@ function formatDateTime(value?: string, language?: string) {
   return date.locale(language?.startsWith('zh') ? 'zh-cn' : 'en').format('YYYY-MM-DD HH:mm')
 }
 
-function formatDate(value?: string) {
+// 列表里日期与时间分两行展示，既保持列宽窄又不丢精度。
+function formatDateParts(value?: string) {
   if (!value) {
-    return '--'
+    return null
   }
 
   const date = dayjs(value)
-  return date.isValid() ? date.format('YYYY-MM-DD') : value
-}
-
-function joinSummary(parts: Array<string | undefined>) {
-  const values = parts.map((item) => item?.trim()).filter(Boolean)
-  return values.length > 0 ? values.join(' / ') : '--'
+  return date.isValid() ? { date: date.format('YYYY-MM-DD'), time: date.format('HH:mm') } : { date: value, time: '' }
 }
 
 function getProfileKey(record: Pick<EmployeeProfileSummaryDto, 'id' | 'userGUID' | 'userId' | 'username'>) {
   return record.id || record.userGUID || record.userId || record.username || ''
+}
+
+function getAvatarTone(seed: string) {
+  return AVATAR_TONES[getStablePaletteIndex(seed, AVATAR_TONES.length)]
 }
 
 function mapProfileToFormValues(profile: EmployeeProfileDetailDto): EmployeeProfileFormValues {
@@ -140,6 +196,8 @@ export default function SystemEmployeeProfilesPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState(0)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [activeTab, setActiveTab] = useState('profiles')
   const listRequestGuardRef = useRef(createLatestRequestGuard())
   const mountedRef = useRef(false)
   const desiredListQueryRef = useRef<DesiredEmployeeProfileQuery>({
@@ -151,7 +209,14 @@ export default function SystemEmployeeProfilesPage() {
   const [editLoading, setEditLoading] = useState(false)
   const [editingProfile, setEditingProfile] = useState<EmployeeProfileDetailDto | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
+  const [activeSection, setActiveSection] = useState<SectionKey>('basic')
+  const [dirtyCount, setDirtyCount] = useState(0)
   const [form] = Form.useForm<EmployeeProfileFormValues>()
+  const initialFormValuesRef = useRef<EmployeeProfileFormValues>({})
+  const formBodyRef = useRef<HTMLDivElement | null>(null)
+  const sectionRefs = useRef<Partial<Record<SectionKey, HTMLElement | null>>>({})
+  // 点击导航触发的程序化滚动期间暂停滚动联动：内容较短时只能滚到底，否则「滚到底选最后一项」会抢走刚点的高亮。
+  const jumpLockUntilRef = useRef(0)
 
   const avatarUrl = Form.useWatch('avatarUrl', form)
   const identityPhotoUrl = Form.useWatch('identityPhotoUrl', form)
@@ -184,15 +249,6 @@ export default function SystemEmployeeProfilesPage() {
     [employmentTypeOptions],
   )
 
-  const genderLabelMap = useMemo(
-    () =>
-      genderOptions.reduce<Record<string, string>>((acc, item) => {
-        acc[item.value] = item.label
-        return acc
-      }, {}),
-    [genderOptions],
-  )
-
   const loadData = async (overrides: Partial<DesiredEmployeeProfileQuery> = {}) => {
     if (!mountedRef.current) {
       return
@@ -214,6 +270,7 @@ export default function SystemEmployeeProfilesPage() {
         setTotal(result.total)
         setPage(result.page)
         setPageSize(result.pageSize)
+        setHasLoaded(true)
       },
       onError: (error) => {
         console.error(error)
@@ -254,6 +311,46 @@ export default function SystemEmployeeProfilesPage() {
     void loadPendingCount()
   }, [])
 
+  // 抽屉内的分区导航跟随滚动高亮：取「顶边已越过吸顶导航」的最后一个分区；滚到底时强制选中最后一个。
+  useEffect(() => {
+    if (!editOpen || !editingProfile) {
+      return undefined
+    }
+
+    const container = formBodyRef.current?.closest('.ant-drawer-body') as HTMLElement | null
+    if (!container) {
+      return undefined
+    }
+
+    const handleScroll = () => {
+      if (Date.now() < jumpLockUntilRef.current) {
+        return
+      }
+      const threshold = container.getBoundingClientRect().top + 64
+      let current: SectionKey = 'basic'
+      for (const key of SECTION_KEYS) {
+        const element = sectionRefs.current[key]
+        if (element && element.getBoundingClientRect().top <= threshold) {
+          current = key
+        }
+      }
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 2) {
+        current = SECTION_KEYS[SECTION_KEYS.length - 1]
+      }
+      setActiveSection(current)
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [editOpen, editingProfile])
+
+  const closeEditDrawer = () => {
+    setEditOpen(false)
+    setEditingProfile(null)
+    setDirtyCount(0)
+    form.resetFields()
+  }
+
   const handleEdit = async (record: EmployeeProfileSummaryDto) => {
     const profileKey = getProfileKey(record)
     if (!profileKey) {
@@ -264,12 +361,17 @@ export default function SystemEmployeeProfilesPage() {
     setEditOpen(true)
     setEditLoading(true)
     setEditingProfile(null)
+    setActiveSection('basic')
+    setDirtyCount(0)
     form.resetFields()
 
     try {
       const detail = await getAdminEmployeeProfile(profileKey)
+      const formValues = mapProfileToFormValues(detail)
       setEditingProfile(detail)
-      form.setFieldsValue(mapProfileToFormValues(detail))
+      form.setFieldsValue(formValues)
+      // 记录打开时的初始值，底栏据此统计「已修改 N 项」。
+      initialFormValuesRef.current = formValues
     } catch (error) {
       console.error(error)
       message.error(t('system.employeeProfiles.loadDetailFailed'))
@@ -329,9 +431,7 @@ export default function SystemEmployeeProfilesPage() {
         return
       }
       message.success(t('system.employeeProfiles.saveSuccess'))
-      setEditOpen(false)
-      setEditingProfile(null)
-      form.resetFields()
+      closeEditDrawer()
       void refreshDesiredList()
       void loadPendingCount()
     } catch (error) {
@@ -345,58 +445,150 @@ export default function SystemEmployeeProfilesPage() {
     }
   }
 
+  const handleFormValuesChange = () => {
+    setDirtyCount(countChangedFormFields(initialFormValuesRef.current, form.getFieldsValue(), PROFILE_FORM_FIELDS))
+  }
+
+  const handleJumpToSection = (key: SectionKey) => {
+    setActiveSection(key)
+    jumpLockUntilRef.current = Date.now() + 900
+    // 尊重系统「减少动态效果」设置：开启时直接跳转不做平滑滚动。
+    const reduceMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    sectionRefs.current[key]?.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' })
+  }
+
+  const handleCopyIdentifier = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      message.success(t('system.employeeProfiles.drawer.copied'))
+    } catch {
+      message.error(t('system.employeeProfiles.drawer.copyFailed'))
+    }
+  }
+
+  const renderEmploymentTag = (value?: EmployeeEmploymentType) =>
+    value ? (
+      <Tag bordered={false} color={EMPLOYMENT_TAG_COLORS[value]} style={{ marginInlineEnd: 0 }}>
+        {employmentTypeLabelMap[value] || value}
+      </Tag>
+    ) : null
+
   const columns: ColumnsType<EmployeeProfileSummaryDto> = [
     {
-      title: t('system.employeeProfiles.account'),
-      key: 'account',
-      width: 220,
-      render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{record.username || '--'}</Typography.Text>
-          <Typography.Text type="secondary">{record.userGUID || record.userId || record.id || '--'}</Typography.Text>
-        </Space>
-      ),
-    },
-    {
-      title: t('system.employeeProfiles.displayName'),
-      dataIndex: 'displayName',
-      width: 160,
-      render: (value: string | undefined) => value || '--',
+      title: t('system.employeeProfiles.employee'),
+      key: 'employee',
+      width: 260,
+      render: (_, record) => {
+        const displayName = record.displayName || record.username || '--'
+        const tone = getAvatarTone(getProfileKey(record) || displayName)
+        return (
+          <div className="sys-emp-who">
+            <Avatar size={34} src={record.avatarUrl || undefined} style={{ ...tone, flex: 'none', fontWeight: 600 }}>
+              {getProfileInitials(record.displayName, record.username)}
+            </Avatar>
+            <div className="sys-emp-who-text">
+              <span className="sys-emp-name">{displayName}</span>
+              {record.displayName && record.username ? <span className="sys-emp-sub">@{record.username}</span> : null}
+            </div>
+          </div>
+        )
+      },
     },
     {
       title: t('system.employeeProfiles.employmentType'),
       dataIndex: 'employmentType',
-      width: 120,
+      width: 100,
       render: (value: EmployeeEmploymentType | undefined) =>
-        value ? <Tag color="blue">{employmentTypeLabelMap[value] || value}</Tag> : '--',
+        renderEmploymentTag(value) ?? <span className="sys-emp-faint">{t('system.employeeProfiles.notSet')}</span>,
     },
     {
-      title: t('system.employeeProfiles.bankSummary'),
-      key: 'bankSummary',
-      width: 220,
-      render: (_, record) => joinSummary([record.bankBsb, maskSensitiveSummary(record.bankAccountNumber)]),
+      title: t('system.employeeProfiles.bankAccount'),
+      key: 'bankAccount',
+      width: 170,
+      render: (_, record) => {
+        // 未建档用户没有任何资料，用淡色占位；已建档但没填才用琥珀色提醒。
+        if (record.hasProfile === false) {
+          return <span className="sys-emp-faint">--</span>
+        }
+        if (!record.bankBsb && !record.bankAccountNumber) {
+          return <span className="sys-emp-missing">{t('system.employeeProfiles.notFilled')}</span>
+        }
+        return (
+          <div className="sys-emp-two">
+            <span className="sys-emp-mono sys-emp-strong">{record.bankBsb || '--'}</span>
+            <span className="sys-emp-mono sys-emp-sub">{maskSensitiveSummary(record.bankAccountNumber)}</span>
+          </div>
+        )
+      },
     },
     {
-      title: t('system.employeeProfiles.superSummary'),
-      key: 'superSummary',
-      width: 260,
-      render: (_, record) =>
-        joinSummary([
-          record.superannuationCompanyName,
-          record.superannuationCompanyCode,
-          maskSensitiveSummary(record.superannuationAccountNumber),
-        ]),
+      title: t('system.employeeProfiles.superannuation'),
+      key: 'superannuation',
+      width: 230,
+      render: (_, record) => {
+        if (record.hasProfile === false) {
+          return <span className="sys-emp-faint">--</span>
+        }
+        if (!record.superannuationCompanyName && !record.superannuationAccountNumber) {
+          return <span className="sys-emp-missing">{t('system.employeeProfiles.notFilled')}</span>
+        }
+        return (
+          <div className="sys-emp-two">
+            <span className="sys-emp-strong">{record.superannuationCompanyName || '--'}</span>
+            <span className="sys-emp-sub">
+              {record.superannuationCompanyCode ? <span className="sys-emp-mono">{record.superannuationCompanyCode} · </span> : null}
+              <span className="sys-emp-mono">{maskSensitiveSummary(record.superannuationAccountNumber)}</span>
+            </span>
+          </div>
+        )
+      },
+    },
+    {
+      title: t('system.employeeProfiles.completion.title'),
+      key: 'completion',
+      width: 130,
+      render: (_, record) => {
+        const completion = getProfileCompletion(record)
+        if (completion.status === 'noProfile') {
+          return <span className="sys-emp-status sys-emp-status-none">{t('system.employeeProfiles.completion.noProfile')}</span>
+        }
+        if (completion.status === 'complete') {
+          return <span className="sys-emp-status sys-emp-status-complete">{t('system.employeeProfiles.completion.complete')}</span>
+        }
+        return (
+          <div className="sys-emp-two">
+            <span className="sys-emp-status sys-emp-status-warn">{t('system.employeeProfiles.completion.incomplete')}</span>
+            <span className="sys-emp-sub">
+              {completion.missing
+                .map((part) => t(part === 'bank' ? 'system.employeeProfiles.completion.missingBank' : 'system.employeeProfiles.completion.missingSuper'))
+                .join(' · ')}
+            </span>
+          </div>
+        )
+      },
     },
     {
       title: t('column.updateTime'),
       dataIndex: 'updatedAt',
-      width: 160,
-      render: (value: string | undefined) => formatDateTime(value, i18n.language),
+      width: 120,
+      render: (value: string | undefined) => {
+        const parts = formatDateParts(value)
+        return parts ? (
+          <div className="sys-emp-datetime">
+            <span>{parts.date}</span>
+            {parts.time ? <span className="sys-emp-sub">{parts.time}</span> : null}
+          </div>
+        ) : (
+          <span className="sys-emp-faint">--</span>
+        )
+      },
     },
     {
       title: t('column.action'),
       key: 'action',
-      width: 120,
+      width: 90,
+      fixed: 'right',
+      align: 'right',
       render: (_, record) => (
         <Button type="link" icon={<EditOutlined />} disabled={!canEditProfiles} onClick={() => void handleEdit(record)}>
           {t('common.edit')}
@@ -405,25 +597,54 @@ export default function SystemEmployeeProfilesPage() {
     },
   ]
 
+  const editingDisplayName = editingProfile
+    ? editingProfile.displayName || editingProfile.username || editingProfile.userGUID || editingProfile.id || ''
+    : ''
+  const editingIdentifier = editingProfile ? editingProfile.userGUID || editingProfile.userId || editingProfile.id || '' : ''
+  // 头像随「头像链接」输入实时预览；尚未触碰表单时用详情里的已保存值。
+  const headerAvatarUrl = avatarUrl !== undefined ? avatarUrl : editingProfile?.avatarUrl
+  const sectionTitles: Record<SectionKey, string> = {
+    basic: t('system.employeeProfiles.drawer.nav.basic'),
+    bankSuper: t('system.employeeProfiles.drawer.nav.bankSuper'),
+    identity: t('system.employeeProfiles.drawer.nav.identity'),
+  }
+  const sensitiveBadge = (
+    <span className="sys-emp-sensitive">
+      <LockOutlined style={{ fontSize: 11 }} />
+      {t('system.employeeProfiles.drawer.sensitive')}
+    </span>
+  )
+
   return (
     <PageContainer
+      compact
       title={t('system.employeeProfiles.pageTitle')}
-      subtitle={t('system.employeeProfiles.pageSubtitle')}
+      subtitle={hasLoaded ? t('system.employeeProfiles.totalCount', { count: total }) : undefined}
+      extra={
+        pendingCount > 0 ? (
+          <Button className="sys-emp-pending-entry" icon={<LockOutlined />} onClick={() => setActiveTab('pending')}>
+            {t('system.employeeProfiles.pendingEntry', { count: pendingCount })}
+            <ArrowRightOutlined />
+          </Button>
+        ) : undefined
+      }
     >
       <Card>
         <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
           items={[
             {
               key: 'profiles',
               label: t('system.employeeProfiles.tabs.profiles'),
               children: (
                 <>
-                  <Space wrap style={{ marginBottom: 16 }}>
+                  <div className="sys-emp-toolbar">
                     <Input
                       allowClear
                       prefix={<SearchOutlined />}
-                      placeholder={t('system.employeeProfiles.searchPlaceholder')}
-                      style={{ width: 300 }}
+                      placeholder={`${t('system.employeeProfiles.searchPlaceholder')} · ${t('common.listToolbar.searchEnterHint', '回车查询')}`}
+                      style={{ width: 340 }}
                       value={keyword}
                       onChange={(event) => setKeyword(event.target.value)}
                       onPressEnter={() => void loadData({ page: 1, pageSize })}
@@ -431,21 +652,42 @@ export default function SystemEmployeeProfilesPage() {
                     <Button type="primary" onClick={() => void loadData({ page: 1, pageSize })}>
                       {t('common.query')}
                     </Button>
-                    <Button icon={<ReloadOutlined />} onClick={() => void refreshDesiredList()}>
-                      {t('common.refresh')}
-                    </Button>
-                  </Space>
+                    <Tooltip title={t('common.refresh')}>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        aria-label={t('common.refresh')}
+                        onClick={() => void refreshDesiredList()}
+                      />
+                    </Tooltip>
+                    <span className="sys-emp-toolbar-spacer" />
+                    <span className="sys-emp-mask-hint">
+                      <LockOutlined />
+                      {t('system.employeeProfiles.maskedHint')}
+                    </span>
+                  </div>
 
                   <MeasuredTable metricId="system.employee-profiles.table-1"
+                    className="sys-emp-table"
                     rowKey={(record) => getProfileKey(record)}
                     loading={loading}
                     columns={columns}
                     dataSource={data}
-                    scroll={{ x: 1180 }}
+                    scroll={{ x: 1100 }}
+                    rowClassName={() => (canEditProfiles ? 'sys-emp-row-clickable' : '')}
+                    onRow={(record) => ({
+                      // 整行可点开编辑；行内按钮、头像预览等自带交互的元素不触发，避免重复打开。
+                      onClick: (event) => {
+                        if (!canEditProfiles || (event.target as HTMLElement).closest('button, a, .ant-image')) {
+                          return
+                        }
+                        void handleEdit(record)
+                      },
+                    })}
                     pagination={{
                       current: page,
                       pageSize,
                       total,
+                      showTotal: (count) => t('common.total', { count }),
                       onChange: (nextPage, nextPageSize) => {
                         void loadData({ page: nextPage, pageSize: nextPageSize })
                       },
@@ -474,205 +716,185 @@ export default function SystemEmployeeProfilesPage() {
       </Card>
 
       <Drawer
-        width={960}
+        width={760}
         destroyOnHidden
+        rootClassName="sys-emp-drawer"
         open={editOpen}
-        onClose={() => {
-          setEditOpen(false)
-          setEditingProfile(null)
-          form.resetFields()
-        }}
+        onClose={closeEditDrawer}
+        closable={{ placement: 'end' }}
         title={
-          editingProfile
-            ? t('system.employeeProfiles.editTitle', {
-                name: editingProfile.displayName || editingProfile.username || editingProfile.userGUID || editingProfile.id,
-              })
-            : t('system.employeeProfiles.editTitleShort')
+          editingProfile ? (
+            <div className="sys-emp-drawer-head">
+              <Avatar
+                size={46}
+                src={headerAvatarUrl || undefined}
+                style={{ ...getAvatarTone(editingIdentifier || editingDisplayName), flex: 'none', fontWeight: 600 }}
+              >
+                {getProfileInitials(editingProfile.displayName, editingProfile.username)}
+              </Avatar>
+              <div className="sys-emp-drawer-head-main">
+                <div className="sys-emp-drawer-title">
+                  <span>{editingDisplayName}</span>
+                  {renderEmploymentTag(editingProfile.employmentType)}
+                </div>
+                <div className="sys-emp-drawer-meta">
+                  {editingProfile.username ? <span>@{editingProfile.username}</span> : null}
+                  {editingIdentifier ? (
+                    <span>
+                      <span className="sys-emp-mono">ID {shortenIdentifier(editingIdentifier)}</span>
+                      <Tooltip title={t('system.employeeProfiles.drawer.copyId')}>
+                        <Button
+                          type="text"
+                          size="small"
+                          className="sys-emp-copy-btn"
+                          icon={<CopyOutlined />}
+                          aria-label={t('system.employeeProfiles.drawer.copyId')}
+                          onClick={() => void handleCopyIdentifier(editingIdentifier)}
+                        />
+                      </Tooltip>
+                    </span>
+                  ) : null}
+                  {editingProfile.createdAt ? (
+                    <span>{t('system.employeeProfiles.drawer.createdOn', { date: formatDateTime(editingProfile.createdAt, i18n.language).slice(0, 10) })}</span>
+                  ) : null}
+                  <span>{t('system.employeeProfiles.drawer.updatedOn', { date: formatDateTime(editingProfile.updatedAt, i18n.language) })}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            t('system.employeeProfiles.editTitleShort')
+          )
         }
-        extra={
-          <Space>
-            <Button onClick={() => setEditOpen(false)}>{t('common.cancel')}</Button>
-            <Button type="primary" loading={editLoading} disabled={!canEditProfiles} onClick={() => void handleSubmit()}>
-              {t('common.save')}
-            </Button>
-          </Space>
+        footer={
+          editingProfile ? (
+            <div className="sys-emp-drawer-footer">
+              {dirtyCount > 0 ? <span className="sys-emp-dirty">{t('system.employeeProfiles.drawer.dirty', { count: dirtyCount })}</span> : null}
+              <span className="sys-emp-drawer-footer-spacer" />
+              <Button onClick={closeEditDrawer}>{t('common.cancel')}</Button>
+              <Button type="primary" loading={editLoading} disabled={!canEditProfiles} onClick={() => void handleSubmit()}>
+                {t('common.save')}
+              </Button>
+            </div>
+          ) : null
         }
       >
         {editLoading && !editingProfile ? (
-          <Typography.Text type="secondary">{t('system.employeeProfiles.loadingDetail')}</Typography.Text>
+          <span className="sys-emp-sub">{t('system.employeeProfiles.loadingDetail')}</span>
         ) : !editingProfile ? (
-          <Typography.Text type="danger">{t('system.employeeProfiles.notFound')}</Typography.Text>
+          <span style={{ color: '#d4380d' }}>{t('system.employeeProfiles.notFound')}</span>
         ) : (
-          <Form form={form} layout="vertical" preserve={false}>
-            <Row gutter={16}>
-              <Col xs={24} md={12}>
-                <Card size="small" title={t('system.employeeProfiles.sections.account')}>
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.Item name="username" label={t('system.employeeProfiles.username')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.username')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="displayName" label={t('system.employeeProfiles.displayName')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.displayName')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="userGUID" label={t('system.employeeProfiles.userGuid')}>
-                        <Input disabled />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="userId" label={t('system.employeeProfiles.userId')}>
-                        <Input disabled />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="employmentType" label={t('system.employeeProfiles.employmentType')}>
-                        <Select allowClear options={employmentTypeOptions} placeholder={t('system.employeeProfiles.placeholders.employmentType')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="gender" label={t('system.employeeProfiles.gender')}>
-                        <Select allowClear options={genderOptions} placeholder={t('system.employeeProfiles.placeholders.gender')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="birthday" label={t('system.employeeProfiles.birthday')}>
-                        <DatePicker style={{ width: '100%' }} placeholder={t('system.employeeProfiles.placeholders.birthday')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="identityType" label={t('system.employeeProfiles.identityType')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.identityType')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="identityId" label={t('system.employeeProfiles.identityId')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.identityId')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={24}>
-                      <Typography.Text type="secondary">
-                        {t('system.employeeProfiles.lastUpdated')}: {formatDateTime(editingProfile.updatedAt, i18n.language)}
-                      </Typography.Text>
-                    </Col>
-                  </Row>
-                </Card>
-              </Col>
+          <div ref={formBodyRef}>
+            <nav className="sys-emp-anchor" aria-label={t('system.employeeProfiles.editTitleShort')}>
+              {SECTION_KEYS.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-current={activeSection === key ? 'true' : undefined}
+                  onClick={() => handleJumpToSection(key)}
+                >
+                  {sectionTitles[key]}
+                </button>
+              ))}
+            </nav>
 
-              <Col xs={24} md={12}>
-                <Card size="small" title={t('system.employeeProfiles.sections.media')}>
-                  <Row gutter={12}>
-                    <Col span={24}>
-                      <Form.Item name="avatarUrl" label={t('system.employeeProfiles.avatarUrl')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.avatarUrl')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={24}>
-                      <Form.Item name="identityPhotoUrl" label={t('system.employeeProfiles.identityPhotoUrl')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.identityPhotoUrl')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        <Typography.Text strong>{t('system.employeeProfiles.avatarPreview')}</Typography.Text>
-                        {avatarUrl ? (
-                          <Image
-                            src={avatarUrl}
-                            width={120}
-                            height={120}
-                            style={{ objectFit: 'cover', borderRadius: 6 }}
-                            fallback="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
-                          />
-                        ) : (
-                          <Typography.Text type="secondary">{t('system.employeeProfiles.noImage')}</Typography.Text>
-                        )}
-                      </Space>
-                    </Col>
-                    <Col span={12}>
-                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        <Typography.Text strong>{t('system.employeeProfiles.identityPhotoPreview')}</Typography.Text>
-                        {identityPhotoUrl ? (
-                          <Image
-                            src={identityPhotoUrl}
-                            width={120}
-                            height={120}
-                            style={{ objectFit: 'cover', borderRadius: 6 }}
-                            fallback="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
-                          />
-                        ) : (
-                          <Typography.Text type="secondary">{t('system.employeeProfiles.noImage')}</Typography.Text>
-                        )}
-                      </Space>
-                    </Col>
-                  </Row>
-                </Card>
-              </Col>
+            <Form
+              form={form}
+              layout="vertical"
+              preserve={false}
+              requiredMark={false}
+              onValuesChange={handleFormValuesChange}
+            >
+              <section className="sys-emp-section" ref={(element) => { sectionRefs.current.basic = element }}>
+                <h4 className="sys-emp-section-title">{sectionTitles.basic}</h4>
+                <div className="sys-emp-grid-2">
+                  <Form.Item name="username" label={t('system.employeeProfiles.username')}>
+                    <Input placeholder={t('system.employeeProfiles.placeholders.username')} />
+                  </Form.Item>
+                  <Form.Item name="displayName" label={t('system.employeeProfiles.displayName')}>
+                    <Input placeholder={t('system.employeeProfiles.placeholders.displayName')} />
+                  </Form.Item>
+                  <Form.Item name="employmentType" label={t('system.employeeProfiles.employmentType')}>
+                    <Select allowClear options={employmentTypeOptions} placeholder={t('system.employeeProfiles.placeholders.employmentType')} />
+                  </Form.Item>
+                  <Form.Item name="gender" label={t('system.employeeProfiles.gender')}>
+                    <Select allowClear options={genderOptions} placeholder={t('system.employeeProfiles.placeholders.gender')} />
+                  </Form.Item>
+                  <Form.Item className="sys-emp-span-all" name="address" label={t('system.employeeProfiles.address')}>
+                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t('system.employeeProfiles.placeholders.address')} />
+                  </Form.Item>
+                  <Form.Item className="sys-emp-span-all" name="avatarUrl" label={t('system.employeeProfiles.avatarUrl')}>
+                    <Input placeholder={t('system.employeeProfiles.placeholders.avatarUrl')} />
+                  </Form.Item>
+                </div>
+              </section>
 
-              <Col xs={24} md={12}>
-                <Card size="small" title={t('system.employeeProfiles.sections.banking')} style={{ marginTop: 16 }}>
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.Item name="bankBsb" label={t('system.employeeProfiles.bankBsb')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.bankBsb')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="bankAccountNumber" label={t('system.employeeProfiles.bankAccountNumber')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.bankAccountNumber')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={24}>
-                      <Form.Item name="address" label={t('system.employeeProfiles.address')}>
-                        <Input.TextArea rows={3} placeholder={t('system.employeeProfiles.placeholders.address')} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                </Card>
-              </Col>
+              <section className="sys-emp-section" ref={(element) => { sectionRefs.current.bankSuper = element }}>
+                <h4 className="sys-emp-section-title">
+                  {sectionTitles.bankSuper}
+                  {sensitiveBadge}
+                </h4>
+                <div className="sys-emp-grid-2">
+                  <Form.Item name="bankBsb" label={t('system.employeeProfiles.bankBsb')}>
+                    <Input className="sys-emp-mono" placeholder={t('system.employeeProfiles.placeholders.bankBsb')} />
+                  </Form.Item>
+                  <Form.Item name="bankAccountNumber" label={t('system.employeeProfiles.bankAccountNumber')}>
+                    <Input className="sys-emp-mono" placeholder={t('system.employeeProfiles.placeholders.bankAccountNumber')} />
+                  </Form.Item>
+                  <Form.Item className="sys-emp-span-all" name="superannuationCompanyName" label={t('system.employeeProfiles.superannuationCompanyName')}>
+                    <Input placeholder={t('system.employeeProfiles.placeholders.superannuationCompanyName')} />
+                  </Form.Item>
+                  <Form.Item name="superannuationCompanyCode" label={t('system.employeeProfiles.superannuationCompanyCode')}>
+                    <Input className="sys-emp-mono" placeholder={t('system.employeeProfiles.placeholders.superannuationCompanyCode')} />
+                  </Form.Item>
+                  <Form.Item name="superannuationAccountNumber" label={t('system.employeeProfiles.superannuationAccountNumber')}>
+                    <Input className="sys-emp-mono" placeholder={t('system.employeeProfiles.placeholders.superannuationAccountNumber')} />
+                  </Form.Item>
+                </div>
+              </section>
 
-              <Col xs={24} md={12}>
-                <Card size="small" title={t('system.employeeProfiles.sections.superannuation')} style={{ marginTop: 16 }}>
-                  <Row gutter={12}>
-                    <Col span={24}>
-                      <Form.Item name="superannuationCompanyName" label={t('system.employeeProfiles.superannuationCompanyName')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.superannuationCompanyName')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="superannuationCompanyCode" label={t('system.employeeProfiles.superannuationCompanyCode')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.superannuationCompanyCode')} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="superannuationAccountNumber" label={t('system.employeeProfiles.superannuationAccountNumber')}>
-                        <Input placeholder={t('system.employeeProfiles.placeholders.superannuationAccountNumber')} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                </Card>
-              </Col>
-            </Row>
+              <section className="sys-emp-section" ref={(element) => { sectionRefs.current.identity = element }}>
+                <h4 className="sys-emp-section-title">
+                  {sectionTitles.identity}
+                  {sensitiveBadge}
+                </h4>
+                <div className="sys-emp-grid-3">
+                  <Form.Item name="birthday" label={t('system.employeeProfiles.birthday')}>
+                    <DatePicker style={{ width: '100%' }} placeholder={t('system.employeeProfiles.placeholders.birthday')} />
+                  </Form.Item>
+                  <Form.Item name="identityType" label={t('system.employeeProfiles.identityType')}>
+                    <Input placeholder={t('system.employeeProfiles.placeholders.identityType')} />
+                  </Form.Item>
+                  <Form.Item name="identityId" label={t('system.employeeProfiles.identityId')}>
+                    <Input className="sys-emp-mono" placeholder={t('system.employeeProfiles.placeholders.identityId')} />
+                  </Form.Item>
+                  <Form.Item className="sys-emp-span-2" name="identityPhotoUrl" label={t('system.employeeProfiles.identityPhotoUrl')}>
+                    <Input className="sys-emp-mono" placeholder={t('system.employeeProfiles.placeholders.identityPhotoUrl')} />
+                  </Form.Item>
+                  <Form.Item label={t('system.employeeProfiles.identityPhotoPreview')}>
+                    <div className="sys-emp-photo-preview">
+                      {identityPhotoUrl ? (
+                        <Image
+                          src={identityPhotoUrl}
+                          height={56}
+                          style={{ objectFit: 'cover' }}
+                          fallback="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
+                        />
+                      ) : (
+                        t('system.employeeProfiles.noImage')
+                      )}
+                    </div>
+                  </Form.Item>
+                </div>
+              </section>
 
-            <Card size="small" title={t('system.employeeProfiles.sections.audit')} style={{ marginTop: 16 }}>
-              <Row gutter={12}>
-                <Col xs={24} md={12}>
-                  <Typography.Text>{t('system.employeeProfiles.createdAt')}: {formatDateTime(editingProfile.createdAt, i18n.language)}</Typography.Text>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Typography.Text>{t('system.employeeProfiles.updatedAt')}: {formatDateTime(editingProfile.updatedAt, i18n.language)}</Typography.Text>
-                </Col>
-                <Col xs={24} md={12} style={{ marginTop: 8 }}>
-                  <Typography.Text>{t('system.employeeProfiles.birthday')}: {formatDate(editingProfile.birthday)}</Typography.Text>
-                </Col>
-                <Col xs={24} md={12} style={{ marginTop: 8 }}>
-                  <Typography.Text>{t('system.employeeProfiles.gender')}: {editingProfile.gender ? (genderLabelMap[editingProfile.gender] || editingProfile.gender) : '--'}</Typography.Text>
-                </Col>
-              </Row>
-            </Card>
-          </Form>
+              <Alert
+                type="info"
+                showIcon
+                message={t('system.employeeProfiles.drawer.sensitiveNotice')}
+                style={{ margin: '4px 0 8px' }}
+              />
+            </Form>
+          </div>
         )}
       </Drawer>
     </PageContainer>

@@ -50,6 +50,97 @@ export function maskSensitiveSummary(value?: string | null) {
   return `****${normalized.slice(-4)}`
 }
 
+export type ProfileCompletionStatus = 'noProfile' | 'incomplete' | 'complete'
+export type ProfileMissingPart = 'bank' | 'superannuation'
+
+interface ProfileCompletionInput {
+  hasProfile?: boolean
+  bankBsb?: string
+  bankAccountNumber?: string
+  superannuationCompanyName?: string
+  superannuationAccountNumber?: string
+}
+
+function hasText(value?: string | null) {
+  return Boolean(value?.trim())
+}
+
+/**
+ * 列表行的资料状态：
+ * - 未建档：后端明确返回 hasProfile=false，该用户没有任何员工资料记录；
+ * - 待补全：已建档，但银行（BSB + 账号）或公积金（公司 + 账号）缺失；
+ * - 完整：银行与公积金都已填写。
+ * 证件信息不在列表接口里返回，所以这里不能据此判断证件是否齐全。
+ */
+export function getProfileCompletion(profile: ProfileCompletionInput): {
+  status: ProfileCompletionStatus
+  missing: ProfileMissingPart[]
+} {
+  if (profile.hasProfile === false) {
+    return { status: 'noProfile', missing: ['bank', 'superannuation'] }
+  }
+
+  const missing: ProfileMissingPart[] = []
+  if (!hasText(profile.bankBsb) || !hasText(profile.bankAccountNumber)) {
+    missing.push('bank')
+  }
+  if (!hasText(profile.superannuationCompanyName) || !hasText(profile.superannuationAccountNumber)) {
+    missing.push('superannuation')
+  }
+  return { status: missing.length === 0 ? 'complete' : 'incomplete', missing }
+}
+
+/** 头像占位文字：中文取第一个字，西文取前两个单词首字母（大写）。 */
+export function getProfileInitials(...names: Array<string | null | undefined>) {
+  const source = names.map((name) => name?.trim()).find(Boolean)
+  if (!source) {
+    return '?'
+  }
+
+  const words = source.split(/\s+/).filter(Boolean)
+  if (words.length > 1 && /^[A-Za-z]/.test(words[0])) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase()
+  }
+
+  // 用 Array.from 按码点切分，避免把代理对（生僻字）拆成乱码。
+  const first = Array.from(source)[0]
+  return /^[A-Za-z]/.test(first) ? Array.from(source).slice(0, 2).join('').toUpperCase() : first
+}
+
+/** 按名称稳定取色：分页、刷新后同一个人的头像颜色不会跳变。 */
+export function getStablePaletteIndex(seed: string, paletteSize: number) {
+  const hash = Array.from(seed).reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 0)
+  return paletteSize > 0 ? hash % paletteSize : 0
+}
+
+/** GUID 等长标识的展示缩写：保留头尾便于核对，完整值仍可复制。 */
+export function shortenIdentifier(value?: string | null, head = 8, tail = 6) {
+  const normalized = value?.trim()
+  if (!normalized) {
+    return ''
+  }
+  return normalized.length <= head + tail + 1 ? normalized : `${normalized.slice(0, head)}…${normalized.slice(-tail)}`
+}
+
+function normalizeFormValue(value: unknown) {
+  // dayjs / moment 一类日期对象统一按日期字符串比较，其余按去空白后的字符串比较。
+  if (value && typeof value === 'object' && 'format' in value && typeof value.format === 'function') {
+    return String(value.format('YYYY-MM-DD'))
+  }
+  return typeof value === 'string' ? value.trim() : String(value ?? '')
+}
+
+/** 编辑抽屉底部「已修改 N 项」：对比打开时的初始值与当前表单值，只统计真正不同的字段。 */
+export function countChangedFormFields(
+  initial: object,
+  current: object,
+  fields: readonly string[],
+) {
+  // 入参用 object：表单值是 interface，TS 不会给接口隐式的字符串索引签名。
+  const read = (source: object, field: string) => (source as Record<string, unknown>)[field]
+  return fields.filter((field) => normalizeFormValue(read(initial, field)) !== normalizeFormValue(read(current, field))).length
+}
+
 export function isRejectReasonValid(reason?: string | null) {
   return Boolean(reason?.trim())
 }

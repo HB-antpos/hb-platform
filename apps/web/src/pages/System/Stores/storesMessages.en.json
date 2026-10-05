@@ -1,0 +1,25 @@
+{
+  "system": {
+    "stores": {
+      "totalSummary": "{{total}} stores · {{enabled}} with cashier enabled",
+      "filterAll": "All",
+      "cashRegisterShort": "Cashier",
+      "cashRegisterColumn": "Cashier",
+      "codeColumn": "Code",
+      "cashEnabled": "Enabled",
+      "cashDisabled": "Not enabled",
+      "brandAbn": "Brand / ABN",
+      "usersColumn": "Users",
+      "viewDetail": "Details",
+      "moreActions": "More actions",
+      "peopleUnit": "users",
+      "detailUsers": "Linked users (active / total)",
+      "detailBasic": "Basic info",
+      "cashRegisterOn": "Cashier enabled",
+      "cashRegisterOff": "Cashier not enabled",
+      "formContact": "Contact",
+      "formNotes": "Notes",
+      "cashRegisterToggleHint": "When disabled, the store's cashier system is unavailable"
+    }
+  }
+}
