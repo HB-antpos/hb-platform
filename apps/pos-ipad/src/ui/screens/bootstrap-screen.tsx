@@ -1,10 +1,11 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
   Image,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -16,7 +17,9 @@ import {
   loadExpoBootstrapServerDiagnostics,
   type BootstrapServerDiagnostics,
 } from "@/core/runtime/expo-bootstrap-server-diagnostics";
+import { loadExpoStartupOtaRecovery } from "@/core/runtime/expo-startup-ota-recovery";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
+import { StartupOtaRecoveryPanel } from "@/features/app-updates/startup-ota-recovery-panel";
 import { serverConnectionPanelCopy } from "@/features/device-registration/server-connection-copy";
 import { ServerConnectionPanel } from "@/features/device-registration/server-connection-panel";
 import { PosPressable } from "@/ui/controls/pos-pressable";
@@ -91,10 +94,24 @@ export function BootstrapScreen() {
     runtime.phase === "failed" &&
     serverDiagnostics?.canAbandonPendingDeviceActivation === true &&
     !pendingActivationAbandoned;
-  const startupActionBusy = abandoningPendingActivation || retryingStartup;
+  const [otaRecoveryBusy, setOtaRecoveryBusy] = useState(false);
+  const startupActionBusy =
+    abandoningPendingActivation || retryingStartup || otaRecoveryBusy;
+  // reload 前读取最新相位：只有 runtime 仍失败（SQLite 已在失败收尾关闭）且未在重试/放弃激活时才允许套用 OTA。
+  const runtimePhase = useRef(runtime.phase);
+  runtimePhase.current = runtime.phase;
+  const loadOtaRecovery = useCallback(
+    () =>
+      loadExpoStartupOtaRecovery({
+        canReload: () =>
+          runtimePhase.current === "failed" &&
+          !startupActionInFlight.current,
+      }),
+    [],
+  );
 
   const retryStartup = async () => {
-    if (startupActionInFlight.current) return;
+    if (startupActionInFlight.current || otaRecoveryBusy) return;
     startupActionInFlight.current = true;
     setRetryingStartup(true);
     try {
@@ -167,7 +184,12 @@ export function BootstrapScreen() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <PosStatusStrip />
-      <View style={[styles.page, compact && styles.pageCompact]}>
+      {/* 失败态同时展示服务器检查与修复更新时会超出横屏高度，必须可滚动以保证重试按钮可达。 */}
+      <ScrollView
+        contentContainerStyle={[styles.page, compact && styles.pageCompact]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.brandRail}>
           <Image
             accessibilityIgnoresInvertColors
@@ -236,6 +258,13 @@ export function BootstrapScreen() {
           </View>
         ) : null}
 
+        {runtime.phase === "failed" ? (
+          <StartupOtaRecoveryPanel
+            load={loadOtaRecovery}
+            onBusyChange={setOtaRecoveryBusy}
+          />
+        ) : null}
+
         <View style={styles.footer}>
           <View style={styles.footerDot} />
           <View style={styles.footerCopy}>
@@ -285,7 +314,7 @@ export function BootstrapScreen() {
             ) : null}
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -296,7 +325,7 @@ const styles = StyleSheet.create({
     backgroundColor: posColors.canvas,
   },
   page: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 48,
     paddingVertical: 30,
   },

@@ -101,6 +101,7 @@ import {
   settingsAppUpdateSnapshot,
   settingsPaymentConfiguration,
 } from "./expo-settings-configuration";
+import { readCurrentUpdateGroupId } from "./expo-update-identity";
 import { resolveExpoUpdateRuntimeVersion } from "./expo-update-runtime-version";
 import { resolveLocalDeviceState } from "./local-device-state";
 import { createPaymentProviderRuntimeBootstrap } from "./payment-provider-runtime-bootstrap";
@@ -1289,31 +1290,6 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
     );
     throw error;
   }
-}
-
-function readCurrentUpdateGroupId(manifest: unknown): string | null {
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
-    return null;
-  }
-  const record = manifest as Record<string, unknown>;
-  const metadata =
-    record.metadata &&
-    typeof record.metadata === "object" &&
-    !Array.isArray(record.metadata)
-      ? (record.metadata as Record<string, unknown>)
-      : null;
-  const candidate =
-    metadata?.updateGroupId ??
-    metadata?.updateGroup ??
-    record.updateGroupId ??
-    null;
-  if (typeof candidate !== "string") return null;
-  const normalized = candidate.trim().toLowerCase();
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
-    normalized,
-  )
-    ? normalized
-    : null;
 }
 
 export function createExpoPosRuntimeController(): PosRuntimeController<ExpoPosRuntimeServices> {

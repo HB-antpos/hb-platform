@@ -13,6 +13,9 @@ import { BootstrapScreen } from "./bootstrap-screen";
 import { PosSoundContext } from "@/ui/feedback/pos-sound-context";
 
 const mockRetry = jest.fn<() => Promise<void>>();
+const mockLoadOtaRecovery = jest.fn<
+  (input: { canReload(): boolean }) => Promise<unknown>
+>();
 const mockServerTest = jest.fn<
   (address: string, signal: AbortSignal) => Promise<boolean>
 >();
@@ -55,6 +58,11 @@ jest.mock("@/core/runtime/expo-bootstrap-server-diagnostics", () => ({
     }),
 }));
 
+jest.mock("@/core/runtime/expo-startup-ota-recovery", () => ({
+  loadExpoStartupOtaRecovery: (input: { canReload(): boolean }) =>
+    mockLoadOtaRecovery(input),
+}));
+
 jest.mock("@/ui/shell/status-strip", () => ({
   PosStatusStrip: () => null,
 }));
@@ -65,6 +73,8 @@ describe("BootstrapScreen", () => {
     mockRetry.mockResolvedValue(undefined);
     mockServerTest.mockReset();
     mockServerTest.mockResolvedValue(true);
+    mockLoadOtaRecovery.mockReset();
+    mockLoadOtaRecovery.mockRejectedValue(new Error("not under test"));
     mockRuntimeError = "bootstrap.error";
     mockTranslations = {};
     mockRuntimeState = {
@@ -198,5 +208,42 @@ describe("BootstrapScreen", () => {
     expect(
       screen.getByTestId("server-connection-save-disabled-reason"),
     ).toBeTruthy();
+  });
+
+  it("失败页加载修复更新通道；安装进行中禁用重试，reload 只在 runtime 仍失败时放行", async () => {
+    let listener: ((state: unknown) => void) | null = null;
+    const recovery = {
+      check: jest.fn(async () => {
+        listener?.({ phase: "applying" });
+        return { phase: "applying" };
+      }),
+      apply: jest.fn(),
+      getState: () => ({ phase: "applying" }),
+      subscribe: (next: (state: unknown) => void) => {
+        listener = next;
+        return () => {
+          listener = null;
+        };
+      },
+    };
+    mockLoadOtaRecovery.mockResolvedValue(recovery);
+
+    const screen = await render(<BootstrapScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByText("bootstrap.otaRecovery.applying")).toBeTruthy(),
+    );
+    const retryButton = screen.getByRole("button", { name: "bootstrap.retry" });
+    expect(retryButton.props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(retryButton);
+    expect(mockRetry).not.toHaveBeenCalled();
+
+    const [{ canReload }] = mockLoadOtaRecovery.mock.calls[0] as [
+      { canReload(): boolean },
+    ];
+    expect(canReload()).toBe(true);
+    mockRuntimeState = { ...mockRuntimeState, phase: "starting" };
+    await screen.rerender(<BootstrapScreen />);
+    expect(canReload()).toBe(false);
   });
 });
