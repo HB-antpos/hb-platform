@@ -844,6 +844,19 @@ builder.Services.AddScoped<INativeAppUpdatePolicyService>(sp =>
         sp.GetRequiredService<ILogger<NativeAppUpdatePolicyService>>()
     );
 });
+builder.Services.AddScoped<IMobileAndroidNativeUpdatePolicyService>(sp =>
+{
+    var context = sp.GetRequiredService<SqlSugarContext>();
+    // 公开安卓包筛选复用 MobileAppBuildService，与匿名 android-latest 保持同一口径。
+    return new MobileAndroidNativeUpdatePolicyService(
+        context.Db,
+        sp.GetRequiredService<IMobileAppBuildService>(),
+        sp.GetRequiredService<ILogger<MobileAndroidNativeUpdatePolicyService>>(),
+        sp.GetRequiredService<
+            Microsoft.Extensions.Options.IOptions<MobileAppBuildOptions>
+        >()
+    );
+});
 builder.Services.AddScoped<IAppOtaReleaseService>(sp =>
 {
     var context = sp.GetRequiredService<SqlSugarContext>();

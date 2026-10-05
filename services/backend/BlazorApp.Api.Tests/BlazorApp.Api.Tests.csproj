@@ -322,6 +322,7 @@
     <Compile Include="MobileAppDeviceStatusServiceTests.cs" />
     <Compile Include="AppOtaReleaseSqlParameterTests.cs" />
     <Compile Include="AppUpdatePolicyServiceTests.cs" />
+    <Compile Include="MobileAndroidNativeUpdatePolicyServiceTests.cs" />
     <Compile Include="AppUpdatePolicySchemaMigratorSqlServerIntegrationTests.cs" />
     <Compile Include="PosHandheldUpdateDecisionServiceTests.cs" />
     <Compile Include="PosHandheldUpdatePolicyServiceTests.cs" />

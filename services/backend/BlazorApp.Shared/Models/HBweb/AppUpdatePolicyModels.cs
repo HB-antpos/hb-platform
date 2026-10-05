@@ -72,6 +72,35 @@ public sealed class MobileIosNativeUpdatePolicy : BaseEntity
 }
 
 /// <summary>
+/// Mobile 安卓原生「最低支持构建号」强制更新策略。PolicyKey 数据库唯一，全局只有一行。
+/// 表由版本化迁移 20261005.002 创建，实体不进 SqlSugarContext 的自动建表清单。
+/// </summary>
+[SugarTable("MobileAndroidNativeUpdatePolicy")]
+public sealed class MobileAndroidNativeUpdatePolicy : BaseEntity
+{
+    [SugarColumn(IsPrimaryKey = true, IsIdentity = false)]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [SugarColumn(Length = 40, IsNullable = false)]
+    public string PolicyKey { get; set; } = "mobile-android";
+
+    [SugarColumn(IsNullable = false)]
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// 最低支持的安卓 versionCode；低于它的设备在有可安装公开包时被整页拦截。
+    /// </summary>
+    [SugarColumn(IsNullable = true)]
+    public int? MinimumSupportedBuildNumber { get; set; }
+
+    [SugarColumn(Length = 1000, IsNullable = true)]
+    public string? ReleaseMessage { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public long PolicyVersion { get; set; }
+}
+
+/// <summary>
 /// iPad 原生 App Store 升级策略。
 /// </summary>
 [SugarTable("PosIpadNativeUpdatePolicy")]
