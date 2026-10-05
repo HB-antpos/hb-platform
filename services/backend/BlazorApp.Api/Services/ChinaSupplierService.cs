@@ -95,9 +95,16 @@ namespace BlazorApp.Api.Services
                         "status" => isDescending
                             ? supplierQuery.OrderByDescending(s => s.Status)
                             : supplierQuery.OrderBy(s => s.Status),
-                        "fgc_createdate" or "createdate" => isDescending
+                        // 前端列头直接把 antd 的 sorter.field（createdAt / updatedAt）当 sortField 发送；
+                        // 页面上展示的“创建/更新时间”取自 FGC_CreateDate / FGC_LastModifyDate，
+                        // 所以这两个新键要对准这两列（而不是 BaseEntity 的 CreatedAt/UpdatedAt）。
+                        // 旧键 fgc_createdate / createdate 继续保留以兼容既有调用方。
+                        "fgc_createdate" or "createdate" or "createdat" => isDescending
                             ? supplierQuery.OrderByDescending(s => s.FGC_CreateDate)
                             : supplierQuery.OrderBy(s => s.FGC_CreateDate),
+                        "updatedat" => isDescending
+                            ? supplierQuery.OrderByDescending(s => s.FGC_LastModifyDate)
+                            : supplierQuery.OrderBy(s => s.FGC_LastModifyDate),
                         _ => supplierQuery.OrderByDescending(s => s.FGC_CreateDate), // 默认按创建时间降序
                     };
                 }

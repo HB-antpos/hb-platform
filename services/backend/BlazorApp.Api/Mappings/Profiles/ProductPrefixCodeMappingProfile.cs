@@ -27,6 +27,10 @@ namespace BlazorApp.Api.Mappings.Profiles
 
             // UpdateProductPrefixCodeDto -> ProductPrefixCode 映射（用于更新场景）
             CreateMap<UpdateProductPrefixCodeDto, ProductPrefixCode>()
+                // SortOrder 为空表示“请求没有提供”，必须保持库里原值；
+                // AutoMapper 默认会把 null 也映射过去，等于每次不带排序的编辑都把它清空。
+                // 显式给出的值（包括 0）照常覆盖。
+                .ForMember(dest => dest.SortOrder, opt => opt.Condition((src, dest, srcSortOrder) => srcSortOrder.HasValue))
                 .ForMember(dest => dest.PrefixCode, opt => opt.Ignore())
                 .ForMember(dest => dest.SupplierCode, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())

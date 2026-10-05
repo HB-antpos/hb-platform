@@ -126,34 +126,8 @@ namespace BlazorApp.Api.Services.React
             {
                 var db = _context.Db;
 
-                // 构建基础查询
-                var query = db.Queryable<DomesticProduct>()
-                    .LeftJoin<ChinaSupplier>((p, s) => p.SupplierCode == s.SupplierCode)
-                    .Where(p => !p.IsDeleted);
-
-                // 全局搜索（OR）
-                if (!string.IsNullOrWhiteSpace(request.GlobalSearch))
-                {
-                    var keyword = request.GlobalSearch.Trim();
-                    query = query.Where(
-                        (p, s) =>
-                            (p.ProductName != null && p.ProductName.Contains(keyword))
-                            || (p.HBProductNo != null && p.HBProductNo.Contains(keyword))
-                            || (p.Barcode != null && p.Barcode.Contains(keyword))
-                            || (
-                                p.EnglishProductName != null
-                                && p.EnglishProductName.Contains(keyword)
-                            )
-                            || (s.SupplierName != null && s.SupplierName.Contains(keyword))
-                            || (p.SupplierCode != null && p.SupplierCode.Contains(keyword))
-                    );
-                }
-
-                // 列过滤（AND）
-                if (request.FilterModel != null && request.FilterModel.Any())
-                {
-                    query = ApplyAgGridFilters(query, request.FilterModel);
-                }
+                // 主查询：筛选条件（删除标记 + 关键词 + 列筛选）统一由 BuildGridFilteredQuery 构造
+                var query = BuildGridFilteredQuery(db, request);
 
                 // 排序
                 if (request.SortModel != null && request.SortModel.Any())
@@ -165,29 +139,10 @@ namespace BlazorApp.Api.Services.React
                     query = query.OrderBy(p => p.UpdatedAt, OrderByType.Desc);
                 }
 
-                // 统计总数（复制主查询条件）
-                var countQuery = db.Queryable<DomesticProduct>()
-                    .LeftJoin<ChinaSupplier>((p, s) => p.SupplierCode == s.SupplierCode)
-                    .Where(p => !p.IsDeleted);
-
-                if (!string.IsNullOrWhiteSpace(request.GlobalSearch))
-                {
-                    var keyword = request.GlobalSearch.Trim();
-                    countQuery = countQuery.Where(
-                        (p, s) =>
-                            (p.ProductName != null && p.ProductName.Contains(keyword))
-                            || (p.HBProductNo != null && p.HBProductNo.Contains(keyword))
-                            || (p.Barcode != null && p.Barcode.Contains(keyword))
-                            || (
-                                p.EnglishProductName != null
-                                && p.EnglishProductName.Contains(keyword)
-                            )
-                            || (p.SupplierCode != null && p.SupplierCode.Contains(keyword))
-                            || (s.SupplierName != null && s.SupplierName.Contains(keyword))
-                    );
-                }
-
-                var total = await countQuery.CountAsync();
+                // 统计总数：重新构造一份与主查询完全相同的筛选条件（不带排序）。
+                // 总数必须与主查询共用同一个构造方法，否则任一侧新增筛选而另一侧遗漏，
+                // 就会出现 total 与实际可翻页条数不一致（分页多出空页、导出数量偏大）。
+                var total = await BuildGridFilteredQuery(db, request).CountAsync();
 
                 // 分页查询
                 var items = await query
@@ -278,6 +233,47 @@ namespace BlazorApp.Api.Services.React
                 _logger.LogError(ex, "Grid 查询失败");
                 return GridResponseDto<DomesticProductDto>.Error("查询失败: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 构造 grid 的筛选查询：未删除 + 全局关键词（OR）+ 列筛选（AND）。
+        /// 主查询与总数查询都必须通过本方法取得查询，保证二者筛选条件逐项一致；
+        /// 排序与分页不在这里处理，由调用方按需追加。
+        /// </summary>
+        private ISugarQueryable<DomesticProduct, ChinaSupplier> BuildGridFilteredQuery(
+            ISqlSugarClient db,
+            GridRequestDto request
+        )
+        {
+            var query = db.Queryable<DomesticProduct>()
+                .LeftJoin<ChinaSupplier>((p, s) => p.SupplierCode == s.SupplierCode)
+                .Where(p => !p.IsDeleted);
+
+            // 全局搜索（OR）
+            if (!string.IsNullOrWhiteSpace(request.GlobalSearch))
+            {
+                var keyword = request.GlobalSearch.Trim();
+                query = query.Where(
+                    (p, s) =>
+                        (p.ProductName != null && p.ProductName.Contains(keyword))
+                        || (p.HBProductNo != null && p.HBProductNo.Contains(keyword))
+                        || (p.Barcode != null && p.Barcode.Contains(keyword))
+                        || (
+                            p.EnglishProductName != null
+                            && p.EnglishProductName.Contains(keyword)
+                        )
+                        || (s.SupplierName != null && s.SupplierName.Contains(keyword))
+                        || (p.SupplierCode != null && p.SupplierCode.Contains(keyword))
+                );
+            }
+
+            // 列过滤（AND）
+            if (request.FilterModel != null && request.FilterModel.Any())
+            {
+                query = ApplyAgGridFilters(query, request.FilterModel);
+            }
+
+            return query;
         }
 
         // 过滤与排序辅助方法
@@ -641,7 +637,41 @@ namespace BlazorApp.Api.Services.React
                 return query.Where(p => typeNames.Contains(p.ProductType.ToString()));
             }
 
+            // 启用状态：前端按 isActive 发送 ["true"] / ["false"]。
+            // 两个值都勾选（或都无法识别）等同于不筛选；此前后端没有这个分支，
+            // 状态筛选在列表与 total 里都被静默忽略。
+            if (columnId == "isActive")
+            {
+                var wantedStates = filter
+                    .Values.Select(ParseActiveState)
+                    .Where(state => state.HasValue)
+                    .Select(state => state!.Value)
+                    .Distinct()
+                    .ToList();
+                if (wantedStates.Count != 1)
+                    return query;
+
+                var wantedActive = wantedStates[0];
+                return query.Where(p => p.IsActive == wantedActive);
+            }
+
             return query;
+        }
+
+        /// <summary>
+        /// 把 set 筛选里的状态字符串解析为布尔；无法识别返回 null。
+        /// </summary>
+        private static bool? ParseActiveState(string? value)
+        {
+            var text = value?.Trim();
+            if (bool.TryParse(text, out var parsed))
+                return parsed;
+            return text switch
+            {
+                "1" => true,
+                "0" => false,
+                _ => null,
+            };
         }
 
         private ISugarQueryable<DomesticProduct, ChinaSupplier> ApplyAgGridSorts(
