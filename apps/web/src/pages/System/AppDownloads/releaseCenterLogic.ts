@@ -361,7 +361,15 @@ export function summarizeWpfLane(releases: readonly WpfAppRelease[]): ReleaseLan
       ? summary.targetDeviceRegistrationIds.length
       : summary.targetStoreGuids.length,
   )
-  const minimumBelowTarget = compareWpfVersion(summary.minimumSupportedVersion, summary.targetVersion)
+  // 强更口径与后端 WpfAppReleaseService 一致：当前版本 < 最低支持版本即强制；未存最低版本则不按最低版本强制。
+  // 摘要里的 minimumSupportedVersion 在未存时会回退成目标版本（仅供展示），所以这里读原始值。
+  const policyCarrier = releases.find((release) => release.targetVersion?.trim())
+    ?? releases.find((release) => release.isCurrent)
+  const storedMinimum = policyCarrier?.minimumSupportedVersion?.trim() || null
+  const minimumVsTarget = storedMinimum ? compareWpfVersion(storedMinimum, summary.targetVersion) : null
+  const minimumBelowTarget = minimumVsTarget !== null && minimumVsTarget < 0
+  // 最低版本等于目标时，低于目标的机器全部落在强制区间，等同强制更新。
+  const minimumCoversTarget = minimumVsTarget !== null && minimumVsTarget >= 0
   const attentions: ReleaseLaneAttention[] = []
   if (scope.kind !== 'all') {
     attentions.push({ kind: 'partial-rollout', scope })
@@ -380,10 +388,10 @@ export function summarizeWpfLane(releases: readonly WpfAppRelease[]): ReleaseLan
     status: 'active',
     target: summary.targetVersion,
     detail: null,
-    minimum: minimumBelowTarget !== null && minimumBelowTarget < 0 ? summary.minimumSupportedVersion : null,
-    mode: summary.forceUpdate
+    minimum: !summary.forceUpdate && minimumBelowTarget ? storedMinimum : null,
+    mode: summary.forceUpdate || minimumCoversTarget
       ? 'required'
-      : minimumBelowTarget !== null && minimumBelowTarget < 0 ? 'minimum' : 'optional',
+      : minimumBelowTarget ? 'minimum' : 'optional',
     scope,
     updatedAt: summary.policyUpdatedAt,
     updatedBy: summary.policyUpdatedBy,

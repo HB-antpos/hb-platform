@@ -223,10 +223,18 @@ assert.deepEqual(wpfSummary.attentions, [
   { kind: 'pending-release', count: 1, latest: '1.0.46' },
 ], '已禁用的更高版本不算待投放')
 
-const wpfForced = summarizeWpfLane([wpf('1.0.45', { isCurrent: true, targetVersion: '1.0.45', minimumSupportedVersion: '1.0.45', forceUpdate: true })])
+const wpfForced = summarizeWpfLane([wpf('1.0.45', { isCurrent: true, targetVersion: '1.0.45', minimumSupportedVersion: '1.0.44', forceUpdate: true })])
 assert.equal(wpfForced.mode, 'required')
-assert.equal(wpfForced.minimum, null, '最低版本等于目标时不重复展示')
+assert.equal(wpfForced.minimum, null, '强制更新时最低版本不再影响结果，不重复展示')
 assert.deepEqual(wpfForced.scope, { kind: 'all', count: 0 })
+
+const wpfMinimumEqualsTarget = summarizeWpfLane([wpf('1.0.45', { isCurrent: true, targetVersion: '1.0.45', minimumSupportedVersion: '1.0.45' })])
+assert.equal(wpfMinimumEqualsTarget.mode, 'required', '最低版本等于目标：低于目标的机器全部强制（后端 current < minimum）')
+assert.equal(wpfMinimumEqualsTarget.minimum, null)
+
+const wpfNoMinimum = summarizeWpfLane([wpf('1.0.45', { isCurrent: true, targetVersion: '1.0.45', minimumSupportedVersion: null })])
+assert.equal(wpfNoMinimum.mode, 'optional', '未存最低版本时后端不按最低版本强制，不能用摘要的回退值判断')
+assert.equal(wpfNoMinimum.minimum, null)
 
 assert.equal(summarizeWpfLane([]).status, 'disabled')
 
