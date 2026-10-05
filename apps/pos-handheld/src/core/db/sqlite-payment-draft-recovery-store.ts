@@ -1523,6 +1523,18 @@ async function findBlockingRecoveryInTransaction(
      FROM payment_attempts p
      INNER JOIN local_orders o ON o.order_guid = p.order_guid
      WHERE o.store_code = ? AND o.device_code = ?
+       -- 退货在线退款 attempt 归退货账本（production-return-runtime）恢复，不是销售草稿：
+       -- 退货单无草稿行绑定，若在此选中会抛 "no lines" 让冷启动/销售页恢复全部失败。
+       -- 按退货单号排除（prepare 时与 Draft 同事务写入），覆盖 attempt 已 Created
+       -- 但尚未回写 allocation 绑定的崩溃窗口；allocation 条件与 Linkly 恢复口径对齐。
+       AND NOT EXISTS (
+         SELECT 1 FROM return_actions ret
+         WHERE ret.return_order_guid = p.order_guid
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM return_action_allocations allocation
+         WHERE allocation.durable_attempt_id = p.attempt_id
+       )
        AND (
          p.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
          OR (
