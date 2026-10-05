@@ -95,3 +95,23 @@ test("iOS 原生 optional 提示等 Mobile 决策完成，OTA required 时继续
   assert.equal(coordinator.tryOwnPrompt("native"), true);
   coordinator.releasePrompt("native");
 });
+
+test("安卓原生强制更新优先于 OTA 初始化与 OTA required，且禁止 OTA 抢占与 reload", () => {
+  const coordinator = createAppUpdateMutualExclusion();
+  coordinator.setOtaRequiredGate(true);
+  assert.equal(coordinator.tryStartOperation("native"), null, "默认仍让 OTA 门禁优先");
+
+  coordinator.setNativeRequiredGate(true);
+  assert.equal(coordinator.isNativeRequiredGateActive(), true);
+  const nativeDownload = coordinator.tryStartOperation("native");
+  assert.ok(nativeDownload, "原生 required 时不再等待 OTA 初始化或 OTA required");
+  nativeDownload?.finish();
+  assert.equal(coordinator.tryStartOperation("ota"), null);
+  assert.equal(coordinator.tryOwnPrompt("ota"), false);
+  assert.equal(coordinator.canReloadOta(), false, "原生 required 时 OTA 不得 reload");
+  assert.equal(coordinator.tryOwnPrompt("native"), true);
+  coordinator.releasePrompt("native");
+
+  coordinator.setNativeRequiredGate(false);
+  assert.equal(coordinator.tryStartOperation("native"), null, "关闭后恢复原有优先级");
+});

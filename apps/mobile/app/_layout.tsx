@@ -12,6 +12,7 @@ import { usePrinterAutoConnect } from "@/modules/printer/use-printer-auto-connec
 import { waitForStartupReadiness } from "@/modules/startup/startup-readiness";
 import { shouldRunAutomaticAppUpdatesForProfile } from "@/modules/updates/app-build-profile";
 import { IosNativeUpdateBoundary } from "@/modules/updates/IosNativeUpdateBoundary";
+import { AndroidNativeUpdateBoundary } from "@/modules/updates/AndroidNativeUpdateBoundary";
 import { MobileOtaUpdateBoundary } from "@/modules/updates/MobileOtaUpdateBoundary";
 import {
   deriveIosNativeOtaBarrier,
@@ -216,6 +217,15 @@ export default function RootLayout() {
                   void iosNativeUpdate.recheck();
                 }}
               >
+                {/* 安卓原生强制更新优先于 OTA：旧原生包无法承接后续 OTA，拦截页包住 OTA 层与全部路由。 */}
+                <AndroidNativeUpdateBoundary
+                  enabled={automaticUpdatesEnabled}
+                  decision={nativeAppUpdate.requiredDecision}
+                  phase={nativeAppUpdate.phase}
+                  readyToInstall={nativeAppUpdate.readyToInstall}
+                  onInstall={nativeAppUpdate.installRequired}
+                  onRetry={nativeAppUpdate.retry}
+                >
                 <MobileOtaUpdateBoundary
                   enabled={mobileOtaUpdate.enabled}
                   initialized={mobileOtaUpdate.initialized}
@@ -250,6 +260,7 @@ export default function RootLayout() {
                     {isIosReviewSession ? <IosReviewBanner /> : null}
                   </View>
                 </MobileOtaUpdateBoundary>
+                </AndroidNativeUpdateBoundary>
               </IosNativeUpdateBoundary>
             </NetworkRecoveryProvider>
           </PaperProvider>
