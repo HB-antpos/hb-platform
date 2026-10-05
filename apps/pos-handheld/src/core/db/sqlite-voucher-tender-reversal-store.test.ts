@@ -1129,6 +1129,339 @@ test("commitReleased 最终事务任一步失败会回滚 tender/link/audit/acti
   });
 });
 
+const DISPOSITION_MIGRATION_VERSION = (() => {
+  const migration = POS_DATABASE_MIGRATIONS.find((candidate) =>
+    candidate.name.endsWith("_voucher_reversal_blocked_disposition"));
+  if (!migration) throw new Error("Disposition migration is missing.");
+  return migration.version;
+})();
+const SCOPE = Object.freeze({ storeCode: "STORE-1", deviceCode: "DEVICE-1" });
+const SUPERVISOR = Object.freeze({
+  cashierId: "supervisor-1",
+  cashierName: "Supervisor",
+  userGuid: "supervisor-guid-1",
+});
+const VOID_PERMISSION = "Permissions.PosTerminal.Payment.RemoveTender";
+
+test("旧库已有 Blocked 撤券：升级后仍阻塞，主管作废后不再阻塞、原礼券 tender 保留并被抵消、订单可继续收款完成且幂等", async () => {
+  await withDatabase(async (connection) => {
+    // 先停在处置迁移之前，复现线上已卡死的 Blocked 数据。
+    await applyMigrations(
+      connection,
+      () => T0,
+      POS_DATABASE_MIGRATIONS.filter(
+        (migration) => migration.version < DISPOSITION_MIGRATION_VERSION,
+      ),
+    );
+    await insertOrder(connection, "order-void", sequenceFor("void"), 1_000);
+    const command = await seedApprovedVoucherPurchase(
+      connection,
+      "void",
+      700,
+      "order-void",
+    );
+    // 旧版本代码写入的 Blocked（本地校验失败，release 从未发出，受保护状态仍 approved）。
+    await insertLegacyBlockedAction(
+      connection,
+      command,
+      "VOUCHER_SOURCE_ATTEMPT_MISSING",
+    );
+
+    await applyMigrations(connection, () => T1);
+    assert.equal(await schemaVersion(connection), POS_DATABASE_MIGRATIONS.at(-1)?.version);
+    const store = createStore(connection);
+    const blocking = await store.findBlocking(SCOPE);
+    assert.equal(blocking?.state, "Blocked");
+    assert.equal(blocking?.actionId, command.actionId);
+    // 修复前的死锁根因：Blocked 永远阻塞且封住新 tender / 订单完成。
+    await assert.rejects(
+      insertCashTender(connection, "order-void", "cash-before-void", 300),
+      /VOUCHER_TENDER_REVERSAL_ORDER_UNRESOLVED/,
+    );
+
+    await assert.rejects(
+      store.voidBlockedUnreleased({
+        scope: SCOPE,
+        actionId: command.actionId,
+        orderGuid: command.orderGuid,
+        sourceTenderGuid: command.sourceTenderGuid,
+        requestingActor: paymentActor(),
+        authorizingActor: paymentActor(),
+        permissionCode: VOID_PERMISSION,
+      }),
+      /different supervisor/,
+    );
+    await assert.rejects(
+      store.voidBlockedUnreleased({
+        scope: { storeCode: "STORE-1", deviceCode: "OTHER-DEVICE" },
+        actionId: command.actionId,
+        orderGuid: command.orderGuid,
+        sourceTenderGuid: command.sourceTenderGuid,
+        requestingActor: paymentActor(),
+        authorizingActor: SUPERVISOR,
+        permissionCode: VOID_PERMISSION,
+      }),
+      /scope mismatch/,
+    );
+
+    const voided = await store.voidBlockedUnreleased({
+      scope: SCOPE,
+      actionId: command.actionId,
+      orderGuid: command.orderGuid,
+      sourceTenderGuid: command.sourceTenderGuid,
+      requestingActor: paymentActor(),
+      authorizingActor: SUPERVISOR,
+      permissionCode: VOID_PERMISSION,
+    });
+    assert.equal(voided.replayed, false);
+    assert.equal(await store.findBlocking(SCOPE), null);
+    // 原礼券 tender 是不可变账本，仍在；只追加等额负 tender + link。
+    const source = voided.truth.tenders.find(
+      (tender) => tender.tenderGuid === command.sourceTenderGuid,
+    );
+    assert.equal(source?.amount.cents, 700);
+    const reversal = voided.truth.tenders.find(
+      (tender) => tender.tenderGuid === voided.reversalTenderGuid,
+    );
+    assert.equal(reversal?.method, "voucher");
+    assert.equal(reversal?.amount.cents, -700);
+    assert.deepEqual(voided.truth.reversalLinks, [{
+      actionId: command.actionId,
+      sourceTenderGuid: command.sourceTenderGuid,
+      reversalTenderGuid: voided.reversalTenderGuid,
+    }]);
+    // Blocked 原行不被改写，不伪造 Reversed/已释放。
+    const actionRow = await connection.getFirst<{
+      state: unknown;
+      reversal_tender_guid: unknown;
+    }>(
+      `SELECT state, reversal_tender_guid
+       FROM voucher_tender_reversal_actions WHERE action_id = ?`,
+      [command.actionId],
+    );
+    assert.equal(actionRow?.state, "Blocked");
+    assert.equal(actionRow?.reversal_tender_guid, null);
+    const audit = await connection.getFirst<{ payload_json: string }>(
+      `SELECT audit.payload_json
+       FROM voucher_tender_reversal_dispositions disposition
+       INNER JOIN audit_events audit
+         ON audit.event_id = disposition.audit_event_id
+       WHERE disposition.action_id = ?`,
+      [command.actionId],
+    );
+    const payload = JSON.parse(audit?.payload_json ?? "{}");
+    assert.equal(payload.outcome, "voided-unreleased");
+    assert.equal(payload.blockedErrorCode, "VOUCHER_SOURCE_ATTEMPT_MISSING");
+    assert.equal(payload.requestingCashierId, "cashier-1");
+    assert.equal(payload.authorizingCashierId, "supervisor-1");
+    assert.equal(JSON.stringify(payload).includes("VOUCHER-"), false);
+    assert.equal(JSON.stringify(payload).includes("reservation-"), false);
+
+    // 幂等：重放只回读原事实，不追加第二笔负 tender。
+    const replay = await store.voidBlockedUnreleased({
+      scope: SCOPE,
+      actionId: command.actionId,
+      orderGuid: command.orderGuid,
+      sourceTenderGuid: command.sourceTenderGuid,
+      requestingActor: paymentActor(),
+      authorizingActor: SUPERVISOR,
+      permissionCode: VOID_PERMISSION,
+    });
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.reversalTenderGuid, voided.reversalTenderGuid);
+    assert.equal(await negativeTenderCount(connection, command.orderGuid), 1);
+
+    // 订单回到可继续收款：新正 tender 与完成状态均不再被撤券门禁拦截。
+    await insertCashTender(connection, "order-void", "cash-after-void", 1_000);
+    await connection.run(
+      "UPDATE local_orders SET state = 'CompletedLocal' WHERE order_guid = ?",
+      ["order-void"],
+    );
+
+    await assert.rejects(
+      connection.run(
+        "UPDATE voucher_tender_reversal_dispositions SET disposition = 'X'",
+      ),
+      /VOUCHER_TENDER_REVERSAL_DISPOSITION_IMMUTABLE/,
+    );
+    await assert.rejects(
+      connection.run("DELETE FROM voucher_tender_reversal_dispositions"),
+      /VOUCHER_TENDER_REVERSAL_DISPOSITION_IMMUTABLE/,
+    );
+    await assert.rejects(
+      connection.run(
+        "DELETE FROM order_tenders WHERE tender_guid = ?",
+        [voided.reversalTenderGuid],
+      ),
+      /VOUCHER_TENDER_REVERSAL_TENDER_(DELETE_FORBIDDEN|IMMUTABLE)|FOREIGN KEY/,
+    );
+  });
+});
+
+test("Unknown/Prepared 撤券不能被主管作废且仍阻塞；无审计/负 tender 的裸处置行被数据库拒绝", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    const command = await seedApprovedVoucherPurchase(connection, "unknown-void", 400);
+    const store = createStore(connection);
+    const prepared = await store.prepareOrLoad(command);
+    await assert.rejects(
+      store.voidBlockedUnreleased({
+        scope: SCOPE,
+        actionId: command.actionId,
+        orderGuid: command.orderGuid,
+        sourceTenderGuid: command.sourceTenderGuid,
+        requestingActor: paymentActor(),
+        authorizingActor: SUPERVISOR,
+        permissionCode: VOID_PERMISSION,
+      }),
+      /Only a blocked voucher reversal/,
+    );
+    await store.markUnknown(
+      await store.markSubmitted(prepared),
+      "VOUCHER_RELEASE_RESULT_UNRESOLVED",
+    );
+    await assert.rejects(
+      store.voidBlockedUnreleased({
+        scope: SCOPE,
+        actionId: command.actionId,
+        orderGuid: command.orderGuid,
+        sourceTenderGuid: command.sourceTenderGuid,
+        requestingActor: paymentActor(),
+        authorizingActor: SUPERVISOR,
+        permissionCode: VOID_PERMISSION,
+      }),
+      /Only a blocked voucher reversal/,
+    );
+    assert.equal((await store.findBlocking(SCOPE))?.state, "Unknown");
+    assert.equal(await negativeTenderCount(connection, command.orderGuid), 0);
+
+    const blockedCommand = await seedApprovedVoucherPurchase(
+      connection,
+      "raw-disposition",
+      300,
+    );
+    await store.markBlocked(
+      await store.prepareOrLoad(blockedCommand),
+      "VOUCHER_RELEASE_REJECTED",
+    );
+    await connection.run(
+      `INSERT INTO audit_events (
+        event_id, event_type, occurred_at_iso, order_guid,
+        correlation_id, payload_json, uploaded_at_iso
+      ) VALUES ('raw-audit', 'PAYMENT_TENDER_REMOVE', ?, ?, ?, '{}', NULL)`,
+      [T1, blockedCommand.orderGuid, blockedCommand.actionId],
+    );
+    await assert.rejects(
+      connection.run(
+        `INSERT INTO voucher_tender_reversal_dispositions (
+          action_id, order_guid, disposition, reversal_tender_guid,
+          audit_event_id, requesting_actor_json, authorizing_actor_json,
+          created_at_iso
+        ) VALUES (?, ?, 'VoidedUnreleased', ?, 'raw-audit',
+          '{"requestingCashierId":"cashier-1"}',
+          '{"authorizingCashierId":"supervisor-1"}', ?)`,
+        [
+          blockedCommand.actionId,
+          blockedCommand.orderGuid,
+          blockedCommand.sourceTenderGuid,
+          T1,
+        ],
+      ),
+      /VOUCHER_TENDER_REVERSAL_DISPOSITION_INVALID|FOREIGN KEY|UNIQUE/,
+    );
+    assert.equal(
+      await scalar(
+        connection,
+        "SELECT COUNT(*) AS count FROM voucher_tender_reversal_dispositions",
+      ),
+      0,
+    );
+    // 两笔未处置动作（Unknown + Blocked）仍整体失败关闭，不静默挑选。
+    await assert.rejects(
+      store.findBlocking(SCOPE),
+      /Multiple unresolved voucher tender reversals/,
+    );
+  });
+});
+
+/** 按 M16 旧代码的写法直接落一条 Blocked（处置迁移前的线上数据形态）。 */
+async function insertLegacyBlockedAction(
+  connection: SqliteConnectionPort,
+  command: SeededVoucherTenderReversalCommand,
+  errorCode: string,
+): Promise<void> {
+  const actor = {
+    requestingCashierId: command.actor.cashierId,
+    requestingCashierName: command.actor.cashierName,
+    requestingUserGuid: command.actor.userGuid,
+  };
+  await connection.run(
+    `INSERT INTO voucher_tender_reversal_actions (
+      action_id, order_guid, source_tender_guid, source_attempt_id,
+      amount_cents, reason, state, attempt_count, last_error_code,
+      reversal_tender_guid, audit_actor_json,
+      terminal_audit_event_id, submitted_at_iso,
+      terminal_at_iso, created_at_iso, updated_at_iso
+    ) VALUES (?, ?, ?, ?, ?, 'SALE', 'Prepared', 0, NULL,
+      NULL, ?, NULL, NULL, NULL, ?, ?)`,
+    [
+      command.actionId,
+      command.orderGuid,
+      command.sourceTenderGuid,
+      command.expectedSourceAttemptId,
+      command.expectedAmountCents,
+      JSON.stringify(actor),
+      T0,
+      T0,
+    ],
+  );
+  const auditEventId = `legacy-blocked-audit-${command.actionId}`;
+  await connection.run(
+    `INSERT INTO audit_events (
+      event_id, event_type, occurred_at_iso, order_guid,
+      correlation_id, payload_json, uploaded_at_iso
+    ) VALUES (?, 'PAYMENT_TENDER_REMOVE', ?, ?, ?, ?, NULL)`,
+    [
+      auditEventId,
+      T0,
+      command.orderGuid,
+      command.actionId,
+      JSON.stringify({
+        action: "payment-tender-remove",
+        outcome: "blocked",
+        reason: "SALE",
+        amountCents: command.expectedAmountCents,
+        sourceTenderGuid: command.sourceTenderGuid,
+        sourceAttemptId: command.expectedSourceAttemptId,
+        errorCode,
+        ...actor,
+      }),
+    ],
+  );
+  await connection.run(
+    `UPDATE voucher_tender_reversal_actions
+     SET state = 'Blocked', last_error_code = ?,
+         terminal_audit_event_id = ?, terminal_at_iso = ?, updated_at_iso = ?
+     WHERE action_id = ?`,
+    [errorCode, auditEventId, T0, T0, command.actionId],
+  );
+}
+
+async function insertCashTender(
+  connection: SqliteConnectionPort,
+  orderGuid: string,
+  tenderGuid: string,
+  amountCents: number,
+): Promise<void> {
+  await connection.run(
+    `INSERT INTO order_tenders (
+      tender_guid, order_guid, method, amount_cents,
+      payment_attempt_id, created_at_iso
+    ) VALUES (?, ?, 'cash', ?, NULL, ?)`,
+    [tenderGuid, orderGuid, amountCents, T1],
+  );
+}
+
 async function seedApprovedVoucherPurchase(
   connection: SqliteConnectionPort,
   suffix: string,

@@ -563,11 +563,27 @@ test("Blocked 礼券撤销提供明确的中英文稳定文案", () => {
   );
   assert.equal(
     paymentText("en", "error.TENDER_REVERSAL_BLOCKED"),
-    "Gift card reversal requires supervisor support and cannot be retried.",
+    "Gift card reversal cannot be retried. A supervisor can void this gift card tender; the gift card is never redeemed for this order.",
   );
   assert.equal(
     paymentText("zh", "error.TENDER_REVERSAL_BLOCKED"),
-    "礼品卡撤销已阻断，必须由主管处理且不能重试。",
+    "礼品卡撤销已阻断且不能重试。可由主管授权作废该礼品卡付款，本单不会核销该礼品卡。",
+  );
+  assert.equal(
+    paymentText("en", "error.TENDER_REVERSAL_VOID_NOT_AUTHORIZED"),
+    "Supervisor approval was not completed. The gift card tender is still blocked.",
+  );
+  assert.equal(
+    paymentText("zh", "error.TENDER_REVERSAL_VOID_NOT_AUTHORIZED"),
+    "主管授权未完成，礼品卡付款仍处于阻断状态。",
+  );
+  assert.equal(
+    paymentText("en", "action.voidBlockedTenderReversal"),
+    "Supervisor: void gift card tender",
+  );
+  assert.equal(
+    paymentText("zh", "action.voidBlockedTenderReversal"),
+    "主管授权作废礼品卡付款",
   );
   assert.equal(
     paymentText("en", "error.SQUARE_SANDBOX_AMOUNT_LIMIT_EXCEEDED"),
