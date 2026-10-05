@@ -5059,11 +5059,12 @@
         "retry": "Retry",
         "readOnly": "Your account has view-only access. Policies and rollout settings cannot be changed.",
       "tabs": {
-        "mobile": "Mobile Native",
+        "mobile": "Mobile iOS Native",
         "mobileOta": "Mobile OTA",
         "ipadNative": "iPad Native",
         "ipadOta": "iPad OTA",
-        "posHandheld": "Handheld POS"
+        "posHandheld": "Handheld POS",
+        "mobileAndroidNative": "Mobile Android Native"
         },
         "releaseFacts": "Release Facts",
         "policy": "Native Update Policy",

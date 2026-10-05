@@ -1,0 +1,26 @@
+{
+  "system": {
+    "appDownloads": {
+      "updatePolicy": {
+        "mobileAndroid": {
+          "boundaryTitle": "Mobile 安卓原生按最低支持构建号（versionCode）强制更新",
+          "boundaryDescription": "启用后，构建号低于最低支持构建号的安卓设备会被整页拦截（含登录页），只能安装当前公开的 production 安卓包后继续使用；可选更新提示仍由安卓安装包流程处理，与本策略无关。",
+          "loadFailed": "加载 Mobile 安卓原生更新策略失败",
+          "latestBuildTitle": "当前公开安卓包",
+          "latestBuild": "公开安卓包",
+          "completedAt": "构建完成时间",
+          "noLatestBuild": "当前没有公开的 production 安卓包，无法启用强制更新。",
+          "minimumBuild": "最低支持构建号",
+          "minimumBuildHelp": "安卓 versionCode，范围 1 ~ {{max}}（当前公开包构建号）；低于此值的设备必须更新。",
+          "minimumBuildRequired": "启用时必须填写最低支持构建号",
+          "minimumBuildInvalid": "最低支持构建号必须是不小于 1 的整数",
+          "minimumBuildAboveLatest": "最低支持构建号不能高于当前公开安卓包的构建号，否则设备将无包可装",
+          "releaseMessageTooLong": "更新说明不能超过 1000 个字符",
+          "confirmTitle": "确认启用安卓强制更新？",
+          "blockWarning": "构建号低于 {{build}} 的安卓设备会被整页拦截，必须安装最新安装包后才能继续使用。",
+          "disableConfirmDescription": "停用后安卓设备不再被强制拦截，本次保存会同时清空最低支持构建号和更新说明。"
+        }
+      }
+    }
+  }
+}

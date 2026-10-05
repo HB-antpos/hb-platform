@@ -5,6 +5,9 @@ import type {
   AppUpdateTargetStoreOption,
   IosAppStoreRelease,
   IosAppStoreReleaseCreateRequest,
+  MobileAndroidLatestBuild,
+  MobileAndroidNativeUpdatePolicy,
+  MobileAndroidNativeUpdatePolicyRequest,
   MobileIosNativeUpdatePolicyRequest,
   NativeUpdatePolicy,
   PosIpadNativeUpdatePolicyRequest,
@@ -122,6 +125,41 @@ export function normalizeNativeUpdatePolicy(value: unknown): NativeUpdatePolicy 
   }
 }
 
+function normalizeMobileAndroidLatestBuild(value: unknown): MobileAndroidLatestBuild | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const raw = asRecord(value)
+  // 关键位置：versionCode 必须是正整数，否则视为没有可用公开包，避免前端放开一个装不上的最低构建号。
+  const appBuildVersion = nullableInt32(raw, 'appBuildVersion')
+  if (appBuildVersion === null || appBuildVersion < 1) {
+    return null
+  }
+
+  return {
+    easBuildId: text(raw, 'easBuildId'),
+    appVersion: text(raw, 'appVersion'),
+    appBuildVersion,
+    completedAt: nullableText(raw, 'completedAt'),
+  }
+}
+
+export function normalizeMobileAndroidNativeUpdatePolicy(
+  value: unknown,
+): MobileAndroidNativeUpdatePolicy {
+  const raw = asRecord(value)
+  return {
+    enabled: boolean(raw, 'enabled'),
+    minimumSupportedBuildNumber: nullableInt32(raw, 'minimumSupportedBuildNumber'),
+    releaseMessage: nullableText(raw, 'releaseMessage'),
+    policyVersion: number(raw, 'policyVersion'),
+    updatedAt: nullableText(raw, 'updatedAt'),
+    updatedBy: nullableText(raw, 'updatedBy'),
+    latestBuild: normalizeMobileAndroidLatestBuild(raw.latestBuild),
+  }
+}
+
 export function normalizeAppUpdateStoreOption(value: unknown): AppUpdateTargetStoreOption {
   const raw = asRecord(value)
   return {
@@ -208,6 +246,23 @@ export function createAppUpdatePolicyService(transport: AppUpdatePolicyTransport
         { signal },
       )
       return normalizeNativeUpdatePolicy(unwrap(response))
+    },
+
+    async getMobileAndroidNativePolicy(signal?: AbortSignal) {
+      const response = await transport.get('/api/app-update-policies/mobile-android', { signal })
+      return normalizeMobileAndroidNativeUpdatePolicy(unwrap(response))
+    },
+
+    async saveMobileAndroidNativePolicy(
+      payload: MobileAndroidNativeUpdatePolicyRequest,
+      signal?: AbortSignal,
+    ) {
+      const response = await transport.put(
+        '/api/app-update-policies/mobile-android',
+        payload,
+        { signal },
+      )
+      return normalizeMobileAndroidNativeUpdatePolicy(unwrap(response))
     },
 
     async getPosIpadNativePolicy(signal?: AbortSignal) {

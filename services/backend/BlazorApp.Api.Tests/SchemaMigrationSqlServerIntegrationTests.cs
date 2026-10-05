@@ -965,6 +965,65 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 安卓原生最低构建号策略表_可重复执行_唯一过滤索引生效且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, MobileAndroidNativeUpdatePolicySchema.VerifySql));
+        Assert.Equal(51890, missing.Number);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, MobileAndroidNativeUpdatePolicySchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, MobileAndroidNativeUpdatePolicySchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.MobileAndroidNativeUpdatePolicy
+                (Id, PolicyKey, Enabled, MinimumSupportedBuildNumber, ReleaseMessage, PolicyVersion, CreatedAt, CreatedBy)
+            VALUES (NEWID(), N'mobile-android', 1, 63, N'msg', 1, SYSUTCDATETIME(), N'admin');
+            """);
+        // 重复执行不得丢失已有策略行；IsDeleted 默认 0。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, MobileAndroidNativeUpdatePolicySchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, MobileAndroidNativeUpdatePolicySchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.MobileAndroidNativeUpdatePolicy
+                WHERE PolicyKey = N'mobile-android' AND MinimumSupportedBuildNumber = 63 AND IsDeleted = 0) <> 1
+                THROW 51893, 'Existing mobile android policy row was lost.', 1;
+            """);
+
+        // 未删除行按 PolicyKey 唯一；软删除行不占唯一键。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, """
+                INSERT dbo.MobileAndroidNativeUpdatePolicy (Id, PolicyKey, Enabled, PolicyVersion, CreatedAt)
+                VALUES (NEWID(), N'mobile-android', 0, 1, SYSUTCDATETIME());
+                """));
+        Assert.Contains(duplicate.Number, new[] { 2601, 2627 });
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.MobileAndroidNativeUpdatePolicy (Id, PolicyKey, Enabled, PolicyVersion, CreatedAt, IsDeleted)
+            VALUES (NEWID(), N'mobile-android', 0, 1, SYSUTCDATETIME(), 1);
+            """);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "ALTER TABLE dbo.MobileAndroidNativeUpdatePolicy ALTER COLUMN ReleaseMessage nvarchar(500) NULL;"
+        );
+        var columnMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, MobileAndroidNativeUpdatePolicySchema.VerifySql));
+        Assert.Equal(51891, columnMismatch.Number);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "ALTER TABLE dbo.MobileAndroidNativeUpdatePolicy ALTER COLUMN ReleaseMessage nvarchar(1000) NULL;"
+        );
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            DROP INDEX [UX_MobileAndroidNativeUpdatePolicy_PolicyKey] ON dbo.MobileAndroidNativeUpdatePolicy;
+            CREATE UNIQUE INDEX [UX_MobileAndroidNativeUpdatePolicy_PolicyKey]
+                ON dbo.MobileAndroidNativeUpdatePolicy (PolicyKey) WHERE IsDeleted = 1;
+            """);
+        var indexMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, MobileAndroidNativeUpdatePolicySchema.VerifySql));
+        Assert.Equal(51892, indexMismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 供应商分类三表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

@@ -5059,11 +5059,12 @@
         "retry": "重试",
         "readOnly": "当前账号只有查看权限，策略和投放配置均为只读。",
       "tabs": {
-        "mobile": "Mobile 原生",
+        "mobile": "Mobile iOS 原生",
         "mobileOta": "Mobile OTA",
         "ipadNative": "iPad 原生",
         "ipadOta": "iPad OTA",
-        "posHandheld": "手持 POS"
+        "posHandheld": "手持 POS",
+        "mobileAndroidNative": "Mobile 安卓原生"
         },
         "releaseFacts": "发布事实",
         "policy": "原生更新策略",

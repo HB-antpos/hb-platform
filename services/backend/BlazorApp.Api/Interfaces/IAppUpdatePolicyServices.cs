@@ -58,6 +58,21 @@ public interface INativeAppUpdatePolicyService
     );
 }
 
+/// <summary>
+/// Mobile 安卓原生「最低支持构建号」强制更新策略。
+/// </summary>
+public interface IMobileAndroidNativeUpdatePolicyService
+{
+    Task<ApiResponse<MobileAndroidNativeUpdatePolicyDto>> GetPolicyAsync();
+
+    Task<ApiResponse<MobileAndroidNativeUpdatePolicyDto>> SetPolicyAsync(
+        MobileAndroidNativeUpdatePolicyRequest request,
+        string currentUser
+    );
+
+    Task<MobileAndroidNativeUpdateDecisionDto> GetDecisionAsync(string? build);
+}
+
 public interface IPosIpadOtaPolicyService
 {
     Task<ApiResponse<List<PosIpadOtaReleaseDto>>> GetReleasesAsync();
