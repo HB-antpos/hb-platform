@@ -23,6 +23,22 @@ export function getRoleColor(roleName: string): string {
   return ROLE_COLOR_MAP[roleName] || 'default'
 }
 
+// 角色色点用的实色：与 getRoleColor 的 AntD 预设色一一对应，未知角色回落为中性灰。
+const ROLE_ACCENT_HEX: Record<string, string> = {
+  red: '#f5222d',
+  orange: '#fa8c16',
+  gold: '#d99a00',
+  green: '#52c41a',
+  cyan: '#13c2c2',
+  blue: '#1677ff',
+  purple: '#722ed1',
+  default: '#8c93a1',
+}
+
+export function getRoleAccentColor(roleName: string): string {
+  return ROLE_ACCENT_HEX[getRoleColor(roleName)] ?? ROLE_ACCENT_HEX.default
+}
+
 export function getStoreColor(storeName: string): string {
   return getStableTagColor(storeName)
 }
