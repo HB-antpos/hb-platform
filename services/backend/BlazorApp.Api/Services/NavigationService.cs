@@ -84,8 +84,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/system/payment-terminal-settings", TitleKey = "menu.paymentTerminalSettings", Icon = "WalletOutlined", Permission = Permissions.System.ManageSettings },
                     new() { Path = "/system/emergency-login-keys", TitleKey = "menu.emergencyLoginKeys", Icon = "KeyOutlined", Permission = Permissions.System.ManageSettings },
                     new() { Path = "/system/device-registration", TitleKey = "menu.deviceRegistration", Icon = "BuildOutlined", Permission = Permissions.DeviceRegistration.View },
+                    // 版本发布中心：App 原生 / OTA 与 WPF 安装包合并为一页，旧 /system/wpf-versions 由 Web 重定向到其 WPF 终端。
                     new() { Path = "/system/app-downloads", TitleKey = "menu.appDownloads", Icon = "QrcodeOutlined", Permission = Permissions.System.ViewAppDownloads },
-                    new() { Path = "/system/wpf-versions", TitleKey = "menu.wpfVersions", Icon = "DownloadOutlined", Permission = Permissions.System.ViewAppDownloads },
                 },
             },
             new()
