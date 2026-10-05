@@ -1,0 +1,304 @@
+/* 分店管理页：列表单元格、详情抽屉与表单分区样式（普通 CSS + 全局类名：测试打包把 .css 当空模块，不能用 CSS Modules） */
+
+.sys-store-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sys-store-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sys-store-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* 列表：行高约 56px；品牌 / ABN 两行单元格决定行高下限，其余列单行居中 */
+.sys-store-table .ant-table-tbody > tr > td {
+  padding-block: 10px;
+}
+
+/* antd 默认左右各 16px 内边距，12 列的密集表格里太宽，表头会被挤成多行 */
+.sys-store-table .ant-table-thead > tr > th,
+.sys-store-table .ant-table-tbody > tr > td {
+  padding-inline: 12px;
+}
+
+.sys-store-row-clickable {
+  cursor: pointer;
+}
+
+.sys-store-name {
+  font-weight: 600;
+}
+
+.sys-store-mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
+}
+
+.sys-store-ellipsis {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sys-store-two {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  line-height: 1.35;
+}
+
+.sys-store-sub {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.sys-store-faint {
+  color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.25));
+}
+
+/* 地址按业务要求完整展示：允许换行，不做省略号 */
+.sys-store-address {
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.sys-store-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sys-store-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c3c9d4;
+}
+
+.sys-store-status-on {
+  color: #0b7a3c;
+}
+
+.sys-store-status-on::before {
+  background: #12a150;
+}
+
+.sys-store-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.sys-store-actions .ant-btn {
+  padding-inline: 7px;
+}
+
+/* 详情抽屉 */
+.sys-store-drawer .ant-drawer-body {
+  padding: 0 24px 12px;
+}
+
+.sys-store-drawer-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sys-store-drawer-title {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.sys-store-drawer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.sys-store-drawer-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sys-store-drawer-footer-spacer {
+  flex: 1 1 auto;
+}
+
+.sys-store-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 14px 0 4px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+  border-radius: 10px;
+}
+
+.sys-store-stats > div {
+  padding: 11px 16px;
+}
+
+.sys-store-stats > div + div {
+  border-left: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+}
+
+.sys-store-stat-key {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.sys-store-stat-value {
+  margin-top: 2px;
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.sys-store-stat-value small {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.sys-store-stat-value-sm {
+  margin-top: 6px;
+  font-size: 15px;
+}
+
+.sys-store-detail-section {
+  padding: 14px 0 6px;
+}
+
+.sys-store-detail-section + .sys-store-detail-section {
+  border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+}
+
+.sys-store-section-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.sys-store-dl {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px 12px;
+  margin: 0;
+}
+
+.sys-store-dl dt {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+}
+
+.sys-store-dl dd {
+  margin: 0;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.sys-store-panel {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f8fb;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* 新建 / 编辑弹窗：三个分区、两列网格 */
+.sys-store-section {
+  padding: 14px 0 2px;
+}
+
+.sys-store-section + .sys-store-section {
+  border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+}
+
+.sys-store-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.sys-store-grid .ant-form-item {
+  margin-bottom: 14px;
+}
+
+.sys-store-span-all {
+  grid-column: 1 / -1;
+}
+
+/* 标签与右侧字数计数同一行：让 antd 的 label 容器撑满整行 */
+.sys-store-grid .ant-form-item-label,
+.sys-store-grid .ant-form-item-label > label {
+  width: 100%;
+}
+
+.sys-store-label {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sys-store-count {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sys-store-count-over {
+  color: #d4380d;
+  font-weight: 600;
+}
+
+.sys-store-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 8px;
+  background: #fafbfd;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 12.5px;
+}
+
+@media (max-width: 720px) {
+  .sys-store-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sys-store-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sys-store-stats > div + div {
+    border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+    border-left: 0;
+  }
+}

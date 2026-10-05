@@ -1,0 +1,37 @@
+{
+  "system": {
+    "employeeProfiles": {
+      "totalCount": "{{count}} employees",
+      "pendingEntry": "{{count}} sensitive change request(s) pending review",
+      "maskedHint": "Bank and super account numbers are masked; open Edit to view the full values",
+      "employee": "Employee",
+      "bankAccount": "Bank account",
+      "superannuation": "Superannuation",
+      "notFilled": "Not provided",
+      "notSet": "Not set",
+      "completion": {
+        "title": "Profile status",
+        "noProfile": "No profile",
+        "incomplete": "Incomplete",
+        "complete": "Complete",
+        "missingBank": "Bank missing",
+        "missingSuper": "Super missing"
+      },
+      "drawer": {
+        "sensitive": "Sensitive",
+        "nav": {
+          "basic": "Basic info",
+          "bankSuper": "Bank & super",
+          "identity": "Identity & documents"
+        },
+        "copyId": "Copy ID",
+        "copied": "Copied",
+        "copyFailed": "Copy failed. Please select and copy manually",
+        "createdOn": "Created {{date}}",
+        "updatedOn": "Updated {{date}}",
+        "dirty": "{{count}} field(s) modified",
+        "sensitiveNotice": "Sensitive details changed by an administrator take effect immediately and are written to the audit log. If the employee has a pending change request, you will be asked to confirm and it will be voided on save."
+      }
+    }
+  }
+}

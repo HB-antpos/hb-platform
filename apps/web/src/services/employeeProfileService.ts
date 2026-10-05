@@ -28,6 +28,10 @@ function mapEmployeeProfile<T extends EmployeeProfileSummaryDto>(raw: BackendEmp
     id: asString(raw.id) ?? asString(raw.employeeInfoId) ?? asString(raw.EmployeeInfoId),
     userGUID: asString(raw.userGUID) ?? asString(raw.UserGUID) ?? asString(raw.userGuid),
     userId: asString(raw.userId) ?? asString(raw.UserId) ?? asString(raw.userGUID) ?? asString(raw.UserGUID),
+    // 三态：缺失保持 undefined，避免旧响应被误判为「未建档」。
+    hasProfile: typeof (raw.hasProfile ?? raw.HasProfile) === 'boolean'
+      ? (raw.hasProfile ?? raw.HasProfile) as boolean
+      : undefined,
     username: asString(raw.username) ?? asString(raw.Username),
     displayName: asString(raw.displayName) ?? asString(raw.DisplayName) ?? asString(raw.fullName) ?? asString(raw.FullName),
     bankBsb: asString(raw.bankBsb) ?? asString(raw.bankBSB) ?? asString(raw.BankBSB),
