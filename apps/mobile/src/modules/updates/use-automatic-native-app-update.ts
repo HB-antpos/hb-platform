@@ -2,9 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { toByteArray } from "base64-js";
 import { i18n } from "@/shared/i18n/i18n";
+import { AppAsyncStorage } from "@/shared/storage/async-storage";
 import HBAppInstaller, {
   type HBAppInstallerNativeModule,
 } from "../../../modules/hb-app-installer/src/HBAppInstallerModule";
+import {
+  fetchAndroidNativeUpdateDecision,
+  isAndroidNativeUpdateRequired,
+  parseInstalledAndroidBuildNumber,
+  resolveAndroidNativeUpdateDecision,
+  shouldCheckAndroidNativeRequiredUpdate,
+  type AndroidNativeUpdateDecision,
+} from "./android-native-required-update";
 import {
   appUpdateMutualExclusion,
   createUpdateLaneRetryGate,
@@ -18,6 +27,18 @@ import {
 } from "./native-app-update";
 
 const APK_MIME_TYPE = "application/vnd.android.package-archive";
+
+type RequiredDownload = {
+  build: NativeAppBuildInfo;
+  fileUri: string;
+  nativeInstaller: HBAppInstallerNativeModule | null;
+};
+
+/** OTA 强制门只在没有原生强制更新时拦安装；原生 required 时必须允许打开安装器。 */
+function isInstallBlockedByOtaGate() {
+  return appUpdateMutualExclusion.isOtaRequiredGateActive()
+    && !appUpdateMutualExclusion.isNativeRequiredGateActive();
+}
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
 
 function toTrustedHttpsOrigin(value: unknown) {
@@ -72,6 +93,49 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
   const inFlightRef = useRef(false);
   const promptedBuildIdRef = useRef<string | null>(null);
   const operationRetryGateRef = useRef(createUpdateLaneRetryGate());
+  const [requiredDecision, setRequiredDecision] = useState<AndroidNativeUpdateDecision | null>(null);
+  const [readyToInstall, setReadyToInstall] = useState(false);
+  const requiredRef = useRef(false);
+  const requiredDownloadRef = useRef<RequiredDownload | null>(null);
+
+  function applyRequiredDecision(decision: AndroidNativeUpdateDecision | null) {
+    const required = isAndroidNativeUpdateRequired(decision);
+    requiredRef.current = required;
+    setRequiredDecision(required ? decision : null);
+    if (!required) {
+      requiredDownloadRef.current = null;
+      setReadyToInstall(false);
+    }
+    // 开门后被 OTA 挡住的原生检查会经 subscribe + retry gate 自动重跑。
+    appUpdateMutualExclusion.setNativeRequiredGate(required);
+  }
+
+  async function refreshRequiredDecision(
+    apiClient: typeof import("@/shared/api/client").apiClient,
+    buildProfile: string,
+    nativeBuildVersion: string | null,
+  ) {
+    if (!shouldCheckAndroidNativeRequiredUpdate(buildProfile)) {
+      applyRequiredDecision(null);
+      return;
+    }
+    const installedBuild = parseInstalledAndroidBuildNumber(nativeBuildVersion);
+    const apiBaseUrl = apiClient.defaults.baseURL?.trim();
+    if (installedBuild === null || !apiBaseUrl) {
+      applyRequiredDecision(null);
+      return;
+    }
+    const resolution = await resolveAndroidNativeUpdateDecision({
+      fetchDecision: () => fetchAndroidNativeUpdateDecision(apiClient, installedBuild),
+      storage: AppAsyncStorage,
+      scope: { apiBaseUrl, installedBuild },
+    });
+    if (resolution.decision === null && requiredRef.current) {
+      // 本次运行已确认必须更新时，网络抖动不能把拦截页放开。
+      return;
+    }
+    applyRequiredDecision(resolution.decision);
+  }
 
   useEffect(() => {
     optionsRef.current = options;
@@ -128,7 +192,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
           {
             text: i18n.t("settings:dialogs.nativeUpdateOpenSettingsAction"),
             onPress: () => {
-              if (appUpdateMutualExclusion.isOtaRequiredGateActive()) {
+              if (isInstallBlockedByOtaGate()) {
                 appUpdateMutualExclusion.releasePrompt("native");
                 return;
               }
@@ -183,7 +247,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
         {
           text: i18n.t("settings:dialogs.nativeUpdateInstallAction"),
           onPress: () => {
-            if (appUpdateMutualExclusion.isOtaRequiredGateActive()) {
+            if (isInstallBlockedByOtaGate()) {
               appUpdateMutualExclusion.releasePrompt("native");
               return;
             }
@@ -203,15 +267,8 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
     }
     if (Platform.OS !== "android") return;
 
-    const updateLease = appUpdateMutualExclusion.tryStartOperation("native");
-    if (!updateLease) {
-      operationRetryGateRef.current.markBlocked();
-      return;
-    }
-    operationRetryGateRef.current.clear();
-
     inFlightRef.current = true;
-    setPhase("checking");
+    let updateLease: ReturnType<typeof appUpdateMutualExclusion.tryStartOperation> = null;
     try {
       const { apiClient } = await import("@/shared/api/client");
       const buildProfile = await getNativeAppBuildProfile();
@@ -219,14 +276,25 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
 
       if (!nativeInstallerEnabled) {
         // 显式关闭时完全停用自动 APK 更新；人工下载只允许从后台受控入口发起。
+        applyRequiredDecision(null);
         setPhase(null);
         return;
       }
 
-      const [FileSystem, Application] = await Promise.all([
-        import("expo-file-system/legacy"),
-        import("expo-application"),
-      ]);
+      const Application = await import("expo-application");
+      // 强制判定只是一次只读 GET，先于互斥锁执行：required 时打开原生强制门，
+      // 才能在 OTA 初始化或 OTA required 期间继续下载 APK，避免两边互相卡死。
+      await refreshRequiredDecision(apiClient, buildProfile, Application.nativeBuildVersion);
+
+      updateLease = appUpdateMutualExclusion.tryStartOperation("native");
+      if (!updateLease) {
+        operationRetryGateRef.current.markBlocked();
+        return;
+      }
+      operationRetryGateRef.current.clear();
+      setPhase("checking");
+
+      const FileSystem = await import("expo-file-system/legacy");
       const nativeInstaller = HBAppInstaller;
       const configuredTrustedOrigins = await getConfiguredNativeAppInstallerOrigins();
       const downloadDirectory = nativeInstaller
@@ -264,6 +332,18 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
       });
       setPhase(null);
 
+      if (requiredRef.current) {
+        // 强制更新不弹「稍后」框：安装包就绪后由拦截页提供「立即安装」。
+        const promptNativeInstaller = result.status === "downloaded" && result.verification === "native"
+          ? nativeInstaller
+          : null;
+        requiredDownloadRef.current = result.status === "downloaded"
+          ? { build: result.build, fileUri: result.fileUri, nativeInstaller: promptNativeInstaller }
+          : null;
+        setReadyToInstall(result.status === "downloaded");
+        return;
+      }
+
       if (result.status !== "downloaded" || promptedBuildIdRef.current === result.build.easBuildId) {
         return;
       }
@@ -278,12 +358,26 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
       console.warn("[updates] automatic APK update check failed", error);
     } finally {
       inFlightRef.current = false;
-      updateLease.finish();
+      updateLease?.finish();
     }
+  }
+
+  function installRequired() {
+    const download = requiredDownloadRef.current;
+    if (!requiredRef.current) {
+      return;
+    }
+    if (!download) {
+      void check(optionsRef.current);
+      return;
+    }
+    appUpdateMutualExclusion.activateNativeInstaller();
+    void openDownloadedApk(download.build, download.fileUri, download.nativeInstaller);
   }
 
   useEffect(() => {
     if (!options.enabled) {
+      if (requiredRef.current) applyRequiredDecision(null);
       return;
     }
 
@@ -320,6 +414,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
       operationRetryGateRef.current.clear();
       appUpdateMutualExclusion.releasePrompt("native");
       appUpdateMutualExclusion.clearNativeInstaller();
+      appUpdateMutualExclusion.setNativeRequiredGate(false);
     };
   }, []);
 
@@ -328,9 +423,13 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
     void check(optionsRef.current);
   }, { enabled: options.enabled });
 
+  const androidEnabled = options.enabled && Platform.OS === "android";
   return {
-    phase: options.enabled && Platform.OS === "android" ? phase : null,
+    phase: androidEnabled ? phase : null,
     retry: () => { void check(optionsRef.current); },
     dismiss: () => setPhase(null),
+    requiredDecision: androidEnabled ? requiredDecision : null,
+    readyToInstall: androidEnabled && readyToInstall,
+    installRequired,
   };
 }
