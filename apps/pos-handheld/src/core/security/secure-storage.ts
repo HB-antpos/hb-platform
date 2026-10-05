@@ -377,6 +377,15 @@ export class DeviceLockStore {
     await this.secureStore.remove(deviceLockKey);
   }
 
+  /**
+   * 仅当持久锁原因正是 expectedReason 时才移除。用于撤销重置恢复自己写的锁，
+   * 绝不能顺带解除服务端停用或设备 403 写入的其他锁（那些锁由设备会话按服务端结果处理）。
+   */
+  public async unlockIfReason(expectedReason: string): Promise<void> {
+    if ((await this.secureStore.get(deviceLockKey)) !== expectedReason) return;
+    await this.secureStore.remove(deviceLockKey);
+  }
+
   /** 持久锁写入失败时，进程闩锁仍必须先同步阻止登录及设备会话。 */
   public async lockForRecovery(reason: string): Promise<void> {
     this.recoveryProcessLocked = true;

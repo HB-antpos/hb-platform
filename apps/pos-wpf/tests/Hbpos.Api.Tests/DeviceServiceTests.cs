@@ -613,11 +613,17 @@ public sealed class DeviceServiceTests
     }
 
     [Theory]
-    [InlineData("iOS")]
-    [InlineData("Android")]
-    public async Task VerifyAsync_WhenNonIpadExactHardwareMatches_does_not_issue_ipad_recovery_proof(
-        string deviceSystem)
+    [InlineData("iOS", 1, true)]
+    [InlineData("Android", 1, true)]
+    [InlineData("iOS", 0, false)]
+    [InlineData("Android", 0, false)]
+    public async Task VerifyAsync_WhenHandheldExactHardwareMatches_reports_exact_identity_for_reset_recovery(
+        string deviceSystem,
+        int deviceStatus,
+        bool expectedAllowed)
     {
+        // 手持 iOS/Android 与 iPadOS 一样按门店+设备码+硬件码精确查询，
+        // 必须给出精确身份证明，否则「清除设备注册」中断后启动恢复永远无法确认服务端停用。
         var repository = new FakeDeviceRegistrationRepository
         {
             DeviceByExactIdentity = new DeviceRegistrationRecord
@@ -625,7 +631,7 @@ public sealed class DeviceServiceTests
                 DeviceCode = "POS_1003_1011",
                 StoreCode = "1003",
                 HardwareId = "HW-EXPECTED",
-                DeviceStatus = 1,
+                DeviceStatus = deviceStatus,
                 DeviceSystem = deviceSystem,
                 AuthorizationCode = "AUTH-EXPECTED"
             }
@@ -641,8 +647,64 @@ public sealed class DeviceServiceTests
                 deviceSystem),
             CancellationToken.None);
 
-        Assert.True(response.IsAllowed);
-        Assert.Equal("AUTH-EXPECTED", response.AuthorizationCode);
+        Assert.Equal(deviceStatus, response.DeviceStatus);
+        Assert.Equal(expectedAllowed, response.IsAllowed);
+        Assert.Equal(expectedAllowed ? "AUTH-EXPECTED" : null, response.AuthorizationCode);
+        Assert.True(response.ExactIdentityMatched);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WhenWindowsHardwareMatches_never_reports_exact_identity()
+    {
+        // Windows 只按门店+设备码查询（兼容旧客户端），不是精确硬件身份，不能给出恢复证明。
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            DeviceByCode = new DeviceRegistrationRecord
+            {
+                DeviceCode = "POS_1003_1011",
+                StoreCode = "1003",
+                HardwareId = "HW-001",
+                DeviceStatus = 0,
+                DeviceSystem = "Windows",
+                AuthorizationCode = "AUTH-001"
+            }
+        };
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        var response = await service.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1011", "1003", "HW-001", "front counter", "Windows"),
+            CancellationToken.None);
+
+        Assert.False(response.IsAllowed);
+        Assert.False(response.ExactIdentityMatched);
+    }
+
+    [Theory]
+    [InlineData("iOS")]
+    [InlineData("Android")]
+    public async Task VerifyAsync_WhenHandheldRegisteredOnAnotherPlatform_never_reports_exact_identity(
+        string deviceSystem)
+    {
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            DeviceByExactIdentity = new DeviceRegistrationRecord
+            {
+                DeviceCode = "POS_1003_1011",
+                StoreCode = "1003",
+                HardwareId = "HW-EXPECTED",
+                DeviceStatus = 0,
+                DeviceSystem = "iPadOS",
+                AuthorizationCode = "AUTH-EXPECTED"
+            }
+        };
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        var response = await service.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1011", "1003", "HW-EXPECTED", "handheld", deviceSystem),
+            CancellationToken.None);
+
+        Assert.False(response.IsAllowed);
+        Assert.Equal("Device system does not match existing registration.", response.Message);
         Assert.False(response.ExactIdentityMatched);
     }
 
