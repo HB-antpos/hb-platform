@@ -226,6 +226,8 @@ import {
 import {
   createProductionPaymentRuntime,
   type PosPaymentRuntimeService,
+  type TenderReversalVoidAuthorization,
+  type TenderReversalVoidAuthorizer,
 } from "./production-payment-runtime";
 import {
   ProductionReturnCashRefundAdapter,
@@ -1427,6 +1429,41 @@ export function createProductionPosRuntimeServices(
     hasReturnRecoveryRequired: () =>
       returnRecoveryProbe.hasRecoveryRequired(),
     drainFulfilment: postCommitWork,
+    // Blocked 礼券撤券的人工作废必须走现有主管扫码授权，且强制第二人复核；
+    // 主管身份只取自授权回调，绝不使用当前登录员工或 UI 勾选。
+    authorizeTenderReversalVoid: operationAuthorization
+      ? async <T>(
+          request: Parameters<TenderReversalVoidAuthorizer>[0],
+          run: (authorization: TenderReversalVoidAuthorization) => Promise<T>,
+        ): Promise<T> => {
+          const requesting = currentCashier.require();
+          assertTrustedCashierScope(requesting, input.auditMetadata);
+          const result = await operationAuthorization.authorizeAndRun(
+            {
+              actionId: input.createId(),
+              permissionCode: request.permissionCode,
+              screen: request.screen,
+              action: request.action,
+              forceSupervisor: true,
+            },
+            async (context) => {
+              const active = currentCashier.require();
+              assertTrustedCashierScope(active, input.auditMetadata);
+              if (active !== requesting || !context.authorizingActor) {
+                throw new Error("TENDER_REVERSAL_VOID_AUTHORIZATION_REVOKED");
+              }
+              return run({
+                authorizingActor: context.authorizingActor,
+                permissionCode: context.permissionCode,
+              });
+            },
+          );
+          if (!result.authorized) {
+            throw new Error(`TENDER_REVERSAL_VOID_AUTHORIZATION_${result.reason}`);
+          }
+          return result.value;
+        }
+      : undefined,
     authorizeRecovery: async (request, run) => {
       const requesting = currentCashier.require();
       assertTrustedCashierScope(requesting, input.auditMetadata);

@@ -1504,11 +1504,17 @@ function RecoveryActions({
     preparedCashCancellation && state.phase === "recovery-required";
   const showGenericCancellation =
     state.allowedActions.cancel && !preparedCashCancellation;
+  // Blocked 礼券撤券只能由主管授权作废；没有授权能力时不显示任何可点按钮。
+  const showVoidBlockedTenderReversal =
+    state.tenderReversalRecovery?.status === "blocked" &&
+    state.tenderReversalRecovery.voidAvailable === true &&
+    typeof presenter.voidBlockedTenderReversal === "function";
   if (
     !state.allowedActions.recover &&
     !showGenericCancellation &&
     !showPreparedCashCancellation &&
-    !cashConfirmationRecovery
+    !cashConfirmationRecovery &&
+    !showVoidBlockedTenderReversal
   ) {
     return null;
   }
@@ -1538,6 +1544,17 @@ function RecoveryActions({
           }}
           testID="payment-recover"
           tone="primary"
+        />
+      ) : null}
+      {showVoidBlockedTenderReversal ? (
+        <ActionButton
+          disabled={actionDisabled}
+          label={t("action.voidBlockedTenderReversal")}
+          onPress={() => {
+            void presenter.voidBlockedTenderReversal?.();
+          }}
+          testID="payment-void-blocked-tender-reversal"
+          tone="danger"
         />
       ) : null}
       {showGenericCancellation ? (

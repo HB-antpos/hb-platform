@@ -175,6 +175,8 @@ export interface PaymentScreenPresenter {
   dismissError(): void;
   submitSelected(): Promise<boolean>;
   recover(options?: PaymentRecoverOptions): Promise<boolean>;
+  /** Blocked 礼券撤券的主管作废入口；仅在快照声明 voidAvailable 时可用。 */
+  voidBlockedTenderReversal?(): Promise<boolean>;
   cancel(): Promise<boolean>;
   removeTender(tenderGuid: string): Promise<boolean>;
   sendLinklyKey(key: LinklySafeOperatorKey): Promise<boolean>;
@@ -851,6 +853,51 @@ export class PaymentPresenter {
     }, { background: options.background === true });
   }
 
+  /**
+   * 主管授权后作废 Blocked 撤券的礼券 tender。授权弹窗由组合根的 operation
+   * authorization 驱动；授权取消/失败时 runtime 抛错，presenter 只展示错误。
+   */
+  public voidBlockedTenderReversal(): Promise<boolean> {
+    if (this.actionInFlight) return Promise.resolve(false);
+    const orderGuid = this.state.orderGuid;
+    const recovery = this.state.tenderReversalRecovery;
+    const voidBlocked =
+      this.dependencies.runtime.voidBlockedTenderReversal?.bind(
+        this.dependencies.runtime,
+      );
+    if (
+      !orderGuid ||
+      recovery?.status !== "blocked" ||
+      recovery.voidAvailable !== true ||
+      !voidBlocked
+    ) {
+      return Promise.resolve(false);
+    }
+    return this.runExclusive(async (revision) => {
+      this.patchIfCurrent(revision, {
+        phase: "submitting",
+        runtimeErrorCode: null,
+      });
+      let snapshot: PaymentCheckoutPublicSnapshot;
+      try {
+        snapshot = await voidBlocked({
+          orderGuid,
+          tenderGuid: recovery.tenderGuid,
+        });
+      } catch (error) {
+        // 授权取消或处置失败：回读耐久快照恢复阻断页，再由外层展示错误码。
+        const current = await this.dependencies.runtime
+          .read(orderGuid)
+          .catch(() => null);
+        if (current && this.isCurrent(revision)) this.applySnapshot(current);
+        throw error;
+      }
+      if (!this.isCurrent(revision)) return false;
+      this.applySnapshot(snapshot);
+      return snapshot.tenderReversalRecovery === undefined;
+    });
+  }
+
   public cancel(): Promise<boolean> {
     if (
       !this.state.allowedActions.cancel ||
@@ -1441,6 +1488,9 @@ function copyTenderReversalRecovery(
   return Object.freeze({
     tenderGuid: recovery.tenderGuid,
     status: recovery.status,
+    ...(recovery.status === "blocked" && recovery.voidAvailable === true
+      ? { voidAvailable: true }
+      : {}),
   });
 }
 

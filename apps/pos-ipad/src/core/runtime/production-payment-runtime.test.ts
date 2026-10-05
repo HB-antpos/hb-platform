@@ -5,6 +5,7 @@ import { CurrentCashierSession } from "./current-cashier-session";
 import {
   createProductionPaymentRuntime,
   createProductionTenderReversalRouter,
+  type TenderReversalVoidAuthorizer,
 } from "./production-payment-runtime";
 
 import type {
@@ -1550,6 +1551,177 @@ test("查询期间换班时只允许 Approved 落账，不恢复购物车或解�
   assert.deepEqual(activeCart.getSnapshot().lines, []);
 });
 
+test("Blocked 撤券：主管授权作废后不再阻塞并恢复可操作；授权取消保持阻断；未提供授权时不开放入口", async (t) => {
+  const createRuntime = (options: Readonly<{
+    authorize?: TenderReversalVoidAuthorizer;
+    onVoid?(command: unknown): void;
+  }>) => {
+    const cart = pricedCart();
+    const persisted = {
+      ...voucherReversalRecord(voucherOnlyTruth()),
+      state: "Blocked" as const,
+      attemptCount: 1,
+      lastErrorCode: "VOUCHER_PROTECTED_REFERENCE_CONFLICT",
+    };
+    return createProductionPaymentRuntime({
+      database: reversalDatabase({
+        draft: voucherCheckoutDraft(cart.snapshot().revision),
+        recovery: draftRecovery(cart),
+        record: persisted,
+        persisted: true,
+        onCash: () => {
+          throw new Error("cash must not be called");
+        },
+        ...(options.onVoid ? { onVoid: options.onVoid } : {}),
+      }),
+      repositories: repositories(approvedVoucherAttempt()),
+      encryptor,
+      activeCart: new ActivePricingCartSession(
+        new PricingCart(),
+        () => new PricingCart(),
+      ),
+      currentCashier: activeCashier(),
+      terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+      clock: {
+        now: () => new Date("2026-07-28T00:00:00.000Z"),
+        nowIso: () => "2026-07-28T00:00:00.000Z",
+      },
+      createId: idFactory(),
+      connectivity: { async isOnline() { return true; } },
+      bootstrap: voucherReleaseBootstrap(
+        true,
+        async () => {
+          throw new Error("void must never call provider release");
+        },
+        () => {
+          throw new Error("void must never call provider");
+        },
+      ),
+      ...(options.authorize
+        ? { authorizeTenderReversalVoid: options.authorize }
+        : {}),
+      async drainFulfilment() {},
+    });
+  };
+
+  await t.test("主管授权成功", async () => {
+    const voidCommands: unknown[] = [];
+    const authorizations: unknown[] = [];
+    const runtime = createRuntime({
+      authorize: async (request, run) => {
+        authorizations.push(request);
+        return run({
+          authorizingActor: {
+            cashierId: "supervisor-1",
+            cashierName: "Supervisor",
+            userGuid: "supervisor-guid-1",
+          },
+          permissionCode: request.permissionCode,
+        });
+      },
+      onVoid: (command) => voidCommands.push(command),
+    });
+    await runtime.initializeRecovery();
+    const service = runtime.service;
+    assert.equal(service.status, "available");
+    if (service.status !== "available") return;
+    assert.equal(await runtime.recoveryProbe.hasRecoveryRequired(), true);
+
+    const presenter = service.createPresenter(null);
+    assert.equal(await presenter.initialize(), true);
+    // 修复前：只有 Blocked 提示，所有动作均为 false，且没有任何出口。
+    assert.equal(presenter.getState().runtimeErrorCode, "TENDER_REVERSAL_BLOCKED");
+    assert.deepEqual(presenter.getState().tenderReversalRecovery, {
+      tenderGuid: "voucher-1",
+      status: "blocked",
+      voidAvailable: true,
+    });
+    assert.equal(presenter.getState().allowedActions.recover, false);
+
+    assert.equal(await presenter.voidBlockedTenderReversal(), true);
+    assert.equal(authorizations.length, 1);
+    assert.deepEqual(authorizations[0], {
+      action: "payment-tender-void-unreleased",
+      screen: "payment",
+      orderGuid: "order-1",
+      tenderGuid: "voucher-1",
+      permissionCode: "Permissions.PosTerminal.Payment.RemoveTender",
+    });
+    assert.equal(voidCommands.length, 1);
+    assert.deepEqual(voidCommands[0], {
+      scope: { storeCode: "S1", deviceCode: "IPAD-1" },
+      actionId: "id-2",
+      orderGuid: "order-1",
+      sourceTenderGuid: "voucher-1",
+      requestingActor: TEST_AUDIT_ACTOR,
+      authorizingActor: {
+        cashierId: "supervisor-1",
+        cashierName: "Supervisor",
+        userGuid: "supervisor-guid-1",
+      },
+      permissionCode: "Permissions.PosTerminal.Payment.RemoveTender",
+    });
+    const state = presenter.getState();
+    assert.equal(state.tenderReversalRecovery, null);
+    assert.equal(state.runtimeErrorCode, null);
+    assert.equal(state.remaining.cents, 1_000);
+    assert.equal(state.tenders.length, 0);
+    // 订单回到普通未完成支付：可继续收款，或在无 tender 时取消回到销售页。
+    assert.equal(
+      state.allowedActions.start || state.allowedActions.addCash,
+      true,
+    );
+    assert.equal(state.allowedActions.cancel, true);
+    // 撤券账本不再贡献阻断；剩余的 true 只来自普通活动支付草稿。
+    assert.equal(await runtime.recoveryProbe.hasRecoveryRequired(), true);
+    // 幂等：已无阻断时再次调用不会再授权或再次落账。
+    assert.equal(await presenter.voidBlockedTenderReversal(), false);
+    assert.equal(authorizations.length, 1);
+    presenter.destroy();
+  });
+
+  await t.test("主管授权取消", async () => {
+    let voidCalls = 0;
+    const runtime = createRuntime({
+      authorize: async () => {
+        throw new Error("TENDER_REVERSAL_VOID_AUTHORIZATION_CANCELLED");
+      },
+      onVoid: () => {
+        voidCalls += 1;
+      },
+    });
+    await runtime.initializeRecovery();
+    const service = runtime.service;
+    if (service.status !== "available") return assert.fail();
+    const presenter = service.createPresenter(null);
+    assert.equal(await presenter.initialize(), true);
+    assert.equal(await presenter.voidBlockedTenderReversal(), false);
+    assert.equal(voidCalls, 0);
+    assert.equal(
+      presenter.getState().runtimeErrorCode,
+      "TENDER_REVERSAL_VOID_NOT_AUTHORIZED",
+    );
+    assert.equal(presenter.getState().tenderReversalRecovery?.status, "blocked");
+    assert.equal(presenter.getState().busy, false);
+    presenter.destroy();
+  });
+
+  await t.test("组合根未提供主管授权", async () => {
+    const runtime = createRuntime({});
+    await runtime.initializeRecovery();
+    const service = runtime.service;
+    if (service.status !== "available") return assert.fail();
+    const presenter = service.createPresenter(null);
+    assert.equal(await presenter.initialize(), true);
+    assert.deepEqual(presenter.getState().tenderReversalRecovery, {
+      tenderGuid: "voucher-1",
+      status: "blocked",
+    });
+    assert.equal(await presenter.voidBlockedTenderReversal(), false);
+    presenter.destroy();
+  });
+});
+
 function bootstrap(
   onBind: () => void,
   onProviderGet: () => void = () => undefined,
@@ -2530,8 +2702,11 @@ function reversalDatabase(input: Readonly<{
   persisted?: boolean;
   recoveryThrowsAfterFirst?: boolean;
   onCash(): void;
+  onVoid?(command: unknown): void;
 }>): PosDatabase {
   let current = input.record;
+  // 主管作废后：Blocked 行保持不变，但已处置、不再阻塞，礼券被负 tender 抵消。
+  let voided = false;
   let created =
     input.persisted ?? input.record.state !== "Prepared";
   let recoveryReads = 0;
@@ -2539,6 +2714,9 @@ function reversalDatabase(input: Readonly<{
     ...database(input.draft),
     paymentDraftRecovery: () => ({
       async assertPersisted() {},
+      async findPendingLinklyAcknowledgement() {
+        return null;
+      },
       async findBlockingRecovery() {
         recoveryReads += 1;
         if (
@@ -2552,6 +2730,14 @@ function reversalDatabase(input: Readonly<{
         return input.recovery;
       },
       async readDraft() {
+        if (voided) {
+          return {
+            ...input.draft,
+            remaining: input.draft.total,
+            cancellableAfterReversal: true,
+            tenders: [],
+          };
+        }
         return current.state === "Reversed"
           ? {
               ...input.draft,
@@ -2591,11 +2777,53 @@ function reversalDatabase(input: Readonly<{
           scope.storeCode !== "S1" ||
           scope.deviceCode !== "IPAD-1" ||
           !created ||
-          current.state === "Reversed"
+          current.state === "Reversed" ||
+          voided
         ) {
           return null;
         }
         return current;
+      },
+      async voidBlockedUnreleased(command: Readonly<{
+        actionId: string;
+        orderGuid: string;
+        sourceTenderGuid: string;
+      }>) {
+        input.onVoid?.(command);
+        if (
+          current.state !== "Blocked" ||
+          command.actionId !== current.actionId ||
+          command.orderGuid !== current.orderGuid ||
+          command.sourceTenderGuid !== current.sourceTenderGuid
+        ) {
+          throw new Error("only the persisted blocked action can be voided");
+        }
+        if (voided) {
+          return {
+            actionId: current.actionId,
+            orderGuid: current.orderGuid,
+            sourceTenderGuid: current.sourceTenderGuid,
+            reversalTenderGuid: `reversal-${current.actionId}`,
+            replayed: true,
+            truth: current.truth,
+          };
+        }
+        const reversed = reversedMutation(
+          current.truth,
+          current.actionId,
+          current.sourceTenderGuid,
+        );
+        const replayed = false;
+        voided = true;
+        current = { ...current, truth: reversed.truth };
+        return {
+          actionId: current.actionId,
+          orderGuid: current.orderGuid,
+          sourceTenderGuid: current.sourceTenderGuid,
+          reversalTenderGuid: reversed.reversalTenderGuid,
+          replayed,
+          truth: reversed.truth,
+        };
       },
       async prepareOrLoad(command: Readonly<{
         actionId: string;

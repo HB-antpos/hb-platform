@@ -125,6 +125,48 @@ test("当前收银员直通且重复 action 只执行一次，回调上下文没
   assert.deepEqual(audits, []);
 });
 
+test("强制主管授权时，即使当前收银员已有权限也必须等待第二人扫码并冻结主管身份", async () => {
+  const { service, loginInputs } = harness(undefined, cashier({ permissions: [PERMISSION] }));
+  let calls = 0;
+  const action = service.authorizeAndRun(request({ forceSupervisor: true }), (context) => {
+    calls += 1;
+    return context.authorizingActor;
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(service.getState().kind, "awaiting-supervisor");
+  assert.deepEqual(await service.submitSupervisorBarcode("supervisor"), { consumed: true, outcome: "authorized" });
+  const result = await action;
+  assert.deepEqual(result, {
+    authorized: true,
+    value: { cashierId: "SUPERVISOR", cashierName: "Supervisor", userGuid: "supervisor-user-guid" },
+  });
+  assert.equal(result.authorized && Object.isFrozen(result.value), true);
+  assert.equal(calls, 1);
+  assert.equal(loginInputs.length, 1);
+});
+
+test("强制主管授权拒绝当前收银员用 cashierId 或 userGuid 给自己授权", async () => {
+  const cases: readonly CashierSessionDto[] = [
+    supervisor({ cashierId: " requester ", userGuid: "different-user-guid" }),
+    supervisor({ cashierId: "OTHER", userGuid: " REQUESTER-USER-GUID " }),
+  ];
+  for (const [index, session] of cases.entries()) {
+    const { service } = harness(async () => ({ source: "online", session }), cashier({ permissions: [PERMISSION] }));
+    const action = service.authorizeAndRun(
+      request({ actionId: `forced-self-${index}`, forceSupervisor: true }),
+      () => "must-not-run",
+    );
+    assert.deepEqual(await service.submitSupervisorBarcode("requester"), {
+      consumed: true,
+      outcome: "denied",
+      reason: "AUTHORIZER_IDENTITY_INVALID",
+    });
+    assert.equal(service.cancel(), true);
+    assert.deepEqual(await action, { authorized: false, reason: "CANCELLED" });
+  }
+});
+
 test("主管授权审计脱敏，票据既不在回调也不留在可 JSON 化服务状态", async () => {
   const { service, audits } = harness();
   const authorization = service.authorizeAndRun(request(), (context) => context);
@@ -137,6 +179,11 @@ test("主管授权审计脱敏，票据既不在回调也不留在可 JSON 化�
       requestingCashierId: "REQUESTER",
       authorizingCashierId: "SUPERVISOR",
       permissionCode: PERMISSION,
+      authorizingActor: {
+        cashierId: "SUPERVISOR",
+        cashierName: "Supervisor",
+        userGuid: "supervisor-user-guid",
+      },
     },
   });
   await flush();

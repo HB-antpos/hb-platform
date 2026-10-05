@@ -35,6 +35,7 @@ import type {
   SensitivePayloadEncryptor,
 } from "@/core/db/sqlite-repositories";
 import type {
+  VoucherTenderReversalDispositionStorePort,
   VoucherTenderReversalRecord,
   VoucherTenderReversalRecoveryStorePort,
   VoucherTenderReversalStorePort,
@@ -92,6 +93,30 @@ import type { ActivePricingCartSession } from "@/features/sales/runtime";
 
 const CASH_DRAWER_PERMISSION =
   "Permissions.PosTerminal.CashDrawer.Open";
+/** 作废 Blocked 礼券撤券需要主管具备移除 tender 权限，且必须是另一名员工。 */
+export const VOUCHER_REVERSAL_VOID_PERMISSION =
+  "Permissions.PosTerminal.Payment.RemoveTender";
+
+export type TenderReversalVoidAuthorization = Readonly<{
+  /** 主管扫码核验后冻结的真实身份；不得由 UI 或当前会话拼接。 */
+  authorizingActor: AuditActorSnapshot;
+  permissionCode: string;
+}>;
+
+/**
+ * 组合根把现有 operationAuthorization 主管授权流程注入这里；run 只能在授权
+ * 成功的回调内执行，授权失败或取消必须抛错且不执行 run。
+ */
+export type TenderReversalVoidAuthorizer = <T>(
+  request: Readonly<{
+    action: "payment-tender-void-unreleased";
+    screen: "payment";
+    orderGuid: string;
+    tenderGuid: string;
+    permissionCode: string;
+  }>,
+  run: (authorization: TenderReversalVoidAuthorization) => Promise<T>,
+) => Promise<T>;
 
 export type PosPaymentRuntimeService =
   | Readonly<{
@@ -141,6 +166,8 @@ export type ProductionPaymentRuntimeDependencies = Readonly<{
   receiptSettings?: PaymentReceiptSettingsPort | undefined;
   /** 退货存在活动恢复时封锁新的付款/退款金融操作。 */
   hasReturnRecoveryRequired?: (() => Promise<boolean>) | undefined;
+  /** 缺失时 Blocked 撤券仍保持阻断（失败关闭），不提供人工作废入口。 */
+  authorizeTenderReversalVoid?: TenderReversalVoidAuthorizer | undefined;
   drainFulfilment(): Promise<unknown>;
 }>;
 
@@ -514,6 +541,15 @@ export function createProductionPaymentRuntime(
         store: voucherReversalStore,
         scope: terminalScope,
         retryAvailable: voucherReversal !== null,
+        voidBlocked: input.authorizeTenderReversalVoid
+          ? createBlockedTenderReversalVoider({
+              authorize: input.authorizeTenderReversalVoid,
+              store: voucherReversalStore,
+              scope: terminalScope,
+              requestingActor: actor,
+              assertActive: () => guard.assertActive(),
+            })
+          : null,
       }),
       linkly: acknowledgements ? input.bootstrap!.createLinklyOperator({ attempts, acknowledgements, trustedSession: guard, permissions: guard }) : null,
     };
@@ -849,7 +885,8 @@ function voucherTenderReversalStore(
     "database" | "encryptor" | "createId"
   >,
 ): VoucherTenderReversalStorePort &
-  VoucherTenderReversalRecoveryStorePort {
+  VoucherTenderReversalRecoveryStorePort &
+  VoucherTenderReversalDispositionStorePort {
   return input.database.voucherTenderReversals(
     input.encryptor,
     {
@@ -859,15 +896,73 @@ function voucherTenderReversalStore(
   );
 }
 
+type BlockedTenderReversalVoider = (
+  blocking: VoucherTenderReversalRecord,
+) => Promise<void>;
+
+/**
+ * 主管作废 Blocked 撤券：授权回调内再次复核可信会话，再由 store 在独占事务里
+ * 校验 Blocked/来源绑定并追加负 tender + 审计。全程不调用 provider。
+ */
+function createBlockedTenderReversalVoider(
+  options: Readonly<{
+    authorize: TenderReversalVoidAuthorizer;
+    store: VoucherTenderReversalDispositionStorePort;
+    scope: PaymentRecoveryScope;
+    requestingActor: AuditActorSnapshot;
+    assertActive(): void;
+  }>,
+): BlockedTenderReversalVoider {
+  return async (blocking) => {
+    options.assertActive();
+    let authorized = false;
+    try {
+      await options.authorize(
+        {
+          action: "payment-tender-void-unreleased",
+          screen: "payment",
+          orderGuid: blocking.orderGuid,
+          tenderGuid: blocking.sourceTenderGuid,
+          permissionCode: VOUCHER_REVERSAL_VOID_PERMISSION,
+        },
+        async (authorization) => {
+          authorized = true;
+          // 授权期间可能换班或锁屏；必须仍是同一可信收银员租约才落账。
+          options.assertActive();
+          await options.store.voidBlockedUnreleased({
+            scope: options.scope,
+            actionId: blocking.actionId,
+            orderGuid: blocking.orderGuid,
+            sourceTenderGuid: blocking.sourceTenderGuid,
+            requestingActor: options.requestingActor,
+            authorizingActor: authorization.authorizingActor,
+            permissionCode: authorization.permissionCode,
+          });
+        },
+      );
+    } catch (error) {
+      // 授权取消/拒绝时 run 从未执行，账本保持 Blocked；只暴露稳定错误码。
+      if (!authorized) {
+        throw new PaymentCheckoutRuntimeError(
+          "TENDER_REVERSAL_VOID_NOT_AUTHORIZED",
+        );
+      }
+      throw error;
+    }
+  };
+}
+
 function withPersistedVoucherTenderReversalRecovery(
   options: Readonly<{
     runtime: PaymentCheckoutRuntimePort;
     store: VoucherTenderReversalRecoveryStorePort;
     scope: PaymentRecoveryScope;
     retryAvailable: boolean;
+    voidBlocked: BlockedTenderReversalVoider | null;
   }>,
 ): PaymentCheckoutRuntimePort {
   const readBlocking = () => options.store.findBlocking(options.scope);
+  const voidAvailable = options.voidBlocked !== null;
   const projectCurrent = async (
     snapshot: PaymentCheckoutPublicSnapshot,
   ): Promise<PaymentCheckoutPublicSnapshot> => {
@@ -882,6 +977,7 @@ function withPersistedVoucherTenderReversalRecovery(
       snapshot,
       blocking,
       options.retryAvailable,
+      voidAvailable,
     );
   };
   const assertNoBlocking = async (
@@ -928,6 +1024,7 @@ function withPersistedVoucherTenderReversalRecovery(
           await options.runtime.read(blocking.orderGuid),
           blocking,
           options.retryAvailable,
+          voidAvailable,
         );
       }
       return options.runtime.findRecoveryRequired();
@@ -939,6 +1036,7 @@ function withPersistedVoucherTenderReversalRecovery(
           await options.runtime.read(blocking.orderGuid),
           blocking,
           options.retryAvailable,
+          voidAvailable,
         );
       }
       return options.runtime.resumeCurrent(prepared);
@@ -977,6 +1075,35 @@ function withPersistedVoucherTenderReversalRecovery(
         await options.runtime.removeTender(request),
       );
     },
+    ...(options.voidBlocked
+      ? {
+          async voidBlockedTenderReversal(request: {
+            orderGuid: string;
+            tenderGuid: string;
+          }) {
+            // read 先复核可信会话、门店与 View 权限，再以私有 durable record 为准。
+            const base = await options.runtime.read(request.orderGuid);
+            const blocking = await readBlocking();
+            if (!blocking) {
+              // 幂等：已处置后不再有阻断，直接返回当前真实快照。
+              return projectCurrent(base);
+            }
+            if (
+              blocking.state !== "Blocked" ||
+              blocking.orderGuid !== request.orderGuid ||
+              blocking.sourceTenderGuid !== request.tenderGuid
+            ) {
+              throw new PaymentCheckoutRuntimeError(
+                "TENDER_REVERSAL_UNAVAILABLE",
+              );
+            }
+            await options.voidBlocked!(blocking);
+            return projectCurrent(
+              await options.runtime.read(request.orderGuid),
+            );
+          },
+        }
+      : {}),
     async retryTenderReversal(request) {
       // read 先完成可信会话与 View 权限复核；真正 removeTender 仍会复核
       // RemoveTender 权限并使用下面从私有 durable record 取得的原 actionId。
@@ -996,6 +1123,7 @@ function withPersistedVoucherTenderReversalRecovery(
           base,
           blocking,
           options.retryAvailable,
+          voidAvailable,
         );
       }
       const result = await options.runtime.removeTender({
@@ -1012,6 +1140,7 @@ function persistedVoucherReversalSnapshot(
   snapshot: PaymentCheckoutPublicSnapshot,
   record: VoucherTenderReversalRecord,
   retryAvailable: boolean,
+  voidAvailable: boolean,
 ): PaymentCheckoutPublicSnapshot {
   const source = snapshot.tenders.find(
     (tender) => tender.tenderGuid === record.sourceTenderGuid,
@@ -1065,6 +1194,10 @@ function persistedVoucherReversalSnapshot(
     tenderReversalRecovery: Object.freeze({
       tenderGuid: record.sourceTenderGuid,
       status: recoveryStatus,
+      // 只有 Blocked（不会自动重试）才开放主管作废；Unknown 等仍按原 action 恢复。
+      ...(record.state === "Blocked" && voidAvailable
+        ? { voidAvailable: true }
+        : {}),
     }),
     allowedActions: Object.freeze({
       start: false,

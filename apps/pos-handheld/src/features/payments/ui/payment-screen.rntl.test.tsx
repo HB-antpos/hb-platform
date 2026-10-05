@@ -807,6 +807,64 @@ test("Unknown 隐藏新付款和 Linkly 按键，只允许恢复同一 attempt",
   expect(linkly.sendCalls).toHaveLength(0);
 });
 
+test("Blocked 礼券撤券显示主管作废入口，作废后回到可继续收款的支付页", async () => {
+  class VoidingScreenRuntime extends ScreenPaymentRuntime {
+    public readonly voidInputs: unknown[] = [];
+
+    public async voidBlockedTenderReversal(input: {
+      orderGuid: string;
+      tenderGuid: string;
+    }): Promise<PaymentCheckoutPublicSnapshot> {
+      this.voidInputs.push(input);
+      return snapshot();
+    }
+  }
+  const runtime = new VoidingScreenRuntime();
+  const blocked = snapshot({
+    status: "recovery-required",
+    remaining: aud(500),
+    errorCode: "TENDER_REVERSAL_BLOCKED",
+    tenders: [
+      {
+        tenderGuid: "voucher-ui-1",
+        method: "voucher",
+        amount: aud(500),
+        reversible: false,
+      },
+    ],
+    tenderReversalRecovery: {
+      tenderGuid: "voucher-ui-1",
+      status: "blocked",
+      voidAvailable: true,
+    },
+    allowedActions: actions(),
+  });
+  runtime.recovery = blocked;
+  const screen = await render(
+    <PaymentScreen
+      locale="zh"
+      presenter={screenPresenter(runtime, new ScreenLinklyOperator())}
+      showStatusStrip={false}
+    />,
+  );
+
+  const button = await waitFor(() =>
+    screen.getByTestId("payment-void-blocked-tender-reversal"),
+  );
+  expect(screen.getByText("主管授权作废礼券付款")).toBeTruthy();
+  expect(screen.queryByTestId("payment-recover")).toBeNull();
+  await fireEvent.press(button);
+  await waitFor(() =>
+    expect(
+      screen.queryByTestId("payment-void-blocked-tender-reversal"),
+    ).toBeNull(),
+  );
+  expect(runtime.voidInputs).toEqual([
+    { orderGuid: "order-ui-1", tenderGuid: "voucher-ui-1" },
+  ]);
+  expect(screen.getByTestId("payment-cancel")).toBeTruthy();
+});
+
 test("部分付款显示脱敏 tender、余额与可控 reversal，不把银行卡归因到 provider reference", async () => {
   const runtime = new ScreenPaymentRuntime();
   runtime.recovery = snapshot({

@@ -6056,6 +6056,310 @@ BEGIN
 END;
 `;
 
+/**
+ * 礼券撤销 Blocked 的主管处置（本地作废、未释放）。
+ *
+ * 资金依据：礼券余额只会在订单同步时由服务端 claim+redeem 扣减；锁定只是 5 分钟
+ * 自然过期的占用。Blocked 动作无法证明 release 结果，但只要该礼券 tender 被负 tender
+ * 抵消并从同步载荷中剔除，服务端就永远不会核销这笔锁定，礼券余额保持不变。
+ * 因此处置只追加：负礼券 tender + reversal link + 审计 + 本表一行；Blocked 原行、
+ * 原 tender、原 attempt 与受保护状态全部保持不可变，不伪造“已释放”。
+ */
+const M47 = `
+CREATE TABLE voucher_tender_reversal_dispositions (
+  action_id TEXT PRIMARY KEY
+    REFERENCES voucher_tender_reversal_actions(action_id) ON DELETE RESTRICT,
+  order_guid TEXT NOT NULL
+    REFERENCES local_orders(order_guid) ON DELETE RESTRICT,
+  disposition TEXT NOT NULL CHECK (disposition IN ('VoidedUnreleased')),
+  reversal_tender_guid TEXT NOT NULL UNIQUE
+    REFERENCES order_tenders(tender_guid) ON DELETE RESTRICT,
+  audit_event_id TEXT NOT NULL UNIQUE
+    REFERENCES audit_events(event_id) ON DELETE RESTRICT,
+  requesting_actor_json TEXT NOT NULL CHECK (
+    json_valid(requesting_actor_json) = 1
+    AND json_type(requesting_actor_json, '$.requestingCashierId') = 'text'
+    AND LENGTH(TRIM(
+      json_extract(requesting_actor_json, '$.requestingCashierId')
+    )) BETWEEN 1 AND 256
+  ),
+  authorizing_actor_json TEXT NOT NULL CHECK (
+    json_valid(authorizing_actor_json) = 1
+    AND json_type(authorizing_actor_json, '$.authorizingCashierId') = 'text'
+    AND LENGTH(TRIM(
+      json_extract(authorizing_actor_json, '$.authorizingCashierId')
+    )) BETWEEN 1 AND 256
+  ),
+  created_at_iso TEXT NOT NULL,
+  CHECK (TRIM(action_id) <> '' AND LENGTH(action_id) <= 128),
+  CHECK (TRIM(order_guid) <> '' AND LENGTH(order_guid) <= 128),
+  CHECK (
+    TRIM(reversal_tender_guid) <> ''
+    AND LENGTH(reversal_tender_guid) <= 128
+  ),
+  CHECK (TRIM(audit_event_id) <> '' AND LENGTH(audit_event_id) <= 128),
+  CHECK (TRIM(created_at_iso) <> '' AND LENGTH(created_at_iso) <= 64)
+);
+
+-- 只有仍为 Blocked、订单仍 Completing、且同一事务内已写入精确负 tender、
+-- link 与 voided-unreleased 审计的动作才能被处置。
+CREATE TRIGGER trg_voucher_tender_reversal_disposition_validate_insert
+BEFORE INSERT ON voucher_tender_reversal_dispositions
+FOR EACH ROW
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_actions action
+  INNER JOIN local_orders order_row
+    ON order_row.order_guid = action.order_guid
+  INNER JOIN order_tenders source
+    ON source.tender_guid = action.source_tender_guid
+  INNER JOIN order_tenders reversal
+    ON reversal.tender_guid = NEW.reversal_tender_guid
+  INNER JOIN payment_tender_reversal_links link
+    ON link.order_guid = action.order_guid
+   AND link.action_id = action.action_id
+   AND link.source_tender_guid = action.source_tender_guid
+   AND link.reversal_tender_guid = NEW.reversal_tender_guid
+  INNER JOIN audit_events audit
+    ON audit.event_id = NEW.audit_event_id
+  WHERE action.action_id = NEW.action_id
+    AND action.order_guid = NEW.order_guid
+    AND action.state = 'Blocked'
+    AND action.reversal_tender_guid IS NULL
+    AND order_row.state = 'Completing'
+    AND source.order_guid = action.order_guid
+    AND source.method = 'voucher'
+    AND source.amount_cents = action.amount_cents
+    AND source.payment_attempt_id = action.source_attempt_id
+    AND reversal.order_guid = action.order_guid
+    AND reversal.method = 'voucher'
+    AND reversal.amount_cents = -action.amount_cents
+    AND reversal.payment_attempt_id IS NULL
+    AND audit.event_type = 'PAYMENT_TENDER_REMOVE'
+    AND audit.order_guid = action.order_guid
+    AND audit.correlation_id = action.action_id
+    AND json_valid(audit.payload_json) = 1
+    AND json_extract(audit.payload_json, '$.action')
+      = 'payment-tender-remove'
+    AND json_extract(audit.payload_json, '$.outcome')
+      = 'voided-unreleased'
+    AND json_extract(audit.payload_json, '$.reason') = action.reason
+    AND json_extract(audit.payload_json, '$.amountCents')
+      = action.amount_cents
+    AND json_extract(audit.payload_json, '$.sourceTenderGuid')
+      = action.source_tender_guid
+    AND json_extract(audit.payload_json, '$.sourceAttemptId')
+      = action.source_attempt_id
+    AND json_extract(audit.payload_json, '$.reversalTenderGuid')
+      = NEW.reversal_tender_guid
+    AND json_extract(audit.payload_json, '$.blockedErrorCode')
+      = action.last_error_code
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_DISPOSITION_INVALID');
+END;
+
+CREATE TRIGGER trg_voucher_tender_reversal_disposition_immutable
+BEFORE UPDATE ON voucher_tender_reversal_dispositions
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_DISPOSITION_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_voucher_tender_reversal_disposition_delete_forbidden
+BEFORE DELETE ON voucher_tender_reversal_dispositions
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_DISPOSITION_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_voucher_tender_reversal_disposition_tender_immutable
+BEFORE UPDATE ON order_tenders
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_dispositions disposition
+  WHERE disposition.reversal_tender_guid = OLD.tender_guid
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_TENDER_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_voucher_tender_reversal_disposition_tender_delete_forbidden
+BEFORE DELETE ON order_tenders
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_dispositions disposition
+  WHERE disposition.reversal_tender_guid = OLD.tender_guid
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_TENDER_DELETE_FORBIDDEN');
+END;
+
+CREATE TRIGGER trg_voucher_tender_reversal_disposition_audit_immutable
+BEFORE UPDATE ON audit_events
+FOR EACH ROW
+WHEN (
+  NEW.event_id IS NOT OLD.event_id
+  OR NEW.event_type IS NOT OLD.event_type
+  OR NEW.occurred_at_iso IS NOT OLD.occurred_at_iso
+  OR NEW.order_guid IS NOT OLD.order_guid
+  OR NEW.correlation_id IS NOT OLD.correlation_id
+  OR NEW.payload_json IS NOT OLD.payload_json
+  OR (
+    NEW.uploaded_at_iso IS NOT OLD.uploaded_at_iso
+    AND NOT (
+      OLD.uploaded_at_iso IS NULL
+      AND NEW.uploaded_at_iso IS NOT NULL
+    )
+  )
+)
+AND EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_dispositions disposition
+  WHERE disposition.audit_event_id = OLD.event_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_AUDIT_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_voucher_tender_reversal_disposition_audit_delete_forbidden
+BEFORE DELETE ON audit_events
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_dispositions disposition
+  WHERE disposition.audit_event_id = OLD.event_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_AUDIT_DELETE_FORBIDDEN');
+END;
+
+-- 已处置的 Blocked 不再算未决；Prepared/Submitted/Unknown 与未处置 Blocked 仍封锁订单。
+DROP INDEX ux_voucher_tender_reversal_one_unresolved_order;
+CREATE UNIQUE INDEX ux_voucher_tender_reversal_one_unresolved_order
+  ON voucher_tender_reversal_actions (order_guid)
+  WHERE state IN ('Prepared', 'Submitted', 'Unknown');
+
+-- 部分索引不能引用处置表；未处置 Blocked 的“单订单唯一未决”改由触发器保证。
+CREATE TRIGGER trg_voucher_tender_reversal_undisposed_blocked_insert_gate
+BEFORE INSERT ON voucher_tender_reversal_actions
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_actions action
+  WHERE action.order_guid = NEW.order_guid
+    AND action.state = 'Blocked'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM voucher_tender_reversal_dispositions disposition
+      WHERE disposition.action_id = action.action_id
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_ORDER_UNRESOLVED');
+END;
+
+DROP TRIGGER trg_voucher_tender_reversal_order_state_gate;
+CREATE TRIGGER trg_voucher_tender_reversal_order_state_gate
+BEFORE UPDATE OF state ON local_orders
+FOR EACH ROW
+WHEN NEW.state NOT IN ('Draft', 'Completing')
+  AND EXISTS (
+    SELECT 1
+    FROM voucher_tender_reversal_actions action
+    WHERE action.order_guid = OLD.order_guid
+      AND (
+        action.state IN ('Prepared', 'Submitted', 'Unknown')
+        OR (
+          action.state = 'Blocked'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM voucher_tender_reversal_dispositions disposition
+            WHERE disposition.action_id = action.action_id
+          )
+        )
+      )
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_ORDER_UNRESOLVED');
+END;
+
+DROP TRIGGER trg_voucher_tender_reversal_positive_tender_gate;
+CREATE TRIGGER trg_voucher_tender_reversal_positive_tender_gate
+BEFORE INSERT ON order_tenders
+FOR EACH ROW
+WHEN NEW.amount_cents > 0
+  AND EXISTS (
+    SELECT 1
+    FROM voucher_tender_reversal_actions action
+    WHERE action.order_guid = NEW.order_guid
+      AND (
+        action.state IN ('Prepared', 'Submitted', 'Unknown')
+        OR (
+          action.state = 'Blocked'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM voucher_tender_reversal_dispositions disposition
+            WHERE disposition.action_id = action.action_id
+          )
+        )
+      )
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_ORDER_UNRESOLVED');
+END;
+
+DROP TRIGGER trg_voucher_tender_reversal_action_binding_gate;
+CREATE TRIGGER trg_voucher_tender_reversal_action_binding_gate
+BEFORE INSERT ON payment_action_bindings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_actions action
+  WHERE action.order_guid = NEW.order_guid
+    AND (
+      action.state IN ('Prepared', 'Submitted', 'Unknown')
+      OR (
+        action.state = 'Blocked'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM voucher_tender_reversal_dispositions disposition
+          WHERE disposition.action_id = action.action_id
+        )
+      )
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_ORDER_UNRESOLVED');
+END;
+
+DROP TRIGGER trg_voucher_tender_reversal_payment_attempt_gate;
+CREATE TRIGGER trg_voucher_tender_reversal_payment_attempt_gate
+BEFORE INSERT ON payment_attempts
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM voucher_tender_reversal_actions action
+  WHERE action.order_guid = NEW.order_guid
+    AND (
+      action.state IN ('Prepared', 'Submitted', 'Unknown')
+      OR (
+        action.state = 'Blocked'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM voucher_tender_reversal_dispositions disposition
+          WHERE disposition.action_id = action.action_id
+        )
+      )
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'VOUCHER_TENDER_REVERSAL_ORDER_UNRESOLVED');
+END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -6103,6 +6407,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 44, name: "M44_linkly_provider_acknowledgement", sql: M44 },
   { version: 45, name: "M45_catalog_code_conflicts", sql: M45 },
   { version: 46, name: "M46_manual_card_terminal_blocking", sql: M46 },
+  { version: 47, name: "M47_voucher_reversal_blocked_disposition", sql: M47 },
 ];
 
 export async function applyMigrations(

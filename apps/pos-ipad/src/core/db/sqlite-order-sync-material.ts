@@ -752,13 +752,18 @@ export class SqliteOrderSyncMaterialResolver {
   ): Promise<LocalOrder> {
     const actions =
       await this.connection.getAll<VoucherReversalActionSyncRow>(
-        `SELECT action_id, order_guid, source_tender_guid,
-          source_attempt_id, amount_cents, reason, state,
-          attempt_count, last_error_code, reversal_tender_guid,
-          terminal_audit_event_id
-         FROM voucher_tender_reversal_actions
-         WHERE order_guid = ?
-         ORDER BY created_at_iso, action_id`,
+        `SELECT action.action_id, action.order_guid,
+          action.source_tender_guid, action.source_attempt_id,
+          action.amount_cents, action.reason, action.state,
+          action.attempt_count, action.last_error_code,
+          action.reversal_tender_guid, action.terminal_audit_event_id,
+          disposition.action_id AS disposition_action_id
+         FROM voucher_tender_reversal_actions action
+         LEFT JOIN voucher_tender_reversal_dispositions disposition
+           ON disposition.action_id = action.action_id
+          AND disposition.order_guid = action.order_guid
+         WHERE action.order_guid = ?
+         ORDER BY action.created_at_iso, action.action_id`,
         [order.orderGuid],
       );
     for (const action of actions) {
@@ -766,6 +771,10 @@ export class SqliteOrderSyncMaterialResolver {
         action.state,
         "ORDER_SYNC_VOUCHER_REVERSAL_MISMATCH",
       );
+      // 中文注释：主管已处置的 Blocked 由负 tender + link 抵消，下面按作废对校验。
+      if (state === "Blocked" && action.disposition_action_id !== null) {
+        continue;
+      }
       if (
         state === "Prepared" ||
         state === "Submitted" ||
@@ -820,7 +829,16 @@ export class SqliteOrderSyncMaterialResolver {
         audit.event_type AS audit_event_type,
         audit.order_guid AS audit_order_guid,
         audit.correlation_id AS audit_correlation_id,
-        audit.payload_json AS audit_payload_json
+        audit.payload_json AS audit_payload_json,
+        disposition.action_id AS disposition_action_id,
+        disposition.order_guid AS disposition_order_guid,
+        disposition.disposition AS disposition_kind,
+        disposition.reversal_tender_guid AS disposition_reversal_tender_guid,
+        disposition_audit.event_id AS disposition_audit_event_id,
+        disposition_audit.event_type AS disposition_audit_event_type,
+        disposition_audit.order_guid AS disposition_audit_order_guid,
+        disposition_audit.correlation_id AS disposition_audit_correlation_id,
+        disposition_audit.payload_json AS disposition_audit_payload_json
        FROM payment_tender_reversal_links link
        INNER JOIN order_tenders source
          ON source.tender_guid = link.source_tender_guid
@@ -835,6 +853,11 @@ export class SqliteOrderSyncMaterialResolver {
          ON protected.attempt_id = attempt.attempt_id
        LEFT JOIN audit_events audit
          ON audit.event_id = action.terminal_audit_event_id
+       LEFT JOIN voucher_tender_reversal_dispositions disposition
+         ON disposition.action_id = link.action_id
+        AND disposition.order_guid = link.order_guid
+       LEFT JOIN audit_events disposition_audit
+         ON disposition_audit.event_id = disposition.audit_event_id
        WHERE link.order_guid = ?
        ORDER BY link.created_at_iso, link.action_id`,
       [order.orderGuid],
@@ -899,6 +922,48 @@ export class SqliteOrderSyncMaterialResolver {
       const reversalTender = order.tenders.find(
         (tender) => tender.tenderGuid === reversalTenderGuid,
       );
+      if (row.disposition_action_id !== null) {
+        // 中文注释：主管作废的 Blocked 撤券没有 release 证明；但礼券只会在同步
+        // claim 时扣减，整对剔除后服务端永远不会核销这笔锁定，资金口径一致。
+        assertVoidedVoucherPair(row, {
+          orderGuid: order.orderGuid,
+          actionId,
+          sourceTenderGuid,
+          reversalTenderGuid,
+          sourceAmountCents,
+          attemptId,
+          idempotencyKey,
+          reason,
+          sourceTender,
+          reversalTender,
+        });
+        const voidedState = await resolveProtectedMaterial(
+          () => this.options.voucherProtectedTokens.getByAttempt(attemptId),
+          "ORDER_SYNC_VOUCHER_REVERSAL_MISMATCH",
+        );
+        if (
+          !voidedState ||
+          (voidedState.phase !== "approved" &&
+            voidedState.phase !== "release-submitted" &&
+            voidedState.phase !== "released") ||
+          voidedState.attemptId !== attemptId ||
+          voidedState.idempotencyKey !== idempotencyKey ||
+          voidedState.orderGuid !== order.orderGuid ||
+          voidedState.operation !== "purchase" ||
+          voidedState.storeCode !== order.storeCode ||
+          voidedState.cashierId !== order.cashierId ||
+          voidedState.amountCents !== sourceAmountCents
+        ) {
+          throw materialError("ORDER_SYNC_VOUCHER_REVERSAL_MISMATCH");
+        }
+        if (matchedActions.has(actionId)) {
+          throw materialError("ORDER_SYNC_VOUCHER_REVERSAL_MISMATCH");
+        }
+        matchedActions.add(actionId);
+        excludedTenderGuids.add(sourceTenderGuid);
+        excludedTenderGuids.add(reversalTenderGuid);
+        continue;
+      }
       if (
         persistedText(
           row.link_order_guid,
@@ -1147,6 +1212,7 @@ type ReversalMemberRow = Readonly<{
 }>;
 
 type VoucherReversalActionSyncRow = Readonly<{
+  disposition_action_id: unknown;
   action_id: unknown;
   order_guid: unknown;
   source_tender_guid: unknown;
@@ -1199,7 +1265,114 @@ type TenderReversalSyncRow = Readonly<{
   audit_order_guid: unknown;
   audit_correlation_id: unknown;
   audit_payload_json: unknown;
+  disposition_action_id: unknown;
+  disposition_order_guid: unknown;
+  disposition_kind: unknown;
+  disposition_reversal_tender_guid: unknown;
+  disposition_audit_event_id: unknown;
+  disposition_audit_event_type: unknown;
+  disposition_audit_order_guid: unknown;
+  disposition_audit_correlation_id: unknown;
+  disposition_audit_payload_json: unknown;
 }>;
+
+type VoidedVoucherPairIdentity = Readonly<{
+  orderGuid: string;
+  actionId: string;
+  sourceTenderGuid: string;
+  reversalTenderGuid: string;
+  sourceAmountCents: number;
+  attemptId: string;
+  idempotencyKey: string;
+  reason: string;
+  sourceTender: OrderTender | undefined;
+  reversalTender: OrderTender | undefined;
+}>;
+
+/**
+ * 校验主管作废（VoidedUnreleased）的礼券对：action 仍是 Blocked 且无 release 结果，
+ * 处置行、负 tender、link 与 voided-unreleased 审计必须逐字段一致。
+ */
+function assertVoidedVoucherPair(
+  row: TenderReversalSyncRow,
+  identity: VoidedVoucherPairIdentity,
+): void {
+  const code = "ORDER_SYNC_VOUCHER_REVERSAL_MISMATCH";
+  let payload: Record<string, unknown> | null = null;
+  try {
+    const decoded: unknown = JSON.parse(
+      persistedText(row.disposition_audit_payload_json, code),
+    );
+    if (decoded && typeof decoded === "object" && !Array.isArray(decoded)) {
+      payload = decoded as Record<string, unknown>;
+    }
+  } catch {
+    payload = null;
+  }
+  if (
+    !payload ||
+    persistedText(row.disposition_action_id, code) !== identity.actionId ||
+    persistedText(row.disposition_order_guid, code) !== identity.orderGuid ||
+    row.disposition_kind !== "VoidedUnreleased" ||
+    persistedText(row.disposition_reversal_tender_guid, code) !==
+      identity.reversalTenderGuid ||
+    persistedText(row.link_order_guid, code) !== identity.orderGuid ||
+    persistedText(row.source_order_guid, code) !== identity.orderGuid ||
+    persistedText(row.reversal_order_guid, code) !== identity.orderGuid ||
+    persistedText(row.link_action_id, code) !== identity.actionId ||
+    persistedText(row.action_order_guid, code) !== identity.orderGuid ||
+    persistedText(row.action_source_tender_guid, code) !==
+      identity.sourceTenderGuid ||
+    row.action_reversal_tender_guid !== null ||
+    row.action_state !== "Blocked" ||
+    persistedText(row.action_last_error_code, code) !==
+      payload.blockedErrorCode ||
+    identity.sourceAmountCents <= 0 ||
+    persistedInteger(row.reversal_amount_cents, code) !==
+      -identity.sourceAmountCents ||
+    persistedInteger(row.action_amount_cents, code) !==
+      identity.sourceAmountCents ||
+    (identity.reason !== "SALE" &&
+      identity.reason !== "CARD_FAILURE_AUTO_RELEASE") ||
+    row.reversal_payment_attempt_id !== null ||
+    persistedText(row.source_payment_attempt_id, code) !==
+      identity.attemptId ||
+    persistedText(row.action_source_attempt_id, code) !==
+      identity.attemptId ||
+    persistedText(row.attempt_order_guid, code) !== identity.orderGuid ||
+    row.provider !== "voucher" ||
+    row.operation !== "purchase" ||
+    row.attempt_state !== "Approved" ||
+    persistedInteger(row.attempt_amount_cents, code) !==
+      identity.sourceAmountCents ||
+    persistedText(row.protected_attempt_id, code) !== identity.attemptId ||
+    persistedText(row.protected_idempotency_key, code) !==
+      identity.idempotencyKey ||
+    persistedText(row.protected_order_guid, code) !== identity.orderGuid ||
+    !identity.sourceTender ||
+    identity.sourceTender.method !== "voucher" ||
+    identity.sourceTender.amount.cents !== identity.sourceAmountCents ||
+    !identity.reversalTender ||
+    identity.reversalTender.method !== "voucher" ||
+    identity.reversalTender.amount.cents !== -identity.sourceAmountCents ||
+    persistedText(row.disposition_audit_event_type, code) !==
+      "PAYMENT_TENDER_REMOVE" ||
+    persistedText(row.disposition_audit_order_guid, code) !==
+      identity.orderGuid ||
+    persistedText(row.disposition_audit_correlation_id, code) !==
+      identity.actionId ||
+    payload.action !== "payment-tender-remove" ||
+    payload.outcome !== "voided-unreleased" ||
+    payload.reason !== identity.reason ||
+    payload.amountCents !== identity.sourceAmountCents ||
+    payload.sourceTenderGuid !== identity.sourceTenderGuid ||
+    payload.sourceAttemptId !== identity.attemptId ||
+    payload.reversalTenderGuid !== identity.reversalTenderGuid ||
+    auditActorSnapshotFromPayload(payload) === null
+  ) {
+    throw materialError(code);
+  }
+}
 
 type VoucherReversalAuditIdentity = Readonly<{
   actionId: string;

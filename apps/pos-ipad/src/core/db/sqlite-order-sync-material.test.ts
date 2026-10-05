@@ -714,6 +714,77 @@ test("M16 voucher reversal：Prepared/Unknown/Blocked 均以同一稳定码阻�
   }
 });
 
+test("Blocked 撤券经主管作废后：同步成对剔除礼券且不要求 released，绝不发送 reservation", async () => {
+  await withDatabase(async (connection) => {
+    const fixture = await seedApprovedVoucherPurchase(
+      connection,
+      "voided-blocked",
+    );
+    await connection.run(
+      "UPDATE local_orders SET state = 'Completing' WHERE order_guid = ?",
+      [fixture.order.orderGuid],
+    );
+    const store = createVoucherReversalStore(connection);
+    const sourceTenderGuid = fixture.order.tenders[0]?.tenderGuid ?? "";
+    const prepared = await store.prepareOrLoad({
+      actionId: "voided-blocked-action",
+      orderGuid: fixture.order.orderGuid,
+      sourceTenderGuid,
+      reason: "SALE",
+      actor: VOUCHER_REVERSAL_ACTOR,
+    });
+    await store.markBlocked(
+      await store.markSubmitted(prepared),
+      "VOUCHER_PROTECTED_REFERENCE_CONFLICT",
+    );
+    // 未处置的 Blocked 仍以 UNRESOLVED 阻止同步。
+    const blockedOrder = await readOrdinaryOrder(
+      connection,
+      fixture.order.orderGuid,
+    );
+    await assert.rejects(
+      () => fixture.resolver.resolveForSync(blockedOrder, null),
+      (error: unknown) =>
+        error instanceof OrderSyncMaterialError &&
+        error.code === "ORDER_SYNC_VOUCHER_REVERSAL_UNRESOLVED",
+    );
+    await store.voidBlockedUnreleased({
+      scope: { storeCode: "S1", deviceCode: "IPAD-1" },
+      actionId: "voided-blocked-action",
+      orderGuid: fixture.order.orderGuid,
+      sourceTenderGuid,
+      requestingActor: VOUCHER_REVERSAL_ACTOR,
+      authorizingActor: {
+        cashierId: "supervisor-1",
+        cashierName: "Supervisor",
+        userGuid: "supervisor-guid-1",
+      },
+      permissionCode: "Permissions.PosTerminal.Payment.RemoveTender",
+    });
+    // 处置后订单门禁放行；受保护状态仍是 approved（从未发送 release）。
+    await connection.run(
+      "UPDATE local_orders SET state = 'PendingSync' WHERE order_guid = ?",
+      [fixture.order.orderGuid],
+    );
+    const ordinary = await readOrdinaryOrder(
+      connection,
+      fixture.order.orderGuid,
+    );
+    assert.deepEqual(
+      (await fixture.resolver.resolve(ordinary, null)).tenders
+        .map((tender) => tender.amount.cents)
+        .sort(),
+      [-500, 500],
+    );
+    const sync = await fixture.resolver.resolveForSync(ordinary, null);
+    assert.equal(sync.order.tenders.length, 0);
+    assert.equal(
+      JSON.stringify(sync.order).includes("reservation-voided-blocked"),
+      false,
+    );
+  });
+});
+
 test("M16 voucher reversal 错绑/成功 audit 损坏稳定 MISMATCH，真实 voucher refund 不受影响", async () => {
   await withDatabase(async (connection) => {
     const fixture = await seedApprovedVoucherPurchase(

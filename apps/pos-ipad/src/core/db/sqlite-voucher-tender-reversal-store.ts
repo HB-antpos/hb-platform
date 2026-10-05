@@ -93,6 +93,56 @@ export interface VoucherTenderReversalRecoveryStorePort {
   ): Promise<VoucherTenderReversalRecord | null>;
 }
 
+/**
+ * Blocked 撤券的主管处置命令。requestingActor 是当前收银员，authorizingActor
+ * 是完成主管授权的另一名员工；两者都在处置当下冻结进审计与处置行。
+ */
+export type VoucherTenderReversalVoidCommand = Readonly<{
+  scope: VoucherTenderReversalRecoveryScope;
+  actionId: string;
+  orderGuid: string;
+  sourceTenderGuid: string;
+  requestingActor: AuditActorSnapshot;
+  authorizingActor: AuditActorSnapshot;
+  permissionCode: string;
+}>;
+
+export type VoucherTenderReversalVoidResult = Readonly<{
+  actionId: string;
+  orderGuid: string;
+  sourceTenderGuid: string;
+  reversalTenderGuid: string;
+  /** true 表示该动作此前已被处置，本次只返回原耐久事实。 */
+  replayed: boolean;
+  truth: MixedPaymentOrderTruth;
+}>;
+
+export interface VoucherTenderReversalDispositionStorePort {
+  voidBlockedUnreleased(
+    command: VoucherTenderReversalVoidCommand,
+  ): Promise<VoucherTenderReversalVoidResult>;
+}
+
+/** 未决动作的统一谓词：已由主管处置的 Blocked 不再阻塞订单与设备。 */
+const UNRESOLVED_ACTION_PREDICATE = `(
+  action.state IN ('Prepared', 'Submitted', 'Unknown')
+  OR (
+    action.state = 'Blocked'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM voucher_tender_reversal_dispositions disposition
+      WHERE disposition.action_id = action.action_id
+    )
+  )
+)`;
+
+type DispositionRow = Readonly<{
+  action_id: unknown;
+  order_guid: unknown;
+  disposition: unknown;
+  reversal_tender_guid: unknown;
+}>
+
 type ActionRow = Readonly<{
   action_id: unknown;
   order_guid: unknown;
@@ -155,7 +205,8 @@ type TruthLinkRow = Readonly<{
 export class SqliteVoucherTenderReversalStore
 implements
   VoucherTenderReversalStorePort,
-  VoucherTenderReversalRecoveryStorePort {
+  VoucherTenderReversalRecoveryStorePort,
+  VoucherTenderReversalDispositionStorePort {
   public constructor(
     private readonly connection: SqliteConnectionPort,
     private readonly encryptor: SensitivePayloadEncryptor,
@@ -189,9 +240,7 @@ implements
            ON order_row.order_guid = action.order_guid
          WHERE order_row.store_code = ?
            AND order_row.device_code = ?
-           AND action.state IN (
-             'Prepared', 'Submitted', 'Unknown', 'Blocked'
-           )
+           AND ${UNRESOLVED_ACTION_PREDICATE}
          ORDER BY order_row.local_sequence DESC,
            action.created_at_iso DESC, action.action_id DESC
          LIMIT 2`,
@@ -251,12 +300,10 @@ implements
       }
 
       const unresolved = await transaction.getFirst<ActionRow>(
-        `SELECT action_id, order_guid, source_tender_guid, source_attempt_id,
-          amount_cents, reason, state, attempt_count, last_error_code,
-          reversal_tender_guid, audit_actor_json
-         FROM voucher_tender_reversal_actions
-         WHERE order_guid = ?
-           AND state IN ('Prepared', 'Submitted', 'Unknown', 'Blocked')
+        `SELECT action.action_id
+         FROM voucher_tender_reversal_actions action
+         WHERE action.order_guid = ?
+           AND ${UNRESOLVED_ACTION_PREDICATE}
          LIMIT 1`,
         [command.orderGuid],
       );
@@ -654,6 +701,222 @@ implements
     });
   }
 
+  /**
+   * 主管处置 Blocked 撤券：在同一独占事务内追加负礼券 tender、reversal link、
+   * voided-unreleased 审计与处置行，使订单回到可继续收款/取消的状态。
+   *
+   * 不调用 provider、不改写 Blocked 原行，也不声称礼券已释放：礼券只在订单同步
+   * claim 时才会扣减，该 tender 被抵消后会从同步载荷剔除，服务端永远不会核销
+   * 这笔锁定；锁定本身 5 分钟内自然过期。重复调用返回原处置事实（幂等）。
+   */
+  public async voidBlockedUnreleased(
+    commandInput: VoucherTenderReversalVoidCommand,
+  ): Promise<VoucherTenderReversalVoidResult> {
+    const command = normalizeVoidCommand(commandInput);
+    return this.connection.withExclusiveTransaction(async (transaction) => {
+      const current = await requireAction(transaction, command.actionId);
+      if (
+        text(current.order_guid, "voucher reversal order") !==
+          command.orderGuid ||
+        text(current.source_tender_guid, "voucher reversal source tender") !==
+          command.sourceTenderGuid
+      ) {
+        throw new Error(
+          "Voucher reversal disposition has different immutable content.",
+        );
+      }
+      await assertOrderScope(transaction, command.orderGuid, command.scope);
+
+      const existing = await transaction.getFirst<DispositionRow>(
+        `SELECT action_id, order_guid, disposition, reversal_tender_guid
+         FROM voucher_tender_reversal_dispositions
+         WHERE action_id = ?`,
+        [command.actionId],
+      );
+      if (existing) {
+        // 中文注释：处置是追加式终态，重放只回读原事实，不再写第二笔负 tender。
+        if (
+          text(existing.order_guid, "voucher disposition order") !==
+            command.orderGuid ||
+          existing.disposition !== "VoidedUnreleased"
+        ) {
+          throw new Error("Voucher reversal disposition is invalid.");
+        }
+        return Object.freeze({
+          actionId: command.actionId,
+          orderGuid: command.orderGuid,
+          sourceTenderGuid: command.sourceTenderGuid,
+          reversalTenderGuid: text(
+            existing.reversal_tender_guid,
+            "voucher disposition tender",
+          ),
+          replayed: true,
+          truth: await requireTruth(transaction, command.orderGuid),
+        });
+      }
+
+      // 只有 Blocked（不会再自动重试）才允许人工处置；Unknown 等仍须按原 action 恢复。
+      if (
+        reversalState(current.state) !== "Blocked" ||
+        nullableText(current.reversal_tender_guid, "voucher reversal tender") !==
+          null
+      ) {
+        throw new Error(
+          "Only a blocked voucher reversal can be voided by a supervisor.",
+        );
+      }
+      const record = await readRecord(
+        transaction,
+        current,
+        await requireTruth(transaction, command.orderGuid),
+      );
+      const source = await readSource(
+        transaction,
+        record.orderGuid,
+        record.sourceTenderGuid,
+      );
+      const sourceAttemptId = assertPreparedSource(source, {
+        actionId: record.actionId,
+        orderGuid: record.orderGuid,
+        sourceTenderGuid: record.sourceTenderGuid,
+        reason: record.reason,
+      });
+      if (
+        sourceAttemptId !== record.sourceAttemptId ||
+        integer(source.tender_amount_cents, "voucher reversal amount") !==
+          record.amount.cents
+      ) {
+        throw new Error("Voucher reversal disposition source binding changed.");
+      }
+      await this.assertBoundProtectedState(transaction, record, source);
+      const blockedErrorCode = strictErrorCode(record.lastErrorCode);
+
+      const reversalTenderGuid = generatedId(
+        this.ids.createReversalTenderGuid(),
+        "voucher reversal tender id",
+      );
+      const auditEventId = generatedId(
+        this.ids.createAuditEventId(),
+        "voucher reversal audit id",
+      );
+      const now = canonicalIso(this.nowIso(), "voucher disposition time");
+      await transaction.run(
+        `INSERT INTO order_tenders (
+          tender_guid, order_guid, method, amount_cents,
+          payment_attempt_id, created_at_iso
+        ) VALUES (?, ?, 'voucher', ?, NULL, ?)`,
+        [
+          reversalTenderGuid,
+          record.orderGuid,
+          -record.amount.cents,
+          now,
+        ],
+      );
+      await transaction.run(
+        `INSERT INTO payment_tender_reversal_links (
+          order_guid, action_id, source_tender_guid,
+          reversal_tender_guid, created_at_iso
+        ) VALUES (?, ?, ?, ?, ?)`,
+        [
+          record.orderGuid,
+          record.actionId,
+          record.sourceTenderGuid,
+          reversalTenderGuid,
+          now,
+        ],
+      );
+      await transaction.run(
+        `INSERT INTO audit_events (
+          event_id, event_type, occurred_at_iso, order_guid,
+          correlation_id, payload_json, uploaded_at_iso
+        ) VALUES (?, 'PAYMENT_TENDER_REMOVE', ?, ?, ?, ?, NULL)`,
+        [
+          auditEventId,
+          now,
+          record.orderGuid,
+          record.actionId,
+          safeJson({
+            action: "payment-tender-remove",
+            outcome: "voided-unreleased",
+            result: "voided-unreleased",
+            reason: record.reason,
+            amountCents: record.amount.cents,
+            sourceTenderGuid: record.sourceTenderGuid,
+            sourceAttemptId: record.sourceAttemptId,
+            reversalTenderGuid,
+            blockedErrorCode,
+            permissionCode: command.permissionCode,
+            ...auditActorPayload(command.requestingActor),
+            authorizingCashierId: command.authorizingActor.cashierId,
+            authorizingUserGuid: command.authorizingActor.userGuid,
+          }),
+        ],
+      );
+      await transaction.run(
+        `INSERT INTO voucher_tender_reversal_dispositions (
+          action_id, order_guid, disposition, reversal_tender_guid,
+          audit_event_id, requesting_actor_json, authorizing_actor_json,
+          created_at_iso
+        ) VALUES (?, ?, 'VoidedUnreleased', ?, ?, ?, ?, ?)`,
+        [
+          record.actionId,
+          record.orderGuid,
+          reversalTenderGuid,
+          auditEventId,
+          JSON.stringify(auditActorPayload(command.requestingActor)),
+          JSON.stringify({
+            authorizingCashierId: command.authorizingActor.cashierId,
+            authorizingCashierName: command.authorizingActor.cashierName,
+            authorizingUserGuid: command.authorizingActor.userGuid,
+          }),
+          now,
+        ],
+      );
+      return Object.freeze({
+        actionId: record.actionId,
+        orderGuid: record.orderGuid,
+        sourceTenderGuid: record.sourceTenderGuid,
+        reversalTenderGuid,
+        replayed: false,
+        truth: await requireTruth(transaction, record.orderGuid),
+      });
+    });
+  }
+
+  /**
+   * 处置不依赖 release 阶段（礼券只会在同步时扣减），但受保护状态必须仍完整
+   * 绑定原 attempt，证明这不是被篡改或错绑的数据。
+   */
+  private async assertBoundProtectedState(
+    transaction: SqliteConnectionPort,
+    record: VoucherTenderReversalRecord,
+    source: SourceRow,
+  ): Promise<void> {
+    const tokens = new SqliteVoucherProtectedTokenStore(
+      transaction,
+      this.encryptor,
+      () => {
+        throw new Error("Read-only voucher disposition verification.");
+      },
+      this.nowIso,
+    );
+    const state = await tokens.getByAttempt(record.sourceAttemptId);
+    if (
+      !state ||
+      state.attemptId !== record.sourceAttemptId ||
+      state.orderGuid !== record.orderGuid ||
+      state.operation !== "purchase" ||
+      (state.phase !== "approved" &&
+        state.phase !== "release-submitted" &&
+        state.phase !== "released") ||
+      state.storeCode !== text(source.store_code, "voucher store code") ||
+      state.cashierId !== text(source.cashier_id, "voucher cashier id") ||
+      state.amountCents !== record.amount.cents
+    ) {
+      throw new Error("Voucher disposition protected state is invalid.");
+    }
+  }
+
   private async assertReleasedProtectedState(
     transaction: SqliteConnectionPort,
     record: VoucherTenderReversalRecord,
@@ -1000,6 +1263,73 @@ function normalizeCommand(
     reason: reversalReason(command.reason),
     actor: normalizeActor(command.actor),
   });
+}
+
+function normalizeVoidCommand(
+  command: VoucherTenderReversalVoidCommand,
+): VoucherTenderReversalVoidCommand {
+  if (!command || typeof command !== "object") {
+    throw new TypeError("Voucher reversal disposition is required.");
+  }
+  const requestingActor = normalizeActor(command.requestingActor);
+  const authorizingActor = normalizeActor(command.authorizingActor);
+  // 中文注释：主管处置必须是第二人复核；同一员工（或同一用户）不能自批。
+  if (
+    requestingActor.cashierId === authorizingActor.cashierId ||
+    (requestingActor.userGuid !== null &&
+      requestingActor.userGuid === authorizingActor.userGuid)
+  ) {
+    throw new TypeError(
+      "Voucher reversal disposition requires a different supervisor.",
+    );
+  }
+  return Object.freeze({
+    scope: Object.freeze({
+      storeCode: strictId(
+        command.scope?.storeCode,
+        "voucher disposition store",
+      ),
+      deviceCode: strictId(
+        command.scope?.deviceCode,
+        "voucher disposition device",
+      ),
+    }),
+    actionId: strictId(command.actionId, "voucher reversal action"),
+    orderGuid: strictId(command.orderGuid, "voucher reversal order"),
+    sourceTenderGuid: strictId(
+      command.sourceTenderGuid,
+      "voucher reversal source tender",
+    ),
+    requestingActor,
+    authorizingActor,
+    permissionCode: strictId(
+      command.permissionCode,
+      "voucher disposition permission",
+    ),
+  });
+}
+
+async function assertOrderScope(
+  connection: SqliteConnectionPort,
+  orderGuid: string,
+  scope: VoucherTenderReversalRecoveryScope,
+): Promise<void> {
+  const row = await connection.getFirst<{
+    store_code: unknown;
+    device_code: unknown;
+  }>(
+    `SELECT store_code, device_code
+     FROM local_orders
+     WHERE order_guid = ?`,
+    [orderGuid],
+  );
+  if (
+    !row ||
+    row.store_code !== scope.storeCode ||
+    row.device_code !== scope.deviceCode
+  ) {
+    throw new Error("Voucher reversal disposition scope mismatch.");
+  }
 }
 
 function normalizeRecord(

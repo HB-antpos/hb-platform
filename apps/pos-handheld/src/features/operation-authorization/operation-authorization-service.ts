@@ -1,5 +1,5 @@
 import type { CashierSessionDto } from "@/core/api/hbpos-api";
-import { auditActorPayload } from "@/core/contracts";
+import { auditActorPayload, type AuditActorSnapshot } from "@/core/contracts";
 import type { AuditRepositoryPort } from "@hb/pos-domain/core/contracts/repositories";
 import type { CashierAuthenticationService } from "@/core/security/cashier-authentication";
 
@@ -24,14 +24,18 @@ export type OperationAuthorizationRequest = Readonly<{
   permissionCode: string;
   screen: string;
   action: string;
+  /** 高风险动作必须由另一名主管扫码授权，即使当前收银员自己已有该权限。 */
+  forceSupervisor?: boolean;
 }>;
 
-/** 传给业务回调的上下文刻意不含主管票据、条码或完整身份资料。 */
+/** 传给业务回调的上下文刻意不含主管票据或条码，仅含冻结的主管审计身份。 */
 export type AuthorizedOperationContext = Readonly<{
   authorizationMode: OperationAuthorizationMode;
   requestingCashierId: string;
   authorizingCashierId: string | null;
   permissionCode: string;
+  /** 仅主管授权成功时存在，供业务在动作发生时冻结真实审计身份。 */
+  authorizingActor?: AuditActorSnapshot;
 }>;
 
 export type OperationAuthorizationResult<T> =
@@ -101,6 +105,7 @@ type NormalizedRequest = Readonly<{
   permissionCode: string;
   screen: string;
   action: string;
+  forceSupervisor: boolean;
   signature: string;
 }>;
 
@@ -133,6 +138,7 @@ type ValidationResult =
   | Readonly<{
       valid: true;
       cashierId: string;
+      cashierName: string | null;
       userGuid: string | null;
       authorizationMode: "offline-cache" | "online";
     }>
@@ -220,7 +226,7 @@ export class OperationAuthorizationService {
       return existing.promise as Promise<OperationAuthorizationResult<T>>;
     }
 
-    if (cashier.permissions.includes(request.permissionCode)) {
+    if (!request.forceSupervisor && cashier.permissions.includes(request.permissionCode)) {
       const record = this.createRecord(request, cashier, operation);
       this.records.set(request.actionId, record);
       this.execute(record, {
@@ -309,6 +315,11 @@ export class OperationAuthorizationService {
       requestingCashierId: pending.record.cashier.cashierId,
       authorizingCashierId: validation.cashierId,
       permissionCode: pending.record.request.permissionCode,
+      authorizingActor: Object.freeze({
+        cashierId: validation.cashierId,
+        cashierName: validation.cashierName,
+        userGuid: validation.userGuid,
+      }),
     });
     // 授权结论先固定；审计失败不扩大权限，也不翻转已开始的动作。
     void this.recordOverride(pending.record.request, pending.record.cashier, {
@@ -465,7 +476,22 @@ export class OperationAuthorizationService {
     }
     const cashierId = optionalText(session.cashierId);
     if (!cashierId) return { valid: false, reason: "AUTHORIZER_IDENTITY_INVALID" };
-    return { valid: true, cashierId, userGuid: optionalText(session.userGuid), authorizationMode };
+    const userGuid = optionalText(session.userGuid);
+    if (
+      record.request.forceSupervisor &&
+      (sameIdentityText(cashierId, record.cashier.cashierId) ||
+        (userGuid !== null && record.cashier.userGuid !== null && sameIdentityText(userGuid, record.cashier.userGuid)))
+    ) {
+      // 强制主管模式要求第二人授权；收银员不能用自己的另一张票据绕过双人复核。
+      return { valid: false, reason: "AUTHORIZER_IDENTITY_INVALID" };
+    }
+    return {
+      valid: true,
+      cashierId,
+      cashierName: optionalText(session.cashierName),
+      userGuid,
+      authorizationMode,
+    };
   }
 
   private nowEpochMs(): number {
@@ -520,6 +546,7 @@ function normalizeRequest(input: OperationAuthorizationRequest): NormalizedReque
     permissionCode: requiredText(input.permissionCode, "Authorization permission code"),
     screen: requiredText(input.screen, "Authorization screen"),
     action: requiredText(input.action, "Authorization action"),
+    forceSupervisor: input.forceSupervisor === true,
   };
   return { ...normalized, signature: JSON.stringify(normalized) };
 }

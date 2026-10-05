@@ -224,6 +224,7 @@ export type PaymentCheckoutErrorCode =
   | "TENDER_REVERSAL_UNKNOWN"
   | "TENDER_REVERSAL_RECOVERY_REQUIRED"
   | "TENDER_REVERSAL_BLOCKED"
+  | "TENDER_REVERSAL_VOID_NOT_AUTHORIZED"
   | "ZERO_BALANCE_ORDER_NOT_COMPLETED"
   | "PAYMENT_DRAFT_NOT_FOUND"
   | "PAYMENT_DRAFT_CONFLICT"
@@ -258,6 +259,8 @@ export type PaymentCheckoutAllowedActions = Readonly<{
 export type PaymentCheckoutTenderReversalRecovery = Readonly<{
   tenderGuid: string;
   status: "pending" | "unknown" | "blocked";
+  /** 仅 blocked 且组合根提供主管授权时为 true：可由主管作废该礼券 tender。 */
+  voidAvailable?: boolean;
 }>;
 
 /**
@@ -356,6 +359,14 @@ export interface PaymentCheckoutRuntimePort {
     input: RecoverPaymentCheckoutInput,
   ): Promise<PaymentCheckoutPublicSnapshot>;
   retryTenderReversal?(input: {
+    orderGuid: string;
+    tenderGuid: string;
+  }): Promise<PaymentCheckoutPublicSnapshot>;
+  /**
+   * 主管授权后作废 Blocked 撤券对应的礼券 tender（不声称已释放）。
+   * 只有持久 Blocked action 与入参完全一致时才会执行。
+   */
+  voidBlockedTenderReversal?(input: {
     orderGuid: string;
     tenderGuid: string;
   }): Promise<PaymentCheckoutPublicSnapshot>;
