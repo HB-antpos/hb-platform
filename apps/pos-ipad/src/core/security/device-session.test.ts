@@ -2028,6 +2028,7 @@ test("重绑已提交但丢响应时，启动在旧凭据 403 后才匿名恢复
   let recoveryAllowed = true;
   let recoveryCredentialsComplete = true;
   let oldBindingFailure: "http" | "envelope" = "http";
+  let verifyCalls = 0;
   await credentials.save({
     deviceCode: "IPAD-OLD",
     storeCode: "1003",
@@ -2042,7 +2043,17 @@ test("重绑已提交但丢响应时，启动在旧凭据 403 后才匿名恢复
     {
       async register() { throw new Error("not used"); },
       async reregister() { throw new Error("not used"); },
-      async verify() { throw new Error("verify must not start"); },
+      async verify() {
+        // 旧身份已被停用：换绑可能已在本硬件生效，verify 只能给出停用结果。
+        verifyCalls += 1;
+        return {
+          isAllowed: false,
+          deviceCode: "IPAD-OLD",
+          storeCode: "1003",
+          deviceStatus: 0,
+          message: "disabled",
+        };
+      },
       async rebindActivationCode() {
         rebindCalls += 1;
         if (oldBindingFailure === "envelope") {
@@ -2087,11 +2098,17 @@ test("重绑已提交但丢响应时，启动在旧凭据 403 后才匿名恢复
     assert.equal((await credentials.load())?.deviceCode, "IPAD-OLD");
     assert.equal(await pendingActivation.load(), activationCode);
   }
+  assert.equal(verifyCalls, 0);
   recoveryAllowed = false;
   recoveryReason = "ACTIVATION_CODE_NOT_AVAILABLE";
-  await assert.rejects(() => coordinator.poll(), /ACTIVATION_RECOVERED|recovery/i);
+  // NOT_AVAILABLE 无法区分“未消费”与“已被本硬件消费但新注册不可恢复”；
+  // 旧凭据 verify 也被拒时必须保留 pending，按普通停用结果锁机而不是让启动失败。
+  const unconfirmed = await coordinator.poll();
+  assert.equal(unconfirmed.status, "disabled");
+  assert.equal(verifyCalls, 1);
   assert.equal((await credentials.load())?.deviceCode, "IPAD-OLD");
   assert.equal(await pendingActivation.load(), activationCode);
+  await new DeviceLockStore(secureStore).unlock();
 
   recoveryAllowed = true;
   oldBindingFailure = "envelope";
@@ -2108,6 +2125,269 @@ test("重绑已提交但丢响应时，启动在旧凭据 403 后才匿名恢复
   assert.equal(rebindCalls, 5);
   assert.equal(redeemCalls, 5);
   assert.equal(await pendingActivation.load(), null);
+});
+
+type PendingRebindRecoveryOutcome =
+  | "not-available"
+  | "store-unavailable"
+  | "recovered"
+  | "transport"
+  | "http-503";
+type PreviousBindingVerifyOutcome =
+  | "allowed"
+  | "allowed-other-identity"
+  | "allowed-without-authorization"
+  | "disabled"
+  | "transport"
+  | "http-503";
+
+/**
+ * 换绑 pending 启动恢复夹具：旧凭据 + rebind 模式 pending；rebind 默认因缺少收银员票据返回 401，
+ * 匿名 recoveryOnly 兑换与旧凭据 verify 的结果均可逐次切换。
+ */
+async function createPendingRebindRecoveryHarness(
+  options: Readonly<{ locked?: boolean; stagePendingDirectly?: boolean }> = {},
+) {
+  const secureStore = new InMemorySecureStore();
+  const installation = new InstallationIdentityStore(secureStore, () => "INSTALL-001");
+  const credentials = new DeviceCredentialStore(secureStore);
+  const lock = new DeviceLockStore(secureStore);
+  const pendingActivation = new PendingDeviceActivationCodeStore(secureStore);
+  const calls = { rebind: 0, redeem: 0, verify: 0 };
+  const outcomes: {
+    redeem: PendingRebindRecoveryOutcome;
+    verify: PreviousBindingVerifyOutcome;
+  } = { redeem: "not-available", verify: "allowed" };
+  await credentials.save({
+    deviceCode: "IPAD-OLD",
+    storeCode: "1003",
+    hardwareId: "INSTALL-001",
+    authorizationCode: "old-secret",
+  });
+  if (options.locked) await lock.lock("old binding locked");
+  if (options.stagePendingDirectly !== false) {
+    await pendingActivation.save(DEVICE_ACTIVATION_CODE, "rebind", {
+      apiPartition: "https://hotbargain.vip/pos-api",
+      hardwareId: "INSTALL-001",
+    });
+  }
+  const api: DeviceSessionApi = {
+    async register() { throw new Error("not used"); },
+    async reregister() { throw new Error("not used"); },
+    async rebindActivationCode() {
+      calls.rebind += 1;
+      if (options.locked) throw new Error("locked device must not retry rebind");
+      // 启动时没有带换绑权限的收银员票据。
+      throw new HbposApiError("cashier ticket required", {
+        kind: "http",
+        status: 401,
+      });
+    },
+    async redeemActivationCode(input, redeemOptions) {
+      calls.redeem += 1;
+      assert.deepEqual(input, {
+        activationCode: DEVICE_ACTIVATION_CODE,
+        hardwareId: "INSTALL-001",
+      });
+      assert.deepEqual(redeemOptions, { recoveryOnly: true });
+      switch (outcomes.redeem) {
+        case "transport":
+          throw new HbposApiError("offline", {
+            kind: "transport",
+            code: "NO_HTTP_RESPONSE",
+          });
+        case "http-503":
+          throw new HbposApiError("unavailable", { kind: "http", status: 503 });
+        case "not-available":
+          return {
+            isAllowed: false,
+            reasonCode: "ACTIVATION_CODE_NOT_AVAILABLE",
+            deviceStatus: 0,
+            message: "Activation code is not available.",
+          };
+        case "store-unavailable":
+          return {
+            isAllowed: false,
+            reasonCode: "STORE_UNAVAILABLE",
+            deviceStatus: 0,
+            message: "Target store is unavailable.",
+          };
+        case "recovered":
+          return {
+            isAllowed: true,
+            reasonCode: "ACTIVATION_RECOVERED",
+            deviceCode: "IPAD-NEW",
+            storeCode: "1042",
+            storeName: "Sunnybank",
+            deviceStatus: 1,
+            authorizationCode: "new-secret",
+          };
+      }
+    },
+    async verify(input) {
+      calls.verify += 1;
+      assert.deepEqual(input, {
+        deviceCode: "IPAD-OLD",
+        storeCode: "1003",
+        hardwareId: "INSTALL-001",
+      });
+      switch (outcomes.verify) {
+        case "transport":
+          throw new HbposApiError("offline", {
+            kind: "transport",
+            code: "NO_HTTP_RESPONSE",
+          });
+        case "http-503":
+          throw new HbposApiError("unavailable", { kind: "http", status: 503 });
+        case "disabled":
+          return {
+            isAllowed: false,
+            deviceCode: "IPAD-OLD",
+            storeCode: "1003",
+            deviceStatus: 0,
+            message: "disabled",
+          };
+        case "allowed-other-identity":
+          return {
+            isAllowed: true,
+            deviceCode: "IPAD-OTHER",
+            storeCode: "1003",
+            storeName: "Garden City",
+            deviceStatus: 1,
+            authorizationCode: "old-secret",
+          };
+        case "allowed-without-authorization":
+          return {
+            isAllowed: true,
+            deviceCode: "IPAD-OLD",
+            storeCode: "1003",
+            storeName: "Garden City",
+            deviceStatus: 1,
+          };
+        case "allowed":
+          return {
+            isAllowed: true,
+            deviceCode: "IPAD-OLD",
+            storeCode: "1003",
+            storeName: "Garden City",
+            deviceStatus: 1,
+            authorizationCode: "old-secret",
+          };
+      }
+    },
+  };
+  const createCoordinator = (overrides: Partial<DeviceSessionApi> = {}) =>
+    new DeviceSessionCoordinator(
+      { ...api, ...overrides },
+      installation,
+      credentials,
+      lock,
+      undefined,
+      undefined,
+      pendingActivation,
+    );
+  return { credentials, lock, pendingActivation, calls, outcomes, createCoordinator };
+}
+
+test("换绑结果未知后重启：匿名恢复 NOT_AVAILABLE 且旧凭据仍有效时清除 pending 并正常启动", async () => {
+  const harness = await createPendingRebindRecoveryHarness({
+    stagePendingDirectly: false,
+  });
+  // 设置页换绑：请求 503，结果不确定，pending 必须保留。
+  const settings = harness.createCoordinator({
+    async rebindActivationCode() {
+      throw new HbposApiError("unavailable", { kind: "http", status: 503 });
+    },
+  });
+  await assert.rejects(
+    () => settings.rebindActivationCode({ activationCode: DEVICE_ACTIVATION_CODE }),
+    /unavailable/,
+  );
+  assert.equal(await harness.pendingActivation.load(), DEVICE_ACTIVATION_CODE);
+
+  // 重启：没有收银员票据 → rebind 401 → recoveryOnly 兑换 NOT_AVAILABLE → 旧凭据 verify 仍启用。
+  const restarted = harness.createCoordinator();
+  const state = await restarted.poll();
+  assert.equal(state.status, "authorized");
+  assert.equal(state.deviceCode, "IPAD-OLD");
+  assert.equal(state.storeCode, "1003");
+  assert.equal(await harness.pendingActivation.load(), null);
+  assert.equal(await restarted.hasActivationRecoveryRisk(), false);
+  assert.equal((await harness.credentials.load())?.deviceCode, "IPAD-OLD");
+  assert.equal(await harness.lock.isLocked(), false);
+  assert.deepEqual(harness.calls, { rebind: 1, redeem: 1, verify: 1 });
+
+  // pending 清除后回到普通启动：只 verify，不再重放开通码。
+  const next = await restarted.poll();
+  assert.equal(next.status, "authorized");
+  assert.deepEqual(harness.calls, { rebind: 1, redeem: 1, verify: 2 });
+});
+
+test("本地已锁的换绑 pending：跳过 rebind，NOT_AVAILABLE 后旧凭据仍有效则解锁并清除 pending", async () => {
+  const harness = await createPendingRebindRecoveryHarness({ locked: true });
+  const coordinator = harness.createCoordinator();
+  const state = await coordinator.poll();
+  assert.equal(state.status, "authorized");
+  assert.equal(state.deviceCode, "IPAD-OLD");
+  assert.equal(await harness.lock.isLocked(), false);
+  assert.equal(await harness.pendingActivation.load(), null);
+  assert.deepEqual(harness.calls, { rebind: 0, redeem: 1, verify: 1 });
+});
+
+test("换绑 pending 恢复结果不确定时保留 pending：网络、5xx、旧身份无法确认或已停用", async () => {
+  const harness = await createPendingRebindRecoveryHarness();
+  const coordinator = harness.createCoordinator();
+  const assertPendingKept = async () => {
+    assert.equal(await harness.pendingActivation.load(), DEVICE_ACTIVATION_CODE);
+    assert.equal((await harness.credentials.load())?.deviceCode, "IPAD-OLD");
+  };
+
+  harness.outcomes.redeem = "transport";
+  await assert.rejects(() => coordinator.poll(), /offline/);
+  await assertPendingKept();
+  harness.outcomes.redeem = "http-503";
+  await assert.rejects(() => coordinator.poll(), /unavailable/);
+  await assertPendingKept();
+  assert.equal(harness.calls.verify, 0);
+
+  harness.outcomes.redeem = "not-available";
+  harness.outcomes.verify = "transport";
+  await assert.rejects(() => coordinator.poll(), /offline/);
+  await assertPendingKept();
+  harness.outcomes.verify = "http-503";
+  await assert.rejects(() => coordinator.poll(), /unavailable/);
+  await assertPendingKept();
+  harness.outcomes.verify = "allowed-other-identity";
+  await assert.rejects(() => coordinator.poll(), /previous device binding/);
+  await assertPendingKept();
+  harness.outcomes.verify = "allowed-without-authorization";
+  await assert.rejects(() => coordinator.poll(), /previous device binding/);
+  await assertPendingKept();
+  assert.equal(await harness.lock.isLocked(), false);
+  assert.equal(harness.calls.verify, 4);
+
+  // STORE_UNAVAILABLE 只在码已被本硬件消费时出现；旧注册已被换绑停用，必须保留 pending 等待恢复。
+  harness.outcomes.redeem = "store-unavailable";
+  harness.outcomes.verify = "disabled";
+  const disabled = await coordinator.poll();
+  assert.equal(disabled.status, "disabled");
+  await assertPendingKept();
+  assert.equal(await harness.lock.isLocked(), true);
+  assert.equal(harness.calls.verify, 5);
+});
+
+test("本地已锁的换绑 pending 收到 ACTIVATION_RECOVERED 时正常完成换绑", async () => {
+  const harness = await createPendingRebindRecoveryHarness({ locked: true });
+  harness.outcomes.redeem = "recovered";
+  const coordinator = harness.createCoordinator();
+  const state = await coordinator.poll();
+  assert.equal(state.status, "authorized");
+  assert.equal(state.deviceCode, "IPAD-NEW");
+  assert.equal(state.storeCode, "1042");
+  assert.equal((await harness.credentials.load())?.authorizationCode, "new-secret");
+  assert.equal(await harness.lock.isLocked(), false);
+  assert.equal(await harness.pendingActivation.load(), null);
+  assert.deepEqual(harness.calls, { rebind: 0, redeem: 1, verify: 0 });
 });
 
 test("启动先用 pending 开通码恢复首次兑换；确定拒绝后才回到旧设备锁机，断网则保留", async () => {
