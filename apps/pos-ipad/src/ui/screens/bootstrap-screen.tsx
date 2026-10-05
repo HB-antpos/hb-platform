@@ -285,6 +285,7 @@ export function BootstrapScreen() {
                     style={({ pressed }) => [
                       styles.abandonPendingButton,
                       pressed && styles.retryButtonPressed,
+                      startupActionBusy && styles.retryButtonDisabled,
                     ]}
                     testID="bootstrap-abandon-pending-activation"
                   >
@@ -306,6 +307,7 @@ export function BootstrapScreen() {
                   style={({ pressed }) => [
                     styles.retryButton,
                     pressed && styles.retryButtonPressed,
+                    startupActionBusy && styles.retryButtonDisabled,
                   ]}
                 >
                   <Text style={styles.retryLabel}>{t("bootstrap.retry")}</Text>
@@ -441,6 +443,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 9,
     marginTop: "auto",
+    // 内容超出一屏时 auto 间距归零，保留固定留白避免贴住上方面板。
+    paddingTop: 20,
   },
   footerCopy: {
     flex: 1,
@@ -491,6 +495,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 18,
     backgroundColor: posColors.ink,
+  },
+  // 任一启动动作进行中时按钮禁用，外观须同步变灰，避免误以为无响应。
+  retryButtonDisabled: {
+    opacity: 0.4,
   },
   retryButtonPressed: {
     opacity: 0.78,

@@ -7,6 +7,7 @@ import {
   jest,
 } from "@jest/globals";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 
 import { BootstrapScreen } from "./bootstrap-screen";
 
@@ -235,6 +236,8 @@ describe("BootstrapScreen", () => {
     );
     const retryButton = screen.getByRole("button", { name: "bootstrap.retry" });
     expect(retryButton.props.accessibilityState.disabled).toBe(true);
+    // 禁用时外观同步变灰，避免店员误以为按钮无响应。
+    expect(StyleSheet.flatten(retryButton.props.style).opacity).toBe(0.4);
     await fireEvent.press(retryButton);
     expect(mockRetry).not.toHaveBeenCalled();
 

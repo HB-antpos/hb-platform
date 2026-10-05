@@ -205,6 +205,7 @@ export function BootstrapScreen() {
                   style={({ pressed }) => [
                     styles.retryButton,
                     pressed && styles.retryButtonPressed,
+                    otaRecoveryBusy && styles.retryButtonDisabled,
                   ]}
                 >
                   <Text style={styles.retryLabel}>{t("bootstrap.retry")}</Text>
@@ -364,6 +365,10 @@ const styles = StyleSheet.create({
   },
   retryButtonPressed: {
     opacity: 0.78,
+  },
+  // 修复更新检查/安装期间禁用重试，外观须同步变灰，避免店员误以为按钮无响应。
+  retryButtonDisabled: {
+    opacity: 0.4,
   },
   retryLabel: {
     color: "#FFFFFF",
