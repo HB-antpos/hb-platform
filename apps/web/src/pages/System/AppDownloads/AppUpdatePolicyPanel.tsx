@@ -24,7 +24,6 @@ import {
   Select,
   Space,
   Switch,
-  Tabs,
   Tag,
   Typography,
   message,
@@ -35,7 +34,6 @@ import {
   AppstoreAddOutlined,
   LinkOutlined,
   QrcodeOutlined,
-  ReloadOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
 import { QRCodeSVG } from '@rc-component/qrcode'
@@ -78,8 +76,20 @@ import MobileOtaPolicyTab from './MobileOtaPolicyTab'
 import MobileAndroidNativePolicyTab from './MobileAndroidNativePolicyTab'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
+/** 版本发布中心里由本面板承载的轨道；每个实例只渲染、只加载一条轨道。 */
+export type AppUpdatePolicyLane =
+  | 'mobile-native'
+  | 'mobile-android-native'
+  | 'mobile-ota'
+  | 'ipad-native'
+  | 'ipad-ota'
+  | 'pos-handheld'
+
 interface AppUpdatePolicyPanelProps {
   canManage: boolean
+  lane: AppUpdatePolicyLane
+  /** 外部刷新信号：数值变化时重新加载当前轨道。 */
+  refreshVersion?: number
 }
 
 interface PolicySaveConfirmation {
@@ -184,7 +194,11 @@ function safeExternalUrl(value: string | null | undefined, allowedHosts: readonl
   }
 }
 
-export default function AppUpdatePolicyPanel({ canManage }: AppUpdatePolicyPanelProps) {
+export default function AppUpdatePolicyPanel({
+  canManage,
+  lane,
+  refreshVersion = 0,
+}: AppUpdatePolicyPanelProps) {
   const { t } = useTranslation()
   const [mobileForm] = Form.useForm<NativeUpdatePolicyFormValue>()
   const [ipadForm] = Form.useForm<NativeUpdatePolicyFormValue>()
@@ -341,13 +355,20 @@ export default function AppUpdatePolicyPanel({ canManage }: AppUpdatePolicyPanel
     setHandheldRefreshVersion((version) => version + 1)
     setMobileOtaRefreshVersion((version) => version + 1)
     setMobileAndroidRefreshVersion((version) => version + 1)
-    await Promise.allSettled([
-      loadMobileNativeLane(),
-      loadIpadNativeLane(),
-      loadIpadOtaLane(),
-      loadStoreOptionsLane(),
-    ])
+    // 只加载当前轨道需要的数据：未渲染的表单不能回填，也避免一次打开拉全部轨道。
+    const loads: Promise<unknown>[] = []
+    if (lane === 'mobile-native') {
+      loads.push(loadMobileNativeLane())
+    }
+    if (lane === 'ipad-native') {
+      loads.push(loadIpadNativeLane(), loadStoreOptionsLane())
+    }
+    if (lane === 'ipad-ota') {
+      loads.push(loadIpadOtaLane(), loadStoreOptionsLane())
+    }
+    await Promise.allSettled(loads)
   }, [
+    lane,
     loadIpadNativeLane,
     loadIpadOtaLane,
     loadMobileNativeLane,
@@ -361,16 +382,11 @@ export default function AppUpdatePolicyPanel({ canManage }: AppUpdatePolicyPanel
         laneRequestsRef.current[key].invalidate()
       }
     }
-  }, [refreshAll])
+  }, [refreshAll, refreshVersion])
 
   const storeOptionsUsable = storeLoadState.loaded
     && !storeLoadState.loading
     && !storeLoadState.failed
-  const anyLaneLoading = mobileLoadState.loading
-    || ipadLoadState.loading
-    || otaLoadState.loading
-    || storeLoadState.loading
-
   const mergedStoreOptions = useMemo(() => {
     const options = new Map(
       storeOptions.map((store) => [
@@ -1574,31 +1590,7 @@ export default function AppUpdatePolicyPanel({ canManage }: AppUpdatePolicyPanel
 
   return (
     <>
-      <Card
-        title={t('system.appDownloads.updatePolicy.title')}
-        extra={
-          <Button
-            icon={<ReloadOutlined />}
-            loading={anyLaneLoading}
-            onClick={() => void refreshAll()}
-          >
-            {t('common.refresh')}
-          </Button>
-        }
-      >
-        <Typography.Paragraph type="secondary">
-          {t('system.appDownloads.updatePolicy.subtitle')}
-        </Typography.Paragraph>
-        {!canManage ? (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 12 }}
-            message={t('system.appDownloads.updatePolicy.readOnly')}
-          />
-        ) : null}
-        <Tabs items={tabs} destroyInactiveTabPane={false} />
-      </Card>
+      {tabs.find((item) => item.key === lane)?.children ?? null}
 
       <Modal
         open={Boolean(qrRelease)}

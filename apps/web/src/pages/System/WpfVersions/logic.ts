@@ -252,7 +252,7 @@ function normalizeUniquePositiveIntegers(values: number[]) {
   return [...new Set(values.filter((value) => Number.isInteger(value) && value > 0))].sort((left, right) => left - right)
 }
 
-function compareWpfVersion(left: string, right: string) {
+export function compareWpfVersion(left: string, right: string) {
   const leftParts = parseWpfVersion(left)
   const rightParts = parseWpfVersion(right)
   if (!leftParts || !rightParts) {

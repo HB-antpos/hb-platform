@@ -440,9 +440,15 @@ for (const lane of [
   )
 }
 assertEqual(
-  panelSource.includes('Promise.allSettled(['),
+  panelSource.includes('await Promise.allSettled(loads)'),
   true,
-  '全局刷新必须并发启动四个独立加载通道',
+  '刷新必须并发启动当前轨道的独立加载通道，单个通道失败不阻塞其它通道',
+)
+assertEqual(
+  panelSource.includes("if (lane === 'ipad-native') {\n      loads.push(loadIpadNativeLane(), loadStoreOptionsLane())")
+    && panelSource.includes("if (lane === 'ipad-ota') {\n      loads.push(loadIpadOtaLane(), loadStoreOptionsLane())"),
+  true,
+  'iPad 原生与 OTA 轨道都依赖分店选项，必须同时加载分店通道',
 )
 assertEqual(
   requestLogicSource.includes('new AbortController()'),

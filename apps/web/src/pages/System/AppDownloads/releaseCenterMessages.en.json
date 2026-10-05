@@ -1,0 +1,100 @@
+{
+  "system": {
+    "releaseCenter": {
+      "title": "Release Center",
+      "subtitle": "Registering a release does not activate it: builds, OTA updates and installers are registered as release facts first, and clients only update after an admin activates a policy.",
+      "navLabel": "Release center navigation",
+      "nav": {
+        "overview": "Rollout overview",
+        "terminals": "Clients",
+        "tools": "Tools",
+        "mobile": "Mobile staff app",
+        "mobileSub": "iOS · Android · OTA",
+        "ipad": "iPad POS",
+        "ipadSub": "iOS · OTA",
+        "handheld": "Handheld POS",
+        "handheldSub": "Android · iOS · OTA",
+        "wpf": "WPF POS",
+        "wpfSub": "Windows installer",
+        "toolsItem": "Components & tokens",
+        "toolsSub": "RustDesk · Service tokens"
+      },
+      "terminalDesc": {
+        "mobile": "Staff and store manager app. Native builds and OTA roll out on separate lanes; OTA is split into production and preview.",
+        "ipad": "iPad POS. App Store native builds plus EAS OTA.",
+        "handheld": "Handheld POS. OTA covers production only and decisions are sent after device authentication.",
+        "wpf": "Windows POS client. Installers are uploaded from the web and can target stores or devices."
+      },
+      "lanes": {
+        "ios-native": "iOS native",
+        "android-native": "Android native",
+        "ota": "OTA updates",
+        "policy": "Update policy",
+        "apk": "APK builds",
+        "installer": "Windows installer"
+      },
+      "readOnly": "This account is read-only: policies, uploads and rollouts cannot be changed.",
+      "refresh": "Refresh",
+      "columns": {
+        "terminal": "Client",
+        "nativeGroup": "Native / installer",
+        "otaGroup": "OTA updates",
+        "ios-native": "iOS",
+        "android-native": "Android",
+        "windows": "Windows",
+        "ios-ota": "iOS",
+        "android-ota": "Android"
+      },
+      "matrixTitle": "Rollout matrix",
+      "matrixHint": "Each cell is the active policy of one lane (production for OTA). Click to manage the lane.",
+      "legendActive": "Active",
+      "legendAttention": "Needs attention",
+      "legendDisabled": "Not enabled",
+      "notApplicable": "N/A",
+      "loadFailed": "Failed to load",
+      "loadFailedHint": "Some lanes failed to load. Refresh to retry; you can still open each client.",
+      "enterLaneAria": "{{lane}}, open lane",
+      "noTarget": "No target selected",
+      "notEnabled": "Not enabled",
+      "modes": {
+        "optional": "Optional",
+        "minimum": "Min version required",
+        "required": "Required"
+      },
+      "minimum": "Min {{value}}",
+      "scope": {
+        "all": "All",
+        "stores": "{{count}} stores",
+        "devices": "{{count}} devices"
+      },
+      "attentionTitle": "Needs attention",
+      "attentionHint": "Release decisions waiting for an admin. Click to open the lane.",
+      "attentionEmpty": "Nothing needs attention",
+      "attention": {
+        "pendingRelease": "{{count}} newer release(s) not rolled out, latest {{latest}}",
+        "pendingReleaseDesc": "Registered, but the policy still targets an older release. Activate it in the lane when ready.",
+        "bindingInvalid": "Policy binding is invalid",
+        "bindingInvalidDesc": "Devices will reject the current binding. Choose a candidate again.",
+        "partialRollout": "Staged rollout: {{scope}} only",
+        "partialRolloutDesc": "Expand to everyone once it looks good.",
+        "go": "Open"
+      },
+      "recentTitle": "Recent policy changes",
+      "recentHint": "Last policy save of each lane, newest first",
+      "recentEmpty": "No policy changes yet",
+      "laneNames": {
+        "mobile-ios-native": "Mobile · iOS native",
+        "mobile-android-native": "Mobile · Android native",
+        "mobile-ios-ota": "Mobile · OTA iOS",
+        "mobile-android-ota": "Mobile · OTA Android",
+        "ipad-ios-native": "iPad POS · iOS native",
+        "ipad-ios-ota": "iPad POS · OTA iOS",
+        "handheld-ios-native": "Handheld POS · iOS native",
+        "handheld-android-native": "Handheld POS · Android native",
+        "handheld-ios-ota": "Handheld POS · OTA iOS",
+        "handheld-android-ota": "Handheld POS · OTA Android",
+        "wpf-windows": "WPF POS · Windows"
+      }
+    }
+  }
+}

@@ -259,7 +259,7 @@ public class NavigationServiceTests
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
         Assert.Contains(systemMenu.Children!, item => item.Path == "/system/app-downloads");
-        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/wpf-versions");
+        Assert.DoesNotContain(systemMenu.Children!, item => item.Path == "/system/wpf-versions");
         Assert.DoesNotContain(menu, item => item.Path == "/dashboard");
     }
 
@@ -272,7 +272,7 @@ public class NavigationServiceTests
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
         Assert.Contains(systemMenu.Children!, item => item.Path == "/system/app-downloads");
-        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/wpf-versions");
+        Assert.DoesNotContain(systemMenu.Children!, item => item.Path == "/system/wpf-versions");
         Assert.DoesNotContain(menu, item => item.Path == "/dashboard");
     }
 
@@ -414,7 +414,7 @@ public class NavigationServiceTests
 
         var systemMenu = Assert.Single(menu, item => item.Path == "/system");
         Assert.Contains(systemMenu.Children!, item => item.Path == "/system/employee-profiles");
-        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/wpf-versions");
+        Assert.Contains(systemMenu.Children!, item => item.Path == "/system/app-downloads");
 
         var posAdminMenu = Assert.Single(menu, item => item.Path == "/pos-admin");
         Assert.Contains(posAdminMenu.Children!, item => item.Path == "/pos-admin/products");
@@ -734,8 +734,8 @@ public class NavigationServiceTests
         var item = Assert.Single(systemMenu.Children!, child => child.Path == "/system/app-downloads");
         Assert.Equal(Permissions.System.ViewAppDownloads, item.Permission);
 
-        var wpfVersions = Assert.Single(systemMenu.Children!, child => child.Path == "/system/wpf-versions");
-        Assert.Equal(Permissions.System.ViewAppDownloads, wpfVersions.Permission);
+        // WPF 版本已并入版本发布中心，不再单独出现在 Web 菜单。
+        Assert.DoesNotContain(systemMenu.Children!, child => child.Path == "/system/wpf-versions");
     }
 
     [Fact]
