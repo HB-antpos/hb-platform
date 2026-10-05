@@ -1,4 +1,21 @@
-import { DollarOutlined, EditOutlined, EyeOutlined, HistoryOutlined, LockOutlined, PlusOutlined, QrcodeOutlined, ReloadOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons'
+import {
+  CheckCircleOutlined,
+  CloseOutlined,
+  DollarOutlined,
+  EditOutlined,
+  EyeOutlined,
+  HistoryOutlined,
+  LockOutlined,
+  MoreOutlined,
+  PlusOutlined,
+  QrcodeOutlined,
+  ReloadOutlined,
+  SafetyCertificateOutlined,
+  SaveOutlined,
+  SearchOutlined,
+  ShopOutlined,
+  StopOutlined,
+} from '@ant-design/icons'
 import {
   Alert,
   Button,
@@ -6,6 +23,7 @@ import {
   Checkbox,
   Descriptions,
   Drawer,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -19,19 +37,22 @@ import {
   Switch,
   Tabs,
   Tag,
+  Tooltip,
   Transfer,
   Tree,
   Typography,
   message,
 } from 'antd'
-import type { TransferDirection } from 'antd/es/transfer'
+import type { MenuProps, TabsProps } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { DataNode } from 'antd/es/tree'
-import type { Dispatch, Key, SetStateAction } from 'react'
+import dayjs from 'dayjs'
+import type { Dispatch, Key, ReactNode, SetStateAction } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HasPermission } from '../../../components/Access'
 import PageContainer from '../../../components/PageContainer'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { P } from '../../../types/permissions'
 import {
   assignRolesToUser,
@@ -55,7 +76,7 @@ import { getStores } from '../../../services/storeService'
 import type { CreateUserDto, UpdateUserDto, UserDetailDto, UserDto, UserLoginRecordDto, UserPermissionStateDto, UserStoreDto, UserStorePosTerminalPermissionsResponse } from '../../../types/user'
 import type { RoleOptionDto, PermissionCategoryDto } from '../../../types/role'
 import type { StoreDto } from '../../../types/store'
-import { getRoleColor, getStoreColor } from '../../../utils/userTableColors'
+import { getRoleColor } from '../../../utils/userTableColors'
 import { useAuthStore } from '../../../store/auth'
 import {
   areRoleGuidsAllowedForScopedManager,
@@ -89,7 +110,19 @@ import {
 } from './userPermissions'
 import type { AssignmentLoadStatus, PosPermissionRequestTarget } from './userPermissions'
 import { getCreateUserErrorFeedback } from './createUserFeedback'
-import { formatUserLocalDateTime } from './time'
+import { formatUserLocalDateTime, parseUserUtcTimestamp } from './time'
+import {
+  STALE_LOGIN_DAYS,
+  describeLastLogin,
+  diffAssignmentKeys,
+  diffStoreAssignment,
+  getUserDisplayName,
+  getUserInitial,
+  getUserSecondaryLine,
+  splitVisibleStores,
+  toIsActiveQuery,
+} from './usersPageLogic'
+import type { UserStatusFilter } from './usersPageLogic'
 import {
   DEFAULT_SYSTEM_LIST_PAGE_SIZE,
   createLatestRequestGuard,
@@ -99,8 +132,19 @@ import {
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import UserMobileMenuPermissionManager from './UserMobileMenuPermissionManager'
 import UserCashierBarcodeModal from './UserCashierBarcodeModal'
+import { NeutralChip, PendingChangesBar, RoleChip, StatusDot } from '../accessAdminUi'
+import usersPageMessagesEn from './usersPageMessages.en.json'
+import usersPageMessagesZh from './usersPageMessages.zh.json'
+import './usersPage.css'
+
+registerPageMessages({ zh: usersPageMessagesZh, en: usersPageMessagesEn })
 
 type PermissionPlatform = 'web' | 'pos'
+
+/** 统一用户抽屉的标签页；登录记录与收银权限也在抽屉内，不再单开弹窗。 */
+type UserDrawerTab = 'info' | 'assignments' | 'permissions' | 'mobile-menu' | 'login-records' | 'pos'
+
+type UserRowAction = 'login-records' | 'pos' | 'cashier-qr' | 'reset-password' | 'toggle-active'
 
 export default function SystemUsersPage() {
   const { t } = useTranslation()
@@ -126,6 +170,7 @@ export default function SystemUsersPage() {
 
   const [selectedStoreGuid, setSelectedStoreGuid] = useState<string | undefined>(undefined)
   const [selectedRoleGuid, setSelectedRoleGuid] = useState<string | undefined>(undefined)
+  const [statusFilter, setStatusFilter] = useState<UserStatusFilter>('all')
 
   const [sortBy, setSortBy] = useState<string | undefined>(undefined)
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | null>(null)
@@ -139,7 +184,9 @@ export default function SystemUsersPage() {
   const [detailUser, setDetailUser] = useState<UserDetailDto | null>(null)
   const [detailStores, setDetailStores] = useState<UserStoreDto[]>([])
 
-  const [loginRecordsOpen, setLoginRecordsOpen] = useState(false)
+  // 抽屉打开时对应的列表行；登录记录、收银权限等标签页按它懒加载。
+  const [drawerUser, setDrawerUser] = useState<UserDto | null>(null)
+
   const [loginRecordsLoading, setLoginRecordsLoading] = useState(false)
   const [loginRecordsUser, setLoginRecordsUser] = useState<UserDto | null>(null)
   const [loginRecords, setLoginRecords] = useState<UserLoginRecordDto[]>([])
@@ -150,11 +197,13 @@ export default function SystemUsersPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [editLoading, setEditLoading] = useState(false)
   const [editingUser, setEditingUser] = useState<UserDetailDto | null>(null)
-  const [editTab, setEditTab] = useState('info')
+  const [editTab, setEditTab] = useState<UserDrawerTab>('info')
   const [form] = Form.useForm<UpdateUserDto>()
 
   const [allRoles, setAllRoles] = useState<RoleOptionDto[]>([])
   const [roleTargetKeys, setRoleTargetKeys] = useState<string[]>([])
+  // 已保存的角色/分店基线：与草稿对比得出「未保存的更改」，只在读取成功或写入成功后更新。
+  const [roleBaselineKeys, setRoleBaselineKeys] = useState<string[]>([])
   const [roleLoadStatus, setRoleLoadStatus] = useState<AssignmentLoadStatus>('idle')
   const roleLoading = roleLoadStatus === 'loading'
   const [roleSaving, setRoleSaving] = useState(false)
@@ -162,7 +211,11 @@ export default function SystemUsersPage() {
   const [allStores, setAllStores] = useState<StoreDto[]>([])
   const [storeTargetKeys, setStoreTargetKeys] = useState<string[]>([])
   const [storeManageableKeys, setStoreManageableKeys] = useState<string[]>([])
+  const [storeBaselineKeys, setStoreBaselineKeys] = useState<string[]>([])
+  const [storeManageableBaselineKeys, setStoreManageableBaselineKeys] = useState<string[]>([])
   const [storeLoadStatus, setStoreLoadStatus] = useState<AssignmentLoadStatus>('idle')
+  const [addStoreSelectOpen, setAddStoreSelectOpen] = useState(false)
+  const [addStoreSearch, setAddStoreSearch] = useState('')
   const storeLoading = storeLoadStatus === 'loading'
   const [storeSaving, setStoreSaving] = useState(false)
 
@@ -175,7 +228,6 @@ export default function SystemUsersPage() {
   const [permLoadError, setPermLoadError] = useState<string | null>(null)
   const [permissionPlatform, setPermissionPlatform] = useState<PermissionPlatform>('web')
 
-  const [posPermissionOpen, setPosPermissionOpen] = useState(false)
   const [posPermissionUser, setPosPermissionUser] = useState<UserDto | null>(null)
   const [posPermissionStores, setPosPermissionStores] = useState<UserStoreDto[]>([])
   const [selectedPosPermissionStoreGuid, setSelectedPosPermissionStoreGuid] = useState<string>()
@@ -191,6 +243,8 @@ export default function SystemUsersPage() {
 
   const [resetPwdLoading, setResetPwdLoading] = useState(false)
   const [resetPwdOpen, setResetPwdOpen] = useState(false)
+  // 重置密码可从抽屉或列表「更多」菜单发起，目标用户单独记录，不依赖抽屉是否已加载完。
+  const [resetPwdTarget, setResetPwdTarget] = useState<Pick<UserDto, 'userGUID' | 'username'> | null>(null)
   const [resetPwdForm] = Form.useForm<{ newPassword: string }>()
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -230,6 +284,9 @@ export default function SystemUsersPage() {
   const canLoadRoleOptions = access.canReadRole || access.hasPermission(P.Users.ManageRoles)
   const canManageUserPermissions = access.hasPermission(P.Users.ManageRoles)
   const canManagePosTerminalPermissions = access.hasPermission(P.Users.ManagePosTerminalPermissions)
+  // 有编辑权的操作者打开可编辑抽屉；否则同一抽屉以只读资料 + 登录记录呈现。
+  const canEditUsers = access.hasPermission(P.Users.Edit)
+  const canResetUserPassword = access.hasPermission(P.Users.ResetPassword)
   const canEditUserPermissions = canManageUserPermissions || (
     isCurrentUserScoped && canManagePosTerminalPermissions
   )
@@ -375,6 +432,7 @@ export default function SystemUsersPage() {
         const queryBase = {
           search: keyword || undefined,
           roleGuid: selectedRoleGuid,
+          isActive: toIsActiveQuery(statusFilter),
           sortBy: currentSortBy || undefined,
           sortDirection: currentSortOrder === 'ascend' ? 'asc' : currentSortOrder === 'descend' ? 'desc' : undefined,
         }
@@ -427,6 +485,7 @@ export default function SystemUsersPage() {
         search: keyword || undefined,
         storeGuid: selectedStoreGuid,
         roleGuid: selectedRoleGuid,
+        isActive: toIsActiveQuery(statusFilter),
         sortBy: currentSortBy || undefined,
         sortDirection: currentSortOrder === 'ascend' ? 'asc' : currentSortOrder === 'descend' ? 'desc' : undefined,
       })
@@ -484,7 +543,6 @@ export default function SystemUsersPage() {
 
   const handleOpenLoginRecords = async (record: UserDto) => {
     setLoginRecordsUser(record)
-    setLoginRecordsOpen(true)
     setLoginRecords([])
     setLoginRecordsTotal(0)
     setLoginRecordsPage(1)
@@ -494,7 +552,6 @@ export default function SystemUsersPage() {
 
   const closeLoginRecords = () => {
     loginRecordsRequestGuardRef.current.invalidate()
-    setLoginRecordsOpen(false)
     setLoginRecordsLoading(false)
     setLoginRecordsUser(null)
     setLoginRecords([])
@@ -510,6 +567,26 @@ export default function SystemUsersPage() {
 
     void loadData(1, pageSize, undefined, undefined)
   }, [currentUser?.userGUID, isCurrentUserScoped, managedStoreKey])
+
+  // 筛选即查询：下拉与状态分段立即生效，关键字防抖 300ms；记录上一次的取值，避免首屏与 StrictMode 重复请求。
+  const filterQueryKey = `${selectedStoreGuid ?? ''}|${selectedRoleGuid ?? ''}|${statusFilter}`
+  const lastFilterQueryKeyRef = useRef(filterQueryKey)
+  const lastKeywordRef = useRef(keyword)
+
+  useEffect(() => {
+    if (lastFilterQueryKeyRef.current === filterQueryKey) return
+    lastFilterQueryKeyRef.current = filterQueryKey
+    void loadData(1, pageSize, sortBy, sortOrder)
+  }, [filterQueryKey])
+
+  useEffect(() => {
+    if (lastKeywordRef.current === keyword) return
+    const timer = window.setTimeout(() => {
+      lastKeywordRef.current = keyword
+      void loadData(1, pageSize, sortBy, sortOrder)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [keyword])
 
   useEffect(() => {
     void (async () => {
@@ -626,6 +703,7 @@ export default function SystemUsersPage() {
           if (!isCurrentEditingSession(userGuid, editSessionId)) return
           setAllRoles(roles)
           setRoleTargetKeys(targetKeys)
+          setRoleBaselineKeys(targetKeys)
           setRoleLoadStatus('ready')
         },
         onError: (error) => {
@@ -692,6 +770,8 @@ export default function SystemUsersPage() {
           setAllStores(stores)
           setStoreTargetKeys(targetKeys)
           setStoreManageableKeys(manageableKeys)
+          setStoreBaselineKeys(targetKeys)
+          setStoreManageableBaselineKeys(manageableKeys)
           setStoreLoadStatus('ready')
         },
         onError: (error) => {
@@ -740,7 +820,7 @@ export default function SystemUsersPage() {
     )
   }
 
-  const handleEdit = async (record: UserDto) => {
+  const handleEdit = async (record: UserDto, initialTab: UserDrawerTab = 'info') => {
     if (isCurrentUserScoped && (!data.some((item) => item.userGUID === record.userGUID) || hasForbiddenRoleForScopedManager(record))) {
       message.error(t('system.users.editOutOfScope', '无权编辑该用户'))
       return
@@ -752,16 +832,19 @@ export default function SystemUsersPage() {
     setEditOpen(true)
     editingUserGuidRef.current = record.userGUID
     setEditingUser(null)
-    setEditTab('info')
+    setEditTab(initialTab)
     setPermissionPlatform(isCurrentUserScoped ? 'pos' : 'web')
     permissionRequestGuardRef.current.invalidate()
     permissionSaveGuardRef.current.invalidate()
     setAllRoles([])
     setRoleTargetKeys([])
+    setRoleBaselineKeys([])
     setRoleLoadStatus('idle')
     setAllStores([])
     setStoreTargetKeys([])
     setStoreManageableKeys([])
+    setStoreBaselineKeys([])
+    setStoreManageableBaselineKeys([])
     setStoreLoadStatus('idle')
     setPermCategories([])
     setPermissionState(null)
@@ -855,6 +938,8 @@ export default function SystemUsersPage() {
       message.error(t('system.users.roleAssignForbidden', '店长不能分配管理员、店长或仓库经理角色'))
       return
     }
+    // 记录发起保存时的草稿，写入成功后作为新的已保存基线。
+    const savedRoleKeys = [...roleTargetKeys]
     setRoleSaving(true)
     try {
       try {
@@ -870,6 +955,7 @@ export default function SystemUsersPage() {
       void loadData(page, pageSize, sortBy, sortOrder)
       if (!isCurrentEditingSession(targetUserGuid, editSessionId)) return
 
+      setRoleBaselineKeys(savedRoleKeys)
       message.success(t('system.users.roleAssignSuccess', '角色分配成功'))
       try {
         const updated = await getUserByGuid(targetUserGuid)
@@ -965,6 +1051,8 @@ export default function SystemUsersPage() {
     const targetUserGuid = editingUser.userGUID
     const editSessionId = currentEditSessionIdRef.current
     if (editSessionId === null) return
+    const savedStoreKeys = [...storeTargetKeys]
+    const savedManageableKeys = [...storeManageableKeys]
     setStoreSaving(true)
     try {
       try {
@@ -1002,6 +1090,8 @@ export default function SystemUsersPage() {
       void loadData(page, pageSize, sortBy, sortOrder)
       if (!isCurrentEditingSession(targetUserGuid, editSessionId)) return
 
+      setStoreBaselineKeys(savedStoreKeys)
+      setStoreManageableBaselineKeys(savedManageableKeys)
       message.success(t('system.users.storeAssignSuccess', '分店分配成功'))
       try {
         const updated = await getUserByGuid(targetUserGuid)
@@ -1028,16 +1118,18 @@ export default function SystemUsersPage() {
   }
 
   const handleResetPassword = async () => {
-    if (!editingUser) return
+    const target = resetPwdTarget
+    if (!target) return
     try {
       const values = await resetPwdForm.validateFields()
       setResetPwdLoading(true)
-      await updateUserPassword(editingUser.userGUID, {
+      await updateUserPassword(target.userGUID, {
         newPassword: values.newPassword,
         passwordFormat: 'raw',
       })
       message.success(t('system.users.resetPasswordSuccess', '密码重置成功'))
       setResetPwdOpen(false)
+      setResetPwdTarget(null)
       resetPwdForm.resetFields()
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) return
@@ -1045,6 +1137,137 @@ export default function SystemUsersPage() {
       message.error(t('system.users.resetPasswordFailed', '密码重置失败'))
     } finally {
       setResetPwdLoading(false)
+    }
+  }
+
+  const openResetPassword = (target: Pick<UserDto, 'userGUID' | 'username'>) => {
+    resetPwdForm.resetFields()
+    setResetPwdTarget({ userGUID: target.userGUID, username: target.username })
+    setResetPwdOpen(true)
+  }
+
+  const roleAssignmentDiff = diffAssignmentKeys(roleBaselineKeys, roleTargetKeys)
+  const storeAssignmentDiff = diffStoreAssignment({
+    baselineStores: storeBaselineKeys,
+    draftStores: storeTargetKeys,
+    baselineManageable: storeManageableBaselineKeys,
+    draftManageable: storeManageableKeys,
+  })
+  const hasRoleAssignmentChanges = roleAssignmentDiff.added.length + roleAssignmentDiff.removed.length > 0
+  const hasStoreAssignmentChanges =
+    storeAssignmentDiff.added.length + storeAssignmentDiff.removed.length + storeAssignmentDiff.manageableChanged.length > 0
+  const assignmentChangeCount =
+    roleAssignmentDiff.added.length +
+    roleAssignmentDiff.removed.length +
+    storeAssignmentDiff.added.length +
+    storeAssignmentDiff.removed.length +
+    storeAssignmentDiff.manageableChanged.length
+
+  /**
+   * 「角色与分店」共用一个保存入口：只保存有变化的一侧，依次复用各自的保存流程，
+   * 各自的会话守卫、写入失败与回读失败提示保持不变；一侧失败时另一侧的草稿仍保留。
+   */
+  const handleSaveAssignments = async () => {
+    if (hasRoleAssignmentChanges) {
+      await handleSaveRoles()
+    }
+    if (hasStoreAssignmentChanges) {
+      await handleSaveStores()
+    }
+  }
+
+  const discardAssignmentChanges = () => {
+    setRoleTargetKeys(roleBaselineKeys)
+    setStoreTargetKeys(storeBaselineKeys)
+    setStoreManageableKeys(storeManageableBaselineKeys)
+  }
+
+  const resetPosPermissionState = () => {
+    // 递增序号让在途的收银权限请求全部失效，再清空该标签页状态。
+    posPermissionRequestRef.current = {
+      sequence: (posPermissionRequestRef.current?.sequence ?? 0) + 1,
+      userGuid: '',
+      storeGuid: '',
+    }
+    setPosPermissionUser(null)
+    setPosPermissionStores([])
+    setSelectedPosPermissionStoreGuid(undefined)
+    setPosPermissionState(null)
+    setPosPermissionError(null)
+    setPosPermissionStoresLoading(false)
+    setPosPermissionLoading(false)
+    setPosPermissionSaving(false)
+    setPosPermissionRestoring(false)
+  }
+
+  /** 打开统一用户抽屉：有编辑权走可编辑流程，否则只读查看；切换用户时先清掉上一位的登录记录与收银权限。 */
+  const openUserDrawer = (record: UserDto, tab: UserDrawerTab = 'info') => {
+    closeLoginRecords()
+    resetPosPermissionState()
+    setDrawerUser(record)
+    if (canEditUsers) {
+      void handleEdit(record, tab)
+      return
+    }
+    setEditTab(tab === 'login-records' || tab === 'pos' ? tab : 'info')
+    void handleViewDetail(record)
+  }
+
+  const handleToggleUserActive = (record: UserDto) => {
+    if (isCurrentUserScoped && (!data.some((item) => item.userGUID === record.userGUID) || hasForbiddenRoleForScopedManager(record))) {
+      message.error(t('system.users.editOutOfScope', '无权编辑该用户'))
+      return
+    }
+
+    const nextActive = !record.isActive
+    const name = getUserDisplayName(record)
+    Modal.confirm({
+      title: nextActive
+        ? t('system.usersWorkspace.enableUserTitle', '启用账号「{{name}}」？', { name })
+        : t('system.usersWorkspace.disableUserTitle', '停用账号「{{name}}」？', { name }),
+      content: nextActive
+        ? t('system.usersWorkspace.enableUserContent', '启用后该账号可以重新登录。')
+        : t('system.usersWorkspace.disableUserContent', '停用后该账号将无法登录，已分配的角色与分店保持不变。'),
+      okText: nextActive
+        ? t('system.usersWorkspace.enableUser', '启用账号')
+        : t('system.usersWorkspace.disableUser', '停用账号'),
+      okButtonProps: { danger: !nextActive },
+      cancelText: t('common.cancel', '取消'),
+      onOk: async () => {
+        try {
+          // 只改启停状态：其余字段沿用列表里的当前值，与资料表单保存的字段一致。
+          const updated = await updateUser(record.userGUID, {
+            username: record.username,
+            email: record.email,
+            fullName: record.fullName,
+            isActive: nextActive,
+          })
+          message.success(nextActive
+            ? t('system.usersWorkspace.enableUserSuccess', '账号已启用')
+            : t('system.usersWorkspace.disableUserSuccess', '账号已停用'))
+          void loadData(page, pageSize, sortBy, sortOrder)
+          if (editingUserGuidRef.current === updated.userGUID) {
+            setEditingUser(updated)
+            form.setFieldValue('isActive', updated.isActive)
+          }
+          if (detailUser?.userGUID === updated.userGUID) setDetailUser(updated)
+        } catch (error) {
+          console.error(error)
+          message.error(t('system.users.updateFailed', '更新用户失败'))
+        }
+      },
+    })
+  }
+
+  const handleRowAction = (record: UserDto, action: UserRowAction) => {
+    if (action === 'login-records' || action === 'pos') {
+      openUserDrawer(record, action)
+    } else if (action === 'cashier-qr') {
+      setCashierBarcodeUser(record)
+    } else if (action === 'reset-password') {
+      openResetPassword(record)
+    } else if (action === 'toggle-active') {
+      handleToggleUserActive(record)
     }
   }
 
@@ -1092,7 +1315,6 @@ export default function SystemUsersPage() {
       return
     }
 
-    setPosPermissionOpen(true)
     setPosPermissionUser(record)
     setPosPermissionStores([])
     setSelectedPosPermissionStoreGuid(undefined)
@@ -1476,268 +1698,477 @@ export default function SystemUsersPage() {
     },
   ]
 
+  const formatPlainDateTime = (value?: string | null) => {
+    if (!value) return t('common.emptyValue')
+    const parsed = dayjs(value)
+    return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : value
+  }
+
+  const formatLastLoginLabel = (record: Pick<UserDto, 'lastLoginAt'>) => {
+    const description = describeLastLogin(record.lastLoginAt, new Date())
+    if (description.kind === 'never') return { label: t('system.usersWorkspace.lastLoginNever', '从未登录'), stale: true }
+    if (description.kind === 'justNow') return { label: t('system.usersWorkspace.lastLoginJustNow', '刚刚'), stale: false }
+    if (description.kind === 'minutes') {
+      return { label: t('system.usersWorkspace.lastLoginMinutes', '{{count}} 分钟前', { count: description.count }), stale: false }
+    }
+    if (description.kind === 'hours') {
+      return { label: t('system.usersWorkspace.lastLoginHours', '{{count}} 小时前', { count: description.count }), stale: false }
+    }
+    if (description.kind === 'yesterday') return { label: t('system.usersWorkspace.lastLoginYesterday', '昨天'), stale: false }
+    return {
+      label: t('system.usersWorkspace.lastLoginDays', '{{count}} 天前', { count: description.count }),
+      stale: description.stale,
+    }
+  }
+
+  const renderLastLogin = (record: UserDto) => {
+    const { label, stale } = formatLastLoginLabel(record)
+    const parsed = parseUserUtcTimestamp(record.lastLoginAt)
+    if (!parsed) {
+      return <Typography.Text type="secondary">{label}</Typography.Text>
+    }
+
+    // 相对时间便于扫读，绝对时间与登录 IP 放在第二行和悬浮提示里。
+    const tooltip = [
+      formatUserLocalDateTime(record.lastLoginAt, ''),
+      record.lastLoginIp ? t('system.usersWorkspace.loginIp', '登录 IP：{{ip}}', { ip: record.lastLoginIp }) : '',
+      stale ? t('system.usersWorkspace.lastLoginStaleHint', '超过 {{days}} 天未登录', { days: STALE_LOGIN_DAYS }) : '',
+    ].filter(Boolean).join(' · ')
+
+    return (
+      <Tooltip title={tooltip}>
+        <span>
+          <span className={stale ? 'users-ws-login-rel users-ws-login-stale' : 'users-ws-login-rel'}>{label}</span>
+          <span className="users-ws-login-abs">{parsed.format('YYYY-MM-DD HH:mm')}</span>
+        </span>
+      </Tooltip>
+    )
+  }
+
+  const renderUserIdentity = (record: UserDto) => {
+    const displayName = getUserDisplayName(record)
+    return (
+      <div className="users-ws-identity">
+        <span className={record.isActive ? 'users-ws-avatar' : 'users-ws-avatar users-ws-avatar-inactive'} aria-hidden="true">
+          {getUserInitial(displayName)}
+        </span>
+        <span style={{ minWidth: 0 }}>
+          <span className={record.isActive ? 'users-ws-name' : 'users-ws-name users-ws-name-inactive'}>{displayName}</span>
+          <span className="users-ws-subline">{getUserSecondaryLine(record) || t('common.emptyValue')}</span>
+        </span>
+      </div>
+    )
+  }
+
+  const buildRowMenuItems = (record: UserDto): MenuProps['items'] => {
+    const items: NonNullable<MenuProps['items']> = [
+      { key: 'login-records', icon: <HistoryOutlined />, label: t('system.users.loginRecords', '登录记录') },
+    ]
+    if (canManagePosTerminalPermissions) {
+      items.push({ key: 'pos', icon: <DollarOutlined />, label: t('system.users.posPermissions', '收银权限') })
+    }
+    if (access.isAdmin && canManagePosTerminalPermissions) {
+      items.push({ key: 'cashier-qr', icon: <QrcodeOutlined />, label: t('system.users.cashierQr.title') })
+    }
+
+    const accountItems: NonNullable<MenuProps['items']> = []
+    if (canResetUserPassword) {
+      accountItems.push({ key: 'reset-password', icon: <LockOutlined />, label: t('system.users.resetPassword', '重置密码') })
+    }
+    // 不提供停用当前登录账号的入口，避免把自己锁在系统外。
+    if (canEditUsers && record.userGUID !== currentUser?.userGUID) {
+      accountItems.push(record.isActive
+        ? { key: 'toggle-active', icon: <StopOutlined />, danger: true, label: t('system.usersWorkspace.disableUser', '停用账号') }
+        : { key: 'toggle-active', icon: <CheckCircleOutlined />, label: t('system.usersWorkspace.enableUser', '启用账号') })
+    }
+    if (accountItems.length) {
+      items.push({ type: 'divider' }, ...accountItems)
+    }
+    return items
+  }
+
   const columns: ColumnsType<UserDto> = [
     {
-      title: t('system.users.rowIndex', '#'),
-      key: 'rowIndex',
-      width: 60,
-      align: 'center',
-      render: (_: unknown, __: UserDto, index: number) => (page - 1) * pageSize + index + 1,
+      title: t('system.usersWorkspace.user', '用户'),
+      dataIndex: 'username',
+      width: 240,
+      sorter: true,
+      sortOrder: sortBy === 'username' ? sortOrder : null,
+      render: (_value: string, record) => renderUserIdentity(record),
     },
-    { title: t('system.users.username', '用户名'), dataIndex: 'username', width: 180, sorter: true, sortOrder: sortBy === 'username' ? sortOrder : null },
-    { title: t('system.users.fullName', '姓名'), dataIndex: 'fullName', width: 160, sorter: true, sortOrder: sortBy === 'fullName' ? sortOrder : null, render: (value) => value || t('common.emptyValue') },
-    { title: t('system.users.email', '邮箱'), dataIndex: 'email', width: 220 },
     {
       title: t('system.users.roles', '角色'),
       dataIndex: 'roleNames',
-      width: 220,
+      width: 190,
       sorter: true,
       sortOrder: sortBy === 'roleNames' ? sortOrder : null,
-      render: (value: string[]) =>
-        value?.length ? value.map((item) => <Tag key={item} color={getRoleColor(item)}>{item}</Tag>) : t('common.emptyValue'),
+      render: (value: string[]) => value?.length ? (
+        <div className="users-ws-chips">
+          {value.map((item) => <RoleChip key={item} roleName={item} />)}
+        </div>
+      ) : <Typography.Text type="secondary">{t('common.emptyValue')}</Typography.Text>,
     },
     {
       title: t('system.users.linkedStores', '关联分店'),
       dataIndex: 'storeNames',
-      width: 240,
+      width: 260,
       sorter: true,
       sortOrder: sortBy === 'storeNames' ? sortOrder : null,
       render: (value: string[]) => {
-        const stores = [...(value || [])].sort((left, right) => left.localeCompare(right))
-        if (!stores.length) return t('common.emptyValue')
+        // 分店不承载语义，统一中性标签；超出两家折叠为 +N，悬浮查看全部。
+        const { visible, hidden } = splitVisibleStores(value)
+        if (!visible.length) return <Typography.Text type="secondary">{t('common.emptyValue')}</Typography.Text>
         return (
-          <Space wrap size={[4, 4]}>
-            {stores.slice(0, 2).map((store) => (
-              <Tag key={store} color={getStoreColor(store)}>{store}</Tag>
-            ))}
-            {stores.length > 2 ? <Tag>+{stores.length - 2}</Tag> : null}
-          </Space>
+          <div className="users-ws-chips users-ws-chips-nowrap">
+            {visible.map((store) => <NeutralChip key={store} title={store}>{store}</NeutralChip>)}
+            {hidden.length ? (
+              <Tooltip title={hidden.join('、')}>
+                <span>
+                  <NeutralChip outlined>{`+${hidden.length}`}</NeutralChip>
+                </span>
+              </Tooltip>
+            ) : null}
+          </div>
         )
       },
     },
     {
       title: t('common.status', '状态'),
       dataIndex: 'isActive',
-      width: 100,
+      width: 88,
       render: (value: boolean) => (
-        <Tag color={value ? 'success' : 'default'}>{value ? t('common.active', '启用') : t('common.inactive', '停用')}</Tag>
+        <StatusDot active={value} label={value ? t('common.active', '启用') : t('common.inactive', '停用')} />
       ),
     },
     {
       title: t('system.users.lastLogin', '最近登录'),
       dataIndex: 'lastLoginAt',
-      width: 190,
+      width: 160,
       sorter: true,
       sortOrder: sortBy === 'lastLoginAt' ? sortOrder : null,
-      render: (_value: string | undefined, record) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text>{formatUserLocalDateTime(record.lastLoginAt, t('common.emptyValue'))}</Typography.Text>
-          {record.lastLoginIp ? (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {record.lastLoginIp}
-            </Typography.Text>
-          ) : null}
-        </Space>
-      ),
+      render: (_value: string | undefined, record) => renderLastLogin(record),
     },
     {
       title: t('common.action', '操作'),
       key: 'action',
-      width: 350,
+      width: 132,
       fixed: 'right',
+      align: 'right',
       render: (_, record) => (
-        <Space size={0} wrap>
-          <Button type="link" icon={<EyeOutlined />} onClick={() => void handleViewDetail(record)}>
-            {t('common.view', '详情')}
+        <div className="users-ws-row-actions">
+          <Button
+            size="small"
+            icon={canEditUsers ? <EditOutlined /> : <EyeOutlined />}
+            onClick={() => openUserDrawer(record)}
+          >
+            {canEditUsers ? t('common.edit', '编辑') : t('common.view', '详情')}
           </Button>
-          <Button type="link" icon={<HistoryOutlined />} onClick={() => void handleOpenLoginRecords(record)}>
-            {t('system.users.loginRecords', '登录记录')}
-          </Button>
-          <HasPermission code={P.Users.Edit}>
-            <Button type="link" icon={<EditOutlined />} onClick={() => void handleEdit(record)}>
-              {t('common.edit', '编辑')}
-            </Button>
-          </HasPermission>
-          <HasPermission code={P.Users.ManagePosTerminalPermissions}>
-            <Button
-              type="link"
-              icon={<DollarOutlined />}
-              onClick={() => void handleOpenPosPermissions(record)}
-            >
-              {t('system.users.posPermissions', '收银权限')}
-            </Button>
-          </HasPermission>
-          {access.isAdmin && canManagePosTerminalPermissions && (
-            <Button type="link" icon={<QrcodeOutlined />} onClick={() => setCashierBarcodeUser(record)}>
-              {t('system.users.cashierQr.title')}
-            </Button>
-          )}
-        </Space>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomRight"
+            menu={{
+              items: buildRowMenuItems(record),
+              onClick: ({ key, domEvent }) => {
+                // 下拉菜单渲染在 Portal 中，事件仍沿 React 树冒泡到表格行，这里拦截以免同时打开抽屉。
+                domEvent.stopPropagation()
+                handleRowAction(record, key as UserRowAction)
+              },
+            }}
+          >
+            <Button size="small" icon={<MoreOutlined />} aria-label={t('system.usersWorkspace.moreActions', '更多操作')} />
+          </Dropdown>
+        </div>
       ),
     },
   ]
 
+  const toggleRoleAssignment = (roleGuid: string, checked: boolean) => {
+    if (!canMutateLoadedAssignment(roleLoadStatus, roleSaving)) return
+    setRoleTargetKeys((current) => {
+      if (checked) return current.includes(roleGuid) ? current : [...current, roleGuid]
+      return current.filter((key) => key !== roleGuid)
+    })
+  }
+
+  const addStoreAssignment = (storeGuid: string) => {
+    // 选中即加入列表：收起下拉并清空搜索词，便于连续添加下一家。
+    setAddStoreSelectOpen(false)
+    setAddStoreSearch('')
+    if (!canMutateLoadedAssignment(storeLoadStatus, storeSaving) || storeTargetKeys.includes(storeGuid)) return
+    handleStoreTargetChange([...storeTargetKeys, storeGuid])
+  }
+
+  const selectedAssignmentStores = storeTargetKeys
+    .map((storeGUID) => sortedStores.find((item) => item.storeGUID === storeGUID))
+    .filter((item): item is StoreDto => Boolean(item))
+  const addableStoreOptions = sortedStores
+    .filter((store) => !storeTargetKeys.includes(store.storeGUID))
+    .map((store) => ({ label: `${store.storeName} (${store.storeCode})`, value: store.storeGUID }))
+  const storeControlsDisabled = !canMutateLoadedAssignment(storeLoadStatus, storeSaving)
+
+  const assignmentChangeDetail = [
+    hasRoleAssignmentChanges
+      ? t('system.usersWorkspace.pendingRoles', '角色 +{{added}} / −{{removed}}', {
+          added: roleAssignmentDiff.added.length,
+          removed: roleAssignmentDiff.removed.length,
+        })
+      : '',
+    storeAssignmentDiff.added.length + storeAssignmentDiff.removed.length > 0
+      ? t('system.usersWorkspace.pendingStores', '分店 +{{added}} / −{{removed}}', {
+          added: storeAssignmentDiff.added.length,
+          removed: storeAssignmentDiff.removed.length,
+        })
+      : '',
+    storeAssignmentDiff.manageableChanged.length > 0
+      ? t('system.usersWorkspace.pendingManageable', '可管理 {{count}} 项变更', {
+          count: storeAssignmentDiff.manageableChanged.length,
+        })
+      : '',
+  ].filter(Boolean).join(' · ')
+
   const editTabItems = [
     {
       key: 'info',
-      label: t('system.users.basicInfo', '基本信息'),
+      label: t('system.usersWorkspace.tabProfile', '资料'),
       children: (
         <Spin spinning={editLoading}>
-          <Form form={form} layout="vertical" style={{ maxWidth: 480 }}>
-            <Form.Item label={t('system.users.username', '用户名')} name="username" rules={[{ required: true, message: t('system.users.usernameRequired', '请输入用户名') }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item
-              label={t('system.users.email', '邮箱')}
-              name="email"
-              rules={[
-                { required: true, message: t('system.users.emailRequired', '请输入邮箱') },
-                { type: 'email', message: t('system.users.emailInvalid', '邮箱格式不正确') },
-              ]}
-            >
-              <Input />
-            </Form.Item>
-            <Form.Item label={t('system.users.fullName', '姓名')} name="fullName">
-              <Input />
-            </Form.Item>
-            <Form.Item label={t('common.status', '状态')} name="isActive" valuePropName="checked">
-              <Switch checkedChildren={t('common.active', '启用')} unCheckedChildren={t('common.inactive', '停用')} />
-            </Form.Item>
-            <Form.Item>
-              <Button type="primary" loading={editLoading} onClick={() => void handleEditSubmit()}>
+          <div className="users-ws-tab-body">
+            <section>
+              <div className="users-ws-section-head">
+                <h3>{t('system.users.basicInfo', '基本信息')}</h3>
+              </div>
+              <Form form={form} layout="vertical" className="users-ws-info-form">
+                <Form.Item label={t('system.users.username', '用户名')} name="username" rules={[{ required: true, message: t('system.users.usernameRequired', '请输入用户名') }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item
+                  label={t('system.users.email', '邮箱')}
+                  name="email"
+                  rules={[
+                    { required: true, message: t('system.users.emailRequired', '请输入邮箱') },
+                    { type: 'email', message: t('system.users.emailInvalid', '邮箱格式不正确') },
+                  ]}
+                >
+                  <Input />
+                </Form.Item>
+                <Form.Item label={t('system.users.fullName', '姓名')} name="fullName">
+                  <Input />
+                </Form.Item>
+                <Form.Item label={t('common.status', '状态')} name="isActive" valuePropName="checked">
+                  <Switch checkedChildren={t('common.active', '启用')} unCheckedChildren={t('common.inactive', '停用')} />
+                </Form.Item>
+              </Form>
+              <Button type="primary" icon={<SaveOutlined />} loading={editLoading} onClick={() => void handleEditSubmit()}>
                 {t('system.users.saveBasicInfo', '保存基本信息')}
               </Button>
-            </Form.Item>
+            </section>
+
+            {editingUser ? (
+              <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
+                <Descriptions.Item label={t('system.users.lastLogin', '最近登录')}>
+                  {formatUserLocalDateTime(editingUser.lastLoginAt, t('common.emptyValue'))}
+                </Descriptions.Item>
+                <Descriptions.Item label={t('system.users.lastLoginIp', '最近登录 IP')}>
+                  {editingUser.lastLoginIp || t('common.emptyValue')}
+                </Descriptions.Item>
+                <Descriptions.Item label={t('system.users.createdAt', '创建时间')}>{formatPlainDateTime(editingUser.createdAt)}</Descriptions.Item>
+                <Descriptions.Item label={t('system.users.updatedAt', '更新时间')}>{formatPlainDateTime(editingUser.updatedAt)}</Descriptions.Item>
+              </Descriptions>
+            ) : null}
+
             <HasPermission code={P.Users.ResetPassword}>
-              <div style={{ paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
-                <Button icon={<LockOutlined />} onClick={() => setResetPwdOpen(true)} danger>
-                    {t('system.users.resetPassword', '重置密码')}
-                  </Button>
-              </div>
+              <section className="users-ws-danger">
+                <div>
+                  <Typography.Text strong>{t('system.usersWorkspace.accountSecurity', '账号安全')}</Typography.Text>
+                  <div>
+                    <Typography.Text type="secondary">
+                      {t('system.usersWorkspace.resetPasswordHint', '为该用户设置新密码，原密码立即失效。')}
+                    </Typography.Text>
+                  </div>
+                </div>
+                <Button danger icon={<LockOutlined />} disabled={!editingUser} onClick={() => editingUser && openResetPassword(editingUser)}>
+                  {t('system.users.resetPassword', '重置密码')}
+                </Button>
+              </section>
             </HasPermission>
-          </Form>
+          </div>
         </Spin>
       ),
     },
     {
-      key: 'roles',
-      label: (
-        <HasPermission code={P.Users.ManageRoles} fallback={<span>{t('system.users.roles', '角色')}</span>}>
-          <span>{t('system.users.roles', '角色')}</span>
-        </HasPermission>
-      ),
+      key: 'assignments',
+      label: t('system.usersWorkspace.tabAssignments', '角色与分店'),
       children: (
-        <HasPermission code={P.Users.ManageRoles} fallback={<Typography.Text type="secondary">{t('system.users.noRolePermission', '无权限管理角色')}</Typography.Text>}>
-          <Spin spinning={roleLoading}>
-            {roleLoadStatus === 'error' ? (
-              <Alert
-                type="error"
-                showIcon
-                style={{ marginBottom: 12 }}
-                message={t('system.users.loadRolesFailed', '加载角色数据失败')}
-                action={(
-                  <Button size="small" onClick={retryRoleData}>
-                    {t('common.retry', '重试')}
-                  </Button>
-                )}
-              />
+        <>
+          <div className="users-ws-tab-body">
+            <section aria-label={t('system.users.roles', '角色')}>
+              <div className="users-ws-section-head">
+                <h3>{t('system.users.roles', '角色')}</h3>
+                <span className="users-ws-section-hint">{t('system.usersWorkspace.rolesHint', '决定账号的基础权限，可多选')}</span>
+              </div>
+              <HasPermission code={P.Users.ManageRoles} fallback={<Typography.Text type="secondary">{t('system.users.noRolePermission', '无权限管理角色')}</Typography.Text>}>
+                <Spin spinning={roleLoading}>
+                  {roleLoadStatus === 'error' ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={t('system.users.loadRolesFailed', '加载角色数据失败')}
+                      action={(
+                        <Button size="small" onClick={retryRoleData}>
+                          {t('common.retry', '重试')}
+                        </Button>
+                      )}
+                    />
+                  ) : null}
+                  {allRoles.length ? (
+                    <div className="users-ws-role-grid">
+                      {allRoles.map((role) => {
+                        const checked = roleTargetKeys.includes(role.roleGUID)
+                        const optionClassName = [
+                          'users-ws-role-option',
+                          checked ? 'users-ws-role-option-checked' : '',
+                          canMutateLoadedAssignment(roleLoadStatus, roleSaving) ? '' : 'users-ws-role-option-disabled',
+                        ].filter(Boolean).join(' ')
+                        return (
+                          <Checkbox
+                            key={role.roleGUID}
+                            className={optionClassName}
+                            checked={checked}
+                            disabled={!canMutateLoadedAssignment(roleLoadStatus, roleSaving)}
+                            onChange={(event) => toggleRoleAssignment(role.roleGUID, event.target.checked)}
+                          >
+                            <span style={{ display: 'block', minWidth: 0 }}>
+                              <RoleChip roleName={role.roleName} />
+                              <span className="users-ws-subline" style={{ marginTop: 4 }}>
+                                {role.description || t('common.emptyValue')}
+                              </span>
+                            </span>
+                          </Checkbox>
+                        )
+                      })}
+                    </div>
+                  ) : roleLoadStatus === 'ready' ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('system.usersWorkspace.noRoles', '暂无可分配的角色')} />
+                  ) : null}
+                </Spin>
+              </HasPermission>
+            </section>
+
+            <section aria-label={t('system.users.linkedStores', '关联分店')}>
+              <div className="users-ws-section-head">
+                <h3>{t('system.users.linkedStores', '关联分店')}</h3>
+                <span className="users-ws-section-hint">
+                  {t('system.usersWorkspace.storeCount', '共 {{count}} 家', { count: storeTargetKeys.length })}
+                  {' · '}
+                  {t('system.usersWorkspace.storesHint', '「可管理」的分店允许该用户管理本店数据')}
+                </span>
+              </div>
+              <HasPermission code={P.Users.ManageStores} fallback={<Typography.Text type="secondary">{t('system.users.noStorePermission', '无权限管理分店')}</Typography.Text>}>
+                <Spin spinning={storeLoading}>
+                  {storeLoadStatus === 'error' ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={t('system.users.loadStoresFailed', '加载分店数据失败')}
+                      action={(
+                        <Button size="small" onClick={retryStoreData}>
+                          {t('common.retry', '重试')}
+                        </Button>
+                      )}
+                    />
+                  ) : null}
+                  <Select<string>
+                    showSearch
+                    value={null}
+                    open={addStoreSelectOpen}
+                    onOpenChange={setAddStoreSelectOpen}
+                    searchValue={addStoreSearch}
+                    onSearch={setAddStoreSearch}
+                    optionFilterProp="label"
+                    placeholder={t('system.usersWorkspace.addStorePlaceholder', '搜索并添加分店')}
+                    aria-label={t('system.usersWorkspace.addStorePlaceholder', '搜索并添加分店')}
+                    style={{ width: '100%', marginBottom: 10 }}
+                    disabled={!canMutateLoadedAssignment(storeLoadStatus, storeSaving)}
+                    options={addableStoreOptions}
+                    onChange={(storeGuid) => addStoreAssignment(storeGuid)}
+                  />
+                  {selectedAssignmentStores.length ? (
+                    <div className="users-ws-store-list">
+                      {selectedAssignmentStores.map((store) => (
+                        <div key={store.storeGUID} className="users-ws-store-row">
+                          <ShopOutlined style={{ color: '#667085' }} />
+                          <span className="users-ws-store-name">
+                            {store.storeName}
+                            <span className="users-ws-store-code">{store.storeCode}</span>
+                          </span>
+                          {storeBaselineKeys.includes(store.storeGUID) ? null : (
+                            <Tag color="blue" bordered={false}>{t('system.usersWorkspace.newBadge', '新增')}</Tag>
+                          )}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: '#4b5565', fontSize: 13 }}>
+                            {t('system.users.manageableStore', '可管理')}
+                            <Switch
+                              size="small"
+                              checked={storeManageableKeys.includes(store.storeGUID)}
+                              disabled={storeControlsDisabled}
+                              aria-label={`${t('system.users.manageableStore', '可管理')} ${store.storeName}`}
+                              onChange={(checked) => toggleStoreManageable(store.storeGUID, checked, setStoreManageableKeys)}
+                            />
+                          </span>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<CloseOutlined />}
+                            disabled={storeControlsDisabled}
+                            aria-label={t('system.usersWorkspace.removeStore', '移除分店 {{name}}', { name: store.storeName })}
+                            onClick={() => handleStoreTargetChange(storeTargetKeys.filter((key) => key !== store.storeGUID))}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : storeLoadStatus === 'ready' ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('system.usersWorkspace.noStores', '尚未关联分店')} />
+                  ) : null}
+                </Spin>
+              </HasPermission>
+            </section>
+
+            {permissionState ? (
+              <div className="users-ws-summary">
+                <SafetyCertificateOutlined />
+                <span>
+                  {t(
+                    'system.usersWorkspace.effectivePermissionSummary',
+                    '当前有效权限 {{effective}} 项（角色继承 {{inherited}} · 直接授权 {{direct}}）',
+                    {
+                      effective: effectivePermSet.size,
+                      inherited: inheritedPermSet.size,
+                      direct: directPermKeys.length,
+                    },
+                  )}
+                </span>
+                <Button type="link" size="small" style={{ marginLeft: 'auto' }} onClick={() => setEditTab('permissions')}>
+                  {t('system.usersWorkspace.viewPermissionDetail', '查看明细')}
+                </Button>
+              </div>
             ) : null}
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text type="secondary">
-                {t('system.users.assignedRoles', '当前用户已分配 {{count}} 个角色', { count: roleTargetKeys.length })}
-              </Typography.Text>
-            </div>
-            <Transfer
-              dataSource={allRoles.map((role) => ({
-                key: role.roleGUID,
-                title: role.roleName,
-                description: role.description || '',
-              }))}
-              targetKeys={roleTargetKeys}
-              onChange={(nextTargetKeys: Key[], _direction: TransferDirection, _moveKeys: Key[]) => {
-                if (!canMutateLoadedAssignment(roleLoadStatus, roleSaving)) return
-                setRoleTargetKeys(nextTargetKeys.map(String))
-              }}
-              disabled={!canMutateLoadedAssignment(roleLoadStatus, roleSaving)}
-              render={(item) => item.title}
-              titles={[t('system.users.availableRoles', '可选角色'), t('system.users.assignedRolesLabel', '已分配角色')]}
-              listStyle={{ width: 320, height: 400 }}
-              showSearch
-            />
-            <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button
-                type="primary"
-                loading={roleSaving}
-                disabled={!canMutateLoadedAssignment(roleLoadStatus, roleSaving)}
-                onClick={() => void handleSaveRoles()}
-              >
-                {t('system.users.saveRoleAssign', '保存角色分配')}
-              </Button>
-            </div>
-          </Spin>
-        </HasPermission>
-      ),
-    },
-    {
-      key: 'stores',
-      label: (
-        <HasPermission code={P.Users.ManageStores} fallback={<span>{t('system.users.stores', '分店')}</span>}>
-          <span>{t('system.users.stores', '分店')}</span>
-        </HasPermission>
-      ),
-      children: (
-        <HasPermission code={P.Users.ManageStores} fallback={<Typography.Text type="secondary">{t('system.users.noStorePermission', '无权限管理分店')}</Typography.Text>}>
-          <Spin spinning={storeLoading}>
-            {storeLoadStatus === 'error' ? (
-              <Alert
-                type="error"
-                showIcon
-                style={{ marginBottom: 12 }}
-                message={t('system.users.loadStoresFailed', '加载分店数据失败')}
-                action={(
-                  <Button size="small" onClick={retryStoreData}>
-                    {t('common.retry', '重试')}
-                  </Button>
-                )}
-              />
-            ) : null}
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text type="secondary">
-                {t('system.users.assignedStores', '当前用户已关联 {{count}} 个分店', { count: storeTargetKeys.length })}
-              </Typography.Text>
-            </div>
-            <Transfer
-              dataSource={sortedStores.map((store) => ({
-                key: store.storeGUID,
-                title: `${store.storeName} (${store.storeCode})`,
-                description: store.address || '',
-              }))}
-              targetKeys={storeTargetKeys}
-              onChange={(nextTargetKeys: Key[], _direction: TransferDirection, _moveKeys: Key[]) => {
-                if (!canMutateLoadedAssignment(storeLoadStatus, storeSaving)) return
-                handleStoreTargetChange(nextTargetKeys)
-              }}
-              disabled={!canMutateLoadedAssignment(storeLoadStatus, storeSaving)}
-              render={(item) => item.title}
-              titles={[t('system.users.availableStores', '可选分店'), t('system.users.assignedStoresLabel', '已分配分店')]}
-              listStyle={{ width: 320, height: 400 }}
-              showSearch
-            />
-            {canMutateLoadedAssignment(storeLoadStatus, storeSaving)
-              ? renderManageableStoreControls(storeTargetKeys, storeManageableKeys, setStoreManageableKeys)
-              : null}
-            <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button
-                type="primary"
-                loading={storeSaving}
-                disabled={!canMutateLoadedAssignment(storeLoadStatus, storeSaving)}
-                onClick={() => void handleSaveStores()}
-              >
-                {t('system.users.saveStoreAssign', '保存分店分配')}
-              </Button>
-            </div>
-          </Spin>
-        </HasPermission>
+          </div>
+          <PendingChangesBar
+            visible={assignmentChangeCount > 0}
+            summary={t('system.usersWorkspace.pendingChanges', '{{count}} 项未保存的更改', { count: assignmentChangeCount })}
+            detail={assignmentChangeDetail}
+            discardLabel={t('system.usersWorkspace.discardChanges', '放弃更改')}
+            saveLabel={t('system.usersWorkspace.saveChanges', '保存更改')}
+            saving={roleSaving || storeSaving}
+            saveDisabled={
+              (hasRoleAssignmentChanges && !canMutateLoadedAssignment(roleLoadStatus, roleSaving)) ||
+              (hasStoreAssignmentChanges && !canMutateLoadedAssignment(storeLoadStatus, storeSaving))
+            }
+            onDiscard={discardAssignmentChanges}
+            onSave={() => void handleSaveAssignments()}
+          />
+        </>
       ),
     },
     {
@@ -1880,16 +2311,420 @@ export default function SystemUsersPage() {
     },
   ]
 
+  const loginRecordsTab = {
+    key: 'login-records',
+    label: t('system.users.loginRecords', '登录记录'),
+    children: (
+      <div className="users-ws-tab-body">
+        <div className="users-ws-tab-toolbar">
+          <Typography.Text type="secondary">
+            {t('system.usersWorkspace.loginRecordsTotal', '共 {{count}} 条登录记录', { count: loginRecordsTotal })}
+          </Typography.Text>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={loginRecordsLoading}
+            onClick={() => {
+              if (loginRecordsUser) {
+                void loadLoginRecords(loginRecordsUser, loginRecordsPage, loginRecordsPageSize)
+              }
+            }}
+          >
+            {t('common.refresh', '刷新')}
+          </Button>
+        </div>
+        <MeasuredTable<UserLoginRecordDto> metricId="system.users.table-2"
+          rowKey="sessionId"
+          size="small"
+          loading={loginRecordsLoading}
+          columns={loginRecordColumns}
+          dataSource={loginRecords}
+          scroll={{ x: 860 }}
+          pagination={{
+            current: loginRecordsPage,
+            pageSize: loginRecordsPageSize,
+            total: loginRecordsTotal,
+            showSizeChanger: true,
+            onChange: (nextPage, nextPageSize) => {
+              if (loginRecordsUser) {
+                void loadLoginRecords(loginRecordsUser, nextPage, nextPageSize)
+              }
+            },
+          }}
+        />
+      </div>
+    ),
+  }
+
+  const posPermissionPanel = (
+    <div className="users-ws-tab-body">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <div>
+          <Typography.Text strong>{t('system.users.targetStore', '目标分店')}</Typography.Text>
+          <Select
+            aria-label={t('system.users.targetStore', '目标分店')}
+            value={selectedPosPermissionStoreGuid}
+            loading={posPermissionStoresLoading}
+            disabled={posPermissionStoresLoading || posPermissionSaving || posPermissionRestoring || !posPermissionStores.length}
+            style={{ width: '100%', marginTop: 8 }}
+            placeholder={t('system.users.selectPosPermissionStore', '请选择目标用户关联的分店')}
+            options={posPermissionStores.map((store) => ({
+              label: `${store.storeName} (${store.storeCode})`,
+              value: store.storeGUID,
+            }))}
+            onChange={(storeGuid) => void handlePosPermissionStoreChange(storeGuid)}
+          />
+        </div>
+
+        {posPermissionStoresLoading || posPermissionLoading ? (
+          <Skeleton active title paragraph={{ rows: 8 }} />
+        ) : posPermissionError ? (
+          <Alert
+            type="error"
+            showIcon
+            message={posPermissionError}
+            action={
+              posPermissionUser && selectedPosPermissionStoreGuid ? (
+                <Button
+                  size="small"
+                  onClick={() => void loadPosPermissionState(posPermissionUser.userGUID, selectedPosPermissionStoreGuid)}
+                >
+                  {t('common.retry', '重试')}
+                </Button>
+              ) : (
+                <Button size="small" onClick={() => posPermissionUser && void handleOpenPosPermissions(posPermissionUser)}>
+                  {t('common.retry', '重试')}
+                </Button>
+              )
+            }
+          />
+        ) : !posPermissionStores.length ? (
+          <Empty description={t('system.users.noPosPermissionStores', '目标用户没有可管理的关联分店')} />
+        ) : !posPermissionState ? (
+          <Empty description={t('system.users.noPosPermissionData', '暂无收银权限数据')} />
+        ) : (
+          <>
+            <Alert
+              type="info"
+              showIcon
+              message={
+                isInheritedPosPermissionMode(posPermissionState.mode)
+                  ? t('system.users.posPermissionInheritedMode', '当前使用账号权限继承')
+                  : t('system.users.posPermissionOverrideMode', '当前使用分店权限覆盖')
+              }
+              description={t(
+                'system.users.posPermissionSummary',
+                '可分配 {{assignable}} 项，账号继承 {{inherited}} 项，当前有效 {{effective}} 项。勾选项表示保存后的分店有效权限。',
+                {
+                  assignable: posPermissionState.assignablePermissions.length,
+                  inherited: inheritedPosPermissionSet.size,
+                  effective: effectivePosPermissionSet.size,
+                },
+              )}
+            />
+
+            {posPermissionSections.length ? posPermissionSections.map((section) => (
+              <Card key={section.module} title={section.displayName} size="small">
+                <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                  {section.groups.map((group) => {
+                    const groupPermissionCodes = group.permissions.map((permission) => permission.code)
+                    const groupSelectionState = getPosPermissionGroupSelectionState(
+                      selectedPosPermissionCodes,
+                      groupPermissionCodes,
+                    )
+
+                    return (
+                      <div key={group.key}>
+                        <Checkbox
+                          checked={groupSelectionState.checked}
+                          indeterminate={groupSelectionState.indeterminate}
+                          disabled={posPermissionSaving || posPermissionRestoring}
+                          onChange={(event) => {
+                            setSelectedPosPermissionCodes((current) =>
+                              setPosPermissionGroupSelection(
+                                current,
+                                groupPermissionCodes,
+                                event.target.checked,
+                              ),
+                            )
+                          }}
+                        >
+                          <Typography.Text strong>{group.displayName}</Typography.Text>
+                        </Checkbox>
+                        <List
+                          size="small"
+                          dataSource={group.permissions}
+                          locale={{ emptyText: t('system.users.noPosPermissionData', '暂无收银权限数据') }}
+                          renderItem={(permission) => {
+                            const isSelected = selectedPosPermissionSet.has(permission.code)
+                            const isEffective = effectivePosPermissionSet.has(permission.code)
+                            const hasDraftChange = isSelected !== isEffective
+                            return (
+                              <List.Item>
+                                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                                  <Checkbox
+                                    checked={isSelected}
+                                    disabled={posPermissionSaving || posPermissionRestoring}
+                                    onChange={(event) => {
+                                      setSelectedPosPermissionCodes((current) => {
+                                        const next = new Set(current)
+                                        if (event.target.checked) next.add(permission.code)
+                                        else next.delete(permission.code)
+                                        return Array.from(next)
+                                      })
+                                    }}
+                                  >
+                                    {permission.name}
+                                  </Checkbox>
+                                  <Space wrap size={[4, 4]} style={{ paddingLeft: 24 }}>
+                                    {inheritedPosPermissionSet.has(permission.code) ? (
+                                      <Tag>{t('system.users.accountInherited', '账号继承')}</Tag>
+                                    ) : null}
+                                    {overriddenPosPermissionSet.has(permission.code) ? (
+                                      <Tag color="processing">{t('system.users.storeOverridden', '分店已覆盖')}</Tag>
+                                    ) : null}
+                                    <Tag color={isEffective ? 'success' : 'default'}>
+                                      {isEffective
+                                        ? t('system.users.permissionEffective', '当前有效')
+                                        : t('system.users.permissionIneffective', '当前无效')}
+                                    </Tag>
+                                    {hasDraftChange ? (
+                                      <Tag color="warning">
+                                        {isSelected
+                                          ? t('system.users.pendingEnable', '待保存启用')
+                                          : t('system.users.pendingDisable', '待保存停用')}
+                                      </Tag>
+                                    ) : null}
+                                  </Space>
+                                  {permission.description ? (
+                                    <Typography.Text type="secondary" style={{ paddingLeft: 24, fontSize: 12 }}>
+                                      {permission.description}
+                                    </Typography.Text>
+                                  ) : null}
+                                </Space>
+                              </List.Item>
+                            )
+                          }}
+                        />
+                      </div>
+                    )
+                  })}
+                </Space>
+              </Card>
+            )) : (
+              <Empty description={t('system.users.noAssignablePosPermissions', '当前分店没有可分配的收银权限')} />
+            )}
+
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button
+                disabled={isInheritedPosPermissionMode(posPermissionState.mode) || posPermissionSaving || posPermissionRestoring}
+                loading={posPermissionRestoring}
+                onClick={handleRestorePosPermissionInheritance}
+              >
+                {t('system.users.restoreInheritance', '恢复继承')}
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                disabled={
+                  !shouldEnablePosPermissionSave(posPermissionState.mode, hasPosPermissionChanges) ||
+                  posPermissionLoading ||
+                  posPermissionRestoring
+                }
+                loading={posPermissionSaving}
+                onClick={() => void handleSavePosPermissions()}
+              >
+                {t('system.users.saveStorePosPermissions', '保存分店权限')}
+              </Button>
+            </Space>
+          </>
+        )}
+      </Space>
+    </div>
+  )
+
+  const viewInfoTab = {
+    key: 'info',
+    label: t('system.usersWorkspace.tabProfile', '资料'),
+    children: (
+      <Spin spinning={detailLoading}>
+        <div className="users-ws-tab-body">
+          {detailUser ? (
+            <>
+              <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
+                <Descriptions.Item label={t('system.users.username', '用户名')}>{detailUser.username}</Descriptions.Item>
+                <Descriptions.Item label={t('system.users.fullName', '姓名')}>{detailUser.fullName || t('common.emptyValue')}</Descriptions.Item>
+                <Descriptions.Item label={t('system.users.email', '邮箱')}>{detailUser.email}</Descriptions.Item>
+                <Descriptions.Item label={t('common.status', '状态')}>
+                  <StatusDot
+                    active={detailUser.isActive}
+                    label={detailUser.isActive ? t('common.active', '启用') : t('common.inactive', '停用')}
+                  />
+                </Descriptions.Item>
+                <Descriptions.Item label={t('system.users.lastLogin', '最近登录')}>
+                  {formatUserLocalDateTime(detailUser.lastLoginAt, t('common.emptyValue'))}
+                </Descriptions.Item>
+                <Descriptions.Item label={t('system.users.lastLoginIp', '最近登录 IP')}>{detailUser.lastLoginIp || t('common.emptyValue')}</Descriptions.Item>
+                <Descriptions.Item label={t('system.users.createdAt', '创建时间')}>{formatPlainDateTime(detailUser.createdAt)}</Descriptions.Item>
+                <Descriptions.Item label={t('system.users.updatedAt', '更新时间')}>{formatPlainDateTime(detailUser.updatedAt)}</Descriptions.Item>
+                <Descriptions.Item label={t('system.users.roles', '角色')} span="filled">
+                  {detailUser.roleNames?.length ? (
+                    <div className="users-ws-chips">
+                      {detailUser.roleNames.map((item) => <RoleChip key={item} roleName={item} />)}
+                    </div>
+                  ) : t('common.emptyValue')}
+                </Descriptions.Item>
+              </Descriptions>
+
+              <section>
+                <div className="users-ws-section-head">
+                  <h3>{t('system.users.linkedStores', '关联分店')}</h3>
+                  <span className="users-ws-section-hint">
+                    {t('system.usersWorkspace.storeCount', '共 {{count}} 家', { count: detailStores.length })}
+                  </span>
+                </div>
+                {detailStores.length ? (
+                  <div className="users-ws-store-list">
+                    {detailStores.map((store) => (
+                      <div key={store.storeGUID} className="users-ws-store-row">
+                        <ShopOutlined style={{ color: '#667085' }} />
+                        <span className="users-ws-store-name">
+                          {store.storeName}
+                          <span className="users-ws-store-code">{store.storeCode}</span>
+                        </span>
+                        {store.isManageable ? (
+                          <Tag color="processing">{t('system.users.manageableStore', '可管理')}</Tag>
+                        ) : (
+                          <Tag>{t('system.users.linkedOnlyStore', '普通关联')}</Tag>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('system.users.noLinkedStores', '暂无关联分店')} />
+                )}
+              </section>
+
+              <section>
+                <div className="users-ws-section-head">
+                  <h3>{t('system.usersWorkspace.effectivePermissions', '有效权限')}</h3>
+                  <span className="users-ws-section-hint">{detailUser.permissions?.length ?? 0}</span>
+                </div>
+                {detailUser.permissions?.length ? (
+                  <div className="users-ws-chips">
+                    {detailUser.permissions.map((permission) => <NeutralChip key={permission}>{permission}</NeutralChip>)}
+                  </div>
+                ) : (
+                  <Typography.Text type="secondary">{t('common.emptyValue')}</Typography.Text>
+                )}
+              </section>
+            </>
+          ) : detailLoading ? null : (
+            <Empty description={t('system.users.userNotFound', '未找到用户信息')} />
+          )}
+        </div>
+      </Spin>
+    ),
+  }
+
+  const posPermissionTabs = canManagePosTerminalPermissions
+    ? [{ key: 'pos', label: t('system.users.posPermissions', '收银权限'), children: posPermissionPanel }]
+    : []
+  const drawerTabItems: TabsProps['items'] = editOpen
+    ? [...editTabItems, loginRecordsTab, ...posPermissionTabs]
+    : [viewInfoTab, loginRecordsTab, ...posPermissionTabs]
+  const userDrawerOpen = editOpen || detailOpen
+
+  // 登录记录与收银权限标签页首次切到时才加载，并始终跟随抽屉当前用户。
+  useEffect(() => {
+    if (!userDrawerOpen || !drawerUser || editTab !== 'login-records') return
+    if (loginRecordsUser?.userGUID === drawerUser.userGUID) return
+    void handleOpenLoginRecords(drawerUser)
+  }, [userDrawerOpen, drawerUser, editTab])
+
+  useEffect(() => {
+    if (!userDrawerOpen || !drawerUser || editTab !== 'pos' || !canManagePosTerminalPermissions) return
+    if (posPermissionUser?.userGUID === drawerUser.userGUID) return
+    void handleOpenPosPermissions(drawerUser)
+  }, [userDrawerOpen, drawerUser, editTab, canManagePosTerminalPermissions])
+
+  /** 关闭抽屉前若「角色与分店」或功能权限还有未保存的草稿，先确认再丢弃。 */
+  const confirmCloseUserDrawer = (close: () => void) => {
+    if (assignmentChangeCount === 0 && !hasDirectPermChanges) {
+      close()
+      return
+    }
+    Modal.confirm({
+      title: t('system.usersWorkspace.discardConfirmTitle', '放弃未保存的更改？'),
+      content: t('system.usersWorkspace.discardConfirmContent', '关闭后 {{count}} 项未保存的更改将被丢弃。', {
+        count: assignmentChangeCount + (hasDirectPermChanges ? 1 : 0),
+      }),
+      okText: t('system.usersWorkspace.discardChanges', '放弃更改'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel', '取消'),
+      onOk: close,
+    })
+  }
+
+  const renderUserDrawerTitle = (user: UserDto | null): ReactNode => {
+    if (!user) return t('system.users.userDetail', '用户详情')
+    const displayName = getUserDisplayName(user)
+    return (
+      <div className="users-ws-drawer-header">
+        <span className={user.isActive ? 'users-ws-avatar users-ws-avatar-lg' : 'users-ws-avatar users-ws-avatar-lg users-ws-avatar-inactive'} aria-hidden="true">
+          {getUserInitial(displayName)}
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div className="users-ws-drawer-title">
+            <span>{displayName}</span>
+            <span style={{ fontSize: 13, fontWeight: 400 }}>
+              <StatusDot active={user.isActive} label={user.isActive ? t('common.active', '启用') : t('common.inactive', '停用')} />
+            </span>
+          </div>
+          <span className="users-ws-subline">{getUserSecondaryLine(user)}</span>
+          <div className="users-ws-drawer-facts">
+            <span>
+              {t('system.usersWorkspace.lastLogin', '最近登录')}{' '}
+              <strong>{formatUserLocalDateTime(user.lastLoginAt, t('system.usersWorkspace.lastLoginNever', '从未登录'))}</strong>
+            </span>
+            {user.lastLoginIp ? (
+              <span>IP <strong>{user.lastLoginIp}</strong></span>
+            ) : null}
+            {user.createdAt ? (
+              <span>
+                {t('system.usersWorkspace.createdAt', '创建于')} <strong>{formatPlainDateTime(user.createdAt)}</strong>
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <PageContainer title={t('menu.systemUsers', '用户管理')} subtitle={t('system.users.pageSubtitle', '管理用户的基本信息、角色、分店和权限。')}>
+    <PageContainer
+      title={t('menu.systemUsers', '用户管理')}
+      subtitle={t('system.users.pageSubtitle', '管理用户的基本信息、角色、分店和权限。')}
+      extra={(
+        <HasPermission code={P.Users.Create}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => void handleOpenCreate()}>
+            {t('system.users.createUser', '创建用户')}
+          </Button>
+        </HasPermission>
+      )}
+    >
       <Card>
-        <Space wrap style={{ marginBottom: 16 }}>
+        <div className="users-ws-toolbar">
           <Input
+            className="users-ws-search"
             placeholder={t('system.users.searchPlaceholder', '搜索用户名 / 姓名 / 邮箱')}
+            aria-label={t('system.users.searchPlaceholder', '搜索用户名 / 姓名 / 邮箱')}
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
+            onPressEnter={() => {
+              lastKeywordRef.current = keyword
+              void loadData(1, pageSize, sortBy, sortOrder)
+            }}
             prefix={<SearchOutlined />}
-            style={{ width: 280 }}
             allowClear
           />
           <Select
@@ -1897,6 +2732,7 @@ export default function SystemUsersPage() {
             showSearch
             optionFilterProp="label"
             placeholder={t('system.users.filterByStore', '按分店过滤')}
+            aria-label={t('system.users.filterByStore', '按分店过滤')}
             style={{ width: 220 }}
             value={selectedStoreGuid}
             onChange={(value) => setSelectedStoreGuid(value)}
@@ -1907,30 +2743,46 @@ export default function SystemUsersPage() {
             showSearch
             optionFilterProp="label"
             placeholder={t('system.users.filterByRole', '按角色过滤')}
+            aria-label={t('system.users.filterByRole', '按角色过滤')}
             style={{ width: 180 }}
             value={selectedRoleGuid}
             onChange={(value) => setSelectedRoleGuid(value)}
             options={roleOptions}
           />
-          <Button type="primary" onClick={() => void loadData(1, pageSize, sortBy, sortOrder)}>
-            {t('common.query', '查询')}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void loadData(page, pageSize, sortBy, sortOrder)}>
-            {t('common.refresh', '刷新')}
-          </Button>
-          <HasPermission code={P.Users.Create}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => void handleOpenCreate()}>
-              {t('system.users.createUser', '创建用户')}
-            </Button>
-          </HasPermission>
-        </Space>
+          <Segmented<UserStatusFilter>
+            aria-label={t('system.usersWorkspace.statusFilter', '账号状态')}
+            value={statusFilter}
+            onChange={(value) => setStatusFilter(value)}
+            options={[
+              { label: t('common.all', '全部'), value: 'all' },
+              { label: t('common.active', '启用'), value: 'active' },
+              { label: t('common.inactive', '停用'), value: 'inactive' },
+            ]}
+          />
+          <Tooltip title={t('common.refresh', '刷新')}>
+            <Button
+              className="users-ws-refresh"
+              icon={<ReloadOutlined />}
+              aria-label={t('common.refresh', '刷新')}
+              onClick={() => void loadData(page, pageSize, sortBy, sortOrder)}
+            />
+          </Tooltip>
+        </div>
 
         <MeasuredTable metricId="system.users.table-1"
           rowKey="userGUID"
+          className="users-ws-table"
           loading={loading}
           columns={columns}
           dataSource={data}
-          scroll={{ x: 1360 }}
+          scroll={{ x: 1070 }}
+          onRow={(record) => ({
+            onClick: (event) => {
+              // 整行点击打开抽屉；操作区按钮与其下拉菜单自己处理点击。
+              if ((event.target as HTMLElement).closest('.users-ws-row-actions, .ant-dropdown')) return
+              openUserDrawer(record)
+            },
+          })}
           onChange={(pagination, _filters, sorter, extra) => {
             const nextPagination = resolveSystemListPagination(extra.action, pagination, pageSize)
             if (extra.action === 'paginate') {
@@ -1957,6 +2809,7 @@ export default function SystemUsersPage() {
             pageSize,
             total,
             showSizeChanger: true,
+            showTotal: (count) => t('system.usersWorkspace.totalUsers', '共 {{count}} 位用户', { count }),
           }}
         />
       </Card>
@@ -1970,336 +2823,11 @@ export default function SystemUsersPage() {
       )}
 
       <Drawer
-        title={detailUser ? t('system.users.userDetailTitle', '用户详情 - {{name}}', { name: detailUser.username }) : t('system.users.userDetail', '用户详情')}
-        width={820}
-        open={detailOpen}
-        onClose={() => {
-          setDetailOpen(false)
-          setDetailUser(null)
-          setDetailStores([])
-        }}
-        destroyOnHidden
-      >
-        {detailLoading ? (
-          <Typography.Text type="secondary">{t('system.users.loadingDetail', '正在加载用户详情...')}</Typography.Text>
-        ) : !detailUser ? (
-          <Typography.Text type="danger">{t('system.users.userNotFound', '未找到用户信息')}</Typography.Text>
-        ) : (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions bordered column={2}>
-              <Descriptions.Item label={t('system.users.username', '用户名')}>{detailUser.username}</Descriptions.Item>
-              <Descriptions.Item label={t('system.users.fullName', '姓名')}>{detailUser.fullName || t('common.emptyValue')}</Descriptions.Item>
-              <Descriptions.Item label={t('system.users.email', '邮箱')}>{detailUser.email}</Descriptions.Item>
-              <Descriptions.Item label={t('common.status', '状态')}>
-                <Tag color={detailUser.isActive ? 'success' : 'default'}>
-                  {detailUser.isActive ? t('common.active', '启用') : t('common.inactive', '停用')}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.users.lastLogin', '最近登录')}>{formatUserLocalDateTime(detailUser.lastLoginAt, t('common.emptyValue'))}</Descriptions.Item>
-              <Descriptions.Item label={t('system.users.lastLoginIp', '最近登录 IP')}>{detailUser.lastLoginIp || t('common.emptyValue')}</Descriptions.Item>
-              <Descriptions.Item label={t('system.users.roles', '角色')} span={2}>
-                <Space wrap>
-                  {detailUser.roleNames?.length ? detailUser.roleNames.map((item) => <Tag key={item}>{item}</Tag>) : t('common.emptyValue')}
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.users.permissions', '权限')} span={2}>
-                <Space wrap>
-                  {detailUser.permissions?.length
-                    ? detailUser.permissions.map((p) => <Tag key={p} color="green">{p}</Tag>)
-                    : t('common.emptyValue')}
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.users.createdAt', '创建时间')}>{detailUser.createdAt}</Descriptions.Item>
-              <Descriptions.Item label={t('system.users.updatedAt', '更新时间')}>{detailUser.updatedAt}</Descriptions.Item>
-            </Descriptions>
-
-            <Card title={t('system.users.linkedStores', '关联分店')} size="small">
-              <List
-                dataSource={detailStores}
-                locale={{ emptyText: t('system.users.noLinkedStores', '暂无关联分店') }}
-                renderItem={(item) => (
-                  <List.Item>
-                    <Space>
-                      <Typography.Text strong>{item.storeName}</Typography.Text>
-                      <Tag>{item.storeCode}</Tag>
-                      {item.isManageable ? <Tag color="processing">{t('system.users.manageableStore', '可管理')}</Tag> : null}
-                    </Space>
-                  </List.Item>
-                )}
-              />
-            </Card>
-          </Space>
-        )}
-      </Drawer>
-
-      <Drawer
-        title={
-          posPermissionUser
-            ? t('system.users.posPermissionsTitle', '收银权限 - {{name}}', { name: posPermissionUser.username })
-            : t('system.users.posPermissions', '收银权限')
-        }
-        width={900}
-        open={posPermissionOpen}
-        onClose={() => {
-          posPermissionRequestRef.current = {
-            sequence: (posPermissionRequestRef.current?.sequence ?? 0) + 1,
-            userGuid: '',
-            storeGuid: '',
-          }
-          setPosPermissionOpen(false)
-          setPosPermissionUser(null)
-          setPosPermissionStores([])
-          setSelectedPosPermissionStoreGuid(undefined)
-          setPosPermissionState(null)
-          setPosPermissionError(null)
-          setPosPermissionStoresLoading(false)
-          setPosPermissionLoading(false)
-          setPosPermissionSaving(false)
-          setPosPermissionRestoring(false)
-        }}
-        destroyOnHidden
-      >
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <div>
-            <Typography.Text strong>{t('system.users.targetStore', '目标分店')}</Typography.Text>
-            <Select
-              aria-label={t('system.users.targetStore', '目标分店')}
-              value={selectedPosPermissionStoreGuid}
-              loading={posPermissionStoresLoading}
-              disabled={posPermissionStoresLoading || posPermissionSaving || posPermissionRestoring || !posPermissionStores.length}
-              style={{ width: '100%', marginTop: 8 }}
-              placeholder={t('system.users.selectPosPermissionStore', '请选择目标用户关联的分店')}
-              options={posPermissionStores.map((store) => ({
-                label: `${store.storeName} (${store.storeCode})`,
-                value: store.storeGUID,
-              }))}
-              onChange={(storeGuid) => void handlePosPermissionStoreChange(storeGuid)}
-            />
-          </div>
-
-          {posPermissionStoresLoading || posPermissionLoading ? (
-            <Skeleton active title paragraph={{ rows: 8 }} />
-          ) : posPermissionError ? (
-            <Alert
-              type="error"
-              showIcon
-              message={posPermissionError}
-              action={
-                posPermissionUser && selectedPosPermissionStoreGuid ? (
-                  <Button
-                    size="small"
-                    onClick={() => void loadPosPermissionState(posPermissionUser.userGUID, selectedPosPermissionStoreGuid)}
-                  >
-                    {t('common.retry', '重试')}
-                  </Button>
-                ) : (
-                  <Button size="small" onClick={() => posPermissionUser && void handleOpenPosPermissions(posPermissionUser)}>
-                    {t('common.retry', '重试')}
-                  </Button>
-                )
-              }
-            />
-          ) : !posPermissionStores.length ? (
-            <Empty description={t('system.users.noPosPermissionStores', '目标用户没有可管理的关联分店')} />
-          ) : !posPermissionState ? (
-            <Empty description={t('system.users.noPosPermissionData', '暂无收银权限数据')} />
-          ) : (
-            <>
-              <Alert
-                type="info"
-                showIcon
-                message={
-                  isInheritedPosPermissionMode(posPermissionState.mode)
-                    ? t('system.users.posPermissionInheritedMode', '当前使用账号权限继承')
-                    : t('system.users.posPermissionOverrideMode', '当前使用分店权限覆盖')
-                }
-                description={t(
-                  'system.users.posPermissionSummary',
-                  '可分配 {{assignable}} 项，账号继承 {{inherited}} 项，当前有效 {{effective}} 项。勾选项表示保存后的分店有效权限。',
-                  {
-                    assignable: posPermissionState.assignablePermissions.length,
-                    inherited: inheritedPosPermissionSet.size,
-                    effective: effectivePosPermissionSet.size,
-                  },
-                )}
-              />
-
-              {posPermissionSections.length ? posPermissionSections.map((section) => (
-                <Card key={section.module} title={section.displayName} size="small">
-                  <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                    {section.groups.map((group) => {
-                      const groupPermissionCodes = group.permissions.map((permission) => permission.code)
-                      const groupSelectionState = getPosPermissionGroupSelectionState(
-                        selectedPosPermissionCodes,
-                        groupPermissionCodes,
-                      )
-
-                      return (
-                        <div key={group.key}>
-                          <Checkbox
-                            checked={groupSelectionState.checked}
-                            indeterminate={groupSelectionState.indeterminate}
-                            disabled={posPermissionSaving || posPermissionRestoring}
-                            onChange={(event) => {
-                              setSelectedPosPermissionCodes((current) =>
-                                setPosPermissionGroupSelection(
-                                  current,
-                                  groupPermissionCodes,
-                                  event.target.checked,
-                                ),
-                              )
-                            }}
-                          >
-                            <Typography.Text strong>{group.displayName}</Typography.Text>
-                          </Checkbox>
-                          <List
-                            size="small"
-                            dataSource={group.permissions}
-                            locale={{ emptyText: t('system.users.noPosPermissionData', '暂无收银权限数据') }}
-                            renderItem={(permission) => {
-                              const isSelected = selectedPosPermissionSet.has(permission.code)
-                              const isEffective = effectivePosPermissionSet.has(permission.code)
-                              const hasDraftChange = isSelected !== isEffective
-                              return (
-                                <List.Item>
-                                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                                    <Checkbox
-                                      checked={isSelected}
-                                      disabled={posPermissionSaving || posPermissionRestoring}
-                                      onChange={(event) => {
-                                        setSelectedPosPermissionCodes((current) => {
-                                          const next = new Set(current)
-                                          if (event.target.checked) next.add(permission.code)
-                                          else next.delete(permission.code)
-                                          return Array.from(next)
-                                        })
-                                      }}
-                                    >
-                                      {permission.name}
-                                    </Checkbox>
-                                    <Space wrap size={[4, 4]} style={{ paddingLeft: 24 }}>
-                                      {inheritedPosPermissionSet.has(permission.code) ? (
-                                        <Tag>{t('system.users.accountInherited', '账号继承')}</Tag>
-                                      ) : null}
-                                      {overriddenPosPermissionSet.has(permission.code) ? (
-                                        <Tag color="processing">{t('system.users.storeOverridden', '分店已覆盖')}</Tag>
-                                      ) : null}
-                                      <Tag color={isEffective ? 'success' : 'default'}>
-                                        {isEffective
-                                          ? t('system.users.permissionEffective', '当前有效')
-                                          : t('system.users.permissionIneffective', '当前无效')}
-                                      </Tag>
-                                      {hasDraftChange ? (
-                                        <Tag color="warning">
-                                          {isSelected
-                                            ? t('system.users.pendingEnable', '待保存启用')
-                                            : t('system.users.pendingDisable', '待保存停用')}
-                                        </Tag>
-                                      ) : null}
-                                    </Space>
-                                    {permission.description ? (
-                                      <Typography.Text type="secondary" style={{ paddingLeft: 24, fontSize: 12 }}>
-                                        {permission.description}
-                                      </Typography.Text>
-                                    ) : null}
-                                  </Space>
-                                </List.Item>
-                              )
-                            }}
-                          />
-                        </div>
-                      )
-                    })}
-                  </Space>
-                </Card>
-              )) : (
-                <Empty description={t('system.users.noAssignablePosPermissions', '当前分店没有可分配的收银权限')} />
-              )}
-
-              <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-                <Button
-                  disabled={isInheritedPosPermissionMode(posPermissionState.mode) || posPermissionSaving || posPermissionRestoring}
-                  loading={posPermissionRestoring}
-                  onClick={handleRestorePosPermissionInheritance}
-                >
-                  {t('system.users.restoreInheritance', '恢复继承')}
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  disabled={
-                    !shouldEnablePosPermissionSave(posPermissionState.mode, hasPosPermissionChanges) ||
-                    posPermissionLoading ||
-                    posPermissionRestoring
-                  }
-                  loading={posPermissionSaving}
-                  onClick={() => void handleSavePosPermissions()}
-                >
-                  {t('system.users.saveStorePosPermissions', '保存分店权限')}
-                </Button>
-              </Space>
-            </>
-          )}
-        </Space>
-      </Drawer>
-
-      <Modal
-        title={
-          loginRecordsUser
-            ? t('system.users.loginRecordsTitle', '登录记录 - {{name}}', { name: loginRecordsUser.username })
-            : t('system.users.loginRecords', '登录记录')
-        }
-        width={960}
-        open={loginRecordsOpen}
-        footer={[
-          <Button
-            key="refresh"
-            icon={<ReloadOutlined />}
-            loading={loginRecordsLoading}
-            onClick={() => {
-              if (loginRecordsUser) {
-                void loadLoginRecords(loginRecordsUser, loginRecordsPage, loginRecordsPageSize)
-              }
-            }}
-          >
-            {t('common.refresh', '刷新')}
-          </Button>,
-          <Button
-            key="close"
-            onClick={closeLoginRecords}
-          >
-            {t('common.close', '关闭')}
-          </Button>,
-        ]}
-        onCancel={closeLoginRecords}
-        destroyOnHidden
-      >
-        <MeasuredTable<UserLoginRecordDto> metricId="system.users.table-2"
-          rowKey="sessionId"
-          size="small"
-          loading={loginRecordsLoading}
-          columns={loginRecordColumns}
-          dataSource={loginRecords}
-          scroll={{ x: 860 }}
-          pagination={{
-            current: loginRecordsPage,
-            pageSize: loginRecordsPageSize,
-            total: loginRecordsTotal,
-            showSizeChanger: true,
-            onChange: (nextPage, nextPageSize) => {
-              if (loginRecordsUser) {
-                void loadLoginRecords(loginRecordsUser, nextPage, nextPageSize)
-              }
-            },
-          }}
-        />
-      </Modal>
-
-      <Drawer
-        title={editingUser ? t('system.users.editUserTitle', '编辑用户 - {{name}}', { name: editingUser.username }) : t('system.users.editUser', '编辑用户')}
+        title={editingUser ? renderUserDrawerTitle(editingUser) : renderUserDrawerTitle(detailUser ?? drawerUser)}
         width="min(860px, 100vw)"
-        open={editOpen}
-        onClose={() => {
+        rootClassName="users-ws-drawer"
+        open={userDrawerOpen}
+        onClose={() => confirmCloseUserDrawer(() => {
           editingUserGuidRef.current = null
           currentEditSessionIdRef.current = null
           editUserRequestGuardRef.current.invalidate()
@@ -2313,10 +2841,13 @@ export default function SystemUsersPage() {
           setEditingUser(null)
           setAllRoles([])
           setRoleTargetKeys([])
+          setRoleBaselineKeys([])
           setRoleLoadStatus('idle')
           setAllStores([])
           setStoreTargetKeys([])
           setStoreManageableKeys([])
+          setStoreBaselineKeys([])
+          setStoreManageableBaselineKeys([])
           setStoreLoadStatus('idle')
           setPermCategories([])
           setPermissionState(null)
@@ -2329,22 +2860,33 @@ export default function SystemUsersPage() {
           setStoreSaving(false)
           setPermissionPlatform('web')
           form.resetFields()
-        }}
+          // 只读查看、登录记录与收银权限同在这个抽屉，关闭时一并清理。
+          setDetailOpen(false)
+          setDetailUser(null)
+          setDetailStores([])
+          closeLoginRecords()
+          resetPosPermissionState()
+          setDrawerUser(null)
+          setEditTab('info')
+        })}
         destroyOnHidden
       >
         <Tabs
+          className="users-ws-drawer-tabs"
           activeKey={editTab}
-          onChange={setEditTab}
-          items={editTabItems}
-          tabBarStyle={{ overflowX: 'auto' }}
+          onChange={(key) => setEditTab(key as UserDrawerTab)}
+          items={drawerTabItems}
         />
       </Drawer>
 
       <Modal
-        title={t('system.users.resetPassword', '重置密码')}
+        title={resetPwdTarget
+          ? t('system.usersWorkspace.resetPasswordTitle', '重置密码 - {{name}}', { name: resetPwdTarget.username })
+          : t('system.users.resetPassword', '重置密码')}
         open={resetPwdOpen}
         onCancel={() => {
           setResetPwdOpen(false)
+          setResetPwdTarget(null)
           resetPwdForm.resetFields()
         }}
         onOk={() => void handleResetPassword()}

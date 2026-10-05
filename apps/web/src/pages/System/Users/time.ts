@@ -16,6 +16,16 @@ function normalizeUtcTimestamp(value: string) {
   return `${trimmed.replace(' ', 'T')}Z`
 }
 
+/** 解析后端 UTC 时间戳（可能缺少时区后缀）；无效值返回 null。 */
+export function parseUserUtcTimestamp(value?: string | null) {
+  if (!value) {
+    return null
+  }
+
+  const parsed = dayjs(normalizeUtcTimestamp(value))
+  return parsed.isValid() ? parsed : null
+}
+
 export function formatUserLocalDateTime(value?: string | null, emptyValue = '--') {
   if (!value) {
     return emptyValue

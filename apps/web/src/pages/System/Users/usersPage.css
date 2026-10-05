@@ -1,0 +1,327 @@
+/* 用户管理页：单行高密度列表 + 统一的用户抽屉。类名统一 users-ws- 前缀，避免与全局样式冲突。 */
+
+.users-ws-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.users-ws-search {
+  width: 300px;
+  max-width: 100%;
+}
+
+.users-ws-refresh {
+  margin-left: auto;
+}
+
+.users-ws-table .ant-table-tbody > tr.ant-table-row {
+  cursor: pointer;
+}
+
+.users-ws-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.users-ws-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #e4eefc;
+  color: #0b4fc2;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.users-ws-avatar-inactive {
+  background: #eceff3;
+  color: #667085;
+}
+
+.users-ws-avatar-lg {
+  width: 48px;
+  height: 48px;
+  font-size: 18px;
+}
+
+.users-ws-name {
+  display: block;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.users-ws-name-inactive {
+  color: #667085;
+}
+
+.users-ws-subline {
+  display: block;
+  overflow: hidden;
+  color: #667085;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.users-ws-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.users-ws-chips-nowrap {
+  flex-wrap: nowrap;
+}
+
+.users-ws-login-rel {
+  display: block;
+}
+
+.users-ws-login-stale {
+  color: #8a5a00;
+}
+
+.users-ws-login-abs {
+  display: block;
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.users-ws-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* 抽屉：表头放用户摘要，正文由标签页撑满并独立滚动，待保存栏贴底。 */
+.users-ws-drawer .ant-drawer-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.users-ws-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.users-ws-drawer-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 26px;
+}
+
+.users-ws-drawer-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin-top: 6px;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.users-ws-drawer-facts strong {
+  color: #1f2430;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.users-ws-drawer-tabs {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.users-ws-drawer-tabs > .ant-tabs-nav {
+  margin: 0;
+  padding: 0 24px;
+}
+
+.users-ws-drawer-tabs > .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/*
+ * 标签页内容至少撑满可视高度，内容较短时待保存栏也贴在抽屉底部。
+ * .ant-tabs-content 的高度只来自 min-height（非确定高度），子元素不能再用百分比，改用 flex 撑满。
+ */
+.users-ws-drawer-tabs > .ant-tabs-content-holder > .ant-tabs-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.users-ws-drawer-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.users-ws-drawer-tabs .ant-tabs-tabpane-active > .users-ws-tab-body {
+  flex: 1 0 auto;
+}
+
+.users-ws-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 20px 24px 24px;
+}
+
+.users-ws-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 10px;
+}
+
+.users-ws-section-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.users-ws-section-hint {
+  color: #667085;
+  font-size: 12.5px;
+}
+
+.users-ws-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 8px;
+}
+
+/* 角色选项整张卡片就是 AntD Checkbox 的 label，点任意位置都能勾选。 */
+.users-ws-role-option.ant-checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  margin-inline-start: 0;
+  padding: 8px 12px;
+  border: 1px solid #e1e5ec;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.users-ws-role-option.ant-checkbox-wrapper > span:last-child {
+  flex: 1;
+  min-width: 0;
+  padding-inline-end: 0;
+}
+
+.users-ws-role-option.ant-checkbox-wrapper:hover {
+  border-color: #91caff;
+}
+
+.users-ws-role-option.users-ws-role-option-checked {
+  border-color: #1677ff;
+  background: #f0f6ff;
+}
+
+.users-ws-role-option.users-ws-role-option-disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.users-ws-store-list {
+  overflow: hidden;
+  border: 1px solid #e1e5ec;
+  border-radius: 12px;
+}
+
+.users-ws-store-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 0 12px;
+}
+
+.users-ws-store-row + .users-ws-store-row {
+  border-top: 1px solid #eef0f4;
+}
+
+.users-ws-store-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.users-ws-store-code {
+  margin-left: 6px;
+  color: #667085;
+  font-weight: 400;
+}
+
+.users-ws-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f6f8fb;
+  color: #4b5565;
+  font-size: 13px;
+}
+
+.users-ws-info-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  column-gap: 16px;
+}
+
+.users-ws-danger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #ffd8d2;
+  border-radius: 12px;
+  background: #fffafa;
+}
+
+.users-ws-tab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .users-ws-role-option {
+    transition: none;
+  }
+}
