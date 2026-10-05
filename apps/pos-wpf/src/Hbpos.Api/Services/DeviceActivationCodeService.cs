@@ -830,30 +830,16 @@ public sealed class DeviceActivationCodeService : IDeviceActivationCodeService
             new SugarParameter("@CreatedBy", CreatedBy));
     }
 
-    private async Task<string> CreateAvailableDeviceCodeAsync(string storeCode)
+    private Task<string> CreateAvailableDeviceCodeAsync(string storeCode)
     {
-        var baseCode = DeviceService.CreateDeviceCode(storeCode, LocalNow());
-        baseCode = baseCode[..Math.Min(50, baseCode.Length)];
-        for (var sequence = 1; sequence <= 99; sequence++)
-        {
-            var suffix = sequence == 1 ? string.Empty : $"_{sequence}";
-            var candidateBase = baseCode[..Math.Min(50 - suffix.Length, baseCode.Length)];
-            var candidate = candidateBase + suffix;
-            var exists = await _dbContext.PosmDb.Ado.GetIntAsync(
-                """
-                SELECT COUNT(1)
-                FROM [dbo].[POSM_设备注册信息表] WITH (UPDLOCK, HOLDLOCK)
-                WHERE [分店代码] = @StoreCode
-                  AND [系统设备编号] = @DeviceCode;
-                """,
+        // 候选号规则与匿名注册、换店共用 DeviceService.CreateAvailableDeviceCodeAsync，占用检查在当前事务内加锁。
+        return DeviceService.CreateAvailableDeviceCodeAsync(
+            storeCode,
+            LocalNow(),
+            async candidate => await _dbContext.PosmDb.Ado.GetIntAsync(
+                SqlSugarDeviceRegistrationRepository.IsDeviceCodeTakenForRegistrationSql,
                 new SugarParameter("@StoreCode", storeCode),
-                new SugarParameter("@DeviceCode", candidate));
-            if (exists == 0)
-            {
-                return candidate;
-            }
-        }
-        throw new InvalidOperationException("Could not allocate a target store device code.");
+                new SugarParameter("@DeviceCode", candidate)) > 0);
     }
 
     private async Task<int> ConsumeGrantAsync(

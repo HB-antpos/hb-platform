@@ -43,9 +43,22 @@ public interface IDeviceRegistrationRepository
         string hardwareId,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 按（设备号, 门店）确定性取一条记录：与 <paramref name="preferredHardwareId"/> 一致的行优先，
+    /// 否则取 ID 最大的最新行。只决定命中哪一行，是否放行仍由调用方按平台策略校验。
+    /// </summary>
     Task<DeviceRegistrationRecord?> FindByDeviceCodeAsync(
         string deviceCode,
         string storeCode,
+        string? preferredHardwareId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 在注册事务内检查门店下设备号是否已被任意记录占用，并持有范围锁直到事务结束，防止并发分配同号。
+    /// </summary>
+    Task<bool> IsDeviceCodeTakenForRegistrationAsync(
+        string storeCode,
+        string deviceCode,
         CancellationToken cancellationToken);
 
     Task<DeviceRegistrationRecord?> FindLatestByDeviceCodeAndHardwareIdAsync(
@@ -694,6 +707,7 @@ public sealed class DeviceService : IDeviceService
                     : CreatePendingRegistration(
                         hardwareId,
                         storeCode,
+                        await AllocateDeviceCodeAsync(storeCode, now, token),
                         terminalName,
                         now,
                         deviceSystem: deviceSystem);
@@ -758,10 +772,12 @@ public sealed class DeviceService : IDeviceService
         }
 
         // iPadOS 等跨端设备必须按门店、设备码、硬件码取最新记录，避免复用设备码命中其他硬件。
+        // Windows 兼容旧客户端可不带硬件码；带了硬件码时优先命中同硬件的行，避免历史撞号随机命中他人记录被持久化为拒绝。
         var device = requiresExactHardwareId
             ? await deviceRegistrationRepository.FindLatestByDeviceCodeAndHardwareIdAsync(
                 deviceCode, storeCode, hardwareId, cancellationToken)
-            : await deviceRegistrationRepository.FindByDeviceCodeAsync(deviceCode, storeCode, cancellationToken);
+            : await deviceRegistrationRepository.FindByDeviceCodeAsync(
+                deviceCode, storeCode, hardwareId, cancellationToken);
         if (device is null)
         {
             return CreateVerifyResponse(deviceCode, storeCode, store.StoreName, UnregisteredStatus, "Device is not registered.");
@@ -903,6 +919,7 @@ public sealed class DeviceService : IDeviceService
                 var pendingRegistration = CreatePendingRegistration(
                     hardwareId,
                     targetStoreCode,
+                    await AllocateDeviceCodeAsync(targetStoreCode, now, token),
                     terminalName,
                     now,
                     authorizationCode,
@@ -1009,6 +1026,48 @@ public sealed class DeviceService : IDeviceService
         return $"POS_{storeCode}_{localTime:HHmm}";
     }
 
+    /// <summary>
+    /// 生成门店内未被占用的设备号：先用 POS_{门店}_{HHmm}，被占用时依次追加 _2.._99。
+    /// 匿名注册、换店与开通码路径共用此规则；占用判断由调用方在事务内加锁完成。
+    /// </summary>
+    internal static async Task<string> CreateAvailableDeviceCodeAsync(
+        string storeCode,
+        DateTime localTime,
+        Func<string, Task<bool>> isTakenAsync)
+    {
+        // 设备号列为 varchar(50)，截断基础号时保留后缀，保证候选号互不相同。
+        const int maxDeviceCodeLength = 50;
+        var baseCode = CreateDeviceCode(storeCode, localTime);
+        baseCode = baseCode[..Math.Min(maxDeviceCodeLength, baseCode.Length)];
+        for (var sequence = 1; sequence <= 99; sequence++)
+        {
+            var suffix = sequence == 1 ? string.Empty : $"_{sequence}";
+            var candidateBase = baseCode[..Math.Min(maxDeviceCodeLength - suffix.Length, baseCode.Length)];
+            var candidate = candidateBase + suffix;
+            if (!await isTakenAsync(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException("Could not allocate a target store device code.");
+    }
+
+    private Task<string> AllocateDeviceCodeAsync(
+        string storeCode,
+        DateTime localTime,
+        CancellationToken cancellationToken)
+    {
+        // 关键逻辑：HHmm 每店只有 1440 种取值，跨日期、跨平台都会撞号；必须在注册事务内带锁去重后再写入。
+        return CreateAvailableDeviceCodeAsync(
+            storeCode,
+            localTime,
+            candidate => deviceRegistrationRepository.IsDeviceCodeTakenForRegistrationAsync(
+                storeCode,
+                candidate,
+                cancellationToken));
+    }
+
     private async Task<DeviceStoreInfo?> LoadStoreAsync(string storeCode, CancellationToken cancellationToken)
     {
         var context = dbContext ?? throw new InvalidOperationException("Db context is required for store lookup.");
@@ -1024,6 +1083,7 @@ public sealed class DeviceService : IDeviceService
     private static DeviceRegistrationCreateRequest CreatePendingRegistration(
         string hardwareId,
         string storeCode,
+        string deviceCode,
         string terminalName,
         DateTime createdAt,
         string? authorizationCode = null,
@@ -1032,7 +1092,7 @@ public sealed class DeviceService : IDeviceService
         return new DeviceRegistrationCreateRequest
         {
             HardwareId = hardwareId,
-            DeviceCode = CreateDeviceCode(storeCode, createdAt),
+            DeviceCode = deviceCode,
             StoreCode = storeCode,
             DeviceStatus = PendingStatus,
             AuthorizationCode = authorizationCode ?? Guid.NewGuid().ToString("N"),
@@ -1239,6 +1299,34 @@ public sealed class SqlSugarDeviceRegistrationRepository(HbposSqlSugarContext db
         ORDER BY [ID] DESC;
         """;
 
+    // 硬件码比较与 DeviceAuthorizationPlatformPolicy 一致（去空格、忽略大小写），只影响命中顺序，不放宽过滤条件。
+    internal const string FindByDeviceCodeSql = """
+        SELECT TOP 1
+            [系统设备编号] AS DeviceCode,
+            [分店代码] AS StoreCode,
+            [设备硬件识别码] AS HardwareId,
+            [设备状态] AS DeviceStatus,
+            [设备授权码] AS AuthorizationCode,
+            [设备系统] AS DeviceSystem
+        FROM [POSM_设备注册信息表]
+        WHERE [系统设备编号] = @DeviceCode
+          AND [分店代码] = @StoreCode
+        ORDER BY
+            CASE
+                WHEN @HardwareId <> ''
+                     AND UPPER(LTRIM(RTRIM([设备硬件识别码]))) = UPPER(@HardwareId) THEN 0
+                ELSE 1
+            END,
+            [ID] DESC;
+        """;
+
+    internal const string IsDeviceCodeTakenForRegistrationSql = """
+        SELECT COUNT(1)
+        FROM [dbo].[POSM_设备注册信息表] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [分店代码] = @StoreCode
+          AND [系统设备编号] = @DeviceCode;
+        """;
+
     internal const string CountActiveOrLockedByStoreCodeForRegistrationSql = """
         SELECT COUNT(1)
         FROM [dbo].[POSM_AppReviewGrantConsumptions] AS consumption WITH (UPDLOCK, HOLDLOCK)
@@ -1336,27 +1424,31 @@ public sealed class SqlSugarDeviceRegistrationRepository(HbposSqlSugarContext db
     public async Task<DeviceRegistrationRecord?> FindByDeviceCodeAsync(
         string deviceCode,
         string storeCode,
+        string? preferredHardwareId,
         CancellationToken cancellationToken)
     {
-        const string sql = """
-            SELECT TOP 1
-                [系统设备编号] AS DeviceCode,
-                [分店代码] AS StoreCode,
-                [设备硬件识别码] AS HardwareId,
-                [设备状态] AS DeviceStatus,
-                [设备授权码] AS AuthorizationCode,
-                [设备系统] AS DeviceSystem
-            FROM [POSM_设备注册信息表]
-            WHERE [系统设备编号] = @DeviceCode
-              AND [分店代码] = @StoreCode;
-            """;
-
+        // 关键逻辑：生产表没有（分店代码, 系统设备编号）唯一约束，历史撞号时必须确定性命中；
+        // 空硬件码统一传空串，使所有行落入同一优先级、退化为取最新行。
         var record = await dbContext.PosmDb.Ado.SqlQuerySingleAsync<DeviceRegistrationRecord>(
-            sql,
+            FindByDeviceCodeSql,
             new SugarParameter("@DeviceCode", deviceCode),
-            new SugarParameter("@StoreCode", storeCode));
+            new SugarParameter("@StoreCode", storeCode),
+            new SugarParameter("@HardwareId", (preferredHardwareId ?? string.Empty).Trim()));
 
         return record;
+    }
+
+    public async Task<bool> IsDeviceCodeTakenForRegistrationAsync(
+        string storeCode,
+        string deviceCode,
+        CancellationToken cancellationToken)
+    {
+        // 关键逻辑：UPDLOCK + HOLDLOCK 在注册事务内锁住该门店设备号的键范围，
+        // 并发请求会在此排队，等前一个事务提交后看到新写入的号码再顺延，与开通码路径同一做法。
+        return await dbContext.PosmDb.Ado.GetIntAsync(
+            IsDeviceCodeTakenForRegistrationSql,
+            new SugarParameter("@StoreCode", storeCode),
+            new SugarParameter("@DeviceCode", deviceCode)) > 0;
     }
 
     public async Task<DeviceRegistrationRecord?> FindLatestByDeviceCodeAndHardwareIdAsync(

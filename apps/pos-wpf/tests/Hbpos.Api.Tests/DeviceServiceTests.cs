@@ -19,6 +19,32 @@ public sealed class DeviceServiceTests
     }
 
     [Fact]
+    public void FindByDeviceCodeSql_KeepsExactFiltersAndOrdersByHardwareThenLatest()
+    {
+        var sql = SqlSugarDeviceRegistrationRepository.FindByDeviceCodeSql;
+
+        // 过滤条件保持设备号 + 门店精确匹配，硬件码只参与排序，不放宽命中范围。
+        Assert.Contains("[系统设备编号] = @DeviceCode", sql, StringComparison.Ordinal);
+        Assert.Contains("[分店代码] = @StoreCode", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("WHERE [设备硬件识别码]", sql, StringComparison.Ordinal);
+        var orderByIndex = sql.IndexOf("ORDER BY", StringComparison.Ordinal);
+        Assert.True(orderByIndex > 0);
+        Assert.Contains("@HardwareId", sql[orderByIndex..], StringComparison.Ordinal);
+        Assert.Contains("[ID] DESC", sql[orderByIndex..], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IsDeviceCodeTakenForRegistrationSql_LocksStoreDeviceCodeRange()
+    {
+        var sql = SqlSugarDeviceRegistrationRepository.IsDeviceCodeTakenForRegistrationSql;
+
+        Assert.Contains("WITH (UPDLOCK, HOLDLOCK)", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[分店代码] = @StoreCode", sql, StringComparison.Ordinal);
+        Assert.Contains("[系统设备编号] = @DeviceCode", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("[设备状态]", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResetRegistrationForReregisterSql_UsesSnapshotConcurrencyConditions()
     {
         var sql = SqlSugarDeviceRegistrationRepository.ResetRegistrationForReregisterSql;
@@ -1575,6 +1601,159 @@ public sealed class DeviceServiceTests
         Assert.Null(repository.LastRuntimeStatus.CashierLoginAt);
     }
 
+    [Fact]
+    public async Task RegisterAsync_WhenSameStoreRegistersTwoDevicesInSameMinute_AllocatesDistinctDeviceCodes()
+    {
+        var now = new DateTime(2026, 7, 10, 11, 1, 0);
+        var repository = new FakeDeviceRegistrationRepository();
+        var service = new DeviceService(
+            repository,
+            LoadStoreAsync,
+            () => now,
+            utcNowProvider: () => new DateTimeOffset(now));
+
+        var first = await service.RegisterAsync(
+            new DeviceRegisterRequest("1003", "HW-001", "Counter 1"),
+            CancellationToken.None);
+        var second = await service.RegisterAsync(
+            new DeviceRegisterRequest("1003", "HW-002", "Counter 2"),
+            CancellationToken.None);
+
+        // 同一门店同一 HH:mm 注册的两台设备必须拿到不同设备号，否则 Windows verify 可能命中别人的记录。
+        Assert.Equal("POS_1003_1101", first.DeviceCode);
+        Assert.Equal("POS_1003_1101_2", second.DeviceCode);
+        Assert.Equal(
+            ["POS_1003_1101", "POS_1003_1101_2"],
+            repository.CreatedRegistrations.Select(item => item.DeviceCode).ToArray());
+    }
+
+    [Fact]
+    public async Task RegisterAsync_WhenHistoricalDeviceUsedSameHourMinute_SkipsTakenDeviceCode()
+    {
+        var now = new DateTime(2026, 10, 5, 11, 1, 0);
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            // 另一天、另一平台注册的设备号同样占用该门店的 HH:mm 槽位。
+            ExistingDeviceCodes = [("1003", "POS_1003_1101")]
+        };
+        var service = new DeviceService(
+            repository,
+            LoadStoreAsync,
+            () => now,
+            utcNowProvider: () => new DateTimeOffset(now));
+
+        var response = await service.RegisterAsync(
+            new DeviceRegisterRequest("1003", "HW-003", "Counter 3", DeviceSystems.IpadOs),
+            CancellationToken.None);
+
+        Assert.Equal("POS_1003_1101_2", response.DeviceCode);
+        Assert.Equal("POS_1003_1101_2", Assert.Single(repository.CreatedRegistrations).DeviceCode);
+    }
+
+    [Fact]
+    public async Task ReregisterAsync_WhenTargetStoreNeedsNewDeviceCode_AvoidsTakenDeviceCode()
+    {
+        var now = new DateTime(2026, 7, 10, 10, 17, 0);
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            ExistingDeviceCodes = [("1003", "POS_1003_1017"), ("1002", "POS_1002_1017_2")]
+        };
+        var service = new DeviceService(repository, LoadStoreAsync, () => now);
+
+        var response = await service.ReregisterAsync(
+            new DeviceReregisterRequest("1003", "HW-001", "Counter 2"),
+            new DeviceReregisterContext("POS_1002_0800", "1002", "HW-001"),
+            CancellationToken.None);
+
+        // 目标门店的同号已被其他设备占用，只按目标门店去重，其他门店的同名号码不影响。
+        Assert.Equal("POS_1003_1017_2", response.DeviceCode);
+        var created = Assert.Single(repository.CreatedRegistrations);
+        Assert.Equal("POS_1003_1017_2", created.DeviceCode);
+        Assert.Equal("1003", created.StoreCode);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WhenWindowsDeviceCodeHasDuplicateRows_UsesRowMatchingHardwareId()
+    {
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            // 模拟历史撞号：其他设备的记录更新且物理顺序靠前。
+            DeviceRowsByCode =
+            [
+                new DeviceRegistrationRecord
+                {
+                    Id = 12,
+                    DeviceCode = "POS_1003_1101",
+                    StoreCode = "1003",
+                    HardwareId = "HW-OTHER",
+                    DeviceStatus = 1,
+                    DeviceSystem = "Windows",
+                    AuthorizationCode = "AUTH-OTHER"
+                },
+                new DeviceRegistrationRecord
+                {
+                    Id = 7,
+                    DeviceCode = "POS_1003_1101",
+                    StoreCode = "1003",
+                    HardwareId = "HW-001",
+                    DeviceStatus = 1,
+                    DeviceSystem = "Windows",
+                    AuthorizationCode = "AUTH-001"
+                }
+            ]
+        };
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        var response = await service.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1101", "1003", " hw-001 ", DeviceSystem: DeviceSystems.Windows),
+            CancellationToken.None);
+
+        Assert.True(response.IsAllowed);
+        Assert.Equal(1, response.DeviceStatus);
+        Assert.Equal("AUTH-001", response.AuthorizationCode);
+        Assert.Equal("hw-001", repository.LastPreferredHardwareId);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WhenLegacyWindowsRequestOmitsHardwareIdForDuplicateRows_UsesLatestRow()
+    {
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            DeviceRowsByCode =
+            [
+                new DeviceRegistrationRecord
+                {
+                    Id = 7,
+                    DeviceCode = "POS_1003_1101",
+                    StoreCode = "1003",
+                    HardwareId = "HW-001",
+                    DeviceStatus = 0,
+                    DeviceSystem = "Windows",
+                    AuthorizationCode = "AUTH-001"
+                },
+                new DeviceRegistrationRecord
+                {
+                    Id = 12,
+                    DeviceCode = "POS_1003_1101",
+                    StoreCode = "1003",
+                    HardwareId = "HW-002",
+                    DeviceStatus = 1,
+                    DeviceSystem = "Windows",
+                    AuthorizationCode = "AUTH-002"
+                }
+            ]
+        };
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        var response = await service.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1101", "1003"),
+            CancellationToken.None);
+
+        // 旧客户端不带硬件码时，确定性地取最新一行，而不是随机行。
+        Assert.True(response.IsAllowed);
+        Assert.Equal("AUTH-002", response.AuthorizationCode);
+    }
+
     private static Task<DeviceStoreInfo?> LoadStoreAsync(string storeCode, CancellationToken cancellationToken)
     {
         DeviceStoreInfo? store = storeCode switch
@@ -1606,6 +1785,12 @@ public sealed class DeviceServiceTests
         public DeviceRegistrationRecord? DeviceByCode { get; init; }
 
         public DeviceRegistrationRecord? DeviceByExactIdentity { get; init; }
+
+        public IReadOnlyList<DeviceRegistrationRecord> DeviceRowsByCode { get; init; } = [];
+
+        public IReadOnlyList<(string StoreCode, string DeviceCode)> ExistingDeviceCodes { get; init; } = [];
+
+        public string? LastPreferredHardwareId { get; private set; }
 
         public DeviceRegistrationRecord? LatestByHardwareId { get; init; }
 
@@ -1664,9 +1849,44 @@ public sealed class DeviceServiceTests
         public Task<DeviceRegistrationRecord?> FindByDeviceCodeAsync(
             string deviceCode,
             string storeCode,
+            string? preferredHardwareId,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(DeviceByCode);
+            LastPreferredHardwareId = preferredHardwareId;
+            if (DeviceByCode is not null)
+            {
+                return Task.FromResult<DeviceRegistrationRecord?>(DeviceByCode);
+            }
+
+            // 与仓储 SQL 契约一致：硬件码一致的行优先，其次取 ID 最大的最新行。
+            var normalizedHardwareId = (preferredHardwareId ?? string.Empty).Trim();
+            var record = DeviceRowsByCode
+                .Where(row => string.Equals(row.DeviceCode, deviceCode, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(row.StoreCode, storeCode, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(row => normalizedHardwareId.Length > 0
+                    && string.Equals(
+                        (row.HardwareId ?? string.Empty).Trim(),
+                        normalizedHardwareId,
+                        StringComparison.OrdinalIgnoreCase)
+                        ? 0
+                        : 1)
+                .ThenByDescending(row => row.Id)
+                .FirstOrDefault();
+            return Task.FromResult(record);
+        }
+
+        public Task<bool> IsDeviceCodeTakenForRegistrationAsync(
+            string storeCode,
+            string deviceCode,
+            CancellationToken cancellationToken)
+        {
+            var taken = ExistingDeviceCodes.Any(item =>
+                    string.Equals(item.StoreCode, storeCode, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.DeviceCode, deviceCode, StringComparison.OrdinalIgnoreCase))
+                || CreatedRegistrations.Any(item =>
+                    string.Equals(item.StoreCode, storeCode, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.DeviceCode, deviceCode, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(taken);
         }
 
         public Task<DeviceRegistrationRecord?> FindLatestByDeviceCodeAndHardwareIdAsync(

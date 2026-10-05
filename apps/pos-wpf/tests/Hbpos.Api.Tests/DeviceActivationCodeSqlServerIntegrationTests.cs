@@ -124,14 +124,7 @@ public sealed class DeviceActivationSqlServerFixture : IAsyncLifetime
 
     public (DeviceActivationCodeService Service, HbposSqlSugarContext Context) CreateService()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:MainConnection"] = MainConnectionString,
-                ["ConnectionStrings:PosmConnection"] = PosmConnectionString,
-                ["Database:CommandTimeoutSeconds"] = "30",
-            })
-            .Build();
+        var configuration = CreateConfiguration();
         var context = new HbposSqlSugarContext(
             configuration,
             NullLogger<HbposSqlSugarContext>.Instance);
@@ -142,6 +135,20 @@ public sealed class DeviceActivationSqlServerFixture : IAsyncLifetime
                 NullLogger<DeviceActivationCodeService>.Instance),
             context);
     }
+
+    // 每次返回独立连接的上下文，供并发用例模拟多个 API 请求。
+    public HbposSqlSugarContext CreateContext() =>
+        new(CreateConfiguration(), NullLogger<HbposSqlSugarContext>.Instance);
+
+    private IConfiguration CreateConfiguration() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:MainConnection"] = MainConnectionString,
+                ["ConnectionStrings:PosmConnection"] = PosmConnectionString,
+                ["Database:CommandTimeoutSeconds"] = "30",
+            })
+            .Build();
 
     public async Task<DeviceActivationCodeMaterial> SeedGrantAsync(
         string storeCode = "S002",
