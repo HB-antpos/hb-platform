@@ -1644,6 +1644,184 @@ test("真实 SQLite：Cancelled close 遇到活动 tender、非 Cancelled 或其
   });
 });
 
+test("真实 SQLite：退货在线退款 attempt 未决（Created/Unknown/Approved 未入 tender）不被销售支付恢复当作阻塞单，销售 attempt 仍正常阻塞", async () => {
+  // 回归：退货单在 prepare 阶段即以 Draft 写入 local_orders，退款 attempt 的 OrderGuid 是退货单；
+  // 销售支付恢复曾把它当成阻塞单去重建购物车，抛 "Payment recovery order has no lines."，
+  // 冷启动、销售页恢复探针全部失败，而退货恢复又要等运行时起来，形成死锁。
+  await withDatabase("return-refund-not-sale-blocking", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-cash",
+      originalOrderGuid: "original-return-order",
+      method: "cash",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: null,
+      observedAtIso: T0,
+    });
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-card",
+      originalOrderGuid: "original-return-order",
+      method: "card",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: { paymentId: "PAYMENT-ID", rfn: "RFN" },
+      observedAtIso: T0,
+    });
+    let tenderId = 0;
+    let auditId = 0;
+    const ledger = new SqliteReturnExecutionLedger(
+      connection,
+      encryptor,
+      {
+        createTenderGuid: () => `return-tender-${++tenderId}`,
+        createAuditEventId: () => `return-audit-${++auditId}`,
+      },
+      () => T2,
+    );
+    const draft = durableReturnDraft();
+    await ledger.prepareOrLoad(draft);
+    const scope = {
+      storeCode: draft.identity.storeCode,
+      deviceCode: draft.identity.deviceCode,
+    };
+    const store = new SqlitePaymentDraftRecoveryStore(
+      connection,
+      sequenceIds("sale-order", "sale-audit"),
+      () => T2,
+    );
+    assert.equal(await store.findBlockingRecovery(scope), null);
+
+    assert.equal(
+      await ledger.markAllocationSubmitted({
+        actionId: draft.actionId,
+        allocationId: "return-allocation-card",
+      }),
+      true,
+    );
+    await insertActionBinding(
+      connection,
+      draft.returnOrderGuid,
+      "return-provider-action",
+      "return-payment-attempt",
+      "return-payment-idempotency",
+      ["square", "refund", "AUD", -300],
+    );
+    await insertAttempt(connection, {
+      attemptId: "return-payment-attempt",
+      idempotencyKey: "return-payment-idempotency",
+      orderGuid: draft.returnOrderGuid,
+      provider: "square",
+      operation: "refund",
+      amountCents: -300,
+      state: "Created",
+    });
+    // provider 调用前 attempt 已 Created、但尚未回写 allocation 绑定的崩溃窗口，同样不得误判。
+    assert.equal(await store.findBlockingRecovery(scope), null);
+
+    await connection.run(
+      "UPDATE payment_attempts SET state = 'Unknown' WHERE attempt_id = ?",
+      ["return-payment-attempt"],
+    );
+    assert.equal(
+      await ledger.bindAllocationAttempt({
+        actionId: draft.actionId,
+        allocationId: "return-allocation-card",
+        attemptKind: "payment-provider",
+        externalActionId: "return-provider-action",
+        durableAttemptId: "return-payment-attempt",
+      }),
+      true,
+    );
+    assert.equal(
+      await ledger.recordAllocationOutcome({
+        actionId: draft.actionId,
+        allocationId: "return-allocation-card",
+        expectedStatuses: ["submitted"],
+        status: "unknown",
+        protectedRecoveryKey: "RECOVERY-KEY",
+      }),
+      true,
+    );
+    await ledger.markActionUnknown({ actionId: draft.actionId });
+    assert.equal(await store.findBlockingRecovery(scope), null);
+
+    await connection.run(
+      "UPDATE payment_attempts SET state = 'Approved' WHERE attempt_id = ?",
+      ["return-payment-attempt"],
+    );
+    assert.equal(
+      await scalar(
+        connection,
+        "SELECT COUNT(*) AS count FROM order_tenders WHERE order_guid = ?",
+        [draft.returnOrderGuid],
+      ),
+      0,
+    );
+    assert.equal(await store.findBlockingRecovery(scope), null);
+
+    // 退货自身的恢复入口不受影响：仍按 return_actions 发现这笔未决退货。
+    const recoverable = await ledger.listRecoverable({
+      ...scope,
+      cashierId: draft.identity.cashierId,
+      sessionEpoch: "new-session-epoch",
+    });
+    assert.equal(recoverable.length, 1);
+    assert.equal(recoverable[0]?.returnOrderGuid, draft.returnOrderGuid);
+    assert.equal(recoverable[0]?.status, "unknown");
+
+    // 同机销售支付仍被正确识别：草稿与 purchase attempt 依旧是唯一阻塞单。
+    const saleInput = draftInput({
+      draftId: "sale-draft-beside-return",
+      identity: {
+        storeCode: scope.storeCode,
+        deviceCode: scope.deviceCode,
+        cashierId: draft.identity.cashierId,
+        cashierName: draft.identity.cashierName,
+      },
+    });
+    const sale = await store.createOrReuseDraft(saleInput);
+    const prepared = await store.findBlockingRecovery(scope);
+    assert.equal(prepared?.kind, "DraftPrepared");
+    assert.equal(prepared?.orderGuid, sale.orderGuid);
+    await insertActionBinding(
+      connection,
+      sale.orderGuid,
+      "sale-pay-action",
+      "sale-payment-attempt",
+      "sale-payment-idempotency",
+    );
+    await insertAttempt(connection, {
+      attemptId: "sale-payment-attempt",
+      idempotencyKey: "sale-payment-idempotency",
+      orderGuid: sale.orderGuid,
+      provider: "square",
+      operation: "purchase",
+      amountCents: 900,
+      state: "Unknown",
+    });
+    const blocking = await store.findBlockingRecovery(scope);
+    assert.equal(blocking?.kind, "AttemptBlocking");
+    if (blocking?.kind === "AttemptBlocking") {
+      assert.equal(blocking.orderGuid, sale.orderGuid);
+      assert.equal(blocking.attemptId, "sale-payment-attempt");
+      assert.equal(blocking.operation, "purchase");
+      assert.equal(blocking.state, "Unknown");
+    }
+    // 已有阻塞销售单时，新的销售草稿仍必须被挡回原单。
+    await assert.rejects(
+      () => store.createOrReuseDraft(
+        draftInput({
+          draftId: "sale-draft-second",
+          identity: saleInput.identity,
+        }),
+      ),
+      /must resume existing order/,
+    );
+  });
+});
+
 test("真实 SQLite：退货多 allocation 在 provider 前耐久绑定，Unknown 跨恢复冻结容量并以同一 OrderGuid 完成", async () => {
   await withDatabase("durable-return-ledger", async (connection) => {
     await migrateFresh(connection);
