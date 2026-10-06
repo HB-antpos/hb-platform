@@ -706,13 +706,15 @@ namespace BlazorApp.Api.Tests
 
             await _db.Insertable(new[]
             {
-                // 混合单：2 行 NULL（未检测）、2 行 0（主档不存在）、1 行 1、1 行 3；另有已删除的 NULL/0 不应计入。
+                // 混合单：2 行 NULL（未检测）、2 行 0 且无编码（新品）、1 行 0 但已回填编码（已建品，不算新品）、1 行 1、1 行 3；
+                // 另有已删除的 NULL/0 不应计入。
                 new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-null-1", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = false },
                 new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-null-2", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = false },
                 new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-1", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = false },
                 new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-2", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = false },
-                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-one", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 1, IsDeleted = false },
-                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-three", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 3, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-synced", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, ProductCode = "P-SYNCED", IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-one", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 1, ProductCode = "P-ONE", IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-three", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 3, ProductCode = "P-THREE", IsDeleted = false },
                 new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-deleted-null", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = true },
                 new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-deleted-zero", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = true },
                 // 全部已检测但主档都不存在：算已检测，且全部计入主档不存在。
@@ -724,8 +726,9 @@ namespace BlazorApp.Api.Tests
 
             Assert.True(result.Success, result.Message);
             var mixed = Assert.Single(result.Items!, item => item.InvoiceGUID == "invoice-count-mixed");
-            Assert.Equal(6, mixed.DetailCount);
+            Assert.Equal(7, mixed.DetailCount);
             Assert.Equal(2, mixed.UncheckedDetailCount);
+            // 关键断言：检测为不存在但已回填编码的行不再计入新品。
             Assert.Equal(2, mixed.NewProductDetailCount);
             Assert.False(mixed.IsProductChecked);
 
