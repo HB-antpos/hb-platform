@@ -1,0 +1,56 @@
+{
+  "posAdmin": {
+    "devices": {
+      "mgmt": {
+        "subtitle": "共 {{total}} 台 · 在线 {{online}}",
+        "searchPlaceholder": "搜索设备编号、硬件标识、备注或收银员",
+        "statusTabs": {
+          "all": "全部",
+          "pending": "待确认",
+          "enabled": "启用",
+          "disabled": "禁用",
+          "locked": "锁定"
+        },
+        "pendingBanner": "{{count}} 台新设备等待确认启用",
+        "pendingBannerAction": "只看待确认",
+        "truncated": "当前只加载了 {{loaded}} / {{total}} 台设备，请先选择分店缩小范围。",
+        "columns": {
+          "device": "设备",
+          "typeSystem": "类型 / 系统",
+          "runtime": "运行",
+          "transactions": "交易",
+          "registeredAt": "注册时间",
+          "version": "版本",
+          "update": "更新",
+          "lastUser": "最近用户"
+        },
+        "heartbeatNever": "从未上报",
+        "cashier": "收银员 {{name}}",
+        "relative": {
+          "justNow": "刚刚",
+          "minutes": "{{count}} 分钟前",
+          "hours": "{{count}} 小时前",
+          "days": "{{count}} 天前"
+        },
+        "transactionsNotApplicableHint": "仅 iPad POS 和 iOS/Android 手持端支持交易开关",
+        "emptyFiltered": "没有符合条件的设备",
+        "clearFilters": "清空筛选",
+        "confirmDisableTitle": "禁用设备 {{deviceNo}}？",
+        "confirmDisableContent": "禁用后该设备无法再进入 App 或收银，之后可随时重新启用。",
+        "confirmLockTitle": "锁定设备 {{deviceNo}}？",
+        "confirmLockContent": "锁定用于设备丢失或疑似被盗，锁定后该设备立即无法使用，需管理员重新启用。",
+        "drawer": {
+          "sectionBasic": "基本信息",
+          "sectionRuntime": "运行状态",
+          "sectionRecord": "记录",
+          "sectionSettings": "设备设置",
+          "lastHeartbeat": "最后心跳",
+          "cashierLoginAt": "收银员登录",
+          "readOnlyHint": "当前账号只有查看权限，不能修改设备设置或状态。"
+        },
+        "appSummaryUnknown": "系统未知",
+        "appLastReport": "最后上报"
+      }
+    }
+  }
+}

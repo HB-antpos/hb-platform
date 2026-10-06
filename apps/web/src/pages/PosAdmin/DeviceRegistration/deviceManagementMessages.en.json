@@ -1,0 +1,56 @@
+{
+  "posAdmin": {
+    "devices": {
+      "mgmt": {
+        "subtitle": "{{total}} devices · {{online}} online",
+        "searchPlaceholder": "Search device no., hardware ID, remark or cashier",
+        "statusTabs": {
+          "all": "All",
+          "pending": "Pending",
+          "enabled": "Enabled",
+          "disabled": "Disabled",
+          "locked": "Locked"
+        },
+        "pendingBanner": "{{count}} new device(s) waiting for approval",
+        "pendingBannerAction": "Show pending only",
+        "truncated": "Only {{loaded}} of {{total}} devices are loaded. Select a store to narrow the list.",
+        "columns": {
+          "device": "Device",
+          "typeSystem": "Type / System",
+          "runtime": "Runtime",
+          "transactions": "Sales",
+          "registeredAt": "Registered",
+          "version": "Version",
+          "update": "Update",
+          "lastUser": "Last user"
+        },
+        "heartbeatNever": "Never reported",
+        "cashier": "Cashier {{name}}",
+        "relative": {
+          "justNow": "just now",
+          "minutes": "{{count}} min ago",
+          "hours": "{{count}} h ago",
+          "days": "{{count}} d ago"
+        },
+        "transactionsNotApplicableHint": "Only iPad POS and iOS/Android handhelds support the sales switch",
+        "emptyFiltered": "No devices match the filters",
+        "clearFilters": "Clear filters",
+        "confirmDisableTitle": "Disable device {{deviceNo}}?",
+        "confirmDisableContent": "The device will no longer be able to open the app or take sales. You can enable it again at any time.",
+        "confirmLockTitle": "Lock device {{deviceNo}}?",
+        "confirmLockContent": "Use lock when a device is lost or suspected stolen. It stops working immediately until an admin enables it again.",
+        "drawer": {
+          "sectionBasic": "Basics",
+          "sectionRuntime": "Runtime",
+          "sectionRecord": "History",
+          "sectionSettings": "Settings",
+          "lastHeartbeat": "Last heartbeat",
+          "cashierLoginAt": "Cashier signed in",
+          "readOnlyHint": "You have view-only access and cannot change device settings or status."
+        },
+        "appSummaryUnknown": "Unknown OS",
+        "appLastReport": "Last report"
+      }
+    }
+  }
+}
