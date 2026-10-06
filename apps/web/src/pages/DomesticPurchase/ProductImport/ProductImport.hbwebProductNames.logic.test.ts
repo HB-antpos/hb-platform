@@ -348,19 +348,34 @@ assertDeepEqual(
   '页面终态通知应为 success/warning 二选一，且不得读取原始 errors 或为 partial 追加 error',
 )
 
+// 原断言：「更新主表名称」按钮与 HQ 复选框组成不换行分组，并整体位于「检测匹配」按钮之前。
+// 重设计后的流程是 检测 → 入库：复选框所在的不换行分组改放在「重新检测」之后、「更新 / 新建」之前；
+// 「更新主表名称」按钮收进「更多操作」菜单，仍调用同一个 handleUpdateHbwebProductNames（请求体、确认文案、通知逻辑都不变）。
+const detectButtonIndex = pageSource.indexOf("t('productImport.detectMatch', '检测匹配')")
 const updateGroupIndex = pageSource.indexOf('<Space size="small" wrap={false}>')
-const updateButtonIndex = pageSource.indexOf("t('productImport.updateHbwebProductNames', '更新主表名称')")
 const syncCheckboxIndex = pageSource.indexOf('checked={syncProductNamesToHq}')
 const updateGroupEndIndex = pageSource.indexOf('</Space>', syncCheckboxIndex)
-const detectButtonIndex = pageSource.indexOf("t('productImport.detectMatch', '检测匹配')")
+const updateCountButtonIndex = pageSource.indexOf("t('productImport.updateCountButton'")
+const createCountButtonIndex = pageSource.indexOf("t('productImport.createCountButton'")
 assertEqual(
-  updateGroupIndex >= 0
-    && updateGroupIndex < updateButtonIndex
-    && updateButtonIndex < syncCheckboxIndex
+  detectButtonIndex >= 0
+    && detectButtonIndex < updateGroupIndex
+    && updateGroupIndex < syncCheckboxIndex
     && syncCheckboxIndex < updateGroupEndIndex
-    && updateGroupEndIndex < detectButtonIndex,
+    && updateGroupEndIndex < updateCountButtonIndex
+    && updateCountButtonIndex < createCountButtonIndex,
   true,
-  '更新按钮与 HQ 复选框应组成不换行分组，并整体位于检测按钮之前',
+  'HQ 复选框应是不换行分组，位于重新检测按钮之后、更新 / 新建按钮之前',
+)
+assertDeepEqual(
+  [
+    pageSource.includes("key: 'updateNames'"),
+    pageSource.includes("if (key === 'updateNames') handleUpdateHbwebProductNames()"),
+    pageSource.includes("t('productImport.menuUpdateNamesWithHq'"),
+    pageSource.includes("t('productImport.menuUpdateNames'"),
+  ],
+  [true, true, true, true],
+  '「更新主表名称」应在更多操作菜单里，并随 HQ 复选框切换文案、调用同一个处理器',
 )
 
 const originalFetch = globalThis.fetch
