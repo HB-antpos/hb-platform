@@ -264,6 +264,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             var storePricesToCreate = new List<StoreRetailPrice>();
             var multiCodesToCreate = new List<StoreMultiCodeProduct>();
             var productSetCodesToCreate = new List<ProductSetCode>();
+            var detailsToBackfill = new List<StoreLocalSupplierInvoiceDetails>();
             var pricingStrategyCache = new Dictionary<decimal, PricingStrategy?>();
 
             foreach (var detail in details)
@@ -413,6 +414,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     );
                 }
 
+                // 关键位置：明细回填新主档编码，否则明细页关联不到商品、新品数一直不减；
+                // 重新「商品检测」虽能回填，但会把已执行的 99 重置成待执行，不能依赖它。
+                detail.ProductCode = productUUID;
+                detail.StoreProductCode = string.IsNullOrWhiteSpace(header.StoreCode)
+                    ? null
+                    : header.StoreCode + productUUID;
+                detail.ExistingProductCount = 1;
+                detailsToBackfill.Add(detail);
+
                 result.SuccessCount++;
                 result.AddedMultiCodeCount += additionalBarcodes.Count;
                 result.SuccessfulDetailGuids.Add(detail.DetailGUID);
@@ -437,6 +447,20 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             if (multiCodesToCreate.Count > 0)
             {
                 await db.Fastest<StoreMultiCodeProduct>().BulkCopyAsync(multiCodesToCreate);
+            }
+
+            if (detailsToBackfill.Count > 0)
+            {
+                // 与调用方随后写入的 ActivityType=99 处于同一事务（CommandWriter 持有），任一失败整笔回滚；
+                // UpdatedAt/UpdatedBy 统一由 BatchUpdateDetailActivityTypeAsync 写入。
+                await db.Updateable(detailsToBackfill)
+                    .UpdateColumns(new[]
+                    {
+                        nameof(StoreLocalSupplierInvoiceDetails.ProductCode),
+                        nameof(StoreLocalSupplierInvoiceDetails.StoreProductCode),
+                        nameof(StoreLocalSupplierInvoiceDetails.ExistingProductCount),
+                    })
+                    .ExecuteCommandAsync();
             }
 
             return result;
