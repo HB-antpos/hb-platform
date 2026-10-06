@@ -1697,7 +1697,7 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
-    public async Task Mixed_card_and_voucher_refund_keeps_card_refund_receipt()
+    public async Task Mixed_card_and_voucher_refund_prints_card_receipt_then_refund_voucher()
     {
         var printService = new RecordingReceiptPrintService();
         var viewModel = CreateAuthorizedMainViewModel(
@@ -1717,13 +1717,46 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 1);
-        var call = Assert.Single(printService.Calls);
-        Assert.Equal(ReceiptPrintReason.CardAuto, call.Reason);
-        Assert.Null(call.Receipt!.RefundVoucher);
-        var document = new ReceiptTextFormatter().Build(call.Receipt, ReceiptPrinterSettings.Default, order.SoldAt);
+        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 2);
+        var cardCall = printService.Calls[0];
+        Assert.Equal(ReceiptPrintReason.CardAuto, cardCall.Reason);
+        Assert.Null(cardCall.Receipt!.RefundVoucher);
+        var document = new ReceiptTextFormatter().Build(cardCall.Receipt, ReceiptPrinterSettings.Default, order.SoldAt);
         Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
         Assert.DoesNotContain("REFUND VOUCHER", document.PlainText, StringComparison.Ordinal);
+
+        // 混合退款的退款券单独出一张可扫码凭证，凭证只含该券付款行。
+        var voucherCall = printService.Calls[1];
+        Assert.Equal(ReceiptPrintReason.VoucherRefundAuto, voucherCall.Reason);
+        Assert.Equal(new RefundVoucherReceipt("RF123", 4m), voucherCall.Receipt!.RefundVoucher);
+        Assert.Single(voucherCall.Receipt.Payments);
+    }
+
+    [Fact]
+    public async Task Mixed_cash_and_voucher_refund_prints_refund_voucher_document()
+    {
+        var printService = new RecordingReceiptPrintService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var order = CreateReceiptPrintOrder(PaymentMethodKind.Cash, PaymentMethodKind.Voucher) with
+        {
+            TotalAmount = -10m,
+            ActualAmount = -10m,
+            Payments =
+            [
+                new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Cash, -6m, null),
+                new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, -4m, "VOUCHER_REFUND:RF456")
+            ]
+        };
+
+        InvokePaymentCompleted(viewModel, order);
+
+        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && printService.Calls.Count == 1);
+        var call = Assert.Single(printService.Calls);
+        Assert.Equal(ReceiptPrintReason.VoucherRefundAuto, call.Reason);
+        Assert.Equal(new RefundVoucherReceipt("RF456", 4m), call.Receipt!.RefundVoucher);
     }
 
     [Fact]

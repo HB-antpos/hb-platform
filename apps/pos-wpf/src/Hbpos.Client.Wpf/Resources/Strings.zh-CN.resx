@@ -1685,6 +1685,12 @@
   <data name="payment.refund.status.remainingBalance" xml:space="preserve">
     <value>退款金额结清后才能完成退款。</value>
   </data>
+  <data name="payment.refund.status.voucherFundedRequiresVoucher" xml:space="preserve">
+    <value>代金券买的商品不能退现金或退卡：至少 {0} 须退代金券，现金须最后退。</value>
+  </data>
+  <data name="payment.refund.status.voucherFundedShortfall" xml:space="preserve">
+    <value>代金券支付部分还差 {0} 未退代金券，请补退代金券后再完成。</value>
+  </data>
   <data name="payment.refund.status.voucherOfflineUnavailable" xml:space="preserve">
     <value>离线状态下不可使用退款代金券。请恢复联网后再使用。</value>
   </data>

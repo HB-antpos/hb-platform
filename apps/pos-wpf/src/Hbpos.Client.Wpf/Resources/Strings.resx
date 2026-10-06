@@ -592,6 +592,8 @@
   <data name="payment.status.remainingBalance" xml:space="preserve"><value>The order must be fully paid before completion.</value></data>
   <data name="payment.refund.status.noTendersAdded" xml:space="preserve"><value>Add at least one refund tender before completing the refund.</value></data>
   <data name="payment.refund.status.remainingBalance" xml:space="preserve"><value>The refund must be fully covered before completion.</value></data>
+  <data name="payment.refund.status.voucherFundedRequiresVoucher" xml:space="preserve"><value>Items paid by voucher cannot be refunded as cash or card: at least {0} must be refunded as a voucher. Refund cash last.</value></data>
+  <data name="payment.refund.status.voucherFundedShortfall" xml:space="preserve"><value>The voucher-paid portion is still {0} short. Add a voucher refund before completing.</value></data>
   <data name="payment.refund.status.voucherOfflineUnavailable" xml:space="preserve"><value>Voucher refunds are unavailable while offline. Reconnect before using refund voucher.</value></data>
   <data name="payment.refund.status.alternativeMethodRequired" xml:space="preserve"><value>This recovered Square refund must be completed with cash or voucher. Card refund is unavailable.</value></data>
   <data name="payment.status.duplicateVoucher" xml:space="preserve"><value>This voucher has already been added.</value></data>

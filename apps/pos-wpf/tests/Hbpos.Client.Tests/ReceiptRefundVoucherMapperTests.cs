@@ -149,4 +149,40 @@ public sealed class ReceiptRefundVoucherMapperTests
         Assert.NotNull(voucher);
         Assert.Equal(9.99m, voucher.Amount);
     }
+
+    [Fact]
+    public void Mixed_refund_creates_one_voucher_document_per_issued_refund_voucher()
+    {
+        var receipt = new ReceiptDetails(
+            Guid.NewGuid(),
+            "S001",
+            "POS-01",
+            "Alice",
+            DateTimeOffset.UtcNow,
+            -30m,
+            0m,
+            -30m,
+            [],
+            [
+                new ReceiptPaymentLine(PaymentMethodKind.Card, -10m, "CARD-REFUND-1"),
+                new ReceiptPaymentLine(PaymentMethodKind.Cash, -5m, null),
+                new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, " VOUCHER_REFUND:RF-A "),
+                new ReceiptPaymentLine(PaymentMethodKind.Voucher, -7m, "VOUCHER_REFUND:RF-B"),
+                // 待签发与非退款券引用不出票。
+                new ReceiptPaymentLine(PaymentMethodKind.Voucher, -1m, "VOUCHER_REFUND_PENDING"),
+                new ReceiptPaymentLine(PaymentMethodKind.Voucher, -1m, "VOUCHER_REFUND:")
+            ]);
+
+        var documents = ReceiptRefundVoucherDocuments.Create(receipt);
+
+        Assert.Equal(
+            [new RefundVoucherReceipt("RF-A", 8m), new RefundVoucherReceipt("RF-B", 7m)],
+            documents.Select(document => document.RefundVoucher));
+        Assert.All(documents, document =>
+        {
+            var payment = Assert.Single(document.Payments);
+            Assert.Equal(PaymentMethodKind.Voucher, payment.Method);
+            Assert.Null(document.VoucherBalance);
+        });
+    }
 }

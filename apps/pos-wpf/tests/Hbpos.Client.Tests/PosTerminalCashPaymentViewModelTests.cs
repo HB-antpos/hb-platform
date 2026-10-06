@@ -2818,6 +2818,61 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public async Task Refund_of_voucher_paid_goods_requires_voucher_share_before_cash()
+    {
+        var originalOrder = Guid.NewGuid();
+        var cart = new PosCartService();
+        cart.AddReturnLine(new ReturnCartLineRequest(
+            "S001",
+            "SKU-VOUCHER-FUNDED",
+            null,
+            "Voucher Funded Tea",
+            "930142F",
+            "ITEM-VOUCHER-FUNDED",
+            null,
+            1m,
+            10m,
+            PriceSourceKind.StoreRetailPrice,
+            PriceSourceKind.StoreRetailPrice.ToString(),
+            "RETURN-VM-VOUCHER-FUNDED",
+            originalOrder,
+            Guid.NewGuid()));
+        // 原单现金 20 + 代金券 10：退 10 元商品须至少 3.34 退代金券。
+        cart.AddReturnPaymentCapacities(
+        [
+            new OrderReturnPaymentCapacityDto(PaymentMethodKind.Cash, 20m, 0m, 20m, null, OriginalOrderGuid: originalOrder),
+            new OrderReturnPaymentCapacityDto(PaymentMethodKind.Voucher, 10m, 0m, 10m, null, OriginalOrderGuid: originalOrder)
+        ]);
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashPaymentWorkflowService(
+                new CashCheckoutService(),
+                new InMemoryOrderRepository(),
+                new InMemorySyncQueueRepository()),
+            Session, paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(VoucherEnabled: true)));
+
+        viewModel.PrepareForEntry(Session);
+
+        Assert.Equal(PaymentEntryMode.Refund, viewModel.PaymentMode);
+        Assert.Contains("3.34", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.False(viewModel.SelectCashCommand.CanExecute(null));
+        Assert.True(viewModel.SelectVoucherCommand.CanExecute(null));
+
+        await viewModel.SelectVoucherCommand.ExecuteAsync(null);
+
+        var voucherTender = Assert.Single(viewModel.PaymentTenders);
+        Assert.Equal(PaymentMethodKind.Voucher, voucherTender.Method);
+        Assert.Equal(-3.34m, voucherTender.Amount);
+        Assert.True(viewModel.SelectCashCommand.CanExecute(null));
+
+        await viewModel.SelectCashCommand.ExecuteAsync(null);
+
+        var cashTender = Assert.Single(viewModel.PaymentTenders, tender => tender.Method == PaymentMethodKind.Cash);
+        Assert.Equal(-6.65m, cashTender.Amount);
+        Assert.True(viewModel.ConfirmPaymentCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task Recovered_square_refund_policy_survives_page_reentry_and_clears_with_the_cart()
     {
         var cart = new PosCartService();
