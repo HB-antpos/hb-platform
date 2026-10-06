@@ -1,24 +1,13 @@
 {
   "title": "HB new arrivals",
-  "pagination": { "previous": "Previous", "next": "Next", "page": "Page {{page}} of {{pageCount}} · {{total}} items" },
-  "actions": { "back": "Back", "retry": "Retry" },
-  "labels": {
-    "currentStore": "Current store",
-    "range": "Store arrival: past week · next 2 weeks",
-    "sortByArrival": "Arrival date ↑",
-    "container": "Container {{code}}",
-    "quantity": "Qty {{value}}",
-    "estimatedArrival": "Estimated arrival",
-    "actualBasis": "Based on container warehouse arrival",
-    "estimatedBasis": "Based on estimated arrival",
-    "retailPrice": "Retail ${{value}}"
-  },
-  "messages": {
-    "notAllowed": "You do not have access to HB new arrivals.",
-    "storesFailed": "Stores could not be loaded.",
-    "selectStore": "Select a store first.",
-    "dateNotice": "Store arrival is an estimated range: NSW within 0–3 business days and QLD within 3–7 business days of the container's warehouse arrival, or of its estimated port arrival if it has not reached the warehouse yet."
-  },
-  "states": { "loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new products arriving in store in the past week or next 2 weeks.", "noImage": "No image", "emptyPast": "No new products arrived in store in the past week.", "emptyUpcoming": "No new products arriving in store in the next 2 weeks." },
-  "filters": { "all": "All {{count}}", "past": "Past week {{count}}", "upcoming": "Next 2 weeks {{count}}" }
+  "pagination": {"previous": "Previous", "next": "Next", "page": "Page {{page}} of {{pageCount}} · {{total}} items", "perPage": "{{count}} / page", "compact": "{{page}} / {{pageCount}}", "jumpLabel": "Page {{page}} of {{pageCount}}, tap to jump"},
+  "actions": {"back": "Back", "retry": "Retry", "howDates": "How?", "hideDates": "Hide", "clearFilters": "Clear filters"},
+  "labels": {"currentStore": "Current store", "range": "Store arrival: past week · next 2 weeks", "sortByArrival": "Arrival date ↑", "container": "Container {{code}}", "quantity": "Qty {{value}}", "estimatedArrival": "Estimated arrival", "retailPrice": "Retail ${{value}}", "newTag": "NEW", "existingTag": "EXISTING", "arrived": "At warehouse", "transit": "In transit"},
+  "messages": {"notAllowed": "You do not have access to HB new arrivals.", "storesFailed": "Stores could not be loaded.", "selectStore": "Select a store first.", "dateNotice": "Store arrival is an estimated range: NSW within 0–3 business days and QLD within 3–7 business days of the container's warehouse arrival, or of its estimated port arrival if it has not reached the warehouse yet.", "dateNoticeShort": "Store arrival dates are estimates"},
+  "states": {"loading": "Loading…", "loadFailed": "Could not load new arrivals.", "stateUnknown": "The store state is unknown, so arrival dates cannot be calculated.", "empty": "No new products arriving in store in the past week or next 2 weeks.", "noImage": "No image", "emptyPast": "No new products arrived in store in the past week.", "emptyUpcoming": "No new products arriving in store in the next 2 weeks.", "emptyFiltered": "No products match these filters."},
+  "filters": {"all": "All {{count}}", "past": "Past week {{count}}", "upcoming": "Next 2 weeks {{count}}"},
+  "chips": {"productType": {"new": "New products", "existing": "Existing products", "all": "All products"}, "warehouse": {"any": "Warehouse: Any", "arrived": "At warehouse", "transit": "In transit"}, "containersAll": "Container: All {{count}}", "containersMany": "{{count}} containers", "clearAll": "Clear all"},
+  "filterSheet": {"title": "Filter products", "reset": "Reset", "productType": "Product type", "warehouse": "Container at warehouse", "newTitle": "New products", "newHint": "First time in HB, created from this container", "existingTitle": "Existing products", "existingHint": "Restock of products already in HB", "allTitle": "All products", "warehouseAny": "Any", "warehouseArrived": "Arrived {{count}}", "warehouseTransit": "In transit {{count}}", "warehouseHint": "Arrived = the container has a warehouse arrival date. In transit = dates use its estimated port arrival.", "apply": "Show {{count}} products"},
+  "containerSheet": {"title": "Containers", "subtitle": "Select one or more · {{count}} in this period", "search": "Search container no.", "clear": "Clear", "arrivedGroup": "At warehouse · {{count}}", "transitGroup": "In transit · {{count}}", "storeRange": "Store {{range}}", "storeRangeEstimated": "Store {{range}} · est.", "newKinds": "{{count}} new", "existingKinds": "{{count}} existing", "noMatch": "No containers match.", "allContainers": "All containers", "apply": "Show {{count}} containers", "applyAll": "Show all containers"},
+  "pageSheet": {"title": "Pages", "subtitle": "{{total}} products · page {{page}} of {{pageCount}}", "goTo": "Go to page", "of": "of {{pageCount}}", "go": "Go", "pageSize": "Products per page", "pageSizeHint": "Changing this goes back to page 1. Your choice is remembered on this device."}
 }
