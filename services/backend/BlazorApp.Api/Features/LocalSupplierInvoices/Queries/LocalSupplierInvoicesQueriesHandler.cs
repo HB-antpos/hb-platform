@@ -165,7 +165,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
                     // 仅按当前页批量聚合有效明细；至少一条明细且所有 ExistingProductCount 非空才算已检测。
                     // 口径：NULL 才是“未检测”；0 是合法的“已检测但商品主档不存在”（需新建商品），不把 0 当作未检测。
-                    // 同一次 GROUP BY 同时算出明细数、未检测数、主档不存在数，不额外增加数据库往返。
+                    // 同一次 GROUP BY 同时算出明细数、未检测数、新品数，不额外增加数据库往返。
                     var productCheckAggregates = await db.Queryable<StoreLocalSupplierInvoiceDetails>()
                         .Where(d =>
                             d.IsDeleted == false
@@ -180,8 +180,11 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                             NullProductCount = SqlFunc.AggregateSum(
                                 SqlFunc.IIF(d.ExistingProductCount == null, 1, 0)
                             ),
+                            // 新品 = 检测为主档不存在，且至今仍未关联主档（ProductCode 为空）。
+                            // 不能只看 ExistingProductCount==0：它是检测时的快照，「同步到总部」建品只回填 ProductCode、
+                            // 不改该列，生产曾有 1.5 万行早已建好商品却一直被算成新品。
                             NewProductCount = SqlFunc.AggregateSum(
-                                SqlFunc.IIF(d.ExistingProductCount == 0, 1, 0)
+                                SqlFunc.IIF(d.ExistingProductCount == 0 && d.ProductCode == null, 1, 0)
                             ),
                         })
                         .ToListAsync();

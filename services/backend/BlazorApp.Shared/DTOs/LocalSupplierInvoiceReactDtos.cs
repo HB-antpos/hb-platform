@@ -92,8 +92,8 @@ namespace BlazorApp.Shared.DTOs
         /// </summary>
         public int UncheckedDetailCount { get; set; }
         /// <summary>
-        /// 已检测但商品主档不存在的有效明细行数（ExistingProductCount == 0），即需新建商品的行；
-        /// NULL（未检测）不计入此项。
+        /// 新品行数：检测为商品主档不存在（ExistingProductCount == 0）且至今未关联主档（ProductCode 为空）的有效明细，
+        /// 即仍需新建商品的行；已新建或已同步到总部回填编码的行、NULL（未检测）均不计入此项。
         /// </summary>
         public int NewProductDetailCount { get; set; }
         public string? Remarks { get; set; }
