@@ -153,7 +153,9 @@ import {
   constrainSelectedRowKeysToVisibleDetails,
   getBatchExecuteErrorFeedback,
   getNewProductWithAdditionalBarcodesRows,
+  pickPurchasePriceDirectionGuids,
   splitCreateProductDetailGuids,
+  splitPurchasePriceDirectionGuids,
 } from './batchExecuteConfirm'
 import {
   EditableNumberCell,
@@ -2349,6 +2351,12 @@ export default function InvoiceEditPage() {
       return
     }
     const skippedCreateCount = isCreateMode ? 0 : createGuids.length
+    // 「执行操作」里涨价、降价可分开执行：确认框勾选哪类就提交哪类，未勾选的保留为待执行。
+    const priceSplit = isCreateMode
+      ? { upGuids: [], downGuids: [], otherGuids: targetGuids }
+      : splitPurchasePriceDirectionGuids(targetGuids, details, rowActions)
+    const hasPriceDirectionChoice = priceSplit.upGuids.length > 0 || priceSplit.downGuids.length > 0
+    const priceChoice = { includeUp: true, includeDown: true }
     // 写 HQ 需要 PushToHq 权限；没有时开关禁用且不勾选。确认框不受 React 状态管理，用普通对象记录勾选结果。
     const hqChoice = { syncToHq: canWriteLocalPurchaseToHq }
 
@@ -2430,6 +2438,38 @@ export default function InvoiceEditPage() {
               ))}
             </Space>
           )}
+          {hasPriceDirectionChoice && (
+            <div className="lsi-wb-price-choice">
+              <div className="lsi-wb-price-choice-title">{t('posAdmin.invoiceWorkbench.priceDirectionTitle')}</div>
+              <Space size={16} wrap>
+                {priceSplit.upGuids.length > 0 && (
+                  <Checkbox
+                    className="lsi-wb-price-choice-up"
+                    defaultChecked
+                    onChange={(event) => {
+                      priceChoice.includeUp = event.target.checked
+                    }}
+                  >
+                    {t('posAdmin.invoiceWorkbench.includePriceUp', { count: priceSplit.upGuids.length })}
+                  </Checkbox>
+                )}
+                {priceSplit.downGuids.length > 0 && (
+                  <Checkbox
+                    className="lsi-wb-price-choice-down"
+                    defaultChecked
+                    onChange={(event) => {
+                      priceChoice.includeDown = event.target.checked
+                    }}
+                  >
+                    {t('posAdmin.invoiceWorkbench.includePriceDown', { count: priceSplit.downGuids.length })}
+                  </Checkbox>
+                )}
+              </Space>
+              <div className="lsi-wb-sync-hq-hint">
+                {t('posAdmin.invoiceWorkbench.priceDirectionHint', { count: priceSplit.otherGuids.length })}
+              </div>
+            </div>
+          )}
           {isCreateMode && (
             <div style={{ marginTop: 8 }}>
               <Checkbox
@@ -2454,8 +2494,14 @@ export default function InvoiceEditPage() {
       cancelText: confirmText.cancelText,
       okButtonProps: { danger: previewSnapshot.confirmedCreateProductCount > 0 },
       onOk: () => {
+        const executeGuids = pickPurchasePriceDirectionGuids(previewSnapshot.detailGuids, priceSplit, priceChoice)
+        if (!executeGuids.length) {
+          message.warning(t('posAdmin.invoiceWorkbench.noRowsToExecute'))
+          // 返回 rejected promise 让确认框保持打开，用户可以重新勾选。
+          return Promise.reject(new Error('no rows selected'))
+        }
         void executeSelectedBatchActions(buildBatchExecuteSnapshot({
-          selectedRowKeys: previewSnapshot.detailGuids,
+          selectedRowKeys: executeGuids,
           details,
           rowActions,
           // 关键位置：有副码的新商品必须在用户确认后带上主档类型，避免后台静默建成普通商品。

@@ -129,6 +129,56 @@ export function splitCreateProductDetailGuids(
   return { createGuids, otherGuids }
 }
 
+export interface PurchasePriceDirectionSplit {
+  /** 操作为「更新进货价」且本单进货价高于上次进货价的行。 */
+  upGuids: string[]
+  /** 操作为「更新进货价」且本单进货价低于上次进货价的行。 */
+  downGuids: string[]
+  /** 其余行：改货号、加多码，以及进货价未变或没有上次进货价可比的「更新进货价」。 */
+  otherGuids: string[]
+}
+
+/**
+ * 「执行操作」里按进货价涨跌分组，让涨价、降价可以分开执行。
+ * 只有「更新进货价」会写进货价（改货号、加多码不动价格），所以只给这一类按方向分组；
+ * 涨跌口径与明细工作台的「涨价 / 降价」快捷筛选一致：上次进货价 > 0 才可比较。
+ */
+export function splitPurchasePriceDirectionGuids(
+  detailGuids: Key[],
+  details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType' | 'purchasePrice' | 'lastPurchasePrice'>>,
+  rowActions: Record<string, number>,
+): PurchasePriceDirectionSplit {
+  const detailMap = new Map(details.map((item) => [item.detailGUID, item]))
+  const split: PurchasePriceDirectionSplit = { upGuids: [], downGuids: [], otherGuids: [] }
+  for (const key of detailGuids) {
+    const guid = String(key)
+    const detail = detailMap.get(guid)
+    const action = detail ? getCurrentDetailAction(detail, rowActions) : rowActions[guid]
+    const last = detail?.lastPurchasePrice
+    const current = detail?.purchasePrice
+    const comparable = action === DetailAction.UpdatePurchasePrice
+      && typeof last === 'number' && last > 0
+      && typeof current === 'number'
+    if (comparable && current > last) split.upGuids.push(guid)
+    else if (comparable && current < last) split.downGuids.push(guid)
+    else split.otherGuids.push(guid)
+  }
+  return split
+}
+
+/** 按用户勾选合并要执行的行，保持原始顺序；未勾选的涨价 / 降价行留作待执行。 */
+export function pickPurchasePriceDirectionGuids(
+  detailGuids: Key[],
+  split: PurchasePriceDirectionSplit,
+  choice: { includeUp: boolean; includeDown: boolean },
+): string[] {
+  const excluded = new Set<string>([
+    ...(choice.includeUp ? [] : split.upGuids),
+    ...(choice.includeDown ? [] : split.downGuids),
+  ])
+  return detailGuids.map(String).filter((guid) => !excluded.has(guid))
+}
+
 export function getNewProductWithAdditionalBarcodesRows(
   selectedRowKeys: Key[],
   details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType' | 'additionalBarcodes' | 'itemNumber' | 'barcode' | 'productName'>>,

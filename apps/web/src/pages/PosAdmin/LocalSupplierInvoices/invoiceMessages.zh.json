@@ -214,7 +214,12 @@
       "syncToHqStoreHint": "本地分店价更新完成后，按同样的分店和字段写入 HQ。",
       "syncToHqCreateHint": "新建完成后，把新商品和全部启用分店的价格写入 HQ。",
       "syncToHqNoPermission": "没有写入 HQ 的权限",
-      "syncToHqNoStores": "没有可写入 HQ 的分店，已跳过同步 HQ"
+      "syncToHqNoStores": "没有可写入 HQ 的分店，已跳过同步 HQ",
+      "priceDirectionTitle": "进货价变动",
+      "includePriceUp": "执行涨价 {{count}} 行",
+      "includePriceDown": "执行降价 {{count}} 行",
+      "priceDirectionHint": "取消勾选的行保留为「待执行」，可稍后单独执行；改货号、加多码等其余 {{count}} 行照常执行。",
+      "noRowsToExecute": "没有要执行的明细，请至少勾选一类"
     }
   }
 }
