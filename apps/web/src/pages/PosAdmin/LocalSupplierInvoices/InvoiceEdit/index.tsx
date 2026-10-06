@@ -188,6 +188,12 @@ import {
   mergeProductCheckResult,
 } from './matchedProductLink'
 import {
+  BATCH_LINK_QUERY_CONCURRENCY,
+  mapWithConcurrency,
+  pickBatchLinkCandidates,
+  resolveSingleMatchedProductCode,
+} from './batchLinkMatchedProducts'
+import {
   buildInvoiceHeaderFormValues,
   buildInvoiceHeaderSavePayload,
   includeCurrentInvoiceHeaderOption,
@@ -375,7 +381,8 @@ function loadSavedPasteFieldOrder() {
   }
 }
 
-const matchedProductTableScrollX = 940
+// 各列定宽之和；弹窗内容区（1120 宽减去图标与内边距）放得下，窄屏才横向滚动。
+const matchedProductTableScrollX = 1000
 
 const matchedProductNameCellStyle: CSSProperties = {
   minWidth: 240,
@@ -390,9 +397,6 @@ const matchedProductTagStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
-const matchedProductActionButtonStyle: CSSProperties = {
-  paddingInline: 0,
-}
 
 function renderNumericCell(value: ReactNode) {
   return <span className="lsi-num">{value}</span>
@@ -553,6 +557,9 @@ const ACTION_MENU_ITEMS = (t: ReturnType<typeof useTranslation>['t']) => [
   { key: '4', label: <Tag color="purple">{t('posAdmin.invoiceDetail.updateItemNumber', '更新货号')}</Tag> },
   { key: '5', label: <Tag color="cyan">{t('posAdmin.invoiceDetail.addMultiCode', '添加多码')}</Tag> },
 ]
+
+/** 「设置操作」菜单里的批量选用：不是操作类型，用分隔线和上面的操作类型隔开。 */
+const BATCH_LINK_MATCHED_MENU_KEY = 'link-matched-product'
 
 export default function InvoiceEditPage() {
   const { t } = useTranslation()
@@ -2544,6 +2551,82 @@ export default function InvoiceEditPage() {
     }
   }
 
+  // ---- 批量选用条码唯一匹配的商品 ----
+  // 单行「选用」的批量版：只处理主档不存在、条码只匹配到一个商品的行，多匹配的仍需在弹窗里人工选择。
+  const runBatchLinkMatchedProducts = async (candidates: LocalSupplierInvoiceItemDto[]) => {
+    if (!invoiceGuid) return
+    setDetailLoading(true)
+    try {
+      const lookups = await mapWithConcurrency(candidates, BATCH_LINK_QUERY_CONCURRENCY, async (detail) => {
+        const result = await getProductsByBarcode(invoiceGuid, detail.barcode!.trim())
+        return { detailGuid: detail.detailGUID, productCode: resolveSingleMatchedProductCode(result?.matchedProducts) }
+      })
+      const links: { detailGUID: string; productCode: string }[] = []
+      let multiCount = 0
+      let queryFailedCount = 0
+      lookups.forEach((lookup) => {
+        if (lookup.status === 'rejected') queryFailedCount += 1
+        else if (lookup.value.productCode) links.push({ detailGUID: lookup.value.detailGuid, productCode: lookup.value.productCode })
+        else multiCount += 1
+      })
+      if (!links.length) {
+        message.warning(t('posAdmin.invoiceWorkbench.linkMatchedNothing', { multi: multiCount, failed: queryFailedCount }))
+        return
+      }
+
+      // 与单行选用相同：先写商品编码，再只对这些行重新检测，由后端确认「已关联商品拥有本行条码」。
+      await batchUpsertDetails(invoiceGuid, links)
+      const linkedGuids = links.map((link) => link.detailGUID)
+      const checkResponse = await checkProducts({ invoiceGuid, detailGuids: linkedGuids })
+      publishLocalSupplierInvoiceChanged(invoiceGuid)
+      const checkByGuid = new Map(checkResponse.results.map((item) => [item.detailGuid, item]))
+      detailsSnapshotRef.current = detailsSnapshotRef.current.map((item) => {
+        const checkResult = checkByGuid.get(item.detailGUID)
+        return checkResult ? mergeProductCheckResult(item, checkResult) : item
+      })
+      applyCheckProductsResponse(checkResponse)
+      const confirmedCount = links.filter((link) => isProductLinkConfirmed(checkByGuid.get(link.detailGUID), link.productCode)).length
+      const rejectedCount = links.length - confirmedCount
+      const leftover = multiCount + queryFailedCount + rejectedCount
+      notification[leftover > 0 ? 'warning' : 'success']({
+        message: t('posAdmin.invoiceWorkbench.linkMatchedResult', { count: confirmedCount }),
+        description: leftover > 0
+          ? t('posAdmin.invoiceWorkbench.linkMatchedResultDetail', { multi: multiCount, failed: queryFailedCount, rejected: rejectedCount })
+          : undefined,
+        duration: leftover > 0 ? 0 : 4,
+      })
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('posAdmin.invoiceDetail.linkProductFailed', '选用商品失败'))
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const handleBatchLinkMatchedProducts = () => {
+    if (!invoiceGuid || !selectedRowKeys.length || !ensureCanAccessInvoice()) return
+    const { candidates, ineligibleCount } = pickBatchLinkCandidates(selectedRowKeys, details)
+    if (!candidates.length) {
+      message.warning(t('posAdmin.invoiceWorkbench.linkMatchedNone'))
+      return
+    }
+    Modal.confirm({
+      title: t('posAdmin.invoiceWorkbench.linkMatchedConfirmTitle'),
+      content: (
+        <Space direction="vertical" size={4}>
+          <span>{t('posAdmin.invoiceWorkbench.linkMatchedConfirmContent', { count: candidates.length })}</span>
+          {ineligibleCount > 0 && (
+            <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.linkMatchedSkipped', { count: ineligibleCount })}</span>
+          )}
+        </Space>
+      ),
+      okText: t('posAdmin.invoiceWorkbench.linkMatchedOk'),
+      cancelText: t('common.cancel', '取消'),
+      onOk: () => {
+        void runBatchLinkMatchedProducts(candidates)
+      },
+    })
+  }
+
   // ---- 批量设置操作类型 ----
   const handleBatchSetAction = async (actionKey: string) => {
     if (!invoiceGuid || !selectedRowKeys.length || !ensureCanAccessInvoice()) return
@@ -2771,7 +2854,8 @@ export default function InvoiceEditPage() {
     const barcode = record.barcode
     const modal = Modal.info({
       title: t('posAdmin.invoiceDetail.barcodeMatchedProductsTitle', '条码匹配商品：{{barcode}}', { barcode }),
-      width: 920,
+      // Modal.info 左侧留给图标，920 时表格会被挤出横向滚动；窄屏不超出视口。
+      width: 'min(1120px, calc(100vw - 32px))',
       okText: t('common.close', '关闭'),
       content: <div>{t('common.loading', '加载中...')}</div>,
     })
@@ -2946,13 +3030,13 @@ export default function InvoiceEditPage() {
         {
           title: t('posAdmin.invoiceDetail.supplierName', '供应商名称'),
           dataIndex: 'supplierName',
-          width: 150,
+          width: 160,
           render: (value?: string) => value || '--',
         },
         {
           title: t('posAdmin.invoiceDetail.matchSource', '来源'),
           dataIndex: 'isMultiCode',
-          width: 100,
+          width: 110,
           render: (isMultiCode?: boolean) => (
             <Tag color={isMultiCode ? 'orange' : 'blue'} style={matchedProductTagStyle}>
               {isMultiCode
@@ -2964,15 +3048,15 @@ export default function InvoiceEditPage() {
         ...(canManagePosProducts || showLinkAction ? [{
           title: t('posAdmin.invoiceDetail.action', '操作'),
           key: 'replaceProductMaster',
-          width: 130,
+          width: 180,
+          // 两个操作影响面不同：「选用」只改本行（主按钮），「更换」改商品主档（危险色），分开摆放避免误点。
           render: (_: unknown, matchedProduct: BarcodeAbnormalMatchedProductDto) => (
-            <Space size={0}>
+            <Space size={8}>
               {showLinkAction ? (
                 <Tooltip title={t('posAdmin.invoiceDetail.linkProductTip', '本行就是这个商品：回填商品编码，不改主档')}>
                   <Button
                     size="small"
-                    type="link"
-                    style={matchedProductActionButtonStyle}
+                    type="primary"
                     onClick={() => handleLinkMatchedProduct(matchedProduct)}
                   >
                     {t('posAdmin.invoiceDetail.linkProduct', '选用')}
@@ -2983,8 +3067,7 @@ export default function InvoiceEditPage() {
                 <Tooltip title={t('posAdmin.invoiceDetail.replaceProductMaster', '更换货号和供应商')}>
                   <Button
                     size="small"
-                    type="link"
-                    style={matchedProductActionButtonStyle}
+                    danger
                     onClick={() => handleReplaceMatchedProductMaster(matchedProduct, matchedProductColumns)}
                   >
                     {t('posAdmin.invoiceDetail.replaceProductMasterShort', '更换')}
@@ -3988,8 +4071,25 @@ export default function InvoiceEditPage() {
               {canRunGlobalLocalPurchaseBatchActions && (
                 <Dropdown
                   menu={{
-                    items: ACTION_MENU_ITEMS(t),
-                    onClick: ({ key }) => void handleBatchSetAction(key),
+                    items: [
+                      ...ACTION_MENU_ITEMS(t),
+                      ...(canEditDetailRows ? [
+                        { type: 'divider' as const },
+                        {
+                          key: BATCH_LINK_MATCHED_MENU_KEY,
+                          label: (
+                            <Tooltip placement="right" title={t('posAdmin.invoiceWorkbench.linkMatchedTip')}>
+                              <Tag color="geekblue">{t('posAdmin.invoiceWorkbench.linkMatchedAction')}</Tag>
+                            </Tooltip>
+                          ),
+                        },
+                      ] : []),
+                    ],
+                    onClick: ({ key }) => {
+                      // 选用要先重新检测已保存的数据，有未保存修改时先让用户保存。
+                      if (key === BATCH_LINK_MATCHED_MENU_KEY) runAfterUnsavedGuard(handleBatchLinkMatchedProducts)
+                      else void handleBatchSetAction(key)
+                    },
                   }}
                 >
                   <Button size="small">
