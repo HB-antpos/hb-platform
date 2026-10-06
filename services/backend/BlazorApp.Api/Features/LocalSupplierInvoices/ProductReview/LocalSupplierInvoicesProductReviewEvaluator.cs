@@ -40,17 +40,20 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
                 ExistingProductCount = 0,
             };
 
-            if (!string.IsNullOrWhiteSpace(itemNumber))
+            if (!string.IsNullOrWhiteSpace(itemNumber)
+                && data.ProductsByItemNumber.TryGetValue(itemNumber, out var product))
             {
-                if (data.ProductsByItemNumber.TryGetValue(itemNumber, out var product))
-                {
-                    ApplyProductMatch(result, detail, product, data.StorePricesByProductCode, summary);
-                }
-                else
-                {
-                    result.ProductStatus = 2;
-                    summary.ProductNotExists++;
-                }
+                ApplyProductMatch(result, detail, product, data.StorePricesByProductCode, summary);
+            }
+            else if (TryGetLinkedProduct(detail, barcode, data, out var linkedProduct))
+            {
+                // 货号对不上主档，但明细已关联的商品拥有本行条码（手动选用的已有商品），沿用该关联。
+                ApplyProductMatch(result, detail, linkedProduct, data.StorePricesByProductCode, summary);
+            }
+            else if (!string.IsNullOrWhiteSpace(itemNumber))
+            {
+                result.ProductStatus = 2;
+                summary.ProductNotExists++;
             }
 
             ApplyBarcodeStatus(result, barcode, data.BarcodeMatchCounts, summary);
@@ -69,6 +72,28 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
         }
 
         return new LocalSupplierInvoicesProductReviewEvaluation(results, summary);
+    }
+
+    /// <summary>
+    /// 明细已有商品编码且该商品仍有效、并拥有本行条码（主条码或本店多码）时，视为人工关联的已有商品。
+    /// 要求条码佐证，避免改了条码或商品被删后仍挂着过期编码。
+    /// </summary>
+    private static bool TryGetLinkedProduct(
+        StoreLocalSupplierInvoiceDetails detail,
+        string? barcode,
+        LocalSupplierInvoicesProductReviewData data,
+        out Product product)
+    {
+        product = null!;
+        var productCode = detail.ProductCode?.Trim();
+        if (string.IsNullOrWhiteSpace(productCode)
+            || !data.LinkedProductsByCode.TryGetValue(productCode, out var linked)
+            || !LocalSupplierInvoicesBarcodeRules.IsBarcodeOwnedByProduct(
+                data.ProductCodesByBarcode, barcode, linked.ProductCode))
+            return false;
+
+        product = linked;
+        return true;
     }
 
     private static void ApplyProductMatch(

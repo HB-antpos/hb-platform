@@ -180,6 +180,11 @@ import {
   getMatchedProductMasterUpdateTarget,
 } from './matchedProductMasterUpdate'
 import {
+  canLinkMatchedProduct,
+  isProductLinkConfirmed,
+  mergeProductCheckResult,
+} from './matchedProductLink'
+import {
   buildInvoiceHeaderFormValues,
   buildInvoiceHeaderSavePayload,
   includeCurrentInvoiceHeaderOption,
@@ -203,6 +208,7 @@ import {
 import {
   buildInvoiceDetailSnapshotIndex,
   countEditedInvoiceDetailRows,
+  getEditedInvoiceDetailFields,
   isInvoiceDetailFieldEdited,
 } from './detailDirtyState'
 import type {
@@ -365,7 +371,7 @@ function loadSavedPasteFieldOrder() {
   }
 }
 
-const matchedProductTableScrollX = 900
+const matchedProductTableScrollX = 940
 
 const matchedProductNameCellStyle: CSSProperties = {
   minWidth: 240,
@@ -1952,23 +1958,7 @@ export default function InvoiceEditPage() {
     setDetails((prev) =>
       prev.map((d) => {
         const checkResult = statusMap.get(d.detailGUID)
-        if (!checkResult) return d
-        return {
-          ...d,
-          productCode: checkResult.productInfo?.productCode ?? undefined,
-          storeProductCode: checkResult.productInfo?.storeProductCode ?? checkResult.storeProductCode ?? undefined,
-          existingProductCount: checkResult.existingProductCount,
-          barcodeStatus: checkResult.barcodeStatus,
-          barcodeMatchCount: checkResult.barcodeMatchCount,
-          autoPricing: checkResult.autoPricing ?? undefined,
-          isSpecialProduct: checkResult.isSpecialProduct ?? undefined,
-          discountRate: checkResult.discountRate ?? undefined,
-          pricingFloatRate: checkResult.pricingFloatRate ?? undefined,
-          newAutoRetailPrice: checkResult.newAutoRetailPrice ?? undefined,
-          // 商品检测只补空的上次进货价；已有快照由手动按钮强制刷新，避免自动检测覆盖比较基准。
-          lastPurchasePrice: d.lastPurchasePrice ?? checkResult.lastPurchasePrice ?? undefined,
-          activityType: checkResult.defaultAction ?? d.activityType,
-        } as LocalSupplierInvoiceItemDto
+        return checkResult ? mergeProductCheckResult(d, checkResult) : d
       }),
     )
     // 更新行内操作类型
@@ -2653,6 +2643,64 @@ export default function InvoiceEditPage() {
         })
       }
 
+      const handleLinkMatchedProduct = (matchedProduct: BarcodeAbnormalMatchedProductDto) => {
+        const productCode = matchedProduct.productCode?.trim()
+        if (!productCode) {
+          message.warning(t('posAdmin.invoiceDetail.linkProductMissingProductCode', '匹配商品缺少商品编码，无法选用'))
+          return
+        }
+        // 选用会对本行重新检测并改写定价预览等字段，本行有未保存修改时先让用户保存，避免被覆盖。
+        const currentDetail = details.find((item) => item.detailGUID === record.detailGUID) ?? record
+        if (getEditedInvoiceDetailFields(currentDetail, detailSnapshotIndex).length > 0) {
+          message.warning(t('posAdmin.invoiceDetail.linkProductSaveFirst', '本行有未保存的修改，请先保存再选用商品'))
+          return
+        }
+
+        Modal.confirm({
+          title: t('posAdmin.invoiceDetail.linkProductConfirmTitle', '选用该商品作为本行商品？'),
+          content: (
+            <Space direction="vertical" size={4}>
+              <span>
+                {t('posAdmin.invoiceDetail.linkProductTargetLine', '{{productName}}（货号 {{itemNumber}}）', {
+                  productName: matchedProduct.productName || productCode,
+                  itemNumber: matchedProduct.itemNumber || '--',
+                })}
+              </span>
+              <span className="lsi-muted">
+                {t('posAdmin.invoiceDetail.linkProductHint', '回填商品编码后本行按已有商品处理（默认更新进货价），商品主档的货号和供应商不变。')}
+              </span>
+            </Space>
+          ),
+          okText: t('posAdmin.invoiceDetail.linkProduct', '选用'),
+          cancelText: t('common.cancel', '取消'),
+          onOk: async () => {
+            try {
+              // 先写入商品编码，再只对本行重新检测：检测会认「已关联商品拥有本行条码」，由后端统一算出状态与默认操作。
+              await batchUpsertDetails(invoiceGuid, [{ detailGUID: record.detailGUID, productCode }])
+              const checkResponse = await checkProducts({ invoiceGuid, detailGuids: [record.detailGUID] })
+              const checkResult = checkResponse.results.find((item) => item.detailGuid === record.detailGUID)
+              if (checkResult) {
+                // 检测结果已落库，同步到快照，避免定价预览等字段被误判为未保存修改。
+                detailsSnapshotRef.current = detailsSnapshotRef.current.map((item) => (
+                  item.detailGUID === record.detailGUID ? mergeProductCheckResult(item, checkResult) : item
+                ))
+                applyCheckProductsResponse(checkResponse)
+              }
+              if (!isProductLinkConfirmed(checkResult, productCode)) {
+                message.warning(t('posAdmin.invoiceDetail.linkProductNotApplied', '该商品不拥有本行条码，未能关联'))
+                return
+              }
+              message.success(t('posAdmin.invoiceDetail.linkProductSuccess', '已回填商品编码'))
+              modal.destroy()
+            } catch (error) {
+              message.error(error instanceof Error ? error.message : t('posAdmin.invoiceDetail.linkProductFailed', '选用商品失败'))
+              throw error
+            }
+          },
+        })
+      }
+
+      const showLinkAction = canEditDetailRows && canLinkMatchedProduct(record)
       const result = await getProductsByBarcode(invoiceGuid, barcode)
       const matchedProducts = result?.matchedProducts ?? []
       const matchedProductColumns: ColumnsType<BarcodeAbnormalMatchedProductDto> = [
@@ -2696,21 +2744,37 @@ export default function InvoiceEditPage() {
             </Tag>
           ),
         },
-        ...(canManagePosProducts ? [{
+        ...(canManagePosProducts || showLinkAction ? [{
           title: t('posAdmin.invoiceDetail.action', '操作'),
           key: 'replaceProductMaster',
-          width: 90,
+          width: 130,
           render: (_: unknown, matchedProduct: BarcodeAbnormalMatchedProductDto) => (
-            <Tooltip title={t('posAdmin.invoiceDetail.replaceProductMaster', '更换货号和供应商')}>
-              <Button
-                size="small"
-                type="link"
-                style={matchedProductActionButtonStyle}
-                onClick={() => handleReplaceMatchedProductMaster(matchedProduct, matchedProductColumns)}
-              >
-                {t('posAdmin.invoiceDetail.replaceProductMasterShort', '更换')}
-              </Button>
-            </Tooltip>
+            <Space size={0}>
+              {showLinkAction ? (
+                <Tooltip title={t('posAdmin.invoiceDetail.linkProductTip', '本行就是这个商品：回填商品编码，不改主档')}>
+                  <Button
+                    size="small"
+                    type="link"
+                    style={matchedProductActionButtonStyle}
+                    onClick={() => handleLinkMatchedProduct(matchedProduct)}
+                  >
+                    {t('posAdmin.invoiceDetail.linkProduct', '选用')}
+                  </Button>
+                </Tooltip>
+              ) : null}
+              {canManagePosProducts ? (
+                <Tooltip title={t('posAdmin.invoiceDetail.replaceProductMaster', '更换货号和供应商')}>
+                  <Button
+                    size="small"
+                    type="link"
+                    style={matchedProductActionButtonStyle}
+                    onClick={() => handleReplaceMatchedProductMaster(matchedProduct, matchedProductColumns)}
+                  >
+                    {t('posAdmin.invoiceDetail.replaceProductMasterShort', '更换')}
+                  </Button>
+                </Tooltip>
+              ) : null}
+            </Space>
           ),
         } satisfies ColumnType<BarcodeAbnormalMatchedProductDto>] : []),
       ]

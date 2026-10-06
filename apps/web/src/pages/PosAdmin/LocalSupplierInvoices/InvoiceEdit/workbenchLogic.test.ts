@@ -7,6 +7,7 @@ import {
 } from './detailDirtyState'
 import { applyInvoiceDetailInlineEdit } from './inlineEdit'
 import { buildInvoiceHeaderFormValues, isInvoiceHeaderDirty } from './invoiceHeaderForm'
+import { canLinkMatchedProduct, isProductLinkConfirmed, mergeProductCheckResult } from './matchedProductLink'
 import { buildPricingEditorChanges } from './pricingEditorChanges'
 import {
   filterDetailsByProgressBucket,
@@ -190,5 +191,32 @@ assertDeepEqual(
   [],
   '折扣率按百分比比较，0.1 与 10% 视为未改动',
 )
+
+// 选用已有商品：只开放给检测后主档不存在的行；检测结果合并只补空的上次进货价。
+assert(canLinkMatchedProduct({ detailGUID: 'n', existingProductCount: 0, barcodeStatus: 2, barcodeMatchCount: 1 }), '主档不存在的行应允许选用已有商品')
+assert(!canLinkMatchedProduct({ detailGUID: 'e', existingProductCount: 1, barcodeStatus: 1 }), '主档已存在的行不应允许选用')
+assert(!canLinkMatchedProduct({ detailGUID: 'u' }), '未检测的行不应允许选用')
+assert(!canLinkMatchedProduct({ detailGUID: 'c', existingProductCount: 0, isCreatedByThisInvoice: true }), '本单新品不应允许选用')
+const linkedDetail = mergeProductCheckResult(
+  { detailGUID: 'link', existingProductCount: 0, barcodeStatus: 2, barcodeMatchCount: 1, lastPurchasePrice: 2.8, activityType: DetailAction.WaitForOperation },
+  {
+    detailGuid: 'link',
+    productStatus: 1,
+    barcodeStatus: 1,
+    existingProductCount: 1,
+    barcodeMatchCount: 1,
+    lastPurchasePrice: 3.5,
+    productInfo: { productCode: 'P-LINK', storeProductCode: '1005P-LINK' },
+    defaultAction: DetailAction.UpdatePurchasePrice,
+  },
+)
+assertEqual(linkedDetail.productCode, 'P-LINK', '应回填所选商品编码')
+assertEqual(linkedDetail.storeProductCode, '1005P-LINK', '应回填分店商品编码')
+assertEqual(linkedDetail.existingProductCount, 1, '选用后主档应显示存在')
+assertEqual(linkedDetail.lastPurchasePrice, 2.8, '已有上次进货价快照不能被检测覆盖')
+assertEqual(linkedDetail.activityType, DetailAction.UpdatePurchasePrice, '默认操作应取检测结果')
+assert(isProductLinkConfirmed({ detailGuid: 'x', productStatus: 1, barcodeStatus: 1, existingProductCount: 1, productInfo: { productCode: 'p-link ' } }, 'P-LINK'), '商品编码比较应忽略大小写与空白')
+assert(!isProductLinkConfirmed({ detailGuid: 'x', productStatus: 2, barcodeStatus: 2, existingProductCount: 0 }, 'P-LINK'), '后端清掉关联时应判定未关联')
+assert(!isProductLinkConfirmed(undefined, 'P-LINK'), '缺少检测结果时应判定未关联')
 
 console.log('InvoiceEdit workbenchLogic tests: ok')
