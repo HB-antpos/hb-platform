@@ -399,6 +399,28 @@ namespace BlazorApp.Api.Services.React
                     localPreparationStopwatch.Stop();
                     localPreparationMs = localPreparationStopwatch.ElapsedMilliseconds;
 
+                    // 关键位置：本批新建的商品必须把编码回填到明细，否则明细关联不到主档、列表一直把它算作新品。
+                    // 同批重复货号的后续行会复用首行新建的商品（自身 IsNewProduct=false），因此按「商品是否本批新建」筛选。
+                    // 只写两列编码，不动「上次进货价」等明细字段；与主档、分店价格、变更历史同处本地事务。
+                    var createdProductCodes = updateItems
+                        .Where(item => item.IsNewProduct)
+                        .Select(item => item.Product.ProductCode!)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var detailsToBind = updateItems
+                        .Where(item => createdProductCodes.Contains(item.Product.ProductCode!))
+                        .Select(item => item.Detail)
+                        .ToList();
+                    if (detailsToBind.Count > 0)
+                    {
+                        await db.Updateable(detailsToBind)
+                            .UpdateColumns(new[]
+                            {
+                                nameof(StoreLocalSupplierInvoiceDetails.ProductCode),
+                                nameof(StoreLocalSupplierInvoiceDetails.StoreProductCode),
+                            })
+                            .ExecuteCommandAsync();
+                    }
+
                     var localPriceStopwatch = Stopwatch.StartNew();
                     await UpsertLocalStorePricesForHqUpdateAsync(
                         updateItems.Where(item => item.IsNewProduct).ToList(),
@@ -736,8 +758,8 @@ namespace BlazorApp.Api.Services.React
                 result.HbwebCreated++;
             }
 
-            // 更新HQ商品链路不回写本单明细，避免把“上次进货价”等明细字段改成本次操作值。
-            // 这里只在内存中补齐商品编码，供后续本地价格和HQ价格写入使用。
+            // 更新HQ商品链路不整行回写本单明细，避免把“上次进货价”等明细字段改成本次操作值。
+            // 这里先在内存中补齐商品编码，供后续本地价格和HQ价格写入使用；本批新建商品的两列编码由调用方统一落库。
             detail.ProductCode = product.ProductCode;
             detail.StoreProductCode ??= BuildStoreProductCode(detail.StoreCode, product.ProductCode!);
 
