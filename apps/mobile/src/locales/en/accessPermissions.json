@@ -765,6 +765,10 @@
       "name": "Warehouse Order Picking",
       "description": "Mobile Order picking - scan to pick, fill in a missing min order qty and submit ship quantities. Included with Warehouse Manage or Warehouse Manage Orders."
     },
+    "Warehouse.StartPicking": {
+      "name": "Start Picking on Print",
+      "description": "Web page /warehouse/store-order/picking/:id - printing or downloading the picking sheet moves the order from Submitted to Picking. Granted separately from order editing; not included with Warehouse Manage."
+    },
     "Warehouse.ManageProducts": {
       "name": "Warehouse Manage Products",
       "description": "Allows access to Warehouse Manage Products."

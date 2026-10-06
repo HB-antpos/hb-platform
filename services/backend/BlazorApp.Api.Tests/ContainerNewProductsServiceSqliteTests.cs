@@ -201,6 +201,39 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_带includeExisting时同时返回已有商品并标记新旧_默认只返回新商品()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+        database.Insertable(new Store { StoreGUID = "store-7", StoreCode = "S-7", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-7", UserGUID = "user-7", StoreGUID = "store-7", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-MIX", ContainerNumber = "MIX", ActualArrivalDate = today }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "M1", ContainerCode = "C-MIX", ProductCode = "P-FRESH" },
+            new ContainerDetail { DetailCode = "M2", ContainerCode = "C-MIX", ProductCode = "P-CREATED" },
+            new ContainerDetail { DetailCode = "M3", ContainerCode = "C-MIX", ProductCode = "P-RESTOCK" },
+        }).ExecuteCommand();
+        // P-CREATED 由本柜提交时新建，仍算新商品；P-RESTOCK 早已在仓库，是已有商品
+        database.Insertable(new[]
+        {
+            new WarehouseProduct { ProductCode = "P-CREATED" },
+            new WarehouseProduct { ProductCode = "P-RESTOCK" },
+        }).ExecuteCommand();
+        database.Insertable(new WarehouseProductChangeHistory { ProductCode = "P-CREATED", Source = "ContainerSubmit", Action = "Create", SourceReference = "C-MIX" }).ExecuteCommand();
+
+        var service = CreateService("user-7");
+        var defaultResult = await service.GetAsync("S-7");
+        var withExisting = await service.GetAsync("S-7", includeExisting: true);
+
+        Assert.Equal(new[] { "P-CREATED", "P-FRESH" }, defaultResult.Items.Select(x => x.ProductCode).Order());
+        Assert.All(defaultResult.Items, x => Assert.True(x.IsNewProduct));
+        Assert.Equal(
+            new[] { ("P-CREATED", true), ("P-FRESH", true), ("P-RESTOCK", false) },
+            withExisting.Items.Select(x => (x.ProductCode, x.IsNewProduct)).OrderBy(x => x.ProductCode));
+    }
+
+    [Fact]
     public async Task GetAsync_仅允许UserStore关联门店_不要求Primary()
     {
         database.Insertable(new Store { StoreGUID = "store-2", StoreCode = "S-2", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
