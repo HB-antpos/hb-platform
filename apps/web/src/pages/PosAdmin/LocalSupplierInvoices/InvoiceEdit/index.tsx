@@ -153,6 +153,7 @@ import {
   constrainSelectedRowKeysToVisibleDetails,
   getBatchExecuteErrorFeedback,
   getNewProductWithAdditionalBarcodesRows,
+  splitCreateProductDetailGuids,
 } from './batchExecuteConfirm'
 import {
   EditableNumberCell,
@@ -215,6 +216,7 @@ import type {
 } from './statusFilters'
 import { MeasuredTable } from '../../../../components/MeasuredTable'
 import { formatLocalSupplierInvoiceAuditTime, formatLocalSupplierInvoiceAuditTimeCompact } from '../auditTime'
+import { publishLocalSupplierInvoiceChanged } from '../invoiceListSync'
 import invoiceMessagesEn from '../invoiceMessages.en.json'
 import invoiceMessagesZh from '../invoiceMessages.zh.json'
 import '../localSupplierInvoices.css'
@@ -451,6 +453,21 @@ function buildUpdatePriceFields(values: Record<string, unknown>): UpdateToStoreP
     updateDiscountRate: values.updateDiscountRate === true,
   }
 }
+
+// 「新建商品」同步 HQ 时写全部价格字段：与本地新建为全部启用分店建价一致，取值来自明细行。
+const ALL_UPDATE_PRICE_FIELDS: UpdateToStorePricesFields = {
+  updatePurchasePrice: true,
+  updateRetailPrice: true,
+  updateIsAutoPricing: true,
+  updateIsSpecialProduct: true,
+  updateDiscountRate: true,
+}
+
+function createHqIdempotencyKey(fallback: string) {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${fallback}-${Date.now()}`
+}
+
+type BatchExecuteMode = 'createProducts' | 'otherActions'
 
 function hasAnyUpdatePriceField(updateFields: UpdateToStorePricesFields) {
   return (
@@ -958,6 +975,11 @@ export default function InvoiceEditPage() {
     () => getPendingExecutionDetailGuids(details, rowActions),
     [details, rowActions],
   )
+  // 待执行拆成「新建商品」与其余操作两组，进度区分别给出按钮。
+  const pendingExecutionSplit = useMemo(
+    () => splitCreateProductDetailGuids(pendingExecutionDetailGuids, details, rowActions),
+    [pendingExecutionDetailGuids, details, rowActions],
+  )
 
   // 过滤后数据：处理进度、商品类型、特殊商品先过滤，再交给搜索/涨跌/状态/操作类型的行为级过滤链（全部按 AND 叠加）。
   const filteredDetails = useMemo(
@@ -1262,6 +1284,7 @@ export default function InvoiceEditPage() {
     setSaving(true)
     try {
       await updateInvoice(invoiceGuid, payload)
+      publishLocalSupplierInvoiceChanged(invoiceGuid)
       // 分店或供应商变更会由后端级联到明细，保存后同步刷新两份快照避免继续编辑旧范围数据。
       const refreshed = await loadInvoiceAndDetails(false)
       if (!refreshed) {
@@ -1313,6 +1336,7 @@ export default function InvoiceEditPage() {
     setDetailLoading(true)
     try {
       await batchUpsertDetails(invoiceGuid, items)
+      publishLocalSupplierInvoiceChanged(invoiceGuid)
       message.success(t('posAdmin.invoiceDetail.detailSaveSuccess', '明细保存成功'))
       if (options.reload !== false) await loadDetails()
       return true
@@ -1436,6 +1460,7 @@ export default function InvoiceEditPage() {
               duration: result.failed > 0 ? 0 : 4,
             })
           }
+          publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
           if (canApplyInvoiceJobResult(currentInvoiceGuidRef.current, submittedInvoiceGuid)) {
             await loadDetails()
           }
@@ -1467,6 +1492,7 @@ export default function InvoiceEditPage() {
           setPasteVisible(false)
           setPasteText('')
           message.success(formatPasteDetailsResult(result))
+          publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
           if (canApplyInvoiceJobResult(currentInvoiceGuidRef.current, submittedInvoiceGuid)) {
             await loadDetails()
           }
@@ -1532,6 +1558,7 @@ export default function InvoiceEditPage() {
     void (async () => {
       try {
         await batchUpdateDetails(submittedInvoiceGuid, items, editFields)
+        publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
         message.success(t('posAdmin.invoiceDetail.batchUpdateSuccess', '批量更新成功'))
       } catch (error) {
         message.error(error instanceof Error ? error.message : t('posAdmin.invoiceDetail.batchUpdateFailed', '批量更新失败'))
@@ -1764,6 +1791,8 @@ export default function InvoiceEditPage() {
       targetStoreCodes: values.targetStoreCodes,
       updateFields,
     }
+    // 「同时更新 HQ 数据库」默认打开；没有写 HQ 权限时开关禁用，这里再兜底一次。
+    const syncToHq = values.syncToHq === true && canWriteLocalPurchaseToHq
 
     setStorePriceVisible(false)
     storePriceForm.resetFields()
@@ -1812,6 +1841,17 @@ export default function InvoiceEditPage() {
           ) : description,
           duration: hasDetails ? 0 : 4,
         })
+        // 本地分店价写完再按同样的明细、分店与字段补写 HQ；本地整单失败时（上面已 return）不写 HQ。
+        if (syncToHq) {
+          runUpdateHqProductsJob({
+            invoiceGuid: request.invoiceGuid,
+            detailGuids: request.detailGuids,
+            targetStoreCodes: request.targetStoreCodes,
+            updateFields: request.updateFields,
+            idempotencyKey: createHqIdempotencyKey(request.invoiceGuid),
+            saveSelectedDetails: false,
+          })
+        }
       } catch (error) {
         if (error instanceof HqProductSyncPollingTimeoutError) {
           notifyBatchJobTimeout()
@@ -1824,6 +1864,96 @@ export default function InvoiceEditPage() {
         })
       } finally {
         setStorePriceLoading(false)
+      }
+    })()
+  }
+
+  // 后台提交「更新HQ商品」任务并通知结果。「更新HQ商品」按钮，以及「新建商品」「更新到分店」勾选「同时更新 HQ 数据库」后都走这里。
+  const runUpdateHqProductsJob = (params: {
+    invoiceGuid: string
+    detailGuids: string[]
+    targetStoreCodes: string[]
+    updateFields: UpdateToStorePricesFields
+    idempotencyKey: string
+    /** 按钮直接提交时先保存前端选中行（HQ 按后端明细取值）；串联提交时上一步已落库，不再保存。 */
+    saveSelectedDetails: boolean
+    onFinished?: (keepIdempotencyKey: boolean) => void
+  }) => {
+    const { invoiceGuid, detailGuids, targetStoreCodes, updateFields, idempotencyKey } = params
+    setHqUpdateLoading(true)
+
+    void (async () => {
+      let shouldClearIdempotencyKey = true
+      try {
+        if (params.saveSelectedDetails) {
+          const selectedDetailSet = new Set(detailGuids)
+          const selectedDetails = details.filter((detail) => detail.detailGUID && selectedDetailSet.has(detail.detailGUID))
+          if (selectedDetails.length !== detailGuids.length) {
+            throw new Error(t('posAdmin.invoiceDetail.selectedDetailNotFound', '未找到选中的明细行'))
+          }
+
+          // HQ 按后端明细行写入字段值；提交任务前先保存当前前端选中行，避免读到旧明细。
+          await batchUpsertDetails(invoiceGuid, buildInvoiceDetailSaveItems(selectedDetails))
+        }
+        notifyBackgroundTaskSubmitted(t('posAdmin.invoiceDetail.updateHqProductsSubmitted', '更新HQ商品已提交'))
+
+        const job = await startUpdateHqProductsJob(invoiceGuid, {
+          detailGuids,
+          targetStoreCodes,
+          updateFields,
+          idempotencyKey,
+        })
+        const completedJob = await pollUpdateHqProductsJob(job.jobId)
+        const result = completedJob.result
+        if (!result) {
+          throw new Error(completedJob.message || t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败'))
+        }
+        const hasDetails = result.failed > 0 || (result.skipped ?? 0) > 0 || !!result.errors?.length
+        if (completedJob.status === 'Failed') {
+          notification.error({
+            message: t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败'),
+            description: (
+              <Space direction="vertical" size={4}>
+                <span>{completedJob.message || t('posAdmin.invoiceDetail.updateHqProductsFailedCount', '失败：{{count}} 条', { count: result.failed ?? 0 })}</span>
+                {hasDetails && renderBackgroundTaskDetailsButton(() => showUpdateHqProductsResult(result))}
+              </Space>
+            ),
+            duration: 0,
+          })
+          return
+        }
+        notification[result.failed > 0 || result.errors?.length ? 'warning' : 'success']({
+          message: t('posAdmin.invoiceDetail.updateHqProductsCompleted', '更新HQ商品完成'),
+          description: (
+            <Space direction="vertical" size={4}>
+              <span>{t('posAdmin.invoiceDetail.updateHqProductsUpdated', '成功更新：{{count}} 条', { count: result.updated ?? 0 })}</span>
+              {hasDetails && renderBackgroundTaskDetailsButton(() => showUpdateHqProductsResult(result))}
+            </Space>
+          ),
+          duration: hasDetails ? 0 : 4,
+        })
+        publishLocalSupplierInvoiceChanged(invoiceGuid)
+        await loadDetails()
+      } catch (error) {
+        if (error instanceof HqProductSyncPollingTimeoutError) {
+          shouldClearIdempotencyKey = false
+          notifyBatchJobTimeout()
+          return
+        }
+        const failure = getUpdateHqProductsFailure(error)
+        notification.error({
+          message: t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败'),
+          description: failure ? (
+            <Space direction="vertical" size={4}>
+              <span>{t('posAdmin.invoiceDetail.updateHqProductsFailedCount', '失败：{{count}} 条', { count: failure.failed ?? 0 })}</span>
+              {renderBackgroundTaskDetailsButton(() => showUpdateHqProductsResult(failure))}
+            </Space>
+          ) : (error instanceof Error ? error.message : t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败')),
+          duration: 0,
+        })
+      } finally {
+        params.onFinished?.(!shouldClearIdempotencyKey)
+        setHqUpdateLoading(false)
       }
     })()
   }
@@ -1869,81 +1999,18 @@ export default function InvoiceEditPage() {
 
     setHqUpdateVisible(false)
     hqUpdateForm.resetFields()
-    setHqUpdateLoading(true)
-
-    void (async () => {
-      let shouldClearIdempotencyKey = true
-      try {
-        const selectedDetailSet = new Set(detailGuids)
-        const selectedDetails = details.filter((detail) => detail.detailGUID && selectedDetailSet.has(detail.detailGUID))
-        if (selectedDetails.length !== detailGuids.length) {
-          throw new Error(t('posAdmin.invoiceDetail.selectedDetailNotFound', '未找到选中的明细行'))
-        }
-
-        // HQ 按后端明细行写入字段值；提交任务前先保存当前前端选中行，避免读到旧明细。
-        await batchUpsertDetails(invoiceGuid, buildInvoiceDetailSaveItems(selectedDetails))
-        notifyBackgroundTaskSubmitted(t('posAdmin.invoiceDetail.updateHqProductsSubmitted', '更新HQ商品已提交'))
-
-        const job = await startUpdateHqProductsJob(invoiceGuid, {
-          detailGuids,
-          targetStoreCodes,
-          updateFields,
-          idempotencyKey,
-        })
-        const completedJob = await pollUpdateHqProductsJob(job.jobId)
-        const result = completedJob.result
-        if (!result) {
-          throw new Error(completedJob.message || t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败'))
-        }
-        const hasDetails = result.failed > 0 || (result.skipped ?? 0) > 0 || !!result.errors?.length
-        if (completedJob.status === 'Failed') {
-          notification.error({
-            message: t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败'),
-            description: (
-              <Space direction="vertical" size={4}>
-                <span>{completedJob.message || t('posAdmin.invoiceDetail.updateHqProductsFailedCount', '失败：{{count}} 条', { count: result.failed ?? 0 })}</span>
-                {hasDetails && renderBackgroundTaskDetailsButton(() => showUpdateHqProductsResult(result))}
-              </Space>
-            ),
-            duration: 0,
-          })
-          return
-        }
-        notification[result.failed > 0 || result.errors?.length ? 'warning' : 'success']({
-          message: t('posAdmin.invoiceDetail.updateHqProductsCompleted', '更新HQ商品完成'),
-          description: (
-            <Space direction="vertical" size={4}>
-              <span>{t('posAdmin.invoiceDetail.updateHqProductsUpdated', '成功更新：{{count}} 条', { count: result.updated ?? 0 })}</span>
-              {hasDetails && renderBackgroundTaskDetailsButton(() => showUpdateHqProductsResult(result))}
-            </Space>
-          ),
-          duration: hasDetails ? 0 : 4,
-        })
-        await loadDetails()
-      } catch (error) {
-        if (error instanceof HqProductSyncPollingTimeoutError) {
-          shouldClearIdempotencyKey = false
-          notifyBatchJobTimeout()
-          return
-        }
-        const failure = getUpdateHqProductsFailure(error)
-        notification.error({
-          message: t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败'),
-          description: failure ? (
-            <Space direction="vertical" size={4}>
-              <span>{t('posAdmin.invoiceDetail.updateHqProductsFailedCount', '失败：{{count}} 条', { count: failure.failed ?? 0 })}</span>
-              {renderBackgroundTaskDetailsButton(() => showUpdateHqProductsResult(failure))}
-            </Space>
-          ) : (error instanceof Error ? error.message : t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败')),
-          duration: 0,
-        })
-      } finally {
-        if (shouldClearIdempotencyKey) {
-          hqUpdateIdempotencyKeyRef.current = null
-        }
-        setHqUpdateLoading(false)
-      }
-    })()
+    runUpdateHqProductsJob({
+      invoiceGuid,
+      detailGuids,
+      targetStoreCodes,
+      updateFields,
+      idempotencyKey,
+      saveSelectedDetails: true,
+      // 轮询超时时 HQ 可能已写入：保留幂等键，用户重试沿用同一个键，避免重复写 HQ。
+      onFinished: (keepIdempotencyKey) => {
+        if (!keepIdempotencyKey) hqUpdateIdempotencyKeyRef.current = null
+      },
+    })
   }
 
   const applyCheckProductsResponse = (result: CheckProductsResponse) => {
@@ -2026,6 +2093,7 @@ export default function InvoiceEditPage() {
             ),
             duration: hasDetails ? 0 : 4,
           })
+          publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
           if (canApplyInvoiceJobResult(currentInvoiceGuidRef.current, submittedInvoiceGuid)) {
             await loadDetails()
           }
@@ -2086,6 +2154,7 @@ export default function InvoiceEditPage() {
             description,
             duration: 4,
           })
+          publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
           if (canApplyCheckProductsJobResult({
             currentInvoiceGuid: currentInvoiceGuidRef.current,
             submittedInvoiceGuid,
@@ -2122,6 +2191,7 @@ export default function InvoiceEditPage() {
           })
           const description = t('posAdmin.invoiceDetail.detectCompleteMsg', '检测完成：共 {{total}}条，商品存在 {{productExists}}条，不存在 {{productNotExists}}条，条码正常 {{barcodeNormal}}条，异常 {{barcodeAbnormal}}条', result.summary)
           message.success(description)
+          publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
           if (canApplyCheckProductsJobResult({
             currentInvoiceGuid: currentInvoiceGuidRef.current,
             submittedInvoiceGuid,
@@ -2167,7 +2237,46 @@ export default function InvoiceEditPage() {
     }
   }
 
-  const executeSelectedBatchActions = async (snapshot: ReturnType<typeof buildBatchExecuteSnapshot>) => {
+  // 「新建商品」勾选「同时更新 HQ 数据库」：只把这次真正建好（已回填商品编码）的行交给 HQ 任务，为全部启用分店写全部价格字段。
+  const syncCreatedProductsToHq = async (snapshot: ReturnType<typeof buildBatchExecuteSnapshot>) => {
+    if (!invoiceGuid) return
+    const createGuidSet = new Set(
+      snapshot.expectedActions
+        .filter((item) => item.action === DetailActionEnum.CreateProduct)
+        .map((item) => item.detailGuid),
+    )
+    try {
+      // 执行结果只有计数没有逐行结果，按服务端回填的商品编码判断哪些行真正建好。
+      const refreshed = await getInvoiceDetails(invoiceGuid)
+      const createdGuids = refreshed
+        .filter((detail) => createGuidSet.has(detail.detailGUID) && detail.productCode)
+        .map((detail) => detail.detailGUID)
+      if (!createdGuids.length) return
+      if (!allStoreCodes.length) {
+        message.warning(t('posAdmin.invoiceWorkbench.syncToHqNoStores'))
+        return
+      }
+      runUpdateHqProductsJob({
+        invoiceGuid,
+        detailGuids: createdGuids,
+        targetStoreCodes: allStoreCodes,
+        updateFields: ALL_UPDATE_PRICE_FIELDS,
+        idempotencyKey: createHqIdempotencyKey(invoiceGuid),
+        saveSelectedDetails: false,
+      })
+    } catch (error) {
+      notification.error({
+        message: t('posAdmin.invoiceDetail.updateHqProductsFailed', '更新HQ商品失败'),
+        description: error instanceof Error ? error.message : undefined,
+        duration: 0,
+      })
+    }
+  }
+
+  const executeSelectedBatchActions = async (
+    snapshot: ReturnType<typeof buildBatchExecuteSnapshot>,
+    options?: { syncCreatedToHq?: boolean },
+  ) => {
     if (!invoiceGuid || !ensureCanAccessInvoice()) return
     setExecuting(true)
     notifyBackgroundTaskSubmitted(t('posAdmin.invoiceDetail.batchExecuteSubmitted', '批量执行操作已提交'))
@@ -2192,7 +2301,11 @@ export default function InvoiceEditPage() {
         ) : t('posAdmin.invoiceDetail.executeResultMsg', '执行完成：{{parts}}', { parts }),
         duration: hasDetails ? 0 : 4,
       })
+      publishLocalSupplierInvoiceChanged(invoiceGuid)
       void loadDetails()
+      if (options?.syncCreatedToHq && result.createdProducts > 0) {
+        void syncCreatedProductsToHq(snapshot)
+      }
     } catch (error) {
       const feedback = getBatchExecuteErrorFeedback(error, t('posAdmin.invoiceDetail.executeFailed', '批量执行操作失败'))
       notification.error({
@@ -2211,7 +2324,7 @@ export default function InvoiceEditPage() {
   }
 
   // ---- 批量执行操作 ----
-  const handleBatchExecute = (explicitDetailGuids?: string[]) => {
+  const handleBatchExecute = (explicitDetailGuids?: string[], mode: BatchExecuteMode = 'otherActions') => {
     if (!invoiceGuid || !ensureCanAccessInvoice()) return
     // 「执行全部待执行」直接按全部明细里的待执行行提交（不受当前筛选影响）；勾选执行仍只执行当前可见的选中行。
     const visibleSelectedRowKeys = explicitDetailGuids ?? constrainSelectedRowKeysToVisibleDetails(selectedRowKeys, filteredDetails)
@@ -2223,13 +2336,27 @@ export default function InvoiceEditPage() {
       setSelectedRowKeys(visibleSelectedRowKeys)
     }
 
+    // 「新建商品」与其余操作分开执行：新建单独确认（可同时更新 HQ），「执行操作」跳过新建行。
+    const { createGuids, otherGuids } = splitCreateProductDetailGuids(visibleSelectedRowKeys, details, rowActions)
+    const isCreateMode = mode === 'createProducts'
+    const targetGuids = isCreateMode ? createGuids : otherGuids
+    if (!targetGuids.length) {
+      message.warning(isCreateMode
+        ? t('posAdmin.invoiceWorkbench.noCreateProductRows')
+        : t('posAdmin.invoiceWorkbench.onlyCreateProductRows'))
+      return
+    }
+    const skippedCreateCount = isCreateMode ? 0 : createGuids.length
+    // 写 HQ 需要 PushToHq 权限；没有时开关禁用且不勾选。确认框不受 React 状态管理，用普通对象记录勾选结果。
+    const hqChoice = { syncToHq: canWriteLocalPurchaseToHq }
+
     const previewSnapshot = buildBatchExecuteSnapshot({
-      selectedRowKeys: visibleSelectedRowKeys,
+      selectedRowKeys: targetGuids,
       details,
       rowActions,
     })
     const newProductWithAdditionalBarcodesRows = getNewProductWithAdditionalBarcodesRows(
-      visibleSelectedRowKeys,
+      targetGuids,
       details,
       rowActions,
     )
@@ -2239,13 +2366,21 @@ export default function InvoiceEditPage() {
     const confirmText = buildBatchExecuteConfirmText({
       selectedCount: previewSnapshot.selectedCount,
       createProductCount: previewSnapshot.confirmedCreateProductCount,
-      labels: {
-        title: t('posAdmin.invoiceDetail.batchExecuteConfirmTitle', '确认执行批量操作？'),
-        content: t('posAdmin.invoiceDetail.batchExecuteConfirmContent', '将对 {{count}} 条明细执行已设置的操作。'),
-        createProductNotice: t('posAdmin.invoiceDetail.batchExecuteCreateProductNotice', '其中 {{count}} 条会新建商品，请确认货号、条码和名称无误。'),
-        okText: t('posAdmin.invoiceDetail.batchExecuteConfirmOk', '确认执行'),
-        cancelText: t('common.cancel', '取消'),
-      },
+      labels: isCreateMode
+        ? {
+            title: t('posAdmin.invoiceWorkbench.createProductsConfirmTitle'),
+            content: t('posAdmin.invoiceWorkbench.createProductsConfirmContent'),
+            createProductNotice: t('posAdmin.invoiceDetail.batchExecuteCreateProductNotice', '其中 {{count}} 条会新建商品，请确认货号、条码和名称无误。'),
+            okText: t('posAdmin.invoiceWorkbench.createProductsConfirmOk'),
+            cancelText: t('common.cancel', '取消'),
+          }
+        : {
+            title: t('posAdmin.invoiceDetail.batchExecuteConfirmTitle', '确认执行批量操作？'),
+            content: t('posAdmin.invoiceDetail.batchExecuteConfirmContent', '将对 {{count}} 条明细执行已设置的操作。'),
+            createProductNotice: t('posAdmin.invoiceDetail.batchExecuteCreateProductNotice', '其中 {{count}} 条会新建商品，请确认货号、条码和名称无误。'),
+            okText: t('posAdmin.invoiceDetail.batchExecuteConfirmOk', '确认执行'),
+            cancelText: t('common.cancel', '取消'),
+          },
     })
 
     Modal.confirm({
@@ -2255,6 +2390,9 @@ export default function InvoiceEditPage() {
           {confirmText.content.split('\n').map((line) => (
             <div key={line}>{line}</div>
           ))}
+          {skippedCreateCount > 0 && (
+            <Alert type="info" showIcon message={t('posAdmin.invoiceWorkbench.skippedCreateRows', { count: skippedCreateCount })} />
+          )}
           {newProductWithAdditionalBarcodesRows.length > 0 && (
             <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
               <Alert
@@ -2290,6 +2428,24 @@ export default function InvoiceEditPage() {
               ))}
             </Space>
           )}
+          {isCreateMode && (
+            <div style={{ marginTop: 8 }}>
+              <Checkbox
+                defaultChecked={canWriteLocalPurchaseToHq}
+                disabled={!canWriteLocalPurchaseToHq}
+                onChange={(event) => {
+                  hqChoice.syncToHq = event.target.checked
+                }}
+              >
+                {t('posAdmin.invoiceWorkbench.syncToHq')}
+              </Checkbox>
+              <div className="lsi-wb-sync-hq-hint">
+                {canWriteLocalPurchaseToHq
+                  ? t('posAdmin.invoiceWorkbench.syncToHqCreateHint')
+                  : t('posAdmin.invoiceWorkbench.syncToHqNoPermission')}
+              </div>
+            </div>
+          )}
         </Space>
       ),
       okText: confirmText.okText,
@@ -2307,14 +2463,15 @@ export default function InvoiceEditPage() {
           })),
           // 真正提交的确认时间在用户点击确认时生成。
           confirmedAt: new Date().toISOString(),
-        }))
+        }), { syncCreatedToHq: isCreateMode && hqChoice.syncToHq })
       },
     })
   }
 
-  const handleExecuteAllPending = () => {
-    if (!pendingExecutionDetailGuids.length) return
-    runAfterUnsavedGuard(() => handleBatchExecute(pendingExecutionDetailGuids))
+  const handleExecuteAllPending = (mode: BatchExecuteMode) => {
+    const guids = mode === 'createProducts' ? pendingExecutionSplit.createGuids : pendingExecutionSplit.otherGuids
+    if (!guids.length) return
+    runAfterUnsavedGuard(() => handleBatchExecute(guids, mode))
   }
 
   // ---- 删除选中 ----
@@ -2327,6 +2484,7 @@ export default function InvoiceEditPage() {
     setDetailLoading(true)
     try {
       await deleteDetails(invoiceGuid, selectedRowKeys.map(String))
+      publishLocalSupplierInvoiceChanged(invoiceGuid)
       message.success(t('posAdmin.invoiceDetail.deleteSuccess', '删除成功'))
       setSelectedRowKeys([])
       loadDetails()
@@ -3564,15 +3722,28 @@ export default function InvoiceEditPage() {
                   )
                 })}
               <span className="lsi-wb-spacer" />
-              {canRunGlobalLocalPurchaseBatchActions && progressStats.pending > 0 && (
+              {canRunGlobalLocalPurchaseBatchActions && pendingExecutionSplit.createGuids.length > 0 && (
                 <Button
                   type="primary"
                   size="small"
                   icon={executing ? <LoadingOutlined /> : <PlayCircleOutlined />}
                   disabled={executing}
-                  onClick={handleExecuteAllPending}
+                  onClick={() => handleExecuteAllPending('createProducts')}
                 >
-                  {t('posAdmin.invoiceWorkbench.executeAllPending', { count: progressStats.pending })}
+                  {t('posAdmin.invoiceWorkbench.createAllPending', { count: pendingExecutionSplit.createGuids.length })}
+                </Button>
+              )}
+              {canRunGlobalLocalPurchaseBatchActions && pendingExecutionSplit.otherGuids.length > 0 && (
+                <Button
+                  type={pendingExecutionSplit.createGuids.length > 0 ? 'default' : 'primary'}
+                  size="small"
+                  icon={executing ? <LoadingOutlined /> : <PlayCircleOutlined />}
+                  disabled={executing}
+                  onClick={() => handleExecuteAllPending('otherActions')}
+                >
+                  {pendingExecutionSplit.createGuids.length > 0
+                    ? t('posAdmin.invoiceWorkbench.executeOtherPending', { count: pendingExecutionSplit.otherGuids.length })
+                    : t('posAdmin.invoiceWorkbench.executeAllPending', { count: pendingExecutionSplit.otherGuids.length })}
                 </Button>
               )}
             </div>
@@ -3693,6 +3864,18 @@ export default function InvoiceEditPage() {
                     <DownOutlined style={{ fontSize: 10 }} />
                   </Button>
                 </Dropdown>
+              )}
+              {canRunGlobalLocalPurchaseBatchActions && (
+                <Button
+                  size="small"
+                  type="primary"
+                  ghost
+                  icon={executing ? <LoadingOutlined /> : undefined}
+                  disabled={executing}
+                  onClick={() => runAfterUnsavedGuard(() => handleBatchExecute(undefined, 'createProducts'))}
+                >
+                  {t('posAdmin.invoiceWorkbench.createProducts')}
+                </Button>
               )}
               {canRunGlobalLocalPurchaseBatchActions && (
                 <Button
@@ -4045,7 +4228,7 @@ export default function InvoiceEditPage() {
         <Form
           form={storePriceForm}
           layout="vertical"
-          initialValues={{ updatePurchasePrice: true }}
+          initialValues={{ updatePurchasePrice: true, syncToHq: canWriteLocalPurchaseToHq }}
         >
           <Form.Item
             name="targetStoreCodes"
@@ -4094,6 +4277,15 @@ export default function InvoiceEditPage() {
           </Form.Item>
           <Form.Item name="updateDiscountRate" valuePropName="checked">
             <Checkbox>{t('posAdmin.invoiceDetail.updateDiscountRate', '更新折扣率')}</Checkbox>
+          </Form.Item>
+          <Form.Item
+            name="syncToHq"
+            valuePropName="checked"
+            extra={canWriteLocalPurchaseToHq
+              ? t('posAdmin.invoiceWorkbench.syncToHqStoreHint')
+              : t('posAdmin.invoiceWorkbench.syncToHqNoPermission')}
+          >
+            <Checkbox disabled={!canWriteLocalPurchaseToHq}>{t('posAdmin.invoiceWorkbench.syncToHq')}</Checkbox>
           </Form.Item>
         </Form>
       </Modal>

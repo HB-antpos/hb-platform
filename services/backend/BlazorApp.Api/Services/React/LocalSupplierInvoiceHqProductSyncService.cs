@@ -399,34 +399,7 @@ namespace BlazorApp.Api.Services.React
                     localPreparationStopwatch.Stop();
                     localPreparationMs = localPreparationStopwatch.ElapsedMilliseconds;
 
-                    // 关键位置：本批新建的商品必须把编码回填到明细，否则明细关联不到主档、列表一直把它算作新品。
-                    // 同批重复货号的后续行会复用首行新建的商品（自身 IsNewProduct=false），因此按「商品是否本批新建」筛选。
-                    // 只写两列编码，不动「上次进货价」等明细字段；与主档、分店价格、变更历史同处本地事务。
-                    var createdProductCodes = updateItems
-                        .Where(item => item.IsNewProduct)
-                        .Select(item => item.Product.ProductCode!)
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    var detailsToBind = updateItems
-                        .Where(item => createdProductCodes.Contains(item.Product.ProductCode!))
-                        .Select(item => item.Detail)
-                        .ToList();
-                    if (detailsToBind.Count > 0)
-                    {
-                        await db.Updateable(detailsToBind)
-                            .UpdateColumns(new[]
-                            {
-                                nameof(StoreLocalSupplierInvoiceDetails.ProductCode),
-                                nameof(StoreLocalSupplierInvoiceDetails.StoreProductCode),
-                            })
-                            .ExecuteCommandAsync();
-                    }
-
                     var localPriceStopwatch = Stopwatch.StartNew();
-                    await UpsertLocalStorePricesForHqUpdateAsync(
-                        updateItems.Where(item => item.IsNewProduct).ToList(),
-                        activeStoreCodes,
-                        updatedBy
-                    );
 
                     var preparedProductCodes = SetChildPurchasePriceMutationLock.NormalizeProductCodes(
                         updateItems
@@ -506,13 +479,6 @@ namespace BlazorApp.Api.Services.React
                     localPriceStopwatch.Stop();
                     localPriceMs = localPriceStopwatch.ElapsedMilliseconds;
 
-                    await RecordCreatedLocalProductHistoryAsync(
-                        updateItems,
-                        invoiceGuid,
-                        auditBatchGuid,
-                        actorUserGuid,
-                        actorName
-                    );
                     await db.Ado.CommitTranAsync();
                 }
                 catch
@@ -701,7 +667,6 @@ namespace BlazorApp.Api.Services.React
         )
         {
             var db = _context.Db;
-            var now = DateTime.UtcNow;
             var product = lockedProduct ?? await FindExistingProductAsync(
                 db,
                 detail.ProductCode,
@@ -712,54 +677,18 @@ namespace BlazorApp.Api.Services.React
 
             // 动态匹配只可复用本次已锁住的商品；任何旁路写入引入的新身份都必须回滚，不能越界写入。
             lockScope.EnsureCovers(db, new[] { product?.ProductCode ?? generatedProductCode });
-            var isNewProduct = product == null;
+            // 「更新HQ商品」只负责补写 HQ，不再隐式新建本地商品：新建统一走「新建商品」（批量执行），
+            // 那条路径会同事务写主档、全部启用分店价、明细编码回填与本单 Create 变更历史，避免两套建商品语义不一致。
+            // 因此这里匹配不到主档就逐行报错跳过。
             if (product == null)
             {
-                if (string.IsNullOrWhiteSpace(detail.ItemNumber))
-                {
-                    AddError(result, detail.DetailGUID, detail.StoreCode, "新建商品货号不能为空");
-                    return null;
-                }
-                if (string.IsNullOrWhiteSpace(detail.Barcode))
-                {
-                    AddError(result, detail.DetailGUID, detail.StoreCode, "新建商品条码不能为空");
-                    return null;
-                }
-                if (detail.PurchasePrice == null || detail.PurchasePrice <= 0)
-                {
-                    AddError(result, detail.DetailGUID, detail.StoreCode, "新建商品进货价必须大于0");
-                    return null;
-                }
-
-                product = new Product
-                {
-                    UUID = generatedProductCode,
-                    ProductCode = generatedProductCode,
-                    ProductCategoryGUID = detail.ProductCategoryGUID,
-                    LocalSupplierCode = header.SupplierCode ?? detail.SupplierCode,
-                    ItemNumber = detail.ItemNumber,
-                    Barcode = detail.Barcode,
-                    ProductName = detail.ProductName ?? string.Empty,
-                    ProductType = 0,
-                    PurchasePrice = detail.PurchasePrice,
-                    RetailPrice = ResolveRetailPrice(detail),
-                    IsAutoPricing = detail.AutoPricing ?? true,
-                    IsSpecialProduct = detail.IsSpecialProduct ?? false,
-                    ProductImage = detail.ProductImage,
-                    IsActive = true,
-                    IsDeleted = false,
-                    CreatedAt = now,
-                    UpdatedAt = now,
-                    CreatedBy = updatedBy,
-                    UpdatedBy = updatedBy,
-                };
-
-                await db.Insertable(product).ExecuteCommandAsync();
-                result.HbwebCreated++;
+                AddError(result, detail.DetailGUID, detail.StoreCode, "未找到商品主档，请先执行「新建商品」");
+                return null;
             }
+            const bool isNewProduct = false;
 
             // 更新HQ商品链路不整行回写本单明细，避免把“上次进货价”等明细字段改成本次操作值。
-            // 这里先在内存中补齐商品编码，供后续本地价格和HQ价格写入使用；本批新建商品的两列编码由调用方统一落库。
+            // 这里只在内存中补齐商品编码，供后续成本回算和 HQ 价格写入使用，不落库。
             detail.ProductCode = product.ProductCode;
             detail.StoreProductCode ??= BuildStoreProductCode(detail.StoreCode, product.ProductCode!);
 
@@ -949,161 +878,6 @@ namespace BlazorApp.Api.Services.React
                 IsAutoPricing = productSource.IsAutoPricing,
                 IsActive = productSource.IsActive,
             };
-        }
-
-        private async Task UpsertLocalStorePricesForHqUpdateAsync(
-            List<PreparedSyncItem> items,
-            List<string> storeCodes,
-            string updatedBy
-        )
-        {
-            if (items.Count == 0 || storeCodes.Count == 0)
-                return;
-
-            var db = _context.Db;
-            var now = DateTime.UtcNow;
-            var productCodes = items
-                .Select(item => item.Product.ProductCode)
-                .Where(code => !string.IsNullOrWhiteSpace(code))
-                .Select(code => code!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var existingPrices = new List<StoreRetailPrice>();
-            foreach (var codeBatch in productCodes.Chunk(LocalWriteBatchSize))
-            {
-                var codes = codeBatch.ToList();
-                existingPrices.AddRange(
-                    await db.Queryable<StoreRetailPrice>()
-                        .Where(price =>
-                            price.StoreCode != null
-                            && storeCodes.Contains(price.StoreCode)
-                            && price.ProductCode != null
-                            && codes.Contains(price.ProductCode)
-                            && price.IsDeleted == false
-                        )
-                        .ToListAsync()
-                );
-            }
-
-            var existingByKey = existingPrices
-                .Where(price =>
-                    !string.IsNullOrWhiteSpace(price.StoreCode)
-                    && !string.IsNullOrWhiteSpace(price.ProductCode)
-                )
-                .GroupBy(
-                    price => BuildStorePriceKey(price.StoreCode, price.ProductCode),
-                    StringComparer.OrdinalIgnoreCase
-                )
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.OrderByDescending(price => price.UpdatedAt ?? price.CreatedAt).First(),
-                    StringComparer.OrdinalIgnoreCase
-                );
-            var inserts = new List<StoreRetailPrice>();
-            var updates = new List<StoreRetailPrice>();
-
-            foreach (var item in items)
-            {
-                var detail = item.Detail;
-                var product = item.Product;
-                var productCode = product.ProductCode;
-                if (string.IsNullOrWhiteSpace(productCode))
-                    continue;
-
-                foreach (var storeCode in storeCodes)
-                {
-                    var key = BuildStorePriceKey(storeCode, productCode);
-                    if (existingByKey.TryGetValue(key, out var existing))
-                    {
-                        existing.SupplierCode = product.LocalSupplierCode ?? detail.SupplierCode;
-                        existing.PurchasePrice = detail.PurchasePrice;
-                        existing.StoreRetailPriceValue = ResolveRetailPrice(detail);
-                        existing.DiscountRate = detail.DiscountRate;
-                        existing.IsAutoPricing = detail.AutoPricing ?? existing.IsAutoPricing;
-                        existing.IsSpecialProduct = detail.IsSpecialProduct ?? existing.IsSpecialProduct;
-                        existing.UpdatedAt = now;
-                        existing.UpdatedBy = updatedBy;
-                        updates.Add(existing);
-                        continue;
-                    }
-
-                    var created = new StoreRetailPrice
-                    {
-                        UUID = UuidHelper.GenerateUuid7(),
-                        StoreCode = storeCode,
-                        ProductCode = productCode,
-                        StoreProductCode = BuildStoreProductCode(storeCode, productCode),
-                        SupplierCode = product.LocalSupplierCode ?? detail.SupplierCode,
-                        PurchasePrice = detail.PurchasePrice,
-                        StoreRetailPriceValue = ResolveRetailPrice(detail),
-                        DiscountRate = detail.DiscountRate,
-                        IsActive = true,
-                        IsAutoPricing = detail.AutoPricing ?? true,
-                        IsSpecialProduct = detail.IsSpecialProduct ?? false,
-                        IsDeleted = false,
-                        CreatedAt = now,
-                        UpdatedAt = now,
-                        CreatedBy = updatedBy,
-                        UpdatedBy = updatedBy,
-                    };
-                    inserts.Add(created);
-                    existingByKey[key] = created;
-                }
-            }
-
-            if (db.CurrentConnectionConfig.DbType == DbType.Sqlite)
-            {
-                foreach (var batch in inserts.Chunk(LocalWriteBatchSize))
-                {
-                    await db.Insertable(batch.ToList()).ExecuteCommandAsync();
-                }
-            }
-            else if (inserts.Count > 0)
-            {
-                // SQL Server 普通多值 INSERT 会受 2100 参数上限约束；BulkCopy 内部分页保持 500 行逻辑批次。
-                await db.Fastest<StoreRetailPrice>()
-                    .PageSize(LocalWriteBatchSize)
-                    .BulkCopyAsync(inserts);
-            }
-
-            if (db.CurrentConnectionConfig.DbType == DbType.Sqlite)
-            {
-                foreach (var batch in updates.Chunk(LocalWriteBatchSize))
-                {
-                    await db.Updateable(batch.ToList())
-                        .UpdateColumns(price => new
-                        {
-                            price.SupplierCode,
-                            price.PurchasePrice,
-                            price.StoreRetailPriceValue,
-                            price.DiscountRate,
-                            price.IsAutoPricing,
-                            price.IsSpecialProduct,
-                            price.UpdatedAt,
-                            price.UpdatedBy,
-                        })
-                        .ExecuteCommandAsync();
-                }
-            }
-            else if (updates.Count > 0)
-            {
-                await db.Fastest<StoreRetailPrice>()
-                    .PageSize(LocalWriteBatchSize)
-                    .BulkUpdateAsync(
-                        updates,
-                        [nameof(StoreRetailPrice.UUID)],
-                        [
-                            nameof(StoreRetailPrice.SupplierCode),
-                            nameof(StoreRetailPrice.PurchasePrice),
-                            nameof(StoreRetailPrice.StoreRetailPriceValue),
-                            nameof(StoreRetailPrice.DiscountRate),
-                            nameof(StoreRetailPrice.IsAutoPricing),
-                            nameof(StoreRetailPrice.IsSpecialProduct),
-                            nameof(StoreRetailPrice.UpdatedAt),
-                            nameof(StoreRetailPrice.UpdatedBy),
-                        ]
-                    );
-            }
         }
 
         private async Task UpsertLocalStorePricesAsync(
