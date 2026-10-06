@@ -268,6 +268,12 @@ namespace BlazorApp.Shared.Constants
             public const string ManageLocations = "Warehouse.ManageLocations";
             public const string ManageOrders = "Warehouse.ManageOrders";
             public const string Picking = "Warehouse.Picking";
+            /// <summary>
+            /// 打印配货单时自动「开始配货」（订单 已提交 → 配货中）。与订单编辑权限分开授权：
+            /// 纯仓库员工不能编辑订单，但可以被单独授予这一个动作。刻意不设别名，
+            /// 持有 Warehouse.Manage 等宽泛权限不会因此自动具备，需显式授予。
+            /// </summary>
+            public const string StartPicking = "Warehouse.StartPicking";
         }
 
         public static class DomesticPurchase

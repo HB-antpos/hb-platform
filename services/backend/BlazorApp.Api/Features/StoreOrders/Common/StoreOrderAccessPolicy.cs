@@ -309,6 +309,19 @@ internal sealed class StoreOrderAccessPolicy(
         return await RequireOrderManagementActionAsync(OrderEditPermissions);
     }
 
+    public async Task<StoreOrderAccessDecision> RequireStartPickingAsync(string orderGuid)
+    {
+        if (IsWarehouseStaffOnly())
+        {
+            // 纯仓库员工只认显式授予的 Warehouse.StartPicking，不会因 Warehouse.Manage / Orders.Edit
+            // 等宽泛权限获得；与 RequireCreateOrderAsync、RequireOrderLineMutationAsync 的员工分支同一口径。
+            // 只放行「开始配货」这一个状态流转，不放开其它订单管理动作。
+            return await RequireAnyPermissionAsync(Permissions.Warehouse.StartPicking);
+        }
+
+        return await RequireOrderEditAsync(orderGuid);
+    }
+
     public async Task<StoreOrderAccessDecision> RequireOrderEditAsync(
         string orderGuid,
         string? storeCode = null
