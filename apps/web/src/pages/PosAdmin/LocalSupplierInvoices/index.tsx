@@ -76,7 +76,7 @@ import {
   buildBatchItemMap,
   getRowBatchDisplay,
   isBatchJobActive,
-  limitBatchSelection,
+  applyBatchSelectionLimit,
   mergeSelectedRecords,
   pickPendingSelection,
   summarizeBatchSelection,
@@ -834,6 +834,11 @@ export default function LocalSupplierInvoicesPage() {
   const requestFirstPage = (deferUntilCommitted = false, reloadFromDependencies = page !== 1) => {
     if (!mountedRef.current) return
 
+    // 关键位置：筛选条件一变，旧勾选就不在当前列表里了，留着会出现「已选 50 单却一行没勾」。
+    // 只有翻页、排序保留跨页勾选（它们不走这里）。
+    setSelectedInvoiceKeys([])
+    setSelectedInvoiceRecords({})
+
     if (reloadFromDependencies) {
       listRequestGuardRef.current.invalidate()
       if (page !== 1) setPage(1)
@@ -1347,9 +1352,12 @@ export default function LocalSupplierInvoicesPage() {
     return merged
   }, [data, selectedInvoiceRecords])
   const selectionSummary = summarizeBatchSelection(selectedInvoiceKeys, selectionRecords)
+  // 跨页勾选的单不在当前页上，单独点出数量，避免「已选 N 单」和眼前勾选对不上。
+  const currentPageGuids = new Set(data.map((row) => row.invoiceGUID))
+  const selectedOffPageCount = selectedInvoiceKeys.filter((key) => !currentPageGuids.has(key)).length
 
   const updateInvoiceSelection = (keys: string[], rows: (LocalSupplierInvoiceListDto | undefined)[]) => {
-    const limited = limitBatchSelection(keys)
+    const limited = applyBatchSelectionLimit(selectedInvoiceKeys, keys)
     if (limited.truncated) {
       message.warning(t('posAdmin.invoiceList.batchCheck.selectionLimit', { max: BATCH_CHECK_MAX_INVOICES }))
     }
@@ -1462,6 +1470,11 @@ export default function LocalSupplierInvoicesPage() {
           {selectionSummary.pending < selectionSummary.total && (
             <span className="lsi-muted">
               {t('posAdmin.invoiceList.batchCheck.selectedPending', { count: selectionSummary.pending })}
+            </span>
+          )}
+          {selectedOffPageCount > 0 && (
+            <span className="lsi-muted">
+              {t('posAdmin.invoiceList.batchCheck.selectedOffPage', { count: selectedOffPageCount })}
             </span>
           )}
         </span>
