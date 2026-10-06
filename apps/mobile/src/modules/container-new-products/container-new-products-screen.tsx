@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ProductBarcodeImage } from "@/components/product-maintenance/ProductBarcodeImage";
+import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import { useStores } from "@/modules/shop/use-stores";
 import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -25,7 +26,7 @@ const ACCENT_SOFT = "#EAF2FF";
 const SUCCESS_SOFT = "#ECFDF3";
 const WARNING_SOFT = "#FFFAEB";
 
-type OpenSheet = "product" | "containers" | "pages" | null;
+type OpenSheet = "product" | "containers" | "pages" | "stores" | null;
 
 function ScreenMessage({ message, onBack, retry }: { message: string; onBack: () => void; retry?: () => void }) {
   const { t } = useAppTranslation("containerNewProducts");
@@ -98,7 +99,8 @@ export function ContainerNewProductsScreen() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const hasPermission = useAuthStore((state) => state.access.hasPermission);
   const isReview = useAuthStore((state) => state.iosReviewOfflineGuardActive);
-  const { selectedStore, isStoreSelectionReady, isLoading: storesLoading, error: storesError } = useStores();
+  const { stores, selectedStore, selectStore, isDeviceMode, isStoreSelectionReady, isLoading: storesLoading, error: storesError } = useStores();
+  const canSwitchStore = !isDeviceMode && stores.length > 1;
   const storeCode = selectedStore?.storeCode ?? null;
   // 页面连同已有商品一起取（约千余行），筛选、分页都在前端做；工作台角标另用只含新商品的缓存
   const query = useQuery({
@@ -151,7 +153,8 @@ export function ContainerNewProductsScreen() {
   if (!canViewContainerNewProducts(isAuthenticated, hasPermission, isReview)) return <ScreenMessage message={t("messages.notAllowed")} onBack={goBack} />;
   if (storesError) return <ScreenMessage message={t("messages.storesFailed")} onBack={goBack} />;
   if (storesLoading || !isStoreSelectionReady) return <ScreenMessage message={t("states.loading")} onBack={goBack} />;
-  if (!selectedStore) return <ScreenMessage message={t("messages.selectStore")} onBack={goBack} />;
+  // 全局分店选择没有选中时会默认第一个；仍为空说明账号没有可用分店
+  if (!selectedStore) return <ScreenMessage message={t(stores.length > 0 ? "messages.selectStore" : "messages.noStores")} onBack={goBack} />;
 
   const hasData = query.isSuccess && orderedItems.length > 0;
   const pager = (position: "top" | "bottom") => <View style={styles.pager}>
@@ -174,7 +177,19 @@ export function ContainerNewProductsScreen() {
   return <SafeAreaView style={styles.safe} edges={["top"]}>
     <View style={styles.header}><Button compact onPress={goBack} icon="chevron-left" labelStyle={styles.backLabel}>{t("actions.back")}</Button><Text variant="headlineSmall" style={styles.title}>{t("title")}</Text><View style={styles.headerSpacer} /></View>
     <ScrollView ref={scrollRef} style={styles.body} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={query.isFetching} onRefresh={() => void query.refetch()} />}>
-      <View style={styles.storeCard}><MaterialCommunityIcons name="store-outline" size={26} color={HB_COLORS.action} /><View style={styles.storeInfo}><Text variant="labelMedium" style={styles.muted}>{t("labels.currentStore")}</Text><Text variant="titleMedium">{selectedStore.storeName}</Text></View>{query.data?.stateCode ? <Text style={styles.state}>{query.data.stateCode}</Text> : null}</View>
+      {/* 可选分店多于一个时门店卡片可点，打开分店列表切换 */}
+      <Pressable
+        accessibilityRole={canSwitchStore ? "button" : undefined}
+        accessibilityLabel={canSwitchStore ? t("actions.switchStoreLabel", { store: selectedStore.storeName }) : undefined}
+        disabled={!canSwitchStore}
+        onPress={() => setOpenSheet("stores")}
+        style={styles.storeCard}
+      >
+        <MaterialCommunityIcons name="store-outline" size={26} color={HB_COLORS.action} />
+        <View style={styles.storeInfo}><Text variant="labelMedium" style={styles.muted}>{t("labels.currentStore")}</Text><Text variant="titleMedium" numberOfLines={1}>{selectedStore.storeName}</Text></View>
+        {query.data?.stateCode ? <Text style={styles.state}>{query.data.stateCode}</Text> : null}
+        {canSwitchStore ? <View style={styles.switchStore}><Text style={styles.switchStoreText}>{t("actions.switchStore")}</Text><MaterialCommunityIcons name="chevron-right" size={18} color={HB_COLORS.action} /></View> : null}
+      </Pressable>
       {/* 日期说明默认收成一行，给列表让出首屏空间；点「说明」展开全文 */}
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: noteExpanded }} onPress={() => setNoteExpanded((value) => !value)} style={styles.note}>
         <MaterialCommunityIcons name="clock-outline" size={18} color={HB_COLORS.action} />
@@ -213,6 +228,20 @@ export function ContainerNewProductsScreen() {
       onApply={(containerCodes) => { setFilters((current) => ({ ...current, containerCodes })); setOpenSheet(null); }}
       onDismiss={() => setOpenSheet(null)}
     />
+    <StorePickerModal
+      visible={openSheet === "stores"}
+      presentation="sheet"
+      stores={stores}
+      selectedStoreCode={selectedStore.storeCode}
+      title={t("common:labels.selectStore")}
+      cancelLabel={t("common:actions.cancel")}
+      onDismiss={() => setOpenSheet(null)}
+      onSelectStore={async (store) => {
+        setOpenSheet(null);
+        if (!store || store.storeCode === selectedStore.storeCode) return;
+        await selectStore(store).catch(() => undefined);
+      }}
+    />
     <PageSheet
       visible={openSheet === "pages"}
       page={pageSlice.page}
@@ -236,6 +265,8 @@ const styles = StyleSheet.create({
   content: { padding: HB_SPACING.md, gap: HB_SPACING.sm },
   storeCard: { backgroundColor: HB_COLORS.white, borderRadius: HB_RADIUS.sheet, paddingHorizontal: HB_SPACING.md, paddingVertical: HB_SPACING.sm, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: HB_SPACING.sm },
   storeInfo: { flex: 1, minWidth: 0 },
+  switchStore: { flexDirection: "row", alignItems: "center", minHeight: 44, paddingLeft: HB_SPACING.xxs },
+  switchStoreText: { color: HB_COLORS.action, fontWeight: "600", fontSize: 14 },
   muted: { color: HB_COLORS.textSecondary },
   state: { color: HB_COLORS.action, backgroundColor: ACCENT_SOFT, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, fontWeight: "700", overflow: "hidden" },
   note: { backgroundColor: ACCENT_SOFT, borderRadius: HB_RADIUS.surface, paddingHorizontal: HB_SPACING.sm, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },

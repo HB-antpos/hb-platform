@@ -4,11 +4,13 @@ import type { Store, StoreOrderCart } from "@/modules/shop/types";
 interface CartStoreState {
   userStores: Store[];
   selectedStore: Store | null;
+  /** 当前分店是否为「没选过分店时自动默认的第一个」；用户手动选过或本机记住的为 false */
+  selectedStoreIsAuto: boolean;
   cartSummary: StoreOrderCart | null;
   cartSyncPendingByStore: Record<string, number>;
   adjustCartSyncPending: (storeCode: string, delta: number) => void;
   setUserStores: (stores: Store[]) => void;
-  setSelectedStore: (store: Store | null) => void;
+  setSelectedStore: (store: Store | null, options?: { auto?: boolean }) => void;
   setCartSummary: (cartSummary: StoreOrderCart | null) => void;
   reset: () => void;
 }
@@ -21,6 +23,7 @@ function normalizeStoreCode(storeCode?: string | null) {
 export const useCartStore = create<CartStoreState>((set) => ({
   userStores: [],
   selectedStore: null,
+  selectedStoreIsAuto: false,
   cartSummary: null,
   cartSyncPendingByStore: {},
   adjustCartSyncPending: (storeCode, delta) =>
@@ -52,14 +55,16 @@ export const useCartStore = create<CartStoreState>((set) => ({
       return {
         userStores: stores,
         selectedStore,
+        selectedStoreIsAuto: selectedStore ? state.selectedStoreIsAuto : false,
       };
     }),
-  setSelectedStore: (selectedStore) => set({ selectedStore }),
+  setSelectedStore: (selectedStore, options) => set({ selectedStore, selectedStoreIsAuto: Boolean(selectedStore && options?.auto) }),
   setCartSummary: (cartSummary) => set({ cartSummary }),
   reset: () =>
     set({
       userStores: [],
       selectedStore: null,
+      selectedStoreIsAuto: false,
       cartSummary: null,
       cartSyncPendingByStore: {},
     }),
