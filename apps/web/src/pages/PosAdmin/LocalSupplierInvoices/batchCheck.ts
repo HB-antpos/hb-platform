@@ -21,11 +21,24 @@ export function isBatchJobActive(job: BatchCheckProductsJobDto | null | undefine
   return job?.status === 'Running'
 }
 
-/** 勾选超过上限时保留最早勾选的那些，避免一次「全选」把前几页已选的单挤掉。 */
-export function limitBatchSelection(keys: string[], max = BATCH_CHECK_MAX_INVOICES) {
-  return keys.length > max
-    ? { keys: keys.slice(0, max), truncated: true }
-    : { keys, truncated: false }
+/**
+ * 勾选上限：已选的单保留，新勾的只补到上限为止；取消勾选总是生效。
+ * 不能简单截取前 N 个——那会把用户刚点的那一行丢掉，看起来像「点了没反应还报错」。
+ */
+export function applyBatchSelectionLimit(
+  previousKeys: string[],
+  nextKeys: string[],
+  max = BATCH_CHECK_MAX_INVOICES,
+) {
+  const next = new Set(nextKeys)
+  const previous = new Set(previousKeys)
+  const kept = previousKeys.filter((key) => next.has(key))
+  const added = nextKeys.filter((key) => !previous.has(key))
+  const room = Math.max(0, max - kept.length)
+  return {
+    keys: [...kept, ...added.slice(0, room)],
+    truncated: added.length > room,
+  }
 }
 
 export function buildBatchItemMap(job: BatchCheckProductsJobDto | null | undefined) {

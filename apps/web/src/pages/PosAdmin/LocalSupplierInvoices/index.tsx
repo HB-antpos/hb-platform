@@ -76,7 +76,7 @@ import {
   buildBatchItemMap,
   getRowBatchDisplay,
   isBatchJobActive,
-  limitBatchSelection,
+  applyBatchSelectionLimit,
   mergeSelectedRecords,
   pickPendingSelection,
   summarizeBatchSelection,
@@ -327,7 +327,8 @@ const COLUMN_WIDTHS: Partial<Record<LocalSupplierInvoiceColumnKey | 'index' | 'a
   detailCount: 64,
   priceChange: 96,
   totalAmount: 100,
-  isProductChecked: 140,
+  // 「已检测 · 新品 N · 本单新品 N」常见两项一行放下，三项同时出现时折成两行（见下方 Space wrap）。
+  isProductChecked: 200,
   flowStatus: 88,
   createdAt: 160,
   inboundDate: 104,
@@ -834,6 +835,11 @@ export default function LocalSupplierInvoicesPage() {
   const requestFirstPage = (deferUntilCommitted = false, reloadFromDependencies = page !== 1) => {
     if (!mountedRef.current) return
 
+    // 关键位置：筛选条件一变，旧勾选就不在当前列表里了，留着会出现「已选 50 单却一行没勾」。
+    // 只有翻页、排序保留跨页勾选（它们不走这里）。
+    setSelectedInvoiceKeys([])
+    setSelectedInvoiceRecords({})
+
     if (reloadFromDependencies) {
       listRequestGuardRef.current.invalidate()
       if (page !== 1) setPage(1)
@@ -1135,7 +1141,7 @@ export default function LocalSupplierInvoicesPage() {
         const newProducts = record.newProductDetailCount ?? 0
         const createdHere = record.createdHereProductDetailCount ?? 0
         return (
-          <Space size={6}>
+          <Space size={[6, 4]} wrap>
             {value ? (
               <span className="lsi-pill lsi-pill-ok">{t('posAdmin.invoiceList.checked')}</span>
             ) : (
@@ -1347,9 +1353,12 @@ export default function LocalSupplierInvoicesPage() {
     return merged
   }, [data, selectedInvoiceRecords])
   const selectionSummary = summarizeBatchSelection(selectedInvoiceKeys, selectionRecords)
+  // 跨页勾选的单不在当前页上，单独点出数量，避免「已选 N 单」和眼前勾选对不上。
+  const currentPageGuids = new Set(data.map((row) => row.invoiceGUID))
+  const selectedOffPageCount = selectedInvoiceKeys.filter((key) => !currentPageGuids.has(key)).length
 
   const updateInvoiceSelection = (keys: string[], rows: (LocalSupplierInvoiceListDto | undefined)[]) => {
-    const limited = limitBatchSelection(keys)
+    const limited = applyBatchSelectionLimit(selectedInvoiceKeys, keys)
     if (limited.truncated) {
       message.warning(t('posAdmin.invoiceList.batchCheck.selectionLimit', { max: BATCH_CHECK_MAX_INVOICES }))
     }
@@ -1462,6 +1471,11 @@ export default function LocalSupplierInvoicesPage() {
           {selectionSummary.pending < selectionSummary.total && (
             <span className="lsi-muted">
               {t('posAdmin.invoiceList.batchCheck.selectedPending', { count: selectionSummary.pending })}
+            </span>
+          )}
+          {selectedOffPageCount > 0 && (
+            <span className="lsi-muted">
+              {t('posAdmin.invoiceList.batchCheck.selectedOffPage', { count: selectedOffPageCount })}
             </span>
           )}
         </span>

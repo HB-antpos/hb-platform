@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+
 import type {
   BatchCheckProductsItemDto,
   BatchCheckProductsJobDto,
@@ -6,9 +9,9 @@ import type {
 import {
   BATCH_CHECK_JOB_STORAGE_KEY,
   BATCH_CHECK_MAX_INVOICES,
+  applyBatchSelectionLimit,
   buildBatchItemMap,
   getRowBatchDisplay,
-  limitBatchSelection,
   mergeSelectedRecords,
   pickPendingSelection,
   readStoredBatchJobId,
@@ -56,12 +59,29 @@ function record(invoiceGUID: string, isProductChecked: boolean): LocalSupplierIn
 }
 
 // ---- 勾选上限 ----
-const keys = Array.from({ length: BATCH_CHECK_MAX_INVOICES + 3 }, (_, index) => `inv-${index}`)
-const limited = limitBatchSelection(keys)
-assertEqual(limited.keys.length, BATCH_CHECK_MAX_INVOICES, '超过上限时截到上限')
-assertEqual(limited.keys[0], 'inv-0', '保留最早勾选的单')
-assert(limited.truncated, '超过上限要提示')
-assert(!limitBatchSelection(['a']).truncated, '未超过上限不提示')
+const full = Array.from({ length: BATCH_CHECK_MAX_INVOICES }, (_, index) => `inv-${index}`)
+// 复现 10-06 线上问题：已选满 50 张（来自别的筛选视图）后再点一行，不能把已选的挤掉、也不能悄悄丢掉新点的
+const overflow = applyBatchSelectionLimit(full, [...full, 'new-row'])
+assertEqual(overflow.keys.length, BATCH_CHECK_MAX_INVOICES, '已选满时总数不超过上限')
+assert(!overflow.keys.includes('new-row'), '已选满时新勾的不加入')
+assert(overflow.truncated, '已选满时要提示')
+const partial = applyBatchSelectionLimit(full.slice(0, 48), [...full.slice(0, 48), 'x1', 'x2', 'x3'])
+assertEqual(partial.keys.join(','), [...full.slice(0, 48), 'x1', 'x2'].join(','), '全选一页超限时已选保留、新勾的补到上限')
+assert(partial.truncated, '补不全要提示')
+const removed = applyBatchSelectionLimit(['a', 'b', 'c'], ['a', 'c'])
+assertEqual(removed.keys.join(','), 'a,c', '取消勾选总是生效')
+assert(!removed.truncated, '取消勾选不提示')
+const fresh = applyBatchSelectionLimit([], ['a', 'b'])
+assertEqual(fresh.keys.join(','), 'a,b', '未超过上限原样保留')
+assert(!fresh.truncated, '未超过上限不提示')
+
+// ---- 源码契约：筛选条件变化清空勾选（翻页、排序不走 requestFirstPage，保留跨页勾选）----
+const pageSource = readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoices/index.tsx'), 'utf8')
+const requestFirstPageStart = pageSource.indexOf('const requestFirstPage = ')
+assert(requestFirstPageStart >= 0, '找不到 requestFirstPage')
+const requestFirstPageBody = pageSource.slice(requestFirstPageStart, pageSource.indexOf('\n  }\n', requestFirstPageStart))
+assert(requestFirstPageBody.includes('setSelectedInvoiceKeys([])'), '筛选条件变化必须清空已选进货单')
+assert(requestFirstPageBody.includes('setSelectedInvoiceRecords({})'), '筛选条件变化必须清空已选行数据')
 
 // ---- 行内状态 ----
 const job = buildJob({
