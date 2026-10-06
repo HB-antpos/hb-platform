@@ -51,6 +51,24 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 && SqlFunc.ToUpper(item.SetBarcode) == normalizedBarcode
             );
 
+        /// <summary>分店多码里该条码是否已挂在别的商品上；挂在同一商品上视为已添加，不算冲突。</summary>
+        public async Task<bool> HasStoreMultiCodeBarcodeOnOtherProductAsync(string normalizedBarcode, string productCode) =>
+            await _context.Db.Queryable<StoreMultiCodeProduct>().AnyAsync(item =>
+                item.IsDeleted == false
+                && item.MultiBarcode != null
+                && SqlFunc.ToUpper(item.MultiBarcode) == normalizedBarcode
+                && item.ProductCode != productCode
+            );
+
+        /// <summary>多码关系里该条码是否被别的商品或非「一品多码」关系占用；同一商品的一品多码视为已添加。</summary>
+        public async Task<bool> HasProductSetBarcodeConflictAsync(string normalizedBarcode, string productCode) =>
+            await _context.Db.Queryable<ProductSetCode>().AnyAsync(item =>
+                item.IsDeleted == false
+                && item.SetBarcode != null
+                && SqlFunc.ToUpper(item.SetBarcode) == normalizedBarcode
+                && (item.ProductCode != productCode || item.SetType != 2)
+            );
+
         public async Task<bool> HasSupplierProductIdentityAsync(
             string? supplierCode,
             string? normalizedItemNumber,

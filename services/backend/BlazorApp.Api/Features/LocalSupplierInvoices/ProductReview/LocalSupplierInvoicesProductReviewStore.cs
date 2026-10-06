@@ -457,6 +457,23 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
                 AddBarcodeMatch(barcodeCounts, productCodesByBarcode, multiCode.MultiBarcode, multiCode.ProductCode);
         }
 
+        // 副码已有的「一品多码」归属：副码都已挂在本行商品上时，检测不能再默认「添加多码」（执行会因已存在而失败）。
+        var additionalBarcodes = details
+            .SelectMany(x => LocalSupplierInvoicesBarcodeRules.DeserializeAdditionalBarcodes(x.AdditionalBarcodesJson))
+            .Select(x => x.Trim())
+            .Where(x => x.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var additionalBarcodeOwners = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        if (additionalBarcodes.Count > 0)
+        {
+            var setCodes = await QueryInChunksParallelAsync<ProductSetCode, string>(additionalBarcodes, 200, (queryDb, chunk) =>
+                queryDb.Queryable<ProductSetCode>().Where(x => x.IsDeleted == false && x.SetType == 2
+                    && x.SetBarcode != null && chunk.Contains(x.SetBarcode)).ToListAsync());
+            foreach (var setCode in setCodes)
+                LocalSupplierInvoicesBarcodeRules.AddBarcodeProductCode(additionalBarcodeOwners, setCode.SetBarcode?.Trim(), setCode.ProductCode);
+        }
+
         return new LocalSupplierInvoicesProductReviewData(
             header,
             details,
@@ -464,7 +481,8 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
             linkedProducts,
             storePrices,
             barcodeCounts,
-            productCodesByBarcode
+            productCodesByBarcode,
+            additionalBarcodeOwners
         );
     }
 
@@ -519,7 +537,8 @@ internal sealed record LocalSupplierInvoicesProductReviewData(
     Dictionary<string, Product> LinkedProductsByCode,
     Dictionary<string, StoreRetailPrice> StorePricesByProductCode,
     Dictionary<string, int> BarcodeMatchCounts,
-    Dictionary<string, HashSet<string>> ProductCodesByBarcode);
+    Dictionary<string, HashSet<string>> ProductCodesByBarcode,
+    Dictionary<string, HashSet<string>> AdditionalBarcodeOwners);
 
 internal sealed class BarcodeProductProjection
 {

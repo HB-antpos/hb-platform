@@ -1677,6 +1677,78 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CheckProductsAsync_副码都已是本商品多码时_默认更新进货价而非添加多码()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-multi-owned-check", "INV-MULTI-OWNED-CHECK", new DateTime(2026, 1, 9));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-owned-check",
+                ProductCode = "P-MULTI-OWNED-CHECK",
+                ItemNumber = "4303962",
+                Barcode = "9310434001674",
+                ProductName = "Soft Jellies 240g",
+                LocalSupplierCode = "SUP01",
+                ProductType = 2,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new ProductSetCode
+            {
+                SetCodeId = "set-multi-owned-check",
+                ProductCode = "P-MULTI-OWNED-CHECK",
+                SetProductCode = "MC-OWNED-CHECK",
+                SetItemNumber = "MC-OWNED-CHECK",
+                SetBarcode = "9310434005801",
+                SetQuantity = 1,
+                SetType = 2,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                new StoreLocalSupplierInvoiceDetails
+                {
+                    DetailGUID = "detail-multi-owned-check",
+                    InvoiceGUID = "invoice-multi-owned-check",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ItemNumber = "4303962",
+                    Barcode = "9310434001674",
+                    AdditionalBarcodesJson = JsonSerializer.Serialize(new[] { "9310434005801" }),
+                    ProductName = "Soft Jellies 240g",
+                    PurchasePrice = 2.5m,
+                    IsDeleted = false,
+                },
+                new StoreLocalSupplierInvoiceDetails
+                {
+                    // 对照：同一商品还有一个没加过的副码，仍默认「添加多码」。
+                    DetailGUID = "detail-multi-partly-owned-check",
+                    InvoiceGUID = "invoice-multi-owned-check",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ItemNumber = "4303962",
+                    Barcode = "9310434001674",
+                    AdditionalBarcodesJson = JsonSerializer.Serialize(new[] { "9310434005801", "9310434005818" }),
+                    ProductName = "Soft Jellies 240g",
+                    PurchasePrice = 2.5m,
+                    IsDeleted = false,
+                },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().CheckProductsAsync(new CheckProductsRequest
+            {
+                InvoiceGuid = "invoice-multi-owned-check",
+            });
+
+            var details = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .Where(x => x.InvoiceGUID == "invoice-multi-owned-check")
+                .ToListAsync();
+            Assert.True(result.Success, result.Message);
+            Assert.Equal((int)DetailAction.UpdatePurchasePrice, details.Single(x => x.DetailGUID == "detail-multi-owned-check").ActivityType);
+            Assert.Equal((int)DetailAction.AddMultiCode, details.Single(x => x.DetailGUID == "detail-multi-partly-owned-check").ActivityType);
+        }
+
+        [Fact]
         public async Task CheckProductsAsync_有副条码但主条码不属于匹配商品时_等待操作()
         {
             await SeedStoreAndSupplierAsync();
@@ -2500,7 +2572,8 @@ namespace BlazorApp.Api.Tests
             {
                 UUID = "multi-existing-case",
                 StoreCode = "S01",
-                ProductCode = "P-MULTI-CASE",
+                // 挂在别的商品上才是冲突；大小写不同也要识别。
+                ProductCode = "P-MULTI-CASE-OTHER-OWNER",
                 MultiCodeProductCode = "MULTI-CASE-001",
                 StoreMultiCodeProductCode = "S01MULTI-CASE-001",
                 MultiBarcode = "BAR-MULTI",
@@ -2567,11 +2640,12 @@ namespace BlazorApp.Api.Tests
                 LocalSupplierCode = "SUP01",
                 IsDeleted = false,
             }).ExecuteCommandAsync();
+            // 已有分店多码挂在别的商品上才是冲突；挂在同一商品上视为已添加（见「已属于同一商品」用例）。
             await _db.Insertable(new StoreMultiCodeProduct
             {
                 UUID = "multi-existing",
                 StoreCode = "S01",
-                ProductCode = "P-MULTI",
+                ProductCode = "P-MULTI-OTHER-OWNER",
                 MultiCodeProductCode = "MULTI-001",
                 StoreMultiCodeProductCode = "S01MULTI-001",
                 MultiBarcode = "BAR-MULTI",
@@ -2671,7 +2745,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task BatchExecuteActionsAsync_AddMultiCode_副条码已存在时回滚()
+        public async Task BatchExecuteActionsAsync_AddMultiCode_副条码被其他商品占用时回滚()
         {
             await SeedStoreAndSupplierAsync();
             await InsertInvoiceAsync("invoice-multi-secondary-dup", "INV-MULTI-SECONDARY-DUP", new DateTime(2026, 1, 12));
@@ -2689,7 +2763,7 @@ namespace BlazorApp.Api.Tests
             {
                 UUID = "multi-existing-secondary",
                 StoreCode = "S01",
-                ProductCode = "P-MULTI-SECONDARY-DUP",
+                ProductCode = "P-MULTI-SECONDARY-OTHER-OWNER",
                 MultiCodeProductCode = "MULTI-SECONDARY-001",
                 StoreMultiCodeProductCode = "S01MULTI-SECONDARY-001",
                 MultiBarcode = "191554882669",
@@ -2730,6 +2804,104 @@ namespace BlazorApp.Api.Tests
             Assert.Contains(validationDetails.Errors, error => error.Contains("191554882669", StringComparison.Ordinal));
             Assert.Equal(1, multiCodeCount);
             Assert.Equal(0, productSetCodeCount);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_AddMultiCode_副条码已属于同一商品时跳过已有记录只补缺失分店()
+        {
+            await SeedStoreAndSupplierAsync();
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-guid-multi-second",
+                StoreCode = "S02",
+                StoreName = "Second Store",
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await InsertInvoiceAsync("invoice-multi-same-owner", "INV-MULTI-SAME-OWNER", new DateTime(2026, 1, 12));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-multi-same-owner",
+                ProductCode = "P-MULTI-SAME",
+                ItemNumber = "4303962",
+                Barcode = "9310434001674",
+                ProductName = "Soft Jellies 240g",
+                LocalSupplierCode = "SUP01",
+                ProductType = 2,
+                PurchasePrice = 2.5m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            // 生产 10-07 实例：副码 5801 早已是该商品的一品多码，但只在 S01 有分店记录。
+            await _db.Insertable(new ProductSetCode
+            {
+                SetCodeId = "set-existing-same-owner",
+                ProductCode = "P-MULTI-SAME",
+                SetProductCode = "MC-EXISTING",
+                SetItemNumber = "MC-EXISTING",
+                SetBarcode = "9310434005801",
+                SetQuantity = 1,
+                SetType = 2,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreMultiCodeProduct
+            {
+                UUID = "store-multi-existing-same-owner",
+                StoreCode = "S01",
+                ProductCode = "P-MULTI-SAME",
+                MultiCodeProductCode = "MC-EXISTING",
+                StoreMultiCodeProductCode = "S01MC-EXISTING",
+                MultiBarcode = "9310434005801",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-multi-same-owner",
+                InvoiceGUID = "invoice-multi-same-owner",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-MULTI-SAME",
+                ItemNumber = "4303962",
+                Barcode = "9310434001674",
+                AdditionalBarcodesJson = JsonSerializer.Serialize(new[] { "9310434005801", "9310434005818" }),
+                ProductName = "Soft Jellies 240g",
+                PurchasePrice = 2.5m,
+                ActivityType = (int)DetailAction.AddMultiCode,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-multi-same-owner",
+                new List<string> { "detail-multi-same-owner" },
+                "tester"
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            var existingSets = await _db.Queryable<ProductSetCode>()
+                .Where(x => x.SetBarcode == "9310434005801")
+                .ToListAsync();
+            var existingStores = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.MultiBarcode == "9310434005801")
+                .OrderBy(x => x.StoreCode)
+                .ToListAsync();
+            var newSets = await _db.Queryable<ProductSetCode>()
+                .Where(x => x.SetBarcode == "9310434005818")
+                .ToListAsync();
+            var newStores = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.MultiBarcode == "9310434005818")
+                .ToListAsync();
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .SingleAsync(x => x.DetailGUID == "detail-multi-same-owner");
+
+            // 已有关系不重复新建；缺的 S02 补上，并沿用已有关系的多码商品编码。
+            Assert.Single(existingSets);
+            Assert.Equal(new[] { "S01", "S02" }, existingStores.Select(x => x.StoreCode).ToArray());
+            Assert.All(existingStores, x => Assert.Equal("MC-EXISTING", x.MultiCodeProductCode));
+            // 同一行里真正新的副码照常写入两张表。
+            Assert.Single(newSets);
+            Assert.Equal(2, newStores.Count);
+            Assert.All(newStores, x => Assert.Equal(newSets[0].SetProductCode, x.MultiCodeProductCode));
+            Assert.Equal(99, detail.ActivityType);
         }
 
         [Fact]

@@ -67,7 +67,7 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
                 storeStrategies,
                 globalStrategies
             );
-            result.DefaultAction = SelectDefaultAction(result, detail, data.ProductCodesByBarcode);
+            result.DefaultAction = SelectDefaultAction(result, detail, data.ProductCodesByBarcode, data.AdditionalBarcodeOwners);
             results.Add(result);
         }
 
@@ -187,12 +187,16 @@ internal sealed class LocalSupplierInvoicesProductReviewEvaluator
     private static int SelectDefaultAction(
         ProductCheckResultDto result,
         StoreLocalSupplierInvoiceDetails detail,
-        Dictionary<string, HashSet<string>> productCodesByBarcode)
+        Dictionary<string, HashSet<string>> productCodesByBarcode,
+        Dictionary<string, HashSet<string>> additionalBarcodeOwners)
     {
         var productExists = result.ProductStatus == 1;
         var barcodeNormal = result.BarcodeStatus == 1;
+        var productCode = result.ProductInfo?.ProductCode;
+        // 关键位置：副码都已是本行商品的多码时不算「待添加」，按普通已有商品处理（默认更新进货价）。
         var hasAdditionalBarcodes = LocalSupplierInvoicesBarcodeRules
-            .DeserializeAdditionalBarcodes(detail.AdditionalBarcodesJson).Count > 0;
+            .DeserializeAdditionalBarcodes(detail.AdditionalBarcodesJson)
+            .Any(barcode => !LocalSupplierInvoicesBarcodeRules.IsBarcodeOwnedByProduct(additionalBarcodeOwners, barcode, productCode));
         if (productExists && hasAdditionalBarcodes)
         {
             return LocalSupplierInvoicesBarcodeRules.IsBarcodeOwnedByProduct(
