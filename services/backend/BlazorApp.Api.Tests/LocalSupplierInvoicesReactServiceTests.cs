@@ -1048,6 +1048,81 @@ namespace BlazorApp.Api.Tests
             Assert.Equal((int)DetailAction.CreateProduct, detail.ActivityType);
         }
 
+        [Theory]
+        [InlineData("BAR-LINK", true)]
+        [InlineData("BAR-OTHER", false)]
+        public async Task CheckProductsAsync_货号不匹配但已关联商品_仅在商品拥有本行条码时沿用关联(
+            string detailBarcode,
+            bool expectLinked)
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-check-linked", "INV-CHECK-LINKED", new DateTime(2026, 1, 8));
+            await _db.Insertable(new Product
+            {
+                UUID = "product-linked",
+                ProductCode = "P-LINK",
+                ItemNumber = "MASTER-ITEM",
+                Barcode = "BAR-LINK",
+                ProductName = "Linked Product",
+                LocalSupplierCode = "SUP01",
+                PurchasePrice = 4.00m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreRetailPrice
+            {
+                UUID = "store-price-linked",
+                StoreCode = "S01",
+                ProductCode = "P-LINK",
+                StoreProductCode = "S01-P-LINK",
+                SupplierCode = "SUP01",
+                PurchasePrice = 3.50m,
+                StoreRetailPriceValue = 6.50m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-linked",
+                InvoiceGUID = "invoice-check-linked",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                // 发票货号与主档货号不同：只能靠手动关联的商品编码识别为已有商品。
+                ItemNumber = "INVOICE-ITEM",
+                Barcode = detailBarcode,
+                ProductName = "Linked Product",
+                Quantity = 1,
+                PurchasePrice = 3.00m,
+                ProductCode = "P-LINK",
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().CheckProductsAsync(new CheckProductsRequest
+            {
+                InvoiceGuid = "invoice-check-linked",
+                DetailGuids = new List<string> { "detail-linked" },
+            });
+
+            Assert.True(result.Success, result.Message);
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .SingleAsync(x => x.DetailGUID == "detail-linked");
+            if (expectLinked)
+            {
+                Assert.Equal("P-LINK", detail.ProductCode);
+                Assert.Equal("S01-P-LINK", detail.StoreProductCode);
+                Assert.Equal(1, detail.ExistingProductCount);
+                Assert.Equal(1, detail.BarcodeStatus);
+                Assert.Equal(3.50m, detail.LastPurchasePrice);
+                Assert.Equal((int)DetailAction.UpdatePurchasePrice, detail.ActivityType);
+                Assert.Equal(1, result.Data!.Summary.ProductExists);
+            }
+            else
+            {
+                Assert.Null(detail.ProductCode);
+                Assert.Null(detail.StoreProductCode);
+                Assert.Equal(0, detail.ExistingProductCount);
+                Assert.Equal(1, result.Data!.Summary.ProductNotExists);
+            }
+        }
+
         [Fact]
         public async Task CheckProductsAsync_LastPurchasePrice为空时_补充分店上次进货价()
         {

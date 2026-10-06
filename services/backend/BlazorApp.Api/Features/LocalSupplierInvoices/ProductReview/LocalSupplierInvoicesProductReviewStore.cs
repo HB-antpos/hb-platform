@@ -408,7 +408,25 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
             }
         }
 
-        var productCodes = products.Values.Select(x => x.ProductCode).Where(x => !string.IsNullOrWhiteSpace(x))
+        // 货号匹配不到主档、但明细已关联商品编码（如手动选用条码匹配商品）的行，预加载关联商品；
+        // 是否沿用由评估器按「该商品拥有明细条码」判定，这里只负责取数。
+        var linkedCodes = details
+            .Where(x => string.IsNullOrWhiteSpace(x.ItemNumber) || !products.ContainsKey(x.ItemNumber.Trim()))
+            .Select(x => x.ProductCode?.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x)).Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var linkedProducts = new Dictionary<string, Product>(StringComparer.OrdinalIgnoreCase);
+        if (linkedCodes.Count > 0)
+        {
+            var rows = await QueryInChunksParallelAsync<Product, string>(linkedCodes, 200, (queryDb, chunk) =>
+                queryDb.Queryable<Product>().Where(p => p.ProductCode != null
+                    && chunk.Contains(p.ProductCode) && p.IsDeleted == false).ToListAsync());
+            foreach (var row in rows.Where(x => !string.IsNullOrWhiteSpace(x.ProductCode)))
+                linkedProducts[row.ProductCode!] = row;
+        }
+
+        var productCodes = products.Values.Concat(linkedProducts.Values)
+            .Select(x => x.ProductCode).Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => x!).Distinct().ToList();
         var storePrices = new Dictionary<string, StoreRetailPrice>();
         if (productCodes.Count > 0)
@@ -440,6 +458,7 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
             header,
             details,
             products,
+            linkedProducts,
             storePrices,
             barcodeCounts,
             productCodesByBarcode
@@ -494,6 +513,7 @@ internal sealed record LocalSupplierInvoicesProductReviewData(
     StoreLocalSupplierInvoice Header,
     List<StoreLocalSupplierInvoiceDetails> Details,
     Dictionary<string, Product> ProductsByItemNumber,
+    Dictionary<string, Product> LinkedProductsByCode,
     Dictionary<string, StoreRetailPrice> StorePricesByProductCode,
     Dictionary<string, int> BarcodeMatchCounts,
     Dictionary<string, HashSet<string>> ProductCodesByBarcode);
