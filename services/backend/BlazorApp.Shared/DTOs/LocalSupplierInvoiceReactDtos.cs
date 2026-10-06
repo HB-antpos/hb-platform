@@ -75,6 +75,18 @@ namespace BlazorApp.Shared.DTOs
         public int PriceDecreaseItemCount { get; set; }
         /// <summary>当前进货单有效明细均已完成商品检测时为 true。</summary>
         public bool IsProductChecked { get; set; }
+        /// <summary>有效明细行数（IsDeleted=false）；没有明细的单为 0。</summary>
+        public int DetailCount { get; set; }
+        /// <summary>
+        /// 未检测的有效明细行数：ExistingProductCount 为 NULL 才算未检测；
+        /// 0 是"已检测但商品主档不存在"，不计入此项。
+        /// </summary>
+        public int UncheckedDetailCount { get; set; }
+        /// <summary>
+        /// 已检测但商品主档不存在的有效明细行数（ExistingProductCount == 0），即需新建商品的行；
+        /// NULL（未检测）不计入此项。
+        /// </summary>
+        public int NewProductDetailCount { get; set; }
         public string? Remarks { get; set; }
         [JsonConverter(typeof(LocalSupplierInvoiceAuditUtcDateTimeJsonConverter))]
         public DateTime CreatedAt { get; set; }

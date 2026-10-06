@@ -11,6 +11,16 @@ export interface LocalSupplierInvoiceListDto {
   totalAmount?: number
   receivedTotalAmount?: number
   isProductChecked?: boolean
+  /** 有效明细中进货价高于上次进货价的行数（后端按当前页聚合）。 */
+  priceIncreaseItemCount?: number
+  /** 有效明细中进货价低于上次进货价的行数。 */
+  priceDecreaseItemCount?: number
+  /** 有效明细行数。 */
+  detailCount?: number
+  /** 尚未做商品检测（ExistingProductCount 为空）的明细行数。 */
+  uncheckedDetailCount?: number
+  /** 已检测但商品主档不存在（ExistingProductCount = 0）的明细行数。 */
+  newProductDetailCount?: number
   flowStatus?: number
   inboundStatus?: number
   createdAt: string

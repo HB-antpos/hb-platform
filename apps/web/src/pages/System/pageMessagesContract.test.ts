@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// 分店管理 / 员工个人信息维护两个页面的文案被拆成两处：既有键在全局 zh.json / en.json，
+// 分店管理 / 员工个人信息维护 / 分店进货单（列表与明细）这些页面的文案被拆成两处：既有键在全局 zh.json / en.json，
 // 重设计新增的键在页面级消息文件里（随页面懒加载，不占首屏 i18n 包）。
 // 拆开后键名写错不会有任何报错，界面会直接显示原始键名，所以在这里做静态核对。
 
@@ -53,6 +53,31 @@ const pages = [
     registerImport: "from './employeeProfilesMessages.zh.json'",
     registerSource: 'src/pages/System/EmployeeProfiles/index.tsx',
   },
+  {
+    name: '分店进货单列表',
+    keyPattern: /['"`](posAdmin\.invoiceList\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: ['src/pages/PosAdmin/LocalSupplierInvoices/index.tsx'],
+    messages: {
+      zh: 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.zh.json',
+      en: 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.en.json',
+    },
+    registerImport: "from './invoiceMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/LocalSupplierInvoices/index.tsx',
+  },
+  {
+    name: '进货单明细工作台',
+    keyPattern: /['"`](posAdmin\.invoiceWorkbench\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: [
+      'src/pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit/index.tsx',
+      'src/pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit/PricingEditor.tsx',
+    ],
+    messages: {
+      zh: 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.zh.json',
+      en: 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.en.json',
+    },
+    registerImport: "from '../invoiceMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit/index.tsx',
+  },
 ]
 
 for (const page of pages) {
@@ -94,7 +119,8 @@ for (const page of pages) {
   }
 
   // 4) 页面消息文件不应与全局语言包重复定义同一个键（重复只会白白占首屏之外的体积，且后注册的不会覆盖前者，容易误导）。
-  for (const key of zhKeys.map((item) => `system.${page.name === '分店管理' ? 'stores' : 'employeeProfiles'}.${item.split('.').slice(2).join('.')}`)) {
+  // 页面消息文件里的键本身就是完整路径，直接与全局语言包比对。
+  for (const key of zhKeys) {
     if (hasLeaf(globalMessages.zh, key)) {
       throw new Error(`${page.name} 页面消息文件重复定义了全局已有的键: ${key}`)
     }

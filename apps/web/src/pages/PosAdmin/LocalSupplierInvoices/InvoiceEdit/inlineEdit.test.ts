@@ -8,7 +8,6 @@ import {
 } from './inlineEdit'
 import {
   COMPACT_NUMBER_INPUT_WIDTH,
-  resolveEditableBooleanToggleTrigger,
   resolveEditableNumberInputWidth,
   shouldSelectEditableNumberTextOnFocus,
 } from './editableCellLayout'
@@ -282,12 +281,6 @@ async function main() {
     assertEqual(shouldSelectEditableNumberTextOnFocus(true), true, '显式开启时应全选当前文本')
   })
   if (selectTextOnFocusFailure) failures.push(selectTextOnFocusFailure)
-
-  const booleanToggleTriggerFailure = await runTest('自动定价布尔列应支持单击切换，其它布尔列默认双击', () => {
-    assertEqual(resolveEditableBooleanToggleTrigger(), 'doubleClick', '布尔编辑默认应保持双击切换')
-    assertEqual(resolveEditableBooleanToggleTrigger(true), 'click', '自动定价列应可配置为单击切换')
-  })
-  if (booleanToggleTriggerFailure) failures.push(booleanToggleTriggerFailure)
 
   if (failures.length) {
     console.error(`\n${failures.length} test(s) failed:`)

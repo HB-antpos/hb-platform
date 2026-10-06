@@ -421,7 +421,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                         );
 
                     // 仅按当前页批量聚合有效明细；至少一条明细且所有 ExistingProductCount 非空才算已检测。
-                    // 0 是合法的“已检测但未匹配”，因此这里只统计 NULL，不把 0 当作未检测。
+                    // 口径：NULL 才是“未检测”；0 是合法的“已检测但商品主档不存在”（需新建商品），不把 0 当作未检测。
+                    // 同一次 GROUP BY 同时算出明细数、未检测数、主档不存在数，不额外增加数据库往返。
                     var productCheckAggregates = await db.Queryable<StoreLocalSupplierInvoiceDetails>()
                         .Where(d =>
                             d.IsDeleted == false
@@ -436,16 +437,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                             NullProductCount = SqlFunc.AggregateSum(
                                 SqlFunc.IIF(d.ExistingProductCount == null, 1, 0)
                             ),
+                            NewProductCount = SqlFunc.AggregateSum(
+                                SqlFunc.IIF(d.ExistingProductCount == 0, 1, 0)
+                            ),
                         })
                         .ToListAsync();
-                    var checkedInvoices = productCheckAggregates
-                        .Where(item =>
-                            !string.IsNullOrWhiteSpace(item.InvoiceGUID)
-                            && item.DetailCount > 0
-                            && item.NullProductCount == 0
-                        )
-                        .Select(item => item.InvoiceGUID!)
-                        .ToHashSet(StringComparer.Ordinal);
+                    // GROUP BY 已保证每张单只有一行聚合结果。
+                    var productCheckByInvoice = productCheckAggregates
+                        .Where(item => !string.IsNullOrWhiteSpace(item.InvoiceGUID))
+                        .ToDictionary(item => item.InvoiceGUID!, StringComparer.Ordinal);
 
                     foreach (var item in list)
                     {
@@ -454,7 +454,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                             item.PriceIncreaseItemCount = counts.Increase;
                             item.PriceDecreaseItemCount = counts.Decrease;
                         }
-                        item.IsProductChecked = checkedInvoices.Contains(item.InvoiceGUID);
+
+                        // 没有有效明细的单不会出现在聚合结果里，三个计数保持默认 0、IsProductChecked 为 false。
+                        if (productCheckByInvoice.TryGetValue(item.InvoiceGUID, out var productCheck))
+                        {
+                            item.DetailCount = productCheck.DetailCount;
+                            item.UncheckedDetailCount = productCheck.NullProductCount;
+                            item.NewProductDetailCount = productCheck.NewProductCount;
+                        }
+                        item.IsProductChecked = item.DetailCount > 0 && item.UncheckedDetailCount == 0;
                     }
                 }
 

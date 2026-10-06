@@ -4,6 +4,8 @@ import { DetailAction } from '../../../../types/localSupplierInvoice'
 export type PriceFilter = 'all' | 'up' | 'down'
 export type ProductStatusFilter = 'notDetected' | 'exists' | 'notExists'
 export type BarcodeStatusFilter = 'notDetected' | 'normal' | 'noMatch' | 'multiMatch'
+/** 筛选专用的组合值：条码异常 = 无匹配 + 多匹配，供工作台「条码异常」快捷筛选使用。 */
+export type BarcodeStatusFilterValue = StatusFilterValue<BarcodeStatusFilter> | 'abnormal'
 export type ActionTypeFilter =
   | DetailAction.None
   | DetailAction.CreateProduct
@@ -18,7 +20,7 @@ export interface InvoiceDetailFilters {
   searchText: string
   priceFilter: PriceFilter
   productStatusFilter: StatusFilterValue<ProductStatusFilter>
-  barcodeStatusFilter: StatusFilterValue<BarcodeStatusFilter>
+  barcodeStatusFilter: BarcodeStatusFilterValue
   actionTypeFilter?: ActionTypeFilterValue
   rowActions?: Record<string, number>
 }
@@ -52,6 +54,11 @@ export function getBarcodeStatusFilter(detail: LocalSupplierInvoiceItemDto): Bar
   if (status === 1) return 'normal'
   if (count === 0) return 'noMatch'
   return 'multiMatch'
+}
+
+export function isBarcodeStatusAbnormal(detail: LocalSupplierInvoiceItemDto) {
+  const status = getBarcodeStatusFilter(detail)
+  return status === 'noMatch' || status === 'multiMatch'
 }
 
 export function getActionTypeFilter(
@@ -133,7 +140,9 @@ export function filterInvoiceDetails(
     result = result.filter((item) => getProductStatusFilter(item) === filters.productStatusFilter)
   }
 
-  if (filters.barcodeStatusFilter !== 'all') {
+  if (filters.barcodeStatusFilter === 'abnormal') {
+    result = result.filter((item) => isBarcodeStatusAbnormal(item))
+  } else if (filters.barcodeStatusFilter !== 'all') {
     result = result.filter((item) => getBarcodeStatusFilter(item) === filters.barcodeStatusFilter)
   }
 

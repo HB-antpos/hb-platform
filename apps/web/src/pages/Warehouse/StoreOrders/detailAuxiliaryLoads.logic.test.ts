@@ -27,7 +27,6 @@ const detailFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/
 const pickingListFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/PickingList.tsx')
 const invoiceFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/Invoice.tsx')
 const containerDetailFile = path.resolve(process.cwd(), 'src/pages/Warehouse/ContainerDetail/index.tsx')
-const localSupplierInvoiceDetailFile = path.resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoiceDetailPage/index.tsx')
 const localSupplierInvoiceEditFile = path.resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit/index.tsx')
 const detailLoadStateFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/detailLoadState.ts')
 const sharedDetailLoadStateFile = path.resolve(process.cwd(), 'src/utils/detailLoadState.ts')
@@ -43,7 +42,6 @@ const detailSource = readSource(detailFile)
 const pickingListSource = readSource(pickingListFile)
 const invoiceSource = readSource(invoiceFile)
 const containerDetailSource = readSource(containerDetailFile)
-const localSupplierInvoiceDetailSource = readSource(localSupplierInvoiceDetailFile)
 const localSupplierInvoiceEditSource = readSource(localSupplierInvoiceEditFile)
 const detailLoadStateSource = readSource(detailLoadStateFile)
 const sharedDetailLoadStateSource = readSource(sharedDetailLoadStateFile)
@@ -485,16 +483,7 @@ async function main() {
           containerDetailSource.indexOf('setDetailTableRenderKey((value) => value + 1)'),
       '货柜明细 Tab 切回已有数据时应只恢复虚拟表格测量，不能通过重新加载明细修复空白',
     )
-    assert(
-      localSupplierInvoiceDetailSource.includes("import { shouldShowDetailInitialLoading, shouldSkipDetailAutoReload } from '../../../utils/detailLoadState'") &&
-        localSupplierInvoiceDetailSource.includes('loadedInvoiceGuidRef') &&
-        localSupplierInvoiceDetailSource.includes('visibleInvoiceGuidRef') &&
-        localSupplierInvoiceDetailSource.includes('const loadInvoice = async (showLoading = true)') &&
-        localSupplierInvoiceDetailSource.includes('shouldSkipDetailAutoReload({') &&
-        localSupplierInvoiceDetailSource.includes('loadedInvoiceGuidRef.current = invoiceGuid') &&
-        localSupplierInvoiceDetailSource.includes('visibleInvoiceGuidRef.current = invoiceGuid'),
-      '本地供应商发票只读详情缺少同发票 Tab 恢复跳过自动刷新保护',
-    )
+    // 原只读详情页已并入进货单明细页（同一页面按权限显示只读视图），下面一条断言覆盖两种身份。
     assert(
       localSupplierInvoiceEditSource.includes("import { shouldShowDetailInitialLoading, shouldSkipDetailAutoReload } from '../../../../utils/detailLoadState'") &&
         localSupplierInvoiceEditSource.includes('loadedInvoiceGuidRef') &&
@@ -503,7 +492,7 @@ async function main() {
         localSupplierInvoiceEditSource.includes('shouldSkipDetailAutoReload({') &&
         localSupplierInvoiceEditSource.includes('loadedInvoiceGuidRef.current = invoiceGuid') &&
         localSupplierInvoiceEditSource.includes('visibleInvoiceGuidRef.current = invoiceGuid'),
-      '本地供应商发票编辑页缺少同发票 Tab 恢复跳过自动刷新保护',
+      '进货单明细页（含只读视图）缺少同发票 Tab 恢复跳过自动刷新保护',
     )
   })
   if (lowRiskDetailPagesKeepAliveFailure) failures.push(lowRiskDetailPagesKeepAliveFailure)

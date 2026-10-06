@@ -32,8 +32,8 @@ import {
   WalletOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
-import { isValidElement, lazy } from 'react'
-import { matchPath, Navigate } from 'react-router-dom'
+import { isValidElement, lazy, useEffect } from 'react'
+import { matchPath, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import i18n from '../i18n'
 import {
   ADMIN_PURCHASE_SALES_PATH,
@@ -77,9 +77,25 @@ const PosAdminEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/EmployeeLo
 const LinklySettlementsPage = lazy(() => import('../pages/PosAdmin/LinklySettlements'))
 const LinklySettlementDetailPage = lazy(() => import('../pages/PosAdmin/LinklySettlementDetail'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
-const LocalSupplierInvoiceDetailPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoiceDetailPage'))
 const LocalSupplierInvoiceSalesAnalysisPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoiceSalesAnalysis'))
 const InvoiceEditPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit'))
+
+function LegacyInvoiceDetailRedirect() {
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  // 页面由标签页保活体系渲染、不在 react-router 的 <Route> 里，useParams 拿不到参数，直接从地址解析；
+  // 跳转后外壳还会用新地址再渲染本组件一次，所以只在仍停留在旧地址时跳转，避免被二次带回列表。
+  useEffect(() => {
+    const id = matchPath('/pos-admin/invoice-detail/:id', pathname)?.params.id
+    if (!id) return
+    navigate(`/pos-admin/local-supplier-invoices/${encodeURIComponent(id)}`, { replace: true })
+  }, [navigate, pathname])
+  return null
+}
+
+/** 只做跳转的旧地址路由元素类型：不生成页签。 */
+const REDIRECT_ELEMENT_TYPES = new Set<unknown>([Navigate, LegacyInvoiceDetailRedirect])
+
 const SystemAppDownloadsPage = lazy(() => import('../pages/System/AppDownloads'))
 const SystemRemoteMaintenancePage = lazy(() => import('../pages/System/RemoteMaintenance'))
 const SystemCenterLogsPage = lazy(() => import('../pages/System/CenterLogs'))
@@ -874,16 +890,15 @@ export const appRoutes: AppRouteItem[] = [
         element: <Navigate replace to={buildAdminPurchaseSalesTabPath('store')} />,
       },
       {
+        // 旧「查看」页（店长用）已并入进货单明细页：书签与历史链接重定向到同一张单的新地址。
         path: '/pos-admin/invoice-detail/:id',
         meta: {
           title: 'menu.invoiceDetail',
           hidden: true,
-          keepAlive: true,
           accessKey: 'canManageLocalPurchase',
           activeMenu: '/pos-admin/local-supplier-invoices',
-          dynamicTitle: () => i18n.t('menu.invoiceDetail'),
         },
-        element: <LocalSupplierInvoiceDetailPage />,
+        element: <LegacyInvoiceDetailRedirect />,
       },
       {
         path: '/pos-admin/local-supplier-invoices/:id/sales-analysis',
@@ -898,14 +913,15 @@ export const appRoutes: AppRouteItem[] = [
         element: <LocalSupplierInvoiceSalesAnalysisPage />,
       },
       {
+        // 进货单明细页：编辑权限看到完整工作台，只有查看权限（如店长）看到同一页面的只读视图。
         path: '/pos-admin/local-supplier-invoices/:id',
         meta: {
-          title: 'menu.editInvoice',
+          title: 'menu.invoiceDetail',
           hidden: true,
           keepAlive: true,
-          accessKey: 'canEditLocalPurchase',
+          accessKey: 'canManageLocalPurchase',
           activeMenu: '/pos-admin/local-supplier-invoices',
-          dynamicTitle: () => i18n.t('menu.editInvoice'),
+          dynamicTitle: () => i18n.t('menu.invoiceDetail'),
         },
         element: <InvoiceEditPage />,
       },
@@ -1096,7 +1112,7 @@ export function toTabItem(pathname: string, access: AccessControl): TabItem | nu
     return null
   }
   // 旧地址兼容路由只做跳转：不生成页签，否则跳转后会留下一个与目标页同名的多余页签。
-  if (isValidElement(route.element) && route.element.type === Navigate) {
+  if (isValidElement(route.element) && REDIRECT_ELEMENT_TYPES.has(route.element.type)) {
     return null
   }
 

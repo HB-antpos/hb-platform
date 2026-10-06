@@ -15,7 +15,7 @@ const requireModalSource = (snippet: string, message: string) => {
 requireInvoiceSource("import ProductSetCodeMaintenanceModal from './ProductSetCodeMaintenanceModal'", '进货单页应接入独立多码/套装弹窗')
 requireInvoiceSource('setSetCodeMaintenanceTarget({ ...record, productCode: maintenanceProductCode })', '商品行操作应使用去除空格后的商品号打开维护弹窗')
 requireInvoiceSource('const maintenanceProductCode = record.productCode?.trim()', '入口应拒绝仅包含空格的商品号')
-requireInvoiceSource('disabled={!maintenanceProductCode}', '未检测或未匹配商品的明细不得打开维护弹窗')
+requireInvoiceSource('disabled: !maintenanceProductCode', '未检测或未匹配商品的明细不得打开维护弹窗（行尾菜单项禁用）')
 requireInvoiceSource('productCode={setCodeMaintenanceTarget?.productCode}', '弹窗必须使用当前行实际 productCode')
 requireInvoiceSource('storeCode={setCodeMaintenanceTarget?.storeCode?.trim() || invoice?.storeCode?.trim()}', '弹窗保存必须限定当前进货单分店')
 

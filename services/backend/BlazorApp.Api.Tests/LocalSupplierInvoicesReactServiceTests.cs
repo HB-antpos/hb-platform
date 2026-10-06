@@ -542,6 +542,20 @@ namespace BlazorApp.Api.Tests
             Assert.True(checkedByInvoice["invoice-mixed-deleted"]);
             Assert.False(checkedByInvoice["invoice-isolated"]);
 
+            // 三个明细计数与检测状态同源：只数有效明细，NULL 计未检测，0 计主档不存在。
+            var countsByInvoice = result.Items!.ToDictionary(
+                item => item.InvoiceGUID,
+                item => (item.DetailCount, item.UncheckedDetailCount, item.NewProductDetailCount)
+            );
+            Assert.Equal((0, 0, 0), countsByInvoice["invoice-empty"]);
+            Assert.Equal((1, 1, 0), countsByInvoice["invoice-unchecked"]);
+            Assert.Equal((2, 1, 0), countsByInvoice["invoice-partial"]);
+            Assert.Equal((2, 0, 0), countsByInvoice["invoice-complete"]);
+            Assert.Equal((1, 0, 1), countsByInvoice["invoice-zero"]);
+            Assert.Equal((0, 0, 0), countsByInvoice["invoice-deleted-only"]);
+            Assert.Equal((1, 0, 0), countsByInvoice["invoice-mixed-deleted"]);
+            Assert.Equal((1, 1, 0), countsByInvoice["invoice-isolated"]);
+
             // 筛选口径必须与列表展示一致：按 true/false 筛出的订单正好是上面展示为是/否的两组。
             async Task<string[]> FilterByCheckedAsync(string value)
             {
@@ -580,6 +594,52 @@ namespace BlazorApp.Api.Tests
                 },
             });
             Assert.Equal(result.Total, ignored.Total);
+        }
+
+        [Fact]
+        public async Task GetGridDataAsync_明细计数区分未检测与主档不存在且忽略已删除明细()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-count-mixed", "INV-COUNT-MIXED", new DateTime(2026, 2, 1));
+            await InsertInvoiceAsync("invoice-count-new-only", "INV-COUNT-NEW", new DateTime(2026, 2, 2));
+            await InsertInvoiceAsync("invoice-count-none", "INV-COUNT-NONE", new DateTime(2026, 2, 3));
+
+            await _db.Insertable(new[]
+            {
+                // 混合单：2 行 NULL（未检测）、2 行 0（主档不存在）、1 行 1、1 行 3；另有已删除的 NULL/0 不应计入。
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-null-1", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-null-2", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-1", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-2", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-one", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 1, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-three", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 3, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-deleted-null", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = true },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-deleted-zero", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = true },
+                // 全部已检测但主档都不存在：算已检测，且全部计入主档不存在。
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-new-1", InvoiceGUID = "invoice-count-new-only", ExistingProductCount = 0, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-new-2", InvoiceGUID = "invoice-count-new-only", ExistingProductCount = 0, IsDeleted = false },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().GetGridDataAsync(new GridRequestDto { StartRow = 0, PageSize = 20 });
+
+            Assert.True(result.Success, result.Message);
+            var mixed = Assert.Single(result.Items!, item => item.InvoiceGUID == "invoice-count-mixed");
+            Assert.Equal(6, mixed.DetailCount);
+            Assert.Equal(2, mixed.UncheckedDetailCount);
+            Assert.Equal(2, mixed.NewProductDetailCount);
+            Assert.False(mixed.IsProductChecked);
+
+            var newOnly = Assert.Single(result.Items!, item => item.InvoiceGUID == "invoice-count-new-only");
+            Assert.Equal(2, newOnly.DetailCount);
+            Assert.Equal(0, newOnly.UncheckedDetailCount);
+            Assert.Equal(2, newOnly.NewProductDetailCount);
+            Assert.True(newOnly.IsProductChecked);
+
+            var none = Assert.Single(result.Items!, item => item.InvoiceGUID == "invoice-count-none");
+            Assert.Equal(0, none.DetailCount);
+            Assert.Equal(0, none.UncheckedDetailCount);
+            Assert.Equal(0, none.NewProductDetailCount);
+            Assert.False(none.IsProductChecked);
         }
 
         [Fact]
@@ -623,6 +683,10 @@ namespace BlazorApp.Api.Tests
             });
             var keywordInvoice = Assert.Single(keywordResult.Items!, item => item.InvoiceGUID == "invoice-keyword");
             Assert.False(keywordInvoice.IsProductChecked);
+            // 商品关键词只筛选订单，不缩小明细计数：未命中关键词的未检测行仍计入。
+            Assert.Equal(2, keywordInvoice.DetailCount);
+            Assert.Equal(1, keywordInvoice.UncheckedDetailCount);
+            Assert.Equal(0, keywordInvoice.NewProductDetailCount);
 
             // PageSize=20 是服务允许的最小页长；跳过前一整页，验证当前页各订单的聚合结果。
             var pagedResult = await CreateService().GetGridDataAsync(new GridRequestDto { StartRow = 20, PageSize = 20 }, new List<string> { "S01" });

@@ -69,3 +69,19 @@ export function includeCurrentInvoiceHeaderOption(
     ...options,
   ]
 }
+
+const INVOICE_HEADER_SAVED_FIELDS = ['storeCode', 'supplierCode', 'orderDate', 'inboundDate', 'remarks'] as const
+
+/**
+ * 表头是否有未保存修改：把当前表单值和服务端订单头都换算成保存 payload 再逐项比较，
+ * 这样日期格式、首尾空格、空备注这类不影响落库的差异不会被误报成修改。
+ */
+export function isInvoiceHeaderDirty(
+  values: Partial<InvoiceHeaderFormValues> | undefined,
+  invoice: LocalSupplierInvoiceDetailDto | null,
+) {
+  if (!invoice || !values) return false
+  const current = buildInvoiceHeaderSavePayload({ totalAmount: '', ...values })
+  const original = buildInvoiceHeaderSavePayload(buildInvoiceHeaderFormValues(invoice))
+  return INVOICE_HEADER_SAVED_FIELDS.some((field) => (current[field] ?? undefined) !== (original[field] ?? undefined))
+}

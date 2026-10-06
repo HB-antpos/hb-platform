@@ -1,22 +1,22 @@
 import {
-  CheckCircleOutlined,
-  CloudUploadOutlined,
+  ArrowLeftOutlined,
+  BarChartOutlined,
+  BarcodeOutlined,
   CopyOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  HistoryOutlined,
-
-  PlusOutlined,
-  RollbackOutlined,
+  DownOutlined,
+  FilterOutlined,
+  LoadingOutlined,
+  MoreOutlined,
+  PictureOutlined,
+  PlayCircleOutlined,
+  ScanOutlined,
   SearchOutlined,
-  SendOutlined,
   SnippetsOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons'
 import {
   Alert,
+  Badge,
   Button,
-  Card,
   Checkbox,
   Col,
   DatePicker,
@@ -27,13 +27,16 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Popover,
   Radio,
   Row,
   Select,
+  Skeleton,
   Space,
   Switch,
   Tag,
   Tooltip,
+  Typography,
   message,
   notification,
 } from 'antd'
@@ -46,6 +49,9 @@ import { useTranslation } from 'react-i18next'
 import { useDynamicTabTitle } from '../../../../hooks/useDynamicTabTitle'
 import { useStableRouteContext } from '../../../../hooks/useStableRouteContext'
 import BarcodePreview from '../../../../components/BarcodePreview'
+import ActiveFilterBar, { type ActiveFilterItem } from '../../../../components/listToolbar/ActiveFilterBar'
+import SelectionActionBar from '../../../../components/listToolbar/SelectionActionBar'
+import { registerPageMessages } from '../../../../i18n/registerPageMessages'
 import { getProductById, updateProduct } from '../../../../services/posProductService'
 import {
   batchExecuteActions,
@@ -101,7 +107,7 @@ import type {
 } from '../../../../types/localSupplierInvoice'
 import { copyTextToClipboard } from '../../../../utils/clipboard'
 import { shouldShowDetailInitialLoading, shouldSkipDetailAutoReload } from '../../../../utils/detailLoadState'
-import { discountRateToDecimal, discountRateToPercent, formatDiscountRate } from '../../../../utils/discountRate'
+import { discountRateToDecimal, formatDiscountRate } from '../../../../utils/discountRate'
 import { RequestError } from '../../../../utils/request'
 import { DetailAction as DetailActionEnum } from '../../../../types/localSupplierInvoice'
 import {
@@ -120,12 +126,9 @@ import {
 import {
   compareNullableNumbers,
   compareNullableText,
-  filterBarcodeStatusColumn,
   filterBooleanColumn,
-  filterProductStatusColumn,
   matchesTextColumnFilter,
   matchesNumberColumnFilter,
-  matchesActionTypeColumnFilter,
   parseNumberColumnFilter,
   parseTextColumnFilter,
   serializeNumberColumnFilter,
@@ -152,7 +155,6 @@ import {
   getNewProductWithAdditionalBarcodesRows,
 } from './batchExecuteConfirm'
 import {
-  EditableBooleanCell,
   EditableNumberCell,
   EditableTextCell,
 } from './EditableCells'
@@ -181,18 +183,44 @@ import {
   buildInvoiceHeaderFormValues,
   buildInvoiceHeaderSavePayload,
   includeCurrentInvoiceHeaderOption,
+  isInvoiceHeaderDirty,
   type InvoiceHeaderSelectOption,
 } from './invoiceHeaderForm'
 import ProductSetCodeMaintenanceModal from './ProductSetCodeMaintenanceModal'
+import PricingEditor from './PricingEditor'
+import type { PricingEditorChange } from './pricingEditorChanges'
+import {
+  DETAIL_PROGRESS_BUCKETS,
+  EXECUTED_DETAIL_ACTION,
+  filterDetailsByProgressBucket,
+  getDetailProgressBucket,
+  getDetailProgressStats,
+  getExecutedPercent,
+  getPendingExecutionDetailGuids,
+  type DetailProgressBucket,
+  type DetailProgressBucketFilter,
+} from './progressBuckets'
+import {
+  buildInvoiceDetailSnapshotIndex,
+  countEditedInvoiceDetailRows,
+  isInvoiceDetailFieldEdited,
+} from './detailDirtyState'
 import type {
-  BarcodeStatusFilter,
   ActionTypeFilterValue,
+  BarcodeStatusFilter,
+  BarcodeStatusFilterValue,
   PriceFilter,
   ProductStatusFilter,
   StatusFilterValue,
 } from './statusFilters'
 import { MeasuredTable } from '../../../../components/MeasuredTable'
+import { formatLocalSupplierInvoiceAuditTime, formatLocalSupplierInvoiceAuditTimeCompact } from '../auditTime'
+import invoiceMessagesEn from '../invoiceMessages.en.json'
+import invoiceMessagesZh from '../invoiceMessages.zh.json'
+import '../localSupplierInvoices.css'
 
+// 重设计新增的文案随页面代码块懒注册，不进首屏 i18n 包。
+registerPageMessages({ zh: invoiceMessagesZh, en: invoiceMessagesEn })
 
 /* ------------------------------------------------------------------ */
 /*  辅助函数                                                           */
@@ -299,11 +327,6 @@ function buildInvoiceRowActions(data: LocalSupplierInvoiceItemDto[]) {
   )
 }
 
-const statusStatsTagColors = {
-  product: { all: 'blue', notDetected: 'purple', exists: 'green', notExists: 'red' },
-  barcode: { all: 'geekblue', notDetected: 'purple', normal: 'cyan', noMatch: 'volcano', multiMatch: 'orange' },
-} as const
-
 const pasteFieldOrderStorageKey = 'hbweb_rv.localSupplierInvoice.pasteFieldOrder.v1'
 const validPasteFieldKeys = new Set<PasteFieldKey>([
   'itemNumber',
@@ -341,24 +364,6 @@ function loadSavedPasteFieldOrder() {
   }
 }
 
-function getStatusStatsTagStyle(selected: boolean): CSSProperties {
-  return {
-    cursor: 'pointer',
-    fontWeight: selected ? 600 : 400,
-    boxShadow: selected ? '0 0 0 1px rgba(22, 119, 255, 0.35)' : undefined,
-  }
-}
-
-const productNameCellStyle: CSSProperties = {
-  display: '-webkit-box',
-  WebkitBoxOrient: 'vertical',
-  WebkitLineClamp: 2,
-  overflow: 'hidden',
-  whiteSpace: 'normal',
-  wordBreak: 'break-word',
-  lineHeight: '20px',
-}
-
 const matchedProductTableScrollX = 900
 
 const matchedProductNameCellStyle: CSSProperties = {
@@ -378,23 +383,13 @@ const matchedProductActionButtonStyle: CSSProperties = {
   paddingInline: 0,
 }
 
-function renderCompactHeader(label: ReactNode) {
-  return <span className="invoice-detail-compact-table-header">{label}</span>
-}
-
-function renderNowrapText(value: ReactNode) {
-  return <span className="invoice-detail-nowrap">{value}</span>
-}
-
 function renderNumericCell(value: ReactNode) {
-  return <span className="invoice-detail-nowrap invoice-detail-numeric-cell">{value}</span>
+  return <span className="lsi-num">{value}</span>
 }
 
-type ActiveFilterTag = {
-  key: string
-  label: ReactNode
-  color?: string
-  onClose: () => void
+function formatQuantity(value?: number | null) {
+  if (value === undefined || value === null) return '--'
+  return value.toLocaleString('en-AU', { maximumFractionDigits: 2 })
 }
 
 function normalizeEnsureHqErrors(value: unknown): EnsureHqProductError[] {
@@ -466,27 +461,61 @@ function hasAnyUpdatePriceField(updateFields: UpdateToStorePricesFields) {
   )
 }
 
-/** 价格变动高亮背景色 */
-function getPriceChangeBg(lastPrice?: number, currentPrice?: number): string {
-  if (lastPrice === undefined || lastPrice === null || lastPrice === 0) return ''
-  if (currentPrice === undefined || currentPrice === null) return ''
+type PurchasePriceChange =
+  | { kind: 'noPrice' }
+  | { kind: 'noHistory' }
+  | { kind: 'same'; last: number }
+  | { kind: 'up' | 'down'; last: number; percent: number; className: string }
+
+/** 本次进货价较上次的变化；涨幅分档沿用原来的底色阈值（>20% / >5% / >0），降价单独用蓝色。 */
+function getPurchasePriceChange(lastPrice?: number, currentPrice?: number): PurchasePriceChange {
+  if (currentPrice === undefined || currentPrice === null) return { kind: 'noPrice' }
+  if (lastPrice === undefined || lastPrice === null || lastPrice === 0) return { kind: 'noHistory' }
+  if (Math.abs(currentPrice - lastPrice) < 0.00005) return { kind: 'same', last: lastPrice }
   const changeRate = (currentPrice - lastPrice) / lastPrice
-  if (changeRate > 0.2) return '#ffccc7' // 涨>20% 红底
-  if (changeRate > 0.05) return '#ffe7ba' // 涨>5% 橙底
-  if (changeRate > 0) return '#fffbe6' // 涨>0% 黄底
-  if (changeRate < 0) return '#d9f7be' // 跌 绿底
-  return ''
+  const percent = Math.abs(changeRate * 100)
+  if (changeRate < 0) {
+    return { kind: 'down', last: lastPrice, percent, className: 'lsi-wb-delta lsi-wb-delta-down' }
+  }
+  const className = changeRate > 0.2
+    ? 'lsi-wb-delta lsi-wb-delta-up-strong'
+    : changeRate > 0.05
+      ? 'lsi-wb-delta lsi-wb-delta-up'
+      : 'lsi-wb-delta lsi-wb-delta-up-mild'
+  return { kind: 'up', last: lastPrice, percent, className }
+}
+
+/** 处理进度分段的颜色：已执行绿、待执行蓝、等待操作橙、未检测紫、无需操作灰（明暗也有差异，不只靠色相区分）。 */
+const PROGRESS_BUCKET_COLORS: Record<DetailProgressBucket, string> = {
+  executed: '#389e0d',
+  pending: '#1677ff',
+  waiting: '#fa8c16',
+  unchecked: '#8c6bd8',
+  none: '#c9d0db',
+}
+
+const FLOW_STATUS_LABELS: Record<number, { labelKey: string; className: string }> = {
+  0: { labelKey: 'posAdmin.invoices.draft', className: 'lsi-tag lsi-tag-neutral' },
+  1: { labelKey: 'posAdmin.invoices.submitted', className: 'lsi-tag lsi-tag-blue' },
+  2: { labelKey: 'posAdmin.invoices.approved', className: 'lsi-tag lsi-tag-green' },
+  3: { labelKey: 'posAdmin.invoices.pushed', className: 'lsi-tag lsi-tag-purple' },
+}
+
+const INBOUND_STATUS_LABEL_KEYS: Record<number, string> = {
+  0: 'posAdmin.invoices.notInbound',
+  1: 'posAdmin.invoices.partialInbound',
+  2: 'posAdmin.invoices.inbounded',
 }
 
 /** 操作类型配置 */
-const DETAIL_ACTION_CONFIG = (t: ReturnType<typeof useTranslation>['t']): Record<number, { label: string; color: string }> => ({
-  [DetailActionEnum.None]: { label: t('posAdmin.invoiceDetail.none', '无'), color: 'default' },
-  [DetailActionEnum.CreateProduct]: { label: t('posAdmin.invoiceDetail.createProduct', '新建商品'), color: 'blue' },
-  [DetailActionEnum.UpdatePurchasePrice]: { label: t('posAdmin.invoiceDetail.updatePurchasePriceShort', '更新进货价'), color: 'green' },
-  [DetailActionEnum.WaitForOperation]: { label: t('posAdmin.invoiceDetail.waitForOperation', '等待操作'), color: 'orange' },
-  [DetailActionEnum.UpdateItemNumber]: { label: t('posAdmin.invoiceDetail.updateItemNumber', '更新货号'), color: 'purple' },
-  [DetailActionEnum.AddMultiCode]: { label: t('posAdmin.invoiceDetail.addMultiCode', '添加多码'), color: 'cyan' },
-  [99]: { label: t('posAdmin.invoiceDetail.executed', '已执行'), color: 'default' },
+const DETAIL_ACTION_CONFIG = (t: ReturnType<typeof useTranslation>['t']): Record<number, { label: string; color: string; className: string }> => ({
+  [DetailActionEnum.None]: { label: t('posAdmin.invoiceDetail.none', '无'), color: 'default', className: 'lsi-tag-neutral' },
+  [DetailActionEnum.CreateProduct]: { label: t('posAdmin.invoiceDetail.createProduct', '新建商品'), color: 'blue', className: 'lsi-tag-blue' },
+  [DetailActionEnum.UpdatePurchasePrice]: { label: t('posAdmin.invoiceDetail.updatePurchasePriceShort', '更新进货价'), color: 'green', className: 'lsi-tag-green' },
+  [DetailActionEnum.WaitForOperation]: { label: t('posAdmin.invoiceDetail.waitForOperation', '等待操作'), color: 'orange', className: 'lsi-tag-orange' },
+  [DetailActionEnum.UpdateItemNumber]: { label: t('posAdmin.invoiceDetail.updateItemNumber', '更新货号'), color: 'purple', className: 'lsi-tag-purple' },
+  [DetailActionEnum.AddMultiCode]: { label: t('posAdmin.invoiceDetail.addMultiCode', '添加多码'), color: 'cyan', className: 'lsi-tag-cyan' },
+  [EXECUTED_DETAIL_ACTION]: { label: t('posAdmin.invoiceDetail.executed', '已执行'), color: 'default', className: 'lsi-tag-neutral' },
 })
 
 /** 操作类型下拉菜单项 */
@@ -510,6 +539,11 @@ export default function InvoiceEditPage() {
   const canManagePosProducts = access.canManagePosProducts
   const canWriteLocalPurchaseToHq = access.canEditLocalPurchase && access.canPushLocalPurchaseToHq
   const canRunGlobalLocalPurchaseBatchActions = access.canEditLocalPurchase && (access.isAdmin || access.isWarehouseManager)
+  // 「查看」页已并入本页：有编辑权限才能改表头（后端 PUT 要求 LocalPurchase.Edit）；
+  // 明细行编辑、粘贴、检测、删除等沿用原页面的管理员口径；其余用户（如店长）看到同一页面的只读视图。
+  const canEditInvoice = access.canEditLocalPurchase
+  const canEditDetailRows = isAdmin
+  const canSelectRows = isAdmin || canWriteLocalPurchaseToHq || canRunGlobalLocalPurchaseBatchActions
   const managedStoreCodes = access.managedStoreCodes()
   const managedStoreCodeKey = managedStoreCodes?.join(',') ?? 'all'
   // 记录当前发票已完成首次加载，保活 Tab 恢复时保留订单头和明细表。
@@ -524,7 +558,7 @@ export default function InvoiceEditPage() {
   /* ---- 主表数据 ---- */
   const [invoice, setInvoice] = useState<LocalSupplierInvoiceDetailDto | null>(null)
   const invoiceTabTitle = useMemo(
-    () => buildInvoiceTabTitle(invoice, t('menu.editInvoice', '编辑进货单')),
+    () => buildInvoiceTabTitle(invoice, t('menu.invoiceDetail', '进货单详情')),
     [invoice, t],
   )
   // 这里只更新当前编辑页的 KeepAlive Tab 标题，不改变路由标题或面包屑。
@@ -534,6 +568,7 @@ export default function InvoiceEditPage() {
   const [loading, setLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [savingAll, setSavingAll] = useState(false)
 
   /* ---- 行选择 ---- */
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -553,13 +588,23 @@ export default function InvoiceEditPage() {
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all')
   const [productTypeFilter, setProductTypeFilter] = useState<'all' | 'unknown' | 0 | 1 | 2>('all')
   const [productStatusFilter, setProductStatusFilter] = useState<StatusFilterValue<ProductStatusFilter>>('all')
-  const [barcodeStatusFilter, setBarcodeStatusFilter] = useState<StatusFilterValue<BarcodeStatusFilter>>('all')
+  const [barcodeStatusFilter, setBarcodeStatusFilter] = useState<BarcodeStatusFilterValue>('all')
   const [actionTypeFilter, setActionTypeFilter] = useState<ActionTypeFilterValue>('all')
+  // 处理进度条既是统计也是筛选入口；特殊商品筛选从原列头迁到「更多筛选」。
+  const [progressBucketFilter, setProgressBucketFilter] = useState<DetailProgressBucketFilter>('all')
+  const [specialProductFilter, setSpecialProductFilter] = useState<'all' | 'yes' | 'no'>('all')
+  // 定价弹窗同一时间只开一行。
+  const [pricingEditorDetailGuid, setPricingEditorDetailGuid] = useState<string | null>(null)
   // 列头过滤只作用于当前前端明细，不请求后端；保持受控后才能被“清空过滤”统一重置。
   const [columnFilteredValues, setColumnFilteredValues] = useState<Record<string, (React.Key | boolean)[] | null>>({})
 
   /* ---- 表单 ---- */
   const [form] = Form.useForm()
+  const watchedStoreCode = Form.useWatch('storeCode', form)
+  const watchedSupplierCode = Form.useWatch('supplierCode', form)
+  const watchedOrderDate = Form.useWatch('orderDate', form)
+  const watchedInboundDate = Form.useWatch('inboundDate', form)
+  const watchedRemarks = Form.useWatch('remarks', form)
 
   /* ---- 分店选项 ---- */
   const [storeOptions, setStoreOptions] = useState<InvoiceHeaderSelectOption[]>([])
@@ -634,6 +679,28 @@ export default function InvoiceEditPage() {
 
   /* ---- 批量执行操作 ---- */
   const [executing, setExecuting] = useState(false)
+
+  /* ---- 未保存修改 ---- */
+  const headerDirty = canEditInvoice && isInvoiceHeaderDirty({
+    storeCode: watchedStoreCode,
+    supplierCode: watchedSupplierCode,
+    orderDate: watchedOrderDate,
+    inboundDate: watchedInboundDate,
+    remarks: watchedRemarks,
+  }, invoice)
+  // detailsSnapshotRef 只在 loadDetails / 批量编辑里与 details 一起更新，所以随 details 重建索引即可。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const detailSnapshotIndex = useMemo(() => buildInvoiceDetailSnapshotIndex(detailsSnapshotRef.current), [details])
+  const editedDetailRowCount = useMemo(
+    () => (canEditDetailRows ? countEditedInvoiceDetailRows(details, detailSnapshotIndex) : 0),
+    [canEditDetailRows, details, detailSnapshotIndex],
+  )
+  const hasUnsavedChanges = headerDirty || editedDetailRowCount > 0
+  const unsavedSummary = headerDirty && editedDetailRowCount > 0
+    ? t('posAdmin.invoiceWorkbench.unsavedBoth', { count: editedDetailRowCount })
+    : headerDirty
+      ? t('posAdmin.invoiceWorkbench.unsavedHeader')
+      : t('posAdmin.invoiceWorkbench.unsavedRows', { count: editedDetailRowCount })
 
   /* ---- 动态表格高度 ---- */
   const tableCardRef = useRef<HTMLDivElement>(null)
@@ -814,6 +881,17 @@ export default function InvoiceEditPage() {
     }
   }, [pasteFieldOrder])
 
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // 关闭或刷新浏览器标签时由浏览器弹出原生确认。
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
+
   const ensureCanAccessInvoice = useCallback(() => {
     if (canAccessInvoice) {
       return true
@@ -823,15 +901,17 @@ export default function InvoiceEditPage() {
   }, [canAccessInvoice, t])
 
   /* ---- 动态高度 ---- */
+  const hasSelectedRows = selectedRowKeys.length > 0
   useLayoutEffect(() => {
     const calc = () => {
-      const available = window.innerHeight - (tableCardRef.current?.getBoundingClientRect().top ?? 200) - 80
-      setTableScrollY(available > 200 ? available : 200)
+      // 表格区顶部以下：扣掉表头约 38px、底部合计栏约 42px 和页面底部内边距，让合计栏留在首屏。
+      const available = window.innerHeight - (tableCardRef.current?.getBoundingClientRect().top ?? 200) - 112
+      setTableScrollY(available > 240 ? available : 240)
     }
     calc()
     window.addEventListener('resize', calc)
     return () => window.removeEventListener('resize', calc)
-  }, [details.length])
+  }, [details.length, hasSelectedRows, loading, invoice?.invoiceGUID])
 
   /* ================================================================ */
   /*  计算属性                                                         */
@@ -871,13 +951,21 @@ export default function InvoiceEditPage() {
       : detail.productType === option.value).length,
   })), [details, t])
 
-  // 过滤后数据
+  // 处理进度：五段互斥，合计等于明细行数；「执行全部待执行」按全部明细计算，不受当前筛选影响。
+  const progressStats = useMemo(() => getDetailProgressStats(details, rowActions), [details, rowActions])
+  const pendingExecutionDetailGuids = useMemo(
+    () => getPendingExecutionDetailGuids(details, rowActions),
+    [details, rowActions],
+  )
+
+  // 过滤后数据：处理进度、商品类型、特殊商品先过滤，再交给搜索/涨跌/状态/操作类型的行为级过滤链（全部按 AND 叠加）。
   const filteredDetails = useMemo(
     () =>
-      filterInvoiceDetails(details.filter((detail) => productTypeFilter === 'all'
+      filterInvoiceDetails(filterDetailsByProgressBucket(details, progressBucketFilter, rowActions).filter((detail) => (productTypeFilter === 'all'
         || (productTypeFilter === 'unknown'
           ? ![0, 1, 2].includes(detail.productType ?? -1)
-          : detail.productType === productTypeFilter)), {
+          : detail.productType === productTypeFilter))
+        && (specialProductFilter === 'all' || Boolean(detail.isSpecialProduct) === (specialProductFilter === 'yes'))), {
         searchText,
         priceFilter,
         productStatusFilter,
@@ -885,7 +973,7 @@ export default function InvoiceEditPage() {
         actionTypeFilter,
         rowActions,
     }),
-    [details, searchText, priceFilter, productTypeFilter, productStatusFilter, barcodeStatusFilter, actionTypeFilter, rowActions],
+    [details, searchText, priceFilter, productTypeFilter, productStatusFilter, barcodeStatusFilter, actionTypeFilter, rowActions, progressBucketFilter, specialProductFilter],
   )
   const inlineNavigationDetails = useMemo(
     () =>
@@ -952,14 +1040,26 @@ export default function InvoiceEditPage() {
     [t],
   )
 
-  const barcodeStatusFilterLabels: Record<BarcodeStatusFilter, string> = useMemo(
+  const barcodeStatusFilterLabels: Record<BarcodeStatusFilter | 'abnormal', string> = useMemo(
     () => ({
       notDetected: t('posAdmin.invoiceDetail.notDetected', '未检测'),
       normal: t('posAdmin.invoiceDetail.normal', '正常'),
       noMatch: t('posAdmin.invoiceDetail.noMatch', '无匹配'),
-      multiMatch: t('posAdmin.invoiceDetail.multiMatchShort', '多匹配({{count}})', { count: detailStatusStats.barcode.multiMatch }),
+      multiMatch: t('posAdmin.invoiceWorkbench.filterMultiMatch'),
+      abnormal: t('posAdmin.invoiceWorkbench.chipBarcodeAbnormal'),
     }),
-    [detailStatusStats.barcode.multiMatch, t],
+    [t],
+  )
+
+  const progressBucketLabels: Record<DetailProgressBucket, string> = useMemo(
+    () => ({
+      executed: t('posAdmin.invoiceWorkbench.bucketExecuted'),
+      pending: t('posAdmin.invoiceWorkbench.bucketPending'),
+      waiting: t('posAdmin.invoiceWorkbench.bucketWaiting'),
+      unchecked: t('posAdmin.invoiceWorkbench.bucketUnchecked'),
+      none: t('posAdmin.invoiceWorkbench.bucketNone'),
+    }),
+    [t],
   )
 
   const pasteFieldLabels: Record<PasteFieldKey, string> = useMemo(
@@ -1013,6 +1113,8 @@ export default function InvoiceEditPage() {
     setProductStatusFilter('all')
     setBarcodeStatusFilter('all')
     setActionTypeFilter('all')
+    setProgressBucketFilter('all')
+    setSpecialProductFilter('all')
     setColumnFilteredValues({})
   }, [])
 
@@ -1021,89 +1123,105 @@ export default function InvoiceEditPage() {
     [columnFilteredValues],
   )
 
-  // 当前过滤栏展示页面外层过滤和列头过滤摘要，方便一键清空所有前端过滤条件。
-  const activeFilterTags = useMemo<ActiveFilterTag[]>(() => {
-    const tags: ActiveFilterTag[] = []
+  // 已生效筛选条：把搜索、进度、涨跌、状态、操作类型、特殊商品和列头过滤汇总成可单独移除的标签（复用列表工具栏共用组件）。
+  const activeFilterTags = useMemo<ActiveFilterItem[]>(() => {
+    const items: ActiveFilterItem[] = []
     const keyword = searchText.trim()
 
     if (keyword) {
-      tags.push({
+      items.push({
         key: 'search',
-        color: 'blue',
-        label: t('posAdmin.invoiceDetail.activeSearchFilter', '搜索：{{value}}', { value: keyword }),
-        onClose: () => setSearchText(''),
+        label: t('posAdmin.invoiceWorkbench.filterSearch'),
+        value: keyword,
+        source: 'toolbar',
+        onRemove: () => setSearchText(''),
       })
     }
 
-    if (priceFilter === 'up') {
-      tags.push({
-        key: 'price-up',
-        color: 'red',
-        label: t('posAdmin.invoiceDetail.activePriceUpFilter', '涨价'),
-        onClose: () => setPriceFilter('all'),
+    if (progressBucketFilter !== 'all') {
+      items.push({
+        key: 'progress-bucket',
+        label: t('posAdmin.invoiceWorkbench.filterBucket'),
+        value: progressBucketLabels[progressBucketFilter],
+        source: 'toolbar',
+        onRemove: () => setProgressBucketFilter('all'),
       })
-    } else if (priceFilter === 'down') {
-      tags.push({
-        key: 'price-down',
-        color: 'green',
-        label: t('posAdmin.invoiceDetail.activePriceDownFilter', '降价'),
-        onClose: () => setPriceFilter('all'),
+    }
+
+    if (priceFilter !== 'all') {
+      items.push({
+        key: 'price',
+        label: t('posAdmin.invoiceWorkbench.filterPrice'),
+        value: priceFilter === 'up'
+          ? t('posAdmin.invoiceWorkbench.chipPriceUp')
+          : t('posAdmin.invoiceWorkbench.chipPriceDown'),
+        source: 'toolbar',
+        onRemove: () => setPriceFilter('all'),
       })
     }
 
     if (productTypeFilter !== 'all') {
       const option = productTypeStats.find((item) => item.value === productTypeFilter)
-      tags.push({
+      items.push({
         key: 'product-type',
-        color: option?.color,
-        label: `${t('posAdmin.products.productTypeLabel', '商品类型')}：${option?.label}`,
-        onClose: () => setProductTypeFilter('all'),
+        label: t('posAdmin.invoiceWorkbench.filterProductType'),
+        value: option?.label ?? '',
+        source: 'toolbar',
+        onRemove: () => setProductTypeFilter('all'),
       })
     }
 
     if (productStatusFilter !== 'all') {
-      tags.push({
+      items.push({
         key: 'product-status',
-        color: statusStatsTagColors.product[productStatusFilter],
-        label: t('posAdmin.invoiceDetail.activeProductStatusFilter', '商品状态：{{value}}', {
-          value: productStatusFilterLabels[productStatusFilter],
-        }),
-        onClose: () => setProductStatusFilter('all'),
+        label: t('posAdmin.invoiceWorkbench.filterProductStatus'),
+        value: productStatusFilterLabels[productStatusFilter],
+        source: 'toolbar',
+        onRemove: () => setProductStatusFilter('all'),
       })
     }
 
     if (barcodeStatusFilter !== 'all') {
-      tags.push({
+      items.push({
         key: 'barcode-status',
-        color: statusStatsTagColors.barcode[barcodeStatusFilter],
-        label: t('posAdmin.invoiceDetail.activeBarcodeStatusFilter', '条码状态：{{value}}', {
-          value: barcodeStatusFilterLabels[barcodeStatusFilter],
-        }),
-        onClose: () => setBarcodeStatusFilter('all'),
+        label: t('posAdmin.invoiceWorkbench.filterBarcodeStatus'),
+        value: barcodeStatusFilterLabels[barcodeStatusFilter],
+        source: 'toolbar',
+        onRemove: () => setBarcodeStatusFilter('all'),
       })
     }
 
     if (actionTypeFilter !== 'all') {
-      tags.push({
+      items.push({
         key: 'action-type',
-        color: detailActionConfig[actionTypeFilter]?.color,
-        label: t('posAdmin.invoiceDetail.activeActionTypeFilter', '操作类型：{{value}}', {
-          value: detailActionConfig[actionTypeFilter]?.label ?? detailActionConfig[DetailActionEnum.None].label,
-        }),
-        onClose: () => setActionTypeFilter('all'),
+        label: t('posAdmin.invoiceWorkbench.filterActionType'),
+        value: detailActionConfig[actionTypeFilter]?.label ?? detailActionConfig[DetailActionEnum.None].label,
+        source: 'toolbar',
+        onRemove: () => setActionTypeFilter('all'),
+      })
+    }
+
+    if (specialProductFilter !== 'all') {
+      items.push({
+        key: 'special-product',
+        label: t('posAdmin.invoiceWorkbench.filterSpecial'),
+        value: specialProductFilter === 'yes' ? t('posAdmin.invoiceDetail.yes', '是') : t('posAdmin.invoiceDetail.no', '否'),
+        source: 'toolbar',
+        onRemove: () => setSpecialProductFilter('all'),
       })
     }
 
     if (activeColumnFilterCount > 0) {
-      tags.push({
+      items.push({
         key: 'column-filters',
-        color: 'geekblue',
-        label: t('posAdmin.invoiceDetail.activeColumnFilters', '列头过滤：{{count}}', { count: activeColumnFilterCount }),
-        onClose: () => setColumnFilteredValues({}),
+        label: t('posAdmin.invoiceWorkbench.filterColumns'),
+        value: t('posAdmin.invoiceWorkbench.filterColumnCount', { count: activeColumnFilterCount }),
+        source: 'column',
+        onRemove: () => setColumnFilteredValues({}),
       })
     }
 
-    return tags
+    return items
   }, [
     activeColumnFilterCount,
     actionTypeFilter,
@@ -1115,7 +1233,10 @@ export default function InvoiceEditPage() {
     productStatusFilterLabels,
     productTypeFilter,
     productTypeStats,
+    progressBucketFilter,
+    progressBucketLabels,
     searchText,
+    specialProductFilter,
     t,
   ])
 
@@ -1129,12 +1250,12 @@ export default function InvoiceEditPage() {
 
   // ---- 保存主表 ----
   const handleSave = async () => {
-    if (!invoiceGuid || !ensureCanAccessInvoice()) return
+    if (!invoiceGuid || !ensureCanAccessInvoice()) return false
     const values = await form.validateFields()
     const payload = buildInvoiceHeaderSavePayload(values)
     if (!isStoreCodeInManagedScope(payload.storeCode, managedStoreCodes)) {
       message.error(t('message.noPermission', '无权操作该数据'))
-      return
+      return false
     }
     setSaving(true)
     try {
@@ -1158,11 +1279,13 @@ export default function InvoiceEditPage() {
           'posAdmin.invoiceDetail.savedButRefreshFailed',
           '订单已保存但最新数据刷新失败，请重新加载',
         ))
-        return
+        return false
       }
       message.success(t('posAdmin.invoiceDetail.saveSuccess', '保存成功'))
+      return true
     } catch {
       message.error(t('posAdmin.invoiceDetail.saveFailed', '保存失败'))
+      return false
     } finally {
       setSaving(false)
     }
@@ -1182,19 +1305,81 @@ export default function InvoiceEditPage() {
   )
 
   // ---- 批量保存明细（含行内价格编辑） ----
-  const handleSaveDetails = async () => {
-    if (!invoiceGuid || !ensureCanAccessInvoice()) return
+  const handleSaveDetails = async (options: { reload?: boolean } = {}) => {
+    if (!invoiceGuid || !ensureCanAccessInvoice()) return false
     const items: InvoiceDetailUpsertItemDto[] = buildInvoiceDetailSaveItems(details)
     setDetailLoading(true)
     try {
       await batchUpsertDetails(invoiceGuid, items)
       message.success(t('posAdmin.invoiceDetail.detailSaveSuccess', '明细保存成功'))
-      loadDetails()
+      if (options.reload !== false) await loadDetails()
+      return true
     } catch {
       message.error(t('posAdmin.invoiceDetail.detailSaveFailed', '明细保存失败'))
+      return false
     } finally {
       setDetailLoading(false)
     }
+  }
+
+  // ---- 统一保存：原来表头「保存」与工具栏「保存明细」分开，现在合成一个入口 ----
+  // 顺序很重要：先存明细且不刷新，再存表头；表头保存会同时刷新订单头和明细（分店/供应商变更会级联到明细）。
+  const handleSaveAll = async () => {
+    if (savingAll || !hasUnsavedChanges) return !hasUnsavedChanges
+    setSavingAll(true)
+    try {
+      if (editedDetailRowCount > 0) {
+        const detailsSaved = await handleSaveDetails({ reload: !headerDirty })
+        if (!detailsSaved) return false
+      }
+      if (headerDirty) {
+        return await handleSave()
+      }
+      return true
+    } catch {
+      // 表头校验未通过时 validateFields 会抛错，错误已显示在表单上。
+      return false
+    } finally {
+      setSavingAll(false)
+    }
+  }
+
+  // 会刷新明细的操作（粘贴、检测、删除、批量执行等）完成后会用服务端数据覆盖页面，
+  // 有未保存修改时先提示保存，避免用户改了一半的价格被静默冲掉。
+  const runAfterUnsavedGuard = (action: () => void) => {
+    if (!hasUnsavedChanges) {
+      action()
+      return
+    }
+    Modal.confirm({
+      title: t('posAdmin.invoiceWorkbench.unsavedConfirmTitle'),
+      content: t('posAdmin.invoiceWorkbench.unsavedConfirmContent'),
+      okText: t('posAdmin.invoiceWorkbench.saveAndContinue'),
+      cancelText: t('common.cancel', '取消'),
+      onOk: async () => {
+        if (await handleSaveAll()) action()
+      },
+    })
+  }
+
+  const handleBackToList = () => {
+    if (!hasUnsavedChanges) {
+      navigate('/pos-admin/local-supplier-invoices')
+      return
+    }
+    Modal.confirm({
+      title: t('posAdmin.invoiceWorkbench.leaveConfirmTitle'),
+      content: t('posAdmin.invoiceWorkbench.leaveConfirmContent', { summary: unsavedSummary }),
+      okText: t('posAdmin.invoiceWorkbench.leaveWithoutSaving'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel', '取消'),
+      onOk: () => navigate('/pos-admin/local-supplier-invoices'),
+    })
+  }
+
+  const handlePricingApply = (detailGuid: string, changes: PricingEditorChange[]) => {
+    changes.forEach((change) => handleInlineDetailSave(detailGuid, change.field, change.value))
+    setPricingEditorDetailGuid(null)
   }
 
   // ---- 粘贴数据 ----
@@ -1334,6 +1519,8 @@ export default function InvoiceEditPage() {
     setBatchEditLoading(true)
     // 批量编辑确认后先更新前端当前明细，后端批量落库在后台继续执行，避免弹窗等待长请求。
     setDetails((prev) => applyInvoiceDetailBatchEdit(prev, submittedDetailGuids, editFields))
+    // 批量编辑由后端写入同样的值，快照同步推进，避免这些行被误标成「未保存」；后台失败时 loadDetails 会按服务端重置。
+    detailsSnapshotRef.current = applyInvoiceDetailBatchEdit(detailsSnapshotRef.current, submittedDetailGuids, editFields)
     setBatchEditVisible(false)
     batchEditForm.resetFields()
     setSelectedRowKeys([])
@@ -2022,14 +2209,15 @@ export default function InvoiceEditPage() {
   }
 
   // ---- 批量执行操作 ----
-  const handleBatchExecute = () => {
+  const handleBatchExecute = (explicitDetailGuids?: string[]) => {
     if (!invoiceGuid || !ensureCanAccessInvoice()) return
-    const visibleSelectedRowKeys = constrainSelectedRowKeysToVisibleDetails(selectedRowKeys, filteredDetails)
+    // 「执行全部待执行」直接按全部明细里的待执行行提交（不受当前筛选影响）；勾选执行仍只执行当前可见的选中行。
+    const visibleSelectedRowKeys = explicitDetailGuids ?? constrainSelectedRowKeysToVisibleDetails(selectedRowKeys, filteredDetails)
     if (!visibleSelectedRowKeys.length) {
       message.warning(t('posAdmin.invoiceDetail.selectDetailsFirst', '请先选择明细行'))
       return
     }
-    if (visibleSelectedRowKeys.length !== selectedRowKeys.length) {
+    if (!explicitDetailGuids && visibleSelectedRowKeys.length !== selectedRowKeys.length) {
       setSelectedRowKeys(visibleSelectedRowKeys)
     }
 
@@ -2120,6 +2308,11 @@ export default function InvoiceEditPage() {
         }))
       },
     })
+  }
+
+  const handleExecuteAllPending = () => {
+    if (!pendingExecutionDetailGuids.length) return
+    runAfterUnsavedGuard(() => handleBatchExecute(pendingExecutionDetailGuids))
   }
 
   // ---- 删除选中 ----
@@ -2529,132 +2722,213 @@ export default function InvoiceEditPage() {
     }
   }
 
+  // 改过但未保存的值用浅蓝底 + 圆点标出，与页头「n 行明细未保存」对应。
+  const renderEditedValue = (
+    record: LocalSupplierInvoiceItemDto,
+    field: InvoiceDetailInlineEditableField,
+    content: ReactNode,
+  ) => (
+    canEditDetailRows && isInvoiceDetailFieldEdited(record, detailSnapshotIndex, field)
+      ? <span className="lsi-wb-edited">{content}</span>
+      : renderNumericCell(content)
+  )
+
+  const renderPurchasePriceChange = (record: LocalSupplierInvoiceItemDto) => {
+    const change = getPurchasePriceChange(record.lastPurchasePrice, record.purchasePrice)
+    if (change.kind === 'noPrice') {
+      return <span className="lsi-wb-delta lsi-muted">{t('posAdmin.invoiceWorkbench.noPurchasePrice')}</span>
+    }
+    if (change.kind === 'noHistory') {
+      return <span className="lsi-wb-delta lsi-muted">{t('posAdmin.invoiceWorkbench.noHistory')}</span>
+    }
+    if (change.kind === 'same') {
+      return (
+        <span className="lsi-wb-delta lsi-muted">
+          {t('posAdmin.invoiceWorkbench.samePrice', { price: formatAmount(change.last) })}
+        </span>
+      )
+    }
+    return (
+      <span
+        className={change.className}
+        title={`${t('posAdmin.invoiceDetail.lastPurchasePrice', '上次进货价')}：${formatAmount(change.last)}`}
+      >
+        {change.kind === 'up' ? '↑' : '↓'}{change.percent.toFixed(1)}% · {formatAmount(change.last)}
+      </span>
+    )
+  }
+
+  const renderPricingSummary = (record: LocalSupplierInvoiceItemDto) => {
+    const pricingEdited = (['autoPricing', 'pricingFloatRate', 'newAutoRetailPrice', 'isSpecialProduct', 'discountRate'] as const)
+      .some((field) => canEditDetailRows && isInvoiceDetailFieldEdited(record, detailSnapshotIndex, field))
+    const modeText = record.autoPricing == null
+      ? '--'
+      : record.autoPricing
+        ? (record.pricingFloatRate != null
+          ? t('posAdmin.invoiceWorkbench.pricingAuto', { rate: formatPricingFloatRate(record.pricingFloatRate) })
+          : t('posAdmin.invoiceWorkbench.pricingAutoNoRate'))
+        : t('posAdmin.invoiceWorkbench.pricingManual')
+    const hasDiscount = record.discountRate != null && record.discountRate !== 0
+    return (
+      <>
+        <span className="lsi-wb-pricing-line">
+          <span className={pricingEdited ? 'lsi-wb-edited' : undefined}>{modeText}</span>
+          {record.isSpecialProduct ? (
+            <span className="lsi-tag lsi-tag-orange">{t('posAdmin.invoiceWorkbench.pricingSpecial')}</span>
+          ) : null}
+          {hasDiscount ? (
+            <span className="lsi-tag lsi-tag-neutral">
+              {t('posAdmin.invoiceWorkbench.pricingDiscount', { rate: formatDiscountRate(record.discountRate) })}
+            </span>
+          ) : null}
+        </span>
+        <span className="lsi-wb-sub lsi-num">
+          {record.newAutoRetailPrice != null
+            ? t('posAdmin.invoiceWorkbench.pricingNew', { price: formatAmount(record.newAutoRetailPrice) })
+            : ''}
+        </span>
+      </>
+    )
+  }
+
+  const renderHqStatus = (record: LocalSupplierInvoiceItemDto) => {
+    const bucket = getDetailProgressBucket(record, rowActions)
+    const statusMap: Record<DetailProgressBucket, { label: string; className: string }> = {
+      executed: { label: t('posAdmin.invoiceWorkbench.hqDone'), className: 'lsi-wb-hq-status lsi-wb-match-ok' },
+      pending: { label: t('posAdmin.invoiceWorkbench.hqPending'), className: 'lsi-wb-hq-status lsi-price-down' },
+      waiting: { label: t('posAdmin.invoiceWorkbench.hqWaiting'), className: 'lsi-wb-hq-status lsi-wb-match-warn' },
+      unchecked: { label: t('posAdmin.invoiceWorkbench.hqUnchecked'), className: 'lsi-wb-hq-status lsi-muted' },
+      none: { label: t('posAdmin.invoiceWorkbench.hqNone'), className: 'lsi-wb-hq-status lsi-muted' },
+    }
+    const status = statusMap[bucket]
+    return <span className={status.className}>{status.label}</span>
+  }
+
   const columns: ColumnsType<LocalSupplierInvoiceItemDto> = [
     {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.seqNo', '序号')),
+      title: t('posAdmin.invoiceWorkbench.colSeq'),
+      key: 'seq',
       width: 44,
-      align: 'right',
+      align: 'center',
       fixed: 'left',
-      render: (_, __, index) => renderNumericCell(index + 1),
+      render: (_, __, index) => <span className="lsi-num lsi-muted">{index + 1}</span>,
     },
     {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.image', '图片')),
-      dataIndex: 'productImage',
-      width: 48,
-      fixed: 'left',
-      render: (v: string) =>
-        v ? (
-          <Image src={v} width={36} height={36} style={{ objectFit: 'cover', borderRadius: 4 }} />
-        ) : (
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              background: '#f5f5f5',
-              borderRadius: 4,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#ccc',
-              fontSize: 10,
-            }}
-          >
-            {t('posAdmin.invoiceDetail.noImage', '无图')}
-          </div>
-        ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.itemNumber', '货号')),
-      dataIndex: 'itemNumber',
-      width: 108,
-      fixed: 'left',
-      sorter: (a, b) => compareNullableText(a.itemNumber, b.itemNumber),
-      ...getTextColumnSearchProps('itemNumber', t('posAdmin.invoiceDetail.itemNumber', '货号')),
-      render: (v: string, record) => (
-        <Space size={2} className="invoice-detail-nowrap">
-          <EditableTextCell
-            value={v}
-            detailGuid={record.detailGUID}
-            field="itemNumber"
-            onSave={handleInlineDetailSave}
-            display={renderNowrapText(v || '--')}
-          />
-          {v && (
-            <Tooltip title={t('posAdmin.invoiceDetail.copyItemNumber', '复制货号')}>
-              <Button
-                type="text"
-                size="small"
-                icon={<CopyOutlined />}
-                onDoubleClick={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void copyTextToClipboard(v)
-                }}
-              />
-            </Tooltip>
-          )}
-        </Space>
+      // 商品列合并原来的图片/货号/条码/名称/商品类型 5 列；不设宽度，屏幕更宽时多出的空间只给它。
+      title: (
+        <span>
+          {t('posAdmin.invoiceWorkbench.colProduct')}
+          <span className="lsi-muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+            {t('posAdmin.invoiceWorkbench.colProductHint')}
+          </span>
+        </span>
       ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.barcode', '条码')),
-      dataIndex: 'barcode',
-      width: 138,
-      sorter: (a, b) => compareNullableText(a.barcode, b.barcode),
-      ...getTextColumnSearchProps('barcode', t('posAdmin.invoiceDetail.barcode', '条码')),
-      render: (v: string, record) => (
-        <div className="invoice-detail-nowrap">
-          <EditableTextCell
-            value={v}
-            detailGuid={record.detailGUID}
-            field="barcode"
-            onSave={handleInlineDetailSave}
-            display={<BarcodePreview value={v} compactCopy />}
-          />
-          {(record.additionalBarcodes?.length ?? 0) > 0 && (
-            <Tooltip title={record.additionalBarcodes?.join(', ')}>
-              <Tag color="cyan" style={{ marginTop: 4, marginInlineEnd: 0 }}>
-                {t('posAdmin.invoiceDetail.additionalBarcodeCount', '副码 {{count}}', { count: record.additionalBarcodes?.length ?? 0 })}
-              </Tag>
-            </Tooltip>
-          )}
-        </div>
-      ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.productName', '商品名称')),
       dataIndex: 'productName',
-      width: 190,
+      key: 'productName',
       sorter: (a, b) => compareNullableText(a.productName, b.productName),
       ...getTextColumnSearchProps('productName', t('posAdmin.invoiceDetail.productName', '商品名称')),
-      render: (v: string, record) => (
-        <EditableTextCell
-          value={v}
-          detailGuid={record.detailGUID}
-          field="productName"
-          onSave={handleInlineDetailSave}
-          display={<div style={productNameCellStyle}>{v || '--'}</div>}
-        />
-      ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.products.productTypeLabel', '商品类型')),
-      dataIndex: 'productType',
-      width: 82,
-      align: 'center',
-      render: (value: number | null | undefined) => {
-        // 仅显示主档返回的类型，不能按订单操作或副码数量推断。
-        if (value == null) return '--'
-        if (value === 0) return <Tag>{t('posAdmin.products.normalProduct', '单品')}</Tag>
-        if (value === 1) return <Tag color="blue">{t('posAdmin.products.setProduct', '套装')}</Tag>
-        if (value === 2) return <Tag color="purple">{t('posAdmin.products.multiCodeProductShort', '多码')}</Tag>
-        return <Tag>{value}</Tag>
+      render: (v: string, record) => {
+        const additionalBarcodeCount = record.additionalBarcodes?.length ?? 0
+        const productType = record.productType
+        // 仅显示主档返回的类型，不能按订单操作或副码数量推断；单品不加标记以减少噪音。
+        const productTypeTag = productType === 1
+          ? <span className="lsi-tag lsi-tag-blue">{t('posAdmin.products.setProduct', '套装')}</span>
+          : productType === 2
+            ? <span className="lsi-tag lsi-tag-purple">{t('posAdmin.products.multiCodeProductShort', '多码')}</span>
+            : null
+        return (
+          <div className="lsi-wb-product">
+            {record.productImage ? (
+              <Image src={record.productImage} width={36} height={36} style={{ objectFit: 'cover', borderRadius: 6 }} />
+            ) : (
+              <span className="lsi-wb-thumb" aria-label={t('posAdmin.invoiceDetail.noImage', '无图')}>
+                <PictureOutlined />
+              </span>
+            )}
+            <div className="lsi-wb-cell" style={{ flex: '1 1 auto' }}>
+              <div className="lsi-wb-product-name">
+                <EditableTextCell
+                  value={v}
+                  detailGuid={record.detailGUID}
+                  field="productName"
+                  onSave={handleInlineDetailSave}
+                  readOnly={!canEditDetailRows}
+                  display={<span title={v || undefined}>{renderEditedValue(record, 'productName', v || '--')}</span>}
+                />
+                {productTypeTag}
+                {additionalBarcodeCount > 0 && (
+                  <Tooltip title={record.additionalBarcodes?.join(', ')}>
+                    <span className="lsi-tag lsi-tag-cyan">
+                      {t('posAdmin.invoiceDetail.additionalBarcodeCount', '副码 {{count}}', { count: additionalBarcodeCount })}
+                    </span>
+                  </Tooltip>
+                )}
+                {!canEditInvoice && getProductStatusFilter(record) === 'notExists' && (
+                  <Tooltip title={t('posAdmin.invoiceWorkbench.notExistsStoreTip')}>
+                    <span className="lsi-tag lsi-tag-new">{t('posAdmin.invoiceWorkbench.chipNotExistsStore')}</span>
+                  </Tooltip>
+                )}
+              </div>
+              <div className="lsi-wb-product-codes">
+                <EditableTextCell
+                  value={record.itemNumber}
+                  detailGuid={record.detailGUID}
+                  field="itemNumber"
+                  onSave={handleInlineDetailSave}
+                  readOnly={!canEditDetailRows}
+                  display={renderEditedValue(record, 'itemNumber', record.itemNumber || '--')}
+                />
+                <span aria-hidden="true">·</span>
+                <EditableTextCell
+                  value={record.barcode}
+                  detailGuid={record.detailGUID}
+                  field="barcode"
+                  onSave={handleInlineDetailSave}
+                  readOnly={!canEditDetailRows}
+                  display={renderEditedValue(record, 'barcode', record.barcode || '--')}
+                />
+                {record.itemNumber && (
+                  <Tooltip title={t('posAdmin.invoiceDetail.copyItemNumber', '复制货号')}>
+                    <Button
+                      className="lsi-copy-button"
+                      type="text"
+                      size="small"
+                      icon={<CopyOutlined />}
+                      aria-label={t('posAdmin.invoiceDetail.copyItemNumber', '复制货号')}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void copyTextToClipboard(record.itemNumber!)
+                      }}
+                    />
+                  </Tooltip>
+                )}
+                {record.barcode && (
+                  <Popover
+                    trigger="click"
+                    content={<BarcodePreview value={record.barcode} compactCopy />}
+                  >
+                    <Button
+                      className="lsi-copy-button"
+                      type="text"
+                      size="small"
+                      icon={<BarcodeOutlined />}
+                      aria-label={t('posAdmin.invoiceWorkbench.showBarcode')}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    />
+                  </Popover>
+                )}
+              </div>
+            </div>
+          </div>
+        )
       },
     },
     {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.quantity', '数量')),
+      title: t('posAdmin.invoiceWorkbench.colQuantity'),
       dataIndex: 'quantity',
-      width: 58,
+      key: 'quantity',
+      width: 80,
       align: 'right',
       sorter: (a, b) => compareNullableNumbers(a.quantity, b.quantity),
       ...getNumberColumnFilterProps('quantity', t('posAdmin.invoiceDetail.quantity', '数量')),
@@ -2664,47 +2938,56 @@ export default function InvoiceEditPage() {
           detailGuid={record.detailGUID}
           field="quantity"
           onSave={handleInlineDetailSave}
+          readOnly={!canEditDetailRows}
           precision={0}
-          displayValue={renderNumericCell(v ?? '--')}
+          displayValue={renderEditedValue(record, 'quantity', formatQuantity(v))}
         />
       ),
     },
     {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.lastPurchasePrice', '上次进货价')),
-      dataIndex: 'lastPurchasePrice',
-      width: 82,
-      align: 'right',
-      sorter: (a, b) => compareNullableNumbers(a.lastPurchasePrice, b.lastPurchasePrice),
-      ...getNumberColumnFilterProps('lastPurchasePrice', t('posAdmin.invoiceDetail.lastPurchasePrice', '上次进货价')),
-      render: (v: number) => renderNumericCell(formatAmount(v)),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.currentPurchasePrice', '本次进货价')),
+      title: (
+        <span>
+          {t('posAdmin.invoiceWorkbench.colPurchasePrice')}
+          <span className="lsi-muted" style={{ fontWeight: 400, marginLeft: 4 }}>
+            {t('posAdmin.invoiceWorkbench.colPurchaseHint')}
+          </span>
+        </span>
+      ),
       dataIndex: 'purchasePrice',
-      width: 86,
+      key: 'purchasePrice',
+      width: 124,
       align: 'right',
       sorter: (a, b) => compareNullableNumbers(a.purchasePrice, b.purchasePrice),
       ...getNumberColumnFilterProps('purchasePrice', t('posAdmin.invoiceDetail.currentPurchasePrice', '本次进货价')),
-      render: (v: number, record) => {
-        const bg = getPriceChangeBg(record.lastPurchasePrice, v)
-        const bgStyle = bg ? { backgroundColor: bg, padding: '2px 6px', borderRadius: 4 } : undefined
-        return (
-          <span className="invoice-detail-nowrap invoice-detail-numeric-cell">
-            <EditableNumberCell
-              value={v}
-              detailGuid={record.detailGUID}
-              field="purchasePrice"
-              onSave={handleInlineDetailSave}
-              style={bgStyle}
-            />
-          </span>
-        )
-      },
+      render: (v: number, record) => (
+        <div className="lsi-wb-cell lsi-wb-cell-end">
+          <EditableNumberCell
+            value={v}
+            detailGuid={record.detailGUID}
+            field="purchasePrice"
+            onSave={handleInlineDetailSave}
+            readOnly={!canEditDetailRows}
+            displayValue={renderEditedValue(record, 'purchasePrice', formatAmount(v))}
+          />
+          {renderPurchasePriceChange(record)}
+        </div>
+      ),
     },
     {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.retailPrice', '零售价')),
+      title: t('posAdmin.invoiceWorkbench.colAmount'),
+      dataIndex: 'amount',
+      key: 'amount',
+      width: 92,
+      align: 'right',
+      sorter: (a, b) => compareNullableNumbers(a.amount, b.amount),
+      ...getNumberColumnFilterProps('amount', t('posAdmin.invoiceDetail.amount', '金额')),
+      render: (v: number) => renderNumericCell(formatAmount(v)),
+    },
+    {
+      title: t('posAdmin.invoiceWorkbench.colRetailPrice'),
       dataIndex: 'retailPrice',
-      width: 72,
+      key: 'retailPrice',
+      width: 92,
       align: 'right',
       sorter: (a, b) => compareNullableNumbers(a.retailPrice, b.retailPrice),
       ...getNumberColumnFilterProps('retailPrice', t('posAdmin.invoiceDetail.retailPrice', '零售价')),
@@ -2714,652 +2997,779 @@ export default function InvoiceEditPage() {
           detailGuid={record.detailGUID}
           field="retailPrice"
           onSave={handleInlineDetailSave}
+          readOnly={!canEditDetailRows}
           active={isInlineNumberEditActive(record.detailGUID, 'retailPrice')}
           onActivate={() => activateInlineNumberEdit(record.detailGUID, 'retailPrice')}
           onDeactivate={() => deactivateInlineNumberEdit(record.detailGUID, 'retailPrice')}
           onNavigate={handleInlineNumberNavigate}
-          // 零售价列较窄，编辑态使用紧凑输入框，避免撑开单元格。
+          // 零售价列较窄，编辑态使用紧凑输入框，避免撑开单元格；↑↓ 可连续录入相邻行。
           inputWidth={COMPACT_NUMBER_INPUT_WIDTH}
           controls={false}
-          displayValue={renderNumericCell(formatAmount(v))}
+          displayValue={renderEditedValue(record, 'retailPrice', formatAmount(v))}
         />
       ),
     },
     {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.pricingRate', '定价浮率')),
-      dataIndex: 'pricingFloatRate',
-      width: 76,
-      align: 'right',
-      sorter: (a, b) => compareNullableNumbers(a.pricingFloatRate, b.pricingFloatRate),
-      ...getNumberColumnFilterProps('pricingFloatRate', t('posAdmin.invoiceDetail.pricingRate', '定价浮率')),
-      render: (v: number, record) => (
-        <EditableNumberCell
-          value={v}
-          detailGuid={record.detailGUID}
-          field="pricingFloatRate"
-          onSave={handleInlineDetailSave}
-          displayValue={renderNumericCell(formatPricingFloatRate(v))}
-        />
-      ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.newAutoRetailPrice', '新自动零售价')),
-      dataIndex: 'newAutoRetailPrice',
-      width: 92,
-      align: 'right',
-      sorter: (a, b) => compareNullableNumbers(a.newAutoRetailPrice, b.newAutoRetailPrice),
-      ...getNumberColumnFilterProps('newAutoRetailPrice', t('posAdmin.invoiceDetail.newAutoRetailPrice', '新自动零售价')),
-      render: (v: number, record) => (
-        <EditableNumberCell
-          value={v}
-          detailGuid={record.detailGUID}
-          field="newAutoRetailPrice"
-          onSave={handleInlineDetailSave}
-          displayValue={renderNumericCell(formatAmount(v))}
-        />
-      ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.autoPricingLabel', '自动定价')),
+      // 定价列合并自动定价、定价浮率、新自动零售价、特殊商品、折扣率；点击打开定价弹窗统一修改。
+      title: t('posAdmin.invoiceWorkbench.colPricing'),
       dataIndex: 'autoPricing',
-      width: 68,
-      align: 'center',
+      key: 'autoPricing',
+      width: 140,
       filters: [
         { text: t('posAdmin.invoiceDetail.auto', '自动'), value: true },
         { text: t('posAdmin.invoiceDetail.manual', '手动'), value: false },
       ],
       filteredValue: (columnFilteredValues.autoPricing ?? null) as React.Key[] | null,
       onFilter: (value, record) => filterBooleanColumn(record.autoPricing, value),
-      render: (v: boolean, record) => (
-        <EditableBooleanCell
-          value={v}
-          detailGuid={record.detailGUID}
-          field="autoPricing"
-          onSave={handleInlineDetailSave}
-          trueLabel={t('posAdmin.invoiceDetail.auto', '自动')}
-          falseLabel={t('posAdmin.invoiceDetail.manual', '手动')}
-          trueColor="green"
-          toggleOnClick
-        />
-      ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.specialProductLabel', '特殊商品')),
-      dataIndex: 'isSpecialProduct',
-      width: 68,
-      align: 'center',
-      filters: [
-        { text: t('posAdmin.invoiceDetail.yes', '是'), value: true },
-        { text: t('posAdmin.invoiceDetail.no', '否'), value: false },
-      ],
-      filteredValue: (columnFilteredValues.isSpecialProduct ?? null) as React.Key[] | null,
-      onFilter: (value, record) => filterBooleanColumn(record.isSpecialProduct, value),
-      render: (v: boolean, record) => (
-        <EditableBooleanCell
-          value={v}
-          detailGuid={record.detailGUID}
-          field="isSpecialProduct"
-          onSave={handleInlineDetailSave}
-          trueLabel={t('posAdmin.invoiceDetail.yes', '是')}
-          falseLabel={t('posAdmin.invoiceDetail.no', '否')}
-          trueColor="orange"
-        />
-      ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.discountRate', '折扣率')),
-      dataIndex: 'discountRate',
-      width: 68,
-      align: 'right',
-      sorter: (a, b) => compareNullableNumbers(a.discountRate, b.discountRate),
-      ...getNumberColumnFilterProps('discountRate', t('posAdmin.invoiceDetail.discountRate', '折扣率')),
-      render: (v: number, record) => (
-        <EditableNumberCell
-          value={discountRateToPercent(v)}
-          detailGuid={record.detailGUID}
-          field="discountRate"
-          onSave={handleInlineDetailSave}
-          max={100}
-          precision={1}
-          addonAfter="%"
-          displayValue={renderNumericCell(formatDiscountRate(v))}
-        />
-      ),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.amount', '金额')),
-      dataIndex: 'amount',
-      width: 82,
-      align: 'right',
-      sorter: (a, b) => compareNullableNumbers(a.amount, b.amount),
-      ...getNumberColumnFilterProps('amount', t('posAdmin.invoiceDetail.amount', '金额')),
-      render: (v: number) => renderNumericCell(formatAmount(v)),
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.productStatus', '商品状态')),
-      dataIndex: 'existingProductCount',
-      width: 78,
-      align: 'center',
-      filters: [
-        { text: t('posAdmin.invoiceDetail.notDetected', '未检测'), value: 'notDetected' },
-        { text: t('posAdmin.invoiceDetail.exists', '已存在'), value: 'exists' },
-        { text: t('posAdmin.invoiceDetail.notExistsShort', '不存在'), value: 'notExists' },
-      ],
-      filteredValue: (columnFilteredValues.existingProductCount ?? null) as React.Key[] | null,
-      onFilter: (value, record) => filterProductStatusColumn(record, value),
-      render: (_: number, record) => {
-        const count = record.existingProductCount
-        const status = getProductStatusFilter(record)
-        if (status === 'notDetected') {
-          return <Tag color="default">{t('posAdmin.invoiceDetail.notDetected', '未检测')}</Tag>
+      render: (_: boolean, record) => {
+        if (!canEditDetailRows) {
+          return <div className="lsi-wb-pricing">{renderPricingSummary(record)}</div>
         }
-        if (status === 'exists') {
-          return <Tag color="green">{t('posAdmin.invoiceDetail.existsWithCount', '已存在({{count}})', { count })}</Tag>
-        }
-        return <Tag color="red">{t('posAdmin.invoiceDetail.notExistsShort', '不存在')}</Tag>
-      },
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.barcodeStatus', '条码状态')),
-      dataIndex: 'barcodeMatchCount',
-      width: 84,
-      align: 'center',
-      filters: [
-        { text: t('posAdmin.invoiceDetail.notDetected', '未检测'), value: 'notDetected' },
-        { text: t('posAdmin.invoiceDetail.normal', '正常'), value: 'normal' },
-        { text: t('posAdmin.invoiceDetail.noMatch', '无匹配'), value: 'noMatch' },
-        { text: t('posAdmin.invoiceDetail.multiMatchShort', '多匹配'), value: 'multiMatch' },
-      ],
-      filteredValue: (columnFilteredValues.barcodeMatchCount ?? null) as React.Key[] | null,
-      onFilter: (value, record) => filterBarcodeStatusColumn(record, value),
-      render: (_: number, record) => {
-        const count = record.barcodeMatchCount ?? 0
-        const status = getBarcodeStatusFilter(record)
-        const openMatchedProducts = (event: ReactMouseEvent) => {
-          event.stopPropagation()
-          void showBarcodeMatchedProducts(record)
-        }
-        const clickableStyle: CSSProperties | undefined = status === 'notDetected' ? undefined : { cursor: 'pointer' }
-        if (status === 'notDetected') {
-          return <Tag color="default">{t('posAdmin.invoiceDetail.notDetected', '未检测')}</Tag>
-        }
-        if (status === 'normal') {
-          return <Tag color="green" style={clickableStyle} onClick={openMatchedProducts}>{t('posAdmin.invoiceDetail.normal', '正常')}</Tag>
-        }
-        if (status === 'noMatch') {
-          return <Tag color="red" style={clickableStyle} onClick={openMatchedProducts}>{t('posAdmin.invoiceDetail.noMatch', '无匹配')}</Tag>
-        }
-        return <Tag color="orange" style={clickableStyle} onClick={openMatchedProducts}>{t('posAdmin.invoiceDetail.multiMatchShort', '多匹配({{count}})', { count })}</Tag>
-      },
-    },
-    {
-      title: renderCompactHeader(t('posAdmin.invoiceDetail.action', '操作')),
-      key: 'action',
-      width: isAdmin ? 184 : 98,
-      fixed: 'right',
-      filters: actionTypeFilters.map((actionType) => {
-        const config = detailActionConfig[actionType] ?? detailActionConfig[DetailActionEnum.None]
-        return { text: config.label, value: actionType }
-      }),
-      filteredValue: (columnFilteredValues.action ?? null) as React.Key[] | null,
-      onFilter: (value, record) => matchesActionTypeColumnFilter(record, value, rowActions),
-      render: (_, record) => {
-        const maintenanceProductCode = record.productCode?.trim()
-        const currentAction = rowActions[record.detailGUID] ?? record.activityType ?? 0
-        const actionConfig = DETAIL_ACTION_CONFIG(t)
-        const config = actionConfig[currentAction] || actionConfig[0]
-        const actionSelector = isAdmin ? (
-          <Dropdown
-            menu={{
-              items: ACTION_MENU_ITEMS(t),
-              onClick: ({ key }) => void handleRowActionChange(record.detailGUID, key),
-              selectedKeys: [String(currentAction)],
-            }}
-            trigger={['click']}
-          >
-            <Button size="small" type="text">
-              <Tag color={config.color} style={{ cursor: 'pointer' }}>
-                {config.label}
-              </Tag>
-            </Button>
-          </Dropdown>
-        ) : (
-          <Tag color={config.color}>{config.label}</Tag>
-        )
-
+        const editorOpen = pricingEditorDetailGuid === record.detailGUID
         return (
-          <Space size={2}>
-            {actionSelector}
-            {isAdmin ? (
-              <Tooltip
-                title={maintenanceProductCode
-                  ? t('posAdmin.invoiceDetail.setCodeMaintenanceTooltip', '维护该商品的多条码或套装条码')
-                  : t('posAdmin.invoiceDetail.setCodeMaintenanceNeedsProduct', '请先检测并匹配商品')}
-              >
-                <Button
-                  type="link"
-                  size="small"
-                  disabled={!maintenanceProductCode}
-                  style={{ paddingInline: 4 }}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    if (maintenanceProductCode) {
-                      setSetCodeMaintenanceTarget({ ...record, productCode: maintenanceProductCode })
-                    }
+          <Popover
+            trigger="click"
+            placement="bottomLeft"
+            open={editorOpen}
+            onOpenChange={(open) => setPricingEditorDetailGuid(open ? record.detailGUID : null)}
+            title={t('posAdmin.invoiceWorkbench.pricingEditorTitle')}
+            content={editorOpen ? (
+              <PricingEditor
+                detail={record}
+                onApply={(changes) => handlePricingApply(record.detailGUID, changes)}
+                onCancel={() => setPricingEditorDetailGuid(null)}
+              />
+            ) : null}
+          >
+            <button type="button" className="lsi-wb-pricing" title={t('posAdmin.invoiceWorkbench.pricingEditTip')}>
+              {renderPricingSummary(record)}
+            </button>
+          </Popover>
+        )
+      },
+    },
+    ...(canEditInvoice ? [
+      {
+        // 商品匹配列合并商品状态与条码状态；条码状态可点开查看匹配商品（并可更换主档）。
+        title: t('posAdmin.invoiceWorkbench.colMatch'),
+        key: 'match',
+        width: 128,
+        render: (_: unknown, record: LocalSupplierInvoiceItemDto) => {
+          const productStatus = getProductStatusFilter(record)
+          const barcodeStatus = getBarcodeStatusFilter(record)
+          const openMatchedProducts = (event: ReactMouseEvent) => {
+            event.stopPropagation()
+            void showBarcodeMatchedProducts(record)
+          }
+          const productLine = productStatus === 'notDetected'
+            ? <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.matchUnchecked')}</span>
+            : productStatus === 'exists'
+              ? (
+                <span className="lsi-wb-match-ok">
+                  {(record.existingProductCount ?? 0) > 1
+                    ? t('posAdmin.invoiceWorkbench.matchExistsCount', { count: record.existingProductCount })
+                    : t('posAdmin.invoiceWorkbench.matchExists')}
+                </span>
+              )
+              : <span className="lsi-wb-match-new">{t('posAdmin.invoiceWorkbench.matchNotExists')}</span>
+          const barcodeLabel = barcodeStatus === 'normal'
+            ? <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.barcodeNormal')}</span>
+            : barcodeStatus === 'noMatch'
+              ? <span className="lsi-wb-match-bad">{t('posAdmin.invoiceWorkbench.barcodeNoMatch')}</span>
+              : <span className="lsi-wb-match-warn">{t('posAdmin.invoiceWorkbench.barcodeMultiMatch', { count: record.barcodeMatchCount ?? 0 })}</span>
+          return (
+            <div className="lsi-wb-cell">
+              {productLine}
+              {barcodeStatus === 'notDetected' ? (
+                <span className="lsi-wb-sub">{t('posAdmin.invoiceWorkbench.barcodeUnchecked')}</span>
+              ) : (
+                <Tooltip title={t('posAdmin.invoiceWorkbench.viewMatches')}>
+                  <Button type="link" size="small" className="lsi-wb-match-link" onClick={openMatchedProducts}>
+                    {barcodeLabel}
+                  </Button>
+                </Tooltip>
+              )}
+            </div>
+          )
+        },
+      } satisfies ColumnType<LocalSupplierInvoiceItemDto>,
+      {
+        title: t('posAdmin.invoiceWorkbench.colAction'),
+        key: 'action',
+        width: isAdmin ? 144 : 112,
+        fixed: 'right',
+        render: (_: unknown, record: LocalSupplierInvoiceItemDto) => {
+          const maintenanceProductCode = record.productCode?.trim()
+          const currentAction = rowActions[record.detailGUID] ?? record.activityType ?? 0
+          const actionConfig = DETAIL_ACTION_CONFIG(t)
+          const config = actionConfig[currentAction] || actionConfig[0]
+          const actionSelector = isAdmin ? (
+            <Dropdown
+              menu={{
+                items: ACTION_MENU_ITEMS(t),
+                onClick: ({ key }) => void handleRowActionChange(record.detailGUID, key),
+                selectedKeys: [String(currentAction)],
+              }}
+              trigger={['click']}
+            >
+              <button type="button" className={`lsi-wb-action lsi-tag ${config.className}`}>
+                {config.label}
+                <DownOutlined style={{ fontSize: 9 }} />
+              </button>
+            </Dropdown>
+          ) : (
+            <span className={`lsi-wb-action lsi-wb-action-static lsi-tag ${config.className}`}>{config.label}</span>
+          )
+
+          return (
+            <Space size={2}>
+              {actionSelector}
+              {isAdmin ? (
+                // 多码/套装维护收进行尾菜单，省出宽度给商品匹配列；未检测或未匹配商品时禁用。
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      {
+                        key: 'setCodeMaintenance',
+                        label: maintenanceProductCode
+                          ? t('posAdmin.invoiceDetail.setCodeMaintenanceShort', '多码/套装')
+                          : t('posAdmin.invoiceDetail.setCodeMaintenanceNeedsProduct', '请先检测并匹配商品'),
+                        disabled: !maintenanceProductCode,
+                      },
+                    ],
+                    onClick: ({ key, domEvent }) => {
+                      domEvent.stopPropagation()
+                      if (key === 'setCodeMaintenance' && maintenanceProductCode) {
+                        setSetCodeMaintenanceTarget({ ...record, productCode: maintenanceProductCode })
+                      }
+                    },
                   }}
                 >
-                  {t('posAdmin.invoiceDetail.setCodeMaintenanceShort', '多码/套装')}
-                </Button>
-              </Tooltip>
-            ) : null}
-          </Space>
-        )
-      },
-    },
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<MoreOutlined />}
+                    aria-label={t('posAdmin.invoiceDetail.setCodeMaintenanceTooltip', '维护该商品的多条码或套装条码')}
+                  />
+                </Dropdown>
+              ) : null}
+            </Space>
+          )
+        },
+      } satisfies ColumnType<LocalSupplierInvoiceItemDto>,
+    ] : [
+      {
+        // 只读视图：用一列总部处理状态代替商品匹配与操作两列。
+        title: t('posAdmin.invoiceWorkbench.colHqStatus'),
+        key: 'hqStatus',
+        width: 112,
+        render: (_: unknown, record: LocalSupplierInvoiceItemDto) => renderHqStatus(record),
+      } satisfies ColumnType<LocalSupplierInvoiceItemDto>,
+    ]),
   ]
+  // 表格最小宽度 = 定宽列之和 + 商品列最小宽度 + 勾选列；更宽的屏幕把多余空间留给商品列。
+  const detailTableScrollX = columns.reduce(
+    (sum, column) => sum + (typeof column.width === 'number' ? column.width : 236),
+    canSelectRows ? 36 : 0,
+  )
+
+  // 底部合计按当前可见行（外层筛选 + 列头筛选）计算。
+  const visibleDetailTotals = useMemo(
+    () => inlineNavigationDetails.reduce(
+      (totals, detail) => ({
+        quantity: totals.quantity + (detail.quantity ?? 0),
+        amount: totals.amount + (detail.amount ?? 0),
+      }),
+      { quantity: 0, amount: 0 },
+    ),
+    [inlineNavigationDetails],
+  )
+  const isDetailFiltered = inlineNavigationDetails.length !== details.length
+
+  const runningTaskLabels = [
+    checking && t('posAdmin.invoiceWorkbench.taskCheck'),
+    pasteLoading && t('posAdmin.invoiceWorkbench.taskPaste'),
+    storePriceLoading && t('posAdmin.invoiceWorkbench.taskStorePrice'),
+    hqUpdateLoading && t('posAdmin.invoiceWorkbench.taskHq'),
+    executing && t('posAdmin.invoiceWorkbench.taskExecute'),
+    updatingLastPurchasePrices && t('posAdmin.invoiceWorkbench.taskLastPrice'),
+  ].filter((label): label is string => Boolean(label))
+
+  const pendingBreakdown = [
+    progressStats.pendingByAction[DetailActionEnum.CreateProduct]
+      ? t('posAdmin.invoiceWorkbench.pendingCreate', { count: progressStats.pendingByAction[DetailActionEnum.CreateProduct] })
+      : '',
+    progressStats.pendingByAction[DetailActionEnum.UpdatePurchasePrice]
+      ? t('posAdmin.invoiceWorkbench.pendingUpdatePrice', { count: progressStats.pendingByAction[DetailActionEnum.UpdatePurchasePrice] })
+      : '',
+    progressStats.pendingByAction[DetailActionEnum.UpdateItemNumber]
+      ? t('posAdmin.invoiceWorkbench.pendingItemNumber', { count: progressStats.pendingByAction[DetailActionEnum.UpdateItemNumber] })
+      : '',
+    progressStats.pendingByAction[DetailActionEnum.AddMultiCode]
+      ? t('posAdmin.invoiceWorkbench.pendingMultiCode', { count: progressStats.pendingByAction[DetailActionEnum.AddMultiCode] })
+      : '',
+  ].filter(Boolean).join(' · ')
+
+  const moreFilterCount = [
+    productTypeFilter !== 'all',
+    productStatusFilter !== 'all',
+    barcodeStatusFilter !== 'all',
+    actionTypeFilter !== 'all',
+    specialProductFilter !== 'all',
+  ].filter(Boolean).length
+
+  const withCount = (label: string, count: number) => `${label} ${count}`
+
+  const moreFiltersContent = (
+    <div className="lsi-wb-filter-panel">
+      <span>{t('posAdmin.invoiceWorkbench.filterProductType')}</span>
+      <Select<'all' | 'unknown' | 0 | 1 | 2>
+        size="small"
+        value={productTypeFilter}
+        onChange={setProductTypeFilter}
+        options={[
+          { value: 'all', label: withCount(t('posAdmin.invoiceWorkbench.filterAll'), details.length) },
+          ...productTypeStats
+            .filter((option) => option.value !== 'unknown' || option.count > 0)
+            .map((option) => ({ value: option.value, label: withCount(option.label, option.count) })),
+        ]}
+      />
+      <span>{t('posAdmin.invoiceWorkbench.filterProductStatus')}</span>
+      <Select<StatusFilterValue<ProductStatusFilter>>
+        size="small"
+        value={productStatusFilter}
+        onChange={setProductStatusFilter}
+        options={[
+          { value: 'all', label: withCount(t('posAdmin.invoiceWorkbench.filterAll'), details.length) },
+          ...(['notDetected', 'exists', 'notExists'] as const).map((value) => ({
+            value,
+            label: withCount(productStatusFilterLabels[value], detailStatusStats.product[value]),
+          })),
+        ]}
+      />
+      <span>{t('posAdmin.invoiceWorkbench.filterBarcodeStatus')}</span>
+      <Select<BarcodeStatusFilterValue>
+        size="small"
+        value={barcodeStatusFilter}
+        onChange={setBarcodeStatusFilter}
+        options={[
+          { value: 'all', label: withCount(t('posAdmin.invoiceWorkbench.filterAll'), details.length) },
+          ...(['notDetected', 'normal', 'noMatch', 'multiMatch'] as const).map((value) => ({
+            value,
+            label: withCount(barcodeStatusFilterLabels[value], detailStatusStats.barcode[value]),
+          })),
+          {
+            value: 'abnormal',
+            label: withCount(barcodeStatusFilterLabels.abnormal, detailStatusStats.barcode.noMatch + detailStatusStats.barcode.multiMatch),
+          },
+        ]}
+      />
+      <span>{t('posAdmin.invoiceWorkbench.filterActionType')}</span>
+      <Select<ActionTypeFilterValue>
+        size="small"
+        value={actionTypeFilter}
+        onChange={setActionTypeFilter}
+        options={[
+          { value: 'all', label: withCount(t('posAdmin.invoiceWorkbench.filterAll'), details.length) },
+          ...actionTypeFilters.map((actionType) => ({
+            value: actionType,
+            label: withCount(
+              (detailActionConfig[actionType] ?? detailActionConfig[DetailActionEnum.None]).label,
+              detailStatusStats.action[actionType],
+            ),
+          })),
+        ]}
+      />
+      <span>{t('posAdmin.invoiceWorkbench.filterSpecial')}</span>
+      <Select<'all' | 'yes' | 'no'>
+        size="small"
+        value={specialProductFilter}
+        onChange={setSpecialProductFilter}
+        options={[
+          { value: 'all', label: t('posAdmin.invoiceWorkbench.filterAll') },
+          { value: 'yes', label: t('posAdmin.invoiceDetail.yes', '是') },
+          { value: 'no', label: t('posAdmin.invoiceDetail.no', '否') },
+        ]}
+      />
+    </div>
+  )
+
+  const renderQuickChip = (key: string, label: string, count: number, active: boolean, onToggle: () => void) => (
+    <Button
+      key={key}
+      size="small"
+      className="lsi-wb-chip"
+      type={active ? 'primary' : 'default'}
+      ghost={active}
+      aria-pressed={active}
+      onClick={onToggle}
+    >
+      {label}
+      <span className="lsi-wb-chip-count">{count}</span>
+    </Button>
+  )
+
+  const executedPercent = getExecutedPercent(progressStats)
+  const selectedCount = selectedRowKeys.length
+  const headerStoreText = invoice?.storeCode
+    ? `${invoice.storeCode}${invoice.storeName ? ` ${invoice.storeName}` : ''}`
+    : '--'
+  const headerSupplierText = invoice?.supplierCode
+    ? `${invoice.supplierCode}${invoice.supplierName ? ` ${invoice.supplierName}` : ''}`
+    : '--'
+  const flowStatusInfo = FLOW_STATUS_LABELS[invoice?.flowStatus ?? 0] ?? FLOW_STATUS_LABELS[0]
+  const inboundStatusLabelKey = INBOUND_STATUS_LABEL_KEYS[invoice?.inboundStatus ?? 0] ?? INBOUND_STATUS_LABEL_KEYS[0]
 
   /* ================================================================ */
   /*  渲染                                                             */
   /* ================================================================ */
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <div className="lsi-wb">
       {/* ============================================================ */}
-      {/* 顶部 Card - 订单头信息                                         */}
+      {/* 页头：单号、状态、后台任务、统一保存 + 表头字段                    */}
       {/* ============================================================ */}
-      <Card
-        title={t('posAdmin.invoiceDetail.orderHeaderInfo', '订单头信息')}
-        loading={loading}
-        size="small"
-        className="invoice-header-compact-card"
-      >
-        <Form form={form} layout="vertical">
-          <Row gutter={[12, 8]} align="bottom">
-            <Col flex="150px">
-              <Form.Item name="invoiceNo" label={t('posAdmin.invoiceDetail.orderNoLabel', '订单号')}>
-                <Input disabled />
-              </Form.Item>
-            </Col>
-            <Col flex="150px">
+      <section className="lsi-wb-card lsi-wb-header" aria-busy={loading}>
+        <div className="lsi-wb-titlebar">
+          <Tooltip title={t('posAdmin.invoiceWorkbench.backToList')}>
+            <Button
+              type="text"
+              icon={<ArrowLeftOutlined />}
+              aria-label={t('posAdmin.invoiceWorkbench.backToList')}
+              onClick={handleBackToList}
+              style={{ marginLeft: -8 }}
+            />
+          </Tooltip>
+          <h1 className="lsi-wb-title">{invoice?.invoiceNo || '--'}</h1>
+          {invoice?.invoiceNo && (
+            <Tooltip title={t('posAdmin.invoiceWorkbench.copyInvoiceNo')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<CopyOutlined />}
+                aria-label={t('posAdmin.invoiceWorkbench.copyInvoiceNo')}
+                onClick={() => void copyTextToClipboard(invoice.invoiceNo!)}
+              />
+            </Tooltip>
+          )}
+          {invoice && <span className={flowStatusInfo.className}>{t(flowStatusInfo.labelKey)}</span>}
+          {invoice && <span className="lsi-muted" style={{ fontSize: 12 }}>{t(inboundStatusLabelKey)}</span>}
+          {!canEditInvoice && invoice && details.length > 0 && (
+            <span className="lsi-wb-mini-progress">
+              <span className="lsi-wb-mini-progress-track" aria-hidden="true">
+                <span className="lsi-wb-mini-progress-fill" style={{ width: `${executedPercent}%` }} />
+              </span>
+              {t('posAdmin.invoiceWorkbench.hqProgress', { executed: progressStats.executed, total: progressStats.total })}
+            </span>
+          )}
+          <span className="lsi-wb-spacer" />
+          {runningTaskLabels.length > 0 && (
+            <span className="lsi-wb-task" role="status">
+              <LoadingOutlined />
+              {t('posAdmin.invoiceWorkbench.runningTasks', { tasks: runningTaskLabels.join('、') })}
+            </span>
+          )}
+          {invoiceGuid && (
+            <Button
+              icon={<BarChartOutlined />}
+              onClick={() => navigate(`/pos-admin/local-supplier-invoices/${invoiceGuid}/sales-analysis`)}
+            >
+              {t('posAdmin.invoiceWorkbench.salesAnalysis')}
+            </Button>
+          )}
+          {canEditInvoice && hasUnsavedChanges && (
+            <span className="lsi-wb-unsaved" role="status">{unsavedSummary}</span>
+          )}
+          {canEditInvoice && (
+            <Button
+              type="primary"
+              loading={saving || savingAll}
+              disabled={!hasUnsavedChanges}
+              onClick={() => void handleSaveAll()}
+            >
+              {t('posAdmin.invoiceWorkbench.saveChanges')}
+            </Button>
+          )}
+        </div>
+
+        {loading && !invoice ? <Skeleton active paragraph={{ rows: 1 }} title={false} /> : null}
+        {/* 表单始终挂载（首次加载时只隐藏），loadInvoice 写入的值不会因为表单实例未连接而丢失。 */}
+        <Form
+          form={form}
+          layout="vertical"
+          className="lsi-wb-fields"
+          requiredMark={false}
+          style={loading && !invoice ? { display: 'none' } : undefined}
+        >
+          {canEditInvoice ? (
+            <>
               <Form.Item
                 name="storeCode"
-                label={t('posAdmin.invoiceDetail.storeLabel', '分店')}
+                label={t('posAdmin.invoiceWorkbench.fieldStore')}
                 rules={[{ required: true, message: t('posAdmin.invoiceDetail.storeRequired', '请选择分店') }]}
               >
                 <Select
                   showSearch
+                  variant="filled"
                   loading={storeOptionsLoading}
                   options={headerStoreOptions}
                   optionFilterProp="label"
                   placeholder={t('posAdmin.invoiceDetail.storePlaceholder', '请选择分店')}
                 />
               </Form.Item>
-            </Col>
-            <Col flex="170px">
               <Form.Item
                 name="supplierCode"
-                label={t('posAdmin.invoiceDetail.supplierLabel', '供应商')}
+                label={t('posAdmin.invoiceWorkbench.fieldSupplier')}
                 rules={[{ required: true, message: t('posAdmin.invoiceDetail.supplierRequired', '请选择供应商') }]}
               >
                 <Select
                   showSearch
+                  variant="filled"
                   loading={supplierOptionsLoading}
                   options={headerSupplierOptions}
                   optionFilterProp="label"
                   placeholder={t('posAdmin.invoiceDetail.supplierPlaceholder', '请选择供应商')}
                 />
               </Form.Item>
-            </Col>
-            <Col flex="130px">
-              <Form.Item name="orderDate" label={t('posAdmin.invoiceDetail.orderDate', '订单日期')}>
-                <DatePicker style={{ width: '100%' }} />
+              <Form.Item name="orderDate" label={t('posAdmin.invoiceWorkbench.fieldOrderDate')}>
+                <DatePicker variant="filled" style={{ width: '100%' }} />
               </Form.Item>
-            </Col>
-            <Col flex="130px">
-              <Form.Item name="inboundDate" label={t('posAdmin.invoiceDetail.inboundDate', '入库日期')}>
-                <DatePicker style={{ width: '100%' }} />
+              <Form.Item name="inboundDate" label={t('posAdmin.invoiceWorkbench.fieldInboundDate')}>
+                <DatePicker
+                  variant="filled"
+                  style={{ width: '100%' }}
+                  placeholder={t('posAdmin.invoiceWorkbench.notFilled')}
+                />
               </Form.Item>
-            </Col>
-            <Col flex="110px">
-              <Form.Item name="totalAmount" label={t('posAdmin.invoiceDetail.totalAmountLabel', '总金额')}>
-                <Input disabled />
+              <Form.Item name="remarks" label={t('posAdmin.invoiceWorkbench.fieldRemarks')}>
+                <Input variant="filled" placeholder={t('posAdmin.invoiceWorkbench.notFilled')} />
               </Form.Item>
-            </Col>
-            <Col flex="160px">
-              <Form.Item name="remarks" label={t('posAdmin.invoiceDetail.remarksLabel', '备注')}>
-                <Input placeholder={t('posAdmin.invoiceDetail.remarksPlaceholder', '备注')} />
+            </>
+          ) : (
+            <>
+              <Form.Item label={t('posAdmin.invoiceWorkbench.fieldStore')}>
+                <div className="lsi-wb-readonly-value">{headerStoreText}</div>
               </Form.Item>
-            </Col>
-            <Col flex="none" className="invoice-header-compact-card__actions">
-              <Form.Item label=" " className="invoice-header-compact-card__actions-item">
-                <Space size={8} wrap className="invoice-header-compact-card__actions-space">
-                  <Button type="primary" loading={saving} onClick={() => void handleSave()}>
-                    {t('posAdmin.invoiceDetail.saveBtn', '保存')}
-                  </Button>
-                  <Button
-                    icon={<RollbackOutlined />}
-                    onClick={() => navigate('/pos-admin/local-supplier-invoices')}
-                  >
-                    {t('posAdmin.invoiceDetail.returnToList', '返回列表')}
-                  </Button>
-                </Space>
+              <Form.Item label={t('posAdmin.invoiceWorkbench.fieldSupplier')}>
+                <div className="lsi-wb-readonly-value">{headerSupplierText}</div>
               </Form.Item>
-            </Col>
-          </Row>
+              <Form.Item label={t('posAdmin.invoiceWorkbench.fieldOrderDate')}>
+                <div className="lsi-wb-readonly-value lsi-num">{invoice?.orderDate?.slice(0, 10) || '--'}</div>
+              </Form.Item>
+              <Form.Item label={t('posAdmin.invoiceWorkbench.fieldInboundDate')}>
+                <div className="lsi-wb-readonly-value lsi-num">
+                  {invoice?.inboundDate?.slice(0, 10) || t('posAdmin.invoiceWorkbench.notFilled')}
+                </div>
+              </Form.Item>
+              <Form.Item label={t('posAdmin.invoiceWorkbench.fieldRemarks')}>
+                <div className="lsi-wb-readonly-value" title={invoice?.remarks || undefined}>{invoice?.remarks || '--'}</div>
+              </Form.Item>
+            </>
+          )}
+          <Form.Item label={t('posAdmin.invoiceWorkbench.fieldTotalAmount')}>
+            <div className="lsi-wb-readonly-value lsi-num" style={{ fontWeight: 600, fontSize: 15 }}>
+              {formatAmount(invoice?.totalAmount)}
+            </div>
+          </Form.Item>
+          <Form.Item label={t('posAdmin.invoiceWorkbench.fieldAudit')}>
+            <div
+              className="lsi-wb-readonly-value lsi-num lsi-muted"
+              title={`${formatLocalSupplierInvoiceAuditTime(invoice?.createdAt)} · ${formatLocalSupplierInvoiceAuditTime(invoice?.updatedAt)}`}
+            >
+              {formatLocalSupplierInvoiceAuditTimeCompact(invoice?.createdAt)}
+              {' · '}
+              {formatLocalSupplierInvoiceAuditTimeCompact(invoice?.updatedAt)}
+            </div>
+          </Form.Item>
         </Form>
-      </Card>
+      </section>
 
       {/* ============================================================ */}
-      {/* 底部 Card - 明细表格                                           */}
+      {/* 明细：处理进度（同时是筛选）→ 工具栏 → 已生效筛选 → 勾选操作条 → 表格 → 合计 */}
       {/* ============================================================ */}
-      <Card
-        ref={tableCardRef}
-        title={t('posAdmin.invoiceDetail.detailCount', '明细 ({{count}} 条)', { count: details.length })}
-        size="small"
-        extra={
-          <div ref={toolbarRef}>
-            <Space wrap size={8}>
-              {/* 搜索 */}
-              <Input
-                allowClear
-                placeholder={t('posAdmin.invoiceDetail.searchKeyword', '搜索货号/条码/名称')}
-                style={{ width: 180 }}
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                prefix={<CopyOutlined />}
-              />
-              {/* 涨跌过滤 */}
-              <Button
-                type={priceFilter === 'up' ? 'primary' : 'default'}
-                danger={priceFilter === 'up'}
-                size="small"
-                onClick={() => setPriceFilter(priceFilter === 'up' ? 'all' : 'up')}
+      <section className="lsi-wb-card">
+        {canEditInvoice && (
+          <div className="lsi-wb-progress">
+            <div className="lsi-wb-progress-head">
+              <Typography.Text strong style={{ fontSize: 14 }}>
+                {t('posAdmin.invoiceWorkbench.detailsTitle')}
+                <span className="lsi-muted lsi-num" style={{ fontWeight: 400, marginLeft: 6 }}>
+                  {t('posAdmin.invoiceWorkbench.detailsCount', { count: details.length })}
+                </span>
+              </Typography.Text>
+              <div
+                className="lsi-wb-progress-track"
+                role="img"
+                aria-label={t('posAdmin.invoiceWorkbench.progressAria', {
+                  executed: progressStats.executed,
+                  pending: progressStats.pending,
+                  waiting: progressStats.waiting,
+                  unchecked: progressStats.unchecked,
+                  none: progressStats.none,
+                })}
               >
-                {t('posAdmin.invoiceDetail.priceUpCount', '涨价 ({{count}})', { count: priceStats.upCount })}
-              </Button>
-              <Button
-                type={priceFilter === 'down' ? 'primary' : 'default'}
-                size="small"
-                style={priceFilter === 'down' ? { background: '#52c41a', borderColor: '#52c41a' } : {}}
-                onClick={() => setPriceFilter(priceFilter === 'down' ? 'all' : 'down')}
-              >
-                {t('posAdmin.invoiceDetail.priceDownCount', '降价 ({{count}})', { count: priceStats.downCount })}
-              </Button>
-            </Space>
-          </div>
-        }
-      >
-        {/* 状态统计栏：数量按全部明细计算，点击后与搜索和涨跌筛选叠加。 */}
-        <div style={{ marginBottom: 12 }}>
-          <Space wrap size={8}>
-            <span style={{ fontWeight: 500 }}>{t('posAdmin.invoiceDetail.statusStatsTitle', '状态统计')}</span>
-            <span style={{ color: '#595959' }}>{t('posAdmin.products.productTypeLabel', '商品类型')}</span>
-            <Tag
-              color="blue"
-              style={getStatusStatsTagStyle(productTypeFilter === 'all')}
-              onClick={() => setProductTypeFilter('all')}
-            >
-              {t('posAdmin.invoiceDetail.statusStatsAll', '全部 {{count}}', { count: details.length })}
-            </Tag>
-            {productTypeStats.filter((option) => option.value !== 'unknown' || option.count > 0).map((option) => (
-              <Tag
-                key={option.value}
-                color={option.color}
-                style={getStatusStatsTagStyle(productTypeFilter === option.value)}
-                onClick={() => setProductTypeFilter(productTypeFilter === option.value ? 'all' : option.value)}
-              >
-                {option.label} {option.count}
-              </Tag>
-            ))}
-            <span style={{ color: '#595959' }}>{t('posAdmin.invoiceDetail.productStatusLabel', '商品状态')}</span>
-            <Tag
-              color={statusStatsTagColors.product.all}
-              style={getStatusStatsTagStyle(productStatusFilter === 'all')}
-              onClick={() => setProductStatusFilter('all')}
-            >
-              {t('posAdmin.invoiceDetail.statusStatsAll', '全部 {{count}}', { count: details.length })}
-            </Tag>
-            <Tag
-              color={statusStatsTagColors.product.notDetected}
-              style={getStatusStatsTagStyle(productStatusFilter === 'notDetected')}
-              onClick={() => setProductStatusFilter(toggleStatusFilter(productStatusFilter, 'notDetected'))}
-            >
-              {t('posAdmin.invoiceDetail.notDetected', '未检测')} {detailStatusStats.product.notDetected}
-            </Tag>
-            <Tag
-              color={statusStatsTagColors.product.exists}
-              style={getStatusStatsTagStyle(productStatusFilter === 'exists')}
-              onClick={() => setProductStatusFilter(toggleStatusFilter(productStatusFilter, 'exists'))}
-            >
-              {t('posAdmin.invoiceDetail.exists', '已存在')} {detailStatusStats.product.exists}
-            </Tag>
-            <Tag
-              color={statusStatsTagColors.product.notExists}
-              style={getStatusStatsTagStyle(productStatusFilter === 'notExists')}
-              onClick={() => setProductStatusFilter(toggleStatusFilter(productStatusFilter, 'notExists'))}
-            >
-              {t('posAdmin.invoiceDetail.notExistsShort', '不存在')} {detailStatusStats.product.notExists}
-            </Tag>
-            <span style={{ color: '#595959' }}>{t('posAdmin.invoiceDetail.barcodeStatusLabel', '条码状态')}</span>
-            <Tag
-              color={statusStatsTagColors.barcode.all}
-              style={getStatusStatsTagStyle(barcodeStatusFilter === 'all')}
-              onClick={() => setBarcodeStatusFilter('all')}
-            >
-              {t('posAdmin.invoiceDetail.statusStatsAll', '全部 {{count}}', { count: details.length })}
-            </Tag>
-            <Tag
-              color={statusStatsTagColors.barcode.notDetected}
-              style={getStatusStatsTagStyle(barcodeStatusFilter === 'notDetected')}
-              onClick={() => setBarcodeStatusFilter(toggleStatusFilter(barcodeStatusFilter, 'notDetected'))}
-            >
-              {t('posAdmin.invoiceDetail.notDetected', '未检测')} {detailStatusStats.barcode.notDetected}
-            </Tag>
-            <Tag
-              color={statusStatsTagColors.barcode.normal}
-              style={getStatusStatsTagStyle(barcodeStatusFilter === 'normal')}
-              onClick={() => setBarcodeStatusFilter(toggleStatusFilter(barcodeStatusFilter, 'normal'))}
-            >
-              {t('posAdmin.invoiceDetail.normal', '正常')} {detailStatusStats.barcode.normal}
-            </Tag>
-            <Tag
-              color={statusStatsTagColors.barcode.noMatch}
-              style={getStatusStatsTagStyle(barcodeStatusFilter === 'noMatch')}
-              onClick={() => setBarcodeStatusFilter(toggleStatusFilter(barcodeStatusFilter, 'noMatch'))}
-            >
-              {t('posAdmin.invoiceDetail.noMatch', '无匹配')} {detailStatusStats.barcode.noMatch}
-            </Tag>
-            <Tag
-              color={statusStatsTagColors.barcode.multiMatch}
-              style={getStatusStatsTagStyle(barcodeStatusFilter === 'multiMatch')}
-              onClick={() => setBarcodeStatusFilter(toggleStatusFilter(barcodeStatusFilter, 'multiMatch'))}
-            >
-              {t('posAdmin.invoiceDetail.multiMatch', '多匹配({{count}})', { count: detailStatusStats.barcode.multiMatch })}
-            </Tag>
-            <span style={{ color: '#595959' }}>{t('posAdmin.invoiceDetail.actionTypeLabel', '操作类型')}</span>
-            <Tag
-              color="blue"
-              style={getStatusStatsTagStyle(actionTypeFilter === 'all')}
-              onClick={() => setActionTypeFilter('all')}
-            >
-              {t('posAdmin.invoiceDetail.statusStatsAll', '全部 {{count}}', { count: details.length })}
-            </Tag>
-            {actionTypeFilters.map((actionType) => {
-              const config = detailActionConfig[actionType] ?? detailActionConfig[DetailActionEnum.None]
-              return (
-                <Tag
-                  key={actionType}
-                  color={config.color}
-                  style={getStatusStatsTagStyle(actionTypeFilter === actionType)}
-                  onClick={() => setActionTypeFilter(toggleStatusFilter(actionTypeFilter, actionType))}
-                >
-                  {config.label} {detailStatusStats.action[actionType]}
-                </Tag>
-              )
-            })}
-          </Space>
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <Space wrap size={8}>
-            <span style={{ fontWeight: 500 }}>{t('posAdmin.invoiceDetail.activeFiltersTitle', '当前过滤')}</span>
-            {activeFilterTags.length ? (
-              <>
-                {activeFilterTags.map((filterTag) => (
-                  <Tag
-                    key={filterTag.key}
-                    color={filterTag.color}
-                    closable
-                    onClose={filterTag.onClose}
-                  >
-                    {filterTag.label}
-                  </Tag>
+                {DETAIL_PROGRESS_BUCKETS.filter((bucket) => progressStats[bucket] > 0).map((bucket) => (
+                  <span
+                    key={bucket}
+                    style={{ flex: `${progressStats[bucket]} 1 0`, background: PROGRESS_BUCKET_COLORS[bucket] }}
+                  />
                 ))}
-                <Button size="small" type="link" onClick={handleClearAllOuterFilters}>
-                  {t('posAdmin.invoiceDetail.clearActiveFilters', '清空过滤')}
+              </div>
+              <span className="lsi-muted lsi-num" style={{ fontSize: 12 }}>
+                {t('posAdmin.invoiceWorkbench.executedPercent', { percent: executedPercent })}
+              </span>
+            </div>
+            <div className="lsi-wb-progress-buckets">
+              <button
+                type="button"
+                className={progressBucketFilter === 'all' ? 'lsi-wb-bucket lsi-wb-bucket-active' : 'lsi-wb-bucket'}
+                aria-pressed={progressBucketFilter === 'all'}
+                onClick={() => setProgressBucketFilter('all')}
+              >
+                {t('posAdmin.invoiceWorkbench.bucketAll')}
+                <span className="lsi-wb-bucket-count">{details.length}</span>
+              </button>
+              {DETAIL_PROGRESS_BUCKETS
+                .filter((bucket) => progressStats[bucket] > 0 || progressBucketFilter === bucket)
+                .map((bucket) => {
+                  const selected = progressBucketFilter === bucket
+                  const hint = bucket === 'pending'
+                    ? pendingBreakdown
+                    : bucket === 'waiting'
+                      ? t('posAdmin.invoiceWorkbench.waitingHint')
+                      : ''
+                  return (
+                    <button
+                      key={bucket}
+                      type="button"
+                      className={selected ? 'lsi-wb-bucket lsi-wb-bucket-active' : 'lsi-wb-bucket'}
+                      aria-pressed={selected}
+                      onClick={() => setProgressBucketFilter(selected ? 'all' : bucket)}
+                    >
+                      <span className="lsi-wb-swatch" style={{ background: PROGRESS_BUCKET_COLORS[bucket] }} />
+                      {progressBucketLabels[bucket]}
+                      <span className="lsi-wb-bucket-count">{progressStats[bucket]}</span>
+                      {hint ? <span className="lsi-wb-bucket-hint">{hint}</span> : null}
+                    </button>
+                  )
+                })}
+              <span className="lsi-wb-spacer" />
+              {canRunGlobalLocalPurchaseBatchActions && progressStats.pending > 0 && (
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={executing ? <LoadingOutlined /> : <PlayCircleOutlined />}
+                  disabled={executing}
+                  onClick={handleExecuteAllPending}
+                >
+                  {t('posAdmin.invoiceWorkbench.executeAllPending', { count: progressStats.pending })}
                 </Button>
-              </>
-            ) : (
-              <Tag>{t('posAdmin.invoiceDetail.noActiveFilters', '无')}</Tag>
-            )}
-          </Space>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div ref={toolbarRef} className="lsi-wb-toolbar">
+          {!canEditInvoice && (
+            <Typography.Text strong style={{ fontSize: 14, marginRight: 8 }}>
+              {t('posAdmin.invoiceWorkbench.detailsTitle')}
+              <span className="lsi-muted lsi-num" style={{ fontWeight: 400, marginLeft: 6 }}>
+                {t('posAdmin.invoiceWorkbench.detailsCount', { count: details.length })}
+              </span>
+            </Typography.Text>
+          )}
+          <Input
+            allowClear
+            prefix={<SearchOutlined className="lsi-muted" />}
+            placeholder={t('posAdmin.invoiceWorkbench.searchPlaceholder')}
+            style={{ width: 220 }}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+          {renderQuickChip('price-up', t('posAdmin.invoiceWorkbench.chipPriceUp'), priceStats.upCount, priceFilter === 'up', () => setPriceFilter(priceFilter === 'up' ? 'all' : 'up'))}
+          {renderQuickChip('price-down', t('posAdmin.invoiceWorkbench.chipPriceDown'), priceStats.downCount, priceFilter === 'down', () => setPriceFilter(priceFilter === 'down' ? 'all' : 'down'))}
+          {renderQuickChip(
+            'not-exists',
+            canEditInvoice ? t('posAdmin.invoiceWorkbench.chipNotExists') : t('posAdmin.invoiceWorkbench.chipNotExistsStore'),
+            detailStatusStats.product.notExists,
+            productStatusFilter === 'notExists',
+            () => setProductStatusFilter(toggleStatusFilter(productStatusFilter, 'notExists')),
+          )}
+          {canEditInvoice && renderQuickChip(
+            'barcode-abnormal',
+            t('posAdmin.invoiceWorkbench.chipBarcodeAbnormal'),
+            detailStatusStats.barcode.noMatch + detailStatusStats.barcode.multiMatch,
+            barcodeStatusFilter === 'abnormal',
+            () => setBarcodeStatusFilter(barcodeStatusFilter === 'abnormal' ? 'all' : 'abnormal'),
+          )}
+          {canEditInvoice && (
+            <Popover trigger="click" placement="bottomLeft" content={moreFiltersContent}>
+              <Button size="small" className="lsi-wb-chip" icon={<FilterOutlined />}>
+                {t('posAdmin.invoiceWorkbench.moreFilters')}
+                {moreFilterCount > 0 && <Badge count={moreFilterCount} size="small" style={{ marginLeft: 4 }} />}
+              </Button>
+            </Popover>
+          )}
+          <span className="lsi-wb-spacer" />
+          {canEditDetailRows && (
+            <Button
+              icon={<SnippetsOutlined />}
+              onClick={() => runAfterUnsavedGuard(() => {
+                setPasteMultilineCellMode('merge')
+                setPasteVisible(true)
+              })}
+            >
+              {t('posAdmin.invoiceDetail.pasteDataBtn', '粘贴数据')}
+            </Button>
+          )}
+          {canEditDetailRows && (
+            <Button
+              icon={checking ? <LoadingOutlined /> : <ScanOutlined />}
+              disabled={checking}
+              onClick={() => runAfterUnsavedGuard(() => void handleCheckProducts())}
+            >
+              {/* 检测范围写在按钮上：有勾选只检测勾选行，否则检测全部 */}
+              {selectedCount > 0
+                ? t('posAdmin.invoiceWorkbench.checkSelected', { count: selectedCount })
+                : t('posAdmin.invoiceWorkbench.checkAll', { count: details.length })}
+            </Button>
+          )}
+          {canEditDetailRows && (
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  {
+                    key: 'updateLastPurchasePrices',
+                    label: t('posAdmin.invoiceDetail.updateLastPurchasePricesBtn', '更新上次进货价'),
+                    disabled: updatingLastPurchasePrices || !details.length,
+                  },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'updateLastPurchasePrices') {
+                    runAfterUnsavedGuard(() => handleUpdateLastPurchasePrices())
+                  }
+                },
+              }}
+            >
+              <Button icon={<MoreOutlined />} aria-label={t('posAdmin.invoiceWorkbench.moreActions')} />
+            </Dropdown>
+          )}
         </div>
 
-        {/* 工具栏按钮 */}
-        <div style={{ marginBottom: 12 }}>
-          <Space wrap>
-            {isAdmin && (
-              <Button
-                icon={<SnippetsOutlined />}
-                onClick={() => {
-                  setPasteMultilineCellMode('merge')
-                  setPasteVisible(true)
-                }}
-              >
-                {t('posAdmin.invoiceDetail.pasteDataBtn', '粘贴数据')}
-              </Button>
-            )}
-            {isAdmin && (
-              <Button
-                icon={<EditOutlined />}
-                disabled={!selectedRowKeys.length}
-                onClick={() => setBatchEditVisible(true)}
-              >
-                {t('posAdmin.invoiceDetail.batchEditCount', '批量编辑 ({{count}})', { count: selectedRowKeys.length })}
-              </Button>
-            )}
-            {isAdmin && (
-              <Button
-                icon={<SendOutlined />}
-                disabled={!selectedRowKeys.length}
-                onClick={() => openStorePriceModal()}
-              >
-                {t('posAdmin.invoiceDetail.updateToStoreBtn', '更新到分店')}
-              </Button>
-            )}
-            {isAdmin && (
-              <Button
-                icon={<CheckCircleOutlined />}
-                loading={checking}
-                disabled={checking}
-                onClick={() => void handleCheckProducts()}
-              >
-                {t('posAdmin.invoiceDetail.productDetectBtn', '商品检测')}
-              </Button>
-            )}
-            {isAdmin && (
-              <Button
-                icon={<HistoryOutlined />}
-                loading={updatingLastPurchasePrices}
-                disabled={updatingLastPurchasePrices || !details.length}
-                onClick={() => void handleUpdateLastPurchasePrices()}
-              >
-                {t('posAdmin.invoiceDetail.updateLastPurchasePricesBtn', '更新上次进货价')}
-              </Button>
-            )}
-            {canWriteLocalPurchaseToHq && (
-              <Button
-                icon={<CloudUploadOutlined />}
-                loading={hqUpdateLoading}
-                disabled={hqUpdateLoading || !selectedRowKeys.length}
-                onClick={() => openHqUpdateModal()}
-              >
-                {t('posAdmin.invoiceDetail.updateHqProductsBtn', '更新HQ商品')}
-              </Button>
-            )}
-            {canRunGlobalLocalPurchaseBatchActions && (
-              <Button
-                icon={<ThunderboltOutlined />}
-                loading={executing}
-                disabled={executing || !selectedRowKeys.length}
-                onClick={() => void handleBatchExecute()}
-              >
-                {t('posAdmin.invoiceDetail.batchExecuteBtn', '批量执行操作')}
-              </Button>
-            )}
-            {canRunGlobalLocalPurchaseBatchActions && (
-              <Dropdown
-                menu={{
-                  items: ACTION_MENU_ITEMS(t),
-                  onClick: ({ key }) => void handleBatchSetAction(key),
-                }}
-                disabled={!selectedRowKeys.length}
-              >
-                <Button icon={<PlusOutlined />} disabled={!selectedRowKeys.length}>
-                  {t('posAdmin.invoiceDetail.batchSetActionBtn', '批量设置操作类型')}
+        {activeFilterTags.length > 0 && (
+          <div className="lsi-wb-strip">
+            <ActiveFilterBar items={activeFilterTags} onClearAll={handleClearAllOuterFilters} />
+          </div>
+        )}
+
+        {canSelectRows && selectedCount > 0 && (
+          <div className="lsi-wb-strip">
+            <SelectionActionBar selectedCount={selectedCount} onClearSelection={() => setSelectedRowKeys([])}>
+              {isAdmin && (
+                <Button size="small" onClick={() => setBatchEditVisible(true)}>
+                  {t('posAdmin.invoiceWorkbench.batchEdit')}
                 </Button>
-              </Dropdown>
-            )}
-            {isAdmin && (
-              <Button
-                type="primary"
-                loading={detailLoading}
-                onClick={() => void handleSaveDetails()}
-              >
-                {t('posAdmin.invoiceDetail.saveDetailBtn2', '保存明细')}
-              </Button>
-            )}
-            {isAdmin && (
-              <Popconfirm
-                title={t('posAdmin.invoiceDetail.confirmDeleteTitle', '确认删除选中的明细行吗？')}
-                description={t('posAdmin.invoiceDetail.willDeleteCount', '将删除 {{count}} 条记录', { count: selectedRowKeys.length })}
-                okText={t('posAdmin.invoiceDetail.delete', '删除')}
-                cancelText={t('common.cancel', '取消')}
-                okButtonProps={{ danger: true }}
-                onConfirm={() => void handleDeleteSelected()}
-              >
-                <Button
-                  icon={<DeleteOutlined />}
-                  danger
-                  disabled={!selectedRowKeys.length}
+              )}
+              {canRunGlobalLocalPurchaseBatchActions && (
+                <Dropdown
+                  menu={{
+                    items: ACTION_MENU_ITEMS(t),
+                    onClick: ({ key }) => void handleBatchSetAction(key),
+                  }}
                 >
-                  {t('posAdmin.invoiceDetail.deleteSelectedCount', '删除选中 ({{count}})', { count: selectedRowKeys.length })}
+                  <Button size="small">
+                    {t('posAdmin.invoiceWorkbench.setAction')}
+                    <DownOutlined style={{ fontSize: 10 }} />
+                  </Button>
+                </Dropdown>
+              )}
+              {canRunGlobalLocalPurchaseBatchActions && (
+                <Button
+                  size="small"
+                  type="primary"
+                  ghost
+                  icon={executing ? <LoadingOutlined /> : undefined}
+                  disabled={executing}
+                  onClick={() => runAfterUnsavedGuard(() => handleBatchExecute())}
+                >
+                  {t('posAdmin.invoiceWorkbench.executeSelected')}
                 </Button>
-              </Popconfirm>
-            )}
-          </Space>
-        </div>
+              )}
+              {isAdmin && (
+                <Button size="small" disabled={storePriceLoading} onClick={() => openStorePriceModal()}>
+                  {t('posAdmin.invoiceWorkbench.updateToStore')}
+                </Button>
+              )}
+              {canWriteLocalPurchaseToHq && (
+                <Button
+                  size="small"
+                  icon={hqUpdateLoading ? <LoadingOutlined /> : undefined}
+                  disabled={hqUpdateLoading || !selectedRowKeys.length}
+                  onClick={() => openHqUpdateModal()}
+                >
+                  {t('posAdmin.invoiceDetail.updateHqProductsBtn', '更新HQ商品')}
+                </Button>
+              )}
+              {isAdmin && (
+                <Popconfirm
+                  title={t('posAdmin.invoiceDetail.confirmDeleteTitle', '确认删除选中的明细行吗？')}
+                  description={t('posAdmin.invoiceDetail.willDeleteCount', '将删除 {{count}} 条记录', { count: selectedCount })}
+                  okText={t('posAdmin.invoiceDetail.delete', '删除')}
+                  cancelText={t('common.cancel', '取消')}
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => runAfterUnsavedGuard(() => void handleDeleteSelected())}
+                >
+                  <Button size="small" danger>
+                    {t('posAdmin.invoiceWorkbench.deleteSelected')}
+                  </Button>
+                </Popconfirm>
+              )}
+            </SelectionActionBar>
+          </div>
+        )}
 
         {/* 明细表格 */}
-        <MeasuredTable metricId="pos-admin.local-supplier-invoices.invoice-edit.table-2"
-          rowKey="detailGUID"
-          loading={detailLoading}
-          dataSource={filteredDetails}
-          columns={columns}
-          pagination={false}
-          onChange={handleTableChange}
-          scroll={{ x: 1682, y: tableScrollY }}
-          className="invoice-detail-compact-table"
-          rowSelection={{
-            fixed: true,
-            columnWidth: 36,
-            selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys),
-          }}
-          rowClassName={(_, index) => (index % 2 === 1 ? 'table-row-striped' : '')}
-          size="small"
-        />
-      </Card>
+        <div ref={tableCardRef}>
+          <MeasuredTable metricId="pos-admin.local-supplier-invoices.invoice-edit.table-2"
+            rowKey="detailGUID"
+            loading={detailLoading}
+            dataSource={filteredDetails}
+            columns={columns}
+            pagination={false}
+            onChange={handleTableChange}
+            scroll={{ x: detailTableScrollX, y: tableScrollY }}
+            className="lsi-wb-table"
+            rowSelection={canSelectRows ? {
+              fixed: true,
+              columnWidth: 36,
+              selectedRowKeys,
+              onChange: (keys) => setSelectedRowKeys(keys),
+            } : undefined}
+            size="small"
+          />
+        </div>
+
+        <div className="lsi-wb-footer">
+          <span className="lsi-muted lsi-num">
+            {isDetailFiltered
+              ? t('posAdmin.invoiceWorkbench.footerFiltered', { count: inlineNavigationDetails.length, total: details.length })
+              : t('posAdmin.invoiceWorkbench.footerAll', { count: details.length })}
+          </span>
+          <span className="lsi-wb-spacer" />
+          <span className="lsi-num">
+            <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.footerQuantity')}</span>
+            {' '}
+            {formatQuantity(visibleDetailTotals.quantity)}
+          </span>
+          <span className="lsi-num">
+            <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.footerAmount')}</span>
+            {' '}
+            <strong>{formatAmount(visibleDetailTotals.amount)}</strong>
+          </span>
+        </div>
+      </section>
 
       {/* ============================================================ */}
       {/* 粘贴数据 Modal                                                 */}
@@ -3751,7 +4161,11 @@ export default function InvoiceEditPage() {
         productCode={setCodeMaintenanceTarget?.productCode}
         storeCode={setCodeMaintenanceTarget?.storeCode?.trim() || invoice?.storeCode?.trim()}
         onClose={() => setSetCodeMaintenanceTarget(null)}
+        // 多码/套装保存后刷新明细，商品类型标记随之更新；有未保存修改时不刷新，避免覆盖用户改到一半的值。
+        onSaved={async () => {
+          if (!hasUnsavedChanges) await loadDetails(false)
+        }}
       />
-    </Space>
+    </div>
   )
 }

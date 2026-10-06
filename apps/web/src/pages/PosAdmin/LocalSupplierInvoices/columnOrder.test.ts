@@ -7,10 +7,15 @@ import {
   dispatchLocalSupplierInvoiceDragHandleKeyDown,
   dispatchLocalSupplierInvoiceDragHandlePointerDown,
   dispatchLocalSupplierInvoiceSortableHeaderKeyDown,
+  DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS,
+  LOCKED_LOCAL_SUPPLIER_INVOICE_COLUMNS,
+  isLocalSupplierInvoiceColumnLayoutCustomized,
   isLocalSupplierInvoiceColumnOrderCustomized,
   mergeLocalSupplierInvoiceColumnOrder,
   moveLocalSupplierInvoiceColumnOrder,
   parseLocalSupplierInvoiceColumnOrder,
+  parseLocalSupplierInvoiceHiddenColumns,
+  toggleLocalSupplierInvoiceHiddenColumn,
 } from './columnOrder'
 
 function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
@@ -27,26 +32,27 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   }
 }
 
+const expectedDefaultOrder = [
+  'invoiceNo',
+  'storeCode',
+  'supplierCode',
+  'orderDate',
+  'detailCount',
+  'priceChange',
+  'totalAmount',
+  'isProductChecked',
+  'flowStatus',
+  'createdAt',
+  'inboundDate',
+  'inboundStatus',
+  'receivedTotalAmount',
+  'remarks',
+  'updatedAt',
+]
 assertDeepEqual(
   DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER,
-  [
-    'storeCode',
-    'supplierCode',
-    'invoiceNo',
-    'orderDate',
-    'inboundDate',
-    'totalAmount',
-    'receivedTotalAmount',
-    'isProductChecked',
-    'flowStatus',
-    'inboundStatus',
-    'remarks',
-    'createdAt',
-    'createdBy',
-    'updatedAt',
-    'updatedBy',
-  ],
-  '默认列序应包含全部业务列和四个审计字段',
+  expectedDefaultOrder,
+  '默认列序应以随货单号打头，并包含明细行数、价格变动和合并后的审计列',
 )
 assertEqual(
   DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER.includes('index' as never),
@@ -75,27 +81,11 @@ assertDeepEqual(
 
 assertDeepEqual(
   mergeLocalSupplierInvoiceColumnOrder(
-    ['updatedBy', 'unknown', 'updatedBy', 'storeCode'],
+    ['updatedAt', 'unknown', 'updatedBy', 'updatedAt', 'storeCode'],
     DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER,
   ),
-  [
-    'updatedBy',
-    'storeCode',
-    'supplierCode',
-    'invoiceNo',
-    'orderDate',
-    'inboundDate',
-    'totalAmount',
-    'receivedTotalAmount',
-    'isProductChecked',
-    'flowStatus',
-    'inboundStatus',
-    'remarks',
-    'createdAt',
-    'createdBy',
-    'updatedAt',
-  ],
-  '持久化列序应过滤未知和重复列，并按默认顺序补齐新增列',
+  ['updatedAt', 'storeCode', ...expectedDefaultOrder.filter((key) => key !== 'updatedAt' && key !== 'storeCode')],
+  '持久化列序应过滤未知、已下线（如 updatedBy）和重复列，并按默认顺序补齐新增列',
 )
 assertDeepEqual(
   mergeLocalSupplierInvoiceColumnOrder({ storeCode: true }),
@@ -108,23 +98,7 @@ assertDeepEqual(
     'updatedAt',
     'supplierCode',
   ),
-  [
-    'storeCode',
-    'updatedAt',
-    'supplierCode',
-    'invoiceNo',
-    'orderDate',
-    'inboundDate',
-    'totalAmount',
-    'receivedTotalAmount',
-    'isProductChecked',
-    'flowStatus',
-    'inboundStatus',
-    'remarks',
-    'createdAt',
-    'createdBy',
-    'updatedBy',
-  ],
+  ['invoiceNo', 'storeCode', 'updatedAt', 'supplierCode', ...expectedDefaultOrder.slice(3, -1)],
   '拖拽应将审计字段移动到目标业务列位置',
 )
 assertDeepEqual(
@@ -145,12 +119,61 @@ assertEqual(
   isLocalSupplierInvoiceColumnOrderCustomized(
     moveLocalSupplierInvoiceColumnOrder(
       DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER,
-      'updatedBy',
+      'updatedAt',
       'storeCode',
     ),
   ),
   true,
   '调整列序后应显示重置列按钮',
+)
+
+assertDeepEqual(
+  parseLocalSupplierInvoiceHiddenColumns(null),
+  ['flowStatus', 'inboundDate', 'inboundStatus', 'receivedTotalAmount', 'remarks', 'updatedAt'],
+  '首次打开应默认隐藏流程状态、入库日期、入库状态、已收总金额、备注和最后修改',
+)
+assertDeepEqual(
+  DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS,
+  parseLocalSupplierInvoiceHiddenColumns('not-json'),
+  '损坏的显隐配置应恢复默认隐藏列',
+)
+assertDeepEqual(
+  parseLocalSupplierInvoiceHiddenColumns(JSON.stringify(['remarks', 'invoiceNo', 'unknown', 'remarks', 'storeCode'])),
+  ['storeCode', 'remarks'],
+  '显隐配置应过滤未知列、去重、剔除锁定的随货单号，并按默认列序输出',
+)
+assertDeepEqual(
+  parseLocalSupplierInvoiceHiddenColumns('[]'),
+  [],
+  '用户把所有列都打开后应保留空的隐藏列表',
+)
+assertDeepEqual(
+  toggleLocalSupplierInvoiceHiddenColumn(DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS, 'remarks'),
+  ['flowStatus', 'inboundDate', 'inboundStatus', 'receivedTotalAmount', 'updatedAt'],
+  '勾选已隐藏的备注列应把它显示出来',
+)
+assertDeepEqual(
+  toggleLocalSupplierInvoiceHiddenColumn([], 'invoiceNo'),
+  [],
+  '随货单号是锁定列，不能被隐藏',
+)
+assertEqual(
+  isLocalSupplierInvoiceColumnLayoutCustomized(
+    DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER,
+    DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS,
+  ),
+  false,
+  '默认列序和默认隐藏列不应提示可恢复默认',
+)
+assertEqual(
+  isLocalSupplierInvoiceColumnLayoutCustomized(DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER, ['remarks']),
+  true,
+  '改过列显隐后应提示可恢复默认',
+)
+assertEqual(
+  LOCKED_LOCAL_SUPPLIER_INVOICE_COLUMNS.includes('invoiceNo'),
+  true,
+  '随货单号应在锁定列里',
 )
 
 assertDeepEqual(
