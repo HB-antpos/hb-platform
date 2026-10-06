@@ -11,6 +11,10 @@ namespace BlazorApp.Api.Interfaces.React
             GridRequestDto request,
             List<string>? allowedStoreCodes
         );
+        Task<ApiResponse<List<LocalSupplierInvoiceStoreCountDto>>> GetStoreCountsAsync(
+            GridRequestDto request,
+            List<string>? allowedStoreCodes
+        );
         Task<ApiResponse<LocalSupplierInvoiceFilterOptionsDto>> GetFilterOptionsAsync(
             List<string>? allowedStoreCodes,
             string? storeCode

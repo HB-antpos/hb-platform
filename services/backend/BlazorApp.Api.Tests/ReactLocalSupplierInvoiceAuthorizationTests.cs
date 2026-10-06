@@ -264,6 +264,7 @@ public sealed class ReactLocalSupplierInvoiceAuthorizationTests : IDisposable
 
     [Theory]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.Grid))]
+    [InlineData(nameof(ReactLocalSupplierInvoicesController.StoreCounts))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetInvoice))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetDetails))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetDetailsGrid))]
@@ -375,6 +376,7 @@ public sealed class ReactLocalSupplierInvoiceAuthorizationTests : IDisposable
 
     [Theory]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.Grid))]
+    [InlineData(nameof(ReactLocalSupplierInvoicesController.StoreCounts))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetInvoice))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetDetails))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetDetailsGrid))]
@@ -404,6 +406,7 @@ public sealed class ReactLocalSupplierInvoiceAuthorizationTests : IDisposable
 
     [Theory]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.Grid))]
+    [InlineData(nameof(ReactLocalSupplierInvoicesController.StoreCounts))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetInvoice))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetDetails))]
     [InlineData(nameof(ReactLocalSupplierInvoicesController.GetDetailsGrid))]
@@ -621,6 +624,8 @@ public sealed class ReactLocalSupplierInvoiceAuthorizationTests : IDisposable
         return methodName switch
         {
             nameof(ReactLocalSupplierInvoicesController.Grid) => controller.Grid(new GridRequestDto()),
+            nameof(ReactLocalSupplierInvoicesController.StoreCounts) =>
+                controller.StoreCounts(new GridRequestDto()),
             nameof(ReactLocalSupplierInvoicesController.GetInvoice) => controller.GetInvoice("invoice-1"),
             nameof(ReactLocalSupplierInvoicesController.GetDetails) => controller.GetDetails("invoice-1"),
             nameof(ReactLocalSupplierInvoicesController.GetDetailsGrid) => controller.GetDetailsGrid(

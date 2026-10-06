@@ -56,6 +56,15 @@ namespace BlazorApp.Shared.DTOs
         public decimal? NewAutoRetailPrice { get; set; }
     }
 
+    /// <summary>
+    /// 分店进货单列表左侧分店栏的计数：某分店在当前其他筛选条件下的单数。
+    /// </summary>
+    public class LocalSupplierInvoiceStoreCountDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        public int Count { get; set; }
+    }
+
     public class LocalSupplierInvoiceListDto
     {
         public string InvoiceGUID { get; set; } = string.Empty;

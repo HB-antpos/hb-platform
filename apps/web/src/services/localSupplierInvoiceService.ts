@@ -453,6 +453,12 @@ export async function getInvoiceGrid(data: Record<string, unknown>) {
   return unwrapApiData(response)
 }
 
+/** 列表左侧分店栏的单数：请求体与 grid 相同（调用方去掉分店条件），返回每个分店的单数。 */
+export async function getInvoiceStoreCounts(data: Record<string, unknown>) {
+  const response = await request.post<ApiResponse<{ storeCode: string; count: number }[]>>(`${API_BASE}/store-counts`, data)
+  return unwrapApiData(response) ?? []
+}
+
 export async function getInvoice(invoiceGuid: string): Promise<LocalSupplierInvoiceDetailDto> {
   const response = await request.get<ApiResponse<LocalSupplierInvoiceDetailDto>>(`${API_BASE}/${invoiceGuid}`)
   return unwrapApiData(response)

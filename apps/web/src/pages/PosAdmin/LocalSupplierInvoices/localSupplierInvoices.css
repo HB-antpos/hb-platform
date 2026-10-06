@@ -153,7 +153,7 @@
 /* 左侧分店栏：全部分店常显，与右侧工具栏、表格、分页组成左右两栏 */
 .lsi-store-rail {
   display: flex;
-  flex: 0 0 200px;
+  flex: 0 0 212px;
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid #eef1f5;
@@ -216,6 +216,23 @@
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* 单数右对齐、等宽数字；0 单淡化，选中项跟随主色 */
+.lsi-store-rail-count {
+  flex: none;
+  margin-left: 8px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-store-rail-count.is-zero {
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.lsi-store-rail-item.is-active .lsi-store-rail-count {
+  color: #1677ff;
 }
 
 .lsi-list-main {

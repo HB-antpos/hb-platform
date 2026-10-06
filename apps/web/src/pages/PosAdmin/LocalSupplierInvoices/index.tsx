@@ -41,6 +41,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType, TableRef } from 'antd/es/table'
+import dayjs from 'dayjs'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import {
   useCallback,
@@ -63,6 +64,7 @@ import {
   createInvoice,
   deleteInvoice,
   getInvoiceGrid,
+  getInvoiceStoreCounts,
 } from '../../../services/localSupplierInvoiceService'
 import { getActiveLocalSuppliers } from '../../../services/localSupplierService'
 import { getActiveStores } from '../../../services/storeService'
@@ -99,6 +101,14 @@ import {
   type LocalSupplierInvoiceColumnKey,
 } from './columnOrder'
 import { formatLocalSupplierInvoiceAuditTime, formatLocalSupplierInvoiceAuditTimeCompact } from './auditTime'
+import {
+  DEFAULT_INVOICE_LIST_DATE_FIELD,
+  buildInvoiceListDateFilter,
+  getDefaultInvoiceListDateRange,
+  isDefaultInvoiceListDateFilter,
+  type InvoiceListDateField,
+  type InvoiceListDateRange,
+} from './listDateFilter'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import invoiceMessagesEn from './invoiceMessages.en.json'
 import invoiceMessagesZh from './invoiceMessages.zh.json'
@@ -411,10 +421,15 @@ export default function LocalSupplierInvoicesPage() {
   const [invoiceNo, setInvoiceNo] = useState('')
   const [keyword, setKeyword] = useState('')
   const [productChecked, setProductChecked] = useState<boolean | undefined>(undefined)
+  // 日期区间：默认按创建日期看近 90 天；清空表示全部时间。
+  const [dateField, setDateField] = useState<InvoiceListDateField>(DEFAULT_INVOICE_LIST_DATE_FIELD)
+  const [dateRange, setDateRange] = useState<InvoiceListDateRange | null>(() => getDefaultInvoiceListDateRange())
   // 随货单号与商品关键词共用一个搜索框，用前缀下拉切换搜索范围。
   const [searchScope, setSearchScope] = useState<SearchScope>('invoiceNo')
   // 状态分段上的数量：只随分店/供应商/搜索条件变化重新统计，翻页和排序不重复请求。
   const [segmentCounts, setSegmentCounts] = useState<{ all: number; pending: number } | null>(null)
+  // 左侧分店栏的单数：沿用除分店以外的全部条件，同样只在这些条件变化时重新统计。
+  const [storeCounts, setStoreCounts] = useState<Record<string, number> | null>(null)
 
   // 下拉选项
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
@@ -440,6 +455,8 @@ export default function LocalSupplierInvoicesPage() {
   const listRequestGuardRef = useRef(createLatestRequestGuard())
   const countRequestGuardRef = useRef(createLatestRequestGuard())
   const lastCountFilterKeyRef = useRef<string | null>(null)
+  const storeCountRequestGuardRef = useRef(createLatestRequestGuard())
+  const lastStoreCountFilterKeyRef = useRef<string | null>(null)
   const mountedRef = useRef(false)
   const latestLoadDataRef = useRef<() => Promise<void>>(async () => undefined)
 
@@ -496,9 +513,12 @@ export default function LocalSupplierInvoicesPage() {
       listRequestGuardRef.current.invalidate()
       countRequestGuardRef.current.invalidate()
       lastCountFilterKeyRef.current = null
+      storeCountRequestGuardRef.current.invalidate()
+      lastStoreCountFilterKeyRef.current = null
       setData([])
       setTotal(0)
       setSegmentCounts(null)
+      setStoreCounts(null)
       setLoading(false)
       return
     }
@@ -518,6 +538,10 @@ export default function LocalSupplierInvoicesPage() {
     }
     if (keyword) {
       baseFilterModel.productKeyword = { filterType: 'text', filter: keyword }
+    }
+    const dateFilter = buildInvoiceListDateFilter(dateField, dateRange)
+    if (dateFilter) {
+      baseFilterModel[dateFilter.key] = dateFilter.value
     }
     const filterModel: Record<string, unknown> = { ...baseFilterModel }
     if (productChecked !== undefined) {
@@ -560,6 +584,37 @@ export default function LocalSupplierInvoicesPage() {
       )
     }
 
+    // 分店栏单数：沿用除分店以外的全部条件（含是否检测、日期），分店只保留可管理范围。
+    const storeCountFilterModel: Record<string, unknown> = { ...filterModel }
+    const scopeOnlyStoreFilter = buildScopedStoreCodeFilter(undefined, managedStoreCodes)
+    if (scopeOnlyStoreFilter) {
+      storeCountFilterModel.storeCode = scopeOnlyStoreFilter
+    } else {
+      delete storeCountFilterModel.storeCode
+    }
+    const storeCountFilterKey = JSON.stringify(storeCountFilterModel)
+    if (storeCountFilterKey !== lastStoreCountFilterKeyRef.current) {
+      lastStoreCountFilterKeyRef.current = storeCountFilterKey
+      void runLatestGuardedRequest(
+        storeCountRequestGuardRef.current,
+        () => getInvoiceStoreCounts({
+          startRow: 0,
+          endRow: 1,
+          pageSize: 1,
+          filterModel: Object.keys(storeCountFilterModel).length ? storeCountFilterModel : undefined,
+        }),
+        {
+          onSuccess: (rows) => {
+            setStoreCounts(Object.fromEntries(rows.map((row) => [row.storeCode, row.count])))
+          },
+          onError: () => {
+            lastStoreCountFilterKeyRef.current = null
+            setStoreCounts(null)
+          },
+        },
+      )
+    }
+
     await runLatestGuardedRequest(
       listRequestGuardRef.current,
       () =>
@@ -589,6 +644,7 @@ export default function LocalSupplierInvoicesPage() {
       mountedRef.current = false
       listRequestGuardRef.current.invalidate()
       countRequestGuardRef.current.invalidate()
+      storeCountRequestGuardRef.current.invalidate()
     }
   }, [])
 
@@ -748,6 +804,17 @@ export default function LocalSupplierInvoicesPage() {
     requestFirstPage(true)
   }
 
+  const handleDateFieldChange = (field: InvoiceListDateField) => {
+    setDateField(field)
+    // 未选日期（全部时间）时切换日期类型不改变结果，不必重查。
+    if (dateRange) requestFirstPage(true)
+  }
+
+  const handleDateRangeChange = (range: InvoiceListDateRange | null) => {
+    setDateRange(range)
+    requestFirstPage(true)
+  }
+
   const handleReset = () => {
     const reloadFromDependencies = page !== 1 || sortBy !== 'createdAt' || sortOrder !== 'descend'
     setStoreCode(undefined)
@@ -755,6 +822,8 @@ export default function LocalSupplierInvoicesPage() {
     setInvoiceNo('')
     setKeyword('')
     setProductChecked(undefined)
+    setDateField(DEFAULT_INVOICE_LIST_DATE_FIELD)
+    setDateRange(getDefaultInvoiceListDateRange())
     setSortBy('createdAt')
     setSortOrder('descend')
     requestFirstPage(true, reloadFromDependencies)
@@ -764,8 +833,9 @@ export default function LocalSupplierInvoicesPage() {
     try {
       await deleteInvoice(invoiceGuid)
       message.success(t('message.deleteSuccess'))
-      // 删除会改变分段计数，强制下次加载重新统计。
+      // 删除会改变分段与分店计数，强制下次加载重新统计。
       lastCountFilterKeyRef.current = null
+      lastStoreCountFilterKeyRef.current = null
       void latestLoadDataRef.current()
     } catch {
       message.error(t('message.deleteFailed'))
@@ -814,6 +884,7 @@ export default function LocalSupplierInvoicesPage() {
       setCreateVisible(false)
       createForm.resetFields()
       lastCountFilterKeyRef.current = null
+      lastStoreCountFilterKeyRef.current = null
       navigate(`/pos-admin/local-supplier-invoices/${newGuid}`)
     } catch {
       message.error(t('message.createFailed'))
@@ -825,6 +896,7 @@ export default function LocalSupplierInvoicesPage() {
   const handleImportedInvoiceCreated = async (invoiceGuid: string) => {
     setImportVisible(false)
     lastCountFilterKeyRef.current = null
+    lastStoreCountFilterKeyRef.current = null
     await latestLoadDataRef.current()
     navigate(`/pos-admin/local-supplier-invoices/${invoiceGuid}`)
   }
@@ -1189,7 +1261,19 @@ export default function LocalSupplierInvoicesPage() {
 
   // 桌面端把可选分店全部列在表格左侧，点选即筛选；只有一个分店（如单店店长）或手机端时退回工具栏下拉。
   const showStoreRail = !isMobile && storeOptions.length > 1
-  const hasActiveFilters = Boolean(storeCode || supplierCode || invoiceNo || keyword || productChecked !== undefined)
+  // 默认的「创建日期 近 90 天」不算额外筛选，改过日期才显示「清空筛选」。
+  const hasActiveFilters = Boolean(
+    storeCode || supplierCode || invoiceNo || keyword || productChecked !== undefined
+    || !isDefaultInvoiceListDateFilter(dateField, dateRange),
+  )
+  const storeCountTotal = storeCounts ? Object.values(storeCounts).reduce((sum, count) => sum + count, 0) : undefined
+  const today = dayjs().startOf('day')
+  const datePresets: { label: string; value: InvoiceListDateRange }[] = [
+    { label: t('posAdmin.invoiceList.datePresetLast7Days'), value: [today.subtract(6, 'day'), today] },
+    { label: t('posAdmin.invoiceList.datePresetLast30Days'), value: [today.subtract(29, 'day'), today] },
+    { label: t('posAdmin.invoiceList.datePresetLast90Days'), value: getDefaultInvoiceListDateRange(today) },
+    { label: t('posAdmin.invoiceList.datePresetThisYear'), value: [today.startOf('year'), today] },
+  ]
   const searchValue = searchScope === 'invoiceNo' ? invoiceNo : keyword
   const pendingCount = segmentCounts?.pending
   const checkedCount = segmentCounts ? Math.max(0, segmentCounts.all - segmentCounts.pending) : undefined
@@ -1303,6 +1387,8 @@ export default function LocalSupplierInvoicesPage() {
             <div className="lsi-store-rail-list">
               {[{ value: undefined, label: t('posAdmin.invoiceList.allOption') }, ...storeOptions].map((store) => {
                 const selected = (store.value ?? undefined) === storeCode
+                // 计数还没回来时不显示数字；回来后没有单的分店显示 0。
+                const count = store.value ? (storeCounts ? storeCounts[store.value] ?? 0 : undefined) : storeCountTotal
                 return (
                   <button
                     key={store.value ?? '__all__'}
@@ -1316,6 +1402,11 @@ export default function LocalSupplierInvoicesPage() {
                   >
                     {store.value ? <span className="lsi-code">{store.value}</span> : null}
                     <span className="lsi-store-rail-name">{store.label}</span>
+                    {typeof count === 'number' && (
+                      <span className={count > 0 ? 'lsi-store-rail-count' : 'lsi-store-rail-count is-zero'}>
+                        {formatCount(count)}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -1340,6 +1431,28 @@ export default function LocalSupplierInvoicesPage() {
                 ]}
               />
               <span className="lsi-list-toolbar-divider" />
+              {/* 日期类型并排单选（默认创建日期），区间默认近 90 天；清空即全部时间。 */}
+              <Space size={6}>
+                <Radio.Group
+                  className="lsi-search-scope"
+                  optionType="button"
+                  value={dateField}
+                  onChange={(e) => handleDateFieldChange(e.target.value as InvoiceListDateField)}
+                  options={[
+                    { value: 'createdAt', label: t('posAdmin.invoiceList.dateFieldCreatedAt') },
+                    { value: 'orderDate', label: t('posAdmin.invoiceList.dateFieldOrderDate') },
+                  ]}
+                />
+                <DatePicker.RangePicker
+                  allowClear
+                  value={dateRange}
+                  presets={datePresets}
+                  style={{ width: 236 }}
+                  onChange={(values) => handleDateRangeChange(
+                    values?.[0] && values?.[1] ? [values[0], values[1]] : null,
+                  )}
+                />
+              </Space>
               {!showStoreRail && (
                 <Select
                   allowClear
@@ -1473,7 +1586,7 @@ export default function LocalSupplierInvoicesPage() {
               }}
               showSizeChanger
               responsive={false}
-              pageSizeOptions={[10, 20, 50, 100, 200]}
+              pageSizeOptions={[20, 50, 100]}
             />
           </div>
         </div>

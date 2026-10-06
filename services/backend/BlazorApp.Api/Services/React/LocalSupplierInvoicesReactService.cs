@@ -53,6 +53,7 @@ namespace BlazorApp.Api.Services.React
 
         public Task<GridResponseDto<LocalSupplierInvoiceListDto>> GetGridDataAsync(GridRequestDto request) => _queries.GetGridDataAsync(request);
         public Task<GridResponseDto<LocalSupplierInvoiceListDto>> GetGridDataAsync(GridRequestDto request, List<string>? allowedStoreCodes) => _queries.GetGridDataAsync(request, allowedStoreCodes);
+        public Task<ApiResponse<List<LocalSupplierInvoiceStoreCountDto>>> GetStoreCountsAsync(GridRequestDto request, List<string>? allowedStoreCodes) => _queries.GetStoreCountsAsync(request, allowedStoreCodes);
         public Task<ApiResponse<LocalSupplierInvoiceFilterOptionsDto>> GetFilterOptionsAsync(List<string>? allowedStoreCodes, string? storeCode) => _queries.GetFilterOptionsAsync(allowedStoreCodes, storeCode);
         public Task<ApiResponse<LocalSupplierInvoiceDetailDto>> GetInvoiceAsync(string invoiceGuid) => _queries.GetInvoiceAsync(invoiceGuid);
         public Task<ApiResponse<List<LocalSupplierInvoiceItemDto>>> GetDetailsAsync(string invoiceGuid) => _queries.GetDetailsAsync(invoiceGuid);

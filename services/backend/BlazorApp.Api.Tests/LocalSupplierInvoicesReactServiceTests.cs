@@ -405,6 +405,106 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetGridDataAsync_创建时间按带时区的时刻区间筛选且结束为开区间()
+        {
+            await SeedStoreAndSupplierAsync();
+            // CreatedAt 存 UTC；悉尼（+10）的 07-09 至 07-10 两天 = UTC [07-08 14:00, 07-10 14:00)。
+            var createdAtByInvoice = new Dictionary<string, DateTime>
+            {
+                ["INV-BEFORE"] = new DateTime(2026, 7, 8, 13, 59, 59, DateTimeKind.Utc),
+                ["INV-START"] = new DateTime(2026, 7, 8, 14, 0, 0, DateTimeKind.Utc),
+                ["INV-END"] = new DateTime(2026, 7, 10, 13, 59, 59, DateTimeKind.Utc),
+                ["INV-AFTER"] = new DateTime(2026, 7, 10, 14, 0, 0, DateTimeKind.Utc),
+            };
+            foreach (var (invoiceNo, createdAt) in createdAtByInvoice)
+            {
+                await _db.Insertable(new StoreLocalSupplierInvoice
+                {
+                    InvoiceGUID = $"guid-{invoiceNo}",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    InvoiceNo = invoiceNo,
+                    OrderDate = new DateTime(2026, 7, 1),
+                    CreatedAt = createdAt,
+                    IsDeleted = false,
+                }).ExecuteCommandAsync();
+            }
+
+            var result = await CreateService().GetGridDataAsync(new GridRequestDto
+            {
+                StartRow = 0,
+                PageSize = 20,
+                FilterModel = new Dictionary<string, FilterModelDto>
+                {
+                    ["createdAt"] = new()
+                    {
+                        FilterType = "date",
+                        Type = "inRange",
+                        Filter = "2026-07-09T00:00:00+10:00",
+                        FilterTo = "2026-07-11T00:00:00+10:00",
+                    },
+                },
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(
+                new[] { "INV-END", "INV-START" },
+                result.Items?.Select(item => item.InvoiceNo).OrderBy(no => no, StringComparer.Ordinal).ToArray()
+            );
+        }
+
+        [Fact]
+        public async Task GetStoreCountsAsync_按分店分组并沿用其他筛选与分店范围()
+        {
+            await SeedStoreAndSupplierAsync();
+            var invoices = new[]
+            {
+                ("S01", "SUP01", false),
+                ("S01", "SUP01", false),
+                ("S01", "SUP01", true),
+                ("S02", "SUP01", false),
+                ("S02", "SUP02", false),
+                ("S03", "SUP01", false),
+            };
+            var index = 0;
+            foreach (var (storeCode, supplierCode, isDeleted) in invoices)
+            {
+                index++;
+                await _db.Insertable(new StoreLocalSupplierInvoice
+                {
+                    InvoiceGUID = $"count-{index}",
+                    StoreCode = storeCode,
+                    SupplierCode = supplierCode,
+                    InvoiceNo = $"INV-COUNT-{index}",
+                    OrderDate = new DateTime(2026, 3, index),
+                    CreatedAt = DateTime.UtcNow,
+                    IsDeleted = isDeleted,
+                }).ExecuteCommandAsync();
+            }
+            var request = new GridRequestDto
+            {
+                FilterModel = new Dictionary<string, FilterModelDto>
+                {
+                    ["supplierCode"] = new() { FilterType = "text", Type = "equals", Filter = "SUP01" },
+                },
+            };
+
+            var all = await CreateService().GetStoreCountsAsync(request, null);
+            var scoped = await CreateService().GetStoreCountsAsync(request, new List<string> { "S01", "S02" });
+
+            Assert.True(all.Success, all.Message);
+            Assert.Equal(
+                new[] { ("S01", 2), ("S02", 1), ("S03", 1) },
+                all.Data!.OrderBy(row => row.StoreCode).Select(row => (row.StoreCode, row.Count)).ToArray()
+            );
+            Assert.True(scoped.Success, scoped.Message);
+            Assert.Equal(
+                new[] { ("S01", 2), ("S02", 1) },
+                scoped.Data!.OrderBy(row => row.StoreCode).Select(row => (row.StoreCode, row.Count)).ToArray()
+            );
+        }
+
+        [Fact]
         public async Task GetGridDataAsync_统计当前页涨跌价商品数量()
         {
             await SeedStoreAndSupplierAsync();
