@@ -181,13 +181,12 @@ export function isLocalSupplierInvoiceColumnOrderCustomized(
 
 export type LocalSupplierInvoiceColumnKeyList = readonly LocalSupplierInvoiceColumnKey[]
 
-/** 默认隐藏的列：信息量低（生产几乎恒定或很少填写；近 60 天新单流程状态全是草稿），在「列设置」里可以打开。 */
+/** 默认隐藏的列：信息量低（生产几乎恒定或很少填写；近 60 天新单流程状态全是草稿），在「列设置」里可以打开。备注默认显示（常写货柜/船次号）。 */
 export const DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS: LocalSupplierInvoiceColumnKeyList = [
   'flowStatus',
   'inboundDate',
   'inboundStatus',
   'receivedTotalAmount',
-  'remarks',
   'updatedAt',
 ]
 

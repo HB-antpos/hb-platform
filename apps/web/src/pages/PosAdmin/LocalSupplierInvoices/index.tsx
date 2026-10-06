@@ -292,25 +292,28 @@ const INBOUND_STATUS_MAP: Record<number, { labelKey: string; className: string }
 }
 
 // 列宽：供应商列不设宽度，屏幕更宽时多出的空间只给它，其余列保持紧凑。
-// 列宽按 1440 宽屏幕、侧栏展开时正好放下默认列来分配（中等密度表格左右内边距各 8px）。
-const COLUMN_WIDTHS: Partial<Record<LocalSupplierInvoiceColumnKey | 'action', number>> = {
-  invoiceNo: 130,
-  storeCode: 134,
-  orderDate: 100,
+// 列宽（中等密度表格左右内边距各 8px）。分店/供应商定宽、名称最多折两行显示完整；
+// 备注是唯一的弹性列：屏幕越宽显示越完整，其余列在任何屏幕上都保持原宽，窄列不会被撑宽。
+const COLUMN_WIDTHS: Partial<Record<LocalSupplierInvoiceColumnKey | 'index' | 'action', number>> = {
+  index: 48,
+  invoiceNo: 120,
+  storeCode: 160,
+  supplierCode: 160,
+  orderDate: 96,
   detailCount: 64,
   priceChange: 96,
   totalAmount: 100,
-  isProductChecked: 148,
+  isProductChecked: 140,
   flowStatus: 88,
-  createdAt: 150,
+  createdAt: 160,
   inboundDate: 104,
   inboundStatus: 100,
   receivedTotalAmount: 116,
-  remarks: 180,
-  updatedAt: 150,
-  action: 88,
+  updatedAt: 160,
+  action: 86,
 }
-const FLEX_COLUMN_MIN_WIDTH = 104
+/** 备注列最小宽度；隐藏备注时由一个空白占位列吸收多余宽度。 */
+const REMARKS_MIN_WIDTH = 140
 
 function formatDate(value?: string) {
   if (!value) return '--'
@@ -392,7 +395,8 @@ export default function LocalSupplierInvoicesPage() {
   const [data, setData] = useState<LocalSupplierInvoiceListDto[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  // 每页默认 50 条：一天约 16–29 张新单，一页能看完近两天的单据。
+  const [pageSize, setPageSize] = useState(50)
   const [sortBy, setSortBy] = useState('createdAt')
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend')
   const [columnOrder, setColumnOrder] = useState<LocalSupplierInvoiceColumnKey[]>(readStoredColumnOrder)
@@ -847,6 +851,15 @@ export default function LocalSupplierInvoicesPage() {
   // 「从HQ同步」（HQ 进货单 → HBweb）已于 2026-09-29 停用；编辑页「更新HQ商品」等写 HQ 的操作不受影响。
   const baseColumns: ColumnsType<LocalSupplierInvoiceListDto> = [
     {
+      // 序号按全局位置编号（翻页后接着上一页），固定在最左，不参与拖拽和列显隐。
+      title: t('column.index'),
+      key: 'index',
+      width: COLUMN_WIDTHS.index,
+      align: 'center',
+      className: 'lsi-num',
+      render: (_, __, index) => <span className="lsi-muted">{(page - 1) * pageSize + index + 1}</span>,
+    },
+    {
       title: t('posAdmin.invoices.invoiceNo'),
       dataIndex: 'invoiceNo',
       key: 'invoiceNo',
@@ -888,6 +901,7 @@ export default function LocalSupplierInvoicesPage() {
       dataIndex: 'storeCode',
       key: 'storeCode',
       width: COLUMN_WIDTHS.storeCode,
+      className: 'lsi-cell-wrap',
       sorter: true,
       sortOrder: sortBy === 'storeCode' ? sortOrder : undefined,
       render: (_: string, record) => renderEntity(record.storeCode, record.storeName),
@@ -896,6 +910,8 @@ export default function LocalSupplierInvoicesPage() {
       title: t('column.supplier'),
       dataIndex: 'supplierCode',
       key: 'supplierCode',
+      width: COLUMN_WIDTHS.supplierCode,
+      className: 'lsi-cell-wrap',
       sorter: true,
       sortOrder: sortBy === 'supplierCode' ? sortOrder : undefined,
       render: (_: string, record) => renderEntity(record.supplierCode, record.supplierName),
@@ -1049,9 +1065,8 @@ export default function LocalSupplierInvoicesPage() {
       title: t('column.remarks'),
       dataIndex: 'remarks',
       key: 'remarks',
-      width: COLUMN_WIDTHS.remarks,
-      ellipsis: true,
-      render: (v: string) => v || '--',
+      ellipsis: { showTitle: true },
+      render: (v: string) => v || <span className="lsi-muted">--</span>,
     },
     {
       title: t('posAdmin.invoiceList.columnUpdated'),
@@ -1137,6 +1152,7 @@ export default function LocalSupplierInvoicesPage() {
   const visibleColumnOrder = columnOrder.filter((key) => !hiddenColumnSet.has(key))
   const columnMap = new Map(baseColumns.map((column) => [String(column.key), column]))
   const columns = [
+    columnMap.get('index'),
     ...visibleColumnOrder.map((key) => {
       const column = columnMap.get(key)
       if (!column) return undefined
@@ -1151,13 +1167,15 @@ export default function LocalSupplierInvoicesPage() {
         } as DraggableHeaderCellProps),
       }
     }),
+    // 备注被隐藏时，用一个不显示内容的占位列吸收多余宽度，避免其它列被按比例撑宽。
+    hiddenColumnSet.has('remarks') ? { key: 'spacer', title: '', render: () => null } : undefined,
     columnMap.get('action'),
   ].filter(
     (column): column is ColumnsType<LocalSupplierInvoiceListDto>[number] => Boolean(column),
   )
-  // 表格最小宽度 = 定宽列之和 + 弹性列（供应商）最小宽度；更宽的屏幕把多余空间留给弹性列。
+  // 表格最小宽度 = 定宽列之和 + 备注最小宽度；更宽的屏幕把多余空间留给备注（或隐藏备注时的占位列）。
   const tableScrollX = columns.reduce(
-    (sum, column) => sum + (typeof column.width === 'number' ? column.width : FLEX_COLUMN_MIN_WIDTH),
+    (sum, column) => sum + (typeof column.width === 'number' ? column.width : column.key === 'remarks' ? REMARKS_MIN_WIDTH : 0),
     0,
   )
 

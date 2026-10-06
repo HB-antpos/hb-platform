@@ -37,6 +37,20 @@
   text-overflow: ellipsis;
 }
 
+/* 分店、供应商名称最多折两行，长名称也能显示完整 */
+.lsi-list-card .ant-table-tbody > tr > td.lsi-cell-wrap {
+  white-space: normal;
+}
+
+.lsi-cell-wrap .lsi-entity-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 18px;
+}
+
 .lsi-pill {
   display: inline-flex;
   align-items: center;

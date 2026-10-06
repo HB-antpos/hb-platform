@@ -129,8 +129,8 @@ assertEqual(
 
 assertDeepEqual(
   parseLocalSupplierInvoiceHiddenColumns(null),
-  ['flowStatus', 'inboundDate', 'inboundStatus', 'receivedTotalAmount', 'remarks', 'updatedAt'],
-  '首次打开应默认隐藏流程状态、入库日期、入库状态、已收总金额、备注和最后修改',
+  ['flowStatus', 'inboundDate', 'inboundStatus', 'receivedTotalAmount', 'updatedAt'],
+  '首次打开应默认隐藏流程状态、入库日期、入库状态、已收总金额和最后修改，备注默认显示',
 )
 assertDeepEqual(
   DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS,
@@ -149,8 +149,8 @@ assertDeepEqual(
 )
 assertDeepEqual(
   toggleLocalSupplierInvoiceHiddenColumn(DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS, 'remarks'),
-  ['flowStatus', 'inboundDate', 'inboundStatus', 'receivedTotalAmount', 'updatedAt'],
-  '勾选已隐藏的备注列应把它显示出来',
+  ['flowStatus', 'inboundDate', 'inboundStatus', 'receivedTotalAmount', 'remarks', 'updatedAt'],
+  '取消勾选备注列应把它隐藏',
 )
 assertDeepEqual(
   toggleLocalSupplierInvoiceHiddenColumn([], 'invoiceNo'),
@@ -166,7 +166,7 @@ assertEqual(
   '默认列序和默认隐藏列不应提示可恢复默认',
 )
 assertEqual(
-  isLocalSupplierInvoiceColumnLayoutCustomized(DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER, ['remarks']),
+  isLocalSupplierInvoiceColumnLayoutCustomized(DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER, ['remarks', 'updatedAt']),
   true,
   '改过列显隐后应提示可恢复默认',
 )
