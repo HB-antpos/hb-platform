@@ -40,6 +40,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
         public void AddSkipped(int count) => Result.Skipped += count;
 
+        /// <summary>无需再写入但应标记为已执行的行（如商品早已建好），计入跳过并参与「已执行」标记。</summary>
+        public void MarkAlreadyDone(IEnumerable<string> detailGuids)
+        {
+            var guids = detailGuids.ToList();
+            Result.Skipped += guids.Count;
+            SuccessfulDetailGuids.AddRange(guids);
+        }
+
         /// <summary>整单回滚后清零写入计数，只保留失败行数与原因，避免前端把已回滚的行显示为成功。</summary>
         public void MarkRolledBack(int failedCount, IEnumerable<string> errors)
         {

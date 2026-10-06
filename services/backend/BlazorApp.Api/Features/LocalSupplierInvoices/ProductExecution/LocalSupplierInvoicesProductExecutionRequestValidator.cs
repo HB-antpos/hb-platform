@@ -58,7 +58,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
         public async Task<List<string>> ValidateLockedDetailsAsync(
             ProductExecutionSourceData data,
-            IReadOnlyDictionary<string, int> productTypes
+            IReadOnlyDictionary<string, int> productTypes,
+            IReadOnlySet<string>? alreadyCreatedDetailGuids = null
         )
         {
             var errors = new List<string>();
@@ -86,6 +87,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     case DetailAction.WaitForOperation:
                         break;
                     case DetailAction.CreateProduct:
+                        // 商品已建好的行视为已执行（写入时跳过），不再按「新建」校验货号条码是否已存在。
+                        if (alreadyCreatedDetailGuids?.Contains(detail.DetailGUID) == true) break;
                         await ValidateCreateProductAsync(detail, data.Header!, productTypes, createItemNumbers, createBarcodes, errors);
                         break;
                     case DetailAction.UpdatePurchasePrice:

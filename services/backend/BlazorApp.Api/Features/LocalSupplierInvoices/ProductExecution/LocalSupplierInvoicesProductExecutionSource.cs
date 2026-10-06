@@ -1,4 +1,5 @@
 using BlazorApp.Api.Data;
+using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
 using SqlSugar;
@@ -50,6 +51,49 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 && item.SetBarcode != null
                 && SqlFunc.ToUpper(item.SetBarcode) == normalizedBarcode
             );
+
+        /// <summary>
+        /// 「新建商品」行里商品其实已经建好的明细：已关联商品编码、该商品未删除、供应商与本单一致，且货号或条码对得上。
+        /// 历史上「更新HQ商品」会隐式新建并回填编码却不标记已执行（生产 10-07 统计 57 万行），这些行再次新建会撞「已存在」。
+        /// </summary>
+        public async Task<HashSet<string>> FindAlreadyCreatedProductDetailGuidsAsync(
+            IEnumerable<StoreLocalSupplierInvoiceDetails> details,
+            string? supplierCode
+        )
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var candidates = details
+                .Where(detail => detail.ActivityType == (int)DetailAction.CreateProduct
+                    && !string.IsNullOrWhiteSpace(detail.ProductCode))
+                .ToList();
+            if (candidates.Count == 0 || string.IsNullOrWhiteSpace(supplierCode))
+                return result;
+
+            var productCodes = candidates.Select(detail => detail.ProductCode!.Trim()).Distinct().ToList();
+            var products = await _context.Db.Queryable<Product>()
+                .Where(product => product.IsDeleted == false && productCodes.Contains(product.ProductCode))
+                .Select(product => new { product.ProductCode, product.LocalSupplierCode, product.ItemNumber, product.Barcode })
+                .ToListAsync();
+            var productsByCode = products
+                .Where(product => !string.IsNullOrWhiteSpace(product.ProductCode))
+                .GroupBy(product => product.ProductCode!.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            static bool SameText(string? left, string? right) =>
+                !string.IsNullOrWhiteSpace(left) && !string.IsNullOrWhiteSpace(right)
+                && string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+
+            foreach (var detail in candidates)
+            {
+                if (!productsByCode.TryGetValue(detail.ProductCode!.Trim(), out var product))
+                    continue;
+                if (!SameText(product.LocalSupplierCode, supplierCode))
+                    continue;
+                if (SameText(product.ItemNumber, detail.ItemNumber) || SameText(product.Barcode, detail.Barcode))
+                    result.Add(detail.DetailGUID);
+            }
+            return result;
+        }
 
         /// <summary>分店多码里该条码是否已挂在别的商品上；挂在同一商品上视为已添加，不算冲突。</summary>
         public async Task<bool> HasStoreMultiCodeBarcodeOnOtherProductAsync(string normalizedBarcode, string productCode) =>
