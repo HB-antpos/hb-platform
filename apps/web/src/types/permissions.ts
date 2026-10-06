@@ -57,6 +57,9 @@ export const P = {
     ManageOrders: 'Warehouse.ManageOrders',
     // 移动端「订单拣货」专用权限；后端按别名让 Warehouse.Manage / Warehouse.ManageOrders 持有者自动具备，反向不成立。
     Picking: 'Warehouse.Picking',
+    // 仓库员工打印/下载配货单时自动「开始配货」（已提交 → 配货中）的独立权限；
+    // 与订单编辑分开授权，且没有别名：持有 Warehouse.Manage 等宽泛权限不会自动具备，需显式授予。
+    StartPicking: 'Warehouse.StartPicking',
   },
   Container: {
     View: 'Container.View',

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
 import { useAuthStore } from '../../../store/auth'
+import { P } from '../../../types/permissions'
 import { getStores } from '../../../services/storeService'
 import { getStoreOrderDetail, startPickingStoreOrder } from '../../../services/storeOrderService'
 import { StoreOrderFlowStatus } from '../../../types/storeOrder'
@@ -15,7 +16,7 @@ import { useDynamicTabTitle } from '../../../hooks/useDynamicTabTitle'
 import { shouldSkipDetailAutoReload } from '../../../utils/detailLoadState'
 import { shouldShowStoreOrderDetailInitialLoading } from './detailLoadState'
 import { buildDocumentFileName, downloadElementPagesAsPdf, formatCurrency, formatPrintDate, printElementPagesAsPdf } from './printUtils'
-import { buildPickingListExcelData, buildPickingListPdfPages, buildPickingOrderBarcode, formatInnerPackCount, formatPickingOrderQuantity } from './pickingListLogic'
+import { buildPickingListExcelData, buildPickingListPdfPages, buildPickingOrderBarcode, formatInnerPackCount, formatPickingOrderQuantity, shouldStartPickingBeforePrint } from './pickingListLogic'
 import { formatStoreOrderVolume } from './volumeFormat'
 import { publishStoreOrderFlowStatusChanged } from './storeOrderFlowStatusSync'
 import './print.css'
@@ -47,6 +48,8 @@ export default function PickingListPage() {
     (access.hasRole('WarehouseStaff') || access.hasRole('仓库员工'))
   // 配货单自动开始配货属于写动作，跟随仓库订货管理权限，纯 WarehouseStaff 只能打印/下载。
   const canUseWarehouseManagerActions = access.canManageWarehouseOrders && !isWarehouseStaffOnly
+  // 纯仓库员工默认只能打印/下载；被显式授予「打印配货单开始配货」后，打印才会把订单推进到配货中。
+  const hasStartPickingPermission = access.hasPermission(P.Warehouse.StartPicking)
   // 打印页日期格式跟随当前语言，但只限定本次需求中的中英文区域设置。
   const printLocale = i18n.resolvedLanguage?.toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN'
 
@@ -197,8 +200,15 @@ export default function PickingListPage() {
       throw new Error(t('warehouse.pickingList.layoutNotReady'))
     }
 
-    // WarehouseStaff 可打印/下载配货单，但不能借打印动作触发订单状态流转。
-    if (canUseWarehouseManagerActions && order.flowStatus === StoreOrderFlowStatus.Submitted) {
+    // WarehouseStaff 可打印/下载配货单，但默认不能借打印动作触发订单状态流转；
+    // 只有被显式授予「打印配货单开始配货」权限时才会推进（后端同样按该权限放行）。
+    if (
+      shouldStartPickingBeforePrint({
+        flowStatus: order.flowStatus,
+        canUseWarehouseManagerActions,
+        hasStartPickingPermission,
+      })
+    ) {
       await startPickingStoreOrder(order.orderGUID)
       // 订单明细、订单列表是保活页面，切回时不会重新请求；这里通知它们把该订单改显示为「配货中」，
       // 否则打印后回到明细页仍会看到旧的「已提交」。无论当前打印页是否仍处于激活状态都要通知。

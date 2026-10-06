@@ -426,7 +426,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public void RolePermissionTemplates_WarehouseStaff_UseWarehouseProductAndLocationPermissionsOnly()
+        public void RolePermissionTemplates_WarehouseStaff_UseWarehouseProductLocationAndStartPickingPermissionsOnly()
         {
             var template = Assert.Single(
                 PermissionSeedData.RolePermissionTemplates,
@@ -437,6 +437,8 @@ namespace BlazorApp.Api.Tests
                 Permissions.Warehouse.Manage,
                 Permissions.Warehouse.ManageProducts,
                 Permissions.Warehouse.ManageLocations,
+                // 打印配货单时开始配货是独立权限，与订单编辑分开授权。
+                Permissions.Warehouse.StartPicking,
             };
 
             Assert.Equal(
