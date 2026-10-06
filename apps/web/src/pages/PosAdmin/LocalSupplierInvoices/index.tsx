@@ -32,6 +32,7 @@ import {
   Modal,
   Pagination,
   Popover,
+  Radio,
   Segmented,
   Select,
   Space,
@@ -53,6 +54,7 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { useAuthStore } from '../../../store/auth'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
@@ -384,6 +386,7 @@ export default function LocalSupplierInvoicesPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { active } = useKeepAliveContext()
+  const isMobile = useIsMobile()
   const { access, currentUser } = useAuthStore()
   const isAdmin = access.isAdmin
   // 有编辑权限的人进入明细工作台处理；只读用户（如店长）进入同一页面的只读视图。
@@ -738,6 +741,11 @@ export default function LocalSupplierInvoicesPage() {
 
   const handleSearch = () => {
     requestFirstPage()
+  }
+
+  const handleStoreChange = (code: string | undefined) => {
+    setStoreCode(code)
+    requestFirstPage(true)
   }
 
   const handleReset = () => {
@@ -1179,6 +1187,8 @@ export default function LocalSupplierInvoicesPage() {
     0,
   )
 
+  // 桌面端把可选分店全部列在表格左侧，点选即筛选；只有一个分店（如单店店长）或手机端时退回工具栏下拉。
+  const showStoreRail = !isMobile && storeOptions.length > 1
   const hasActiveFilters = Boolean(storeCode || supplierCode || invoiceNo || keyword || productChecked !== undefined)
   const searchValue = searchScope === 'invoiceNo' ? invoiceNo : keyword
   const pendingCount = segmentCounts?.pending
@@ -1284,159 +1294,188 @@ export default function LocalSupplierInvoicesPage() {
           height: 'calc(100vh - 252px)',
           minHeight: 420,
           display: 'flex',
-          flexDirection: 'column',
           overflow: 'hidden',
         }}
       >
-        <div ref={toolbarRef} className="lsi-list-toolbar">
-          <Segmented<ProductCheckedSegment>
-            aria-label={t('posAdmin.invoiceList.segmentAria')}
-            value={toProductCheckedSegment(productChecked)}
-            onChange={(value) => {
-              setProductChecked(fromProductCheckedSegment(value))
-              requestFirstPage(true)
-            }}
-            options={[
-              { value: 'all', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentAll'), segmentCounts?.all) },
-              { value: 'pending', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentPending'), pendingCount, true) },
-              { value: 'checked', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentChecked'), checkedCount) },
-            ]}
-          />
-          <span className="lsi-list-toolbar-divider" />
-          <Select
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            prefix={t('posAdmin.invoiceList.storeFilter')}
-            placeholder={t('posAdmin.invoiceList.allOption')}
-            style={{ width: 180 }}
-            value={storeCode}
-            onChange={(v) => {
-              setStoreCode(v)
-              requestFirstPage(true)
-            }}
-            options={storeOptions}
-          />
-          <Select
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            prefix={t('posAdmin.invoiceList.supplierFilter')}
-            placeholder={t('posAdmin.invoiceList.allOption')}
-            style={{ width: 200 }}
-            value={supplierCode}
-            onChange={(v) => {
-              setSupplierCode(v)
-              requestFirstPage(true)
-            }}
-            options={supplierOptions}
-          />
-          <Space.Compact>
-            <Select<SearchScope>
-              value={searchScope}
-              style={{ width: 104 }}
-              onChange={handleSearchScopeChange}
-              options={[
-                { value: 'invoiceNo', label: t('posAdmin.invoiceList.searchScopeInvoiceNo') },
-                { value: 'product', label: t('posAdmin.invoiceList.searchScopeProduct') },
-              ]}
-            />
-            <Input
-              allowClear
-              placeholder={searchScope === 'invoiceNo'
-                ? t('posAdmin.invoiceList.searchPlaceholderInvoiceNo')
-                : t('posAdmin.invoiceList.searchPlaceholderProduct')}
-              style={{ width: 200 }}
-              value={searchValue}
-              onChange={(e) => handleSearchTextChange(e.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Space.Compact>
-          {hasActiveFilters && (
-            <Button type="link" onClick={handleReset} style={{ paddingInline: 4 }}>
-              {t('posAdmin.invoiceList.clearFilters')}
-            </Button>
-          )}
-          <span className="lsi-list-toolbar-spacer" />
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            title={t('posAdmin.invoiceList.columnSettingsTitle')}
-            content={columnSettingsContent}
-          >
-            <Tooltip title={t('posAdmin.invoiceList.columnSettings')}>
-              <Button type="text" icon={<SettingOutlined />} aria-label={t('posAdmin.invoiceList.columnSettings')} />
-            </Tooltip>
-          </Popover>
-        </div>
-
-        <div ref={tableRegionRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', borderTop: '1px solid #eef1f5' }}>
-          <DndContext
-            sensors={columnDragSensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleColumnDragEnd}
-            accessibility={dndAccessibility}
-          >
-            <SortableContext items={visibleColumnOrder} strategy={horizontalListSortingStrategy}>
-              <MeasuredTable metricId="pos-admin.local-supplier-invoices.table-1"
-                ref={invoiceTableRef}
-                rowKey="invoiceGUID"
-                loading={loading}
-                dataSource={data}
-                components={{ header: { cell: DraggableHeaderCell } }}
-                columns={columns}
-                pagination={false}
-                size="middle"
-                scroll={{ x: tableScrollX, y: tableScrollY }}
-                onScroll={handleInvoiceTableScroll}
-                onChange={(_pagination, _filters, sorter) => {
-                  const s = Array.isArray(sorter) ? sorter[0] : sorter
-                  const field = s?.field || s?.column?.dataIndex
-                  const order = s?.order as 'ascend' | 'descend' | undefined
-                  if (field && order) {
-                    setSortBy(String(field))
-                    setSortOrder(order)
-                  } else {
-                    setSortBy('createdAt')
-                    setSortOrder('descend')
-                  }
+        {showStoreRail && (
+          <nav className="lsi-store-rail" aria-label={t('posAdmin.invoiceList.storeFilter')}>
+            <div className="lsi-store-rail-title">{t('posAdmin.invoiceList.storeFilter')}</div>
+            <div className="lsi-store-rail-list">
+              {[{ value: undefined, label: t('posAdmin.invoiceList.allOption') }, ...storeOptions].map((store) => {
+                const selected = (store.value ?? undefined) === storeCode
+                return (
+                  <button
+                    key={store.value ?? '__all__'}
+                    type="button"
+                    className={selected ? 'lsi-store-rail-item is-active' : 'lsi-store-rail-item'}
+                    aria-pressed={selected}
+                    title={store.value ? `${store.value} - ${store.label}` : undefined}
+                    onClick={() => {
+                      if (!selected) handleStoreChange(store.value)
+                    }}
+                  >
+                    {store.value ? <span className="lsi-code">{store.value}</span> : null}
+                    <span className="lsi-store-rail-name">{store.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </nav>
+        )}
+        <div className="lsi-list-main">
+          <div ref={toolbarRef} className="lsi-list-toolbar">
+            {/* 筛选项在自己的容器里换行，列设置按钮固定在右上角，不会被挤到下一行。 */}
+            <div className="lsi-list-toolbar-filters">
+              <Segmented<ProductCheckedSegment>
+                aria-label={t('posAdmin.invoiceList.segmentAria')}
+                value={toProductCheckedSegment(productChecked)}
+                onChange={(value) => {
+                  setProductChecked(fromProductCheckedSegment(value))
+                  requestFirstPage(true)
                 }}
+                options={[
+                  { value: 'all', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentAll'), segmentCounts?.all) },
+                  { value: 'pending', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentPending'), pendingCount, true) },
+                  { value: 'checked', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentChecked'), checkedCount) },
+                ]}
               />
-            </SortableContext>
-          </DndContext>
-        </div>
+              <span className="lsi-list-toolbar-divider" />
+              {!showStoreRail && (
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  prefix={t('posAdmin.invoiceList.storeFilter')}
+                  placeholder={t('posAdmin.invoiceList.allOption')}
+                  style={{ width: 180 }}
+                  value={storeCode}
+                  onChange={handleStoreChange}
+                  options={storeOptions}
+                />
+              )}
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                prefix={t('posAdmin.invoiceList.supplierFilter')}
+                placeholder={t('posAdmin.invoiceList.allOption')}
+                style={{ width: 176 }}
+                value={supplierCode}
+                onChange={(v) => {
+                  setSupplierCode(v)
+                  requestFirstPage(true)
+                }}
+                options={supplierOptions}
+              />
+              {/* 两种查询类型并排常显，单选切换；切换时把已输入的文字带到新类型并重新查询。 */}
+              <Space size={6}>
+                <Radio.Group
+                  className="lsi-search-scope"
+                  optionType="button"
+                  value={searchScope}
+                  onChange={(e) => handleSearchScopeChange(e.target.value as SearchScope)}
+                  options={[
+                    { value: 'invoiceNo', label: t('posAdmin.invoiceList.searchScopeInvoiceNo') },
+                    { value: 'product', label: t('posAdmin.invoiceList.searchScopeProduct') },
+                  ]}
+                />
+                <Input
+                  allowClear
+                  placeholder={searchScope === 'invoiceNo'
+                    ? t('posAdmin.invoiceList.searchPlaceholderInvoiceNo')
+                    : t('posAdmin.invoiceList.searchPlaceholderProduct')}
+                  style={{ width: 200 }}
+                  value={searchValue}
+                  onChange={(e) => handleSearchTextChange(e.target.value)}
+                  onPressEnter={handleSearch}
+                />
+              </Space>
+              {hasActiveFilters && (
+                <Button type="link" onClick={handleReset} style={{ paddingInline: 4 }}>
+                  {t('posAdmin.invoiceList.clearFilters')}
+                </Button>
+              )}
+            </div>
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              title={t('posAdmin.invoiceList.columnSettingsTitle')}
+              content={columnSettingsContent}
+            >
+              <Tooltip title={t('posAdmin.invoiceList.columnSettings')}>
+                <Button type="text" icon={<SettingOutlined />} aria-label={t('posAdmin.invoiceList.columnSettings')} />
+              </Tooltip>
+            </Popover>
+          </div>
 
-        <div
-          ref={pagerRef}
-          style={{
-            padding: '8px 16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-            width: '100%',
-            background: '#fff',
-            borderTop: '1px solid #eef1f5',
-            position: 'relative',
-            zIndex: 3,
-            flexShrink: 0,
-          }}
-        >
-          <Typography.Text type="secondary" className="lsi-num">
-            {t('posAdmin.invoiceList.totalCount', { count: formatCount(total) })}
-          </Typography.Text>
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            onChange={(p, ps) => {
-              setPage(p)
-              setPageSize(ps)
+          <div ref={tableRegionRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', borderTop: '1px solid #eef1f5' }}>
+            <DndContext
+              sensors={columnDragSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleColumnDragEnd}
+              accessibility={dndAccessibility}
+            >
+              <SortableContext items={visibleColumnOrder} strategy={horizontalListSortingStrategy}>
+                <MeasuredTable metricId="pos-admin.local-supplier-invoices.table-1"
+                  ref={invoiceTableRef}
+                  rowKey="invoiceGUID"
+                  loading={loading}
+                  dataSource={data}
+                  components={{ header: { cell: DraggableHeaderCell } }}
+                  columns={columns}
+                  pagination={false}
+                  size="middle"
+                  scroll={{ x: tableScrollX, y: tableScrollY }}
+                  onScroll={handleInvoiceTableScroll}
+                  onChange={(_pagination, _filters, sorter) => {
+                    const s = Array.isArray(sorter) ? sorter[0] : sorter
+                    const field = s?.field || s?.column?.dataIndex
+                    const order = s?.order as 'ascend' | 'descend' | undefined
+                    if (field && order) {
+                      setSortBy(String(field))
+                      setSortOrder(order)
+                    } else {
+                      setSortBy('createdAt')
+                      setSortOrder('descend')
+                    }
+                  }}
+                />
+              </SortableContext>
+            </DndContext>
+          </div>
+
+          <div
+            ref={pagerRef}
+            style={{
+              padding: '8px 16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              width: '100%',
+              background: '#fff',
+              borderTop: '1px solid #eef1f5',
+              position: 'relative',
+              zIndex: 3,
+              flexShrink: 0,
             }}
-            showSizeChanger
-            responsive={false}
-            pageSizeOptions={[10, 20, 50, 100, 200]}
-          />
+          >
+            <Typography.Text type="secondary" className="lsi-num">
+              {t('posAdmin.invoiceList.totalCount', { count: formatCount(total) })}
+            </Typography.Text>
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              onChange={(p, ps) => {
+                setPage(p)
+                setPageSize(ps)
+              }}
+              showSizeChanger
+              responsive={false}
+              pageSizeOptions={[10, 20, 50, 100, 200]}
+            />
+          </div>
         </div>
       </section>
 
