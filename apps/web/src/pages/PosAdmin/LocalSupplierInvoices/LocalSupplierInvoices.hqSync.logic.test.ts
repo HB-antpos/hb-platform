@@ -803,8 +803,12 @@ async function main() {
       '过滤链应先按处理进度分段，再委托行为级纯函数',
     )
     assert(
-      editPageSource.includes('[details, searchText, priceFilter, productTypeFilter, productStatusFilter, barcodeStatusFilter, actionTypeFilter, rowActions, progressBucketFilter, specialProductFilter]'),
+      editPageSource.includes('[details, deferredSearchText, priceFilter, productTypeFilter, productStatusFilter, barcodeStatusFilter, actionTypeFilter, rowActions, progressBucketFilter, specialProductFilter]'),
       '过滤结果应依赖搜索、涨跌、商品类型、状态、操作类型、进度和特殊商品过滤，按 AND 叠加',
+    )
+    assert(
+      editPageSource.includes('const deferredSearchText = useDeferredValue(searchText)'),
+      '搜索应延后参与过滤，上千行明细时输入框不被整表重渲染卡住',
     )
     assert(editPageSource.includes('DETAIL_PROGRESS_BUCKETS'), '进度条应按固定的五个互斥分段渲染')
     assert(editPageSource.includes("setProgressBucketFilter(selected ? 'all' : bucket)"), '再次点击同一进度分段应取消过滤')

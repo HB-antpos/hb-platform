@@ -40,10 +40,10 @@ import {
   message,
   notification,
 } from 'antd'
-import type { ColumnType, ColumnsType, TableProps } from 'antd/es/table'
+import type { ColumnType, ColumnsType, TableProps, TableRef } from 'antd/es/table'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useDynamicTabTitle } from '../../../../hooks/useDynamicTabTitle'
@@ -607,6 +607,8 @@ export default function InvoiceEditPage() {
 
   /* ---- 搜索 ---- */
   const [searchText, setSearchText] = useState('')
+  // 搜索框立即显示输入，明细过滤用延后的值在后台重算，上千行时打字不被整表重渲染拖住。
+  const deferredSearchText = useDeferredValue(searchText)
 
   /* ---- 涨跌过滤 ---- */
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all')
@@ -728,6 +730,7 @@ export default function InvoiceEditPage() {
 
   /* ---- 动态表格高度 ---- */
   const tableCardRef = useRef<HTMLDivElement>(null)
+  const detailTableRef = useRef<TableRef>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [tableScrollY, setTableScrollY] = useState<number>(400)
 
@@ -995,14 +998,14 @@ export default function InvoiceEditPage() {
           ? ![0, 1, 2].includes(detail.productType ?? -1)
           : detail.productType === productTypeFilter))
         && (specialProductFilter === 'all' || Boolean(detail.isSpecialProduct) === (specialProductFilter === 'yes'))), {
-        searchText,
+        searchText: deferredSearchText,
         priceFilter,
         productStatusFilter,
         barcodeStatusFilter,
         actionTypeFilter,
         rowActions,
     }),
-    [details, searchText, priceFilter, productTypeFilter, productStatusFilter, barcodeStatusFilter, actionTypeFilter, rowActions, progressBucketFilter, specialProductFilter],
+    [details, deferredSearchText, priceFilter, productTypeFilter, productStatusFilter, barcodeStatusFilter, actionTypeFilter, rowActions, progressBucketFilter, specialProductFilter],
   )
   const inlineNavigationDetails = useMemo(
     () =>
@@ -1053,6 +1056,15 @@ export default function InvoiceEditPage() {
       const target = resolveInvoiceDetailInlineNavigation(inlineNavigationDetails, detailGuid, field, key)
       if (!target) return false
       setActiveInlineNumberEdit(target)
+      // 虚拟滚动只挂载可视区的行：按移动方向多滚 2 行，让后续目标行提前挂载，
+      // 按住方向键连发时焦点不会因目标行尚未渲染而落空（编辑框挂载后自动聚焦）。
+      const targetIndex = inlineNavigationDetails.findIndex((detail) => detail.detailGUID === target.detailGuid)
+      const lookaheadIndex = Math.min(
+        Math.max(targetIndex + (key === 'ArrowUp' ? -2 : 2), 0),
+        inlineNavigationDetails.length - 1,
+      )
+      const scrollKey = inlineNavigationDetails[lookaheadIndex]?.detailGUID ?? target.detailGuid
+      detailTableRef.current?.scrollTo({ key: scrollKey })
       return true
     },
     [inlineNavigationDetails],
@@ -3989,7 +4001,10 @@ export default function InvoiceEditPage() {
 
         {/* 明细表格 */}
         <div ref={tableCardRef}>
+          {/* 虚拟滚动：只渲染可视区的行，上千行明细时渲染成本不随行数增长。 */}
           <MeasuredTable metricId="pos-admin.local-supplier-invoices.invoice-edit.table-2"
+            ref={detailTableRef}
+            virtual
             rowKey="detailGUID"
             loading={detailLoading}
             dataSource={filteredDetails}
