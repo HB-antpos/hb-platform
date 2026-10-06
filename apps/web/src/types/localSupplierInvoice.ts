@@ -19,8 +19,10 @@ export interface LocalSupplierInvoiceListDto {
   detailCount?: number
   /** 尚未做商品检测（ExistingProductCount 为空）的明细行数。 */
   uncheckedDetailCount?: number
-  /** 已检测但商品主档不存在（ExistingProductCount = 0）的明细行数。 */
+  /** 待建新品行数：检测为主档不存在（ExistingProductCount = 0）且至今未关联主档编码的明细。 */
   newProductDetailCount?: number
+  /** 本单新品行数：明细关联的商品由本进货单新建。 */
+  createdHereProductDetailCount?: number
   flowStatus?: number
   inboundStatus?: number
   createdAt: string
@@ -67,6 +69,8 @@ export interface LocalSupplierInvoiceItemDto {
   productName?: string
   /** 商品主档当前类型；未匹配主档时为空，仅用于展示。 */
   productType?: number | null
+  /** 本单新品：关联的商品由本进货单新建（后端按商品变更历史判定）。 */
+  isCreatedByThisInvoice?: boolean
   specification?: string
   unit?: string
   quantity?: number

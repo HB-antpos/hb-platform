@@ -96,6 +96,10 @@ namespace BlazorApp.Shared.DTOs
         /// 即仍需新建商品的行；已新建或已同步到总部回填编码的行、NULL（未检测）均不计入此项。
         /// </summary>
         public int NewProductDetailCount { get; set; }
+        /// <summary>
+        /// 本单新品行数：明细关联的商品由本进货单新建（依据商品变更历史的 Create 记录，历史之前的数据按检测快照兜底）。
+        /// </summary>
+        public int CreatedHereProductDetailCount { get; set; }
         public string? Remarks { get; set; }
         [JsonConverter(typeof(LocalSupplierInvoiceAuditUtcDateTimeJsonConverter))]
         public DateTime CreatedAt { get; set; }
@@ -159,6 +163,8 @@ namespace BlazorApp.Shared.DTOs
         public decimal? RetailPrice { get; set; }
         public decimal? Amount { get; set; }
         public int? ExistingProductCount { get; set; }
+        /// <summary>本单新品：明细关联的商品由本进货单新建，口径同列表的 CreatedHereProductDetailCount。</summary>
+        public bool IsCreatedByThisInvoice { get; set; }
         public int? BarcodeStatus { get; set; }
         public int? BarcodeMatchCount { get; set; }
         public string? ProductImage { get; set; }

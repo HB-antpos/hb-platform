@@ -912,6 +912,11 @@ async function main() {
     assertEqual(getProductStatusFilter(details[0]), 'notDetected', '未检测商品状态应来自空 existingProductCount')
     assertEqual(getProductStatusFilter(details[1]), 'exists', '已存在商品状态应来自 existingProductCount > 0')
     assertEqual(getProductStatusFilter(details[2]), 'notExists', '不存在商品状态应来自 existingProductCount = 0')
+    // 本单新品优先于检测快照：再次商品检测会把 existingProductCount 改成 1，仍应显示为本单新品。
+    const createdHereDetail = { ...details[1], detailGUID: 'created-here', existingProductCount: 1, isCreatedByThisInvoice: true }
+    assertEqual(getProductStatusFilter(createdHereDetail), 'createdHere', '本单新品应来自 isCreatedByThisInvoice，且优先于 existingProductCount')
+    assertEqual(getDetailStatusStats([createdHereDetail, details[1]]).product.createdHere, 1, '状态统计应单独计入本单新品')
+    assertEqual(getDetailStatusStats([createdHereDetail, details[1]]).product.exists, 1, '本单新品不应同时计入已存在')
     assertEqual(getBarcodeStatusFilter(details[0]), 'notDetected', '未检测条码状态应来自空 barcodeStatus')
     assertEqual(getBarcodeStatusFilter(details[1]), 'normal', '正常条码状态应来自 barcodeStatus = 1')
     assertEqual(getBarcodeStatusFilter(details[2]), 'noMatch', '无匹配条码状态应来自异常且匹配数为 0')
@@ -922,7 +927,7 @@ async function main() {
     assertDeepEqual(
       getDetailStatusStats(details, rowActions),
       {
-        product: { notDetected: 1, exists: 2, notExists: 1 },
+        product: { notDetected: 1, exists: 2, notExists: 1, createdHere: 0 },
         barcode: { notDetected: 1, normal: 1, noMatch: 1, multiMatch: 1 },
         action: {
           [DetailAction.None]: 1,

@@ -119,6 +119,8 @@
     <Compile Include="SeasonalCardRemainingReactServiceTests.cs" />
     <Compile Include="LocalSupplierInvoicesReactServiceTests.cs" />
     <Compile Include="LocalSupplierInvoiceCreateProductDetailBackfillTests.cs" />
+    <Compile Include="LocalSupplierInvoiceCreatedHereProductTests.cs" />
+    <Compile Include="SqliteWarehouseProductChangeHistoryTable.cs" />
     <Compile Include="LocalSupplierInvoiceAuditTimestampContractTests.cs" />
     <Compile Include="ReactLocalSupplierInvoiceAuthorizationTests.cs" />
     <Compile Include="LocalSupplierInvoiceImportTests.cs" />

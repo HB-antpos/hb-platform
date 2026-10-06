@@ -1061,6 +1061,7 @@ export default function LocalSupplierInvoicesPage() {
         if (typeof value !== 'boolean') return '--'
         const unchecked = record.uncheckedDetailCount ?? 0
         const newProducts = record.newProductDetailCount ?? 0
+        const createdHere = record.createdHereProductDetailCount ?? 0
         return (
           <Space size={6}>
             {value ? (
@@ -1075,6 +1076,11 @@ export default function LocalSupplierInvoicesPage() {
             {newProducts > 0 && (
               <Tooltip title={t('posAdmin.invoiceList.newProductsTip')}>
                 <span className="lsi-tag lsi-tag-new">{t('posAdmin.invoiceList.newProducts', { count: newProducts })}</span>
+              </Tooltip>
+            )}
+            {createdHere > 0 && (
+              <Tooltip title={t('posAdmin.invoiceList.createdHereProductsTip')}>
+                <span className="lsi-tag lsi-tag-here">{t('posAdmin.invoiceList.createdHereProducts', { count: createdHere })}</span>
               </Tooltip>
             )}
           </Space>
