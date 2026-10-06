@@ -17,6 +17,7 @@ import { shouldShowStoreOrderDetailInitialLoading } from './detailLoadState'
 import { buildDocumentFileName, downloadElementPagesAsPdf, formatCurrency, formatPrintDate, printElementPagesAsPdf } from './printUtils'
 import { buildPickingListExcelData, buildPickingListPdfPages, buildPickingOrderBarcode, formatInnerPackCount, formatPickingOrderQuantity } from './pickingListLogic'
 import { formatStoreOrderVolume } from './volumeFormat'
+import { publishStoreOrderFlowStatusChanged } from './storeOrderFlowStatusSync'
 import './print.css'
 
 export default function PickingListPage() {
@@ -199,6 +200,9 @@ export default function PickingListPage() {
     // WarehouseStaff 可打印/下载配货单，但不能借打印动作触发订单状态流转。
     if (canUseWarehouseManagerActions && order.flowStatus === StoreOrderFlowStatus.Submitted) {
       await startPickingStoreOrder(order.orderGUID)
+      // 订单明细、订单列表是保活页面，切回时不会重新请求；这里通知它们把该订单改显示为「配货中」，
+      // 否则打印后回到明细页仍会看到旧的「已提交」。无论当前打印页是否仍处于激活状态都要通知。
+      publishStoreOrderFlowStatusChanged(order.orderGUID, StoreOrderFlowStatus.Picking)
       if (!activeRef.current) {
         // 状态写入已经成功，但当前打印 DOM 已隐藏；恢复页面后重新加载最新订单再允许打印。
         loadedOrderIdRef.current = null
