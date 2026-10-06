@@ -308,6 +308,7 @@
     <Compile Include="LocalSupplierInvoiceHqProductSyncTests.cs" />
     <Compile Include="LocalSupplierInvoiceHqConcurrencySqlServerTests.cs" />
     <Compile Include="LocalSupplierInvoiceBatchUpdateJobServiceTests.cs" />
+    <Compile Include="LocalSupplierInvoiceBatchCheckProductsJobTests.cs" />
     <Compile Include="ApplicationLogServiceTests.cs" />
     <Compile Include="OperationAuditQueryServiceTests.cs" />
     <Compile Include="OperationAuditRiskQueryTests.cs" />

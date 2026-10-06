@@ -1110,6 +1110,99 @@ namespace BlazorApp.Api.Controllers.React
             return Ok(new { success = true, data = job, message = "查询成功" });
         }
 
+        [HttpPost("check-products/batch-jobs")]
+        [Authorize(Policy = Permissions.LocalPurchase.Edit)]
+        public async Task<IActionResult> StartBatchCheckProductsJob(
+            [FromBody] StartBatchCheckProductsRequest? dto,
+            CancellationToken cancellationToken
+        )
+        {
+            if (dto == null)
+                return BadRequest(new { success = false, message = "请求参数不能为空" });
+            if (_batchUpdateJobService == null)
+                return BadRequest(new { success = false, message = "本地进货单后台任务服务未注册" });
+
+            var invoiceGuids = (dto.InvoiceGuids ?? new List<string>())
+                .Where(guid => !string.IsNullOrWhiteSpace(guid))
+                .Select(guid => guid.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (invoiceGuids.Count == 0)
+                return BadRequest(new { success = false, message = "请选择要检测的进货单" });
+            if (invoiceGuids.Count > LocalSupplierInvoiceBatchCheckProductsLimits.MaxInvoices)
+                return BadRequest(new
+                {
+                    success = false,
+                    message = $"单次最多检测 {LocalSupplierInvoiceBatchCheckProductsLimits.MaxInvoices} 张进货单",
+                });
+
+            var headers = await _dbContext.Db.Queryable<StoreLocalSupplierInvoice>()
+                .Where(i => invoiceGuids.Contains(i.InvoiceGUID) && i.IsDeleted == false)
+                .Select(i => new { i.InvoiceGUID, i.StoreCode })
+                .ToListAsync();
+            // 关键位置：分店范围用户必须每张单都能找到且属于自己的分店；全局用户找不到的单交给任务标记失败。
+            if (!IsFullStoreAccessUser() && headers.Count != invoiceGuids.Count)
+                return Forbid();
+            var storeCodes = headers
+                .Select(h => h.StoreCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code!)
+                .Distinct()
+                .ToList();
+            if (!await CanAccessAllStoresAsync(storeCodes))
+                return Forbid();
+
+            var job = await _batchUpdateJobService.StartBatchCheckProductsJobAsync(
+                invoiceGuids,
+                storeCodes,
+                cancellationToken
+            );
+            return Ok(new { success = true, data = job, message = "批量商品检测任务已提交" });
+        }
+
+        [HttpGet("check-products/batch-jobs/{jobId}")]
+        [Authorize(Policy = Permissions.LocalPurchase.Edit)]
+        public async Task<IActionResult> GetBatchCheckProductsJob(
+            [FromRoute] string jobId,
+            CancellationToken cancellationToken
+        )
+        {
+            if (_batchUpdateJobService == null)
+                return BadRequest(new { success = false, message = "本地进货单后台任务服务未注册" });
+            if (string.IsNullOrWhiteSpace(jobId))
+                return BadRequest(new { success = false, message = "jobId 不能为空" });
+
+            var job = await _batchUpdateJobService.GetBatchCheckProductsJobAsync(jobId, cancellationToken);
+            if (job == null)
+                return NotFound(new { success = false, message = "批量商品检测任务不存在或已过期" });
+            if (!IsFullStoreAccessUser() && !await CanAccessAllStoresAsync(job.StoreCodes))
+                return Forbid();
+
+            return Ok(new { success = true, data = job, message = "查询成功" });
+        }
+
+        [HttpPost("check-products/batch-jobs/{jobId}/cancel")]
+        [Authorize(Policy = Permissions.LocalPurchase.Edit)]
+        public async Task<IActionResult> CancelBatchCheckProductsJob(
+            [FromRoute] string jobId,
+            CancellationToken cancellationToken
+        )
+        {
+            if (_batchUpdateJobService == null)
+                return BadRequest(new { success = false, message = "本地进货单后台任务服务未注册" });
+            if (string.IsNullOrWhiteSpace(jobId))
+                return BadRequest(new { success = false, message = "jobId 不能为空" });
+
+            var existing = await _batchUpdateJobService.GetBatchCheckProductsJobAsync(jobId, cancellationToken);
+            if (existing == null)
+                return NotFound(new { success = false, message = "批量商品检测任务不存在或已过期" });
+            if (!IsFullStoreAccessUser() && !await CanAccessAllStoresAsync(existing.StoreCodes))
+                return Forbid();
+
+            var job = await _batchUpdateJobService.CancelBatchCheckProductsJobAsync(jobId, cancellationToken);
+            return Ok(new { success = true, data = job, message = "已停止剩余检测" });
+        }
+
         [HttpPost("{invoiceGuid}/details/ensure-hq-products")]
         [Authorize(Policy = Permissions.LocalPurchase.Edit)]
         public async Task<IActionResult> EnsureHqProducts(

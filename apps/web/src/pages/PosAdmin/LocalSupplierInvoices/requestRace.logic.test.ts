@@ -290,7 +290,7 @@ async function main() {
   if (mutationAfterUnmountFailure) failures.push(mutationAfterUnmountFailure)
 
   const sourceContractFailure = await runTest('发票列表 guard 与 scope skip 接线位于 loadData 内', () => {
-    const loadDataSection = extractSection(pageSource, 'const loadData = async () => {', 'useLayoutEffect(() => {', 'invoice loadData')
+    const loadDataSection = extractSection(pageSource, 'const loadData = async (', 'useLayoutEffect(() => {', 'invoice loadData')
     const committedLoaderSection = extractSection(
       pageSource,
       'useLayoutEffect(() => {\n    latestLoadDataRef.current = loadData',
@@ -313,7 +313,7 @@ async function main() {
 
     assert(pageSource.includes('const listRequestGuardRef = useRef(createLatestRequestGuard())'), '发票列表缺少独立 guard')
     assert(pageSource.includes('const mountedRef = useRef(false)'), '发票列表缺少 mounted guard')
-    assert(pageSource.includes('const latestLoadDataRef = useRef<() => Promise<void>>'), '发票列表缺少 current-loader ref')
+    assert(pageSource.includes('const latestLoadDataRef = useRef<(options?: LoadDataOptions) => Promise<void>>'), '发票列表缺少 current-loader ref')
     assert(loadDataSection.includes('if (!mountedRef.current) return'), 'loader 在卸载后仍可能开始请求')
     assert(committedLoaderSection.includes('latestLoadDataRef.current = loadData'), 'current-loader ref 未在 commit 后更新')
     assert(!loadDataSection.includes('latestLoadDataRef.current = loadData'), 'current-loader ref 不应在 render 期间直接赋值')

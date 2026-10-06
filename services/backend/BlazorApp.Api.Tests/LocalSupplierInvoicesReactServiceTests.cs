@@ -1049,6 +1049,132 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CheckProductsAsync_排除已执行明细时_已执行行保持不变只检测其余行()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-check-executed", "INV-CHECK-EXECUTED", new DateTime(2026, 1, 8));
+            await _db.Insertable(new List<StoreLocalSupplierInvoiceDetails>
+            {
+                new()
+                {
+                    DetailGUID = "detail-executed",
+                    InvoiceGUID = "invoice-check-executed",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ItemNumber = "EXEC-1",
+                    ProductName = "Executed Product",
+                    Quantity = 1,
+                    PurchasePrice = 2.00m,
+                    ProductCode = "P-EXECUTED",
+                    ExistingProductCount = 0,
+                    ActivityType = 99,
+                    IsDeleted = false,
+                },
+                new()
+                {
+                    DetailGUID = "detail-pending",
+                    InvoiceGUID = "invoice-check-executed",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ItemNumber = "PENDING-1",
+                    ProductName = "Pending Product",
+                    Quantity = 1,
+                    PurchasePrice = 2.00m,
+                    IsDeleted = false,
+                },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().CheckProductsAsync(new CheckProductsRequest
+            {
+                InvoiceGuid = "invoice-check-executed",
+                ExcludeExecutedDetails = true,
+            });
+
+            Assert.True(result.Success);
+            Assert.Equal(1, result.Data!.Summary.Total);
+            Assert.Equal("detail-pending", Assert.Single(result.Data.Results).DetailGuid);
+
+            var executed = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .FirstAsync(x => x.DetailGUID == "detail-executed");
+            Assert.Equal(99, executed.ActivityType);
+            Assert.Equal("P-EXECUTED", executed.ProductCode);
+            var pending = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .FirstAsync(x => x.DetailGUID == "detail-pending");
+            Assert.Equal(0, pending.ExistingProductCount);
+        }
+
+        [Fact]
+        public async Task BatchCheckProductsJobEndpoints_分店范围用户含其他分店的单时拒绝()
+        {
+            await SeedStoreAndSupplierAsync();
+            await SeedSecondActiveStoreAndScopedUserAsync();
+            await InsertInvoiceAsync("invoice-batch-s01", "INV-BATCH-S01", new DateTime(2026, 1, 20));
+            await InsertInvoiceAsync("invoice-batch-s02", "INV-BATCH-S02", new DateTime(2026, 1, 20));
+            await _db.Updateable<StoreLocalSupplierInvoice>()
+                .SetColumns(x => x.StoreCode == "S02")
+                .Where(x => x.InvoiceGUID == "invoice-batch-s02")
+                .ExecuteCommandAsync();
+            var jobService = new Mock<ILocalSupplierInvoiceBatchUpdateJobService>(MockBehavior.Strict);
+            var controller = CreateControllerWithJobService(
+                jobService.Object,
+                new Claim(ClaimTypes.Name, "scoped-user"),
+                new Claim("userId", "user-scoped")
+            );
+
+            var otherStore = await controller.StartBatchCheckProductsJob(
+                new StartBatchCheckProductsRequest { InvoiceGuids = ["invoice-batch-s01", "invoice-batch-s02"] },
+                CancellationToken.None
+            );
+            var missing = await controller.StartBatchCheckProductsJob(
+                new StartBatchCheckProductsRequest { InvoiceGuids = ["invoice-batch-s01", "invoice-not-exists"] },
+                CancellationToken.None
+            );
+
+            Assert.IsType<ForbidResult>(otherStore);
+            Assert.IsType<ForbidResult>(missing);
+            jobService.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task BatchCheckProductsJobEndpoints_校验数量并把分店编码交给后台服务()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-batch-1", "INV-BATCH-1", new DateTime(2026, 1, 20));
+            var jobService = new Mock<ILocalSupplierInvoiceBatchUpdateJobService>(MockBehavior.Strict);
+            jobService
+                .Setup(service => service.StartBatchCheckProductsJobAsync(
+                    It.Is<IReadOnlyList<string>>(guids => guids.Count == 1 && guids[0] == "invoice-batch-1"),
+                    It.Is<IReadOnlyCollection<string>>(codes => codes.Count == 1 && codes.Contains("S01")),
+                    It.IsAny<CancellationToken>()
+                ))
+                .ReturnsAsync(new LocalSupplierInvoiceBatchCheckProductsJobDto { JobId = "batch-1" });
+            var controller = CreateControllerWithJobService(jobService.Object);
+
+            var empty = await controller.StartBatchCheckProductsJob(
+                new StartBatchCheckProductsRequest { InvoiceGuids = [" "] },
+                CancellationToken.None
+            );
+            var tooMany = await controller.StartBatchCheckProductsJob(
+                new StartBatchCheckProductsRequest
+                {
+                    InvoiceGuids = Enumerable.Range(0, LocalSupplierInvoiceBatchCheckProductsLimits.MaxInvoices + 1)
+                        .Select(index => $"invoice-{index}")
+                        .ToList(),
+                },
+                CancellationToken.None
+            );
+            var ok = await controller.StartBatchCheckProductsJob(
+                new StartBatchCheckProductsRequest { InvoiceGuids = ["invoice-batch-1", "invoice-batch-1"] },
+                CancellationToken.None
+            );
+
+            Assert.IsType<BadRequestObjectResult>(empty);
+            Assert.IsType<BadRequestObjectResult>(tooMany);
+            Assert.IsType<OkObjectResult>(ok);
+            jobService.VerifyAll();
+        }
+
+        [Fact]
         public async Task CheckProductsAsync_LastPurchasePrice为空时_补充分店上次进货价()
         {
             await SeedStoreAndSupplierAsync();

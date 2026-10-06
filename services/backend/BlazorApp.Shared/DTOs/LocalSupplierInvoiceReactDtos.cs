@@ -693,6 +693,81 @@ namespace BlazorApp.Shared.DTOs
         /// 要检测的明细GUID列表（为空则检测所有）
         /// </summary>
         public List<string>? DetailGuids { get; set; }
+
+        /// <summary>
+        /// 为 true 时跳过已执行（ActivityType=99）的明细：重新检测会把操作类型覆盖成默认建议，
+        /// 列表批量检测必须保留「已执行」标记。默认 false，单张检测行为不变。
+        /// </summary>
+        public bool ExcludeExecutedDetails { get; set; }
+    }
+
+    /// <summary>
+    /// 列表批量商品检测请求：按提交顺序逐张检测。
+    /// </summary>
+    public class StartBatchCheckProductsRequest
+    {
+        public List<string> InvoiceGuids { get; set; } = new();
+    }
+
+    public static class LocalSupplierInvoiceBatchCheckProductsLimits
+    {
+        /// <summary>单次批量检测最多进货单数。</summary>
+        public const int MaxInvoices = 50;
+    }
+
+    /// <summary>批量检测任务整体状态。</summary>
+    public static class LocalSupplierInvoiceBatchCheckProductsJobStatusConstants
+    {
+        public const string Running = "Running";
+        public const string Completed = "Completed";
+        public const string Cancelled = "Cancelled";
+    }
+
+    /// <summary>批量检测中单张进货单的状态。</summary>
+    public static class LocalSupplierInvoiceBatchCheckProductsItemStatusConstants
+    {
+        public const string Queued = "Queued";
+        public const string Running = "Running";
+        public const string Succeeded = "Succeeded";
+        public const string Failed = "Failed";
+        public const string Skipped = "Skipped";
+    }
+
+    /// <summary>
+    /// 列表批量商品检测后台任务状态。
+    /// </summary>
+    public class LocalSupplierInvoiceBatchCheckProductsJobDto
+    {
+        public string JobId { get; set; } = string.Empty;
+        public string OperationId { get; set; } = string.Empty;
+        public string Status { get; set; } = LocalSupplierInvoiceBatchCheckProductsJobStatusConstants.Running;
+        public bool IsDuplicateRequest { get; set; }
+        /// <summary>前面还有其他批量检测任务在执行，本任务尚未开始。</summary>
+        public bool IsWaiting { get; set; }
+        public bool CancelRequested { get; set; }
+        /// <summary>任务涉及的分店编码，用于查询进度时校验分店范围。</summary>
+        public List<string> StoreCodes { get; set; } = new();
+        public DateTime CreatedAt { get; set; }
+        public DateTime? StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public string? Message { get; set; }
+        public int Total { get; set; }
+        public int Processed { get; set; }
+        public int Succeeded { get; set; }
+        public int Failed { get; set; }
+        public int Skipped { get; set; }
+        public List<LocalSupplierInvoiceBatchCheckProductsItemDto> Items { get; set; } = new();
+    }
+
+    public class LocalSupplierInvoiceBatchCheckProductsItemDto
+    {
+        public string InvoiceGuid { get; set; } = string.Empty;
+        public string Status { get; set; } = LocalSupplierInvoiceBatchCheckProductsItemStatusConstants.Queued;
+        public string? Message { get; set; }
+        /// <summary>本次实际检测的明细行数（已执行行不计入）。</summary>
+        public int CheckedCount { get; set; }
+        public DateTime? CompletedAt { get; set; }
     }
 
     /// <summary>

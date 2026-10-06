@@ -233,6 +233,18 @@ public class ControllerAuthorizationMetadataTests
             Permissions.LocalPurchase.Edit
         );
         yield return Policy<ReactLocalSupplierInvoicesController>(
+            nameof(ReactLocalSupplierInvoicesController.StartBatchCheckProductsJob),
+            Permissions.LocalPurchase.Edit
+        );
+        yield return Policy<ReactLocalSupplierInvoicesController>(
+            nameof(ReactLocalSupplierInvoicesController.GetBatchCheckProductsJob),
+            Permissions.LocalPurchase.Edit
+        );
+        yield return Policy<ReactLocalSupplierInvoicesController>(
+            nameof(ReactLocalSupplierInvoicesController.CancelBatchCheckProductsJob),
+            Permissions.LocalPurchase.Edit
+        );
+        yield return Policy<ReactLocalSupplierInvoicesController>(
             nameof(ReactLocalSupplierInvoicesController.BatchExecuteActions),
             Permissions.LocalPurchase.Edit
         );
