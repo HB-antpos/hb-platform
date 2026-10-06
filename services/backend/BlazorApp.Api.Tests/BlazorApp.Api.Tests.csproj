@@ -75,6 +75,7 @@
     <Compile Include="DomesticProductReactServiceTests.cs" />
     <Compile Include="DomesticProductGridFilterTests.cs" />
     <Compile Include="DomesticProductDtoValidationTests.cs" />
+    <Compile Include="StoreOrderStartPickingAccessTests.cs" />
     <Compile Include="ChinaSupplierSortTests.cs" />
     <Compile Include="ProductPrefixCodeUpdateSortOrderTests.cs" />
     <Compile Include="EmployeeProfileServiceTests.cs" />

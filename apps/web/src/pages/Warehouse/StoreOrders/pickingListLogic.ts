@@ -1,3 +1,4 @@
+import { StoreOrderFlowStatus } from '../../../types/storeOrder'
 import type { StoreOrderDetail, StoreOrderDetailLine } from '../../../types/storeOrder'
 import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../../utils/barcode'
 import { formatStoreOrderVolume } from './volumeFormat'
@@ -289,4 +290,28 @@ export function buildPickingListPdfPages(
   })
 
   return pages
+}
+
+export interface StartPickingBeforePrintInput {
+  flowStatus?: StoreOrderFlowStatus
+  /** 仓库订货管理类账号（非纯仓库员工）：沿用原行为，打印即开始配货。 */
+  canUseWarehouseManagerActions: boolean
+  /** 是否被显式授予「打印配货单开始配货」权限（纯仓库员工靠它获得这一个动作）。 */
+  hasStartPickingPermission: boolean
+}
+
+/**
+ * 打印/下载配货单前，是否要先把订单从「已提交」推进到「配货中」。
+ * 只有「已提交」的订单才会推进；管理类账号沿用原行为，纯仓库员工必须被显式授予
+ * 开始配货权限——它只放开这一个动作，不代表可以编辑订单。
+ */
+export function shouldStartPickingBeforePrint({
+  flowStatus,
+  canUseWarehouseManagerActions,
+  hasStartPickingPermission,
+}: StartPickingBeforePrintInput) {
+  return (
+    flowStatus === StoreOrderFlowStatus.Submitted &&
+    (canUseWarehouseManagerActions || hasStartPickingPermission)
+  )
 }

@@ -98,6 +98,12 @@ public interface IStoreOrderAccessPolicy
 
     Task<StoreOrderAccessDecision> RequireOrderManagementEditAsync();
 
+    /// <summary>
+    /// 「开始配货」（已提交 → 配货中）的授权：纯仓库员工只认显式的 Warehouse.StartPicking，
+    /// 其余账号沿用订单编辑授权，行为不变。
+    /// </summary>
+    Task<StoreOrderAccessDecision> RequireStartPickingAsync(string orderGuid);
+
     Task<StoreOrderAccessDecision> RequireOrderEditAsync(
         string orderGuid,
         string? storeCode = null
