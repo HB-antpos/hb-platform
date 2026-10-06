@@ -196,8 +196,9 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             {
                 var normalized = NormalizeCaseInsensitive(barcode) ?? string.Empty;
                 if (!multiCodeKeys.Add(normalized)) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：本次执行内多码重复 {barcode}");
-                if (await _source.HasStoreMultiCodeBarcodeAsync(normalized)) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：分店多码已存在 {barcode}");
-                if (await _source.HasProductSetBarcodeAsync(normalized)) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：商品多码关系已存在 {barcode}");
+                // 关键位置：已挂在本行商品上的多码视为已添加（写入时跳过），只有被其他商品占用才是冲突。
+                if (await _source.HasStoreMultiCodeBarcodeOnOtherProductAsync(normalized, detail.ProductCode!)) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：分店多码已被其他商品使用 {barcode}");
+                if (await _source.HasProductSetBarcodeConflictAsync(normalized, detail.ProductCode!)) errors.Add($"明细 {detail.DetailGUID} 添加多码失败：商品多码关系已被其他商品使用 {barcode}");
             }
         }
 

@@ -710,6 +710,34 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             var multiCodesToCreate = new List<StoreMultiCodeProduct>();
             var productSetCodesToCreate = new List<ProductSetCode>();
 
+            // 关键位置：多码可能早已挂在同一商品上（之前执行过或其它入口加过），已有的关系与分店记录跳过，
+            // 只补缺失的分店，并沿用已有关系的多码商品编码，保证总部与分店仍指向同一个多码商品。
+            // 按大写比较，与校验口径（SqlFunc.ToUpper）一致，不依赖数据库排序规则是否区分大小写。
+            var requestedBarcodes = details
+                .SelectMany(GetDetailBarcodesForMultiCode)
+                .Select(x => x.Trim().ToUpperInvariant())
+                .Where(x => x.Length > 0)
+                .Distinct()
+                .ToList();
+            var existingSetProductCodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var existingStoreMultiCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (requestedBarcodes.Count > 0)
+            {
+                var existingSets = await db.Queryable<ProductSetCode>()
+                    .Where(x => x.IsDeleted == false && x.SetType == 2 && x.SetBarcode != null && requestedBarcodes.Contains(SqlFunc.ToUpper(x.SetBarcode)))
+                    .Select(x => new { x.ProductCode, x.SetBarcode, x.SetProductCode })
+                    .ToListAsync();
+                foreach (var set in existingSets)
+                    existingSetProductCodes.TryAdd(BuildMultiCodeKey(set.ProductCode, set.SetBarcode), set.SetProductCode);
+
+                var existingStores = await db.Queryable<StoreMultiCodeProduct>()
+                    .Where(x => x.IsDeleted == false && x.MultiBarcode != null && requestedBarcodes.Contains(SqlFunc.ToUpper(x.MultiBarcode)))
+                    .Select(x => new { x.StoreCode, x.ProductCode, x.MultiBarcode })
+                    .ToListAsync();
+                foreach (var store in existingStores)
+                    existingStoreMultiCodes.Add(BuildStoreMultiCodeKey(store.StoreCode, store.ProductCode, store.MultiBarcode));
+            }
+
             foreach (var detail in details)
             {
                 if (string.IsNullOrWhiteSpace(detail.ProductCode))
@@ -735,16 +763,25 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
                 foreach (var barcodeToAdd in barcodesToAdd)
                 {
+                    existingSetProductCodes.TryGetValue(
+                        BuildMultiCodeKey(detail.ProductCode, barcodeToAdd),
+                        out var existingSetProductCode
+                    );
+                    var missingStores = activeStores
+                        .Where(storeCode => !existingStoreMultiCodes.Contains(
+                            BuildStoreMultiCodeKey(storeCode, detail.ProductCode, barcodeToAdd)))
+                        .ToList();
                     AppendMultiCodeEntities(
                         detail,
                         detail.ProductCode!,
                         barcodeToAdd,
-                        activeStores,
+                        missingStores,
                         detail.RetailPrice,
                         now,
                         userName,
                         productSetCodesToCreate,
-                        multiCodesToCreate
+                        multiCodesToCreate,
+                        existingSetProductCode
                     );
                 }
 
@@ -768,6 +805,12 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             return result;
         }
 
+        private static string BuildMultiCodeKey(string? productCode, string? barcode) =>
+            $"{productCode?.Trim()}|{barcode?.Trim()}";
+
+        private static string BuildStoreMultiCodeKey(string? storeCode, string? productCode, string? barcode) =>
+            $"{storeCode?.Trim()}|{productCode?.Trim()}|{barcode?.Trim()}";
+
         private static void AppendMultiCodeEntities(
             StoreLocalSupplierInvoiceDetails detail,
             string productCode,
@@ -777,30 +820,35 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             DateTime now,
             string userName,
             List<ProductSetCode> productSetCodesToCreate,
-            List<StoreMultiCodeProduct> multiCodesToCreate
+            List<StoreMultiCodeProduct> multiCodesToCreate,
+            string? existingSetProductCode = null
         )
         {
-            var multiCodeProductCode = UuidHelper.GenerateUuid7();
-            // 关键位置：总部一品多码和分店一品多码使用同一个多码商品编码，后续 HQ 同步按它做幂等匹配。
-            productSetCodesToCreate.Add(new ProductSetCode
+            // 已有同商品的一品多码关系时不再新建，分店补录沿用它的多码商品编码。
+            var multiCodeProductCode = existingSetProductCode ?? UuidHelper.GenerateUuid7();
+            if (existingSetProductCode == null)
             {
-                SetCodeId = UuidHelper.GenerateUuid7(),
-                ProductCode = productCode,
-                SetProductCode = multiCodeProductCode,
-                SetItemNumber = detail.ItemNumber ?? string.Empty,
-                SetBarcode = barcodeToAdd,
-                // Type2 的关系成本只能由父商品回算，创建时不能把进货单明细成本当作最终成本写入。
-                SetPurchasePrice = null,
-                SetRetailPrice = retailPrice,
-                SetQuantity = 1,
-                SetType = 2,
-                IsActive = true,
-                IsDeleted = false,
-                CreatedAt = now,
-                UpdatedAt = now,
-                CreatedBy = userName,
-                UpdatedBy = userName,
-            });
+                // 关键位置：总部一品多码和分店一品多码使用同一个多码商品编码，后续 HQ 同步按它做幂等匹配。
+                productSetCodesToCreate.Add(new ProductSetCode
+                {
+                    SetCodeId = UuidHelper.GenerateUuid7(),
+                    ProductCode = productCode,
+                    SetProductCode = multiCodeProductCode,
+                    SetItemNumber = detail.ItemNumber ?? string.Empty,
+                    SetBarcode = barcodeToAdd,
+                    // Type2 的关系成本只能由父商品回算，创建时不能把进货单明细成本当作最终成本写入。
+                    SetPurchasePrice = null,
+                    SetRetailPrice = retailPrice,
+                    SetQuantity = 1,
+                    SetType = 2,
+                    IsActive = true,
+                    IsDeleted = false,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    CreatedBy = userName,
+                    UpdatedBy = userName,
+                });
+            }
 
             foreach (var storeCode in activeStores.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct())
             {
