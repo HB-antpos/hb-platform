@@ -4,7 +4,7 @@ public sealed class ContainerNewProductsResponseDto
 {
     public string StoreCode { get; init; } = string.Empty;
     public string StateCode { get; init; } = string.Empty;
-    /// <summary>门店所在州的本地今天；移动端据此把到店日拆成「过去 1 周 / 未来 2 周」两组，避免设备时区不同导致分界漂移。</summary>
+    /// <summary>门店所在州的本地今天；移动端据此把到店日拆成「过去 1 周 / 未来 3 周」两组，避免设备时区不同导致分界漂移。</summary>
     public DateOnly LocalToday { get; init; }
     public IReadOnlyList<ContainerNewProductItemDto> Items { get; init; } = [];
 }
