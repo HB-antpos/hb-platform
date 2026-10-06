@@ -1,6 +1,9 @@
 import {
   DEFAULT_SUPPLIER_SORT,
+  SUPPLIER_COLUMN_WIDTHS,
+  SUPPLIER_NAME_COLUMN,
   SUPPLIER_SORT_FIELD_BY_COLUMN,
+  SUPPLIER_TABLE_MIN_WIDTH,
   buildFailureClipboardText,
   buildSavePayload,
   formatCreatedDate,
@@ -10,6 +13,7 @@ import {
   parseSyncFailure,
   resolveOverflowPage,
   resolveSupplierSort,
+  resolveSupplierTableLayout,
   sortOrderForColumn,
   statusFilterToParam,
   statusParamToFilter,
@@ -192,5 +196,22 @@ assertJson(parseSyncFailure('HB009(): 原因'), { label: 'HB009', reason: '原�
 assertJson(parseSyncFailure('连接 HBSales 超时'), { label: '', reason: '连接 HBSales 超时' }, '非标准格式整行当原因')
 assertEqual(buildFailureClipboardText({ errors: ['a', 'b'] }), 'a\nb', '复制文本一行一条，用后端原文')
 assertEqual(buildFailureClipboardText({ errors: [] }), '', '没有明细时为空串')
+
+// 列宽：供应商列有上下限，不再吃掉全部剩余宽度（大屏上曾被拉到上千像素）。
+const supplierFixed = Object.values(SUPPLIER_COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0)
+assertEqual(SUPPLIER_TABLE_MIN_WIDTH, supplierFixed + SUPPLIER_NAME_COLUMN.min, '最窄表格宽度 = 固定列合计 + 供应商列最窄宽度')
+// 1280 视口表格区约 952px（卡片内边距 24×2）：最窄宽度不能超过它，否则出现横向滚动。
+assert(SUPPLIER_TABLE_MIN_WIDTH <= 952, `供应商表格最窄宽度 ${SUPPLIER_TABLE_MIN_WIDTH} 超过 1280 视口表格区 952px`)
+assert(SUPPLIER_COLUMN_WIDTHS.serial >= 53, '序号列至少 53px 才能放下 5 位数序号（等宽 12px 数字约 33px + padding 20px）')
+assert(SUPPLIER_COLUMN_WIDTHS.action >= 86, '操作列至少 86px 才能容纳「编辑 ⋯」按钮组')
+const supplierNarrow = resolveSupplierTableLayout(952)
+assert(supplierNarrow.nameWidth >= SUPPLIER_NAME_COLUMN.min, '1280 视口供应商列不小于最窄宽度')
+assertEqual(supplierNarrow.tableWidth, supplierFixed + supplierNarrow.nameWidth, 'scroll.x = 固定列合计 + 供应商列宽')
+assert(supplierNarrow.tableWidth <= 952, '1280 视口 scroll.x 不超过表格区宽度')
+const supplierTooNarrow = resolveSupplierTableLayout(700)
+assertEqual(supplierTooNarrow.nameWidth, SUPPLIER_NAME_COLUMN.min, '容器比最窄宽度还窄时停在最窄值（由 scroll.x 触发横向滚动，而不是把列压扁）')
+const supplierWide = resolveSupplierTableLayout(2200)
+assertEqual(supplierWide.nameWidth, SUPPLIER_NAME_COLUMN.max, '超宽屏供应商列封顶')
+assert(supplierWide.tableWidth < 2200, '超宽屏下表格最小宽度小于容器，多出来的空间由没设宽度的操作列吸收')
 
 console.log('ChinaSuppliers chinaSuppliersLogic.test.ts: ok')

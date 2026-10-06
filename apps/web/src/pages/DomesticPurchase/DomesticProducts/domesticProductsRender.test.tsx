@@ -87,8 +87,8 @@ const normalProduct: DomesticProductItem = {
   volume: undefined,
 }
 
-// —— 列表列：勾选 + 9 列 = 10 列，没有条码画布 ——
-function renderTable(canWrite: boolean) {
+// —— 列表列：勾选 + 序号 + 9 列 = 11 列，没有条码画布 ——
+function renderTable(canWrite: boolean, page = 1) {
   return renderToStaticMarkup(
     <MeasuredTable
       metricId="domestic-products-render-test"
@@ -104,6 +104,10 @@ function renderTable(canWrite: boolean) {
         sortOrder: 'descend',
         canWrite,
         currentYear: 2026,
+        page,
+        pageSize: 50,
+        productWidth: 300,
+        supplierWidth: 160,
         onEdit: noop,
         getRowMenu: () => ({ items: [{ key: 'detail', label: '查看详情' }] }),
       })}
@@ -115,8 +119,19 @@ const tableMarkup = renderTable(true)
 // antd 在定宽布局下还会渲染一行不可见的 measure-cell 表头（aria-hidden），只数真正的表头单元格。
 assert.equal(
   (tableMarkup.match(/<th\b[^>]*class="ant-table-cell\b/g) ?? []).length,
-  10,
-  '列表应是 10 列（勾选 + 商品/货号/条码/供应商/类型/价格/状态/更新/操作）',
+  11,
+  '列表应是 11 列（勾选 + 序号 + 商品/货号/条码/供应商/类型/价格/状态/更新/操作）',
+)
+// 序号跨页连续编号：第 1 页从 1 开始，第 3 页（每页 50）从 101 开始。
+assert.deepEqual(
+  [...tableMarkup.matchAll(/<span class="dp-serial">(\d+)<\/span>/g)].map((match) => match[1]),
+  ['1', '2'],
+  '第 1 页序号从 1 开始',
+)
+assert.deepEqual(
+  [...renderTable(true, 3).matchAll(/<span class="dp-serial">(\d+)<\/span>/g)].map((match) => match[1]),
+  ['101', '102'],
+  '第 3 页每页 50 条，序号从 101 开始（跨页连续）',
 )
 assert.ok(!tableMarkup.includes('<canvas'), '列表里不再渲染条码画布，只留可复制文本')
 assert.ok(tableMarkup.includes('玻璃密封罐 3 件套') && tableMarkup.includes('Glass Storage Jar Set of 3'), '商品列显示名称与英文名')

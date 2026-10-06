@@ -9,7 +9,6 @@ import { CopyableText, ProductStatusText, ProductTypeTag } from './ProductCells'
 import ProductThumb from './ProductThumb'
 import {
   LIST_COLUMN_WIDTHS,
-  SUPPLIER_COLUMN_WIDTH_PERCENT,
   SORT_FIELD_BY_COLUMN,
   formatFullTimestamp,
   formatMoney,
@@ -17,6 +16,7 @@ import {
   sortOrderForColumn,
   type SortOrderValue,
 } from './domesticProductsLogic'
+import { rowSerialNumber } from '../tableWidthLogic'
 import './domesticProducts.css'
 
 /** 列头只开放升 / 降序两态：服务端查询必须有明确排序，不提供「取消排序」。 */
@@ -29,14 +29,20 @@ export interface ProductColumnsOptions {
   canWrite: boolean
   /** 用于「更新」列：当年的日期省略年份。 */
   currentYear: number
+  /** 当前页码与每页条数：序号列跨页连续编号。 */
+  page: number
+  pageSize: number
+  /** 商品列、供应商列的宽度（由表格可用宽度算出，见 resolveListTableLayout）。 */
+  productWidth: number
+  supplierWidth: number
   onEdit: (record: DomesticProductItem) => void
   /** 行末「更多」菜单，由页面提供（菜单项要调用页面里的打开详情 / 套装子项 / 复制等动作）。 */
   getRowMenu: (record: DomesticProductItem) => MenuProps
 }
 
 /**
- * 国内商品列表的列：勾选列由 rowSelection 提供，这里是其余 9 列，合计 10 列
- * （旧版 19 列 2506px）：商品（弹性）/ HB 货号 / 条码 / 供应商 / 类型 / 价格 / 状态 / 更新 / 操作。
+ * 国内商品列表的列：勾选列由 rowSelection 提供，这里是其余 10 列，合计 11 列
+ * （旧版 19 列 2506px）：序号 / 商品 / HB 货号 / 条码 / 供应商 / 类型 / 价格 / 状态 / 更新 / 操作。
  * 进口价、规格、包装等低频字段不上列表，收进详情抽屉。
  */
 export function buildProductColumns({
@@ -45,10 +51,23 @@ export function buildProductColumns({
   sortOrder,
   canWrite,
   currentYear,
+  page,
+  pageSize,
+  productWidth,
+  supplierWidth,
   onEdit,
   getRowMenu,
 }: ProductColumnsOptions): ColumnsType<DomesticProductItem> {
   return [
+    {
+      // 序号：跨页连续编号（第 2 页每页 50 条时第一行是 51）。
+      key: 'serial',
+      title: t('common.index'),
+      width: LIST_COLUMN_WIDTHS.serial,
+      render: (_value: unknown, _record, index) => (
+        <span className="dp-serial">{rowSerialNumber(page, pageSize, index)}</span>
+      ),
+    },
     {
       key: 'product',
       title: t('domesticProducts.product', '商品'),
@@ -56,7 +75,8 @@ export function buildProductColumns({
       sorter: true,
       sortDirections: SORT_DIRECTIONS,
       sortOrder: sortOrderForColumn('product', sortField, sortOrder),
-      // 弹性列：不设宽度，吃掉其余固定列之外的全部剩余宽度。
+      // 宽度范围 148~340，随表格可用宽度算出：笔记本宽度下与原先接近，大屏上封顶，不再被拉到上千像素。
+      width: productWidth,
       render: (_, record) => (
         <div className="dp-who">
           <ProductThumb src={record.productImage} name={record.name} seed={record.itemNumber} />
@@ -95,7 +115,7 @@ export function buildProductColumns({
       key: 'supplier',
       title: t('domesticProducts.supplier', '供应商'),
       dataIndex: SORT_FIELD_BY_COLUMN.supplier,
-      width: SUPPLIER_COLUMN_WIDTH_PERCENT,
+      width: supplierWidth,
       sorter: true,
       sortDirections: SORT_DIRECTIONS,
       sortOrder: sortOrderForColumn('supplier', sortField, sortOrder),
@@ -161,7 +181,7 @@ export function buildProductColumns({
     {
       key: 'action',
       title: t('common.action', '操作'),
-      width: LIST_COLUMN_WIDTHS.action,
+      // 不设宽度：吸收商品 / 供应商列封顶之后多出来的宽度，按钮靠右；最窄时是 LIST_COLUMN_WIDTHS.action（已计入 scroll.x）。
       align: 'right',
       render: (_, record) => (
         <div className="dp-actions">

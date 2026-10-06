@@ -32,16 +32,20 @@ import {
   runLatestGuardedRequest,
 } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import { rowSerialNumber } from '../tableWidthLogic'
+import { useElementWidth } from '../useElementWidth'
 import SupplierFormModal from './SupplierFormModal'
 import SyncResultModal from './SyncResultModal'
 import {
   DEFAULT_SUPPLIER_SORT,
+  SUPPLIER_COLUMN_WIDTHS,
   buildSavePayload,
   formatCreatedDate,
   normalizeKeyword,
   normalizeSyncResult,
   resolveOverflowPage,
   resolveSupplierSort,
+  resolveSupplierTableLayout,
   sortOrderForColumn,
   statusFilterToParam,
   statusParamToFilter,
@@ -91,6 +95,10 @@ export default function DomesticChinaSuppliersPage() {
   const [sort, setSort] = useState<SupplierSortState>({ ...DEFAULT_SUPPLIER_SORT })
   // 页头「共 N 家 · 启用 M」：与当前筛选无关的全局概览。
   const [overview, setOverview] = useState<{ total: number; enabled: number } | null>(null)
+  // 表格可用宽度：工具栏与表格同在卡片内、都是整行块元素，工具栏的宽度就是表格区的宽度。
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const containerWidth = useElementWidth(toolbarRef, 952)
+  const colLayout = resolveSupplierTableLayout(containerWidth)
   const mainListRequestGuardRef = useRef(createLatestRequestGuard())
   const overviewRequestGuardRef = useRef(createLatestRequestGuard())
   const mountedRef = useRef(false)
@@ -370,10 +378,21 @@ export default function DomesticChinaSuppliersPage() {
 
   const columns: ColumnsType<ChinaSupplierItem> = [
     {
+      // 序号：跨页连续编号（第 2 页每页 20 条时第一行是 21），不随排序 / 筛选改变含义，只是行的位置。
+      title: t('common.index'),
+      key: 'serial',
+      width: SUPPLIER_COLUMN_WIDTHS.serial,
+      render: (_value: unknown, _record, index) => (
+        <span className="china-sup-serial">{rowSerialNumber(page, pageSize, index)}</span>
+      ),
+    },
+    {
       title: t('chinaSuppliers.supplierColumn'),
       key: 'supplierName',
       dataIndex: 'supplierName',
-      // 不设固定宽度：吃掉其它列之外的剩余空间，名称过长时省略并在 title 里看全称。
+      // 宽度由表格可用宽度算出，范围 150~300：笔记本宽度下与原先一致，大屏上封顶，不再被拉到上千像素；
+      // 名称过长时省略并在 title 里看全称。
+      width: colLayout.nameWidth,
       sorter: true,
       sortOrder: sortOrderForColumn('supplierName', sort),
       render: (_value: string, record) => (
@@ -406,7 +425,7 @@ export default function DomesticChinaSuppliersPage() {
       title: t('chinaSuppliers.shopNumber'),
       key: 'shopNumber',
       dataIndex: 'shopNumber',
-      width: 96,
+      width: SUPPLIER_COLUMN_WIDTHS.shopNumber,
       sorter: true,
       sortOrder: sortOrderForColumn('shopNumber', sort),
       render: (value?: string) => (value ? <span className="china-sup-ellipsis" title={value}>{value}</span> : EMPTY_CELL),
@@ -416,7 +435,7 @@ export default function DomesticChinaSuppliersPage() {
       title: t('chinaSuppliers.contactPerson'),
       key: 'contactPerson',
       dataIndex: 'contactPerson',
-      width: 140,
+      width: SUPPLIER_COLUMN_WIDTHS.contactPerson,
       sorter: true,
       sortOrder: sortOrderForColumn('contactPerson', sort),
       render: (_value: string | undefined, record) =>
@@ -433,14 +452,14 @@ export default function DomesticChinaSuppliersPage() {
       title: t('chinaSuppliers.email'),
       key: 'email',
       dataIndex: 'email',
-      width: 168,
+      width: SUPPLIER_COLUMN_WIDTHS.email,
       render: (value?: string) => (value ? <span className="china-sup-email china-sup-ellipsis" title={value}>{value}</span> : EMPTY_CELL),
     },
     {
       title: t('common.status'),
       key: 'status',
       dataIndex: 'status',
-      width: 84,
+      width: SUPPLIER_COLUMN_WIDTHS.status,
       sorter: true,
       sortOrder: sortOrderForColumn('status', sort),
       render: (value: number) => (
@@ -453,7 +472,7 @@ export default function DomesticChinaSuppliersPage() {
       title: t('chinaSuppliers.createdAt'),
       key: 'createdAt',
       dataIndex: 'createdAt',
-      width: 104,
+      width: SUPPLIER_COLUMN_WIDTHS.createdAt,
       // 创建时间首次点击更自然的方向是「最新在前」。
       sortDirections: ['descend', 'ascend'],
       sorter: true,
@@ -466,7 +485,7 @@ export default function DomesticChinaSuppliersPage() {
     {
       title: t('common.action'),
       key: 'action',
-      width: 104,
+      // 不设宽度：吸收供应商列封顶之后多出来的宽度，按钮靠右；最窄时是 SUPPLIER_COLUMN_WIDTHS.action（已计入 scroll.x）。
       align: 'right',
       render: (_value, record) => (
         <div className="china-sup-actions">
@@ -517,7 +536,7 @@ export default function DomesticChinaSuppliersPage() {
       )}
     >
       <Card>
-        <div className="china-sup-toolbar" data-testid="china-suppliers-toolbar">
+        <div className="china-sup-toolbar" data-testid="china-suppliers-toolbar" ref={toolbarRef}>
           <Input
             className="china-sup-search"
             placeholder={t('chinaSuppliers.searchPlaceholderAll')}
@@ -570,10 +589,10 @@ export default function DomesticChinaSuppliersPage() {
           columns={columns}
           dataSource={data}
           tableLayout="fixed"
-          // 侧栏 248 + 页面内边距 32 + 卡片内边距 48 后，1280 宽屏幕的表格区约 952px：
-          // 勾选列 40 + 6 列固定宽度 696 = 736，供应商列吃剩余约 216px（最小 920 - 736 = 184px），
-          // 所以 ≥1280 不出现横向滚动；1440 宽时供应商列约 376px。
-          scroll={{ x: 920 }}
+          // scroll.x = 固定列合计（含序号与操作列最窄宽度）+ 供应商列宽，随容器宽度算出（见 resolveSupplierTableLayout）：
+          // 1280 视口表格区约 952px 时供应商列约 204px、不出现横向滚动；容器更宽时供应商列最多 300px，
+          // 其余宽度由没设宽度的「操作」列吸收。
+          scroll={{ x: colLayout.tableWidth }}
           showSorterTooltip={false}
           locale={{
             emptyText: (
@@ -587,7 +606,7 @@ export default function DomesticChinaSuppliersPage() {
             selectedRowKeys,
             onChange: setSelectedRowKeys,
             preserveSelectedRowKeys: true,
-            columnWidth: 40,
+            columnWidth: SUPPLIER_COLUMN_WIDTHS.selection,
           }}
           onChange={handleTableChange}
           pagination={{

@@ -1,227 +1,92 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import {
-  Alert,
-  Button,
-  Card,
-  Col,
-  Descriptions,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  QRCode,
-  Row,
-  Segmented,
-  Select,
-  Space,
-  Spin,
-  Statistic,
-  Switch,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-} from 'antd'
+  EllipsisOutlined,
+  InfoCircleOutlined,
+  ReloadOutlined,
+  SafetyCertificateOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
+import { Alert, Button, Dropdown, Input, Modal, Segmented, Select, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import ActiveFilterBar from '../../../components/listToolbar/ActiveFilterBar'
+import type { ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
+import { MeasuredTable } from '../../../components/MeasuredTable'
+import PageContainer from '../../../components/PageContainer'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
   activateDevice,
-  createEmergencyLoginGrant,
   disableDevice,
-  getAppDeviceStatuses,
-  getAppDeviceStatusSummary,
-  getDeviceRegistrationDetail,
   getDeviceRegistrations,
-  getEmergencyLoginGrant,
   getStoreOptions,
   isDeviceRuntimeOnline,
   lockDevice,
-  revokeEmergencyLoginGrant,
-  updateDeviceRegistration,
 } from '../../../services/deviceRegistrationService'
-import type {
-  AppDeviceOnlineState,
-  AppDeviceStatus,
-  AppDeviceStatusSummary,
-  DeviceRegistrationDetail,
-  DeviceRegistrationItem,
-  EmergencyLoginGrantSummary,
-  StoreOption,
-  UpdateDeviceRegistrationPayload,
-} from '../../../types/deviceRegistration'
 import { useAuthStore } from '../../../store/auth'
+import type { DeviceRegistrationItem, StoreOption } from '../../../types/deviceRegistration'
 import { P } from '../../../types/permissions'
+import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
+
+import AppUsagePanel from './AppUsagePanel'
 import DeviceActivationCodePanel from './DeviceActivationCodePanel'
+import EmergencyLoginModal from './EmergencyLoginModal'
+import { supportsTransactionGate } from './deviceSystemOptions'
 import {
-  APP_DEVICE_SYSTEM_OPTIONS,
-  canEditRegisteredDeviceSystem,
-  getRegisteredDeviceSystemEditOptions,
-  isEnabledLegacyIosPos,
-  REGISTERED_DEVICE_SYSTEM_OPTIONS,
-  supportsTransactionGate,
-} from './deviceSystemOptions'
-import { MeasuredTable } from '../../../components/MeasuredTable'
+  DeviceStatusPill,
+  DeviceTypeTag,
+  EMPTY_VALUE,
+  OnlineDot,
+  RelativeTime,
+  StoreCell,
+  formatDateTime,
+  formatStoreLabel,
+} from './deviceCells'
+import DeviceDetailDrawer from './DeviceDetailDrawer'
+import {
+  DEVICE_STATUS_TABS,
+  buildCountedOptions,
+  compareDateDesc,
+  countDevicesByStatus,
+  filterDevicesByStatus,
+  filterDevicesExceptStatus,
+  formatDateOnly,
+  getDeviceStatusActions,
+  type CountedOption,
+  type DeviceOnlineFilter,
+  type DeviceStatusAction,
+  type DeviceStatusTab,
+} from './deviceManagementLogic'
+import './deviceManagement.css'
+import deviceManagementMessagesEn from './deviceManagementMessages.en.json'
+import deviceManagementMessagesZh from './deviceManagementMessages.zh.json'
 
-const STATUS_COLOR_MAP: Record<number, string> = {
-  [-1]: 'gold',
-  0: 'default',
-  1: 'green',
-  2: 'red',
-  3: 'blue',
-}
+// 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧）。
+registerPageMessages({ zh: deviceManagementMessagesZh, en: deviceManagementMessagesEn })
 
-const DEVICE_TYPE_OPTIONS = ['Mobile', 'PDA', 'POS', 'Admin']
-const APP_ONLINE_STATE_OPTIONS: AppDeviceOnlineState[] = ['all', 'online', 'offline']
-const APP_USAGE_PAGE_SIZE = 200
-const EMPTY_VALUE = '--'
+/**
+ * 生产全部门店约 220 台设备：一次拉全量（只把分店交给后端筛选），
+ * 状态页签计数、类型/系统/在线/关键字筛选都在本地完成，计数才准确。
+ * 旧版固定取 200 条，不选分店时已经在截断。
+ */
+const REGISTERED_FETCH_SIZE = 1000
+const POLL_INTERVAL_MS = 15_000
 
 type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes'
 
-const DEVICE_TYPE_COLOR_MAP: Record<string, string> = {
-  mobile: 'blue',
-  pda: 'purple',
-  pos: 'volcano',
-  admin: 'gold',
-}
-
-const DEVICE_SYSTEM_COLOR_MAP: Record<string, string> = {
-  android: 'green',
-  ios: 'magenta',
-  ipados: 'purple',
-  windows: 'geekblue',
-  mac: 'cyan',
-}
-
-const APP_UPDATE_SOURCE_COLOR_MAP: Record<string, string> = {
-  ota: 'green',
-  embedded: 'blue',
-  unknown: 'default',
-}
-
-function formatDateTime(value?: string | null) {
-  if (!value) {
-    return '--'
+function renderCountedOption(option: CountedOption) {
+  return {
+    value: option.value,
+    // 搜索/回显用纯文本，下拉里右侧显示台数
+    title: option.value,
+    label: (
+      <span className="dev-mgmt-option">
+        <span>{option.value}</span>
+        <span className="dev-mgmt-option-count">{option.count}</span>
+      </span>
+    ),
   }
-
-  const timestamp = Date.parse(value)
-  if (Number.isNaN(timestamp)) {
-    return value
-  }
-
-  return new Date(timestamp).toLocaleString()
 }
-
-function getTagColor(value: string, colorMap: Record<string, string>) {
-  return colorMap[value.trim().toLowerCase()] ?? 'default'
-}
-
-function renderDeviceTypeTag(value?: string | null) {
-  return value ? <Tag color={getTagColor(value, DEVICE_TYPE_COLOR_MAP)}>{value}</Tag> : '--'
-}
-
-function renderDeviceSystemTag(value?: string | null) {
-  return value ? <Tag color={getTagColor(value, DEVICE_SYSTEM_COLOR_MAP)}>{value}</Tag> : EMPTY_VALUE
-}
-
-function getUpdateTail(updateId?: string | null) {
-  const value = updateId?.trim()
-  if (!value) {
-    return EMPTY_VALUE
-  }
-  return value.length <= 10 ? value : `...${value.slice(-10)}`
-}
-
-function renderAppUpdateId(value?: string | null) {
-  const updateId = value?.trim()
-  if (!updateId) {
-    return EMPTY_VALUE
-  }
-
-  return (
-    <Tooltip title={updateId}>
-      <Typography.Text copyable={{ text: updateId }}>
-        {getUpdateTail(updateId)}
-      </Typography.Text>
-    </Tooltip>
-  )
-}
-
-function getAppUpdateSourceLabel(
-  value: string | null | undefined,
-  t: (key: string) => string
-) {
-  const normalized = value?.trim().toLowerCase()
-  if (!normalized) {
-    return EMPTY_VALUE
-  }
-
-  if (normalized === 'ota' || normalized === 'embedded' || normalized === 'unknown') {
-    return t(`posAdmin.devices.appUpdateSources.${normalized}`)
-  }
-
-  return value?.trim() || EMPTY_VALUE
-}
-
-function renderAppUpdateSourceTag(
-  value: string | null | undefined,
-  t: (key: string) => string
-) {
-  const normalized = value?.trim().toLowerCase()
-  if (!normalized) {
-    return EMPTY_VALUE
-  }
-
-  return (
-    <Tag color={APP_UPDATE_SOURCE_COLOR_MAP[normalized] ?? 'default'}>
-      {getAppUpdateSourceLabel(value, t)}
-    </Tag>
-  )
-}
-
-function getAppPackageVersion(item: AppDeviceStatus) {
-  if (item.appVersion && item.appBuildVersion) {
-    return `${item.appVersion} (${item.appBuildVersion})`
-  }
-  return item.appVersion || item.appBuildVersion || EMPTY_VALUE
-}
-
-function getAppDeviceUser(item: AppDeviceStatus, fallback: string) {
-  return item.lastSeenUserFullName || item.lastSeenUsername || item.lastSeenUserGuid || fallback
-}
-
-function renderRuntimeStatus(record: DeviceRegistrationItem, t: ReturnType<typeof useTranslation>['t']) {
-  const online = isDeviceRuntimeOnline(record)
-  return (
-    <Space direction="vertical" size={0}>
-      <Tag color={online ? 'green' : 'default'}>
-        {online ? t('posAdmin.devices.online') : t('posAdmin.devices.offline')}
-      </Tag>
-      <Typography.Text type="secondary">
-        {formatDateTime(record.lastHeartbeatAt)}
-      </Typography.Text>
-    </Space>
-  )
-}
-
-function renderCashierStatus(record: DeviceRegistrationItem, t: ReturnType<typeof useTranslation>['t']) {
-  const online = isDeviceRuntimeOnline(record)
-  if (!online || !record.currentCashierName) {
-    return <Tag>{t('posAdmin.devices.cashierNotLoggedIn')}</Tag>
-  }
-
-  return (
-    <Space direction="vertical" size={0}>
-      <Typography.Text>{record.currentCashierName}</Typography.Text>
-      <Tag color="green">{t('posAdmin.devices.cashierLoggedIn')}</Tag>
-      <Typography.Text type="secondary">
-        {formatDateTime(record.cashierLoginAt)}
-      </Typography.Text>
-    </Space>
-  )
-}
-
-type DeviceEditFormValues = UpdateDeviceRegistrationPayload
-type EmergencyGrantFormValues = { reason: string }
 
 export default function DeviceRegistrationPage() {
   const { t } = useTranslation()
@@ -236,106 +101,73 @@ export default function DeviceRegistrationPage() {
     access.isAdmin ||
     access.hasPermission(P.DeviceRegistration.View) ||
     access.hasPermission(P.DeviceRegistration.Manage)
-  const [editForm] = Form.useForm<DeviceEditFormValues>()
-  const editingDeviceType = Form.useWatch('deviceType', editForm)
-  const editingDeviceSystem = Form.useWatch('deviceSystem', editForm)
-  const editingSupportsTransactionGate = supportsTransactionGate(
-    editingDeviceSystem,
-    editingDeviceType
-  )
-  const [emergencyForm] = Form.useForm<EmergencyGrantFormValues>()
+  const canManage = access.canManageDeviceRegistration
+  const canIssueEmergencyLogin = canManage && access.canManageSystemSettings
+
   const [viewMode, setViewMode] = useState<DeviceRegistrationViewMode>(() =>
     canViewLegacyDeviceRegistration ? 'registered' : 'activationCodes',
   )
-  const [items, setItems] = useState<DeviceRegistrationItem[]>([])
-  const [appItems, setAppItems] = useState<AppDeviceStatus[]>([])
-  const [appSummary, setAppSummary] = useState<AppDeviceStatusSummary>({
-    total: 0,
-    online: 0,
-    offline: 0,
-    android: 0,
-    ios: 0,
-    unknownSystem: 0,
-  })
   const [stores, setStores] = useState<StoreOption[]>([])
-  const [loading, setLoading] = useState(false)
-  const [appLoading, setAppLoading] = useState(false)
   const [selectedStoreCode, setSelectedStoreCode] = useState<string>()
-  const [selectedDeviceType, setSelectedDeviceType] = useState<string>()
-  const [selectedDeviceSystem, setSelectedDeviceSystem] = useState<string>()
-  const [selectedAppOnlineState, setSelectedAppOnlineState] = useState<AppDeviceOnlineState>('all')
-  const [appKeyword, setAppKeyword] = useState('')
+
+  const [items, setItems] = useState<DeviceRegistrationItem[]>([])
+  const [serverTotal, setServerTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [statusTab, setStatusTab] = useState<DeviceStatusTab>('all')
+  const [keyword, setKeyword] = useState('')
+  const [deviceType, setDeviceType] = useState<string>()
+  const [deviceSystem, setDeviceSystem] = useState<string>()
+  const [onlineFilter, setOnlineFilter] = useState<DeviceOnlineFilter>()
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 50 })
+
   const [actionDeviceId, setActionDeviceId] = useState<number | null>(null)
-  const [editOpen, setEditOpen] = useState(false)
-  const [editLoading, setEditLoading] = useState(false)
-  const [editSaving, setEditSaving] = useState(false)
-  const [editingDevice, setEditingDevice] = useState<DeviceRegistrationDetail | null>(null)
+  const [drawerDeviceId, setDrawerDeviceId] = useState<number | null>(null)
+  const [drawerSnapshot, setDrawerSnapshot] = useState<DeviceRegistrationItem | null>(null)
   const [emergencyOpen, setEmergencyOpen] = useState(false)
-  const [emergencyLoading, setEmergencyLoading] = useState(false)
-  const [emergencySaving, setEmergencySaving] = useState(false)
-  const [emergencyRevoking, setEmergencyRevoking] = useState(false)
-  const [emergencyGrant, setEmergencyGrant] = useState<EmergencyLoginGrantSummary | null>(null)
-  const [emergencyToken, setEmergencyToken] = useState<string | null>(null)
+  const listRequestGuardRef = useRef(createLatestRequestGuard())
+  // 列定义被 useMemo 缓存，里面的操作按钮闭包可能是旧渲染的；刷新列表时从 ref 读当前分店，
+  // 否则切换分店后点「启用」会按旧分店重新拉取并覆盖列表。
+  const selectedStoreCodeRef = useRef(selectedStoreCode)
+  selectedStoreCodeRef.current = selectedStoreCode
 
   async function loadStores() {
     try {
-      const nextStores = await getStoreOptions()
-      setStores(nextStores)
+      setStores(await getStoreOptions())
     } catch (error) {
       console.error(t('posAdmin.devices.loadStoresFailed'), error)
       message.error(t('posAdmin.devices.loadStoresFailed'))
     }
   }
 
-  async function loadDevices(showLoading = true) {
-    if (showLoading) {
-      setLoading(true)
-    }
-    try {
-      const result = await getDeviceRegistrations({
-        page: 1,
-        pageSize: 200,
-        storeCode: selectedStoreCode,
-        deviceType: selectedDeviceType,
-        deviceSystem: selectedDeviceSystem,
-      })
-      setItems(result.devices)
-    } catch (error) {
-      console.error(t('posAdmin.devices.loadFailed'), error)
-      message.error(t('posAdmin.devices.loadFailed'))
-    } finally {
-      if (showLoading) {
-        setLoading(false)
-      }
-    }
-  }
-
-  async function loadAppDevices() {
-    setAppLoading(true)
-    try {
-      const [list, summary] = await Promise.all([
-        getAppDeviceStatuses({
+  function loadDevices(showLoading = true) {
+    return runLatestGuardedRequest(
+      listRequestGuardRef.current,
+      () =>
+        getDeviceRegistrations({
           page: 1,
-          pageSize: APP_USAGE_PAGE_SIZE,
-          storeCode: selectedStoreCode,
-          deviceSystem: selectedDeviceSystem,
-          onlineState: selectedAppOnlineState,
-          keyword: appKeyword,
+          pageSize: REGISTERED_FETCH_SIZE,
+          storeCode: selectedStoreCodeRef.current,
         }),
-        getAppDeviceStatusSummary({
-          storeCode: selectedStoreCode,
-          deviceSystem: selectedDeviceSystem,
-          keyword: appKeyword,
-        }),
-      ])
-      setAppItems(list.devices)
-      setAppSummary(summary)
-    } catch (error) {
-      console.error(t('posAdmin.devices.appUsageLoadFailed'), error)
-      message.error(t('posAdmin.devices.appUsageLoadFailed'))
-    } finally {
-      setAppLoading(false)
-    }
+      {
+        onStart: () => {
+          if (showLoading) {
+            setLoading(true)
+          }
+        },
+        onSuccess: (result) => {
+          setItems(result.devices)
+          setServerTotal(result.total)
+        },
+        onError: (error) => {
+          console.error(t('posAdmin.devices.loadFailed'), error)
+          // 后台轮询失败不弹窗，避免网络抖动时每 15 秒刷一条错误
+          if (showLoading) {
+            message.error(t('posAdmin.devices.loadFailed'))
+          }
+        },
+        onSettled: () => setLoading(false),
+      },
+    )
   }
 
   useEffect(() => {
@@ -358,24 +190,62 @@ export default function DeviceRegistrationPage() {
     void loadDevices()
     const intervalId = window.setInterval(() => {
       void loadDevices(false)
-    }, 15_000)
+    }, POLL_INTERVAL_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [viewMode, selectedStoreCode, selectedDeviceType, selectedDeviceSystem])
+  }, [viewMode, selectedStoreCode])
 
+  useEffect(() => () => listRequestGuardRef.current.invalidate(), [])
+
+  // 任一筛选变化都回到第一页，避免停在超出范围的空页
   useEffect(() => {
-    if (viewMode === 'appUsage') {
-      void loadAppDevices()
-    }
-  }, [viewMode, selectedStoreCode, selectedDeviceSystem, selectedAppOnlineState, appKeyword])
+    setPagination((current) => (current.current === 1 ? current : { ...current, current: 1 }))
+  }, [selectedStoreCode, statusTab, keyword, deviceType, deviceSystem, onlineFilter])
 
-  async function runAction(
-    item: DeviceRegistrationItem,
-    action: 'activate' | 'disable' | 'lock'
-  ) {
-    if (!access.canManageDeviceRegistration) {
-      return
-    }
+  const storeNameMap = useMemo(
+    () =>
+      stores.reduce<Record<string, string>>((accumulator, store) => {
+        accumulator[store.storeCode] = store.storeName
+        return accumulator
+      }, {}),
+    [stores]
+  )
+
+  const getStoreName = (storeCode?: string | null) =>
+    storeCode ? storeNameMap[storeCode] : undefined
+
+  const baseFiltered = useMemo(
+    () =>
+      filterDevicesExceptStatus(
+        items,
+        { keyword, deviceType, deviceSystem, online: onlineFilter },
+        (item) => isDeviceRuntimeOnline(item),
+        getStoreName,
+      ),
+    [items, keyword, deviceType, deviceSystem, onlineFilter, storeNameMap]
+  )
+  const statusCounts = useMemo(() => countDevicesByStatus(baseFiltered), [baseFiltered])
+  const visibleItems = useMemo(() => filterDevicesByStatus(baseFiltered, statusTab), [baseFiltered, statusTab])
+  const scopeCounts = useMemo(
+    () => ({
+      total: items.length,
+      online: items.filter((item) => isDeviceRuntimeOnline(item)).length,
+      pending: countDevicesByStatus(items).pending,
+    }),
+    [items]
+  )
+
+  // 选项与台数取自当前分店范围的已加载设备（不受其他筛选影响），保证每个选项都能筛出数据
+  const deviceTypeOptions = useMemo(
+    () => buildCountedOptions(items.map((item) => item.deviceType), deviceType),
+    [items, deviceType]
+  )
+  const deviceSystemOptions = useMemo(
+    () => buildCountedOptions(items.map((item) => item.deviceSystem), deviceSystem),
+    [items, deviceSystem]
+  )
+
+  async function executeStatusAction(item: DeviceRegistrationItem, action: DeviceStatusAction) {
     setActionDeviceId(item.id)
     try {
       if (action === 'activate') {
@@ -398,266 +268,161 @@ export default function DeviceRegistrationPage() {
     }
   }
 
-  async function openEditModal(item: DeviceRegistrationItem) {
-    if (!access.canManageDeviceRegistration) {
+  /** 启用直接执行；禁用、锁定会让门店设备立即不可用，先二次确认。 */
+  function runAction(item: DeviceRegistrationItem, action: DeviceStatusAction) {
+    if (!canManage) {
+      return
+    }
+    if (action === 'activate') {
+      void executeStatusAction(item, action)
       return
     }
 
-    setEditOpen(true)
-    setEditLoading(true)
-    setEditingDevice(null)
-    editForm.resetFields()
-    try {
-      const detail = await getDeviceRegistrationDetail(item.id)
-      setEditingDevice(detail)
-      editForm.setFieldsValue({
-        deviceType: detail.deviceType,
-        deviceSystem: detail.deviceSystem,
-        allowTransactions: detail.allowTransactions,
-        remark: detail.remark ?? '',
-      })
-    } catch (error) {
-      console.error(t('posAdmin.devices.loadDetailFailed'), error)
-      message.error(t('posAdmin.devices.loadDetailFailed'))
-      setEditOpen(false)
-    } finally {
-      setEditLoading(false)
-    }
+    const deviceNo = item.systemDeviceNumber || item.hardwareId
+    Modal.confirm({
+      title: t(
+        action === 'lock' ? 'posAdmin.devices.mgmt.confirmLockTitle' : 'posAdmin.devices.mgmt.confirmDisableTitle',
+        { deviceNo },
+      ),
+      content: t(
+        action === 'lock' ? 'posAdmin.devices.mgmt.confirmLockContent' : 'posAdmin.devices.mgmt.confirmDisableContent',
+      ),
+      okText: t(action === 'lock' ? 'posAdmin.devices.lock' : 'posAdmin.devices.disable'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: () => executeStatusAction(item, action),
+    })
   }
 
-  function closeEditModal() {
-    setEditOpen(false)
-    setEditingDevice(null)
-    setEditLoading(false)
-    editForm.resetFields()
+  function openDrawer(item: DeviceRegistrationItem) {
+    setDrawerDeviceId(item.id)
+    setDrawerSnapshot(item)
   }
 
-  async function submitEditModal() {
-    if (!editingDevice) {
-      return
-    }
-
-    try {
-      const values = await editForm.validateFields()
-      setEditSaving(true)
-      await updateDeviceRegistration(editingDevice.id, {
-        deviceType: values.deviceType,
-        deviceSystem: values.deviceSystem,
-        allowTransactions: values.allowTransactions,
-        remark: values.remark ?? '',
-      })
-      message.success(t('posAdmin.devices.updateSuccess'))
-      closeEditModal()
-      await loadDevices()
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'errorFields' in error) {
-        return
-      }
-      console.error(t('posAdmin.devices.updateFailed'), error)
-      message.error(t('posAdmin.devices.updateFailed'))
-    } finally {
-      setEditSaving(false)
-    }
+  function closeDrawer() {
+    setDrawerDeviceId(null)
+    setDrawerSnapshot(null)
   }
 
-  async function openEmergencyModal() {
-    if (
-      !selectedStoreCode ||
-      !access.canManageDeviceRegistration ||
-      !access.canManageSystemSettings
-    ) {
-      return
-    }
+  // 抽屉跟随轮询/操作后的最新行，行被筛掉时退回打开时的快照
+  const drawerDevice = drawerDeviceId === null
+    ? null
+    : items.find((item) => item.id === drawerDeviceId) ?? drawerSnapshot
 
-    setEmergencyOpen(true)
-    setEmergencyLoading(true)
-    setEmergencyGrant(null)
-    setEmergencyToken(null)
-    emergencyForm.resetFields()
-    try {
-      setEmergencyGrant(await getEmergencyLoginGrant(selectedStoreCode))
-    } catch (error) {
-      console.error(t('posAdmin.devices.emergencyLoadFailed'), error)
-      message.error(t('posAdmin.devices.emergencyLoadFailed'))
-    } finally {
-      setEmergencyLoading(false)
-    }
+  const statusActionLabel: Record<DeviceStatusAction, string> = {
+    activate: t('posAdmin.devices.enable'),
+    disable: t('posAdmin.devices.disable'),
+    lock: t('posAdmin.devices.lock'),
   }
-
-  function closeEmergencyModal() {
-    setEmergencyOpen(false)
-    setEmergencyGrant(null)
-    setEmergencyToken(null)
-    emergencyForm.resetFields()
-  }
-
-  async function submitEmergencyGrant() {
-    if (!selectedStoreCode) {
-      return
-    }
-
-    try {
-      const values = await emergencyForm.validateFields()
-      setEmergencySaving(true)
-      const result = await createEmergencyLoginGrant(selectedStoreCode, values.reason)
-      setEmergencyGrant(result.grant)
-      setEmergencyToken(result.token)
-      message.success(t('posAdmin.devices.emergencyCreateSuccess'))
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'errorFields' in error) {
-        return
-      }
-      console.error(t('posAdmin.devices.emergencyCreateFailed'), error)
-      message.error(t('posAdmin.devices.emergencyCreateFailed'))
-    } finally {
-      setEmergencySaving(false)
-    }
-  }
-
-  async function revokeEmergencyGrant() {
-    if (!emergencyGrant) {
-      return
-    }
-
-    try {
-      setEmergencyRevoking(true)
-      const revoked = await revokeEmergencyLoginGrant(
-        emergencyGrant.grantId,
-        t('posAdmin.devices.emergencyRevokeReason')
-      )
-      setEmergencyGrant(revoked)
-      setEmergencyToken(null)
-      message.success(t('posAdmin.devices.emergencyRevokeSuccess'))
-    } catch (error) {
-      console.error(t('posAdmin.devices.emergencyRevokeFailed'), error)
-      message.error(t('posAdmin.devices.emergencyRevokeFailed'))
-    } finally {
-      setEmergencyRevoking(false)
-    }
-  }
-
-  async function copyEmergencyToken() {
-    if (!emergencyToken) {
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(emergencyToken)
-      message.success(t('posAdmin.devices.emergencyCopySuccess'))
-    } catch (error) {
-      console.error(t('posAdmin.devices.emergencyCopyFailed'), error)
-      message.error(t('posAdmin.devices.emergencyCopyFailed'))
-    }
-  }
-
-  function downloadEmergencyQrCode() {
-    const canvas = document.querySelector<HTMLCanvasElement>('#emergency-login-qr canvas')
-    if (!canvas || !emergencyGrant) {
-      message.error(t('posAdmin.devices.emergencyDownloadFailed'))
-      return
-    }
-
-    const link = document.createElement('a')
-    link.download = `hbpos-emergency-${emergencyGrant.storeCode}-${emergencyGrant.businessDate}.png`
-    link.href = canvas.toDataURL('image/png')
-    link.click()
-  }
-
-  const storeNameMap = useMemo(
-    () =>
-      stores.reduce<Record<string, string>>((accumulator, store) => {
-        accumulator[store.storeCode] = store.storeName
-        return accumulator
-      }, {}),
-    [stores]
-  )
 
   const columns = useMemo<ColumnsType<DeviceRegistrationItem>>(() => {
     const baseColumns: ColumnsType<DeviceRegistrationItem> = [
       {
-        title: t('posAdmin.devices.deviceNo'),
-        dataIndex: 'systemDeviceNumber',
-        width: 180,
-      },
-      {
-        title: t('posAdmin.devices.hardwareId'),
-        dataIndex: 'hardwareId',
-        ellipsis: true,
+        title: t('posAdmin.devices.mgmt.columns.device'),
+        key: 'device',
+        width: 220,
+        fixed: 'left',
+        render: (_value, record) => (
+          <div className="dev-mgmt-two">
+            <span className="dev-mgmt-strong dev-mgmt-mono">{record.systemDeviceNumber || EMPTY_VALUE}</span>
+            <span className="dev-mgmt-sub dev-mgmt-mono dev-mgmt-ellipsis" title={record.hardwareId}>
+              {record.hardwareId || EMPTY_VALUE}
+            </span>
+          </div>
+        ),
       },
       {
         title: t('column.store'),
         dataIndex: 'storeCode',
-        width: 180,
-        render: (value: string | null | undefined) =>
-          value ? `${value}${storeNameMap[value] ? ` / ${storeNameMap[value]}` : ''}` : '--',
-      },
-      {
-        title: t('posAdmin.devices.deviceType'),
-        dataIndex: 'deviceType',
-        width: 120,
-        render: (value: string | null | undefined) => renderDeviceTypeTag(value),
-      },
-      {
-        title: t('posAdmin.devices.deviceSystem'),
-        dataIndex: 'deviceSystem',
-        width: 120,
-        render: (value: string | null | undefined) => renderDeviceSystemTag(value),
-      },
-      {
-        title: t('posAdmin.devices.onlineStatus'),
-        key: 'onlineStatus',
-        width: 150,
-        render: (_value, record) => renderRuntimeStatus(record, t),
-      },
-      {
-        title: t('posAdmin.devices.currentCashier'),
-        key: 'currentCashier',
-        width: 180,
-        render: (_value, record) => renderCashierStatus(record, t),
-      },
-      {
-        title: t('column.status'),
-        dataIndex: 'statusDescription',
-        width: 120,
-        render: (_value: string, record) => (
-          <Tag color={STATUS_COLOR_MAP[record.status] ?? 'default'}>
-            {record.statusDescription || record.status}
-          </Tag>
+        width: 170,
+        render: (value: string | null | undefined, record) => (
+          <StoreCell storeCode={value} storeName={getStoreName(value) ?? record.storeName} />
         ),
       },
       {
-        title: t('posAdmin.devices.allowTransactions'),
+        title: t('posAdmin.devices.mgmt.columns.typeSystem'),
+        key: 'typeSystem',
+        width: 170,
+        render: (_value, record) => (
+          <span className="dev-mgmt-inline">
+            <DeviceTypeTag value={record.deviceType} />
+            <span className="dev-mgmt-sub">{record.deviceSystem || EMPTY_VALUE}</span>
+          </span>
+        ),
+      },
+      {
+        title: t('posAdmin.devices.mgmt.columns.runtime'),
+        key: 'runtime',
+        width: 180,
+        render: (_value, record) => {
+          const online = isDeviceRuntimeOnline(record)
+          return (
+            <div className="dev-mgmt-two">
+              <span className="dev-mgmt-inline">
+                <OnlineDot online={online} t={t} />
+                <span className="dev-mgmt-sub">
+                  <RelativeTime value={record.lastHeartbeatAt} t={t} empty={t('posAdmin.devices.mgmt.heartbeatNever')} />
+                </span>
+              </span>
+              {online && record.currentCashierName ? (
+                <Tooltip title={formatDateTime(record.cashierLoginAt)}>
+                  <span className="dev-mgmt-sub dev-mgmt-ellipsis">
+                    {t('posAdmin.devices.mgmt.cashier', { name: record.currentCashierName })}
+                  </span>
+                </Tooltip>
+              ) : null}
+            </div>
+          )
+        },
+      },
+      {
+        title: t('column.status'),
+        dataIndex: 'status',
+        width: 100,
+        render: (_value: number, record) => (
+          <DeviceStatusPill status={record.status} description={record.statusDescription} t={t} />
+        ),
+      },
+      {
+        title: t('posAdmin.devices.mgmt.columns.transactions'),
         dataIndex: 'allowTransactions',
-        width: 120,
+        width: 80,
         render: (value: boolean, record) =>
           supportsTransactionGate(record.deviceSystem, record.deviceType) ? (
-            <Tag color={value ? 'green' : 'red'}>
-              {t(
-                value
-                  ? 'posAdmin.devices.transactionsAllowed'
-                  : 'posAdmin.devices.transactionsBlocked'
-              )}
-            </Tag>
+            <span className={value ? 'dev-mgmt-txn-on' : 'dev-mgmt-txn-off'}>
+              {t(value ? 'posAdmin.devices.transactionsAllowed' : 'posAdmin.devices.transactionsBlocked')}
+            </span>
           ) : (
-            <Typography.Text type="secondary">
-              {t('posAdmin.devices.transactionControlNotApplicable')}
-            </Typography.Text>
+            <Tooltip title={t('posAdmin.devices.mgmt.transactionsNotApplicableHint')}>
+              <span className="dev-mgmt-faint">{EMPTY_VALUE}</span>
+            </Tooltip>
           ),
       },
       {
-        title: t('column.createTime'),
-        dataIndex: 'createdAt',
-        width: 180,
-        render: (value: string | undefined) => formatDateTime(value),
+        title: t('column.remarks'),
+        dataIndex: 'remark',
+        width: 160,
+        render: (value: string | null | undefined) =>
+          value ? (
+            <span className="dev-mgmt-ellipsis" title={value}>{value}</span>
+          ) : (
+            <span className="dev-mgmt-faint">{EMPTY_VALUE}</span>
+          ),
       },
       {
-        title: t('posAdmin.devices.lastModified'),
-        dataIndex: 'lastModified',
-        width: 180,
-        render: (value: string | null | undefined) => formatDateTime(value),
+        title: t('posAdmin.devices.mgmt.columns.registeredAt'),
+        dataIndex: 'createdAt',
+        width: 120,
+        sorter: (left, right) => compareDateDesc(right.createdAt, left.createdAt),
+        render: (value: string | undefined) => (
+          <Tooltip title={formatDateTime(value)}>
+            <span className="dev-mgmt-mono">{formatDateOnly(value) ?? EMPTY_VALUE}</span>
+          </Tooltip>
+        ),
       },
     ]
 
-    if (!access.canManageDeviceRegistration) {
+    if (!canManage) {
       return baseColumns
     }
 
@@ -666,542 +431,325 @@ export default function DeviceRegistrationPage() {
       {
         title: t('column.action'),
         key: 'actions',
-        width: 300,
+        width: 150,
         fixed: 'right',
-        render: (_value, record) => (
-          <Space wrap>
-            <Button size="small" onClick={() => void openEditModal(record)}>
-              {t('common.edit')}
-            </Button>
-            <Button
-              type="primary"
-              size="small"
-              loading={actionDeviceId === record.id}
-              onClick={() => void runAction(record, 'activate')}
-            >
-              {t('posAdmin.devices.enable')}
-            </Button>
-            <Button
-              size="small"
-              loading={actionDeviceId === record.id}
-              onClick={() => void runAction(record, 'disable')}
-            >
-              {t('posAdmin.devices.disable')}
-            </Button>
-            <Button
-              danger
-              size="small"
-              loading={actionDeviceId === record.id}
-              onClick={() => void runAction(record, 'lock')}
-            >
-              {t('posAdmin.devices.lock')}
-            </Button>
-          </Space>
-        ),
+        align: 'right',
+        render: (_value, record) => {
+          const { primary, secondary } = getDeviceStatusActions(record.status)
+          return (
+            // 操作区点击不能冒泡到行点击（行点击会打开详情抽屉）
+            <span className="dev-mgmt-actions" onClick={(event) => event.stopPropagation()}>
+              <Button
+                type="link"
+                size="small"
+                loading={actionDeviceId === record.id}
+                onClick={() => runAction(record, primary)}
+              >
+                {statusActionLabel[primary]}
+              </Button>
+              <Button type="link" size="small" onClick={() => openDrawer(record)}>
+                {t('common.edit')}
+              </Button>
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: secondary.map((action) => ({
+                    key: action,
+                    label: statusActionLabel[action],
+                    danger: action === 'lock',
+                  })),
+                  onClick: ({ key }) => runAction(record, key as DeviceStatusAction),
+                }}
+              >
+                <Button type="text" size="small" icon={<EllipsisOutlined />} aria-label={t('common.more')} />
+              </Dropdown>
+            </span>
+          )
+        },
       },
     ]
-  }, [access.canManageDeviceRegistration, actionDeviceId, storeNameMap, t])
+  }, [canManage, actionDeviceId, storeNameMap, t])
 
-  const appColumns = useMemo<ColumnsType<AppDeviceStatus>>(() => [
-    {
-      title: t('posAdmin.devices.deviceNo'),
-      dataIndex: 'systemDeviceNumber',
-      width: 190,
-      render: (_value: string | undefined, record) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{record.systemDeviceNumber || record.hardwareId}</Typography.Text>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {record.hardwareId}
-          </Typography.Text>
-        </Space>
-      ),
-    },
-    {
-      title: t('column.store'),
-      dataIndex: 'storeCode',
-      width: 180,
-      render: (value: string | undefined) =>
-        value ? `${value}${storeNameMap[value] ? ` / ${storeNameMap[value]}` : ''}` : EMPTY_VALUE,
-    },
-    {
-      title: t('posAdmin.devices.appUsageStatus'),
-      dataIndex: 'isOnline',
-      width: 100,
-      render: (value: boolean) => (
-        <Tag color={value ? 'green' : 'default'}>
-          {t(value ? 'posAdmin.devices.appOnline' : 'posAdmin.devices.appOffline')}
-        </Tag>
-      ),
-    },
-    {
-      title: t('posAdmin.devices.deviceSystem'),
-      dataIndex: 'deviceSystem',
-      width: 110,
-      render: (_value: string | undefined, record) => renderDeviceSystemTag(record.deviceSystem || record.platform),
-    },
-    {
-      title: t('posAdmin.devices.appPackageVersion'),
-      width: 170,
-      render: (_value, record) => getAppPackageVersion(record),
-    },
-    {
-      title: t('posAdmin.devices.appRuntime'),
-      dataIndex: 'runtimeVersion',
-      width: 150,
-      ellipsis: true,
-      render: (value: string | undefined) => value || EMPTY_VALUE,
-    },
-    {
-      title: t('posAdmin.devices.appChannel'),
-      dataIndex: 'channel',
-      width: 130,
-      ellipsis: true,
-      render: (value: string | undefined) => value || EMPTY_VALUE,
-    },
-    {
-      title: t('posAdmin.devices.appUpdateSource'),
-      dataIndex: 'updateSource',
-      width: 120,
-      render: (value: string | undefined) => renderAppUpdateSourceTag(value, t),
-    },
-    {
-      title: t('posAdmin.devices.appUpdateId'),
-      dataIndex: 'updateId',
-      width: 160,
-      render: (value: string | undefined) => renderAppUpdateId(value),
-    },
-    {
-      title: t('posAdmin.devices.appLastUser'),
-      width: 160,
-      ellipsis: true,
-      render: (_value, record) => getAppDeviceUser(record, t('posAdmin.devices.appNoRecentUser')),
-    },
-    {
-      title: t('posAdmin.devices.appAuthMode'),
-      dataIndex: 'lastAuthMode',
-      width: 120,
-      render: (value: string | undefined) => value || EMPTY_VALUE,
-    },
-    {
-      title: t('posAdmin.devices.appLastSeen'),
-      dataIndex: 'lastSeenAtUtc',
-      width: 180,
-      render: (value: string | undefined) => formatDateTime(value),
-    },
-  ], [storeNameMap, t])
+  const storeOptions = stores.map((store) => ({
+    label: `${store.storeCode} / ${store.storeName}`,
+    value: store.storeCode,
+  }))
 
-  const renderStore = (device: DeviceRegistrationDetail) =>
-    device.storeCode ? `${device.storeCode}${device.storeName ? ` / ${device.storeName}` : ''}` : '--'
+  const activeFilterItems: ActiveFilterItem[] = [
+    ...(selectedStoreCode
+      ? [{
+          key: 'store',
+          label: t('column.store'),
+          value: formatStoreLabel(selectedStoreCode, getStoreName(selectedStoreCode)),
+          source: 'toolbar' as const,
+          onRemove: () => setSelectedStoreCode(undefined),
+        }]
+      : []),
+    ...(keyword.trim()
+      ? [{
+          key: 'keyword',
+          label: t('common.search'),
+          value: keyword.trim(),
+          source: 'toolbar' as const,
+          onRemove: () => setKeyword(''),
+        }]
+      : []),
+    ...(deviceType
+      ? [{
+          key: 'deviceType',
+          label: t('posAdmin.devices.deviceType'),
+          value: deviceType,
+          source: 'toolbar' as const,
+          onRemove: () => setDeviceType(undefined),
+        }]
+      : []),
+    ...(deviceSystem
+      ? [{
+          key: 'deviceSystem',
+          label: t('posAdmin.devices.deviceSystem'),
+          value: deviceSystem,
+          source: 'toolbar' as const,
+          onRemove: () => setDeviceSystem(undefined),
+        }]
+      : []),
+    ...(onlineFilter
+      ? [{
+          key: 'online',
+          label: t('posAdmin.devices.onlineStatus'),
+          value: t(onlineFilter === 'online' ? 'posAdmin.devices.online' : 'posAdmin.devices.offline'),
+          source: 'toolbar' as const,
+          onRemove: () => setOnlineFilter(undefined),
+        }]
+      : []),
+  ]
 
-  const refreshCurrentView = () => {
-    if (viewMode === 'appUsage') {
-      void loadAppDevices()
-      return
-    }
-
-    if (viewMode === 'activationCodes') {
-      return
-    }
-
-    void loadDevices()
+  function clearFilters() {
+    setSelectedStoreCode(undefined)
+    setKeyword('')
+    setDeviceType(undefined)
+    setDeviceSystem(undefined)
+    setOnlineFilter(undefined)
+    setStatusTab('all')
   }
 
-  const pageTitleKey = viewMode === 'appUsage'
-    ? 'posAdmin.devices.appUsageTitle'
-    : viewMode === 'activationCodes'
-      ? 'posAdmin.devices.activation.title'
-      : 'posAdmin.devices.title'
+  const viewOptions = [
+    ...(canViewLegacyDeviceRegistration
+      ? [
+          { label: t('posAdmin.devices.viewRegistered'), value: 'registered' as const },
+          { label: t('posAdmin.devices.viewAppUsage'), value: 'appUsage' as const },
+        ]
+      : []),
+    ...(canManageAnyActivationCodes
+      ? [{ label: t('posAdmin.devices.activation.view'), value: 'activationCodes' as const }]
+      : []),
+  ]
 
   return (
-    <>
-      <Card
-        title={t(pageTitleKey)}
-        extra={
-          <Space wrap>
-            <Segmented<DeviceRegistrationViewMode>
-              value={viewMode}
-              onChange={(nextViewMode) => {
-                setSelectedDeviceSystem(undefined)
-                setViewMode(nextViewMode)
-              }}
+    <PageContainer
+      compact
+      title={t('posAdmin.devices.title')}
+      subtitle={
+        viewMode === 'registered' && items.length
+          ? t('posAdmin.devices.mgmt.subtitle', { total: scopeCounts.total, online: scopeCounts.online })
+          : undefined
+      }
+      extra={
+        viewOptions.length > 1 ? (
+          <Segmented<DeviceRegistrationViewMode>
+            value={viewMode}
+            onChange={(nextViewMode) => setViewMode(nextViewMode)}
+            options={viewOptions}
+          />
+        ) : null
+      }
+    >
+      {viewMode === 'activationCodes' ? (
+        <div className="dev-mgmt-card">
+          <DeviceActivationCodePanel
+            canManage={canManageActivationCodes}
+            canManageMobile={canManageMobileActivationCodes}
+          />
+        </div>
+      ) : viewMode === 'appUsage' ? (
+        <AppUsagePanel
+          stores={stores}
+          storeNameMap={storeNameMap}
+          selectedStoreCode={selectedStoreCode}
+          onStoreChange={setSelectedStoreCode}
+        />
+      ) : (
+        <div className="dev-mgmt-card">
+          <div className="dev-mgmt-toolbar">
+            <Input
+              allowClear
+              prefix={<SearchOutlined className="dev-mgmt-faint" />}
+              placeholder={t('posAdmin.devices.mgmt.searchPlaceholder')}
+              style={{ width: 280 }}
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+            />
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder={t('posAdmin.devices.filterByStore')}
+              style={{ width: 220 }}
+              value={selectedStoreCode}
+              onChange={(value) => setSelectedStoreCode(value)}
+              options={storeOptions}
+            />
+            <Select
+              allowClear
+              placeholder={t('posAdmin.devices.filterByDeviceType')}
+              style={{ width: 150 }}
+              value={deviceType}
+              onChange={(value) => setDeviceType(value)}
+              options={deviceTypeOptions.map(renderCountedOption)}
+            />
+            <Select
+              allowClear
+              placeholder={t('posAdmin.devices.filterByDeviceSystem')}
+              style={{ width: 140 }}
+              value={deviceSystem}
+              onChange={(value) => setDeviceSystem(value)}
+              options={deviceSystemOptions.map(renderCountedOption)}
+            />
+            <Select<DeviceOnlineFilter>
+              allowClear
+              placeholder={t('posAdmin.devices.filterByOnline')}
+              style={{ width: 130 }}
+              value={onlineFilter}
+              onChange={(value) => setOnlineFilter(value)}
               options={[
-                ...(canViewLegacyDeviceRegistration
-                  ? [
-                      { label: t('posAdmin.devices.viewRegistered'), value: 'registered' as const },
-                      { label: t('posAdmin.devices.viewAppUsage'), value: 'appUsage' as const },
-                    ]
-                  : []),
-                ...(canManageAnyActivationCodes
-                  ? [{
-                      label: t('posAdmin.devices.activation.view'),
-                      value: 'activationCodes' as const,
-                    }]
-                  : []),
+                { label: t('posAdmin.devices.online'), value: 'online' },
+                { label: t('posAdmin.devices.offline'), value: 'offline' },
               ]}
             />
-            {viewMode !== 'activationCodes' ? (
-              <Select
-                allowClear
-                placeholder={t('posAdmin.devices.filterByStore')}
-                style={{ width: 240 }}
-                value={selectedStoreCode}
-                onChange={(value) => setSelectedStoreCode(value)}
-                options={stores.map((store) => ({
-                  label: `${store.storeCode} / ${store.storeName}`,
-                  value: store.storeCode,
-                }))}
-              />
-            ) : null}
-            {viewMode === 'registered' ? (
-              <Select
-                allowClear
-                placeholder={t('posAdmin.devices.filterByDeviceType')}
-                style={{ width: 160 }}
-                value={selectedDeviceType}
-                onChange={(value) => setSelectedDeviceType(value)}
-                options={DEVICE_TYPE_OPTIONS.map((deviceType) => ({
-                  label: renderDeviceTypeTag(deviceType),
-                  value: deviceType,
-                }))}
-              />
-            ) : null}
-            {viewMode !== 'activationCodes' ? (
-              <Select
-                allowClear
-                placeholder={t('posAdmin.devices.filterByDeviceSystem')}
-                style={{ width: 160 }}
-                value={selectedDeviceSystem}
-                onChange={(value) => setSelectedDeviceSystem(value)}
-                options={(viewMode === 'registered'
-                  ? REGISTERED_DEVICE_SYSTEM_OPTIONS
-                  : APP_DEVICE_SYSTEM_OPTIONS
-                ).map((deviceSystem) => ({
-                  label:
-                    deviceSystem === 'Other'
-                      ? <Tag>{t('posAdmin.devices.deviceSystemOther')}</Tag>
-                      : renderDeviceSystemTag(deviceSystem),
-                  value: deviceSystem,
-                }))}
-              />
-            ) : null}
-            {viewMode === 'appUsage' ? (
-              <>
-                <Select<AppDeviceOnlineState>
-                  placeholder={t('posAdmin.devices.filterByOnline')}
-                  style={{ width: 140 }}
-                  value={selectedAppOnlineState}
-                  onChange={(value) => setSelectedAppOnlineState(value)}
-                  options={APP_ONLINE_STATE_OPTIONS.map((onlineState) => ({
-                    label: t(`posAdmin.devices.appOnlineFilters.${onlineState}`),
-                    value: onlineState,
-                  }))}
-                />
-                <Input.Search
-                  allowClear
-                  placeholder={t('posAdmin.devices.appSearchPlaceholder')}
-                  style={{ width: 220 }}
-                  onSearch={(value) => setAppKeyword(value.trim())}
-                  onChange={(event) => {
-                    if (!event.target.value) {
-                      setAppKeyword('')
-                    }
-                  }}
-                />
-              </>
-            ) : null}
-            {viewMode === 'registered' &&
-            access.canManageDeviceRegistration &&
-            access.canManageSystemSettings ? (
-              <Tooltip
-                title={!selectedStoreCode ? t('posAdmin.devices.emergencySelectStoreFirst') : undefined}
-              >
+            <span className="dev-mgmt-toolbar-spacer" />
+            {canIssueEmergencyLogin ? (
+              <Tooltip title={!selectedStoreCode ? t('posAdmin.devices.emergencySelectStoreFirst') : undefined}>
                 <Button
                   danger
+                  icon={<SafetyCertificateOutlined />}
                   disabled={!selectedStoreCode}
-                  onClick={() => void openEmergencyModal()}
+                  onClick={() => setEmergencyOpen(true)}
                 >
                   {t('posAdmin.devices.emergencyAction')}
                 </Button>
               </Tooltip>
             ) : null}
-            {viewMode !== 'activationCodes' ? (
-              <Button onClick={refreshCurrentView}>{t('common.refresh')}</Button>
-            ) : null}
-          </Space>
-        }
-      >
-        {viewMode === 'activationCodes' ? (
-          <DeviceActivationCodePanel
-            canManage={canManageActivationCodes}
-            canManageMobile={canManageMobileActivationCodes}
-          />
-        ) : viewMode === 'appUsage' ? (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Typography.Text type="secondary">
-              {t('posAdmin.devices.appUsageNote')}
-            </Typography.Text>
-            <Row gutter={[12, 12]}>
-              <Col xs={12} md={6}>
-                <Statistic title={t('posAdmin.devices.appSummaryTotal')} value={appSummary.total} />
-              </Col>
-              <Col xs={12} md={6}>
-                <Statistic title={t('posAdmin.devices.appSummaryOnline')} value={appSummary.online} />
-              </Col>
-              <Col xs={12} md={6}>
-                <Statistic title={t('posAdmin.devices.appSummaryAndroid')} value={appSummary.android} />
-              </Col>
-              <Col xs={12} md={6}>
-                <Statistic title={t('posAdmin.devices.appSummaryIos')} value={appSummary.ios} />
-              </Col>
-            </Row>
-            <MeasuredTable<AppDeviceStatus> metricId="pos-admin.device-registration.table-1"
-              rowKey={(record) => record.id || record.hardwareId}
-              loading={appLoading}
-              columns={appColumns}
-              dataSource={appItems}
-              scroll={{ x: 1600 }}
-              pagination={false}
-            />
-          </Space>
-        ) : (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Typography.Text type="secondary">
-              {t('posAdmin.devices.deviceNote')}
-            </Typography.Text>
-            <MeasuredTable<DeviceRegistrationItem> metricId="pos-admin.device-registration.table-2"
-              rowKey="id"
-              loading={loading}
-              columns={columns}
-              dataSource={items}
-              scroll={{ x: access.canManageDeviceRegistration ? 1770 : 1470 }}
-              pagination={false}
-            />
-          </Space>
-        )}
-      </Card>
-
-      <Modal
-        open={editOpen}
-        title={t('posAdmin.devices.editTitle')}
-        okText={t('common.save')}
-        cancelText={t('common.cancel')}
-        confirmLoading={editSaving}
-        okButtonProps={{ disabled: editLoading || !editingDevice }}
-        onOk={() => void submitEditModal()}
-        onCancel={closeEditModal}
-        destroyOnHidden
-        width={760}
-      >
-        <Spin spinning={editLoading}>
-          {editingDevice ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions bordered column={2} size="small">
-              <Descriptions.Item label={t('posAdmin.devices.deviceNo')}>
-                {editingDevice.systemDeviceNumber || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('posAdmin.devices.hardwareId')}>
-                {editingDevice.hardwareId || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('column.store')}>
-                {renderStore(editingDevice)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('column.status')}>
-                <Tag color={STATUS_COLOR_MAP[editingDevice.status] ?? 'default'}>
-                  {editingDevice.statusDescription || String(editingDevice.status)}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('column.createTime')}>
-                {formatDateTime(editingDevice.createdAt)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('column.creator')}>
-                {editingDevice.createdBy || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('posAdmin.devices.lastModified')}>
-                {formatDateTime(editingDevice.lastModified)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('column.updater')}>
-                {editingDevice.lastModifiedBy || '--'}
-              </Descriptions.Item>
-            </Descriptions>
-
-            <Form form={editForm} layout="vertical">
-              <Form.Item
-                name="deviceType"
-                label={t('posAdmin.devices.deviceType')}
-                rules={[{ required: true, message: t('posAdmin.devices.deviceTypeRequired') }]}
-              >
-                <Select
-                  disabled={isEnabledLegacyIosPos(
-                    editingDevice.status,
-                    editingDevice.deviceSystem,
-                    editingDevice.deviceType,
-                  )}
-                  options={DEVICE_TYPE_OPTIONS.map((deviceType) => ({
-                    label: renderDeviceTypeTag(deviceType),
-                    value: deviceType,
-                  }))}
-                />
-              </Form.Item>
-              <Form.Item
-                name="deviceSystem"
-                label={t('posAdmin.devices.deviceSystem')}
-                rules={[{ required: true, message: t('posAdmin.devices.deviceSystemRequired') }]}
-              >
-                <Select
-                  disabled={
-                    !canEditRegisteredDeviceSystem(
-                      editingDevice.status,
-                      editingDevice.deviceSystem,
-                      editingDevice.deviceType,
-                    )
-                  }
-                  options={getRegisteredDeviceSystemEditOptions(
-                    editingDevice.status,
-                    editingDevice.deviceSystem,
-                    editingDevice.deviceType,
-                  ).map((deviceSystem) => ({
-                    label: renderDeviceSystemTag(deviceSystem),
-                    value: deviceSystem,
-                  }))}
-                />
-              </Form.Item>
-              <Form.Item
-                name="allowTransactions"
-                label={t('posAdmin.devices.allowTransactions')}
-                valuePropName="checked"
-                extra={t(
-                  editingSupportsTransactionGate
-                    ? 'posAdmin.devices.allowTransactionsHint'
-                    : 'posAdmin.devices.allowTransactionsUnsupportedHint'
-                )}
-              >
-                <Switch disabled={!editingSupportsTransactionGate} />
-              </Form.Item>
-              <Form.Item name="remark" label={t('column.remarks')}>
-                <Input.TextArea
-                  rows={3}
-                  maxLength={500}
-                  showCount
-                  placeholder={t('posAdmin.devices.remarkPlaceholder')}
-                />
-              </Form.Item>
-            </Form>
-          </Space>
-          ) : null}
-        </Spin>
-      </Modal>
-
-      <Modal
-        open={emergencyOpen}
-        title={t('posAdmin.devices.emergencyTitle')}
-        onCancel={closeEmergencyModal}
-        destroyOnHidden
-        width={680}
-        footer={
-          emergencyToken ? (
-            <Space>
-              <Button onClick={() => void copyEmergencyToken()}>
-                {t('posAdmin.devices.emergencyCopy')}
-              </Button>
-              <Button onClick={downloadEmergencyQrCode}>
-                {t('posAdmin.devices.emergencyDownload')}
-              </Button>
-              <Button type="primary" onClick={closeEmergencyModal}>
-                {t('common.close')}
-              </Button>
-            </Space>
-          ) : emergencyGrant?.status === 'Active' ? (
-            <Space>
-              <Popconfirm
-                title={t('posAdmin.devices.emergencyRevokeConfirm')}
-                onConfirm={() => void revokeEmergencyGrant()}
-              >
-                <Button danger loading={emergencyRevoking}>
-                  {t('posAdmin.devices.emergencyRevoke')}
-                </Button>
-              </Popconfirm>
-              <Button onClick={closeEmergencyModal}>{t('common.close')}</Button>
-            </Space>
-          ) : (
-            <Space>
-              <Button onClick={closeEmergencyModal}>{t('common.cancel')}</Button>
+            <Tooltip title={t('common.refresh')}>
               <Button
-                danger
-                type="primary"
-                loading={emergencySaving}
-                disabled={emergencyLoading}
-                onClick={() => void submitEmergencyGrant()}
-              >
-                {t('posAdmin.devices.emergencyCreate')}
-              </Button>
-            </Space>
-          )
-        }
-      >
-        <Spin spinning={emergencyLoading}>
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Alert
-              type="warning"
-              showIcon
-              message={t('posAdmin.devices.emergencyWarningTitle')}
-              description={t('posAdmin.devices.emergencyWarningDescription')}
-            />
-            <Descriptions bordered column={1} size="small">
-              <Descriptions.Item label={t('column.store')}>
-                {selectedStoreCode
-                  ? `${selectedStoreCode}${storeNameMap[selectedStoreCode] ? ` / ${storeNameMap[selectedStoreCode]}` : ''}`
-                  : EMPTY_VALUE}
-              </Descriptions.Item>
-              {emergencyGrant ? (
-                <>
-                  <Descriptions.Item label={t('posAdmin.devices.emergencyStatus')}>
-                    <Tag color={emergencyGrant.status === 'Active' ? 'red' : 'default'}>
-                      {t(`posAdmin.devices.emergencyStatuses.${emergencyGrant.status}`)}
-                    </Tag>
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('posAdmin.devices.emergencyGrantId')}>
-                    <Typography.Text copyable>{emergencyGrant.grantId}</Typography.Text>
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('posAdmin.devices.emergencyExpiresAt')}>
-                    {formatDateTime(emergencyGrant.expiresAtUtc)}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('posAdmin.devices.emergencyReason')}>
-                    {emergencyGrant.reason || EMPTY_VALUE}
-                  </Descriptions.Item>
-                </>
-              ) : null}
-            </Descriptions>
+                icon={<ReloadOutlined spin={loading} />}
+                aria-label={t('common.refresh')}
+                onClick={() => void loadDevices()}
+              />
+            </Tooltip>
+          </div>
 
-            {emergencyToken ? (
-              <Space direction="vertical" align="center" size={12} style={{ width: '100%' }}>
-                <div id="emergency-login-qr">
-                  <QRCode value={emergencyToken} size={320} errorLevel="M" />
-                </div>
-                <Alert
-                  type="info"
-                  showIcon
-                  message={t('posAdmin.devices.emergencyTokenOneTime')}
-                />
-              </Space>
-            ) : emergencyGrant?.status === 'Active' ? (
-              <Alert type="info" showIcon message={t('posAdmin.devices.emergencyActiveSummary')} />
-            ) : (
-              <Form form={emergencyForm} layout="vertical">
-                <Form.Item
-                  name="reason"
-                  label={t('posAdmin.devices.emergencyReason')}
-                  rules={[
-                    { required: true, message: t('posAdmin.devices.emergencyReasonRequired') },
-                    { max: 200, message: t('posAdmin.devices.emergencyReasonTooLong') },
-                  ]}
+          <div className="dev-mgmt-status-tabs" role="tablist">
+            {DEVICE_STATUS_TABS.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={statusTab === tab}
+                className={`dev-mgmt-status-tab ${statusTab === tab ? 'dev-mgmt-status-tab-active' : ''}`}
+                onClick={() => setStatusTab(tab)}
+              >
+                {t(`posAdmin.devices.mgmt.statusTabs.${tab}`)}
+                <span
+                  className={`dev-mgmt-status-count ${
+                    tab === 'pending' && statusCounts.pending > 0 ? 'dev-mgmt-status-count-alert' : ''
+                  }`}
                 >
-                  <Input.TextArea rows={3} maxLength={200} showCount />
-                </Form.Item>
-              </Form>
-            )}
-          </Space>
-        </Spin>
-      </Modal>
-    </>
+                  {statusCounts[tab]}
+                </span>
+              </button>
+            ))}
+            <Tooltip title={t('posAdmin.devices.deviceNote')} placement="topRight">
+              <InfoCircleOutlined className="dev-mgmt-status-tab-info" aria-label={t('posAdmin.devices.deviceNote')} />
+            </Tooltip>
+          </div>
+
+          {scopeCounts.pending > 0 && statusTab !== 'pending' ? (
+            <div className="dev-mgmt-pending">
+              <span className="dev-mgmt-pending-title">
+                {t('posAdmin.devices.mgmt.pendingBanner', { count: scopeCounts.pending })}
+              </span>
+              <span className="dev-mgmt-pending-text">{t('posAdmin.devices.deviceNote')}</span>
+              <Button size="small" onClick={() => setStatusTab('pending')}>
+                {t('posAdmin.devices.mgmt.pendingBannerAction')}
+              </Button>
+            </div>
+          ) : null}
+
+          {serverTotal > items.length || activeFilterItems.length ? (
+            <div className="dev-mgmt-bars">
+              {serverTotal > items.length ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={t('posAdmin.devices.mgmt.truncated', { loaded: items.length, total: serverTotal })}
+                />
+              ) : null}
+              {activeFilterItems.length ? (
+                <ActiveFilterBar items={activeFilterItems} onClearAll={clearFilters} />
+              ) : null}
+            </div>
+          ) : null}
+
+          <MeasuredTable<DeviceRegistrationItem>
+            metricId="pos-admin.device-registration.table-2"
+            className="dev-mgmt-table"
+            rowKey="id"
+            size="middle"
+            loading={loading}
+            columns={columns}
+            dataSource={visibleItems}
+            scroll={{ x: canManage ? 1350 : 1200 }}
+            rowClassName={() => 'dev-mgmt-row-clickable'}
+            onRow={(record) => ({ onClick: () => openDrawer(record) })}
+            locale={{
+              emptyText: activeFilterItems.length || statusTab !== 'all' ? (
+                <div style={{ padding: '24px 0' }}>
+                  <div className="dev-mgmt-sub">{t('posAdmin.devices.mgmt.emptyFiltered')}</div>
+                  <Button type="link" onClick={clearFilters}>{t('posAdmin.devices.mgmt.clearFilters')}</Button>
+                </div>
+              ) : undefined,
+            }}
+            pagination={{
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              showSizeChanger: true,
+              pageSizeOptions: [20, 50, 100, 200],
+              showTotal: (total) => t('common.totalCount', { count: total }),
+              hideOnSinglePage: visibleItems.length <= 20,
+              onChange: (current, pageSize) => setPagination({ current, pageSize }),
+            }}
+          />
+        </div>
+      )}
+
+      <DeviceDetailDrawer
+        device={drawerDevice}
+        storeName={getStoreName(drawerDevice?.storeCode)}
+        canManage={canManage}
+        actionLoading={drawerDevice !== null && actionDeviceId === drawerDevice.id}
+        onClose={closeDrawer}
+        onSaved={() => {
+          closeDrawer()
+          void loadDevices()
+        }}
+        onStatusAction={runAction}
+      />
+
+      <EmergencyLoginModal
+        open={emergencyOpen}
+        storeCode={selectedStoreCode}
+        storeLabel={formatStoreLabel(selectedStoreCode, getStoreName(selectedStoreCode))}
+        onClose={() => setEmergencyOpen(false)}
+      />
+    </PageContainer>
   )
 }

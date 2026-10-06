@@ -1,0 +1,412 @@
+/* 设备管理页（普通 CSS + 全局前缀类名：测试打包把 .css 当空模块，不能用 CSS Modules） */
+
+.dev-mgmt-card {
+  background: var(--ant-color-bg-container, #fff);
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 12px;
+  padding: 16px 18px 6px;
+}
+
+.dev-mgmt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dev-mgmt-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+/* 状态页签：带计数，「待确认」有待办时用琥珀色强调 */
+.dev-mgmt-status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px 20px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #eef0f4);
+}
+
+.dev-mgmt-status-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 9px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dev-mgmt-status-tab:hover {
+  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+}
+
+.dev-mgmt-status-tab:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.dev-mgmt-status-tab-active {
+  color: var(--ant-color-primary, #1677ff);
+  border-bottom-color: var(--ant-color-primary, #1677ff);
+  font-weight: 600;
+}
+
+.dev-mgmt-status-count {
+  min-width: 22px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: #f1f3f6;
+  color: #5b6472;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 500;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-mgmt-status-tab-active .dev-mgmt-status-count {
+  background: #e6f0ff;
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.dev-mgmt-status-count-alert {
+  background: #fff3d6;
+  color: #ad6800;
+}
+
+.dev-mgmt-status-tab-info {
+  margin-left: auto;
+  padding-bottom: 9px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  cursor: help;
+}
+
+/* 待确认提醒条 */
+.dev-mgmt-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid #ffe2a8;
+  border-radius: 10px;
+  background: #fffaf0;
+}
+
+.dev-mgmt-pending-title {
+  color: #874d00;
+  font-weight: 600;
+}
+
+.dev-mgmt-pending-text {
+  flex: 1 1 320px;
+  color: #8c6d3f;
+  font-size: 12.5px;
+}
+
+.dev-mgmt-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* 表格 */
+.dev-mgmt-table .ant-table-thead > tr > th,
+.dev-mgmt-table .ant-table-tbody > tr > td {
+  padding-inline: 12px;
+}
+
+.dev-mgmt-table .ant-table-tbody > tr > td {
+  padding-block: 10px;
+}
+
+.dev-mgmt-row-clickable {
+  cursor: pointer;
+}
+
+.dev-mgmt-two {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.dev-mgmt-strong {
+  font-weight: 600;
+}
+
+.dev-mgmt-mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
+}
+
+.dev-mgmt-sub {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.dev-mgmt-faint {
+  color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.25));
+}
+
+.dev-mgmt-ellipsis {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dev-mgmt-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.dev-mgmt-inline .ant-tag {
+  margin-inline-end: 0;
+}
+
+/* 带圆点的状态文字：运行（在线/离线）与设备状态共用 */
+.dev-mgmt-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.dev-mgmt-dot::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c3c9d4;
+}
+
+.dev-mgmt-dot-online {
+  color: #0b7a3c;
+}
+
+.dev-mgmt-dot-online::before {
+  background: #12a150;
+  box-shadow: 0 0 0 3px rgba(18, 161, 80, 0.14);
+}
+
+.dev-mgmt-dot-offline {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+/* 设备状态胶囊 */
+.dev-mgmt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 9px 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  background: #f1f3f6;
+  color: #5b6472;
+}
+
+.dev-mgmt-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dev-mgmt-pill-pending {
+  background: #fff3d6;
+  color: #ad6800;
+}
+
+.dev-mgmt-pill-enabled {
+  background: #e7f6ec;
+  color: #0b7a3c;
+}
+
+.dev-mgmt-pill-locked {
+  background: #fdecec;
+  color: #c4302b;
+}
+
+.dev-mgmt-txn-on {
+  color: #0b7a3c;
+}
+
+.dev-mgmt-txn-off {
+  color: #c4302b;
+  font-weight: 500;
+}
+
+.dev-mgmt-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.dev-mgmt-actions .ant-btn {
+  padding-inline: 7px;
+}
+
+/* App 使用情况：紧凑统计条 */
+.dev-mgmt-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dev-mgmt-stat {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f7f8fa;
+}
+
+.dev-mgmt-stat-label {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 12px;
+}
+
+.dev-mgmt-stat-value {
+  margin-top: 2px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-mgmt-stat-online .dev-mgmt-stat-value {
+  color: #0b7a3c;
+}
+
+.dev-mgmt-note {
+  margin: -4px 0 12px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+/* 详情抽屉 */
+.dev-mgmt-drawer .ant-drawer-body {
+  padding: 4px 24px 16px;
+}
+
+.dev-mgmt-drawer-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dev-mgmt-drawer-title {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.dev-mgmt-drawer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.dev-mgmt-section {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.dev-mgmt-section:last-child {
+  border-bottom: 0;
+}
+
+.dev-mgmt-section-title {
+  margin-bottom: 10px;
+  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dev-mgmt-kv {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px 12px;
+  font-size: 13px;
+}
+
+.dev-mgmt-kv dt {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+.dev-mgmt-kv dd {
+  margin: 0;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.dev-mgmt-drawer-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dev-mgmt-drawer-footer-spacer {
+  flex: 1 1 auto;
+}
+
+.dev-mgmt-drawer .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dev-mgmt-status-tab {
+    transition: none;
+  }
+}
+
+.dev-mgmt-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+
+/* 筛选下拉：取值 + 右侧台数 */
+.dev-mgmt-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dev-mgmt-option-count {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 选中后回显在输入框里时不显示台数 */
+.ant-select-selection-item .dev-mgmt-option-count {
+  display: none;
+}
