@@ -108,14 +108,14 @@ public sealed class ContainerNewProductsRulesTests
     }
 
     [Fact]
-    public void QueryWindow_UsesInclusiveSevenBackAndFourteenForwardDays()
+    public void QueryWindow_UsesInclusiveSevenBackAndTwentyOneForwardDays()
     {
         var (from, toExclusive) = ContainerNewProductsReactService.BuildWindow(new DateTime(2026, 9, 28));
 
         Assert.Equal(new DateTime(2026, 9, 21), from);
-        Assert.Equal(new DateTime(2026, 10, 13), toExclusive);
-        Assert.True(new DateTime(2026, 10, 12) < toExclusive);
-        Assert.False(new DateTime(2026, 10, 13) < toExclusive);
+        Assert.Equal(new DateTime(2026, 10, 20), toExclusive);
+        Assert.True(new DateTime(2026, 10, 19) < toExclusive);
+        Assert.False(new DateTime(2026, 10, 20) < toExclusive);
     }
 
     [Theory]

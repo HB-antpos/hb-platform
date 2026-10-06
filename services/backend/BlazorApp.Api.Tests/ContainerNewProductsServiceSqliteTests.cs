@@ -42,9 +42,9 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         database.Insertable(new Container { ContainerCode = "C-LATE", ContainerNumber = "LATE", ActualArrivalDate = today.AddDays(-5), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
         database.Insertable(new Container { ContainerCode = "C-EARLY", ContainerNumber = "EARLY", ActualArrivalDate = today.AddDays(-12), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
         database.Insertable(new Container { ContainerCode = "C-FALL", ContainerNumber = "FALL", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(2) }).ExecuteCommand();
-        // 窗口外：区间结束日在 9~11 天前、起始日在 15~17 天后，都不应出现
+        // 窗口外：区间结束日在 9~11 天前、起始日在 22~24 天后（未来 3 周之外），都不应出现
         database.Insertable(new Container { ContainerCode = "C-OLD", ContainerNumber = "OLD", ActualArrivalDate = today.AddDays(-20) }).ExecuteCommand();
-        database.Insertable(new Container { ContainerCode = "C-FAR", ContainerNumber = "FAR", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(12) }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-FAR", ContainerNumber = "FAR", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(19) }).ExecuteCommand();
         database.Insertable(new[]
         {
             new ContainerDetail { DetailCode = "D1", ContainerCode = "C-LATE", ProductCode = "P-AUDIT" },
@@ -70,7 +70,7 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.Equal(new[] { "C-EARLY", "C-LATE", "C-LATE", "C-FALL" }, result.Items.Select(x => x.ContainerCode));
         Assert.DoesNotContain(result.Items, x => x.ProductCode == "P-WRONG");
         var storeFrom = DateOnly.FromDateTime(today.AddDays(-7));
-        var storeTo = DateOnly.FromDateTime(today.AddDays(14));
+        var storeTo = DateOnly.FromDateTime(today.AddDays(21));
         Assert.All(result.Items, x =>
         {
             // 区间与窗口有交集，且结束日 = 起始日 + 4 个工作日
