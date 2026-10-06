@@ -9,14 +9,19 @@ import {
   buildLinklyCredentialPayload,
   buildCreateLinklyTerminalPayload,
   buildUpdateLinklyTerminalPayload,
+  buildLinklyActivationChecklist,
   buildSquareTokenPayload,
   canActivateLinklyConfiguration,
   createLinklyCredentialFormValues,
   createLinklyTerminalFormValues,
   createSquareTokenFormValues,
+  describeElapsedSince,
   getEnvironmentStatus,
   getLinklyTerminalAssignmentOwner,
+  getTerminalDeviceCodes,
+  getTerminalHealthTone,
   resolvePaymentTerminalSettingsErrorMessage,
+  suggestNextLaneNo,
 } from './pageLogic'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -267,5 +272,104 @@ const routeSource = readFileSync('src/router/routes.tsx', 'utf8')
 assert(routeSource.includes("path: '/system/payment-terminal-settings'"), 'route should include payment terminal path')
 assert(routeSource.includes("title: 'menu.paymentTerminalSettings'"), 'route should include menu key')
 assert(routeSource.includes("accessKey: 'canManageSystemSettings'"), 'route should use system settings access')
+
+// 启用检查清单：必须与 canActivateLinklyConfiguration 同一口径，并能点名到具体设备。
+const unpairedTerminal = {
+  ...activationBase.terminals[0],
+  terminalId: 'terminal-2',
+  laneNo: 2,
+  displayName: 'Back Counter',
+  pairingState: 'Unpaired' as const,
+  selectedDeviceCount: 0,
+}
+const checklistFixtures = [
+  activationBase,
+  { ...activationBase, terminals: [] },
+  { ...activationBase, mode: 'Active' as const },
+  { ...activationBase, devices: [activationBase.devices[0], { ...activationBase.devices[0], deviceCode: 'POS-02' }] },
+  {
+    ...activationBase,
+    terminals: [...activationBase.terminals, unpairedTerminal],
+    devices: [activationBase.devices[0], { ...activationBase.devices[0], deviceCode: 'POS-02', terminalId: 'terminal-2' }],
+  },
+]
+for (const fixture of checklistFixtures) {
+  assertEqual(
+    buildLinklyActivationChecklist(fixture).canActivate,
+    canActivateLinklyConfiguration(fixture),
+    'activation checklist must share the activation rule',
+  )
+}
+
+const readyChecklist = buildLinklyActivationChecklist(activationBase)
+assertEqual(readyChecklist.terminalCount, 1, 'checklist counts terminals')
+assertEqual(readyChecklist.readyTerminalCount, 1, 'checklist counts ready terminals')
+assertEqual(readyChecklist.assignedDeviceCount, 1, 'checklist counts enabled POS with a Cloud selection')
+assertEqual(readyChecklist.conflicts.length, 0, 'a single selection is not a conflict')
+
+const conflictChecklist = buildLinklyActivationChecklist(checklistFixtures[3])
+assertEqual(conflictChecklist.conflicts.length, 1, 'two enabled POS on one terminal is one conflict')
+assertEqual(conflictChecklist.conflicts[0].deviceCodes.join(','), 'POS-01,POS-02', 'conflict names every POS involved')
+
+const notReadyChecklist = buildLinklyActivationChecklist(checklistFixtures[4])
+assertEqual(notReadyChecklist.notReadySelections.length, 1, 'selecting an unpaired terminal is reported')
+assertEqual(notReadyChecklist.notReadySelections[0].deviceCode, 'POS-02', 'not-ready issue names the POS')
+
+const disabledConflictChecklist = buildLinklyActivationChecklist({
+  ...activationBase,
+  devices: [activationBase.devices[0], { ...activationBase.devices[0], deviceCode: 'POS-OFF', enabled: false }],
+})
+assertEqual(disabledConflictChecklist.conflicts.length, 0, 'disabled POS selections do not block activation')
+
+const orphanManagement = {
+  ...activationBase,
+  devices: [
+    activationBase.devices[0],
+    { deviceCode: 'POS-GONE', deviceSystem: '', enabled: false, deviceMissing: true, terminalId: 'terminal-1', revision: 3 },
+  ],
+}
+const orphanChecklist = buildLinklyActivationChecklist(orphanManagement)
+assertEqual(orphanChecklist.orphanSelections.length, 1, 'missing device that still holds a terminal is reported')
+assertEqual(orphanChecklist.canActivate, true, 'missing device selections do not block activation')
+assertEqual(
+  getTerminalDeviceCodes(orphanManagement, 'terminal-1').join(','),
+  'POS-01,POS-GONE',
+  'terminal device list includes missing devices that still hold it',
+)
+assertEqual(buildLinklyActivationChecklist(null).canActivate, false, 'no management data cannot activate')
+
+assertEqual(suggestNextLaneNo([]), 1, 'first terminal defaults to lane 1')
+assertEqual(suggestNextLaneNo([{ laneNo: 1 }, { laneNo: 2 }, { laneNo: 4 }]), 3, 'new terminal fills the first unused lane')
+assertEqual(suggestNextLaneNo([{ laneNo: 2 }]), 1, 'lane 1 is reused when free')
+
+assertEqual(getTerminalHealthTone('Healthy'), 'healthy', 'Healthy maps to healthy')
+assertEqual(getTerminalHealthTone(' unhealthy '), 'unhealthy', 'health tone ignores case and spaces')
+assertEqual(getTerminalHealthTone('Degraded'), 'other', 'unknown health values are shown as-is')
+assertEqual(getTerminalHealthTone(null), 'unchecked', 'missing health means not checked yet')
+
+const healthNow = new Date('2026-10-06T10:00:00Z')
+assertEqual(describeElapsedSince(null, healthNow).kind, 'never', 'missing timestamp is never')
+assertEqual(describeElapsedSince('2026-10-06T09:59:40Z', healthNow).kind, 'justNow', 'under a minute is just now')
+const minutesAgo = describeElapsedSince('2026-10-06 09:55:00', healthNow)
+assertEqual(minutesAgo.kind === 'minutes' ? minutesAgo.count : -1, 5, 'SQL timestamps without Z are treated as UTC')
+const hoursAgo = describeElapsedSince('2026-10-06T07:10:00Z', healthNow)
+assertEqual(hoursAgo.kind === 'hours' ? hoursAgo.count : -1, 2, 'hours are floored')
+const daysAgo = describeElapsedSince('2026-10-03T09:00:00Z', healthNow)
+assertEqual(daysAgo.kind === 'days' ? daysAgo.count : -1, 3, 'days are floored')
+
+// 页面结构契约：Square 是按环境的全局设置，不能再挂在门店选择器之下。
+const pageSource = readFileSync('src/pages/System/PaymentTerminalSettings/index.tsx', 'utf8')
+const squareCardIndex = pageSource.indexOf('className="pts-square"')
+const storeSelectIndex = pageSource.indexOf('onChange={handleStoreChange}')
+assert(squareCardIndex > 0 && storeSelectIndex > 0, 'page should render the Square card and the store selector')
+assert(squareCardIndex < storeSelectIndex, 'Square card should render before (outside) the Linkly store selector')
+assert(
+  pageSource.includes("environment === 'Sandbox'") && pageSource.includes('pts-env-banner'),
+  'sandbox environment should show a banner',
+)
+assert(
+  pageSource.includes('buildLinklyActivationChecklist(linklyManagement)'),
+  'activation button state should come from the shared checklist',
+)
 
 console.log('paymentTerminalSettings.logic.test: ok')
