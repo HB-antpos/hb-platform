@@ -2,6 +2,7 @@
 // 全部写成不依赖 React / antd 的纯函数，便于在 Node 下直接做单元测试。
 
 import { ProductType } from '../../../types/domesticProduct'
+import { allocateCappedColumns, type CappedColumn } from '../tableWidthLogic'
 import type {
   CreateDomesticProductPayload,
   DomesticProductItem,
@@ -50,46 +51,53 @@ export function sortOrderForColumn(
 }
 
 /**
- * 列表列宽（px）。真实可用宽度 = 视口 − 侧栏 248 − 内容区左右 padding 32：
- * 1440 视口约 1143，1280 视口约 983（比设计稿的 1192 窄）。
- * 做法是「固定列 + 供应商列（按表格宽度百分比）+ 商品列（弹性）」：
- * 固定列合计 + 供应商最小宽度 + 商品列最小宽度 = 表格最小宽度，只要它不超过 985，
- * 1280 宽下就不会出现横向滚动；更宽的屏幕多出来的宽度主要给商品列，供应商列按比例变宽。
- * 货号（10 位等宽字符 + 复制图标）与条码（13 位等宽字符 + 复制图标）必须完整显示，
- * 所以这两列给足宽度，不能为了让商品列更宽而压缩它们
- * （等宽字符约 7.7px：货号 10 位 = 77px，条码 13 位 = 101px，再加复制按钮 22px + 间距 2px + 单元格 padding 20px，
- * 即货号列 ≥ 122、条码列 ≥ 145，各留 2~3px 余量）；
- * 单元格左右 padding 各 10px，操作列的「编辑 ⋯」按钮组实测 66px，所以操作列至少 86px，否则会溢出并撑出横向滚动条。
+ * 列表列宽（px）。真实可用宽度 = 视口 − 侧栏 248 − 内容区左右 padding 32：1280 视口约 983，1440 视口约 1143。
+ * 做法是「固定列 + 两个有上下限的弹性列（商品、供应商）」：
+ * - 固定列单元格左右 padding 各 10px；货号（10 位等宽字符 + 复制按钮）与条码（13 位等宽字符 + 复制按钮）必须完整显示
+ *   （等宽字符约 7.7px：货号 77px、条码 101px，再加复制按钮 22px + 间距 2px + padding 20px，即货号列 ≥ 122、条码列 ≥ 145）；
+ * - 序号跨页连续编号，2 万多件商品时到 5 位数，按 5 位预留（12px 等宽数字约 33px + padding 20px）；
+ * - action 是「操作」列在表格最窄时的宽度（「编辑 ⋯」按钮组实测 66px + padding 20px，至少 86）；
+ *   操作列自身不设宽度，吸收两个弹性列封顶之后多出来的所有宽度（按钮靠右）。
  */
 export const LIST_COLUMN_WIDTHS = {
   selection: 40,
+  serial: 56,
   itemNumber: 124,
   barcode: 148,
   type: 60,
-  price: 88,
-  status: 64,
-  updated: 80,
-  action: 88,
+  price: 84,
+  status: 60,
+  updated: 76,
+  action: 86,
 } as const
 
 /**
- * 供应商列（名称 + 编码两行，名称允许省略号、完整名称在 title 里）：
- * 宽度取表格宽度的百分比，1280 视口约 128px、1440 视口约 149px；
- * 最小宽度只用于计算表格最小宽度。
+ * 商品列（缩略图 + 名称 + 英文名）与供应商列（名称 + 编码两行）的宽度范围与分配权重：
+ * - 最窄值保证 1280 视口不出现横向滚动（Windows 经典滚动条再占约 15px，所以总最小宽度要 ≤ 985）；
+ * - 最宽值：商品列 340（缩略图 + 约 15 个汉字），供应商列 200（约 12 个汉字），再宽只是空白——
+ *   大屏上多出来的宽度交给「操作」列，不再把这两列拉到上千像素；
+ * - 笔记本宽度下按 0.62 / 0.38 分剩余空间，商品列分得更多。
  */
-export const SUPPLIER_COLUMN_WIDTH_PERCENT = '13%'
-export const SUPPLIER_COLUMN_MIN_WIDTH = 110
+export const PRODUCT_COLUMN: CappedColumn = { min: 148, max: 340, weight: 0.62 }
+export const SUPPLIER_COLUMN: CappedColumn = { min: 100, max: 200, weight: 0.38 }
 
-/**
- * 商品列（缩略图 + 名称 + 英文名）弹性列的最小宽度。
- * 取 180：Windows 经典滚动条会吃掉约 15px 可用宽度（983 → 968），表格最小宽度要留出这点余量。
- */
-export const PRODUCT_COLUMN_MIN_WIDTH = 180
+const LIST_FIXED_WIDTH = Object.values(LIST_COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0)
 
-export const LIST_TABLE_MIN_WIDTH =
-  Object.values(LIST_COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0) +
-  SUPPLIER_COLUMN_MIN_WIDTH +
-  PRODUCT_COLUMN_MIN_WIDTH
+/** 表格最窄宽度 = 固定列合计 + 两个弹性列的最窄宽度（1280 视口下也不出现横向滚动的下限）。 */
+export const LIST_TABLE_MIN_WIDTH = LIST_FIXED_WIDTH + PRODUCT_COLUMN.min + SUPPLIER_COLUMN.min
+
+export interface ListTableLayout {
+  productWidth: number
+  supplierWidth: number
+  /** 传给 antd `scroll.x` 的表格宽度；容器比它宽时，多出来的部分由「操作」列吸收。 */
+  tableWidth: number
+}
+
+/** 由表格可用宽度算出商品列、供应商列的宽度与 scroll.x。 */
+export function resolveListTableLayout(containerWidth: number): ListTableLayout {
+  const [productWidth, supplierWidth] = allocateCappedColumns(containerWidth - LIST_FIXED_WIDTH, [PRODUCT_COLUMN, SUPPLIER_COLUMN])
+  return { productWidth, supplierWidth, tableWidth: LIST_FIXED_WIDTH + productWidth + supplierWidth }
+}
 
 interface TablePaginationLike {
   current?: number

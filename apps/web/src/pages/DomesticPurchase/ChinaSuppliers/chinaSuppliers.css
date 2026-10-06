@@ -371,3 +371,10 @@
     border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
   }
 }
+
+/* 序号：弱化成辅助信息，等宽数字（5 位也不抖动）。 */
+.china-sup-serial {
+  color: var(--ant-color-text-tertiary, #98a1b0);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,5 +1,6 @@
 // 国内供应商页的纯逻辑：排序键映射、状态筛选、翻页兜底、保存载荷整理、同步结果归一化。
 // 全部是无副作用的纯函数（不引入 antd / i18n），便于用 esbuild 单文件直接跑单测。
+import { allocateCappedColumns, type CappedColumn } from '../tableWidthLogic'
 import type {
   ChinaSupplierItem,
   SaveChinaSupplierPayload,
@@ -247,4 +248,50 @@ export function parseSyncFailure(line: string): { label: string; reason: string 
 /** 「复制失败明细」的剪贴板文本：直接用后端原文，一行一条，便于粘贴给开发排查。 */
 export function buildFailureClipboardText(result: Pick<SyncResultView, 'errors'>): string {
   return result.errors.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// 列宽
+// ---------------------------------------------------------------------------
+
+/**
+ * 列表固定列宽（px）。单元格左右 padding 各 10px。
+ * - serial：序号跨页连续编号，按 5 位数预留（12px 等宽数字约 33px + 左右 padding 20px，至少 53），取 56；
+ * - action：「编辑 ⋯」按钮组实测约 66px，所以至少 86px，这里取 92；它同时是「操作」列在表格最窄时的宽度——
+ *   操作列自身不设宽度，吸收供应商列封顶之后多出来的所有宽度（按钮靠右）。
+ */
+export const SUPPLIER_COLUMN_WIDTHS = {
+  selection: 40,
+  serial: 56,
+  shopNumber: 88,
+  contactPerson: 140,
+  email: 168,
+  status: 72,
+  createdAt: 96,
+  action: 92,
+} as const
+
+/**
+ * 供应商列（名称 + 编码两行）的宽度范围：
+ * 最窄 150（1280 视口下表格区约 952px，扣掉其它列后正好够）；最宽 300，足够显示约 20 个汉字的店名，
+ * 再宽也只是一大片空白——大屏上多出来的宽度交给「操作」列，而不是把这一列拉到上千像素。
+ */
+export const SUPPLIER_NAME_COLUMN: CappedColumn = { min: 150, max: 300, weight: 1 }
+
+const SUPPLIER_FIXED_WIDTH = Object.values(SUPPLIER_COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0)
+
+/** 表格最窄宽度：固定列合计 + 供应商列最窄宽度（= 1280 视口下也不出现横向滚动的下限）。 */
+export const SUPPLIER_TABLE_MIN_WIDTH = SUPPLIER_FIXED_WIDTH + SUPPLIER_NAME_COLUMN.min
+
+export interface SupplierTableLayout {
+  /** 供应商列宽度。 */
+  nameWidth: number
+  /** 传给 antd `scroll.x` 的表格宽度；容器比它宽时，多出来的部分由「操作」列吸收。 */
+  tableWidth: number
+}
+
+/** 由表格可用宽度算出供应商列宽与 scroll.x。 */
+export function resolveSupplierTableLayout(containerWidth: number): SupplierTableLayout {
+  const [nameWidth] = allocateCappedColumns(containerWidth - SUPPLIER_FIXED_WIDTH, [SUPPLIER_NAME_COLUMN])
+  return { nameWidth, tableWidth: SUPPLIER_FIXED_WIDTH + nameWidth }
 }
