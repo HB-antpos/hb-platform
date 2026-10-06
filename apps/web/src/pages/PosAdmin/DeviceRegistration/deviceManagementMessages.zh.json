@@ -49,7 +49,25 @@
           "readOnlyHint": "当前账号只有查看权限，不能修改设备设置或状态。"
         },
         "appSummaryUnknown": "系统未知",
-        "appLastReport": "最后上报"
+        "appLastReport": "最后上报",
+        "batch": {
+          "actions": {
+            "activate": "启用 {{count}} 台",
+            "disable": "禁用 {{count}} 台",
+            "lock": "锁定 {{count}} 台"
+          },
+          "allInStatusHint": "选中的设备都已是该状态",
+          "confirmActivateTitle": "启用选中的 {{count}} 台设备？",
+          "confirmDisableTitle": "禁用选中的 {{count}} 台设备？",
+          "confirmLockTitle": "锁定选中的 {{count}} 台设备？",
+          "confirmActivateContent": "启用后这些设备可以进入 App 和收银。",
+          "skipped": "另有 {{count}} 台已是该状态，将跳过。",
+          "progress": "正在处理 {{done}} / {{total}} 台设备…",
+          "activateSucceeded": "已启用 {{count}} 台设备",
+          "disableSucceeded": "已禁用 {{count}} 台设备",
+          "lockSucceeded": "已锁定 {{count}} 台设备",
+          "partialFailed": "{{succeeded}} 台成功，{{failed}} 台失败（{{devices}}）。失败的设备仍保持勾选，可直接重试。"
+        }
       }
     }
   }

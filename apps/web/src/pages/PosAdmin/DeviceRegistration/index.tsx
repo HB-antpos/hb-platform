@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 
 import ActiveFilterBar from '../../../components/listToolbar/ActiveFilterBar'
 import type { ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
+import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import PageContainer from '../../../components/PageContainer'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
@@ -44,6 +45,7 @@ import {
 } from './deviceCells'
 import DeviceDetailDrawer from './DeviceDetailDrawer'
 import {
+  DEVICE_STATUS_ACTIONS,
   DEVICE_STATUS_TABS,
   buildCountedOptions,
   compareDateDesc,
@@ -51,7 +53,9 @@ import {
   filterDevicesByStatus,
   filterDevicesExceptStatus,
   formatDateOnly,
+  getBatchActionTargets,
   getDeviceStatusActions,
+  runWithConcurrency,
   type CountedOption,
   type DeviceOnlineFilter,
   type DeviceStatusAction,
@@ -71,8 +75,42 @@ registerPageMessages({ zh: deviceManagementMessagesZh, en: deviceManagementMessa
  */
 const REGISTERED_FETCH_SIZE = 1000
 const POLL_INTERVAL_MS = 15_000
+/** 批量状态操作的并发请求数（后端只有单台接口）。 */
+const BATCH_CONCURRENCY = 4
+const BATCH_MESSAGE_KEY = 'device-batch-status'
+/** 失败提示里最多列出的设备编号数。 */
+const BATCH_FAILED_PREVIEW = 5
+
+const STATUS_ACTION_REQUEST: Record<DeviceStatusAction, (id: number) => Promise<unknown>> = {
+  activate: activateDevice,
+  disable: disableDevice,
+  lock: lockDevice,
+}
 
 type DeviceRegistrationViewMode = 'registered' | 'appUsage' | 'activationCodes'
+
+// 文案键写成字面量，页面文案契约测试才能扫描到并校验中英文都存在
+const BATCH_ACTION_LABEL_KEY: Record<DeviceStatusAction, string> = {
+  activate: 'posAdmin.devices.mgmt.batch.actions.activate',
+  disable: 'posAdmin.devices.mgmt.batch.actions.disable',
+  lock: 'posAdmin.devices.mgmt.batch.actions.lock',
+}
+const BATCH_CONFIRM_TITLE_KEY: Record<DeviceStatusAction, string> = {
+  activate: 'posAdmin.devices.mgmt.batch.confirmActivateTitle',
+  disable: 'posAdmin.devices.mgmt.batch.confirmDisableTitle',
+  lock: 'posAdmin.devices.mgmt.batch.confirmLockTitle',
+}
+// 禁用/锁定的影响说明与单台确认框共用
+const BATCH_CONFIRM_CONTENT_KEY: Record<DeviceStatusAction, string> = {
+  activate: 'posAdmin.devices.mgmt.batch.confirmActivateContent',
+  disable: 'posAdmin.devices.mgmt.confirmDisableContent',
+  lock: 'posAdmin.devices.mgmt.confirmLockContent',
+}
+const BATCH_SUCCESS_KEY: Record<DeviceStatusAction, string> = {
+  activate: 'posAdmin.devices.mgmt.batch.activateSucceeded',
+  disable: 'posAdmin.devices.mgmt.batch.disableSucceeded',
+  lock: 'posAdmin.devices.mgmt.batch.lockSucceeded',
+}
 
 function renderCountedOption(option: CountedOption) {
   return {
@@ -124,6 +162,8 @@ export default function DeviceRegistrationPage() {
   const [drawerDeviceId, setDrawerDeviceId] = useState<number | null>(null)
   const [drawerSnapshot, setDrawerSnapshot] = useState<DeviceRegistrationItem | null>(null)
   const [emergencyOpen, setEmergencyOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [batchAction, setBatchAction] = useState<DeviceStatusAction | null>(null)
   const listRequestGuardRef = useRef(createLatestRequestGuard())
   // 列定义被 useMemo 缓存，里面的操作按钮闭包可能是旧渲染的；刷新列表时从 ref 读当前分店，
   // 否则切换分店后点「启用」会按旧分店重新拉取并覆盖列表。
@@ -197,10 +237,24 @@ export default function DeviceRegistrationPage() {
 
   useEffect(() => () => listRequestGuardRef.current.invalidate(), [])
 
-  // 任一筛选变化都回到第一页，避免停在超出范围的空页
+  // 任一筛选变化都回到第一页，避免停在超出范围的空页；
+  // 同时清空勾选，避免批量操作作用到已被筛掉、当前看不见的设备。
   useEffect(() => {
     setPagination((current) => (current.current === 1 ? current : { ...current, current: 1 }))
-  }, [selectedStoreCode, statusTab, keyword, deviceType, deviceSystem, onlineFilter])
+    setSelectedIds((current) => (current.length ? [] : current))
+  }, [selectedStoreCode, statusTab, keyword, deviceType, deviceSystem, onlineFilter, viewMode])
+
+  // 轮询/操作后重新拉取时，剔除已不在列表里的勾选（设备被删除或换了分店）
+  useEffect(() => {
+    setSelectedIds((current) => {
+      if (!current.length) {
+        return current
+      }
+      const loadedIds = new Set(items.map((item) => item.id))
+      const next = current.filter((id) => loadedIds.has(id))
+      return next.length === current.length ? current : next
+    })
+  }, [items])
 
   const storeNameMap = useMemo(
     () =>
@@ -291,6 +345,97 @@ export default function DeviceRegistrationPage() {
       okButtonProps: { danger: true },
       cancelText: t('common.cancel'),
       onOk: () => executeStatusAction(item, action),
+    })
+  }
+
+  // 勾选只存 id，状态取最新一次拉取的行：轮询期间别处改了状态，批量跳过口径也跟着变
+  const selectedDevices = useMemo(() => {
+    const selected = new Set(selectedIds)
+    return items.filter((item) => selected.has(item.id))
+  }, [items, selectedIds])
+  const batchTargets = useMemo(
+    () =>
+      Object.fromEntries(
+        DEVICE_STATUS_ACTIONS.map((action) => [action, getBatchActionTargets(selectedDevices, action)]),
+      ) as Record<DeviceStatusAction, DeviceRegistrationItem[]>,
+    [selectedDevices],
+  )
+
+  async function executeBatchAction(action: DeviceStatusAction, targets: DeviceRegistrationItem[]) {
+    setBatchAction(action)
+    message.loading({
+      key: BATCH_MESSAGE_KEY,
+      duration: 0,
+      content: t('posAdmin.devices.mgmt.batch.progress', { done: 0, total: targets.length }),
+    })
+    try {
+      const failures = await runWithConcurrency(
+        targets,
+        BATCH_CONCURRENCY,
+        (item) => STATUS_ACTION_REQUEST[action](item.id),
+        (done, total) =>
+          message.loading({
+            key: BATCH_MESSAGE_KEY,
+            duration: 0,
+            content: t('posAdmin.devices.mgmt.batch.progress', { done, total }),
+          }),
+      )
+
+      if (failures.length === 0) {
+        message.success({
+          key: BATCH_MESSAGE_KEY,
+          content: t(BATCH_SUCCESS_KEY[action], { count: targets.length }),
+        })
+        setSelectedIds([])
+      } else {
+        failures.forEach(({ item, error }) => console.error(t('message.deviceStatusFailed'), item.id, error))
+        const preview = failures
+          .slice(0, BATCH_FAILED_PREVIEW)
+          .map(({ item }) => item.systemDeviceNumber || item.hardwareId)
+          .join('、')
+        message.warning({
+          key: BATCH_MESSAGE_KEY,
+          duration: 8,
+          content: t('posAdmin.devices.mgmt.batch.partialFailed', {
+            succeeded: targets.length - failures.length,
+            failed: failures.length,
+            devices: failures.length > BATCH_FAILED_PREVIEW ? `${preview}…` : preview,
+          }),
+        })
+        // 只保留失败的设备勾选，用户可以直接再点一次重试
+        setSelectedIds(failures.map(({ item }) => item.id))
+      }
+
+      await loadDevices()
+    } finally {
+      setBatchAction(null)
+    }
+  }
+
+  /** 批量操作一律二次确认，并提示会跳过多少台已处于目标状态的设备。 */
+  function runBatchAction(action: DeviceStatusAction) {
+    const targets = batchTargets[action]
+    if (!canManage || batchAction || targets.length === 0) {
+      return
+    }
+
+    const skipped = selectedDevices.length - targets.length
+    Modal.confirm({
+      title: t(BATCH_CONFIRM_TITLE_KEY[action], { count: targets.length }),
+      content: (
+        <>
+          <div>{t(BATCH_CONFIRM_CONTENT_KEY[action])}</div>
+          {skipped > 0 ? (
+            <div className="dev-mgmt-sub" style={{ marginTop: 6 }}>
+              {t('posAdmin.devices.mgmt.batch.skipped', { count: skipped })}
+            </div>
+          ) : null}
+        </>
+      ),
+      okText: t(BATCH_ACTION_LABEL_KEY[action], { count: targets.length }),
+      okButtonProps: { danger: action !== 'activate' },
+      cancelText: t('common.cancel'),
+      onOk: () => executeBatchAction(action, targets),
     })
   }
 
@@ -684,7 +829,7 @@ export default function DeviceRegistrationPage() {
             </div>
           ) : null}
 
-          {serverTotal > items.length || activeFilterItems.length ? (
+          {serverTotal > items.length || activeFilterItems.length || selectedIds.length ? (
             <div className="dev-mgmt-bars">
               {serverTotal > items.length ? (
                 <Alert
@@ -696,6 +841,28 @@ export default function DeviceRegistrationPage() {
               {activeFilterItems.length ? (
                 <ActiveFilterBar items={activeFilterItems} onClearAll={clearFilters} />
               ) : null}
+              {/* 勾选后才出现；按钮上的台数是实际会被改动的台数（已处于目标状态的跳过） */}
+              <SelectionActionBar
+                selectedCount={selectedIds.length}
+                onClearSelection={() => setSelectedIds([])}
+              >
+                {DEVICE_STATUS_ACTIONS.map((action) => {
+                  const count = batchTargets[action].length
+                  return (
+                    <Tooltip key={action} title={count === 0 ? t('posAdmin.devices.mgmt.batch.allInStatusHint') : undefined}>
+                      <Button
+                        size="small"
+                        danger={action === 'lock'}
+                        disabled={count === 0 || (batchAction !== null && batchAction !== action)}
+                        loading={batchAction === action}
+                        onClick={() => runBatchAction(action)}
+                      >
+                        {t(BATCH_ACTION_LABEL_KEY[action], { count })}
+                      </Button>
+                    </Tooltip>
+                  )
+                })}
+              </SelectionActionBar>
             </div>
           ) : null}
 
@@ -707,9 +874,26 @@ export default function DeviceRegistrationPage() {
             loading={loading}
             columns={columns}
             dataSource={visibleItems}
-            scroll={{ x: canManage ? 1350 : 1200 }}
+            rowSelection={canManage ? {
+              selectedRowKeys: selectedIds,
+              // 跨分页保留勾选（勾选范围是当前筛选结果，筛选变化时已清空）
+              preserveSelectedRowKeys: true,
+              fixed: true,
+              columnWidth: 44,
+              getCheckboxProps: () => ({ disabled: batchAction !== null }),
+              onChange: (keys) => setSelectedIds(keys.map(Number)),
+            } : undefined}
+            scroll={{ x: canManage ? 1394 : 1200 }}
             rowClassName={() => 'dev-mgmt-row-clickable'}
-            onRow={(record) => ({ onClick: () => openDrawer(record) })}
+            onRow={(record) => ({
+              onClick: (event) => {
+                // 勾选列点击（含勾选框四周空白）只负责勾选，不打开详情抽屉
+                if ((event.target as HTMLElement).closest('.ant-table-selection-column, .ant-checkbox-wrapper')) {
+                  return
+                }
+                openDrawer(record)
+              },
+            })}
             locale={{
               emptyText: activeFilterItems.length || statusTab !== 'all' ? (
                 <div style={{ padding: '24px 0' }}>
