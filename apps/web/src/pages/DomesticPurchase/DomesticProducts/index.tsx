@@ -34,6 +34,7 @@ import { copyTextToClipboard } from '../../../utils/clipboard'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 import ProductDetailDrawer from './ProductDetailDrawer'
 import ProductFormModal, { type ProductSavedResult } from './ProductFormModal'
+import { useElementWidth } from '../useElementWidth'
 import { buildProductColumns } from './productColumns'
 import SetItemsModal, { type SetItemsSavedResult } from './SetItemsModal'
 import {
@@ -41,13 +42,13 @@ import {
   DEFAULT_SORT_FIELD,
   DEFAULT_SORT_ORDER,
   LIST_COLUMN_WIDTHS,
-  LIST_TABLE_MIN_WIDTH,
   PAGE_SIZE_OPTIONS,
   applyFormValuesToItem,
   buildSupplierOptions,
   describeSupplier,
   filterSupplierOption,
   resolveExportPageSize,
+  resolveListTableLayout,
   resolveTableChange,
   shouldIgnoreRowClick,
   statusFromSegment,
@@ -141,6 +142,10 @@ export default function DomesticProductsPage() {
   const [setItemsOpen, setSetItemsOpen] = useState(false)
   const [setItemsProduct, setSetItemsProduct] = useState<DomesticProductItem | null>(null)
   const [setItemsVersion, setSetItemsVersion] = useState(0)
+  // 表格可用宽度：工具栏与表格同在卡片内（卡片 body 无 padding）、都是整行块元素，工具栏的宽度就是表格区的宽度。
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const containerWidth = useElementWidth(toolbarRef, 983)
+  const listLayout = resolveListTableLayout(containerWidth)
   const listRequestGuardRef = useRef(createLatestRequestGuard())
   const exportingRef = useRef(false)
   const mountedRef = useRef(false)
@@ -495,6 +500,10 @@ export default function DomesticProductsPage() {
     sortOrder,
     canWrite: access.canWriteProduct,
     currentYear: new Date().getFullYear(),
+    page,
+    pageSize,
+    productWidth: listLayout.productWidth,
+    supplierWidth: listLayout.supplierWidth,
     onEdit: handleOpenEdit,
     getRowMenu: rowMenu,
   })
@@ -517,7 +526,7 @@ export default function DomesticProductsPage() {
       }
     >
       <Card className="dp-card" styles={{ body: { padding: 0 } }}>
-        <div className="dp-toolbar" data-testid="domestic-products-toolbar">
+        <div className="dp-toolbar" data-testid="domestic-products-toolbar" ref={toolbarRef}>
           <SearchInput
             value={searchText}
             placeholder={t('domesticProducts.searchBoxPlaceholder')}
@@ -650,9 +659,10 @@ export default function DomesticProductsPage() {
             selectedRowKeys,
             onChange: setSelectedRowKeys,
           }}
-          // 不再写死高度 620 / 虚拟滚动：整页滚动。scroll.x 是弹性商品列的最小宽度推算出的表格最小宽度，
-          // 1280 视口可用宽度约 1000，所以这里必须 ≤ 1000，才不会出现横向滚动条。
-          scroll={{ x: LIST_TABLE_MIN_WIDTH }}
+          // 不再写死高度 620 / 虚拟滚动：整页滚动。scroll.x = 固定列合计 + 商品列宽 + 供应商列宽，随容器宽度算出
+          // （见 resolveListTableLayout）：最窄 LIST_TABLE_MIN_WIDTH ≤ 985，1280 视口不出现横向滚动；
+          // 容器更宽时两列分别最多 340 / 200，多出来的宽度由没设宽度的「操作」列吸收。
+          scroll={{ x: listLayout.tableWidth }}
           rowClassName={() => 'dp-row-clickable'}
           onRow={(record) => ({
             // 整行可点开详情；行内按钮、勾选框、下拉菜单、缩略图预览等自带交互的元素不触发。

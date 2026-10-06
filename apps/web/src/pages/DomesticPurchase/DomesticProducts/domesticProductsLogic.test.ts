@@ -4,8 +4,9 @@ import {
   DEFAULT_SORT_ORDER,
   LIST_COLUMN_WIDTHS,
   LIST_TABLE_MIN_WIDTH,
-  PRODUCT_COLUMN_MIN_WIDTH,
-  SUPPLIER_COLUMN_MIN_WIDTH,
+  resolveListTableLayout,
+  PRODUCT_COLUMN,
+  SUPPLIER_COLUMN,
   ROW_CLICK_IGNORE_SELECTOR,
   SORT_FIELD_BY_COLUMN,
   applyFormValuesToItem,
@@ -146,25 +147,40 @@ assertEqual(statusToSegment(true), 'active', 'true 对应启用')
 assertEqual(statusToSegment(false), 'inactive', 'false 对应停用')
 
 // ---------------------------------------------------------------------------
-// 列宽：1280 视口可用宽度 = 1280 − 侧栏 248 − 内容区 padding 32 = 1000
+// 列宽：1280 视口可用宽度 = 1280 − 侧栏 248 − 内容区 padding 32 = 1000（实测表格区约 983）
 // ---------------------------------------------------------------------------
 
 const fixedWidthSum = Object.values(LIST_COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0)
 assertEqual(
   LIST_TABLE_MIN_WIDTH,
-  fixedWidthSum + SUPPLIER_COLUMN_MIN_WIDTH + PRODUCT_COLUMN_MIN_WIDTH,
-  '表格最小宽度 = 固定列合计 + 供应商列最小宽度 + 商品列最小宽度',
+  fixedWidthSum + PRODUCT_COLUMN.min + SUPPLIER_COLUMN.min,
+  '表格最小宽度 = 固定列合计 + 商品列最窄 + 供应商列最窄',
 )
-// 1280 视口可用 1000px；Windows 经典滚动条再占 15px，所以按 985 把关。
+// 1280 视口表格区约 983px；Windows 经典滚动条再占 15px，所以按 985 把关。
 assert(LIST_TABLE_MIN_WIDTH <= 985, `表格最小宽度 ${LIST_TABLE_MIN_WIDTH} 超过 1280 视口扣掉滚动条后的 985px，会出现横向滚动`)
-// 1280 视口表格可用约 983：固定列 + 供应商列最小宽度之后，剩给商品列的不能少于它的最小宽度。
-assertEqual(983 - fixedWidthSum - SUPPLIER_COLUMN_MIN_WIDTH >= PRODUCT_COLUMN_MIN_WIDTH, true, '1280 视口下商品列实际宽度不少于其最小宽度')
 // 货号 / 条码要完整显示：等宽字符 + 复制图标 + 单元格左右 padding。
 assert(LIST_COLUMN_WIDTHS.itemNumber >= 124, '货号列至少 124px 才能完整显示 10 位货号和复制图标（等宽 77px + 按钮 24 + padding 20）')
 assert(LIST_COLUMN_WIDTHS.barcode >= 148, '条码列至少 148px 才能完整显示 13 位条码和复制图标（等宽 101px + 按钮 24 + padding 20）')
 // 操作列：按钮组实测 66px + 单元格左右 padding 20px，小于 86 会溢出并出现横向滚动条。
 assert(LIST_COLUMN_WIDTHS.action >= 86, '操作列至少 86px 才能容纳「编辑 ⋯」按钮组')
-assert(PRODUCT_COLUMN_MIN_WIDTH >= 180, '商品列至少要容纳缩略图 + 约 8 个汉字')
+// 序号跨页连续编号，2 万多件商品时到 5 位数：12px 等宽数字约 33px + 单元格左右 padding 20px。
+assert(LIST_COLUMN_WIDTHS.serial >= 53, '序号列至少 53px 才能放下 5 位数序号')
+assert(PRODUCT_COLUMN.min >= 148, '商品列至少要容纳缩略图 + 约 6 个汉字')
+
+// 商品 / 供应商列：窄屏取最窄值，笔记本宽度按权重分剩余宽度，大屏封顶（旧实现让商品列吃掉全部剩余，大屏上能到上千像素）。
+const narrow = resolveListTableLayout(983)
+assertEqual(narrow.productWidth, PRODUCT_COLUMN.min, '1280 视口商品列取最窄值')
+assertEqual(narrow.supplierWidth, SUPPLIER_COLUMN.min, '1280 视口供应商列取最窄值')
+assert(narrow.tableWidth <= 985, '1280 视口 scroll.x 不超过可用宽度，不出现横向滚动')
+const laptop = resolveListTableLayout(1143)
+assert(laptop.productWidth > narrow.productWidth && laptop.supplierWidth > narrow.supplierWidth, '1440 视口两列都比最窄值宽')
+assert(laptop.productWidth > laptop.supplierWidth, '1440 视口商品列比供应商列宽')
+assert(laptop.tableWidth <= 1143, '1440 视口 scroll.x 不超过容器宽度')
+const wide = resolveListTableLayout(2600)
+assertEqual(wide.productWidth, PRODUCT_COLUMN.max, '超宽屏商品列封顶')
+assertEqual(wide.supplierWidth, SUPPLIER_COLUMN.max, '超宽屏供应商列封顶')
+assertEqual(wide.tableWidth, fixedWidthSum + PRODUCT_COLUMN.max + SUPPLIER_COLUMN.max, '超宽屏 scroll.x = 固定列 + 两列封顶宽度，多出的宽度交给没设宽度的操作列')
+assert(wide.tableWidth < 2600, '超宽屏下表格最小宽度小于容器，多出来的空间由操作列吸收')
 
 // ---------------------------------------------------------------------------
 // 供应商下拉

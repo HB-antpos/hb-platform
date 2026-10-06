@@ -617,3 +617,10 @@
     border-left: 0;
   }
 }
+
+/* 序号：弱化成辅助信息，等宽数字（5 位也不抖动）。 */
+.dp-serial {
+  color: var(--ant-color-text-tertiary, #98a1b0);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}

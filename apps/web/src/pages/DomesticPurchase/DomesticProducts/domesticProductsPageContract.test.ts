@@ -31,10 +31,13 @@ for (const name of sourceNames) {
 
 const indexSource = read('index.tsx')
 
-// 2) 列表不再写死高度、不再用虚拟滚动，10 列靠弹性商品列适配宽度，不横向滚动。
+// 2) 列表不再写死高度、不再用虚拟滚动；商品 / 供应商列宽度由表格可用宽度算出且有上限，不横向滚动，也不会在大屏上被拉到上千像素。
 assert(!/\bvirtual\b/.test(indexSource), '国内商品列表不应再使用虚拟滚动')
 assert(!/scroll=\{\{[^}]*\by:/.test(indexSource), '国内商品列表不应再写死滚动高度')
-assert(indexSource.includes('scroll={{ x: LIST_TABLE_MIN_WIDTH }}'), '列表 scroll.x 必须取自 LIST_TABLE_MIN_WIDTH（≤ 1280 视口可用宽度）')
+assert(indexSource.includes('scroll={{ x: listLayout.tableWidth }}'), '列表 scroll.x 必须取自 resolveListTableLayout 算出的 tableWidth（最窄 ≤ 1280 视口可用宽度）')
+assert(indexSource.includes('resolveListTableLayout(containerWidth)') && indexSource.includes('useElementWidth(toolbarRef'), '列宽必须由测量到的表格可用宽度算出，而不是让商品列无上限地吃剩余宽度')
+assert(indexSource.includes('ref={toolbarRef}'), '要测量宽度的工具栏必须挂上 ref')
+assert(!/LIST_TABLE_MIN_WIDTH\s*\}\}/.test(indexSource), 'scroll.x 不能再直接写死最小宽度')
 assert(indexSource.includes('<MeasuredTable'), '列表必须使用 MeasuredTable')
 
 // 3) 条码画布只在详情抽屉里，列表只留可复制文本。
