@@ -375,7 +375,8 @@ function loadSavedPasteFieldOrder() {
   }
 }
 
-const matchedProductTableScrollX = 940
+// 各列定宽之和；弹窗内容区（1120 宽减去图标与内边距）放得下，窄屏才横向滚动。
+const matchedProductTableScrollX = 1000
 
 const matchedProductNameCellStyle: CSSProperties = {
   minWidth: 240,
@@ -390,9 +391,6 @@ const matchedProductTagStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
-const matchedProductActionButtonStyle: CSSProperties = {
-  paddingInline: 0,
-}
 
 function renderNumericCell(value: ReactNode) {
   return <span className="lsi-num">{value}</span>
@@ -2771,7 +2769,8 @@ export default function InvoiceEditPage() {
     const barcode = record.barcode
     const modal = Modal.info({
       title: t('posAdmin.invoiceDetail.barcodeMatchedProductsTitle', '条码匹配商品：{{barcode}}', { barcode }),
-      width: 920,
+      // Modal.info 左侧留给图标，920 时表格会被挤出横向滚动；窄屏不超出视口。
+      width: 'min(1120px, calc(100vw - 32px))',
       okText: t('common.close', '关闭'),
       content: <div>{t('common.loading', '加载中...')}</div>,
     })
@@ -2946,13 +2945,13 @@ export default function InvoiceEditPage() {
         {
           title: t('posAdmin.invoiceDetail.supplierName', '供应商名称'),
           dataIndex: 'supplierName',
-          width: 150,
+          width: 160,
           render: (value?: string) => value || '--',
         },
         {
           title: t('posAdmin.invoiceDetail.matchSource', '来源'),
           dataIndex: 'isMultiCode',
-          width: 100,
+          width: 110,
           render: (isMultiCode?: boolean) => (
             <Tag color={isMultiCode ? 'orange' : 'blue'} style={matchedProductTagStyle}>
               {isMultiCode
@@ -2964,15 +2963,15 @@ export default function InvoiceEditPage() {
         ...(canManagePosProducts || showLinkAction ? [{
           title: t('posAdmin.invoiceDetail.action', '操作'),
           key: 'replaceProductMaster',
-          width: 130,
+          width: 180,
+          // 两个操作影响面不同：「选用」只改本行（主按钮），「更换」改商品主档（危险色），分开摆放避免误点。
           render: (_: unknown, matchedProduct: BarcodeAbnormalMatchedProductDto) => (
-            <Space size={0}>
+            <Space size={8}>
               {showLinkAction ? (
                 <Tooltip title={t('posAdmin.invoiceDetail.linkProductTip', '本行就是这个商品：回填商品编码，不改主档')}>
                   <Button
                     size="small"
-                    type="link"
-                    style={matchedProductActionButtonStyle}
+                    type="primary"
                     onClick={() => handleLinkMatchedProduct(matchedProduct)}
                   >
                     {t('posAdmin.invoiceDetail.linkProduct', '选用')}
@@ -2983,8 +2982,7 @@ export default function InvoiceEditPage() {
                 <Tooltip title={t('posAdmin.invoiceDetail.replaceProductMaster', '更换货号和供应商')}>
                   <Button
                     size="small"
-                    type="link"
-                    style={matchedProductActionButtonStyle}
+                    danger
                     onClick={() => handleReplaceMatchedProductMaster(matchedProduct, matchedProductColumns)}
                   >
                     {t('posAdmin.invoiceDetail.replaceProductMasterShort', '更换')}
