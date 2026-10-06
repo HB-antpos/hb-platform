@@ -327,7 +327,8 @@ const COLUMN_WIDTHS: Partial<Record<LocalSupplierInvoiceColumnKey | 'index' | 'a
   detailCount: 64,
   priceChange: 96,
   totalAmount: 100,
-  isProductChecked: 140,
+  // 「已检测 · 新品 N · 本单新品 N」常见两项一行放下，三项同时出现时折成两行（见下方 Space wrap）。
+  isProductChecked: 200,
   flowStatus: 88,
   createdAt: 160,
   inboundDate: 104,
@@ -1140,7 +1141,7 @@ export default function LocalSupplierInvoicesPage() {
         const newProducts = record.newProductDetailCount ?? 0
         const createdHere = record.createdHereProductDetailCount ?? 0
         return (
-          <Space size={6}>
+          <Space size={[6, 4]} wrap>
             {value ? (
               <span className="lsi-pill lsi-pill-ok">{t('posAdmin.invoiceList.checked')}</span>
             ) : (
