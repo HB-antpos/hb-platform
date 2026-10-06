@@ -116,8 +116,32 @@ assertEqual(
     isDeviceMode: false,
     stores: posEnabledStores,
   }),
+  "ENABLED_VIEW",
+  "stale inactive selection is rejected and falls back to the first enabled store"
+);
+
+assertEqual(
+  resolveScopedStoreCode({
+    currentStoreCode: null,
+    persistedStoreCode: null,
+    deviceBoundStoreCode: null,
+    isDeviceMode: false,
+    stores: assignedStores,
+  }),
+  assignedStores[0]?.storeCode ?? null,
+  "account sessions without a selection default to the first store"
+);
+
+assertEqual(
+  resolveScopedStoreCode({
+    currentStoreCode: null,
+    persistedStoreCode: null,
+    deviceBoundStoreCode: null,
+    isDeviceMode: false,
+    stores: [],
+  }),
   null,
-  "stale inactive selection is rejected when multiple enabled stores remain"
+  "no stores means no selection"
 );
 
 assertEqual(
