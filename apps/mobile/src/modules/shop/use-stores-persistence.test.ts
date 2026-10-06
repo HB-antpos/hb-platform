@@ -113,6 +113,7 @@ test("门店选择持久化失败时保留原门店与购物车摘要", async ()
       {
         getAssignedStoresForSession: ({ stores }: { stores: Store[] }) => stores,
         resolveScopedStoreCode: () => null,
+        resolveScopedStoreSelection: () => ({ storeCode: null, isAuto: false }),
       },
     ],
     ["@/modules/shop/warehouse-cart-access", { shouldLoadAllStoresForWarehouseCart: () => false }],
