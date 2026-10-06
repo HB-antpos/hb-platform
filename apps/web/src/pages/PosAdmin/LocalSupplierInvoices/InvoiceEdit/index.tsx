@@ -296,6 +296,7 @@ function normalizeInvoiceDetailSnapshot(item: LocalSupplierInvoiceItemDto) {
     retailPrice: item.retailPrice,
     amount: item.amount,
     existingProductCount: item.existingProductCount,
+    isCreatedByThisInvoice: item.isCreatedByThisInvoice,
     barcodeStatus: item.barcodeStatus,
     barcodeMatchCount: item.barcodeMatchCount,
     productImage: item.productImage,
@@ -1036,6 +1037,7 @@ export default function InvoiceEditPage() {
       notDetected: t('posAdmin.invoiceDetail.notDetected', '未检测'),
       exists: t('posAdmin.invoiceDetail.exists', '已存在'),
       notExists: t('posAdmin.invoiceDetail.notExistsShort', '不存在'),
+      createdHere: t('posAdmin.invoiceWorkbench.statusCreatedHere'),
     }),
     [t],
   )
@@ -2863,6 +2865,11 @@ export default function InvoiceEditPage() {
                     </span>
                   </Tooltip>
                 )}
+                {record.isCreatedByThisInvoice && (
+                  <Tooltip title={t('posAdmin.invoiceWorkbench.createdHereTip')}>
+                    <span className="lsi-tag lsi-tag-here">{t('posAdmin.invoiceWorkbench.statusCreatedHere')}</span>
+                  </Tooltip>
+                )}
                 {!canEditInvoice && getProductStatusFilter(record) === 'notExists' && (
                   <Tooltip title={t('posAdmin.invoiceWorkbench.notExistsStoreTip')}>
                     <span className="lsi-tag lsi-tag-new">{t('posAdmin.invoiceWorkbench.chipNotExistsStore')}</span>
@@ -3063,6 +3070,8 @@ export default function InvoiceEditPage() {
           }
           const productLine = productStatus === 'notDetected'
             ? <span className="lsi-muted">{t('posAdmin.invoiceWorkbench.matchUnchecked')}</span>
+            : productStatus === 'createdHere'
+              ? <span className="lsi-wb-match-ok">{t('posAdmin.invoiceWorkbench.matchCreatedHere')}</span>
             : productStatus === 'exists'
               ? (
                 <span className="lsi-wb-match-ok">
@@ -3242,7 +3251,7 @@ export default function InvoiceEditPage() {
         onChange={setProductStatusFilter}
         options={[
           { value: 'all', label: withCount(t('posAdmin.invoiceWorkbench.filterAll'), details.length) },
-          ...(['notDetected', 'exists', 'notExists'] as const).map((value) => ({
+          ...(['notDetected', 'exists', 'notExists', 'createdHere'] as const).map((value) => ({
             value,
             label: withCount(productStatusFilterLabels[value], detailStatusStats.product[value]),
           })),

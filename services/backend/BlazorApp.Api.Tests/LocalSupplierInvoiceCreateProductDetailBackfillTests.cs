@@ -53,6 +53,7 @@ namespace BlazorApp.Api.Tests
                 typeof(StoreLocalSupplierInvoice),
                 typeof(StoreLocalSupplierInvoiceDetails)
             );
+            SqliteWarehouseProductChangeHistoryTable.Create(_db);
         }
 
         public void Dispose()

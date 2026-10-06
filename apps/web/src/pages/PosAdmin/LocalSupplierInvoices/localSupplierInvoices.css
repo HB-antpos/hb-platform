@@ -96,6 +96,12 @@
   color: #5a3fc0;
 }
 
+/* 本单新品：商品已由本单建成，与「主档已存在」同为绿色系，用文字区分。 */
+.lsi-tag-here {
+  background: #edf7e8;
+  color: #237804;
+}
+
 .lsi-tag-neutral {
   background: #f0f3f8;
   color: #4e5969;

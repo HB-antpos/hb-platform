@@ -192,6 +192,9 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     var productCheckByInvoice = productCheckAggregates
                         .Where(item => !string.IsNullOrWhiteSpace(item.InvoiceGUID))
                         .ToDictionary(item => item.InvoiceGUID!, StringComparer.Ordinal);
+                    var createdHereCountByInvoice = (await LoadCreatedHereDetailsAsync(db, invoiceGuids))
+                        .GroupBy(item => item.InvoiceGUID, StringComparer.Ordinal)
+                        .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
 
                     foreach (var item in list)
                     {
@@ -208,6 +211,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                             item.UncheckedDetailCount = productCheck.NullProductCount;
                             item.NewProductDetailCount = productCheck.NewProductCount;
                         }
+                        item.CreatedHereProductDetailCount = createdHereCountByInvoice.GetValueOrDefault(item.InvoiceGUID);
                         item.IsProductChecked = item.DetailCount > 0 && item.UncheckedDetailCount == 0;
                     }
                 }
@@ -747,6 +751,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     .ToListAsync();
 
                 LocalSupplierInvoicesBarcodeRules.PopulateAdditionalBarcodes(list);
+                await MarkCreatedHereDetailsAsync(db, invoiceGuid, list);
                 return ApiResponse<List<LocalSupplierInvoiceItemDto>>.OK(list);
             }
             catch (Exception ex)
@@ -841,6 +846,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     .ToListAsync();
 
                 LocalSupplierInvoicesBarcodeRules.PopulateAdditionalBarcodes(list);
+                await MarkCreatedHereDetailsAsync(db, invoiceGuid, list);
                 return GridResponseDto<LocalSupplierInvoiceItemDto>.OK(list, total);
             }
             catch (Exception ex)
@@ -1166,6 +1172,77 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
             utc = default;
             return false;
+        }
+
+        /// <summary>
+        /// 本单新品：明细关联的商品是由这张进货单新建的。
+        /// 主判据是商品变更历史里该编码有 Action=Create 且来源单据为本单（批量执行新建与「更新总部商品」都会写）；
+        /// 不能用 ExistingProductCount 判断，再次「商品检测」会把它改成 1。
+        /// 2026-08-13 之前没有变更历史，兜底沿用检测快照：检测时主档不存在（0）、现已关联编码、且该编码没有任何 Create 记录。
+        /// 判定写在 WHERE 子查询里而非聚合内，SQL Server 不允许聚合函数里嵌子查询（错误 130）。
+        /// </summary>
+        private static async Task<List<(string InvoiceGUID, string DetailGUID)>> LoadCreatedHereDetailsAsync(
+            ISqlSugarClient db,
+            List<string> invoiceGuids
+        )
+        {
+            if (invoiceGuids.Count == 0)
+                return new List<(string, string)>();
+
+            // 两个判据拆成两条查询再取并集：合成一条 OR 时优化器会把整张历史表做成临时工作表，
+            // 生产实测每页 50 单 135ms，拆开后约 45ms。
+            var byHistory = await db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .Where(d =>
+                    d.IsDeleted == false
+                    && d.InvoiceGUID != null
+                    && invoiceGuids.Contains(d.InvoiceGUID)
+                    && d.ProductCode != null
+                    && SqlFunc.Subqueryable<WarehouseProductChangeHistory>()
+                        .Where(w =>
+                            w.ProductCode == d.ProductCode
+                            && w.Action == "Create"
+                            && w.SourceReference == d.InvoiceGUID
+                        )
+                        .Any()
+                )
+                .Select(d => new { d.InvoiceGUID, d.DetailGUID })
+                .ToListAsync();
+            var bySnapshot = await db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .Where(d =>
+                    d.IsDeleted == false
+                    && d.InvoiceGUID != null
+                    && invoiceGuids.Contains(d.InvoiceGUID)
+                    && d.ProductCode != null
+                    && d.ExistingProductCount == 0
+                    && SqlFunc.Subqueryable<WarehouseProductChangeHistory>()
+                        .Where(w => w.ProductCode == d.ProductCode && w.Action == "Create")
+                        .NotAny()
+                )
+                .Select(d => new { d.InvoiceGUID, d.DetailGUID })
+                .ToListAsync();
+            return byHistory
+                .Concat(bySnapshot)
+                .DistinctBy(row => row.DetailGUID, StringComparer.Ordinal)
+                .Select(row => (row.InvoiceGUID!, row.DetailGUID))
+                .ToList();
+        }
+
+        private static async Task MarkCreatedHereDetailsAsync(
+            ISqlSugarClient db,
+            string invoiceGuid,
+            List<LocalSupplierInvoiceItemDto> list
+        )
+        {
+            if (list.Count == 0)
+                return;
+
+            var createdHere = (await LoadCreatedHereDetailsAsync(db, new List<string> { invoiceGuid }))
+                .Select(item => item.DetailGUID)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var item in list)
+            {
+                item.IsCreatedByThisInvoice = createdHere.Contains(item.DetailGUID);
+            }
         }
 
         private static int ClampGridPageSize(int requested, int fallback, params int[] allowed)

@@ -40,6 +40,7 @@ public sealed class LocalSupplierInvoiceShopGridTests : IDisposable
             StoreLocalSupplierInvoice,
             StoreLocalSupplierInvoiceDetails
         >();
+        SqliteWarehouseProductChangeHistoryTable.Create(_db);
     }
 
     [Fact]

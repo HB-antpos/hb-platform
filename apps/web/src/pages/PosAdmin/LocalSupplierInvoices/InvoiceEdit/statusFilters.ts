@@ -2,7 +2,7 @@ import type { LocalSupplierInvoiceItemDto } from '../../../../types/localSupplie
 import { DetailAction } from '../../../../types/localSupplierInvoice'
 
 export type PriceFilter = 'all' | 'up' | 'down'
-export type ProductStatusFilter = 'notDetected' | 'exists' | 'notExists'
+export type ProductStatusFilter = 'notDetected' | 'exists' | 'notExists' | 'createdHere'
 export type BarcodeStatusFilter = 'notDetected' | 'normal' | 'noMatch' | 'multiMatch'
 /** 筛选专用的组合值：条码异常 = 无匹配 + 多匹配，供工作台「条码异常」快捷筛选使用。 */
 export type BarcodeStatusFilterValue = StatusFilterValue<BarcodeStatusFilter> | 'abnormal'
@@ -41,6 +41,8 @@ export const actionTypeFilters = [
 ] as const
 
 export function getProductStatusFilter(detail: LocalSupplierInvoiceItemDto): ProductStatusFilter {
+  // 本单新品优先：再次商品检测会把 existingProductCount 改成 1，不能据此判断是不是本单建的。
+  if (detail.isCreatedByThisInvoice) return 'createdHere'
   const count = detail.existingProductCount
   if (count === undefined || count === null) return 'notDetected'
   if (count > 0) return 'exists'
@@ -78,6 +80,7 @@ export function getDetailStatusStats(
       notDetected: 0,
       exists: 0,
       notExists: 0,
+      createdHere: 0,
     },
     barcode: {
       notDetected: 0,
