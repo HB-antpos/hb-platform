@@ -1,8 +1,9 @@
 import {
   CopyOutlined,
   HolderOutlined,
+  MoreOutlined,
   PlusOutlined,
-  ReloadOutlined,
+  SettingOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import {
@@ -23,19 +24,24 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import {
   Button,
-  Card,
+  Checkbox,
   DatePicker,
+  Dropdown,
   Form,
   Input,
   Modal,
   Pagination,
-  Popconfirm,
+  Popover,
+  Radio,
+  Segmented,
   Select,
   Space,
-  Tag,
+  Tooltip,
+  Typography,
   message,
 } from 'antd'
 import type { ColumnsType, TableRef } from 'antd/es/table'
+import dayjs from 'dayjs'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import {
   useCallback,
@@ -49,14 +55,16 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { useIsMobile } from '../../../hooks/useIsMobile'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { useAuthStore } from '../../../store/auth'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
-import { getStableTagColor } from '../../../utils/tagColors'
 import {
   checkInvoiceNoExists,
   createInvoice,
   deleteInvoice,
   getInvoiceGrid,
+  getInvoiceStoreCounts,
 } from '../../../services/localSupplierInvoiceService'
 import { getActiveLocalSuppliers } from '../../../services/localSupplierService'
 import { getActiveStores } from '../../../services/storeService'
@@ -79,20 +87,41 @@ import {
 } from './invoiceTableScroll'
 import {
   DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER,
+  DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS,
+  LOCKED_LOCAL_SUPPLIER_INVOICE_COLUMNS,
   createLocalSupplierInvoiceDndAccessibility,
   dispatchLocalSupplierInvoiceDragHandleKeyDown,
   dispatchLocalSupplierInvoiceDragHandlePointerDown,
   dispatchLocalSupplierInvoiceSortableHeaderKeyDown,
-  isLocalSupplierInvoiceColumnOrderCustomized,
+  isLocalSupplierInvoiceColumnLayoutCustomized,
   moveLocalSupplierInvoiceColumnOrder,
   parseLocalSupplierInvoiceColumnOrder,
+  parseLocalSupplierInvoiceHiddenColumns,
+  toggleLocalSupplierInvoiceHiddenColumn,
   type LocalSupplierInvoiceColumnKey,
 } from './columnOrder'
-import { formatLocalSupplierInvoiceAuditTime } from './auditTime'
+import { formatLocalSupplierInvoiceAuditTime, formatLocalSupplierInvoiceAuditTimeCompact } from './auditTime'
+import {
+  DEFAULT_INVOICE_LIST_DATE_FIELD,
+  buildInvoiceListDateFilter,
+  getDefaultInvoiceListDateRange,
+  isDefaultInvoiceListDateFilter,
+  type InvoiceListDateField,
+  type InvoiceListDateRange,
+} from './listDateFilter'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import invoiceMessagesEn from './invoiceMessages.en.json'
+import invoiceMessagesZh from './invoiceMessages.zh.json'
+import './localSupplierInvoices.css'
 
+// 重设计新增的文案随页面代码块懒注册，不进首屏 i18n 包。
+registerPageMessages({ zh: invoiceMessagesZh, en: invoiceMessagesEn })
+
+// 2026-10 重设计调整了列（合并审计人、新增明细与价格变动），列序存储升到 v2，让所有人先看到新的默认布局。
 const LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER_STORAGE_KEY =
-  'hbweb_rv.localSupplierInvoices.columnOrder.v1'
+  'hbweb_rv.localSupplierInvoices.columnOrder.v2'
+const LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS_STORAGE_KEY =
+  'hbweb_rv.localSupplierInvoices.hiddenColumns.v1'
 
 interface DraggableHeaderCellProps extends HTMLAttributes<HTMLTableCellElement> {
   'data-column-key'?: string
@@ -244,6 +273,7 @@ function DraggableHeaderCell({ children, style, ...props }: DraggableHeaderCellP
   )
 }
 
+
 const SORT_FIELD_MAP: Record<string, string> = {
   storeName: 'storeName',
   supplierName: 'supplierName',
@@ -260,21 +290,47 @@ const SORT_FIELD_MAP: Record<string, string> = {
   updatedBy: 'updatedBy',
 }
 
-const FLOW_STATUS_MAP: Record<number, { labelKey: string; color: string }> = {
-  0: { labelKey: 'posAdmin.invoices.draft', color: 'default' },
-  1: { labelKey: 'posAdmin.invoices.submitted', color: 'blue' },
-  2: { labelKey: 'posAdmin.invoices.approved', color: 'green' },
-  3: { labelKey: 'posAdmin.invoices.pushed', color: 'purple' },
+const FLOW_STATUS_MAP: Record<number, { labelKey: string; className: string }> = {
+  0: { labelKey: 'posAdmin.invoices.draft', className: 'lsi-tag lsi-tag-neutral' },
+  1: { labelKey: 'posAdmin.invoices.submitted', className: 'lsi-tag lsi-tag-blue' },
+  2: { labelKey: 'posAdmin.invoices.approved', className: 'lsi-tag lsi-tag-green' },
+  3: { labelKey: 'posAdmin.invoices.pushed', className: 'lsi-tag lsi-tag-purple' },
 }
 
-const INBOUND_STATUS_MAP: Record<number, { labelKey: string; color: string }> = {
-  0: { labelKey: 'posAdmin.invoices.notInbound', color: 'default' },
-  1: { labelKey: 'posAdmin.invoices.partialInbound', color: 'orange' },
-  2: { labelKey: 'posAdmin.invoices.inbounded', color: 'green' },
+const INBOUND_STATUS_MAP: Record<number, { labelKey: string; className: string }> = {
+  0: { labelKey: 'posAdmin.invoices.notInbound', className: 'lsi-tag lsi-tag-neutral' },
+  1: { labelKey: 'posAdmin.invoices.partialInbound', className: 'lsi-tag lsi-tag-orange' },
+  2: { labelKey: 'posAdmin.invoices.inbounded', className: 'lsi-tag lsi-tag-green' },
 }
+
+// 列宽：供应商列不设宽度，屏幕更宽时多出的空间只给它，其余列保持紧凑。
+// 列宽（中等密度表格左右内边距各 8px）。分店/供应商定宽、名称最多折两行显示完整；
+// 备注是唯一的弹性列：屏幕越宽显示越完整，其余列在任何屏幕上都保持原宽，窄列不会被撑宽。
+const COLUMN_WIDTHS: Partial<Record<LocalSupplierInvoiceColumnKey | 'index' | 'action', number>> = {
+  index: 48,
+  invoiceNo: 120,
+  storeCode: 160,
+  supplierCode: 160,
+  orderDate: 96,
+  detailCount: 64,
+  priceChange: 96,
+  totalAmount: 100,
+  isProductChecked: 140,
+  flowStatus: 88,
+  createdAt: 160,
+  inboundDate: 104,
+  inboundStatus: 100,
+  receivedTotalAmount: 116,
+  updatedAt: 160,
+  action: 86,
+}
+/** 备注列最小宽度；隐藏备注时由一个空白占位列吸收多余宽度。 */
+const REMARKS_MIN_WIDTH = 140
 
 function formatDate(value?: string) {
   if (!value) return '--'
+  // 后端返回 ISO 日期时直接截取日期部分，避免按浏览器时区换算后跨天。
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString('zh-CN')
@@ -282,15 +338,69 @@ function formatDate(value?: string) {
 
 function formatAmount(value?: number) {
   if (value === undefined || value === null) return '--'
-  return value.toFixed(2)
+  return value.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatCount(value: number) {
+  return value.toLocaleString('en-AU')
+}
+
+function readStoredColumnOrder() {
+  if (typeof window === 'undefined') {
+    return [...DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER]
+  }
+  try {
+    return parseLocalSupplierInvoiceColumnOrder(
+      localStorage.getItem(LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER_STORAGE_KEY),
+    )
+  } catch {
+    return [...DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER]
+  }
+}
+
+function readStoredHiddenColumns() {
+  if (typeof window === 'undefined') {
+    return [...DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS]
+  }
+  try {
+    return parseLocalSupplierInvoiceHiddenColumns(
+      localStorage.getItem(LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS_STORAGE_KEY),
+    )
+  } catch {
+    return [...DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS]
+  }
+}
+
+function writeStoredValue(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage 不可用时仍保留当前页面内的列配置。
+  }
+}
+
+type SearchScope = 'invoiceNo' | 'product'
+type ProductCheckedSegment = 'all' | 'pending' | 'checked'
+
+function toProductCheckedSegment(value: boolean | undefined): ProductCheckedSegment {
+  if (value === undefined) return 'all'
+  return value ? 'checked' : 'pending'
+}
+
+function fromProductCheckedSegment(value: ProductCheckedSegment): boolean | undefined {
+  if (value === 'all') return undefined
+  return value === 'checked'
 }
 
 export default function LocalSupplierInvoicesPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { active } = useKeepAliveContext()
+  const isMobile = useIsMobile()
   const { access, currentUser } = useAuthStore()
   const isAdmin = access.isAdmin
+  // 有编辑权限的人进入明细工作台处理；只读用户（如店长）进入同一页面的只读视图。
+  const canEditInvoices = access.canEditLocalPurchase
   const managedStoreCodes = access.managedStoreCodes()
   const managedStoreCodeKey = managedStoreCodes?.join(',') ?? 'all'
 
@@ -298,21 +408,12 @@ export default function LocalSupplierInvoicesPage() {
   const [data, setData] = useState<LocalSupplierInvoiceListDto[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  // 每页默认 50 条：一天约 16–29 张新单，一页能看完近两天的单据。
+  const [pageSize, setPageSize] = useState(50)
   const [sortBy, setSortBy] = useState('createdAt')
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend'>('descend')
-  const [columnOrder, setColumnOrder] = useState<LocalSupplierInvoiceColumnKey[]>(() => {
-    if (typeof window === 'undefined') {
-      return [...DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER]
-    }
-    try {
-      return parseLocalSupplierInvoiceColumnOrder(
-        localStorage.getItem(LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER_STORAGE_KEY),
-      )
-    } catch {
-      return [...DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER]
-    }
-  })
+  const [columnOrder, setColumnOrder] = useState<LocalSupplierInvoiceColumnKey[]>(readStoredColumnOrder)
+  const [hiddenColumns, setHiddenColumns] = useState<LocalSupplierInvoiceColumnKey[]>(readStoredHiddenColumns)
 
   // 筛选条件
   const [storeCode, setStoreCode] = useState<string | undefined>(undefined)
@@ -320,13 +421,19 @@ export default function LocalSupplierInvoicesPage() {
   const [invoiceNo, setInvoiceNo] = useState('')
   const [keyword, setKeyword] = useState('')
   const [productChecked, setProductChecked] = useState<boolean | undefined>(undefined)
+  // 日期区间：默认按创建日期看近 90 天；清空表示全部时间。
+  const [dateField, setDateField] = useState<InvoiceListDateField>(DEFAULT_INVOICE_LIST_DATE_FIELD)
+  const [dateRange, setDateRange] = useState<InvoiceListDateRange | null>(() => getDefaultInvoiceListDateRange())
+  // 随货单号与商品关键词共用一个搜索框，用前缀下拉切换搜索范围。
+  const [searchScope, setSearchScope] = useState<SearchScope>('invoiceNo')
+  // 状态分段上的数量：只随分店/供应商/搜索条件变化重新统计，翻页和排序不重复请求。
+  const [segmentCounts, setSegmentCounts] = useState<{ all: number; pending: number } | null>(null)
+  // 左侧分店栏的单数：沿用除分店以外的全部条件，同样只在这些条件变化时重新统计。
+  const [storeCounts, setStoreCounts] = useState<Record<string, number> | null>(null)
 
   // 下拉选项
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
   const [supplierOptions, setSupplierOptions] = useState<{ label: string; value: string }[]>([])
-
-  // 行选择
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   // 创建 Modal
   const [createVisible, setCreateVisible] = useState(false)
@@ -346,6 +453,10 @@ export default function LocalSupplierInvoicesPage() {
   const lastInvoiceTableScrollTopRef = useRef(0)
   const wasInvoiceListTabActiveRef = useRef(active)
   const listRequestGuardRef = useRef(createLatestRequestGuard())
+  const countRequestGuardRef = useRef(createLatestRequestGuard())
+  const lastCountFilterKeyRef = useRef<string | null>(null)
+  const storeCountRequestGuardRef = useRef(createLatestRequestGuard())
+  const lastStoreCountFilterKeyRef = useRef<string | null>(null)
   const mountedRef = useRef(false)
   const latestLoadDataRef = useRef<() => Promise<void>>(async () => undefined)
 
@@ -362,21 +473,21 @@ export default function LocalSupplierInvoicesPage() {
   )
   const columnLabels = useMemo<Record<LocalSupplierInvoiceColumnKey, string>>(
     () => ({
+      invoiceNo: t('posAdmin.invoices.invoiceNo'),
       storeCode: t('column.store'),
       supplierCode: t('column.supplier'),
-      invoiceNo: t('posAdmin.invoices.invoiceNo'),
       orderDate: t('posAdmin.invoices.orderDate'),
-      inboundDate: t('posAdmin.invoices.inboundDate'),
+      detailCount: t('posAdmin.invoiceList.columnDetailCount'),
+      priceChange: t('posAdmin.invoiceList.columnPriceChange'),
       totalAmount: t('column.totalAmount'),
-      receivedTotalAmount: t('posAdmin.invoices.receivedTotal', '已收总金额'),
-      isProductChecked: t('posAdmin.invoices.isProductChecked'),
+      isProductChecked: t('posAdmin.invoiceList.columnCheck'),
       flowStatus: t('posAdmin.invoices.flowStatus', '流程状态'),
+      createdAt: t('posAdmin.invoiceList.columnCreated'),
+      inboundDate: t('posAdmin.invoices.inboundDate'),
       inboundStatus: t('posAdmin.invoices.inboundStatus', '入库状态'),
+      receivedTotalAmount: t('posAdmin.invoices.receivedTotal', '已收总金额'),
       remarks: t('column.remarks'),
-      createdAt: t('column.createTime'),
-      createdBy: t('column.creator'),
-      updatedAt: t('column.updateTime'),
-      updatedBy: t('column.updater'),
+      updatedAt: t('posAdmin.invoiceList.columnUpdated'),
     }),
     [t],
   )
@@ -400,34 +511,109 @@ export default function LocalSupplierInvoicesPage() {
 
     if (shouldSkipScopedStoreQuery(managedStoreCodes)) {
       listRequestGuardRef.current.invalidate()
+      countRequestGuardRef.current.invalidate()
+      lastCountFilterKeyRef.current = null
+      storeCountRequestGuardRef.current.invalidate()
+      lastStoreCountFilterKeyRef.current = null
       setData([])
       setTotal(0)
-      setSelectedRowKeys([])
+      setSegmentCounts(null)
+      setStoreCounts(null)
       setLoading(false)
       return
     }
 
     const startRow = (page - 1) * pageSize
-    const filterModel: Record<string, unknown> = {}
+    // 分段计数共用除「是否检测」以外的全部条件。
+    const baseFilterModel: Record<string, unknown> = {}
     const scopedStoreFilter = buildScopedStoreCodeFilter(storeCode, managedStoreCodes)
     if (scopedStoreFilter) {
-      filterModel.storeCode = scopedStoreFilter
+      baseFilterModel.storeCode = scopedStoreFilter
     }
     if (supplierCode) {
-      filterModel.supplierCode = { filterType: 'text', type: 'equals', filter: supplierCode }
+      baseFilterModel.supplierCode = { filterType: 'text', type: 'equals', filter: supplierCode }
     }
     if (invoiceNo) {
-      filterModel.invoiceNo = { filterType: 'text', type: 'contains', filter: invoiceNo }
+      baseFilterModel.invoiceNo = { filterType: 'text', type: 'contains', filter: invoiceNo }
     }
     if (keyword) {
-      filterModel.productKeyword = { filterType: 'text', filter: keyword }
+      baseFilterModel.productKeyword = { filterType: 'text', filter: keyword }
     }
+    const dateFilter = buildInvoiceListDateFilter(dateField, dateRange)
+    if (dateFilter) {
+      baseFilterModel[dateFilter.key] = dateFilter.value
+    }
+    const filterModel: Record<string, unknown> = { ...baseFilterModel }
     if (productChecked !== undefined) {
       // 后端按有效明细是否全部完成检测筛选，口径与「是否检测商品」列一致。
       filterModel.isProductChecked = { filterType: 'text', type: 'equals', filter: String(productChecked) }
     }
     const sortField = SORT_FIELD_MAP[sortBy] || sortBy
     const sortModel = [{ colId: sortField, sort: sortOrder === 'ascend' ? 'asc' : 'desc' }]
+
+    const countFilterKey = JSON.stringify(baseFilterModel)
+    if (countFilterKey !== lastCountFilterKeyRef.current) {
+      lastCountFilterKeyRef.current = countFilterKey
+      const baseModel = Object.keys(baseFilterModel).length ? baseFilterModel : undefined
+      // 只要总数：取 1 行即可。已检测数量 = 全部 − 待检测，少发一次请求。
+      void runLatestGuardedRequest(
+        countRequestGuardRef.current,
+        () =>
+          Promise.all([
+            getInvoiceGrid({ startRow: 0, endRow: 1, pageSize: 1, filterModel: baseModel } as Record<string, unknown>),
+            getInvoiceGrid({
+              startRow: 0,
+              endRow: 1,
+              pageSize: 1,
+              filterModel: {
+                ...baseFilterModel,
+                isProductChecked: { filterType: 'text', type: 'equals', filter: 'false' },
+              },
+            } as Record<string, unknown>),
+          ]),
+        {
+          onSuccess: ([allResult, pendingResult]) => {
+            setSegmentCounts({ all: allResult?.total ?? 0, pending: pendingResult?.total ?? 0 })
+          },
+          onError: () => {
+            // 计数失败不影响列表本身，下次加载再重试。
+            lastCountFilterKeyRef.current = null
+            setSegmentCounts(null)
+          },
+        },
+      )
+    }
+
+    // 分店栏单数：沿用除分店以外的全部条件（含是否检测、日期），分店只保留可管理范围。
+    const storeCountFilterModel: Record<string, unknown> = { ...filterModel }
+    const scopeOnlyStoreFilter = buildScopedStoreCodeFilter(undefined, managedStoreCodes)
+    if (scopeOnlyStoreFilter) {
+      storeCountFilterModel.storeCode = scopeOnlyStoreFilter
+    } else {
+      delete storeCountFilterModel.storeCode
+    }
+    const storeCountFilterKey = JSON.stringify(storeCountFilterModel)
+    if (storeCountFilterKey !== lastStoreCountFilterKeyRef.current) {
+      lastStoreCountFilterKeyRef.current = storeCountFilterKey
+      void runLatestGuardedRequest(
+        storeCountRequestGuardRef.current,
+        () => getInvoiceStoreCounts({
+          startRow: 0,
+          endRow: 1,
+          pageSize: 1,
+          filterModel: Object.keys(storeCountFilterModel).length ? storeCountFilterModel : undefined,
+        }),
+        {
+          onSuccess: (rows) => {
+            setStoreCounts(Object.fromEntries(rows.map((row) => [row.storeCode, row.count])))
+          },
+          onError: () => {
+            lastStoreCountFilterKeyRef.current = null
+            setStoreCounts(null)
+          },
+        },
+      )
+    }
 
     await runLatestGuardedRequest(
       listRequestGuardRef.current,
@@ -457,6 +643,8 @@ export default function LocalSupplierInvoicesPage() {
     return () => {
       mountedRef.current = false
       listRequestGuardRef.current.invalidate()
+      countRequestGuardRef.current.invalidate()
+      storeCountRequestGuardRef.current.invalidate()
     }
   }, [])
 
@@ -579,7 +767,7 @@ export default function LocalSupplierInvoicesPage() {
       if (suppliersResult.status === 'fulfilled') {
         setSupplierOptions(
           suppliersResult.value.map((s) => ({
-            label: s.name || s.localSupplierCode,
+            label: s.name ? `${s.localSupplierCode} - ${s.name}` : s.localSupplierCode,
             value: s.localSupplierCode,
           })),
         )
@@ -611,6 +799,22 @@ export default function LocalSupplierInvoicesPage() {
     requestFirstPage()
   }
 
+  const handleStoreChange = (code: string | undefined) => {
+    setStoreCode(code)
+    requestFirstPage(true)
+  }
+
+  const handleDateFieldChange = (field: InvoiceListDateField) => {
+    setDateField(field)
+    // 未选日期（全部时间）时切换日期类型不改变结果，不必重查。
+    if (dateRange) requestFirstPage(true)
+  }
+
+  const handleDateRangeChange = (range: InvoiceListDateRange | null) => {
+    setDateRange(range)
+    requestFirstPage(true)
+  }
+
   const handleReset = () => {
     const reloadFromDependencies = page !== 1 || sortBy !== 'createdAt' || sortOrder !== 'descend'
     setStoreCode(undefined)
@@ -618,6 +822,8 @@ export default function LocalSupplierInvoicesPage() {
     setInvoiceNo('')
     setKeyword('')
     setProductChecked(undefined)
+    setDateField(DEFAULT_INVOICE_LIST_DATE_FIELD)
+    setDateRange(getDefaultInvoiceListDateRange())
     setSortBy('createdAt')
     setSortOrder('descend')
     requestFirstPage(true, reloadFromDependencies)
@@ -627,6 +833,9 @@ export default function LocalSupplierInvoicesPage() {
     try {
       await deleteInvoice(invoiceGuid)
       message.success(t('message.deleteSuccess'))
+      // 删除会改变分段与分店计数，强制下次加载重新统计。
+      lastCountFilterKeyRef.current = null
+      lastStoreCountFilterKeyRef.current = null
       void latestLoadDataRef.current()
     } catch {
       message.error(t('message.deleteFailed'))
@@ -674,6 +883,8 @@ export default function LocalSupplierInvoicesPage() {
       message.success(t('message.createSuccess'))
       setCreateVisible(false)
       createForm.resetFields()
+      lastCountFilterKeyRef.current = null
+      lastStoreCountFilterKeyRef.current = null
       navigate(`/pos-admin/local-supplier-invoices/${newGuid}`)
     } catch {
       message.error(t('message.createFailed'))
@@ -684,297 +895,345 @@ export default function LocalSupplierInvoicesPage() {
 
   const handleImportedInvoiceCreated = async (invoiceGuid: string) => {
     setImportVisible(false)
+    lastCountFilterKeyRef.current = null
+    lastStoreCountFilterKeyRef.current = null
     await latestLoadDataRef.current()
     navigate(`/pos-admin/local-supplier-invoices/${invoiceGuid}`)
+  }
+
+  const openInvoice = useCallback(
+    (invoiceGuid: string) => navigate(`/pos-admin/local-supplier-invoices/${invoiceGuid}`),
+    [navigate],
+  )
+
+  const confirmDeleteInvoice = (record: LocalSupplierInvoiceListDto) => {
+    Modal.confirm({
+      title: t('posAdmin.invoices.confirmDeleteInvoice'),
+      content: t('posAdmin.invoices.deleteIrreversible'),
+      okText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      onOk: () => handleDelete(record.invoiceGUID),
+    })
+  }
+
+  const renderEntity = (code?: string, name?: string) => {
+    if (!code && !name) return '--'
+    const title = name ? `${code ?? ''} - ${name}` : code
+    return (
+      <span className="lsi-entity" title={title}>
+        {code ? <span className="lsi-code">{code}</span> : null}
+        <span className="lsi-entity-name">{name || code}</span>
+      </span>
+    )
   }
 
   // 「从HQ同步」（HQ 进货单 → HBweb）已于 2026-09-29 停用；编辑页「更新HQ商品」等写 HQ 的操作不受影响。
   const baseColumns: ColumnsType<LocalSupplierInvoiceListDto> = [
     {
+      // 序号按全局位置编号（翻页后接着上一页），固定在最左，不参与拖拽和列显隐。
       title: t('column.index'),
       key: 'index',
-      width: 60,
-      align: 'right',
-      render: (_, __, index) => (page - 1) * pageSize + index + 1,
-    },
-    {
-      title: t('column.store'),
-      dataIndex: 'storeCode',
-      key: 'storeCode',
-      width: 160,
-      sorter: true,
-      sortOrder: sortBy === 'storeCode' ? sortOrder : undefined,
-      render: (_: string, record) => {
-        const storeText = record.storeName ? `${record.storeCode} - ${record.storeName}` : record.storeCode || '--'
-
-        return (
-          <Tag
-            color={getStableTagColor(record.storeCode || '')}
-            style={{
-              maxWidth: '100%',
-              whiteSpace: 'normal',
-            }}
-            title={storeText}
-          >
-            {/* 分店名称较长时允许自动换行，最多展示两行，避免挤压后续列。 */}
-            <span
-              style={{
-                display: '-webkit-box',
-                overflow: 'hidden',
-                lineHeight: '18px',
-                overflowWrap: 'anywhere',
-                WebkitBoxOrient: 'vertical',
-                WebkitLineClamp: 2,
-              }}
-            >
-              {storeText}
-            </span>
-          </Tag>
-        )
-      },
-    },
-    {
-      title: t('column.supplier'),
-      dataIndex: 'supplierCode',
-      key: 'supplierCode',
-      width: 160,
-      sorter: true,
-      sortOrder: sortBy === 'supplierCode' ? sortOrder : undefined,
-      render: (_: string, record) => {
-        const supplierText = record.supplierName ? `${record.supplierCode} - ${record.supplierName}` : record.supplierCode || '--'
-
-        return (
-          <Tag
-            color={getStableTagColor(record.supplierCode || '')}
-            style={{
-              maxWidth: '100%',
-              whiteSpace: 'normal',
-            }}
-            title={supplierText}
-          >
-            {/* 供应商内容较长时允许自动换行，最多展示两行，避免挤压后续列。 */}
-            <span
-              style={{
-                display: '-webkit-box',
-                overflow: 'hidden',
-                lineHeight: '18px',
-                overflowWrap: 'anywhere',
-                WebkitBoxOrient: 'vertical',
-                WebkitLineClamp: 2,
-              }}
-            >
-              {supplierText}
-            </span>
-          </Tag>
-        )
-      },
+      width: COLUMN_WIDTHS.index,
+      align: 'center',
+      className: 'lsi-num',
+      render: (_, __, index) => <span className="lsi-muted">{(page - 1) * pageSize + index + 1}</span>,
     },
     {
       title: t('posAdmin.invoices.invoiceNo'),
       dataIndex: 'invoiceNo',
       key: 'invoiceNo',
-      width: 160,
+      width: COLUMN_WIDTHS.invoiceNo,
       sorter: true,
       sortOrder: sortBy === 'invoiceNo' ? sortOrder : undefined,
-      render: (value: string) => (
-        <Space size={4}>
-          <span>{value || '--'}</span>
+      render: (value: string, record) => (
+        <Space size={2} style={{ maxWidth: '100%' }}>
+          <Typography.Link
+            className="lsi-invoice-link"
+            ellipsis
+            href={`/pos-admin/local-supplier-invoices/${record.invoiceGUID}`}
+            onClick={(event) => {
+              // 保留浏览器的新标签打开能力，普通点击走单页路由与 KeepAlive Tab。
+              if (event.metaKey || event.ctrlKey || event.shiftKey) return
+              event.preventDefault()
+              openInvoice(record.invoiceGUID)
+            }}
+          >
+            {value || '--'}
+          </Typography.Link>
           {value && (
-            <Button
-              type="text"
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => void copyTextToClipboard(value)}
-            />
+            <Tooltip title={t('posAdmin.invoiceList.copyInvoiceNo')}>
+              <Button
+                className="lsi-copy-button"
+                type="text"
+                size="small"
+                aria-label={t('posAdmin.invoiceList.copyInvoiceNo')}
+                icon={<CopyOutlined />}
+                onClick={() => void copyTextToClipboard(value)}
+              />
+            </Tooltip>
           )}
         </Space>
       ),
     },
     {
+      title: t('column.store'),
+      dataIndex: 'storeCode',
+      key: 'storeCode',
+      width: COLUMN_WIDTHS.storeCode,
+      className: 'lsi-cell-wrap',
+      sorter: true,
+      sortOrder: sortBy === 'storeCode' ? sortOrder : undefined,
+      render: (_: string, record) => renderEntity(record.storeCode, record.storeName),
+    },
+    {
+      title: t('column.supplier'),
+      dataIndex: 'supplierCode',
+      key: 'supplierCode',
+      width: COLUMN_WIDTHS.supplierCode,
+      className: 'lsi-cell-wrap',
+      sorter: true,
+      sortOrder: sortBy === 'supplierCode' ? sortOrder : undefined,
+      render: (_: string, record) => renderEntity(record.supplierCode, record.supplierName),
+    },
+    {
       title: t('posAdmin.invoices.orderDate'),
       dataIndex: 'orderDate',
       key: 'orderDate',
-      width: 120,
+      width: COLUMN_WIDTHS.orderDate,
       sorter: true,
       sortOrder: sortBy === 'orderDate' ? sortOrder : undefined,
+      className: 'lsi-num',
       render: (v: string) => formatDate(v),
     },
     {
-      title: t('posAdmin.invoices.inboundDate'),
-      dataIndex: 'inboundDate',
-      key: 'inboundDate',
-      width: 120,
-      sorter: true,
-      sortOrder: sortBy === 'inboundDate' ? sortOrder : undefined,
-      render: (v: string) => formatDate(v),
+      title: t('posAdmin.invoiceList.columnDetailCount'),
+      dataIndex: 'detailCount',
+      key: 'detailCount',
+      width: COLUMN_WIDTHS.detailCount,
+      align: 'right',
+      className: 'lsi-num',
+      render: (value?: number) => (typeof value === 'number' ? formatCount(value) : '--'),
+    },
+    {
+      title: t('posAdmin.invoiceList.columnPriceChange'),
+      key: 'priceChange',
+      width: COLUMN_WIDTHS.priceChange,
+      className: 'lsi-num',
+      render: (_, record) => {
+        const up = record.priceIncreaseItemCount ?? 0
+        const down = record.priceDecreaseItemCount ?? 0
+        if (!up && !down) return <span className="lsi-muted">—</span>
+        return (
+          <Space size={8}>
+            {up > 0 && (
+              <span className="lsi-price-up" title={t('posAdmin.invoiceList.priceUpTip', { count: up })}>
+                ↑{up}
+              </span>
+            )}
+            {down > 0 && (
+              <span className="lsi-price-down" title={t('posAdmin.invoiceList.priceDownTip', { count: down })}>
+                ↓{down}
+              </span>
+            )}
+          </Space>
+        )
+      },
     },
     {
       title: t('column.totalAmount'),
       dataIndex: 'totalAmount',
       key: 'totalAmount',
-      width: 120,
+      width: COLUMN_WIDTHS.totalAmount,
       align: 'right',
       sorter: true,
       sortOrder: sortBy === 'totalAmount' ? sortOrder : undefined,
-      render: (v: number) => formatAmount(v),
+      className: 'lsi-num',
+      render: (v: number) => <strong style={{ fontWeight: 600 }}>{formatAmount(v)}</strong>,
     },
     {
-      title: t('posAdmin.invoices.receivedTotal', '已收总金额'),
-      dataIndex: 'receivedTotalAmount',
-      key: 'receivedTotalAmount',
-      width: 120,
-      align: 'right',
-      sorter: true,
-      sortOrder: sortBy === 'receivedTotalAmount' ? sortOrder : undefined,
-      render: (v: number) => formatAmount(v),
-    },
-    {
-      title: t('posAdmin.invoices.isProductChecked'),
+      title: t('posAdmin.invoiceList.columnCheck'),
       dataIndex: 'isProductChecked',
       key: 'isProductChecked',
-      width: 120,
-      align: 'center',
-      render: (value?: boolean) => {
+      width: COLUMN_WIDTHS.isProductChecked,
+      render: (value: boolean | undefined, record) => {
         // 兼容尚未返回汇总字段的后端，缺失值不能误报为未检测。
         if (typeof value !== 'boolean') return '--'
-        return <Tag color={value ? 'green' : 'default'}>{t(value ? 'common.yes' : 'common.no')}</Tag>
+        const unchecked = record.uncheckedDetailCount ?? 0
+        const newProducts = record.newProductDetailCount ?? 0
+        return (
+          <Space size={6}>
+            {value ? (
+              <span className="lsi-pill lsi-pill-ok">{t('posAdmin.invoiceList.checked')}</span>
+            ) : (
+              <span className="lsi-pill lsi-pill-warn">
+                {unchecked > 0
+                  ? t('posAdmin.invoiceList.pendingCount', { count: unchecked })
+                  : t('posAdmin.invoiceList.pending')}
+              </span>
+            )}
+            {newProducts > 0 && (
+              <Tooltip title={t('posAdmin.invoiceList.newProductsTip')}>
+                <span className="lsi-tag lsi-tag-new">{t('posAdmin.invoiceList.newProducts', { count: newProducts })}</span>
+              </Tooltip>
+            )}
+          </Space>
+        )
       },
     },
     {
       title: t('posAdmin.invoices.flowStatus', '流程状态'),
       dataIndex: 'flowStatus',
       key: 'flowStatus',
-      width: 100,
+      width: COLUMN_WIDTHS.flowStatus,
       sorter: true,
       sortOrder: sortBy === 'flowStatus' ? sortOrder : undefined,
       render: (v: number) => {
-        const info = FLOW_STATUS_MAP[v] || { labelKey: String(v), color: 'default' }
-        return <Tag color={info.color}>{t(info.labelKey)}</Tag>
+        const info = FLOW_STATUS_MAP[v]
+        return info ? <span className={info.className}>{t(info.labelKey)}</span> : '--'
       },
+    },
+    {
+      title: t('posAdmin.invoiceList.columnCreated'),
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      width: COLUMN_WIDTHS.createdAt,
+      sorter: true,
+      sortOrder: sortBy === 'createdAt' ? sortOrder : undefined,
+      className: 'lsi-num',
+      render: (v: string, record) => (
+        <span title={formatLocalSupplierInvoiceAuditTime(v)}>
+          {formatLocalSupplierInvoiceAuditTimeCompact(v)}
+          {record.createdBy ? <span className="lsi-muted"> · {record.createdBy}</span> : null}
+        </span>
+      ),
+    },
+    {
+      title: t('posAdmin.invoices.inboundDate'),
+      dataIndex: 'inboundDate',
+      key: 'inboundDate',
+      width: COLUMN_WIDTHS.inboundDate,
+      sorter: true,
+      sortOrder: sortBy === 'inboundDate' ? sortOrder : undefined,
+      className: 'lsi-num',
+      render: (v: string) => formatDate(v),
     },
     {
       title: t('posAdmin.invoices.inboundStatus', '入库状态'),
       dataIndex: 'inboundStatus',
       key: 'inboundStatus',
-      width: 100,
+      width: COLUMN_WIDTHS.inboundStatus,
       sorter: true,
       sortOrder: sortBy === 'inboundStatus' ? sortOrder : undefined,
       render: (v: number) => {
-        const info = INBOUND_STATUS_MAP[v] || { labelKey: String(v), color: 'default' }
-        return <Tag color={info.color}>{t(info.labelKey)}</Tag>
+        const info = INBOUND_STATUS_MAP[v]
+        return info ? <span className={info.className}>{t(info.labelKey)}</span> : '--'
       },
+    },
+    {
+      title: t('posAdmin.invoices.receivedTotal', '已收总金额'),
+      dataIndex: 'receivedTotalAmount',
+      key: 'receivedTotalAmount',
+      width: COLUMN_WIDTHS.receivedTotalAmount,
+      align: 'right',
+      sorter: true,
+      sortOrder: sortBy === 'receivedTotalAmount' ? sortOrder : undefined,
+      className: 'lsi-num',
+      render: (v: number) => formatAmount(v),
     },
     {
       title: t('column.remarks'),
       dataIndex: 'remarks',
       key: 'remarks',
-      width: 180,
-      ellipsis: true,
-      render: (v: string) => v || '--',
+      ellipsis: { showTitle: true },
+      render: (v: string) => v || <span className="lsi-muted">--</span>,
     },
     {
-      title: t('column.createTime'),
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      width: 170,
-      sorter: true,
-      sortOrder: sortBy === 'createdAt' ? sortOrder : undefined,
-      render: (v: string) => formatLocalSupplierInvoiceAuditTime(v),
-    },
-    {
-      title: t('column.creator'),
-      dataIndex: 'createdBy',
-      key: 'createdBy',
-      width: 120,
-      render: (v: string) => v || '--',
-    },
-    {
-      title: t('column.updateTime'),
+      title: t('posAdmin.invoiceList.columnUpdated'),
       dataIndex: 'updatedAt',
       key: 'updatedAt',
-      width: 170,
+      width: COLUMN_WIDTHS.updatedAt,
       sorter: true,
       sortOrder: sortBy === 'updatedAt' ? sortOrder : undefined,
-      render: (v: string) => formatLocalSupplierInvoiceAuditTime(v),
-    },
-    {
-      title: t('column.updater'),
-      dataIndex: 'updatedBy',
-      key: 'updatedBy',
-      width: 120,
-      render: (v: string) => v || '--',
+      className: 'lsi-num',
+      render: (v: string, record) => (
+        <span title={formatLocalSupplierInvoiceAuditTime(v)}>
+          {formatLocalSupplierInvoiceAuditTimeCompact(v)}
+          {record.updatedBy ? <span className="lsi-muted"> · {record.updatedBy}</span> : null}
+        </span>
+      ),
     },
     {
       title: t('column.action'),
       key: 'action',
       fixed: 'right',
-      width: 180,
+      width: COLUMN_WIDTHS.action,
       render: (_, record) => (
         <Space size={0}>
-          <Button
-            type="link"
-            onClick={() => navigate(`/pos-admin/invoice-detail/${record.invoiceGUID}`)}
-          >
-            {t('common.view')}
+          <Button type="link" size="small" onClick={() => openInvoice(record.invoiceGUID)}>
+            {canEditInvoices ? t('posAdmin.invoiceList.process') : t('posAdmin.invoiceList.view')}
           </Button>
-          {isAdmin && (
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'salesAnalysis', label: t('posAdmin.invoiceList.salesAnalysis') },
+                ...(isAdmin ? [{ key: 'delete', label: t('common.delete'), danger: true }] : []),
+              ],
+              onClick: ({ key }) => {
+                if (key === 'salesAnalysis') {
+                  navigate(`/pos-admin/local-supplier-invoices/${record.invoiceGUID}/sales-analysis`)
+                } else if (key === 'delete') {
+                  confirmDeleteInvoice(record)
+                }
+              },
+            }}
+          >
             <Button
-              type="link"
-              onClick={() => navigate(`/pos-admin/local-supplier-invoices/${record.invoiceGUID}`)}
-            >
-              {t('common.edit')}
-            </Button>
-          )}
-          {isAdmin && (
-            <Popconfirm
-              title={t('posAdmin.invoices.confirmDeleteInvoice')}
-              description={t('posAdmin.invoices.deleteIrreversible')}
-              okText={t('common.delete')}
-              cancelText={t('common.cancel')}
-              okButtonProps={{ danger: true }}
-              onConfirm={() => void handleDelete(record.invoiceGUID)}
-            >
-              <Button type="link" danger>
-                {t('common.delete')}
-              </Button>
-            </Popconfirm>
-          )}
+              type="text"
+              size="small"
+              icon={<MoreOutlined />}
+              aria-label={t('posAdmin.invoiceList.moreActions')}
+            />
+          </Dropdown>
         </Space>
       ),
     },
   ]
 
-  const isColumnOrderCustomized =
-    isLocalSupplierInvoiceColumnOrderCustomized(columnOrder)
+  const hiddenColumnSet = useMemo(() => new Set(hiddenColumns), [hiddenColumns])
+  const isColumnLayoutCustomized = isLocalSupplierInvoiceColumnLayoutCustomized(columnOrder, hiddenColumns)
 
   const handleColumnDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
     const nextOrder = moveLocalSupplierInvoiceColumnOrder(columnOrder, active.id, over.id)
     setColumnOrder(nextOrder)
-    try {
-      localStorage.setItem(
-        LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER_STORAGE_KEY,
-        JSON.stringify(nextOrder),
-      )
-    } catch {
-      // localStorage 不可用时仍保留当前页面内的列顺序。
-    }
+    writeStoredValue(LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER_STORAGE_KEY, nextOrder)
   }
 
-  const resetColumnOrder = () => {
+  const handleToggleColumn = (key: LocalSupplierInvoiceColumnKey) => {
+    const nextHidden = toggleLocalSupplierInvoiceHiddenColumn(hiddenColumns, key)
+    setHiddenColumns(nextHidden)
+    writeStoredValue(LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS_STORAGE_KEY, nextHidden)
+  }
+
+  const resetColumnLayout = () => {
     setColumnOrder([...DEFAULT_LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER])
+    setHiddenColumns([...DEFAULT_LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS])
     try {
       localStorage.removeItem(LOCAL_SUPPLIER_INVOICE_COLUMN_ORDER_STORAGE_KEY)
+      localStorage.removeItem(LOCAL_SUPPLIER_INVOICE_HIDDEN_COLUMNS_STORAGE_KEY)
     } catch {
-      // localStorage 不可用时仍恢复当前页面内的默认列顺序。
+      // localStorage 不可用时仍恢复当前页面内的默认列配置。
     }
-    message.success(t('posAdmin.invoices.columnOrderReset'))
+    message.success(t('posAdmin.invoiceList.layoutReset'))
   }
 
+  const visibleColumnOrder = columnOrder.filter((key) => !hiddenColumnSet.has(key))
   const columnMap = new Map(baseColumns.map((column) => [String(column.key), column]))
   const columns = [
     columnMap.get('index'),
-    ...columnOrder.map((key) => {
+    ...visibleColumnOrder.map((key) => {
       const column = columnMap.get(key)
       if (!column) return undefined
       return {
@@ -988,17 +1247,108 @@ export default function LocalSupplierInvoicesPage() {
         } as DraggableHeaderCellProps),
       }
     }),
+    // 备注被隐藏时，用一个不显示内容的占位列吸收多余宽度，避免其它列被按比例撑宽。
+    hiddenColumnSet.has('remarks') ? { key: 'spacer', title: '', render: () => null } : undefined,
     columnMap.get('action'),
   ].filter(
     (column): column is ColumnsType<LocalSupplierInvoiceListDto>[number] => Boolean(column),
   )
+  // 表格最小宽度 = 定宽列之和 + 备注最小宽度；更宽的屏幕把多余空间留给备注（或隐藏备注时的占位列）。
+  const tableScrollX = columns.reduce(
+    (sum, column) => sum + (typeof column.width === 'number' ? column.width : column.key === 'remarks' ? REMARKS_MIN_WIDTH : 0),
+    0,
+  )
+
+  // 桌面端把可选分店全部列在表格左侧，点选即筛选；只有一个分店（如单店店长）或手机端时退回工具栏下拉。
+  const showStoreRail = !isMobile && storeOptions.length > 1
+  // 默认的「创建日期 近 90 天」不算额外筛选，改过日期才显示「清空筛选」。
+  const hasActiveFilters = Boolean(
+    storeCode || supplierCode || invoiceNo || keyword || productChecked !== undefined
+    || !isDefaultInvoiceListDateFilter(dateField, dateRange),
+  )
+  const storeCountTotal = storeCounts ? Object.values(storeCounts).reduce((sum, count) => sum + count, 0) : undefined
+  const today = dayjs().startOf('day')
+  const datePresets: { label: string; value: InvoiceListDateRange }[] = [
+    { label: t('posAdmin.invoiceList.datePresetLast7Days'), value: [today.subtract(6, 'day'), today] },
+    { label: t('posAdmin.invoiceList.datePresetLast30Days'), value: [today.subtract(29, 'day'), today] },
+    { label: t('posAdmin.invoiceList.datePresetLast90Days'), value: getDefaultInvoiceListDateRange(today) },
+    { label: t('posAdmin.invoiceList.datePresetThisYear'), value: [today.startOf('year'), today] },
+  ]
+  const searchValue = searchScope === 'invoiceNo' ? invoiceNo : keyword
+  const pendingCount = segmentCounts?.pending
+  const checkedCount = segmentCounts ? Math.max(0, segmentCounts.all - segmentCounts.pending) : undefined
+
+  const renderSegmentLabel = (label: string, count?: number, warn = false) => (
+    <span>
+      {label}
+      {typeof count === 'number' && (
+        <span className={warn && count > 0 ? 'lsi-segment-count lsi-segment-count-warn' : 'lsi-segment-count'}>
+          {formatCount(count)}
+        </span>
+      )}
+    </span>
+  )
+
+  const handleSearchTextChange = (value: string) => {
+    if (searchScope === 'invoiceNo') setInvoiceNo(value)
+    else setKeyword(value)
+    // 点清除图标时立即刷新；普通输入等回车再查。
+    if (!value && searchValue) requestFirstPage(true)
+  }
+
+  const handleSearchScopeChange = (scope: SearchScope) => {
+    const text = searchValue
+    setSearchScope(scope)
+    setInvoiceNo(scope === 'invoiceNo' ? text : '')
+    setKeyword(scope === 'product' ? text : '')
+    if (text.trim()) requestFirstPage(true)
+  }
+
+  const columnSettingsContent = (
+    <div className="lsi-column-settings">
+      <Typography.Text type="secondary" style={{ fontSize: 12, padding: '0 4px 4px' }}>
+        {t('posAdmin.invoiceList.columnSettingsHint')}
+      </Typography.Text>
+      {columnOrder.map((key) => {
+        const locked = LOCKED_LOCAL_SUPPLIER_INVOICE_COLUMNS.includes(key)
+        return (
+          <div key={key} className="lsi-column-settings-row">
+            <Checkbox
+              checked={!hiddenColumnSet.has(key)}
+              disabled={locked}
+              onChange={() => handleToggleColumn(key)}
+            >
+              {columnLabels[key]}
+            </Checkbox>
+            {locked && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('posAdmin.invoiceList.columnLocked')}
+              </Typography.Text>
+            )}
+          </div>
+        )
+      })}
+      <div className="lsi-column-settings-footer">
+        <span />
+        <Button size="small" disabled={!isColumnLayoutCustomized} onClick={resetColumnLayout}>
+          {t('posAdmin.invoiceList.restoreDefault')}
+        </Button>
+      </div>
+    </div>
+  )
 
   return (
-    <Card
-      title={t('posAdmin.invoices.title')}
-      styles={{ body: { padding: 0 } }}
-      extra={
-        <Space>
+    <div className="lsi-list-page">
+      <div className="page-header page-header-compact">
+        <div className="page-header-compact-title">
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            {t('posAdmin.invoices.title')}
+          </Typography.Title>
+          <Typography.Text type="secondary" className="page-header-compact-subtitle">
+            {t('posAdmin.invoiceList.totalCount', { count: formatCount(segmentCounts?.all ?? total) })}
+          </Typography.Text>
+        </div>
+        <Space wrap>
           {isAdmin && (
             <Button
               icon={<UploadOutlined />}
@@ -1019,153 +1369,228 @@ export default function LocalSupplierInvoicesPage() {
             </Button>
           )}
         </Space>
-      }
-    >
-      <div
+      </div>
+
+      <section
         ref={wrapRef}
+        className="lsi-list-card"
         style={{
-          height: 'calc(100vh - 160px)',
+          height: 'calc(100vh - 252px)',
+          minHeight: 420,
           display: 'flex',
-          flexDirection: 'column',
           overflow: 'hidden',
         }}
       >
-        <div ref={toolbarRef} style={{ padding: 16 }}>
-          <Space wrap>
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder={t('form.pleaseSelectStore')}
-              style={{ width: 200 }}
-              value={storeCode}
-              onChange={(v) => {
-                setStoreCode(v)
-              }}
-              options={storeOptions}
-            />
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder={t('form.pleaseSelectSupplier')}
-              style={{ width: 200 }}
-              value={supplierCode}
-              onChange={(v) => {
-                setSupplierCode(v)
-              }}
-              options={supplierOptions}
-            />
-            <Input
-              allowClear
-              placeholder={t('posAdmin.invoices.invoiceNo')}
-              style={{ width: 180 }}
-              value={invoiceNo}
-              onChange={(e) => setInvoiceNo(e.target.value)}
-            />
-            <Input
-              allowClear
-              placeholder={t('posAdmin.invoices.productKeyword', '商品关键词')}
-              style={{ width: 180 }}
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-            />
-            <Select
-              allowClear
-              placeholder={t('posAdmin.invoices.isProductChecked')}
-              style={{ width: 150 }}
-              value={productChecked}
-              onChange={(v?: boolean) => setProductChecked(v)}
-              options={[
-                { label: t('common.yes'), value: true },
-                { label: t('common.no'), value: false },
-              ]}
-            />
-            <Button type="primary" onClick={handleSearch}>
-              {t('common.query')}
-            </Button>
-            <Button onClick={handleReset}>{t('common.reset')}</Button>
-            {isColumnOrderCustomized ? (
-              <Button icon={<ReloadOutlined />} onClick={resetColumnOrder}>
-                {t('posAdmin.invoices.resetColumns')}
-              </Button>
-            ) : null}
-          </Space>
-        </div>
-
-        <div ref={tableRegionRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <DndContext
-            sensors={columnDragSensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleColumnDragEnd}
-            accessibility={dndAccessibility}
-          >
-            <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
-              <MeasuredTable metricId="pos-admin.local-supplier-invoices.table-1"
-                ref={invoiceTableRef}
-                rowKey="invoiceGUID"
-                loading={loading}
-                dataSource={data}
-                components={{ header: { cell: DraggableHeaderCell } }}
-                columns={columns}
-                pagination={false}
-                scroll={{ x: 2320, y: tableScrollY }}
-                rowSelection={
-                  isAdmin
-                    ? {
-                        selectedRowKeys,
-                        onChange: (keys) => setSelectedRowKeys(keys),
-                      }
-                    : undefined
-                }
-                rowClassName={(_, index) => (index % 2 === 1 ? 'table-row-striped' : '')}
-                onScroll={handleInvoiceTableScroll}
-                onChange={(_pagination, _filters, sorter) => {
-                  const s = Array.isArray(sorter) ? sorter[0] : sorter
-                  const field = s?.field || s?.column?.dataIndex
-                  const order = s?.order as 'ascend' | 'descend' | undefined
-                  if (field && order) {
-                    setSortBy(String(field))
-                    setSortOrder(order)
-                  } else {
-                    setSortBy('createdAt')
-                    setSortOrder('descend')
-                  }
+        {showStoreRail && (
+          <nav className="lsi-store-rail" aria-label={t('posAdmin.invoiceList.storeFilter')}>
+            <div className="lsi-store-rail-title">{t('posAdmin.invoiceList.storeFilter')}</div>
+            <div className="lsi-store-rail-list">
+              {[{ value: undefined, label: t('posAdmin.invoiceList.allOption') }, ...storeOptions].map((store) => {
+                const selected = (store.value ?? undefined) === storeCode
+                // 计数还没回来时不显示数字；回来后没有单的分店显示 0。
+                const count = store.value ? (storeCounts ? storeCounts[store.value] ?? 0 : undefined) : storeCountTotal
+                return (
+                  <button
+                    key={store.value ?? '__all__'}
+                    type="button"
+                    className={selected ? 'lsi-store-rail-item is-active' : 'lsi-store-rail-item'}
+                    aria-pressed={selected}
+                    title={store.value ? `${store.value} - ${store.label}` : undefined}
+                    onClick={() => {
+                      if (!selected) handleStoreChange(store.value)
+                    }}
+                  >
+                    {store.value ? <span className="lsi-code">{store.value}</span> : null}
+                    <span className="lsi-store-rail-name">{store.label}</span>
+                    {typeof count === 'number' && (
+                      <span className={count > 0 ? 'lsi-store-rail-count' : 'lsi-store-rail-count is-zero'}>
+                        {formatCount(count)}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </nav>
+        )}
+        <div className="lsi-list-main">
+          <div ref={toolbarRef} className="lsi-list-toolbar">
+            {/* 筛选项在自己的容器里换行，列设置按钮固定在右上角，不会被挤到下一行。 */}
+            <div className="lsi-list-toolbar-filters">
+              <Segmented<ProductCheckedSegment>
+                aria-label={t('posAdmin.invoiceList.segmentAria')}
+                value={toProductCheckedSegment(productChecked)}
+                onChange={(value) => {
+                  setProductChecked(fromProductCheckedSegment(value))
+                  requestFirstPage(true)
                 }}
+                options={[
+                  { value: 'all', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentAll'), segmentCounts?.all) },
+                  { value: 'pending', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentPending'), pendingCount, true) },
+                  { value: 'checked', label: renderSegmentLabel(t('posAdmin.invoiceList.segmentChecked'), checkedCount) },
+                ]}
               />
-            </SortableContext>
-          </DndContext>
-        </div>
+              <span className="lsi-list-toolbar-divider" />
+              {/* 日期类型并排单选（默认创建日期），区间默认近 90 天；清空即全部时间。 */}
+              <Space size={6}>
+                <Radio.Group
+                  className="lsi-search-scope"
+                  optionType="button"
+                  value={dateField}
+                  onChange={(e) => handleDateFieldChange(e.target.value as InvoiceListDateField)}
+                  options={[
+                    { value: 'createdAt', label: t('posAdmin.invoiceList.dateFieldCreatedAt') },
+                    { value: 'orderDate', label: t('posAdmin.invoiceList.dateFieldOrderDate') },
+                  ]}
+                />
+                <DatePicker.RangePicker
+                  allowClear
+                  value={dateRange}
+                  presets={datePresets}
+                  style={{ width: 236 }}
+                  onChange={(values) => handleDateRangeChange(
+                    values?.[0] && values?.[1] ? [values[0], values[1]] : null,
+                  )}
+                />
+              </Space>
+              {!showStoreRail && (
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  prefix={t('posAdmin.invoiceList.storeFilter')}
+                  placeholder={t('posAdmin.invoiceList.allOption')}
+                  style={{ width: 180 }}
+                  value={storeCode}
+                  onChange={handleStoreChange}
+                  options={storeOptions}
+                />
+              )}
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                prefix={t('posAdmin.invoiceList.supplierFilter')}
+                placeholder={t('posAdmin.invoiceList.allOption')}
+                style={{ width: 176 }}
+                value={supplierCode}
+                onChange={(v) => {
+                  setSupplierCode(v)
+                  requestFirstPage(true)
+                }}
+                options={supplierOptions}
+              />
+              {/* 两种查询类型并排常显，单选切换；切换时把已输入的文字带到新类型并重新查询。 */}
+              <Space size={6}>
+                <Radio.Group
+                  className="lsi-search-scope"
+                  optionType="button"
+                  value={searchScope}
+                  onChange={(e) => handleSearchScopeChange(e.target.value as SearchScope)}
+                  options={[
+                    { value: 'invoiceNo', label: t('posAdmin.invoiceList.searchScopeInvoiceNo') },
+                    { value: 'product', label: t('posAdmin.invoiceList.searchScopeProduct') },
+                  ]}
+                />
+                <Input
+                  allowClear
+                  placeholder={searchScope === 'invoiceNo'
+                    ? t('posAdmin.invoiceList.searchPlaceholderInvoiceNo')
+                    : t('posAdmin.invoiceList.searchPlaceholderProduct')}
+                  style={{ width: 200 }}
+                  value={searchValue}
+                  onChange={(e) => handleSearchTextChange(e.target.value)}
+                  onPressEnter={handleSearch}
+                />
+              </Space>
+              {hasActiveFilters && (
+                <Button type="link" onClick={handleReset} style={{ paddingInline: 4 }}>
+                  {t('posAdmin.invoiceList.clearFilters')}
+                </Button>
+              )}
+            </div>
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              title={t('posAdmin.invoiceList.columnSettingsTitle')}
+              content={columnSettingsContent}
+            >
+              <Tooltip title={t('posAdmin.invoiceList.columnSettings')}>
+                <Button type="text" icon={<SettingOutlined />} aria-label={t('posAdmin.invoiceList.columnSettings')} />
+              </Tooltip>
+            </Popover>
+          </div>
 
-        <div
-          ref={pagerRef}
-          style={{
-            padding: '8px 16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-            background: '#fff',
-            position: 'relative',
-            zIndex: 3,
-            flexShrink: 0,
-          }}
-        >
-          <div />
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            onChange={(p, ps) => {
-              setPage(p)
-              setPageSize(ps)
+          <div ref={tableRegionRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', borderTop: '1px solid #eef1f5' }}>
+            <DndContext
+              sensors={columnDragSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleColumnDragEnd}
+              accessibility={dndAccessibility}
+            >
+              <SortableContext items={visibleColumnOrder} strategy={horizontalListSortingStrategy}>
+                <MeasuredTable metricId="pos-admin.local-supplier-invoices.table-1"
+                  ref={invoiceTableRef}
+                  rowKey="invoiceGUID"
+                  loading={loading}
+                  dataSource={data}
+                  components={{ header: { cell: DraggableHeaderCell } }}
+                  columns={columns}
+                  pagination={false}
+                  size="middle"
+                  scroll={{ x: tableScrollX, y: tableScrollY }}
+                  onScroll={handleInvoiceTableScroll}
+                  onChange={(_pagination, _filters, sorter) => {
+                    const s = Array.isArray(sorter) ? sorter[0] : sorter
+                    const field = s?.field || s?.column?.dataIndex
+                    const order = s?.order as 'ascend' | 'descend' | undefined
+                    if (field && order) {
+                      setSortBy(String(field))
+                      setSortOrder(order)
+                    } else {
+                      setSortBy('createdAt')
+                      setSortOrder('descend')
+                    }
+                  }}
+                />
+              </SortableContext>
+            </DndContext>
+          </div>
+
+          <div
+            ref={pagerRef}
+            style={{
+              padding: '8px 16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              width: '100%',
+              background: '#fff',
+              borderTop: '1px solid #eef1f5',
+              position: 'relative',
+              zIndex: 3,
+              flexShrink: 0,
             }}
-            showSizeChanger
-            responsive={false}
-            pageSizeOptions={[10, 20, 50, 100, 200]}
-          />
+          >
+            <Typography.Text type="secondary" className="lsi-num">
+              {t('posAdmin.invoiceList.totalCount', { count: formatCount(total) })}
+            </Typography.Text>
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              onChange={(p, ps) => {
+                setPage(p)
+                setPageSize(ps)
+              }}
+              showSizeChanger
+              responsive={false}
+              pageSizeOptions={[20, 50, 100]}
+            />
+          </div>
         </div>
-      </div>
+      </section>
 
       <Modal
         open={createVisible}
@@ -1253,6 +1678,6 @@ export default function LocalSupplierInvoicesPage() {
         onCancel={() => setImportVisible(false)}
         onCreated={handleImportedInvoiceCreated}
       />
-    </Card>
+    </div>
   )
 }

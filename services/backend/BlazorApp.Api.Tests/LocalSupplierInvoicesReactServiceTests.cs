@@ -405,6 +405,106 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetGridDataAsync_创建时间按带时区的时刻区间筛选且结束为开区间()
+        {
+            await SeedStoreAndSupplierAsync();
+            // CreatedAt 存 UTC；悉尼（+10）的 07-09 至 07-10 两天 = UTC [07-08 14:00, 07-10 14:00)。
+            var createdAtByInvoice = new Dictionary<string, DateTime>
+            {
+                ["INV-BEFORE"] = new DateTime(2026, 7, 8, 13, 59, 59, DateTimeKind.Utc),
+                ["INV-START"] = new DateTime(2026, 7, 8, 14, 0, 0, DateTimeKind.Utc),
+                ["INV-END"] = new DateTime(2026, 7, 10, 13, 59, 59, DateTimeKind.Utc),
+                ["INV-AFTER"] = new DateTime(2026, 7, 10, 14, 0, 0, DateTimeKind.Utc),
+            };
+            foreach (var (invoiceNo, createdAt) in createdAtByInvoice)
+            {
+                await _db.Insertable(new StoreLocalSupplierInvoice
+                {
+                    InvoiceGUID = $"guid-{invoiceNo}",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    InvoiceNo = invoiceNo,
+                    OrderDate = new DateTime(2026, 7, 1),
+                    CreatedAt = createdAt,
+                    IsDeleted = false,
+                }).ExecuteCommandAsync();
+            }
+
+            var result = await CreateService().GetGridDataAsync(new GridRequestDto
+            {
+                StartRow = 0,
+                PageSize = 20,
+                FilterModel = new Dictionary<string, FilterModelDto>
+                {
+                    ["createdAt"] = new()
+                    {
+                        FilterType = "date",
+                        Type = "inRange",
+                        Filter = "2026-07-09T00:00:00+10:00",
+                        FilterTo = "2026-07-11T00:00:00+10:00",
+                    },
+                },
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(
+                new[] { "INV-END", "INV-START" },
+                result.Items?.Select(item => item.InvoiceNo).OrderBy(no => no, StringComparer.Ordinal).ToArray()
+            );
+        }
+
+        [Fact]
+        public async Task GetStoreCountsAsync_按分店分组并沿用其他筛选与分店范围()
+        {
+            await SeedStoreAndSupplierAsync();
+            var invoices = new[]
+            {
+                ("S01", "SUP01", false),
+                ("S01", "SUP01", false),
+                ("S01", "SUP01", true),
+                ("S02", "SUP01", false),
+                ("S02", "SUP02", false),
+                ("S03", "SUP01", false),
+            };
+            var index = 0;
+            foreach (var (storeCode, supplierCode, isDeleted) in invoices)
+            {
+                index++;
+                await _db.Insertable(new StoreLocalSupplierInvoice
+                {
+                    InvoiceGUID = $"count-{index}",
+                    StoreCode = storeCode,
+                    SupplierCode = supplierCode,
+                    InvoiceNo = $"INV-COUNT-{index}",
+                    OrderDate = new DateTime(2026, 3, index),
+                    CreatedAt = DateTime.UtcNow,
+                    IsDeleted = isDeleted,
+                }).ExecuteCommandAsync();
+            }
+            var request = new GridRequestDto
+            {
+                FilterModel = new Dictionary<string, FilterModelDto>
+                {
+                    ["supplierCode"] = new() { FilterType = "text", Type = "equals", Filter = "SUP01" },
+                },
+            };
+
+            var all = await CreateService().GetStoreCountsAsync(request, null);
+            var scoped = await CreateService().GetStoreCountsAsync(request, new List<string> { "S01", "S02" });
+
+            Assert.True(all.Success, all.Message);
+            Assert.Equal(
+                new[] { ("S01", 2), ("S02", 1), ("S03", 1) },
+                all.Data!.OrderBy(row => row.StoreCode).Select(row => (row.StoreCode, row.Count)).ToArray()
+            );
+            Assert.True(scoped.Success, scoped.Message);
+            Assert.Equal(
+                new[] { ("S01", 2), ("S02", 1) },
+                scoped.Data!.OrderBy(row => row.StoreCode).Select(row => (row.StoreCode, row.Count)).ToArray()
+            );
+        }
+
+        [Fact]
         public async Task GetGridDataAsync_统计当前页涨跌价商品数量()
         {
             await SeedStoreAndSupplierAsync();
@@ -542,6 +642,20 @@ namespace BlazorApp.Api.Tests
             Assert.True(checkedByInvoice["invoice-mixed-deleted"]);
             Assert.False(checkedByInvoice["invoice-isolated"]);
 
+            // 三个明细计数与检测状态同源：只数有效明细，NULL 计未检测，0 计主档不存在。
+            var countsByInvoice = result.Items!.ToDictionary(
+                item => item.InvoiceGUID,
+                item => (item.DetailCount, item.UncheckedDetailCount, item.NewProductDetailCount)
+            );
+            Assert.Equal((0, 0, 0), countsByInvoice["invoice-empty"]);
+            Assert.Equal((1, 1, 0), countsByInvoice["invoice-unchecked"]);
+            Assert.Equal((2, 1, 0), countsByInvoice["invoice-partial"]);
+            Assert.Equal((2, 0, 0), countsByInvoice["invoice-complete"]);
+            Assert.Equal((1, 0, 1), countsByInvoice["invoice-zero"]);
+            Assert.Equal((0, 0, 0), countsByInvoice["invoice-deleted-only"]);
+            Assert.Equal((1, 0, 0), countsByInvoice["invoice-mixed-deleted"]);
+            Assert.Equal((1, 1, 0), countsByInvoice["invoice-isolated"]);
+
             // 筛选口径必须与列表展示一致：按 true/false 筛出的订单正好是上面展示为是/否的两组。
             async Task<string[]> FilterByCheckedAsync(string value)
             {
@@ -580,6 +694,55 @@ namespace BlazorApp.Api.Tests
                 },
             });
             Assert.Equal(result.Total, ignored.Total);
+        }
+
+        [Fact]
+        public async Task GetGridDataAsync_明细计数区分未检测与主档不存在且忽略已删除明细()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-count-mixed", "INV-COUNT-MIXED", new DateTime(2026, 2, 1));
+            await InsertInvoiceAsync("invoice-count-new-only", "INV-COUNT-NEW", new DateTime(2026, 2, 2));
+            await InsertInvoiceAsync("invoice-count-none", "INV-COUNT-NONE", new DateTime(2026, 2, 3));
+
+            await _db.Insertable(new[]
+            {
+                // 混合单：2 行 NULL（未检测）、2 行 0 且无编码（新品）、1 行 0 但已回填编码（已建品，不算新品）、1 行 1、1 行 3；
+                // 另有已删除的 NULL/0 不应计入。
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-null-1", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-null-2", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-1", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-2", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-zero-synced", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, ProductCode = "P-SYNCED", IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-one", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 1, ProductCode = "P-ONE", IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-three", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 3, ProductCode = "P-THREE", IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-deleted-null", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = null, IsDeleted = true },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-mixed-deleted-zero", InvoiceGUID = "invoice-count-mixed", ExistingProductCount = 0, IsDeleted = true },
+                // 全部已检测但主档都不存在：算已检测，且全部计入主档不存在。
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-new-1", InvoiceGUID = "invoice-count-new-only", ExistingProductCount = 0, IsDeleted = false },
+                new StoreLocalSupplierInvoiceDetails { DetailGUID = "count-new-2", InvoiceGUID = "invoice-count-new-only", ExistingProductCount = 0, IsDeleted = false },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().GetGridDataAsync(new GridRequestDto { StartRow = 0, PageSize = 20 });
+
+            Assert.True(result.Success, result.Message);
+            var mixed = Assert.Single(result.Items!, item => item.InvoiceGUID == "invoice-count-mixed");
+            Assert.Equal(7, mixed.DetailCount);
+            Assert.Equal(2, mixed.UncheckedDetailCount);
+            // 关键断言：检测为不存在但已回填编码的行不再计入新品。
+            Assert.Equal(2, mixed.NewProductDetailCount);
+            Assert.False(mixed.IsProductChecked);
+
+            var newOnly = Assert.Single(result.Items!, item => item.InvoiceGUID == "invoice-count-new-only");
+            Assert.Equal(2, newOnly.DetailCount);
+            Assert.Equal(0, newOnly.UncheckedDetailCount);
+            Assert.Equal(2, newOnly.NewProductDetailCount);
+            Assert.True(newOnly.IsProductChecked);
+
+            var none = Assert.Single(result.Items!, item => item.InvoiceGUID == "invoice-count-none");
+            Assert.Equal(0, none.DetailCount);
+            Assert.Equal(0, none.UncheckedDetailCount);
+            Assert.Equal(0, none.NewProductDetailCount);
+            Assert.False(none.IsProductChecked);
         }
 
         [Fact]
@@ -623,6 +786,10 @@ namespace BlazorApp.Api.Tests
             });
             var keywordInvoice = Assert.Single(keywordResult.Items!, item => item.InvoiceGUID == "invoice-keyword");
             Assert.False(keywordInvoice.IsProductChecked);
+            // 商品关键词只筛选订单，不缩小明细计数：未命中关键词的未检测行仍计入。
+            Assert.Equal(2, keywordInvoice.DetailCount);
+            Assert.Equal(1, keywordInvoice.UncheckedDetailCount);
+            Assert.Equal(0, keywordInvoice.NewProductDetailCount);
 
             // PageSize=20 是服务允许的最小页长；跳过前一整页，验证当前页各订单的聚合结果。
             var pagedResult = await CreateService().GetGridDataAsync(new GridRequestDto { StartRow = 20, PageSize = 20 }, new List<string> { "S01" });

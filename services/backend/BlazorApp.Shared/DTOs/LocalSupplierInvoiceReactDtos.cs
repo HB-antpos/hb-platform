@@ -56,6 +56,15 @@ namespace BlazorApp.Shared.DTOs
         public decimal? NewAutoRetailPrice { get; set; }
     }
 
+    /// <summary>
+    /// 分店进货单列表左侧分店栏的计数：某分店在当前其他筛选条件下的单数。
+    /// </summary>
+    public class LocalSupplierInvoiceStoreCountDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        public int Count { get; set; }
+    }
+
     public class LocalSupplierInvoiceListDto
     {
         public string InvoiceGUID { get; set; } = string.Empty;
@@ -75,6 +84,18 @@ namespace BlazorApp.Shared.DTOs
         public int PriceDecreaseItemCount { get; set; }
         /// <summary>当前进货单有效明细均已完成商品检测时为 true。</summary>
         public bool IsProductChecked { get; set; }
+        /// <summary>有效明细行数（IsDeleted=false）；没有明细的单为 0。</summary>
+        public int DetailCount { get; set; }
+        /// <summary>
+        /// 未检测的有效明细行数：ExistingProductCount 为 NULL 才算未检测；
+        /// 0 是"已检测但商品主档不存在"，不计入此项。
+        /// </summary>
+        public int UncheckedDetailCount { get; set; }
+        /// <summary>
+        /// 新品行数：检测为商品主档不存在（ExistingProductCount == 0）且至今未关联主档（ProductCode 为空）的有效明细，
+        /// 即仍需新建商品的行；已新建或已同步到总部回填编码的行、NULL（未检测）均不计入此项。
+        /// </summary>
+        public int NewProductDetailCount { get; set; }
         public string? Remarks { get; set; }
         [JsonConverter(typeof(LocalSupplierInvoiceAuditUtcDateTimeJsonConverter))]
         public DateTime CreatedAt { get; set; }

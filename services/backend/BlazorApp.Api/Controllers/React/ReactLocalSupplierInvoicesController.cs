@@ -472,6 +472,29 @@ namespace BlazorApp.Api.Controllers.React
             );
         }
 
+        /// <summary>
+        /// 列表左侧分店栏的单数。请求体与 grid 相同（调用方去掉分店条件），权限与分店范围口径也与 grid 一致。
+        /// </summary>
+        [HttpPost("store-counts")]
+        public async Task<IActionResult> StoreCounts([FromBody] GridRequestDto request)
+        {
+            if (!await HasLocalSupplierInvoiceReadPermissionAsync())
+                return Forbid();
+
+            var allowedStoreCodes = IsFullStoreAccessUser()
+                ? null
+                : await GetCurrentUserStoreCodesAsync();
+            var result = await _service.GetStoreCountsAsync(request, allowedStoreCodes);
+            return Ok(
+                new
+                {
+                    success = result.Success,
+                    data = result.Data ?? new List<LocalSupplierInvoiceStoreCountDto>(),
+                    message = result.Message,
+                }
+            );
+        }
+
         [HttpPost("shop/grid")]
         public async Task<IActionResult> ShopGrid([FromBody] GridRequestDto request)
         {

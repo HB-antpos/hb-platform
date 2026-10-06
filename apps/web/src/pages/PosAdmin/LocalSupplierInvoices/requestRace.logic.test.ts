@@ -328,13 +328,16 @@ async function main() {
     const invalidateIndex = cleanupSection.indexOf('listRequestGuardRef.current.invalidate()')
     assert(mountedFalseIndex >= 0 && mountedFalseIndex < invalidateIndex, '卸载清理应先标记 unmounted，再 invalidate')
     assert(cleanupSection.includes('return () => {'), '卸载保护必须使用 layout cleanup')
+    assert(cleanupSection.includes('countRequestGuardRef.current.invalidate()'), '卸载时分段计数请求也必须失效')
+    assert(skipSection.includes('countRequestGuardRef.current.invalidate()'), 'scope skip 时分段计数请求也必须失效')
     assert(!pageSource.includes('useEffect(() => () => {\n    mountedRef.current = false'), '不得把 mounted 清理推迟到 passive effect')
 
+    // 列表已去掉勾选列（没有任何批量操作），scope skip 改为同时清空状态分段计数。
     const orderedStatements = [
       'listRequestGuardRef.current.invalidate()',
       'setData([])',
       'setTotal(0)',
-      'setSelectedRowKeys([])',
+      'setSegmentCounts(null)',
       'setLoading(false)',
       'return',
     ]

@@ -19,9 +19,3 @@ export function shouldSelectEditableNumberTextOnFocus(selectTextOnFocus?: boolea
   // 数字格进入编辑态默认全选，方便用户直接覆盖；保留显式 false 给特殊列关闭。
   return selectTextOnFocus !== false
 }
-
-export type EditableBooleanToggleTrigger = 'click' | 'doubleClick'
-
-export function resolveEditableBooleanToggleTrigger(toggleOnClick?: boolean): EditableBooleanToggleTrigger {
-  return toggleOnClick ? 'click' : 'doubleClick'
-}

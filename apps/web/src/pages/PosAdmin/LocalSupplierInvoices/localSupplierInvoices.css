@@ -1,0 +1,832 @@
+/* 分店进货单列表与明细工作台共用样式（普通 CSS + lsi- 前缀全局类名：测试打包把 .css 当空模块，不能用 CSS Modules） */
+
+/* ---------- 通用小元素 ---------- */
+
+.lsi-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-muted {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.lsi-code {
+  display: inline-block;
+  min-width: 30px;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #f0f3f8;
+  color: #4e5969;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-entity {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.lsi-entity-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 分店、供应商名称最多折两行，长名称也能显示完整 */
+.lsi-list-card .ant-table-tbody > tr > td.lsi-cell-wrap {
+  white-space: normal;
+}
+
+.lsi-cell-wrap .lsi-entity-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 18px;
+}
+
+.lsi-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lsi-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: currentColor;
+}
+
+.lsi-pill-ok {
+  color: #237804;
+  background: #f3fbea;
+}
+
+.lsi-pill-warn {
+  color: #b45309;
+  background: #fff4e0;
+}
+
+.lsi-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lsi-tag-new {
+  background: #f4f0ff;
+  color: #5a3fc0;
+}
+
+.lsi-tag-neutral {
+  background: #f0f3f8;
+  color: #4e5969;
+}
+
+.lsi-tag-blue {
+  background: #eef4ff;
+  color: #1554c0;
+}
+
+.lsi-tag-purple {
+  background: #f4f0ff;
+  color: #5a3fc0;
+}
+
+.lsi-tag-green {
+  background: #f3fbea;
+  color: #237804;
+}
+
+.lsi-tag-orange {
+  background: #fff4e0;
+  color: #b45309;
+}
+
+.lsi-tag-cyan {
+  background: #e6fffb;
+  color: #08797e;
+}
+
+.lsi-price-up {
+  color: #c2410c;
+  font-weight: 600;
+}
+
+.lsi-price-down {
+  color: #0958d9;
+  font-weight: 600;
+}
+
+/* ---------- 列表页 ---------- */
+
+.lsi-list-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lsi-list-card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+/* 左侧分店栏：全部分店常显，与右侧工具栏、表格、分页组成左右两栏 */
+.lsi-store-rail {
+  display: flex;
+  flex: 0 0 212px;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid #eef1f5;
+  background: #fafbfc;
+}
+
+.lsi-store-rail-title {
+  padding: 16px 16px 8px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.lsi-store-rail-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 8px 12px;
+  overflow-y: auto;
+}
+
+.lsi-store-rail-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.88);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lsi-store-rail-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.lsi-store-rail-item:focus-visible {
+  outline: 2px solid #91caff;
+  outline-offset: -2px;
+}
+
+.lsi-store-rail-item.is-active {
+  background: #e6f4ff;
+  color: #1677ff;
+  font-weight: 500;
+}
+
+.lsi-store-rail-item.is-active .lsi-code {
+  background: #fff;
+  color: #1677ff;
+}
+
+/* 长店名折行显示完整，不截断 */
+.lsi-store-rail-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 单数右对齐、等宽数字；0 单淡化，选中项跟随主色 */
+.lsi-store-rail-count {
+  flex: none;
+  margin-left: 8px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-store-rail-count.is-zero {
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.lsi-store-rail-item.is-active .lsi-store-rail-count {
+  color: #1677ff;
+}
+
+.lsi-list-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lsi-list-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.lsi-list-toolbar-filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lsi-list-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #e8edf5;
+}
+
+
+.lsi-segment-count {
+  margin-left: 6px;
+  color: rgba(0, 0, 0, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-segment-count-warn {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.lsi-invoice-link {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 复制按钮只在行悬停时出现，平时不占视觉噪音 */
+.lsi-copy-button {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.ant-table-row:hover .lsi-copy-button,
+.lsi-copy-button:focus-visible {
+  opacity: 1;
+}
+
+.lsi-column-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 240px;
+}
+
+.lsi-column-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 0 4px;
+  border-radius: 6px;
+}
+
+.lsi-column-settings-row:hover {
+  background: #f5f7fb;
+}
+
+.lsi-column-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  margin-top: 6px;
+  border-top: 1px solid #eef1f5;
+}
+
+/* ---------- 明细工作台 ---------- */
+
+.lsi-wb {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lsi-wb-card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.lsi-wb-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 20px;
+}
+
+.lsi-wb-titlebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.lsi-wb-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-wb-spacer {
+  flex: 1 1 auto;
+}
+
+.lsi-wb-unsaved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #b45309;
+  font-size: 12px;
+}
+
+.lsi-wb-unsaved::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: currentColor;
+}
+
+.lsi-wb-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #cfe0ff;
+  border-radius: 8px;
+  background: #eef4ff;
+  color: #1554c0;
+  font-size: 12px;
+}
+
+/* 表头字段：宽屏一行放下（分店、供应商、备注给更多宽度），窄屏退回自适应换行 */
+.lsi-wb-fields {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.3fr) minmax(150px, 1.3fr) minmax(124px, 1fr) minmax(124px, 1fr)
+    minmax(140px, 1.3fr) minmax(90px, 0.8fr) minmax(196px, 1.3fr);
+  gap: 4px 16px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f2f6;
+}
+
+.lsi-wb-fields .ant-form-item {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+@media (max-width: 1279px) {
+  .lsi-wb-fields {
+    grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  }
+}
+
+.lsi-wb-fields .ant-form-item-label {
+  padding-bottom: 2px;
+}
+
+.lsi-wb-fields .ant-form-item-label > label {
+  height: auto;
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+}
+
+.lsi-wb-readonly-value {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lsi-wb-mini-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4e5969;
+  font-size: 12px;
+}
+
+.lsi-wb-mini-progress-track {
+  display: inline-flex;
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #eef1f5;
+}
+
+.lsi-wb-mini-progress-fill {
+  background: #389e0d;
+}
+
+/* 处理进度条 */
+.lsi-wb-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid #f0f2f6;
+}
+
+.lsi-wb-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.lsi-wb-progress-track {
+  display: flex;
+  flex: 1 1 320px;
+  gap: 2px;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #eef1f5;
+}
+
+.lsi-wb-progress-buckets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.lsi-wb-bucket {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.88);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lsi-wb-bucket:hover {
+  background: #f5f7fb;
+}
+
+.lsi-wb-bucket:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.lsi-wb-bucket-active {
+  border-color: #bcd4ff;
+  background: #eef4ff;
+}
+
+.lsi-wb-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.lsi-wb-bucket-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-wb-bucket-hint {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.lsi-wb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+
+.lsi-wb-chip.ant-btn {
+  border-radius: 14px;
+}
+
+.lsi-wb-chip-count {
+  margin-left: 4px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-wb-filter-panel {
+  display: grid;
+  grid-template-columns: 88px 200px;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.lsi-wb-strip {
+  padding: 0 16px 10px;
+}
+
+/* 明细表：两行单元格（主值 + 辅助信息） */
+.lsi-wb-table .ant-table-thead > tr > th {
+  padding: 8px 8px !important;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lsi-wb-table .ant-table-tbody > tr > td {
+  padding: 6px 8px !important;
+  vertical-align: middle;
+}
+
+.lsi-wb-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  line-height: 20px;
+}
+
+.lsi-wb-cell-end {
+  align-items: flex-end;
+}
+
+.lsi-wb-sub {
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lsi-wb-product {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lsi-wb-thumb {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #e8edf5;
+  border-radius: 6px;
+  background: #f0f3f8;
+  color: #a3acb9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 10px;
+}
+
+.lsi-wb-product-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.lsi-wb-product-name > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lsi-wb-product-codes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: rgba(0, 0, 0, 0.55);
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 已改未保存的单元格：浅蓝底 + 小圆点，和「保存修改」的计数对应 */
+.lsi-wb-edited {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: 4px;
+  background: #eef4ff;
+  color: #0958d9;
+  font-weight: 600;
+}
+
+.lsi-wb-edited::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background: #1677ff;
+}
+
+.lsi-wb-delta {
+  font-size: 11px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.lsi-wb-delta-up-strong {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.lsi-wb-delta-up {
+  color: #c2410c;
+  font-weight: 600;
+}
+
+.lsi-wb-delta-up-mild {
+  color: #b45309;
+}
+
+.lsi-wb-delta-down {
+  color: #0958d9;
+  font-weight: 600;
+}
+
+.lsi-wb-pricing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  line-height: 20px;
+}
+
+button.lsi-wb-pricing {
+  cursor: pointer;
+}
+
+button.lsi-wb-pricing:hover,
+button.lsi-wb-pricing:focus-visible {
+  border-color: #d9dee7;
+  background: #fff;
+}
+
+.lsi-wb-pricing-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.lsi-wb-match-ok {
+  color: #237804;
+}
+
+.lsi-wb-match-new {
+  color: #5a3fc0;
+  font-weight: 600;
+}
+
+.lsi-wb-match-warn {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.lsi-wb-match-bad {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.lsi-wb-match-link.ant-btn {
+  align-self: flex-start;
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+}
+
+.lsi-wb-action-pill.ant-btn {
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.lsi-wb-hq-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lsi-wb-hq-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: currentColor;
+}
+
+.lsi-wb-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 10px 16px;
+  border-top: 1px solid #eef1f5;
+  font-size: 12px;
+}
+
+.lsi-wb-pricing-editor {
+  display: grid;
+  grid-template-columns: 96px 150px;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.lsi-wb-pricing-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 行操作类型：可点开下拉切换的小胶囊 */
+.lsi-wb-action {
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.lsi-wb-action:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.lsi-wb-action-static {
+  padding-right: 8px;
+  cursor: default;
+}
+
+/* 列表单元格一律单行，长名称在各自列内省略，避免日期、编码被折成两行 */
+.lsi-list-card .ant-table-thead > tr > th,
+.lsi-list-card .ant-table-tbody > tr > td {
+  white-space: nowrap;
+}
+
+.lsi-entity .lsi-code {
+  flex: 0 0 auto;
+}
+
+/* 查询类型单选按钮收窄内边距，给左侧分店栏腾出工具栏宽度 */
+.lsi-search-scope .ant-radio-button-wrapper {
+  padding-inline: 12px;
+}

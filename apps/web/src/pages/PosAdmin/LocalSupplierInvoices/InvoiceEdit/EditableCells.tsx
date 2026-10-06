@@ -4,15 +4,13 @@
  * 职责边界：
  * - EditableTextCell：双击编辑文本，Enter 提交 / Esc 取消
  * - EditableNumberCell：双击编辑数字，Enter 提交 / Esc 取消；可选支持上下方向键切换同列行
- * - EditableBooleanCell：默认双击切换布尔值，可按列配置单击切换
  * - 纯展示组件，所有保存逻辑由父组件通过 onSave 回调注入
  * - 不接管任何数据加载或业务逻辑
  */
 
-import { Input, InputNumber, Tag, Tooltip } from 'antd'
+import { Input, InputNumber } from 'antd'
 import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react'
 import {
-  resolveEditableBooleanToggleTrigger,
   resolveEditableNumberInputWidth,
   shouldSelectEditableNumberTextOnFocus,
 } from './editableCellLayout'
@@ -48,6 +46,7 @@ export function EditableTextCell({
   onSave,
   display,
   style,
+  readOnly = false,
 }: {
   value?: string
   detailGuid: string
@@ -55,6 +54,8 @@ export function EditableTextCell({
   onSave: InlineCellSaveHandler
   display?: ReactNode
   style?: CSSProperties
+  /** 只读用户（如店长查看）只展示，不响应双击编辑。 */
+  readOnly?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [inputValue, setInputValue] = useState(value ?? '')
@@ -92,6 +93,10 @@ export function EditableTextCell({
     )
   }
 
+  if (readOnly) {
+    return <span style={style}>{display ?? value ?? '--'}</span>
+  }
+
   return (
     <span style={{ ...style, cursor: 'pointer' }} onDoubleClick={() => setEditing(true)}>
       {display ?? value ?? '--'}
@@ -119,6 +124,7 @@ export function EditableNumberCell({
   inputWidth,
   controls,
   selectTextOnFocus,
+  readOnly = false,
 }: {
   value?: number | null
   detailGuid: string
@@ -137,6 +143,8 @@ export function EditableNumberCell({
   inputWidth?: number
   controls?: boolean
   selectTextOnFocus?: boolean
+  /** 只读用户（如店长查看）只展示，不响应双击编辑。 */
+  readOnly?: boolean
 }) {
   const [localEditing, setLocalEditing] = useState(false)
   const [inputValue, setInputValue] = useState<number | null>(value ?? null)
@@ -250,48 +258,13 @@ export function EditableNumberCell({
     )
   }
 
+  if (readOnly) {
+    return <span style={style}>{displayValue ?? formatAmount(value ?? undefined)}</span>
+  }
+
   return (
     <span style={{ ...style, cursor: 'pointer' }} onDoubleClick={openEditing}>
       {displayValue ?? formatAmount(value ?? undefined)}
     </span>
-  )
-}
-
-// ---- EditableBooleanCell ----
-
-export function EditableBooleanCell({
-  value,
-  detailGuid,
-  field,
-  onSave,
-  trueLabel,
-  falseLabel,
-  trueColor,
-  toggleOnClick,
-}: {
-  value?: boolean | null
-  detailGuid: string
-  field: InvoiceDetailInlineEditableField
-  onSave: InlineCellSaveHandler
-  trueLabel: string
-  falseLabel: string
-  trueColor: string
-  toggleOnClick?: boolean
-}) {
-  const actualValue = Boolean(value)
-  const toggleTrigger = resolveEditableBooleanToggleTrigger(toggleOnClick)
-  const handleToggle = () => onSave(detailGuid, field, !actualValue)
-
-  return (
-    <Tooltip title={toggleTrigger === 'click' ? '单击切换' : '双击切换'}>
-      <Tag
-        color={actualValue ? trueColor : 'default'}
-        style={{ cursor: 'pointer' }}
-        onClick={toggleTrigger === 'click' ? handleToggle : undefined}
-        onDoubleClick={toggleTrigger === 'doubleClick' ? handleToggle : undefined}
-      >
-        {actualValue ? trueLabel : falseLabel}
-      </Tag>
-    </Tooltip>
   )
 }
