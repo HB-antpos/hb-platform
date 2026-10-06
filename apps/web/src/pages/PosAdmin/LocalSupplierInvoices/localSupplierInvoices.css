@@ -701,6 +701,28 @@
   background: #5a3fc0;
 }
 
+/* 执行确认框里的涨价 / 降价分组，颜色与快捷筛选一致 */
+.lsi-wb-price-choice {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f7f9fd;
+}
+
+.lsi-wb-price-choice-title {
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* 叠加父级与 .ant-checkbox-wrapper，避免和 antd 复选框自带的文字颜色同权重时被覆盖 */
+.lsi-wb-price-choice .lsi-wb-price-choice-up.ant-checkbox-wrapper {
+  color: #c2410c;
+}
+
+.lsi-wb-price-choice .lsi-wb-price-choice-down.ant-checkbox-wrapper {
+  color: #0958d9;
+}
+
 .lsi-wb-filter-panel {
   display: grid;
   grid-template-columns: 88px 200px;

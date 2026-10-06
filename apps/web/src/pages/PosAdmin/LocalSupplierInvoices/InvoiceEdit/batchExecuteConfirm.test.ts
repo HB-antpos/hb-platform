@@ -10,6 +10,8 @@ import {
   getNewProductWithAdditionalBarcodesRows,
   constrainSelectedRowKeysToVisibleDetails,
   countSelectedBatchExecuteActions,
+  pickPurchasePriceDirectionGuids,
+  splitPurchasePriceDirectionGuids,
 } from './batchExecuteConfirm'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -455,6 +457,46 @@ async function main() {
     assertEqual(String(result[1]), 'd2', '应保留第二个可见选中项')
   })
   if (visibleSelectionFailure) failures.push(visibleSelectionFailure)
+
+  const priceDirectionFailure = await runTest('执行操作按进货价涨跌分组，涨价降价可分开执行且保持原顺序', () => {
+    const details = [
+      { detailGUID: 'up-1', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 3, lastPurchasePrice: 2.5 },
+      { detailGUID: 'item-1', activityType: DetailAction.UpdateItemNumber, purchasePrice: 9, lastPurchasePrice: 1 },
+      { detailGUID: 'down-1', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 2, lastPurchasePrice: 2.5 },
+      { detailGUID: 'flat-1', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 2.5, lastPurchasePrice: 2.5 },
+      { detailGUID: 'no-last', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 2, lastPurchasePrice: 0 },
+      { detailGUID: 'up-2', activityType: DetailAction.WaitForOperation, purchasePrice: 5, lastPurchasePrice: 4 },
+    ]
+    // up-2 在页面里刚改成「更新进货价」还没保存，以 rowActions 为准
+    const rowActions = { 'up-2': DetailAction.UpdatePurchasePrice }
+    const guids = details.map((item) => item.detailGUID)
+    const split = splitPurchasePriceDirectionGuids(guids, details, rowActions)
+    assertDeepEqual(split.upGuids, ['up-1', 'up-2'], '涨价只算「更新进货价」且高于上次进货价的行')
+    assertDeepEqual(split.downGuids, ['down-1'], '降价只算「更新进货价」且低于上次进货价的行')
+    assertDeepEqual(split.otherGuids, ['item-1', 'flat-1', 'no-last'], '改货号、价格未变、没有上次进货价都归其他')
+
+    assertDeepEqual(
+      pickPurchasePriceDirectionGuids(guids, split, { includeUp: true, includeDown: true }),
+      guids,
+      '默认全选时与原行为一致',
+    )
+    assertDeepEqual(
+      pickPurchasePriceDirectionGuids(guids, split, { includeUp: false, includeDown: true }),
+      ['item-1', 'down-1', 'flat-1', 'no-last'],
+      '只执行降价时排除涨价行并保持顺序',
+    )
+    assertDeepEqual(
+      pickPurchasePriceDirectionGuids(guids, split, { includeUp: true, includeDown: false }),
+      ['up-1', 'item-1', 'flat-1', 'no-last', 'up-2'],
+      '只执行涨价时排除降价行',
+    )
+    assertDeepEqual(
+      pickPurchasePriceDirectionGuids(['up-1', 'down-1'], splitPurchasePriceDirectionGuids(['up-1', 'down-1'], details, {}), { includeUp: false, includeDown: false }),
+      [],
+      '两类都取消且没有其他行时为空，页面据此提示并保持确认框打开',
+    )
+  })
+  if (priceDirectionFailure) failures.push(priceDirectionFailure)
 
   const i18nFailure = await runTest('中英文 locale 应补齐批量执行确认框文案 key', () => {
     const zh = JSON.parse(readFileSync(resolve(process.cwd(), 'src/i18n/locales/zh.json'), 'utf8'))
