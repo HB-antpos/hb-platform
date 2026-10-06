@@ -104,6 +104,31 @@ export function countSelectedBatchExecuteActions(
   }
 }
 
+/**
+ * 把明细分成「新建商品」与其余操作两组，保持传入顺序。
+ * 两条流程分开提交：「新建商品」单独确认（可同时更新 HQ），「执行操作」只执行改进货价、改货号、加多码等其余操作。
+ */
+export function splitCreateProductDetailGuids(
+  detailGuids: Key[],
+  details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType'>>,
+  rowActions: Record<string, number>,
+): { createGuids: string[]; otherGuids: string[] } {
+  const detailMap = new Map(details.map((item) => [item.detailGUID, item]))
+  const createGuids: string[] = []
+  const otherGuids: string[] = []
+  for (const key of detailGuids) {
+    const guid = String(key)
+    const detail = detailMap.get(guid)
+    const action = detail ? getCurrentDetailAction(detail, rowActions) : rowActions[guid]
+    if (action === DetailAction.CreateProduct) {
+      createGuids.push(guid)
+    } else {
+      otherGuids.push(guid)
+    }
+  }
+  return { createGuids, otherGuids }
+}
+
 export function getNewProductWithAdditionalBarcodesRows(
   selectedRowKeys: Key[],
   details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType' | 'additionalBarcodes' | 'itemNumber' | 'barcode' | 'productName'>>,

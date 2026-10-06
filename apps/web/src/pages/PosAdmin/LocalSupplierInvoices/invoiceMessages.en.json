@@ -199,7 +199,21 @@
       "hqWaiting": "Waiting",
       "hqUnchecked": "Unchecked",
       "hqNone": "No action",
-      "filterMultiMatch": "Multiple matches"
+      "filterMultiMatch": "Multiple matches",
+      "createProducts": "Create products",
+      "createAllPending": "Create all new {{count}}",
+      "executeOtherPending": "Run other pending {{count}}",
+      "createProductsConfirmTitle": "Create products?",
+      "createProductsConfirmContent": "Create products for {{count}} rows and set up prices for all active stores.",
+      "createProductsConfirmOk": "Create",
+      "skippedCreateRows": "Skipped {{count}} create-product rows. Use “Create products” for them.",
+      "noCreateProductRows": "No selected rows are set to create a product",
+      "onlyCreateProductRows": "All selected rows create products. Use “Create products”.",
+      "syncToHq": "Also update HQ database",
+      "syncToHqStoreHint": "After local store prices are updated, write the same stores and fields to HQ.",
+      "syncToHqCreateHint": "After creating, write the new products and prices for all active stores to HQ.",
+      "syncToHqNoPermission": "No permission to write to HQ",
+      "syncToHqNoStores": "No stores available for HQ, HQ sync skipped"
     }
   }
 }

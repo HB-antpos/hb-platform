@@ -199,7 +199,21 @@
       "hqWaiting": "等待确认",
       "hqUnchecked": "未检测",
       "hqNone": "无需处理",
-      "filterMultiMatch": "多匹配"
+      "filterMultiMatch": "多匹配",
+      "createProducts": "新建商品",
+      "createAllPending": "新建全部新品 {{count}}",
+      "executeOtherPending": "执行其余待执行 {{count}}",
+      "createProductsConfirmTitle": "确认新建商品？",
+      "createProductsConfirmContent": "将为 {{count}} 条明细新建商品，并为所有启用分店建立分店价。",
+      "createProductsConfirmOk": "确认新建",
+      "skippedCreateRows": "已跳过 {{count}} 条「新建商品」明细，请用「新建商品」单独执行。",
+      "noCreateProductRows": "选中的明细里没有操作为「新建商品」的行",
+      "onlyCreateProductRows": "选中的都是「新建商品」明细，请用「新建商品」执行",
+      "syncToHq": "同时更新 HQ 数据库",
+      "syncToHqStoreHint": "本地分店价更新完成后，按同样的分店和字段写入 HQ。",
+      "syncToHqCreateHint": "新建完成后，把新商品和全部启用分店的价格写入 HQ。",
+      "syncToHqNoPermission": "没有写入 HQ 的权限",
+      "syncToHqNoStores": "没有可写入 HQ 的分店，已跳过同步 HQ"
     }
   }
 }

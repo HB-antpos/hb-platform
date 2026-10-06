@@ -5,6 +5,7 @@ import {
   countEditedInvoiceDetailRows,
   getEditedInvoiceDetailFields,
 } from './detailDirtyState'
+import { splitCreateProductDetailGuids } from './batchExecuteConfirm'
 import { applyInvoiceDetailInlineEdit } from './inlineEdit'
 import { buildInvoiceHeaderFormValues, isInvoiceHeaderDirty } from './invoiceHeaderForm'
 import { canLinkMatchedProduct, isProductLinkConfirmed, mergeProductCheckResult } from './matchedProductLink'
@@ -191,6 +192,24 @@ assertDeepEqual(
   [],
   '折扣率按百分比比较，0.1 与 10% 视为未改动',
 )
+
+// 「新建商品」与其余操作分开执行：按当前操作类型（行内改过的优先）分组，保持传入顺序。
+{
+  const splitDetails = [
+    { detailGUID: 'c1', activityType: DetailAction.CreateProduct },
+    { detailGUID: 'p1', activityType: DetailAction.UpdatePurchasePrice },
+    { detailGUID: 'c2', activityType: DetailAction.UpdatePurchasePrice },
+    { detailGUID: 'm1', activityType: DetailAction.AddMultiCode },
+  ]
+  const split = splitCreateProductDetailGuids(['c1', 'p1', 'c2', 'm1'], splitDetails, { c2: DetailAction.CreateProduct })
+  assertDeepEqual(split.createGuids, ['c1', 'c2'], '新建商品行按当前操作类型识别，行内改成新建的也算')
+  assertDeepEqual(split.otherGuids, ['p1', 'm1'], '其余操作保持传入顺序')
+  assertDeepEqual(
+    splitCreateProductDetailGuids(['x'], [], { x: DetailAction.CreateProduct }),
+    { createGuids: ['x'], otherGuids: [] },
+    '明细不在当前列表时按行内操作类型判断',
+  )
+}
 
 // 选用已有商品：只开放给检测后主档不存在的行；检测结果合并只补空的上次进货价。
 assert(canLinkMatchedProduct({ detailGUID: 'n', existingProductCount: 0, barcodeStatus: 2, barcodeMatchCount: 1 }), '主档不存在的行应允许选用已有商品')

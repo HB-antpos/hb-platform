@@ -120,6 +120,7 @@ import {
   type InvoiceListDateField,
   type InvoiceListDateRange,
 } from './listDateFilter'
+import { shouldRefreshInvoiceList, subscribeLocalSupplierInvoiceChanged } from './invoiceListSync'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import invoiceMessagesEn from './invoiceMessages.en.json'
 import invoiceMessagesZh from './invoiceMessages.zh.json'
@@ -692,6 +693,21 @@ export default function LocalSupplierInvoicesPage() {
   useEffect(() => {
     void latestLoadDataRef.current()
   }, [page, pageSize, sortBy, sortOrder, managedStoreCodeKey])
+
+  // 明细页检测、保存、执行等操作后会发布变化通知：先标记过期，列表可见时再刷新当前页与两组计数。
+  const listStaleRef = useRef(false)
+  const [listStaleVersion, setListStaleVersion] = useState(0)
+  useEffect(() => subscribeLocalSupplierInvoiceChanged(() => {
+    listStaleRef.current = true
+    setListStaleVersion((version) => version + 1)
+  }), [])
+  useEffect(() => {
+    if (!shouldRefreshInvoiceList(listStaleRef.current, active)) return
+    listStaleRef.current = false
+    lastCountFilterKeyRef.current = null
+    lastStoreCountFilterKeyRef.current = null
+    void latestLoadDataRef.current()
+  }, [active, listStaleVersion])
 
   useLayoutEffect(() => {
     let frameId: number | null = null

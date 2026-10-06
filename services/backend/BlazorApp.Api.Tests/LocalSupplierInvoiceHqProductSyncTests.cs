@@ -1390,7 +1390,7 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateHqProductsAsync_本地商品不存在_新建本地商品并为所有启用分店创建本地价格()
+    public async Task UpdateHqProductsAsync_本地商品不存在_逐行报错跳过且不新建商品不写价格与历史()
     {
         await SeedStoreAsync("S01", true);
         await SeedStoreAsync("S02", true);
@@ -1412,8 +1412,10 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
             DiscountRate = 0.15m,
             IsDeleted = false,
         });
+        // 严格模拟且不配置任何调用：本流程一旦写变更历史，测试即失败。
+        var historyService = new Mock<IWarehouseProductChangeHistoryService>(MockBehavior.Strict);
 
-        var result = await CreateSyncService().UpdateHqProductsAsync(
+        var response = await CreateSyncService(historyService.Object).UpdateHqProductsAsync(
             "invoice-1",
             new UpdateHqProductsRequest
             {
@@ -1427,36 +1429,27 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
             "tester"
         );
 
-        Assert.True(result.Success, BuildFailureMessage(result));
-        Assert.Equal(1, result.Data!.HbwebCreated);
+        // 「更新HQ商品」不再隐式新建本地商品：找不到主档的行报错跳过，提示先执行「新建商品」。
+        Assert.False(response.Success);
+        Assert.Equal("HQ_UPDATE_PARTIAL_FAILED", response.ErrorCode);
+        var result = Assert.IsType<UpdateHqProductsResult>(response.Details);
+        Assert.Equal(0, result.HbwebCreated);
+        Assert.Equal(0, result.HqCreated);
+        Assert.Equal(1, result.Failed);
+        Assert.Contains(
+            result.Errors,
+            error => error.DetailGuid == "detail-new-local-product" && error.Message.Contains("请先执行「新建商品」")
+        );
 
+        Assert.Equal(0, await _localDb.Queryable<Product>().Where(x => x.ItemNumber == "ITEM-NEW-LOCAL").CountAsync());
         var detail = await _localDb.Queryable<StoreLocalSupplierInvoiceDetails>()
             .FirstAsync(x => x.DetailGUID == "detail-new-local-product");
-
-        var product = await _localDb.Queryable<Product>()
-            .FirstAsync(x => x.ItemNumber == "ITEM-NEW-LOCAL");
-        // 本次新建的商品只回填两列编码，明细关联到主档；「上次进货价」等其他明细字段保持不变。
-        Assert.Equal(product.ProductCode, detail.ProductCode);
-        Assert.Equal($"S01{product.ProductCode}", detail.StoreProductCode);
-        Assert.Null(detail.LastPurchasePrice);
-        Assert.Equal("ITEM-NEW-LOCAL", product.ItemNumber);
-        Assert.Equal("930000009999", product.Barcode);
-
-        var localPrices = await _localDb.Queryable<StoreRetailPrice>()
-            .Where(x => x.ProductCode == product.ProductCode)
-            .OrderBy(x => x.StoreCode)
-            .ToListAsync();
-        Assert.Equal(new[] { "S01", "S02" }, localPrices.Select(x => x.StoreCode).ToArray());
-        Assert.DoesNotContain(localPrices, price => price.StoreCode == "S03");
-        Assert.All(localPrices, price =>
-        {
-            Assert.Equal(4.20m, price.PurchasePrice);
-            Assert.Equal(9.90m, price.StoreRetailPriceValue);
-            Assert.Equal(0.15m, price.DiscountRate);
-            Assert.False(price.IsAutoPricing);
-            Assert.True(price.IsSpecialProduct);
-            Assert.Equal($"{price.StoreCode}{product.ProductCode}", price.StoreProductCode);
-        });
+        Assert.Null(detail.ProductCode);
+        Assert.Null(detail.StoreProductCode);
+        Assert.Equal(0, await _localDb.Queryable<StoreRetailPrice>().CountAsync());
+        Assert.Equal(0, await _hqDb.Queryable<DIC_商品信息字典表>().CountAsync());
+        Assert.Equal(0, await _hqDb.Queryable<DIC_商品零售价表>().CountAsync());
+        historyService.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -1522,7 +1515,7 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
     [Theory]
     [InlineData(4, 3)]
     [InlineData(31, 20)]
-    public async Task UpdateHqProductsAsync_新建多商品为启用分店写价格_价格写入命令数应受批量上限约束(
+    public async Task UpdateHqProductsAsync_本地已建多商品_HQ新建时为启用分店写价格_价格写入命令数应受批量上限约束(
         int productCount,
         int activeStoreCount
     )
@@ -1539,12 +1532,15 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
         {
             var detailGuid = $"detail-batch-{index}";
             detailGuids.Add(detailGuid);
+            // 本地主档由「新建商品」先建好并回填到明细；「更新HQ商品」只负责补写 HQ。
+            await SeedExistingProductAsync($"P-BATCH-{index}", "SUP01", $"ITEM-BATCH-{index}", $"93000001{index:D5}");
             await SeedDetailAsync(new StoreLocalSupplierInvoiceDetails
             {
                 DetailGUID = detailGuid,
                 InvoiceGUID = "invoice-1",
                 StoreCode = "S01",
                 SupplierCode = "SUP01",
+                ProductCode = $"P-BATCH-{index}",
                 ItemNumber = $"ITEM-BATCH-{index}",
                 Barcode = $"93000001{index:D5}",
                 ProductName = $"批量新商品{index}",
@@ -1596,26 +1592,22 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
         }
 
         Assert.NotNull(result);
-        Assert.Equal(productCount, result!.HbwebCreated);
+        Assert.Equal(0, result!.HbwebCreated);
         Assert.Equal(productCount, result.HqCreated);
 
+        // 本地分店价不归「更新HQ商品」写；HQ 侧商品是新建的，所以为全部启用分店写价格，停用分店不写。
         var expectedPriceCount = productCount * activeStoreCount;
-        Assert.Equal(expectedPriceCount, await _localDb.Queryable<StoreRetailPrice>().CountAsync());
-        Assert.Equal(0, await _localDb.Queryable<StoreRetailPrice>()
-            .Where(x => x.StoreCode == "S99")
-            .CountAsync());
+        Assert.Equal(0, await _localDb.Queryable<StoreRetailPrice>().CountAsync());
+        Assert.Equal(0, localPriceWriteCommands);
         Assert.Equal(expectedPriceCount, await _hqDb.Queryable<DIC_商品零售价表>().CountAsync());
         Assert.Equal(0, await _hqDb.Queryable<DIC_商品零售价表>()
             .Where(x => x.H分店代码 == "S99")
             .CountAsync());
 
-        var localCommandLimit = (int)Math.Ceiling(expectedPriceCount / 500m);
         var hqCommandLimit = productCount * (int)Math.Ceiling(activeStoreCount / 40m);
-        var localWithinLimit = localPriceWriteCommands <= localCommandLimit;
-        var hqWithinLimit = hqPriceWriteCommands <= hqCommandLimit;
         Assert.True(
-            localWithinLimit && hqWithinLimit,
-            $"价格写入命令数超标：本地 {localPriceWriteCommands} 条(上限{localCommandLimit})，HQ {hqPriceWriteCommands} 条(上限{hqCommandLimit})"
+            hqPriceWriteCommands <= hqCommandLimit,
+            $"HQ 价格写入命令数超标：{hqPriceWriteCommands} 条(上限{hqCommandLimit})"
         );
     }
 
@@ -1632,6 +1624,7 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
             InvoiceGUID = "invoice-1",
             StoreCode = "S01",
             SupplierCode = "SUP01",
+            ProductCode = "P-BATCH-FALLBACK",
             ItemNumber = "ITEM-BATCH-FALLBACK",
             Barcode = "930000010099",
             ProductName = "批量失败降级测试",
@@ -1650,6 +1643,8 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
             END;
             """
         );
+
+        await SeedExistingProductAsync("P-BATCH-FALLBACK", "SUP01", "ITEM-BATCH-FALLBACK", "930000010099");
 
         var response = await CreateSyncService().UpdateHqProductsAsync(
             "invoice-1",
@@ -1681,7 +1676,8 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
             .OrderBy(price => price.H分店代码)
             .ToListAsync();
         Assert.Equal(new[] { "S01", "S03" }, hqPrices.Select(price => price.H分店代码).ToArray());
-        Assert.Equal(3, await _localDb.Queryable<StoreRetailPrice>().CountAsync());
+        // 本地分店价不归「更新HQ商品」写（新建商品时已由「新建商品」为全部启用分店建好）。
+        Assert.Equal(0, await _localDb.Queryable<StoreRetailPrice>().CountAsync());
     }
 
     [Fact]
@@ -1845,59 +1841,6 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateHqProductsAsync_本地价格批量失败_本地事务回滚且创建计数恢复为0()
-    {
-        await SeedStoreAsync("S01", true);
-        await SeedStoreAsync("S02", true);
-        await SeedInvoiceAsync("invoice-1", "S01", "SUP01");
-        await SeedDetailAsync(new StoreLocalSupplierInvoiceDetails
-        {
-            DetailGUID = "detail-local-batch-rollback",
-            InvoiceGUID = "invoice-1",
-            StoreCode = "S01",
-            SupplierCode = "SUP01",
-            ItemNumber = "ITEM-LOCAL-BATCH-ROLLBACK",
-            Barcode = "930000010199",
-            ProductName = "本地批量回滚测试",
-            PurchasePrice = 6.60m,
-            RetailPrice = 16.60m,
-            IsDeleted = false,
-        });
-        await _localDb.Ado.ExecuteCommandAsync(
-            """
-            CREATE TRIGGER "reject_local_price_s02"
-            BEFORE INSERT ON "StoreRetailPrice"
-            WHEN NEW."StoreCode" = 'S02'
-            BEGIN
-                SELECT RAISE(ABORT, 'reject S02');
-            END;
-            """
-        );
-
-        var response = await CreateSyncService().UpdateHqProductsAsync(
-            "invoice-1",
-            new UpdateHqProductsRequest
-            {
-                DetailGuids = new List<string> { "detail-local-batch-rollback" },
-                TargetStoreCodes = new List<string> { "S01" },
-                UpdateFields = new UpdateToStorePricesFields
-                {
-                    UpdatePurchasePrice = true,
-                },
-            },
-            "tester"
-        );
-
-        var failedResult = Assert.IsType<UpdateHqProductsResult>(response.Details);
-        Assert.False(response.Success);
-        Assert.Equal("HQ_UPDATE_ERROR", response.ErrorCode);
-        Assert.Equal(0, failedResult.HbwebCreated);
-        Assert.Equal(0, await _localDb.Queryable<Product>().CountAsync());
-        Assert.Equal(0, await _localDb.Queryable<StoreRetailPrice>().CountAsync());
-        Assert.Equal(0, await _hqDb.Queryable<DIC_商品信息字典表>().CountAsync());
-    }
-
-    [Fact]
     public async Task EnsureHqProductsAsync_缺本地和HQ商品_新建商品并为所有启用分店创建价格()
     {
         await SeedStoreAsync("S01", true);
@@ -2007,85 +1950,6 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
             .ToListAsync();
         Assert.Equal(new[] { "S01", "S02" }, hqPrices.Select(x => x.H分店代码).ToArray());
         Assert.All(hqPrices, price => Assert.Equal(9.90m, price.H分店零售价));
-    }
-
-    [Fact]
-    public async Task UpdateHqProductsAsync_新建本地主档_写入统一历史上下文()
-    {
-        await SeedStoreAsync("S01", true);
-        await SeedInvoiceAsync("invoice-history", "S01", "SUP01");
-        await SeedDetailAsync(new StoreLocalSupplierInvoiceDetails
-        {
-            DetailGUID = "detail-history",
-            InvoiceGUID = "invoice-history",
-            StoreCode = "S01",
-            SupplierCode = "SUP01",
-            ItemNumber = "ITEM-HISTORY",
-            Barcode = "930000001234",
-            ProductName = "历史商品",
-            PurchasePrice = 4.20m,
-            RetailPrice = 9.90m,
-            IsDeleted = false,
-        });
-
-        IReadOnlyDictionary<string, WarehouseProductChangeSnapshotDto>? capturedBeforeSnapshots = null;
-        IReadOnlyDictionary<string, WarehouseProductChangeSnapshotDto>? capturedAfterSnapshots = null;
-        WarehouseProductChangeHistoryContextDto? capturedContext = null;
-        var historyService = new Mock<IWarehouseProductChangeHistoryService>(MockBehavior.Strict);
-        historyService
-            .Setup(service => service.RecordChangesAsync(
-                It.IsAny<IReadOnlyDictionary<string, WarehouseProductChangeSnapshotDto>>(),
-                It.IsAny<IReadOnlyDictionary<string, WarehouseProductChangeSnapshotDto>>(),
-                It.Is<WarehouseProductChangeHistoryContextDto>(context =>
-                    context.Action == "Create"
-                    && context.Source == "LocalSupplierInvoiceHqProductSync"
-                    && context.SourceReference == "invoice-history"
-                    && context.BatchGuid.HasValue
-                    && context.ActorUserGuid == "actor-guid-history"
-                    && context.ActorName == "历史审计操作员"
-                ),
-                It.IsAny<CancellationToken>()
-            ))
-            .Callback<
-                IReadOnlyDictionary<string, WarehouseProductChangeSnapshotDto>,
-                IReadOnlyDictionary<string, WarehouseProductChangeSnapshotDto>,
-                WarehouseProductChangeHistoryContextDto,
-                CancellationToken
-            >((before, after, context, _) =>
-            {
-                capturedBeforeSnapshots = before;
-                capturedAfterSnapshots = after;
-                capturedContext = context;
-            })
-            .ReturnsAsync(1);
-
-        var result = await CreateSyncService(historyService.Object).UpdateHqProductsAsync(
-            "invoice-history",
-            new UpdateHqProductsRequest
-            {
-                DetailGuids = new List<string> { "detail-history" },
-                TargetStoreCodes = new List<string> { "S01" },
-                UpdateFields = new UpdateToStorePricesFields { UpdatePurchasePrice = true },
-            },
-            "actor-guid-history",
-            "历史审计操作员"
-        );
-
-        Assert.True(result.Success, BuildFailureMessage(result));
-        var product = await _localDb.Queryable<Product>()
-            .SingleAsync(item => item.ItemNumber == "ITEM-HISTORY");
-        Assert.NotNull(capturedBeforeSnapshots);
-        Assert.Empty(capturedBeforeSnapshots);
-        Assert.NotNull(capturedAfterSnapshots);
-        var createdSnapshot = Assert.Single(capturedAfterSnapshots);
-        Assert.Equal(product.ProductCode, createdSnapshot.Key);
-        AssertCreatedProductSnapshot(product, createdSnapshot.Value);
-        Assert.NotNull(capturedContext);
-        historyService.Verify(service => service.CaptureSnapshotsAsync(
-            It.IsAny<IEnumerable<string>>(),
-            It.IsAny<CancellationToken>()
-        ), Times.Never);
-        historyService.VerifyAll();
     }
 
     [Fact]

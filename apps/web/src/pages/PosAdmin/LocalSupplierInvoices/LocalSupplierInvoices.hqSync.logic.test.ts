@@ -632,7 +632,7 @@ async function main() {
   })
   if (batchEditBooleanSwitchFailure) failures.push(batchEditBooleanSwitchFailure)
 
-  const updateToStoreHqFailure = await runTest('更新到分店应移除同步HQ耦合并保留独立HQ弹窗', () => {
+  const updateToStoreHqFailure = await runTest('更新到分店不混入HQ写入，同步HQ走独立任务并保留独立HQ弹窗', () => {
     const storeModalStart = editPageSource.indexOf('{/* 更新到分店价格 Modal')
     const hqModalStart = editPageSource.indexOf('{/* 更新 HQ 商品 Modal')
     const storeModalSource = editPageSource.slice(storeModalStart, hqModalStart)
@@ -644,7 +644,11 @@ async function main() {
     assert(editPageSource.includes('hqUpdateForm.validateFields()'), '更新HQ商品应校验独立弹窗表单')
     assert(editPageSource.includes('startUpdateToStorePricesJob(request)'), '更新到分店应提交后台任务')
     assert(editPageSource.includes('getUpdateToStorePricesJob(jobId)'), '更新到分店应轮询后台任务')
-    assert(storeModalSource.includes('initialValues={{ updatePurchasePrice: true }}'), '更新到分店弹窗默认应勾选更新进货价')
+    assert(storeModalSource.includes('initialValues={{ updatePurchasePrice: true, syncToHq: canWriteLocalPurchaseToHq }}'), '更新到分店弹窗默认应勾选更新进货价，有写 HQ 权限时默认勾选同时更新 HQ')
+    assert(storeModalSource.includes('name="syncToHq"'), '更新到分店弹窗应有「同时更新 HQ 数据库」开关')
+    // 同步 HQ 不再混进更新到分店的请求：本地任务完成后另起「更新HQ商品」任务，沿用同样的明细、分店与字段。
+    assert(editPageSource.includes('const syncToHq = values.syncToHq === true && canWriteLocalPurchaseToHq'), '同时更新 HQ 必须同时满足勾选与写 HQ 权限')
+    assert(/if \(syncToHq\) \{\s*runUpdateHqProductsJob\(\{[\s\S]*?saveSelectedDetails: false/.test(editPageSource), '更新到分店完成后应另起独立 HQ 任务')
     assert(storeModalSource.includes('name="updatePurchasePrice"'), '更新到分店弹窗应保留更新进货价字段开关')
     assert(storeModalSource.includes('name="updateRetailPrice"'), '更新到分店弹窗应保留更新零售价字段开关')
     assert(storeModalSource.includes('name="updateIsAutoPricing"'), '更新到分店弹窗应保留更新自动定价字段开关')
@@ -824,7 +828,9 @@ async function main() {
       assert(editPageSource.includes(reset), `清空过滤应执行 ${reset}`)
     }
     assert(editPageSource.includes('getPendingExecutionDetailGuids(details, rowActions)'), '执行全部待执行应按全部明细计算目标行')
-    assert(editPageSource.includes('runAfterUnsavedGuard(() => handleBatchExecute(pendingExecutionDetailGuids))'), '执行全部待执行前应先处理未保存修改')
+    // 待执行拆成「新建商品」与其余操作两组，各自经未保存守卫提交。
+    assert(editPageSource.includes('splitCreateProductDetailGuids(pendingExecutionDetailGuids, details, rowActions)'), '执行全部待执行应拆成新建商品与其余操作两组')
+    assert(editPageSource.includes('runAfterUnsavedGuard(() => handleBatchExecute(guids, mode))'), '执行全部待执行前应先处理未保存修改')
     assert(!editPageSource.includes('statusStatsTagColors'), '旧的约 21 个状态统计标签不应再出现')
     assert(!editPageSource.includes("t('posAdmin.invoiceDetail.statusStatsTitle'"), '不应再显示旧的状态统计栏标题')
   })
