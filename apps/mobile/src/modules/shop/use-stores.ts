@@ -7,7 +7,7 @@ import { useDeviceStore } from "@/store/device-store";
 import { AppAsyncStorage } from "@/shared/storage/async-storage";
 import { STORE_SELECTION_STORAGE_KEY, type Store } from "@/modules/shop/types";
 import { normalizeShopStores, sortShopStores } from "@/modules/shop/store-normalization";
-import { getAssignedStoresForSession, resolveScopedStoreCode } from "@/modules/shop/store-scope";
+import { getAssignedStoresForSession, resolveScopedStoreSelection } from "@/modules/shop/store-scope";
 import { shouldLoadAllStoresForWarehouseCart } from "@/modules/shop/warehouse-cart-access";
 import {
   buildStoreSelectionScopeKey,
@@ -166,24 +166,26 @@ export function useStores() {
       const stores = storesQuery.data ?? [];
       setUserStores(stores);
 
-      const currentSelectedStore = useCartStore.getState().selectedStore;
+      const { selectedStore: currentSelectedStore, selectedStoreIsAuto: currentIsAuto } = useCartStore.getState();
       const persistedStoreCode = await AppAsyncStorage.getString(STORE_SELECTION_STORAGE_KEY);
 
       if (cancelled) {
         return;
       }
 
-      const nextStoreCode = resolveScopedStoreCode({
+      const { storeCode: nextStoreCode, isAuto } = resolveScopedStoreSelection({
         currentStoreCode: currentSelectedStore?.storeCode,
+        currentIsAuto,
         persistedStoreCode,
         isDeviceMode: false,
         stores,
       });
       const nextSelectedStore = nextStoreCode ? stores.find((item) => item.storeCode === nextStoreCode) ?? null : null;
 
-      setSelectedStore(nextSelectedStore ?? null);
+      setSelectedStore(nextSelectedStore ?? null, { auto: isAuto });
 
-      if (nextSelectedStore?.storeCode) {
+      // 自动默认的分店不写入本机记住，避免下次启动被当成用户选择
+      if (nextSelectedStore?.storeCode && !isAuto) {
         await AppAsyncStorage.setString(STORE_SELECTION_STORAGE_KEY, nextSelectedStore.storeCode);
       } else {
         await AppAsyncStorage.removeItem(STORE_SELECTION_STORAGE_KEY);
@@ -208,6 +210,8 @@ export function useStores() {
     deviceBoundStore,
   });
   const effectiveSelectedStore = isDeviceMode ? deviceBoundStore : selectedStore;
+  const selectedStoreIsAuto = useCartStore((state) => state.selectedStoreIsAuto);
+  const isSelectedStoreAuto = !isDeviceMode && Boolean(effectiveSelectedStore) && selectedStoreIsAuto;
   const selectedStoreCode = effectiveSelectedStore?.storeCode ?? null;
   const isStoreSelectionReady = isStoreSelectionReadyForScope({
     currentScopeKey: selectionScopeKey,
@@ -273,6 +277,8 @@ export function useStores() {
     stores: effectiveStores,
     selectedStore: effectiveSelectedStore,
     selectedStoreCode,
+    /** 当前分店是自动默认的第一个（用户没选过）；「没选过分店时看全部」的页面据此仍按全部显示 */
+    isSelectedStoreAuto,
     isDeviceMode,
     deviceBoundStore,
     isHydratingSelection,
