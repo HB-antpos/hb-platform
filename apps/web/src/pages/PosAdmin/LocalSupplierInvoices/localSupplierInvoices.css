@@ -579,6 +579,13 @@
   vertical-align: middle;
 }
 
+/* 明细表开了虚拟滚动：行与单元格是 div（flex 行），td 规则不生效。
+   单元格保持撑满整行（底边线、悬停背景连续），内容在格内垂直居中。 */
+.lsi-wb-table .ant-table-tbody-virtual .ant-table-cell {
+  padding: 6px 8px !important;
+  align-content: center;
+}
+
 .lsi-wb-cell {
   display: flex;
   flex-direction: column;
