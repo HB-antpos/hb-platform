@@ -35,6 +35,26 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(expected, PublicHolidaySyncHelper.ResolveJurisdictionFromPostcode(postcode));
         }
 
+        [Theory]
+        // 配置时区优先：地址只写区名（生产 Bankstown）或邮编指向别州时都以时区为准
+        [InlineData("Australia/Sydney", "Bankstown", "NSW")]
+        [InlineData("Australia/Brisbane", "SHOP 1 65-69 CRONULLA ST, CRONULLA, NSW, 2230", "QLD")]
+        [InlineData(" australia/sydney ", null, "NSW")]
+        // 未配置、无效或不支持的时区回退到地址邮编
+        [InlineData(null, "Shop 11, Southport QLD 4215", "QLD")]
+        [InlineData("Invalid/TimeZone", "Kotara NSW 2289", "NSW")]
+        [InlineData("Australia/Melbourne", "Kotara NSW 2289", "NSW")]
+        [InlineData("Australia/Melbourne", "Cheltenham 3192, VIC", null)]
+        [InlineData(null, "Bankstown", null)]
+        public void ResolveStoreJurisdiction_PrefersConfiguredTimeZoneThenPostcode(
+            string? timeZoneId,
+            string? address,
+            string? expected
+        )
+        {
+            Assert.Equal(expected, PublicHolidaySyncHelper.ResolveStoreJurisdiction(timeZoneId, address));
+        }
+
         [Fact]
         public void BuildSyncWindow_IncludesTodayAndThirtyDays()
         {

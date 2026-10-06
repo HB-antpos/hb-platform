@@ -1,5 +1,6 @@
 using System.Globalization;
 using BlazorApp.Api.Services.Attendance;
+using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.Models;
 
 namespace BlazorApp.Api.Services.React;
@@ -14,6 +15,11 @@ public static class InstallmentOrderStoreTimeZoneResolver
     {
         if (store == null)
             return Sydney;
+
+        // 分店管理里配置的时区优先；未配置或无效时才按地址/名称推导（与考勤、销售历史口径一致）
+        if (StoreTimeZonePolicy.TryNormalize(store.TimeZoneId, out var configuredTimeZone)
+            && configuredTimeZone != null)
+            return configuredTimeZone;
 
         var postcode = PublicHolidaySyncHelper.ExtractPostcodeFromAddress(store.Address);
         var jurisdiction = ResolveJurisdiction(postcode);

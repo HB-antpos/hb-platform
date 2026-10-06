@@ -74,13 +74,11 @@ namespace BlazorApp.Api.Services.Attendance
                 PublicHolidaySyncHelper.NormalizeJurisdiction(request.StateCode)
                 ?? PublicHolidaySyncHelper.NormalizeJurisdiction(request.Jurisdiction)
                 ?? PublicHolidaySyncHelper.ResolveJurisdictionFromPostcode(request.Postcode)
-                ?? PublicHolidaySyncHelper.ResolveJurisdictionFromPostcode(
-                    PublicHolidaySyncHelper.ExtractPostcodeFromAddress(store.Address)
-                );
+                ?? PublicHolidaySyncHelper.ResolveStoreJurisdiction(store.TimeZoneId, store.Address);
             if (jurisdiction == null)
             {
                 return ApiResponse<SyncAttendanceStoreHolidayResultDto>.Error(
-                    "无法从门店地址解析 NSW/QLD 公共假期州别",
+                    "无法从门店时区或地址解析 NSW/QLD 公共假期州别",
                     "JURISDICTION_REQUIRED"
                 );
             }
@@ -103,20 +101,23 @@ namespace BlazorApp.Api.Services.Attendance
             var window = PublicHolidaySyncHelper.BuildSyncWindow(today, null, null, daysAhead);
             var stores = await _db.Queryable<Store>()
                 .Where(item => item.IsActive && !item.IsDeleted)
-                .Select(item => new { item.StoreCode, item.Address })
+                .Select(item => new { item.StoreCode, item.TimeZoneId, item.Address })
                 .ToListAsync();
 
             var targets = new List<(string StoreCode, string Jurisdiction)>();
             var skipped = new List<string>();
             foreach (var store in stores)
             {
-                var postcode = PublicHolidaySyncHelper.ExtractPostcodeFromAddress(store.Address);
-                var jurisdiction = PublicHolidaySyncHelper.ResolveJurisdictionFromPostcode(postcode);
+                // 先认配置时区再按地址邮编：地址只写区名的门店（如 Bankstown）也要同步假期
+                var jurisdiction = PublicHolidaySyncHelper.ResolveStoreJurisdiction(
+                    store.TimeZoneId,
+                    store.Address
+                );
                 if (jurisdiction == null)
                 {
                     skipped.Add(store.StoreCode);
                     _logger.LogInformation(
-                        "跳过公共假期同步：分店 {StoreCode} 地址无法解析 NSW/QLD postcode",
+                        "跳过公共假期同步：分店 {StoreCode} 时区与地址都无法解析 NSW/QLD",
                         store.StoreCode
                     );
                     continue;
