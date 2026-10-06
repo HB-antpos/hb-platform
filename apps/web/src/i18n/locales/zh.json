@@ -6202,15 +6202,15 @@
     "noProductDetail": "当前订单没有商品明细。"
   },
   "prefixCode": {
-    "prefixName": "前缀名",
-    "enterPrefixName": "请输入前缀名",
-    "prefixNameAlphaNum": "前缀名只能包含字母和数字",
-    "prefixDescription": "前缀说明",
+    "prefixName": "前缀",
+    "enterPrefixName": "请输入前缀",
+    "prefixNameAlphaNum": "前缀只能包含字母和数字",
+    "prefixDescription": "说明",
     "confirmDeletePrefix": "确认删除该前缀？",
     "prefixManagement": "前缀管理",
     "prefixManagementSubtitle": "管理前缀信息并查看该前缀关联的国内商品，保留旧系统页顶新增、行内编辑和展开商品交互。",
     "addPrefix": "新增前缀",
-    "searchPlaceholder": "搜索前缀名 / 说明 / 供应商名称 / 供应商代码 / 店铺号"
+    "searchPlaceholder": "搜索 前缀 / 说明 / 供应商 / 店铺号"
   },
   "warehouseLocations": {
     "title": "仓库标签管理",

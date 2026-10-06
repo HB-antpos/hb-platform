@@ -72,7 +72,9 @@ function toPrefixPayload(data: SavePrefixCodePayload, includeSupplierCode: boole
     prefixName: data.prefixName,
     prefixDescription: data.prefixDescription,
     isActive: data.isActive ?? true,
-    sortOrder: data.sortOrder ?? 0,
+    // 排序号原样透传：表单有「排序」字段后不再补成 0（旧写法会让编辑/切换状态时悄悄把排序重置为 0）。
+    // 未填时为 undefined，序列化时被丢弃，由后端按空值处理。
+    sortOrder: data.sortOrder,
   }
 }
 

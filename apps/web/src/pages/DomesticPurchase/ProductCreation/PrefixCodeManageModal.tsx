@@ -1,8 +1,11 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { Button, Col, Form, Input, InputNumber, message, Modal, Popconfirm, Row, Space, Spin, Switch } from 'antd'
+import { Button, Input, message, Modal, Popconfirm, Switch } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+// 创建页里的「管理前缀」沿用 /api/v1/productprefixcodes 这组接口：它允许 Admin 与 WarehouseManager 写入，
+// 并带有独立的状态切换接口；而前缀管理页用的 React 接口写入只允许 Admin，所以这里不能直接换成同一套服务。
+// 共用的是表单、规则与类型（见 ProductPrefixCodeManagement/）。
 import {
   createPrefixCode,
   deletePrefixCode,
@@ -11,11 +14,11 @@ import {
   updatePrefixCode,
 } from '../../../services/domesticProductCreationService'
 import { MeasuredTable } from '../../../components/MeasuredTable'
-
-const handlePrefixNameChange = (e: React.ChangeEvent<HTMLInputElement>, form: ReturnType<typeof Form.useForm>[0]) => {
-  const upperValue = e.target.value.toUpperCase()
-  form.setFieldValue('prefixName', upperValue)
-}
+import type { ProductPrefixCodeItem, SavePrefixCodePayload } from '../../../types/productPrefixCode'
+import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
+import PrefixCodeFormModal from '../ProductPrefixCodeManagement/PrefixCodeFormModal'
+import { formatPrefixTimestamp } from '../ProductPrefixCodeManagement/prefixListLogic'
+import '../ProductPrefixCodeManagement/prefixCode.css'
 
 interface PrefixCodeManageModalProps {
   visible: boolean
@@ -25,248 +28,317 @@ interface PrefixCodeManageModalProps {
   onSuccess?: () => void
 }
 
-interface PrefixCodeItem {
-  prefixCode: string
-  supplierCode: string
-  supplierName?: string
-  prefixName: string
-  prefixDescription?: string
-  isActive: boolean
-  sortOrder?: number
-  createdAt: string
+type PrefixFormTarget = { mode: 'create' } | { mode: 'edit'; record: ProductPrefixCodeItem }
+
+interface ManageListQuery {
+  page: number
+  pageSize: number
+  search?: string
 }
 
 export default function PrefixCodeManageModal({ visible, supplierCode, supplierName, onClose, onSuccess }: PrefixCodeManageModalProps) {
   const { t } = useTranslation()
-  const [form] = Form.useForm()
-  const [editForm] = Form.useForm()
   const [loading, setLoading] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [list, setList] = useState<PrefixCodeItem[]>([])
+  const [list, setList] = useState<ProductPrefixCodeItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  // keyword 是输入框文本，search 是已提交（回车 / 清空）真正参与查询的关键词。
+  const [keyword, setKeyword] = useState('')
   const [search, setSearch] = useState('')
-  const [editingKey, setEditingKey] = useState('')
+  const [formTarget, setFormTarget] = useState<PrefixFormTarget | null>(null)
+  const [togglingKeys, setTogglingKeys] = useState<Set<string>>(() => new Set())
+  const listRequestGuardRef = useRef(createLatestRequestGuard())
+  const lastFormTargetRef = useRef<PrefixFormTarget>({ mode: 'create' })
 
-  const loadList = useCallback(async () => {
-    if (!supplierCode) return
-    setLoading(true)
-    try {
-      const res = await getPrefixCodeList({ page, pageSize, search: search || undefined, supplierCode } as any)
-      setLoading(false)
-      if (res.success) {
-        setList(res.data?.items || [])
-        setTotal(res.data?.total || 0)
-      } else {
-        message.error(res.message || t('productCreation.loadPrefixFailed', '加载前缀码失败'))
-      }
-    } catch {
-      setLoading(false)
-      message.error(t('productCreation.loadPrefixFailed', '加载前缀码失败'))
-    }
-  }, [supplierCode, page, pageSize, search])
+  // 对象合并而非默认参数：overrides 里显式 undefined 表示「清除该筛选」。
+  const loadList = useCallback(
+    async (overrides: Partial<ManageListQuery> = {}) => {
+      if (!supplierCode) return
+      const query: ManageListQuery = { page, pageSize, search: search || undefined, ...overrides }
+
+      // 快速翻页 / 切换供应商时，只认最后一次请求，旧响应不能覆盖新结果。
+      await runLatestGuardedRequest(
+        listRequestGuardRef.current,
+        async () => {
+          const res = await getPrefixCodeList({ page: query.page, pageSize: query.pageSize, search: query.search, supplierCode })
+          if (!res.success) {
+            throw new Error(res.message || t('prefixCode.loadListFailed'))
+          }
+          return res.data
+        },
+        {
+          onStart: () => setLoading(true),
+          onSuccess: (data) => {
+            setList((data?.items ?? []) as ProductPrefixCodeItem[])
+            setTotal(data?.total ?? 0)
+            setPage(query.page)
+            setPageSize(query.pageSize)
+          },
+          onError: (error) => {
+            console.error(error)
+            message.error(error instanceof Error && error.message ? error.message : t('prefixCode.loadListFailed'))
+          },
+          onSettled: () => setLoading(false),
+        },
+      )
+    },
+    [supplierCode, page, pageSize, search],
+  )
 
   useEffect(() => {
     if (visible && supplierCode) {
       setPage(1)
+      setKeyword('')
       setSearch('')
-      form.resetFields()
-      editForm.resetFields()
-      setEditingKey('')
-      loadList()
+      setFormTarget(null)
+      void loadList({ page: 1, search: undefined })
     }
+    // 关闭 / 切换供应商时作废在途请求，晚到的响应不再写入。
+    return () => listRequestGuardRef.current.invalidate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, supplierCode])
 
-  const handleAdd = useCallback(async () => {
-    try {
-      const values = await form.validateFields()
-      setSubmitting(true)
+  const commitSearch = (value: string) => {
+    const nextSearch = value.trim()
+    setKeyword(nextSearch)
+    setSearch(nextSearch)
+    void loadList({ page: 1, search: nextSearch || undefined })
+  }
+
+  const handleKeywordChange = (value: string) => {
+    setKeyword(value)
+    if (!value && search) {
+      commitSearch('')
+    }
+  }
+
+  const handleSubmitForm = async (payload: SavePrefixCodePayload) => {
+    if (!formTarget) {
+      return
+    }
+
+    // 请求失败向外抛，由共用弹窗就地提示并保持打开；成功后才关闭并刷新。
+    if (formTarget.mode === 'create') {
       const res = await createPrefixCode({
         supplierCode,
-        prefixName: values.prefixName?.toUpperCase(),
-        prefixDescription: values.prefixDescription,
-        isActive: values.isActive ?? true,
-        sortOrder: values.sortOrder,
+        prefixName: payload.prefixName,
+        prefixDescription: payload.prefixDescription,
+        isActive: payload.isActive,
+        sortOrder: payload.sortOrder,
       })
-      setSubmitting(false)
-      if (res.success) {
-        message.success(t('productCreation.addSuccess', '添加成功'))
-        form.resetFields()
-        loadList()
-        onSuccess?.()
-      } else {
-        message.error(res.message || t('productCreation.addFailed', '添加失败'))
+      if (!res.success) {
+        throw new Error(res.message || t('prefixCode.saveFailed'))
       }
-    } catch {
-      setSubmitting(false)
+      message.success(t('prefixCode.createSuccess'))
+    } else {
+      const res = await updatePrefixCode(formTarget.record.prefixCode, {
+        prefixName: payload.prefixName,
+        prefixDescription: payload.prefixDescription,
+        isActive: payload.isActive,
+        sortOrder: payload.sortOrder,
+      })
+      if (!res.success) {
+        throw new Error(res.message || t('prefixCode.saveFailed'))
+      }
+      message.success(t('prefixCode.updateSuccess'))
     }
-  }, [supplierCode, form, loadList, onSuccess])
 
-  const handleEdit = useCallback(async () => {
-    if (!editingKey) return
+    const reloadPage = formTarget.mode === 'create' ? 1 : page
+    setFormTarget(null)
+    void loadList({ page: reloadPage })
+    onSuccess?.()
+  }
+
+  const handleDelete = async (record: ProductPrefixCodeItem) => {
     try {
-      const values = await editForm.validateFields()
-      setSubmitting(true)
-      const res = await updatePrefixCode(editingKey, {
-        prefixName: values.prefixName?.toUpperCase(),
-        prefixDescription: values.prefixDescription,
-        isActive: values.isActive ?? true,
-        sortOrder: values.sortOrder,
-      })
-      setSubmitting(false)
-      if (res.success) {
-        message.success(t('productCreation.updateSuccess', '更新成功'))
-        setEditingKey('')
-        editForm.resetFields()
-        loadList()
-        onSuccess?.()
-      } else {
-        message.error(res.message || t('productCreation.updateFailed', '更新失败'))
+      const res = await deletePrefixCode(record.prefixCode)
+      if (!res.success) {
+        message.error(res.message || t('prefixCode.deleteFailed'))
+        return
       }
-    } catch {
-      setSubmitting(false)
+      message.success(t('prefixCode.deleteSuccess'))
+      // 删掉当前页最后一行时回退一页，避免停在空白页。
+      void loadList({ page: list.length <= 1 && page > 1 ? page - 1 : page })
+      onSuccess?.()
+    } catch (error) {
+      // 后端会拒绝删除已被商品使用的前缀，其 message 已说明原因，直接展示。
+      console.error(error)
+      message.error(error instanceof Error && error.message ? error.message : t('prefixCode.deleteFailed'))
     }
-  }, [editingKey, editForm, loadList, onSuccess])
+  }
 
-  const handleDelete = useCallback(
-    async (prefixCode: string) => {
-      const res = await deletePrefixCode(prefixCode)
-      if (res.success) {
-        message.success(t('productCreation.deleteSuccess', '删除成功'))
-        loadList()
-        onSuccess?.()
-      } else {
-        message.error(res.message || t('productCreation.deleteFailed', '删除失败'))
+  // 行内直接切换启用状态：先乐观更新，请求失败再回滚。
+  const handleToggleStatus = async (record: ProductPrefixCodeItem, checked: boolean) => {
+    if (togglingKeys.has(record.prefixCode)) {
+      return
+    }
+
+    const patchRow = (isActive: boolean) =>
+      setList((current) => current.map((row) => (row.prefixCode === record.prefixCode ? { ...row, isActive } : row)))
+    setTogglingKeys((current) => new Set(current).add(record.prefixCode))
+    patchRow(checked)
+    try {
+      const res = await togglePrefixCodeStatus(record.prefixCode, checked)
+      if (!res.success) {
+        throw new Error(res.message || t('prefixCode.statusUpdateFailed'))
       }
-    },
-    [loadList, onSuccess],
-  )
+      message.success(t('prefixCode.statusUpdated'))
+      void loadList()
+      onSuccess?.()
+    } catch (error) {
+      console.error(error)
+      patchRow(record.isActive)
+      message.error(error instanceof Error && error.message ? error.message : t('prefixCode.statusUpdateFailed'))
+    } finally {
+      setTogglingKeys((current) => {
+        const next = new Set(current)
+        next.delete(record.prefixCode)
+        return next
+      })
+    }
+  }
 
-  const handleToggleStatus = useCallback(
-    async (prefixCode: string, isActive: boolean) => {
-      const res = await togglePrefixCodeStatus(prefixCode, isActive)
-      if (res.success) {
-        message.success(t('productCreation.statusUpdateSuccess', '状态更新成功'))
-        loadList()
-        onSuccess?.()
-      } else {
-        message.error(res.message || t('productCreation.statusUpdateFailed', '状态更新失败'))
-      }
-    },
-    [loadList, onSuccess],
-  )
-
-  const startEdit = useCallback((record: PrefixCodeItem) => {
-    setEditingKey(record.prefixCode)
-    editForm.setFieldsValue({ prefixName: record.prefixName, prefixDescription: record.prefixDescription, isActive: record.isActive, sortOrder: record.sortOrder })
-  }, [editForm])
-
-  const cancelEdit = useCallback(() => {
-    setEditingKey('')
-    editForm.resetFields()
-  }, [editForm])
-
-  const columns: ColumnsType<PrefixCodeItem> = [
+  const columns: ColumnsType<ProductPrefixCodeItem> = [
     {
-      title: t('productCreation.prefixCode', '前缀码'),
+      title: t('prefixCode.prefixName'),
       dataIndex: 'prefixName',
-      key: 'prefixName',
-      width: 150,
-      render: (text, record) =>
-        editingKey === record.prefixCode ? (
-          <Form.Item name="prefixName" noStyle><Input style={{ width: 120, textTransform: 'uppercase' }} onChange={(e) => handlePrefixNameChange(e, editForm)} /></Form.Item>
-        ) : text,
+      width: 110,
+      render: (value: string) => <span className="prefix-code-tag">{value}</span>,
     },
     {
-      title: t('productCreation.description', '描述'),
+      title: t('prefixCode.prefixDescription'),
       dataIndex: 'prefixDescription',
-      key: 'prefixDescription',
-      width: 200,
-      render: (text, record) =>
-        editingKey === record.prefixCode ? <Form.Item name="prefixDescription" noStyle><Input style={{ width: 160 }} /></Form.Item> : text || '-',
+      render: (value?: string) =>
+        value ? <span className="prefix-code-ellipsis" title={value}>{value}</span> : <span className="prefix-code-faint">--</span>,
     },
     {
-      title: t('productCreation.sort', '排序'),
+      title: t('prefixCode.formSort'),
       dataIndex: 'sortOrder',
-      key: 'sortOrder',
-      width: 100,
-      render: (text, record) =>
-        editingKey === record.prefixCode ? <Form.Item name="sortOrder" noStyle><InputNumber min={0} style={{ width: 70 }} /></Form.Item> : text ?? '-',
+      width: 72,
+      render: (value?: number) => (value === undefined || value === null ? <span className="prefix-code-faint">--</span> : <span className="prefix-code-mono">{value}</span>),
     },
     {
-      title: t('domesticProducts.status', '状态'),
+      title: t('domesticProducts.status'),
       dataIndex: 'isActive',
-      key: 'isActive',
-      width: 100,
-      render: (isActive, record) =>
-        editingKey === record.prefixCode ? (
-          <Form.Item name="isActive" valuePropName="checked" noStyle><Switch /></Form.Item>
-        ) : (
-          <Switch checked={isActive} onChange={(checked) => handleToggleStatus(record.prefixCode, checked)} checkedChildren={t('common.enable', '启用')} unCheckedChildren={t('common.disable', '停用')} />
-        ),
+      width: 80,
+      render: (value: boolean, record) => (
+        <Switch
+          checked={value}
+          loading={togglingKeys.has(record.prefixCode)}
+          onChange={(checked) => void handleToggleStatus(record, checked)}
+          aria-label={`${record.prefixName} ${t('domesticProducts.status')}`}
+        />
+      ),
     },
     {
-      title: t('chinaSuppliers.createdAt', '创建时间'),
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      width: 160,
-      render: (text) => (text ? new Date(text).toLocaleString('zh-CN') : '-'),
+      title: t('column.updateTime'),
+      dataIndex: 'updatedAt',
+      width: 118,
+      // 旧接口的列表项里没有 updatedAt 字段声明，缺失时退回创建时间，仍显示一个时间。
+      render: (_value: string | undefined, record) => (
+        <span className="prefix-code-sub">{formatPrefixTimestamp(record.updatedAt ?? record.createdAt)}</span>
+      ),
     },
     {
-      title: t('common.action', '操作'),
+      title: t('column.action'),
       key: 'actions',
-      width: 120,
+      width: 104,
       fixed: 'right',
-      render: (_, record) =>
-        editingKey === record.prefixCode ? (
-          <Space size="small">
-            <Button type="link" size="small" onClick={handleEdit} loading={submitting}>{t('common.confirm', '确定')}</Button>
-            <Button type="link" size="small" onClick={cancelEdit}>{t('common.cancel', '取消')}</Button>
-          </Space>
-        ) : (
-          <Space size="small">
-            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => startEdit(record)} />
-            <Popconfirm title={t('productCreation.confirmDelete', '确定删除？')} onConfirm={() => handleDelete(record.prefixCode)}>
-              <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-            </Popconfirm>
-          </Space>
-        ),
+      align: 'right',
+      render: (_value, record) => (
+        <div className="prefix-code-actions">
+          <Button size="small" type="link" onClick={() => setFormTarget({ mode: 'edit', record })}>
+            {t('common.edit')}
+          </Button>
+          <Popconfirm
+            title={t('prefixCode.confirmDeletePrefix')}
+            description={t('prefixCode.deleteDescription')}
+            okText={t('common.delete')}
+            okButtonProps={{ danger: true }}
+            cancelText={t('common.cancel')}
+            onConfirm={() => handleDelete(record)}
+          >
+            <Button size="small" type="link" danger>
+              {t('common.delete')}
+            </Button>
+          </Popconfirm>
+        </div>
+      ),
     },
   ]
 
+  // 关闭动画期间 formTarget 已是 null，内容若立刻切回默认值会闪一下，所以沿用最近一次的目标。
+  if (formTarget) {
+    lastFormTargetRef.current = formTarget
+  }
+  const shownFormTarget = formTarget ?? lastFormTargetRef.current
+  const editingRecord = shownFormTarget.mode === 'edit' ? shownFormTarget.record : undefined
+
   return (
-    <Modal title={t('productCreation.managePrefixTitle', '管理前缀码 - {{name}}', { name: supplierName || supplierCode })} open={visible} onCancel={onClose} width={900} footer={null} destroyOnHidden>
-      <Form form={form} layout="inline" style={{ marginBottom: 16 }}>
-        <Row gutter={12} style={{ width: '100%' }}>
-          <Col flex="120px">
-            <Form.Item name="prefixName" rules={[{ required: true, message: t('productCreation.enterPrefixCode', '请输入前缀码') }, { pattern: /^[A-Za-z0-9]+$/, message: t('productCreation.alphaNumOnly', '仅限字母和数字') }]}>
-              <Input placeholder={t('productCreation.prefixCode', '前缀码')} maxLength={10} style={{ textTransform: 'uppercase' }} onChange={(e) => handlePrefixNameChange(e, form)} />
-            </Form.Item>
-          </Col>
-          <Col flex="200px">
-            <Form.Item name="prefixDescription"><Input placeholder={t('productCreation.description', '描述')} /></Form.Item>
-          </Col>
-          <Col flex="80px">
-            <Form.Item name="sortOrder" initialValue={0}><InputNumber min={0} placeholder="#" style={{ width: '100%' }} /></Form.Item>
-          </Col>
-          <Col flex="80px">
-            <Form.Item name="isActive" valuePropName="checked" initialValue={true}><Switch checkedChildren={t('common.enable', '启用')} unCheckedChildren={t('common.disable', '停用')} /></Form.Item>
-          </Col>
-          <Col>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} loading={submitting}>{t('common.add', '添加')}</Button>
-          </Col>
-        </Row>
-      </Form>
-      <div style={{ marginBottom: 12 }}>
-        <Space>
-          <Input placeholder={t('productCreation.searchPrefix', '搜索前缀码')} prefix={<SearchOutlined />} value={search} onChange={(e) => setSearch(e.target.value)} onPressEnter={() => { setPage(1); loadList() }} style={{ width: 240 }} allowClear />
-          <Button onClick={() => { setPage(1); loadList() }}>{t('common.search', '搜索')}</Button>
-        </Space>
+    <Modal
+      title={t('prefixCode.manageTitle', { name: supplierName || supplierCode })}
+      open={visible}
+      onCancel={onClose}
+      width={880}
+      footer={null}
+      // 弹窗里有新增 / 编辑流程，误点遮罩会丢内容。
+      maskClosable={false}
+      destroyOnHidden
+    >
+      <div className="prefix-code-manage-toolbar" data-testid="prefix-code-manage-toolbar">
+        <Input
+          placeholder={`${t('prefixCode.searchPrefixOnly')} · ${t('common.listToolbar.searchEnterHint')}`}
+          prefix={<SearchOutlined />}
+          value={keyword}
+          onChange={(event) => handleKeywordChange(event.target.value)}
+          onPressEnter={() => commitSearch(keyword)}
+          style={{ width: 300 }}
+          allowClear
+        />
+        <span className="prefix-code-spacer" />
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setFormTarget({ mode: 'create' })} data-testid="prefix-code-manage-add">
+          {t('prefixCode.addPrefix')}
+        </Button>
       </div>
-      <Spin spinning={loading}>
-        <MeasuredTable metricId="domestic-purchase.product-creation.prefix-code-manage-modal.table-1" columns={columns} dataSource={list} rowKey="prefixCode" size="small" pagination={{ current: page, pageSize, total, showSizeChanger: true, showQuickJumper: true, showTotal: (total) => t('common.totalCount', '共 {{count}} 条', { count: total }), onChange: (p, ps) => { setPage(p); setPageSize(ps) } }} scroll={{ x: 800 }} />
-      </Spin>
+      <MeasuredTable
+        metricId="domestic-purchase.product-creation.prefix-code-manage-modal.table-1"
+        className="prefix-code-table"
+        columns={columns}
+        dataSource={list}
+        rowKey="prefixCode"
+        size="small"
+        loading={loading}
+        tableLayout="fixed"
+        scroll={{ x: 760 }}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          showTotal: (count) => t('common.totalCount', { count }),
+          onChange: (nextPage, nextPageSize) => void loadList({ page: nextPageSize === pageSize ? nextPage : 1, pageSize: nextPageSize }),
+        }}
+      />
+
+      <PrefixCodeFormModal
+        open={formTarget !== null}
+        mode={shownFormTarget.mode}
+        initialValues={
+          editingRecord
+            ? {
+                prefixName: editingRecord.prefixName,
+                prefixDescription: editingRecord.prefixDescription,
+                sortOrder: editingRecord.sortOrder,
+                isActive: editingRecord.isActive,
+              }
+            : { isActive: true, sortOrder: 0 }
+        }
+        // 供应商固定为当前所管理的供应商，不再提供选择。
+        fixedSupplier={{ code: supplierCode, name: supplierName }}
+        onSubmit={handleSubmitForm}
+        onCancel={() => setFormTarget(null)}
+      />
     </Modal>
   )
 }
