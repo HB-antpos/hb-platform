@@ -219,7 +219,17 @@
       "includePriceUp": "执行涨价 {{count}} 行",
       "includePriceDown": "执行降价 {{count}} 行",
       "priceDirectionHint": "取消勾选的行保留为「待执行」，可稍后单独执行；改货号、加多码等其余 {{count}} 行照常执行。",
-      "noRowsToExecute": "没有要执行的明细，请至少勾选一类"
+      "noRowsToExecute": "没有要执行的明细，请至少勾选一类",
+      "linkMatchedAction": "选用条码匹配商品",
+      "linkMatchedTip": "主档不存在、条码只匹配到一个已有商品的行，回填该商品编码，按已有商品处理",
+      "linkMatchedNone": "选中的行里没有可选用的明细：需检测为主档不存在、且条码匹配到已有商品",
+      "linkMatchedConfirmTitle": "选用条码唯一匹配的商品？",
+      "linkMatchedConfirmContent": "将查询 {{count}} 行的条码匹配商品：只匹配到一个商品的行回填该商品编码，按已有商品处理（默认更新进货价），商品主档不变；匹配到多个商品的行跳过，需逐行选择。",
+      "linkMatchedSkipped": "另有 {{count}} 行不符合条件（主档已存在、未检测或条码无匹配），不处理。",
+      "linkMatchedOk": "确认选用",
+      "linkMatchedNothing": "没有条码只匹配到一个商品的行：匹配到多个商品 {{multi}} 行，查询失败 {{failed}} 行",
+      "linkMatchedResult": "已选用 {{count}} 行",
+      "linkMatchedResultDetail": "还有需人工处理的行：条码匹配到多个商品 {{multi}} 行，查询失败 {{failed}} 行，未能关联 {{rejected}} 行。可点条码状态逐行选择。"
     }
   }
 }

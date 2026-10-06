@@ -219,7 +219,17 @@
       "includePriceUp": "Apply {{count}} price increases",
       "includePriceDown": "Apply {{count}} price decreases",
       "priceDirectionHint": "Unchecked rows stay pending so you can run them later; the other {{count}} rows (item number, multi-code, etc.) run as usual.",
-      "noRowsToExecute": "Nothing to run. Check at least one group."
+      "noRowsToExecute": "Nothing to run. Check at least one group.",
+      "linkMatchedAction": "Link barcode match",
+      "linkMatchedTip": "For rows not in the product master whose barcode matches exactly one existing product, fill in that product code and treat the row as an existing product",
+      "linkMatchedNone": "No selected rows can be linked: rows must be checked as not in the product master and have a barcode match",
+      "linkMatchedConfirmTitle": "Link products that uniquely match the barcode?",
+      "linkMatchedConfirmContent": "Will look up barcode matches for {{count}} rows. Rows matching exactly one product get that product code and are treated as existing products (default: update purchase price); the product master is unchanged. Rows matching several products are skipped for manual choice.",
+      "linkMatchedSkipped": "{{count}} other rows are not eligible (already in the product master, not checked, or no barcode match) and are left as is.",
+      "linkMatchedOk": "Link",
+      "linkMatchedNothing": "No rows match exactly one product: {{multi}} match several products, {{failed}} lookups failed",
+      "linkMatchedResult": "Linked {{count}} rows",
+      "linkMatchedResultDetail": "Rows still need manual handling: {{multi}} match several products, {{failed}} lookups failed, {{rejected}} could not be linked. Click the barcode status to choose row by row."
     }
   }
 }
