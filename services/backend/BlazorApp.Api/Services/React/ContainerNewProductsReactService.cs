@@ -20,6 +20,7 @@ public sealed class ContainerNewProductsReactService(
 
     public async Task<ContainerNewProductsResponseDto> GetAsync(
         string storeCode,
+        bool includeExisting = false,
         CancellationToken cancellationToken = default
     )
     {
@@ -146,9 +147,11 @@ public sealed class ContainerNewProductsReactService(
         foreach (var group in details.GroupBy(x => (x.ContainerCode, x.ProductCode)))
         {
             var detail = group.First();
-            if (!ShouldIncludeProduct(
-                    existingProducts.Contains(detail.ProductCode),
-                    historyKeys.Contains(new HistoryKey(detail.ProductCode, detail.ContainerCode))))
+            // 新商品 = 仓库里还没有，或正是由本柜提交时新建的；其余是补货的已有商品，仅在调用方要求时返回
+            var isNewProduct = ShouldIncludeProduct(
+                existingProducts.Contains(detail.ProductCode),
+                historyKeys.Contains(new HistoryKey(detail.ProductCode, detail.ContainerCode)));
+            if (!isNewProduct && !includeExisting)
             {
                 continue;
             }
@@ -172,6 +175,7 @@ public sealed class ContainerNewProductsReactService(
                 EstimatedStoreArrivalDate = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].Start),
                 EstimatedStoreArrivalDateEnd = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].End),
                 Basis = container.ActualArrivalDate.HasValue ? "actual" : "estimated",
+                IsNewProduct = isNewProduct,
             });
         }
 
