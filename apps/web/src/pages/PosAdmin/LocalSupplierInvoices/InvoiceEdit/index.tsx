@@ -3539,13 +3539,22 @@ export default function InvoiceEditPage() {
     </div>
   )
 
-  const renderQuickChip = (key: string, label: string, count: number, active: boolean, onToggle: () => void) => (
+  // 有色调的快捷筛选（涨价 / 降价 / 主档不存在）沿用表格里同一语义色：未选浅底彩字，选中实心白字；
+  // 选中态由 CSS 类表达，不用 antd primary，否则三个都会变成同一种蓝色。
+  const renderQuickChip = (
+    key: string,
+    label: string,
+    count: number,
+    active: boolean,
+    onToggle: () => void,
+    tone?: 'up' | 'down' | 'new',
+  ) => (
     <Button
       key={key}
       size="small"
-      className="lsi-wb-chip"
-      type={active ? 'primary' : 'default'}
-      ghost={active}
+      className={tone ? `lsi-wb-chip lsi-wb-chip-${tone}${active ? ' is-active' : ''}` : 'lsi-wb-chip'}
+      type={active && !tone ? 'primary' : 'default'}
+      ghost={active && !tone}
       aria-pressed={active}
       onClick={onToggle}
     >
@@ -3844,14 +3853,15 @@ export default function InvoiceEditPage() {
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
-          {renderQuickChip('price-up', t('posAdmin.invoiceWorkbench.chipPriceUp'), priceStats.upCount, priceFilter === 'up', () => setPriceFilter(priceFilter === 'up' ? 'all' : 'up'))}
-          {renderQuickChip('price-down', t('posAdmin.invoiceWorkbench.chipPriceDown'), priceStats.downCount, priceFilter === 'down', () => setPriceFilter(priceFilter === 'down' ? 'all' : 'down'))}
+          {renderQuickChip('price-up', t('posAdmin.invoiceWorkbench.chipPriceUp'), priceStats.upCount, priceFilter === 'up', () => setPriceFilter(priceFilter === 'up' ? 'all' : 'up'), 'up')}
+          {renderQuickChip('price-down', t('posAdmin.invoiceWorkbench.chipPriceDown'), priceStats.downCount, priceFilter === 'down', () => setPriceFilter(priceFilter === 'down' ? 'all' : 'down'), 'down')}
           {renderQuickChip(
             'not-exists',
             canEditInvoice ? t('posAdmin.invoiceWorkbench.chipNotExists') : t('posAdmin.invoiceWorkbench.chipNotExistsStore'),
             detailStatusStats.product.notExists,
             productStatusFilter === 'notExists',
             () => setProductStatusFilter(toggleStatusFilter(productStatusFilter, 'notExists')),
+            'new',
           )}
           {canEditInvoice && renderQuickChip(
             'barcode-abnormal',
