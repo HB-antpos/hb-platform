@@ -14,6 +14,7 @@ import {
   type ReturnErrorCode,
   type ReturnRefundPlan,
   type ReturnTenderMethod,
+  type VoucherFundedRefundBasis,
 } from "./return-domain";
 
 import {
@@ -116,6 +117,7 @@ export type ReturnWorkflowSnapshot = Readonly<{
   returnRecordsMayBeStale: boolean;
   lines: readonly ReturnDraftLine[];
   tenderCapacities: readonly OriginalReturnTenderCapacity[];
+  voucherFundedBasis?: VoucherFundedRefundBasis | null;
   preferredMethod: ReturnTenderMethod | null;
   selectedTotalCents: number;
   status: ReturnWorkflowStatus;
@@ -236,6 +238,7 @@ export class ReturnWorkflow {
       returnRecordsMayBeStale: context.returnRecordsMayBeStale,
       lines: createReceiptDraftLines(context),
       tenderCapacities: [...context.tenderCapacities],
+      voucherFundedBasis: context.voucherFundedBasis ?? null,
       // 含不能原路退回的额度时默认现金兜底；收银员仍可改选代金券。
       preferredMethod: context.tenderCapacities.some(
         (capacity) => capacity.substituteOnly === true && capacity.remainingCents > 0,
@@ -525,6 +528,7 @@ export class ReturnWorkflow {
       capacities: this.snapshot.tenderCapacities,
       online,
       preferredMethod: this.snapshot.preferredMethod,
+      voucherFundedBasis: this.snapshot.voucherFundedBasis ?? null,
     });
   }
 

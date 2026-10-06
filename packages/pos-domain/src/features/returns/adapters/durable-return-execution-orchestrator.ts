@@ -936,14 +936,15 @@ function deriveReturnFulfilmentPolicy(
   const hasCard = allocations.some(
     (allocation) => allocation.method === "card",
   );
-  // WPF 只为纯券退款自动打印新签发的退款券；混入现金后只开钱箱。
-  const voucherOnly =
-    allocations.length === 1 &&
-    allocations[0]?.method === "voucher";
+  // 与 WPF 对齐：代金券买的部分须退代金券后，现金/刷卡 + 退款券的混合退款常见，每张退款券都要出票。
+  // 含刷卡打印退货小票（其后追加各张退款券）；不含刷卡但有退款券时逐张打印退款券；其余只开钱箱。
+  const hasVoucher = allocations.some(
+    (allocation) => allocation.method === "voucher",
+  );
   return Object.freeze({
     receiptKind: hasCard
       ? "refund-receipt"
-      : voucherOnly
+      : hasVoucher
         ? "refund-voucher"
         : "none",
     drawerRequired: hasCash,

@@ -47,6 +47,7 @@ import type {
   InstallmentCashRepaymentPreparation,
   InstallmentRepaymentClaim,
   InstallmentCancelClaim,
+  InstallmentCancelRefundMode,
   InstallmentRefundCommand,
   InstallmentsRemotePort,
   InstallmentVoidCommand,
@@ -372,6 +373,10 @@ export type ProductionInstallmentRuntimeDependencies = Readonly<{
   /** 仅将服务端当前未确认 session 强匹配到旧账本，绝不重放金融操作。 */
   prepareProviderAcknowledgementRecovery?: () => Promise<void>;
   receiptReprint?: InstallmentReceiptReprintRuntimePort | null;
+  /** 取消退款成功后打印本机签发的退款代金券券面；只是收尾，失败不影响取消结果。 */
+  refundVoucherPrinter?: Readonly<{
+    printAfterCancel(installmentGuid: string, orderLabel: string): Promise<unknown>;
+  }> | null;
   voucherIntents: InstallmentVoucherIntentVaultPort;
   sha256Hex(material: string): Promise<string>;
   createId(): string;
@@ -1221,17 +1226,42 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
   public async cancelWithRefund(input: Readonly<{
     installmentGuid: string;
     reason: string | null;
+    refundMode?: InstallmentCancelRefundMode;
   }>): Promise<InstallmentDetails> {
     await this.assertOnlineAndScoped();
     const blocking = await this.loadBlockingOperation();
     if (blocking) return this.recoverBlockingOperation(blocking);
+    // 中文注释：两种退款方式沿用同一取消权限，不另设权限码。
     this.requireCurrentPermission(INSTALLMENTS_CANCEL_PERMISSION);
+    const refundMode = normalizeCancelRefundMode(input.refundMode);
     const capabilities = await this.getRequiredCancelClaimCapabilities();
     const details = await this.assertInitialMutationScope(
       requiredText(input.installmentGuid, "installment guid"),
       capabilities.crossDeviceCancelRefundEnabled,
     );
-    const candidate = await this.createCancelAction(input, details);
+    if (
+      refundMode === "original-route" &&
+      details.payments.some(
+        (payment) =>
+          payment.status === "Recorded" &&
+          payment.amountCents > 0 &&
+          payment.method === "card",
+      )
+    ) {
+      // 中文注释：服务端原路退对刷卡原付款一律 409 拒绝；在建 action/claim 前失败关闭。
+      throw workflowError(
+        "refund-method-unsupported",
+        "Card payments cannot be refunded through the original route.",
+      );
+    }
+    const candidate = await this.createCancelAction(
+      {
+        installmentGuid: input.installmentGuid,
+        reason: input.reason,
+        refundMode,
+      },
+      details,
+    );
     const persisted = await this.persistCandidate(candidate);
     return this.executePersistedAction(persisted);
   }
@@ -1694,6 +1724,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
   private async createCancelAction(input: Readonly<{
     installmentGuid: string;
     reason: string | null;
+    refundMode: InstallmentCancelRefundMode;
   }>, details: InstallmentDetails): Promise<InstallmentActionCandidate> {
     const installmentGuid = requiredText(
       input.installmentGuid,
@@ -1713,10 +1744,12 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       cancelledAtIso: runtimeIso(this.context.input),
       reason: input.reason,
       idempotencyKey: action.idempotencyKey,
+      // 中文注释：指纹始终按原付款方式计算（服务端同口径），与退款方式无关。
       refundPlanFingerprint: await createCancelRefundPlanFingerprint(
         this.context.input,
         details,
       ),
+      refundMode: input.refundMode,
     });
     return this.createActionCandidate({
       action,
@@ -1932,7 +1965,13 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       persisted.action.kind === "cancel-refund" &&
       "refunds" in result
     ) {
-      refunds = validateApprovedRefunds(persisted.action, result.refunds);
+      refunds = validateApprovedRefunds(
+        persisted.action,
+        result.refunds,
+        persisted.command.kind === "cancel-refund"
+          ? persistedCancelRefundMode(persisted.command)
+          : "original-route",
+      );
     } else {
       throw paymentRecoveryError(
         "Payment adapter returned an action of the wrong kind.",
@@ -2609,7 +2648,12 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       }
     } catch (error) {
       if (cancelClaimDeterministicFailure(error) && persisted.state === "Created") {
-        await this.finalizeCreatedClaimFailure(persisted, "ClaimBusy");
+        await this.finalizeCreatedClaimFailure(
+          persisted,
+          cancelRefundMethodUnsupported(error)
+            ? "PaymentMethodUnsupported"
+            : "ClaimBusy",
+        );
       }
       throw mapRemoteError(error);
     }
@@ -2652,7 +2696,11 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       throw workflowError("authorization-declined", "Refund was declined.");
     }
     if (!("refunds" in result)) throw paymentRecoveryError("Payment adapter returned an action of the wrong kind.");
-    const refunds = validateApprovedRefunds(action, result.refunds);
+    const refunds = validateApprovedRefunds(
+      action,
+      result.refunds,
+      persistedCancelRefundMode(cancelCommand),
+    );
     claim = await this.commitCancelClaimWithRecovery(persisted, refunds);
     return this.finishCommittedCancel(persisted, claim, refunds);
   }
@@ -2671,9 +2719,23 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       validateCancelClaim(claim, persisted.action, command);
       return claim;
     };
+    const validateOrReleaseMode = async (claim: InstallmentCancelClaim) => {
+      if (claim.refundMode !== persistedCancelRefundMode(command)) {
+        await this.rejectCancelClaimRefundMode(persisted, identity, claim);
+      }
+      return validate(claim);
+    };
     try {
-      return validate(await this.context.input.api.getCancelClaim(identity));
+      return await validateOrReleaseMode(
+        await this.context.input.api.getCancelClaim(identity),
+      );
     } catch (error) {
+      if (
+        error instanceof InstallmentWorkflowError &&
+        error.code === "refund-mode-unsupported"
+      ) {
+        throw error;
+      }
       if (!repaymentClaimNotFound(error)) {
         if (cancelClaimDeterministicFailure(error) && persisted.state === "Created") {
           await this.finalizeCreatedClaimFailure(persisted, "ClaimBusy");
@@ -2686,19 +2748,64 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
         "Cancel claim is missing during provider recovery; creating a new claim is unsafe.",
       );
     }
+    let created: InstallmentCancelClaim;
     try {
-      return validate(await this.context.input.api.createCancelClaim({
+      created = await this.context.input.api.createCancelClaim({
         ...identity,
         idempotencyKey: persisted.action.idempotencyKey,
         reason: command.reason,
         refundPlanFingerprint,
-      }));
+        refundMode: persistedCancelRefundMode(command),
+      });
     } catch (error) {
       if (cancelClaimDeterministicFailure(error) && persisted.state === "Created") {
-        await this.finalizeCreatedClaimFailure(persisted, "ClaimBusy");
+        await this.finalizeCreatedClaimFailure(
+          persisted,
+          cancelRefundMethodUnsupported(error)
+            ? "PaymentMethodUnsupported"
+            : "ClaimBusy",
+        );
       }
       throw mapRemoteError(error);
     }
+    return validateOrReleaseMode(created);
+  }
+
+  /**
+   * 回包 claim 的退款方式与本地冻结选择不一致（典型：旧服务端丢弃 refundMode 而按原路退建 claim）。
+   * 此时尚未 begin-refund、未签发任何退款券：仅在本地 action 仍为 Created 时释放远端 Prepared claim
+   * 并终结本地 action，随后失败关闭；其它状态说明退款可能已开始，必须保持阻塞等待人工恢复。
+   */
+  private async rejectCancelClaimRefundMode(
+    persisted: PersistedInstallmentAction,
+    identity: Readonly<{ installmentGuid: string; operationGuid: string }>,
+    claim: InstallmentCancelClaim,
+  ): Promise<never> {
+    if (
+      persisted.state !== "Created" ||
+      (claim.status !== "Prepared" &&
+        claim.status !== "Released" &&
+        claim.status !== "Declined")
+    ) {
+      throw paymentRecoveryError(
+        "Cancel claim refund mode does not match the durable action.",
+      );
+    }
+    if (claim.status === "Prepared") {
+      try {
+        await this.context.input.api.resolveCancelClaim({
+          ...identity,
+          outcome: "Released",
+        });
+      } catch {
+        // 远端 Prepared claim 会按 TTL 过期；本地未调用任何退款 provider，可安全终结。
+      }
+    }
+    await this.finalizeCreatedClaimFailure(persisted, "ClaimMismatch");
+    throw workflowError(
+      "refund-mode-unsupported",
+      "The server did not accept the selected cancellation refund mode.",
+    );
   }
 
   private async markCancelUnknown(
@@ -2774,7 +2881,19 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     await this.cacheDetails(details);
     await this.context.input.actionStore.complete({ actionId: persisted.action.actionId, expectedState: "BackendPending", terminal: this.context.terminal });
     await this.acknowledgeCompletedAction(persisted.action.actionId);
+    await this.printRefundVouchersAfterCancel(details);
     return details;
+  }
+
+  // 与 WPF 对齐：取消（含恢复后完成）成功后自动出退款券；打印失败只能补打，绝不回滚或改写取消结果。
+  private async printRefundVouchersAfterCancel(details: InstallmentDetails): Promise<void> {
+    const printer = this.context.input.refundVoucherPrinter;
+    if (!printer) return;
+    try {
+      await printer.printAfterCancel(details.installmentGuid, details.installmentNumber);
+    } catch {
+      // 券已签发且取消已提交；打印异常留给交易记录补打，不向取消流程抛出。
+    }
   }
 
   private async acknowledgeCompletedAction(actionId: string): Promise<void> {
@@ -3467,10 +3586,37 @@ function validateCancelClaim(
     claim.operationGuid !== action.actionId ||
     claim.idempotencyKey !== action.idempotencyKey ||
     !command.refundPlanFingerprint ||
-    claim.refundPlanFingerprint !== command.refundPlanFingerprint
+    claim.refundPlanFingerprint !== command.refundPlanFingerprint ||
+    // 中文注释：退款方式必须与本地冻结选择严格一致，旧服务端丢弃 refundMode 时失败关闭。
+    claim.refundMode !== persistedCancelRefundMode(command)
   ) {
     throw workflowError("conflict", "Cancel claim does not match the durable action.");
   }
+}
+
+/** 旧版本落盘的取消 action 没有 refundMode，一律视为原路退（与服务端旧 claim 口径一致）。 */
+function persistedCancelRefundMode(
+  command: Pick<InstallmentCancelActionCommand, "refundMode">,
+): InstallmentCancelRefundMode {
+  return command.refundMode ?? "original-route";
+}
+
+function normalizeCancelRefundMode(
+  value: InstallmentCancelRefundMode | undefined,
+): InstallmentCancelRefundMode {
+  if (value === undefined) return "original-route";
+  if (value !== "original-route" && value !== "voucher") {
+    throw workflowError("conflict", "Cancellation refund mode is invalid.");
+  }
+  return value;
+}
+
+function cancelRefundMethodUnsupported(error: unknown): boolean {
+  return (
+    error instanceof HbposApiError &&
+    error.code?.trim().toUpperCase() ===
+      "INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED"
+  );
 }
 
 function cancelClaimDeterministicFailure(error: unknown): boolean {
@@ -3544,6 +3690,7 @@ function validateRepaymentClaim(
 function validateApprovedRefunds(
   action: InstallmentPaymentAction,
   approvedRefunds: readonly InstallmentApprovedRefund[],
+  refundMode: InstallmentCancelRefundMode,
 ): readonly InstallmentRefundCommand[] {
   if (action.kind !== "cancel-refund" || approvedRefunds.length === 0) {
     throw workflowError(
@@ -3570,6 +3717,19 @@ function validateApprovedRefunds(
     }
     if (!["cash", "card", "voucher"].includes(refund.method)) {
       throw paymentRecoveryError("Refund method is invalid.");
+    }
+    // 中文注释：退代金券模式下每笔原付款都必须以新签发的退款券退回；
+    // 任一代金券退款都必须带服务端核验所需的 VOUCHER_REFUND: 前缀。
+    if (refundMode === "voucher" && refund.method !== "voucher") {
+      throw paymentRecoveryError(
+        "Voucher refund mode requires every refund to be a voucher.",
+      );
+    }
+    if (
+      refund.method === "voucher" &&
+      !isVoucherRefundReference(refund.reference)
+    ) {
+      throw paymentRecoveryError("Voucher refund reference is invalid.");
     }
     const paymentGuid = recoveryUuid(
       refund.paymentGuid,
@@ -3697,6 +3857,14 @@ function validatePaymentMutationResult(
         "Refund response contains uncorrelated refund tenders.",
       );
     }
+    if (
+      persistedCancelRefundMode(persisted.command) === "voucher" &&
+      recordedRefunds.some((payment) => payment.method !== "voucher")
+    ) {
+      throw paymentRecoveryError(
+        "Voucher refund cancellation recorded a non-voucher refund.",
+      );
+    }
     for (const refund of refunds) {
       requireRecordedPayment(
         details,
@@ -3809,6 +3977,13 @@ function mapRemoteError(error: unknown): Error {
       return workflowError(
         "conflict",
         "Installment device scope does not match the current terminal.",
+      );
+    }
+    if (code === "installment_cancel_refund_method_unsupported") {
+      // 中文注释：原路退遇到刷卡原付款，服务端拒绝；提示改选"全部退代金券"。
+      return workflowError(
+        "refund-method-unsupported",
+        "Original-route refund is unsupported for these payments; choose voucher refund.",
       );
     }
     if (error.status === 401 || error.status === 403) {
@@ -4056,6 +4231,25 @@ function repaymentActionKey(input: InstallmentWorkflowRepaymentInput): string {
   });
 }
 
-function cancelActionKey(input: Readonly<{ installmentGuid: string; reason: string | null }>): string {
-  return JSON.stringify({ kind: "cancel-refund", ...input });
+function cancelActionKey(input: Readonly<{
+  installmentGuid: string;
+  reason: string | null;
+  refundMode: InstallmentCancelRefundMode;
+}>): string {
+  // 中文注释：退款方式纳入意图原材料，同一单换退款方式即为不同意图。
+  return JSON.stringify({
+    kind: "cancel-refund",
+    installmentGuid: input.installmentGuid,
+    reason: input.reason,
+    refundMode: input.refundMode,
+  });
+}
+
+function isVoucherRefundReference(reference: string | null): boolean {
+  const prefix = "VOUCHER_REFUND:";
+  return (
+    typeof reference === "string" &&
+    reference.startsWith(prefix) &&
+    reference.slice(prefix.length).trim().length > 0
+  );
 }

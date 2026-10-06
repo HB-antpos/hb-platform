@@ -59,7 +59,9 @@ import {
 } from "./sqlite-fulfilment-store";
 import { SqliteInstallmentActionStore } from "./sqlite-installment-action-store";
 import { SqliteInstallmentPaymentPersistenceFacade } from "./sqlite-installment-payment-persistence";
+import { SqliteInstallmentRefundVoucherPrintMaterial } from "./sqlite-installment-refund-voucher-print-material";
 import { SqliteInstallmentSnapshotRepository } from "./sqlite-installment-snapshot-repository";
+import { SqliteInstallmentVoucherProtectedTokenStore } from "./sqlite-installment-voucher-persistence";
 import {
   SqliteLocalHistoryStore,
   type LocalHistoryStoreScope,
@@ -310,6 +312,22 @@ export class PosDatabase implements DatabasePort {
       this.connection,
       encryptor,
       this.nowIso,
+    );
+  }
+
+  /** 取消分期退款券券面材料：只读本机受保护券 state，券码不经 feature 层或日志。 */
+  public installmentRefundVoucherPrintMaterial(
+    encryptor: SensitivePayloadEncryptor,
+    createProtectedReference: () => string,
+  ): SqliteInstallmentRefundVoucherPrintMaterial {
+    return new SqliteInstallmentRefundVoucherPrintMaterial(
+      this.connection,
+      new SqliteInstallmentVoucherProtectedTokenStore(
+        this.connection,
+        encryptor,
+        createProtectedReference,
+        this.nowIso,
+      ),
     );
   }
 

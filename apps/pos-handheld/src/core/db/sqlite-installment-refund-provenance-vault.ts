@@ -4,6 +4,7 @@ import type {
   PaymentProviderReferences,
 } from "../contracts";
 import type {
+  InstallmentCancelRefundMode,
   InstallmentOriginalTenderEvidence,
   InstallmentRefundProvenanceSnapshot,
 } from "../runtime/production-installment-payment-adapter";
@@ -107,32 +108,37 @@ implements InstallmentRefundProvenanceVaultPort {
     input: ProvenanceScope,
   ): Promise<InstallmentRefundProvenanceSnapshot | null> {
     const scope = normalizeScope(input);
-    const actionId = await this.findCancelActionId(
+    const action = await this.findCancelAction(this.connection, scope);
+    if (!action) return null;
+    return this.loadSnapshot(
       this.connection,
+      action.actionId,
       scope,
+      action.refundMode,
     );
-    if (!actionId) return null;
-    return this.loadSnapshot(this.connection, actionId, scope);
   }
 
   public async importProtected(
     input: InstallmentProtectedProvenanceImport,
   ): Promise<InstallmentRefundProvenanceSnapshot> {
-    const imported = normalizeImport(input);
-    const scope = normalizeScope(imported);
-    const actionId = await this.findCancelActionId(
+    const action = await this.findCancelAction(
       this.connection,
-      scope,
+      normalizeScope(input),
     );
-    if (!actionId) {
+    if (!action) {
       throw new Error(
         "Installment refund provenance action was not found.",
       );
     }
+    // 中文注释：证据严格度以 action 冻结的退款方式为准，不信任调用方自报。
+    const { actionId, refundMode } = action;
+    const imported = normalizeImport(input, refundMode);
+    const scope = normalizeScope(imported);
     const existing = await this.loadProtectedSnapshot(
       this.connection,
       actionId,
       scope,
+      refundMode,
     );
     if (existing) {
       assertSameProtectedImport(existing, imported);
@@ -156,11 +162,11 @@ implements InstallmentRefundProvenanceVaultPort {
     );
     return this.connection.withExclusiveTransaction(
       async (transaction) => {
-        const currentActionId = await this.findCancelActionId(
-          transaction,
-          scope,
-        );
-        if (currentActionId !== actionId) {
+        const current = await this.findCancelAction(transaction, scope);
+        if (
+          current?.actionId !== actionId ||
+          current.refundMode !== refundMode
+        ) {
           throw new Error(
             "Installment refund provenance action binding changed.",
           );
@@ -169,6 +175,7 @@ implements InstallmentRefundProvenanceVaultPort {
           transaction,
           actionId,
           scope,
+          refundMode,
         );
         if (raced) {
           assertSameProtectedImport(raced, imported);
@@ -262,17 +269,15 @@ implements InstallmentRefundProvenanceVaultPort {
       throw integrity("PROTECTED_MATERIAL_BINDING_MISMATCH");
     }
     const scope = scopeFromSnapshot(snapshotRow);
-    const currentActionId = await this.findCancelActionId(
-      this.connection,
-      scope,
-    );
-    if (currentActionId !== actionId) {
+    const current = await this.findCancelAction(this.connection, scope);
+    if (current?.actionId !== actionId) {
       throw integrity("PROTECTED_MATERIAL_BINDING_MISMATCH");
     }
     const protectedTender = await this.decodeEvidence(
       row,
       actionId,
       scope,
+      current.refundMode,
     );
     const persistedEvidence = normalizeEvidence(protectedTender);
     if (
@@ -290,10 +295,13 @@ implements InstallmentRefundProvenanceVaultPort {
     });
   }
 
-  private async findCancelActionId(
+  private async findCancelAction(
     connection: SqliteConnectionPort,
     scope: ProvenanceScope,
-  ): Promise<string | null> {
+  ): Promise<Readonly<{
+    actionId: string;
+    refundMode: InstallmentCancelRefundMode;
+  }> | null> {
     const rows = await connection.getAll<{ action_id: unknown }>(
       `SELECT action_id
        FROM installment_actions
@@ -320,22 +328,29 @@ implements InstallmentRefundProvenanceVaultPort {
       action.action.kind !== "cancel-refund" ||
       action.action.installmentGuid !== scope.installmentGuid ||
       action.storeCode !== scope.storeCode ||
-      action.deviceCode !== scope.requestingDeviceCode
+      action.deviceCode !== scope.requestingDeviceCode ||
+      action.command.kind !== "cancel-refund"
     ) {
       throw integrity("PROTECTED_MATERIAL_BINDING_MISMATCH");
     }
-    return actionId;
+    return Object.freeze({
+      actionId,
+      // 旧 action 无 refundMode：按原路退严格校验。
+      refundMode: action.command.refundMode ?? "original-route",
+    });
   }
 
   private async loadSnapshot(
     connection: SqliteConnectionPort,
     actionId: string,
     scope: ProvenanceScope,
+    refundMode: InstallmentCancelRefundMode,
   ): Promise<InstallmentRefundProvenanceSnapshot | null> {
     const imported = await this.loadProtectedSnapshot(
       connection,
       actionId,
       scope,
+      refundMode,
     );
     return imported ? safeSnapshot(imported) : null;
   }
@@ -344,6 +359,7 @@ implements InstallmentRefundProvenanceVaultPort {
     connection: SqliteConnectionPort,
     actionId: string,
     scope: ProvenanceScope,
+    refundMode: InstallmentCancelRefundMode,
   ): Promise<InstallmentProtectedProvenanceImport | null> {
     const snapshot = await connection.getFirst<SnapshotRow>(
       `SELECT refund_action_id, store_code, device_code, installment_guid,
@@ -372,22 +388,28 @@ implements InstallmentRefundProvenanceVaultPort {
     }
     const tenders: InstallmentProtectedTenderImport[] = [];
     for (const row of rows) {
-      tenders.push(await this.decodeEvidence(row, actionId, scope));
+      tenders.push(
+        await this.decodeEvidence(row, actionId, scope, refundMode),
+      );
     }
-    return normalizeImport({
-      ...scope,
-      paidAmountCents: positiveInteger(
-        snapshot.paid_amount_cents,
-        "refund paid amount",
-      ),
-      tenders,
-    });
+    return normalizeImport(
+      {
+        ...scope,
+        paidAmountCents: positiveInteger(
+          snapshot.paid_amount_cents,
+          "refund paid amount",
+        ),
+        tenders,
+      },
+      refundMode,
+    );
   }
 
   private async decodeEvidence(
     row: EvidenceRow,
     actionId: string,
     scope: ProvenanceScope,
+    refundMode: InstallmentCancelRefundMode,
   ): Promise<InstallmentProtectedTenderImport> {
     if (
       integer(row.payload_revision, "refund evidence revision") !== 1
@@ -416,7 +438,7 @@ implements InstallmentRefundProvenanceVaultPort {
     const envelope = parsed as ImportedTenderEnvelopeV1;
     let tender: InstallmentProtectedTenderImport;
     try {
-      tender = normalizeProtectedTender(envelope.tender, scope);
+      tender = normalizeProtectedTender(envelope.tender, scope, refundMode);
     } catch (error) {
       if (error instanceof TypeError) {
         throw integrity("PROTECTED_MATERIAL_SHAPE_INVALID");
@@ -469,6 +491,7 @@ async function encryptImportedTender(
 
 function normalizeImport(
   input: InstallmentProtectedProvenanceImport,
+  refundMode: InstallmentCancelRefundMode,
 ): InstallmentProtectedProvenanceImport {
   if (!isRecord(input) || !Array.isArray(input.tenders)) {
     throw new TypeError("Installment provenance import is invalid.");
@@ -486,7 +509,7 @@ function normalizeImport(
   const sourceAttempts = new Set<string>();
   let total = 0;
   const tenders = input.tenders.map((value) => {
-    const tender = normalizeProtectedTender(value, scope);
+    const tender = normalizeProtectedTender(value, scope, refundMode);
     if (
       ids.has(tender.evidenceId) ||
       paymentGuids.has(tender.sourcePaymentGuid) ||
@@ -516,6 +539,7 @@ function normalizeImport(
 function normalizeProtectedTender(
   input: InstallmentProtectedTenderImport,
   scope: ProvenanceScope,
+  refundMode: InstallmentCancelRefundMode,
 ): InstallmentProtectedTenderImport {
   if (!isRecord(input) || !Array.isArray(input.cardTransactions)) {
     throw new TypeError("Protected installment tender is invalid.");
@@ -540,7 +564,9 @@ function normalizeProtectedTender(
       (reference !== null || cardTransactions.length !== 0)) ||
     (evidence.method === "voucher" &&
       (reference === null || cardTransactions.length !== 0)) ||
+    // 中文注释：退代金券模式不向卡 provider 退款，不要求原卡引用/卡交易；原路退保持严格。
     (evidence.method === "card" &&
+      refundMode === "original-route" &&
       (reference === null ||
         cardTransactions.length === 0 ||
         !cardTransactions.some(

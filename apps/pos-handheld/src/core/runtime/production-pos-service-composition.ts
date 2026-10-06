@@ -70,6 +70,7 @@ import {
 } from "../../features/operation-authorization";
 import type { PaymentConnectivityPort } from "@hb/pos-payments-core/features/payments/payment-attempt-service";
 import { VoucherHbposApi } from "../../features/payments/voucher";
+import { InstallmentRefundVoucherPrintService } from "../../features/receipts/installment-refund-voucher-print-service";
 import {
   CashFulfilmentPlanner,
   InstallmentReceiptReprintPreparationService,
@@ -87,7 +88,10 @@ import {
   buildDailyCloseReceipt,
   dailyCloseReceiptToEscPosBytes,
 } from "@hb/pos-receipt-core/features/receipts/daily-close-receipt";
-import { ProtectedRefundVoucherReceiptRenderer } from "@hb/pos-receipt-core/features/receipts/refund-voucher-receipt-renderer";
+import {
+  hasRefundVoucherTender,
+  ProtectedRefundVoucherReceiptRenderer,
+} from "@hb/pos-receipt-core/features/receipts/refund-voucher-receipt-renderer";
 import {
   OrderRepositoryReturnReceiptRenderer,
   type ReturnReceiptSettingsPort,
@@ -229,7 +233,10 @@ import {
   createProductionSettingsComposition,
   type ProductionSettingsCompositionInput,
 } from "./production-settings-composition";
-import { ReturnFulfilmentRuntime } from "./return-fulfilment-runtime";
+import {
+  renderRefundReceiptWithVouchers,
+  ReturnFulfilmentRuntime,
+} from "./return-fulfilment-runtime";
 import { resolveTrustedReceiptPrinterSettings } from "./trusted-receipt-settings";
 
 export type { PosCashierSummary } from "./current-cashier-session";
@@ -1056,6 +1063,20 @@ export function createProductionPosRuntimeServices(
       settings: frozenReceiptReprintSettings,
       trustedStoreCode: input.auditMetadata.storeCode,
     });
+  // 取消分期签发的退款券：取消后自动出券面，补打已取消分期时追加券面（与 WPF 对齐）。
+  const installmentRefundVoucherPrinter: InstallmentRefundVoucherPrintService | null = input.installments
+    ? new InstallmentRefundVoucherPrintService({
+        materials: input.database.installmentRefundVoucherPrintMaterial(
+          input.encryptor,
+          input.createId,
+        ),
+        settings: returnReceiptSettings(baseReceiptSettings),
+        printQueue: fulfilmentStore,
+        trustedStoreCode: input.auditMetadata.storeCode,
+        now: input.clock.now,
+        requestPrintDrain: (): Promise<unknown> => fulfilment.drainAutomaticQueue(),
+      })
+    : null;
   const installmentHistoryReceiptReprint = input.installments
     ? new InstallmentReceiptReprintPreparationService({
         installments: new HbposInstallmentsApi(
@@ -1066,6 +1087,7 @@ export function createProductionPosRuntimeServices(
         trustedStoreCode: input.auditMetadata.storeCode,
         trustedDeviceCode: input.auditMetadata.deviceCode,
         nowIso: input.clock.nowIso,
+        refundVouchers: installmentRefundVoucherPrinter,
       })
     : null;
   const localHistoryReceiptPreview = new LocalHistoryReceiptPreviewService({
@@ -1469,6 +1491,7 @@ export function createProductionPosRuntimeServices(
                   prepareInstallmentAcknowledgementRecovery,
               }
             : {}),
+          refundVoucherPrinter: installmentRefundVoucherPrinter,
           receiptReprint: {
             canReprint: isInstallmentReceiptReprintEligible,
             execute: (installmentGuid, authorization, assertActive) =>
@@ -2768,7 +2791,19 @@ function createAvailableReturnRuntime(input: Readonly<{
           identity.returnOrderGuid,
         );
       }
-      return receiptRenderer.render(identity.returnOrderGuid);
+      // 刷卡 + 退款券混合退款：券面追加在退货小票之后、同一 print job。
+      return renderRefundReceiptWithVouchers({
+        renderReceipt: () => receiptRenderer.render(identity.returnOrderGuid),
+        hasRefundVoucherTender: async () =>
+          hasRefundVoucherTender(
+            await input.repositories.orders.getByGuid(identity.returnOrderGuid),
+          ),
+        renderRefundVouchers: () =>
+          refundVoucherReceiptRenderer.render(
+            identity.actionId,
+            identity.returnOrderGuid,
+          ),
+      });
     },
   });
   const runtime = createProductionReturnRuntime({

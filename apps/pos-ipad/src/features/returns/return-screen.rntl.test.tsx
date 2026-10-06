@@ -310,11 +310,136 @@ test("刷卡订单选现金代替：整单按现金退款且仍绑定原卡容�
   ).toBe("card-capacity");
 });
 
+test("代金券买的商品：提示至少须退代金券的金额，计划先退代金券其余按原支付", async () => {
+  const execution = new ScreenExecution();
+  const presenter = createScreenPresenter(execution, {
+    receiptContext: voucherFundedReceiptContext(),
+  });
+  const screen = await render(
+    <ReturnScreen locale="en" presenter={presenter} />,
+  );
+
+  await fireEvent.changeText(
+    screen.getByTestId("return-order-query"),
+    "HB-1001",
+  );
+  await fireEvent.press(screen.getByTestId("return-order-search"));
+  await waitFor(() =>
+    expect(screen.getByTestId("return-row-return-line-1")).toBeTruthy(),
+  );
+  await fireEvent.press(
+    screen.getByTestId("return-increase-return-line-1"),
+  );
+
+  // 退 $10.00 × 代金券占比 7/20 = $3.50 须退代金券。
+  expect(presenter.getState().requiredVoucherRefundCents).toBe(350);
+  expect(
+    screen.getByTestId("return-voucher-funded-notice").props.children,
+  ).toMatch(/cannot be refunded as cash or card: at least .*3\.50 must be refunded as a voucher/u);
+
+  await fireEvent.press(screen.getByTestId("return-confirm"));
+  expect(execution.executeCalls).toHaveLength(1);
+  expect(
+    execution.executeCalls[0]?.plan.allocations.map((allocation) => [
+      allocation.method,
+      allocation.signedAmountCents,
+      allocation.originalCapacityId,
+    ]),
+  ).toEqual([
+    ["voucher", -350, "voucher-capacity"],
+    ["card", -650, "card-capacity"],
+  ]);
+});
+
+test("代金券买的商品离线时说明退款券须联网签发；中文提示与英文对应", async () => {
+  const execution = new ScreenExecution();
+  const presenter = createScreenPresenter(execution, {
+    receiptContext: voucherFundedReceiptContext(),
+    online: false,
+  });
+  const screen = await render(
+    <ReturnScreen locale="zh" presenter={presenter} />,
+  );
+
+  await fireEvent.changeText(
+    screen.getByTestId("return-order-query"),
+    "HB-1001",
+  );
+  await fireEvent.press(screen.getByTestId("return-order-search"));
+  await waitFor(() =>
+    expect(screen.getByTestId("return-row-return-line-1")).toBeTruthy(),
+  );
+  await fireEvent.press(
+    screen.getByTestId("return-increase-return-line-1"),
+  );
+
+  expect(
+    screen.getByTestId("return-voucher-funded-notice").props.children,
+  ).toMatch(/^代金券买的商品不能退现金或退卡：至少 .*3\.50 须退代金券。$/u);
+  await fireEvent.press(screen.getByTestId("return-confirm"));
+  expect(execution.executeCalls).toHaveLength(0);
+  await waitFor(() =>
+    expect(screen.getByText("代金券买的商品须退代金券，退款券只能联网签发，请联网后再退。")).toBeTruthy(),
+  );
+});
+
+test("原单无代金券付款时不显示代金券提示", async () => {
+  const execution = new ScreenExecution();
+  const presenter = createScreenPresenter(execution, {
+    receiptContext: {
+      ...screenReceiptContext(),
+      voucherFundedBasis: { voucherOriginalCents: 0, paidOriginalCents: 2_000 },
+    },
+  });
+  const screen = await render(
+    <ReturnScreen locale="en" presenter={presenter} />,
+  );
+
+  await fireEvent.changeText(
+    screen.getByTestId("return-order-query"),
+    "HB-1001",
+  );
+  await fireEvent.press(screen.getByTestId("return-order-search"));
+  await waitFor(() =>
+    expect(screen.getByTestId("return-row-return-line-1")).toBeTruthy(),
+  );
+  await fireEvent.press(
+    screen.getByTestId("return-increase-return-line-1"),
+  );
+
+  expect(presenter.getState().requiredVoucherRefundCents).toBe(0);
+  expect(screen.queryByTestId("return-voucher-funded-notice")).toBeNull();
+});
+
+function voucherFundedReceiptContext(): ReceiptReturnContext {
+  return {
+    ...screenReceiptContext(),
+    tenderCapacities: [
+      {
+        capacityId: "card-capacity",
+        originalOrderGuid: "order-a",
+        method: "card",
+        remainingCents: 1_300,
+        offlineCashProof: null,
+      },
+      {
+        capacityId: "voucher-capacity",
+        originalOrderGuid: "order-a",
+        method: "voucher",
+        remainingCents: 700,
+        offlineCashProof: null,
+      },
+    ],
+    voucherFundedBasis: { voucherOriginalCents: 700, paidOriginalCents: 2_000 },
+  };
+}
+
 function createScreenPresenter(
   execution: ScreenExecution,
   options: Readonly<{
     authorize?(): Promise<{ authorizationKey: string }>;
     receiptContext?: ReceiptReturnContext;
+    online?: boolean;
   }> = {},
 ): ReturnPresenter {
   const workflow = new ReturnWorkflow({
@@ -332,7 +457,7 @@ function createScreenPresenter(
         unitRefundCents: input.unitRefundCents,
       }),
     },
-    connectivity: { isOnline: async () => true },
+    connectivity: { isOnline: async () => options.online ?? true },
     supervisorAuthorization: {
       authorizeNoReceiptReturn:
         options.authorize ??

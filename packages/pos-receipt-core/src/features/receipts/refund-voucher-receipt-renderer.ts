@@ -15,24 +15,36 @@ import type { OrderRepositoryPort } from "@hb/pos-domain/core/contracts/reposito
 export type ProtectedRefundVoucherPrintMaterial = Readonly<{
   returnOrderGuid: string;
   voucherCode: string;
-  /** 正数整数分币；必须与唯一 voucher tender 的绝对值完全一致。 */
+  /** 正数整数分币；必须与一笔 voucher tender 的绝对值完全一致。 */
   refundAmountCents: number;
 }>;
 
 export interface ProtectedRefundVoucherPrintMaterialPort {
   /**
    * 实现只能从二次加密的已批准 voucher state 解析材料，且不得缓存、记录或
-   * 返回到 route/UI。找不到唯一 action/order 绑定时返回 null，由渲染器失败关闭。
+   * 返回到 route/UI。退货单中每笔 voucher tender 对应一份材料；任何绑定缺失或
+   * 不唯一时返回 null，由渲染器失败关闭。
    */
-  resolveApprovedRefundVoucher(
+  resolveApprovedRefundVouchers(
     actionId: string,
     returnOrderGuid: string,
-  ): Promise<ProtectedRefundVoucherPrintMaterial | null>;
+  ): Promise<readonly ProtectedRefundVoucherPrintMaterial[] | null>;
+}
+
+/** 退货单是否含新签发的退款券（负数 voucher tender），供组合根决定是否追加券面。 */
+export function hasRefundVoucherTender(order: LocalOrder | null): boolean {
+  return (
+    order !== null &&
+    order.tenders.some(
+      (tender) => tender.method === "voucher" && tender.amount.cents < 0,
+    )
+  );
 }
 
 /**
- * WPF 等价的独立退款券面。普通本地订单只有脱敏 tender；券码仅在本方法内
- * 短暂解密，并直接编码为打印字节，不进入普通 receipt document 或日志。
+ * WPF 等价的独立退款券面，每张退款券一张（各自切纸，放在同一冻结 print job）。
+ * 普通本地订单只有脱敏 tender；券码仅在本方法内短暂解密，并直接编码为打印字节，
+ * 不进入普通 receipt document 或日志。混合退款（现金/刷卡 + 退款券）同样适用。
  */
 export class ProtectedRefundVoucherReceiptRenderer {
   public constructor(
@@ -56,48 +68,105 @@ export class ProtectedRefundVoucherReceiptRenderer {
       "REFUND_VOUCHER_ORDER_ID_INVALID",
       128,
     );
-    const order = await this.orders.getByGuid(returnOrderGuid);
-    assertPureVoucherReturn(order, returnOrderGuid);
+    const loaded = await this.orders.getByGuid(returnOrderGuid);
+    const { order, voucherTenderCents } = assertVoucherRefundReturn(loaded, returnOrderGuid);
 
-    const [material, settings] = await Promise.all([
-      this.materials.resolveApprovedRefundVoucher(
+    const [materials, settings] = await Promise.all([
+      this.materials.resolveApprovedRefundVouchers(
         actionId,
         returnOrderGuid,
       ),
       this.settings.getFrozenReturnReceiptSettings(),
     ]);
-    const normalizedMaterial = normalizeMaterial(material, returnOrderGuid);
-    const normalizedSettings = normalizeSettings(settings);
-    if (normalizedMaterial.refundAmountCents !== -order.actualAmount.cents) {
+    if (!materials || materials.length !== voucherTenderCents.length) {
+      throw new Error("REFUND_VOUCHER_MATERIAL_INVALID");
+    }
+    const normalizedMaterials = materials.map((material) =>
+      normalizeMaterial(material, returnOrderGuid),
+    );
+    // 券面金额必须与 voucher tender 逐笔一一对应（按金额多重集合比对）。
+    const expected = [...voucherTenderCents].sort((left, right) => left - right);
+    const actual = normalizedMaterials
+      .map((material) => material.refundAmountCents)
+      .sort((left, right) => left - right);
+    if (expected.some((cents, index) => cents !== actual[index])) {
       throw new Error("REFUND_VOUCHER_AMOUNT_MISMATCH");
     }
 
-    return {
-      printerId: normalizedSettings.printerId,
-      receiptBytes: encodeRefundVoucher({
-        paper: normalizedSettings.paper,
-        locale: normalizedSettings.locale,
-        orderGuid: returnOrderGuid,
-        voucherCode: normalizedMaterial.voucherCode,
-        amountCents: normalizedMaterial.refundAmountCents,
-        printedAt: formatLocalDateTime(this.now()),
-        heading: receiptStoreHeading(
-          normalizedSettings.store.brandName,
-          normalizedSettings.store.storeName,
-          order.storeCode,
-        ),
-        returnPolicy: normalizedReturnPolicy(
-          normalizedSettings.store.returnPolicy,
-        ),
-      }),
-    };
+    return encodeRefundVoucherDocuments({
+      settings,
+      storeCode: order.storeCode,
+      orderLabel: returnOrderGuid,
+      vouchers: normalizedMaterials.map((material) => ({
+        voucherCode: material.voucherCode,
+        amountCents: material.refundAmountCents,
+      })),
+      printedAt: this.now(),
+    });
   }
 }
 
-function assertPureVoucherReturn(
+/**
+ * 退款券面公共编码：每张券一段（各自切纸）拼入同一冻结 print job。
+ * 退货与取消分期共用；券码必须是可打印 ASCII，金额为正整数分。
+ */
+export function encodeRefundVoucherDocuments(input: Readonly<{
+  settings: FrozenReturnReceiptSettings | null;
+  storeCode: string;
+  orderLabel: string;
+  vouchers: readonly Readonly<{ voucherCode: string; amountCents: number }>[];
+  printedAt: Date;
+}>): RenderedReturnReceipt {
+  const settings = normalizeSettings(input.settings);
+  const orderLabel = safeText(input.orderLabel, "REFUND_VOUCHER_ORDER_ID_INVALID", 128);
+  if (input.vouchers.length === 0) {
+    throw new Error("REFUND_VOUCHER_MATERIAL_INVALID");
+  }
+  const printedAt = formatLocalDateTime(input.printedAt);
+  const heading = receiptStoreHeading(
+    settings.store.brandName,
+    settings.store.storeName,
+    input.storeCode,
+  );
+  const returnPolicy = normalizedReturnPolicy(settings.store.returnPolicy);
+  const documents = input.vouchers.map((voucher) => {
+    const voucherCode = normalizeVoucherCode(voucher.voucherCode);
+    if (!Number.isSafeInteger(voucher.amountCents) || voucher.amountCents <= 0) {
+      throw new Error("REFUND_VOUCHER_AMOUNT_INVALID");
+    }
+    return encodeRefundVoucher({
+      paper: settings.paper,
+      locale: settings.locale,
+      orderGuid: orderLabel,
+      voucherCode,
+      amountCents: voucher.amountCents,
+      printedAt,
+      heading,
+      returnPolicy,
+    });
+  });
+  return {
+    printerId: settings.printerId,
+    receiptBytes: concatBytes(documents),
+  };
+}
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.byteLength;
+  }
+  return output;
+}
+
+/** 校验退货单并返回每笔 voucher tender 的退款金额（正数分）。 */
+function assertVoucherRefundReturn(
   order: LocalOrder | null,
   returnOrderGuid: string,
-): asserts order is LocalOrder {
+): Readonly<{ order: LocalOrder; voucherTenderCents: number[] }> {
   if (
     !order ||
     order.orderGuid !== returnOrderGuid ||
@@ -111,21 +180,31 @@ function assertPureVoucherReturn(
     order.total.cents !== order.actualAmount.cents ||
     order.discount.cents !== 0 ||
     order.lines.length === 0 ||
-    order.tenders.length !== 1
+    order.tenders.length === 0
   ) {
     throw new Error("REFUND_VOUCHER_ORDER_INVALID");
   }
-  const tender = order.tenders[0];
+  let tenderTotal = 0;
+  const voucherCents: number[] = [];
+  for (const tender of order.tenders) {
+    if (
+      tender.amount.currency !== "AUD" ||
+      !Number.isSafeInteger(tender.amount.cents) ||
+      tender.amount.cents >= 0
+    ) {
+      throw new Error("REFUND_VOUCHER_ORDER_INVALID");
+    }
+    tenderTotal += tender.amount.cents;
+    if (tender.method === "voucher") voucherCents.push(-tender.amount.cents);
+  }
   if (
-    !tender ||
-    tender.method !== "voucher" ||
-    tender.amount.currency !== "AUD" ||
-    !Number.isSafeInteger(tender.amount.cents) ||
-    tender.amount.cents !== order.actualAmount.cents ||
-    tender.amount.cents >= 0
+    voucherCents.length === 0 ||
+    !Number.isSafeInteger(tenderTotal) ||
+    tenderTotal !== order.actualAmount.cents
   ) {
     throw new Error("REFUND_VOUCHER_ORDER_INVALID");
   }
+  return { order, voucherTenderCents: voucherCents };
 }
 
 function normalizeMaterial(
@@ -140,20 +219,20 @@ function normalizeMaterial(
   ) {
     throw new Error("REFUND_VOUCHER_MATERIAL_INVALID");
   }
-  const voucherCode = safeText(
-    material.voucherCode,
-    "REFUND_VOUCHER_CODE_INVALID",
-    80,
-  );
+  return {
+    returnOrderGuid,
+    voucherCode: normalizeVoucherCode(material.voucherCode),
+    refundAmountCents: material.refundAmountCents,
+  };
+}
+
+function normalizeVoucherCode(value: unknown): string {
+  const voucherCode = safeText(value, "REFUND_VOUCHER_CODE_INVALID", 80);
   // CODE128/QR 仅接受可打印 ASCII；控制字符和 ESC/POS 注入一律拒绝。
   if (!/^[\x20-\x7e]+$/u.test(voucherCode)) {
     throw new Error("REFUND_VOUCHER_CODE_INVALID");
   }
-  return {
-    returnOrderGuid,
-    voucherCode,
-    refundAmountCents: material.refundAmountCents,
-  };
+  return voucherCode;
 }
 
 function normalizeSettings(

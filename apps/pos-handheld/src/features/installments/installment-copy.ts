@@ -133,13 +133,24 @@ export const installmentEnglishCopy = {
   "cancel.title": "Cancel installment",
   "cancel.reasonAccessibility": "Cancellation reason",
   "cancel.reasonPlaceholder": "Refund-cancel reason",
+  "cancel.refundModeLabel": "Refund method",
+  "cancel.refundMode.original-route": "Original route",
+  "cancel.refundMode.voucher": "All to voucher",
+  "cancel.refundModeHint.original-route":
+    "Cash goes back as cash; voucher payments are reissued as new refund vouchers.",
+  "cancel.refundModeHint.voucher":
+    "Every payment, card included, is refunded as a new refund voucher for the same amount.",
+  "cancel.cardRequiresVoucher":
+    "This installment has card payments, which cannot be refunded through the original route. All payments will be refunded as vouchers.",
   "void.reasonAccessibility": "Void reason",
   "void.reasonPlaceholder": "Void reason",
   "pickup.title": "Confirm pickup",
   "pickup.noteAccessibility": "Pickup note",
   "pickup.notePlaceholder": "ID check or note",
   "confirmation.cancel":
-    "The original payments will be refunded, then the installment will be cancelled after the result is known.",
+    "All recorded payments, including a fully paid balance, will be refunded through the original route, then the installment will be cancelled after the result is known.",
+  "confirmation.cancelVoucher":
+    "Every recorded payment, including a fully paid balance, will be refunded in full as new refund vouchers, then the installment will be cancelled after the result is known.",
   "confirmation.void":
     "Voiding does not refund; use it only for an incorrect installment that needs no refund.",
   "confirmation.pickup":
@@ -185,6 +196,10 @@ export const installmentEnglishCopy = {
   "status.authorization-declined":
     "Payment was declined; no installment change was made.",
   "status.cancel-complete": "Installment refunded and cancelled.",
+  "status.cancel-refund-method-unsupported":
+    "Card payments cannot be refunded through the original route. Choose “All to voucher”; nothing was refunded.",
+  "status.cancel-refund-mode-unsupported":
+    "The server does not support voucher refunds yet; nothing was refunded. Use the original route or update the server.",
   "status.claim-review-required":
     "Repayment claim mismatch. No payment was started; ask a supervisor to review the audit record.",
   "status.conflict": "Server state changed; refresh first.",
@@ -340,12 +355,24 @@ const installmentChineseCopy = {
   "cancel.title": "取消分期",
   "cancel.reasonAccessibility": "取消退款原因",
   "cancel.reasonPlaceholder": "退款取消原因",
+  "cancel.refundModeLabel": "退款方式",
+  "cancel.refundMode.original-route": "原路退回",
+  "cancel.refundMode.voucher": "全部退代金券",
+  "cancel.refundModeHint.original-route":
+    "现金退回现金，原代金券付款改发新的退款代金券。",
+  "cancel.refundModeHint.voucher":
+    "每笔原付款（含刷卡）都按原金额改发一张新的退款代金券。",
+  "cancel.cardRequiresVoucher":
+    "该分期含刷卡付款，无法原路退回，将全部改退代金券。",
   "void.reasonAccessibility": "作废原因",
   "void.reasonPlaceholder": "作废原因",
   "pickup.title": "取货确认",
   "pickup.noteAccessibility": "取货备注",
   "pickup.notePlaceholder": "证件核对或备注",
-  "confirmation.cancel": "将按原付款记录执行退款，并在结果明确后取消分期。",
+  "confirmation.cancel":
+    "将按原付款记录原路全额退款（已付清的单同样全额退回），并在结果明确后取消分期。",
+  "confirmation.cancelVoucher":
+    "每笔已记录付款都将按原金额改发新的退款代金券（已付清的单同样全额退回），并在结果明确后取消分期。",
   "confirmation.void": "作废不会退款；仅用于无需退款的错误分期单。",
   "confirmation.pickup": "确认后分期单会标记为已取货。",
   "blocked.offline": "请恢复联网后再执行此分期操作。",
@@ -387,6 +414,10 @@ const installmentChineseCopy = {
   "status.action-failed": "操作失败，请核对状态后重试。",
   "status.authorization-declined": "支付未获批准，分期状态未改变。",
   "status.cancel-complete": "分期已退款取消。",
+  "status.cancel-refund-method-unsupported":
+    "刷卡付款无法原路退回，请改选“全部退代金券”；未发生任何退款。",
+  "status.cancel-refund-mode-unsupported":
+    "服务端暂不支持退代金券，未发生任何退款；请改用原路退回或升级服务端。",
   "status.claim-review-required":
     "续付占用信息不一致，尚未发起付款；请让主管查看审计记录。",
   "status.conflict": "服务端状态已变化，请刷新后处理。",

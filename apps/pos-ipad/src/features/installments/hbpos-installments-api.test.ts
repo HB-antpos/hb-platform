@@ -394,18 +394,74 @@ test("cancel claim 不携带门店或收银员身份，并复用同一 durable o
     { success: true, data: committed },
   ]);
   const api = new HbposInstallmentsApi(transport, "S1");
-  await api.createCancelClaim({ installmentGuid, operationGuid, idempotencyKey: operationGuid, reason: "customer", refundPlanFingerprint: payload.refundPlanFingerprint });
+  const created = await api.createCancelClaim({ installmentGuid, operationGuid, idempotencyKey: operationGuid, reason: "customer", refundPlanFingerprint: payload.refundPlanFingerprint, refundMode: "original-route" });
+  // 旧服务端回包没有 refundMode：按原路退映射，交由 runtime 与本地选择严格比对。
+  assert.equal(created.refundMode, "original-route");
   await api.beginCancelClaimRefund({ installmentGuid, operationGuid });
   await api.getCancelClaim({ installmentGuid, operationGuid });
   await api.resolveCancelClaim({ installmentGuid, operationGuid, outcome: "Unknown" });
   await api.commitCancelClaim({ installmentGuid, operationGuid, refunds: [{ paymentGuid, originalPaymentGuid, method: "cash", amountCents: 2_000, reference: null, cardTransactions: [], idempotencyKey: `${operationGuid}:refund:${originalPaymentGuid}` }] });
   assert.deepEqual(transport.requests.map(({ method, url, data }) => ({ method, url, data })), [
-    { method: "POST", url: `/api/v1/installments/${installmentGuid}/cancel-claims`, data: { operationGuid, idempotencyKey: operationGuid, reason: "customer", refundPlanFingerprint: payload.refundPlanFingerprint } },
+    { method: "POST", url: `/api/v1/installments/${installmentGuid}/cancel-claims`, data: { operationGuid, idempotencyKey: operationGuid, reason: "customer", refundPlanFingerprint: payload.refundPlanFingerprint, refundMode: 1 } },
     { method: "POST", url: `/api/v1/installments/${installmentGuid}/cancel-claims/${operationGuid}/begin-refund`, data: undefined },
     { method: "GET", url: `/api/v1/installments/${installmentGuid}/cancel-claims/${operationGuid}`, data: undefined },
     { method: "POST", url: `/api/v1/installments/${installmentGuid}/cancel-claims/${operationGuid}/resolve`, data: { outcome: 3 } },
     { method: "POST", url: `/api/v1/installments/${installmentGuid}/cancel-claims/${operationGuid}/commit`, data: { refunds: [{ paymentGuid, method: 1, amount: 20, reference: null, cardTransactions: [], idempotencyKey: `${operationGuid}:refund:${originalPaymentGuid}`, originalPaymentGuid }] } },
   ]);
+});
+
+test("cancel claim 退代金券模式下发 refundMode=2 并严格映射回包退款方式", async () => {
+  const payload = {
+    installmentGuid,
+    operationGuid,
+    idempotencyKey: operationGuid,
+    refundPlanFingerprint: `sha256:${"b".repeat(64)}`,
+    status: 1,
+    createdAtUtc: "2026-08-04T01:00:00Z",
+    updatedAtUtc: "2026-08-04T01:00:00Z",
+    expiresAtUtc: null,
+    commit: null,
+    alreadyExists: false,
+  };
+  const transport = new QueueTransport([
+    { success: true, data: { ...payload, refundMode: 2 } },
+    { success: true, data: { ...payload, refundMode: 1 } },
+    { success: true, data: { ...payload, refundMode: 9 } },
+  ]);
+  const api = new HbposInstallmentsApi(transport, "S1");
+  const command = {
+    installmentGuid,
+    operationGuid,
+    idempotencyKey: operationGuid,
+    reason: null,
+    refundPlanFingerprint: payload.refundPlanFingerprint,
+    refundMode: "voucher" as const,
+  };
+
+  assert.equal((await api.createCancelClaim(command)).refundMode, "voucher");
+  assert.equal(
+    (await api.getCancelClaim({ installmentGuid, operationGuid })).refundMode,
+    "original-route",
+  );
+  await assert.rejects(
+    api.getCancelClaim({ installmentGuid, operationGuid }),
+    /cancelClaim\.refundMode/u,
+  );
+  assert.deepEqual(transport.requests[0]?.data, {
+    operationGuid,
+    idempotencyKey: operationGuid,
+    reason: null,
+    refundPlanFingerprint: payload.refundPlanFingerprint,
+    refundMode: 2,
+  });
+  await assert.rejects(
+    api.createCancelClaim({
+      ...command,
+      refundMode: "card" as unknown as "voucher",
+    }),
+    /refundMode/u,
+  );
+  assert.equal(transport.requests.length, 3);
 });
 
 test("历史查询固定可信门店并严格映射状态、时间和整数分", async () => {

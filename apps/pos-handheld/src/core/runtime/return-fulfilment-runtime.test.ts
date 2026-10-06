@@ -8,6 +8,7 @@ import type {
 
 import {
   RETURN_CASH_DRAWER_REASON,
+  renderRefundReceiptWithVouchers,
   ReturnFulfilmentRuntime,
 } from "./return-fulfilment-runtime";
 
@@ -356,3 +357,50 @@ function plan(
     createdAtIso: T0,
   });
 }
+
+test("退货小票含退款券时把券面追加到同一打印字节；无券时只打小票；券面失败或打印机不一致整体失败", async () => {
+  const receipt = { printerId: "printer-1", receiptBytes: new Uint8Array([1, 2]) };
+  const vouchers = { printerId: "printer-1", receiptBytes: new Uint8Array([3, 4, 5]) };
+  let voucherRenders = 0;
+
+  const combined = await renderRefundReceiptWithVouchers({
+    renderReceipt: async () => receipt,
+    hasRefundVoucherTender: async () => true,
+    renderRefundVouchers: async () => {
+      voucherRenders += 1;
+      return vouchers;
+    },
+  });
+  assert.equal(combined.printerId, "printer-1");
+  assert.deepEqual([...combined.receiptBytes], [1, 2, 3, 4, 5]);
+
+  const receiptOnly = await renderRefundReceiptWithVouchers({
+    renderReceipt: async () => receipt,
+    hasRefundVoucherTender: async () => false,
+    renderRefundVouchers: async () => {
+      voucherRenders += 1;
+      return vouchers;
+    },
+  });
+  assert.equal(receiptOnly, receipt);
+  assert.equal(voucherRenders, 1);
+
+  await assert.rejects(
+    () => renderRefundReceiptWithVouchers({
+      renderReceipt: async () => receipt,
+      hasRefundVoucherTender: async () => true,
+      renderRefundVouchers: async () => {
+        throw new Error("REFUND_VOUCHER_MATERIAL_INVALID");
+      },
+    }),
+    /REFUND_VOUCHER_MATERIAL_INVALID/u,
+  );
+  await assert.rejects(
+    () => renderRefundReceiptWithVouchers({
+      renderReceipt: async () => receipt,
+      hasRefundVoucherTender: async () => true,
+      renderRefundVouchers: async () => ({ ...vouchers, printerId: "printer-2" }),
+    }),
+    /printer identity has diverged/u,
+  );
+});

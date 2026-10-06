@@ -13,6 +13,63 @@ import type {
 const NOW = "2026-07-31T00:00:00.000Z";
 const ORDER_GUID = "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9d01";
 
+test("取消分期退款券以外部订单身份幂等入队，触发器只放行固定前缀的非重打任务", async () => {
+  const connection = new NodeSqliteConnection();
+  try {
+    await applyMigrations(connection, () => NOW);
+    const store = new SqliteFulfilmentStore(connection, {
+      encryptor: {
+        async encrypt(plaintext) {
+          return new TextEncoder().encode(plaintext);
+        },
+        async decrypt(ciphertext) {
+          return new TextDecoder().decode(ciphertext);
+        },
+      },
+      nowIso: () => NOW,
+      createPrintJobId: () => "unused",
+    });
+    const installmentGuid = "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9d99";
+    const input = {
+      jobId: `installment-refund-voucher:${installmentGuid}`,
+      installmentGuid,
+      printerId: "printer-1",
+      receiptBytes: Uint8Array.of(9, 8, 7),
+    } as const;
+
+    assert.equal(await store.enqueueInstallmentRefundVoucherPrintJob(input), "created");
+    // 重放时打印时间不同、字节不同也视为已入队，不重复出票。
+    assert.equal(
+      await store.enqueueInstallmentRefundVoucherPrintJob({ ...input, receiptBytes: Uint8Array.of(1) }),
+      "existing",
+    );
+    const queued = await store.listQueuedPrintJobs();
+    const job = queued.find((item) => item.jobId === input.jobId);
+    assert.equal(job?.orderGuid, installmentGuid);
+    assert.equal(job?.externalOrderGuid, installmentGuid);
+    assert.equal(job?.isReprint, false);
+
+    await assert.rejects(
+      () => store.enqueueInstallmentRefundVoucherPrintJob({ ...input, jobId: `other:${installmentGuid}` }),
+      /job id is invalid/,
+    );
+    // 其他外部订单身份的非重打任务仍被迁移触发器拒绝。
+    await assert.rejects(
+      () => connection.run(
+        `INSERT INTO print_jobs (
+          job_id, order_guid, external_order_guid, state, printer_id,
+          receipt_ciphertext, is_reprint, retry_count, last_error_code,
+          created_at_iso, updated_at_iso
+        ) VALUES ('auto-external-1', NULL, ?, 'Queued', 'printer-1', ?, 0, 0, NULL, ?, ?)`,
+        [installmentGuid, Uint8Array.of(1), NOW, NOW],
+      ),
+      /PRINT_JOB_EXTERNAL_ORDER_INVALID/,
+    );
+  } finally {
+    await connection.close();
+  }
+});
+
 test("礼券余额打印任务按稳定 jobId 幂等入队且校验冻结字节", async () => {
   const connection = new NodeSqliteConnection();
   try {

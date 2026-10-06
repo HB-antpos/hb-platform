@@ -4,13 +4,20 @@ import test from "node:test";
 
 import type { DurableReturnLine, TrustedReturnIdentity } from "@hb/pos-domain/features/returns/adapters/durable-return-execution-orchestrator";
 import {
+  ReturnFeatureError,
+  buildReturnRefundPlan,
+  createReceiptDraftLines,
+} from "@hb/pos-domain/features/returns/return-domain";
+import {
   CanonicalReturnFingerprint,
   CatalogLocalReturnAdapter,
   DurableCapacityVaultAdapter,
   OrderRepositoryLocalReturnLookup,
   ReturnLineMaterialCache,
 } from "./production-return-support";
-import type { ProtectedTenderCapacityMaterial } from "./return-lookup-adapter";
+import { ReturnLookupAdapter, type ProtectedTenderCapacityMaterial } from "./return-lookup-adapter";
+
+import { HbposApiError } from "@/core/api/hbpos-api";
 
 import type { LocalOrder } from "@hb/pos-domain/core/contracts/order";
 import type { OrderRepositoryPort } from "@hb/pos-domain/core/contracts/repositories";
@@ -51,6 +58,63 @@ test("本地订单只接受同门店已完成销售单，且只封存公开可�
   assert.equal(JSON.stringify(snapshot).includes("RFN-SECRET"), false);
   assert.equal(JSON.stringify(snapshot).includes("VOUCHER-SECRET"), false);
   assert.equal(repository.getByGuidCalls, 0);
+});
+
+test("本地订单代金券占比按全部 tender（含被丢弃的券与 Linkly）原始金额计算", async () => {
+  const lookup = new OrderRepositoryLocalReturnLookup(new FakeOrders([makeOrder()]));
+
+  const snapshot = await lookup.findSameStore({ storeCode: "S01", query: "4" });
+
+  // 券 tender 不产出可退容量（券码不可离线验证），但仍计入原单代金券占比。
+  assert.deepEqual(snapshot?.capacities.map((item) => item.method), ["cash", "card"]);
+  assert.deepEqual(snapshot?.voucherFundedBasis, { voucherOriginalCents: 1, paidOriginalCents: 502 });
+
+  const noVoucher = await new OrderRepositoryLocalReturnLookup(new FakeOrders([
+    makeOrder({ tenders: [{ tenderGuid: "cash-1", method: "cash", amount: money(500), reference: null, reservationToken: null }] }),
+  ])).findSameStore({ storeCode: "S01", query: "4" });
+  assert.deepEqual(noVoucher?.voucherFundedBasis, { voucherOriginalCents: 0, paidOriginalCents: 500 });
+});
+
+test("离线本地回退：代金券买的商品须退代金券，计划要求联网；无券原单仍可离线退现金", async () => {
+  const offline = {
+    async search(): Promise<never> { throw new HbposApiError("offline", { kind: "transport" }); },
+    async getReturnContext(): Promise<never> { throw new HbposApiError("offline", { kind: "transport" }); },
+  };
+  const planOffline = async (order: LocalOrder) => {
+    const adapter = new ReturnLookupAdapter({
+      storeCode: "S01",
+      historyApi: offline,
+      localOrders: new OrderRepositoryLocalReturnLookup(new FakeOrders([order])),
+      localCatalog: { async findExactMatches() { return []; }, async search() { return []; } },
+      capacityVault: createVault([]),
+      createOpaqueId: (kind) => `${kind}-opaque`,
+    });
+    const context = await adapter.lookupReceipt("4");
+    assert.ok(context);
+    return buildReturnRefundPlan({
+      sourceKind: "receipt",
+      originalOrderGuid: context.originalOrderGuid,
+      lines: createReceiptDraftLines(context).map((line) => ({ ...line, selectedQuantity: 1 })),
+      capacities: context.tenderCapacities,
+      online: false,
+      preferredMethod: null,
+      voucherFundedBasis: context.voucherFundedBasis ?? null,
+    });
+  };
+  const cashTender = (cents: number) => ({ tenderGuid: "cash-1", method: "cash" as const, amount: money(cents), reference: null, reservationToken: null });
+
+  await assert.rejects(
+    () => planOffline(makeOrder({
+      tenders: [
+        cashTender(300),
+        { tenderGuid: "voucher-1", method: "voucher", amount: money(200), reference: "VOUCHER-SECRET", reservationToken: null },
+      ],
+    })),
+    (error: unknown) => error instanceof ReturnFeatureError && error.code === "RETURN_ONLINE_REQUIRED",
+  );
+
+  const plan = await planOffline(makeOrder({ tenders: [cashTender(500)] }));
+  assert.deepEqual(plan.allocations.map((allocation) => [allocation.method, allocation.signedAmountCents]), [["cash", -250]]);
 });
 
 test("本地小票旧订单缺失冻结来源时失败关闭，不按当前目录补猜", async () => {

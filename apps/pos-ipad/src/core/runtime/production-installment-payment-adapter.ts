@@ -20,11 +20,14 @@ import {
   type PaymentProviderResult,
 } from "@/core/contracts";
 import type {
+  InstallmentCancelRefundMode,
   InstallmentPaymentCommand,
   InstallmentRefundCommand,
 } from "@/features/installments/installment-models";
 import type { PaymentProviderRegistryPort } from "@hb/pos-payments-core/features/payments/payment-attempt-service";
 import type { PaymentProviderAvailability } from "@/features/payments/runtime/payment-provider-registry";
+
+export type { InstallmentCancelRefundMode };
 
 export type InstallmentCardProvider = Extract<
   PaymentProvider,
@@ -69,6 +72,11 @@ export interface InstallmentRefundProvenanceRemotePort {
     installmentGuid: string;
     storeCode: string;
     requestingDeviceCode: string;
+    /**
+     * 退代金券模式不需要原卡引用/卡交易证据；缺省按原路退严格校验。
+     * vault 以 action 冻结的 refundMode 为准，二者不一致时失败关闭。
+     */
+    refundMode?: InstallmentCancelRefundMode;
   }>): Promise<InstallmentRefundProvenanceSnapshot>;
 
   /**
@@ -572,11 +580,13 @@ export class ProductionInstallmentPaymentAdapter
   private async createRefundPlan(
     action: PersistedInstallmentAction,
   ): Promise<InstallmentProviderAttemptPlan> {
+    const refundMode = actionRefundMode(action);
     const snapshot = validateProvenanceSnapshot(
       await this.options.provenance.resolveOrImport({
         installmentGuid: action.action.installmentGuid,
         storeCode: action.storeCode,
         requestingDeviceCode: action.deviceCode,
+        refundMode,
       }),
       action,
     );
@@ -592,6 +602,26 @@ export class ProductionInstallmentPaymentAdapter
         action.action.actionId,
         evidence.sourcePaymentGuid,
       );
+      if (refundMode === "voucher") {
+        // 中文注释：退代金券模式下现金、刷卡、代金券原付款一律各签发一张同额退款券；
+        // 不建现金结算、不调用卡 provider 也不注入原卡引用，幂等键沿用
+        // `${operationGuid}:refund:${原paymentGuid}`，服务端据此核验券备注 RefundKey。
+        attempts.push(
+          this.createProviderRecord({
+            action,
+            paymentGuid,
+            provider: "voucher",
+            sequence,
+            operation: "refund",
+            amountCents: evidence.amountCents,
+            originalTenderEvidenceId: evidence.evidenceId,
+            sourcePaymentGuid: evidence.sourcePaymentGuid,
+            sourceAttemptId: evidence.sourceAttemptId,
+            idempotencyKey: refundIdempotencyKey,
+          }),
+        );
+        continue;
+      }
       if (evidence.method === "cash") {
         cashSettlements.push(
           Object.freeze({
@@ -1350,8 +1380,24 @@ function validatePlan(
     }
   } else if (plan.attempts.length + plan.cashSettlements.length === 0) {
     throw planConflict();
+  } else if (
+    actionRefundMode(action) === "voucher" &&
+    (plan.cashSettlements.length > 0 ||
+      plan.attempts.some((record) => record.attempt.provider !== "voucher"))
+  ) {
+    // 中文注释：退代金券模式的耐久计划只能由退款券 attempt 组成。
+    throw planConflict();
   }
   return plan;
+}
+
+/** 旧 action 没有 refundMode，一律按原路退。 */
+function actionRefundMode(
+  action: PersistedInstallmentAction,
+): InstallmentCancelRefundMode {
+  return action.command.kind === "cancel-refund"
+    ? action.command.refundMode ?? "original-route"
+    : "original-route";
 }
 
 function validateAttemptRecord(
@@ -1667,7 +1713,8 @@ function refundCommand(
       paymentGuid: record.paymentGuid,
       method: "voucher" as const,
       amountCents: positiveCents(-record.attempt.amount.cents),
-      reference: material.reference,
+      // 中文注释：服务端按 VOUCHER_REFUND:{券码} 前缀查找新签发的退款券并核验 RefundKey。
+      reference: voucherRefundReference(material.reference),
       cardTransactions: Object.freeze([]),
       idempotencyKey: record.attempt.idempotencyKey,
     });
@@ -1682,6 +1729,10 @@ function refundCommand(
     ]),
     idempotencyKey: record.attempt.idempotencyKey,
   });
+}
+
+function voucherRefundReference(voucherCode: string): string {
+  return `VOUCHER_REFUND:${protectedText(voucherCode, "voucher refund code").trim()}`;
 }
 
 function refundFromCash(

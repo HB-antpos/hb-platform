@@ -1322,12 +1322,25 @@ function normalizeCommand(
     "reason",
     "idempotencyKey",
   ] as const;
-  const hasRefundPlanFingerprint = exact(value, [
+  // 中文注释：精确字段集合只接受三代形状——旧版无指纹、带指纹、带指纹+退款方式；
+  // 旧数据缺 refundMode 按原路退处理，不做迁移。
+  const hasRefundMode = exact(value, [
     ...legacyKeys,
     "refundPlanFingerprint",
+    "refundMode",
   ]);
+  const hasRefundPlanFingerprint =
+    hasRefundMode ||
+    exact(value, [...legacyKeys, "refundPlanFingerprint"]);
   if (!exact(value, legacyKeys) && !hasRefundPlanFingerprint) {
     throw new TypeError("Installment cancel command is invalid.");
+  }
+  if (
+    hasRefundMode &&
+    value.refundMode !== "original-route" &&
+    value.refundMode !== "voucher"
+  ) {
+    throw new TypeError("Installment cancel refund mode is invalid.");
   }
   const idempotencyKey = uuid(value.idempotencyKey, "idempotency key");
   if (idempotencyKey !== action.idempotencyKey) {
@@ -1346,6 +1359,11 @@ function normalizeCommand(
             value.refundPlanFingerprint,
             "refund plan fingerprint",
           ),
+        }
+      : {}),
+    ...(hasRefundMode
+      ? {
+          refundMode: value.refundMode as "original-route" | "voucher",
         }
       : {}),
   });

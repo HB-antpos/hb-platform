@@ -7,6 +7,8 @@ import type {
   ReceiptReprintSettingsSource,
 } from "@hb/pos-receipt-core/features/receipts/receipt-reprint-service";
 
+import type { RenderedReturnReceipt } from "@hb/pos-receipt-core/features/receipts/return-receipt-renderer";
+
 import type { PreparedLastReceiptReprint } from "@hb/pos-domain/features/fulfilment/fulfilment-service";
 import type {
   InstallmentDetails,
@@ -20,6 +22,10 @@ export type InstallmentReceiptReprintPreparationServiceOptions = Readonly<{
   trustedStoreCode: string;
   trustedDeviceCode: string;
   nowIso(): string;
+  /** 已取消分期补打时追加本机签发的退款券券面（与 WPF 一致）；缺省不追加。 */
+  refundVouchers?: Readonly<{
+    renderVouchers(installmentGuid: string, orderLabel: string): Promise<RenderedReturnReceipt | null>;
+  }> | null;
 }>;
 
 /**
@@ -98,10 +104,14 @@ export class InstallmentReceiptReprintPreparationService {
         extraInfoLines: installmentInfoLines(details, recordedPayments),
       });
 
+      const receiptBytes = documentToEscPosBytes(document);
+      const voucherBytes = details.status === "Cancelled"
+        ? await this.refundVoucherBytes(installmentGuid, details.installmentNumber, settings.printerId)
+        : null;
       return {
         orderGuid: installmentGuid,
         externalOrderGuid: installmentGuid,
-        receiptBytes: documentToEscPosBytes(document),
+        receiptBytes: voucherBytes ? concatBytes(receiptBytes, voucherBytes) : receiptBytes,
         printerId: settings.printerId,
       };
     } catch {
@@ -109,6 +119,28 @@ export class InstallmentReceiptReprintPreparationService {
       return null;
     }
   }
+
+  // 退款券材料缺失（如跨机取消）或打印机不一致时只补打分期小票，不因券面阻断补打。
+  private async refundVoucherBytes(
+    installmentGuid: string,
+    orderLabel: string,
+    printerId: string,
+  ): Promise<Uint8Array | null> {
+    if (!this.options.refundVouchers) return null;
+    try {
+      const rendered = await this.options.refundVouchers.renderVouchers(installmentGuid, orderLabel);
+      return rendered && rendered.printerId === printerId ? rendered.receiptBytes : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function concatBytes(first: Uint8Array, second: Uint8Array): Uint8Array {
+  const output = new Uint8Array(first.byteLength + second.byteLength);
+  output.set(first, 0);
+  output.set(second, first.byteLength);
+  return output;
 }
 
 function installmentInfoLines(
@@ -293,12 +325,21 @@ function hasBalancedRefundPayments(
   ) {
     return false;
   }
-  return (["cash", "card", "voucher"] as const).every((method) => {
+  // 中文注释：原路退按方式逐项抵平。
+  const balancedByMethod = (["cash", "card", "voucher"] as const).every((method) => {
     const amounts = payments
       .filter((payment) => payment.method === method)
       .map((payment) => payment.amountCents);
     return amounts.length === 0 || exactCentsSum(amounts) === 0;
   });
+  if (balancedByMethod) return true;
+  // 中文注释：退代金券模式下现金/刷卡原付款也以退款券退回，只能按合计抵平，且退款必须全为代金券。
+  return (
+    payments
+      .filter((payment) => payment.amountCents < 0)
+      .every((payment) => payment.method === "voucher") &&
+    exactCentsSum(payments.map((payment) => payment.amountCents)) === 0
+  );
 }
 
 function exactCentsSum(values: readonly number[]): number | null {

@@ -29,15 +29,15 @@ const encryptor = {
 test("只从唯一完成退货、负数 voucher tender、Approved attempt 与受保护状态恢复券码", async () => {
   await withFixture(async ({ adapter, connection }) => {
     assert.deepEqual(
-      await adapter.resolveApprovedRefundVoucher(
+      await adapter.resolveApprovedRefundVouchers(
         "return-action-1",
         "return-order-1",
       ),
-      {
+      [{
         returnOrderGuid: "return-order-1",
         voucherCode: "REFUND-VOUCHER-001",
         refundAmountCents: 500,
-      },
+      }],
     );
 
     const publicRow = await connection.getFirst<{
@@ -59,7 +59,7 @@ test("只从唯一完成退货、负数 voucher tender、Approved attempt 与受
 test("缺少 action/fulfilment 绑定时不得只凭 returnOrderGuid 恢复券码", async () => {
   await withUnboundFixture(async ({ adapter }) => {
     assert.equal(
-      await adapter.resolveApprovedRefundVoucher(
+      await adapter.resolveApprovedRefundVouchers(
         "return-action-1",
         "return-order-1",
       ),
@@ -72,7 +72,7 @@ test("fulfilment plan 的 action 与订单交叉绑定时不得恢复券码", as
   await withUnboundFixture(async ({ adapter, connection }) => {
     await seedCrossBoundFulfilmentPlan(connection);
     assert.equal(
-      await adapter.resolveApprovedRefundVoucher(
+      await adapter.resolveApprovedRefundVouchers(
         "return-action-1",
         "return-order-1",
       ),
@@ -82,7 +82,7 @@ test("fulfilment plan 的 action 与订单交叉绑定时不得恢复券码", as
 });
 
 test("关系不唯一、非终态、金额或受保护上下文换绑时失败关闭", async (t) => {
-  await t.test("多 tender", async () => {
+  await t.test("订单 tender 合计与实退金额不符", async () => {
     await withFixture(async ({ adapter, connection }) => {
       await connection.run(
         `INSERT INTO order_tenders (
@@ -92,7 +92,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         [NOW],
       );
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -108,7 +108,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         ["voucher-attempt-1"],
       );
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -134,7 +134,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         [NOW, NOW],
       );
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -150,7 +150,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         ["return-order-1"],
       );
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -165,7 +165,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         ["return-order-1"],
       );
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -181,7 +181,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         ["voucher-tender-1"],
       );
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -196,7 +196,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         storeCode: "OTHER-STORE",
       });
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -211,7 +211,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         cashierId: "other-cashier",
       });
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -232,7 +232,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         tokens,
       );
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -251,7 +251,7 @@ test("关系不唯一、非终态、金额或受保护上下文换绑时失败�
         },
       });
       assert.equal(
-        await adapter.resolveApprovedRefundVoucher(
+        await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -271,13 +271,13 @@ test("礼券代替刷卡/现金额度签发的退款券同样可恢复；分期�
   for (const testCase of cases) {
     await t.test(testCase.name, async () => {
       await withFixture(async ({ adapter }) => {
-        const resolved = await adapter.resolveApprovedRefundVoucher(
+        const resolved = await adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         );
         assert.equal(resolved !== null, testCase.expected);
         if (testCase.expected) {
-          assert.equal(resolved?.voucherCode, "REFUND-VOUCHER-001");
+          assert.equal(resolved?.[0]?.voucherCode, "REFUND-VOUCHER-001");
         }
       }, { method: testCase.method, context: testCase.keepContext });
     });
@@ -294,7 +294,7 @@ test("已解密 JSON/绑定损坏使用 typed integrity error", async (t) => {
         [await encryptor.encrypt("{broken-json"), "voucher-attempt-1"],
       );
       await assert.rejects(
-        () => adapter.resolveApprovedRefundVoucher(
+        () => adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -317,7 +317,7 @@ test("已解密 JSON/绑定损坏使用 typed integrity error", async (t) => {
         ["tampered-idempotency", "voucher-attempt-1"],
       );
       await assert.rejects(
-        () => adapter.resolveApprovedRefundVoucher(
+        () => adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -347,7 +347,7 @@ test("数据库与解密错误保持原对象透传", async (t) => {
       { getByAttempt: async () => null },
     );
     await assert.rejects(
-      () => adapter.resolveApprovedRefundVoucher(
+      () => adapter.resolveApprovedRefundVouchers(
         "return-action-1",
         "return-order-1",
       ),
@@ -381,7 +381,7 @@ test("数据库与解密错误保持原对象透传", async (t) => {
         },
       });
       await assert.rejects(
-        () => adapter.resolveApprovedRefundVoucher(
+        () => adapter.resolveApprovedRefundVouchers(
           "return-action-1",
           "return-order-1",
         ),
@@ -390,6 +390,415 @@ test("数据库与解密错误保持原对象透传", async (t) => {
     });
   });
 });
+
+test("混合退款：现金/刷卡 + 退款券、多张券时每笔已批准券 allocation 各返回一份材料", async (t) => {
+  const cases: readonly Readonly<{
+    name: string;
+    receiptKind: "refund-voucher" | "refund-receipt";
+    allocations: readonly MixedAllocationSeed[];
+  }>[] = [
+    {
+      name: "现金 + 券",
+      receiptKind: "refund-voucher",
+      allocations: [
+        { method: "cash", amountCents: 300, capacityMethod: "cash" },
+        { method: "voucher", amountCents: 700, capacityMethod: "voucher" },
+      ],
+    },
+    {
+      name: "刷卡 + 券（退货小票后追加券面）",
+      receiptKind: "refund-receipt",
+      allocations: [
+        { method: "voucher", amountCents: 250, capacityMethod: "card" },
+        { method: "card", amountCents: 750, capacityMethod: "card" },
+      ],
+    },
+    {
+      name: "多张券",
+      receiptKind: "refund-voucher",
+      allocations: [
+        { method: "voucher", amountCents: 400, capacityMethod: "voucher" },
+        { method: "voucher", amountCents: 600, capacityMethod: "cash" },
+      ],
+    },
+  ];
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withMixedFixture(
+        { receiptKind: testCase.receiptKind, allocations: testCase.allocations },
+        async ({ adapter }) => {
+          const expected = testCase.allocations.flatMap((allocation, index) =>
+            allocation.method === "voucher"
+              ? [{
+                  returnOrderGuid: "return-order-1",
+                  voucherCode: `MIXED-VOUCHER-${index}`,
+                  refundAmountCents: allocation.amountCents,
+                }]
+              : []);
+          assert.deepEqual(
+            await adapter.resolveApprovedRefundVouchers(
+              "return-action-1",
+              "return-order-1",
+            ),
+            expected,
+          );
+        },
+      );
+    });
+  }
+});
+
+test("混合退款任一券绑定缺失、不唯一或与履约策略不符时整体失败关闭", async (t) => {
+  const twoVouchers: readonly MixedAllocationSeed[] = [
+    { method: "cash", amountCents: 200, capacityMethod: "cash" },
+    { method: "voucher", amountCents: 300, capacityMethod: "voucher" },
+    { method: "voucher", amountCents: 500, capacityMethod: "cash" },
+  ];
+
+  await t.test("第二张券缺少 tender 绑定", async () => {
+    await withMixedFixture(
+      { receiptKind: "refund-voucher", allocations: twoVouchers, skipBindingIndex: 2 },
+      async ({ adapter }) => {
+        assert.equal(
+          await adapter.resolveApprovedRefundVouchers(
+            "return-action-1",
+            "return-order-1",
+          ),
+          null,
+        );
+      },
+    );
+  });
+
+  await t.test("第二张券缺少受保护状态", async () => {
+    await withMixedFixture(
+      { receiptKind: "refund-voucher", allocations: twoVouchers, skipProtectedIndex: 2 },
+      async ({ adapter }) => {
+        assert.equal(
+          await adapter.resolveApprovedRefundVouchers(
+            "return-action-1",
+            "return-order-1",
+          ),
+          null,
+        );
+      },
+    );
+  });
+
+  await t.test("券 attempt 非 Approved", async () => {
+    await withMixedFixture(
+      { receiptKind: "refund-voucher", allocations: twoVouchers },
+      async ({ adapter, connection }) => {
+        await connection.run(
+          "UPDATE payment_attempts SET state = 'Pending' WHERE attempt_id = ?",
+          ["mixed-attempt-2"],
+        );
+        assert.equal(
+          await adapter.resolveApprovedRefundVouchers(
+            "return-action-1",
+            "return-order-1",
+          ),
+          null,
+        );
+      },
+    );
+  });
+
+  await t.test("含刷卡却标为纯券面", async () => {
+    await withMixedFixture(
+      {
+        receiptKind: "refund-voucher",
+        allocations: [
+          { method: "voucher", amountCents: 250, capacityMethod: "card" },
+          { method: "card", amountCents: 750, capacityMethod: "card" },
+        ],
+      },
+      async ({ adapter }) => {
+        assert.equal(
+          await adapter.resolveApprovedRefundVouchers(
+            "return-action-1",
+            "return-order-1",
+          ),
+          null,
+        );
+      },
+    );
+  });
+
+  await t.test("不含刷卡却标为退货小票", async () => {
+    await withMixedFixture(
+      { receiptKind: "refund-receipt", allocations: twoVouchers },
+      async ({ adapter }) => {
+        assert.equal(
+          await adapter.resolveApprovedRefundVouchers(
+            "return-action-1",
+            "return-order-1",
+          ),
+          null,
+        );
+      },
+    );
+  });
+
+  await t.test("没有任何券 allocation", async () => {
+    await withMixedFixture(
+      {
+        receiptKind: "refund-receipt",
+        allocations: [
+          { method: "card", amountCents: 1000, capacityMethod: "card" },
+        ],
+      },
+      async ({ adapter }) => {
+        assert.equal(
+          await adapter.resolveApprovedRefundVouchers(
+            "return-action-1",
+            "return-order-1",
+          ),
+          null,
+        );
+      },
+    );
+  });
+
+  await t.test("订单另有未绑定的 voucher tender", async () => {
+    await withMixedFixture(
+      {
+        receiptKind: "refund-voucher",
+        allocations: [
+          { method: "cash", amountCents: 300, capacityMethod: "cash" },
+          { method: "voucher", amountCents: 700, capacityMethod: "voucher" },
+        ],
+      },
+      async ({ adapter, connection }) => {
+        // 把现金 tender 改成 voucher：金额合计不变，但券 tender 数与券 allocation 数不一致。
+        await connection.run(
+          "UPDATE order_tenders SET method = 'voucher' WHERE tender_guid = ?",
+          ["mixed-tender-0"],
+        );
+        assert.equal(
+          await adapter.resolveApprovedRefundVouchers(
+            "return-action-1",
+            "return-order-1",
+          ),
+          null,
+        );
+      },
+    );
+  });
+});
+
+type MixedAllocationSeed = Readonly<{
+  method: "cash" | "card" | "voucher";
+  amountCents: number;
+  capacityMethod: "cash" | "card" | "voucher";
+}>;
+
+/**
+ * 混合退款夹具：每笔 allocation 一条 tender；券 allocation 额外有 Approved voucher refund
+ * attempt 与受保护状态，非券 allocation 走 hbpos-api（现金）或 payment-provider（刷卡）绑定。
+ */
+async function withMixedFixture(
+  spec: Readonly<{
+    receiptKind: "refund-voucher" | "refund-receipt";
+    allocations: readonly MixedAllocationSeed[];
+    skipBindingIndex?: number;
+    skipProtectedIndex?: number;
+  }>,
+  operation: (fixture: Readonly<{
+    connection: SqliteConnectionPort;
+    adapter: SqliteRefundVoucherPrintMaterial;
+  }>) => Promise<void>,
+): Promise<void> {
+  await withDatabase(async (connection) => {
+    const totalCents = spec.allocations.reduce(
+      (sum, allocation) => sum + allocation.amountCents,
+      0,
+    );
+    await connection.run(
+      `INSERT INTO local_orders (
+        order_guid, local_sequence, store_code, device_code,
+        cashier_id, cashier_name, sold_at_iso, state,
+        total_cents, discount_cents, actual_amount_cents,
+        original_order_guid, created_at_iso, updated_at_iso
+      ) VALUES (
+        'return-order-1', 1, 'S1', 'IPAD-1', 'cashier-1', 'Cashier',
+        ?, 'PendingSync', ?, 0, ?, 'original-order-1', ?, ?
+      )`,
+      [NOW, -totalCents, -totalCents, NOW, NOW],
+    );
+    await connection.run(
+      `INSERT INTO local_order_lines (
+        line_id, order_guid, line_sequence, product_code, item_number,
+        lookup_code, display_name, quantity, unit_price_cents,
+        discount_cents, actual_amount_cents, price_source, line_kind,
+        return_source_key, original_order_guid, original_order_detail_guid,
+        reference_code, sync_price_source
+      ) VALUES (
+        'return-line-1', 'return-order-1', 1, 'P1', NULL,
+        'P1', 'Returned product', '1', ?, 0, ?,
+        'catalog', 'return', 'return-source-1',
+        'original-order-1', 'original-detail-1', 'REF-P1', 2
+      )`,
+      [totalCents, -totalCents],
+    );
+    await connection.run(
+      `INSERT INTO return_actions (
+        action_id, request_fingerprint, return_order_guid,
+        action_recovery_token, source_kind, total_refund_cents, online,
+        store_code, device_code, cashier_id, cashier_name, session_epoch,
+        supervisor_grant_id, plan_json, state, created_at_iso,
+        completed_at_iso, updated_at_iso
+      ) VALUES (
+        'return-action-1', 'fingerprint-1', 'return-order-1',
+        'recovery-1', 'receipt', ?, 1,
+        'S1', 'IPAD-1', 'cashier-1', 'Cashier', 'session-1',
+        NULL, '{}', 'completed', ?, ?, ?
+      )`,
+      [totalCents, NOW, NOW, NOW],
+    );
+    let protectedSequence = 0;
+    const tokens = new SqliteVoucherProtectedTokenStore(
+      connection,
+      encryptor,
+      () => `vpr_mixed_reference_${String.fromCharCode(97 + protectedSequence++)}`,
+      () => NOW,
+    );
+    for (const [index, allocation] of spec.allocations.entries()) {
+      const attemptId = `mixed-attempt-${index}`;
+      const tenderGuid = `mixed-tender-${index}`;
+      const allocationId = `mixed-allocation-${index}`;
+      const capacityId = `mixed-capacity-${index}`;
+      const externalId = `mixed-external-${index}`;
+      const viaProvider = allocation.method !== "cash";
+      await connection.run(
+        `INSERT INTO return_tender_capacities (
+          capacity_id, original_order_guid, method,
+          original_amount_cents, remaining_amount_cents,
+          protected_context_ciphertext, observed_at_iso,
+          created_at_iso, updated_at_iso
+        ) VALUES (?, 'original-order-1', ?, ?, 0, ?, ?, ?, ?)`,
+        [
+          capacityId,
+          allocation.capacityMethod,
+          allocation.amountCents,
+          allocation.capacityMethod === "cash" ? null : new Uint8Array([1]),
+          NOW,
+          NOW,
+          NOW,
+        ],
+      );
+      if (viaProvider) {
+        await connection.run(
+          `INSERT INTO payment_attempts (
+            attempt_id, idempotency_key, order_guid, provider, operation,
+            amount_cents, state, checkout_id, payment_id, session_id,
+            txn_ref, rfn, provider_payload_ciphertext,
+            provider_receipt_ciphertext, provider_response_code,
+            created_at_iso, updated_at_iso, last_error_code
+          ) VALUES (
+            ?, ?, 'return-order-1', ?, 'refund', ?, 'Approved',
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL
+          )`,
+          [
+            attemptId,
+            `mixed-idem-${index}`,
+            allocation.method === "voucher" ? "voucher" : "square",
+            -allocation.amountCents,
+            NOW,
+            NOW,
+          ],
+        );
+      }
+      await connection.run(
+        `INSERT INTO order_tenders (
+          tender_guid, order_guid, method, amount_cents,
+          payment_attempt_id, created_at_iso
+        ) VALUES (?, 'return-order-1', ?, ?, ?, ?)`,
+        [
+          tenderGuid,
+          allocation.method,
+          -allocation.amountCents,
+          viaProvider ? attemptId : null,
+          NOW,
+        ],
+      );
+      await connection.run(
+        `INSERT INTO return_action_allocations (
+          action_id, allocation_id, allocation_index, execution_kind,
+          method, signed_amount_cents, capacity_id, original_order_guid,
+          offline_evidence_id, offline_evidence_remaining_cents,
+          external_attempt_id, external_attempt_kind, external_action_id,
+          durable_attempt_id, status, protected_recovery_ciphertext,
+          capacity_reservation_state, created_at_iso, updated_at_iso
+        ) VALUES (
+          'return-action-1', ?, ?, 'online-refund',
+          ?, ?, ?, 'original-order-1',
+          NULL, NULL, ?, ?, ?, ?, 'completed', NULL,
+          'Committed', ?, ?
+        )`,
+        [
+          allocationId,
+          index,
+          allocation.method,
+          -allocation.amountCents,
+          capacityId,
+          externalId,
+          viaProvider ? "payment-provider" : "hbpos-api",
+          externalId,
+          viaProvider ? attemptId : `mixed-api-${index}`,
+          NOW,
+          NOW,
+        ],
+      );
+      if (spec.skipBindingIndex !== index) {
+        await connection.run(
+          `INSERT INTO return_tender_attempt_bindings (
+            tender_guid, action_id, allocation_id, external_attempt_kind,
+            external_action_id, durable_attempt_id, created_at_iso
+          ) VALUES (?, 'return-action-1', ?, ?, ?, ?, ?)`,
+          [
+            tenderGuid,
+            allocationId,
+            viaProvider ? "payment-provider" : "hbpos-api",
+            externalId,
+            viaProvider ? attemptId : `mixed-api-${index}`,
+            NOW,
+          ],
+        );
+      }
+      if (allocation.method === "voucher" && spec.skipProtectedIndex !== index) {
+        await tokens.save(protectedState({
+          attemptId,
+          idempotencyKey: `mixed-idem-${index}`,
+          voucherCode: `MIXED-VOUCHER-${index}`,
+          amountCents: -allocation.amountCents,
+        }));
+      }
+    }
+    await connection.run(
+      `INSERT INTO return_fulfilment_plans (
+        action_id, return_order_guid, print_job_id, drawer_event_id,
+        receipt_kind, print_receipt, drawer_required,
+        materialized_at_iso, created_at_iso
+      ) VALUES (
+        'return-action-1', 'return-order-1', 'print-return-action-1', ?,
+        ?, 1, ?, NULL, ?
+      )`,
+      [
+        spec.allocations.some((allocation) => allocation.method === "cash")
+          ? "drawer-return-action-1"
+          : null,
+        spec.receiptKind,
+        spec.allocations.some((allocation) => allocation.method === "cash") ? 1 : 0,
+        NOW,
+      ],
+    );
+    await operation(Object.freeze({
+      connection,
+      adapter: new SqliteRefundVoucherPrintMaterial(connection, tokens),
+    }));
+  });
+}
 
 async function withFixture(
   operation: (fixture: Readonly<{

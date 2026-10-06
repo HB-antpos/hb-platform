@@ -701,6 +701,133 @@ test("refund provenance 原子导入 Square/Linkly/券受保护来源，公开 s
   });
 });
 
+test("退代金券模式：原付款证据不要求卡引用/卡交易，计划只能由退款券 attempt 组成", async () => {
+  // 现金、无卡材料的 Square 刷卡、代金券三笔原付款。
+  const voucherModeImport = (): InstallmentProtectedProvenanceImport =>
+    Object.freeze({
+      installmentGuid: INSTALLMENT_GUID,
+      storeCode: STORE_CODE,
+      requestingDeviceCode: DEVICE_CODE,
+      paidAmountCents: 3_000,
+      tenders: Object.freeze([
+        protectedTender({
+          evidenceId: "hbpos:cash",
+          sourceAttemptId: "hbpos:cash-attempt",
+          sourcePaymentGuid: "30000000-0000-4000-8000-000000000011",
+          method: "cash",
+          provider: null,
+          reference: null,
+        }),
+        protectedTender({
+          evidenceId: "hbpos:square",
+          sourceAttemptId: "hbpos:square-attempt",
+          sourcePaymentGuid: "30000000-0000-4000-8000-000000000012",
+          method: "card",
+          provider: "square",
+          reference: null,
+          cardTransactions: Object.freeze([]),
+        }),
+        protectedTender({
+          evidenceId: "hbpos:voucher",
+          sourceAttemptId: "hbpos:voucher-attempt",
+          sourcePaymentGuid: "30000000-0000-4000-8000-000000000013",
+          method: "voucher",
+          provider: "voucher",
+          reference: "VOUCHER-CODE-PRIVATE",
+        }),
+      ]),
+    });
+
+  // 原路退仍严格要求卡材料。
+  await withMigratedDatabase(async (connection) => {
+    const encryptor = new RecordingEncryptor();
+    const actionStore = new SqliteInstallmentActionStore(connection, encryptor, () => NOW);
+    await actionStore.createIfNone(createCancelAction("original-route"));
+    const vault = new SqliteInstallmentRefundProvenanceVault(connection, encryptor, () => NOW);
+    await assert.rejects(
+      () => vault.importProtected(voucherModeImport()),
+      /material|invalid/i,
+    );
+  });
+
+  await withMigratedDatabase(async (connection) => {
+    const encryptor = new RecordingEncryptor();
+    const actionStore = new SqliteInstallmentActionStore(connection, encryptor, () => NOW);
+    await actionStore.createIfNone(createCancelAction("voucher"));
+    await actionStore.transition({
+      actionId: ACTION_ID,
+      expectedState: "Created",
+      nextState: "ProviderPending",
+      terminal: { storeCode: STORE_CODE, deviceCode: DEVICE_CODE },
+    });
+    const vault = new SqliteInstallmentRefundProvenanceVault(connection, encryptor, () => NOW);
+    const snapshot = await vault.importProtected(voucherModeImport());
+    assert.equal(snapshot.complete, true);
+    assert.deepEqual(
+      snapshot.tenders.map((tender) => [tender.method, tender.provider]),
+      [["cash", null], ["card", "square"], ["voucher", "voucher"]],
+    );
+    // 本地快照重读同样按 action 冻结的退代金券模式校验。
+    assert.deepEqual(
+      await vault.resolve({
+        installmentGuid: INSTALLMENT_GUID,
+        storeCode: STORE_CODE,
+        requestingDeviceCode: DEVICE_CODE,
+      }),
+      snapshot,
+    );
+
+    const voucherPlan = Object.freeze({
+      actionId: ACTION_ID,
+      attempts: Object.freeze(
+        snapshot.tenders.map((tender, index) =>
+          refundRecord(
+            tender,
+            Object.freeze({
+              ...refundAttempt(tender, "voucher"),
+              attemptId: `refund-voucher-${index}`,
+              idempotencyKey: `${ACTION_ID}:refund:${tender.sourcePaymentGuid}`,
+            }),
+            index,
+            `30000000-0000-4000-8000-00000000002${index + 1}`,
+          ),
+        ),
+      ),
+      cashSettlements: Object.freeze([]),
+    });
+    const providerStore = new SqliteInstallmentProviderAttemptStore(connection, encryptor, () => NOW);
+    // 退代金券模式不得混入现金结算。
+    const cashTender = snapshot.tenders[0]!;
+    await assert.rejects(
+      () =>
+        providerStore.bindPlanOrGet(
+          Object.freeze({
+            actionId: ACTION_ID,
+            attempts: Object.freeze(voucherPlan.attempts.slice(1)),
+            cashSettlements: Object.freeze([
+              Object.freeze({
+                actionId: ACTION_ID,
+                settlementId: "30000000-0000-4000-8000-000000000031",
+                paymentGuid: "30000000-0000-4000-8000-000000000021",
+                sourcePaymentGuid: cashTender.sourcePaymentGuid,
+                originalTenderEvidenceId: cashTender.evidenceId,
+                sourceAttemptId: cashTender.sourceAttemptId,
+                sequence: 0,
+                operation: "refund" as const,
+                amountCents: cashTender.amountCents,
+                idempotencyKey: `${ACTION_ID}:refund:${cashTender.sourcePaymentGuid}`,
+                state: "Prepared" as const,
+              }),
+            ]),
+          }),
+        ),
+      /voucher refund plan|cash/i,
+    );
+    assert.deepEqual(await providerStore.bindPlanOrGet(voucherPlan), voucherPlan);
+    assert.deepEqual(await providerStore.loadPlan(ACTION_ID), voucherPlan);
+  });
+});
+
 test("分期专用 voucher token/context/material 绑定 provider attempt 与 action scope，secret 全部二次加密", async () => {
   await withMigratedDatabase(async (connection) => {
     const encryptor = new RecordingEncryptor();
@@ -1011,7 +1138,9 @@ function createCashAction(): PersistedInstallmentAction {
   });
 }
 
-function createCancelAction(): PersistedInstallmentAction {
+function createCancelAction(
+  refundMode?: "original-route" | "voucher",
+): PersistedInstallmentAction {
   return Object.freeze({
     action: Object.freeze({
       actionId: ACTION_ID,
@@ -1031,6 +1160,12 @@ function createCancelAction(): PersistedInstallmentAction {
       cancelledAtIso: NOW,
       reason: "PRIVATE CANCEL REASON",
       idempotencyKey: ACTION_ID,
+      ...(refundMode
+        ? {
+            refundPlanFingerprint: `sha256:${"c".repeat(64)}`,
+            refundMode,
+          }
+        : {}),
     }),
     deviceCode: DEVICE_CODE,
     intentFingerprint: "sha256:".concat("b".repeat(64)),

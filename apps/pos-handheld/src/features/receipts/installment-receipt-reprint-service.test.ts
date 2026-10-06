@@ -100,6 +100,9 @@ function createService(input: Readonly<{
   settingValue?: FrozenReceiptReprintSettings | null;
   trustedStoreCode?: string;
   trustedDeviceCode?: string;
+  refundVouchers?: Readonly<{
+    renderVouchers(installmentGuid: string, orderLabel: string): Promise<Readonly<{ printerId: string; receiptBytes: Uint8Array }> | null>;
+  }>;
 }>) {
   const detailCalls: string[] = [];
   let settingsCalls = 0;
@@ -128,6 +131,7 @@ function createService(input: Readonly<{
       trustedStoreCode: input.trustedStoreCode ?? "BNE",
       trustedDeviceCode: input.trustedDeviceCode ?? "POS-1",
       nowIso: () => "2026-08-03T03:04:05.000Z",
+      ...(input.refundVouchers ? { refundVouchers: input.refundVouchers } : {}),
     }),
   };
 }
@@ -218,6 +222,151 @@ test("合法 RefundCancel 使用正定金与负退款的 Recorded 净额归零",
   });
 
   assert.equal(isInstallmentReceiptReprintEligible(refunded), true);
+});
+
+test("退代金券取消：现金与刷卡原付款以退款券按合计抵平仍可补打，混入非券退款则不可", () => {
+  const cancelled = (refunds: InstallmentDetails["payments"]) =>
+    details({
+      totalCents: 8_000,
+      minimumDownPaymentCents: 2_000,
+      downPaymentCents: 2_000,
+      paidCents: 0,
+      balanceCents: 0,
+      status: "Cancelled",
+      lines: [{
+        ...details().lines[0]!,
+        unitPriceCents: 4_000,
+        actualAmountCents: 8_000,
+      }],
+      payments: [
+        payment(
+          "12345678-1234-1234-1234-000000000002",
+          2_000,
+          "2026-08-01T02:00:00.000Z",
+          { method: "cash", cardType: null, maskedCardNumber: null },
+        ),
+        payment(
+          "12345678-1234-1234-1234-000000000003",
+          6_000,
+          "2026-08-02T02:00:00.000Z",
+        ),
+        ...refunds,
+      ],
+      cancellationInfo: {
+        kind: "RefundCancel",
+        cancelledAtIso: "2026-08-03T01:02:03.000Z",
+        cancelledBy: "Alice",
+        reason: "Customer request",
+      },
+    });
+  const voucherRefund = (paymentGuid: string, amountCents: number) =>
+    payment(paymentGuid, amountCents, "2026-08-03T01:02:03.000Z", {
+      method: "voucher",
+      cardType: null,
+      maskedCardNumber: null,
+    });
+
+  assert.equal(
+    isInstallmentReceiptReprintEligible(
+      cancelled([
+        voucherRefund("12345678-1234-1234-1234-000000000005", -2_000),
+        voucherRefund("12345678-1234-1234-1234-000000000006", -6_000),
+      ]),
+    ),
+    true,
+  );
+  // 合计抵平但退款里混入现金：既不满足按方式逐项抵平，也不满足"全为代金券"。
+  assert.equal(
+    isInstallmentReceiptReprintEligible(
+      cancelled([
+        voucherRefund("12345678-1234-1234-1234-000000000005", -6_000),
+        payment(
+          "12345678-1234-1234-1234-000000000006",
+          -2_000,
+          "2026-08-03T01:02:03.000Z",
+          { method: "card" },
+        ),
+      ]),
+    ),
+    false,
+  );
+  // 全为代金券但合计未抵平。
+  assert.equal(
+    isInstallmentReceiptReprintEligible(
+      cancelled([
+        voucherRefund("12345678-1234-1234-1234-000000000005", -2_000),
+        voucherRefund("12345678-1234-1234-1234-000000000006", -5_000),
+      ]),
+    ),
+    false,
+  );
+});
+
+test("补打已取消分期时在小票后追加本机退款券券面；无券、打印机不一致或券面异常时只补打小票", async () => {
+  const cancelled = details({
+    paidCents: 0,
+    balanceCents: 0,
+    status: "Cancelled",
+    payments: [
+      payment(
+        "12345678-1234-1234-1234-000000000002",
+        10_000,
+        "2026-08-01T02:00:00.000Z",
+        { method: "cash", cardType: null, maskedCardNumber: null },
+      ),
+      payment(
+        "12345678-1234-1234-1234-000000000005",
+        -10_000,
+        "2026-08-03T01:02:03.000Z",
+        { method: "voucher", cardType: null, maskedCardNumber: null },
+      ),
+    ],
+    cancellationInfo: {
+      kind: "RefundCancel",
+      cancelledAtIso: "2026-08-03T01:02:03.000Z",
+      cancelledBy: "Alice",
+      reason: "Customer request",
+    },
+  });
+  const labels: string[] = [];
+  const render = async (rendered: Readonly<{ printerId: string; receiptBytes: Uint8Array }> | null | "throw") => {
+    const harness = createService({
+      response: cancelled,
+      refundVouchers: {
+        async renderVouchers(guid, label) {
+          assert.equal(guid, installmentGuid);
+          labels.push(label);
+          if (rendered === "throw") throw new Error("material broken");
+          return rendered;
+        },
+      },
+    });
+    const prepared = await harness.service.prepare(installmentGuid);
+    return decoder.decode(prepared?.receiptBytes);
+  };
+  const voucherBytes = new TextEncoder().encode("REFUND VOUCHER APPENDIX");
+
+  const appended = await render({ printerId: "printer-installment", receiptBytes: voucherBytes });
+  assert.match(appended, /\*\*\* REPRINT \*\*\*/u);
+  assert.ok(appended.endsWith("REFUND VOUCHER APPENDIX"));
+  assert.deepEqual(labels, ["INS-100"]);
+
+  for (const variant of [null, { printerId: "printer-other", receiptBytes: voucherBytes }, "throw"] as const) {
+    const receiptOnly = await render(variant);
+    assert.match(receiptOnly, /\*\*\* REPRINT \*\*\*/u);
+    assert.doesNotMatch(receiptOnly, /REFUND VOUCHER APPENDIX/u);
+  }
+
+  // 未取消的分期补打不读取退款券。
+  const active = createService({
+    response: details(),
+    refundVouchers: {
+      async renderVouchers() {
+        throw new Error("must not be called");
+      },
+    },
+  });
+  assert.ok(await active.service.prepare(installmentGuid));
 });
 
 test("prepare 点击时重读可信分期并按 WPF 字段生成带 REPRINT 的票据", async () => {

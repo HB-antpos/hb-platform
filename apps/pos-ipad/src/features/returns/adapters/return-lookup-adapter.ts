@@ -5,6 +5,7 @@ import {
   type ReceiptReturnContext,
   type ReceiptReturnLine,
   type ReturnTenderMethod,
+  type VoucherFundedRefundBasis,
 } from "@hb/pos-domain/features/returns/return-domain";
 import type { ReturnLookupPort } from "@hb/pos-domain/features/returns/return-workflow";
 
@@ -121,6 +122,8 @@ export type LocalReceiptReturnSnapshot = Readonly<{
   receiptLabel: string;
   lines: readonly ReceiptReturnLine[];
   capacities: readonly ProtectedTenderCapacityMaterial[];
+  /** 原单全部支付（含代金券）的原始付款额口径；缺省视为无法取得，不额外约束。 */
+  voucherFundedBasis?: VoucherFundedRefundBasis | null;
 }>;
 
 export interface LocalReturnOrderLookupPort {
@@ -325,6 +328,11 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
         ),
       )
       .filter((line): line is ReceiptReturnLine => line !== null);
+    // 必须在过滤剩余额为 0 的容量之前计算：已退完的代金券付款仍计入原单代金券占比。
+    const voucherFundedBasis = remoteVoucherFundedBasis(
+      originalOrderGuid,
+      context.paymentCapacities ?? [],
+    );
     const materials = this.mapRemoteTenderMaterials(
       originalOrderGuid,
       context.paymentCapacities ?? [],
@@ -342,6 +350,7 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       returnRecordsMayBeStale: false,
       lines,
       tenderCapacities,
+      voucherFundedBasis,
     };
   }
 
@@ -375,6 +384,7 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       returnRecordsMayBeStale: true,
       lines,
       tenderCapacities,
+      voucherFundedBasis: snapshot.voucherFundedBasis ?? null,
     };
   }
 
@@ -525,6 +535,52 @@ export function decimalAmountToCents(value: number): number {
     throw new ReturnFeatureError("RETURN_SOURCE_MISMATCH");
   }
   return rounded;
+}
+
+/**
+ * 由原单各支付的原始付款额汇总代金券占比口径（与 WPF VoucherFundedRefundPolicy 一致）。
+ * 原始付款额 ≤0 的支付不参与；任一金额非法或付款总额 ≤0 时返回 null（不额外约束）。
+ */
+export function buildVoucherFundedBasis(
+  payments: readonly Readonly<{ isVoucher: boolean; originalCents: number }>[],
+): VoucherFundedRefundBasis | null {
+  let voucherOriginalCents = 0;
+  let paidOriginalCents = 0;
+  for (const payment of payments) {
+    if (!Number.isSafeInteger(payment.originalCents)) return null;
+    if (payment.originalCents <= 0) continue;
+    paidOriginalCents += payment.originalCents;
+    if (payment.isVoucher) voucherOriginalCents += payment.originalCents;
+    if (!Number.isSafeInteger(paidOriginalCents)) return null;
+  }
+  if (paidOriginalCents <= 0) return null;
+  return Object.freeze({ voucherOriginalCents, paidOriginalCents });
+}
+
+function remoteVoucherFundedBasis(
+  originalOrderGuid: string,
+  capacities: readonly OrderReturnPaymentCapacityDto[],
+): VoucherFundedRefundBasis | null {
+  const payments: { isVoucher: boolean; originalCents: number }[] = [];
+  for (const capacity of capacities) {
+    // 明确属于其他原单的支付不计入本单占比。
+    if (
+      capacity.originalOrderGuid &&
+      capacity.originalOrderGuid !== originalOrderGuid
+    ) {
+      continue;
+    }
+    const originalAmount = capacity.originalAmount;
+    if (typeof originalAmount !== "number") return null;
+    let originalCents: number;
+    try {
+      originalCents = decimalAmountToCents(originalAmount);
+    } catch {
+      return null;
+    }
+    payments.push({ isVoucher: capacity.method === 3, originalCents });
+  }
+  return buildVoucherFundedBasis(payments);
 }
 
 function mapRemoteLine(

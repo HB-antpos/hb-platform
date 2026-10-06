@@ -500,6 +500,33 @@ test("真实 SQLite：旧 cancel 密文缺少摘要仍可恢复", async () => {
   });
 });
 
+test("真实 SQLite：cancel 带退款方式字段可 create/load，旧数据缺省视为原路退", async () => {
+  await withMigratedDatabase(async (connection) => {
+    const encryptor = new RecordingEncryptor();
+    const store = new SqliteInstallmentActionStore(
+      connection,
+      encryptor,
+      () => NOW,
+    );
+    const candidate = cancelCandidate({
+      refundPlanFingerprint: REFUND_PLAN_FINGERPRINT,
+      refundMode: "voucher",
+    });
+
+    assert.deepEqual(await store.createIfNone(candidate), {
+      created: true,
+      action: candidate,
+    });
+    const restored = await store.loadBlocking({
+      storeCode: STORE,
+      deviceCode: DEVICE,
+    });
+    assert.deepEqual(restored, candidate);
+    assert.ok(restored?.command.kind === "cancel-refund");
+    assert.equal(restored.command.refundMode, "voucher");
+  });
+});
+
 test("真实 SQLite：cancel 坏摘要与未知字段 fail closed", async () => {
   await withMigratedDatabase(async (connection) => {
     const encryptor = new RecordingEncryptor();
@@ -519,12 +546,21 @@ test("真实 SQLite：cancel 坏摘要与未知字段 fail closed", async () => 
         refundPlanFingerprint: REFUND_PLAN_FINGERPRINT,
         unexpected: true,
       },
+      // 退款方式只允许与摘要同时出现，且只接受两种取值。
+      { refundMode: "voucher" },
+      { refundPlanFingerprint: REFUND_PLAN_FINGERPRINT, refundMode: "card" },
+      { refundPlanFingerprint: REFUND_PLAN_FINGERPRINT, refundMode: null },
+      {
+        refundPlanFingerprint: REFUND_PLAN_FINGERPRINT,
+        refundMode: "voucher",
+        unexpected: true,
+      },
     ] as const;
 
     for (const command of invalidCommands) {
       await assert.rejects(
         () => store.createIfNone(cancelCandidate(command)),
-        /cancel command|fingerprint/i,
+        /cancel command|fingerprint|refund mode/i,
       );
     }
     assert.equal(encryptor.encryptedPlaintexts.length, 0);

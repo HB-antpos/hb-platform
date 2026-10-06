@@ -96,7 +96,7 @@ export function ReturnScreen({
       <StatusPage
         actionLabel={t("action.recover")}
         busy={state.busy}
-        error={state.errorCode ? errorText(t, state.errorCode) : null}
+        error={state.errorCode ? errorText(t, state.errorCode, state.requiredVoucherRefundCents) : null}
         hint={t("status.unknownHint")}
         onAction={() => void presenter.recoverUnknown()}
         testID="return-unknown"
@@ -126,7 +126,7 @@ export function ReturnScreen({
     return (
       <StatusPage
         actionLabel={t("action.reset")}
-        error={state.errorCode ? errorText(t, state.errorCode) : null}
+        error={state.errorCode ? errorText(t, state.errorCode, state.requiredVoucherRefundCents) : null}
         hint={t("status.failedHint")}
         onAction={() => presenter.reset()}
         testID="return-failed"
@@ -317,7 +317,7 @@ export function ReturnScreen({
           ) : null}
           {state.errorCode ? (
             <Text style={styles.errorNotice} testID="return-error">
-              {errorText(t, state.errorCode)}
+              {errorText(t, state.errorCode, state.requiredVoucherRefundCents)}
             </Text>
           ) : null}
 
@@ -399,6 +399,14 @@ export function ReturnScreen({
               ? t("summary.ruleReceiptDefault")
               : t("summary.rule")}
           </Text>
+          {/* 代金券买的部分只能退代金券；计划阶段同口径强制，这里只做提示。 */}
+          {state.requiredVoucherRefundCents > 0 ? (
+            <Text style={styles.warning} testID="return-voucher-funded-notice">
+              {t("voucherFunded.notice", {
+                amount: formatAud(state.requiredVoucherRefundCents, locale),
+              })}
+            </Text>
+          ) : null}
           <View style={styles.confirmArea}>
             <ActionButton
               disabled={!state.canConfirm || state.busy}
@@ -713,7 +721,13 @@ function ActionButton({
 function errorText(
   t: (key: ReturnCopyKey) => string,
   code: `RETURN_${string}`,
+  requiredVoucherRefundCents: number,
 ): string {
+  // 本次须退代金券时，联网与额度不足两类错误都源于代金券占比约束，给出可操作的说明。
+  if (requiredVoucherRefundCents > 0) {
+    if (code === "RETURN_ONLINE_REQUIRED") return t("voucherFunded.onlineRequired");
+    if (code === "RETURN_CAPACITY_EXCEEDED") return t("voucherFunded.capacityExceeded");
+  }
   return t(`error.${code}` as ReturnCopyKey);
 }
 

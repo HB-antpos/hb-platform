@@ -21,7 +21,10 @@ import type {
   ReturnCapacityVaultInput,
   ReturnCapacityVaultPort,
 } from "./return-lookup-adapter";
-import { isManualCardReturnMaterial } from "./return-lookup-adapter";
+import {
+  buildVoucherFundedBasis,
+  isManualCardReturnMaterial,
+} from "./return-lookup-adapter";
 
 import type { CartLine } from "@hb/pos-domain/core/contracts/cart";
 import {
@@ -64,6 +67,14 @@ export class OrderRepositoryLocalReturnLookup
       receiptLabel: order.orderGuid,
       lines,
       capacities: groupLocalTenderCapacities(order.orderGuid, order.tenders),
+      // mapVerifiedTender 会丢弃代金券 tender，占比必须按原单全部 tender 的原始金额先算；
+      // 离线时若须退代金券，领域层会要求联网（退款券只能在线签发）。
+      voucherFundedBasis: buildVoucherFundedBasis(
+        order.tenders.map((tender) => ({
+          isVoucher: tender.method === "voucher",
+          originalCents: tender.amount.cents,
+        })),
+      ),
     };
   }
 

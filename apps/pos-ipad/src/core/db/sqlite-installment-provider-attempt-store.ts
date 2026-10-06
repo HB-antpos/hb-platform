@@ -1563,6 +1563,13 @@ async function assertRefundEvidenceBindings(
   action: PersistedInstallmentAction,
 ): Promise<void> {
   if (action.action.kind !== "cancel-refund") return;
+  const refundMode =
+    action.command.kind === "cancel-refund"
+      ? action.command.refundMode ?? "original-route"
+      : "original-route";
+  if (refundMode === "voucher" && plan.cashSettlements.length > 0) {
+    throw new Error("Installment voucher refund plan cannot settle cash.");
+  }
   for (const entry of [...plan.attempts, ...plan.cashSettlements]) {
     const row = await connection.getFirst<{
       refund_action_id: unknown;
@@ -1589,17 +1596,24 @@ async function assertRefundEvidenceBindings(
           ? "voucher"
           : "card"
         : "cash";
+    // 中文注释：退代金券模式下任何原付款（现金/刷卡/代金券）都只能以退款券 attempt 退回，
+    // 原付款证据只需来源、金额一致；原路退仍要求方式与 provider 与原付款逐项一致。
+    const voucherRefundMode = refundMode === "voucher";
     if (
       !row ||
       !matches(row.refund_action_id, plan.actionId) ||
       !matches(row.source_payment_guid, entry.sourcePaymentGuid!) ||
       !matches(row.source_attempt_id, entry.sourceAttemptId!) ||
-      !matches(row.method, method) ||
+      (voucherRefundMode
+        ? provider !== "voucher"
+        : !matches(row.method, method)) ||
       integer(row.amount_cents, "refund evidence amount") !==
         ("attempt" in entry
           ? Math.abs(entry.attempt.amount.cents)
           : entry.amountCents) ||
-      (method !== "cash" && !matches(row.provider, provider!))
+      (!voucherRefundMode &&
+        method !== "cash" &&
+        !matches(row.provider, provider!))
     ) {
       throw new Error("Installment refund evidence binding conflict.");
     }
