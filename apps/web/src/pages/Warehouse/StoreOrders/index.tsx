@@ -89,6 +89,7 @@ import {
 import BatchAssignModal from './pickingAssignment/BatchAssignModal'
 import { AssigneeChip, pickingSlipsPath } from './pickingAssignment/PickingAssignmentSection'
 import { formatStoreOrderVolume } from './volumeFormat'
+import { applyFlowStatusToOrderList, subscribeStoreOrderFlowStatusChanged } from './storeOrderFlowStatusSync'
 import './compact.css'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
@@ -1306,6 +1307,16 @@ export default function StoreOrdersPage() {
   useEffect(() => {
     void Promise.all([loadData({ pageNumber: 1 }), loadBranches()])
   }, [])
+
+  // 列表是保活页面，只在挂载时加载一次；其它页面（如打印配货单自动开始配货）改了订单流程状态后，
+  // 这里把对应行改显示为新状态，避免回到列表仍看到旧的「已提交」。
+  useEffect(
+    () =>
+      subscribeStoreOrderFlowStatusChanged((orderGuid, flowStatus) => {
+        setData((current) => applyFlowStatusToOrderList(current, orderGuid, flowStatus))
+      }),
+    [],
+  )
 
   useLayoutEffect(() => {
     isMountedRef.current = true

@@ -1,3 +1,4 @@
+import { StoreOrderFlowStatus } from '../../../types/storeOrder'
 import type { StoreOrderDetail, StoreOrderDetailLine } from '../../../types/storeOrder'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -11,6 +12,7 @@ import {
   buildPickingOrderBarcodeValue,
   formatInnerPackCount,
   formatPickingOrderQuantity,
+  shouldStartPickingBeforePrint,
 } from './pickingListLogic'
 import { formatStoreOrderVolume } from './volumeFormat'
 
@@ -668,6 +670,50 @@ runTest('配货单 PDF 页码应包含中英文翻译', () => {
   assertEqual(enLocale.warehouse.pickingList.pageNumber, 'Page {{current}} / {{total}}', '英文 PDF 页码应显示 Page x / y')
   assertEqual(zhLocale.warehouse.pickingList.layoutNotReady, '打印内容尚未准备完成，请稍后重试', '中文应提示打印布局未就绪')
   assertEqual(enLocale.warehouse.pickingList.layoutNotReady, 'The print content is not ready yet. Please try again.', '英文应提示打印布局未就绪')
+})
+
+runTest('打印配货单前是否开始配货：管理类账号沿用原行为，纯仓库员工必须显式授权', () => {
+  const submitted = StoreOrderFlowStatus.Submitted
+
+  assertEqual(
+    shouldStartPickingBeforePrint({ flowStatus: submitted, canUseWarehouseManagerActions: true, hasStartPickingPermission: false }),
+    true,
+    '管理类账号打印已提交订单应开始配货（原行为不变）',
+  )
+  assertEqual(
+    shouldStartPickingBeforePrint({ flowStatus: submitted, canUseWarehouseManagerActions: false, hasStartPickingPermission: true }),
+    true,
+    '被显式授予开始配货权限的仓库员工打印已提交订单应开始配货',
+  )
+  assertEqual(
+    shouldStartPickingBeforePrint({ flowStatus: submitted, canUseWarehouseManagerActions: false, hasStartPickingPermission: false }),
+    false,
+    '没有该权限的仓库员工只能打印，不得借打印触发状态流转',
+  )
+})
+
+runTest('打印配货单前只推进已提交的订单', () => {
+  for (const flowStatus of [
+    StoreOrderFlowStatus.ShoppingCart,
+    StoreOrderFlowStatus.Picking,
+    StoreOrderFlowStatus.Completed,
+    undefined,
+  ]) {
+    assertEqual(
+      shouldStartPickingBeforePrint({ flowStatus, canUseWarehouseManagerActions: true, hasStartPickingPermission: true }),
+      false,
+      `状态 ${String(flowStatus)} 的订单不应再次开始配货`,
+    )
+  }
+})
+
+runTest('配货单页用开始配货权限接线，且权限码与后端一致', () => {
+  const pickingListSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/PickingList.tsx'), 'utf8')
+  const permissionsSource = fs.readFileSync(path.resolve(process.cwd(), 'src/types/permissions.ts'), 'utf8')
+
+  assertEqual(permissionsSource.includes("StartPicking: 'Warehouse.StartPicking'"), true, '前端权限码应与后端 Warehouse.StartPicking 一致')
+  assertEqual(pickingListSource.includes('access.hasPermission(P.Warehouse.StartPicking)'), true, '配货单页应读取开始配货权限')
+  assertEqual(pickingListSource.includes('shouldStartPickingBeforePrint({'), true, '打印前的状态推进应由统一判定函数决定')
 })
 
 console.log('pickingListLogic.test: ok')

@@ -680,7 +680,8 @@ public sealed class EmployeeMinorComplianceService
         row.StoreGUID = store.StoreGUID;
         row.StoreCode = store.StoreCode;
         row.StoreTimeZoneId = InstallmentOrderStoreTimeZoneResolver.Resolve(store);
-        row.StateCode = PublicHolidaySyncHelper.ResolveJurisdictionFromPostcode(PublicHolidaySyncHelper.ExtractPostcodeFromAddress(store.Address))
+        // 先认配置时区再按邮编，地址只写区名的门店（如 Bankstown）也能定出州别和表单类型
+        row.StateCode = PublicHolidaySyncHelper.ResolveStoreJurisdiction(store.TimeZoneId, store.Address)
             ?? (store.Address?.Contains("QLD", StringComparison.OrdinalIgnoreCase) == true ? "QLD" : store.Address?.Contains("NSW", StringComparison.OrdinalIgnoreCase) == true ? "NSW" : "UNKNOWN");
         row.FormType = row.StateCode == "QLD" ? "QLD_CE1" : row.StateCode == "NSW" ? "NSW_COMPANY_CONSENT" : "UNSUPPORTED_STATE";
     }

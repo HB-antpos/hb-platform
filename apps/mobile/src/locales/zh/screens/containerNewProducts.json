@@ -1,24 +1,13 @@
 {
   "title": "HB新品",
-  "pagination": { "previous": "上一页", "next": "下一页", "page": "第 {{page}} / {{pageCount}} 页 · 共 {{total}} 款" },
-  "actions": { "back": "返回", "retry": "重试" },
-  "labels": {
-    "currentStore": "当前门店",
-    "range": "预计到店：过去 1 周 · 未来 2 周",
-    "sortByArrival": "到店日 ↑",
-    "container": "货柜 {{code}}",
-    "quantity": "数量 {{value}}",
-    "estimatedArrival": "预计到店",
-    "actualBasis": "货柜到仓库日期推算",
-    "estimatedBasis": "预计到岸推算",
-    "retailPrice": "零售价 ${{value}}"
-  },
-  "messages": {
-    "notAllowed": "没有 HB新品 权限，请联系管理员授权",
-    "storesFailed": "门店列表加载失败",
-    "selectStore": "请先选择门店",
-    "dateNotice": "到店日期为推算区间：NSW 为到仓库当天至 3 个工作日，QLD 为到仓库后 3 至 7 个工作日；优先按货柜到仓库日期，未到仓库的按预计到岸日期"
-  },
-  "states": { "loading": "正在加载…", "loadFailed": "加载失败", "stateUnknown": "门店州别未知，无法计算到店日期", "empty": "过去 1 周至未来 2 周暂无到店新品", "noImage": "暂无图片", "emptyPast": "过去 1 周没有到店新品", "emptyUpcoming": "未来 2 周暂无到店新品" },
-  "filters": { "all": "全部 {{count}}", "past": "过去 1 周 {{count}}", "upcoming": "未来 2 周 {{count}}" }
+  "pagination": {"previous": "上一页", "next": "下一页", "page": "第 {{page}} / {{pageCount}} 页 · 共 {{total}} 款", "perPage": "{{count}} 条/页", "compact": "{{page}} / {{pageCount}}", "jumpLabel": "第 {{page}} / {{pageCount}} 页，点按跳页"},
+  "actions": {"back": "返回", "retry": "重试", "howDates": "说明", "hideDates": "收起", "clearFilters": "清除筛选", "switchStore": "切换", "switchStoreLabel": "当前门店 {{store}}，点按切换"},
+  "labels": {"currentStore": "当前门店", "range": "预计到店：过去 1 周 · 未来 3 周", "sortByArrival": "到店日 ↑", "container": "货柜 {{code}}", "quantity": "数量 {{value}}", "estimatedArrival": "预计到店", "retailPrice": "零售价 ${{value}}", "newTag": "新品", "existingTag": "已有", "arrived": "已到仓", "transit": "在途"},
+  "messages": {"notAllowed": "没有 HB新品 权限，请联系管理员授权", "storesFailed": "门店列表加载失败", "selectStore": "请先选择门店", "dateNotice": "到店日期为推算区间：NSW 为到仓库当天至 3 个工作日，QLD 为到仓库后 3 至 7 个工作日；优先按货柜到仓库日期，未到仓库的按预计到岸日期", "dateNoticeShort": "到店日期为推算区间", "noStores": "当前账号没有可查看的门店"},
+  "states": {"loading": "正在加载…", "loadFailed": "加载失败", "stateUnknown": "门店州别未知，无法计算到店日期", "empty": "过去 1 周至未来 3 周暂无到店新品", "noImage": "暂无图片", "emptyPast": "过去 1 周没有到店新品", "emptyUpcoming": "未来 3 周暂无到店新品", "emptyFiltered": "没有符合筛选条件的商品"},
+  "filters": {"all": "全部 {{count}}", "past": "过去 1 周 {{count}}", "upcoming": "未来 3 周 {{count}}"},
+  "chips": {"productType": {"new": "新商品", "existing": "已有商品", "all": "全部商品"}, "warehouse": {"any": "到仓：全部", "arrived": "已到仓", "transit": "在途"}, "containersAll": "货柜：全部 {{count}}", "containersMany": "{{count}} 个货柜", "clearAll": "清除全部"},
+  "filterSheet": {"title": "筛选商品", "reset": "重置", "productType": "商品类型", "warehouse": "货柜是否到仓", "newTitle": "新商品", "newHint": "HB 首次到货，由本柜新建", "existingTitle": "已有商品", "existingHint": "HB 已有商品的补货", "allTitle": "全部商品", "warehouseAny": "全部", "warehouseArrived": "已到仓 {{count}}", "warehouseTransit": "在途 {{count}}", "warehouseHint": "已到仓 = 货柜已有到仓库日期；在途 = 按预计到岸日期推算", "apply": "显示 {{count}} 款商品"},
+  "containerSheet": {"title": "货柜", "subtitle": "可多选 · 本期共 {{count}} 个货柜", "search": "搜索柜号", "clear": "清空", "arrivedGroup": "已到仓 · {{count}}", "transitGroup": "在途 · {{count}}", "storeRange": "到店 {{range}}", "storeRangeEstimated": "到店 {{range}} · 预计", "newKinds": "新品 {{count}}", "existingKinds": "已有 {{count}}", "noMatch": "没有匹配的货柜", "allContainers": "全部货柜", "apply": "显示 {{count}} 个货柜", "applyAll": "显示全部货柜"},
+  "pageSheet": {"title": "分页", "subtitle": "共 {{total}} 款 · 第 {{page}} / {{pageCount}} 页", "goTo": "跳到第几页", "of": "/ {{pageCount}}", "go": "跳转", "pageSize": "每页条数", "pageSizeHint": "修改后回到第 1 页，本机会记住你的选择"}
 }

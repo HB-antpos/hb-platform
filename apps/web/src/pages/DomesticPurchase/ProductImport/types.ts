@@ -45,18 +45,6 @@ export interface ProductImportItem {
 
 export type ProductStatus = 'duplicate' | 'new' | 'updated' | 'unchanged' | 'error' | 'dbDuplicate'
 
-export interface PageState {
-  supplier: string | null
-  mode: 'import' | 'create'
-  products: ProductImportItem[]
-  selectedIds: string[]
-  statistics: Statistics
-  loading: boolean
-  detecting: boolean
-  saving: boolean
-  needsDetection: boolean
-}
-
 export interface Statistics {
   total: number
   duplicateCount: number

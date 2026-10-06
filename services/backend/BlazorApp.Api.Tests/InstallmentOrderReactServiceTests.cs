@@ -511,6 +511,33 @@ public sealed class InstallmentOrderReactServiceTests : IDisposable
         return task.GetType().GetProperty("Result")!.GetValue(task)!;
     }
 
+    [Theory]
+    // 配置的时区优先于地址（即使地址邮编指向别的州）
+    [InlineData("Australia/Brisbane", "SHOP 1 65-69 CRONULLA ST, CRONULLA, NSW, 2230", "Australia/Brisbane")]
+    [InlineData("Australia/Melbourne", "Bankstown", "Australia/Melbourne")]
+    // 地址只写区名时靠配置时区
+    [InlineData("Australia/Sydney", "Bankstown", "Australia/Sydney")]
+    // 未配置或无效时按地址推导
+    [InlineData(null, "Shop 11, Southport QLD 4215", "Australia/Brisbane")]
+    [InlineData("Invalid/TimeZone", "Westfield Southland, Cheltenham 3192, VIC", "Australia/Melbourne")]
+    public void StoreTimeZoneResolver_PrefersConfiguredTimeZoneThenAddress(
+        string? timeZoneId,
+        string address,
+        string expected
+    )
+    {
+        Assert.Equal(
+            expected,
+            InstallmentOrderStoreTimeZoneResolver.Resolve(new Store
+            {
+                StoreCode = "S001",
+                StoreName = "Store",
+                TimeZoneId = timeZoneId,
+                Address = address,
+            })
+        );
+    }
+
     private static object? GetProperty(object value, string propertyName) =>
         value.GetType().GetProperty(propertyName)!.GetValue(value);
 

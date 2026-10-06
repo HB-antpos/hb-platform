@@ -278,6 +278,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Warehouse.ManageLocations, "管理仓库标签", "仓库管理", "Web 页面 /warehouse/locations - 管理仓库标签"),
                 new(Permissions.Warehouse.ManageOrders, "管理仓库订货", "仓库管理", "Web 页面 /warehouse/store-orders、/warehouse/preorders、/warehouse/store-order-import-price-variance 与移动端「订货单」- 管理分店订货、预订、配货单和发票"),
                 new(Permissions.Warehouse.Picking, "仓库订单拣货", "仓库管理", "移动端「订单拣货」- 扫码拣货、补录缺失的中包数并提交配货数；持有管理仓库或管理仓库订货权限时自动具备"),
+                new(Permissions.Warehouse.StartPicking, "打印配货单开始配货", "仓库管理", "Web 页面 /warehouse/store-order/picking/:id - 仓库员工打印或下载配货单时自动把订单从「已提交」推进到「配货中」；与订单编辑权限分开授权，不会随管理仓库权限自动具备"),
                 new(Permissions.DomesticPurchase.ManageSuppliers, "管理国内供应商", "国内采购", "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"),
                 new(Permissions.DomesticPurchase.ManageProducts, "管理国内商品", "国内采购", "Web 页面 /domestic-purchase/product-creation 与 /product-import - 创建和导入商品"),
                 new(Permissions.DomesticPurchase.ManagePrefixCodes, "管理前缀码", "国内采购", "Web 页面 /domestic-purchase/prefix-code-management - 管理商品前缀码"),
@@ -443,6 +444,8 @@ namespace BlazorApp.Shared.Constants
                         Permissions.Warehouse.Manage,
                         Permissions.Warehouse.ManageProducts,
                         Permissions.Warehouse.ManageLocations,
+                        // 仓库员工打印配货单时可自动开始配货；这是独立权限，不代表可以编辑订单。
+                        Permissions.Warehouse.StartPicking,
                     }
                 ),
                 new("StoreManager", StoreManagerPermissionCodes),

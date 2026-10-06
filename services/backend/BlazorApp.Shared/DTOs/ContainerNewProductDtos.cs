@@ -4,7 +4,7 @@ public sealed class ContainerNewProductsResponseDto
 {
     public string StoreCode { get; init; } = string.Empty;
     public string StateCode { get; init; } = string.Empty;
-    /// <summary>门店所在州的本地今天；移动端据此把到店日拆成「过去 1 周 / 未来 2 周」两组，避免设备时区不同导致分界漂移。</summary>
+    /// <summary>门店所在州的本地今天；移动端据此把到店日拆成「过去 1 周 / 未来 3 周」两组，避免设备时区不同导致分界漂移。</summary>
     public DateOnly LocalToday { get; init; }
     public IReadOnlyList<ContainerNewProductItemDto> Items { get; init; } = [];
 }
@@ -31,4 +31,6 @@ public sealed class ContainerNewProductItemDto
     /// <summary>预计到店区间结束日（含当天；NSW = 货柜日期 + 3 个工作日，QLD = + 7 个工作日）。</summary>
     public DateOnly EstimatedStoreArrivalDateEnd { get; init; }
     public string Basis { get; init; } = string.Empty;
+    /// <summary>是否新商品（仓库里没有、或由本柜提交时新建）；false 为补货的已有商品，只在请求带 includeExisting=true 时出现。</summary>
+    public bool IsNewProduct { get; init; } = true;
 }

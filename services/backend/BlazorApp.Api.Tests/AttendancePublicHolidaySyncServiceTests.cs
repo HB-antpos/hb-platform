@@ -123,6 +123,52 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("manager override", holiday.Remark);
         }
 
+        [Fact]
+        public async Task SyncStoreAsync_UsesConfiguredTimeZoneWhenAddressHasNoState()
+        {
+            // 生产 Bankstown：地址只写区名，分店管理配置了 Sydney 时区
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-bankstown",
+                StoreCode = "1024",
+                StoreName = "Bankstown",
+                Address = "Bankstown",
+                TimeZoneId = "Australia/Sydney",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            var provider = new FakeHolidayProvider(Array.Empty<PublicHolidaySourceItem>());
+            var service = CreateService(provider);
+
+            var result = await service.SyncStoreAsync(new SyncAttendanceStoreHolidayDto
+            {
+                StoreCode = "1024",
+                FromDate = new DateTime(2026, 5, 25),
+                ToDate = new DateTime(2026, 6, 24),
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(new[] { "NSW" }, provider.RequestedJurisdictions);
+        }
+
+        [Fact]
+        public async Task SyncAllActiveStoresAsync_ResolvesByTimeZoneThenAddressAndSkipsUnknown()
+        {
+            await _db.Insertable(new List<Store>
+            {
+                new() { StoreGUID = "store-bankstown", StoreCode = "1024", StoreName = "Bankstown", Address = "Bankstown", TimeZoneId = "Australia/Sydney", IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { StoreGUID = "store-bri", StoreCode = "BRI", StoreName = "Brisbane", Address = "123 Queen Street Brisbane QLD 4000", IsActive = true, CreatedAt = DateTime.UtcNow },
+                new() { StoreGUID = "store-unknown", StoreCode = "UNK", StoreName = "Unknown", Address = "Greenhills shopping center", IsActive = true, CreatedAt = DateTime.UtcNow },
+            }).ExecuteCommandAsync();
+            var provider = new FakeHolidayProvider(Array.Empty<PublicHolidaySourceItem>());
+            var service = CreateService(provider);
+
+            var result = await service.SyncAllActiveStoresAsync();
+
+            Assert.Equal(new[] { "UNK" }, result.SkippedStores);
+            Assert.Contains("NSW", provider.RequestedJurisdictions);
+            Assert.Contains("QLD", provider.RequestedJurisdictions);
+        }
+
         public void Dispose()
         {
             _db.Dispose();
@@ -135,10 +181,12 @@ namespace BlazorApp.Api.Tests
 
         private AttendancePublicHolidaySyncService CreateService(
             IReadOnlyList<PublicHolidaySourceItem> holidays
-        ) =>
+        ) => CreateService(new FakeHolidayProvider(holidays));
+
+        private AttendancePublicHolidaySyncService CreateService(FakeHolidayProvider provider) =>
             new(
                 CreateSqlSugarContext(_db),
-                new FakeHolidayProvider(holidays),
+                provider,
                 new FakeStoreScopeService(),
                 NullLogger<AttendancePublicHolidaySyncService>.Instance
             );
@@ -165,12 +213,18 @@ namespace BlazorApp.Api.Tests
                 _holidays = holidays;
             }
 
+            public List<string> RequestedJurisdictions { get; } = new();
+
             public Task<IReadOnlyList<PublicHolidaySourceItem>> GetHolidaysAsync(
                 string jurisdiction,
                 DateTime fromDate,
                 DateTime toDate,
                 CancellationToken cancellationToken = default
-            ) => Task.FromResult(_holidays);
+            )
+            {
+                RequestedJurisdictions.Add(jurisdiction);
+                return Task.FromResult(_holidays);
+            }
         }
 
         private sealed class FakeStoreScopeService : ICurrentUserManageableStoreScopeService

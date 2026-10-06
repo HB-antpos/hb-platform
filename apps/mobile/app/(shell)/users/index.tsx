@@ -78,6 +78,7 @@ export default function UsersScreen() {
   const {
     stores,
     selectedStoreCode: rememberedStoreCode,
+    isSelectedStoreAuto,
     isDeviceMode,
     isHydratingSelection,
     isLoading: storesLoading,
@@ -146,7 +147,8 @@ export default function UsersScreen() {
         return current;
       }
 
-      const selectedAssignedStore = rememberedStoreCode
+      // 全局自动默认的分店不算用户选择，仍默认全部分店
+      const selectedAssignedStore = rememberedStoreCode && !isSelectedStoreAuto
         ? posEnabledStores.find((store) => store.storeCode === rememberedStoreCode)
         : null;
       if (selectedAssignedStore) {
@@ -155,7 +157,7 @@ export default function UsersScreen() {
 
       return null;
     });
-  }, [deviceBoundStoreCode, isHydratingSelection, rememberedStoreCode, posEnabledStores, storesLoading]);
+  }, [deviceBoundStoreCode, isHydratingSelection, isSelectedStoreAuto, rememberedStoreCode, posEnabledStores, storesLoading]);
 
   const managedStore = useMemo(
     () => stores.find((store) => store.storeCode === managedStoreCode) ?? null,

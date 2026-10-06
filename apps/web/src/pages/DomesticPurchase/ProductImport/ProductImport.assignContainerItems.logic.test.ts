@@ -36,14 +36,16 @@ function createProduct(overrides: Partial<ProductImportItem>): ProductImportItem
 }
 
 const pageSource = readFileSync('src/pages/DomesticPurchase/ProductImport/index.tsx', 'utf8')
-const pageStyleSource = readFileSync('src/pages/DomesticPurchase/ProductImport/styles.css', 'utf8')
+const pageStyleSource = readFileSync('src/pages/DomesticPurchase/ProductImport/productImport.css', 'utf8')
+const cellSource = readFileSync('src/pages/DomesticPurchase/ProductImport/ImportCell.tsx', 'utf8')
 const zhLocaleSource = readFileSync('src/i18n/locales/zh.json', 'utf8')
 const enLocaleSource = readFileSync('src/i18n/locales/en.json', 'utf8')
 
 assertDeepEqual(
   [
     pageSource.includes('const loadContainers = useCallback(async () => {'),
-    pageSource.includes('onDropdownVisibleChange={(open) => {'),
+    // 原：onDropdownVisibleChange（antd 5.29 已弃用并在开发环境告警）；现用等价的 onOpenChange，行为不变
+    pageSource.includes('onOpenChange={(open) => {'),
     pageSource.includes('if (open) void loadContainers()'),
   ],
   [true, true, true],
@@ -57,10 +59,10 @@ assertDeepEqual(
     pageSource.includes('window.addEventListener(\'resize\', updateTableScrollY)'),
     pageSource.includes('window.removeEventListener(\'resize\', updateTableScrollY)'),
     pageSource.includes('className="product-import-table"'),
-    pageSource.includes('const PRODUCT_IMPORT_BASE_TABLE_SCROLL_X = 1280'),
-    pageSource.includes('const PRODUCT_IMPORT_DETECTED_TABLE_SCROLL_X = 2500'),
-    pageSource.includes('const productImportTableScrollX = showStatistics ? PRODUCT_IMPORT_DETECTED_TABLE_SCROLL_X : PRODUCT_IMPORT_BASE_TABLE_SCROLL_X'),
-    pageSource.includes('scroll={{ x: productImportTableScrollX, y: tableScrollY }}'),
+    pageSource.includes('const PRODUCT_IMPORT_TABLE_SCROLL_X = 968'),
+    // 旧的「检测前 1280 / 检测后 2500」两套宽度已随 24 列并入 13 列而取消，不应再出现
+    !pageSource.includes('PRODUCT_IMPORT_BASE_TABLE_SCROLL_X') && !pageSource.includes('PRODUCT_IMPORT_DETECTED_TABLE_SCROLL_X'),
+    pageSource.includes('scroll={{ x: PRODUCT_IMPORT_TABLE_SCROLL_X, y: tableScrollY }}'),
     pageSource.includes('\'--product-import-table-body-height\': `${tableScrollY}px`'),
     pageStyleSource.includes('.product-import-table .ant-table-body'),
     pageStyleSource.includes('height: var(--product-import-table-body-height) !important;'),
@@ -68,9 +70,15 @@ assertDeepEqual(
     pageSource.includes('const handlePaste = useCallback((e: ClipboardEvent) => {'),
     pageSource.includes('const resolveColumnKeyFromTd = useCallback((td: HTMLTableCellElement): string | null => {'),
   ],
-  [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  [true, true, true, true, true, true, true, true, true, true, true, true, true, true],
   '商品导入表格应使用视口剩余高度和当前列宽填满页面并保留粘贴和选择交互',
 )
+
+// 新增：表格最小宽度必须能在 1280 视口 + 展开侧栏（内容区约 1000px）下不出现横向滚动条
+const tableScrollXMatch = /const PRODUCT_IMPORT_TABLE_SCROLL_X = (\d+)/.exec(pageSource)
+if (!tableScrollXMatch || Number(tableScrollXMatch[1]) > 1000) {
+  throw new Error('商品导入表格最小宽度应不超过 1000px，才能在 1280 视口下不横向滚动')
+}
 
 assertDeepEqual(
   [
@@ -82,35 +90,45 @@ assertDeepEqual(
   '商品导入供应商搜索应覆盖编码、名称、店号和完整展示文本',
 )
 
+const deleteAllStart = pageSource.indexOf('const deleteAllRows = useCallback(() => {')
+const deleteAllSource = pageSource.slice(deleteAllStart, pageSource.indexOf('const updateProduct', deleteAllStart))
+const resetViewStart = pageSource.indexOf('const resetDetectionView = useCallback(() => {')
+const resetViewSource = pageSource.slice(resetViewStart, pageSource.indexOf('useEffect(', resetViewStart))
+
 assertDeepEqual(
   [
-    pageSource.includes('const deleteAllRows = useCallback(() => {'),
+    deleteAllStart >= 0 && resetViewStart >= 0,
     pageSource.includes('title: t(\'productImport.deleteAllConfirmTitle\''),
     pageSource.includes('content: t(\'productImport.deleteAllConfirmContent\''),
-    pageSource.includes('products: []'),
-    pageSource.includes('selectedIds: []'),
-    pageSource.includes('statistics: calculateStatistics([], [])'),
-    pageSource.includes('setShowStatistics(false)'),
-    pageSource.includes('setDuplicateGroups([])'),
-    pageSource.includes('disabled={state.products.length === 0}'),
+    deleteAllSource.includes('products: []'),
+    deleteAllSource.includes('selectedIds: []'),
+    // 原：statistics: calculateStatistics([], []) 写在这里；现在统计与步骤都由行数据派生，行清空即归零，只需清检测结果
+    deleteAllSource.includes('resetDetectionView()'),
+    resetViewSource.includes('setShowStatistics(false)'),
+    resetViewSource.includes('setDetectedRowIds(null)'),
+    resetViewSource.includes('setDuplicateGroups([])'),
+    // 原：disabled={state.products.length === 0}；现在检测 / 入库 / 发送等请求进行中也要禁用，防止并发删除
+    pageSource.includes('disabled={state.products.length === 0 || busy}'),
     pageSource.includes('productImport.deleteAll'),
     zhLocaleSource.includes('"deleteAll": "删除全部"'),
     zhLocaleSource.includes('"deleteAllConfirmTitle": "删除所有表格行"'),
     enLocaleSource.includes('"deleteAll": "Delete All"'),
     enLocaleSource.includes('"deleteAllConfirmTitle": "Delete all table rows"'),
   ],
-  [true, true, true, true, true, true, true, true, true, true, true, true, true, true],
-  '商品导入应提供删除全部表格行按钮，二次确认后清空行、选中和统计状态',
+  [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  '商品导入应提供删除全部表格行按钮，二次确认后清空行、选中和检测结果状态'
 )
 
 assertDeepEqual(
   [
     pageSource.includes("import { isValidEAN13 } from '../../../utils/barcode'"),
     pageSource.includes('const isNonEan13Barcode = Boolean(barcode && !isValidEAN13(barcode))'),
-    pageSource.includes("status={isNonEan13Barcode ? 'warning' : undefined}"),
+    // 原：status={isNonEan13Barcode ? 'warning' : undefined} 直接写在页面里；现在输入框在 ImportCell 里，由 warning prop 驱动（错误优先于警告）
+    cellSource.includes("status={invalidMessage ? 'error' : warning ? 'warning' : undefined}"),
+    pageSource.includes("warning: isNonEan13Barcode ? t('productImport.notEan13Barcode', '不是 EAN13 条码') : undefined"),
     pageSource.includes("t('productImport.notEan13Barcode', '不是 EAN13 条码')"),
   ],
-  [true, true, true, true],
+  [true, true, true, true, true],
   '商品导入条码列应标明非 EAN13 条码，但不阻断检测和保存流程',
 )
 

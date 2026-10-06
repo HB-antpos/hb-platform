@@ -60,7 +60,7 @@ const mutationGate = createDeferred<void>()
 let mutationMounted = true
 const mutationGuard = createLatestRequestGuard()
 const mutationRequests: Array<ReturnType<typeof createDeferred<string>>> = []
-let desiredQuery = { page: 1, sortField: 'createdAt', sortDirection: 'desc' }
+let desiredQuery = { page: 1, sortField: 'createdate', sortDirection: 'desc' }
 let mutationLoading = false
 let mutationVisibleQuery = ''
 const refreshedQueries: string[] = []
@@ -88,11 +88,11 @@ const mutationRun = (async () => {
   await mutationGate.promise
   await refreshDesiredQuery()
 })()
-const latestLabel = '3:supplierName:asc'
+const latestLabel = '3:suppliername:asc'
 const bRequest = createDeferred<string>()
 const cRequest = createDeferred<string>()
 mutationRequests.push(bRequest, cRequest)
-const bRun = runList({ page: 3, sortField: 'supplierName', sortDirection: 'asc' })
+const bRun = runList({ page: 3, sortField: 'suppliername', sortDirection: 'asc' })
 mutationGate.resolve()
 await Promise.resolve()
 assertEqual(refreshedQueries.join(','), `${latestLabel},${latestLabel}`, 'mutation 刷新必须保留已开始 B 的页码和排序')
@@ -121,6 +121,33 @@ unmountGate.resolve()
 await unmountMutationRun
 assertEqual(beginsAfterUnmount, 0, 'layout cleanup 后 mutation 不得重新 begin 列表请求')
 
+// 删除最后一页唯一一条后页面会在 onSuccess 里再发起「回退到最后一页」的查询：
+// 首个请求的 finally 不得关闭这个新请求的 loading，且只有新请求可以写入列表。
+const overflowGuard = createLatestRequestGuard()
+const overflowState = { loading: false, visible: '' }
+const overflowFirst = createDeferred<string>()
+const overflowSecond = createDeferred<string>()
+let overflowSecondRun: Promise<void> | undefined
+const overflowFirstRun = runLatestGuardedRequest(overflowGuard, () => overflowFirst.promise, {
+  onStart: () => { overflowState.loading = true },
+  onSuccess: () => {
+    overflowSecondRun = runLatestGuardedRequest(overflowGuard, () => overflowSecond.promise, {
+      onStart: () => { overflowState.loading = true },
+      onSuccess: (value) => { overflowState.visible = value },
+      onSettled: () => { overflowState.loading = false },
+    })
+  },
+  onSettled: () => { overflowState.loading = false },
+})
+overflowFirst.resolve('empty page 4')
+await overflowFirstRun
+assertEqual(overflowState.loading, true, '越界回退请求在途时，首个请求的 finally 不得关闭 loading')
+assertEqual(overflowState.visible, '', '越界的空页不得写入列表')
+overflowSecond.resolve('page 3')
+await overflowSecondRun
+assertEqual(overflowState.visible, 'page 3', '回退到最后一页的请求应写入列表')
+assertEqual(overflowState.loading, false, '回退请求完成后应关闭 loading')
+
 const source = readFileSync(resolve('src/pages/DomesticPurchase/ChinaSuppliers/index.tsx'), 'utf8')
 const domesticSource = readFileSync(resolve('src/pages/DomesticPurchase/DomesticProducts/index.tsx'), 'utf8')
 const tableStart = source.indexOf(
@@ -142,6 +169,13 @@ assertIncludes(source, 'if (!mountedRef.current) {', '国内供应商 loader 应
 assertIncludes(source, 'const desiredListQueryRef = useRef<DesiredChinaSupplierQuery>({', '国内供应商页面应保存已开始请求的 desired query')
 assertIncludes(source, 'desiredListQueryRef.current = query', '国内供应商 loader 应在请求开始时发布 desired query')
 assertIncludes(source, 'latestLoadDataRef.current({ ...desiredListQueryRef.current, ...overrides })', '国内供应商 mutation 刷新应读取 desired query')
+assertIncludes(source, 'const overviewRequestGuardRef = useRef(createLatestRequestGuard())', '页头概览（共 N 家 · 启用 M）应有独立的最新请求守卫')
+assertIncludes(source, 'overviewRequestGuardRef.current.invalidate()', '国内供应商页面卸载时应使概览请求失效')
+assertIncludes(
+  source,
+  'const query: DesiredChinaSupplierQuery = {\n      ...desiredListQueryRef.current,\n      ...overrides,\n    }',
+  '国内供应商 loader 应以已开始请求的 desired query 为底做对象合并，而不是读渲染闭包里的旧 state 或用默认参数',
+)
 assertIncludes(source, 'void refreshDesiredList()', '国内供应商更新后应刷新已开始的最新查询')
 assertIncludes(source, 'void refreshDesiredList({ page: 1 })', '国内供应商创建后应保持回第一页语义')
 assertIncludes(source, "extra.action === 'paginate' ? pagination.current ?? 1 : 1", '只有 paginate 应保留目标页')

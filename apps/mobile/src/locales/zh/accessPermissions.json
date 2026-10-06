@@ -765,6 +765,10 @@
       "name": "仓库订单拣货",
       "description": "移动端「订单拣货」- 扫码拣货、补录缺失的中包数并提交配货数；持有管理仓库或管理仓库订货权限时自动具备"
     },
+    "Warehouse.StartPicking": {
+      "name": "打印配货单开始配货",
+      "description": "Web 页面 /warehouse/store-order/picking/:id - 仓库员工打印或下载配货单时自动把订单从「已提交」推进到「配货中」；与订单编辑权限分开授权，不会随管理仓库权限自动具备"
+    },
     "Warehouse.ManageProducts": {
       "name": "管理仓库商品",
       "description": "Web 页面 /warehouse/products、/warehouse/products/retail-price-changes、/warehouse/product-grade-management 与移动端「仓库」- 管理仓库商品、零售价变更和等级"

@@ -518,6 +518,7 @@ export default function Orders() {
     stores,
     selectedStore,
     selectedStoreCode,
+    isSelectedStoreAuto,
     selectStore,
     isDeviceMode,
     isStoreSelectionReady,
@@ -551,9 +552,10 @@ export default function Orders() {
     if (!isStoreSelectionReady || initializedOrderScopeKey === orderStoreScopeKey) {
       return;
     }
-    setAllStoresSelected(!isDeviceMode && !selectedStoreCode && stores.length > 0);
+    // 没选过分店（含全局自动默认的第一个）时仍默认看全部分店
+    setAllStoresSelected(!isDeviceMode && (!selectedStoreCode || isSelectedStoreAuto) && stores.length > 0);
     setInitializedOrderScopeKey(orderStoreScopeKey);
-  }, [initializedOrderScopeKey, isDeviceMode, isStoreSelectionReady, orderStoreScopeKey, selectedStoreCode, stores.length]);
+  }, [initializedOrderScopeKey, isDeviceMode, isSelectedStoreAuto, isStoreSelectionReady, orderStoreScopeKey, selectedStoreCode, stores.length]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {

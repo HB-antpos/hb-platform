@@ -6136,15 +6136,15 @@
     "noProductDetail": "There are no product lines in this order."
   },
   "prefixCode": {
-    "prefixName": "前缀名",
-    "enterPrefixName": "请输入前缀名",
-    "prefixNameAlphaNum": "前缀名只能包含字母和数字",
-    "prefixDescription": "前缀说明",
-    "confirmDeletePrefix": "确认删除该前缀？",
-    "prefixManagement": "前缀管理",
-    "prefixManagementSubtitle": "管理前缀信息并查看该前缀关联的国内商品，保留旧系统页顶新增、行内编辑和展开商品交互。",
-    "addPrefix": "新增前缀",
-    "searchPlaceholder": "搜索前缀名 / 说明 / 供应商名称 / 供应商代码 / 店铺号"
+    "prefixName": "Prefix",
+    "enterPrefixName": "Enter a prefix",
+    "prefixNameAlphaNum": "A prefix can only contain letters and digits",
+    "prefixDescription": "Description",
+    "confirmDeletePrefix": "Delete this prefix?",
+    "prefixManagement": "Prefix Management",
+    "prefixManagementSubtitle": "Manage prefixes and view the domestic products under each one.",
+    "addPrefix": "Add prefix",
+    "searchPlaceholder": "Search prefix / description / supplier / shop no."
   },
   "warehouseLocations": {
     "title": "Warehouse Tag Management",

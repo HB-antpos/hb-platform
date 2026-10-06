@@ -29,6 +29,12 @@ export function createWebBundleDependencyMetadataPlugin(): Plugin {
   return {
     name: 'hb-web-bundle-dependency-metadata',
     apply: 'build',
+    // 必须排在 Vite 内置的 vite:css-post 之后：它会在自己的 generateBundle 里把「只含 CSS 的 chunk」
+    // 从 bundle 中删掉（manifest 里不再出现）。若本插件先执行，就会把这类随后消失的 chunk
+    // 也写进依赖映射，verify:bundle 会报「dependency map 与 manifest JS 不一致」。
+    // 共享样式被多个懒加载页面以不同组合引用时（如 listToolbar.css）就会产生这种 chunk，
+    // 所以它取决于页面引用拓扑，改页面的 PR 无意中就会触发。
+    enforce: 'post',
     generateBundle(_options, bundle) {
       const chunks = Object.fromEntries(
         Object.values(bundle)

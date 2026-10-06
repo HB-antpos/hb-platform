@@ -500,6 +500,7 @@ export default function LocalSupplierInvoicesScreen() {
   const {
     stores,
     selectedStoreCode,
+    isSelectedStoreAuto,
     isDeviceMode,
     isStoreSelectionReady,
     isLoading: storesLoading,
@@ -989,7 +990,8 @@ export default function LocalSupplierInvoicesScreen() {
       return;
     }
 
-    const initialStoreCode = selectedStoreCode && stores.some(
+    // 全局自动默认的分店不算用户选择，筛选仍默认全部分店
+    const initialStoreCode = selectedStoreCode && !isSelectedStoreAuto && stores.some(
       (store) => store.storeCode === selectedStoreCode,
     )
       ? selectedStoreCode
@@ -999,7 +1001,7 @@ export default function LocalSupplierInvoicesScreen() {
     setFilters(initialFilters);
     initialStoreScopeAppliedRef.current = true;
     setInitialStoreScopeReady(true);
-  }, [isDeviceMode, isStoreSelectionReady, restoreState, selectedStoreCode, stores]);
+  }, [isDeviceMode, isSelectedStoreAuto, isStoreSelectionReady, restoreState, selectedStoreCode, stores]);
 
   useEffect(() => {
     if (!deviceBoundStoreCode) {

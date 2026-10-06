@@ -156,6 +156,7 @@ import {
 } from './pasteOptimisticRows'
 import PickingAssignmentSection, { AssigneeChip, type LineAssigneeMap } from './pickingAssignment/PickingAssignmentSection'
 import { formatStoreOrderVolume } from './volumeFormat'
+import { applyFlowStatusToOrder, subscribeStoreOrderFlowStatusChanged } from './storeOrderFlowStatusSync'
 import {
   isStoreOrderDetailColumnOrderCustomized,
   mergeStoreOrderDetailColumnOrder,
@@ -1718,6 +1719,17 @@ export default function StoreOrderDetailPage() {
     }
     void loadStores()
   }, [canLoadDetail, storesQueryKey, id])
+
+  // 其它页面（如打印配货单自动开始配货）改了本订单的流程状态时，只合入新的 flowStatus。
+  // 本页是保活页面，切回时同订单同查询条件不会重新请求；也不能靠重新加载来同步，
+  // 因为 loadDetail 会清空 editingRows 与表头草稿，丢掉用户尚未保存的编辑。
+  useEffect(
+    () =>
+      subscribeStoreOrderFlowStatusChanged((orderGuid, flowStatus) => {
+        setDetail((current) => applyFlowStatusToOrder(current, orderGuid, flowStatus))
+      }),
+    [],
+  )
 
   useEffect(() => {
     if (!containerPickerOpen) {

@@ -433,7 +433,7 @@ async function main() {
   })
   if (warehouseStaffPickingStoreLoadFailure) failures.push(warehouseStaffPickingStoreLoadFailure)
 
-  const warehouseStaffPickingPrintFailure = await runTest('配货单页 WarehouseStaff 打印下载不应触发状态流转写接口', () => {
+  const warehouseStaffPickingPrintFailure = await runTest('配货单页 WarehouseStaff 打印下载默认不触发状态流转写接口，显式授予开始配货权限后才触发', () => {
     const beforePrintSource = pickingListSource.slice(
       pickingListSource.indexOf('const handleBeforePrint = async () => {'),
       pickingListSource.indexOf('const handlePrint = async () => {'),
@@ -441,14 +441,19 @@ async function main() {
 
     assert(
       beforePrintSource.includes('WarehouseStaff 可打印/下载配货单') &&
-        beforePrintSource.includes('if (canUseWarehouseManagerActions && order.flowStatus === StoreOrderFlowStatus.Submitted)') &&
+        // 是否推进状态统一由 shouldStartPickingBeforePrint 决定：管理类账号沿用原行为，
+        // 纯仓库员工必须被显式授予 Warehouse.StartPicking（见 pickingListLogic.test.ts）。
+        beforePrintSource.includes('shouldStartPickingBeforePrint({') &&
+        beforePrintSource.includes('canUseWarehouseManagerActions,') &&
+        beforePrintSource.includes('hasStartPickingPermission,') &&
+        pickingListSource.includes('access.hasPermission(P.Warehouse.StartPicking)') &&
         beforePrintSource.includes('await startPickingStoreOrder(order.orderGUID)') &&
         beforePrintSource.includes('if (!activeRef.current)') &&
         beforePrintSource.includes('loadedOrderIdRef.current = null') &&
         pickingListSource.includes('await handleBeforePrint()') &&
         pickingListSource.includes('await printElementPagesAsPdf') &&
         pickingListSource.includes('await downloadElementPagesAsPdf'),
-      '配货单打印/下载前只有仓库管理员可自动开始配货，且切换 Tab 后不能继续生成旧页面 PDF',
+      '配货单打印/下载前只有管理类账号或被显式授予开始配货权限的账号可自动开始配货，且切换 Tab 后不能继续生成旧页面 PDF',
     )
   })
   if (warehouseStaffPickingPrintFailure) failures.push(warehouseStaffPickingPrintFailure)

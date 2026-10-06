@@ -116,17 +116,17 @@ namespace BlazorApp.Shared.DTOs
         public int? MiddlePackQuantity { get; set; }
 
         /// <summary>
-        /// 包装尺寸
+        /// 包装尺寸（仅为 DTO 形状兼容：DomesticProduct 实体没有对应列，查询结果恒为 null，不落库）
         /// </summary>
         public string? PackingSize { get; set; }
 
         /// <summary>
-        /// 材质
+        /// 材质（同上：实体无对应列，恒为 null，不落库）
         /// </summary>
         public string? Material { get; set; }
 
         /// <summary>
-        /// 备注
+        /// 备注（同上：实体无对应列，恒为 null，不落库）
         /// </summary>
         public string? Remarks { get; set; }
 
@@ -174,6 +174,11 @@ namespace BlazorApp.Shared.DTOs
     /// <summary>
     /// 创建国内商品DTO
     /// </summary>
+    /// <remarks>
+    /// 材质 / 备注 / 包装尺寸 刻意不在此 DTO 中：DomesticProduct 实体没有对应列，
+    /// 业务已确认（2026-10-06）不需要落库；请求里带了这些成员也会被忽略。
+    /// 装箱数 / 中包数量的校验口径为 ≥ 1（见下方 Range），批量路径由服务内 &lt;= 0 判断保持同一口径。
+    /// </remarks>
     public class CreateDomesticProductDto
     {
         /// <summary>
@@ -275,6 +280,13 @@ namespace BlazorApp.Shared.DTOs
     /// <summary>
     /// 更新国内商品DTO
     /// </summary>
+    /// <remarks>
+    /// 以下成员刻意不在此 DTO 中，请求里带了也会被忽略（业务已于 2026-10-06 确认）：
+    /// - Barcode：条码是扫码、HQ 同步、门店价与 POS 目录共用的标识，创建时确定，之后不允许编辑
+    ///   （映射 UpdateDomesticProductDto → DomesticProduct 也显式忽略 Barcode；前端编辑表单为只读）。
+    /// - Material / Remarks / PackingSize：DomesticProduct 实体没有对应列，不需要落库。
+    /// 装箱数 / 中包数量的校验口径为 ≥ 1（见下方 Range），批量路径由服务内 &lt;= 0 判断保持同一口径。
+    /// </remarks>
     public class UpdateDomesticProductDto
     {
         /// <summary>

@@ -74,7 +74,7 @@ public sealed class StoreOrderLifecycleController(
         try
         {
             var forbidden = ForbidIf(
-                await AccessPolicy.RequireOrderEditAsync(orderGuid)
+                await AccessPolicy.RequireStartPickingAsync(orderGuid)
             );
             if (forbidden != null)
             {

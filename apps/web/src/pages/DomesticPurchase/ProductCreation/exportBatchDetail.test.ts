@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ProductCreationType } from '../../../types/domesticProductCreation'
 import type { BatchProductItem } from '../../../types/domesticProductCreation'
-import { getExportableBatchItems } from './exportBatchDetail'
+import { EXPORT_COLUMN_KEYS, getExportableBatchItems, toExportRows } from './exportBatchDetail'
 
 const items: BatchProductItem[] = [
   {
@@ -62,6 +62,17 @@ assert.deepEqual(
 assert.equal(exportableItems[1].parentItemNumber, 'HB001-8001')
 assert.equal(exportableItems[2].productType, ProductCreationType.SET_SUB_ITEM)
 assert.equal(exportableItems[3].parentItemNumber, 'HB001-MISSING')
+
+// 导出列顺序：前 5 列必须与「批次明细」抽屉的列（货号/条码/名称/类型/零售价）一致，界面与导出文件不错位。
+assert.deepEqual(
+  EXPORT_COLUMN_KEYS.slice(0, 5),
+  ['itemNumber', 'barcode', 'productName', 'type', 'privateLabelPrice'],
+)
+const exportedRow = toExportRows(items)[0]
+for (const key of EXPORT_COLUMN_KEYS) {
+  // 条码图片列没有对应的文本值，其余每一列都必须能从导出行里取到值。
+  if (key !== 'barcodeImage') assert.ok(key in exportedRow, `导出行缺少列 ${key}`)
+}
 
 const productionExcelSources = new Map([
   ['src/services/exportService.ts', 3],

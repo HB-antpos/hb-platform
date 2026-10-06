@@ -1,0 +1,818 @@
+/* 货号条码创建页：批次记录列表、「创建批次」工作台、批次明细抽屉与套装模板抽屉。
+   普通 CSS + 全局类名（统一 pc- 前缀）：测试打包把 .css 当空模块，不能用 CSS Modules。
+   按 1440 宽设计，≥1280 不出现横向滚动（工作台三栏在 <1400 时两侧栏收窄）。 */
+
+.pc-mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
+}
+
+.pc-sub {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.pc-faint {
+  color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.25));
+}
+
+.pc-center {
+  text-align: center;
+}
+
+/* ---------- 批次记录列表 ---------- */
+
+.pc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pc-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pc-batch-table .ant-table-tbody > tr > td {
+  padding-block: 12px;
+}
+
+.pc-batch-table .ant-table-thead > tr > th,
+.pc-batch-table .ant-table-tbody > tr > td {
+  padding-inline: 12px;
+}
+
+.pc-code-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+/* 复制图标默认淡灰，悬停才加深，不抢货号本身的视觉 */
+.pc-copy.ant-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.3));
+}
+
+.pc-copy.ant-btn:hover {
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.pc-prefix-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #f1f3f7;
+  box-shadow: inset 0 0 0 1px #dfe4ec;
+  color: var(--ant-color-text, #1d2129);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.pc-count-cell,
+.pc-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.pc-row-actions .ant-btn {
+  padding-inline: 7px;
+}
+
+.pc-supplier-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pc-supplier-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pc-supplier-option-code {
+  flex: none;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* ---------- 工作台：页头与三栏 ---------- */
+
+.pc-workspace-header {
+  justify-content: flex-start;
+}
+
+.pc-workspace-header .pc-back.ant-btn {
+  padding-inline: 0;
+}
+
+.pc-header-spacer {
+  flex: 1 1 auto;
+}
+
+.pc-workgrid {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 250px;
+  gap: 12px;
+  align-items: stretch;
+  /* 三栏起点在文档里约 240px（外壳 168 + 页头卡片约 60 + 间距 12），底部再留 16px：
+     这样视口较高时三栏刚好铺满、不会把「预览货号只是示意」提示挤出视口；内容更高时自然撑开。 */
+  min-height: calc(100vh - 256px);
+}
+
+@media (max-width: 1399px) {
+  .pc-workgrid {
+    grid-template-columns: 232px minmax(0, 1fr) 232px;
+  }
+}
+
+@media (max-width: 1099px) {
+  .pc-workgrid {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+}
+
+.pc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.pc-panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.pc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pc-field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 12.5px;
+}
+
+.pc-field-label em {
+  margin-left: 2px;
+  color: #d4380d;
+  font-style: normal;
+}
+
+.pc-field-label .pc-link.ant-btn {
+  height: 22px;
+  padding-inline: 0;
+  font-size: 12.5px;
+}
+
+.pc-help {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.pc-prefix-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pc-prefix-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.pc-notice .anticon {
+  flex: none;
+  margin-top: 3px;
+}
+
+.pc-notice-warn {
+  border: 1px solid #f6d9a8;
+  background: #fff5e0;
+  color: #a35a00;
+}
+
+.pc-settings-notice {
+  margin-top: auto;
+}
+
+/* ---------- 工作台：中栏网格 ---------- */
+
+.pc-grid-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.pc-grid-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+
+.pc-grid-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.pc-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 312px;
+}
+
+.pc-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pc-popover-label {
+  flex: none;
+  width: 68px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 12.5px;
+}
+
+.pc-popover-warn {
+  color: #cf1322;
+  font-size: 12px;
+}
+
+.pc-popover-hint {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.pc-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 录入网格：行高约 40px，单元格内是带边框的输入框 */
+.pc-grid-table .ant-table-thead > tr > th {
+  padding: 8px 6px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.pc-grid-table .ant-table-tbody > tr > td {
+  padding: 5px 6px;
+}
+
+.pc-index {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.5));
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-type-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #f1f3f7;
+  color: #6b7280;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.pc-type-tag-set {
+  background: #f1eaff;
+  color: #5a3fc0;
+}
+
+.pc-cell.ant-input,
+.pc-cell.ant-input-number {
+  width: 100%;
+  border-color: #dfe4ec;
+  border-radius: 5px;
+}
+
+.pc-cell-num .ant-input-number-input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-cell-center .ant-input-number-input {
+  text-align: center;
+}
+
+/* 被选中的粘贴列：整列输入框浅蓝底，提示 Ctrl+V 会写入哪一列 */
+.pc-cell-selected.ant-input,
+.pc-cell-selected.ant-input-number {
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  border-color: var(--ant-color-primary-border, #91caff);
+}
+
+.pc-cell-selected .ant-input-number-input {
+  background: transparent;
+}
+
+.pc-paste-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: copy;
+}
+
+.pc-paste-title .anticon {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.pc-paste-title:hover,
+.pc-paste-title-on {
+  border-color: var(--ant-color-primary-border, #91caff);
+  background: var(--ant-color-primary-bg, #e6f4ff);
+}
+
+.pc-paste-title-on .anticon {
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.pc-expand-btn.ant-btn {
+  height: 24px;
+  padding-inline: 0;
+}
+
+.pc-expand-btn-pending.ant-btn {
+  color: #d4380d;
+}
+
+.pc-expand-icon {
+  margin-right: 4px;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.pc-expand-icon-open {
+  transform: rotate(90deg);
+}
+
+.pc-row-warn {
+  margin-right: 4px;
+  color: #cf1322;
+}
+
+/* 校验不通过的行：整行淡红底 + 左侧红条；定位时短暂闪一下 */
+.pc-grid-table .ant-table-tbody > tr.pc-grid-row-error > td {
+  background: #fff8f7;
+}
+
+.pc-grid-table .ant-table-tbody > tr.pc-grid-row-error > td:first-child {
+  box-shadow: inset 3px 0 0 #ff4d4f;
+}
+
+.pc-grid-table .ant-table-tbody > tr.pc-grid-row-flash > td {
+  animation: pc-row-flash 1.6s ease-out;
+}
+
+@keyframes pc-row-flash {
+  0%,
+  35% {
+    background: #fff1b8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-grid-table .ant-table-tbody > tr.pc-grid-row-flash > td {
+    animation: none;
+    background: #fff1b8;
+  }
+}
+
+/* 套装展开面板 */
+.pc-grid-table .ant-table-expanded-row > td {
+  padding: 8px 12px 12px 40px;
+  background: #fafbfd;
+}
+
+.pc-sub-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pc-sub-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.pc-sub-title {
+  margin-right: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.pc-sub-head .ant-btn-link {
+  padding-inline: 4px;
+}
+
+.pc-set-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pc-set-price .ant-input-number {
+  width: 104px;
+}
+
+.pc-sub-table .ant-table-thead > tr > th {
+  padding: 6px;
+  font-size: 12px;
+}
+
+.pc-sub-table .ant-table-tbody > tr > td {
+  padding: 4px 6px;
+}
+
+.pc-grid-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 8px 16px;
+  border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+  border-radius: 0 0 12px 12px;
+  background: #fafbfd;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 12.5px;
+}
+
+.pc-grid-hint-icon {
+  margin: 0 4px;
+}
+
+/* ---------- 工作台：右栏汇总与校验 ---------- */
+
+.pc-kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 13px;
+}
+
+.pc-kv b {
+  color: var(--ant-color-text, #1d2129);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pc-kv-tight {
+  margin-bottom: 6px;
+}
+
+.pc-kv-note {
+  margin-left: 4px;
+  color: #d4380d;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.pc-over {
+  color: #cf1322 !important;
+}
+
+.pc-meter {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #edf0f5;
+}
+
+.pc-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ant-color-primary, #1677ff);
+}
+
+.pc-meter-over > i {
+  background: #ff4d4f;
+}
+
+.pc-panel-title-issues {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.pc-count-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: #fff1f0;
+  color: #cf1322;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pc-issue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pc-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #fff1f0;
+  color: #cf1322;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pc-issue .anticon {
+  flex: none;
+  margin-top: 3px;
+}
+
+.pc-issue b {
+  font-weight: 600;
+}
+
+.pc-issue:hover {
+  background: #ffe3e0;
+}
+
+.pc-issue:focus-visible {
+  outline: 2px solid #ff7875;
+  outline-offset: 1px;
+}
+
+.pc-issue-static {
+  cursor: default;
+}
+
+.pc-issue-static:hover {
+  background: #fff1f0;
+}
+
+.pc-issue-ok {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #e9f8ef;
+  color: #0b7a3c;
+  font-size: 12.5px;
+}
+
+/* 提交区贴着面板底部；批次很长、面板被撑高时，按钮仍停留在可视区底部 */
+.pc-summary-actions {
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  background: #fff;
+}
+
+/* ---------- 预览货号弹窗 ---------- */
+
+.pc-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 12px 0;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 12.5px;
+}
+
+.pc-preview-sub {
+  padding-left: 12px;
+}
+
+/* ---------- 抽屉（批次明细 / 套装模板） ---------- */
+
+.pc-drawer .ant-drawer-body {
+  padding: 0 24px 12px;
+}
+
+.pc-drawer-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pc-drawer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.pc-drawer-batch-no {
+  font-size: 16px;
+}
+
+.pc-drawer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.pc-drawer-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pc-drawer-footer-spacer {
+  flex: 1 1 auto;
+}
+
+.pc-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 12.5px;
+}
+
+.pc-dirty::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f0a020;
+}
+
+.pc-detail-tabs .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+.pc-detail-table .ant-table-thead > tr > th {
+  padding: 8px 10px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.pc-detail-table .ant-table-tbody > tr > td {
+  padding: 6px 10px;
+}
+
+.pc-detail-table .ant-table-tbody > tr.pc-detail-subrow > td {
+  background: #fbfcfe;
+}
+
+.pc-detail-sub-name {
+  padding-left: 14px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.7));
+}
+
+/* 改过的价格：浅黄底，提示还没保存 */
+.pc-cell-changed.ant-input-number {
+  border-color: #f6d9a8;
+  background: #fff8e6;
+}
+
+.pc-cell-changed .ant-input-number-input {
+  background: transparent;
+}
+
+.pc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.pc-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c3c9d4;
+}
+
+.pc-status-on {
+  color: #0b7a3c;
+}
+
+.pc-status-on::before {
+  background: #12a150;
+}
+
+/* 套装模板编辑表单 */
+.pc-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+  padding-top: 14px;
+}
+
+.pc-section-title {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.pc-template-subitems {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pc-template-subitems-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pc-template-subitem-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 32px;
+  gap: 8px;
+  align-items: start;
+}
+
+.pc-template-subitem-row .ant-form-item {
+  margin-bottom: 0;
+}
