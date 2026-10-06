@@ -15,7 +15,7 @@ public sealed class ContainerNewProductsControllerTests
     public async Task UnknownState_Returns400WithStableErrorCode()
     {
         var service = new Mock<IContainerNewProductsReactService>();
-        service.Setup(x => x.GetAsync("S-1", It.IsAny<CancellationToken>()))
+        service.Setup(x => x.GetAsync("S-1", It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ContainerNewProductsStateUnknownException());
 
         var response = await new ContainerNewProductsController(service.Object).Get("S-1", CancellationToken.None);
@@ -28,12 +28,27 @@ public sealed class ContainerNewProductsControllerTests
     public async Task ForbiddenStore_Returns403()
     {
         var service = new Mock<IContainerNewProductsReactService>();
-        service.Setup(x => x.GetAsync("S-2", It.IsAny<CancellationToken>()))
+        service.Setup(x => x.GetAsync("S-2", It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ContainerNewProductsForbiddenException());
 
         var response = await new ContainerNewProductsController(service.Object).Get("S-2", CancellationToken.None);
 
         Assert.IsType<ForbidResult>(response);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IncludeExisting_原样透传给服务(bool includeExisting)
+    {
+        var service = new Mock<IContainerNewProductsReactService>();
+        service.Setup(x => x.GetAsync("S-1", includeExisting, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ContainerNewProductsResponseDto { StoreCode = "S-1" });
+
+        var response = await new ContainerNewProductsController(service.Object).Get("S-1", CancellationToken.None, includeExisting);
+
+        Assert.IsType<OkObjectResult>(response);
+        service.Verify(x => x.GetAsync("S-1", includeExisting, It.IsAny<CancellationToken>()), Times.Once);
     }
 
 }
@@ -93,14 +108,14 @@ public sealed class ContainerNewProductsRulesTests
     }
 
     [Fact]
-    public void QueryWindow_UsesInclusiveSevenBackAndFourteenForwardDays()
+    public void QueryWindow_UsesInclusiveSevenBackAndTwentyOneForwardDays()
     {
         var (from, toExclusive) = ContainerNewProductsReactService.BuildWindow(new DateTime(2026, 9, 28));
 
         Assert.Equal(new DateTime(2026, 9, 21), from);
-        Assert.Equal(new DateTime(2026, 10, 13), toExclusive);
-        Assert.True(new DateTime(2026, 10, 12) < toExclusive);
-        Assert.False(new DateTime(2026, 10, 13) < toExclusive);
+        Assert.Equal(new DateTime(2026, 10, 20), toExclusive);
+        Assert.True(new DateTime(2026, 10, 19) < toExclusive);
+        Assert.False(new DateTime(2026, 10, 20) < toExclusive);
     }
 
     [Theory]

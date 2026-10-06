@@ -20,6 +20,7 @@ public sealed class ContainerNewProductsReactService(
 
     public async Task<ContainerNewProductsResponseDto> GetAsync(
         string storeCode,
+        bool includeExisting = false,
         CancellationToken cancellationToken = default
     )
     {
@@ -146,9 +147,11 @@ public sealed class ContainerNewProductsReactService(
         foreach (var group in details.GroupBy(x => (x.ContainerCode, x.ProductCode)))
         {
             var detail = group.First();
-            if (!ShouldIncludeProduct(
-                    existingProducts.Contains(detail.ProductCode),
-                    historyKeys.Contains(new HistoryKey(detail.ProductCode, detail.ContainerCode))))
+            // 新商品 = 仓库里还没有，或正是由本柜提交时新建的；其余是补货的已有商品，仅在调用方要求时返回
+            var isNewProduct = ShouldIncludeProduct(
+                existingProducts.Contains(detail.ProductCode),
+                historyKeys.Contains(new HistoryKey(detail.ProductCode, detail.ContainerCode)));
+            if (!isNewProduct && !includeExisting)
             {
                 continue;
             }
@@ -172,6 +175,7 @@ public sealed class ContainerNewProductsReactService(
                 EstimatedStoreArrivalDate = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].Start),
                 EstimatedStoreArrivalDateEnd = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].End),
                 Basis = container.ActualArrivalDate.HasValue ? "actual" : "estimated",
+                IsNewProduct = isNewProduct,
             });
         }
 
@@ -229,9 +233,9 @@ public sealed class ContainerNewProductsReactService(
     internal static bool OverlapsWindow(DateTime start, DateTime end, DateTime from, DateTime toExclusive) =>
         end >= from && start < toExclusive;
 
-    // 预计到店日窗口：过去 1 周至未来 2 周，含今天前 7 天与后 14 天，上界为开区间
+    // 预计到店日窗口：过去 1 周至未来 3 周，含今天前 7 天与后 21 天，上界为开区间
     internal static (DateTime From, DateTime ToExclusive) BuildWindow(DateTime localToday) =>
-        (localToday.Date.AddDays(-7), localToday.Date.AddDays(15));
+        (localToday.Date.AddDays(-7), localToday.Date.AddDays(22));
 
     // 货柜日期粗筛窗口：到店区间结束日比货柜日期最多晚 7 个工作日（最多跨 11 个自然日），下界多放 14 天保证不漏；
     // 到店区间起始日不早于货柜日期，所以上界沿用到店窗口上界即可

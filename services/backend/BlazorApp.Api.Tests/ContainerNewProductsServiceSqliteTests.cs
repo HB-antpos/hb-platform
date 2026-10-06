@@ -42,9 +42,9 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         database.Insertable(new Container { ContainerCode = "C-LATE", ContainerNumber = "LATE", ActualArrivalDate = today.AddDays(-5), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
         database.Insertable(new Container { ContainerCode = "C-EARLY", ContainerNumber = "EARLY", ActualArrivalDate = today.AddDays(-12), EstimatedArrivalDate = today.AddDays(-30) }).ExecuteCommand();
         database.Insertable(new Container { ContainerCode = "C-FALL", ContainerNumber = "FALL", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(2) }).ExecuteCommand();
-        // 窗口外：区间结束日在 9~11 天前、起始日在 15~17 天后，都不应出现
+        // 窗口外：区间结束日在 9~11 天前、起始日在 22~24 天后（未来 3 周之外），都不应出现
         database.Insertable(new Container { ContainerCode = "C-OLD", ContainerNumber = "OLD", ActualArrivalDate = today.AddDays(-20) }).ExecuteCommand();
-        database.Insertable(new Container { ContainerCode = "C-FAR", ContainerNumber = "FAR", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(12) }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-FAR", ContainerNumber = "FAR", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(19) }).ExecuteCommand();
         database.Insertable(new[]
         {
             new ContainerDetail { DetailCode = "D1", ContainerCode = "C-LATE", ProductCode = "P-AUDIT" },
@@ -70,7 +70,7 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.Equal(new[] { "C-EARLY", "C-LATE", "C-LATE", "C-FALL" }, result.Items.Select(x => x.ContainerCode));
         Assert.DoesNotContain(result.Items, x => x.ProductCode == "P-WRONG");
         var storeFrom = DateOnly.FromDateTime(today.AddDays(-7));
-        var storeTo = DateOnly.FromDateTime(today.AddDays(14));
+        var storeTo = DateOnly.FromDateTime(today.AddDays(21));
         Assert.All(result.Items, x =>
         {
             // 区间与窗口有交集，且结束日 = 起始日 + 4 个工作日
@@ -198,6 +198,39 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.Equal(("HB0001", 2.50m), (byCode["P-NEW"].Barcode, byCode["P-NEW"].RetailPrice));
         Assert.Null(byCode["P-NONE"].Barcode);
         Assert.Null(byCode["P-NONE"].RetailPrice);
+    }
+
+    [Fact]
+    public async Task GetAsync_带includeExisting时同时返回已有商品并标记新旧_默认只返回新商品()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+        database.Insertable(new Store { StoreGUID = "store-7", StoreCode = "S-7", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-7", UserGUID = "user-7", StoreGUID = "store-7", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new Container { ContainerCode = "C-MIX", ContainerNumber = "MIX", ActualArrivalDate = today }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "M1", ContainerCode = "C-MIX", ProductCode = "P-FRESH" },
+            new ContainerDetail { DetailCode = "M2", ContainerCode = "C-MIX", ProductCode = "P-CREATED" },
+            new ContainerDetail { DetailCode = "M3", ContainerCode = "C-MIX", ProductCode = "P-RESTOCK" },
+        }).ExecuteCommand();
+        // P-CREATED 由本柜提交时新建，仍算新商品；P-RESTOCK 早已在仓库，是已有商品
+        database.Insertable(new[]
+        {
+            new WarehouseProduct { ProductCode = "P-CREATED" },
+            new WarehouseProduct { ProductCode = "P-RESTOCK" },
+        }).ExecuteCommand();
+        database.Insertable(new WarehouseProductChangeHistory { ProductCode = "P-CREATED", Source = "ContainerSubmit", Action = "Create", SourceReference = "C-MIX" }).ExecuteCommand();
+
+        var service = CreateService("user-7");
+        var defaultResult = await service.GetAsync("S-7");
+        var withExisting = await service.GetAsync("S-7", includeExisting: true);
+
+        Assert.Equal(new[] { "P-CREATED", "P-FRESH" }, defaultResult.Items.Select(x => x.ProductCode).Order());
+        Assert.All(defaultResult.Items, x => Assert.True(x.IsNewProduct));
+        Assert.Equal(
+            new[] { ("P-CREATED", true), ("P-FRESH", true), ("P-RESTOCK", false) },
+            withExisting.Items.Select(x => (x.ProductCode, x.IsNewProduct)).OrderBy(x => x.ProductCode));
     }
 
     [Fact]
