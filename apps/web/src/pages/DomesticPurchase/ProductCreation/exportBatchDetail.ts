@@ -19,6 +19,21 @@ interface ExportRow {
   setPrice: number | string
 }
 
+/** 导出列顺序（也是批次明细抽屉列顺序的延伸）。 */
+export const EXPORT_COLUMN_KEYS = [
+  'itemNumber',
+  'barcode',
+  'productName',
+  'type',
+  'privateLabelPrice',
+  'parentItemNumber',
+  'setQuantity',
+  'setPrice',
+  'barcodeImage',
+] as const
+
+type ExportColumnKey = (typeof EXPORT_COLUMN_KEYS)[number]
+
 export function getExportableBatchItems(items: BatchProductItem[]) {
   const normalItems = items
     .filter((item) => item.productType === ProductCreationType.NORMAL)
@@ -80,17 +95,21 @@ export async function exportProductCreationBatchToExcel(
   const { default: ExcelJS } = await import('exceljs')
   const workbook = new ExcelJS.Workbook()
   const worksheet = workbook.addWorksheet(t('productCreation.batchDetail', '批次明细'))
-  worksheet.columns = [
-    { header: t('productCreation.type', '类型'), key: 'type', width: 12 },
-    { header: t('productCreation.parentSetItemNumber', '父套装货号'), key: 'parentItemNumber', width: 20 },
-    { header: t('productImport.hbProductNoCol', '货号'), key: 'itemNumber', width: 20 },
-    { header: t('domesticProducts.barcode', '条码'), key: 'barcode', width: 18 },
-    { header: t('domesticProducts.productName', '商品名称'), key: 'productName', width: 30 },
-    { header: t('productCreation.privateLabelPrice', '零售价'), key: 'privateLabelPrice', width: 12 },
-    { header: t('productCreation.setQuantity', '套装数量'), key: 'setQuantity', width: 10 },
-    { header: t('productCreation.setPrice', '套装价格'), key: 'setPrice', width: 12 },
-    { header: t('productCreation.barcodeImage', '条码图片'), key: 'barcodeImage', width: 25 },
-  ]
+  // 列顺序以 EXPORT_COLUMN_KEYS 为唯一来源：前 5 列与批次明细抽屉的列（货号/条码/名称/类型/零售价）顺序一致，
+  // 其余补充列（父套装货号、套装数量/价格、条码图片）排在后面，界面所见与导出文件不再错位。
+  const columnDefinitions: Record<ExportColumnKey, { header: string; width: number }> = {
+    itemNumber: { header: t('productImport.hbProductNoCol', '货号'), width: 20 },
+    barcode: { header: t('domesticProducts.barcode', '条码'), width: 18 },
+    productName: { header: t('domesticProducts.productName', '商品名称'), width: 30 },
+    type: { header: t('productCreation.type', '类型'), width: 12 },
+    privateLabelPrice: { header: t('productCreation.privateLabelPrice', '零售价'), width: 12 },
+    parentItemNumber: { header: t('productCreation.parentSetItemNumber', '父套装货号'), width: 20 },
+    setQuantity: { header: t('productCreation.setQuantity', '套装数量'), width: 10 },
+    setPrice: { header: t('productCreation.setPrice', '套装价格'), width: 12 },
+    barcodeImage: { header: t('productCreation.barcodeImage', '条码图片'), width: 25 },
+  }
+  worksheet.columns = EXPORT_COLUMN_KEYS.map((key) => ({ header: columnDefinitions[key].header, key, width: columnDefinitions[key].width }))
+  const barcodeImageColumnIndex = EXPORT_COLUMN_KEYS.indexOf('barcodeImage')
 
   const headerRow = worksheet.getRow(1)
   headerRow.height = 25
@@ -106,17 +125,8 @@ export async function exportProductCreationBatchToExcel(
 
   rows.forEach((item, index) => {
     const currentRow = worksheet.getRow(index + 2)
-    currentRow.values = [
-      item.type,
-      item.parentItemNumber,
-      item.itemNumber,
-      item.barcode,
-      item.productName,
-      item.privateLabelPrice,
-      item.setQuantity,
-      item.setPrice,
-      '',
-    ]
+    // 条码图片列只放图片，单元格留空；其余按 EXPORT_COLUMN_KEYS 顺序取值。
+    currentRow.values = EXPORT_COLUMN_KEYS.map((key) => (key === 'barcodeImage' ? '' : item[key]))
     currentRow.height = 50
     if (index % 2 === 0) {
       currentRow.eachCell((cell) => {
@@ -129,8 +139,8 @@ export async function exportProductCreationBatchToExcel(
         const base64Image = barcodeData.split(',')[1]
         const imageId = workbook.addImage({ base64: base64Image, extension: 'png' })
         worksheet.addImage(imageId, {
-          tl: { col: 8, row: index + 1 },
-          br: { col: 9, row: index + 2 },
+          tl: { col: barcodeImageColumnIndex, row: index + 1 },
+          br: { col: barcodeImageColumnIndex + 1, row: index + 2 },
           editAs: 'oneCell',
         } as any)
       }

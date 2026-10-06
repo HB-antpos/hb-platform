@@ -1,111 +1,151 @@
-import { DownloadOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, DatePicker, message, Select, Space } from 'antd'
+import { DownloadOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Button, Card, Segmented, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageContainer from '../../../components/PageContainer'
+import { MeasuredTable } from '../../../components/MeasuredTable'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getActiveChinaSuppliers } from '../../../services/chinaSupplierService'
 import { getBatchDetail, getBatchList } from '../../../services/domesticProductCreationService'
 import type { BatchInfo } from '../../../types/domesticProductCreation'
-import BatchCreateModal from './BatchCreateModal'
-import BatchDetailModal from './BatchDetailModal'
+import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
+import BatchDetailDrawer from './BatchDetailDrawer'
+import BatchWorkspace from './BatchWorkspace'
+import CopyValueButton from './CopyValueButton'
+import SupplierSelect from './SupplierSelect'
+import type { SupplierOption } from './SupplierSelect'
+import { BATCH_CREATED_RANGES, buildBatchListParams, formatBatchTime } from './batchListLogic'
+import type { BatchCreatedRange, BatchListQuery } from './batchListLogic'
+import { getBatchDetailErrorMessage } from './batchDetailErrorMessage'
 import { exportProductCreationBatchToExcel, getExportableBatchItems } from './exportBatchDetail'
-import { MeasuredTable } from '../../../components/MeasuredTable'
+import './productCreation.css'
+import productCreationMessagesEn from './productCreationMessages.en.json'
+import productCreationMessagesZh from './productCreationMessages.zh.json'
 
-const { RangePicker } = DatePicker
+// 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
+registerPageMessages({ zh: productCreationMessagesZh, en: productCreationMessagesEn })
+
+const DEFAULT_PAGE_SIZE = 20
+
+const RANGE_LABEL_KEYS: Record<BatchCreatedRange, string> = {
+  all: 'common.all',
+  today: 'productCreation.rangeToday',
+  last7: 'productCreation.rangeLast7',
+  last30: 'productCreation.rangeLast30',
+}
 
 export default function ProductCreationPage() {
   const { t } = useTranslation()
+  // 「创建批次」是页内状态切换，不新增路由；列表与工作台互斥显示。
+  const [view, setView] = useState<'list' | 'workspace'>('list')
   const [loading, setLoading] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const [data, setData] = useState<BatchInfo[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
-  const [suppliers, setSuppliers] = useState<Array<{ supplierCode: string; supplierName: string }>>([])
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [supplierFilter, setSupplierFilter] = useState<string | undefined>()
-  const [dateRange, setDateRange] = useState<[string, string] | undefined>()
-  const [createModalVisible, setCreateModalVisible] = useState(false)
-  const [detailModalVisible, setDetailModalVisible] = useState(false)
+  const [range, setRange] = useState<BatchCreatedRange>('all')
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
   const [selectedBatch, setSelectedBatch] = useState<BatchInfo | null>(null)
   const [exportingBatchNumber, setExportingBatchNumber] = useState<string | null>(null)
+  const listGuardRef = useRef(createLatestRequestGuard())
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params: Record<string, unknown> = { page, pageSize }
-      if (supplierFilter) params.supplierCode = supplierFilter
-      if (dateRange) {
-        params.startDate = dateRange[0]
-        params.endDate = dateRange[1]
-      }
-      const response = await getBatchList(params as any)
-      setLoading(false)
-      if (response.success && response.data) {
-        setData(response.data.items || [])
-        setTotal(response.data.total || 0)
-      } else {
-        setData([])
-        setTotal(0)
-      }
-    } catch {
-      setLoading(false)
-      message.error(t('productCreation.loadBatchListFailed', '加载批次列表失败'))
-    }
-  }, [page, pageSize, supplierFilter, dateRange])
+  /**
+   * 加载批次列表。overrides 里显式写 undefined 表示「清除该筛选」，所以用对象合并而不是默认参数；
+   * 只有最后一次请求能写入页面状态，快速切换筛选/翻页时旧响应不会覆盖新结果。
+   */
+  const loadData = async (overrides: Partial<BatchListQuery> = {}) => {
+    const query: BatchListQuery = { page, pageSize, supplierCode: supplierFilter, range, ...overrides }
+    await runLatestGuardedRequest(listGuardRef.current, () => getBatchList(buildBatchListParams(query)), {
+      onStart: () => setLoading(true),
+      onSuccess: (response) => {
+        if (response.success && response.data) {
+          setData(response.data.items || [])
+          setTotal(response.data.total || 0)
+        } else {
+          setData([])
+          setTotal(0)
+        }
+        setPage(query.page)
+        setPageSize(query.pageSize)
+        setSupplierFilter(query.supplierCode)
+        setRange(query.range)
+        setLoaded(true)
+      },
+      onError: (error) => {
+        console.error(error)
+        message.error(getBatchDetailErrorMessage(error, t('productCreation.loadBatchListFailed')))
+      },
+      // 旧请求结束时不能关闭较新请求的 loading。
+      onSettled: () => setLoading(false),
+    })
+  }
 
   const loadSuppliers = useCallback(async () => {
+    setSuppliersLoading(true)
     try {
       const response = await getActiveChinaSuppliers()
-      setSuppliers(response || [])
-    } catch {
-      // ignore
+      setSuppliers((response || []).map((item) => ({ supplierCode: item.supplierCode, supplierName: item.supplierName })))
+    } catch (error) {
+      console.error(error)
+      message.error(t('productCreation.loadSupplierFailed'))
+    } finally {
+      setSuppliersLoading(false)
     }
+  }, [t])
+
+  useEffect(() => {
+    void loadData({ page: 1 })
+    void loadSuppliers()
+    const guard = listGuardRef.current
+    return () => guard.invalidate()
+    // 只在挂载时加载一次；之后由筛选/翻页显式触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    loadSuppliers()
-  }, [loadSuppliers])
+  const applyFilters = (patch: Partial<Pick<BatchListQuery, 'supplierCode' | 'range'>>) => {
+    void loadData({ page: 1, ...patch })
+  }
 
-  useEffect(() => {
-    loadData()
-  }, [loadData])
-
-  const handleCreateSuccess = (createdBatch?: BatchInfo) => {
-    setCreateModalVisible(false)
-    if (createdBatch?.batchNumber) {
-      setSelectedBatch(createdBatch)
-      setDetailModalVisible(true)
+  const handleCreated = (created?: BatchInfo) => {
+    setView('list')
+    void loadData({ page: 1 })
+    if (created?.batchNumber) {
+      // 创建成功后直接展示新批次的明细，方便立刻复制/导出货号与条码。
+      setSelectedBatch(created)
+      setDetailOpen(true)
     }
-    void loadData()
   }
 
   const handleViewDetail = (record: BatchInfo) => {
     setSelectedBatch(record)
-    setDetailModalVisible(true)
+    setDetailOpen(true)
   }
 
   const handleExportBatch = async (record: BatchInfo) => {
+    if (exportingBatchNumber) return
     const messageKey = `product-creation-export-${record.batchNumber}`
     setExportingBatchNumber(record.batchNumber)
-    message.loading({ content: t('productCreation.exporting', '导出中...'), key: messageKey })
+    message.loading({ content: t('productCreation.exporting'), key: messageKey })
     try {
       const response = await getBatchDetail(record.batchNumber)
       if (!response.success || !response.data) {
-        message.error({
-          content: response.message || t('productCreation.loadDetailFailed', '加载明细失败'),
-          key: messageKey,
-        })
+        message.error({ content: response.message || t('productCreation.loadDetailFailed'), key: messageKey })
         return
       }
       if (getExportableBatchItems(response.data.items).length === 0) {
-        message.warning({ content: t('productCreation.noDataToExport', '无数据可导出'), key: messageKey })
+        message.warning({ content: t('productCreation.noDataToExport'), key: messageKey })
         return
       }
       await exportProductCreationBatchToExcel(response.data, { batchNumber: record.batchNumber, t })
-      message.success({ content: t('productCreation.exportSuccess', '导出成功'), key: messageKey })
+      message.success({ content: t('productCreation.exportSuccess'), key: messageKey })
     } catch (error) {
       console.error('导出失败:', error)
-      message.error({ content: t('productCreation.exportBatchFailed', '导出批次失败'), key: messageKey })
+      message.error({ content: t('productCreation.exportBatchFailed'), key: messageKey })
     } finally {
       setExportingBatchNumber(null)
     }
@@ -113,170 +153,164 @@ export default function ProductCreationPage() {
 
   const columns: ColumnsType<BatchInfo> = [
     {
-      title: '#',
-      key: '_index',
-      width: 50,
-      align: 'center',
-      render: (_, __, index) => (page - 1) * pageSize + index + 1,
-    },
-    {
-      title: t('productCreation.batchNumber', '批次号'),
+      title: t('productCreation.batchNumber'),
       dataIndex: 'batchNumber',
       key: 'batchNumber',
-      width: 180,
-      render: (text) => <span style={{ fontFamily: 'monospace' }}>{text}</span>,
+      width: 160,
+      render: (value: string) => (
+        <span className="pc-code-cell">
+          <span className="pc-mono">{value}</span>
+          <CopyValueButton value={value} label={value} />
+        </span>
+      ),
     },
     {
-      title: t('domesticProducts.supplier', '供应商'),
+      // 不设宽度：吃掉其它列之外的剩余空间，名称过长时省略并带原生提示。
+      title: t('domesticProducts.supplier'),
       dataIndex: 'supplierName',
       key: 'supplierName',
-      width: 150,
-      render: (text, record) => `${record.supplierCode} - ${text}`,
+      ellipsis: true,
+      render: (value: string, record) => value || record.supplierCode,
     },
     {
-      title: t('productCreation.prefixCode', '前缀码'),
+      title: t('productCreation.prefixColumn'),
       dataIndex: 'prefixCode',
       key: 'prefixCode',
-      width: 100,
-      render: (text) => text || '-',
+      width: 80,
+      render: (value?: string) => (value ? <span className="pc-prefix-tag">{value}</span> : <span className="pc-faint">—</span>),
     },
     {
-      title: t('productCreation.normalProduct', '普通商品'),
-      dataIndex: 'normalCount',
-      key: 'normalCount',
-      width: 100,
-      align: 'center',
+      title: t('productCreation.itemCountColumn'),
+      key: 'itemCount',
+      width: 190,
+      render: (_, record) => (
+        <span className="pc-count-cell">
+          <span className="pc-mono">{record.totalCount}</span>
+          <span className="pc-sub">
+            {' '}{t('productCreation.itemsUnit')} · {t('productCreation.normal')} {record.normalCount} · {t('productCreation.set')} {record.setCount}
+          </span>
+        </span>
+      ),
     },
     {
-      title: t('productCreation.setProduct', '套装商品'),
-      dataIndex: 'setCount',
-      key: 'setCount',
-      width: 100,
-      align: 'center',
-    },
-    {
-      title: t('productCreation.totalCount', '总数量'),
-      dataIndex: 'totalCount',
-      key: 'totalCount',
-      width: 100,
-      align: 'center',
-    },
-    {
-      title: t('chinaSuppliers.createdAt', '创建时间'),
+      title: t('chinaSuppliers.createdAt'),
       dataIndex: 'createdAt',
       key: 'createdAt',
-      width: 180,
-      render: (text) => (text ? new Date(text).toLocaleString('zh-CN') : '-'),
+      width: 144,
+      render: (value: string) => <span className="pc-time">{formatBatchTime(value)}</span>,
     },
     {
-      title: t('productCreation.createdBy', '创建人'),
+      title: t('productCreation.createdBy'),
       dataIndex: 'createdBy',
       key: 'createdBy',
-      width: 120,
-      render: (text) => text || '-',
+      width: 88,
+      ellipsis: true,
+      render: (value?: string) => value || <span className="pc-faint">—</span>,
     },
     {
-      title: t('common.action', '操作'),
+      title: t('common.action'),
       key: 'actions',
-      width: 170,
-      fixed: 'right',
+      width: 124,
+      align: 'right',
       render: (_, record) => (
-        <Space size={0}>
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            disabled={exportingBatchNumber === record.batchNumber}
-            onClick={() => handleViewDetail(record)}
-          >
-            {t('productCreation.detail', '明细')}
+        <span className="pc-row-actions">
+          <Button type="link" size="small" onClick={() => handleViewDetail(record)}>
+            {t('productCreation.detail')}
           </Button>
           <Button
             type="link"
             size="small"
             icon={<DownloadOutlined />}
             loading={exportingBatchNumber === record.batchNumber}
+            disabled={exportingBatchNumber !== null && exportingBatchNumber !== record.batchNumber}
             onClick={() => void handleExportBatch(record)}
           >
-            {t('productCreation.exportBatch', '导出')}
+            {t('productCreation.exportBatch')}
           </Button>
-        </Space>
+        </span>
       ),
     },
   ]
 
   return (
-    <PageContainer
-      title={t('productCreation.batchCreateTitle', '货号条码批量创建')}
-      subtitle={t('productCreation.batchCreateSubtitle', '管理货号条码创建批次')}
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalVisible(true)}>
-          {t('productCreation.createBatch', '创建批次')}
-        </Button>
-      }
-    >
-      <div style={{ marginBottom: 16 }}>
-        <Space wrap>
-          <Select
-            placeholder={t('productCreation.filterSupplier', '筛选供应商')}
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            style={{ width: 200 }}
-            value={supplierFilter}
-            onChange={(v) => {
-              setSupplierFilter(v)
-              setPage(1)
-            }}
-            options={suppliers.map((s) => ({
-              label: `${s.supplierCode} - ${s.supplierName}`,
-              value: s.supplierCode,
-            }))}
-          />
-          <RangePicker
-            onChange={(_, dateStrings) => {
-              setDateRange(dateStrings[0] && dateStrings[1] ? (dateStrings as [string, string]) : undefined)
-              setPage(1)
-            }}
-          />
-        </Space>
-      </div>
+    <>
+      {view === 'workspace' ? (
+        <BatchWorkspace
+          suppliers={suppliers}
+          suppliersLoading={suppliersLoading}
+          onExit={() => setView('list')}
+          onCreated={handleCreated}
+        />
+      ) : (
+        <PageContainer
+          compact
+          title={t('menu.productCreation')}
+          subtitle={loaded ? t('productCreation.batchCountSummary', { count: total }) : undefined}
+          extra={(
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setView('workspace')} data-testid="product-creation-create-batch">
+              {t('productCreation.createBatch')}
+            </Button>
+          )}
+        >
+          <Card>
+            <div className="pc-toolbar" data-testid="product-creation-toolbar">
+              <SupplierSelect
+                allowClear
+                suppliers={suppliers}
+                loading={suppliersLoading}
+                prefix={t('domesticProducts.supplier')}
+                placeholder={t('common.all')}
+                style={{ width: 260 }}
+                value={supplierFilter}
+                onChange={(value) => applyFilters({ supplierCode: value || undefined })}
+              />
+              {/* 标签与分段控件包成一组，窄屏换行时不会把标签孤零零留在上一行 */}
+              <span className="pc-filter-group">
+                <span className="pc-sub">{t('chinaSuppliers.createdAt')}</span>
+                <Segmented<BatchCreatedRange>
+                  value={range}
+                  options={BATCH_CREATED_RANGES.map((value) => ({ value, label: t(RANGE_LABEL_KEYS[value]) }))}
+                  onChange={(value) => applyFilters({ range: value })}
+                />
+              </span>
+              <Tooltip title={t('common.refresh')}>
+                <Button icon={<ReloadOutlined />} aria-label={t('common.refresh')} onClick={() => void loadData()} />
+              </Tooltip>
+            </div>
 
-      <MeasuredTable metricId="domestic-purchase.product-creation.table-1"
-        columns={columns}
-        dataSource={data}
-        rowKey="batchNumber"
-        loading={loading}
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total) => t('common.totalCount', '共 {{count}} 条', { count: total }),
-          onChange: (p, ps) => {
-            setPage(p)
-            setPageSize(ps)
-          },
-        }}
-        scroll={{ x: 1150 }}
-        size="small"
-      />
+            <div data-testid="product-creation-batch-list">
+              <MeasuredTable<BatchInfo>
+                metricId="domestic-purchase.product-creation.batches"
+                className="pc-batch-table"
+                columns={columns}
+                dataSource={data}
+                rowKey="batchNumber"
+                loading={loading}
+                tableLayout="fixed"
+                size="middle"
+                pagination={{
+                  current: page,
+                  pageSize,
+                  total,
+                  showSizeChanger: true,
+                  showTotal: (count) => t('common.totalCount', { count }),
+                  // 改每页条数时回到第一页，翻页时保持当前筛选。
+                  onChange: (nextPage, nextPageSize) => {
+                    void loadData({ page: nextPageSize !== pageSize ? 1 : nextPage, pageSize: nextPageSize })
+                  },
+                }}
+              />
+            </div>
+          </Card>
+        </PageContainer>
+      )}
 
-      <BatchCreateModal
-        visible={createModalVisible}
-        onClose={() => setCreateModalVisible(false)}
-        onSuccess={handleCreateSuccess}
-      />
-
-      <BatchDetailModal
-        visible={detailModalVisible}
+      <BatchDetailDrawer
+        open={detailOpen}
         batch={selectedBatch}
-        onClose={() => {
-          setDetailModalVisible(false)
-          setSelectedBatch(null)
-        }}
+        // 只关闭抽屉、保留 selectedBatch：关闭动画期间标题不会闪成空白，下次打开会重新加载明细。
+        onClose={() => setDetailOpen(false)}
       />
-    </PageContainer>
+    </>
   )
 }
