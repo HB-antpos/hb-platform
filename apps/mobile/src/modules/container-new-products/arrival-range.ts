@@ -11,7 +11,7 @@ export function deviceLocalToday(now = new Date()): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-// 接口已限定「过去 1 周 ~ 未来 2 周」，这里只按今天切成两组：到店区间结束日早于今天算过去，
+// 接口已限定「过去 1 周 ~ 未来 3 周」，这里只按今天切成两组：到店区间结束日早于今天算过去，
 // 区间还没结束（今天或以后仍可能到店）算未来；旧版后端没有结束日时按起始日判断。
 // 日期都是 YYYY-MM-DD，直接按字符串比较即可，避免 Date 解析带来的时区偏移。
 export function matchesArrivalRange(item: Pick<ContainerNewProductItem, "estimatedStoreArrivalDate" | "estimatedStoreArrivalDateEnd">, filter: ArrivalRangeFilter, localToday: string): boolean {

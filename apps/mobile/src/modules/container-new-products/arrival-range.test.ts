@@ -9,7 +9,7 @@ const later = { estimatedStoreArrivalDate: "2026-10-14", estimatedStoreArrivalDa
 
 assert.equal(matchesArrivalRange(yesterday, "past", today), true);
 assert.equal(matchesArrivalRange(yesterday, "upcoming", today), false);
-// 今天到店的归入「未来 2 周」
+// 今天到店的归入「未来 3 周」
 assert.equal(matchesArrivalRange(sameDay, "past", today), false);
 assert.equal(matchesArrivalRange(sameDay, "upcoming", today), true);
 assert.equal(matchesArrivalRange(later, "all", today), true);
