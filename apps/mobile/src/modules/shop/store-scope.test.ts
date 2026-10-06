@@ -4,6 +4,7 @@ import {
   getPosEnabledStores,
   isStoreManageable,
   resolveScopedStoreCode,
+  resolveScopedStoreSelection,
 } from "./store-scope";
 import { IOS_REVIEW_STORES } from "../ios-review/identity";
 import { normalizeShopStores } from "./store-normalization";
@@ -194,4 +195,40 @@ assertEqual(
   }),
   "1004",
   "account sessions keep an assigned current selection"
+);
+
+// 自动默认分店标记：用户选的 → 本机记住 → 自动默认的当前分店 → 第一个
+const twoStores = [
+  { storeCode: "A", storeName: "Alpha" },
+  { storeCode: "B", storeName: "Beta" },
+];
+assertEqual(
+  JSON.stringify(resolveScopedStoreSelection({ isDeviceMode: false, stores: twoStores })),
+  JSON.stringify({ storeCode: "A", isAuto: true }),
+  "no selection defaults to the first store and marks it auto"
+);
+assertEqual(
+  JSON.stringify(resolveScopedStoreSelection({ currentStoreCode: "A", currentIsAuto: true, isDeviceMode: false, stores: twoStores })),
+  JSON.stringify({ storeCode: "A", isAuto: true }),
+  "an auto-selected store stays auto across re-syncs"
+);
+assertEqual(
+  JSON.stringify(resolveScopedStoreSelection({ currentStoreCode: "A", currentIsAuto: true, persistedStoreCode: "B", isDeviceMode: false, stores: twoStores })),
+  JSON.stringify({ storeCode: "B", isAuto: false }),
+  "a remembered user choice wins over an auto-selected store"
+);
+assertEqual(
+  JSON.stringify(resolveScopedStoreSelection({ currentStoreCode: "B", persistedStoreCode: "A", isDeviceMode: false, stores: twoStores })),
+  JSON.stringify({ storeCode: "B", isAuto: false }),
+  "a user-selected current store is kept"
+);
+assertEqual(
+  JSON.stringify(resolveScopedStoreSelection({ currentStoreCode: "B", deviceBoundStoreCode: "D", isDeviceMode: true, stores: twoStores })),
+  JSON.stringify({ storeCode: "D", isAuto: false }),
+  "device mode is never auto"
+);
+assertEqual(
+  JSON.stringify(resolveScopedStoreSelection({ isDeviceMode: false, stores: [] })),
+  JSON.stringify({ storeCode: null, isAuto: false }),
+  "no stores means no selection and not auto"
 );
