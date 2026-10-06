@@ -74,5 +74,6 @@ export function resolveScopedStoreCode({
     return persistedStoreCode;
   }
 
-  return stores.length === 1 ? stores[0].storeCode : null;
+  // 没有当前选择、也没有记住的有效分店时默认第一个（列表已排序），所有需要分店的页面进来即有分店，可再手动切换
+  return stores[0]?.storeCode ?? null;
 }
