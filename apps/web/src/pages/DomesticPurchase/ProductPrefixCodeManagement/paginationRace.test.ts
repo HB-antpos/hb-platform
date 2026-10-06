@@ -26,6 +26,7 @@ function createDeferred<T>() {
   return { promise, resolve: resolvePromise }
 }
 
+// 每个前缀一个独立守卫：对应生产代码里「每个展开行是一个 PrefixProductsPanel 实例，各自持有守卫」。
 const guards = new Map<string, LatestRequestGuard>()
 const state: Record<string, { data: string; page: number; loading: boolean; expanded: boolean }> = {}
 
@@ -146,31 +147,40 @@ await unmountMutationRun
 assertEqual(beginsAfterUnmount, 0, '前缀 layout cleanup 后 mutation 不得重新 begin 列表请求')
 
 const source = readFileSync(resolve('src/pages/DomesticPurchase/ProductPrefixCodeManagement/index.tsx'), 'utf8')
-const tableStart = source.lastIndexOf(
-  '<MeasuredTable metricId="domestic-purchase.product-prefix-code-management.table-2"\n            rowKey="prefixCode"',
-)
+// 展开商品面板已拆成独立组件（每个前缀一个实例，各自持有分页状态与最新请求守卫），其源码契约在 panelSource 上检查。
+const panelSource = readFileSync(resolve('src/pages/DomesticPurchase/ProductPrefixCodeManagement/PrefixProductsPanel.tsx'), 'utf8')
+const tableStart = source.lastIndexOf('metricId="domestic-purchase.product-prefix-code-management.table-2"')
 const tableEnd = source.indexOf('\n          />', tableStart)
 const tableSource = source.slice(tableStart, tableEnd)
 const paginationStart = tableSource.indexOf('pagination={{')
 const paginationEnd = tableSource.indexOf('\n            }}', paginationStart)
 const paginationSource = tableSource.slice(paginationStart, paginationEnd)
 
-assertIncludes(source, 'createLatestRequestGuard()', '前缀主列表和展开商品应创建最新请求守卫')
+assertEqual(tableStart > 0 && tableEnd > tableStart, true, '应能在源码里定位到前缀主表')
+assertEqual(paginationStart > 0 && paginationEnd > paginationStart, true, '应能在主表里定位到 pagination 配置')
+
+assertIncludes(source, 'createLatestRequestGuard()', '前缀主列表应创建最新请求守卫')
 assertIncludes(source, 'runLatestGuardedRequest(mainListRequestGuardRef.current', '前缀主列表应统一执行受保护请求')
-assertIncludes(source, 'productRequestGuardsRef.current.get(prefixCode)', '展开商品应按前缀隔离请求守卫')
-assertIncludes(source, 'productRequestGuardsRef.current.clear()', '主列表重载或卸载时应清空展开请求守卫')
 assertIncludes(source, 'const mountedRef = useRef(false)', '前缀页面应记录 mounted 状态')
 assertIncludes(source, 'const latestLoadListRef = useRef(loadList)', '前缀页面应保存 commit 后最新 loader')
 assertIncludes(source, 'latestLoadListRef.current = loadList', '前缀页面应在 layout effect 发布最新 loader')
-assertIncludes(source, 'if (!mountedRef.current) {', '前缀主列表及展开商品应在 begin 前拦截已卸载页面')
+assertIncludes(source, 'if (!mountedRef.current) {', '前缀主列表应在 begin 前拦截已卸载页面')
 assertIncludes(source, 'const desiredListQueryRef = useRef<DesiredPrefixListQuery>({', '前缀页面应保存已开始请求的 desired query')
 assertIncludes(source, 'desiredListQueryRef.current = query', '前缀 loader 应在请求开始时发布 desired query')
 assertIncludes(source, 'latestLoadListRef.current({ ...desiredListQueryRef.current, ...overrides })', '前缀 mutation 刷新应读取 desired query')
-assertIncludes(source, 'void refreshDesiredList()', '前缀编辑和删除后应刷新 desired query')
+assertIncludes(source, 'void refreshDesiredList()', '前缀编辑、删除、切换状态后应刷新 desired query')
 assertIncludes(source, 'void refreshDesiredList({ page: 1 })', '前缀创建后应保持回第一页语义')
 assertIncludes(source, "extra.action === 'paginate' ? pagination.current ?? 1 : 1", '只有 paginate 应保留目标页')
 assertIncludes(tableSource, 'onChange={handleTableChange}', '主表应只通过 Table.onChange 处理分页和排序')
 assertEqual(paginationSource.includes('onChange:'), false, '主表 pagination 不得保留重复请求入口')
-assertEqual((source.match(/onChange: \(nextPage, nextPageSize\)/g) ?? []).length, 1, '只应保留展开子表的 pagination.onChange')
+assertEqual((source.match(/onChange: \(nextPage, nextPageSize\)/g) ?? []).length, 0, '主页面不应再持有展开子表的分页入口')
+
+// 展开商品：每个前缀一个独立面板实例，守卫随实例隔离；收起 / 被换页卸载时作废在途请求。
+assertIncludes(source, '<PrefixProductsPanel key={record.prefixCode}', '展开行应按前缀编码为 key 渲染独立面板，保证每个前缀独立分页与守卫')
+assertEqual(source.includes('productRequestGuardsRef'), false, '主页面不应再用共享 Map 持有展开商品的守卫')
+assertIncludes(panelSource, 'const requestGuardRef = useRef(createLatestRequestGuard())', '每个展开面板应持有自己的最新请求守卫')
+assertIncludes(panelSource, 'runLatestGuardedRequest(requestGuardRef.current', '展开商品应通过自己的守卫执行受保护请求')
+assertIncludes(panelSource, 'return () => requestGuardRef.current.invalidate()', '收起或卸载时应作废在途展开请求，晚到的响应不能写已卸载面板')
+assertEqual((panelSource.match(/onChange: \(nextPage, nextPageSize\)/g) ?? []).length, 1, '只应保留展开子表的 pagination.onChange')
 
 console.log('ProductPrefixCodeManagement paginationRace.test.ts: ok')

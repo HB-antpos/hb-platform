@@ -1,0 +1,373 @@
+/* 国内供应商页：工具栏、列表单元格、编辑弹窗与同步结果弹窗
+   （普通 CSS + 全局类名：测试打包把 .css 当空模块，不能用 CSS Modules） */
+
+/* ---- 工具栏与勾选条 ---- */
+.china-sup-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.china-sup-search {
+  width: 330px;
+  max-width: 100%;
+}
+
+/* 搜索框右侧的「回车」小提示：键帽样式，提示搜索靠回车触发 */
+.china-sup-kbd {
+  padding: 0 5px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 4px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.china-sup-bars {
+  margin-bottom: 12px;
+}
+
+/* ---- 列表 ---- */
+/* antd 默认单元格左右 16px，7 列在 1280 宽下会挤占供应商列，统一收窄到 12px；两行单元格决定行高下限 */
+.china-sup-table .ant-table-thead > tr > th,
+.china-sup-table .ant-table-tbody > tr > td {
+  padding-inline: 12px;
+}
+
+.china-sup-table .ant-table-tbody > tr > td {
+  padding-block: 10px;
+}
+
+.china-sup-two {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.china-sup-name-row,
+.china-sup-code-row {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.china-sup-name-row {
+  gap: 6px;
+}
+
+.china-sup-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 备注收进 ⓘ：不占列，悬停或聚焦时再看 */
+.china-sup-note {
+  flex: none;
+  color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.25));
+  cursor: default;
+}
+
+.china-sup-note:hover,
+.china-sup-note:focus-visible {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+.china-sup-mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
+}
+
+.china-sup-sub {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.china-sup-faint {
+  color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.25));
+}
+
+.china-sup-ellipsis {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.china-sup-code-row .china-sup-copy.ant-btn {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  padding: 0;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+.china-sup-contact-name {
+  font-weight: 500;
+}
+
+.china-sup-email {
+  font-size: 13px;
+}
+
+.china-sup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.china-sup-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c3c9d4;
+}
+
+.china-sup-status-on {
+  color: #0b7a3c;
+}
+
+.china-sup-status-on::before {
+  background: #12a150;
+}
+
+.china-sup-date {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.china-sup-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.china-sup-actions .ant-btn {
+  padding-inline: 7px;
+}
+
+/* 分页器：「共 N 条」靠左，页码与每页条数靠右（antd 默认整体靠右） */
+.china-sup-table .ant-pagination-total-text {
+  margin-inline-end: auto;
+}
+
+/* ---- 编辑 / 新建弹窗：三个分区 ---- */
+.china-sup-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.china-sup-section {
+  padding: 14px 0 2px;
+}
+
+.china-sup-section + .china-sup-section {
+  border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+}
+
+.china-sup-section-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.china-sup-grid-2,
+.china-sup-grid-3 {
+  display: grid;
+  gap: 0 16px;
+}
+
+.china-sup-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.china-sup-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.china-sup-grid-2 .ant-form-item,
+.china-sup-grid-3 .ant-form-item {
+  margin-bottom: 14px;
+}
+
+.china-sup-span-all {
+  grid-column: 1 / -1;
+}
+
+/* 标签与右侧字数计数同一行：让 antd 的 label 容器撑满整行 */
+.china-sup-form .ant-form-item-label,
+.china-sup-form .ant-form-item-label > label {
+  width: 100%;
+}
+
+.china-sup-label {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.china-sup-count {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 超出上限即时变红，不必等提交后才收到 400 */
+.china-sup-count-over {
+  color: #d4380d;
+  font-weight: 600;
+}
+
+.china-sup-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 8px;
+  background: #fafbfd;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.china-sup-photo-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88px;
+  padding: 4px;
+  overflow: hidden;
+  border: 1px dashed var(--ant-color-border, #d9d9d9);
+  border-radius: 8px;
+  background: #fafbfd;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.china-sup-photo-box img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* ---- 同步结果弹窗 ---- */
+.china-sup-sync-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 只给图标着色，标题文字保持默认色：既能一眼看出「有失败」，又不会让整行标题过于刺眼 */
+.china-sup-sync-title-warn .anticon {
+  color: #d48806;
+}
+
+.china-sup-sync-title-error .anticon {
+  color: #cf1322;
+}
+
+.china-sup-sync-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+  border-radius: 10px;
+}
+
+.china-sup-sync-stats > div {
+  padding: 10px 16px;
+}
+
+.china-sup-sync-stats > div + div {
+  border-left: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+}
+
+.china-sup-sync-stat-key {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.china-sup-sync-stat-value {
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.china-sup-sync-stat-new {
+  color: #12a150;
+}
+
+.china-sup-sync-stat-updated {
+  color: #1677ff;
+}
+
+.china-sup-sync-stat-failed {
+  color: #cf1322;
+}
+
+.china-sup-sync-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 失败明细可能很长：限制高度、内部滚动，不把「复制失败明细 / 知道了」挤出可视区 */
+.china-sup-sync-failures {
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.china-sup-sync-failures > li + li {
+  margin-top: 6px;
+}
+
+.china-sup-sync-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .china-sup-grid-2,
+  .china-sup-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .china-sup-sync-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .china-sup-sync-stats > div:nth-child(3) {
+    border-left: 0;
+  }
+
+  .china-sup-sync-stats > div:nth-child(n + 3) {
+    border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+  }
+}
