@@ -2554,6 +2554,130 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchExecuteActionsAsync_CreateProduct_商品已建好并回填编码时标记已执行不报已存在()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-create-already", "INV-CREATE-ALREADY", new DateTime(2026, 10, 5));
+            // 生产 10-07 实例（388353 · FRA 327935）：商品早由「更新HQ商品」建好并回填编码，明细仍挂着「新建商品」。
+            await _db.Insertable(new Product
+            {
+                UUID = "product-already-created",
+                ProductCode = "P-ALREADY",
+                ItemNumber = "FRA 327935",
+                Barcode = "9320760327935",
+                ProductName = "30X30CM ICONIC FRAME BLACK",
+                LocalSupplierCode = "SUP01",
+                PurchasePrice = 1.2m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                new StoreLocalSupplierInvoiceDetails
+                {
+                    DetailGUID = "detail-create-already",
+                    InvoiceGUID = "invoice-create-already",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ProductCode = "P-ALREADY",
+                    ItemNumber = "fra 327935",
+                    Barcode = "9320760327935",
+                    ProductName = "30X30CM ICONIC FRAME BLACK",
+                    PurchasePrice = 1.2m,
+                    ExistingProductCount = 0,
+                    ActivityType = (int)DetailAction.CreateProduct,
+                    IsDeleted = false,
+                },
+                new StoreLocalSupplierInvoiceDetails
+                {
+                    // 对照：同一批里真正的新品照常新建。
+                    DetailGUID = "detail-create-fresh",
+                    InvoiceGUID = "invoice-create-already",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ItemNumber = "FRESH-001",
+                    Barcode = "9320760999999",
+                    ProductName = "Fresh Product",
+                    PurchasePrice = 2.5m,
+                    ActivityType = (int)DetailAction.CreateProduct,
+                    IsDeleted = false,
+                },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-create-already",
+                new List<string> { "detail-create-already", "detail-create-fresh" },
+                "tester"
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(1, result.Data?.CreatedProducts);
+            Assert.Equal(1, await _db.Queryable<Product>().CountAsync(x => x.ItemNumber == "FRA 327935"));
+            Assert.Equal(1, await _db.Queryable<Product>().CountAsync(x => x.ItemNumber == "FRESH-001"));
+            var details = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .Where(x => x.InvoiceGUID == "invoice-create-already")
+                .ToListAsync();
+            Assert.All(details, x => Assert.Equal(99, x.ActivityType));
+            Assert.Equal("P-ALREADY", details.Single(x => x.DetailGUID == "detail-create-already").ProductCode);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_CreateProduct_已关联编码属于别家供应商时仍按已存在报错()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-create-mismatch", "INV-CREATE-MISMATCH", new DateTime(2026, 10, 5));
+            await _db.Insertable(new[]
+            {
+                new Product
+                {
+                    UUID = "product-other-supplier",
+                    ProductCode = "P-OTHER-SUPPLIER",
+                    ItemNumber = "MISMATCH-1",
+                    Barcode = "9320760888888",
+                    ProductName = "Other Supplier Product",
+                    LocalSupplierCode = "SUP02",
+                    IsDeleted = false,
+                },
+                new Product
+                {
+                    UUID = "product-same-identity",
+                    ProductCode = "P-SAME-IDENTITY",
+                    ItemNumber = "MISMATCH-1",
+                    Barcode = "9320760777777",
+                    ProductName = "Same Identity Product",
+                    LocalSupplierCode = "SUP01",
+                    IsDeleted = false,
+                },
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-create-mismatch",
+                InvoiceGUID = "invoice-create-mismatch",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ProductCode = "P-OTHER-SUPPLIER",
+                ItemNumber = "MISMATCH-1",
+                Barcode = "9320760888888",
+                ProductName = "Mismatch Product",
+                PurchasePrice = 2.2m,
+                ActivityType = (int)DetailAction.CreateProduct,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-create-mismatch",
+                new List<string> { "detail-create-mismatch" },
+                "tester"
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.Code);
+            Assert.Equal(2, await _db.Queryable<Product>().CountAsync());
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .SingleAsync(x => x.DetailGUID == "detail-create-mismatch");
+            Assert.Equal((int)DetailAction.CreateProduct, detail.ActivityType);
+        }
+
+        [Fact]
         public async Task BatchExecuteActionsAsync_WhenMultiCodeDuplicateDiffersOnlyByCase_ReturnsValidationError()
         {
             await SeedStoreAndSupplierAsync();

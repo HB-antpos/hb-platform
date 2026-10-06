@@ -72,9 +72,15 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 );
                 lockScope?.EnsureCovers(db, productCodes);
 
+                // 锁内识别「新建商品」里商品已建好的行：校验不报「已存在」，执行时跳过并标记已执行。
+                var alreadyCreatedDetailGuids = await _source.FindAlreadyCreatedProductDetailGuidsAsync(
+                    lockedData.Details,
+                    lockedData.Header?.SupplierCode
+                );
                 var validationErrors = await _validator.ValidateLockedDetailsAsync(
                     lockedData,
-                    plan.Request.ProductTypes
+                    plan.Request.ProductTypes,
+                    alreadyCreatedDetailGuids
                 );
                 validationErrors.AddRange(plan.Request.ProductTypeSelectionErrors);
                 if (validationErrors.Count > 0)
@@ -92,7 +98,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 // 历史审计与主档写入必须处于同一事务，保证任意失败整笔回滚。
                 var beforeSnapshots = await _dependencies.ChangeHistoryService.CaptureSnapshotsAsync(productCodes);
                 var groups = LocalSupplierInvoicesProductExecutionPlan.GroupBySavedAction(lockedData.Details);
-                await ExecuteGroupsAsync(groups, lockedData, plan.Request, accumulator);
+                await ExecuteGroupsAsync(groups, lockedData, plan.Request, accumulator, alreadyCreatedDetailGuids);
                 if (accumulator.Result.Failed > 0)
                 {
                     await db.Ado.RollbackTranAsync();
@@ -258,19 +264,27 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             IReadOnlyDictionary<DetailAction, List<BlazorApp.Shared.Models.StoreLocalSupplierInvoiceDetails>> groups,
             ProductExecutionSourceData data,
             ProductExecutionRequest request,
-            LocalSupplierInvoicesProductExecutionResultAccumulator accumulator
+            LocalSupplierInvoicesProductExecutionResultAccumulator accumulator,
+            IReadOnlySet<string> alreadyCreatedDetailGuids
         )
         {
-            if (groups.TryGetValue(DetailAction.CreateProduct, out var create))
-                accumulator.Apply(
-                    DetailAction.CreateProduct,
-                    await _store.BatchCreateProductsAsync(
-                        create,
-                        data.Header!,
-                        request.UserName,
-                        request.ProductTypes
-                    )
-                );
+            if (groups.TryGetValue(DetailAction.CreateProduct, out var createGroup))
+            {
+                accumulator.MarkAlreadyDone(createGroup
+                    .Where(detail => alreadyCreatedDetailGuids.Contains(detail.DetailGUID))
+                    .Select(detail => detail.DetailGUID));
+                var create = createGroup.Where(detail => !alreadyCreatedDetailGuids.Contains(detail.DetailGUID)).ToList();
+                if (create.Count > 0)
+                    accumulator.Apply(
+                        DetailAction.CreateProduct,
+                        await _store.BatchCreateProductsAsync(
+                            create,
+                            data.Header!,
+                            request.UserName,
+                            request.ProductTypes
+                        )
+                    );
+            }
             if (groups.TryGetValue(DetailAction.UpdatePurchasePrice, out var prices))
                 accumulator.Apply(
                     DetailAction.UpdatePurchasePrice,
