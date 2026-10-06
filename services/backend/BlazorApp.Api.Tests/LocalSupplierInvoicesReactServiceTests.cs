@@ -2055,6 +2055,99 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchExecuteActionsAsync_更新套装主商品进货价时自动补齐有分店价门店的缺失子项()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await SeedActiveSetRelationsAsync("P001", "AUTO");
+            await _db.Insertable(new[]
+            {
+                new Store { StoreGUID = "store-guid-s02", StoreCode = "S02", StoreName = "Store 2", IsActive = true, IsDeleted = false },
+                new Store { StoreGUID = "store-guid-s03", StoreCode = "S03", StoreName = "Store 3", IsActive = true, IsDeleted = false },
+            }).ExecuteCommandAsync();
+            // S01、S02 都有分店价但没有任何门店子项（生产 1042 缺 G114109 子项即此形态）；
+            // S03 没有分店价，补齐不应凭空扩展到该店。
+            await _db.Insertable(new StoreRetailPrice
+            {
+                UUID = "SRP-001-S02",
+                StoreCode = "S02",
+                ProductCode = "P001",
+                StoreProductCode = "S02P001",
+                SupplierCode = "SUP01",
+                PurchasePrice = 1.11m,
+                StoreRetailPriceValue = 2.22m,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price" },
+                "tester"
+            );
+
+            var product = await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == "P001");
+            var relations = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == "P001" && x.IsActive && !x.IsDeleted)
+                .ToListAsync();
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(1, result.Data?.UpdatedPurchasePrices);
+            Assert.Equal(5.55m, product.PurchasePrice);
+            Assert.Equal(
+                new[] { "S01", "S02" },
+                relations.Select(x => x.StoreCode).Distinct().OrderBy(x => x).ToArray()
+            );
+            Assert.Equal(4, relations.Count);
+            Assert.All(relations, relation => Assert.Equal("tester", relation.CreatedBy));
+            Assert.All(relations, relation => Assert.True(relation.PurchasePrice > 0m));
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_套装子项无法自动补齐时整单回滚并返回涉及货号()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await SeedActiveSetRelationsAsync("P001", "UNSAFE");
+            // 停用墓碑不会被自动复活，补齐失败后严格重算仍报缺子项，整单必须回滚。
+            await _db.Insertable(new StoreMultiCodeProduct
+            {
+                UUID = "S01-P001-TOMBSTONE",
+                StoreCode = "S01",
+                ProductCode = "P001",
+                MultiCodeProductCode = "UNSAFE-CHILD-T1",
+                StoreMultiCodeProductCode = "S01UNSAFE-CHILD-T1",
+                MultiBarcode = "UNSAFE-BAR-T1",
+                PurchasePrice = 7.77m,
+                MultiCodeRetailPrice = 4m,
+                IsActive = false,
+                IsDeleted = true,
+                UpdatedBy = "历史操作人",
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price" },
+                "tester"
+            );
+
+            var product = await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == "P001");
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .SingleAsync(x => x.DetailGUID == "detail-price");
+            var activeRelations = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == "P001" && x.IsActive && !x.IsDeleted)
+                .ToListAsync();
+            Assert.False(result.Success);
+            Assert.Equal("SET_CHILD_COST_RECALCULATION_INCOMPLETE", result.ErrorCode);
+            Assert.Contains("ITEM-OLD（P001）", result.Message);
+            var failure = Assert.IsType<BatchExecuteActionsResultDto>(result.Details);
+            Assert.Equal(1, failure.Failed);
+            Assert.Equal(0, failure.UpdatedPurchasePrices);
+            Assert.Contains(failure.Errors, error => error.Contains("已停用或软删除", StringComparison.Ordinal));
+            Assert.Contains(failure.Errors, error => error.Contains("套装子项成本无法完整重算", StringComparison.Ordinal));
+            Assert.Equal(1.11m, product.PurchasePrice);
+            Assert.Empty(activeRelations);
+            Assert.Equal((int)DetailAction.UpdatePurchasePrice, detail.ActivityType);
+        }
+
+        [Fact]
         public async Task BatchExecuteActionsAsync_UpdateItemNumber_BatchUpdatesProducts()
         {
             await SeedExecutableItemNumberUpdatesAsync();

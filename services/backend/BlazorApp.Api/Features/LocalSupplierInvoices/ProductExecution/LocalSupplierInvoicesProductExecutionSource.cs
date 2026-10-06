@@ -145,6 +145,67 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 .ToDictionary(product => product.ProductCode!, product => product.ItemNumber!, StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// 读取本次改动商品中仍有有效套装/多码关系的主商品成本，供重算前补齐门店子项。
+        /// 口径与套装重算一致：主档进货价为正优先，否则回退仓库进口价；成本不为正的商品不返回，
+        /// 交由随后的严格重算按原规则报错，避免补齐门禁比原流程更严。
+        /// </summary>
+        public async Task<Dictionary<string, decimal>> LoadSetParentPurchasePricesAsync(
+            IReadOnlyCollection<string> productCodes
+        )
+        {
+            var prices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            if (productCodes.Count == 0)
+                return prices;
+
+            var codes = productCodes.ToList();
+            var parentCodes = (
+                await _context.Db.Queryable<ProductSetCode>()
+                    .Where(row =>
+                        codes.Contains(row.ProductCode)
+                        && (row.SetType == 1 || row.SetType == 2)
+                        && row.IsActive
+                        && row.IsDeleted == false
+                    )
+                    .Select(row => row.ProductCode)
+                    .Distinct()
+                    .ToListAsync()
+            )
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (parentCodes.Count == 0)
+                return prices;
+
+            var products = await _context.Db.Queryable<Product>()
+                .Where(product =>
+                    product.ProductCode != null
+                    && parentCodes.Contains(product.ProductCode)
+                    && product.IsDeleted == false
+                )
+                .ToListAsync();
+            foreach (var product in products)
+            {
+                if (product.PurchasePrice.GetValueOrDefault() > 0m)
+                    prices.TryAdd(product.ProductCode!.Trim(), product.PurchasePrice!.Value);
+            }
+
+            var warehouseCodes = parentCodes.Where(code => !prices.ContainsKey(code)).ToList();
+            if (warehouseCodes.Count == 0)
+                return prices;
+            var warehouses = await _context.Db.Queryable<WarehouseProduct>()
+                .Where(row => warehouseCodes.Contains(row.ProductCode) && row.IsDeleted == false)
+                .ToListAsync();
+            foreach (var warehouse in warehouses)
+            {
+                if (warehouse.ImportPrice.GetValueOrDefault() > 0m)
+                    prices.TryAdd(warehouse.ProductCode.Trim(), warehouse.ImportPrice!.Value);
+            }
+
+            return prices;
+        }
+
         private static string? NormalizeCaseInsensitive(string? value) =>
             string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToUpperInvariant();
     }

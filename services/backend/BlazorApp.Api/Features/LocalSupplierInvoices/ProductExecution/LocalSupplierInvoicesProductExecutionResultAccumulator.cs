@@ -39,6 +39,20 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         }
 
         public void AddSkipped(int count) => Result.Skipped += count;
+
+        /// <summary>整单回滚后清零写入计数，只保留失败行数与原因，避免前端把已回滚的行显示为成功。</summary>
+        public void MarkRolledBack(int failedCount, IEnumerable<string> errors)
+        {
+            Result.CreatedProducts = 0;
+            Result.UpdatedPurchasePrices = 0;
+            Result.UpdatedItemNumbers = 0;
+            Result.AddedMultiCodes = 0;
+            Result.Skipped = 0;
+            Result.Failed = failedCount;
+            Result.Errors.Clear();
+            Result.Errors.AddRange(errors);
+            SuccessfulDetailGuids.Clear();
+        }
     }
 
     internal sealed record ProductExecutionCommandResult(
