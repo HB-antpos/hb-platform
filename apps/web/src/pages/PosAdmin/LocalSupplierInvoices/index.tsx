@@ -71,6 +71,17 @@ import { getActiveStores } from '../../../services/storeService'
 import type {
   LocalSupplierInvoiceListDto,
 } from '../../../types/localSupplierInvoice'
+import {
+  BATCH_CHECK_MAX_INVOICES,
+  buildBatchItemMap,
+  getRowBatchDisplay,
+  isBatchJobActive,
+  limitBatchSelection,
+  mergeSelectedRecords,
+  pickPendingSelection,
+  summarizeBatchSelection,
+} from './batchCheck'
+import { useBatchCheckProductsJob } from './useBatchCheckProductsJob'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import {
   buildStoreOptionsFromUserStores,
@@ -326,6 +337,8 @@ const COLUMN_WIDTHS: Partial<Record<LocalSupplierInvoiceColumnKey | 'index' | 'a
 }
 /** 备注列最小宽度；隐藏备注时由一个空白占位列吸收多余宽度。 */
 const REMARKS_MIN_WIDTH = 140
+/** 批量检测勾选列宽度（仅有编辑权限时显示）。 */
+const SELECTION_COLUMN_WIDTH = 40
 
 function formatDate(value?: string) {
   if (!value) return '--'
@@ -380,6 +393,10 @@ function writeStoredValue(key: string, value: unknown) {
 }
 
 type SearchScope = 'invoiceNo' | 'product'
+interface LoadDataOptions {
+  /** 后台刷新（如批量检测进度）：不显示表格加载态。 */
+  silent?: boolean
+}
 type ProductCheckedSegment = 'all' | 'pending' | 'checked'
 
 function toProductCheckedSegment(value: boolean | undefined): ProductCheckedSegment {
@@ -430,6 +447,11 @@ export default function LocalSupplierInvoicesPage() {
   const [segmentCounts, setSegmentCounts] = useState<{ all: number; pending: number } | null>(null)
   // 左侧分店栏的单数：沿用除分店以外的全部条件，同样只在这些条件变化时重新统计。
   const [storeCounts, setStoreCounts] = useState<Record<string, number> | null>(null)
+  // 批量商品检测：跨页勾选，记下各页勾选行的数据用于「待检测」计数。
+  const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState<string[]>([])
+  const [selectedInvoiceRecords, setSelectedInvoiceRecords] = useState<
+    Record<string, LocalSupplierInvoiceListDto | undefined>
+  >({})
 
   // 下拉选项
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
@@ -458,7 +480,19 @@ export default function LocalSupplierInvoicesPage() {
   const storeCountRequestGuardRef = useRef(createLatestRequestGuard())
   const lastStoreCountFilterKeyRef = useRef<string | null>(null)
   const mountedRef = useRef(false)
-  const latestLoadDataRef = useRef<() => Promise<void>>(async () => undefined)
+  const latestLoadDataRef = useRef<(options?: LoadDataOptions) => Promise<void>>(async () => undefined)
+  const batchCheck = useBatchCheckProductsJob({
+    onListShouldRefresh: () => {
+      // 检测会改变「待检测」分段与分店计数，强制重新统计。
+      lastCountFilterKeyRef.current = null
+      lastStoreCountFilterKeyRef.current = null
+      void latestLoadDataRef.current({ silent: true })
+    },
+    onPollError: () => message.warning(t('posAdmin.invoiceList.batchCheck.pollFailed')),
+  })
+  const batchJob = batchCheck.job
+  const batchJobActive = isBatchJobActive(batchJob)
+  const batchItemMap = useMemo(() => buildBatchItemMap(batchJob), [batchJob])
 
   const columnDragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -506,7 +540,7 @@ export default function LocalSupplierInvoicesPage() {
     [columnLabels, t],
   )
 
-  const loadData = async () => {
+  const loadData = async ({ silent = false }: LoadDataOptions = {}) => {
     if (!mountedRef.current) return
 
     if (shouldSkipScopedStoreQuery(managedStoreCodes)) {
@@ -626,7 +660,10 @@ export default function LocalSupplierInvoicesPage() {
           sortModel,
         } as Record<string, unknown>),
       {
-        onStart: () => setLoading(true),
+        // 批量检测进度触发的刷新不转圈，避免每处理完几张单整表闪一次。
+        onStart: () => {
+          if (!silent) setLoading(true)
+        },
         onSuccess: (result) => {
           setData(result?.items ?? [])
           setTotal(result?.total ?? 0)
@@ -1057,6 +1094,25 @@ export default function LocalSupplierInvoicesPage() {
       key: 'isProductChecked',
       width: COLUMN_WIDTHS.isProductChecked,
       render: (value: boolean | undefined, record) => {
+        // 批量检测中的单优先显示任务状态；成功后回到下面按列表数据显示，口径与后端统计一致。
+        const batchItem = batchItemMap.get(record.invoiceGUID)
+        const batchDisplay = getRowBatchDisplay(batchItem, batchJobActive)
+        if (batchDisplay === 'queued' || batchDisplay === 'running') {
+          return (
+            <span className={batchDisplay === 'running' ? 'lsi-pill lsi-pill-running' : 'lsi-pill lsi-pill-queued'}>
+              {t(batchDisplay === 'running' ? 'posAdmin.invoiceList.batchCheck.rowRunning' : 'posAdmin.invoiceList.batchCheck.rowQueued')}
+            </span>
+          )
+        }
+        if (batchDisplay === 'failed' || batchDisplay === 'skipped') {
+          return (
+            <Tooltip title={batchItem?.message || undefined}>
+              <span className={batchDisplay === 'failed' ? 'lsi-pill lsi-pill-error' : 'lsi-pill lsi-pill-muted'}>
+                {t(batchDisplay === 'failed' ? 'posAdmin.invoiceList.batchCheck.rowFailed' : 'posAdmin.invoiceList.batchCheck.rowSkipped')}
+              </span>
+            </Tooltip>
+          )
+        }
         // 兼容尚未返回汇总字段的后端，缺失值不能误报为未检测。
         if (typeof value !== 'boolean') return '--'
         const unchecked = record.uncheckedDetailCount ?? 0
@@ -1262,8 +1318,151 @@ export default function LocalSupplierInvoicesPage() {
   // 表格最小宽度 = 定宽列之和 + 备注最小宽度；更宽的屏幕把多余空间留给备注（或隐藏备注时的占位列）。
   const tableScrollX = columns.reduce(
     (sum, column) => sum + (typeof column.width === 'number' ? column.width : column.key === 'remarks' ? REMARKS_MIN_WIDTH : 0),
-    0,
+    canEditInvoices ? SELECTION_COLUMN_WIDTH : 0,
   )
+
+  // ---- 批量商品检测 ----
+  // 当前页的行数据比勾选时记下的更新（检测完刷新后待检测数会变），优先用当前页。
+  const selectionRecords = useMemo(() => {
+    const merged = { ...selectedInvoiceRecords }
+    for (const row of data) {
+      if (row.invoiceGUID in merged) merged[row.invoiceGUID] = row
+    }
+    return merged
+  }, [data, selectedInvoiceRecords])
+  const selectionSummary = summarizeBatchSelection(selectedInvoiceKeys, selectionRecords)
+
+  const updateInvoiceSelection = (keys: string[], rows: (LocalSupplierInvoiceListDto | undefined)[]) => {
+    const limited = limitBatchSelection(keys)
+    if (limited.truncated) {
+      message.warning(t('posAdmin.invoiceList.batchCheck.selectionLimit', { max: BATCH_CHECK_MAX_INVOICES }))
+    }
+    setSelectedInvoiceKeys(limited.keys)
+    setSelectedInvoiceRecords((previous) => mergeSelectedRecords(limited.keys, rows, previous))
+  }
+
+  const clearInvoiceSelection = () => {
+    setSelectedInvoiceKeys([])
+    setSelectedInvoiceRecords({})
+  }
+
+  const keepPendingSelection = () => {
+    const keys = pickPendingSelection(selectedInvoiceKeys, selectionRecords)
+    setSelectedInvoiceKeys(keys)
+    setSelectedInvoiceRecords((previous) => mergeSelectedRecords(keys, [], previous))
+  }
+
+  const handleStartBatchCheck = async () => {
+    if (selectedInvoiceKeys.length === 0 || batchJobActive) return
+    try {
+      const job = await batchCheck.start(selectedInvoiceKeys)
+      message.success(t('posAdmin.invoiceList.batchCheck.submitted', { count: job.total }))
+      clearInvoiceSelection()
+    } catch (error) {
+      message.error(error instanceof Error && error.message
+        ? error.message
+        : t('posAdmin.invoiceList.batchCheck.submitFailed'))
+    }
+  }
+
+  const handleCancelBatchCheck = async () => {
+    try {
+      await batchCheck.cancel()
+    } catch {
+      message.error(t('posAdmin.invoiceList.batchCheck.cancelFailed'))
+    }
+  }
+
+  const renderBatchProgress = () => {
+    if (!batchJob) return null
+    const percent = batchJob.total > 0 ? Math.round((batchJob.processed / batchJob.total) * 100) : 0
+    let label: string
+    if (batchCheck.pollStopped) label = t('posAdmin.invoiceList.batchCheck.pollStopped')
+    else if (batchJobActive && batchJob.isWaiting) label = t('posAdmin.invoiceList.batchCheck.waiting')
+    else if (batchJobActive && batchJob.cancelRequested) label = t('posAdmin.invoiceList.batchCheck.stopping')
+    else if (batchJobActive) label = t('posAdmin.invoiceList.batchCheck.running')
+    else if (batchJob.status === 'Cancelled') label = t('posAdmin.invoiceList.batchCheck.cancelled')
+    else label = t('posAdmin.invoiceList.batchCheck.completed')
+    const canDismiss = !batchJobActive || batchCheck.pollStopped
+    return (
+      <div className="lsi-batch-progress" aria-live="polite">
+        <span className="lsi-batch-progress-label">{label}</span>
+        <span
+          className="lsi-batch-progress-track"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={batchJob.total}
+          aria-valuenow={batchJob.processed}
+        >
+          <span className="lsi-batch-progress-fill" style={{ width: `${percent}%` }} />
+        </span>
+        <span className="lsi-num">{batchJob.processed}/{batchJob.total}</span>
+        <span className="lsi-batch-progress-stats lsi-num">
+          {t('posAdmin.invoiceList.batchCheck.statSucceeded', { count: batchJob.succeeded })}
+          {batchJob.failed > 0 && (
+            <span className="lsi-batch-stat-failed">
+              {' · '}{t('posAdmin.invoiceList.batchCheck.statFailed', { count: batchJob.failed })}
+            </span>
+          )}
+          {batchJob.skipped > 0 && (
+            <span>{' · '}{t('posAdmin.invoiceList.batchCheck.statSkipped', { count: batchJob.skipped })}</span>
+          )}
+        </span>
+        {canDismiss ? (
+          <Button size="small" type="text" onClick={batchCheck.dismiss}>
+            {t('posAdmin.invoiceList.batchCheck.dismiss')}
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            disabled={batchJob.cancelRequested}
+            loading={batchCheck.cancelling}
+            onClick={handleCancelBatchCheck}
+          >
+            {t('posAdmin.invoiceList.batchCheck.stop')}
+          </Button>
+        )}
+      </div>
+    )
+  }
+
+  const renderBatchSelection = () => {
+    if (selectedInvoiceKeys.length === 0) return null
+    const startButton = (
+      <Button
+        type="primary"
+        size="small"
+        loading={batchCheck.submitting}
+        disabled={batchJobActive}
+        onClick={handleStartBatchCheck}
+      >
+        {t('posAdmin.invoiceList.batchCheck.start')}
+      </Button>
+    )
+    return (
+      <div className="lsi-batch-selection">
+        <span className="lsi-num">
+          {t('posAdmin.invoiceList.batchCheck.selected', { count: selectionSummary.total })}
+          {selectionSummary.pending < selectionSummary.total && (
+            <span className="lsi-muted">
+              {t('posAdmin.invoiceList.batchCheck.selectedPending', { count: selectionSummary.pending })}
+            </span>
+          )}
+        </span>
+        {batchJobActive ? (
+          <Tooltip title={t('posAdmin.invoiceList.batchCheck.busyTip')}>{startButton}</Tooltip>
+        ) : startButton}
+        {selectionSummary.pending > 0 && selectionSummary.pending < selectionSummary.total && (
+          <Button size="small" onClick={keepPendingSelection}>
+            {t('posAdmin.invoiceList.batchCheck.keepPending')}
+          </Button>
+        )}
+        <Button size="small" type="link" onClick={clearInvoiceSelection} style={{ paddingInline: 4 }}>
+          {t('posAdmin.invoiceList.batchCheck.clearSelection')}
+        </Button>
+      </div>
+    )
+  }
 
   // 桌面端把可选分店全部列在表格左侧，点选即筛选；只有一个分店（如单店店长）或手机端时退回工具栏下拉。
   const showStoreRail = !isMobile && storeOptions.length > 1
@@ -1527,6 +1726,13 @@ export default function LocalSupplierInvoicesPage() {
             </Popover>
           </div>
 
+          {canEditInvoices && (selectedInvoiceKeys.length > 0 || batchJob) && (
+            <div className="lsi-batch-bar">
+              {renderBatchSelection()}
+              {renderBatchProgress()}
+            </div>
+          )}
+
           <div ref={tableRegionRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', borderTop: '1px solid #eef1f5' }}>
             <DndContext
               sensors={columnDragSensors}
@@ -1540,6 +1746,13 @@ export default function LocalSupplierInvoicesPage() {
                   rowKey="invoiceGUID"
                   loading={loading}
                   dataSource={data}
+                  // 只有能处理进货单的人能批量检测；只读用户（如店长）不显示勾选列。
+                  rowSelection={canEditInvoices ? {
+                    selectedRowKeys: selectedInvoiceKeys,
+                    preserveSelectedRowKeys: true,
+                    columnWidth: SELECTION_COLUMN_WIDTH,
+                    onChange: (keys, rows) => updateInvoiceSelection(keys.map(String), rows),
+                  } : undefined}
                   components={{ header: { cell: DraggableHeaderCell } }}
                   columns={columns}
                   pagination={false}

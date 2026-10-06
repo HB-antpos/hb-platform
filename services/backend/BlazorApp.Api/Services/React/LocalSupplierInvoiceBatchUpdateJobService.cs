@@ -24,7 +24,7 @@ namespace BlazorApp.Api.Services.React
     /// <summary>
     /// 本地进货单批量更新后台任务服务。
     /// </summary>
-    public class LocalSupplierInvoiceBatchUpdateJobService : ILocalSupplierInvoiceBatchUpdateJobService
+    public partial class LocalSupplierInvoiceBatchUpdateJobService : ILocalSupplierInvoiceBatchUpdateJobService
     {
         private static readonly TimeSpan DefaultCompletedRetention = TimeSpan.FromMinutes(45);
         private static readonly TimeSpan HqLockRetryBudget = TimeSpan.FromSeconds(60);
@@ -713,6 +713,7 @@ namespace BlazorApp.Api.Services.React
             CleanupExpiredJobs(_hqProductJobs, now);
             CleanupExpiredJobs(_pasteDetailsJobs, now);
             CleanupExpiredJobs(_checkProductsJobs, now);
+            CleanupExpiredBatchCheckProductsJobs(now);
         }
 
         private void CleanupExpiredJobs<T>(
@@ -736,19 +737,33 @@ namespace BlazorApp.Api.Services.React
             ConcurrentDictionary<string, JobState<T>> jobs
         )
         {
-            if (!_runningInvoiceFamilyJobIds.TryGetValue(familyKey, out var existingJobId))
+            if (!TryGetRunningInvoiceFamilyJobId(familyKey, jobs, out var existingJobId))
                 return;
-            if (!jobs.TryGetValue(existingJobId, out var existingState) || !IsRunning(existingState))
-            {
-                _runningInvoiceFamilyJobIds.TryRemove(familyKey, out _);
-                return;
-            }
 
             throw new LocalSupplierInvoiceBatchUpdateJobConflictException(
                 "同一张本地进货单已有同类后台任务正在执行，请等待完成后再提交新的批量写入",
                 existingJobId,
                 operationId
             );
+        }
+
+        /// <summary>同张单同类任务仍在运行时返回其 JobId；登记已失效（任务结束或被清理）时顺手移除。</summary>
+        private bool TryGetRunningInvoiceFamilyJobId<T>(
+            string familyKey,
+            ConcurrentDictionary<string, JobState<T>> jobs,
+            out string existingJobId
+        )
+        {
+            if (!_runningInvoiceFamilyJobIds.TryGetValue(familyKey, out existingJobId!))
+                return false;
+            if (!jobs.TryGetValue(existingJobId, out var existingState) || !IsRunning(existingState))
+            {
+                _runningInvoiceFamilyJobIds.TryRemove(familyKey, out _);
+                existingJobId = string.Empty;
+                return false;
+            }
+
+            return true;
         }
 
         private LocalSupplierInvoiceUpdateToStorePricesJobDto? GetRunningStorePriceJob(string operationId)
@@ -957,7 +972,7 @@ namespace BlazorApp.Api.Services.React
                 "check-products",
                 request.InvoiceGuid,
                 JoinSorted(request.DetailGuids)
-            );
+            ) + (request.ExcludeExecutedDetails ? "|exclude-executed" : string.Empty);
         }
 
         private static string BuildInvoiceFamilyKey(string family, string invoiceGuid)
@@ -1048,6 +1063,7 @@ namespace BlazorApp.Api.Services.React
             {
                 InvoiceGuid = request.InvoiceGuid,
                 DetailGuids = request.DetailGuids?.ToList(),
+                ExcludeExecutedDetails = request.ExcludeExecutedDetails,
             };
         }
 

@@ -58,5 +58,23 @@ namespace BlazorApp.Api.Interfaces.React
             string jobId,
             CancellationToken cancellationToken = default
         );
+
+        /// <summary>列表批量商品检测：按顺序逐张检测，跳过已执行明细。</summary>
+        Task<LocalSupplierInvoiceBatchCheckProductsJobDto> StartBatchCheckProductsJobAsync(
+            IReadOnlyList<string> invoiceGuids,
+            IReadOnlyCollection<string> storeCodes,
+            CancellationToken cancellationToken = default
+        );
+
+        Task<LocalSupplierInvoiceBatchCheckProductsJobDto?> GetBatchCheckProductsJobAsync(
+            string jobId,
+            CancellationToken cancellationToken = default
+        );
+
+        /// <summary>停止剩余：正在检测的单跑完，排队中的单标记为跳过。</summary>
+        Task<LocalSupplierInvoiceBatchCheckProductsJobDto?> CancelBatchCheckProductsJobAsync(
+            string jobId,
+            CancellationToken cancellationToken = default
+        );
     }
 }

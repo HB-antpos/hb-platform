@@ -81,6 +81,39 @@
   background: #fff4e0;
 }
 
+/* 批量检测中的行内状态：排队 / 检测中 / 失败 / 跳过 */
+.lsi-pill-queued,
+.lsi-pill-muted {
+  color: #4e5969;
+  background: #f0f3f8;
+}
+
+.lsi-pill-running {
+  color: #1554c0;
+  background: #eef4ff;
+}
+
+.lsi-pill-running::before {
+  animation: lsi-pill-pulse 1.2s ease-in-out infinite;
+}
+
+.lsi-pill-error {
+  color: #c11f1f;
+  background: #fff1f0;
+}
+
+@keyframes lsi-pill-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lsi-pill-running::before {
+    animation: none;
+  }
+}
+
 .lsi-tag {
   display: inline-flex;
   align-items: center;
@@ -263,6 +296,56 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+/* 批量商品检测：勾选操作与进度共用一条，位于筛选栏和表格之间 */
+.lsi-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  padding: 6px 16px;
+  border-top: 1px solid #eef1f5;
+  background: #f7f9fd;
+  font-size: 13px;
+}
+
+.lsi-batch-selection,
+.lsi-batch-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lsi-batch-progress-label {
+  font-weight: 500;
+}
+
+.lsi-batch-progress-track {
+  position: relative;
+  width: 160px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #e3e8f0;
+}
+
+.lsi-batch-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: #1677ff;
+  transition: width 0.3s ease;
+}
+
+.lsi-batch-progress-stats {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.lsi-batch-stat-failed {
+  color: #c11f1f;
 }
 
 .lsi-list-toolbar-divider {

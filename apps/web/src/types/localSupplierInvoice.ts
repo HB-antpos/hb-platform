@@ -475,6 +475,43 @@ export interface CheckProductsJobDto extends LocalSupplierInvoiceJobBase {
 
 export type CheckProductsJobResult = CheckProductsJobDto
 
+/** 列表批量商品检测：整体状态。 */
+export type BatchCheckProductsJobStatus = 'Running' | 'Completed' | 'Cancelled'
+
+/** 列表批量商品检测：单张进货单状态。 */
+export type BatchCheckProductsItemStatus = 'Queued' | 'Running' | 'Succeeded' | 'Failed' | 'Skipped'
+
+export interface BatchCheckProductsItemDto {
+  invoiceGuid: string
+  status: BatchCheckProductsItemStatus
+  message?: string | null
+  /** 本次实际检测的明细行数（已执行行不计入）。 */
+  checkedCount: number
+  completedAt?: string | null
+}
+
+export interface BatchCheckProductsJobDto {
+  jobId: string
+  operationId: string
+  status: BatchCheckProductsJobStatus
+  isDuplicateRequest: boolean
+  /** 前面还有其他批量检测任务，本任务尚未开始。 */
+  isWaiting: boolean
+  cancelRequested: boolean
+  storeCodes: string[]
+  createdAt: string
+  startedAt?: string | null
+  completedAt?: string | null
+  expiresAt?: string | null
+  message?: string | null
+  total: number
+  processed: number
+  succeeded: number
+  failed: number
+  skipped: number
+  items: BatchCheckProductsItemDto[]
+}
+
 export interface LocalSupplierInvoiceHqSyncRequest {
   selectedStoreCodes?: string[]
   startDate?: string

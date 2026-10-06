@@ -377,6 +377,9 @@ internal sealed class LocalSupplierInvoicesProductReviewStore
             .Where(x => x.InvoiceGUID == request.InvoiceGuid && x.IsDeleted == false);
         if (request.DetailGuids is { Count: > 0 })
             detailsQuery = detailsQuery.Where(x => request.DetailGuids.Contains(x.DetailGUID));
+        // 关键位置：批量检测不能把已执行行（99）的操作类型覆盖回默认建议，否则「已执行」进度丢失。
+        if (request.ExcludeExecutedDetails)
+            detailsQuery = detailsQuery.Where(x => x.ActivityType == null || x.ActivityType != 99);
         var details = await detailsQuery.ToListAsync();
 
         var itemNumbers = details.Select(x => x.ItemNumber?.Trim())

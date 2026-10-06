@@ -4,6 +4,7 @@ import type {
   BatchExecuteActionsResult,
   BatchEditFields,
   BatchResultDto,
+  BatchCheckProductsJobDto,
   CheckProductsJobResult,
   CheckInvoiceNoRequest,
   CheckInvoiceNoResponse,
@@ -662,6 +663,31 @@ export async function getCheckProductsJob(invoiceGuid: string, jobId: string): P
     `${API_BASE}/${invoiceGuid}/check-products/jobs/${encodeURIComponent(jobId)}`,
   )
   assertApiSuccess(response, '查询商品检测任务失败')
+  return unwrapApiData(response)
+}
+
+export async function startBatchCheckProductsJob(invoiceGuids: string[]): Promise<BatchCheckProductsJobDto> {
+  const response = await request.post<ApiResponse<BatchCheckProductsJobDto>>(
+    `${API_BASE}/check-products/batch-jobs`,
+    { invoiceGuids },
+  )
+  assertApiSuccess(response, '创建批量商品检测任务失败')
+  return unwrapApiData(response)
+}
+
+export async function getBatchCheckProductsJob(jobId: string): Promise<BatchCheckProductsJobDto> {
+  const response = await request.get<ApiResponse<BatchCheckProductsJobDto>>(
+    `${API_BASE}/check-products/batch-jobs/${encodeURIComponent(jobId)}`,
+  )
+  assertApiSuccess(response, '查询批量商品检测任务失败')
+  return unwrapApiData(response)
+}
+
+export async function cancelBatchCheckProductsJob(jobId: string): Promise<BatchCheckProductsJobDto> {
+  const response = await request.post<ApiResponse<BatchCheckProductsJobDto>>(
+    `${API_BASE}/check-products/batch-jobs/${encodeURIComponent(jobId)}/cancel`,
+  )
+  assertApiSuccess(response, '停止批量商品检测失败')
   return unwrapApiData(response)
 }
 
