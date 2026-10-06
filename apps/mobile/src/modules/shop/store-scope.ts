@@ -49,31 +49,51 @@ export function isStoreManageable(storeCode: string | null | undefined, manageab
   return manageableStores.some((store) => store.storeCode === storeCode);
 }
 
-export function resolveScopedStoreCode({
-  currentStoreCode,
-  persistedStoreCode,
-  deviceBoundStoreCode,
-  isDeviceMode,
-  stores,
-}: {
+type ScopedStoreInput = {
   currentStoreCode?: string | null;
+  /** 当前分店是否为自动默认（不是用户选的） */
+  currentIsAuto?: boolean;
   persistedStoreCode?: string | null;
   deviceBoundStoreCode?: string | null;
   isDeviceMode: boolean;
   stores: Store[];
-}) {
+};
+
+/**
+ * 解析当前应选中的分店，并标明是否为自动默认。优先级：用户选的当前分店 → 本机记住的分店 → 自动默认的当前分店 → 列表第一个。
+ * 自动默认让所有需要分店的页面进来即有分店；订货单、分店进货单、用户管理等「没选过分店时看全部」的页面据 isAuto 仍按全部显示。
+ */
+export function resolveScopedStoreSelection({
+  currentStoreCode,
+  currentIsAuto = false,
+  persistedStoreCode,
+  deviceBoundStoreCode,
+  isDeviceMode,
+  stores,
+}: ScopedStoreInput): { storeCode: string | null; isAuto: boolean } {
   if (isDeviceMode) {
-    return deviceBoundStoreCode ?? null;
+    return { storeCode: deviceBoundStoreCode ?? null, isAuto: false };
   }
 
-  if (currentStoreCode && stores.some((store) => store.storeCode === currentStoreCode)) {
-    return currentStoreCode;
+  const isAvailable = (storeCode?: string | null): storeCode is string =>
+    Boolean(storeCode && stores.some((store) => store.storeCode === storeCode));
+
+  if (isAvailable(currentStoreCode) && !currentIsAuto) {
+    return { storeCode: currentStoreCode, isAuto: false };
   }
 
-  if (persistedStoreCode && stores.some((store) => store.storeCode === persistedStoreCode)) {
-    return persistedStoreCode;
+  if (isAvailable(persistedStoreCode)) {
+    return { storeCode: persistedStoreCode, isAuto: false };
   }
 
-  // 没有当前选择、也没有记住的有效分店时默认第一个（列表已排序），所有需要分店的页面进来即有分店，可再手动切换
-  return stores[0]?.storeCode ?? null;
+  if (isAvailable(currentStoreCode)) {
+    return { storeCode: currentStoreCode, isAuto: true };
+  }
+
+  const firstStoreCode = stores[0]?.storeCode ?? null;
+  return { storeCode: firstStoreCode, isAuto: Boolean(firstStoreCode) };
+}
+
+export function resolveScopedStoreCode(input: ScopedStoreInput) {
+  return resolveScopedStoreSelection(input).storeCode;
 }
