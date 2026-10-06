@@ -1432,10 +1432,13 @@ public sealed class LocalSupplierInvoiceHqProductSyncTests : IDisposable
 
         var detail = await _localDb.Queryable<StoreLocalSupplierInvoiceDetails>()
             .FirstAsync(x => x.DetailGUID == "detail-new-local-product");
-        Assert.True(string.IsNullOrWhiteSpace(detail.ProductCode));
 
         var product = await _localDb.Queryable<Product>()
             .FirstAsync(x => x.ItemNumber == "ITEM-NEW-LOCAL");
+        // 本次新建的商品只回填两列编码，明细关联到主档；「上次进货价」等其他明细字段保持不变。
+        Assert.Equal(product.ProductCode, detail.ProductCode);
+        Assert.Equal($"S01{product.ProductCode}", detail.StoreProductCode);
+        Assert.Null(detail.LastPurchasePrice);
         Assert.Equal("ITEM-NEW-LOCAL", product.ItemNumber);
         Assert.Equal("930000009999", product.Barcode);
 

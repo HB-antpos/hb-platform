@@ -394,6 +394,19 @@ public sealed class LocalSupplierInvoiceHqConcurrencySqlServerTests
             Assert.Equal(11m, price.StoreRetailPriceValue);
         });
 
+        // 两行（含复用首行新建商品的 D1）都必须回填编码，且不改动「上次进货价」等其他明细字段。
+        var details = await fixture.Local.Queryable<StoreLocalSupplierInvoiceDetails>()
+            .Where(detail => detail.InvoiceGUID == "invoice-duplicate-batch")
+            .OrderBy(detail => detail.DetailGUID)
+            .ToListAsync();
+        Assert.Equal(2, details.Count);
+        Assert.All(details, detail =>
+        {
+            Assert.Equal(product.ProductCode, detail.ProductCode);
+            Assert.Equal("S00" + product.ProductCode, detail.StoreProductCode);
+            Assert.Equal(5m, detail.LastPurchasePrice);
+        });
+
         var hqProduct = Assert.Single(await fixture.Hq.Queryable<DIC_商品信息字典表>().ToListAsync());
         Assert.Equal(product.ProductCode, hqProduct.H商品编码);
         var hqPrices = await fixture.Hq.Queryable<DIC_商品零售价表>().ToListAsync();
@@ -663,20 +676,21 @@ public sealed class LocalSupplierInvoiceHqConcurrencySqlServerTests
                 .ToListAsync();
             Assert.Equal(2, details.Count);
             Assert.Equal(new[] { "D0", "D1" }, details.Select(detail => detail.DetailGUID).ToArray());
-            Assert.All(details, detail =>
-            {
-                // HQ 更新只在内存中补齐商品编码；本次业务不回写进货单明细的 ProductCode。
-                Assert.Null(detail.ProductCode);
-                Assert.Equal(7m, detail.PurchasePrice);
-                Assert.Equal(5m, detail.LastPurchasePrice);
-                Assert.Equal(11m, detail.RetailPrice);
-            });
-
             var products = await fixture.Local.Queryable<Product>()
                 .OrderBy(product => product.ItemNumber)
                 .ToListAsync();
             Assert.Equal(2, products.Count);
             Assert.Equal(new[] { "ITEM0", "ITEM1" }, products.Select(product => product.ItemNumber).ToArray());
+            var productCodeByItem = products.ToDictionary(product => product.ItemNumber!, product => product.ProductCode);
+            Assert.All(details, detail =>
+            {
+                // 本次新建的商品只回填两列编码；进货价、上次进货价、零售价等明细字段不回写。
+                Assert.Equal(productCodeByItem[detail.ItemNumber!], detail.ProductCode);
+                Assert.Equal("S00" + detail.ProductCode, detail.StoreProductCode);
+                Assert.Equal(7m, detail.PurchasePrice);
+                Assert.Equal(5m, detail.LastPurchasePrice);
+                Assert.Equal(11m, detail.RetailPrice);
+            });
             Assert.All(products, product =>
             {
                 Assert.Equal("SUP", product.LocalSupplierCode);
