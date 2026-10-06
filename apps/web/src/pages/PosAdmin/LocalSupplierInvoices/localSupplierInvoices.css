@@ -639,6 +639,68 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * 快捷筛选色调：涨价橙红、降价蓝、主档不存在紫，与明细涨跌数字（.lsi-wb-delta-*）和列表「新品」标签（.lsi-tag-new）同色。
+ * 选择器叠加 .ant-btn-default 与 :not(:disabled) 是为了压过 antd 默认按钮的悬停样式。
+ */
+.lsi-wb-chip.lsi-wb-chip-up.ant-btn-default:not(:disabled) {
+  color: #c2410c;
+  border-color: #f5c9ad;
+  background: #fff7f2;
+}
+
+.lsi-wb-chip.lsi-wb-chip-up.ant-btn-default:not(:disabled):hover {
+  color: #c2410c;
+  border-color: #c2410c;
+  background: #ffefe5;
+}
+
+.lsi-wb-chip.lsi-wb-chip-down.ant-btn-default:not(:disabled) {
+  color: #0958d9;
+  border-color: #bcd4f7;
+  background: #f3f7ff;
+}
+
+.lsi-wb-chip.lsi-wb-chip-down.ant-btn-default:not(:disabled):hover {
+  color: #0958d9;
+  border-color: #0958d9;
+  background: #e8f0ff;
+}
+
+.lsi-wb-chip.lsi-wb-chip-new.ant-btn-default:not(:disabled) {
+  color: #5a3fc0;
+  border-color: #d8cdf7;
+  background: #f7f4ff;
+}
+
+.lsi-wb-chip.lsi-wb-chip-new.ant-btn-default:not(:disabled):hover {
+  color: #5a3fc0;
+  border-color: #5a3fc0;
+  background: #efe9ff;
+}
+
+/* 选中：实心底 + 白字，悬停保持不变，避免和未选中的悬停态混淆 */
+.lsi-wb-chip.lsi-wb-chip-up.is-active.ant-btn-default:not(:disabled),
+.lsi-wb-chip.lsi-wb-chip-up.is-active.ant-btn-default:not(:disabled):hover {
+  color: #fff;
+  border-color: #c2410c;
+  background: #c2410c;
+}
+
+.lsi-wb-chip.lsi-wb-chip-down.is-active.ant-btn-default:not(:disabled),
+.lsi-wb-chip.lsi-wb-chip-down.is-active.ant-btn-default:not(:disabled):hover {
+  color: #fff;
+  border-color: #0958d9;
+  background: #0958d9;
+}
+
+.lsi-wb-chip.lsi-wb-chip-new.is-active.ant-btn-default:not(:disabled),
+.lsi-wb-chip.lsi-wb-chip-new.is-active.ant-btn-default:not(:disabled):hover {
+  color: #fff;
+  border-color: #5a3fc0;
+  background: #5a3fc0;
+}
+
 .lsi-wb-filter-panel {
   display: grid;
   grid-template-columns: 88px 200px;
