@@ -156,4 +156,27 @@ public sealed class ContainerNewProductsRulesTests
     {
         Assert.Equal(expected, ContainerNewProductsReactService.ResolveState(new Store { Address = address }));
     }
+
+    [Theory]
+    // 生产 Bankstown：地址只写了区名，但分店管理配置了 Sydney 时区
+    [InlineData("Australia/Sydney", "Bankstown", "NSW")]
+    [InlineData("Australia/Brisbane", "Shopping Centre", "QLD")]
+    // 配置的时区优先于地址
+    [InlineData("Australia/Brisbane", "SHOP 1 65-69 CRONULLA ST, CRONULLA, NSW, 2230", "QLD")]
+    // 无效或本功能不支持的时区回退到地址推导
+    [InlineData("Invalid/TimeZone", "10 Main Street, Brisbane QLD 4000", "QLD")]
+    [InlineData("Australia/Melbourne", "Shop 1, Sydney NSW 2000", "NSW")]
+    [InlineData(null, "10 Main Street, Brisbane QLD 4000", "QLD")]
+    public void ResolveState_PrefersConfiguredTimeZoneThenAddress(string? timeZoneId, string address, string expected)
+    {
+        Assert.Equal(expected, ContainerNewProductsReactService.ResolveState(new Store { TimeZoneId = timeZoneId, Address = address }));
+    }
+
+    [Theory]
+    [InlineData("Australia/Melbourne", "Shop 1, Cheltenham 3192, VIC")]
+    [InlineData(null, "Bankstown")]
+    public void ResolveState_ReturnsNullWhenNeitherTimeZoneNorAddressGivesSupportedState(string? timeZoneId, string address)
+    {
+        Assert.Null(ContainerNewProductsReactService.ResolveState(new Store { TimeZoneId = timeZoneId, Address = address }));
+    }
 }

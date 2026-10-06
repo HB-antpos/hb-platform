@@ -259,9 +259,9 @@ public sealed class ContainerNewProductsReactService(
 
     internal static string? ResolveState(Store store)
     {
-        var postcode = PublicHolidaySyncHelper.ExtractPostcodeFromAddress(store.Address);
+        // 先认配置时区、再按邮编（与考勤、公共假期同步共用口径），都推不出时再看地址里的州名
         var text = (store.Address ?? string.Empty).ToUpperInvariant();
-        return PublicHolidaySyncHelper.ResolveJurisdictionFromPostcode(postcode)
+        return PublicHolidaySyncHelper.ResolveStoreJurisdiction(store.TimeZoneId, store.Address)
             ?? (Regex.IsMatch(text, @"(?:^|[\s,])(?:QLD|QUEENSLAND)(?:[\s,]|$)") ? "QLD" : null)
             ?? (Regex.IsMatch(text, @"(?:^|[\s,])(?:NSW|NEW SOUTH WALES)(?:[\s,]|$)") ? "NSW" : null);
     }

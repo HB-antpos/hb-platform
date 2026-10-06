@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using BlazorApp.Shared.Constants;
 
 namespace BlazorApp.Api.Services.Attendance
 {
@@ -42,6 +43,22 @@ namespace BlazorApp.Api.Services.Attendance
                 "QLD" or "QUEENSLAND" => "QLD",
                 _ => null,
             };
+        }
+
+        /// <summary>
+        /// 门店所在州（仅 NSW/QLD）：先认分店管理里配置的时区（Sydney=NSW、Brisbane=QLD），
+        /// 未配置、无效或为其他时区（如 Melbourne）时再按地址里的邮编推导。
+        /// 地址只写区名的门店（如 Bankstown）靠时区才能识别。
+        /// </summary>
+        public static string? ResolveStoreJurisdiction(string? timeZoneId, string? address)
+        {
+            if (StoreTimeZonePolicy.TryNormalize(timeZoneId, out var normalizedTimeZoneId))
+            {
+                if (normalizedTimeZoneId == StoreTimeZonePolicy.Sydney) return "NSW";
+                if (normalizedTimeZoneId == StoreTimeZonePolicy.Brisbane) return "QLD";
+            }
+
+            return ResolveJurisdictionFromPostcode(ExtractPostcodeFromAddress(address));
         }
 
         public static string? ResolveJurisdictionFromPostcode(string? postcode)
