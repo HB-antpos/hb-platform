@@ -49,7 +49,25 @@
           "readOnlyHint": "You have view-only access and cannot change device settings or status."
         },
         "appSummaryUnknown": "Unknown OS",
-        "appLastReport": "Last report"
+        "appLastReport": "Last report",
+        "batch": {
+          "actions": {
+            "activate": "Enable {{count}}",
+            "disable": "Disable {{count}}",
+            "lock": "Lock {{count}}"
+          },
+          "allInStatusHint": "All selected devices are already in this status",
+          "confirmActivateTitle": "Enable {{count}} selected device(s)?",
+          "confirmDisableTitle": "Disable {{count}} selected device(s)?",
+          "confirmLockTitle": "Lock {{count}} selected device(s)?",
+          "confirmActivateContent": "These devices will be able to open the app and take sales.",
+          "skipped": "{{count}} other device(s) are already in this status and will be skipped.",
+          "progress": "Processing {{done}} / {{total}} device(s)…",
+          "activateSucceeded": "Enabled {{count}} device(s)",
+          "disableSucceeded": "Disabled {{count}} device(s)",
+          "lockSucceeded": "Locked {{count}} device(s)",
+          "partialFailed": "{{succeeded}} succeeded, {{failed}} failed ({{devices}}). Failed devices stay selected so you can retry."
+        }
       }
     }
   }

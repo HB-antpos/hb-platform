@@ -6,9 +6,11 @@ import {
   countDevicesByStatus,
   filterDevicesByStatus,
   filterDevicesExceptStatus,
+  getBatchActionTargets,
   getDeviceStatusActions,
   getRelativeTimeParts,
   formatDateOnly,
+  runWithConcurrency,
 } from './deviceManagementLogic'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -136,5 +138,33 @@ assert(!countedTypes.some((option) => option.value === 'Admin'), '筛选选项�
 const withSelected = buildCountedOptions(['POS'], 'WarehousePDA')
 assertEqual(withSelected.find((option) => option.value === 'WarehousePDA')?.count, 0, '保留当前选中值且计数为 0')
 assertEqual(buildCountedOptions(['POS', ' ', null, undefined]).length, 1, '空值不进选项')
+
+// 批量操作：已处于目标状态的设备跳过（items 状态依次为 -1/1/0/2/3）。
+assertEqual(getBatchActionTargets(items, 'activate').map((item) => item.id).join(','), '1,3,4,5', '批量启用跳过已启用')
+assertEqual(getBatchActionTargets(items, 'disable').map((item) => item.id).join(','), '1,2,4,5', '批量禁用跳过已禁用')
+assertEqual(getBatchActionTargets(items, 'lock').map((item) => item.id).join(','), '1,2,3,5', '批量锁定跳过已锁定')
+
+// 有限并发：单个失败不中断其余、并发数不超过上限、进度走满。
+let running = 0
+let peak = 0
+const progress: number[] = []
+const failures = await runWithConcurrency(
+  [1, 2, 3, 4, 5, 6, 7],
+  3,
+  async (value) => {
+    running += 1
+    peak = Math.max(peak, running)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    running -= 1
+    if (value % 3 === 0) {
+      throw new Error(`fail ${value}`)
+    }
+  },
+  (done) => progress.push(done),
+)
+assertEqual(failures.map((failure) => failure.item).sort().join(','), '3,6', '只返回失败项')
+assert(peak <= 3, `并发数超过上限：${peak}`)
+assertEqual(progress.join(','), '1,2,3,4,5,6,7', '进度逐个递增到总数')
+assertEqual((await runWithConcurrency([], 4, async () => undefined)).length, 0, '空列表直接返回')
 
 console.log('deviceManagementLogic.test: ok')

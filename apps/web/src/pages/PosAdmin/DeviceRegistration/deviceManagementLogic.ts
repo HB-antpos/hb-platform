@@ -169,6 +169,64 @@ export function getDeviceStatusActions(status: number): {
   return { primary: 'activate', secondary: ['disable', 'lock'] }
 }
 
+export const DEVICE_STATUS_ACTIONS: DeviceStatusAction[] = ['activate', 'disable', 'lock']
+
+const ACTION_TARGET_STATUS: Record<DeviceStatusAction, number> = {
+  activate: DEVICE_STATUS.enabled,
+  disable: DEVICE_STATUS.disabled,
+  lock: DEVICE_STATUS.locked,
+}
+
+/**
+ * 批量操作的实际目标：已经处于目标状态的设备跳过，不重复请求、也不重复写操作日志。
+ * 其余状态与单台操作口径一致（单台的「更多」菜单同样允许从任意其他状态切过去）。
+ */
+export function getBatchActionTargets(
+  items: DeviceRegistrationItem[],
+  action: DeviceStatusAction,
+): DeviceRegistrationItem[] {
+  const targetStatus = ACTION_TARGET_STATUS[action]
+  return items.filter((item) => item.status !== targetStatus)
+}
+
+export interface BatchFailure<T> {
+  item: T
+  error: unknown
+}
+
+/**
+ * 以有限并发逐个执行（后端只有单台状态接口）；单个失败不中断其余，最后统一返回失败项。
+ * 约 220 台的上限下并发 4 足够快，又不会一次把几十个写请求压到同一个库连接池上。
+ */
+export async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<unknown>,
+  onProgress?: (done: number, total: number) => void,
+): Promise<BatchFailure<T>[]> {
+  const failures: BatchFailure<T>[] = []
+  let nextIndex = 0
+  let done = 0
+
+  async function runLane() {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex]
+      nextIndex += 1
+      try {
+        await worker(item)
+      } catch (error) {
+        failures.push({ item, error })
+      }
+      done += 1
+      onProgress?.(done, items.length)
+    }
+  }
+
+  const laneCount = Math.max(1, Math.min(limit, items.length))
+  await Promise.all(Array.from({ length: laneCount }, () => runLane()))
+  return failures
+}
+
 export type RelativeTimeParts =
   | { unit: 'justNow' }
   | { unit: 'minutes' | 'hours' | 'days'; count: number }
