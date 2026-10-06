@@ -381,7 +381,7 @@ public sealed class InstallmentService(
             return new InstallmentCancelResponse(details.InstallmentGuid, details.Status, details, AlreadyCancelled: true, existing);
         }
 
-        ValidateCancellable(details);
+        ValidateRefundCancellable(details);
         var refunds = NormalizeAndValidateRefunds(details, normalized);
         var cancelledAt = normalized.CancelledAt == default
             ? _timeProvider.GetUtcNow()
@@ -761,6 +761,15 @@ public sealed class InstallmentService(
         }
     }
 
+    private static void ValidateRefundCancellable(InstallmentDetailsDto details)
+    {
+        // 取消退款额外允许"已付清未提货"；作废不退款仍走 ValidateCancellable，只限进行中单。
+        if (!InstallmentLifecycleRules.CanCancelWithRefund(details.Status, details.BalanceAmount))
+        {
+            throw new InvalidOperationException("Only active or paid-off installments that have not been picked up can be cancelled with refund.");
+        }
+    }
+
     internal static IReadOnlyList<InstallmentRefundPaymentCommandDto> NormalizeAndValidateRefunds(
         InstallmentDetailsDto details,
         InstallmentCancelRequest request)
@@ -778,10 +787,12 @@ public sealed class InstallmentService(
         var refundByMethod = refunds
             .GroupBy(refund => refund.Method)
             .ToDictionary(group => group.Key, group => RoundCurrency(group.Sum(refund => refund.Amount)));
-        if (paidByMethod.Count != refundByMethod.Count ||
-            paidByMethod.Any(pair => !refundByMethod.TryGetValue(pair.Key, out var refundAmount) || refundAmount != pair.Value))
+        var refundMode = InstallmentLifecycleRules.NormalizeRefundMode(request.RefundMode);
+        if (!InstallmentLifecycleRules.RefundTotalsMatch(paidByMethod, refundByMethod, refundMode))
         {
-            throw new InvalidOperationException("Refund payments must cover all recorded installment payments by method.");
+            throw new InvalidOperationException(refundMode == InstallmentCancelRefundMode.Voucher
+                ? "Voucher refund must cover the total of all recorded installment payments."
+                : "Refund payments must cover all recorded installment payments by method.");
         }
 
         return refunds;
@@ -1225,9 +1236,9 @@ public sealed class SqlSugarInstallmentRepository(HbposSqlSugarContext dbContext
             var lockedOrder = await InstallmentMutationLock.LockOrderAsync(db, installmentGuid, cancellationToken)
                 ?? throw new InvalidOperationException("Installment was not found.");
             await InstallmentMutationLock.EnsureNoBlockingClaimAsync(db, installmentGuid, cancellationToken);
-            if (lockedOrder.Status != (int)InstallmentStatus.Active || lockedOrder.BalanceAmount <= 0m)
+            if (!InstallmentLifecycleRules.CanCancelWithRefund(lockedOrder.Status, lockedOrder.BalanceAmount))
             {
-                throw new InvalidOperationException("Only active unpaid installments can be cancelled.");
+                throw new InvalidOperationException("Only active or paid-off installments that have not been picked up can be cancelled with refund.");
             }
 
             foreach (var refund in refunds)

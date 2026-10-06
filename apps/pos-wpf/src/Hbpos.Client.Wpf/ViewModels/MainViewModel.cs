@@ -842,7 +842,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             printSelectedHistoryReceiptAsync: vm => PrintSelectedHistoryReceiptAsync(vm),
             setStatusMessage: msg => StatusMessage = msg,
             getLastCompletedOrder: () => _lastCompletedOrder,
-            setLastCompletedOrder: value => _lastCompletedOrder = value);
+            setLastCompletedOrder: value => _lastCompletedOrder = value,
+            printInstallmentRefundVouchersAsync: PrintInstallmentRefundVouchersAfterCancelAsync);
 
     public PosTerminalViewModel? PosTerminal
     {
@@ -3532,6 +3533,37 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task<string?> PrintInstallmentRefundVouchersAfterCancelAsync(Guid installmentGuid)
+    {
+        var order = await _installmentOrderService.GetLocalOrderAsync(installmentGuid);
+        return order is null ? null : await PrintInstallmentRefundVouchersAsync(order);
+    }
+
+    // 取消分期签发的每张退款代金券单独出一张带条码/二维码的凭证；单张失败不阻断其余券，返回首个失败原因。
+    private async Task<string?> PrintInstallmentRefundVouchersAsync(LocalInstallmentOrder order)
+    {
+        string? firstFailure = null;
+        foreach (var voucher in InstallmentReceiptMapper.GetRefundVouchers(order))
+        {
+            ReceiptPrintResult result;
+            try
+            {
+                result = await PrintReceiptWithShellPermissionAsync(
+                    InstallmentReceiptMapper.CreateRefundVoucherReceipt(order, voucher),
+                    ReceiptPrintReason.VoucherRefundAuto);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                ConsoleLog.WriteError("InstallmentAudit", "installment refund voucher print failed", null, ex);
+                result = new ReceiptPrintResult(false, ex.GetType().Name, order.OrderGuid);
+            }
+
+            firstFailure ??= result.Succeeded ? null : $"{voucher.VoucherCode}: {result.Message}";
+        }
+
+        return firstFailure;
+    }
+
     private async Task<LocalInstallmentOrder> ConfirmInstallmentPickupAfterPaidOffAsync(
         InstallmentOrderSummary order,
         LocalInstallmentOrder localOrder)
@@ -3752,6 +3784,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 {
                     // 远程订单和分期订单都不能回退到普通本地订单查询，直接打印历史页已加载的完整小票。
                     result = await _receiptCoordinator.PrintReceiptAsync(loadedReceipt, ReceiptPrintReason.Reprint);
+                    if (result.Succeeded &&
+                        selectedOrder.Source == TransactionHistorySource.InstallmentOrders &&
+                        history.SelectedInstallmentDetailsForReprint is { } installmentDetails &&
+                        await PrintInstallmentRefundVouchersAsync(installmentDetails) is { } voucherFailure)
+                    {
+                        // 已取消分期补打时一并补打退款券凭证，作为取消后自动打印失败的补救入口。
+                        StatusMessage = string.Format(
+                            _localization.CurrentCulture,
+                            _localization.T("receipt.print.failed"),
+                            voucherFailure);
+                    }
                 }
             }
             else

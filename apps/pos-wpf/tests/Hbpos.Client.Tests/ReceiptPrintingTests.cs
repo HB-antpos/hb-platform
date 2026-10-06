@@ -116,6 +116,46 @@ public sealed class ReceiptPrintingTests
     }
 
     [Fact]
+    public void Installment_refund_vouchers_are_read_in_order_and_each_prints_a_standalone_voucher_document()
+    {
+        var baseOrder = CreateInstallmentOrder(InstallmentStatus.Cancelled, paidAmount: 0m, balanceAmount: 0m);
+        var at = baseOrder.CreatedAt;
+        InstallmentPaymentDto Payment(PaymentMethodKind method, decimal amount, string? reference, int minutes, InstallmentPaymentStatus status = InstallmentPaymentStatus.Recorded) =>
+            new(Guid.NewGuid(), method, amount, reference, status, at.AddMinutes(minutes), "user-1", "POS-01");
+        var order = baseOrder with
+        {
+            Payments =
+            [
+                Payment(PaymentMethodKind.Card, 30m, "ANZ:TXN-1", 0),
+                Payment(PaymentMethodKind.Cash, 20m, null, 1),
+                Payment(PaymentMethodKind.Voucher, -20m, "VOUCHER_REFUND:RF-0002", 6),
+                Payment(PaymentMethodKind.Voucher, -30m, "VOUCHER_REFUND:RF-0001", 5),
+                // 原代金券付款、已作废的退款、非退款券引用都不是本次签发的退款券。
+                Payment(PaymentMethodKind.Voucher, 10m, "VOUCHER:VC-1:TOKEN", 2),
+                Payment(PaymentMethodKind.Voucher, -10m, "VOUCHER_REFUND:RF-VOID", 7, InstallmentPaymentStatus.Voided),
+                Payment(PaymentMethodKind.Voucher, -10m, "VOUCHER_REFUND_PENDING", 8)
+            ]
+        };
+
+        var vouchers = InstallmentReceiptMapper.GetRefundVouchers(order);
+
+        Assert.Equal(
+            [new RefundVoucherReceipt("RF-0001", 30m), new RefundVoucherReceipt("RF-0002", 20m)],
+            vouchers);
+
+        var receipt = InstallmentReceiptMapper.CreateRefundVoucherReceipt(order, vouchers[0]);
+        var payment = Assert.Single(receipt.Payments);
+        Assert.Equal(PaymentMethodKind.Voucher, payment.Method);
+        Assert.Null(payment.CardTransactions);
+        Assert.Equal(vouchers[0], receipt.RefundVoucher);
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, null);
+        Assert.Contains("REFUND VOUCHER", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("Voucher: RF-0001", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains($"Order: {order.InstallmentNumber}", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("RF-0002", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Installment_receipt_mapper_does_not_mark_cancelled_zero_balance_order_as_pickup_pending()
     {
         var order = CreateInstallmentOrder(

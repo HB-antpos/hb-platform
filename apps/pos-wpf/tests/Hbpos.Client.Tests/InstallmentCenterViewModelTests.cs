@@ -436,6 +436,95 @@ public sealed class InstallmentCenterViewModelTests
     }
 
     [Fact]
+    public async Task Cancel_to_voucher_command_passes_voucher_mode_and_original_cancel_keeps_original_route()
+    {
+        var auditLogger = new RecordingOperationAuditLogger();
+        var targetOrder = CreateOrder("IO-PAID", "张三", "0400111222", "待提货", canCancelWithRefund: true);
+        var service = new FakeInstallmentOrderService
+        {
+            Orders = [targetOrder],
+            CancelWithRefundResult = new InstallmentOrderActionResult(true, "已取消")
+        };
+        var viewModel = new InstallmentCenterViewModel(
+            service,
+            CreateSession(),
+            _ => Task.CompletedTask,
+            () => { },
+            operationAuditLogger: auditLogger);
+
+        await viewModel.LoadAsync();
+
+        Assert.True(viewModel.CancelWithVoucherRefundCommand.CanExecute(null));
+        await viewModel.CancelWithRefundCommand.ExecuteAsync(null);
+        await viewModel.CancelWithVoucherRefundCommand.ExecuteAsync(null);
+
+        Assert.Equal(
+            [InstallmentCancelRefundMode.OriginalRoute, InstallmentCancelRefundMode.Voucher],
+            service.CancelRefundModes);
+        Assert.Equal(
+            ["CANCEL_WITH_REFUND", "CANCEL_WITH_VOUCHER_REFUND"],
+            auditLogger.Events.Select(auditEvent => auditEvent.ReasonCode));
+    }
+
+    [Fact]
+    public async Task Successful_cancel_prints_refund_vouchers_and_print_failure_only_asks_for_reprint()
+    {
+        var targetOrder = CreateOrder("IO-PAID", "张三", "0400111222", "待提货", canCancelWithRefund: true);
+        var service = new FakeInstallmentOrderService
+        {
+            Orders = [targetOrder],
+            CancelWithRefundResult = new InstallmentOrderActionResult(true, "分期单已取消，退款代金券：RF-1 $20.00")
+        };
+        var printedOrderIds = new List<Guid>();
+        var viewModel = new InstallmentCenterViewModel(
+            service,
+            CreateSession(),
+            _ => Task.CompletedTask,
+            () => { },
+            printRefundVouchersAsync: orderId =>
+            {
+                printedOrderIds.Add(orderId);
+                return Task.FromResult<string?>("RF-1: 打印机离线");
+            });
+
+        await viewModel.LoadAsync();
+        await viewModel.CancelWithVoucherRefundCommand.ExecuteAsync(null);
+
+        Assert.Equal([targetOrder.OrderId], printedOrderIds);
+        // 取消已提交成功：打印失败只追加补打提示，券码仍保留在完成提示里。
+        Assert.Contains("RF-1 $20.00", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("退款券打印失败", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("交易记录补打", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Failed_cancel_does_not_print_refund_vouchers()
+    {
+        var targetOrder = CreateOrder("IO-PAID", "张三", "0400111222", "待提货", canCancelWithRefund: true);
+        var service = new FakeInstallmentOrderService
+        {
+            Orders = [targetOrder],
+            CancelWithRefundResult = new InstallmentOrderActionResult(false, "退款结果未知，已锁定等待处理。", RequiresReview: true)
+        };
+        var printCalls = 0;
+        var viewModel = new InstallmentCenterViewModel(
+            service,
+            CreateSession(),
+            _ => Task.CompletedTask,
+            () => { },
+            printRefundVouchersAsync: _ =>
+            {
+                printCalls++;
+                return Task.FromResult<string?>(null);
+            });
+
+        await viewModel.LoadAsync();
+        await viewModel.CancelWithRefundCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, printCalls);
+    }
+
+    [Fact]
     public async Task ConfirmPickupCommand_follows_button_state_and_invokes_service()
     {
         var targetOrder = CreateOrder("IO-002", "李四", "0400222333", "待提货", canConfirmPickup: true);
@@ -1006,11 +1095,14 @@ public sealed class InstallmentCenterViewModelTests
             return Task.FromResult(AddRepaymentResult);
         }
 
-        public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default)
+        public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default)
         {
             LastCancelOrderId = orderId;
+            CancelRefundModes.Add(refundMode);
             return Task.FromResult(CancelWithRefundResult);
         }
+
+        public List<InstallmentCancelRefundMode> CancelRefundModes { get; } = [];
 
         public Task<InstallmentOrderActionResult> VoidCancelAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default)
         {

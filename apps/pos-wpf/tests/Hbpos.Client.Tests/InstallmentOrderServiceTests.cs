@@ -306,6 +306,62 @@ public sealed class InstallmentOrderServiceTests
     }
 
     [Fact]
+    public async Task QueryHistoryAsync_allows_cancel_refund_for_paid_off_but_not_picked_up_or_void()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            var repository = new LocalInstallmentOrderRepository(store);
+            var updatedAt = DateTimeOffset.Parse("2026-10-06T05:30:00Z");
+            InstallmentSummaryDto Summary(string number, InstallmentStatus status, decimal paid, decimal balance) =>
+                new(
+                    Guid.NewGuid(),
+                    number,
+                    "S001",
+                    "POS-02",
+                    "Alice",
+                    "Customer",
+                    "0400111222",
+                    DateTimeOffset.Parse("2026-10-01T00:00:00Z"),
+                    120m,
+                    20m,
+                    paid,
+                    balance,
+                    status,
+                    updatedAt);
+            var apiClient = new StubInstallmentApiClient
+            {
+                HistoryResponse = new InstallmentHistoryQueryResponse(
+                [
+                    Summary("IO-PAID-OFF", InstallmentStatus.PaidOff, 120m, 0m),
+                    Summary("IO-PICKED-UP", InstallmentStatus.PickedUp, 120m, 0m)
+                ])
+            };
+            var service = new InstallmentOrderService(repository, apiClient);
+
+            await schema.InitializeAsync();
+            var result = await service.QueryHistoryAsync(
+                CreateOnlineSession(),
+                new InstallmentHistorySearchQuery(Take: 100));
+
+            var paidOff = Assert.Single(result, candidate => candidate.OrderNumber == "IO-PAID-OFF");
+            Assert.True(paidOff.CanCancelWithRefund);
+            Assert.False(paidOff.CanVoidCancel);
+            Assert.True(paidOff.CanConfirmPickup);
+            var pickedUp = Assert.Single(result, candidate => candidate.OrderNumber == "IO-PICKED-UP");
+            Assert.False(pickedUp.CanCancelWithRefund);
+            Assert.False(pickedUp.CanVoidCancel);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task QueryHistoryAsync_uses_local_snapshot_search_when_offline()
     {
         var databasePath = CreateTempDatabasePath();

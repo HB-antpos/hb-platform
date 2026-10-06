@@ -12,8 +12,8 @@ const document = JSON.parse(readFileSync(snapshotPath, "utf8"));
 assert.equal(Object.keys(document.paths ?? {}).length, 119, "共享 OpenAPI 必须锁定当前 119 条路径");
 assert.equal(
   Object.keys(document.components?.schemas ?? {}).length,
-  281,
-  "共享 OpenAPI 必须锁定当前 281 个 schema",
+  282,
+  "共享 OpenAPI 必须锁定当前 282 个 schema",
 );
 
 for (const route of [
@@ -496,8 +496,10 @@ for (const requestSchema of [
 
 assert.deepEqual(
   Object.keys(schemas.InstallmentCancelClaimCreateRequest?.properties ?? {}),
-  ["operationGuid", "idempotencyKey", "reason", "refundPlanFingerprint"]
+  ["operationGuid", "idempotencyKey", "reason", "refundPlanFingerprint", "refundMode"]
 );
+// 取消退款方式：1=原路退（缺省），2=全部改发退款代金券。
+assert.deepEqual(schemas.InstallmentCancelRefundMode?.enum, [1, 2]);
 assert.deepEqual(
   schemas.InstallmentCancelClaimCreateRequest?.properties?.operationGuid,
   { type: "string", format: "uuid" }
@@ -538,7 +540,8 @@ assert.deepEqual(
     "commit",
     "alreadyExists",
     "originalDeviceCode",
-    "executingDeviceCode"
+    "executingDeviceCode",
+    "refundMode"
   ]
 );
 for (const guidField of ["installmentGuid", "operationGuid"]) {

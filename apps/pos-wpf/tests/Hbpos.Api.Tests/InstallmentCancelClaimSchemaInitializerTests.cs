@@ -34,6 +34,10 @@ public sealed class InstallmentCancelClaimSchemaInitializerTests
         Assert.Contains("ADD [LastRecoveryCashierName] NVARCHAR(100) NULL", sql);
         Assert.Contains("ADD [LastRecoveryCashierUserGuid] NVARCHAR(50) NULL", sql);
         Assert.Contains("ADD [RecoveredAtUtc] DATETIME2(7) NULL", sql);
+        Assert.Contains("[RefundMode] NVARCHAR(20) NULL", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_InstallmentCancelClaim', N'RefundMode') IS NULL", sql);
+        Assert.Contains("ADD [RefundMode] NVARCHAR(20) NULL", sql);
+        Assert.Contains("CK_POSM_InstallmentCancelClaim_RefundMode", sql);
         Assert.Contains("COMMIT TRANSACTION", sql);
     }
 

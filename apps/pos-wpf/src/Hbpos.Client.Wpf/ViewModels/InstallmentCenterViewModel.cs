@@ -5,12 +5,14 @@ using CommunityToolkit.Mvvm.Input;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Contracts.Installments;
 using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Wpf.ViewModels;
 
 public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisposable
 {
+    private readonly Func<Guid, Task<string?>>? _printRefundVouchersAsync;
     private readonly IInstallmentOrderService _installmentOrderService;
     private readonly Func<PosCartServiceSnapshot?, Task> _showCreateAsync;
     private readonly Action _backToPayment;
@@ -56,9 +58,11 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         ICashierSessionContext? cashierSessionContext = null,
         bool enforcePermissionsWhenNoCashier = false,
         IOperationAuditLogger? operationAuditLogger = null,
-        IOperationAuthorizationService? operationAuthorizationService = null)
+        IOperationAuthorizationService? operationAuthorizationService = null,
+        Func<Guid, Task<string?>>? printRefundVouchersAsync = null)
     {
         _installmentOrderService = installmentOrderService;
+        _printRefundVouchersAsync = printRefundVouchersAsync;
         _session = session;
         _showCreateAsync = showCreateAsync;
         _backToPayment = backToPayment;
@@ -84,6 +88,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         CreateInstallmentCommand = new AsyncRelayCommand(CreateInstallmentAsync, CanCreateInstallment);
         AddRepaymentCommand = new AsyncRelayCommand(AddRepaymentAsync, CanAddRepayment);
         CancelWithRefundCommand = new AsyncRelayCommand(CancelWithRefundAsync, CanCancelWithRefund);
+        CancelWithVoucherRefundCommand = new AsyncRelayCommand(CancelWithVoucherRefundAsync, CanCancelWithRefund);
         VoidCancelCommand = new AsyncRelayCommand(VoidCancelAsync, CanVoidCancel);
         ConfirmPickupCommand = new AsyncRelayCommand(ConfirmPickupAsync, CanConfirmPickup);
         SupervisorResolveRefundCommand = new AsyncRelayCommand(ResolveRefundBySupervisorAsync, CanResolveRefundBySupervisor);
@@ -109,6 +114,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     public IAsyncRelayCommand CreateInstallmentCommand { get; }
     public IAsyncRelayCommand AddRepaymentCommand { get; }
     public IAsyncRelayCommand CancelWithRefundCommand { get; }
+    public IAsyncRelayCommand CancelWithVoucherRefundCommand { get; }
     public IAsyncRelayCommand VoidCancelCommand { get; }
     public IAsyncRelayCommand ConfirmPickupCommand { get; }
     public IAsyncRelayCommand SupervisorResolveRefundCommand { get; }
@@ -121,6 +127,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     public string CreateInstallmentText => T("installment.center.action.create", "Create Installment");
     public string AddRepaymentText => T("installment.center.action.repay", "Add Repayment");
     public string CancelWithRefundText => T("installment.center.action.cancel", "Cancel and Refund");
+    public string CancelWithVoucherRefundText => T("installment.center.action.cancelToVoucher", "Cancel and Refund as Voucher");
     public string VoidCancelText => T("installment.center.action.void", "Void");
     public string ConfirmPickupText => T("installment.center.action.confirmPickup", "Confirm Pickup");
     public string LoadText => T("common.load", "Load");
@@ -366,7 +373,17 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         RepaymentAmount > 0m &&
         RepaymentAmount <= SelectedOrder.OutstandingAmount &&
         (RepaymentMethod != PaymentMethodKind.Voucher || (!string.IsNullOrWhiteSpace(RepaymentReference) && !string.IsNullOrWhiteSpace(RepaymentVoucherToken)));
-    private async Task CancelWithRefundAsync()
+    private Task CancelWithRefundAsync() =>
+        CancelWithRefundCoreAsync(InstallmentCancelRefundMode.OriginalRoute, "cancel-with-refund", "CANCEL_WITH_REFUND");
+
+    // 原路退或统一改发退款代金券都走同一个取消权限：收银员无权限时由主管授权，服务端同样按该权限校验。
+    private Task CancelWithVoucherRefundAsync() =>
+        CancelWithRefundCoreAsync(InstallmentCancelRefundMode.Voucher, "cancel-with-voucher-refund", "CANCEL_WITH_VOUCHER_REFUND");
+
+    private async Task CancelWithRefundCoreAsync(
+        InstallmentCancelRefundMode refundMode,
+        string authorizationAction,
+        string auditReasonCode)
     {
         var selectedOrder = SelectedOrder;
         if (selectedOrder is null || !CanCancelWithRefund())
@@ -374,7 +391,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             return;
         }
 
-        using var authorization = await AuthorizeAsync(Permissions.PosTerminal.Installments.Cancel, "cancel-with-refund");
+        using var authorization = await AuthorizeAsync(Permissions.PosTerminal.Installments.Cancel, authorizationAction);
         if (authorization is null)
         {
             return;
@@ -387,11 +404,40 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             selectedOrder.CanCancelWithRefund)
         {
             var orderId = selectedOrder.OrderId;
-            await RunOrderActionAsync(
-                () => _installmentOrderService.CancelWithRefundAsync(orderId, Session),
+            var result = await RunOrderActionAsync(
+                () => _installmentOrderService.CancelWithRefundAsync(orderId, Session, refundMode),
                 OperationAuditTypes.InstallmentRepaymentCancel,
-                "CANCEL_WITH_REFUND",
+                auditReasonCode,
                 orderGuid: orderId);
+            if (result.Succeeded)
+            {
+                await PrintRefundVouchersAfterCancelAsync(orderId, result.Message);
+            }
+        }
+    }
+
+    // 取消已在中央提交成功；退款券凭证打印失败只提示补打，不能把取消结果改成失败。
+    private async Task PrintRefundVouchersAfterCancelAsync(Guid orderId, string? completedMessage)
+    {
+        if (_printRefundVouchersAsync is null)
+        {
+            return;
+        }
+
+        string? failure;
+        try
+        {
+            failure = await _printRefundVouchersAsync(orderId);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            ConsoleLog.WriteError("InstallmentAudit", "installment refund voucher print failed", null, ex);
+            failure = ex.GetType().Name;
+        }
+
+        if (!string.IsNullOrWhiteSpace(failure))
+        {
+            SetLiteralStatus($"{completedMessage} 退款券打印失败（{failure}），请在交易记录补打。");
         }
     }
 
@@ -817,6 +863,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         CreateInstallmentCommand.NotifyCanExecuteChanged();
         AddRepaymentCommand.NotifyCanExecuteChanged();
         CancelWithRefundCommand.NotifyCanExecuteChanged();
+        CancelWithVoucherRefundCommand.NotifyCanExecuteChanged();
         VoidCancelCommand.NotifyCanExecuteChanged();
         ConfirmPickupCommand.NotifyCanExecuteChanged();
         RecoveryCommand.NotifyCanExecuteChanged();
@@ -843,6 +890,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         OnPropertyChanged(nameof(CreateInstallmentText));
         OnPropertyChanged(nameof(AddRepaymentText));
         OnPropertyChanged(nameof(CancelWithRefundText));
+        OnPropertyChanged(nameof(CancelWithVoucherRefundText));
         OnPropertyChanged(nameof(VoidCancelText));
         OnPropertyChanged(nameof(ConfirmPickupText));
         OnPropertyChanged(nameof(LoadText));

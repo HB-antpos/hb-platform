@@ -62,7 +62,7 @@ public interface IInstallmentOrderService
 
     Task<InstallmentOrderActionResult> AddRepaymentAsync(InstallmentOrderRepaymentRequest request, CancellationToken cancellationToken = default);
 
-    Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default);
+    Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default);
 
     Task<InstallmentOrderActionResult> VoidCancelAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default);
 
@@ -472,7 +472,7 @@ public sealed class InstallmentOrderService(
         return AddRepaymentAsync(new InstallmentOrderRepaymentRequest(orderId, session, new InstallmentPaymentDraft(Guid.NewGuid(), method, amount, reference, reservationToken)), cancellationToken);
     }
 
-    public async Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default)
+    public async Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default)
     {
         var local = await localRepository.GetAsync(orderId, cancellationToken);
         if (local is null)
@@ -482,10 +482,14 @@ public sealed class InstallmentOrderService(
 
         if (installmentOperations is not null)
         {
-            var operation = await installmentOperations.ExecuteCancelAsync(local, session, cancellationToken: cancellationToken);
+            var operation = await installmentOperations.ExecuteCancelAsync(local, session, refundMode: refundMode, cancellationToken: cancellationToken);
             return new InstallmentOrderActionResult(
                 operation.Succeeded,
-                operation.Message ?? (operation.Succeeded ? "分期单已取消并退款。" : "退款结果未知，已锁定等待处理。"),
+                operation.Message ?? (operation.Succeeded
+                    ? refundMode == InstallmentCancelRefundMode.Voucher
+                        ? FormatVoucherRefundCompletedMessage(operation.LocalOrder)
+                        : "分期单已取消并退款。"
+                    : "退款结果未知，已锁定等待处理。"),
                 operation.LocalOrder is null ? null : MapSummary(operation.LocalOrder),
                 operation.RequiresReview);
         }
@@ -493,9 +497,22 @@ public sealed class InstallmentOrderService(
         return new InstallmentOrderActionResult(false, "安全取消服务未配置，已在退款 provider 调用前停止。", RequiresReview: true);
     }
 
+    // 完成提示同时列出券码与金额：即使退款券凭证打印失败，收银员也能当场看到券码。
+    private static string FormatVoucherRefundCompletedMessage(LocalInstallmentOrder? order)
+    {
+        var vouchers = order is null
+            ? []
+            : InstallmentReceiptMapper.GetRefundVouchers(order)
+                .Select(voucher => $"{voucher.VoucherCode} {voucher.Amount.ToString("C2", CultureInfo.GetCultureInfo("en-AU"))}")
+                .ToList();
+        return vouchers.Count == 0
+            ? "分期单已取消，已发退款代金券。"
+            : $"分期单已取消，退款代金券：{string.Join("、", vouchers)}";
+    }
+
     public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, string? reason, CancellationToken cancellationToken = default)
     {
-        return CancelWithRefundAsync(orderId, session, cancellationToken);
+        return CancelWithRefundAsync(orderId, session, cancellationToken: cancellationToken);
     }
 
     public async Task<InstallmentOrderActionResult> VoidCancelAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default)
@@ -584,7 +601,8 @@ public sealed class InstallmentOrderService(
             0,
             order.Status == InstallmentStatus.Active && order.BalanceAmount > 0m,
             order.Status == InstallmentStatus.PaidOff,
-            order.Status == InstallmentStatus.Active && order.BalanceAmount > 0m,
+            // 取消退款与 API 闸门共用规则：已付清未提货也可取消退款；作废仍只限进行中单。
+            InstallmentLifecycleRules.CanCancelWithRefund(order.Status, order.BalanceAmount),
             order.Status == InstallmentStatus.Active && order.BalanceAmount > 0m,
             GetStatusText(order),
             order.DeviceCode,
@@ -605,7 +623,7 @@ public sealed class InstallmentOrderService(
             0,
             order.Status == InstallmentStatus.Active && order.BalanceAmount > 0m,
             order.Status == InstallmentStatus.PaidOff,
-            order.Status == InstallmentStatus.Active && order.BalanceAmount > 0m,
+            InstallmentLifecycleRules.CanCancelWithRefund(order.Status, order.BalanceAmount),
             order.Status == InstallmentStatus.Active && order.BalanceAmount > 0m,
             GetStatusText(order.Status, order.CancellationKind),
             order.DeviceCode,
@@ -844,7 +862,7 @@ public sealed class NoopInstallmentOrderService : IInstallmentOrderService
     public Task<InstallmentWriteResult<InstallmentVoidResponse>> VoidCancelAsync(PosSessionState session, InstallmentVoidRequest request, CancellationToken cancellationToken = default) => Task.FromResult(InstallmentWriteResult<InstallmentVoidResponse>.OnlineRequired(session.IsOnline ? "分期服务尚未接入。" : "OnlineRequired"));
     public Task<InstallmentOrderCreateResult> CreateOrderAsync(InstallmentOrderCreateRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderCreateResult(false, "分期服务尚未接入。"));
     public Task<InstallmentOrderActionResult> AddRepaymentAsync(InstallmentOrderRepaymentRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
-    public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
+    public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
     public Task<InstallmentOrderActionResult> VoidCancelAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
     public Task<InstallmentOrderActionResult> ConfirmPickupAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default) => Task.FromResult(new InstallmentOrderActionResult(false, "分期服务尚未接入。"));
 }

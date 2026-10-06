@@ -8145,7 +8145,7 @@ public sealed class PosTerminalCashPaymentViewModelTests
             return Task.FromResult(new InstallmentOrderActionResult(true, "补款已记录。"));
         }
 
-        public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default)
+        public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }

@@ -198,7 +198,8 @@ internal sealed class MainChildViewModelFactory
     public InstallmentCenterViewModel CreateInstallmentCenterViewModel(
         PosSessionState session,
         Func<PosCartServiceSnapshot?, Task> showInstallmentCreateAsync,
-        Action showCashPayment)
+        Action showCashPayment,
+        Func<Guid, Task<string?>>? printRefundVouchersAsync = null)
     {
         return new InstallmentCenterViewModel(
             _installmentOrderService,
@@ -210,7 +211,8 @@ internal sealed class MainChildViewModelFactory
             _cashierSessionContext,
             _enforceCashierPermissions,
             _operationAuditLogger,
-            _operationAuthorizationService);
+            _operationAuthorizationService,
+            printRefundVouchersAsync);
     }
 
     public InstallmentCreateViewModel CreateInstallmentCreateViewModel(

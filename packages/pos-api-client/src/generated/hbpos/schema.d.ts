@@ -6003,6 +6003,7 @@ export interface components {
             idempotencyKey?: string | null;
             reason?: string | null;
             refundPlanFingerprint?: string | null;
+            refundMode?: components["schemas"]["InstallmentCancelRefundMode"];
         };
         InstallmentCancelClaimDto: {
             /** Format: uuid */
@@ -6022,6 +6023,7 @@ export interface components {
             alreadyExists?: boolean;
             originalDeviceCode?: string | null;
             executingDeviceCode?: string | null;
+            refundMode?: components["schemas"]["InstallmentCancelRefundMode"];
         };
         InstallmentCancelClaimDtoApiResult: {
             success?: boolean;
@@ -6043,6 +6045,11 @@ export interface components {
          * @enum {integer}
          */
         InstallmentCancelClaimStatus: 1 | 2 | 3 | 4 | 5 | 6;
+        /**
+         * Format: int32
+         * @enum {integer}
+         */
+        InstallmentCancelRefundMode: 1 | 2;
         InstallmentCancelRequest: {
             /** Format: uuid */
             installmentGuid?: string;
@@ -6055,6 +6062,7 @@ export interface components {
             refunds?: components["schemas"]["InstallmentRefundPaymentCommandDto"][] | null;
             reason?: string | null;
             idempotencyKey?: string | null;
+            refundMode?: components["schemas"]["InstallmentCancelRefundMode"];
         };
         InstallmentCancelResponse: {
             /** Format: uuid */

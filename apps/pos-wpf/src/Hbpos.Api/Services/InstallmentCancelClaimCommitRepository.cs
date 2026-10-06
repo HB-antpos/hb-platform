@@ -114,8 +114,7 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
                 throw Mismatch("Only a refund-pending cancellation claim can be committed.");
             }
 
-            if (order.Status != (int)InstallmentStatus.Active ||
-                order.BalanceAmount <= 0m ||
+            if (!InstallmentLifecycleRules.CanCancelWithRefund(order.Status, order.BalanceAmount) ||
                 !string.Equals(order.StoreCode, claim.StoreCode, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(
                     order.DeviceCode,
@@ -127,12 +126,14 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
                 throw Mismatch("Installment state or original device scope no longer matches the cancellation claim.");
             }
 
+            var lockedStatus = order.Status;
+
             var details = await installmentRepository.GetDetailsAsync(
                 expectedClaim.InstallmentGuid,
                 cancellationToken)
                 ?? throw NotFound("Installment disappeared while committing the cancellation claim.");
             // 即使上游预检被旧客户端绕过，原子提交仍必须拒绝当前无法验证的退款方式。
-            InstallmentCancelRefundExecutionPolicy.Validate(details);
+            InstallmentCancelRefundExecutionPolicy.Validate(details, expectedClaim.RefundMode);
             if (!string.Equals(
                     InstallmentCancelClaimFingerprint.Create(details),
                     claim.RefundPlanFingerprint,
@@ -152,7 +153,8 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
                 committedAtUtc,
                 request.Refunds,
                 claim.Reason,
-                claim.IdempotencyKey);
+                claim.IdempotencyKey,
+                expectedClaim.RefundMode);
             IReadOnlyList<InstallmentRefundPaymentCommandDto> normalizedRefunds;
             try
             {
@@ -163,7 +165,7 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
                 throw Invalid(ex.Message);
             }
 
-            var refundBindings = ValidateRefundBindings(claim, details, normalizedRefunds);
+            var refundBindings = ValidateRefundBindings(claim, details, normalizedRefunds, expectedClaim.RefundMode);
             await ValidateRefundEvidenceAsync(db, claim, refundBindings, cancellationToken);
             var refundPayments = normalizedRefunds
                 .Select(refund => InstallmentService.MapRefundPayment(
@@ -200,7 +202,8 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
                 .SetColumns(entity => entity.CancellationIdempotencyKey == claim.IdempotencyKey)
                 .SetColumns(entity => entity.UpdatedAt == committedAtUtc.UtcDateTime)
                 .Where(entity => entity.InstallmentGuid == installmentGuidText)
-                .Where(entity => entity.Status == (int)InstallmentStatus.Active)
+                // 乐观并发：只允许从锁内读到的那个状态（进行中或已付清）转为取消，期间被提货等改动则失败。
+                .Where(entity => entity.Status == lockedStatus)
                 .ExecuteCommandAsync(cancellationToken);
             if (affectedOrders != 1)
             {
@@ -303,7 +306,8 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
     private static IReadOnlyList<RefundBinding> ValidateRefundBindings(
         InstallmentCancelClaimEntity claim,
         InstallmentDetailsDto details,
-        IReadOnlyList<InstallmentRefundPaymentCommandDto> refunds)
+        IReadOnlyList<InstallmentRefundPaymentCommandDto> refunds,
+        InstallmentCancelRefundMode refundMode)
     {
         if (refunds.Select(refund => refund.PaymentGuid).Distinct().Count() != refunds.Count)
         {
@@ -336,7 +340,9 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
                 throw Mismatch("Refund originalPaymentGuid does not identify a refundable payment.");
             }
 
-            if (refund.Method != original.Method || RoundCurrency(refund.Amount) != RoundCurrency(original.Amount))
+            // 每笔原付款仍一对一退回原金额；退款方式由 claim 固定（原路或统一改发代金券）。
+            if (refund.Method != InstallmentLifecycleRules.ResolveRefundMethod(original.Method, refundMode) ||
+                RoundCurrency(refund.Amount) != RoundCurrency(original.Amount))
             {
                 throw Mismatch("Refund method or amount does not match its original payment.");
             }
@@ -477,7 +483,8 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
             !string.Equals(actual.CashierName, expected.CashierName, StringComparison.Ordinal) ||
             !string.Equals(actual.IdempotencyKey, expected.IdempotencyKey, StringComparison.Ordinal) ||
             !string.Equals(actual.Reason, expected.Reason, StringComparison.Ordinal) ||
-            !string.Equals(actual.RefundPlanFingerprint, expected.RefundPlanFingerprint, StringComparison.Ordinal))
+            !string.Equals(actual.RefundPlanFingerprint, expected.RefundPlanFingerprint, StringComparison.Ordinal) ||
+            InstallmentCancelClaimRecord.ParseStoredRefundMode(actual.RefundMode) != expected.RefundMode)
         {
             throw Mismatch("Stored cancellation claim no longer matches its immutable facts.");
         }
@@ -504,7 +511,8 @@ public sealed class SqlSugarInstallmentCancelClaimCommitRepository(
         entity.LastRecoveryCashierName,
         entity.LastRecoveryCashierUserGuid,
         entity.RecoveredAtUtc is null ? null : ToUtc(entity.RecoveredAtUtc.Value),
-        entity.OriginalDeviceCode);
+        entity.OriginalDeviceCode,
+        InstallmentCancelClaimRecord.ParseStoredRefundMode(entity.RefundMode));
 
     private static bool SameRecoveryIdentity(
         InstallmentCancelClaimEntity claim,

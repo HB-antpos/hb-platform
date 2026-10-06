@@ -11,6 +11,65 @@ public enum InstallmentStatus
     Cancelled = 4
 }
 
+/// <summary>
+/// 分期生命周期的共享判定，API 各写入闸门与客户端按钮必须用同一口径。
+/// </summary>
+public static class InstallmentLifecycleRules
+{
+    /// <summary>
+    /// 可"取消并退款"：未付清的进行中单，或已付清但尚未提货的单。
+    /// 已提货、已取消不可走取消退款；作废（不退款）仍只允许进行中单，不受此规则影响。
+    /// </summary>
+    public static bool CanCancelWithRefund(InstallmentStatus status, decimal balanceAmount) =>
+        (status == InstallmentStatus.Active && balanceAmount > 0m) ||
+        (status == InstallmentStatus.PaidOff && balanceAmount == 0m);
+
+    public static bool CanCancelWithRefund(int status, decimal balanceAmount) =>
+        CanCancelWithRefund((InstallmentStatus)status, balanceAmount);
+
+    /// <summary>未传退款方式的旧请求/旧记录一律按原路退处理；未定义的枚举值拒绝。</summary>
+    public static InstallmentCancelRefundMode NormalizeRefundMode(InstallmentCancelRefundMode? mode) =>
+        mode switch
+        {
+            null => InstallmentCancelRefundMode.OriginalRoute,
+            InstallmentCancelRefundMode.OriginalRoute or InstallmentCancelRefundMode.Voucher => mode.Value,
+            _ => throw new InvalidOperationException("Installment cancellation refund mode is invalid.")
+        };
+
+    /// <summary>
+    /// 退款合计是否覆盖全部原付款：原路退按方式逐项相等；退代金券则只允许代金券且合计等于原付款总额。
+    /// API 旧取消接口、claim 原子提交、提交快照校验三处共用，避免口径漂移。
+    /// </summary>
+    public static bool RefundTotalsMatch(
+        IReadOnlyDictionary<PaymentMethodKind, decimal> paidByMethod,
+        IReadOnlyDictionary<PaymentMethodKind, decimal> refundByMethod,
+        InstallmentCancelRefundMode mode)
+    {
+        if (mode == InstallmentCancelRefundMode.Voucher)
+        {
+            return refundByMethod.Count == 1 &&
+                refundByMethod.TryGetValue(PaymentMethodKind.Voucher, out var voucherRefund) &&
+                voucherRefund == decimal.Round(paidByMethod.Values.Sum(), 2, MidpointRounding.AwayFromZero);
+        }
+
+        return paidByMethod.Count == refundByMethod.Count &&
+            paidByMethod.All(pair => refundByMethod.TryGetValue(pair.Key, out var refundAmount) && refundAmount == pair.Value);
+    }
+
+    /// <summary>某笔原付款在给定退款方式下应以什么方式退回。</summary>
+    public static PaymentMethodKind ResolveRefundMethod(
+        PaymentMethodKind originalMethod,
+        InstallmentCancelRefundMode mode) =>
+        mode == InstallmentCancelRefundMode.Voucher ? PaymentMethodKind.Voucher : originalMethod;
+}
+
+/// <summary>取消分期的退款方式：原路退回，或全部改发退款代金券（含刷卡原付款）。</summary>
+public enum InstallmentCancelRefundMode
+{
+    OriginalRoute = 1,
+    Voucher = 2
+}
+
 public enum InstallmentPaymentStatus
 {
     Recorded = 1,
@@ -121,7 +180,8 @@ public sealed record InstallmentCancelClaimCreateRequest(
     Guid OperationGuid,
     string IdempotencyKey,
     string? Reason,
-    string RefundPlanFingerprint);
+    string RefundPlanFingerprint,
+    InstallmentCancelRefundMode? RefundMode = null);
 
 public sealed record InstallmentCancelClaimResolveRequest(
     InstallmentCancelClaimResolveOutcome Outcome,
@@ -146,7 +206,8 @@ public sealed record InstallmentCancelClaimDto(
     InstallmentCancelClaimCommitResponse? Commit = null,
     bool AlreadyExists = false,
     string? OriginalDeviceCode = null,
-    string? ExecutingDeviceCode = null);
+    string? ExecutingDeviceCode = null,
+    InstallmentCancelRefundMode RefundMode = InstallmentCancelRefundMode.OriginalRoute);
 
 public sealed record InstallmentLineDto(
     Guid InstallmentLineGuid,
@@ -254,7 +315,8 @@ public sealed record InstallmentCancelRequest(
     DateTimeOffset CancelledAt,
     IReadOnlyList<InstallmentRefundPaymentCommandDto> Refunds,
     string? Reason = null,
-    string? IdempotencyKey = null);
+    string? IdempotencyKey = null,
+    InstallmentCancelRefundMode? RefundMode = null);
 
 public sealed record InstallmentCancelResponse(
     Guid InstallmentGuid,

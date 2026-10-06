@@ -26,6 +26,7 @@ internal sealed class ScreenNavigator
     private readonly Func<Task<DeviceReregistrationStartResult>> _beginDeviceReregistrationAsync;
     private readonly Func<Task<bool>>? _recoverActiveCardPaymentSessionFromPaymentAsync;
     private readonly Func<InstallmentOrderSummary, Task> _onInstallmentOrderCreatedAsync;
+    private readonly Func<Guid, Task<string?>>? _printInstallmentRefundVouchersAsync;
 
     // Callbacks provided by MainViewModel for integration points.
     private readonly Action<object?> _setScreen;
@@ -77,7 +78,8 @@ internal sealed class ScreenNavigator
         Func<TransactionHistoryViewModel, Task> printSelectedHistoryReceiptAsync,
         Action<string> setStatusMessage,
         Func<LocalOrder?> getLastCompletedOrder,
-        Action<LocalOrder?> setLastCompletedOrder)
+        Action<LocalOrder?> setLastCompletedOrder,
+        Func<Guid, Task<string?>>? printInstallmentRefundVouchersAsync = null)
     {
         _factory = factory;
         _cart = cart;
@@ -96,6 +98,7 @@ internal sealed class ScreenNavigator
         _beginDeviceReregistrationAsync = beginDeviceReregistrationAsync;
         _recoverActiveCardPaymentSessionFromPaymentAsync = recoverActiveCardPaymentSessionFromPaymentAsync;
         _onInstallmentOrderCreatedAsync = onInstallmentOrderCreatedAsync;
+        _printInstallmentRefundVouchersAsync = printInstallmentRefundVouchersAsync;
         _setScreen = setScreen;
         _onPaymentCreated = onPaymentCreated;
         _onPaymentDisposed = onPaymentDisposed;
@@ -631,7 +634,8 @@ internal sealed class ScreenNavigator
         return _factory.CreateInstallmentCenterViewModel(
             Session,
             ShowInstallmentCreateAsync,
-            ShowCashPayment);
+            ShowCashPayment,
+            _printInstallmentRefundVouchersAsync);
     }
 
     public InstallmentCreateViewModel CreateInstallmentCreateViewModel()

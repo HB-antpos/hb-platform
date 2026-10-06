@@ -107,7 +107,8 @@ public sealed class InstallmentCancelClaimService(
 
         var details = await GetRequiredInstallmentAsync(installmentGuid, cancellationToken);
         ValidateInstallmentForNewClaim(details, normalizedIdentity);
-        InstallmentCancelRefundExecutionPolicy.Validate(details);
+        var refundMode = InstallmentLifecycleRules.NormalizeRefundMode(normalizedRequest.RefundMode);
+        InstallmentCancelRefundExecutionPolicy.Validate(details, refundMode);
         var authoritativeFingerprint = InstallmentCancelClaimFingerprint.Create(details);
         if (!string.Equals(
                 authoritativeFingerprint,
@@ -135,7 +136,8 @@ public sealed class InstallmentCancelClaimService(
             now.AddSeconds(PreparedClaimTtlSeconds),
             CommittedAtUtc: null,
             Revision: 1,
-            OriginalDeviceCode: details.DeviceCode);
+            OriginalDeviceCode: details.DeviceCode,
+            RefundMode: refundMode);
         if (await claimRepository.TryInsertAsync(claim, cancellationToken))
         {
             return Map(claim, alreadyExists: false);
@@ -173,7 +175,7 @@ public sealed class InstallmentCancelClaimService(
 
         if (current.Status == InstallmentCancelClaimStatus.RefundPending)
         {
-            await EnsureRefundExecutionSupportedAsync(installmentGuid, cancellationToken);
+            await EnsureRefundExecutionSupportedAsync(installmentGuid, current.RefundMode, cancellationToken);
             current = await RecordRecoveryCashierAsync(current, recoveryIdentity, cancellationToken);
             return Map(current, alreadyExists: true);
         }
@@ -194,7 +196,7 @@ public sealed class InstallmentCancelClaimService(
         }
 
         // Begin 成功是客户端调用退款 provider 的放行信号，必须基于最新权威账本再次复核。
-        await EnsureRefundExecutionSupportedAsync(installmentGuid, cancellationToken);
+        await EnsureRefundExecutionSupportedAsync(installmentGuid, current.RefundMode, cancellationToken);
         var updated = current with
         {
             Status = InstallmentCancelClaimStatus.RefundPending,
@@ -480,10 +482,11 @@ public sealed class InstallmentCancelClaimService(
 
     private async Task EnsureRefundExecutionSupportedAsync(
         Guid installmentGuid,
+        InstallmentCancelRefundMode refundMode,
         CancellationToken cancellationToken)
     {
         var details = await GetRequiredInstallmentAsync(installmentGuid, cancellationToken);
-        InstallmentCancelRefundExecutionPolicy.Validate(details);
+        InstallmentCancelRefundExecutionPolicy.Validate(details, refundMode);
     }
 
     private void ValidateInstallmentForNewClaim(
@@ -501,9 +504,9 @@ public sealed class InstallmentCancelClaimService(
             throw Mismatch("Cross-device installment cancellation refund is disabled.");
         }
 
-        if (details.Status != InstallmentStatus.Active || details.BalanceAmount <= 0m)
+        if (!InstallmentLifecycleRules.CanCancelWithRefund(details.Status, details.BalanceAmount))
         {
-            throw Mismatch("Only active unpaid installments can start a cancellation claim.");
+            throw Mismatch("Only active or paid-off installments that have not been picked up can start a cancellation claim.");
         }
     }
 
@@ -526,7 +529,8 @@ public sealed class InstallmentCancelClaimService(
     {
         if (!string.Equals(claim.IdempotencyKey, request.IdempotencyKey, StringComparison.Ordinal) ||
             !string.Equals(claim.Reason, request.Reason, StringComparison.Ordinal) ||
-            !string.Equals(claim.RefundPlanFingerprint, request.RefundPlanFingerprint, StringComparison.Ordinal))
+            !string.Equals(claim.RefundPlanFingerprint, request.RefundPlanFingerprint, StringComparison.Ordinal) ||
+            claim.RefundMode != InstallmentLifecycleRules.NormalizeRefundMode(request.RefundMode))
         {
             throw Mismatch("operationGuid is already bound to different cancellation facts.");
         }
@@ -551,11 +555,22 @@ public sealed class InstallmentCancelClaimService(
             throw Invalid("refundPlanFingerprint must be a lowercase sha256 digest.");
         }
 
+        InstallmentCancelRefundMode refundMode;
+        try
+        {
+            refundMode = InstallmentLifecycleRules.NormalizeRefundMode(request.RefundMode);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw Invalid(ex.Message);
+        }
+
         return request with
         {
             IdempotencyKey = idempotencyKey,
             Reason = reason,
-            RefundPlanFingerprint = refundPlanFingerprint
+            RefundPlanFingerprint = refundPlanFingerprint,
+            RefundMode = refundMode
         };
     }
 
@@ -635,7 +650,8 @@ public sealed class InstallmentCancelClaimService(
             string.IsNullOrWhiteSpace(claim.OriginalDeviceCode)
                 ? claim.ClaimantDeviceCode
                 : claim.OriginalDeviceCode,
-            claim.ClaimantDeviceCode);
+            claim.ClaimantDeviceCode,
+            claim.RefundMode);
 
     private static InstallmentCancelClaimException Busy() => new(
         InstallmentCancelClaimErrorCodes.Busy,
@@ -684,8 +700,14 @@ public sealed class InstallmentCancelClaimService(
 
 internal static class InstallmentCancelRefundExecutionPolicy
 {
-    internal static void Validate(InstallmentDetailsDto details)
+    internal static void Validate(InstallmentDetailsDto details, InstallmentCancelRefundMode refundMode)
     {
+        if (refundMode == InstallmentCancelRefundMode.Voucher)
+        {
+            // 全部改发退款代金券：每笔退款都有服务端发券凭据可核验，刷卡原付款也能在同一原子提交里落账。
+            return;
+        }
+
         var unsupported = details.Payments.FirstOrDefault(payment =>
             payment.Status == InstallmentPaymentStatus.Recorded &&
             payment.Amount > 0m &&
@@ -759,9 +781,7 @@ internal static class InstallmentCancelClaimCommitSnapshotValidator
         var refundByMethod = refunds
             .GroupBy(refund => refund.Method)
             .ToDictionary(group => group.Key, group => RoundCurrency(-group.Sum(refund => refund.Amount)));
-        if (paidByMethod.Count != refundByMethod.Count ||
-            paidByMethod.Any(pair =>
-                !refundByMethod.TryGetValue(pair.Key, out var amount) || amount != pair.Value))
+        if (!InstallmentLifecycleRules.RefundTotalsMatch(paidByMethod, refundByMethod, claim.RefundMode))
         {
             throw new InstallmentCancelClaimException(
                 InstallmentCancelClaimErrorCodes.Mismatch,

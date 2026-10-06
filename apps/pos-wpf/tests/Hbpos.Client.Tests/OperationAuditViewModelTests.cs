@@ -1555,6 +1555,7 @@ public sealed class OperationAuditViewModelTests
         public Task<InstallmentOrderActionResult> CancelWithRefundAsync(
             Guid orderId,
             PosSessionState session,
+            InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

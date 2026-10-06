@@ -1318,17 +1318,78 @@ public sealed class InstallmentServiceTests
     }
 
     [Fact]
-    public async Task Cancel_and_void_reject_paid_off_installment()
+    public async Task Cancel_with_refund_allows_paid_off_installment_before_pickup()
     {
         var service = CreateService();
         var created = await service.CreateAsync(CreateRequest(totalAmount: 50m, downPaymentAmount: 50m), CancellationToken.None);
+        Assert.Equal(InstallmentStatus.PaidOff, created.Status);
 
+        // 已付清仍须按方式全额原路退，部分退款不能把付清单取消。
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CancelAsync(
                 CreateCancel(created.InstallmentGuid, [new InstallmentRefundPaymentCommandDto(Guid.NewGuid(), PaymentMethodKind.Cash, 20m, "CASH-REFUND")]),
                 CancellationToken.None));
+
+        var response = await service.CancelAsync(
+            CreateCancel(created.InstallmentGuid, [new InstallmentRefundPaymentCommandDto(Guid.NewGuid(), PaymentMethodKind.Cash, 50m, "CASH-REFUND")]),
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentStatus.Cancelled, response.Status);
+        Assert.Equal(InstallmentCancellationKind.RefundCancel, response.Details.CancellationInfo!.Kind);
+        Assert.Equal(0m, response.Details.PaidAmount);
+    }
+
+    [Fact]
+    public async Task Cancel_with_voucher_mode_requires_voucher_refund_for_the_full_paid_total()
+    {
+        var service = CreateService();
+        var created = await service.CreateAsync(CreateRequest(totalAmount: 50m, downPaymentAmount: 50m), CancellationToken.None);
+        var voucherMode = CreateCancel(
+            created.InstallmentGuid,
+            [new InstallmentRefundPaymentCommandDto(Guid.NewGuid(), PaymentMethodKind.Cash, 50m, "CASH-REFUND")]) with
+        {
+            RefundMode = InstallmentCancelRefundMode.Voucher
+        };
+
+        // 退代金券模式下现金退款不被接受。
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CancelAsync(voucherMode, CancellationToken.None));
+
+        var response = await service.CancelAsync(
+            voucherMode with
+            {
+                Refunds = [new InstallmentRefundPaymentCommandDto(Guid.NewGuid(), PaymentMethodKind.Voucher, 50m, "VOUCHER_REFUND:RF001")]
+            },
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentStatus.Cancelled, response.Status);
+        Assert.Contains(response.Details.Payments, payment => payment.Method == PaymentMethodKind.Voucher && payment.Amount == -50m);
+    }
+
+    [Fact]
+    public async Task Void_still_rejects_paid_off_installment()
+    {
+        var service = CreateService();
+        var created = await service.CreateAsync(CreateRequest(totalAmount: 50m, downPaymentAmount: 50m), CancellationToken.None);
+
+        // 作废不退款会让客户损失全款，付清后只允许取消退款。
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.VoidAsync(CreateVoid(created.InstallmentGuid), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Cancel_with_refund_rejects_picked_up_installment()
+    {
+        var service = CreateService();
+        var created = await service.CreateAsync(CreateRequest(totalAmount: 50m, downPaymentAmount: 50m), CancellationToken.None);
+        await service.ConfirmPickupAsync(CreatePickup(created.InstallmentGuid), CancellationToken.None);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CancelAsync(
+                CreateCancel(created.InstallmentGuid, [new InstallmentRefundPaymentCommandDto(Guid.NewGuid(), PaymentMethodKind.Cash, 50m, "CASH-REFUND")]),
+                CancellationToken.None));
+
+        Assert.Contains("picked up", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

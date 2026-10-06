@@ -691,11 +691,11 @@ public sealed class LocalInstallmentOperationRepository(LocalSqliteStore store) 
             INSERT INTO LocalInstallmentRefundSteps
             (RefundStepGuid, OperationGuid, OriginalPaymentGuid, Method, Amount, OriginalReference, IdempotencyKey, State,
              RefundReference, ProviderEnvironment, CardTransactionsJson, FailureMessage, SupervisorDecision, SupervisorUserId, SupervisorReason,
-             SupervisorEvidence, ResolvedAt, CreatedAt, UpdatedAt)
+             SupervisorEvidence, ResolvedAt, CreatedAt, UpdatedAt, OriginalMethod)
             VALUES
             ($RefundStepGuid, $OperationGuid, $OriginalPaymentGuid, $Method, $Amount, $OriginalReference, $IdempotencyKey, $State,
              $RefundReference, $ProviderEnvironment, $CardTransactionsJson, $FailureMessage, $SupervisorDecision, $SupervisorUserId, $SupervisorReason,
-             $SupervisorEvidence, $ResolvedAt, $CreatedAt, $UpdatedAt);
+             $SupervisorEvidence, $ResolvedAt, $CreatedAt, $UpdatedAt, $OriginalMethod);
             """;
         AddRefundStepParameters(command, step);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -799,6 +799,7 @@ public sealed class LocalInstallmentOperationRepository(LocalSqliteStore store) 
         command.Parameters.AddWithValue("$ResolvedAt", step.ResolvedAt?.ToString("O") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$CreatedAt", step.CreatedAt.ToString("O"));
         command.Parameters.AddWithValue("$UpdatedAt", step.UpdatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$OriginalMethod", step.OriginalMethod is { } originalMethod ? (int)originalMethod : DBNull.Value);
     }
 
     private static LocalInstallmentOperation ReadOperation(SqliteDataReader reader) => new(
@@ -838,7 +839,8 @@ public sealed class LocalInstallmentOperationRepository(LocalSqliteStore store) 
         ReadNullableDateTimeOffset(reader, "ResolvedAt"),
         ReadDateTimeOffset(reader, "CreatedAt"),
         ReadDateTimeOffset(reader, "UpdatedAt"),
-        ReadNullableString(reader, "ProviderEnvironment"));
+        ReadNullableString(reader, "ProviderEnvironment"),
+        ReadNullableInt32(reader, "OriginalMethod") is { } originalMethod ? (PaymentMethodKind)originalMethod : null);
 
     private static Guid ReadGuid(SqliteDataReader reader, string name) => Guid.Parse(ReadString(reader, name));
     private static Guid? ReadNullableGuid(SqliteDataReader reader, string name)
@@ -853,6 +855,11 @@ public sealed class LocalInstallmentOperationRepository(LocalSqliteStore store) 
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
     private static int ReadInt32(SqliteDataReader reader, string name) => Convert.ToInt32(reader.GetValue(reader.GetOrdinal(name)), CultureInfo.InvariantCulture);
+    private static int? ReadNullableInt32(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? null : Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+    }
     private static decimal ReadDecimal(SqliteDataReader reader, string name) => Convert.ToDecimal(reader.GetValue(reader.GetOrdinal(name)), CultureInfo.InvariantCulture);
     private static DateTimeOffset ReadDateTimeOffset(SqliteDataReader reader, string name) => DateTimeOffset.Parse(ReadString(reader, name), CultureInfo.InvariantCulture);
     private static DateTimeOffset? ReadNullableDateTimeOffset(SqliteDataReader reader, string name)

@@ -129,6 +129,9 @@
                     <Button Command="{Binding CancelWithRefundCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="44" Margin="0,10,0,0">
                         <TextBlock Text="{Binding CancelWithRefundText}" FontWeight="Bold" />
                     </Button>
+                    <Button Command="{Binding CancelWithVoucherRefundCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="44" Margin="0,10,0,0">
+                        <TextBlock Text="{Binding CancelWithVoucherRefundText}" FontWeight="Bold" />
+                    </Button>
                     <TextBox Text="{Binding VoidReason, UpdateSourceTrigger=PropertyChanged}" materialDesign:HintAssist.Hint="{loc:Loc installment.center.input.voidReason}" Margin="0,10,0,0" Height="44" Style="{StaticResource PosSearchTextBoxStyle}" />
                     <Button Command="{Binding VoidCancelCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="44" Margin="0,10,0,0">
                         <TextBlock Text="{Binding VoidCancelText}" FontWeight="Bold" />

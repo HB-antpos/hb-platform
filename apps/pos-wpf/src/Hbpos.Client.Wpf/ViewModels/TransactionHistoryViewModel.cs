@@ -647,6 +647,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         !IsReceiptPreviewLoading &&
         string.IsNullOrWhiteSpace(OrderDetailsErrorMessage);
 
+    // 补打已取消分期时用于一并补打退款券；只返回与当前选中单匹配的快照，避免切单后打错券。
+    internal LocalInstallmentOrder? SelectedInstallmentDetailsForReprint => CurrentOrderInstallmentDetails;
+
     private LocalInstallmentOrder? CurrentOrderInstallmentDetails
     {
         get
