@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import Module from "node:module";
 import { beforeEach, test } from "node:test";
+import { installPrinterLinkRecorder, type PrinterLinkLogItem } from "./link-diagnostics";
 import type { PrinterStatus, SavedPrinter } from "./types";
 
 function mockModule(name: string, exports: object) {
@@ -396,6 +397,85 @@ async function run() {
     await api.connectSavedPrinter();
     await api.testReceiptPrinterConnection();
     assert.deepEqual(events, []);
+  });
+
+  // 蓝牙链路诊断：用真实的 api.ts + 真实记录器，只替换原生边界，验证打点位置与内容。
+  function installRecorder(emitted: PrinterLinkLogItem[]) {
+    let clock = 1_000_000;
+    let ids = 0;
+    installPrinterLinkRecorder({
+      now: () => (clock += 1_000),
+      newId: () => `00000000-0000-4000-8000-${String((ids += 1)).padStart(12, "0")}`,
+      emit: (item) => emitted.push(item),
+      context: () => ({ environment: "test", appVersion: "1.0.10+63" }),
+    });
+  }
+
+  type LoggedEvent = { kind: string; trigger?: string; bluetoothEnabled?: boolean; source?: string; code?: string };
+
+  test("蓝牙链路诊断：自动重连连续失败与恢复各生成一条日志，带触发来源、错误码与蓝牙状态", async () => {
+    const emitted: PrinterLinkLogItem[] = [];
+    installRecorder(emitted);
+    try {
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      connectError = Object.assign(new Error("read failed, socket might closed or timeout, read ret: -1"), { code: "CONNECT_ERROR" });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await assert.rejects(api.connectSavedPrinter({ status: "reconnecting" }), /read failed/);
+      }
+      assert.equal(emitted.length, 1, "第 3 次失败才上报一次，不是每次失败都上报");
+      const failing = emitted[0];
+      assert.equal(failing.category, "printer.link");
+      assert.equal(failing.level, "Warning");
+      assert.equal(failing.properties.phase, "failing");
+      assert.equal(failing.properties.failures, 3);
+      assert.equal(failing.properties.address, "label");
+      assert.deepEqual(
+        (failing.properties.errors as { code: string; count: number }[]).map((error) => [error.code, error.count]),
+        [["CONNECT_ERROR", 3]],
+      );
+      const starts = (failing.properties.events as LoggedEvent[]).filter((event) => event.kind === "connect.start");
+      assert.equal(starts.length, 3);
+      assert.ok(starts.every((event) => event.trigger === "auto" && event.bluetoothEnabled === true));
+
+      connectError = null;
+      await api.connectSavedPrinter({ status: "reconnecting" });
+      assert.equal(emitted.length, 2);
+      assert.equal(emitted[1].properties.phase, "recovered");
+      assert.equal(emitted[1].properties.failures, 3);
+    } finally {
+      installPrinterLinkRecorder(null);
+    }
+  });
+
+  test("蓝牙链路诊断：打印时才发现断线记为 link.lost，随后手动重连失败的触发来源是 print/manual", async () => {
+    const emitted: PrinterLinkLogItem[] = [];
+    installRecorder(emitted);
+    try {
+      writeError = new Error("write failed: EPIPE (Broken pipe)");
+      await assert.rejects(api.printProductLabelPayload(payload), /Broken pipe/);
+      writeError = null;
+      connectError = Object.assign(new Error("Bluetooth is turned off."), { code: "BLUETOOTH_DISABLED" });
+      await assert.rejects(api.printProductLabelPayload(payload), /turned off/);
+      await assert.rejects(api.connectSavedPrinter(), /turned off/);
+      await assert.rejects(api.connectSavedPrinter(), /turned off/);
+      assert.equal(emitted.length, 1);
+      const events = emitted[0].properties.events as LoggedEvent[];
+      assert.ok(events.some((event) => event.kind === "link.lost" && event.source === "print"), "必须带上断线来源");
+      assert.deepEqual(
+        events.filter((event) => event.kind === "connect.fail").map((event) => [event.trigger, event.code]),
+        [["print", "BLUETOOTH_DISABLED"], ["manual", "BLUETOOTH_DISABLED"], ["manual", "BLUETOOTH_DISABLED"]],
+      );
+    } finally {
+      installPrinterLinkRecorder(null);
+    }
+  });
+
+  test("蓝牙链路诊断：未安装记录器时连接与打印行为不变", async () => {
+    installPrinterLinkRecorder(null);
+    nativeStatus = { ...nativeStatus, connected: false, address: null };
+    await api.connectSavedPrinter({ status: "reconnecting" });
+    assert.deepEqual(events, ["connect:label"]);
+    assert.equal(usePrinterStore.getState().status, "connected");
   });
 }
 
