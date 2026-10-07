@@ -344,6 +344,8 @@
     "smallLabel": "Small label (60mm)",
     "quantity": "Print quantity",
     "quantitySingleUse": "Single use",
+    "quantitySingleUseHint": "Reset to 1 after printing",
+    "quantitySingleUseIdleHint": "Available when quantity is above 1",
     "printerStatus": {
       "unselected": "No printer selected",
       "idle": "Ready to connect",
@@ -354,7 +356,18 @@
       "paused": "Connection paused",
       "error": "Connection issue",
       "errorHint": "Open settings to check the connection",
-      "openSettingsHint": "Open printer settings"
+      "openSettingsHint": "Open print settings",
+      "short": {
+        "unselected": "No printer",
+        "idle": "Idle",
+        "connecting": "Connecting",
+        "connected": "Connected",
+        "reconnecting": "Retrying",
+        "disconnected": "Offline",
+        "paused": "Paused",
+        "error": "Issue"
+      },
+      "manage": "Printer settings"
     },
     "label": "Labels"
   },
