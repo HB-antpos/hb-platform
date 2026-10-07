@@ -1,3 +1,4 @@
+import { INSTALLMENT_RECEIPT_TERMS } from "@hb/pos-receipt-core/features/receipts/installment-receipt-terms";
 import {
   buildSaleReceiptDocument,
   documentToEscPosBytes,
@@ -102,6 +103,8 @@ export class InstallmentReceiptReprintPreparationService {
         includeMachineCodes: true,
         printedAtIso: this.options.nowIso(),
         extraInfoLines: installmentInfoLines(details, recordedPayments),
+        // 中文注释：分期条款只印在进行中的分期上；未带条款时与原小票字节一致。
+        ...(shouldPrintInstallmentTerms(details) ? { termsBlock: INSTALLMENT_RECEIPT_TERMS } : {}),
       });
 
       const receiptBytes = documentToEscPosBytes(document);
@@ -141,6 +144,15 @@ function concatBytes(first: Uint8Array, second: Uint8Array): Uint8Array {
   output.set(first, 0);
   output.set(second, first.byteLength);
   return output;
+}
+
+/**
+ * 分期条款（订单至少 $50、首付至少 $20、每次还款至少 $5）只对「进行中」的分期有意义：
+ * 已付清、已提货、已取消后再印「最低首付/还款」没有意义，取消单上更会误导顾客。
+ * 带提货信息的进行中单属于不一致数据，同样不印，与 WPF 的判断一致。
+ */
+function shouldPrintInstallmentTerms(details: InstallmentDetails): boolean {
+  return details.status === "Active" && !details.pickupInfo;
 }
 
 function installmentInfoLines(

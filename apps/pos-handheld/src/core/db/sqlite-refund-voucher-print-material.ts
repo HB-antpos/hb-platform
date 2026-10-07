@@ -352,7 +352,6 @@ implements ProtectedRefundVoucherPrintMaterialPort {
         state.cashierId !== order.cashierId ||
         state.amountCents !== binding.signedAmountCents ||
         state.reservationToken !== null ||
-        !isCanonicalIso(state.expiresAtIso) ||
         !voucherCode
       ) {
         return null;
@@ -361,6 +360,11 @@ implements ProtectedRefundVoucherPrintMaterialPort {
         returnOrderGuid,
         voucherCode,
         refundAmountCents: -binding.signedAmountCents,
+        // 券面要印的到期日 = 发券时服务端返回并写入受保护状态的这张券自己的到期时刻。
+        // 到期日只是券面的附加信息：缺失或格式异常（旧数据）只省略它，绝不能因此让整张券打不出来。
+        ...(isCanonicalIso(state.expiresAtIso)
+          ? { expiresAtIso: state.expiresAtIso }
+          : {}),
       }));
     }
     return Object.freeze(materials);

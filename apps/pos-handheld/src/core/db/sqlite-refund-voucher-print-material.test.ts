@@ -13,9 +13,20 @@ import type {
 } from "@hb/pos-db/core/db/types";
 
 import type { VoucherProtectedAttemptState } from "@/features/payments/voucher";
+import {
+  hasRefundVoucherTender,
+  ProtectedRefundVoucherReceiptRenderer,
+} from "@hb/pos-receipt-core/features/receipts/refund-voucher-receipt-renderer";
+import { renderRefundReceiptWithVouchers } from "@/core/runtime/return-fulfilment-runtime";
+import type { LocalOrder } from "@hb/pos-domain/core/contracts/order";
 
 const NOW = "2026-07-28T00:00:00.000Z";
 const EXPIRES = "2027-07-28T00:00:00.000Z";
+
+/** 混合退款夹具里第 index 笔 allocation 的券到期时刻：每张不同，用来证明到期日不会串券。 */
+function mixedExpiry(index: number): string {
+  return `2027-07-${String(10 + index).padStart(2, "0")}T13:59:59.000Z`;
+}
 
 const encryptor = {
   async encrypt(plaintext: string): Promise<Uint8Array> {
@@ -37,6 +48,8 @@ test("只从唯一完成退货、负数 voucher tender、Approved attempt 与受
         returnOrderGuid: "return-order-1",
         voucherCode: "REFUND-VOUCHER-001",
         refundAmountCents: 500,
+        // 到期日就是发券时服务端返回并写入受保护状态的那一个，客户端不反推。
+        expiresAtIso: EXPIRES,
       }],
     );
 
@@ -55,6 +68,212 @@ test("只从唯一完成退货、负数 voucher tender、Approved attempt 与受
     );
   });
 });
+
+test("到期日取自这张券自己的受保护状态；缺失、null 或格式异常时仍恢复券码材料，只是不带到期日（不再因此失败关闭）", async () => {
+  await withFixture(async ({ connection }) => {
+    const store = new SqliteVoucherProtectedTokenStore(
+      connection,
+      encryptor,
+      () => "vpr_abcdefghijklmnop",
+      () => NOW,
+    );
+    // 真实存储层保证 approved 状态一定带规范到期日；这里在读取口模拟旧数据、异常数据，
+    // 证明到期日问题只会让券面少一行，绝不会让整张退款券打不出来。
+    const withExpiry = (expiresAtIso: unknown) =>
+      new SqliteRefundVoucherPrintMaterial(connection, {
+        async getByAttempt(attemptId) {
+          const state = await store.getByAttempt(attemptId);
+          return state === null
+            ? null
+            : { ...state, expiresAtIso: expiresAtIso as string | null };
+        },
+      });
+    const base = {
+      returnOrderGuid: "return-order-1",
+      voucherCode: "REFUND-VOUCHER-001",
+      refundAmountCents: 500,
+    };
+
+    assert.deepEqual(
+      await withExpiry(EXPIRES).resolveApprovedRefundVouchers(
+        "return-action-1",
+        "return-order-1",
+      ),
+      [{ ...base, expiresAtIso: EXPIRES }],
+    );
+    for (const missing of [
+      null,
+      undefined,
+      "",
+      "not-a-date",
+      "2027-07-28T00:00:00+00:00",
+      20270728,
+    ]) {
+      assert.deepEqual(
+        await withExpiry(missing).resolveApprovedRefundVouchers(
+          "return-action-1",
+          "return-order-1",
+        ),
+        [base],
+        `expiresAtIso=${JSON.stringify(missing)}`,
+      );
+    }
+  });
+});
+
+test("退货首次打印端到端：真实 SQLite 材料 + 渲染器印出受保护状态里的到期日与使用说明", async () => {
+  await withFixture(async ({ adapter }) => {
+    const renderWith = async (businessTimeZone: string | undefined): Promise<string> => {
+      const renderer = new ProtectedRefundVoucherReceiptRenderer(
+        { async getByGuid() { return returnOrderForRender(); } },
+        adapter,
+        {
+          async getFrozenReturnReceiptSettings() {
+            return {
+              printerId: "printer-1",
+              paper: "58mm",
+              locale: "en",
+              store: { brandName: "Hot Bargain", storeName: "Main", address: "", phone: "", abn: "", returnPolicy: "" },
+            };
+          },
+        },
+        () => new Date(2026, 6, 28, 9, 0, 0),
+        businessTimeZone,
+      );
+      return new TextDecoder().decode(
+        (await renderer.render("return-action-1", "return-order-1")).receiptBytes,
+      );
+    };
+
+    // EXPIRES = 2027-07-28T00:00:00Z：布里斯班(+10) 是 7 月 28 日 10:00；洛杉矶(-7) 还停在 7 月 27 日。
+    const brisbane = await renderWith("Australia/Brisbane");
+    assert.match(brisbane, /Voucher: REFUND-VOUCHER-001/u);
+    assert.match(brisbane, /Valid until: 2027-07-28/u);
+    assert.match(brisbane, /VOUCHER TERMS/u);
+    assert.match(await renderWith(undefined), /Valid until: 2027-07-28/u);
+    assert.match(await renderWith("America/Los_Angeles"), /Valid until: 2027-07-27/u);
+  });
+});
+
+test("刷卡 + 券混合退款首次打印：退货小票之后追加带到期日与使用说明的券面（真实 SQLite 材料）", async () => {
+  await withMixedFixture(
+    {
+      receiptKind: "refund-receipt",
+      allocations: [
+        { method: "voucher", amountCents: 250, capacityMethod: "card" },
+        { method: "card", amountCents: 750, capacityMethod: "card" },
+      ],
+    },
+    async ({ adapter }) => {
+      const base = returnOrderForRender();
+      const order: LocalOrder = {
+        ...base,
+        total: { currency: "AUD", cents: -1_000 },
+        actualAmount: { currency: "AUD", cents: -1_000 },
+        lines: [{
+          ...base.lines[0]!,
+          unitPrice: { currency: "AUD", cents: 1_000 },
+          actualAmount: { currency: "AUD", cents: -1_000 },
+        }],
+        tenders: [
+          {
+            tenderGuid: "mixed-tender-0",
+            method: "voucher",
+            amount: { currency: "AUD", cents: -250 },
+            reference: null,
+            reservationToken: null,
+          },
+          {
+            tenderGuid: "mixed-tender-1",
+            method: "card",
+            amount: { currency: "AUD", cents: -750 },
+            reference: null,
+            reservationToken: null,
+          },
+        ],
+      };
+      const renderer = new ProtectedRefundVoucherReceiptRenderer(
+        { async getByGuid() { return order; } },
+        adapter,
+        {
+          async getFrozenReturnReceiptSettings() {
+            return {
+              printerId: "printer-1",
+              paper: "80mm",
+              locale: "en",
+              store: { brandName: "Hot Bargain", storeName: "Main", address: "", phone: "", abn: "", returnPolicy: "" },
+            };
+          },
+        },
+        () => new Date(2026, 6, 28, 9, 0, 0),
+        "Australia/Brisbane",
+      );
+
+      const rendered = await renderRefundReceiptWithVouchers({
+        renderReceipt: async () => ({
+          printerId: "printer-1",
+          receiptBytes: new TextEncoder().encode("RETURN-RECEIPT\n"),
+        }),
+        hasRefundVoucherTender: async () => hasRefundVoucherTender(order),
+        renderRefundVouchers: () =>
+          renderer.render("return-action-1", "return-order-1"),
+      });
+      const text = new TextDecoder().decode(rendered.receiptBytes);
+
+      assert.ok(text.startsWith("RETURN-RECEIPT\n"), "退货小票在前");
+      // 第 0 笔 allocation 的券到期时刻是 2027-07-10T13:59:59Z（布里斯班 23:59:59 当天）。
+      const voucherIndex = text.indexOf("Voucher: MIXED-VOUCHER-0");
+      assert.ok(voucherIndex > "RETURN-RECEIPT\n".length, "券面追加在退货小票之后");
+      assert.ok(text.indexOf("Valid until: 2027-07-10") > voucherIndex);
+      assert.ok(text.indexOf("VOUCHER TERMS") > text.indexOf("Valid until: 2027-07-10"));
+      assert.equal(text.match(/Valid until/gu)?.length, 1);
+    },
+  );
+});
+
+function returnOrderForRender(): LocalOrder {
+  return {
+    orderGuid: "return-order-1",
+    localSequence: 1,
+    storeCode: "S1",
+    deviceCode: "IPAD-1",
+    cashierId: "cashier-1",
+    cashierName: "Cashier",
+    soldAtIso: NOW,
+    state: "PendingSync",
+    total: { currency: "AUD", cents: -500 },
+    discount: { currency: "AUD", cents: 0 },
+    actualAmount: { currency: "AUD", cents: -500 },
+    originalOrderGuid: "original-order-1",
+    lines: [
+      {
+        lineId: "return-line-1",
+        productCode: "P1",
+        itemNumber: null,
+        lookupCode: "P1",
+        displayName: "Returned product",
+        quantity: "1",
+        unitPrice: { currency: "AUD", cents: 500 },
+        discount: { currency: "AUD", cents: 0 },
+        actualAmount: { currency: "AUD", cents: -500 },
+        priceSource: "catalog",
+        kind: "return",
+        returnSourceKey: "return-source-1",
+        originalOrderGuid: "original-order-1",
+        originalOrderDetailGuid: "original-detail-1",
+      },
+    ],
+    tenders: [
+      {
+        tenderGuid: "voucher-tender-1",
+        method: "voucher",
+        amount: { currency: "AUD", cents: -500 },
+        reference: null,
+        reservationToken: null,
+      },
+    ],
+  };
+}
 
 test("缺少 action/fulfilment 绑定时不得只凭 returnOrderGuid 恢复券码", async () => {
   await withUnboundFixture(async ({ adapter }) => {
@@ -433,6 +652,8 @@ test("混合退款：现金/刷卡 + 退款券、多张券时每笔已批准券 
                   returnOrderGuid: "return-order-1",
                   voucherCode: `MIXED-VOUCHER-${index}`,
                   refundAmountCents: allocation.amountCents,
+                  // 每张券各带自己受保护状态里的到期时刻（各不相同，防止串券）。
+                  expiresAtIso: mixedExpiry(index),
                 }]
               : []);
           assert.deepEqual(
@@ -772,6 +993,7 @@ async function withMixedFixture(
           idempotencyKey: `mixed-idem-${index}`,
           voucherCode: `MIXED-VOUCHER-${index}`,
           amountCents: -allocation.amountCents,
+          expiresAtIso: mixedExpiry(index),
         }));
       }
     }

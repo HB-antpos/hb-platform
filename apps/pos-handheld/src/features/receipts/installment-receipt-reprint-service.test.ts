@@ -412,8 +412,9 @@ test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () =
         payments: [payment("12345678-1234-1234-1234-000000000002", 4_000, "2026-08-01T02:00:00.000Z")],
       }),
       expected: "*** Deposit Received ***",
+      showsTerms: true,
     },
-    { value: details(), expected: "*** Paid - Pickup Pending ***" },
+    { value: details(), expected: "*** Paid - Pickup Pending ***", showsTerms: false },
     {
       value: details({
         status: "PickedUp",
@@ -424,6 +425,7 @@ test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () =
         },
       }),
       expected: "*** Paid - Picked Up ***",
+      showsTerms: false,
     },
     {
       value: details({
@@ -450,6 +452,7 @@ test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () =
         },
       }),
       expected: "*** Installment Cancelled ***",
+      showsTerms: false,
     },
   ] as const;
 
@@ -457,6 +460,13 @@ test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () =
     const prepared = await createService({ response: scenario.value }).service.prepare(installmentGuid);
     const receipt = decoder.decode(prepared?.receiptBytes);
     assert.match(receipt, new RegExp(scenario.expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    // 分期条款只在进行中（Active）的补打小票上打印；已付清、已提货、已取消都不带。
+    if (scenario.showsTerms) {
+      assert.match(receipt, /INSTALLMENT TERMS/u, scenario.expected);
+    } else {
+      assert.doesNotMatch(receipt, /INSTALLMENT TERMS/u, scenario.expected);
+      assert.doesNotMatch(receipt, /Order total: \$50\.00 minimum\./u, scenario.expected);
+    }
   }
   const pickedUp = decoder.decode(
     (await createService({ response: scenarios[2].value }).service.prepare(installmentGuid))?.receiptBytes,
@@ -464,6 +474,62 @@ test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () =
   assert.match(pickedUp, /Pickup: Confirmed/u);
   assert.match(pickedUp, /Picked up by: Bob/u);
   assert.match(pickedUp, /Pickup note: Back door/u);
+});
+
+function activeInstallment(overrides: Partial<InstallmentDetails> = {}): InstallmentDetails {
+  return details({
+    status: "Active",
+    paidCents: 4_000,
+    balanceCents: 6_000,
+    payments: [payment("12345678-1234-1234-1234-000000000002", 4_000, "2026-08-01T02:00:00.000Z")],
+    ...overrides,
+  });
+}
+
+test("进行中分期补打在退货政策之后、条码之前追加英文分期条款，80mm 按纸宽换行", async () => {
+  const harness = createService({
+    response: activeInstallment(),
+    settingValue: { ...settings, store: { ...settings.store, returnPolicy: "Refunds within 14 days with proof of purchase." } },
+  });
+
+  const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
+
+  const policy = receipt.indexOf("Refunds and returns");
+  const title = receipt.indexOf("INSTALLMENT TERMS");
+  // 条款之后依次是分隔线、完整 GUID 的 QR 载荷与页脚，所以取条款后第一次出现的 GUID 比较。
+  const machineCode = receipt.indexOf(installmentGuid, title);
+  const printTime = receipt.indexOf("Print Time:");
+  assert.ok(policy >= 0 && title > policy, "条款在退货政策之后");
+  assert.ok(machineCode > title && printTime > machineCode, "条款在条码/QR 与页脚之前");
+  assert.match(receipt, /Order total: \$50\.00 minimum\./u);
+  assert.match(receipt, /First payment: \$20\.00 minimum\./u);
+  // 第三条在 80mm（42 字符）下于单词边界换成两行，不是手工拆行。
+  assert.match(receipt, /Each later payment: \$5\.00 minimum, or the[\s\S]{1,12}remaining balance if it is lower\./u);
+  assert.equal(receipt.split("INSTALLMENT TERMS").length - 1, 1);
+});
+
+test("进行中分期在 zh-CN 与 58mm 下仍原样打印英文条款并按 32 字符换行", async () => {
+  const harness = createService({
+    response: activeInstallment(),
+    settingValue: { ...settings, locale: "zh-CN", paper: "58mm" },
+  });
+
+  const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
+
+  assert.match(receipt, /INSTALLMENT TERMS/u);
+  assert.match(receipt, /Order total: \$50\.00 minimum\./u);
+  assert.match(receipt, /First payment: \$20\.00 minimum\./u);
+  assert.match(receipt, /Each later payment: \$5\.00[\s\S]{1,12}minimum, or the remaining[\s\S]{1,12}balance if it is lower\./u);
+});
+
+test("状态为进行中但带提货信息的不一致数据不打印分期条款", async () => {
+  const receipt = decoder.decode((await createService({
+    response: activeInstallment({
+      pickupInfo: { pickedUpAtIso: "2026-08-03T01:02:03.000Z", pickedUpBy: "Bob", note: null },
+    }),
+  }).service.prepare(installmentGuid))?.receiptBytes);
+
+  assert.doesNotMatch(receipt, /INSTALLMENT TERMS/u);
 });
 
 test("prepare 对 GUID、门店或当前设备不一致 fail closed 且不读取设置", async () => {

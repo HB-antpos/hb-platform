@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "dd61a4aef385c339b5d0e89a4124a98cf376f1b079f8e80acbb62cb15ca7b400",
+  "reviewedModuleTopologySha256": "be70d6819d75f47bca08170e019390f58cba94ea827c03ca1a48be1229c8dae3",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -525,15 +525,21 @@
     {
       "path": "features/receipts/refund-voucher-receipt-renderer.ts",
       "package": "pos-receipt-core",
-      "reason": "退款券面支持混合退款与多张退款券：材料端口返回每笔 voucher tender 一份，逐张编码拼入同一冻结 print job；抽出 encodeRefundVoucherDocuments 供取消分期退款券复用，新增 hasRefundVoucherTender",
+      "reason": "退款券面支持混合退款与多张退款券：材料端口返回每笔 voucher tender 一份，逐张编码拼入同一冻结 print job；抽出 encodeRefundVoucherDocuments 供取消分期退款券复用，新增 hasRefundVoucherTender。券面新增两块内容：Amount 行之后按业务时区（Intl，非设备时区）印这张券自己的 Valid until: yyyy-MM-dd（材料里的到期日可选，缺失、格式异常或时区不可用时只省略该行，绝不阻断出票），QR 之后印英文券使用说明块（文案在 refund-voucher-terms.ts，按本渲染器纸宽 58mm=32 / 80mm=48 在单词边界换行）",
       "baselineCanonicalRuntimeSha256": "1f9d0f50597f2785dbe7bbf8cbc6d71739debf380b5c6a6817306363843d11fe",
-      "canonicalRuntimeSha256": "a41baf6b101aeb86bc04e7e6e7f030b50e6bf84f0cfc615f69db5978b5ff2ac9",
-      "canonicalTypeSha256": "722d48f6f9bb6d5349b2e56b955e3763443e40647d4d48b4e432b42d23de0d93",
+      "canonicalRuntimeSha256": "0dee4b5e4b43cbfa25ca0cd31a5a5e41707463e9cb818c20884ef655c57aca8b",
+      "canonicalTypeSha256": "9973df44e3b177442a544a33072cc4f7b5614a562cd4e26004c410a0e17ebd6d",
       "behaviorTests": [
         {
           "workspace": "packages/pos-receipt-core",
           "script": "test",
           "path": "src/features/receipts/refund-voucher-receipt-renderer.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "packages/pos-receipt-core",
+          "script": "test",
+          "path": "src/features/receipts/refund-voucher-terms.test.ts",
           "pattern": "src/**/*.test.ts"
         },
         {
@@ -547,17 +553,35 @@
           "script": "test:receipts",
           "path": "src/features/receipts/installment-refund-voucher-print-service.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-refund-voucher-print-material.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-refund-voucher-print-material.test.ts",
+          "pattern": "src/core/db/*.test.ts"
         }
       ]
-    }
-  ],
-  "semanticAdaptations": [
+    },
     {
       "path": "features/receipts/receipt-document.ts",
       "package": "pos-receipt-core",
-      "reason": "抽取 ReceiptStoreHeading 命名类型供共享重打服务与 App adapter 复用；类型擦除后的运行时语义与固定基线一致",
-      "canonicalTypeSha256": "75096c5b9534e58b340adf5a5f7bb782d5895bbf5d4298a7f7994e9a7f680a14",
+      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配",
+      "baselineCanonicalRuntimeSha256": "be588d9a3581e769fb819e30d22bc72e1f4873eaf98c2aa754416e1ccc9af8bc",
+      "canonicalRuntimeSha256": "7cce71c9dde2595bf2c9e8f207f2639d94aa74aab371627058e36814f134658d",
+      "canonicalTypeSha256": "8a6f5e200eac5d8f11321b96489a47aed653a47726e6a283f7d85bee3afb7ebd",
       "behaviorTests": [
+        {
+          "workspace": "packages/pos-receipt-core",
+          "script": "test",
+          "path": "src/features/receipts/installment-receipt-terms.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
         {
           "workspace": "apps/pos-ipad",
           "script": "test:receipts",
@@ -569,9 +593,23 @@
           "script": "test:receipts",
           "path": "src/features/receipts/receipt-document.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/installment-receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/installment-receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
         }
       ]
-    },
+    }
+  ],
+  "semanticAdaptations": [
     {
       "path": "core/contracts/repositories.ts",
       "package": "pos-domain",

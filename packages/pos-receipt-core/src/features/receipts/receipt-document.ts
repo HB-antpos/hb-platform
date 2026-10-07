@@ -38,6 +38,12 @@ export type ReceiptStoreHeading = Readonly<{
   returnPolicy: string;
 }>;
 
+/** 小票底部的条款块：标题（加粗）加若干条款行，文案由调用方提供，本文件只负责排版。 */
+export type ReceiptTermsBlock = Readonly<{
+  title: string;
+  lines: readonly string[];
+}>;
+
 export type SaleInput = Readonly<{
   locale: ReceiptLocale;
   paper: ReceiptPaper;
@@ -66,6 +72,11 @@ export type SaleInput = Readonly<{
   includeMachineCodes?: boolean;
   /** 由票据领域生成并安全校验的业务扩展行；UI 不得注入原始支付材料。 */
   extraInfoLines?: readonly string[];
+  /**
+   * 退货政策之后、条码之前的条款块（如分期条款）。不传（默认）则完全不打印，
+   * 其它所有小票的输出保持不变；目前只有分期补打传入。
+   */
+  termsBlock?: ReceiptTermsBlock;
 }>;
 type DailyInput = Readonly<{ locale: ReceiptLocale; paper: ReceiptPaper; storeName: string; businessDate: string; deviceCode: string; cashierName: string; paymentTotals: readonly Readonly<{ method: string; salesCents: number; refundCents: number; netCents: number }>[]; orderCount: number; salesCents: number; refundCents: number; netCents: number; expectedCashCents: number; countedCashCents: number; differenceCents: number }>;
 type BankInput = Readonly<{ locale: ReceiptLocale; paper: ReceiptPaper; status: string; cardType?: string; maskedCardNumber?: string; reference?: string; rawText?: string }>;
@@ -163,6 +174,20 @@ export function buildSaleReceiptDocument(input: SaleInput): EscPosDocument {
     b.text(zh ? "退款与退货" : "Refunds and returns", "left", true);
     for (const policyLine of wrapByWord(returnPolicy, width)) {
       b.text(policyLine);
+    }
+  }
+
+  // 中文注释：条款块紧跟退货政策（无退货政策则紧跟付款块），用分隔线与上文隔开；
+  // 与 WPF 顺序一致：付款 → 退货政策 → 条款 → 分隔线 → 条码。
+  // 标题加粗左对齐（与「Refunds and returns」同款），条款行左对齐并按纸宽在单词边界换行。
+  // 只有传入了 termsBlock 且含可打印内容才输出，因此未传入时与原输出字节级一致。
+  const termsTitle = nonBlank(input.termsBlock?.title);
+  const termsLines = (input.termsBlock?.lines ?? []).filter((line) => line.trim());
+  if (termsTitle || termsLines.length > 0) {
+    b.separator();
+    if (termsTitle) b.text(termsTitle, "left", true);
+    for (const termsLine of termsLines) {
+      for (const wrapped of wrapByWord(termsLine, width)) b.text(wrapped);
     }
   }
 
@@ -406,6 +431,11 @@ function assertSafeSaleText(input: SaleInput): void {
   });
   input.extraInfoLines?.forEach((line, index) => {
     assertSafeText(line, `extraInfoLines[${index}]`, false);
+  });
+  // 中文注释：条款块与其它票面文本同样不得夹带控制字符（防止注入打印指令）。
+  assertSafeText(input.termsBlock?.title, "termsBlock.title", false);
+  input.termsBlock?.lines.forEach((line, index) => {
+    assertSafeText(line, `termsBlock.lines[${index}]`, false);
   });
 }
 

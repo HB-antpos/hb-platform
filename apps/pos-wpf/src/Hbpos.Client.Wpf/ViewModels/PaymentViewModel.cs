@@ -261,7 +261,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             () => AddTenderByMethodAsync(PaymentMethodKind.Card),
             () => CanAddTender(PaymentMethodKind.Card, allowDefaultAmount: true));
         SelectVoucherCommand = new AsyncRelayCommand(() => AddTenderByMethodAsync(PaymentMethodKind.Voucher), () => CanAddTender(PaymentMethodKind.Voucher, allowDefaultAmount: true));
-        OpenVoucherEntryCommand = new RelayCommand(OpenVoucherEntry, CanOpenVoucherEntry);
+        OpenVoucherEntryCommand = new AsyncRelayCommand(OpenVoucherEntryAsync, CanOpenVoucherEntry);
         VoucherEntryKeyCommand = new RelayCommand<string>(ApplyVoucherEntryKey, _ => CanUseVoucherEntryDialog());
         ConfirmVoucherEntryCommand = new AsyncRelayCommand(ConfirmVoucherEntryAsync, CanConfirmVoucherEntry);
         CancelVoucherEntryCommand = new RelayCommand(CancelVoucherEntry, () => IsVoucherEntryDialogOpen);
@@ -590,7 +590,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand SelectVoucherCommand { get; }
 
-    public IRelayCommand OpenVoucherEntryCommand { get; }
+    public IAsyncRelayCommand OpenVoucherEntryCommand { get; }
 
     public IRelayCommand<string> VoucherEntryKeyCommand { get; }
 
@@ -1305,16 +1305,24 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             AddTenderByMethodAsync);
     }
 
-    private void OpenVoucherEntry()
+    private Task OpenVoucherEntryAsync()
     {
         if (!CanOpenVoucherEntry())
         {
-            return;
+            return Task.CompletedTask;
+        }
+
+        // 中文注释：退款的代金券由系统在结算阶段新发（见 CashPaymentWorkflowService.IssuePendingRefundVouchersAsync），
+        // 没有可扫描/输入的券号；销售用的扫码弹窗在退款时输入会被丢弃，所以直接按剩余应退金额加一笔退券付款项。
+        if (IsRefundMode)
+        {
+            return AddTenderByMethodAsync(PaymentMethodKind.Voucher);
         }
 
         SelectedPaymentMethod = PaymentMethodKind.Voucher;
         VoucherEntryText = VoucherCodeText;
         IsVoucherEntryDialogOpen = true;
+        return Task.CompletedTask;
     }
 
     private bool CanOpenVoucherEntry()

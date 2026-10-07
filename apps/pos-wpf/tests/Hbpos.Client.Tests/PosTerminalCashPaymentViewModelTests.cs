@@ -2818,6 +2818,54 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public async Task Refund_mode_voucher_button_adds_tender_without_opening_code_entry_dialog()
+    {
+        var cart = CreateRefundVoucherCart();
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashPaymentWorkflowService(
+                new CashCheckoutService(),
+                new InMemoryOrderRepository(),
+                new InMemorySyncQueueRepository()),
+            Session, paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(VoucherEnabled: true)));
+
+        viewModel.PrepareForEntry(Session);
+
+        Assert.Equal(PaymentEntryMode.Refund, viewModel.PaymentMode);
+        Assert.True(viewModel.OpenVoucherEntryCommand.CanExecute(null));
+
+        // 退款的代金券由系统结算时新发，点按钮不应再弹出“扫码或输入代金券号”，而是直接加退券付款项。
+        await viewModel.OpenVoucherEntryCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.IsVoucherEntryDialogOpen);
+        Assert.Equal(string.Empty, viewModel.VoucherEntryText);
+        var tender = Assert.Single(viewModel.PaymentTenders);
+        Assert.Equal(PaymentMethodKind.Voucher, tender.Method);
+        Assert.Equal(-8.5m, tender.Amount);
+        Assert.Equal("VOUCHER_REFUND_PENDING", tender.Reference);
+    }
+
+    [Fact]
+    public async Task Refund_mode_offline_voucher_entry_button_shows_unavailable_without_opening_dialog()
+    {
+        var cart = CreateRefundVoucherCart();
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            TenderToAdd = new PaymentTender(PaymentMethodKind.Voucher, -8.5m, "VOUCHER_REFUND_PENDING")
+        };
+        var viewModel = new PaymentViewModel(cart, workflow, OfflineSession, paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(VoucherEnabled: true)));
+
+        viewModel.PrepareForEntry(OfflineSession);
+
+        await viewModel.OpenVoucherEntryCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.IsVoucherEntryDialogOpen);
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal(0, workflow.AddTenderCallCount);
+        Assert.Equal("payment.refund.status.voucherOfflineUnavailable", viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task Refund_of_voucher_paid_goods_requires_voucher_share_before_cash()
     {
         var originalOrder = Guid.NewGuid();

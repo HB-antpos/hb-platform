@@ -801,6 +801,12 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             }
         }
 
+        if (receipt.Terms is { Lines.Count: > 0 } terms)
+        {
+            // 中文注释：条款块放在退货政策之后、条码之前。
+            AppendTerms(builder, terms);
+        }
+
         builder.Separator();
         builder.Barcode(orderId);
         builder.QrCode(orderId);
@@ -828,14 +834,43 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         builder.Blank();
         builder.Text($"Voucher: {refundVoucher.VoucherCode}", ReceiptPrintAlignment.Center, isEmphasized: true);
         builder.Text($"Amount: {Money(refundVoucher.Amount)}", ReceiptPrintAlignment.Center, isEmphasized: true);
+        AppendVoucherExpiry(builder, refundVoucher.ExpiresAt);
         builder.Separator();
         builder.Text($"Order: {displayOrderId}");
         builder.Text($"Print Time: {printedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
         builder.Barcode(refundVoucher.VoucherCode);
         builder.QrCode(refundVoucher.VoucherCode);
+        // 中文注释：使用说明放在条码下方，顾客拿券时能直接看到；退款券绑定发券门店且可分次使用（服务端强制）。
+        AppendTerms(builder, VoucherReceiptTerms.RefundVoucher);
         builder.Blank();
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// 券面有效期行。到期时刻是门店当天 23:59:59，按本机（与门店同时区）日历日显示，和其它小票时间口径一致。
+    /// 没有到期时刻（旧券无到期、离线或查不到）时整行省略，不印任何猜测日期。
+    /// </summary>
+    private static void AppendVoucherExpiry(ReceiptDocumentBuilder builder, DateTimeOffset? expiresAt)
+    {
+        if (expiresAt is { } expiry)
+        {
+            builder.Text($"Valid until: {expiry.ToLocalTime():yyyy-MM-dd}", ReceiptPrintAlignment.Center, isEmphasized: true);
+        }
+    }
+
+    /// <summary>条款块：分隔线 + 居中加粗标题 + 左对齐条款行；条款句子按纸宽换行，避免长句被打印机截断。</summary>
+    private static void AppendTerms(ReceiptDocumentBuilder builder, ReceiptTerms terms)
+    {
+        builder.Separator();
+        builder.Text(terms.Title, ReceiptPrintAlignment.Center, isEmphasized: true);
+        foreach (var termLine in terms.Lines)
+        {
+            foreach (var wrappedLine in WrapByWord(termLine, LineWidth))
+            {
+                builder.Text(wrappedLine);
+            }
+        }
     }
 
     private static ReceiptPrintDocument BuildVoucherBalanceDocument(
@@ -865,6 +900,8 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             builder.Text(voucherLine, ReceiptPrintAlignment.Center, isEmphasized: true);
         }
         builder.Text($"Balance: {Money(voucherBalance.RemainingBalance)}", ReceiptPrintAlignment.Center, isEmphasized: true);
+        // 中文注释：余额凭证只补有效期；非退款类代金券不一定限发券门店，不套用退款券的使用说明。
+        AppendVoucherExpiry(builder, voucherBalance.ExpiresAt);
         builder.Separator();
         foreach (var orderLine in WrapByWord($"Order: {displayOrderId}", LineWidth))
         {
@@ -1135,7 +1172,8 @@ public sealed class ReceiptPrintService(
     IReceiptPrinterDriver driver,
     IEnumerable<ICardReceiptPrintedNotifier>? cardReceiptPrintedNotifiers = null,
     ILocalizationService? localization = null,
-    DeviceAuthorizationState? deviceAuthorizationState = null) : IReceiptPrintService, IDisposable
+    DeviceAuthorizationState? deviceAuthorizationState = null,
+    IVoucherExpiryLookup? voucherExpiryLookup = null) : IReceiptPrintService, IDisposable
 {
     private readonly SemaphoreSlim _printLock = new(1, 1);
     private readonly IReadOnlyList<ICardReceiptPrintedNotifier> _cardReceiptPrintedNotifiers =
@@ -1167,6 +1205,8 @@ public sealed class ReceiptPrintService(
         ReceiptPrintReason reason = ReceiptPrintReason.Manual,
         CancellationToken cancellationToken = default)
     {
+        // 中文注释：到期日补查是网络调用（最长几秒），放在拿到打印锁之前，避免堵住其它小票的打印。
+        receipt = await WithVoucherExpiryAsync(receipt, cancellationToken);
         await _printLock.WaitAsync(cancellationToken);
         try
         {
@@ -1195,6 +1235,47 @@ public sealed class ReceiptPrintService(
         {
             _printLock.Release();
         }
+    }
+
+    /// <summary>
+    /// 退款券/余额凭证出票前，按券号向服务端补查这张券的真实到期时刻。
+    /// 客户端不能按规则反推：旧券是 12 个月、新券是 90 天且取整到当天结束，补打历史小票时两种券都会遇到。
+    /// 查不到（离线、超时、券已用完/过期）就保持 null，券面不印日期但照常出票。
+    /// </summary>
+    private async Task<ReceiptDetails> WithVoucherExpiryAsync(
+        ReceiptDetails receipt,
+        CancellationToken cancellationToken)
+    {
+        if (voucherExpiryLookup is null)
+        {
+            return receipt;
+        }
+
+        if (receipt.RefundVoucher is { ExpiresAt: null } refundVoucher)
+        {
+            var expiry = await voucherExpiryLookup.FindExpiryAsync(
+                receipt.StoreCode,
+                refundVoucher.VoucherCode,
+                cancellationToken);
+            if (expiry is not null)
+            {
+                receipt = receipt with { RefundVoucher = refundVoucher with { ExpiresAt = expiry } };
+            }
+        }
+
+        if (receipt.VoucherBalance is { ExpiresAt: null } voucherBalance)
+        {
+            var expiry = await voucherExpiryLookup.FindExpiryAsync(
+                receipt.StoreCode,
+                voucherBalance.VoucherCode,
+                cancellationToken);
+            if (expiry is not null)
+            {
+                receipt = receipt with { VoucherBalance = voucherBalance with { ExpiresAt = expiry } };
+            }
+        }
+
+        return receipt;
     }
 
     private async Task MarkCardReceiptsPrintedAsync(

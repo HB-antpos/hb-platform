@@ -194,6 +194,118 @@ public sealed class ReceiptPrintingTests
     }
 
     [Fact]
+    public void Installment_receipt_for_active_order_prints_terms_after_payments_and_before_barcode()
+    {
+        var order = CreateInstallmentOrder(InstallmentStatus.Active, paidAmount: 20m, balanceAmount: 60m);
+
+        var receipt = InstallmentReceiptMapper.CreateReceipt(order);
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, order.CreatedAt);
+
+        Assert.Equal("INSTALLMENT TERMS", receipt.Terms?.Title);
+        Assert.Contains("INSTALLMENT TERMS", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("Order total: $50.00 minimum.", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("First payment: $20.00 minimum.", document.PlainText, StringComparison.Ordinal);
+        // 第三条超过一行纸宽会被自动换行，所以按「折叠空白后的整句」断言，不绑定具体断行位置。
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(document.PlainText, @"\s+", " ");
+        Assert.Contains(
+            "Each later payment: $5.00 minimum, or the remaining balance if it is lower.",
+            collapsed,
+            StringComparison.Ordinal);
+        // 位置必须用元素序列判断：PlainText 不含条码文本，只比较 Print Time 抓不到「条款被挪到条码之后」。
+        var elements = document.Elements;
+        var paymentAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Payment:");
+        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "INSTALLMENT TERMS");
+        var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
+        Assert.True(paymentAt >= 0 && paymentAt < termsAt, "条款必须在付款明细之后");
+        Assert.True(termsAt < barcodeAt, "条款必须在条码之前");
+        // 条款前有分隔线，标题居中加粗（与同位置的 Refunds and returns 一致）。
+        Assert.Equal(ReceiptPrintElementKind.Separator, elements[termsAt - 1].Kind);
+        Assert.Equal(ReceiptPrintAlignment.Center, elements[termsAt].Alignment);
+        Assert.True(elements[termsAt].IsEmphasized);
+        // 条款块自身（标题到下一条分隔线之间）每行都不超过 42 字符纸宽；
+        // 不对整张小票断言宽度：条码预览行 "BARCODE <36 位订单号>" 本身就是 44 字符，与条款无关。
+        var termsEnd = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Separator, termsAt + 1);
+        Assert.All(
+            elements.Skip(termsAt).Take(termsEnd - termsAt),
+            element => Assert.True(element.Text.Length <= 42, element.Text));
+    }
+
+    [Fact]
+    public void Installment_receipt_for_active_order_with_pickup_info_does_not_print_terms()
+    {
+        // 进行中却带提货信息属于不一致数据，与手持/iPad 的判断一致，一律不打印条款。
+        var order = CreateInstallmentOrder(
+            InstallmentStatus.Active,
+            paidAmount: 20m,
+            balanceAmount: 60m,
+            pickupInfo: new InstallmentPickupInfoDto(
+                new DateTimeOffset(2026, 7, 4, 13, 0, 0, TimeSpan.Zero),
+                "Alice",
+                "Customer collected at counter"));
+
+        var receipt = InstallmentReceiptMapper.CreateReceipt(order);
+
+        Assert.Null(receipt.Terms);
+    }
+
+    private static int IndexOfElement(
+        IReadOnlyList<ReceiptPrintElement> elements,
+        Func<ReceiptPrintElement, bool> predicate,
+        int startIndex = 0)
+    {
+        for (var index = startIndex; index < elements.Count; index++)
+        {
+            if (predicate(elements[index]))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    [Theory]
+    [InlineData(InstallmentStatus.PaidOff)]
+    [InlineData(InstallmentStatus.PickedUp)]
+    [InlineData(InstallmentStatus.Cancelled)]
+    public void Installment_receipt_for_finished_order_does_not_print_terms(InstallmentStatus status)
+    {
+        var order = CreateInstallmentOrder(status, paidAmount: 0m, balanceAmount: 0m);
+
+        var receipt = InstallmentReceiptMapper.CreateReceipt(order);
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, order.CreatedAt);
+
+        Assert.Null(receipt.Terms);
+        Assert.DoesNotContain("INSTALLMENT TERMS", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installment_terms_do_not_leak_into_standalone_voucher_documents_or_regular_receipts()
+    {
+        var order = CreateInstallmentOrder(InstallmentStatus.Active, paidAmount: 20m, balanceAmount: 60m);
+        var installmentReceipt = InstallmentReceiptMapper.CreateReceipt(order);
+        var formatter = new ReceiptTextFormatter();
+
+        // 即使带条款的小票被派生成退款券/余额凭证，独立券面也不能打印分期条款。
+        var refundVoucherDocument = formatter.Build(
+            installmentReceipt with { RefundVoucher = new RefundVoucherReceipt("RF-TEST-1", 5m) },
+            ReceiptPrinterSettings.Default,
+            order.CreatedAt);
+        var balanceDocument = formatter.Build(
+            installmentReceipt with { VoucherBalance = new VoucherBalanceReceipt("VC-TEST-1", 7m) },
+            ReceiptPrinterSettings.Default,
+            order.CreatedAt);
+        var regularDocument = formatter.Build(
+            CreateReceipt(Guid.Parse("11111111-2222-3333-4444-555555555555")),
+            ReceiptPrinterSettings.Default,
+            order.CreatedAt);
+
+        Assert.DoesNotContain("INSTALLMENT TERMS", refundVoucherDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("INSTALLMENT TERMS", balanceDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("INSTALLMENT TERMS", regularDocument.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Receipt_text_formatter_builds_print_commands_and_preview_from_same_document()
     {
         var orderGuid = Guid.Parse("11111111-2222-3333-4444-555555555555");
@@ -482,6 +594,192 @@ public sealed class ReceiptPrintingTests
             CultureInfo.InvariantCulture,
             DateTimeStyles.None);
         Assert.InRange(printedAt, before, after);
+    }
+
+    [Fact]
+    public void Refund_voucher_document_prints_expiry_under_amount_and_usage_terms_below_codes()
+    {
+        var expiry = new DateTimeOffset(2027, 1, 5, 23, 59, 59, TimeSpan.FromHours(11));
+        var receipt = CreateReceipt(Guid.NewGuid(), paymentReference: "VOUCHER_REFUND:RF123", paymentMethod: PaymentMethodKind.Voucher) with
+        {
+            Payments = [new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, "VOUCHER_REFUND:RF123")],
+            RefundVoucher = new RefundVoucherReceipt("RF123", 8m, expiry)
+        };
+
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
+
+        var elements = document.Elements;
+        var amountAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Amount: $8.00");
+        var expiryAt = IndexOfElement(elements, element =>
+            element.Kind == ReceiptPrintElementKind.Text && element.Text == $"Valid until: {expiry.ToLocalTime():yyyy-MM-dd}");
+        var qrAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "VOUCHER TERMS");
+        // 到期日紧跟金额行；使用说明在条码和二维码之后，位置用元素序列判断（PlainText 不含条码文本）。
+        Assert.True(amountAt >= 0);
+        Assert.Equal(amountAt + 1, expiryAt);
+        Assert.True(qrAt >= 0 && qrAt < termsAt, "使用说明必须在条码/二维码之后");
+        Assert.True(elements[expiryAt].IsEmphasized);
+
+        // 条款句子较长会按纸宽自动换行，所以按折叠空白后的整句断言。
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(document.PlainText, @"\s+", " ");
+        Assert.Contains("Use at the issuing store only.", collapsed, StringComparison.Ordinal);
+        Assert.Contains("Pay with it at checkout by scanning the barcode or QR code.", collapsed, StringComparison.Ordinal);
+        Assert.Contains("Can be used across several purchases until the balance is $0.00.", collapsed, StringComparison.Ordinal);
+        Assert.Contains("Not redeemable for cash.", collapsed, StringComparison.Ordinal);
+        // 使用说明块里每一行都不超过 42 字符纸宽。
+        Assert.All(
+            elements.Skip(termsAt).Where(element => element.Kind == ReceiptPrintElementKind.Text),
+            element => Assert.True(element.Text.Length <= 42, element.Text));
+    }
+
+    [Fact]
+    public void Refund_voucher_document_without_known_expiry_omits_valid_until_but_keeps_usage_terms()
+    {
+        var receipt = CreateReceipt(Guid.NewGuid(), paymentReference: "VOUCHER_REFUND:RF124", paymentMethod: PaymentMethodKind.Voucher) with
+        {
+            Payments = [new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, "VOUCHER_REFUND:RF124")],
+            RefundVoucher = new RefundVoucherReceipt("RF124", 8m)
+        };
+
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
+
+        // 旧券无到期、离线或查不到时不印任何猜测日期，但券面仍要能出票并带使用说明。
+        Assert.DoesNotContain("Valid until", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("VOUCHER TERMS", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains(document.Elements, element => element.Kind == ReceiptPrintElementKind.Barcode && element.Text == "RF124");
+    }
+
+    [Fact]
+    public void Voucher_balance_document_prints_expiry_but_not_refund_voucher_terms()
+    {
+        var expiry = new DateTimeOffset(2027, 1, 5, 23, 59, 59, TimeSpan.FromHours(11));
+        var receipt = CreateReceipt(Guid.NewGuid()) with
+        {
+            VoucherBalance = new VoucherBalanceReceipt("VC200", 12.34m, expiry)
+        };
+
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
+
+        Assert.Contains($"Valid until: {expiry.ToLocalTime():yyyy-MM-dd}", document.PlainText, StringComparison.Ordinal);
+        // 余额凭证对应的券类型不限于退款券，不一定限本店，不套用退款券的使用说明。
+        Assert.DoesNotContain("VOUCHER TERMS", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("issuing store", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Receipt_print_service_fills_refund_voucher_expiry_from_lookup_before_printing()
+    {
+        var expiry = new DateTimeOffset(2027, 1, 5, 23, 59, 59, TimeSpan.FromHours(11));
+        var lookup = new FakeVoucherExpiryLookup(expiry);
+        var receipt = CreateReceipt(Guid.NewGuid()) with
+        {
+            Payments = [new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, "VOUCHER_REFUND:RF123")],
+            RefundVoucher = new RefundVoucherReceipt("RF123", 8m)
+        };
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver,
+            voucherExpiryLookup: lookup);
+
+        var result = await service.PrintReceiptAsync(receipt, ReceiptPrintReason.VoucherRefundAuto);
+
+        Assert.True(result.Succeeded);
+        var call = Assert.Single(lookup.Calls);
+        Assert.Equal((receipt.StoreCode, "RF123"), call);
+        Assert.Contains(
+            driver.LastDocument!.Elements,
+            element => element.Text == $"Valid until: {expiry.ToLocalTime():yyyy-MM-dd}");
+    }
+
+    [Fact]
+    public async Task Receipt_print_service_still_prints_voucher_without_expiry_when_lookup_finds_nothing()
+    {
+        var lookup = new FakeVoucherExpiryLookup(null);
+        var receipt = CreateReceipt(Guid.NewGuid()) with
+        {
+            Payments = [new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, "VOUCHER_REFUND:RF123")],
+            RefundVoucher = new RefundVoucherReceipt("RF123", 8m)
+        };
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver,
+            voucherExpiryLookup: lookup);
+
+        var result = await service.PrintReceiptAsync(receipt, ReceiptPrintReason.VoucherRefundAuto);
+
+        // 离线/查不到只是少印日期，绝不能阻断出票。
+        Assert.True(result.Succeeded);
+        Assert.Single(lookup.Calls);
+        Assert.DoesNotContain(driver.LastDocument!.Elements, element => element.Text.StartsWith("Valid until", StringComparison.Ordinal));
+        Assert.Contains(driver.LastDocument.Elements, element => element.Kind == ReceiptPrintElementKind.Barcode && element.Text == "RF123");
+    }
+
+    [Fact]
+    public async Task Receipt_print_service_does_not_query_expiry_for_regular_receipts_or_when_expiry_is_known()
+    {
+        var lookup = new FakeVoucherExpiryLookup(new DateTimeOffset(2027, 1, 5, 23, 59, 59, TimeSpan.FromHours(11)));
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver,
+            voucherExpiryLookup: lookup);
+        var knownExpiry = new DateTimeOffset(2026, 12, 31, 23, 59, 59, TimeSpan.FromHours(11));
+
+        await service.PrintReceiptAsync(CreateReceipt(Guid.NewGuid()), ReceiptPrintReason.Manual);
+        await service.PrintReceiptAsync(
+            CreateReceipt(Guid.NewGuid()) with { RefundVoucher = new RefundVoucherReceipt("RF900", 8m, knownExpiry) },
+            ReceiptPrintReason.VoucherRefundAuto);
+
+        // 普通小票不查；券面已经带着到期日（例如调用方已知）也不重复查询。
+        Assert.Empty(lookup.Calls);
+        Assert.Contains(
+            driver.LastDocument!.Elements,
+            element => element.Text == $"Valid until: {knownExpiry.ToLocalTime():yyyy-MM-dd}");
+    }
+
+    [Fact]
+    public async Task Receipt_print_service_fills_voucher_balance_expiry_from_lookup()
+    {
+        var expiry = new DateTimeOffset(2027, 3, 2, 23, 59, 59, TimeSpan.FromHours(10));
+        var lookup = new FakeVoucherExpiryLookup(expiry);
+        var receipt = CreateReceipt(Guid.NewGuid()) with
+        {
+            VoucherBalance = new VoucherBalanceReceipt("VC200", 12.34m)
+        };
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore(),
+            new ReceiptTextFormatter(),
+            driver,
+            voucherExpiryLookup: lookup);
+
+        var result = await service.PrintReceiptAsync(receipt, ReceiptPrintReason.VoucherBalanceAuto);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal((receipt.StoreCode, "VC200"), Assert.Single(lookup.Calls));
+        Assert.Contains(
+            driver.LastDocument!.Elements,
+            element => element.Text == $"Valid until: {expiry.ToLocalTime():yyyy-MM-dd}");
+    }
+
+    private sealed class FakeVoucherExpiryLookup(DateTimeOffset? expiry) : IVoucherExpiryLookup
+    {
+        public List<(string StoreCode, string VoucherCode)> Calls { get; } = [];
+
+        public Task<DateTimeOffset?> FindExpiryAsync(string storeCode, string voucherCode, CancellationToken cancellationToken)
+        {
+            Calls.Add((storeCode, voucherCode));
+            return Task.FromResult(expiry);
+        }
     }
 
     [Fact]

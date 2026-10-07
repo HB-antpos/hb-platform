@@ -3,6 +3,7 @@ import {
   encodeEscPosText,
 } from "./esc-pos-text-encoding";
 import { receiptStoreHeading } from "./receipt-document";
+import { REFUND_VOUCHER_TERMS } from "./refund-voucher-terms";
 import type {
   FrozenReturnReceiptSettings,
   RenderedReturnReceipt,
@@ -17,6 +18,12 @@ export type ProtectedRefundVoucherPrintMaterial = Readonly<{
   voucherCode: string;
   /** 正数整数分币；必须与一笔 voucher tender 的绝对值完全一致。 */
   refundAmountCents: number;
+  /**
+   * 服务端发这张券时返回的真实到期时刻（UTC 绝对时刻，ISO 字符串）。可选：旧数据、缺失或
+   * 格式异常时渲染器只省略「Valid until」行，其余照常出票——到期日绝不能让出票失败。
+   * 客户端不得按规则自行反推：历史券是 12 个月、新券是 90 天且取整到门店当天结束。
+   */
+  expiresAtIso?: string | null;
 }>;
 
 export interface ProtectedRefundVoucherPrintMaterialPort {
@@ -52,6 +59,11 @@ export class ProtectedRefundVoucherReceiptRenderer {
     private readonly materials: ProtectedRefundVoucherPrintMaterialPort,
     private readonly settings: ReturnReceiptSettingsPort,
     private readonly now: () => Date,
+    /**
+     * 到期日按此业务时区取日历日（IANA 名，如 Australia/Brisbane）；缺失或空白时沿用
+     * Australia/Brisbane，与 resolveRuntimeBusinessTimeZone 的默认口径一致。
+     */
+    private readonly businessTimeZone?: string,
   ) {}
 
   public async render(
@@ -100,8 +112,12 @@ export class ProtectedRefundVoucherReceiptRenderer {
       vouchers: normalizedMaterials.map((material) => ({
         voucherCode: material.voucherCode,
         amountCents: material.refundAmountCents,
+        expiresAtIso: material.expiresAtIso ?? null,
       })),
       printedAt: this.now(),
+      ...(this.businessTimeZone !== undefined
+        ? { businessTimeZone: this.businessTimeZone }
+        : {}),
     });
   }
 }
@@ -114,8 +130,15 @@ export function encodeRefundVoucherDocuments(input: Readonly<{
   settings: FrozenReturnReceiptSettings | null;
   storeCode: string;
   orderLabel: string;
-  vouchers: readonly Readonly<{ voucherCode: string; amountCents: number }>[];
+  vouchers: readonly Readonly<{
+    voucherCode: string;
+    amountCents: number;
+    /** 这张券自己的真实到期时刻；缺失/异常只省略到期行。 */
+    expiresAtIso?: string | null;
+  }>[];
   printedAt: Date;
+  /** 到期日取日历日用的业务时区；缺失或空白时为 Australia/Brisbane。 */
+  businessTimeZone?: string;
 }>): RenderedReturnReceipt {
   const settings = normalizeSettings(input.settings);
   const orderLabel = safeText(input.orderLabel, "REFUND_VOUCHER_ORDER_ID_INVALID", 128);
@@ -129,6 +152,7 @@ export function encodeRefundVoucherDocuments(input: Readonly<{
     input.storeCode,
   );
   const returnPolicy = normalizedReturnPolicy(settings.store.returnPolicy);
+  const businessTimeZone = resolveBusinessTimeZone(input.businessTimeZone);
   const documents = input.vouchers.map((voucher) => {
     const voucherCode = normalizeVoucherCode(voucher.voucherCode);
     if (!Number.isSafeInteger(voucher.amountCents) || voucher.amountCents <= 0) {
@@ -140,6 +164,11 @@ export function encodeRefundVoucherDocuments(input: Readonly<{
       orderGuid: orderLabel,
       voucherCode,
       amountCents: voucher.amountCents,
+      // 取日期失败（缺失、格式异常、时区不可用）一律得到 null：只省略到期行，绝不抛错。
+      validUntil: formatBusinessCalendarDate(
+        voucher.expiresAtIso,
+        businessTimeZone,
+      ),
       printedAt,
       heading,
       returnPolicy,
@@ -223,6 +252,10 @@ function normalizeMaterial(
     returnOrderGuid,
     voucherCode: normalizeVoucherCode(material.voucherCode),
     refundAmountCents: material.refundAmountCents,
+    // 到期日是可选信息：只透传字符串，具体合法性在取日期时判断，不合法也不阻断出票。
+    ...(typeof material.expiresAtIso === "string"
+      ? { expiresAtIso: material.expiresAtIso }
+      : {}),
   };
 }
 
@@ -257,6 +290,8 @@ function encodeRefundVoucher(input: Readonly<{
   orderGuid: string;
   voucherCode: string;
   amountCents: number;
+  /** 门店业务日历日 yyyy-MM-dd；null 表示不印到期行。 */
+  validUntil: string | null;
   printedAt: string;
   heading: string;
   returnPolicy: string | null;
@@ -283,6 +318,10 @@ function encodeRefundVoucher(input: Readonly<{
     "center",
     true,
   );
+  // 到期行样式跟随 Amount 行（居中加粗）；业主只审定了英文，zh-CN 下同样保持英文。
+  if (input.validUntil) {
+    appendText(bytes, `Valid until: ${input.validUntil}`, "center", true);
+  }
   appendText(bytes, "-".repeat(width), "left", false);
   appendWrappedText(
     bytes,
@@ -305,6 +344,8 @@ function encodeRefundVoucher(input: Readonly<{
   );
   appendCode128(bytes, input.voucherCode);
   appendQrCode(bytes, input.voucherCode);
+  // 使用说明放在 QR 之后、走纸切纸之前，顾客拿券时能直接看到；每张券面都带，与到期日有无无关。
+  appendVoucherTerms(bytes, width);
   bytes.push(0x1b, 0x64, 0x03);
   // 芯烨 ESC/POS 全切；每个冻结 print job 只包含一次切纸，避免 adapter 猜测。
   bytes.push(0x1d, 0x56, 0x00);
@@ -363,6 +404,47 @@ function appendReturnPolicy(
       false,
     );
   }
+}
+
+/**
+ * 券使用说明块：空行、分隔线、居中加粗标题、左对齐条款行。条款按本渲染器自己的纸宽
+ * （58mm=32 / 80mm=48）在单词边界换行，单词本身超宽时才硬切，保证每行不超过纸宽。
+ */
+function appendVoucherTerms(output: number[], width: number): void {
+  appendText(output, "", "left", false);
+  appendText(output, "-".repeat(width), "left", false);
+  appendText(output, REFUND_VOUCHER_TERMS.title, "center", true);
+  for (const termsLine of REFUND_VOUCHER_TERMS.lines) {
+    for (const wrapped of wrapByWord(termsLine, width)) {
+      appendText(output, wrapped, "left", false);
+    }
+  }
+}
+
+function wrapByWord(value: string, width: number): readonly string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of value.split(/\s+/u).filter(Boolean)) {
+    let remaining = word;
+    while (remaining.length > width) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      lines.push(remaining.slice(0, width));
+      remaining = remaining.slice(width);
+    }
+    if (!line) {
+      line = remaining;
+    } else if (line.length + 1 + remaining.length <= width) {
+      line += ` ${remaining}`;
+    } else {
+      lines.push(line);
+      line = remaining;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length > 0 ? lines : [""];
 }
 
 function appendReceiptWrappedText(
@@ -485,6 +567,50 @@ function appendQrCode(output: number[], voucherCode: string): void {
     0x51,
     0x30,
   );
+}
+
+/** 与 resolveRuntimeBusinessTimeZone 的缺省口径一致：未配置时区时按布里斯班（UTC+10，无夏令时）。 */
+const DEFAULT_BUSINESS_TIME_ZONE = "Australia/Brisbane";
+
+function resolveBusinessTimeZone(value: unknown): string {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : DEFAULT_BUSINESS_TIME_ZONE;
+}
+
+/**
+ * 把服务端的到期时刻（UTC 绝对时刻）按业务时区取成 yyyy-MM-dd 日历日。
+ * 绝不使用设备本地时区：设备时区与门店不同时会差一天。任何失败（缺失、非字符串、
+ * 非 ISO 日期时间、时区名不可用）都返回 null，调用方只省略到期行。
+ *
+ * 限制：服务端到期时刻是「门店当地 23:59:59」。用布里斯班（UTC+10）取日历日，对 UTC+10/+11
+ * 的门店（QLD/NSW/VIC）是对的；西澳/南澳/北领地/新西兰的门店会显示成次日。
+ */
+function formatBusinessCalendarDate(
+  value: unknown,
+  timeZone: string,
+): string | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u.test(value)) {
+    return null;
+  }
+  const epochMilliseconds = Date.parse(value);
+  if (!Number.isFinite(epochMilliseconds)) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      calendar: "gregory",
+      numberingSystem: "latn",
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(epochMilliseconds));
+    const part = (type: string): string =>
+      parts.find((candidate) => candidate.type === type)?.value ?? "";
+    const date = `${part("year")}-${part("month")}-${part("day")}`;
+    return /^\d{4}-\d{2}-\d{2}$/u.test(date) ? date : null;
+  } catch {
+    return null;
+  }
 }
 
 function money(cents: number): string {
