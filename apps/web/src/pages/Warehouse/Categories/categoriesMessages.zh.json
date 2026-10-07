@@ -1,0 +1,36 @@
+{
+  "warehouseUi": {
+    "categories": {
+      "subtitle": "{{top}} 个顶级 · {{total}} 个分类",
+      "treeRegion": "分类树",
+      "treeSearchPlaceholder": "搜索分类名称 / 中文名",
+      "refreshTree": "刷新分类树",
+      "allProducts": "全部商品",
+      "uncategorizedProducts": "未分类商品",
+      "noTreeMatch": "没有匹配的分类",
+      "currentRegion": "当前分类",
+      "topLevel": "顶级分类",
+      "childCount": "子分类",
+      "remarks": "备注：{{text}}",
+      "allProductsHint": "仓库中的全部商品。勾选商品后，可在列表上方选择目标分类批量移动。",
+      "uncategorizedHint": "还没有设置仓库分类的商品。勾选后移动到目标分类即可完成归类。",
+      "addChild": "新增子分类",
+      "edit": "编辑",
+      "delete": "删除",
+      "deleteDisabledHasChildren": "该分类下还有子分类，需先删除或移走子分类",
+      "productsRegion": "分类下的商品",
+      "productSearchPlaceholder": "货号 / 商品名称",
+      "supplierPlaceholder": "全部国内供应商",
+      "totalCount": "共 {{count}} 个",
+      "paginationTotal": "共 {{count}} 个 · 翻页保留勾选",
+      "refreshProducts": "刷新商品列表",
+      "moveTo": "移动到",
+      "moveTargetPlaceholder": "选择目标分类",
+      "moveCount": "移动 {{count}} 个",
+      "columnProduct": "商品",
+      "columnSupplier": "国内供应商",
+      "columnCategory": "当前分类",
+      "columnStatus": "状态"
+    }
+  }
+}

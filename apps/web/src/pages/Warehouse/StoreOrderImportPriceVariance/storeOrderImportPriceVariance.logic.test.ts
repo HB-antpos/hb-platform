@@ -12,17 +12,22 @@ const routeSource = readFileSync(path.resolve(process.cwd(), 'src/router/routes.
 const zhLocale = JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/i18n/locales/zh.json'), 'utf8'))
 const enLocale = JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/i18n/locales/en.json'), 'utf8'))
 
+// 2026-10 重设计：商品图并入「商品」列，基准金额并入「原始 / 基准金额」列第二行，
+// 体积、装箱数收进「列设置」（默认隐藏、仍可服务端排序），新增发货数量列。
 assert(
-  pageSource.includes("dataIndex: 'productImage'") &&
+  pageSource.includes('<ProductListImage src={row.productImage}') &&
 	    pageSource.includes("dataIndex: 'domesticPrice'") &&
 	    pageSource.includes("dataIndex: 'unitVolume'") &&
 	    pageSource.includes("dataIndex: 'packingQuantity'") &&
+	    pageSource.includes("optionalColumns.includes('unitVolume')") &&
+	    pageSource.includes("optionalColumns.includes('packingQuantity')") &&
 	    pageSource.includes("dataIndex: 'warehouseImportPrice'") &&
 	    pageSource.includes("dataIndex: 'firstContainerImportPrice'") &&
+    pageSource.includes("dataIndex: 'allocQuantityTotal'") &&
     pageSource.includes("dataIndex: 'originalImportAmountTotal'") &&
-    pageSource.includes("dataIndex: 'baselineImportAmountTotal'") &&
+    pageSource.includes('formatAmount(row.baselineImportAmountTotal)') &&
     pageSource.includes("dataIndex: 'varianceAmountTotal'"),
-	  '商品汇总主表必须包含商品图片、国内价格、体积、装箱数、当前仓库进货价格、首次进货价和三项金额合计列',
+	  '商品汇总主表必须包含商品图片、国内价格、当前仓库进货价格、首次进货价、发货数量和三项金额合计，体积与装箱数可在列设置中打开',
 	)
 
 const editablePriceBlockStart = pageSource.indexOf('const renderEditablePriceCell')
@@ -71,17 +76,21 @@ assert(
     pageSource.includes('warehouseImportPrice: values.warehouseImportPrice ?? 0') &&
     pageSource.includes('setSelectedRowKeys([])') &&
     pageSource.includes('await loadData()') &&
-    pageSource.includes("title={t('storeOrders.importPriceVariance.batchWarehouseImportPriceTitle'") &&
+    // 2026-10 重设计统一叫法为「仓库进货价」，批量弹窗标题改用页面级文案键。
+    pageSource.includes("title={t('warehouseUi.priceVariance.batchTitle'") &&
+    pageSource.includes('<SelectionActionBar selectedCount={selectedRowKeys.length}') &&
     pageSource.includes('<InputNumber') &&
     pageSource.includes('批量修改只提交商品编码和统一的新当前参考进货价'),
   '商品汇总主表必须支持勾选商品后批量修改当前参考进货价，成功后清空选择并刷新统计结果',
 )
 
+// 2026-10 重设计：筛选改为工具栏即时查询（不再用 Form 字段），供应商显示在商品列第二行和供应商排行中。
 assert(
-  pageSource.includes("dataIndex: 'supplierCode'") &&
+  pageSource.includes('<DomesticSupplierFilterSelect') &&
+    pageSource.includes('value={filterValues.supplierCode}') &&
     pageSource.includes("t('storeOrders.importPriceVariance.domesticSupplier')") &&
-    pageSource.includes('name="supplierCode"'),
-  '页面必须包含国内供应商筛选组件和国内供应商列',
+    pageSource.includes('row.supplierName, row.supplierCode'),
+  '页面必须包含国内供应商筛选组件，并在商品行展示国内供应商',
 )
 
 assert(
@@ -112,6 +121,8 @@ assert(
   '主表必须通过服务端接口加载并响应表格分页排序',
 )
 
+// 2026-10 重设计：供应商卡取消一屏固定高度与内部滚动、改为默认显示前 6 个 +「展开全部」，
+// 排序改在逻辑文件里本地完成（仍是全部供应商、可按列排序）；点击供应商行即设置国内供应商筛选、再点取消。
 assert(
   pageSource.includes('const [supplierSummaries, setSupplierSummaries]') &&
     pageSource.includes('setSupplierSummaries(result.supplierSummaries)') &&
@@ -119,34 +130,67 @@ assert(
     pageSource.includes(
       '<MeasuredTable<StoreOrderImportPriceVarianceSupplierSummary> metricId="warehouse.store-order-import-price-variance.table-1"',
     ) &&
-    pageSource.includes('supplierVarianceRankingTitle') &&
+    pageSource.includes("t('warehouseUi.priceVariance.supplierTitle')") &&
     pageSource.includes('noSupplierVarianceData') &&
     pageSource.includes("dataIndex: 'increaseVarianceAmountTotal'") &&
     pageSource.includes("dataIndex: 'decreaseVarianceAmountTotal'") &&
-    pageSource.includes('defaultPageSize: 50') &&
-    pageSource.includes('pageSizeOptions: [20, 50, 100]') &&
-    pageSource.includes('compareSupplierText') &&
-    pageSource.includes('compareSupplierNumber') &&
-    pageSource.includes('sorter: (left, right)') &&
-    pageSource.includes('const supplierSummaryRegionRef = useRef<HTMLDivElement | null>(null)') &&
-    pageSource.includes('const [supplierSummaryTableScrollY, setSupplierSummaryTableScrollY]') &&
-    pageSource.includes("maxHeight: 'calc(100vh - 32px)'") &&
-    pageSource.includes('scroll={{ x: 1120, y: supplierSummaryTableScrollY }}') &&
+    pageSource.includes('sortSupplierSummaries(supplierRows, supplierSort)') &&
+    pageSource.includes('getVisibleSupplierRows(sortedSupplierRows, supplierExpanded, filters.supplierCode)') &&
+    pageSource.includes('onChange={handleSupplierTableChange}') &&
+    pageSource.includes('onRow={(row) => ({ onClick: () => toggleSupplierFilter(row) })}') &&
+    pageSource.includes('filterValuesRef.current.supplierCode === row.supplierCode ? undefined : row.supplierCode') &&
     !pageSource.includes('result.supplierSummaries.slice(0, 10)') &&
-    !pageSource.includes('SUPPLIER_SUMMARY_PLACEHOLDER_COUNT'),
-  '页面必须用单张一屏内可滚动、可排序的表格展示所有国内供应商差额统计，并默认每页 50 条',
+    !pageSource.includes('SUPPLIER_SUMMARY_PLACEHOLDER_COUNT') &&
+    !pageSource.includes('supplierSummaryTableScrollY'),
+  '页面必须展示当前筛选下全部国内供应商的可排序差额统计，默认前 6 个可展开全部，并能点行联动商品筛选',
 )
 
+// 选中某个供应商后接口只返回该供应商汇总：排行必须复用同条件下的全量缓存，缓存不匹配时补一次不带供应商的请求。
 assert(
-  pageSource.includes('useLayoutEffect') &&
-    pageSource.includes('const tableRegionRef = useRef<HTMLDivElement | null>(null)') &&
-    pageSource.includes('const [tableScrollY, setTableScrollY]') &&
-    pageSource.includes("height: 'calc(100vh - 32px)'") &&
-    pageSource.includes('region.clientHeight') &&
-    pageSource.includes('scroll={{ x: 2000, y: tableScrollY }}') &&
-    pageSource.includes('主表和供应商统计都把滚动限制在表格 body 内') &&
-    pageSource.includes("overflow: 'hidden'"),
-  '主表区域必须按一屏高度展示，并根据表格区域自身高度计算 body 内部滚动高度',
+  pageSource.includes('getSupplierRankingKey(filters)') &&
+    pageSource.includes('supplierCode: undefined,') &&
+    pageSource.includes('rankingGuard.isLatest(requestId)') &&
+    pageSource.includes('supplierRanking?.key === supplierRankingKey ? supplierRanking.rows : supplierSummaries'),
+  '点选供应商后排行仍需显示同条件下的全部供应商',
+)
+
+// 2026-10 重设计：取消主表与供应商卡的一屏固定高度和 body 内部滚动（多层滚动难用），整页自然滚动。
+assert(
+  !pageSource.includes('useLayoutEffect') &&
+    !pageSource.includes('tableScrollY') &&
+    !pageSource.includes("height: 'calc(100vh - 32px)'") &&
+    pageSource.includes('scroll={{ x: PRODUCT_TABLE_BASE_WIDTH + optionalColumns.length * PRODUCT_OPTIONAL_COLUMN_WIDTH }}') &&
+    pageSource.includes('scroll={{ x: 860 }}'),
+  '主表与供应商卡不得再限制为一屏高度的内部滚动',
+)
+
+// 默认列（不含列设置里的可选列）在 1440 宽屏内放得下，差额数值不能被挤出视野。
+const productTableBaseWidth = Number(pageSource.match(/const PRODUCT_TABLE_BASE_WIDTH = (\d+)/)?.[1])
+assert(productTableBaseWidth > 0 && productTableBaseWidth <= 1100, `商品表默认宽度 ${productTableBaseWidth}px 超出 1440 宽屏可用宽度`)
+
+// 筛选即查询：关键字等文本防抖 300ms，下拉 / 日期 / 分段立即生效；主表、排行、明细各自只采纳最后一次响应。
+assert(
+  pageSource.includes('const FILTER_DEBOUNCE_MS = 300') &&
+    pageSource.includes("updateFilterValues({ keyword: event.target.value }, 'debounced')") &&
+    pageSource.includes("updateFilterValues({ varianceDirection: value }, 'immediate')") &&
+    pageSource.includes("updateFilterValues({ orderDateRange: value }, 'immediate')") &&
+    pageSource.includes('<ActiveFilterBar') &&
+    pageSource.includes('<MoreFiltersButton activeCount={moreFilterCount}>') &&
+    pageSource.includes("updateFilterValues({ storeCode: event.target.value }, 'debounced')") &&
+    pageSource.includes("updateFilterValues({ orderNo: event.target.value }, 'debounced')") &&
+    pageSource.includes('if (!listGuard.isLatest(requestId)) {') &&
+    pageSource.includes('if (!detailGuard.isLatest(requestId)) {') &&
+    !pageSource.includes('htmlType="submit"'),
+  '筛选必须即时查询（文本防抖），保留分店编码与订单号筛选，且请求有竞态守卫',
+)
+
+// 多收 / 少收改用橙 / 蓝，不能再用红 / 绿标签表示差额方向。
+assert(
+  !pageSource.includes("'red'") &&
+    !pageSource.includes("'green'") &&
+    !pageSource.includes('#cf1322') &&
+    !pageSource.includes('#389e0d'),
+  '差额方向配色必须改为多收橙、少收蓝',
 )
 
 assert(

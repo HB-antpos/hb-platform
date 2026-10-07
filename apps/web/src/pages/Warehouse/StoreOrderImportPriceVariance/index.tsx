@@ -1,31 +1,46 @@
-import { DollarOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  ArrowDownOutlined,
+  DollarOutlined,
+  EditOutlined,
+  InfoCircleOutlined,
+  PictureOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  SettingOutlined,
+} from '@ant-design/icons'
 import {
   App as AntdApp,
   Button,
-  Card,
+  Checkbox,
   Col,
   DatePicker,
   Empty,
   Form,
-  Image,
   Input,
   InputNumber,
   Modal,
+  Popover,
   Row,
+  Segmented,
   Select,
   Space,
   Statistic,
-  Tag,
+  Tooltip,
   Typography,
 } from 'antd'
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table'
 import type { InputRef } from 'antd/es/input'
 import type { SorterResult } from 'antd/es/table/interface'
-import type { Dayjs } from 'dayjs'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type Key } from 'react'
-import { useTranslation } from 'react-i18next'
+import dayjs, { type Dayjs } from 'dayjs'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type Key } from 'react'
+import { Trans, useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import PageContainer from '../../../components/PageContainer'
+import ProductListImage from '../../../components/ProductListImage'
+import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
+import MoreFiltersButton from '../../../components/listToolbar/MoreFiltersButton'
+import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getActiveChinaSuppliers } from '../../../services/chinaSupplierService'
 import {
   batchUpdateStoreOrderImportPriceVarianceWarehouseImportPrice,
@@ -43,12 +58,39 @@ import type {
   StoreOrderImportPriceVarianceSummary,
   StoreOrderImportPriceVarianceSupplierSummary,
 } from '../../../types/storeOrder'
+import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import {
+  SUPPLIER_PREVIEW_COUNT,
+  VARIANCE_TONE_COLORS,
+  formatAmount,
+  formatQuantity,
+  formatSignedAmount,
+  getFilterSignature,
+  getMaxAbsVariance,
+  getSupplierRankingKey,
+  getSupplierRowKey,
+  getVarianceBarWidths,
+  getVarianceTone,
+  getVisibleSupplierRows,
+  sortSupplierSummaries,
+  summarizeSupplierTotals,
+  type SupplierSort,
+  type SupplierSortKey,
+} from './priceVariance.logic'
+import priceVarianceMessagesEn from './priceVarianceMessages.en.json'
+import priceVarianceMessagesZh from './priceVarianceMessages.zh.json'
+import './styles.css'
+
+// 页面重设计新增的文案随页面懒注册，不放进首屏全局语言包。
+registerPageMessages({ zh: priceVarianceMessagesZh, en: priceVarianceMessagesEn })
 
 const { RangePicker } = DatePicker
 
 type RangeValue = [Dayjs | null, Dayjs | null] | null
 type EditablePriceField = 'domesticPrice' | 'warehouseImportPrice'
+/** 列设置里可选显示的低频列。 */
+type OptionalColumnKey = 'unitVolume' | 'packingQuantity'
 
 interface FilterValues {
   keyword?: string
@@ -83,8 +125,16 @@ interface DomesticSupplierFilterSelectProps {
   loading: boolean
   options: SupplierOption[]
   placeholder: string
+  prefix?: string
+  style?: CSSProperties
   onChange?: (value?: string) => void
   onOpenChange: (open: boolean) => void
+}
+
+/** 供应商排行：按「除供应商外的筛选条件」缓存，点选供应商后仍显示同条件下的全部供应商。 */
+interface SupplierRanking {
+  key: string
+  rows: StoreOrderImportPriceVarianceSupplierSummary[]
 }
 
 const DEFAULT_PAGE_SIZE = 20
@@ -92,6 +142,9 @@ const DEFAULT_SORT_BY = 'absoluteVarianceAmount'
 const DEFAULT_SORT_DESCENDING = true
 const DEFAULT_DETAIL_SORT_BY = 'orderDate'
 const DEFAULT_DETAIL_SORT_DESCENDING = true
+/** 文本类筛选（关键字、分店编码、订单号）输入停顿后再查询。 */
+const FILTER_DEBOUNCE_MS = 300
+const INITIAL_FILTER_VALUES: FilterValues = { varianceDirection: 'all' }
 
 const emptySummary: StoreOrderImportPriceVarianceSummary = {
   totalRows: 0,
@@ -118,6 +171,13 @@ function formatDate(value?: string, language?: string) {
   return date.toLocaleDateString(language?.startsWith('zh') ? 'zh-CN' : 'en-US')
 }
 
+/** 首次货柜日期：跨年数据多，统一显示完整日期。 */
+function formatContainerDate(value?: string) {
+  if (!value) return '--'
+  const date = dayjs(value)
+  return date.isValid() ? date.format('YYYY-MM-DD') : value
+}
+
 function formatMoney(value?: number) {
   return (value ?? 0).toFixed(2)
 }
@@ -141,15 +201,6 @@ function parsePriceDraft(value: string) {
   return Math.round(parsed * 100) / 100
 }
 
-// 供应商统计接口一次性返回完整聚合结果，列排序在前端本地完成。
-function compareSupplierText(left?: string, right?: string) {
-  return (left || '').localeCompare(right || '', 'zh-Hans-CN', { numeric: true, sensitivity: 'base' })
-}
-
-function compareSupplierNumber(left?: number, right?: number) {
-  return (left ?? 0) - (right ?? 0)
-}
-
 function getRowKey(row: StoreOrderImportPriceVarianceItem) {
   return row.productCode || row.itemNumber || row.productName || 'product'
 }
@@ -160,10 +211,6 @@ function getEditablePriceInputKey(row: StoreOrderImportPriceVarianceItem, field:
 
 function getEditablePriceValue(row: StoreOrderImportPriceVarianceItem, field: EditablePriceField) {
   return field === 'domesticPrice' ? row.domesticPrice : row.warehouseImportPrice
-}
-
-function getSupplierSummaryRowKey(row: StoreOrderImportPriceVarianceSupplierSummary) {
-  return row.supplierCode || row.supplierName || 'unknown-supplier'
 }
 
 function getDetailRowKey(row: StoreOrderImportPriceVarianceDetailItem) {
@@ -192,6 +239,8 @@ function DomesticSupplierFilterSelect({
   loading,
   options,
   placeholder,
+  prefix,
+  style,
   onChange,
   onOpenChange,
 }: DomesticSupplierFilterSelectProps) {
@@ -203,6 +252,9 @@ function DomesticSupplierFilterSelect({
       loading={loading}
       options={options}
       placeholder={placeholder}
+      prefix={prefix}
+      style={style}
+      aria-label={prefix ?? placeholder}
       onChange={onChange}
       onOpenChange={onOpenChange}
       filterOption={(input, option) =>
@@ -213,32 +265,62 @@ function DomesticSupplierFilterSelect({
   )
 }
 
+/** 差额双向条：中线左侧蓝色为少收、右侧橙色为多收，长度按当前列表最大绝对值归一。 */
+const PRODUCT_TABLE_BASE_WIDTH = 1096
+const PRODUCT_OPTIONAL_COLUMN_WIDTH = 96
+
+function VarianceBar({ value, maxAbs, width }: { value?: number; maxAbs: number; width: number }) {
+  const bar = getVarianceBarWidths(value, maxAbs)
+  return (
+    <span className="wh-pv-bar" style={{ width }} aria-hidden="true">
+      <span className="wh-pv-bar-half wh-pv-bar-under-half">
+        <span className="wh-pv-bar-under" style={{ width: `${bar.under}%` }} />
+      </span>
+      <span className="wh-pv-bar-half">
+        <span className="wh-pv-bar-over" style={{ width: `${bar.over}%` }} />
+      </span>
+    </span>
+  )
+}
+
+function SignedVariance({ value }: { value?: number }) {
+  return <span className={`wh-pv-variance wh-pv-tone-${getVarianceTone(value)}`}>{formatSignedAmount(value)}</span>
+}
+
 export default function StoreOrderImportPriceVariancePage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { message } = AntdApp.useApp()
-  const [form] = Form.useForm<FilterValues>()
   const [batchWarehouseImportPriceForm] = Form.useForm<BatchWarehouseImportPriceFormValues>()
+  // 筛选栏的即时取值（文本框防抖前的草稿）与已生效条件分开保存：只有已生效条件驱动查询。
+  const [filterValues, setFilterValues] = useState<FilterValues>(INITIAL_FILTER_VALUES)
+  const filterValuesRef = useRef<FilterValues>(INITIAL_FILTER_VALUES)
+  const filterDebounceTimerRef = useRef<number | null>(null)
   const [filters, setFilters] = useState<AppliedFilters>({ varianceDirection: 'all' })
+  const appliedFiltersRef = useRef<AppliedFilters>({ varianceDirection: 'all' })
   const [items, setItems] = useState<StoreOrderImportPriceVarianceItem[]>([])
   const [summary, setSummary] = useState<StoreOrderImportPriceVarianceSummary>(emptySummary)
   const [supplierSummaries, setSupplierSummaries] = useState<StoreOrderImportPriceVarianceSupplierSummary[]>([])
+  const [supplierRanking, setSupplierRanking] = useState<SupplierRanking | null>(null)
+  const [supplierSort, setSupplierSort] = useState<SupplierSort>(null)
+  const [supplierExpanded, setSupplierExpanded] = useState(false)
   const [total, setTotal] = useState(0)
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [sortBy, setSortBy] = useState(DEFAULT_SORT_BY)
   const [sortDescending, setSortDescending] = useState(DEFAULT_SORT_DESCENDING)
   const [loading, setLoading] = useState(false)
-  const tableRegionRef = useRef<HTMLDivElement | null>(null)
-  const [tableScrollY, setTableScrollY] = useState(480)
+  const [optionalColumns, setOptionalColumns] = useState<OptionalColumnKey[]>([])
+  // 筛选即查询后请求更密集：主表、供应商排行、明细弹窗各自只允许最后一次请求写入页面。
+  const listRequestGuardRef = useRef(createLatestRequestGuard())
+  const rankingRequestGuardRef = useRef(createLatestRequestGuard())
+  const detailRequestGuardRef = useRef(createLatestRequestGuard())
   const priceInputRefs = useRef<Record<string, InputRef | null>>({})
   const [editingPriceKey, setEditingPriceKey] = useState<string | null>(null)
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
   // 键盘保存会紧接着触发 blur，用 ref 做同步防重，避免重复提交同一格。
   const savingPriceKeyRef = useRef<string | null>(null)
   const [savingPriceKey, setSavingPriceKey] = useState<string | null>(null)
-  const supplierSummaryRegionRef = useRef<HTMLDivElement | null>(null)
-  const [supplierSummaryTableScrollY, setSupplierSummaryTableScrollY] = useState(360)
   const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([])
   const [supplierLoading, setSupplierLoading] = useState(false)
   const supplierOptionsLoadedRef = useRef(false)
@@ -258,6 +340,8 @@ export default function StoreOrderImportPriceVariancePage() {
   const [batchWarehouseImportPriceSaving, setBatchWarehouseImportPriceSaving] = useState(false)
 
   const loadData = useCallback(async () => {
+    const listGuard = listRequestGuardRef.current
+    const requestId = listGuard.begin()
     setLoading(true)
     try {
       const query: StoreOrderImportPriceVarianceQuery = {
@@ -268,17 +352,29 @@ export default function StoreOrderImportPriceVariancePage() {
         sortDescending,
       }
       const result = await getStoreOrderImportPriceVariance(query)
+      if (!listGuard.isLatest(requestId)) {
+        return
+      }
       setItems(result.items)
       setTotal(result.total)
       setPageNumber(result.page)
       setPageSize(result.pageSize)
       setSummary(result.summary)
       setSupplierSummaries(result.supplierSummaries)
+      // 没有选国内供应商时，接口返回的就是同条件下的全部供应商，顺手更新排行缓存。
+      if (!filters.supplierCode) {
+        setSupplierRanking({ key: getSupplierRankingKey(filters), rows: result.supplierSummaries })
+      }
     } catch (error) {
+      if (!listGuard.isLatest(requestId)) {
+        return
+      }
       console.error(error)
       void message.error(t('storeOrders.importPriceVariance.loadFailed'))
     } finally {
-      setLoading(false)
+      if (listGuard.isLatest(requestId)) {
+        setLoading(false)
+      }
     }
   }, [filters, message, pageNumber, pageSize, sortBy, sortDescending, t])
 
@@ -286,98 +382,81 @@ export default function StoreOrderImportPriceVariancePage() {
     void loadData()
   }, [loadData])
 
+  const supplierRankingKey = getSupplierRankingKey(filters)
+  const cachedRankingKey = supplierRanking?.key
+
+  // 点选了国内供应商且排行缓存不是当前条件时，补一次不带供应商的请求（只取第 1 页 1 条）拿全部供应商排行。
+  // 失败静默降级：排行只显示当前供应商。
+  useEffect(() => {
+    if (!filters.supplierCode || cachedRankingKey === supplierRankingKey) {
+      return
+    }
+    const rankingGuard = rankingRequestGuardRef.current
+    const requestId = rankingGuard.begin()
+    void getStoreOrderImportPriceVariance({
+      ...filters,
+      supplierCode: undefined,
+      pageNumber: 1,
+      pageSize: 1,
+      sortBy: DEFAULT_SORT_BY,
+      sortDescending: DEFAULT_SORT_DESCENDING,
+    })
+      .then((result) => {
+        if (rankingGuard.isLatest(requestId)) {
+          setSupplierRanking({ key: supplierRankingKey, rows: result.supplierSummaries })
+        }
+      })
+      .catch((error: unknown) => console.error(error))
+  }, [cachedRankingKey, filters, supplierRankingKey])
+
   useEffect(
     () => () => {
       supplierRequestControllerRef.current?.abort()
+      if (filterDebounceTimerRef.current !== null) {
+        window.clearTimeout(filterDebounceTimerRef.current)
+      }
+      listRequestGuardRef.current.invalidate()
+      rankingRequestGuardRef.current.invalidate()
+      detailRequestGuardRef.current.invalidate()
     },
     [],
   )
 
-  useLayoutEffect(() => {
-    let frameId: number | null = null
+  /** 应用已生效条件：条件确实变了才回到第 1 页并清空勾选（与原「查询」按钮一致）。 */
+  const applyFilters = useCallback((next: AppliedFilters) => {
+    if (getFilterSignature(appliedFiltersRef.current) === getFilterSignature(next)) {
+      return
+    }
+    appliedFiltersRef.current = next
+    setFilters(next)
+    setPageNumber(1)
+    setSelectedRowKeys([])
+  }, [])
 
-    const readOuterHeight = (element: HTMLElement | null) => {
-      if (!element) {
-        return 0
+  /**
+   * 更新筛选栏取值。下拉、日期、分段是 immediate：立即查询；文本框是 debounced：停顿 300ms 再查询。
+   * 立即生效时会一并带上还在防抖中的文本，避免两次查询。
+   */
+  const updateFilterValues = useCallback(
+    (patch: Partial<FilterValues>, mode: 'immediate' | 'debounced') => {
+      const next = { ...filterValuesRef.current, ...patch }
+      filterValuesRef.current = next
+      setFilterValues(next)
+      if (filterDebounceTimerRef.current !== null) {
+        window.clearTimeout(filterDebounceTimerRef.current)
+        filterDebounceTimerRef.current = null
       }
-
-      const style = window.getComputedStyle(element)
-      const marginTop = Number.parseFloat(style.marginTop) || 0
-      const marginBottom = Number.parseFloat(style.marginBottom) || 0
-      return Math.ceil(element.getBoundingClientRect().height + marginTop + marginBottom)
-    }
-
-    const measureTableBodyScrollY = (region: HTMLElement | null, minTableBodyHeight: number) => {
-      if (!region) {
-        return null
+      if (mode === 'debounced') {
+        filterDebounceTimerRef.current = window.setTimeout(() => {
+          filterDebounceTimerRef.current = null
+          applyFilters(normalizeFilters(filterValuesRef.current))
+        }, FILTER_DEBOUNCE_MS)
+        return
       }
-
-      const tableHeader = region.querySelector('.ant-table-thead') as HTMLElement | null
-      const tableBody = region.querySelector('.ant-table-body') as HTMLElement | null
-      const pagination = region.querySelector('.ant-table-pagination') as HTMLElement | null
-      const tableHeaderHeight = readOuterHeight(tableHeader)
-      const paginationHeight = readOuterHeight(pagination)
-      const horizontalScrollbarHeight = tableBody ? Math.max(0, tableBody.offsetHeight - tableBody.clientHeight) : 0
-      const innerPadding = 8
-
-      return Math.max(
-        Math.floor(
-          region.clientHeight -
-            tableHeaderHeight -
-            paginationHeight -
-            horizontalScrollbarHeight -
-            innerPadding,
-        ),
-        minTableBodyHeight,
-      )
-    }
-
-    const measureTableScrollY = () => {
-      // 主表和供应商统计都把滚动限制在表格 body 内，避免整页被长表格撑开。
-      const nextScrollY = measureTableBodyScrollY(tableRegionRef.current, 260)
-      const nextSupplierScrollY = measureTableBodyScrollY(supplierSummaryRegionRef.current, 240)
-
-      if (nextScrollY != null) {
-        setTableScrollY((current) => (Math.abs(current - nextScrollY) > 4 ? nextScrollY : current))
-      }
-      if (nextSupplierScrollY != null) {
-        setSupplierSummaryTableScrollY((current) =>
-          Math.abs(current - nextSupplierScrollY) > 4 ? nextSupplierScrollY : current,
-        )
-      }
-    }
-
-    const scheduleMeasure = () => {
-      if (frameId != null) {
-        window.cancelAnimationFrame(frameId)
-      }
-      frameId = window.requestAnimationFrame(measureTableScrollY)
-    }
-
-    scheduleMeasure()
-    window.addEventListener('resize', scheduleMeasure)
-
-    if (typeof ResizeObserver === 'undefined') {
-      return () => {
-        if (frameId != null) window.cancelAnimationFrame(frameId)
-        window.removeEventListener('resize', scheduleMeasure)
-      }
-    }
-
-    const observer = new ResizeObserver(scheduleMeasure)
-    if (tableRegionRef.current) {
-      observer.observe(tableRegionRef.current)
-    }
-    if (supplierSummaryRegionRef.current) {
-      observer.observe(supplierSummaryRegionRef.current)
-    }
-
-    return () => {
-      if (frameId != null) window.cancelAnimationFrame(frameId)
-      observer.disconnect()
-      window.removeEventListener('resize', scheduleMeasure)
-    }
-  }, [i18n.language, items.length, pageSize, supplierSummaries.length, total])
+      applyFilters(normalizeFilters(next))
+    },
+    [applyFilters],
+  )
 
   const loadSupplierOptions = useCallback(async () => {
     if (supplierOptionsLoadedRef.current || supplierLoading) {
@@ -465,6 +544,7 @@ export default function StoreOrderImportPriceVariancePage() {
   }, [])
 
   const closeProductDetails = useCallback(() => {
+    detailRequestGuardRef.current.invalidate()
     setDetailModalOpen(false)
     setSelectedProduct(null)
     setDetailItems([])
@@ -477,6 +557,9 @@ export default function StoreOrderImportPriceVariancePage() {
       return
     }
 
+    // 弹窗内翻页 / 排序 / 换商品时只采纳最后一次响应。
+    const detailGuard = detailRequestGuardRef.current
+    const requestId = detailGuard.begin()
     setDetailLoading(true)
     try {
       const result = await getStoreOrderImportPriceVarianceDetails({
@@ -487,16 +570,24 @@ export default function StoreOrderImportPriceVariancePage() {
         sortBy: detailSortBy,
         sortDescending: detailSortDescending,
       })
+      if (!detailGuard.isLatest(requestId)) {
+        return
+      }
       setDetailItems(result.items)
       setDetailSummary(result.summary)
       setDetailTotal(result.total)
       setDetailPageNumber(result.page)
       setDetailPageSize(result.pageSize)
     } catch (error) {
+      if (!detailGuard.isLatest(requestId)) {
+        return
+      }
       console.error(error)
       void message.error(t('storeOrders.importPriceVariance.loadDetailsFailed'))
     } finally {
-      setDetailLoading(false)
+      if (detailGuard.isLatest(requestId)) {
+        setDetailLoading(false)
+      }
     }
   }, [
     detailModalOpen,
@@ -700,13 +791,23 @@ export default function StoreOrderImportPriceVariancePage() {
     (value: number | undefined, row: StoreOrderImportPriceVarianceItem, field: EditablePriceField) => {
       const rowKey = getEditablePriceInputKey(row, field)
       if (editingPriceKey !== rowKey) {
+        const fieldLabel =
+          field === 'domesticPrice'
+            ? t('warehouseUi.priceVariance.colDomesticPrice')
+            : t('warehouseUi.priceVariance.colWarehousePrice')
+        // 虚线下划线提示可直接改价；用按钮承载，键盘也能进入编辑。
         return (
-          <Typography.Text
-            style={{ cursor: 'text' }}
+          <button
+            type="button"
+            className="wh-pv-editable-price"
+            aria-label={t('warehouseUi.priceVariance.editPriceAria', {
+              field: fieldLabel,
+              item: row.itemNumber || row.productCode || '--',
+            })}
             onClick={() => focusPriceInput(row, field)}
           >
-            {formatMoney(value)}
-          </Typography.Text>
+            {formatAmount(value, field === 'domesticPrice' ? '¥' : '$')}
+          </button>
         )
       }
 
@@ -718,6 +819,7 @@ export default function StoreOrderImportPriceVariancePage() {
           autoComplete="off"
           value={priceDrafts[rowKey] ?? formatMoney(value)}
           disabled={savingPriceKey === rowKey}
+          className="wh-pv-price-input"
           style={{ textAlign: 'right', width: '100%' }}
           onChange={(event) =>
             setPriceDrafts((current) => ({
@@ -744,6 +846,7 @@ export default function StoreOrderImportPriceVariancePage() {
       registerPriceInput,
       saveEditablePrice,
       savingPriceKey,
+      t,
     ],
   )
 
@@ -808,84 +911,55 @@ export default function StoreOrderImportPriceVariancePage() {
     }
   }, [batchWarehouseImportPriceForm, loadData, message, selectedRowKeys, t])
 
-  const productColumns = useMemo<ColumnsType<StoreOrderImportPriceVarianceItem>>(
-    () => [
+  const productMaxAbsVariance = useMemo(() => getMaxAbsVariance(items.map((item) => item.varianceAmountTotal)), [items])
+  const isDefaultSort = sortBy === DEFAULT_SORT_BY && sortDescending === DEFAULT_SORT_DESCENDING
+
+  const productColumns = useMemo<ColumnsType<StoreOrderImportPriceVarianceItem>>(() => {
+    const columns: ColumnsType<StoreOrderImportPriceVarianceItem> = [
       {
-        title: t('storeOrders.importPriceVariance.productImage'),
-        dataIndex: 'productImage',
-        key: 'productImage',
-        width: 92,
-        render: (value?: string) =>
-          value ? (
-            <Image
-              src={value}
-              width={48}
-              height={48}
-              style={{ objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0' }}
-            />
-          ) : (
-            <Typography.Text type="secondary">--</Typography.Text>
-          ),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.itemAndProduct'),
+        title: t('warehouseUi.priceVariance.colProduct'),
         dataIndex: 'productName',
         key: 'itemNumber',
-        width: 260,
+        width: 248,
         sorter: true,
         render: (_value, row) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text strong>{row.itemNumber || row.productCode || '--'}</Typography.Text>
-            <Typography.Text type="secondary">{row.productName || '--'}</Typography.Text>
-          </Space>
+          <div className="wh-pv-product">
+            {row.productImage ? (
+              <ProductListImage src={row.productImage} size={38} radius={6} className="wh-pv-product-image" />
+            ) : (
+              <span className="wh-pv-product-placeholder" aria-hidden="true">
+                <PictureOutlined />
+              </span>
+            )}
+            <div className="wh-pv-product-text">
+              <div className="wh-pv-product-line">
+                <span className="wh-pv-item-number">{row.itemNumber || row.productCode || '--'}</span>
+                <span className="wh-pv-product-name">{row.productName || '--'}</span>
+              </div>
+              <div className="wh-pv-product-supplier">
+                {row.supplierName || row.supplierCode
+                  ? [row.supplierName, row.supplierCode].filter(Boolean).join(' · ')
+                  : t('storeOrders.importPriceVariance.unknownSupplier')}
+              </div>
+            </div>
+          </div>
         ),
       },
       {
-        title: t('storeOrders.importPriceVariance.domesticSupplier'),
-        dataIndex: 'supplierCode',
-        key: 'supplierCode',
-        width: 180,
-        sorter: true,
-        render: (_value, row) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text>{row.supplierName || '--'}</Typography.Text>
-            <Typography.Text type="secondary">{row.supplierCode || '--'}</Typography.Text>
-          </Space>
-        ),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.domesticPrice'),
+        title: t('warehouseUi.priceVariance.colDomesticPrice'),
         dataIndex: 'domesticPrice',
         key: 'domesticPrice',
         align: 'right',
-        width: 120,
+        width: 88,
         sorter: true,
         render: (value: number | undefined, row) => renderEditablePriceCell(value, row, 'domesticPrice'),
       },
       {
-        title: t('storeOrders.importPriceVariance.unitVolume'),
-        dataIndex: 'unitVolume',
-        key: 'unitVolume',
-        align: 'right',
-        width: 110,
-        sorter: true,
-        render: (value?: number) => formatNumber(value, 4),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.packingQuantity'),
-        dataIndex: 'packingQuantity',
-        key: 'packingQuantity',
-        align: 'right',
-        width: 110,
-        sorter: true,
-        render: (value?: number) => formatNumber(value, 0),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.warehouseImportPrice'),
+        title: t('warehouseUi.priceVariance.colWarehousePrice'),
         dataIndex: 'warehouseImportPrice',
         key: 'warehouseImportPrice',
         align: 'right',
-        width: 150,
+        width: 104,
         sorter: true,
         render: (value: number | undefined, row) => renderEditablePriceCell(value, row, 'warehouseImportPrice'),
       },
@@ -894,90 +968,129 @@ export default function StoreOrderImportPriceVariancePage() {
         dataIndex: 'firstContainerImportPrice',
         key: 'firstContainerImportPrice',
         align: 'right',
-        width: 130,
+        width: 152,
         sorter: true,
-        render: (value?: number) => formatMoney(value),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.originalImportAmountTotal'),
-        dataIndex: 'originalImportAmountTotal',
-        key: 'originalImportAmountTotal',
-        align: 'right',
-        width: 140,
-        sorter: true,
-        render: (value?: number) => formatMoney(value),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.baselineImportAmountTotal'),
-        dataIndex: 'baselineImportAmountTotal',
-        key: 'baselineImportAmountTotal',
-        align: 'right',
-        width: 140,
-        sorter: true,
-        render: (value?: number) => formatMoney(value),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.varianceAmountTotal'),
-        dataIndex: 'varianceAmountTotal',
-        key: 'varianceAmountTotal',
-        align: 'right',
-        width: 130,
-        sorter: true,
-        render: (value?: number) => {
-          const amount = value ?? 0
-          const color = amount > 0 ? 'red' : amount < 0 ? 'green' : 'default'
-          return <Tag color={color}>{formatMoney(amount)}</Tag>
-        },
-      },
-      {
-        title: t('storeOrders.importPriceVariance.firstContainerNumber'),
-        dataIndex: 'firstContainerNumber',
-        key: 'firstContainerNumber',
-        width: 150,
-        render: (_value, row) => {
-          const text = row.firstContainerNumber || row.firstContainerCode || '--'
-          if (!row.firstContainerCode) {
-            return text
-          }
-
+        render: (value: number | undefined, row) => {
+          const containerText = row.firstContainerNumber || row.firstContainerCode
           return (
-            <Button type="link" size="small" onClick={() => openContainerDetail(row)}>
-              {text}
-            </Button>
+            <div className="wh-pv-two-line">
+              <div className="wh-pv-strong">{formatAmount(value)}</div>
+              <div className="wh-pv-small">
+                {containerText && row.firstContainerCode ? (
+                  <button type="button" className="wh-pv-link-button" onClick={() => openContainerDetail(row)}>
+                    {containerText}
+                  </button>
+                ) : (
+                  <span className="wh-pv-muted">{containerText || '--'}</span>
+                )}
+                <span className="wh-pv-muted"> · {formatContainerDate(row.firstContainerDate)}</span>
+              </div>
+            </div>
           )
         },
       },
-      {
-        title: t('storeOrders.importPriceVariance.firstContainerDate'),
-        dataIndex: 'firstContainerDate',
-        key: 'firstContainerDate',
-        width: 130,
+    ]
+
+    // 体积、装箱数是低频参考列，默认收进「列设置」，需要时再打开（仍支持服务端排序）。
+    if (optionalColumns.includes('unitVolume')) {
+      columns.push({
+        title: t('storeOrders.importPriceVariance.unitVolume'),
+        dataIndex: 'unitVolume',
+        key: 'unitVolume',
+        align: 'right',
+        width: 96,
         sorter: true,
-        render: (value?: string) => formatDate(value, i18n.language),
+        render: (value?: number) => formatNumber(value, 4),
+      })
+    }
+    if (optionalColumns.includes('packingQuantity')) {
+      columns.push({
+        title: t('storeOrders.importPriceVariance.packingQuantity'),
+        dataIndex: 'packingQuantity',
+        key: 'packingQuantity',
+        align: 'right',
+        width: 96,
+        sorter: true,
+        render: (value?: number) => formatNumber(value, 0),
+      })
+    }
+
+    columns.push(
+      {
+        title: t('warehouseUi.priceVariance.colQuantity'),
+        dataIndex: 'allocQuantityTotal',
+        key: 'allocQuantityTotal',
+        align: 'right',
+        width: 84,
+        sorter: true,
+        render: (value?: number) => formatQuantity(value),
       },
       {
-        title: t('storeOrders.importPriceVariance.details'),
+        title: t('warehouseUi.priceVariance.colAmounts'),
+        dataIndex: 'originalImportAmountTotal',
+        key: 'originalImportAmountTotal',
+        align: 'right',
+        width: 128,
+        sorter: true,
+        render: (value: number | undefined, row) => (
+          <div className="wh-pv-two-line">
+            <div>{formatAmount(value)}</div>
+            <div className="wh-pv-small wh-pv-muted">
+              {t('warehouseUi.priceVariance.baselineLine', { amount: formatAmount(row.baselineImportAmountTotal) })}
+            </div>
+          </div>
+        ),
+      },
+      {
+        // 默认按差额绝对值倒序（不对应任何列头排序），在表头写明；点列头排序发送带符号的 varianceAmountTotal。
+        title: isDefaultSort ? (
+          <Tooltip title={t('warehouseUi.priceVariance.defaultSortHint')}>
+            <span className="wh-pv-default-sort">
+              {t('warehouseUi.priceVariance.colVarianceDefault')}
+              <ArrowDownOutlined />
+            </span>
+          </Tooltip>
+        ) : (
+          t('warehouseUi.priceVariance.colVariance')
+        ),
+        dataIndex: 'varianceAmountTotal',
+        key: 'varianceAmountTotal',
+        width: 176,
+        sorter: true,
+        // 默认排序时表头已有自己的说明浮层，避免和 antd 的排序提示叠在一起。
+        showSorterTooltip: !isDefaultSort,
+        render: (value?: number) => (
+          <span className="wh-pv-variance-cell">
+            <VarianceBar value={value} maxAbs={productMaxAbsVariance} width={64} />
+            <SignedVariance value={value} />
+          </span>
+        ),
+      },
+      {
+        title: t('warehouseUi.priceVariance.colDetails'),
         dataIndex: 'detailCount',
         key: 'detailCount',
         align: 'right',
         fixed: 'right',
-        width: 130,
+        width: 72,
         sorter: true,
         render: (value: number | undefined, row) => (
-          <Button type="link" size="small" onClick={() => openProductDetails(row)}>
-            {t('storeOrders.importPriceVariance.detailEntry', { count: value ?? 0 })}
-          </Button>
+          <button type="button" className="wh-pv-link-button wh-pv-number" onClick={() => openProductDetails(row)}>
+            {t('warehouseUi.priceVariance.detailLink', { count: value ?? 0 })}
+          </button>
         ),
       },
-    ],
-    [
-      i18n.language,
-      openContainerDetail,
-      openProductDetails,
-      renderEditablePriceCell,
-      t,
-    ],
-  )
+    )
+    return columns
+  }, [
+    isDefaultSort,
+    openContainerDetail,
+    openProductDetails,
+    optionalColumns,
+    productMaxAbsVariance,
+    renderEditablePriceCell,
+    t,
+  ])
 
   const detailColumns = useMemo<ColumnsType<StoreOrderImportPriceVarianceDetailItem>>(
     () => [
@@ -1072,11 +1185,7 @@ export default function StoreOrderImportPriceVariancePage() {
         align: 'right',
         width: 130,
         sorter: true,
-        render: (value?: number) => {
-          const amount = value ?? 0
-          const color = amount > 0 ? 'red' : amount < 0 ? 'green' : 'default'
-          return <Tag color={color}>{formatMoney(amount)}</Tag>
-        },
+        render: (value?: number) => <SignedVariance value={value} />,
       },
       {
         title: t('storeOrders.importPriceVariance.firstContainerNumber'),
@@ -1108,122 +1217,137 @@ export default function StoreOrderImportPriceVariancePage() {
     [i18n.language, openContainerDetail, openOrderDetail, t],
   )
 
-  const supplierSummaryColumns = useMemo<ColumnsType<StoreOrderImportPriceVarianceSupplierSummary>>(
-    () => [
+  // 供应商排行：选了国内供应商时用缓存的同条件全量排行，否则直接用本次结果。
+  const supplierRows =
+    filters.supplierCode && supplierRanking?.key === supplierRankingKey ? supplierRanking.rows : supplierSummaries
+  const sortedSupplierRows = useMemo(() => sortSupplierSummaries(supplierRows, supplierSort), [supplierRows, supplierSort])
+  const visibleSupplierRows = useMemo(
+    () => getVisibleSupplierRows(sortedSupplierRows, supplierExpanded, filters.supplierCode),
+    [filters.supplierCode, sortedSupplierRows, supplierExpanded],
+  )
+  const supplierMaxAbsVariance = useMemo(
+    () => getMaxAbsVariance(supplierRows.map((row) => row.varianceAmountTotal)),
+    [supplierRows],
+  )
+
+  /** 点供应商行 = 设置国内供应商筛选并联动商品表；再点同一行取消。没有编码的「未识别供应商」不能作为筛选条件。 */
+  const toggleSupplierFilter = useCallback(
+    (row: StoreOrderImportPriceVarianceSupplierSummary) => {
+      if (!row.supplierCode) {
+        return
+      }
+      updateFilterValues(
+        { supplierCode: filterValuesRef.current.supplierCode === row.supplierCode ? undefined : row.supplierCode },
+        'immediate',
+      )
+    },
+    [updateFilterValues],
+  )
+
+  const supplierSummaryColumns = useMemo<ColumnsType<StoreOrderImportPriceVarianceSupplierSummary>>(() => {
+    const sortOrderOf = (key: SupplierSortKey) => (supplierSort?.key === key ? supplierSort.order : null)
+    return [
       {
         title: t('storeOrders.importPriceVariance.domesticSupplier'),
-        dataIndex: 'supplierName',
-        key: 'supplierName',
-        width: 220,
-        sorter: (left, right) =>
-          compareSupplierText(left.supplierName || left.supplierCode, right.supplierName || right.supplierCode) ||
-          compareSupplierText(left.supplierCode, right.supplierCode),
+        key: 'supplier',
+        sorter: true,
+        sortOrder: sortOrderOf('supplier'),
         render: (_value, row) => {
           const supplierName =
             row.supplierName ||
             row.supplierCode ||
             t('storeOrders.importPriceVariance.unknownSupplier')
-
+          const selected = Boolean(row.supplierCode) && row.supplierCode === filters.supplierCode
           return (
-            <Space direction="vertical" size={0}>
-              <Typography.Text strong>{supplierName}</Typography.Text>
-              <Typography.Text type="secondary">{row.supplierCode || '--'}</Typography.Text>
-            </Space>
+            <span className="wh-pv-supplier-cell">
+              {row.supplierCode ? (
+                // 点击冒泡到行上统一切换筛选；按钮本身负责键盘可达与选中态播报。
+                <button
+                  type="button"
+                  className={`wh-pv-radio${selected ? ' is-selected' : ''}`}
+                  aria-pressed={selected}
+                  aria-label={t('warehouseUi.priceVariance.supplierSelectAria', { name: supplierName })}
+                />
+              ) : (
+                <span className="wh-pv-radio is-placeholder" aria-hidden="true" />
+              )}
+              <span className={`wh-pv-supplier-name${selected ? ' is-selected' : ''}`}>{supplierName}</span>
+              {/* 没有名称时名称位已经显示编码，不再重复。 */}
+              {row.supplierCode && row.supplierName ? <span className="wh-pv-muted wh-pv-small">{row.supplierCode}</span> : null}
+            </span>
           )
         },
       },
       {
-        title: t('storeOrders.importPriceVariance.originalImportAmountTotal'),
-        dataIndex: 'originalImportAmountTotal',
-        key: 'originalImportAmountTotal',
+        title: t('warehouseUi.priceVariance.colProducts'),
+        dataIndex: 'productCount',
+        key: 'productCount',
         align: 'right',
-        width: 140,
-        sorter: (left, right) =>
-          compareSupplierNumber(left.originalImportAmountTotal, right.originalImportAmountTotal),
-        render: (value?: number) => formatMoney(value),
+        width: 80,
+        sorter: true,
+        sortOrder: sortOrderOf('productCount'),
+        render: (value?: number) => formatQuantity(value),
       },
       {
-        title: t('storeOrders.importPriceVariance.baselineImportAmountTotal'),
-        dataIndex: 'baselineImportAmountTotal',
-        key: 'baselineImportAmountTotal',
+        title: t('warehouseUi.priceVariance.colDetails'),
+        dataIndex: 'detailCount',
+        key: 'detailCount',
         align: 'right',
-        width: 140,
-        sorter: (left, right) =>
-          compareSupplierNumber(left.baselineImportAmountTotal, right.baselineImportAmountTotal),
-        render: (value?: number) => formatMoney(value),
+        width: 88,
+        sorter: true,
+        sortOrder: sortOrderOf('detailCount'),
+        render: (value?: number) => formatQuantity(value),
       },
       {
         title: t('storeOrders.importPriceVariance.increaseVarianceAmountTotal'),
         dataIndex: 'increaseVarianceAmountTotal',
-        key: 'increaseVarianceAmountTotal',
+        key: 'increase',
         align: 'right',
         width: 130,
-        sorter: (left, right) =>
-          compareSupplierNumber(left.increaseVarianceAmountTotal, right.increaseVarianceAmountTotal),
-        render: (value?: number) => (
-          <Typography.Text style={{ color: '#cf1322' }}>{formatMoney(value)}</Typography.Text>
-        ),
+        sorter: true,
+        sortOrder: sortOrderOf('increase'),
+        render: (value?: number) => <span className="wh-pv-tone-over">{formatSignedAmount(value)}</span>,
       },
       {
+        // 接口返回少收金额的绝对值，显示时带上负号，与净差额的符号口径一致。
         title: t('storeOrders.importPriceVariance.decreaseVarianceAmountTotal'),
         dataIndex: 'decreaseVarianceAmountTotal',
-        key: 'decreaseVarianceAmountTotal',
+        key: 'decrease',
         align: 'right',
         width: 130,
-        sorter: (left, right) =>
-          compareSupplierNumber(left.decreaseVarianceAmountTotal, right.decreaseVarianceAmountTotal),
+        sorter: true,
+        sortOrder: sortOrderOf('decrease'),
+        render: (value?: number) => <span className="wh-pv-tone-under">{formatSignedAmount(-(value ?? 0))}</span>,
+      },
+      {
+        title: t('warehouseUi.priceVariance.colNet'),
+        dataIndex: 'varianceAmountTotal',
+        key: 'net',
+        width: 260,
+        sorter: true,
+        sortOrder: sortOrderOf('net'),
         render: (value?: number) => (
-          <Typography.Text style={{ color: '#389e0d' }}>{formatMoney(value)}</Typography.Text>
+          <span className="wh-pv-variance-cell">
+            <VarianceBar value={value} maxAbs={supplierMaxAbsVariance} width={120} />
+            <SignedVariance value={value} />
+          </span>
         ),
       },
-      {
-        title: t('storeOrders.importPriceVariance.varianceAmountTotal'),
-        dataIndex: 'varianceAmountTotal',
-        key: 'varianceAmountTotal',
-        align: 'right',
-        width: 130,
-        sorter: (left, right) => compareSupplierNumber(left.varianceAmountTotal, right.varianceAmountTotal),
-        render: (value?: number) => {
-          const amount = value ?? 0
-          return <Tag color={amount > 0 ? 'red' : amount < 0 ? 'green' : 'default'}>{formatMoney(amount)}</Tag>
-        },
-      },
-      {
-        title: t('storeOrders.importPriceVariance.productCount'),
-        dataIndex: 'productCount',
-        key: 'productCount',
-        align: 'right',
-        width: 100,
-        sorter: (left, right) => compareSupplierNumber(left.productCount, right.productCount),
-        render: (value?: number) => formatNumber(value, 0),
-      },
-      {
-        title: t('storeOrders.importPriceVariance.detailCount'),
-        dataIndex: 'detailCount',
-        key: 'detailCount',
-        align: 'right',
-        width: 100,
-        sorter: (left, right) => compareSupplierNumber(left.detailCount, right.detailCount),
-        render: (value?: number) => formatNumber(value, 0),
-      },
-    ],
-    [t],
-  )
+    ]
+  }, [filters.supplierCode, supplierMaxAbsVariance, supplierSort, t])
 
-  const handleSearch = (values: FilterValues) => {
-    setFilters(normalizeFilters(values))
-    setPageNumber(1)
-    setSelectedRowKeys([])
-  }
-
-  const handleReset = () => {
-    form.resetFields()
-    setFilters({ varianceDirection: 'all' })
-    setPageNumber(1)
-    setPageSize(DEFAULT_PAGE_SIZE)
-    setSortBy(DEFAULT_SORT_BY)
-    setSortDescending(DEFAULT_SORT_DESCENDING)
-    setSelectedRowKeys([])
+  const handleSupplierTableChange = (
+    _pagination: TablePaginationConfig,
+    _filters: Record<string, unknown>,
+    sorter:
+      | SorterResult<StoreOrderImportPriceVarianceSupplierSummary>
+      | SorterResult<StoreOrderImportPriceVarianceSupplierSummary>[],
+  ) => {
+    const nextSorter = Array.isArray(sorter) ? sorter[0] : sorter
+    // 取消列排序时回到默认的「净差额绝对值倒序」。
+    setSupplierSort(
+      nextSorter?.order ? { key: String(nextSorter.columnKey) as SupplierSortKey, order: nextSorter.order } : null,
+    )
   }
 
   const handleTableChange = (
@@ -1265,221 +1389,335 @@ export default function StoreOrderImportPriceVariancePage() {
     }
   }
 
-  return (
-    <PageContainer title={t('storeOrders.importPriceVariance.title')}>
-      <Card>
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ varianceDirection: 'all' }}
-          onFinish={handleSearch}
-        >
-          <Row gutter={16}>
-            <Col xs={24} md={8} xl={5}>
-              <Form.Item name="keyword" label={t('storeOrders.importPriceVariance.keyword')}>
-                <Input allowClear placeholder={t('storeOrders.importPriceVariance.keywordPlaceholder')} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={8} xl={4}>
-              <Form.Item name="storeCode" label={t('storeOrders.importPriceVariance.storeCode')}>
-                <Input allowClear placeholder={t('storeOrders.importPriceVariance.storeCodePlaceholder')} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={8} xl={5}>
-              <Form.Item name="supplierCode" label={t('storeOrders.importPriceVariance.domesticSupplier')}>
-                <DomesticSupplierFilterSelect
-                  loading={supplierLoading}
-                  options={supplierOptions}
-                  placeholder={t('storeOrders.importPriceVariance.supplierPlaceholder')}
-                  onOpenChange={handleSupplierOpenChange}
-                />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={8} xl={4}>
-              <Form.Item name="orderNo" label={t('storeOrders.importPriceVariance.orderNo')}>
-                <Input allowClear placeholder={t('storeOrders.importPriceVariance.orderNoPlaceholder')} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12} xl={6}>
-              <Form.Item name="orderDateRange" label={t('storeOrders.importPriceVariance.orderDateRange')}>
-                <RangePicker style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12} xl={4}>
-              <Form.Item name="varianceDirection" label={t('storeOrders.importPriceVariance.varianceDirection')}>
-                <Select
-                  options={[
-                    { value: 'all', label: t('storeOrders.importPriceVariance.directionAll') },
-                    { value: 'increase', label: t('storeOrders.importPriceVariance.directionIncrease') },
-                    { value: 'decrease', label: t('storeOrders.importPriceVariance.directionDecrease') },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Space>
-            <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>
-              {t('common.search')}
-            </Button>
-            <Button onClick={handleReset} icon={<ReloadOutlined />}>
-              {t('common.reset')}
-            </Button>
-          </Space>
-        </Form>
-      </Card>
+  // 下拉选项按需加载；从供应商排行点选时选项可能还没加载，补一个当前值的选项避免只显示编码。
+  const supplierSelectOptions = useMemo(() => {
+    const code = filterValues.supplierCode
+    if (!code || supplierOptions.some((option) => option.value === code)) {
+      return supplierOptions
+    }
+    const known = supplierRows.find((row) => row.supplierCode === code)
+    return [{ value: code, label: `${code} - ${known?.supplierName || code}` }, ...supplierOptions]
+  }, [filterValues.supplierCode, supplierOptions, supplierRows])
 
-      <Row gutter={16} style={{ marginTop: 16 }}>
-        <Col xs={24} md={8}>
-          <Card>
-            <Statistic
-              title={t('storeOrders.importPriceVariance.originalImportAmountTotal')}
-              value={formatMoney(summary.originalImportAmountTotal)}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card>
-            <Statistic
-              title={t('storeOrders.importPriceVariance.baselineImportAmountTotal')}
-              value={formatMoney(summary.baselineImportAmountTotal)}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card>
-            <Statistic
-              title={t('storeOrders.importPriceVariance.varianceAmountTotal')}
-              value={formatMoney(summary.varianceAmountTotal)}
-              valueStyle={{
-                color:
-                  summary.varianceAmountTotal > 0
-                    ? '#cf1322'
-                    : summary.varianceAmountTotal < 0
-                      ? '#389e0d'
-                      : undefined,
-              }}
-            />
-          </Card>
-        </Col>
-      </Row>
+  const directionLabel = (direction: StoreOrderImportPriceVarianceDirection) =>
+    direction === 'increase'
+      ? t('storeOrders.importPriceVariance.directionIncrease')
+      : t('storeOrders.importPriceVariance.directionDecrease')
 
-      <Card
-        title={t('storeOrders.importPriceVariance.supplierVarianceRankingTitle')}
-        style={{
-          marginTop: 16,
-          maxHeight: 'calc(100vh - 32px)',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-        styles={{
-          body: {
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden',
+  // 已生效条件：逐个可移除，「清空全部」回到初始条件（排序与分页大小保持不变）。
+  const activeFilterItems: ActiveFilterItem[] = []
+  if (filters.keyword) {
+    activeFilterItems.push({
+      key: 'keyword',
+      label: t('storeOrders.importPriceVariance.keyword'),
+      value: filters.keyword,
+      source: 'toolbar',
+      onRemove: () => updateFilterValues({ keyword: undefined }, 'immediate'),
+    })
+  }
+  if (filters.startDate || filters.endDate) {
+    activeFilterItems.push({
+      key: 'orderDate',
+      label: t('storeOrders.importPriceVariance.orderDate'),
+      value: `${filters.startDate ?? '…'} ~ ${filters.endDate ?? '…'}`,
+      source: 'toolbar',
+      onRemove: () => updateFilterValues({ orderDateRange: null }, 'immediate'),
+    })
+  }
+  if (filters.supplierCode) {
+    activeFilterItems.push({
+      key: 'supplierCode',
+      label: t('storeOrders.importPriceVariance.domesticSupplier'),
+      value: supplierSelectOptions.find((option) => option.value === filters.supplierCode)?.label ?? filters.supplierCode,
+      source: 'toolbar',
+      onRemove: () => updateFilterValues({ supplierCode: undefined }, 'immediate'),
+    })
+  }
+  if (filters.varianceDirection !== 'all') {
+    activeFilterItems.push({
+      key: 'varianceDirection',
+      label: t('storeOrders.importPriceVariance.varianceDirection'),
+      value: directionLabel(filters.varianceDirection),
+      source: 'toolbar',
+      onRemove: () => updateFilterValues({ varianceDirection: 'all' }, 'immediate'),
+    })
+  }
+  if (filters.storeCode) {
+    activeFilterItems.push({
+      key: 'storeCode',
+      label: t('warehouseUi.priceVariance.storeCodeLabel'),
+      value: filters.storeCode,
+      source: 'toolbar',
+      onRemove: () => updateFilterValues({ storeCode: undefined }, 'immediate'),
+    })
+  }
+  if (filters.orderNo) {
+    activeFilterItems.push({
+      key: 'orderNo',
+      label: t('storeOrders.importPriceVariance.orderNo'),
+      value: filters.orderNo,
+      source: 'toolbar',
+      onRemove: () => updateFilterValues({ orderNo: undefined }, 'immediate'),
+    })
+  }
+  const moreFilterCount = [filters.storeCode, filters.orderNo].filter(Boolean).length
+
+  // 汇总条：明细行 / 多收 / 少收来自供应商汇总，只有核对出是全量时才显示这几格。
+  const supplierTotals = summarizeSupplierTotals(summary, supplierSummaries)
+  const metrics: Array<{ key: string; label: string; value: string; tone?: 'over' | 'under' | 'none' }> = [
+    ...(supplierTotals
+      ? [{ key: 'detailRows', label: t('warehouseUi.priceVariance.metricDetailRows'), value: formatQuantity(supplierTotals.detailRows) }]
+      : []),
+    { key: 'original', label: t('storeOrders.importPriceVariance.originalImportAmountTotal'), value: formatAmount(summary.originalImportAmountTotal) },
+    { key: 'baseline', label: t('storeOrders.importPriceVariance.baselineImportAmountTotal'), value: formatAmount(summary.baselineImportAmountTotal) },
+    ...(supplierTotals
+      ? [
+          {
+            key: 'increase',
+            label: t('storeOrders.importPriceVariance.increaseVarianceAmountTotal'),
+            value: formatSignedAmount(supplierTotals.increaseTotal),
+            tone: 'over' as const,
           },
-        }}
-      >
-        <div ref={supplierSummaryRegionRef} style={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
-          <MeasuredTable<StoreOrderImportPriceVarianceSupplierSummary> metricId="warehouse.store-order-import-price-variance.table-1"
-            rowKey={getSupplierSummaryRowKey}
-            loading={loading}
-            columns={supplierSummaryColumns}
-            dataSource={supplierSummaries}
-            size="small"
-            scroll={{ x: 1120, y: supplierSummaryTableScrollY }}
-            locale={{
-              emptyText: <Empty description={t('storeOrders.importPriceVariance.noSupplierVarianceData')} />,
-            }}
-            pagination={{
-              defaultPageSize: 50,
-              pageSizeOptions: [20, 50, 100],
-              showSizeChanger: true,
-              showTotal: (value) => t('storeOrders.importPriceVariance.totalSuppliers', { total: value }),
+          {
+            key: 'decrease',
+            label: t('storeOrders.importPriceVariance.decreaseVarianceAmountTotal'),
+            value: formatSignedAmount(-supplierTotals.decreaseTotal),
+            tone: 'under' as const,
+          },
+        ]
+      : []),
+    {
+      key: 'net',
+      label: t('warehouseUi.priceVariance.metricNet'),
+      value: formatSignedAmount(summary.varianceAmountTotal),
+      tone: getVarianceTone(summary.varianceAmountTotal),
+    },
+  ]
+
+  const varianceStatisticStyle = (value: number) => {
+    const tone = getVarianceTone(value)
+    return { color: tone === 'none' ? undefined : VARIANCE_TONE_COLORS[tone] }
+  }
+
+  return (
+    <PageContainer
+      compact
+      title={t('menu.storeOrderImportPriceVariance')}
+      extra={
+        <p className="wh-pv-formula">
+          <InfoCircleOutlined className="wh-pv-formula-icon" />
+          <span>
+            <Trans
+              i18nKey="warehouseUi.priceVariance.formula"
+              components={{ over: <strong className="wh-pv-tone-over" />, under: <strong className="wh-pv-tone-under" /> }}
+            />
+          </span>
+        </p>
+      }
+    >
+      <section className="wh-pv-toolbar">
+        <div className="list-toolbar-filter-row">
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            className="wh-pv-search"
+            placeholder={t('warehouseUi.priceVariance.searchPlaceholder')}
+            aria-label={t('storeOrders.importPriceVariance.keyword')}
+            value={filterValues.keyword ?? ''}
+            onChange={(event) => updateFilterValues({ keyword: event.target.value }, 'debounced')}
+          />
+          <RangePicker
+            prefix={<span className="wh-pv-field-prefix">{t('storeOrders.importPriceVariance.orderDate')}</span>}
+            value={filterValues.orderDateRange}
+            onChange={(value) => updateFilterValues({ orderDateRange: value }, 'immediate')}
+          />
+          <DomesticSupplierFilterSelect
+            value={filterValues.supplierCode}
+            loading={supplierLoading}
+            options={supplierSelectOptions}
+            prefix={t('storeOrders.importPriceVariance.domesticSupplier')}
+            placeholder={t('storeOrders.importPriceVariance.directionAll')}
+            style={{ width: 220 }}
+            onChange={(value) => updateFilterValues({ supplierCode: value }, 'immediate')}
+            onOpenChange={handleSupplierOpenChange}
+          />
+          <Segmented<StoreOrderImportPriceVarianceDirection>
+            aria-label={t('storeOrders.importPriceVariance.varianceDirection')}
+            value={filterValues.varianceDirection ?? 'all'}
+            onChange={(value) => updateFilterValues({ varianceDirection: value }, 'immediate')}
+            options={[
+              { value: 'all', label: t('storeOrders.importPriceVariance.directionAll') },
+              { value: 'increase', label: t('storeOrders.importPriceVariance.directionIncrease') },
+              { value: 'decrease', label: t('storeOrders.importPriceVariance.directionDecrease') },
+            ]}
+          />
+          {/* 分店编码（精确匹配）与订单号（只匹配订单号）是低频条件，收进「更多筛选」，保留原有能力。 */}
+          <MoreFiltersButton activeCount={moreFilterCount}>
+            <label className="wh-pv-more-field">
+              <span>{t('warehouseUi.priceVariance.storeCodeLabel')}</span>
+              <Input
+                allowClear
+                placeholder={t('storeOrders.importPriceVariance.storeCodePlaceholder')}
+                value={filterValues.storeCode ?? ''}
+                onChange={(event) => updateFilterValues({ storeCode: event.target.value }, 'debounced')}
+              />
+              <span className="wh-pv-muted wh-pv-small">{t('warehouseUi.priceVariance.storeCodeHint')}</span>
+            </label>
+            <label className="wh-pv-more-field">
+              <span>{t('storeOrders.importPriceVariance.orderNo')}</span>
+              <Input
+                allowClear
+                placeholder={t('storeOrders.importPriceVariance.orderNoPlaceholder')}
+                value={filterValues.orderNo ?? ''}
+                onChange={(event) => updateFilterValues({ orderNo: event.target.value }, 'debounced')}
+              />
+              <span className="wh-pv-muted wh-pv-small">{t('warehouseUi.priceVariance.orderNoHint')}</span>
+            </label>
+          </MoreFiltersButton>
+          <span className="list-toolbar-filter-spacer" />
+          <Tooltip title={t('common.refresh')}>
+            <Button icon={<ReloadOutlined />} aria-label={t('common.refresh')} onClick={() => void loadData()} />
+          </Tooltip>
+        </div>
+        {activeFilterItems.length ? (
+          <ActiveFilterBar
+            items={activeFilterItems}
+            onClearAll={() => {
+              filterValuesRef.current = INITIAL_FILTER_VALUES
+              updateFilterValues({}, 'immediate')
             }}
           />
-        </div>
-      </Card>
+        ) : null}
+      </section>
 
-      <Card
-        style={{
-          marginTop: 16,
-          height: 'calc(100vh - 32px)',
-          minHeight: 0,
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-        styles={{
-          body: {
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          },
-        }}
-      >
-        {selectedRowKeys.length > 0 && (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: '8px 12px',
-              background: '#fafafa',
-              border: '1px solid #f0f0f0',
-              borderRadius: 4,
-            }}
+      <div className="wh-pv-metrics" role="group" aria-label={t('warehouseUi.priceVariance.metricsLabel')}>
+        {metrics.map((metric) => (
+          <div key={metric.key} className="wh-pv-metric">
+            <span className="wh-pv-metric-label">{metric.label}</span>
+            <span className={`wh-pv-metric-value wh-pv-tone-${metric.tone ?? 'none'}`}>{metric.value}</span>
+          </div>
+        ))}
+      </div>
+
+      <section className="wh-pv-card" aria-label={t('warehouseUi.priceVariance.supplierTitle')}>
+        <div className="wh-pv-card-head">
+          <h2 className="wh-pv-card-title">{t('warehouseUi.priceVariance.supplierTitle')}</h2>
+          <span className="wh-pv-muted wh-pv-small">{t('warehouseUi.priceVariance.supplierHint')}</span>
+          <span className="wh-pv-spacer" />
+          <span className="wh-pv-muted wh-pv-small wh-pv-number">
+            {supplierSort
+              ? t('warehouseUi.priceVariance.supplierCount', { count: sortedSupplierRows.length })
+              : t('warehouseUi.priceVariance.supplierDefaultSort', { count: sortedSupplierRows.length })}
+          </span>
+        </div>
+        <MeasuredTable<StoreOrderImportPriceVarianceSupplierSummary> metricId="warehouse.store-order-import-price-variance.table-1"
+          className="wh-pv-table wh-pv-supplier-table"
+          rowKey={getSupplierRowKey}
+          loading={loading}
+          columns={supplierSummaryColumns}
+          dataSource={visibleSupplierRows}
+          size="small"
+          scroll={{ x: 860 }}
+          pagination={false}
+          onChange={handleSupplierTableChange}
+          rowClassName={(row) =>
+            row.supplierCode
+              ? `wh-pv-supplier-row${row.supplierCode === filters.supplierCode ? ' is-selected' : ''}`
+              : ''
+          }
+          onRow={(row) => ({ onClick: () => toggleSupplierFilter(row) })}
+          locale={{
+            emptyText: <Empty description={t('storeOrders.importPriceVariance.noSupplierVarianceData')} />,
+          }}
+        />
+        {sortedSupplierRows.length > SUPPLIER_PREVIEW_COUNT ? (
+          <div className="wh-pv-card-foot">
+            <Button type="link" size="small" className="wh-pv-expand" onClick={() => setSupplierExpanded((current) => !current)}>
+              {supplierExpanded
+                ? t('warehouseUi.priceVariance.supplierCollapse')
+                : t('warehouseUi.priceVariance.supplierExpandAll', { count: sortedSupplierRows.length })}
+            </Button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="wh-pv-card" aria-label={t('warehouseUi.priceVariance.productsTitle')}>
+        <div className="wh-pv-card-head">
+          <h2 className="wh-pv-card-title">{t('warehouseUi.priceVariance.productsTitle')}</h2>
+          <span className="wh-pv-muted wh-pv-small wh-pv-number">
+            {t('warehouseUi.priceVariance.productsCount', { count: total })}
+          </span>
+          <span className="wh-pv-spacer" />
+          <span className="wh-pv-edit-hint">
+            <EditOutlined />
+            {t('warehouseUi.priceVariance.editHint')}
+          </span>
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <Checkbox.Group<OptionalColumnKey>
+                className="wh-pv-column-settings"
+                value={optionalColumns}
+                onChange={(value) => setOptionalColumns(value)}
+                options={[
+                  { value: 'unitVolume', label: t('storeOrders.importPriceVariance.unitVolume') },
+                  { value: 'packingQuantity', label: t('storeOrders.importPriceVariance.packingQuantity') },
+                ]}
+              />
+            }
           >
-            <Space wrap>
-              <Typography.Text>
-                {t('storeOrders.importPriceVariance.selectedProducts', { count: selectedRowKeys.length })}
-              </Typography.Text>
+            <Button size="small" icon={<SettingOutlined />}>
+              {t('common.listToolbar.columnSettings')}
+            </Button>
+          </Popover>
+        </div>
+        {selectedRowKeys.length > 0 ? (
+          <div className="wh-pv-selection">
+            <SelectionActionBar selectedCount={selectedRowKeys.length} onClearSelection={() => setSelectedRowKeys([])}>
               <Button
-                type="primary"
                 size="small"
                 icon={<DollarOutlined />}
                 loading={batchWarehouseImportPriceSaving}
                 disabled={batchWarehouseImportPriceSaving}
                 onClick={openBatchWarehouseImportPriceModal}
               >
-                {t('storeOrders.importPriceVariance.batchWarehouseImportPrice')}
+                {t('warehouseUi.priceVariance.batchButton')}
               </Button>
-              <Button size="small" onClick={() => setSelectedRowKeys([])}>
-                {t('storeOrders.importPriceVariance.cancelSelection')}
-              </Button>
-            </Space>
+            </SelectionActionBar>
           </div>
-        )}
-        <div ref={tableRegionRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <MeasuredTable<StoreOrderImportPriceVarianceItem> metricId="warehouse.store-order-import-price-variance.table-2"
-            rowKey={getRowKey}
-            loading={loading}
-            columns={productColumns}
-            dataSource={items}
-            rowSelection={{
-              fixed: true,
-              columnWidth: 48,
-              selectedRowKeys,
-              preserveSelectedRowKeys: true,
-              onChange: setSelectedRowKeys,
-              getCheckboxProps: (row) => ({ disabled: !row.productCode }),
-            }}
-            scroll={{ x: 2000, y: tableScrollY }}
-            onChange={handleTableChange}
-            pagination={{
-              current: pageNumber,
-              pageSize,
-              total,
-              showSizeChanger: true,
-              showTotal: (value) => t('storeOrders.importPriceVariance.totalRows', { total: value }),
-            }}
-          />
-        </div>
-      </Card>
+        ) : null}
+        <MeasuredTable<StoreOrderImportPriceVarianceItem> metricId="warehouse.store-order-import-price-variance.table-2"
+          className="wh-pv-table wh-pv-product-table"
+          rowKey={getRowKey}
+          loading={loading}
+          columns={productColumns}
+          dataSource={items}
+          rowSelection={{
+            fixed: true,
+            columnWidth: 44,
+            selectedRowKeys,
+            preserveSelectedRowKeys: true,
+            onChange: setSelectedRowKeys,
+            getCheckboxProps: (row) => ({ disabled: !row.productCode }),
+          }}
+          rowClassName={(row) => (selectedRowKeys.includes(getRowKey(row)) ? 'wh-pv-row-selected' : '')}
+          // 默认列宽合计约 1096px（含勾选列），1440 宽屏下不出横向滚动；列设置里每打开一个可选列再加 96px。
+          scroll={{ x: PRODUCT_TABLE_BASE_WIDTH + optionalColumns.length * PRODUCT_OPTIONAL_COLUMN_WIDTH }}
+          onChange={handleTableChange}
+          pagination={{
+            current: pageNumber,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (value) => t('warehouseUi.priceVariance.productsCount', { count: value }),
+          }}
+        />
+      </section>
 
       <Modal
         open={batchWarehouseImportPriceOpen}
-        title={t('storeOrders.importPriceVariance.batchWarehouseImportPriceTitle', {
+        title={t('warehouseUi.priceVariance.batchTitle', {
           count: selectedRowKeys.length,
         })}
         okText={t('common.save')}
@@ -1493,13 +1731,13 @@ export default function StoreOrderImportPriceVariancePage() {
       >
         <Form form={batchWarehouseImportPriceForm} layout="vertical" preserve={false}>
           <Typography.Paragraph type="secondary">
-            {t('storeOrders.importPriceVariance.batchWarehouseImportPriceHint', {
+            {t('warehouseUi.priceVariance.batchHint', {
               count: selectedRowKeys.length,
             })}
           </Typography.Paragraph>
           <Form.Item
             name="warehouseImportPrice"
-            label={t('storeOrders.importPriceVariance.warehouseImportPrice')}
+            label={t('warehouseUi.priceVariance.colWarehousePrice')}
             rules={[
               {
                 required: true,
@@ -1516,8 +1754,9 @@ export default function StoreOrderImportPriceVariancePage() {
               min={0}
               precision={2}
               autoFocus
+              prefix="$"
               style={{ width: '100%' }}
-              placeholder={t('storeOrders.importPriceVariance.batchWarehouseImportPricePlaceholder')}
+              placeholder={t('warehouseUi.priceVariance.batchPlaceholder')}
             />
           </Form.Item>
         </Form>
@@ -1550,14 +1789,7 @@ export default function StoreOrderImportPriceVariancePage() {
             <Statistic
               title={t('storeOrders.importPriceVariance.varianceAmountTotal')}
               value={formatMoney(detailSummary.varianceAmountTotal)}
-              valueStyle={{
-                color:
-                  detailSummary.varianceAmountTotal > 0
-                    ? '#cf1322'
-                    : detailSummary.varianceAmountTotal < 0
-                      ? '#389e0d'
-                      : undefined,
-              }}
+              valueStyle={varianceStatisticStyle(detailSummary.varianceAmountTotal)}
             />
           </Col>
         </Row>

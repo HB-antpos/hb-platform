@@ -53,26 +53,35 @@ async function main() {
   })
   if (pushToHbSalesFailure) failures.push(pushToHbSalesFailure)
 
-  const inlineStatusFailure = await runTest('状态列应支持行内四态下拉更新', () => {
+  // 重设计：行内下拉「一改就保存」改为「⋯」菜单选目标状态 + 二次确认，权限与回滚逻辑不变。
+  const inlineStatusFailure = await runTest('改状态应在 ⋯ 菜单里选择并二次确认后保存', () => {
     assert(
       pageSource.includes('handleContainerStatusChange') &&
       pageSource.includes('updateContainer(record.hguid') &&
       pageSource.includes('{ 状态: nextStatus }'),
-      '页面应通过行内 handler 调用 updateContainer 更新当前货柜状态',
+      '页面应通过行级 handler 调用 updateContainer 更新当前货柜状态',
     )
 
     assert(
-      pageSource.includes('containerStatusOptions') &&
-      pageSource.includes('statusUpdatingKeys') &&
-      pageSource.includes('onChange={(nextStatus) => void handleContainerStatusChange(record, nextStatus)}'),
-      '状态列应使用四态下拉，并在行级更新中禁用当前状态控件',
+      pageSource.includes('access.canEditContainer && Boolean(record.hguid) && record.状态 != null && Boolean(containerStatusMeta[record.状态])'),
+      '改状态入口应保留原权限与可改条件（有编辑权限、有 GUID、状态已知）',
     )
 
+    const confirmStart = pageSource.indexOf('const confirmContainerStatusChange = (record: ContainerMain, nextStatus: number) => {')
+    assert(confirmStart >= 0, '缺少改状态确认函数')
+    const confirmSection = pageSource.slice(confirmStart, pageSource.indexOf('const handleStatusTabChange', confirmStart))
     assert(
-      pageSource.includes('CONTAINER_STATUS_SELECT_WIDTH') &&
-      pageSource.includes('style={{ width: CONTAINER_STATUS_SELECT_WIDTH }}') &&
-      pageSource.includes('popupMatchSelectWidth={CONTAINER_STATUS_SELECT_WIDTH}'),
-      '状态列下拉选择框和弹出层应使用同一宽度，避免控件大小不匹配',
+      confirmSection.includes('Modal.confirm({') && confirmSection.includes('onOk: () => handleContainerStatusChange(record, nextStatus)'),
+      '改状态应先二次确认，确认后才调用保存',
+    )
+    assert(
+      pageSource.includes('.filter((value) => value !== record.状态)') &&
+      pageSource.includes('onClick: ({ key }) => confirmContainerStatusChange(record, Number(String(key).split(\':\')[1]))'),
+      '菜单只列出与当前不同的目标状态，点击后进入确认',
+    )
+    assert(
+      pageSource.includes('disabled={statusUpdatingKeys.includes(recordKey)}'),
+      '行级更新进行中应禁用该行的改状态菜单',
     )
 
     assert(
@@ -83,33 +92,21 @@ async function main() {
   })
   if (inlineStatusFailure) failures.push(inlineStatusFailure)
 
-  const weekDateColorFailure = await runTest('三列日期应按同年同 ISO 周使用一致颜色', () => {
+  // 重设计：日期不再按周号哈希上色（颜色只表示状态），周号改为小字显示，由 containersLogic 按 ISO 周计算。
+  const weekDateColorFailure = await runTest('日期按 ISO 周显示周号且不再按值上色', () => {
+    const logicSource = readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/Containers/containersLogic.ts'), 'utf8')
     assert(
-      pageSource.includes("import isoWeek from 'dayjs/plugin/isoWeek'") &&
-        pageSource.includes('dayjs.extend(isoWeek)'),
-      '页面应启用 dayjs isoWeek 插件，按 ISO 周计算同年同周',
+      logicSource.includes("import isoWeek from 'dayjs/plugin/isoWeek'") && logicSource.includes('dayjs.extend(isoWeek)'),
+      '周号计算应启用 dayjs isoWeek 插件（周一为周首、跨年按 ISO week-year）',
     )
-
+    for (const removed of ['containerDateWeekColors', 'getContainerDateWeekColor', 'renderContainerWeekDate']) {
+      assert(!pageSource.includes(removed), `日期不应再按周哈希上色：${removed}`)
+    }
     assert(
-      pageSource.includes('containerDateWeekColors') &&
-        pageSource.includes('getContainerDateWeekKey') &&
-        pageSource.includes('renderContainerWeekDate'),
-      '页面应提供日期周 key、稳定调色板和周日期渲染 helper',
+      pageSource.includes('getIsoWeekNumber(date)') && pageSource.includes('describeEtaHint(record, today)'),
+      '装柜日期显示周号，预计到岸显示到岸提示或周号',
     )
-
-    assert(
-      pageSource.includes("return `${date.isoWeekYear()}-W${String(date.isoWeek()).padStart(2, '0')}`"),
-      '日期周 key 应同时包含 ISO week-year 和两位 week，避免跨年同周混色',
-    )
-
-    const weekDateRenderCount = pageSource.split('render: renderContainerWeekDate').length - 1
-    assertEqual(weekDateRenderCount, 3, '装柜日期、预计到岸日期、实际到货日期三列都应使用同周配色渲染')
-
-    assert(
-      pageSource.includes("if (!value) return '--'") &&
-        pageSource.includes('if (!weekKey) return formatDate(value)'),
-      '空日期应继续显示 --，无效日期应保留普通日期格式兜底',
-    )
+    assertEqual(pageSource.split('formatContainerDate(value)').length - 1 >= 3, true, '三列日期都应走统一的日期格式化')
   })
   if (weekDateColorFailure) failures.push(weekDateColorFailure)
 

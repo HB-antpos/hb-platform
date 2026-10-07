@@ -136,11 +136,21 @@ export function parseComparableFilterTokens(values?: string[]) {
   return { mode: 'eq' as ComparableFilterMode, value: normalizedValues[0] ?? '', min: '', max: '' };
 }
 
+// AntD onChange 的 filters 以列 key 为键；列 key 与后端 Filters 键不同的列在这里映射。
+// 「商品」组合列的列头筛选沿用货号筛选，「供应商」组合列沿用国内供应商筛选。
+const TABLE_FILTER_KEY_MAP: Record<string, string> = {
+  name: 'productName',
+  labelPrice: 'oemPrice',
+  product: 'itemNumber',
+  supplier: 'domesticSupplierCode',
+};
+
+export function toWarehouseProductFilterKey(columnKey: string) {
+  return TABLE_FILTER_KEY_MAP[columnKey] ?? columnKey;
+}
+
 export function normalizeTableFilters(filters: WarehouseProductTableFilters): WarehouseProductColumnFilters {
-  const filterKeyMap: Record<string, string> = {
-    name: 'productName',
-    labelPrice: 'oemPrice',
-  };
+  const filterKeyMap: Record<string, string> = TABLE_FILTER_KEY_MAP;
   return Object.entries(filters).reduce<WarehouseProductColumnFilters>((current, [key, value]) => {
     if (key === 'categoryName' || !value?.length) {
       return current;
@@ -149,6 +159,22 @@ export function normalizeTableFilters(filters: WarehouseProductTableFilters): Wa
     const normalizedValues = value.map((item) => String(item).trim());
     return setFilterValues(current, mappedFilterKey, normalizedValues);
   }, {});
+}
+
+/**
+ * AntD 只把当前渲染列的筛选放进 onChange 的 filters。被「列设置」隐藏的列（或只在顶部工具栏设置、
+ * 列头不可见的条件）不在其中，必须沿用原值，不能因为翻页、排序或改其他列头筛选被静默清掉。
+ */
+export function keepHiddenColumnFilters(
+  renderedFilters: WarehouseProductColumnFilters,
+  tableFilters: WarehouseProductTableFilters,
+  currentFilters: WarehouseProductColumnFilters,
+): WarehouseProductColumnFilters {
+  const renderedFilterKeys = new Set(Object.keys(tableFilters).map(toWarehouseProductFilterKey));
+  return Object.entries(currentFilters).reduce<WarehouseProductColumnFilters>(
+    (merged, [key, values]) => (renderedFilterKeys.has(key) ? merged : setFilterValues(merged, key, values)),
+    renderedFilters,
+  );
 }
 
 export function normalizeWarehouseProductSortField(field: unknown, fallback: string) {
@@ -160,7 +186,17 @@ export function normalizeWarehouseProductSortField(field: unknown, fallback: str
   return field === 'labelPrice' ? 'oemPrice' : field;
 }
 
-export function resolveCategoryFilterValueFromTableFilters(filters: WarehouseProductTableFilters) {
+/**
+ * 分类列头值 → 分类筛选值。分类列被「列设置」隐藏时 filters 里没有 categoryName，
+ * 此时沿用当前分类（左侧分类面板选中的值），不能回退成全部商品。
+ */
+export function resolveCategoryFilterValueFromTableFilters(
+  filters: WarehouseProductTableFilters,
+  currentValue: string = ALL_PRODUCTS_FILTER_KEY,
+) {
+  if (!('categoryName' in filters)) {
+    return currentValue;
+  }
   const categoryValues = filters.categoryName?.map((value) => String(value).trim()).filter(Boolean) ?? [];
   return categoryValues[0] || ALL_PRODUCTS_FILTER_KEY;
 }

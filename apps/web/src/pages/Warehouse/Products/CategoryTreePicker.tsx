@@ -23,7 +23,7 @@ interface FilterResult {
   expandedKeys: string[]
 }
 
-function normalizeSearchText(value: string) {
+export function normalizeSearchText(value: string) {
   return value.trim().toLowerCase()
 }
 
@@ -42,7 +42,8 @@ function buildSearchText(
   return fullPath.toLowerCase()
 }
 
-function filterCategoryTree(
+/** 按名称与父级路径搜索分类树；仓库商品页左侧分类面板也复用它，搜索语义保持一致。 */
+export function filterCategoryTree(
   nodes: WarehouseCategoryNode[],
   keyword: string,
   language: string | undefined,

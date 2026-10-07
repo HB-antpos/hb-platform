@@ -1,0 +1,42 @@
+{
+  "warehouseUi": {
+    "priceVariance": {
+      "formula": "Baseline = the import price on the product's earliest valid container. Variance = shipped qty × (order import price − first container price): <over>positive means overcharged</over>, <under>negative means undercharged</under>. Prices more than 10× apart are treated as anomalies and excluded.",
+      "searchPlaceholder": "Order no., item no., product, store or supplier",
+      "storeCodeLabel": "Store code",
+      "storeCodeHint": "Exact store code match",
+      "orderNoHint": "Matches order numbers only",
+      "metricsLabel": "Summary",
+      "metricDetailRows": "Detail Lines",
+      "metricNet": "Net Variance",
+      "supplierTitle": "By domestic supplier",
+      "supplierHint": "Click a supplier to filter the products below; click again to clear",
+      "supplierDefaultSort": "Sorted by absolute net variance · {{count}} in total",
+      "supplierCount": "{{count}} in total",
+      "supplierExpandAll": "Show all {{count}} suppliers",
+      "supplierCollapse": "Show fewer",
+      "supplierSelectAria": "Filter products by {{name}}",
+      "colProducts": "Products",
+      "colDetails": "Lines",
+      "colNet": "Net Variance",
+      "productsTitle": "Products",
+      "productsCount": "{{count}} products",
+      "editHint": "Dashed prices are editable: Enter to save · Esc to cancel · ↑↓ to save and move",
+      "colProduct": "Product",
+      "colDomesticPrice": "Domestic Price",
+      "colWarehousePrice": "Warehouse Import Price",
+      "colQuantity": "Shipped Qty",
+      "colAmounts": "Original / Baseline",
+      "baselineLine": "Baseline {{amount}}",
+      "colVariance": "Variance",
+      "colVarianceDefault": "Variance (Absolute)",
+      "defaultSortHint": "Sorted by absolute variance, largest first. Click the header to sort by signed variance.",
+      "detailLink": "{{count}} lines",
+      "editPriceAria": "Edit {{field}} for {{item}}",
+      "batchButton": "Set warehouse import price",
+      "batchTitle": "Set warehouse import price ({{count}} products)",
+      "batchHint": "The warehouse import price of the {{count}} selected products will be set to the price below.",
+      "batchPlaceholder": "Enter the new warehouse import price"
+    }
+  }
+}

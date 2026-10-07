@@ -1,0 +1,29 @@
+{
+  "warehouseUi": {
+    "products": {
+      "priceAndSync": "价格与同步",
+      "totalCount": "共 {{total}} 个",
+      "statusTabsLabel": "商品状态",
+      "categoryPanelTitle": "分类",
+      "categorySearchPlaceholder": "搜索分类",
+      "categorySearchEmpty": "没有匹配的分类",
+      "allProducts": "全部商品",
+      "uncategorized": "未分类",
+      "typePrefix": "类型",
+      "allAustralianSuppliers": "全部澳洲供应商",
+      "columnSettingsTitle": "显示更多列",
+      "columnSettingsDragHint": "拖动表头可调整列顺序",
+      "columnProduct": "商品",
+      "supplierAustralia": "澳洲",
+      "locationUnbound": "未绑定",
+      "middlePack": "中包 {{count}}",
+      "retailPriceMissing": "缺零售价",
+      "rowEditAria": "编辑 {{code}}",
+      "rowMoreAria": "更多操作：{{code}}",
+      "activate": "上架",
+      "deactivate": "下架…",
+      "selectionSetCategory": "改分类",
+      "pushToHq": "发送到 HQ"
+    }
+  }
+}

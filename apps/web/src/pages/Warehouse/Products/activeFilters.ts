@@ -10,8 +10,9 @@ import {
 /**
  * 顶部筛选栏会把这些条件同步镜像写入 columnFilters（与列头筛选共用一份 state），
  * 已生效筛选条里它们只显示一次，并以「顶部筛选栏」身份展示。
+ * 状态由状态页签控制；澳洲供应商在「更多筛选」里设置，也可在澳洲供应商列头设置。
  */
-export const TOOLBAR_MIRRORED_FILTER_KEYS = ['domesticSupplierCode', 'isActive', 'productType'] as const;
+export const TOOLBAR_MIRRORED_FILTER_KEYS = ['domesticSupplierCode', 'isActive', 'productType', 'localSupplierCode'] as const;
 export type ToolbarMirroredFilterKey = (typeof TOOLBAR_MIRRORED_FILTER_KEYS)[number];
 
 export const ACTIVE_FILTER_SEARCH_KEY = 'searchText';
@@ -100,17 +101,20 @@ function resolveMirroredValues(key: ToolbarMirroredFilterKey, query: ActiveFilte
   if (fromFilters.length) {
     return fromFilters;
   }
+  // 澳洲供应商没有顶层查询字段，只存在于 filters。
   const topLevel = key === 'domesticSupplierCode'
     ? query.supplierCode
     : key === 'productType'
       ? query.productType
-      : query.isActive;
+      : key === 'isActive'
+        ? query.isActive
+        : undefined;
   return topLevel === undefined || topLevel === null || String(topLevel).trim() === '' ? [] : [String(topLevel)];
 }
 
 /**
  * 条件 → 已生效标签：只依据「实际发出的查询」生成，保证标签与表格数据一致。
- * 顺序：关键词、国内供应商、分类、状态、商品类型，其后是其余列头筛选。
+ * 顺序：关键词、国内供应商、分类、状态、商品类型、澳洲供应商，其后是其余列头筛选。
  */
 export function buildActiveFilterChips(input: BuildActiveFilterChipsInput): ActiveFilterChip[] {
   const { query, labels, columns, categoryLabel, textModeLabels } = input;
@@ -145,6 +149,7 @@ export function buildActiveFilterChips(input: BuildActiveFilterChipsInput): Acti
   }
   pushMirrored('isActive');
   pushMirrored('productType');
+  pushMirrored('localSupplierCode');
 
   const filters = query.filters ?? {};
   // 先按列定义顺序，再补上未登记列元数据的键，避免有条件生效却不显示。
@@ -187,6 +192,9 @@ export function buildActiveFilterRemovalOverrides(
   }
   if (chipKey === 'isActive') {
     return { page: 1, isActive: undefined, filters: setFilterValues(filters, chipKey, undefined) };
+  }
+  if (chipKey === 'localSupplierCode') {
+    return { page: 1, filters: setFilterValues(filters, chipKey, undefined) };
   }
   if (chipKey.startsWith(COLUMN_CHIP_PREFIX)) {
     return { page: 1, filters: setFilterValues(filters, chipKey.slice(COLUMN_CHIP_PREFIX.length), undefined) };

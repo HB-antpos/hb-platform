@@ -1,0 +1,36 @@
+{
+  "warehouseUi": {
+    "categories": {
+      "subtitle": "{{top}} top-level · {{total}} categories",
+      "treeRegion": "Category tree",
+      "treeSearchPlaceholder": "Search category or Chinese name",
+      "refreshTree": "Refresh category tree",
+      "allProducts": "All products",
+      "uncategorizedProducts": "Uncategorized products",
+      "noTreeMatch": "No matching categories",
+      "currentRegion": "Selected category",
+      "topLevel": "Top-level category",
+      "childCount": "Subcategories",
+      "remarks": "Notes: {{text}}",
+      "allProductsHint": "Every product in the warehouse. Check products, then pick a target category above the list to move them in bulk.",
+      "uncategorizedHint": "Products without a warehouse category yet. Check them and move them to a target category to file them.",
+      "addChild": "Add subcategory",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteDisabledHasChildren": "This category still has subcategories. Delete or move them first.",
+      "productsRegion": "Products in category",
+      "productSearchPlaceholder": "Item no. / product name",
+      "supplierPlaceholder": "All domestic suppliers",
+      "totalCount": "{{count}} total",
+      "paginationTotal": "{{count}} total · selection kept across pages",
+      "refreshProducts": "Refresh product list",
+      "moveTo": "Move to",
+      "moveTargetPlaceholder": "Choose target category",
+      "moveCount": "Move {{count}}",
+      "columnProduct": "Product",
+      "columnSupplier": "Domestic supplier",
+      "columnCategory": "Current category",
+      "columnStatus": "Status"
+    }
+  }
+}

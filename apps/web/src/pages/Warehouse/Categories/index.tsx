@@ -1,6 +1,7 @@
 import {
   DeleteOutlined,
   EditOutlined,
+  PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -8,7 +9,6 @@ import {
 import {
   Alert,
   Button,
-  Card,
   Empty,
   Form,
   Image,
@@ -19,28 +19,30 @@ import {
   Space,
   Spin,
   Switch,
-  Tag,
+  Tooltip,
   Tree,
-  Typography,
+  TreeSelect,
   message,
 } from 'antd'
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table'
 import type { DefaultOptionType } from 'antd/es/select'
 import type { DataNode } from 'antd/es/tree'
 import type { TFunction } from 'i18next'
-import { useEffect, useMemo, useState } from 'react'
+import type { Key } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageContainer from '../../../components/PageContainer'
+import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
+import StatusPill from '../../../components/listToolbar/StatusPill'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getSupplierOptions } from '../../../services/domesticProductService'
 import {
   batchAssignProducts,
   createWarehouseCategory,
   deleteWarehouseCategory,
   getCategoryTree,
-  getWarehouseCategoryProducts,
   type SaveWarehouseCategoryPayload,
   type WarehouseCategoryNode,
-  type WarehouseCategoryProductItem,
   updateWarehouseCategory,
 } from '../../../services/warehouseCategoryService'
 import {
@@ -51,13 +53,25 @@ import {
 import type { SupplierOption } from '../../../types/domesticProduct'
 import {
   ALL_PRODUCTS_FILTER_KEY,
+  UNCATEGORIZED_PRODUCTS_FILTER_KEY,
   buildCategoryOptions,
-  buildFilterCategoryOptions,
-  type CategoryProductFilterMode,
+  buildFilterCategoryTreeOptions,
   resolveCategoryProductFilterMode,
-  hasExecutedCategoryProductQuery,
 } from './categoryProductFilters'
+import {
+  collectAncestorGuids,
+  countCategoryTree,
+  filterCategoryTree,
+  findCategoryPath,
+  formatCategoryPathTail,
+  resolveProductCategoryPath,
+} from './categoryTreeView'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import categoriesMessagesEn from './categoriesMessages.en.json'
+import categoriesMessagesZh from './categoriesMessages.zh.json'
+import './categories.css'
+
+registerPageMessages({ zh: categoriesMessagesZh, en: categoriesMessagesEn })
 
 type FormMode = 'idle' | 'create' | 'edit'
 
@@ -65,15 +79,17 @@ interface WarehouseCategoryFormValues extends SaveWarehouseCategoryPayload {
   isActive: boolean
 }
 
-interface ProductFilterValues {
-  itemNumber?: string
+interface ProductQuery {
+  /** 左侧选中项：全部商品 / 未分类商品哨兵值，或具体分类 GUID */
+  key: string
+  keyword: string
   supplierCode?: string
-  filterCategoryGuid?: string
-  targetCategoryGuid?: string
+  page: number
+  pageSize: number
 }
 
 const DEFAULT_TREE_EXPAND_LEVEL = 2
-const IMAGE_FALLBACK = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+const PRODUCT_SEARCH_DEBOUNCE_MS = 300
 
 function collectExpandedKeysToLevel(nodes: WarehouseCategoryNode[], maxLevel: number, level = 1): string[] {
   if (level > maxLevel) {
@@ -113,48 +129,29 @@ function collectDescendantKeys(node?: WarehouseCategoryNode): string[] {
   return (node.children || []).flatMap((child) => [child.categoryGUID, ...collectDescendantKeys(child)])
 }
 
-function buildTreeData(nodes: WarehouseCategoryNode[], t: TFunction): DataNode[] {
+function isQuickFilterKey(key: string) {
+  return key === ALL_PRODUCTS_FILTER_KEY || key === UNCATEGORIZED_PRODUCTS_FILTER_KEY
+}
+
+function buildTreeData(nodes: WarehouseCategoryNode[], t: TFunction, level = 0): DataNode[] {
   return nodes.map((node) => ({
     key: node.categoryGUID,
     title: (
-      <Space size={6}>
-        <Typography.Text>{node.categoryName}</Typography.Text>
-        {node.chineseName ? <Typography.Text type="secondary">{node.chineseName}</Typography.Text> : null}
-        {node.isActive ? (
-          <Tag color="success">{t('common.active')}</Tag>
-        ) : (
-          <Tag>{t('common.inactive')}</Tag>
-        )}
-      </Space>
+      <span
+        className={[
+          'wh-categories-node',
+          level === 0 ? 'wh-categories-node-root' : '',
+          node.isActive ? '' : 'wh-categories-node-inactive',
+        ].filter(Boolean).join(' ')}
+      >
+        <span className="wh-categories-node-name">{node.categoryName}</span>
+        {node.chineseName ? <span className="wh-categories-node-cn">{node.chineseName}</span> : null}
+        {/* 只标出停用分类：启用是常态，不再给每个节点挂绿色标签 */}
+        {node.isActive ? null : <span className="wh-categories-node-off">{t('common.inactive')}</span>}
+      </span>
     ),
-    children: buildTreeData(node.children || [], t),
+    children: buildTreeData(node.children || [], t, level + 1),
   }))
-}
-
-function mapWarehouseTableItemToCategoryProduct(item: WarehouseProductListItem): WarehouseCategoryProductItem {
-  return {
-    productCode: item.productCode,
-    productBaseName: item.name,
-    itemNumber: item.itemNumber,
-    domesticSupplierCode: item.domesticSupplierCode,
-    domesticSupplierName: item.domesticSupplierName,
-    localSupplierCode: item.localSupplierCode,
-    localSupplierName: item.localSupplierName,
-    productCategoryName: item.categoryName,
-    productBarcode: item.barcode,
-    productImage: item.productImage,
-    domesticPrice: item.domesticPrice,
-    volume: item.volume,
-    isActive: item.isActive,
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt,
-  }
-}
-
-function formatDomesticSupplier(record: WarehouseCategoryProductItem): string {
-  return [record.domesticSupplierCode || record.localSupplierCode, record.domesticSupplierName || record.localSupplierName]
-    .filter(Boolean)
-    .join(' - ')
 }
 
 type SupplierSelectOption = DefaultOptionType & {
@@ -175,10 +172,8 @@ function filterSupplierOption(input: string, option?: DefaultOptionType) {
 }
 
 export default function WarehouseCategoriesPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [form] = Form.useForm<WarehouseCategoryFormValues>()
-  const [productFilterForm] = Form.useForm<ProductFilterValues>()
-  const watchedTargetCategoryGuid = Form.useWatch('targetCategoryGuid', productFilterForm)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [productLoading, setProductLoading] = useState(false)
@@ -187,24 +182,43 @@ export default function WarehouseCategoriesPage() {
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [supplierLoading, setSupplierLoading] = useState(false)
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
-  const [selectedCategoryGuid, setSelectedCategoryGuid] = useState<string>()
+  const [treeKeyword, setTreeKeyword] = useState('')
+  const [searchExpandedKeys, setSearchExpandedKeys] = useState<string[]>([])
+  // 左侧选中项同时决定右侧信息卡和商品列表范围；默认「全部商品」并自动加载，不再出现空表等查询。
+  const [selectedKey, setSelectedKey] = useState<string>(ALL_PRODUCTS_FILTER_KEY)
   const [formMode, setFormMode] = useState<FormMode>('idle')
   const [modalOpen, setModalOpen] = useState(false)
-  const [productFilterMode, setProductFilterMode] = useState<CategoryProductFilterMode | null>(null)
-  const [productItemNumber, setProductItemNumber] = useState('')
-  const [productSupplierCode, setProductSupplierCode] = useState('')
+  const [productKeywordInput, setProductKeywordInput] = useState('')
+  const [productKeyword, setProductKeyword] = useState('')
+  const [productSupplierCode, setProductSupplierCode] = useState<string>()
   const [productPage, setProductPage] = useState(1)
   const [productPageSize, setProductPageSize] = useState(20)
   const [productTotal, setProductTotal] = useState(0)
-  const [products, setProducts] = useState<WarehouseCategoryProductItem[]>([])
-  const [selectedProductCodes, setSelectedProductCodes] = useState<React.Key[]>([])
+  const [products, setProducts] = useState<WarehouseProductListItem[]>([])
+  const [selectedProductCodes, setSelectedProductCodes] = useState<Key[]>([])
+  // 批量移动的目标分类与左侧筛选完全分离：查看 A 分类时也能把商品移到任意分类。
+  const [moveTargetGuid, setMoveTargetGuid] = useState<string>()
+  const productRequestSeqRef = useRef(0)
+  const treeLoadedRef = useRef(false)
 
   const selectedCategory = useMemo(
-    () => findCategory(categories, selectedCategoryGuid),
+    () => findCategory(categories, selectedKey),
+    [categories, selectedKey],
+  )
+  const selectedCategoryGuid = selectedCategory?.categoryGUID
+  const selectedCategoryPath = useMemo(
+    () => findCategoryPath(categories, selectedCategoryGuid),
     [categories, selectedCategoryGuid],
   )
+  const treeStats = useMemo(() => countCategoryTree(categories), [categories])
+  const treeView = useMemo(() => filterCategoryTree(categories, treeKeyword), [categories, treeKeyword])
+  const isTreeSearching = treeKeyword.trim().length > 0
+  const treeData = useMemo(() => buildTreeData(treeView.nodes, t), [treeView.nodes, t])
 
-  const treeData = useMemo(() => buildTreeData(categories, t), [categories, t])
+  useEffect(() => {
+    // 搜索词变化时展开命中项的全部祖先；搜索期间用户手动收起/展开不影响原展开状态。
+    setSearchExpandedKeys(treeView.expandedKeys)
+  }, [treeView])
 
   const disallowedParentKeys = useMemo(() => {
     if (!selectedCategory || formMode !== 'edit') {
@@ -218,59 +232,50 @@ export default function WarehouseCategoriesPage() {
     () => buildCategoryOptions(categories).filter((item) => !disallowedParentKeys.has(String(item.value))),
     [categories, disallowedParentKeys],
   )
-  const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories])
-  const filterCategoryOptions = useMemo(() => buildFilterCategoryOptions(categories, t), [categories, t])
+  const moveTargetOptions = useMemo(
+    () =>
+      buildFilterCategoryTreeOptions(categories, t, i18n.language).filter(
+        (option) => !isQuickFilterKey(option.value),
+      ),
+    [categories, i18n.language, t],
+  )
   const supplierOptions = useMemo(() => buildSupplierOptions(suppliers), [suppliers])
 
-  const loadProducts = async (
-    nextFilterMode = productFilterMode,
-    nextPage = productPage,
-    nextPageSize = productPageSize,
-    nextItemNumber = productItemNumber,
-    nextSupplierCode = productSupplierCode,
-  ) => {
-    if (!hasExecutedCategoryProductQuery(nextFilterMode)) {
-      return
-    }
+  const loadProducts = async (query: ProductQuery) => {
+    const requestSeq = productRequestSeqRef.current + 1
+    productRequestSeqRef.current = requestSeq
+    const filterMode = resolveCategoryProductFilterMode(query.key)
 
     setProductLoading(true)
     try {
-      const filterMode = nextFilterMode
-
-      if (filterMode.type === 'category') {
-        const result = await getWarehouseCategoryProducts({
-          categoryGuid: filterMode.categoryGuid,
-          page: nextPage,
-          pageSize: nextPageSize,
-          itemNumber: nextItemNumber || undefined,
-          supplierCode: nextSupplierCode || undefined,
-        })
-        setProducts(result.items)
-        setProductTotal(result.total)
-        setProductPage(result.page)
-        setProductPageSize(result.pageSize)
-        setProductFilterMode(filterMode)
-        return
-      }
-
+      // 三种范围统一走仓库商品表格接口：关键词同时匹配货号和商品名称，分类查询含子分类，返回 total。
       const result = await getWarehouseProductsTable({
-        page: nextPage,
-        pageSize: nextPageSize,
-        searchText: nextItemNumber || undefined,
-        supplierCode: nextSupplierCode || undefined,
-        categoryFilter: filterMode.type,
+        page: query.page,
+        pageSize: query.pageSize,
+        searchText: query.keyword || undefined,
+        supplierCode: query.supplierCode || undefined,
+        categoryFilter: filterMode.type === 'category' ? undefined : filterMode.type,
+        categoryGuid: filterMode.type === 'category' ? filterMode.categoryGuid : undefined,
       } satisfies WarehouseProductsTableQuery)
 
-      setProducts(result.items.map(mapWarehouseTableItemToCategoryProduct))
+      // 切换分类或改筛选后，先发出的请求晚到时不能覆盖当前列表。
+      if (requestSeq !== productRequestSeqRef.current) {
+        return
+      }
+      setProducts(result.items)
       setProductTotal(result.total)
       setProductPage(result.page)
       setProductPageSize(result.pageSize)
-      setProductFilterMode(filterMode)
     } catch (error) {
+      if (requestSeq !== productRequestSeqRef.current) {
+        return
+      }
       console.error(error)
       message.error(error instanceof Error ? error.message : t('warehouse.categories.loadProductsFailed'))
     } finally {
-      setProductLoading(false)
+      if (requestSeq === productRequestSeqRef.current) {
+        setProductLoading(false)
+      }
     }
   }
 
@@ -286,49 +291,40 @@ export default function WarehouseCategoriesPage() {
     }
   }
 
-  const loadTree = async (nextSelectedGuid?: string, autoSelectFirst = false) => {
+  /**
+   * 重新加载分类树并定位选中项。
+   * nextSelectedKey 不传时保持当前选中；传入的分类已不存在（如刚被删除）时回到「全部商品」。
+   */
+  const loadTree = async (nextSelectedKey?: string) => {
     setLoading(true)
     try {
       const tree = await getCategoryTree()
       setCategories(tree)
-      setExpandedKeys(collectExpandedKeysToLevel(tree, DEFAULT_TREE_EXPAND_LEVEL))
 
-      const targetGuid =
-        nextSelectedGuid === undefined
-          ? selectedCategoryGuid
-          : nextSelectedGuid || undefined
-
-      const targetCategory = findCategory(tree, targetGuid)
+      const isFirstLoad = !treeLoadedRef.current
+      treeLoadedRef.current = true
+      const targetKey = nextSelectedKey ?? selectedKey
+      const targetCategory = findCategory(tree, targetKey)
+      const ancestorKeys = targetCategory ? collectAncestorGuids(tree, targetCategory.categoryGUID) : []
+      // 首次加载默认展开到第 2 级；之后保留用户的展开状态，只补上新选中节点的祖先。
+      setExpandedKeys((current) =>
+        Array.from(new Set([
+          ...(isFirstLoad ? collectExpandedKeysToLevel(tree, DEFAULT_TREE_EXPAND_LEVEL) : current),
+          ...ancestorKeys,
+        ])),
+      )
 
       if (targetCategory) {
-        setSelectedCategoryGuid(targetCategory.categoryGUID)
-        productFilterForm.setFieldValue('targetCategoryGuid', targetCategory.categoryGUID)
-        form.setFieldsValue({
-          categoryName: targetCategory.categoryName,
-          chineseName: targetCategory.chineseName,
-          parentGUID: targetCategory.parentGUID,
-          isActive: targetCategory.isActive,
-          remarks: targetCategory.remarks,
-        })
+        setSelectedKey(targetCategory.categoryGUID)
         return
       }
 
-      if (autoSelectFirst && tree[0]) {
-        const firstCategory = tree[0]
-        setSelectedCategoryGuid(firstCategory.categoryGUID)
-        productFilterForm.setFieldValue('targetCategoryGuid', firstCategory.categoryGUID)
-        form.setFieldsValue({
-          categoryName: firstCategory.categoryName,
-          chineseName: firstCategory.chineseName,
-          parentGUID: firstCategory.parentGUID,
-          isActive: firstCategory.isActive,
-          remarks: firstCategory.remarks,
-        })
+      if (isQuickFilterKey(targetKey)) {
+        setSelectedKey(targetKey)
         return
       }
 
-      setSelectedCategoryGuid(undefined)
-      setProductFilterMode(null)
+      setSelectedKey(ALL_PRODUCTS_FILTER_KEY)
       setFormMode('idle')
       setModalOpen(false)
       form.resetFields()
@@ -341,42 +337,27 @@ export default function WarehouseCategoriesPage() {
   }
 
   useEffect(() => {
-    void loadTree(undefined, true)
+    void loadTree()
     void loadSuppliers()
   }, [])
 
   useEffect(() => {
-    if (!selectedCategoryGuid) {
-      setProducts([])
-      setProductTotal(0)
-      setSelectedProductCodes([])
-      return
-    }
-  }, [selectedCategoryGuid])
+    // 关键词防抖：停止输入约 300ms 后才查询，避免每个字符都请求一次。
+    const timer = window.setTimeout(() => setProductKeyword(productKeywordInput.trim()), PRODUCT_SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [productKeywordInput])
 
-  const handleSelectCategory = (categoryGuid?: string) => {
-    if (!categoryGuid) {
-      setSelectedCategoryGuid(undefined)
-      setFormMode('idle')
-      form.resetFields()
-      return
-    }
-
-    const targetCategory = findCategory(categories, categoryGuid)
-    if (!targetCategory) {
-      return
-    }
-
-    setSelectedCategoryGuid(targetCategory.categoryGUID)
-    productFilterForm.setFieldValue('targetCategoryGuid', categoryGuid)
-    form.setFieldsValue({
-      categoryName: targetCategory.categoryName,
-      chineseName: targetCategory.chineseName,
-      parentGUID: targetCategory.parentGUID,
-      isActive: targetCategory.isActive,
-      remarks: targetCategory.remarks,
+  useEffect(() => {
+    // 选中节点、关键词、供应商任一变化即查第 1 页；勾选随新查询清空（与原「查询」按钮一致），翻页仍保留勾选。
+    setSelectedProductCodes([])
+    void loadProducts({
+      key: selectedKey,
+      keyword: productKeyword,
+      supplierCode: productSupplierCode,
+      page: 1,
+      pageSize: productPageSize,
     })
-  }
+  }, [selectedKey, productKeyword, productSupplierCode])
 
   const handleCreateRoot = () => {
     setFormMode('create')
@@ -486,8 +467,10 @@ export default function WarehouseCategoriesPage() {
       const parentGuid = selectedCategory.parentGUID
       await deleteWarehouseCategory(selectedCategory.categoryGUID)
       message.success(t('warehouse.categories.deleteSuccess'))
-      await loadTree(parentGuid || '', false)
+      // 删除后选中父分类；顶级分类被删时回到「全部商品」。
+      await loadTree(parentGuid || ALL_PRODUCTS_FILTER_KEY)
     } catch (error) {
+      // 有关联商品等情况由后端拒绝，原样提示后端返回的原因。
       console.error(error)
       message.error(error instanceof Error ? error.message : t('warehouse.categories.deleteFailed'))
     } finally {
@@ -495,45 +478,20 @@ export default function WarehouseCategoriesPage() {
     }
   }
 
-  const handleSearchProducts = async () => {
-    const values = productFilterForm.getFieldsValue()
-    const nextFilterMode = resolveCategoryProductFilterMode(values.filterCategoryGuid)
-
-    setProductItemNumber(values.itemNumber?.trim() || '')
-    setProductSupplierCode(values.supplierCode?.trim() || '')
-    setProductPage(1)
-    setSelectedProductCodes([])
-    await loadProducts(nextFilterMode, 1, productPageSize, values.itemNumber?.trim() || '', values.supplierCode?.trim() || '')
-  }
-
-  const handleResetProducts = async () => {
-    productFilterForm.setFieldsValue({
-      itemNumber: '',
-      supplierCode: undefined,
-      filterCategoryGuid: ALL_PRODUCTS_FILTER_KEY,
-      targetCategoryGuid: selectedCategoryGuid,
-    })
-    setProductItemNumber('')
-    setProductSupplierCode('')
-    setProductFilterMode(null)
-    setProductPage(1)
-    setProducts([])
-    setProductTotal(0)
-    setSelectedProductCodes([])
-  }
+  const currentProductQuery = (page = productPage, pageSize = productPageSize): ProductQuery => ({
+    key: selectedKey,
+    keyword: productKeyword,
+    supplierCode: productSupplierCode,
+    page,
+    pageSize,
+  })
 
   const handleProductTableChange = (pagination: TablePaginationConfig) => {
-    const nextPage = pagination.current ?? 1
-    const nextPageSize = pagination.pageSize ?? productPageSize
-    if (!hasExecutedCategoryProductQuery(productFilterMode)) {
-      return
-    }
-
-    void loadProducts(productFilterMode, nextPage, nextPageSize, productItemNumber, productSupplierCode)
+    void loadProducts(currentProductQuery(pagination.current ?? 1, pagination.pageSize ?? productPageSize))
   }
 
   const handleBatchAssign = async () => {
-    const targetCategoryGuid = productFilterForm.getFieldValue('targetCategoryGuid') as string | undefined
+    const targetCategoryGuid = moveTargetGuid
 
     if (!targetCategoryGuid) {
       message.warning(t('warehouse.categories.selectTargetFirst'))
@@ -554,12 +512,8 @@ export default function WarehouseCategoriesPage() {
         categoryName: targetCategory?.categoryName || t('warehouse.categories.targetCategory'),
       }))
       setSelectedProductCodes([])
-      await Promise.all([
-        loadTree(selectedCategoryGuid),
-        hasExecutedCategoryProductQuery(productFilterMode)
-          ? loadProducts(productFilterMode, productPage, productPageSize, productItemNumber, productSupplierCode)
-          : Promise.resolve(),
-      ])
+      // 分类树不含商品数据，移动商品后只需刷新当前页商品。
+      await loadProducts(currentProductQuery())
     } catch (error) {
       console.error(error)
       message.error(error instanceof Error ? error.message : t('warehouse.categories.batchUpdateFailed'))
@@ -568,246 +522,354 @@ export default function WarehouseCategoriesPage() {
     }
   }
 
-  const productColumns: ColumnsType<WarehouseCategoryProductItem> = [
-    {
-      title: t('column.image'),
-      dataIndex: 'productImage',
-      width: 88,
-      render: (value?: string) => (
+  const renderProductCell = (record: WarehouseProductListItem) => (
+    <div className="wh-categories-product">
+      {record.productImage ? (
         <Image
-          src={value}
-          alt=""
-          width={44}
-          height={44}
-          style={{ borderRadius: 4, objectFit: 'cover' }}
-          fallback={IMAGE_FALLBACK}
-          preview={Boolean(value)}
+          src={record.productImage}
+          alt={record.name || record.itemNumber || record.productCode}
+          width={36}
+          height={36}
+          loading="lazy"
+          className="wh-categories-product-image"
+          preview={{ mask: '' }}
         />
-      ),
-    },
+      ) : (
+        <span className="wh-categories-product-placeholder" aria-hidden="true">
+          <PictureOutlined />
+        </span>
+      )}
+      <div className="wh-categories-product-text">
+        <div className="wh-categories-product-code">{record.itemNumber || record.productCode}</div>
+        <div className="wh-categories-product-name" title={record.name || undefined}>
+          {record.name || '--'}
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderSupplierCell = (record: WarehouseProductListItem) => {
+    const name = record.domesticSupplierName || record.localSupplierName
+    const code = record.domesticSupplierCode || record.localSupplierCode
+    if (!name && !code) {
+      return '--'
+    }
+    return (
+      <div className="wh-categories-two-line">
+        <div className="wh-categories-two-line-main" title={name || undefined}>{name || code}</div>
+        {name && code ? <div className="wh-categories-two-line-sub">{code}</div> : null}
+      </div>
+    )
+  }
+
+  const renderCategoryCell = (record: WarehouseProductListItem) => {
+    const path = resolveProductCategoryPath(
+      categories,
+      { categoryGuid: record.warehouseCategoryGUID, categoryName: record.categoryName },
+      selectedCategoryGuid,
+    )
+    if (!path.length) {
+      return <span className="wh-categories-muted">{t('warehouseUi.categories.uncategorizedProducts')}</span>
+    }
+    return (
+      <span className="wh-categories-path-cell" title={path.join(' › ')}>
+        {formatCategoryPathTail(path)}
+      </span>
+    )
+  }
+
+  const productColumns: ColumnsType<WarehouseProductListItem> = [
     {
-      title: t('column.itemNumber'),
+      title: t('warehouseUi.categories.columnProduct'),
       dataIndex: 'itemNumber',
-      width: 160,
-      render: (value?: string) => value || '--',
+      width: 280,
+      render: (_value, record) => renderProductCell(record),
     },
     {
-      title: t('column.productName'),
-      dataIndex: 'productBaseName',
-      width: 240,
-      ellipsis: true,
-      render: (value?: string) => value || '--',
-    },
-    {
-      title: t('warehouse.categories.domesticSupplier'),
+      title: t('warehouseUi.categories.columnSupplier'),
       key: 'domesticSupplier',
-      width: 220,
-      render: (_value, record) => {
-        const supplierText = formatDomesticSupplier(record)
-        return supplierText || '--'
-      },
+      width: 190,
+      render: (_value, record) => renderSupplierCell(record),
     },
     {
-      title: t('column.currentCategory'),
-      dataIndex: 'productCategoryName',
-      width: 160,
-      render: (value?: string) => value || '--',
+      title: t('warehouseUi.categories.columnCategory'),
+      key: 'currentCategory',
+      width: 190,
+      render: (_value, record) => renderCategoryCell(record),
     },
     {
-      title: t('column.status'),
+      title: t('warehouseUi.categories.columnStatus'),
       dataIndex: 'isActive',
-      width: 100,
-      render: (value: boolean) => (value ? <Tag color="success">{t('common.active')}</Tag> : <Tag>{t('common.inactive')}</Tag>),
+      width: 96,
+      render: (value: boolean) => (
+        <StatusPill tone={value ? 'green' : 'gray'}>{value ? t('common.active') : t('common.inactive')}</StatusPill>
+      ),
     },
   ]
 
-  return (
-    <PageContainer
-      title={t('warehouse.categories.title')}
-      subtitle={t('warehouse.categories.subtitle')}
+  const renderQuickItem = (key: string, label: string) => (
+    <button
+      type="button"
+      className={`wh-categories-quick-item${selectedKey === key ? ' wh-categories-quick-item-active' : ''}`}
+      aria-pressed={selectedKey === key}
+      onClick={() => setSelectedKey(key)}
     >
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '360px minmax(0, 1fr)',
-          gap: 16,
-        }}
-      >
-        <Card
-          title={t('warehouse.categories.categoryTree')}
-          extra={
-            <Space size={8}>
-              <Button icon={<ReloadOutlined />} onClick={() => void loadTree()}>
-                {t('common.refresh')}
+      {label}
+    </button>
+  )
+
+  const renderSelectedInfo = () => {
+    if (!selectedCategory) {
+      const isUncategorized = selectedKey === UNCATEGORIZED_PRODUCTS_FILTER_KEY
+      return (
+        <div className="wh-categories-info-body">
+          <div className="wh-categories-info-title">
+            <h2>
+              {isUncategorized
+                ? t('warehouseUi.categories.uncategorizedProducts')
+                : t('warehouseUi.categories.allProducts')}
+            </h2>
+          </div>
+          <div className="wh-categories-info-meta">
+            {isUncategorized
+              ? t('warehouseUi.categories.uncategorizedHint')
+              : t('warehouseUi.categories.allProductsHint')}
+          </div>
+        </div>
+      )
+    }
+
+    const parentNames = selectedCategoryPath.slice(0, -1).map((node) => node.categoryName)
+    const childCount = selectedCategory.children?.length ?? 0
+
+    return (
+      <>
+        <div className="wh-categories-info-body">
+          <div className="wh-categories-info-path">
+            {parentNames.length ? `${parentNames.join(' › ')} ›` : t('warehouseUi.categories.topLevel')}
+          </div>
+          <div className="wh-categories-info-title">
+            <h2>{selectedCategory.categoryName}</h2>
+            {selectedCategory.chineseName ? (
+              <span className="wh-categories-info-cn">{selectedCategory.chineseName}</span>
+            ) : null}
+            <StatusPill tone={selectedCategory.isActive ? 'green' : 'gray'}>
+              {selectedCategory.isActive ? t('common.active') : t('common.inactive')}
+            </StatusPill>
+          </div>
+          <div className="wh-categories-info-meta">
+            <span>
+              {t('warehouseUi.categories.childCount')} <strong>{childCount}</strong>
+            </span>
+            {selectedCategory.remarks ? (
+              <span>{t('warehouseUi.categories.remarks', { text: selectedCategory.remarks })}</span>
+            ) : null}
+          </div>
+        </div>
+        <div className="wh-categories-info-actions">
+          <Button icon={<PlusOutlined />} onClick={handleCreateChild}>
+            {t('warehouseUi.categories.addChild')}
+          </Button>
+          <Button icon={<EditOutlined />} onClick={handleEditCategory}>
+            {t('warehouseUi.categories.edit')}
+          </Button>
+          {childCount > 0 ? (
+            // 有子分类时前端直接禁用；商品数前端未知，交给后端拒绝并原样提示。
+            <Tooltip title={t('warehouseUi.categories.deleteDisabledHasChildren')}>
+              <Button danger icon={<DeleteOutlined />} disabled>
+                {t('warehouseUi.categories.delete')}
               </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateRoot}>
-                {t('warehouse.categories.addTopCategory')}
-              </Button>
-            </Space>
-          }
-        >
-          <Space wrap size={[8, 8]} style={{ marginBottom: 12, width: '100%' }}>
-            <Button onClick={handleCreateChild} disabled={!selectedCategory}>
-              {t('warehouse.categories.addChildCategory')}
-            </Button>
-            <Button icon={<EditOutlined />} onClick={handleEditCategory} disabled={!selectedCategory}>
-              {t('warehouse.categories.editCategory')}
-            </Button>
+            </Tooltip>
+          ) : (
             <Popconfirm
               title={t('warehouse.categories.confirmDelete')}
               description={t('warehouse.categories.deleteBlockedHint')}
               onConfirm={() => void handleDelete()}
-              disabled={!selectedCategory}
             >
-              <Button danger icon={<DeleteOutlined />} disabled={!selectedCategory} loading={saving}>
-                {t('warehouse.categories.deleteCategory')}
+              <Button danger icon={<DeleteOutlined />} loading={saving}>
+                {t('warehouseUi.categories.delete')}
               </Button>
             </Popconfirm>
-          </Space>
+          )}
+        </div>
+      </>
+    )
+  }
 
+  return (
+    <PageContainer
+      compact
+      title={t('warehouse.categories.title')}
+      subtitle={
+        categories.length
+          ? t('warehouseUi.categories.subtitle', { top: treeStats.topLevel, total: treeStats.total })
+          : undefined
+      }
+      extra={
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateRoot}>
+          {t('warehouse.categories.addTopCategory')}
+        </Button>
+      }
+    >
+      <div className="wh-categories-layout">
+        <aside className="wh-categories-panel wh-categories-tree-panel" aria-label={t('warehouseUi.categories.treeRegion')}>
+          <div className="wh-categories-tree-search">
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              value={treeKeyword}
+              onChange={(event) => setTreeKeyword(event.target.value)}
+              placeholder={t('warehouseUi.categories.treeSearchPlaceholder')}
+              aria-label={t('warehouseUi.categories.treeSearchPlaceholder')}
+            />
+            <Tooltip title={t('warehouseUi.categories.refreshTree')}>
+              <Button
+                icon={<ReloadOutlined />}
+                aria-label={t('warehouseUi.categories.refreshTree')}
+                loading={loading}
+                onClick={() => void loadTree()}
+              />
+            </Tooltip>
+          </div>
+          <div className="wh-categories-quick-list">
+            {renderQuickItem(ALL_PRODUCTS_FILTER_KEY, t('warehouseUi.categories.allProducts'))}
+            {renderQuickItem(UNCATEGORIZED_PRODUCTS_FILTER_KEY, t('warehouseUi.categories.uncategorizedProducts'))}
+          </div>
+          <div className="wh-categories-divider" />
           <Spin spinning={loading}>
-            {categories.length ? (
-              <div
-                style={{
-                  minHeight: 320,
-                  maxHeight: 'calc(100vh - 280px)',
-                  overflowY: 'auto',
-                  overflowX: 'hidden',
-                  paddingRight: 4,
-                }}
-              >
+            <div className="wh-categories-tree-scroll">
+              {treeData.length ? (
                 <Tree
                   blockNode
+                  className="wh-categories-tree"
                   selectedKeys={selectedCategoryGuid ? [selectedCategoryGuid] : []}
-                  expandedKeys={expandedKeys}
-                  onExpand={(keys) => setExpandedKeys(keys as string[])}
-                  onSelect={(keys) => handleSelectCategory(typeof keys[0] === 'string' ? keys[0] : undefined)}
+                  expandedKeys={isTreeSearching ? searchExpandedKeys : expandedKeys}
+                  onExpand={(keys) =>
+                    (isTreeSearching ? setSearchExpandedKeys : setExpandedKeys)(keys.map(String))
+                  }
+                  onSelect={(keys) => {
+                    // 再次点击已选节点时 antd 会取消选中，这里保持当前选中不变。
+                    if (typeof keys[0] === 'string') {
+                      setSelectedKey(keys[0])
+                    }
+                  }}
                   treeData={treeData}
                 />
-              </div>
-            ) : (
-              <Empty description={t('warehouse.categories.noCategoryData')} />
-            )}
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    isTreeSearching && categories.length
+                      ? t('warehouseUi.categories.noTreeMatch')
+                      : t('warehouse.categories.noCategoryData')
+                  }
+                />
+              )}
+            </div>
           </Spin>
-        </Card>
+        </aside>
 
-        <div style={{ display: 'grid', gap: 16 }}>
-          <Card
-            title={t('warehouse.categories.productCategoryManagement')}
-            extra={
-              <Space>
+        <div className="wh-categories-main">
+          <section
+            className="wh-categories-panel wh-categories-info"
+            aria-label={t('warehouseUi.categories.currentRegion')}
+          >
+            {renderSelectedInfo()}
+          </section>
+
+          <section
+            className="wh-categories-panel wh-categories-products"
+            aria-label={t('warehouseUi.categories.productsRegion')}
+          >
+            <div className="wh-categories-products-toolbar">
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                value={productKeywordInput}
+                onChange={(event) => setProductKeywordInput(event.target.value)}
+                placeholder={t('warehouseUi.categories.productSearchPlaceholder')}
+                aria-label={t('warehouseUi.categories.productSearchPlaceholder')}
+                className="wh-categories-products-search"
+              />
+              <Select
+                allowClear
+                showSearch
+                value={productSupplierCode}
+                onChange={(value?: string) => setProductSupplierCode(value || undefined)}
+                loading={supplierLoading}
+                options={supplierOptions}
+                filterOption={filterSupplierOption}
+                placeholder={t('warehouseUi.categories.supplierPlaceholder')}
+                className="wh-categories-products-supplier"
+                popupMatchSelectWidth={300}
+              />
+              <span className="wh-categories-spacer" />
+              <span className="wh-categories-products-total">
+                {t('warehouseUi.categories.totalCount', { count: productTotal })}
+              </span>
+              <Tooltip title={t('warehouseUi.categories.refreshProducts')}>
                 <Button
+                  icon={<ReloadOutlined />}
+                  aria-label={t('warehouseUi.categories.refreshProducts')}
+                  onClick={() => void loadProducts(currentProductQuery())}
+                />
+              </Tooltip>
+            </div>
+
+            <div className="wh-categories-selection">
+              <SelectionActionBar
+                selectedCount={selectedProductCodes.length}
+                onClearSelection={() => setSelectedProductCodes([])}
+              >
+                <span>{t('warehouseUi.categories.moveTo')}</span>
+                <TreeSelect
+                  size="small"
+                  showSearch
+                  allowClear
+                  value={moveTargetGuid}
+                  onChange={(value?: string) => setMoveTargetGuid(value || undefined)}
+                  treeData={moveTargetOptions}
+                  treeNodeFilterProp="searchText"
+                  placeholder={t('warehouseUi.categories.moveTargetPlaceholder')}
+                  className="wh-categories-move-target"
+                  popupMatchSelectWidth={320}
+                  listHeight={360}
+                />
+                <Button
+                  size="small"
                   type="primary"
-                  disabled={!watchedTargetCategoryGuid || !selectedProductCodes.length}
+                  disabled={!moveTargetGuid}
                   loading={assigning}
                   onClick={() => void handleBatchAssign()}
                 >
-                  {t('warehouse.categories.batchUpdateToTarget')}
+                  {t('warehouseUi.categories.moveCount', { count: selectedProductCodes.length })}
                 </Button>
-                <Button
-                  icon={<ReloadOutlined />}
-                  disabled={!hasExecutedCategoryProductQuery(productFilterMode)}
-                  onClick={() =>
-                    hasExecutedCategoryProductQuery(productFilterMode)
-                      ? void loadProducts(
-                          productFilterMode,
-                          productPage,
-                          productPageSize,
-                          productItemNumber,
-                          productSupplierCode,
-                        )
-                      : undefined
-                  }
-                >
-                  {t('common.refresh')}
-                </Button>
-              </Space>
-            }
-          >
-            {!categories.length ? (
-              <Empty description={t('warehouse.categories.noCategoryData')} />
-            ) : (
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <Alert
-                  type="info"
-                  showIcon
-                  message={t('warehouse.categories.operationSteps')}
-                />
+              </SelectionActionBar>
+            </div>
 
-                <Form
-                  form={productFilterForm}
-                  layout="inline"
-                  initialValues={{ filterCategoryGuid: ALL_PRODUCTS_FILTER_KEY, targetCategoryGuid: selectedCategoryGuid }}
-                >
-                  <Form.Item label={t('warehouse.categories.itemNumber')} name="itemNumber">
-                    <Input allowClear placeholder={t('warehouse.categories.enterItemNumber')} style={{ width: 180 }} />
-                  </Form.Item>
-                  <Form.Item label={t('warehouse.categories.supplierCode')} name="supplierCode">
-                    <Select
-                      allowClear
-                      showSearch
-                      loading={supplierLoading}
-                      options={supplierOptions}
-                      filterOption={filterSupplierOption}
-                      placeholder={t('warehouse.categories.selectDomesticSupplier')}
-                      style={{ width: 220 }}
-                    />
-                  </Form.Item>
-                  <Form.Item label={t('warehouse.categories.category')} name="filterCategoryGuid">
-                    <Select
-                      style={{ width: 260 }}
-                      options={filterCategoryOptions}
-                      placeholder={t('warehouse.categories.uncategorizedWhenEmpty')}
-                      showSearch
-                      optionFilterProp="label"
-                      allowClear
-                    />
-                  </Form.Item>
-                  <Form.Item label={t('warehouse.categories.targetCategory')} name="targetCategoryGuid">
-                    <Select
-                      style={{ width: 260 }}
-                      options={categoryOptions}
-                      placeholder={t('warehouse.categories.selectBatchTarget')}
-                      showSearch
-                      optionFilterProp="label"
-                      allowClear
-                    />
-                  </Form.Item>
-                  <Form.Item>
-                    <Space>
-                      <Button type="primary" icon={<SearchOutlined />} onClick={() => void handleSearchProducts()}>
-                        {t('common.query')}
-                      </Button>
-                      <Button onClick={() => void handleResetProducts()}>
-                        {t('common.reset')}
-                      </Button>
-                    </Space>
-                  </Form.Item>
-                </Form>
-
-                <MeasuredTable metricId="warehouse.categories.table-1"
-                  rowKey="productCode"
-                  loading={productLoading}
-                  columns={productColumns}
-                  dataSource={products}
-                  rowSelection={{
-                    selectedRowKeys: selectedProductCodes,
-                    onChange: setSelectedProductCodes,
-                    preserveSelectedRowKeys: true,
-                  }}
-                  onChange={handleProductTableChange}
-                  scroll={{ x: 950 }}
-                  pagination={{
-                    current: productPage,
-                    pageSize: productPageSize,
-                    total: productTotal,
-                    showSizeChanger: true,
-                    showQuickJumper: true,
-                  }}
-                />
-              </Space>
-            )}
-          </Card>
+            <MeasuredTable<WarehouseProductListItem> metricId="warehouse.categories.table-1"
+              className="wh-categories-table"
+              rowKey="productCode"
+              loading={productLoading}
+              columns={productColumns}
+              dataSource={products}
+              rowSelection={{
+                selectedRowKeys: selectedProductCodes,
+                onChange: setSelectedProductCodes,
+                preserveSelectedRowKeys: true,
+              }}
+              onChange={handleProductTableChange}
+              scroll={{ x: 800 }}
+              pagination={{
+                current: productPage,
+                pageSize: productPageSize,
+                total: productTotal,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (count) => t('warehouseUi.categories.paginationTotal', { count }),
+              }}
+            />
+          </section>
         </div>
       </div>
       <Modal

@@ -1,0 +1,29 @@
+{
+  "warehouseUi": {
+    "products": {
+      "priceAndSync": "Prices & sync",
+      "totalCount": "{{total}} in total",
+      "statusTabsLabel": "Product status",
+      "categoryPanelTitle": "Categories",
+      "categorySearchPlaceholder": "Search categories",
+      "categorySearchEmpty": "No matching categories",
+      "allProducts": "All products",
+      "uncategorized": "Uncategorized",
+      "typePrefix": "Type",
+      "allAustralianSuppliers": "All Australian suppliers",
+      "columnSettingsTitle": "Show more columns",
+      "columnSettingsDragHint": "Drag column headers to reorder",
+      "columnProduct": "Product",
+      "supplierAustralia": "AU",
+      "locationUnbound": "Unassigned",
+      "middlePack": "Inner pack {{count}}",
+      "retailPriceMissing": "No retail price",
+      "rowEditAria": "Edit {{code}}",
+      "rowMoreAria": "More actions for {{code}}",
+      "activate": "Put on shelf",
+      "deactivate": "Take off shelf…",
+      "selectionSetCategory": "Change category",
+      "pushToHq": "Send to HQ"
+    }
+  }
+}

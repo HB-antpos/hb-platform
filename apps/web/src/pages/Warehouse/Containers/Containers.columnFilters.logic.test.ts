@@ -38,9 +38,11 @@ async function main() {
       pageSource.includes('const [columnFilters, setColumnFilters] = useState<ContainerColumnFilters>({})'),
       '页面应维护受控 columnFilters 状态',
     )
+    // 重设计后原列头条件收进「更多筛选」，经 buildContainerListQuery 展开后随请求发到服务端。
     assert(
       pageSource.includes('const activeColumnFilters = options.columnFilters ?? columnFilters') &&
-        pageSource.includes('...activeColumnFilters') &&
+        pageSource.includes('columnFilters: activeColumnFilters') &&
+        pageSource.includes('...filters.columnFilters') &&
         pageSource.includes('void requestFirstPage({ columnFilters: nextFilters })'),
       '列头过滤应随 getContainerList 请求发送到服务端，而不是只过滤当前页 dataSource',
     )
@@ -84,39 +86,43 @@ async function main() {
   })
   if (requestMappingFailure) failures.push(requestMappingFailure)
 
-  const columnFailure = await runTest('全部业务列应配置列头过滤控件', () => {
+  // 重设计：原列头放大镜里的条件全部收进「更多筛选」弹层，状态多选改由状态页签承担。
+  const columnFailure = await runTest('原列头条件应全部保留在更多筛选里，状态由页签过滤', () => {
     const expectedMarkers = [
-      "...textFilterProps('containerNumberFilter'",
-      "...dateRangeFilterProps('loadingDateStart', 'loadingDateEnd')",
-      "...dateRangeFilterProps('estimatedArrivalDateStart', 'estimatedArrivalDateEnd')",
-      "...dateRangeFilterProps('actualArrivalDateStart', 'actualArrivalDateEnd')",
-      "...numberRangeFilterProps('totalPiecesMin', 'totalPiecesMax')",
-      "...numberRangeFilterProps('totalAmountMin', 'totalAmountMax')",
-      "...numberRangeFilterProps('totalVolumeMin', 'totalVolumeMax')",
-      'filterDropdown: makeStatusFilterDropdown',
-      'filtered: Boolean(columnFilters.statuses?.length)',
+      'value={moreDraft.containerNumberFilter ?? \'\'}',
+      "{ startKey: 'loadingDateStart', endKey: 'loadingDateEnd'",
+      "{ startKey: 'estimatedArrivalDateStart', endKey: 'estimatedArrivalDateEnd'",
+      "{ startKey: 'actualArrivalDateStart', endKey: 'actualArrivalDateEnd'",
+      "{ minKey: 'totalPiecesMin', maxKey: 'totalPiecesMax'",
+      "{ minKey: 'totalAmountMin', maxKey: 'totalAmountMax'",
+      "{ minKey: 'totalVolumeMin', maxKey: 'totalVolumeMax'",
+      'DATE_RANGE_FILTERS.map(({ startKey, endKey, labelKey }) => renderMoreFilterDateRange(',
+      'NUMBER_RANGE_FILTERS.map(({ minKey, maxKey, labelKey }) => renderMoreFilterRange(',
+      'statuses: CONTAINER_STATUS_TAB_STATUSES[activeStatusTab]',
     ]
-    expectedMarkers.forEach((marker) => assert(pageSource.includes(marker), `业务列缺少过滤配置：${marker}`))
+    expectedMarkers.forEach((marker) => assert(pageSource.includes(marker), `更多筛选或状态页签缺少条件：${marker}`))
+    assert(pageSource.includes('<ActiveFilterBar items={activeFilterItems} onClearAll={clearAllFilters} />'), '生效条件应集中显示且可逐个移除')
   })
   if (columnFailure) failures.push(columnFailure)
 
-  const remarkColumnFailure = await runTest('货柜列表应显示备注列', () => {
+  const remarkColumnFailure = await runTest('货柜列表应显示备注（并入货柜编号第二行）', () => {
     const columnsStart = normalizedPageSource.indexOf('const columns: ColumnsType<ContainerMain> = [')
-    const columnsEnd = normalizedPageSource.indexOf(']\n\n  return', columnsStart)
+    const columnsEnd = normalizedPageSource.indexOf('\n  ]\n', columnsStart)
     assert(columnsStart >= 0 && columnsEnd > columnsStart, '无法定位货柜列表 columns 定义')
 
     const columnsSource = normalizedPageSource.slice(columnsStart, columnsEnd)
-    assert(columnsSource.includes("title: t('containers.fields.remark')"), '货柜列表列定义缺少备注标题')
-    assert(columnsSource.includes("dataIndex: '备注'"), '货柜列表列定义缺少备注字段')
+    assert(columnsSource.includes("title: t('containers.fields.containerNumber')"), '货柜列表列定义缺少货柜编号列')
+    assert(columnsSource.includes('const remark = record.备注?.trim()'), '货柜编号列应读取备注字段')
+    assert(columnsSource.includes('{remark ? <div className="wh-containers-sub" title={remark}>{remark}</div> : null}'), '备注应显示在货柜编号第二行')
   })
   if (remarkColumnFailure) failures.push(remarkColumnFailure)
 
-  const resetFailure = await runTest('顶部重置应同步清空列头过滤', () => {
+  const resetFailure = await runTest('清空全部应同步清空更多筛选里的原列头条件', () => {
     assert(
       pageSource.includes('setColumnFilters({})') &&
         pageSource.includes('columnFilters: {}') &&
-        pageSource.includes('顶部重置同时清空列头过滤'),
-      '顶部重置应清空列头状态，并用空 columnFilters 立即刷新服务端列表',
+        pageSource.includes('清空全部同时清掉「更多筛选」里的原列头条件'),
+      '清空全部应清空列头条件状态，并用空 columnFilters 立即刷新服务端列表',
     )
   })
   if (resetFailure) failures.push(resetFailure)
