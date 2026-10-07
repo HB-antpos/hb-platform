@@ -217,15 +217,21 @@
     {
       "path": "core/sync/sync-coordinator.ts",
       "package": "pos-sync",
-      "reason": "换店门禁需要同步协调器在更新切换释放后补做定时唤醒，并向双端运行时发布脱敏的单飞 drain 终态；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对",
+      "reason": "换店门禁需要同步协调器在更新切换释放后补做定时唤醒，并向双端运行时发布脱敏的单飞 drain 终态；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；新增可选的日结上传端口：每次 drain 末尾补传本地日结（异常隔离、关闭感知、重试时间参与定时唤醒并钳到至少 1 秒）",
       "baselineCanonicalRuntimeSha256": "3ea1a760b8bef7d1df2cd3e2db0a3a10597e193bfa8fb3dd5b9af5e5657cc7dc",
-      "canonicalRuntimeSha256": "20282b6bfc47e3b74610ce33bbebe64299cb343fd34ebeda7527ce785c52d0de",
-      "canonicalTypeSha256": "79ad15d1622fd17bb1a66267767b4dd65193083ffdc083ab5dd45275c21f8b17",
+      "canonicalRuntimeSha256": "d92c9a18946720bfa5eac4203a00f82bcbfc486fcd7b5d4f6fe5e5f140071f35",
+      "canonicalTypeSha256": "6e03b31ad6e159d6cc21195ff14816350a76394e94d6a10ed3d7ea12f4a32b6d",
       "behaviorTests": [
         {
           "workspace": "packages/pos-sync",
           "script": "test",
           "path": "src/core/sync/sync-coordinator.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "packages/pos-sync",
+          "script": "test",
+          "path": "src/core/sync/sync-coordinator-daily-close.test.ts",
           "pattern": "src/**/*.test.ts"
         },
         {
@@ -239,6 +245,18 @@
           "script": "test:runtime",
           "path": "src/core/runtime/production-pos-service-composition.test.ts",
           "pattern": "src/core/runtime/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-upload.integration.test.ts",
+          "pattern": "src/core/db/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:db",
+          "path": "src/core/db/sqlite-daily-close-upload.integration.test.ts",
+          "pattern": "src/core/db/*.test.ts"
         }
       ]
     },

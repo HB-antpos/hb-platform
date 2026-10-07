@@ -2,6 +2,7 @@ export * from "./core/db/protected-material-integrity-error";
 export * from "./core/db/order-sync-material-contract";
 export * from "./core/db/serialized-sqlite-connection";
 export * from "./core/db/sqlite-daily-close-repository";
+export * from "./core/db/sqlite-daily-close-upload-repository";
 export * from "./core/db/sqlite-offline-return-capacity";
 export * from "./core/db/sqlite-order-sync-status-repository";
 export * from "./core/db/sqlite-payment-protected-material";

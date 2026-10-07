@@ -34,6 +34,36 @@ export interface AuditBatchUploadPort {
   uploadOutbox?(payloadJson: string): Promise<AuditUploadResult>;
 }
 
+/** 协调器 shutdown 后，日结上传需要尽快停止取新记录；正在网络中的当前记录仍会完成终态写入。 */
+export type DailyCloseUploadDrainControl = Readonly<{
+  shouldStop?: () => boolean;
+}>;
+
+export type DailyCloseUploadDrainResult = Readonly<{
+  /** 真正发起过一次上传尝试的记录数（含 401/403 中断的那条）。 */
+  attempted: number;
+  uploaded: number;
+  /** 被服务端或本地映射永久拒绝（rejected）。 */
+  rejected: number;
+  /** 非 GUID 的遗留 closeId，标记 skipped、未发请求。 */
+  skipped: number;
+  /** 失败后带退避回到 pending（含单条处理异常）。 */
+  deferred: number;
+  /** 401/403 设备授权问题导致本批次被中断。 */
+  interrupted: boolean;
+}>;
+
+/**
+ * 日结记录上传：手持 / iPad 把本地日结存档上传到服务端，并在升级后补传所有历史日结。
+ * 由协调器在每次 drain 末尾调用，因此共享它的单飞、更新切换互斥、关闭感知与定时唤醒。
+ * 实现负责自己的投递状态（pending/uploading/synced/rejected/skipped）与退避。
+ */
+export interface DailyCloseUploadDrainPort {
+  drain(control?: DailyCloseUploadDrainControl): Promise<DailyCloseUploadDrainResult>;
+  /** 带退避时间的 pending 与崩溃遗留租约的最早到期时间，仅用于定时唤醒。 */
+  nextReadyAtIso(): Promise<string | null>;
+}
+
 export interface SyncRetryTimerPort {
   set(delayMs: number, callback: () => void): unknown;
   clear(handle: unknown): void;
@@ -72,6 +102,8 @@ export type PosSyncCoordinatorOptions = Readonly<{
   auditDelivery?: OperationAuditDeliveryPort;
   orderSync: OrderSyncPort;
   auditUploader: AuditBatchUploadPort;
+  /** 日结记录上传 outbox；缺省时不上传日结（旧测试/适配器无需改动）。 */
+  dailyCloseUpload?: DailyCloseUploadDrainPort;
   security: SyncSecurityPort;
   now: () => Date;
   random?: () => number;
@@ -85,6 +117,7 @@ export type PosSyncCoordinatorOptions = Readonly<{
 }>;
 
 const auditBatchSize = 8;
+const minimumDailyCloseWakeMs = 1_000;
 const maxTimerDelayMs = 2_147_483_647;
 const defaultTimer: SyncRetryTimerPort = {
   set: (delayMs, callback) => {
@@ -279,6 +312,22 @@ export class PosSyncCoordinator {
     }
     if (this.stopped) return;
     await this.syncPendingAudits(report);
+    if (this.stopped) return;
+    await this.syncDailyCloses();
+  }
+
+  /**
+   * 日结补传放在订单与审计之后：它们的失败/退避不受影响。日结上传的任何异常
+   * 都不能让订单/审计 drain 变成失败（记录仍在本地 pending，等待下一次触发或定时唤醒）。
+   */
+  private async syncDailyCloses(): Promise<void> {
+    const upload = this.options.dailyCloseUpload;
+    if (!upload) return;
+    try {
+      await upload.drain({ shouldStop: () => this.stopped });
+    } catch {
+      // 读取/上传基础设施故障保持日结 pending，不改变订单与审计的 drain 结果。
+    }
   }
 
   private async syncOutboxItem(item: OutboxLease, report: {
@@ -494,6 +543,7 @@ export class PosSyncCoordinator {
     const candidates = await Promise.all([
       this.options.outbox.nextReadyAtIso?.(),
       this.options.auditDelivery?.nextReadyAtIso(),
+      this.nextDailyCloseReadyAtIso(),
     ]);
     if (this.stopped) return;
     const nextReadyAt = candidates
@@ -515,6 +565,26 @@ export class PosSyncCoordinator {
       this.scheduledDrain = undefined;
       this.requestScheduledDrain();
     });
+  }
+
+  /**
+   * 日结重试的唤醒时间至少晚于现在 1 秒：即使日结仓储给出已过期的时间
+   * （例如本轮 drain 因故没处理掉它），也不能让定时器 0ms 反复自旋。
+   */
+  private async nextDailyCloseReadyAtIso(): Promise<string | null> {
+    const upload = this.options.dailyCloseUpload;
+    if (!upload) return null;
+    try {
+      const readyAt = await upload.nextReadyAtIso();
+      if (typeof readyAt !== "string") return null;
+      const readyAtMs = Date.parse(readyAt);
+      if (!Number.isFinite(readyAtMs)) return null;
+      return new Date(
+        Math.max(readyAtMs, this.options.now().getTime() + minimumDailyCloseWakeMs),
+      ).toISOString();
+    } catch {
+      return null;
+    }
   }
 
   private requestScheduledDrain(): void {
