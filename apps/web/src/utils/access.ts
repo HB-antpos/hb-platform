@@ -90,6 +90,7 @@ function createEmptyAccess(): AccessControl {
     canEditStoreProducts: false,
     canCreateStoreProducts: false,
     canManageStoreOps: false,
+    canViewStoreCash: false,
     canManageLocalPurchase: false,
     canEditLocalPurchase: false,
     canPushLocalPurchaseToHq: false,
@@ -296,6 +297,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
 
   // 分店运营
   const canManageStoreOps = isAdmin || hasPermission(P.Store.ManageOperations)
+  // 分店现金管理页只认 Cash.Overview.View（管理员由 hasPermission 统一放行）；可见分店、T2 窗口与按钮由接口裁剪。
+  // 父菜单 /pos-admin 不设访问键，由可见子页决定，所以本页权限即可点亮父菜单。
+  const canViewStoreCash = hasPermission(P.Cash.OverviewView)
 
   // 本地进货
   const canManageLocalPurchase = isAdmin || hasPermission(P.LocalPurchase.View)
@@ -467,6 +471,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canEditStoreProducts,
     canCreateStoreProducts,
     canManageStoreOps,
+    canViewStoreCash,
     canManageLocalPurchase,
     canEditLocalPurchase,
     canPushLocalPurchaseToHq,

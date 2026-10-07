@@ -78,6 +78,15 @@ export const P = {
   StoreVouchers: {
     View: 'StoreVouchers.View',
   },
+  // 分店现金管理：Web「现金管理」页与员工 App「现金」入口共用；与后端 Permissions.Cash 一致。
+  // 按钮显隐以接口返回的 capabilities / canVoid / canReview 为准，前端只用 OverviewView 决定入口。
+  Cash: {
+    OverviewView: 'Cash.Overview.View',
+    DepositCreate: 'Cash.Deposit.Create',
+    ExpenseCreate: 'Cash.Expense.Create',
+    Void: 'Cash.Void',
+    AllStoresView: 'Cash.AllStores.View',
+  },
   DomesticPurchase: {
     ManageSuppliers: 'DomesticPurchase.ManageSuppliers',
     ManageProducts: 'DomesticPurchase.ManageProducts',

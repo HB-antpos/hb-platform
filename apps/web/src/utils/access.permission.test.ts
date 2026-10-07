@@ -370,6 +370,7 @@ const backendNavigationEntryCases: Array<[string, string]> = [
   [P.System.ViewAppDownloads, '/system/app-downloads'],
   [P.System.ManageAppDownloads, '/system/app-downloads'],
   [P.PosTerminal.AuditView, '/pos-admin/operation-logs'],
+  [P.Cash.OverviewView, '/pos-admin/store-cash'],
 ]
 
 for (const [permission, expectedPath] of backendNavigationEntryCases) {
@@ -1771,6 +1772,55 @@ assertEqual(
   resolveAuthorizedWebTarget('/shop/batch-product-sales', orderFrontWithBackendBatchSalesAccess),
   undefined,
   '可进前台但缺少前台货号销量权限时，历史地址不应放行',
+)
+
+// 分店现金管理：只认 Cash.Overview.View；页面权限即可点亮 /pos-admin 父菜单并进入后台，
+// 从角色菜单授予时只补本页权限，不连带授予工作台（给店长开现金管理不应开放全公司看板）。
+const storeCashOnlyAccess = buildAccess(
+  createCurrentUser({ roleNames: ['StoreManager'], permissions: [P.Cash.OverviewView] }),
+)
+assertEqual(storeCashOnlyAccess.canViewStoreCash, true, 'Cash.Overview.View 应放开现金管理页')
+assertEqual(storeCashOnlyAccess.canAccessDashboard, false, '现金管理权限不应放开工作台')
+assertEqual(storeCashOnlyAccess.canAccessAdminShell, true, '只有现金管理权限也应能进入后台')
+assertEqual(getDefaultWebPath(storeCashOnlyAccess), '/pos-admin/store-cash', '只有现金管理权限时默认落到现金管理页')
+assertEqual(
+  resolveAuthorizedWebTarget('/pos-admin/store-cash?tab=expenses&store=S001', storeCashOnlyAccess),
+  '/pos-admin/store-cash?tab=expenses&store=S001',
+  '现金管理页带筛选参数的地址应保留',
+)
+assertEqual(
+  resolveAuthorizedWebTarget('/pos-admin/local-supplier-invoices', storeCashOnlyAccess),
+  undefined,
+  '现金管理权限不应放行其他后台页面',
+)
+for (const permission of [P.Cash.DepositCreate, P.Cash.ExpenseCreate, P.Cash.Void, P.Cash.AllStoresView]) {
+  const access = buildAccess(createCurrentUser({ permissions: [permission] }))
+  assertEqual(access.canViewStoreCash, false, `${permission} 单独不应放开现金管理页`)
+}
+assertEqual(buildAccess(createCurrentUser({ roleNames: ['Admin'] })).canViewStoreCash, true, '管理员应能看到现金管理页')
+
+const storeCashOnlyPreview = buildWebRoleMenuPreview(storeCashOnlyAccess, translate, {
+  includeHidden: true,
+  explicitPermissionCodes: [P.Cash.OverviewView],
+})
+const storeCashMenu = findWebMenuNode(storeCashOnlyPreview, '/pos-admin/store-cash')
+assertEqual(storeCashMenu?.visible, true, '菜单预览应显示现金管理')
+assertEqual(storeCashOnlyPreview.find((node) => node.path === '/pos-admin')?.visible, true, '现金管理应点亮 /pos-admin 父菜单')
+assertEqual(storeCashMenu?.permissionCodes.join(','), P.Cash.OverviewView, '现金管理菜单只承载 Cash.Overview.View')
+assertEqual(getAccessKeyPermissionCodes('canViewStoreCash').join(','), P.Cash.OverviewView, '访问键映射到 Cash.Overview.View')
+const storeCashAddPreview = buildWebRoleMenuPreview(buildAccess(createCurrentUser({ permissions: [] })), translate, {
+  includeHidden: true,
+  explicitPermissionCodes: [],
+})
+assertEqual(
+  findWebMenuNode(storeCashAddPreview, '/pos-admin/store-cash')?.edit.addPermissionCodes.join(','),
+  P.Cash.OverviewView,
+  '从菜单授予现金管理只补本页权限，不连带授予工作台',
+)
+assertEqual(
+  findWebMenuNode(storeCashAddPreview, '/pos-admin/promotions')?.edit.addPermissionCodes.join(','),
+  [P.Promotions.View, P.Dashboard.View].join(','),
+  '其他后台页面从菜单授予时仍连带授予工作台（行为不变）',
 )
 
 console.log('access.permission.test: ok')

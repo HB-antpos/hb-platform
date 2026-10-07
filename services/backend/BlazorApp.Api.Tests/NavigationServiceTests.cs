@@ -944,6 +944,15 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildMenu_只有现金查看权限也能进后台且只看到现金管理页()
+    {
+        var menu = _service.BuildMenu(CreateUser(new Claim("permission", Permissions.Cash.OverviewView)));
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        Assert.Equal(new[] { "/pos-admin/store-cash" }, posAdmin.Children!.Select(item => item.Path));
+    }
+
+    [Fact]
     public void BuildAppMenu_ShowsFullMenuForAdmin()
     {
         var user = CreateUser(new Claim(ClaimTypes.Role, "Admin"));

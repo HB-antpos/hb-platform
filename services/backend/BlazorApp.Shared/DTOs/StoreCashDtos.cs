@@ -143,6 +143,81 @@ public sealed class CashStoreSummaryDto
     public List<DateOnly> MissingCloseDates { get; set; } = [];
 }
 
+// ───────────────────────── 多店总览（Web） ─────────────────────────
+
+/// <summary>
+/// GET cash/overview?from=&amp;to=&amp;storeCodes=：每个可见分店一行。
+/// 「区间」字段只统计 [From, To]（门店本地营业日 / 存款日 / 支出日）；现金池余额、未存天数等「当前」字段截止到门店今天。
+/// </summary>
+public sealed class CashOverviewDto
+{
+    public DateOnly From { get; set; }
+    public DateOnly To { get; set; }
+    public bool DailyCloseConnected { get; set; }
+
+    /// <summary>当前账号受 T2 窗口限制：区间里的 T2 只含最近 14 天，分类之和可能小于支出合计。</summary>
+    public bool T2Restricted { get; set; }
+
+    public List<CashOverviewRowDto> Rows { get; set; } = [];
+
+    /// <summary>各分店合计；任一分店的可空字段为 null 时，对应合计也为 null，避免把不可算的店当 0 加进去。</summary>
+    public CashOverviewTotalsDto Totals { get; set; } = new();
+}
+
+public sealed class CashOverviewRowDto
+{
+    public string StoreCode { get; set; } = string.Empty;
+    public string StoreName { get; set; } = string.Empty;
+    public DateOnly StoreToday { get; set; }
+
+    // 当前（截止门店今天）
+    public bool OpeningMissing { get; set; }
+    public decimal? PoolBalance { get; set; }
+    public int UncoveredDayCount { get; set; }
+    public DateOnly? OldestUncoveredDate { get; set; }
+    public bool DepositOverdue { get; set; }
+    public DateOnly? LastDepositDate { get; set; }
+
+    // 区间
+    /// <summary>区间内纳入的日结实点现金合计；日结未接入时为 null。</summary>
+    public decimal? InflowCash { get; set; }
+
+    /// <summary>区间内纳入日结的差异合计（实点 − 应有，正为长款、负为短款）；日结未接入时为 null。</summary>
+    public decimal? CloseVariance { get; set; }
+
+    /// <summary>区间内有日结的营业日数。</summary>
+    public int CloseDayCount { get; set; }
+
+    /// <summary>区间内（不含门店今天）没有任何日结的营业日数；可能是休息日，仅提示。日结未接入时为 0。</summary>
+    public int MissingCloseDayCount { get; set; }
+
+    public decimal DepositTotal { get; set; }
+    public int DepositCount { get; set; }
+
+    /// <summary>区间内支出真实合计。</summary>
+    public decimal ExpenseTotal { get; set; }
+
+    /// <summary>区间内按类别合计（四类固定顺序）；T2 受当前账号可见窗口限制。</summary>
+    public List<CashExpenseCategoryTotalDto> ExpenseByCategory { get; set; } = [];
+
+    /// <summary>区间内被标记为「存疑」的支出笔数。</summary>
+    public int FlaggedExpenseCount { get; set; }
+}
+
+public sealed class CashOverviewTotalsDto
+{
+    public decimal? PoolBalance { get; set; }
+    public decimal? InflowCash { get; set; }
+    public decimal? CloseVariance { get; set; }
+    public decimal DepositTotal { get; set; }
+    public int DepositCount { get; set; }
+    public decimal ExpenseTotal { get; set; }
+    public List<CashExpenseCategoryTotalDto> ExpenseByCategory { get; set; } = [];
+    public int UncoveredDayCount { get; set; }
+    public int OverdueStoreCount { get; set; }
+    public int FlaggedExpenseCount { get; set; }
+}
+
 // ───────────────────────── 按日明细与日结选择 ─────────────────────────
 
 public sealed class CashCloseArchiveDto
@@ -298,6 +373,15 @@ public sealed class CashDepositSlipDto
     public List<CashAttachmentDto> Attachments { get; set; } = [];
 }
 
+/// <summary>存单摘要：银行对账按存单粒度匹配入账流水，列表与导出都需要逐张的金额与存单号。</summary>
+public sealed class CashDepositSlipSummaryDto
+{
+    public string SlipGuid { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string? SlipNo { get; set; }
+    public int ImageCount { get; set; }
+}
+
 public class CashDepositListItemDto
 {
     public string DepositGuid { get; set; } = string.Empty;
@@ -308,6 +392,9 @@ public class CashDepositListItemDto
     public decimal TotalAmount { get; set; }
     public int SlipCount { get; set; }
     public int ImageCount { get; set; }
+
+    /// <summary>按录入顺序的存单摘要。</summary>
+    public List<CashDepositSlipSummaryDto> SlipSummaries { get; set; } = [];
 
     /// <summary>Active / Voided。</summary>
     public string Status { get; set; } = string.Empty;
@@ -365,8 +452,15 @@ public class CashExpenseListItemDto
     public string? PayeeName { get; set; }
     public string? Note { get; set; }
 
-    /// <summary>None / Reviewed / Flagged。</summary>
+    /// <summary>None / Reviewed / Flagged：财务事后核对标记，不影响支出生效。</summary>
     public string ReviewStatus { get; set; } = "None";
+
+    public string? ReviewNote { get; set; }
+    public string? ReviewedByName { get; set; }
+    public DateTime? ReviewedAtUtc { get; set; }
+
+    /// <summary>当前账号能否打核对标记（持有 Cash.Void，且记录有效）。</summary>
+    public bool CanReview { get; set; }
 
     /// <summary>Active / Voided。</summary>
     public string Status { get; set; } = string.Empty;
@@ -384,6 +478,16 @@ public sealed class CashExpenseDetailDto : CashExpenseListItemDto
     public string? VoidedByName { get; set; }
     public DateTime? VoidedAtUtc { get; set; }
     public List<CashAttachmentDto> Attachments { get; set; } = [];
+}
+
+/// <summary>
+/// POST cash/expenses/{id}/review：财务事后核对标记（Reviewed 已核 / Flagged 存疑 / None 清除），需要 Cash.Void。
+/// 存疑必须写说明；标记不影响支出生效与现金池。
+/// </summary>
+public sealed class CashExpenseReviewRequest
+{
+    public string ReviewStatus { get; set; } = string.Empty;
+    public string? Note { get; set; }
 }
 
 // ───────────────────────── 期初与盘点 ─────────────────────────

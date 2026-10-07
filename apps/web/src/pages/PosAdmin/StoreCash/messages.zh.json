@@ -1,0 +1,360 @@
+{
+  "storeCash": {
+    "title": "现金管理",
+    "subtitle": "现金池 = 期初 + 日结实点现金 − 存款 − 支出；备用金在点钱前已取出，不计入，存完后余额应趋近 0",
+    "noStores": "当前账号没有可查看现金的分店",
+    "t2Note": "T2 仅含最近 {{days}} 天",
+    "tabs": {
+      "overview": "总览",
+      "daily": "按日明细",
+      "deposits": "存款",
+      "expenses": "支出"
+    },
+    "dailyCloseMissing": {
+      "title": "日结数据暂未接入",
+      "description": "现金池余额、日结现金与日结差异暂时无法计算，显示为「—」；存款与支出记录不受影响。"
+    },
+    "filters": {
+      "range": "日期范围",
+      "rangeHint": "最多 {{days}} 天，不能晚于门店今天",
+      "store": "分店",
+      "stores": "分店",
+      "allStores": "全部分店",
+      "category": "类别",
+      "allCategories": "全部类别",
+      "review": "核对状态",
+      "allReview": "全部",
+      "includeVoided": "含已作废"
+    },
+    "actions": {
+      "refresh": "刷新",
+      "retry": "重试",
+      "cancel": "取消"
+    },
+    "export": {
+      "button": "导出 CSV",
+      "preparing": "正在准备…",
+      "progress": "正在导出 {{done}} / {{total}} 行",
+      "success": "已导出 {{fileName}}（{{rows}} 行）",
+      "tooMany": "当前条件下共 {{total}} 行，超过单次导出上限 {{max}} 行，请缩小日期范围或筛选条件后再导出",
+      "empty": "当前条件下没有可导出的数据",
+      "failed": "导出失败：{{reason}}",
+      "prefix": {
+        "overview": "现金总览",
+        "daily": "现金按日明细",
+        "deposits": "现金存款",
+        "expenses": "现金支出"
+      }
+    },
+    "kpi": {
+      "region": "现金指标",
+      "pool": "现金池余额合计",
+      "poolSub": "截止各店今天",
+      "openingMissing": "{{count}} 家分店缺期初，合计暂不可算",
+      "dailyCloseMissing": "日结数据暂未接入",
+      "inflow": "区间日结现金",
+      "variance": "日结差异",
+      "deposits": "区间存款",
+      "depositCount": "共 {{count}} 笔",
+      "expenses": "区间支出",
+      "expenseSub": "现金工资、现金购物、T2、其他",
+      "overdue": "逾期未存分店",
+      "overdueSub": "超过 {{days}} 天未存银行；共 {{count}} 个营业日未存",
+      "flagged": "存疑支出",
+      "flaggedSub": "财务标记为存疑待跟进，不影响支出生效"
+    },
+    "overview": {
+      "openDaily": "查看该店按日明细",
+      "openingMissing": "缺期初",
+      "openingMissingHint": "该店还没有录入期初现金，现金池余额无法计算",
+      "allDeposited": "已全部存入",
+      "uncoveredDays": "{{count}} 天未存",
+      "overdue": "逾期",
+      "oldestUncovered": "最久 {{date}}",
+      "varianceHint": "实点 − 应有：正数为长款，负数为短款",
+      "closeDays": "{{count}} 天有日结",
+      "missingCloseHint": "区间内（不含今天）没有任何日结的营业日，可能是休息日，仅提示",
+      "missingCloseDays": "缺日结 {{count}} 天",
+      "depositCount": "{{count}} 笔",
+      "tableLabel": "分店现金总览表",
+      "tableTitle": "分店明细",
+      "rangeNote": "区间 {{from}} ~ {{to}}；现金池余额与未存天数截止各店今天",
+      "rowHint": "点分店查看按日明细",
+      "empty": "所选分店在该区间没有数据",
+      "totalRow": "合计（{{count}} 家）",
+      "columns": {
+        "store": "分店",
+        "poolBalance": "现金池余额",
+        "uncovered": "未存银行",
+        "inflowCash": "日结现金",
+        "closeVariance": "日结差异",
+        "closeDays": "日结天数",
+        "deposits": "存款",
+        "expenseGroup": "区间支出",
+        "expenseTotal": "合计",
+        "flagged": "存疑",
+        "lastDepositDate": "最近存款日"
+      }
+    },
+    "weekday": {
+      "sun": "周日",
+      "mon": "周一",
+      "tue": "周二",
+      "wed": "周三",
+      "thu": "周四",
+      "fri": "周五",
+      "sat": "周六"
+    },
+    "daily": {
+      "columns": {
+        "businessDate": "营业日",
+        "inflowCash": "日结现金",
+        "close": "日结",
+        "covered": "存款覆盖",
+        "expenseTotal": "当天支出",
+        "devices": "设备日结"
+      },
+      "hasClose": "有日结",
+      "noClose": "无日结",
+      "covered": "已存",
+      "uncovered": "未存",
+      "deviceCount": "{{count}} 台设备",
+      "manualCount": "手选 {{count}}",
+      "staleCount": "待确认 {{count}}",
+      "overlapCount": "区间重叠 {{count}}",
+      "summary": {
+        "inflow": "日结现金",
+        "closeDays": "有日结天数",
+        "uncoveredDays": "未存天数",
+        "expense": "支出"
+      },
+      "readOnlyHint": "纳入哪几份日结由店长在员工 App「现金」里手选，这里只读",
+      "tableLabel": "按日明细表",
+      "empty": "该店在所选区间没有日结与支出",
+      "device": {
+        "included": "纳入现金池",
+        "selectedBy": "{{name}} 手选于 {{time}}",
+        "stale": "手选之后又出现了更新的日结存档，需要店长在 App 里重新确认",
+        "overlap": "手选的几份日结统计区间有重叠，可能重复计入",
+        "reason": "手选原因：{{reason}}"
+      },
+      "archive": {
+        "savedAt": "保存时间",
+        "period": "统计区间",
+        "periodHint": "这份日结统计的收银时间段（门店本地时间）",
+        "counted": "实点",
+        "expected": "应有",
+        "variance": "差异",
+        "included": "纳入",
+        "yes": "已纳入",
+        "no": "未纳入",
+        "empty": "没有日结存档"
+      }
+    },
+    "selection": {
+      "Default": "默认（最新一份）",
+      "Manual": "手选"
+    },
+    "category": {
+      "Salary": "现金工资",
+      "Purchase": "现金购物",
+      "T2": "T2",
+      "Other": "其他"
+    },
+    "review": {
+      "None": "未核对",
+      "Reviewed": "已核",
+      "Flagged": "存疑"
+    },
+    "status": {
+      "Active": "有效",
+      "Voided": "已作废"
+    },
+    "deposits": {
+      "columns": {
+        "depositDate": "存款日期",
+        "covered": "覆盖营业日",
+        "total": "合计",
+        "slips": "存单",
+        "images": "图片",
+        "createdBy": "录入人",
+        "createdAt": "录入时间",
+        "status": "状态",
+        "note": "备注"
+      },
+      "coveredRange": "{{from}} ~ {{to}}",
+      "slipCount": "{{count}} 张",
+      "tableLabel": "存款记录表",
+      "tableTitle": "存款记录",
+      "rowHint": "点行查看存单与照片",
+      "empty": "该店在所选区间没有存款记录",
+      "drawerTitle": "存款 {{date}}",
+      "drawerTitleLoading": "存款详情",
+      "fields": {
+        "status": "状态",
+        "depositDate": "存款日期",
+        "covered": "覆盖营业日",
+        "total": "合计",
+        "slips": "存单",
+        "createdBy": "录入",
+        "note": "备注",
+        "overrideReason": "差异原因"
+      },
+      "slipSummary": "{{slips}} 张存单，{{images}} 张照片",
+      "slipsTitle": "存单",
+      "noSlips": "没有存单",
+      "slipLabel": "存单 {{index}}",
+      "slipNo": "存单号 {{slipNo}}",
+      "slipNoMissing": "未填存单号",
+      "slipImageAlt": "存单 {{index}} 照片 {{image}}"
+    },
+    "expenses": {
+      "columns": {
+        "expenseDate": "日期",
+        "category": "类别",
+        "amount": "金额",
+        "payee": "收款人",
+        "note": "备注",
+        "review": "核对",
+        "createdBy": "录入",
+        "status": "状态",
+        "images": "图片"
+      },
+      "tooMany": "当前条件下共 {{total}} 笔支出，超过 {{max}} 笔上限，无法列出与合计；请缩小日期范围或筛选条件",
+      "summary": {
+        "region": "支出分类合计",
+        "total": "合计",
+        "count": "（{{count}} 笔）",
+        "voidedExcluded": "不含已作废 {{count}} 笔",
+        "flagged": "存疑 {{count}} 笔"
+      },
+      "tableLabel": "现金支出表",
+      "tableTitle": "支出记录",
+      "rowHint": "点行查看收据并核对",
+      "empty": "该店在所选条件下没有支出记录",
+      "drawerTitle": "支出 {{date}}",
+      "drawerTitleLoading": "支出详情",
+      "flaggedBanner": "财务已标记为存疑",
+      "fields": {
+        "status": "状态",
+        "expenseDate": "日期",
+        "category": "类别",
+        "amount": "金额",
+        "payee": "收款人",
+        "note": "备注",
+        "createdBy": "录入",
+        "review": "核对标记"
+      },
+      "receiptsTitle": "收据照片（{{count}} 张）",
+      "receiptAlt": "收据照片 {{index}}"
+    },
+    "drawer": {
+      "reload": "重新加载",
+      "byAt": "{{name}} · {{time}}",
+      "noImages": "没有照片",
+      "imageExpiry": "照片链接几分钟内有效；打不开时点「重新加载」"
+    },
+    "void": {
+      "success": "已作废",
+      "voidedTitle": "已作废，不计入现金池与合计",
+      "voidedDetail": "原因：{{reason}}（{{name}} · {{time}}）",
+      "depositButton": "作废存款",
+      "depositTitle": "作废这笔存款？",
+      "depositDescription": "{{date}} 的存款 {{amount}} 作废后不再计入现金池，它覆盖的营业日会重新显示为未存。作废后不能撤销。",
+      "expenseButton": "作废支出",
+      "expenseTitle": "作废这笔支出？",
+      "expenseDescription": "{{date}} 的支出 {{amount}} 作废后不再计入现金池与合计。作废后不能撤销。",
+      "reasonLabel": "作废原因",
+      "reasonPlaceholder": "例如：重复录入、金额录错",
+      "confirm": "确认作废"
+    },
+    "reviewAction": {
+      "success": "核对标记已更新",
+      "markReviewed": "标为已核",
+      "markFlagged": "标为存疑",
+      "clear": "清除标记",
+      "reviewedTitle": "标为已核？",
+      "reviewedDescription": "确认 {{date}} 的支出 {{amount}} 已核对无误。核对标记不影响支出生效。",
+      "reviewedConfirm": "标为已核",
+      "flaggedTitle": "标为存疑？",
+      "flaggedDescription": "{{date}} 的支出 {{amount}} 将标为存疑，并在列表里醒目显示。标记不影响支出生效与现金池。",
+      "flaggedConfirm": "标为存疑",
+      "clearTitle": "清除核对标记？",
+      "clearDescription": "{{date}} 的支出 {{amount}} 将恢复为未核对。",
+      "clearConfirm": "清除标记",
+      "noteLabel": "说明",
+      "notePlaceholderRequired": "写明存疑的原因（必填）",
+      "notePlaceholderOptional": "可选"
+    },
+    "reason": {
+      "tooShort": "至少填写 {{min}} 个字"
+    },
+    "pagination": {
+      "total": "共 {{count}} 条"
+    },
+    "errors": {
+      "invalidRequest": "请求参数无效，请检查筛选条件",
+      "dateOutOfRange": "日期超出允许范围",
+      "storeNotFound": "分店不存在",
+      "storeForbidden": "没有权限查看该分店的现金数据",
+      "recordNotFound": "记录不存在或已被删除",
+      "voidNotAllowed": "没有权限作废这条记录，或已超过可作废时限",
+      "closeSourceUnavailable": "日结数据暂时无法读取，请稍后重试",
+      "conflict": "记录已被其他人修改，请刷新后重试",
+      "server": "服务器出错，请稍后重试",
+      "network": "网络连接失败，请检查网络后重试",
+      "unknown": "操作失败，请稍后重试"
+    },
+    "csv": {
+      "storeCode": "分店编码",
+      "storeName": "分店名称",
+      "poolBalance": "现金池余额",
+      "openingMissing": "缺期初",
+      "uncoveredDays": "未存天数",
+      "oldestUncoveredDate": "最久未存日期",
+      "depositOverdue": "逾期未存",
+      "inflowCash": "日结现金",
+      "closeVariance": "日结差异",
+      "closeDays": "有日结天数",
+      "missingCloseDays": "缺日结天数",
+      "depositCount": "存款笔数",
+      "depositTotal": "存款金额",
+      "expenseTotal": "支出合计",
+      "t2Restricted": "T2（仅含最近 {{days}} 天）",
+      "flaggedCount": "存疑笔数",
+      "lastDepositDate": "最近存款日",
+      "totalRow": "合计",
+      "yes": "是",
+      "no": "否",
+      "businessDate": "营业日",
+      "hasClose": "有日结",
+      "covered": "已被存款覆盖",
+      "dayExpense": "当天支出",
+      "deviceCount": "日结设备数",
+      "manualDevices": "手选设备数",
+      "staleDevices": "待确认设备数",
+      "depositDate": "存款日期",
+      "coveredFrom": "覆盖起始营业日",
+      "coveredTo": "覆盖截止营业日",
+      "depositAmount": "存款合计",
+      "slipCount": "存单张数",
+      "slipIndex": "存单序号",
+      "slipAmount": "存单金额",
+      "slipNo": "存单号",
+      "slipImageCount": "存单图片数",
+      "imageCount": "图片张数",
+      "createdBy": "录入人",
+      "createdAt": "录入时间",
+      "status": "状态",
+      "note": "备注",
+      "expenseDate": "支出日期",
+      "category": "类别",
+      "amount": "金额",
+      "payee": "收款人",
+      "reviewStatus": "核对状态",
+      "reviewNote": "核对说明",
+      "reviewedBy": "核对人",
+      "reviewedAt": "核对时间"
+    }
+  }
+}

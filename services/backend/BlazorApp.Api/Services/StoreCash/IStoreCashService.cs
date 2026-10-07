@@ -17,6 +17,15 @@ public interface IStoreCashService
         CancellationToken cancellationToken
     );
 
+    /// <summary>Web 多店总览：每个可见分店一行，区间默认本月 1 日到今天。</summary>
+    Task<ApiResponse<CashOverviewDto>> GetOverviewAsync(
+        CashAccess access,
+        DateOnly? from,
+        DateOnly? to,
+        IReadOnlyList<string>? storeCodes,
+        CancellationToken cancellationToken
+    );
+
     Task<ApiResponse<CashDailyDto>> GetDailyAsync(
         CashAccess access,
         string? storeCode,
@@ -79,6 +88,7 @@ public interface IStoreCashService
         DateOnly? from,
         DateOnly? to,
         string? category,
+        string? reviewStatus,
         bool includeVoided,
         int limit,
         int offset,
@@ -88,6 +98,13 @@ public interface IStoreCashService
     Task<ApiResponse<CashExpenseDetailDto>> GetExpenseAsync(
         CashAccess access,
         string expenseGuid,
+        CancellationToken cancellationToken
+    );
+
+    Task<ApiResponse<CashExpenseDetailDto>> ReviewExpenseAsync(
+        CashAccess access,
+        string expenseGuid,
+        CashExpenseReviewRequest request,
         CancellationToken cancellationToken
     );
 

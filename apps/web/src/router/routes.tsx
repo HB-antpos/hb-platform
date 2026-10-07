@@ -1,4 +1,5 @@
 import {
+  AccountBookOutlined,
   AppstoreOutlined,
   BankOutlined,
   BarChartOutlined,
@@ -78,6 +79,8 @@ const PosAdminEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/EmployeeLo
 const LinklySettlementsPage = lazy(() => import('../pages/PosAdmin/LinklySettlements'))
 const LinklySettlementDetailPage = lazy(() => import('../pages/PosAdmin/LinklySettlementDetail'))
 const DailyClosesPage = lazy(() => import('../pages/PosAdmin/DailyCloses'))
+// 分店现金管理：多店现金池总览、按日日结、存款与现金支出（页面文案随页面懒加载）。
+const PosAdminStoreCashPage = lazy(() => import('../pages/PosAdmin/StoreCash'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
 const LocalSupplierInvoiceSalesAnalysisPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoiceSalesAnalysis'))
 const InvoiceEditPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit'))
@@ -141,6 +144,7 @@ interface LeafEntry {
 
 const iconMap = {
   DashboardOutlined: <DashboardOutlined />,
+  AccountBookOutlined: <AccountBookOutlined />,
   AppstoreOutlined: <AppstoreOutlined />,
   BankOutlined: <BankOutlined />,
   BarChartOutlined: <BarChartOutlined />,
@@ -881,6 +885,16 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewDailyCloseRecords',
         },
         element: <DailyClosesPage />,
+      },
+      {
+        path: '/pos-admin/store-cash',
+        meta: {
+          title: 'menu.storeCash',
+          icon: 'AccountBookOutlined',
+          keepAlive: true,
+          accessKey: 'canViewStoreCash',
+        },
+        element: <PosAdminStoreCashPage />,
       },
       {
         path: '/pos-admin/sales-orders',

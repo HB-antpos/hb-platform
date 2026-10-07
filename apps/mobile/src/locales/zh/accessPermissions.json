@@ -139,7 +139,7 @@
     },
     "Cash.Overview.View": {
       "name": "查看现金管理",
-      "description": "移动端「现金」- 查看分店现金池余额、按日明细、存款与现金支出记录；店长只限自己关联的分店"
+      "description": "移动端「现金」与 Web 页面 /pos-admin/store-cash - 查看分店现金池余额、按日明细、存款与现金支出记录并导出；店长只限自己关联的分店"
     },
     "Cash.Void": {
       "name": "作废现金记录",

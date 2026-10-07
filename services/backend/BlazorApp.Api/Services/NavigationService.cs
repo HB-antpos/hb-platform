@@ -157,6 +157,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
                     // 日结记录：WPF / 手持 / iPad 上传的日结与现金盘点明细；独立权限码，分店范围由查询接口收口。
                     new() { Path = "/pos-admin/daily-closes",          TitleKey = "menu.dailyCloses",            Icon = "MoneyCollectOutlined",       Permission = Permissions.DailyCloseRecords.View },
+                    // 分店现金管理：多店现金池总览、按日日结、存款与现金支出；店长只见关联分店，T2 受 14 天窗口限制。
+                    new() { Path = "/pos-admin/store-cash",           TitleKey = "menu.storeCash",              Icon = "AccountBookOutlined",        Permission = Permissions.Cash.OverviewView },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
@@ -754,6 +756,8 @@ namespace BlazorApp.Api.Services
                 Permissions.PosTerminal.Audit.View,
                 Permissions.LegacyEmployeeLogs.View,
                 Permissions.DailyCloseRecords.View,
+                // 现金管理页：只有该权限的店长 / 财务也要能拿到后台菜单，否则前端只能退回本地菜单。
+                Permissions.Cash.OverviewView,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage
             );
