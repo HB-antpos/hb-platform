@@ -13,8 +13,6 @@
     "deviceServicesReady": "Device configuration available",
     "deviceServicesAttention": "Some device settings need attention",
     "connectionSummary": "Current store: {{store}}",
-    "ready": "Ready",
-    "attention": "Attention",
     "accountMode": "Account mode",
     "deviceMode": "Device mode",
     "languageZhShort": "中文",

@@ -12,6 +12,8 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import { useRouter } from "expo-router";
 import {
@@ -61,7 +63,11 @@ import { useDeviceStore } from "@/store/device-store";
 import { resolveSettingsAuthMode, shouldShowProfileAction } from "@/modules/device/settings-mode";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import { isRequiredLocationError } from "@/modules/attendance/required-location";
-import { buildAppUpdateInfoRows, formatAppPackageVersion } from "@/modules/updates/app-update-info";
+import {
+  buildAppUpdateInfoRows,
+  formatAppPackageVersion,
+  resolveAppUpdateSourceKey,
+} from "@/modules/updates/app-update-info";
 import { getCurrentAppUpdateInfo } from "@/modules/updates/app-update-runtime";
 import { useMobileOtaManualCheck } from "@/modules/updates/MobileOtaUpdateBoundary";
 import {
@@ -158,10 +164,18 @@ function StatusPill({ label, tone = "neutral" }: StatusPillProps) {
     danger: styles.statusPillTextDanger,
     neutral: styles.statusPillTextNeutral,
   }[tone];
+  const dotToneStyle = {
+    success: styles.statusPillDotSuccess,
+    warning: styles.statusPillDotWarning,
+    danger: styles.statusPillDotDanger,
+    neutral: styles.statusPillDotNeutral,
+  }[tone];
 
+  // 不限行数：英文状态（如 "Status: Auto reconnecting"）宁可换行也不能被省略号截断。
   return (
     <View style={[styles.statusPill, toneStyle]}>
-      <Text variant="labelSmall" style={[styles.statusPillText, textToneStyle]} numberOfLines={1}>
+      <View style={[styles.statusPillDot, dotToneStyle]} />
+      <Text variant="labelSmall" style={[styles.statusPillText, textToneStyle]}>
         {label}
       </Text>
     </View>
@@ -281,24 +295,27 @@ function CompactRow({
           <Icon source={icon} size={21} color={HB_COLORS.action} />
         </View>
       ) : null}
-      <View style={styles.compactRowText}>
-        <Text variant="bodyMedium" style={styles.compactRowLabel}>
-          {label}
-        </Text>
+      <View style={styles.compactRowBody}>
+        {/* 状态标签跟在标题后、放不下整体换行；右侧只留操作与箭头，文字列不再被挤到截断。 */}
+        <View style={styles.compactRowTitleLine}>
+          <Text variant="bodyMedium" style={styles.compactRowLabel}>
+            {label}
+          </Text>
+          {status ? <StatusPill label={status} tone={statusTone} /> : null}
+        </View>
         {value ? (
-          <Text variant="bodySmall" style={styles.compactRowValue} numberOfLines={1}>
+          <Text variant="bodySmall" style={styles.compactRowValue}>
             {value}
           </Text>
         ) : null}
         {meta ? (
-          <Text variant="bodySmall" style={styles.meta} numberOfLines={2}>
+          <Text variant="bodySmall" style={styles.meta}>
             {meta}
           </Text>
         ) : null}
       </View>
-      {status || action || onPress ? (
+      {action || onPress ? (
         <View style={styles.compactRowEnd}>
-          {status ? <StatusPill label={status} tone={statusTone} /> : null}
           {action ? <View style={styles.compactRowAction}>{action}</View> : null}
           {onPress ? (
             <View style={styles.rowChevron} accessible={false}>
@@ -332,6 +349,50 @@ function CompactRow({
     >
       {rowContent}
     </Pressable>
+  );
+}
+
+interface UpdateInfoTileProps {
+  label: string;
+  value: string;
+}
+
+// 标签在上、数值在下且不限行数：英文标签更长时数值照样完整显示（原先渠道会被按钮挤掉）。
+function UpdateInfoTile({ label, value }: UpdateInfoTileProps) {
+  return (
+    <View style={styles.updateTile} accessible accessibilityLabel={[label, value].join(". ")}>
+      <Text variant="labelMedium" style={styles.updateTileLabel}>
+        {label}
+      </Text>
+      <Text variant="bodyMedium" style={styles.updateTileValue}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+interface InfoRowProps {
+  label: string;
+  value: string;
+  monospace?: boolean;
+  style?: StyleProp<ViewStyle>;
+}
+
+// 诊断用的两列信息行：标签最多占 45%，数值右对齐、可换行且可长按复制（便于排障时复制更新 ID）。
+function InfoRow({ label, value, monospace, style }: InfoRowProps) {
+  return (
+    <View style={[styles.infoRow, style]}>
+      <Text variant="bodySmall" style={styles.infoRowLabel}>
+        {label}
+      </Text>
+      <Text
+        variant="bodySmall"
+        selectable
+        style={[styles.infoRowValue, monospace && styles.infoRowValueMono]}
+      >
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -524,6 +585,9 @@ export default function Settings() {
     () => formatAppPackageVersion(updateInfo, t("updates.unknown")),
     [t, updateInfo]
   );
+  const appUpdateSourceKey = resolveAppUpdateSourceKey(updateInfo);
+  // 用 || 而非 ??：开发包与未配置渠道的安装包里 Updates.channel 是空字符串，?? 会让渠道显示为空白。
+  const appUpdateChannelLabel = updateInfo.channel || t("updates.noChannel");
 
   const hasSelectedTransport =
     Platform.OS !== "android" || transportFilters.showClassic || transportFilters.showBle;
@@ -1164,14 +1228,10 @@ export default function Settings() {
                     : "overview.deviceServicesReady"
                 )}
               </Text>
-              <Text variant="bodySmall" style={styles.meta} numberOfLines={1}>
+              <Text variant="bodySmall" style={styles.meta}>
                 {t("overview.connectionSummary", { store: deviceStoreDisplayName })}
               </Text>
             </View>
-            <StatusPill
-              label={t(connectionNeedsAttention ? "overview.attention" : "overview.ready")}
-              tone={connectionNeedsAttention ? "warning" : "success"}
-            />
           </View>
 
           <View style={styles.sectionDivider} />
@@ -1191,8 +1251,8 @@ export default function Settings() {
           <CompactRow
             icon="printer-outline"
             label={t("printer.title")}
-            value={savedPrinter?.name || savedPrinter?.address || t("overview.notConfigured")}
-            meta={labelPrinterStatusText}
+            value={savedPrinter?.name || savedPrinter?.address || t("printer.notSelected")}
+            meta={savedPrinter ? labelPrinterStatusText : undefined}
             status={t(
               isPrinterConnected
                 ? "overview.connected"
@@ -1213,9 +1273,9 @@ export default function Settings() {
             value={
               savedReceiptPrinter?.name ||
               savedReceiptPrinter?.address ||
-              t("overview.notConfigured")
+              t("receiptPrinter.notSelected")
             }
-            meta={receiptPrinterStatusText}
+            meta={savedReceiptPrinter ? receiptPrinterStatusText : undefined}
             status={t(
               receiptPrinterStatus === "connected"
                 ? "overview.connected"
@@ -1284,37 +1344,58 @@ export default function Settings() {
             icon="shield-check-outline"
             label={t("privacy.title")}
             value={t("overview.privacySummary")}
-            meta={t(
-              showProfileAction
-                ? "privacy.employeeDescription"
-                : "privacy.deviceDescription"
-            )}
             onPress={() => router.push("/privacy")}
             accessibilityLabel={t("privacy.openPolicy")}
           />
+          {/* 数据权利说明须完整可读：英文约 190 字符，原先塞在两行副标题里后半句被截掉。 */}
+          <View style={styles.inlineNote}>
+            <View style={styles.inlineNoteIcon}>
+              <Icon source="information-outline" size={16} color={HB_COLORS.textSecondary} />
+            </View>
+            <Text variant="bodySmall" style={styles.inlineNoteText}>
+              {t(
+                showProfileAction
+                  ? "privacy.employeeDescription"
+                  : "privacy.deviceDescription"
+              )}
+            </Text>
+          </View>
         </CompactSection>
 
         <CompactSection
           title={t("groups.support")}
           testID="settings-group-app-support"
         >
-          <CompactRow
-            icon="cloud-download-outline"
-            label={t("updates.title")}
-            value={appPackageVersion}
-            meta={`${t("updates.channel")}: ${updateInfo.channel ?? t("updates.noChannel")}`}
-            action={
-              <Button
-                compact
-                mode="text"
-                onPress={handleCheckUpdates}
-                loading={updateBusy}
-                disabled={updateBusy}
-              >
-                {t("updates.check")}
-              </Button>
-            }
-          />
+          {/* 检查按钮独占一行：英文 "Check for updates" 约占半行，与文字同行时曾把更新渠道挤到被截断。 */}
+          <View style={styles.updatePanel} testID="settings-app-update">
+            <View style={styles.updatePanelHeader}>
+              <View style={styles.rowIconBox}>
+                <Icon source="cloud-download-outline" size={21} color={HB_COLORS.action} />
+              </View>
+              <View style={[styles.compactRowTitleLine, styles.updatePanelTitleLine]}>
+                <Text variant="bodyMedium" style={styles.compactRowLabel}>
+                  {t("updates.title")}
+                </Text>
+                <StatusPill label={t(appUpdateSourceKey)} />
+              </View>
+            </View>
+            <View style={styles.updateTiles}>
+              <UpdateInfoTile label={t("updates.version")} value={appPackageVersion} />
+              <UpdateInfoTile label={t("updates.channel")} value={appUpdateChannelLabel} />
+            </View>
+            <Button
+              mode="outlined"
+              icon="refresh"
+              testID="settings-check-updates"
+              onPress={handleCheckUpdates}
+              loading={updateBusy}
+              disabled={updateBusy}
+              style={styles.updateCheckButton}
+              contentStyle={styles.updateCheckButtonContent}
+            >
+              {t("updates.check")}
+            </Button>
+          </View>
           <View style={styles.sectionDivider} />
           <CompactRow
             icon="server-network"
@@ -1354,7 +1435,7 @@ export default function Settings() {
         <Text variant="bodySmall" style={styles.buildFooter}>
           {t("overview.buildFooter", {
             version: appPackageVersion,
-            channel: updateInfo.channel ?? t("updates.noChannel"),
+            channel: appUpdateChannelLabel,
           })}
         </Text>
       </ScrollView>
@@ -1380,7 +1461,6 @@ export default function Settings() {
               <View style={styles.statusBlock}>
                 <CompactRow
                   label={t("device.statusLabel")}
-                  value={accountBinding ? t("deviceStatus.bound") : deviceStatusText}
                   status={accountBinding ? t("deviceStatus.bound") : deviceStatusText}
                   statusTone={deviceStatusTone}
                 />
@@ -1484,19 +1564,19 @@ export default function Settings() {
             >
               <View style={styles.printerSection}>
                 <View style={styles.printerSectionHeader}>
-                  <View style={styles.compactRowText}>
+                  <View style={styles.compactRowTitleLine}>
                     <Text variant="titleMedium" style={styles.sheetSubheading}>
                       {t("printer.title")}
                     </Text>
-                    <Text variant="bodySmall" style={styles.compactRowValue} numberOfLines={1}>
-                      {savedPrinter
-                        ? t("printer.selected", {
-                            printer: savedPrinter.name || savedPrinter.address,
-                          })
-                        : t("printer.notSelected")}
-                    </Text>
+                    <StatusPill label={labelPrinterStatusText} tone={labelPrinterStatusTone} />
                   </View>
-                  <StatusPill label={labelPrinterStatusText} tone={labelPrinterStatusTone} />
+                  <Text variant="bodySmall" style={styles.compactRowValue}>
+                    {savedPrinter
+                      ? t("printer.selected", {
+                          printer: savedPrinter.name || savedPrinter.address,
+                        })
+                      : t("printer.notSelected")}
+                  </Text>
                 </View>
 
                 <View style={styles.primaryPrinterActions}>
@@ -1612,22 +1692,22 @@ export default function Settings() {
 
               <View style={styles.printerSection}>
                 <View style={styles.printerSectionHeader}>
-                  <View style={styles.compactRowText}>
+                  <View style={styles.compactRowTitleLine}>
                     <Text variant="titleMedium" style={styles.sheetSubheading}>
                       {t("receiptPrinter.title")}
                     </Text>
-                    <Text variant="bodySmall" style={styles.compactRowValue} numberOfLines={1}>
-                      {savedReceiptPrinter
-                        ? t("receiptPrinter.selected", {
-                            printer: savedReceiptPrinter.name || savedReceiptPrinter.address,
-                          })
-                        : t("receiptPrinter.notSelected")}
-                    </Text>
+                    <StatusPill
+                      label={receiptPrinterStatusText}
+                      tone={receiptPrinterStatusTone}
+                    />
                   </View>
-                  <StatusPill
-                    label={receiptPrinterStatusText}
-                    tone={receiptPrinterStatusTone}
-                  />
+                  <Text variant="bodySmall" style={styles.compactRowValue}>
+                    {savedReceiptPrinter
+                      ? t("receiptPrinter.selected", {
+                          printer: savedReceiptPrinter.name || savedReceiptPrinter.address,
+                        })
+                      : t("receiptPrinter.notSelected")}
+                  </Text>
                 </View>
 
                 <View style={styles.primaryPrinterActions}>
@@ -1731,11 +1811,18 @@ export default function Settings() {
               showsVerticalScrollIndicator={false}
             >
               <View style={styles.diagnosticsSummary}>
-                <Icon
-                  source={connectionNeedsAttention ? "alert-circle-outline" : "check-circle-outline"}
-                  size={24}
-                  color={connectionNeedsAttention ? HB_COLORS.warning : HB_COLORS.success}
-                />
+                <View
+                  style={[
+                    styles.connectionSummaryIcon,
+                    connectionNeedsAttention && styles.connectionSummaryIconWarning,
+                  ]}
+                >
+                  <Icon
+                    source={connectionNeedsAttention ? "alert-circle-outline" : "check-circle-outline"}
+                    size={24}
+                    color={connectionNeedsAttention ? HB_COLORS.warning : HB_COLORS.success}
+                  />
+                </View>
                 <View style={styles.compactRowText}>
                   <Text variant="titleSmall" style={styles.compactRowLabel}>
                     {t(
@@ -1751,18 +1838,31 @@ export default function Settings() {
               </View>
 
               <View style={styles.diagnosticList}>
-                <CompactRow
+                <InfoRow
                   label={t("device.statusLabel")}
                   value={accountBinding ? t("deviceStatus.bound") : deviceStatusText}
+                  style={styles.diagnosticListRow}
                 />
                 <View style={styles.sectionDivider} />
-                <CompactRow label={t("device.storeLabelCompact")} value={deviceStoreDisplayName} />
+                <InfoRow
+                  label={t("device.storeLabelCompact")}
+                  value={deviceStoreDisplayName}
+                  style={styles.diagnosticListRow}
+                />
                 <View style={styles.sectionDivider} />
-                <CompactRow label={t("printer.title")} value={labelPrinterStatusText} />
+                <InfoRow
+                  label={t("printer.title")}
+                  value={labelPrinterStatusText}
+                  style={styles.diagnosticListRow}
+                />
                 <View style={styles.sectionDivider} />
-                <CompactRow label={t("receiptPrinter.title")} value={receiptPrinterStatusText} />
+                <InfoRow
+                  label={t("receiptPrinter.title")}
+                  value={receiptPrinterStatusText}
+                  style={styles.diagnosticListRow}
+                />
                 <View style={styles.sectionDivider} />
-                <CompactRow label={t("apiHost.title")} value={apiHost} />
+                <InfoRow label={t("apiHost.title")} value={apiHost} style={styles.diagnosticListRow} />
               </View>
 
               <View style={styles.diagnosticsSection}>
@@ -1771,14 +1871,12 @@ export default function Settings() {
                 </Text>
                 <View style={styles.updateInfoCompactList}>
                   {updateInfoRows.map((row) => (
-                    <View key={row.key} style={styles.updateInfoRow}>
-                      <Text variant="bodySmall" style={styles.updateInfoLabel}>
-                        {t(row.labelKey)}
-                      </Text>
-                      <Text variant="bodySmall" style={styles.updateInfoValue} numberOfLines={1}>
-                        {row.value ?? t(row.valueKey ?? "updates.unknown")}
-                      </Text>
-                    </View>
+                    <InfoRow
+                      key={row.key}
+                      label={t(row.labelKey)}
+                      value={row.value ?? t(row.valueKey ?? "updates.unknown")}
+                      monospace={row.key === "updateId" && Boolean(row.value)}
+                    />
                   ))}
                 </View>
               </View>
@@ -1817,7 +1915,7 @@ export default function Settings() {
             <Text variant="labelMedium" style={styles.meta}>
               {t("apiHost.current")}
             </Text>
-            <Text variant="bodyLarge" style={styles.value} numberOfLines={1}>
+            <Text variant="bodyLarge" style={styles.value}>
               {apiHost}
             </Text>
           </View>
@@ -1935,7 +2033,8 @@ const styles = StyleSheet.create({
   compactRow: {
     minHeight: 68,
     flexDirection: "row",
-    alignItems: "center",
+    // 多行文字时图标与标题顶端对齐；单行时由 compactRowBody 的 minHeight 居中。
+    alignItems: "flex-start",
     gap: HB_SPACING.sm,
     paddingHorizontal: HB_SPACING.md,
     paddingVertical: HB_SPACING.sm,
@@ -1956,15 +2055,32 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: 2,
   },
+  compactRowBody: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 40,
+    justifyContent: "center",
+    gap: 2,
+  },
+  compactRowTitleLine: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: HB_SPACING.xs,
+    rowGap: HB_SPACING.xxs,
+  },
   compactRowLabel: {
     color: HB_COLORS.textPrimary,
     fontWeight: "600",
   },
   compactRowValue: {
-    color: HB_COLORS.textSecondary,
+    color: HB_COLORS.textPrimary,
+    fontSize: 13,
+    lineHeight: 18,
   },
   compactRowEnd: {
     flexShrink: 0,
+    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     gap: HB_SPACING.xxs,
@@ -1980,13 +2096,31 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   statusPill: {
-    maxWidth: 136,
-    minHeight: 24,
+    maxWidth: "100%",
+    minHeight: 22,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 5,
     borderRadius: 999,
     paddingHorizontal: HB_SPACING.xs,
     paddingVertical: 3,
+  },
+  statusPillDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusPillDotSuccess: {
+    backgroundColor: HB_COLORS.success,
+  },
+  statusPillDotWarning: {
+    backgroundColor: HB_COLORS.warning,
+  },
+  statusPillDotDanger: {
+    backgroundColor: HB_COLORS.danger,
+  },
+  statusPillDotNeutral: {
+    backgroundColor: HB_COLORS.textSecondary,
   },
   statusPillSuccess: {
     backgroundColor: "#ECFDF3",
@@ -2001,6 +2135,7 @@ const styles = StyleSheet.create({
     backgroundColor: HB_COLORS.surfaceMuted,
   },
   statusPillText: {
+    flexShrink: 1,
     fontWeight: "700",
   },
   statusPillTextSuccess: {
@@ -2034,23 +2169,94 @@ const styles = StyleSheet.create({
     color: HB_COLORS.warning,
     fontWeight: "700",
   },
+  inlineNote: {
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
+    marginHorizontal: HB_SPACING.md,
+    marginBottom: HB_SPACING.sm,
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: HB_SPACING.xs,
+    borderRadius: HB_RADIUS.control,
+    backgroundColor: HB_COLORS.surfaceMuted,
+  },
+  inlineNoteIcon: {
+    paddingTop: 1,
+  },
+  inlineNoteText: {
+    flex: 1,
+    color: HB_COLORS.textSecondary,
+    lineHeight: 18,
+  },
+  updatePanel: {
+    gap: HB_SPACING.sm,
+    paddingHorizontal: HB_SPACING.md,
+    paddingTop: HB_SPACING.sm,
+    paddingBottom: HB_SPACING.md,
+  },
+  updatePanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.sm,
+  },
+  updatePanelTitleLine: {
+    flex: 1,
+    minWidth: 0,
+  },
+  updateTiles: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: HB_SPACING.xs,
+  },
+  updateTile: {
+    // 两格等分；可用宽度不足 2×128 时自动上下排列。
+    flexGrow: 1,
+    flexBasis: 128,
+    minWidth: 0,
+    gap: 2,
+    borderRadius: HB_RADIUS.control,
+    backgroundColor: HB_COLORS.surfaceMuted,
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: HB_SPACING.xs,
+  },
+  updateTileLabel: {
+    color: HB_COLORS.textSecondary,
+  },
+  updateTileValue: {
+    color: HB_COLORS.textPrimary,
+    fontWeight: "600",
+  },
+  updateCheckButton: {
+    borderRadius: HB_RADIUS.control,
+  },
+  updateCheckButtonContent: {
+    minHeight: 44,
+  },
   updateInfoCompactList: {
     gap: HB_SPACING.xs,
   },
-  updateInfoRow: {
+  infoRow: {
     flexDirection: "row",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: HB_SPACING.sm,
   },
-  updateInfoLabel: {
+  infoRowLabel: {
+    flexShrink: 1,
+    maxWidth: "45%",
     color: HB_COLORS.textSecondary,
-    flexShrink: 0,
+    lineHeight: 18,
   },
-  updateInfoValue: {
+  infoRowValue: {
     flex: 1,
     color: HB_COLORS.textPrimary,
     textAlign: "right",
     fontWeight: "600",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  infoRowValueMono: {
+    fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
+    fontSize: 12,
   },
   apiHostCurrentBox: {
     gap: HB_SPACING.xxs,
@@ -2089,19 +2295,18 @@ const styles = StyleSheet.create({
   },
   primaryPrinterActions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: HB_SPACING.xs,
   },
   primaryActionButton: {
-    flex: 1,
+    // 按文字宽度起步再均分剩余空间：Paper 按钮文字只有一行，英文放不下时整行换行而不是截断成 "Scan receipt print…"。
+    flexGrow: 1,
   },
   printerSection: {
     gap: HB_SPACING.sm,
   },
   printerSectionHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: HB_SPACING.sm,
+    gap: HB_SPACING.xxs,
   },
   printerRoleDivider: {
     height: StyleSheet.hairlineWidth,
@@ -2218,6 +2423,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: HB_COLORS.outlineMuted,
     backgroundColor: HB_COLORS.surface,
+  },
+  diagnosticListRow: {
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: 10,
   },
   diagnosticsSection: {
     gap: HB_SPACING.xs,
