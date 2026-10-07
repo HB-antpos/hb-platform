@@ -442,8 +442,8 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     icon: 'cash-register',
     // 与后端 FullAppMenu 一致：移动端「日结记录」与 Web /pos-admin/daily-closes 共用独立权限码，店长只看自己关联的分店。
     permissionCodes: [P.DailyCloseRecords.View],
-    // 后端 FullAppMenu 里它的 Order 是 58，但声明位置夹在 Order=57 的条目之间；预览按 order 稳定排序，
-    // 这里取 57 才能与后端源码声明顺序（expoRoleMenuPreview.test 直接读 NavigationService.cs 比对）保持一致。
+    // 与后端 FullAppMenu 里它的 Order（57）一致：声明位置夹在 legacy-employee-logs 与 user-admin 之间，
+    // 预览按 order 稳定排序，expoRoleMenuPreview.test 直接读 NavigationService.cs 的声明顺序比对。
     order: 57,
     ...ROUTE_LABELS['daily-closes'],
   },
