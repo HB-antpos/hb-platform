@@ -253,6 +253,10 @@
       "name": "Review employee operation anomalies",
       "description": "Mark flagged legacy or new POS operations as normal or needing follow-up, or revoke the review, on the web admin and the mobile employee operation logs page."
     },
+    "DailyCloseRecords.View": {
+      "name": "View daily close records",
+      "description": "View daily close records and cash count details uploaded by the WPF, handheld and iPad POS for managed stores on the web admin and the mobile app."
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",
       "description": "Allows access to Permissions Pos Terminal Cash Drawer Open."

@@ -889,6 +889,54 @@
         }
       }
     },
+    "/api/v1/daily-closes/sync": {
+      "post": {
+        "tags": [
+          "DailyCloses"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyCloseSyncRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyCloseSyncRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyCloseSyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyCloseSyncResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyCloseSyncResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyCloseSyncResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/devices/activation-code/preview": {
       "post": {
         "tags": [
@@ -7885,6 +7933,153 @@
           "message": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DailyCloseCashCountSync": {
+        "type": "object",
+        "properties": {
+          "denominationCents": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DailyCloseSyncRequest": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dailyCloseGuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "deviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientKind": {
+            "type": "string",
+            "nullable": true
+          },
+          "businessDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "periodFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "periodTo": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "savedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cashierId": {
+            "type": "string",
+            "nullable": true
+          },
+          "cashierName": {
+            "type": "string",
+            "nullable": true
+          },
+          "appVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "returnQuantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "refundAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "tenders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailyCloseTenderSync"
+            },
+            "nullable": true
+          },
+          "cashCounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailyCloseCashCountSync"
+            },
+            "nullable": true
+          },
+          "noteSubtotal": {
+            "type": "number",
+            "format": "double"
+          },
+          "coinSubtotal": {
+            "type": "number",
+            "format": "double"
+          },
+          "countedCashAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "cashDifference": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DailyCloseSyncResponse": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "alreadySynced": {
+            "type": "boolean"
+          },
+          "replacedPlaceholder": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DailyCloseTenderSync": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "nullable": true
+          },
+          "salesAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "refundAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "netAmount": {
+            "type": "number",
+            "format": "double"
           }
         },
         "additionalProperties": false

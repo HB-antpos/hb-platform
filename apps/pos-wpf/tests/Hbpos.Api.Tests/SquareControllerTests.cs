@@ -1011,6 +1011,10 @@ public sealed class SquareControllerTests
                 services.AddSingleton<ILinklySettlementSchemaInitializer>(
                     new TestNoOpLinklySettlementSchemaInitializer());
 
+                services.RemoveAll<IDailyCloseSchemaInitializer>();
+                services.AddSingleton<IDailyCloseSchemaInitializer>(
+                    new TestNoOpDailyCloseSchemaInitializer());
+
                 services.RemoveAll<IAdvertisementSchemaInitializer>();
                 services.AddSingleton<IAdvertisementSchemaInitializer>(new NoOpAdvertisementSchemaInitializer());
 
