@@ -192,6 +192,8 @@ import type {
   CashierAuthenticationService,
 } from "../security/cashier-authentication";
 import { subscribeDeviceScopeChange } from "../security/device-session";
+import { DailyCloseUploadService } from "@hb/pos-sync/core/sync/daily-close-upload-service";
+import { HbposDailyCloseSyncAdapter } from "@hb/pos-sync/core/sync/hbpos-daily-close-sync-adapter";
 import {
   HbposAuditBatchAdapter,
   HbposOrderSyncAdapter,
@@ -1290,10 +1292,24 @@ export function createProductionPosRuntimeServices(
     fulfilment,
     localHistoryReceiptPreview,
   );
+  // 日结记录上传 outbox：保存日结后与升级后的历史日结都由同一条路径上传到 POST /api/v1/daily-closes/sync。
+  // 上传范围固定为当前可信终端（storeCode/deviceCode），其它范围的行保持 pending 不动。
+  const dailyCloseUpload = new DailyCloseUploadService({
+    repository: input.database.dailyCloseUploads(),
+    sync: new HbposDailyCloseSyncAdapter(input.transport),
+    scope: () => ({
+      storeCode: input.auditMetadata.storeCode,
+      deviceCode: input.auditMetadata.deviceCode,
+    }),
+    clientKind: "Handheld",
+    appVersion: input.auditMetadata.appVersion,
+    now: input.clock.now,
+  });
   const coordinator = new PosSyncCoordinator({
     outbox: repositories.outbox,
     auditRepository: repositories.audit,
     auditDelivery: repositories.auditDelivery,
+    dailyCloseUpload,
     orderSync: new HbposOrderSyncAdapter(
       input.transport,
       repositories.orders,
@@ -2205,6 +2221,13 @@ export function createProductionPosRuntimeServices(
               }
               const result =
                 await dailyCloseRepository.saveArchive(commit);
+              // 日结已耐久归档：唤醒同步协调器上传。唤醒失败（含同步抛出）绝不能让“日结已保存”变成失败，
+              // 上传由 pending 状态保证，之后的启动/前台/联网/定时唤醒仍会补传。
+              try {
+                void coordinator.requestDrain().catch(() => undefined);
+              } catch {
+                // 同步抛出的唤醒异常同样忽略。
+              }
               assertActiveScope(
                 result.archive.storeCode,
                 result.archive.deviceCode,

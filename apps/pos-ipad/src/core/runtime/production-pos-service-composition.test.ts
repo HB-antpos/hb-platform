@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import test from "node:test";
+import test, { mock } from "node:test";
 
 import {
   UPDATE_TRANSITION_IN_PROGRESS,
@@ -87,6 +87,14 @@ import type {
   LocalCatalogMatch,
 } from "../db/catalog-repository";
 import { PosDatabase } from "../db/pos-database";
+import type {
+  DailyCloseUploadLease,
+  DailyCloseUploadRepositoryPort,
+  DailyCloseUploadScope,
+  DailyCloseUploadState,
+} from "@hb/pos-domain/core/contracts/daily-close-upload";
+import { PosSyncCoordinator } from "@hb/pos-sync/core/sync/sync-coordinator";
+import { validateAgainstServerRules } from "@hb/pos-sync/testing/daily-close-server-rules";
 import {
   PosSettingsRepository,
   type ReceiptPrinterSettings,
@@ -4899,6 +4907,160 @@ test("日结只使用可信收银员作用域，先耐久归档再通过同一�
   presenter.destroy();
 });
 
+/** 轮询等待后台唤醒的上传把日结推进到目标状态；超时说明保存后没有唤醒上传。 */
+async function waitForDailyCloseState(
+  uploads: MemoryDailyCloseUploadRepository,
+  closeId: string,
+  expected: DailyCloseUploadState,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (uploads.stateOf(closeId) === expected) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.equal(uploads.stateOf(closeId), expected, "保存日结后应由唤醒的协调器完成上传");
+}
+
+const GUID_PERMISSIONS = [
+  "Permissions.PosTerminal.DailyClose.View",
+  "Permissions.PosTerminal.DailyClose.Save",
+  "Permissions.PosTerminal.DailyClose.Reprint",
+] as const;
+
+function uuidFactory(): () => string {
+  let next = 0;
+  return () => `00000000-0000-4000-8000-${String(++next).padStart(12, "0")}`;
+}
+
+test("日结保存成功后唤醒同步协调器：只按当前终端范围上传到 POST /api/v1/daily-closes/sync，请求通过服务端校验", async () => {
+  const dailyClose = new MemoryDailyCloseRepository();
+  const uploads = new MemoryDailyCloseUploadRepository(dailyClose);
+  const requests: HbposTransportRequest[] = [];
+  const services = createTestComposition(
+    databaseFor([], { dailyClose, dailyCloseUploads: uploads }),
+    {
+      cashierPermissions: GUID_PERMISSIONS,
+      createId: uuidFactory(),
+      transport: {
+        async request(input: HbposTransportRequest) {
+          requests.push(input);
+          return {
+            status: 200,
+            data: { accepted: true, alreadySynced: false, replacedPlaceholder: false },
+          };
+        },
+      } as HbposTransport,
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const presenter = services.dailyClose.createPresenter();
+  await presenter.load();
+  assert.equal(presenter.setCount(100, 10), true);
+  await presenter.saveAndPrint();
+  // 这里刻意不手动触发 drain：上传必须由保存路径里的“唤醒协调器”自己完成（保存本身不等待上传）。
+  const closeId = dailyClose.saved[0]?.archive.closeId ?? "";
+  await waitForDailyCloseState(uploads, closeId, "synced");
+
+  const uploaded = requests.filter(
+    (request) => request.url === "/api/v1/daily-closes/sync",
+  );
+  assert.equal(uploaded.length, 1);
+  assert.equal(uploaded[0]?.method, "POST");
+  const body = uploaded[0]?.data as Record<string, unknown>;
+  assert.equal(body.dailyCloseGuid, closeId);
+  assert.equal(body.clientKind, "Ipad");
+  assert.equal(body.appVersion, "0.1.0-test");
+  assert.equal(body.storeCode, "S001");
+  assert.equal(body.deviceCode, "IPAD-1");
+  assert.deepEqual(
+    validateAgainstServerRules(body, { storeCode: "S001", deviceCode: "IPAD-1" }),
+    { ok: true },
+  );
+  assert.equal(uploads.stateOf(closeId), "synced");
+  // 上传范围固定为组合根里的可信终端，不接受调用方传入。
+  assert.deepEqual(uploads.listDueScopes[0], { storeCode: "S001", deviceCode: "IPAD-1" });
+  presenter.destroy();
+});
+
+test("日结 id 不是 GUID 时不发请求，直接标记 skipped", async () => {
+  const dailyClose = new MemoryDailyCloseRepository();
+  const uploads = new MemoryDailyCloseUploadRepository(dailyClose);
+  const requests: HbposTransportRequest[] = [];
+  const services = createTestComposition(
+    databaseFor([], { dailyClose, dailyCloseUploads: uploads }),
+    {
+      cashierPermissions: GUID_PERMISSIONS,
+      transport: {
+        async request(input: HbposTransportRequest) {
+          requests.push(input);
+          return { status: 200, data: { accepted: true } };
+        },
+      } as HbposTransport,
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const presenter = services.dailyClose.createPresenter();
+  await presenter.load();
+  presenter.setCount(100, 10);
+  await presenter.saveAndPrint();
+  await services.sync.requestDrain();
+
+  const closeId = dailyClose.saved[0]?.archive.closeId ?? "";
+  assert.match(closeId, /^test-id-/);
+  assert.equal(uploads.stateOf(closeId), "skipped");
+  assert.equal(
+    requests.some((request) => request.url === "/api/v1/daily-closes/sync"),
+    false,
+  );
+  presenter.destroy();
+});
+
+test("唤醒同步协调器同步抛出或异步拒绝，都不会让“日结已保存”变成失败", async (context) => {
+  for (const scenario of [
+    {
+      name: "同步抛出",
+      requestDrain: () => {
+        throw new Error("drain unavailable");
+      },
+    },
+    {
+      name: "异步拒绝",
+      requestDrain: () => Promise.reject(new Error("drain rejected")),
+    },
+  ]) {
+    await context.test(scenario.name, async () => {
+      const dailyClose = new MemoryDailyCloseRepository();
+      const services = createTestComposition(
+        databaseFor([], { dailyClose }),
+        { cashierPermissions: GUID_PERMISSIONS, createId: uuidFactory() },
+      );
+      await services.initialize();
+      await services.cashierSession.signIn("cashier");
+      const presenter = services.dailyClose.createPresenter();
+      await presenter.load();
+      presenter.setCount(100, 10);
+      const wake = mock.method(
+        PosSyncCoordinator.prototype,
+        "requestDrain",
+        scenario.requestDrain as unknown as PosSyncCoordinator["requestDrain"],
+      );
+      try {
+        await presenter.saveAndPrint();
+        // 让可能的未处理拒绝有机会冒出来（若实现没有吞掉，测试进程会因 unhandledRejection 失败）。
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.ok(wake.mock.callCount() >= 1, "保存成功后确实唤醒了协调器");
+      } finally {
+        wake.mock.restore();
+      }
+
+      assert.equal(dailyClose.saved.length, 1, "日结已耐久归档");
+      assert.equal(presenter.getState().statusCode, "saved-printed");
+      presenter.destroy();
+    });
+  }
+});
+
 test("换店凭据提交并 reload 后废弃旧 cashier/cart，提交前失败不误杀", async (context) => {
   const activationCode =
     "HBDEV1-0123456789ABCDEFGHJKMNPQRS-STVWXYZ0123456789ABCDEFGHJ";
@@ -5920,6 +6082,7 @@ function databaseFor(
     syncHistoryOrders?: readonly LocalSyncHistoryOrder[];
     specialProductItems?: readonly SpecialProductItem[];
     dailyClose?: DailyCloseRepositoryPort;
+    dailyCloseUploads?: DailyCloseUploadRepositoryPort;
     onSyncHistoryRestore?(): void;
     onRefundVoucherPrintMaterialCreated?(): void;
     returnRecoveryRequired?: boolean;
@@ -6023,8 +6186,26 @@ function databaseFor(
       },
     },
     payments: {},
-    outbox: {},
-    audit: {},
+    // 只有日结上传用例（注入 dailyCloseUploads）会真正跑完整 drain：此时订单 outbox 与员工审计需要“空队列”替身；
+    // 其余用例保持原状（未实现的队列接口），日结唤醒的拒绝由组合根吞掉。
+    outbox: options.dailyCloseUploads
+      ? {
+          async enqueue() {},
+          async leaseReady() { return []; },
+          async nextReadyAtIso() { return null; },
+          async markSucceeded() {},
+          async releaseRetry() {},
+          async markBlocked403() {},
+          async markRejected() {},
+        }
+      : {},
+    audit: options.dailyCloseUploads
+      ? {
+          async append() {},
+          async listPending() { return []; },
+          async markUploaded() {},
+        }
+      : {},
     heldOrderRecords: {
       ...unavailableHeldOrderRecords(),
       ...options.heldOrderRecords,
@@ -6209,6 +6390,8 @@ function databaseFor(
     }),
     dailyCloses: () =>
       options.dailyClose ?? new MemoryDailyCloseRepository(),
+    dailyCloseUploads: () =>
+      options.dailyCloseUploads ?? new IdleDailyCloseUploadRepository(),
     settings: () => settings,
     settingsSafety: () => ({
       async read() {
@@ -6482,6 +6665,104 @@ function databaseFor(
       },
     }),
   } as unknown as PosDatabase;
+}
+
+/** 默认替身：没有任何待传日结，也不记录调用；只有日结上传相关用例才注入 Memory 版本。 */
+class IdleDailyCloseUploadRepository implements DailyCloseUploadRepositoryPort {
+  public async recoverExpiredUploading() {
+    return 0;
+  }
+  public async listDue() {
+    return [];
+  }
+  public async tryClaim() {
+    return null;
+  }
+  public async readArchive() {
+    return null;
+  }
+  public async markSucceeded() {}
+  public async markPending() {}
+  public async releaseWithoutAttempt() {}
+  public async markRejected() {}
+  public async markSkipped() {}
+  public async nextReadyAtIso() {
+    return null;
+  }
+}
+
+/** 以 MemoryDailyCloseRepository 里已保存的日结为待传队列的内存上传仓储：按状态机记录结果与调用范围。 */
+class MemoryDailyCloseUploadRepository implements DailyCloseUploadRepositoryPort {
+  public readonly states = new Map<string, DailyCloseUploadState>();
+  public readonly listDueScopes: DailyCloseUploadScope[] = [];
+
+  public constructor(private readonly source: MemoryDailyCloseRepository) {}
+
+  public stateOf(closeId: string): DailyCloseUploadState {
+    return this.states.get(closeId) ?? "pending";
+  }
+
+  public async recoverExpiredUploading() {
+    return 0;
+  }
+
+  public async listDue(scope: DailyCloseUploadScope) {
+    this.listDueScopes.push(scope);
+    return this.source.saved
+      .map((commit) => commit.archive)
+      .filter(
+        (archive) =>
+          archive.storeCode === scope.storeCode &&
+          archive.deviceCode === scope.deviceCode &&
+          this.stateOf(archive.closeId) === "pending",
+      )
+      .map((archive) => archive.closeId);
+  }
+
+  public async tryClaim(
+    closeId: string,
+    scope: DailyCloseUploadScope,
+  ): Promise<DailyCloseUploadLease | null> {
+    const archive = await this.source.getArchive(closeId);
+    if (
+      !archive ||
+      archive.storeCode !== scope.storeCode ||
+      archive.deviceCode !== scope.deviceCode ||
+      this.stateOf(closeId) !== "pending"
+    ) {
+      return null;
+    }
+    this.states.set(closeId, "uploading");
+    return { closeId, attemptCount: 1 };
+  }
+
+  public readArchive(closeId: string) {
+    return this.source.getArchive(closeId);
+  }
+
+  public async markSucceeded(closeId: string) {
+    this.states.set(closeId, "synced");
+  }
+
+  public async markPending(closeId: string) {
+    this.states.set(closeId, "pending");
+  }
+
+  public async releaseWithoutAttempt(closeId: string) {
+    this.states.set(closeId, "pending");
+  }
+
+  public async markRejected(closeId: string) {
+    this.states.set(closeId, "rejected");
+  }
+
+  public async markSkipped(closeId: string) {
+    this.states.set(closeId, "skipped");
+  }
+
+  public async nextReadyAtIso() {
+    return null;
+  }
 }
 
 class MemoryDailyCloseRepository implements DailyCloseRepositoryPort {

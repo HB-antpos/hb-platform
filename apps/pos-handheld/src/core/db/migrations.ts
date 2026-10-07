@@ -6388,6 +6388,44 @@ BEGIN
 END;
 `;
 
+/**
+ * 日结记录上传 outbox（收银端把本地日结存档上传到 POST /api/v1/daily-closes/sync，语义与 WPF 一致）。
+ *
+ * 给 local_daily_closes 补上传状态列。关键点：
+ * 1. ADD COLUMN 的 DEFAULT 让升级前已有的全部历史日结自动成为 upload_state='pending'、
+ *    upload_next_attempt_at_iso 为 NULL（立即到期）——这就是“升级后自动补传所有历史日结”的触发方式，
+ *    历史行含完整面额与支付方式，会覆盖服务端按审计事件回填的占位记录。不写任何回填 UPDATE 来重置已 synced/rejected 的行。
+ * 2. M17 从 M6 迁入的遗留日结 close_id 可能不是 GUID（服务端 dailyCloseGuid 是 Guid），无法上传，
+ *    在迁移里直接置 'skipped'，不会发请求也不会反复重试。
+ * 3. 日结存档不可变触发器（trg_daily_close_archive_immutable）只列固定业务列，
+ *    新增的 upload_* 列不在其中，所以上传状态仍可 UPDATE；删除依旧被 trg_daily_close_delete_forbidden 禁止。
+ */
+const M49 = `
+ALTER TABLE local_daily_closes ADD COLUMN upload_state TEXT NOT NULL DEFAULT 'pending'
+  CHECK (upload_state IN ('pending', 'uploading', 'synced', 'rejected', 'skipped'));
+ALTER TABLE local_daily_closes ADD COLUMN upload_attempt_count INTEGER NOT NULL DEFAULT 0
+  CHECK (typeof(upload_attempt_count) = 'integer' AND upload_attempt_count >= 0);
+ALTER TABLE local_daily_closes ADD COLUMN upload_next_attempt_at_iso TEXT NULL;
+ALTER TABLE local_daily_closes ADD COLUMN upload_last_attempt_at_iso TEXT NULL;
+ALTER TABLE local_daily_closes ADD COLUMN upload_error_code TEXT NULL;
+ALTER TABLE local_daily_closes ADD COLUMN upload_error_message TEXT NULL;
+ALTER TABLE local_daily_closes ADD COLUMN uploaded_at_iso TEXT NULL;
+
+UPDATE local_daily_closes
+SET upload_state = 'skipped',
+    upload_error_code = 'DAILY_CLOSE_GUID_INVALID',
+    upload_error_message = 'Legacy daily close id is not a GUID and cannot be uploaded.'
+WHERE NOT (
+  INSTR(close_id, char(0)) = 0
+  AND close_id GLOB '[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]'
+);
+
+CREATE INDEX ix_local_daily_closes_upload_due
+  ON local_daily_closes (
+    upload_state, store_code, device_code, upload_next_attempt_at_iso
+  );
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -6437,6 +6475,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 46, name: "M46_manual_card_terminal_blocking", sql: M46 },
   { version: 47, name: "M47_voucher_reversal_blocked_disposition", sql: M47 },
   { version: 48, name: "M48_installment_refund_voucher_print_jobs", sql: M48 },
+  { version: 49, name: "M49_daily_close_upload_outbox", sql: M49 },
 ];
 
 export async function applyMigrations(
