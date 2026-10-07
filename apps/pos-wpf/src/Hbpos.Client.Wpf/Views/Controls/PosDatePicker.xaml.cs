@@ -51,6 +51,18 @@ public partial class PosDatePicker : UserControl
         typeof(PosDatePicker),
         new PropertyMetadata(true, OnDisplayPropertyChanged));
 
+    public static readonly DependencyProperty ShowCalendarIconProperty = DependencyProperty.Register(
+        nameof(ShowCalendarIcon),
+        typeof(bool),
+        typeof(PosDatePicker),
+        new PropertyMetadata(true, OnDisplayPropertyChanged));
+
+    public static readonly DependencyProperty StepButtonWidthProperty = DependencyProperty.Register(
+        nameof(StepButtonWidth),
+        typeof(double),
+        typeof(PosDatePicker),
+        new PropertyMetadata(48d));
+
     public static readonly DependencyProperty ButtonHeightProperty = DependencyProperty.Register(
         nameof(ButtonHeight),
         typeof(double),
@@ -116,6 +128,20 @@ public partial class PosDatePicker : UserControl
     {
         get => (bool)GetValue(ShowDropDownGlyphProperty);
         set => SetValue(ShowDropDownGlyphProperty, value);
+    }
+
+    /// <summary>日期按钮左侧的日历图标；顶栏等窄处有前后一天箭头时可隐藏以省宽度。</summary>
+    public bool ShowCalendarIcon
+    {
+        get => (bool)GetValue(ShowCalendarIconProperty);
+        set => SetValue(ShowCalendarIconProperty, value);
+    }
+
+    /// <summary>前后一天按钮的宽度，触屏下不要小于 44。</summary>
+    public double StepButtonWidth
+    {
+        get => (double)GetValue(StepButtonWidthProperty);
+        set => SetValue(StepButtonWidthProperty, value);
     }
 
     public double ButtonHeight
@@ -191,6 +217,7 @@ public partial class PosDatePicker : UserControl
             : string.Empty;
         LabelText.Visibility = string.IsNullOrWhiteSpace(Label) ? Visibility.Collapsed : Visibility.Visible;
         DropDownGlyph.Visibility = ShowDropDownGlyph ? Visibility.Visible : Visibility.Collapsed;
+        CalendarIcon.Visibility = ShowCalendarIcon ? Visibility.Visible : Visibility.Collapsed;
 
         var stepVisibility = ShowDayStepButtons ? Visibility.Visible : Visibility.Collapsed;
         PreviousDayButton.Visibility = stepVisibility;

@@ -6,7 +6,7 @@
              xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
              x:Name="Root">
     <UserControl.Resources>
-        <!-- 前后一天、翻月按钮：正方形触屏按钮，边长跟随 ButtonHeight（日结 48、交易历史 44）。 -->
+        <!-- 前后一天、翻月按钮：触屏按钮，前后一天的宽高由 StepButtonWidth / ButtonHeight 决定（不小于 44）。 -->
         <Style x:Key="PosDatePickerIconButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="MinWidth" Value="0" />
@@ -52,9 +52,9 @@
 
         <Button x:Name="PreviousDayButton"
                 Grid.Column="0"
-                Width="{Binding ButtonHeight, ElementName=Root}"
+                Width="{Binding StepButtonWidth, ElementName=Root}"
                 Height="{Binding ButtonHeight, ElementName=Root}"
-                Margin="0,0,8,0"
+                Margin="0,0,6,0"
                 Click="PreviousDayButtonClick"
                 ToolTip="{loc:Loc datePicker.previousDay}"
                 AutomationProperties.Name="{loc:Loc datePicker.previousDay}"
@@ -77,7 +77,8 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <materialDesign:PackIcon Grid.Column="0"
+                <materialDesign:PackIcon x:Name="CalendarIcon"
+                                         Grid.Column="0"
                                          Kind="CalendarMonthOutline"
                                          Width="20"
                                          Height="20"
@@ -108,9 +109,9 @@
 
         <Button x:Name="NextDayButton"
                 Grid.Column="2"
-                Width="{Binding ButtonHeight, ElementName=Root}"
+                Width="{Binding StepButtonWidth, ElementName=Root}"
                 Height="{Binding ButtonHeight, ElementName=Root}"
-                Margin="8,0,0,0"
+                Margin="6,0,0,0"
                 Click="NextDayButtonClick"
                 ToolTip="{loc:Loc datePicker.nextDay}"
                 AutomationProperties.Name="{loc:Loc datePicker.nextDay}"
