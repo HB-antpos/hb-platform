@@ -739,6 +739,8 @@ public sealed class CashierPermissionTests
     [InlineData(HttpStatusCode.ServiceUnavailable)]
     [InlineData(HttpStatusCode.RequestTimeout)]
     [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
     public async Task Cashier_session_refresh_api_client_keeps_unavailable_statuses_offline_capable(
         HttpStatusCode statusCode)
     {
@@ -788,6 +790,72 @@ public sealed class CashierPermissionTests
 
         Assert.True(attempt.IsApiUnavailable);
         Assert.False(attempt.IsOnlineRejected);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task Cashier_session_refresh_keeps_cashier_and_offline_cache_on_gateway_status(
+        HttpStatusCode statusCode)
+    {
+        // 后端发布/网关切换期间的 404/405 不是服务端结论：不能踢下线，也不能删离线登录缓存。
+        var current = CreateSession();
+        var context = new CashierSessionContext();
+        context.SetCurrent(current);
+        var cache = new RecordingCashierSessionCacheUpdater(() => context.CurrentSession);
+        var service = new CashierSessionRefreshService(
+            CreateStaticCashierSessionRefreshApiClient(statusCode, "<html>Not Found</html>"),
+            context,
+            cache);
+        var rejectedCount = 0;
+        service.SessionRejected += (_, _) => rejectedCount++;
+
+        await service.RefreshOnceAsync();
+
+        Assert.Same(current, context.CurrentSession);
+        Assert.False(cache.Removed);
+        Assert.Equal(0, rejectedCount);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "{\"success\":false,\"errorCode\":\"CASHIER_SESSION_REVOKED\"}")]
+    [InlineData(HttpStatusCode.Forbidden, "{\"success\":false,\"errorCode\":\"DEVICE_SCOPE_FORBIDDEN\"}")]
+    public async Task Cashier_session_refresh_still_signs_out_on_server_auth_rejection(
+        HttpStatusCode statusCode,
+        string body)
+    {
+        var current = CreateSession();
+        var context = new CashierSessionContext();
+        context.SetCurrent(current);
+        var cache = new RecordingCashierSessionCacheUpdater(() => context.CurrentSession);
+        var service = new CashierSessionRefreshService(
+            CreateStaticCashierSessionRefreshApiClient(statusCode, body, "application/json"),
+            context,
+            cache);
+        var rejectedCount = 0;
+        service.SessionRejected += (_, _) => rejectedCount++;
+
+        await service.RefreshOnceAsync();
+
+        Assert.Null(context.CurrentSession);
+        Assert.True(cache.Removed);
+        Assert.Same(current, cache.RemovedSession);
+        Assert.Equal(1, rejectedCount);
+    }
+
+    private static CashierSessionRefreshApiClient CreateStaticCashierSessionRefreshApiClient(
+        HttpStatusCode statusCode,
+        string body,
+        string mediaType = "text/html")
+    {
+        return new CashierSessionRefreshApiClient(new HttpClient(new StaticResponseHandler(
+            new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(body, Encoding.UTF8, mediaType)
+            }))
+        {
+            BaseAddress = new Uri("http://localhost/")
+        });
     }
 
     [Fact]

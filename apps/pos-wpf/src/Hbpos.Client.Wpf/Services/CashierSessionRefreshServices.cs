@@ -63,11 +63,19 @@ public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
         }
     }
 
+    /// <summary>
+    /// 服务端 cashiers/session 只用 401（票据无效/已吊销/设备认证失败）和 403（设备越权）表达会话真实失效；
+    /// 404/405 只会来自后端发布、网关切换或路由未就绪，与 DeviceApiClient.IsGatewayStatus 口径一致按不可用处理，
+    /// 避免把门店收银员批量踢下线并清掉离线登录缓存。
+    /// </summary>
     private static bool IsServiceUnavailable(HttpStatusCode statusCode)
     {
         var numericStatusCode = (int)statusCode;
         return numericStatusCode >= 500 ||
-            statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
+            statusCode is HttpStatusCode.NotFound
+                or HttpStatusCode.MethodNotAllowed
+                or HttpStatusCode.RequestTimeout
+                or HttpStatusCode.TooManyRequests;
     }
 }
 
