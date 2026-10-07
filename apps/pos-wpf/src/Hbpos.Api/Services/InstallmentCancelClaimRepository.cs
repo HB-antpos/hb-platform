@@ -25,8 +25,18 @@ public sealed record InstallmentCancelClaimRecord(
     string? LastRecoveryCashierName = null,
     string? LastRecoveryCashierUserGuid = null,
     DateTimeOffset? RecoveredAtUtc = null,
-    string? OriginalDeviceCode = null)
+    string? OriginalDeviceCode = null,
+    InstallmentCancelRefundMode RefundMode = InstallmentCancelRefundMode.OriginalRoute)
 {
+    // 列值为空的旧 claim 均是升级前创建的原路退款。
+    internal static string? ToStoredRefundMode(InstallmentCancelRefundMode mode) =>
+        mode == InstallmentCancelRefundMode.OriginalRoute ? null : mode.ToString();
+
+    internal static InstallmentCancelRefundMode ParseStoredRefundMode(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? InstallmentCancelRefundMode.OriginalRoute
+            : Enum.Parse<InstallmentCancelRefundMode>(value, ignoreCase: true);
+
     public static bool IsBlocking(InstallmentCancelClaimStatus status) =>
         status is InstallmentCancelClaimStatus.Prepared
             or InstallmentCancelClaimStatus.RefundPending
@@ -61,7 +71,7 @@ public sealed class SqlSugarInstallmentCancelClaimRepository(
         [InstallmentGuid], [OperationGuid], [StoreCode], [OriginalDeviceCode], [ClaimantDeviceCode], [CashierId], [CashierName],
         [IdempotencyKey], [Reason], [RefundPlanFingerprint], [Status], [CreatedAtUtc], [UpdatedAtUtc],
         [ExpiresAtUtc], [CommittedAtUtc], [Revision], [CommitResponseJson], [LastRecoveryCashierId],
-        [LastRecoveryCashierName], [LastRecoveryCashierUserGuid], [RecoveredAtUtc]
+        [LastRecoveryCashierName], [LastRecoveryCashierUserGuid], [RecoveredAtUtc], [RefundMode]
         """;
 
     public async Task<InstallmentCancelClaimRecord?> GetAsync(
@@ -120,8 +130,7 @@ public sealed class SqlSugarInstallmentCancelClaimRepository(
                         ? claim.ClaimantDeviceCode
                         : claim.OriginalDeviceCode,
                     StringComparison.OrdinalIgnoreCase) ||
-                order.Status != (int)InstallmentStatus.Active ||
-                order.BalanceAmount <= 0m)
+                !InstallmentLifecycleRules.CanCancelWithRefund(order.Status, order.BalanceAmount))
             {
                 await db.Ado.RollbackTranAsync();
                 return false;
@@ -224,7 +233,8 @@ public sealed class SqlSugarInstallmentCancelClaimRepository(
         LastRecoveryCashierId = claim.LastRecoveryCashierId,
         LastRecoveryCashierName = claim.LastRecoveryCashierName,
         LastRecoveryCashierUserGuid = claim.LastRecoveryCashierUserGuid,
-        RecoveredAtUtc = claim.RecoveredAtUtc?.UtcDateTime
+        RecoveredAtUtc = claim.RecoveredAtUtc?.UtcDateTime,
+        RefundMode = InstallmentCancelClaimRecord.ToStoredRefundMode(claim.RefundMode)
     };
 
     private static SugarParameter[] ToParameters(InstallmentCancelClaimRecord claim) =>
@@ -278,7 +288,8 @@ public sealed class SqlSugarInstallmentCancelClaimRepository(
         row.LastRecoveryCashierName,
         row.LastRecoveryCashierUserGuid,
         row.RecoveredAtUtc is null ? null : ToUtc(row.RecoveredAtUtc.Value),
-        row.OriginalDeviceCode);
+        row.OriginalDeviceCode,
+        InstallmentCancelClaimRecord.ParseStoredRefundMode(row.RefundMode));
 
     private static DateTimeOffset ToUtc(DateTime value) =>
         new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
@@ -315,6 +326,7 @@ public sealed class SqlSugarInstallmentCancelClaimRepository(
         public string? LastRecoveryCashierName { get; set; }
         public string? LastRecoveryCashierUserGuid { get; set; }
         public DateTime? RecoveredAtUtc { get; set; }
+        public string? RefundMode { get; set; }
     }
 }
 
@@ -360,4 +372,7 @@ public sealed class InstallmentCancelClaimEntity
     public string? LastRecoveryCashierUserGuid { get; set; }
     [SugarColumn(IsNullable = true)]
     public DateTime? RecoveredAtUtc { get; set; }
+    // 取消退款方式；NULL 表示原路退（兼容升级前的 claim）。创建后不可变。
+    [SugarColumn(Length = 20, IsNullable = true)]
+    public string? RefundMode { get; set; }
 }

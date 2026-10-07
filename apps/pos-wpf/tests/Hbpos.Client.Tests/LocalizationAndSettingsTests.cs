@@ -274,6 +274,7 @@ public sealed class LocalizationAndSettingsTests
             "installment.center.action.create",
             "installment.center.action.repay",
             "installment.center.action.cancel",
+            "installment.center.action.cancelToVoucher",
             "installment.center.action.void",
             "installment.center.action.confirmPickup",
             "installment.center.search",

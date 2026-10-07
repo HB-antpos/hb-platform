@@ -73,6 +73,57 @@ public sealed class InstallmentCancelClaimServiceTests
         Assert.Equal(InstallmentCancelClaimStatus.Prepared, harness.Repository.Records[request.OperationGuid].Status);
     }
 
+    [Fact]
+    public async Task Voucher_mode_claim_for_card_original_can_be_created_and_begin_refund()
+    {
+        var harness = CreateHarness(payments:
+        [
+            Payment(Guid.NewGuid(), PaymentMethodKind.Cash, 10m),
+            Payment(Guid.NewGuid(), PaymentMethodKind.Card, 10m)
+        ]);
+        var fingerprint = InstallmentCancelClaimFingerprint.Create(harness.Installments.Details);
+        var request = CreateRequest(fingerprint) with { RefundMode = InstallmentCancelRefundMode.Voucher };
+
+        var created = await harness.Service.CreateAsync(InstallmentGuid, request, Identity(), CancellationToken.None);
+        var begun = await harness.Service.BeginRefundAsync(
+            InstallmentGuid,
+            request.OperationGuid,
+            Identity(),
+            CancellationToken.None);
+
+        Assert.Equal(InstallmentCancelRefundMode.Voucher, created.RefundMode);
+        Assert.Equal(InstallmentCancelClaimStatus.RefundPending, begun.Status);
+        Assert.Equal(InstallmentCancelRefundMode.Voucher, harness.Repository.Records[request.OperationGuid].RefundMode);
+
+        // 同一 operationGuid 换成原路退属于改写不可变事实，必须拒绝。
+        var changed = await Assert.ThrowsAsync<InstallmentCancelClaimException>(() =>
+            harness.Service.CreateAsync(
+                InstallmentGuid,
+                request with { RefundMode = null },
+                Identity(),
+                CancellationToken.None));
+        Assert.Equal(InstallmentCancelClaimErrorCodes.Mismatch, changed.Code);
+    }
+
+    [Fact]
+    public async Task Original_route_claim_for_card_original_still_fails_closed_and_invalid_mode_is_rejected()
+    {
+        var harness = CreateHarness(payments: [Payment(Guid.NewGuid(), PaymentMethodKind.Card, 20m)]);
+        var fingerprint = InstallmentCancelClaimFingerprint.Create(harness.Installments.Details);
+
+        var unsupported = await Assert.ThrowsAsync<InstallmentCancelClaimException>(() =>
+            harness.Service.CreateAsync(InstallmentGuid, CreateRequest(fingerprint), Identity(), CancellationToken.None));
+        Assert.Equal(InstallmentCancelClaimErrorCodes.RefundMethodUnsupported, unsupported.Code);
+
+        var invalid = await Assert.ThrowsAsync<InstallmentCancelClaimException>(() =>
+            harness.Service.CreateAsync(
+                InstallmentGuid,
+                CreateRequest(fingerprint) with { RefundMode = (InstallmentCancelRefundMode)99 },
+                Identity(),
+                CancellationToken.None));
+        Assert.NotEqual(InstallmentCancelClaimErrorCodes.RefundMethodUnsupported, invalid.Code);
+    }
+
     [Theory]
     [InlineData(PaymentMethodKind.Cash)]
     [InlineData(PaymentMethodKind.Voucher)]
@@ -117,6 +168,36 @@ public sealed class InstallmentCancelClaimServiceTests
                 Identity(storeCode: "S02", deviceCode: "POS-99"),
                 CancellationToken.None));
         Assert.Equal(InstallmentCancelClaimErrorCodes.Mismatch, otherStore.Code);
+    }
+
+    [Fact]
+    public async Task Create_allows_paid_off_installment_but_rejects_picked_up_installment()
+    {
+        var harness = CreateHarness();
+        harness.Installments.Details = Details() with
+        {
+            TotalAmount = 20m,
+            BalanceAmount = 0m,
+            Status = InstallmentStatus.PaidOff
+        };
+        var fingerprint = InstallmentCancelClaimFingerprint.Create(harness.Installments.Details);
+
+        var created = await harness.Service.CreateAsync(
+            InstallmentGuid,
+            CreateRequest(fingerprint),
+            Identity(),
+            CancellationToken.None);
+        Assert.Equal(InstallmentCancelClaimStatus.Prepared, created.Status);
+
+        var pickedUpHarness = CreateHarness();
+        pickedUpHarness.Installments.Details = harness.Installments.Details with { Status = InstallmentStatus.PickedUp };
+        var pickedUp = await Assert.ThrowsAsync<InstallmentCancelClaimException>(() =>
+            pickedUpHarness.Service.CreateAsync(
+                InstallmentGuid,
+                CreateRequest(fingerprint),
+                Identity(),
+                CancellationToken.None));
+        Assert.Equal(InstallmentCancelClaimErrorCodes.Mismatch, pickedUp.Code);
     }
 
     [Fact]

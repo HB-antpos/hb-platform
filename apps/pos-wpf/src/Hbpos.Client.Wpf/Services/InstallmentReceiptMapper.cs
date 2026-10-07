@@ -64,6 +64,36 @@ internal static class InstallmentReceiptMapper
             ExtraInfoLines: extraInfoLines);
     }
 
+    /// <summary>
+    /// 取消分期时签发的退款代金券（已记录的负数代金券付款、引用为 VOUCHER_REFUND:券码），按记录时间排序。
+    /// </summary>
+    public static IReadOnlyList<RefundVoucherReceipt> GetRefundVouchers(LocalInstallmentOrder order)
+    {
+        const string prefix = "VOUCHER_REFUND:";
+        return order.Payments
+            .Where(payment =>
+                payment.Status == InstallmentPaymentStatus.Recorded &&
+                payment.Method == PaymentMethodKind.Voucher &&
+                payment.Amount < 0m)
+            .OrderBy(payment => payment.RecordedAt)
+            .Select(payment => (Reference: payment.Reference?.Trim(), Amount: Math.Abs(payment.Amount)))
+            .Where(item => item.Reference?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true)
+            .Select(item => new RefundVoucherReceipt(item.Reference![prefix.Length..].Trim(), item.Amount))
+            .Where(voucher => voucher.VoucherCode.Length > 0)
+            .ToList();
+    }
+
+    /// <summary>
+    /// 单张退款券凭证：只保留这张券的付款行，避免打印成功后把分期单里的刷卡回单误标为已打印。
+    /// </summary>
+    public static ReceiptDetails CreateRefundVoucherReceipt(LocalInstallmentOrder order, RefundVoucherReceipt voucher) =>
+        CreateReceipt(order) with
+        {
+            Payments = [new ReceiptPaymentLine(PaymentMethodKind.Voucher, -voucher.Amount, $"VOUCHER_REFUND:{voucher.VoucherCode}")],
+            RefundVoucher = voucher,
+            VoucherBalance = null
+        };
+
     private static void AddPickupInfo(List<string> extraInfoLines, LocalInstallmentOrder order)
     {
         if (order.PickupInfo is { } pickupInfo)

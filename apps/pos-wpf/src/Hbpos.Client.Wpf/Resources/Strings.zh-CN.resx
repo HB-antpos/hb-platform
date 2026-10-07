@@ -2671,6 +2671,9 @@
   <data name="installment.center.action.cancel" xml:space="preserve">
     <value>取消退款</value>
   </data>
+  <data name="installment.center.action.cancelToVoucher" xml:space="preserve">
+    <value>取消退代金券</value>
+  </data>
   <data name="installment.center.action.void" xml:space="preserve">
     <value>作废</value>
   </data>

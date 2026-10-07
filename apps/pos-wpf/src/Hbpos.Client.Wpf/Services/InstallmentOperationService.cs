@@ -36,6 +36,7 @@ public interface IInstallmentOperationService
         LocalInstallmentOrder localOrder,
         PosSessionState session,
         string? reason = null,
+        InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute,
         CancellationToken cancellationToken = default);
 
     Task<InstallmentOperationResult<InstallmentConfirmPickupResponse>> ExecutePickupAsync(
@@ -314,15 +315,18 @@ public sealed class InstallmentOperationService(
         LocalInstallmentOrder localOrder,
         PosSessionState session,
         string? reason = null,
+        InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute,
         CancellationToken cancellationToken = default) =>
-        Task.Run(() => ExecuteCancelCoreAsync(localOrder, session, reason, cancellationToken), CancellationToken.None);
+        Task.Run(() => ExecuteCancelCoreAsync(localOrder, session, reason, refundMode, cancellationToken), CancellationToken.None);
 
     private async Task<InstallmentOperationResult<InstallmentCancelResponse>> ExecuteCancelCoreAsync(
         LocalInstallmentOrder localOrder,
         PosSessionState session,
-        string? reason = null,
-        CancellationToken cancellationToken = default)
+        string? reason,
+        InstallmentCancelRefundMode refundMode,
+        CancellationToken cancellationToken)
     {
+        refundMode = InstallmentLifecycleRules.NormalizeRefundMode(refundMode);
         if (!string.Equals(localOrder.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(localOrder.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase))
         {
@@ -349,8 +353,11 @@ public sealed class InstallmentOperationService(
             session.CashierName,
             DateTimeOffset.UtcNow,
             [],
-            string.IsNullOrWhiteSpace(reason) ? "取消分期并退款" : reason.Trim(),
-            operationGuid.ToString("D"));
+            string.IsNullOrWhiteSpace(reason)
+                ? refundMode == InstallmentCancelRefundMode.Voucher ? "取消分期并退代金券" : "取消分期并退款"
+                : reason.Trim(),
+            operationGuid.ToString("D"),
+            refundMode);
         var now = DateTimeOffset.UtcNow;
         // 同批退款步骤使用递增 tick 保留原付款顺序，避免数据库退化为哈希 GUID 排序。
         var steps = localOrder.Payments
@@ -358,18 +365,22 @@ public sealed class InstallmentOperationService(
             .Select((payment, index) =>
             {
                 var stepCreatedAt = now.AddTicks(index);
+                // 退代金券时每笔原付款都改为发券：步骤方式即实际退款方式，不再带原卡引用/卡交易，
+                // 避免被当作 Square/Linkly 卡退款去调终端；原付款方式另存，仅用于计算与服务端一致的退款计划指纹。
+                var refundsAsVoucher = refundMode == InstallmentCancelRefundMode.Voucher;
                 return new LocalInstallmentRefundStep(
                     DeterministicGuid($"refund:{operationGuid:D}:{payment.PaymentGuid:D}"),
                     operationGuid,
                     payment.PaymentGuid,
-                    payment.Method,
+                    InstallmentLifecycleRules.ResolveRefundMethod(payment.Method, refundMode),
                     payment.Amount,
-                    payment.Reference,
+                    refundsAsVoucher ? null : payment.Reference,
                     $"{operationGuid:D}:refund:{payment.PaymentGuid:D}",
                     LocalInstallmentRefundStepState.Prepared,
                     null,
-                    payment.CardTransactions is null ? null : JsonSerializer.Serialize(payment.CardTransactions, JsonOptions),
-                    null, null, null, null, null, null, stepCreatedAt, stepCreatedAt);
+                    refundsAsVoucher || payment.CardTransactions is null ? null : JsonSerializer.Serialize(payment.CardTransactions, JsonOptions),
+                    null, null, null, null, null, null, stepCreatedAt, stepCreatedAt,
+                    OriginalMethod: payment.Method);
             })
             .ToList();
         var operation = await repository.CreateCancelOrGetAsync(CreateOperation(
@@ -858,7 +869,8 @@ public sealed class InstallmentOperationService(
                         operation.OperationGuid,
                         operation.IdempotencyKey,
                         request.Reason,
-                        fingerprint),
+                        fingerprint,
+                        InstallmentLifecycleRules.NormalizeRefundMode(request.RefundMode)),
                     cancellationToken);
             }
 
@@ -2559,7 +2571,13 @@ public sealed class InstallmentOperationService(
         claim.InstallmentGuid == operation.InstallmentGuid &&
         claim.OperationGuid == operation.OperationGuid &&
         string.Equals(claim.IdempotencyKey, operation.IdempotencyKey, StringComparison.Ordinal) &&
-        string.Equals(claim.RefundPlanFingerprint, fingerprint, StringComparison.Ordinal);
+        string.Equals(claim.RefundPlanFingerprint, fingerprint, StringComparison.Ordinal) &&
+        claim.RefundMode == ReadCancelRefundMode(operation);
+
+    // 旧版本落盘的取消请求没有 RefundMode，一律视为原路退，与服务端旧 claim 的空列口径一致。
+    private static InstallmentCancelRefundMode ReadCancelRefundMode(LocalInstallmentOperation operation) =>
+        InstallmentLifecycleRules.NormalizeRefundMode(
+            Deserialize<InstallmentCancelRequest>(operation.RequestJson).RefundMode);
 
     private async Task<bool> TryMarkCancelFailedAsync(LocalInstallmentOperation operation, string failureMessage)
     {
@@ -2613,7 +2631,8 @@ public sealed class InstallmentOperationService(
             .Select(step => new
             {
                 PaymentGuid = step.OriginalPaymentGuid.ToString("D"),
-                Method = step.Method switch
+                // 指纹描述的是原付款计划（服务端按原付款方式计算），退代金券时步骤方式已改为 Voucher。
+                Method = (step.OriginalMethod ?? step.Method) switch
                 {
                     PaymentMethodKind.Cash => "cash",
                     PaymentMethodKind.Card => "card",

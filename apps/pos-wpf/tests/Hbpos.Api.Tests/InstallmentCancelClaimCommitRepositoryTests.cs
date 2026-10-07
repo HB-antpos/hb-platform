@@ -79,6 +79,134 @@ public sealed class InstallmentCancelClaimCommitRepositoryTests
     }
 
     [Fact]
+    public async Task Paid_off_installment_not_picked_up_can_commit_cancellation_refund()
+    {
+        await using var fixture = new CommitFixture();
+        var claim = await fixture.SeedRefundPendingClaimAsync(paidOff: true);
+        var repository = new SqlSugarInstallmentCancelClaimCommitRepository(
+            fixture.DbContext,
+            new SqlSugarInstallmentRepository(fixture.DbContext),
+            new NoOpInstallmentCancelClaimCommitFaultInjector());
+
+        var result = await repository.CommitAsync(
+            claim,
+            CashRefundRequest(claim, fixture.SourcePaymentGuid),
+            RecoveryIdentity(),
+            Now,
+            CancellationToken.None);
+
+        var state = await fixture.ReadStateAsync(claim);
+        Assert.Equal(InstallmentStatus.Cancelled, result.CommitResponse.Details.Status);
+        Assert.Equal((int)InstallmentStatus.Cancelled, state.Order.Status);
+        Assert.Equal(0m, state.Order.PaidAmount);
+        Assert.Equal(-20m, state.Refund.Amount);
+    }
+
+    [Fact]
+    public async Task Paid_off_installment_picked_up_during_refund_cannot_commit_cancellation()
+    {
+        await using var fixture = new CommitFixture();
+        var claim = await fixture.SeedRefundPendingClaimAsync(paidOff: true);
+        // 退款进行中另一入口完成提货：提交必须拒绝，不能出现"货已拿走又全额退款"。
+        await fixture.ChangeOrderAfterCommitAsync(claim.InstallmentGuid);
+        var repository = new SqlSugarInstallmentCancelClaimCommitRepository(
+            fixture.DbContext,
+            new SqlSugarInstallmentRepository(fixture.DbContext),
+            new NoOpInstallmentCancelClaimCommitFaultInjector());
+
+        await Assert.ThrowsAsync<InstallmentCancelClaimException>(() =>
+            repository.CommitAsync(
+                claim,
+                CashRefundRequest(claim, fixture.SourcePaymentGuid),
+                RecoveryIdentity(),
+                Now,
+                CancellationToken.None));
+
+        var state = await fixture.ReadStateAsync(claim);
+        Assert.Equal(0, state.RefundCount);
+        Assert.Equal((int)InstallmentStatus.PickedUp, state.Order.Status);
+    }
+
+    [Fact]
+    public async Task Voucher_mode_refunds_card_original_payment_with_server_issued_voucher()
+    {
+        await using var fixture = new CommitFixture();
+        var claim = await fixture.SeedRefundPendingClaimAsync(
+            PaymentMethodKind.Card,
+            reference: "ANZ:ORIGINAL-TXN",
+            paidOff: true,
+            refundMode: InstallmentCancelRefundMode.Voucher);
+        var idempotencyKey = RefundIdempotencyKey(claim, fixture.SourcePaymentGuid);
+        var voucherCode = await fixture.SeedRefundVoucherAsync(idempotencyKey, 20m);
+        var repository = new SqlSugarInstallmentCancelClaimCommitRepository(
+            fixture.DbContext,
+            new SqlSugarInstallmentRepository(fixture.DbContext),
+            new NoOpInstallmentCancelClaimCommitFaultInjector());
+
+        var result = await repository.CommitAsync(
+            claim,
+            new InstallmentCancelClaimCommitRequest(
+            [
+                new InstallmentRefundPaymentCommandDto(
+                    Guid.NewGuid(),
+                    PaymentMethodKind.Voucher,
+                    20m,
+                    $"VOUCHER_REFUND:{voucherCode}",
+                    [],
+                    idempotencyKey,
+                    fixture.SourcePaymentGuid)
+            ]),
+            RecoveryIdentity(),
+            Now,
+            CancellationToken.None);
+
+        var state = await fixture.ReadStateAsync(claim);
+        Assert.Equal(InstallmentStatus.Cancelled, result.CommitResponse.Details.Status);
+        Assert.Equal((int)PaymentMethodKind.Voucher, state.Refund.Method);
+        Assert.Equal(-20m, state.Refund.Amount);
+        Assert.Equal(InstallmentCancelRefundMode.Voucher, result.Claim.RefundMode);
+    }
+
+    [Fact]
+    public async Task Voucher_mode_rejects_cash_refund_for_any_original_payment()
+    {
+        await using var fixture = new CommitFixture();
+        var claim = await fixture.SeedRefundPendingClaimAsync(
+            PaymentMethodKind.Cash,
+            refundMode: InstallmentCancelRefundMode.Voucher);
+        var repository = new SqlSugarInstallmentCancelClaimCommitRepository(
+            fixture.DbContext,
+            new SqlSugarInstallmentRepository(fixture.DbContext),
+            new NoOpInstallmentCancelClaimCommitFaultInjector());
+
+        // 选了退代金券就不能再退现金，哪怕原付款是现金。
+        await Assert.ThrowsAsync<InstallmentCancelClaimException>(() =>
+            repository.CommitAsync(
+                claim,
+                CashRefundRequest(claim, fixture.SourcePaymentGuid),
+                RecoveryIdentity(),
+                Now,
+                CancellationToken.None));
+
+        Assert.Equal(0, (await fixture.ReadStateAsync(claim)).RefundCount);
+    }
+
+    private static InstallmentCancelClaimCommitRequest CashRefundRequest(
+        InstallmentCancelClaimRecord claim,
+        Guid sourcePaymentGuid) =>
+        new(
+        [
+            new InstallmentRefundPaymentCommandDto(
+                Guid.NewGuid(),
+                PaymentMethodKind.Cash,
+                20m,
+                null,
+                [],
+                RefundIdempotencyKey(claim, sourcePaymentGuid),
+                sourcePaymentGuid)
+        ]);
+
+    [Fact]
     public async Task Card_commit_without_approved_provider_evidence_is_rejected_before_any_ledger_mutation()
     {
         await using var fixture = new CommitFixture();
@@ -388,7 +516,9 @@ public sealed class InstallmentCancelClaimCommitRepositoryTests
         public async Task<InstallmentCancelClaimRecord> SeedRefundPendingClaimAsync(
             PaymentMethodKind method = PaymentMethodKind.Cash,
             string? reference = null,
-            IReadOnlyList<CardTransactionDto>? cardTransactions = null)
+            IReadOnlyList<CardTransactionDto>? cardTransactions = null,
+            bool paidOff = false,
+            InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute)
         {
             var installmentGuid = Guid.NewGuid();
             await client.Insertable(new InstallmentOrderEntity
@@ -401,12 +531,12 @@ public sealed class InstallmentCancelClaimCommitRepositoryTests
                 CashierName = "Original Cashier",
                 CustomerName = "Cancel Customer",
                 CustomerPhone = "0400000000",
-                TotalAmount = 50m,
+                TotalAmount = paidOff ? 20m : 50m,
                 MinimumDownPayment = 20m,
                 DownPaymentAmount = 20m,
                 PaidAmount = 20m,
-                BalanceAmount = 30m,
-                Status = (int)InstallmentStatus.Active,
+                BalanceAmount = paidOff ? 0m : 30m,
+                Status = paidOff ? (int)InstallmentStatus.PaidOff : (int)InstallmentStatus.Active,
                 CreatedAt = Now.AddDays(-1).UtcDateTime,
                 UpdatedAt = Now.AddDays(-1).UtcDateTime
             }).ExecuteCommandAsync();
@@ -446,7 +576,8 @@ public sealed class InstallmentCancelClaimCommitRepositoryTests
                 IsBlocking = true,
                 CreatedAtUtc = Now.AddMinutes(-1).UtcDateTime,
                 UpdatedAtUtc = Now.AddMinutes(-1).UtcDateTime,
-                Revision = 2
+                Revision = 2,
+                RefundMode = InstallmentCancelClaimRecord.ToStoredRefundMode(refundMode)
             };
             await client.Insertable(entity).ExecuteCommandAsync();
             return new InstallmentCancelClaimRecord(
@@ -464,7 +595,8 @@ public sealed class InstallmentCancelClaimCommitRepositoryTests
                 new DateTimeOffset(entity.UpdatedAtUtc, TimeSpan.Zero),
                 null,
                 null,
-                entity.Revision);
+                entity.Revision,
+                RefundMode: refundMode);
         }
 
         public async Task<string> SeedRefundVoucherAsync(

@@ -83,7 +83,9 @@ public sealed record LocalInstallmentRefundStep(
     DateTimeOffset? ResolvedAt,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    string? ProviderEnvironment = null);
+    string? ProviderEnvironment = null,
+    // 原付款方式；退代金券时 Method 为 Voucher、此列保留原方式供退款计划指纹使用。旧数据为空即等于 Method。
+    PaymentMethodKind? OriginalMethod = null);
 
 public sealed record InstallmentRefundSupervisorResolution(
     InstallmentRefundSupervisorDecision Decision,

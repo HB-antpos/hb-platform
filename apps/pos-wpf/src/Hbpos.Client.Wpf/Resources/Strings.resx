@@ -957,6 +957,7 @@
   <data name="installment.center.action.create" xml:space="preserve"><value>Create Installment</value></data>
   <data name="installment.center.action.repay" xml:space="preserve"><value>Add Repayment</value></data>
   <data name="installment.center.action.cancel" xml:space="preserve"><value>Cancel and Refund</value></data>
+  <data name="installment.center.action.cancelToVoucher" xml:space="preserve"><value>Cancel and Refund as Voucher</value></data>
   <data name="installment.center.action.void" xml:space="preserve"><value>Void</value></data>
   <data name="installment.center.action.confirmPickup" xml:space="preserve"><value>Confirm Pickup</value></data>
   <data name="installment.center.search" xml:space="preserve"><value>Search order no., name, or phone</value></data>

@@ -7509,6 +7509,40 @@ public sealed class MainViewModelScannerTests
         return await task;
     }
 
+    [Fact]
+    public async Task Installment_cancel_prints_one_auto_refund_voucher_document_per_issued_voucher()
+    {
+        var printService = new RecordingReceiptPrintService();
+        var installmentService = new RecordingInstallmentOrderService();
+        installmentService.SeedCancelledVoucherRefundOrder();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            installmentOrderService: installmentService);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        printService.Calls.Clear();
+
+        // 导航器创建的分期中心必须接上主界面的退款券打印回调。
+        var navigator = typeof(MainViewModel).GetField("_screenNavigator", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewModel)!;
+        var center = (InstallmentCenterViewModel)navigator.GetType().GetMethod("CreateInstallmentCenterViewModel", BindingFlags.Instance | BindingFlags.Public)!.Invoke(navigator, [])!;
+        Assert.NotNull(typeof(InstallmentCenterViewModel).GetField("_printRefundVouchersAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(center));
+
+        var method = typeof(MainViewModel).GetMethod("PrintInstallmentRefundVouchersAfterCancelAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var failure = await (Task<string?>)method!.Invoke(viewModel, [installmentService.CreatedLocalOrder!.InstallmentGuid])!;
+
+        Assert.Null(failure);
+        Assert.Equal(2, printService.Calls.Count);
+        Assert.All(printService.Calls, call =>
+        {
+            Assert.Equal(ReceiptPrintReason.VoucherRefundAuto, call.Reason);
+            Assert.Single(call.Receipt!.Payments);
+        });
+        Assert.Equal(
+            ["RF-CARD", "RF-CASH"],
+            printService.Calls.Select(call => call.Receipt!.RefundVoucher!.VoucherCode));
+    }
+
     private static async Task InvokeShowInstallmentRepaymentAsync(MainViewModel viewModel, InstallmentOrderSummary order)
     {
         var navigatorField = typeof(MainViewModel).GetField("_screenNavigator", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -9012,6 +9046,25 @@ public sealed class MainViewModelScannerTests
 
         public Guid? LastConfirmPickupOrderId { get; private set; }
 
+        public void SeedCancelledVoucherRefundOrder()
+        {
+            SeedRepaymentOrder();
+            var at = CreatedLocalOrder!.CreatedAt;
+            CreatedLocalOrder = CreatedLocalOrder with
+            {
+                Status = InstallmentStatus.Cancelled,
+                PaidAmount = 0m,
+                BalanceAmount = 0m,
+                Payments =
+                [
+                    new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Card, 30m, "ANZ:TXN-1", InstallmentPaymentStatus.Recorded, at, "C001", "POS-01"),
+                    new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Cash, 20m, null, InstallmentPaymentStatus.Recorded, at.AddMinutes(1), "C001", "POS-01"),
+                    new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Voucher, -30m, "VOUCHER_REFUND:RF-CARD", InstallmentPaymentStatus.Recorded, at.AddMinutes(5), "C001", "POS-01"),
+                    new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Voucher, -20m, "VOUCHER_REFUND:RF-CASH", InstallmentPaymentStatus.Recorded, at.AddMinutes(6), "C001", "POS-01")
+                ]
+            };
+        }
+
         public InstallmentOrderSummary SeedRepaymentOrder()
         {
             var guid = Guid.NewGuid();
@@ -9232,7 +9285,7 @@ public sealed class MainViewModelScannerTests
             return Task.FromResult(new InstallmentOrderActionResult(true, "补款已记录。", ToSummary(CreatedLocalOrder)));
         }
 
-        public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, CancellationToken cancellationToken = default) =>
+        public Task<InstallmentOrderActionResult> CancelWithRefundAsync(Guid orderId, PosSessionState session, InstallmentCancelRefundMode refundMode = InstallmentCancelRefundMode.OriginalRoute, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task<InstallmentOrderActionResult> VoidCancelAsync(Guid orderId, PosSessionState session, string? reason = null, CancellationToken cancellationToken = default) =>

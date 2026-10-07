@@ -53,6 +53,7 @@ public sealed class SqlSugarInstallmentCancelClaimSchemaInitializer(
                 [LastRecoveryCashierName] NVARCHAR(100) NULL,
                 [LastRecoveryCashierUserGuid] NVARCHAR(50) NULL,
                 [RecoveredAtUtc] DATETIME2(7) NULL,
+                [RefundMode] NVARCHAR(20) NULL,
                 [Revision] BIGINT NOT NULL,
                 CONSTRAINT [CK_POSM_InstallmentCancelClaim_Fingerprint]
                     CHECK ([RefundPlanFingerprint] LIKE N'sha256:%' AND LEN([RefundPlanFingerprint]) = 71),
@@ -112,6 +113,23 @@ public sealed class SqlSugarInstallmentCancelClaimSchemaInitializer(
         BEGIN
             ALTER TABLE [dbo].[POSM_InstallmentCancelClaim]
                 ADD [RecoveredAtUtc] DATETIME2(7) NULL;
+        END;
+
+        -- 取消退款方式：NULL=原路退（升级前的 claim 均为此口径），Voucher=全部改发退款代金券。
+        IF OBJECT_ID(N'[dbo].[POSM_InstallmentCancelClaim]', N'U') IS NOT NULL
+           AND COL_LENGTH(N'dbo.POSM_InstallmentCancelClaim', N'RefundMode') IS NULL
+        BEGIN
+            ALTER TABLE [dbo].[POSM_InstallmentCancelClaim]
+                ADD [RefundMode] NVARCHAR(20) NULL;
+        END;
+
+        IF OBJECT_ID(N'[dbo].[POSM_InstallmentCancelClaim]', N'U') IS NOT NULL
+           AND OBJECT_ID(N'[dbo].[CK_POSM_InstallmentCancelClaim_RefundMode]', N'C') IS NULL
+        BEGIN
+            -- 新列在同一 batch 内编译期不可见，约束须经 EXEC 重新编译。
+            EXEC(N'ALTER TABLE [dbo].[POSM_InstallmentCancelClaim]
+                ADD CONSTRAINT [CK_POSM_InstallmentCancelClaim_RefundMode]
+                CHECK ([RefundMode] IS NULL OR [RefundMode] IN (N''OriginalRoute'', N''Voucher''));');
         END;
 
         IF NOT EXISTS (

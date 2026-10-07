@@ -1573,6 +1573,65 @@ public sealed class InstallmentOperationServiceTests
     }
 
     [Fact]
+    public async Task Voucher_mode_cancel_issues_vouchers_for_every_tender_without_terminal_and_keeps_original_fingerprint()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var repository = await CreateRepositoryAsync(path);
+            var installmentGuid = Guid.Parse("11111111-1111-4111-8111-111111111111");
+            var now = DateTimeOffset.UtcNow;
+            var order = CreateLocalOrder() with
+            {
+                OrderGuid = installmentGuid,
+                InstallmentGuid = installmentGuid,
+                PaidAmount = 37.75m,
+                Payments =
+                [
+                    new InstallmentPaymentDto(Guid.Parse("40000000-0000-4000-8000-000000000001"), PaymentMethodKind.Voucher, 7.25m, "VIP-GOLDEN", InstallmentPaymentStatus.Recorded, now, "C001", "POS-01"),
+                    new InstallmentPaymentDto(Guid.Parse("20000000-0000-4000-8000-000000000001"), PaymentMethodKind.Cash, 20m, null, InstallmentPaymentStatus.Recorded, now, "C001", "POS-01"),
+                    new InstallmentPaymentDto(Guid.Parse("30000000-0000-4000-8000-000000000001"), PaymentMethodKind.Card, 10.50m, "ANZ:CARD-GOLDEN", InstallmentPaymentStatus.Recorded, now, "C001", "POS-01")
+                ]
+            };
+            var api = new RecordingInstallmentApi { CancelResponse = CreateCancelResponse(order) };
+            var terminal = new CountingTerminal(approve: true);
+            var voucher = new CountingVoucherTenderClient(claimBegun: () => api.BeginCancelRefundCalls > 0);
+            var service = new InstallmentOperationService(repository, api, terminal, voucher);
+
+            var result = await service.ExecuteCancelAsync(order, Session, "golden vector", InstallmentCancelRefundMode.Voucher);
+
+            Assert.True(result.Succeeded, result.Message);
+            // 指纹描述原付款计划，必须与原路退的黄金向量完全一致，服务端才能按原付款核对。
+            Assert.Equal(
+                "sha256:e71e70a0dde391c395f87e43cbeb12056488ad6fbbd76622ba77761cf2b816e4",
+                api.LastCancelClaimCreateRequest!.RefundPlanFingerprint);
+            Assert.Equal(InstallmentCancelRefundMode.Voucher, api.LastCancelClaimCreateRequest.RefundMode);
+            Assert.Equal(0, terminal.RefundCalls);
+            Assert.Equal(3, voucher.IssueRefundCalls);
+            Assert.True(voucher.ClaimWasBegunBeforeRefund);
+            var refunds = api.LastCancelClaimCommitRequest!.Refunds;
+            Assert.Equal(3, refunds.Count);
+            Assert.All(refunds, refund =>
+            {
+                Assert.Equal(PaymentMethodKind.Voucher, refund.Method);
+                Assert.True(refund.CardTransactions is null or { Count: 0 });
+            });
+            Assert.Equal(10.50m, refunds.Single(refund => refund.OriginalPaymentGuid == order.Payments[2].PaymentGuid).Amount);
+
+            var steps = await repository.GetRefundStepsAsync(api.CreatedCancelOperationGuids[0]);
+            var cardStep = steps.Single(step => step.OriginalPaymentGuid == order.Payments[2].PaymentGuid);
+            Assert.Equal(PaymentMethodKind.Voucher, cardStep.Method);
+            Assert.Equal(PaymentMethodKind.Card, cardStep.OriginalMethod);
+            Assert.Null(cardStep.OriginalReference);
+            Assert.Null(cardStep.CardTransactionsJson);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
     public async Task Cancel_claim_busy_stops_before_any_refund()
     {
         var path = CreateTempDatabasePath();
@@ -3074,7 +3133,8 @@ public sealed class InstallmentOperationServiceTests
                 InstallmentCancelClaimStatus.Prepared,
                 now,
                 now,
-                now.AddSeconds(120));
+                now.AddSeconds(120),
+                RefundMode: request.RefundMode ?? InstallmentCancelRefundMode.OriginalRoute);
             _cancelClaims.Add(request.OperationGuid, claim);
             return Task.FromResult(claim);
         }

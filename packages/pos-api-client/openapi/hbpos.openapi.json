@@ -8612,6 +8612,9 @@
           "refundPlanFingerprint": {
             "type": "string",
             "nullable": true
+          },
+          "refundMode": {
+            "$ref": "#/components/schemas/InstallmentCancelRefundMode"
           }
         },
         "additionalProperties": false
@@ -8664,6 +8667,9 @@
           "executingDeviceCode": {
             "type": "string",
             "nullable": true
+          },
+          "refundMode": {
+            "$ref": "#/components/schemas/InstallmentCancelRefundMode"
           }
         },
         "additionalProperties": false
@@ -8725,6 +8731,14 @@
         "type": "integer",
         "format": "int32"
       },
+      "InstallmentCancelRefundMode": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
       "InstallmentCancelRequest": {
         "type": "object",
         "properties": {
@@ -8766,6 +8780,9 @@
           "idempotencyKey": {
             "type": "string",
             "nullable": true
+          },
+          "refundMode": {
+            "$ref": "#/components/schemas/InstallmentCancelRefundMode"
           }
         },
         "additionalProperties": false

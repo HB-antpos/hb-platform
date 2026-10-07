@@ -328,6 +328,12 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             // Square refundId 只能在创建它的环境查询，升级旧库时以 nullable 列保持兼容。
             await ExecuteAsync(connection, "ALTER TABLE LocalInstallmentRefundSteps ADD COLUMN ProviderEnvironment TEXT NULL;", cancellationToken);
         }
+
+        if (!refundStepColumns.Contains("OriginalMethod"))
+        {
+            // 取消分期退代金券时步骤方式与原付款方式不同；旧库升级为空列，读取时回退为 Method。
+            await ExecuteAsync(connection, "ALTER TABLE LocalInstallmentRefundSteps ADD COLUMN OriginalMethod INTEGER NULL;", cancellationToken);
+        }
     }
 
     private static async Task EnsureLinklySettlementUploadColumnsAsync(
@@ -1369,6 +1375,7 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             ResolvedAt TEXT NULL,
             CreatedAt TEXT NOT NULL,
             UpdatedAt TEXT NOT NULL,
+            OriginalMethod INTEGER NULL,
             FOREIGN KEY (OperationGuid) REFERENCES LocalInstallmentOperations(OperationGuid)
         );
         """,
