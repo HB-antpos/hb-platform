@@ -212,6 +212,8 @@
     <Compile Include="WarehouseProductRecordQueryServiceTests.cs" />
     <Compile Include="WarehouseProductRecordAuthorizationTests.cs" />
     <Compile Include="SalesDashboardReportRevenueTests.cs" />
+    <Compile Include="MonthlyStoreDailySalesReactServiceTests.cs" />
+    <Compile Include="MonthlyStoreDailySalesSqlServerIntegrationTests.cs" />
     <Compile Include="WeeklyReportTests.cs" />
     <Compile Include="SalesDetailQueryFlightsTests.cs" />
     <Compile Include="SupplierReportReadTests.cs" />

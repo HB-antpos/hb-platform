@@ -60,6 +60,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.SalesDashboard.SalesDataView, "查看销售数据", "销售看板", "Web 页面 /executive-sales-intelligence/overview - 查看营业额、订单、客流及分店销售表现"),
                 new(Permissions.SalesDashboard.SalesDetailView, "查看销售明细", "销售看板", "Web 页面 /executive-sales-intelligence/sales-detail-v2 - 按供应商、分店和商品查看销售明细"),
                 new(Permissions.SalesDashboard.CompactBoardView, "查看独立销售看板", "销售看板", "Web 页面 /executive-sales-intelligence/compact-sales-board - 查看紧凑布局的分店、供应商和商品销售数据"),
+                new(Permissions.SalesDashboard.MonthlyDailySalesDownloadView, "查看月度日销售下载", "销售看板", "Web 页面 /executive-sales-intelligence/monthly-daily-sales-download - 按分店、按日查看并下载某个月的营业额、刷卡和现金"),
                 new(Permissions.SalesDashboard.ProductMovementView, "查看商品经营分析", "销售看板", "Web 页面 /executive-sales-intelligence/product-movement-report - 查看商品经营表现和店长动作建议"),
                 new(Permissions.SalesDashboard.BatchProductSalesView, "查看批量货号销量", "销售看板", "Web 页面 /executive-sales-intelligence/purchase-sales-analysis「批量货号销量」标签 - 按导入货号查看商品每日销量、分店销量及折扣成交情况"),
                 new(Permissions.SalesDashboard.WarehouseFlowView, "查看仓库商品流转分析", "销售看板", "Web 页面 /executive-sales-intelligence/warehouse-product-flow-analysis 与移动端「仓库商品进销」- 查看仓库商品的进货、发货和销售流转"),

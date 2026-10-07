@@ -56,6 +56,7 @@ const ProductImportPage = lazy(() => import('../pages/DomesticPurchase/ProductIm
 const ProductGradeManagementPage = lazy(() => import('../pages/Warehouse/ProductGradeManagement'))
 const ExecutiveSalesIntelligencePage = lazy(() => import('../pages/ExecutiveSalesIntelligence'))
 const CompactSalesBoardPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/CompactSalesBoard'))
+const MonthlyDailySalesDownloadPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/MonthlyDailySalesDownload'))
 const SalesDetailAnalysisPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/SalesDetailAnalysisV2'))
 const ProductMovementReportPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/ProductMovementReport'))
 const WarehouseProductFlowAnalysisPage = lazy(() => import('../pages/ExecutiveSalesIntelligence/WarehouseProductFlowAnalysis'))
@@ -647,6 +648,16 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewCompactSalesBoard',
         },
         element: <CompactSalesBoardPage />,
+      },
+      {
+        path: '/executive-sales-intelligence/monthly-daily-sales-download',
+        meta: {
+          title: 'menu.monthlyDailySalesDownload',
+          icon: 'DownloadOutlined',
+          keepAlive: true,
+          accessKey: 'canViewMonthlyDailySalesDownload',
+        },
+        element: <MonthlyDailySalesDownloadPage />,
       },
       {
         path: '/executive-sales-intelligence/product-movement-report',

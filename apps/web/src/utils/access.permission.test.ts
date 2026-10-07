@@ -1025,6 +1025,7 @@ const adminWebMenuPreview = buildWebRoleMenuPreview(adminAccess, translate, {
 })
 const productStatisticMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/product-statistics')
 const compactSalesBoardMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/compact-sales-board')
+const monthlyDailySalesDownloadMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/monthly-daily-sales-download')
 const productMovementReportOnlyWebPreview = buildWebRoleMenuPreview(productMovementReportOnlyAccess, translate, {
   includeHidden: true,
 })
@@ -1040,6 +1041,10 @@ const hiddenSalesDetailForProductMovementOnly = findWebMenuNode(
 const hiddenCompactSalesBoardForProductMovementOnly = findWebMenuNode(
   productMovementReportOnlyWebPreview,
   '/executive-sales-intelligence/compact-sales-board',
+)
+const hiddenMonthlyDailySalesDownloadForProductMovementOnly = findWebMenuNode(
+  productMovementReportOnlyWebPreview,
+  '/executive-sales-intelligence/monthly-daily-sales-download',
 )
 const localPurchaseOnlyWebPreview = buildWebRoleMenuPreview(localPurchaseDashboardOnlyAccess, translate, {
   includeHidden: true,
@@ -1170,6 +1175,18 @@ assertEqual(
 )
 
 assertEqual(
+  monthlyDailySalesDownloadMenu?.visible,
+  true,
+  '管理员应显示月度日销售下载入口',
+)
+
+assertEqual(
+  monthlyDailySalesDownloadMenu?.permissionCodes.join(','),
+  P.SalesDashboard.MonthlyDailySalesDownloadView,
+  '月度日销售下载应仅要求本页查看权限',
+)
+
+assertEqual(
   productMovementParentMenu?.visible,
   true,
   '只有商品经营分析权限时销售看板父菜单应可见',
@@ -1191,6 +1208,12 @@ assertEqual(
   hiddenCompactSalesBoardForProductMovementOnly?.visible,
   false,
   '只有商品经营分析权限时不应打开独立销售看板',
+)
+
+assertEqual(
+  hiddenMonthlyDailySalesDownloadForProductMovementOnly?.visible,
+  false,
+  '只有商品经营分析权限时不应打开月度日销售下载',
 )
 
 assertEqual(

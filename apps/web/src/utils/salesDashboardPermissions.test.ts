@@ -17,6 +17,7 @@ const entries: MenuEntry[] = [
   single('overview', 'canViewSalesData', 'SalesDashboard.SalesData.View'),
   single('sales-detail-v2', 'canViewSalesDetail', 'SalesDashboard.SalesDetail.View'),
   single('compact-sales-board', 'canViewCompactSalesBoard', 'SalesDashboard.CompactBoard.View'),
+  single('monthly-daily-sales-download', 'canViewMonthlyDailySalesDownload', 'SalesDashboard.MonthlyDailySalesDownload.View'),
   single('product-movement-report', 'canViewProductMovementReport', 'SalesDashboard.ProductMovement.View'),
   { path: 'purchase-sales-analysis', key: 'canViewPurchaseSalesAnalysis', codes: tabs.map(([, , code]) => code), legacy: tabs },
   single('warehouse-product-flow-analysis', 'canViewWarehouseProductFlowAnalysis', 'SalesDashboard.WarehouseFlow.View'),

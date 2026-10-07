@@ -35,6 +35,7 @@ public class NavigationServiceTests
         yield return new object[] { "SalesDashboard.SalesData.View", "/executive-sales-intelligence/overview" };
         yield return new object[] { "SalesDashboard.SalesDetail.View", "/executive-sales-intelligence/sales-detail-v2" };
         yield return new object[] { "SalesDashboard.CompactBoard.View", "/executive-sales-intelligence/compact-sales-board" };
+        yield return new object[] { "SalesDashboard.MonthlyDailySalesDownload.View", "/executive-sales-intelligence/monthly-daily-sales-download" };
         yield return new object[] { "SalesDashboard.ProductMovement.View", "/executive-sales-intelligence/product-movement-report" };
         // 批量货号销量与分店进货销量分析已合并为「进货销量分析」一页，任一权限都只点亮这一项。
         yield return new object[] { "SalesDashboard.BatchProductSales.View", "/executive-sales-intelligence/purchase-sales-analysis" };

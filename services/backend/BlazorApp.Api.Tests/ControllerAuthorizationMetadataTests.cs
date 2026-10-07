@@ -44,6 +44,12 @@ public class ControllerAuthorizationMetadataTests
         };
         yield return new object[]
         {
+            typeof(MonthlyStoreDailySalesController),
+            nameof(MonthlyStoreDailySalesController.GetMonthlyStoreDailySales),
+            "SalesDashboard.MonthlyDailySalesDownload.View",
+        };
+        yield return new object[]
+        {
             typeof(ProductMovementReportController),
             nameof(ProductMovementReportController.GetReport),
             "SalesDashboard.ProductMovement.View",
@@ -96,6 +102,7 @@ public class ControllerAuthorizationMetadataTests
     [Theory]
     [InlineData(typeof(RevenueReportSnapshotController), "SalesDashboard.SalesData.View")]
     [InlineData(typeof(SalesDetailReportController), "SalesDashboard.SalesDetail.View")]
+    [InlineData(typeof(MonthlyStoreDailySalesController), "SalesDashboard.MonthlyDailySalesDownload.View")]
     [InlineData(typeof(ProductMovementReportController), "SalesDashboard.ProductMovement.View")]
     [InlineData(typeof(LocalSupplierProductSalesAnalysisController), "SalesDashboard.LocalProductAnalysis.View")]
     [InlineData(typeof(ReactLocalPurchaseDashboardController), "SalesDashboard.PurchaseAmount.View")]

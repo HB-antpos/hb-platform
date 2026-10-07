@@ -1,0 +1,158 @@
+{
+  "monthlyDailySalesDownload": {
+    "title": "月度日销售下载",
+    "subtitle": "按分店、按日导出营业额、刷卡和现金",
+    "monthLabel": "{{year}} 年 {{month}} 月",
+    "monthDay": "{{month}} 月 {{day}} 日",
+    "listSeparator": "、",
+    "month": {
+      "label": "月份",
+      "group": "选择月份",
+      "previous": "上一个月",
+      "next": "下一个月",
+      "refresh": "重新加载（绕过缓存）"
+    },
+    "kpi": {
+      "region": "已选分店合计",
+      "selected": "已选 {{count}} 家合计",
+      "partial": "本月进行中",
+      "missing": "缺数 {{count}} 个店日未计入",
+      "noSplit": "刷卡、现金、其他不含 {{count}} 个无支付方式拆分的店日"
+    },
+    "freshness": {
+      "complete": "统计截至 {{month}} 月 {{day}} 日 · {{counted}} / {{total}} 天已出数",
+      "partial": "统计截至 {{month}} 月 {{day}} 日 · 已出数 {{counted}} / {{total}} 天",
+      "none": "本月还没有已出数的日期"
+    },
+    "columns": {
+      "date": "日期",
+      "code": "分店编码",
+      "name": "分店",
+      "weekday": "星期",
+      "revenue": "营业额",
+      "card": "刷卡",
+      "cash": "现金",
+      "other": "其他",
+      "remark": "备注"
+    },
+    "weekday": {
+      "sun": "周日",
+      "mon": "周一",
+      "tue": "周二",
+      "wed": "周三",
+      "thu": "周四",
+      "fri": "周五",
+      "sat": "周六"
+    },
+    "stores": {
+      "region": "分店列表",
+      "title": "分店",
+      "hint": "共 {{count}} 家，勾选的进入下载",
+      "searchLabel": "搜索分店名称或编码",
+      "searchPlaceholder": "搜索分店名称或编码",
+      "selectAll": "全选",
+      "clear": "清空",
+      "tableLabel": "分店月度合计",
+      "colDownload": "下载",
+      "colStore": "分店",
+      "colMix": "支付构成",
+      "checkLabel": "纳入下载：{{name}}",
+      "legendOther": "其他（代金券等，营业额减刷卡减现金）",
+      "tagMissing": "缺 {{count}} 天",
+      "tagNoSplit": "无拆分 {{count}} 天",
+      "tagNoSplitTitle": "没有支付方式拆分的日子：{{dates}}",
+      "emptyAll": "这个月没有分店数据",
+      "emptySearch": "没有匹配的分店",
+      "mixLabel": "刷卡 {{card}}%，现金 {{cash}}%，其他 {{other}}%",
+      "mixNone": "没有可用的支付方式拆分"
+    },
+    "banner": {
+      "missingLeadOne": "{{name}} 有 {{count}} 天未出数：{{dates}}。",
+      "missingLeadMany": "{{stores}} 家分店共有 {{count}} 天未出数（{{names}}）。",
+      "missingTail": "文件中这些日子留空，不按 0 计入合计。",
+      "excludeOne": "先排除这家店",
+      "excludeMany": "先排除这 {{count}} 家店",
+      "noSplitLeadOne": "{{name}} 有 {{count}} 天没有支付方式拆分：{{dates}}。",
+      "noSplitLeadMany": "{{stores}} 家分店共有 {{count}} 天没有支付方式拆分（{{names}}）。",
+      "noSplitTail": "这些日子的营业额照常计入；刷卡、现金、其他显示为「—」并留空，且不计入这三列的合计。"
+    },
+    "daily": {
+      "region": "单店逐日明细",
+      "tableLabel": "单店逐日明细",
+      "empty": "暂无分店",
+      "subtitle": "{{monthLabel}}逐日 · {{days}} 天",
+      "note": "下载文件中该店的数据就是这张表 · 金额单位澳元",
+      "notIncluded": "该店未勾选，不会进入下载文件 · 金额单位澳元",
+      "totalLabel": "{{month}} 月合计",
+      "missingTitle": "该日统计尚未发布（缺数）",
+      "noSplitTitle": "该日没有可靠的支付方式拆分",
+      "noStores": "没有可预览的分店",
+      "legendMissing": "缺数 {{count}} 天：{{dates}}，显示为「—」，不计入合计。",
+      "legendNoSplit": "无支付方式拆分 {{count}} 天：{{dates}}，刷卡、现金、其他显示为「—」，不计入这三列的合计。"
+    },
+    "footer": {
+      "region": "下载",
+      "pickFirst": "请先在左侧勾选要下载的分店",
+      "summaryXlsx": "1 个 Excel 文件 · {{sheets}} 个工作表（汇总 + {{count}} 家分店）· 每店每天一行",
+      "summaryCsv": "1 个 CSV 文件 · {{rows}} 行 · 列：{{columns}}",
+      "fileLine": "文件名 {{fileName}} · 金额单位澳元，保留两位小数",
+      "formatGroup": "文件格式",
+      "formatXlsx": "Excel 工作簿",
+      "formatCsv": "CSV 长表",
+      "download": "下载 {{month}} 月数据",
+      "downloadIdle": "下载",
+      "generating": "生成中…",
+      "monthData": "{{month}} 月数据",
+      "noData": "本月还没有已出数的日期，暂时没有可下载的数据",
+      "partial": "本月还没结束：文件只含 {{month}} 月 1–{{last}} 日，{{next}} 日起的数据出数后需要重新下载",
+      "partialOneDay": "本月还没结束：文件只含 {{month}} 月 1 日，{{next}} 日起的数据出数后需要重新下载",
+      "noteMissing": "缺数 {{count}} 个店日：文件中留空，不按 0 计入合计",
+      "noteNoSplit": "{{count}} 个店日没有支付方式拆分：刷卡、现金、其他留空，不计入这三列的合计"
+    },
+    "progress": {
+      "preparing": "正在准备导出…",
+      "store": "正在生成 {{name}}（{{index}} / {{total}}）",
+      "finalize": "正在生成 Excel 文件…",
+      "cancel": "取消"
+    },
+    "interrupted": {
+      "storeFailed": "导出中断：{{name}} 生成失败（{{reason}}），已完成 {{done}} / {{total}} 家。",
+      "finalizeFailed": "导出中断：文件生成失败（{{reason}}）。",
+      "kept": "已完成的分店不会丢失。",
+      "retry": "重试未完成的 {{count}} 家",
+      "retryFile": "重试生成文件",
+      "downloadDone": "只下载已完成的 {{count}} 家",
+      "discard": "放弃本次导出"
+    },
+    "state": {
+      "noScope": "当前账号没有可查看的分店。",
+      "loadFailed": "月度日销售数据加载失败，请重试。",
+      "retry": "重试",
+      "loading": "加载中…"
+    },
+    "toast": {
+      "exported": "已导出 {{count}} 家分店：{{fileName}}",
+      "exportedCsv": "已导出 {{rows}} 行：{{fileName}}",
+      "cancelled": "已取消导出",
+      "exportFailed": "导出失败，请稍后重试"
+    },
+    "export": {
+      "summarySheet": "汇总",
+      "fileNamePrefix": "月度日销售",
+      "summaryTitle": "月度日销售汇总 · {{monthLabel}}",
+      "summarySubtitle": "单位：澳元 · 统计截至 {{through}} · 已选 {{count}} 家分店",
+      "summarySubtitleCompletedOnly": "单位：澳元 · 统计截至 {{through}} · 已选 {{selected}} 家分店，本文件只含已完成的 {{count}} 家",
+      "partialMonth": "本月进行中（已出数 {{counted}} / {{total}} 天）",
+      "storeTitle": "{{name}} · {{code}} · {{monthLabel}}",
+      "total": "合计",
+      "dayMissing": "缺数（统计尚未发布，留空）",
+      "dayNoSplit": "无支付方式拆分（刷卡、现金、其他留空）",
+      "noteMissing": "缺数 {{count}} 天：{{dates}}（留空，不计入合计）",
+      "noteNoSplit": "无支付方式拆分 {{count}} 天：{{dates}}（刷卡、现金、其他留空，不计入这三列的合计）",
+      "noteSeparator": "；",
+      "footnoteMissing": "说明：缺数日表示该日统计尚未发布，单元格留空，不按 0 计入任何合计。",
+      "footnoteNoSplit": "说明：无支付方式拆分的日子，营业额与收银支付明细对不上（旧系统数据没有支付方式明细，或统计尚未追上迟到上传的订单），营业额照常计入，刷卡、现金、其他留空，且这三列的合计不含这些日子。",
+      "footnotePartial": "说明：本月还没结束，文件只含截至 {{through}} 的数据，之后出数的日子需要重新下载。"
+    }
+  }
+}

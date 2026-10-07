@@ -34,6 +34,7 @@ const WEB_MENU: MenuSource[] = ([
   ["/executive-sales-intelligence/overview", "Sales overview", "销售概览", ["SalesDashboard.SalesData.View"]],
   ["/executive-sales-intelligence/sales-detail-v2", "Sales detail", "销售明细", ["SalesDashboard.SalesDetail.View"]],
   ["/executive-sales-intelligence/compact-sales-board", "Compact sales board", "销售简报", ["SalesDashboard.CompactBoard.View"]],
+  ["/executive-sales-intelligence/monthly-daily-sales-download", "Monthly daily sales download", "月度日销售下载", ["SalesDashboard.MonthlyDailySalesDownload.View"]],
   ["/executive-sales-intelligence/product-movement-report", "Product movement", "商品流动", ["SalesDashboard.ProductMovement.View"]],
   ["/executive-sales-intelligence/warehouse-product-flow-analysis", "Warehouse product flow", "仓库商品流向", ["SalesDashboard.WarehouseFlow.View"]],
   ["/executive-sales-intelligence/local-product-sales-analysis", "Local product sales", "本地商品销售", ["SalesDashboard.LocalProductAnalysis.View"]],

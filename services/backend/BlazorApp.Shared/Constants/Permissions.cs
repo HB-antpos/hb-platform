@@ -301,6 +301,10 @@ namespace BlazorApp.Shared.Constants
             public const string SalesDataView = "SalesDashboard.SalesData.View";
             public const string SalesDetailView = "SalesDashboard.SalesDetail.View";
             public const string CompactBoardView = "SalesDashboard.CompactBoard.View";
+
+            // 月度日销售下载页：按分店、按日查看并下载营业额、刷卡、现金。
+            public const string MonthlyDailySalesDownloadView =
+                "SalesDashboard.MonthlyDailySalesDownload.View";
             public const string ProductMovementView = "SalesDashboard.ProductMovement.View";
             public const string BatchProductSalesView = "SalesDashboard.BatchProductSales.View";
             public const string WarehouseFlowView = "SalesDashboard.WarehouseFlow.View";
