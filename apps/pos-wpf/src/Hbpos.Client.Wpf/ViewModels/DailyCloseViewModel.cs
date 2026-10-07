@@ -905,6 +905,9 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 LocalLinklySettlementStatus.Unknown => T(
                     "dailyClose.linklySettlement.unknown",
                     "Settlement result is unknown. Do not submit it again."),
+                LocalLinklySettlementStatus.Failed when IsPinpadOfflineSettlement(execution.Settlement) => T(
+                    "dailyClose.linklySettlement.pinpadOffline",
+                    "The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle & Print on the Linkly Settlement tab to retry."),
                 LocalLinklySettlementStatus.Failed when execution.Settlement.ReceiptTexts.Count == 0 => Format(
                     "dailyClose.linklySettlement.failedNoReceipt",
                     "Settlement failed: {0}",
@@ -1342,6 +1345,14 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     private bool CanReprintSelectedArchive()
     {
         return !IsBusy && SelectedArchive is not null;
+    }
+
+    private static bool IsPinpadOfflineSettlement(LocalLinklySettlementRecord settlement)
+    {
+        // EFT-Client 在刷卡机离线时立即回 PF、无小票，结算没有到达银行；原文 "PINpad Offline" 只保留在记录里作证据，
+        // 界面改为中英文说明和下一步操作。带小票的 PF 不归为离线，仍显示银行原文。
+        return string.Equals(settlement.ResponseCode?.Trim(), "PF", StringComparison.OrdinalIgnoreCase) &&
+            settlement.ReceiptTexts.Count == 0;
     }
 
     private async Task RefreshAutoSettlementHintAsync(CancellationToken cancellationToken)

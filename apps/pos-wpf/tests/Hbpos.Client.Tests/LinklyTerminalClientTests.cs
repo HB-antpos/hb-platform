@@ -1295,6 +1295,23 @@ public sealed class LinklyTerminalClientTests
     }
 
     [Fact]
+    public async Task SettlementAsync_connection_failure_explains_settlement_was_not_sent()
+    {
+        var eftClient = new FakeLinklyEftClient { ConnectResult = false };
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal(ProviderSubmissionState.NotSubmitted, result.ProviderSubmissionState);
+        Assert.Equal(
+            "Could not connect to the Linkly EFT-Client on this POS, so the settlement was not sent. Make sure the Linkly program is open, then try again.",
+            result.Message);
+        Assert.Empty(eftClient.Requests);
+    }
+
+    [Fact]
     public async Task SettlementAsync_returns_unknown_after_request_is_sent_and_response_fails()
     {
         var eftClient = new FakeLinklyEftClient { ThrowOnRead = true };
