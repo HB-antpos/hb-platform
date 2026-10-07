@@ -157,5 +157,18 @@
       "sendFailed": "验证码发送失败，请稍后重试",
       "confirmFailed": "设置密码失败，请检查验证码后重试"
     }
+  },
+  "buildInfo": {
+    "version": "版本 {{version}}",
+    "channel": {
+      "production": "正式",
+      "preview": "预览",
+      "development": "开发",
+      "custom": "其他渠道",
+      "none": "未配置渠道"
+    },
+    "detailsTitle": "版本信息",
+    "detailsSubtitle": "向管理员反馈问题时，可长按复制下面的信息",
+    "accessibilityLabel": "应用版本 {{version}}，更新渠道 {{channel}}，{{source}}。点按查看详情"
   }
 }

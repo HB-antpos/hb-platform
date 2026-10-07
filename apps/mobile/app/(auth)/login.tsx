@@ -39,6 +39,7 @@ import {
   type LoginErrorDescriptor,
 } from "@/modules/auth/login-errors";
 import { prepareDeviceLoginSession } from "@/modules/auth/device-login-session";
+import { AppBuildInfoFooter } from "@/modules/updates/AppBuildInfoFooter";
 import {
   collectLoginDeviceLocation,
   collectOptionalLoginDeviceLocation,
@@ -808,6 +809,9 @@ export default function Login() {
             >
               {t("privacy.openPolicy")}
             </Button>
+            {/* 版本条放在隐私说明之后：平时不抢眼，向管理员报问题时一眼可读、点开可复制。 */}
+            <View style={styles.footerDivider} />
+            <AppBuildInfoFooter />
           </View>
         </View>
       </ScrollView>
@@ -971,6 +975,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     textAlign: "center",
+  },
+  footerDivider: {
+    alignSelf: "stretch",
+    backgroundColor: HB_COLORS.outlineMuted,
+    height: StyleSheet.hairlineWidth,
+    marginBottom: 2,
+    marginHorizontal: 56,
+    marginTop: 2,
   },
   loginModeRow: {
     flexDirection: "row",

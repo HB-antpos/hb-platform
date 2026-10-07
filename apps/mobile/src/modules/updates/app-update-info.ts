@@ -132,6 +132,22 @@ export function formatAppPackageVersion(
   return info.appVersion || info.appBuildVersion || fallback;
 }
 
+export type AppUpdateChannelKind = "production" | "preview" | "development" | "custom" | "none";
+
+// 受控 OTA 会把渠道覆盖成 mobile-<环境>-<平台>-release-<时间>-<id>，安装包内置渠道则是 production / preview 等裸名。
+const RELEASE_CHANNEL_PATTERN = /^mobile-(production|preview|development)-/;
+
+/** 把 Updates.channel 归成正式 / 预览 / 开发，用于登录页等处的简短标签；原文另行展示。 */
+export function resolveAppUpdateChannelKind(channel: string | null | undefined): AppUpdateChannelKind {
+  const value = channel?.trim().toLowerCase();
+  if (!value) return "none";
+  const environment = RELEASE_CHANNEL_PATTERN.exec(value)?.[1] ?? value;
+  if (environment === "production" || environment === "preview" || environment === "development") {
+    return environment;
+  }
+  return "custom";
+}
+
 export function buildAppUpdateInfoRows(info: AppUpdateInfo): AppUpdateInfoRow[] {
   return [
     buildValueRow("version", "updates.version", info.appVersion, "updates.unknown"),

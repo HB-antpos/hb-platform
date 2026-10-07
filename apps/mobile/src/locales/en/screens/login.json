@@ -157,5 +157,18 @@
       "sendFailed": "Could not send the code. Please try again later.",
       "confirmFailed": "Could not set the password. Check the code and try again."
     }
+  },
+  "buildInfo": {
+    "version": "Version {{version}}",
+    "channel": {
+      "production": "Production",
+      "preview": "Preview",
+      "development": "Development",
+      "custom": "Other channel",
+      "none": "No channel"
+    },
+    "detailsTitle": "Version information",
+    "detailsSubtitle": "Long-press to copy these details when reporting an issue",
+    "accessibilityLabel": "App version {{version}}, update channel {{channel}}, {{source}}. Tap for details"
   }
 }
