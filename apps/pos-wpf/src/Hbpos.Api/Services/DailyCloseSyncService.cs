@@ -68,7 +68,8 @@ internal sealed class DailyCloseSyncService(
             {
                 throw Conflict(
                     "DAILY_CLOSE_SCOPE_CONFLICT",
-                    "The daily close record already belongs to another store or device.");
+                    "The daily close record already belongs to another store or device.",
+                    $"storedStore={existing.StoreCode} storedDevice={existing.DeviceCode}");
             }
 
             if (!string.Equals(existing.DetailLevel, DailyCloseDetailLevels.Full, StringComparison.Ordinal))
@@ -83,14 +84,15 @@ internal sealed class DailyCloseSyncService(
                 continue;
             }
 
-            if (Equivalent(existing, normalized))
+            if (DescribeFirstDifference(existing, normalized) is not { } difference)
             {
                 return new DailyCloseSyncResponse(Accepted: true, AlreadySynced: true, ReplacedPlaceholder: false);
             }
 
             throw Conflict(
                 "DAILY_CLOSE_CONTENT_CONFLICT",
-                "The same daily close was uploaded earlier with different content.");
+                "The same daily close was uploaded earlier with different content.",
+                difference);
         }
 
         throw Conflict(
@@ -336,39 +338,56 @@ internal sealed class DailyCloseSyncService(
     }
 
     /// <summary>已入库的 Full 记录与本次上传在全部上传字段上是否等价（金额已按 2 位小数规整，时间按 100ns 刻度比较）。</summary>
-    private static bool Equivalent(PosmDailyCloseRecord existing, PosmDailyCloseRecord incoming)
+    /// <summary>
+    /// 同一日结 GUID 重复上传时返回第一个不一致的字段名（只写服务端日志，不带收银员姓名、金额等内容）；
+    /// 完全一致返回 null，视为幂等重放。比较口径与原先逐项相等一致。
+    /// </summary>
+    private static string? DescribeFirstDifference(PosmDailyCloseRecord existing, PosmDailyCloseRecord incoming)
     {
-        return existing.DailyCloseGuid == incoming.DailyCloseGuid &&
-            SameCode(existing.StoreCode, incoming.StoreCode) &&
-            SameCode(existing.DeviceCode, incoming.DeviceCode) &&
-            SameCode(existing.ClientKind, incoming.ClientKind) &&
-            existing.BusinessDate.Date == incoming.BusinessDate.Date &&
-            SameInstant(existing.PeriodFromUtc, incoming.PeriodFromUtc) &&
-            SameInstant(existing.PeriodToUtc, incoming.PeriodToUtc) &&
-            SameInstant(existing.SavedAtUtc, incoming.SavedAtUtc) &&
-            string.Equals(existing.CashierId, incoming.CashierId, StringComparison.Ordinal) &&
-            string.Equals(existing.CashierName, incoming.CashierName, StringComparison.Ordinal) &&
+        (string Field, bool Same)[] checks =
+        [
+            ("DailyCloseGuid", existing.DailyCloseGuid == incoming.DailyCloseGuid),
+            ("StoreCode", SameCode(existing.StoreCode, incoming.StoreCode)),
+            ("DeviceCode", SameCode(existing.DeviceCode, incoming.DeviceCode)),
+            ("ClientKind", SameCode(existing.ClientKind, incoming.ClientKind)),
+            ("BusinessDate", existing.BusinessDate.Date == incoming.BusinessDate.Date),
+            ("PeriodFromUtc", SameInstant(existing.PeriodFromUtc, incoming.PeriodFromUtc)),
+            ("PeriodToUtc", SameInstant(existing.PeriodToUtc, incoming.PeriodToUtc)),
+            ("SavedAtUtc", SameInstant(existing.SavedAtUtc, incoming.SavedAtUtc)),
+            ("CashierId", string.Equals(existing.CashierId, incoming.CashierId, StringComparison.Ordinal)),
+            ("CashierName", string.Equals(existing.CashierName, incoming.CashierName, StringComparison.Ordinal)),
             // 刻意不比较 AppVersion：它只是上传方的客户端版本元数据，不是日结的业务内容。
             // 首次上传已被收下、响应丢失后客户端升级再重发时版本号会变，这不能被判成内容冲突，
             // 否则客户端会把一条服务端早已持有的记录标成永久拒绝。已存数据保持首次上传时的版本。
-            existing.OrderCount == incoming.OrderCount &&
-            existing.ReturnQuantity == incoming.ReturnQuantity &&
-            existing.CashSalesAmount == incoming.CashSalesAmount &&
-            existing.CashRefundAmount == incoming.CashRefundAmount &&
-            existing.CashNetAmount == incoming.CashNetAmount &&
-            existing.CardSalesAmount == incoming.CardSalesAmount &&
-            existing.CardRefundAmount == incoming.CardRefundAmount &&
-            existing.CardNetAmount == incoming.CardNetAmount &&
-            existing.VoucherSalesAmount == incoming.VoucherSalesAmount &&
-            existing.VoucherRefundAmount == incoming.VoucherRefundAmount &&
-            existing.VoucherNetAmount == incoming.VoucherNetAmount &&
-            existing.RefundAmount == incoming.RefundAmount &&
-            existing.ExpectedCashAmount == incoming.ExpectedCashAmount &&
-            existing.CountedCashAmount == incoming.CountedCashAmount &&
-            existing.CashDifference == incoming.CashDifference &&
-            existing.NoteSubtotal == incoming.NoteSubtotal &&
-            existing.CoinSubtotal == incoming.CoinSubtotal &&
-            string.Equals(existing.CashCountsJson, incoming.CashCountsJson, StringComparison.Ordinal);
+            ("OrderCount", existing.OrderCount == incoming.OrderCount),
+            ("ReturnQuantity", existing.ReturnQuantity == incoming.ReturnQuantity),
+            ("CashSalesAmount", existing.CashSalesAmount == incoming.CashSalesAmount),
+            ("CashRefundAmount", existing.CashRefundAmount == incoming.CashRefundAmount),
+            ("CashNetAmount", existing.CashNetAmount == incoming.CashNetAmount),
+            ("CardSalesAmount", existing.CardSalesAmount == incoming.CardSalesAmount),
+            ("CardRefundAmount", existing.CardRefundAmount == incoming.CardRefundAmount),
+            ("CardNetAmount", existing.CardNetAmount == incoming.CardNetAmount),
+            ("VoucherSalesAmount", existing.VoucherSalesAmount == incoming.VoucherSalesAmount),
+            ("VoucherRefundAmount", existing.VoucherRefundAmount == incoming.VoucherRefundAmount),
+            ("VoucherNetAmount", existing.VoucherNetAmount == incoming.VoucherNetAmount),
+            ("RefundAmount", existing.RefundAmount == incoming.RefundAmount),
+            ("ExpectedCashAmount", existing.ExpectedCashAmount == incoming.ExpectedCashAmount),
+            ("CountedCashAmount", existing.CountedCashAmount == incoming.CountedCashAmount),
+            ("CashDifference", existing.CashDifference == incoming.CashDifference),
+            ("NoteSubtotal", existing.NoteSubtotal == incoming.NoteSubtotal),
+            ("CoinSubtotal", existing.CoinSubtotal == incoming.CoinSubtotal),
+            ("CashCountsJson", string.Equals(existing.CashCountsJson, incoming.CashCountsJson, StringComparison.Ordinal))
+        ];
+
+        foreach (var (field, same) in checks)
+        {
+            if (!same)
+            {
+                return $"field={field}";
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -438,9 +457,9 @@ internal sealed class DailyCloseSyncService(
         return new DailyCloseValidationException(code, message);
     }
 
-    private static DailyCloseConflictException Conflict(string code, string message)
+    private static DailyCloseConflictException Conflict(string code, string message, string? detail = null)
     {
-        return new DailyCloseConflictException(code, message);
+        return new DailyCloseConflictException(code, message, detail);
     }
 
     private readonly record struct NormalizedTender(decimal SalesAmount, decimal RefundAmount, decimal NetAmount);
@@ -453,7 +472,10 @@ public sealed class DailyCloseValidationException(string code, string message) :
     public string Code { get; } = code;
 }
 
-public sealed class DailyCloseConflictException(string code, string message) : Exception(message)
+/// <param name="detail">冲突明细（不一致的字段名等），只写服务端日志、不回给客户端。</param>
+public sealed class DailyCloseConflictException(string code, string message, string? detail = null) : Exception(message)
 {
     public string Code { get; } = code;
+
+    public string? Detail { get; } = detail;
 }

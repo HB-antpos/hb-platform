@@ -1,5 +1,6 @@
 using Hbpos.Api.Services;
 using Hbpos.Contracts.Linkly;
+using Microsoft.Extensions.Logging;
 
 namespace Hbpos.Api.Tests;
 
@@ -470,11 +471,213 @@ public sealed class LinklySettlementSyncServiceTests
         Assert.Equal("Failed", Assert.Single(repository.Records).Status);
     }
 
-    private static LinklySettlementSyncService CreateService(FakeRepository repository)
+    // 2026-10 线上 1042 测试机 BD0F3F55 的真实时间：设备本地库是原值，服务端库里是被 SQL datetime 舍入后的值。
+    private static readonly DateTimeOffset ProductionRequestedAt =
+        new DateTimeOffset(2026, 10, 2, 6, 48, 52, TimeSpan.Zero).AddTicks(9574255);
+
+    private static readonly DateTimeOffset ProductionCompletedAt =
+        new DateTimeOffset(2026, 10, 2, 6, 49, 3, TimeSpan.Zero).AddTicks(375697);
+
+    [Fact]
+    public void LegacyRound_reproduces_the_values_stored_in_production_before_the_fix()
+    {
+        Assert.Equal(
+            new DateTimeOffset(2026, 10, 2, 6, 48, 52, TimeSpan.Zero).AddTicks(9566667),
+            LegacyRound(ProductionRequestedAt));
+        Assert.Equal(
+            new DateTimeOffset(2026, 10, 2, 6, 49, 3, TimeSpan.Zero).AddTicks(366667),
+            LegacyRound(ProductionCompletedAt));
+        Assert.True(LinklySettlementSyncService.IsOnLegacySqlDateTimeGrid(LegacyRound(ProductionRequestedAt).UtcDateTime));
+        Assert.False(LinklySettlementSyncService.IsOnLegacySqlDateTimeGrid(ProductionRequestedAt.UtcDateTime));
+    }
+
+    [Fact]
+    public async Task SyncAsync_accepts_higher_revision_when_stored_timestamps_were_rounded_by_legacy_datetime_writes()
+    {
+        // 复现线上：修订 4 已落库（时间被旧仓储舍入），打印失败产生修订 5 再上传，修复前必然 IMMUTABLE_FIELDS_CONFLICT。
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        var revision4 = CreateProductionRequest(revision: 4);
+        await service.SyncAsync(revision4, "S001", "POS-01", CancellationToken.None);
+        SimulateLegacyStoredTimestamps(Assert.Single(repository.Records));
+
+        var response = await service.SyncAsync(
+            revision4 with { ClientRevision = 5, LastPrintError = "Printer port could not be opened." },
+            "S001",
+            "POS-01",
+            CancellationToken.None);
+
+        Assert.True(response.Accepted);
+        Assert.False(response.AlreadySynced);
+        Assert.Equal(5, response.AcceptedRevision);
+        var stored = Assert.Single(repository.Records);
+        Assert.Equal(5, stored.ClientRevision);
+        Assert.Equal("Printer port could not be opened.", stored.LastPrintError);
+    }
+
+    [Fact]
+    public async Task SyncAsync_treats_same_revision_retry_as_idempotent_when_stored_timestamps_were_rounded()
+    {
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        var revision4 = CreateProductionRequest(revision: 4);
+        await service.SyncAsync(revision4, "S001", "POS-01", CancellationToken.None);
+        SimulateLegacyStoredTimestamps(Assert.Single(repository.Records));
+
+        var retry = await service.SyncAsync(revision4, "S001", "POS-01", CancellationToken.None);
+
+        Assert.True(retry.Accepted);
+        Assert.True(retry.AlreadySynced);
+        Assert.Equal(4, retry.AcceptedRevision);
+    }
+
+    [Fact]
+    public async Task SyncAsync_accepts_print_progress_when_legacy_rounding_moved_stored_print_time_forward()
+    {
+        // .0398 秒按 1/300 秒舍入后进位成 .0400 秒：库里的末次打印时间比客户端原值晚，修复前会被判成「打印审计倒退」。
+        var printedAt = new DateTimeOffset(2026, 10, 2, 6, 50, 0, TimeSpan.Zero).AddTicks(398000);
+        Assert.True(LegacyRound(printedAt) > printedAt);
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        var printed = CreateProductionRequest(revision: 5) with
+        {
+            FirstPrintedAt = printedAt,
+            LastPrintedAt = printedAt,
+            PrintCount = 1
+        };
+        await service.SyncAsync(printed, "S001", "POS-01", CancellationToken.None);
+        SimulateLegacyStoredTimestamps(Assert.Single(repository.Records));
+
+        var response = await service.SyncAsync(
+            printed with { ClientRevision = 6, LastPrintError = "Paper out." },
+            "S001",
+            "POS-01",
+            CancellationToken.None);
+
+        Assert.Equal(6, response.AcceptedRevision);
+        Assert.False(response.AlreadySynced);
+    }
+
+    [Fact]
+    public async Task SyncAsync_still_rejects_a_real_requested_at_change_and_reports_both_values()
+    {
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        var revision4 = CreateProductionRequest(revision: 4);
+        await service.SyncAsync(revision4, "S001", "POS-01", CancellationToken.None);
+        SimulateLegacyStoredTimestamps(Assert.Single(repository.Records));
+
+        var exception = await Assert.ThrowsAsync<LinklySettlementConflictException>(() =>
+            service.SyncAsync(
+                revision4 with { ClientRevision = 5, RequestedAt = ProductionRequestedAt.AddMilliseconds(5) },
+                "S001",
+                "POS-01",
+                CancellationToken.None));
+
+        Assert.Equal("IMMUTABLE_FIELDS_CONFLICT", exception.Code);
+        Assert.Equal(
+            "field=RequestedAtUtc stored=2026-10-02T06:48:52.9566667Z incoming=2026-10-02T06:48:52.9624255Z",
+            exception.Detail);
+    }
+
+    [Fact]
+    public async Task SyncAsync_does_not_tolerate_millisecond_drift_for_full_precision_rows()
+    {
+        // 容差只给落在 1/300 秒刻度上的旧行；修复后按 DATETIME2 写入的新行仍要求精确相等。
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        var revision4 = CreateProductionRequest(revision: 4);
+        await service.SyncAsync(revision4, "S001", "POS-01", CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<LinklySettlementConflictException>(() =>
+            service.SyncAsync(
+                revision4 with { ClientRevision = 5, RequestedAt = ProductionRequestedAt.AddMilliseconds(1) },
+                "S001",
+                "POS-01",
+                CancellationToken.None));
+
+        Assert.Equal("IMMUTABLE_FIELDS_CONFLICT", exception.Code);
+    }
+
+    [Fact]
+    public async Task SyncAsync_conflict_detail_names_the_field_but_never_echoes_receipt_text()
+    {
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        var request = CreateRequest(status: "Succeeded", revision: 1);
+        await service.SyncAsync(request, "S001", "POS-01", CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<LinklySettlementConflictException>(() =>
+            service.SyncAsync(
+                request with { ReceiptTexts = ["CARD 4111 SECRET"] },
+                "S001",
+                "POS-01",
+                CancellationToken.None));
+
+        Assert.Equal("REVISION_CONTENT_CONFLICT", exception.Code);
+        Assert.StartsWith("field=ReceiptTextsJson storedLength=", exception.Detail);
+        Assert.DoesNotContain("SECRET", exception.Detail);
+        Assert.DoesNotContain("SETTLEMENT RECEIPT", exception.Detail);
+    }
+
+    [Fact]
+    public async Task SyncAsync_logs_every_accepted_outcome_with_scope_and_revisions()
+    {
+        var repository = new FakeRepository();
+        var logger = new RecordingLogger<LinklySettlementSyncService>();
+        var service = CreateService(repository, logger);
+        var request = CreateRequest(status: "Succeeded", revision: 2);
+
+        await service.SyncAsync(request, "S001", "POS-01", CancellationToken.None);
+        await service.SyncAsync(request, "S001", "POS-01", CancellationToken.None);
+        await service.SyncAsync(request with { ClientRevision = 1 }, "S001", "POS-01", CancellationToken.None);
+        await service.SyncAsync(request with { ClientRevision = 3, LastPrintError = "Paper out." }, "S001", "POS-01", CancellationToken.None);
+
+        Assert.All(logger.Entries, entry => Assert.Equal(LogLevel.Information, entry.Level));
+        Assert.Collection(
+            logger.Entries,
+            entry => Assert.Contains($"result=Inserted store=S001 device=POS-01 settlement={request.SettlementGuid} revision=2 storedRevision=", entry.Message),
+            entry => Assert.Contains("result=DuplicateRevision", entry.Message),
+            entry => Assert.Contains("result=StaleRevision", entry.Message),
+            entry => Assert.Contains("result=Updated", entry.Message));
+    }
+
+    private static LinklySettlementSyncRequest CreateProductionRequest(long revision)
+    {
+        return CreateRequest(status: "Succeeded", revision: revision) with
+        {
+            BusinessDate = new DateOnly(2026, 10, 2),
+            RequestedAt = ProductionRequestedAt,
+            CompletedAt = ProductionCompletedAt
+        };
+    }
+
+    /// <summary>模拟修复前：SqlClient 按 SQL datetime 发送（一天内的时间按 1/300 秒四舍五入），落库后以 DATETIME2(7) 读回。</summary>
+    private static DateTimeOffset LegacyRound(DateTimeOffset value)
+    {
+        var utc = value.UtcDateTime;
+        var dayStart = utc.Ticks - utc.Ticks % TimeSpan.TicksPerDay;
+        var sqlTicks = (long)((utc.Ticks - dayStart) / (double)TimeSpan.TicksPerMillisecond * 0.3 + 0.5);
+        var restored = (long)Math.Round(sqlTicks * TimeSpan.TicksPerSecond / 300d, MidpointRounding.AwayFromZero);
+        return new DateTimeOffset(dayStart + restored, TimeSpan.Zero);
+    }
+
+    private static void SimulateLegacyStoredTimestamps(PosmLinklySettlementRecord stored)
+    {
+        stored.RequestedAtUtc = LegacyRound(stored.RequestedAtUtc);
+        stored.CompletedAtUtc = stored.CompletedAtUtc is { } completed ? LegacyRound(completed) : null;
+        stored.FirstPrintedAtUtc = stored.FirstPrintedAtUtc is { } first ? LegacyRound(first) : null;
+        stored.LastPrintedAtUtc = stored.LastPrintedAtUtc is { } last ? LegacyRound(last) : null;
+    }
+
+    private static LinklySettlementSyncService CreateService(
+        FakeRepository repository,
+        ILogger<LinklySettlementSyncService>? logger = null)
     {
         return new LinklySettlementSyncService(
             repository,
-            new FixedTimeProvider(new DateTimeOffset(2026, 8, 1, 2, 0, 0, TimeSpan.Zero)));
+            new FixedTimeProvider(new DateTimeOffset(2026, 8, 1, 2, 0, 0, TimeSpan.Zero)),
+            logger);
     }
 
     private static LinklySettlementSyncRequest CreateRequest(string status, long revision)

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Hbpos.Api.Logging;
 using Hbpos.Api.Services;
 using Hbpos.Contracts.DailyClose;
 using Hbpos.Contracts.Devices;
@@ -15,7 +16,8 @@ namespace Hbpos.Api.Controllers;
 [Authorize(AuthenticationSchemes = DeviceAuthConstants.Scheme)]
 [Route("api/v1/daily-closes")]
 public sealed class DailyClosesController(
-    IDailyCloseSyncService syncService) : ControllerBase
+    IDailyCloseSyncService syncService,
+    ILogger<DailyClosesController>? logger = null) : ControllerBase
 {
     internal const long MaximumRequestBytes = 256 * 1024;
 
@@ -42,6 +44,14 @@ public sealed class DailyClosesController(
             !string.Equals(request.DeviceCode, deviceCode, StringComparison.Ordinal))
         {
             // 上传范围只信任认证 claims；拒绝静默改写，避免错误设备的离线记录落入当前 scope。
+            logger?.LogWarning(
+                RejectedEvent(StatusCodes.Status403Forbidden, "DEVICE_SCOPE_FORBIDDEN"),
+                "Daily close sync rejected status=403 code=DEVICE_SCOPE_FORBIDDEN store={StoreCode} device={DeviceCode} requestStore={RequestStoreCode} requestDevice={RequestDeviceCode} dailyClose={DailyCloseGuid}",
+                storeCode,
+                deviceCode,
+                request.StoreCode,
+                request.DeviceCode,
+                request.DailyCloseGuid);
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 code = "DEVICE_SCOPE_FORBIDDEN",
@@ -51,19 +61,56 @@ public sealed class DailyClosesController(
 
         try
         {
-            return Ok(await syncService.SyncAsync(
+            var response = await syncService.SyncAsync(
                 request,
                 storeCode,
                 deviceCode,
-                cancellationToken));
+                cancellationToken);
+            // 受理结果只进本地日志文件（Information 不进中心日志），用于核对补传历史日结、覆盖回填占位的过程。
+            logger?.LogInformation(
+                "Daily close sync accepted result={Result} store={StoreCode} device={DeviceCode} dailyClose={DailyCloseGuid} clientKind={ClientKind} businessDate={BusinessDate} appVersion={AppVersion}",
+                response.ReplacedPlaceholder ? "ReplacedPlaceholder" : response.AlreadySynced ? "AlreadySynced" : "Inserted",
+                storeCode,
+                deviceCode,
+                request.DailyCloseGuid,
+                request.ClientKind,
+                request.BusinessDate,
+                request.AppVersion);
+            return Ok(response);
         }
         catch (DailyCloseValidationException ex)
         {
+            logger?.LogWarning(
+                RejectedEvent(StatusCodes.Status400BadRequest, ex.Code),
+                "Daily close sync rejected status=400 code={Code} store={StoreCode} device={DeviceCode} dailyClose={DailyCloseGuid} clientKind={ClientKind} appVersion={AppVersion} reason={Reason}",
+                ex.Code,
+                storeCode,
+                deviceCode,
+                request.DailyCloseGuid,
+                request.ClientKind,
+                request.AppVersion,
+                ex.Message);
             return BadRequest(new { code = ex.Code, message = ex.Message });
         }
         catch (DailyCloseConflictException ex)
         {
+            // 客户端把 409 当作永久拒绝、不再自动重试，所以必须在服务端留下「哪个字段不一致」。
+            logger?.LogWarning(
+                RejectedEvent(StatusCodes.Status409Conflict, ex.Code),
+                "Daily close sync rejected status=409 code={Code} store={StoreCode} device={DeviceCode} dailyClose={DailyCloseGuid} clientKind={ClientKind} appVersion={AppVersion} detail={Detail}",
+                ex.Code,
+                storeCode,
+                deviceCode,
+                request.DailyCloseGuid,
+                request.ClientKind,
+                request.AppVersion,
+                ex.Detail);
             return Conflict(new { code = ex.Code, message = ex.Message });
         }
+    }
+
+    private static EventId RejectedEvent(int statusCode, string code)
+    {
+        return RejectionEventIds.Create("DailyCloseSync", statusCode, code);
     }
 }

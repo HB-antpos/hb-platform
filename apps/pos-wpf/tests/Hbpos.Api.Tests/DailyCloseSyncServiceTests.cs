@@ -416,6 +416,7 @@ public sealed class DailyCloseSyncServiceTests
             service.SyncAsync(request, "S001", "POS-01", CancellationToken.None));
 
         Assert.Equal("DAILY_CLOSE_CONTENT_CONFLICT", exception.Code);
+        Assert.Equal("field=OrderCount", exception.Detail);
         Assert.Equal(99, Assert.Single(repository.Records).OrderCount);
     }
 
@@ -465,6 +466,8 @@ public sealed class DailyCloseSyncServiceTests
             service.SyncAsync(request, "S001", "POS-01", CancellationToken.None));
 
         Assert.Equal("DAILY_CLOSE_CONTENT_CONFLICT", exception.Code);
+        // 明细只给字段名，不把收银员姓名等内容写进日志。
+        Assert.Equal("field=CashierName", exception.Detail);
     }
 
     [Fact]

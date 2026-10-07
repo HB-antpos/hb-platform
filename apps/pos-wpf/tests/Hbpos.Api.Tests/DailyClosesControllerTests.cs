@@ -7,6 +7,7 @@ using Hbpos.Contracts.Devices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Hbpos.Api.Tests;
 
@@ -188,10 +189,83 @@ public sealed class DailyClosesControllerTests
     private static string? MessageOf(object? value) =>
         value?.GetType().GetProperty("message")?.GetValue(value) as string;
 
+    [Fact]
+    public async Task Sync_logs_accepted_result_including_placeholder_replacement()
+    {
+        var service = new RecordingSyncService { Response = new DailyCloseSyncResponse(true, false, true) };
+        var logger = new RecordingLogger<DailyClosesController>();
+        var controller = CreateController(service, "S001", "POS-01", logger);
+        var request = CreateRequest();
+
+        await controller.Sync(request, CancellationToken.None);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.StartsWith(
+            $"Daily close sync accepted result=ReplacedPlaceholder store=S001 device=POS-01 dailyClose={request.DailyCloseGuid}",
+            entry.Message);
+    }
+
+    [Fact]
+    public async Task Sync_logs_conflict_detail_as_warning_without_returning_it_to_the_client()
+    {
+        var service = new RecordingSyncService
+        {
+            Exception = new DailyCloseConflictException(
+                "DAILY_CLOSE_CONTENT_CONFLICT",
+                "The same daily close was uploaded earlier with different content.",
+                "field=CountedCashAmount")
+        };
+        var logger = new RecordingLogger<DailyClosesController>();
+        var controller = CreateController(service, "S001", "POS-01", logger);
+        var request = CreateRequest();
+
+        var result = await controller.Sync(request, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Equal(["code", "message"], conflict.Value!.GetType().GetProperties().Select(property => property.Name));
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("DailyCloseSync:DAILY-CLOSE-CONTENT-CONFLICT", entry.EventId.Name);
+        Assert.Contains($"status=409 code=DAILY_CLOSE_CONTENT_CONFLICT store=S001 device=POS-01 dailyClose={request.DailyCloseGuid}", entry.Message);
+        Assert.EndsWith("detail=field=CountedCashAmount", entry.Message);
+    }
+
+    [Fact]
+    public async Task Sync_logs_validation_and_scope_rejections_as_warnings()
+    {
+        var logger = new RecordingLogger<DailyClosesController>();
+        var invalid = CreateController(
+            new RecordingSyncService { Exception = new DailyCloseValidationException("INVALID_TENDERS", "tenders cannot contain null entries.") },
+            "S001",
+            "POS-01",
+            logger);
+        var scoped = CreateController(new RecordingSyncService(), "S001", "POS-01", logger);
+
+        await invalid.Sync(CreateRequest(), CancellationToken.None);
+        await scoped.Sync(CreateRequest() with { DeviceCode = "POS-99" }, CancellationToken.None);
+
+        Assert.Collection(
+            logger.Entries,
+            entry =>
+            {
+                Assert.Equal(LogLevel.Warning, entry.Level);
+                Assert.Equal("DailyCloseSync:INVALID-TENDERS", entry.EventId.Name);
+                Assert.EndsWith("reason=tenders cannot contain null entries.", entry.Message);
+            },
+            entry =>
+            {
+                Assert.Equal(LogLevel.Warning, entry.Level);
+                Assert.Equal("DailyCloseSync:DEVICE-SCOPE-FORBIDDEN", entry.EventId.Name);
+                Assert.Contains("requestDevice=POS-99", entry.Message);
+            });
+    }
+
     private static DailyClosesController CreateController(
         IDailyCloseSyncService service,
         string? storeCode = null,
-        string? deviceCode = null)
+        string? deviceCode = null,
+        ILogger<DailyClosesController>? logger = null)
     {
         var claims = new List<Claim>();
         if (storeCode is not null && deviceCode is not null)
@@ -200,12 +274,15 @@ public sealed class DailyClosesControllerTests
             claims.Add(new Claim(DeviceAuthConstants.DeviceCodeClaim, deviceCode));
         }
 
-        return CreateController(service, claims);
+        return CreateController(service, claims, logger);
     }
 
-    private static DailyClosesController CreateController(IDailyCloseSyncService service, IReadOnlyList<Claim> claims)
+    private static DailyClosesController CreateController(
+        IDailyCloseSyncService service,
+        IReadOnlyList<Claim> claims,
+        ILogger<DailyClosesController>? logger = null)
     {
-        var controller = new DailyClosesController(service)
+        var controller = new DailyClosesController(service, logger)
         {
             ControllerContext = new ControllerContext
             {

@@ -234,11 +234,40 @@ public sealed class OperationAuditControllerTests
         Assert.Null(service.Request);
     }
 
+    [Fact]
+    public async Task Batch_logs_rejected_events_as_warning_with_codes()
+    {
+        var logger = new RecordingLogger<OperationAuditsController>();
+        var controller = CreateController(new RejectingOperationAuditIngestService(), "STORE-1", "POS-1", logger: logger);
+
+        var result = await controller.Batch(CreateRequest(), CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, entry.Level);
+        Assert.Equal("OperationAudit:EVENTS-REJECTED", entry.EventId.Name);
+        Assert.Contains("store=STORE-1 device=POS-1 rejected=1 total=1 codes=INVALID_OPERATION_TYPE", entry.Message);
+    }
+
+    [Fact]
+    public async Task Batch_logs_scope_mismatch_as_warning()
+    {
+        var logger = new RecordingLogger<OperationAuditsController>();
+        var controller = CreateController(new RecordingOperationAuditIngestService(), "STORE-2", "POS-1", logger: logger);
+
+        await controller.Batch(CreateRequest(), CancellationToken.None);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal("OperationAudit:DEVICE-SCOPE-FORBIDDEN", entry.EventId.Name);
+        Assert.Contains("status=403 code=DEVICE_SCOPE_FORBIDDEN store=STORE-2 device=POS-1 events=1", entry.Message);
+    }
+
     private static OperationAuditsController CreateController(
         IOperationAuditIngestService service,
         string? storeCode = null,
         string? deviceCode = null,
-        string? deviceSystem = null)
+        string? deviceSystem = null,
+        Microsoft.Extensions.Logging.ILogger<OperationAuditsController>? logger = null)
     {
         var httpContext = new DefaultHttpContext();
         if (storeCode is not null && deviceCode is not null)
@@ -256,10 +285,33 @@ public sealed class OperationAuditControllerTests
             httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(claims, DeviceAuthConstants.Scheme));
         }
 
-        return new OperationAuditsController(service)
+        return new OperationAuditsController(service, logger)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
+    }
+
+    private sealed class RejectingOperationAuditIngestService : IOperationAuditIngestService
+    {
+        public Task<OperationAuditBatchResultDto> IngestAsync(
+            OperationAuditBatchRequestDto request,
+            string storeCode,
+            string deviceCode,
+            CancellationToken cancellationToken,
+            string? deviceSystem = null)
+        {
+            return Task.FromResult(new OperationAuditBatchResultDto
+            {
+                RejectedCount = request.Events.Count,
+                Results = request.Events.Select(x => new OperationAuditItemResultDto
+                {
+                    EventId = x.EventId,
+                    Status = "rejected",
+                    ErrorCode = "INVALID_OPERATION_TYPE",
+                    ErrorMessage = "operationType is not supported."
+                }).ToList()
+            });
+        }
     }
 
     private static OperationAuditBatchRequestDto CreateRequest()

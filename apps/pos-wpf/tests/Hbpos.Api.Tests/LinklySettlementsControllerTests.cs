@@ -7,6 +7,7 @@ using Hbpos.Contracts.Linkly;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Hbpos.Api.Tests;
 
@@ -76,12 +77,88 @@ public sealed class LinklySettlementsControllerTests
         Assert.IsType<ConflictObjectResult>(result.Result);
     }
 
+    [Fact]
+    public async Task Sync_logs_conflict_detail_as_warning_without_returning_it_to_the_client()
+    {
+        var detail = "field=RequestedAtUtc stored=2026-10-02T06:48:52.9566667Z incoming=2026-10-02T06:48:52.9574255Z";
+        var service = new RecordingSyncService
+        {
+            Exception = new LinklySettlementConflictException(
+                "IMMUTABLE_FIELDS_CONFLICT",
+                "Immutable Linkly settlement fields cannot change.",
+                detail)
+        };
+        var logger = new RecordingLogger<LinklySettlementsController>();
+        var controller = CreateController(service, "S001", "POS-01", logger);
+        var request = CreateRequest() with { ClientRevision = 5 };
+
+        var result = await controller.Sync(request, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        // 响应体保持原契约（code、message），冲突明细只进服务端日志。
+        Assert.Equal(["code", "message"], conflict.Value!.GetType().GetProperties().Select(property => property.Name));
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("LinklySettlementSync:IMMUTABLE-FIELDS-CONFLICT", entry.EventId.Name);
+        Assert.Equal(
+            $"Linkly settlement sync rejected status=409 code=IMMUTABLE_FIELDS_CONFLICT store=S001 device=POS-01 settlement={request.SettlementGuid} revision=5 detail={detail}",
+            entry.Message);
+    }
+
+    [Fact]
+    public async Task Sync_logs_validation_rejection_as_warning()
+    {
+        var service = new RecordingSyncService
+        {
+            Exception = new LinklySettlementValidationException("INVALID_CLIENT_REVISION", "clientRevision must be greater than zero.")
+        };
+        var logger = new RecordingLogger<LinklySettlementsController>();
+        var controller = CreateController(service, "S001", "POS-01", logger);
+
+        var result = await controller.Sync(CreateRequest(), CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("LinklySettlementSync:INVALID-CLIENT-REVISION", entry.EventId.Name);
+        Assert.Contains("status=400 code=INVALID_CLIENT_REVISION store=S001 device=POS-01", entry.Message);
+        Assert.EndsWith("reason=clientRevision must be greater than zero.", entry.Message);
+    }
+
+    [Fact]
+    public async Task Sync_logs_scope_mismatch_as_warning()
+    {
+        var service = new RecordingSyncService();
+        var logger = new RecordingLogger<LinklySettlementsController>();
+        var controller = CreateController(service, "S001", "POS-01", logger);
+
+        await controller.Sync(CreateRequest() with { StoreCode = "S002" }, CancellationToken.None);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("LinklySettlementSync:DEVICE-SCOPE-FORBIDDEN", entry.EventId.Name);
+        Assert.Contains("store=S001 device=POS-01 requestStore=S002 requestDevice=POS-01", entry.Message);
+    }
+
+    [Theory]
+    [InlineData("IMMUTABLE_FIELDS_CONFLICT", "LinklySettlementSync:IMMUTABLE-FIELDS-CONFLICT")]
+    [InlineData("SETTLEMENT_SYNC_CONCURRENT_UPDATE", "LinklySettlementSync:SETTLEMENT-SYNC-CONCURRENT-UPDATE")]
+    public void RejectedEvent_name_only_uses_characters_the_center_log_accepts(string code, string expected)
+    {
+        var name = Hbpos.Api.Logging.RejectionEventIds.Create("LinklySettlementSync", StatusCodes.Status409Conflict, code).Name;
+
+        Assert.Equal(expected, name);
+        // 与后端 ApplicationLogService.SafeIdentifierPattern 一致；不匹配时中心日志会把整个 EventId 丢掉。
+        Assert.Matches(@"^[A-Za-z0-9][A-Za-z0-9._:/+\-]*$", name);
+    }
+
     private static LinklySettlementsController CreateController(
         ILinklySettlementSyncService service,
         string? storeCode = null,
-        string? deviceCode = null)
+        string? deviceCode = null,
+        ILogger<LinklySettlementsController>? logger = null)
     {
-        var controller = new LinklySettlementsController(service)
+        var controller = new LinklySettlementsController(service, logger)
         {
             ControllerContext = new ControllerContext
             {
