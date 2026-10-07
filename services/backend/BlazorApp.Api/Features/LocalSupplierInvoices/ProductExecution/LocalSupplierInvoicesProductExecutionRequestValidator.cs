@@ -165,7 +165,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             if (string.IsNullOrWhiteSpace(detail.ItemNumber)) errors.Add($"明细 {detail.DetailGUID} 更新货号失败：新货号不能为空");
             if (string.IsNullOrWhiteSpace(detail.ProductCode))
             {
-                errors.Add($"明细 {detail.DetailGUID} 更新货号失败：未找到商品编码");
+                // 走到这里说明锁内按条码也没能唯一解析出本供应商的商品（0 个或多个），需人工选定改哪个商品。
+                errors.Add($"明细 {detail.DetailGUID}（货号 {detail.ItemNumber ?? "--"}）更新货号失败：未关联商品，且条码未唯一匹配到本供应商商品，请先「选用」要改货号的商品");
                 return;
             }
             if (!await _source.ProductExistsByCodeAsync(detail.ProductCode)) errors.Add($"明细 {detail.DetailGUID} 更新货号失败：商品不存在");

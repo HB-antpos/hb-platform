@@ -650,6 +650,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             if (productsToUpdate.Count > 0)
             {
                 await db.Updateable(productsToUpdate.Values.ToList()).ExecuteCommandAsync();
+
+                // 按条码解析出商品的行原本没有商品编码，回写到明细，单据上能看出改的是哪个商品。
+                // UpdatedAt/UpdatedBy 统一由 BatchUpdateDetailActivityTypeAsync 写入。
+                var succeeded = result.SuccessfulDetailGuids.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var detailsToBackfill = validDetails.Where(detail => succeeded.Contains(detail.DetailGUID)).ToList();
+                await db.Updateable(detailsToBackfill)
+                    .UpdateColumns(new[] { nameof(StoreLocalSupplierInvoiceDetails.ProductCode) })
+                    .ExecuteCommandAsync();
             }
 
             return result;

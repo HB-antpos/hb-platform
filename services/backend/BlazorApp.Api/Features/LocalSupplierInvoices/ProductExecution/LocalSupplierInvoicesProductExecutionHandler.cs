@@ -68,7 +68,16 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     );
                 }
 
-                var plan = LocalSupplierInvoicesProductExecutionPlan.Create(validatedRequest, initialData);
+                // 「更新货号」未关联商品的行先按条码解析商品编码，供加身份锁；锁内会重新解析并比对。
+                var resolvedItemNumberProductCodes = await _source.ResolveItemNumberUpdateProductCodesAsync(
+                    initialData.Details,
+                    initialData.Header.SupplierCode
+                );
+                var plan = LocalSupplierInvoicesProductExecutionPlan.Create(
+                    validatedRequest,
+                    initialData,
+                    resolvedItemNumberProductCodes
+                );
                 return (await _commandWriter.ExecuteAsync(plan)).ToApiResponse();
             }
             catch (Exception ex)

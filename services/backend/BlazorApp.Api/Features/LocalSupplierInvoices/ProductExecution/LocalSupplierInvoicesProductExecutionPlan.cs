@@ -9,11 +9,14 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
     {
         private LocalSupplierInvoicesProductExecutionPlan(
             ProductExecutionRequest request,
-            ProductExecutionSourceData initialData
+            ProductExecutionSourceData initialData,
+            IReadOnlyDictionary<string, string>? resolvedItemNumberProductCodes
         )
         {
             Request = request;
             InitialData = initialData;
+            ResolvedItemNumberProductCodes = resolvedItemNumberProductCodes
+                ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             ExpectedHeaderIdentity = BuildHeaderIdentity(initialData.Header!);
             ExpectedDetailIdentities = request.ConfirmedDetailIdentities
                 ?? initialData.Details.ToDictionary(
@@ -28,16 +31,43 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         public string ExpectedHeaderIdentity { get; }
         public Dictionary<string, string> ExpectedDetailIdentities { get; }
 
+        /// <summary>锁前按条码解析出的「更新货号」商品编码（明细 GUID → 商品编码），锁内须解析出同样结果。</summary>
+        public IReadOnlyDictionary<string, string> ResolvedItemNumberProductCodes { get; }
+
         public static LocalSupplierInvoicesProductExecutionPlan Create(
             ProductExecutionRequest request,
-            ProductExecutionSourceData initialData
-        ) => new(request, initialData);
+            ProductExecutionSourceData initialData,
+            IReadOnlyDictionary<string, string>? resolvedItemNumberProductCodes = null
+        ) => new(request, initialData, resolvedItemNumberProductCodes);
 
         public bool RequiresAllProductsLock => InitialData.Details.Any(detail =>
             GetSavedAction(detail) == DetailAction.CreateProduct
         );
 
-        public List<string> InitialProductCodes => NormalizeProductCodes(InitialData.Details);
+        // 解析出的商品也要进身份锁：改货号会改变主档身份，不能只锁明细上已有编码的商品。
+        public List<string> InitialProductCodes => NormalizeProductCodes(InitialData.Details)
+            .Concat(ResolvedItemNumberProductCodes.Values)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        /// <summary>锁内解析结果必须与锁前一致，否则说明等待锁期间主档条码或供应商变了。</summary>
+        public bool MatchesResolvedItemNumberProductCodes(IReadOnlyDictionary<string, string> lockedResolution) =>
+            lockedResolution.Count == ResolvedItemNumberProductCodes.Count
+            && lockedResolution.All(pair =>
+                ResolvedItemNumberProductCodes.TryGetValue(pair.Key, out var code)
+                && string.Equals(code, pair.Value, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>把解析出的商品编码写回内存中的明细，后续校验、执行与明细回写都按已关联处理。</summary>
+        public static void ApplyResolvedProductCodes(
+            IEnumerable<StoreLocalSupplierInvoiceDetails> details,
+            IReadOnlyDictionary<string, string> resolution)
+        {
+            foreach (var detail in details)
+            {
+                if (resolution.TryGetValue(detail.DetailGUID, out var productCode))
+                    detail.ProductCode = productCode;
+            }
+        }
 
         public bool TryValidateLockedData(
             ProductExecutionSourceData lockedData,
