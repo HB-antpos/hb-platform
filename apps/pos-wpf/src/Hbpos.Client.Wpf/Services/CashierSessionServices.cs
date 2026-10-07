@@ -306,6 +306,8 @@ public interface ICashierLoginApiClient
 
 public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLoginApiClient
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<CashierLoginAttempt> LoginAsync(
         CashierBarcodeLoginRequest request,
         CancellationToken cancellationToken = default)
@@ -335,12 +337,27 @@ public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLogin
                     failed?.ErrorCode);
             }
 
-            var result = await response.Content.ReadFromJsonAsync<ApiResult<CashierSessionDto>>(cancellationToken);
-            return result?.Success == true && result.Data is not null
+            // 2xx 只有带 ApiResult 信封才是服务端结论：空对象、null、Wi-Fi 认证页 JSON 等不是 POS API 的响应，
+            // 按不可用处理以允许离线缓存兜底，不能误报"条码无效或已停用"（与 DeviceApiClient 口径一致）。
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(content);
+            if (!DeviceApiClient.IsApiResultEnvelope(document.RootElement))
+            {
+                return CashierLoginAttempt.ApiUnavailable();
+            }
+
+            var result = document.RootElement.Deserialize<ApiResult<CashierSessionDto>>(JsonOptions)!;
+            if (!result.Success)
+            {
+                return CashierLoginAttempt.OnlineRejected(
+                    result.Message ?? "收银员条码无效或已停用",
+                    result.ErrorCode);
+            }
+
+            // success=true 却没有会话数据属于形状异常，不是拒绝。
+            return result.Data is not null
                 ? CashierLoginAttempt.OnlineAccepted(result.Data)
-                : CashierLoginAttempt.OnlineRejected(
-                    result?.Message ?? "收银员条码无效或已停用",
-                    result?.ErrorCode);
+                : CashierLoginAttempt.ApiUnavailable();
         }
         catch (JsonException)
         {

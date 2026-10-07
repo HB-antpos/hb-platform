@@ -34,6 +34,8 @@ public sealed class CashierSessionRejectedEventArgs(CashierSessionDto rejectedSe
 public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
     : ICashierSessionRefreshApiClient
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<CashierSessionRefreshAttempt> RefreshAsync(
         CancellationToken cancellationToken = default)
     {
@@ -47,11 +49,25 @@ public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
                     : CashierSessionRefreshAttempt.OnlineRejected();
             }
 
-            var result = await response.Content
-                .ReadFromJsonAsync<ApiResult<CashierSessionDto>>(cancellationToken);
-            return result?.Success == true && result.Data is not null
+            // 2xx 只有带 ApiResult 信封才是服务端结论：空对象、null、Wi-Fi 认证页 JSON 等不是 POS API 的响应，
+            // 按不可用处理，绝不能据此踢下线并删除离线登录缓存（与 DeviceApiClient 口径一致）。
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(content);
+            if (!DeviceApiClient.IsApiResultEnvelope(document.RootElement))
+            {
+                return CashierSessionRefreshAttempt.ApiUnavailable();
+            }
+
+            var result = document.RootElement.Deserialize<ApiResult<CashierSessionDto>>(JsonOptions)!;
+            if (!result.Success)
+            {
+                return CashierSessionRefreshAttempt.OnlineRejected();
+            }
+
+            // success=true 却没有会话数据属于形状异常，不是拒绝。
+            return result.Data is not null
                 ? CashierSessionRefreshAttempt.Refreshed(result.Data)
-                : CashierSessionRefreshAttempt.OnlineRejected();
+                : CashierSessionRefreshAttempt.ApiUnavailable();
         }
         catch (JsonException)
         {
