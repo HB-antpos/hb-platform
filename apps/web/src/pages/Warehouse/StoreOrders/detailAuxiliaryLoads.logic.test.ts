@@ -173,28 +173,34 @@ async function main() {
   if (completeOrderOutboundDateFailure) failures.push(completeOrderOutboundDateFailure)
 
   const disabledUiFailure = await runTest('非仓库管理员应禁用表头和明细写控件，仅保留 WarehouseStaff 只读配货单入口', () => {
-    const orderDetailSectionSource = detailSource.slice(
-      detailSource.indexOf("title={t('storeOrders.orderDetailSection')}"),
-      detailSource.indexOf('className="store-order-detail-filter-bar"'),
+    // 重设计：配货单/发票/状态流转按钮从订单头和明细卡挪到概况卡右侧，权限开关不变。
+    const overviewActionsSource = detailSource.slice(
+      detailSource.indexOf('<div className="wh-order-detail-overview-actions">'),
+      detailSource.indexOf('<ol className="wh-order-detail-steps"'),
     )
-    const pickingButtonSource = orderDetailSectionSource.slice(
-      orderDetailSectionSource.indexOf('icon={<PrinterOutlined />}'),
-      orderDetailSectionSource.indexOf("t('storeOrders.pickingList')"),
+    const pickingButtonPosition = overviewActionsSource.indexOf("t('storeOrders.pickingList')")
+    const pickingButtonSource = overviewActionsSource.slice(
+      overviewActionsSource.lastIndexOf('<Button', pickingButtonPosition),
+      pickingButtonPosition,
     )
-    const pickingButtonPosition = orderDetailSectionSource.indexOf("t('storeOrders.pickingList')")
-    const managerGuardPosition = orderDetailSectionSource.lastIndexOf('{canUseWarehouseManagerActions ? (', pickingButtonPosition)
-    const managerGuardClosePosition = orderDetailSectionSource.lastIndexOf(') : null}', pickingButtonPosition)
+    const managerGuardPosition = overviewActionsSource.lastIndexOf('{canUseWarehouseManagerActions ? (', pickingButtonPosition)
+    const managerGuardClosePosition = overviewActionsSource.lastIndexOf(') : null}', pickingButtonPosition)
+    const extraGuardPosition = overviewActionsSource.lastIndexOf('{canUseStoreOrderDetailExtraActions ? (', pickingButtonPosition)
 
     assert(
       detailSource.includes('disabled={!canUseWarehouseManagerActions || isReadonlyOrder}') &&
         detailSource.includes('disabled={!canUseWarehouseManagerActions || isReadonlyOrder || validPastePreviewCount === 0}') &&
         detailSource.includes('disabled={isReadonlyOrder || !canStartPicking}') &&
         detailSource.includes('disabled={!canCompleteOrder}') &&
-        detailSource.includes('extra={\n                  canUseWarehouseManagerActions ? (') &&
+        // 开始配货 / 完成订单 / ⋯（更改状态）只给订货管理者：主操作由权限派生，⋯ 菜单在管理员开关内。
+        detailSource.includes('const flowActions = resolveStoreOrderDetailFlowActions(detail?.flowStatus, canUseWarehouseManagerActions)') &&
+        overviewActionsSource.includes("flowActions.primary === 'startPicking' ? (") &&
+        overviewActionsSource.includes('{canUseWarehouseManagerActions ? (\n                  <Dropdown') &&
         detailSource.includes('const canUseWarehouseManagerActions = access.canManageWarehouseOrders && !isWarehouseStaffOnly') &&
         detailSource.includes('const canUseStoreOrderDocumentActions = access.isWarehouseStaff') &&
         detailSource.includes('const canUseStoreOrderDetailExtraActions = canUseWarehouseManagerActions || canUseStoreOrderDocumentActions') &&
-        orderDetailSectionSource.includes('canUseStoreOrderDetailExtraActions ? (\n                  <Space wrap>') &&
+        extraGuardPosition >= 0 &&
+        extraGuardPosition < pickingButtonPosition &&
         pickingButtonSource.includes('navigate(`/warehouse/store-order/picking/${detail.orderGUID}`)') &&
         managerGuardPosition <= managerGuardClosePosition &&
         /rowSelection=\{\s*canUseWarehouseManagerActions/.test(detailSource),

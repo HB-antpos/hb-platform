@@ -1,0 +1,736 @@
+/*
+ * 订货明细页（/warehouse/store-order/detail/:id）重设计样式。
+ * 普通 CSS + wh-order-detail- 前缀全局类名（CI 测试把 .css 打成空模块，不能用 CSS Modules）。
+ * 颜色只表示状态：主色 #1677ff / #1554c0，文字 #1f2430，次要文字 #667085，分隔线 #eef0f4 / #e7eaf0，
+ * 未保存修改用琥珀色（#fffaf0 底、#f2b45c 边、#8a4b00 字）。
+ */
+
+.wh-order-detail.page-container {
+  gap: 12px;
+  color: #1f2430;
+}
+
+.wh-order-detail-loading {
+  display: flex;
+  min-height: 240px;
+  align-items: center;
+  justify-content: center;
+}
+
+.wh-order-detail-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.wh-order-detail-spacer {
+  flex: 1 1 auto;
+}
+
+.wh-order-detail-muted {
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-order-detail-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- 概况卡：返回 + 单号 + 状态 + 分店 + 主操作，下方三步进度 ---------- */
+
+.wh-order-detail-overview {
+  gap: 14px;
+  padding: 14px 16px;
+}
+
+.wh-order-detail-overview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.wh-order-detail-back.ant-btn {
+  width: 30px;
+  height: 30px;
+  border-color: #e7eaf0;
+  border-radius: 8px;
+}
+
+.wh-order-detail-title {
+  margin: 0;
+  color: #1f2430;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-order-detail-copy.ant-btn {
+  margin-left: -8px;
+  color: #667085;
+}
+
+.wh-order-detail-store {
+  color: #4b5563;
+}
+
+.wh-order-detail-store-code {
+  color: #667085;
+}
+
+.wh-order-detail-overview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wh-order-detail-overview-actions .ant-btn {
+  border-radius: 8px;
+}
+
+.wh-order-detail-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wh-order-detail-step {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid #eef0f4;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.wh-order-detail-step-mark {
+  display: inline-flex;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #e7eaf0;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wh-order-detail-step-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.wh-order-detail-step-label {
+  color: #4b5563;
+  font-weight: 600;
+}
+
+.wh-order-detail-step-note {
+  overflow: hidden;
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-order-detail-step.is-done {
+  border-color: #cfe9d8;
+  background: #f6fbf7;
+}
+
+.wh-order-detail-step.is-done .wh-order-detail-step-mark {
+  background: #22a05a;
+  color: #ffffff;
+}
+
+.wh-order-detail-step.is-done .wh-order-detail-step-label {
+  color: #17663a;
+}
+
+.wh-order-detail-step.is-active {
+  border-color: #f2cf98;
+  background: #fffaf0;
+}
+
+.wh-order-detail-step.is-active .wh-order-detail-step-mark {
+  background: #f08c00;
+  color: #ffffff;
+}
+
+.wh-order-detail-step.is-active .wh-order-detail-step-label {
+  color: #8a4b00;
+}
+
+/* ---------- 订单信息 / 数量与金额 两张卡 ---------- */
+
+.wh-order-detail-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.wh-order-detail-card-head {
+  display: flex;
+  min-height: 48px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.wh-order-detail-card-title {
+  margin: 0;
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wh-order-detail-card-hint {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-order-detail-dirty-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #8a4b00;
+  font-size: 12px;
+}
+
+.wh-order-detail-dirty-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f08c00;
+}
+
+.wh-order-detail-readonly-hint {
+  margin: 12px 16px 0;
+  padding: 6px 10px;
+  border: 1px solid #f2cf98;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #8a4b00;
+  font-size: 12px;
+}
+
+.wh-order-detail-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  padding: 14px 16px 16px;
+}
+
+.wh-order-detail-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wh-order-detail-field-wide {
+  grid-column: span 2;
+}
+
+.wh-order-detail-field-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wh-order-detail-field-label {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-order-detail-field-help {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-order-detail-field-help .ant-typography {
+  color: inherit;
+  font-size: 12px;
+}
+
+.wh-order-detail-field-help.is-warning {
+  color: #8a4b00;
+}
+
+.wh-order-detail-form .ant-input,
+.wh-order-detail-form .ant-input-number,
+.wh-order-detail-form .ant-input-affix-wrapper,
+.wh-order-detail-form .ant-picker,
+.wh-order-detail-form .ant-select-selector {
+  border-radius: 8px !important;
+}
+
+.wh-order-detail-number-input .ant-input-number-input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 改过但未保存的订单信息字段：琥珀边框 + 浅琥珀底 */
+.wh-order-detail-field-dirty .ant-input,
+.wh-order-detail-field-dirty .ant-input-number,
+.wh-order-detail-field-dirty .ant-input-number-affix-wrapper,
+.wh-order-detail-field-dirty .ant-picker,
+.wh-order-detail-field-dirty .ant-select-selector {
+  border-color: #f2b45c !important;
+  background: #fffaf0 !important;
+}
+
+.wh-order-detail-field-dirty .ant-input-number .ant-input-number-input,
+.wh-order-detail-field-dirty .ant-input-number-affix-wrapper .ant-input-number {
+  background: transparent !important;
+}
+
+.wh-order-detail-amounts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 16px;
+}
+
+.wh-order-detail-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wh-order-detail-progress-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-order-detail-progress-label {
+  color: #4b5563;
+}
+
+.wh-order-detail-progress-value strong {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.wh-order-detail-progress-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #eef0f4;
+}
+
+.wh-order-detail-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #1677ff;
+  transition: width 0.2s ease;
+}
+
+.wh-order-detail-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: #4b5563;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-order-detail-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #1554c0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wh-order-detail-link:hover {
+  color: #0b3f99;
+  text-decoration: underline;
+}
+
+.wh-order-detail-link:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.wh-order-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-order-detail-metrics > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wh-order-detail-metrics dt {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-order-detail-metrics dd {
+  margin: 0;
+  color: #1f2430;
+}
+
+.wh-order-detail-metrics dd.is-strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wh-order-detail-metrics dd.is-dirty {
+  color: #8a4b00;
+}
+
+/* ---------- 订单明细卡：页签 + 工具栏 + 勾选条 + 表格 + 吸底未保存条 ---------- */
+
+.wh-order-detail-lines-tabs {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  gap: 0 18px;
+  padding: 0 16px;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.wh-order-detail-lines-tabs .wh-order-detail-card-title {
+  flex: none;
+  align-self: center;
+}
+
+.wh-order-detail-lines-tabs .list-toolbar-status-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.wh-order-detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 10px;
+}
+
+.wh-order-detail-toolbar .ant-btn,
+.wh-order-detail-toolbar .ant-input-affix-wrapper {
+  border-radius: 8px;
+}
+
+.wh-order-detail-quick-add .wh-order-detail-quick-add-code {
+  width: 184px;
+  max-width: 48vw;
+}
+
+.wh-order-detail-quick-add .wh-order-detail-quick-add-qty {
+  width: 72px;
+}
+
+.wh-order-detail-quick-add .wh-order-detail-quick-add-qty .ant-input-number-input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Space.Compact 里的三段（货号 / 发货数 / 加入）只保留外侧圆角 */
+.wh-order-detail-toolbar .wh-order-detail-quick-add > .ant-input-affix-wrapper {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.wh-order-detail-toolbar .wh-order-detail-quick-add > .ant-btn {
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
+
+.wh-order-detail-search {
+  width: 220px;
+  max-width: 100%;
+}
+
+.wh-order-detail-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wh-order-detail-sort-select {
+  min-width: 132px;
+}
+
+.wh-order-detail-menu-icon-placeholder {
+  display: inline-block;
+  width: 14px;
+}
+
+.wh-order-detail-active-filters,
+.wh-order-detail-selection {
+  padding: 0 16px 10px;
+}
+
+.wh-order-detail-selection:empty {
+  display: none;
+}
+
+.wh-order-detail-inline-alert {
+  margin: 0 16px 10px;
+}
+
+.wh-order-detail-lines .store-order-detail-table {
+  border-top: 1px solid #eef0f4;
+}
+
+.wh-order-detail-lines .store-order-detail-table .ant-table-thead .ant-table-cell {
+  background: #f8f9fb;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 合并列后每行有两行信息，原紧凑表格 2px 4px 的内边距放宽到 6px 8px */
+.wh-order-detail-lines .store-order-detail-table .ant-table-cell {
+  padding: 6px 8px !important;
+  line-height: 1.4;
+}
+
+.wh-order-detail-lines .store-order-detail-table .ant-table-pagination.ant-pagination {
+  margin: 10px 0;
+  padding: 0 16px;
+}
+
+/* 有未保存修改的行在最左侧画一条琥珀色竖线，滚动时也能看出哪些行改过 */
+.wh-order-detail-lines .store-order-detail-table .wh-order-detail-row-dirty > .ant-table-cell:first-child {
+  box-shadow: inset 3px 0 0 #f08c00;
+}
+
+.wh-order-detail-product-cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.wh-order-detail-product-cell .ant-image {
+  flex: none;
+}
+
+.wh-order-detail-product-text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wh-order-detail-product-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.wh-order-detail-item-number {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wh-order-detail-product-line .store-order-detail-copy-button {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 20px;
+  padding: 0;
+  color: #667085;
+}
+
+.wh-order-detail-product-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-order-detail-product-sub {
+  overflow: hidden;
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-order-detail-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wh-order-detail-location {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  /* 一个商品绑多个货位时单行省略，完整列表看悬浮提示，避免压到相邻的订货列 */
+  text-overflow: ellipsis;
+}
+
+.wh-order-detail-no-location {
+  color: #b42318;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wh-order-detail-assignee {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: #4b5563;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-order-detail-assignee-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #c3cad6;
+}
+
+.wh-order-detail-assignee.is-unassigned {
+  color: #667085;
+}
+
+.wh-order-detail-zero {
+  color: #b42318;
+  font-weight: 500;
+}
+
+.wh-order-detail-alloc-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.wh-order-detail-diff {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.wh-order-detail-diff.is-unshipped,
+.wh-order-detail-diff.is-short {
+  color: #b4400a;
+}
+
+.wh-order-detail-diff.is-extra {
+  color: #1d4ed8;
+}
+
+/* 已改未存的发货数 / 进口价单元格：琥珀底 */
+.wh-order-detail-lines .store-order-detail-table .ant-input-number.wh-order-detail-input-dirty,
+.wh-order-detail-lines .store-order-detail-table .wh-order-detail-input-dirty.ant-input-number-outlined {
+  border-color: #f2b45c;
+  background: #fffaf0;
+}
+
+.wh-order-detail-lines .store-order-detail-table .ant-input-number-input {
+  text-align: right;
+}
+
+.wh-order-detail-lines .store-order-detail-table .wh-order-detail-row-more-dirty {
+  color: #8a4b00;
+}
+
+.wh-order-detail-unsaved-bar {
+  position: sticky;
+  z-index: 3;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  border-top: 1px solid #f2cf98;
+  border-radius: 0 0 10px 10px;
+  background: #fffaf0;
+}
+
+.wh-order-detail-unsaved-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8a4b00;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-order-detail-unsaved-detail {
+  color: #8a4b00;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .wh-order-detail-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wh-order-detail-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wh-order-detail-field-wide {
+    grid-column: auto;
+  }
+
+  .wh-order-detail-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wh-order-detail-lines-tabs {
+    flex-wrap: wrap;
+  }
+
+  .wh-order-detail-search,
+  .wh-order-detail-quick-add .wh-order-detail-quick-add-code {
+    width: 100%;
+  }
+}

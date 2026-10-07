@@ -8,6 +8,9 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
 
 const pageSource = readFileSync('src/pages/Warehouse/ContainerDetail/index.tsx', 'utf8')
 const styleSource = readFileSync('src/pages/Warehouse/ContainerDetail/index.css', 'utf8')
+// 重设计后保存状态条的新文案在页面级消息文件里（warehouseUi.containerDetail），原中文语义保持不变。
+const pageMessagesZh = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailPageMessages.zh.json', 'utf8'))
+  .warehouseUi.containerDetail as Record<string, string>
 const restoreDraftSource = pageSource.slice(
   pageSource.indexOf('const restorePendingDetailDraft = () => {'),
   pageSource.indexOf('useEffect(() => {', pageSource.indexOf('const restorePendingDetailDraft = () => {')),
@@ -65,10 +68,14 @@ assertEqual(
     && pageSource.includes('clearPendingDetailDraft')
     && pageSource.includes('pendingDetailFieldCount')
     && pageSource.includes('项未保存')
-    && pageSource.includes('定位未保存项')
+    && pageSource.includes("t('warehouseUi.containerDetail.draftPending', { count: manualDraftSummary.total })")
+    && pageSource.includes("onClick={() => locateFirstPendingDetailField()}")
+    && pageSource.includes("onClick={clearPendingDetailDraft}")
+    && pageMessagesZh.locateDraftTitle === '定位未保存项'
+    && pageMessagesZh.discardDraft === '丢弃草稿'
     && pageSource.includes('清空草稿'),
   true,
-  '紧凑工具栏应提供字段数、定位和显式清空草稿入口',
+  '保存状态条应提供待保存字段数、定位和显式丢弃草稿入口（确认弹窗仍是原「清空草稿」）',
 )
 assertEqual(
   styleSource.includes('.container-detail-draft-meta')
@@ -77,7 +84,9 @@ assertEqual(
   '草稿操作应保持高密度单行布局',
 )
 assertEqual(
-  pageSource.includes('仅当前页面内存保存，刷新或关闭页面会丢失')
+  pageSource.includes("t('warehouseUi.containerDetail.draftMemoryOnly')")
+    && pageSource.includes('{isDetailDraftMemoryOnly ? (')
+    && pageMessagesZh.draftMemoryOnly === '仅当前页面内存保存，刷新或关闭页面会丢失'
     && pageSource.includes('clearContainerDetailDraftFieldsIfVersionMatches')
     && pageSource.includes("window.addEventListener('storage', onStorage)"),
   true,

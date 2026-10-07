@@ -48,16 +48,26 @@ async function main() {
   })
   if (remoteQueryFailure) failures.push(remoteQueryFailure)
 
-  const defaultLocationSortFailure = await runTest('详情页默认排序应按货位升序并提供默认排序按钮', () => {
+  // 重设计：原「默认排序」按钮改为工具栏「排序」下拉，选「按货位（默认）」即恢复默认排序（仍走 handleResetDetailDefaultSort）。
+  const defaultLocationSortFailure = await runTest('详情页默认排序应按货位升序并提供恢复默认排序入口', () => {
+    const sortChangeSource = detailSource.slice(
+      detailSource.indexOf('const handleChangeDetailSortField = (field: StoreOrderDetailSortField) => {'),
+      detailSource.indexOf('const handleToggleDetailSortOrder = () => {'),
+    )
     assert(
       detailSource.includes("useState<DetailSortField>('locationCode')") &&
         detailSource.includes("useState<SortOrder>('ascend')") &&
         detailSource.includes('const handleResetDetailDefaultSort = () =>') &&
         detailSource.includes("setDetailSortField('locationCode')") &&
         detailSource.includes("setDetailSortOrder('ascend')") &&
-        detailSource.includes("t('storeOrders.detail.defaultSort')") &&
-        detailSource.includes('icon={<SortAscendingOutlined />}'),
-      '详情页尚未默认按货位升序，或缺少恢复默认排序按钮',
+        sortChangeSource.includes("if (field === 'locationCode') {") &&
+        sortChangeSource.includes('handleResetDetailDefaultSort()') &&
+        sortChangeSource.includes('setSelectedLineKeys([])') &&
+        sortChangeSource.includes('setDetailPage(1)') &&
+        detailSource.includes("const STORE_ORDER_DETAIL_SORT_OPTION_FIELDS: StoreOrderDetailSortField[] = [\n  'locationCode',") &&
+        detailSource.includes("locationCode: t('warehouseUi.storeOrderDetail.sortLocation')") &&
+        detailSource.includes('onChange={handleChangeDetailSortField}'),
+      '详情页尚未默认按货位升序，或排序下拉缺少「按货位（默认）」恢复入口',
     )
   })
   if (defaultLocationSortFailure) failures.push(defaultLocationSortFailure)
@@ -77,9 +87,12 @@ async function main() {
       detailSource.includes('useState<StoreOrderDetailColumnFilters>({})') &&
         detailSource.includes('cleanStoreOrderDetailColumnFilters(detailColumnFilters)') &&
         requiredSortFields.every((field) => detailSource.includes(field)) &&
-        detailSource.includes("detailTextFilterProps('itemNumber'") &&
-        detailSource.includes("detailTextFilterProps('productName'") &&
-        detailSource.includes("detailTextFilterProps('barcode'") &&
+        // 重设计：货号/名称/条码合并成「商品」列，列头放大镜里同时给出三个过滤框，仍分别提交原来的三个列筛选键。
+        detailSource.includes('...detailProductFilterProps(),') &&
+        detailSource.includes('itemNumber: detailColumnFilters.itemNumber,') &&
+        detailSource.includes('productName: detailColumnFilters.productName,') &&
+        detailSource.includes('barcode: detailColumnFilters.barcode,') &&
+        detailSource.includes("clearDetailColumnFilter(['itemNumber', 'productName', 'barcode'], nextConfirm)") &&
         detailSource.includes("detailTextFilterProps('locationCode'") &&
         detailSource.includes("detailNumberFilterProps({ min: 'quantityMin', max: 'quantityMax' })") &&
         detailSource.includes("detailNumberFilterProps({ min: 'allocQuantityMin', max: 'allocQuantityMax' })") &&
@@ -126,14 +139,31 @@ async function main() {
   if (currentPageDataFailure) failures.push(currentPageDataFailure)
 
   const clearSelectionFailure = await runTest('翻页筛选排序时应清空勾选行', () => {
+    // 重设计：明细搜索改为防抖约 300ms 后才写入 detailItemFilter（与仓库各列表统一），写入时仍先清空勾选并回到第一页。
+    const keywordDebounceSource = detailSource.slice(
+      detailSource.indexOf('if (detailKeywordInput.trim() === detailItemFilter.trim()) {'),
+      detailSource.indexOf('}, [detailItemFilter, detailKeywordInput])'),
+    )
+    const statTabSource = detailSource.slice(
+      detailSource.indexOf('const handleChangeDetailStatFilter = (nextFilter: StoreOrderDetailStatFilter) => {'),
+      detailSource.indexOf('const focusDetailStatFilter'),
+    )
     assert(
       detailSource.includes('setSelectedLineKeys([])') &&
         detailSource.includes('setDetailPage(nextPage)') &&
         detailSource.includes("extra.action === 'paginate'") &&
         detailSource.includes("extra.action === 'filter'") &&
-        detailSource.includes('setDetailItemFilter(event.target.value)') &&
+        detailSource.includes('onChange={(event) => setDetailKeywordInput(event.target.value)}') &&
+        detailSource.includes('const STORE_ORDER_DETAIL_KEYWORD_DEBOUNCE_MS = 300') &&
+        keywordDebounceSource.includes('window.setTimeout(') &&
+        keywordDebounceSource.includes('setSelectedLineKeys([])') &&
+        keywordDebounceSource.includes('setDetailPage(1)') &&
+        keywordDebounceSource.includes('setDetailItemFilter(detailKeywordInput)') &&
+        keywordDebounceSource.includes('window.clearTimeout(timer)') &&
+        statTabSource.includes('setSelectedLineKeys([])') &&
+        statTabSource.includes('setDetailPage(1)') &&
         detailSource.includes('setDetailSortField(field)'),
-      '翻页筛选排序时尚未统一清空 selectedLineKeys',
+      '翻页、搜索、页签、排序时尚未统一清空 selectedLineKeys',
     )
   })
   if (clearSelectionFailure) failures.push(clearSelectionFailure)
