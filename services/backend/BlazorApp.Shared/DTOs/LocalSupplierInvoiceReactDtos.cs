@@ -1090,6 +1090,11 @@ namespace BlazorApp.Shared.DTOs
         /// 新商品带副码时，用户选择的主档商品类型。
         /// </summary>
         public List<BatchExecuteNewProductProductTypeSelectionDto> NewProductProductTypeSelections { get; set; } = new();
+
+        /// <summary>
+        /// 用户已二次确认「进货价较上次涨跌超过 40%」的行；缺省视为未确认，后端会拒绝并返回 PRICE_CHANGE_CONFIRM_REQUIRED。
+        /// </summary>
+        public bool? ConfirmedLargePriceChange { get; set; }
     }
 
     /// <summary>

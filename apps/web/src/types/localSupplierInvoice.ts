@@ -714,6 +714,8 @@ export interface BatchExecuteActionsRequest {
   confirmedCreateProductCount: number
   confirmedAt: string
   newProductProductTypeSelections?: BatchExecuteNewProductProductTypeSelection[]
+  /** 用户已二次确认「进货价较上次涨跌超过 40%」的行；缺省视为未确认，后端会拒绝并返回 PRICE_CHANGE_CONFIRM_REQUIRED。 */
+  confirmedLargePriceChange?: boolean
 }
 
 export interface BatchExecuteExpectedAction {

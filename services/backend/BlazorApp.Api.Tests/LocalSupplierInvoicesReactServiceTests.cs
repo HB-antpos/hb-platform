@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using AutoMapper;
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Features.LocalSupplierInvoices;
 using BlazorApp.Api.Controllers.React;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
@@ -2124,6 +2125,137 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(1.11m, product.PurchasePrice);
             Assert.Equal(1.11m, price.PurchasePrice);
             Assert.Equal((int)DetailAction.UpdatePurchasePrice, detail.ActivityType);
+        }
+
+        [Theory]
+        [InlineData(1.00, 1.40, false)] // 恰好 +40%：不超过阈值，放行
+        [InlineData(1.00, 1.41, true)] // +41%：超限
+        [InlineData(1.00, 0.60, false)] // 恰好 -40%：放行
+        [InlineData(1.00, 0.59, true)] // -41%：超限
+        [InlineData(2.50, 30.00, true)] // 整箱录入：+1100%
+        [InlineData(0.00, 30.00, false)] // 上次价为 0：新商品，无可比价
+        public void 进货价涨跌幅保护_阈值为严格超过40百分比(double last, double current, bool expectedLarge)
+        {
+            Assert.Equal(
+                expectedLarge,
+                LocalSupplierInvoicesPurchasePriceChangeGuard.IsLargeChange((decimal)last, (decimal)current)
+            );
+        }
+
+        [Fact]
+        public void 进货价涨跌幅保护_缺少上次价或本次价时不可比较()
+        {
+            Assert.False(LocalSupplierInvoicesPurchasePriceChangeGuard.IsLargeChange(null, 99m));
+            Assert.False(LocalSupplierInvoicesPurchasePriceChangeGuard.IsLargeChange(5m, null));
+            Assert.Null(LocalSupplierInvoicesPurchasePriceChangeGuard.GetChangeRatio(-1m, 5m));
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_涨跌幅超40百分比且未二次确认时整单零写入()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            // 上次 1.11 → 本次 5.55，涨 400%，模拟整箱录入。
+            await _db.Updateable<StoreLocalSupplierInvoiceDetails>()
+                .SetColumns(x => x.LastPurchasePrice == 1.11m)
+                .Where(x => x.DetailGUID == "detail-price")
+                .ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price" },
+                "tester"
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal(LocalSupplierInvoicesPurchasePriceChangeGuard.ConfirmRequiredCode, result.ErrorCode);
+            var failure = Assert.IsType<BatchExecuteActionsResultDto>(result.Details);
+            Assert.Equal(1, failure.Failed);
+            Assert.Contains(failure.Errors, line => line.Contains("detail-price") && line.Contains("+400"));
+
+            var product = await _db.Queryable<Product>().FirstAsync(x => x.ProductCode == "P001");
+            var price = await _db.Queryable<StoreRetailPrice>().FirstAsync(x => x.ProductCode == "P001");
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .FirstAsync(x => x.DetailGUID == "detail-price");
+            Assert.Equal(1.11m, product.PurchasePrice);
+            Assert.Equal(1.11m, price.PurchasePrice);
+            Assert.Equal((int)DetailAction.UpdatePurchasePrice, detail.ActivityType);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_涨跌幅超40百分比但已二次确认时正常执行()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await _db.Updateable<StoreLocalSupplierInvoiceDetails>()
+                .SetColumns(x => x.LastPurchasePrice == 1.11m)
+                .Where(x => x.DetailGUID == "detail-price")
+                .ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price" },
+                "tester",
+                confirmedLargePriceChange: true
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(1, result.Data?.UpdatedPurchasePrices);
+            var product = await _db.Queryable<Product>().FirstAsync(x => x.ProductCode == "P001");
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .FirstAsync(x => x.DetailGUID == "detail-price");
+            Assert.Equal(5.55m, product.PurchasePrice);
+            Assert.Equal(99, detail.ActivityType);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_同批只要有一行超限未确认其余正常行也不执行()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await SeedSecondExecutablePriceUpdateDetailAsync();
+            // detail-price：1.11 → 5.55（超限）；detail-price-2：6.00 → 6.66（+11%，正常）。
+            await _db.Updateable<StoreLocalSupplierInvoiceDetails>()
+                .SetColumns(x => x.LastPurchasePrice == 1.11m)
+                .Where(x => x.DetailGUID == "detail-price")
+                .ExecuteCommandAsync();
+            await _db.Updateable<StoreLocalSupplierInvoiceDetails>()
+                .SetColumns(x => x.LastPurchasePrice == 6.00m)
+                .Where(x => x.DetailGUID == "detail-price-2")
+                .ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price", "detail-price-2" },
+                "tester"
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal(LocalSupplierInvoicesPurchasePriceChangeGuard.ConfirmRequiredCode, result.ErrorCode);
+            Assert.Equal(1, Assert.IsType<BatchExecuteActionsResultDto>(result.Details).Failed);
+            var secondProduct = await _db.Queryable<Product>().FirstAsync(x => x.ProductCode == "P002");
+            var secondDetail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .FirstAsync(x => x.DetailGUID == "detail-price-2");
+            Assert.Equal(2.22m, secondProduct.PurchasePrice);
+            Assert.Equal((int)DetailAction.UpdatePurchasePrice, secondDetail.ActivityType);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_涨跌幅未超40百分比或无上次价时无需二次确认()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await SeedSecondExecutablePriceUpdateDetailAsync();
+            // detail-price：4.00 → 5.55（+38.75%）；detail-price-2 没有上次价（新商品）。
+            await _db.Updateable<StoreLocalSupplierInvoiceDetails>()
+                .SetColumns(x => x.LastPurchasePrice == 4.00m)
+                .Where(x => x.DetailGUID == "detail-price")
+                .ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price", "detail-price-2" },
+                "tester"
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(2, result.Data?.UpdatedPurchasePrices);
         }
 
         [Fact]

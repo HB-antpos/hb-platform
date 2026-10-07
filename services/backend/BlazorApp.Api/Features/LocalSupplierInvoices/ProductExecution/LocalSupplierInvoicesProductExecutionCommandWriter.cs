@@ -96,6 +96,26 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     lockedData.Details,
                     lockedData.Header?.SupplierCode
                 );
+                // 涨跌幅保护：用锁内复读的明细判断，未带二次确认标志时整单零写入。必须早于其他校验，
+                // 这样前端能凭固定错误码弹出二次确认再重试，而不是和别的校验错误混在一起。
+                if (!plan.Request.ConfirmedLargePriceChange)
+                {
+                    var largeChanges = LocalSupplierInvoicesPurchasePriceChangeGuard.FindLargeChanges(lockedData.Details);
+                    if (largeChanges.Count > 0)
+                    {
+                        accumulator.Result.Failed = largeChanges.Count;
+                        accumulator.Result.Errors.AddRange(
+                            largeChanges.Select(LocalSupplierInvoicesPurchasePriceChangeGuard.BuildErrorLine)
+                        );
+                        await db.Ado.RollbackTranAsync();
+                        return new ProductExecutionCommandResult(
+                            accumulator.Result,
+                            $"有 {largeChanges.Count} 行进货价较上次涨跌超过 40%，需二次确认后才能执行",
+                            LocalSupplierInvoicesPurchasePriceChangeGuard.ConfirmRequiredCode
+                        );
+                    }
+                }
+
                 var validationErrors = await _validator.ValidateLockedDetailsAsync(
                     lockedData,
                     plan.Request.ProductTypes,

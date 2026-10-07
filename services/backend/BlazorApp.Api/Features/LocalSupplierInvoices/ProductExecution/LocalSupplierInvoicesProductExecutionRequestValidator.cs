@@ -296,6 +296,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         Dictionary<string, int> ProductTypes,
         List<string> ProductTypeSelectionErrors,
         Dictionary<string, int>? ConfirmedActions,
-        Dictionary<string, string>? ConfirmedDetailIdentities
+        Dictionary<string, string>? ConfirmedDetailIdentities,
+        // 用户已对「进货价较上次涨跌超过 40%」的行做二次确认；缺省为未确认，锁内校验据此拒绝。
+        bool ConfirmedLargePriceChange = false
     );
 }

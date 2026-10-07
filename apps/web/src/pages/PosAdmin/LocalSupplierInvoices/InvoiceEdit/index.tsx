@@ -151,8 +151,12 @@ import {
   buildBatchExecuteConfirmText,
   buildBatchExecuteSnapshot,
   constrainSelectedRowKeysToVisibleDetails,
+  findLargePriceChangeRows,
   getBatchExecuteErrorFeedback,
   getNewProductWithAdditionalBarcodesRows,
+  isPriceChangeConfirmRequiredError,
+  PRICE_CHANGE_CONFIRM_RATIO,
+  type LargePriceChangeRow,
   pickPurchasePriceDirectionGuids,
   splitCreateProductDetailGuids,
   splitPurchasePriceDirectionGuids,
@@ -2288,9 +2292,47 @@ export default function InvoiceEditPage() {
     }
   }
 
+  // 进货价较上次涨跌超过 40% 的二次确认：这类行多半是整箱数量/价格录错，写入主档后会污染分店价与成本。
+  // 前端按明细预先拦截；后端对同一条件再校验，未带确认标志会拒绝，这里的弹窗也是后端拒绝时的兜底。
+  const confirmLargePriceChange = (lines: string[], totalCount: number, onConfirm: () => void) => {
+    const limit = Math.round(PRICE_CHANGE_CONFIRM_RATIO * 100)
+    const visibleLines = lines.slice(0, 10)
+    Modal.confirm({
+      title: t('posAdmin.invoiceWorkbench.largePriceChangeTitle', { limit }),
+      width: 560,
+      content: (
+        <Space direction="vertical" size={4}>
+          <Alert
+            type="warning"
+            showIcon
+            message={t('posAdmin.invoiceWorkbench.largePriceChangeContent', { count: totalCount, limit })}
+          />
+          {visibleLines.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+          {totalCount > visibleLines.length && (
+            <div>{t('posAdmin.invoiceWorkbench.largePriceChangeMore', { count: totalCount - visibleLines.length })}</div>
+          )}
+        </Space>
+      ),
+      okText: t('posAdmin.invoiceWorkbench.largePriceChangeOk'),
+      cancelText: t('common.cancel', '取消'),
+      okButtonProps: { danger: true },
+      onOk: onConfirm,
+    })
+  }
+
+  const formatLargePriceChangeLine = (row: LargePriceChangeRow) => t('posAdmin.invoiceWorkbench.largePriceChangeRow', {
+    item: row.itemNumber || '--',
+    name: row.productName || '--',
+    last: formatAmount(row.lastPurchasePrice),
+    current: formatAmount(row.purchasePrice),
+    percent: `${row.ratio > 0 ? '+' : ''}${(row.ratio * 100).toFixed(1)}%`,
+  })
+
   const executeSelectedBatchActions = async (
     snapshot: ReturnType<typeof buildBatchExecuteSnapshot>,
-    options?: { syncCreatedToHq?: boolean },
+    options?: { syncCreatedToHq?: boolean; confirmedLargePriceChange?: boolean },
   ) => {
     if (!invoiceGuid || !ensureCanAccessInvoice()) return
     setExecuting(true)
@@ -2303,6 +2345,7 @@ export default function InvoiceEditPage() {
         confirmedCreateProductCount: snapshot.confirmedCreateProductCount,
         confirmedAt: snapshot.confirmedAt ?? new Date().toISOString(),
         newProductProductTypeSelections: snapshot.newProductProductTypeSelections,
+        confirmedLargePriceChange: options?.confirmedLargePriceChange,
       })
       const parts = formatBatchExecuteResultParts(result)
       const hasDetails = !!result.errors?.length || result.failed > 0 || result.skipped > 0
@@ -2323,6 +2366,13 @@ export default function InvoiceEditPage() {
       }
     } catch (error) {
       const feedback = getBatchExecuteErrorFeedback(error, t('posAdmin.invoiceDetail.executeFailed', '批量执行操作失败'))
+      if (isPriceChangeConfirmRequiredError(error) && !options?.confirmedLargePriceChange) {
+        // 后端按最新数据判定有行涨跌超限（前端明细可能已过期）：整单未执行，确认后带标志重试一次。
+        confirmLargePriceChange(feedback.details, feedback.failure?.failed || feedback.details.length, () => {
+          void executeSelectedBatchActions(snapshot, { ...options, confirmedLargePriceChange: true })
+        })
+        return
+      }
       notification.error({
         message: feedback.message,
         description: feedback.details.length ? (
@@ -2511,18 +2561,27 @@ export default function InvoiceEditPage() {
           // 返回 rejected promise 让确认框保持打开，用户可以重新勾选。
           return Promise.reject(new Error('no rows selected'))
         }
-        void executeSelectedBatchActions(buildBatchExecuteSnapshot({
-          selectedRowKeys: executeGuids,
-          details,
-          rowActions,
-          // 关键位置：有副码的新商品必须在用户确认后带上主档类型，避免后台静默建成普通商品。
-          newProductProductTypeSelections: newProductWithAdditionalBarcodesRows.map((row) => ({
-            detailGuid: row.detailGuid,
-            productType: newProductProductTypeSelectionMap.get(row.detailGuid) ?? 2,
-          })),
-          // 真正提交的确认时间在用户点击确认时生成。
-          confirmedAt: new Date().toISOString(),
-        }), { syncCreatedToHq: isCreateMode && hqChoice.syncToHq })
+        const run = (confirmedLargePriceChange: boolean) => {
+          void executeSelectedBatchActions(buildBatchExecuteSnapshot({
+            selectedRowKeys: executeGuids,
+            details,
+            rowActions,
+            // 关键位置：有副码的新商品必须在用户确认后带上主档类型，避免后台静默建成普通商品。
+            newProductProductTypeSelections: newProductWithAdditionalBarcodesRows.map((row) => ({
+              detailGuid: row.detailGuid,
+              productType: newProductProductTypeSelectionMap.get(row.detailGuid) ?? 2,
+            })),
+            // 真正提交的确认时间在用户点击确认时生成。
+            confirmedAt: new Date().toISOString(),
+          }), { syncCreatedToHq: isCreateMode && hqChoice.syncToHq, confirmedLargePriceChange })
+        }
+        // 涨跌超 40% 的「更新进货价」行（含手动勾选、「执行全部待执行」）必须二次确认；取消则整批不执行，行保持原状态。
+        const largePriceRows = isCreateMode ? [] : findLargePriceChangeRows(executeGuids, details, rowActions)
+        if (largePriceRows.length > 0) {
+          confirmLargePriceChange(largePriceRows.map(formatLargePriceChangeLine), largePriceRows.length, () => run(true))
+        } else {
+          run(false)
+        }
       },
     })
   }

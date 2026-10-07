@@ -873,6 +873,8 @@ export async function batchExecuteActions(data: BatchExecuteActionsRequest): Pro
     confirmedCreateProductCount: data.confirmedCreateProductCount,
     confirmedAt: data.confirmedAt,
     newProductProductTypeSelections: data.newProductProductTypeSelections ?? [],
+    // 只在确认过时才发送，未确认的请求体保持原样，由后端按未确认处理。
+    confirmedLargePriceChange: data.confirmedLargePriceChange ? true : undefined,
   })
   assertApiSuccess(response, '批量执行操作失败')
   return unwrapApiData(response)
