@@ -91,6 +91,7 @@ const pages = [
     sources: [
       'src/pages/PosAdmin/DeviceRegistration/index.tsx',
       'src/pages/PosAdmin/DeviceRegistration/AppUsagePanel.tsx',
+      'src/pages/PosAdmin/DeviceRegistration/AppVersionDistribution.tsx',
       'src/pages/PosAdmin/DeviceRegistration/DeviceDetailDrawer.tsx',
       'src/pages/PosAdmin/DeviceRegistration/EmergencyLoginModal.tsx',
       'src/pages/PosAdmin/DeviceRegistration/deviceCells.tsx',

@@ -255,6 +255,112 @@ public sealed class MobileAppDeviceStatusServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetPaged_按版本号和构建号精确筛选_不被关键词式包含误伤()
+    {
+        await InsertStatusAsync("hw-a", "Android", "android", _now, "1.0.1", "5");
+        await InsertStatusAsync("hw-b", "Android", "android", _now, "1.0.10", "5");
+        await InsertStatusAsync("hw-c", "Android", "android", _now, "1.0.1", "6");
+        var service = CreateService();
+
+        var response = await service.GetPagedAsync(
+            new MobileAppDeviceStatusQueryDto { AppVersion = "1.0.1", AppBuildVersion = "5" }
+        );
+        var summary = await service.GetSummaryAsync(
+            new MobileAppDeviceStatusQueryDto { AppVersion = "1.0.1" }
+        );
+
+        Assert.Equal(new[] { "hw-a" }, response.Data!.Items!.Select(item => item.HardwareId));
+        // 汇总条与列表同口径：只按版本号筛时 1.0.1 的两台都算，1.0.10 不算。
+        Assert.Equal(2, summary.Data!.Total);
+    }
+
+    [Fact]
+    public async Task GetVersionDistribution_按系统版本构建号分组并统计在线与更新来源()
+    {
+        await InsertStatusAsync("hw-1", "iOS", "ios", _now.AddMinutes(-1), "1.0.7", "58", "ota");
+        await InsertStatusAsync("hw-2", "iOS", "ios", _now.AddMinutes(-30), "1.0.7", "58", "embedded");
+        await InsertStatusAsync("hw-3", "iOS", "ios", _now.AddMinutes(-2), "1.0.7", "58", " OTA ");
+        await InsertStatusAsync("hw-4", "iOS", "ios", _now.AddMinutes(-2), "1.0.7", "57", null);
+        // 同一版本号出现在两个系统时必须分成两行，两端版本线本来就不同步。
+        await InsertStatusAsync("hw-5", "Android", "android", _now.AddMinutes(-3), "1.0.7", "58", "unknown");
+        var service = CreateService();
+
+        var response = await service.GetVersionDistributionAsync(new MobileAppDeviceStatusQueryDto());
+
+        Assert.True(response.Success);
+        Assert.Equal(5, response.Data!.Total);
+        var items = response.Data.Items;
+        Assert.Equal(3, items.Count);
+
+        var ios58 = items.Single(item => item.DeviceSystem == "iOS" && item.AppBuildVersion == "58");
+        Assert.Equal(3, ios58.Total);
+        Assert.Equal(2, ios58.Online);
+        Assert.Equal(2, ios58.Ota);
+        Assert.Equal(1, ios58.Embedded);
+
+        var android = items.Single(item => item.DeviceSystem == "Android");
+        Assert.Equal(1, android.Total);
+        Assert.Equal(0, android.Ota + android.Embedded);
+    }
+
+    [Fact]
+    public async Task GetVersionDistribution_版本号按数值从新到旧_iOS先于Android_未上报版本垫底()
+    {
+        await InsertStatusAsync("hw-a9", "Android", "android", _now, "1.0.9", "50");
+        await InsertStatusAsync("hw-a10", "Android", "android", _now, "1.0.10", "54");
+        await InsertStatusAsync("hw-a10-old", "Android", "android", _now, "1.0.10", "9");
+        await InsertStatusAsync("hw-a-none", "Android", "android", _now);
+        await InsertStatusAsync("hw-i", "iOS", "ios", _now, "1.0.7", "58");
+        await InsertStatusAsync("hw-unknown", null, null, _now, "2.0.0", "1");
+        var service = CreateService();
+
+        var response = await service.GetVersionDistributionAsync(new MobileAppDeviceStatusQueryDto());
+
+        // 构建号 54 与 9 要按数值比较：54 在前；字符串比较会把 9 排到前面。
+        Assert.Equal(
+            new[]
+            {
+                "iOS 1.0.7 58",
+                "Android 1.0.10 54",
+                "Android 1.0.10 9",
+                "Android 1.0.9 50",
+                "Android - -",
+                "- 2.0.0 1",
+            },
+            response.Data!.Items.Select(item =>
+                $"{item.DeviceSystem ?? "-"} {item.AppVersion ?? "-"} {item.AppBuildVersion ?? "-"}"
+            )
+        );
+    }
+
+    [Fact]
+    public async Task GetVersionDistribution_受分店系统关键词约束_不受在线状态和版本筛选影响()
+    {
+        await InsertStatusAsync("hw-1", "Android", "android", _now.AddMinutes(-60), "1.0.9", "50", storeCode: "S001");
+        await InsertStatusAsync("hw-2", "Android", "android", _now, "1.0.10", "54", storeCode: "S001");
+        await InsertStatusAsync("hw-3", "Android", "android", _now, "1.0.10", "54", storeCode: "S002");
+        await InsertStatusAsync("hw-4", "iOS", "ios", _now, "1.0.7", "58", storeCode: "S001");
+        var service = CreateService();
+
+        var scoped = await service.GetVersionDistributionAsync(
+            new MobileAppDeviceStatusQueryDto
+            {
+                StoreCode = "S001",
+                DeviceSystem = "Android",
+                // 这两个条件只属于对明细的下钻，分布必须忽略，否则点选后其余版本会消失。
+                OnlineState = "online",
+                AppVersion = "1.0.10",
+            }
+        );
+
+        Assert.Equal(2, scoped.Data!.Total);
+        Assert.Equal(
+            new[] { "1.0.10", "1.0.9" },
+            scoped.Data.Items.Select(item => item.AppVersion)
+        );
+    }
+
+    [Fact]
     public async Task Heartbeat_无Bearer且无有效设备会话_返回401()
     {
         var controller = new MobileAppDeviceStatusController(
@@ -302,7 +408,11 @@ public sealed class MobileAppDeviceStatusServiceTests : IDisposable
         string hardwareId,
         string? deviceSystem,
         string? platform,
-        DateTime lastSeenAtUtc
+        DateTime lastSeenAtUtc,
+        string? appVersion = null,
+        string? appBuildVersion = null,
+        string? updateSource = null,
+        string? storeCode = null
     )
     {
         await _db.Insertable(new MobileAppDeviceStatus
@@ -311,6 +421,10 @@ public sealed class MobileAppDeviceStatusServiceTests : IDisposable
             HardwareId = hardwareId,
             DeviceSystem = deviceSystem,
             Platform = platform,
+            StoreCode = storeCode,
+            AppVersion = appVersion,
+            AppBuildVersion = appBuildVersion,
+            UpdateSource = updateSource,
             LastSeenAtUtc = lastSeenAtUtc,
             LastAuthMode = "test",
             CreatedAt = lastSeenAtUtc,

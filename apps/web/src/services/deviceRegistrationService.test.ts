@@ -11,6 +11,7 @@ import {
   lockDevice,
   normalizeAppDeviceStatusListResponse,
   normalizeAppDeviceStatusSummary,
+  normalizeAppVersionDistribution,
   normalizeDeviceRegistrationDetail,
   normalizeRegisteredDeviceSystem,
   revokeEmergencyLoginGrant,
@@ -253,6 +254,33 @@ assertDeepEqual(
     unknownSystem: 0,
   },
   'Should normalize App device summary',
+)
+
+assertDeepEqual(
+  normalizeAppVersionDistribution({
+    success: true,
+    data: {
+      Total: 3,
+      Items: [
+        { DeviceSystem: 'iOS', AppVersion: '1.0.7', AppBuildVersion: '58', Total: 2, Online: 1, Ota: 1, Embedded: 1 },
+        { DeviceSystem: null, AppVersion: null, AppBuildVersion: null, Total: 1, Online: 0, Ota: 0, Embedded: 0 },
+        null,
+      ],
+    },
+  }),
+  {
+    total: 3,
+    items: [
+      { deviceSystem: 'iOS', appVersion: '1.0.7', appBuildVersion: '58', total: 2, online: 1, ota: 1, embedded: 1 },
+      { total: 1, online: 0, ota: 0, embedded: 0 },
+    ],
+  },
+  'Should normalize App version distribution, dropping invalid rows and null versions',
+)
+assertDeepEqual(
+  normalizeAppVersionDistribution({ success: true, data: null }),
+  { total: 0, items: [] },
+  'Should tolerate an empty App version distribution payload',
 )
 
 const originalFetch = globalThis.fetch

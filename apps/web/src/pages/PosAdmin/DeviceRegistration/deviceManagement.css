@@ -306,6 +306,192 @@
   font-size: 12px;
 }
 
+/* App 版本分布：每行一个「系统 + 版本」，占比条 + 数字，整行可点选 */
+.dev-mgmt-versions {
+  margin-bottom: 14px;
+  padding: 12px 14px 8px;
+  border-radius: 10px;
+  background: #f7f8fa;
+}
+
+.dev-mgmt-versions-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 8px;
+}
+
+.dev-mgmt-versions-title {
+  font-weight: 600;
+}
+
+.dev-mgmt-versions-empty {
+  padding: 14px 0 10px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 13px;
+}
+
+/* 列表和表头共用同一套栅格，保证列对齐 */
+.dev-mgmt-versions-grid {
+  display: grid;
+  grid-template-columns: 84px minmax(110px, 1fr) minmax(170px, 2fr) 56px 56px 56px;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.dev-mgmt-versions-columns {
+  padding: 0 10px 4px;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.dev-mgmt-versions-list {
+  max-height: 296px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.dev-mgmt-versions-row {
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 10px;
+  border: 0;
+  border-top: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+
+.dev-mgmt-versions-row:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.dev-mgmt-versions-row:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: -2px;
+}
+
+.dev-mgmt-versions-row:disabled {
+  cursor: not-allowed;
+}
+
+.dev-mgmt-versions-row-active,
+.dev-mgmt-versions-row-active:hover:not(:disabled) {
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  box-shadow: inset 3px 0 0 var(--ant-color-primary, #1677ff);
+}
+
+.dev-mgmt-versions-system {
+  margin-inline-end: 0;
+}
+
+.dev-mgmt-versions-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dev-mgmt-versions-track {
+  flex: 1 1 auto;
+  height: 8px;
+  min-width: 40px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.dev-mgmt-versions-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--ant-color-primary-border, #91caff);
+  transition: width 0.2s;
+}
+
+.dev-mgmt-versions-row-active .dev-mgmt-versions-fill {
+  background: var(--ant-color-primary, #1677ff);
+}
+
+.dev-mgmt-versions-total {
+  min-width: 28px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-mgmt-versions-share {
+  min-width: 42px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-mgmt-versions-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-mgmt-versions-online {
+  color: #0b7a3c;
+}
+
+.dev-mgmt-versions-foot {
+  padding: 6px 10px 2px;
+  border-top: 1px solid var(--ant-color-border-secondary, #eef0f4);
+}
+
+.dev-mgmt-versions-ver {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 窄屏：收起占比条、占比、OTA / 内置，只留系统、版本、设备数与在线，版本号独占剩余宽度。
+   各列最小宽度之和须小于卡片内宽（375 宽手机约 255px），否则设备数和在线列会被挤出卡片。 */
+@media (max-width: 720px) {
+  .dev-mgmt-versions-grid {
+    grid-template-columns: 64px minmax(80px, 1fr) 52px 44px;
+    column-gap: 6px;
+  }
+
+  .dev-mgmt-versions-columns,
+  .dev-mgmt-versions-row {
+    padding-inline: 6px;
+  }
+
+  .dev-mgmt-versions-bar {
+    justify-content: flex-end;
+  }
+
+  .dev-mgmt-versions-track,
+  .dev-mgmt-versions-extra,
+  .dev-mgmt-versions-share {
+    display: none;
+  }
+
+  /* 表头「设备数」与右对齐的数字对齐 */
+  .dev-mgmt-versions-columns > :nth-child(3) {
+    text-align: right;
+  }
+}
+
+/* 320 宽的小屏手机：再收紧列宽并缩小系统标签 */
+@media (max-width: 360px) {
+  .dev-mgmt-versions-grid {
+    grid-template-columns: 54px minmax(60px, 1fr) 44px 40px;
+    column-gap: 4px;
+  }
+
+  .dev-mgmt-versions-system {
+    padding-inline: 3px;
+    font-size: 11px;
+  }
+}
+
 /* 详情抽屉 */
 .dev-mgmt-drawer .ant-drawer-body {
   padding: 4px 24px 16px;
@@ -381,7 +567,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dev-mgmt-status-tab {
+  .dev-mgmt-status-tab,
+  .dev-mgmt-versions-row,
+  .dev-mgmt-versions-fill {
     transition: none;
   }
 }

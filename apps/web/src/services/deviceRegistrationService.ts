@@ -4,6 +4,7 @@ import type {
   AppDeviceStatus,
   AppDeviceStatusPagedResult,
   AppDeviceStatusSummary,
+  AppVersionDistribution,
   DeviceRegistrationDetail,
   DeviceRegistrationItem,
   DeviceRegistrationPagedResult,
@@ -254,6 +255,35 @@ export function normalizeAppDeviceStatusSummary(payload: unknown): AppDeviceStat
   }
 }
 
+export function normalizeAppVersionDistribution(payload: unknown): AppVersionDistribution {
+  const data = unwrapApiData(payload as ApiResponse<unknown> | unknown)
+  const record = asRecord(data) ?? {}
+  const itemsPayload = pick(record, 'items', 'Items')
+
+  return {
+    total: asNumber(pick(record, 'total', 'Total'), 0),
+    items: Array.isArray(itemsPayload)
+      ? itemsPayload.flatMap((raw) => {
+          const item = asRecord(raw)
+          if (!item) {
+            return []
+          }
+          return [
+            {
+              deviceSystem: asString(pick(item, 'deviceSystem', 'DeviceSystem')),
+              appVersion: asString(pick(item, 'appVersion', 'AppVersion')),
+              appBuildVersion: asString(pick(item, 'appBuildVersion', 'AppBuildVersion')),
+              total: asNumber(pick(item, 'total', 'Total'), 0),
+              online: asNumber(pick(item, 'online', 'Online'), 0),
+              ota: asNumber(pick(item, 'ota', 'Ota', 'OTA'), 0),
+              embedded: asNumber(pick(item, 'embedded', 'Embedded'), 0),
+            },
+          ]
+        })
+      : [],
+  }
+}
+
 function buildAppDeviceStatusParams(params?: {
   page?: number
   pageSize?: number
@@ -261,6 +291,8 @@ function buildAppDeviceStatusParams(params?: {
   deviceSystem?: string
   onlineState?: AppDeviceOnlineState
   keyword?: string
+  appVersion?: string
+  appBuildVersion?: string
 }) {
   return {
     page: params?.page,
@@ -269,6 +301,8 @@ function buildAppDeviceStatusParams(params?: {
     deviceSystem: params?.deviceSystem,
     onlineState: params?.onlineState && params.onlineState !== 'all' ? params.onlineState : undefined,
     keyword: params?.keyword?.trim() || undefined,
+    appVersion: params?.appVersion || undefined,
+    appBuildVersion: params?.appBuildVersion || undefined,
   }
 }
 
@@ -371,6 +405,8 @@ export async function getAppDeviceStatuses(params?: {
   deviceSystem?: string
   onlineState?: AppDeviceOnlineState
   keyword?: string
+  appVersion?: string
+  appBuildVersion?: string
 }): Promise<AppDeviceStatusPagedResult> {
   const response = await request.get<ApiResponse<unknown>>(`${APP_DEVICE_API_BASE}/paged`, {
     params: buildAppDeviceStatusParams(params),
@@ -382,15 +418,35 @@ export async function getAppDeviceStatusSummary(params?: {
   storeCode?: string
   deviceSystem?: string
   keyword?: string
+  appVersion?: string
+  appBuildVersion?: string
 }): Promise<AppDeviceStatusSummary> {
   const response = await request.get<ApiResponse<unknown>>(`${APP_DEVICE_API_BASE}/summary`, {
     params: {
       storeCode: params?.storeCode,
       deviceSystem: params?.deviceSystem,
       keyword: params?.keyword?.trim() || undefined,
+      appVersion: params?.appVersion || undefined,
+      appBuildVersion: params?.appBuildVersion || undefined,
     },
   })
   return normalizeAppDeviceStatusSummary(response)
+}
+
+/** 按版本统计设备数；只受分店、系统、关键词约束，不带版本精确筛选。 */
+export async function getAppVersionDistribution(params?: {
+  storeCode?: string
+  deviceSystem?: string
+  keyword?: string
+}): Promise<AppVersionDistribution> {
+  const response = await request.get<ApiResponse<unknown>>(`${APP_DEVICE_API_BASE}/version-distribution`, {
+    params: {
+      storeCode: params?.storeCode,
+      deviceSystem: params?.deviceSystem,
+      keyword: params?.keyword?.trim() || undefined,
+    },
+  })
+  return normalizeAppVersionDistribution(response)
 }
 
 export async function activateDevice(id: number) {
