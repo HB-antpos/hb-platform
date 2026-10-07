@@ -1,0 +1,30 @@
+{
+  "posAdmin": {
+    "scheduleAttendance": {
+      "approvalPresentation": {
+        "MealBreak": {
+          "title": "用餐未休息加工时"
+        }
+      },
+      "status": {
+        "sourceType": {
+          "MealBreak": "用餐未休息"
+        }
+      },
+      "meal": {
+        "column": "用餐与计薪",
+        "deduction": "用餐扣 {{minutes}} 分",
+        "pendingAddBack": "待审加回 {{minutes}} 分",
+        "approvedAddBack": "已加回 {{minutes}} 分",
+        "paid": "计薪 {{value}}",
+        "claimSummary": "没休息 {{count}} 次，申请加回 {{minutes}} 分钟",
+        "claimCounts": "排班用餐 {{expected}} 次，记录到 {{recorded}} 次",
+        "reason": "原因：{{reason}}",
+        "approve": "批准加回",
+        "approveTitle": "批准用餐加工时",
+        "rejectTitle": "拒绝用餐加工时",
+        "remarkRequired": "拒绝用餐加工时必须填写审核备注"
+      }
+    }
+  }
+}

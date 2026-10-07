@@ -191,4 +191,25 @@ for (const pathValue of requiredLocalePaths) {
   assert(!/[\u3400-\u9fff]/.test(enValue), `英文 locale ${pathValue} 不应包含中文`)
 }
 
+// 用餐未休息加工时：文案在页面级消息文件；审批标题与来源类型是模板键，静态扫描扫不到，这里逐个核对。
+const zhPageLocale = JSON.parse(readFileSync(
+  path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.zh.json'),
+  'utf8',
+)).posAdmin.scheduleAttendance
+const enPageLocale = JSON.parse(readFileSync(
+  path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.en.json'),
+  'utf8',
+)).posAdmin.scheduleAttendance
+for (const pathValue of ['approvalPresentation.MealBreak.title', 'status.sourceType.MealBreak']) {
+  const zhValue = readLocalePath(zhPageLocale, pathValue)
+  const enValue = readLocalePath(enPageLocale, pathValue)
+  assert(typeof zhValue === 'string' && zhValue.trim().length > 0, `页面级中文文案缺少 ${pathValue}`)
+  assert(typeof enValue === 'string' && enValue.trim().length > 0, `页面级英文文案缺少 ${pathValue}`)
+  assert(!/[㐀-鿿]/.test(enValue), `页面级英文文案 ${pathValue} 不应包含中文`)
+}
+assert(recordColumnsSource.includes('buildAttendanceMealPaySummary(record)'), '考勤记录应展示用餐扣除、加回与计薪工时')
+assert(pageSource.includes("reviewTarget.sourceType === 'MealBreak'")
+  && pageSource.includes('validateMealBreakApproval'), '拒绝用餐加工时必须先校验审核备注')
+assert(pageSource.includes('record.mealClaim'), '用餐加工时审批必须展示员工声明的次数与原因')
+
 console.log('attendanceRecordUiContract.test.ts: ok')

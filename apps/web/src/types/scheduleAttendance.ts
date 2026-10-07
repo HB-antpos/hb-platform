@@ -12,7 +12,7 @@ export type AttendancePunchStatus =
   | 'PendingApproval'
   | 'Approved'
   | 'Rejected'
-export type AttendanceApprovalSourceType = 'Punch' | 'Leave' | 'PunchAdjustment' | 'Overtime' | 'MissingClockOut'
+export type AttendanceApprovalSourceType = 'Punch' | 'Leave' | 'PunchAdjustment' | 'Overtime' | 'MissingClockOut' | 'MealBreak'
 export type AttendanceReviewStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'
 export type AttendanceScheduleState = 'NotStarted' | 'InProgress' | 'Completed' | 'MissingClockOut' | string
 export type AttendanceSegmentStatus = 'NotStarted' | 'Open' | 'Completed' | 'MissingClockOut' | string
@@ -63,6 +63,29 @@ export interface AttendanceScheduleDto {
   earlyLeaveMinutes?: number
   crossStoreMissingClockOutStoreCode?: string
   segments?: AttendanceScheduleSegmentDto[]
+  /** 排班有效用餐次数（指定值优先，否则按时长默认）；旧后端不返回。 */
+  effectiveMealBreakCount?: number
+  /** 计薪时扣除的用餐分钟（是否休息过都按排班扣）。 */
+  mealDeductionMinutes?: number
+  /** 员工声明没休息且已批准、加回工时的分钟。 */
+  approvedMealAddBackMinutes?: number
+  /** 员工声明没休息、等待审核的分钟（未计入计薪工时）。 */
+  pendingMealAddBackMinutes?: number
+  /** 计薪工时 = 已闭合班段工时 − 用餐扣除 + 已批准加回；workedMinutes 含义不变。 */
+  paidMinutes?: number
+}
+
+/** 下班时的用餐声明：员工声明没休息时生成 MealBreak 审批。 */
+export interface AttendanceMealClaimDto {
+  claimGuid: string
+  expectedCount: number
+  recordedCount: number
+  missingCount: number
+  notTakenCount: number
+  claimedMinutes: number
+  approvedMinutes?: number
+  status: string
+  reason?: string
 }
 
 export interface AttendanceScheduleSegmentDto {
@@ -165,6 +188,8 @@ export interface AttendanceApprovalDto {
   candidateOvertimeMinutes?: number
   approvedOvertimeMinutes?: number
   adjustment?: AttendanceAdjustmentDetailDto
+  /** sourceType 为 MealBreak 时的用餐声明。 */
+  mealClaim?: AttendanceMealClaimDto
 }
 
 export interface ReviewAttendanceApprovalPayload {

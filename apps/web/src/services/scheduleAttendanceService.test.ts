@@ -96,6 +96,43 @@ const approval = normalizeAttendanceApproval({
   },
 })
 
+assertEqual(approval.mealClaim, undefined, '非用餐审批不应伪造用餐声明')
+
+// 用餐未休息加工时：审批带 MealClaim，排班带用餐扣除与计薪工时（PascalCase 兼容）。
+const mealApproval = normalizeAttendanceApproval({
+  ApprovalGuid: 'approval-meal',
+  SourceType: 'MealBreak',
+  SourceGuid: 'claim-1',
+  StoreCode: 'S001',
+  ApplicantUserGuid: 'user-1',
+  ReviewStatus: 'Pending',
+  MealClaim: {
+    ClaimGuid: 'claim-1',
+    ExpectedCount: 1,
+    RecordedCount: 0,
+    MissingCount: 1,
+    NotTakenCount: 1,
+    ClaimedMinutes: 30,
+    Status: 'Pending',
+    Reason: '太忙',
+  },
+})
+assertEqual(mealApproval.sourceType, 'MealBreak', '应保留用餐审批类型')
+assertEqual(mealApproval.mealClaim?.claimedMinutes, 30, '应解析申请加回分钟')
+assertEqual(mealApproval.mealClaim?.reason, '太忙', '应保留员工填写的原因')
+const mealSchedule = normalizeAttendanceSchedule({
+  ScheduleGuid: 'schedule-meal',
+  MealDeductionMinutes: 30,
+  PendingMealAddBackMinutes: 30,
+  ApprovedMealAddBackMinutes: 0,
+  PaidMinutes: 490,
+  EffectiveMealBreakCount: 1,
+})
+assertEqual(mealSchedule.mealDeductionMinutes, 30, '应解析用餐扣除分钟')
+assertEqual(mealSchedule.pendingMealAddBackMinutes, 30, '应解析待审加回分钟')
+assertEqual(mealSchedule.paidMinutes, 490, '应解析计薪工时')
+assertEqual(mealSchedule.effectiveMealBreakCount, 1, '应解析有效用餐次数')
+
 assertEqual(approval.candidateOvertimeMinutes, 45, '审批应兼容候选加班')
 assertEqual(approval.adjustment?.originalPunchTimeLocal, '2026-07-21T08:52:00+10:00', '审批应保留原始打卡时间')
 assertEqual(approval.adjustment?.requestedPunchTimeLocal, '2026-07-21T08:45:00+10:00', '审批应兼容补卡明细')

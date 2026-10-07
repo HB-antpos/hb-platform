@@ -105,6 +105,18 @@ const pages = [
     registerSource: 'src/pages/PosAdmin/DeviceRegistration/index.tsx',
   },
   {
+    // 排班考勤页既有文案在全局；用餐未休息加工时新增的 meal.* 键在页面级消息文件。
+    name: '排班考勤',
+    keyPattern: /['"`](posAdmin\.scheduleAttendance\.meal\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: ['src/pages/PosAdmin/ScheduleAttendance/index.tsx'],
+    messages: {
+      zh: 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.zh.json',
+      en: 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.en.json',
+    },
+    registerImport: "from './scheduleAttendanceMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/ScheduleAttendance/index.tsx',
+  },
+  {
     name: '支付终端配置',
     keyPattern: /['"`](paymentTerminalSettings\.[A-Za-z0-9_.]+)['"`]/g,
     sources: ['src/pages/System/PaymentTerminalSettings/index.tsx'],
