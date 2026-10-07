@@ -1,13 +1,9 @@
 export type StoreOrderListTableColumnKey = string
+// 订货明细重设计后合并了列：商品（图片 + 货号 + 名称，第二行条码 · 零售价）、货位 · 拣货（货位 + 负责人）；
+// 序号列去掉，订货体积改为列设置里可选显示。
 export type StoreOrderDetailTableColumnKey =
-  | 'index'
-  | 'productImage'
-  | 'itemNumber'
-  | 'productName'
-  | 'barcode'
-  | 'price'
+  | 'product'
   | 'locationCode'
-  | 'assignee'
   | 'quantity'
   | 'allocQuantity'
   | 'importPrice'
@@ -17,11 +13,7 @@ export type StoreOrderDetailTableColumnKey =
   | 'isActive'
   | 'actions'
 
-const STORE_ORDER_DETAIL_FIXED_LEFT_COLUMN_KEYS = new Set<StoreOrderDetailTableColumnKey>([
-  'index',
-  'productImage',
-  'itemNumber',
-])
+const STORE_ORDER_DETAIL_FIXED_LEFT_COLUMN_KEYS = new Set<StoreOrderDetailTableColumnKey>(['product'])
 const STORE_ORDER_DETAIL_FIXED_RIGHT_COLUMN_KEYS = new Set<StoreOrderDetailTableColumnKey>(['actions'])
 
 function mergeColumnOrder<T extends string>(

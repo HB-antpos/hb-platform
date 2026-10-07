@@ -273,6 +273,10 @@
       "name": "核查员工操作日志异常",
       "description": "Web 页面 /pos-admin/operation-logs 与移动端「员工操作日志」- 对老收银、新收银命中异常规则的操作标记确认正常或需跟进，并可撤销"
     },
+    "DailyCloseRecords.View": {
+      "name": "查看日结记录",
+      "description": "Web 页面 /pos-admin/daily-closes 与员工 App「日结记录」- 按管理的分店查看 WPF、手持、iPad 的日结记录与现金盘点明细"
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "打开钱箱",
       "description": "收银端钱箱 - 打开钱箱按钮"

@@ -108,6 +108,10 @@ using (var scope = app.Services.CreateScope())
         var linklySettlementSchemaInitializer = scope.ServiceProvider.GetRequiredService<ILinklySettlementSchemaInitializer>();
         await linklySettlementSchemaInitializer.InitializeAsync();
 
+        // 日结记录表：收银端上传与回填脚本共用，启动时幂等建表。
+        var dailyCloseSchemaInitializer = scope.ServiceProvider.GetRequiredService<IDailyCloseSchemaInitializer>();
+        await dailyCloseSchemaInitializer.InitializeAsync();
+
         var installmentRepaymentClaimSchemaInitializer = scope.ServiceProvider.GetRequiredService<IInstallmentRepaymentClaimSchemaInitializer>();
         await installmentRepaymentClaimSchemaInitializer.InitializeAsync();
 

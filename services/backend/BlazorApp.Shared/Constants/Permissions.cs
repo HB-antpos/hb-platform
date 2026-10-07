@@ -104,6 +104,16 @@ namespace BlazorApp.Shared.Constants
             public const string Review = "LegacyEmployeeLogs.Review";
         }
 
+        /// <summary>
+        /// 日结记录：Web 页面 /pos-admin/daily-closes 与员工 App「日结记录」，只读查看 WPF、手持、iPad 上传的日结与现金盘点明细。
+        /// 刻意不放在 Permissions.PosTerminal.* 下：该前缀会被当作收银端权限下发到收银机与收银员授权
+        /// （PosTerminal.DailyClose.* 是收银机上操作日结的权限，与后台查看记录无关）。
+        /// </summary>
+        public static class DailyCloseRecords
+        {
+            public const string View = "DailyCloseRecords.View";
+        }
+
         public static class PosTerminal
         {
             public static class Sales

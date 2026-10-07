@@ -630,6 +630,9 @@ export type ContainerDetailTableColumnKey =
   | 'image'
   | 'categoryName'
   | 'readonlyOemPrice'
+  // 「成本核算 / 上架定价」视图专用的合成列：商品（图+货号+标签+名称）与问题标签，「全部列」不显示。
+  | 'product'
+  | 'issues'
   | ContainerDetailSortField
 
 export interface ContainerDetailCategoryFilterLookup {

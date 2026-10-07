@@ -11,7 +11,7 @@ interface PrinterTransportFilterControlsProps {
   disabled?: boolean;
 }
 
-/** Android 的标签打印走经典蓝牙；BLE 默认隐藏，但允许现场排查时显式查看。 */
+/** Android 经典蓝牙与 BLE 都能打印，默认两种都列出（DEFAULT_PRINTER_TRANSPORT_FILTERS）；可按需只看其中一种。 */
 export function PrinterTransportFilterControls({
   value,
   onChange,

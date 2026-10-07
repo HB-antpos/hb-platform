@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Hbpos.Api.Auth;
 using Hbpos.Api.Services;
+using Hbpos.Contracts.DailyClose;
 using Hbpos.Contracts.Devices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
@@ -40,6 +41,9 @@ public sealed class OpenApiSnapshotExportTests
         Assert.Contains("/api/v1/held-orders/claims/mine", document, StringComparison.Ordinal);
         Assert.Contains("HeldOrderSourceDto", document, StringComparison.Ordinal);
         Assert.Contains("heldOrderDisposition", document, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/daily-closes/sync", document, StringComparison.Ordinal);
+        Assert.Contains("DailyCloseSyncRequest", document, StringComparison.Ordinal);
+        Assert.Contains("DailyCloseSyncResponse", document, StringComparison.Ordinal);
 
         AssertSharedSaleCartOpenApiContract(document);
         AssertDeviceActivationRequestOpenApiContract(document);
@@ -228,6 +232,148 @@ public sealed class OpenApiSnapshotExportTests
         Assert.Equal(0, factory.ActivationService.CallCount);
     }
 
+    [Fact]
+    public async Task Daily_close_sync_binds_camel_case_json_and_scopes_the_call_to_the_device_claims()
+    {
+        using var factory = new OpenApiExportFactory();
+        using var client = factory.CreateClient();
+        using var request = CreateDailyCloseRequest(DailyCloseJson("S001", "POS-OLD"), authenticated: true);
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected 200 but received {(int)response.StatusCode}: {body}");
+        Assert.Equal(
+            "{\"accepted\":true,\"alreadySynced\":false,\"replacedPlaceholder\":false}",
+            body);
+        var received = Assert.Single(factory.DailyCloseService.Calls);
+        Assert.Equal("S001", received.StoreCode);
+        Assert.Equal("POS-OLD", received.DeviceCode);
+        Assert.Equal(new DateOnly(2026, 10, 7), received.Request.BusinessDate);
+        Assert.Equal(11, received.Request.CashCounts.Count);
+        Assert.Equal(3, received.Request.Tenders.Count);
+    }
+
+    [Fact]
+    public async Task Daily_close_sync_rejects_body_scope_that_differs_from_the_device_with_403()
+    {
+        using var factory = new OpenApiExportFactory();
+        using var client = factory.CreateClient();
+        using var request = CreateDailyCloseRequest(DailyCloseJson("S001", "POS-OTHER"), authenticated: true);
+
+        using var response = await client.SendAsync(request);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("DEVICE_SCOPE_FORBIDDEN", body.RootElement.GetProperty("code").GetString());
+        Assert.Empty(factory.DailyCloseService.Calls);
+    }
+
+    [Fact]
+    public async Task Daily_close_sync_without_device_authorization_returns_401_before_the_service()
+    {
+        using var factory = new OpenApiExportFactory();
+        using var client = factory.CreateClient();
+        using var request = CreateDailyCloseRequest(DailyCloseJson("S001", "POS-OLD"), authenticated: false);
+
+        using var response = await client.SendAsync(request);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("DEVICE_AUTH_REQUIRED", body.RootElement.GetProperty("code").GetString());
+        Assert.Empty(factory.DailyCloseService.Calls);
+    }
+
+    [Theory]
+    [InlineData("validation", HttpStatusCode.BadRequest, "INVALID_CASH_COUNTS")]
+    [InlineData("conflict", HttpStatusCode.Conflict, "DAILY_CLOSE_CONTENT_CONFLICT")]
+    public async Task Daily_close_sync_maps_service_failures_to_json_code_and_message(
+        string kind,
+        HttpStatusCode expectedStatus,
+        string expectedCode)
+    {
+        using var factory = new OpenApiExportFactory();
+        factory.DailyCloseService.Failure = kind == "validation"
+            ? new DailyCloseValidationException(expectedCode, "rejected")
+            : new DailyCloseConflictException(expectedCode, "rejected");
+        using var client = factory.CreateClient();
+        using var request = CreateDailyCloseRequest(DailyCloseJson("S001", "POS-OLD"), authenticated: true);
+
+        using var response = await client.SendAsync(request);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        Assert.Equal(expectedCode, body.RootElement.GetProperty("code").GetString());
+        Assert.Equal("rejected", body.RootElement.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task Daily_close_sync_returns_400_for_a_structurally_incomplete_body_before_the_service()
+    {
+        using var factory = new OpenApiExportFactory();
+        using var client = factory.CreateClient();
+        using var request = CreateDailyCloseRequest("{}", authenticated: true);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(factory.DailyCloseService.Calls);
+    }
+
+    private static HttpRequestMessage CreateDailyCloseRequest(string json, bool authenticated)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/daily-closes/sync")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        if (authenticated)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "TEST-AUTH");
+            request.Headers.Add(DeviceAuthConstants.DeviceCodeHeader, "POS-OLD");
+            request.Headers.Add(DeviceAuthConstants.StoreCodeHeader, "S001");
+            request.Headers.Add(DeviceAuthConstants.HardwareIdHeader, "HW-1");
+        }
+
+        return request;
+    }
+
+    private static string DailyCloseJson(string storeCode, string deviceCode)
+    {
+        var counts = string.Join(
+            ",",
+            new[] { 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5 }
+                .Select(cents => $"{{\"denominationCents\":{cents},\"quantity\":0}}"));
+        return $$"""
+            {
+              "schemaVersion": 1,
+              "dailyCloseGuid": "11111111-2222-3333-4444-555555555555",
+              "storeCode": "{{storeCode}}",
+              "deviceCode": "{{deviceCode}}",
+              "clientKind": "Wpf",
+              "businessDate": "2026-10-07",
+              "periodFrom": "2026-10-07T00:00:00+11:00",
+              "periodTo": "2026-10-08T00:00:00+11:00",
+              "savedAt": "2026-10-07T20:00:00+11:00",
+              "cashierId": "C001",
+              "cashierName": "Alice",
+              "appVersion": "1.0.47",
+              "orderCount": 0,
+              "returnQuantity": 0,
+              "refundAmount": 0,
+              "tenders": [
+                { "method": "Cash", "salesAmount": 0, "refundAmount": 0, "netAmount": 0 },
+                { "method": "Card", "salesAmount": 0, "refundAmount": 0, "netAmount": 0 },
+                { "method": "Voucher", "salesAmount": 0, "refundAmount": 0, "netAmount": 0 }
+              ],
+              "cashCounts": [{{counts}}],
+              "noteSubtotal": 0,
+              "coinSubtotal": 0,
+              "countedCashAmount": 0,
+              "cashDifference": 0
+            }
+            """;
+    }
+
     private static void AssertSharedSaleCartOpenApiContract(string document)
     {
         using var json = JsonDocument.Parse(document);
@@ -381,6 +527,8 @@ public sealed class OpenApiSnapshotExportTests
     {
         public RecordingDeviceActivationCodeService ActivationService { get; } = new();
 
+        public RecordingDailyCloseSyncService DailyCloseService { get; } = new();
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
@@ -414,6 +562,8 @@ public sealed class OpenApiSnapshotExportTests
                 services.AddSingleton<ILinklyCloudBackendAsyncSchemaInitializer>(new NoOp());
                 services.RemoveAll<ILinklySettlementSchemaInitializer>();
                 services.AddSingleton<ILinklySettlementSchemaInitializer>(new NoOp());
+                services.RemoveAll<IDailyCloseSchemaInitializer>();
+                services.AddSingleton<IDailyCloseSchemaInitializer>(new NoOp());
                 services.RemoveAll<IInstallmentRepaymentClaimSchemaInitializer>();
                 services.AddSingleton<IInstallmentRepaymentClaimSchemaInitializer>(new NoOp());
                 services.RemoveAll<IInstallmentCancelClaimSchemaInitializer>();
@@ -424,6 +574,8 @@ public sealed class OpenApiSnapshotExportTests
                 services.AddSingleton<ISquareTokenSchemaInitializer>(new NoOp());
                 services.RemoveAll<IDeviceActivationCodeService>();
                 services.AddSingleton<IDeviceActivationCodeService>(ActivationService);
+                services.RemoveAll<IDailyCloseSyncService>();
+                services.AddSingleton<IDailyCloseSyncService>(DailyCloseService);
                 services.RemoveAll<IDeviceAuthorizationService>();
                 services.AddSingleton<IDeviceAuthorizationService>(new TestDeviceAuthorizationService());
                 services.RemoveAll<IAuthorizationHandler>();
@@ -470,6 +622,25 @@ public sealed class OpenApiSnapshotExportTests
                 DeviceActivationReasonCodes.NotAvailable);
     }
 
+    private sealed class RecordingDailyCloseSyncService : IDailyCloseSyncService
+    {
+        public List<(DailyCloseSyncRequest Request, string StoreCode, string DeviceCode)> Calls { get; } = [];
+
+        public Exception? Failure { get; set; }
+
+        public Task<DailyCloseSyncResponse> SyncAsync(
+            DailyCloseSyncRequest request,
+            string storeCode,
+            string deviceCode,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add((request, storeCode, deviceCode));
+            return Failure is null
+                ? Task.FromResult(new DailyCloseSyncResponse(true, false, false))
+                : Task.FromException<DailyCloseSyncResponse>(Failure);
+        }
+    }
+
     private sealed class TestDeviceAuthorizationService : IDeviceAuthorizationService
     {
         public Task<DeviceAuthorizationValidationResult> ValidateAsync(
@@ -507,6 +678,7 @@ public sealed class OpenApiSnapshotExportTests
         IDeviceRuntimeStatusSchemaInitializer,
         ILinklyCloudBackendAsyncSchemaInitializer,
         ILinklySettlementSchemaInitializer,
+        IDailyCloseSchemaInitializer,
         IInstallmentRepaymentClaimSchemaInitializer,
         IInstallmentCancelClaimSchemaInitializer,
         ISquareWebhookSchemaInitializer,

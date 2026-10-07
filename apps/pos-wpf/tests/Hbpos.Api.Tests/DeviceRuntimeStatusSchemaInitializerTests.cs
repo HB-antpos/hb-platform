@@ -122,6 +122,10 @@ public sealed class DeviceRuntimeStatusSchemaInitializerTests
                 services.AddSingleton<ILinklySettlementSchemaInitializer>(
                     new TestNoOpLinklySettlementSchemaInitializer());
 
+                services.RemoveAll<IDailyCloseSchemaInitializer>();
+                services.AddSingleton<IDailyCloseSchemaInitializer>(
+                    new TestNoOpDailyCloseSchemaInitializer());
+
                 services.RemoveAll<ISquareTokenSchemaInitializer>();
                 services.AddSingleton<ISquareTokenSchemaInitializer>(new NoOpSquareTokenSchemaInitializer());
 

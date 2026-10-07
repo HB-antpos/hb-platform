@@ -228,6 +228,10 @@ public static class ServiceRegistration
         services.AddScoped<ILinklySettlementSyncService, LinklySettlementSyncService>();
         services.AddScoped<ILinklySettlementSchemaSqlExecutor, SqlSugarLinklySettlementSchemaSqlExecutor>();
         services.AddScoped<ILinklySettlementSchemaInitializer, SqlSugarLinklySettlementSchemaInitializer>();
+        services.AddScoped<IDailyCloseRepository, SqlSugarDailyCloseRepository>();
+        services.AddScoped<IDailyCloseSyncService, DailyCloseSyncService>();
+        services.AddScoped<IDailyCloseSchemaSqlExecutor, SqlSugarDailyCloseSchemaSqlExecutor>();
+        services.AddScoped<IDailyCloseSchemaInitializer, SqlSugarDailyCloseSchemaInitializer>();
         services.AddScoped<ISquareTokenRepository, SqlSugarSquareTokenRepository>();
         services.AddScoped<ISquareTokenService, SquareTokenService>();
         services.AddScoped<ISquareTokenSchemaSqlExecutor, SqlSugarSquareTokenSchemaSqlExecutor>();

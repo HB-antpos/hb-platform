@@ -74,6 +74,8 @@ jobs:
         run: node --test scripts/ci/*.test.mjs scripts/performance/*.test.mjs
       - name: 验证 RustDesk 回滚端口保护
         run: python3 -B -m unittest discover -s scripts/ops/rustdesk -p test_cutover.py
+      - name: 验证日结记录回填脚本
+        run: python3 -B -m unittest discover -s scripts/ops/daily-close-audit-backfill -p test_backfill.py
       - name: 生成按路径执行矩阵
         id: plan
         shell: bash

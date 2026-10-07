@@ -774,6 +774,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/daily-closes/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["DailyCloseSyncRequest"];
+                    "text/json": components["schemas"]["DailyCloseSyncRequest"];
+                    "application/*+json": components["schemas"]["DailyCloseSyncRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["DailyCloseSyncResponse"];
+                        "application/json": components["schemas"]["DailyCloseSyncResponse"];
+                        "text/json": components["schemas"]["DailyCloseSyncResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/devices/activation-code/preview": {
         parameters: {
             query?: never;
@@ -5835,6 +5878,62 @@ export interface components {
             data?: components["schemas"]["CatalogSyncPlanResponse"];
             errorCode?: string | null;
             message?: string | null;
+        };
+        DailyCloseCashCountSync: {
+            /** Format: int32 */
+            denominationCents?: number;
+            /** Format: int32 */
+            quantity?: number;
+        };
+        DailyCloseSyncRequest: {
+            /** Format: int32 */
+            schemaVersion?: number;
+            /** Format: uuid */
+            dailyCloseGuid?: string;
+            storeCode?: string | null;
+            deviceCode?: string | null;
+            clientKind?: string | null;
+            /** Format: date */
+            businessDate?: string;
+            /** Format: date-time */
+            periodFrom?: string;
+            /** Format: date-time */
+            periodTo?: string;
+            /** Format: date-time */
+            savedAt?: string;
+            cashierId?: string | null;
+            cashierName?: string | null;
+            appVersion?: string | null;
+            /** Format: int32 */
+            orderCount?: number;
+            /** Format: double */
+            returnQuantity?: number;
+            /** Format: double */
+            refundAmount?: number;
+            tenders?: components["schemas"]["DailyCloseTenderSync"][] | null;
+            cashCounts?: components["schemas"]["DailyCloseCashCountSync"][] | null;
+            /** Format: double */
+            noteSubtotal?: number;
+            /** Format: double */
+            coinSubtotal?: number;
+            /** Format: double */
+            countedCashAmount?: number;
+            /** Format: double */
+            cashDifference?: number;
+        };
+        DailyCloseSyncResponse: {
+            accepted?: boolean;
+            alreadySynced?: boolean;
+            replacedPlaceholder?: boolean;
+        };
+        DailyCloseTenderSync: {
+            method?: string | null;
+            /** Format: double */
+            salesAmount?: number;
+            /** Format: double */
+            refundAmount?: number;
+            /** Format: double */
+            netAmount?: number;
         };
         DeletedLookupDto: {
             storeCode?: string | null;

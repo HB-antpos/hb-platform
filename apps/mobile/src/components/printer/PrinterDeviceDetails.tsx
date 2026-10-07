@@ -23,7 +23,11 @@ const TRANSPORT_LABEL_KEYS = {
   unknown: "printer.transportUnknown",
 } as const;
 
-/** 显示地址与系统报告的能力，不以同名设备或图标猜测打印通道。 */
+/**
+ * 显示地址与系统报告的能力，不以同名设备或图标猜测打印通道。
+ * 文字一律不限行数：英文说明（如 “Classic Bluetooth · Not paired. Pair it in system Bluetooth settings first”）
+ * 在右侧连接按钮挤压下两行放不下，截断后看不到关键的配对提示。
+ */
 export function PrinterDeviceDetails({ device }: PrinterDeviceDetailsProps) {
   const { t } = useAppTranslation(["settings"]);
   const transport = getDisplayPrinterTransport(device, Platform.OS);
@@ -41,23 +45,22 @@ export function PrinterDeviceDetails({ device }: PrinterDeviceDetailsProps) {
         <Icon source={icon} size={20} color={unsupported ? HB_COLORS.warning : HB_COLORS.brand} />
       </View>
       <View style={styles.meta}>
-        <Text variant="bodyMedium" style={styles.name} numberOfLines={1}>
+        <Text variant="bodyMedium" style={styles.name}>
           {device.name || device.address}
         </Text>
-        <Text variant="bodySmall" style={styles.address} numberOfLines={1}>
+        <Text variant="bodySmall" style={styles.address}>
           {device.address}
         </Text>
         <Text
           variant="bodySmall"
           style={[styles.secondary, needsSystemPairing && styles.unbonded]}
-          numberOfLines={2}
         >
           {unsupported
             ? t(TRANSPORT_LABEL_KEYS[transport])
             : `${t(TRANSPORT_LABEL_KEYS[transport])} · ${connectHint}`}
         </Text>
         {unsupported ? (
-          <Text variant="bodySmall" style={styles.unsupported} numberOfLines={2}>
+          <Text variant="bodySmall" style={styles.unsupported}>
             {t("printer.bleUnsupported")}
           </Text>
         ) : null}

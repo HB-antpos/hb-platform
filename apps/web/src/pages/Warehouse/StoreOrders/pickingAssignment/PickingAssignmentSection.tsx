@@ -1,5 +1,5 @@
-import { PrinterOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, Popconfirm, Progress, Select, Space, Spin, Tag, Typography, message } from 'antd'
+import { LoadingOutlined, MoreOutlined, PrinterOutlined, ReloadOutlined, TeamOutlined, UndoOutlined } from '@ant-design/icons'
+import { Button, Dropdown, Empty, Modal, Progress, Select, Space, Spin, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -17,7 +17,7 @@ import {
 } from '../../../../services/warehousePickingAssignmentService'
 
 import AssignPickingModal from './AssignPickingModal'
-import { assigneeStatus, formatUtcShort, segmentColor } from './pickingAssignmentLogic'
+import { assigneeStatus, formatUtcShort, segmentColor, shouldShowPickingAssignmentSection } from './pickingAssignmentLogic'
 import './messages'
 import './pickingAssignment.css'
 
@@ -54,6 +54,8 @@ interface PickingAssignmentSectionProps {
 /**
  * 订单详情“拣货分配”卡片：每人一行，显示路线、进度、状态与分单条码，可重新打印单人分单；
  * 自带数据加载，详情页只需放在订单头卡片与明细卡片之间。
+ * 卡头：标题 + 分配摘要 + 「还有 N 个品种未分配」琥珀胶囊 + 打印全部分单、分配/重新分配，
+ * 刷新与撤销分配收进 ⋯（撤销仍要二次确认）。
  */
 export default function PickingAssignmentSection({ orderGuid, orderNo, storeName, assignable, onAssignmentChange }: PickingAssignmentSectionProps) {
   const { t } = useTranslation()
@@ -100,6 +102,17 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
     void load(controller.signal)
     return () => controller.abort()
   }, [load])
+
+  // 撤销会让已打印的分单全部失效：⋯ 菜单里点了也要先确认（原 Popconfirm 的同一句提示）。
+  const confirmClear = () => {
+    Modal.confirm({
+      title: t('storeOrders.pickingAssignment.clearConfirm', '撤销后已打印的分单全部失效，确定撤销？'),
+      okText: t('storeOrders.pickingAssignment.clear', '撤销分配'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: () => clear(),
+    })
+  }
 
   const clear = async () => {
     setClearing(true)
@@ -284,69 +297,109 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
     },
   ]
 
+  const hasAssignees = assignees.length > 0
+  const unassignedLineCount = summary?.unassignedLineCount ?? 0
+  const sectionTitle = t('storeOrders.pickingAssignment.sectionTitle', '拣货分配')
+
+  // 只读订单没有任何分配时整块隐藏（首次加载中也不先闪一张空卡片）。
+  // 数据仍照常加载并通过 onAssignmentChange 交给明细表；所有 hooks 都在上面，提前返回不会改变 hooks 顺序。
+  if (!shouldShowPickingAssignmentSection({ assigneeCount: assignees.length, assignable })) return null
+
   return (
-    <Card
-      title={
-        <Space size={12}>
-          <span>{t('storeOrders.pickingAssignment.sectionTitle', '拣货分配')}</span>
-          {summary?.assignedByName ? (
-            <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-              {t('storeOrders.pickingAssignment.assignedBy', '{{name}} 于 {{time}} 分配 · {{count}} 份 · 按 M 型走位分段', {
-                name: summary.assignedByName,
-                time: formatUtcShort(summary.assignedAtUtc),
-                count: assignees.length,
-              })}
-            </Typography.Text>
-          ) : null}
-        </Space>
-      }
-      extra={
-        <Space size={4} wrap>
-          <Button type="text" aria-label={t('common.refresh', '刷新')} icon={<ReloadOutlined />} loading={loading} onClick={() => void load()} />
-          {assignees.length > 0 ? (
-            <Button type="link" icon={<PrinterOutlined />} onClick={() => navigate(pickingSlipsPath([orderGuid]))}>
-              {t('storeOrders.pickingAssignment.printAll', '打印全部分单')}
-            </Button>
-          ) : null}
-          {assignable ? (
-            <Button type={assignees.length > 0 ? 'link' : 'primary'} icon={<TeamOutlined />} onClick={() => setModalOpen(true)}>
-              {assignees.length > 0 ? t('storeOrders.pickingAssignment.reassign', '重新分配') : t('storeOrders.pickingAssignment.assign', '分配拣货')}
-            </Button>
-          ) : null}
-          {assignees.length > 0 ? (
-            <Popconfirm
-              title={t('storeOrders.pickingAssignment.clearConfirm', '撤销后已打印的分单全部失效，确定撤销？')}
-              onConfirm={() => void clear()}
-            >
-              <Button type="link" danger loading={clearing}>
-                {t('storeOrders.pickingAssignment.clear', '撤销分配')}
-              </Button>
-            </Popconfirm>
-          ) : null}
-        </Space>
-      }
-    >
-      {!summary && loading ? (
-        <Spin />
-      ) : assignees.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            assignable
-              ? t('storeOrders.pickingAssignment.empty', '还没有分配拣货。分成几份后打印分单，员工扫码领取自己那一段；也可以直接指定员工。')
-              : t('storeOrders.pickingAssignment.emptyReadonly', '没有拣货分配')
-          }
-        />
-      ) : (
-        <>
-          <MeasuredTable<Assignee> metricId="warehouse.store-order-detail.picking-assignment" rowKey="segmentNo" size="small" pagination={false} columns={columns} dataSource={assignees} />
-          {summary && summary.unassignedLineCount > 0 ? (
-            <Typography.Text type="warning" style={{ display: 'block', marginTop: 8 }}>
-              {t('storeOrders.pickingAssignment.unassigned', '还有 {{count}} 个品种没有分配（订单加行后未重新分配）', { count: summary.unassignedLineCount })}
-            </Typography.Text>
-          ) : null}
-        </>
-      )}
+    <section className="picking-assign-section" aria-label={sectionTitle}>
+      <div className="picking-assign-section-head">
+        <h2 className="picking-assign-section-title">{sectionTitle}</h2>
+        {summary?.assignedByName ? (
+          <span className="picking-assign-section-summary">
+            {t('storeOrders.pickingAssignment.assignedBy', '{{name}} 于 {{time}} 分配 · {{count}} 份 · 按 M 型走位分段', {
+              name: summary.assignedByName,
+              time: formatUtcShort(summary.assignedAtUtc),
+              count: assignees.length,
+            })}
+          </span>
+        ) : null}
+        {hasAssignees && unassignedLineCount > 0 ? (
+          // 原卡片底部的提示改为卡头胶囊；完整原因（加行后未重新分配）放在悬停说明里。
+          <span
+            className="picking-assign-section-pill"
+            title={t('storeOrders.pickingAssignment.unassigned', '还有 {{count}} 个品种没有分配（订单加行后未重新分配）', {
+              count: unassignedLineCount,
+            })}
+          >
+            {t('warehouseUi.storeOrderDetail.pickingUnassignedPill', { count: unassignedLineCount })}
+          </span>
+        ) : null}
+        <span className="picking-assign-section-spacer" />
+        {hasAssignees ? (
+          <Button size="small" icon={<PrinterOutlined />} onClick={() => navigate(pickingSlipsPath([orderGuid]))}>
+            {t('storeOrders.pickingAssignment.printAll', '打印全部分单')}
+          </Button>
+        ) : null}
+        {assignable ? (
+          <Button size="small" type={hasAssignees ? 'default' : 'primary'} icon={<TeamOutlined />} onClick={() => setModalOpen(true)}>
+            {hasAssignees ? t('storeOrders.pickingAssignment.reassign', '重新分配') : t('storeOrders.pickingAssignment.assign', '分配拣货')}
+          </Button>
+        ) : null}
+        <Dropdown
+          trigger={['click']}
+          placement="bottomRight"
+          menu={{
+            items: [
+              { key: 'refresh', icon: <ReloadOutlined />, label: t('common.refresh', '刷新'), disabled: loading },
+              ...(hasAssignees
+                ? [
+                    {
+                      key: 'clear',
+                      icon: <UndoOutlined />,
+                      danger: true,
+                      disabled: clearing,
+                      label: t('storeOrders.pickingAssignment.clear', '撤销分配'),
+                    },
+                  ]
+                : []),
+            ],
+            onClick: ({ key }) => {
+              if (key === 'refresh') {
+                void load()
+              } else if (key === 'clear') {
+                confirmClear()
+              }
+            },
+          }}
+        >
+          <Button
+            size="small"
+            type="text"
+            icon={loading || clearing ? <LoadingOutlined /> : <MoreOutlined />}
+            aria-label={t('warehouseUi.storeOrderDetail.pickingMoreActions')}
+          />
+        </Dropdown>
+      </div>
+      <div className="picking-assign-section-body">
+        {!summary && loading ? (
+          <Spin />
+        ) : assignees.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            // 走到这里说明订单还能派单（只读且无分配时整块已隐藏）。
+            description={t(
+              'storeOrders.pickingAssignment.empty',
+              '还没有分配拣货。分成几份后打印分单，员工扫码领取自己那一段；也可以直接指定员工。',
+            )}
+          />
+        ) : (
+          <MeasuredTable<Assignee>
+            metricId="warehouse.store-order-detail.picking-assignment"
+            className="picking-assign-section-table"
+            rowKey="segmentNo"
+            size="small"
+            pagination={false}
+            columns={columns}
+            dataSource={assignees}
+            scroll={{ x: 980 }}
+          />
+        )}
+      </div>
       {modalOpen ? (
         <AssignPickingModal
           open
@@ -361,6 +414,6 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
           }}
         />
       ) : null}
-    </Card>
+    </section>
   )
 }
