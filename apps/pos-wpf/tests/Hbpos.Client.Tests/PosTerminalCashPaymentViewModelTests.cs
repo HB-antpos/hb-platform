@@ -2843,13 +2843,18 @@ public sealed class PosTerminalCashPaymentViewModelTests
             new OrderReturnPaymentCapacityDto(PaymentMethodKind.Cash, 20m, 0m, 20m, null, OriginalOrderGuid: originalOrder),
             new OrderReturnPaymentCapacityDto(PaymentMethodKind.Voucher, 10m, 0m, 10m, null, OriginalOrderGuid: originalOrder)
         ]);
+        // 状态文案带金额占位符，需注入真实本地化；未注入时 T() 只回显键名，金额无从断言。
+        var localization = new LocalizationService();
+        localization.SetCulture(LocalizationService.DefaultCultureName);
         var viewModel = new PaymentViewModel(
             cart,
             new CashPaymentWorkflowService(
                 new CashCheckoutService(),
                 new InMemoryOrderRepository(),
                 new InMemorySyncQueueRepository()),
-            Session, paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(VoucherEnabled: true)));
+            Session,
+            localization: localization,
+            paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(VoucherEnabled: true)));
 
         viewModel.PrepareForEntry(Session);
 
