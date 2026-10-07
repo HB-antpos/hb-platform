@@ -1,0 +1,158 @@
+{
+  "dailyCloses": {
+    "title": "Daily Closes",
+    "total": "{{count}} records",
+    "refresh": "Refresh",
+    "nth": "Save #{{n}}",
+    "backfill": "Backfilled",
+    "inferred": "Date inferred",
+    "pager": "{{from}}–{{to}} of {{total}}",
+    "placeholder": "No data yet · waiting for this terminal to upload",
+    "filters": {
+      "businessDate": "Business date",
+      "store": "Store",
+      "storePlaceholder": "All stores",
+      "device": "Terminal",
+      "devicePlaceholder": "e.g. POS01",
+      "source": "Source",
+      "sourceAll": "All",
+      "cashier": "Cashier",
+      "cashierPlaceholder": "Name or ID",
+      "search": "Search",
+      "reset": "Reset"
+    },
+    "presets": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "last7": "Last 7 days",
+      "last30": "Last 30 days",
+      "thisMonth": "This month",
+      "lastMonth": "Last month"
+    },
+    "status": {
+      "all": "All",
+      "short": "Short",
+      "over": "Over",
+      "even": "Balanced",
+      "none": "No amount"
+    },
+    "totals": {
+      "label": "Cash totals for the current filter",
+      "expected": "Expected cash",
+      "counted": "Counted",
+      "difference": "Net difference",
+      "noneNote": "Records without amounts are not included in totals"
+    },
+    "columns": {
+      "businessDate": "Business date",
+      "storeDevice": "Store / Terminal / Source",
+      "cashier": "Cashier",
+      "orderCount": "Orders",
+      "expectedCash": "Expected cash",
+      "countedCash": "Counted cash",
+      "difference": "Cash difference",
+      "cardNet": "Card net",
+      "savedAt": "Saved at",
+      "action": "Action"
+    },
+    "actions": {
+      "view": "View",
+      "viewLabel": "View daily close details for {{store}} on {{date}}"
+    },
+    "source": {
+      "Wpf": "WPF",
+      "Handheld": "Handheld",
+      "Ipad": "iPad"
+    },
+    "sourceLong": {
+      "Wpf": "WPF POS",
+      "Handheld": "Handheld POS",
+      "Ipad": "iPad POS"
+    },
+    "dataSource": {
+      "ClientUpload": "POS upload",
+      "AuditBackfill": "Operation log"
+    },
+    "empty": {
+      "title": "No daily closes match these filters",
+      "hint": "Daily closes saved before this feature launched only show full details after the matching POS terminal is upgraded."
+    },
+    "errors": {
+      "loadFailed": "Failed to load daily closes. Please try again.",
+      "forbidden": "You do not have permission to view daily closes, or to view this store.",
+      "invalidQuery": "Invalid filters: the business date range can be at most 93 days and the start date cannot be after the end date.",
+      "detailFailed": "Failed to load the daily close details. Please try again.",
+      "detailNotFound": "This daily close does not exist or is outside the stores you can view.",
+      "loadStoresFailed": "Failed to load the store list",
+      "retry": "Retry"
+    },
+    "validation": {
+      "rangeRequired": "Please choose a valid business date range",
+      "rangeReversed": "The start date cannot be after the end date",
+      "rangeTooLong": "The business date range can be at most 93 days. Please narrow it down."
+    },
+    "drawer": {
+      "title": "Daily close",
+      "close": "Close",
+      "store": "Store",
+      "device": "Terminal",
+      "cashier": "Cashier",
+      "businessDate": "Business date",
+      "savedAt": "Saved at",
+      "storeWithCode": "{{name}} ({{code}})",
+      "dateWithWeekday": "{{date}} ({{weekday}})",
+      "inferred": "inferred"
+    },
+    "notice": {
+      "title": "Backfilled record",
+      "cashOnly": "This daily close was saved before the POS upgrade. Only the three cash figures (expected, counted, difference) could be recovered from the operation log; there is no tender summary or cash count breakdown.",
+      "traceOnly": "This daily close was saved before the POS upgrade. Only the save record (store, terminal, cashier, saved time) remains; there are no amounts.",
+      "inferred": "The business date was inferred from the saved time (store local time).",
+      "autoComplete": "Once this terminal is upgraded, the full details saved on the machine will be uploaded automatically and replace this record."
+    },
+    "recon": {
+      "title": "Cash reconciliation",
+      "counted": "Counted cash",
+      "expected": "Expected cash (net)",
+      "differenceShort": "Cash difference · Short",
+      "differenceOver": "Cash difference · Over",
+      "differenceEven": "Cash difference · Balanced",
+      "differenceNone": "Cash difference · No amount",
+      "formula": "Difference = counted cash − expected net cash. Negative is short, positive is over.",
+      "noAmountNote": "No amount: this record has no cash data, so the cash difference cannot be calculated."
+    },
+    "tenders": {
+      "title": "Tender summary",
+      "method": "Method",
+      "sales": "Sales",
+      "refund": "Refunds",
+      "net": "Net",
+      "total": "Total",
+      "Cash": "Cash",
+      "Card": "Card",
+      "Voucher": "Voucher"
+    },
+    "cashCounts": {
+      "title": "Cash count",
+      "notes": "Notes",
+      "coins": "Coins",
+      "noteQuantity": "Count",
+      "coinQuantity": "Count",
+      "subtotal": "Subtotal",
+      "noteSubtotal": "Notes subtotal",
+      "coinSubtotal": "Coins subtotal"
+    },
+    "info": {
+      "title": "Other details",
+      "orderCount": "Orders",
+      "returnQuantity": "Returned items",
+      "source": "Source",
+      "dataSource": "Data source",
+      "uploadedAt": "Uploaded at",
+      "appVersion": "POS version",
+      "period": "Period",
+      "periodValue": "{{from}} – {{to}} (store local time)",
+      "guid": "GUID"
+    }
+  }
+}

@@ -162,6 +162,7 @@ const TAB_PATHS: Record<string, string> = {
   'seasonal-product-insights': '/(shell)/seasonal-product-insights',
   users: '/(shell)/users',
   'legacy-employee-logs': '/(shell)/legacy-employee-logs',
+  'daily-closes': '/(shell)/daily-closes',
   'user-admin': '/(shell)/user-admin',
   'cash-register-users': '/(shell)/cash-register-users',
   roles: '/(shell)/roles',
@@ -202,6 +203,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'seasonal-product-insights': { zhTitle: '季节商品查询', enTitle: 'Seasonal Products' },
   users: { zhTitle: '用户', enTitle: 'Users' },
   'legacy-employee-logs': { zhTitle: '员工操作日志', enTitle: 'Employee Operation Logs' },
+  'daily-closes': { zhTitle: '日结记录', enTitle: 'Daily Closes' },
   'user-admin': { zhTitle: '用户管理', enTitle: 'User Management' },
   'cash-register-users': { zhTitle: '收银用户条码', enTitle: 'Cashier Barcodes' },
   roles: { zhTitle: '角色管理', enTitle: 'Role Management' },
@@ -433,6 +435,17 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: [P.LegacyEmployeeLogs.View, P.PosTerminal.AuditView],
     order: 57,
     ...ROUTE_LABELS['legacy-employee-logs'],
+  },
+  {
+    routeName: 'daily-closes',
+    titleKey: 'tabs.dailyCloses',
+    icon: 'cash-register',
+    // 与后端 FullAppMenu 一致：移动端「日结记录」与 Web /pos-admin/daily-closes 共用独立权限码，店长只看自己关联的分店。
+    permissionCodes: [P.DailyCloseRecords.View],
+    // 后端 FullAppMenu 里它的 Order 是 58，但声明位置夹在 Order=57 的条目之间；预览按 order 稳定排序，
+    // 这里取 57 才能与后端源码声明顺序（expoRoleMenuPreview.test 直接读 NavigationService.cs 比对）保持一致。
+    order: 57,
+    ...ROUTE_LABELS['daily-closes'],
   },
   {
     routeName: 'user-admin',

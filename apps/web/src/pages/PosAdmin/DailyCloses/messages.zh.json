@@ -1,0 +1,158 @@
+{
+  "dailyCloses": {
+    "title": "日结记录",
+    "total": "共 {{count}} 条",
+    "refresh": "刷新",
+    "nth": "第{{n}}次",
+    "backfill": "补录",
+    "inferred": "营业日推算",
+    "pager": "第 {{from}}–{{to}} 条，共 {{total}} 条",
+    "placeholder": "暂无数据 · 待该终端补传",
+    "filters": {
+      "businessDate": "营业日",
+      "store": "分店",
+      "storePlaceholder": "全部分店",
+      "device": "终端",
+      "devicePlaceholder": "如 POS01",
+      "source": "来源",
+      "sourceAll": "全部",
+      "cashier": "收银员",
+      "cashierPlaceholder": "姓名或编号",
+      "search": "查询",
+      "reset": "重置"
+    },
+    "presets": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "last7": "近 7 天",
+      "last30": "近 30 天",
+      "thisMonth": "本月",
+      "lastMonth": "上月"
+    },
+    "status": {
+      "all": "全部",
+      "short": "短款",
+      "over": "长款",
+      "even": "已平",
+      "none": "无金额"
+    },
+    "totals": {
+      "label": "当前筛选的现金合计",
+      "expected": "现金应有合计",
+      "counted": "实点合计",
+      "difference": "净差额",
+      "noneNote": "无金额的记录不计入合计"
+    },
+    "columns": {
+      "businessDate": "营业日",
+      "storeDevice": "分店 / 终端 / 来源",
+      "cashier": "收银员",
+      "orderCount": "订单数",
+      "expectedCash": "现金应有",
+      "countedCash": "实点现金",
+      "difference": "现金差额",
+      "cardNet": "刷卡净额",
+      "savedAt": "保存时间",
+      "action": "操作"
+    },
+    "actions": {
+      "view": "查看",
+      "viewLabel": "查看 {{date}} {{store}} 的日结明细"
+    },
+    "source": {
+      "Wpf": "WPF",
+      "Handheld": "手持",
+      "Ipad": "iPad"
+    },
+    "sourceLong": {
+      "Wpf": "WPF 收银端",
+      "Handheld": "手持收银端",
+      "Ipad": "iPad 收银端"
+    },
+    "dataSource": {
+      "ClientUpload": "收银端上传",
+      "AuditBackfill": "操作日志补录"
+    },
+    "empty": {
+      "title": "该筛选条件下没有日结记录",
+      "hint": "上线前保存的日结，要等对应收银端升级后才会出现完整明细。"
+    },
+    "errors": {
+      "loadFailed": "加载日结记录失败，请重试",
+      "forbidden": "没有查看日结记录的权限，或没有该分店的查看权限",
+      "invalidQuery": "查询条件不合法：营业日区间最长 93 天，且起始日不能晚于结束日",
+      "detailFailed": "加载日结明细失败，请重试",
+      "detailNotFound": "日结记录不存在，或不在你可查看的分店范围内",
+      "loadStoresFailed": "加载分店列表失败",
+      "retry": "重试"
+    },
+    "validation": {
+      "rangeRequired": "请选择有效的营业日范围",
+      "rangeReversed": "起始日不能晚于结束日",
+      "rangeTooLong": "营业日区间最长 93 天，请缩小范围"
+    },
+    "drawer": {
+      "title": "日结明细",
+      "close": "关闭",
+      "store": "分店",
+      "device": "终端",
+      "cashier": "收银员",
+      "businessDate": "营业日",
+      "savedAt": "保存于",
+      "storeWithCode": "{{name}}（{{code}}）",
+      "dateWithWeekday": "{{date}}（{{weekday}}）",
+      "inferred": "推算"
+    },
+    "notice": {
+      "title": "历史补录记录",
+      "cashOnly": "这条日结保存于收银端升级之前，系统只能从操作日志里补出现金三项（应有、实点、差额），没有支付方式汇总和盘点明细。",
+      "traceOnly": "这条日结保存于收银端升级之前，系统只留下了保存记录（门店、终端、收银员、保存时间），没有任何金额数据。",
+      "inferred": "营业日是按保存时间（门店本地时间）推算的。",
+      "autoComplete": "该终端升级收银端后，本机保存的完整明细会自动补传并替换本记录。"
+    },
+    "recon": {
+      "title": "现金对账",
+      "counted": "实点现金（盘点）",
+      "expected": "系统应有现金（现金净额）",
+      "differenceShort": "现金差额 · 短款",
+      "differenceOver": "现金差额 · 长款",
+      "differenceEven": "现金差额 · 已平",
+      "differenceNone": "现金差额 · 无金额",
+      "formula": "差额 = 实点现金 − 系统现金净额；负数为短款，正数为长款。",
+      "noAmountNote": "无金额：该记录没有现金数据，无法计算现金差额。"
+    },
+    "tenders": {
+      "title": "支付方式汇总",
+      "method": "方式",
+      "sales": "销售",
+      "refund": "退款",
+      "net": "净额",
+      "total": "合计",
+      "Cash": "现金",
+      "Card": "刷卡",
+      "Voucher": "代金券"
+    },
+    "cashCounts": {
+      "title": "现金盘点明细",
+      "notes": "纸币",
+      "coins": "硬币",
+      "noteQuantity": "张数",
+      "coinQuantity": "枚数",
+      "subtotal": "小计",
+      "noteSubtotal": "纸币小计",
+      "coinSubtotal": "硬币小计"
+    },
+    "info": {
+      "title": "其他信息",
+      "orderCount": "订单数",
+      "returnQuantity": "退货件数",
+      "source": "来源",
+      "dataSource": "数据来源",
+      "uploadedAt": "上传时间",
+      "appVersion": "收银端版本",
+      "period": "统计时段",
+      "periodValue": "{{from}} – {{to}}（门店本地时间）",
+      "guid": "日结 GUID"
+    }
+  }
+}

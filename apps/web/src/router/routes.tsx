@@ -77,6 +77,7 @@ const PosAdminAdvertisementsPage = lazy(() => import('../pages/PosAdmin/Advertis
 const PosAdminEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/EmployeeLogs'))
 const LinklySettlementsPage = lazy(() => import('../pages/PosAdmin/LinklySettlements'))
 const LinklySettlementDetailPage = lazy(() => import('../pages/PosAdmin/LinklySettlementDetail'))
+const DailyClosesPage = lazy(() => import('../pages/PosAdmin/DailyCloses'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
 const LocalSupplierInvoiceSalesAnalysisPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoiceSalesAnalysis'))
 const InvoiceEditPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit'))
@@ -869,6 +870,17 @@ export const appRoutes: AppRouteItem[] = [
           dynamicTitle: () => i18n.t('menu.linklySettlementDetail'),
         },
         element: <LinklySettlementDetailPage />,
+      },
+      {
+        // 日结记录：列表 + 右侧明细抽屉（抽屉用 ?id=<日结 GUID> 保持，可深链分享）；独立权限 DailyCloseRecords.View。
+        path: '/pos-admin/daily-closes',
+        meta: {
+          title: 'menu.dailyCloses',
+          icon: 'MoneyCollectOutlined',
+          keepAlive: true,
+          accessKey: 'canViewDailyCloseRecords',
+        },
+        element: <DailyClosesPage />,
       },
       {
         path: '/pos-admin/sales-orders',
