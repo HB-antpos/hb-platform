@@ -1,5 +1,6 @@
 import {
   CloudSyncOutlined,
+  CloudUploadOutlined,
   EditOutlined,
   EllipsisOutlined,
   LoadingOutlined,
@@ -39,9 +40,19 @@ import SelectionActionBar from '../../../components/listToolbar/SelectionActionB
 import { P } from '../../../types/permissions'
 import { batchUpdateStores, createStore, getNextStoreCode, getStoreByGuid, getStores, syncStoreToHq, updateStore } from '../../../services/storeService'
 import type { CreateStoreDto, StoreDetailDto, StoreDto, UpdateStoreDto } from '../../../types/store'
+import type { StoreReceiptProfilePublishResult } from '../../../types/storeReceiptProfile'
 import { RequestError } from '../../../utils/request'
 import StoreFormFields from './StoreFormFields'
 import StoreUserManagement from './StoreUserManagement'
+import { ReceiptProfileStatusCell } from './ReceiptProfileCells'
+import ReceiptProfileDevicesDrawer, { type ReceiptProfileDevicesTarget } from './ReceiptProfileDevicesDrawer'
+import ReceiptProfilePublishModal from './ReceiptProfilePublishModal'
+import {
+  collectPendingGuids,
+  isReceiptProfileEndpointMissing,
+  mergeSelectionWithLimit,
+} from './receiptProfileLogic'
+import { useReceiptProfileStatuses } from './useReceiptProfileStatuses'
 import {
   BatchUpdateRequestError,
   buildBatchUpdateStoresRequest,
@@ -176,6 +187,23 @@ export default function SystemStoresPage() {
   const [syncingStoreGuids, setSyncingStoreGuids] = useState<Set<string>>(() => new Set())
   const [storeUserOpen, setStoreUserOpen] = useState(false)
   const [storeUserTarget, setStoreUserTarget] = useState<StoreDto | null>(null)
+  // 小票资料下发：确认弹窗的目标分店（null=关闭）与设备应用情况抽屉的目标分店（null=关闭）。
+  const [publishTargetGuids, setPublishTargetGuids] = useState<string[] | null>(null)
+  const [devicesTarget, setDevicesTarget] = useState<ReceiptProfileDevicesTarget | null>(null)
+  // 小票下发状态异步补充到列表上，失败（含后端未部署的 404）只提示一次，不影响列表。
+  const {
+    statusByGuid: receiptStatusByGuid,
+    loading: receiptStatusLoading,
+    refresh: refreshReceiptStatuses,
+  } = useReceiptProfileStatuses({
+    onFirstFailure: (error) => {
+      message.warning(
+        isReceiptProfileEndpointMissing(error)
+          ? t('system.stores.receiptProfile.statusUnavailable')
+          : t('system.stores.receiptProfile.statusLoadFailed'),
+      )
+    },
+  })
   const [form] = Form.useForm<UpdateStoreDto>()
   const [createForm] = Form.useForm<CreateStoreDto>()
   const [batchEditForm] = Form.useForm<BatchUpdateStoreFormValues>()
@@ -220,6 +248,9 @@ export default function SystemStoresPage() {
         setSortBy(query.sortBy)
         setSortOrder(query.sortOrder ?? null)
         setKnownBrands((previous) => mergeBrandNames(previous, result.items))
+        // 列表先渲染，小票下发状态随后异步补上（不 await）。保存/批量修改/换页/筛选后都会重新走到这里，
+        // 所以「保存分店资料后该行变为 pending」不需要在每个保存入口单独刷新。
+        void refreshReceiptStatuses(result.items.map((item) => item.storeGUID))
       },
       onError: (error) => {
         console.error(error)
@@ -487,6 +518,32 @@ export default function SystemStoresPage() {
     }
   }
 
+  // 当前页里「有未下发修改」的分店：只覆盖已经拿到状态的当前页数据（状态按页请求）。
+  const pendingReceiptGuids = useMemo(
+    () => collectPendingGuids(data, receiptStatusByGuid),
+    [data, receiptStatusByGuid],
+  )
+
+  // 一键勾选这些分店：追加到已有勾选上，总数受下发单批 100 家上限约束。
+  const handleSelectPendingReceipt = () => {
+    const { next, truncated } = mergeSelectionWithLimit(selectedStoreGuids, pendingReceiptGuids)
+    setSelectedStoreGuids(next)
+    if (truncated) {
+      message.warning(t('system.stores.receiptProfile.selectPendingTruncated'))
+    }
+  }
+
+  const handleReceiptProfilePublished = (result: StoreReceiptProfilePublishResult, publishedGuids: string[]) => {
+    message.success(t('system.stores.receiptProfile.publishSuccess', {
+      published: result.publishedCount,
+      unchanged: result.unchangedCount,
+    }))
+    setPublishTargetGuids(null)
+    // 已提交的分店移出勾选（单店入口提交的那家也一并处理）；没参与本次提交的勾选保留。
+    setSelectedStoreGuids((previous) => previous.filter((guid) => !publishedGuids.includes(guid)))
+    void refreshReceiptStatuses(publishedGuids)
+  }
+
   const brandFilterOptions = useMemo(() => {
     const brands = new Set(knownBrands)
     if (brandFilter) {
@@ -659,6 +716,23 @@ export default function SystemStoresPage() {
       ),
     },
     {
+      // 两行紧凑单元格：状态（含版本号）+ 设备应用台数；状态异步补充，所以没数据时先出骨架占位。
+      title: t('system.stores.receiptProfile.columnTitle'),
+      key: 'receiptProfile',
+      width: 156,
+      render: (_, record) => (
+        <ReceiptProfileStatusCell
+          status={receiptStatusByGuid[record.storeGUID]}
+          loading={receiptStatusLoading}
+          onOpenDevices={(item) => setDevicesTarget({
+            storeGuid: item.storeGuid,
+            storeName: item.storeName,
+            storeCode: item.storeCode,
+          })}
+        />
+      ),
+    },
+    {
       title: t('column.action'),
       key: 'action',
       width: 124,
@@ -685,6 +759,11 @@ export default function SystemStoresPage() {
                       label: t('system.stores.syncHq'),
                       icon: syncingStoreGuids.has(record.storeGUID) ? <LoadingOutlined /> : <CloudSyncOutlined />,
                       disabled: syncingStoreGuids.has(record.storeGUID),
+                    }, {
+                      // 单店下发入口：与勾选后的批量下发共用同一个确认弹窗。
+                      key: 'publishReceipt',
+                      label: t('system.stores.receiptProfile.publishAction'),
+                      icon: <CloudUploadOutlined />,
                     }]
                   : []),
                 { key: 'users', label: t('system.stores.manageUsers'), icon: <TeamOutlined /> },
@@ -692,6 +771,8 @@ export default function SystemStoresPage() {
               onClick: ({ key }) => {
                 if (key === 'sync') {
                   void handleSyncStoreToHq(record)
+                } else if (key === 'publishReceipt') {
+                  setPublishTargetGuids([record.storeGUID])
                 } else if (key === 'users') {
                   handleOpenStoreUsers(record)
                 }
@@ -764,6 +845,19 @@ export default function SystemStoresPage() {
           <Tooltip title={t('common.refresh')}>
             <Button icon={<ReloadOutlined />} aria-label={t('common.refresh')} onClick={() => void loadData()} />
           </Tooltip>
+          {/* 本页有未下发修改的统计提示：所有人可见；只有能编辑的人才有「勾选」入口（无编辑权限本来就没有勾选列）。 */}
+          {pendingReceiptGuids.length > 0 ? (
+            <span className="sys-store-rp-hint" role="status">
+              {t('system.stores.receiptProfile.pendingHint', { count: pendingReceiptGuids.length })}
+              {canEditStores ? (
+                <Tooltip title={t('system.stores.receiptProfile.selectPendingTip')}>
+                  <Button type="link" size="small" onClick={handleSelectPendingReceipt}>
+                    {t('system.stores.receiptProfile.selectPending')}
+                  </Button>
+                </Tooltip>
+              ) : null}
+            </span>
+          ) : null}
         </div>
 
         {activeFilterItems.length > 0 || selectedStoreGuids.length > 0 ? (
@@ -776,6 +870,9 @@ export default function SystemStoresPage() {
               <HasPermission code={P.Stores.Edit}>
                 <Button size="small" icon={<EditOutlined />} onClick={handleOpenBatchEdit}>
                   {t('system.stores.batchEdit')}
+                </Button>
+                <Button size="small" icon={<CloudUploadOutlined />} onClick={() => setPublishTargetGuids([...selectedStoreGuids])}>
+                  {t('system.stores.receiptProfile.publishAction')}
                 </Button>
               </HasPermission>
             </SelectionActionBar>
@@ -803,7 +900,7 @@ export default function SystemStoresPage() {
           columns={columns}
           dataSource={data}
           tableLayout="fixed"
-          scroll={{ x: 1160 }}
+          scroll={{ x: 1320 }}
           onChange={handleTableChange}
           rowClassName={() => 'sys-store-row-clickable'}
           onRow={(record) => ({
@@ -1105,6 +1202,15 @@ export default function SystemStoresPage() {
           <StoreFormFields />
         </Form>
       </Modal>
+
+      {/* 下发确认弹窗（批量与单店共用）：失败时保留弹窗与勾选，便于修正后重试。 */}
+      <ReceiptProfilePublishModal
+        storeGuids={publishTargetGuids}
+        onCancel={() => setPublishTargetGuids(null)}
+        onPublished={handleReceiptProfilePublished}
+      />
+
+      <ReceiptProfileDevicesDrawer target={devicesTarget} onClose={() => setDevicesTarget(null)} />
 
       <StoreUserManagement
         open={storeUserOpen}

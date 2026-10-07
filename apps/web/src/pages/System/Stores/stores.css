@@ -302,3 +302,270 @@
     border-left: 0;
   }
 }
+
+/* ───────── 小票资料下发（状态列 / 勾选提示 / 确认弹窗 / 设备抽屉） ───────── */
+
+/* 状态点 + 文案：沿用「收银」列的圆点写法；灰=从未下发、绿=已下发、橙=有未下发修改 */
+.sys-store-rp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sys-store-rp-status::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c3c9d4;
+}
+
+.sys-store-rp-status-never {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+}
+
+.sys-store-rp-status-synced {
+  color: #0b7a3c;
+}
+
+.sys-store-rp-status-synced::before {
+  background: #12a150;
+}
+
+.sys-store-rp-status-pending {
+  color: #ad6800;
+}
+
+.sys-store-rp-status-pending::before {
+  background: #fa8c16;
+}
+
+.sys-store-rp-ver {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* 设备应用台数：看起来是一行小字，悬浮才显出可点击；没全部应用时用琥珀色提醒 */
+.sys-store-rp-devices {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sys-store-rp-devices:hover {
+  color: var(--ant-color-primary, #1677ff);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.sys-store-rp-devices:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.sys-store-rp-devices-partial {
+  color: #ad6800;
+  font-weight: 600;
+}
+
+/* 状态异步加载中的占位：两条灰色条，对应状态行与台数行 */
+.sys-store-rp-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sys-store-rp-skeleton span {
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #f1f3f6 25%, #e6e9ef 37%, #f1f3f6 63%);
+  background-size: 400% 100%;
+  animation: sys-store-rp-shimmer 1.4s ease infinite;
+}
+
+.sys-store-rp-skeleton span:first-child {
+  width: 88px;
+}
+
+.sys-store-rp-skeleton span:last-child {
+  width: 64px;
+}
+
+@keyframes sys-store-rp-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sys-store-rp-skeleton span {
+    animation: none;
+  }
+}
+
+/* 工具栏右侧的「本页 N 家有未下发的修改」提示：克制的琥珀色小条，窄屏下自动换到下一行 */
+.sys-store-rp-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid #ffe2a8;
+  border-radius: 6px;
+  background: #fffaf0;
+  color: #874d00;
+  font-size: 12.5px;
+}
+
+.sys-store-rp-hint .ant-btn {
+  padding-inline: 6px;
+}
+
+/* 确认弹窗：内容区自己滚动，页脚按钮始终可见 */
+.sys-store-rp-modal {
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.sys-store-rp-loading {
+  display: flex;
+  justify-content: center;
+  padding: 40px 0;
+}
+
+.sys-store-rp-summary-line {
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.sys-store-rp-panel-head {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.sys-store-rp-panel-fields {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sys-store-rp-errors {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.sys-store-rp-unchanged {
+  margin-top: 10px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* 新旧对比：字段 / 最新下发 / 当前资料 三列；只有有差异的行带琥珀色底与左侧色条 */
+.sys-store-rp-diff {
+  overflow: hidden;
+  border: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.sys-store-rp-diff-head,
+.sys-store-rp-diff-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 7px 12px;
+}
+
+.sys-store-rp-diff-first .sys-store-rp-diff-head,
+.sys-store-rp-diff-first .sys-store-rp-diff-row {
+  grid-template-columns: 88px minmax(0, 1fr);
+}
+
+.sys-store-rp-diff-head {
+  background: #f7f8fb;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.sys-store-rp-diff-row {
+  border-top: 1px solid var(--ant-color-split, rgba(5, 5, 5, 0.06));
+}
+
+.sys-store-rp-diff-label {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
+}
+
+.sys-store-rp-value {
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sys-store-rp-diff-row:not(.sys-store-rp-diff-row-changed) .sys-store-rp-value {
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+.sys-store-rp-diff-first .sys-store-rp-diff-row .sys-store-rp-value {
+  color: inherit;
+}
+
+.sys-store-rp-diff-row-changed {
+  background: #fff8e6;
+  box-shadow: inset 3px 0 0 #fa8c16;
+}
+
+.sys-store-rp-diff-row-changed .sys-store-rp-diff-old .sys-store-rp-value {
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  text-decoration: line-through;
+}
+
+.sys-store-rp-diff-row-changed .sys-store-rp-diff-new .sys-store-rp-value {
+  font-weight: 600;
+}
+
+/* 设备抽屉顶部摘要 */
+.sys-store-rp-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 22px;
+  margin: 14px 0 12px;
+}
+
+/* 窄屏：对比表收窄字段列与间距，避免新旧两列被挤到只剩几个字 */
+@media (max-width: 560px) {
+  .sys-store-rp-diff-head,
+  .sys-store-rp-diff-row {
+    grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .sys-store-rp-diff-first .sys-store-rp-diff-head,
+  .sys-store-rp-diff-first .sys-store-rp-diff-row {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .sys-store-rp-hint {
+    margin-left: 0;
+  }
+}
