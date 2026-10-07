@@ -95,6 +95,53 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             return result;
         }
 
+        /// <summary>
+        /// 「更新货号」但未关联商品编码的明细，按主条码在本单供应商的商品里唯一解析商品编码（明细 GUID → 商品编码）。
+        /// 典型场景：单据货号与主档只差空格（BEA 345618 ↔ BEA345618），检测判为主档不存在，用户直接改成「更新货号」。
+        /// 只认同供应商、未删除、主条码相同且去重后恰好一个商品；0 个或多个都不解析，交给校验提示先「选用」。
+        /// </summary>
+        public async Task<Dictionary<string, string>> ResolveItemNumberUpdateProductCodesAsync(
+            IEnumerable<StoreLocalSupplierInvoiceDetails> details,
+            string? supplierCode
+        )
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var candidates = details
+                .Where(detail => detail.ActivityType == (int)DetailAction.UpdateItemNumber
+                    && string.IsNullOrWhiteSpace(detail.ProductCode)
+                    && NormalizeCaseInsensitive(detail.Barcode) != null)
+                .ToList();
+            if (candidates.Count == 0 || string.IsNullOrWhiteSpace(supplierCode))
+                return result;
+
+            // 原值做 IN（生产库排序规则大小写不敏感），内存里再按大写归并，兼顾 SQLite 测试库。
+            var barcodes = candidates
+                .SelectMany(detail => new[] { detail.Barcode!.Trim(), detail.Barcode!.Trim().ToUpperInvariant() })
+                .Distinct()
+                .ToList();
+            var products = await _context.Db.Queryable<Product>()
+                .Where(product => product.IsDeleted == false
+                    && product.LocalSupplierCode == supplierCode
+                    && product.ProductCode != null
+                    && barcodes.Contains(product.Barcode))
+                .Select(product => new { product.ProductCode, product.Barcode })
+                .ToListAsync();
+            var codesByBarcode = products
+                .Where(product => !string.IsNullOrWhiteSpace(product.ProductCode) && !string.IsNullOrWhiteSpace(product.Barcode))
+                .GroupBy(product => product.Barcode!.Trim().ToUpperInvariant())
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(product => product.ProductCode!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                );
+
+            foreach (var detail in candidates)
+            {
+                if (codesByBarcode.TryGetValue(NormalizeCaseInsensitive(detail.Barcode)!, out var codes) && codes.Count == 1)
+                    result[detail.DetailGUID] = codes[0];
+            }
+            return result;
+        }
+
         /// <summary>分店多码里该条码是否已挂在别的商品上；挂在同一商品上视为已添加，不算冲突。</summary>
         public async Task<bool> HasStoreMultiCodeBarcodeOnOtherProductAsync(string normalizedBarcode, string productCode) =>
             await _context.Db.Queryable<StoreMultiCodeProduct>().AnyAsync(item =>

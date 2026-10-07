@@ -2248,6 +2248,120 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchExecuteActionsAsync_更新货号未关联商品时按条码唯一匹配本供应商商品并回填编码()
+        {
+            // 生产 10-07 进货单 387250：货号 BEA 345618 与主档 BEA345618 只差空格，检测判主档不存在，
+            // 用户直接改成「更新货号」，明细没有商品编码导致整批「未找到商品编码」。
+            await SeedUnlinkedItemNumberUpdateAsync(extraProducts: Array.Empty<Product>());
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-item-unlinked",
+                new List<string> { "detail-unlinked" },
+                "tester"
+            );
+
+            Assert.True(result.Success, result.Message + string.Join(";", result.Data?.Errors ?? new()));
+            Assert.Equal(1, result.Data?.UpdatedItemNumbers);
+            var product = await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == "PUNLINKED");
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>().SingleAsync(x => x.DetailGUID == "detail-unlinked");
+            Assert.Equal("BEA 345618", product.ItemNumber);
+            Assert.Equal("PUNLINKED", detail.ProductCode);
+            Assert.Equal(99, detail.ActivityType);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_更新货号未关联商品且条码匹配本供应商多个商品时提示先选用且零写入()
+        {
+            await SeedUnlinkedItemNumberUpdateAsync(extraProducts: new[]
+            {
+                new Product
+                {
+                    UUID = "UUID-UNLINKED-DUP",
+                    ProductCode = "PUNLINKED-DUP",
+                    ItemNumber = "BEA345618-B",
+                    Barcode = "9320760345618",
+                    ProductName = "Duplicate barcode product",
+                    LocalSupplierCode = "SUP01",
+                    IsDeleted = false,
+                },
+            });
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-item-unlinked",
+                new List<string> { "detail-unlinked" },
+                "tester"
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+            var failure = Assert.IsType<BatchExecuteActionsResultDto>(result.Details);
+            Assert.Contains(failure.Errors, error => error.Contains("请先「选用」", StringComparison.Ordinal)
+                && error.Contains("BEA 345618", StringComparison.Ordinal));
+            var products = await _db.Queryable<Product>().Where(x => x.Barcode == "9320760345618").ToListAsync();
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>().SingleAsync(x => x.DetailGUID == "detail-unlinked");
+            Assert.DoesNotContain(products, x => x.ItemNumber == "BEA 345618");
+            Assert.Null(detail.ProductCode);
+            Assert.Equal((int)DetailAction.UpdateItemNumber, detail.ActivityType);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_更新货号未关联商品且条码只匹配别家供应商商品时不解析()
+        {
+            await SeedUnlinkedItemNumberUpdateAsync(extraProducts: Array.Empty<Product>(), productSupplierCode: "OTHER-SUP");
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-item-unlinked",
+                new List<string> { "detail-unlinked" },
+                "tester"
+            );
+
+            Assert.False(result.Success);
+            var failure = Assert.IsType<BatchExecuteActionsResultDto>(result.Details);
+            Assert.Contains(failure.Errors, error => error.Contains("请先「选用」", StringComparison.Ordinal));
+            var product = await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == "PUNLINKED");
+            Assert.Equal("BEA345618", product.ItemNumber);
+        }
+
+        private async Task SeedUnlinkedItemNumberUpdateAsync(IEnumerable<Product> extraProducts, string productSupplierCode = "SUP01")
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-item-unlinked", "INV-ITEM-UNLINKED", new DateTime(2026, 10, 7));
+            await _db.Insertable(new List<Product>
+            {
+                new()
+                {
+                    UUID = "UUID-UNLINKED",
+                    ProductCode = "PUNLINKED",
+                    ItemNumber = "BEA345618",
+                    Barcode = "9320760345618",
+                    ProductName = "Kids hair clips",
+                    LocalSupplierCode = productSupplierCode,
+                    PurchasePrice = 0.88m,
+                    RetailPrice = 2.5m,
+                    IsDeleted = false,
+                },
+            }.Concat(extraProducts).ToList()).ExecuteCommandAsync();
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-unlinked",
+                InvoiceGUID = "invoice-item-unlinked",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ItemNumber = "BEA 345618",
+                Barcode = "9320760345618",
+                ProductName = "Kids hair clips",
+                Quantity = 12,
+                PurchasePrice = 0.88m,
+                ProductCode = null,
+                ExistingProductCount = 0,
+                BarcodeStatus = 2,
+                BarcodeMatchCount = 1,
+                ActivityType = (int)DetailAction.UpdateItemNumber,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+        }
+
+        [Fact]
         public async Task BatchExecuteActionsAsync_商品主档变化记录共享批次和发票来源()
         {
             await SeedExecutableItemNumberUpdatesAsync();

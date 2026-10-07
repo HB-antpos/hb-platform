@@ -67,6 +67,25 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     );
                 }
 
+                // 「更新货号」按条码解析的商品编码：锁内重新解析须与锁前一致，再写回明细按已关联商品执行。
+                var lockedItemNumberProductCodes = await _source.ResolveItemNumberUpdateProductCodesAsync(
+                    lockedData.Details,
+                    lockedData.Header?.SupplierCode
+                );
+                if (!plan.MatchesResolvedItemNumberProductCodes(lockedItemNumberProductCodes))
+                {
+                    await db.Ado.RollbackTranAsync();
+                    return new ProductExecutionCommandResult(
+                        accumulator.Result,
+                        "等待商品锁期间条码匹配的商品已变化，请重新读取并确认后重试",
+                        "VALIDATION_ERROR"
+                    );
+                }
+                LocalSupplierInvoicesProductExecutionPlan.ApplyResolvedProductCodes(
+                    lockedData.Details,
+                    lockedItemNumberProductCodes
+                );
+
                 var productCodes = LocalSupplierInvoicesProductExecutionPlan.NormalizeProductCodes(
                     lockedData.Details
                 );
