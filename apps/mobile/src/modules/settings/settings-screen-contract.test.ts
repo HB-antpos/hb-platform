@@ -217,3 +217,16 @@ test("设置页手动检查复用受控 OTA 唯一发布通道", () => {
   assert.match(boundary, /MobileOtaManualCheckContext\.Provider/);
   assert.match(hook, /optionalPromptTargetRef\.current = null;[\s\S]{0,500}await runCheckRef\.current\(\)/);
 });
+
+test("设置页信息在中英文下都完整显示，不靠写死行数截断", () => {
+  const source = read("app/(shell)/settings.tsx");
+
+  // 英文按钮与状态文案更长；任何写死行数都会把更新渠道、隐私说明等信息截掉。
+  assert.doesNotMatch(source, /numberOfLines=/);
+  // 检查更新按钮独占一行，版本与渠道各占一格，不再与按钮争宽。
+  assert.match(source, /testID="settings-app-update"/);
+  assert.match(source, /<UpdateInfoTile[\s\S]{0,40}label=\{t\("updates\.channel"\)\}/);
+  assert.match(source, /testID="settings-check-updates"[\s\S]{0,120}onPress=\{handleCheckUpdates\}/);
+  // 诊断里的更新 ID 用等宽字体完整换行显示。
+  assert.match(source, /<InfoRow[\s\S]{0,300}monospace=\{row\.key === "updateId"/);
+});

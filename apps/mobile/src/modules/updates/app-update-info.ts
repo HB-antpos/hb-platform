@@ -107,7 +107,9 @@ function buildValueRow(
   return { key, labelKey, valueKey: fallbackKey };
 }
 
-function resolveAppUpdateSourceKey(info: AppUpdateInfo): AppUpdateInfoValueKey {
+export function resolveAppUpdateSourceKey(
+  info: Pick<AppUpdateInfo, "updateId" | "isEmbeddedLaunch">
+): AppUpdateInfoValueKey {
   if (info.updateId) {
     return "updates.sourceOta";
   }
