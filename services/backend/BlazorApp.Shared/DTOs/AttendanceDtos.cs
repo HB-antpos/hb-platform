@@ -80,6 +80,18 @@ namespace BlazorApp.Shared.DTOs
         public string? Remark { get; set; }
         /// <summary>店长指定的用餐次数；null 表示按班次时长自动计算。</summary>
         public int? MealBreakCount { get; set; }
+        /// <summary>排班的有效用餐次数：店长指定值，否则按班次时长默认（超 4.5 小时 1 次、超 9 小时 2 次）。后端统一计算，移动端以此为准。</summary>
+        public int EffectiveMealBreakCount { get; set; }
+        /// <summary>计薪时从已闭合班段工时里扣除的用餐分钟数（是否休息过都按排班扣）。</summary>
+        public int MealDeductionMinutes { get; set; }
+        /// <summary>声明没休息且店长已批准、加回工时的分钟数。</summary>
+        public int ApprovedMealAddBackMinutes { get; set; }
+        /// <summary>声明没休息、等待店长审核的分钟数（只展示，未计入 PaidMinutes）。</summary>
+        public int PendingMealAddBackMinutes { get; set; }
+        /// <summary>计薪工时 = 已闭合班段工时 − 用餐扣除 + 已批准加回；WorkedMinutes 含义不变（仍是原始班段时长）。</summary>
+        public int PaidMinutes { get; set; }
+        /// <summary>用餐状态（休息横幅、计时、下班前确认）；仅「我的今日」接口且排班有用餐时返回。</summary>
+        public AttendanceMealStateDto? Meal { get; set; }
         /// <summary>只读合规提醒；存在提醒时排班仍可保存和发布。</summary>
         public MinorEmploymentComplianceEvaluationDto? MinorCompliance { get; set; }
         public string ScheduleState { get; set; } = "NotStarted";
@@ -201,6 +213,8 @@ namespace BlazorApp.Shared.DTOs
         public string? LocationPermissionStatus { get; set; }
         public DateTime? LocationCapturedAtUtc { get; set; }
         public string? Remark { get; set; }
+        /// <summary>下班时对「缺休息」的声明；旧版 App 不带，服务端按「已休息」处理。</summary>
+        public AttendanceMealDeclarationDto? MealDeclaration { get; set; }
     }
 
     public class AttendanceQrResolveRequestDto
@@ -255,6 +269,8 @@ namespace BlazorApp.Shared.DTOs
         public string? Remark { get; set; }
         /// <summary>打卡已保存后的未成年用工提醒，不能作为打卡失败条件。</summary>
         public MinorEmploymentComplianceEvaluationDto? MinorCompliance { get; set; }
+        /// <summary>下班打卡时产生的用餐声明；声明没休息时同时有一条待审的 MealBreak 审批。</summary>
+        public AttendanceMealClaimDto? MealClaim { get; set; }
         public int? SegmentIndex { get; set; }
         public string? SegmentStatus { get; set; }
         public bool IsBreakBoundary { get; set; }
@@ -360,6 +376,8 @@ namespace BlazorApp.Shared.DTOs
         public int? CandidateOvertimeMinutes { get; set; }
         public int? ApprovedOvertimeMinutes { get; set; }
         public AttendancePunchAdjustmentDto? Adjustment { get; set; }
+        /// <summary>SourceType = MealBreak 时的用餐声明（缺几次、申请加回多少分钟）。</summary>
+        public AttendanceMealClaimDto? MealClaim { get; set; }
     }
 
     public class CreateAttendancePunchAdjustmentDto

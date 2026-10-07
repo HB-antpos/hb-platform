@@ -20,7 +20,8 @@ using SqlSugar;
 
 namespace BlazorApp.Api.Services.React
 {
-    public class AttendanceReactService : IAttendanceReactService
+    // partial：用餐休息相关逻辑在 AttendanceReactService.MealBreaks.cs，避免这个已有 5000+ 行的文件继续膨胀。
+    public partial class AttendanceReactService : IAttendanceReactService
     {
         private const string DefaultStoreTimeZone = StoreTimeZonePolicy.Sydney;
 
@@ -583,6 +584,8 @@ namespace BlazorApp.Api.Services.React
                 punches,
                 punchDtos,
                 reconcileDerivedApprovals: false);
+            // 排班有用餐要求时附上用餐状态：休息横幅、休息计时、下班前的缺休息确认都读它。
+            await PopulateMealStatesAsync(allScheduleDtos, schedules, punches, userGuid);
             var scheduleDtos = access.StoreCodes.Count == 0
                 ? allScheduleDtos
                 : allScheduleDtos.Where(item => access.StoreCodes.Contains(
@@ -1132,8 +1135,23 @@ namespace BlazorApp.Api.Services.React
                 await ReconcileFinalPunchApprovalsAsync(schedule, updatedSession, settings);
                 await ReconcileMissingClockOutApprovalAsync(schedule, updatedSession);
             }
+            AttendanceMealClaim? mealClaim = null;
+            if (punchType == "ClockOut" && schedule != null)
+            {
+                // 下班时结束仍在进行的休息，并按排班检查缺几次休息；声明与待审批和下班卡在同一事务里落库。
+                mealClaim = await ApplyClockOutMealCheckAsync(
+                    schedule,
+                    punch,
+                    todayPunches.Append(punch),
+                    segmentLimit,
+                    punchLocal,
+                    settings,
+                    isFinalClockOut,
+                    request.MealDeclaration);
+            }
             await _db.Ado.CommitTranAsync();
             var resultDto = ToDto(punch, employeeName, storeName, serverNow);
+            resultDto.MealClaim = mealClaim == null ? null : ToDto(mealClaim);
             resultDto.MinorCompliance = await EvaluateMinorEmploymentAsync(userGuid, schedule, punch);
             if (resultDto.MinorCompliance != null)
             {
@@ -2405,9 +2423,10 @@ namespace BlazorApp.Api.Services.React
                 }
             }
             AttendanceSchedule? overtimeSchedule = null;
+            AttendanceMealClaim? mealClaim = null;
             var reviewedAt = _timeProvider.GetUtcNow().UtcDateTime;
             var updatedBy = _currentUserService.GetCurrentUsername();
-            var mutationResource = model.SourceType is "Punch" or "MissingClockOut" or "Overtime" or "PunchAdjustment"
+            var mutationResource = model.SourceType is "Punch" or "MissingClockOut" or "Overtime" or "PunchAdjustment" or "MealBreak"
                 ? AttendanceDailyMutationLock.BuildResource(
                     model.ApplicantUserGuid,
                     model.StoreCode,
@@ -2584,6 +2603,19 @@ namespace BlazorApp.Api.Services.React
                             "REVIEW_REMARK_REQUIRED");
                     }
                 }
+                if (model.SourceType == "MealBreak")
+                {
+                    // 用餐加工时：进员工日锁后重读声明，排班或下班打卡已失效就自动取消；拒绝必须填备注。
+                    var (claim, claimError) = await ValidateMealClaimReviewAsync(
+                        model,
+                        reviewStatus,
+                        reviewRemark);
+                    if (claimError != null)
+                    {
+                        return claimError;
+                    }
+                    mealClaim = claim;
+                }
                 // 条件更新是审批的原子领取点；并发请求只有一个能把 Pending 改为终态。
                 var claimed = await _db.Updateable<AttendanceApproval>()
                     .SetColumns(item => item.ReviewStatus == reviewStatus)
@@ -2635,6 +2667,10 @@ namespace BlazorApp.Api.Services.React
                         .SetColumns(item => item.ReviewRemark == reviewRemark)
                         .Where(item => item.LeaveGuid == model.SourceGuid)
                         .ExecuteCommandAsync();
+                }
+                else if (mealClaim != null)
+                {
+                    await ApplyMealClaimReviewAsync(mealClaim, reviewStatus, reviewedAt);
                 }
                 else if (adjustment != null)
                 {
@@ -2812,6 +2848,7 @@ namespace BlazorApp.Api.Services.React
             }
             await CancelPendingApprovalsAsync("Overtime", scheduleGuid, reason);
             await CancelPendingApprovalsAsync("MissingClockOut", scheduleGuid, reason);
+            await CancelMealClaimsForScheduleAsync(scheduleGuid, reason);
         }
 
         private async Task ReconcileOvertimeApprovalAsync(
@@ -4180,6 +4217,15 @@ namespace BlazorApp.Api.Services.React
             var punchDtoMap = punchDtos?.ToDictionary(
                 item => item.PunchGuid,
                 StringComparer.OrdinalIgnoreCase);
+            // 用餐声明按排班批量读取，用于计算计薪工时里的用餐扣除与加回。
+            var mealClaimsBySchedule = (await _db.Queryable<AttendanceMealClaim>()
+                    .Where(item => scheduleGuids.Contains(item.ScheduleGuid))
+                    .ToListAsync())
+                .GroupBy(item => item.ScheduleGuid, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.ToList(),
+                    StringComparer.OrdinalIgnoreCase);
 
             foreach (var schedule in schedules)
             {
@@ -4209,6 +4255,12 @@ namespace BlazorApp.Api.Services.React
                 dto.LateOvertimeMinutes = session.LateOvertimeMinutes;
                 dto.CandidateOvertimeMinutes = session.CandidateOvertimeMinutes;
                 dto.Segments = session.Segments;
+                ApplyMealPayFields(
+                    dto,
+                    schedule,
+                    session,
+                    mealClaimsBySchedule.GetValueOrDefault(schedule.ScheduleGuid)
+                        ?? new List<AttendanceMealClaim>());
                 var overtimeApprovals = overtimeApprovalMap != null
                     ? overtimeApprovalMap.GetValueOrDefault(schedule.ScheduleGuid) ?? new List<AttendanceApproval>()
                     : await _db.Queryable<AttendanceApproval>()
@@ -4335,7 +4387,20 @@ namespace BlazorApp.Api.Services.React
                 .Select(item => item.SourceGuid)
                 .Distinct()
                 .ToList();
+            var mealClaimGuids = approvals
+                .Where(item => item.SourceType.Equals("MealBreak", StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.SourceGuid)
+                .Distinct()
+                .ToList();
 
+            var mealClaims = mealClaimGuids.Count == 0
+                ? new List<AttendanceMealClaim>()
+                : await _db.Queryable<AttendanceMealClaim>()
+                    .Where(item => mealClaimGuids.Contains(item.ClaimGuid))
+                    .ToListAsync();
+            var mealClaimMap = mealClaims.ToDictionary(
+                item => item.ClaimGuid,
+                StringComparer.OrdinalIgnoreCase);
             var users = await _db.Queryable<User>()
                 .Where(item => userGuids.Contains(item.UserGUID))
                 .ToListAsync();
@@ -4444,6 +4509,18 @@ namespace BlazorApp.Api.Services.React
                     }
                     approval.Title = "漏下班待处理";
                     approval.Detail = "排班结束后仍存在未闭合班段";
+                }
+                else if (approval.SourceType.Equals("MealBreak", StringComparison.OrdinalIgnoreCase))
+                {
+                    approval.Title = "用餐未休息加工时";
+                    if (mealClaimMap.TryGetValue(approval.SourceGuid, out var mealClaim))
+                    {
+                        approval.WorkDate = mealClaim.WorkDate;
+                        approval.MealClaim = ToDto(mealClaim);
+                        approval.Detail = $"排班用餐 {mealClaim.ExpectedCount} 次，缺 {mealClaim.MissingCount} 次，"
+                            + $"声明没休息 {mealClaim.NotTakenCount} 次，申请加回 {mealClaim.ClaimedMinutes} 分钟"
+                            + (string.IsNullOrWhiteSpace(mealClaim.Reason) ? string.Empty : $" · {mealClaim.Reason}");
+                    }
                 }
                 else
                 {
@@ -5076,6 +5153,10 @@ namespace BlazorApp.Api.Services.React
             Status = item.Status,
             Remark = item.Remark,
             MealBreakCount = item.MealBreakCount,
+            EffectiveMealBreakCount = AttendanceMealBreakRules.EffectiveCount(
+                item.MealBreakCount,
+                item.StartTime,
+                item.EndTime),
         };
 
         private static AttendanceAvailabilityDto ToDto(AttendanceAvailability item) => new()
