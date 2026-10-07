@@ -136,11 +136,11 @@ internal sealed class SqlSugarLinklySettlementRepository(
               AND [DeviceCode] = @DeviceCode
               AND [SettlementGuid] = @SettlementGuid;
             """;
-        return await dbContext.PosmDb.Ado.SqlQuerySingleAsync<PosmLinklySettlementRecord>(
+        return AsUtc(await dbContext.PosmDb.Ado.SqlQuerySingleAsync<PosmLinklySettlementRecord>(
             sql,
             new SugarParameter("@StoreCode", storeCode),
             new SugarParameter("@DeviceCode", deviceCode),
-            new SugarParameter("@SettlementGuid", settlementGuid));
+            new SugarParameter("@SettlementGuid", settlementGuid)));
     }
 
     public async Task<PosmLinklySettlementRecord?> GetByProviderSessionAsync(
@@ -161,13 +161,13 @@ internal sealed class SqlSugarLinklySettlementRepository(
               AND [DeviceCode] = @DeviceCode
               AND [ProviderSessionId] = @ProviderSessionId;
             """;
-        return await dbContext.PosmDb.Ado.SqlQuerySingleAsync<PosmLinklySettlementRecord>(
+        return AsUtc(await dbContext.PosmDb.Ado.SqlQuerySingleAsync<PosmLinklySettlementRecord>(
             sql,
             new SugarParameter("@ConnectionMode", connectionMode),
             new SugarParameter("@Environment", environment),
             new SugarParameter("@StoreCode", storeCode),
             new SugarParameter("@DeviceCode", deviceCode),
-            new SugarParameter("@ProviderSessionId", providerSessionId));
+            new SugarParameter("@ProviderSessionId", providerSessionId)));
     }
 
     public async Task<LinklyCloudBackendSettlementFact?> GetCloudBackendSettlementAsync(
@@ -254,7 +254,12 @@ internal sealed class SqlSugarLinklySettlementRepository(
         }
     }
 
-    private static SugarParameter[] ToParameters(PosmLinklySettlementRecord settlement)
+    /// <summary>
+    /// 时间戳统一用显式 DbType.DateTime2：SugarParameter 对 DateTime 默认按 SQL datetime（1/300 秒精度）发送，
+    /// 写进 DATETIME2(7) 列的值会被舍入，之后更高修订号的不可变字段比较、同修订幂等比较就会把
+    /// 「库里舍入值」与「客户端原值」判成不同（2026-10 线上 IMMUTABLE_FIELDS_CONFLICT 的根因）。
+    /// </summary>
+    internal static SugarParameter[] ToParameters(PosmLinklySettlementRecord settlement)
     {
         return
         [
@@ -272,17 +277,46 @@ internal sealed class SqlSugarLinklySettlementRepository(
             new("@ResponseText", settlement.ResponseText),
             new("@SettlementData", settlement.SettlementData),
             new("@ReceiptTextsJson", settlement.ReceiptTextsJson),
-            new("@RequestedAtUtc", settlement.RequestedAtUtc.UtcDateTime),
-            new("@CompletedAtUtc", settlement.CompletedAtUtc?.UtcDateTime),
-            new("@FirstPrintedAtUtc", settlement.FirstPrintedAtUtc?.UtcDateTime),
-            new("@LastPrintedAtUtc", settlement.LastPrintedAtUtc?.UtcDateTime),
+            Utc("@RequestedAtUtc", settlement.RequestedAtUtc),
+            Utc("@CompletedAtUtc", settlement.CompletedAtUtc),
+            Utc("@FirstPrintedAtUtc", settlement.FirstPrintedAtUtc),
+            Utc("@LastPrintedAtUtc", settlement.LastPrintedAtUtc),
             new("@PrintCount", settlement.PrintCount),
             new("@LastPrintError", settlement.LastPrintError),
             new("@ClientRevision", settlement.ClientRevision),
-            new("@ReceivedAtUtc", settlement.ReceivedAtUtc.UtcDateTime),
-            new("@UpdatedAtUtc", settlement.UpdatedAtUtc.UtcDateTime)
+            Utc("@ReceivedAtUtc", settlement.ReceivedAtUtc),
+            Utc("@UpdatedAtUtc", settlement.UpdatedAtUtc)
         ];
     }
+
+    /// <summary>
+    /// 库里存的是 UTC 墙钟（DATETIME2 不带时区），SqlSugar 读回 DateTimeOffset 时会按进程本地时区补偏移；
+    /// 这里把墙钟原样重新解释为 UTC。线上容器是 UTC 时等同空操作，但不能让比较结果依赖机器时区。
+    /// </summary>
+    internal static PosmLinklySettlementRecord? AsUtc(PosmLinklySettlementRecord? record)
+    {
+        if (record is null)
+        {
+            return null;
+        }
+
+        record.RequestedAtUtc = AsUtc(record.RequestedAtUtc);
+        record.CompletedAtUtc = record.CompletedAtUtc is { } completed ? AsUtc(completed) : null;
+        record.FirstPrintedAtUtc = record.FirstPrintedAtUtc is { } first ? AsUtc(first) : null;
+        record.LastPrintedAtUtc = record.LastPrintedAtUtc is { } last ? AsUtc(last) : null;
+        record.ReceivedAtUtc = AsUtc(record.ReceivedAtUtc);
+        record.UpdatedAtUtc = AsUtc(record.UpdatedAtUtc);
+        return record;
+    }
+
+    private static DateTimeOffset AsUtc(DateTimeOffset value) =>
+        new(DateTime.SpecifyKind(value.DateTime, DateTimeKind.Utc));
+
+    private static SugarParameter Utc(string name, DateTimeOffset? value) =>
+        new(name, value is null ? null : (object)value.Value.UtcDateTime)
+        {
+            DbType = System.Data.DbType.DateTime2
+        };
 
     private static bool IsUniqueConstraintViolation(Exception ex)
     {

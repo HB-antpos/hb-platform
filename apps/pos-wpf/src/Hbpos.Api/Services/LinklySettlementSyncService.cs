@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Hbpos.Contracts.Linkly;
 
@@ -14,8 +15,12 @@ public interface ILinklySettlementSyncService
 
 internal sealed class LinklySettlementSyncService(
     ILinklySettlementRepository repository,
-    TimeProvider? timeProvider = null) : ILinklySettlementSyncService
+    TimeProvider? timeProvider = null,
+    ILogger<LinklySettlementSyncService>? logger = null) : ILinklySettlementSyncService
 {
+    // 修复前仓储按 SQL datetime（1/300 秒刻度）写入时间戳，旧值与客户端原值最多相差半个刻度（约 1.667ms）；
+    // 再放宽 1 个 100ns 刻度覆盖 datetime→datetime2(7) 换算的进位。
+    private const long LegacyDateTimeTolerance = TimeSpan.TicksPerSecond / 600 + 1;
     private const int MaximumReceiptCount = 16;
     private const int MaximumReceiptLength = 64 * 1024;
     private const int MaximumReceiptTotalLength = 512 * 1024;
@@ -57,13 +62,15 @@ internal sealed class LinklySettlementSyncService(
             {
                 throw Conflict(
                     "PROVIDER_SESSION_CONFLICT",
-                    "The Linkly provider session is already linked to another settlement record.");
+                    "The Linkly provider session is already linked to another settlement record.",
+                    $"providerSessionId={normalized.ProviderSessionId} linkedSettlement={providerExisting.SettlementGuid}");
             }
 
             if (existing is null)
             {
                 if (await repository.TryInsertAsync(normalized, cancellationToken))
                 {
+                    LogAccepted(normalized, "Inserted", storedRevision: null);
                     return new LinklySettlementSyncResponse(true, false, normalized.ClientRevision);
                 }
 
@@ -72,18 +79,21 @@ internal sealed class LinklySettlementSyncService(
 
             if (normalized.ClientRevision < existing.ClientRevision)
             {
+                LogAccepted(normalized, "StaleRevision", existing.ClientRevision);
                 return new LinklySettlementSyncResponse(true, true, existing.ClientRevision);
             }
 
             if (normalized.ClientRevision == existing.ClientRevision)
             {
-                if (!Equivalent(existing, normalized))
+                if (DescribeFirstDifference(existing, normalized) is { } difference)
                 {
                     throw Conflict(
                         "REVISION_CONTENT_CONFLICT",
-                        "The same Linkly settlement revision was uploaded with different content.");
+                        "The same Linkly settlement revision was uploaded with different content.",
+                        difference);
                 }
 
+                LogAccepted(normalized, "DuplicateRevision", existing.ClientRevision);
                 return new LinklySettlementSyncResponse(true, true, existing.ClientRevision);
             }
 
@@ -92,6 +102,7 @@ internal sealed class LinklySettlementSyncService(
             normalized.ReceivedAtUtc = existing.ReceivedAtUtc;
             if (await repository.TryUpdateAsync(normalized, existing.ClientRevision, cancellationToken))
             {
+                LogAccepted(normalized, "Updated", existing.ClientRevision);
                 return new LinklySettlementSyncResponse(true, false, normalized.ClientRevision);
             }
         }
@@ -419,43 +430,47 @@ internal sealed class LinklySettlementSyncService(
         PosmLinklySettlementRecord existing,
         PosmLinklySettlementRecord incoming)
     {
-        if (existing.BusinessDate.Date != incoming.BusinessDate.Date ||
-            !Same(existing.ConnectionMode, incoming.ConnectionMode) ||
-            !Same(existing.Environment, incoming.Environment) ||
-            existing.RequestedAtUtc.UtcDateTime != incoming.RequestedAtUtc.UtcDateTime)
+        if (DescribeImmutableDifference(existing, incoming) is { } immutableDifference)
         {
-            throw Conflict("IMMUTABLE_FIELDS_CONFLICT", "Immutable Linkly settlement fields cannot change.");
+            throw Conflict(
+                "IMMUTABLE_FIELDS_CONFLICT",
+                "Immutable Linkly settlement fields cannot change.",
+                immutableDifference);
         }
 
         if (existing.ProviderSessionId is not null &&
             !Same(existing.ProviderSessionId, incoming.ProviderSessionId))
         {
-            throw Conflict("PROVIDER_SESSION_CONFLICT", "providerSessionId cannot change once assigned.");
+            throw Conflict(
+                "PROVIDER_SESSION_CONFLICT",
+                "providerSessionId cannot change once assigned.",
+                Field("ProviderSessionId", existing.ProviderSessionId, incoming.ProviderSessionId));
         }
 
         if (existing.CloudBackendSessionId is not null &&
             existing.CloudBackendSessionId != incoming.CloudBackendSessionId)
         {
-            throw Conflict("CLOUD_BACKEND_SESSION_CONFLICT", "CloudBackendAsync session linkage cannot change.");
+            throw Conflict(
+                "CLOUD_BACKEND_SESSION_CONFLICT",
+                "CloudBackendAsync session linkage cannot change.",
+                Field("CloudBackendSessionId", existing.CloudBackendSessionId?.ToString(CultureInfo.InvariantCulture), incoming.CloudBackendSessionId?.ToString(CultureInfo.InvariantCulture)));
         }
 
         if (!IsAllowedStatusProgression(existing.Status, incoming.Status))
         {
-            throw Conflict("STATUS_REGRESSION", "Linkly settlement status cannot regress or change between final states.");
+            throw Conflict(
+                "STATUS_REGRESSION",
+                "Linkly settlement status cannot regress or change between final states.",
+                Field("Status", existing.Status, incoming.Status));
         }
 
         var statusAdvanced = !Same(existing.Status, incoming.Status);
-        if (!statusAdvanced &&
-            (GetStoredProviderSubmissionState(existing) != GetStoredProviderSubmissionState(incoming) ||
-             !Same(existing.ResponseCode, incoming.ResponseCode) ||
-             !Same(existing.ResponseText, incoming.ResponseText) ||
-             !Same(existing.SettlementData, incoming.SettlementData) ||
-             !Same(existing.ReceiptTextsJson, incoming.ReceiptTextsJson) ||
-             !SameInstant(existing.CompletedAtUtc, incoming.CompletedAtUtc)))
+        if (!statusAdvanced && DescribeBankEvidenceDifference(existing, incoming) is { } bankDifference)
         {
             throw Conflict(
                 "BANK_EVIDENCE_CONFLICT",
-                "A higher revision cannot rewrite bank evidence without a valid status progression.");
+                "A higher revision cannot rewrite bank evidence without a valid status progression.",
+                bankDifference);
         }
 
         ValidatePrintProgression(existing, incoming);
@@ -467,21 +482,173 @@ internal sealed class LinklySettlementSyncService(
     {
         if (incoming.PrintCount < existing.PrintCount ||
             existing.FirstPrintedAtUtc is not null &&
-            !SameInstant(existing.FirstPrintedAtUtc, incoming.FirstPrintedAtUtc) ||
+            !SameStoredInstant(existing.FirstPrintedAtUtc, incoming.FirstPrintedAtUtc) ||
             existing.LastPrintedAtUtc is not null &&
-            (incoming.LastPrintedAtUtc is null || incoming.LastPrintedAtUtc < existing.LastPrintedAtUtc))
+            IsBeforeStored(incoming.LastPrintedAtUtc, existing.LastPrintedAtUtc.Value))
         {
-            throw Conflict("PRINT_AUDIT_REGRESSION", "Linkly settlement print audit cannot regress.");
+            throw Conflict(
+                "PRINT_AUDIT_REGRESSION",
+                "Linkly settlement print audit cannot regress.",
+                DescribePrintAudit(existing, incoming));
         }
 
         if (incoming.PrintCount == existing.PrintCount &&
-            (!SameInstant(existing.FirstPrintedAtUtc, incoming.FirstPrintedAtUtc) ||
-             !SameInstant(existing.LastPrintedAtUtc, incoming.LastPrintedAtUtc)))
+            (!SameStoredInstant(existing.FirstPrintedAtUtc, incoming.FirstPrintedAtUtc) ||
+             !SameStoredInstant(existing.LastPrintedAtUtc, incoming.LastPrintedAtUtc)))
         {
             throw Conflict(
                 "PRINT_AUDIT_CONFLICT",
-                "Print timestamps cannot change without advancing printCount.");
+                "Print timestamps cannot change without advancing printCount.",
+                DescribePrintAudit(existing, incoming));
         }
+    }
+
+    private static string? DescribeImmutableDifference(
+        PosmLinklySettlementRecord existing,
+        PosmLinklySettlementRecord incoming)
+    {
+        if (existing.BusinessDate.Date != incoming.BusinessDate.Date)
+        {
+            return Field("BusinessDate", FormatDate(existing.BusinessDate), FormatDate(incoming.BusinessDate));
+        }
+
+        if (!Same(existing.ConnectionMode, incoming.ConnectionMode))
+        {
+            return Field("ConnectionMode", existing.ConnectionMode, incoming.ConnectionMode);
+        }
+
+        if (!Same(existing.Environment, incoming.Environment))
+        {
+            return Field("Environment", existing.Environment, incoming.Environment);
+        }
+
+        return SameStoredInstant(existing.RequestedAtUtc, incoming.RequestedAtUtc)
+            ? null
+            : Field("RequestedAtUtc", FormatInstant(existing.RequestedAtUtc), FormatInstant(incoming.RequestedAtUtc));
+    }
+
+    private static string? DescribeBankEvidenceDifference(
+        PosmLinklySettlementRecord existing,
+        PosmLinklySettlementRecord incoming)
+    {
+        if (GetStoredProviderSubmissionState(existing) != GetStoredProviderSubmissionState(incoming))
+        {
+            return Field(
+                "ProviderSubmissionState",
+                GetStoredProviderSubmissionState(existing).ToString(),
+                GetStoredProviderSubmissionState(incoming).ToString());
+        }
+
+        if (!Same(existing.ResponseCode, incoming.ResponseCode))
+        {
+            return Field("ResponseCode", existing.ResponseCode, incoming.ResponseCode);
+        }
+
+        // 回执、结算数据可能带银行凭证内容，只记字段名和长度，不记原文。
+        return TextField("ResponseText", existing.ResponseText, incoming.ResponseText)
+            ?? TextField("SettlementData", existing.SettlementData, incoming.SettlementData)
+            ?? TextField("ReceiptTextsJson", existing.ReceiptTextsJson, incoming.ReceiptTextsJson)
+            ?? (SameStoredInstant(existing.CompletedAtUtc, incoming.CompletedAtUtc)
+                ? null
+                : Field("CompletedAtUtc", FormatInstant(existing.CompletedAtUtc), FormatInstant(incoming.CompletedAtUtc)));
+    }
+
+    /// <summary>
+    /// 同修订号重复上传时返回第一个不一致的字段说明；完全一致返回 null（视为幂等重放）。
+    /// 字段顺序与比较口径保持修复前的 Equivalent 一致，只有时间戳改用 SameStoredInstant 兼容旧数据。
+    /// </summary>
+    private static string? DescribeFirstDifference(PosmLinklySettlementRecord existing, PosmLinklySettlementRecord incoming)
+    {
+        if (existing.SettlementGuid != incoming.SettlementGuid)
+        {
+            return Field("SettlementGuid", existing.SettlementGuid.ToString(), incoming.SettlementGuid.ToString());
+        }
+
+        if (!Same(existing.StoreCode, incoming.StoreCode))
+        {
+            return Field("StoreCode", existing.StoreCode, incoming.StoreCode);
+        }
+
+        if (!Same(existing.DeviceCode, incoming.DeviceCode))
+        {
+            return Field("DeviceCode", existing.DeviceCode, incoming.DeviceCode);
+        }
+
+        if (DescribeImmutableDifference(existing, incoming) is { } immutableDifference)
+        {
+            return immutableDifference;
+        }
+
+        if (!Same(existing.ProviderSessionId, incoming.ProviderSessionId))
+        {
+            return Field("ProviderSessionId", existing.ProviderSessionId, incoming.ProviderSessionId);
+        }
+
+        if (existing.CloudBackendSessionId != incoming.CloudBackendSessionId)
+        {
+            return Field(
+                "CloudBackendSessionId",
+                existing.CloudBackendSessionId?.ToString(CultureInfo.InvariantCulture),
+                incoming.CloudBackendSessionId?.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (!Same(existing.Status, incoming.Status))
+        {
+            return Field("Status", existing.Status, incoming.Status);
+        }
+
+        if (DescribeBankEvidenceDifference(existing, incoming) is { } bankDifference)
+        {
+            return bankDifference;
+        }
+
+        if (!SameStoredInstant(existing.FirstPrintedAtUtc, incoming.FirstPrintedAtUtc) ||
+            !SameStoredInstant(existing.LastPrintedAtUtc, incoming.LastPrintedAtUtc) ||
+            existing.PrintCount != incoming.PrintCount)
+        {
+            return DescribePrintAudit(existing, incoming);
+        }
+
+        if (TextField("LastPrintError", existing.LastPrintError, incoming.LastPrintError) is { } printErrorDifference)
+        {
+            return printErrorDifference;
+        }
+
+        return existing.ClientRevision == incoming.ClientRevision
+            ? null
+            : Field(
+                "ClientRevision",
+                existing.ClientRevision.ToString(CultureInfo.InvariantCulture),
+                incoming.ClientRevision.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static string DescribePrintAudit(PosmLinklySettlementRecord existing, PosmLinklySettlementRecord incoming)
+    {
+        return $"field=PrintAudit printCount stored={existing.PrintCount} incoming={incoming.PrintCount} " +
+            $"firstPrintedAtUtc stored={FormatInstant(existing.FirstPrintedAtUtc)} incoming={FormatInstant(incoming.FirstPrintedAtUtc)} " +
+            $"lastPrintedAtUtc stored={FormatInstant(existing.LastPrintedAtUtc)} incoming={FormatInstant(incoming.LastPrintedAtUtc)}";
+    }
+
+    private static string Field(string name, string? stored, string? incoming)
+    {
+        return $"field={name} stored={stored ?? "null"} incoming={incoming ?? "null"}";
+    }
+
+    private static string? TextField(string name, string? stored, string? incoming)
+    {
+        return Same(stored, incoming)
+            ? null
+            : $"field={name} storedLength={stored?.Length ?? 0} incomingLength={incoming?.Length ?? 0}";
+    }
+
+    private static string FormatDate(DateTime value)
+    {
+        return value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatInstant(DateTimeOffset? value)
+    {
+        return value?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? "null";
     }
 
     private static bool IsAllowedStatusProgression(string existing, string incoming)
@@ -499,34 +666,52 @@ internal sealed class LinklySettlementSyncService(
         };
     }
 
-    private static bool Equivalent(PosmLinklySettlementRecord left, PosmLinklySettlementRecord right)
+    /// <summary>
+    /// 比较「库里已存的时间」与「客户端本次上传的时间」。完全相等即同一时刻；
+    /// 另外兼容修复前按 SQL datetime 写入的旧行：库里值落在 1/300 秒刻度上、且与上传值相差不超过半个刻度时，
+    /// 视为同一时刻（库里值就是上传原值被舍入的结果）。参数顺序有意义：第一个必须是库里的值。
+    /// </summary>
+    internal static bool SameStoredInstant(DateTimeOffset? stored, DateTimeOffset? incoming)
     {
-        return left.SettlementGuid == right.SettlementGuid &&
-            Same(left.StoreCode, right.StoreCode) &&
-            Same(left.DeviceCode, right.DeviceCode) &&
-            left.BusinessDate.Date == right.BusinessDate.Date &&
-            Same(left.ConnectionMode, right.ConnectionMode) &&
-            Same(left.Environment, right.Environment) &&
-            Same(left.ProviderSessionId, right.ProviderSessionId) &&
-            GetStoredProviderSubmissionState(left) == GetStoredProviderSubmissionState(right) &&
-            left.CloudBackendSessionId == right.CloudBackendSessionId &&
-            Same(left.Status, right.Status) &&
-            Same(left.ResponseCode, right.ResponseCode) &&
-            Same(left.ResponseText, right.ResponseText) &&
-            Same(left.SettlementData, right.SettlementData) &&
-            Same(left.ReceiptTextsJson, right.ReceiptTextsJson) &&
-            left.RequestedAtUtc.UtcDateTime == right.RequestedAtUtc.UtcDateTime &&
-            SameInstant(left.CompletedAtUtc, right.CompletedAtUtc) &&
-            SameInstant(left.FirstPrintedAtUtc, right.FirstPrintedAtUtc) &&
-            SameInstant(left.LastPrintedAtUtc, right.LastPrintedAtUtc) &&
-            left.PrintCount == right.PrintCount &&
-            Same(left.LastPrintError, right.LastPrintError) &&
-            left.ClientRevision == right.ClientRevision;
+        if (stored is null || incoming is null)
+        {
+            return stored is null && incoming is null;
+        }
+
+        var storedUtc = stored.Value.UtcDateTime;
+        var incomingUtc = incoming.Value.UtcDateTime;
+        return storedUtc == incomingUtc ||
+            IsOnLegacySqlDateTimeGrid(storedUtc) &&
+            Math.Abs((storedUtc - incomingUtc).Ticks) <= LegacyDateTimeTolerance;
     }
 
-    private static bool SameInstant(DateTimeOffset? left, DateTimeOffset? right)
+    /// <summary>上传值是否早于库里的值；库里是舍入过的旧值时，半个刻度内的差异不算「更早」。</summary>
+    private static bool IsBeforeStored(DateTimeOffset? incoming, DateTimeOffset stored)
     {
-        return left?.UtcDateTime == right?.UtcDateTime;
+        return incoming is null || incoming < stored && !SameStoredInstant(stored, incoming);
+    }
+
+    /// <summary>SQL datetime 以 1/300 秒为刻度；换算成 DATETIME2(7) 后落在刻度上（允许 1 个 100ns 的进位误差）。</summary>
+    internal static bool IsOnLegacySqlDateTimeGrid(DateTime value)
+    {
+        var ticksInSecond = value.Ticks % TimeSpan.TicksPerSecond;
+        var sqlTicks = Math.Round(ticksInSecond * 300d / TimeSpan.TicksPerSecond);
+        return Math.Abs(ticksInSecond - sqlTicks * TimeSpan.TicksPerSecond / 300d) <= 1;
+    }
+
+    private void LogAccepted(PosmLinklySettlementRecord settlement, string result, long? storedRevision)
+    {
+        // 受理结果只写本地日志文件（Information 不进中心日志），用于事后还原某条结算各修订号的到达顺序。
+        logger?.LogInformation(
+            "Linkly settlement sync accepted result={Result} store={StoreCode} device={DeviceCode} settlement={SettlementGuid} revision={ClientRevision} storedRevision={StoredRevision} status={Status} printCount={PrintCount}",
+            result,
+            settlement.StoreCode,
+            settlement.DeviceCode,
+            settlement.SettlementGuid,
+            settlement.ClientRevision,
+            storedRevision,
+            settlement.Status,
+            settlement.PrintCount);
     }
 
     private static bool Same(string? left, string? right)
@@ -569,9 +754,9 @@ internal sealed class LinklySettlementSyncService(
         return new LinklySettlementValidationException(code, message);
     }
 
-    private static LinklySettlementConflictException Conflict(string code, string message)
+    private static LinklySettlementConflictException Conflict(string code, string message, string? detail = null)
     {
-        return new LinklySettlementConflictException(code, message);
+        return new LinklySettlementConflictException(code, message, detail);
     }
 }
 
@@ -580,7 +765,13 @@ public sealed class LinklySettlementValidationException(string code, string mess
     public string Code { get; } = code;
 }
 
-public sealed class LinklySettlementConflictException(string code, string message) : Exception(message)
+/// <param name="detail">
+/// 冲突明细（哪个字段、库里值、上传值），只写服务端日志、不回给客户端；
+/// 回执原文等敏感文本只记字段名与长度。
+/// </param>
+public sealed class LinklySettlementConflictException(string code, string message, string? detail = null) : Exception(message)
 {
     public string Code { get; } = code;
+
+    public string? Detail { get; } = detail;
 }
