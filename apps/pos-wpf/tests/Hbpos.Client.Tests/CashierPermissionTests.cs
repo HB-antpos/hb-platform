@@ -12,6 +12,7 @@ using Hbpos.Client.Wpf.Services.Facades;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.Contracts.Cashiers;
 using Hbpos.Contracts.Catalog;
+using Hbpos.Contracts.Common;
 using Hbpos.Contracts.Orders;
 using BlazorApp.Shared.Constants;
 
@@ -715,6 +716,87 @@ public sealed class CashierPermissionTests
     }
 
     [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task Cashier_login_api_client_treats_gateway_status_as_api_unavailable(
+        HttpStatusCode statusCode)
+    {
+        var client = CreateStaticCashierLoginApiClient(statusCode, "<html>Not Found</html>");
+
+        var attempt = await client.LoginAsync(new CashierBarcodeLoginRequest("S001", "BAR-1", "POS-01"));
+
+        Assert.True(attempt.IsApiUnavailable);
+        Assert.False(attempt.IsOnlineRejected);
+        Assert.Equal("CASHIER_LOGIN_API_UNAVAILABLE", attempt.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task Cashier_login_falls_back_to_offline_cache_on_gateway_status(
+        HttpStatusCode statusCode)
+    {
+        // 先在线登录一次写入离线缓存，再模拟后端发布期间网关返回 404/405：应走离线缓存而不是报条码无效。
+        var settings = new InMemoryAppSettingsRepository();
+        var protector = new PassthroughProtector();
+        await new CashierLoginService(
+                new SequenceCashierLoginApiClient(CashierLoginAttempt.OnlineAccepted(CreateSession())),
+                settings,
+                protector)
+            .LoginAsync("S001", "POS-01", "BAR-1");
+        var service = new CashierLoginService(
+            CreateStaticCashierLoginApiClient(statusCode, "<html>Not Found</html>"),
+            settings,
+            protector);
+
+        var result = await service.LoginAsync("S001", "POS-01", "BAR-1");
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Session!.IsOfflineCached);
+        Assert.Equal("C001", result.Session.CashierId);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "{\"success\":false,\"errorCode\":\"CASHIER_LOGIN_FAILED\",\"message\":\"收银员条码无效或已停用\"}")]
+    [InlineData(HttpStatusCode.Forbidden, "{\"success\":false,\"errorCode\":\"DEVICE_SCOPE_FORBIDDEN\",\"message\":\"Device is not authorized for this store.\"}")]
+    public async Task Cashier_login_does_not_fall_back_to_offline_cache_on_server_rejection(
+        HttpStatusCode statusCode,
+        string body)
+    {
+        var settings = new InMemoryAppSettingsRepository();
+        var protector = new PassthroughProtector();
+        await new CashierLoginService(
+                new SequenceCashierLoginApiClient(CashierLoginAttempt.OnlineAccepted(CreateSession())),
+                settings,
+                protector)
+            .LoginAsync("S001", "POS-01", "BAR-1");
+        var service = new CashierLoginService(
+            CreateStaticCashierLoginApiClient(statusCode, body, "application/json"),
+            settings,
+            protector);
+
+        var result = await service.LoginAsync("S001", "POS-01", "BAR-1");
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Session);
+    }
+
+    private static CashierLoginApiClient CreateStaticCashierLoginApiClient(
+        HttpStatusCode statusCode,
+        string body,
+        string mediaType = "text/html")
+    {
+        return new CashierLoginApiClient(new HttpClient(new StaticResponseHandler(
+            new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(body, Encoding.UTF8, mediaType)
+            }))
+        {
+            BaseAddress = new Uri("http://localhost/")
+        });
+    }
+
+    [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.Forbidden)]
     public async Task Cashier_session_refresh_api_client_treats_auth_rejection_as_online_rejection(
@@ -739,6 +821,8 @@ public sealed class CashierPermissionTests
     [InlineData(HttpStatusCode.ServiceUnavailable)]
     [InlineData(HttpStatusCode.RequestTimeout)]
     [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
     public async Task Cashier_session_refresh_api_client_keeps_unavailable_statuses_offline_capable(
         HttpStatusCode statusCode)
     {
@@ -775,6 +859,150 @@ public sealed class CashierPermissionTests
         Assert.False(attempt.IsOnlineRejected);
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("{\"status\":\"ok\"}")]
+    [InlineData("{\"success\":\"true\"}")]
+    [InlineData("{\"success\":true}")]
+    public async Task Cashier_session_refresh_api_client_treats_2xx_without_usable_envelope_as_api_unavailable(
+        string body)
+    {
+        // 2xx 却不是 POS API 信封（认证页、空对象），或 success=true 却缺会话数据：都不是服务端拒绝。
+        var attempt = await CreateOkJsonCashierSessionRefreshApiClient(body).RefreshAsync();
+
+        Assert.True(attempt.IsApiUnavailable);
+        Assert.False(attempt.IsOnlineRejected);
+    }
+
+    [Fact]
+    public async Task Cashier_session_refresh_api_client_keeps_2xx_envelope_failure_as_online_rejection()
+    {
+        var attempt = await CreateOkJsonCashierSessionRefreshApiClient(
+                "{\"success\":false,\"errorCode\":\"CASHIER_SESSION_REVOKED\"}")
+            .RefreshAsync();
+
+        Assert.True(attempt.IsOnlineRejected);
+        Assert.False(attempt.IsApiUnavailable);
+    }
+
+    [Fact]
+    public async Task Cashier_session_refresh_api_client_reads_2xx_success_envelope()
+    {
+        var body = JsonSerializer.Serialize(
+            ApiResult<CashierSessionDto>.Ok(CreateSession()),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        var attempt = await CreateOkJsonCashierSessionRefreshApiClient(body).RefreshAsync();
+
+        Assert.NotNull(attempt.Session);
+        Assert.Equal("C001", attempt.Session!.CashierId);
+        Assert.False(attempt.IsApiUnavailable);
+        Assert.False(attempt.IsOnlineRejected);
+    }
+
+    [Fact]
+    public async Task Cashier_session_refresh_keeps_cashier_and_offline_cache_on_2xx_non_envelope()
+    {
+        var current = CreateSession();
+        var context = new CashierSessionContext();
+        context.SetCurrent(current);
+        var cache = new RecordingCashierSessionCacheUpdater(() => context.CurrentSession);
+        var service = new CashierSessionRefreshService(
+            CreateOkJsonCashierSessionRefreshApiClient("{\"status\":\"ok\"}"),
+            context,
+            cache);
+
+        await service.RefreshOnceAsync();
+
+        Assert.Same(current, context.CurrentSession);
+        Assert.False(cache.Removed);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("{\"status\":\"ok\"}")]
+    [InlineData("{\"success\":true}")]
+    public async Task Cashier_login_api_client_treats_2xx_without_usable_envelope_as_api_unavailable(
+        string body)
+    {
+        var attempt = await CreateOkJsonCashierLoginApiClient(body)
+            .LoginAsync(new CashierBarcodeLoginRequest("S001", "BAR-1", "POS-01"));
+
+        Assert.True(attempt.IsApiUnavailable);
+        Assert.False(attempt.IsOnlineRejected);
+        Assert.Equal("CASHIER_LOGIN_API_UNAVAILABLE", attempt.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Cashier_login_api_client_keeps_2xx_envelope_failure_as_online_rejection()
+    {
+        var attempt = await CreateOkJsonCashierLoginApiClient(
+                "{\"success\":false,\"errorCode\":\"CASHIER_LOGIN_FAILED\",\"message\":\"条码无效\"}")
+            .LoginAsync(new CashierBarcodeLoginRequest("S001", "BAR-1", "POS-01"));
+
+        Assert.True(attempt.IsOnlineRejected);
+        Assert.False(attempt.IsApiUnavailable);
+        Assert.Equal("CASHIER_LOGIN_FAILED", attempt.ErrorCode);
+        Assert.Equal("条码无效", attempt.Message);
+    }
+
+    [Fact]
+    public async Task Cashier_login_api_client_reads_2xx_success_envelope()
+    {
+        var body = JsonSerializer.Serialize(
+            ApiResult<CashierSessionDto>.Ok(CreateSession()),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        var attempt = await CreateOkJsonCashierLoginApiClient(body)
+            .LoginAsync(new CashierBarcodeLoginRequest("S001", "BAR-1", "POS-01"));
+
+        Assert.NotNull(attempt.Session);
+        Assert.Equal("C001", attempt.Session!.CashierId);
+        Assert.False(attempt.IsApiUnavailable);
+        Assert.False(attempt.IsOnlineRejected);
+    }
+
+    [Fact]
+    public async Task Cashier_login_falls_back_to_offline_cache_on_2xx_non_envelope()
+    {
+        var settings = new InMemoryAppSettingsRepository();
+        var protector = new PassthroughProtector();
+        await new CashierLoginService(
+                new SequenceCashierLoginApiClient(CashierLoginAttempt.OnlineAccepted(CreateSession())),
+                settings,
+                protector)
+            .LoginAsync("S001", "POS-01", "BAR-1");
+        var service = new CashierLoginService(
+            CreateOkJsonCashierLoginApiClient("{\"status\":\"ok\"}"),
+            settings,
+            protector);
+
+        var result = await service.LoginAsync("S001", "POS-01", "BAR-1");
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Session!.IsOfflineCached);
+    }
+
+    private static HttpClient CreateOkJsonHttpClient(string body)
+    {
+        return new HttpClient(new StaticResponseHandler(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            }))
+        {
+            BaseAddress = new Uri("http://localhost/")
+        };
+    }
+
+    private static CashierSessionRefreshApiClient CreateOkJsonCashierSessionRefreshApiClient(string body) =>
+        new(CreateOkJsonHttpClient(body));
+
+    private static CashierLoginApiClient CreateOkJsonCashierLoginApiClient(string body) =>
+        new(CreateOkJsonHttpClient(body));
+
     [Fact]
     public async Task Cashier_session_refresh_api_client_treats_network_failure_as_api_unavailable()
     {
@@ -788,6 +1016,72 @@ public sealed class CashierPermissionTests
 
         Assert.True(attempt.IsApiUnavailable);
         Assert.False(attempt.IsOnlineRejected);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task Cashier_session_refresh_keeps_cashier_and_offline_cache_on_gateway_status(
+        HttpStatusCode statusCode)
+    {
+        // 后端发布/网关切换期间的 404/405 不是服务端结论：不能踢下线，也不能删离线登录缓存。
+        var current = CreateSession();
+        var context = new CashierSessionContext();
+        context.SetCurrent(current);
+        var cache = new RecordingCashierSessionCacheUpdater(() => context.CurrentSession);
+        var service = new CashierSessionRefreshService(
+            CreateStaticCashierSessionRefreshApiClient(statusCode, "<html>Not Found</html>"),
+            context,
+            cache);
+        var rejectedCount = 0;
+        service.SessionRejected += (_, _) => rejectedCount++;
+
+        await service.RefreshOnceAsync();
+
+        Assert.Same(current, context.CurrentSession);
+        Assert.False(cache.Removed);
+        Assert.Equal(0, rejectedCount);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "{\"success\":false,\"errorCode\":\"CASHIER_SESSION_REVOKED\"}")]
+    [InlineData(HttpStatusCode.Forbidden, "{\"success\":false,\"errorCode\":\"DEVICE_SCOPE_FORBIDDEN\"}")]
+    public async Task Cashier_session_refresh_still_signs_out_on_server_auth_rejection(
+        HttpStatusCode statusCode,
+        string body)
+    {
+        var current = CreateSession();
+        var context = new CashierSessionContext();
+        context.SetCurrent(current);
+        var cache = new RecordingCashierSessionCacheUpdater(() => context.CurrentSession);
+        var service = new CashierSessionRefreshService(
+            CreateStaticCashierSessionRefreshApiClient(statusCode, body, "application/json"),
+            context,
+            cache);
+        var rejectedCount = 0;
+        service.SessionRejected += (_, _) => rejectedCount++;
+
+        await service.RefreshOnceAsync();
+
+        Assert.Null(context.CurrentSession);
+        Assert.True(cache.Removed);
+        Assert.Same(current, cache.RemovedSession);
+        Assert.Equal(1, rejectedCount);
+    }
+
+    private static CashierSessionRefreshApiClient CreateStaticCashierSessionRefreshApiClient(
+        HttpStatusCode statusCode,
+        string body,
+        string mediaType = "text/html")
+    {
+        return new CashierSessionRefreshApiClient(new HttpClient(new StaticResponseHandler(
+            new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(body, Encoding.UTF8, mediaType)
+            }))
+        {
+            BaseAddress = new Uri("http://localhost/")
+        });
     }
 
     [Fact]

@@ -307,6 +307,7 @@ public interface ICashierLoginApiClient
 public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLoginApiClient
 {
     private const string LoginPath = "api/v1/cashiers/barcode-login";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<CashierLoginAttempt> LoginAsync(
         CashierBarcodeLoginRequest request,
@@ -344,16 +345,33 @@ public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLogin
                     failed?.ErrorCode);
             }
 
-            var result = await response.Content.ReadFromJsonAsync<ApiResult<CashierSessionDto>>(cancellationToken);
-            if (result?.Success == true && result.Data is not null)
+            // 2xx 只有带 ApiResult 信封才是服务端结论：空对象、null、Wi-Fi 认证页 JSON 等不是 POS API 的响应，
+            // 按不可用处理以允许离线缓存兜底，不能误报"条码无效或已停用"（与 DeviceApiClient 口径一致）。
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(content);
+            if (!DeviceApiClient.IsApiResultEnvelope(document.RootElement))
             {
-                return CashierLoginAttempt.OnlineAccepted(result.Data);
+                LogUnavailable(request, "not-api-envelope", statusCode, stopwatch.ElapsedMilliseconds);
+                return CashierLoginAttempt.ApiUnavailable();
             }
 
-            LogRejected(request, statusCode, result?.ErrorCode, stopwatch.ElapsedMilliseconds, "success-false");
-            return CashierLoginAttempt.OnlineRejected(
-                result?.Message ?? "收银员条码无效或已停用",
-                result?.ErrorCode);
+            var result = document.RootElement.Deserialize<ApiResult<CashierSessionDto>>(JsonOptions)!;
+            if (!result.Success)
+            {
+                LogRejected(request, statusCode, result.ErrorCode, stopwatch.ElapsedMilliseconds, "success-false");
+                return CashierLoginAttempt.OnlineRejected(
+                    result.Message ?? "收银员条码无效或已停用",
+                    result.ErrorCode);
+            }
+
+            // success=true 却没有会话数据属于形状异常，不是拒绝。
+            if (result.Data is null)
+            {
+                LogUnavailable(request, "missing-session-data", statusCode, stopwatch.ElapsedMilliseconds);
+                return CashierLoginAttempt.ApiUnavailable();
+            }
+
+            return CashierLoginAttempt.OnlineAccepted(result.Data);
         }
         catch (JsonException ex)
         {
@@ -438,11 +456,19 @@ public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLogin
             Properties: properties);
     }
 
+    /// <summary>
+    /// 服务端 cashiers/barcode-login 只以 401（条码无效/停用、设备认证失败）、403（设备越权）和 400（请求体校验）表达在线拒绝；
+    /// 404/405 只会来自后端发布、网关切换或路由未就绪，与 DeviceApiClient.IsGatewayStatus 口径一致按不可用处理，
+    /// 让收银员在发布窗口内仍能走离线缓存登录，而不是被误报"条码无效或已停用"。
+    /// </summary>
     private static bool IsServiceUnavailable(HttpStatusCode statusCode)
     {
         var numericStatusCode = (int)statusCode;
         return numericStatusCode >= 500 ||
-            statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
+            statusCode is HttpStatusCode.NotFound
+                or HttpStatusCode.MethodNotAllowed
+                or HttpStatusCode.RequestTimeout
+                or HttpStatusCode.TooManyRequests;
     }
 }
 

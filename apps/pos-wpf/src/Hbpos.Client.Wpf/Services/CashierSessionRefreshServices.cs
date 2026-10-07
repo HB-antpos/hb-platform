@@ -43,6 +43,8 @@ public sealed class CashierSessionRejectedEventArgs(CashierSessionDto rejectedSe
 public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
     : ICashierSessionRefreshApiClient
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<CashierSessionRefreshAttempt> RefreshAsync(
         CancellationToken cancellationToken = default)
     {
@@ -64,15 +66,37 @@ public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
                     };
             }
 
-            var result = await response.Content
-                .ReadFromJsonAsync<ApiResult<CashierSessionDto>>(cancellationToken);
-            return result?.Success == true && result.Data is not null
-                ? CashierSessionRefreshAttempt.Refreshed(result.Data)
-                : CashierSessionRefreshAttempt.OnlineRejected() with
+            // 2xx 只有带 ApiResult 信封才是服务端结论：空对象、null、Wi-Fi 认证页 JSON 等不是 POS API 的响应，
+            // 按不可用处理，绝不能据此踢下线并删除离线登录缓存（与 DeviceApiClient 口径一致）。
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(content);
+            if (!DeviceApiClient.IsApiResultEnvelope(document.RootElement))
+            {
+                return CashierSessionRefreshAttempt.ApiUnavailable() with
                 {
                     StatusCode = statusCode,
-                    ErrorCode = result?.ErrorCode,
+                    Reason = "not-api-envelope"
+                };
+            }
+
+            var result = document.RootElement.Deserialize<ApiResult<CashierSessionDto>>(JsonOptions)!;
+            if (!result.Success)
+            {
+                return CashierSessionRefreshAttempt.OnlineRejected() with
+                {
+                    StatusCode = statusCode,
+                    ErrorCode = result.ErrorCode,
                     Reason = "success-false"
+                };
+            }
+
+            // success=true 却没有会话数据属于形状异常，不是拒绝。
+            return result.Data is not null
+                ? CashierSessionRefreshAttempt.Refreshed(result.Data)
+                : CashierSessionRefreshAttempt.ApiUnavailable() with
+                {
+                    StatusCode = statusCode,
+                    Reason = "missing-session-data"
                 };
         }
         catch (JsonException ex)
@@ -113,11 +137,19 @@ public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
         }
     }
 
+    /// <summary>
+    /// 服务端 cashiers/session 只用 401（票据无效/已吊销/设备认证失败）和 403（设备越权）表达会话真实失效；
+    /// 404/405 只会来自后端发布、网关切换或路由未就绪，与 DeviceApiClient.IsGatewayStatus 口径一致按不可用处理，
+    /// 避免把门店收银员批量踢下线并清掉离线登录缓存。
+    /// </summary>
     private static bool IsServiceUnavailable(HttpStatusCode statusCode)
     {
         var numericStatusCode = (int)statusCode;
         return numericStatusCode >= 500 ||
-            statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
+            statusCode is HttpStatusCode.NotFound
+                or HttpStatusCode.MethodNotAllowed
+                or HttpStatusCode.RequestTimeout
+                or HttpStatusCode.TooManyRequests;
     }
 }
 
