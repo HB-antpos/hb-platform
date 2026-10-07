@@ -150,9 +150,12 @@ public static class StoreReceiptProfileErrorCodes
     public const string NotPublishable = "RECEIPT_PROFILE_NOT_PUBLISHABLE";
     public const string PublishConflict = "RECEIPT_PROFILE_PUBLISH_CONFLICT";
 
-    // 以下三个只出现在 NotPublishable 的 Details 里，说明具体哪家店为什么不能下发。
+    // 以下几个只出现在 NotPublishable 的 Details 里，说明具体哪家店为什么不能下发。
     public const string StoreInactive = "STORE_INACTIVE";
     public const string StoreNameRequired = "STORE_NAME_REQUIRED";
     public const string InvalidCharacters = "STORE_PROFILE_INVALID_CHARACTERS";
     public const string StoreCodeRequired = "STORE_CODE_REQUIRED";
+
+    // 字段超过收银端（手持/iPad）本机校验上限：下发后它们会整份丢弃资料，所以发布时拦截。
+    public const string TooLong = "STORE_PROFILE_TOO_LONG";
 }

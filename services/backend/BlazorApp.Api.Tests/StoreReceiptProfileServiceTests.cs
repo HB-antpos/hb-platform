@@ -630,6 +630,249 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
         Assert.Equal("  HB  ", store.BrandName);
     }
 
+    // ───────────────────────── 收银端长度上限 ─────────────────────────
+
+    // 上限来自手持/iPad 本机校验（pos-settings-repository.ts）：品牌 120、店名 120、地址 240、电话 60、ABN 32、退货政策 500。
+    // SQLite 不强制列宽，所以这里能存进 HBweb 列宽之外的长内容，用来覆盖「HBweb 存得下、收银端会整份丢弃」的情形。
+    [Theory]
+    [InlineData("address", 240, true)]
+    [InlineData("address", 241, false)]
+    [InlineData("phone", 60, true)]
+    [InlineData("phone", 61, false)]
+    [InlineData("brandName", 120, true)]
+    [InlineData("brandName", 121, false)]
+    [InlineData("storeName", 120, true)]
+    [InlineData("storeName", 121, false)]
+    [InlineData("abn", 32, true)]
+    [InlineData("abn", 33, false)]
+    [InlineData("returnPolicy", 500, true)]
+    [InlineData("returnPolicy", 501, false)]
+    public async Task Publish_各字段长度边界_恰好上限通过_多1个字符拒绝(string field, int length, bool expectPass)
+    {
+        var value = new string('x', length);
+        await SeedStoreAsync("g-1", "S001", "门店", configure: store => SetField(store, field, value));
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        if (expectPass)
+        {
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(1, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+            return;
+        }
+
+        Assert.False(result.Success);
+        Assert.Equal(StoreReceiptProfileErrorCodes.NotPublishable, result.ErrorCode);
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(result.Details));
+        Assert.Equal("STORE_PROFILE_TOO_LONG", detail.ErrorCode);
+        Assert.Equal(StoreReceiptProfileErrorCodes.TooLong, detail.ErrorCode);
+        Assert.Equal(("g-1", "S001"), (detail.StoreGuid, detail.StoreCode));
+        Assert.Contains($"（当前 {length}）", detail.Message);
+        Assert.Equal(0, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+    }
+
+    [Fact]
+    public async Task Publish_超限提示写明字段名_上限与当前长度()
+    {
+        await SeedStoreAsync("g-1", "S001", "门店", address: new string('址', 312));
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(result.Details));
+        Assert.Equal("地址超过收银端上限 240 个字符（当前 312），请先在分店资料里缩短再下发", detail.Message);
+    }
+
+    [Fact]
+    public async Task Publish_一批里只有一家超限_整批不写入且Details只列超限的店()
+    {
+        await SeedStoreAsync("g-ok1", "S001", "好店一", address: new string('a', 240));
+        await SeedStoreAsync("g-long", "S002", "超限店", phone: new string('9', 61));
+        await SeedStoreAsync("g-ok2", "S003", "好店二");
+        var service = CreateService();
+
+        var result = await service.PublishAsync(new[] { "g-ok1", "g-long", "g-ok2" }, "alice");
+
+        Assert.False(result.Success);
+        Assert.Equal(StoreReceiptProfileErrorCodes.NotPublishable, result.ErrorCode);
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(result.Details));
+        Assert.Equal(("g-long", "S002", StoreReceiptProfileErrorCodes.TooLong), (detail.StoreGuid, detail.StoreCode, detail.ErrorCode));
+        Assert.Equal("电话超过收银端上限 60 个字符（当前 61），请先在分店资料里缩短再下发", detail.Message);
+        // 好店也不能被写入。
+        Assert.Equal(0, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+
+        // 缩短后整批可下发。
+        var store = await _mainDb.Queryable<Store>().FirstAsync(row => row.StoreGUID == "g-long");
+        store.Phone = new string('9', 60);
+        await _mainDb.Updateable(store).ExecuteCommandAsync();
+        var retry = await service.PublishAsync(new[] { "g-ok1", "g-long", "g-ok2" }, "alice");
+        Assert.True(retry.Success, retry.Message);
+        Assert.Equal(3, retry.Data!.PublishedCount);
+    }
+
+    [Fact]
+    public async Task Publish_多家多字段同时超限_都列出且同店多字段合并在一条message里()
+    {
+        await SeedStoreAsync("g-a", "S001", "甲店", address: new string('a', 241), phone: new string('9', 61));
+        await SeedStoreAsync("g-b", "S002", "乙店", returnPolicy: new string('r', 501));
+        await SeedStoreAsync("g-c", "S003", "丙店", brandName: new string('b', 121), abn: new string('1', 33));
+        await SeedStoreAsync("g-fine", "S004", "正常店");
+
+        var result = await CreateService().PublishAsync(new[] { "g-a", "g-b", "g-fine", "g-c" }, "alice");
+
+        Assert.False(result.Success);
+        var details = Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(result.Details);
+        // 按请求顺序、每家超限的店一条；正常店不出现。
+        Assert.Equal(new[] { "g-a", "g-b", "g-c" }, details.Select(detail => detail.StoreGuid));
+        Assert.All(details, detail => Assert.Equal(StoreReceiptProfileErrorCodes.TooLong, detail.ErrorCode));
+        Assert.Equal(
+            "地址超过收银端上限 240 个字符（当前 241）；电话超过收银端上限 60 个字符（当前 61），请先在分店资料里缩短再下发",
+            details[0].Message);
+        Assert.Equal("退货政策超过收银端上限 500 个字符（当前 501），请先在分店资料里缩短再下发", details[1].Message);
+        Assert.Equal(
+            "品牌超过收银端上限 120 个字符（当前 121）；ABN超过收银端上限 32 个字符（当前 33），请先在分店资料里缩短再下发",
+            details[2].Message);
+        Assert.Contains("有 3 家门店不能下发", result.Message);
+        Assert.Equal(0, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+    }
+
+    [Fact]
+    public async Task Publish_长度按归一后的值计算_首尾空白不算()
+    {
+        // 地址恰好 240 个有效字符，前后各带空白与换行：trim 后正好 240，通过；快照里存的也是 trim 后的 240 字符。
+        var address = new string('a', 240);
+        await SeedStoreAsync(
+            "g-1",
+            "S001",
+            "  门店  ",
+            address: "  \r\n" + address + "\t \n",
+            phone: " " + new string('9', 60) + " ",
+            brandName: "   " + new string('b', 120) + "   ");
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        Assert.True(result.Success, result.Message);
+        var row = await _mainDb.Queryable<StoreReceiptProfileRelease>().SingleAsync();
+        Assert.Equal(address, row.Address);
+        Assert.Equal(60, row.Phone!.Length);
+        Assert.Equal(120, row.BrandName!.Length);
+    }
+
+    [Fact]
+    public async Task Publish_纯空白的超长内容归一为null不触发超限()
+    {
+        // 300 个空格归一后是 null，写进快照也是 null，收银端看到的是空字段，不会超限。
+        await SeedStoreAsync("g-1", "S001", "门店", address: new string(' ', 300), returnPolicy: new string(' ', 600));
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        Assert.True(result.Success, result.Message);
+        var row = await _mainDb.Queryable<StoreReceiptProfileRelease>().SingleAsync();
+        Assert.Null(row.Address);
+        Assert.Null(row.ReturnPolicy);
+    }
+
+    [Fact]
+    public async Task Publish_控制字符检查先于长度检查()
+    {
+        // 同一家店既超长又含控制字符：先报控制字符（修好控制字符后再提示长度）。
+        await SeedStoreAsync("g-1", "S001", "门店", phone: new string('9', 70) + "\u0001");
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(result.Details));
+        Assert.Equal(StoreReceiptProfileErrorCodes.InvalidCharacters, detail.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Publish_长度按UTF16码元计_与JS_string_length一致()
+    {
+        // 一个 emoji 是 2 个 UTF-16 码元（JS 的 "😀".length === 2，.NET 的 "😀".Length === 2）。
+        // 120 个 emoji = 240 码元恰好通过，121 个 = 242 码元被拒绝。
+        await SeedStoreAsync("g-ok", "S001", "门店甲", address: string.Concat(Enumerable.Repeat("😀", 120)));
+        await SeedStoreAsync("g-long", "S002", "门店乙", address: string.Concat(Enumerable.Repeat("😀", 121)));
+
+        var ok = await CreateService().PublishAsync(new[] { "g-ok" }, "alice");
+        var tooLong = await CreateService().PublishAsync(new[] { "g-long" }, "alice");
+
+        Assert.True(ok.Success, ok.Message);
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(tooLong.Details));
+        Assert.Equal(StoreReceiptProfileErrorCodes.TooLong, detail.ErrorCode);
+        Assert.Contains("（当前 242）", detail.Message);
+    }
+
+    [Fact]
+    public async Task Publish_已下发过的店资料被改超限后再下发被拒绝_不生成新版本()
+    {
+        await SeedStoreAsync("g-1", "S001", "门店", address: "短地址");
+        await PublishAsync("g-1");
+        var store = await _mainDb.Queryable<Store>().FirstAsync(row => row.StoreGUID == "g-1");
+        store.Address = new string('a', 300);
+        await _mainDb.Updateable(store).ExecuteCommandAsync();
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        Assert.False(result.Success);
+        Assert.Equal(1, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+        // status 仍可查询并显示 pending，让总部知道还有未下发的修改。
+        var status = (await CreateService().GetStatusAsync(new[] { "g-1" })).Data!.Single();
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, status.Status);
+    }
+
+    [Fact]
+    public void Guard_长度上限常量与收银端手持和iPad本机校验一致()
+    {
+        Assert.Equal(120, StoreReceiptProfileGuard.MaxBrandNameLength);
+        Assert.Equal(120, StoreReceiptProfileGuard.MaxStoreNameLength);
+        Assert.Equal(240, StoreReceiptProfileGuard.MaxAddressLength);
+        Assert.Equal(60, StoreReceiptProfileGuard.MaxPhoneLength);
+        Assert.Equal(32, StoreReceiptProfileGuard.MaxAbnLength);
+        Assert.Equal(500, StoreReceiptProfileGuard.MaxReturnPolicyLength);
+    }
+
+    [Theory]
+    [InlineData("apps/pos-handheld/src/core/db/pos-settings-repository.ts")]
+    [InlineData("apps/pos-ipad/src/core/db/pos-settings-repository.ts")]
+    public void Guard_长度上限与收银端源码里的本机校验一致(string relativePath)
+    {
+        // 漂移守卫：只读源码，不改 apps/。收银端以后调整上限时，这里会失败，提醒同步修改 HBweb 的发布前校验。
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), relativePath));
+        var limits = System.Text.RegularExpressions.Regex
+            .Matches(
+                source,
+                @"(?:boundedText|multilineText|optionalMultilineText|optionalText)\(record\.(brandName|storeName|address|phone|abn|returnPolicy),\s*(\d+),")
+            .ToDictionary(match => match.Groups[1].Value, match => int.Parse(match.Groups[2].Value));
+
+        Assert.Equal(StoreReceiptProfileGuard.MaxBrandNameLength, limits["brandName"]);
+        Assert.Equal(StoreReceiptProfileGuard.MaxStoreNameLength, limits["storeName"]);
+        Assert.Equal(StoreReceiptProfileGuard.MaxAddressLength, limits["address"]);
+        Assert.Equal(StoreReceiptProfileGuard.MaxPhoneLength, limits["phone"]);
+        Assert.Equal(StoreReceiptProfileGuard.MaxAbnLength, limits["abn"]);
+        Assert.Equal(StoreReceiptProfileGuard.MaxReturnPolicyLength, limits["returnPolicy"]);
+    }
+
+    [Fact]
+    public void Guard_FindTooLongFields_返回全部超限字段_固定顺序_null与合法值不报()
+    {
+        var all = StoreReceiptProfileGuard.FindTooLongFields(
+            new string('b', 121),
+            new string('n', 121),
+            new string('a', 241),
+            new string('p', 61),
+            new string('1', 33),
+            new string('r', 501));
+
+        Assert.Equal(
+            new[]
+            {
+                ("品牌", 120, 121), ("店名", 120, 121), ("地址", 240, 241),
+                ("电话", 60, 61), ("ABN", 32, 33), ("退货政策", 500, 501),
+            },
+            all.Select(field => (field.DisplayName, field.Limit, field.Length)).ToArray());
+        Assert.Empty(StoreReceiptProfileGuard.FindTooLongFields(null, "店", null, null, null, null));
+        Assert.Empty(StoreReceiptProfileGuard.FindTooLongFields(
+            new string('b', 120), new string('n', 120), new string('a', 240), new string('p', 60), new string('1', 32), new string('r', 500)));
+    }
+
     // ───────────────────────── 请求参数校验 ─────────────────────────
 
     public static IEnumerable<object?[]> InvalidRequests()
@@ -737,6 +980,37 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
             _time,
             beforeInsert
         );
+
+    private static void SetField(Store store, string field, string value)
+    {
+        switch (field)
+        {
+            case "brandName": store.BrandName = value; break;
+            case "storeName": store.StoreName = value; break;
+            case "address": store.Address = value; break;
+            case "phone": store.Phone = value; break;
+            case "abn": store.ABN = value; break;
+            case "returnPolicy": store.ReturnPolicy = value; break;
+            default: throw new ArgumentOutOfRangeException(nameof(field), field, null);
+        }
+    }
+
+    private static string FindRepoRoot([System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(sourcePath)!);
+        while (directory != null)
+        {
+            var gitPath = Path.Combine(directory.FullName, ".git");
+            if (Directory.Exists(gitPath) || File.Exists(gitPath))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("无法定位仓库根目录。");
+    }
 
     private async Task PublishAsync(params string[] storeGuids)
     {

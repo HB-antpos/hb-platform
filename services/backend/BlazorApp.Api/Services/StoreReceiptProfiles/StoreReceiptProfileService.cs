@@ -421,6 +421,28 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             );
         }
 
+        // 收银端手持/iPad 本机校验有更严的长度上限（地址 240、电话 60 等），超限会整份丢弃且永远不更新；
+        // HBweb 列宽更大所以保存得进去，必须在这里拦住。按归一后的值计长度（与写入快照的口径相同，首尾空白不算）。
+        var normalized = ToFields(store);
+        var tooLong = StoreReceiptProfileGuard.FindTooLongFields(
+            normalized.BrandName,
+            normalized.StoreName,
+            normalized.Address,
+            normalized.Phone,
+            normalized.Abn,
+            normalized.ReturnPolicy
+        );
+        if (tooLong.Count > 0)
+        {
+            // 一家店一条明细：同时超限的多个字段写在同一条 message 里，总部一次就能改全。
+            var parts = tooLong.Select(field => $"{field.DisplayName}超过收银端上限 {field.Limit} 个字符（当前 {field.Length}）");
+            return Detail(
+                store,
+                StoreReceiptProfileErrorCodes.TooLong,
+                $"{string.Join("；", parts)}，请先在分店资料里缩短再下发"
+            );
+        }
+
         return null;
     }
 

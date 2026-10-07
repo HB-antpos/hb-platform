@@ -367,6 +367,7 @@ public sealed class StoreReceiptProfileControllerTests
         Assert.Equal("RECEIPT_PROFILE_NOT_PUBLISHABLE", StoreReceiptProfileErrorCodes.NotPublishable);
         Assert.Equal("RECEIPT_PROFILE_PUBLISH_CONFLICT", StoreReceiptProfileErrorCodes.PublishConflict);
         Assert.Equal("STORE_PROFILE_INVALID_CHARACTERS", StoreReceiptProfileErrorCodes.InvalidCharacters);
+        Assert.Equal("STORE_PROFILE_TOO_LONG", StoreReceiptProfileErrorCodes.TooLong);
     }
 
     // ───────────────────────── 架构边界 ─────────────────────────
