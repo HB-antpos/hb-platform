@@ -332,9 +332,11 @@ public sealed class StoreVoucherServiceTests
     }
 
     [Fact]
-    public async Task IssueRefundAsync_CreatesRefundVoucherWithTwelveMonthExpiry()
+    public async Task IssueRefundAsync_ExpiresAtEndOfStoreLocalDayNinetyDaysAfterIssue()
     {
+        // 悉尼 5 月为 UTC+10：UTC 10:00 = 当地 20:00（05-26），第 90 天是 08-24，取整到当地 23:59:59。
         var time = DateTimeOffset.Parse("2026-05-26T10:00:00Z");
+        var expectedExpiry = new DateTimeOffset(2026, 8, 24, 23, 59, 59, TimeSpan.FromHours(10));
         var repository = new FakeStoreVoucherRepository(null)
         {
             CreatedVoucherCode = "RF001"
@@ -342,7 +344,8 @@ public sealed class StoreVoucherServiceTests
         var service = new StoreVoucherService(
             repository,
             new FakeReservationService(),
-            new FakeTimeProvider(time));
+            new FakeTimeProvider(time),
+            timeZoneResolver: new StubStoreTimeZoneResolver());
 
         var response = await service.IssueRefundAsync(
             new StoreVoucherIssueRefundRequest("S01", 18.5m, "C001", IdempotencyKey: "ORDER-1:PAY-1", OrderReference: "ORDER-1", Reason: "Refund"),
@@ -352,12 +355,64 @@ public sealed class StoreVoucherServiceTests
         Assert.Equal(18.5m, response.Amount);
         Assert.Equal(18.5m, response.RemainingAmount);
         Assert.Equal("1", response.Status);
-        Assert.Equal(time.AddMonths(12), response.ExpiredAt);
+        Assert.Equal(expectedExpiry, response.ExpiredAt);
         Assert.NotNull(repository.LastRefundRequest);
+        // 落库的到期时间也必须是门店当地当天结束，不能只是响应里算对。
+        Assert.Equal(expectedExpiry, repository.LastRefundRequest!.ExpiredAt);
         Assert.Equal("S01", repository.LastRefundRequest!.StoreCode);
         Assert.Equal("C001", repository.LastRefundRequest.CashierId);
         Assert.Equal("ORDER-1:PAY-1", repository.LastRefundRequest.IdempotencyKey);
         Assert.Equal("ORDER-1", repository.LastRefundRequest.OrderReference);
+    }
+
+    [Theory]
+    // UTC 15:00 在悉尼已是次日 01:00：发券日要按门店当地日历日算，不是 UTC 日期（08-25，不是 08-24）。
+    [InlineData("2026-05-26T15:00:00Z", "Sydney", "2026-08-25T23:59:59+10:00")]
+    // 悉尼 3 月仍是夏令时 UTC+11，第 90 天（06-08）已回到标准时间 UTC+10：偏移按到期日当天算。
+    [InlineData("2026-03-10T00:00:00Z", "Sydney", "2026-06-08T23:59:59+10:00")]
+    // 10-07 发券，第 90 天是 2027-01-05（夏令时 UTC+11），这是业主确认的样例日期。
+    [InlineData("2026-10-06T23:30:00Z", "Sydney", "2027-01-05T23:59:59+11:00")]
+    // 布里斯班全年 UTC+10 不受夏令时影响；同一时刻在悉尼是 UTC+11，绝对时刻不同。
+    [InlineData("2026-12-01T20:00:00Z", "Brisbane", "2027-03-02T23:59:59+10:00")]
+    [InlineData("2026-12-01T20:00:00Z", "Sydney", "2027-03-02T23:59:59+11:00")]
+    public async Task IssueRefundAsync_ExpiryFollowsStoreTimeZoneCalendarDay(
+        string issuedAtUtc,
+        string storeZone,
+        string expectedExpiry)
+    {
+        var time = DateTimeOffset.Parse(issuedAtUtc);
+        var repository = new FakeStoreVoucherRepository(null) { CreatedVoucherCode = "RF010" };
+        var timeZone = storeZone == "Brisbane" ? TestStoreTimeZones.Brisbane : TestStoreTimeZones.Sydney;
+        var service = new StoreVoucherService(
+            repository,
+            new FakeReservationService(),
+            new FakeTimeProvider(time),
+            timeZoneResolver: new StubStoreTimeZoneResolver(timeZone));
+
+        var response = await service.IssueRefundAsync(
+            new StoreVoucherIssueRefundRequest("S01", 10m, "C001", IdempotencyKey: "ORDER-TZ:PAY-1", OrderReference: "ORDER-TZ", Reason: "Refund"),
+            CancellationToken.None);
+
+        Assert.Equal(DateTimeOffset.Parse(expectedExpiry), response.ExpiredAt);
+        Assert.Equal(DateTimeOffset.Parse(expectedExpiry), repository.LastRefundRequest!.ExpiredAt);
+    }
+
+    [Fact]
+    public async Task IssueRefundAsync_WithoutTimeZoneResolverFallsBackToUtcCalendarDay()
+    {
+        // 仅单元测试会出现未注入解析器；生产 DI 一定注入，门店未配时区时由解析器回退悉尼。
+        var time = DateTimeOffset.Parse("2026-05-26T10:00:00Z");
+        var repository = new FakeStoreVoucherRepository(null) { CreatedVoucherCode = "RF011" };
+        var service = new StoreVoucherService(
+            repository,
+            new FakeReservationService(),
+            new FakeTimeProvider(time));
+
+        var response = await service.IssueRefundAsync(
+            new StoreVoucherIssueRefundRequest("S01", 10m, "C001", IdempotencyKey: "ORDER-UTC:PAY-1", OrderReference: "ORDER-UTC", Reason: "Refund"),
+            CancellationToken.None);
+
+        Assert.Equal(DateTimeOffset.Parse("2026-08-24T23:59:59Z"), response.ExpiredAt);
     }
 
     [Fact]
@@ -432,6 +487,30 @@ public sealed class StoreVoucherServiceTests
         Assert.NotNull(repository.LastIssueRequest);
         Assert.Equal("ISSUE-1", repository.LastIssueRequest!.IdempotencyKey);
         Assert.Equal("Manual issue", repository.LastIssueRequest.Reason);
+    }
+
+    [Fact]
+    public async Task IssueAsync_DefaultsToEndOfStoreLocalDayNinetyDaysAfterIssueWhenNoExpiryGiven()
+    {
+        var time = DateTimeOffset.Parse("2026-05-26T10:00:00Z");
+        var expectedExpiry = new DateTimeOffset(2026, 8, 24, 23, 59, 59, TimeSpan.FromHours(10));
+        var repository = new FakeStoreVoucherRepository(null)
+        {
+            CreatedVoucherCode = "VC002"
+        };
+        var service = new StoreVoucherService(
+            repository,
+            new FakeReservationService(),
+            new FakeTimeProvider(time),
+            timeZoneResolver: new StubStoreTimeZoneResolver());
+
+        var response = await service.IssueAsync(
+            new StoreVoucherIssueRequest("S01", 25m, "C001", "ISSUE-2", null, "CUS001", "Manual issue"),
+            CancellationToken.None);
+
+        Assert.Equal(expectedExpiry, response.ExpiredAt);
+        Assert.NotNull(repository.LastIssueRequest);
+        Assert.Equal(expectedExpiry, repository.LastIssueRequest!.ExpiredAt);
     }
 
     [Fact]
