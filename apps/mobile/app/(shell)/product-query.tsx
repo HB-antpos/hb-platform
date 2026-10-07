@@ -27,6 +27,7 @@ import { CodeAddSheet } from "@/components/product-maintenance/CodeAddSheet";
 import { LookupResultSheet } from "@/components/product-maintenance/LookupResultSheet";
 import { LabelPrintCard } from "@/components/product-maintenance/LabelPrintCard";
 import { PrintSettingsModal } from "@/components/product-maintenance/PrintSettingsModal";
+import { LabelPrinterSetupSheet } from "@/components/printer/LabelPrinterSetupSheet";
 import {
   PrinterConnectionChip,
   PrinterConnectionSummary,
@@ -631,6 +632,7 @@ function ProductQueryContent() {
   const [printQuantity, setPrintQuantity] = useState(1);
   const [quantitySingleUse, setQuantitySingleUse] = useState(true);
   const [printSettingsVisible, setPrintSettingsVisible] = useState(false);
+  const [printerSetupVisible, setPrinterSetupVisible] = useState(false);
   const [storePickerVisible, setStorePickerVisible] = useState(false);
   const [discardReturnVisible, setDiscardReturnVisible] = useState(false);
   const [allowInvoiceExit, setAllowInvoiceExit] = useState(false);
@@ -3844,10 +3846,11 @@ function ProductQueryContent() {
     void handlePrintRef.current("bigDiscount");
   }, []);
   const handleOpenPrinterSettings = useCallback(() => {
-    // 从打印设置弹窗进入打印机设置页：先收起弹窗，返回本页时不会再看到它悬在上面。
+    // 就地弹出蓝牙打印机连接抽屉，不离开商品查询页。抽屉是原生 Modal，会压住 Paper Portal，
+    // 所以先收起打印设置弹窗再打开抽屉，两层不会互相遮挡。
     setPrintSettingsVisible(false);
-    router.navigate("/(shell)/settings");
-  }, [router]);
+    setPrinterSetupVisible(true);
+  }, []);
   const handleOpenPrintSettings = useCallback(() => {
     setPrintSettingsVisible(true);
   }, []);
@@ -5056,6 +5059,8 @@ function ProductQueryContent() {
           </>
         ) : null}
       </Portal>
+
+      <LabelPrinterSetupSheet visible={printerSetupVisible} onDismiss={() => setPrinterSetupVisible(false)} />
 
       <CameraScanSheet
         visible={cameraVisible}

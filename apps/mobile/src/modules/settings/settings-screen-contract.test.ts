@@ -230,3 +230,38 @@ test("设置页信息在中英文下都完整显示，不靠写死行数截断",
   // 诊断里的更新 ID 用等宽字体完整换行显示。
   assert.match(source, /<InfoRow[\s\S]{0,300}monospace=\{row\.key === "updateId"/);
 });
+
+test("蓝牙打印机设置在英文窄屏下完整显示，BLE 默认列出", () => {
+  const settings = read("app/(shell)/settings.tsx");
+  const setupSheet = read("src/components/printer/LabelPrinterSetupSheet.tsx");
+  const details = read("src/components/printer/PrinterDeviceDetails.tsx");
+  const deviceList = read("src/modules/printer/device-list.ts");
+
+  // 设备行英文说明（如 “Classic Bluetooth · Not paired. Pair it in system Bluetooth settings first”）
+  // 在右侧连接按钮挤压下两行放不下；打印机设置相关文字一律不限行数。
+  for (const [name, source] of [["设备行", details], ["连接抽屉", setupSheet]] as const) {
+    assert.doesNotMatch(source, /numberOfLines/, `${name}不得限制行数`);
+  }
+  // 抽屉按钮行与设置页一致：放不下时整行换行，而不是把按钮文字截断。
+  assert.match(setupSheet, /actions: \{\s*flexDirection: "row",\s*flexWrap: "wrap"/);
+  assert.match(setupSheet, /footerActions: \{\s*flexDirection: "row",\s*flexWrap: "wrap"/);
+  assert.match(setupSheet, /headerRow: \{[\s\S]{0,200}flexWrap: "wrap"/);
+  assert.match(setupSheet, /actionButton: \{[\s\S]{0,160}flexGrow: 1/);
+  for (const source of [settings, setupSheet]) {
+    assert.match(source, /style=\{styles\.filterLabel\}>\{t\("printer\.filterXPOnly"\)\}/);
+  }
+
+  // 经典蓝牙与 BLE 默认都列出。
+  assert.match(deviceList, /DEFAULT_PRINTER_TRANSPORT_FILTERS[^=]*= \{\s*showClassic: true,\s*showBle: true,\s*\}/);
+});
+
+test("商品查询点打印机设置就地弹出连接抽屉，不跳转设置页", () => {
+  const productQuery = read("app/(shell)/product-query.tsx");
+  const handler = productQuery.match(/const handleOpenPrinterSettings = useCallback\(\(\) => \{[\s\S]*?\}, \[\]\);/);
+  assert.ok(handler, "handleOpenPrinterSettings 必须存在且不依赖 router");
+  assert.doesNotMatch(handler[0], /router\./, "不得跳转离开商品查询页");
+  // 抽屉是原生 Modal，会压住 Paper Portal：先收起打印设置弹窗再打开抽屉。
+  assert.match(handler[0], /setPrintSettingsVisible\(false\);\s*setPrinterSetupVisible\(true\);/);
+  assert.match(productQuery, /<LabelPrinterSetupSheet visible=\{printerSetupVisible\} onDismiss=\{\(\) => setPrinterSetupVisible\(false\)\} \/>/);
+  assert.match(productQuery, /onManage=\{handleOpenPrinterSettings\}/);
+});

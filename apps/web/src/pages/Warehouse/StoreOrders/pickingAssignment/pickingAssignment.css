@@ -225,3 +225,76 @@
   background: #fff7e6;
   color: #ad4e00;
 }
+
+/* 订单详情里的「拣货分配」卡片：与订货明细页其它卡片同一套外观（白底、#e7eaf0 边框、10px 圆角） */
+.picking-assign-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.picking-assign-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 12px 16px;
+}
+
+.picking-assign-section-title {
+  margin: 0;
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.picking-assign-section-summary {
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 还有品种未分配：琥珀色胶囊，提醒订单加行后要重新分配 */
+.picking-assign-section-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  background: #fff1db;
+  color: #8a4b00;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.picking-assign-section-spacer {
+  flex: 1 1 auto;
+}
+
+.picking-assign-section-body {
+  min-width: 0;
+  border-top: 1px solid #eef0f4;
+}
+
+.picking-assign-section-body > .ant-spin,
+.picking-assign-section-body > .ant-empty {
+  display: block;
+  margin: 16px;
+}
+
+.picking-assign-section-table .ant-table-thead > tr > th {
+  background: #f8f9fb;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.picking-assign-section-table .ant-table-tbody > tr > td {
+  vertical-align: middle;
+}

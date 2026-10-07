@@ -31,6 +31,8 @@ const printCssFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrder
 const packageFile = path.resolve(process.cwd(), 'package.json')
 const listLogicFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/storeOrderListLogic.ts')
 const listMessagesZhFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/storeOrdersMessages.zh.json')
+const detailCssFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/storeOrderDetail.css')
+const detailMessagesZhFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/storeOrderDetailMessages.zh.json')
 
 function readSource(file: string) {
   // 统一换行，避免 Windows CRLF 让源码契约断言误判。
@@ -48,14 +50,17 @@ const printCssSource = readSource(printCssFile)
 const packageSource = readSource(packageFile)
 const listLogicSource = readSource(listLogicFile)
 const listMessagesZhSource = readSource(listMessagesZhFile)
+const detailCssSource = readSource(detailCssFile)
+const detailMessagesZhSource = readSource(detailMessagesZhFile)
 const detailMainTableSource = detailSource.slice(detailSource.indexOf('const baseDetailColumns: ColumnsType<StoreOrderDetailLine>'))
 const detailKeyboardHandlerSource = detailSource.slice(
   detailSource.indexOf('const handleDetailInputKeyDown'),
   detailSource.indexOf('const handleCompleteOrder'),
 )
+// 重设计：订单头 Descriptions 改为「订单信息」卡的字段布局，订货/出库日期位于分店与联系邮箱之间。
 const detailHeaderDateSource = detailSource.slice(
-  detailSource.indexOf('<Descriptions.Item label={t(\'storeOrders.orderDateLabel\')}>'),
-  detailSource.indexOf('<Descriptions.Item label={t(\'storeOrders.orderQtyLabel\')}>'),
+  detailSource.indexOf("htmlFor={fieldId('orderDate')}"),
+  detailSource.indexOf("htmlFor={fieldId('contactEmail')}"),
 )
 
 function readCssRule(source: string, selector: string) {
@@ -85,7 +90,9 @@ async function main() {
   const detailClassFailure = await runTest('详情页主明细表应挂载紧凑样式 class', () => {
     assert(detailSource.includes("import './compact.css'"), '详情页应引入 StoreOrders 局部紧凑样式')
     assert(detailSource.includes('className="store-order-detail-table"'), '详情页主明细表缺少 store-order-detail-table class')
-    assert(detailSource.includes('className="store-order-detail-filter-bar"'), '详情页筛选统计条缺少紧凑样式 class')
+    // 重设计：原「统计过滤」条改为明细页签 + 工具栏，样式在页面级 storeOrderDetail.css。
+    assert(detailSource.includes("import './storeOrderDetail.css'"), '详情页应引入页面级重设计样式')
+    assert(detailSource.includes('className="wh-order-detail-toolbar"'), '详情页明细工具栏缺少样式 class')
     assert(detailSource.includes('renderStoreOrderDetailNumericCell('), '详情页数字列应走单行等宽数字 helper')
   })
   if (detailClassFailure) failures.push(detailClassFailure)
@@ -197,8 +204,9 @@ async function main() {
       '详情页列头拖拽应同时支持键盘传感器和横向坐标解析',
     )
     assert(
-      detailSource.includes("const STORE_ORDER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.storeOrders.detail.columnOrder.v1'") &&
-        detailSource.includes("const STORE_ORDER_DETAIL_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.storeOrders.detail.columnWidths.v1'") &&
+      // 重设计合并了列，旧 v1 布局对应另一套列，改用 v2 键。
+      detailSource.includes("const STORE_ORDER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.storeOrders.detail.columnOrder.v2'") &&
+        detailSource.includes("const STORE_ORDER_DETAIL_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.storeOrders.detail.columnWidths.v2'") &&
         detailSource.includes('localStorage.setItem(STORE_ORDER_DETAIL_COLUMN_ORDER_STORAGE_KEY') &&
         detailSource.includes('localStorage.setItem(STORE_ORDER_DETAIL_COLUMN_WIDTH_STORAGE_KEY'),
       '详情页明细表列顺序和列宽应保存到专用 localStorage key',
@@ -235,38 +243,38 @@ async function main() {
       '详情页调宽应隔离 click，并在重复拖拽、失去捕获、窗口失焦或页面卸载时清理监听',
     )
     assert(
-      detailSource.includes('itemNumber: 132') &&
-        detailSource.includes('productName: 180') &&
-        detailSource.includes('barcode: 112') &&
+      // 重设计：货号、名称、条码合并为「商品」列（默认 320），并使用动态横向滚动宽度。
+      detailSource.includes('product: 320') &&
         detailSource.includes('scroll={{ x: detailTableScrollX, y: 620 }}'),
-      '详情页明细表默认货号、名称、条码列宽应放宽，并使用动态横向滚动宽度',
+      '详情页明细表商品列默认宽度应足够放下货号与名称，并使用动态横向滚动宽度',
     )
     assert(
       detailSource.includes("key: 'allocatedImportAmount'") &&
-        detailSource.includes('allocatedImportAmount: 76'),
+        detailSource.includes('allocatedImportAmount: 100'),
       '详情页列布局必须保留主线的已分配进口金额列及其默认宽度',
     )
     assert(
-      detailSource.includes('className="store-order-detail-item-number-cell"') &&
-        detailSource.includes('className="store-order-detail-item-number-text"') &&
-        detailSource.includes('ellipsis={{ tooltip: value }}'),
-      '详情页货号单元格应使用专用防重叠布局',
+      detailSource.includes('className="wh-order-detail-product-cell"') &&
+        detailSource.includes('className="wh-order-detail-item-number"') &&
+        detailSource.includes('className="wh-order-detail-product-name" title={record.productName}') &&
+        /\.wh-order-detail-item-number\s*\{[^}]*white-space:\s*nowrap/.test(detailCssSource) &&
+        /\.wh-order-detail-product-name\s*\{[^}]*text-overflow:\s*ellipsis/.test(detailCssSource),
+      '详情页商品列货号应完整显示、名称过长省略并可悬停查看，避免互相重叠',
     )
     assert(
       detailSource.includes('resetDetailColumnLayout') &&
-        detailSource.includes("t('storeOrders.detail.resetColumnLayout', '重置列布局')") &&
+        detailSource.includes("label: t('warehouseUi.storeOrderDetail.resetColumnLayout')") &&
+        detailSource.includes('disabled: !isDetailColumnSettingsCustomized') &&
         detailSource.includes('localStorage.removeItem(STORE_ORDER_DETAIL_COLUMN_ORDER_STORAGE_KEY)') &&
         detailSource.includes('localStorage.removeItem(STORE_ORDER_DETAIL_COLUMN_WIDTH_STORAGE_KEY)'),
-      '详情页明细表应提供重置列布局入口',
+      '详情页明细表应在列设置菜单里提供重置列布局入口',
     )
     assert(
       compactCssSource.includes('.store-order-detail-draggable-header') &&
         compactCssSource.includes('.store-order-detail-draggable-header:focus-visible') &&
         compactCssSource.includes('.store-order-detail-column-resize-handle') &&
-        compactCssSource.includes('cursor: col-resize') &&
-        compactCssSource.includes('.store-order-detail-item-number-cell') &&
-        compactCssSource.includes('.store-order-detail-item-number-text'),
-      '详情页紧凑样式应包含键盘焦点、拖拽表头、列宽手柄和货号防重叠样式',
+        compactCssSource.includes('cursor: col-resize'),
+      '详情页紧凑样式应包含键盘焦点、拖拽表头和列宽手柄样式',
     )
   })
   if (detailColumnLayoutFailure) failures.push(detailColumnLayoutFailure)
@@ -431,17 +439,35 @@ async function main() {
   })
   if (listColumnFilterFailure) failures.push(listColumnFilterFailure)
 
-  const detailContentFailure = await runTest('详情页货号条码名称应保留业务可读性', () => {
-    assert(detailMainTableSource.includes('width={30}') && detailMainTableSource.includes('height={30}'), '详情页主明细图片应缩到 30x30')
-    assert(detailMainTableSource.includes('className="store-order-detail-copy-button"'), '详情页货号复制按钮应为无文字图标按钮')
-    assert(!detailMainTableSource.includes('<Button size="small" type="link" onClick={() => void copyTextToClipboard(value)}>'), '详情页主明细货号复制按钮不应显示复制文字')
-    assert(detailMainTableSource.includes('className="store-order-barcode-cell"'), '详情页条码文本应挂载不隐藏不折叠样式')
-    assert(detailMainTableSource.includes('textNoWrap'), '详情页条码文本应保持单行显示')
-    assert(detailMainTableSource.includes('showCopy={false}'), '详情页主明细条码列应关闭复制按钮以保留条码可读宽度')
-    assert(!detailMainTableSource.includes('textMaxWidth'), '详情页条码文本不应设置 textMaxWidth 省略折叠')
-    assert(detailMainTableSource.includes('renderStoreOrderTwoLineText(value)'), '详情页商品名称应最多显示两行')
-    assert(detailMainTableSource.includes("Tooltip title={t('common.save')}"), '详情页操作列保存按钮应使用 Tooltip 图标按钮')
-    assert(detailMainTableSource.includes('className="store-order-detail-action-button"'), '详情页操作列应使用紧凑图标按钮样式')
+  // 重设计：货号、名称、条码、零售价合并为「商品」列（第二行「条码 · 零售 $x」），行操作收进 ⋯ 菜单。
+  const detailContentFailure = await runTest('详情页商品列应合并货号条码名称并保留业务可读性', () => {
+    const productColumn = detailMainTableSource.slice(
+      detailMainTableSource.indexOf("key: 'product'"),
+      detailMainTableSource.indexOf("key: 'locationCode'"),
+    )
+    assert(productColumn.includes('width={32}') && productColumn.includes('height={32}'), '详情页商品列图片应不超过 32x32')
+    assert(productColumn.includes('className="store-order-detail-copy-button"'), '详情页货号复制按钮应为无文字图标按钮')
+    assert(!productColumn.includes('<Button size="small" type="link" onClick={() => void copyTextToClipboard(value)}>'), '详情页主明细货号复制按钮不应显示复制文字')
+    assert(productColumn.includes('onClick={() => void copyTextToClipboard(record.itemNumber)}'), '详情页商品列应保留货号复制')
+    assert(
+      productColumn.includes("{record.barcode || '--'} · {t('warehouseUi.storeOrderDetail.retailPrice', { price: formatCurrencyAmount(record.price) })}"),
+      '详情页商品列第二行应显示条码与零售价',
+    )
+    assert(/\.wh-order-detail-product-sub\s*\{[^}]*white-space:\s*nowrap/.test(detailCssSource), '条码与零售价应单行显示')
+    assert(detailMainTableSource.includes("key: 'actions'") && detailMainTableSource.includes('render: (_, record) => renderLineMoreDropdown(record)'), '详情页行操作应收进 ⋯ 菜单')
+    assert(
+      detailSource.includes("label: t('warehouseUi.storeOrderDetail.rowSave')") &&
+        detailSource.includes("label: t('warehouseUi.storeOrderDetail.rowDelete')") &&
+        detailSource.includes('void handleSaveLine(record)') &&
+        detailSource.includes('void handleToggleLineStatus(record)') &&
+        detailSource.includes('confirmRemoveLine(record)'),
+      '⋯ 菜单应保留只保存此行、仓库上/下架与删除行',
+    )
+    assert(
+      detailSource.includes("title: t('storeOrders.detail.confirmDeleteLine'),") && detailSource.includes('onOk: () => handleRemoveLine(line),'),
+      '删除行改为菜单项后仍需二次确认',
+    )
+    assert(detailSource.includes('className={`store-order-detail-action-button'), '详情页行 ⋯ 按钮应使用紧凑图标按钮样式')
   })
   if (detailContentFailure) failures.push(detailContentFailure)
 
@@ -449,7 +475,14 @@ async function main() {
     const statusColumn = readColumnBlock(detailMainTableSource, 'isActive')
 
     assert(statusColumn.includes("t('common.activeUpper')") && statusColumn.includes("t('common.inactiveUpper')"), '详情页商品状态列应显示上架/下架')
-    assert(detailMainTableSource.includes("record.isActive ? t('common.inactiveUpper') : t('common.activeUpper')"), '详情页商品状态切换按钮应提示上架/下架')
+    // 重设计：行上的上/下架进 ⋯ 菜单，文案写明改的是仓库商品全局状态（下架仍先填供货说明）。
+    assert(
+      detailSource.includes("? t('warehouseUi.storeOrderDetail.rowDelistWarehouse')") &&
+        detailSource.includes(": t('warehouseUi.storeOrderDetail.rowListWarehouse')") &&
+        detailMessagesZhSource.includes('"rowListWarehouse": "仓库上架（改仓库商品全局状态）"') &&
+        detailMessagesZhSource.includes('"rowDelistWarehouse": "仓库下架（改仓库商品全局状态，需填供货说明）…"'),
+      '详情页商品状态切换菜单应提示上架/下架，并写明改的是仓库全局商品状态',
+    )
     assert(detailSource.includes("status: line.isActive ? t('common.inactiveUpper') : t('common.activeUpper')"), '详情页商品状态切换成功提示应使用上架/下架')
     assert(detailSource.includes("{ value: 'active', label: t('common.activeUpper') }") && detailSource.includes("{ value: 'inactive', label: t('common.inactiveUpper') }"), '批量修改状态下拉应使用上架/下架')
   })
@@ -471,19 +504,20 @@ async function main() {
   if (containerPickerRetailPriceFailure) failures.push(containerPickerRetailPriceFailure)
 
   const densityFailure = await runTest('详情页主明细表关键字段应默认可读并保留紧凑输入列', () => {
-    const imageColumn = readColumnBlock(detailMainTableSource, 'productImage')
+    // 重设计：图片并入「商品」列（不再单独占列）；去掉序号列后最小横向宽度相应收窄到 1080。
+    const productColumn = detailMainTableSource.slice(
+      detailMainTableSource.indexOf("key: 'product'"),
+      detailMainTableSource.indexOf("key: 'locationCode'"),
+    )
     const locationColumn = readColumnBlock(detailMainTableSource, 'locationCode')
     const allocQuantityColumn = readColumnBlock(detailMainTableSource, 'allocQuantity')
     const importPriceColumn = readColumnBlock(detailMainTableSource, 'importPrice')
 
-    assert(detailSource.includes('productImage: 42'), '图片列默认宽度应保持 42')
-    assert(readNumericValue(imageColumn, /width=\{(\d+)\}/) <= 32, '图片宽度应压到 32 以内')
-    assert(readNumericValue(imageColumn, /height=\{(\d+)\}/) <= 32, '图片高度应压到 32 以内')
-    assert(detailSource.includes('itemNumber: 132'), '货号列默认宽度应放宽到 132，避免复制按钮挤压名称列')
-    assert(detailSource.includes('productName: 180'), '商品名称列默认宽度应放宽到 180')
-    assert(detailSource.includes('barcode: 112'), '条码列默认宽度应放宽到 112')
+    assert(readNumericValue(productColumn, /width=\{(\d+)\}/) <= 32, '图片宽度应压到 32 以内')
+    assert(readNumericValue(productColumn, /height=\{(\d+)\}/) <= 32, '图片高度应压到 32 以内')
+    assert(detailSource.includes('product: 320'), '商品列默认宽度应放得下图片、货号与名称')
     assert(detailSource.includes('scroll={{ x: detailTableScrollX, y: 620 }}'), '主表 scroll.x 应基于当前列宽动态计算')
-    assert(detailSource.includes('STORE_ORDER_DETAIL_TABLE_MIN_SCROLL_X = 1290'), '主表动态 scroll.x 应保留原紧凑最小宽度')
+    assert(detailSource.includes('STORE_ORDER_DETAIL_TABLE_MIN_SCROLL_X = 1080'), '主表动态 scroll.x 应保留最小宽度')
     assert(locationColumn.includes('width: STORE_ORDER_DETAIL_DEFAULT_COLUMN_WIDTHS.locationCode'), '货位列应继续走默认紧凑列宽常量')
     assert(readNumericValue(allocQuantityColumn, /style=\{\{\s*width:\s*(\d+)/) <= 62, '发货数输入框宽度应压到 62 以内')
     assert(readNumericValue(importPriceColumn, /style=\{\{\s*width:\s*(\d+)/) <= 62, '进口价输入框宽度应压到 62 以内')
@@ -563,7 +597,9 @@ async function main() {
     assert(detailSource.includes('getEditedLinePayloads()'), '整单保存应从已修改行生成 payload')
     assert(detailSource.includes('batchUpdateStoreOrderLines({'), '整单保存应复用明细批量保存接口')
     assert(detailSource.includes('detailGUID: item.detailGUID'), '整单保存 payload 应携带明细 GUID 以命中后端快路径')
-    assert(detailSource.includes("t('storeOrders.detail.saveEditedLines'"), '详情页缺少整单保存按钮文案')
+    // 重设计：整单保存改为吸底「未保存修改」条里的「保存 N 行」，有草稿时才出现。
+    assert(detailSource.includes("t('warehouseUi.storeOrderDetail.saveLines', { count: editedLineCount })"), '详情页缺少整单保存（保存 N 行）按钮文案')
+    assert(detailSource.includes('{canUseWarehouseManagerActions && editedLineCount > 0 ? ('), '未保存修改条应只在有草稿且有订货管理权限时出现')
     assert(
       detailSource.includes('disabled={isReadonlyOrder || isPasteOptimisticPreviewActive || editedLineCount === 0}'),
       '整单保存应在只读、临时预览或无修改时禁用',
@@ -593,32 +629,39 @@ async function main() {
   if (detailRefreshImportPriceFailure) failures.push(detailRefreshImportPriceFailure)
 
   const warehouseManagerActionFailure = await runTest('仓库员工仅可看到详情页只读文档入口，不应看到订货管理功能按钮', () => {
-    const orderDetailSectionSource = detailSource.slice(
-      detailSource.indexOf("title={t('storeOrders.orderDetailSection')}"),
-      detailSource.indexOf('className="store-order-detail-filter-bar"'),
+    // 重设计：配货单/发票/状态流转在概况卡右侧；明细管理入口在明细卡工具栏、「添加商品」菜单、勾选条与吸底保存条。
+    const overviewActionsSource = detailSource.slice(
+      detailSource.indexOf('<div className="wh-order-detail-overview-actions">'),
+      detailSource.indexOf('<ol className="wh-order-detail-steps"'),
     )
-    const pickingButtonSource = orderDetailSectionSource.slice(
-      orderDetailSectionSource.indexOf('icon={<PrinterOutlined />}'),
-      orderDetailSectionSource.indexOf("t('storeOrders.pickingList')"),
+    const linesToolbarSource = detailSource.slice(
+      detailSource.indexOf('<div className="wh-order-detail-toolbar">'),
+      detailSource.indexOf('<DndContext sensors={detailColumnDragSensors}'),
+    )
+    const addProductMenuSource = detailSource.slice(
+      detailSource.indexOf("const addProductMenuItems: MenuProps['items'] = ["),
+      detailSource.indexOf('const handleAddProductMenuClick'),
+    )
+    const pickingButtonPosition = overviewActionsSource.indexOf("t('storeOrders.pickingList')")
+    const pickingButtonSource = overviewActionsSource.slice(
+      overviewActionsSource.lastIndexOf('<Button', pickingButtonPosition),
+      pickingButtonPosition,
     )
     const managerGuardText = '{canUseWarehouseManagerActions ? ('
-    const detailExtraGuardText = 'canUseStoreOrderDetailExtraActions ? ('
-    const isInsideGuard = (guardText: string, targetPosition: number) => {
-      const guardPosition = orderDetailSectionSource.lastIndexOf(guardText, targetPosition)
-      const guardClosePosition = orderDetailSectionSource.lastIndexOf(') : null}', targetPosition)
+    const detailExtraGuardText = '{canUseStoreOrderDetailExtraActions ? ('
+    const isInsideGuard = (source: string, guardText: string, targetPosition: number) => {
+      const guardPosition = source.lastIndexOf(guardText, targetPosition)
+      const guardClosePosition = source.lastIndexOf(') : null}', targetPosition)
       return guardPosition >= 0 && guardPosition > guardClosePosition
     }
-    const invoiceButtonPosition = orderDetailSectionSource.indexOf("t('storeOrders.invoice')")
-    const pickingButtonPosition = orderDetailSectionSource.indexOf("t('storeOrders.pickingList')")
+    const invoiceButtonPosition = overviewActionsSource.indexOf("t('storeOrders.invoice')")
     const managerOnlyDetailActions = [
-      "t('storeOrders.quickAdd')",
-      "t('storeOrders.selectProduct')",
-      "t('storeOrders.containerPicker')",
-      "t('storeOrders.excelPaste')",
-      "t('storeOrders.detail.saveEditedLines')",
+      "t('warehouseUi.storeOrderDetail.quickAddButton')",
+      'menu={{ items: addProductMenuItems, onClick: handleAddProductMenuClick }}',
       "t('storeOrders.detail.refreshImportPrices')",
-      "t('storeOrders.batchModify')",
-      "t('storeOrders.detail.selectedRows'",
+      '<SelectionActionBar',
+      "t('warehouseUi.storeOrderDetail.copyOrderQtyToAlloc')",
+      "t('warehouseUi.storeOrderDetail.batchModify')",
     ]
 
     assert(
@@ -710,28 +753,36 @@ async function main() {
       '详情页编辑保护应同时检查仓库管理员权限',
     )
     assert(
-      detailSource.includes('extra={\n                  canUseWarehouseManagerActions ? ('),
-      '详情页订单头功能按钮应仅仓库管理员可见',
+      overviewActionsSource.includes('{canUseWarehouseManagerActions ? (\n                  <Dropdown') &&
+        overviewActionsSource.includes('menu={{ items: overviewMenuItems, onClick: handleOverviewMenuClick }}') &&
+        detailSource.includes('const flowActions = resolveStoreOrderDetailFlowActions(detail?.flowStatus, canUseWarehouseManagerActions)'),
+      '详情页状态流转（开始配货/完成订单/更改状态）应仅仓库管理员可见',
     )
     assert(
-      orderDetailSectionSource.includes('canUseStoreOrderDetailExtraActions ? (\n                  <Space wrap>') &&
-        orderDetailSectionSource.indexOf(detailExtraGuardText) >= 0 &&
-        orderDetailSectionSource.indexOf(detailExtraGuardText) < pickingButtonPosition &&
-        !isInsideGuard(managerGuardText, pickingButtonPosition) &&
+      overviewActionsSource.indexOf(detailExtraGuardText) >= 0 &&
+        overviewActionsSource.indexOf(detailExtraGuardText) < pickingButtonPosition &&
+        isInsideGuard(overviewActionsSource, detailExtraGuardText, pickingButtonPosition) &&
+        !isInsideGuard(overviewActionsSource, managerGuardText, pickingButtonPosition) &&
         pickingButtonSource.includes('navigate(`/warehouse/store-order/picking/${detail.orderGUID}`)') &&
         pickingButtonSource.includes('icon={<PrinterOutlined />}'),
       '详情页配货单按钮应受只读文档入口权限控制，不能只由仓库管理员权限包住',
     )
     assert(
-      invoiceButtonPosition > 0 && isInsideGuard(managerGuardText, invoiceButtonPosition),
+      invoiceButtonPosition > 0 && isInsideGuard(overviewActionsSource, managerGuardText, invoiceButtonPosition),
       '详情页发票按钮仍应仅仓库管理员可见',
     )
     assert(
       managerOnlyDetailActions.every((actionText) => {
-        const actionPosition = orderDetailSectionSource.indexOf(actionText)
-        return actionPosition > 0 && isInsideGuard(managerGuardText, actionPosition)
+        const actionPosition = linesToolbarSource.indexOf(actionText)
+        return actionPosition > 0 && isInsideGuard(linesToolbarSource, managerGuardText, actionPosition)
       }),
       '详情页明细管理功能按钮应继续受仓库管理员权限保护',
+    )
+    assert(
+      addProductMenuSource.includes("t('storeOrders.selectProduct')") &&
+        addProductMenuSource.includes("t('warehouseUi.storeOrderDetail.addFromContainer')") &&
+        addProductMenuSource.includes("t('storeOrders.excelPaste')"),
+      '「添加商品」菜单应保留选择商品、货柜选择与 Excel 粘贴三个入口',
     )
     assert(
       detailSource.includes("column.key !== 'actions'") &&
@@ -787,20 +838,37 @@ async function main() {
     assert(detailSource.includes("handleBatchConfirm({ type: 'copyOrderQuantityToAllocQuantity' })"), '页面批量复制按钮应复用同一个批量确认分支')
     assert(detailSource.includes('detailGUID: line.detailGUID'), '复制订货数量 payload 应携带明细 GUID 以命中后端快路径')
     assert(detailSource.includes("t('storeOrders.batchCopyOrderQuantityConfirmTitle')"), '风险行应弹出二次确认标题')
-    assert(detailSource.includes("t('storeOrders.batchCopyOrderQuantityButton')"), '详情页应提供批量复制按钮短文案')
+    // 重设计：「批量复制」改名「发货数 = 订货数」，只在勾选后出现在勾选条里（原「放在配货单前面」的位置约束随之失效）。
+    const selectionBarSource = detailSource.slice(
+      detailSource.indexOf('<SelectionActionBar selectedCount={selectedLineKeys.length}'),
+      detailSource.indexOf('</SelectionActionBar>'),
+    )
     assert(
-      detailSource.indexOf("t('storeOrders.batchCopyOrderQuantityButton')") <
-        detailSource.indexOf("t('storeOrders.pickingList')"),
-      '批量复制按钮应放在配货单按钮前面',
+      selectionBarSource.includes("t('warehouseUi.storeOrderDetail.copyOrderQtyToAlloc')") &&
+        selectionBarSource.includes("handleBatchConfirm({ type: 'copyOrderQuantityToAllocQuantity' })") &&
+        detailMessagesZhSource.includes('"copyOrderQtyToAlloc": "发货数 = 订货数"'),
+      '详情页勾选条应提供「发货数 = 订货数」批量复制入口',
     )
   })
   if (batchCopyOrderQuantityFailure) failures.push(batchCopyOrderQuantityFailure)
 
-  const detailActionButtonColorFailure = await runTest('详情页整单保存和 Excel 粘贴按钮应使用不同颜色', () => {
-    assert(detailSource.includes('store-order-excel-paste-button'), 'Excel 粘贴按钮应有专用颜色 class')
-    assert(detailSource.includes('store-order-save-edited-lines-button'), '整单保存按钮应有专用颜色 class')
-    assert(compactCssSource.includes('.store-order-excel-paste-button'), '紧凑样式缺少 Excel 粘贴按钮颜色')
-    assert(compactCssSource.includes('.store-order-save-edited-lines-button'), '紧凑样式缺少整单保存按钮颜色')
+  // 重设计：两个按钮不再并排——整单保存是吸底「未保存修改」条里的主按钮，Excel 粘贴收进「添加商品 ▾」菜单，
+  // 原用来区分两者的专用颜色 class 不再需要。
+  const detailActionButtonColorFailure = await runTest('详情页整单保存与 Excel 粘贴入口应明确区分', () => {
+    const unsavedBarSource = detailSource.slice(
+      detailSource.indexOf('<div className="wh-order-detail-unsaved-bar"'),
+      detailSource.indexOf('</section>', detailSource.indexOf('<div className="wh-order-detail-unsaved-bar"')),
+    )
+    assert(
+      unsavedBarSource.includes('type="primary"') && unsavedBarSource.includes('onClick={() => void handleSaveEditedLines()}'),
+      '整单保存应是吸底未保存修改条里的主按钮',
+    )
+    assert(
+      detailSource.includes("{ key: 'excelPaste', icon: <FileExcelOutlined />, label: t('storeOrders.excelPaste') }") &&
+        detailSource.includes("resetPasteState('allocQuantity')\n      setPasteModalOpen(true)"),
+      'Excel 粘贴应收进添加商品菜单，打开前仍重置粘贴状态',
+    )
+    assert(/\.wh-order-detail-unsaved-bar\s*\{[^}]*position:\s*sticky/.test(detailCssSource), '未保存修改条应吸底')
   })
   if (detailActionButtonColorFailure) failures.push(detailActionButtonColorFailure)
 
@@ -833,9 +901,15 @@ async function main() {
     assert(detailSource.includes('draftTotalImportAmount') && detailSource.includes('Number(allocQuantity) * Number(importPrice) - Number(savedAmount)'), '发货金额 ex GST 应按页面草稿金额差值更新')
     assert(detailSource.includes('detail?.totalAllocatedImportAmount') && detailSource.includes('line.allocatedImportAmount'), '发货金额 ex GST 应优先使用发货/发票金额字段')
     assert(detailSource.includes('line.price') && detailSource.includes('line.allocQuantity'), '预计销售额应按零售价和当前发货数计算')
-    assert(detailSource.includes("label={t('storeOrders.orderAmountLabel')}") && detailSource.includes('formatAmount(estimatedSalesAmount)'), '订单金额位置应改为显示预计销售额')
-    assert(detailSource.includes("label={t('storeOrders.importAmountLabel')}") && detailSource.includes('formatAmount(draftTotalImportAmount)'), '发货金额 ex GST 应显示草稿总金额')
-    assert(detailSource.includes("label={t('storeOrders.gstAmountLabel')}") && detailSource.includes('formatAmount(gstAmount)'), '详情页应新增 GST 10% 显示')
+    // 重设计：金额移到「数量与金额」卡（dl 列表、带 $）；预计销售额只按当前已加载的一页求和，有筛选或超过一页时标「仅本页」。
+    assert(
+      detailSource.includes(": t('storeOrders.orderAmountLabel')}") &&
+        detailSource.includes("? t('warehouseUi.storeOrderDetail.estimatedSalesPage')") &&
+        detailSource.includes('formatCurrencyAmount(estimatedSalesAmount)'),
+      '订单金额位置应改为显示预计销售额，且只覆盖本页时标明本页',
+    )
+    assert(detailSource.includes("<dt>{t('storeOrders.importAmountLabel')}</dt>") && detailSource.includes('formatCurrencyAmount(draftTotalImportAmount)'), '发货金额 ex GST 应显示草稿总金额')
+    assert(detailSource.includes("<dt>{t('storeOrders.gstAmountLabel')}</dt>") && detailSource.includes('formatCurrencyAmount(gstAmount)'), '详情页应新增 GST 10% 显示')
     assert(detailMainTableSource.includes('Number(edited.allocQuantity ?? record.allocQuantity ?? 0) * Number(edited.importPrice ?? record.importPrice ?? 0)'), '明细进口金额应按当前草稿发货数和进口价显示')
     assert(detailMainTableSource.includes("sortOrder: detailColumnSortOrder('allocatedImportAmount')"), '明细发货金额列应按 allocatedImportAmount 发起服务端排序')
     assert(detailMainTableSource.includes('editedAllocQuantity !== undefined') && detailMainTableSource.includes('Number(record.volume) * Number(editedAllocQuantity)'), '明细发货体积应按当前草稿发货数显示')
