@@ -508,7 +508,8 @@ export function hasCashReconciliation(item: Pick<DailyCloseListItem, "expectedCa
 
 // ───────────────────────── 查看保存记录（员工操作日志）─────────────────────────
 
-export type SaveLogSource = "legacy" | "pos";
+/** 「保存日结」事件只在新收银的操作审计里（见 resolveSaveLogLink），所以来源固定为 pos。 */
+export type SaveLogSource = "pos";
 export type SaveLogPreset = "today" | "yesterday" | "last7" | "last31";
 
 export interface SaveLogLink {
@@ -518,23 +519,28 @@ export interface SaveLogLink {
   preset: SaveLogPreset;
 }
 
+/** 日志页「近 31 天」= 今天及前 30 天；更早的记录不在任何预设窗口内。 */
+export const SAVE_LOG_MAX_AGE_DAYS = 30;
+
 /**
- * 跳员工操作日志的预置参数。日志页只支持「今天 / 昨天 / 近 7 天 / 近 31 天」，
- * 取能盖住保存日的最小预设（保存日在门店时区）；超过 31 天的旧记录只能落在近 31 天，页面不会有对应日志。
- * 来源：补录记录来自旧收银日志优先老收银，其余优先新收银；没有对应来源的查看权限就换另一个，都没有返回 null（不显示入口）。
+ * 跳员工操作日志的预置参数。
+ * 来源固定为新收银（pos）：不管是客户端上传的日结，还是按审计事件回填的占位（补录），
+ * 「保存日结」都是新收银写入 pos_operation_audit 的事件；老收银日志里没有，所以不能跳过去，
+ * 没有「新收银日志」查看权限时不显示入口。
+ * 日志页只支持「今天 / 昨天 / 近 7 天 / 近 31 天」，取能盖住保存日的最小预设（保存日按门店时区）；
+ * 保存日早于窗口（超过 30 天）时跳过去只会是空列表，所以同样不显示入口。
  */
 export function resolveSaveLogLink(
-  item: Pick<DailyCloseListItem, "dataSource" | "storeCode" | "deviceCode" | "savedAtUtc" | "storeTimeZoneId">,
-  access: { canLegacy: boolean; canPos: boolean },
+  item: Pick<DailyCloseListItem, "storeCode" | "deviceCode" | "savedAtUtc" | "storeTimeZoneId">,
+  access: { canPos: boolean },
   today: string,
 ): SaveLogLink | null {
-  const order: SaveLogSource[] = item.dataSource === "AuditBackfill" ? ["legacy", "pos"] : ["pos", "legacy"];
-  const source = order.find((candidate) => (candidate === "legacy" ? access.canLegacy : access.canPos));
-  if (!source) return null;
+  if (!access.canPos) return null;
   const savedDate = toZonedMoment(item.savedAtUtc, item.storeTimeZoneId)?.date;
   const age = savedDate ? diffDays(today, savedDate) : null;
+  if (age !== null && age > SAVE_LOG_MAX_AGE_DAYS) return null;
   const preset: SaveLogPreset = age === null || age <= 0 ? "today" : age === 1 ? "yesterday" : age <= 6 ? "last7" : "last31";
-  return { source, stores: item.storeCode, device: item.deviceCode, preset };
+  return { source: "pos", stores: item.storeCode, device: item.deviceCode, preset };
 }
 
 // ───────────────────────── 错误 ─────────────────────────

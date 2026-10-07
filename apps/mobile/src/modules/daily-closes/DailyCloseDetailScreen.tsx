@@ -46,7 +46,7 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
   const query = useDailyCloseDetail(id);
   const formatError = useDailyCloseErrorMessage("errors.detailFailed");
   const dateLabel = useBusinessDateLabel();
-  const canLegacyLogs = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  // 「保存日结」事件只在新收银的操作审计里，所以只看新收银日志的查看权限。
   const canPosLogs = useAuthStore((state) => state.access.canViewPosOperationAudits);
   const detail = query.data;
 
@@ -75,7 +75,7 @@ function DetailContent({ id, onBack }: { id: string; onBack: () => void }) {
     const source = sourceKey ? t(`source.${sourceKey}`) : detail.clientKind || "-";
     const store = detail.storeName || detail.storeCode || "-";
     const notice = resolveBackfillNotice(detail);
-    const saveLog = resolveSaveLogLink(detail, { canLegacy: canLegacyLogs, canPos: canPosLogs }, todayInSydney());
+    const saveLog = resolveSaveLogLink(detail, { canPos: canPosLogs }, todayInSydney());
     // 折叠态摘要：只列有值的项（补录记录没有订单数与退货件数），都没有时显示「—」
     const infoSummary =
       [

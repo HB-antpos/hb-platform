@@ -378,22 +378,24 @@ assert.equal(hasCashReconciliation(item()), true);
 assert.equal(hasCashReconciliation(item({ expectedCashAmount: null, countedCashAmount: null, cashDifference: null })), false, "TraceOnly 三格都没有数据");
 assert.equal(hasCashReconciliation(item({ countedCashAmount: null })), false, "缺任何一项都不能对账");
 
-// —— 查看保存记录：跳员工操作日志的预置参数 ——
-const bothAccess = { canLegacy: true, canPos: true };
+// —— 查看保存记录：跳员工操作日志（新收银）的预置参数 ——
+// 「保存日结」事件只在新收银的操作审计里：客户端上传的日结与按审计事件回填的占位（补录）都一样，来源固定为 pos。
+const posAccess = { canPos: true };
 const saved = item({ savedAtUtc: "2026-10-06T11:48:00Z", storeTimeZoneId: "Australia/Sydney" }); // 悉尼 10-06 22:48
-assert.deepEqual(resolveSaveLogLink(saved, bothAccess, "2026-10-06"), { source: "pos", stores: "1008", device: "POS01", preset: "today" }, "客户端上传优先新收银日志");
-assert.equal(resolveSaveLogLink(saved, bothAccess, "2026-10-07")?.preset, "yesterday");
-assert.equal(resolveSaveLogLink(saved, bothAccess, "2026-10-12")?.preset, "last7", "6 天前仍在近 7 天内");
-assert.equal(resolveSaveLogLink(saved, bothAccess, "2026-10-13")?.preset, "last31", "7 天前要用近 31 天");
-assert.equal(resolveSaveLogLink(saved, bothAccess, "2026-12-30")?.preset, "last31", "超过 31 天只能落在近 31 天");
-assert.equal(resolveSaveLogLink(saved, bothAccess, "2026-10-05")?.preset, "today", "保存日晚于今天（时钟偏差）按今天");
-assert.equal(resolveSaveLogLink(item({ dataSource: "AuditBackfill" }), bothAccess, "2026-10-06")?.source, "legacy", "补录记录来自旧收银日志，优先老收银");
-assert.equal(resolveSaveLogLink(saved, { canLegacy: true, canPos: false }, "2026-10-06")?.source, "legacy", "没有新收银权限就换老收银");
-assert.equal(resolveSaveLogLink(item({ dataSource: "AuditBackfill" }), { canLegacy: false, canPos: true }, "2026-10-06")?.source, "pos");
-assert.equal(resolveSaveLogLink(saved, { canLegacy: false, canPos: false }, "2026-10-06"), null, "两个日志来源都没权限不显示入口");
+assert.deepEqual(resolveSaveLogLink(saved, posAccess, "2026-10-06"), { source: "pos", stores: "1008", device: "POS01", preset: "today" });
+assert.equal(resolveSaveLogLink(saved, posAccess, "2026-10-07")?.preset, "yesterday");
+assert.equal(resolveSaveLogLink(saved, posAccess, "2026-10-12")?.preset, "last7", "6 天前仍在近 7 天内");
+assert.equal(resolveSaveLogLink(saved, posAccess, "2026-10-13")?.preset, "last31", "7 天前要用近 31 天");
+assert.equal(resolveSaveLogLink(saved, posAccess, "2026-11-05")?.preset, "last31", "近 31 天 = 今天及前 30 天，正好 30 天前仍在窗口内");
+assert.equal(resolveSaveLogLink(saved, posAccess, "2026-11-06"), null, "31 天前已不在任何预设窗口内，跳过去只会是空列表，不显示入口");
+assert.equal(resolveSaveLogLink(saved, posAccess, "2026-12-30"), null, "更早的记录同样不显示入口");
+assert.equal(resolveSaveLogLink(saved, posAccess, "2026-10-05")?.preset, "today", "保存日晚于今天（时钟偏差）按今天");
+// 补录记录同样来自新收银的审计事件，不能跳老收银日志（老收银日志里没有它）
+assert.equal(resolveSaveLogLink(item({ dataSource: "AuditBackfill", detailLevel: "CashOnly" }), posAccess, "2026-10-06")?.source, "pos");
+assert.equal(resolveSaveLogLink(saved, { canPos: false }, "2026-10-06"), null, "没有新收银日志查看权限不显示入口（只有老收银日志权限也不行）");
 // 保存日按门店时区：悉尼 10-07 01:30 保存（UTC 10-06 14:30），悉尼今天 10-07 → today
-assert.equal(resolveSaveLogLink(item({ savedAtUtc: "2026-10-06T14:30:00Z" }), bothAccess, "2026-10-07")?.preset, "today");
-assert.equal(resolveSaveLogLink(item({ savedAtUtc: "" }), bothAccess, "2026-10-07")?.preset, "today", "保存时间无效按今天");
+assert.equal(resolveSaveLogLink(item({ savedAtUtc: "2026-10-06T14:30:00Z" }), posAccess, "2026-10-07")?.preset, "today");
+assert.equal(resolveSaveLogLink(item({ savedAtUtc: "" }), posAccess, "2026-10-07")?.preset, "today", "保存时间无效按今天");
 
 // —— 错误分类 ——
 assert.equal(classifyDailyCloseError({ response: { status: 400, data: { success: false, errorCode: "INVALID_QUERY" } } }), "invalidQuery");
