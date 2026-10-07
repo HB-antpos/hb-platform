@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   buildAppUpdateInfoRows,
   formatAppPackageVersion,
+  resolveAppUpdateChannelKind,
   resolveAppUpdateCheckAvailability,
   runAppUpdateCheck,
 } from "./app-update-info";
@@ -127,6 +128,29 @@ async function run() {
       0,
       "检查被取消后不得继续下载 OTA",
     );
+  }
+
+  // 登录页版本条的渠道标签：安装包内置裸渠道名、受控 OTA 的长 release 渠道名都要识别成同一类。
+  const channelCases: [string | null | undefined, string][] = [
+    ["production", "production"],
+    ["preview", "preview"],
+    ["development", "development"],
+    ["mobile-production-android-release-20261007t053243-1a7e593b", "production"],
+    ["mobile-preview-android-release-20261005t074303-82b53fb2", "preview"],
+    ["mobile-development-ios-release-x", "development"],
+    ["  Preview  ", "preview"],
+    ["MOBILE-PRODUCTION-ANDROID-RELEASE-A", "production"],
+    ["", "none"],
+    ["   ", "none"],
+    [null, "none"],
+    [undefined, "none"],
+    ["staging", "custom"],
+    ["mobile-staging-android-release-x", "custom"],
+    // 只认前缀，不能因为字符串里含 production 就误判。
+    ["not-production", "custom"],
+  ];
+  for (const [channel, expected] of channelCases) {
+    assert.equal(resolveAppUpdateChannelKind(channel), expected, `渠道 ${JSON.stringify(channel)} 应识别为 ${expected}`);
   }
 
   console.log("app-update-info.test.ts: ok");
