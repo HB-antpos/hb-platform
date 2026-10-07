@@ -1,0 +1,158 @@
+{
+  "monthlyDailySalesDownload": {
+    "title": "Monthly Daily Sales Download",
+    "subtitle": "Export revenue, card and cash by store and by day",
+    "monthLabel": "{{monthName}} {{year}}",
+    "monthDay": "{{day}} {{monthName}}",
+    "listSeparator": ", ",
+    "month": {
+      "label": "Month",
+      "group": "Choose month",
+      "previous": "Previous month",
+      "next": "Next month",
+      "refresh": "Reload (bypass cache)"
+    },
+    "kpi": {
+      "region": "Totals for selected stores",
+      "selected": "Total of {{count}} selected store(s)",
+      "partial": "Month in progress",
+      "missing": "{{count}} store-day(s) with no data are excluded",
+      "noSplit": "Card, cash and other exclude {{count}} store-day(s) without a payment split"
+    },
+    "freshness": {
+      "complete": "Counted through {{day}} {{monthName}} · {{counted}} / {{total}} days",
+      "partial": "Counted through {{day}} {{monthName}} · {{counted}} of {{total}} days so far",
+      "none": "No days have been counted yet this month"
+    },
+    "columns": {
+      "date": "Date",
+      "code": "Store Code",
+      "name": "Store",
+      "weekday": "Weekday",
+      "revenue": "Revenue",
+      "card": "Card",
+      "cash": "Cash",
+      "other": "Other",
+      "remark": "Remarks"
+    },
+    "weekday": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "stores": {
+      "region": "Store list",
+      "title": "Stores",
+      "hint": "{{count}} store(s) · tick the ones to download",
+      "searchLabel": "Search stores by name or code",
+      "searchPlaceholder": "Name or code",
+      "selectAll": "Select all",
+      "clear": "Clear",
+      "tableLabel": "Monthly totals by store",
+      "colDownload": "Use",
+      "colStore": "Store",
+      "colMix": "Payment mix",
+      "checkLabel": "Include in download: {{name}}",
+      "legendOther": "Other (vouchers etc., revenue minus card minus cash)",
+      "tagMissing": "{{count}} day(s) missing",
+      "tagNoSplit": "{{count}} day(s) no split",
+      "tagNoSplitTitle": "Days without a payment split: {{dates}}",
+      "emptyAll": "No store data for this month",
+      "emptySearch": "No matching stores",
+      "mixLabel": "Card {{card}}%, cash {{cash}}%, other {{other}}%",
+      "mixNone": "No reliable payment split available"
+    },
+    "banner": {
+      "missingLeadOne": "{{name}} has {{count}} day(s) with no data: {{dates}}.",
+      "missingLeadMany": "{{stores}} stores have {{count}} day(s) with no data ({{names}}).",
+      "missingTail": " These days are left blank in the file and are not counted as 0 in totals.",
+      "excludeOne": "Exclude this store for now",
+      "excludeMany": "Exclude these {{count}} stores for now",
+      "noSplitLeadOne": "{{name}} has {{count}} day(s) without a payment split: {{dates}}.",
+      "noSplitLeadMany": "{{stores}} stores have {{count}} day(s) without a payment split ({{names}}).",
+      "noSplitTail": " Revenue for these days is still counted; card, cash and other are left blank (shown as —) and excluded from those three totals."
+    },
+    "daily": {
+      "region": "Daily detail for one store",
+      "tableLabel": "Daily detail for one store",
+      "empty": "No store",
+      "subtitle": "{{monthLabel}} by day · {{days}} day(s)",
+      "note": "This store's data in the downloaded file matches this table · amounts in AUD",
+      "notIncluded": "This store is not ticked and will not be in the file · amounts in AUD",
+      "totalLabel": "{{monthName}} total",
+      "missingTitle": "Statistics for this day are not published yet (no data)",
+      "noSplitTitle": "No reliable payment split for this day",
+      "noStores": "No store to preview",
+      "legendMissing": "{{count}} day(s) with no data: {{dates}}. Shown as — and excluded from totals.",
+      "legendNoSplit": "{{count}} day(s) without a payment split: {{dates}}. Card, cash and other are shown as — and excluded from those three totals."
+    },
+    "footer": {
+      "region": "Download",
+      "pickFirst": "Tick the stores to download on the left first",
+      "summaryXlsx": "1 Excel file · {{sheets}} sheets (Summary + {{count}} store(s)) · one row per store per day",
+      "summaryCsv": "1 CSV file · {{rows}} rows · columns: {{columns}}",
+      "fileLine": "File name {{fileName}} · amounts in AUD, two decimals",
+      "formatGroup": "File format",
+      "formatXlsx": "Excel workbook",
+      "formatCsv": "CSV long table",
+      "download": "Download {{monthName}} data",
+      "downloadIdle": "Download",
+      "generating": "Generating…",
+      "monthData": "{{monthName}} data",
+      "noData": "No days have been counted yet this month, so there is nothing to download",
+      "partial": "This month is not over: the file only covers 1–{{last}} {{monthName}}; data from {{next}} {{monthName}} onward needs a new download once available",
+      "partialOneDay": "This month is not over: the file only covers 1 {{monthName}}; data from {{next}} {{monthName}} onward needs a new download once available",
+      "noteMissing": "{{count}} store-day(s) with no data: left blank in the file, not counted as 0 in totals",
+      "noteNoSplit": "{{count}} store-day(s) without a payment split: card, cash and other are left blank and excluded from those three totals"
+    },
+    "progress": {
+      "preparing": "Preparing export…",
+      "store": "Generating {{name}} ({{index}} / {{total}})",
+      "finalize": "Generating the Excel file…",
+      "cancel": "Cancel"
+    },
+    "interrupted": {
+      "storeFailed": "Export interrupted: {{name}} failed ({{reason}}); {{done}} of {{total}} stores finished.",
+      "finalizeFailed": "Export interrupted: the file could not be generated ({{reason}}).",
+      "kept": " Finished stores are kept.",
+      "retry": "Retry the {{count}} unfinished",
+      "retryFile": "Retry generating the file",
+      "downloadDone": "Download only the {{count}} finished",
+      "discard": "Discard this export"
+    },
+    "state": {
+      "noScope": "Your account has no stores to view.",
+      "loadFailed": "Failed to load the monthly daily sales. Please try again.",
+      "retry": "Retry",
+      "loading": "Loading…"
+    },
+    "toast": {
+      "exported": "Exported {{count}} store(s): {{fileName}}",
+      "exportedCsv": "Exported {{rows}} rows: {{fileName}}",
+      "cancelled": "Export cancelled",
+      "exportFailed": "Export failed. Please try again later."
+    },
+    "export": {
+      "summarySheet": "Summary",
+      "fileNamePrefix": "Monthly_Daily_Sales",
+      "summaryTitle": "Monthly daily sales summary · {{monthLabel}}",
+      "summarySubtitle": "Unit: AUD · counted through {{through}} · {{count}} store(s) selected",
+      "summarySubtitleCompletedOnly": "Unit: AUD · counted through {{through}} · {{selected}} store(s) selected, this file only has the {{count}} finished",
+      "partialMonth": "month in progress ({{counted}} of {{total}} days counted)",
+      "storeTitle": "{{name}} · {{code}} · {{monthLabel}}",
+      "total": "Total",
+      "dayMissing": "No data (statistics not published yet, left blank)",
+      "dayNoSplit": "No payment split (card, cash and other left blank)",
+      "noteMissing": "{{count}} day(s) with no data: {{dates}} (left blank, not counted in totals)",
+      "noteNoSplit": "{{count}} day(s) without a payment split: {{dates}} (card, cash and other left blank, excluded from those three totals)",
+      "noteSeparator": "; ",
+      "footnoteMissing": "Note: a day with no data means its statistics are not published yet. The cells are left blank and are not counted as 0 in any total.",
+      "footnoteNoSplit": "Note: on days without a payment split, revenue does not reconcile with the POS payment records (older-system data has no payment breakdown, or statistics have not yet caught up with late-uploaded orders). Revenue is still counted; card, cash and other are left blank and the totals of those three columns exclude these days.",
+      "footnotePartial": "Note: this month is not over. The file only has data through {{through}}; days counted later need a new download."
+    }
+  }
+}

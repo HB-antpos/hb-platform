@@ -129,6 +129,7 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/executive-sales-intelligence/overview",       TitleKey = "menu.salesData",   Icon = "DashboardOutlined", Permission = Permissions.SalesDashboard.SalesDataView },
                     new() { Path = "/executive-sales-intelligence/sales-detail-v2", TitleKey = "menu.salesDetail", Icon = "FileTextOutlined",  Permission = Permissions.SalesDashboard.SalesDetailView },
                     new() { Path = "/executive-sales-intelligence/compact-sales-board", TitleKey = "menu.compactSalesBoard", Icon = "BarChartOutlined", Permission = Permissions.SalesDashboard.CompactBoardView },
+                    new() { Path = "/executive-sales-intelligence/monthly-daily-sales-download", TitleKey = "menu.monthlyDailySalesDownload", Icon = "DownloadOutlined", Permission = Permissions.SalesDashboard.MonthlyDailySalesDownloadView },
                     new() { Path = "/executive-sales-intelligence/product-movement-report", TitleKey = "menu.productMovementReport", Icon = "ReconciliationOutlined", Permission = Permissions.SalesDashboard.ProductMovementView },
                     // 进货销量分析：批量货号销量与分店进货销量分析合为一页两个标签，任一页权限即显示入口，标签再按各自权限显示。
                     new() { Path = "/executive-sales-intelligence/purchase-sales-analysis", TitleKey = "menu.purchaseSalesAnalysis", Icon = "BarChartOutlined", AnyPermissions = new List<string> { Permissions.SalesDashboard.BatchProductSalesView, Permissions.SalesDashboard.LocalSupplierPurchaseSalesView } },
@@ -718,6 +719,7 @@ namespace BlazorApp.Api.Services
                 Permissions.SalesDashboard.SalesDataView,
                 Permissions.SalesDashboard.SalesDetailView,
                 Permissions.SalesDashboard.CompactBoardView,
+                Permissions.SalesDashboard.MonthlyDailySalesDownloadView,
                 Permissions.SalesDashboard.ProductMovementView,
                 Permissions.SalesDashboard.BatchProductSalesView,
                 Permissions.SalesDashboard.WarehouseFlowView,

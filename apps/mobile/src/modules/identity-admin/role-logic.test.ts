@@ -89,7 +89,7 @@ assert.equal(implicitPreview[0].visible && implicitPreview[0].readOnly, true);
 assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
-assert.equal(fullMenus.filter((item) => item.platform === "web").length, 45);
+assert.equal(fullMenus.filter((item) => item.platform === "web").length, 46);
 assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 33);
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "app-install")?.permissionCodes,

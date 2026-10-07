@@ -557,6 +557,10 @@
       "name": "查看独立销售看板",
       "description": "Web 页面 /executive-sales-intelligence/compact-sales-board - 查看紧凑布局的分店、供应商和商品销售数据"
     },
+    "SalesDashboard.MonthlyDailySalesDownload.View": {
+      "name": "查看并下载月度日销售",
+      "description": "Web 页面 /executive-sales-intelligence/monthly-daily-sales-download - 选择月份和分店，预览并下载各店每天的营业额、刷卡和现金"
+    },
     "SalesDashboard.BatchProductSales.View": {
       "name": "查看批量货号销量",
       "description": "Web 页面 /executive-sales-intelligence/purchase-sales-analysis「批量货号销量」标签 - 按导入货号查看商品每日销量、分店销量及折扣成交情况"

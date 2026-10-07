@@ -557,6 +557,10 @@
       "name": "View compact sales dashboard",
       "description": "View store, supplier and product sales data in a compact layout."
     },
+    "SalesDashboard.MonthlyDailySalesDownload.View": {
+      "name": "View and download monthly daily sales",
+      "description": "Choose a month and stores, then preview and download each store's daily revenue, card and cash."
+    },
     "SalesDashboard.BatchProductSales.View": {
       "name": "View batch item sales",
       "description": "View daily, store and discounted sales for imported item numbers."

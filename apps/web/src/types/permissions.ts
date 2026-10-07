@@ -91,6 +91,7 @@ export const P = {
     SalesDataView: 'SalesDashboard.SalesData.View',
     SalesDetailView: 'SalesDashboard.SalesDetail.View',
     CompactBoardView: 'SalesDashboard.CompactBoard.View',
+    MonthlyDailySalesDownloadView: 'SalesDashboard.MonthlyDailySalesDownload.View',
     ProductMovementView: 'SalesDashboard.ProductMovement.View',
     BatchProductSalesView: 'SalesDashboard.BatchProductSales.View',
     WarehouseFlowView: 'SalesDashboard.WarehouseFlow.View',

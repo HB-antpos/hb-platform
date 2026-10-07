@@ -1164,6 +1164,7 @@ builder.Services.AddScoped<DeviceActivationCodeManagementService>();
 builder.Services.AddScoped<IAttendancePosDeviceStatusProvider, AttendancePosDeviceStatusProvider>();
 builder.Services.AddScoped<ITaxInvoiceService, TaxInvoiceService>();
 builder.Services.AddScoped<ISalesDashboardReactService, SalesDashboardReactService>();
+builder.Services.AddScoped<IMonthlyStoreDailySalesReactService, MonthlyStoreDailySalesReactService>();
 builder.Services.AddScoped<ISalesDashboardCacheWarmer, SalesDashboardCacheWarmer>();
 builder.Services.AddScoped<IProductMovementReportService, ProductMovementReportService>();
 builder.Services.AddScoped<IBatchProductSalesAnalysisService, BatchProductSalesAnalysisService>();
