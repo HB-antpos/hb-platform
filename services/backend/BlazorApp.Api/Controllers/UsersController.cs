@@ -589,9 +589,12 @@ namespace BlazorApp.Api.Controllers
 
         /// <summary>
         /// 为用户分配分店
+        /// 关键逻辑：控制器要求 Users.ManageStores，与移除分店接口、前端「分店分配」入口口径一致；
+        /// 服务层再按角色（管理员 / 有主分店的店长）与目标分店范围收口。
+        /// 此前这里只有 [Authorize]，该权限码对写操作不起作用，单独去掉它仍能通过接口分配分店。
         /// </summary>
         [HttpPost("guid/{guid}/stores")]
-        [Authorize]
+        [Authorize(Policy = Permissions.Users.ManageStores)]
         public async Task<IActionResult> AssignStoresToUser(
             string guid,
             [FromBody] List<UserStoreAssignmentDto> storeAssignments
