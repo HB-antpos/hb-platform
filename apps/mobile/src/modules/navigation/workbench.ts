@@ -62,6 +62,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "promotions", labelKey: "routes.promotions", icon: "sale-outline" },
       { routeName: "reports", labelKey: "routes.reports", icon: "chart-line" },
       { routeName: "legacy-employee-logs", labelKey: "routes.legacyEmployeeLogs", icon: "clipboard-text-clock-outline" },
+      { routeName: "daily-closes", labelKey: "routes.dailyCloses", icon: "cash-register" },
     ],
   },
   {

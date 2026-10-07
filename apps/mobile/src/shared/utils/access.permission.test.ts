@@ -60,6 +60,28 @@ assertEqual(
   "legacy PosTerminal.Audit.View without prefix is treated as the same permission"
 );
 
+// 日结记录只认独立权限码：收银机上的日结权限、员工操作日志权限都不能打开它（与后端 FullAppMenu 同口径）。
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.DailyCloseRecords.View])).canViewDailyCloseRecords,
+  true,
+  "DailyCloseRecords.View enables the daily close records entrance"
+);
+assertEqual(
+  buildAccess(createUser(["Permissions.PosTerminal.DailyClose.View", "Permissions.PosTerminal.DailyClose.Save", PERMISSIONS.LegacyEmployeeLogs.View, PERMISSIONS.PosTerminal.AuditView])).canViewDailyCloseRecords,
+  false,
+  "POS terminal daily close permissions and operation log permissions do not unlock daily close records"
+);
+assertEqual(
+  buildAccess(createUser([], ["Admin"])).canViewDailyCloseRecords,
+  true,
+  "administrators can view daily close records"
+);
+assertEqual(
+  buildAccess(null).canViewDailyCloseRecords,
+  false,
+  "no session means no daily close records"
+);
+
 const purchaseLegacyAccess = buildAccess(
   createUser(["LocalInvocie.View", "LocalInvocie.Edit"])
 );

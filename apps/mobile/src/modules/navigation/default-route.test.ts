@@ -437,6 +437,31 @@ assertEqual(
 );
 
 assertEqual(
+  TAB_PATHS["daily-closes"],
+  "/(shell)/daily-closes",
+  "daily closes route is registered as a valid tab path"
+);
+
+// 日结记录按账号权限与可查看分店授权：设备会话必须隐藏，账号会话照后端菜单显示。
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["product-query", "daily-closes"],
+    isDeviceMode: true,
+  }).join(","),
+  "workbench,product-query,settings",
+  "设备模式收到显式日结记录菜单时也必须隐藏该入口"
+);
+
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["legacy-employee-logs", "daily-closes"],
+    isDeviceMode: false,
+  }).join(","),
+  "workbench,legacy-employee-logs,daily-closes,settings",
+  "账号会话必须保留后端下发的日结记录入口"
+);
+
+assertEqual(
   TAB_PATHS["seasonal-cards"],
   "/(shell)/seasonal-cards",
   "seasonal cards route is registered as a valid tab path"

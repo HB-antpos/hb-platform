@@ -18,6 +18,10 @@ export const PERMISSIONS = {
     View: "LegacyEmployeeLogs.View",
     Review: "LegacyEmployeeLogs.Review",
   },
+  // 日结记录：独立顶层权限码，不挂在收银机权限（Permissions.PosTerminal.*）下。
+  DailyCloseRecords: {
+    View: "DailyCloseRecords.View",
+  },
   EmployeeProfiles: {
     View: "EmployeeProfiles.View",
     Edit: "EmployeeProfiles.Edit",
@@ -217,6 +221,7 @@ function createEmptyAccess(): AccessControl {
     canViewDeviceRegistration: false,
     canViewLegacyEmployeeLogs: false,
     canViewPosOperationAudits: false,
+    canViewDailyCloseRecords: false,
     canReviewLegacyEmployeeLogs: false,
     canManageDeviceRegistration: false,
     canManageDeviceActivationCodes: false,
@@ -366,6 +371,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canReviewLegacyEmployeeLogs = hasPermission(PERMISSIONS.LegacyEmployeeLogs.Review);
   // 员工操作日志（新收银）：后端只放行管理员与店长类角色并按可管理分店收口；核查与老收银共用同一权限。
   const canViewPosOperationAudits = hasPermission(PERMISSIONS.PosTerminal.AuditView);
+  // 日结记录：只认独立权限码；分店范围由后端收口（管理员全部，店长只看自己关联的分店）。
+  const canViewDailyCloseRecords = hasPermission(PERMISSIONS.DailyCloseRecords.View);
   const canViewDeviceRegistration =
     canManageDeviceRegistration ||
     hasPermission(PERMISSIONS.DeviceRegistration.View) ||
@@ -454,6 +461,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewDeviceRegistration,
     canViewLegacyEmployeeLogs,
     canViewPosOperationAudits,
+    canViewDailyCloseRecords,
     canReviewLegacyEmployeeLogs,
     canManageDeviceRegistration,
     canManageDeviceActivationCodes,
