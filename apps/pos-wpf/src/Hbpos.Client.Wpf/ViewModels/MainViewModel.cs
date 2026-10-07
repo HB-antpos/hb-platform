@@ -549,6 +549,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 OnOperationAuthorizationBarcodeScanned);
         }
 
+        if (_cashierLoginService is not null)
+        {
+            // 关键逻辑：登录弹窗拥有独立扫码页，Raw Input 扫码直接走收银员登录，不再先绕到商品查询。
+            _rawScannerService.Subscribe(CashierLoginScannerPageId, OnCashierLoginBarcodeScanned);
+        }
+
         _screenNavigator.PaymentSuccess = _mainChildViewModelFactory.CreatePaymentSuccessViewModel();
         PaymentSuccess.NewTransactionRequested += OnPaymentSuccessNewTransactionRequested;
         PaymentSuccess.PrintReceiptRequested += OnPaymentSuccessPrintReceiptRequested;
@@ -1307,6 +1313,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _ = ContinuePosStartupAfterShownAsync(startupOptions, CurrentOwner);
     }
 
+    /// <summary>收银员登录弹窗在 Raw Input 扫码服务里的页面标识。</summary>
+    public const string CashierLoginScannerPageId = "CashierLogin";
+
     public bool TryProcessKeyboardScannerInput(string barcode)
     {
         if (IsApiServerSwitching)
@@ -1349,12 +1358,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return true;
         }
 
+        if (IsCashierLoginOverlayOpen && TryProcessCashierLoginInput(barcode))
+        {
+            // 登录弹窗打开时还没有收银员，扫码只可能是员工条码：直接登录，不经过当前页面的商品查询。
+            return true;
+        }
+
         if (CurrentScreen is IScannerInputTarget scannerInputTarget)
         {
             return scannerInputTarget.ProcessScannerBarcode(
                 barcode,
                 "keyboard-focus-fallback",
                 "keyboard-fallback");
+        }
+
+        if (Session.CashierSession is not null)
+        {
+            // 已登录时，设置、日结、付款等不接收扫码的页面不能把条码当员工码登录：
+            // 否则商品条码会提示「收银员条码无效」，同事的员工码还会直接顶替当前收银员。
+            StatusMessage = _localization.T("shell.scanner.status.unsupportedScreen");
+            ConsoleLog.Write(
+                "RawScanner",
+                $"keyboard fallback scan ignored on non-scanner screen while signed in screen={CurrentScreen?.GetType().Name ?? "<none>"} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(barcode)}");
+            return true;
         }
 
         if (TryProcessCashierLoginInput(barcode))
@@ -1862,6 +1888,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshLocalizedShell();
         _screenNavigator.ApplySessionToScreens();
         OnPropertyChanged(nameof(IsCashierLoginOverlayOpen));
+        // 登录/登出会开关登录弹窗，Raw Input 扫码页要随之在「登录」与当前页面之间切换。
+        RefreshActiveScannerPage();
     }
 
     partial void OnCashierBarcodeInputChanged(string value)
@@ -1928,6 +1956,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _operationAuthorizationService?.ProcessScannerBarcode(args.Barcode);
     }
 
+    private void OnCashierLoginBarcodeScanned(RawBarcodeScannedEventArgs args)
+    {
+        if (!IsCashierLoginOverlayOpen)
+        {
+            // 会话已建立但扫码页尚未刷新的竞态窗口：丢弃，绝不在已登录后切换收银员。
+            ConsoleLog.Write(
+                "RawScanner",
+                $"cashier login scan ignored because login overlay is closed barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(args.Barcode)}");
+            return;
+        }
+
+        _ = TryProcessCashierLoginInput(args.Barcode);
+    }
+
     private void RefreshActiveScannerPage()
     {
         _rawScannerService.SetGlobalBarcodeInterceptor(ShouldConsumeReservedActivationBarcode);
@@ -1941,7 +1983,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ? _operationAuthorizationService.ScannerPageId
             : IsDeviceReregistrationDialogOpen
                 ? (DeviceRegistration as IScannerInputTarget)?.ScannerPageId
-                : (CurrentScreen as IScannerInputTarget)?.ScannerPageId;
+                : IsCashierLoginOverlayOpen && _cashierLoginService is not null
+                    ? CashierLoginScannerPageId
+                    : (CurrentScreen as IScannerInputTarget)?.ScannerPageId;
         _rawScannerService.SetActivePage(pageId);
     }
 
