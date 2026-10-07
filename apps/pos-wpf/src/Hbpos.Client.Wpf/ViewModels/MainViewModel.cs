@@ -60,6 +60,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IReceiptPrinterSettingsStore? _receiptPrinterSettingsStore;
     private readonly IReceiptTextFormatter _receiptTextFormatter;
     private readonly IStoreReceiptProfileApiClient? _storeReceiptProfileApiClient;
+    private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
     private readonly ILinklyBankReceiptPrinter? _linklyBankReceiptPrinter;
     private readonly IInstallmentOrderService _installmentOrderService;
     private readonly ISuspendedOrderService? _suspendedOrderService;
@@ -436,7 +437,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CashierSessionRefreshService? cashierSessionRefreshService = null,
         IRemoteMaintenanceService? remoteMaintenanceService = null,
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
-        ICatalogSyncStatusService? catalogSyncStatusService = null)
+        ICatalogSyncStatusService? catalogSyncStatusService = null,
+        IReceiptProfileSyncService? receiptProfileSyncService = null)
     {
         _core = core;
         _infra = infra;
@@ -465,6 +467,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _receiptPrinterSettingsStore = print.ReceiptPrinterSettingsStore;
         _receiptTextFormatter = print.ReceiptTextFormatter ?? new ReceiptTextFormatter();
         _storeReceiptProfileApiClient = storeReceiptProfileApiClient;
+        _receiptProfileSyncService = receiptProfileSyncService;
         _linklyBankReceiptPrinter = print.LinklyBankReceiptPrinter;
         _installmentOrderService = installmentOrderService ?? NoopInstallmentOrderService.Instance;
         _suspendedOrderService = suspendedOrderService;
@@ -668,7 +671,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
              storeReceiptProfileApiClient: _storeReceiptProfileApiClient,
              remoteMaintenanceService: _remoteMaintenanceService,
              paymentMethodSettingsService: _paymentMethodSettingsService,
-             catalogSyncStatusService: _catalogSyncStatusService);
+             catalogSyncStatusService: _catalogSyncStatusService,
+             receiptProfileSyncService: _receiptProfileSyncService);
 
     private CardRecoveryPresenter CreateCardRecoveryPresenter() =>
         new(
@@ -2369,6 +2373,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             if (isOnline && autoRetryOrders)
             {
+                // 中文注释：autoRetryOrders=true 即启动后首次探测和 15 秒定时探测（后台例行刷新）。
+                // 小票资料同步放在待传订单重试之前：它每 4 拍才真正请求一次、单轮有 20 秒预算，
+                // 而订单重试可能很久，不能让总部下发的资料被它拖慢生效。
+                await TrySyncReceiptProfileAsync(refreshCancellation);
                 await TryAutoRetryPendingOrdersAsync(refreshCancellation);
             }
 
@@ -2452,6 +2460,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 ? "main.catalogSync.failed"
                 : "main.catalogSync.initialDownloadFailed";
             StatusMessage = string.Format(_localization.CurrentCulture, _localization.T(statusKey), ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 挂在连接探测流程里同步总部下发的小票资料。放在探测任务内部，shutdown 取消令牌会同步取消它，
+    /// 且 shutdown 令牌源要等探测任务结束才释放，不会在同步进行时被销毁。失败只记日志，不影响探测。
+    /// </summary>
+    private async Task TrySyncReceiptProfileAsync(CancellationToken cancellationToken)
+    {
+        if (_receiptProfileSyncService is null || IsLifetimeEnding)
+        {
+            return;
+        }
+
+        try
+        {
+            await _receiptProfileSyncService.RunScheduledTickAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || IsLifetimeEnding)
+        {
+            // 关闭时的预期取消。
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.Write("ReceiptProfile", $"scheduled sync failed error={ex.GetType().Name}");
         }
     }
 

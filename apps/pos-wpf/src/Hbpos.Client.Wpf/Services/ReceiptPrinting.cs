@@ -55,7 +55,10 @@ public sealed record ReceiptPrinterSettings(
     int CutDistance,
     // 中文注释：客人小票是否附带 Linkly 银行收据原文；默认打印，保持旧行为。
     // 关闭后仍保留付款行的卡类型/卡号后四位，签名单、拒付单、结算单等独立银行单据不受影响。
-    bool PrintBankReceiptText = true)
+    bool PrintBankReceiptText = true,
+    // 中文注释：本机已应用的总部下发版本，0 = 从未应用过下发（资料可手工编辑）。
+    // 仅供设置页决定六个资料字段是否只读；打印路径不读取它，保存时存储层也忽略它（版本只由同步写入）。
+    int ProfileVersion = 0)
 {
     public const string DefaultPrinterPort = "USB,";
 
@@ -198,7 +201,7 @@ public interface ICashDrawerService
     Task<ReceiptPrintResult> OpenAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
+public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, IReceiptProfileLocalStore
 {
     private const string Prefix = "ReceiptPrinter:";
     private const string PrinterPortKey = Prefix + "Port";
@@ -212,7 +215,14 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
     // 中文注释：与端口、切纸距离一样按设备保存，不随门店资料作用域迁移。
     private const string PrintBankReceiptTextKey = Prefix + "PrintBankReceiptText";
     private const string ProfileStoreCodeKey = Prefix + "ProfileStoreCode";
+    // 中文注释：总部下发版本与已回执版本。两个键不带门店作用域，有效性完全取决于 ProfileStoreCode
+    // 是否等于当前门店：换店后旧值读出来一律按 0，重新绑定时在同一次批量写里清零。
+    private const string ProfileVersionKey = Prefix + "ProfileVersion";
+    private const string ProfileAckedVersionKey = Prefix + "ProfileAckedVersion";
 
+    // 中文注释：设置页保存、测试打印前保存与后台同步写入都会改资料键；用进程内互斥串行化，
+    // 避免「保存读到版本 0 → 同步写入新版本 → 保存用旧草稿覆盖六个字段」造成字段与版本不一致。
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly ILocalAppSettingsRepository _settingsRepository;
     private readonly DeviceAuthorizationState? _deviceAuthorizationState;
     private readonly ILocalDeviceRepository? _localDeviceRepository;
@@ -247,11 +257,101 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
 
     public async Task SaveAsync(ReceiptPrinterSettings settings, CancellationToken cancellationToken = default)
     {
-        var storeCode = CurrentStoreCode;
-        var values = storeCode is null
-            ? BuildLegacyWrite(settings)
-            : BuildScopedWrite(storeCode, settings);
-        await _settingsRepository.SetValuesAsync(values, cancellationToken);
+        await _writeGate.WaitAsync(cancellationToken);
+        try
+        {
+            var storeCode = CurrentStoreCode;
+            var values = storeCode is null
+                ? BuildLegacyWrite(settings)
+                : await BuildScopedSaveAsync(storeCode, settings, cancellationToken);
+            await _settingsRepository.SetValuesAsync(values, cancellationToken);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    public async Task<ReceiptProfileLocalState> LoadProfileStateAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        return await ReadProfileStateAsync(storeCode, cancellationToken);
+    }
+
+    public async Task<bool> ApplyHeadquartersProfileAsync(
+        string storeCode,
+        ReceiptProfileFields fields,
+        int version,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        ArgumentNullException.ThrowIfNull(fields);
+        ArgumentOutOfRangeException.ThrowIfLessThan(version, 1);
+
+        await _writeGate.WaitAsync(cancellationToken);
+        try
+        {
+            // 设备在请求期间换了店：旧店的下发资料不能写进新店，调用方丢弃本次结果即可。
+            if (CurrentStoreCode is { } currentStoreCode &&
+                !string.Equals(currentStoreCode, storeCode, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // 中文注释：六个字段 + 版本 + 绑定门店 + 回执版本清零放进同一次批量写（本地库里是一个事务），
+            // 要么全部生效要么全部不生效，不会出现「字段是新的、版本是旧的」的半截状态。
+            // 回执版本清零：新版本写入后必须重新回执，哪怕旧回执的版本号更大（服务端重建后版本回退）。
+            var values = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [ProfileStoreCodeKey] = storeCode,
+                [ProfileKey(storeCode, "BrandName")] = NormalizeText(fields.BrandName, string.Empty),
+                [ProfileKey(storeCode, "StoreName")] = NormalizeText(fields.StoreName, string.Empty),
+                [ProfileKey(storeCode, "StoreAddress")] = NormalizeText(fields.Address, string.Empty),
+                [ProfileKey(storeCode, "StorePhone")] = NormalizeText(fields.Phone, string.Empty),
+                [ProfileKey(storeCode, "Abn")] = NormalizeText(fields.Abn, string.Empty),
+                [ProfileKey(storeCode, "ReturnPolicy")] = NormalizeText(fields.ReturnPolicy, string.Empty),
+                [ProfileVersionKey] = version.ToString(CultureInfo.InvariantCulture),
+                [ProfileAckedVersionKey] = "0",
+            };
+            await _settingsRepository.SetValuesAsync(values, cancellationToken);
+            return true;
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    public async Task<bool> MarkProfileAckedAsync(
+        string storeCode,
+        int version,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+
+        await _writeGate.WaitAsync(cancellationToken);
+        try
+        {
+            // 只有「本机仍绑定这家店、且当前版本正是被回执的版本」才记已回执，
+            // 否则回执期间资料已被替换/换店，旧回执不能算在新版本头上。
+            var state = await ReadProfileStateAsync(storeCode, cancellationToken);
+            if (state.Version != version)
+            {
+                return false;
+            }
+
+            await _settingsRepository.SetValueAsync(
+                ProfileAckedVersionKey,
+                version.ToString(CultureInfo.InvariantCulture),
+                cancellationToken);
+            return true;
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
     }
 
     private string? CurrentStoreCode =>
@@ -299,19 +399,27 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
         if (!string.Equals(boundCode, storeCode, StringComparison.Ordinal))
         {
             // 设备改店：旧店资料不得用于打印，仅保留硬件设置并安全回退当前店名/店号。
+            // 旧店的下发版本同样不属于新店，ProfileVersion 保持 0（资料可编辑，同步会重新拉取新店资料）。
             var empty = new ProfileSnapshot(null, null, null, null, null, null);
             return CreateScopedSettings(port, cutDistance, empty, await ResolveCurrentStoreNameAsync(storeCode, cancellationToken));
         }
 
         var scoped = await ReadProfileAsync(storeCode, cancellationToken);
-        return CreateScopedSettings(port, cutDistance, scoped, await ResolveCurrentStoreNameAsync(storeCode, cancellationToken));
+        var profileVersion = ParseVersion(await _settingsRepository.GetValueAsync(ProfileVersionKey, cancellationToken));
+        return CreateScopedSettings(
+            port,
+            cutDistance,
+            scoped,
+            await ResolveCurrentStoreNameAsync(storeCode, cancellationToken),
+            profileVersion);
     }
 
     private static ReceiptPrinterSettings CreateScopedSettings(
         string port,
         int cutDistance,
         ProfileSnapshot snapshot,
-        string storeNameFallback)
+        string storeNameFallback,
+        int profileVersion = 0)
     {
         return new ReceiptPrinterSettings(
             port,
@@ -321,7 +429,34 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
             NormalizeStored(snapshot.StorePhone, string.Empty),
             NormalizeStored(snapshot.Abn, string.Empty),
             NormalizeStored(snapshot.ReturnPolicy, string.Empty),
-            cutDistance);
+            cutDistance,
+            ProfileVersion: profileVersion);
+    }
+
+    /// <summary>
+    /// 读取指定门店的下发版本状态：本机没有绑定这家店（含从未绑定、已换店）一律视为 (0, 0)。
+    /// </summary>
+    private async Task<ReceiptProfileLocalState> ReadProfileStateAsync(
+        string storeCode,
+        CancellationToken cancellationToken)
+    {
+        var boundCode = await _settingsRepository.GetValueAsync(ProfileStoreCodeKey, cancellationToken);
+        if (!string.Equals(boundCode, storeCode, StringComparison.Ordinal))
+        {
+            return ReceiptProfileLocalState.None;
+        }
+
+        var version = ParseVersion(await _settingsRepository.GetValueAsync(ProfileVersionKey, cancellationToken));
+        var acked = ParseVersion(await _settingsRepository.GetValueAsync(ProfileAckedVersionKey, cancellationToken));
+        return new ReceiptProfileLocalState(version, acked);
+    }
+
+    private static int ParseVersion(string? value)
+    {
+        // 损坏、缺失或非正数都按 0（从未应用过下发），不让脏值把资料锁成只读。
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var version) && version > 0
+            ? version
+            : 0;
     }
 
     private async Task<ProfileSnapshot> ReadProfileAsync(string? storeCode, CancellationToken cancellationToken)
@@ -356,6 +491,42 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore
         }
 
         return storeCode;
+    }
+
+    private async Task<Dictionary<string, string>> BuildScopedSaveAsync(
+        string storeCode,
+        ReceiptPrinterSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var boundCode = await _settingsRepository.GetValueAsync(ProfileStoreCodeKey, cancellationToken);
+        var sameStore = string.Equals(boundCode, storeCode, StringComparison.Ordinal);
+        if (sameStore &&
+            ParseVersion(await _settingsRepository.GetValueAsync(ProfileVersionKey, cancellationToken)) > 0)
+        {
+            // 中文注释：资料来自总部下发（只读）时，保存/测试打印只落硬件设置，
+            // 绝不用设置页里可能已过期的草稿覆盖六个资料字段，资料只由同步写入。
+            return BuildHardwareOnlyWrite(settings);
+        }
+
+        var values = BuildScopedWrite(storeCode, settings);
+        if (!sameStore)
+        {
+            // 换店后重新绑定：旧店的下发版本不能被新店继承，与绑定写入放在同一次批量写里清零。
+            values[ProfileVersionKey] = "0";
+            values[ProfileAckedVersionKey] = "0";
+        }
+
+        return values;
+    }
+
+    private static Dictionary<string, string> BuildHardwareOnlyWrite(ReceiptPrinterSettings settings)
+    {
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [PrinterPortKey] = NormalizePort(settings.PrinterPort),
+            [CutDistanceKey] = Math.Max(1, settings.CutDistance).ToString(CultureInfo.InvariantCulture),
+            [PrintBankReceiptTextKey] = FormatFlag(settings.PrintBankReceiptText),
+        };
     }
 
     private static Dictionary<string, string> BuildLegacyWrite(ReceiptPrinterSettings settings)

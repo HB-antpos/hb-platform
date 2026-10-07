@@ -70,6 +70,20 @@ namespace BlazorApp.Api.Tests
             );
         }
 
+        [Theory]
+        [InlineData(nameof(UsersController.AssignStoresToUser))]
+        [InlineData(nameof(UsersController.RemoveStoreFromUser))]
+        public void UserStoreWriteRoutes_RequireManageStoresPermission(string methodName)
+        {
+            // 分配 / 移除用户分店都必须持有 Users.ManageStores；服务层的角色与范围校验是第二道防线。
+            var method = typeof(UsersController).GetMethod(methodName);
+
+            Assert.Equal(
+                Permissions.Users.ManageStores,
+                method?.GetCustomAttribute<AuthorizeAttribute>()?.Policy
+            );
+        }
+
         [Fact]
         public void UsersController_HasSinglePublicConstructor_ForDependencyInjection()
         {
@@ -935,9 +949,10 @@ namespace BlazorApp.Api.Tests
             ));
         }
 
+        // 分配角色仍只靠服务层按角色与范围收口（店长不持有 Users.ManageRoles）。
+        // 分配分店自 10-07 起改为要求 Users.ManageStores，见 UserStoreWriteRoutes_RequireManageStoresPermission。
         [Theory]
         [InlineData(nameof(UsersController.AssignRolesToUser))]
-        [InlineData(nameof(UsersController.AssignStoresToUser))]
         public void LimitedAccessWriteEndpoints_UseAuthenticatedServiceAuthorization(string methodName)
         {
             var method = typeof(UsersController).GetMethod(methodName);

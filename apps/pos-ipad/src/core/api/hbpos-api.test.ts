@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   HbposApiError,
   HbposDeviceApi,
+  HbposStoreApi,
   unwrapHbposEnvelope,
   type HbposTransport,
   type HbposTransportRequest
@@ -269,6 +270,153 @@ test("设备注册重置只发送 operationId 并使用本次在线员工票据"
       },
     },
   ]);
+});
+
+test("下发资料轮询：固定 GET sync 路径只带 knownVersion，不拼门店/设备参数，并透传取消信号", async () => {
+  const calls: HbposTransportRequest[] = [];
+  const transport: HbposTransport = {
+    async request<T>(config: HbposTransportRequest) {
+      calls.push(config);
+      return {
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            changed: true,
+            version: 4,
+            profile: {
+              storeCode: "BNE-01",
+              storeName: "Brisbane",
+              brandName: null,
+              address: "1 Queen St",
+              phone: null,
+              abn: "12 345 678 901",
+              returnPolicy: null,
+              version: 4,
+              publishedAt: "2026-10-07T00:00:00Z",
+            },
+          },
+        } as T,
+      };
+    },
+  };
+  const controller = new AbortController();
+
+  const result = await new HbposStoreApi(transport).syncReceiptProfile(3, controller.signal);
+
+  assert.deepEqual(calls, [{
+    method: "GET",
+    url: "/api/v1/stores/current/receipt-profile/sync",
+    params: { knownVersion: 3 },
+    signal: controller.signal,
+  }]);
+  assert.deepEqual(result, {
+    changed: true,
+    version: 4,
+    profile: {
+      version: 4,
+      storeCode: "BNE-01",
+      storeName: "Brisbane",
+      brandName: "",
+      address: "1 Queen St",
+      phone: "",
+      abn: "12 345 678 901",
+      returnPolicy: "",
+    },
+  });
+});
+
+test("下发资料轮询对生成类型里全部可选的字段容错：changed 缺失按 false、version 缺失按 0、profile 缺失按无资料", async () => {
+  const respond = (data: unknown): HbposTransport => ({
+    async request<T>() {
+      return { status: 200, data: { success: true, data } as T };
+    },
+  });
+
+  assert.deepEqual(await new HbposStoreApi(respond({})).syncReceiptProfile(0), {
+    changed: false,
+    version: 0,
+    profile: null,
+  });
+  assert.deepEqual(
+    await new HbposStoreApi(respond({ version: 9 })).syncReceiptProfile(9),
+    { changed: false, version: 9, profile: null },
+  );
+  // 服务端若漏掉 profile.version，归一为 0，由同步控制器判为无效响应
+  const missingVersion = await new HbposStoreApi(
+    respond({ changed: true, version: 2, profile: { storeCode: "S1", storeName: "Shop" } }),
+  ).syncReceiptProfile(0);
+  assert.equal(missingVersion.changed, true);
+  assert.equal(missingVersion.profile?.version, 0);
+  // 非布尔 changed 不当作 true
+  assert.equal(
+    (await new HbposStoreApi(respond({ changed: "true", version: 1 })).syncReceiptProfile(0)).changed,
+    false,
+  );
+});
+
+test("下发资料轮询的 knownVersion 脏值（负数/小数/非数字）一律按 0 发送", async () => {
+  const sent: unknown[] = [];
+  const transport: HbposTransport = {
+    async request<T>(config: HbposTransportRequest) {
+      sent.push(config.params);
+      return { status: 200, data: { success: true, data: { changed: false, version: 0 } } as T };
+    },
+  };
+  const api = new HbposStoreApi(transport);
+  for (const dirty of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60]) {
+    await api.syncReceiptProfile(dirty);
+  }
+  assert.deepEqual(sent, Array.from({ length: 5 }, () => ({ knownVersion: 0 })));
+});
+
+test("下发资料回执：POST ack 只发送 version；HTTP 错误与业务 envelope 失败都不被吞掉", async () => {
+  const calls: HbposTransportRequest[] = [];
+  const ok: HbposTransport = {
+    async request<T>(config: HbposTransportRequest) {
+      calls.push(config);
+      return { status: 200, data: { success: true, data: { appliedVersion: 5 } } as T };
+    },
+  };
+  const controller = new AbortController();
+  await new HbposStoreApi(ok).ackReceiptProfile(5, controller.signal);
+  assert.deepEqual(calls, [{
+    method: "POST",
+    url: "/api/v1/stores/current/receipt-profile/ack",
+    data: { version: 5 },
+    signal: controller.signal,
+  }]);
+
+  const rejected: HbposTransport = {
+    async request() {
+      throw new HbposApiError("version invalid", {
+        kind: "http",
+        status: 400,
+        code: "RECEIPT_PROFILE_VERSION_INVALID",
+      });
+    },
+  };
+  await assert.rejects(
+    () => new HbposStoreApi(rejected).ackReceiptProfile(9),
+    (error: unknown) =>
+      error instanceof HbposApiError &&
+      error.kind === "http" &&
+      error.status === 400 &&
+      error.code === "RECEIPT_PROFILE_VERSION_INVALID",
+  );
+
+  const envelopeFailure: HbposTransport = {
+    async request<T>() {
+      return {
+        status: 200,
+        data: { success: false, errorCode: "RECEIPT_PROFILE_VERSION_INVALID", message: "bad" } as T,
+      };
+    },
+  };
+  await assert.rejects(
+    () => new HbposStoreApi(envelopeFailure).ackReceiptProfile(9),
+    (error: unknown) => error instanceof HbposApiError && error.kind === "envelope",
+  );
 });
 
 test("业务 envelope 失败以非传输错误抛出，不能被离线回退吞掉", () => {

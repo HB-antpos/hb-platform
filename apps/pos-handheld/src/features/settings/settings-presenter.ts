@@ -208,6 +208,30 @@ export type SettingsReceiptProfileDraft = Readonly<{
   returnPolicy: string;
 }>;
 
+/** 「立即同步」失败原因归类：设置页只展示这几类文案。 */
+export type SettingsReceiptProfileSyncFailure =
+  | "offline"
+  | "unauthorized"
+  | "unsupported"
+  | "invalid"
+  | "failed";
+
+/**
+ * 总部下发小票资料的一次手动同步结果。
+ * updated / up-to-date 带上同步后落盘的最新设置，设置页据此刷新只读展示的六项资料与版本。
+ */
+export type SettingsReceiptProfileSyncResult =
+  | Readonly<{
+      status: "updated" | "up-to-date";
+      version: number;
+      printer: ReceiptPrinterSettings;
+    }>
+  | Readonly<{ status: "not-published" }>
+  | Readonly<{
+      status: "failed";
+      reason: SettingsReceiptProfileSyncFailure;
+    }>;
+
 export type SettingsPaymentDraft = Readonly<{
   square: Readonly<{
     environment: PaymentEnvironment;
@@ -427,6 +451,13 @@ export interface SettingsControlPort {
     signal: AbortSignal,
   ): Promise<void>;
   loadReceiptProfile(signal: AbortSignal): Promise<SettingsReceiptProfileDraft | null>;
+  /**
+   * 已应用总部下发资料（profileVersion > 0）时的「立即同步」：立刻跑一轮同步并返回结果。
+   * 缺省表示该运行时不支持，设置页按同步失败处理。
+   */
+  syncReceiptProfile?:
+    | ((signal: AbortSignal) => Promise<SettingsReceiptProfileSyncResult>)
+    | undefined;
   scanPrinters(signal: AbortSignal): Promise<readonly SettingsPrinterDevice[]>;
   connectPrinter(peripheralId: string, signal: AbortSignal): Promise<void>;
   testPrinter(signal: AbortSignal): Promise<void>;
@@ -516,6 +547,14 @@ export type SettingsStatusCode =
   | "printer-test-unknown"
   | "receipt-profile-load-failed"
   | "receipt-profile-loaded"
+  | "receipt-profile-not-published"
+  | "receipt-profile-sync-failed"
+  | "receipt-profile-sync-forbidden"
+  | "receipt-profile-sync-invalid"
+  | "receipt-profile-sync-offline"
+  | "receipt-profile-sync-unsupported"
+  | "receipt-profile-synced"
+  | "receipt-profile-up-to-date"
   | "restart-failed"
   | "safety-check-failed"
   | "scanner-test-failed"
@@ -1416,7 +1455,7 @@ export class SettingsPresenter {
   }
 
   public setReceiptBrandName(value: string): void {
-    if (!this.canEditPrinter()) return;
+    if (!this.canEditReceiptProfile()) return;
     this.patch({
       printer: { ...this.state.printer, brandName: value },
       statusCode: null,
@@ -1424,7 +1463,7 @@ export class SettingsPresenter {
   }
 
   public setReceiptStoreName(value: string): void {
-    if (!this.canEditPrinter()) return;
+    if (!this.canEditReceiptProfile()) return;
     this.patch({
       printer: { ...this.state.printer, storeName: value },
       statusCode: null,
@@ -1432,7 +1471,7 @@ export class SettingsPresenter {
   }
 
   public setReceiptAddress(value: string): void {
-    if (!this.canEditPrinter()) return;
+    if (!this.canEditReceiptProfile()) return;
     this.patch({
       printer: { ...this.state.printer, address: value },
       statusCode: null,
@@ -1440,7 +1479,7 @@ export class SettingsPresenter {
   }
 
   public setReceiptPhone(value: string): void {
-    if (!this.canEditPrinter()) return;
+    if (!this.canEditReceiptProfile()) return;
     this.patch({
       printer: { ...this.state.printer, phone: value },
       statusCode: null,
@@ -1448,7 +1487,7 @@ export class SettingsPresenter {
   }
 
   public setReceiptAbn(value: string): void {
-    if (!this.canEditPrinter()) return;
+    if (!this.canEditReceiptProfile()) return;
     this.patch({
       printer: { ...this.state.printer, abn: value },
       statusCode: null,
@@ -1456,16 +1495,76 @@ export class SettingsPresenter {
   }
 
   public setReceiptReturnPolicy(value: string): void {
-    if (!this.canEditPrinter()) return;
+    if (!this.canEditReceiptProfile()) return;
     this.patch({
       printer: { ...this.state.printer, returnPolicy: value },
       statusCode: null,
     });
   }
 
+  /**
+   * 已应用总部下发资料时，「立即同步」：立刻跑一轮同步并显示结果。
+   * 同步结果里的最新资料只替换六项资料与下发版本，不动尚未保存的硬件草稿。
+   */
+  public syncReceiptProfile(): Promise<void> {
+    if (!this.requirePermission(this.state.access.canConfigurePrinter)) {
+      return Promise.resolve();
+    }
+    return this.runAction(async () => {
+      const sync = this.options.port.syncReceiptProfile;
+      if (!sync) {
+        this.patch({ statusCode: "receipt-profile-sync-failed" });
+        return;
+      }
+      let result: SettingsReceiptProfileSyncResult;
+      try {
+        result = await sync.call(this.options.port, this.lifetime.signal);
+      } catch {
+        this.patch({ statusCode: "receipt-profile-sync-failed" });
+        return;
+      }
+      if (result.status === "not-published") {
+        this.patch({ statusCode: "receipt-profile-not-published" });
+        return;
+      }
+      if (result.status === "failed") {
+        this.patch({ statusCode: receiptProfileSyncFailureStatus(result.reason) });
+        return;
+      }
+      try {
+        // 先在局部对象里完整规整，成功后一次性替换草稿里的资料部分。
+        const synced = normalizePrinterSettings(result.printer);
+        this.patch({
+          printer: Object.freeze({
+            ...this.state.printer,
+            brandName: synced.brandName,
+            storeName: synced.storeName,
+            address: synced.address,
+            phone: synced.phone,
+            abn: synced.abn,
+            returnPolicy: synced.returnPolicy,
+            profileStoreCode: synced.profileStoreCode,
+            profileVersion: synced.profileVersion,
+            profileAckedVersion: synced.profileAckedVersion,
+          }),
+          statusCode:
+            result.status === "updated"
+              ? "receipt-profile-synced"
+              : "receipt-profile-up-to-date",
+        });
+      } catch {
+        this.patch({ statusCode: "receipt-profile-sync-invalid" });
+      }
+    });
+  }
+
   public loadReceiptProfile(): Promise<void> {
     if (!this.requirePermission(this.state.access.canConfigurePrinter)) {
       return Promise.resolve();
+    }
+    // 已应用下发资料后，旧的「载入门店资料」不得再覆盖只读资料，一律改走同步。
+    if (this.state.printer.profileVersion > 0) {
+      return this.syncReceiptProfile();
     }
     return this.runAction(async () => {
       let profile: SettingsReceiptProfileDraft | null;
@@ -2822,6 +2921,11 @@ export class SettingsPresenter {
     return this.canEdit() && this.state.access.canConfigurePrinter;
   }
 
+  /** 已应用总部下发资料后六项门店资料只读，要改请到 Web 分店管理修改并重新下发。 */
+  private canEditReceiptProfile(): boolean {
+    return this.canEditPrinter() && this.state.printer.profileVersion === 0;
+  }
+
   private runAction(action: () => Promise<void>): Promise<void> {
     if (this.destroyed) return Promise.resolve();
     if (this.actionInFlight) return this.actionInFlight;
@@ -3259,7 +3363,33 @@ function normalizePrinterSettings(
     abn: boundedPublicText(settings.abn, 32),
     returnPolicy: boundedPublicMultilineText(settings.returnPolicy, 500),
     profileStoreCode: boundedPublicText(settings.profileStoreCode, 128),
+    profileVersion: publicVersion(settings.profileVersion),
+    profileAckedVersion: publicVersion(settings.profileAckedVersion),
   });
+}
+
+/** 下发版本号：脏值（缺失、非整数、负数）回落为 0，与本机存储层口径一致。 */
+function publicVersion(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0;
+}
+
+function receiptProfileSyncFailureStatus(
+  reason: SettingsReceiptProfileSyncFailure,
+): SettingsStatusCode {
+  switch (reason) {
+    case "offline":
+      return "receipt-profile-sync-offline";
+    case "unauthorized":
+      return "receipt-profile-sync-forbidden";
+    case "unsupported":
+      return "receipt-profile-sync-unsupported";
+    case "invalid":
+      return "receipt-profile-sync-invalid";
+    default:
+      return "receipt-profile-sync-failed";
+  }
 }
 
 function bindPrinterSettingsToCurrentStore(

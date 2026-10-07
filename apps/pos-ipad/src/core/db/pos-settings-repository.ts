@@ -19,6 +19,13 @@ export type ReceiptPrinterSettings = Readonly<{
   abn: string;
   returnPolicy: string;
   profileStoreCode: string;
+  /**
+   * 已应用的总部下发版本；0 = 从未应用过下发（资料由本机手工维护，行为与旧版完全一致）。
+   * 大于 0 时六项门店资料只读，由总部下发覆盖。旧数据缺省视为 0，无需迁移。
+   */
+  profileVersion: number;
+  /** 已成功回执给服务端的下发版本；小于 profileVersion 表示还有回执待补发。 */
+  profileAckedVersion: number;
 }>;
 
 export const DEFAULT_RECEIPT_PRINTER_SETTINGS: ReceiptPrinterSettings = {
@@ -34,6 +41,8 @@ export const DEFAULT_RECEIPT_PRINTER_SETTINGS: ReceiptPrinterSettings = {
   abn: "",
   returnPolicy: "",
   profileStoreCode: "",
+  profileVersion: 0,
+  profileAckedVersion: 0,
 };
 
 type SettingsRow = Readonly<{ setting_value: unknown }>;
@@ -49,24 +58,14 @@ export class PosSettingsRepository {
   ) {}
 
   public async getReceiptPrinterSettings(): Promise<ReceiptPrinterSettings> {
-    const row = await this.db.getFirst<SettingsRow>(
-      "SELECT setting_value FROM app_settings WHERE setting_key = ?",
-      [RECEIPT_PRINTER_KEY],
-    );
-    if (!row) return DEFAULT_RECEIPT_PRINTER_SETTINGS;
-    try {
-      return parseReceiptPrinterSettings(row.setting_value);
-    } catch {
-      // 配置损坏时绝不以旧值猜测开钱箱或打印，必须由设置页重新明确保存。
-      return DEFAULT_RECEIPT_PRINTER_SETTINGS;
-    }
+    return readReceiptPrinterSettings(this.db);
   }
 
   public async saveReceiptPrinterSettings(
     input: ReceiptPrinterSettings,
   ): Promise<ReceiptPrinterSettings> {
     const settings = validateReceiptPrinterSettings(input);
-    const payload = JSON.stringify(settings);
+    const payload = serializeReceiptPrinterSettings(settings);
     await this.db.withExclusiveTransaction(async (transaction) => {
       await transaction.run(
         `INSERT INTO app_settings (setting_key, setting_value, updated_at_iso)
@@ -79,6 +78,184 @@ export class PosSettingsRepository {
     });
     return settings;
   }
+
+  /**
+   * 设置页等「用户保存」入口专用：在同一个独占事务里重读已落盘设置，再合并后写入。
+   * - 下发版本两个字段永远以已落盘值为准，草稿里的旧值不能覆盖后台刚写入的版本；
+   * - 已应用总部下发（profileVersion > 0）时，六项资料与绑定门店也以已落盘值为准，
+   *   避免过期草稿把后台刚同步的新资料盖回旧值。
+   * 换店清空等需要重置这些字段的内部路径仍用 saveReceiptPrinterSettings 整体覆盖。
+   */
+  public async saveReceiptPrinterSettingsPreservingProfile(
+    input: ReceiptPrinterSettings,
+  ): Promise<ReceiptPrinterSettings> {
+    const requested = validateReceiptPrinterSettings(input);
+    return this.db.withExclusiveTransaction(async (transaction) => {
+      const current = await readReceiptPrinterSettings(transaction);
+      const managed = current.profileVersion > 0;
+      const merged: ReceiptPrinterSettings = Object.freeze({
+        ...requested,
+        ...(managed
+          ? {
+              brandName: current.brandName,
+              storeName: current.storeName,
+              address: current.address,
+              phone: current.phone,
+              abn: current.abn,
+              returnPolicy: current.returnPolicy,
+              profileStoreCode: current.profileStoreCode,
+            }
+          : {}),
+        profileVersion: current.profileVersion,
+        profileAckedVersion: current.profileAckedVersion,
+      });
+      await upsertReceiptPrinterSettings(transaction, merged, this.nowIso());
+      return merged;
+    });
+  }
+
+  /**
+   * 原子写入总部下发的一版资料：六项资料 + 下发版本 + 绑定门店代码在同一个事务、同一条 UPSERT 里落盘。
+   * 校验与「现有保存」同口径（长度上限、控制字符规则，另要求门店名非空），任何一项不通过
+   * 抛 ReceiptProfileRejectedError 且不写入任何内容；存储层 I/O 故障则以原异常抛出（调用方下一轮重试）。
+   * 打印机型号、纸宽、钱箱等硬件设置保持落盘值不变。
+   */
+  public async applyReceiptProfile(
+    profile: ReceiptProfileApplyInput,
+  ): Promise<ReceiptPrinterSettings> {
+    if (!Number.isSafeInteger(profile.version) || profile.version <= 0) {
+      throw new ReceiptProfileRejectedError("Receipt profile version is invalid.");
+    }
+    // 先用安全默认值做一次纯校验：不通过就不开事务，更不会写入半截数据。
+    const candidate = (base: ReceiptPrinterSettings): ReceiptPrinterSettings =>
+      validateReceiptPrinterSettings({
+        ...base,
+        brandName: profile.brandName,
+        storeName: profile.storeName,
+        address: profile.address,
+        phone: profile.phone,
+        abn: profile.abn,
+        returnPolicy: profile.returnPolicy,
+        profileStoreCode: profile.storeCode,
+        profileVersion: profile.version,
+        profileAckedVersion: 0,
+      });
+    const normalize = (settings: ReceiptPrinterSettings): ReceiptPrinterSettings => {
+      // 与设置页载入资料同口径：单行字段去首尾空白，地址/退货政策保留换行排版。
+      const normalized = Object.freeze({
+        ...settings,
+        brandName: settings.brandName.trim(),
+        storeName: settings.storeName.trim(),
+        phone: settings.phone.trim(),
+        abn: settings.abn.trim(),
+        profileStoreCode: settings.profileStoreCode.trim(),
+      });
+      if (normalized.storeName === "") {
+        throw new ReceiptProfileRejectedError("Receipt profile store name is required.");
+      }
+      return normalized;
+    };
+    try {
+      normalize(candidate(DEFAULT_RECEIPT_PRINTER_SETTINGS));
+    } catch (error) {
+      if (error instanceof ReceiptProfileRejectedError) throw error;
+      throw new ReceiptProfileRejectedError("Receipt profile failed validation.");
+    }
+    return this.db.withExclusiveTransaction(async (transaction) => {
+      const current = await readReceiptPrinterSettings(transaction);
+      const next = normalize(candidate(current));
+      // 新版本尚未回执：已回执版本不得超过 version - 1（服务端回退版本号时也能重新回执）。
+      const applied: ReceiptPrinterSettings = Object.freeze({
+        ...next,
+        profileAckedVersion: Math.min(current.profileAckedVersion, profile.version - 1),
+      });
+      await upsertReceiptPrinterSettings(transaction, applied, this.nowIso());
+      return applied;
+    });
+  }
+
+  /**
+   * 记录「已成功回执」的下发版本。只有本机当前版本仍等于 version 时才写入（比较并设置），
+   * 回执在途期间若已应用更新的版本，则不能把旧版本的回执记到新版本头上。
+   */
+  public async markReceiptProfileAcked(version: number): Promise<boolean> {
+    if (!Number.isSafeInteger(version) || version <= 0) return false;
+    return this.db.withExclusiveTransaction(async (transaction) => {
+      const current = await readReceiptPrinterSettings(transaction);
+      if (current.profileVersion !== version || current.profileAckedVersion >= version) {
+        return false;
+      }
+      await upsertReceiptPrinterSettings(
+        transaction,
+        validateReceiptPrinterSettings({ ...current, profileAckedVersion: version }),
+        this.nowIso(),
+      );
+      return true;
+    });
+  }
+}
+
+/** 总部下发资料没通过本机校验：未写入任何内容，同一版本重试也不会通过。 */
+export class ReceiptProfileRejectedError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "ReceiptProfileRejectedError";
+  }
+}
+
+export type ReceiptProfileApplyInput = Readonly<{
+  version: number;
+  storeCode: string;
+  storeName: string;
+  brandName: string;
+  address: string;
+  phone: string;
+  abn: string;
+  returnPolicy: string;
+}>;
+
+async function readReceiptPrinterSettings(
+  db: SqliteConnectionPort,
+): Promise<ReceiptPrinterSettings> {
+  const row = await db.getFirst<SettingsRow>(
+    "SELECT setting_value FROM app_settings WHERE setting_key = ?",
+    [RECEIPT_PRINTER_KEY],
+  );
+  if (!row) return DEFAULT_RECEIPT_PRINTER_SETTINGS;
+  try {
+    return parseReceiptPrinterSettings(row.setting_value);
+  } catch {
+    // 配置损坏时绝不以旧值猜测开钱箱或打印，必须由设置页重新明确保存。
+    return DEFAULT_RECEIPT_PRINTER_SETTINGS;
+  }
+}
+
+async function upsertReceiptPrinterSettings(
+  db: SqliteConnectionPort,
+  settings: ReceiptPrinterSettings,
+  updatedAtIso: string,
+): Promise<void> {
+  await db.run(
+    `INSERT INTO app_settings (setting_key, setting_value, updated_at_iso)
+     VALUES (?, ?, ?)
+     ON CONFLICT(setting_key) DO UPDATE SET
+       setting_value = excluded.setting_value,
+       updated_at_iso = excluded.updated_at_iso`,
+    [RECEIPT_PRINTER_KEY, serializeReceiptPrinterSettings(settings), updatedAtIso],
+  );
+}
+
+/**
+ * 落盘序列化：下发版本为 0（从未应用过总部下发）时不写两个版本字段。
+ * 这样没被下发过的设备，其 receipt_printer_v1 与旧版格式逐字段一致；
+ * 旧代码的校验会拒绝未知键并把整份设置判为损坏（回落为关闭打印/钱箱的默认值），
+ * 因此只有真正应用过下发的设备才写入新键，缩小 OTA 回滚时的影响面。读取时缺省按 0。
+ */
+function serializeReceiptPrinterSettings(settings: ReceiptPrinterSettings): string {
+  const { profileVersion, profileAckedVersion, ...rest } = settings;
+  return JSON.stringify(
+    profileVersion > 0 ? { ...rest, profileVersion, profileAckedVersion } : rest,
+  );
 }
 
 function parseReceiptPrinterSettings(value: unknown): ReceiptPrinterSettings {
@@ -100,7 +277,7 @@ function validateReceiptPrinterSettings(value: unknown): ReceiptPrinterSettings 
   const allowed = new Set([
     "printEnabled", "drawerEnabled", "peripheralId", "paper", "locale",
     "brandName", "storeName", "address", "phone", "abn",
-    "returnPolicy", "profileStoreCode",
+    "returnPolicy", "profileStoreCode", "profileVersion", "profileAckedVersion",
   ]);
   for (const key of Object.keys(record)) {
     if (SENSITIVE_KEY.test(key) || !allowed.has(key)) {
@@ -127,7 +304,17 @@ function validateReceiptPrinterSettings(value: unknown): ReceiptPrinterSettings 
     abn: boundedText(record.abn, 32, "abn"),
     returnPolicy: optionalMultilineText(record.returnPolicy, 500, "returnPolicy"),
     profileStoreCode: optionalText(record.profileStoreCode, 128, "profileStoreCode"),
+    profileVersion: lenientVersion(record.profileVersion),
+    profileAckedVersion: lenientVersion(record.profileAckedVersion),
   };
+}
+
+/**
+ * 下发版本号：缺失（旧数据）、非整数、负数、超范围等脏值一律回落为 0，
+ * 而不是让整份设置校验失败——否则一个脏版本号会把打印/钱箱设置整体重置为默认值。
+ */
+function lenientVersion(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 function boolean(value: unknown, field: string): boolean {

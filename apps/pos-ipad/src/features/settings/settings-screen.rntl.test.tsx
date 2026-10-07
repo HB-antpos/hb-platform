@@ -27,6 +27,7 @@ import {
   type SettingsPaymentSettingsInput,
   type SettingsPrinterDevice,
   type SettingsReceiptProfileDraft,
+  type SettingsReceiptProfileSyncResult,
   type SettingsLinklyHealthSnapshot,
   type SettingsLinklyConnectionTestResult,
   type SettingsLinklyPairingPort,
@@ -2442,6 +2443,163 @@ describe("SettingsScreen", () => {
     await fireEvent.press(screen.getByTestId("settings-printer-picker-backdrop"));
     expect(screen.queryByTestId("settings-printer-picker")).toBeNull();
   });
+  describe("总部下发小票资料", () => {
+    const managedPrinter: ReceiptPrinterSettings = {
+      ...DEFAULT_RECEIPT_PRINTER_SETTINGS,
+      printEnabled: true,
+      peripheralId: "XP-N160I",
+      brandName: "Hot Bargain",
+      storeName: "Bankstown",
+      address: "1 Main St",
+      phone: "02 1234 5678",
+      abn: "12 345 678 901",
+      returnPolicy: "14 days.",
+      profileStoreCode: "BNE-01",
+      profileVersion: 3,
+      profileAckedVersion: 3,
+    };
+    const profileFieldIds = [
+      "settings-receipt-brand-name",
+      "settings-receipt-store-name",
+      "settings-receipt-address",
+      "settings-receipt-phone",
+      "settings-receipt-abn",
+      "settings-receipt-return-policy",
+    ] as const;
+
+    async function openManagedCard(
+      locale: "en" | "zh",
+      port = new ScreenSettingsPort(),
+    ) {
+      port.snapshotValue = { ...snapshot(), printer: managedPrinter };
+      const presenter = createPresenter(port);
+      await presenter.load();
+      const screen = await render(
+        <SettingsScreen locale={locale} presenter={presenter} />,
+      );
+      await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+      await screen.findByTestId("settings-pane-content-peripherals");
+      return { port, presenter, screen };
+    }
+
+    it("已应用下发资料：六字段只读并提示由总部下发，按钮改为「立即同步」，保存按钮仍可用", async () => {
+      const { screen } = await openManagedCard("zh");
+
+      expect(screen.getByText("由总部下发，请在 Web 分店管理修改")).toBeTruthy();
+      expect(screen.getByText("已应用版本 3")).toBeTruthy();
+      for (const testID of profileFieldIds) {
+        expect(screen.getByTestId(testID).props.editable).toBe(false);
+      }
+      expect(screen.getByText("立即同步")).toBeTruthy();
+      expect(screen.queryByText("从门店载入")).toBeNull();
+      // 硬件设置与保存不受只读影响
+      expect(screen.getByTestId("settings-printer-id").props.editable).toBe(true);
+      expect(
+        screen.getByTestId("settings-printer-save").props.accessibilityState?.disabled,
+      ).not.toBe(true);
+    });
+
+    it("英文界面同样只读并显示 Sync now", async () => {
+      const { screen } = await openManagedCard("en");
+
+      expect(
+        screen.getByText("Managed by head office. Edit it in Web store management."),
+      ).toBeTruthy();
+      expect(screen.getByText("Applied version 3")).toBeTruthy();
+      expect(screen.getByText("Sync now")).toBeTruthy();
+      expect(screen.queryByText("Load from store")).toBeNull();
+      for (const testID of profileFieldIds) {
+        expect(screen.getByTestId(testID).props.editable).toBe(false);
+      }
+    });
+
+    it("点击「立即同步」只跑同步、不调用旧载入接口，并显示「已更新到版本 N」与新资料", async () => {
+      const port = new ScreenSettingsPort();
+      port.receiptProfileValue = {
+        storeCode: "BNE-01",
+        brandName: "Legacy",
+        storeName: "Legacy",
+        address: "",
+        phone: "",
+        abn: "",
+        returnPolicy: "",
+      };
+      port.syncResult = {
+        status: "updated",
+        version: 4,
+        printer: {
+          ...managedPrinter,
+          brandName: "New brand",
+          storeName: "New store",
+          profileVersion: 4,
+          profileAckedVersion: 4,
+        },
+      };
+      const { screen } = await openManagedCard("zh", port);
+
+      await fireEvent.press(screen.getByTestId("settings-receipt-profile-load"));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("settings-receipt-brand-name").props.value).toBe(
+          "New brand",
+        ),
+      );
+      expect(port.syncCalls).toBe(1);
+      expect(port.receiptProfileLoads).toBe(0);
+      expect(screen.getByText("已更新到版本 4")).toBeTruthy();
+      expect(screen.getByText("已应用版本 4")).toBeTruthy();
+      expect(port.savedPrinterSettings).toHaveLength(0);
+    });
+
+    it("同步结果文案：已是最新 / 总部还没有下发过 / 失败原因，均为中文", async () => {
+      const port = new ScreenSettingsPort();
+      const { screen } = await openManagedCard("zh", port);
+      const press = async () => {
+        await fireEvent.press(screen.getByTestId("settings-receipt-profile-load"));
+      };
+
+      port.syncResult = { status: "up-to-date", version: 3, printer: managedPrinter };
+      await press();
+      await screen.findByText("已是最新");
+
+      port.syncResult = { status: "not-published" };
+      await press();
+      await screen.findByText("总部还没有下发过小票资料");
+
+      const failures = [
+        ["offline", "同步失败：网络不可用"],
+        ["unauthorized", "同步失败：设备认证未通过，请检查本设备是否仍已授权"],
+        ["unsupported", "同步失败：服务器暂不支持小票资料下发"],
+        ["invalid", "同步失败：总部下发的资料无效"],
+        ["failed", "同步失败，请稍后重试"],
+      ] as const;
+      for (const [reason, text] of failures) {
+        port.syncResult = { status: "failed", reason };
+        await press();
+        await screen.findByText(text);
+      }
+    });
+
+    it("未下发（profileVersion=0）：六字段可编辑，按钮仍是「载入门店资料」，行为与旧版一致", async () => {
+      const port = new ScreenSettingsPort();
+      const presenter = createPresenter(port);
+      await presenter.load();
+      const screen = await render(
+        <SettingsScreen locale="zh" presenter={presenter} />,
+      );
+      await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+      await screen.findByTestId("settings-pane-content-peripherals");
+
+      for (const testID of profileFieldIds) {
+        expect(screen.getByTestId(testID).props.editable).toBe(true);
+      }
+      expect(screen.getByText("从门店载入")).toBeTruthy();
+      expect(screen.queryByText("立即同步")).toBeNull();
+      expect(screen.queryByText("由总部下发，请在 Web 分店管理修改")).toBeNull();
+      expect(screen.queryByTestId("settings-receipt-profile-managed")).toBeNull();
+    });
+  });
+
 });
 
 function createPresenter(port: ScreenSettingsPort): SettingsPresenter {
@@ -2573,6 +2731,11 @@ class ScreenSettingsPort implements SettingsControlPort {
   public printerTestError: Error | null = null;
   public printerTests = 0;
   public receiptProfileValue: SettingsReceiptProfileDraft | null = null;
+  public receiptProfileLoads = 0;
+  public syncCalls = 0;
+  public syncResult: SettingsReceiptProfileSyncResult = {
+    status: "not-published",
+  };
   public scannerTests = 0;
   public displayTests = 0;
   public readonly deviceResetBarcodes: string[] = [];
@@ -2721,7 +2884,13 @@ class ScreenSettingsPort implements SettingsControlPort {
   }
 
   public async loadReceiptProfile(): Promise<SettingsReceiptProfileDraft | null> {
+    this.receiptProfileLoads += 1;
     return this.receiptProfileValue;
+  }
+
+  public async syncReceiptProfile(): Promise<SettingsReceiptProfileSyncResult> {
+    this.syncCalls += 1;
+    return this.syncResult;
   }
 
   public async testCashDrawer() {

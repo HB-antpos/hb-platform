@@ -87,7 +87,16 @@ import type {
   LocalCatalogMatch,
 } from "../db/catalog-repository";
 import { PosDatabase } from "../db/pos-database";
-import type { ReceiptPrinterSettings } from "../db/pos-settings-repository";
+import {
+  PosSettingsRepository,
+  type ReceiptPrinterSettings,
+} from "../db/pos-settings-repository";
+import type {
+  SqliteConnectionPort,
+  SqlRunResult,
+  SqlValue,
+} from "@hb/pos-db/core/db/types";
+import type { ReceiptProfileSyncLogEvent } from "@hb/pos-sync/features/receipt-profile/receipt-profile-sync-controller";
 import type { SqliteInstallmentSnapshotRepository } from "../db/sqlite-installment-snapshot-repository";
 import type {
   ManualPaymentRecoveryFindingInput,
@@ -3372,6 +3381,510 @@ test("Settings 钱箱测试复用受权限、lease 与审计保护的正式开�
   presenter.destroy();
 });
 
+/**
+ * 用真实 PosSettingsRepository 跑在内存连接上：下发资料的原子写入、比较并设置回执、
+ * 用户保存时保留下发资料，走的都是生产同一份 SQL 合并逻辑，而不是测试替身。
+ */
+class InMemorySettingsConnection implements SqliteConnectionPort {
+  private value: string | null;
+  private tail: Promise<void> = Promise.resolve();
+
+  public constructor(initial: ReceiptPrinterSettings) {
+    this.value = JSON.stringify(initial);
+  }
+
+  public async exec(): Promise<void> {}
+
+  public async run(sql: string, parameters: readonly SqlValue[] = []): Promise<SqlRunResult> {
+    if (!/INSERT INTO app_settings/u.test(sql)) throw new Error(`unexpected SQL: ${sql}`);
+    this.value = String(parameters[1]);
+    return { changes: 1, lastInsertRowId: 0 };
+  }
+
+  public async getFirst<T extends object>(): Promise<T | null> {
+    return this.value === null ? null : ({ setting_value: this.value } as unknown as T);
+  }
+
+  public async getAll<T extends object>(): Promise<readonly T[]> {
+    return [];
+  }
+
+  public async withExclusiveTransaction<T>(
+    operation: (transaction: SqliteConnectionPort) => Promise<T>,
+  ): Promise<T> {
+    const previous = this.tail;
+    let release!: () => void;
+    this.tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation(this);
+    } finally {
+      release();
+    }
+  }
+
+  public async close(): Promise<void> {}
+}
+
+const BASE_RECEIPT_SETTINGS: ReceiptPrinterSettings = {
+  printEnabled: true,
+  drawerEnabled: true,
+  peripheralId: "printer-1",
+  paper: "80mm",
+  locale: "en",
+  brandName: "Manual brand",
+  storeName: "Manual store",
+  address: "1 Manual St",
+  phone: "0712345678",
+  abn: "12 345 678 901",
+  returnPolicy: "Manual policy",
+  profileStoreCode: "S001",
+  profileVersion: 0,
+  profileAckedVersion: 0,
+};
+
+function receiptProfileRepository(
+  initial: ReceiptPrinterSettings = BASE_RECEIPT_SETTINGS,
+): PosSettingsRepository {
+  return new PosSettingsRepository(
+    new InMemorySettingsConnection(initial),
+    () => "2026-07-28T00:00:00.000Z",
+  );
+}
+
+function hqProfile(version: number, overrides: Record<string, unknown> = {}) {
+  return {
+    storeCode: "S001",
+    storeName: `HQ Store v${version}`,
+    brandName: "Hot Bargain",
+    address: "9 HQ Road\nSydney NSW",
+    phone: "02 9000 0000",
+    abn: "99 999 999 999",
+    returnPolicy: `HQ policy v${version}`,
+    version,
+    publishedAt: "2026-10-07T00:00:00Z",
+    ...overrides,
+  };
+}
+
+/** 按脚本应答 sync / ack，并记录请求；其余 URL 一律报错，防止误打别的接口。 */
+function receiptProfileTransport(script: Readonly<{
+  sync(knownVersion: number): unknown;
+  ack?(version: number): unknown;
+}>): Readonly<{ transport: HbposTransport; requests: HbposTransportRequest[] }> {
+  const requests: HbposTransportRequest[] = [];
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest) {
+      requests.push(request);
+      if (request.url === "/api/v1/stores/current/receipt-profile/sync") {
+        const known = Number((request.params as { knownVersion: number }).knownVersion);
+        const data = script.sync(known);
+        if (data instanceof Error) throw data;
+        return { status: 200, data: { success: true, data } as T };
+      }
+      if (request.url === "/api/v1/stores/current/receipt-profile/ack") {
+        const version = Number((request.data as { version: number }).version);
+        const data = script.ack ? script.ack(version) : { appliedVersion: version };
+        if (data instanceof Error) throw data;
+        return { status: 200, data: { success: true, data } as T };
+      }
+      throw new Error(`Unexpected URL: ${request.url}`);
+    },
+  };
+  return { transport, requests };
+}
+
+test("下发资料后台同步（无需收银员登录）：拉取→原子写入→回执→记录已回执版本；下一轮以新版本号轮询且不重复回执", async () => {
+  const repository = receiptProfileRepository();
+  const { transport, requests } = receiptProfileTransport({
+    sync: (known) =>
+      known === 3
+        ? { changed: false, version: 3 }
+        : { changed: true, version: 3, profile: hqProfile(3) },
+  });
+  const logs: ReceiptProfileSyncLogEvent[] = [];
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport, reportReceiptProfileSync: (event) => logs.push(event) },
+  );
+  await services.initialize();
+
+  const first = await services.receiptProfileSync.requestSync("startup");
+
+  assert.deepEqual(first, { status: "updated", version: 3 });
+  assert.deepEqual(
+    requests.map(({ method, url, params, data }) => ({ method, url, params, data })),
+    [
+      {
+        method: "GET",
+        url: "/api/v1/stores/current/receipt-profile/sync",
+        params: { knownVersion: 0 },
+        data: undefined,
+      },
+      {
+        method: "POST",
+        url: "/api/v1/stores/current/receipt-profile/ack",
+        params: undefined,
+        data: { version: 3 },
+      },
+    ],
+  );
+  const settings = await services.receiptSettings.get();
+  assert.equal(settings.storeName, "HQ Store v3");
+  assert.equal(settings.brandName, "Hot Bargain");
+  assert.equal(settings.address, "9 HQ Road\nSydney NSW");
+  assert.equal(settings.phone, "02 9000 0000");
+  assert.equal(settings.abn, "99 999 999 999");
+  assert.equal(settings.returnPolicy, "HQ policy v3");
+  assert.equal(settings.profileStoreCode, "S001");
+  assert.equal(settings.profileVersion, 3);
+  assert.equal(settings.profileAckedVersion, 3);
+  // 硬件设置不受影响
+  assert.equal(settings.printEnabled, true);
+  assert.equal(settings.peripheralId, "printer-1");
+  // 日志只含版本号，不含资料内容
+  assert.match(JSON.stringify(logs), /"version":3/);
+  assert.equal(JSON.stringify(logs).includes("HQ Road"), false);
+
+  requests.length = 0;
+  assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+    status: "up-to-date",
+    version: 3,
+  });
+  assert.deepEqual(
+    requests.map(({ url, params }) => ({ url, params })),
+    [{ url: "/api/v1/stores/current/receipt-profile/sync", params: { knownVersion: 3 } }],
+  );
+});
+
+test("下发资料后台同步：新版本落盘后，已创建的日结回单立即使用新资料（组合根缓存同步刷新）", async () => {
+  const repository = receiptProfileRepository();
+  const { transport } = receiptProfileTransport({
+    sync: () => ({
+      changed: true,
+      version: 2,
+      profile: hqProfile(2, { returnPolicy: "HQ refund within 7 days." }),
+    }),
+  });
+  const printed: Uint8Array[] = [];
+  const services = createTestComposition(
+    databaseFor([], { dailyClose: new MemoryDailyCloseRepository(), receiptSettingsRepository: repository }),
+    {
+      transport,
+      cashierPermissions: [
+        "Permissions.PosTerminal.DailyClose.View",
+        "Permissions.PosTerminal.DailyClose.Save",
+        "Permissions.PosTerminal.DailyClose.Reprint",
+      ],
+      onPrint(_jobId, bytes) {
+        printed.push(bytes);
+      },
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  // 先创建日结 presenter（它捕获创建时的设置），再同步到新资料
+  const presenter = services.dailyClose.createPresenter();
+  await presenter.load();
+  await services.receiptProfileSync.requestSync("foreground");
+
+  assert.equal(presenter.setCount(100, 10), true);
+  await presenter.saveAndPrint();
+
+  assert.equal(printed.length, 1);
+  const text = new TextDecoder().decode(printed[0]);
+  assert.match(text, /HQ refund within 7 days\./);
+  assert.equal(text.includes("Manual policy"), false);
+  presenter.destroy();
+});
+
+test("下发资料后台同步：服务端 404 视为尚未支持，后台退避不再发请求，本机设置原样不变", async () => {
+  const repository = receiptProfileRepository();
+  const { transport, requests } = receiptProfileTransport({
+    sync: () =>
+      Object.assign(new Error("not found"), { name: "HbposApiError", kind: "http", status: 404 }),
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport },
+  );
+  await services.initialize();
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("startup"), {
+    status: "failed",
+    reason: "unsupported",
+  });
+  assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+    status: "skipped",
+    reason: "backoff",
+  });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(await services.receiptSettings.get(), BASE_RECEIPT_SETTINGS);
+});
+
+test("下发资料后台同步：资料没通过本机校验（电话超长）整份丢弃，不写入、不回执、同一版本不再重试写入", async () => {
+  const repository = receiptProfileRepository();
+  const { transport, requests } = receiptProfileTransport({
+    sync: () => ({ changed: true, version: 2, profile: hqProfile(2, { phone: "1".repeat(61) }) }),
+  });
+  const logs: ReceiptProfileSyncLogEvent[] = [];
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport, reportReceiptProfileSync: (event) => logs.push(event) },
+  );
+  await services.initialize();
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("startup"), {
+    status: "failed",
+    reason: "invalid-profile",
+  });
+  assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+    status: "failed",
+    reason: "invalid-profile",
+  });
+
+  assert.equal(
+    requests.some(({ url }) => url.endsWith("/ack")),
+    false,
+    "未写入的版本不能回执",
+  );
+  assert.deepEqual(await services.receiptSettings.get(), BASE_RECEIPT_SETTINGS);
+  assert.equal(logs.length, 1, "同一个不合规版本只记一次日志");
+  assert.equal(JSON.stringify(logs).includes("111111"), false, "日志不含资料内容");
+});
+
+test("下发资料后台同步：回执返回 400 时已写入的资料保留，本进程内不再对同一版本重试回执", async () => {
+  const repository = receiptProfileRepository();
+  const { transport, requests } = receiptProfileTransport({
+    sync: (known) =>
+      known >= 3 ? { changed: false, version: 3 } : { changed: true, version: 3, profile: hqProfile(3) },
+    ack: () =>
+      Object.assign(new Error("bad version"), {
+        name: "HbposApiError",
+        kind: "http",
+        status: 400,
+        code: "RECEIPT_PROFILE_VERSION_INVALID",
+      }),
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport },
+  );
+  await services.initialize();
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("startup"), {
+    status: "updated",
+    version: 3,
+  });
+  await services.receiptProfileSync.requestSync("timer");
+  await services.receiptProfileSync.requestSync("timer");
+
+  const acks = requests.filter(({ url }) => url.endsWith("/ack"));
+  assert.equal(acks.length, 1, "同一版本回执被拒后不再重试");
+  const settings = await services.receiptSettings.get();
+  assert.equal(settings.profileVersion, 3, "不回滚已写入的本机资料");
+  assert.equal(settings.profileAckedVersion, 0);
+  assert.equal(settings.storeName, "HQ Store v3");
+});
+
+test("设置页立即同步：已应用下发资料后走 sync 接口、刷新只读资料与版本，且旧载入接口不再调用", async () => {
+  const repository = receiptProfileRepository({
+    ...BASE_RECEIPT_SETTINGS,
+    storeName: "HQ Store v1",
+    returnPolicy: "HQ policy v1",
+    profileVersion: 1,
+    profileAckedVersion: 1,
+  });
+  const { transport, requests } = receiptProfileTransport({
+    sync: (known) =>
+      known === 1
+        ? { changed: true, version: 2, profile: hqProfile(2) }
+        : { changed: false, version: known },
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    {
+      transport,
+      cashierPermissions: [SETTINGS_VIEW_PERMISSION, SETTINGS_RECEIPT_PRINTER_PERMISSION],
+      settings: settingsRuntimeConfiguration(),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  assert.equal("createPresenter" in services.settings, true);
+  if (!("createPresenter" in services.settings)) return;
+  const presenter = services.settings.createPresenter();
+  await presenter.load();
+  assert.equal(presenter.getState().printer.profileVersion, 1);
+
+  // 已下发：六项资料只读
+  presenter.setReceiptStoreName("Hacked");
+  assert.equal(presenter.getState().printer.storeName, "HQ Store v1");
+
+  await presenter.loadReceiptProfile();
+
+  assert.equal(presenter.getState().statusCode, "receipt-profile-synced");
+  assert.equal(presenter.getState().printer.storeName, "HQ Store v2");
+  assert.equal(presenter.getState().printer.profileVersion, 2);
+  assert.equal(presenter.getState().printer.profileAckedVersion, 2);
+  assert.deepEqual(
+    requests.map(({ method, url }) => `${method} ${url}`),
+    [
+      "GET /api/v1/stores/current/receipt-profile/sync",
+      "POST /api/v1/stores/current/receipt-profile/ack",
+    ],
+  );
+
+  // 再点一次：已是最新
+  await presenter.syncReceiptProfile();
+  assert.equal(presenter.getState().statusCode, "receipt-profile-up-to-date");
+  presenter.destroy();
+});
+
+test("设置页立即同步的失败原因按网络/设备认证/服务器未支持归类；总部从未下发时提示未下发且不覆盖本机手工设置", async () => {
+  const failures: Array<[unknown, string]> = [
+    [Object.assign(new Error("offline"), { name: "HbposApiError", kind: "transport", code: "NO_HTTP_RESPONSE" }), "receipt-profile-sync-offline"],
+    // 现在 sync/ack 只要求设备认证：401/403 表示设备认证本身有问题（如设备被撤销或尚未授权）
+    [Object.assign(new Error("device auth rejected"), { name: "HbposApiError", kind: "http", status: 403 }), "receipt-profile-sync-forbidden"],
+    [Object.assign(new Error("gone"), { name: "HbposApiError", kind: "http", status: 404 }), "receipt-profile-sync-unsupported"],
+    [Object.assign(new Error("boom"), { name: "HbposApiError", kind: "http", status: 500 }), "receipt-profile-sync-failed"],
+  ];
+  for (const [error, expected] of failures) {
+    const repository = receiptProfileRepository({
+      ...BASE_RECEIPT_SETTINGS,
+      profileVersion: 1,
+      profileAckedVersion: 1,
+    });
+    const { transport } = receiptProfileTransport({ sync: () => error });
+    const services = createTestComposition(
+      databaseFor([], { receiptSettingsRepository: repository }),
+      {
+        transport,
+        cashierPermissions: [SETTINGS_VIEW_PERMISSION, SETTINGS_RECEIPT_PRINTER_PERMISSION],
+        settings: settingsRuntimeConfiguration(),
+      },
+    );
+    await services.initialize();
+    await services.cashierSession.signIn("cashier");
+    if (!("createPresenter" in services.settings)) throw new Error("settings unavailable");
+    const presenter = services.settings.createPresenter();
+    await presenter.load();
+    await presenter.syncReceiptProfile();
+    assert.equal(presenter.getState().statusCode, expected);
+    presenter.destroy();
+  }
+
+  // 总部还没下发过：提示未下发，本机手工设置原样保留
+  const repository = receiptProfileRepository();
+  const { transport } = receiptProfileTransport({ sync: () => ({ changed: false, version: 0 }) });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    {
+      transport,
+      cashierPermissions: [SETTINGS_VIEW_PERMISSION, SETTINGS_RECEIPT_PRINTER_PERMISSION],
+      settings: settingsRuntimeConfiguration(),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  if (!("createPresenter" in services.settings)) throw new Error("settings unavailable");
+  const presenter = services.settings.createPresenter();
+  await presenter.load();
+  await presenter.syncReceiptProfile();
+  assert.equal(presenter.getState().statusCode, "receipt-profile-not-published");
+  assert.equal((await services.receiptSettings.get()).storeName, "Manual store");
+  presenter.destroy();
+});
+
+test("用户在设置页保存硬件设置时，后台刚同步的下发资料不会被过期草稿盖回旧值", async () => {
+  const repository = receiptProfileRepository();
+  const { transport } = receiptProfileTransport({
+    sync: () => ({ changed: true, version: 5, profile: hqProfile(5) }),
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    {
+      transport,
+      cashierPermissions: [SETTINGS_VIEW_PERMISSION, SETTINGS_RECEIPT_PRINTER_PERMISSION],
+      settings: settingsRuntimeConfiguration(),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  if (!("createPresenter" in services.settings)) throw new Error("settings unavailable");
+  const presenter = services.settings.createPresenter();
+  // 设置页在下发前加载（草稿里是手工资料、版本 0），用户改了纸宽
+  await presenter.load();
+  presenter.setPrinterPaper("58mm");
+
+  // 保存之前后台同步到了新资料
+  await services.receiptProfileSync.requestSync("timer");
+  await presenter.savePrinterSettings();
+
+  const saved = await services.receiptSettings.get();
+  assert.equal(saved.paper, "58mm", "硬件改动照常保存");
+  assert.equal(saved.storeName, "HQ Store v5", "下发资料不被过期草稿盖回旧值");
+  assert.equal(saved.returnPolicy, "HQ policy v5");
+  assert.equal(saved.profileVersion, 5);
+  assert.equal(saved.profileAckedVersion, 5);
+  presenter.destroy();
+});
+
+test("换店：本机绑定门店与已存下发资料不一致时先清空资料与版本，同步再按新店重新拉取（knownVersion 回到 0）", async () => {
+  const repository = receiptProfileRepository({
+    ...BASE_RECEIPT_SETTINGS,
+    profileStoreCode: "OLD-STORE",
+    storeName: "Old store HQ",
+    profileVersion: 9,
+    profileAckedVersion: 9,
+  });
+  const { transport, requests } = receiptProfileTransport({
+    sync: (known) => ({
+      changed: known === 0,
+      version: 1,
+      ...(known === 0 ? { profile: hqProfile(1) } : {}),
+    }),
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport },
+  );
+  await services.initialize();
+
+  const result = await services.receiptProfileSync.requestSync("startup");
+
+  assert.deepEqual(result, { status: "updated", version: 1 });
+  assert.deepEqual(
+    requests.map(({ params }) => params),
+    [{ knownVersion: 0 }, undefined],
+  );
+  const settings = await services.receiptSettings.get();
+  assert.equal(settings.profileStoreCode, "S001");
+  assert.equal(settings.storeName, "HQ Store v1");
+  assert.equal(settings.profileVersion, 1);
+});
+
+test("同步控制器随组合根关闭而中止：关闭后不再发请求", async () => {
+  const repository = receiptProfileRepository();
+  const { transport, requests } = receiptProfileTransport({
+    sync: () => ({ changed: false, version: 0 }),
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport },
+  );
+  await services.initialize();
+  await services.shutdownBackgroundWork();
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+    status: "skipped",
+    reason: "disposed",
+  });
+  assert.equal(requests.length, 0);
+});
+
 test("Settings 钱箱测试缺少 CashDrawer.Open 权限时失败且不触发硬件", async () => {
   let drawerOpens = 0;
   const services = createTestComposition(databaseFor([]), {
@@ -4870,6 +5383,7 @@ function createTestComposition(
     settings?: ProductionSettingsRuntimeConfiguration;
     appUpdateTransition?: UpdateTransitionLeaseCoordinator;
     sharedHeldOrderPublicationScheduler?: SharedHeldOrderPublicationSchedulerPort;
+    reportReceiptProfileSync?(event: ReceiptProfileSyncLogEvent): void;
   }> = {},
 ) {
   let nextId = 0;
@@ -5049,6 +5563,9 @@ function createTestComposition(
         }
       : {}),
     ...(options.settings ? { settings: options.settings } : {}),
+    ...(options.reportReceiptProfileSync
+      ? { reportReceiptProfileSync: options.reportReceiptProfileSync }
+      : {}),
   });
 }
 
@@ -5425,6 +5942,8 @@ function databaseFor(
     onCatalogActivate?(): void;
     onCatalogDiscard?(): void;
     onActivePromotionsLoad?(storeCode: string): void;
+    /** 提供时用真实设置仓库（内存连接）代替简易替身，验证下发资料的原子合并语义。 */
+    receiptSettingsRepository?: PosSettingsRepository;
   }> = {},
 ): PosDatabase {
   let activeCatalogMetadata = options.activeCatalogMetadata ?? null;
@@ -5473,8 +5992,10 @@ function databaseFor(
     abn: "12 345 678 901",
     returnPolicy: "",
     profileStoreCode: "S001",
+    profileVersion: 0,
+    profileAckedVersion: 0,
   };
-  const settings = {
+  const settings = options.receiptSettingsRepository ?? {
     async getReceiptPrinterSettings() {
       options.onFrozenSettingsRead?.();
       return receiptPrinterSettings;
@@ -5483,6 +6004,10 @@ function databaseFor(
       receiptPrinterSettings = input;
       options.onReceiptSettingsSave?.(input);
       return input;
+    },
+    // 用户保存入口走「保留下发资料」写入；测试替身没有下发资料，与整体保存等价。
+    async saveReceiptPrinterSettingsPreservingProfile(input: ReceiptPrinterSettings) {
+      return this.saveReceiptPrinterSettings(input);
     },
   };
   const repositories = {

@@ -299,9 +299,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         Func<string, Task<bool>>? confirmLinklyTerminalAssignmentAsync = null,
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
         ICatalogSyncStatusService? catalogSyncStatusService = null,
-        IOperationAuditLogger? operationAuditLogger = null)
+        IOperationAuditLogger? operationAuditLogger = null,
+        IReceiptProfileSyncService? receiptProfileSyncService = null)
     {
         _setupService = setupService;
+        _receiptProfileSyncService = receiptProfileSyncService;
         _operationAuditLogger = operationAuditLogger;
         _paymentMethodSettingsService = paymentMethodSettingsService;
         _catalogSyncStatusService = catalogSyncStatusService;
@@ -381,6 +383,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         InitializeCatalogSyncStatus();
+        InitializeReceiptProfileSync();
 
         SelectDataMaintenanceCommand = new RelayCommand(() => SelectedCategory = SettingsCategory.DataMaintenance);
         SelectPaymentTerminalCommand = new AsyncRelayCommand(() => SelectCategoryAsync(SettingsCategory.PaymentTerminal, Permissions.PosTerminal.Settings.PaymentTerminal));
@@ -444,6 +447,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         ReleaseCatalogSyncStatus();
+        ReleaseReceiptProfileSync();
     }
 
     public ObservableCollection<SquareLocationOption> SquareLocations { get; } = [];
@@ -2120,6 +2124,14 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
         using var authorizationActivation = permissionGrant.Activate();
 
+        // 中文注释：本机已应用过总部下发（版本 > 0）时，六个字段只读、按钮是「立即同步」：
+        // 直接跑一轮同步并显示结果，不再把资料载入草稿。
+        if (IsReceiptProfileManaged)
+        {
+            await SyncReceiptProfileNowAsync();
+            return;
+        }
+
         if (_storeReceiptProfileApiClient is null)
         {
             ReceiptPrinterTestStatusMessage = "Store receipt profile is not configured.";
@@ -2129,10 +2141,18 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         try
         {
             var profile = await _storeReceiptProfileApiClient.GetCurrentAsync();
-            var validationError = ValidateStoreReceiptProfile(profile);
+            var validationError = StoreReceiptProfileValidator.Validate(profile);
             if (validationError is not null)
             {
                 ReceiptPrinterTestStatusMessage = validationError;
+                return;
+            }
+
+            if (profile.Version > 0 && _receiptProfileSyncService is not null)
+            {
+                // 中文注释：总部已下发但本机还没应用（后台同步还没跑到）：改走同步，
+                // 让资料原子写入并进入只读，而不是塞进草稿再靠手工保存（保存后版本仍为 0，随后还会被同步覆盖一次）。
+                await SyncReceiptProfileNowAsync();
                 return;
             }
 
@@ -2150,56 +2170,6 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             // 中文注释：网络失败或契约异常不改动任何草稿字段，仅回写错误状态。
             ReceiptPrinterTestStatusMessage = ex.Message;
         }
-    }
-
-    private static string? ValidateStoreReceiptProfile(StoreReceiptProfileDto profile)
-    {
-        // 中文注释：仅地址/退货政策允许 CR、LF、TAB；其余资料字段拒绝任何控制字符（含 DEL）。
-        if (ContainsRejectedControlCharacter(profile.StoreCode, allowLineBreaksAndTabs: false) ||
-            ContainsRejectedControlCharacter(profile.StoreName, allowLineBreaksAndTabs: false) ||
-            ContainsRejectedControlCharacter(profile.BrandName, allowLineBreaksAndTabs: false) ||
-            ContainsRejectedControlCharacter(profile.Phone, allowLineBreaksAndTabs: false) ||
-            ContainsRejectedControlCharacter(profile.Abn, allowLineBreaksAndTabs: false) ||
-            ContainsRejectedControlCharacter(profile.Address, allowLineBreaksAndTabs: true) ||
-            ContainsRejectedControlCharacter(profile.ReturnPolicy, allowLineBreaksAndTabs: true))
-        {
-            return "Store receipt profile contains invalid control characters.";
-        }
-
-        if (profile.ReturnPolicy is { Length: > 500 })
-        {
-            return "Return policy exceeds the maximum length of 500 characters.";
-        }
-
-        return null;
-    }
-
-    private static bool ContainsRejectedControlCharacter(string? value, bool allowLineBreaksAndTabs)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return false;
-        }
-
-        foreach (var ch in value)
-        {
-            if (ch is '\r' or '\n' or '\t')
-            {
-                if (!allowLineBreaksAndTabs)
-                {
-                    return true;
-                }
-
-                continue;
-            }
-
-            if (char.IsControl(ch))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private async Task DownloadCatalogAsync(CancellationToken cancellationToken)
@@ -2631,6 +2601,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(LinklyCloudCredentialStatusText));
         OnPropertyChanged(nameof(LinklyTestActionText));
         OnPropertyChanged(nameof(ReceiptPrinterTitleText));
+        OnPropertyChanged(nameof(ReceiptProfileLoadButtonText));
+        OnPropertyChanged(nameof(ReceiptProfileManagedHintText));
         OnPropertyChanged(nameof(SquareTokenStatusText));
         OnPropertyChanged(nameof(SquareDeviceCodesUnavailableText));
         foreach (var line in LinklyCloudLines)
@@ -2684,6 +2656,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ReceiptAbnText = settings.Abn;
         ReceiptReturnPolicyText = settings.ReturnPolicy;
         ReceiptPrintBankReceiptText = settings.PrintBankReceiptText;
+        ReceiptProfileVersion = settings.ProfileVersion;
     }
 
     private ReceiptPrinterSettings CreateReceiptPrinterSettingsFromFields()
@@ -2697,7 +2670,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ReceiptAbnText,
             ReceiptReturnPolicyText,
             ReceiptPrinterSettings.Default.CutDistance,
-            ReceiptPrintBankReceiptText);
+            ReceiptPrintBankReceiptText,
+            // 版本只由同步写入；存储层保存时也不会读取它，这里带上仅为让保存后回显与界面状态一致。
+            ReceiptProfileVersion);
     }
 
     partial void OnIsSquareSandboxChanged(bool value)

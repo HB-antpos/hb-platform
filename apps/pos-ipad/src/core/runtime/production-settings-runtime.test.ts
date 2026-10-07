@@ -60,6 +60,8 @@ const SNAPSHOT: SettingsSnapshot = {
     abn: "",
     returnPolicy: "",
     profileStoreCode: "S1",
+    profileVersion: 0,
+    profileAckedVersion: 0,
   },
   square: {
     available: true,

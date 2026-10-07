@@ -248,4 +248,72 @@ export class HbposStoreApi {
       returnPolicy: data.returnPolicy ?? "",
     });
   }
+
+  /**
+   * 轻量轮询总部下发的小票资料：本机已应用版本作为 knownVersion，服务端版本没变时只回
+   * {changed:false}。门店与设备只取认证声明，这里不拼任何门店/设备参数。
+   * 生成类型里的字段全是可选的，这里容错归一：changed 缺失按 false，version 缺失按 0。
+   */
+  public async syncReceiptProfile(
+    knownVersion: number,
+    signal?: AbortSignal,
+  ): Promise<StoreReceiptProfileSyncResult> {
+    const response = await this.transport.request<
+      HbposEnvelope<components["schemas"]["StoreReceiptProfileSyncDto"]>
+    >({
+      method: "GET",
+      url: "/api/v1/stores/current/receipt-profile/sync",
+      params: { knownVersion: nonNegativeInteger(knownVersion) },
+      ...(signal ? { signal } : {}),
+    });
+    const data = unwrapHbposEnvelope(response.data);
+    const profile = data.profile;
+    return Object.freeze({
+      changed: data.changed === true,
+      version: nonNegativeInteger(data.version),
+      profile: profile
+        ? Object.freeze({
+            version: nonNegativeInteger(profile.version),
+            storeCode: profile.storeCode ?? "",
+            storeName: profile.storeName ?? "",
+            brandName: profile.brandName ?? "",
+            address: profile.address ?? "",
+            phone: profile.phone ?? "",
+            abn: profile.abn ?? "",
+            returnPolicy: profile.returnPolicy ?? "",
+          })
+        : null,
+    });
+  }
+
+  /** 回报「本机已应用到版本 N」；服务端对版本不认账会返回 400（RECEIPT_PROFILE_VERSION_INVALID）。 */
+  public async ackReceiptProfile(
+    version: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const response = await this.transport.request<
+      HbposEnvelope<components["schemas"]["StoreReceiptProfileAckResultDto"]>
+    >({
+      method: "POST",
+      url: "/api/v1/stores/current/receipt-profile/ack",
+      data: { version: nonNegativeInteger(version) },
+      ...(signal ? { signal } : {}),
+    });
+    unwrapHbposEnvelope(response.data);
+  }
+}
+
+/** 一次 sync 的容错结果；profile 带下发版本号（缺失按 0，由同步控制器判为无效响应）。 */
+export type StoreReceiptProfileSyncResult = Readonly<{
+  changed: boolean;
+  version: number;
+  profile:
+    | (StoreReceiptProfile & Readonly<{ version: number }>)
+    | null;
+}>;
+
+function nonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : 0;
 }

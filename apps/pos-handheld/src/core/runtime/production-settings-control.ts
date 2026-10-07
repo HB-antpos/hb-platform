@@ -14,6 +14,7 @@ import {
   type SettingsPendingDataSnapshot,
   type SettingsPrinterDevice,
   type SettingsReceiptProfileDraft,
+  type SettingsReceiptProfileSyncResult,
   type SettingsScannerTestResult,
   type SettingsLinklyPairingPort,
   type SettingsLinklyTerminalSelectionSnapshot,
@@ -79,6 +80,9 @@ export type ProductionSettingsControlDependencies = Readonly<{
   }>;
   receiptProfile: Readonly<{
     load(signal: AbortSignal): Promise<SettingsReceiptProfileDraft | null>;
+    sync?:
+      | ((signal: AbortSignal) => Promise<SettingsReceiptProfileSyncResult>)
+      | undefined;
   }>;
   scanner: Readonly<{
     test(signal: AbortSignal): Promise<SettingsScannerTestResult>;
@@ -313,6 +317,17 @@ export class ProductionSettingsControl implements SettingsControlPort {
     signal: AbortSignal,
   ): Promise<SettingsReceiptProfileDraft | null> {
     return abortChecked(signal, () => this.input.receiptProfile.load(signal));
+  }
+
+  public syncReceiptProfile(
+    signal: AbortSignal,
+  ): Promise<SettingsReceiptProfileSyncResult> {
+    const sync = this.input.receiptProfile.sync;
+    // 运行时未提供同步能力时按失败返回，设置页不会误以为已是最新。
+    if (!sync) {
+      return Promise.resolve({ status: "failed", reason: "failed" });
+    }
+    return abortChecked(signal, () => sync(signal));
   }
 
   public scanPrinters(

@@ -179,6 +179,8 @@
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>&#x4FDD;&#x5B58;&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>&#x6D4B;&#x8BD5;&#x6253;&#x5370;</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>&#x4ECE;&#x5206;&#x5E97;&#x8D44;&#x6599;&#x8F7D;&#x5165;</value></data>
+  <data name="settings.receiptPrinter.syncNow" xml:space="preserve"><value>立即同步</value></data>
+  <data name="settings.receiptPrinter.profileManaged" xml:space="preserve"><value>由总部下发，请在 Web 分店管理修改</value></data>
   <data name="settings.page.dataMaintenance.description" xml:space="preserve"><value>保持商品、价格和收银软件处于可用状态。</value></data>
   <data name="settings.page.paymentTerminal.description" xml:space="preserve"><value>选择并配置收银时使用的刷卡服务商。</value></data>
   <data name="settings.receiptPrinter.preview" xml:space="preserve"><value>小票预览</value></data>
@@ -192,6 +194,13 @@
   <data name="settings.deviceRegistration.supervisorRequired" xml:space="preserve"><value>需要主管授权。</value></data>
   <data name="settings.deviceRegistration.deviceReuse" xml:space="preserve"><value>目标分店存在设备编号时将优先复用。</value></data>
   <data name="settings.status.receiptProfileLoaded" xml:space="preserve"><value>&#x5DF2;&#x8F7D;&#x5165;&#xFF0C;&#x4FDD;&#x5B58;&#x540E;&#x751F;&#x6548;</value></data>
+  <data name="settings.status.receiptProfileSyncApplied" xml:space="preserve"><value>已更新到版本 {0}</value></data>
+  <data name="settings.status.receiptProfileSyncUpToDate" xml:space="preserve"><value>已是最新（版本 {0}）</value></data>
+  <data name="settings.status.receiptProfileSyncNeverReleased" xml:space="preserve"><value>总部还没有下发过小票资料</value></data>
+  <data name="settings.status.receiptProfileSyncDiscarded" xml:space="preserve"><value>总部下发的小票资料无效，未应用</value></data>
+  <data name="settings.status.receiptProfileSyncFailed" xml:space="preserve"><value>同步失败：{0}</value></data>
+  <data name="settings.status.receiptProfileSyncUnsupported" xml:space="preserve"><value>服务器暂不支持小票资料下发</value></data>
+  <data name="settings.status.receiptProfileSyncNotReady" xml:space="preserve"><value>设备尚未完成授权，暂时无法同步</value></data>
   <data name="settings.deviceRegistration.description" xml:space="preserve"><value>选择其他分店，为当前收银设备提交授权重新注册请求。提交前会继续检查购物车和待同步、失败、同步中的订单。</value></data>
   <data name="settings.deviceRegistration.action" xml:space="preserve"><value>更换分店重新注册</value></data>
   <data name="settings.status.ready" xml:space="preserve"><value>&#x5C31;&#x7EEA;&#x3002;</value></data>

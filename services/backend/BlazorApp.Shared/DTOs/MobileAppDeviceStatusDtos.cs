@@ -58,6 +58,12 @@ namespace BlazorApp.Shared.DTOs
         public string? OnlineState { get; set; }
 
         public string? Keyword { get; set; }
+
+        /// <summary>原生版本号精确匹配（版本分布点选用，不同于关键词的模糊包含）。</summary>
+        public string? AppVersion { get; set; }
+
+        /// <summary>原生构建号精确匹配，与 AppVersion 搭配使用。</summary>
+        public string? AppBuildVersion { get; set; }
     }
 
     /// <summary>
@@ -120,5 +126,40 @@ namespace BlazorApp.Shared.DTOs
         public int Ios { get; set; }
 
         public int UnknownSystem { get; set; }
+    }
+
+    /// <summary>
+    /// 版本分布的一行：同一系统、同一原生版本号 + 构建号下的设备数。
+    /// </summary>
+    public class MobileAppVersionDistributionItemDto
+    {
+        /// <summary>规范化后的系统名（Android / iOS / iPadOS 等）；缺失时为 null。</summary>
+        public string? DeviceSystem { get; set; }
+
+        /// <summary>原生版本号；设备从未上报时为 null。</summary>
+        public string? AppVersion { get; set; }
+
+        public string? AppBuildVersion { get; set; }
+
+        public int Total { get; set; }
+
+        /// <summary>最近 15 分钟内有心跳的设备数。</summary>
+        public int Online { get; set; }
+
+        /// <summary>当前跑的是 OTA 热更新包的设备数。</summary>
+        public int Ota { get; set; }
+
+        /// <summary>当前跑的是安装包内置 bundle 的设备数。</summary>
+        public int Embedded { get; set; }
+    }
+
+    /// <summary>
+    /// Expo App 按版本统计的设备数。
+    /// </summary>
+    public class MobileAppVersionDistributionDto
+    {
+        public int Total { get; set; }
+
+        public List<MobileAppVersionDistributionItemDto> Items { get; set; } = new();
     }
 }

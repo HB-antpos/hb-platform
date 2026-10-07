@@ -139,6 +139,9 @@ namespace BlazorApp.Api.Services
                         StoreCode = query.StoreCode,
                         DeviceSystem = query.DeviceSystem,
                         Keyword = query.Keyword,
+                        // 点选某个版本后，汇总条要和下方列表保持同一口径。
+                        AppVersion = query.AppVersion,
+                        AppBuildVersion = query.AppBuildVersion,
                     },
                     threshold
                 )
@@ -161,6 +164,51 @@ namespace BlazorApp.Api.Services
             );
         }
 
+        /// <summary>
+        /// 按系统 + 原生版本号 + 构建号统计设备数，同时给出在线数与 OTA / 内置 bundle 的分布。
+        /// </summary>
+        public async Task<ApiResponse<MobileAppVersionDistributionDto>> GetVersionDistributionAsync(
+            MobileAppDeviceStatusQueryDto query
+        )
+        {
+            var threshold = GetOnlineThreshold(EnsureUtc(_utcNow()));
+            // 关键逻辑：分布只受分店、系统、关键词约束。在线状态与版本精确筛选属于对明细的下钻，
+            // 若也作用在分布上，点选一个版本后其余版本会消失，无法切换。
+            var allItems = await BuildQuery(
+                    new MobileAppDeviceStatusQueryDto
+                    {
+                        StoreCode = query.StoreCode,
+                        DeviceSystem = query.DeviceSystem,
+                        Keyword = query.Keyword,
+                    },
+                    threshold
+                )
+                .ToListAsync();
+
+            var items = allItems
+                .GroupBy(item => (
+                    System: ResolveSystemLabel(item),
+                    Version: NormalizeText(item.AppVersion, 80),
+                    Build: NormalizeText(item.AppBuildVersion, 80)
+                ))
+                .Select(group => new MobileAppVersionDistributionItemDto
+                {
+                    DeviceSystem = group.Key.System,
+                    AppVersion = group.Key.Version,
+                    AppBuildVersion = group.Key.Build,
+                    Total = group.Count(),
+                    Online = group.Count(item => item.LastSeenAtUtc >= threshold),
+                    Ota = group.Count(item => IsUpdateSource(item, "ota")),
+                    Embedded = group.Count(item => IsUpdateSource(item, "embedded")),
+                })
+                .ToList();
+            items.Sort(CompareDistributionItems);
+
+            return ApiResponse<MobileAppVersionDistributionDto>.OK(
+                new MobileAppVersionDistributionDto { Total = allItems.Count, Items = items }
+            );
+        }
+
         private ISugarQueryable<MobileAppDeviceStatus> BuildQuery(
             MobileAppDeviceStatusQueryDto query,
             DateTime onlineThreshold
@@ -180,6 +228,18 @@ namespace BlazorApp.Api.Services
             if (!string.IsNullOrWhiteSpace(deviceSystem))
             {
                 queryable = queryable.Where(item => item.DeviceSystem == deviceSystem);
+            }
+
+            var appVersion = NormalizeText(query.AppVersion, 80);
+            if (!string.IsNullOrWhiteSpace(appVersion))
+            {
+                queryable = queryable.Where(item => item.AppVersion == appVersion);
+            }
+
+            var appBuildVersion = NormalizeText(query.AppBuildVersion, 80);
+            if (!string.IsNullOrWhiteSpace(appBuildVersion))
+            {
+                queryable = queryable.Where(item => item.AppBuildVersion == appBuildVersion);
             }
 
             var keyword = NormalizeText(query.Keyword, 120);
@@ -327,6 +387,96 @@ namespace BlazorApp.Api.Services
                 "iOS" => "ios",
                 _ => "unknown",
             };
+        }
+
+        /// <summary>系统展示名：与列表筛选同源，优先 DeviceSystem，缺失时回退 Platform。</summary>
+        private static string? ResolveSystemLabel(MobileAppDeviceStatus entity)
+        {
+            return NormalizeDeviceSystem(entity.DeviceSystem) ?? NormalizeDeviceSystem(entity.Platform);
+        }
+
+        private static bool IsUpdateSource(MobileAppDeviceStatus entity, string source)
+        {
+            return string.Equals(entity.UpdateSource?.Trim(), source, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 排序：iOS、Android 在前，其他系统按名称，未知系统最后；同系统内版本号从新到旧，未上报版本垫底。
+        /// </summary>
+        private static int CompareDistributionItems(
+            MobileAppVersionDistributionItemDto left,
+            MobileAppVersionDistributionItemDto right
+        )
+        {
+            var result = GetSystemRank(left.DeviceSystem).CompareTo(GetSystemRank(right.DeviceSystem));
+            if (result != 0)
+            {
+                return result;
+            }
+
+            result = string.Compare(left.DeviceSystem, right.DeviceSystem, StringComparison.OrdinalIgnoreCase);
+            if (result != 0)
+            {
+                return result;
+            }
+
+            result = CompareVersionTextDescending(left.AppVersion, right.AppVersion);
+            return result != 0
+                ? result
+                : CompareVersionTextDescending(left.AppBuildVersion, right.AppBuildVersion);
+        }
+
+        private static int GetSystemRank(string? system)
+        {
+            return system?.ToLowerInvariant() switch
+            {
+                "ios" => 0,
+                "android" => 1,
+                null => 3,
+                _ => 2,
+            };
+        }
+
+        /// <summary>
+        /// 版本文本从新到旧比较：按「.」或「-」分段，两边都是数字时按数值比（1.0.10 大于 1.0.9），
+        /// 否则按字符；空值视为最旧，排在最后。
+        /// </summary>
+        private static int CompareVersionTextDescending(string? left, string? right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            {
+                return string.IsNullOrWhiteSpace(left) == string.IsNullOrWhiteSpace(right)
+                    ? 0
+                    : string.IsNullOrWhiteSpace(left) ? 1 : -1;
+            }
+
+            var leftParts = left.Split('.', '-');
+            var rightParts = right.Split('.', '-');
+            for (var index = 0; index < Math.Max(leftParts.Length, rightParts.Length); index++)
+            {
+                // 较短的一方缺段，视为更旧（1.0 比 1.0.1 旧）。
+                if (index >= leftParts.Length)
+                {
+                    return 1;
+                }
+
+                if (index >= rightParts.Length)
+                {
+                    return -1;
+                }
+
+                var result =
+                    long.TryParse(leftParts[index], out var leftNumber)
+                    && long.TryParse(rightParts[index], out var rightNumber)
+                        ? leftNumber.CompareTo(rightNumber)
+                        : string.Compare(leftParts[index], rightParts[index], StringComparison.OrdinalIgnoreCase);
+                if (result != 0)
+                {
+                    return -result;
+                }
+            }
+
+            return 0;
         }
 
         private static string? NormalizeDeviceSystem(string? value)
