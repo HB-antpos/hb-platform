@@ -38,9 +38,9 @@ function setup(idleMs = IDLE) {
   return { gate, advance, notified, timers };
 }
 
-test("默认值：30 秒空闲、后台下载只占一半带宽", () => {
+test("默认值：30 秒空闲、后台下载最多占 80% 带宽", () => {
   assert.equal(BACKGROUND_DOWNLOAD_IDLE_MS, 30_000);
-  assert.equal(BACKGROUND_DOWNLOAD_BANDWIDTH_SHARE, 0.5);
+  assert.equal(BACKGROUND_DOWNLOAD_BANDWIDTH_SHARE, 0.8);
 });
 
 test("未接上登录状态时视为打开，保持原有立即下载行为", () => {

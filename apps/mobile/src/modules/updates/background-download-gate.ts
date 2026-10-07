@@ -11,7 +11,7 @@
 export const BACKGROUND_DOWNLOAD_IDLE_MS = 30_000;
 
 /** 后台安装包下载最多占用的带宽比例，交给原生下载器限速；旧原生包会忽略这个参数。 */
-export const BACKGROUND_DOWNLOAD_BANDWIDTH_SHARE = 0.5;
+export const BACKGROUND_DOWNLOAD_BANDWIDTH_SHARE = 0.8;
 
 type Timer = ReturnType<typeof setTimeout>;
 

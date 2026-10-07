@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
@@ -122,52 +123,14 @@ class HBAppInstallerModule : Module() {
       Uri.fromFile(directory.canonicalFile).toString()
     }
 
-    AsyncFunction("downloadApk") { request: DownloadApkRequestRecord ->
-      val context = requireContext()
-      val metadata = request.validated()
-      val directory = downloadDirectory(context, persistent = false)
-      ensureDirectory(directory)
-      val destination = validatedDownloadTarget(context, metadata.destinationFileUri)
-      HBAppInstallerTargetLock.withLock(destination) {
-        val result = HBAppInstallerDownloader().download(
-          ApkDownloadRequest(
-            sourceUrl = metadata.url,
-            destinationFile = destination,
-            destinationFileUri = metadata.destinationFileUri,
-            expectedSizeBytes = metadata.expectedSizeBytes,
-            expectedSha256Hex = metadata.expectedSha256Hex,
-            trustedOrigins = metadata.trustedOrigins,
-            bandwidthShare = request.bandwidthShare,
-          ),
-          onProgress = ApkDownloadProgressListener { bytesWritten, totalBytes, bytesPerSecond ->
-            // 带上 JS 传入的原始目标 URI，JS 只认自己这次下载的进度。
-            val event = mutableMapOf<String, Any>(
-              "destinationFileUri" to metadata.destinationFileUri,
-              "bytesWritten" to bytesWritten.toDouble(),
-              "totalBytes" to totalBytes.toDouble(),
-            )
-            // 预热期还没测出速率时不带该字段，JS 按「未知」处理、不提示网络差。
-            if (bytesPerSecond != null) event["bytesPerSecond"] = bytesPerSecond.toDouble()
-            sendEvent(DOWNLOAD_PROGRESS_EVENT, event)
-          },
-        )
-        mapOf(
-          "fileUri" to result.fileUri,
-          "sizeBytes" to result.sizeBytes,
-          "sha256Hex" to result.sha256Hex,
-          "finalUrl" to result.finalUrl,
-        )
-      }
+    // 下载、校验、安装前复验都要读写整包（下载可达数分钟），一律移出 Expo 共享异步队列，
+    // 否则期间所有 Expo 异步调用（含每个 API 请求读令牌）都要排队等它结束。
+    AsyncFunction("downloadApk") Coroutine { request: DownloadApkRequestRecord ->
+      runOffModulesQueue { downloadApk(request) }
     }
 
-    AsyncFunction("verifyApk") { request: VerifyApkRequestRecord ->
-      val context = requireContext()
-      val metadata = request.validated()
-      val target = validatedLocalApk(context, metadata.fileUri)
-      HBAppInstallerTargetLock.withLock(target) {
-        val identity = installCoordinator(context).verifyApk(target, metadata)
-        mapOf("verified" to true, "packageName" to identity.packageName, "versionCode" to identity.versionCode)
-      }
+    AsyncFunction("verifyApk") Coroutine { request: VerifyApkRequestRecord ->
+      runOffModulesQueue { verifyDownloadedApk(request) }
     }
 
     AsyncFunction("removeDownloadedApk") { fileUri: String ->
@@ -180,14 +143,66 @@ class HBAppInstallerModule : Module() {
       }
     }
 
-    AsyncFunction("installVerifiedApk") { request: VerifyApkRequestRecord ->
-      val context = requireContext()
-      val metadata = request.validated()
-      val target = validatedLocalApk(context, metadata.fileUri)
-      HBAppInstallerTargetLock.withLock(target) {
-        val identity = installCoordinator(context).installVerifiedApk(target, metadata)
-        mapOf("launched" to true, "packageName" to identity.packageName, "versionCode" to identity.versionCode)
-      }
+    AsyncFunction("installVerifiedApk") Coroutine { request: VerifyApkRequestRecord ->
+      runOffModulesQueue { installVerifiedApk(request) }
+    }
+  }
+
+  private fun downloadApk(request: DownloadApkRequestRecord): Map<String, Any> {
+    val context = requireContext()
+    val metadata = request.validated()
+    val directory = downloadDirectory(context, persistent = false)
+    ensureDirectory(directory)
+    val destination = validatedDownloadTarget(context, metadata.destinationFileUri)
+    return HBAppInstallerTargetLock.withLock(destination) {
+      val result = HBAppInstallerDownloader().download(
+        ApkDownloadRequest(
+          sourceUrl = metadata.url,
+          destinationFile = destination,
+          destinationFileUri = metadata.destinationFileUri,
+          expectedSizeBytes = metadata.expectedSizeBytes,
+          expectedSha256Hex = metadata.expectedSha256Hex,
+          trustedOrigins = metadata.trustedOrigins,
+          bandwidthShare = request.bandwidthShare,
+        ),
+        onProgress = ApkDownloadProgressListener { bytesWritten, totalBytes, bytesPerSecond ->
+          // 带上 JS 传入的原始目标 URI，JS 只认自己这次下载的进度。
+          val event = mutableMapOf<String, Any>(
+            "destinationFileUri" to metadata.destinationFileUri,
+            "bytesWritten" to bytesWritten.toDouble(),
+            "totalBytes" to totalBytes.toDouble(),
+          )
+          // 预热期还没测出速率时不带该字段，JS 按「未知」处理、不提示网络差。
+          if (bytesPerSecond != null) event["bytesPerSecond"] = bytesPerSecond.toDouble()
+          sendEvent(DOWNLOAD_PROGRESS_EVENT, event)
+        },
+      )
+      mapOf(
+        "fileUri" to result.fileUri,
+        "sizeBytes" to result.sizeBytes,
+        "sha256Hex" to result.sha256Hex,
+        "finalUrl" to result.finalUrl,
+      )
+    }
+  }
+
+  private fun verifyDownloadedApk(request: VerifyApkRequestRecord): Map<String, Any> {
+    val context = requireContext()
+    val metadata = request.validated()
+    val target = validatedLocalApk(context, metadata.fileUri)
+    return HBAppInstallerTargetLock.withLock(target) {
+      val identity = installCoordinator(context).verifyApk(target, metadata)
+      mapOf("verified" to true, "packageName" to identity.packageName, "versionCode" to identity.versionCode)
+    }
+  }
+
+  private fun installVerifiedApk(request: VerifyApkRequestRecord): Map<String, Any> {
+    val context = requireContext()
+    val metadata = request.validated()
+    val target = validatedLocalApk(context, metadata.fileUri)
+    return HBAppInstallerTargetLock.withLock(target) {
+      val identity = installCoordinator(context).installVerifiedApk(target, metadata)
+      mapOf("launched" to true, "packageName" to identity.packageName, "versionCode" to identity.versionCode)
     }
   }
 
