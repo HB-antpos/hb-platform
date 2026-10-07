@@ -187,6 +187,7 @@ import {
   isProductLinkConfirmed,
   mergeProductCheckResult,
 } from './matchedProductLink'
+import { resolveInvoiceEditGuid } from './invoiceEditRoute'
 import {
   BATCH_LINK_QUERY_CONCURRENCY,
   mapWithConcurrency,
@@ -565,7 +566,10 @@ export default function InvoiceEditPage() {
   const { t } = useTranslation()
   const route = useStableRouteContext()
   const { active } = useKeepAliveContext()
-  const invoiceGuid = route?.params.id
+  // 关键位置：单号只在路由确实是本页时更新；KeepAlive 隐藏时切到列表等页面不能把单号清空，否则后台任务结果会被丢弃。
+  const invoiceGuidRef = useRef<string | undefined>(undefined)
+  invoiceGuidRef.current = resolveInvoiceEditGuid(invoiceGuidRef.current, route)
+  const invoiceGuid = invoiceGuidRef.current
   const navigate = useNavigate()
   const { access, currentUser } = useAuthStore()
   const isAdmin = access.isAdmin
