@@ -218,7 +218,7 @@ public sealed class StoreReceiptProfileReleaseTests
     // ---------------------------------------------------------------- 控制器
 
     [Fact]
-    public void New_endpoints_keep_route_templates_and_require_receipt_printer_policy()
+    public void New_endpoints_keep_route_templates_and_need_only_device_authentication()
     {
         var sync = typeof(StoresController).GetMethod(nameof(StoresController.SyncCurrentReceiptProfile))!;
         var ack = typeof(StoresController).GetMethod(nameof(StoresController.AckCurrentReceiptProfile))!;
@@ -229,11 +229,15 @@ public sealed class StoreReceiptProfileReleaseTests
         Assert.Equal(
             "current/receipt-profile/ack",
             Assert.Single(ack.GetCustomAttributes<HttpPostAttribute>()).Template);
+
+        // 后台轮询不一定有收银员登录：只沿用类上的设备认证，方法上不得再叠加收银员权限策略，
+        // 也不得匿名（匿名会让任何人都能写回执）。真实授权管线见 StoreReceiptProfileSyncAuthorizationHttpTests。
+        var classAuthorize = Assert.Single(typeof(StoresController).GetCustomAttributes<AuthorizeAttribute>());
+        Assert.Null(classAuthorize.Policy);
         foreach (var method in new[] { sync, ack })
         {
-            Assert.Equal(
-                CashierAuthorizationPolicies.ReceiptPrinter,
-                Assert.Single(method.GetCustomAttributes<AuthorizeAttribute>()).Policy);
+            Assert.Empty(method.GetCustomAttributes<AuthorizeAttribute>());
+            Assert.Empty(method.GetCustomAttributes<AllowAnonymousAttribute>());
         }
     }
 

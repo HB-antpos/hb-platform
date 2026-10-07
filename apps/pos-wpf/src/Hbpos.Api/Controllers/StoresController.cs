@@ -50,8 +50,13 @@ public sealed class StoresController(
 
     /// <summary>
     /// 收银端按版本号轮询总部下发的小票资料：版本没变时只回 {changed:false}，响应很小，可每 60 秒调一次。
+    /// <para>
+    /// 授权：只要求设备认证（沿用类上的 [Authorize]），**不要求**收银员票据与 ReceiptPrinter 权限。
+    /// 这是后台轮询：应用启动、收银员尚未登录、或当班收银员没有「设置小票打印机」权限时同样要能同步，
+    /// 否则下发只会在有权限的人登录后才生效。返回内容只是本设备所在门店的小票抬头（每张小票都会印出来），
+    /// 门店只取认证声明，不接受客户端指定。
+    /// </para>
     /// </summary>
-    [Authorize(Policy = CashierAuthorizationPolicies.ReceiptPrinter)]
     [HttpGet("current/receipt-profile/sync")]
     public async Task<ActionResult<ApiResult<StoreReceiptProfileSyncDto>>> SyncCurrentReceiptProfile(
         [FromQuery] string? knownVersion,
@@ -77,9 +82,9 @@ public sealed class StoresController(
 
     /// <summary>
     /// 收银端把总部下发的资料写入本机后回报「已应用到版本 N」，HBweb 据此显示每台设备的应用情况。
-    /// 门店与设备都只取认证声明，不接受客户端指定。
+    /// 门店与设备都只取认证声明，不接受客户端指定。授权同 sync：只要求设备认证，不要求收银员票据
+    /// （回执发生在后台同步之后，此时不一定有人登录）；它只能写本设备自己的一行，且版本必须是已发布的版本。
     /// </summary>
-    [Authorize(Policy = CashierAuthorizationPolicies.ReceiptPrinter)]
     [HttpPost("current/receipt-profile/ack")]
     [RequestSizeLimit(1024)]
     public async Task<ActionResult<ApiResult<StoreReceiptProfileAckResultDto>>> AckCurrentReceiptProfile(
