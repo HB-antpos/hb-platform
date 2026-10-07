@@ -179,6 +179,67 @@ export function pickPurchasePriceDirectionGuids(
   return detailGuids.map(String).filter((guid) => !excluded.has(guid))
 }
 
+/** 进货价较上次涨跌绝对值超过该比例（严格大于）时，「更新进货价」必须二次确认；与后端 LocalSupplierInvoicesPurchasePriceChangeGuard 同口径。 */
+export const PRICE_CHANGE_CONFIRM_RATIO = 0.4
+
+/** 后端因未带二次确认标志而拒绝时返回的错误码。 */
+export const PRICE_CHANGE_CONFIRM_REQUIRED_CODE = 'PRICE_CHANGE_CONFIRM_REQUIRED'
+
+/** 涨跌幅（本次 / 上次 - 1）；上次进货价为空或 ≤ 0（新商品）、本次价缺失时无可比价，返回 null。 */
+export function getPurchasePriceChangeRatio(
+  lastPurchasePrice: number | null | undefined,
+  purchasePrice: number | null | undefined,
+): number | null {
+  if (typeof lastPurchasePrice !== 'number' || !(lastPurchasePrice > 0)) return null
+  if (typeof purchasePrice !== 'number' || !Number.isFinite(purchasePrice)) return null
+  return purchasePrice / lastPurchasePrice - 1
+}
+
+export interface LargePriceChangeRow {
+  detailGuid: string
+  itemNumber?: string
+  productName?: string
+  lastPurchasePrice: number
+  purchasePrice: number
+  /** 涨跌幅，0.5 表示 +50%，负数为降价。 */
+  ratio: number
+}
+
+/**
+ * 找出本次将执行「更新进货价」且涨跌幅超限的行（含降价）。
+ * 新进货价 ≤ 0 的行后端会跳过不写入，不需要确认；改货号、加多码不动价格，也不看。
+ */
+export function findLargePriceChangeRows(
+  detailGuids: Key[],
+  details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType' | 'purchasePrice' | 'lastPurchasePrice' | 'itemNumber' | 'productName'>>,
+  rowActions: Record<string, number>,
+): LargePriceChangeRow[] {
+  const detailMap = new Map(details.map((item) => [item.detailGUID, item]))
+  const rows: LargePriceChangeRow[] = []
+  for (const key of detailGuids) {
+    const detail = detailMap.get(String(key))
+    if (!detail || getCurrentDetailAction(detail, rowActions) !== DetailAction.UpdatePurchasePrice) continue
+    if (!(typeof detail.purchasePrice === 'number' && detail.purchasePrice > 0)) continue
+    const ratio = getPurchasePriceChangeRatio(detail.lastPurchasePrice, detail.purchasePrice)
+    if (ratio === null || Math.abs(ratio) <= PRICE_CHANGE_CONFIRM_RATIO) continue
+    rows.push({
+      detailGuid: detail.detailGUID,
+      itemNumber: detail.itemNumber,
+      productName: detail.productName,
+      lastPurchasePrice: detail.lastPurchasePrice as number,
+      purchasePrice: detail.purchasePrice,
+      ratio,
+    })
+  }
+  return rows
+}
+
+/** 后端是否因「涨跌幅超限未二次确认」拒绝了本次批量执行（前端明细过期时的兜底）。 */
+export function isPriceChangeConfirmRequiredError(error: unknown): boolean {
+  if (!(error instanceof RequestError)) return false
+  return (error.payload as { code?: unknown } | undefined)?.code === PRICE_CHANGE_CONFIRM_REQUIRED_CODE
+}
+
 export function getNewProductWithAdditionalBarcodesRows(
   selectedRowKeys: Key[],
   details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType' | 'additionalBarcodes' | 'itemNumber' | 'barcode' | 'productName'>>,

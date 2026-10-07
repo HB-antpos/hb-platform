@@ -1659,7 +1659,8 @@ namespace BlazorApp.Api.Controllers.React
                 user,
                 dto.NewProductProductTypeSelections,
                 dto.ExpectedActions,
-                confirmationValidation.ConfirmedDetails
+                confirmationValidation.ConfirmedDetails,
+                dto.ConfirmedLargePriceChange == true
             );
             if (result.Success)
                 return Ok(new { success = true, data = result.Data, message = result.Message });

@@ -10,6 +10,9 @@ import {
   getNewProductWithAdditionalBarcodesRows,
   constrainSelectedRowKeysToVisibleDetails,
   countSelectedBatchExecuteActions,
+  findLargePriceChangeRows,
+  getPurchasePriceChangeRatio,
+  isPriceChangeConfirmRequiredError,
   pickPurchasePriceDirectionGuids,
   splitPurchasePriceDirectionGuids,
 } from './batchExecuteConfirm'
@@ -497,6 +500,95 @@ async function main() {
     )
   })
   if (priceDirectionFailure) failures.push(priceDirectionFailure)
+
+  const largePriceFailure = await runTest('进货价涨跌超 40% 的「更新进货价」行须被识别为需二次确认（含降价），恰好 40% 与无可比价不拦', () => {
+    const details = [
+      // SI0075729 现场：整箱录入，涨 1097.6%
+      { detailGUID: 'case', itemNumber: 'A1', productName: '整箱', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 13.32, lastPurchasePrice: 1.11 },
+      { detailGUID: 'edge-up', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 14, lastPurchasePrice: 10 },
+      { detailGUID: 'over-up', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 14.1, lastPurchasePrice: 10 },
+      { detailGUID: 'edge-down', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 6, lastPurchasePrice: 10 },
+      { detailGUID: 'over-down', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 5.9, lastPurchasePrice: 10 },
+      { detailGUID: 'no-last', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 99, lastPurchasePrice: 0 },
+      { detailGUID: 'null-last', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 99 },
+      { detailGUID: 'zero-price', activityType: DetailAction.UpdatePurchasePrice, purchasePrice: 0, lastPurchasePrice: 10 },
+      { detailGUID: 'item-number', activityType: DetailAction.UpdateItemNumber, purchasePrice: 99, lastPurchasePrice: 1 },
+      { detailGUID: 'waiting', activityType: DetailAction.WaitForOperation, purchasePrice: 99, lastPurchasePrice: 1 },
+      { detailGUID: 'executed', activityType: 99, purchasePrice: 99, lastPurchasePrice: 1 },
+      // 页面里刚改成「更新进货价」还没保存，以 rowActions 为准
+      { detailGUID: 'row-action', activityType: DetailAction.WaitForOperation, purchasePrice: 30, lastPurchasePrice: 10 },
+    ]
+    const guids = details.map((item) => item.detailGUID)
+    const rows = findLargePriceChangeRows(guids, details, { 'row-action': DetailAction.UpdatePurchasePrice })
+    assertDeepEqual(
+      rows.map((row) => row.detailGuid),
+      ['case', 'over-up', 'over-down', 'row-action'],
+      '只拦涨跌绝对值严格超过 40% 的「更新进货价」行',
+    )
+    assertEqual(Math.round((rows[0].ratio ?? 0) * 1000) / 10, 1100, '涨跌幅按本次/上次-1 计算')
+    assertEqual(rows[0].itemNumber, 'A1', '带上货号供确认框展示')
+    assertDeepEqual(findLargePriceChangeRows(['case'], details, { case: DetailAction.WaitForOperation }), [], '改成等待操作的行不执行价格，不拦')
+    assertEqual(getPurchasePriceChangeRatio(0, 5), null, '上次价为 0 无可比价')
+    assertEqual(getPurchasePriceChangeRatio(undefined, 5), null, '上次价缺失无可比价')
+    assertEqual(getPurchasePriceChangeRatio(10, undefined), null, '本次价缺失无可比价')
+  })
+  if (largePriceFailure) failures.push(largePriceFailure)
+
+  const confirmCodeFailure = await runTest('后端涨跌幅超限拒绝码应被识别为需二次确认', () => {
+    const rejected = new RequestError('需二次确认', 400, { success: false, code: 'PRICE_CHANGE_CONFIRM_REQUIRED', details: { failed: 1, errors: ['x'] } })
+    assert(isPriceChangeConfirmRequiredError(rejected), '应识别 PRICE_CHANGE_CONFIRM_REQUIRED')
+    assert(!isPriceChangeConfirmRequiredError(new RequestError('其他', 400, { code: 'VALIDATION_ERROR' })), '其他错误码不应触发二次确认')
+    assert(!isPriceChangeConfirmRequiredError(new Error('x')), '非 RequestError 不应触发')
+    const feedback = getBatchExecuteErrorFeedback(rejected, 'fallback')
+    assertDeepEqual(feedback.details, ['x'], '错误明细应原样带出供确认框展示')
+  })
+  if (confirmCodeFailure) failures.push(confirmCodeFailure)
+
+  const confirmedFlagFailure = await runTest('batchExecuteActions 仅在已二次确认时发送 confirmedLargePriceChange', async () => {
+    const originalFetch = globalThis.fetch
+    const bodies: Record<string, unknown>[] = []
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({
+        success: true,
+        data: { createdProducts: 0, updatedPurchasePrices: 1, updatedItemNumbers: 0, addedMultiCodes: 0, skipped: 0, failed: 0, errors: [] },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+    const base = {
+      invoiceGuid: 'invoice-1',
+      detailGuids: ['d1'],
+      expectedActions: [{ detailGuid: 'd1', action: DetailAction.UpdatePurchasePrice, activityType: DetailAction.UpdatePurchasePrice }],
+      confirmedCreateProductCount: 0,
+      confirmedAt: '2026-10-07T09:30:00.000Z',
+    }
+    try {
+      await batchExecuteActions(base)
+      await batchExecuteActions({ ...base, confirmedLargePriceChange: false })
+      await batchExecuteActions({ ...base, confirmedLargePriceChange: true })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    assert(!('confirmedLargePriceChange' in bodies[0]), '未确认时请求体不带标志')
+    assert(!('confirmedLargePriceChange' in bodies[1]), 'false 也不发送，保持后端按未确认处理')
+    assertEqual(bodies[2].confirmedLargePriceChange, true, '二次确认后应发送 true')
+  })
+  if (confirmedFlagFailure) failures.push(confirmedFlagFailure)
+
+  const largePriceMessagesFailure = await runTest('页面级消息文件应补齐二次确认文案的中英文 key', () => {
+    const zh = JSON.parse(readFileSync(resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.zh.json'), 'utf8'))
+    const en = JSON.parse(readFileSync(resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.en.json'), 'utf8'))
+    const keys = ['largePriceChangeTitle', 'largePriceChangeContent', 'largePriceChangeRow', 'largePriceChangeMore', 'largePriceChangeOk']
+    keys.forEach((key) => {
+      assert(typeof zh?.posAdmin?.invoiceWorkbench?.[key] === 'string' && zh.posAdmin.invoiceWorkbench[key].length > 0, `中文页面消息缺少 ${key}`)
+      assert(typeof en?.posAdmin?.invoiceWorkbench?.[key] === 'string' && en.posAdmin.invoiceWorkbench[key].length > 0, `英文页面消息缺少 ${key}`)
+    })
+    // 文案里的占位符中英文必须一致，避免某一语言漏插值。
+    const placeholders = (text: string) => (text.match(/{{\w+}}/g) ?? []).sort().join(',')
+    keys.forEach((key) => {
+      assertEqual(placeholders(zh.posAdmin.invoiceWorkbench[key]), placeholders(en.posAdmin.invoiceWorkbench[key]), `${key} 中英文占位符应一致`)
+    })
+  })
+  if (largePriceMessagesFailure) failures.push(largePriceMessagesFailure)
 
   const i18nFailure = await runTest('中英文 locale 应补齐批量执行确认框文案 key', () => {
     const zh = JSON.parse(readFileSync(resolve(process.cwd(), 'src/i18n/locales/zh.json'), 'utf8'))

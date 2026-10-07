@@ -31,7 +31,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             string userName,
             List<BatchExecuteNewProductProductTypeSelectionDto>? newProductProductTypeSelections = null,
             List<BatchExecuteExpectedActionDto>? expectedActions = null,
-            IReadOnlyCollection<StoreLocalSupplierInvoiceDetails>? confirmedDetails = null
+            IReadOnlyCollection<StoreLocalSupplierInvoiceDetails>? confirmedDetails = null,
+            bool confirmedLargePriceChange = false
         )
         {
             var result = new BatchExecuteActionsResultDto();
@@ -56,7 +57,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     );
                 }
 
-                var validatedRequest = request!;
+                // 二次确认标志不参与确认快照比对，只在锁内校验阶段决定是否放行涨跌幅超限的「更新进货价」。
+                var validatedRequest = request! with { ConfirmedLargePriceChange = confirmedLargePriceChange };
                 var initialData = await _source.LoadInitialAsync(validatedRequest);
                 if (initialData.Header == null)
                     return ApiResponse<BatchExecuteActionsResultDto>.Error("进货单不存在", "NOT_FOUND");

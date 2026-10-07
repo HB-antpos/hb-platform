@@ -520,7 +520,9 @@ public sealed class ReactLocalSupplierInvoiceAuthorizationTests : IDisposable
                 ),
                 It.Is<IReadOnlyCollection<StoreLocalSupplierInvoiceDetails>?>(items =>
                     items != null && items.Count == 0
-                )
+                ),
+                // 表达式树不允许省略可选参数；未带二次确认标志时控制器应传 false。
+                false
             ))
             .ReturnsAsync(ApiResponse<BatchExecuteActionsResultDto>.Error(
                 "套装子项成本正在更新，请稍后重试",
