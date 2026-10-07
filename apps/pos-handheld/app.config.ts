@@ -14,7 +14,7 @@ const defaultTrustedApkOrigin =
 const posHandheldProductionChannel = "pos-handheld-production";
 // 原生包升版时必须同步升：runtime 按 appVersion 生成，受控 OTA 会把渠道覆盖成 release channel，
 // runtime 不变时新 APK 的内置 JS 会被旧 OTA 盖掉（与移动端 #495 同因）。
-const posHandheldAppVersion = "0.1.1";
+const posHandheldAppVersion = "0.1.2";
 
 function buildOtaUpdateConfiguration(): Readonly<{
   buildProfile: string;

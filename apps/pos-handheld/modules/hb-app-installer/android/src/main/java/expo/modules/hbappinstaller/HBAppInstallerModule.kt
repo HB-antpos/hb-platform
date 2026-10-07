@@ -104,6 +104,9 @@ class HBAppInstallerModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("HBAppInstaller")
 
+    // 旧原生包没有该事件，JS 收不到进度时保持不确定状态，不能伪造百分比。
+    Events(DOWNLOAD_PROGRESS_EVENT)
+
     AsyncFunction("getInstallPermissionStatus") {
       // 仅查询当前包的未知来源安装开关；查询本身绝不能触发下载或安装。
       if (requireContext().packageManager.canRequestPackageInstalls()) {
@@ -158,6 +161,17 @@ class HBAppInstallerModule : Module() {
           expectedSizeBytes = metadata.expectedSizeBytes,
           trustedOrigins = metadata.trustedOrigins,
         ),
+        onProgress = ApkDownloadProgressListener { bytesWritten, totalBytes ->
+          // 带上 JS 传入的原始目标 URI，JS 只认自己这次下载的进度。
+          sendEvent(
+            DOWNLOAD_PROGRESS_EVENT,
+            mapOf(
+              "destinationFileUri" to metadata.destinationFileUri,
+              "bytesWritten" to bytesWritten.toDouble(),
+              "totalBytes" to totalBytes.toDouble(),
+            ),
+          )
+        },
       )
       mapOf(
         "fileUri" to result.fileUri,

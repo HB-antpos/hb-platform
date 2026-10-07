@@ -5,6 +5,13 @@ export type DownloadApkRequest = Readonly<{
   trustedOrigins: readonly string[];
 }>;
 
+/** 原生下载进度事件；destinationFileUri 原样回传 JS 发起下载时的目标 URI。 */
+export type ApkDownloadProgressEvent = Readonly<{
+  destinationFileUri: string;
+  bytesWritten: number;
+  totalBytes: number;
+}>;
+
 export type DownloadedApkResult = Readonly<{
   fileUri: string;
   sizeBytes: number;

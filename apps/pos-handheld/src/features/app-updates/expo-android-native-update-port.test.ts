@@ -235,3 +235,118 @@ test("生产组合根只从签名构建 extra 注入 APK origins，且不保留 
   assert.doesNotMatch(source, /androidApk\s*:/u);
   assert.doesNotMatch(source, /Linking\.openURL\([^)]*downloadUrl/u);
 });
+
+test("下载前先订阅原生进度，只转发本目标事件，结束后无论成败都退订", async (t) => {
+  for (const outcome of ["success", "failure"] as const) {
+    await t.test(outcome, async () => {
+      const order: string[] = [];
+      const progress: unknown[] = [];
+      let emit: ((bytesWritten: number) => void) | null = null;
+      let subscribedUri: string | null = null;
+      const downloader = new ExpoAndroidApkDownloader({
+        async subscribeDownloadProgress(destinationFileUri, listener) {
+          order.push("subscribe");
+          subscribedUri = destinationFileUri;
+          emit = listener;
+          return () => {
+            order.push("unsubscribe");
+            emit = null;
+          };
+        },
+        async downloadApk(request) {
+          order.push("download");
+          emit?.(0);
+          emit?.(1);
+          emit?.(1);
+          emit?.(4);
+          if (outcome === "failure") throw new Error("network failed");
+          return {
+            fileUri: request.destinationFileUri,
+            sizeBytes: 4,
+            finalUrl: request.url,
+          };
+        },
+        async removeDownloadedApk() {},
+      });
+
+      const run = downloader.download({
+        url: "https://updates.example.test/build.apk",
+        destinationFileUri: FILE_URI,
+        expectedSizeBytes: 4,
+        maximumSizeBytes: 10,
+        trustedOrigins: ["https://updates.example.test"],
+        onProgress: (value) => progress.push(value),
+      });
+      if (outcome === "failure") {
+        await assert.rejects(run, /network failed/u);
+      } else {
+        await run;
+      }
+
+      assert.equal(subscribedUri, FILE_URI);
+      assert.deepEqual(order, ["subscribe", "download", "unsubscribe"]);
+      // 重复的 25% 被百分比节流掉；总大小取已验证的 expectedSizeBytes。
+      assert.deepEqual(progress, [
+        { bytesWritten: 0, totalBytes: 4 },
+        { bytesWritten: 1, totalBytes: 4 },
+        { bytesWritten: 4, totalBytes: 4 },
+      ]);
+    });
+  }
+});
+
+test("没有进度回调或订阅失败时照常下载", async () => {
+  let downloads = 0;
+  const downloader = new ExpoAndroidApkDownloader({
+    async subscribeDownloadProgress() {
+      throw new Error("native module unavailable");
+    },
+    async downloadApk(request) {
+      downloads += 1;
+      return {
+        fileUri: request.destinationFileUri,
+        sizeBytes: 4,
+        finalUrl: request.url,
+      };
+    },
+    async removeDownloadedApk() {},
+  });
+  const input = {
+    url: "https://updates.example.test/build.apk",
+    destinationFileUri: FILE_URI,
+    expectedSizeBytes: 4,
+    maximumSizeBytes: 10,
+    trustedOrigins: ["https://updates.example.test"],
+  };
+
+  await downloader.download(input);
+  await downloader.download({ ...input, onProgress: () => undefined });
+  assert.equal(downloads, 2);
+});
+
+test("Expo bridge 进度订阅按目标 URI 过滤；旧原生包没有 addListener 时返回空退订", async () => {
+  const received: number[] = [];
+  // 回调里赋值的 let 会被外层控制流收窄为 null，用对象持有监听器引用。
+  const native: { listener: ((event: unknown) => void) | null } = { listener: null };
+  let removed = 0;
+  const withEvents = new ExpoHbAppInstallerBridge(async () => ({
+    addListener(_eventName: "onDownloadProgress", listener: (event: unknown) => void) {
+      native.listener = listener;
+      return { remove: () => { removed += 1; } };
+    },
+  }) as unknown as HbAppInstallerNativeContract);
+
+  const stop = await withEvents.subscribeDownloadProgress(FILE_URI, (bytes) => received.push(bytes));
+  native.listener?.({ destinationFileUri: FILE_URI, bytesWritten: 2, totalBytes: 4 });
+  native.listener?.({ destinationFileUri: `${FILE_URI}.other`, bytesWritten: 3, totalBytes: 4 });
+  native.listener?.({ destinationFileUri: FILE_URI, bytesWritten: "4", totalBytes: 4 });
+  stop();
+  assert.deepEqual(received, [2]);
+  assert.equal(removed, 1);
+
+  const legacy = new ExpoHbAppInstallerBridge(
+    async () => ({}) as unknown as HbAppInstallerNativeContract,
+  );
+  const stopLegacy = await legacy.subscribeDownloadProgress(FILE_URI, () => undefined);
+  assert.doesNotThrow(stopLegacy);
+});

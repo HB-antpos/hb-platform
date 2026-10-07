@@ -255,10 +255,12 @@ test("required 交易未安全时不盖住恢复页面，并持续复查直到�
   expect(updates.refreshSafety).toHaveBeenCalled();
 });
 
-function updateService(presentation: any): any {
+function updateService(presentation: any, downloadProgress: any = null): any {
   return {
     getPresentation: jest.fn(() => presentation),
     subscribePresentation: jest.fn(() => () => undefined),
+    getDownloadProgress: jest.fn(() => downloadProgress),
+    subscribeDownloadProgress: jest.fn(() => () => undefined),
     refreshSafety: jest.fn(async () => presentation),
     prepareSelectedUpdate: jest.fn(async () => presentation),
     getAndroidInstallPermissionStatus: jest.fn(async () => "granted"),
@@ -326,6 +328,61 @@ test.each(["downloading", "failed"] as const)(
     expect(screen.getByTestId("app-update-action")).toBeTruthy();
   },
 );
+
+test("下载中只展示当前目标的确定进度，旧原生包无进度时保持原文案", async () => {
+  const presentation = {
+    key: "native:Android:optional:200",
+    downloadTargetKey: "apk:android:200:hash-a",
+    kind: "native", platform: "Android", requirement: "optional",
+    phase: "prompt", blocking: false, releaseMessage: null,
+    appStoreUrl: null, downloadUrl: "https://updates.example.test/handheld.apk",
+    downloadState: "downloading",
+  };
+  const updates = updateService(presentation, {
+    targetKey: "apk:android:200:hash-a",
+    bytesWritten: 12 * 1024 * 1024,
+    totalBytes: 48 * 1024 * 1024,
+  });
+  mockRuntime = { services: { appUpdates: updates } };
+  const screen = await render(<AppUpdateGateBridge />);
+
+  expect(screen.getByText("正在后台下载更新，可继续使用")).toBeTruthy();
+  expect(screen.getByTestId("app-update-download-progress")).toBeTruthy();
+  expect(screen.getByText("25% · 12.0 / 48.0 MB")).toBeTruthy();
+  expect(screen.getByRole("progressbar").props.accessibilityValue)
+    .toEqual({ min: 0, max: 100, now: 25 });
+
+  // 进度属于别的下载目标（策略已切换）时不能串显示。
+  updates.getDownloadProgress.mockReturnValue({
+    targetKey: "apk:android:199:hash-old",
+    bytesWritten: 1,
+    totalBytes: 2,
+  });
+  await screen.rerender(<AppUpdateGateBridge />);
+  expect(screen.queryByTestId("app-update-download-progress")).toBeNull();
+
+  updates.getDownloadProgress.mockReturnValue(null);
+  await screen.rerender(<AppUpdateGateBridge />);
+  expect(screen.queryByTestId("app-update-download-progress")).toBeNull();
+  expect(screen.getByText("正在后台下载更新，可继续使用")).toBeTruthy();
+});
+
+test("required 下载中在全屏门内展示确定进度", async () => {
+  mockRuntime = { services: { appUpdates: updateService({
+    key: "native:Android:required:200", kind: "native", platform: "Android",
+    requirement: "required", phase: "blocking", blocking: true,
+    downloadState: "downloading", downloadTargetKey: "apk:android:200:hash-a",
+    releaseMessage: null, appStoreUrl: null,
+  }, {
+    targetKey: "apk:android:200:hash-a",
+    bytesWritten: 30,
+    totalBytes: 40,
+  }) } };
+  const screen = await render(<AppUpdateGateBridge />);
+  expect(screen.getByTestId("app-update-blocking-gate")).toBeTruthy();
+  expect(screen.getByText(/^75% · /u)).toBeTruthy();
+  expect(screen.queryByTestId("app-update-action")).toBeNull();
+});
 
 test("optional pending 关闭后进入 ready 再失败，会重新显示新的失败状态", async () => {
   const presentation = {

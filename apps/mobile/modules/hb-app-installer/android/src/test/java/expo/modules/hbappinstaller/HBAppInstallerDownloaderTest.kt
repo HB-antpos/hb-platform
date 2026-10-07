@@ -36,6 +36,21 @@ class HBAppInstallerDownloaderTest {
     assertFalse(network.opened.single().instanceFollowRedirects)
   }
 
+  @Test fun `reports start and completion progress against the verified size`() {
+    val body = byteArrayOf(1, 2, 3, 4)
+    val network = FakeNetwork().apply {
+      respond("https://api.example.test/build", FakeResponse.ok(body))
+    }
+    val reports = mutableListOf<Pair<Long, Long>>()
+
+    downloader(network).download(
+      request(body),
+      onProgress = ApkDownloadProgressListener { written, total -> reports += written to total },
+    )
+
+    assertEquals(listOf(0L to 4L, 4L to 4L), reports)
+  }
+
   @Test fun `rejects hash mismatch and leaves neither final nor partial APK`() {
     val body = byteArrayOf(1, 2, 3, 4)
     val network = FakeNetwork().apply { respond("https://api.example.test/build", FakeResponse.ok(body)) }

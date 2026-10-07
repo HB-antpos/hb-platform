@@ -292,6 +292,25 @@ test("native 返回未受信最终 URL 时不安装并清理目标", async () =>
 type DownloadInput = Parameters<AndroidApkDownloadPort["download"]>[0];
 type InstallCall = Parameters<AndroidAppInstallerPort["installVerifiedApk"]>;
 
+test("prepare 把界面进度回调原样交给下载器，未传时下载请求不带回调字段", async () => {
+  const withProgress = createHarness();
+  const received: unknown[] = [];
+  const onProgress = (progress: unknown) => received.push(progress);
+
+  await withProgress.adapter.prepare(androidDecision, { onProgress });
+  withProgress.downloads[0]?.onProgress?.({ bytesWritten: 1, totalBytes: 2_048 });
+
+  assert.equal(withProgress.downloads[0]?.onProgress, onProgress);
+  assert.deepEqual(received, [{ bytesWritten: 1, totalBytes: 2_048 }]);
+
+  const withoutProgress = createHarness();
+  await withoutProgress.adapter.prepare(androidDecision);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(withoutProgress.downloads[0], "onProgress"),
+    false,
+  );
+});
+
 function createHarness(
   overrides: Readonly<{
     platform?: unknown;

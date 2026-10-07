@@ -424,6 +424,107 @@ async function run() {
     assert.deepEqual(phases, ["checking", "verifying"], "原生缓存校验不能误报下载");
   }
 
+  for (const outcome of ["success", "failure"] as const) {
+    // 新原生包：下载前订阅进度，只认本次目标 URI，下载结束（成功或失败）立即退订。
+    const progress: unknown[] = [];
+    const subscription = { listener: null as ((event: unknown) => void) | null, removed: 0 };
+    const nativeInstaller: NativeApkInstallerPort = {
+      addListener: (eventName, listener) => {
+        assert.equal(eventName, "onDownloadProgress");
+        subscription.listener = listener as (event: unknown) => void;
+        return { remove: () => { subscription.removed += 1; } };
+      },
+      downloadApk: async (request) => {
+        const emit = subscription.listener;
+        assert.ok(emit, "原生下载开始前必须已订阅进度");
+        const total = request.expectedSizeBytes;
+        emit({ destinationFileUri: request.destinationFileUri, bytesWritten: 0, totalBytes: total });
+        emit({ destinationFileUri: request.destinationFileUri, bytesWritten: total / 2, totalBytes: total });
+        emit({ destinationFileUri: request.destinationFileUri, bytesWritten: total / 2 + 1, totalBytes: total });
+        emit({ destinationFileUri: "file:///cache/hb-other.apk", bytesWritten: total, totalBytes: total });
+        emit({ destinationFileUri: request.destinationFileUri, bytesWritten: "bad", totalBytes: total });
+        if (outcome === "failure") {
+          throw new Error("APP_DOWNLOAD_HTTP_ERROR");
+        }
+        emit({ destinationFileUri: request.destinationFileUri, bytesWritten: total, totalBytes: total });
+        return {
+          fileUri: request.destinationFileUri,
+          sizeBytes: request.expectedSizeBytes,
+          sha256Hex: request.expectedSha256Hex,
+        };
+      },
+      verifyApk: async (request) => ({
+        verified: true,
+        packageName: request.expectedPackageName,
+        versionCode: request.expectedVersionCode,
+      }),
+      removeDownloadedApk: async () => undefined,
+    };
+    const harness = createHarness({
+      nativeInstaller,
+      overrides: { onProgress: (value) => progress.push(value) },
+    });
+    if (outcome === "failure") {
+      await assert.rejects(checkAndDownloadNativeAppUpdate(harness.dependencies), /APP_DOWNLOAD_HTTP_ERROR/);
+    } else {
+      assert.equal((await checkAndDownloadNativeAppUpdate(harness.dependencies)).status, "downloaded");
+    }
+    const total = APK_BYTES.byteLength;
+    assert.deepEqual(progress, [
+      { bytesWritten: 0, totalBytes: total },
+      { bytesWritten: total / 2, totalBytes: total },
+      ...(outcome === "success" ? [{ bytesWritten: total, totalBytes: total }] : []),
+    ], "同一百分比、别的目标和非法值都不能转发");
+    assert.equal(subscription.removed, 1, `${outcome} 后必须退订原生进度`);
+  }
+
+  {
+    // 旧原生包没有 addListener：照常下载，不产生任何伪造进度。
+    const progress: unknown[] = [];
+    const nativeInstaller: NativeApkInstallerPort = {
+      downloadApk: async (request) => ({
+        fileUri: request.destinationFileUri,
+        sizeBytes: request.expectedSizeBytes,
+        sha256Hex: request.expectedSha256Hex,
+      }),
+      verifyApk: async (request) => ({
+        verified: true,
+        packageName: request.expectedPackageName,
+        versionCode: request.expectedVersionCode,
+      }),
+      removeDownloadedApk: async () => undefined,
+    };
+    const harness = createHarness({
+      nativeInstaller,
+      overrides: { onProgress: (value) => progress.push(value) },
+    });
+    assert.equal((await checkAndDownloadNativeAppUpdate(harness.dependencies)).status, "downloaded");
+    assert.deepEqual(progress, []);
+  }
+
+  {
+    // 兼容下载器（无原生模块）：字节回调同样按百分比节流后转发。
+    const progress: unknown[] = [];
+    const harness = createHarness({ overrides: { onProgress: (value) => progress.push(value) } });
+    const baseDownload = harness.dependencies.downloadFile;
+    harness.dependencies.downloadFile = async (url, targetUri, onBytesWritten) => {
+      assert.ok(onBytesWritten, "有进度订阅者时必须传入字节回调");
+      for (const written of [0, 1, 6_000, 6_001, 300_000, APK_BYTES.byteLength]) {
+        onBytesWritten(written);
+      }
+      return baseDownload(url, targetUri);
+    };
+    const result = await checkAndDownloadNativeAppUpdate(harness.dependencies);
+    assert.equal(result.status === "downloaded" ? result.verification : null, "js");
+    const total = APK_BYTES.byteLength;
+    assert.deepEqual(progress, [
+      { bytesWritten: 0, totalBytes: total },
+      { bytesWritten: 6_000, totalBytes: total },
+      { bytesWritten: 300_000, totalBytes: total },
+      { bytesWritten: total, totalBytes: total },
+    ]);
+  }
+
   {
     const harness = createHarness({
       overrides: { getDownloadUrl: () => null },
