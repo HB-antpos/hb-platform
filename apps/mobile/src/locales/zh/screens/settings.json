@@ -13,8 +13,6 @@
     "deviceServicesReady": "设备配置可用",
     "deviceServicesAttention": "部分设备配置需要处理",
     "connectionSummary": "当前分店：{{store}}",
-    "ready": "正常",
-    "attention": "需处理",
     "accountMode": "账户模式",
     "deviceMode": "设备模式",
     "languageZhShort": "中文",
