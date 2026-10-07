@@ -179,6 +179,8 @@
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>Save Receipt Printer</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>Test Print</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>Load from Store Profile</value></data>
+  <data name="settings.receiptPrinter.syncNow" xml:space="preserve"><value>Sync now</value></data>
+  <data name="settings.receiptPrinter.profileManaged" xml:space="preserve"><value>Published by head office. Edit it in Web Store Management.</value></data>
   <data name="settings.page.dataMaintenance.description" xml:space="preserve"><value>Keep products, prices and POS software ready for checkout.</value></data>
   <data name="settings.page.paymentTerminal.description" xml:space="preserve"><value>Choose and configure the card provider used for checkout.</value></data>
   <data name="settings.receiptPrinter.preview" xml:space="preserve"><value>Receipt preview</value></data>
@@ -192,6 +194,13 @@
   <data name="settings.deviceRegistration.supervisorRequired" xml:space="preserve"><value>Supervisor authorization is required.</value></data>
   <data name="settings.deviceRegistration.deviceReuse" xml:space="preserve"><value>The target store reuses an existing device number when available.</value></data>
   <data name="settings.status.receiptProfileLoaded" xml:space="preserve"><value>Loaded — save to apply</value></data>
+  <data name="settings.status.receiptProfileSyncApplied" xml:space="preserve"><value>Updated to version {0}</value></data>
+  <data name="settings.status.receiptProfileSyncUpToDate" xml:space="preserve"><value>Already up to date (version {0})</value></data>
+  <data name="settings.status.receiptProfileSyncNeverReleased" xml:space="preserve"><value>Head office has not published a receipt profile yet</value></data>
+  <data name="settings.status.receiptProfileSyncDiscarded" xml:space="preserve"><value>The published receipt profile is invalid and was not applied</value></data>
+  <data name="settings.status.receiptProfileSyncFailed" xml:space="preserve"><value>Sync failed: {0}</value></data>
+  <data name="settings.status.receiptProfileSyncUnsupported" xml:space="preserve"><value>The server does not support receipt profile publishing yet</value></data>
+  <data name="settings.status.receiptProfileSyncNotReady" xml:space="preserve"><value>Device authorization is not ready, cannot sync yet</value></data>
   <data name="settings.deviceRegistration.description" xml:space="preserve"><value>Choose another store and submit an authorized reregistration request for this checkout device. Pending, failed, or syncing orders must be cleared first.</value></data>
   <data name="settings.deviceRegistration.action" xml:space="preserve"><value>Change Store Registration</value></data>
   <data name="settings.status.ready" xml:space="preserve"><value>Ready.</value></data>

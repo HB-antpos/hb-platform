@@ -434,7 +434,14 @@ public static class ServiceRegistration
         services.AddSingleton<ISuspendedOrderService, SuspendedOrderService>();
         services.AddSingleton<IRemoteOrderHistoryService, RemoteOrderHistoryService>();
         services.AddSingleton<IReceiptQueryService, ReceiptQueryService>();
-        services.AddSingleton<IReceiptPrinterSettingsStore, ReceiptPrinterSettingsStore>();
+        // 中文注释：小票设置存储同时承担总部下发资料的本机读写，两个接口必须解析到同一个单例（共用写入互斥）。
+        services.AddSingleton<ReceiptPrinterSettingsStore>();
+        services.AddSingleton<IReceiptPrinterSettingsStore>(sp => sp.GetRequiredService<ReceiptPrinterSettingsStore>());
+        services.AddSingleton<IReceiptProfileLocalStore>(sp => sp.GetRequiredService<ReceiptPrinterSettingsStore>());
+        services.AddSingleton<IReceiptProfileSyncService>(sp => new ReceiptProfileSyncService(
+            sp.GetRequiredService<IReceiptProfileLocalStore>(),
+            sp.GetRequiredService<IStoreReceiptProfileApiClient>(),
+            sp.GetRequiredService<DeviceAuthorizationState>()));
         services.AddSingleton<IReceiptTextFormatter, ReceiptTextFormatter>();
         services.AddSingleton<IReceiptPrinterDriver, XpReceiptPrinterDriver>();
         services.AddSingleton<IReceiptPrintService, ReceiptPrintService>();
@@ -658,7 +665,8 @@ public static class ServiceRegistration
                 cashierSessionRefreshService: sp.GetRequiredService<CashierSessionRefreshService>(),
                 remoteMaintenanceService: sp.GetRequiredService<IRemoteMaintenanceService>(),
                 paymentMethodSettingsService: sp.GetRequiredService<IPaymentMethodSettingsService>(),
-                catalogSyncStatusService: sp.GetRequiredService<ICatalogSyncStatusService>());
+                catalogSyncStatusService: sp.GetRequiredService<ICatalogSyncStatusService>(),
+                receiptProfileSyncService: sp.GetRequiredService<IReceiptProfileSyncService>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

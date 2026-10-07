@@ -29,6 +29,12 @@
             <Setter Property="Height" Value="42" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="ScrollViewer.PanningMode" Value="None" />
+            <!-- 只读（例如总部下发的小票资料）用浅一级底色提示不可编辑，文字仍可选中复制。 -->
+            <Style.Triggers>
+                <Trigger Property="IsReadOnly" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="SettingsFieldPasswordBoxStyle" TargetType="PasswordBox">
@@ -2113,7 +2119,8 @@
                                             VerticalAlignment="Center">
                                         <StackPanel Orientation="Horizontal">
                                             <materialDesign:PackIcon Kind="CloudDownloadOutline" Width="16" Height="16" Margin="0,0,8,0" />
-                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.loadFromStore}" />
+                                            <!-- 本机已应用过总部下发（版本 > 0）时显示「立即同步」，否则保持「从分店资料载入」。 -->
+                                            <TextBlock Text="{Binding ReceiptProfileLoadButtonText}" />
                                         </StackPanel>
                                     </Button>
                                     <StackPanel>
@@ -2126,6 +2133,14 @@
                                                    Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                    TextWrapping="Wrap"
                                                    Margin="0,5,0,0" />
+                                        <!-- 总部下发后六个资料字段只读，提示去 Web 分店管理修改。 -->
+                                        <TextBlock Text="{Binding ReceiptProfileManagedHintText}"
+                                                   Visibility="{Binding IsReceiptProfileManaged, Converter={StaticResource BoolToVis}}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,6,0,0" />
                                     </StackPanel>
                                 </DockPanel>
 
@@ -2143,6 +2158,7 @@
                                     <StackPanel Grid.Column="2">
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.brandName}" Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBox Text="{Binding ReceiptBrandNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
                                                  Style="{StaticResource SettingsFieldTextBoxStyle}" />
                                     </StackPanel>
                                 </Grid>
@@ -2156,11 +2172,13 @@
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.storeName}" Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBox Text="{Binding ReceiptStoreNameText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
                                                  Style="{StaticResource SettingsFieldTextBoxStyle}" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2">
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.phone}" Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBox Text="{Binding ReceiptStorePhoneText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
                                                  Style="{StaticResource SettingsFieldTextBoxStyle}" />
                                     </StackPanel>
                                 </Grid>
@@ -2174,6 +2192,7 @@
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.address}" Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBox Text="{Binding ReceiptStoreAddressText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
                                                  Style="{StaticResource SettingsFieldTextBoxStyle}"
                                                  Height="86"
                                                  TextWrapping="Wrap"
@@ -2184,10 +2203,12 @@
                                     <StackPanel Grid.Column="2">
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.abn}" Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBox Text="{Binding ReceiptAbnText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
                                                  Style="{StaticResource SettingsFieldTextBoxStyle}"
                                                  Margin="0,0,0,14" />
                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.returnPolicy}" Style="{StaticResource SettingsLabelStyle}" />
                                         <TextBox Text="{Binding ReceiptReturnPolicyText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
                                                  Style="{StaticResource SettingsFieldTextBoxStyle}"
                                                  Height="86"
                                                  MaxLength="500"
