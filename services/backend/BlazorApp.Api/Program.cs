@@ -690,6 +690,16 @@ builder.Services.AddHostedService<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk
 builder.Services.AddScoped<ILinklySettlementQueryService, LinklySettlementQueryService>();
 builder.Services.AddSingleton<ILinklySettlementAmountParser, LinklySettlementAmountParser>();
 builder.Services.AddSingleton<LinklySettlementExcelExporter>();
+// 日结记录只读查询：日结在 POSM 库（表由 Hbpos.Api 启动时创建，后台不建表），门店名称与时区在 HBweb 门店表。
+builder.Services.AddScoped<BlazorApp.Api.Services.DailyCloses.IDailyCloseQueryService>(sp =>
+    new BlazorApp.Api.Services.DailyCloses.DailyCloseQueryService(
+        sp.GetRequiredService<POSMSqlSugarContext>().Db,
+        sp.GetRequiredService<SqlSugarContext>().Db,
+        sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
+        sp.GetRequiredService<IHttpContextAccessor>(),
+        sp.GetRequiredService<ILogger<BlazorApp.Api.Services.DailyCloses.DailyCloseQueryService>>()
+    )
+);
 builder.Services.AddScoped<ApplicationLogService>(sp =>
 {
     var context = sp.GetRequiredService<SqlSugarContext>();

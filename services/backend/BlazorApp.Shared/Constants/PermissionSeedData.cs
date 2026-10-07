@@ -92,6 +92,13 @@ namespace BlazorApp.Shared.Constants
                 Permissions.EmployeeProfiles.ReviewSensitiveManagedStore,
             };
 
+        // 日结记录查看只授予 StoreManager 与「店长」；「经理」仍用上面的共用别名模板，由管理员按需在角色管理里再授。
+        // 与 20261007_AddDailyCloseRecordsPermission.sql 的授予范围保持一致。
+        private static IReadOnlyList<string> StoreManagerChineseAliasPermissionCodes { get; } =
+            StoreManagerAliasPermissionCodes
+                .Append(Permissions.DailyCloseRecords.View)
+                .ToList();
+
         private static IReadOnlyList<string> StoreManagerPermissionCodes { get; } =
             new[]
             {
@@ -114,6 +121,7 @@ namespace BlazorApp.Shared.Constants
                 Permissions.DeviceRegistration.View,
                 Permissions.DeviceRegistration.Manage,
                 Permissions.PosTerminal.Audit.View,
+                Permissions.DailyCloseRecords.View,
                 Permissions.Users.View,
                 Permissions.Users.ManagePosTerminalPermissions,
                 Permissions.Users.CreateStoreStaff,
@@ -356,6 +364,8 @@ namespace BlazorApp.Shared.Constants
                 // 仅注册权限，不写入角色模板；由管理员显式授予，数据范围仍按当前账号可管理分店收口。
                 new(Permissions.LegacyEmployeeLogs.View, "查看老系统操作日志", "POS 审计", "Web 页面 /pos-admin/legacy-employee-logs - 按分店查看旧版收银系统上传的员工操作记录"),
                 new(Permissions.LegacyEmployeeLogs.Review, "核查员工操作日志异常", "POS 审计", "Web 页面 /pos-admin/operation-logs 与移动端「员工操作日志」- 对老收银、新收银命中异常规则的操作标记确认正常或需跟进，并可撤销"),
+                // 日结记录只读查询；不能挂在 PosTerminal.* 下（会被当作收银机权限下发）。仅授予店长，管理员按需在角色管理里再授。
+                new(Permissions.DailyCloseRecords.View, "查看日结记录", "POS 日结", "Web 页面 /pos-admin/daily-closes 与员工 App「日结记录」- 按管理的分店查看 WPF、手持、iPad 的日结记录与现金盘点明细"),
                 new(Permissions.Promotions.View, "查看促销", "促销管理", "Web 页面 /pos-admin/promotions 与移动端「促销」- 查看促销活动"),
                 // 全局促销的写接口额外要求 Admin 角色，属有意设计；分店促销仅需本权限。
                 new(Permissions.Promotions.Edit, "编辑促销", "促销管理", "Web 页面 /pos-admin/promotions - 编辑分店促销；全局促销的新增、修改、删除、启停另需管理员角色"),
@@ -451,7 +461,7 @@ namespace BlazorApp.Shared.Constants
                 ),
                 new("StoreManager", StoreManagerPermissionCodes),
                 // 中文店长别名只补用户查看、POS 权限和本店店员管理，不扩大其他系统管理能力。
-                new("店长", StoreManagerAliasPermissionCodes),
+                new("店长", StoreManagerChineseAliasPermissionCodes),
                 new("经理", StoreManagerAliasPermissionCodes),
                 new("Manager", AttendanceSelfServicePermissionCodes),
                 new("User", AttendanceSelfServicePermissionCodes),
