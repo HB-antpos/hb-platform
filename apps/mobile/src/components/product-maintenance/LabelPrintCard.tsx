@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
-import { Button, Card, IconButton, Text } from "react-native-paper";
+import { Button, Card, Text } from "react-native-paper";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
@@ -13,7 +13,8 @@ interface LabelPrintCardProps {
   onPrintProduct?: () => void;
   onPrintDiscount?: () => void;
   onPrintBigDiscount?: () => void;
-  onOpenSettings?: () => void;
+  /** 行首槽位（打印机连接状态 chip）；不传时显示"标签"文字标题。 */
+  leading?: ReactNode;
   /** 与标签合并在同一张卡里的下一行（清货价行）。 */
   footer?: ReactNode;
 }
@@ -27,7 +28,7 @@ export const LabelPrintCard = memo(function LabelPrintCard({
   onPrintProduct,
   onPrintDiscount,
   onPrintBigDiscount,
-  onOpenSettings,
+  leading,
   footer,
 }: LabelPrintCardProps) {
   const { t } = useAppTranslation(["productQuery"]);
@@ -35,7 +36,7 @@ export const LabelPrintCard = memo(function LabelPrintCard({
   return (
     <Card style={styles.card} mode="contained">
       <View style={styles.row}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{t("print.label")}</Text>
+        {leading ?? <Text style={styles.rowTitle} numberOfLines={1}>{t("print.label")}</Text>}
         <View style={styles.actions}>
           <Button
             compact
@@ -71,15 +72,6 @@ export const LabelPrintCard = memo(function LabelPrintCard({
             {t("print.bigDiscountShort")}
           </Button>
         </View>
-        {onOpenSettings ? (
-          <IconButton
-            icon="cog-outline"
-            accessibilityLabel={t("print.settingsTitle")}
-            size={20}
-            onPress={onOpenSettings}
-            style={styles.settingsButton}
-          />
-        ) : null}
       </View>
       {footer ? <View style={styles.footer}>{footer}</View> : null}
     </Card>
@@ -99,8 +91,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: HB_SPACING.xs,
     minHeight: 52,
-    paddingLeft: HB_SPACING.sm,
-    paddingRight: HB_SPACING.xxs,
+    paddingHorizontal: HB_SPACING.sm,
   },
   rowTitle: {
     minWidth: 32,
@@ -121,9 +112,6 @@ const styles = StyleSheet.create({
   buttonLabel: {
     marginHorizontal: 6,
     fontSize: 13,
-  },
-  settingsButton: {
-    margin: 0,
   },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,

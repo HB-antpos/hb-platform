@@ -344,6 +344,8 @@
     "smallLabel": "小标签 (60mm)",
     "quantity": "打印数量",
     "quantitySingleUse": "单次有效",
+    "quantitySingleUseHint": "打印后数量恢复为 1",
+    "quantitySingleUseIdleHint": "数量大于 1 时可用",
     "printerStatus": {
       "unselected": "未选择打印机",
       "idle": "待连接",
@@ -354,7 +356,18 @@
       "paused": "连接已暂停",
       "error": "连接异常",
       "errorHint": "请打开设置检查连接",
-      "openSettingsHint": "打开打印机设置"
+      "openSettingsHint": "打开打印设置",
+      "short": {
+        "unselected": "未选择",
+        "idle": "待连接",
+        "connecting": "连接中",
+        "connected": "已连接",
+        "reconnecting": "重连中",
+        "disconnected": "已断开",
+        "paused": "已暂停",
+        "error": "连接异常"
+      },
+      "manage": "打印机设置"
     },
     "label": "标签"
   },

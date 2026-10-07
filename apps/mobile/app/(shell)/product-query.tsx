@@ -27,7 +27,10 @@ import { CodeAddSheet } from "@/components/product-maintenance/CodeAddSheet";
 import { LookupResultSheet } from "@/components/product-maintenance/LookupResultSheet";
 import { LabelPrintCard } from "@/components/product-maintenance/LabelPrintCard";
 import { PrintSettingsModal } from "@/components/product-maintenance/PrintSettingsModal";
-import { PrinterConnectionStatus } from "@/components/product-maintenance/PrinterConnectionStatus";
+import {
+  PrinterConnectionChip,
+  PrinterConnectionSummary,
+} from "@/components/product-maintenance/PrinterConnectionStatus";
 import { MultiCodeCompactList } from "@/components/product-maintenance/MultiCodeCompactList";
 import { NumericInputModal } from "@/components/product-maintenance/NumericInputModal";
 import { OfflineCatalogStatusRow } from "@/components/product-maintenance/OfflineCatalogStatusRow";
@@ -3839,6 +3842,8 @@ function ProductQueryContent() {
     void handlePrintRef.current("bigDiscount");
   }, []);
   const handleOpenPrinterSettings = useCallback(() => {
+    // 从打印设置弹窗进入打印机设置页：先收起弹窗，返回本页时不会再看到它悬在上面。
+    setPrintSettingsVisible(false);
     router.navigate("/(shell)/settings");
   }, [router]);
   const handleOpenPrintSettings = useCallback(() => {
@@ -4564,7 +4569,8 @@ function ProductQueryContent() {
       ) : null}
       </View>
 
-      {/* 固定区只放标签操作，清货价与海报仍可滚动，避免占满 Zebra 小屏。 */}
+      {/* 固定区只放标签操作，清货价与海报仍可滚动，避免占满 Zebra 小屏；
+          打印机连接状态以 chip 并入打印行，不再单独占一行高度。 */}
       {detail && (editorTab === "price" || !hasCodeSection) ? (
         <View
           style={styles.printDock}
@@ -4572,13 +4578,15 @@ function ProductQueryContent() {
           importantForAccessibility={pendingScanPresentation ? "no-hide-descendants" : "auto"}
           pointerEvents={scannerInputBlocked ? "none" : "auto"}
         >
-          <PrinterConnectionStatus
-            savedPrinter={savedPrinter}
-            status={printerConnectionStatus}
-            lastError={printerLastError}
-            onPress={handleOpenPrinterSettings}
-          />
           <LabelPrintCard
+            leading={
+              <PrinterConnectionChip
+                savedPrinter={savedPrinter}
+                status={printerConnectionStatus}
+                lastError={printerLastError}
+                onPress={pendingScanPresentation ? undefined : handleOpenPrintSettings}
+              />
+            }
             isPrintingProduct={printingAction === "product"}
             isPrintingDiscount={printingAction === "discount"}
             isPrintingBigDiscount={printingAction === "bigDiscount"}
@@ -4605,7 +4613,6 @@ function ProductQueryContent() {
                 ? undefined
                 : handleBigDiscountPrintPress
             }
-            onOpenSettings={pendingScanPresentation ? undefined : handleOpenPrintSettings}
           />
         </View>
       ) : null}
@@ -5020,6 +5027,14 @@ function ProductQueryContent() {
               smallLabel={smallLabel}
               printQuantity={printQuantity}
               quantitySingleUse={quantitySingleUse}
+              printerSection={
+                <PrinterConnectionSummary
+                  savedPrinter={savedPrinter}
+                  status={printerConnectionStatus}
+                  lastError={printerLastError}
+                  onManage={handleOpenPrinterSettings}
+                />
+              }
               onToggleContinuousPrint={setContinuousPrintEnabled}
               onToggleSmallLabel={setSmallLabel}
               onChangePrintQuantity={setPrintQuantity}
@@ -5156,7 +5171,6 @@ const styles = StyleSheet.create({
   },
   printDock: {
     flexShrink: 0,
-    gap: 6,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 12,
