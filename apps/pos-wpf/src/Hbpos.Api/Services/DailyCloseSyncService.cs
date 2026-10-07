@@ -348,7 +348,9 @@ internal sealed class DailyCloseSyncService(
             SameInstant(existing.SavedAtUtc, incoming.SavedAtUtc) &&
             string.Equals(existing.CashierId, incoming.CashierId, StringComparison.Ordinal) &&
             string.Equals(existing.CashierName, incoming.CashierName, StringComparison.Ordinal) &&
-            string.Equals(existing.AppVersion, incoming.AppVersion, StringComparison.Ordinal) &&
+            // 刻意不比较 AppVersion：它只是上传方的客户端版本元数据，不是日结的业务内容。
+            // 首次上传已被收下、响应丢失后客户端升级再重发时版本号会变，这不能被判成内容冲突，
+            // 否则客户端会把一条服务端早已持有的记录标成永久拒绝。已存数据保持首次上传时的版本。
             existing.OrderCount == incoming.OrderCount &&
             existing.ReturnQuantity == incoming.ReturnQuantity &&
             existing.CashSalesAmount == incoming.CashSalesAmount &&

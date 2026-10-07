@@ -159,6 +159,30 @@ public sealed class DailyCloseSyncServiceTests
         Assert.True(response.AlreadySynced);
     }
 
+    [Fact]
+    public async Task SyncAsync_treats_same_content_with_a_different_app_version_as_already_synced()
+    {
+        // AppVersion 只是上传方的客户端版本元数据：首次上传已被收下、响应丢失后客户端升级重发，
+        // 不能因为版本号变了就判内容冲突（那会让客户端把一条服务端早已持有的记录标成永久拒绝）。
+        var repository = new FakeRepository();
+        var service = CreateService(repository);
+        var original = CreateRequest();
+        await service.SyncAsync(original, "S001", "POS-01", CancellationToken.None);
+
+        var response = await service.SyncAsync(
+            original with { AppVersion = "1.0.48" },
+            "S001",
+            "POS-01",
+            CancellationToken.None);
+
+        Assert.True(response.Accepted);
+        Assert.True(response.AlreadySynced);
+        Assert.False(response.ReplacedPlaceholder);
+        Assert.Single(repository.Records);
+        // 已存数据不被改写：仍是首次上传时的版本。
+        Assert.Equal("1.0.47", repository.Records[0].AppVersion);
+    }
+
     [Theory]
     [MemberData(nameof(ContentChanges))]
     public async Task SyncAsync_rejects_same_guid_with_different_content(
@@ -190,7 +214,6 @@ public sealed class DailyCloseSyncServiceTests
         yield return Change("SavedAt", request => request with { SavedAt = request.SavedAt.AddSeconds(1) });
         yield return Change("CashierId", request => request with { CashierId = "C002" });
         yield return Change("CashierName", request => request with { CashierName = "Bob" });
-        yield return Change("AppVersion", request => request with { AppVersion = "1.0.48" });
         yield return Change("OrderCount", request => request with { OrderCount = 13 });
         yield return Change("ReturnQuantity", request => request with { ReturnQuantity = 2m });
         yield return Change("RefundAmount", request => request with { RefundAmount = 106m });
