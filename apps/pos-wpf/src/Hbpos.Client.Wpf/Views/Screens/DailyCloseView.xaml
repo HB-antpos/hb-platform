@@ -388,7 +388,8 @@
                                         </StackPanel>
                                     </Button>
 
-                                    <!-- 营业日期：前一天 / 日期 / 后一天三个触屏按钮，点日期弹出大格子月历；不能选未来日期。 -->
+                                    <!-- 营业日期：前一天 / 日期 / 后一天三个触屏按钮，点日期弹出大格子月历；不能选未来日期。
+                                         顶栏在 1080 宽下还要放下页签（最小 308）和新建日结按钮，日期按钮不显示星期和下拉箭头以省宽度。 -->
                                     <StackPanel x:Name="DailyCloseBusinessDateBlock"
                                                 Grid.Column="1"
                                                 Margin="0,0,14,0"
@@ -398,8 +399,10 @@
                                                                 IsEnabled="{Binding CanChangeBusinessDate}"
                                                                 Label="{loc:Loc dailyClose.businessDate}"
                                                                 ShowDayStepButtons="True"
+                                                                IncludeDayOfWeek="False"
+                                                                ShowDropDownGlyph="False"
                                                                 ButtonHeight="48"
-                                                                DateButtonMinWidth="200"
+                                                                DateButtonMinWidth="150"
                                                                 AutomationProperties.AutomationId="DailyCloseBusinessDatePicker" />
                                         <Border Margin="10,0,0,0" Style="{StaticResource TodayChipStyle}">
                                             <TextBlock Text="{loc:Loc dailyClose.today}"
