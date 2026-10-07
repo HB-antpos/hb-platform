@@ -34,7 +34,14 @@ const pages = [
   {
     name: '分店管理',
     keyPattern: /['"`](system\.stores\.[A-Za-z0-9_.]+)['"`]/g,
-    sources: ['src/pages/System/Stores/index.tsx', 'src/pages/System/Stores/StoreFormFields.tsx'],
+    sources: [
+      'src/pages/System/Stores/index.tsx',
+      'src/pages/System/Stores/StoreFormFields.tsx',
+      // 小票资料下发：状态单元格 / 设备应用抽屉 / 下发确认弹窗用的也是 system.stores.* 文案
+      'src/pages/System/Stores/ReceiptProfileCells.tsx',
+      'src/pages/System/Stores/ReceiptProfileDevicesDrawer.tsx',
+      'src/pages/System/Stores/ReceiptProfilePublishModal.tsx',
+    ],
     messages: {
       zh: 'src/pages/System/Stores/storesMessages.zh.json',
       en: 'src/pages/System/Stores/storesMessages.en.json',
