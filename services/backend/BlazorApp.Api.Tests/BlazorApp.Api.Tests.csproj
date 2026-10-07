@@ -67,6 +67,9 @@
     <Compile Include="RustDeskClientSchemaTests.cs" />
     <Compile Include="RemoteMaintenanceSchemaReadinessTests.cs" />
     <Compile Include="SchemaMigrationCoordinatorTests.cs" />
+    <Compile Include="StoreReceiptProfileServiceTests.cs" />
+    <Compile Include="StoreReceiptProfileControllerTests.cs" />
+    <Compile Include="StoreReceiptProfilePipelineTests.cs" />
     <Compile Include="SchemaMigrationSqlServerIntegrationTests.cs" />
     <Compile Include="SchemaCommandProcessTests.cs" />
     <Compile Include="DomesticProductCreationControllerTests.cs" />

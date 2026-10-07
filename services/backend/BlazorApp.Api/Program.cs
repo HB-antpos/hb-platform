@@ -767,6 +767,7 @@ builder.Services.AddHostedService<EmployeeImageUploadCleanupBackgroundService>()
 builder.Services.AddScoped<IRoleService, RoleService>(); // 角色管理服务
 builder.Services.AddScoped<IStoreService, StoreService>(); // 分店管理服务
 builder.Services.AddScoped<StoreSyncService>(); // 分店数据同步服务
+builder.Services.AddScoped<BlazorApp.Api.Services.StoreReceiptProfiles.IStoreReceiptProfileService, BlazorApp.Api.Services.StoreReceiptProfiles.StoreReceiptProfileService>(); // 门店小票资料下发（快照 / 设备应用情况）
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));
