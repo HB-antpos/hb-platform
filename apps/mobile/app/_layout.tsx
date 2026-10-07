@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { StatusBar } from "expo-status-bar";
+import { installPrinterLinkDiagnostics } from "@/modules/printer/link-diagnostics-runtime";
 import { usePrinterAutoConnect } from "@/modules/printer/use-printer-auto-connect";
 import { waitForStartupReadiness } from "@/modules/startup/startup-readiness";
 import { shouldRunAutomaticAppUpdatesForProfile } from "@/modules/updates/app-build-profile";
@@ -82,6 +83,13 @@ export default function RootLayout() {
     optionalPromptActive: iosNativeUpdate.optionalPromptActive,
   });
 
+  // 蓝牙链路诊断必须先于自动重连安装，挂载后第一次状态同步的事件才不会漏记。
+  useEffect(() => {
+    if (!sideEffectsEnabled) {
+      return;
+    }
+    return installPrinterLinkDiagnostics();
+  }, [sideEffectsEnabled]);
   usePrinterAutoConnect({ enabled: sideEffectsEnabled });
   // Android 原生包检查先注册 effect；共享互斥会让 APK 提示优先于 OTA optional。
   const nativeAppUpdate = useAutomaticNativeAppUpdate({ enabled: automaticUpdatesEnabled });

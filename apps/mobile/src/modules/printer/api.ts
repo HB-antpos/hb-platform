@@ -19,6 +19,12 @@ import {
   printRawCommand,
   scanPrinters,
 } from "@/modules/printer/native";
+import {
+  describeLinkError,
+  recordPrinterLink,
+  recordPrinterNativeStatus,
+  type PrinterLinkTrigger,
+} from "@/modules/printer/link-diagnostics";
 import { buildReceiptPrinterTestCommand } from "@/modules/printer/receipt";
 import { PrinterStorage } from "@/modules/printer/storage";
 import { usePrinterStore, useReceiptPrinterStore } from "@/modules/printer/state";
@@ -26,6 +32,7 @@ import type {
   CashRegisterUserBarcodeLabelPrintPayload,
   EmployeeCashierBarcodeLabelPrintPayload,
   PrinterDevice,
+  PrinterStatus,
   ProductLabelPrintPayload,
   SavedPrinter,
   WarehouseLocationLabelPrintPayload,
@@ -68,6 +75,53 @@ function isPrinterConnectionError(error: unknown) {
     /broken pipe|\bEPIPE\b|socket.*(?:closed|reset)|connection.*(?:lost|closed|reset)|printer.*disconnected|no bluetooth printer is connected/i.test(message ?? "");
 }
 
+/**
+ * 所有蓝牙连接尝试的统一出口：记录开始、结果与耗时，供蓝牙链路诊断（link-diagnostics）使用。
+ * 只做旁路记录，原样返回结果或抛出原错误，不改变任何连接行为。
+ */
+async function connectPrinterLogged(
+  printer: SavedPrinter,
+  trigger: PrinterLinkTrigger,
+  nativeStatus?: PrinterStatus,
+) {
+  const role = trigger === "receipt-test" ? "receipt" : "label";
+  const startedAtMs = Date.now();
+  recordPrinterLink("connect.start", {
+    role,
+    trigger,
+    address: printer.address,
+    transport: printer.transport ?? null,
+    // 发起连接前原生层的状态：蓝牙是否开着、是否仍占着别的 socket。
+    nativeConnected: nativeStatus?.connected,
+    nativeAddress: nativeStatus?.address,
+    bluetoothEnabled: nativeStatus?.enabled,
+  });
+  try {
+    const connected = await connectPrinter(printer.address, printer.transport);
+    recordPrinterLink(connected ? "connect.ok" : "connect.fail", {
+      role,
+      trigger,
+      address: printer.address,
+      transport: printer.transport ?? null,
+      elapsedMs: Date.now() - startedAtMs,
+      ...(connected ? {} : { code: "NOT_CONNECTED", message: "connect returned false" }),
+    });
+    return connected;
+  } catch (error) {
+    const { code, message } = describeLinkError(error);
+    recordPrinterLink("connect.fail", {
+      role,
+      trigger,
+      address: printer.address,
+      transport: printer.transport ?? null,
+      elapsedMs: Date.now() - startedAtMs,
+      code,
+      message,
+    });
+    throw error;
+  }
+}
+
 async function runLabelPrint(print: () => Promise<boolean>) {
   return runPrinterOperation(async () => {
     await ensureConnectedPrinter({ preferHotWrite: true });
@@ -75,6 +129,9 @@ async function runLabelPrint(print: () => Promise<boolean>) {
       return await print();
     } catch (error) {
       if (isPrinterConnectionError(error)) {
+        const { code, message } = describeLinkError(error);
+        // 打印写入时才发现连接已断：蓝牙链路诊断里的一次“断线”。
+        recordPrinterLink("link.lost", { source: "print", code, message });
         // 兼容旧原生包：写失败后主动丢弃仍被标记为 connected 的 socket。
         // 数据可能已部分发送，只恢复连接状态，不重放本次标签。
         labelConnectionInvalidated = true;
@@ -190,7 +247,16 @@ async function ensureConnectedPrinter(options?: { status?: "connecting" | "recon
     return;
   }
   const store = usePrinterStore.getState();
+  // 连接发起方：打印前补连 / 自动重连 / 启动或恢复自动连接 / 设置页手动重连。
+  const trigger: PrinterLinkTrigger = options?.preferHotWrite
+    ? "print"
+    : options?.status === "reconnecting"
+      ? "auto"
+      : options?.force
+        ? "start"
+        : "manual";
   if (store.autoReconnectPaused) {
+    recordPrinterLink("connect.skip", { role: "label", trigger, reason: "auto-reconnect-paused" });
     store.setStatus("paused");
     throw new Error("Printer auto-connect is paused. Reconnect it in Settings first.");
   }
@@ -209,6 +275,7 @@ async function ensureConnectedPrinter(options?: { status?: "connecting" | "recon
   const [status, savedPrinter] = await Promise.all([statusPromise, savedPrinterPromise]);
 
   if (!savedPrinter?.address) {
+    recordPrinterLink("connect.skip", { role: "label", trigger, reason: "no-saved-printer" });
     store.setStatus("disconnected");
     throw new Error("No label printer has been selected yet.");
   }
@@ -230,7 +297,7 @@ async function ensureConnectedPrinter(options?: { status?: "connecting" | "recon
   store.setStatus(options?.status ?? "connecting");
   store.setLastError(null);
   try {
-    const connected = await connectPrinter(savedPrinter.address, savedPrinter.transport);
+    const connected = await connectPrinterLogged(savedPrinter, trigger, status);
     if (!connected) {
       throw new Error("Unable to connect to the saved label printer.");
     }
@@ -302,7 +369,7 @@ export async function selectPrinter(device: PrinterDevice) {
       }
       const connected = currentStatus.connected && currentStatus.address === selectedPrinter.address
         ? true
-        : await connectPrinter(selectedPrinter.address, selectedPrinter.transport);
+        : await connectPrinterLogged(selectedPrinter, "select", currentStatus);
       if (!connected) {
         throw new Error("Unable to connect to the selected label printer.");
       }
@@ -482,6 +549,8 @@ export async function syncPrinterStatus() {
     ? { ...reportedStatus, connected: false }
     : reportedStatus;
   const store = usePrinterStore.getState();
+  // 原生状态变化（蓝牙开关、标签打印机连上/断开）才记一条，每 5 秒的轮询不会产生噪音。
+  recordPrinterNativeStatus(nativeStatus, store.savedPrinter?.address ?? null);
 
   if (!store.savedPrinter) {
     store.setStatus(nativeStatus.connected ? "connected" : "idle");
@@ -582,7 +651,7 @@ export async function testReceiptPrinterConnection() {
     let cleanupError: unknown = null;
 
     try {
-      const connected = await connectPrinter(savedPrinter.address, savedPrinter.transport);
+      const connected = await connectPrinterLogged(savedPrinter, "receipt-test");
       if (!connected) {
         receiptStore.setStatus("error");
         throw new Error("Unable to connect to the saved receipt printer.");
