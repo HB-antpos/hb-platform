@@ -13,6 +13,7 @@ const knownAttendanceApprovalSourceTypes = new Set<AttendanceApprovalSourceType>
   'PunchAdjustment',
   'Overtime',
   'MissingClockOut',
+  'MealBreak',
 ])
 
 export function getAttendanceWeekdayIndex(value?: string): number | undefined {
@@ -269,6 +270,30 @@ export function validateOvertimeApproval(input: OvertimeApprovalInput): Overtime
     return 'remarkRequired'
   }
   return null
+}
+
+/** 用餐未休息加工时：批准按申请分钟全额加回，拒绝必须填写审核备注（与后端 REVIEW_REMARK_REQUIRED 一致）。 */
+export function validateMealBreakApproval(input: { action: 'approve' | 'reject'; remark?: string }): 'remarkRequired' | null {
+  return input.action === 'reject' && !input.remark?.trim() ? 'remarkRequired' : null
+}
+
+export interface AttendanceMealPaySummary {
+  deductionMinutes: number
+  pendingAddBackMinutes: number
+  approvedAddBackMinutes: number
+  paidMinutes?: number
+}
+
+/**
+ * 记录表「用餐与计薪」列：排班有用餐、或有加回申请时才返回；
+ * 旧后端没有这些字段、或排班不用餐且无申请时返回 undefined，单元格留空。
+ */
+export function buildAttendanceMealPaySummary(schedule: AttendanceScheduleDto): AttendanceMealPaySummary | undefined {
+  const deductionMinutes = schedule.mealDeductionMinutes ?? 0
+  const pendingAddBackMinutes = schedule.pendingMealAddBackMinutes ?? 0
+  const approvedAddBackMinutes = schedule.approvedMealAddBackMinutes ?? 0
+  if (deductionMinutes <= 0 && pendingAddBackMinutes <= 0 && approvedAddBackMinutes <= 0) return undefined
+  return { deductionMinutes, pendingAddBackMinutes, approvedAddBackMinutes, paidMinutes: schedule.paidMinutes }
 }
 
 function localPunchMinuteKey(value?: string): string | undefined {

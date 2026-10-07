@@ -1,0 +1,30 @@
+{
+  "posAdmin": {
+    "scheduleAttendance": {
+      "approvalPresentation": {
+        "MealBreak": {
+          "title": "Missed meal break"
+        }
+      },
+      "status": {
+        "sourceType": {
+          "MealBreak": "Missed meal break"
+        }
+      },
+      "meal": {
+        "column": "Meal & paid",
+        "deduction": "Meal −{{minutes}} min",
+        "pendingAddBack": "Pending add-back {{minutes}} min",
+        "approvedAddBack": "Added back {{minutes}} min",
+        "paid": "Paid {{value}}",
+        "claimSummary": "No break ×{{count}}, requests {{minutes}} min added back",
+        "claimCounts": "Roster meal breaks {{expected}}, recorded {{recorded}}",
+        "reason": "Reason: {{reason}}",
+        "approve": "Approve add-back",
+        "approveTitle": "Approve missed meal break",
+        "rejectTitle": "Reject missed meal break",
+        "remarkRequired": "A review remark is required to reject a missed meal break"
+      }
+    }
+  }
+}

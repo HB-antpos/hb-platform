@@ -15,6 +15,8 @@ import {
   getAttendanceWeekdayIndex,
   insertAttendanceWeekday,
   insertAttendanceWeekdaysInText,
+  validateMealBreakApproval,
+  buildAttendanceMealPaySummary,
 } from './attendanceRecordLogic'
 import type { AttendanceScheduleDto } from '../../../types/scheduleAttendance'
 
@@ -360,5 +362,38 @@ assertEqual(
   'remarkRequired',
   '拒绝加班必须备注',
 )
+
+// 用餐未休息加工时
+assertEqual(isKnownAttendanceApprovalSourceType('MealBreak'), true, 'MealBreak 应走本地化展示文案')
+assertEqual(validateMealBreakApproval({ action: 'approve' }), null, '批准用餐加工时不需要备注')
+assertEqual(validateMealBreakApproval({ action: 'reject', remark: ' ' }), 'remarkRequired', '拒绝用餐加工时必须备注')
+assertEqual(validateMealBreakApproval({ action: 'reject', remark: '当天有轮休' }), null, '填写备注后可以拒绝')
+
+const mealBaseSchedule: AttendanceScheduleDto = {
+  scheduleGuid: 'meal-schedule',
+  storeCode: 'S001',
+  userGuid: 'user-1',
+  workDate: '2026-05-18',
+  startTime: '09:00',
+  endTime: '17:00',
+  status: 'Active',
+}
+assertEqual(buildAttendanceMealPaySummary(mealBaseSchedule), undefined, '旧后端没有用餐字段时单元格留空')
+assertEqual(
+  buildAttendanceMealPaySummary({ ...mealBaseSchedule, mealDeductionMinutes: 0, paidMinutes: 480 }),
+  undefined,
+  '排班不用餐且无加回申请时不显示',
+)
+const mealSummary = buildAttendanceMealPaySummary({
+  ...mealBaseSchedule,
+  mealDeductionMinutes: 30,
+  pendingMealAddBackMinutes: 30,
+  approvedMealAddBackMinutes: 0,
+  paidMinutes: 490,
+})
+assertEqual(mealSummary?.deductionMinutes, 30, '应展示用餐扣除分钟')
+assertEqual(mealSummary?.pendingAddBackMinutes, 30, '应展示待审加回分钟')
+assertEqual(mealSummary?.approvedAddBackMinutes, 0, '未批准时加回为 0')
+assertEqual(mealSummary?.paidMinutes, 490, '应展示后端算好的计薪工时')
 
 console.log('attendanceRecordLogic.test.ts: ok')

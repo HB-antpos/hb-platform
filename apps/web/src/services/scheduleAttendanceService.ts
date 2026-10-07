@@ -4,6 +4,7 @@ import type {
   AttendanceAdjustmentDetailDto,
   AttendanceAvailabilityDto,
   AttendanceLocationSampleDto,
+  AttendanceMealClaimDto,
   AttendancePagedResult,
   AttendancePunchDto,
   AttendancePunchAdjustmentDto,
@@ -100,6 +101,29 @@ export function normalizeAttendanceSchedule(value: unknown): AttendanceScheduleD
     earlyLeaveMinutes: readCompat<number>(source, 'earlyLeaveMinutes', 'EarlyLeaveMinutes'),
     crossStoreMissingClockOutStoreCode: readCompat<string>(source, 'crossStoreMissingClockOutStoreCode', 'CrossStoreMissingClockOutStoreCode'),
     segments: Array.isArray(segments) ? segments.map(normalizeAttendanceSegment) : undefined,
+    // 用餐扣除与计薪工时：旧后端不返回时都是 undefined，记录表不显示用餐列内容。
+    effectiveMealBreakCount: readCompat<number>(source, 'effectiveMealBreakCount', 'EffectiveMealBreakCount'),
+    mealDeductionMinutes: readCompat<number>(source, 'mealDeductionMinutes', 'MealDeductionMinutes'),
+    approvedMealAddBackMinutes: readCompat<number>(source, 'approvedMealAddBackMinutes', 'ApprovedMealAddBackMinutes'),
+    pendingMealAddBackMinutes: readCompat<number>(source, 'pendingMealAddBackMinutes', 'PendingMealAddBackMinutes'),
+    paidMinutes: readCompat<number>(source, 'paidMinutes', 'PaidMinutes'),
+  }
+}
+
+function normalizeAttendanceMealClaim(value: unknown): AttendanceMealClaimDto | undefined {
+  const source = asRecord(value)
+  const claimGuid = readCompat<string>(source, 'claimGuid', 'ClaimGuid')
+  if (!claimGuid) return undefined
+  return {
+    claimGuid,
+    expectedCount: readCompat<number>(source, 'expectedCount', 'ExpectedCount') ?? 0,
+    recordedCount: readCompat<number>(source, 'recordedCount', 'RecordedCount') ?? 0,
+    missingCount: readCompat<number>(source, 'missingCount', 'MissingCount') ?? 0,
+    notTakenCount: readCompat<number>(source, 'notTakenCount', 'NotTakenCount') ?? 0,
+    claimedMinutes: readCompat<number>(source, 'claimedMinutes', 'ClaimedMinutes') ?? 0,
+    approvedMinutes: readCompat<number>(source, 'approvedMinutes', 'ApprovedMinutes'),
+    status: readCompat<string>(source, 'status', 'Status') ?? 'None',
+    reason: readCompat<string>(source, 'reason', 'Reason'),
   }
 }
 
@@ -182,6 +206,7 @@ export function normalizeAttendanceApproval(value: unknown): AttendanceApprovalD
     candidateOvertimeMinutes: readCompat<number>(source, 'candidateOvertimeMinutes', 'CandidateOvertimeMinutes'),
     approvedOvertimeMinutes: readCompat<number>(source, 'approvedOvertimeMinutes', 'ApprovedOvertimeMinutes'),
     adjustment: adjustment ? normalizeAttendanceAdjustment(adjustment) : undefined,
+    mealClaim: normalizeAttendanceMealClaim(readCompat<unknown>(source, 'mealClaim', 'MealClaim')),
   }
 }
 

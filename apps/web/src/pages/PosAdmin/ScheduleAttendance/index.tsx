@@ -41,6 +41,7 @@ import 'dayjs/locale/en-gb'
 import isoWeek from 'dayjs/plugin/isoWeek'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
   approveAttendanceApproval,
   batchUpsertAttendanceHolidays,
@@ -106,6 +107,8 @@ import {
   getAttendanceWeekdayIndex,
   insertAttendanceWeekday,
   insertAttendanceWeekdaysInText,
+  validateMealBreakApproval,
+  buildAttendanceMealPaySummary,
 } from './attendanceRecordLogic'
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
 import AttendanceLocationTrajectoryMap from './AttendanceLocationTrajectoryMap'
@@ -122,7 +125,12 @@ import {
 } from '../../../utils/managedStoreScope'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
+import scheduleAttendanceMessagesEn from './scheduleAttendanceMessages.en.json'
+import scheduleAttendanceMessagesZh from './scheduleAttendanceMessages.zh.json'
+
 dayjs.extend(isoWeek)
+// 用餐未休息加工时等新增文案放页面级消息文件，随页面懒加载，不占首屏 i18n 包。
+registerPageMessages({ zh: scheduleAttendanceMessagesZh, en: scheduleAttendanceMessagesEn })
 
 type TabKey = 'schedules' | 'records' | 'availability' | 'punches' | 'approvals' | 'holidays' | 'settings'
 type ReviewAction = 'approve' | 'reject'
@@ -1042,6 +1050,12 @@ export default function ScheduleAttendancePage() {
           return
         }
       }
+      if (reviewTarget.sourceType === 'MealBreak'
+        && validateMealBreakApproval({ action: reviewAction, remark: values.reviewRemark })) {
+        // 拒绝用餐加工时必须写明理由，员工能在申请记录里看到。
+        message.warning(t('posAdmin.scheduleAttendance.meal.remarkRequired'))
+        return
+      }
       setSaving(true)
       const payload = {
         reviewRemark: values.reviewRemark?.trim() || undefined,
@@ -1471,6 +1485,29 @@ export default function ScheduleAttendancePage() {
       },
     },
     {
+      title: t('posAdmin.scheduleAttendance.meal.column'),
+      key: 'mealPaid',
+      width: 170,
+      render: (_, record) => {
+        const meal = buildAttendanceMealPaySummary(record)
+        if (!meal) return '--'
+        return (
+          <Space size={[4, 3]} wrap>
+            <Tag>{t('posAdmin.scheduleAttendance.meal.deduction', { minutes: meal.deductionMinutes })}</Tag>
+            {meal.pendingAddBackMinutes > 0 ? (
+              <Tag color="gold">{t('posAdmin.scheduleAttendance.meal.pendingAddBack', { minutes: meal.pendingAddBackMinutes })}</Tag>
+            ) : null}
+            {meal.approvedAddBackMinutes > 0 ? (
+              <Tag color="green">{t('posAdmin.scheduleAttendance.meal.approvedAddBack', { minutes: meal.approvedAddBackMinutes })}</Tag>
+            ) : null}
+            {meal.paidMinutes !== undefined ? (
+              <Typography.Text strong>{t('posAdmin.scheduleAttendance.meal.paid', { value: formatRecordMinutes(meal.paidMinutes) })}</Typography.Text>
+            ) : null}
+          </Space>
+        )
+      },
+    },
+    {
       title: t('posAdmin.scheduleAttendance.fields.exceptions'),
       key: 'exceptions',
       width: 140,
@@ -1767,6 +1804,29 @@ export default function ScheduleAttendancePage() {
       ) : null
     }
 
+    if (record.sourceType === 'MealBreak') {
+      // 店长判断依据：员工声明没休息几次、排班要求几次、系统记录到几次，以及员工给的原因。
+      const claim = record.mealClaim
+      if (!claim) {
+        return record.detail ? <Typography.Text type="secondary">{formatBusinessDetailText(record.detail)}</Typography.Text> : null
+      }
+      return (
+        <>
+          <Space size={4} wrap>
+            <Tag color="gold">
+              {t('posAdmin.scheduleAttendance.meal.claimSummary', { count: claim.notTakenCount, minutes: claim.claimedMinutes })}
+            </Tag>
+          </Space>
+          <Typography.Text type="secondary">
+            {t('posAdmin.scheduleAttendance.meal.claimCounts', { expected: claim.expectedCount, recorded: claim.recordedCount })}
+          </Typography.Text>
+          {claim.reason ? (
+            <Typography.Text type="secondary">{t('posAdmin.scheduleAttendance.meal.reason', { reason: claim.reason })}</Typography.Text>
+          ) : null}
+        </>
+      )
+    }
+
     if (record.sourceType === 'Overtime') {
       return (
         <Space size={4} wrap>
@@ -1840,7 +1900,9 @@ export default function ScheduleAttendancePage() {
           <Button type="link" size="small" icon={<CheckOutlined />} onClick={() => openReviewModal(record, 'approve')}>
             {record.sourceType === 'Overtime'
               ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
-              : t('posAdmin.scheduleAttendance.actions.approve')}
+              : record.sourceType === 'MealBreak'
+                ? t('posAdmin.scheduleAttendance.meal.approve')
+                : t('posAdmin.scheduleAttendance.actions.approve')}
           </Button>
           <Button type="link" danger size="small" icon={<CloseOutlined />} onClick={() => openReviewModal(record, 'reject')}>
             {record.sourceType === 'Overtime'
@@ -1933,7 +1995,8 @@ export default function ScheduleAttendancePage() {
         columns={recordColumns}
         dataSource={records.items}
         pagination={pagination(records, loadRecords)}
-        scroll={{ x: 1900 }}
+        // 新增「用餐与计薪」列（170px）后同步加宽，避免挤压已有列。
+        scroll={{ x: 2070 }}
         size="small"
       />
     ),
@@ -2650,16 +2713,22 @@ export default function ScheduleAttendancePage() {
           ? reviewAction === 'approve'
             ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
             : t('posAdmin.scheduleAttendance.actions.rejectOvertime')
-          : reviewAction === 'approve'
-            ? t('posAdmin.scheduleAttendance.drawer.approve')
-            : t('posAdmin.scheduleAttendance.drawer.reject')}
+          : reviewTarget?.sourceType === 'MealBreak'
+            ? reviewAction === 'approve'
+              ? t('posAdmin.scheduleAttendance.meal.approveTitle')
+              : t('posAdmin.scheduleAttendance.meal.rejectTitle')
+            : reviewAction === 'approve'
+              ? t('posAdmin.scheduleAttendance.drawer.approve')
+              : t('posAdmin.scheduleAttendance.drawer.reject')}
         open={reviewModalOpen}
         okText={reviewTarget?.sourceType === 'Overtime'
           ? reviewAction === 'approve'
             ? t('posAdmin.scheduleAttendance.actions.approveOvertime')
             : t('posAdmin.scheduleAttendance.actions.rejectOvertime')
           : reviewAction === 'approve'
-            ? t('posAdmin.scheduleAttendance.actions.approve')
+            ? reviewTarget?.sourceType === 'MealBreak'
+              ? t('posAdmin.scheduleAttendance.meal.approve')
+              : t('posAdmin.scheduleAttendance.actions.approve')
             : t('posAdmin.scheduleAttendance.actions.reject')}
         cancelText={t('common.cancel')}
         okButtonProps={{ danger: reviewAction === 'reject', loading: saving }}
