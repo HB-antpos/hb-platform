@@ -6361,6 +6361,92 @@
         }
       }
     },
+    "/api/v1/stores/current/receipt-profile/sync": {
+      "get": {
+        "tags": [
+          "Stores"
+        ],
+        "parameters": [
+          {
+            "name": "knownVersion",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreReceiptProfileSyncDtoApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreReceiptProfileSyncDtoApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreReceiptProfileSyncDtoApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stores/current/receipt-profile/ack": {
+      "post": {
+        "tags": [
+          "Stores"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoreReceiptProfileAckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoreReceiptProfileAckRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoreReceiptProfileAckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreReceiptProfileAckResultDtoApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreReceiptProfileAckResultDtoApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreReceiptProfileAckResultDtoApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/vouchers/{voucherCode}": {
       "get": {
         "tags": [
@@ -14262,6 +14348,46 @@
         },
         "additionalProperties": false
       },
+      "StoreReceiptProfileAckRequest": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StoreReceiptProfileAckResultDto": {
+        "type": "object",
+        "properties": {
+          "appliedVersion": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StoreReceiptProfileAckResultDtoApiResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StoreReceiptProfileAckResultDto"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "StoreReceiptProfileDto": {
         "type": "object",
         "properties": {
@@ -14292,6 +14418,15 @@
           "returnPolicy": {
             "type": "string",
             "nullable": true
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -14304,6 +14439,42 @@
           },
           "data": {
             "$ref": "#/components/schemas/StoreReceiptProfileDto"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "StoreReceiptProfileSyncDto": {
+        "type": "object",
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/StoreReceiptProfileDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StoreReceiptProfileSyncDtoApiResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StoreReceiptProfileSyncDto"
           },
           "errorCode": {
             "type": "string",

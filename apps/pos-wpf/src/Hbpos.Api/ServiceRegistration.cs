@@ -144,6 +144,8 @@ public static class ServiceRegistration
         services.AddScoped<IStoreSchemaSqlExecutor, SqlSugarStoreSchemaSqlExecutor>();
         services.AddScoped<IStoreSchemaInitializer, SqlSugarStoreSchemaInitializer>();
         services.AddScoped<IStoreReceiptProfileService, StoreReceiptProfileService>();
+        services.AddScoped<IStoreReceiptProfileReleaseRepository, SqlSugarStoreReceiptProfileReleaseRepository>();
+        services.AddScoped<IStoreReceiptProfileReleaseService, StoreReceiptProfileReleaseService>();
         services.AddScoped<IAdvertisementSchemaInitializer, SqlSugarAdvertisementSchemaInitializer>();
         services.AddScoped<IOrderSyncSchemaSqlExecutor, SqlSugarOrderSyncSchemaSqlExecutor>();
         services.AddScoped<IOrderSyncSchemaInitializer, SqlSugarOrderSyncSchemaInitializer>();

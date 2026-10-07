@@ -5178,6 +5178,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stores/current/receipt-profile/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    knownVersion?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["StoreReceiptProfileSyncDtoApiResult"];
+                        "application/json": components["schemas"]["StoreReceiptProfileSyncDtoApiResult"];
+                        "text/json": components["schemas"]["StoreReceiptProfileSyncDtoApiResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stores/current/receipt-profile/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["StoreReceiptProfileAckRequest"];
+                    "text/json": components["schemas"]["StoreReceiptProfileAckRequest"];
+                    "application/*+json": components["schemas"]["StoreReceiptProfileAckRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["StoreReceiptProfileAckResultDtoApiResult"];
+                        "application/json": components["schemas"]["StoreReceiptProfileAckResultDtoApiResult"];
+                        "text/json": components["schemas"]["StoreReceiptProfileAckResultDtoApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vouchers/{voucherCode}": {
         parameters: {
             query?: never;
@@ -7821,6 +7903,20 @@ export interface components {
             errorCode?: string | null;
             message?: string | null;
         };
+        StoreReceiptProfileAckRequest: {
+            /** Format: int32 */
+            version?: number;
+        };
+        StoreReceiptProfileAckResultDto: {
+            /** Format: int32 */
+            appliedVersion?: number;
+        };
+        StoreReceiptProfileAckResultDtoApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["StoreReceiptProfileAckResultDto"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
         StoreReceiptProfileDto: {
             storeCode?: string | null;
             storeName?: string | null;
@@ -7829,10 +7925,26 @@ export interface components {
             phone?: string | null;
             abn?: string | null;
             returnPolicy?: string | null;
+            /** Format: int32 */
+            version?: number;
+            /** Format: date-time */
+            publishedAt?: string | null;
         };
         StoreReceiptProfileDtoApiResult: {
             success?: boolean;
             data?: components["schemas"]["StoreReceiptProfileDto"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        StoreReceiptProfileSyncDto: {
+            changed?: boolean;
+            /** Format: int32 */
+            version?: number;
+            profile?: components["schemas"]["StoreReceiptProfileDto"];
+        };
+        StoreReceiptProfileSyncDtoApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["StoreReceiptProfileSyncDto"];
             errorCode?: string | null;
             message?: string | null;
         };
