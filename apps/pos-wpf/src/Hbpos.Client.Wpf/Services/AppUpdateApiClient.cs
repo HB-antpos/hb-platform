@@ -37,10 +37,23 @@ public sealed class AppUpdateApiClient(
         using var response = await httpClient.SendAsync(checkRequest, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
+            // 检查频率低（启动/每 30-60 分钟/人工），失败直接记 Warning；errorCode 保持不变，状态码写进消息与上下文。
+            var statusCode = (int)response.StatusCode;
+            ConsoleLog.WriteWarning(
+                "AppUpdate",
+                $"app update check http error status={statusCode} currentVersion={request.CurrentVersion} channel={channel}",
+                new ApplicationLogContext(
+                    RequestPath: "api/app-update/check",
+                    RequestMethod: "GET",
+                    StatusCode: statusCode,
+                    Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["errorCode"] = "LOCAL_APP_UPDATE_HTTP_ERROR"
+                    }));
             return AppUpdateCheckResponse.Failed(
                 request.CurrentVersion,
                 "LOCAL_APP_UPDATE_HTTP_ERROR",
-                "Local app update check returned an unsuccessful status.");
+                $"Local app update check returned an unsuccessful status (HTTP {statusCode}).");
         }
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);

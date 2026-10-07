@@ -70,4 +70,18 @@ public sealed class ClientLogSanitizerTests
         Assert.Contains("order uploaded", json, StringComparison.Ordinal);
         Assert.Contains("P001", json, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Serialize_redacts_bare_voucher_assignment_in_message_text()
+    {
+        var json = ClientLogSanitizer.Serialize(new
+        {
+            Message = "release failed voucher=HB-VOUCHER-7788 voucherTail=7788 error=HttpRequestException"
+        });
+
+        Assert.DoesNotContain("HB-VOUCHER-7788", json, StringComparison.Ordinal);
+        // 只记后 4 位的 voucherTail 不是完整券号，必须保留以便排查。
+        Assert.Contains("voucherTail=7788", json, StringComparison.Ordinal);
+        Assert.Contains("HttpRequestException", json, StringComparison.Ordinal);
+    }
 }

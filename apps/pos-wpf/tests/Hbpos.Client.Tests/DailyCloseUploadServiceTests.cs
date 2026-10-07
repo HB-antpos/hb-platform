@@ -42,6 +42,49 @@ public sealed class DailyCloseUploadServiceTests
     }
 
     [Fact]
+    public async Task ExecutePendingAsync_logs_a_throttled_warning_when_the_upload_is_deferred()
+    {
+        await using var fixture = await DailyCloseUploadFixture.CreateAsync();
+        var guid = await fixture.InsertDailyCloseAsync();
+        var client = new FakeDailyCloseSyncApiClient(_ =>
+            FakeDailyCloseSyncApiClient.Fail(HttpStatusCode.ServiceUnavailable, "UPSTREAM_DOWN", "maintenance"));
+        var service = fixture.CreateService(client, new MutableTimeProvider(Now));
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            await service.ExecutePendingAsync();
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        // 5xx 退避重试：首次失败必须有可按日结 GUID 追溯的 Warning，并带退避信息。
+        var entry = Assert.Single(sink.Entries, item => item.Level == "Warning" && item.TraceId == guid.ToString("D"));
+        Assert.Equal("DailyCloseUpload", entry.Category);
+        Assert.Equal(503, entry.StatusCode);
+        Assert.Equal("api/v1/daily-closes/sync", entry.RequestPath);
+        Assert.Equal("UPSTREAM_DOWN", entry.Properties!["errorCode"]);
+        Assert.Equal(1, entry.Properties["attemptCount"]);
+        Assert.Equal(DailyCloseUploadService.GetRetryDelaySeconds(1), entry.Properties["nextRetrySeconds"]);
+        Assert.Contains("daily close upload deferred", entry.Message);
+        Assert.Equal("Pending", (await fixture.ReadUploadRowAsync(guid)).Status);
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(4, true)]
+    [InlineData(6, false)]
+    [InlineData(8, true)]
+    public void IsLoggedAttempt_only_escalates_powers_of_two(int attempt, bool expected)
+    {
+        Assert.Equal(expected, DailyCloseUploadService.IsLoggedAttempt(attempt));
+    }
+
+    [Fact]
     public async Task ExecutePendingAsync_does_not_warn_for_retryable_conflicts()
     {
         await using var fixture = await DailyCloseUploadFixture.CreateAsync();

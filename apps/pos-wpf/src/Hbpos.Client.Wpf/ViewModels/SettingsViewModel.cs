@@ -2562,7 +2562,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         {
             if (!string.IsNullOrWhiteSpace(operationName))
             {
-                LogSquareSettings($"{operationName} canceled");
+                ConsoleLog.Write(ResolveSettingsLogCategory(operationName), $"settings ui {operationName} canceled");
             }
             SetStatus("settings.status.operationCanceled");
         }
@@ -2570,7 +2570,17 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         {
             if (!string.IsNullOrWhiteSpace(operationName))
             {
-                LogSquareSettings($"{operationName} failed message={LogValue(ex.Message)}");
+                // 设置页人工操作失败（多为联网/配置问题）记 Warning 并带异常；Linkly 操作归到 LinklySettings 类别，其余保持原 Square 类别。
+                ConsoleLog.WriteWarning(
+                    ResolveSettingsLogCategory(operationName),
+                    $"settings ui {operationName} failed message={LogValue(ex.Message)}",
+                    new ApplicationLogContext(
+                        Properties: new Dictionary<string, object?>
+                        {
+                            ["operation"] = operationName,
+                            ["screen"] = "Settings"
+                        }),
+                    ex);
             }
             SetStatusOverride(ex.Message);
         }
@@ -3305,6 +3315,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         SyncSquareInputs();
         _squareCoordinator.SuggestDeviceCodeName(force, _squareState);
         SyncSquareState();
+    }
+
+    private static string ResolveSettingsLogCategory(string operationName)
+    {
+        return operationName.Contains("linkly", StringComparison.OrdinalIgnoreCase) ? "LinklySettings" : "Square";
     }
 
     private static void LogSquareSettings(string message)

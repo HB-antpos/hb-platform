@@ -556,6 +556,7 @@ public sealed class InstallmentOperationService(
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                LogOperationIssue(operation.OperationGuid, $"recover-{operation.Kind}", "ResultUnknown", exception);
                 await repository.TryTransitionAsync(operation.OperationGuid,
                     [LocalInstallmentOperationState.TerminalApproved, LocalInstallmentOperationState.ApiSubmitting, LocalInstallmentOperationState.ResultUnknown],
                     LocalInstallmentOperationState.ResultUnknown,
@@ -701,6 +702,7 @@ public sealed class InstallmentOperationService(
             "INSTALLMENT_REPAYMENT_BUSY" or
             "INSTALLMENT_REPAYMENT_CLAIM_MISMATCH")
         {
+            LogOperationIssue(operation.OperationGuid, "repayment-claim-create", "Failed (provider not called)", exception);
             await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.Prepared],
@@ -716,6 +718,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            LogOperationIssue(operation.OperationGuid, "repayment-claim-create", "Stopped before provider", exception);
             return RepaymentClaimReady.Failed($"创建补款 claim 失败，已在 provider 调用前停止：{exception.Message}", requiresReview: true);
         }
     }
@@ -739,6 +742,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            LogOperationIssue(operation.OperationGuid, "repayment-begin-provider", "Unknown (provider not called)", exception);
             return TerminalReady.Unknown($"登记补款 provider 失败，未调用 provider：{exception.Message}");
         }
     }
@@ -759,6 +763,7 @@ public sealed class InstallmentOperationService(
         catch (Exception exception)
         {
             // 中文注释：provider 已产生或可能产生副作用时，resolve 失败不能解锁本地 operation；后续仅允许本机按相同 claim 恢复。
+            LogOperationIssue(operation.OperationGuid, $"repayment-claim-resolve-{outcome}", "ResultUnknown", exception);
             await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.TerminalSubmitting, LocalInstallmentOperationState.ResultUnknown],
@@ -905,6 +910,7 @@ public sealed class InstallmentOperationService(
             "INSTALLMENT_CANCEL_CLAIM_MISMATCH" or
             "INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED")
         {
+            LogOperationIssue(operation.OperationGuid, "cancel-claim-ensure", "Failed (refund provider not called)", exception);
             var safeToRestart = CanSafelyTerminateCancelBeforeRefund(operation, steps);
             var terminated = safeToRestart && await TryMarkCancelFailedAsync(operation, exception.Message);
             if (!terminated)
@@ -924,6 +930,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            LogOperationIssue(operation.OperationGuid, "cancel-claim-ensure", "Stopped before refund", exception);
             return CancelClaimReady.Failed($"创建或读取取消 claim 失败，已在退款前停止：{exception.Message}", requiresReview: true);
         }
     }
@@ -952,6 +959,7 @@ public sealed class InstallmentOperationService(
         }
         catch (CatalogApiException exception) when (exception.ErrorCode == "INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED")
         {
+            LogOperationIssue(operation.OperationGuid, "cancel-begin-refund", "Failed (refund provider not called)", exception);
             var steps = await repository.GetRefundStepsAsync(operation.OperationGuid, CancellationToken.None);
             if (claim.Status != InstallmentCancelClaimStatus.Prepared ||
                 !CanSafelyTerminateCancelBeforeRefund(operation, steps))
@@ -981,6 +989,7 @@ public sealed class InstallmentOperationService(
         }
         catch (CatalogApiException exception) when (exception.ErrorCode == "INSTALLMENT_CANCEL_CLAIM_EXPIRED")
         {
+            LogOperationIssue(operation.OperationGuid, "cancel-begin-refund", "Claim expired, re-reading", exception);
             try
             {
                 var steps = await repository.GetRefundStepsAsync(operation.OperationGuid, CancellationToken.None);
@@ -1004,12 +1013,14 @@ public sealed class InstallmentOperationService(
             }
             catch (Exception refreshException)
             {
+                LogOperationIssue(operation.OperationGuid, "cancel-claim-refresh", "Locked for review", refreshException);
                 await LockCancelForReviewAsync(operation, $"取消 claim 过期后重新读取失败：{refreshException.Message}");
                 return CancelClaimReady.Failed("取消 claim 过期后的远端状态读取失败，保持锁定等待人工对账。", requiresReview: true);
             }
         }
         catch (Exception exception)
         {
+            LogOperationIssue(operation.OperationGuid, "cancel-begin-refund", "Failed (refund provider not called)", exception);
             return CancelClaimReady.Failed($"登记取消退款阶段失败，未调用退款 provider：{exception.Message}", requiresReview: true);
         }
     }
@@ -1037,6 +1048,7 @@ public sealed class InstallmentOperationService(
         catch (Exception exception)
         {
             // provider 已产生或可能产生副作用时，中央结案失败不能解锁本地操作。
+            LogOperationIssue(operation.OperationGuid, $"cancel-claim-resolve-{outcome}", "ResultUnknown", exception);
             await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.TerminalSubmitting, LocalInstallmentOperationState.ResultUnknown],
@@ -1272,6 +1284,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception)
         {
+            LogOperationIssue(operation.OperationGuid, "repayment-voucher-redeem", "ResultUnknown", exception);
             await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.TerminalSubmitting],
@@ -1424,6 +1437,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception)
         {
+            LogOperationIssue(operation.OperationGuid, "card-authorize", "ResultUnknown", exception);
             await repository.TryTransitionAsync(
                 operation.OperationGuid,
                 [LocalInstallmentOperationState.TerminalSubmitting],
@@ -1690,14 +1704,14 @@ public sealed class InstallmentOperationService(
             }
             return new InstallmentOperationResult<InstallmentCreateResponse>(true, response, local, response.Message);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, "创建 API 调用已取消，结果未知。", CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "create", "创建 API 调用已取消，结果未知。", exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: "创建结果未知，请勿再次收款。", RequiresReview: true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, exception.Message, CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "create", exception.Message, exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: "分期创建结果未知，请勿再次收款。", RequiresReview: true);
         }
     }
@@ -1722,7 +1736,7 @@ public sealed class InstallmentOperationService(
             var response = committedClaim.Commit;
             if (committedClaim.Status != InstallmentRepaymentClaimStatus.Committed || response is null)
             {
-                await MarkApiUnknownAsync(operation.OperationGuid, $"中央补款 claim 返回状态 {committedClaim.Status}，缺少提交结果。", CancellationToken.None);
+                await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", $"中央补款 claim 返回状态 {committedClaim.Status}，缺少提交结果。", null, CancellationToken.None);
                 return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款提交结果不完整，保持锁定等待恢复。", RequiresReview: true);
             }
             var local = ToLocalOrder(response.Details);
@@ -1732,14 +1746,14 @@ public sealed class InstallmentOperationService(
             }
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(true, response, local, response.Message);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, "补款 API 调用已取消，结果未知。", CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", "补款 API 调用已取消，结果未知。", exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款结果未知，请勿再次收款。", RequiresReview: true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, exception.Message, CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "repayment-commit", exception.Message, exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款结果未知，请勿再次收款。", RequiresReview: true);
         }
     }
@@ -1968,14 +1982,15 @@ public sealed class InstallmentOperationService(
                 }
                 catch (Exception recoveryException)
                 {
-                    await MarkApiUnknownAsync(operation.OperationGuid, $"{firstException.Message}; commit 恢复失败：{recoveryException.Message}", CancellationToken.None);
+                    LogOperationIssue(operation.OperationGuid, "cancel-commit", "First commit failed", firstException);
+                    await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit-recovery", $"{firstException.Message}; commit 恢复失败：{recoveryException.Message}", recoveryException, CancellationToken.None);
                     return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消提交结果未知，退款不会重复执行。", RequiresReview: true);
                 }
             }
 
             if (committedClaim.Status != InstallmentCancelClaimStatus.Committed || committedClaim.Commit is null)
             {
-                await MarkApiUnknownAsync(operation.OperationGuid, $"中央取消 claim 返回状态 {committedClaim.Status}，缺少提交结果。", CancellationToken.None);
+                await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit", $"中央取消 claim 返回状态 {committedClaim.Status}，缺少提交结果。", null, CancellationToken.None);
                 return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消提交结果不完整，退款不会重复执行。", RequiresReview: true);
             }
 
@@ -1986,7 +2001,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, exception.Message, CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "cancel-commit", exception.Message, exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentCancelResponse>(false, Message: "取消提交结果未知，退款不会重复执行。", RequiresReview: true);
         }
     }
@@ -2006,6 +2021,7 @@ public sealed class InstallmentOperationService(
             };
             if (authorization.ResultUnknown)
             {
+                LogRefundStepIssue(step, "ResultUnknown", null, "provider-result-unknown");
                 await repository.TryTransitionRefundStepAsync(
                     step.RefundStepGuid,
                     [LocalInstallmentRefundStepState.TerminalSubmitting],
@@ -2042,6 +2058,7 @@ public sealed class InstallmentOperationService(
             if (!HasExactAuthorizedAmount(authorization, step.Amount) ||
                 (step.Method == PaymentMethodKind.Card && !HasCardRefundEvidence(authorization)))
             {
+                LogRefundStepIssue(step, "ResultUnknown", null, "approval-evidence-mismatch");
                 await repository.TryTransitionRefundStepAsync(
                     step.RefundStepGuid,
                     [LocalInstallmentRefundStepState.TerminalSubmitting],
@@ -2063,13 +2080,15 @@ public sealed class InstallmentOperationService(
 
             return new InstallmentOperationResult<bool>(true, true);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
+            LogRefundStepIssue(step, "ResultUnknown", exception, "canceled");
             await repository.TryTransitionRefundStepAsync(step.RefundStepGuid, [LocalInstallmentRefundStepState.TerminalSubmitting], LocalInstallmentRefundStepState.ResultUnknown, DateTimeOffset.UtcNow, failureMessage: "退款终端调用被取消，结果未知。", cancellationToken: CancellationToken.None);
             return new InstallmentOperationResult<bool>(false, Message: "退款结果未知，等待主管结案。", RequiresReview: true);
         }
         catch (Exception exception)
         {
+            LogRefundStepIssue(step, "ResultUnknown", exception, "exception");
             await repository.TryTransitionRefundStepAsync(
                 step.RefundStepGuid,
                 [LocalInstallmentRefundStepState.TerminalSubmitting],
@@ -2268,6 +2287,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            LogOperationIssue(operation.OperationGuid, "recover-repayment-read-claim", "Kept locked", exception);
             return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.ResultUnknown, false, $"读取中央补款 claim 失败，保持锁定：{exception.Message}");
         }
 
@@ -2453,9 +2473,70 @@ public sealed class InstallmentOperationService(
             cancellationToken);
     }
 
-    private async Task MarkApiUnknownAsync(Guid operationGuid, string message, CancellationToken cancellationToken)
+    private async Task MarkApiUnknownAsync(
+        Guid operationGuid,
+        string operation,
+        string message,
+        Exception? exception,
+        CancellationToken cancellationToken)
     {
+        // 结果未知会锁住分期单等待对账：先在中心日志留痕，再写本地状态。
+        LogOperationIssue(operationGuid, operation, "ResultUnknown", exception, exception is null ? message : null);
         await repository.TryTransitionAsync(operationGuid, [LocalInstallmentOperationState.ApiSubmitting], LocalInstallmentOperationState.ResultUnknown, DateTimeOffset.UtcNow, failureMessage: message, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// 分期联网/终端操作失败统一留痕（此前只写本地库）：operationGuid 作 TraceId，与服务端 claim 日志串联。
+    /// 结果未知、中止均为 Warning；退款类真实资金失败由 <see cref="LogRefundStepIssue"/> 记 Error。
+    /// </summary>
+    private static void LogOperationIssue(
+        Guid operationGuid,
+        string operation,
+        string outcome,
+        Exception? exception,
+        string? detail = null,
+        bool isError = false)
+    {
+        var apiException = exception as CatalogApiException;
+        int? statusCode = apiException?.StatusCode is { } status ? (int)status : null;
+        var message =
+            $"op={operation} operationGuid={operationGuid:D} → {outcome}" +
+            (apiException?.ErrorCode is { } code ? $" errorCode={code}" : string.Empty) +
+            (statusCode is { } http ? $" http={http}" : string.Empty) +
+            (exception is null ? string.Empty : $" error={exception.GetType().Name} message={exception.Message}") +
+            (string.IsNullOrWhiteSpace(detail) ? string.Empty : $" detail={detail}");
+        var context = new ApplicationLogContext(
+            TraceId: operationGuid.ToString("D"),
+            StatusCode: statusCode,
+            Properties: new Dictionary<string, object?>
+            {
+                ["errorCode"] = apiException?.ErrorCode,
+                ["operation"] = operation
+            });
+        if (isError)
+        {
+            ConsoleLog.WriteError("Installment", message, context, exception);
+        }
+        else
+        {
+            ConsoleLog.WriteWarning("Installment", message, context, exception);
+        }
+    }
+
+    /// <summary>退款步骤（退款券/刷卡退款）结果未知涉及真实资金且需主管结案，记 Error。</summary>
+    private static void LogRefundStepIssue(
+        LocalInstallmentRefundStep step,
+        string outcome,
+        Exception? exception,
+        string reason)
+    {
+        LogOperationIssue(
+            step.OperationGuid,
+            $"refund-{step.Method}",
+            outcome,
+            exception,
+            $"refundStepGuid={step.RefundStepGuid:D} amount={step.Amount:0.00} reason={reason}",
+            isError: true);
     }
 
     private static LocalFinancialSupervisorResolution BuildInstallmentRefundSupervisorJournal(
@@ -2767,9 +2848,9 @@ public sealed class InstallmentOperationService(
                 local,
                 "分期单已确认提货。");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, "提货确认 API 调用已取消，结果未知。", CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "pickup", "提货确认 API 调用已取消，结果未知。", exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
                 Message: "提货确认请求超时，结果可能已提交；已锁定，请刷新恢复，勿重复确认提货。",
@@ -2777,7 +2858,7 @@ public sealed class InstallmentOperationService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await MarkApiUnknownAsync(operation.OperationGuid, exception.Message, CancellationToken.None);
+            await MarkApiUnknownAsync(operation.OperationGuid, "pickup", exception.Message, exception, CancellationToken.None);
             return new InstallmentOperationResult<InstallmentConfirmPickupResponse>(
                 false,
                 Message: "提货确认结果未知，已锁定；请刷新恢复，勿重复确认提货。",

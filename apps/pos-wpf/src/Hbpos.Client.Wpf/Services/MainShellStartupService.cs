@@ -78,9 +78,11 @@ public sealed class MainShellStartupService(
         {
             // 热切换后禁止沿用旧服务器的离线授权；目标服务器 Verify 不成功即返回注册页。
             deviceAuthorizationState.Clear();
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "DeviceServerSwitch",
-                $"target verify failed; registration required error={ex.GetType().Name} message={ex.Message}");
+                $"target verify failed; registration required {DescribeVerifyFailure(ex)}",
+                CreateVerifyFailureContext(ex, "server-switch-verify-failed"),
+                ex);
             return new MainShellStartupResult(session, true, cachedDevice);
         }
 
@@ -165,13 +167,21 @@ public sealed class MainShellStartupService(
             {
                 // 传输故障、超时、网关错误页/认证页（DeviceApiUnavailableException）、限流、服务端错误，
                 // 以及没有业务错误码的 API 错误，都无法证明服务端拒绝了本设备：使用本地缓存继续离线营业。
-                ConsoleLog.Write(
+                // 降级本身是预期路径，但意味着本次启动未经服务端复核授权，记 Warning 便于发现长期离线的机器。
+                ConsoleLog.WriteWarning(
                     "DeviceStartup",
-                    $"device authorization verify unavailable; using local cache error={ex.GetType().Name} message={ex.Message}");
+                    $"device authorization verify unavailable; degraded to local cached authorization (offline startup) {DescribeVerifyFailure(ex)}",
+                    CreateVerifyFailureContext(ex, "verify-unavailable-offline-fallback"),
+                    ex);
             }
             catch (CatalogApiException ex)
             {
                 // 只有可解析的 ApiResult 信封携带业务错误码时才是确定性拒绝，持久化拒绝状态以防下次离线复活。
+                ConsoleLog.WriteWarning(
+                    "DeviceStartup",
+                    $"device denied by server; persisting local denial and requiring registration device={cachedDevice.DeviceCode} store={cachedDevice.StoreCode} {DescribeVerifyFailure(ex)}",
+                    CreateVerifyFailureContext(ex, "device-denied"),
+                    ex);
                 var deniedVerification = new DeviceVerifyResponse(
                     cachedDevice.DeviceCode,
                     cachedDevice.StoreCode,
@@ -210,6 +220,14 @@ public sealed class MainShellStartupService(
                     !string.Equals(verification.DeviceCode, cachedDevice.DeviceCode, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(verification.StoreCode, cachedDevice.StoreCode, StringComparison.OrdinalIgnoreCase))
                 {
+                    ConsoleLog.WriteWarning(
+                        "DeviceStartup",
+                        $"device not enabled by server verify; registration required deviceStatus={verification.DeviceStatus} isAllowed={verification.IsAllowed} device={cachedDevice.DeviceCode} store={cachedDevice.StoreCode} verifiedDevice={verification.DeviceCode} verifiedStore={verification.StoreCode}",
+                        new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["reason"] = "device-not-enabled",
+                            ["status"] = verification.DeviceStatus
+                        }));
                     return new MainShellStartupResult(session, true, startupDevice);
                 }
             }
@@ -275,9 +293,11 @@ public sealed class MainShellStartupService(
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or CatalogApiException or JsonException)
         {
             // 无法拿到服务端明确结论（离线、网关错误、业务错误）时保持本地拒绝，不改写缓存，照常进入注册页。
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "DeviceStartup",
-                $"local device denial recheck unavailable; registration required error={ex.GetType().Name} message={ex.Message}");
+                $"local device denial recheck unavailable; registration required {DescribeVerifyFailure(ex)}",
+                CreateVerifyFailureContext(ex, "local-denial-recheck-unavailable"),
+                ex);
             return new MainShellStartupResult(session, true, cachedDevice);
         }
 
@@ -309,6 +329,45 @@ public sealed class MainShellStartupService(
             },
             false,
             verifiedDevice);
+    }
+
+    private static string DescribeVerifyFailure(Exception exception)
+    {
+        var (statusCode, errorCode) = ExtractVerifyFailure(exception);
+        return $"error={exception.GetType().Name} status={statusCode?.ToString() ?? "-"} errorCode={errorCode ?? "-"}";
+    }
+
+    private static ApplicationLogContext CreateVerifyFailureContext(Exception exception, string reason)
+    {
+        var (statusCode, errorCode) = ExtractVerifyFailure(exception);
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["reason"] = reason
+        };
+        if (!string.IsNullOrWhiteSpace(errorCode))
+        {
+            properties["errorCode"] = errorCode;
+        }
+
+        return new ApplicationLogContext(
+            RequestPath: "api/v1/devices/verify",
+            RequestMethod: "POST",
+            StatusCode: statusCode,
+            Properties: properties);
+    }
+
+    private static (int? StatusCode, string? ErrorCode) ExtractVerifyFailure(Exception exception)
+    {
+        return exception switch
+        {
+            CatalogApiException apiException => (
+                apiException.StatusCode is { } status ? (int)status : (int?)null,
+                apiException.ErrorCode),
+            HttpRequestException httpException => (
+                httpException.StatusCode is { } status ? (int)status : (int?)null,
+                null),
+            _ => (null, null)
+        };
     }
 
     /// <summary>

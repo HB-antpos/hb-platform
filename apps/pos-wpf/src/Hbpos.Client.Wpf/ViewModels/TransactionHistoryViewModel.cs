@@ -193,6 +193,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private readonly HashSet<Guid> _lockedInstallmentGuids = [];
     private bool _isInstallmentRecoveryStateUnknown;
     private bool _heldRemoteCacheReady;
+    // 挂单源 10 秒自动刷新：远端/本地读取失败只在状态切换时记日志（成功→失败 Warning，失败→成功 Information）。
+    private DateTimeOffset? _heldRemoteFailingSince;
+    private int _heldRemoteFailureCount;
+    private bool _heldLocalLoadFailing;
     private ITimer? _heldAutoRefreshTimer;
 
     [ObservableProperty]
@@ -886,6 +890,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             !cancellationToken.IsCancellationRequested)
         {
             // HttpClient 超时也会表现为取消异常；仅让调用方主动取消继续向上传播。
+            LogHistoryWarning(
+                $"history load failed source={SelectedSource} error={ex.GetType().Name} message={ex.Message}",
+                traceId: null,
+                ex,
+                ex is OperationCanceledException ? "timeout" : null);
             Orders.Clear();
             InvalidateSelectedReceiptLoad();
             ClearReceiptPreview();
@@ -1026,6 +1035,12 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             }
 
             // 属性变更回调不能把故障 Task 留在后台；HttpClient 超时在这里统一转为可见状态。
+            LogHistoryWarning(
+                $"order details load failed source={expectedOrder?.Source.ToString() ?? "<none>"} " +
+                $"orderGuid={expectedOrder?.OrderGuid.ToString("D") ?? "<none>"} error={ex.GetType().Name} message={ex.Message}",
+                expectedOrder?.OrderGuid.ToString("D"),
+                ex,
+                ex is OperationCanceledException ? "timeout" : null);
             ClearReceiptPreview();
             OrderDetailsErrorMessage = ex is OperationCanceledException
                 ? T("history.detailsLoadTimeout")
@@ -1189,7 +1204,12 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         IsReuploading = true;
         try
         {
+            ConsoleLog.Write("TransactionHistory", $"manual reupload selected start count={selected.Length}");
             var result = await _orderUploadExecutionService.ExecuteSelectedAsync(selected);
+            ConsoleLog.Write(
+                "TransactionHistory",
+                $"manual reupload selected completed attempted={result.AttemptedCount} uploaded={result.UploadedCount} " +
+                $"failed={result.FailedCount} interrupted={result.WasInterrupted}");
             await LoadAsync();
             StatusMessage = string.Format(
                 CultureInfo.CurrentCulture,
@@ -1261,6 +1281,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 T("history.reuploadRangeProgress"),
                 orderGuids.Count,
                 batchCount);
+            ConsoleLog.Write(
+                "TransactionHistory",
+                $"manual reupload date range start soldFrom={soldFrom:O} soldTo={soldTo:O} " +
+                $"device={SelectedTerminalDeviceCode ?? "<all>"} count={orderGuids.Count} batches={batchCount}");
             var attemptedCount = 0;
             var uploadedCount = 0;
             var failedCount = 0;
@@ -1278,6 +1302,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 }
             }
 
+            ConsoleLog.Write(
+                "TransactionHistory",
+                $"manual reupload date range completed total={orderGuids.Count} attempted={attemptedCount} " +
+                $"uploaded={uploadedCount} failed={failedCount} interrupted={wasInterrupted}");
             await LoadAsync();
             StatusMessage = string.Format(
                 CultureInfo.CurrentCulture,
@@ -1292,6 +1320,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
         catch (Exception ex)
         {
+            LogHistoryWarning(
+                $"manual reupload date range failed error={ex.GetType().Name} message={ex.Message}",
+                traceId: null,
+                ex);
             StatusMessage = string.Format(CultureInfo.CurrentCulture, T("history.reuploadRangeFailed"), ex.Message);
         }
         finally
@@ -1399,7 +1431,14 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     {
         try
         {
-            return await LoadHeldOrdersCoreAsync(scope, generation, cancellationToken);
+            var rows = await LoadHeldOrdersCoreAsync(scope, generation, cancellationToken);
+            if (_heldLocalLoadFailing)
+            {
+                _heldLocalLoadFailing = false;
+                ConsoleLog.Write("TransactionHistory", $"held orders local load recovered scope={scope}");
+            }
+
+            return rows;
         }
         catch (OperationCanceledException)
         {
@@ -1407,6 +1446,15 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (!_heldLocalLoadFailing)
+            {
+                _heldLocalLoadFailing = true;
+                LogHistoryWarning(
+                    $"held orders local load failed scope={scope} error={ex.GetType().Name} message={ex.Message}",
+                    traceId: null,
+                    ex);
+            }
+
             StatusMessage = ex.Message;
             // 本地读取失败只保留当前页签自己的缓存，绝不把另一页签或其他来源行带过来。
             var retained = CachedHeldRows(scope);
@@ -1543,6 +1591,22 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
 
             _heldRemoteRowsCache = remoteRows;
             _heldRemoteCacheReady = true;
+            if (_heldRemoteFailingSince is { } failingSince)
+            {
+                ConsoleLog.WriteInformation(
+                    "HeldOrder",
+                    $"held orders remote refresh recovered failures={_heldRemoteFailureCount} " +
+                    $"offlineSeconds={(int)(_timeProvider.GetUtcNow() - failingSince).TotalSeconds}",
+                    new ApplicationLogContext(Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = Session.StoreCode,
+                        ["deviceCode"] = Session.DeviceCode,
+                        ["offlineSeconds"] = (int)(_timeProvider.GetUtcNow() - failingSince).TotalSeconds,
+                        ["attemptCount"] = _heldRemoteFailureCount
+                    }));
+                _heldRemoteFailingSince = null;
+                _heldRemoteFailureCount = 0;
+            }
             if (scope == HeldOrderViewScope.Other)
             {
                 HeldOrdersRemoteStatusMessage = string.Empty;
@@ -1564,6 +1628,28 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             if (generation != _heldLoadGeneration)
             {
                 return;
+            }
+
+            _heldRemoteFailureCount++;
+            if (_heldRemoteFailingSince is null)
+            {
+                _heldRemoteFailingSince = _timeProvider.GetUtcNow();
+                var apiException = ex as SharedHeldOrderApiException;
+                ConsoleLog.WriteWarning(
+                    "HeldOrder",
+                    $"held orders remote refresh failed scope={scope} kind={apiException?.Kind.ToString() ?? "<none>"} " +
+                    $"errorCode={apiException?.ErrorCode ?? "<null>"} error={ex.GetType().Name} message={ex.Message}",
+                    new ApplicationLogContext(
+                        RequestPath: "api/v1/held-orders",
+                        RequestMethod: "GET",
+                        StatusCode: apiException is null ? null : (int)apiException.StatusCode,
+                        Properties: new Dictionary<string, object?>
+                        {
+                            ["storeCode"] = Session.StoreCode,
+                            ["deviceCode"] = Session.DeviceCode,
+                            ["errorCode"] = apiException?.ErrorCode
+                        }),
+                    apiException?.InnerException ?? ex);
             }
 
             if (scope == HeldOrderViewScope.Other)
@@ -2008,6 +2094,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             ex is not StackOverflowException &&
             (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
         {
+            LogHistoryWarning(
+                $"installment recovery locks unavailable error={ex.GetType().Name} message={ex.Message}",
+                traceId: null,
+                ex,
+                ex is OperationCanceledException ? "timeout" : null);
             return (false, new HashSet<Guid>());
         }
     }
@@ -2464,6 +2555,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         {
             // 删除流程固定使用 CancellationToken.None；HTTP 超时也必须保留暂存状态并允许重试。
             var failureMessage = ex.Message;
+            LogHistoryWarning(
+                $"held order delete failed orderGuid={candidate?.OrderGuid.ToString("D") ?? "<none>"} staged={deleteStaged} " +
+                $"error={ex.GetType().Name} message={ex.Message}",
+                candidate?.OrderGuid.ToString("D"),
+                ex);
             OperationAuditEvents.RecordAction(
                 _operationAuditLogger,
                 OperationAuditTypes.OrderCancel,
@@ -2601,6 +2697,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
         catch (Exception ex)
         {
+            LogHistoryWarning(
+                $"held order share request failed orderGuid={candidate.OrderGuid:D} error={ex.GetType().Name} message={ex.Message}",
+                candidate.OrderGuid.ToString("D"),
+                ex);
             StatusMessage = ex.Message;
         }
         finally
@@ -2653,6 +2753,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         catch (Exception ex)
         {
             // 请求已持久化：worker 单轮失败不影响共享意图，hosted service 会重试。
+            LogHistoryWarning(
+                $"held order share publish round failed error={ex.GetType().Name} message={ex.Message}",
+                traceId: null,
+                ex);
             StatusMessage = ex.Message;
         }
 
@@ -2790,6 +2894,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         catch (Exception ex)
         {
             // 强制释放使用 CancellationToken.None；内部 HTTP 超时应留在可重试状态，不能逃逸到 Dispatcher。
+            LogHistoryWarning(
+                $"held order force release failed orderGuid={candidate.OrderGuid:D} serverReleased={releaseAuditRecorded} " +
+                $"error={ex.GetType().Name} message={ex.Message}",
+                candidate.OrderGuid.ToString("D"),
+                ex);
             if (!releaseAuditRecorded)
             {
                 OperationAuditEvents.RecordAction(
@@ -2951,6 +3060,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
         catch (OperationCanceledException ex)
         {
+            LogHistoryWarning(
+                $"installment pickup result unknown installmentGuid={installmentGuid:D} error={ex.GetType().Name}",
+                installmentGuid.ToString("D"),
+                ex,
+                "timeout");
             RecordInstallmentPickupAudit(installmentGuid, "Failed", ex.GetType().Name);
             LockInstallmentPickup(orderSnapshot!.InstallmentOrder!.OrderId);
             if (ReferenceEquals(SelectedOrder, orderSnapshot))
@@ -2961,6 +3075,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
         catch (Exception ex)
         {
+            LogHistoryWarning(
+                $"installment pickup failed installmentGuid={installmentGuid:D} error={ex.GetType().Name} message={ex.Message}",
+                installmentGuid.ToString("D"),
+                ex);
             RecordInstallmentPickupAudit(installmentGuid, "Failed", ex.GetType().Name);
             if (ReferenceEquals(SelectedOrder, orderSnapshot))
             {
@@ -3723,6 +3841,38 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
 
         await LoadHeldOrdersAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// 历史页人工操作失败此前只写 StatusMessage：统一补一条 Warning（带异常与业务 Guid），
+    /// 便于在中心日志按订单/分期号追查收银员看到的失败。
+    /// </summary>
+    private void LogHistoryWarning(string message, string? traceId, Exception exception, string? reason = null)
+    {
+        ConsoleLog.WriteWarning(
+            "TransactionHistory",
+            reason is null ? message : $"{message} reason={reason}",
+            new ApplicationLogContext(
+                TraceId: traceId,
+                StatusCode: exception switch
+                {
+                    CatalogApiException { StatusCode: { } status } => (int)status,
+                    SharedHeldOrderApiException held => (int)held.StatusCode,
+                    _ => null
+                },
+                Properties: new Dictionary<string, object?>
+                {
+                    ["storeCode"] = Session.StoreCode,
+                    ["deviceCode"] = Session.DeviceCode,
+                    ["errorCode"] = exception switch
+                    {
+                        CatalogApiException api => api.ErrorCode,
+                        SharedHeldOrderApiException held => held.ErrorCode,
+                        _ => null
+                    },
+                    ["reason"] = reason
+                }),
+            exception);
     }
 
     public void Dispose()

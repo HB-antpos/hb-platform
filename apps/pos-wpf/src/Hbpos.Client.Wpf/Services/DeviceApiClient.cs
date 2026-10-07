@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -47,8 +48,11 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
 
     public async Task<IReadOnlyList<StoreSelectionItem>> GetStoresAsync(CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.GetAsync("api/v1/catalog/stores", cancellationToken);
-        var stores = await ReadApiResultAsync<IReadOnlyList<StoreDto>>(response, cancellationToken);
+        var stores = await SendLoggedAsync<IReadOnlyList<StoreDto>>(
+            "api/v1/catalog/stores",
+            HttpMethod.Get,
+            token => httpClient.GetAsync("api/v1/catalog/stores", token),
+            cancellationToken);
         return stores
             .Where(x => x.IsActive)
             .OrderBy(x => x.StoreName, StringComparer.CurrentCultureIgnoreCase)
@@ -61,60 +65,55 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
         DeviceRegisterRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.PostAsJsonAsync(
+        return await SendLoggedAsync<DeviceRegisterResponse>(
             "api/v1/devices/register",
-            request,
-            JsonOptions,
+            HttpMethod.Post,
+            token => httpClient.PostAsJsonAsync("api/v1/devices/register", request, JsonOptions, token),
             cancellationToken);
-        return await ReadApiResultAsync<DeviceRegisterResponse>(response, cancellationToken);
     }
 
     public async Task<DeviceVerifyResponse> VerifyAsync(
         DeviceVerifyRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.PostAsJsonAsync(
+        return await SendLoggedAsync<DeviceVerifyResponse>(
             "api/v1/devices/verify",
-            request,
-            JsonOptions,
+            HttpMethod.Post,
+            token => httpClient.PostAsJsonAsync("api/v1/devices/verify", request, JsonOptions, token),
             cancellationToken);
-        return await ReadApiResultAsync<DeviceVerifyResponse>(response, cancellationToken);
     }
 
     public async Task<DeviceReregisterResponse> ReregisterAsync(
         DeviceReregisterRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.PostAsJsonAsync(
+        return await SendLoggedAsync<DeviceReregisterResponse>(
             "api/v1/devices/reregister",
-            request,
-            JsonOptions,
+            HttpMethod.Post,
+            token => httpClient.PostAsJsonAsync("api/v1/devices/reregister", request, JsonOptions, token),
             cancellationToken);
-        return await ReadApiResultAsync<DeviceReregisterResponse>(response, cancellationToken);
     }
 
     public async Task<DeviceActivationCodePreviewResponse> PreviewActivationCodeAsync(
         DeviceActivationCodePreviewRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.PostAsJsonAsync(
+        return await SendLoggedAsync<DeviceActivationCodePreviewResponse>(
             "api/v1/devices/activation-code/preview",
-            request,
-            JsonOptions,
+            HttpMethod.Post,
+            token => httpClient.PostAsJsonAsync("api/v1/devices/activation-code/preview", request, JsonOptions, token),
             cancellationToken);
-        return await ReadApiResultAsync<DeviceActivationCodePreviewResponse>(response, cancellationToken);
     }
 
     public async Task<DeviceActivationCodeRedeemResponse> RedeemActivationCodeAsync(
         DeviceActivationCodeRedeemRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.PostAsJsonAsync(
+        return await SendLoggedAsync<DeviceActivationCodeRedeemResponse>(
             "api/v1/devices/activation-code/redeem",
-            request,
-            JsonOptions,
+            HttpMethod.Post,
+            token => httpClient.PostAsJsonAsync("api/v1/devices/activation-code/redeem", request, JsonOptions, token),
             cancellationToken);
-        return await ReadApiResultAsync<DeviceActivationCodeRedeemResponse>(response, cancellationToken);
     }
 
     public async Task<DeviceActivationCodeRedeemResponse> RedeemActivationCodeForRecoveryAsync(
@@ -128,20 +127,188 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
             Content = JsonContent.Create(request, options: JsonOptions)
         };
         httpRequest.Headers.TryAddWithoutValidation(ActivationRecoveryOnlyHeader, "true");
-        using var response = await httpClient.SendAsync(httpRequest, cancellationToken);
-        return await ReadApiResultAsync<DeviceActivationCodeRedeemResponse>(response, cancellationToken);
+        return await SendLoggedAsync<DeviceActivationCodeRedeemResponse>(
+            "api/v1/devices/activation-code/redeem",
+            HttpMethod.Post,
+            token => httpClient.SendAsync(httpRequest, token),
+            cancellationToken,
+            operation: "recovery");
     }
 
     public async Task<DeviceActivationCodeRedeemResponse> RebindActivationCodeAsync(
         DeviceActivationCodeRebindRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.PostAsJsonAsync(
+        return await SendLoggedAsync<DeviceActivationCodeRedeemResponse>(
             "api/v1/devices/activation-code/rebind",
-            request,
-            JsonOptions,
+            HttpMethod.Post,
+            token => httpClient.PostAsJsonAsync("api/v1/devices/activation-code/rebind", request, JsonOptions, token),
             cancellationToken);
-        return await ReadApiResultAsync<DeviceActivationCodeRedeemResponse>(response, cancellationToken);
+    }
+
+    private const string LogCategory = "Device";
+    private const string VerifyPath = "api/v1/devices/verify";
+
+    // 注册页待审批时每 5 秒轮询 verify：结果不变 / 同一失败重复出现时不再重复记日志。
+    // DeviceApiClient 是 typed HttpClient（transient），所以去重状态放静态字段，用 Interlocked 原子替换保证线程安全。
+    private static string? _lastVerifyOutcome;
+
+    /// <summary>
+    /// 统一发送、读取信封并记录日志。请求体含开通码/授权码，响应含 AuthorizationCode，所以日志只记路径、状态码、耗时与 errorCode，绝不记正文。
+    /// </summary>
+    private static async Task<T> SendLoggedAsync<T>(
+        string path,
+        HttpMethod method,
+        Func<CancellationToken, Task<HttpResponseMessage>> send,
+        CancellationToken cancellationToken,
+        string? operation = null)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        int? statusCode = null;
+        try
+        {
+            using var response = await send(cancellationToken);
+            statusCode = (int)response.StatusCode;
+            var result = await ReadApiResultAsync<T>(response, cancellationToken);
+            LogCompleted(path, method, statusCode.Value, stopwatch.ElapsedMilliseconds, operation, result);
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 调用方主动取消（离开页面、停止轮询）不算联网失败。
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogFailed(path, method, statusCode, stopwatch.ElapsedMilliseconds, operation, ex);
+            throw;
+        }
+    }
+
+    private static void LogCompleted<T>(
+        string path,
+        HttpMethod method,
+        int statusCode,
+        long elapsedMs,
+        string? operation,
+        T result)
+    {
+        // 只摘取不敏感的状态字段；AuthorizationCode 不进日志。
+        var summary = result switch
+        {
+            DeviceVerifyResponse verify => $" deviceStatus={verify.DeviceStatus} isAllowed={verify.IsAllowed}",
+            DeviceRegisterResponse register => $" deviceStatus={register.DeviceStatus} isAllowed={register.IsAllowed} reasonCode={register.ReasonCode ?? "-"}",
+            DeviceReregisterResponse reregister => $" deviceStatus={reregister.DeviceStatus} isAllowed={reregister.IsAllowed}",
+            DeviceActivationCodePreviewResponse preview => $" isAllowed={preview.IsAllowed} reasonCode={preview.ReasonCode ?? "-"}",
+            DeviceActivationCodeRedeemResponse redeem => $" deviceStatus={redeem.DeviceStatus} isAllowed={redeem.IsAllowed} reasonCode={redeem.ReasonCode ?? "-"}",
+            IReadOnlyList<StoreDto> stores => $" storeCount={stores.Count}",
+            _ => string.Empty
+        };
+
+        if (string.Equals(path, VerifyPath, StringComparison.Ordinal)
+            && !ShouldLogVerifyOutcome($"ok|{statusCode}|{summary}"))
+        {
+            return;
+        }
+
+        ConsoleLog.WriteInformation(
+            LogCategory,
+            $"device request completed path={path} status={statusCode} elapsedMs={elapsedMs}{summary}",
+            new ApplicationLogContext(
+                RequestPath: path,
+                RequestMethod: method.Method,
+                StatusCode: statusCode,
+                Properties: BuildProperties(elapsedMs, operation, errorCode: null, reason: null)));
+    }
+
+    private static void LogFailed(
+        string path,
+        HttpMethod method,
+        int? statusCode,
+        long elapsedMs,
+        string? operation,
+        Exception exception)
+    {
+        string reason;
+        string? errorCode = null;
+        switch (exception)
+        {
+            case CatalogApiException apiException:
+                reason = "rejected";
+                errorCode = apiException.ErrorCode;
+                statusCode ??= apiException.StatusCode is { } apiStatus ? (int)apiStatus : (int?)null;
+                break;
+            case DeviceApiUnavailableException unavailable:
+                reason = "unavailable";
+                statusCode ??= unavailable.StatusCode is { } unavailableStatus ? (int)unavailableStatus : (int?)null;
+                break;
+            case OperationCanceledException:
+                // 调用方未取消却收到取消：HttpClient 3 秒超时。
+                reason = "timeout";
+                break;
+            case HttpRequestException:
+                reason = "network";
+                break;
+            default:
+                reason = "unexpected";
+                break;
+        }
+
+        if (string.Equals(path, VerifyPath, StringComparison.Ordinal)
+            && !ShouldLogVerifyOutcome($"fail|{reason}|{statusCode}|{errorCode}"))
+        {
+            return;
+        }
+
+        ConsoleLog.WriteWarning(
+            LogCategory,
+            $"device request failed path={path} reason={reason} status={statusCode?.ToString() ?? "-"} errorCode={errorCode ?? "-"} elapsedMs={elapsedMs}",
+            new ApplicationLogContext(
+                RequestPath: path,
+                RequestMethod: method.Method,
+                StatusCode: statusCode,
+                Properties: BuildProperties(elapsedMs, operation, errorCode, reason)),
+            exception);
+    }
+
+    private static bool ShouldLogVerifyOutcome(string outcome)
+    {
+        var previous = Interlocked.Exchange(ref _lastVerifyOutcome, outcome);
+        return !string.Equals(previous, outcome, StringComparison.Ordinal);
+    }
+
+    /// <summary>仅供测试复位静态去重状态。</summary>
+    internal static void ResetLogStateForTests()
+    {
+        Interlocked.Exchange(ref _lastVerifyOutcome, null);
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildProperties(
+        long elapsedMs,
+        string? operation,
+        string? errorCode,
+        string? reason)
+    {
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["elapsedMs"] = elapsedMs
+        };
+        if (!string.IsNullOrWhiteSpace(operation))
+        {
+            properties["operation"] = operation;
+        }
+
+        if (!string.IsNullOrWhiteSpace(errorCode))
+        {
+            properties["errorCode"] = errorCode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            properties["reason"] = reason;
+        }
+
+        return properties;
     }
 
     private static async Task<T> ReadApiResultAsync<T>(

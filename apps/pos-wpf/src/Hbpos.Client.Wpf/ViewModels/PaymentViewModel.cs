@@ -1732,11 +1732,30 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                 paymentAmount: attemptedPaymentAmount,
                 correlationId: correlation.CorrelationId,
                 traceId: correlation.TraceId);
-            ConsoleLog.WriteError(
-                "OperationAudit",
-                $"tender failed method={method} error={ex.GetType().Name}",
-                new ApplicationLogContext(TraceId: correlation.TraceId),
-                ex);
+            // 服务端 4xx（如券不可用、余额不足）是收银员可见并可重试的业务拒绝，记 Warning；其余异常仍为 Error。
+            var tenderFailureContext = new ApplicationLogContext(
+                TraceId: correlation.TraceId,
+                StatusCode: ex is CatalogApiException { StatusCode: { } tenderStatus } ? (int)tenderStatus : null,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = (ex as CatalogApiException)?.ErrorCode
+                });
+            if (ex is CatalogApiException { StatusCode: { } clientStatus } && (int)clientStatus is >= 400 and < 500)
+            {
+                ConsoleLog.WriteWarning(
+                    "OperationAudit",
+                    $"tender rejected method={method} error={ex.GetType().Name} http={(int)clientStatus}",
+                    tenderFailureContext,
+                    ex);
+            }
+            else
+            {
+                ConsoleLog.WriteError(
+                    "OperationAudit",
+                    $"tender failed method={method} error={ex.GetType().Name}",
+                    tenderFailureContext,
+                    ex);
+            }
             SetStatus("payment.status.tenderFailed");
             NotifyPaymentCommandStates();
             return;

@@ -231,6 +231,43 @@ public sealed class ProductThumbnailImageSourceConverterTests
     }
 
     [Fact]
+    public void Convert_summarizes_remote_downloads_and_dedupes_failures_by_reason_and_host()
+    {
+        ClearImageCacheForTests();
+        var now = new DateTimeOffset(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+        using var clock = ProductThumbnailImageSourceConverter.UseDownloadStatsClockForTests(() => now);
+        var converter = new ProductThumbnailImageSourceConverter();
+        var runId = Guid.NewGuid().ToString("N");
+        using var remoteImages = ProductThumbnailImageSourceConverter.UseRemoteImageBytesLoaderForTests((uri, _) =>
+            uri.AbsolutePath.Contains("/missing-", StringComparison.Ordinal)
+                ? throw new HttpRequestException("not found", null, HttpStatusCode.NotFound)
+                : Task.FromResult(OnePixelPngBytes()));
+
+        var logs = CaptureProductImageLogs(() =>
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                converter.Convert($"https://cdn.example.test/{runId}/ok-{i}.png?sign=secret-{i}", typeof(BitmapSource), null, CultureInfo.InvariantCulture);
+                converter.Convert($"https://cdn.example.test/{runId}/missing-{i}.png?sign=secret-{i}", typeof(BitmapSource), null, CultureInfo.InvariantCulture);
+            }
+
+            // 跨过 5 分钟窗口后的下一次下载触发一条汇总。
+            now = now.AddMinutes(5);
+            converter.Convert($"https://cdn.example.test/{runId}/ok-last.png", typeof(BitmapSource), null, CultureInfo.InvariantCulture);
+        });
+
+        Assert.DoesNotContain(logs, line => line.Contains("image downloaded", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs, line => line.Contains("image uri parsed", StringComparison.Ordinal));
+        var failure = Assert.Single(logs, line => line.Contains("image download failed", StringComparison.Ordinal));
+        Assert.Contains("reason=http-404", failure, StringComparison.Ordinal);
+        Assert.Contains("host=cdn.example.test", failure, StringComparison.Ordinal);
+        Assert.DoesNotContain("sign=", failure, StringComparison.Ordinal);
+        var summary = Assert.Single(logs, line => line.Contains("image download summary", StringComparison.Ordinal));
+        Assert.Contains("succeeded=4", summary, StringComparison.Ordinal);
+        Assert.Contains("failed=3", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Convert_escapes_unescaped_hash_in_http_image_file_name()
     {
         var converter = new ProductThumbnailImageSourceConverter();

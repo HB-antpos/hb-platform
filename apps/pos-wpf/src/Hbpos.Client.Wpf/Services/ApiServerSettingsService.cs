@@ -112,6 +112,9 @@ public sealed class ApiServerSettingsService
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ConnectionTimeout);
 
+        // 人工点按"测试连接"触发，低频：成功记 Information、失败记 Warning；只记 scheme://host:port，不记路径与查询串。
+        var target = baseAddress.GetLeftPart(UriPartial.Authority);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             // 候选健康检查客户端未接入运行时端点处理器，必须始终直达用户输入的地址。
@@ -120,12 +123,20 @@ public sealed class ApiServerSettingsService
                 timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
+                LogTestConnectionResult(target, "http-status", (int)response.StatusCode, stopwatch.ElapsedMilliseconds, null);
                 return false;
             }
 
             var result = await response.Content.ReadFromJsonAsync<ApiResult<HealthCheckResponse>>(
                 cancellationToken: timeout.Token);
-            return result?.Success == true && result.Data?.IsOnline == true;
+            var isOnline = result?.Success == true && result.Data?.IsOnline == true;
+            LogTestConnectionResult(
+                target,
+                isOnline ? null : "health-not-online",
+                (int)response.StatusCode,
+                stopwatch.ElapsedMilliseconds,
+                null);
+            return isOnline;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -133,8 +144,49 @@ public sealed class ApiServerSettingsService
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            var reason = ex switch
+            {
+                TaskCanceledException => "timeout",
+                JsonException => "unparsable-response",
+                _ => "network"
+            };
+            LogTestConnectionResult(target, reason, (ex as HttpRequestException)?.StatusCode is { } status ? (int)status : null, stopwatch.ElapsedMilliseconds, ex);
             return false;
         }
+    }
+
+    private static void LogTestConnectionResult(
+        string target,
+        string? failureReason,
+        int? statusCode,
+        long elapsedMs,
+        Exception? exception)
+    {
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["elapsedMs"] = elapsedMs,
+            ["action"] = "test-connection"
+        };
+        var context = new ApplicationLogContext(
+            RequestPath: "api/v1/health",
+            RequestMethod: "GET",
+            StatusCode: statusCode,
+            Properties: properties);
+        if (failureReason is null)
+        {
+            ConsoleLog.WriteInformation(
+                "ApiServerSettings",
+                $"api server test connection succeeded target={target} status={statusCode?.ToString() ?? "-"} elapsedMs={elapsedMs}",
+                context);
+            return;
+        }
+
+        properties["reason"] = failureReason;
+        ConsoleLog.WriteWarning(
+            "ApiServerSettings",
+            $"api server test connection failed target={target} reason={failureReason} status={statusCode?.ToString() ?? "-"} elapsedMs={elapsedMs}",
+            context,
+            exception);
     }
 
     public void SaveUserAddress(string address)

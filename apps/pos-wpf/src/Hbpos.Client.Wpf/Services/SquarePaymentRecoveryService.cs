@@ -519,7 +519,10 @@ public sealed class SquarePaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"supervisor payment audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"supervisor payment audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
             }
         }
 
@@ -533,7 +536,10 @@ public sealed class SquarePaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"supervisor payment post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"supervisor payment post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardRecoveryResolutionResult(
                 false,
                 ResolutionPendingMessage(),
@@ -651,9 +657,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"persisted supervisor resolution recovery failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"persisted supervisor resolution recovery failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage());
@@ -682,9 +690,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"supervisor resolution lock check failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"supervisor resolution lock check failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attemptGuid.ToString("D")),
+                ex);
             return true;
         }
     }
@@ -779,9 +789,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "SquareRecovery",
-                $"recovery finalization failed attemptGuid={attempt.AttemptGuid} target={targetStatus} error={ex.GetType().Name}");
+                $"recovery finalization failed attemptGuid={attempt.AttemptGuid} target={targetStatus} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return false;
         }
     }
@@ -820,9 +832,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"not-paid finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"not-paid finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.square.notPaidTerminalizeFailed", "The previous Square payment could not be finalized. Run recovery again."));
@@ -845,9 +859,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"not-paid restore failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"not-paid restore failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.square.notPaidRestoreFailed", "The previous Square payment could not be restored. Run recovery again."));
@@ -1260,9 +1276,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"alternative refund existing order lookup failed attemptGuid={attempt.AttemptGuid} orderGuid={draft.OrderGuid} error={ex.GetType().Name}");
+                $"alternative refund existing order lookup failed attemptGuid={attempt.AttemptGuid} orderGuid={draft.OrderGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage(),
@@ -1346,9 +1364,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"alternative refund existing order finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"alternative refund existing order finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage(),
@@ -1558,7 +1578,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write("SquareRecovery", $"checkout lookup failed attemptGuid={attempt.AttemptGuid} checkoutId={attempt.CheckoutId} error={ex.GetType().Name}");
+            ConsoleLog.WriteWarning(
+                "SquareRecovery",
+                $"checkout lookup failed attemptGuid={attempt.AttemptGuid} checkoutId={attempt.CheckoutId} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 UnknownResultMessage());
@@ -1676,7 +1700,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write("SquareRecovery", $"payment lookup failed attemptGuid={attempt.AttemptGuid} checkoutId={attempt.CheckoutId} paymentId={paymentId} error={ex.GetType().Name}");
+            ConsoleLog.WriteWarning(
+                "SquareRecovery",
+                $"payment lookup failed attemptGuid={attempt.AttemptGuid} checkoutId={attempt.CheckoutId} paymentId={paymentId} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 UnknownResultMessage());
@@ -1789,9 +1817,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"refund lookup failed attemptGuid={attempt.AttemptGuid} refundId={attempt.PaymentId} error={ex.GetType().Name}");
+                $"refund lookup failed attemptGuid={attempt.AttemptGuid} refundId={attempt.PaymentId} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return null;
         }
 
@@ -2035,9 +2065,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"local refund failure handoff repair failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"local refund failure handoff repair failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
         }
 
         return new CardPaymentRecoveryResult(
@@ -2192,7 +2224,10 @@ public sealed class SquarePaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"not-refunded authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"not-refunded authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
                 return new CardRefundSupervisorResolutionResult(
                     false,
                     T("cardRecovery.refund.retryDraftInvalid", "The bank confirmed no refund, but POS could not rebuild the original return. Do not retry until support checks this attempt."),
@@ -2287,7 +2322,10 @@ public sealed class SquarePaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"supervisor refund audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"supervisor refund audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
             }
         }
 
@@ -2301,7 +2339,10 @@ public sealed class SquarePaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"supervisor refund post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"supervisor refund post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardRefundSupervisorResolutionResult(
                 false,
                 ResolutionPendingMessage(),
@@ -2407,7 +2448,10 @@ public sealed class SquarePaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"confirmed refund authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.refund.confirmedDraftInvalid", "The refund is confirmed, but POS could not rebuild the original return. Do not refund again; contact support."),
@@ -2453,9 +2497,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"confirmed refund existing order lookup failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund existing order lookup failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage(),
@@ -2567,9 +2613,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (InvalidOperationException ex)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"confirmed refund checkout restore deferred attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund checkout restore deferred attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.refund.requiresReview", "A previous card refund is still unresolved. Do not refund again; ask a supervisor to reconcile Square and the original sale."),
@@ -2595,9 +2643,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "SquareRecovery",
-                $"confirmed refund order save failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund order save failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage(),
@@ -2650,7 +2700,10 @@ public sealed class SquarePaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"not-refunded retry authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"not-refunded retry authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.refund.retryDraftInvalid", "The bank confirmed no refund, but POS could not rebuild the original return. Do not retry until support checks this attempt."),
@@ -2735,9 +2788,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"square draft handoff read failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"square draft handoff read failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attemptGuid.ToString("D")),
+                ex);
             return false;
         }
 
@@ -2781,9 +2836,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"square draft handoff verification failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"square draft handoff verification failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attemptGuid.ToString("D")),
+                ex);
             return false;
         }
 
@@ -3275,7 +3332,10 @@ public sealed class SquarePaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"verified payment authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"verified payment authoritative draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 UnknownResultMessage());
@@ -3290,9 +3350,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"verified payment existing order lookup failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"verified payment existing order lookup failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 UnknownResultMessage());
@@ -3317,9 +3379,11 @@ public sealed class SquarePaymentRecoveryService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
             {
-                ConsoleLog.Write(
+                ConsoleLog.WriteWarning(
                     "SquareRecovery",
-                    $"verified existing order finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"verified existing order finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                    ex);
                 return new CardPaymentRecoveryResult(
                     CardPaymentRecoveryOutcome.Unknown,
                     UnknownResultMessage());
@@ -3352,9 +3416,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"verified payment finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"verified payment finalization prepare failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 UnknownResultMessage());
@@ -3415,9 +3481,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"verified payment order rebuild failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"verified payment order rebuild failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 UnknownResultMessage());
@@ -3442,9 +3510,11 @@ public sealed class SquarePaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "SquareRecovery",
-                $"verified payment order save failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"verified payment order save failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 UnknownResultMessage());
@@ -3461,9 +3531,11 @@ public sealed class SquarePaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             hasPostCommitWarning = true;
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "SquareRecovery",
-                $"verified payment order saved but attempt finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"verified payment order saved but attempt finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
         }
 
         return new CardPaymentRecoveryResult(
@@ -3590,11 +3662,28 @@ public sealed class SquarePaymentRecoveryService(
         return string.Format(localization?.CurrentCulture ?? System.Globalization.CultureInfo.CurrentCulture, template, args);
     }
 
-    private static void TryWriteRecoveryLog(string message)
+    private static void TryWriteRecoveryLog(
+        string message,
+        Exception? exception = null,
+        Guid? attemptGuid = null,
+        bool error = false)
     {
         try
         {
-            ConsoleLog.Write("SquareRecovery", message);
+            // 带异常的失败记 Warning（订单/最终状态落库失败需人工处理时记 Error），以 attemptGuid 作 TraceId；其余保持 Information。
+            var context = new ApplicationLogContext(TraceId: attemptGuid?.ToString("D"));
+            if (exception is null)
+            {
+                ConsoleLog.Write("SquareRecovery", message);
+            }
+            else if (error)
+            {
+                ConsoleLog.WriteError("SquareRecovery", message, context, exception);
+            }
+            else
+            {
+                ConsoleLog.WriteWarning("SquareRecovery", message, context, exception);
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {

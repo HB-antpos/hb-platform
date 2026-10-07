@@ -171,8 +171,22 @@ public sealed class LinklyBackendTerminalClient(
         try
         {
             var relativeUrl = $"api/v1/linkly/cloud-backend/terminals?environment={Uri.EscapeDataString(environment.ToString())}";
-            using var response = await httpClient.GetAsync(relativeUrl, cancellationToken);
-            var directory = await ReadTerminalApiResultAsync<LinklyCloudTerminalListResponse>(response, cancellationToken);
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await SendWithFailureLogAsync(
+                "terminal directory",
+                HttpMethod.Get,
+                FormatRequestUrl(relativeUrl),
+                txnType: null,
+                stopwatch,
+                () => httpClient.GetAsync(relativeUrl, cancellationToken),
+                cancellationToken);
+            var directory = await ReadTerminalApiResultAsync<LinklyCloudTerminalListResponse>(
+                response,
+                "terminal directory",
+                HttpMethod.Get,
+                FormatRequestUrl(relativeUrl),
+                stopwatch,
+                cancellationToken);
             if (!string.Equals(directory.Environment, environment.ToString(), StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Linkly terminal directory response environment did not match the request.");
@@ -204,8 +218,22 @@ public sealed class LinklyBackendTerminalClient(
         {
             const string relativeUrl = "api/v1/linkly/cloud-backend/terminal-selection";
             var request = new LinklyCloudTerminalSelectionRequest(environment.ToString(), terminalId, expectedRevision);
-            using var response = await httpClient.PutAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken);
-            var selection = await ReadTerminalApiResultAsync<LinklyCloudTerminalSelectionResponse>(response, cancellationToken);
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await SendWithFailureLogAsync(
+                "terminal selection",
+                HttpMethod.Put,
+                FormatRequestUrl(relativeUrl),
+                txnType: null,
+                stopwatch,
+                () => httpClient.PutAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
+                cancellationToken);
+            var selection = await ReadTerminalApiResultAsync<LinklyCloudTerminalSelectionResponse>(
+                response,
+                "terminal selection",
+                HttpMethod.Put,
+                FormatRequestUrl(relativeUrl),
+                stopwatch,
+                cancellationToken);
             if (selection.TerminalId != terminalId ||
                 !string.Equals(selection.Environment, environment.ToString(), StringComparison.OrdinalIgnoreCase))
             {
@@ -252,8 +280,23 @@ public sealed class LinklyBackendTerminalClient(
         var relativeUrl = $"api/v1/linkly/cloud-backend/terminals/{terminalId:D}/pair";
         // 配对码属于一次性敏感输入，只进入请求体，不写日志或客户端持久化。
         var request = new LinklyCloudBackendPairRequest(environment.ToString(), pairCode);
-        using var response = await httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken);
-        var result = await ReadTerminalApiResultAsync<LinklyCloudTerminalPairResponse>(response, cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        // 只记录操作名与 URL，配对码所在的请求体绝不进入日志。
+        using var response = await SendWithFailureLogAsync(
+            "terminal pair",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
+            cancellationToken);
+        var result = await ReadTerminalApiResultAsync<LinklyCloudTerminalPairResponse>(
+            response,
+            "terminal pair",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            stopwatch,
+            cancellationToken);
         lock (_terminalDirectorySync)
         {
             if (_terminalDirectories.TryGetValue(environment, out var current))
@@ -283,8 +326,22 @@ public sealed class LinklyBackendTerminalClient(
         CancellationToken cancellationToken = default)
     {
         var relativeUrl = $"api/v1/linkly/cloud-backend/terminals/{terminalId:D}/connection-test";
-        using var response = await httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken);
-        return await ReadTerminalApiResultAsync<LinklyCloudTerminalConnectionTestResponse>(response, cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await SendWithFailureLogAsync(
+            "terminal connection test",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
+            cancellationToken);
+        return await ReadTerminalApiResultAsync<LinklyCloudTerminalConnectionTestResponse>(
+            response,
+            "terminal connection test",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            stopwatch,
+            cancellationToken);
     }
 
     public async Task<LinklyCloudTerminalListResponse> AssignTerminalAsync(
@@ -293,8 +350,22 @@ public sealed class LinklyBackendTerminalClient(
         CancellationToken cancellationToken = default)
     {
         var relativeUrl = $"api/v1/linkly/cloud-backend/terminals/{terminalId:D}/assignment";
-        using var response = await httpClient.PutAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken);
-        var directory = await ReadTerminalApiResultAsync<LinklyCloudTerminalListResponse>(response, cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await SendWithFailureLogAsync(
+            "terminal assignment",
+            HttpMethod.Put,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.PutAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
+            cancellationToken);
+        var directory = await ReadTerminalApiResultAsync<LinklyCloudTerminalListResponse>(
+            response,
+            "terminal assignment",
+            HttpMethod.Put,
+            FormatRequestUrl(relativeUrl),
+            stopwatch,
+            cancellationToken);
         if (Enum.TryParse<CardTerminalEnvironment>(directory.Environment, ignoreCase: true, out var environment))
         {
             lock (_terminalDirectorySync)
@@ -457,6 +528,12 @@ public sealed class LinklyBackendTerminalClient(
                         StringComparison.Ordinal))
                 {
                     // Fresh Daily Close 尚未访问设置/付款页时，首个 409 明确未创建 session；刷新目录后只重试一次。
+                    LogSettlementEvent(
+                        "retry",
+                        "terminal-selection-conflict",
+                        sessionId: null,
+                        ex,
+                        LinklyLogLevel.Information);
                     settlementStartRequested = false;
                     await GetTerminalsAsync(settings.Environment, timeoutCts.Token);
                     terminalSelection = GetCachedTerminalSelection(settings.Environment);
@@ -494,8 +571,14 @@ public sealed class LinklyBackendTerminalClient(
                 status.SettlementReceiptTexts,
                 ProviderSubmissionState: ProviderSubmissionState.Submitted);
         }
-        catch (OperationCanceledException) when (settlementStartRequested || submitted)
+        catch (OperationCanceledException ex) when (settlementStartRequested || submitted)
         {
+            // 结算请求可能已到终端：无论调用方取消还是业务超时，结果都未知，需人工确认。
+            LogSettlementEvent(
+                "unknown",
+                cancellationToken.IsCancellationRequested ? "caller-cancelled-after-submit" : "timeout",
+                status?.SessionId,
+                ex);
             return SettlementUnknown(status?.SessionId);
         }
         catch (LinklyBackendHttpException ex) when (
@@ -503,7 +586,11 @@ public sealed class LinklyBackendTerminalClient(
             IsDefinitiveSettlementStartRejection(ex))
         {
             // 仅后端的显式错误码可证明尚未创建 settlement session；任意 4xx 都不能推断为未提交。
-            Log($"settlement rejected before submit http={(int)ex.HttpStatus} code={LogValue(ex.ErrorCode)}");
+            LogSettlementEvent(
+                "rejected",
+                $"settlement rejected before submit http={(int)ex.HttpStatus} code={LogValue(ex.ErrorCode)}",
+                sessionId: null,
+                ex);
             if (string.Equals(ex.ErrorCode, CloudBackendActiveOperationErrorCode, StringComparison.Ordinal))
             {
                 LinklyCloudBackendSessionResponse? activeStatus = null;
@@ -513,7 +600,11 @@ public sealed class LinklyBackendTerminalClient(
                 }
                 catch (Exception activeLookupException) when (activeLookupException is HttpRequestException or JsonException)
                 {
-                    Log($"active session lookup after settlement conflict failed error={activeLookupException.GetType().Name}");
+                    LogSettlementEvent(
+                        "failed",
+                        "active session lookup after settlement conflict failed",
+                        sessionId: null,
+                        activeLookupException);
                 }
 
                 return RejectActiveSessionForNewSettlement(activeStatus, ex.Message);
@@ -526,11 +617,22 @@ public sealed class LinklyBackendTerminalClient(
         }
         catch (Exception ex) when ((settlementStartRequested || submitted) && (ex is LinklyBackendHttpException or HttpRequestException or JsonException))
         {
-            Log($"settlement unknown sessionId={LogValue(status?.SessionId)} error={ex.GetType().Name}");
+            LogSettlementEvent(
+                "unknown",
+                $"settlement unknown error={ex.GetType().Name}",
+                status?.SessionId,
+                ex);
             return SettlementUnknown(status?.SessionId);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            // 提交前：调用方取消是正常操作只记 Information；业务等待超时记 Warning。
+            LogSettlementEvent(
+                cancellationToken.IsCancellationRequested ? "cancelled" : "failed",
+                cancellationToken.IsCancellationRequested ? "caller-cancelled-before-submit" : "timeout",
+                status?.SessionId,
+                ex,
+                cancellationToken.IsCancellationRequested ? LinklyLogLevel.Information : null);
             return new LinklySettlementResult(
                 false,
                 cancellationToken.IsCancellationRequested ? "ANZ Linkly settlement was cancelled." : "ANZ Linkly settlement timed out.",
@@ -539,7 +641,11 @@ public sealed class LinklyBackendTerminalClient(
         }
         catch (Exception ex) when (ex is LinklyBackendHttpException or HttpRequestException or JsonException)
         {
-            Log($"settlement failed before submit error={ex.GetType().Name}");
+            LogSettlementEvent(
+                "failed",
+                $"settlement failed before submit error={ex.GetType().Name}",
+                status?.SessionId,
+                ex);
             return new LinklySettlementResult(
                 false,
                 ex.Message,
@@ -610,10 +716,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: null,
             txnRef: null,
             bodyJson: SerializeDebugJson(request));
-        using var response = await httpClient.PostAsJsonAsync(
-            relativeUrl,
-            request,
-            JsonOptions,
+        using var response = await SendWithFailureLogAsync(
+            "acknowledge",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
             cancellationToken);
         _ = await ReadApiResultAsync(
             response,
@@ -643,6 +752,8 @@ public sealed class LinklyBackendTerminalClient(
         var activeSessionConflictDetected = false;
         var activeSessionTakeoverAttempted = false;
         string? lastTakenOverSessionId = null;
+        // 仅用于失败日志串联：POST 成功拿到 session 后记下，异常分支以它作 TraceId。
+        string? submittedSessionId = null;
         CancellationTokenSource? transactionBusinessWaitCts = null;
         CancellationTokenSource? transactionTimeoutCts = null;
         Log($"transaction request start txnType={txnType} environment={settings.Environment} componentVersion={GetComponentVersion()}");
@@ -723,6 +834,7 @@ public sealed class LinklyBackendTerminalClient(
                         activeSessionConflictDetected = false;
                         transactionSubmitted = true;
                         status = await StartTransactionAsync(request, transactionTimeoutCts.Token);
+                        submittedSessionId = NormalizeOptional(status.SessionId);
                         await NotifyPaymentAttemptSessionStartedAsync(status, cancellationToken);
                         break;
                     }
@@ -883,8 +995,17 @@ public sealed class LinklyBackendTerminalClient(
             keepDialogOpen = !result.Approved && !pollResult.ManualCancelRequested;
             return result;
         }
-        catch (LinklyBackendLocalCancelException)
+        catch (LinklyBackendLocalCancelException ex)
         {
+            LogTransactionAborted(
+                txnType,
+                "unknown",
+                "local-cancel",
+                submittedSessionId,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                cancellationToken.IsCancellationRequested,
+                ex);
             var message = T(
                 "linkly.backend.cancelledUnknown",
                 "Stopped waiting for the ANZ Linkly Cloud backend card result. The transaction may have reached the terminal; recover the previous transaction or confirm the result in Linkly before retrying.");
@@ -892,12 +1013,33 @@ public sealed class LinklyBackendTerminalClient(
         }
         catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested && !transactionSubmitted)
         {
+            // 调用方在 POST 前主动取消，属于正常操作，只记 Information。
+            LogTransactionAborted(
+                txnType,
+                "cancelled",
+                "caller-cancelled-before-submit",
+                submittedSessionId,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                callerCancelled: true,
+                ex,
+                LinklyLogLevel.Information);
             // 明确告诉 workflow：取消发生在本次新交易 POST 之前。退款 claim 只是本地 fencing，
             // 不能因此把本次新付款/退款误记为已提交或 ResultUnknown。
             throw new CardTerminalNotSubmittedException(ex, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && transactionSubmitted)
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested && transactionSubmitted)
         {
+            // 虽是调用方取消，但交易可能已到终端、结果未知，按 Warning 记录以便异常中心对账。
+            LogTransactionAborted(
+                txnType,
+                "unknown",
+                "caller-cancelled-after-submit",
+                submittedSessionId,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                callerCancelled: true,
+                ex);
             // POST 已进入 HTTP 管线后，即使调用方同时取消，也无法证明后端没有创建会话。
             // 必须保守落入异常中心，禁止把它当作普通取消后再次扣款。
             var message = T(
@@ -905,15 +1047,33 @@ public sealed class LinklyBackendTerminalClient(
                 "Stopped waiting for the ANZ Linkly Cloud backend card result. The transaction may have reached the terminal; recover the previous transaction or confirm the result in Linkly before retrying.");
             return ResultUnknown("linkly.backend.cancelledUnknown", message);
         }
-        catch (OperationCanceledException) when (dialogService.LocalCancelToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (dialogService.LocalCancelToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
+            LogTransactionAborted(
+                txnType,
+                "unknown",
+                "local-cancel",
+                submittedSessionId,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                callerCancelled: false,
+                ex);
             var message = T(
                 "linkly.backend.cancelledUnknown",
                 "Stopped waiting for the ANZ Linkly Cloud backend card result. The transaction may have reached the terminal; recover the previous transaction or confirm the result in Linkly before retrying.");
             return ResultUnknown("linkly.backend.cancelledUnknown", message);
         }
-        catch (OperationCanceledException) when (transactionTimeoutCts?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (transactionTimeoutCts?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
         {
+            LogTransactionAborted(
+                txnType,
+                transactionSubmitted ? "unknown" : "failed",
+                "timeout",
+                submittedSessionId,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                callerCancelled: false,
+                ex);
             var message = T("linkly.backend.timeout", "ANZ Linkly Cloud transaction timed out.");
             await PresentFinalFailureAsync("backend-timeout", message, cancellationToken);
             keepDialogOpen = true;
@@ -925,11 +1085,24 @@ public sealed class LinklyBackendTerminalClient(
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            Log(
-                $"operation-cancelled source={ex.GetType().Name} transactionSubmitted={transactionSubmitted} " +
-                $"businessTimeoutCancelled={transactionTimeoutCts?.IsCancellationRequested == true} " +
-                $"localCancelRequested={dialogService.LocalCancelToken.IsCancellationRequested} " +
-                $"callerCancelled={cancellationToken.IsCancellationRequested}");
+            // 非调用方、非业务超时的取消（如 HttpClient 内部超时）：结果可能未知，按失败记 Warning。
+            LinklyJsonLog.Write(
+                "LinklyBackend",
+                "backend-terminal",
+                "operation-cancelled",
+                transactionSubmitted ? "unknown" : "failed",
+                sessionId: submittedSessionId,
+                success: false,
+                reason: "wait-cancelled",
+                details: new
+                {
+                    message =
+                        $"operation-cancelled source={ex.GetType().Name} transactionSubmitted={transactionSubmitted} " +
+                        $"businessTimeoutCancelled={transactionTimeoutCts?.IsCancellationRequested == true} " +
+                        $"localCancelRequested={dialogService.LocalCancelToken.IsCancellationRequested} " +
+                        $"callerCancelled={cancellationToken.IsCancellationRequested}"
+                },
+                exception: ex);
             var message = T(
                 "linkly.backend.waitCancelled",
                 "Waiting for the ANZ Linkly Cloud backend response was cancelled before the transaction result could be confirmed.");
@@ -942,8 +1115,17 @@ public sealed class LinklyBackendTerminalClient(
                 ? ResultUnknown("linkly.backend.resultUnknown", BuildResultUnknownMessage(message))
                 : FallbackAllowed("linkly.backend.waitCancelled", message);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            LogTransactionAborted(
+                txnType,
+                transactionSubmitted ? "unknown" : "failed",
+                "http-error",
+                submittedSessionId,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                cancellationToken.IsCancellationRequested,
+                ex);
             var message = T("linkly.backend.communicationFailed", "ANZ Linkly Cloud backend communication failed.");
             await PresentFinalFailureAsync("backend-http-error", message, cancellationToken);
             keepDialogOpen = true;
@@ -953,8 +1135,17 @@ public sealed class LinklyBackendTerminalClient(
                 ? ResultUnknown("linkly.backend.resultUnknown", BuildResultUnknownMessage(message))
                 : FallbackAllowed("linkly.backend.communicationFailed", message);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            LogTransactionAborted(
+                txnType,
+                transactionSubmitted ? "unknown" : "failed",
+                "invalid-response",
+                submittedSessionId,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                cancellationToken.IsCancellationRequested,
+                ex);
             var message = T("linkly.backend.invalidResponse", "ANZ Linkly Cloud backend returned an invalid response.");
             await PresentFinalFailureAsync("backend-json-error", message, cancellationToken);
             keepDialogOpen = true;
@@ -975,6 +1166,65 @@ public sealed class LinklyBackendTerminalClient(
                 await dialogService.CloseAsync(CancellationToken.None);
             }
         }
+    }
+
+    /// <summary>
+    /// 交易被取消/超时/通信失败时写一条结构化日志：已提交的记 unknown（结果未知需对账），未提交的记 failed。
+    /// </summary>
+    private static void LogTransactionAborted(
+        string txnType,
+        string phase,
+        string reason,
+        string? sessionId,
+        bool transactionSubmitted,
+        bool activeSessionConflictDetected,
+        bool callerCancelled,
+        Exception exception,
+        LinklyLogLevel? level = null)
+    {
+        LinklyJsonLog.Write(
+            "LinklyBackend",
+            "backend-terminal",
+            "transaction",
+            phase,
+            sessionId: sessionId,
+            httpStatus: (exception as LinklyBackendHttpException)?.HttpStatus,
+            success: false,
+            reason: reason,
+            details: new
+            {
+                txnType,
+                transactionSubmitted,
+                activeSessionConflictDetected,
+                callerCancelled,
+                errorCode = (exception as LinklyBackendHttpException)?.ErrorCode
+            },
+            exception: exception,
+            level: level);
+    }
+
+    private static void LogSettlementEvent(
+        string phase,
+        string reason,
+        string? sessionId,
+        Exception exception,
+        LinklyLogLevel? level = null)
+    {
+        LinklyJsonLog.Write(
+            "LinklyBackend",
+            "backend-terminal",
+            "settlement",
+            phase,
+            sessionId: sessionId,
+            httpStatus: (exception as LinklyBackendHttpException)?.HttpStatus,
+            success: false,
+            reason: reason,
+            details: new
+            {
+                errorCode = (exception as LinklyBackendHttpException)?.ErrorCode
+            },
+            exception: exception,
+            level: level);
     }
 
     private static PaymentAuthorizationResult ActiveSessionRecoveryRequired(string message) =>
@@ -1988,10 +2238,13 @@ public sealed class LinklyBackendTerminalClient(
             request.TxnType,
             txnRef: null,
             bodyJson: SerializeDebugJson(request));
-        using var response = await httpClient.PostAsJsonAsync(
-            relativeUrl,
-            request,
-            JsonOptions,
+        using var response = await SendWithFailureLogAsync(
+            "start transaction",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: request.TxnType,
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
             cancellationToken);
         var status = await ReadApiResultAsync(
             response,
@@ -2017,10 +2270,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: "S",
             txnRef: null,
             bodyJson: SerializeDebugJson(request));
-        using var response = await httpClient.PostAsJsonAsync(
-            relativeUrl,
-            request,
-            JsonOptions,
+        using var response = await SendWithFailureLogAsync(
+            "start settlement",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: "S",
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
             cancellationToken);
         return await ReadApiResultAsync(
             response,
@@ -2045,8 +2301,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: null,
             txnRef: null,
             bodyJson: null);
-        using var response = await httpClient.GetAsync(
-            relativeUrl,
+        using var response = await SendWithFailureLogAsync(
+            "active session",
+            HttpMethod.Get,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.GetAsync(relativeUrl, cancellationToken),
             cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -2060,7 +2321,9 @@ public sealed class LinklyBackendTerminalClient(
                 stopwatch.ElapsedMilliseconds,
                 txnType: null,
                 txnRef: null,
-                body);
+                body,
+                // 404 表示当前没有活动/可恢复会话，属于正常结果，不能按失败告警。
+                level: LinklyLogLevel.Information);
             return null;
         }
 
@@ -2106,8 +2369,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: null,
             txnRef: null,
             bodyJson: null);
-        using var response = await httpClient.GetAsync(
-            relativeUrl,
+        using var response = await SendWithFailureLogAsync(
+            "resumable session",
+            HttpMethod.Get,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.GetAsync(relativeUrl, cancellationToken),
             cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -2121,7 +2389,9 @@ public sealed class LinklyBackendTerminalClient(
                 stopwatch.ElapsedMilliseconds,
                 txnType: null,
                 txnRef: null,
-                body);
+                body,
+                // 404 表示当前没有活动/可恢复会话，属于正常结果，不能按失败告警。
+                level: LinklyLogLevel.Information);
             return null;
         }
 
@@ -2149,7 +2419,14 @@ public sealed class LinklyBackendTerminalClient(
             txnType: "S",
             txnRef: null,
             bodyJson: null);
-        using var response = await httpClient.GetAsync(relativeUrl, cancellationToken);
+        using var response = await SendWithFailureLogAsync(
+            "resumable settlement",
+            HttpMethod.Get,
+            FormatRequestUrl(relativeUrl),
+            txnType: "S",
+            stopwatch,
+            () => httpClient.GetAsync(relativeUrl, cancellationToken),
+            cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -2162,7 +2439,9 @@ public sealed class LinklyBackendTerminalClient(
                 stopwatch.ElapsedMilliseconds,
                 txnType: "S",
                 txnRef: null,
-                body);
+                body,
+                // 404 表示当前没有活动/可恢复会话，属于正常结果，不能按失败告警。
+                level: LinklyLogLevel.Information);
             return null;
         }
 
@@ -2190,8 +2469,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: null,
             txnRef: null,
             bodyJson: null);
-        using var response = await httpClient.GetAsync(
-            relativeUrl,
+        using var response = await SendWithFailureLogAsync(
+            "status",
+            HttpMethod.Get,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.GetAsync(relativeUrl, cancellationToken),
             cancellationToken);
         var status = await ReadApiResultAsync(
             response,
@@ -2218,7 +2502,14 @@ public sealed class LinklyBackendTerminalClient(
             txnType: "S",
             txnRef: null,
             bodyJson: null);
-        using var response = await httpClient.GetAsync(relativeUrl, cancellationToken);
+        using var response = await SendWithFailureLogAsync(
+            "settlement status",
+            HttpMethod.Get,
+            FormatRequestUrl(relativeUrl),
+            txnType: "S",
+            stopwatch,
+            () => httpClient.GetAsync(relativeUrl, cancellationToken),
+            cancellationToken);
         return await ReadApiResultAsync(
             response,
             "settlement status",
@@ -2245,10 +2536,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: "S",
             txnRef: null,
             bodyJson: SerializeDebugJson(request));
-        using var response = await httpClient.PostAsJsonAsync(
-            relativeUrl,
-            request,
-            JsonOptions,
+        using var response = await SendWithFailureLogAsync(
+            $"settlement {operation}",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: "S",
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
             cancellationToken);
         _ = await ReadApiResultAsync(
             response,
@@ -2275,10 +2569,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: null,
             txnRef: null,
             bodyJson: SerializeDebugJson(request));
-        using var response = await httpClient.PostAsJsonAsync(
-            relativeUrl,
-            request,
-            JsonOptions,
+        using var response = await SendWithFailureLogAsync(
+            "recover",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
             cancellationToken);
         var status = await ReadApiResultAsync(
             response,
@@ -2311,10 +2608,13 @@ public sealed class LinklyBackendTerminalClient(
             txnType: null,
             txnRef: null,
             bodyJson: SerializeDebugJson(request));
-        using var response = await httpClient.PostAsJsonAsync(
-            relativeUrl,
-            request,
-            JsonOptions,
+        using var response = await SendWithFailureLogAsync(
+            "sendkey",
+            HttpMethod.Post,
+            FormatRequestUrl(relativeUrl),
+            txnType: null,
+            stopwatch,
+            () => httpClient.PostAsJsonAsync(relativeUrl, request, JsonOptions, cancellationToken),
             cancellationToken);
         var status = await ReadApiResultAsync(
             response,
@@ -2403,7 +2703,14 @@ public sealed class LinklyBackendTerminalClient(
                 txnRef: null,
                 bodyJson: null);
             using var request = new HttpRequestMessage(method, relativeUrl);
-            using var response = await httpClient.SendAsync(request, cancellationToken);
+            using var response = await SendWithFailureLogAsync(
+                operation,
+                method,
+                url,
+                txnType: null,
+                stopwatch,
+                () => httpClient.SendAsync(request, cancellationToken),
+                cancellationToken);
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             stopwatch.Stop();
             LogHttpResponse(
@@ -2469,6 +2776,10 @@ public sealed class LinklyBackendTerminalClient(
 
     private async Task<T> ReadTerminalApiResultAsync<T>(
         HttpResponseMessage response,
+        string operation,
+        HttpMethod method,
+        string url,
+        Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -2483,6 +2794,34 @@ public sealed class LinklyBackendTerminalClient(
             {
                 result = null;
             }
+            catch (JsonException ex)
+            {
+                stopwatch.Stop();
+                LogHttpFailure(operation, method, url, txnType: null, stopwatch.ElapsedMilliseconds, ex, cancellationToken, response.StatusCode);
+                throw;
+            }
+        }
+
+        stopwatch.Stop();
+        if (!response.IsSuccessStatusCode || result?.Success != true || result.Data is null)
+        {
+            // 终端管理（目录/选择/配对/测试/分配）失败只记状态码与服务端 errorCode；不记正文，避免带出配对等敏感字段。
+            LinklyJsonLog.Write(
+                "LinklyBackend",
+                "backend-terminal",
+                operation,
+                "failed",
+                direction: "response",
+                httpStatus: response.StatusCode,
+                success: false,
+                reason: result?.ErrorCode ?? (response.IsSuccessStatusCode ? "failure-response" : "http-error"),
+                elapsedMs: stopwatch.ElapsedMilliseconds,
+                details: new
+                {
+                    method = method.Method,
+                    url,
+                    errorCode = result?.ErrorCode
+                });
         }
 
         if (!response.IsSuccessStatusCode)
@@ -2556,6 +2895,21 @@ public sealed class LinklyBackendTerminalClient(
             catch (JsonException) when (!response.IsSuccessStatusCode)
             {
                 result = null;
+            }
+            catch (JsonException ex)
+            {
+                // 2xx 但正文不是合法 JSON：先记下状态码与耗时再抛出，否则这次响应在日志里完全消失。
+                stopwatch.Stop();
+                LogHttpFailure(
+                    operation,
+                    method,
+                    url,
+                    txnType,
+                    stopwatch.ElapsedMilliseconds,
+                    ex,
+                    cancellationToken,
+                    response.StatusCode);
+                throw;
             }
         }
         stopwatch.Stop();
@@ -3935,7 +4289,8 @@ public sealed class LinklyBackendTerminalClient(
         long elapsedMs,
         string? txnType,
         string? txnRef,
-        string? bodyJson)
+        string? bodyJson,
+        LinklyLogLevel? level = null)
     {
         var responseDetails = ReadLinklyHttpEvidenceDetails(bodyJson);
         LinklyJsonLog.Write(
@@ -3967,7 +4322,72 @@ public sealed class LinklyBackendTerminalClient(
                 responseTime = responseDetails.Time,
                 responseCode = responseDetails.ResponseCode,
                 responseText = responseDetails.ResponseText
-            });
+            },
+            level: level);
+    }
+
+    /// <summary>
+    /// 发送阶段（尚未拿到响应）的网络异常/超时原先只有 request 日志；这里补一条带耗时的失败记录后原样抛出，不改变异常类型。
+    /// </summary>
+    private static async Task<HttpResponseMessage> SendWithFailureLogAsync(
+        string operation,
+        HttpMethod method,
+        string url,
+        string? txnType,
+        Stopwatch stopwatch,
+        Func<Task<HttpResponseMessage>> send,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await send();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            LogHttpFailure(operation, method, url, txnType, stopwatch.ElapsedMilliseconds, ex, cancellationToken);
+            throw;
+        }
+    }
+
+    private static void LogHttpFailure(
+        string operation,
+        HttpMethod method,
+        string url,
+        string? txnType,
+        long elapsedMs,
+        Exception exception,
+        CancellationToken cancellationToken,
+        HttpStatusCode? httpStatus = null)
+    {
+        // 令牌已取消 = 调用方取消或上层业务超时，由上层 catch 区分并记录，这里只记 Information 避免重复告警；
+        // 令牌未取消的 OperationCanceledException 是 HttpClient 自身超时。
+        var cancelled = exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
+        var reason = exception switch
+        {
+            OperationCanceledException when cancelled => "cancelled",
+            OperationCanceledException => "timeout",
+            HttpRequestException => "network-error",
+            JsonException => "invalid-response",
+            _ => exception.GetType().Name
+        };
+        LinklyJsonLog.Write(
+            "LinklyBackend",
+            "backend-terminal",
+            operation,
+            cancelled ? "cancelled" : "failed",
+            direction: "response",
+            httpStatus: httpStatus,
+            success: false,
+            reason: reason,
+            elapsedMs: elapsedMs,
+            details: new
+            {
+                method = method.Method,
+                url,
+                txnType
+            },
+            exception: exception,
+            level: cancelled ? LinklyLogLevel.Information : null);
     }
 
     private static string? GetCertificationCase(string operation)
@@ -4075,12 +4495,30 @@ public sealed class LinklyBackendTerminalClient(
 
     private static void LogStatusSnapshot(string prefix, LinklyCloudBackendSessionResponse status)
     {
-        Log(
+        // 状态快照只是过程记录（轮询每秒一次），显示文本里出现 "FAILED" 等字样也不能被自动升为 Warning 刷屏；
+        // 真正的失败由响应/异常分支单独记录。
+        var spaceIndex = prefix.IndexOf(' ', StringComparison.Ordinal);
+        LinklyJsonLog.Write(
+            "LinklyBackend",
+            "backend-terminal",
+            spaceIndex <= 0 ? prefix : prefix[..spaceIndex],
+            "snapshot",
+            sessionId: status.SessionId,
+            details: new
+            {
+                message = BuildStatusSnapshotMessage(prefix, status)
+            },
+            level: LinklyLogLevel.Information);
+    }
+
+    private static string BuildStatusSnapshotMessage(string prefix, LinklyCloudBackendSessionResponse status)
+    {
+        return
             $"{prefix} sessionId={status.SessionId} status={status.Status} lastHttp={status.LastHttpStatus?.ToString(CultureInfo.InvariantCulture) ?? "<null>"} " +
             $"txnRef={LogValue(status.TxnRef)} " +
             $"display=\"{LogValue(TruncateForLog(status.DisplayText, 80))}\" " +
             $"flags=cancel:{status.CancelKeyFlag},ok:{status.OKKeyFlag},yes:{status.AcceptYesKeyFlag},no:{status.DeclineNoKeyFlag},auth:{status.AuthoriseKeyFlag} " +
-            $"notifications={status.Notifications?.Count ?? 0}");
+            $"notifications={status.Notifications?.Count ?? 0}";
     }
 
     private static string LogJsonBody(string? value)

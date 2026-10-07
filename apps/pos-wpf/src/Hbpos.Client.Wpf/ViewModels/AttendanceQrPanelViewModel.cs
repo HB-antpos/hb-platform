@@ -36,6 +36,10 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
     private readonly TimeSpan _refreshInterval;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly SemaphoreSlim _stateGate = new(1, 1);
+    // 失败日志去重状态：刷新循环、tick、语言切换回调可能并发写日志，用独立锁保护。
+    private readonly object _failureLogSync = new();
+    private string? _lastLoggedFailureKey;
+    private int _consecutiveFailures;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task? _tickLoopTask;
     private readonly Task? _refreshLoopTask;
@@ -220,6 +224,8 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
             {
                 _stateGate.Release();
             }
+
+            LogRefreshRecovered();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -478,14 +484,58 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         finally { _stateGate.Release(); }
     }
 
-    private static void LogFailure(string phase, Exception ex)
+    private void LogFailure(string phase, Exception ex)
     {
         try
         {
             var statusCode = ex is HttpRequestException { StatusCode: { } status }
                 ? ((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : "none";
+            // 刷新每 15 秒一次：同一 phase+异常类型+状态码 连续出现只记第一次，变化或恢复后才再记。
+            var failureKey = $"{phase}|{ex.GetType().Name}|{statusCode}";
+            lock (_failureLogSync)
+            {
+                _consecutiveFailures++;
+                if (string.Equals(_lastLoggedFailureKey, failureKey, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _lastLoggedFailureKey = failureKey;
+            }
+
             ConsoleLog.WriteError("AttendanceQr", $"phase={phase} error={ex.GetType().Name} status={statusCode}");
+        }
+        catch (Exception)
+        {
+            // 日志基础设施失败不能再次冲击二维码刷新或 UI 事件线程。
+        }
+    }
+
+    private void LogRefreshRecovered()
+    {
+        try
+        {
+            int failures;
+            lock (_failureLogSync)
+            {
+                if (_lastLoggedFailureKey is null)
+                {
+                    return;
+                }
+
+                failures = _consecutiveFailures;
+                _lastLoggedFailureKey = null;
+                _consecutiveFailures = 0;
+            }
+
+            ConsoleLog.WriteInformation(
+                "AttendanceQr",
+                $"refresh recovered failedAttempts={failures}",
+                new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["attemptCount"] = failures
+                }));
         }
         catch (Exception)
         {

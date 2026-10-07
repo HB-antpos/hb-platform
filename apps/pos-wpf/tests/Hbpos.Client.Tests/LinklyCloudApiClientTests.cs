@@ -37,7 +37,10 @@ public sealed class LinklyCloudApiClientTests
         Assert.Equal("cloud-api", requestLog.RootElement.GetProperty("source").GetString());
         Assert.Equal("request", requestLog.RootElement.GetProperty("direction").GetString());
         Assert.Equal("https://auth.example/v1/", requestLog.RootElement.GetProperty("details").GetProperty("authBaseUrl").GetString());
-        Assert.Equal("store-user", requestLog.RootElement.GetProperty("request").GetProperty("username").GetString());
+        // 用户名也不进日志，只记是否填写。
+        Assert.True(requestLog.RootElement.GetProperty("request").GetProperty("hasUsername").GetBoolean());
+        Assert.False(requestLog.RootElement.GetProperty("request").TryGetProperty("username", out _));
+        Assert.DoesNotContain(logs.Lines, line => line.Contains("store-user", StringComparison.Ordinal));
         Assert.Equal("<redacted>", requestLog.RootElement.GetProperty("request").GetProperty("password").GetString());
         Assert.Equal("<redacted>", requestLog.RootElement.GetProperty("request").GetProperty("pairCode").GetString());
         using var successLog = FindLinklyLog(logs.Lines, "pair", "succeeded");

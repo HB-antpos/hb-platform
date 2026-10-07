@@ -173,6 +173,17 @@ public sealed class CardPaymentRecoveryCoordinator(
         {
             // provider 自己产生的超时只影响该 provider；调用方明确取消时仍须传播取消。
             cancellationToken.ThrowIfCancellationRequested();
+            // 原先静默吞掉：异常中心只显示"该 provider 加载失败"，现在记下原因便于排查。
+            ConsoleLog.WriteWarning(
+                "CardRecovery",
+                $"recovery queue load failed processor={processor} error={ex.GetType().Name}",
+                new ApplicationLogContext(
+                    Properties: new Dictionary<string, object?>
+                    {
+                        ["source"] = processor.ToString(),
+                        ["action"] = "load-queue"
+                    }),
+                ex);
             return new CardRecoveryProviderLoad(processor, false, []);
         }
     }

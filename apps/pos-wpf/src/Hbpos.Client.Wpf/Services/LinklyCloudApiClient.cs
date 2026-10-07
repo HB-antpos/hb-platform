@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -82,24 +83,29 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         CancellationToken cancellationToken = default)
     {
         var requestBody = new LinklyCloudPairingRequest(username.Trim(), password.Trim(), pairCode.Trim());
+        // 配对请求只记录字段是否填写；用户名、密码、配对码一律不进日志。
         LogEvent(
             "pair",
             "request",
             direction: "request",
-            request: requestBody,
+            request: new
+            {
+                hasUsername = !string.IsNullOrWhiteSpace(requestBody.Username),
+                password = "<redacted>",
+                pairCode = "<redacted>"
+            },
             details: new
             {
                 authBaseUrl,
-                authHost = LogHost(authBaseUrl),
-                username,
-                password,
-                pairCode
+                authHost = LogHost(authBaseUrl)
             });
-        using var response = await httpClient.PostAsJsonAsync(
+        var (sentResponse, elapsedMs) = await PostAuthAsync(
+            "pair",
+            environment: null,
             new Uri(GetBaseUri(authBaseUrl), "pairing/cloudpos"),
             requestBody,
-            JsonOptions,
             cancellationToken);
+        using var response = sentResponse;
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         LogEvent(
             "pair",
@@ -107,6 +113,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             direction: "response",
             httpStatus: response.StatusCode,
             success: response.IsSuccessStatusCode,
+            elapsedMs: elapsedMs,
             response: RawJsonBody(body),
             details: new { authBaseUrl });
         EnsureSuccess(response, body, "Linkly Cloud pairing");
@@ -190,11 +197,13 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
                 authHost = LogHost(settings.LinklyCloudAuthBaseUrl),
                 posId
             });
-        using var response = await httpClient.PostAsJsonAsync(
+        var (sentResponse, elapsedMs) = await PostAuthAsync(
+            "token",
+            settings.Environment,
             new Uri(GetBaseUri(settings.LinklyCloudAuthBaseUrl), "tokens/cloudpos"),
             requestBody,
-            JsonOptions,
             cancellationToken);
+        using var response = sentResponse;
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         LogEvent(
             "token",
@@ -203,6 +212,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             environment: settings.Environment,
             httpStatus: response.StatusCode,
             success: response.IsSuccessStatusCode,
+            elapsedMs: elapsedMs,
             response: RawJsonBody(body),
             details: new { posId });
         EnsureSuccess(response, body, "Linkly Cloud token request");
@@ -258,7 +268,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
                 restBaseUrl = settings.LinklyCloudRestBaseUrl,
                 token
             });
-        using var response = await SendLinklyRequestAsync(
+        var (sentResponse, elapsedMs) = await SendLinklyRequestAsync(
             settings,
             token,
             "status",
@@ -266,8 +276,9 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             requestBody,
             sessionId,
             cancellationToken);
+        using var response = sentResponse;
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        LogEvent("status", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, response: RawJsonBody(body));
+        LogEvent("status", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs, response: RawJsonBody(body));
         EnsureSuccess(response, body, "Linkly Cloud status request");
 
         using var document = JsonDocument.Parse(body);
@@ -311,7 +322,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
                 restBaseUrl = settings.LinklyCloudRestBaseUrl,
                 token
             });
-        using var response = await SendLinklyRequestAsync(
+        var (sentResponse, elapsedMs) = await SendLinklyRequestAsync(
             settings,
             token,
             "logon",
@@ -319,8 +330,9 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             requestBody,
             sessionId,
             cancellationToken);
+        using var response = sentResponse;
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        LogEvent("logon", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, response: RawJsonBody(body));
+        LogEvent("logon", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs, response: RawJsonBody(body));
         EnsureSuccess(response, body, "Linkly Cloud logon request");
 
         using var document = JsonDocument.Parse(body);
@@ -344,11 +356,12 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         CancellationToken cancellationToken = default)
     {
         HttpResponseMessage response;
+        long elapsedMs;
         var requestBody = new LinklyCloudApiRequest(request.ToFields());
         LogEvent("transaction", "request", direction: "request", environment: settings.Environment, sessionId: sessionId, request: requestBody, details: new { request.TxnType, request.TxnRef, request.AmtPurchase });
         try
         {
-            response = await SendLinklyRequestAsync(
+            (response, elapsedMs) = await SendLinklyRequestAsync(
                 settings,
                 token,
                 "transaction",
@@ -359,7 +372,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         }
         catch (HttpRequestException ex)
         {
-            LogEvent("transaction", "pending", direction: "request", environment: settings.Environment, sessionId: sessionId, success: false, reason: "http-request-exception", details: new { error = ex.GetType().Name, ex.Message });
+            LogEvent("transaction", "pending", direction: "request", environment: settings.Environment, sessionId: sessionId, success: false, reason: "http-request-exception", details: new { error = ex.GetType().Name, ex.Message }, exception: ex);
             return PendingTransaction(sessionId);
         }
 
@@ -369,12 +382,12 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
                 response.StatusCode == HttpStatusCode.RequestTimeout ||
                 (int)response.StatusCode >= 500)
             {
-                LogEvent("transaction", "pending", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode);
+                LogEvent("transaction", "pending", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs);
                 return PendingTransaction(sessionId);
             }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            LogEvent("transaction", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, response: RawJsonBody(body));
+            LogEvent("transaction", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs, response: RawJsonBody(body));
             EnsureSuccess(response, body, "Linkly Cloud transaction request");
             var result = ParseTransactionResult(sessionId, body);
             LogEvent("transaction", "parsed", direction: "response", environment: settings.Environment, sessionId: sessionId, success: result.Succeeded, response: result);
@@ -389,7 +402,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         CancellationToken cancellationToken = default)
     {
         LogEvent("transaction-status", "request", direction: "request", environment: settings.Environment, sessionId: sessionId);
-        using var response = await SendLinklyRequestAsync(
+        var (sentResponse, elapsedMs) = await SendLinklyRequestAsync(
             settings,
             token,
             "transaction",
@@ -397,23 +410,26 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             body: null,
             sessionId,
             cancellationToken);
+        using var response = sentResponse;
 
         if (response.StatusCode == HttpStatusCode.Accepted ||
             response.StatusCode == HttpStatusCode.RequestTimeout ||
             (int)response.StatusCode >= 500)
         {
-            LogEvent("transaction-status", "pending", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode);
+            // 状态查询处于轮询中，202/408/5xx 都按"仍在处理"继续查询，不能每次都升 Warning 刷屏。
+            LogEvent("transaction-status", "pending", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs, level: LinklyLogLevel.Information);
             return PendingTransaction(sessionId);
         }
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            LogEvent("transaction-status", "not-submitted", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: false);
+            // 404 = 交易确定未提交，是恢复查询的正常结论。
+            LogEvent("transaction-status", "not-submitted", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: false, elapsedMs: elapsedMs, level: LinklyLogLevel.Information);
             return NotSubmittedTransaction(sessionId);
         }
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        LogEvent("transaction-status", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, response: RawJsonBody(body));
+        LogEvent("transaction-status", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs, response: RawJsonBody(body));
         EnsureSuccess(response, body, "Linkly Cloud transaction status request");
         var result = ParseTransactionResult(sessionId, body);
         LogEvent("transaction-status", "parsed", direction: "response", environment: settings.Environment, sessionId: sessionId, success: result.Succeeded, response: result);
@@ -429,9 +445,10 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         var requestBody = new LinklyCloudApiRequest(new LinklyCloudSettlementRequest().ToFields());
         LogEvent("settlement", "request", direction: "request", environment: settings.Environment, sessionId: sessionId, request: requestBody);
         HttpResponseMessage response;
+        long elapsedMs;
         try
         {
-            response = await SendLinklyRequestAsync(
+            (response, elapsedMs) = await SendLinklyRequestAsync(
                 settings,
                 token,
                 "settlement",
@@ -442,7 +459,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         }
         catch (HttpRequestException ex)
         {
-            LogEvent("settlement", "unknown", direction: "request", environment: settings.Environment, sessionId: sessionId, success: false, reason: "http-request-exception", details: new { error = ex.GetType().Name, ex.Message });
+            LogEvent("settlement", "unknown", direction: "request", environment: settings.Environment, sessionId: sessionId, success: false, reason: "http-request-exception", details: new { error = ex.GetType().Name, ex.Message }, exception: ex);
             return UnknownSettlement(sessionId);
         }
 
@@ -452,12 +469,12 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
                 response.StatusCode == HttpStatusCode.RequestTimeout ||
                 (int)response.StatusCode >= 500)
             {
-                LogEvent("settlement", "unknown", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode);
+                LogEvent("settlement", "unknown", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs);
                 return UnknownSettlement(sessionId);
             }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            LogEvent("settlement", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, response: RawJsonBody(body));
+            LogEvent("settlement", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs, response: RawJsonBody(body));
             EnsureSuccess(response, body, "Linkly Cloud settlement request");
             var result = ParseSettlementResult(sessionId, body);
             LogEvent("settlement", "parsed", direction: "response", environment: settings.Environment, sessionId: sessionId, success: result.Succeeded, response: result);
@@ -480,7 +497,7 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             ["Data"] = string.IsNullOrWhiteSpace(data) ? null : data.Trim()
         });
         LogEvent("sendkey", "request", direction: "request", environment: settings.Environment, sessionId: sessionId, request: requestBody, details: new { key = normalizedKey, data });
-        using var response = await SendLinklyRequestAsync(
+        var (sentResponse, elapsedMs) = await SendLinklyRequestAsync(
             settings,
             token,
             "sendkey",
@@ -488,12 +505,47 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             requestBody,
             sessionId,
             cancellationToken);
+        using var response = sentResponse;
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        LogEvent("sendkey", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, response: RawJsonBody(body));
+        LogEvent("sendkey", "response", direction: "response", environment: settings.Environment, sessionId: sessionId, httpStatus: response.StatusCode, success: response.IsSuccessStatusCode, elapsedMs: elapsedMs, response: RawJsonBody(body));
         EnsureSuccess(response, body, "Linkly Cloud sendkey request");
     }
 
-    private async Task<HttpResponseMessage> SendLinklyRequestAsync(
+    /// <summary>
+    /// 鉴权类请求（配对/取令牌）：请求体含密码、配对码、secret，绝不记录；只在发送失败时记耗时与原因后原样抛出。
+    /// </summary>
+    private async Task<(HttpResponseMessage Response, long ElapsedMs)> PostAuthAsync<TBody>(
+        string operation,
+        CardTerminalEnvironment? environment,
+        Uri uri,
+        TBody body,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var response = await httpClient.PostAsJsonAsync(uri, body, JsonOptions, cancellationToken);
+            return (response, stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            var callerCancelled = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            LogEvent(
+                operation,
+                callerCancelled ? "cancelled" : "failed",
+                direction: "request",
+                environment: environment,
+                success: false,
+                reason: ex is HttpRequestException ? "network-error" : callerCancelled ? "cancelled" : "timeout",
+                elapsedMs: stopwatch.ElapsedMilliseconds,
+                details: new { authHost = LogHost(uri.ToString()) },
+                exception: ex,
+                level: callerCancelled ? LinklyLogLevel.Information : null);
+            throw;
+        }
+    }
+
+    private async Task<(HttpResponseMessage Response, long ElapsedMs)> SendLinklyRequestAsync(
         CardTerminalSettings settings,
         string token,
         string requestType,
@@ -512,7 +564,30 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             request.Content = JsonContent.Create(body, options: LinklyRequestJsonOptions);
         }
 
-        return await httpClient.SendAsync(request, cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var response = await httpClient.SendAsync(request, cancellationToken);
+            return (response, stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            // 发送阶段没拿到响应：记下耗时与原因（调用方取消只记 Information，HttpClient 超时/断网记 Warning）后原样抛出。
+            var callerCancelled = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            LogEvent(
+                requestType,
+                callerCancelled ? "cancelled" : "failed",
+                direction: "request",
+                environment: settings.Environment,
+                sessionId: sessionId,
+                success: false,
+                reason: ex is HttpRequestException ? "network-error" : callerCancelled ? "cancelled" : "timeout",
+                elapsedMs: stopwatch.ElapsedMilliseconds,
+                details: new { method = method.Method, requestType },
+                exception: ex,
+                level: callerCancelled ? LinklyLogLevel.Information : null);
+            throw;
+        }
     }
 
     private static LinklyCloudTransactionResult PendingTransaction(string sessionId)
@@ -799,7 +874,10 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         string? reason = null,
         object? request = null,
         object? response = null,
-        object? details = null)
+        object? details = null,
+        long? elapsedMs = null,
+        Exception? exception = null,
+        LinklyLogLevel? level = null)
     {
         LinklyJsonLog.Write(
             "LinklyCloud",
@@ -812,9 +890,12 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
             httpStatus,
             success,
             reason,
+            elapsedMs: elapsedMs,
             request: request,
             response: response,
-            details: details);
+            details: details,
+            exception: exception,
+            level: level);
     }
 
     private static object? RawJsonBody(string? body)

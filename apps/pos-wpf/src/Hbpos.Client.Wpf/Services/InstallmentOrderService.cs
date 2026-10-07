@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.ViewModels;
@@ -746,6 +748,20 @@ public sealed class InstallmentApiClient(HttpClient httpClient) : IInstallmentAp
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            // 自建 2 秒超时触发（调用方未取消）：单独记 Warning，便于区分慢查询与断网。
+            ConsoleLog.WriteWarning(
+                "Installment",
+                $"installment history query timed out reason=timeout timeoutMs={(int)HistoryQueryTimeout.TotalMilliseconds}",
+                new ApplicationLogContext(
+                    RequestPath: "api/v1/installments/history",
+                    RequestMethod: "GET",
+                    Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = request.StoreCode,
+                        ["deviceCode"] = request.DeviceCode,
+                        ["reason"] = "timeout"
+                    }),
+                ex);
             throw new CatalogApiException(
                 "分期查询超过 2 秒，请缩小日期范围后重试。 / Installment search exceeded 2 seconds. Narrow the date range and retry.",
                 HttpStatusCode.RequestTimeout,
@@ -804,32 +820,123 @@ public sealed class InstallmentApiClient(HttpClient httpClient) : IInstallmentAp
 
     private async Task<TResponse> GetAsync<TResponse>(string path, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         using var response = await httpClient.GetAsync(path, cancellationToken);
-        return await ReadResponseAsync<TResponse>(response, cancellationToken);
+        return await ReadResponseAsync<TResponse>(response, "GET", path, stopwatch, cancellationToken);
     }
 
     private async Task<TResponse> PostAsync<TRequest, TResponse>(string path, TRequest request, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         using var response = await httpClient.PostAsJsonAsync(path, request, JsonOptions, cancellationToken);
-        return await ReadResponseAsync<TResponse>(response, cancellationToken);
+        return await ReadResponseAsync<TResponse>(response, "POST", path, stopwatch, cancellationToken);
     }
 
     private async Task<TResponse> PostAsync<TResponse>(string path, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         using var request = new HttpRequestMessage(HttpMethod.Post, path);
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        return await ReadResponseAsync<TResponse>(response, cancellationToken);
+        return await ReadResponseAsync<TResponse>(response, "POST", path, stopwatch, cancellationToken);
     }
 
-    private static async Task<TResponse> ReadResponseAsync<TResponse>(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<TResponse> ReadResponseAsync<TResponse>(
+        HttpResponseMessage response,
+        string method,
+        string path,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
     {
-        var payload = await response.Content.ReadFromJsonAsync<ApiResult<TResponse>>(JsonOptions, cancellationToken);
-        if (!response.IsSuccessStatusCode || payload?.Success != true || payload.Data is null)
+        // 先读字符串再解析：网关 502 HTML、空体 401 不能以 JsonException 丢掉状态码。
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        ApiResult<TResponse>? payload = null;
+        JsonException? parseException = null;
+        if (!string.IsNullOrWhiteSpace(content))
         {
+            try
+            {
+                payload = JsonSerializer.Deserialize<ApiResult<TResponse>>(content, JsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                parseException = ex;
+            }
+        }
+
+        if (parseException is not null || string.IsNullOrWhiteSpace(content) ||
+            !response.IsSuccessStatusCode || payload?.Success != true || payload.Data is null)
+        {
+            LogFailure(response, method, path, payload?.ErrorCode, payload?.Message, content, parseException, stopwatch);
+            if (parseException is not null)
+            {
+                // 异常形状必须保持 JsonException：调用方的 `CatalogApiException when NotFound` 会重建远端 claim，
+                // 网关 HTML 404（部署切换期间）若被当成真实 404，会把「读取失败、保持锁定」变成重建 claim。
+                ExceptionDispatchInfo.Throw(parseException);
+            }
+
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                // 与原 ReadFromJsonAsync 对空响应体的行为一致（抛 JsonException），同样避免空体 404 命中重建分支。
+                throw new JsonException($"Installment API returned an empty response with HTTP {(int)response.StatusCode}.");
+            }
+
             throw new CatalogApiException(payload?.Message ?? $"Installment API request failed with HTTP {(int)response.StatusCode}.", response.StatusCode, payload?.ErrorCode);
         }
 
         return payload.Data;
+    }
+
+    private static void LogFailure(
+        HttpResponseMessage response,
+        string method,
+        string path,
+        string? errorCode,
+        string? serverMessage,
+        string content,
+        JsonException? parseException,
+        Stopwatch stopwatch)
+    {
+        var statusCode = (int)response.StatusCode;
+        // 路径只到问号前（查询串含门店/关键词）；分期 Guid 本身就在路径里，可直接串联服务端日志。
+        var requestPath = path.Split('?', 2)[0];
+        var body = response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(content)
+            ? null
+            : content.Trim() is { Length: > 256 } longBody ? longBody[..256] : content.Trim();
+        ConsoleLog.WriteWarning(
+            "Installment",
+            $"installment api failed method={method} path={requestPath} http={statusCode} " +
+            $"errorCode={errorCode ?? "<null>"} message={serverMessage ?? "<null>"} " +
+            (parseException is null ? string.Empty : "reason=invalid-json ") +
+            $"elapsedMs={stopwatch.ElapsedMilliseconds}" +
+            (body is null ? string.Empty : $" body={body}"),
+            new ApplicationLogContext(
+                TraceId: ResolveTraceId(requestPath),
+                RequestPath: requestPath,
+                RequestMethod: method,
+                StatusCode: statusCode,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = errorCode,
+                    ["elapsedMs"] = stopwatch.ElapsedMilliseconds
+                }),
+            parseException);
+    }
+
+    /// <summary>
+    /// 路径里最后一个 Guid：claim 接口是 operationGuid（与分期操作日志的 TraceId 一致），其余是 installmentGuid。
+    /// </summary>
+    private static string? ResolveTraceId(string requestPath)
+    {
+        var segments = requestPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var index = segments.Length - 1; index >= 0; index--)
+        {
+            if (Guid.TryParse(segments[index], out var guid))
+            {
+                return guid.ToString("D");
+            }
+        }
+
+        return null;
     }
 
     private static string BuildUri(string path, params (string Name, string? Value)[] query)

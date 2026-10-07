@@ -1065,6 +1065,100 @@ public sealed class ClientLogUploadServiceTests
         }
     }
 
+    [Fact]
+    public async Task Runtime_uploader_reports_dropped_log_delta_once_per_increase()
+    {
+        var databasePath = CreateDatabasePath();
+        // 本地 outbox 只保留 2 条待传运行日志，第 3、4 条写入时会裁掉最旧的 2 条。
+        var store = new ClientLogOutboxStore(databasePath, runtimePendingLimit: 2);
+        await store.InitializeAsync(CancellationToken.None);
+        var now = DateTimeOffset.Parse("2026-07-10T01:00:00Z");
+        for (var index = 0; index < 4; index++)
+        {
+            await store.EnqueueAsync(
+                ClientLogOutboxKind.Runtime,
+                Guid.NewGuid(),
+                now.AddSeconds(index),
+                "{}",
+                now,
+                CancellationToken.None);
+        }
+
+        long queueDropped = 3;
+        var service = new ApplicationLogUploadService(
+            store,
+            CreateApplicationOptions() with { Enabled = false },
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("禁用时不应发起 HTTP"))),
+            TimeProvider.System,
+            () => Interlocked.Read(ref queueDropped));
+        var sink = new FakeApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+
+        try
+        {
+            await service.UploadOnceAsync(now, CancellationToken.None);
+            await service.UploadOnceAsync(now.AddMinutes(1), CancellationToken.None);
+
+            var dropped = Assert.Single(sink.Entries, entry => entry.Category == "LogOutbox");
+            Assert.Equal("Warning", dropped.Level);
+            Assert.Contains("delta=5", dropped.Message, StringComparison.Ordinal);
+            Assert.Equal(5L, Convert.ToInt64(dropped.Properties!["droppedCount"]));
+
+            Interlocked.Increment(ref queueDropped);
+            await service.UploadOnceAsync(now.AddMinutes(2), CancellationToken.None);
+
+            var entries = sink.Entries.Where(entry => entry.Category == "LogOutbox").ToArray();
+            Assert.Equal(2, entries.Length);
+            Assert.Contains("delta=1", entries[1].Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+            service.Dispose();
+            await DeleteDatabaseFilesAsync(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Operation_audit_authorization_failure_writes_single_runtime_warning_until_recovered()
+    {
+        var databasePath = CreateDatabasePath();
+        var store = new ClientLogOutboxStore(databasePath);
+        await store.InitializeAsync(CancellationToken.None);
+        var now = DateTimeOffset.Parse("2026-07-10T01:00:00Z");
+        var eventId = Guid.Parse("56565656-5656-5656-5656-565656565656");
+        await store.EnqueueAsync(ClientLogOutboxKind.OperationAudit, eventId, now, "{}", now, CancellationToken.None);
+        var client = new HttpClient(new StubHttpMessageHandler(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized))))
+        {
+            BaseAddress = new Uri("https://pos-api.example.com/")
+        };
+        var service = new OperationAuditUploadService(
+            store,
+            client,
+            TimeProvider.System,
+            new OperationAuditUploadOptions(true));
+        var sink = new FakeApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+
+        try
+        {
+            await service.UploadOnceAsync(now, CancellationToken.None);
+            await service.UploadOnceAsync(now.AddMinutes(31), CancellationToken.None);
+
+            var warning = Assert.Single(sink.Entries, entry => entry.Category == "LogUpload");
+            Assert.Equal("Warning", warning.Level);
+            Assert.Equal(401, warning.StatusCode);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+            service.Dispose();
+            client.Dispose();
+            await DeleteDatabaseFilesAsync(databasePath);
+        }
+    }
+
     private static ApplicationLogOptions CreateApplicationOptions(int batchSize = 100) => new(
         true,
         "log-key",

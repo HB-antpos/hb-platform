@@ -229,26 +229,42 @@ public sealed class LinklyCloudTerminalClient(
 
             return ToAuthorizationResult(result, amount, requestedTxnRef, "P");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            // 调用方取消只记 Information；业务等待超时记 Warning。
+            LogFailure(
+                "transaction-recovery",
+                cancellationToken.IsCancellationRequested ? "cancelled" : "unknown",
+                cancellationToken.IsCancellationRequested ? "caller-cancelled" : "timeout",
+                requestedSessionId,
+                ex,
+                cancellationToken.IsCancellationRequested ? LinklyLogLevel.Information : null);
             return RecoveryUnknown(requestedSessionId, requestedTxnRef, unknownMessage);
         }
         catch (LinklyCloudApiException ex)
         {
+            LogFailure(
+                "transaction-recovery",
+                "unknown",
+                ex.IsAuthenticationFailure ? "authentication-failure" : "api-error",
+                requestedSessionId,
+                ex);
             var detail = ex.IsAuthenticationFailure
                 ? T("linkly.cloud.pairingInvalid", "Linkly Cloud pairing is invalid. Pair the terminal again.")
                 : unknownMessage;
             return RecoveryUnknown(requestedSessionId, requestedTxnRef, detail);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            LogFailure("transaction-recovery", "unknown", "invalid-response", requestedSessionId, ex);
             return RecoveryUnknown(
                 requestedSessionId,
                 requestedTxnRef,
                 T("linkly.cloud.invalidResponse", "Linkly Cloud returned an invalid response."));
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            LogFailure("transaction-recovery", "unknown", "network-error", requestedSessionId, ex);
             return RecoveryUnknown(
                 requestedSessionId,
                 requestedTxnRef,
@@ -310,6 +326,7 @@ public sealed class LinklyCloudTerminalClient(
             {
                 // 官方 Settlement 协议只定义同步 POST，不支持 Transaction 的 GET error recovery。
                 // 不确定结果必须立即阻止重发，由收银员在终端侧人工确认。
+                LogFailure("settlement", "unknown", "provider-result-unknown", sessionId, exception: null);
                 return SettlementUnknown(result.SessionId);
             }
 
@@ -324,15 +341,27 @@ public sealed class LinklyCloudTerminalClient(
                 result.ReceiptTexts,
                 ProviderSubmissionState: ProviderSubmissionState.Submitted);
         }
-        catch (OperationCanceledException) when (settlementRequestSent)
+        catch (OperationCanceledException ex) when (settlementRequestSent)
         {
-            Log($"settlement unknown sessionId={sessionId} reason={(cancellationToken.IsCancellationRequested ? "caller-cancelled" : "timeout")}");
+            // 结算请求可能已到终端：无论取消还是超时都是结果未知，记 Warning。
+            LogFailure(
+                "settlement",
+                "unknown",
+                cancellationToken.IsCancellationRequested ? "caller-cancelled" : "timeout",
+                sessionId,
+                ex);
             return SettlementUnknown(sessionId);
         }
         catch (LinklyCloudApiException ex) when (
             settlementRequestSent &&
             ex.StatusCode is >= HttpStatusCode.BadRequest and < HttpStatusCode.InternalServerError)
         {
+            LogFailure(
+                "settlement",
+                "rejected",
+                ex.IsAuthenticationFailure ? "authentication-failure" : "provider-rejected",
+                sessionId,
+                ex);
             return new LinklySettlementResult(
                 false,
                 ex.IsAuthenticationFailure
@@ -343,11 +372,19 @@ public sealed class LinklyCloudTerminalClient(
         }
         catch (Exception ex) when (settlementRequestSent && (ex is LinklyCloudApiException or JsonException or HttpRequestException))
         {
-            Log($"settlement unknown sessionId={sessionId} error={ex.GetType().Name}");
+            LogFailure("settlement", "unknown", $"error={ex.GetType().Name}", sessionId, ex);
             return SettlementUnknown(sessionId);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            // 提交前（取令牌阶段）：调用方取消只记 Information，超时记 Warning。
+            LogFailure(
+                "settlement",
+                cancellationToken.IsCancellationRequested ? "cancelled" : "failed",
+                cancellationToken.IsCancellationRequested ? "caller-cancelled-before-submit" : "timeout-before-submit",
+                sessionId,
+                ex,
+                cancellationToken.IsCancellationRequested ? LinklyLogLevel.Information : null);
             return new LinklySettlementResult(
                 false,
                 cancellationToken.IsCancellationRequested ? "ANZ Linkly settlement was cancelled." : T("linkly.cloud.timeout", "Linkly Cloud settlement timed out."),
@@ -356,22 +393,30 @@ public sealed class LinklyCloudTerminalClient(
         }
         catch (LinklyCloudApiException ex)
         {
+            LogFailure(
+                "settlement",
+                "failed",
+                ex.IsAuthenticationFailure ? "authentication-failure-before-submit" : "api-error-before-submit",
+                sessionId,
+                ex);
             return new LinklySettlementResult(false, ex.IsAuthenticationFailure
                 ? T("linkly.cloud.pairingInvalid", "Linkly Cloud pairing is invalid. Pair the terminal again.")
                 : ex.Message,
                 sessionId,
                 ProviderSubmissionState: ProviderSubmissionState.NotSubmitted);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            LogFailure("settlement", "failed", "invalid-response-before-submit", sessionId, ex);
             return new LinklySettlementResult(
                 false,
                 T("linkly.cloud.invalidResponse", "Linkly Cloud returned an invalid response."),
                 sessionId,
                 ProviderSubmissionState: ProviderSubmissionState.NotSubmitted);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            LogFailure("settlement", "failed", "network-error-before-submit", sessionId, ex);
             return new LinklySettlementResult(
                 false,
                 T("linkly.cloud.communicationFailed", "Linkly Cloud communication failed."),
@@ -1165,6 +1210,30 @@ public sealed class LinklyCloudTerminalClient(
     private static void Log(string message)
     {
         LinklyJsonLog.WriteMessage("LinklyCloud", "cloud-terminal", message);
+    }
+
+    /// <summary>
+    /// 恢复/结算的失败与结果未知分支：带 sessionId（TraceId）、HTTP 状态与异常对象，未显式指定级别时按 Warning 记录。
+    /// </summary>
+    private static void LogFailure(
+        string operation,
+        string phase,
+        string reason,
+        string? sessionId,
+        Exception? exception,
+        LinklyLogLevel? level = null)
+    {
+        LinklyJsonLog.Write(
+            "LinklyCloud",
+            "cloud-terminal",
+            operation,
+            phase,
+            sessionId: sessionId,
+            httpStatus: (exception as LinklyCloudApiException)?.StatusCode,
+            success: false,
+            reason: reason,
+            exception: exception,
+            level: level);
     }
 
     private static string LogValue(string? value)

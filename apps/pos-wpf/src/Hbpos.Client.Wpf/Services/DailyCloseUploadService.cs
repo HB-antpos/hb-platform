@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
@@ -194,6 +195,9 @@ public sealed class DailyCloseUploadService(
     private readonly string? resolvedAppVersion = appVersion ?? ClientLogIdentity.CreateCurrent().AppVersion;
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 
+    // 设备授权失败（401/403）会在每 30 秒轮询里重复出现：只在进入/离开该状态时各记一次。
+    private int authorizationBlocked;
+
     public async Task<DailyCloseUploadExecutionResult> ExecutePendingAsync(
         int batchSize = 20,
         CancellationToken cancellationToken = default)
@@ -292,6 +296,7 @@ public sealed class DailyCloseUploadService(
                 return new DailyCloseUploadExecutionResult(0, 0, 0, 0, false);
             }
 
+            var stopwatch = Stopwatch.StartNew();
             var response = await apiClient.SyncAsync(
                 DailyCloseSyncRequestMapper.ToRequest(archive, resolvedAppVersion),
                 cancellationToken);
@@ -299,23 +304,49 @@ public sealed class DailyCloseUploadService(
             {
                 // 200 但没有任何"已收下"标志：响应不可信（服务端契约里 Accepted 恒为 true），
                 // 保守地退避重试，而不是把记录永久标成拒绝。
-                await MarkPendingAsync(lease, "SYNC_NOT_ACCEPTED", "The server did not accept the daily close sync request.");
+                await MarkPendingAsync(lease, scope, "SYNC_NOT_ACCEPTED", "The server did not accept the daily close sync request.");
                 return new DailyCloseUploadExecutionResult(1, 0, 0, 1, false);
             }
 
             // Accepted / AlreadySynced / ReplacedPlaceholder 都表示服务端已持有这条日结。
             await repository.MarkUploadSucceededAsync(dailyCloseGuid, clock.GetUtcNow(), CancellationToken.None);
+            NoteAuthorizationRecovered(scope);
+            // 日结每天每机只有几条，成功也记一条 Information，便于与服务端日结记录对账。
+            ConsoleLog.WriteInformation(
+                "DailyCloseUpload",
+                $"daily close uploaded dailyCloseGuid={dailyCloseGuid:D} accepted={response.Accepted} " +
+                $"alreadySynced={response.AlreadySynced} replacedPlaceholder={response.ReplacedPlaceholder} " +
+                $"attempt={lease.UploadAttemptCount} elapsedMs={stopwatch.ElapsedMilliseconds}",
+                CreateLogContext(dailyCloseGuid, scope, statusCode: null, new Dictionary<string, object?>
+                {
+                    ["attemptCount"] = lease.UploadAttemptCount,
+                    ["elapsedMs"] = stopwatch.ElapsedMilliseconds
+                }));
             return new DailyCloseUploadExecutionResult(1, 1, 0, 0, false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             // HttpClient 超时与端点切换取消都保持 Pending 并退避。
-            await MarkPendingAsync(lease, "REQUEST_CANCELED", "The daily close sync request was canceled or timed out.");
+            await MarkPendingAsync(
+                lease,
+                scope,
+                "REQUEST_CANCELED",
+                "The daily close sync request was canceled or timed out.",
+                exception: ex,
+                reason: "timeout");
             return new DailyCloseUploadExecutionResult(1, 0, 0, 1, false);
         }
         catch (DailyCloseUploadApiException ex) when (IsRetryableConflict(ex))
         {
-            await MarkPendingAsync(lease, ex.ErrorCode!, TrimError(ex.Message));
+            // 服务端并发更新冲突是预期内的瞬时情况，退避重试即可，只记 Information。
+            await MarkPendingAsync(
+                lease,
+                scope,
+                ex.ErrorCode!,
+                TrimError(ex.Message),
+                (int)ex.StatusCode,
+                ex,
+                expected: true);
             return new DailyCloseUploadExecutionResult(1, 0, 0, 1, false);
         }
         catch (DailyCloseUploadApiException ex) when (
@@ -354,28 +385,50 @@ public sealed class DailyCloseUploadService(
             ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             // 设备授权问题不是这条记录的错：保持 Pending、撤销本次尝试计数，并中断整个批次。
+            var errorCode = ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}";
             await repository.ReleaseUploadWithoutAttemptAsync(
                 dailyCloseGuid,
-                ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}",
+                errorCode,
                 TrimError(ex.Message),
                 CancellationToken.None);
+            // 授权问题按状态切换记一次 Warning（配置/授权状态，不是代码错误），轮询期间不重复刷屏。
+            if (Interlocked.Exchange(ref authorizationBlocked, 1) == 0)
+            {
+                ConsoleLog.WriteWarning(
+                    "DailyCloseUpload",
+                    $"daily close upload paused: device authorization rejected dailyCloseGuid={dailyCloseGuid:D} " +
+                    $"errorCode={errorCode} http={(int)ex.StatusCode} message={TrimLogMessage(ex.Message)}",
+                    CreateLogContext(dailyCloseGuid, scope, (int)ex.StatusCode, new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = errorCode,
+                        ["reason"] = "device-authorization"
+                    }),
+                    ex);
+            }
+
             return new DailyCloseUploadExecutionResult(1, 0, 0, 1, true);
         }
         catch (DailyCloseUploadApiException ex)
         {
             // 5xx、408、429，以及服务端尚未部署接口时的 404 等：退避重试。
-            await MarkPendingAsync(lease, ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}", TrimError(ex.Message));
+            await MarkPendingAsync(
+                lease,
+                scope,
+                ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}",
+                TrimError(ex.Message),
+                (int)ex.StatusCode,
+                ex);
             return new DailyCloseUploadExecutionResult(1, 0, 0, 1, false);
         }
         catch (HttpRequestException ex)
         {
-            await MarkPendingAsync(lease, "NETWORK", TrimError(ex.Message));
+            await MarkPendingAsync(lease, scope, "NETWORK", TrimError(ex.Message), exception: ex, reason: "network");
             return new DailyCloseUploadExecutionResult(1, 0, 0, 1, false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // 上传异常必须保持在后台重试，不得影响收银流程。
-            await MarkPendingAsync(lease, "UPLOAD_EXCEPTION", TrimError(ex.Message));
+            await MarkPendingAsync(lease, scope, "UPLOAD_EXCEPTION", TrimError(ex.Message), exception: ex);
             return new DailyCloseUploadExecutionResult(1, 0, 0, 1, false);
         }
     }
@@ -388,8 +441,13 @@ public sealed class DailyCloseUploadService(
 
     private async Task MarkPendingAsync(
         LocalDailyCloseUploadLease lease,
+        DeviceAuthorizationContext scope,
         string errorCode,
-        string errorMessage)
+        string errorMessage,
+        int? statusCode = null,
+        Exception? exception = null,
+        bool expected = false,
+        string? reason = null)
     {
         var delaySeconds = GetRetryDelaySeconds(lease.UploadAttemptCount);
         await repository.MarkUploadPendingAsync(
@@ -398,6 +456,72 @@ public sealed class DailyCloseUploadService(
             errorCode,
             errorMessage,
             CancellationToken.None);
+
+        // 退避重试按 attempt 节流：第 1、2、4、8… 次失败记 Warning，其余与预期内冲突只记 Information，
+        // 避免服务端长时间不可用时每条日结每 5 分钟刷一条 Warning。
+        var attempt = lease.UploadAttemptCount;
+        var message =
+            $"daily close upload deferred dailyCloseGuid={lease.DailyCloseGuid:D} errorCode={errorCode} " +
+            $"http={(statusCode?.ToString(CultureInfo.InvariantCulture) ?? "<none>")} attempt={attempt} " +
+            $"nextRetrySeconds={delaySeconds}" +
+            (reason is null ? string.Empty : $" reason={reason}") +
+            $" message={TrimLogMessage(errorMessage)}";
+        var context = CreateLogContext(lease.DailyCloseGuid, scope, statusCode, new Dictionary<string, object?>
+        {
+            ["errorCode"] = errorCode,
+            ["attemptCount"] = attempt,
+            ["nextRetrySeconds"] = delaySeconds,
+            ["reason"] = reason
+        });
+        if (!expected && IsLoggedAttempt(attempt))
+        {
+            ConsoleLog.WriteWarning("DailyCloseUpload", message, context, exception);
+        }
+        else
+        {
+            ConsoleLog.WriteInformation("DailyCloseUpload", message, context);
+        }
+    }
+
+    private void NoteAuthorizationRecovered(DeviceAuthorizationContext scope)
+    {
+        if (Interlocked.Exchange(ref authorizationBlocked, 0) == 1)
+        {
+            ConsoleLog.WriteInformation(
+                "DailyCloseUpload",
+                "daily close upload resumed after device authorization recovered",
+                new ApplicationLogContext(Properties: new Dictionary<string, object?>
+                {
+                    ["storeCode"] = scope.StoreCode,
+                    ["deviceCode"] = scope.DeviceCode
+                }));
+        }
+    }
+
+    private static ApplicationLogContext CreateLogContext(
+        Guid dailyCloseGuid,
+        DeviceAuthorizationContext scope,
+        int? statusCode,
+        Dictionary<string, object?> properties)
+    {
+        properties["storeCode"] = scope.StoreCode;
+        properties["deviceCode"] = scope.DeviceCode;
+        return new ApplicationLogContext(
+            TraceId: dailyCloseGuid.ToString("D"),
+            RequestPath: "api/v1/daily-closes/sync",
+            RequestMethod: "POST",
+            StatusCode: statusCode,
+            Properties: properties);
+    }
+
+    /// <summary>1、2、4、8… 次失败才升级为 Warning（2 的幂）。</summary>
+    internal static bool IsLoggedAttempt(int attempt) => attempt > 0 && (attempt & (attempt - 1)) == 0;
+
+    private static string TrimLogMessage(string? message)
+    {
+        // 中心日志只保留 256 字符的服务端错误摘要。
+        var text = string.IsNullOrWhiteSpace(message) ? "<none>" : message.Trim();
+        return text.Length <= 256 ? text : text[..256];
     }
 
     private static string TrimError(string? message)

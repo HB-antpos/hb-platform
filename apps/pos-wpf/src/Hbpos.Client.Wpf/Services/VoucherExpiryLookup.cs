@@ -42,15 +42,35 @@ public sealed class VoucherExpiryLookup(IVoucherApiClient voucherApiClient) : IV
                 timeoutSource.Token);
             return response.Found ? response.Voucher?.ExpiredAt : null;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            // 自己的超时：当作查不到，不阻断出票。
+            // 自己的超时：当作查不到，不阻断出票（券面少印到期日）。
+            ConsoleLog.WriteWarning(
+                "Receipt",
+                $"voucher expiry lookup timed out reason=timeout timeoutMs={(int)Timeout.TotalMilliseconds} " +
+                $"voucherTail={VoucherCodeLogFormat.Tail(voucherCode)}",
+                new ApplicationLogContext(Properties: new Dictionary<string, object?>
+                {
+                    ["storeCode"] = storeCode,
+                    ["reason"] = "timeout"
+                }),
+                ex);
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // 不记录券号：券号本身可以直接兑付，不应进入日志。
-            Console.WriteLine($"[HBPOS][Client][Receipt] {DateTimeOffset.Now:O} voucher expiry lookup failed error={ex.GetType().Name}");
+            // 券号本身可以直接兑付，只记后 4 位。
+            ConsoleLog.WriteWarning(
+                "Receipt",
+                $"voucher expiry lookup failed voucherTail={VoucherCodeLogFormat.Tail(voucherCode)} error={ex.GetType().Name}",
+                new ApplicationLogContext(
+                    StatusCode: ex is CatalogApiException { StatusCode: { } status } ? (int)status : null,
+                    Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = storeCode,
+                        ["errorCode"] = (ex as CatalogApiException)?.ErrorCode
+                    }),
+                ex);
             return null;
         }
     }

@@ -363,9 +363,20 @@ public sealed class CashPaymentWorkflowService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            // 释放失败会让券额被锁到预占过期：记 Warning；券号只留后 4 位，reservationToken 不进日志。
+            ConsoleLog.WriteWarning(
                 "VoucherRelease",
-                $"release failed voucher={LogValue(voucherCode)} token={LogValue(reservationToken)} error={ex.GetType().Name} message={LogValue(ex.Message)}");
+                $"release failed voucherTail={VoucherCodeLogFormat.Tail(voucherCode)} amount={tender.Amount:0.00} " +
+                $"error={ex.GetType().Name} message={LogValue(ex.Message)}",
+                new ApplicationLogContext(
+                    StatusCode: ex is CatalogApiException { StatusCode: { } status } ? (int)status : null,
+                    Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = session.StoreCode,
+                        ["deviceCode"] = session.DeviceCode,
+                        ["errorCode"] = (ex as CatalogApiException)?.ErrorCode
+                    }),
+                ex);
             return false;
         }
     }
@@ -723,9 +734,17 @@ public sealed class CashPaymentWorkflowService(
 
     private static void LogPostCommitWarning(string stage, Guid? orderGuid, Exception ex)
     {
-        ConsoleLog.Write(
+        // 订单已落库后的收尾步骤失败：不回滚订单，但必须以 Warning 留痕并带异常，便于按订单号追查。
+        ConsoleLog.WriteWarning(
             "CashPaymentWorkflow",
-            $"post-commit warning stage={stage} orderGuid={orderGuid?.ToString("D") ?? "<none>"} error={ex.GetType().Name}");
+            $"post-commit warning stage={stage} orderGuid={orderGuid?.ToString("D") ?? "<none>"} error={ex.GetType().Name}",
+            new ApplicationLogContext(
+                TraceId: orderGuid?.ToString("D"),
+                Properties: new Dictionary<string, object?>
+                {
+                    ["phase"] = stage
+                }),
+            ex);
     }
 
     private async Task<LocalHeldOrderCompletionContext?> TryResolveHeldOrderAsync(
@@ -3688,6 +3707,21 @@ public sealed class CashPaymentWorkflowService(
                 $"message={LogValue(authorization.Message)} authorizedAmount={authorization.AuthorizedAmount?.ToString("0.00") ?? "<null>"} " +
                 $"cardTxCount={authorization.CardTransactions?.Count ?? 0}");
         }
+        else if (method == PaymentMethodKind.Voucher)
+        {
+            // 代金券锁定结果：批准时 Message 里是券号、Reference 含 reservationToken，二者都不进日志，只记券号后 4 位。
+            ConsoleLog.WriteInformation(
+                "Voucher",
+                $"voucher tender authorize completed approved={authorization.Approved} voucherTail={VoucherCodeLogFormat.Tail(referenceText)} " +
+                $"requestedAmount={amount:0.00} authorizedAmount={authorization.AuthorizedAmount?.ToString("0.00") ?? "<null>"} " +
+                $"statusKey={LogValue(authorization.StatusKey)}",
+                new ApplicationLogContext(Properties: new Dictionary<string, object?>
+                {
+                    ["storeCode"] = session.StoreCode,
+                    ["deviceCode"] = session.DeviceCode,
+                    ["result"] = authorization.Approved ? "approved" : "declined"
+                }));
+        }
 
         if (!authorization.Approved)
         {
@@ -4268,6 +4302,17 @@ public sealed class CashPaymentWorkflowService(
             }
 
             var idempotencyKey = EnsureRefundVoucherIdempotencyKey(order.OrderGuid, payment);
+            var refundLogContext = new ApplicationLogContext(
+                TraceId: order.OrderGuid.ToString("D"),
+                Properties: new Dictionary<string, object?>
+                {
+                    ["storeCode"] = session.StoreCode,
+                    ["deviceCode"] = session.DeviceCode
+                });
+            ConsoleLog.WriteInformation(
+                "Voucher",
+                $"refund voucher issue start orderGuid={order.OrderGuid:D} paymentGuid={payment.PaymentGuid:D} amount={Math.Abs(payment.Amount):0.00}",
+                refundLogContext);
             var authorization = await _voucherTenderClient.IssueRefundAsync(
                 Math.Abs(payment.Amount),
                 session,
@@ -4277,8 +4322,21 @@ public sealed class CashPaymentWorkflowService(
                 cancellationToken);
             if (!authorization.Approved || string.IsNullOrWhiteSpace(authorization.Reference))
             {
+                // 退款券未发出：这笔退款仍待处理，需要收银员/人工跟进。
+                ConsoleLog.WriteWarning(
+                    "Voucher",
+                    $"refund voucher issue declined orderGuid={order.OrderGuid:D} paymentGuid={payment.PaymentGuid:D} " +
+                    $"amount={Math.Abs(payment.Amount):0.00}",
+                    refundLogContext);
                 throw new InvalidOperationException(authorization.Message ?? "Voucher refund issuing failed.");
             }
+
+            ConsoleLog.WriteInformation(
+                "Voucher",
+                $"refund voucher issued orderGuid={order.OrderGuid:D} paymentGuid={payment.PaymentGuid:D} " +
+                $"amount={authorization.AuthorizedAmount?.ToString("0.00") ?? Math.Abs(payment.Amount).ToString("0.00")} " +
+                $"voucherTail={VoucherCodeLogFormat.Tail(OrderUploadService.ParseVoucherReference(authorization.Reference).VoucherCode)}",
+                refundLogContext);
 
             // 每张退款券发券成功后立刻回写本地引用，避免后续步骤失败时再次展示为待处理。
             await RunLocalStoreAsync(

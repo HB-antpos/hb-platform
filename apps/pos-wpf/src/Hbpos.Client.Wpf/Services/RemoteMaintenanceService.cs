@@ -274,6 +274,16 @@ public sealed class RemoteMaintenanceService(
                 stage is RemoteMaintenanceStage.Preparing or RemoteMaintenanceStage.DownloadingRustDesk or
                     RemoteMaintenanceStage.DownloadingStatusAgent or RemoteMaintenanceStage.Registering)
             {
+                ConsoleLog.WriteWarning(
+                    "RemoteMaintenance",
+                    $"remote maintenance provisioning timed out stage={stage} operationId={operationId}",
+                    new ApplicationLogContext(
+                        TraceId: operationId == Guid.Empty ? null : operationId.ToString("D"),
+                        Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["phase"] = stage.ToString(),
+                            ["reason"] = "timeout"
+                        }));
                 return new RemoteMaintenanceProvisionResult(false,
                     stage == RemoteMaintenanceStage.Preparing
                         ? "settings.remoteMaintenance.result.preparationTimedOut"
@@ -283,6 +293,7 @@ public sealed class RemoteMaintenanceService(
         }
         catch (Exception ex)
         {
+            LogProvisioningFailure(stage, operationId, ex);
             if (installation is not null)
             {
                 try
@@ -327,6 +338,49 @@ public sealed class RemoteMaintenanceService(
         {
             _operationGate.Release();
         }
+    }
+
+    /// <summary>
+    /// 界面只显示固定文案，这里把真实原因（异常类型、HTTP 状态、服务端 code、Setup 错误枚举、阶段）写进中心日志。
+    /// 用户在 UAC 弹窗点"否"（Win32 1223）属于主动取消，只记 Information。
+    /// </summary>
+    private static void LogProvisioningFailure(RemoteMaintenanceStage stage, Guid operationId, Exception exception)
+    {
+        int? statusCode = exception switch
+        {
+            RemoteMaintenanceApiException apiException => apiException.StatusCode,
+            System.Net.Http.HttpRequestException { StatusCode: { } status } => (int)status,
+            _ => null
+        };
+        var code = exception switch
+        {
+            RemoteMaintenanceApiException apiException => apiException.Code,
+            RemoteMaintenanceSetupException setupException => setupException.Error.ToString(),
+            System.ComponentModel.Win32Exception win32Exception => $"WIN32_{win32Exception.NativeErrorCode}",
+            _ => null
+        };
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["phase"] = stage.ToString()
+        };
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            properties["errorCode"] = code;
+        }
+
+        var context = new ApplicationLogContext(
+            TraceId: operationId == Guid.Empty ? null : operationId.ToString("D"),
+            StatusCode: statusCode,
+            Properties: properties);
+        var message =
+            $"remote maintenance provisioning failed stage={stage} error={exception.GetType().Name} status={statusCode?.ToString() ?? "-"} code={code ?? "-"} operationId={operationId}";
+        if (exception is System.ComponentModel.Win32Exception { NativeErrorCode: 1223 })
+        {
+            ConsoleLog.WriteInformation("RemoteMaintenance", message + " reason=uac-canceled", context);
+            return;
+        }
+
+        ConsoleLog.WriteWarning("RemoteMaintenance", message, context, exception);
     }
 
     private async Task<RemoteMaintenanceProvisionResult> ResumePendingCommitAsync(

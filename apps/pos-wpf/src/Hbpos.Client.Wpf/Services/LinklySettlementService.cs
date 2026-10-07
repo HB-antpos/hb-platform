@@ -181,6 +181,13 @@ public sealed class LinklySettlementService(
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             // 终端调用已经开始时，非调用方超时按结果未知落库；调用方主动取消则保留 Pending 锁并继续传播。
+            // 结算结果未知需要人工到 Linkly 核对，记 Error 并带异常。
+            ConsoleLog.WriteError(
+                "LinklySettlement",
+                $"settlement terminal call failed settlementGuid={settlement.SettlementGuid:D} " +
+                $"mode={settlement.ConnectionMode} environment={settlement.Environment} error={ex.GetType().Name} -> Unknown",
+                BuildSettlementContext(settlement, status: LocalLinklySettlementStatus.Unknown),
+                ex);
             var unknown = new LocalLinklySettlementCompletion(
                 LocalLinklySettlementStatus.Unknown,
                 ResponseCode: null,
@@ -219,6 +226,7 @@ public sealed class LinklySettlementService(
             : terminalResult.Succeeded
                 ? LocalLinklySettlementStatus.Succeeded
                 : LocalLinklySettlementStatus.Failed;
+        LogTerminalResult(settlement, terminalResult, status, submissionState);
         var completion = new LocalLinklySettlementCompletion(
             status,
             terminalResult.ResponseCode,
@@ -419,7 +427,12 @@ public sealed class LinklySettlementService(
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[HBPOS][Client][Settlement] acknowledge failed session={settlement.ProviderSessionId} error={ex.GetType().Name}");
+            // ack 失败不影响本地结果，后端会保留可恢复会话，下次结算前仍能续接。
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"settlement acknowledge failed settlementGuid={settlement.SettlementGuid:D} sessionId={settlement.ProviderSessionId} error={ex.GetType().Name}",
+                BuildSettlementContext(settlement),
+                ex);
         }
     }
 
@@ -447,7 +460,11 @@ public sealed class LinklySettlementService(
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             // 只传播调用方主动取消；内部超时等非调用方取消按未决结算阻塞处理，不重发、不覆盖状态。
-            Console.WriteLine($"[HBPOS][Client][Settlement] resumable lookup failed error={ex.GetType().Name}");
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"settlement resumable lookup failed settlementGuid={unresolvedSettlement.SettlementGuid:D} error={ex.GetType().Name} -> blocked",
+                BuildSettlementContext(unresolvedSettlement),
+                ex);
             return BlockUnresolvedSettlement(unresolvedSettlement);
         }
 
@@ -614,7 +631,10 @@ public sealed class LinklySettlementService(
         catch (Exception ex)
         {
             // 上传唤醒失败不能影响银行结算或本地 POS 小票打印。
-            Console.WriteLine($"[HBPOS][Client][Settlement] upload wake-up failed error={ex.GetType().Name}");
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"settlement upload wake-up failed error={ex.GetType().Name}",
+                exception: ex);
         }
     }
 
@@ -641,7 +661,52 @@ public sealed class LinklySettlementService(
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[HBPOS][Client][Settlement] receipt printed marker failed session={settlement.ProviderSessionId} error={ex.GetType().Name}");
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"settlement receipt printed marker failed settlementGuid={settlement.SettlementGuid:D} sessionId={settlement.ProviderSessionId} error={ex.GetType().Name}",
+                BuildSettlementContext(settlement),
+                ex);
         }
+    }
+
+    /// <summary>
+    /// 终端返回后记录结算结论：成功 Information；失败或结果未知 Warning（未知需人工到 Linkly 核对）。
+    /// </summary>
+    private static void LogTerminalResult(
+        LocalLinklySettlementRecord settlement,
+        LinklySettlementResult terminalResult,
+        LocalLinklySettlementStatus status,
+        ProviderSubmissionState submissionState)
+    {
+        var message =
+            $"settlement terminal result settlementGuid={settlement.SettlementGuid:D} mode={settlement.ConnectionMode} " +
+            $"status={status} sessionId={terminalResult.SessionId ?? "<null>"} submission={submissionState} " +
+            $"responseCode={terminalResult.ResponseCode ?? "<null>"} resultUnknown={terminalResult.ResultUnknown}";
+        var context = BuildSettlementContext(settlement, status, terminalResult.ResponseCode);
+        if (status == LocalLinklySettlementStatus.Succeeded)
+        {
+            ConsoleLog.WriteInformation("LinklySettlement", message, context);
+        }
+        else
+        {
+            ConsoleLog.WriteWarning("LinklySettlement", $"{message} message={terminalResult.Message}", context);
+        }
+    }
+
+    private static ApplicationLogContext BuildSettlementContext(
+        LocalLinklySettlementRecord settlement,
+        LocalLinklySettlementStatus? status = null,
+        string? responseCode = null)
+    {
+        return new ApplicationLogContext(
+            TraceId: settlement.SettlementGuid.ToString("D"),
+            Properties: new Dictionary<string, object?>
+            {
+                ["storeCode"] = settlement.StoreCode,
+                ["deviceCode"] = settlement.DeviceCode,
+                ["mode"] = settlement.ConnectionMode,
+                ["status"] = (status ?? settlement.Status).ToString(),
+                ["result"] = responseCode
+            });
     }
 }

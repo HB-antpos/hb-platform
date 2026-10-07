@@ -69,6 +69,104 @@ public sealed class LinklySettlementUploadServiceTests
     }
 
     [Fact]
+    public async Task ExecutePendingAsync_logs_a_deferred_warning_with_trace_and_retry_properties_when_device_is_unauthorized()
+    {
+        await using var fixture = await SettlementFixture.CreateAsync();
+        var settlement = await fixture.CreateCompletedSettlementAsync();
+        var client = new FakeSyncApiClient(_ => Task.FromException<LinklySettlementSyncResponse>(
+            new LinklySettlementUploadApiException("Device is not authorized.", HttpStatusCode.Unauthorized, "DEVICE_UNAUTHORIZED")));
+        var service = new LinklySettlementUploadService(fixture.Repository, client);
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        LinklySettlementUploadExecutionResult result;
+        try
+        {
+            result = await service.ExecutePendingAsync();
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        // 401/403 会中断整批上传：必须留下按结算 GUID 可检索的 Warning（授权问题不记 Error），并带上重试节奏。
+        Assert.True(result.WasInterrupted);
+        var entry = Assert.Single(
+            sink.Entries,
+            item => item.Level == "Warning" && item.TraceId == settlement.SettlementGuid.ToString("D"));
+        Assert.Equal("LinklySettlementUpload", entry.Category);
+        Assert.Equal(401, entry.StatusCode);
+        Assert.Equal("DEVICE_UNAUTHORIZED", entry.Properties!["errorCode"]);
+        Assert.Equal(1, entry.Properties["attemptCount"]);
+        Assert.Equal(5, entry.Properties["nextRetrySeconds"]);
+        Assert.Contains("deferred", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("batchInterrupted=true", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(sink.Entries, item => item.Level == "Error");
+    }
+
+    [Fact]
+    public async Task ExecutePendingAsync_logs_success_as_information_with_settlement_trace()
+    {
+        await using var fixture = await SettlementFixture.CreateAsync();
+        var settlement = await fixture.CreateCompletedSettlementAsync();
+        var client = new FakeSyncApiClient(request =>
+            Task.FromResult(new LinklySettlementSyncResponse(true, false, request.ClientRevision)));
+        var service = new LinklySettlementUploadService(fixture.Repository, client);
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            await service.ExecutePendingAsync();
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        var entry = Assert.Single(
+            sink.Entries,
+            item => item.TraceId == settlement.SettlementGuid.ToString("D"));
+        Assert.Equal("Information", entry.Level);
+        Assert.Contains("upload succeeded", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Worker_logs_iteration_failure_as_warning_with_exception()
+    {
+        await using var fixture = await SettlementFixture.CreateAsync();
+        var executor = new FailsOnceSettlementExecutor();
+        var schema = new LocalSchemaService(fixture.Store);
+        await schema.InitializeAsync();
+        schema.SignalReady();
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            using var worker = new LinklySettlementUploadWorker(schema, executor);
+            using var stopping = new CancellationTokenSource();
+
+            await worker.StartAsync(stopping.Token);
+            await executor.FirstFailure.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            worker.RequestUpload();
+            await executor.SecondExecution.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+            stopping.Cancel();
+            await worker.StopAsync(CancellationToken.None).WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        // 原先只 Console.WriteLine 异常类型，中心日志看不到；现在要有带异常对象的 Warning。
+        var entry = Assert.Single(
+            sink.Entries,
+            item => item.Level == "Warning" && item.Message.Contains("upload worker iteration failed", StringComparison.Ordinal));
+        Assert.Equal("LinklySettlementUpload", entry.Category);
+        Assert.Equal(nameof(InvalidOperationException), entry.ExceptionType);
+        Assert.Equal("transient execution failure", entry.ExceptionMessage);
+    }
+
+    [Fact]
     public void Service_registration_reuses_one_concrete_schema_singleton_for_the_interface()
     {
         var services = new ServiceCollection();

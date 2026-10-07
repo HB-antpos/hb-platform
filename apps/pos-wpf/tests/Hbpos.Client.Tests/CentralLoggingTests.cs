@@ -350,8 +350,9 @@ public sealed class CentralLoggingTests
             var entry = Assert.Single(sink.Entries.Where(item =>
                 item.Level == "Error" &&
                 item.ServiceName == "OrderSync" &&
-                item.Message == "Order sync request failed."));
-            Assert.Equal("Order sync request failed.", entry.Message);
+                item.Message.StartsWith("Order sync request failed.", StringComparison.Ordinal)));
+            // 消息现在附带 http/errorCode/服务端 message/attempt，便于直接在中心日志定位原因。
+            Assert.Contains("http=500 errorCode=ORDER_SYNC_FAILED message=sync failed attempt=1", entry.Message);
             Assert.Equal("OrderSync", entry.ServiceName);
             Assert.Equal("POST", entry.RequestMethod);
             Assert.Equal("/api/v1/orders/sync", entry.RequestPath);

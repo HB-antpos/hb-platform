@@ -157,6 +157,7 @@ public sealed class DeviceRegistrationWorkflowService(
         }
         catch (Exception ex) when (IsDeterministicActivationRejection(ex))
         {
+            LogActivationRecoveryCleared("redeem", ex);
             await recoveryStore.ClearAsync(CancellationToken.None);
             throw;
         }
@@ -186,6 +187,7 @@ public sealed class DeviceRegistrationWorkflowService(
         }
         catch (Exception ex) when (IsDeterministicActivationRejection(ex))
         {
+            LogActivationRecoveryCleared("rebind", ex);
             await recoveryStore.ClearAsync(CancellationToken.None);
             throw;
         }
@@ -235,6 +237,9 @@ public sealed class DeviceRegistrationWorkflowService(
         }
         catch (Exception ex) when (IsDeterministicActivationRejection(ex))
         {
+            LogActivationRecoveryCleared(
+                recovery.Mode == DeviceActivationRecoveryMode.Rebind ? "recovery-rebind" : "recovery-redeem",
+                ex);
             await activationRecoveryStore.ClearAsync(CancellationToken.None);
             throw;
         }
@@ -606,6 +611,32 @@ public sealed class DeviceRegistrationWorkflowService(
         return exception.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
             || string.Equals(exception.ErrorCode, "DEVICE_AUTH_REQUIRED", StringComparison.Ordinal)
             || string.Equals(exception.ErrorCode, "DEVICE_DISABLED", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 服务端确定性拒绝开通码时会清除本机恢复意图（之后不再自动重放），这里留痕便于排查"开通码失效/设备冲突"。
+    /// 只记 errorCode 与状态码，开通码本身绝不入日志。
+    /// </summary>
+    private static void LogActivationRecoveryCleared(string operation, Exception exception)
+    {
+        var apiException = exception as CatalogApiException;
+        var statusCode = apiException?.StatusCode is { } status ? (int)status : (int?)null;
+        var errorCode = apiException?.ErrorCode;
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["operation"] = operation,
+            ["reason"] = "deterministic-rejection"
+        };
+        if (!string.IsNullOrWhiteSpace(errorCode))
+        {
+            properties["errorCode"] = errorCode;
+        }
+
+        ConsoleLog.WriteWarning(
+            "Device",
+            $"activation code rejected by server, clearing local activation recovery intent operation={operation} status={statusCode?.ToString() ?? "-"} errorCode={errorCode ?? "-"}",
+            new ApplicationLogContext(StatusCode: statusCode, Properties: properties),
+            exception);
     }
 
     private static bool IsDeterministicActivationRejection(Exception exception)

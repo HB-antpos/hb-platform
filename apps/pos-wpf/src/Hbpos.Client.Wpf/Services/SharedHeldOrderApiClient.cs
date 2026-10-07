@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -98,8 +99,10 @@ public sealed class SharedHeldOrderApiClient(
     public Task<SharedHeldOrderCapabilitiesResponse> GetCapabilitiesAsync(
         CancellationToken cancellationToken = default)
     {
+        // capabilities 只由后台发布 worker 调用，失败由 worker 按退避节流记录。
         return GetAsync<SharedHeldOrderCapabilitiesResponse>(
             "api/v1/held-orders/capabilities",
+            new HeldOrderRequestLog("capabilities", null, LogFailures: false),
             cancellationToken);
     }
 
@@ -107,9 +110,11 @@ public sealed class SharedHeldOrderApiClient(
         SharedHeldOrderPublishRequest request,
         CancellationToken cancellationToken = default)
     {
+        // 发布由后台 worker 10 秒一轮重试，失败由 worker 按 RetryCount 节流记录。
         return PostAsync<SharedHeldOrderPublishRequest, SharedHeldOrderPublishResponse>(
             "api/v1/held-orders",
             request,
+            new HeldOrderRequestLog("publish", request.HoldGuid, LogFailures: false),
             cancellationToken);
     }
 
@@ -122,6 +127,7 @@ public sealed class SharedHeldOrderApiClient(
             () => PostAsync<object?, SharedHeldOrderCancelResponse>(
                 $"api/v1/held-orders/{holdGuid:D}/cancel",
                 null,
+                new HeldOrderRequestLog("cancel", holdGuid),
                 cancellationToken),
             cancellationToken);
     }
@@ -129,8 +135,10 @@ public sealed class SharedHeldOrderApiClient(
     public Task<IReadOnlyList<SharedHeldOrderListItemDto>> ListPendingAsync(
         CancellationToken cancellationToken = default)
     {
+        // 历史页挂单源每 10 秒自动刷新一次，失败由页面按状态切换记录，这里不逐次记。
         return GetAsync<IReadOnlyList<SharedHeldOrderListItemDto>>(
             $"api/v1/held-orders?{SupportedPayloadVersionsQuery}",
+            new HeldOrderRequestLog("list", null, LogFailures: false),
             cancellationToken);
     }
 
@@ -142,6 +150,7 @@ public sealed class SharedHeldOrderApiClient(
         return PostAsync<SharedHeldOrderClaimPrepareRequest, SharedHeldOrderClaimPrepareResponse>(
             $"api/v1/held-orders/{holdGuid:D}/claims/prepare?{SupportedPayloadVersionsQuery}",
             request,
+            new HeldOrderRequestLog("claim-prepare", request.ClaimGuid),
             cancellationToken);
     }
 
@@ -153,6 +162,7 @@ public sealed class SharedHeldOrderApiClient(
         return PostAsync<object?, SharedHeldOrderClaimDto>(
             $"api/v1/held-orders/{holdGuid:D}/claims/{claimGuid:D}/activate",
             null,
+            new HeldOrderRequestLog("claim-activate", claimGuid),
             cancellationToken);
     }
 
@@ -164,6 +174,7 @@ public sealed class SharedHeldOrderApiClient(
         return PostAsync<object?, SharedHeldOrderClaimDto>(
             $"api/v1/held-orders/{holdGuid:D}/claims/{claimGuid:D}/release",
             null,
+            new HeldOrderRequestLog("claim-release", claimGuid),
             cancellationToken);
     }
 
@@ -176,6 +187,7 @@ public sealed class SharedHeldOrderApiClient(
         return PostAsync<SharedHeldOrderForceReleaseRequest, SharedHeldOrderClaimDto>(
             $"api/v1/held-orders/{holdGuid:D}/claims/{claimGuid:D}/force-release",
             request,
+            new HeldOrderRequestLog("claim-force-release", claimGuid),
             cancellationToken);
     }
 
@@ -184,29 +196,100 @@ public sealed class SharedHeldOrderApiClient(
     {
         return GetAsync<IReadOnlyList<SharedHeldOrderRecoveryClaimDto>>(
             $"api/v1/held-orders/claims/mine?{SupportedPayloadVersionsQuery}",
+            new HeldOrderRequestLog("claims-mine", null),
             cancellationToken);
     }
 
-    private async Task<TResponse> GetAsync<TResponse>(
+    private Task<TResponse> GetAsync<TResponse>(
         string path,
+        HeldOrderRequestLog log,
         CancellationToken cancellationToken)
     {
-        using var response = await SendAsync(
+        return ExecuteAsync<TResponse>(
             () => httpClient.GetAsync(path, cancellationToken),
+            "GET",
+            path,
+            log,
             cancellationToken);
-        return await ReadEnvelopeAsync<TResponse>(response, cancellationToken);
     }
 
-    private async Task<TResponse> PostAsync<TRequest, TResponse>(
+    private Task<TResponse> PostAsync<TRequest, TResponse>(
         string path,
         TRequest request,
+        HeldOrderRequestLog log,
         CancellationToken cancellationToken)
     {
-        using var response = await SendAsync(
+        return ExecuteAsync<TResponse>(
             () => httpClient.PostAsJsonAsync(path, request, JsonOptions, cancellationToken),
+            "POST",
+            path,
+            log,
             cancellationToken);
-        return await ReadEnvelopeAsync<TResponse>(response, cancellationToken);
     }
+
+    private static async Task<TResponse> ExecuteAsync<TResponse>(
+        Func<Task<HttpResponseMessage>> send,
+        string method,
+        string path,
+        HeldOrderRequestLog log,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            using var response = await SendAsync(send, cancellationToken);
+            return await ReadEnvelopeAsync<TResponse>(response, cancellationToken);
+        }
+        catch (SharedHeldOrderApiException exception) when (log.LogFailures)
+        {
+            LogFailure(exception, method, path, log, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 人工触发的挂单操作（取单/释放/取消/对账）失败统一记一条；不写任何 payload 或服务端正文。
+    /// 功能未启用是预期配置状态，只记 Information。
+    /// </summary>
+    private static void LogFailure(
+        SharedHeldOrderApiException exception,
+        string method,
+        string path,
+        HeldOrderRequestLog log,
+        long elapsedMs)
+    {
+        var requestPath = path.Split('?', 2)[0];
+        var message =
+            $"shared held order api failed op={log.Operation} method={method} path={requestPath} " +
+            $"http={(int)exception.StatusCode} kind={exception.Kind} errorCode={exception.ErrorCode ?? "<null>"} " +
+            $"message={exception.Message} elapsedMs={elapsedMs}";
+        var context = new ApplicationLogContext(
+            TraceId: log.TraceGuid?.ToString("D"),
+            RequestPath: requestPath,
+            RequestMethod: method,
+            StatusCode: (int)exception.StatusCode,
+            Properties: new Dictionary<string, object?>
+            {
+                ["errorCode"] = exception.ErrorCode,
+                ["operation"] = log.Operation,
+                ["reason"] = exception.Kind.ToString(),
+                ["elapsedMs"] = elapsedMs
+            });
+        if (exception.Kind == SharedHeldOrderApiErrorKind.Disabled)
+        {
+            ConsoleLog.WriteInformation("HeldOrder", message, context);
+            return;
+        }
+
+        ConsoleLog.WriteWarning("HeldOrder", message, context, exception.InnerException ?? exception);
+    }
+
+    /// <param name="TraceGuid">claimGuid（取单/释放）或 holdGuid（取消/发布），作为中心日志 TraceId。</param>
+    /// <param name="LogFailures">false 表示由后台 worker 或页面自行节流记录，客户端不逐次记。</param>
+    private sealed record HeldOrderRequestLog(
+        string Operation,
+        Guid? TraceGuid,
+        bool LogFailures = true);
 
     private static async Task<HttpResponseMessage> SendAsync(
         Func<Task<HttpResponseMessage>> send,
@@ -226,14 +309,15 @@ public sealed class SharedHeldOrderApiClient(
                 HttpStatusCode.ServiceUnavailable,
                 exception);
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            // HttpClient.Timeout 超时（调用方未取消）：按 Retryable 处理。
+            // HttpClient.Timeout 超时（调用方未取消）：按 Retryable 处理，保留原异常便于排查。
             throw new SharedHeldOrderApiException(
                 SharedHeldOrderApiErrorKind.Retryable,
                 "共享挂单服务响应超时，请稍后重试。",
                 null,
-                HttpStatusCode.RequestTimeout);
+                HttpStatusCode.RequestTimeout,
+                exception);
         }
     }
 
@@ -243,15 +327,17 @@ public sealed class SharedHeldOrderApiClient(
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         ApiResult<TResponse>? result = null;
+        JsonException? parseException = null;
         try
         {
             result = string.IsNullOrWhiteSpace(content)
                 ? null
                 : JsonSerializer.Deserialize<ApiResult<TResponse>>(content, JsonOptions);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            // 响应体不是合法 envelope：按状态码分类，不把 body 拼进消息。
+            // 响应体不是合法 envelope：按状态码分类，不把 body 拼进消息；原异常作为 inner 保留。
+            parseException = exception;
         }
 
         if (result is null)
@@ -264,7 +350,8 @@ public sealed class SharedHeldOrderApiClient(
                     : Classify(response.StatusCode, null),
                 $"共享挂单服务返回了无法解析的响应（HTTP {(int)response.StatusCode}）。",
                 null,
-                response.StatusCode);
+                response.StatusCode,
+                parseException);
         }
 
         if (!result.Success)
