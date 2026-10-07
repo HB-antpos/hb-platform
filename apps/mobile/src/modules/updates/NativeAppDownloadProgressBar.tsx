@@ -9,13 +9,23 @@ type Props = {
   color: string;
   trackColor: string;
   labelColor: string;
+  /** 网络差时显示在进度下方的提示（已翻译）；不传则不提示。 */
+  slowNetworkHint?: string;
+  hintColor?: string;
 };
 
 /**
  * APK 下载确定进度：细轨道 + 等宽数字文案。不做宽度动画，
  * 每前进 1% 直接跳到新宽度，安卓 10 低端机上也不额外占用帧。
  */
-export function NativeAppDownloadProgressBar({ progress, color, trackColor, labelColor }: Props) {
+export function NativeAppDownloadProgressBar({
+  progress,
+  color,
+  trackColor,
+  labelColor,
+  slowNetworkHint,
+  hintColor,
+}: Props) {
   const { percent, label } = describeNativeAppDownloadProgress(progress);
   return (
     <View style={styles.container}>
@@ -30,6 +40,11 @@ export function NativeAppDownloadProgressBar({ progress, color, trackColor, labe
       <Text variant="bodySmall" style={[styles.label, { color: labelColor }]}>
         {label}
       </Text>
+      {progress.slowNetwork && slowNetworkHint ? (
+        <Text variant="bodySmall" style={{ color: hintColor ?? labelColor }}>
+          {slowNetworkHint}
+        </Text>
+      ) : null}
     </View>
   );
 }

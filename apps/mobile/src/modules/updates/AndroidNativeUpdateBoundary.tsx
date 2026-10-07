@@ -102,6 +102,8 @@ export function AndroidNativeUpdateBoundary({
                 color="#1677FF"
                 trackColor="#E6F4FF"
                 labelColor="#475569"
+                slowNetworkHint={t("dialogs.nativeUpdateSlowNetwork")}
+                hintColor="#B54708"
               />
             ) : null}
           </View>

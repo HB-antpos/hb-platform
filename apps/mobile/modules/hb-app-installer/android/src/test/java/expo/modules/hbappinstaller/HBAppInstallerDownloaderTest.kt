@@ -45,7 +45,7 @@ class HBAppInstallerDownloaderTest {
 
     downloader(network).download(
       request(body),
-      onProgress = ApkDownloadProgressListener { written, total -> reports += written to total },
+      onProgress = ApkDownloadProgressListener { written, total, _ -> reports += written to total },
     )
 
     assertEquals(listOf(0L to 4L, 4L to 4L), reports)

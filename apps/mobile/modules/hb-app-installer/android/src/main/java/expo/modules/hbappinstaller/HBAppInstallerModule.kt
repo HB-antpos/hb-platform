@@ -45,6 +45,8 @@ internal class DownloadApkRequestRecord : Record {
   @Field var expectedSizeBytes: Double = 0.0
   @Field var expectedSha256Hex: String = ""
   @Field var trustedOrigins: List<String> = emptyList()
+  // 新增可选字段：旧 JS 不传即为 null（不限速）；旧原生包收到会忽略，向后兼容。
+  @Field var bandwidthShare: Double? = null
 
   fun validated() = DownloadMetadata(
     url = url,
@@ -135,17 +137,18 @@ class HBAppInstallerModule : Module() {
             expectedSizeBytes = metadata.expectedSizeBytes,
             expectedSha256Hex = metadata.expectedSha256Hex,
             trustedOrigins = metadata.trustedOrigins,
+            bandwidthShare = request.bandwidthShare,
           ),
-          onProgress = ApkDownloadProgressListener { bytesWritten, totalBytes ->
+          onProgress = ApkDownloadProgressListener { bytesWritten, totalBytes, bytesPerSecond ->
             // 带上 JS 传入的原始目标 URI，JS 只认自己这次下载的进度。
-            sendEvent(
-              DOWNLOAD_PROGRESS_EVENT,
-              mapOf(
-                "destinationFileUri" to metadata.destinationFileUri,
-                "bytesWritten" to bytesWritten.toDouble(),
-                "totalBytes" to totalBytes.toDouble(),
-              ),
+            val event = mutableMapOf<String, Any>(
+              "destinationFileUri" to metadata.destinationFileUri,
+              "bytesWritten" to bytesWritten.toDouble(),
+              "totalBytes" to totalBytes.toDouble(),
             )
+            // 预热期还没测出速率时不带该字段，JS 按「未知」处理、不提示网络差。
+            if (bytesPerSecond != null) event["bytesPerSecond"] = bytesPerSecond.toDouble()
+            sendEvent(DOWNLOAD_PROGRESS_EVENT, event)
           },
         )
         mapOf(

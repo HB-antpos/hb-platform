@@ -38,11 +38,34 @@ export type NativeAppUpdatePhase = "checking" | "downloading" | "verifying";
 export type NativeAppDownloadProgress = Readonly<{
   bytesWritten: number;
   totalBytes: number;
+  /** 网络差（实测低于 128KB/s 或长时间没有进度）时为 true，界面提示换更好的网络。 */
+  slowNetwork?: boolean;
 }>;
 
 type NativeApkDownloadProgressEvent = {
   destinationFileUri?: unknown;
   bytesWritten?: unknown;
+  bytesPerSecond?: unknown;
+};
+
+/** 链路实测速率低于它就提示网络差；原生测速已扣除后台限速补睡，限速本身不会触发提示。 */
+export const SLOW_NETWORK_BYTES_PER_SECOND = 128 * 1024;
+/** 原生开始测速后至少每秒上报一次；超过这么久没有任何进度说明下载卡住，同样提示网络差。 */
+export const SLOW_NETWORK_STALL_MS = 5_000;
+
+type ProgressTimer = ReturnType<typeof setTimeout>;
+export type DownloadProgressTimers = {
+  setTimer: (callback: () => void, delayMs: number) => ProgressTimer;
+  clearTimer: (timer: ProgressTimer) => void;
+};
+const defaultProgressTimers: DownloadProgressTimers = {
+  setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimer: (timer) => clearTimeout(timer),
+};
+
+export type DownloadProgressForwarder = ((bytesWritten: number, bytesPerSecond?: number) => void) & {
+  /** 下载结束或退订时调用，清掉卡住检测的定时器。 */
+  dispose: () => void;
 };
 
 export type NativeAppUpdateApiClient = {
@@ -69,7 +92,13 @@ export type NativeApkDownloadRequest = {
   expectedSha256Hex: string;
   maximumSizeBytes: number;
   trustedOrigins: string[];
+  /** 后台下载最多占用的带宽比例 (0,1)；不传即不限速（如强制更新）。旧原生包忽略此字段。 */
+  bandwidthShare?: number;
 };
+
+export function isValidBandwidthShare(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value < 1;
+}
 
 export type NativeApkVerificationRequest = {
   fileUri: string;
@@ -125,6 +154,8 @@ export type NativeAppUpdateDependencies = {
   nativeInstaller?: NativeApkInstallerPort | null;
   onPhase?: (phase: NativeAppUpdatePhase) => void;
   onProgress?: (progress: NativeAppDownloadProgress) => void;
+  /** 后台下载占用带宽比例；返回 null 表示全速（如强制更新）。仅原生下载器生效。 */
+  getDownloadBandwidthShare?: () => number | null;
   platform: NativeAppUpdatePlatform;
 };
 
@@ -367,26 +398,75 @@ function isRejectedApkMimeType(mimeType: string | null | undefined) {
 }
 
 /**
- * 只在整数百分比前进时转发，写满必转发一次。原生侧已按时间节流，
- * 兼容下载器的回调频率不受控，这里统一限制 React 状态更新次数（最多约 101 次）。
+ * 只在整数百分比前进或「网络差」状态变化时转发，写满必转发一次。原生侧已按时间节流，
+ * 兼容下载器的回调频率不受控，这里统一限制 React 状态更新次数（百分比最多约 101 次）。
+ * 网络差只依据新原生包上报的 bytesPerSecond 判断；旧原生包与 JS 兼容下载没有测速，不提示。
  */
 export function createDownloadProgressForwarder(
   totalBytes: number,
   onProgress: (progress: NativeAppDownloadProgress) => void,
-) {
+  timers: DownloadProgressTimers = defaultProgressTimers,
+): DownloadProgressForwarder {
   let lastPercent = -1;
-  return (bytesWritten: number) => {
-    if (!Number.isFinite(bytesWritten) || !(totalBytes > 0)) {
+  let lastWritten = 0;
+  let slow = false;
+  let measuring = false;
+  let disposed = false;
+  let stallTimer: ProgressTimer | null = null;
+
+  const emit = () => {
+    // 不慢时保持原有的两字段形状，旧调用方与测试不受影响。
+    onProgress(slow
+      ? { bytesWritten: lastWritten, totalBytes, slowNetwork: true }
+      : { bytesWritten: lastWritten, totalBytes });
+  };
+  const clearStallTimer = () => {
+    if (stallTimer !== null) {
+      timers.clearTimer(stallTimer);
+      stallTimer = null;
+    }
+  };
+  const armStallTimer = () => {
+    clearStallTimer();
+    stallTimer = timers.setTimer(() => {
+      stallTimer = null;
+      if (disposed || slow) return;
+      slow = true;
+      emit();
+    }, SLOW_NETWORK_STALL_MS);
+  };
+
+  const forward = (bytesWritten: number, bytesPerSecond?: number) => {
+    if (disposed || !Number.isFinite(bytesWritten) || !(totalBytes > 0)) {
       return;
     }
     const written = Math.min(Math.max(Math.floor(bytesWritten), 0), totalBytes);
     const percent = Math.floor((written * 100) / totalBytes);
-    if (percent <= lastPercent) {
+    const measured = typeof bytesPerSecond === "number"
+      && Number.isFinite(bytesPerSecond)
+      && bytesPerSecond >= 0;
+    if (measured) measuring = true;
+    const nextSlow = measured ? bytesPerSecond < SLOW_NETWORK_BYTES_PER_SECOND : slow;
+    lastWritten = Math.max(lastWritten, written);
+    // 原生已开始测速后，每次上报都重置卡住检测；写满后不再检测。
+    if (measuring && written < totalBytes) {
+      armStallTimer();
+    } else {
+      clearStallTimer();
+    }
+    if (percent <= lastPercent && nextSlow === slow) {
       return;
     }
-    lastPercent = percent;
-    onProgress({ bytesWritten: written, totalBytes });
+    lastPercent = Math.max(lastPercent, percent);
+    slow = nextSlow;
+    emit();
   };
+  return Object.assign(forward, {
+    dispose() {
+      disposed = true;
+      clearStallTimer();
+    },
+  });
 }
 
 function subscribeNativeDownloadProgress(
@@ -403,10 +483,14 @@ function subscribeNativeDownloadProgress(
     const subscription = installer.addListener("onDownloadProgress", (event) => {
       // 只认本次下载目标；其他下载或格式异常的事件一律忽略。
       if (event?.destinationFileUri === fileUri && typeof event.bytesWritten === "number") {
-        forward(event.bytesWritten);
+        forward(
+          event.bytesWritten,
+          typeof event.bytesPerSecond === "number" ? event.bytesPerSecond : undefined,
+        );
       }
     });
     return () => {
+      forward.dispose();
       try {
         subscription?.remove?.();
       } catch {
@@ -415,6 +499,7 @@ function subscribeNativeDownloadProgress(
     };
   } catch {
     // 订阅失败时退回只显示阶段。
+    forward.dispose();
     return () => undefined;
   }
 }
@@ -519,6 +604,7 @@ async function prepareNativeVerifiedApk(
     );
     let downloaded: Awaited<ReturnType<NativeApkInstallerPort["downloadApk"]>>;
     try {
+      const bandwidthShare = dependencies.getDownloadBandwidthShare?.() ?? null;
       downloaded = await installer.downloadApk({
         url: downloadUrl,
         destinationFileUri: fileUri,
@@ -526,6 +612,8 @@ async function prepareNativeVerifiedApk(
         expectedSha256Hex: build.artifactSha256,
         maximumSizeBytes: MAX_APK_SIZE_BYTES,
         trustedOrigins: dependencies.getTrustedOrigins(build),
+        // 只有合法比例才交给原生限速；否则不带这个字段，保持全速。
+        ...(isValidBandwidthShare(bandwidthShare) ? { bandwidthShare } : {}),
       });
     } finally {
       stopProgress();
