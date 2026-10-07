@@ -155,6 +155,8 @@ namespace BlazorApp.Api.Services
                     // 员工操作日志合并页：老收银 / 新收银在页内切换，任一查看权限即可见。
                     new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
                     new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
+                    // 日结记录：WPF / 手持 / iPad 上传的日结与现金盘点明细；独立权限码，分店范围由查询接口收口。
+                    new() { Path = "/pos-admin/daily-closes",          TitleKey = "menu.dailyCloses",            Icon = "MoneyCollectOutlined",       Permission = Permissions.DailyCloseRecords.View },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
@@ -398,6 +400,16 @@ namespace BlazorApp.Api.Services
                 // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
                 AnyPermissions = new[] { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View },
                 Order = 57,
+            },
+            new()
+            {
+                RouteName = "daily-closes",
+                TitleKey = "tabs.dailyCloses",
+                Icon = "cash-register",
+                // 移动端「日结记录」：与 Web /pos-admin/daily-closes 同一个独立权限码；店长只看自己关联的分店，由查询接口收口。
+                // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
+                Permission = Permissions.DailyCloseRecords.View,
+                Order = 58,
             },
             new()
             {
@@ -739,6 +751,7 @@ namespace BlazorApp.Api.Services
                 Permissions.System.ManageAppDownloads,
                 Permissions.PosTerminal.Audit.View,
                 Permissions.LegacyEmployeeLogs.View,
+                Permissions.DailyCloseRecords.View,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage
             );
