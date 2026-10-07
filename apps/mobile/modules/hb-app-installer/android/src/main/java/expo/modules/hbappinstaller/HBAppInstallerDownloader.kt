@@ -20,6 +20,8 @@ internal data class ApkDownloadRequest(
   val expectedSizeBytes: Long,
   val expectedSha256Hex: String,
   val trustedOrigins: Set<String>,
+  /** 后台下载占用带宽的比例（0~1，不含端点）；null 表示不限速（如强制更新）。 */
+  val bandwidthShare: Double? = null,
 )
 
 internal data class ApkDownloadResult(
@@ -33,6 +35,7 @@ internal data class ApkDownloadResult(
 internal class HBAppInstallerDownloader(
   private val connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection },
   private val elapsedMillis: () -> Long = ::monotonicMillis,
+  private val sleeper: (Long) -> Unit = ::sleepForDownloadThrottle,
 ) {
   fun download(
     request: ApkDownloadRequest,
@@ -51,8 +54,20 @@ internal class HBAppInstallerDownloader(
       deleteOrThrow(partial)
       partial.createNewFile()
       partial.setExecutable(false, false)
-      val progress = ApkDownloadProgressReporter(request.expectedSizeBytes, onProgress, elapsedMillis)
-      val response = streamResponse(request.sourceUrl, trusted, request.expectedSizeBytes, partial, progress)
+      val rateLimiter = normalizedBandwidthShare(request.bandwidthShare)?.let {
+        ApkDownloadRateLimiter(it, elapsedMillis, sleeper)
+      }
+      // 有人监听进度才测速；测速扣掉限速补睡，后台限速不会被当成网络慢。
+      val speedMeter = onProgress?.let {
+        ApkDownloadSpeedMeter(throttledMillis = { rateLimiter?.throttledMillis ?: 0L })
+      }
+      val progress = ApkDownloadProgressReporter(
+        request.expectedSizeBytes,
+        onProgress,
+        elapsedMillis,
+        speedMeter = speedMeter,
+      )
+      val response = streamResponse(request.sourceUrl, trusted, request.expectedSizeBytes, partial, progress, rateLimiter)
       val actualHash = response.sha256Hex
       if (!MessageDigest.isEqual(actualHash.hexBytes(), expectedHash.hexBytes())) {
         throw InstallerException("APP_DOWNLOAD_SHA256_MISMATCH", "APK 下载内容与已验证 SHA-256 不一致。")
@@ -75,6 +90,7 @@ internal class HBAppInstallerDownloader(
     expectedSize: Long,
     partial: File,
     progress: ApkDownloadProgressReporter,
+    rateLimiter: ApkDownloadRateLimiter?,
   ): StreamResult {
     var current = parseTrustedUrl(sourceUrl, trustedOrigins)
     val visited = linkedSetOf<String>()
@@ -109,7 +125,7 @@ internal class HBAppInstallerDownloader(
         if (status !in 200..299) throw InstallerException("APP_DOWNLOAD_HTTP_ERROR", "APK 下载服务器返回 HTTP $status。")
         validateContentType(connection.getHeaderField("Content-Type"))
         validateContentLength(connection.getHeaderField("Content-Length"), expectedSize)
-        return streamExact(connection, partial, expectedSize, current.uri.toASCIIString(), progress)
+        return streamExact(connection, partial, expectedSize, current.uri.toASCIIString(), progress, rateLimiter)
       } finally {
         connection.disconnect()
       }
@@ -122,6 +138,7 @@ internal class HBAppInstallerDownloader(
     expectedSize: Long,
     finalUrl: String,
     progress: ApkDownloadProgressReporter,
+    rateLimiter: ApkDownloadRateLimiter?,
   ): StreamResult {
     val digest = MessageDigest.getInstance("SHA-256")
     val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
@@ -145,6 +162,8 @@ internal class HBAppInstallerDownloader(
           digest.update(buffer, 0, count)
           total = next
           progress.report(total)
+          // 后台下载按探测带宽的一定比例限速，避免占满网络影响正常使用。
+          rateLimiter?.onBytesTransferred(count)
         }
         if (total != expectedSize) throw sizeMismatch()
         // fsync 后才允许 rename，掉电不会把只写到 page cache 的文件当成完成包。
@@ -156,6 +175,16 @@ internal class HBAppInstallerDownloader(
 }
 
 private data class StreamResult(val sizeBytes: Long, val sha256Hex: String, val finalUrl: String)
+
+private fun sleepForDownloadThrottle(millis: Long) {
+  try {
+    Thread.sleep(millis)
+  } catch (error: InterruptedException) {
+    // 取消下载会中断线程：恢复中断标记并按取消处理，与读循环的取消语义一致。
+    Thread.currentThread().interrupt()
+    throw InstallerException("APP_DOWNLOAD_CANCELLED", "APK 下载已取消。", error)
+  }
+}
 private data class TrustedOrigin(val host: String, val port: Int)
 private data class TrustedUrl(val uri: URI, val loopKey: String)
 private val redirectStatuses = setOf(301, 302, 303, 307, 308)

@@ -7,6 +7,7 @@ import {
   appUpdateMutualExclusion,
   createUpdateLaneRetryGate,
 } from "./app-update-mutual-exclusion";
+import { backgroundDownloadGate } from "./background-download-gate";
 import { useForegroundUpdateCheckInterval } from "./foreground-update-interval";
 import {
   checkMobileOtaUpdate,
@@ -76,6 +77,10 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const optionalPromptTargetRef = useRef<string | null>(null);
   const operationRetryGateRef = useRef(createUpdateLaneRetryGate());
+  // 可选 OTA 因「登录后空闲」闸门未开而被挡下：闸门打开时据此自动重试。
+  const deferredByIdleGateRef = useRef(false);
+  // 用户在设置页手动「检查更新」时绕过闸门，立即下载。
+  const manualCheckRef = useRef(false);
   const inFlightRef = useRef<{
     generation: number;
     controller: AbortController;
@@ -270,6 +275,16 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
         // 先发布 required/optional 判定，再放行原生 lane；required 会继续阻止 APK optional。
         appUpdateMutualExclusion.setOtaInitializationPending(false);
         if (decision && decision.state !== "none" && !portRef.current?.isReady(decision)) {
+          // 可选 OTA 等登录完成并空闲后再下载，不和开机、登录抢带宽；强制 OTA 与手动检查照常立即下载。
+          if (
+            decision.state === "optional"
+            && !manualCheckRef.current
+            && !backgroundDownloadGate.isOpen()
+          ) {
+            deferredByIdleGateRef.current = true;
+            return;
+          }
+          deferredByIdleGateRef.current = false;
           await downloadDecision(decision, isCurrent);
         }
       } catch (error) {
@@ -401,6 +416,16 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
         void runCheckRef.current();
       }
     });
+    const unsubscribeIdleGate = backgroundDownloadGate.subscribe(() => {
+      if (
+        enabledRef.current
+        && deferredByIdleGateRef.current
+        && backgroundDownloadGate.isOpen()
+      ) {
+        deferredByIdleGateRef.current = false;
+        void runCheckRef.current();
+      }
+    });
     const subscription = AppState.addEventListener("change", (nextState) => {
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
@@ -410,6 +435,7 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     });
     return () => {
       unsubscribe();
+      unsubscribeIdleGate();
       subscription.remove();
     };
   }, []);
@@ -426,7 +452,12 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
 
     // 用户主动检查时允许再次展示先前选择“稍后”的可选更新提示。
     optionalPromptTargetRef.current = null;
-    await runCheckRef.current();
+    manualCheckRef.current = true;
+    try {
+      await runCheckRef.current();
+    } finally {
+      manualCheckRef.current = false;
+    }
 
     const current = snapshotRef.current;
     if (!enabledRef.current) {

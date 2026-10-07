@@ -18,6 +18,10 @@ import {
   appUpdateMutualExclusion,
   createUpdateLaneRetryGate,
 } from "./app-update-mutual-exclusion";
+import {
+  BACKGROUND_DOWNLOAD_BANDWIDTH_SHARE,
+  backgroundDownloadGate,
+} from "./background-download-gate";
 import { useForegroundUpdateCheckInterval } from "./foreground-update-interval";
 import {
   checkAndDownloadNativeAppUpdate,
@@ -104,6 +108,8 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
   const [readyToInstall, setReadyToInstall] = useState(false);
   const requiredRef = useRef(false);
   const requiredDownloadRef = useRef<RequiredDownload | null>(null);
+  // 可选安装包因「登录后空闲」闸门未开而被挡下：闸门打开时据此自动重试。
+  const deferredByIdleGateRef = useRef(false);
 
   function applyRequiredDecision(decision: AndroidNativeUpdateDecision | null) {
     const required = isAndroidNativeUpdateRequired(decision);
@@ -293,6 +299,13 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
       // 才能在 OTA 初始化或 OTA required 期间继续下载 APK，避免两边互相卡死。
       await refreshRequiredDecision(apiClient, buildProfile, Application.nativeBuildVersion);
 
+      // 可选安装包等登录完成并空闲后再检查与下载，不和开机、登录抢带宽；强制更新照常立即进行。
+      if (!requiredRef.current && !backgroundDownloadGate.isOpen()) {
+        deferredByIdleGateRef.current = true;
+        return;
+      }
+      deferredByIdleGateRef.current = false;
+
       updateLease = appUpdateMutualExclusion.tryStartOperation("native");
       if (!updateLease) {
         operationRetryGateRef.current.markBlocked();
@@ -352,6 +365,8 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
         nativeInstaller,
         onPhase: setPhase,
         onProgress: setProgress,
+        // 后台（可选）下载只占一部分带宽；强制更新时用户被拦着等，全速下载。
+        getDownloadBandwidthShare: () => (requiredRef.current ? null : BACKGROUND_DOWNLOAD_BANDWIDTH_SHARE),
       });
       setPhase(null);
 
@@ -417,6 +432,16 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
         void check(optionsRef.current);
       }
     });
+    const unsubscribeIdleGate = backgroundDownloadGate.subscribe(() => {
+      if (
+        optionsRef.current.enabled
+        && deferredByIdleGateRef.current
+        && backgroundDownloadGate.isOpen()
+      ) {
+        deferredByIdleGateRef.current = false;
+        void check(optionsRef.current);
+      }
+    });
     const subscription = AppState.addEventListener("change", (nextState) => {
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
@@ -433,6 +458,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
 
     return () => {
       unsubscribe();
+      unsubscribeIdleGate();
       subscription.remove();
       operationRetryGateRef.current.clear();
       appUpdateMutualExclusion.releasePrompt("native");

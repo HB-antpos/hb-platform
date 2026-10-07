@@ -281,6 +281,7 @@
     "nativeUpdateDownloading": "Downloading app package…",
     "nativeUpdateVerifying": "Verifying app package…",
     "nativeUpdateBackgroundHelper": "Preparing the update in the background. You can keep using the app. We’ll prompt you when it is ready to install.",
+    "nativeUpdateSlowNetwork": "Poor network. Please switch to a better connection (such as Wi‑Fi) to download.",
     "nativeUpdateFailed": "App package update not completed",
     "nativeUpdateFailedHelper": "Check your connection and retry. You can keep using the current version.",
     "nativeUpdateRetryAction": "Retry",

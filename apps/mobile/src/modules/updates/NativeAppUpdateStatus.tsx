@@ -43,6 +43,8 @@ export function NativeAppUpdateStatus({ phase, progress, onRetry, onDismiss }: P
                 color={HB_COLORS.action}
                 trackColor={HB_COLORS.outlineMuted}
                 labelColor={HB_COLORS.textSecondary}
+                slowNetworkHint={t("dialogs.nativeUpdateSlowNetwork")}
+                hintColor={HB_COLORS.warning}
               />
             ) : null}
             <Text variant="bodySmall" style={styles.helper}>

@@ -12,6 +12,7 @@ import { installPrinterLinkDiagnostics } from "@/modules/printer/link-diagnostic
 import { usePrinterAutoConnect } from "@/modules/printer/use-printer-auto-connect";
 import { waitForStartupReadiness } from "@/modules/startup/startup-readiness";
 import { shouldRunAutomaticAppUpdatesForProfile } from "@/modules/updates/app-build-profile";
+import { backgroundDownloadGate } from "@/modules/updates/background-download-gate";
 import { IosNativeUpdateBoundary } from "@/modules/updates/IosNativeUpdateBoundary";
 import { AndroidNativeUpdateBoundary } from "@/modules/updates/AndroidNativeUpdateBoundary";
 import { MobileOtaUpdateBoundary } from "@/modules/updates/MobileOtaUpdateBoundary";
@@ -82,6 +83,24 @@ export default function RootLayout() {
     state: iosNativeUpdate.decision?.state ?? null,
     optionalPromptActive: iosNativeUpdate.optionalPromptActive,
   });
+
+  // 可选更新（安装包 / OTA）等登录完成并空闲后再下载：把后台下载闸门接到登录状态上，
+  // 必须先于下面各更新通道的检查注册。强制更新不受闸门影响。
+  useEffect(() => {
+    if (!sideEffectsEnabled) {
+      return;
+    }
+    backgroundDownloadGate.bind(useAuthStore.getState().isAuthenticated);
+    const unsubscribe = useAuthStore.subscribe((current, previous) => {
+      if (current.isAuthenticated !== previous.isAuthenticated) {
+        backgroundDownloadGate.setAuthenticated(current.isAuthenticated);
+      }
+    });
+    return () => {
+      unsubscribe();
+      backgroundDownloadGate.unbind();
+    };
+  }, [sideEffectsEnabled]);
 
   // 蓝牙链路诊断必须先于自动重连安装，挂载后第一次状态同步的事件才不会漏记。
   useEffect(() => {

@@ -2,10 +2,12 @@ package expo.modules.hbappinstaller
 
 internal const val DOWNLOAD_PROGRESS_EVENT = "onDownloadProgress"
 private const val DEFAULT_PROGRESS_INTERVAL_MILLIS = 200L
+private const val DEFAULT_PROGRESS_HEARTBEAT_MILLIS = 1_000L
 
 /** 下载线程同步回调；实现方只做轻量转发，不得阻塞。 */
 internal fun interface ApkDownloadProgressListener {
-  fun onProgress(bytesWritten: Long, totalBytes: Long)
+  /** [bytesPerSecond] 是链路实测速率；预热期或未测速时为 null。 */
+  fun onProgress(bytesWritten: Long, totalBytes: Long, bytesPerSecond: Long?)
 }
 
 internal fun monotonicMillis(): Long = System.nanoTime() / 1_000_000L
@@ -13,6 +15,7 @@ internal fun monotonicMillis(): Long = System.nanoTime() / 1_000_000L
 /**
  * 下载进度节流：开始传输时先报 0，之后百分比前进且距上次至少 [minIntervalMillis] 才报，
  * 写满时必报一次。安卓 10 手持机性能有限，节流后一次下载最多约百次跨线程事件。
+ * 带测速器时，测出速率后百分比没前进也至少每 [heartbeatMillis] 报一次，JS 据此及时提示网络差。
  * 上报失败（事件未声明、JS 运行时已销毁等）只丢弃这一帧进度，绝不中断下载。
  */
 internal class ApkDownloadProgressReporter(
@@ -20,6 +23,8 @@ internal class ApkDownloadProgressReporter(
   private val listener: ApkDownloadProgressListener?,
   private val elapsedMillis: () -> Long,
   private val minIntervalMillis: Long = DEFAULT_PROGRESS_INTERVAL_MILLIS,
+  private val speedMeter: ApkDownloadSpeedMeter? = null,
+  private val heartbeatMillis: Long = DEFAULT_PROGRESS_HEARTBEAT_MILLIS,
 ) {
   private var lastPercent = -1
   private var lastReportedAt = 0L
@@ -30,15 +35,17 @@ internal class ApkDownloadProgressReporter(
     val written = bytesWritten.coerceIn(0L, totalBytes)
     val percent = (written * 100L / totalBytes).toInt()
     val now = elapsedMillis()
+    val bytesPerSecond = speedMeter?.sample(now, written)
     val complete = written == totalBytes
     if (lastPercent >= 0) {
       if (complete && lastPercent == 100) return
-      if (!complete && (percent <= lastPercent || now - lastReportedAt < minIntervalMillis)) return
+      val heartbeatDue = bytesPerSecond != null && now - lastReportedAt >= heartbeatMillis
+      if (!complete && !heartbeatDue && (percent <= lastPercent || now - lastReportedAt < minIntervalMillis)) return
     }
     lastPercent = percent
     lastReportedAt = now
     try {
-      target.onProgress(written, totalBytes)
+      target.onProgress(written, totalBytes, bytesPerSecond)
     } catch (ignored: Exception) {
       // 进度只是展示信息；下载结果仍以大小与 SHA-256 校验为准。
     }

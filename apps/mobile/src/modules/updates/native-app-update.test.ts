@@ -424,6 +424,40 @@ async function run() {
     assert.deepEqual(phases, ["checking", "verifying"], "原生缓存校验不能误报下载");
   }
 
+  for (const [share, expected] of [
+    [0.5, 0.5],
+    [null, undefined],
+    [0, undefined],
+    [1, undefined],
+    [Number.NaN, undefined],
+    [1.5, undefined],
+  ] as [number | null, number | undefined][]) {
+    // 后台下载把带宽比例交给原生限速；强制更新（null）或不合法的值不带该字段，保持全速。
+    const requests: Parameters<NativeApkInstallerPort["downloadApk"]>[0][] = [];
+    const nativeInstaller: NativeApkInstallerPort = {
+      downloadApk: async (request) => {
+        requests.push(request);
+        return {
+          fileUri: request.destinationFileUri,
+          sizeBytes: request.expectedSizeBytes,
+          sha256Hex: request.expectedSha256Hex,
+        };
+      },
+      verifyApk: async (request) => ({
+        verified: true,
+        packageName: request.expectedPackageName,
+        versionCode: request.expectedVersionCode,
+      }),
+      removeDownloadedApk: async () => undefined,
+    };
+    const harness = createHarness({ nativeInstaller, overrides: { getDownloadBandwidthShare: () => share } });
+    const result = await checkAndDownloadNativeAppUpdate(harness.dependencies);
+    assert.equal(result.status, "downloaded", `share=${share}`);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].bandwidthShare, expected, `share=${share}`);
+    assert.equal("bandwidthShare" in requests[0], expected !== undefined, `share=${share} 时是否带字段`);
+  }
+
   for (const outcome of ["success", "failure"] as const) {
     // 新原生包：下载前订阅进度，只认本次目标 URI，下载结束（成功或失败）立即退订。
     const progress: unknown[] = [];
@@ -476,6 +510,43 @@ async function run() {
       ...(outcome === "success" ? [{ bytesWritten: total, totalBytes: total }] : []),
     ], "同一百分比、别的目标和非法值都不能转发");
     assert.equal(subscription.removed, 1, `${outcome} 后必须退订原生进度`);
+  }
+
+  {
+    // 新原生包的进度事件带实测速率：低于 128KB/s 时转发「网络差」，界面据此提示换网络。
+    const progress: unknown[] = [];
+    let emit: ((event: unknown) => void) | null = null;
+    const nativeInstaller: NativeApkInstallerPort = {
+      addListener: (_eventName, listener) => {
+        emit = listener as (event: unknown) => void;
+        return { remove: () => undefined };
+      },
+      downloadApk: async (request) => {
+        const total = request.expectedSizeBytes;
+        emit?.({ destinationFileUri: request.destinationFileUri, bytesWritten: 0, totalBytes: total });
+        emit?.({ destinationFileUri: request.destinationFileUri, bytesWritten: 1, totalBytes: total, bytesPerSecond: 60 * 1024 });
+        emit?.({ destinationFileUri: request.destinationFileUri, bytesWritten: total, totalBytes: total, bytesPerSecond: 500 * 1024 });
+        return {
+          fileUri: request.destinationFileUri,
+          sizeBytes: request.expectedSizeBytes,
+          sha256Hex: request.expectedSha256Hex,
+        };
+      },
+      verifyApk: async (request) => ({
+        verified: true,
+        packageName: request.expectedPackageName,
+        versionCode: request.expectedVersionCode,
+      }),
+      removeDownloadedApk: async () => undefined,
+    };
+    const harness = createHarness({ nativeInstaller, overrides: { onProgress: (value) => progress.push(value) } });
+    assert.equal((await checkAndDownloadNativeAppUpdate(harness.dependencies)).status, "downloaded");
+    const total = APK_BYTES.byteLength;
+    assert.deepEqual(progress, [
+      { bytesWritten: 0, totalBytes: total },
+      { bytesWritten: 1, totalBytes: total, slowNetwork: true },
+      { bytesWritten: total, totalBytes: total },
+    ]);
   }
 
   {
