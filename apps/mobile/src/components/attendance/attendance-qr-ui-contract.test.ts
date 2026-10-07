@@ -81,8 +81,23 @@ assert.match(
 );
 assert.match(
   source,
-  /isPunching=\{attendanceScannerSubmitting \|\| punchMutation\.isPending\}/,
-  "TodayPunchCard 必须在 resolve、定位、punch 和 tracking 全阶段禁用扫码入口",
+  /isPunching=\{attendanceScannerSubmitting \|\| punchMutation\.isPending \|\| isPreparingScan\}/,
+  "TodayPunchCard 必须在扫码前的用餐核对、resolve、定位、punch 和 tracking 全阶段禁用扫码入口",
+);
+assert.match(
+  source,
+  /const openAttendanceScanner = async \(\) => \{[\s\S]{0,400}resolveClockOutMealDeclaration\(\)[\s\S]{0,300}beginAttendanceScannerSession\(\)/,
+  "用餐确认必须在打开扫码器之前完成：二维码与打卡授权有有效期，扫完再问会过期",
+);
+assert.match(
+  source,
+  /buildAttendanceQrPunchPayload\([\s\S]{0,320}pendingMealDeclarationRef\.current/,
+  "下班打卡必须带上扫码前的用餐回答",
+);
+assert.match(
+  source,
+  /const closeAttendanceScanner = [\s\S]{0,400}pendingMealDeclarationRef\.current = undefined/,
+  "关闭扫码器即放弃本次下班，必须清掉用餐回答",
 );
 assert.match(
   source,

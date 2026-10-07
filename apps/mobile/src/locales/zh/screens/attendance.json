@@ -137,7 +137,22 @@
       "overtime": "加班"
     },
     "lastScan": "最近扫码：{{action}} {{time}} · {{status}}",
-    "lastScanDevice": "POS {{device}}"
+    "lastScanDevice": "POS {{device}}",
+    "meal": {
+      "dueTitle": "已连续工作 4 小时",
+      "dueBody": "按排班可以休息 {{minutes}} 分钟，去吃饭前点「开始休息」。",
+      "upcoming": "用餐 {{handled}}/{{total}} 次",
+      "upcomingAt": "用餐 {{handled}}/{{total}} 次 · {{time}} 提醒",
+      "done": "今日用餐已记录 {{handled}}/{{total}} 次",
+      "onBreak": "休息中 {{elapsed}}",
+      "onBreakSince": "{{time}} 开始，下班时会自动结束",
+      "start": "开始休息",
+      "end": "结束休息",
+      "deduction": "用餐扣 {{duration}}",
+      "pendingAddBack": "待审加回 {{duration}}",
+      "approvedAddBack": "已加回 {{duration}}",
+      "paid": "计薪 {{duration}}"
+    }
   },
   "scanner": {
     "waitingForFreshCode": "请继续对准 POS，正在等待刷新的二维码…",
@@ -251,6 +266,9 @@
       "MissingClockOut": {
         "title": "漏下班待处理",
         "detail": "{{workDate}} 排班结束后仍存在未闭合班段。"
+      },
+      "MealBreak": {
+        "title": "用餐未休息加工时"
       }
     },
     "overtimeValidation": {
@@ -264,13 +282,18 @@
       "PunchAdjustment": "补卡{{punchType}} {{time}}",
       "Overtime": "加班 {{minutes}} 分钟",
       "Leave": "{{leaveType}} {{start}}–{{end}}",
-      "Punch": "打卡异常 · {{punchType}}"
+      "Punch": "打卡异常 · {{punchType}}",
+      "MealBreak": "没休息 {{count}} 次 · 加回 {{minutes}} 分钟"
     },
     "shortDate": "{{month}}/{{day}}",
     "quickMinutes": "{{minutes}} 分",
     "addRemark": "添加备注",
     "fixMissingClockOut": "补录下班",
-    "needsFix": "待补录"
+    "needsFix": "待补录",
+    "mealBreakDetail": "排班用餐 {{expected}} 次，记录到 {{recorded}} 次",
+    "mealBreakValidation": {
+      "remarkRequired": "拒绝用餐加工时必须填写审核备注。"
+    }
   },
   "holidayManagement": {
     "noStore": "请先选择分店",
@@ -570,7 +593,8 @@
     "publishWeek": "发布本周",
     "viewLocation": "查看位置",
     "scanClockIn": "扫码上班打卡",
-    "scanClockOut": "扫码下班打卡"
+    "scanClockOut": "扫码下班打卡",
+    "approveMealBreak": "批准加回"
   },
   "punchTypes": {
     "ClockIn": "上班",
@@ -586,7 +610,8 @@
     "Leave": "请假",
     "PunchAdjustment": "补卡",
     "Overtime": "加班",
-    "MissingClockOut": "漏下班"
+    "MissingClockOut": "漏下班",
+    "MealBreak": "用餐"
   },
   "statuses": {
     "Normal": "正常",
@@ -668,7 +693,14 @@
     "holidayDeleted": "公共假期已删除",
     "holidaySyncSuccess": "已同步 {{count}} 条公共假期",
     "adjustmentSubmitted": "补卡申请已提交",
-    "adjustmentApplied": "补卡修改已直接应用"
+    "adjustmentApplied": "补卡修改已直接应用",
+    "mealBreakStarted": "已开始休息",
+    "mealBreakEnded": "已结束休息",
+    "mealBreakFailed": "操作失败，请稍后重试",
+    "mealNoOpenSegment": "当前没有进行中的班段，不能开始休息",
+    "mealNoOpenBreak": "没有进行中的休息",
+    "mealBreakAlreadyOpen": "休息已在进行中，请刷新后重试",
+    "mealClaimSubmitted": "{{punchType}}已记录；没休息 {{count}} 次已提交店长审核，批准后加回 {{minutes}} 分钟工时"
   },
   "managedRecords": {
     "filterAll": "全部 {{count}}",
@@ -751,5 +783,11 @@
       "submit_other": "提交 {{count}} 天"
     },
     "weekHoursSplit": "工作日 {{weekday}} · 周末 {{weekend}} 小时"
+  },
+  "mealCheck": {
+    "title": "下班前确认用餐",
+    "message": "按排班你今天还有 {{count}} 次用餐没有休息记录。\n\n吃过饭请选「休息了」；没吃请选「没休息」，会提交店长审核，批准后加回 {{minutes}} 分钟工时。",
+    "taken": "休息了",
+    "notTaken": "没休息"
   }
 }

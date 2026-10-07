@@ -137,7 +137,22 @@
       "overtime": "Overtime"
     },
     "lastScan": "Last scan: {{action}} {{time}} · {{status}}",
-    "lastScanDevice": "POS {{device}}"
+    "lastScanDevice": "POS {{device}}",
+    "meal": {
+      "dueTitle": "You've worked 4 hours straight",
+      "dueBody": "Your roster includes a {{minutes}}-minute meal break. Tap Start break before you go.",
+      "upcoming": "Meal breaks {{handled}}/{{total}}",
+      "upcomingAt": "Meal breaks {{handled}}/{{total}} · reminder at {{time}}",
+      "done": "Meal breaks recorded {{handled}}/{{total}}",
+      "onBreak": "On break {{elapsed}}",
+      "onBreakSince": "Since {{time}}; ends automatically when you clock out",
+      "start": "Start break",
+      "end": "End break",
+      "deduction": "Meal −{{duration}}",
+      "pendingAddBack": "Pending add-back {{duration}}",
+      "approvedAddBack": "Added back {{duration}}",
+      "paid": "Paid {{duration}}"
+    }
   },
   "scanner": {
     "waitingForFreshCode": "Keep pointing at the POS. Waiting for the refreshed QR code…",
@@ -251,6 +266,9 @@
       "MissingClockOut": {
         "title": "Missing clock-out",
         "detail": "An open shift remains after the scheduled end on {{workDate}}."
+      },
+      "MealBreak": {
+        "title": "Missed meal break"
       }
     },
     "overtimeValidation": {
@@ -264,13 +282,18 @@
       "PunchAdjustment": "{{punchType}} correction {{time}}",
       "Overtime": "Overtime {{minutes}} min",
       "Leave": "{{leaveType}} {{start}}–{{end}}",
-      "Punch": "{{punchType}} exception"
+      "Punch": "{{punchType}} exception",
+      "MealBreak": "No break ×{{count}} · add back {{minutes}} min"
     },
     "shortDate": "{{day}}/{{month}}",
     "quickMinutes": "{{minutes}} min",
     "addRemark": "Add note",
     "fixMissingClockOut": "Add clock-out",
-    "needsFix": "Needs fix"
+    "needsFix": "Needs fix",
+    "mealBreakDetail": "Roster meal breaks {{expected}}, recorded {{recorded}}",
+    "mealBreakValidation": {
+      "remarkRequired": "A review remark is required to reject a missed meal break."
+    }
   },
   "holidayManagement": {
     "noStore": "Select a store first",
@@ -570,7 +593,8 @@
     "publishWeek": "Publish week",
     "viewLocation": "View location",
     "scanClockIn": "Scan to clock in",
-    "scanClockOut": "Scan to clock out"
+    "scanClockOut": "Scan to clock out",
+    "approveMealBreak": "Approve add-back"
   },
   "punchTypes": {
     "ClockIn": "Clock in",
@@ -586,7 +610,8 @@
     "Leave": "Leave",
     "PunchAdjustment": "Punch correction",
     "Overtime": "Overtime",
-    "MissingClockOut": "Missing clock-out"
+    "MissingClockOut": "Missing clock-out",
+    "MealBreak": "Meal break"
   },
   "statuses": {
     "Normal": "Normal",
@@ -668,7 +693,14 @@
     "holidayDeleted": "Public holiday deleted.",
     "holidaySyncSuccess": "Synced {{count}} public holidays.",
     "adjustmentSubmitted": "Punch correction submitted.",
-    "adjustmentApplied": "Punch correction applied."
+    "adjustmentApplied": "Punch correction applied.",
+    "mealBreakStarted": "Break started",
+    "mealBreakEnded": "Break ended",
+    "mealBreakFailed": "Something went wrong. Please try again.",
+    "mealNoOpenSegment": "You are not clocked in, so a break cannot be started.",
+    "mealNoOpenBreak": "There is no break in progress.",
+    "mealBreakAlreadyOpen": "A break is already in progress. Refresh and try again.",
+    "mealClaimSubmitted": "{{punchType}} recorded. {{count}} missed meal break(s) sent to your manager; if approved, {{minutes}} minutes are added back."
   },
   "managedRecords": {
     "filterAll": "All {{count}}",
@@ -751,5 +783,11 @@
       "submit_other": "Submit {{count}} days"
     },
     "weekHoursSplit": "Weekdays {{weekday}} · Weekend {{weekend}} h"
+  },
+  "mealCheck": {
+    "title": "Meal break check",
+    "message": "Your roster has {{count}} meal break(s) today with no break recorded.\n\nChoose \"Took break\" if you ate. Choose \"No break\" if you did not; it goes to your manager, and if approved {{minutes}} minutes are added back to your hours.",
+    "taken": "Took break",
+    "notTaken": "No break"
   }
 }

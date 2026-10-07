@@ -4,6 +4,7 @@ import { Button, Card, Chip, Icon, Text, TextInput } from "react-native-paper";
 import {
   getSupplementalAttendanceApprovalDetail,
   isKnownAttendanceApprovalSourceType,
+  validateAttendanceMealBreakApproval,
   validateAttendanceOvertimeApproval,
   type KnownAttendanceApprovalSourceType,
   type OvertimeApprovalAction,
@@ -26,6 +27,7 @@ type ApprovalFilter = "all" | KnownAttendanceApprovalSourceType;
 const FILTER_TYPES: KnownAttendanceApprovalSourceType[] = [
   "PunchAdjustment",
   "Overtime",
+  "MealBreak",
   "MissingClockOut",
   "Leave",
   "Punch",
@@ -171,6 +173,12 @@ export function ManagerApprovalList({
     if (item.sourceType === "MissingClockOut") {
       return t("sourceTypes.MissingClockOut");
     }
+    if (item.sourceType === "MealBreak" && item.mealClaim) {
+      return t("approvals.summary.MealBreak", {
+        count: item.mealClaim.notTakenCount,
+        minutes: item.mealClaim.claimedMinutes,
+      });
+    }
     if (item.sourceType === "Leave") {
       const leave = parseLeave(item);
       const leaveType = item.title ? t(`leaveTypes.${item.title}`, item.title) : approvalTitle(item);
@@ -236,6 +244,17 @@ export function ManagerApprovalList({
       ];
     }
 
+    if (item.sourceType === "MealBreak") {
+      // 店长需要看到：排班要求几次、员工记录了几次、员工给的原因。
+      const claim = item.mealClaim;
+      if (!claim) return [...store, ...(item.detail ? [item.detail] : [])];
+      return [
+        ...store,
+        t("approvals.mealBreakDetail", { expected: claim.expectedCount, recorded: claim.recordedCount }),
+        ...(claim.reason ? [`${t("fields.reason")}: ${claim.reason}`] : []),
+      ];
+    }
+
     if (item.sourceType === "Overtime") {
       return [
         ...store,
@@ -281,6 +300,7 @@ export function ManagerApprovalList({
         ? 0
         : Number(approvedMinutes[item.approvalGuid] ?? candidateMinutes)
       : undefined;
+    const isMealBreak = item.sourceType === "MealBreak";
     const validationError = isOvertime
       ? validateAttendanceOvertimeApproval({
         candidateMinutes,
@@ -288,7 +308,9 @@ export function ManagerApprovalList({
         action,
         remark,
       })
-      : null;
+      : isMealBreak
+        ? validateAttendanceMealBreakApproval({ action, remark })
+        : null;
 
     if (validationError) {
       // 需要备注时自动展开备注框，方便直接补填。
@@ -297,7 +319,9 @@ export function ManagerApprovalList({
       }
       setApprovalErrors((current) => ({
         ...current,
-        [item.approvalGuid]: t(`approvals.overtimeValidation.${validationError}`),
+        [item.approvalGuid]: isMealBreak
+          ? t(`approvals.mealBreakValidation.${validationError}`)
+          : t(`approvals.overtimeValidation.${validationError}`),
       }));
       return;
     }
@@ -447,7 +471,9 @@ export function ManagerApprovalList({
             >
               {isOvertime
                 ? t("actions.approveOvertime")
-                : t("actions.approve")}
+                : item.sourceType === "MealBreak"
+                  ? t("actions.approveMealBreak")
+                  : t("actions.approve")}
             </Button>
             {canFixClockOut ? (
               <Button

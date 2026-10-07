@@ -45,6 +45,7 @@ import {
   createManagedLeaveRequest,
   deleteAttendanceHoliday,
   deleteAttendanceSchedule,
+  endMyMealBreak,
   getAttendanceHolidays,
   getAttendanceSchedulesWeek,
   getManagedAvailability,
@@ -58,6 +59,7 @@ import {
   previewMyAttendancePunchAdjustment,
   rejectAttendanceApproval,
   resolveAttendanceQr,
+  startMyMealBreak,
   syncAttendanceHolidays,
   updateAttendanceHoliday,
   updateAttendanceSchedule,
@@ -79,6 +81,14 @@ import {
   type AttendanceQrScanSession,
 } from "@/modules/attendance/attendance-qr-scan-session";
 import { completeAttendancePostSave } from "@/modules/attendance/attendance-post-save";
+import {
+  buildAttendanceMealDeclaration,
+  findActiveMealSession,
+  isMealClaimPendingReview,
+  mealAddBackMinutes,
+  shouldConfirmMealBeforeClockOut,
+  type AttendanceMealCheckAnswer,
+} from "@/modules/attendance/attendance-meal-break";
 import { createAttendanceQrPerformance } from "@/modules/attendance/attendance-qr-performance";
 import {
   ensureAttendanceBackgroundLocationPermission,
@@ -96,6 +106,8 @@ import { runSequentialBatch } from "@/modules/attendance/schedule-grid";
 import type {
   AttendanceAvailability,
   AttendanceAvailabilityPayload,
+  AttendanceMealDeclaration,
+  AttendanceMealState,
   AttendancePunch,
   AttendancePunchMutationResult,
   AttendancePunchVerificationState,
@@ -254,6 +266,10 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const [punchStage, setPunchStage] = useState<"validating" | "locating" | "saving" | "tracking">();
   const [lastQrPunch, setLastQrPunch] = useState<AttendancePunch>();
   const [lastQrTrackingWarning, setLastQrTrackingWarning] = useState("");
+  // 扫码下班前核对用餐期间（刷新今日状态 + 等员工回答）禁用打卡按钮，防止重复点。
+  const [isPreparingScan, setIsPreparingScan] = useState(false);
+  // 员工在扫码前对「吃饭休息了吗」的回答；随本次扫码的打卡请求提交，关闭扫码器或打卡成功后清空。
+  const pendingMealDeclarationRef = useRef<AttendanceMealDeclaration | undefined>(undefined);
   const attendanceScannerSessionGateRef = useRef<
     ReturnType<typeof createAttendanceQrScanSessionGate> | null
   >(null);
@@ -480,6 +496,20 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           ? t("messages.adjustmentApplied")
           : t("messages.adjustmentSubmitted"),
       );
+    },
+  });
+
+  // 当班一键开始/结束休息：成功后刷新今日状态，让用餐区、计时和下班前的核对都用最新数据。
+  const mealBreakMutation = useMutation({
+    mutationFn: ({ action, storeCode }: { action: "start" | "end"; storeCode: string }) =>
+      action === "start" ? startMyMealBreak(storeCode) : endMyMealBreak(storeCode),
+    onSuccess: async (_state, variables) => {
+      showMessage(t(variables.action === "start" ? "messages.mealBreakStarted" : "messages.mealBreakEnded"));
+      await queryClient.invalidateQueries({ queryKey: ["attendance", "my", "today"] });
+    },
+    onError: (error) => {
+      const errorKey = getAttendancePunchErrorKey(getAttendancePunchErrorCode(error));
+      showMessage(errorKey ? t(errorKey) : getErrorMessage(error, "messages.mealBreakFailed"));
     },
   });
 
@@ -921,6 +951,44 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     [t],
   );
 
+  /**
+   * 扫码下班前问「今天吃饭休息了吗」。放在打开扫码器之前：二维码与打卡授权都有有效期，
+   * 扫完再让员工想会导致过期。返回 null 表示员工取消，本次不打开扫码器。
+   */
+  const confirmMealBeforeClockOut = useCallback(
+    (meal: AttendanceMealState) =>
+      new Promise<AttendanceMealCheckAnswer | null>((resolve) => {
+        const missing = meal.missingCountIfClockOutNow;
+        Alert.alert(
+          t("mealCheck.title"),
+          t("mealCheck.message", {
+            count: missing,
+            minutes: mealAddBackMinutes(missing),
+          }),
+          [
+            {
+              text: t("common:actions.cancel"),
+              style: "cancel",
+              onPress: () => resolve(null),
+            },
+            {
+              text: t("mealCheck.notTaken"),
+              onPress: () => resolve("notTaken"),
+            },
+            {
+              text: t("mealCheck.taken"),
+              onPress: () => resolve("taken"),
+            },
+          ],
+          {
+            cancelable: true,
+            onDismiss: () => resolve(null),
+          },
+        );
+      }),
+    [t],
+  );
+
   const openLocationSettings = useCallback(() => {
     // 只有用户明确选择前往设置时才离开 App，避免权限拒绝后自动跳转。
     void Linking.openSettings().catch(() => {
@@ -1133,6 +1201,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           normalizedQrToken,
           resolvedQr.punchAuthorizationToken,
           preparation.verification.payload,
+          // 只有下班才带用餐回答；上班卡即使误带，后端也会忽略。
+          qrToday.nextPunchType === "ClockOut" ? pendingMealDeclarationRef.current : undefined,
         ),
       ));
     } catch (error) {
@@ -1156,9 +1226,16 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           setLastQrPunch(result);
           setLastQrTrackingWarning("");
           setPunchStage("tracking");
-          showMessage(t("messages.qrPunchSuccess", {
-            punchType: t(`punchTypes.${result.punchType}`, result.punchType),
-          }));
+          pendingMealDeclarationRef.current = undefined;
+          const punchTypeLabel = t(`punchTypes.${result.punchType}`, result.punchType);
+          // 声明没休息时告诉员工已提交店长审核，免得以为工时被白扣。
+          showMessage(isMealClaimPendingReview(result.mealClaim)
+            ? t("messages.mealClaimSubmitted", {
+                punchType: punchTypeLabel,
+                count: result.mealClaim?.notTakenCount ?? 0,
+                minutes: result.mealClaim?.claimedMinutes ?? 0,
+              })
+            : t("messages.qrPunchSuccess", { punchType: punchTypeLabel }));
         },
         refresh: () => timing.measure("refresh", invalidateEmployeeData),
         onRefreshError: () => console.warn("[attendance] saved punch refresh failed"),
@@ -1222,6 +1299,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     if (!force && session && attendanceScannerSessionGate.isSubmitting(session)) return;
     attendanceScannerSessionGate.invalidate();
     attendanceScannerSessionRef.current = null;
+    // 关闭扫码器即放弃本次下班，下次点下班重新核对用餐。
+    pendingMealDeclarationRef.current = undefined;
     setAttendanceScannerVisible(false);
     resetAttendanceScannerUi();
     stopLocationCapture();
@@ -1249,8 +1328,45 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     }
   };
 
+  /**
+   * 扫码前的用餐核对。只有当前排班有用餐要求、且正在上班时才刷新一次今日状态：
+   * 缓存里的「此刻下班缺几次」是上次请求时算的，可能已过时。刷新失败时沿用缓存，不能挡住下班。
+   * 返回 "cancelled" 表示员工在确认框里取消；undefined 表示无需声明（上班、不缺休息、旧后端）。
+   */
+  const resolveClockOutMealDeclaration = async (): Promise<AttendanceMealDeclaration | undefined | "cancelled"> => {
+    if (selectedDate !== todayDate || !findActiveMealSession(todayQuery.data?.scheduleSessions)) {
+      return undefined;
+    }
+    let today = todayQuery.data;
+    try {
+      today = await queryClient.fetchQuery({
+        queryKey: attendanceKeys.today(selectedStoreCode, todayDate),
+        queryFn: () => getMyAttendanceToday(selectedStoreCode, todayDate),
+        staleTime: 0,
+        retry: false,
+      });
+    } catch {
+      // 网络抖动时沿用缓存判断；后端在下班时仍会自己重算缺口。
+    }
+    const meal = findActiveMealSession(today?.scheduleSessions)?.meal;
+    if (!meal || !shouldConfirmMealBeforeClockOut(meal)) return undefined;
+    const answer = await confirmMealBeforeClockOut(meal);
+    if (!answer) return "cancelled";
+    return buildAttendanceMealDeclaration(answer, meal.missingCountIfClockOutNow);
+  };
+
   const openAttendanceScanner = async () => {
+    if (isPreparingScan) return;
+    setIsPreparingScan(true);
+    let declaration: AttendanceMealDeclaration | undefined | "cancelled";
+    try {
+      declaration = await resolveClockOutMealDeclaration();
+    } finally {
+      setIsPreparingScan(false);
+    }
+    if (declaration === "cancelled") return;
     beginAttendanceScannerSession();
+    pendingMealDeclarationRef.current = declaration;
     setAttendanceScannerVisible(true);
     if (!attendanceCameraScan.permission?.granted) {
       await requestAttendanceCameraPermission();
@@ -1474,13 +1590,16 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 today={todayQuery.data}
                 isLoading={todayQuery.isFetching}
                 isVerificationRefreshing={isRefreshingVerification}
-                isPunching={attendanceScannerSubmitting || punchMutation.isPending}
+                isPunching={attendanceScannerSubmitting || punchMutation.isPending || isPreparingScan}
                 processingStage={punchStage}
                 hasAuthorizedStores={stores.length > 0}
                 verification={verification}
                 lastQrPunch={lastQrPunch}
                 trackingWarning={lastQrTrackingWarning}
                 onScan={() => void openAttendanceScanner()}
+                isMealBreakBusy={mealBreakMutation.isPending}
+                onStartMealBreak={(storeCode) => mealBreakMutation.mutate({ action: "start", storeCode })}
+                onEndMealBreak={(storeCode) => mealBreakMutation.mutate({ action: "end", storeCode })}
                 />
                 <PunchAdjustmentCard
                   today={todayQuery.data}

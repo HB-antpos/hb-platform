@@ -103,6 +103,15 @@ const legacyPayload = buildAttendanceQrPunchPayload(token, undefined, {
 });
 assert.equal("punchAuthorizationToken" in legacyPayload, false,
   "旧后端无短时凭证时必须保持原二维码打卡 payload");
+assert.equal("mealDeclaration" in legacyPayload, false,
+  "没问过用餐（上班或不缺休息）时不能带 mealDeclaration");
+const mealPayload = buildAttendanceQrPunchPayload(token, punchAuthorizationToken, {
+  locationLatitude: -27.47,
+  locationLongitude: 153.03,
+  locationCapturedAtUtc: "2026-07-16T00:00:00Z",
+}, { notTakenCount: 1 });
+assert.deepEqual(mealPayload.mealDeclaration, { notTakenCount: 1 },
+  "扫码前回答「没休息」必须随下班打卡提交");
 
 assert.equal(canOpenAttendanceQrScanner({ isLoading: false, isPunching: false, isToday: true, hasAuthorizedStores: true }), true);
 assert.equal(canOpenAttendanceQrScanner({ isLoading: false, isPunching: false, isToday: true, hasAuthorizedStores: false }), false);
