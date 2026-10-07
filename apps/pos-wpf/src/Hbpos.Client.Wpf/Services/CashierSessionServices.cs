@@ -353,11 +353,19 @@ public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLogin
         }
     }
 
+    /// <summary>
+    /// 服务端 cashiers/barcode-login 只以 401（条码无效/停用、设备认证失败）、403（设备越权）和 400（请求体校验）表达在线拒绝；
+    /// 404/405 只会来自后端发布、网关切换或路由未就绪，与 DeviceApiClient.IsGatewayStatus 口径一致按不可用处理，
+    /// 让收银员在发布窗口内仍能走离线缓存登录，而不是被误报"条码无效或已停用"。
+    /// </summary>
     private static bool IsServiceUnavailable(HttpStatusCode statusCode)
     {
         var numericStatusCode = (int)statusCode;
         return numericStatusCode >= 500 ||
-            statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
+            statusCode is HttpStatusCode.NotFound
+                or HttpStatusCode.MethodNotAllowed
+                or HttpStatusCode.RequestTimeout
+                or HttpStatusCode.TooManyRequests;
     }
 }
 

@@ -715,6 +715,87 @@ public sealed class CashierPermissionTests
     }
 
     [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task Cashier_login_api_client_treats_gateway_status_as_api_unavailable(
+        HttpStatusCode statusCode)
+    {
+        var client = CreateStaticCashierLoginApiClient(statusCode, "<html>Not Found</html>");
+
+        var attempt = await client.LoginAsync(new CashierBarcodeLoginRequest("S001", "BAR-1", "POS-01"));
+
+        Assert.True(attempt.IsApiUnavailable);
+        Assert.False(attempt.IsOnlineRejected);
+        Assert.Equal("CASHIER_LOGIN_API_UNAVAILABLE", attempt.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task Cashier_login_falls_back_to_offline_cache_on_gateway_status(
+        HttpStatusCode statusCode)
+    {
+        // 先在线登录一次写入离线缓存，再模拟后端发布期间网关返回 404/405：应走离线缓存而不是报条码无效。
+        var settings = new InMemoryAppSettingsRepository();
+        var protector = new PassthroughProtector();
+        await new CashierLoginService(
+                new SequenceCashierLoginApiClient(CashierLoginAttempt.OnlineAccepted(CreateSession())),
+                settings,
+                protector)
+            .LoginAsync("S001", "POS-01", "BAR-1");
+        var service = new CashierLoginService(
+            CreateStaticCashierLoginApiClient(statusCode, "<html>Not Found</html>"),
+            settings,
+            protector);
+
+        var result = await service.LoginAsync("S001", "POS-01", "BAR-1");
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Session!.IsOfflineCached);
+        Assert.Equal("C001", result.Session.CashierId);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "{\"success\":false,\"errorCode\":\"CASHIER_LOGIN_FAILED\",\"message\":\"收银员条码无效或已停用\"}")]
+    [InlineData(HttpStatusCode.Forbidden, "{\"success\":false,\"errorCode\":\"DEVICE_SCOPE_FORBIDDEN\",\"message\":\"Device is not authorized for this store.\"}")]
+    public async Task Cashier_login_does_not_fall_back_to_offline_cache_on_server_rejection(
+        HttpStatusCode statusCode,
+        string body)
+    {
+        var settings = new InMemoryAppSettingsRepository();
+        var protector = new PassthroughProtector();
+        await new CashierLoginService(
+                new SequenceCashierLoginApiClient(CashierLoginAttempt.OnlineAccepted(CreateSession())),
+                settings,
+                protector)
+            .LoginAsync("S001", "POS-01", "BAR-1");
+        var service = new CashierLoginService(
+            CreateStaticCashierLoginApiClient(statusCode, body, "application/json"),
+            settings,
+            protector);
+
+        var result = await service.LoginAsync("S001", "POS-01", "BAR-1");
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Session);
+    }
+
+    private static CashierLoginApiClient CreateStaticCashierLoginApiClient(
+        HttpStatusCode statusCode,
+        string body,
+        string mediaType = "text/html")
+    {
+        return new CashierLoginApiClient(new HttpClient(new StaticResponseHandler(
+            new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(body, Encoding.UTF8, mediaType)
+            }))
+        {
+            BaseAddress = new Uri("http://localhost/")
+        });
+    }
+
+    [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.Forbidden)]
     public async Task Cashier_session_refresh_api_client_treats_auth_rejection_as_online_rejection(
