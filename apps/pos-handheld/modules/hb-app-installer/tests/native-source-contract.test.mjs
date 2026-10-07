@@ -9,6 +9,7 @@ const [
   nativeSource,
   downloaderSource,
   signerPolicySource,
+  backgroundWorkSource,
 ] = await Promise.all([
   readFile(new URL("src/HBAppInstaller.types.ts", moduleRoot), "utf8"),
   readFile(new URL("src/HBAppInstallerModule.ts", moduleRoot), "utf8"),
@@ -29,6 +30,13 @@ const [
   readFile(
     new URL(
       "android/src/main/java/expo/modules/hbappinstaller/HBAppInstallerSignerPolicy.kt",
+      moduleRoot,
+    ),
+    "utf8",
+  ),
+  readFile(
+    new URL(
+      "android/src/main/java/expo/modules/hbappinstaller/HBAppInstallerBackgroundWork.kt",
       moduleRoot,
     ),
     "utf8",
@@ -56,9 +64,31 @@ test("installVerifiedApk uses one strongly typed metadata object", () => {
   );
   assert.match(
     nativeSource,
-    /AsyncFunction\("installVerifiedApk"\) \{ request: InstallVerifiedApkRequestRecord ->/,
+    /AsyncFunction\("installVerifiedApk"\) Coroutine \{ request: InstallVerifiedApkRequestRecord ->/,
   );
   assert.match(nativeSource, /AsyncFunction\("verifyDownloadedApk"\)/);
+});
+
+// Expo 全部模块的 AsyncFunction 共用一条线程；下载/整包校验直接阻塞在上面时，
+// 每个 HBPOS 请求读收银员授权（SecureStore）都要排队，联网查价、结账、收款要等下载完才有结果。
+test("下载、安装前复验、单独校验都移出 Expo 共享异步队列", () => {
+  for (const [name, record] of [
+    ["downloadApk", "DownloadApkRequestRecord"],
+    ["installVerifiedApk", "InstallVerifiedApkRequestRecord"],
+    ["verifyDownloadedApk", "InstallVerifiedApkRequestRecord"],
+  ]) {
+    assert.match(
+      nativeSource,
+      new RegExp(
+        `AsyncFunction\\("${name}"\\) Coroutine \\{ request: ${record} ->\\s*runOffModulesQueue \\{ ${name}\\(request\\) \\}\\s*\\}`,
+      ),
+      `${name} 必须用 Coroutine 并经 runOffModulesQueue 执行`,
+    );
+  }
+  assert.match(
+    backgroundWorkSource,
+    /internal suspend fun <T> runOffModulesQueue\(block: \(\) -> T\): T = runInterruptible\(Dispatchers\.IO\) \{ block\(\) \}/,
+  );
 });
 
 test("unknown-app-source permission has an explicit query and current-package settings contract", () => {
@@ -81,15 +111,16 @@ test("all native file and install boundaries share the permission guard before s
     'AsyncFunction("getDownloadDirectory")',
     'AsyncFunction("downloadApk")',
   );
+  // 重活已移到共享队列外的私有函数，边界切实际执行体而不是 AsyncFunction 派发壳。
   const downloadBoundary = sourceBetween(
     nativeSource,
-    'AsyncFunction("downloadApk")',
-    'AsyncFunction("removeDownloadedApk")',
+    "private fun downloadApk(",
+    "private fun installVerifiedApk(",
   );
   const installBoundary = sourceBetween(
     nativeSource,
-    'AsyncFunction("installVerifiedApk")',
-    "private fun requireContext",
+    "private fun installVerifiedApk(",
+    "private fun verifyDownloadedApk(",
   );
 
   assert.match(

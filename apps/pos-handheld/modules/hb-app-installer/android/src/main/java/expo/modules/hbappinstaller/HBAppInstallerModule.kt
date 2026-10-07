@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
@@ -147,37 +148,12 @@ class HBAppInstallerModule : Module() {
       Uri.fromFile(directory.canonicalFile).toString()
     }
 
-    AsyncFunction("downloadApk") { request: DownloadApkRequestRecord ->
-      val context = requireContext()
-      val metadata = request.validated()
-      val directory = downloadDirectory(context, persistent = false)
-      ensureDirectory(directory)
-      val destination = validatedDownloadTarget(context, metadata.destinationFileUri)
-      val result = HBAppInstallerDownloader().download(
-        ApkDownloadRequest(
-          sourceUrl = metadata.url,
-          destinationFile = destination,
-          destinationFileUri = metadata.destinationFileUri,
-          expectedSizeBytes = metadata.expectedSizeBytes,
-          trustedOrigins = metadata.trustedOrigins,
-        ),
-        onProgress = ApkDownloadProgressListener { bytesWritten, totalBytes ->
-          // 带上 JS 传入的原始目标 URI，JS 只认自己这次下载的进度。
-          sendEvent(
-            DOWNLOAD_PROGRESS_EVENT,
-            mapOf(
-              "destinationFileUri" to metadata.destinationFileUri,
-              "bytesWritten" to bytesWritten.toDouble(),
-              "totalBytes" to totalBytes.toDouble(),
-            ),
-          )
-        },
-      )
-      mapOf(
-        "fileUri" to result.fileUri,
-        "sizeBytes" to result.sizeBytes,
-        "finalUrl" to result.finalUrl,
-      )
+    // 下载、安装前复验、单独校验都要读写整包（下载可达数分钟），一律移出 Expo 共享异步队列，
+    // 否则期间所有 Expo 异步调用（含每个 HBPOS 请求读收银员授权）都要排队等它结束。
+    // JS 侧 AndroidNativeUpdateAdapter 已把同一目标的校验→下载→复验→清理串成单链，
+    // 离开共享队列后不会因并发操作同一 APK 文件。
+    AsyncFunction("downloadApk") Coroutine { request: DownloadApkRequestRecord ->
+      runOffModulesQueue { downloadApk(request) }
     }
 
     AsyncFunction("removeDownloadedApk") { fileUri: String ->
@@ -190,42 +166,82 @@ class HBAppInstallerModule : Module() {
       }
     }
 
-    AsyncFunction("installVerifiedApk") { request: InstallVerifiedApkRequestRecord ->
-      val context = requireContext()
-      val metadata = request.validated()
-      val archiveInfo = validateDownloadedApk(context, metadata)
-      requireInstallPermission(context)
+    AsyncFunction("installVerifiedApk") Coroutine { request: InstallVerifiedApkRequestRecord ->
+      runOffModulesQueue { installVerifiedApk(request) }
+    }
 
-      val apk = validatedLocalApk(context, metadata.fileUri)
-      val contentUri = FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.hbappinstaller.fileprovider",
-        apk,
-      )
-      val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(contentUri, APK_MIME_TYPE)
-        clipData = ClipData.newRawUri("HB POS update", contentUri)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      }
-      if (intent.resolveActivity(context.packageManager) == null) {
-        throw InstallerException(
-          "APP_INSTALLER_UNAVAILABLE",
-          "Android 系统安装器不可用。",
+    AsyncFunction("verifyDownloadedApk") Coroutine { request: InstallVerifiedApkRequestRecord ->
+      runOffModulesQueue { verifyDownloadedApk(request) }
+    }
+  }
+
+  private fun downloadApk(request: DownloadApkRequestRecord): Map<String, Any> {
+    val context = requireContext()
+    val metadata = request.validated()
+    val directory = downloadDirectory(context, persistent = false)
+    ensureDirectory(directory)
+    val destination = validatedDownloadTarget(context, metadata.destinationFileUri)
+    val result = HBAppInstallerDownloader().download(
+      ApkDownloadRequest(
+        sourceUrl = metadata.url,
+        destinationFile = destination,
+        destinationFileUri = metadata.destinationFileUri,
+        expectedSizeBytes = metadata.expectedSizeBytes,
+        trustedOrigins = metadata.trustedOrigins,
+      ),
+      onProgress = ApkDownloadProgressListener { bytesWritten, totalBytes ->
+        // 带上 JS 传入的原始目标 URI，JS 只认自己这次下载的进度。
+        sendEvent(
+          DOWNLOAD_PROGRESS_EVENT,
+          mapOf(
+            "destinationFileUri" to metadata.destinationFileUri,
+            "bytesWritten" to bytesWritten.toDouble(),
+            "totalBytes" to totalBytes.toDouble(),
+          ),
         )
-      }
-      context.startActivity(intent)
-      mapOf(
-        "launched" to true,
-        "packageName" to archiveInfo.packageName,
-        "versionCode" to metadata.expectedVersionCode,
+      },
+    )
+    return mapOf(
+      "fileUri" to result.fileUri,
+      "sizeBytes" to result.sizeBytes,
+      "finalUrl" to result.finalUrl,
+    )
+  }
+
+  private fun installVerifiedApk(request: InstallVerifiedApkRequestRecord): Map<String, Any> {
+    val context = requireContext()
+    val metadata = request.validated()
+    val archiveInfo = validateDownloadedApk(context, metadata)
+    requireInstallPermission(context)
+
+    val apk = validatedLocalApk(context, metadata.fileUri)
+    val contentUri = FileProvider.getUriForFile(
+      context,
+      "${context.packageName}.hbappinstaller.fileprovider",
+      apk,
+    )
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+      setDataAndType(contentUri, APK_MIME_TYPE)
+      clipData = ClipData.newRawUri("HB POS update", contentUri)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    if (intent.resolveActivity(context.packageManager) == null) {
+      throw InstallerException(
+        "APP_INSTALLER_UNAVAILABLE",
+        "Android 系统安装器不可用。",
       )
     }
+    context.startActivity(intent)
+    return mapOf(
+      "launched" to true,
+      "packageName" to archiveInfo.packageName,
+      "versionCode" to metadata.expectedVersionCode,
+    )
+  }
 
-    AsyncFunction("verifyDownloadedApk") { request: InstallVerifiedApkRequestRecord ->
-      validateDownloadedApk(requireContext(), request.validated())
-      Unit
-    }
+  private fun verifyDownloadedApk(request: InstallVerifiedApkRequestRecord) {
+    validateDownloadedApk(requireContext(), request.validated())
   }
 
   private fun validateDownloadedApk(
