@@ -851,6 +851,7 @@
   <data name="dailyClose.title" xml:space="preserve"><value>Daily Settlement</value></data>
   <data name="dailyClose.refresh" xml:space="preserve"><value>Refresh</value></data>
   <data name="dailyClose.saveFinalize" xml:space="preserve"><value>Save &amp; Finalize</value></data>
+  <data name="dailyClose.saveFinalize.autoLinklySettlement" xml:space="preserve"><value>Also sends Linkly settlement</value></data>
   <data name="dailyClose.cashCounter" xml:space="preserve"><value>Cash Count</value></data>
   <data name="dailyClose.apply" xml:space="preserve"><value>Apply</value></data>
   <data name="dailyClose.noteTotal" xml:space="preserve"><value>Note Total</value></data>

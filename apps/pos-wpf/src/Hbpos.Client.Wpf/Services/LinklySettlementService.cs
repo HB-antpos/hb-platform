@@ -40,6 +40,13 @@ public interface ILinklySettlementService
             false,
             settlement,
             "Manual Linkly settlement resolution is not supported by this service."));
+
+    // 日结保存后是否自动发送 Linkly 结算；默认不自动，未实现的服务不能意外触发银行操作。
+    Task<bool> ShouldAutoSettleAfterDailyCloseAsync(
+        PosSessionState session,
+        DateTime businessDate,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
 }
 
 public sealed class LinklySettlementService(
@@ -49,8 +56,47 @@ public sealed class LinklySettlementService(
     ILinklyBankReceiptPrinter receiptPrinter,
     ILinklyBackendTerminalClient? backendTerminalClient = null,
     ILinklySettlementUploadScheduler? settlementUploadScheduler = null,
-    ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null) : ILinklySettlementService
+    ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
+    IPaymentMethodSettingsService? paymentMethodSettingsService = null) : ILinklySettlementService
 {
+    public async Task<bool> ShouldAutoSettleAfterDailyCloseAsync(
+        PosSessionState session,
+        DateTime businessDate,
+        CancellationToken cancellationToken = default)
+    {
+        // 结算只能针对今天；补做昨天的日结不能把今天的终端批次结掉。
+        if (businessDate.Date != DateTime.Today || paymentMethodSettingsService is null)
+        {
+            return false;
+        }
+
+        // 重新从本地设置读取，避免内存里还是默认值（UseManualCard=false）时误判为集成刷卡。
+        var paymentMethods = await paymentMethodSettingsService.LoadAsync(cancellationToken);
+        if (paymentMethods.UseManualCard)
+        {
+            // 手动刷卡（独立刷卡机）模式下 POS 不连终端，结算由刷卡机自己完成。
+            return false;
+        }
+
+        var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
+        if (settings.Processor != CardProcessorKind.Linkly)
+        {
+            return false;
+        }
+
+        // 一天可以保存多次日结：今天已有成功结算就不再重复结算；
+        // 有待定/结果未知的记录须由收银员在结算页处理，自动流程不碰。失败的记录允许自动重试。
+        var existingSettlements = await settlementRepository.GetByBusinessDateAsync(
+            session.StoreCode,
+            session.DeviceCode,
+            businessDate,
+            cancellationToken);
+        return !existingSettlements.Any(settlement =>
+            settlement.Status is LocalLinklySettlementStatus.Succeeded
+                or LocalLinklySettlementStatus.Pending
+                or LocalLinklySettlementStatus.Unknown);
+    }
+
     public async Task<LinklySettlementExecutionResult> SettleAndPrintAsync(
         PosSessionState session,
         DateTime businessDate,
