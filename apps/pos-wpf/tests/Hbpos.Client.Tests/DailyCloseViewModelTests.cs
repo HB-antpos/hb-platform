@@ -923,6 +923,57 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
+    public async Task SaveAndPrintCommand_auto_settlement_pinpad_offline_shows_friendly_message()
+    {
+        var settlementService = new FakeLinklySettlementService
+        {
+            AutoSettleAfterDailyClose = true,
+            FailedResponse = ("PF", "PINpad Offline", false)
+        };
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            returnToPos: () => { },
+            linklySettlementService: settlementService);
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsLinklySettlementTabSelected);
+        Assert.Equal(
+            "Daily close saved and sent to printer. The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle & Print on the Linkly Settlement tab to retry.",
+            viewModel.StatusMessage);
+        // 银行原文仍保留在结算记录里作证据。
+        Assert.Equal("PINpad Offline", Assert.Single(viewModel.Settlements).ResponseText);
+    }
+
+    [Theory]
+    [InlineData("PF", true, "Settlement failed, but the bank response receipt was printed: PINpad Offline")]
+    [InlineData("XX", false, "Settlement failed: PINpad Offline")]
+    public async Task Linkly_settlement_failure_only_maps_receiptless_pf_to_offline_message(
+        string responseCode,
+        bool hasReceipt,
+        string expectedStatus)
+    {
+        var settlementService = new FakeLinklySettlementService
+        {
+            FailedResponse = (responseCode, "PINpad Offline", hasReceipt)
+        };
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            linklySettlementService: settlementService,
+            confirmLinklySettlementAsync: _ => Task.FromResult(true));
+
+        await viewModel.LoadAsync();
+        await viewModel.SettleAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(expectedStatus, viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task Linkly_settlement_and_reprint_commands_use_persisted_record_without_resubmitting()
     {
         var settlementService = new FakeLinklySettlementService();
@@ -1348,6 +1399,9 @@ public sealed class DailyCloseViewModelTests
 
         public bool AutoSettleAfterDailyClose { get; init; }
 
+        // 设置后结算返回失败记录：银行响应码、原文，以及是否带回单。
+        public (string ResponseCode, string ResponseText, bool HasReceipt)? FailedResponse { get; init; }
+
         public Exception? AutoSettleCheckException { get; init; }
 
         public Task<bool> ShouldAutoSettleAfterDailyCloseAsync(
@@ -1386,6 +1440,33 @@ public sealed class DailyCloseViewModelTests
             if (_settlements.FirstOrDefault(item => item.Status == LocalLinklySettlementStatus.Pending) is { } pending)
             {
                 return new LinklySettlementExecutionResult(pending, PrintResult: null);
+            }
+
+            if (FailedResponse is { } failed)
+            {
+                var failedSettlement = new LocalLinklySettlementRecord(
+                    Guid.NewGuid(),
+                    session.StoreCode,
+                    session.DeviceCode,
+                    businessDate,
+                    "LocalIp",
+                    "Production",
+                    "settlement-failed-001",
+                    LocalLinklySettlementStatus.Failed,
+                    failed.ResponseCode,
+                    failed.ResponseText,
+                    SettlementData: null,
+                    failed.HasReceipt ? ["SETTLEMENT FAILED"] : [],
+                    DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow,
+                    FirstPrintedAt: null,
+                    LastPrintedAt: null,
+                    PrintCount: 0,
+                    LastPrintError: null);
+                _settlements.Insert(0, failedSettlement);
+                return new LinklySettlementExecutionResult(
+                    failedSettlement,
+                    failed.HasReceipt ? new ReceiptPrintResult(true, "printed") : null);
             }
 
             var settlement = new LocalLinklySettlementRecord(

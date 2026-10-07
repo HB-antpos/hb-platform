@@ -805,6 +805,7 @@
   <data name="dailyClose.linklySettlement.hint" xml:space="preserve"><value>Only the current business date can be settled; historical records can only be reprinted.</value></data>
   <data name="dailyClose.linklySettlement.refresh" xml:space="preserve"><value>Refresh</value></data>
   <data name="dailyClose.linklySettlement.settleAndPrint" xml:space="preserve"><value>Settle &amp; Print</value></data>
+  <data name="dailyClose.linklySettlement.pinpadOffline" xml:space="preserve"><value>The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle &amp; Print on the Linkly Settlement tab to retry.</value></data>
   <data name="dailyClose.linklySettlement.confirm.title" xml:space="preserve"><value>Confirm Linkly settlement</value></data>
   <data name="dailyClose.linklySettlement.confirm.message" xml:space="preserve"><value>Submit the Linkly settlement for {0:d} to the card terminal and print the bank receipt?</value></data>
   <data name="dailyClose.linklySettlement.time" xml:space="preserve"><value>Time</value></data>
@@ -891,6 +892,7 @@
   <data name="linkly.local.amountMustBePositive" xml:space="preserve"><value>Card amount must be greater than zero.</value></data>
   <data name="linkly.local.cancelled" xml:space="preserve"><value>ANZ Linkly transaction was cancelled.</value></data>
   <data name="linkly.local.connectionFailed" xml:space="preserve"><value>ANZ Linkly EFT-Client connection failed.</value></data>
+  <data name="linkly.local.settlementConnectionFailed" xml:space="preserve"><value>Could not connect to the Linkly EFT-Client on this POS, so the settlement was not sent. Make sure the Linkly program is open, then try again.</value></data>
   <data name="linkly.local.pinpadOffline" xml:space="preserve"><value>The card terminal (PINpad) is offline. No payment was taken.</value></data>
   <data name="linkly.local.recoveryPinpadOffline" xml:space="preserve"><value>The card terminal (PINpad) is offline, so the previous transaction could not be checked. Reconnect the card terminal and try again.</value></data>
   <data name="linkly.local.requestSendFailed" xml:space="preserve"><value>ANZ Linkly transaction request could not be sent.</value></data>

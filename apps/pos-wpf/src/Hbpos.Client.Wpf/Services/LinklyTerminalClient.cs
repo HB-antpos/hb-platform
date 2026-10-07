@@ -686,9 +686,12 @@ public sealed class LinklyTerminalClient(
             if (!connected)
             {
                 LogJson("settlement", "failed", "response", settings.Environment, operationId, success: false, reason: "connection-failed");
+                // 结算专用文案：告诉收银员结算没发出去、下一步该检查什么（收款流程仍用通用的连接失败提示）。
                 return new LinklySettlementResult(
                     false,
-                    T("linkly.local.connectionFailed", "ANZ Linkly EFT-Client connection failed."),
+                    T(
+                        "linkly.local.settlementConnectionFailed",
+                        "Could not connect to the Linkly EFT-Client on this POS, so the settlement was not sent. Make sure the Linkly program is open, then try again."),
                     ProviderSubmissionState: ProviderSubmissionState.NotSubmitted);
             }
 
