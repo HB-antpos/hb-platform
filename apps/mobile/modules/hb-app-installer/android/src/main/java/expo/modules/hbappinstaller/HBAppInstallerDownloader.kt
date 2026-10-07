@@ -32,8 +32,12 @@ internal data class ApkDownloadResult(
 /** 只接受受信 HTTPS origin；每一跳重定向都重新校验，且永不自动携带认证 header。 */
 internal class HBAppInstallerDownloader(
   private val connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection },
+  private val elapsedMillis: () -> Long = ::monotonicMillis,
 ) {
-  fun download(request: ApkDownloadRequest): ApkDownloadResult {
+  fun download(
+    request: ApkDownloadRequest,
+    onProgress: ApkDownloadProgressListener? = null,
+  ): ApkDownloadResult {
     validateSize(request.expectedSizeBytes)
     val expectedHash = normalizedSha256(request.expectedSha256Hex, "APP_DOWNLOAD_METADATA_INVALID")
     val trusted = request.trustedOrigins.mapTo(linkedSetOf(), ::parseTrustedOrigin)
@@ -47,7 +51,8 @@ internal class HBAppInstallerDownloader(
       deleteOrThrow(partial)
       partial.createNewFile()
       partial.setExecutable(false, false)
-      val response = streamResponse(request.sourceUrl, trusted, request.expectedSizeBytes, partial)
+      val progress = ApkDownloadProgressReporter(request.expectedSizeBytes, onProgress, elapsedMillis)
+      val response = streamResponse(request.sourceUrl, trusted, request.expectedSizeBytes, partial, progress)
       val actualHash = response.sha256Hex
       if (!MessageDigest.isEqual(actualHash.hexBytes(), expectedHash.hexBytes())) {
         throw InstallerException("APP_DOWNLOAD_SHA256_MISMATCH", "APK 下载内容与已验证 SHA-256 不一致。")
@@ -69,6 +74,7 @@ internal class HBAppInstallerDownloader(
     trustedOrigins: Set<TrustedOrigin>,
     expectedSize: Long,
     partial: File,
+    progress: ApkDownloadProgressReporter,
   ): StreamResult {
     var current = parseTrustedUrl(sourceUrl, trustedOrigins)
     val visited = linkedSetOf<String>()
@@ -103,7 +109,7 @@ internal class HBAppInstallerDownloader(
         if (status !in 200..299) throw InstallerException("APP_DOWNLOAD_HTTP_ERROR", "APK 下载服务器返回 HTTP $status。")
         validateContentType(connection.getHeaderField("Content-Type"))
         validateContentLength(connection.getHeaderField("Content-Length"), expectedSize)
-        return streamExact(connection, partial, expectedSize, current.uri.toASCIIString())
+        return streamExact(connection, partial, expectedSize, current.uri.toASCIIString(), progress)
       } finally {
         connection.disconnect()
       }
@@ -115,12 +121,15 @@ internal class HBAppInstallerDownloader(
     partial: File,
     expectedSize: Long,
     finalUrl: String,
+    progress: ApkDownloadProgressReporter,
   ): StreamResult {
     val digest = MessageDigest.getInstance("SHA-256")
     val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
     var total = 0L
     connection.inputStream.use { input ->
       FileOutputStream(partial, false).use { output ->
+        // 响应头校验通过、开始写盘时先报 0，JS 据此从转圈切换为确定进度。
+        progress.report(0L)
         while (true) {
           if (Thread.currentThread().isInterrupted) {
             throw InstallerException("APP_DOWNLOAD_CANCELLED", "APK 下载已取消。")
@@ -135,6 +144,7 @@ internal class HBAppInstallerDownloader(
           output.write(buffer, 0, count)
           digest.update(buffer, 0, count)
           total = next
+          progress.report(total)
         }
         if (total != expectedSize) throw sizeMismatch()
         // fsync 后才允许 rename，掉电不会把只写到 page cache 的文件当成完成包。

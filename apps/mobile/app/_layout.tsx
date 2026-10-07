@@ -230,6 +230,7 @@ export default function RootLayout() {
                   enabled={automaticUpdatesEnabled}
                   decision={nativeAppUpdate.requiredDecision}
                   phase={nativeAppUpdate.phase}
+                  progress={nativeAppUpdate.progress}
                   readyToInstall={nativeAppUpdate.readyToInstall}
                   onInstall={nativeAppUpdate.installRequired}
                   onRetry={nativeAppUpdate.retry}
@@ -257,6 +258,7 @@ export default function RootLayout() {
                   <View style={styles.appContent}>
                     <NativeAppUpdateStatus
                       phase={nativeAppUpdate.phase}
+                      progress={nativeAppUpdate.progress}
                       onRetry={nativeAppUpdate.retry}
                       onDismiss={nativeAppUpdate.dismiss}
                     />

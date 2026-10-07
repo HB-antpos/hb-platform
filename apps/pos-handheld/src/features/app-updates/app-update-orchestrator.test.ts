@@ -878,3 +878,66 @@ test("用户确认时重新检查策略，已撤回的下载目标不能安装",
   assert.deepEqual(await orchestrator.performSelectedUpdate(), { action: "blocked", reason: "selection-changed" });
   assert.equal(installs, 0);
 });
+
+test("APK 进度走独立通道：只接受准备中的当前目标，不触发门禁重算，结束后清空", async () => {
+  const download = deferred<void>();
+  const captured: {
+    onProgress?: ((progress: { bytesWritten: number; totalBytes: number }) => void) | undefined;
+  } = {};
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0",
+    native: new FakeNative({ ...androidRequired, state: "optional", required: false }),
+    ota: new FakeOta({
+      state: "none",
+      platform: "Android",
+      policyVersion: "none",
+    } as PosHandheldOtaUpdatePolicy),
+    ...transitionDependencies(),
+    safety: { getSafetySnapshot: () => safeSnapshot() },
+    androidNative: {
+      async prepare(_decision, options) {
+        captured.onProgress = options?.onProgress;
+        await download.promise;
+      },
+      async getInstallPermissionStatus() {
+        return "granted" as const;
+      },
+      async openInstallPermissionSettings() {},
+      async install() {
+        throw new Error("progress test must not install");
+      },
+    },
+  });
+  const seen: unknown[] = [];
+  let gateNotifications = 0;
+  orchestrator.subscribeDownloadProgress((progress) => seen.push(progress));
+  orchestrator.subscribe(() => {
+    gateNotifications += 1;
+  });
+
+  const preparing = orchestrator.prepareSelectedUpdate();
+  while (!captured.onProgress) await Promise.resolve();
+  const targetKey = orchestrator.getPresentation().downloadTargetKey;
+  assert.equal(orchestrator.getPresentation().downloadState, "downloading");
+  const gateNotificationsBefore = gateNotifications;
+
+  captured.onProgress({ bytesWritten: 512, totalBytes: 2_048 });
+  assert.deepEqual(orchestrator.getDownloadProgress(), {
+    targetKey,
+    bytesWritten: 512,
+    totalBytes: 2_048,
+  });
+  assert.equal(gateNotifications, gateNotificationsBefore);
+
+  download.resolve();
+  await preparing;
+  assert.equal(orchestrator.getDownloadProgress(), null);
+  // 准备结束后迟到的原生事件直接丢弃。
+  captured.onProgress({ bytesWritten: 2_048, totalBytes: 2_048 });
+  assert.equal(orchestrator.getDownloadProgress(), null);
+  assert.deepEqual(seen, [
+    null,
+    { targetKey, bytesWritten: 512, totalBytes: 2_048 },
+    null,
+  ]);
+});

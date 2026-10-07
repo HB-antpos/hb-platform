@@ -5,6 +5,8 @@ import type {
   InstallPermissionStatus as NativeInstallPermissionStatus,
 } from "../../../modules/hb-app-installer/src/HBAppInstaller.types";
 
+import type { ApkDownloadProgress } from "./apk-download-progress";
+
 import {
   ANDROID_APK_MAX_SIZE_BYTES,
   normalizePosHandheldUpdatePolicy,
@@ -17,6 +19,12 @@ export type AndroidApkDownloadRequest = Readonly<{
   expectedSizeBytes: number;
   maximumSizeBytes: number;
   trustedOrigins: readonly string[];
+  /** 仅用于界面展示；不会传给原生，也不参与任何校验。 */
+  onProgress?: (progress: ApkDownloadProgress) => void;
+}>;
+
+export type AndroidNativeUpdatePrepareOptions = Readonly<{
+  onProgress?: (progress: ApkDownloadProgress) => void;
 }>;
 
 export type DownloadedAndroidApk = Readonly<{
@@ -49,7 +57,10 @@ export interface AndroidAppInstallerPort {
 export interface AndroidNativeUpdatePort {
   getInstallPermissionStatus(): Promise<AndroidInstallPermissionStatus>;
   openInstallPermissionSettings(): Promise<void>;
-  prepare(decision: PosHandheldUpdatePolicy): Promise<void>;
+  prepare(
+    decision: PosHandheldUpdatePolicy,
+    options?: AndroidNativeUpdatePrepareOptions,
+  ): Promise<void>;
   install(
     decision: PosHandheldUpdatePolicy,
   ): Promise<InstallVerifiedApkResult>;
@@ -113,7 +124,10 @@ export class AndroidNativeUpdateAdapter implements AndroidNativeUpdatePort {
     }
   }
 
-  public async prepare(input: PosHandheldUpdatePolicy): Promise<void> {
+  public async prepare(
+    input: PosHandheldUpdatePolicy,
+    options?: AndroidNativeUpdatePrepareOptions,
+  ): Promise<void> {
     const decision = validateAndroidDecision(input, this.options, this.trustedOrigins);
     const fingerprint = androidDecisionFingerprint(decision);
     if (this.prepared?.fingerprint === fingerprint) return;
@@ -125,9 +139,9 @@ export class AndroidNativeUpdateAdapter implements AndroidNativeUpdatePort {
         if (waitingForFingerprint === fingerprint) throw error;
       }
       if (this.prepared?.fingerprint === fingerprint) return;
-      return this.prepare(input);
+      return this.prepare(input, options);
     }
-    const operation = this.prepareFresh(decision, fingerprint);
+    const operation = this.prepareFresh(decision, fingerprint, options?.onProgress);
     this.preparing = operation;
     this.preparingFingerprint = fingerprint;
     try {
@@ -143,6 +157,7 @@ export class AndroidNativeUpdateAdapter implements AndroidNativeUpdatePort {
   private async prepareFresh(
     decision: PosHandheldUpdatePolicy,
     fingerprint: string,
+    onProgress: AndroidNativeUpdatePrepareOptions["onProgress"],
   ): Promise<void> {
     const downloadUrl = requiredTrustedDownloadUrl(decision.downloadUrl, this.trustedOrigins);
     const directoryUri = await this.options.installer.getDownloadDirectory();
@@ -171,6 +186,7 @@ export class AndroidNativeUpdateAdapter implements AndroidNativeUpdatePort {
         expectedSizeBytes: decision.fileSize!,
         maximumSizeBytes: ANDROID_APK_MAX_SIZE_BYTES,
         trustedOrigins: this.trustedOriginValues,
+        ...(onProgress ? { onProgress } : {}),
       });
       validateDownloadedArtifact(downloaded, destinationFileUri, decision.fileSize!, this.trustedOrigins);
       await this.options.installer.verifyDownloadedApk(request);

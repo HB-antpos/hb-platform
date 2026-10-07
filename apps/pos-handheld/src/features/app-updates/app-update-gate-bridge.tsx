@@ -16,11 +16,13 @@ import {
   isAndroidInstallPermissionRequiredError,
   type AndroidInstallPermissionStatus,
 } from "./android-native-update-adapter";
+import { ApkDownloadProgressBar } from "./apk-download-progress-bar";
 import {
   resolveAppUpdateCopy,
   type AppUpdateCopyKey,
 } from "./app-update-copy";
 import type {
+  AppUpdateDownloadProgress,
   AppUpdateOrchestrator,
   AppUpdatePresentation,
 } from "./app-update-orchestrator";
@@ -54,6 +56,17 @@ export function AppUpdateGateBridge() {
   const router = useRouter();
   const updates = runtime.services?.appUpdates ?? null;
   const presentation = useUpdatePresentation(updates);
+  const latestDownloadProgress = useDownloadProgress(updates);
+  // 只展示当前下载目标的进度；旧原生包没有进度事件时保持原有文案。
+  const downloadProgress =
+    presentation.downloadState === "downloading" &&
+    latestDownloadProgress !== null &&
+    latestDownloadProgress.targetKey === presentation.downloadTargetKey
+      ? latestDownloadProgress
+      : null;
+  const downloadProgressBar = downloadProgress ? (
+    <ApkDownloadProgressBar progress={downloadProgress} />
+  ) : null;
   const copy = resolveAppUpdateCopy(
     i18n.resolvedLanguage ?? i18n.language,
   );
@@ -167,6 +180,7 @@ export function AppUpdateGateBridge() {
           <Text accessibilityLiveRegion="polite" style={styles.body}>
             {copy[downloadFailed ? "download.failed" : "download.running"]}
           </Text>
+          {downloadProgressBar}
           {downloadFailed ? (
             <PosPressable accessibilityRole="button" testID="app-update-download-retry"
               style={styles.secondaryButton} onPress={() => { void updates?.prepareSelectedUpdate(); }}>
@@ -247,6 +261,7 @@ export function AppUpdateGateBridge() {
           copy[required ? "required.body" : presentation.downloadState === "ready"
             ? "download.readyBody" : "optional.body"]}
       </Text>
+      {downloadProgressBar}
       {errorKey ? (
         <Text accessibilityRole="alert" style={styles.error}>
           {copy[errorKey]}
@@ -388,6 +403,21 @@ function useUpdatePresentation(
   );
   const getSnapshot = useCallback(
     () => updates?.getPresentation() ?? HIDDEN_PRESENTATION,
+    [updates],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+function useDownloadProgress(
+  updates: AppUpdateOrchestrator | null,
+): AppUpdateDownloadProgress | null {
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      updates?.subscribeDownloadProgress(listener) ?? (() => undefined),
+    [updates],
+  );
+  const getSnapshot = useCallback(
+    () => updates?.getDownloadProgress() ?? null,
     [updates],
   );
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

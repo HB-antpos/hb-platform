@@ -23,6 +23,7 @@ import {
   checkAndDownloadNativeAppUpdate,
   getBuildBoundNativeAppDownloadUrl,
   type NativeAppBuildInfo,
+  type NativeAppDownloadProgress,
   type NativeAppUpdatePhase,
 } from "./native-app-update";
 
@@ -87,7 +88,13 @@ function getNativeAppInstallerTrustedOrigins(
 }
 
 export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
-  const [phase, setPhase] = useState<NativeAppUpdatePhase | "failed" | null>(null);
+  const [phase, setPhaseState] = useState<NativeAppUpdatePhase | "failed" | null>(null);
+  const [progress, setProgress] = useState<NativeAppDownloadProgress | null>(null);
+  // 进度只属于当前这次下载：任何阶段切换都先清空，等新下载的进度事件再填。
+  const setPhase = (next: NativeAppUpdatePhase | "failed" | null) => {
+    setProgress(null);
+    setPhaseState(next);
+  };
   const optionsRef = useRef(options);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const inFlightRef = useRef(false);
@@ -309,7 +316,22 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
         getDownloadDirectory: () => downloadDirectory,
         getDownloadUrl: (build) => getBuildBoundNativeAppDownloadUrl(apiClient.defaults.baseURL, build, buildProfile),
         getFileInfo: FileSystem.getInfoAsync,
-        downloadFile: FileSystem.downloadAsync,
+        downloadFile: async (url, fileUri, onBytesWritten) => {
+          if (!onBytesWritten) {
+            return FileSystem.downloadAsync(url, fileUri);
+          }
+          // 兼容下载器（无原生安装模块的旧包）用可续传下载拿字节进度，完成语义与 downloadAsync 一致。
+          const result = await FileSystem.createDownloadResumable(
+            url,
+            fileUri,
+            {},
+            (event) => onBytesWritten(event.totalBytesWritten),
+          ).downloadAsync();
+          if (!result) {
+            throw new Error("APK 下载未完成");
+          }
+          return result;
+        },
         deleteFile: (fileUri) => FileSystem.deleteAsync(fileUri, { idempotent: true }),
         moveFile: (from, to) => FileSystem.moveAsync({ from, to }),
         readFileChunk: async (fileUri, position, length) => {
@@ -329,6 +351,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
         ),
         nativeInstaller,
         onPhase: setPhase,
+        onProgress: setProgress,
       });
       setPhase(null);
 
@@ -426,6 +449,7 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
   const androidEnabled = options.enabled && Platform.OS === "android";
   return {
     phase: androidEnabled ? phase : null,
+    progress: androidEnabled && phase === "downloading" ? progress : null,
     retry: () => { void check(optionsRef.current); },
     dismiss: () => setPhase(null),
     requiredDecision: androidEnabled ? requiredDecision : null,

@@ -34,6 +34,17 @@ export type NativeAppUpdateCheckResult =
 export type NativeAppUpdatePlatform = "android" | "ios" | "web" | string;
 export type NativeAppUpdatePhase = "checking" | "downloading" | "verifying";
 
+/** 已写入字节与服务端已验证总大小；只在 downloading 阶段有意义。 */
+export type NativeAppDownloadProgress = Readonly<{
+  bytesWritten: number;
+  totalBytes: number;
+}>;
+
+type NativeApkDownloadProgressEvent = {
+  destinationFileUri?: unknown;
+  bytesWritten?: unknown;
+};
+
 export type NativeAppUpdateApiClient = {
   get: (
     url: string,
@@ -81,11 +92,19 @@ export type NativeApkInstallerPort = {
     versionCode: number;
   }>;
   removeDownloadedApk: (fileUri: string) => Promise<void>;
+  addListener?: (
+    eventName: "onDownloadProgress",
+    listener: (event: NativeApkDownloadProgressEvent) => void,
+  ) => { remove?: () => void } | void;
 };
 
 export type NativeAppUpdateDependencies = {
   apiClient: NativeAppUpdateApiClient;
-  downloadFile: (url: string, fileUri: string) => Promise<{
+  downloadFile: (
+    url: string,
+    fileUri: string,
+    onBytesWritten?: (bytesWritten: number) => void,
+  ) => Promise<{
     uri: string;
     status?: number;
     mimeType?: string | null;
@@ -105,6 +124,7 @@ export type NativeAppUpdateDependencies = {
   readDirectory?: (directory: string) => Promise<string[]>;
   nativeInstaller?: NativeApkInstallerPort | null;
   onPhase?: (phase: NativeAppUpdatePhase) => void;
+  onProgress?: (progress: NativeAppDownloadProgress) => void;
   platform: NativeAppUpdatePlatform;
 };
 
@@ -346,6 +366,59 @@ function isRejectedApkMimeType(mimeType: string | null | undefined) {
     || normalized.endsWith("+xml");
 }
 
+/**
+ * 只在整数百分比前进时转发，写满必转发一次。原生侧已按时间节流，
+ * 兼容下载器的回调频率不受控，这里统一限制 React 状态更新次数（最多约 101 次）。
+ */
+export function createDownloadProgressForwarder(
+  totalBytes: number,
+  onProgress: (progress: NativeAppDownloadProgress) => void,
+) {
+  let lastPercent = -1;
+  return (bytesWritten: number) => {
+    if (!Number.isFinite(bytesWritten) || !(totalBytes > 0)) {
+      return;
+    }
+    const written = Math.min(Math.max(Math.floor(bytesWritten), 0), totalBytes);
+    const percent = Math.floor((written * 100) / totalBytes);
+    if (percent <= lastPercent) {
+      return;
+    }
+    lastPercent = percent;
+    onProgress({ bytesWritten: written, totalBytes });
+  };
+}
+
+function subscribeNativeDownloadProgress(
+  installer: NativeApkInstallerPort,
+  fileUri: string,
+  totalBytes: number,
+  onProgress: NativeAppUpdateDependencies["onProgress"],
+) {
+  if (!onProgress || typeof installer.addListener !== "function") {
+    return () => undefined;
+  }
+  const forward = createDownloadProgressForwarder(totalBytes, onProgress);
+  try {
+    const subscription = installer.addListener("onDownloadProgress", (event) => {
+      // 只认本次下载目标；其他下载或格式异常的事件一律忽略。
+      if (event?.destinationFileUri === fileUri && typeof event.bytesWritten === "number") {
+        forward(event.bytesWritten);
+      }
+    });
+    return () => {
+      try {
+        subscription?.remove?.();
+      } catch {
+        // 退订失败不影响下载结果。
+      }
+    };
+  } catch {
+    // 订阅失败时退回只显示阶段。
+    return () => undefined;
+  }
+}
+
 async function downloadJsVerifiedApk(
   dependencies: NativeAppUpdateDependencies,
   build: NativeAppBuildInfo,
@@ -357,7 +430,10 @@ async function downloadJsVerifiedApk(
   await deleteBestEffort(dependencies, markerFileUri(finalFileUri));
   try {
     dependencies.onPhase?.("downloading");
-    const download = await dependencies.downloadFile(downloadUrl, temporaryFileUri);
+    const onBytesWritten = dependencies.onProgress
+      ? createDownloadProgressForwarder(build.artifactSize, dependencies.onProgress)
+      : undefined;
+    const download = await dependencies.downloadFile(downloadUrl, temporaryFileUri, onBytesWritten);
     dependencies.onPhase?.("verifying");
     if (download.status != null && (download.status < 200 || download.status >= 300)) {
       throw new Error(`APK 下载失败，HTTP 状态码: ${download.status}`);
@@ -433,16 +509,27 @@ async function prepareNativeVerifiedApk(
 
   await installer.removeDownloadedApk(fileUri).catch(() => undefined);
   try {
-    // 旧原生包没有进度事件，只上报实际阶段，不能伪造百分比。
     dependencies.onPhase?.("downloading");
-    const downloaded = await installer.downloadApk({
-      url: downloadUrl,
-      destinationFileUri: fileUri,
-      expectedSizeBytes: build.artifactSize,
-      expectedSha256Hex: build.artifactSha256,
-      maximumSizeBytes: MAX_APK_SIZE_BYTES,
-      trustedOrigins: dependencies.getTrustedOrigins(build),
-    });
+    // 新原生包逐块发 onDownloadProgress；旧原生包没有该事件，只上报阶段，不能伪造百分比。
+    const stopProgress = subscribeNativeDownloadProgress(
+      installer,
+      fileUri,
+      build.artifactSize,
+      dependencies.onProgress,
+    );
+    let downloaded: Awaited<ReturnType<NativeApkInstallerPort["downloadApk"]>>;
+    try {
+      downloaded = await installer.downloadApk({
+        url: downloadUrl,
+        destinationFileUri: fileUri,
+        expectedSizeBytes: build.artifactSize,
+        expectedSha256Hex: build.artifactSha256,
+        maximumSizeBytes: MAX_APK_SIZE_BYTES,
+        trustedOrigins: dependencies.getTrustedOrigins(build),
+      });
+    } finally {
+      stopProgress();
+    }
     dependencies.onPhase?.("verifying");
     if (
       downloaded.fileUri !== fileUri

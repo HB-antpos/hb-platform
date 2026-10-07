@@ -39,6 +39,7 @@ internal class HBAppInstallerDownloader(
   private val maximumRedirects: Int = DEFAULT_MAXIMUM_REDIRECTS,
   private val connectTimeoutMillis: Int = DEFAULT_CONNECT_TIMEOUT_MILLIS,
   private val readTimeoutMillis: Int = DEFAULT_READ_TIMEOUT_MILLIS,
+  private val elapsedMillis: () -> Long = ::monotonicMillis,
 ) {
   init {
     require(maximumRedirects >= 0)
@@ -46,7 +47,10 @@ internal class HBAppInstallerDownloader(
     require(readTimeoutMillis > 0)
   }
 
-  fun download(request: ApkDownloadRequest): ApkDownloadResult {
+  fun download(
+    request: ApkDownloadRequest,
+    onProgress: ApkDownloadProgressListener? = null,
+  ): ApkDownloadResult {
     var partialFile: File? = null
     var completed = false
     var destination = request.destinationFile
@@ -72,6 +76,11 @@ internal class HBAppInstallerDownloader(
         trustedOrigins = trustedOrigins,
         expectedSizeBytes = request.expectedSizeBytes,
         partialFile = partialFile,
+        progress = ApkDownloadProgressReporter(
+          totalBytes = request.expectedSizeBytes,
+          listener = onProgress,
+          elapsedMillis = elapsedMillis,
+        ),
       )
       if (partialFile.length() != request.expectedSizeBytes) {
         throw sizeMismatch()
@@ -108,6 +117,7 @@ internal class HBAppInstallerDownloader(
     trustedOrigins: Set<TrustedOrigin>,
     expectedSizeBytes: Long,
     partialFile: File,
+    progress: ApkDownloadProgressReporter,
   ): StreamedResponse {
     var current = parseTrustedUrl(sourceUrl, trustedOrigins)
     val visited = linkedSetOf<String>()
@@ -164,6 +174,7 @@ internal class HBAppInstallerDownloader(
           connection = connection,
           destination = partialFile,
           expectedSizeBytes = expectedSizeBytes,
+          progress = progress,
         )
         return StreamedResponse(
           sizeBytes = sizeBytes,
@@ -179,11 +190,14 @@ internal class HBAppInstallerDownloader(
     connection: HttpURLConnection,
     destination: File,
     expectedSizeBytes: Long,
+    progress: ApkDownloadProgressReporter,
   ): Long {
     var totalBytes = 0L
     val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
     connection.inputStream.use { input ->
       FileOutputStream(destination, false).use { output ->
+        // 响应头校验通过、开始写盘时先报 0，JS 据此从转圈切换为确定进度。
+        progress.report(0L)
         while (true) {
           if (Thread.currentThread().isInterrupted) {
             throw InstallerException(
@@ -206,6 +220,7 @@ internal class HBAppInstallerDownloader(
           }
           output.write(buffer, 0, count)
           totalBytes = nextTotal
+          progress.report(totalBytes)
         }
         if (totalBytes != expectedSizeBytes) throw sizeMismatch()
         output.fd.sync()

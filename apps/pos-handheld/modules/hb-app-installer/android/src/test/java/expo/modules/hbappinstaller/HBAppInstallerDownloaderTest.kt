@@ -53,6 +53,31 @@ class HBAppInstallerDownloaderTest {
   }
 
   @Test
+  fun `reports throttled progress while streaming and completion exactly once`() {
+    var now = 0L
+    val network = FakeNetwork().apply {
+      respond(
+        "https://updates.example.test/build.apk",
+        FakeResponse.ok(ByteArray(400) { it.toByte() }, maximumReadChunk = 100),
+      )
+    }
+    val reports = mutableListOf<Pair<Long, Long>>()
+    val downloader = HBAppInstallerDownloader(
+      connectionFactory = network::open,
+      elapsedMillis = { now.also { now += 150L } },
+    )
+
+    downloader.download(
+      request(expectedSizeBytes = 400),
+      onProgress = ApkDownloadProgressListener { written, total -> reports += written to total },
+    )
+
+    // 每次上报时钟走 150ms：100、300 字节两次距上一帧不足 200ms 被节流，写满必报。
+    assertEquals(listOf(0L to 400L, 200L to 400L, 400L to 400L), reports)
+    assertEquals(400L, destination.length())
+  }
+
+  @Test
   fun `rejects an oversized Content-Length before opening the body and cleans files`() {
     destination.writeText("stale")
     val network = FakeNetwork().apply {

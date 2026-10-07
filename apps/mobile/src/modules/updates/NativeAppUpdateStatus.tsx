@@ -4,10 +4,12 @@ import { ActivityIndicator, Button, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS } from "@/shared/theme/tokens";
-import type { NativeAppUpdatePhase } from "./native-app-update";
+import { NativeAppDownloadProgressBar } from "./NativeAppDownloadProgressBar";
+import type { NativeAppDownloadProgress, NativeAppUpdatePhase } from "./native-app-update";
 
 type Props = {
   phase: NativeAppUpdatePhase | "failed" | null;
+  progress?: NativeAppDownloadProgress | null;
   onRetry: () => void;
   onDismiss: () => void;
 };
@@ -20,19 +22,29 @@ const phaseKeys = {
 } as const;
 
 /** APK 为后台可选更新：状态条跟随根布局，路由切换时仍可见，不阻挡登录和业务操作。 */
-export function NativeAppUpdateStatus({ phase, onRetry, onDismiss }: Props) {
+export function NativeAppUpdateStatus({ phase, progress, onRetry, onDismiss }: Props) {
   const { t } = useAppTranslation("settings");
   if (!phase) return null;
   const failed = phase === "failed";
+  // 有确定进度时用进度条代替转圈；旧原生包没有进度事件，仍显示转圈。
+  const determinate = phase === "downloading" && progress ? progress : null;
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.container}>
       <View style={styles.content} accessibilityLiveRegion="polite">
         <View style={styles.row}>
-          {!failed ? <ActivityIndicator size="small" color={HB_COLORS.action} /> : null}
+          {!failed && !determinate ? <ActivityIndicator size="small" color={HB_COLORS.action} /> : null}
           <View style={styles.copy}>
             <Text variant="titleSmall" style={failed ? styles.error : styles.title}>
               {t(phaseKeys[phase])}
             </Text>
+            {determinate ? (
+              <NativeAppDownloadProgressBar
+                progress={determinate}
+                color={HB_COLORS.action}
+                trackColor={HB_COLORS.outlineMuted}
+                labelColor={HB_COLORS.textSecondary}
+              />
+            ) : null}
             <Text variant="bodySmall" style={styles.helper}>
               {t(failed ? "dialogs.nativeUpdateFailedHelper" : "dialogs.nativeUpdateBackgroundHelper")}
             </Text>

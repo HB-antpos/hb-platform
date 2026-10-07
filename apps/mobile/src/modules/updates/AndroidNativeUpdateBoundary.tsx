@@ -7,12 +7,14 @@ import {
   getAndroidNativeUpdateBoundaryMode,
   type AndroidNativeUpdateDecision,
 } from "./android-native-required-update";
-import type { NativeAppUpdatePhase } from "./native-app-update";
+import { NativeAppDownloadProgressBar } from "./NativeAppDownloadProgressBar";
+import type { NativeAppDownloadProgress, NativeAppUpdatePhase } from "./native-app-update";
 
 type AndroidNativeUpdateBoundaryProps = {
   enabled: boolean;
   decision: AndroidNativeUpdateDecision | null;
   phase: NativeAppUpdatePhase | "failed" | null;
+  progress?: NativeAppDownloadProgress | null;
   readyToInstall: boolean;
   onInstall: () => void;
   onRetry: () => void;
@@ -27,6 +29,7 @@ export function AndroidNativeUpdateBoundary({
   enabled,
   decision,
   phase,
+  progress,
   readyToInstall,
   onInstall,
   onRetry,
@@ -40,6 +43,8 @@ export function AndroidNativeUpdateBoundary({
   }
 
   const busy = phase === "checking" || phase === "downloading" || phase === "verifying";
+  // 强制更新页通常要等完整包下载完，确定进度最能减少「卡住了」的误判。
+  const determinate = phase === "downloading" && progress ? progress : null;
   const statusText = phase === "failed"
     ? t("dialogs.androidNativeUpdateFailed")
     : busy
@@ -81,14 +86,24 @@ export function AndroidNativeUpdateBoundary({
           <Text variant="bodyLarge" style={styles.message}>
             {decision?.releaseMessage || t("dialogs.androidNativeUpdateRequiredMessage")}
           </Text>
-          <View style={styles.status} accessibilityLiveRegion="polite">
-            {busy ? <ActivityIndicator size="small" /> : null}
-            <Text
-              variant="bodyMedium"
-              style={phase === "failed" ? styles.statusFailed : styles.statusText}
-            >
-              {statusText}
-            </Text>
+          <View style={styles.statusBlock} accessibilityLiveRegion="polite">
+            <View style={styles.status}>
+              {busy && !determinate ? <ActivityIndicator size="small" /> : null}
+              <Text
+                variant="bodyMedium"
+                style={phase === "failed" ? styles.statusFailed : styles.statusText}
+              >
+                {statusText}
+              </Text>
+            </View>
+            {determinate ? (
+              <NativeAppDownloadProgressBar
+                progress={determinate}
+                color="#1677FF"
+                trackColor="#E6F4FF"
+                labelColor="#475569"
+              />
+            ) : null}
           </View>
           <Button
             mode="contained"
@@ -163,6 +178,9 @@ const styles = StyleSheet.create({
   message: {
     color: "#334155",
     lineHeight: 26,
+  },
+  statusBlock: {
+    gap: 10,
   },
   status: {
     flexDirection: "row",

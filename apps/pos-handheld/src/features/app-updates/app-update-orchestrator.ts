@@ -3,6 +3,7 @@ import type {
   AndroidNativeUpdatePort,
 } from "./android-native-update-adapter";
 import { isAndroidInstallPermissionRequiredError } from "./android-native-update-adapter";
+import type { ApkDownloadProgress } from "./apk-download-progress";
 import {
   decideAppUpdateRestart,
   type AppUpdateRefreshReason,
@@ -40,6 +41,10 @@ export type AppUpdatePresentation = Readonly<{
   downloadState?: "idle" | "downloading" | "ready" | "failed" | undefined;
   downloadTargetKey?: string | undefined;
 }>;
+
+/** APK 下载进度；targetKey 与 presentation.downloadTargetKey 对应，防止串到别的下载目标。 */
+export type AppUpdateDownloadProgress = ApkDownloadProgress &
+  Readonly<{ targetKey: string }>;
 
 export type AppUpdateActionResult =
   | Readonly<{ action: "none"; reason: "unchecked" | "no-update" }>
@@ -104,6 +109,9 @@ export type AppUpdateOrchestratorOptions = Readonly<{
 
 type GateListener = (gate: NewTransactionGate) => void;
 type PresentationListener = (presentation: AppUpdatePresentation) => void;
+type DownloadProgressListener = (
+  progress: AppUpdateDownloadProgress | null,
+) => void;
 
 /**
  * 原生与 OTA 各自刷新、缓存和失败回退；这里只合并交易准入与用户展示优先级。
@@ -120,10 +128,14 @@ export class AppUpdateOrchestrator {
   private preparingKey: string | null = null;
   private preparedKey: string | null = null;
   private failedKey: string | null = null;
+  private downloadProgress: AppUpdateDownloadProgress | null = null;
   private disposed = false;
   private readonly gateListeners = new Set<GateListener>();
   private readonly presentationListeners =
     new Set<PresentationListener>();
+  // 进度单独成一条通道：高频更新不触发交易门禁与展示的重算。
+  private readonly downloadProgressListeners =
+    new Set<DownloadProgressListener>();
   private readonly unsubscribeNative: () => void;
   private readonly unsubscribeOta: () => void;
   private readonly unsubscribeTransition: () => void;
@@ -256,6 +268,21 @@ export class AppUpdateOrchestrator {
     };
   }
 
+  /** 仅 APK 下载中有值；旧原生包没有进度事件时始终为 null。 */
+  public getDownloadProgress(): AppUpdateDownloadProgress | null {
+    return this.downloadProgress;
+  }
+
+  public subscribeDownloadProgress(
+    listener: DownloadProgressListener,
+  ): () => void {
+    this.downloadProgressListeners.add(listener);
+    this.notifyDownloadProgress(listener);
+    return () => {
+      this.downloadProgressListeners.delete(listener);
+    };
+  }
+
   public refreshOnStartup(): Promise<AppUpdatePresentation> {
     return this.refresh("startup");
   }
@@ -299,7 +326,9 @@ export class AppUpdateOrchestrator {
     const operation = Promise.resolve().then(async () => {
       try {
         if (selected.kind === "native" && nativePolicy && this.options.androidNative) {
-          await this.options.androidNative.prepare(nativePolicy);
+          await this.options.androidNative.prepare(nativePolicy, {
+            onProgress: (progress) => this.setDownloadProgress(key, progress),
+          });
         } else if (selected.kind === "ota" && otaPolicy) {
           const result = await this.options.ota.prepare(otaPolicy);
           if (result.state !== "ready") throw new Error("OTA download is not ready.");
@@ -312,6 +341,7 @@ export class AppUpdateOrchestrator {
       } finally {
         this.preparingKey = null;
         this.preparationInFlight = null;
+        this.setDownloadProgress(key, null);
         if (!this.disposed) this.recompute();
       }
       return this.presentation;
@@ -491,6 +521,7 @@ export class AppUpdateOrchestrator {
     this.unsubscribeTransition();
     this.gateListeners.clear();
     this.presentationListeners.clear();
+    this.downloadProgressListeners.clear();
   }
 
   private refresh(
@@ -621,6 +652,36 @@ export class AppUpdateOrchestrator {
       return JSON.stringify(["apk", this.options.native.getPolicy()]);
     }
     return null;
+  }
+
+  /** progress 为 null 表示清空；只接受仍在准备中的同一目标，迟到的事件直接丢弃。 */
+  private setDownloadProgress(
+    key: string,
+    progress: ApkDownloadProgress | null,
+  ): void {
+    if (this.disposed) return;
+    if (progress === null) {
+      if (this.downloadProgress?.targetKey !== key) return;
+      this.downloadProgress = null;
+    } else {
+      if (this.preparingKey !== key) return;
+      this.downloadProgress = Object.freeze({
+        targetKey: key,
+        bytesWritten: progress.bytesWritten,
+        totalBytes: progress.totalBytes,
+      });
+    }
+    for (const listener of this.downloadProgressListeners) {
+      this.notifyDownloadProgress(listener);
+    }
+  }
+
+  private notifyDownloadProgress(listener: DownloadProgressListener): void {
+    try {
+      listener(this.downloadProgress);
+    } catch {
+      // 进度只是展示，单个订阅者故障不能影响下载或其他订阅者。
+    }
   }
 
   private invalidatePreparedDownload(key: string | null): void {
