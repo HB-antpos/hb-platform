@@ -224,6 +224,155 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
             && state.StatisticType == SalesStatisticType.ProductStoreDaily);
     }
 
+    // 滚动补算不会无条件刷新的「总账」类统计；任一张状态里的水位落后于 POSM 真实上传水位，都说明当天有迟到上传没进来。
+    private static readonly string[] RollingLedgerStatisticTypes =
+    {
+        SalesStatisticType.DailySales,
+        SalesStatisticType.HourlySales,
+        SalesStatisticType.StoreSales,
+        SalesStatisticType.SupplierSales,
+        SalesStatisticType.StoreSupplierSales,
+    };
+
+    /// <summary>
+    /// 在滚动补算窗口内的历史日（今天往前 3 天）造一笔销售，并把分店营业额故意写成 1.00：
+    /// 整天全量刷新会把它重算为 20.00，没被刷新则保持 1.00，用它区分「全量刷新」与「只做商品补算」两条路径。
+    /// recordedWatermark 决定每张总账状态里记录的水位，返回 null 表示不写这张状态。
+    /// </summary>
+    private async Task<(DateTime Date, DateTime Watermark)> SeedRollingHistoricalDayAsync(
+        Func<string, DateTime, DateTime?> recordedWatermark)
+    {
+        var date = SalesStatisticsBusinessDate.Today().AddDays(-3);
+        await SeedSaleAsync("ORDER-ROLLING", "DETAIL-ROLLING", "P-ROLLING", "S1", date.AddHours(9), 2, 20m, "112");
+        await SeedStoreSalesStatisticAsync(date, "S1", 1m, 1);
+        var watermark = (await SalesStatisticsProductStoreDailyStateSlice.QueryDailySourceWatermarkAsync(
+            CreatePosmSqlSugarContext(_posmDb),
+            null,
+            date))!.Value;
+        foreach (var type in RollingLedgerStatisticTypes)
+        {
+            var recorded = recordedWatermark(type, watermark);
+            if (recorded.HasValue)
+                await SeedRefreshStateAsync(
+                    date,
+                    SalesStatisticRefreshStatus.Fresh,
+                    lastSourceUploadTime: recorded,
+                    statisticType: type);
+        }
+
+        return (date, watermark);
+    }
+
+    private async Task<StoreSalesStatistic?> LoadRollingStoreRowAsync(DateTime date) =>
+        await _localDb.Queryable<StoreSalesStatistic>()
+            .Where(row => row.Date == date && row.BranchCode == "S1")
+            .FirstAsync();
+
+    [Theory]
+    [InlineData(SalesStatisticType.DailySales)]
+    [InlineData(SalesStatisticType.HourlySales)]
+    [InlineData(SalesStatisticType.StoreSales)]
+    [InlineData(SalesStatisticType.SupplierSales)]
+    [InlineData(SalesStatisticType.StoreSupplierSales)]
+    public async Task FullRefreshCurrentDay_滚动补算发现任一总账水位落后应整天全量刷新(string behindType)
+    {
+        // 复现 2026-09-26：订单迟到上传，只有一张总账状态还停在旧水位。
+        var (date, watermark) = await SeedRollingHistoricalDayAsync(
+            (type, source) => type == behindType ? source.AddDays(-1) : source);
+        using var serviceProvider = CreateRollingRefreshServiceProvider();
+        var service = CreateService(serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        await service.FullRefreshCurrentDay();
+
+        var store = await LoadRollingStoreRowAsync(date);
+        Assert.NotNull(store);
+        Assert.Equal(20m, store!.TotalAmount);
+        var states = await _localDb.Queryable<SalesStatisticRefreshState>()
+            .Where(state => state.Date == date)
+            .ToListAsync();
+        foreach (var type in RollingLedgerStatisticTypes)
+        {
+            var state = Assert.Single(states, row => row.StatisticType == type);
+            Assert.Equal(SalesStatisticRefreshStatus.Fresh, state.Status);
+            Assert.Equal(watermark, state.LastSourceUploadTime);
+        }
+    }
+
+    [Fact]
+    public async Task FullRefreshCurrentDay_滚动补算总账状态缺失但当天有来源数据应整天全量刷新()
+    {
+        var (date, _) = await SeedRollingHistoricalDayAsync((_, _) => null);
+        using var serviceProvider = CreateRollingRefreshServiceProvider();
+        var service = CreateService(serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        await service.FullRefreshCurrentDay();
+
+        var store = await LoadRollingStoreRowAsync(date);
+        Assert.NotNull(store);
+        Assert.Equal(20m, store!.TotalAmount);
+    }
+
+    [Fact]
+    public async Task FullRefreshCurrentDay_滚动补算总账水位已追平时只做商品补算不重刷总账()
+    {
+        var (date, _) = await SeedRollingHistoricalDayAsync((_, source) => source);
+        using var serviceProvider = CreateRollingRefreshServiceProvider();
+        var service = CreateService(serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        await service.FullRefreshCurrentDay();
+
+        var store = await LoadRollingStoreRowAsync(date);
+        Assert.NotNull(store);
+        // 总账没有被重算：旧值原样保留。
+        Assert.Equal(1m, store!.TotalAmount);
+        // 商品分店每日的滚动补算照旧执行。
+        Assert.NotNull(await LoadRefreshStateAsync(date));
+    }
+
+    [Fact]
+    public async Task FullRefreshCurrentDay_滚动补算历史日没有来源数据时不创建总账状态()
+    {
+        var today = SalesStatisticsBusinessDate.Today();
+        using var serviceProvider = CreateRollingRefreshServiceProvider();
+        var service = CreateService(serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        await service.FullRefreshCurrentDay();
+
+        var states = await _localDb.Queryable<SalesStatisticRefreshState>().ToListAsync();
+        // 休业日没有水位可言，不能被误判为「落后」而触发整天全量刷新。
+        Assert.DoesNotContain(states, state => state.Date.Date < today
+            && RollingLedgerStatisticTypes.Contains(state.StatisticType));
+        Assert.Contains(states, state => state.Date.Date == today.AddDays(-1)
+            && state.StatisticType == SalesStatisticType.ProductStoreDaily);
+    }
+
+    [Fact]
+    public async Task FullRefreshCurrentDay_滚动补算总账落后但日期租约被占用时应跳过且不抛异常()
+    {
+        var (date, _) = await SeedRollingHistoricalDayAsync((_, source) => source.AddDays(-1));
+        await _localDb.Insertable(new ScheduledTaskLease
+        {
+            TaskType = SalesStatisticsAlignmentService.DailyFullRefreshLeaseTaskType,
+            ScopeKey = date.ToString("yyyy-MM-dd"),
+            Status = ScheduledTaskLeaseStatus.Running,
+            OwnerInstanceId = "other-instance",
+            LeaseToken = Guid.NewGuid().ToString("N"),
+            LeaseUntilUtc = DateTime.UtcNow.AddHours(1),
+            StartedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow,
+        }).ExecuteCommandAsync();
+        using var serviceProvider = CreateRollingRefreshServiceProvider();
+        var service = CreateService(serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        var result = await service.FullRefreshCurrentDay();
+
+        Assert.True(result.IsCompleted);
+        var store = await LoadRollingStoreRowAsync(date);
+        Assert.NotNull(store);
+        // 另一实例正在处理这一天：这次跳过，留待下一晚再比较水位。
+        Assert.Equal(1m, store!.TotalAmount);
+    }
+
     [Fact]
     public async Task LoadStoreCostsInBatchesAsync_超过批量上限应拆分查询且完整返回()
     {

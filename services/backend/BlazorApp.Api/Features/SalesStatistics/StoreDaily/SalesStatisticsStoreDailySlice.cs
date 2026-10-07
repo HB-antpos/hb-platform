@@ -145,8 +145,8 @@ namespace BlazorApp.Api.Services
                     : SalesStatisticsRefreshExecutionResult.Skipped("当天统计已有运行中的日期租约");
             }
 
-            // POSM 可能延迟上传，商品统计额外滚动补算最近 7 天；历史日只在夜间窗口启动。
-            // 每个日期开始前重新检查，窗口边界到达后保留剩余日期到下一轮；当天主刷新和显式入口不受影响。
+            // POSM 可能延迟上传，最近 7 天逐日滚动补算：商品统计无条件重算，总账类统计只在水位落后时整天全量刷新；
+            // 历史日只在夜间窗口启动。每个日期开始前重新检查，窗口边界到达后保留剩余日期到下一轮；当天主刷新和显式入口不受影响。
             for (var offset = Math.Clamp(firstHistoricalDayOffset, 1, 7); offset < 7; offset++)
             {
                 if (automatic && !SalesStatisticsHistoricalRefreshWindow.IsOpen(_timeProvider))
@@ -159,7 +159,7 @@ namespace BlazorApp.Api.Services
                     return SalesStatisticsRefreshExecutionResult.Completed();
                 }
 
-                await RunLeasedProductStoreDailyRefreshAsync(currentDay.AddDays(-offset));
+                await RunRollingHistoricalRefreshAsync(currentDay.AddDays(-offset));
             }
 
             _logger.LogInformation("当天数据全量刷新完成: {Date}", currentDay);
@@ -193,6 +193,85 @@ namespace BlazorApp.Api.Services
         }
 
         return result.ProcessedDays == 1;
+    }
+
+    /// <summary>
+    /// 滚动补算要核对水位的「总账」类统计。商品分店每日及其澳洲/国内供应商拆分由滚动补算本身无条件重算，不在此列。
+    /// </summary>
+    private static readonly string[] RollingLedgerStatisticTypes =
+    {
+        SalesStatisticType.DailySales,
+        SalesStatisticType.HourlySales,
+        SalesStatisticType.StoreSales,
+        SalesStatisticType.SupplierSales,
+        SalesStatisticType.StoreSupplierSales,
+    };
+
+    /// <summary>
+    /// 近 7 天滚动补算的单日入口。
+    /// 总账类统计只在「当天」和「次日夜间」各刷新一次，之后 POSM 才上传的迟到订单不会再进入这些表
+    /// （2026-09-26 一笔订单 10-01 才上传，分店营业额因此比支付明细少 13.98，而商品统计被滚动补算追平了）。
+    /// 这里先比较 POSM 当日真实上传水位与总账状态里记录的水位：落后就整天全量刷新（已包含商品统计，不再重复跑商品补算），
+    /// 否则维持原行为，只重算商品统计。
+    /// </summary>
+    internal async Task RunRollingHistoricalRefreshAsync(DateTime date)
+    {
+        var targetDate = date.Date;
+        if (await HasLedgerStatisticsFallenBehindSourceAsync(targetDate))
+        {
+            _logger.LogInformation(
+                "日期 {Date} 的总账统计水位落后于 POSM 上传水位，滚动补算改为整天全量刷新",
+                targetDate.ToString("yyyy-MM-dd")
+            );
+            // 返回 false 表示日期租约被其他执行者占用，这次跳过即可：水位仍然落后，下一晚会再次比较。
+            // 刷新失败会抛异常，与商品滚动补算失败时的处理一致。
+            await RunLeasedFullRefreshForSingleDateAsync(targetDate, "迟到上传滚动补算");
+            return;
+        }
+
+        await RunLeasedProductStoreDailyRefreshAsync(targetDate);
+    }
+
+    /// <summary>
+    /// 总账类统计里是否有任一张的状态水位落后于 POSM 当日真实上传水位（或根本没有状态）。
+    /// 状态水位在刷新开始时就写入，所以一次尝试（含失败）之后不会再触发，不会出现永久失败的日期每晚重试；
+    /// 失败日期仍由数据对齐页的 Failed 状态负责。
+    /// </summary>
+    internal async Task<bool> HasLedgerStatisticsFallenBehindSourceAsync(DateTime date)
+    {
+        var targetDate = date.Date;
+        // HBSales 历史窗口内的分店与商品统计由原子入口同时刷新，不存在「只补商品」的情况。
+        if (SalesStatisticsHBSalesHistoryWindow.Includes(targetDate))
+            return false;
+
+        using var scope = _serviceScopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<SqlSugarContext>();
+        var posmContext = scope.ServiceProvider.GetRequiredService<POSMSqlSugarContext>();
+        var hbSalesContext = scope.ServiceProvider.GetService<HBSalesRecordSqlSugarContext>();
+
+        // 与刷新时写入状态用的是同一个水位查询，两边口径一致，已对齐的日期差值恒为 0。
+        var sourceWatermark = await SalesStatisticsProductStoreDailyStateSlice
+            .QueryDailySourceWatermarkAsync(posmContext, hbSalesContext, targetDate);
+        if (!sourceWatermark.HasValue)
+            return false; // 当天没有任何来源数据（休业日），没有可落后的内容。
+
+        var nextDate = targetDate.AddDays(1);
+        // SqlSugar 表达式不能直接引用私有静态字段，先拷到局部变量再放进查询条件。
+        var ledgerTypes = RollingLedgerStatisticTypes;
+        // SQLite/SQL Server 的 DateTime 精度不同，按规范化日期范围读取状态。
+        var states = await context.Db.Queryable<SalesStatisticRefreshState>()
+            .Where(s =>
+                ledgerTypes.Contains(s.StatisticType)
+                && s.Date >= targetDate
+                && s.Date < nextDate
+            )
+            .ToListAsync();
+
+        return ledgerTypes.Any(type =>
+        {
+            var recorded = states.FirstOrDefault(s => s.StatisticType == type)?.LastSourceUploadTime;
+            return !recorded.HasValue || recorded.Value < sourceWatermark.Value;
+        });
     }
 
     internal async Task<bool> RunLeasedProductStoreDailyRefreshAsync(DateTime date)
