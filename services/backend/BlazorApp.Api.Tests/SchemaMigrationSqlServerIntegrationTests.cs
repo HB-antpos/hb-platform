@@ -1,6 +1,9 @@
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Data.SchemaMigrations;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.StoreReceiptProfiles;
+using BlazorApp.Shared.Models;
+using BlazorApp.Shared.Models.POSM;
 using System.Diagnostics;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -904,6 +907,215 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 门店小票资料下发两张表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreReceiptProfileRelease (StoreCode, Version, StoreName, PublishedAtUtc, PublishedBy)
+            VALUES (N'S001', 1, N'Store 1', SYSUTCDATETIME(), N'alice');
+            INSERT dbo.PosReceiptProfileAck (DeviceCode, StoreCode, AppliedVersion, AppliedAtUtc, ClientKind)
+            VALUES (N'DEV-1', N'S001', 1, SYSUTCDATETIME(), N'wpf');
+            """);
+        // 重复执行不得丢失已有快照与回执。
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.StoreReceiptProfileRelease WHERE StoreCode = N'S001' AND Version = 1) <> 1
+                THROW 52010, 'Existing release row was lost.', 1;
+            IF (SELECT COUNT(*) FROM dbo.PosReceiptProfileAck WHERE DeviceCode = N'DEV-1') <> 1
+                THROW 52011, 'Existing ack row was lost.', 1;
+            """);
+        // 主键 (StoreCode, Version)：同店同版本不能重复，不同版本可以并存。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreReceiptProfileRelease (StoreCode, Version, StoreName, PublishedAtUtc)
+            VALUES (N'S001', 1, N'dup', SYSUTCDATETIME());
+            """));
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreReceiptProfileRelease (StoreCode, Version, StoreName, PublishedAtUtc)
+            VALUES (N'S001', 2, N'Store 1b', SYSUTCDATETIME());
+            """);
+
+        // 快照表列宽漂移（ABN nvarchar(20) → 40）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreReceiptProfileRelease ALTER COLUMN ABN nvarchar(40) NULL;");
+        var releaseColumns = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql));
+        Assert.Equal(52001, releaseColumns.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreReceiptProfileRelease ALTER COLUMN ABN nvarchar(20) NULL;");
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql);
+
+        // 快照表主键被改成非聚集。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.StoreReceiptProfileRelease DROP CONSTRAINT PK_StoreReceiptProfileRelease;
+            ALTER TABLE dbo.StoreReceiptProfileRelease ADD CONSTRAINT PK_StoreReceiptProfileRelease
+                PRIMARY KEY NONCLUSTERED (StoreCode, Version);
+            """);
+        var releaseKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql));
+        Assert.Equal(52002, releaseKey.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.StoreReceiptProfileRelease DROP CONSTRAINT PK_StoreReceiptProfileRelease;
+            ALTER TABLE dbo.StoreReceiptProfileRelease ADD CONSTRAINT PK_StoreReceiptProfileRelease
+                PRIMARY KEY CLUSTERED (StoreCode, Version);
+            """);
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql);
+
+        // 快照表主键列序颠倒（Version, StoreCode）。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.StoreReceiptProfileRelease DROP CONSTRAINT PK_StoreReceiptProfileRelease;
+            ALTER TABLE dbo.StoreReceiptProfileRelease ADD CONSTRAINT PK_StoreReceiptProfileRelease
+                PRIMARY KEY CLUSTERED (Version, StoreCode);
+            """);
+        var reversedKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql));
+        Assert.Equal(52002, reversedKey.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.StoreReceiptProfileRelease DROP CONSTRAINT PK_StoreReceiptProfileRelease;
+            ALTER TABLE dbo.StoreReceiptProfileRelease ADD CONSTRAINT PK_StoreReceiptProfileRelease
+                PRIMARY KEY CLUSTERED (StoreCode, Version);
+            """);
+
+        // 回执表列可空性漂移。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptProfileAck ALTER COLUMN ClientKind nvarchar(16) NULL;");
+        var ackColumns = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql));
+        Assert.Equal(52003, ackColumns.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PosReceiptProfileAck ALTER COLUMN ClientKind nvarchar(16) NOT NULL;");
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql);
+
+        // 回执门店索引缺失：Verify 报错，重新 Apply 后补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX [IX_PosReceiptProfileAck_StoreCode] ON dbo.PosReceiptProfileAck;");
+        var ackIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql));
+        Assert.Equal(52005, ackIndex.Number);
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql);
+
+        // 任一张表缺失：门禁报 52000。
+        await ExecuteNonQueryAsync(main, "DROP TABLE dbo.PosReceiptProfileAck;");
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql));
+        Assert.Equal(52000, missing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 门店小票资料下发服务_真实SQLServer下发_并发同店只产生一个版本且冲突映射409()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var mainContext = databases.CreateMainContext();
+        var posmContext = databases.CreatePosmContext();
+        // Store / 设备表只为本用例准备；两张新表走迁移 SQL，与生产建表方式一致。
+        mainContext.Db.CodeFirst.InitTables<Store>();
+        posmContext.Db.CodeFirst.InitTables<POSM_设备注册信息表>();
+        await ExecuteNonQueryAsync(databases.MainConnectionString, StoreReceiptProfileReleaseSchema.ApplySql);
+        foreach (var (guid, code, name) in new[]
+        {
+            ("g-1", "S001", "Store 1"), ("g-2", "S002", "Store 2"), ("g-3", "S003", "Store 3"),
+            ("g-4", "S004", "Store 4"), ("g-5", "S005", "Store 5"), ("g-6", "S006", "Store 6"),
+        })
+        {
+            await mainContext.Db.Insertable(new Store { StoreGUID = guid, StoreCode = code, StoreName = name }).ExecuteCommandAsync();
+        }
+        await posmContext.Db.Insertable(new POSM_设备注册信息表
+        {
+            设备硬件识别码 = "hw-1", 系统设备编号 = "DEV-1", 分店代码 = "S001", 设备类型 = "POS", 设备系统 = "Windows", 设备状态 = 1, 设备授权码 = "a",
+        }).ExecuteCommandAsync();
+        await posmContext.Db.Insertable(new POSM_设备注册信息表
+        {
+            设备硬件识别码 = "hw-2", 系统设备编号 = "DEV-2", 分店代码 = "S001", 设备类型 = "pos", 设备系统 = "Android", 设备状态 = 1, 设备授权码 = "b",
+        }).ExecuteCommandAsync();
+        var service = new StoreReceiptProfileService(
+            mainContext, posmContext, NullLogger<StoreReceiptProfileService>.Instance, TimeProvider.System);
+
+        // 首次下发 v1，重复下发 unchanged，改资料后只有改过的店升到 v2（真实执行 UPDLOCK, HOLDLOCK 读取）。
+        var first = await service.PublishAsync(new[] { "g-1", "g-2" }, "alice");
+        Assert.True(first.Success, first.Message);
+        Assert.All(first.Data!.Items, item => Assert.Equal(("published", 1), (item.Outcome, item.Version)));
+        var again = await service.PublishAsync(new[] { "g-1", "g-2" }, "alice");
+        Assert.Equal(2, again.Data!.UnchangedCount);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, "UPDATE dbo.Store SET Phone = N'0400' WHERE StoreGUID = N'g-1';");
+        var third = await service.PublishAsync(new[] { "g-1", "g-2" }, "alice");
+        Assert.Equal(
+            new[] { ("g-1", "published", 2), ("g-2", "unchanged", 1) },
+            third.Data!.Items.Select(item => (item.StoreGuid, item.Outcome, item.Version)).ToArray());
+
+        // 设备应用情况：设备类型大小写不敏感，回执按设备当前门店隔离。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.PosReceiptProfileAck (DeviceCode, StoreCode, AppliedVersion, AppliedAtUtc, ClientKind)
+            VALUES (N'DEV-1', N'S001', 2, SYSUTCDATETIME(), N'wpf'),
+                   (N'DEV-2', N'S999', 9, SYSUTCDATETIME(), N'handheld');
+            """);
+        var status = (await service.GetStatusAsync(new[] { "g-1" })).Data!.Single();
+        Assert.Equal("synced", status.Status);
+        Assert.Equal(2, status.LatestVersion);
+        Assert.Equal(DateTimeKind.Utc, status.PublishedAtUtc!.Value.Kind);
+        Assert.Equal(2, status.DeviceTotal);
+        Assert.Equal(1, status.DeviceApplied);
+        var devices = (await service.GetDevicesAsync("g-1")).Data!.Devices;
+        Assert.Equal(new[] { "DEV-1", "DEV-2" }, devices.Select(device => device.DeviceCode).ToArray());
+        Assert.Equal(new int?[] { 2, null }, devices.Select(device => device.AppliedVersion).ToArray());
+        Assert.Equal(new[] { true, false }, devices.Select(device => device.UpToDate).ToArray());
+
+        // 并发下发同一家从未下发的店：HOLDLOCK 串行化，只会有一个事务写出 v1，其余读到后判为 unchanged，没有主键冲突。
+        var sameStore = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
+            PublishWithFreshContextsAsync(databases, new[] { "g-3" })));
+        Assert.All(sameStore, result => Assert.True(result.Success, result.Message));
+        Assert.Equal(1, sameStore.Sum(result => result.Data!.PublishedCount));
+        Assert.Equal(7, sameStore.Sum(result => result.Data!.UnchangedCount));
+        Assert.Equal(1, await CountReleasesAsync(databases.MainConnectionString, "S003"));
+
+        // 请求顺序相反的并发批量下发（g-4、g-5 互为逆序）：IN 列表按固定顺序申请锁，不死锁，每家店恰好一个 v1。
+        var crossed = await Task.WhenAll(Enumerable.Range(0, 8).Select(index =>
+            PublishWithFreshContextsAsync(databases, index % 2 == 0 ? new[] { "g-4", "g-5" } : new[] { "g-5", "g-4" })));
+        Assert.All(crossed, result => Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}"));
+        Assert.Equal(2, crossed.Sum(result => result.Data!.PublishedCount));
+        Assert.Equal(1, await CountReleasesAsync(databases.MainConnectionString, "S004"));
+        Assert.Equal(1, await CountReleasesAsync(databases.MainConnectionString, "S005"));
+
+        // 主键冲突（兜底路径）：钩子在同一事务里先写入 (S006, 1)，真实 SQL Server 报 2627，映射为 409 语义并整批回滚。
+        var conflictMain = databases.CreateMainContext();
+        var conflicting = new StoreReceiptProfileService(
+            conflictMain.Db,
+            databases.CreatePosmContext().Db,
+            NullLogger<StoreReceiptProfileService>.Instance,
+            TimeProvider.System,
+            async () => await conflictMain.Db.Insertable(new StoreReceiptProfileRelease
+            {
+                StoreCode = "S006",
+                Version = 1,
+                StoreName = "抢先写入",
+                PublishedAtUtc = DateTime.UtcNow,
+            }).ExecuteCommandAsync());
+        var conflict = await conflicting.PublishAsync(new[] { "g-6" }, "alice");
+        Assert.False(conflict.Success);
+        Assert.Equal("RECEIPT_PROFILE_PUBLISH_CONFLICT", conflict.ErrorCode);
+        Assert.Equal(0, await CountReleasesAsync(databases.MainConnectionString, "S006"));
+        var retried = await service.PublishAsync(new[] { "g-6" }, "alice");
+        Assert.Equal(1, retried.Data!.Items.Single().Version);
+    }
+
+    private static Task<BlazorApp.Shared.DTOs.ApiResponse<StoreReceiptProfilePublishResultDto>> PublishWithFreshContextsAsync(
+        IsolatedSchemaDatabases databases,
+        string[] storeGuids) =>
+        Task.Run(() => new StoreReceiptProfileService(
+            databases.CreateMainContext(),
+            databases.CreatePosmContext(),
+            NullLogger<StoreReceiptProfileService>.Instance,
+            TimeProvider.System).PublishAsync(storeGuids, "alice"));
+
+    private static async Task<int> CountReleasesAsync(string connectionString, string storeCode)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM dbo.StoreReceiptProfileRelease WHERE StoreCode = @code";
+        command.Parameters.AddWithValue("@code", storeCode);
+        return (int)(await command.ExecuteScalarAsync())!;
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 找回密码验证码表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
@@ -1442,6 +1654,16 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
                     currentUser,
                     NullLogger<POSMSqlSugarContext>.Instance
                 )
+            );
+        }
+
+        public POSMSqlSugarContext CreatePosmContext()
+        {
+            var configuration = CreateConfiguration();
+            return new POSMSqlSugarContext(
+                configuration,
+                new IsolatedMigrationCurrentUserService(),
+                NullLogger<POSMSqlSugarContext>.Instance
             );
         }
 

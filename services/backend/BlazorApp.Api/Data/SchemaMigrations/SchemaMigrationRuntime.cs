@@ -119,6 +119,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyMobileAndroidNativeUpdatePolicyAsync(CancellationToken cancellationToken);
 
+    Task ApplyStoreReceiptProfileReleaseAsync(CancellationToken cancellationToken);
+
+    Task VerifyStoreReceiptProfileReleaseAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -693,6 +697,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             MobileAndroidNativeUpdatePolicySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyStoreReceiptProfileReleaseAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            StoreReceiptProfileReleaseSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但结构错误的表不会被误标为完成。
+        await VerifyStoreReceiptProfileReleaseAsync(cancellationToken);
+    }
+
+    public async Task VerifyStoreReceiptProfileReleaseAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            StoreReceiptProfileReleaseSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

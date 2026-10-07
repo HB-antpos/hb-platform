@@ -108,6 +108,8 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifyUserPasswordResetCodeTargetEmailAsync", runtimeMethods);
         Assert.Contains("ApplyMobileAndroidNativeUpdatePolicyAsync", runtimeMethods);
         Assert.Contains("VerifyMobileAndroidNativeUpdatePolicyAsync", runtimeMethods);
+        Assert.Contains("ApplyStoreReceiptProfileReleaseAsync", runtimeMethods);
+        Assert.Contains("VerifyStoreReceiptProfileReleaseAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -502,6 +504,10 @@ public sealed class SchemaMigrationCoordinatorTests
         runtime.MarkApplied(
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId
         );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
@@ -954,6 +960,7 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20261004.004-user-password-reset-code",
                 "Check:Main:20261005.001-user-password-reset-code-target-email",
                 "Check:Main:20261005.002-mobile-android-native-update-policy",
+                "Check:Main:20261007.001-store-receipt-profile-release",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1185,59 +1192,64 @@ public sealed class SchemaMigrationCoordinatorTests
         var coordinator = CreateCoordinator(runtime);
 
         // 新迁移按日期追加：供应商分类（09-23）、看板月投影（09-24）、订单拣货（09-29），再是拣货货位没货与拣货分配（09-30），
-        // 然后是排班用餐次数（10-02）、可上班时间的不能上班类型（10-03）、敏感申请生日列与须改密标记表（10-04），未成年用工合规（10-04），然后是找回密码验证码表（10-04），然后是验证码表的新邮箱列（10-05），最后是 Mobile 安卓原生最低构建号策略表（10-05）。
+        // 然后是排班用餐次数（10-02）、可上班时间的不能上班类型（10-03）、敏感申请生日列与须改密标记表（10-04），未成年用工合规（10-04），然后是找回密码验证码表（10-04），然后是验证码表的新邮箱列（10-05），然后是 Mobile 安卓原生最低构建号策略表（10-05），最后是门店小票资料下发的两张新表（10-07）。
         Assert.Equal(
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^14].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceAvailabilityUnavailableMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeProfileSensitiveBirthdayMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordChangeRequirementMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeTargetEmailMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
+        Assert.Equal("20261007.001-store-receipt-profile-release", SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId);
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
         foreach (var migrationId in new[]
         {
@@ -1254,6 +1266,7 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
             SchemaMigrationCoordinator.UserPasswordResetCodeTargetEmailMigrationId,
             SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId,
+            SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -1317,6 +1330,13 @@ public sealed class SchemaMigrationCoordinatorTests
         var androidPolicyRecord = runtime.Events.IndexOf(
             $"Record:Main:{SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId}");
         Assert.True(androidPolicyApply >= 0 && androidPolicyApply < androidPolicyVerify && androidPolicyVerify < androidPolicyRecord);
+        // 门店小票资料下发两张新表同样 Apply → 签名校验 → 登记。
+        var receiptProfileApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId}");
+        var receiptProfileVerify = runtime.Events.IndexOf("VerifyStoreReceiptProfileRelease", receiptProfileApply);
+        var receiptProfileRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId}");
+        Assert.True(receiptProfileApply >= 0 && receiptProfileApply < receiptProfileVerify && receiptProfileVerify < receiptProfileRecord);
     }
 
     [Fact]
@@ -1870,6 +1890,23 @@ public sealed class SchemaMigrationCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Events.Add("VerifyMobileAndroidNativeUpdatePolicy");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyStoreReceiptProfileReleaseAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId,
+                cancellationToken
+            );
+            await VerifyStoreReceiptProfileReleaseAsync(cancellationToken);
+        }
+
+        public Task VerifyStoreReceiptProfileReleaseAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyStoreReceiptProfileRelease");
             return Task.CompletedTask;
         }
 

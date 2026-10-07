@@ -53,6 +53,8 @@ internal sealed class SchemaMigrationCoordinator
         "20261005.001-user-password-reset-code-target-email";
     internal const string MobileAndroidNativeUpdatePolicyMigrationId =
         "20261005.002-mobile-android-native-update-policy";
+    internal const string StoreReceiptProfileReleaseMigrationId =
+        "20261007.001-store-receipt-profile-release";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -178,6 +180,11 @@ internal sealed class SchemaMigrationCoordinator
             MobileAndroidNativeUpdatePolicyMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyMobileAndroidNativeUpdatePolicyAsync(cancellationToken)
+        ),
+        new(
+            StoreReceiptProfileReleaseMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyStoreReceiptProfileReleaseAsync(cancellationToken)
         ),
     ];
 
