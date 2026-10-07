@@ -43,6 +43,18 @@ internal static class ConsoleLog
         Write(category, message, "Information");
     }
 
+    /// <summary>
+    /// 需要人工跟进但不影响收银主流程的情况（例如上传记录被服务端永久拒绝、不再自动重试）。
+    /// </summary>
+    internal static void WriteWarning(
+        string category,
+        string message,
+        ApplicationLogContext? context = null,
+        Exception? exception = null)
+    {
+        Write(category, message, "Warning", context, exception);
+    }
+
     internal static void WriteError(
         string category,
         string message,

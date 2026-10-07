@@ -7,8 +7,67 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Hbpos.Client.Tests;
 
+[Collection(ConsoleLogGlobalStateTestCollection.Name)]
 public sealed class LinklySettlementUploadServiceTests
 {
+    [Fact]
+    public async Task ExecutePendingAsync_logs_a_warning_with_code_and_revision_when_the_server_rejects_permanently()
+    {
+        await using var fixture = await SettlementFixture.CreateAsync();
+        var settlement = await fixture.CreateCompletedSettlementAsync();
+        var client = new FakeSyncApiClient(_ => Task.FromException<LinklySettlementSyncResponse>(
+            new LinklySettlementUploadApiException(
+                "Immutable Linkly settlement fields cannot change.",
+                HttpStatusCode.Conflict,
+                "IMMUTABLE_FIELDS_CONFLICT")));
+        var service = new LinklySettlementUploadService(fixture.Repository, client);
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            await service.ExecutePendingAsync();
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        // 2026-10 线上 1042 测试机的结算被永久拒绝 5 天，中心日志里却一条都没有；现在要有可按结算 GUID 追溯的 Warning。
+        var entry = Assert.Single(
+            sink.Entries,
+            item => item.Level == "Warning" && item.TraceId == settlement.SettlementGuid.ToString("D"));
+        Assert.Equal("LinklySettlementUpload", entry.Category);
+        Assert.Equal(409, entry.StatusCode);
+        Assert.Equal("IMMUTABLE_FIELDS_CONFLICT", entry.Properties!["errorCode"]);
+        Assert.Contains(
+            "revision=2 errorCode=IMMUTABLE_FIELDS_CONFLICT http=409 message=Immutable Linkly settlement fields cannot change.",
+            entry.Message);
+    }
+
+    [Fact]
+    public async Task ExecutePendingAsync_does_not_warn_for_retryable_conflicts()
+    {
+        await using var fixture = await SettlementFixture.CreateAsync();
+        var settlement = await fixture.CreateCompletedSettlementAsync();
+        var client = new FakeSyncApiClient(_ => Task.FromException<LinklySettlementSyncResponse>(
+            new LinklySettlementUploadApiException("retry later", HttpStatusCode.Conflict, "SETTLEMENT_SYNC_CONCURRENT_UPDATE")));
+        var service = new LinklySettlementUploadService(fixture.Repository, client);
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            await service.ExecutePendingAsync();
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        Assert.DoesNotContain(
+            sink.Entries,
+            item => item.Level == "Warning" && item.TraceId == settlement.SettlementGuid.ToString("D"));
+    }
+
     [Fact]
     public void Service_registration_reuses_one_concrete_schema_singleton_for_the_interface()
     {
