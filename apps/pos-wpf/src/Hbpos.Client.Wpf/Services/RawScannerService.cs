@@ -93,10 +93,15 @@ public sealed class RawScannerService(
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_SYSKEYDOWN = 0x0104;
     private const int RIDEV_INPUTSINK = 0x00000100;
+    private static readonly TimeSpan DiagnosticsInterval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan DiagnosticsSummaryInterval = TimeSpan.FromMinutes(10);
 
     private readonly Dictionary<string, Action<RawBarcodeScannedEventArgs>> _handlers = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _flushTimer = new() { Interval = TimeSpan.FromMilliseconds(40) };
     private readonly ScannerInputDuplicateGuard _duplicateGuard = new();
+    private readonly DispatcherTimer _diagnosticsTimer = new() { Interval = DiagnosticsInterval };
+    private readonly RawScannerDiagnostics _diagnostics = new();
+    private IntPtr _registeredHwnd;
     private string? _activePageId;
     private Func<RawBarcodeScannedEventArgs, bool>? _globalBarcodeInterceptor;
     private string? _boundDevicePath;
@@ -111,7 +116,18 @@ public sealed class RawScannerService(
     bool IScannerInputDeduplicator.TryAcceptScanDelivery(
         string barcode,
         string source,
-        DateTimeOffset timestamp) => _duplicateGuard.TryAccept(barcode, source, timestamp);
+        DateTimeOffset timestamp)
+    {
+        // 键盘通道收到扫码时附带一份 Raw Input 计数：两边对照能直接看出 WM_INPUT 是否送达本窗口。
+        if (_diagnostics.ShouldReportNonRawDelivery(timestamp, DiagnosticsSummaryInterval))
+        {
+            ConsoleLog.Write("RawScanner", $"non-raw scan delivered source={source} active={IsActive} {_diagnostics.Describe()} boundDevice={!string.IsNullOrWhiteSpace(_boundDevicePath)}");
+        }
+
+        return _duplicateGuard.TryAccept(barcode, source, timestamp);
+    }
+
+    internal RawScannerDiagnostics Diagnostics => _diagnostics;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -141,6 +157,12 @@ public sealed class RawScannerService(
 
     public void SetActivePage(string? pageId)
     {
+        if (string.Equals(_activePageId, pageId, StringComparison.Ordinal))
+        {
+            // 会话、联网状态变化也会刷新扫码页；页面没变时不重复记日志。
+            return;
+        }
+
         _activePageId = pageId;
         ConsoleLog.Write("RawScanner", $"active page set page={pageId ?? "<none>"}");
     }
@@ -162,27 +184,22 @@ public sealed class RawScannerService(
             ConsoleLog.Write("RawScanner", "scanner service started before binding initialization completed");
         }
 
-        var devices = new RAWINPUTDEVICE[]
+        if (!TryRegisterKeyboard(hwnd, out var registerError))
         {
-            new()
-            {
-                usUsagePage = 0x01,
-                usUsage = 0x06,
-                dwFlags = RIDEV_INPUTSINK,
-                hwndTarget = hwnd
-            }
-        };
-
-        if (!RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>()))
-        {
-            ConsoleLog.Write("RawScanner", $"RegisterRawInputDevices failed error={Marshal.GetLastWin32Error()}");
+            ConsoleLog.WriteWarning("RawScanner", $"RegisterRawInputDevices failed error={registerError}");
             return;
         }
 
         _flushTimer.Tick += OnFlushTimerTick;
         _flushTimer.Start();
+        _registeredHwnd = hwnd;
         IsActive = true;
-        ConsoleLog.Write("RawScanner", "raw input scanner service started");
+        ConsoleLog.Write(
+            "RawScanner",
+            $"raw input scanner service started hwnd=0x{hwnd.ToInt64():X} process64={Environment.Is64BitProcess} os64={Environment.Is64BitOperatingSystem}");
+        VerifyRegistration("start");
+        _diagnosticsTimer.Tick += OnDiagnosticsTimerTick;
+        _diagnosticsTimer.Start();
     }
 
     public void Stop()
@@ -194,6 +211,8 @@ public sealed class RawScannerService(
 
         _flushTimer.Stop();
         _flushTimer.Tick -= OnFlushTimerTick;
+        _diagnosticsTimer.Stop();
+        _diagnosticsTimer.Tick -= OnDiagnosticsTimerTick;
         inputProcessor.Clear();
         IsActive = false;
         ConsoleLog.Write("RawScanner", "raw input scanner service stopped");
@@ -215,7 +234,18 @@ public sealed class RawScannerService(
 
     public IntPtr ProcessWindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (!IsActive || msg != WM_INPUT)
+        if (msg != WM_INPUT)
+        {
+            return IntPtr.Zero;
+        }
+
+        if (_diagnostics.RecordWindowMessage())
+        {
+            // 生产上从未见过 Raw Input 扫码记录；首条 WM_INPUT 到达即留痕，用来区分「消息没送到」与「送到但被丢弃」。
+            ConsoleLog.Write("RawScanner", $"first WM_INPUT received active={IsActive} hwnd=0x{hwnd.ToInt64():X}");
+        }
+
+        if (!IsActive)
         {
             return IntPtr.Zero;
         }
@@ -236,6 +266,7 @@ public sealed class RawScannerService(
         _ = GetRawInputData(rawInputHandle, RidInput, IntPtr.Zero, ref size, headerSize);
         if (size == 0)
         {
+            _diagnostics.RecordReadFailure();
             return;
         }
 
@@ -244,6 +275,7 @@ public sealed class RawScannerService(
         {
             if (GetRawInputData(rawInputHandle, RidInput, buffer, ref size, headerSize) != size)
             {
+                _diagnostics.RecordReadFailure();
                 return;
             }
 
@@ -254,9 +286,11 @@ public sealed class RawScannerService(
                 return;
             }
 
+            _diagnostics.RecordKeyDown();
             var devicePath = GetDevicePath(raw.header.hDevice);
             if (string.IsNullOrWhiteSpace(devicePath))
             {
+                _diagnostics.RecordEmptyDevicePath();
                 LogEmptyDevicePath();
                 return;
             }
@@ -290,6 +324,7 @@ public sealed class RawScannerService(
     {
         if (!RawScannerInputProcessor.CanAcceptDevice(devicePath, _boundDevicePath))
         {
+            _diagnostics.RecordRejectedDevice();
             LogRejectedDevice(devicePath);
             return null;
         }
@@ -351,12 +386,63 @@ public sealed class RawScannerService(
             return;
         }
 
+        _diagnostics.RecordDispatched();
         var dispatchDelayMs = Math.Max(0, (dispatchAt - completedAt).TotalMilliseconds);
         ConsoleLog.Write(
             "RawScanner",
             $"scan accepted barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} completion={result.CompletionKind} activePage={_activePageId} dispatchDelayMs={dispatchDelayMs:0.###}");
         handler(scannedEvent);
     }
+
+    private void OnDiagnosticsTimerTick(object? sender, EventArgs e)
+    {
+        VerifyRegistration("periodic");
+        if (_diagnostics.ShouldReportSummary(DateTimeOffset.Now, DiagnosticsSummaryInterval))
+        {
+            ConsoleLog.Write(
+                "RawScanner",
+                $"raw input stats {_diagnostics.Describe()} boundDevice={!string.IsNullOrWhiteSpace(_boundDevicePath)} activePage={_activePageId ?? "<none>"}");
+        }
+    }
+
+    /// <summary>
+    /// 核对本进程的键盘 Raw Input 注册仍指向本窗口且带 INPUTSINK；被覆盖或丢失时记 Warning 并重新注册一次。
+    /// 每个进程每个 usage 只能有一个注册目标，后注册者会悄悄顶替前者。
+    /// </summary>
+    private void VerifyRegistration(string trigger)
+    {
+        if (!IsActive || _registeredHwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var registration = TryGetKeyboardRegistration(out var queryError);
+        var healthy = registration is { } current &&
+            current.hwndTarget == _registeredHwnd &&
+            (current.dwFlags & RIDEV_INPUTSINK) != 0;
+        if (!_diagnostics.RecordRegistrationState(healthy))
+        {
+            return;
+        }
+
+        if (healthy)
+        {
+            ConsoleLog.Write("RawScanner", $"raw input registration verified trigger={trigger} hwnd=0x{_registeredHwnd.ToInt64():X}");
+            return;
+        }
+
+        var description = registration is { } found
+            ? $"registeredTarget=0x{found.hwndTarget.ToInt64():X} flags=0x{found.dwFlags:X}"
+            : queryError is null ? "registeredTarget=<none>" : $"queryError={queryError}";
+        var reRegistered = TryRegisterKeyboard(_registeredHwnd, out var registerError);
+        ConsoleLog.WriteWarning(
+            "RawScanner",
+            $"raw input registration missing or overridden trigger={trigger} expectedTarget=0x{_registeredHwnd.ToInt64():X} {description} reRegistered={reRegistered} error={registerError?.ToString() ?? "-"}",
+            CreateDiagnosticsContext("registration-lost"));
+    }
+
+    private static ApplicationLogContext CreateDiagnosticsContext(string action) =>
+        new(Properties: new Dictionary<string, object?> { ["action"] = action });
 
     private void LogEmptyDevicePath()
     {
@@ -438,6 +524,64 @@ public sealed class RawScannerService(
         }
     }
 
+    private static bool TryRegisterKeyboard(IntPtr hwnd, out int? error)
+    {
+        var devices = new RAWINPUTDEVICE[]
+        {
+            new()
+            {
+                usUsagePage = 0x01,
+                usUsage = 0x06,
+                dwFlags = RIDEV_INPUTSINK,
+                hwndTarget = hwnd
+            }
+        };
+
+        if (RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>()))
+        {
+            error = null;
+            return true;
+        }
+
+        error = Marshal.GetLastWin32Error();
+        return false;
+    }
+
+    private static RAWINPUTDEVICE? TryGetKeyboardRegistration(out int? error)
+    {
+        error = null;
+        var count = 0u;
+        var entrySize = (uint)Marshal.SizeOf<RAWINPUTDEVICE>();
+        if (GetRegisteredRawInputDevices(null, ref count, entrySize) == uint.MaxValue &&
+            Marshal.GetLastWin32Error() != ErrorInsufficientBuffer)
+        {
+            error = Marshal.GetLastWin32Error();
+            return null;
+        }
+
+        if (count == 0)
+        {
+            return null;
+        }
+
+        var devices = new RAWINPUTDEVICE[count];
+        if (GetRegisteredRawInputDevices(devices, ref count, entrySize) == uint.MaxValue)
+        {
+            error = Marshal.GetLastWin32Error();
+            return null;
+        }
+
+        foreach (var device in devices.Take((int)count))
+        {
+            if (device.usUsagePage == 0x01 && device.usUsage == 0x06)
+            {
+                return device;
+            }
+        }
+
+        return null;
+    }
+
     private static bool TryMapCharacter(Key key, out char character)
     {
         if (key >= Key.D0 && key <= Key.D9)
@@ -513,6 +657,14 @@ public sealed class RawScannerService(
         uint uiNumDevices,
         uint cbSize);
 
+    private const int ErrorInsufficientBuffer = 122;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetRegisteredRawInputDevices(
+        [Out] RAWINPUTDEVICE[]? pRawInputDevices,
+        ref uint puiNumDevices,
+        uint cbSize);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetRawInputData(
         IntPtr hRawInput,
@@ -527,4 +679,80 @@ public sealed class RawScannerService(
         int uiCommand,
         IntPtr pData,
         ref uint pcbSize);
+}
+
+/// <summary>
+/// Raw Input 通道的进程内计数，只用于诊断日志；所有入口都在 UI 线程（WM_INPUT、DispatcherTimer、PreviewKeyDown）。
+/// </summary>
+internal sealed class RawScannerDiagnostics
+{
+    private long _windowMessages;
+    private long _keyDowns;
+    private long _readFailures;
+    private long _emptyDevicePaths;
+    private long _rejectedDevices;
+    private long _dispatched;
+    private bool? _registrationHealthy;
+    private string? _lastSummary;
+    private DateTimeOffset _lastSummaryAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastNonRawReportAt = DateTimeOffset.MinValue;
+
+    public long WindowMessages => _windowMessages;
+
+    public long Dispatched => _dispatched;
+
+    /// <summary>返回 true 表示这是本进程收到的第一条 WM_INPUT。</summary>
+    public bool RecordWindowMessage() => ++_windowMessages == 1;
+
+    public void RecordKeyDown() => _keyDowns++;
+
+    public void RecordReadFailure() => _readFailures++;
+
+    public void RecordEmptyDevicePath() => _emptyDevicePaths++;
+
+    public void RecordRejectedDevice() => _rejectedDevices++;
+
+    public void RecordDispatched() => _dispatched++;
+
+    /// <summary>返回 true 表示注册健康状态发生变化（含首次核对），需要记日志。</summary>
+    public bool RecordRegistrationState(bool healthy)
+    {
+        if (_registrationHealthy == healthy)
+        {
+            return false;
+        }
+
+        _registrationHealthy = healthy;
+        return true;
+    }
+
+    /// <summary>首次一定上报；之后计数有变化且距上次至少 interval 才上报，避免刷屏。</summary>
+    public bool ShouldReportSummary(DateTimeOffset now, TimeSpan interval)
+    {
+        var summary = Describe();
+        var isFirst = _lastSummary is null;
+        if (!isFirst && (string.Equals(summary, _lastSummary, StringComparison.Ordinal) || now - _lastSummaryAt < interval))
+        {
+            return false;
+        }
+
+        _lastSummary = summary;
+        _lastSummaryAt = now;
+        return true;
+    }
+
+    public bool ShouldReportNonRawDelivery(DateTimeOffset now, TimeSpan interval)
+    {
+        if (now - _lastNonRawReportAt < interval)
+        {
+            return false;
+        }
+
+        _lastNonRawReportAt = now;
+        return true;
+    }
+
+    public string Describe() =>
+        $"wmInput={_windowMessages} keyDown={_keyDowns} readFailures={_readFailures} emptyDevicePath={_emptyDevicePaths} " +
+        $"rejectedDevice={_rejectedDevices} dispatched={_dispatched} registrationHealthy={_registrationHealthy?.ToString() ?? "unknown"}";
 }

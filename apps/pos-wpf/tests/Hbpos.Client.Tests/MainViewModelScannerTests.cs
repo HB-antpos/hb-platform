@@ -615,6 +615,80 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Login_overlay_takes_raw_scanner_page_and_raw_scan_signs_in_directly()
+    {
+        var scanner = new FakeRawScannerService();
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var login = new BarcodeRecordingCashierLoginService(CashierLoginResult.Success(cashierSession));
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            rawScannerService: scanner,
+            cashierLoginService: login);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        Assert.True(viewModel.IsCashierLoginOverlayOpen);
+        Assert.Equal(MainViewModel.CashierLoginScannerPageId, scanner.ActivePageId);
+
+        scanner.Emit("EMP-RAW-001");
+        await WaitUntilAsync(() => viewModel.Session.CashierSession is not null);
+
+        Assert.Equal(["EMP-RAW-001"], login.Barcodes);
+        Assert.False(viewModel.IsCashierLoginOverlayOpen);
+        // 登录成功后扫码页回到当前业务页，后续扫码不再进入登录。
+        Assert.Equal(PosTerminalViewModel.PageId, scanner.ActivePageId);
+    }
+
+    [Fact]
+    public async Task Login_overlay_keyboard_scan_signs_in_without_product_lookup()
+    {
+        var scanner = new FakeRawScannerService();
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var login = new BarcodeRecordingCashierLoginService(CashierLoginResult.Success(cashierSession));
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            rawScannerService: scanner,
+            cashierLoginService: login);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        Assert.True(viewModel.IsCashierLoginOverlayOpen);
+        Assert.Same(viewModel.PosTerminal, viewModel.CurrentScreen);
+
+        Assert.True(viewModel.TryProcessKeyboardScannerInput("EMP-KEY-001"));
+        await WaitUntilAsync(() => viewModel.Session.CashierSession is not null);
+
+        Assert.Equal(["EMP-KEY-001"], login.Barcodes);
+        Assert.Empty(viewModel.PosTerminal!.CartLines);
+        Assert.Equal(string.Empty, viewModel.PosTerminal.ScanText);
+    }
+
+    [Fact]
+    public async Task Signed_in_scan_on_non_scanner_screen_never_attempts_cashier_login()
+    {
+        var scanner = new FakeRawScannerService();
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var login = new BarcodeRecordingCashierLoginService(CashierLoginResult.Success(cashierSession));
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            rawScannerService: scanner,
+            cashierLoginService: login);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        await viewModel.LoginCashierByBarcodeAsync("EMP-SIGNED-IN");
+        Assert.Same(cashierSession, viewModel.Session.CashierSession);
+        viewModel.CurrentScreen = new object();
+
+        Assert.True(viewModel.TryProcessKeyboardScannerInput("9300675072651"));
+
+        // 商品条码不再被当作员工码登录：不会提示「收银员条码无效」，也不会顶替当前收银员。
+        Assert.Equal(["EMP-SIGNED-IN"], login.Barcodes);
+        Assert.Same(cashierSession, viewModel.Session.CashierSession);
+        Assert.Null(scanner.ActivePageId);
+        // 本地化服务按当前界面语言取文案，中英文任一份都算命中提示。
+        Assert.True(
+            viewModel.StatusMessage.Contains("不接收扫码", StringComparison.Ordinal) ||
+            viewModel.StatusMessage.Contains("does not accept scans", StringComparison.Ordinal),
+            viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task Cashier_login_passes_current_offline_state_to_login_service()
     {
         var login = new RecordingAttemptCashierLoginService(
@@ -8247,6 +8321,24 @@ public sealed class MainViewModelScannerTests
         public Task RemoveCachedSessionAsync(
             CashierSessionDto session,
             CancellationToken cancellationToken = default) => Task.FromException(exception);
+    }
+
+    private sealed class BarcodeRecordingCashierLoginService(CashierLoginResult result) : ICashierLoginService
+    {
+        private readonly ConcurrentQueue<string> _barcodes = new();
+
+        public IReadOnlyList<string> Barcodes => _barcodes.ToArray();
+
+        public Task<CashierLoginResult> LoginAsync(
+            string storeCode,
+            string deviceCode,
+            string userBarcode,
+            bool attemptOnline = true,
+            CancellationToken cancellationToken = default)
+        {
+            _barcodes.Enqueue(userBarcode);
+            return Task.FromResult(result);
+        }
     }
 
     private sealed class RecordingAttemptCashierLoginService(CashierLoginResult result) : ICashierLoginService

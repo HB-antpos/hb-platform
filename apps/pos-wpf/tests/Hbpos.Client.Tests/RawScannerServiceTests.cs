@@ -143,6 +143,86 @@ public sealed class RawScannerServiceTests
         Assert.Equal(0, deliveryCount);
     }
 
+    [Fact]
+    public void SetActivePage_logs_only_when_the_page_actually_changes()
+    {
+        using var logs = new ConsoleLogCapture();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+
+        service.SetActivePage("dedupe-page-a");
+        service.SetActivePage("dedupe-page-a");
+        service.SetActivePage("dedupe-page-b");
+
+        Assert.Single(logs.Lines, line => line.Contains("active page set page=dedupe-page-a", StringComparison.Ordinal));
+        Assert.Single(logs.Lines, line => line.Contains("active page set page=dedupe-page-b", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ProcessWindowMessage_counts_wm_input_even_before_start_and_logs_first_message_once()
+    {
+        using var logs = new ConsoleLogCapture();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+        var handled = false;
+
+        service.ProcessWindowMessage(IntPtr.Zero, 0x0100, IntPtr.Zero, IntPtr.Zero, ref handled);
+        service.ProcessWindowMessage(IntPtr.Zero, 0x00FF, IntPtr.Zero, IntPtr.Zero, ref handled);
+        service.ProcessWindowMessage(IntPtr.Zero, 0x00FF, IntPtr.Zero, IntPtr.Zero, ref handled);
+
+        // 只统计 WM_INPUT；服务未启动时不解析原始输入，但计数照样增加，便于区分「消息没送到」与「送到被丢弃」。
+        Assert.Equal(2, service.Diagnostics.WindowMessages);
+        Assert.Equal(0, service.Diagnostics.Dispatched);
+        Assert.Single(logs.Lines, line => line.Contains("first WM_INPUT received active=False", StringComparison.Ordinal));
+        Assert.False(handled);
+    }
+
+    [Fact]
+    public void Non_raw_delivery_reports_raw_input_counters_at_most_once_per_interval()
+    {
+        using var logs = new ConsoleLogCapture();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+        var deduplicator = (IScannerInputDeduplicator)service;
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-1", "diagnostics-test-source", now));
+        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-2", "diagnostics-test-source", now.AddSeconds(5)));
+        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-3", "diagnostics-test-source", now.AddMinutes(11)));
+
+        var reports = logs.Lines
+            .Where(line => line.Contains("non-raw scan delivered source=diagnostics-test-source", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, reports.Length);
+        Assert.All(reports, line => Assert.Contains("wmInput=0", line, StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Lines, line => line.Contains("EMP-1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Diagnostics_summary_reports_first_then_only_changed_counters_after_interval()
+    {
+        var diagnostics = new RawScannerDiagnostics();
+        var now = DateTimeOffset.UtcNow;
+        var interval = TimeSpan.FromMinutes(10);
+
+        Assert.True(diagnostics.ShouldReportSummary(now, interval));
+        Assert.False(diagnostics.ShouldReportSummary(now.AddMinutes(20), interval));
+
+        diagnostics.RecordWindowMessage();
+        Assert.False(diagnostics.ShouldReportSummary(now.AddMinutes(5), interval));
+        Assert.True(diagnostics.ShouldReportSummary(now.AddMinutes(10), interval));
+        Assert.Contains("wmInput=1", diagnostics.Describe(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Diagnostics_registration_state_reports_only_transitions()
+    {
+        var diagnostics = new RawScannerDiagnostics();
+
+        Assert.True(diagnostics.RecordRegistrationState(true));
+        Assert.False(diagnostics.RecordRegistrationState(true));
+        Assert.True(diagnostics.RecordRegistrationState(false));
+        Assert.False(diagnostics.RecordRegistrationState(false));
+        Assert.True(diagnostics.RecordRegistrationState(true));
+    }
+
     private sealed class FakeScannerBindingService : IScannerBindingService
     {
         public string? BoundDevicePath { get; set; }

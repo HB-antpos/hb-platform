@@ -415,6 +415,8 @@
   <data name="shell.cashierLogin.status.apiUnavailable" xml:space="preserve"><value>Cashier login service is unavailable.</value></data>
   <data name="shell.cashierLogin.status.success" xml:space="preserve"><value>Cashier login successful.</value></data>
   <data name="shell.cashierLogin.status.locked" xml:space="preserve"><value>Signed out. Sign in again.</value></data>
+  <data name="shell.scanner.status.openVoucherEntryFirst" xml:space="preserve"><value>To pay with a voucher, tap Voucher first, then scan the voucher code.</value></data>
+  <data name="shell.scanner.status.unsupportedScreen" xml:space="preserve"><value>This page does not accept scans. Go back to the sales screen to scan.</value></data>
   <data name="shell.cashierLogin.status.sessionExpired" xml:space="preserve"><value>Cashier session expired. Sign in again.</value></data>
   <data name="shell.cashierLogin.status.offlineSuccess" xml:space="preserve"><value>Signed in using the offline cashier cache.</value></data>
   <data name="shell.cashierLogin.status.emergencyExpired" xml:space="preserve"><value>The emergency login QR code has expired.</value></data>

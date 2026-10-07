@@ -108,6 +108,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         PreviewMouseWheel += MainWindowUserInput;
         PreviewTouchDown += MainWindowUserInput;
         StateChanged += MainWindowStateChanged;
+        Activated += MainWindowActivated;
         Closing += MainWindowClosing;
         Closed += MainWindowClosed;
     }
@@ -180,6 +181,17 @@ public partial class MainWindow : Window, IDisplayMovableWindow
             return;
         }
 
+        var input = _viewModel.CashierBarcodeInput.Trim();
+        if (_rawScannerService is IScannerInputDeduplicator deduplicator &&
+            !deduplicator.TryAcceptScanDelivery(input, "login-box", DateTimeOffset.Now))
+        {
+            // 同一次扫码 Raw Input 已经提交过登录（扫码页切到登录弹窗），登录框里的同一串字符不能再登录一次。
+            ConsoleLog.Write("CashierLogin", "login box submission suppressed because raw scanner already delivered the same scan");
+            _viewModel.CashierBarcodeInput = string.Empty;
+            ClearCashierLoginOverlayInputAfterLogin();
+            return;
+        }
+
         command.Execute(null);
         ClearCashierLoginOverlayInputAfterLogin();
     }
@@ -194,11 +206,19 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 
     private void CashierLoginOverlayIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
+        // 关键逻辑：弹窗开关都清空输入框，上一次残留的半截条码不能拼进下一次扫码导致「条码无效」。
+        CashierLoginOverlayPasswordBox.Clear();
         if (e.NewValue is not true)
         {
             return;
         }
 
+        FocusCashierLoginOverlayInput();
+    }
+
+    private void MainWindowActivated(object? sender, EventArgs e)
+    {
+        // 收银窗口从别的程序切回前台时，WPF 不保证把键盘焦点还给登录框；登录弹窗打开时主动夺回扫码焦点。
         FocusCashierLoginOverlayInput();
     }
 
@@ -452,6 +472,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         PreviewMouseWheel -= MainWindowUserInput;
         PreviewTouchDown -= MainWindowUserInput;
         StateChanged -= MainWindowStateChanged;
+        Activated -= MainWindowActivated;
         Closing -= MainWindowClosing;
         _hwndSource?.RemoveHook(MainWindowMessageHook);
     }

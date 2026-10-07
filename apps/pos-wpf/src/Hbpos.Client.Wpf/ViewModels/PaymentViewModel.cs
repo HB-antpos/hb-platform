@@ -1381,6 +1381,25 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         return CanUseVoucherEntryDialog();
     }
 
+    /// <summary>
+    /// 代金券弹窗打开但焦点不在券号框（例如刚点过屏幕键盘按钮）时，键盘通道收到的扫码由主窗口转交到这里：
+    /// 与扫码直接进输入框一致，只填入券号（按输入框规则转大写），仍由收银员点「确认」添加付款。
+    /// </summary>
+    internal bool TryAcceptScannedVoucherCode(string barcode)
+    {
+        var code = barcode.Trim();
+        if (code.Length == 0 || !CanUseVoucherEntryDialog())
+        {
+            return false;
+        }
+
+        VoucherEntryText = code.ToUpperInvariant();
+        return true;
+    }
+
+    /// <summary>付款页当前可以先打开代金券弹窗再扫券码（销售模式且启用了代金券）。</summary>
+    internal bool CanScanVoucherAfterOpeningEntry => IsVoucherPaymentVisible && !IsRefundMode;
+
     private bool CanUseVoucherEntryDialog()
     {
         return IsVoucherPaymentVisible && IsVoucherEntryDialogOpen && IsPaymentInteractionEnabled;

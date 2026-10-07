@@ -1179,6 +1179,12 @@
   <data name="shell.cashierLogin.status.locked" xml:space="preserve">
     <value>已登出，请重新登录。</value>
   </data>
+  <data name="shell.scanner.status.openVoucherEntryFirst" xml:space="preserve">
+    <value>如需用代金券付款，请先点「代金券」再扫券码。</value>
+  </data>
+  <data name="shell.scanner.status.unsupportedScreen" xml:space="preserve">
+    <value>当前页面不接收扫码，请回到收银页再扫。</value>
+  </data>
   <data name="shell.cashierLogin.status.sessionExpired" xml:space="preserve">
     <value>收银员会话已失效，请重新登录。</value>
   </data>
