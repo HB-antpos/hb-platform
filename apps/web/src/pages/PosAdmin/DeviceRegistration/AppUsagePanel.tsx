@@ -5,15 +5,27 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { MeasuredTable } from '../../../components/MeasuredTable'
-import { getAppDeviceStatuses, getAppDeviceStatusSummary } from '../../../services/deviceRegistrationService'
+import {
+  getAppDeviceStatuses,
+  getAppDeviceStatusSummary,
+  getAppVersionDistribution,
+} from '../../../services/deviceRegistrationService'
 import type {
   AppDeviceOnlineState,
   AppDeviceStatus,
   AppDeviceStatusSummary,
+  AppVersionDistribution as AppVersionDistributionData,
   StoreOption,
 } from '../../../types/deviceRegistration'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 
+import AppVersionDistribution from './AppVersionDistribution'
+import {
+  buildAppVersionOptions,
+  formatAppPackageVersion,
+  getAppVersionSelectionKey,
+  type AppVersionSelection,
+} from './appVersionDistributionLogic'
 import { EMPTY_VALUE, OnlineDot, RelativeTime, StoreCell } from './deviceCells'
 import { APP_DEVICE_SYSTEM_OPTIONS } from './deviceSystemOptions'
 
@@ -38,11 +50,10 @@ function getUpdateTail(updateId: string) {
   return updateId.length <= 10 ? updateId : `…${updateId.slice(-10)}`
 }
 
+const EMPTY_DISTRIBUTION: AppVersionDistributionData = { total: 0, items: [] }
+
 function getAppPackageVersion(item: AppDeviceStatus) {
-  if (item.appVersion && item.appBuildVersion) {
-    return `${item.appVersion} (${item.appBuildVersion})`
-  }
-  return item.appVersion || item.appBuildVersion || EMPTY_VALUE
+  return formatAppPackageVersion(item.appVersion, item.appBuildVersion) ?? EMPTY_VALUE
 }
 
 interface AppUsagePanelProps {
@@ -61,9 +72,20 @@ export default function AppUsagePanel({ stores, storeNameMap, selectedStoreCode,
   const [onlineState, setOnlineState] = useState<AppDeviceOnlineState>('all')
   const [keywordInput, setKeywordInput] = useState('')
   const [keyword, setKeyword] = useState('')
+  const [distribution, setDistribution] = useState<AppVersionDistributionData>(EMPTY_DISTRIBUTION)
+  const [distributionLoading, setDistributionLoading] = useState(false)
+  const [versionSelection, setVersionSelection] = useState<AppVersionSelection>()
   const requestGuardRef = useRef(createLatestRequestGuard())
+  const distributionGuardRef = useRef(createLatestRequestGuard())
 
   function load() {
+    // 关键逻辑：点选版本带的系统优先于顶部系统下拉。顶部下拉也会限制分布本身，
+    // 版本行点选只下钻明细，不能反过来让分布收窄成一个系统。
+    const effectiveDeviceSystem = versionSelection?.deviceSystem ?? deviceSystem
+    const versionFilter = {
+      appVersion: versionSelection?.appVersion,
+      appBuildVersion: versionSelection?.appBuildVersion,
+    }
     return runLatestGuardedRequest(
       requestGuardRef.current,
       () =>
@@ -72,11 +94,17 @@ export default function AppUsagePanel({ stores, storeNameMap, selectedStoreCode,
             page: 1,
             pageSize: APP_USAGE_PAGE_SIZE,
             storeCode: selectedStoreCode,
-            deviceSystem,
+            deviceSystem: effectiveDeviceSystem,
             onlineState,
             keyword,
+            ...versionFilter,
           }),
-          getAppDeviceStatusSummary({ storeCode: selectedStoreCode, deviceSystem, keyword }),
+          getAppDeviceStatusSummary({
+            storeCode: selectedStoreCode,
+            deviceSystem: effectiveDeviceSystem,
+            keyword,
+            ...versionFilter,
+          }),
         ]),
       {
         onStart: () => setLoading(true),
@@ -93,11 +121,44 @@ export default function AppUsagePanel({ stores, storeNameMap, selectedStoreCode,
     )
   }
 
+  // 分布单独加载：点选版本只会改变明细，不需要重新统计分布。
+  function loadDistribution() {
+    return runLatestGuardedRequest(
+      distributionGuardRef.current,
+      () => getAppVersionDistribution({ storeCode: selectedStoreCode, deviceSystem, keyword }),
+      {
+        onStart: () => setDistributionLoading(true),
+        onSuccess: setDistribution,
+        onError: (error) => {
+          console.error(t('posAdmin.devices.mgmt.versionDist.loadFailed'), error)
+          message.error(t('posAdmin.devices.mgmt.versionDist.loadFailed'))
+        },
+        onSettled: () => setDistributionLoading(false),
+      },
+    )
+  }
+
   useEffect(() => {
     void load()
-  }, [selectedStoreCode, deviceSystem, onlineState, keyword])
+  }, [selectedStoreCode, deviceSystem, onlineState, keyword, versionSelection])
 
-  useEffect(() => () => requestGuardRef.current.invalidate(), [])
+  useEffect(() => {
+    void loadDistribution()
+  }, [selectedStoreCode, deviceSystem, keyword])
+
+  useEffect(
+    () => () => {
+      requestGuardRef.current.invalidate()
+      distributionGuardRef.current.invalidate()
+    },
+    [],
+  )
+
+  // 版本下拉与分布表共用同一份筛选状态：下拉选择、点选分布行、清除按钮三者互相同步。
+  const versionOptions = useMemo(
+    () => buildAppVersionOptions(distribution.items, versionSelection),
+    [distribution.items, versionSelection],
+  )
 
   const columns = useMemo<ColumnsType<AppDeviceStatus>>(() => [
     {
@@ -245,8 +306,32 @@ export default function AppUsagePanel({ stores, storeNameMap, selectedStoreCode,
           placeholder={t('posAdmin.devices.filterByDeviceSystem')}
           style={{ width: 140 }}
           value={deviceSystem}
-          onChange={(value) => setDeviceSystem(value)}
+          onChange={(value) => {
+            setDeviceSystem(value)
+            // 点选版本自带系统，下拉改了就会互相矛盾，所以一并清掉版本筛选。
+            setVersionSelection(undefined)
+          }}
           options={APP_DEVICE_SYSTEM_OPTIONS.map((value) => ({ label: value, value }))}
+        />
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="title"
+          placeholder={t('posAdmin.devices.mgmt.versionDist.filterPlaceholder')}
+          style={{ width: 220 }}
+          value={versionSelection ? getAppVersionSelectionKey(versionSelection) : undefined}
+          onChange={(key?: string) => setVersionSelection(versionOptions.find((option) => option.value === key)?.selection)}
+          options={versionOptions.map((option) => ({
+            value: option.value,
+            // 搜索用纯文本，下拉里右侧显示台数；选中回显时台数由样式隐藏。
+            title: option.label,
+            label: (
+              <span className="dev-mgmt-option">
+                <span>{option.label}</span>
+                <span className="dev-mgmt-option-count">{option.count}</span>
+              </span>
+            ),
+          }))}
         />
         <Select<AppDeviceOnlineState>
           style={{ width: 120 }}
@@ -258,7 +343,14 @@ export default function AppUsagePanel({ stores, storeNameMap, selectedStoreCode,
           }))}
         />
         <span className="dev-mgmt-toolbar-spacer" />
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
+        <Button
+          icon={<ReloadOutlined />}
+          loading={loading || distributionLoading}
+          onClick={() => {
+            void load()
+            void loadDistribution()
+          }}
+        >
           {t('common.refresh')}
         </Button>
       </div>
@@ -271,6 +363,12 @@ export default function AppUsagePanel({ stores, storeNameMap, selectedStoreCode,
           </div>
         ))}
       </div>
+      <AppVersionDistribution
+        distribution={distribution}
+        loading={distributionLoading}
+        selection={versionSelection}
+        onSelect={setVersionSelection}
+      />
       <div className="dev-mgmt-note">{t('posAdmin.devices.appUsageNote')}</div>
 
       <MeasuredTable<AppDeviceStatus>

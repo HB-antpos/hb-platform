@@ -69,6 +69,16 @@ namespace BlazorApp.Api.Controllers
             return Ok(result);
         }
 
+        [HttpGet("version-distribution")]
+        [Authorize(Policy = Permissions.DeviceRegistration.View)]
+        public async Task<IActionResult> GetVersionDistribution(
+            [FromQuery] MobileAppDeviceStatusQueryDto query
+        )
+        {
+            var result = await _statusService.GetVersionDistributionAsync(query);
+            return Ok(result);
+        }
+
         private async Task<MobileAppDeviceHeartbeatAuthContext?> ResolveHeartbeatAuthContextAsync(
             MobileAppDeviceHeartbeatDto dto
         )

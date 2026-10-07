@@ -50,6 +50,24 @@
         },
         "appSummaryUnknown": "系统未知",
         "appLastReport": "最后上报",
+        "versionDist": {
+          "title": "版本分布",
+          "hint": "共 {{count}} 个版本，点选一行筛选下方设备明细",
+          "columns": {
+            "system": "系统",
+            "version": "版本",
+            "devices": "设备数",
+            "online": "在线",
+            "embedded": "内置"
+          },
+          "unreportedVersion": "未上报版本",
+          "unselectable": "这些设备没有上报版本号，无法按版本筛选",
+          "empty": "暂无设备上报版本",
+          "rowAria": "{{system}} {{version}}，共 {{count}} 台，在线 {{online}} 台",
+          "sourceNote": "OTA / 内置是设备当前运行的 JS 包来源。旧版 App 不上报来源，所以两者之和可能小于设备数。",
+          "filterPlaceholder": "按版本筛选",
+          "loadFailed": "加载版本分布失败"
+        },
         "batch": {
           "actions": {
             "activate": "启用 {{count}} 台",

@@ -78,6 +78,24 @@ export interface AppDeviceStatusSummary {
   unknownSystem: number
 }
 
+/** 版本分布的一行：同一系统、同一原生版本号 + 构建号。 */
+export interface AppVersionDistributionItem {
+  deviceSystem?: string
+  appVersion?: string
+  appBuildVersion?: string
+  total: number
+  online: number
+  /** 当前跑 OTA 热更新包的设备数 */
+  ota: number
+  /** 当前跑安装包内置 bundle 的设备数 */
+  embedded: number
+}
+
+export interface AppVersionDistribution {
+  total: number
+  items: AppVersionDistributionItem[]
+}
+
 export interface AppDeviceStatusPagedResult {
   devices: AppDeviceStatus[]
   total: number

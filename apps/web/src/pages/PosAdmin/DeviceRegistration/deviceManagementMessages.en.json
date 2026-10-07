@@ -50,6 +50,24 @@
         },
         "appSummaryUnknown": "Unknown OS",
         "appLastReport": "Last report",
+        "versionDist": {
+          "title": "Version distribution",
+          "hint": "{{count}} versions. Select a row to filter the device list below",
+          "columns": {
+            "system": "OS",
+            "version": "Version",
+            "devices": "Devices",
+            "online": "Online",
+            "embedded": "Built-in"
+          },
+          "unreportedVersion": "Not reported",
+          "unselectable": "These devices have not reported a version, so they cannot be filtered by version",
+          "empty": "No devices have reported a version yet",
+          "rowAria": "{{system}} {{version}}, {{count}} devices, {{online}} online",
+          "sourceNote": "OTA / Built-in is the source of the JS bundle a device is running. Older app builds do not report it, so the two may add up to fewer than the device count.",
+          "filterPlaceholder": "Filter by version",
+          "loadFailed": "Failed to load version distribution"
+        },
         "batch": {
           "actions": {
             "activate": "Enable {{count}}",
