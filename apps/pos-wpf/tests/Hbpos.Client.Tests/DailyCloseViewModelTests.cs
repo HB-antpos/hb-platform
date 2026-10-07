@@ -850,6 +850,8 @@ public sealed class DailyCloseViewModelTests
 
         Assert.False(viewModel.WillAutoSendLinklySettlement);
         Assert.Equal(1, settlementService.SettleCallCount);
+        // 发送前只查一次刷卡机（在线就直接发送），不弹任何确认框。
+        Assert.Equal(1, settlementService.TerminalCheckCallCount);
         Assert.Equal(0, confirmCalls);
         // 结算结果要让收银员看到：停在结算页签，不自动回收银台。
         Assert.False(returnedToPos);
@@ -946,6 +948,125 @@ public sealed class DailyCloseViewModelTests
             viewModel.StatusMessage);
         // 银行原文仍保留在结算记录里作证据。
         Assert.Equal("PINpad Offline", Assert.Single(viewModel.Settlements).ResponseText);
+    }
+
+    [Fact]
+    public async Task SaveAndPrintCommand_auto_settlement_with_offline_terminal_explains_without_asking_to_confirm()
+    {
+        var settlementService = new FakeLinklySettlementService
+        {
+            AutoSettleAfterDailyClose = true,
+            TerminalCheck = new LinklySettlementTerminalCheck(false, Offline: true, Message: "PINpad offline")
+        };
+        var logger = new RecordingOperationAuditLogger();
+        var confirmCalls = 0;
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            returnToPos: () => { },
+            operationAuditLogger: logger,
+            linklySettlementService: settlementService,
+            confirmLinklySettlementAsync: _ =>
+            {
+                confirmCalls++;
+                return Task.FromResult(true);
+            });
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        // 刷卡机离线：不弹确认、不发结算、不产生结算记录，只给友好说明并留审计。
+        Assert.Equal(0, confirmCalls);
+        Assert.Equal(0, settlementService.SettleCallCount);
+        Assert.Empty(viewModel.Settlements);
+        Assert.True(viewModel.IsLinklySettlementTabSelected);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal(
+            "Daily close saved and sent to printer. The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle & Print on the Linkly Settlement tab to retry.",
+            viewModel.StatusMessage);
+        Assert.Contains(logger.Events, auditEvent =>
+            auditEvent.OperationType == "LINKLY_SETTLEMENT" &&
+            auditEvent.Outcome == "Failed" &&
+            auditEvent.ReasonCode == "TERMINAL_OFFLINE");
+    }
+
+    [Theory]
+    [InlineData(
+        true,
+        "The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle & Print on the Linkly Settlement tab to retry.",
+        "TERMINAL_OFFLINE")]
+    [InlineData(
+        false,
+        "The card terminal is not ready, so the Linkly settlement was not sent (Linkly EFT-Client connection failed.). Make sure the Linkly program is open and the terminal is connected, then press Settle & Print on the Linkly Settlement tab to retry.",
+        "TERMINAL_NOT_READY")]
+    public async Task Linkly_settlement_with_unready_terminal_explains_without_asking_for_confirmation(
+        bool offline,
+        string expectedStatus,
+        string expectedReasonCode)
+    {
+        var settlementService = new FakeLinklySettlementService
+        {
+            TerminalCheck = new LinklySettlementTerminalCheck(false, offline, "Linkly EFT-Client connection failed.")
+        };
+        var logger = new RecordingOperationAuditLogger();
+        var confirmations = 0;
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            operationAuditLogger: logger,
+            linklySettlementService: settlementService,
+            confirmLinklySettlementAsync: _ =>
+            {
+                confirmations++;
+                return Task.FromResult(true);
+            });
+
+        await viewModel.LoadAsync();
+        await viewModel.SettleAndPrintCommand.ExecuteAsync(null);
+
+        // 先查刷卡机：发不出去的结算不再让收银员确认，也不会走到服务层创建记录。
+        Assert.Equal(1, settlementService.TerminalCheckCallCount);
+        Assert.Equal(0, confirmations);
+        Assert.Equal(0, settlementService.SettleCallCount);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal(expectedStatus, viewModel.StatusMessage);
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("LINKLY_SETTLEMENT", auditEvent.OperationType);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal(expectedReasonCode, auditEvent.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Linkly_settlement_terminal_dropping_after_confirmation_is_explained_and_leaves_no_record()
+    {
+        // 预检通过、确认框期间刷卡机掉线：服务层在创建记录前拦下并抛专用异常，VM 要给友好说明而不是原始异常文本。
+        var settlementService = new FakeLinklySettlementService
+        {
+            SettleException = new LinklySettlementTerminalUnavailableException(
+                new LinklySettlementTerminalCheck(false, Offline: true, Message: "PINpad offline"))
+        };
+        var logger = new RecordingOperationAuditLogger();
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            operationAuditLogger: logger,
+            linklySettlementService: settlementService,
+            confirmLinklySettlementAsync: _ => Task.FromResult(true));
+
+        await viewModel.LoadAsync();
+        await viewModel.SettleAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, settlementService.SettleCallCount);
+        Assert.Empty(viewModel.Settlements);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal(
+            "The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle & Print on the Linkly Settlement tab to retry.",
+            viewModel.StatusMessage);
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("TERMINAL_OFFLINE", auditEvent.ReasonCode);
     }
 
     [Theory]
@@ -1097,7 +1218,10 @@ public sealed class DailyCloseViewModelTests
         await viewModel.SettleAndPrintCommand.ExecuteAsync(null);
 
         Assert.Equal(0, settlementService.SettleCallCount);
+        Assert.Equal(1, settlementService.TerminalCheckCallCount);
         Assert.False(viewModel.IsBusy);
+        // 预检期间的“正在检查刷卡机”提示不能残留在取消确认之后。
+        Assert.NotEqual("Checking the card terminal...", viewModel.StatusMessage);
     }
 
     [Fact]
@@ -1403,6 +1527,20 @@ public sealed class DailyCloseViewModelTests
         public (string ResponseCode, string ResponseText, bool HasReceipt)? FailedResponse { get; init; }
 
         public Exception? AutoSettleCheckException { get; init; }
+
+        // 发送结算前的刷卡机预检结果；默认在线。
+        public LinklySettlementTerminalCheck TerminalCheck { get; init; } = LinklySettlementTerminalCheck.Passed;
+
+        public int TerminalCheckCallCount { get; private set; }
+
+        public Task<LinklySettlementTerminalCheck> CheckTerminalReadyAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default)
+        {
+            TerminalCheckCallCount++;
+            return Task.FromResult(TerminalCheck);
+        }
 
         public Task<bool> ShouldAutoSettleAfterDailyCloseAsync(
             PosSessionState session,

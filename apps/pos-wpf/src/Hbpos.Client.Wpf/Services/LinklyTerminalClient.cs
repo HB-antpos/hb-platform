@@ -88,7 +88,9 @@ public sealed record LinklyConnectionTestResult(
     bool Succeeded,
     string? Message = null,
     LinklyStatusTestDetails? StatusTest = null,
-    bool? PinPadLoggedOn = null);
+    bool? PinPadLoggedOn = null,
+    // EFT-Client 明确回报刷卡机离线（PF）；与连不上 EFT-Client、状态查询超时区分开，调用方据此给不同提示。
+    bool PinPadOffline = false);
 
 public sealed record LinklyLogonResult(
     bool Succeeded,
@@ -308,7 +310,8 @@ public sealed class LinklyTerminalClient(
                 {
                     return new LinklyConnectionTestResult(
                         false,
-                        T("linkly.local.test.pinpadOffline", "Linkly PINpad is offline (PF). Check the terminal connection in Linkly Client."));
+                        T("linkly.local.test.pinpadOffline", "Linkly PINpad is offline (PF). Check the terminal connection in Linkly Client."),
+                        PinPadOffline: true);
                 }
 
                 if (ready)

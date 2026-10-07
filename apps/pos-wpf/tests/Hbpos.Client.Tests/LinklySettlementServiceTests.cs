@@ -1276,6 +1276,171 @@ public sealed class LinklySettlementServiceTests
         });
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Settlement_is_blocked_before_any_record_when_terminal_is_not_ready(bool pinpadOffline)
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be sent"))
+        {
+            ConnectionTestResult = new LinklyConnectionTestResult(false, "terminal check failed", PinPadOffline: pinpadOffline)
+        };
+
+        await WithTerminalCheckServiceAsync(LinklyConnectionMode.LocalIp, terminal, async (service, repository) =>
+        {
+            var exception = await Assert.ThrowsAsync<LinklySettlementTerminalUnavailableException>(
+                () => service.SettleAndPrintAsync(session, DateTime.Today));
+
+            Assert.Equal(pinpadOffline, exception.Check.Offline);
+            Assert.Equal("terminal check failed", exception.Check.Message);
+            // 刷卡机未就绪时既不能发出结算，也不能留下任何本地记录，否则会被上传成没有金额的失败结算。
+            Assert.Equal(0, terminal.SettlementCallCount);
+            Assert.Empty(await repository.GetByBusinessDateAsync(session.StoreCode, session.DeviceCode, DateTime.Today));
+            Assert.Empty(await repository.GetActiveUploadItemsAsync());
+        });
+    }
+
+    [Fact]
+    public async Task Terminal_check_reports_offline_without_creating_a_record()
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be sent"))
+        {
+            ConnectionTestResult = new LinklyConnectionTestResult(false, "PINpad offline", PinPadOffline: true)
+        };
+
+        await WithTerminalCheckServiceAsync(LinklyConnectionMode.LocalIp, terminal, async (service, repository) =>
+        {
+            var check = await service.CheckTerminalReadyAsync(session, DateTime.Today);
+
+            Assert.False(check.Ready);
+            Assert.True(check.Offline);
+            Assert.Equal(1, terminal.TestConnectionCallCount);
+            Assert.Equal(0, terminal.SettlementCallCount);
+            Assert.Empty(await repository.GetByBusinessDateAsync(session.StoreCode, session.DeviceCode, DateTime.Today));
+        });
+    }
+
+    [Fact]
+    public async Task Settlement_proceeds_after_terminal_check_when_pinpad_is_online()
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(
+            true,
+            "done",
+            ResponseCode: "00",
+            ResponseText: "Approved",
+            ProviderSubmissionState: ProviderSubmissionState.Submitted));
+
+        await WithTerminalCheckServiceAsync(LinklyConnectionMode.LocalIp, terminal, async (service, repository) =>
+        {
+            Assert.True((await service.CheckTerminalReadyAsync(session, DateTime.Today)).Ready);
+            Assert.Equal(1, terminal.TestConnectionCallCount);
+
+            var execution = await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            // 发送前服务层还会再查一次，兜住确认框期间刷卡机掉线。
+            Assert.Equal(2, terminal.TestConnectionCallCount);
+            Assert.Equal(1, terminal.SettlementCallCount);
+            Assert.Equal(LocalLinklySettlementStatus.Succeeded, execution.Settlement.Status);
+        });
+    }
+
+    [Fact]
+    public async Task Terminal_check_allows_pinpad_that_is_online_but_not_logged_on()
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "done"))
+        {
+            // 刷卡机在线但未登录银行网络：终端会自己回银行响应，不属于离线，不拦截。
+            ConnectionTestResult = new LinklyConnectionTestResult(true, "not logged on", PinPadLoggedOn: false)
+        };
+
+        await WithTerminalCheckServiceAsync(LinklyConnectionMode.LocalIp, terminal, async (service, _) =>
+            Assert.True((await service.CheckTerminalReadyAsync(session, DateTime.Today)).Ready));
+    }
+
+    [Theory]
+    [InlineData(LinklyConnectionMode.CloudDirectSync)]
+    [InlineData(LinklyConnectionMode.CloudBackendAsync)]
+    public async Task Terminal_check_is_skipped_outside_local_ip_mode(LinklyConnectionMode mode)
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "done"))
+        {
+            ConnectionTestResult = new LinklyConnectionTestResult(false, "would be offline", PinPadOffline: true)
+        };
+
+        // 云端模式没有等价的轻量状态查询：不能拿本地 EFT-Client 的状态去拦云端结算。
+        await WithTerminalCheckServiceAsync(mode, terminal, async (service, _) =>
+        {
+            Assert.True((await service.CheckTerminalReadyAsync(session, DateTime.Today)).Ready);
+            Assert.Equal(0, terminal.TestConnectionCallCount);
+        });
+    }
+
+    [Fact]
+    public async Task Terminal_check_does_not_mask_the_unresolved_settlement_block()
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be sent"))
+        {
+            ConnectionTestResult = new LinklyConnectionTestResult(false, "PINpad offline", PinPadOffline: true)
+        };
+
+        await WithTerminalCheckServiceAsync(LinklyConnectionMode.LocalIp, terminal, async (service, repository) =>
+        {
+            var unresolved = await CreateUnknownSettlementAsync(
+                repository,
+                session,
+                DateTime.Today,
+                providerSessionId: null,
+                connectionMode: LinklyConnectionMode.LocalIp);
+
+            // 已有结果未知的记录时，应由结算自己的“未决记录”阻塞提示说话，而不是误报成刷卡机离线。
+            Assert.True((await service.CheckTerminalReadyAsync(session, DateTime.Today)).Ready);
+            var execution = await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            Assert.Equal(unresolved.SettlementGuid, execution.Settlement.SettlementGuid);
+            Assert.Equal(0, terminal.TestConnectionCallCount);
+            Assert.Equal(0, terminal.SettlementCallCount);
+        });
+    }
+
+    private static async Task WithTerminalCheckServiceAsync(
+        LinklyConnectionMode mode,
+        FakeLinklyTerminalClient terminal,
+        Func<LinklySettlementService, ILocalLinklySettlementRepository, Task> assert)
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-linkly-terminal-check-{Guid.NewGuid():N}.db");
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalLinklySettlementRepository(store);
+            var service = new LinklySettlementService(
+                terminal,
+                new FixedCardTerminalSettingsProvider(CardTerminalSettings.FromEnvironment() with
+                {
+                    Processor = CardProcessorKind.Linkly,
+                    LinklyConnectionMode = mode
+                }),
+                repository,
+                new FakeLinklyBankReceiptPrinter());
+
+            await assert(service, repository);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var path in new[] { databasePath, $"{databasePath}-wal", $"{databasePath}-shm" })
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+    }
+
     private static Task WithAutoSettleServiceAsync(
         PaymentMethodSettings? paymentMethods,
         CardProcessorKind processor,
@@ -1466,8 +1631,16 @@ public sealed class LinklySettlementServiceTests
 
         public Func<CancellationToken, Exception>? SettlementExceptionFactory { get; set; }
 
-        public Task<LinklyConnectionTestResult> TestConnectionAsync(string host, int port, TimeSpan timeout, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LinklyConnectionTestResult(true));
+        // 结算前预检用的刷卡机状态查询结果；默认在线。
+        public LinklyConnectionTestResult ConnectionTestResult { get; set; } = new(true);
+
+        public int TestConnectionCallCount { get; private set; }
+
+        public Task<LinklyConnectionTestResult> TestConnectionAsync(string host, int port, TimeSpan timeout, CancellationToken cancellationToken = default)
+        {
+            TestConnectionCallCount++;
+            return Task.FromResult(ConnectionTestResult);
+        }
 
         public Task<LinklySettlementResult> SettlementAsync(PosSessionState session, CardTerminalSettings settings, CancellationToken cancellationToken = default)
         {

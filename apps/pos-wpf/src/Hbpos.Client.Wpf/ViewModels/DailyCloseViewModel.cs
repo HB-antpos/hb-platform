@@ -641,11 +641,12 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             if (await ShouldAutoSettleAfterDailyCloseAsync(correlation.TraceId, cancellationToken))
             {
                 // 集成 Linkly 刷卡（未开手动刷卡）时，保存日结即视为收银员确认结算，不再二次弹窗；
-                // 结算较慢且结果须让收银员看到，所以留在结算页签而不是回收银台。
+                // 发送前先查刷卡机，离线就只给说明、不发送（也就不会留下失败的结算记录）。
+                // 结算较慢且结果（含刷卡机离线的说明）须让收银员看到，所以留在结算页签而不是回收银台。
                 await RefreshArchivesAsync(cancellationToken, archive.DailyCloseGuid);
                 SelectedTabIndex = LinklySettlementTabIndex;
-                StatusMessage = $"{dailyCloseStatus} {T("dailyClose.linklySettlement.sending", "Sending Linkly settlement...")}";
-                var settlementStatus = await RunLinklySettlementAsync(cancellationToken);
+                StatusMessage = $"{dailyCloseStatus} {T("dailyClose.linklySettlement.checkingTerminal", "Checking the card terminal...")}";
+                var settlementStatus = await CheckAndRunAutoLinklySettlementAsync(dailyCloseStatus, cancellationToken);
                 StatusMessage = $"{dailyCloseStatus} {settlementStatus}";
                 return;
             }
@@ -836,9 +837,34 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         }
         using var authorizationActivation = authorization.Activate();
 
+        if (_confirmLinklySettlementAsync is null)
+        {
+            return;
+        }
+
+        // 先看刷卡机：离线就直接说明原因和下一步，不再让收银员确认一个发不出去的结算。
+        var statusBeforeCheck = StatusMessage;
+        IsBusy = true;
+        StatusMessage = T("dailyClose.linklySettlement.checkingTerminal", "Checking the card terminal...");
+        string? terminalNotReadyMessage;
+        try
+        {
+            terminalNotReadyMessage = await CheckLinklyTerminalBeforeSettlementAsync(cancellationToken);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        if (terminalNotReadyMessage is not null)
+        {
+            StatusMessage = terminalNotReadyMessage;
+            return;
+        }
+
         // 刷卡机日结会向支付终端提交当日结算，必须由收银员再次明确确认。
-        if (_confirmLinklySettlementAsync is null ||
-            !await _confirmLinklySettlementAsync(BusinessDate))
+        StatusMessage = statusBeforeCheck;
+        if (!await _confirmLinklySettlementAsync(BusinessDate))
         {
             return;
         }
@@ -853,6 +879,83 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         {
             IsBusy = false;
         }
+    }
+
+    // 结算前先问刷卡机：不在线就返回给收银员看的说明（此时结算不会发送，也不会留下任何记录），在线返回 null。
+    // 预检本身出错不拦流程：服务层发送前还会再检一次，真有问题会在那里拦下。不负责 IsBusy，由调用方处理。
+    private async Task<string?> CheckLinklyTerminalBeforeSettlementAsync(CancellationToken cancellationToken)
+    {
+        var correlation = OperationAuditEvents.CreateCorrelation();
+        try
+        {
+            var check = await _linklySettlementService!.CheckTerminalReadyAsync(Session, BusinessDate, cancellationToken);
+            if (check.Ready)
+            {
+                return null;
+            }
+
+            RecordLinklyTerminalNotReadyAudit(check, correlation.CorrelationId, correlation.TraceId);
+            return DescribeLinklyTerminalNotReady(check);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ConsoleLog.WriteError(
+                "LinklySettlement",
+                $"terminal pre-check failed error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: correlation.TraceId),
+                ex);
+            return null;
+        }
+    }
+
+    // 日结保存后的 Linkly 结算：先查刷卡机，离线直接说明、不发送；在线则按 #602 的约定直接发送，不再二次弹窗。
+    // 日结已经保存，没发出的结算收银员随时可在「Linkly 结算」页签手动发送。
+    private async Task<string> CheckAndRunAutoLinklySettlementAsync(
+        string dailyCloseStatus,
+        CancellationToken cancellationToken)
+    {
+        var terminalNotReadyMessage = await CheckLinklyTerminalBeforeSettlementAsync(cancellationToken);
+        if (terminalNotReadyMessage is not null)
+        {
+            return terminalNotReadyMessage;
+        }
+
+        StatusMessage = $"{dailyCloseStatus} {T("dailyClose.linklySettlement.sending", "Sending Linkly settlement...")}";
+        return await RunLinklySettlementAsync(cancellationToken);
+    }
+
+    private string DescribeLinklyTerminalNotReady(LinklySettlementTerminalCheck check)
+    {
+        // 明确离线（PF）与「连不上 EFT-Client / 状态查询超时」分开说明，后者带上具体原因。
+        return check.Offline
+            ? PinpadOfflineSettlementMessage()
+            : Format(
+                "dailyClose.linklySettlement.terminalNotReady",
+                "The card terminal is not ready, so the Linkly settlement was not sent ({0}). Make sure the Linkly program is open and the terminal is connected, then press Settle & Print on the Linkly Settlement tab to retry.",
+                check.Message ?? "--");
+    }
+
+    private string PinpadOfflineSettlementMessage()
+    {
+        return T(
+            "dailyClose.linklySettlement.pinpadOffline",
+            "The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle & Print on the Linkly Settlement tab to retry.");
+    }
+
+    // 结算被拦在发送之前（刷卡机离线/未就绪）：审计里留一条，方便按设备回溯“为什么这天没有结算”。
+    private void RecordLinklyTerminalNotReadyAudit(
+        LinklySettlementTerminalCheck check,
+        string correlationId,
+        string traceId)
+    {
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.LinklySettlement,
+            "Failed",
+            Session,
+            reasonCode: check.Offline ? "TERMINAL_OFFLINE" : "TERMINAL_NOT_READY",
+            correlationId: correlationId,
+            traceId: traceId);
     }
 
     // 手动结算与日结后自动结算共用：调用终端、记审计、刷新列表，返回给收银员看的结果文案。
@@ -905,9 +1008,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 LocalLinklySettlementStatus.Unknown => T(
                     "dailyClose.linklySettlement.unknown",
                     "Settlement result is unknown. Do not submit it again."),
-                LocalLinklySettlementStatus.Failed when IsPinpadOfflineSettlement(execution.Settlement) => T(
-                    "dailyClose.linklySettlement.pinpadOffline",
-                    "The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle & Print on the Linkly Settlement tab to retry."),
+                LocalLinklySettlementStatus.Failed when IsPinpadOfflineSettlement(execution.Settlement) => PinpadOfflineSettlementMessage(),
                 LocalLinklySettlementStatus.Failed when execution.Settlement.ReceiptTexts.Count == 0 => Format(
                     "dailyClose.linklySettlement.failedNoReceipt",
                     "Settlement failed: {0}",
@@ -931,6 +1032,12 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                     "Settlement saved, but printing failed: {0}",
                     execution.PrintResult?.Message ?? "Unknown printer error.")
             };
+        }
+        catch (LinklySettlementTerminalUnavailableException ex)
+        {
+            // 确认框期间刷卡机掉线：服务层在创建结算记录之前拦下，没有任何记录，说明原因让收银员重试即可。
+            RecordLinklyTerminalNotReadyAudit(ex.Check, correlation.CorrelationId, correlation.TraceId);
+            return DescribeLinklyTerminalNotReady(ex.Check);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {

@@ -808,6 +808,8 @@
   <data name="dailyClose.linklySettlement.refresh" xml:space="preserve"><value>Refresh</value></data>
   <data name="dailyClose.linklySettlement.settleAndPrint" xml:space="preserve"><value>Settle &amp; Print</value></data>
   <data name="dailyClose.linklySettlement.pinpadOffline" xml:space="preserve"><value>The card terminal (PINpad) is offline, so the Linkly settlement was not sent. Check the terminal connection, then press Settle &amp; Print on the Linkly Settlement tab to retry.</value></data>
+  <data name="dailyClose.linklySettlement.checkingTerminal" xml:space="preserve"><value>Checking the card terminal...</value></data>
+  <data name="dailyClose.linklySettlement.terminalNotReady" xml:space="preserve"><value>The card terminal is not ready, so the Linkly settlement was not sent ({0}). Make sure the Linkly program is open and the terminal is connected, then press Settle &amp; Print on the Linkly Settlement tab to retry.</value></data>
   <data name="dailyClose.linklySettlement.confirm.title" xml:space="preserve"><value>Confirm Linkly settlement</value></data>
   <data name="dailyClose.linklySettlement.confirm.message" xml:space="preserve"><value>Submit the Linkly settlement for {0:d} to the card terminal and print the bank receipt?</value></data>
   <data name="dailyClose.linklySettlement.time" xml:space="preserve"><value>Time</value></data>
