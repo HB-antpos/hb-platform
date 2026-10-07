@@ -805,6 +805,88 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Online_background_refresh_ticks_the_receipt_profile_sync()
+    {
+        var sync = new TickRecordingReceiptProfileSyncService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            connectivityApiClient: new FakeConnectivityApiClient(true),
+            receiptProfileSyncService: sync);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        var isOnline = await InvokeRefreshOnlineStateAsync(viewModel, autoRetryOrders: true);
+
+        // 启动后的首次探测和 15 秒定时探测都走 autoRetryOrders=true：每次探测成功就给同步服务一拍。
+        Assert.True(isOnline);
+        Assert.Equal(1, sync.TickCount);
+        // 传给同步的是与退出取消链接的令牌，退出时能同步取消它。
+        Assert.True(sync.LastTickToken.CanBeCanceled);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Offline_probe_or_non_background_refresh_does_not_tick_the_receipt_profile_sync(
+        bool connectivityResponse,
+        bool autoRetryOrders)
+    {
+        var sync = new TickRecordingReceiptProfileSyncService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            connectivityApiClient: new FakeConnectivityApiClient(connectivityResponse),
+            receiptProfileSyncService: sync);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        await InvokeRefreshOnlineStateAsync(viewModel, autoRetryOrders);
+
+        // 离线时没有可同步的服务端；非后台例行刷新（autoRetryOrders=false）也不占用同步节拍。
+        Assert.Equal(0, sync.TickCount);
+    }
+
+    [Fact]
+    public async Task Receipt_profile_sync_failure_never_marks_the_shell_offline()
+    {
+        var sync = new TickRecordingReceiptProfileSyncService
+        {
+            TickException = new InvalidOperationException("sync exploded")
+        };
+        var runtimeStatus = new RecordingRuntimeStatusApiClient();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            connectivityApiClient: new FakeConnectivityApiClient(true),
+            runtimeStatusApiClient: runtimeStatus,
+            receiptProfileSyncService: sync);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        var isOnline = await InvokeRefreshOnlineStateAsync(viewModel, autoRetryOrders: true);
+
+        Assert.True(isOnline);
+        Assert.True(viewModel.Session.IsOnline);
+        Assert.Equal(1, sync.TickCount);
+        Assert.Contains(runtimeStatus.Reports, report => report.IsOnline);
+    }
+
+    [Fact]
+    public async Task Shutdown_cancels_an_in_flight_receipt_profile_sync_without_leaking_the_task()
+    {
+        var sync = new TickRecordingReceiptProfileSyncService { BlockUntilCancelled = true };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            connectivityApiClient: new FakeConnectivityApiClient(true),
+            receiptProfileSyncService: sync);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        var refreshTask = InvokeRefreshOnlineStateAsync(viewModel, autoRetryOrders: true);
+        await sync.TickStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        viewModel.BeginShutdown();
+
+        // 同步挂在连接探测任务里：退出取消令牌会同步取消它，探测任务正常收尾（不抛、不悬挂）。
+        await sync.TickCancelled.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        await refreshTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        Assert.True(sync.LastTickToken.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task Shutdown_waits_for_ignored_online_report_before_reporting_offline()
     {
         var runtimeStatus = new BlockingOnlineRuntimeStatusApiClient();
@@ -7279,7 +7361,8 @@ public sealed class MainViewModelScannerTests
         IRemoteOrderHistoryService? remoteOrderHistoryService = null,
         IDeviceRegistrationWorkflowService? deviceRegistrationWorkflowService = null,
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
-        ICustomerDisplayWindowPreferenceStore? customerDisplayPreferences = null)
+        ICustomerDisplayWindowPreferenceStore? customerDisplayPreferences = null,
+        IReceiptProfileSyncService? receiptProfileSyncService = null)
     {
         var priceIndex = new LocalSellableItemIndex();
         var effectiveCart = cart ?? new PosCartService();
@@ -7344,7 +7427,8 @@ public sealed class MainViewModelScannerTests
             linklySettlementUploadQueueReader: linklySettlementUploadQueueReader,
             linklySettlementUploadExecutionService: linklySettlementUploadExecutionService,
             remoteOrderHistoryService: remoteOrderHistoryService,
-            paymentMethodSettingsService: paymentMethodSettingsService);
+            paymentMethodSettingsService: paymentMethodSettingsService,
+            receiptProfileSyncService: receiptProfileSyncService);
     }
 
     private static MainViewModel CreateMainViewModelWithShellCatalog(
@@ -8667,6 +8751,58 @@ public sealed class MainViewModelScannerTests
             }
 
             return PendingResponse?.Task ?? Task.FromResult(_responses.Count > 0 && _responses.Dequeue());
+        }
+    }
+
+    private sealed class TickRecordingReceiptProfileSyncService : IReceiptProfileSyncService
+    {
+        public event EventHandler<ReceiptProfileAppliedEventArgs>? ProfileApplied
+        {
+            add { }
+            remove { }
+        }
+
+        public int TickCount { get; private set; }
+
+        public CancellationToken LastTickToken { get; private set; }
+
+        public Exception? TickException { get; init; }
+
+        public bool BlockUntilCancelled { get; init; }
+
+        public TaskCompletionSource TickStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource TickCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<ReceiptProfileSyncResult> SyncNowAsync(CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public async Task<ReceiptProfileSyncResult?> RunScheduledTickAsync(CancellationToken cancellationToken = default)
+        {
+            TickCount++;
+            LastTickToken = cancellationToken;
+            TickStarted.TrySetResult();
+            if (TickException is not null)
+            {
+                throw TickException;
+            }
+
+            if (BlockUntilCancelled)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    TickCancelled.TrySetResult();
+                    throw;
+                }
+            }
+
+            return null;
         }
     }
 

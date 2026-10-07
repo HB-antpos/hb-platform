@@ -4697,8 +4697,11 @@ public sealed class SettingsViewModelTests
             _exception = exception;
         }
 
+        public int GetCurrentCallCount { get; private set; }
+
         public Task<StoreReceiptProfileDto> GetCurrentAsync(CancellationToken cancellationToken = default)
         {
+            GetCurrentCallCount++;
             if (_exception is not null)
             {
                 return Task.FromException<StoreReceiptProfileDto>(_exception);
@@ -4706,6 +4709,350 @@ public sealed class SettingsViewModelTests
 
             return Task.FromResult(_profile ?? throw new InvalidOperationException("No profile configured."));
         }
+
+        // 设置页只通过同步服务使用 sync/ack，直接用这个替身的用例不应该走到它们。
+        public Task<StoreReceiptProfileSyncDto> GetSyncAsync(int knownVersion, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<StoreReceiptProfileAckResultDto> AckAsync(int version, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    // 模拟存储层的「已下发只读」语义：保存只落硬件设置，资料字段与版本只能由同步写入。
+    private sealed class ManagedProfileSettingsStore(ReceiptPrinterSettings initial) : IReceiptPrinterSettingsStore
+    {
+        public ReceiptPrinterSettings Settings { get; set; } = initial;
+
+        public int SaveCallCount { get; private set; }
+
+        public Task<ReceiptPrinterSettings> LoadAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Settings);
+        }
+
+        public Task SaveAsync(ReceiptPrinterSettings settings, CancellationToken cancellationToken = default)
+        {
+            SaveCallCount++;
+            Settings = Settings.ProfileVersion > 0
+                ? Settings with
+                {
+                    PrinterPort = settings.PrinterPort,
+                    CutDistance = settings.CutDistance,
+                    PrintBankReceiptText = settings.PrintBankReceiptText
+                }
+                : settings with { ProfileVersion = 0 };
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeReceiptProfileSyncService : IReceiptProfileSyncService
+    {
+        public event EventHandler<ReceiptProfileAppliedEventArgs>? ProfileApplied;
+
+        public Func<Task<ReceiptProfileSyncResult>> OnSyncNow { get; set; } =
+            () => Task.FromResult(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.UpToDate, 1));
+
+        public int SyncNowCallCount { get; private set; }
+
+        public int SubscriberCount => ProfileApplied?.GetInvocationList().Length ?? 0;
+
+        public Task<ReceiptProfileSyncResult> SyncNowAsync(CancellationToken cancellationToken = default)
+        {
+            SyncNowCallCount++;
+            return OnSyncNow();
+        }
+
+        public Task<ReceiptProfileSyncResult?> RunScheduledTickAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<ReceiptProfileSyncResult?>(null);
+        }
+
+        public void RaiseApplied(string storeCode, int version)
+        {
+            ProfileApplied?.Invoke(this, new ReceiptProfileAppliedEventArgs(storeCode, version));
+        }
+    }
+
+    private static ReceiptPrinterSettings ManagedSettings(int version, string brand = "HQ Brand") =>
+        ReceiptPrinterSettings.Default with
+        {
+            BrandName = brand,
+            StoreName = "Sunnybank",
+            StoreAddress = "Shop 1\nBrisbane",
+            StorePhone = "07 3000 0000",
+            Abn = "12 345 678 901",
+            ReturnPolicy = "Return within 7 days",
+            ProfileVersion = version
+        };
+
+    [Fact]
+    public async Task Receipt_profile_from_headquarters_makes_the_six_fields_read_only_and_relabels_the_button()
+    {
+        var localization = new LocalizationService();
+        var store = new ManagedProfileSettingsStore(ManagedSettings(3));
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            localization,
+            receiptPrinterSettingsStore: store);
+        try
+        {
+            localization.SetCulture("en-US");
+            await viewModel.LoadAsync();
+
+            Assert.True(viewModel.IsReceiptProfileManaged);
+            Assert.Equal(3, viewModel.ReceiptProfileVersion);
+            Assert.Equal("HQ Brand", viewModel.ReceiptBrandNameText);
+            Assert.Equal("Sync now", viewModel.ReceiptProfileLoadButtonText);
+            Assert.Equal("Published by head office. Edit it in Web Store Management.", viewModel.ReceiptProfileManagedHintText);
+
+            localization.SetCulture("zh-CN");
+            Assert.Equal("立即同步", viewModel.ReceiptProfileLoadButtonText);
+            Assert.Equal("由总部下发，请在 Web 分店管理修改", viewModel.ReceiptProfileManagedHintText);
+        }
+        finally
+        {
+            localization.SetCulture("en-US");
+        }
+    }
+
+    [Fact]
+    public async Task Receipt_profile_without_headquarters_release_stays_editable_with_the_original_button()
+    {
+        var localization = new LocalizationService();
+        var store = new ManagedProfileSettingsStore(ManagedSettings(0));
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            localization,
+            receiptPrinterSettingsStore: store);
+        try
+        {
+            localization.SetCulture("en-US");
+            await viewModel.LoadAsync();
+
+            Assert.False(viewModel.IsReceiptProfileManaged);
+            Assert.Equal("Load from Store Profile", viewModel.ReceiptProfileLoadButtonText);
+        }
+        finally
+        {
+            localization.SetCulture("en-US");
+        }
+    }
+
+    [Fact]
+    public async Task Read_only_fields_are_not_treated_as_user_edits_when_saving_hardware_settings()
+    {
+        var store = new ManagedProfileSettingsStore(ManagedSettings(3));
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store);
+        await viewModel.LoadAsync();
+        viewModel.ReceiptPrinterPortText = "USB,COM9";
+        // 界面里的资料字段可能已过期（后台同步在设置页打开期间写入了新版本）。
+        store.Settings = store.Settings with { BrandName = "Newer HQ Brand", ProfileVersion = 4 };
+
+        await viewModel.SaveReceiptPrinterCommand.ExecuteAsync(null);
+
+        // 保存只改了硬件设置；界面随后以存储里的真实内容为准（新版本、新品牌），而不是把旧草稿当成已保存。
+        Assert.Equal(1, store.SaveCallCount);
+        Assert.Equal("USB,COM9", store.Settings.PrinterPort);
+        Assert.Equal("Newer HQ Brand", store.Settings.BrandName);
+        Assert.Equal(4, store.Settings.ProfileVersion);
+        Assert.Equal("Newer HQ Brand", viewModel.ReceiptBrandNameText);
+        Assert.Equal(4, viewModel.ReceiptProfileVersion);
+        Assert.Equal("USB,COM9", viewModel.ReceiptPrinterPortText);
+        Assert.True(viewModel.IsReceiptProfileManaged);
+    }
+
+    [Fact]
+    public async Task Sync_now_runs_a_sync_round_instead_of_loading_the_store_profile_when_managed()
+    {
+        var localization = new LocalizationService();
+        var store = new ManagedProfileSettingsStore(ManagedSettings(3));
+        var apiClient = new FakeStoreReceiptProfileApiClient(new StoreReceiptProfileDto(
+            "S001", "Sunnybank", "Store Brand", null, null, null, null));
+        var sync = new FakeReceiptProfileSyncService();
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            localization,
+            receiptPrinterSettingsStore: store,
+            storeReceiptProfileApiClient: apiClient,
+            receiptProfileSyncService: sync);
+        try
+        {
+            localization.SetCulture("en-US");
+            await viewModel.LoadAsync();
+
+            sync.OnSyncNow = () => Task.FromResult(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.UpToDate, 3));
+            await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+            Assert.Equal("Already up to date (version 3)", viewModel.ReceiptPrinterTestStatusMessage);
+
+            sync.OnSyncNow = () => Task.FromResult(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.NeverReleased));
+            await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+            Assert.Equal("Head office has not published a receipt profile yet", viewModel.ReceiptPrinterTestStatusMessage);
+
+            sync.OnSyncNow = () => Task.FromResult(
+                new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.Failed, Detail: "offline"));
+            await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+            Assert.Equal("Sync failed: offline", viewModel.ReceiptPrinterTestStatusMessage);
+
+            sync.OnSyncNow = () => Task.FromResult(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.Discarded));
+            await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+            Assert.Equal(
+                "The published receipt profile is invalid and was not applied",
+                viewModel.ReceiptPrinterTestStatusMessage);
+
+            Assert.Equal(4, sync.SyncNowCallCount);
+            // 只读状态下不走旧的「载入到草稿」接口，也不改动任何字段。
+            Assert.Equal(0, apiClient.GetCurrentCallCount);
+            Assert.Equal("HQ Brand", viewModel.ReceiptBrandNameText);
+        }
+        finally
+        {
+            localization.SetCulture("en-US");
+        }
+    }
+
+    [Fact]
+    public async Task Sync_now_that_applies_a_new_version_refreshes_the_fields_from_local_settings()
+    {
+        var localization = new LocalizationService();
+        var store = new ManagedProfileSettingsStore(ManagedSettings(3));
+        var sync = new FakeReceiptProfileSyncService();
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            localization,
+            receiptPrinterSettingsStore: store,
+            receiptProfileSyncService: sync);
+        try
+        {
+            localization.SetCulture("en-US");
+            await viewModel.LoadAsync();
+            viewModel.ReceiptPrinterPortText = "USB,COM5";
+            sync.OnSyncNow = () =>
+            {
+                store.Settings = ManagedSettings(4, brand: "Brand v4");
+                return Task.FromResult(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.Applied, 4));
+            };
+
+            await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+
+            Assert.Equal("Updated to version 4", viewModel.ReceiptPrinterTestStatusMessage);
+            Assert.Equal("Brand v4", viewModel.ReceiptBrandNameText);
+            Assert.Equal(4, viewModel.ReceiptProfileVersion);
+            // 硬件设置的未保存草稿不受影响。
+            Assert.Equal("USB,COM5", viewModel.ReceiptPrinterPortText);
+        }
+        finally
+        {
+            localization.SetCulture("en-US");
+        }
+    }
+
+    [Fact]
+    public async Task Load_with_a_published_but_not_yet_applied_profile_syncs_instead_of_filling_the_draft()
+    {
+        var localization = new LocalizationService();
+        var store = new ManagedProfileSettingsStore(ManagedSettings(0) with { BrandName = "Hand Typed" });
+        // 总部已下发 v2，但后台同步还没跑到：GET 接口已经返回了快照。
+        var apiClient = new FakeStoreReceiptProfileApiClient(new StoreReceiptProfileDto(
+            "S001", "Sunnybank", "HQ v2", null, null, null, null, Version: 2));
+        var sync = new FakeReceiptProfileSyncService();
+        sync.OnSyncNow = () =>
+        {
+            store.Settings = ManagedSettings(2, brand: "HQ v2");
+            return Task.FromResult(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.Applied, 2));
+        };
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            localization,
+            receiptPrinterSettingsStore: store,
+            storeReceiptProfileApiClient: apiClient,
+            receiptProfileSyncService: sync);
+        try
+        {
+            localization.SetCulture("en-US");
+            await viewModel.LoadAsync();
+            Assert.False(viewModel.IsReceiptProfileManaged);
+
+            await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+
+            // 走同步原子写入并进入只读，而不是把快照塞进可手工保存的草稿。
+            Assert.Equal(1, sync.SyncNowCallCount);
+            Assert.True(viewModel.IsReceiptProfileManaged);
+            Assert.Equal("HQ v2", viewModel.ReceiptBrandNameText);
+            Assert.Equal("Updated to version 2", viewModel.ReceiptPrinterTestStatusMessage);
+            Assert.Equal(0, store.SaveCallCount);
+        }
+        finally
+        {
+            localization.SetCulture("en-US");
+        }
+    }
+
+    [Fact]
+    public async Task Load_without_a_published_profile_keeps_the_original_draft_behaviour_even_with_a_sync_service()
+    {
+        var store = new ManagedProfileSettingsStore(ManagedSettings(0));
+        var apiClient = new FakeStoreReceiptProfileApiClient(new StoreReceiptProfileDto(
+            "S001", "Sunnybank", "Store Brand", "Shop 9", "07 1", "ABN 9", "Policy 9"));
+        var sync = new FakeReceiptProfileSyncService();
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            storeReceiptProfileApiClient: apiClient,
+            receiptProfileSyncService: sync);
+        await viewModel.LoadAsync();
+
+        await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, sync.SyncNowCallCount);
+        Assert.Equal("Store Brand", viewModel.ReceiptBrandNameText);
+        Assert.Equal("Shop 9", viewModel.ReceiptStoreAddressText);
+        Assert.False(viewModel.IsReceiptProfileManaged);
+        Assert.Equal(0, store.SaveCallCount);
+    }
+
+    [Fact]
+    public async Task Applied_event_refreshes_an_open_settings_page_without_touching_unsaved_hardware_edits()
+    {
+        var store = new ManagedProfileSettingsStore(ManagedSettings(0));
+        var sync = new FakeReceiptProfileSyncService();
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptProfileSyncService: sync);
+        await viewModel.LoadAsync();
+        viewModel.ReceiptPrinterPortText = "USB,COM7";
+        Assert.False(viewModel.IsReceiptProfileManaged);
+
+        store.Settings = ManagedSettings(1, brand: "Pushed Brand");
+        sync.RaiseApplied("S001", 1);
+
+        await WaitUntilAsync(() => viewModel.IsReceiptProfileManaged);
+        Assert.Equal("Pushed Brand", viewModel.ReceiptBrandNameText);
+        Assert.Equal(1, viewModel.ReceiptProfileVersion);
+        Assert.Equal("USB,COM7", viewModel.ReceiptPrinterPortText);
+    }
+
+    [Fact]
+    public async Task Disposed_settings_view_model_stops_listening_to_applied_events()
+    {
+        var store = new ManagedProfileSettingsStore(ManagedSettings(0));
+        var sync = new FakeReceiptProfileSyncService();
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptProfileSyncService: sync);
+        await viewModel.LoadAsync();
+        Assert.Equal(1, sync.SubscriberCount);
+
+        viewModel.Dispose();
+
+        Assert.Equal(0, sync.SubscriberCount);
     }
 
     private static string FindRepoRoot()

@@ -213,7 +213,10 @@ public sealed partial class SettingsViewModel
                 // 字段仍由外层 ViewModel 持有，helper 只负责保存流程编排。
                 var settings = _context.CreateSettingsFromFields();
                 await _context.SettingsStore.SaveAsync(settings);
-                _context.ApplySettings(settings);
+                // 中文注释：资料由总部下发（只读）时，存储层只保存了硬件设置，六个字段以存储里的真实内容为准，
+                // 不能把设置页里可能已过期的草稿当作「已保存」回显。
+                _context.ApplySettings(
+                    settings.ProfileVersion > 0 ? await _context.SettingsStore.LoadAsync() : settings);
                 _context.SetStatus("settings.status.receiptPrinterSaved");
             }, null);
         }
