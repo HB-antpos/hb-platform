@@ -176,23 +176,55 @@ public sealed class RawScannerServiceTests
     }
 
     [Fact]
-    public void Non_raw_delivery_reports_raw_input_counters_at_most_once_per_interval()
+    public void Non_raw_delivery_reports_first_five_scans_then_at_most_once_per_interval()
     {
         using var logs = new ConsoleLogCapture();
         var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
         var deduplicator = (IScannerInputDeduplicator)service;
         var now = DateTimeOffset.UtcNow;
 
-        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-1", "diagnostics-test-source", now));
-        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-2", "diagnostics-test-source", now.AddSeconds(5)));
-        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-3", "diagnostics-test-source", now.AddMinutes(11)));
+        // 现场排查：前 5 次键盘通道扫码都附带 Raw Input 计数，之后按 10 分钟限流。
+        for (var index = 0; index < 5; index++)
+        {
+            Assert.True(deduplicator.TryAcceptScanDelivery($"EMP-{index}", "diagnostics-test-source", now.AddSeconds(index)));
+        }
+
+        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-5", "diagnostics-test-source", now.AddSeconds(10)));
+        Assert.True(deduplicator.TryAcceptScanDelivery("EMP-6", "diagnostics-test-source", now.AddMinutes(11)));
 
         var reports = logs.Lines
             .Where(line => line.Contains("non-raw scan delivered source=diagnostics-test-source", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(2, reports.Length);
-        Assert.All(reports, line => Assert.Contains("wmInput=0", line, StringComparison.Ordinal));
+        Assert.Equal(6, reports.Length);
+        Assert.All(reports, line => Assert.Contains("threadWmInput=0", line, StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Lines, line => line.Contains("EMP-1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ProcessWindowMessage_counts_every_hook_message_for_liveness()
+    {
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+        var handled = false;
+
+        service.ProcessWindowMessage(IntPtr.Zero, 0x0100, IntPtr.Zero, IntPtr.Zero, ref handled);
+        service.ProcessWindowMessage(IntPtr.Zero, 0x0200, IntPtr.Zero, IntPtr.Zero, ref handled);
+        service.ProcessWindowMessage(IntPtr.Zero, 0x00FF, IntPtr.Zero, IntPtr.Zero, ref handled);
+
+        // 钩子总消息数证明窗口过程活着；WM_INPUT 单独计数。
+        Assert.Equal(3, service.Diagnostics.HookMessages);
+        Assert.Equal(1, service.Diagnostics.WindowMessages);
+    }
+
+    [Fact]
+    public void Diagnostics_thread_level_wm_input_reports_first_and_counts_foreign_targets()
+    {
+        var diagnostics = new RawScannerDiagnostics();
+
+        Assert.True(diagnostics.RecordThreadWmInput(targetsRegisteredWindow: false));
+        Assert.False(diagnostics.RecordThreadWmInput(targetsRegisteredWindow: true));
+
+        Assert.Equal(2, diagnostics.ThreadWmInput);
+        Assert.Contains("threadWmInput=2 threadWmInputOtherHwnd=1", diagnostics.Describe(), StringComparison.Ordinal);
     }
 
     [Fact]
