@@ -1,0 +1,42 @@
+{
+  "warehouseUi": {
+    "priceVariance": {
+      "formula": "基准价 = 商品最早一个有效货柜的进货价。差额 = 发货数量 ×（订单进货价 − 首次货柜价），<over>正数为多收</over>、<under>负数为少收</under>；两价相差超过 10 倍视为异常，不计入。",
+      "searchPlaceholder": "订单号 / 货号 / 商品 / 分店 / 供应商",
+      "storeCodeLabel": "分店编码",
+      "storeCodeHint": "按分店编码精确匹配",
+      "orderNoHint": "只匹配订单号",
+      "metricsLabel": "汇总",
+      "metricDetailRows": "明细行",
+      "metricNet": "净差额",
+      "supplierTitle": "按国内供应商",
+      "supplierHint": "点击供应商即筛选下方商品，再点一次取消",
+      "supplierDefaultSort": "按净差额绝对值排序 · 共 {{count}} 个",
+      "supplierCount": "共 {{count}} 个",
+      "supplierExpandAll": "展开全部 {{count}} 个供应商",
+      "supplierCollapse": "收起",
+      "supplierSelectAria": "按 {{name}} 筛选商品",
+      "colProducts": "商品",
+      "colDetails": "明细",
+      "colNet": "净差额",
+      "productsTitle": "商品",
+      "productsCount": "共 {{count}} 个商品",
+      "editHint": "虚线价格可直接改：Enter 保存 · Esc 取消 · ↑↓ 保存并换行",
+      "colProduct": "商品",
+      "colDomesticPrice": "国内价",
+      "colWarehousePrice": "仓库进货价",
+      "colQuantity": "发货数量",
+      "colAmounts": "原始 / 基准金额",
+      "baselineLine": "基准 {{amount}}",
+      "colVariance": "差额",
+      "colVarianceDefault": "差额（按绝对值）",
+      "defaultSortHint": "默认按差额绝对值从大到小；点表头可改按带符号差额排序",
+      "detailLink": "{{count}} 条",
+      "editPriceAria": "修改{{field}}：{{item}}",
+      "batchButton": "批量改仓库进货价",
+      "batchTitle": "批量改仓库进货价（{{count}} 个商品）",
+      "batchHint": "已选 {{count}} 个商品的仓库进货价将统一改为下方价格。",
+      "batchPlaceholder": "输入新的仓库进货价"
+    }
+  }
+}

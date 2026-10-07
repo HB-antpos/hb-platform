@@ -1,0 +1,487 @@
+/* 仓库标签管理（货位）页：货位分布、货架图、工具栏与列表单元格（普通 CSS + 全局类名：测试打包把 .css 当空模块，不能用 CSS Modules） */
+
+.wh-locations-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* ---------- 货位分布（区卡片 + 货架图） ---------- */
+
+.wh-locations-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 16px 14px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.wh-locations-dist-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.wh-locations-dist-title {
+  margin: 0;
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wh-locations-hint {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-locations-dist-spacer {
+  flex: 1 1 auto;
+}
+
+.wh-locations-stale {
+  color: #b45309;
+  font-size: 12px;
+}
+
+.wh-locations-zones {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 8px;
+}
+
+.wh-locations-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2430;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wh-locations-zone:hover:not(:disabled) {
+  border-color: #91b8ff;
+}
+
+.wh-locations-zone:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.wh-locations-zone:disabled {
+  cursor: default;
+}
+
+.wh-locations-zone-active {
+  border-color: #91b8ff;
+  background: #f3f8ff;
+}
+
+.wh-locations-zone-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.wh-locations-zone-name {
+  font-weight: 600;
+}
+
+.wh-locations-zone-active .wh-locations-zone-name {
+  color: #1554c0;
+}
+
+.wh-locations-zone-total,
+.wh-locations-zone-usage {
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-locations-zone-usage {
+  color: #4b5563;
+}
+
+.wh-locations-bar {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #eef0f4;
+}
+
+.wh-locations-bar-fill {
+  display: block;
+  height: 6px;
+  background: #3b6fd8;
+}
+
+.wh-locations-rack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid #eef0f4;
+}
+
+.wh-locations-rack-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.wh-locations-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.wh-locations-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wh-locations-legend-swatch {
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.wh-locations-rack-scroll {
+  overflow-x: auto;
+}
+
+.wh-locations-rack-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wh-locations-rack-line {
+  display: grid;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 0;
+  border-radius: 4px;
+}
+
+.wh-locations-rack-line-active {
+  background: #e8f1ff;
+}
+
+.wh-locations-rack-col-head {
+  color: #667085;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.wh-locations-rack-row-button {
+  height: 18px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: #4b5563;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wh-locations-rack-row-button:hover {
+  color: #1554c0;
+}
+
+.wh-locations-rack-row-button:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 0;
+}
+
+.wh-locations-rack-line-active .wh-locations-rack-row-button {
+  color: #1554c0;
+  font-weight: 600;
+}
+
+.wh-locations-rack-cell {
+  height: 16px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.wh-locations-rack-full {
+  border-color: #3b6fd8;
+  background: #3b6fd8;
+}
+
+.wh-locations-rack-partial {
+  border-color: #a9c3ee;
+  background: #a9c3ee;
+}
+
+.wh-locations-rack-empty {
+  border-color: #b8c0cc;
+  background: #ffffff;
+}
+
+.wh-locations-rack-off {
+  border-color: #d0d5dd;
+  background: #d0d5dd;
+}
+
+.wh-locations-rack-none {
+  border: 1px dashed #eef0f4;
+  background: transparent;
+}
+
+/* ---------- 列表卡片与工具栏 ---------- */
+
+.wh-locations-list.ant-card {
+  border-color: #e7eaf0;
+  border-radius: 10px;
+}
+
+.wh-locations-list .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.wh-locations-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wh-locations-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.wh-locations-search {
+  width: 340px;
+  max-width: 100%;
+}
+
+/* 字段下拉固定宽度，关键字输入框占满剩余宽度 */
+.wh-locations-search-field {
+  flex: none;
+  width: 110px;
+}
+
+.wh-locations-search .ant-input-affix-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wh-locations-more-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wh-locations-more-label {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.wh-locations-more-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- 表格单元格 ---------- */
+
+.wh-locations-table .ant-table-thead > tr > th,
+.wh-locations-table .ant-table-tbody > tr > td {
+  padding-inline: 10px;
+}
+
+.wh-locations-table .ant-table-tbody > tr > td {
+  padding-block: 8px;
+  vertical-align: top;
+}
+
+.wh-locations-code-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.wh-locations-code {
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.wh-locations-code-disabled {
+  color: #667085;
+}
+
+.wh-locations-barcode-button.ant-btn {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  color: #667085;
+}
+
+.wh-locations-sub {
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wh-locations-barcode-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wh-locations-barcode-label {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.wh-locations-type {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wh-locations-type-picking {
+  background: #e8f1ff;
+  color: #1554c0;
+}
+
+.wh-locations-type-storage {
+  background: #f4f0ff;
+  color: #5a3fc0;
+}
+
+.wh-locations-status-on,
+.wh-locations-status-off {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wh-locations-status-on {
+  color: #17663a;
+}
+
+.wh-locations-status-off {
+  color: #667085;
+}
+
+.wh-locations-products {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wh-locations-product {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 26px;
+}
+
+.wh-locations-thumb {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.wh-locations-thumb-empty {
+  display: inline-block;
+  background: #f0f2f5;
+}
+
+.wh-locations-item-number.ant-typography {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 复制图标默认收起，悬停或键盘聚焦该商品行时再出现，避免满屏图标 */
+.wh-locations-item-number .ant-typography-copy {
+  opacity: 0;
+}
+
+.wh-locations-product:hover .ant-typography-copy,
+.wh-locations-item-number .ant-typography-copy:focus-visible {
+  opacity: 1;
+}
+
+.wh-locations-product-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-locations-unbind.ant-btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  color: #667085;
+}
+
+.wh-locations-unbind.ant-btn:hover {
+  color: #b42318;
+}
+
+.wh-locations-empty {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-locations-updated {
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.wh-locations-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}

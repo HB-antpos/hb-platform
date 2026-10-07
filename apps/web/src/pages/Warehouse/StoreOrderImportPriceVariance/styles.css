@@ -1,0 +1,90 @@
+/* 首次货柜价差异统计页（wh-pv-*）：普通 CSS + 页面前缀全局类名，测试打包把 .css 当空模块 */
+
+.wh-pv-muted { color: #667085; }
+.wh-pv-small { font-size: 12px; }
+.wh-pv-strong { font-weight: 500; }
+.wh-pv-number { font-variant-numeric: tabular-nums; }
+.wh-pv-spacer { flex: 1 1 auto; }
+
+/* 差额方向：多收橙、少收蓝（替代原来的红 / 绿） */
+.wh-pv-tone-over { color: #b4400a; }
+.wh-pv-tone-under { color: #1d4ed8; }
+.wh-pv-tone-none { color: #1f2430; }
+strong.wh-pv-tone-over,
+strong.wh-pv-tone-under { font-weight: 600; }
+
+/* 页头下方的口径说明（放在紧凑页头里整行显示） */
+.wh-pv-formula { display: flex; flex: 1 1 100%; align-items: flex-start; gap: 6px; margin: 0; color: #4b5563; font-size: 12px; line-height: 1.6; }
+.wh-pv-formula-icon { flex: none; margin-top: 3px; color: #667085; }
+
+/* 筛选工具栏 */
+.wh-pv-toolbar { display: flex; flex-direction: column; gap: 8px; }
+.wh-pv-search.ant-input-affix-wrapper { width: 240px; max-width: 100%; }
+.wh-pv-field-prefix { color: #667085; }
+.wh-pv-more-field { display: flex; flex-direction: column; gap: 4px; }
+
+/* 汇总条：一张卡片分格 */
+.wh-pv-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); overflow: hidden; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+.wh-pv-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0 -1px -1px 0; padding: 12px 16px; border-right: 1px solid #eef0f4; border-bottom: 1px solid #eef0f4; }
+.wh-pv-metric-label { color: #667085; font-size: 12px; }
+.wh-pv-metric-value { font-size: 18px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* 供应商卡与商品卡 */
+.wh-pv-card { display: flex; flex-direction: column; min-width: 0; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+.wh-pv-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
+.wh-pv-card-title { margin: 0; color: #1f2430; font-size: 14px; font-weight: 600; }
+.wh-pv-card-foot { display: flex; align-items: center; padding: 6px 12px; border-top: 1px solid #eef0f4; }
+.wh-pv-expand.ant-btn { color: #1554c0; font-weight: 500; }
+.wh-pv-edit-hint { display: inline-flex; align-items: center; gap: 6px; color: #667085; font-size: 12px; }
+.wh-pv-column-settings { display: flex; flex-direction: column; gap: 6px; }
+.wh-pv-selection { padding: 10px 16px 0; }
+
+.wh-pv-table .ant-table-thead > tr > th { background: #f8f9fb; color: #4b5563; font-size: 12px; font-weight: 500; }
+.wh-pv-table .ant-table-cell { font-variant-numeric: tabular-nums; }
+.wh-pv-supplier-row { cursor: pointer; }
+.wh-pv-supplier-row.is-selected > td,
+.wh-pv-product-table .wh-pv-row-selected > td { background: #f3f8ff !important; }
+.wh-pv-supplier-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wh-pv-supplier-name { overflow: hidden; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.wh-pv-supplier-name.is-selected { font-weight: 600; }
+.wh-pv-radio { position: relative; flex: none; width: 16px; height: 16px; padding: 0; border: 1.5px solid #c3cad6; border-radius: 50%; background: #fff; cursor: pointer; }
+.wh-pv-radio.is-selected { border-color: #1677ff; background: #1677ff; }
+.wh-pv-radio.is-selected::after { content: ''; position: absolute; inset: 0; width: 6px; height: 6px; margin: auto; border-radius: 50%; background: #fff; }
+.wh-pv-radio.is-placeholder { border-style: dashed; cursor: default; }
+.wh-pv-radio:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+
+/* 差额双向条：左半边少收（蓝）、右半边多收（橙） */
+.wh-pv-variance-cell { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
+.wh-pv-bar { display: flex; flex: none; height: 10px; }
+.wh-pv-bar-half { display: flex; flex: 1; }
+.wh-pv-bar-under-half { justify-content: flex-end; border-right: 1px solid #98a2b3; }
+.wh-pv-bar-under { height: 10px; border-radius: 2px 0 0 2px; background: #3b6fd8; }
+.wh-pv-bar-over { height: 10px; border-radius: 0 2px 2px 0; background: #e8742a; }
+.wh-pv-variance { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* 商品列 */
+.wh-pv-product { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.wh-pv-product-image { flex: none; }
+.wh-pv-product-placeholder { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 6px; background: #f0f2f5; color: #98a2b3; }
+.wh-pv-product-text { min-width: 0; }
+.wh-pv-product-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.wh-pv-item-number { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wh-pv-product-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wh-pv-product-supplier { overflow: hidden; color: #667085; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.wh-pv-two-line { line-height: 1.45; white-space: nowrap; }
+.wh-pv-default-sort { display: inline-flex; align-items: center; gap: 3px; color: #1554c0; }
+
+/* 可直接改的价格：虚线下划线提示，用按钮承载以便键盘进入编辑 */
+.wh-pv-editable-price { padding: 0 0 1px; border: 0; border-bottom: 1px dashed #b8c0cc; background: transparent; color: #1f2430; font: inherit; font-variant-numeric: tabular-nums; cursor: text; }
+.wh-pv-editable-price:hover { border-bottom-color: #1677ff; color: #1554c0; }
+.wh-pv-editable-price:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; border-radius: 2px; }
+.wh-pv-price-input.ant-input { font-variant-numeric: tabular-nums; }
+
+.wh-pv-link-button { padding: 0; border: 0; background: transparent; color: #1554c0; font: inherit; cursor: pointer; }
+.wh-pv-link-button:hover { color: #0b3f99; text-decoration: underline; }
+.wh-pv-link-button:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; border-radius: 2px; }
+
+@media (max-width: 640px) {
+  .wh-pv-search.ant-input-affix-wrapper { width: 100%; }
+  .wh-pv-edit-hint { display: none; }
+}

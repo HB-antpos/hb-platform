@@ -1,8 +1,9 @@
-import { AppstoreOutlined, CloudSyncOutlined, CloudUploadOutlined, CopyOutlined, DownloadOutlined, EditOutlined, GiftOutlined, HistoryOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, TagsOutlined, UploadOutlined } from '@ant-design/icons';
+import { CloudSyncOutlined, CopyOutlined, DownloadOutlined, EditOutlined, GiftOutlined, HistoryOutlined, LoadingOutlined, MoreOutlined, PictureOutlined, PlusOutlined, SearchOutlined, TagsOutlined, UploadOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, type DragEndEvent, useSensor, useSensors, } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable, } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Alert, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, Tooltip, TreeSelect, Typography, message, notification, } from 'antd';
+import { Alert, Button, Checkbox, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, Tooltip, TreeSelect, Typography, message, notification, } from 'antd';
+import type { MenuProps } from 'antd';
 import type { DefaultOptionType } from 'antd/es/select';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import type { FilterDropdownProps, FilterValue, SorterResult } from 'antd/es/table/interface';
@@ -16,6 +17,8 @@ import PageContainer from '../../../components/PageContainer';
 import ActiveFilterBar from '../../../components/listToolbar/ActiveFilterBar';
 import MoreFiltersButton from '../../../components/listToolbar/MoreFiltersButton';
 import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar';
+import StatusPill from '../../../components/listToolbar/StatusPill';
+import StatusTabs from '../../../components/listToolbar/StatusTabs';
 import ToolbarMenuButton from '../../../components/listToolbar/ToolbarMenuButton';
 import { requiresDelistSupplyNotice } from '../../../components/SupplyNotice/delistSupplyNoticeGate';
 import { getSupplierOptions, } from '../../../services/domesticProductService';
@@ -40,16 +43,19 @@ import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../util
 import { RequestError } from '../../../utils/request';
 import { lookupSuggestedDiscounts, previewPriceNotification, setSuggestedDiscounts } from '../../../services/storePriceUpdateTaskService';
 import { buildPriceNotificationPreviewText, buildPriceNotificationView, buildPriceUpdateTasksLink, computeSuggestedDiscountedPrice, createPriceNotificationCapture, suggestedDiscountPercentToRate, suggestedDiscountRateToPercent, type PriceNotificationPreview, type PriceNotificationSummary } from '../../../utils/priceNotification';
-import { isWarehouseProductColumnOrderCustomized, mergeWarehouseProductColumnOrder, moveWarehouseProductColumnOrder, type WarehouseProductTableColumnKey, } from './columnOrder';
+import { filterWarehouseProductVisibleColumnOrder, isWarehouseProductColumnOrderCustomized, isWarehouseProductColumnVisibilityCustomized, mergeWarehouseProductColumnOrder, moveWarehouseProductColumnOrder, normalizeWarehouseProductVisibleOptionalColumns, type WarehouseProductTableColumnKey, } from './columnOrder';
 import CreateProductModal from './CreateProductModal';
 import CategoryTreePicker from './CategoryTreePicker';
+import CategoryFilterPanel from './CategoryFilterPanel';
+import ColumnSettingsButton from './ColumnSettingsButton';
+import { WAREHOUSE_PRODUCT_STATUS_TAB_KEYS, buildSupplyNoticeSummary, buildWarehouseProductMetaParts, buildWarehouseProductStatusCountQuery, formatWarehouseProductCount, isWarehouseProductRetailPriceMissing, planWarehouseProductStatusCounts, resolveWarehouseProductStatusTab, warehouseProductStatusTabToIsActive, type WarehouseProductStatusCounts, type WarehouseProductStatusTabKey, } from './warehouseProductsListView';
 import ContainerCategoryManageModal from '../ContainerDetail/ContainerCategoryManageModal';
 import { resolveContainerCategorySelectionAfterRefresh, resolveContainerCategoryTargetAfterMutation, type ContainerCategoryChange, } from '../ContainerDetail/containerCategoryManageLogic';
 import ImportFromDomesticModal from './ImportFromDomesticModal';
 import ImportNonHbModal from './ImportNonHbModal';
 import { buildWarehouseCategoryLookup, formatWarehouseCategoryNodeName, getWarehouseProductCategoryTooltip, type WarehouseCategoryLookup, } from './categoryPath';
-import { ALL_PRODUCTS_FILTER_KEY, UNCATEGORIZED_PRODUCTS_FILTER_KEY, buildFilterCategoryOptions, buildFilterCategoryTreeOptions, } from '../Categories/categoryProductFilters';
-import { buildCategoryQueryValue, buildComparableFilterTokens, buildTextFilterTokens, getSingleFilterValue, normalizeTableFilters, normalizeWarehouseProductSortField, parseComparableFilterTokens, parseTextFilterTokens, resolveCategoryFilterValueFromTableFilters, setFilterValues, type ComparableFilterMode, type TextFilterMode, type WarehouseProductColumnFilters, } from './columnFilters';
+import { ALL_PRODUCTS_FILTER_KEY, buildFilterCategoryOptions, buildFilterCategoryTreeOptions, } from '../Categories/categoryProductFilters';
+import { buildCategoryQueryValue, buildComparableFilterTokens, buildTextFilterTokens, getSingleFilterValue, keepHiddenColumnFilters, normalizeTableFilters, normalizeWarehouseProductSortField, parseComparableFilterTokens, parseTextFilterTokens, resolveCategoryFilterValueFromTableFilters, setFilterValues, type ComparableFilterMode, type TextFilterMode, type WarehouseProductColumnFilters, } from './columnFilters';
 import { areWarehouseProductCodeSelectionsEqual, buildWarehouseProductHqPushPayload } from './hqPush';
 import { ACTIVE_FILTER_CATEGORY_KEY, ACTIVE_FILTER_SEARCH_KEY, buildActiveFilterChips, buildActiveFilterRemovalOverrides, type ActiveFilterColumnMeta, } from './activeFilters';
 import PosHqPushModal from '../../../components/posHqPush/PosHqPushModal';
@@ -60,9 +66,14 @@ import { MeasuredTable } from '../../../components/MeasuredTable';
 import { registerPageMessages } from '../../../i18n/registerPageMessages';
 import priceNotificationMessagesEn from './priceNotificationMessages.en.json';
 import priceNotificationMessagesZh from './priceNotificationMessages.zh.json';
+import warehouseProductsMessagesEn from './warehouseProductsMessages.en.json';
+import warehouseProductsMessagesZh from './warehouseProductsMessages.zh.json';
+import './warehouseProducts.css';
 
 // 分店价格通知文案只在仓库商品页使用，随本页代码块懒注册，不进入首屏 i18n 包。
 registerPageMessages({ zh: priceNotificationMessagesZh, en: priceNotificationMessagesEn });
+// 本页重设计新增的文案（warehouseUi.products）同样随页面代码块懒注册。
+registerPageMessages({ zh: warehouseProductsMessagesZh, en: warehouseProductsMessagesEn });
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
@@ -180,10 +191,6 @@ function isValidWarehouseProductImageBaseUrl(value?: string): boolean {
 function isWarehouseProductBatchImageField(field: string): boolean {
     return field === 'generateImageUrls' || field === 'imageBaseUrl' || field === 'syncImageToHq';
 }
-const getStatusOptions = (t: ReturnType<typeof useTranslation>['t']) => [
-    { value: true, label: getShelfStatusLabel(true, t) },
-    { value: false, label: getShelfStatusLabel(false, t) },
-];
 function getShelfStatusLabel(isActive: boolean, t: ReturnType<typeof useTranslation>['t']) {
     return isActive ? t('warehouse.onShelf', '上架') : t('warehouse.offShelf', '下架');
 }
@@ -229,191 +236,6 @@ function getProductTypeOptions(t: ReturnType<typeof useTranslation>['t']) {
         label: getProductTypeLabel(Number(value) as ProductType, t),
     }));
 }
-const WAREHOUSE_TABLE_ROW_MAX_HEIGHT = 60;
-const warehouseProductsTableStyle = `
-  /* 筛选行、已生效筛选条、勾选后操作条纵向排列，与表格之间留出间距。 */
-  .warehouse-products-toolbar {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-  /* 主表紧凑模式压缩行高、间距和媒体尺寸，减少首屏横向滚动。 */
-  .warehouse-products-table .ant-table-thead > tr > th,
-  .warehouse-products-table .ant-table-tbody > tr > td {
-    padding: 4px 6px !important;
-    line-height: 1.2;
-  }
-
-  .warehouse-products-table .ant-table-tbody > tr > td {
-    height: ${WAREHOUSE_TABLE_ROW_MAX_HEIGHT}px;
-    max-height: ${WAREHOUSE_TABLE_ROW_MAX_HEIGHT}px;
-    vertical-align: middle;
-  }
-
-  .warehouse-products-table .ant-table-cell {
-    white-space: nowrap;
-  }
-
-  .warehouse-products-table .ant-table-column-title {
-    display: -webkit-box;
-    overflow: hidden;
-    white-space: normal;
-    line-height: 1.15;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-  }
-
-  .warehouse-products-table .ant-table-filter-column {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .warehouse-products-table .ant-table-column-sorters {
-    gap: 4px;
-    padding: 0;
-  }
-
-  .warehouse-products-table .ant-table-filter-column-title,
-  .warehouse-products-table .ant-table-column-title {
-    min-width: 0;
-  }
-
-  .warehouse-products-table .ant-table-filter-trigger {
-    flex: 0 0 auto;
-    margin-inline: 0;
-  }
-
-  .warehouse-products-table .warehouse-products-image-cell,
-  .warehouse-products-table .warehouse-products-barcode-cell {
-    min-height: 48px;
-    max-height: 48px;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-  }
-
-  .warehouse-products-table .warehouse-products-image-cell .ant-image,
-  .warehouse-products-table .warehouse-products-image-cell img {
-    width: 36px;
-    height: 36px;
-    display: block;
-  }
-
-  .warehouse-products-table .warehouse-products-barcode-cell svg,
-  .warehouse-products-table .warehouse-products-barcode-cell canvas,
-  .warehouse-products-table .warehouse-products-barcode-cell img {
-    max-height: 42px !important;
-  }
-
-  .warehouse-products-table .warehouse-products-supplier-cell {
-    white-space: normal;
-    overflow: hidden;
-  }
-
-  .warehouse-products-table .warehouse-products-supplier-cell .ant-tag {
-    max-width: 100%;
-    margin-inline-end: 0;
-    white-space: normal;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    line-height: 18px;
-    padding-block: 1px;
-  }
-
-  .warehouse-products-table .warehouse-products-text-2line {
-    white-space: normal;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    line-height: 18px;
-    word-break: break-word;
-  }
-
-  .warehouse-products-table .warehouse-products-category-cell {
-    max-width: 100%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .warehouse-products-table .warehouse-products-draggable-header {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    min-width: 0;
-    cursor: move;
-  }
-
-  .warehouse-products-table .warehouse-products-draggable-header > * {
-    min-width: 0;
-  }
-
-  .warehouse-products-column-filter-panel {
-    width: 240px;
-    padding: 12px;
-  }
-
-  .warehouse-products-column-filter-body {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .warehouse-products-column-filter-body .ant-select,
-  .warehouse-products-column-filter-body .ant-input,
-  .warehouse-products-column-filter-body .ant-input-number {
-    width: 100%;
-  }
-
-  .warehouse-products-column-filter-body .ant-space-compact {
-    width: 100%;
-  }
-
-  .warehouse-products-column-filter-body .ant-space-compact .ant-input-number {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .warehouse-products-column-filter-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px solid #f0f0f0;
-  }
-
-  .warehouse-products-inline-value {
-    min-height: 28px;
-    display: flex;
-    align-items: center;
-    border-radius: 4px;
-  }
-
-  .warehouse-products-inline-value.is-editable {
-    cursor: text;
-  }
-
-  .warehouse-products-inline-value.is-editable:hover {
-    background: #f5f5f5;
-  }
-
-  .warehouse-products-inline-editor.ant-input-number {
-    width: 100%;
-    height: 28px;
-  }
-
-  .warehouse-products-inline-editor .ant-input-number-input {
-    height: 26px;
-    padding-inline: 6px;
-  }
-`;
 function formatDateTime(value?: string, language?: string) {
     if (!value) {
         return '--';
@@ -463,33 +285,51 @@ const WAREHOUSE_PRODUCT_BATCH_UPDATE_TIMEOUT_MS = 10 * 60 * 1000;
 // 仓库商品主表数据量大，默认展示 100 条并保留大分页选项，继续依赖现有虚拟表格和服务端分页。
 const WAREHOUSE_PRODUCTS_DEFAULT_PAGE_SIZE = 100;
 const WAREHOUSE_PRODUCTS_PAGE_SIZE_OPTIONS = ['50', '100', '200', '500', '1000'];
-const WAREHOUSE_PRODUCT_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.warehouseProducts.columnOrder.v1';
+// 列结构在 2026-10 重设计中改为「商品 / 供应商」组合列，旧版 v1 列顺序缓存不再适用，换用 v2 键。
+const WAREHOUSE_PRODUCT_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.warehouseProducts.columnOrder.v2';
+const WAREHOUSE_PRODUCT_VISIBLE_COLUMNS_STORAGE_KEY = 'hbweb_rv.warehouseProducts.visibleColumns.v1';
+// 默认列顺序：常驻列与可选列按业务含义交错排列，可选列被勾选显示时出现在相关列旁边。
 const WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER = [
-    'rowNumber',
-    'itemNumber',
-    'productImage',
-    'domesticSupplierCode',
-    'categoryName',
+    'product',
     'nameEn',
-    'minOrderQuantity',
+    'name',
+    'barcode',
+    'categoryName',
+    'productType',
+    'supplier',
+    'localSupplierCode',
     'domesticPrice',
     'importPrice',
     'labelPrice',
-    'isActive',
-    'supplyPlan',
-    'supplyExpected',
-    'supplyUpdatedAt',
-    'productType',
-    'barcode',
-    'locationCodes',
-    'name',
+    'minOrderQuantity',
     'packingQty',
     'volume',
-    'localSupplierCode',
+    'locationCodes',
+    'isActive',
+    'supplyUpdatedAt',
     'updatedAt',
     'updatedBy',
     'action',
 ] as const;
+// 低频列：默认隐藏，通过「列设置」勾选显示（localStorage 记忆）。其余列常驻，保证 1440 宽默认视图不横向滚动。
+const WAREHOUSE_PRODUCT_OPTIONAL_COLUMN_KEYS = [
+    'nameEn',
+    'name',
+    'barcode',
+    'categoryName',
+    'productType',
+    'localSupplierCode',
+    'minOrderQuantity',
+    'packingQty',
+    'volume',
+    'supplyUpdatedAt',
+    'updatedAt',
+    'updatedBy',
+] as const;
+const WAREHOUSE_PRODUCT_DEFAULT_VISIBLE_OPTIONAL_COLUMNS: string[] = [];
+const WAREHOUSE_PRODUCT_SELECTION_COLUMN_WIDTH = 36;
+// 关键词输入后 300ms 自动查询；回车立即查询。
+const WAREHOUSE_PRODUCTS_SEARCH_DEBOUNCE_MS = 300;
 interface DraggableHeaderCellProps extends HTMLAttributes<HTMLTableCellElement> {
     'data-column-key'?: string;
 }
@@ -839,7 +679,7 @@ export default function WarehouseProductsPage() {
     const [inlineSavingCellKey, setInlineSavingCellKey] = useState<string | null>(null);
     const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
     const [searchText, setSearchText] = useState('');
-    // 关键词只在回车或点「查询」时提交；翻页、下拉即查等请求都用已提交的关键词，而不是输入框里未提交的草稿。
+    // 关键词输入后防抖提交（回车立即提交）；翻页、下拉即查等请求都用已提交的关键词，而不是输入框里尚未提交的草稿。
     const [submittedSearchText, setSubmittedSearchText] = useState('');
     // 最近一次成功返回的查询条件，已生效筛选条据此展示「表格数据实际是按什么条件查出来的」。
     const [appliedQuery, setAppliedQuery] = useState<WarehouseProductsTableQuery | null>(null);
@@ -895,6 +735,20 @@ export default function WarehouseProductsPage() {
     const [storePriceSyncOpen, setStorePriceSyncOpen] = useState(false);
     const [changeHistoryProduct, setChangeHistoryProduct] = useState<WarehouseProductListItem | null>(null);
     const [columnOrder, setColumnOrder] = useState<WarehouseProductTableColumnKey[]>([]);
+    // 列设置里勾选显示的低频列；首次读取 localStorage，读不到时用默认（全部隐藏）。
+    const [visibleOptionalColumns, setVisibleOptionalColumns] = useState<WarehouseProductTableColumnKey[]>(() => {
+        let saved: unknown = null;
+        try {
+            const raw = typeof window === 'undefined' ? null : window.localStorage.getItem(WAREHOUSE_PRODUCT_VISIBLE_COLUMNS_STORAGE_KEY);
+            saved = raw ? JSON.parse(raw) : null;
+        }
+        catch {
+            saved = null;
+        }
+        return normalizeWarehouseProductVisibleOptionalColumns(saved, WAREHOUSE_PRODUCT_OPTIONAL_COLUMN_KEYS, WAREHOUSE_PRODUCT_DEFAULT_VISIBLE_OPTIONAL_COLUMNS);
+    });
+    // 状态页签计数：接口支持按 isActive 过滤并返回 total，按降级规则并行发 pageSize=1 的计数请求；失败时不显示计数。
+    const [statusCounts, setStatusCounts] = useState<WarehouseProductStatusCounts | null>(null);
     const stopBatchUpdateJobPollingRef = useRef<(() => void) | null>(null);
     const pushToHqLoadingRef = useRef(false);
     const pushToHqProductCodesRef = useRef<string[]>([]);
@@ -905,6 +759,12 @@ export default function WarehouseProductsPage() {
     const selectedRowKeysRef = useRef<React.Key[]>([]);
     const loadDataRef = useRef<((overrides?: Partial<WarehouseProductsTableQuery>) => Promise<void>) | null>(null);
     const listRequestGuardRef = useRef(createLatestRequestGuard());
+    // 计数请求单独一个守卫：只采纳最新一轮结果，不影响列表请求的竞态保护。
+    const statusCountGuardRef = useRef(createLatestRequestGuard());
+    const statusCountsRef = useRef<WarehouseProductStatusCounts | null>(null);
+    // 写操作后列表经 refreshCurrentList 刷新时，即使筛选条件没变也要重新计数。
+    const statusCountsStaleRef = useRef(false);
+    const searchDebounceTimerRef = useRef<number | null>(null);
     const inlineSaveLockRef = useRef<string | null>(null);
     const inlineCancelledCellRef = useRef<string | null>(null);
     useLayoutEffect(() => {
@@ -1093,6 +953,46 @@ export default function WarehouseProductsPage() {
         filteredValue: columnFilters[filterKey] ?? null,
         filterMultiple: true,
     });
+    // 状态页签计数：同一组「状态以外」的条件只计数一次；当前页签直接用列表 total，其余页签各发一个 pageSize=1 请求。
+    // 计数失败只是不显示数量，不影响列表；条件变化时先清掉旧数量，避免把上一组条件的数量挂在新列表上。
+    const loadStatusCounts = (query: WarehouseProductsTableQuery, currentTotal?: number) => {
+        const plan = planWarehouseProductStatusCounts({
+            query,
+            currentTotal,
+            cached: statusCountsRef.current,
+            stale: statusCountsStaleRef.current,
+        });
+        if (plan.skip) {
+            return;
+        }
+        statusCountsStaleRef.current = false;
+        const cached = statusCountsRef.current;
+        const pending: WarehouseProductStatusCounts = {
+            key: plan.key,
+            // 同一组条件重新计数时先保留旧数量，等新结果返回再替换，避免数字闪烁。
+            counts: cached?.key === plan.key ? { ...cached.counts, ...plan.knownCounts } : { ...plan.knownCounts },
+        };
+        statusCountsRef.current = pending;
+        setStatusCounts(pending);
+        if (!plan.tabsToFetch.length) {
+            return;
+        }
+        void runLatestGuardedRequest(statusCountGuardRef.current, () => Promise.all(plan.tabsToFetch.map((tab) => getWarehouseProductsTable(buildWarehouseProductStatusCountQuery(query, tab)))), {
+            onSuccess: (results) => {
+                const next: WarehouseProductStatusCounts = { key: plan.key, counts: { ...pending.counts } };
+                plan.tabsToFetch.forEach((tab, index) => {
+                    next.counts[tab] = results[index].total;
+                });
+                statusCountsRef.current = next;
+                setStatusCounts(next);
+            },
+            onError: (error) => {
+                console.error(error);
+                statusCountsRef.current = null;
+                setStatusCounts(null);
+            },
+        });
+    };
     const loadData = async (overrides: Partial<WarehouseProductsTableQuery> = {}) => {
         if (!isMountedRef.current) {
             return;
@@ -1111,6 +1011,7 @@ export default function WarehouseProductsPage() {
                 setPageSize(result.pageSize);
                 setSelectedRowKeys([]);
                 setAppliedQuery(query);
+                loadStatusCounts(query, result.total);
             },
             onError: (error) => {
                 console.error(error);
@@ -1144,6 +1045,8 @@ export default function WarehouseProductsPage() {
         if (!isMountedRef.current) {
             return Promise.resolve();
         }
+        // 写操作后的刷新可能改变上架/下架数量，筛选条件不变也要重新计数。
+        statusCountsStaleRef.current = true;
         return loadDataRef.current?.(overrides) ?? Promise.resolve();
     }, []);
     const stopBatchUpdateJobPolling = useCallback(() => {
@@ -1425,6 +1328,11 @@ export default function WarehouseProductsPage() {
         return () => {
             isMountedRef.current = false;
             listRequestGuardRef.current.invalidate();
+            statusCountGuardRef.current.invalidate();
+            if (searchDebounceTimerRef.current !== null) {
+                window.clearTimeout(searchDebounceTimerRef.current);
+                searchDebounceTimerRef.current = null;
+            }
         };
     }, []);
     useEffect(() => {
@@ -1688,13 +1596,19 @@ export default function WarehouseProductsPage() {
             }}/>)
         }
         const value = record[field];
-        return (<div
-          className={`warehouse-products-inline-value${canInlineEditWarehouseProduct ? ' is-editable' : ''}`}
-          title={canInlineEditWarehouseProduct ? t('warehouse.doubleClickToEdit', '双击编辑') : undefined}
-          onDoubleClick={canInlineEditWarehouseProduct ? () => handleStartInlineEdit(record, field) : undefined}>
-          {field === 'minOrderQuantity'
-            ? value ?? '--'
-            : formatPrice(value, pricePrefix ?? '$')}
+        // 零售价为空或为 0 视为缺失：显示琥珀色「—」，双击仍可直接补价。
+        const retailPriceMissing = field === 'labelPrice' && isWarehouseProductRetailPriceMissing(value);
+        return (<div className={`warehouse-products-inline-cell warehouse-products-inline-value-${field}${retailPriceMissing ? ' is-missing' : ''}`}>
+          <div
+            className={`warehouse-products-inline-value${canInlineEditWarehouseProduct ? ' is-editable' : ''}`}
+            title={canInlineEditWarehouseProduct ? t('warehouse.doubleClickToEdit', '双击编辑') : undefined}
+            onDoubleClick={canInlineEditWarehouseProduct ? () => handleStartInlineEdit(record, field) : undefined}>
+            {retailPriceMissing
+              ? <span title={t('warehouseUi.products.retailPriceMissing')}>—</span>
+              : field === 'minOrderQuantity'
+                ? value ?? '--'
+                : formatPrice(value, pricePrefix ?? '$')}
+          </div>
         </div>);
     };
     const showPushToHqResult = useCallback((result: PushProductsToHqResult) => {
@@ -2175,6 +2089,11 @@ export default function WarehouseProductsPage() {
             else {
                 void loadSupplyNotices([{ ...record, isActive: false }]).then(() => undefined);
             }
+            // 行内上下架只就地更新当前行、不重查列表，状态页签数量单独按当前条件重新计数。
+            if (appliedQuery) {
+                statusCountsStaleRef.current = true;
+                loadStatusCounts(appliedQuery);
+            }
             message.success(result.message || t('warehouse.statusToggled', { status: getShelfStatusLabel(nextIsActive, t) }));
         }
         catch (error) {
@@ -2379,46 +2298,138 @@ export default function WarehouseProductsPage() {
             setExporting(false);
         }
     };
+    // 商品组合列：缩略图 + 货号（可复制）+ 套装/多码标签 + 名称；第二行 条码 · 分类末级 · 中包 N。
+    const renderProductCell = (record: WarehouseProductListItem) => {
+        const typeTagClassName = record.productType === ProductType.SET
+            ? 'warehouse-products-type-tag-set'
+            : record.productType === ProductType.MULTICODE
+                ? 'warehouse-products-type-tag-multi'
+                : null;
+        const formatMiddlePack = (count: number) => t('warehouseUi.products.middlePack', { count });
+        const metaParts = buildWarehouseProductMetaParts(record, formatMiddlePack);
+        // 单元格只显示分类末级，悬浮提示里换成完整多级路径。
+        const categoryPath = record.categoryName ? getWarehouseProductCategoryTooltip(record, categoryLookup, i18n.language) : undefined;
+        const metaTitle = buildWarehouseProductMetaParts({ ...record, categoryName: categoryPath || record.categoryName }, formatMiddlePack).join(' · ');
+        const displayName = record.name || record.nameEn || '--';
+        return (<div className="warehouse-products-product-cell">
+          <span className="warehouse-products-thumb">
+            {/* 表格内用 COS 缩略图并懒加载，预览时才取原图。 */}
+            {record.productImage ? (<ProductListImage src={record.productImage} size={40} radius={6} fit="cover" fallback="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="/>) : (<PictureOutlined aria-hidden/>)}
+          </span>
+          <div className="warehouse-products-product-text">
+            <div className="warehouse-products-product-line">
+              <span className="warehouse-products-item-number">{record.itemNumber || '--'}</span>
+              {record.itemNumber ? (<Tooltip title={t('common.copy')}>
+                <Button size="small" type="text" className="warehouse-products-copy-button" icon={<CopyOutlined />} aria-label={t('common.copy')} onClick={() => void copyTextToClipboard(record.itemNumber)}/>
+              </Tooltip>) : null}
+              {typeTagClassName ? (<span className={`warehouse-products-type-tag ${typeTagClassName}`}>{getProductTypeLabel(record.productType, t)}</span>) : null}
+              <span className="warehouse-products-product-name" title={displayName}>{displayName}</span>
+            </div>
+            {metaParts.length ? (<div className="warehouse-products-product-meta" title={metaTitle}>{metaParts.join(' · ')}</div>) : null}
+          </div>
+        </div>);
+    };
+    // 下架行状态单元格第二行：供货计划摘要（逾期红色、可带关注门店数）；有写权限时点击修改说明。
+    const renderSupplyNoticeSummary = (record: WarehouseProductListItem) => {
+        const notice = supplyNotices[record.productCode];
+        const summary = buildSupplyNoticeSummary(notice, {
+            none: t('supplyNotice.column.none'),
+            plan: (plan) => t(`supplyNotice.plan.${plan}`),
+            expected: () => (notice ? formatSupplyExpected(notice, t) : ''),
+            overdue: t('supplyNotice.overdueTag'),
+            watchers: (count) => t('supplyNotice.column.watchers', { count }),
+        });
+        const className = `warehouse-products-supply-summary${summary.tone === 'overdue' ? ' is-overdue' : summary.tone === 'none' ? ' is-none' : ''}`;
+        if (!access.canWriteProduct) {
+            return <span className={className} title={summary.text}>{summary.text}</span>;
+        }
+        return (<Tooltip title={t('supplyNotice.column.edit')}>
+          <button type="button" className={className} onClick={() => setSupplyNoticeTarget({ mode: 'edit', productCodes: [record.productCode], initial: notice ?? null })}>
+            {summary.text}
+          </button>
+        </Tooltip>);
+    };
+    // 行操作收敛为「编辑 + ⋯」：修改记录、数据查询、套装子项/多码管理、上架/下架都在 ⋯ 菜单里，权限判断与原按钮一致。
+    const buildRowActionItems = (record: WarehouseProductListItem): NonNullable<MenuProps['items']> => {
+        const toggling = togglingProductCodes.includes(record.productCode);
+        const items: NonNullable<MenuProps['items']> = [];
+        if (access.canManageWarehouseProducts) {
+            items.push({ key: 'changeHistory', icon: <HistoryOutlined />, label: t('warehouse.changeHistory.action', '修改记录') });
+        }
+        if (access.canManageWarehouseProducts && (access.canViewContainers || access.canViewProductSalesAnalysis)) {
+            items.push({ key: 'records', icon: <SearchOutlined />, label: t('warehouseProductRecords.entry', '数据查询') });
+        }
+        items.push(canManageProductDetails(record.productType)
+            ? { key: 'productDetails', icon: <GiftOutlined />, label: getProductDetailsActionLabel(record.productType, t) }
+            : {
+                key: 'productDetails',
+                icon: <GiftOutlined />,
+                disabled: true,
+                label: (<Tooltip title={getProductDetailsDisabledHint(t)} placement="left">
+                  <span>{getProductDetailsActionLabel(ProductType.SET, t)}</span>
+                </Tooltip>),
+            });
+        if (access.canWriteProduct) {
+            items.push({ type: 'divider' });
+            // 下架仍先弹供货说明（handleToggleSingleActive 内拦截），上架直接生效，与原行内开关一致。
+            items.push(record.isActive
+                ? { key: 'deactivate', disabled: toggling, label: t('warehouseUi.products.deactivate') }
+                : { key: 'activate', disabled: toggling, label: t('warehouseUi.products.activate') });
+        }
+        return items;
+    };
+    const handleRowAction = (record: WarehouseProductListItem, key: string) => {
+        if (key === 'changeHistory') {
+            setChangeHistoryProduct(record);
+        }
+        else if (key === 'records') {
+            navigate(`/warehouse/products/${encodeURIComponent(record.productCode)}/records`);
+        }
+        else if (key === 'productDetails' && canManageProductDetails(record.productType)) {
+            void handleOpenSetItems(record);
+        }
+        else if (key === 'activate' || key === 'deactivate') {
+            void handleToggleSingleActive(record, key === 'activate');
+        }
+    };
     const baseColumns = useMemo<ColumnsType<WarehouseProductListItem>>(() => [
-        { key: 'rowNumber', title: '#', dataIndex: 'rowNumber', width: 30, fixed: 'left' },
         {
-            key: 'itemNumber',
-            title: t('column.hbItemNumber'),
+            key: 'product',
+            title: t('warehouseUi.products.columnProduct'),
+            // 商品组合列沿用原「HB货号」列的排序与列头筛选：按货号排序、按货号筛选。
             dataIndex: 'itemNumber',
-            width: 122,
+            width: 248,
             fixed: 'left',
             sorter: true,
             ...textFilterProps('itemNumber', t('warehouse.searchProductByItemNumber', '按货号筛选')),
-            render: (value: string) => value ? (<Space size={4}>
-              <span>{value}</span>
-              <Tooltip title={t('common.copy')}>
-                <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => void copyTextToClipboard(value)}/>
-              </Tooltip>
-            </Space>) : ('--'),
+            render: (_value, record) => renderProductCell(record),
         },
         {
-            key: 'productImage',
-            title: t('column.image'),
-            dataIndex: 'productImage',
-            width: 64,
-            // 表格内用 COS 缩略图并懒加载，预览时才取原图。
-            render: (value: string | undefined) => (<div className="warehouse-products-image-cell">
-            {value ? (<ProductListImage src={value} size={36} radius={4} fit="cover" fallback="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="/>) : null}
-          </div>),
+            key: 'nameEn',
+            title: t('column.englishName'),
+            dataIndex: 'nameEn',
+            width: 176,
+            ...textFilterProps('nameEn', t('warehouse.searchProductByEnglishName', '按英文名筛选')),
+            render: (value: string | undefined) => value ? <div className="warehouse-products-text-2line">{value}</div> : '--',
         },
         {
-            key: 'domesticSupplierCode',
-            title: t('warehouse.domesticSupplier', '国内供应商'),
-            dataIndex: 'domesticSupplierCode',
-            width: 132,
+            key: 'name',
+            title: t('column.productName'),
+            dataIndex: 'name',
+            width: 176,
             sorter: true,
-            ...enumFilterProps('domesticSupplierCode', domesticSupplierFilterOptions),
-            render: (_value, record) => {
-                const supplierDisplayName = record.domesticSupplierName || record.domesticSupplierCode;
-                return supplierDisplayName ? (<div className="warehouse-products-supplier-cell">
-              <Tag color="blue">{supplierDisplayName}</Tag>
-            </div>) : ('--');
-            },
+            ...textFilterProps('productName', t('warehouse.searchProductByName', '按商品名筛选')),
+            render: (value: string | undefined) => value ? <div className="warehouse-products-text-2line">{value}</div> : '--',
+        },
+        {
+            key: 'barcode',
+            title: t('column.barcode'),
+            dataIndex: 'barcode',
+            width: 156,
+            ...textFilterProps('barcode', t('warehouse.searchProductByBarcode', '按条码筛选')),
+            render: (value: string | undefined) => value ? (<div className="warehouse-products-barcode-cell">
+              <BarcodePreview value={value} textMaxWidth={150} compactCopy/>
+            </div>) : ('--'),
         },
         {
             key: 'categoryName',
@@ -2433,102 +2444,6 @@ export default function WarehouseProductsPage() {
             render: (_value, record) => renderWarehouseProductCategoryCell(record, categoryLookup, i18n.language),
         },
         {
-            key: 'nameEn',
-            title: t('column.englishName'),
-            dataIndex: 'nameEn',
-            width: 176,
-            ...textFilterProps('nameEn', t('warehouse.searchProductByEnglishName', '按英文名筛选')),
-            render: (value: string | undefined) => value ? <div className="warehouse-products-text-2line">{value}</div> : '--',
-        },
-        {
-            key: 'minOrderQuantity',
-            title: t('warehouse.middlePackQuantity', '中包数'),
-            dataIndex: 'minOrderQuantity',
-            width: 96,
-            ...numberRangeFilterProps('minOrderQuantity'),
-            render: (_value, record) => renderInlineEditableNumberCell(record, 'minOrderQuantity'),
-        },
-        {
-            key: 'domesticPrice',
-            title: t('column.domesticPrice'),
-            dataIndex: 'domesticPrice',
-            width: 96,
-            ...numberRangeFilterProps('domesticPrice'),
-            render: (_value, record) => renderInlineEditableNumberCell(record, 'domesticPrice'),
-        },
-        {
-            key: 'importPrice',
-            title: t('column.importPrice'),
-            dataIndex: 'importPrice',
-            width: 96,
-            sorter: true,
-            ...numberRangeFilterProps('importPrice'),
-            render: (_value, record) => renderInlineEditableNumberCell(record, 'importPrice'),
-        },
-        {
-            key: 'labelPrice',
-            title: t('column.oemPrice'),
-            dataIndex: 'labelPrice',
-            width: 96,
-            sorter: true,
-            ...numberRangeFilterProps('oemPrice'),
-            render: (_value, record) => renderInlineEditableNumberCell(record, 'labelPrice'),
-        },
-        {
-            key: 'isActive',
-            title: t('column.status'),
-            dataIndex: 'isActive',
-            width: 104,
-            ...enumFilterProps('isActive', [
-                { text: getShelfStatusLabel(true, t), value: 'true' },
-                { text: getShelfStatusLabel(false, t), value: 'false' },
-            ]),
-            render: (value: boolean, record) => (<Switch checked={value} checkedChildren={getShelfStatusLabel(true, t)} unCheckedChildren={getShelfStatusLabel(false, t)} disabled={!access.canWriteProduct || togglingProductCodes.includes(record.productCode)} loading={togglingProductCodes.includes(record.productCode)} onChange={(nextChecked) => void handleToggleSingleActive(record, nextChecked)}/>),
-        },
-        {
-            key: 'supplyPlan',
-            title: t('supplyNotice.column.plan'),
-            width: 120,
-            render: (_value, record) => {
-                if (record.isActive) {
-                    return null;
-                }
-                const notice = supplyNotices[record.productCode];
-                const label = notice ? t(`supplyNotice.plan.${notice.supplyPlan}`) : t('supplyNotice.column.none');
-                const content = (<Space size={4}>
-                    <Tag color={notice ? (notice.supplyPlan === 'Discontinued' ? 'default' : notice.supplyPlan === 'WillRestock' ? 'processing' : 'warning') : undefined}>{label}</Tag>
-                    {notice?.isOverdue ? <Tag color="error">{t('supplyNotice.overdueTag')}</Tag> : null}
-                  </Space>);
-                if (!access.canWriteProduct) {
-                    return content;
-                }
-                return (<Tooltip title={notice?.watchingStoreCount ? t('supplyNotice.column.watchers', { count: notice.watchingStoreCount }) : t('supplyNotice.column.edit')}>
-                    <a onClick={() => setSupplyNoticeTarget({ mode: 'edit', productCodes: [record.productCode], initial: notice ?? null })}>{content}</a>
-                  </Tooltip>);
-            },
-        },
-        {
-            key: 'supplyExpected',
-            title: t('supplyNotice.column.expected'),
-            width: 150,
-            render: (_value, record) => {
-                const notice = supplyNotices[record.productCode];
-                if (record.isActive || !notice || notice.supplyPlan === 'Discontinued') {
-                    return null;
-                }
-                return formatSupplyExpected(notice, t);
-            },
-        },
-        {
-            key: 'supplyUpdatedAt',
-            title: t('supplyNotice.column.updatedAt'),
-            width: 110,
-            render: (_value, record) => {
-                const notice = supplyNotices[record.productCode];
-                return record.isActive || !notice ? null : dayjs(notice.updatedAtUtc).format('YYYY-MM-DD');
-            },
-        },
-        {
             key: 'productType',
             title: t('column.productType'),
             dataIndex: 'productType',
@@ -2540,33 +2455,80 @@ export default function WarehouseProductsPage() {
             render: (value: ProductType) => <Tag color={getProductTypeTagColor(value)}>{getProductTypeLabel(value, t)}</Tag>,
         },
         {
-            key: 'barcode',
-            title: t('column.barcode'),
-            dataIndex: 'barcode',
-            width: 156,
-            ...textFilterProps('barcode', t('warehouse.searchProductByBarcode', '按条码筛选')),
-            render: (value: string | undefined) => value ? (<div className="warehouse-products-barcode-cell">
-              <BarcodePreview value={value} textMaxWidth={150} compactCopy/>
-            </div>) : ('--'),
-        },
-        {
-            key: 'locationCodes',
-            title: t('location.location', '货位'),
-            dataIndex: 'locationCodes',
-            width: 132,
-            ...textFilterProps('locationCodes', t('warehouse.filterLocation', '按货位筛选')),
-            render: (value: string[] | undefined) => value?.length ? (<Space size={4} wrap>
-              {value.map((locationCode) => <Tag key={locationCode}>{locationCode}</Tag>)}
-            </Space>) : ('--'),
-        },
-        {
-            key: 'name',
-            title: t('column.productName'),
-            dataIndex: 'name',
-            width: 176,
+            key: 'supplier',
+            title: t('column.supplier'),
+            // 供应商组合列：第一行国内、第二行澳洲；排序与列头筛选沿用原「国内供应商」列。
+            dataIndex: 'domesticSupplierCode',
+            width: 108,
             sorter: true,
-            ...textFilterProps('productName', t('warehouse.searchProductByName', '按商品名筛选')),
-            render: (value: string | undefined) => value ? <div className="warehouse-products-text-2line">{value}</div> : '--',
+            ...enumFilterProps('domesticSupplierCode', domesticSupplierFilterOptions),
+            render: (_value, record) => {
+                const supplierDisplayName = record.domesticSupplierName || record.domesticSupplierCode;
+                const localSupplierDisplayName = record.localSupplierName || localSupplierNameMap[record.localSupplierCode || ''] || record.localSupplierCode;
+                return (<div className="warehouse-products-supplier-lines">
+                  <div className="warehouse-products-supplier-line" title={supplierDisplayName || undefined}>
+                    <span className="warehouse-products-supplier-label">{t('warehouse.domestic')}</span>{supplierDisplayName || '—'}
+                  </div>
+                  <div className="warehouse-products-supplier-line" title={localSupplierDisplayName || undefined}>
+                    <span className="warehouse-products-supplier-label">{t('warehouseUi.products.supplierAustralia')}</span>{localSupplierDisplayName || '—'}
+                  </div>
+                </div>);
+            },
+        },
+        {
+            key: 'localSupplierCode',
+            title: t('column.australianSupplier', '澳洲供应商'),
+            dataIndex: 'localSupplierCode',
+            width: 140,
+            sorter: true,
+            ...enumFilterProps('localSupplierCode', localSupplierFilterOptions),
+            render: (_value, record) => {
+                // 表格接口只返回澳洲供应商代码时，用活跃供应商列表补齐名称。
+                const supplierDisplayName = record.localSupplierName || localSupplierNameMap[record.localSupplierCode || ''] || record.localSupplierCode;
+                return supplierDisplayName ? (<div className="warehouse-products-ellipsis" title={supplierDisplayName}>{supplierDisplayName}</div>) : ('--');
+            },
+        },
+        {
+            key: 'domesticPrice',
+            title: `${t('column.domesticPrice')} ¥`,
+            dataIndex: 'domesticPrice',
+            width: 80,
+            align: 'right',
+            className: 'warehouse-products-numeric-column',
+            ...numberRangeFilterProps('domesticPrice'),
+            render: (_value, record) => renderInlineEditableNumberCell(record, 'domesticPrice'),
+        },
+        {
+            key: 'importPrice',
+            title: `${t('column.importPrice')} $`,
+            dataIndex: 'importPrice',
+            width: 88,
+            align: 'right',
+            className: 'warehouse-products-numeric-column',
+            sorter: true,
+            ...numberRangeFilterProps('importPrice'),
+            render: (_value, record) => renderInlineEditableNumberCell(record, 'importPrice'),
+        },
+        {
+            key: 'labelPrice',
+            title: `${t('column.oemPrice')} $`,
+            dataIndex: 'labelPrice',
+            width: 88,
+            align: 'right',
+            className: 'warehouse-products-numeric-column',
+            sorter: true,
+            ...numberRangeFilterProps('oemPrice'),
+            render: (_value, record) => renderInlineEditableNumberCell(record, 'labelPrice'),
+        },
+        {
+            key: 'minOrderQuantity',
+            title: t('warehouse.middlePackQuantity', '中包数'),
+            dataIndex: 'minOrderQuantity',
+            width: 96,
+            align: 'right',
+            className: 'warehouse-products-numeric-column',
+            ...numberRangeFilterProps('minOrderQuantity'),
+            render: (_value, record) => renderInlineEditableNumberCell(record, 'minOrderQuantity'),
         },
         {
             key: 'packingQty',
@@ -2575,7 +2537,7 @@ export default function WarehouseProductsPage() {
             width: 108,
             ...numberRangeFilterProps('packingQty'),
             render: (value: number | undefined, record) => value !== undefined && value !== null ? (<Space size={4}>
-              <span>{value}</span>
+              <span className="warehouse-products-numeric">{value}</span>
               {/* 装箱数优先显示国内商品值；仅在国内值缺失时回退到仓库值。 */}
               {record.isPackingQtyFallback ? <Tag color="green">{t('warehouse.warehouse')}</Tag> : <Tag color="gold">{t('warehouse.domestic')}</Tag>}
             </Space>) : ('--'),
@@ -2587,30 +2549,49 @@ export default function WarehouseProductsPage() {
             width: 108,
             ...numberRangeFilterProps('volume'),
             render: (value: number | undefined, record) => value !== undefined && value !== null ? (<Space size={4}>
-              <span>{value}</span>
+              <span className="warehouse-products-numeric">{value}</span>
               {record.isVolumeFallback ? <Tag color="gold">{t('warehouse.domestic')}</Tag> : <Tag color="green">{t('warehouse.warehouse')}</Tag>}
             </Space>) : ('--'),
         },
         {
-            key: 'localSupplierCode',
-            title: t('column.australianSupplier', '澳洲供应商'),
-            dataIndex: 'localSupplierCode',
-            width: 150,
-            sorter: true,
-            ...enumFilterProps('localSupplierCode', localSupplierFilterOptions),
+            key: 'locationCodes',
+            title: t('location.location', '货位'),
+            dataIndex: 'locationCodes',
+            width: 96,
+            ...textFilterProps('locationCodes', t('warehouse.filterLocation', '按货位筛选')),
+            render: (value: string[] | undefined) => value?.length ? (<div className="warehouse-products-location-list" title={value.join(', ')}>
+              {value.map((locationCode) => <span key={locationCode} className="warehouse-products-location-tag">{locationCode}</span>)}
+            </div>) : (<span className="warehouse-products-location-empty">{t('warehouseUi.products.locationUnbound')}</span>),
+        },
+        {
+            key: 'isActive',
+            title: t('column.status'),
+            dataIndex: 'isActive',
+            width: 104,
+            ...enumFilterProps('isActive', [
+                { text: getShelfStatusLabel(true, t), value: 'true' },
+                { text: getShelfStatusLabel(false, t), value: 'false' },
+            ]),
+            // 状态只读展示：上架绿色、下架灰色；上下架改在勾选条与 ⋯ 菜单里操作，下架仍需先填供货说明。
+            render: (value: boolean, record) => (<div className="warehouse-products-status-cell">
+              <StatusPill tone={value ? 'green' : 'gray'}>{getShelfStatusLabel(value, t)}</StatusPill>
+              {value ? null : renderSupplyNoticeSummary(record)}
+            </div>),
+        },
+        {
+            key: 'supplyUpdatedAt',
+            title: t('supplyNotice.column.updatedAt'),
+            width: 104,
             render: (_value, record) => {
-                // 表格接口只返回澳洲供应商代码时，用活跃供应商列表补齐名称。
-                const supplierDisplayName = record.localSupplierName || localSupplierNameMap[record.localSupplierCode || ''] || record.localSupplierCode;
-                return supplierDisplayName ? (<div className="warehouse-products-supplier-cell">
-              <Tag color="purple">{supplierDisplayName}</Tag>
-            </div>) : ('--');
+                const notice = supplyNotices[record.productCode];
+                return record.isActive || !notice ? null : dayjs(notice.updatedAtUtc).format('YYYY-MM-DD');
             },
         },
         {
             key: 'updatedAt',
             title: t('column.updateTime'),
             dataIndex: 'updatedAt',
-            width: 164,
+            width: 156,
             sorter: true,
             ...dateRangeFilterProps('updatedAt'),
             render: (value: string | undefined) => formatDateTime(value, i18n.language),
@@ -2625,28 +2606,22 @@ export default function WarehouseProductsPage() {
         {
             key: 'action',
             title: t('column.action'),
-            width: 400,
+            width: 60,
             fixed: 'right',
-            render: (_, record) => (<Space size={0}>
-            {access.canWriteProduct ? (<Button type="link" icon={<EditOutlined />} onClick={() => handleOpenEdit(record)}>
-                {t('common.edit')}
-              </Button>) : null}
-            {access.canManageWarehouseProducts ? (<Button type="link" icon={<HistoryOutlined />} onClick={() => setChangeHistoryProduct(record)}>
-                {t('warehouse.changeHistory.action', '修改记录')}
-              </Button>) : null}
-            {access.canManageWarehouseProducts && (access.canViewContainers || access.canViewProductSalesAnalysis) ? (<Button type="link" icon={<SearchOutlined />} onClick={() => navigate(`/warehouse/products/${encodeURIComponent(record.productCode)}/records`)}>
-                {t('warehouseProductRecords.entry', '数据查询')}
-              </Button>) : null}
-            {canManageProductDetails(record.productType) ? (<Button type="link" icon={<GiftOutlined />} onClick={() => void handleOpenSetItems(record)}>
-                {getProductDetailsActionLabel(record.productType, t)}
-              </Button>) : (<Tooltip title={getProductDetailsDisabledHint(t)}>
-                <Button type="link" icon={<GiftOutlined />} disabled>
-                  {getProductDetailsActionLabel(ProductType.SET, t)}
-                </Button>
-              </Tooltip>)}
-          </Space>),
+            align: 'right',
+            render: (_, record) => {
+                const actionItems = buildRowActionItems(record);
+                return (<div className="warehouse-products-row-actions">
+                  {access.canWriteProduct ? (<Tooltip title={t('common.edit')}>
+                    <Button type="text" size="small" icon={<EditOutlined />} aria-label={t('warehouseUi.products.rowEditAria', { code: record.itemNumber || record.productCode })} onClick={() => handleOpenEdit(record)}/>
+                  </Tooltip>) : null}
+                  {actionItems.length ? (<Dropdown trigger={['click']} placement="bottomRight" menu={{ items: actionItems, onClick: ({ key }) => handleRowAction(record, String(key)) }}>
+                    <Button type="text" size="small" icon={<MoreOutlined />} aria-label={t('warehouseUi.products.rowMoreAria', { code: record.itemNumber || record.productCode })}/>
+                  </Dropdown>) : null}
+                </div>);
+            },
         },
-    ], [access.canManageWarehouseProducts, access.canViewContainers, access.canViewProductSalesAnalysis, access.canWriteProduct, canInlineEditWarehouseProduct, categoryColumnFilterOptions, categoryFilterValue, categoryLookup, columnFilters, domesticSupplierFilterOptions, i18n.language, inlineEditingCell, inlineSavingCellKey, localSupplierFilterOptions, localSupplierNameMap, navigate, productTypeOptions, t, togglingProductCodes]);
+    ], [access.canManageWarehouseProducts, access.canViewContainers, access.canViewProductSalesAnalysis, access.canWriteProduct, canInlineEditWarehouseProduct, categoryColumnFilterOptions, categoryFilterValue, categoryLookup, columnFilters, domesticSupplierFilterOptions, i18n.language, inlineEditingCell, inlineSavingCellKey, localSupplierFilterOptions, localSupplierNameMap, navigate, productTypeOptions, supplyNotices, t, togglingProductCodes]);
     const draggableColumnKeys = [...WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER];
     useEffect(() => {
         setColumnOrder((current) => {
@@ -2683,18 +2658,41 @@ export default function WarehouseProductsPage() {
         });
     };
     const isColumnOrderCustomized = isWarehouseProductColumnOrderCustomized(columnOrder, WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER);
+    const isColumnVisibilityCustomized = isWarehouseProductColumnVisibilityCustomized(visibleOptionalColumns, WAREHOUSE_PRODUCT_DEFAULT_VISIBLE_OPTIONAL_COLUMNS);
+    // 列设置：勾选显示低频列并记住选择；列头筛选条件不随列隐藏而清除（见表格 onChange）。
+    const handleVisibleOptionalColumnsChange = (keys: string[]) => {
+        const nextKeys = normalizeWarehouseProductVisibleOptionalColumns(keys, WAREHOUSE_PRODUCT_OPTIONAL_COLUMN_KEYS);
+        setVisibleOptionalColumns(nextKeys);
+        try {
+            localStorage.setItem(WAREHOUSE_PRODUCT_VISIBLE_COLUMNS_STORAGE_KEY, JSON.stringify(nextKeys));
+        }
+        catch {
+            // localStorage 不可用时只影响跨刷新记忆，当前页面内仍按勾选显示。
+        }
+    };
     const handleResetColumnOrder = () => {
         try {
             localStorage.removeItem(WAREHOUSE_PRODUCT_COLUMN_ORDER_STORAGE_KEY);
+            localStorage.removeItem(WAREHOUSE_PRODUCT_VISIBLE_COLUMNS_STORAGE_KEY);
         }
         catch {
             // localStorage 不可用时仍恢复当前页面内的默认列顺序。
         }
-        // 重置只影响业务列顺序；选择列仍由 Ant Design rowSelection 管理。
+        // 重置只影响业务列顺序与显示列；选择列仍由 Ant Design rowSelection 管理。
         setColumnOrder([...WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER]);
+        setVisibleOptionalColumns([...WAREHOUSE_PRODUCT_DEFAULT_VISIBLE_OPTIONAL_COLUMNS]);
     };
+    // 实际渲染的列顺序：完整列顺序去掉未勾选的低频列；拖拽排序也只在这些可见列之间进行。
+    const visibleColumnOrder = useMemo(
+        () => filterWarehouseProductVisibleColumnOrder(columnOrder.length ? columnOrder : draggableColumnKeys, WAREHOUSE_PRODUCT_OPTIONAL_COLUMN_KEYS, visibleOptionalColumns),
+        [columnOrder, draggableColumnKeys.join('|'), visibleOptionalColumns],
+    );
+    const columnSettingsOptions = useMemo(() => {
+        const columnMap = new Map(baseColumns.map((column) => [String(column.key), column]));
+        return WAREHOUSE_PRODUCT_OPTIONAL_COLUMN_KEYS.map((key) => ({ key, label: columnMap.get(key)?.title as ReactNode }));
+    }, [baseColumns]);
     const orderedColumns = useMemo(() => {
-        const activeOrder = columnOrder.length ? columnOrder : draggableColumnKeys;
+        const activeOrder = visibleColumnOrder;
         const columnMap = new Map(baseColumns.map((column) => [String(column.key), column]));
         return activeOrder
             .map((key) => columnMap.get(key))
@@ -2705,14 +2703,41 @@ export default function WarehouseProductsPage() {
                 'data-column-key': String(column.key),
             }),
         })) as ColumnsType<WarehouseProductListItem>;
-    }, [baseColumns, columnOrder, draggableColumnKeys.join('|')]);
-    // 回车或点「查询」才提交关键词；下拉类筛选在各自 onChange 里立即请求。
+    }, [baseColumns, visibleColumnOrder]);
+    // 虚拟表格需要数值 scroll.x：取可见列宽之和。容器更宽时 rc-table 会按比例放大各列，更窄时才出现横向滚动。
+    const tableScrollX = useMemo(() => orderedColumns.reduce(
+        (sum, column) => sum + (typeof column.width === 'number' ? column.width : 0),
+        WAREHOUSE_PRODUCT_SELECTION_COLUMN_WIDTH,
+    ), [orderedColumns]);
+    const clearSearchDebounce = () => {
+        if (searchDebounceTimerRef.current !== null) {
+            window.clearTimeout(searchDebounceTimerRef.current);
+            searchDebounceTimerRef.current = null;
+        }
+    };
+    // 回车立即提交关键词，并取消尚未触发的防抖查询，避免同一关键词请求两次；下拉类筛选在各自 onChange 里立即请求。
     const handleSubmitSearch = () => {
+        clearSearchDebounce();
         setSubmittedSearchText(searchText);
         void loadData({ page: 1, searchText });
     };
+    // 输入即查：关键词防抖 300ms 后提交。定时器触发时经 loadDataRef 取最新 loader，
+    // 这期间若又改了其他筛选，也按最新条件查询，而不是输入那一刻的旧条件。
+    const handleSearchTextChange = (value: string) => {
+        setSearchText(value);
+        clearSearchDebounce();
+        searchDebounceTimerRef.current = window.setTimeout(() => {
+            searchDebounceTimerRef.current = null;
+            if (!isMountedRef.current) {
+                return;
+            }
+            setSubmittedSearchText(value);
+            void loadDataRef.current?.({ page: 1, searchText: value });
+        }, WAREHOUSE_PRODUCTS_SEARCH_DEBOUNCE_MS);
+    };
     // 重置筛选：清空顶部栏与列头条件并恢复默认排序，不动列顺序。「清空全部」与之等价。
     const handleResetFilters = () => {
+        clearSearchDebounce();
         setSearchText('');
         setSubmittedSearchText('');
         setSupplierCode(undefined);
@@ -2735,27 +2760,26 @@ export default function WarehouseProductsPage() {
             sortOrder: 'descend',
         });
     };
-    const isUncategorizedOnly = categoryFilterValue === UNCATEGORIZED_PRODUCTS_FILTER_KEY;
-    // 「只看未分类」开关：打开时行为与原「未分类商品」按钮一致，再点一次回到全部分类。
-    const handleToggleUncategorizedOnly = () => {
-        if (isUncategorizedOnly) {
-            setCategoryFilterValue(ALL_PRODUCTS_FILTER_KEY);
-            void loadData({
-                page: 1,
-                filters: columnFilters,
-                categoryGuid: undefined,
-                uncategorizedOnly: false,
-            });
-            return;
-        }
-        setCategoryFilterValue(UNCATEGORIZED_PRODUCTS_FILTER_KEY);
-        void loadData({
-            page: 1,
-            filters: columnFilters,
-            categoryGuid: undefined,
-            uncategorizedOnly: true,
-        });
+    // 左侧分类面板选中即查第 1 页：「全部商品」「未分类」是面板顶部的固定入口，替代原「只看未分类」开关。
+    const handleCategoryFilterChange = (value: string) => {
+        setCategoryFilterValue(value);
+        void loadData({ page: 1, ...buildCategoryQueryValue(value) });
     };
+    const statusTabKey = resolveWarehouseProductStatusTab(isActive);
+    // 状态页签即状态筛选：与列头「状态」筛选共用 isActive 并镜像进 columnFilters，选中即查第 1 页。
+    const handleStatusTabChange = (key: WarehouseProductStatusTabKey) => {
+        const value = warehouseProductStatusTabToIsActive(key);
+        const nextFilters = setFilterValues(columnFilters, 'isActive', value === undefined ? undefined : [String(value)]);
+        setIsActive(value);
+        setColumnFilters(nextFilters);
+        void loadData({ page: 1, isActive: value, filters: nextFilters });
+    };
+    // 计数缺失（加载中、失败）时不传 count，页签只显示文字。
+    const statusTabItems = WAREHOUSE_PRODUCT_STATUS_TAB_KEYS.map((key) => ({
+        key,
+        label: key === 'all' ? t('common.all', '全部') : getShelfStatusLabel(key === 'active', t),
+        count: statusCounts?.counts[key],
+    }));
     // 列头筛选键 → 标签名与取值格式，键名与 normalizeTableFilters 输出一致（name→productName、labelPrice→oemPrice）。
     const activeFilterColumns = useMemo<Record<string, ActiveFilterColumnMeta>>(() => ({
         itemNumber: { label: t('column.hbItemNumber'), kind: 'text' },
@@ -2791,7 +2815,7 @@ export default function WarehouseProductsPage() {
         labels: {
             searchText: t('warehouse.activeFilter.keyword', '关键词'),
             category: t('warehouse.categories.category', '分类'),
-            uncategorized: t('warehouse.categories.uncategorizedOption', '未分类商品'),
+            uncategorized: t('warehouseUi.products.uncategorized'),
         },
         columns: activeFilterColumns,
         categoryLabel: appliedQuery?.categoryGuid
@@ -2808,6 +2832,7 @@ export default function WarehouseProductsPage() {
     const handleRemoveActiveFilter = (chipKey: string) => {
         const overrides = buildActiveFilterRemovalOverrides(chipKey, columnFilters);
         if (chipKey === ACTIVE_FILTER_SEARCH_KEY) {
+            clearSearchDebounce();
             setSearchText('');
             setSubmittedSearchText('');
         }
@@ -2827,14 +2852,27 @@ export default function WarehouseProductsPage() {
         void loadData(overrides);
     };
     return (<>
-      <style>{warehouseProductsTableStyle}</style>
-      <PageContainer compact title={t('warehouse.productManagement')} subtitle={t('warehouse.productTotalCount', { count: total })} extra={<Space wrap>
+      <PageContainer compact title={t('menu.warehouseProducts')} subtitle={t('warehouseUi.products.totalCount', { total: formatWarehouseProductCount(total) })} extra={<Space wrap>
           {exporting ? (<Typography.Text type="secondary">
               {exportMessage} ({exportProgress}%)
             </Typography.Text>) : null}
-          {/* 页头只放低频入口：同步、导入导出收进菜单；批量操作移到勾选后操作条。
-              「从HQ同步库存」（HQ → HBweb）已于 2026-09-29 停用，同步菜单只保留写 HQ 的「更新分店价格」。 */}
-          <ToolbarMenuButton label={t('common.listToolbar.sync', '同步')} icon={<CloudSyncOutlined />} actions={[
+          {/* 页头只放低频入口：价格与同步、导入导出收进菜单；批量操作在勾选后操作条，管理分类在左侧分类面板头部。
+              「从HQ同步库存」（HQ → HBweb）已于 2026-09-29 停用，菜单只保留写 HQ 的「更新分店价格」。 */}
+          <ToolbarMenuButton label={t('warehouseUi.products.priceAndSync')} actions={[
+                {
+                    key: 'retailPriceChanges',
+                    label: t('warehouse.retailPriceChanges.entry'),
+                    icon: <HistoryOutlined />,
+                    visible: access.canManageWarehouseProducts,
+                    onClick: () => navigate('/warehouse/products/retail-price-changes'),
+                },
+                {
+                    key: 'priceUpdateTasks',
+                    label: t('warehouse.priceUpdateTasks.entry'),
+                    icon: <TagsOutlined />,
+                    visible: access.canManageWarehouseProducts,
+                    onClick: () => navigate('/warehouse/products/price-update-tasks'),
+                },
                 {
                     key: 'storePriceSync',
                     label: t('warehouse.storePriceSync.title', '更新分店价格'),
@@ -2844,7 +2882,7 @@ export default function WarehouseProductsPage() {
                     onClick: () => setStorePriceSyncOpen(true),
                 },
             ]}/>
-          <ToolbarMenuButton label={t('common.listToolbar.importExport', '导入 / 导出')} icon={exporting ? <LoadingOutlined /> : <DownloadOutlined />} actions={[
+          <ToolbarMenuButton label={t('common.listToolbar.importExport', '导入 / 导出')} icon={exporting ? <LoadingOutlined /> : undefined} actions={[
                 {
                     key: 'exportExcel',
                     label: t('warehouse.exportExcel'),
@@ -2865,55 +2903,37 @@ export default function WarehouseProductsPage() {
                     visible: canImportNonHbProducts,
                     onClick: () => setImportNonHbOpen(true),
                 },
-                {
-                    key: 'batchImageUpload',
-                    label: t('warehouse.batchImageUpload'),
-                    icon: <UploadOutlined />,
-                    onClick: () => message.info(t('warehouse.batchImageUploadMigrated')),
-                },
-                {
-                    key: 'batchCreateSet',
-                    label: t('warehouse.batchCreateSet'),
-                    icon: <GiftOutlined />,
-                    onClick: () => message.info(t('warehouse.batchSetMigrated')),
-                },
             ]}/>
-          {/* 价格类入口：零售价月度变化与价格变更任务（分店改价、换标签监控）归入同一菜单。 */}
-          <ToolbarMenuButton label={t('common.listToolbar.price', '价格')} icon={<TagsOutlined />} actions={[
-                {
-                    key: 'retailPriceChanges',
-                    label: t('warehouse.retailPriceChanges.entry'),
-                    icon: <HistoryOutlined />,
-                    visible: access.canManageWarehouseProducts,
-                    onClick: () => navigate('/warehouse/products/retail-price-changes'),
-                },
-                {
-                    key: 'priceUpdateTasks',
-                    label: t('warehouse.priceUpdateTasks.entry'),
-                    icon: <TagsOutlined />,
-                    visible: access.canManageWarehouseProducts,
-                    onClick: () => navigate('/warehouse/products/price-update-tasks'),
-                },
-            ]}/>
-          {access.canManageWarehouseCategories ? (<Button icon={<SettingOutlined />} onClick={() => setCategoryManageOpen(true)}>
-              {t('containers.actions.manageCategories', '管理分类')}
-            </Button>) : null}
           {access.canWriteProduct ? (<Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
               {t('warehouse.createProduct')}
             </Button>) : null}
           </Space>}>
-        <Card>
+        <div className="warehouse-products-layout">
+          <CategoryFilterPanel
+            categories={categories}
+            loading={categoryLoading}
+            value={categoryFilterValue}
+            expandedKeys={categoryFilterExpandedKeys}
+            onExpand={setCategoryFilterExpandedKeys}
+            onChange={handleCategoryFilterChange}
+            onManage={access.canManageWarehouseCategories ? () => setCategoryManageOpen(true) : undefined}
+            language={i18n.language}
+            t={t}
+          />
+          <section className="warehouse-products-list" aria-label={t('menu.warehouseProducts')}>
+          <StatusTabs items={statusTabItems} activeKey={statusTabKey} onChange={handleStatusTabChange} ariaLabel={t('warehouseUi.products.statusTabsLabel')}/>
           <div className="warehouse-products-toolbar">
           <div className="list-toolbar-filter-row">
-          <Input value={searchText} onChange={(event) => setSearchText(event.target.value)} onPressEnter={handleSubmitSearch} prefix={<SearchOutlined />} placeholder={`${t('warehouse.searchProductFull')} · ${t('common.listToolbar.searchEnterHint', '回车查询')}`} style={{ width: 300 }} allowClear/>
+          <Input className="warehouse-products-search" value={searchText} onChange={(event) => handleSearchTextChange(event.target.value)} onPressEnter={handleSubmitSearch} prefix={<SearchOutlined />} placeholder={t('warehouse.searchProductFull')} aria-label={t('warehouse.searchProductFull')} allowClear/>
           {/* 下拉选完即查：用 loadData 覆盖参数立即请求第 1 页，不依赖 setState 之后才生效的值。 */}
           <Select value={supplierCode} onChange={(value) => {
             const nextFilters = setFilterValues(columnFilters, 'domesticSupplierCode', value ? [value] : undefined);
             setSupplierCode(value);
             setColumnFilters(nextFilters);
             void loadData({ page: 1, supplierCode: value, filters: nextFilters });
-        }} options={buildSupplierOptions(suppliers)} placeholder={t('warehouse.allDomesticSuppliers')} style={{ width: 240 }} showSearch filterOption={filterSupplierOption} allowClear/>
-          {/* 顶部筛选使用真实分类树，避免多级分类继续依赖 -- 前缀伪缩进。 */}
+        }} options={buildSupplierOptions(suppliers)} prefix={<span className="warehouse-products-select-prefix">{t('warehouse.domesticSupplier', '国内供应商')}</span>} placeholder={t('common.all', '全部')} style={{ width: 220 }} popupMatchSelectWidth={320} showSearch filterOption={filterSupplierOption} allowClear/>
+          {/* 窄屏（列表容器 < 1080px）收起左侧分类面板，改用这里的分类树下拉；宽屏时由 CSS 隐藏。 */}
+          <span className="warehouse-products-category-select">
           <TreeSelect
             value={categoryFilterValue}
             onChange={(value) => {
@@ -2941,82 +2961,78 @@ export default function WarehouseProductsPage() {
             allowClear
             notFoundContent={categoryLoading ? t('common.loading', '加载中') : t('warehouse.categories.noCategoryData', '暂无分类数据')}
           />
-          <Select value={isActive} onChange={(value) => {
-            const nextFilters = setFilterValues(columnFilters, 'isActive', value === undefined ? undefined : [String(value)]);
-            setIsActive(value);
+          </span>
+          <Select value={productType} onChange={(value) => {
+            const nextFilters = setFilterValues(columnFilters, 'productType', value === undefined ? undefined : [String(value)]);
+            setProductType(value);
             setColumnFilters(nextFilters);
-            void loadData({ page: 1, isActive: value, filters: nextFilters });
-        }} options={getStatusOptions(t)} placeholder={t('warehouse.allStatus')} style={{ width: 140 }} allowClear/>
-          {/* 低频的商品类型收进「更多筛选」，角标为弹层内生效条件数。 */}
-          <MoreFiltersButton activeCount={productType === undefined ? 0 : 1}>
-            <Select value={productType} onChange={(value) => {
-                const nextFilters = setFilterValues(columnFilters, 'productType', value === undefined ? undefined : [String(value)]);
-                setProductType(value);
+            void loadData({ page: 1, productType: value, filters: nextFilters });
+        }} options={productTypeOptions} prefix={<span className="warehouse-products-select-prefix">{t('warehouseUi.products.typePrefix')}</span>} placeholder={t('common.all', '全部')} style={{ width: 150 }} popupMatchSelectWidth={160} allowClear/>
+          {/* 低频的澳洲供应商收进「更多筛选」，角标为弹层内生效条件数；与澳洲供应商列头筛选共用同一条件。 */}
+          <MoreFiltersButton activeCount={columnFilters.localSupplierCode?.length ? 1 : 0}>
+            <div className="warehouse-products-more-field">
+              <span className="warehouse-products-more-field-label">{t('column.australianSupplier', '澳洲供应商')}</span>
+              <Select mode="multiple" value={columnFilters.localSupplierCode ?? []} onChange={(values: string[]) => {
+                const nextFilters = setFilterValues(columnFilters, 'localSupplierCode', values);
                 setColumnFilters(nextFilters);
-                void loadData({ page: 1, productType: value, filters: nextFilters });
-            }} options={productTypeOptions} placeholder={t('warehouse.allProductTypes')} allowClear/>
+                void loadData({ page: 1, filters: nextFilters });
+            }} options={localSupplierFilterOptions.map((option) => ({ value: option.value, label: option.text }))} placeholder={t('warehouseUi.products.allAustralianSuppliers')} optionFilterProp="label" maxTagCount="responsive" allowClear/>
+            </div>
           </MoreFiltersButton>
           <span className="list-toolbar-filter-spacer"/>
-          <Button type="primary" onClick={handleSubmitSearch}>
-            {t('common.query')}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={handleResetFilters}>
-            {t('common.reset')}
-          </Button>
-          <span className="list-toolbar-filter-divider"/>
-          <Button icon={<ReloadOutlined />} disabled={!isColumnOrderCustomized} onClick={handleResetColumnOrder}>
-            {t('warehouse.resetColumns', '重置列')}
-          </Button>
+          <ColumnSettingsButton options={columnSettingsOptions} visibleKeys={visibleOptionalColumns} onChange={handleVisibleOptionalColumnsChange} canReset={isColumnOrderCustomized || isColumnVisibilityCustomized} onReset={handleResetColumnOrder} t={t}/>
           </div>
-          <ActiveFilterBar items={activeFilterChips.map((chip) => ({
+          {/* 没有生效条件时整行隐藏，不再占一行显示空提示（与其他仓库列表页一致）。 */}
+          {activeFilterChips.length ? (<ActiveFilterBar items={activeFilterChips.map((chip) => ({
                 ...chip,
                 onRemove: () => handleRemoveActiveFilter(chip.key),
-            }))} onClearAll={handleResetFilters} extra={<Button size="small" type={isUncategorizedOnly ? 'primary' : 'default'} ghost={isUncategorizedOnly} aria-pressed={isUncategorizedOnly} onClick={handleToggleUncategorizedOnly}>
-                {t('warehouse.onlyUncategorized', '只看未分类')}
-              </Button>}/>
+            }))} onClearAll={handleResetFilters}/>) : null}
           <SupplyNoticeModal open={Boolean(supplyNoticeTarget)} mode={supplyNoticeTarget?.mode ?? 'delist'} productCount={supplyNoticeTarget?.productCodes.length ?? 0} initialNotice={supplyNoticeTarget?.initial} confirmLoading={supplyNoticeSaving} onCancel={() => setSupplyNoticeTarget(null)} onSubmit={handleSupplyNoticeSubmit}/>
           {/* 勾选后操作条：只对选中行生效的批量操作，未勾选时整条隐藏。 */}
           <SelectionActionBar selectedCount={selectedRowKeys.length} onClearSelection={() => setSelectedRowKeys([])}>
-            {access.canWriteProduct ? (<Popconfirm title={t('warehouse.confirmBatchActivate')} okText={getShelfStatusLabel(true, t)} cancelText={t('common.cancel')} disabled={!selectedRowKeys.length} onConfirm={() => void handleBatchToggleActive(true)}>
-                <Button size="small" loading={batchActionLoading} disabled={!selectedRowKeys.length || batchActionLoading}>
-                  {t('warehouse.batchActivate')}
-                </Button>
-              </Popconfirm>) : null}
-            {access.canWriteProduct ? (<Button size="small" loading={batchActionLoading} disabled={!selectedRowKeys.length || batchActionLoading} onClick={() => void handleBatchToggleActive(false)}>
-                {t('warehouse.batchDeactivate')}
-              </Button>) : null}
             {access.canWriteProduct ? (<Button size="small" loading={batchEditSaving || Boolean(activeBatchUpdateJob)} disabled={!selectedRowKeys.length || batchEditSaving} onClick={openBatchEdit}>
                 {t('warehouse.batchEdit', '批量修改')}
               </Button>) : null}
-            {access.canWriteProduct ? (<Button size="small" icon={<AppstoreOutlined />} loading={batchCategorySaving} disabled={!selectedRowKeys.length || batchCategorySaving} onClick={openBatchCategory}>
-                {t('warehouse.batchSetCategory', '批量分类')}
+            {access.canWriteProduct ? (<Button size="small" loading={batchCategorySaving} disabled={!selectedRowKeys.length || batchCategorySaving} onClick={openBatchCategory}>
+                {t('warehouseUi.products.selectionSetCategory')}
               </Button>) : null}
-            {access.canManagePosProducts ? (<Button size="small" icon={<CloudUploadOutlined />} loading={pushToHqLoading} disabled={!selectedRowKeys.length || pushToHqLoading || pushToHqModalOpen} onClick={() => void handlePushToHq()}>
-                {t('posAdmin.products.pushToHq', '发送到HQ')}
+            {access.canWriteProduct ? (<Popconfirm title={t('warehouse.confirmBatchActivate')} okText={getShelfStatusLabel(true, t)} cancelText={t('common.cancel')} disabled={!selectedRowKeys.length} onConfirm={() => void handleBatchToggleActive(true)}>
+                <Button size="small" loading={batchActionLoading} disabled={!selectedRowKeys.length || batchActionLoading}>
+                  {t('warehouseUi.products.activate')}
+                </Button>
+              </Popconfirm>) : null}
+            {/* 批量下架不用 Popconfirm：先弹供货说明（后续计划必选），说明弹窗本身就是确认步骤。 */}
+            {access.canWriteProduct ? (<Button size="small" loading={batchActionLoading} disabled={!selectedRowKeys.length || batchActionLoading} onClick={() => void handleBatchToggleActive(false)}>
+                {t('warehouseUi.products.deactivate')}
+              </Button>) : null}
+            {access.canManagePosProducts ? (<Button size="small" loading={pushToHqLoading} disabled={!selectedRowKeys.length || pushToHqLoading || pushToHqModalOpen} onClick={() => void handlePushToHq()}>
+                {t('warehouseUi.products.pushToHq')}
               </Button>) : null}
           </SelectionActionBar>
           </div>
           <DndContext sensors={columnDragSensors} collisionDetection={closestCenter} onDragEnd={handleColumnDragEnd}>
-            <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+            <SortableContext items={visibleColumnOrder} strategy={horizontalListSortingStrategy}>
               <MeasuredTable metricId="warehouse.products.table-2" className="warehouse-products-table" rowKey="productCode" virtual loading={loading} components={{ header: { cell: DraggableHeaderCell } }} columns={orderedColumns} dataSource={data} rowSelection={{
                 fixed: true,
-                columnWidth: 56,
+                columnWidth: WAREHOUSE_PRODUCT_SELECTION_COLUMN_WIDTH,
                 selectedRowKeys,
                 onChange: setSelectedRowKeys,
-            }} scroll={{ x: 2390, y: 620 }} pagination={{
+            }} scroll={{ x: tableScrollX, y: 620 }} pagination={{
                 current: page,
                 pageSize,
                 total,
                 showSizeChanger: true,
                 pageSizeOptions: WAREHOUSE_PRODUCTS_PAGE_SIZE_OPTIONS,
+                showTotal: (count: number) => t('warehouseUi.products.totalCount', { total: formatWarehouseProductCount(count) }),
             }} onChange={(pagination: TablePaginationConfig, filters: Record<string, FilterValue | null>, sorter: SorterResult<WarehouseProductListItem> | SorterResult<WarehouseProductListItem>[], extra) => {
                 const nextSorter = Array.isArray(sorter) ? sorter[0] : sorter;
                 const nextSortField = normalizeWarehouseProductSortField(nextSorter?.field, sortField);
                 const nextSortOrder = nextSorter?.order === 'ascend' || nextSorter?.order === 'descend'
                     ? nextSorter.order
                     : sortOrder;
-                const nextColumnFilters = normalizeTableFilters(filters);
-                const nextCategoryFilterValue = resolveCategoryFilterValueFromTableFilters(filters);
+                // filters 只含当前渲染的列；被「列设置」隐藏的列，其筛选条件与分类筛选都沿用原值。
+                const nextColumnFilters = keepHiddenColumnFilters(normalizeTableFilters(filters), filters, columnFilters);
+                const nextCategoryFilterValue = resolveCategoryFilterValueFromTableFilters(filters, categoryFilterValue);
                 const nextSupplierCode = getSingleFilterValue(nextColumnFilters.domesticSupplierCode);
                 const nextProductType = getSingleFilterValue(nextColumnFilters.productType);
                 const nextIsActive = getSingleFilterValue(nextColumnFilters.isActive);
@@ -3043,7 +3059,8 @@ export default function WarehouseProductsPage() {
             }}/>
             </SortableContext>
           </DndContext>
-        </Card>
+          </section>
+        </div>
 
       <ProductFormModal open={modalOpen} saving={saving} editingItem={editingItem} suppliers={suppliers} form={form} suggestedDiscount={editingSuggestedDiscount} onCancel={handleCloseModal} onSubmit={() => void handleSave()}/>
 

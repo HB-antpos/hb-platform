@@ -29,6 +29,8 @@ const invoiceFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders
 const containerProductPickerFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/components/ContainerProductPicker.tsx')
 const printCssFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/print.css')
 const packageFile = path.resolve(process.cwd(), 'package.json')
+const listLogicFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/storeOrderListLogic.ts')
+const listMessagesZhFile = path.resolve(process.cwd(), 'src/pages/Warehouse/StoreOrders/storeOrdersMessages.zh.json')
 
 function readSource(file: string) {
   // 统一换行，避免 Windows CRLF 让源码契约断言误判。
@@ -44,6 +46,8 @@ const invoiceSource = readSource(invoiceFile)
 const containerProductPickerSource = readSource(containerProductPickerFile)
 const printCssSource = readSource(printCssFile)
 const packageSource = readSource(packageFile)
+const listLogicSource = readSource(listLogicFile)
+const listMessagesZhSource = readSource(listMessagesZhFile)
 const detailMainTableSource = detailSource.slice(detailSource.indexOf('const baseDetailColumns: ColumnsType<StoreOrderDetailLine>'))
 const detailKeyboardHandlerSource = detailSource.slice(
   detailSource.indexOf('const handleDetailInputKeyDown'),
@@ -119,14 +123,16 @@ async function main() {
   if (listOrderNoFailure) failures.push(listOrderNoFailure)
 
   const listTwoLineFailure = await runTest('列表页分店和备注应最多显示两行', () => {
-    const storeTagRule = readCssRule(compactCssSource, '.store-order-list-table .store-order-store-tag')
+    // 改版：分店列为「名称一行 + 编码一行」的中性色文本，名称单行省略；不再用按编码哈希上色的 Tag。
+    const storeNameRule = readCssRule(compactCssSource, '.store-order-list-table .wh-orders-store-name')
     const twoLineRule = readCssRule(compactCssSource, '.store-order-list-table .store-order-two-line-text')
 
-    assert(storeOrdersSource.includes('className="store-order-store-tag"'), '分店列应挂载专属两行样式 class')
+    assert(storeOrdersSource.includes('className="wh-orders-store-name"'), '分店列应挂载名称行 class')
+    assert(!storeOrdersSource.includes('getStoreColor('), '分店不应再按编码哈希上色')
     assert(storeOrdersSource.includes('renderStoreOrderTwoLineText(value)'), '备注列应使用两行文本 helper')
-    assert(/-webkit-line-clamp:\s*2/.test(storeTagRule), '分店名称应最多显示两行')
-    assert(/overflow:\s*hidden/.test(storeTagRule), '分店名称超过两行应隐藏')
-    assert(/white-space:\s*normal/.test(storeTagRule), '分店名称应允许换行')
+    assert(/text-overflow:\s*ellipsis/.test(storeNameRule), '分店名称超长应省略')
+    assert(/overflow:\s*hidden/.test(storeNameRule), '分店名称超长应隐藏')
+    assert(/white-space:\s*nowrap/.test(storeNameRule), '分店名称应单行显示，编码在第二行')
     assert(/-webkit-line-clamp:\s*2/.test(twoLineRule), '备注应最多显示两行')
     assert(/overflow:\s*hidden/.test(twoLineRule), '备注超过两行应隐藏')
     assert(/white-space:\s*normal/.test(twoLineRule), '备注应允许换行')
@@ -142,7 +148,8 @@ async function main() {
       '列表页主表应复用 @dnd-kit 横向排序能力',
     )
     assert(
-      storeOrdersSource.includes("const STORE_ORDER_LIST_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.storeOrders.list.columnOrder.v1'") &&
+      // 改版合并了日期/数量/金额列，列序与列宽 key 升到 v2，旧布局不再套到新列上。
+      storeOrdersSource.includes("const STORE_ORDER_LIST_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.storeOrders.list.columnOrder.v2'") &&
         storeOrdersSource.includes('localStorage.setItem(STORE_ORDER_LIST_COLUMN_ORDER_STORAGE_KEY') &&
         storeOrdersSource.includes('mergeStoreOrderListColumnOrder('),
       '列表页列顺序应保存到专用 localStorage key，并兼容列增删',
@@ -271,27 +278,38 @@ async function main() {
       '列表页不应继续渲染发货体积和发货数量列',
     )
 
+    // 改版后日期/数量/金额合并为两行列，默认列宽集中在 STORE_ORDER_LIST_DEFAULT_COLUMN_WIDTHS。
+    const defaultWidthsBlock = storeOrdersSource.slice(
+      storeOrdersSource.indexOf('const STORE_ORDER_LIST_DEFAULT_COLUMN_WIDTHS = {'),
+      storeOrdersSource.indexOf('} as const', storeOrdersSource.indexOf('const STORE_ORDER_LIST_DEFAULT_COLUMN_WIDTHS = {')),
+    )
     const defaultWidthExpectations = [
-      ['orderDate', 120],
-      ['outboundDate', 120],
-      ['flowStatus', 100],
-      ['totalQuantity', 112],
-      ['totalOrderAmount', 112],
-      ['totalOrderVolume', 108],
-      ['importTotalAmount', 112],
-      ['remarks', 220],
-      ['createdAt', 160],
-      ['updatedBy', 120],
-      ['updatedAt', 160],
+      ['orderNo', 140],
+      ['storeCode', 120],
+      ['orderOutboundDate', 104],
+      ['flowStatus', 84],
+      ['pickingAssignment', 150],
+      ['quantityVolume', 88],
+      ['orderShipAmount', 120],
+      ['remarks', 110],
+      ['action', 92],
     ] as const
-    for (const [dataIndex, minimumWidth] of defaultWidthExpectations) {
-      const columnBlock = readColumnBlock(storeOrdersSource, dataIndex)
-      const width = readNumericValue(columnBlock, /width:\s*(\d+)/)
-      assert(width >= minimumWidth, `${dataIndex} 默认列宽应至少为 ${minimumWidth}px，避免列头过度折行`)
+    let defaultWidthTotal = readNumericValue(storeOrdersSource, /const STORE_ORDER_LIST_SELECTION_COLUMN_WIDTH = (\d+)/)
+    for (const [columnKey, minimumWidth] of defaultWidthExpectations) {
+      const width = readNumericValue(defaultWidthsBlock, new RegExp(`${columnKey}:\\s*(\\d+)`))
+      assert(width >= minimumWidth, `${columnKey} 默认列宽应至少为 ${minimumWidth}px，避免两行内容被挤压`)
+      assert(
+        storeOrdersSource.includes(`width: STORE_ORDER_LIST_DEFAULT_COLUMN_WIDTHS.${columnKey},`),
+        `${columnKey} 列应使用默认列宽常量`,
+      )
+      defaultWidthTotal += width
     }
+    // 1440 宽屏：侧栏 248 + 内容区内边距 32 后约 1160px，留出滚动条余量，默认布局不应出现横向滚动。
+    assert(defaultWidthTotal <= 1120, `默认列宽合计 ${defaultWidthTotal}px 超出 1440 宽屏可用宽度`)
+    assert(!storeOrdersSource.includes("key: 'index'"), '列表页不应再有序号列')
 
     assert(
-      storeOrdersSource.includes("const STORE_ORDER_LIST_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.storeOrders.list.columnWidths.v1'") &&
+      storeOrdersSource.includes("const STORE_ORDER_LIST_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.storeOrders.list.columnWidths.v2'") &&
         storeOrdersSource.includes('const [columnWidths, setColumnWidths]') &&
         storeOrdersSource.includes('normalizeStoreOrderListColumnWidths(') &&
         storeOrdersSource.includes('hasSavedWidths = raw !== null') &&
@@ -345,27 +363,71 @@ async function main() {
   })
   if (listColumnResizeFailure) failures.push(listColumnResizeFailure)
 
-  const listStatusFilterFailure = await runTest('列表页状态筛选应使用多选框并默认勾选已提交和配货中', () => {
-    assert(storeOrdersSource.includes('Checkbox.Group'), '状态筛选应使用 Checkbox.Group')
-    assert(storeOrdersSource.includes('const DEFAULT_STATUS_LIST = [FlowStatus.Submitted, FlowStatus.Picking]'), '默认状态筛选应为已提交和配货中')
-    assert(storeOrdersSource.includes('useState<StoreOrderFlowStatus[]>(DEFAULT_STATUS_LIST)'), '状态筛选初始值应复用默认状态列表')
-    assert(storeOrdersSource.includes('setStatusList(DEFAULT_STATUS_LIST)'), '重置时应恢复默认状态筛选')
-    assert(storeOrdersSource.includes('statusList: DEFAULT_STATUS_LIST'), '重置后查询应按默认状态筛选发起')
-    assert(storeOrdersSource.includes('const STATUS_FILTER_ORDER = [FlowStatus.Submitted, FlowStatus.Picking, FlowStatus.Completed]'), '状态筛选展示顺序应把已完成放在最后')
-    assert(!storeOrdersSource.includes('<Select\n            mode="multiple"\n            value={statusList}'), '状态筛选不应继续使用多选 Select')
+  const listStatusFilterFailure = await runTest('列表页状态筛选应使用状态页签并默认进行中（已提交 + 配货中）', () => {
+    // 改版：状态只保留顶部页签一个入口，去掉状态复选框和状态列头筛选；默认口径不变。
+    assert(storeOrdersSource.includes('<StatusTabs'), '状态筛选应使用 StatusTabs 页签')
+    assert(!storeOrdersSource.includes('Checkbox.Group'), '状态筛选不应再保留复选框')
+    assert(!storeOrdersSource.includes('makeStatusFilterDropdown'), '状态列不应再有列头筛选')
+    assert(
+      storeOrdersSource.includes('useState<StoreOrderStatusTabKey>(DEFAULT_STORE_ORDER_STATUS_TAB)') &&
+        listLogicSource.includes("export const DEFAULT_STORE_ORDER_STATUS_TAB: StoreOrderStatusTabKey = 'active'") &&
+        listLogicSource.includes('active: [StoreOrderFlowStatus.Submitted, StoreOrderFlowStatus.Picking],'),
+      '默认页签应为进行中，即已提交和配货中',
+    )
+    assert(
+      listLogicSource.includes('all: STORE_ORDER_COUNTED_STATUSES,') &&
+        listLogicSource.includes('StoreOrderFlowStatus.Submitted,\n  StoreOrderFlowStatus.Picking,\n  StoreOrderFlowStatus.Completed,\n]'),
+      '全部页签应只含已提交、配货中、已完成三种状态，不含购物车',
+    )
+    assert(
+      storeOrdersSource.includes(': getStoreOrderStatusTabStatusList(statusTab),') &&
+        storeOrdersSource.includes('statusList: getStoreOrderStatusTabStatusList(nextTab)'),
+      '列表查询的 statusList 应只由当前页签决定，切换页签立即查询',
+    )
+    assert(
+      storeOrdersSource.includes('const statusCountRequestGuardRef = useRef(createLatestRequestGuard())') &&
+        storeOrdersSource.includes('statusCountRequestGuardRef.current.invalidate()') &&
+        storeOrdersSource.includes('buildStoreOrderStatusCountQuery(query, status)') &&
+        listLogicSource.includes('pageSize: 1,'),
+      '页签计数应按状态并行发 pageSize=1 请求，并有独立的最新请求守卫',
+    )
   })
   if (listStatusFilterFailure) failures.push(listStatusFilterFailure)
 
-  const listColumnFilterFailure = await runTest('列表页主表列头筛选应走服务端查询参数并支持重置', () => {
-    assert(storeOrdersSource.includes('StoreOrderListColumnFilters'), '列表页应引入列头筛选类型')
-    assert(storeOrdersSource.includes('const [columnFilters, setColumnFilters] = useState<StoreOrderListColumnFilters>({})'), '列表页应维护列头筛选状态')
+  const listColumnFilterFailure = await runTest('列表页筛选条件应走服务端查询参数，收进更多筛选并在已生效条显示', () => {
+    // 改版：原列头放大镜里的条件收进「更多筛选」，仍按服务端 columnFilters 查询；生效条件统一显示在已生效筛选条。
+    assert(storeOrdersSource.includes('StoreOrderListColumnFilters'), '列表页应引入列筛选类型')
+    assert(storeOrdersSource.includes('const [columnFilters, setColumnFilters] = useState<StoreOrderListColumnFilters>({})'), '列表页应维护列筛选状态')
     assert(storeOrdersSource.includes('columnFilters: cleanStoreOrderListColumnFilters('), '列表查询应携带清理后的 columnFilters')
-    assert(storeOrdersSource.includes('setColumnFilters({})'), '重置按钮应清空列头筛选状态')
-    assert(storeOrdersSource.includes('columnFilters: undefined'), '重置查询应显式清空服务端列筛选参数')
-    assert(storeOrdersSource.includes('makeTextFilterDropdown') && storeOrdersSource.includes('makeNumberRangeFilterDropdown') && storeOrdersSource.includes('makeDateRangeFilterDropdown'), '列表页应提供文本、数值范围和日期范围筛选弹层')
-    assert(storeOrdersSource.includes('makeStoreFilterDropdown') && storeOrdersSource.includes('makeStatusFilterDropdown') && storeOrdersSource.includes('makeOrderDateFilterDropdown'), '分店、状态和订单日期列头筛选应复用顶部筛选状态')
-    assert(storeOrdersSource.includes("onMouseDown={(event) => event.stopPropagation()}"), '列头筛选弹层应阻止鼠标事件冒泡，避免触发表头拖拽')
-    assert(compactCssSource.includes('.store-order-list-column-filter'), '列头筛选弹层应有局部紧凑样式')
+    assert(storeOrdersSource.includes('setColumnFilters({})'), '清空全部应清空列筛选状态')
+    assert(storeOrdersSource.includes('columnFilters: undefined'), '清空全部的查询应显式清空服务端列筛选参数')
+    assert(!storeOrdersSource.includes('filterDropdown'), '列表页主表不应再有列头放大镜筛选')
+    assert(storeOrdersSource.includes('<MoreFiltersButton'), '低频条件应收进更多筛选')
+    for (const field of [
+      "'outboundDateStart', 'outboundDateEnd'",
+      "'totalQuantityMin', 'totalQuantityMax'",
+      "'totalOrderAmountMin', 'totalOrderAmountMax'",
+      "'totalOrderVolumeMin', 'totalOrderVolumeMax'",
+      "'importTotalAmountMin', 'importTotalAmountMax'",
+      "'createdAtStart', 'createdAtEnd'",
+      "'updatedAtStart', 'updatedAtEnd'",
+      "'remarks')",
+      "'updatedBy')",
+    ]) {
+      assert(storeOrdersSource.includes(field), `更多筛选应保留原列头筛选条件：${field}`)
+    }
+    assert(
+      storeOrdersSource.includes('<ActiveFilterBar items={activeFilterItems} onClearAll={clearAllFilters} />') &&
+        storeOrdersSource.includes('removeStoreOrderMoreFilterGroup(columnFilters, group)'),
+      '生效条件应显示在已生效筛选条，并可逐个移除和清空全部',
+    )
+    assert(
+      storeOrdersSource.includes('const STORE_ORDER_KEYWORD_DEBOUNCE_MS = 300') &&
+        storeOrdersSource.includes('void loadDataRef.current?.({ pageNumber: 1, keyword: nextKeyword || undefined })') &&
+        !storeOrdersSource.includes("t('common.query')"),
+      '关键字应防抖即时查询（走 current loader 取最新筛选），不再需要查询按钮',
+    )
+    assert(compactCssSource.includes('.store-order-list-column-filter'), '详情页列头筛选弹层仍复用这份局部紧凑样式')
   })
   if (listColumnFilterFailure) failures.push(listColumnFilterFailure)
 
@@ -437,7 +499,7 @@ async function main() {
 
     assert(compactCssSource.includes('.store-order-detail-table .ant-table-cell'), '详情表格缺少局部 cell padding 规则')
     assert(compactCssSource.includes('.store-order-list-table .store-order-list-order-cell'), '列表订单号列缺少局部防溢出样式')
-    assert(compactCssSource.includes('.store-order-list-table .store-order-store-tag'), '列表分店列缺少两行截断样式')
+    assert(compactCssSource.includes('.store-order-list-table .wh-orders-store-name'), '列表分店列缺少名称省略样式')
     assert(compactCssSource.includes('.store-order-list-table .store-order-two-line-text'), '列表备注列缺少两行截断样式')
     assert(!/^\\.store-order-nowrap/m.test(compactCssSource), 'nowrap 工具类必须限定到详情主表下')
     assert(!/^\\.store-order-numeric-cell/m.test(compactCssSource), '数字工具类必须限定到详情主表下')
@@ -571,16 +633,56 @@ async function main() {
       !storeOrdersSource.includes("t('storeOrders.syncIncrementalOrders')"),
       '列表页不应再显示 HQ 增量同步按钮',
     )
+    // 改版：修复 GUID 收进页头 ⋯ 菜单；复制、批量改状态、分配拣货只在勾选后出现在勾选条（勾选列仅管理员有）；
+    // 行内复制/改状态/发票收进 ⋯ 菜单，仍受同样的权限开关控制。
+    const selectionBarSource = storeOrdersSource.slice(
+      storeOrdersSource.indexOf('{canUseWarehouseManagerActions && selectedOrders.length ? ('),
+      storeOrdersSource.indexOf('</SelectionActionBar>'),
+    )
+    const rowMenuSource = storeOrdersSource.slice(
+      storeOrdersSource.indexOf('const buildRowMenuItems = (record: StoreOrderListItem)'),
+      storeOrdersSource.indexOf('const handleRowMenuAction ='),
+    )
     assert(
       storeOrdersSource.includes('{canUseWarehouseManagerActions ? (') &&
+        storeOrdersSource.includes("...(canUseWarehouseManagerActions\n      ? [{ key: 'fixStoreGuid'") &&
         storeOrdersSource.includes("t('storeOrders.fixStoreGuid', '修复分店 GUID')") &&
         storeOrdersSource.includes("t('storeOrders.newOrder')") &&
         storeOrdersSource.includes('disabled={!canCreateStoreOrder}') &&
-        storeOrdersSource.includes("t('storeOrders.copyOrder'") &&
-        storeOrdersSource.includes("t('storeOrders.batchSubmitted')") &&
-        storeOrdersSource.includes("t('storeOrders.batchCompleted')") &&
         storeOrdersSource.includes('{canDeleteStoreOrder ? ('),
-      '列表页修复、新建、复制、删除和批量状态按钮应仅仓库订货管理权限可见',
+      '列表页修复、新建、删除入口应仅仓库订货管理权限可见',
+    )
+    assert(
+      selectionBarSource.includes("t('warehouseUi.storeOrders.assignPicking')") &&
+        selectionBarSource.includes("t('warehouseUi.storeOrders.changeStatus')") &&
+        selectionBarSource.includes('handleBatchStatusChange(') &&
+        selectionBarSource.includes('[FlowStatus.Submitted, FlowStatus.Completed]') &&
+        selectionBarSource.includes("t('warehouseUi.storeOrders.copyAsNew')") &&
+        selectionBarSource.includes('disabled={!canCopySelection}'),
+      '勾选条应提供分配拣货、批量改已提交/已完成与复制为新订单，且仅仓库订货管理权限可见',
+    )
+    assert(
+      storeOrdersSource.includes('const canCopySelection = canCopySelectedStoreOrders(selectedOrders.length)') &&
+        storeOrdersSource.includes('const sourceOrderGUID = copySourceOrder.orderGUID') &&
+        !storeOrdersSource.includes('String(selectedRowKeys[0])'),
+      '复制订单应只在恰好勾选 1 单时可用，并以弹窗打开时指定的订单为源',
+    )
+    assert(
+      rowMenuSource.includes('if (canUseWarehouseManagerActions) {\n      documentItems.push({ key: \'invoice\'') &&
+        rowMenuSource.includes("if (canUseWarehouseManagerActions) {\n      manageItems.push({ key: 'copy'") &&
+        rowMenuSource.includes('if (canDeleteStoreOrder) {'),
+      '行内 ⋯ 菜单的发票、复制、改状态、删除应受原权限开关控制',
+    )
+    assert(
+      !storeOrdersSource.includes('onClick={() => handleStatusToggle(record)}') &&
+        storeOrdersSource.includes("case 'markSubmitted':\n        handleStatusToggle(record)") &&
+        storeOrdersSource.includes('<StatusPill tone={getStoreOrderStatusPillTone(value)}>'),
+      '状态列只展示状态胶囊，单张改状态改由行内菜单明确触发并保留确认弹窗',
+    )
+    assert(
+      storeOrdersSource.includes("t('warehouseUi.storeOrders.pageTotal'") &&
+        listMessagesZhSource.includes('"pageTotal": "本页合计 · {{count}} 单"'),
+      '表尾合计只基于当前页数据，文案必须是「本页合计」',
     )
     assert(
       storeOrdersSource.includes('canUseWarehouseManagerActions && (record.flowStatus === FlowStatus.Submitted || record.flowStatus === FlowStatus.Picking)'),

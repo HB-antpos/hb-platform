@@ -43,7 +43,7 @@ function readNumericValue(source: string, pattern: RegExp) {
 }
 
 const locationsPageFile = path.resolve(process.cwd(), 'src/pages/Warehouse/Locations/index.tsx')
-const compactCssFile = path.resolve(process.cwd(), 'src/pages/Warehouse/Locations/compact.css')
+const locationsCssFile = path.resolve(process.cwd(), 'src/pages/Warehouse/Locations/locations.css')
 const locationTypesFile = path.resolve(process.cwd(), 'src/types/location.ts')
 const locationServiceFile = path.resolve(process.cwd(), 'src/services/locationService.ts')
 const zhLocaleFile = path.resolve(process.cwd(), 'src/i18n/locales/zh.json')
@@ -56,7 +56,7 @@ const locationServiceSource = readFileSync(locationServiceFile, 'utf8')
 const zhLocaleSource = readFileSync(zhLocaleFile, 'utf8')
 const enLocaleSource = readFileSync(enLocaleFile, 'utf8')
 const packageSource = readFileSync(packageFile, 'utf8')
-const compactCssSource = existsSync(compactCssFile) ? readFileSync(compactCssFile, 'utf8') : ''
+const locationsCssSource = existsSync(locationsCssFile) ? readFileSync(locationsCssFile, 'utf8') : ''
 
 async function main() {
   const failures: string[] = []
@@ -96,13 +96,16 @@ async function main() {
   })
   if (hqSyncServiceFailure) failures.push(hqSyncServiceFailure)
 
-  const pageWiringFailure = await runTest('仓库标签页应挂载局部紧凑表格样式和商品条码列', () => {
-    assert(locationsPageSource.includes("import './compact.css'"), '页面应引入局部 compact.css')
-    assert(locationsPageSource.includes('className="warehouse-locations-compact-table"'), 'Table 缺少局部紧凑 class')
-    assert(locationsPageSource.includes('size="small"'), 'Table 应使用 small 尺寸')
-    assert(locationsPageSource.includes("title: t('column.productBarcode')"), '表格缺少商品条码列')
-    assert(locationsPageSource.includes('renderCopyableProductBarcodes'), '商品条码列应走专属可复制渲染 helper')
-    assert(locationsPageSource.includes('renderLocationProductName'), '商品名称应走两行展示 helper')
+  // 重设计：拆散的货号/商品条码/商品名称/图片四列合并为「绑定商品」一列，每个商品一行。
+  const pageWiringFailure = await runTest('仓库标签页应挂载页面样式并在绑定商品列逐个显示商品', () => {
+    assert(locationsPageSource.includes("import './locations.css'"), '页面应引入页面级 locations.css')
+    assert(locationsPageSource.includes('className="wh-locations-table"'), 'Table 缺少页面前缀 class')
+    assert(locationsPageSource.includes("title: t('warehouseUi.locations.colProducts')"), '表格缺少绑定商品列')
+    assert(
+      locationsPageSource.includes('record.products.map((product, index) => renderProductLine(record, product, index))'),
+      '绑定商品列应每个商品一行',
+    )
+    assert(locationsPageSource.includes("t('warehouseUi.locations.emptyLocation')"), '空位应明确显示未绑定商品')
   })
   if (pageWiringFailure) failures.push(pageWiringFailure)
 
@@ -126,49 +129,46 @@ async function main() {
   })
   if (hqSyncPageFailure) failures.push(hqSyncPageFailure)
 
-  const barcodeColumnFailure = await runTest('商品条码列应显示文本和复制图标且不回退货号', () => {
-    const barcodeColumn = readColumnBlock(locationsPageSource, "title: t('column.productBarcode')")
-
-    assert(barcodeColumn.includes('renderCopyableProductBarcodes(record.products, t)'), '商品条码列未绑定商品条码渲染')
-    assert(locationsPageSource.includes('product.productBarcode'), '商品条码 helper 应读取 productBarcode')
-    assert(locationsPageSource.includes('<BarcodePreview'), '商品条码列应显示条码图')
-    assert(locationsPageSource.includes('className="warehouse-locations-product-barcode-preview"'), '商品条码列应使用专属条码图样式')
-    assert(!locationsPageSource.includes('product.productImage'), '商品条码列不能显示现实商品图')
-    assert(!locationsPageSource.includes("field: 'itemNumber' | 'productName' | 'productBarcode'"), '商品条码不应复用会混淆货号的通用字段参数')
-    assert(locationsPageSource.includes('className="warehouse-locations-barcode-cell warehouse-locations-nowrap"'), '商品条码文本应使用 nowrap class')
-    assert(locationsPageSource.includes('className="warehouse-locations-copyable-cell warehouse-locations-nowrap"'), '货号复制内容应使用 nowrap class')
-    assert(locationsPageSource.includes('className="warehouse-locations-copyable-content"'), '货号内容区应限制在单元格内')
-    assert(locationsPageSource.includes('className="warehouse-locations-barcode-content"'), '商品条码内容区应限制在单元格内')
-    assert(locationsPageSource.includes('className="warehouse-locations-copy-button"'), '商品条码复制按钮应使用紧凑图标按钮')
-    assert(!barcodeColumn.includes('itemNumber'), '商品条码列缺失时不能回退显示货号')
+  const barcodeColumnFailure = await runTest('商品行应显示货号、商品条码与名称，条码缺失不回退货号', () => {
+    const lineStart = locationsPageSource.indexOf('const renderProductLine = (')
+    assert(lineStart >= 0, '缺少商品行渲染函数')
+    const lineSource = locationsPageSource.slice(lineStart, locationsPageSource.indexOf('const columns: ColumnsType<LocationItem>', lineStart))
+    assert(
+      lineSource.includes('{product.productBarcode ? <span className="wh-locations-sub">{product.productBarcode}</span> : null}'),
+      '商品条码只读取 productBarcode，缺失时不显示',
+    )
+    assert(!/productBarcode\s*\|\|\s*product\.itemNumber/.test(lineSource), '商品条码缺失时不能回退显示货号')
+    assert(lineSource.includes('copyable={product.itemNumber ? { text: product.itemNumber } : false}'), '货号应保留复制能力')
+    assert(lineSource.includes('className="wh-locations-product-name"'), '商品名称应单行省略展示')
+    assert(lineSource.includes('<Image src={product.productImage} width={24} height={24}'), '商品缩略图 24px 且可预览')
   })
   if (barcodeColumnFailure) failures.push(barcodeColumnFailure)
 
-  const locationBarcodeFailure = await runTest('货位代码和货位条码应保持文本完整显示', () => {
+  const locationBarcodeFailure = await runTest('货位列应完整显示货位代码与条码，条码图收进预览弹层', () => {
     const locationCodeColumn = readColumnBlock(locationsPageSource, "dataIndex: 'locationCode'")
-    const locationBarcodeColumn = readColumnBlock(locationsPageSource, "dataIndex: 'locationBarcode'")
     const locationCodePosition = locationsPageSource.indexOf("dataIndex: 'locationCode'")
     const locationTypePosition = locationsPageSource.indexOf("dataIndex: 'locationType'")
-    const locationBarcodePosition = locationsPageSource.indexOf("dataIndex: 'locationBarcode'")
 
-    assert(locationCodeColumn.includes('textNoWrap'), '货位代码条码文本应保持单行')
-    assert(locationBarcodeColumn.includes('textNoWrap'), '货位条码文本应保持单行')
-    assert(!locationCodeColumn.includes('textMaxWidth'), '货位代码不应通过 textMaxWidth 省略隐藏')
-    assert(!locationBarcodeColumn.includes('textMaxWidth'), '货位条码不应通过 textMaxWidth 省略隐藏')
-    assert(locationCodePosition < locationTypePosition, '货位类型列应放在货位代码之后')
-    assert(locationTypePosition < locationBarcodePosition, '货位类型列应放在货位条码之前')
+    assert(locationCodeColumn.includes("title: t('warehouseUi.locations.colLocation')"), '首列应为货位')
+    assert(locationsPageSource.includes('<div className="wh-locations-sub">{record.locationBarcode || \'--\'}</div>'), '货位条码文字应显示在代码下方')
+    assert(
+      locationsPageSource.includes('<BarcodePreview value={record.locationCode} align="left" compactCopy textNoWrap />') &&
+        locationsPageSource.includes('<BarcodePreview value={record.locationBarcode} align="left" compactCopy textNoWrap />'),
+      '预览弹层应同时提供货位代码与货位条码的条码图和复制',
+    )
+    assert(!locationsPageSource.includes('textMaxWidth'), '货位代码与条码不应通过 textMaxWidth 省略隐藏')
+    assert(locationCodePosition < locationTypePosition, '类型列应放在货位列之后')
   })
   if (locationBarcodeFailure) failures.push(locationBarcodeFailure)
 
   const sortingFailure = await runTest('仓库标签基础列应使用服务端远程排序', () => {
+    // 重设计后货位条码、更新人并入货位列和更新列，不再单独排序；使用状态排序挂在绑定商品列。
     const sortableMarkers = [
       "dataIndex: 'locationCode'",
       "dataIndex: 'locationType'",
-      "dataIndex: 'locationBarcode'",
       "dataIndex: 'status'",
-      "key: 'usage'",
+      "key: 'products'",
       "dataIndex: 'updatedAt'",
-      "dataIndex: 'updatedBy'",
     ]
 
     for (const marker of sortableMarkers) {
@@ -178,11 +178,6 @@ async function main() {
     }
 
     const unsortableMarkers = [
-      "key: 'index'",
-      "key: 'itemNumbers'",
-      "key: 'productBarcodes'",
-      "key: 'productNames'",
-      "key: 'productImages'",
       "key: 'action'",
     ]
 
@@ -193,7 +188,7 @@ async function main() {
     }
 
     assert(locationsPageSource.includes('LOCATION_SORT_FIELD_MAP'), '页面缺少远程排序字段白名单')
-    assert(locationsPageSource.includes("Usage: 'Usage'") || locationsPageSource.includes("usage: 'Usage'"), '使用状态排序应映射到 Usage')
+    assert(locationsPageSource.includes("products: 'Usage'"), '使用状态排序应映射到 Usage')
     assert(locationsPageSource.includes("const [sortBy, setSortBy] = useState<LocationSortBy>(DEFAULT_LOCATION_SORT_BY)"), '页面缺少 sortBy 状态')
     assert(locationsPageSource.includes("const [sortOrder, setSortOrder] = useState<SortOrder>(DEFAULT_LOCATION_SORT_ORDER)"), '页面缺少 sortOrder 状态')
     assert(locationsPageSource.includes('sortDirection: toApiSortDirection(effectiveSortOrder)'), '列表请求应发送排序方向')
@@ -206,66 +201,45 @@ async function main() {
   })
   if (sortingFailure) failures.push(sortingFailure)
 
-  const cssFailure = await runTest('仓库标签紧凑 CSS 应局部限制并保留关键字段', () => {
-    const headerRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .ant-table-column-title')
-    const nowrapRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .warehouse-locations-nowrap')
-    const twoLineRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .warehouse-locations-two-line-text')
-    const barcodeRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .warehouse-locations-barcode-cell')
-    const copyableContentRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .warehouse-locations-copyable-content')
-    const barcodeContentRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .warehouse-locations-barcode-content')
-    const copyButtonRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .warehouse-locations-copy-button')
-    const barcodePreviewRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .warehouse-locations-product-barcode-preview canvas')
-    const selectionColumnRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .ant-table-selection-column')
-    const selectionCheckboxRule = readCssRule(compactCssSource, '.warehouse-locations-compact-table .ant-table-selection-column .ant-checkbox-wrapper')
+  const cssFailure = await runTest('货位页样式应使用页面前缀类名并保证关键字段可读', () => {
+    const codeRule = readCssRule(locationsCssSource, '.wh-locations-code')
+    const subRule = readCssRule(locationsCssSource, '.wh-locations-sub')
+    const productNameRule = readCssRule(locationsCssSource, '.wh-locations-product-name')
+    const selectors = locationsCssSource.match(/^[^\s/@}][^{]*\{/gm) ?? []
 
-    assert(/-webkit-line-clamp:\s*2/.test(headerRule), '列头应最多显示两行')
-    assert(/white-space:\s*nowrap/.test(nowrapRule), '关键字段应保持单行')
-    assert(!/overflow:\s*hidden/.test(nowrapRule), '关键字段不应被隐藏截断')
-    assert(/-webkit-line-clamp:\s*2/.test(twoLineRule), '商品名称应最多显示两行')
-    assert(/overflow:\s*hidden/.test(twoLineRule), '商品名称超过两行才可隐藏')
-    assert(/white-space:\s*nowrap/.test(barcodeRule), '商品条码容器应保持单行')
-    assert(/overflow:\s*hidden/.test(copyableContentRule), '货号内容区应在单元格内裁切，避免复制按钮溢出')
-    assert(/overflow:\s*hidden/.test(barcodeContentRule), '商品条码内容区应在单元格内裁切，避免复制按钮溢出')
-    assert(/min-width:\s*0/.test(copyableContentRule), '货号内容区应允许 flex 收缩')
-    assert(/min-width:\s*0/.test(barcodeContentRule), '商品条码内容区应允许 flex 收缩')
-    assert(/width:\s*20px/.test(copyButtonRule), '复制图标按钮应收窄')
-    assert(/max-width:\s*74px/.test(barcodePreviewRule), '商品条码图应控制最大宽度')
-    assert(/height:\s*18px/.test(barcodePreviewRule), '商品条码图高度应控制到 18px')
-    assert(/width:\s*56px/.test(selectionColumnRule), '选择列应显式占用 56px')
-    assert(/min-width:\s*56px/.test(selectionColumnRule), '选择列应保留 56px 最小宽度，避免紧凑 padding 挤压')
-    assert(/max-width:\s*56px/.test(selectionColumnRule), '选择列应锁定 56px 最大宽度')
-    assert(/text-align:\s*center/.test(selectionColumnRule), '选择列复选框应居中')
-    assert(/display:\s*inline-flex/.test(selectionCheckboxRule), '选择列复选框 wrapper 应使用 inline-flex')
-    assert(/justify-content:\s*center/.test(selectionCheckboxRule), '选择列复选框 wrapper 应水平居中')
-    assert(!/^\.warehouse-locations-nowrap/m.test(compactCssSource), 'nowrap 样式必须限定到仓库标签表格下')
-    assert(!/^\.warehouse-locations-two-line-text/m.test(compactCssSource), '两行样式必须限定到仓库标签表格下')
+    assert(selectors.length > 0, '应能读取到 CSS 规则')
+    for (const selector of selectors) {
+      assert(selector.trim().startsWith('.wh-locations-'), `选择器必须带页面前缀：${selector.trim()}`)
+    }
+    assert(/white-space:\s*nowrap/.test(codeRule), '货位代码应保持单行完整显示')
+    assert(!/overflow:\s*hidden/.test(codeRule), '货位代码不应被隐藏截断')
+    assert(/font-variant-numeric:\s*tabular-nums/.test(subRule), '条码、时间等数字应等宽对齐')
+    assert(/color:\s*#667085/.test(subRule), '次要文字颜色不应比 #667085 更浅')
+    assert(/text-overflow:\s*ellipsis/.test(productNameRule) && /min-width:\s*0/.test(productNameRule), '商品名称应单行省略且允许收缩')
+    for (const state of ['full', 'partial', 'empty', 'off']) {
+      assert(readCssRule(locationsCssSource, `.wh-locations-rack-${state}`).includes('background'), `货架格缺少 ${state} 状态样式`)
+    }
   })
   if (cssFailure) failures.push(cssFailure)
 
-  const layoutFailure = await runTest('仓库标签表格列宽应按紧凑预算设置', () => {
-    const indexColumn = readColumnBlock(locationsPageSource, "key: 'index'")
-    const itemNumberColumn = readColumnBlock(locationsPageSource, "key: 'itemNumbers'")
-    const productBarcodeColumn = readColumnBlock(locationsPageSource, "title: t('column.productBarcode')")
-    const productNameColumn = readColumnBlock(locationsPageSource, "key: 'productNames'")
-    const imageColumn = readColumnBlock(locationsPageSource, "key: 'productImages'")
+  const layoutFailure = await runTest('货位表格去掉序号列，横向滚动预算包含选择列', () => {
+    assert(!locationsPageSource.includes("key: 'index'") && !locationsPageSource.includes("t('column.index')"), '不应再有序号列')
+    const productsColumn = readColumnBlock(locationsPageSource, "key: 'products'")
     const actionColumn = readColumnBlock(locationsPageSource, "key: 'action'")
-    const selectionColumnWidth = readNumericValue(locationsPageSource, /WAREHOUSE_LOCATION_SELECTION_COLUMN_WIDTH\s*=\s*(\d+)/)
-
-    assert(readNumericValue(indexColumn, /width:\s*(\d+)/) <= 56, '序号列应压到 56 以内')
-    assert(readNumericValue(itemNumberColumn, /width:\s*(\d+)/) <= 118, '货号列应压到 118 以内')
-    assert(readNumericValue(productBarcodeColumn, /width:\s*(\d+)/) <= 150, '商品条码列应压到 150 以内')
-    assert(readNumericValue(productNameColumn, /width:\s*(\d+)/) >= 190, '商品名称列应保留至少 190 宽度')
-    assert(readNumericValue(imageColumn, /width:\s*(\d+)/) <= 112, '图片列应压到 112 以内')
-    assert(readNumericValue(actionColumn, /width:\s*(\d+)/) <= 132, '操作列应压到 132 以内')
-    assert(selectionColumnWidth === 56, '选择列 TypeScript 与 CSS 应统一为 56px')
-    assert(indexColumn.includes("fixed: 'left'"), '序号列应固定在选择列右侧，避免横向滚动时重叠')
-    assert(locationsPageSource.includes('columnWidth: WAREHOUSE_LOCATION_SELECTION_COLUMN_WIDTH'), 'rowSelection 应复用统一选择列宽度')
+    assert(readNumericValue(productsColumn, /width:\s*(\d+)/) >= 380, '绑定商品列应保留至少 380 宽度，商品名称才不至于过早省略')
+    assert(readNumericValue(actionColumn, /width:\s*(\d+)/) <= 80, '操作列收敛为「编辑 + ⋯」后应压到 80 以内')
+    assert(!locationsPageSource.includes('virtual'), '行高随商品数变化，不再使用固定行高的虚拟滚动')
+    assert(locationsPageSource.includes('columnWidth: 40'), 'rowSelection 应固定选择列宽度')
     assert(
-      locationsPageSource.includes('const selectionColumnWidth = access.canManageWarehouseLocations\n    ? WAREHOUSE_LOCATION_SELECTION_COLUMN_WIDTH\n    : 0'),
-      'scroll.x 选择列预算应按货位管理权限为 56 或 0',
+      locationsPageSource.includes('const selectionColumnWidth = canManageLocations ? 40 : 0'),
+      'scroll.x 选择列预算应按货位管理权限为 40 或 0',
     )
     assert(locationsPageSource.includes('selectionColumnWidth + columns.reduce'), 'scroll.x 应包含当前可见选择列和全部业务列宽度预算')
-    assert(locationsPageSource.includes('scroll={{ x: tableScrollX, y: 600 }}'), 'Table 应使用包含选择列预算的动态 scroll.x')
+    assert(locationsPageSource.includes('scroll={{ x: tableScrollX }}'), 'Table 应使用包含选择列预算的动态 scroll.x')
+    assert(
+      locationsPageSource.includes("showTotal: (value) => t('warehouseUi.locations.paginationTotal', { count: formatCount(value) })"),
+      '分页应显示货位总数',
+    )
   })
   if (layoutFailure) failures.push(layoutFailure)
 
@@ -284,8 +258,13 @@ async function main() {
     assert(locationsPageSource.includes('rowSelection={access.canManageWarehouseLocations ? rowSelection : undefined}'), '仅货位管理权限用户可选择批量解绑货位')
     assert(locationsPageSource.includes('setSelectedRowKeys((currentKeys)'), '列表刷新后应清理当前页不存在的选择')
     assert(locationsPageSource.includes('danger'), '批量解绑按钮应使用危险操作样式')
-    assert(locationsPageSource.includes("t('warehouseLocations.batchUnbind')"), '批量按钮应使用国际化文案')
-    assert(locationsPageSource.includes("t('warehouseLocations.selectedLocations'"), '操作条应展示货位数和商品关联数')
+    // 重设计：批量解绑收进勾选后才出现的操作条，按钮文案改为「解绑全部商品…」，确认与结果提示沿用原文案。
+    assert(locationsPageSource.includes("t('warehouseUi.locations.unbindAll')"), '批量按钮应使用国际化文案')
+    assert(
+      locationsPageSource.includes('<SelectionActionBar selectedCount={selectedLocations.length}') &&
+        locationsPageSource.includes("t('warehouseUi.locations.selectionLinks', { count: selectedBindings.length })"),
+      '操作条应展示货位数和商品关联数',
+    )
     assert(locationsPageSource.includes('disabled={!selectedBindings.length || loading || batchUnbinding}'), '按钮应在无选择、加载或执行中禁用')
     assert(locationsPageSource.includes('loading={batchUnbinding}'), '按钮应绑定批量解绑 loading')
     assert(locationsPageSource.includes('const handleBatchUnbind = () => {'), '页面缺少批量解绑处理函数')
@@ -296,11 +275,51 @@ async function main() {
     assert(locationsPageSource.includes("message.success(t('warehouseLocations.batchUnbindSuccess'"), '全成功应展示 success')
     assert(locationsPageSource.includes("message.warning(t('warehouseLocations.batchUnbindPartialFailed'"), '部分失败应展示 warning')
     assert(locationsPageSource.includes("message.error(t('warehouseLocations.batchUnbindFailed'"), '全失败应展示 error')
-    assert(locationsPageSource.includes('refresh: () => loadDataWithColumnFilters(page, pageSize)'), '异步协调函数应注入当前列表刷新')
+    assert(
+      locationsPageSource.includes('const outcome = await loadData()') &&
+        locationsPageSource.includes("return outcome.status === 'success' ? outcome.items : undefined"),
+      '异步协调函数应注入当前列表刷新，刷新失败或被取代时返回 undefined',
+    )
     assert(locationsPageSource.includes('shouldApplyPatchedData'), '页面应按协调结果判断是否写回本地补丁')
-    assert(locationsPageSource.includes('setData(patchedData)'), '刷新失败时应写入剔除成功关联后的本地数据')
+    assert(
+      locationsPageSource.includes("if (shouldApplyPatchedData && patchedData && refreshOutcome !== 'superseded') {") &&
+        locationsPageSource.includes('setData(patchedData)'),
+      '刷新失败时应写入剔除成功关联后的本地数据；被更新请求取代时不能覆盖新数据',
+    )
   })
   if (batchUnbindFailure) failures.push(batchUnbindFailure)
+
+  const singleUnbindFailure = await runTest('单个商品解绑应二次确认、与批量解绑同权限并复用同一接口', () => {
+    const start = locationsPageSource.indexOf('const confirmUnbindProduct = (record: LocationItem, product: LocationProduct) => {')
+    assert(start >= 0, '缺少单个商品解绑函数')
+    const section = locationsPageSource.slice(start, locationsPageSource.indexOf('const selectedLocationGuidSet', start))
+    assert(section.includes('Modal.confirm({') && section.includes("t('warehouseUi.locations.unbindContent')"), '单个解绑应二次确认并说明不可恢复')
+    assert(section.includes('okButtonProps: { danger: true }'), '确认按钮应为危险样式')
+    assert(
+      section.includes('batchUnbindLocationProducts([{ locationGuid: record.locationGuid, productCode }])'),
+      '应复用 DELETE /locations/{guid}/products/{productCode}，只发送这一条关联',
+    )
+    assert(section.includes('refreshSummaries()') && section.includes('void loadData()'), '成功后应刷新列表与计数')
+    assert(section.includes("message.error(t('warehouseUi.locations.unbindFailed'"), '失败应提示原因')
+    assert(locationsPageSource.includes('{canManageLocations && productCode ? ('), '单个解绑按钮应与批量解绑同为货位管理权限')
+  })
+  if (singleUnbindFailure) failures.push(singleUnbindFailure)
+
+  const raceGuardFailure = await runTest('货位列表请求应受最新请求守卫保护，卸载时作废', () => {
+    assert(locationsPageSource.includes('const listRequestGuardRef = useRef(createLatestRequestGuard())'), '列表缺少独立 guard')
+    assert(locationsPageSource.includes('listRequestGuardRef.current,') && locationsPageSource.includes('runLatestGuardedRequest('), '列表请求未接入 guarded request')
+    assert(
+      locationsPageSource.includes('listRequestGuardRef.current.invalidate()') &&
+        locationsPageSource.includes('distributionRequestGuardRef.current.invalidate()') &&
+        locationsPageSource.includes('window.clearTimeout(keywordTimerRef.current)'),
+      '卸载时应作废列表与分布请求并清理关键字防抖',
+    )
+    assert(
+      locationsPageSource.includes('window.setTimeout(() => latestApplyFiltersRef.current({ keyword: value.trim() }), 300)'),
+      '关键字应防抖约 300ms 并通过最新入口生效',
+    )
+  })
+  if (raceGuardFailure) failures.push(raceGuardFailure)
 
   const localeAndScriptFailure = await runTest('商品条码文案和测试脚本应接入项目', () => {
     assert(zhLocaleSource.includes('"productBarcode": "商品条码"'), '中文列名缺少商品条码')

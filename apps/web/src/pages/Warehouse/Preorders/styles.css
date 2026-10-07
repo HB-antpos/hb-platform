@@ -6,3 +6,72 @@
 @media (max-width: 900px) {
   .preorder-template-grid, .preorder-paste-grid { grid-template-columns: 1fr; }
 }
+
+/* ===== Preorder 管理页重设计（wh-preorders-*）：普通 CSS + 页面前缀，测试打包把 .css 当空模块 ===== */
+.wh-preorders-muted { color: #667085; }
+.wh-preorders-small { font-size: 12px; }
+.wh-preorders-strong { font-weight: 500; }
+.wh-preorders-number,
+.wh-preorders-number * { font-variant-numeric: tabular-nums; }
+.wh-preorders-section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.wh-preorders-section-title { margin: 0; font-size: 14px; font-weight: 600; color: #1f2430; }
+
+/* 进行中与待开始的批次卡片 */
+.wh-preorders-live { display: flex; flex-direction: column; gap: 8px; }
+.wh-preorders-live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px; }
+.wh-preorders-live-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+.wh-preorders-live-head { display: flex; align-items: flex-start; gap: 8px; }
+.wh-preorders-live-title { flex: 1; min-width: 0; }
+.wh-preorders-live-name { overflow: hidden; color: #1f2430; font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.wh-preorders-live-figures { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 8px; color: #4b5563; font-variant-numeric: tabular-nums; }
+.wh-preorders-live-responded strong { color: #1f2430; font-size: 15px; font-weight: 600; }
+.wh-preorders-live-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: #4b5563; font-size: 12px; font-variant-numeric: tabular-nums; }
+.wh-preorders-live-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.wh-preorders-swatch { width: 8px; height: 8px; border-radius: 2px; }
+.wh-preorders-swatch-responded { background: #1677ff; }
+.wh-preorders-swatch-pending { background: #eef0f4; border: 1px solid #c3cad6; }
+.wh-preorders-live-foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid #f0f2f5; }
+.wh-preorders-live-link.ant-btn { display: inline-flex; align-items: center; gap: 4px; padding-inline: 0; color: #1554c0; font-weight: 500; }
+/* 剩余不超过 2 天、或进行中仍有分店未提交：琥珀色加粗提醒 */
+.wh-preorders-live-card .is-urgent,
+.wh-preorders-current-brief.is-urgent { color: #b45309; font-weight: 600; }
+
+/* 分店处理进度条：已处理（蓝）+ 未提交（底色） */
+.wh-preorders-progress { display: flex; height: 8px; overflow: hidden; border-radius: 4px; background: #eef0f4; }
+.wh-preorders-progress-compact { flex: 1; height: 6px; border-radius: 3px; }
+.wh-preorders-progress-fill { background: #1677ff; }
+
+/* 模板列表卡片 */
+.wh-preorders-card { display: flex; flex-direction: column; min-width: 0; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; }
+.wh-preorders-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid #eef0f4; }
+.wh-preorders-search.ant-input-affix-wrapper { width: 240px; max-width: 100%; border-radius: 8px; }
+.wh-preorders-card-foot { padding: 10px 16px; border-top: 1px solid #eef0f4; color: #667085; font-variant-numeric: tabular-nums; }
+.wh-preorders-table .ant-table-thead > tr > th { background: #f8f9fb; color: #4b5563; font-size: 12px; font-weight: 500; }
+.wh-preorders-template { min-width: 0; }
+.wh-preorders-template-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.wh-preorders-template-name { overflow: hidden; color: #1f2430; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.wh-preorders-template-name.is-disabled { color: #667085; }
+.wh-preorders-template-notes { overflow: hidden; color: #667085; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.wh-preorders-current { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.wh-preorders-current-brief { color: #4b5563; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wh-preorders-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.wh-preorders-expand { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #4b5563; font-size: 11px; cursor: pointer; }
+.wh-preorders-expand:hover { background: #f0f2f5; }
+.wh-preorders-expand:focus-visible { outline: 2px solid #1677ff; outline-offset: 1px; }
+.wh-preorders-expand .anticon { transition: transform 0.15s ease; }
+.wh-preorders-expand.is-expanded .anticon { transform: rotate(90deg); }
+
+/* 行内历届批次 */
+.wh-preorders-table .ant-table-expanded-row > td { background: #fafbfc !important; }
+.wh-preorders-history { padding: 0 0 4px 28px; }
+.wh-preorders-history .ant-table-wrapper { overflow: hidden; border: 1px solid #e7eaf0; border-radius: 8px; background: #fff; }
+.wh-preorders-history-progress { display: flex; align-items: center; gap: 8px; color: #4b5563; white-space: nowrap; }
+@media (max-width: 640px) {
+  .wh-preorders-history { padding-left: 0; }
+}
+
+.wh-preorders-live-batch {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

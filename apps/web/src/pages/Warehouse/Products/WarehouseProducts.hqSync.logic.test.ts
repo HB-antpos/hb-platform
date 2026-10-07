@@ -193,12 +193,11 @@ async function main() {
 
   const pushToHqUiFailure = await runTest('仓库商品页应按 POS 商品管理权限提供发送 HQ 完整交互', () => {
     assert(
-      pageSource.includes('CloudUploadOutlined') &&
-        pageSource.includes('pushProductsToHq') &&
+      pageSource.includes('pushProductsToHq') &&
         pageSource.includes('buildWarehouseProductHqPushPayload') &&
         pageSource.includes('PosHqPushModal') &&
         pageSource.includes('getPushToHqStoreOptions'),
-      '页面应引入发送 HQ 图标、服务、仓库 payload 映射、共享弹窗和分店选项服务',
+      '页面应引入发送 HQ 服务、仓库 payload 映射、共享弹窗和分店选项服务',
     )
     assert(
       pageSource.includes('const [pushToHqLoading, setPushToHqLoading] = useState(false);') &&
@@ -301,16 +300,16 @@ async function main() {
       '</SelectionActionBar>',
     )
     assert(
-      !extractSection(pageSource, "<PageContainer compact title={t('warehouse.productManagement')}", '<Card>').includes('handlePushToHq'),
+      !extractSection(pageSource, "<PageContainer compact title={t('menu.warehouseProducts')}", '<div className="warehouse-products-layout">').includes('handlePushToHq'),
       '发送到HQ 不应再出现在页头',
     )
+    // 2026-10 重设计：勾选条按钮按设计不带图标；文案改用本页 warehouseUi 键（原 posAdmin 键在全局语言包里缺失，英文界面会回退成中文）。
     assert(
       toolbarSection.includes('access.canManagePosProducts ?') &&
-        toolbarSection.includes('icon={<CloudUploadOutlined />}') &&
         toolbarSection.includes('loading={pushToHqLoading}') &&
         toolbarSection.includes('disabled={!selectedRowKeys.length || pushToHqLoading || pushToHqModalOpen}') &&
         toolbarSection.includes('onClick={() => void handlePushToHq()}') &&
-        toolbarSection.includes("t('posAdmin.products.pushToHq', '发送到HQ')"),
+        toolbarSection.includes("t('warehouseUi.products.pushToHq')"),
       '勾选后操作条的发送按钮应只对 POS 商品管理员显示，并正确绑定选择、loading 与点击行为',
     )
     const resultSection = extractSection(
@@ -390,9 +389,10 @@ async function main() {
       'const baseColumns = useMemo',
       'return (<>',
     )
+    // 2026-10 重设计：行内上下架 Switch 去掉，状态列改为状态胶囊只读展示，上下架改在勾选条与 ⋯ 菜单里操作。
     assert(
-      columnsSection.includes('checkedChildren={getShelfStatusLabel(true, t)}') &&
-        columnsSection.includes('unCheckedChildren={getShelfStatusLabel(false, t)}') &&
+      columnsSection.includes("<StatusPill tone={value ? 'green' : 'gray'}>{getShelfStatusLabel(value, t)}</StatusPill>") &&
+        !columnsSection.includes('<Switch') &&
         !columnsSection.includes("t('warehouse.active')") &&
         !columnsSection.includes("t('warehouse.inactive')"),
       '主表状态列应显示上架/下架，不能继续使用启用/停用文案',
@@ -436,11 +436,18 @@ async function main() {
         columnsSection.includes('<Tag color={getProductTypeTagColor(value)}>{getProductTypeLabel(value, t)}</Tag>'),
       '商品类型列应以 Tag 显示普通、套装和多码',
     )
+    // 2026-10 重设计：行操作收敛为「编辑 + ⋯」，套装/多码管理入口在 ⋯ 菜单（buildRowActionItems）里。
+    const rowActionSection = extractSection(
+      pageSource,
+      'const buildRowActionItems = ',
+      'const draggableColumnKeys',
+    )
     assert(
-      columnsSection.includes('canManageProductDetails(record.productType)') &&
-        columnsSection.includes('getProductDetailsActionLabel(record.productType, t)') &&
-        columnsSection.includes('getProductDetailsDisabledHint(t)') &&
-        !columnsSection.includes('record.productType === 1 ?'),
+      rowActionSection.includes('canManageProductDetails(record.productType)') &&
+        rowActionSection.includes('getProductDetailsActionLabel(record.productType, t)') &&
+        rowActionSection.includes('getProductDetailsDisabledHint(t)') &&
+        rowActionSection.includes('void handleOpenSetItems(record);') &&
+        !rowActionSection.includes('record.productType === 1 ?'),
       '操作列应允许套装和多码进入管理入口，不能再只判断 productType === 1',
     )
     assert(
@@ -638,15 +645,17 @@ async function main() {
         pageSource.includes('horizontalListSortingStrategy'),
       '商品管理表头列拖拽应复用 @dnd-kit 横向排序能力',
     )
+    // 2026-10 重设计改为「商品 / 供应商」组合列，v1 缓存的旧列顺序合并后会把新组合列排到最后，所以换用 v2 键。
     assert(
-      pageSource.includes("const WAREHOUSE_PRODUCT_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.warehouseProducts.columnOrder.v1'") &&
+      pageSource.includes("const WAREHOUSE_PRODUCT_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.warehouseProducts.columnOrder.v2'") &&
         pageSource.includes('localStorage.setItem(WAREHOUSE_PRODUCT_COLUMN_ORDER_STORAGE_KEY') &&
         pageSource.includes('mergeWarehouseProductColumnOrder('),
       '商品管理列顺序应保存到独立 localStorage key，并兼容列增删',
     )
+    // 被「列设置」隐藏的列不渲染表头，SortableContext 只能放可见列，否则 dnd-kit 按下标计算位移会错位。
     assert(
       pageSource.includes('components={{ header: { cell: DraggableHeaderCell } }}') &&
-        pageSource.includes('<SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>') &&
+        pageSource.includes('<SortableContext items={visibleColumnOrder} strategy={horizontalListSortingStrategy}>') &&
         pageSource.includes('<DndContext sensors={columnDragSensors} collisionDetection={closestCenter} onDragEnd={handleColumnDragEnd}>'),
       '商品管理表格应接入可拖拽表头 cell 与横向 SortableContext',
     )
@@ -659,31 +668,32 @@ async function main() {
   })
   if (draggableColumnsFailure) failures.push(draggableColumnsFailure)
 
-  const defaultColumnOrderFailure = await runTest('仓库商品表格默认列顺序应按截图并支持重置列', () => {
+  const defaultColumnOrderFailure = await runTest('仓库商品表格默认列顺序应按设计并支持列设置与重置列', () => {
     const defaultOrderSection = extractSection(
       pageSource,
       'const WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER',
       '] as const',
     )
+    // 2026-10 重设计：序号列去掉；货号、图片、名称合并为「商品」列，国内/澳洲供应商合并为「供应商」列；
+    // 低频列按业务含义插在相关常驻列旁边，默认隐藏、在「列设置」里勾选显示。
     const expectedOrder = [
-      "'rowNumber'",
-      "'itemNumber'",
-      "'productImage'",
-      "'domesticSupplierCode'",
-      "'categoryName'",
+      "'product'",
       "'nameEn'",
-      "'minOrderQuantity'",
+      "'name'",
+      "'barcode'",
+      "'categoryName'",
+      "'productType'",
+      "'supplier'",
+      "'localSupplierCode'",
       "'domesticPrice'",
       "'importPrice'",
       "'labelPrice'",
-      "'isActive'",
-      "'productType'",
-      "'barcode'",
-      "'locationCodes'",
-      "'name'",
+      "'minOrderQuantity'",
       "'packingQty'",
       "'volume'",
-      "'localSupplierCode'",
+      "'locationCodes'",
+      "'isActive'",
+      "'supplyUpdatedAt'",
       "'updatedAt'",
       "'updatedBy'",
       "'action'",
@@ -691,12 +701,26 @@ async function main() {
     let lastIndex = -1
     for (const key of expectedOrder) {
       const nextIndex = defaultOrderSection.indexOf(key)
-      assert(nextIndex > lastIndex, `默认列顺序应包含并按截图排列 ${key}`)
+      assert(nextIndex > lastIndex, `默认列顺序应包含并按设计排列 ${key}`)
       lastIndex = nextIndex
     }
     assert(
-      !defaultOrderSection.includes("'selection'"),
-      '默认列顺序不能包含 selection，选择列仍由 rowSelection 管理',
+      !defaultOrderSection.includes("'selection'") && !defaultOrderSection.includes("'rowNumber'"),
+      '默认列顺序不能包含 selection（选择列仍由 rowSelection 管理），也不再有序号列',
+    )
+    const optionalSection = extractSection(pageSource, 'const WAREHOUSE_PRODUCT_OPTIONAL_COLUMN_KEYS', '] as const')
+    for (const key of ["'nameEn'", "'name'", "'barcode'", "'categoryName'", "'productType'", "'localSupplierCode'", "'minOrderQuantity'", "'packingQty'", "'volume'", "'supplyUpdatedAt'", "'updatedAt'", "'updatedBy'"]) {
+      assert(optionalSection.includes(key), `低频列 ${key} 应可在列设置里勾选显示`)
+    }
+    for (const key of ["'product'", "'supplier'", "'domesticPrice'", "'importPrice'", "'labelPrice'", "'locationCodes'", "'isActive'", "'action'"]) {
+      assert(!optionalSection.includes(key), `常驻列 ${key} 不应出现在可选列里`)
+    }
+    assert(
+      pageSource.includes('const WAREHOUSE_PRODUCT_DEFAULT_VISIBLE_OPTIONAL_COLUMNS: string[] = [];') &&
+        pageSource.includes("const WAREHOUSE_PRODUCT_VISIBLE_COLUMNS_STORAGE_KEY = 'hbweb_rv.warehouseProducts.visibleColumns.v1'") &&
+        pageSource.includes('localStorage.setItem(WAREHOUSE_PRODUCT_VISIBLE_COLUMNS_STORAGE_KEY') &&
+        pageSource.includes('filterWarehouseProductVisibleColumnOrder('),
+      '低频列默认隐藏，勾选结果记到独立 localStorage key，渲染时过滤未勾选的可选列',
     )
 
     const columnsSection = extractSection(
@@ -704,15 +728,12 @@ async function main() {
       'const baseColumns = useMemo',
       'const draggableColumnKeys',
     )
-    assert(
-      columnsSection.indexOf("key: 'domesticSupplierCode'") < columnsSection.indexOf("key: 'categoryName'") &&
-        columnsSection.indexOf("key: 'categoryName'") < columnsSection.indexOf("key: 'nameEn'") &&
-        columnsSection.indexOf("key: 'nameEn'") < columnsSection.indexOf("key: 'minOrderQuantity'") &&
-        columnsSection.indexOf("key: 'minOrderQuantity'") < columnsSection.indexOf("key: 'domesticPrice'") &&
-        columnsSection.indexOf("key: 'barcode'") < columnsSection.indexOf("key: 'locationCodes'") &&
-        columnsSection.indexOf("key: 'locationCodes'") < columnsSection.indexOf("key: 'name'"),
-      'baseColumns 应按截图默认顺序排列，避免默认顺序依赖历史代码顺序',
-    )
+    let lastColumnIndex = -1
+    for (const key of expectedOrder) {
+      const nextIndex = columnsSection.indexOf(`key: ${key}`)
+      assert(nextIndex > lastColumnIndex, `baseColumns 应按默认顺序声明 ${key}，避免默认顺序依赖历史代码顺序`)
+      lastColumnIndex = nextIndex
+    }
     assert(
       pageSource.includes('const draggableColumnKeys = [...WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER]') &&
         pageSource.includes('mergeWarehouseProductColumnOrder(current.length ? current : savedOrder, WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER)'),
@@ -726,15 +747,20 @@ async function main() {
     )
     assert(
       resetSection.includes('localStorage.removeItem(WAREHOUSE_PRODUCT_COLUMN_ORDER_STORAGE_KEY)') &&
+        resetSection.includes('localStorage.removeItem(WAREHOUSE_PRODUCT_VISIBLE_COLUMNS_STORAGE_KEY)') &&
         resetSection.includes('setColumnOrder([...WAREHOUSE_PRODUCT_DEFAULT_COLUMN_ORDER])') &&
+        resetSection.includes('setVisibleOptionalColumns([...WAREHOUSE_PRODUCT_DEFAULT_VISIBLE_OPTIONAL_COLUMNS])') &&
         resetSection.includes('选择列仍由 Ant Design rowSelection 管理'),
-      '重置列逻辑应清除列顺序缓存，恢复默认业务列顺序，并保留中文注释说明选择列边界',
+      '重置列逻辑应清除列顺序与显示列缓存，恢复默认业务列顺序与显示列，并保留中文注释说明选择列边界',
     )
+    // 「重置列」从筛选行收进「列设置」弹层：列顺序或显示列改过默认时才可用。
+    const columnSettingsSource = readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/Products/ColumnSettingsButton.tsx'), 'utf8')
     assert(
-      pageSource.includes("t('warehouse.resetColumns', '重置列')") &&
-        pageSource.includes('onClick={handleResetColumnOrder}') &&
-        pageSource.includes('disabled={!isColumnOrderCustomized}'),
-      '筛选工具栏应提供重置列按钮，并仅在列顺序自定义后启用',
+      columnSettingsSource.includes("t('warehouse.resetColumns', '重置列')") &&
+        columnSettingsSource.includes('disabled={!canReset} onClick={onReset}') &&
+        pageSource.includes('onReset={handleResetColumnOrder}') &&
+        pageSource.includes('canReset={isColumnOrderCustomized || isColumnVisibilityCustomized}'),
+      '列设置弹层应提供重置列按钮，并仅在列顺序或显示列自定义后启用',
     )
     assert(
       pageSource.includes('rowSelection={{') &&
@@ -750,22 +776,27 @@ async function main() {
       'const baseColumns = useMemo',
       'const draggableColumnKeys',
     )
+    // 2026-10 重设计：默认显示「供应商」组合列（第一行国内、第二行澳洲），排序与列头筛选沿用国内供应商；
+    // 澳洲供应商独立列保留为可选列（排序、列头筛选）。
     const domesticSupplierSection = extractSection(
       columnsSection,
-      "key: 'domesticSupplierCode'",
-      "key: 'categoryName'",
+      "key: 'supplier'",
+      "key: 'localSupplierCode'",
     )
     const australianSupplierSection = extractSection(
       columnsSection,
       "key: 'localSupplierCode'",
-      "key: 'updatedAt'",
+      "key: 'domesticPrice'",
     )
 
     assert(
-      domesticSupplierSection.includes("title: t('warehouse.domesticSupplier', '国内供应商')") &&
+      domesticSupplierSection.includes("title: t('column.supplier')") &&
         domesticSupplierSection.includes("dataIndex: 'domesticSupplierCode'") &&
-        domesticSupplierSection.includes('sorter: true'),
-      '国内供应商列应绑定 domesticSupplierCode，不能显示澳洲供应商字段',
+        domesticSupplierSection.includes("...enumFilterProps('domesticSupplierCode'") &&
+        domesticSupplierSection.includes('sorter: true') &&
+        domesticSupplierSection.includes("t('warehouse.domestic')") &&
+        domesticSupplierSection.includes("t('warehouseUi.products.supplierAustralia')"),
+      '供应商组合列应以 domesticSupplierCode 排序和筛选，并分国内、澳洲两行显示',
     )
     assert(
       australianSupplierSection.includes("title: t('column.australianSupplier', '澳洲供应商')") &&
@@ -775,8 +806,9 @@ async function main() {
     )
     assert(
       domesticSupplierSection.includes('record.domesticSupplierName || record.domesticSupplierCode') &&
+        domesticSupplierSection.includes('record.localSupplierName || localSupplierNameMap[record.localSupplierCode || \'\'] || record.localSupplierCode') &&
         australianSupplierSection.includes('record.localSupplierName || localSupplierNameMap[record.localSupplierCode || \'\'] || record.localSupplierCode'),
-      '国内供应商列应优先显示名称；澳洲供应商列应优先显示名称，并在行数据缺名称时用活跃供应商映射兜底',
+      '国内供应商应优先显示名称；澳洲供应商应优先显示名称，并在行数据缺名称时用活跃供应商映射兜底',
     )
   })
   if (supplierColumnDisplayFailure) failures.push(supplierColumnDisplayFailure)
@@ -911,17 +943,25 @@ async function main() {
       '分类写入及刷新后应同步批量目标、批量分类树和顶部筛选树',
     )
 
+    // 2026-10 重设计：「管理分类」从页头挪到左侧分类面板头部；仍在本页打开分类管理弹窗，分类树改动后面板即时刷新。
     const manageButtonSection = extractSection(
       pageSource,
-      '{access.canManageWarehouseCategories ? (<Button icon={<SettingOutlined />}',
-      '{access.canWriteProduct ? (<Button type="primary"',
+      'onManage={access.canManageWarehouseCategories ?',
+      '\n',
+    )
+    const categoryPanelSource = readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/Products/CategoryFilterPanel.tsx'), 'utf8')
+    assert(
+      manageButtonSection.includes('() => setCategoryManageOpen(true)') &&
+        !manageButtonSection.includes('selectedRowKeys') &&
+        !manageButtonSection.includes('disabled=') &&
+        categoryPanelSource.includes('{onManage ? (') &&
+        categoryPanelSource.includes("t('containers.actions.manageCategories', '管理分类')") &&
+        categoryPanelSource.includes('onClick={onManage}'),
+      '管理分类入口应仅受分类管理权限控制，且无需勾选商品',
     )
     assert(
-      manageButtonSection.includes('onClick={() => setCategoryManageOpen(true)}') &&
-        manageButtonSection.includes("t('containers.actions.manageCategories', '管理分类')") &&
-        !manageButtonSection.includes('selectedRowKeys') &&
-        !manageButtonSection.includes('disabled='),
-      '管理分类入口应仅受分类管理权限控制，且无需勾选商品',
+      !extractSection(pageSource, "<PageContainer compact title={t('menu.warehouseProducts')}", '<div className="warehouse-products-layout">').includes('setCategoryManageOpen'),
+      '管理分类不应再出现在页头',
     )
 
     const categoryManageModalSection = extractSection(
@@ -940,26 +980,36 @@ async function main() {
   if (categoryManagementFailure) failures.push(categoryManagementFailure)
 
   const compactTableFailure = await runTest('仓库商品主表应使用紧凑行高、媒体尺寸和列宽', () => {
+    // 2026-10 重设计：表格样式从页面内联 <style> 迁到页面级 warehouseProducts.css（普通 CSS + 页面前缀类名）。
+    const pageCssSource = readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/Products/warehouseProducts.css'), 'utf8')
     assert(
-      pageSource.includes('const WAREHOUSE_TABLE_ROW_MAX_HEIGHT = 60'),
+      pageSource.includes("import './warehouseProducts.css';") && !pageSource.includes('<style>'),
+      '页面应引入页面级 CSS，不再在组件里内联 <style>',
+    )
+    assert(
+      pageCssSource.includes('height: 60px;') && pageCssSource.includes('max-height: 60px;'),
       '商品管理主表行高应压缩到紧凑值 60px',
     )
     assert(
-      pageSource.includes('.warehouse-products-table .ant-table-thead > tr > th,') &&
-        pageSource.includes('padding: 4px 6px !important') &&
-        pageSource.includes('.warehouse-products-table .ant-table-column-title') &&
-        pageSource.includes('-webkit-line-clamp: 2') &&
-        pageSource.includes('.warehouse-products-table .ant-table-filter-column') &&
-        pageSource.includes('.warehouse-products-table .ant-table-filter-trigger'),
+      pageCssSource.includes('.warehouse-products-table .ant-table-thead > tr > th,') &&
+        pageCssSource.includes('padding: 6px 8px !important') &&
+        pageCssSource.includes('.warehouse-products-table .ant-table-column-title') &&
+        pageCssSource.includes('-webkit-line-clamp: 2') &&
+        pageCssSource.includes('.warehouse-products-table .ant-table-filter-column') &&
+        pageCssSource.includes('.warehouse-products-table .ant-table-filter-trigger'),
       '商品管理主表应使用紧凑单元格 padding，且表头标题、排序和筛选图标应稳定排列',
     )
     assert(
-      pageSource.includes('min-height: 48px') &&
-        pageSource.includes('max-height: 48px') &&
-        pageSource.includes('width: 36px') &&
-        pageSource.includes('height: 36px') &&
-        pageSource.includes('max-height: 42px !important'),
-      '商品图片和条码预览应使用紧凑尺寸，减少行内占用空间',
+      pageCssSource.includes('.warehouse-products-thumb') &&
+        pageCssSource.includes('width: 40px;') &&
+        pageCssSource.includes('height: 40px;') &&
+        pageCssSource.includes('max-height: 42px !important'),
+      '商品缩略图和条码预览应使用紧凑尺寸，减少行内占用空间',
+    )
+    assert(
+      pageCssSource.includes('font-variant-numeric: tabular-nums;') &&
+        pageCssSource.includes('justify-content: flex-end;'),
+      '价格等数字列应右对齐并使用等宽数字',
     )
 
     const columnsSection = extractSection(
@@ -967,30 +1017,37 @@ async function main() {
       'const baseColumns = useMemo',
       'return (<>',
     )
+    const productCellSection = extractSection(pageSource, 'const renderProductCell = ', 'const renderSupplyNoticeSummary = ')
     assert(
-      columnsSection.includes("key: 'productImage'") &&
-        columnsSection.includes('width: 64') &&
-        columnsSection.includes('<ProductListImage src={value} size={36}') &&
-        columnsSection.includes("key: 'itemNumber'") &&
-        columnsSection.includes('width: 122') &&
+      columnsSection.includes("key: 'product'") &&
+        columnsSection.includes('width: 248') &&
+        productCellSection.includes('<ProductListImage src={record.productImage} size={40}') &&
+        columnsSection.includes("key: 'supplier'") &&
+        columnsSection.includes('width: 108') &&
         columnsSection.includes("key: 'isActive'") &&
         columnsSection.includes('width: 104') &&
-        columnsSection.includes("key: 'productType'") &&
         columnsSection.includes("key: 'domesticPrice'") &&
-        columnsSection.includes('width: 96') &&
+        columnsSection.includes('width: 80') &&
         columnsSection.includes("key: 'packingQty'") &&
         columnsSection.includes('width: 108') &&
         columnsSection.includes("key: 'minOrderQuantity'") &&
         columnsSection.includes("dataIndex: 'minOrderQuantity'") &&
         columnsSection.includes('width: 96') &&
         columnsSection.includes("key: 'updatedAt'") &&
-        columnsSection.includes('width: 164'),
-      '图片、状态、商品类型、价格、装箱数、中包数和更新时间等关键列应使用筛选友好列宽，且中包数仍绑定 minOrderQuantity',
+        columnsSection.includes('width: 156') &&
+        columnsSection.includes("key: 'action'") &&
+        columnsSection.includes('width: 60'),
+      '商品、供应商、状态、价格、装箱数、中包数、更新时间与操作列应使用紧凑列宽，且中包数仍绑定 minOrderQuantity',
     )
+    // 默认可见列宽之和（含选择列 36）应不超过 1440 宽下列表区约 926px，保证默认视图不横向滚动。
+    const defaultVisibleWidth = 36 + 220 + 120 + 80 + 88 + 88 + 92 + 112 + 60
+    assert(defaultVisibleWidth <= 926, `默认可见列宽合计 ${defaultVisibleWidth} 超出 1440 宽下的列表区`)
     assert(
       columnsSection.includes('BarcodePreview value={value} textMaxWidth={150} compactCopy') &&
-        pageSource.includes('scroll={{ x: 2390, y: 620 }}'),
-      '条码列和表格横向滚动宽度应按紧凑布局更新',
+        pageSource.includes('scroll={{ x: tableScrollX, y: 620 }}') &&
+        pageSource.includes('const tableScrollX = useMemo(() => orderedColumns.reduce(') &&
+        pageSource.includes('WAREHOUSE_PRODUCT_SELECTION_COLUMN_WIDTH,'),
+      '条码列保留条码图；表格横向滚动宽度取可见列宽之和（含选择列）',
     )
     assert(
       pageSource.includes('components={{ header: { cell: DraggableHeaderCell } }}') &&
@@ -1024,7 +1081,7 @@ async function main() {
     )
     assert(
       pageSource.includes('virtual') &&
-        pageSource.includes('scroll={{ x: 2390, y: 620 }}') &&
+        pageSource.includes('scroll={{ x: tableScrollX, y: 620 }}') &&
         pageSource.includes('const result = await getWarehouseProductsTable(query);'),
       '分页调整应保留现有虚拟表格、固定滚动高度和异步服务端分页请求',
     )
@@ -1053,18 +1110,19 @@ async function main() {
   })
   if (adminOnlyButtonFailure) failures.push(adminOnlyButtonFailure)
 
-  const loadingFailure = await runTest('「同步」菜单只保留更新分店价格且使用静态图标', () => {
+  const loadingFailure = await runTest('「价格与同步」菜单只保留更新分店价格这一同步入口且使用静态图标', () => {
+    // 2026-10 重设计：原「同步」「价格」两个菜单合并为「价格与同步」，同步项仍只有写 HQ 的更新分店价格。
     const syncMenuSection = extractSection(
       pageSource,
-      "<ToolbarMenuButton label={t('common.listToolbar.sync', '同步')}",
+      "<ToolbarMenuButton label={t('warehouseUi.products.priceAndSync')}",
       "<ToolbarMenuButton label={t('common.listToolbar.importExport'",
     )
     assert(
-      syncMenuSection.includes('icon={<CloudSyncOutlined />}') &&
+      syncMenuSection.includes('icon: <CloudSyncOutlined />') &&
         !syncMenuSection.includes('loading={') &&
         !syncMenuSection.includes("key: 'hqSync'") &&
         syncMenuSection.includes("key: 'storePriceSync'"),
-      '同步菜单应只保留写 HQ 的更新分店价格',
+      '价格与同步菜单应只保留写 HQ 的更新分店价格',
     )
   })
   if (loadingFailure) failures.push(loadingFailure)
@@ -1269,20 +1327,22 @@ async function main() {
         pageSource.includes('列头筛选走后端 Filters，分类仍走顶层字段'),
       '页面应维护 columnFilters 状态，并在 buildGridQuery 中把普通列头筛选发到后端 Filters',
     )
+    // 2026-10 重设计：状态改由状态页签设置；「更多筛选」新增澳洲供应商，与列头筛选共用同一份 columnFilters。
     assert(
       pageSource.includes("const nextFilters = setFilterValues(columnFilters, 'domesticSupplierCode'") &&
         pageSource.includes("const nextFilters = setFilterValues(columnFilters, 'productType'") &&
         pageSource.includes("const nextFilters = setFilterValues(columnFilters, 'isActive'") &&
-        countOccurrences(pageSource, 'setColumnFilters(nextFilters);') === 3,
-      '顶部供应商、商品类型和状态筛选变化时应同步 columnFilters，避免旧列头值残留',
+        pageSource.includes("const nextFilters = setFilterValues(columnFilters, 'localSupplierCode'") &&
+        countOccurrences(pageSource, 'setColumnFilters(nextFilters);') === 4,
+      '顶部供应商、商品类型、状态页签和澳洲供应商筛选变化时应同步 columnFilters，避免旧列头值残留',
     )
   })
   if (columnFilterStateFailure) failures.push(columnFilterStateFailure)
 
-  const topCategoryTreeFilterFailure = await runTest('仓库商品页顶部分类筛选应使用可折叠分类树', () => {
+  const topCategoryTreeFilterFailure = await runTest('仓库商品页分类筛选应使用左侧分类面板，窄屏回到可折叠分类树下拉', () => {
     const topFilterSection = extractSection(
       pageSource,
-      '<Input value={searchText}',
+      '<Input className="warehouse-products-search" value={searchText}',
       '<Select value={productType}',
     )
 
@@ -1315,9 +1375,29 @@ async function main() {
       topFilterSection.includes('allowClear') &&
         topFilterSection.includes('setCategoryFilterValue(value || ALL_PRODUCTS_FILTER_KEY);') &&
         topFilterSection.includes("setCategoryFilterSearchText('');") &&
-        pageSource.includes('setCategoryFilterValue(UNCATEGORIZED_PRODUCTS_FILTER_KEY);') &&
-        pageSource.includes('uncategorizedOnly: true,'),
-      '顶部分类树清空后应回到全部商品并清空搜索词，未分类快捷按钮仍应查询 UncategorizedOnly',
+        topFilterSection.includes('<span className="warehouse-products-category-select">'),
+      '窄屏分类树下拉清空后应回到全部商品并清空搜索词',
+    )
+    // 左侧分类面板：「全部商品」「未分类」固定入口 + 可搜索分类树，点选即查；未分类经 buildCategoryQueryValue 转为 UncategorizedOnly。
+    const categoryPanelSource = readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/Products/CategoryFilterPanel.tsx'), 'utf8')
+    const categoryChangeSection = extractSection(pageSource, 'const handleCategoryFilterChange = (value: string) => {', 'const statusTabKey')
+    assert(
+      pageSource.includes('<CategoryFilterPanel') &&
+        pageSource.includes('onChange={handleCategoryFilterChange}') &&
+        pageSource.includes('expandedKeys={categoryFilterExpandedKeys}') &&
+        categoryChangeSection.includes('setCategoryFilterValue(value);') &&
+        categoryChangeSection.includes('void loadData({ page: 1, ...buildCategoryQueryValue(value) });') &&
+        categoryPanelSource.includes('onClick={() => onChange(ALL_PRODUCTS_FILTER_KEY)}') &&
+        categoryPanelSource.includes('onClick={() => onChange(UNCATEGORIZED_PRODUCTS_FILTER_KEY)}') &&
+        categoryPanelSource.includes('filterCategoryTree(categories, keyword, language)') &&
+        categoryTreePickerSource.includes('export function filterCategoryTree'),
+      '左侧分类面板应提供全部商品、未分类入口与可搜索分类树（复用分类树搜索逻辑），选中后立即按分类查询第 1 页',
+    )
+    const pageCssSource = readFileSync(path.resolve(process.cwd(), 'src/pages/Warehouse/Products/warehouseProducts.css'), 'utf8')
+    assert(
+      pageCssSource.includes('container-type: inline-size;') &&
+        pageCssSource.includes('@container warehouse-products (max-width: 1079px)'),
+      '列表容器变窄时应收起分类面板、显示工具栏分类下拉',
     )
   })
   if (topCategoryTreeFilterFailure) failures.push(topCategoryTreeFilterFailure)
@@ -1329,11 +1409,12 @@ async function main() {
       '}/>',
     )
 
+    // 2026-10 重设计：低频列可被「列设置」隐藏，AntD filters 不再含这些列，需沿用原筛选与当前分类。
     assert(
-      tableSection.includes('const nextColumnFilters = normalizeTableFilters(filters);') &&
-        tableSection.includes('const nextCategoryFilterValue = resolveCategoryFilterValueFromTableFilters(filters);') &&
+      tableSection.includes('const nextColumnFilters = keepHiddenColumnFilters(normalizeTableFilters(filters), filters, columnFilters);') &&
+        tableSection.includes('const nextCategoryFilterValue = resolveCategoryFilterValueFromTableFilters(filters, categoryFilterValue);') &&
         tableSection.includes('setColumnFilters(nextColumnFilters);'),
-      '表格 onChange 应接收 AntD filters，并转换后回写 columnFilters',
+      '表格 onChange 应接收 AntD filters，并转换后回写 columnFilters，隐藏列的条件不能被清掉',
     )
     assert(
       tableSection.includes("page: extra.action === 'paginate' ? pagination.current || 1 : 1,") &&
@@ -1423,10 +1504,12 @@ async function main() {
       '页面应提供文本、数字和日期列头筛选 helper，并显示匹配方式选择',
     )
     assert(
-      columnFiltersSource.includes("const filterKeyMap: Record<string, string> = {") &&
+      columnFiltersSource.includes('const TABLE_FILTER_KEY_MAP: Record<string, string> = {') &&
         columnFiltersSource.includes("name: 'productName'") &&
-        columnFiltersSource.includes("labelPrice: 'oemPrice'"),
-      'normalizeTableFilters 应显式维护列 key 到后端 filter key 的映射',
+        columnFiltersSource.includes("labelPrice: 'oemPrice'") &&
+        columnFiltersSource.includes("product: 'itemNumber'") &&
+        columnFiltersSource.includes("supplier: 'domesticSupplierCode'"),
+      'normalizeTableFilters 应显式维护列 key 到后端 filter key 的映射（含商品、供应商组合列）',
     )
     assert(
         columnsSection.includes("...textFilterProps('itemNumber'") &&
@@ -1477,18 +1560,20 @@ async function main() {
     const resetSection = extractSection(
       pageSource,
       'const handleResetFilters = () => {',
-      'const isUncategorizedOnly',
+      'const handleCategoryFilterChange',
     )
 
+    // 2026-10 重设计去掉筛选行的「重置」按钮，「清空全部」是唯一入口，语义不变。
     assert(
       resetSection.includes('setColumnFilters({});') &&
         resetSection.includes('filters: {},') &&
+        resetSection.includes('clearSearchDebounce();') &&
         resetSection.includes("setSubmittedSearchText('');") &&
         resetSection.includes("searchText: '',") &&
         !resetSection.includes('setColumnOrder') &&
-        pageSource.includes('<Button icon={<ReloadOutlined />} onClick={handleResetFilters}>') &&
+        !pageSource.includes('onClick={handleResetFilters}') &&
         pageSource.includes('onClearAll={handleResetFilters}'),
-      '点击重置或「清空全部」时应清空 columnFilters 与已提交关键词，并按空 Filters 重查列表，且不改动列顺序',
+      '「清空全部」时应清空 columnFilters 与已提交关键词、取消未触发的防抖查询，并按空 Filters 重查列表，且不改动列顺序',
     )
   })
   if (resetColumnFilterFailure) failures.push(resetColumnFilterFailure)
@@ -1606,58 +1691,55 @@ async function main() {
   })
   if (inlineEditFailure) failures.push(inlineEditFailure)
 
-  const headerMenuLayoutFailure = await runTest('页头按钮应归入同步、导入导出菜单，只保留一个主按钮', () => {
+  const headerMenuLayoutFailure = await runTest('页头按钮应归入价格与同步、导入导出菜单，只保留一个主按钮', () => {
+    // 2026-10 重设计：标题改为菜单名「仓库商品管理」；原「同步」「价格」菜单合并为「价格与同步」；
+    // 「导入 / 导出」删掉两个只提示「暂缓到下一轮」的占位项；「管理分类」挪到左侧分类面板头部。
     const headerSection = extractSection(
       pageSource,
-      "<PageContainer compact title={t('warehouse.productManagement')}",
-      '<Card>',
+      "<PageContainer compact title={t('menu.warehouseProducts')}",
+      '<div className="warehouse-products-layout">',
     )
-    const syncMenuSection = extractSection(
+    const priceAndSyncMenuSection = extractSection(
       headerSection,
-      "<ToolbarMenuButton label={t('common.listToolbar.sync', '同步')}",
-      "<ToolbarMenuButton label={t('common.listToolbar.importExport'",
+      "<ToolbarMenuButton label={t('warehouseUi.products.priceAndSync')}",
+      "<ToolbarMenuButton label={t('common.listToolbar.importExport', '导入 / 导出')}",
     )
     const importExportMenuSection = extractSection(
       headerSection,
       "<ToolbarMenuButton label={t('common.listToolbar.importExport', '导入 / 导出')}",
-      "<ToolbarMenuButton label={t('common.listToolbar.price', '价格')}",
-    )
-    const priceMenuSection = extractSection(
-      headerSection,
-      "<ToolbarMenuButton label={t('common.listToolbar.price', '价格')}",
-      '{access.canManageWarehouseCategories ?',
+      '{access.canWriteProduct ? (<Button type="primary"',
     )
     assert(
-      priceMenuSection.includes("label: t('warehouse.retailPriceChanges.entry'),") &&
-        priceMenuSection.includes("onClick: () => navigate('/warehouse/products/retail-price-changes'),") &&
-        priceMenuSection.includes("label: t('warehouse.priceUpdateTasks.entry'),") &&
-        priceMenuSection.includes("onClick: () => navigate('/warehouse/products/price-update-tasks'),") &&
-        (priceMenuSection.match(/visible: access\.canManageWarehouseProducts,/g) ?? []).length === 2,
-      '「价格」菜单应包含零售价月度变化与价格变更任务，均按仓库商品管理权限显示',
+      priceAndSyncMenuSection.includes("label: t('warehouse.retailPriceChanges.entry'),") &&
+        priceAndSyncMenuSection.includes("onClick: () => navigate('/warehouse/products/retail-price-changes'),") &&
+        priceAndSyncMenuSection.includes("label: t('warehouse.priceUpdateTasks.entry'),") &&
+        priceAndSyncMenuSection.includes("onClick: () => navigate('/warehouse/products/price-update-tasks'),") &&
+        (priceAndSyncMenuSection.match(/visible: access\.canManageWarehouseProducts,/g) ?? []).length === 2,
+      '「价格与同步」菜单应包含零售价月度变化与价格变更任务，均按仓库商品管理权限显示',
     )
     assert(
-      headerSection.includes("subtitle={t('warehouse.productTotalCount', { count: total })}") &&
+      headerSection.includes("subtitle={t('warehouseUi.products.totalCount', { total: formatWarehouseProductCount(total) })}") &&
         !pageSource.includes("t('warehouse.productManagementSubtitle')"),
       '紧凑页头副标题应显示记录总数，不再显示原说明文字',
     )
     assert(
-      !syncMenuSection.includes("t('warehouse.hqSync', '从HQ同步库存')") &&
-        syncMenuSection.includes("t('warehouse.storePriceSync.title', '更新分店价格')") &&
-        syncMenuSection.includes('visible: canManageWarehouseStorePriceSync,') &&
-        syncMenuSection.includes('disabled: storePriceSyncOpen,') &&
-        syncMenuSection.includes('onClick: () => setStorePriceSyncOpen(true),'),
-      '「同步」菜单应只包含按权限显示的更新分店价格（从HQ同步库存已停用）',
+      !priceAndSyncMenuSection.includes("t('warehouse.hqSync', '从HQ同步库存')") &&
+        priceAndSyncMenuSection.includes("t('warehouse.storePriceSync.title', '更新分店价格')") &&
+        priceAndSyncMenuSection.includes('visible: canManageWarehouseStorePriceSync,') &&
+        priceAndSyncMenuSection.includes('disabled: storePriceSyncOpen,') &&
+        priceAndSyncMenuSection.includes('onClick: () => setStorePriceSyncOpen(true),'),
+      '「价格与同步」菜单应包含按权限显示的更新分店价格（从HQ同步库存已停用）',
     )
     assert(
-      importExportMenuSection.includes('icon={exporting ? <LoadingOutlined /> : <DownloadOutlined />}') &&
+      importExportMenuSection.includes('icon={exporting ? <LoadingOutlined /> : undefined}') &&
         importExportMenuSection.includes("label: t('warehouse.exportExcel'),") &&
         importExportMenuSection.includes('disabled: exporting,') &&
         importExportMenuSection.includes('onClick: () => setExportConfigOpen(true),') &&
         importExportMenuSection.includes('onClick: () => setImportFromDomesticOpen(true),') &&
         importExportMenuSection.includes('visible: canImportNonHbProducts,') &&
-        importExportMenuSection.includes("onClick: () => message.info(t('warehouse.batchImageUploadMigrated')),") &&
-        importExportMenuSection.includes("onClick: () => message.info(t('warehouse.batchSetMigrated')),"),
-      '「导入 / 导出」菜单应包含导出、国内导入、非国内导入（按权限）以及两个已迁移提示入口',
+        !pageSource.includes("t('warehouse.batchImageUploadMigrated')") &&
+        !pageSource.includes("t('warehouse.batchSetMigrated')"),
+      '「导入 / 导出」菜单应包含导出、国内导入、非国内导入（按权限），不再保留两个「暂缓」占位入口',
     )
     assert(
       headerSection.includes('{exporting ? (<Typography.Text type="secondary">') &&
@@ -1665,14 +1747,13 @@ async function main() {
       '导出进度文字仍应显示在页头',
     )
     assert(
-      // 零售价月度变化已归入「价格」菜单（上方单独断言），页头不再保留独立按钮。
-      !headerSection.includes("{access.canManageWarehouseProducts ? (<Button icon={<HistoryOutlined />}") &&
-        headerSection.includes("{access.canManageWarehouseCategories ? (<Button icon={<SettingOutlined />} onClick={() => setCategoryManageOpen(true)}>") &&
+      !headerSection.includes('<Button icon={<HistoryOutlined />}') &&
+        !headerSection.includes('setCategoryManageOpen') &&
         headerSection.includes('{access.canWriteProduct ? (<Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>') &&
         countOccurrences(headerSection, 'type="primary"') === 1,
-      '页头应保留管理分类，价格入口不再平铺，新建商品为唯一主按钮',
+      '页头价格入口不再平铺、管理分类移到分类面板，新建商品为唯一主按钮',
     )
-    for (const batchText of ["t('warehouse.batchActivate')", "t('warehouse.batchDeactivate')", "t('warehouse.batchEdit'", "t('warehouse.batchSetCategory'", 'handlePushToHq']) {
+    for (const batchText of ["t('warehouse.batchActivate')", "t('warehouse.batchDeactivate')", "t('warehouse.batchEdit'", "t('warehouseUi.products.selectionSetCategory')", 'handlePushToHq']) {
       assert(!headerSection.includes(batchText), `页头不应再出现只对勾选行生效的操作：${batchText}`)
     }
   })
@@ -1697,21 +1778,31 @@ async function main() {
         selectionSection.includes('onClick={() => void handlePushToHq()}') &&
         countOccurrences(selectionSection, '{access.canWriteProduct ?') === 4 &&
         countOccurrences(selectionSection, '{access.canManagePosProducts ?') === 1,
-      '勾选后操作条应包含批量上架（带确认）、批量下架（经供货说明弹窗确认）、批量修改、批量分类和发送到HQ，且权限不变',
+      '勾选后操作条应包含批量修改、改分类、批量上架（带确认）、批量下架（经供货说明弹窗确认）和发送到HQ，且权限不变',
     )
-    const cardSection = extractSection(pageSource, '<Card>', '</Card>')
-    const filterRowIndex = cardSection.indexOf('<div className="list-toolbar-filter-row">')
-    const activeBarIndex = cardSection.indexOf('<ActiveFilterBar')
-    const selectionIndex = cardSection.indexOf('<SelectionActionBar')
-    const tableIndex = cardSection.indexOf('<DndContext')
+    // 2026-10 重设计：按钮顺序按设计为 批量修改 → 改分类 → 上架 → 下架… → 发送到 HQ。
     assert(
-      filterRowIndex >= 0 && filterRowIndex < activeBarIndex && activeBarIndex < selectionIndex && selectionIndex < tableIndex,
-      '顺序应为筛选行 → 已生效筛选条 → 勾选后操作条 → 表格',
+      selectionSection.indexOf('onClick={openBatchEdit}') < selectionSection.indexOf('onClick={openBatchCategory}') &&
+        selectionSection.indexOf('onClick={openBatchCategory}') < selectionSection.indexOf('void handleBatchToggleActive(true)') &&
+        selectionSection.indexOf('void handleBatchToggleActive(true)') < selectionSection.indexOf('void handleBatchToggleActive(false)') &&
+        selectionSection.indexOf('void handleBatchToggleActive(false)') < selectionSection.indexOf('void handlePushToHq()'),
+      '勾选后操作条按钮顺序应与设计一致',
+    )
+    // 列表卡片由 antd Card 改为页面自带样式的 section，顺序：状态页签 → 筛选行 → 已生效筛选条 → 勾选后操作条 → 表格。
+    const listSection = extractSection(pageSource, '<section className="warehouse-products-list"', '</section>')
+    const statusTabsIndex = listSection.indexOf('<StatusTabs')
+    const filterRowIndex = listSection.indexOf('<div className="list-toolbar-filter-row">')
+    const activeBarIndex = listSection.indexOf('<ActiveFilterBar')
+    const selectionIndex = listSection.indexOf('<SelectionActionBar')
+    const tableIndex = listSection.indexOf('<DndContext')
+    assert(
+      statusTabsIndex >= 0 && statusTabsIndex < filterRowIndex && filterRowIndex < activeBarIndex && activeBarIndex < selectionIndex && selectionIndex < tableIndex,
+      '顺序应为状态页签 → 筛选行 → 已生效筛选条 → 勾选后操作条 → 表格',
     )
   })
   if (selectionBarFailure) failures.push(selectionBarFailure)
 
-  const instantFilterFailure = await runTest('下拉筛选选完即查，关键词回车或点查询才提交', () => {
+  const instantFilterFailure = await runTest('下拉与状态页签选完即查，关键词防抖即时查询、回车立即提交', () => {
     const filterRowSection = extractSection(
       pageSource,
       '<div className="list-toolbar-filter-row">',
@@ -1719,32 +1810,56 @@ async function main() {
     )
     assert(
       filterRowSection.includes('void loadData({ page: 1, supplierCode: value, filters: nextFilters });') &&
-        filterRowSection.includes('void loadData({ page: 1, isActive: value, filters: nextFilters });') &&
         filterRowSection.includes('void loadData({ page: 1, productType: value, filters: nextFilters });') &&
-        filterRowSection.includes('void loadData({ page: 1, ...buildCategoryQueryValue(nextCategoryFilterValue) });'),
-      '国内供应商、状态、商品类型、分类变化后应用覆盖参数立即请求第 1 页',
+        filterRowSection.includes('void loadData({ page: 1, ...buildCategoryQueryValue(nextCategoryFilterValue) });') &&
+        filterRowSection.includes('void loadData({ page: 1, filters: nextFilters });'),
+      '国内供应商、商品类型、分类、澳洲供应商变化后应用覆盖参数立即请求第 1 页',
     )
+    // 2026-10 重设计：状态筛选由状态页签承担，与原状态下拉一样镜像进 columnFilters 并立即查第 1 页。
+    const statusTabSection = extractSection(pageSource, 'const handleStatusTabChange = (key: WarehouseProductStatusTabKey) => {', 'const statusTabItems')
+    assert(
+      statusTabSection.includes("const nextFilters = setFilterValues(columnFilters, 'isActive', value === undefined ? undefined : [String(value)]);") &&
+        statusTabSection.includes('void loadData({ page: 1, isActive: value, filters: nextFilters });') &&
+        pageSource.includes('<StatusTabs items={statusTabItems} activeKey={statusTabKey} onChange={handleStatusTabChange}'),
+      '状态页签切换后应同步 isActive 与列头状态筛选，并立即请求第 1 页',
+    )
+    // 设计里「类型」与国内供应商并列在主筛选行，低频的澳洲供应商收进「更多筛选」。
     const moreFiltersSection = extractSection(filterRowSection, '<MoreFiltersButton', '</MoreFiltersButton>')
     assert(
-      moreFiltersSection.includes('activeCount={productType === undefined ? 0 : 1}') &&
-        moreFiltersSection.includes('<Select value={productType}'),
-      '商品类型应收进「更多筛选」，角标为弹层内生效条件数',
+      moreFiltersSection.includes('activeCount={columnFilters.localSupplierCode?.length ? 1 : 0}') &&
+        moreFiltersSection.includes("setFilterValues(columnFilters, 'localSupplierCode', values)") &&
+        !moreFiltersSection.includes('<Select value={productType}') &&
+        filterRowSection.indexOf('<Select value={productType}') < filterRowSection.indexOf('<MoreFiltersButton'),
+      '商品类型应在主筛选行，澳洲供应商收进「更多筛选」，角标为弹层内生效条件数',
     )
     assert(
       filterRowSection.includes('onPressEnter={handleSubmitSearch}') &&
-        filterRowSection.includes("t('common.listToolbar.searchEnterHint', '回车查询')") &&
-        filterRowSection.includes('<Button type="primary" onClick={handleSubmitSearch}>') &&
+        filterRowSection.includes('onChange={(event) => handleSearchTextChange(event.target.value)}') &&
+        !filterRowSection.includes("t('common.listToolbar.searchEnterHint', '回车查询')") &&
+        !filterRowSection.includes('<Button type="primary" onClick={handleSubmitSearch}>') &&
+        !filterRowSection.includes("t('common.query')") &&
         filterRowSection.includes('<span className="list-toolbar-filter-spacer"/>') &&
-        filterRowSection.includes('<span className="list-toolbar-filter-divider"/>') &&
+        filterRowSection.indexOf('<span className="list-toolbar-filter-spacer"/>') < filterRowSection.indexOf('<ColumnSettingsButton') &&
         !filterRowSection.includes("t('warehouse.categories.uncategorizedOption'"),
-      '搜索框回车与查询按钮提交关键词；筛选行按设计含弹性空白与分隔线，未分类入口移到已生效筛选条',
+      '搜索框输入即查（防抖）、回车立即提交，不再有查询按钮；筛选行尾是列设置；未分类入口在分类面板',
     )
-    const submitSection = extractSection(pageSource, 'const handleSubmitSearch = () => {', 'const handleResetFilters')
+    const submitSection = extractSection(pageSource, 'const handleSubmitSearch = () => {', 'const handleSearchTextChange')
     assert(
-      submitSection.includes('setSubmittedSearchText(searchText);') &&
+      submitSection.includes('clearSearchDebounce();') &&
+        submitSection.includes('setSubmittedSearchText(searchText);') &&
         submitSection.includes('void loadData({ page: 1, searchText });') &&
         pageSource.includes('searchText: submittedSearchText,'),
-      '其余请求应使用已提交关键词，而非输入框里未提交的草稿',
+      '回车应取消未触发的防抖并立即提交；其余请求应使用已提交关键词，而非输入框里未提交的草稿',
+    )
+    const debounceSection = extractSection(pageSource, 'const handleSearchTextChange = (value: string) => {', 'const handleResetFilters')
+    assert(
+      pageSource.includes('const WAREHOUSE_PRODUCTS_SEARCH_DEBOUNCE_MS = 300;') &&
+        debounceSection.includes('clearSearchDebounce();') &&
+        debounceSection.includes('if (!isMountedRef.current) {') &&
+        debounceSection.includes('setSubmittedSearchText(value);') &&
+        debounceSection.includes('void loadDataRef.current?.({ page: 1, searchText: value });') &&
+        debounceSection.includes('}, WAREHOUSE_PRODUCTS_SEARCH_DEBOUNCE_MS);'),
+      '关键词应防抖 300ms 后经最新 loader 查询第 1 页，卸载后不再发请求',
     )
   })
   if (instantFilterFailure) failures.push(instantFilterFailure)
@@ -1755,15 +1870,15 @@ async function main() {
       extractSection(loadDataSection, 'onSuccess: (result) => {', 'onError: (error) => {').includes('setAppliedQuery(query);'),
       '已生效条件应取自最新成功返回的查询，而不是界面上尚未提交的 state',
     )
+    // 2026-10 重设计：「只看未分类」开关由左侧分类面板的「未分类」入口替代，分类条件仍以标签显示、可移除。
     const activeBarSection = extractSection(pageSource, '<ActiveFilterBar', '<SelectionActionBar')
     assert(
       activeBarSection.includes('items={activeFilterChips.map((chip) => ({') &&
         activeBarSection.includes('onRemove: () => handleRemoveActiveFilter(chip.key),') &&
         activeBarSection.includes('onClearAll={handleResetFilters}') &&
-        activeBarSection.includes('aria-pressed={isUncategorizedOnly}') &&
-        activeBarSection.includes('onClick={handleToggleUncategorizedOnly}') &&
-        activeBarSection.includes("t('warehouse.onlyUncategorized', '只看未分类')"),
-      '已生效筛选条应接入标签移除、清空全部和「只看未分类」开关',
+        !activeBarSection.includes("t('warehouse.onlyUncategorized', '只看未分类')") &&
+        !pageSource.includes('handleToggleUncategorizedOnly'),
+      '已生效筛选条应接入标签移除与清空全部，「只看未分类」开关已由分类面板替代',
     )
     assert(
       pageSource.includes('const activeFilterChips = useMemo(() => buildActiveFilterChips({') &&
@@ -1774,16 +1889,9 @@ async function main() {
     assert(
       removeSection.includes('const overrides = buildActiveFilterRemovalOverrides(chipKey, columnFilters);') &&
         removeSection.includes('setColumnFilters(overrides.filters);') &&
+        removeSection.includes('clearSearchDebounce();') &&
         removeSection.includes('void loadData(overrides);'),
-      '移除单个标签应同步 columnFilters 并立即按覆盖参数重查',
-    )
-    const toggleSection = extractSection(pageSource, 'const handleToggleUncategorizedOnly = () => {', 'const activeFilterColumns')
-    assert(
-      toggleSection.includes('setCategoryFilterValue(UNCATEGORIZED_PRODUCTS_FILTER_KEY);') &&
-        toggleSection.includes('uncategorizedOnly: true,') &&
-        toggleSection.includes('setCategoryFilterValue(ALL_PRODUCTS_FILTER_KEY);') &&
-        toggleSection.includes('uncategorizedOnly: false,'),
-      '「只看未分类」打开时按 UncategorizedOnly 查询，再点回到全部分类',
+      '移除单个标签应同步 columnFilters、取消未触发的关键词防抖，并立即按覆盖参数重查',
     )
   })
   if (activeFilterBarFailure) failures.push(activeFilterBarFailure)

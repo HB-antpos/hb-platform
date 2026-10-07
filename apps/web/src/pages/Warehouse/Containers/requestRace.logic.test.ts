@@ -395,11 +395,36 @@ async function main() {
 
     // HQ 同步入口已于 2026-09-29 停用，只剩创建成功后刷新第一页。
     assert(pageSource.split('await latestRequestFirstPageRef.current()').length - 1 === 1, '创建成功后应统一使用 current first-page ref')
-    assert(pageSource.includes('void requestFirstPage({ columnFilters: nextFilters })'), '列头筛选未统一走 first-page 入口')
-    assert(pageSource.includes('onPressEnter={() => void requestFirstPage()}'), '回车查询未统一走 first-page 入口')
-    assert(pageSource.includes('onClick={() => void requestFirstPage()}'), '查询按钮未统一走 first-page 入口')
-    assert(pageSource.includes('void requestFirstPage({\n                    dateType:'), '重置未统一走 first-page 入口')
+    // 重设计后去掉「查询/重置」按钮：更多筛选、关键字、状态页签、日期类型与区间、清空全部都即时生效，
+    // 但仍必须统一走 first-page 入口，不能绕过竞态守卫直接请求。
+    assert(pageSource.includes('void requestFirstPage({ columnFilters: nextFilters })'), '更多筛选未统一走 first-page 入口')
+    const applyKeywordSection = extractSection(pageSource, 'const applyKeyword = (value: string) => {', 'useLayoutEffect(() => {', 'containers applyKeyword')
+    assert(applyKeywordSection.includes('void requestFirstPage({ itemNumberFilter: nextKeyword })'), '关键字未统一走 first-page 入口')
+    assert(pageSource.includes('onPressEnter={() => applyKeyword(keywordDraft)}'), '回车查询未走关键字入口')
+    assert(
+      pageSource.includes('window.setTimeout(() => latestApplyKeywordRef.current(value), 300)'),
+      '关键字防抖应在 300ms 后通过 commit 后的最新入口生效，避免旧闭包带旧筛选',
+    )
+    assert(committedLoaderSection.includes('latestApplyKeywordRef.current = applyKeyword'), '关键字入口 ref 未在 commit 后更新')
+    assert(pageSource.includes('void requestFirstPage({ statusTab: key })'), '状态页签未统一走 first-page 入口')
+    assert(pageSource.includes('void requestFirstPage({ dateType: value })'), '日期类型未统一走 first-page 入口')
+    assert(pageSource.includes('void requestFirstPage({ dateRange: value })'), '日期区间未统一走 first-page 入口')
+    assert(
+      pageSource.includes("void requestFirstPage({ dateRange: null, itemNumberFilter: '', columnFilters: {} })"),
+      '清空全部未统一走 first-page 入口',
+    )
     assert(!pageSource.includes('loadData(1, pageSize'), '页面仍存在绕过单一入口的第一页请求')
+
+    // 计数与到岸周历是额外请求，各用独立 guard，卸载时一并作废，防抖定时器也要清掉。
+    assert(pageSource.includes('const countsRequestGuardRef = useRef(createLatestRequestGuard())'), '计数请求缺少独立 guard')
+    assert(pageSource.includes('const overviewRequestGuardRef = useRef(createLatestRequestGuard())'), '到岸周历请求缺少独立 guard')
+    assert(pageSource.includes('countsRequestGuardRef.current,') && pageSource.includes('overviewRequestGuardRef.current,'), '计数与周历请求未接入 guarded request')
+    assert(
+      cleanupSection.includes('countsRequestGuardRef.current.invalidate()') &&
+        cleanupSection.includes('overviewRequestGuardRef.current.invalidate()') &&
+        cleanupSection.includes('window.clearTimeout(keywordTimerRef.current)'),
+      '卸载时未作废计数/周历请求或未清理关键字防抖',
+    )
   })
   if (sourceContractFailure) failures.push(sourceContractFailure)
 

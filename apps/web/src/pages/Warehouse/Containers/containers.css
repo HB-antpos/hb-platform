@@ -1,0 +1,361 @@
+/* 货柜管理页：到岸周历、工具栏、列表单元格（普通 CSS + 全局类名：测试打包把 .css 当空模块，不能用 CSS Modules） */
+
+.wh-containers-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* ---------- 到岸周历 ---------- */
+
+.wh-containers-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 16px 14px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.wh-containers-calendar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.wh-containers-calendar-title {
+  margin: 0;
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wh-containers-calendar-hint {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-containers-calendar-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.wh-containers-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wh-containers-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.wh-containers-dot-in-transit {
+  background: #f08c00;
+}
+
+.wh-containers-dot-loaded {
+  background: #1677ff;
+}
+
+.wh-containers-calendar-scroll {
+  overflow-x: auto;
+}
+
+.wh-containers-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(132px, 1fr));
+  gap: 8px;
+  min-width: 960px;
+}
+
+.wh-containers-week {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 112px;
+  padding: 8px;
+  border: 1px solid #eef0f4;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.wh-containers-week-overdue {
+  border-color: #fecdca;
+  background: #fef3f2;
+}
+
+.wh-containers-week-current {
+  border-color: #cfe0ff;
+  background: #f3f8ff;
+}
+
+.wh-containers-week-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.wh-containers-week-title {
+  color: #1f2430;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wh-containers-week-overdue .wh-containers-week-title {
+  color: #b42318;
+}
+
+.wh-containers-week-current .wh-containers-week-title {
+  color: #1554c0;
+}
+
+.wh-containers-week-range,
+.wh-containers-week-sum {
+  color: #667085;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-containers-week-sum {
+  margin-top: auto;
+}
+
+.wh-containers-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  border: 1px solid #e7eaf0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2430;
+}
+
+a.wh-containers-chip:hover {
+  border-color: #91b8ff;
+  color: #1f2430;
+}
+
+a.wh-containers-chip:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.wh-containers-chip-number {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-containers-chip-number .wh-containers-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.wh-containers-chip-meta {
+  color: #4b5563;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-containers-calendar-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  color: #667085;
+  font-size: 12px;
+}
+
+/* ---------- 列表卡片与工具栏 ---------- */
+
+.wh-containers-list.ant-card {
+  border-color: #e7eaf0;
+  border-radius: 10px;
+}
+
+.wh-containers-list .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 12px;
+}
+
+.wh-containers-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.wh-containers-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.wh-containers-search {
+  width: 260px;
+  max-width: 100%;
+}
+
+.wh-containers-date-type {
+  /* 放得下「预计到岸日期」「实际到货日期」六个字加下拉箭头 */
+  width: 136px;
+}
+
+.wh-containers-more-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wh-containers-more-label {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.wh-containers-more-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wh-containers-selection-summary {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 表格单元格 ---------- */
+
+.wh-containers-table .ant-table-thead > tr > th,
+.wh-containers-table .ant-table-tbody > tr > td {
+  padding-inline: 10px;
+}
+
+.wh-containers-table .ant-table-tbody > tr > td {
+  padding-block: 8px;
+}
+
+.wh-containers-number-cell {
+  min-width: 0;
+}
+
+.wh-containers-number {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
+.wh-containers-sub {
+  overflow: hidden;
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-containers-date {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wh-containers-eta-overdue {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.wh-containers-eta-today {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.wh-containers-eta-soon {
+  color: #4b5563;
+  font-weight: 500;
+}
+
+.wh-containers-not-arrived {
+  color: #667085;
+}
+
+.wh-containers-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wh-containers-sort-hint {
+  margin-left: 3px;
+  color: #1554c0;
+  font-size: 11px;
+}
+
+.wh-containers-load {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wh-containers-load-text {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wh-containers-load-rate {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-containers-load-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #eef0f4;
+}
+
+.wh-containers-load-fill {
+  height: 4px;
+  background: #6b8fd6;
+}
+
+.wh-containers-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.wh-containers-summary-row > td {
+  background: #fafbfc;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-containers-summary-label {
+  color: #4b5563;
+  font-weight: 500;
+}
+
+.wh-containers-summary-value {
+  font-weight: 600;
+}

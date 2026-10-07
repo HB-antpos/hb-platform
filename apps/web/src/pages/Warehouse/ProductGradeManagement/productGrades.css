@@ -1,0 +1,244 @@
+/* 商品等级管理页：等级页签 + 工具栏 + 已生效筛选 + 勾选条 + 表格。普通 CSS + wh-grades- 前缀（测试把 .css 打成空模块，不能用 CSS Modules） */
+
+.wh-grades-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+}
+
+.wh-grades-tabs {
+  padding: 0 16px;
+}
+
+.wh-grades-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 8px;
+}
+
+.wh-grades-search {
+  width: 280px;
+  max-width: 100%;
+}
+
+.wh-grades-filter-supplier,
+.wh-grades-filter-category {
+  width: 200px;
+  max-width: 100%;
+}
+
+.wh-grades-filter-status {
+  width: 150px;
+  max-width: 100%;
+}
+
+.wh-grades-spacer {
+  flex: 1 1 auto;
+}
+
+.wh-grades-active-filters {
+  padding: 0 16px 10px;
+}
+
+.wh-grades-selection:not(:empty) {
+  margin: 0 16px 10px;
+}
+
+.wh-grades-selection-label {
+  color: #1554c0;
+}
+
+.wh-grades-grade-buttons {
+  display: inline-flex;
+  gap: 4px;
+}
+
+/* 等级字母徽标：A 紫 / B 蓝 / C 橙 / D 红，与原 Tag 配色语义一致 */
+.wh-grades-letter {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.wh-grades-letter-A {
+  background: #efe9ff;
+  color: #5a3fc0;
+}
+
+.wh-grades-letter-B {
+  background: #e8f1ff;
+  color: #1554c0;
+}
+
+.wh-grades-letter-C {
+  background: #fff1db;
+  color: #8a4b00;
+}
+
+.wh-grades-letter-D {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.wh-grades-letter-other {
+  background: #f0f2f5;
+  color: #4b5563;
+}
+
+.wh-grades-grade-button.ant-btn {
+  width: 30px;
+  padding: 0;
+  font-weight: 700;
+}
+
+.wh-grades-grade-button-A.ant-btn {
+  border-color: #cbbdf7;
+  color: #5a3fc0;
+}
+
+.wh-grades-grade-button-B.ant-btn {
+  border-color: #b7d0ff;
+  color: #1554c0;
+}
+
+.wh-grades-grade-button-C.ant-btn {
+  border-color: #f2cf98;
+  color: #8a4b00;
+}
+
+.wh-grades-grade-button-D.ant-btn {
+  border-color: #f6c3bd;
+  color: #b42318;
+}
+
+.wh-grades-grade-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.wh-grades-grade-select {
+  /* 放得下「C 清库存·有货」这类最长的等级简称 */
+  width: 100%;
+  min-width: 128px;
+}
+
+.wh-grades-table {
+  border-top: 1px solid #eef0f4;
+}
+
+.wh-grades-table .ant-table-pagination.ant-pagination {
+  margin: 12px 16px;
+}
+
+.wh-grades-product {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wh-grades-product-image {
+  flex: none;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.wh-grades-product-placeholder {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: #f0f2f5;
+  color: #667085;
+}
+
+.wh-grades-product-text,
+.wh-grades-two-line {
+  min-width: 0;
+}
+
+.wh-grades-product-code {
+  color: #1f2430;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-grades-product-name,
+.wh-grades-two-line-main {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wh-grades-product-name {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.wh-grades-two-line {
+  font-size: 12px;
+}
+
+.wh-grades-two-line-sub {
+  color: #667085;
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-grades-category-link.ant-btn {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+  text-align: left;
+  white-space: normal;
+}
+
+.wh-grades-status {
+  min-width: 0;
+}
+
+/* 等级与仓库状态不一致：琥珀色小字，提醒但不喧宾夺主 */
+.wh-grades-mismatch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  color: #8a4b00;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wh-grades-number {
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-grades-number-muted {
+  color: #4b5563;
+}
+
+.wh-grades-number-strong {
+  font-weight: 600;
+}
+
+.wh-grades-undo-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

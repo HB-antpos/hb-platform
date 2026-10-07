@@ -175,3 +175,156 @@
 .list-toolbar-more-badge .ant-badge-count {
   box-shadow: none;
 }
+
+/* 状态页签：下划线页签 + 计数，既是主筛选也给出各状态数量（仓库管理各列表共用） */
+.list-toolbar-status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0 22px;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.list-toolbar-status-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  margin-bottom: -1px;
+  padding: 0 2px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: #4b5563;
+  font: inherit;
+  cursor: pointer;
+}
+
+.list-toolbar-status-tab:hover {
+  color: #1554c0;
+}
+
+.list-toolbar-status-tab:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.list-toolbar-status-tab-active {
+  border-bottom-color: #1677ff;
+  color: #1554c0;
+  font-weight: 600;
+}
+
+.list-toolbar-status-count {
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: #f0f2f5;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.list-toolbar-status-tab-active .list-toolbar-status-count {
+  background: #e8f1ff;
+  color: #1554c0;
+}
+
+.list-toolbar-status-count-warning,
+.list-toolbar-status-tab-active .list-toolbar-status-count-warning {
+  background: #fff1db;
+  color: #8a4b00;
+}
+
+.list-toolbar-status-count-danger,
+.list-toolbar-status-tab-active .list-toolbar-status-count-danger {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.list-toolbar-status-extra {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* 状态胶囊：圆点 + 文字，颜色只表示状态 */
+.list-toolbar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.list-toolbar-pill-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.list-toolbar-pill-blue {
+  background: #e8f1ff;
+  color: #1554c0;
+}
+
+.list-toolbar-pill-blue .list-toolbar-pill-dot {
+  background: #1677ff;
+}
+
+.list-toolbar-pill-orange {
+  background: #fff1db;
+  color: #8a4b00;
+}
+
+.list-toolbar-pill-orange .list-toolbar-pill-dot {
+  background: #f08c00;
+}
+
+.list-toolbar-pill-green {
+  background: #e6f5ec;
+  color: #17663a;
+}
+
+.list-toolbar-pill-green .list-toolbar-pill-dot {
+  background: #22a05a;
+}
+
+.list-toolbar-pill-gray {
+  background: #f0f2f5;
+  color: #4b5563;
+}
+
+.list-toolbar-pill-gray .list-toolbar-pill-dot {
+  background: #98a2b3;
+}
+
+.list-toolbar-pill-red {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.list-toolbar-pill-red .list-toolbar-pill-dot {
+  background: #f04438;
+}
+
+.list-toolbar-pill-purple {
+  background: #efe9ff;
+  color: #5a3fc0;
+}
+
+.list-toolbar-pill-purple .list-toolbar-pill-dot {
+  background: #7c4dff;
+}

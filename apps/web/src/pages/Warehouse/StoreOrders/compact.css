@@ -11,6 +11,9 @@
   flex: 0 0 auto;
   height: 22px;
   padding: 0;
+  color: #1554c0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   line-height: 22px;
   white-space: nowrap;
 }
@@ -22,30 +25,17 @@
   padding: 0;
 }
 
-.store-order-list-table .store-order-store-tag {
-  display: -webkit-box;
-  max-width: 100%;
-  overflow: hidden;
-  line-height: 1.25;
-  white-space: normal;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  word-break: break-word;
-}
-
 .store-order-list-table .store-order-two-line-text {
   display: -webkit-box;
   max-width: 100%;
   overflow: hidden;
-  line-height: 1.25;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.4;
   white-space: normal;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   word-break: break-word;
-}
-
-.store-order-list-table .store-order-store-tag {
-  margin-inline-end: 0;
 }
 
 .store-order-list-table .ant-table-thead > tr > th .ant-table-column-title {
@@ -107,6 +97,276 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* ===== 分店订货列表（改版）：页头、状态页签、工具栏、勾选条、两行单元格与本页合计 =====
+   颜色只表示状态；日期、分店等普通字段统一中性色。次要文字不浅于 #667085，保证对比度。 */
+.wh-orders-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wh-orders-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.wh-orders-tabs {
+  padding: 0 16px;
+}
+
+.wh-orders-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 8px;
+}
+
+.wh-orders-search {
+  width: 280px;
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.wh-orders-store-select {
+  width: 240px;
+  max-width: 100%;
+}
+
+.wh-orders-date-range {
+  width: 300px;
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+/* 订单日期有值时整块高亮，提示列表正被日期收窄 */
+.wh-orders-date-range.is-active {
+  border-color: #91b8ff;
+  background: #f5f9ff;
+}
+
+.wh-orders-field-prefix {
+  margin-right: 2px;
+  color: #667085;
+  white-space: nowrap;
+}
+
+.wh-orders-active-filters,
+.wh-orders-selection {
+  padding: 0 16px 10px;
+}
+
+.wh-orders-selection-summary {
+  font-variant-numeric: tabular-nums;
+}
+
+.wh-orders-selection-divider {
+  width: 1px;
+  height: 18px;
+  background: #b7d0ff;
+}
+
+/* 更多筛选：条件较多，排成两列；共用面板默认 280px，按内容加宽（不支持 :has 的浏览器退回单列）。 */
+.list-toolbar-more-panel:has(> .wh-orders-more-grid) {
+  width: 540px;
+  max-width: calc(100vw - 48px);
+}
+
+.wh-orders-more-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px 12px;
+}
+
+.wh-orders-more-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wh-orders-more-field .ant-picker {
+  width: 100%;
+}
+
+.wh-orders-more-label {
+  color: #667085;
+  font-size: 12px;
+}
+
+.wh-orders-more-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #eef0f4;
+}
+
+.wh-orders-panel .store-order-list-table {
+  border-top: 1px solid #eef0f4;
+}
+
+.wh-orders-panel .store-order-list-table .ant-table-thead > tr > th {
+  background: #f8f9fb;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.wh-orders-panel .store-order-list-table .ant-table-tbody > tr > td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  vertical-align: middle;
+}
+
+.wh-orders-panel .store-order-list-table .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: #f3f8ff;
+}
+
+.wh-orders-panel .store-order-list-table .ant-table-pagination.ant-pagination {
+  margin: 10px 0;
+  padding: 0 16px;
+}
+
+/* 两行单元格：主信息一行，补充信息一行（更新人、分店编码、出库、体积、发货金额） */
+.store-order-list-table .wh-orders-cell-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.4;
+}
+
+.store-order-list-table .wh-orders-cell-sub {
+  color: #667085;
+  font-size: 12px;
+}
+
+.store-order-list-table .wh-orders-ellipsis,
+.store-order-list-table .wh-orders-store-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.store-order-list-table .wh-orders-store-name {
+  color: #1f2430;
+  font-weight: 500;
+}
+
+.store-order-list-table .wh-orders-num,
+.store-order-list-table .wh-orders-num-stack {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.store-order-list-table .wh-orders-num-stack {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.store-order-list-table .wh-orders-amount {
+  font-weight: 500;
+}
+
+.store-order-list-table .wh-orders-outbound-unset {
+  color: #667085;
+}
+
+/* 今天出库：琥珀色加粗，提醒当天要发的单 */
+.store-order-list-table .wh-orders-outbound-today {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.store-order-list-table .wh-orders-unassigned {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px dashed #c9cfd9;
+  border-radius: 6px;
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.store-order-list-table .wh-orders-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.store-order-list-table .wh-orders-row-more-anchor {
+  display: inline-flex;
+}
+
+.store-order-list-table .wh-orders-row-actions .ant-btn-sm {
+  border-radius: 6px;
+}
+
+/* 合并列表头里的排序按钮（订单 / 出库、订货 / 发货金额） */
+.wh-orders-dual-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.wh-orders-dual-sort-sep {
+  color: #98a2b3;
+}
+
+.wh-orders-sort-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wh-orders-sort-toggle:hover {
+  background: rgba(22, 119, 255, 0.06);
+  color: #1554c0;
+}
+
+.wh-orders-sort-toggle:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+.wh-orders-sort-toggle.is-active {
+  color: #1554c0;
+  font-weight: 600;
+}
+
+.wh-orders-sort-toggle .anticon {
+  font-size: 11px;
+}
+
+/* 本页合计行：只汇总当前页数据 */
+.store-order-list-table .wh-orders-summary-row > td {
+  background: #fafbfc;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-order-list-table .wh-orders-summary-label {
+  color: #4b5563;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .store-order-list-column-filter {
@@ -455,4 +715,11 @@
 
 .store-order-product-picker-table .ant-pagination {
   margin: 6px 0 0;
+}
+
+/* 列表里的拣货负责人标签收紧内边距，176px 列宽内可并排两人，避免一人一行把行高撑大 */
+.wh-orders-picking-cell .picking-assign-person-chip {
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px 0 5px;
 }

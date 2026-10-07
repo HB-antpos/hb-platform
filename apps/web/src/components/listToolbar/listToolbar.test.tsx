@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ActiveFilterBar from './ActiveFilterBar'
 import SelectionActionBar from './SelectionActionBar'
+import StatusPill from './StatusPill'
+import StatusTabs from './StatusTabs'
 import ToolbarMenuButton from './ToolbarMenuButton'
 
 const noop = () => undefined
@@ -72,5 +74,30 @@ assert.equal((chipsMarkup.match(/class="list-toolbar-chip-remove"/g) ?? []).leng
 // 测试环境未初始化 i18n，react-i18next 直接返回默认文案且不插值，这里只校验标签存在。
 assert.ok(chipsMarkup.includes('aria-label="移除筛选条件：'), '移除按钮应带无障碍标签')
 assert.ok(chipsMarkup.includes('list-toolbar-chip-column'), '列头来源的条件应有区分样式')
+
+// 状态页签：当前项 aria-pressed，计数按千分位显示；未知计数不显示数字。
+const tabsMarkup = renderToStaticMarkup(
+  <StatusTabs
+    ariaLabel="订单状态"
+    activeKey="active"
+    onChange={noop}
+    items={[
+      { key: 'active', label: '进行中', count: 46 },
+      { key: 'done', label: '已完成', count: 1238 },
+      { key: 'all', label: '全部' },
+      { key: 'overdue', label: '逾期', count: 3, tone: 'danger' },
+    ]}
+  />,
+)
+assert.equal((tabsMarkup.match(/aria-pressed="true"/g) ?? []).length, 1, '只应有一个当前页签')
+assert.ok(tabsMarkup.includes('aria-label="订单状态"'), '页签组应带无障碍名称')
+assert.ok(tabsMarkup.includes('1,238'), '计数应按千分位显示')
+assert.equal((tabsMarkup.match(/list-toolbar-status-count /g) ?? []).length, 3, '未传计数的页签不应显示计数')
+assert.ok(tabsMarkup.includes('list-toolbar-status-count-danger'), '异常计数应有强调样式')
+
+// 状态胶囊：按色调输出类名，圆点对读屏隐藏。
+const pillMarkup = renderToStaticMarkup(<StatusPill tone="orange">配货中</StatusPill>)
+assert.ok(pillMarkup.includes('list-toolbar-pill-orange') && pillMarkup.includes('配货中'), '应按色调渲染状态文字')
+assert.ok(pillMarkup.includes('aria-hidden="true"'), '圆点应对读屏隐藏')
 
 console.log('listToolbar.test: ok')

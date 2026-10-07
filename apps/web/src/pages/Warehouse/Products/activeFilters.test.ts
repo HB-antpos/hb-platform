@@ -85,6 +85,23 @@ assert.deepEqual(multiChips, [
   { key: 'productType', label: '商品类型', value: '套装', source: 'toolbar' },
 ])
 
+// 「更多筛选」里的澳洲供应商按顶部筛选身份显示一次，排在商品类型之后、其余列头条件之前
+const localSupplierChips = buildActiveFilterChips({
+  query: { productType: 1, filters: { localSupplierCode: ['AU1'], itemNumber: ['__filter:eq:HB1'] } },
+  labels,
+  columns,
+  textModeLabels,
+})
+assert.deepEqual(localSupplierChips, [
+  { key: 'productType', label: '商品类型', value: '套装', source: 'toolbar' },
+  { key: 'localSupplierCode', label: '澳洲供应商', value: 'AU1 - Sydney', source: 'toolbar' },
+  { key: 'column:itemNumber', label: '货号', value: '等于 HB1', source: 'column' },
+])
+assert.deepEqual(buildActiveFilterRemovalOverrides('localSupplierCode', { localSupplierCode: ['AU1'], oemPrice: ['gte:5'] }), {
+  page: 1,
+  filters: { oemPrice: ['gte:5'] },
+})
+
 // 只看未分类优先于分类 GUID；isActive=false 也要显示
 const uncategorizedChips = buildActiveFilterChips({
   query: { uncategorizedOnly: true, categoryGuid: 'guid-1', isActive: false },

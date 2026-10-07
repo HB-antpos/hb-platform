@@ -1,36 +1,44 @@
 import {
-  DeleteOutlined,
+  DownOutlined,
   DownloadOutlined,
-  DollarOutlined,
-  FileExcelOutlined,
+  ExclamationCircleOutlined,
+  MoreOutlined,
+  PictureOutlined,
   ReloadOutlined,
   SearchOutlined,
   ShoppingCartOutlined,
+  SnippetsOutlined,
 } from '@ant-design/icons'
 import {
   Button,
-  Card,
   Checkbox,
+  Dropdown,
   Image,
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Radio,
   Progress,
   Select,
   Space,
   Tag,
   Tooltip,
+  TreeSelect,
   Typography,
   message,
 } from 'antd'
+import type { MenuProps } from 'antd'
 import type { FilterDropdownProps, FilterValue, SorterResult, TablePaginationConfig } from 'antd/es/table/interface'
 import type { ColumnsType } from 'antd/es/table'
 import type { Key } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageContainer from '../../../components/PageContainer'
+import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
+import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
+import StatusPill from '../../../components/listToolbar/StatusPill'
+import StatusTabs, { type StatusTabItem } from '../../../components/listToolbar/StatusTabs'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getActiveChinaSuppliers } from '../../../services/chinaSupplierService'
 import { exportProductGradesToExcel } from '../../../services/exportService'
 import { getActiveStores, type StoreOption } from '../../../services/storeService'
@@ -51,7 +59,11 @@ import {
   getGradesByProductCodes,
   getProductGradeList,
 } from '../../../services/productGradeService'
-import { PRODUCT_GRADE_CONFIG, type ProductGradeListItem } from '../../../types/productGrade'
+import {
+  PRODUCT_GRADE_CONFIG,
+  type ProductGradeListItem,
+  type ProductGradeListParams,
+} from '../../../types/productGrade'
 import {
   StoreOrderFlowStatus,
   StoreOrderStatusColorMap,
@@ -60,20 +72,32 @@ import {
 import {
   ALL_PRODUCTS_FILTER_KEY,
   UNCATEGORIZED_PRODUCTS_FILTER_KEY,
-  buildFilterCategoryOptions,
+  buildFilterCategoryTreeOptions,
 } from '../Categories/categoryProductFilters'
 import CategoryTreePicker from '../Products/CategoryTreePicker'
 import { formatWarehouseCategoryNodeName } from '../Products/categoryPath'
 import BatchPriceModal from './BatchPriceModal'
 import PasteImportModal from './PasteImportModal'
+import {
+  GRADE_KEYS,
+  buildGradeCountPlan,
+  collectGradeCounts,
+  formatPriceRangeSummary,
+  getGradeWarehouseMismatch,
+  gradeFilterToTab,
+  gradeTabToFilter,
+  hasNonGradeFilters,
+  isGradeKey,
+  type GradeCounts,
+  type GradeKey,
+  type GradeTabKey,
+} from './productGradeView'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import productGradesMessagesEn from './productGradesMessages.en.json'
+import productGradesMessagesZh from './productGradesMessages.zh.json'
+import './productGrades.css'
 
-const GRADE_TAG_COLOR: Record<string, string> = {
-  A: 'purple',
-  B: 'blue',
-  C: 'orange',
-  D: 'red',
-}
+registerPageMessages({ zh: productGradesMessagesZh, en: productGradesMessagesEn })
 
 interface SupplierOption {
   label: string
@@ -97,10 +121,23 @@ interface ProductGradeColumnFilters {
   oemPriceMax?: number
 }
 
+/** 仍在列头设置的条件（货号文本、三个价格区间）；供应商/分类/仓库状态/等级已移到工具栏与页签。 */
+type ProductGradeTableFilters = Pick<
+  ProductGradeColumnFilters,
+  | 'hbProductNo'
+  | 'domesticPriceMin'
+  | 'domesticPriceMax'
+  | 'importPriceMin'
+  | 'importPriceMax'
+  | 'oemPriceMin'
+  | 'oemPriceMax'
+>
+
 interface LoadListOptions {
   filters?: ProductGradeColumnFilters
   sortField?: string
   sortOrder?: ProductGradeSortOrder
+  search?: string
 }
 
 type AddToOrderMode = 'existing' | 'new'
@@ -110,10 +147,20 @@ const EDITABLE_STORE_ORDER_STATUSES = [
   StoreOrderFlowStatus.Submitted,
 ]
 const ORDER_DROPDOWN_PAGE_SIZE = 20
+const SEARCH_DEBOUNCE_MS = 300
+const IMAGE_FALLBACK = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjQiIHk9IjI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjY2NjIj7ml6DnvKnnlaXimLQ8L3RleHQ+PC9zdmc+'
 
-function formatPrice(value?: number, prefix = '¥') {
+// 等级简称（页签、行内下拉、勾选条按钮提示共用）；用字面量键便于文案契约测试核对。
+const GRADE_SHORT_LABEL_KEYS: Record<GradeKey, string> = {
+  A: 'warehouseUi.productGrades.gradeShortA',
+  B: 'warehouseUi.productGrades.gradeShortB',
+  C: 'warehouseUi.productGrades.gradeShortC',
+  D: 'warehouseUi.productGrades.gradeShortD',
+}
+
+function formatAmount(value?: number) {
   if (value === undefined || value === null) return '--'
-  return `${prefix}${value.toFixed(2)}`
+  return value.toFixed(2)
 }
 
 function encodePriceRange(min?: number, max?: number) {
@@ -143,17 +190,29 @@ function normalizeFilterNumber(value: string | number | null) {
   return Number.isFinite(numberValue) ? numberValue : undefined
 }
 
-function getBooleanFilterValue(value?: FilterValue | null) {
-  const first = value?.[0]
-  if (first === true || first === 'true') return true
-  if (first === false || first === 'false') return false
-  return undefined
-}
-
 function getOrderStatusI18nKey(status: StoreOrderFlowStatus) {
   return status === StoreOrderFlowStatus.ShoppingCart
     ? 'productGrade.orderStatusShoppingCart'
     : 'productGrade.orderStatusSubmitted'
+}
+
+/** 列表请求与页签计数共用同一套筛选参数映射，保证页签数与列表口径一致。 */
+function toListFilterParams(activeFilters: ProductGradeColumnFilters, activeSearch: string): ProductGradeListParams {
+  return {
+    search: activeSearch.trim() || undefined,
+    grade: activeFilters.grade || undefined,
+    supplierCode: activeFilters.supplierCode,
+    hbProductNo: activeFilters.hbProductNo,
+    categoryGuid: activeFilters.categoryGuid,
+    uncategorizedOnly: activeFilters.uncategorizedOnly,
+    warehouseIsActive: activeFilters.warehouseIsActive,
+    domesticPriceMin: activeFilters.domesticPriceMin,
+    domesticPriceMax: activeFilters.domesticPriceMax,
+    importPriceMin: activeFilters.importPriceMin,
+    importPriceMax: activeFilters.importPriceMax,
+    oemPriceMin: activeFilters.oemPriceMin,
+    oemPriceMax: activeFilters.oemPriceMax,
+  }
 }
 
 function collectCategoryExpandedKeys(nodes: WarehouseCategoryNode[], maxLevel: number, level = 1): string[] {
@@ -204,61 +263,88 @@ function collectCategoryAndDescendantGuids(nodes: WarehouseCategoryNode[], targe
   return result
 }
 
-interface CategoryFilterDropdownPanelProps {
-  filterProps: FilterDropdownProps
-  options: Array<{ label: string; value: string }>
-  loading: boolean
-  onLoad: () => void | Promise<void>
-  placeholder: string
-  queryText: string
-  resetText: string
+/** 等级字母徽标：A 紫 / B 蓝 / C 橙 / D 红；后端扩展的其他等级用中性色。 */
+function GradeLetter({ grade }: { grade: string }) {
+  return (
+    <span
+      className={`wh-grades-letter ${isGradeKey(grade) ? `wh-grades-letter-${grade}` : 'wh-grades-letter-other'}`}
+      aria-hidden="true"
+    >
+      {grade || '?'}
+    </span>
+  )
 }
 
-function CategoryFilterDropdownPanel({
-  filterProps,
-  options,
-  loading,
-  onLoad,
-  placeholder,
-  queryText,
-  resetText,
-}: CategoryFilterDropdownPanelProps) {
-  const { selectedKeys, setSelectedKeys, confirm, clearFilters } = filterProps
+/** 商品单元格：图片 + 货号 + 名称。图片懒加载、异步解码、固定尺寸，避免虚拟滚动时抖动。 */
+function ProductGradeProductCell({ record }: { record: ProductGradeListItem }) {
+  return (
+    <div className="wh-grades-product">
+      {record.productImage ? (
+        <Image
+          src={record.productImage}
+          alt={record.productName || record.hbProductNo || record.productCode}
+          width={40}
+          height={40}
+          loading="lazy"
+          decoding="async"
+          className="wh-grades-product-image"
+          preview={{ mask: '' }}
+          fallback={IMAGE_FALLBACK}
+        />
+      ) : (
+        <span className="wh-grades-product-placeholder" aria-hidden="true">
+          <PictureOutlined />
+        </span>
+      )}
+      <div className="wh-grades-product-text">
+        <div className="wh-grades-product-code">{record.hbProductNo || '--'}</div>
+        <Tooltip title={record.productName || undefined}>
+          <div className="wh-grades-product-name">{record.productName || '--'}</div>
+        </Tooltip>
+      </div>
+    </div>
+  )
+}
 
-  useEffect(() => {
-    void onLoad()
-  }, [onLoad])
+function ProductGradeSupplierCell({ record }: { record: ProductGradeListItem }) {
+  if (!record.supplierName && !record.supplierCode) {
+    return <>--</>
+  }
+  return (
+    <div className="wh-grades-two-line">
+      <div className="wh-grades-two-line-main" title={record.supplierName || undefined}>
+        {record.supplierName || record.supplierCode}
+      </div>
+      {record.supplierName && record.supplierCode ? (
+        <div className="wh-grades-two-line-sub">{record.supplierCode}</div>
+      ) : null}
+    </div>
+  )
+}
+
+/** 仓库状态胶囊 + 等级与上下架不一致的琥珀色提示（只按当前行字段判断）。 */
+function ProductGradeWarehouseStatusCell({ record }: { record: ProductGradeListItem }) {
+  const { t } = useTranslation()
+  const mismatch = getGradeWarehouseMismatch(record.grade, record.warehouseIsActive)
 
   return (
-    <Space direction="vertical" style={{ padding: 8, width: 260 }}>
-      <Select
-        showSearch
-        allowClear
-        placeholder={placeholder}
-        value={selectedKeys[0] as string | undefined}
-        options={options}
-        loading={loading}
-        optionFilterProp="label"
-        style={{ width: '100%' }}
-        onChange={(value) => {
-          setSelectedKeys(value && value !== ALL_PRODUCTS_FILTER_KEY ? [value] : [])
-        }}
-      />
-      <Space>
-        <Button type="primary" size="small" onClick={() => confirm()}>
-          {queryText}
-        </Button>
-        <Button
-          size="small"
-          onClick={() => {
-            clearFilters?.()
-            confirm()
-          }}
-        >
-          {resetText}
-        </Button>
-      </Space>
-    </Space>
+    <div className="wh-grades-status">
+      {record.warehouseIsActive === true ? (
+        <StatusPill tone="green">{t('productGrade.warehouseActive')}</StatusPill>
+      ) : record.warehouseIsActive === false ? (
+        <StatusPill tone="gray">{t('productGrade.warehouseInactive')}</StatusPill>
+      ) : (
+        <StatusPill tone="gray">{t('productGrade.warehouseStatusUnknown')}</StatusPill>
+      )}
+      {mismatch ? (
+        <div className="wh-grades-mismatch">
+          <ExclamationCircleOutlined aria-hidden="true" />
+          {mismatch === 'coreDelisted'
+            ? t('warehouseUi.productGrades.mismatchCoreDelisted')
+            : t('warehouseUi.productGrades.mismatchNoStockListed')}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -273,6 +359,7 @@ export default function ProductGradeManagementPage() {
   const [columnFilters, setColumnFilters] = useState<ProductGradeColumnFilters>({})
   const [sortField, setSortField] = useState<string | undefined>(undefined)
   const [sortOrder, setSortOrder] = useState<ProductGradeSortOrder>(null)
+  const [gradeCounts, setGradeCounts] = useState<GradeCounts>({})
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [supplierLoading, setSupplierLoading] = useState(false)
   const [suppliersLoaded, setSuppliersLoaded] = useState(false)
@@ -287,7 +374,6 @@ export default function ProductGradeManagementPage() {
   const [categorySaving, setCategorySaving] = useState(false)
   const [batchCategorySaving, setBatchCategorySaving] = useState(false)
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
-  const [batchGrade, setBatchGrade] = useState<string | undefined>(undefined)
   const [pasteImportOpen, setPasteImportOpen] = useState(false)
   const [batchPriceOpen, setBatchPriceOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -297,6 +383,8 @@ export default function ProductGradeManagementPage() {
   const [exportMessage, setExportMessage] = useState('')
   const [addOrderOpen, setAddOrderOpen] = useState(false)
   const [addOrderMode, setAddOrderMode] = useState<AddToOrderMode>('existing')
+  // 本次要加入订单的商品：勾选条入口为全部已选，行内 ⋯ 入口只有当前行。
+  const [addOrderProductCodes, setAddOrderProductCodes] = useState<string[]>([])
   const [editableOrders, setEditableOrders] = useState<StoreOrderListItem[]>([])
   const [orderPage, setOrderPage] = useState(0)
   const [orderTotal, setOrderTotal] = useState(0)
@@ -312,23 +400,31 @@ export default function ProductGradeManagementPage() {
   const [newOrderRemarks, setNewOrderRemarks] = useState('')
   const listAbortRef = useRef<AbortController | null>(null)
   const listRequestSeqRef = useRef(0)
+  const countAbortRef = useRef<AbortController | null>(null)
+  const countRequestSeqRef = useRef(0)
   const orderRequestSeqRef = useRef(0)
   const supplierAbortRef = useRef<AbortController | null>(null)
-  const gradeFilterOptions = [
-    { label: t('productGrade.allGrades'), value: '' },
-    ...Object.entries(PRODUCT_GRADE_CONFIG).map(([key, cfg]) => ({
-      label: t(`productGrade.${cfg.i18nKey}`),
-      value: key,
-    })),
-  ]
-  const categoryFilterOptions = useMemo(
-    () => buildFilterCategoryOptions(categoryTree, t, i18n.language),
+  // 最近一次真正发出列表请求时用的关键词：防抖到期时若与它相同（下拉筛选已顺带查过）就不重复请求。
+  const lastAppliedSearchRef = useRef('')
+  // 写操作后的「刷新列表 + 页签计数」，始终按最新页码与筛选执行（撤销按钮等延迟回调不会用到旧闭包）。
+  const refreshListAndCountsRef = useRef<() => void>(() => undefined)
+
+  const gradeFullLabel = useCallback(
+    (grade: GradeKey) => t(`productGrade.${PRODUCT_GRADE_CONFIG[grade].i18nKey}`),
+    [t],
+  )
+  const categoryFilterTreeOptions = useMemo(
+    // 「全部分类」用清空表示，树里只保留「未分类商品」快捷项和真实分类。
+    () => buildFilterCategoryTreeOptions(categoryTree, t, i18n.language).filter(
+      (option) => option.value !== ALL_PRODUCTS_FILTER_KEY,
+    ),
     [categoryTree, i18n.language, t],
   )
   const selectedTargetCategory = useMemo(
     () => findWarehouseCategory(categoryTree, targetCategoryGuid),
     [categoryTree, targetCategoryGuid],
   )
+  const activeGradeTab = gradeFilterToTab(columnFilters.grade)
 
   const loadSuppliers = useCallback(async () => {
     if (suppliersLoaded || supplierLoading) {
@@ -403,8 +499,11 @@ export default function ProductGradeManagementPage() {
     options: LoadListOptions = {},
   ) => {
     const activeFilters = options.filters ?? columnFilters
-    const activeSortField = options.sortField ?? sortField
-    const activeSortOrder = options.sortOrder ?? sortOrder
+    // 显式传入排序（包括清除排序时的 undefined / null）就以传入为准；用 ?? 会把「清除」回退成旧排序。
+    const activeSortField = 'sortField' in options ? options.sortField : sortField
+    const activeSortOrder = 'sortOrder' in options ? options.sortOrder : sortOrder
+    const activeSearch = options.search ?? search
+    lastAppliedSearchRef.current = activeSearch
     const requestSeq = listRequestSeqRef.current + 1
     listRequestSeqRef.current = requestSeq
     listAbortRef.current?.abort()
@@ -415,19 +514,7 @@ export default function ProductGradeManagementPage() {
       const result = await getProductGradeList({
         page: nextPage,
         pageSize: nextPageSize,
-        search: search || undefined,
-        grade: activeFilters.grade || undefined,
-        supplierCode: activeFilters.supplierCode,
-        hbProductNo: activeFilters.hbProductNo,
-        categoryGuid: activeFilters.categoryGuid,
-        uncategorizedOnly: activeFilters.uncategorizedOnly,
-        warehouseIsActive: activeFilters.warehouseIsActive,
-        domesticPriceMin: activeFilters.domesticPriceMin,
-        domesticPriceMax: activeFilters.domesticPriceMax,
-        importPriceMin: activeFilters.importPriceMin,
-        importPriceMax: activeFilters.importPriceMax,
-        oemPriceMin: activeFilters.oemPriceMin,
-        oemPriceMax: activeFilters.oemPriceMax,
+        ...toListFilterParams(activeFilters, activeSearch),
         sortField: activeSortField,
         sortDirection: activeSortOrder === 'ascend' ? 'asc' : activeSortOrder === 'descend' ? 'desc' : undefined,
         signal: controller.signal,
@@ -453,61 +540,208 @@ export default function ProductGradeManagementPage() {
     }
   }, [columnFilters, page, pageSize, search, sortField, sortOrder, t])
 
+  /**
+   * 页签计数：每个等级各发一条 pageSize=1 的请求取 total，带上除等级外的同样筛选。
+   * 新一轮发出时取消上一轮，只采纳最新一轮结果；单条失败时该页签不显示计数。
+   */
+  const loadGradeCounts = useCallback(async (activeFilters: ProductGradeColumnFilters, activeSearch: string) => {
+    const requestSeq = countRequestSeqRef.current + 1
+    countRequestSeqRef.current = requestSeq
+    countAbortRef.current?.abort()
+    const controller = new AbortController()
+    countAbortRef.current = controller
+
+    const plan = buildGradeCountPlan(hasNonGradeFilters(activeFilters, activeSearch))
+    const filterParams = toListFilterParams({ ...activeFilters, grade: undefined }, activeSearch)
+    const results = await Promise.allSettled(
+      plan.map((request) => getProductGradeList({
+        ...(request.withFilters ? filterParams : {}),
+        grade: request.grade,
+        page: 1,
+        pageSize: 1,
+        signal: controller.signal,
+      })),
+    )
+
+    if (requestSeq !== countRequestSeqRef.current) {
+      return
+    }
+    countAbortRef.current = null
+    setGradeCounts(collectGradeCounts(plan, results))
+  }, [])
+
+  useEffect(() => {
+    refreshListAndCountsRef.current = () => {
+      void loadList(page, pageSize)
+      void loadGradeCounts(columnFilters, search)
+    }
+  })
+
   useEffect(() => {
     void loadList(1, pageSize)
+    void loadGradeCounts({}, '')
     return () => {
       listAbortRef.current?.abort()
+      countAbortRef.current?.abort()
       supplierAbortRef.current?.abort()
     }
   }, [])
+
+  useEffect(() => {
+    // 关键词防抖约 300ms 后即时查询（不再需要「查询」按钮）；已被其他筛选顺带查过的关键词不重复请求。
+    if (search === lastAppliedSearchRef.current) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      if (search === lastAppliedSearchRef.current) {
+        return
+      }
+      void loadList(1, pageSize, { search })
+      void loadGradeCounts(columnFilters, search)
+    }, SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  /** 工具栏筛选与页签：改了立即查第 1 页；等级页签切换不影响各页签计数，无需重算。 */
+  const applyFilters = (
+    nextFilters: ProductGradeColumnFilters,
+    options: { search?: string; refreshCounts?: boolean } = {},
+  ) => {
+    const activeSearch = options.search ?? search
+    setColumnFilters(nextFilters)
+    void loadList(1, pageSize, { filters: nextFilters, search: activeSearch })
+    if (options.refreshCounts !== false) {
+      void loadGradeCounts(nextFilters, activeSearch)
+    }
+  }
+
+  const removeFilterFields = (fields: Array<keyof ProductGradeColumnFilters>) => {
+    const nextFilters = { ...columnFilters }
+    fields.forEach((field) => {
+      delete nextFilters[field]
+    })
+    applyFilters(nextFilters)
+  }
+
+  const handleGradeTabChange = (tab: GradeTabKey) => {
+    applyFilters({ ...columnFilters, grade: gradeTabToFilter(tab) }, { refreshCounts: false })
+  }
+
+  const handleCategoryFilterChange = (value?: string) => {
+    // 「未分类商品」哨兵值转成 uncategorizedOnly；清空即全部分类。分类筛选含子分类由后端处理。
+    const categoryFilterValue = value || undefined
+    applyFilters({
+      ...columnFilters,
+      categoryGuid: categoryFilterValue
+        && categoryFilterValue !== UNCATEGORIZED_PRODUCTS_FILTER_KEY
+        && categoryFilterValue !== ALL_PRODUCTS_FILTER_KEY
+        ? categoryFilterValue
+        : undefined,
+      uncategorizedOnly: categoryFilterValue === UNCATEGORIZED_PRODUCTS_FILTER_KEY ? true : undefined,
+    })
+  }
+
+  const handleClearAllFilters = () => {
+    // 「清空全部」清掉关键词与工具栏/列头条件；等级页签是主筛选，保持当前页签。
+    setSearch('')
+    applyFilters({ grade: columnFilters.grade }, { search: '' })
+  }
 
   const handleDelete = useCallback(async (id: string) => {
     try {
       await deleteProductGrade(id)
       message.success(t('common.deleteSuccess'))
-      void loadList(page, pageSize)
+      refreshListAndCountsRef.current()
     } catch (error) {
       console.error(error)
       message.error(t('common.deleteFailed'))
     }
-  }, [loadList, page, pageSize, t])
+  }, [t])
 
-  const handleBatchUpdate = async () => {
+  const handleBatchUpdate = async (targetGrade: GradeKey) => {
     if (selectedRowKeys.length === 0) {
       message.warning(t('productGrade.selectProductsFirst'))
-      return
-    }
-    if (!batchGrade) {
-      message.warning(t('productGrade.selectTargetGrade'))
       return
     }
     try {
       await batchUpdateGrades({
         items: selectedRowKeys.map((productCode) => ({
           productCode,
-          grade: batchGrade,
+          grade: targetGrade,
         })),
       })
       message.success(t('productGrade.batchUpdateSuccess', { count: selectedRowKeys.length }))
       setSelectedRowKeys([])
-      setBatchGrade(undefined)
-      void loadList(page, pageSize)
+      refreshListAndCountsRef.current()
     } catch (error) {
       console.error(error)
       message.error(t('productGrade.batchUpdateFailed'))
     }
   }
 
-  const handleInlineGradeChange = useCallback(async (productCode: string, newGrade: string) => {
+  const confirmBatchGrade = (targetGrade: GradeKey) => {
+    if (selectedRowKeys.length === 0) {
+      message.warning(t('productGrade.selectProductsFirst'))
+      return
+    }
+    // 批量改等级影响多行，先确认再提交（行内单个修改可直接撤销，不再弹确认）。
+    Modal.confirm({
+      title: t('warehouseUi.productGrades.batchSetGradeConfirm', { count: selectedRowKeys.length, grade: targetGrade }),
+      content: t('warehouseUi.productGrades.batchSetGradeConfirmHint', { label: gradeFullLabel(targetGrade) }),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      onOk: () => handleBatchUpdate(targetGrade),
+    })
+  }
+
+  const handleUndoGradeChange = useCallback(async (productCode: string, productLabel: string, previousGrade: string) => {
     try {
-      await createOrUpdateProductGrade({ productCode, grade: newGrade })
-      message.success(t('productGrade.updateSuccess'))
-      void loadList(page, pageSize)
+      // 撤销 = 用修改前的等级再调用一次同一个保存接口。
+      await createOrUpdateProductGrade({ productCode, grade: previousGrade })
+      message.success(t('warehouseUi.productGrades.gradeChangeUndone', { code: productLabel, grade: previousGrade }))
+      refreshListAndCountsRef.current()
     } catch (error) {
       console.error(error)
       message.error(t('productGrade.updateFailed'))
     }
-  }, [loadList, page, pageSize, t])
+  }, [t])
+
+  const handleInlineGradeChange = useCallback(async (record: ProductGradeListItem, newGrade: string) => {
+    const previousGrade = record.grade
+    if (newGrade === previousGrade) {
+      return
+    }
+    const productLabel = record.hbProductNo || record.productCode
+    try {
+      await createOrUpdateProductGrade({ productCode: record.productCode, grade: newGrade })
+      const messageKey = `product-grade-change-${record.productCode}`
+      message.success({
+        key: messageKey,
+        duration: 6,
+        content: (
+          <span className="wh-grades-undo-message">
+            {t('warehouseUi.productGrades.gradeChanged', { code: productLabel, from: previousGrade || '--', to: newGrade })}
+            {previousGrade ? (
+              <Button
+                type="link"
+                size="small"
+                onClick={() => {
+                  message.destroy(messageKey)
+                  void handleUndoGradeChange(record.productCode, productLabel, previousGrade)
+                }}
+              >
+                {t('warehouseUi.productGrades.undo')}
+              </Button>
+            ) : null}
+          </span>
+        ),
+      })
+      refreshListAndCountsRef.current()
+    } catch (error) {
+      console.error(error)
+      message.error(t('productGrade.updateFailed'))
+    }
+  }, [handleUndoGradeChange, t])
 
   const openExportModal = () => {
     if (selectedRowKeys.length === 0) {
@@ -633,11 +867,14 @@ export default function ProductGradeManagementPage() {
     }
   }, [storeLoading, storeOptions.length, t])
 
-  const openAddOrderModal = () => {
-    if (selectedRowKeys.length === 0) {
+  const openAddOrderModal = (productCodes?: string[]) => {
+    // 勾选条入口加入全部已选商品；行内 ⋯ 入口只加入这一行，不改变已勾选的其他商品。
+    const codes = productCodes ?? selectedRowKeys.map(String)
+    if (codes.length === 0) {
       message.warning(t('productGrade.selectProductsFirst'))
       return
     }
+    setAddOrderProductCodes(codes)
     setAddOrderMode('existing')
     setTargetOrderGuid(undefined)
     setTargetStoreCode(undefined)
@@ -653,7 +890,7 @@ export default function ProductGradeManagementPage() {
   }
 
   const handleAddToStoreOrder = async () => {
-    if (selectedRowKeys.length === 0) {
+    if (addOrderProductCodes.length === 0) {
       message.warning(t('productGrade.selectProductsFirst'))
       return
     }
@@ -668,7 +905,7 @@ export default function ProductGradeManagementPage() {
 
     setAddOrderSubmitting(true)
     try {
-      const selectedProductCodes = selectedRowKeys.map(String)
+      const selectedProductCodes = addOrderProductCodes
       // 跨页选择时当前表格不一定有完整行数据，提交前按商品编码回查最新商品字段。
       const latestRows = await getGradesByProductCodes(selectedProductCodes)
       const latestByCode = new Map(latestRows.map((item) => [item.productCode, item]))
@@ -709,7 +946,10 @@ export default function ProductGradeManagementPage() {
       await batchAddStoreOrderLines({ orderGUID, items })
       message.success(t('productGrade.addToStoreOrderSuccess', { count: items.length }))
       setAddOrderOpen(false)
-      setSelectedRowKeys([])
+      // 已加入订单的商品从勾选中移除：勾选条入口等同清空勾选，行内入口只去掉这一行。
+      const addedCodeSet = new Set(selectedProductCodes)
+      setSelectedRowKeys((keys) => keys.filter((key) => !addedCodeSet.has(key)))
+      setAddOrderProductCodes([])
       setTargetOrderGuid(undefined)
       setTargetStoreCode(undefined)
       setOrderKeyword('')
@@ -806,6 +1046,8 @@ export default function ProductGradeManagementPage() {
         const currentPageSelectedCount = data.filter((item) => selectedCodeSet.has(item.productCode)).length
         setData((items) => items.filter((item) => !selectedCodeSet.has(item.productCode)))
         setTotal((current) => Math.max(0, current - currentPageSelectedCount))
+        // 商品移出当前分类筛选后，各等级页签的数量也随之变化。
+        void loadGradeCounts(columnFilters, search)
       } else {
         setData((items) => items.map((item) => (
           selectedCodeSet.has(item.productCode)
@@ -868,6 +1110,7 @@ export default function ProductGradeManagementPage() {
       if (shouldRemoveFromCurrentPage) {
         setData((items) => items.filter((item) => item.productCode !== categoryEditRecord.productCode))
         setTotal((current) => Math.max(0, current - 1))
+        void loadGradeCounts(columnFilters, search)
       } else {
         setData((items) => items.map((item) => (
           item.productCode === categoryEditRecord.productCode
@@ -893,23 +1136,14 @@ export default function ProductGradeManagementPage() {
     }
   }
 
-  const getFiltersFromTable = (filters: Record<string, FilterValue | null>): ProductGradeColumnFilters => {
+  /** 只读取仍在列头的条件（货号、价格区间）；工具栏条件保留在 columnFilters 里不被覆盖。 */
+  const getFiltersFromTable = (filters: Record<string, FilterValue | null>): ProductGradeTableFilters => {
     const domesticRange = parsePriceRange(filters.domesticPrice?.[0])
     const importRange = parsePriceRange(filters.importPrice?.[0])
     const oemRange = parsePriceRange(filters.oemPrice?.[0])
-    const categoryFilterValue = getSingleFilterValue(filters.categoryGuid)
 
     return {
-      supplierCode: getSingleFilterValue(filters.supplierCode),
-      categoryGuid: categoryFilterValue
-        && categoryFilterValue !== UNCATEGORIZED_PRODUCTS_FILTER_KEY
-        && categoryFilterValue !== ALL_PRODUCTS_FILTER_KEY
-        ? categoryFilterValue
-        : undefined,
-      uncategorizedOnly: categoryFilterValue === UNCATEGORIZED_PRODUCTS_FILTER_KEY ? true : undefined,
-      grade: getSingleFilterValue(filters.grade),
       hbProductNo: getSingleFilterValue(filters.hbProductNo),
-      warehouseIsActive: getBooleanFilterValue(filters.warehouseIsActive),
       domesticPriceMin: domesticRange.min,
       domesticPriceMax: domesticRange.max,
       importPriceMin: importRange.min,
@@ -931,7 +1165,7 @@ export default function ProductGradeManagementPage() {
     const order = currentSorter?.order as ProductGradeSortOrder | undefined
     const nextSortField = field && order ? field : undefined
     const nextSortOrder = field && order ? order : null
-    const nextFilters = getFiltersFromTable(filters)
+    const nextFilters = { ...columnFilters, ...getFiltersFromTable(filters) }
     // 列头排序/过滤都走服务端，变化时回到第一页，避免只处理当前页数据。
     const nextPage = extra.action === 'paginate' ? pagination.current ?? 1 : 1
     // 表头受控状态在发请求前同步，异步成功回调不再用旧闭包覆盖当前筛选/排序。
@@ -944,57 +1178,11 @@ export default function ProductGradeManagementPage() {
       sortField: nextSortField,
       sortOrder: nextSortOrder,
     })
+    if (extra.action === 'filter') {
+      // 列头条件也参与页签计数口径。
+      void loadGradeCounts(nextFilters, search)
+    }
   }
-
-  const renderSupplierFilterDropdown = ({
-    selectedKeys,
-    setSelectedKeys,
-    confirm,
-    clearFilters,
-  }: FilterDropdownProps) => (
-    <Space direction="vertical" style={{ padding: 8, width: 240 }}>
-      <Select
-        showSearch
-        allowClear
-        placeholder={t('productGrade.filterSupplier')}
-        value={selectedKeys[0] as string | undefined}
-        options={suppliers}
-        loading={supplierLoading}
-        optionFilterProp="label"
-        style={{ width: '100%' }}
-        onDropdownVisibleChange={(open) => {
-          if (open) void loadSuppliers()
-        }}
-        onChange={(value) => setSelectedKeys(value ? [value] : [])}
-      />
-      <Space>
-        <Button type="primary" size="small" onClick={() => confirm()}>
-          {t('common.query')}
-        </Button>
-        <Button
-          size="small"
-          onClick={() => {
-            clearFilters?.()
-            confirm()
-          }}
-        >
-          {t('common.reset', '重置')}
-        </Button>
-      </Space>
-    </Space>
-  )
-
-  const renderCategoryFilterDropdown = (filterProps: FilterDropdownProps) => (
-    <CategoryFilterDropdownPanel
-      filterProps={filterProps}
-      options={categoryFilterOptions}
-      loading={categoryLoading}
-      onLoad={loadCategories}
-      placeholder={t('productGrade.category')}
-      queryText={t('common.query')}
-      resetText={t('common.reset', '重置')}
-    />
-  )
 
   const formatProductGradeCategory = useCallback((record: ProductGradeListItem) => {
     const name = formatWarehouseCategoryNodeName({
@@ -1093,46 +1281,86 @@ export default function ProductGradeManagementPage() {
     )
   }
 
+  const gradeSelectOptions = useMemo(
+    () => GRADE_KEYS.map((grade) => ({
+      value: grade,
+      title: gradeFullLabel(grade),
+      label: (
+        <span className="wh-grades-grade-option">
+          <GradeLetter grade={grade} />
+          {t(GRADE_SHORT_LABEL_KEYS[grade])}
+        </span>
+      ),
+    })),
+    [gradeFullLabel, t],
+  )
+
+  const rowMenuItems = useMemo<MenuProps['items']>(
+    () => [
+      { key: 'category', label: t('warehouseUi.productGrades.changeCategory') },
+      { key: 'order', label: t('productGrade.addToStoreOrder') },
+      { type: 'divider' },
+      { key: 'remove', label: t('warehouseUi.productGrades.removeGrade'), danger: true },
+    ],
+    [t],
+  )
+
+  const handleRowAction = (key: string, record: ProductGradeListItem) => {
+    if (key === 'category') {
+      void openCategoryEditModal(record)
+      return
+    }
+    if (key === 'order') {
+      openAddOrderModal([record.productCode])
+      return
+    }
+    if (key === 'remove') {
+      // 移除等级即原「删除等级」，保留二次确认。
+      Modal.confirm({
+        title: t('productGrade.confirmDelete'),
+        content: t('productGrade.deleteGradeHint'),
+        okText: t('warehouseUi.productGrades.removeGrade'),
+        okButtonProps: { danger: true },
+        cancelText: t('common.cancel'),
+        onOk: () => handleDelete(record.id),
+      })
+    }
+  }
+  // 列定义做了 memo，行内 ⋯ 菜单通过 ref 调用最新的处理函数，避免读到旧的勾选/分店加载状态。
+  const rowActionRef = useRef(handleRowAction)
+  useEffect(() => {
+    rowActionRef.current = handleRowAction
+  })
+
   const columns = useMemo<ColumnsType<ProductGradeListItem>>(
     () => [
       {
-        title: t('column.index'),
-        width: 50,
-        render: (_v, _r, index) => (page - 1) * pageSize + index + 1,
+        title: t('warehouseUi.productGrades.columnProduct'),
+        dataIndex: 'hbProductNo',
+        width: 192,
+        sorter: true,
+        sortOrder: sortField === 'hbProductNo' ? sortOrder : null,
+        filterDropdown: renderTextFilterDropdown,
+        filteredValue: columnFilters.hbProductNo ? [columnFilters.hbProductNo] : null,
+        render: (_value: string | undefined, record) => <ProductGradeProductCell record={record} />,
       },
       {
-        title: t('column.supplier'),
+        title: t('warehouseUi.productGrades.columnSupplier'),
         dataIndex: 'supplierName',
-        width: 150,
+        width: 132,
         sorter: true,
         sortOrder: sortField === 'supplierName' ? sortOrder : null,
-        render: (_, record) => record.supplierName || record.supplierCode || '--',
-      },
-      {
-        title: t('column.supplierCode'),
-        dataIndex: 'supplierCode',
-        width: 110,
-        sorter: true,
-        sortOrder: sortField === 'supplierCode' ? sortOrder : null,
-        filterDropdown: renderSupplierFilterDropdown,
-        filteredValue: columnFilters.supplierCode ? [columnFilters.supplierCode] : null,
-        render: (value?: string) => value || '--',
+        render: (_value: string | undefined, record) => <ProductGradeSupplierCell record={record} />,
       },
       {
         title: t('productGrade.category'),
         dataIndex: 'categoryGuid',
-        width: 150,
-        filterDropdown: renderCategoryFilterDropdown,
-        filteredValue: columnFilters.uncategorizedOnly
-          ? [UNCATEGORIZED_PRODUCTS_FILTER_KEY]
-          : columnFilters.categoryGuid
-            ? [columnFilters.categoryGuid]
-            : null,
+        width: 96,
         render: (_value: string | undefined, record) => (
           <Button
             type="link"
             size="small"
-            style={{ padding: 0, height: 'auto', whiteSpace: 'normal', textAlign: 'left' }}
+            className="wh-grades-category-link"
             onClick={(event) => {
               event.stopPropagation()
               void openCategoryEditModal(record)
@@ -1143,99 +1371,36 @@ export default function ProductGradeManagementPage() {
         ),
       },
       {
-        title: t('column.itemNumber'),
-        dataIndex: 'hbProductNo',
-        width: 140,
-        sorter: true,
-        sortOrder: sortField === 'hbProductNo' ? sortOrder : null,
-        filterDropdown: renderTextFilterDropdown,
-        filteredValue: columnFilters.hbProductNo ? [columnFilters.hbProductNo] : null,
-        render: (value?: string) => value || '--',
-      },
-      {
-        title: t('column.productName'),
-        dataIndex: 'productName',
-        width: 220,
-        ellipsis: true,
-        render: (value?: string) => (
-          <Tooltip title={value || undefined}>
-            <span>{value || '--'}</span>
-          </Tooltip>
-        ),
-      },
-      {
-        title: t('column.image'),
-        dataIndex: 'productImage',
-        width: 80,
-        render: (value: string | undefined, record) =>
-          value ? (
-            <Image
-              src={value}
-              alt={record.productName || record.hbProductNo || record.productCode}
-              width={48}
-              height={48}
-              loading="lazy"
-              decoding="async"
-              style={{ objectFit: 'contain' }}
-              preview={{ mask: '' }}
-              fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjQiIHk9IjI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjY2NjIj7ml6DnvKnnlaXimLQ8L3RleHQ+PC9zdmc+"
-            />
-          ) : (
-            '--'
-          ),
-      },
-      {
-        title: t('column.levelLabel'),
+        title: t('warehouseUi.productGrades.columnGrade'),
         dataIndex: 'grade',
-        width: 100,
+        width: 176,
         sorter: true,
         sortOrder: sortField === 'grade' ? sortOrder : null,
-        filters: Object.keys(PRODUCT_GRADE_CONFIG).map((key) => ({ text: key, value: key })),
-        filteredValue: columnFilters.grade ? [columnFilters.grade] : null,
         render: (grade: string, record) => (
           <Select
             value={grade}
             size="small"
-            style={{ width: 80 }}
-            onChange={(value) => void handleInlineGradeChange(record.productCode, value)}
-          >
-            {Object.keys(PRODUCT_GRADE_CONFIG).map((key) => (
-              <Select.Option key={key} value={key}>
-                <Tag color={GRADE_TAG_COLOR[key]} style={{ marginRight: 0 }}>
-                  {key}
-                </Tag>
-              </Select.Option>
-            ))}
-          </Select>
+            className="wh-grades-grade-select"
+            popupMatchSelectWidth={false}
+            aria-label={t('warehouseUi.productGrades.changeGradeOf', { code: record.hbProductNo || record.productCode })}
+            options={gradeSelectOptions}
+            onChange={(value: string) => void handleInlineGradeChange(record, value)}
+          />
         ),
       },
       {
         title: t('productGrade.warehouseStatus'),
         dataIndex: 'warehouseIsActive',
-        width: 110,
+        width: 130,
         sorter: true,
         sortOrder: sortField === 'warehouseIsActive' ? sortOrder : null,
-        filters: [
-          { text: t('productGrade.warehouseActive'), value: 'true' },
-          { text: t('productGrade.warehouseInactive'), value: 'false' },
-        ],
-        filteredValue: columnFilters.warehouseIsActive === undefined
-          ? null
-          : [String(columnFilters.warehouseIsActive)],
-        render: (value?: boolean | null) => {
-          if (value === true) {
-            return <Tag color="success">{t('productGrade.warehouseActive')}</Tag>
-          }
-          if (value === false) {
-            return <Tag>{t('productGrade.warehouseInactive')}</Tag>
-          }
-          return <Tag color="default">{t('productGrade.warehouseStatusUnknown')}</Tag>
-        },
+        render: (_value: boolean | null | undefined, record) => <ProductGradeWarehouseStatusCell record={record} />,
       },
       {
-        title: t('productGrade.domesticPriceRmb'),
+        title: t('warehouseUi.productGrades.columnDomesticPrice'),
         dataIndex: 'domesticPrice',
-        width: 110,
+        width: 100,
+        align: 'right',
         sorter: true,
         sortOrder: sortField === 'domesticPrice' ? sortOrder : null,
         filterDropdown: renderPriceFilterDropdown(
@@ -1245,12 +1410,13 @@ export default function ProductGradeManagementPage() {
         filteredValue: encodePriceRange(columnFilters.domesticPriceMin, columnFilters.domesticPriceMax)
           ? [encodePriceRange(columnFilters.domesticPriceMin, columnFilters.domesticPriceMax)!]
           : null,
-        render: (value?: number) => formatPrice(value),
+        render: (value?: number) => <span className="wh-grades-number wh-grades-number-muted">{formatAmount(value)}</span>,
       },
       {
-        title: t('productGrade.importPriceAud'),
+        title: t('warehouseUi.productGrades.columnImportPrice'),
         dataIndex: 'importPrice',
-        width: 110,
+        width: 100,
+        align: 'right',
         sorter: true,
         sortOrder: sortField === 'importPrice' ? sortOrder : null,
         filterDropdown: renderPriceFilterDropdown(
@@ -1260,12 +1426,13 @@ export default function ProductGradeManagementPage() {
         filteredValue: encodePriceRange(columnFilters.importPriceMin, columnFilters.importPriceMax)
           ? [encodePriceRange(columnFilters.importPriceMin, columnFilters.importPriceMax)!]
           : null,
-        render: (value?: number) => formatPrice(value, 'A$'),
+        render: (value?: number) => <span className="wh-grades-number">{formatAmount(value)}</span>,
       },
       {
-        title: t('productGrade.retailPriceAud'),
+        title: t('warehouseUi.productGrades.columnRetailPrice'),
         dataIndex: 'oemPrice',
-        width: 110,
+        width: 100,
+        align: 'right',
         sorter: true,
         sortOrder: sortField === 'oemPrice' ? sortOrder : null,
         filterDropdown: renderPriceFilterDropdown(
@@ -1275,44 +1442,168 @@ export default function ProductGradeManagementPage() {
         filteredValue: encodePriceRange(columnFilters.oemPriceMin, columnFilters.oemPriceMax)
           ? [encodePriceRange(columnFilters.oemPriceMin, columnFilters.oemPriceMax)!]
           : null,
-        render: (value?: number) => formatPrice(value, 'A$'),
+        render: (value?: number) => <span className="wh-grades-number wh-grades-number-strong">{formatAmount(value)}</span>,
       },
       {
-        title: t('column.action'),
+        title: '',
         key: 'action',
-        width: 80,
+        width: 44,
         fixed: 'right',
         render: (_, record) => (
-          <Popconfirm
-            title={t('productGrade.confirmDelete')}
-            description={t('productGrade.deleteGradeHint')}
-            onConfirm={() => void handleDelete(record.id)}
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: rowMenuItems,
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation()
+                rowActionRef.current(String(key), record)
+              },
+            }}
           >
-            <Tooltip title={t('productGrade.deleteGrade')}>
-              <Button type="link" danger icon={<DeleteOutlined />} size="small" />
-            </Tooltip>
-          </Popconfirm>
+            <Button
+              type="text"
+              size="small"
+              icon={<MoreOutlined />}
+              aria-label={t('warehouseUi.productGrades.rowActions')}
+              onClick={(event) => event.stopPropagation()}
+            />
+          </Dropdown>
         ),
       },
     ],
     [
-      categoryFilterOptions,
-      categoryLoading,
       columnFilters,
       formatProductGradeCategory,
-      handleDelete,
+      gradeSelectOptions,
       handleInlineGradeChange,
-      loadCategories,
       openCategoryEditModal,
-      page,
-      pageSize,
+      rowMenuItems,
       sortField,
       sortOrder,
-      supplierLoading,
-      suppliers,
       t,
     ],
   )
+
+  const gradeTabItems = useMemo<StatusTabItem<GradeTabKey>[]>(
+    () => [
+      { key: 'all', label: t('warehouseUi.productGrades.tabAll'), count: gradeCounts.all },
+      ...GRADE_KEYS.map((grade) => ({
+        key: grade,
+        label: t(GRADE_SHORT_LABEL_KEYS[grade]),
+        count: gradeCounts[grade],
+        prefix: <GradeLetter grade={grade} />,
+      })),
+    ],
+    [gradeCounts, t],
+  )
+
+  const supplierFilterLabel = columnFilters.supplierCode
+    ? suppliers.find((option) => option.value === columnFilters.supplierCode)?.label ?? columnFilters.supplierCode
+    : undefined
+  const categoryFilterNode = findWarehouseCategory(categoryTree, columnFilters.categoryGuid)
+  const categoryFilterLabel = columnFilters.uncategorizedOnly
+    ? t('warehouse.categories.uncategorizedOption', '未分类商品')
+    : columnFilters.categoryGuid
+      ? (categoryFilterNode ? formatWarehouseCategoryNodeName(categoryFilterNode, i18n.language) : columnFilters.categoryGuid)
+      : undefined
+
+  // 已生效筛选条：工具栏条件（关键词/供应商/分类/仓库状态）+ 列头条件（货号/价格区间）。等级由页签显示，不重复列出。
+  const activeFilterItems: ActiveFilterItem[] = []
+  if (search.trim()) {
+    activeFilterItems.push({
+      key: 'search',
+      label: t('warehouseUi.productGrades.filterKeyword'),
+      value: search.trim(),
+      source: 'toolbar',
+      onRemove: () => {
+        setSearch('')
+        applyFilters(columnFilters, { search: '' })
+      },
+    })
+  }
+  if (supplierFilterLabel) {
+    activeFilterItems.push({
+      key: 'supplierCode',
+      label: t('warehouseUi.productGrades.filterSupplier'),
+      value: supplierFilterLabel,
+      source: 'toolbar',
+      onRemove: () => removeFilterFields(['supplierCode']),
+    })
+  }
+  if (categoryFilterLabel) {
+    activeFilterItems.push({
+      key: 'category',
+      label: t('warehouseUi.productGrades.filterCategory'),
+      value: categoryFilterLabel,
+      source: 'toolbar',
+      onRemove: () => removeFilterFields(['categoryGuid', 'uncategorizedOnly']),
+    })
+  }
+  if (columnFilters.warehouseIsActive !== undefined) {
+    activeFilterItems.push({
+      key: 'warehouseIsActive',
+      label: t('warehouseUi.productGrades.filterWarehouseStatus'),
+      value: columnFilters.warehouseIsActive ? t('productGrade.warehouseActive') : t('productGrade.warehouseInactive'),
+      source: 'toolbar',
+      onRemove: () => removeFilterFields(['warehouseIsActive']),
+    })
+  }
+  if (columnFilters.hbProductNo) {
+    activeFilterItems.push({
+      key: 'hbProductNo',
+      label: t('warehouseUi.productGrades.filterItemNumber'),
+      value: columnFilters.hbProductNo,
+      source: 'column',
+      onRemove: () => removeFilterFields(['hbProductNo']),
+    })
+  }
+  const priceFilterChips: Array<{
+    key: string
+    label: string
+    min?: number
+    max?: number
+    fields: Array<keyof ProductGradeColumnFilters>
+  }> = [
+    {
+      key: 'domesticPrice',
+      label: t('warehouseUi.productGrades.filterDomesticPrice'),
+      min: columnFilters.domesticPriceMin,
+      max: columnFilters.domesticPriceMax,
+      fields: ['domesticPriceMin', 'domesticPriceMax'],
+    },
+    {
+      key: 'importPrice',
+      label: t('warehouseUi.productGrades.filterImportPrice'),
+      min: columnFilters.importPriceMin,
+      max: columnFilters.importPriceMax,
+      fields: ['importPriceMin', 'importPriceMax'],
+    },
+    {
+      key: 'oemPrice',
+      label: t('warehouseUi.productGrades.filterRetailPrice'),
+      min: columnFilters.oemPriceMin,
+      max: columnFilters.oemPriceMax,
+      fields: ['oemPriceMin', 'oemPriceMax'],
+    },
+  ]
+  priceFilterChips.forEach((chip) => {
+    const summary = formatPriceRangeSummary(chip.min, chip.max)
+    if (summary) {
+      activeFilterItems.push({
+        key: chip.key,
+        label: chip.label,
+        value: summary,
+        source: 'column',
+        onRemove: () => removeFilterFields(chip.fields),
+      })
+    }
+  })
+
+  const selectionMoreItems: MenuProps['items'] = [
+    { key: 'export', icon: <DownloadOutlined />, label: t('warehouseUi.productGrades.exportSelected') },
+    // 批量改价可直接写 HQ，保留危险色；弹窗内仍有目标库选择与风险提示。
+    { key: 'batchPrice', label: t('warehouseUi.productGrades.batchPrice'), danger: true },
+  ]
 
   const categoryEditCurrentText = categoryEditRecord ? formatProductGradeCategory(categoryEditRecord) : '--'
   const categoryEditTargetText = selectedTargetCategory
@@ -1320,114 +1611,155 @@ export default function ProductGradeManagementPage() {
     : ''
 
   return (
-    <PageContainer title={t('productGrade.title')} subtitle={t('productGrade.subtitle')}>
-      <Card>
-        <Space wrap style={{ marginBottom: 16 }}>
+    <PageContainer
+      compact
+      title={t('productGrade.title')}
+      subtitle={
+        gradeCounts.graded === undefined
+          ? undefined
+          : t('warehouseUi.productGrades.subtitle', { count: gradeCounts.graded })
+      }
+      extra={
+        <Space size={8} wrap>
+          {/* 导出只导出已勾选的商品：未勾选时禁用并说明原因（勾选条「更多」里也有同一入口）。 */}
+          <Tooltip title={selectedRowKeys.length ? undefined : t('warehouseUi.productGrades.exportNeedSelection')}>
+            <Button icon={<DownloadOutlined />} disabled={selectedRowKeys.length === 0} onClick={openExportModal}>
+              {t('warehouseUi.productGrades.export')}
+            </Button>
+          </Tooltip>
+          <Button type="primary" icon={<SnippetsOutlined />} onClick={() => setPasteImportOpen(true)}>
+            {t('warehouseUi.productGrades.pasteImport')}
+          </Button>
+        </Space>
+      }
+    >
+      <section className="wh-grades-card" aria-label={t('warehouseUi.productGrades.listRegion')}>
+        <div className="wh-grades-tabs">
+          <StatusTabs<GradeTabKey>
+            items={gradeTabItems}
+            activeKey={activeGradeTab}
+            onChange={handleGradeTabChange}
+            ariaLabel={t('warehouseUi.productGrades.tabsLabel')}
+          />
+        </div>
+
+        <div className="wh-grades-toolbar">
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder={t('warehouseUi.productGrades.searchPlaceholder')}
+            aria-label={t('warehouseUi.productGrades.searchPlaceholder')}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="wh-grades-search"
+          />
           <Select
             showSearch
             allowClear
-            placeholder={t('productGrade.filterSupplier')}
+            placeholder={t('warehouseUi.productGrades.supplierAll')}
             value={columnFilters.supplierCode}
             onDropdownVisibleChange={(open) => {
               if (open) void loadSuppliers()
             }}
-            onChange={(value) => {
-              setColumnFilters((current) => ({ ...current, supplierCode: value }))
-            }}
+            onChange={(value?: string) => applyFilters({ ...columnFilters, supplierCode: value || undefined })}
             options={suppliers}
             loading={supplierLoading}
-            style={{ width: 220 }}
             optionFilterProp="label"
+            className="wh-grades-filter-supplier"
+            popupMatchSelectWidth={300}
+          />
+          <TreeSelect
+            showSearch
+            allowClear
+            placeholder={t('warehouseUi.productGrades.categoryAll')}
+            value={columnFilters.uncategorizedOnly ? UNCATEGORIZED_PRODUCTS_FILTER_KEY : columnFilters.categoryGuid}
+            treeData={categoryFilterTreeOptions}
+            treeNodeFilterProp="searchText"
+            loading={categoryLoading}
+            onOpenChange={(open) => {
+              if (open) void loadCategories()
+            }}
+            onChange={(value?: string) => handleCategoryFilterChange(value)}
+            className="wh-grades-filter-category"
+            popupMatchSelectWidth={320}
+            listHeight={360}
+            notFoundContent={categoryLoading ? t('common.loading') : t('warehouse.categories.noCategoryData')}
           />
           <Select
-            value={columnFilters.grade ?? ''}
-            onChange={(value) => {
-              setColumnFilters((current) => ({ ...current, grade: value || undefined }))
-            }}
-            options={gradeFilterOptions}
-            style={{ width: 180 }}
-          />
-          <Input
-            placeholder={t('productGrade.searchPlaceholder')}
-            prefix={<SearchOutlined />}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
             allowClear
-            style={{ width: 260 }}
+            placeholder={t('warehouseUi.productGrades.warehouseStatusAll')}
+            value={columnFilters.warehouseIsActive === undefined ? undefined : String(columnFilters.warehouseIsActive)}
+            options={[
+              { label: t('productGrade.warehouseActive'), value: 'true' },
+              { label: t('productGrade.warehouseInactive'), value: 'false' },
+            ]}
+            onChange={(value?: string) => applyFilters({
+              ...columnFilters,
+              warehouseIsActive: value === 'true' ? true : value === 'false' ? false : undefined,
+            })}
+            className="wh-grades-filter-status"
           />
-          <Button type="primary" onClick={() => void loadList(1, pageSize)}>
-            {t('common.query')}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void loadList(page, pageSize)}>
-            {t('common.refresh')}
-          </Button>
-          <Button
-            type="dashed"
-            icon={<FileExcelOutlined />}
-            onClick={() => setPasteImportOpen(true)}
-          >
-            {t('productGrade.pasteImport')}
-          </Button>
-          <Button
-            icon={<DollarOutlined />}
-            disabled={selectedRowKeys.length === 0}
-            onClick={() => setBatchPriceOpen(true)}
-          >
-            {t('productGrade.batchPrice')}
-          </Button>
-          <Button
-            icon={<DownloadOutlined />}
-            disabled={selectedRowKeys.length === 0}
-            onClick={openExportModal}
-          >
-            {t('productGrade.exportExcel')}
-          </Button>
-          <Button
-            icon={<ShoppingCartOutlined />}
-            disabled={selectedRowKeys.length === 0}
-            onClick={openAddOrderModal}
-          >
-            {t('productGrade.addToStoreOrder')}
-          </Button>
-        </Space>
+          <span className="wh-grades-spacer" />
+          <Tooltip title={t('common.refresh')}>
+            <Button
+              icon={<ReloadOutlined />}
+              aria-label={t('common.refresh')}
+              onClick={() => refreshListAndCountsRef.current()}
+            />
+          </Tooltip>
+        </div>
 
-        {selectedRowKeys.length > 0 && (
-          <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
-            <Space>
-              <span>{t('productGrade.selectedProducts', { count: selectedRowKeys.length })}</span>
-              <Select
-                placeholder={t('productGrade.selectTargetGrade')}
-                value={batchGrade}
-                onChange={setBatchGrade}
-                style={{ width: 160 }}
-                allowClear
-              >
-                {Object.entries(PRODUCT_GRADE_CONFIG).map(([key, cfg]) => (
-                  <Select.Option key={key} value={key}>
-                    <Tag color={GRADE_TAG_COLOR[key]} style={{ marginRight: 4 }}>
-                      {key}
-                    </Tag>
-                    {t(`productGrade.${cfg.i18nKey}`)}
-                  </Select.Option>
-                ))}
-              </Select>
-              <Button type="primary" size="small" onClick={() => void handleBatchUpdate()}>
-                {t('productGrade.batchModify')}
+        <div className="wh-grades-active-filters">
+          {/* 没有生效条件时整行隐藏，与其他仓库列表页一致。 */}
+          {activeFilterItems.length ? <ActiveFilterBar items={activeFilterItems} onClearAll={handleClearAllFilters} /> : null}
+        </div>
+
+        <div className="wh-grades-selection">
+          <SelectionActionBar selectedCount={selectedRowKeys.length} onClearSelection={() => setSelectedRowKeys([])}>
+            <span className="wh-grades-selection-label">{t('warehouseUi.productGrades.setGradeTo')}</span>
+            <span className="wh-grades-grade-buttons">
+              {GRADE_KEYS.map((grade) => (
+                <Tooltip key={grade} title={gradeFullLabel(grade)}>
+                  <Button
+                    size="small"
+                    className={`wh-grades-grade-button wh-grades-grade-button-${grade}`}
+                    aria-label={t('warehouseUi.productGrades.setGradeTitle', { label: gradeFullLabel(grade) })}
+                    onClick={() => confirmBatchGrade(grade)}
+                  >
+                    {grade}
+                  </Button>
+                </Tooltip>
+              ))}
+            </span>
+            <Button size="small" onClick={() => void openBatchCategoryModal()}>
+              {t('warehouseUi.productGrades.changeCategory')}
+            </Button>
+            <Button size="small" icon={<ShoppingCartOutlined />} onClick={() => openAddOrderModal()}>
+              {t('productGrade.addToStoreOrder')}
+            </Button>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: selectionMoreItems,
+                onClick: ({ key }) => {
+                  if (key === 'export') {
+                    openExportModal()
+                  } else if (key === 'batchPrice') {
+                    setBatchPriceOpen(true)
+                  }
+                },
+              }}
+            >
+              <Button size="small">
+                {t('common.more')}
+                <DownOutlined />
               </Button>
-              <Button size="small" onClick={() => void openBatchCategoryModal()}>
-                {t('productGrade.batchCategory')}
-              </Button>
-              <Button size="small" icon={<ShoppingCartOutlined />} onClick={openAddOrderModal}>
-                {t('productGrade.addToStoreOrder')}
-              </Button>
-              <Button size="small" onClick={() => setSelectedRowKeys([])}>
-                {t('productGrade.cancelSelection')}
-              </Button>
-            </Space>
-          </Card>
-        )}
+            </Dropdown>
+          </SelectionActionBar>
+        </div>
 
         <MeasuredTable<ProductGradeListItem> metricId="warehouse.product-grade-management.table-1"
+          className="wh-grades-table"
           rowKey="productCode"
           virtual
           loading={loading}
@@ -1447,17 +1779,17 @@ export default function ProductGradeManagementPage() {
             showSizeChanger: true,
             pageSizeOptions: [20, 50, 100, 200, 500, 1000],
             showQuickJumper: true,
-            showTotal: (total) => t('common.total', { count: total }),
+            showTotal: (count) => t('warehouseUi.productGrades.paginationTotal', { count }),
           }}
-          scroll={{ x: 900, y: 600 }}
+          scroll={{ x: 1110, y: 600 }}
           onChange={handleTableChange}
         />
-      </Card>
+      </section>
 
       <PasteImportModal
         open={pasteImportOpen}
         onClose={() => setPasteImportOpen(false)}
-        onSuccess={() => void loadList(page, pageSize)}
+        onSuccess={() => refreshListAndCountsRef.current()}
       />
 
       <BatchPriceModal
@@ -1467,7 +1799,6 @@ export default function ProductGradeManagementPage() {
         onClose={() => setBatchPriceOpen(false)}
         onSuccess={() => {
           setSelectedRowKeys([])
-          setBatchGrade(undefined)
         }}
       />
 
@@ -1484,7 +1815,7 @@ export default function ProductGradeManagementPage() {
         maskClosable={!addOrderSubmitting}
       >
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <span>{t('productGrade.addToStoreOrderSelected', { count: selectedRowKeys.length })}</span>
+          <span>{t('productGrade.addToStoreOrderSelected', { count: addOrderProductCodes.length })}</span>
           <Radio.Group
             value={addOrderMode}
             onChange={(event) => setAddOrderMode(event.target.value)}
