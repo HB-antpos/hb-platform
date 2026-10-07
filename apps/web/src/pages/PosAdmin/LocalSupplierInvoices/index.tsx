@@ -120,7 +120,12 @@ import {
   type InvoiceListDateField,
   type InvoiceListDateRange,
 } from './listDateFilter'
-import { shouldRefreshInvoiceList, subscribeLocalSupplierInvoiceChanged } from './invoiceListSync'
+import {
+  INVOICE_LIST_REFRESH_DEBOUNCE_MS,
+  invoiceChangeAffectsListCounts,
+  shouldRefreshInvoiceList,
+  subscribeLocalSupplierInvoiceChanged,
+} from './invoiceListSync'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import invoiceMessagesEn from './invoiceMessages.en.json'
 import invoiceMessagesZh from './invoiceMessages.zh.json'
@@ -398,6 +403,10 @@ type SearchScope = 'invoiceNo' | 'product'
 interface LoadDataOptions {
   /** 后台刷新（如批量检测进度）：不显示表格加载态。 */
   silent?: boolean
+  /** 只重算分段/分店计数，不请求当前页（明细变化后判定计数受影响时补算）。 */
+  countsOnly?: boolean
+  /** 当前页成功写入后回调（仅最后一次请求会触发），用于对比刷新前后的行。 */
+  onPageLoaded?: (items: LocalSupplierInvoiceListDto[]) => void
 }
 type ProductCheckedSegment = 'all' | 'pending' | 'checked'
 
@@ -542,7 +551,7 @@ export default function LocalSupplierInvoicesPage() {
     [columnLabels, t],
   )
 
-  const loadData = async ({ silent = false }: LoadDataOptions = {}) => {
+  const loadData = async ({ silent = false, countsOnly = false, onPageLoaded }: LoadDataOptions = {}) => {
     if (!mountedRef.current) return
 
     if (shouldSkipScopedStoreQuery(managedStoreCodes)) {
@@ -651,6 +660,8 @@ export default function LocalSupplierInvoicesPage() {
       )
     }
 
+    if (countsOnly) return
+
     await runLatestGuardedRequest(
       listRequestGuardRef.current,
       () =>
@@ -662,13 +673,14 @@ export default function LocalSupplierInvoicesPage() {
           sortModel,
         } as Record<string, unknown>),
       {
-        // 批量检测进度触发的刷新不转圈，避免每处理完几张单整表闪一次。
+        // 批量检测进度、明细变化触发的刷新不转圈，避免整表闪烁或被遮罩挡住操作。
         onStart: () => {
           if (!silent) setLoading(true)
         },
         onSuccess: (result) => {
           setData(result?.items ?? [])
           setTotal(result?.total ?? 0)
+          onPageLoaded?.(result?.items ?? [])
         },
         onError: () => message.error(t('posAdmin.invoices.loadFailed', '加载进货单列表失败')),
         onSettled: () => setLoading(false),
@@ -695,20 +707,53 @@ export default function LocalSupplierInvoicesPage() {
     void latestLoadDataRef.current()
   }, [page, pageSize, sortBy, sortOrder, managedStoreCodeKey])
 
-  // 明细页检测、保存、执行等操作后会发布变化通知：先标记过期，列表可见时再刷新当前页与两组计数。
-  const listStaleRef = useRef(false)
+  // 明细页检测、保存、执行等操作后会发布变化通知：防抖片刻后在后台静默刷新当前页（不转圈、不清旧行），
+  // 用户通常还在明细页，返回时数据已是新的；若已切回列表就不再等防抖，立即刷新。
+  // 分段/分店计数只在变化的单影响到成员关系或分组时才补算，其余情况只请求当前页这一路。
+  const dataRef = useRef(data)
+  const changedInvoiceGuidsRef = useRef(new Set<string>())
+  const listRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [listStaleVersion, setListStaleVersion] = useState(0)
-  useEffect(() => subscribeLocalSupplierInvoiceChanged(() => {
-    listStaleRef.current = true
+  useLayoutEffect(() => {
+    dataRef.current = data
+  })
+  const flushInvoiceListRefresh = useCallback(() => {
+    if (listRefreshTimerRef.current != null) {
+      clearTimeout(listRefreshTimerRef.current)
+      listRefreshTimerRef.current = null
+    }
+    // 关键位置：变化的单号要等当前页「成功写入」后才从集合里移除。
+    // 刷新请求被后一次请求顶掉或失败时，这些单号仍留在集合里，下一次刷新会一并带上，不会漏算计数。
+    const changedGuids = [...changedInvoiceGuidsRef.current]
+    if (changedGuids.length === 0) return
+    const previousRows = dataRef.current
+    void latestLoadDataRef.current({
+      silent: true,
+      onPageLoaded: (items) => {
+        for (const guid of changedGuids) {
+          changedInvoiceGuidsRef.current.delete(guid)
+        }
+        if (!invoiceChangeAffectsListCounts(changedGuids, previousRows, items)) return
+        lastCountFilterKeyRef.current = null
+        lastStoreCountFilterKeyRef.current = null
+        void latestLoadDataRef.current({ silent: true, countsOnly: true })
+      },
+    })
+  }, [])
+  useEffect(() => subscribeLocalSupplierInvoiceChanged((invoiceGuid) => {
+    changedInvoiceGuidsRef.current.add(invoiceGuid)
+    if (listRefreshTimerRef.current != null) clearTimeout(listRefreshTimerRef.current)
+    listRefreshTimerRef.current = setTimeout(flushInvoiceListRefresh, INVOICE_LIST_REFRESH_DEBOUNCE_MS)
     setListStaleVersion((version) => version + 1)
-  }), [])
+  }), [flushInvoiceListRefresh])
   useEffect(() => {
-    if (!shouldRefreshInvoiceList(listStaleRef.current, active)) return
-    listStaleRef.current = false
-    lastCountFilterKeyRef.current = null
-    lastStoreCountFilterKeyRef.current = null
-    void latestLoadDataRef.current()
-  }, [active, listStaleVersion])
+    if (shouldRefreshInvoiceList(changedInvoiceGuidsRef.current.size > 0, active)) {
+      flushInvoiceListRefresh()
+    }
+  }, [active, listStaleVersion, flushInvoiceListRefresh])
+  useEffect(() => () => {
+    if (listRefreshTimerRef.current != null) clearTimeout(listRefreshTimerRef.current)
+  }, [])
 
   useLayoutEffect(() => {
     let frameId: number | null = null
