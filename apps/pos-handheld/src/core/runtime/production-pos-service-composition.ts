@@ -132,6 +132,7 @@ import {
   SETTINGS_CATALOG_DOWNLOAD_PERMISSION,
   SETTINGS_CATALOG_RESET_PERMISSION,
 } from "../../features/settings/settings-authorization";
+import type { SettingsReceiptProfileSyncResult } from "../../features/settings/settings-presenter";
 import type { SettingsRuntimeFactory } from "../../features/settings/settings-runtime";
 import {
   SharedHeldOrderCoordinator,
@@ -160,6 +161,12 @@ import { SpecialProductsPresenter } from "../../features/special-products/specia
 import type { SpecialProductsRuntimeFactory } from "../../features/special-products/special-products-runtime";
 import type { LocalSyncHistoryPort } from "@hb/pos-sync/features/sync-history/sync-history-domain";
 import { SyncHistoryPresenter } from "@hb/pos-sync/features/sync-history/sync-history-presenter";
+import {
+  ReceiptProfileSyncController,
+  type ReceiptProfileSyncLogEvent,
+  type ReceiptProfileSyncResult,
+  type ReceiptProfileSyncTrigger,
+} from "@hb/pos-sync/features/receipt-profile/receipt-profile-sync-controller";
 import { HbposStoreApi, type HbposTransport } from "../api/hbpos-api";
 import { createAud, type CartSnapshot } from "../contracts";
 import type { NewTransactionGate } from "../contracts/app-updates";
@@ -172,7 +179,10 @@ import type {
 } from "@hb/pos-domain/core/contracts/terminal-cart";
 import type { LocalCatalogMatch } from "../db/catalog-repository";
 import { PosDatabase } from "../db/pos-database";
-import type { ReceiptPrinterSettings } from "../db/pos-settings-repository";
+import {
+  ReceiptProfileRejectedError,
+  type ReceiptPrinterSettings,
+} from "../db/pos-settings-repository";
 import type { LinklyOrderSyncEnvironment } from "../db/sqlite-order-sync-material";
 import type {
   PosRepositoryBundle,
@@ -413,6 +423,15 @@ export type ProductionPosRuntimeServices = Readonly<{
   catalog: PosCatalogRuntimeService;
   catalogRefresh: CatalogRefreshCoordinator;
   receiptSettings: PosReceiptSettingsService;
+  /**
+   * 总部下发小票资料的后台同步入口：壳层在设备就绪、回前台、网络恢复、每 60 秒调用。
+   * 只暴露「请求一次后台同步」，写入、回执、退避都封装在组合根内；永不 reject。
+   */
+  receiptProfileSync: Readonly<{
+    requestSync(
+      trigger: Exclude<ReceiptProfileSyncTrigger, "manual">,
+    ): Promise<ReceiptProfileSyncResult>;
+  }>;
   fulfilment: PosFulfilmentRuntimeService;
   sync: Readonly<{
     requestDrain: PosSyncCoordinator["requestDrain"];
@@ -528,6 +547,10 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   syncSecurity: SyncSecurityPort;
   auditMetadata: HbposAuditMetadata;
   supportAppId: string;
+  /** 总部下发小票资料同步的日志旁路（只含版本号、原因等非敏感标量）；缺省时静默。 */
+  reportReceiptProfileSync?:
+    | ((event: ReceiptProfileSyncLogEvent) => void)
+    | undefined;
   /** 支付草稿冷启动降级为耐久购物车恢复时上报；缺省时静默。 */
   reportPaymentRecoveryFallback?:
     | ((fallback: PaymentCartDurableRecoveryFallback) => void)
@@ -787,13 +810,63 @@ export function createProductionPosRuntimeServices(
   const receiptSettings: PosReceiptSettingsService = {
     get: () => baseReceiptSettings.get(),
     save: async (settings) => {
-      await settingsRepository.saveReceiptPrinterSettings(settings);
+      // 用户保存走「保留下发资料」写入：下发版本与（已下发时的）六项资料以已落盘值为准，
+      // 设置页里过期的草稿不能把后台刚同步的新资料盖回旧值。
+      await settingsRepository.saveReceiptPrinterSettingsPreservingProfile(settings);
       const resolved = await baseReceiptSettings.get();
       dailyCloseReceiptSettings = resolved;
       void recoverVoucherBalancePrints();
       return resolved;
     },
   };
+  // 总部下发小票资料同步：纯 TS 控制器，本机存储/网络/时钟都从这里注入。
+  const receiptProfileApi = new HbposStoreApi(input.transport);
+  const receiptProfileSync = new ReceiptProfileSyncController({
+    api: {
+      sync: (knownVersion, signal) =>
+        receiptProfileApi.syncReceiptProfile(knownVersion, signal),
+      ack: (version, signal) =>
+        receiptProfileApi.ackReceiptProfile(version, signal),
+    },
+    store: {
+      // 经可信读取路径：换店时先清空旧店资料与两个版本，随后的同步自动拉取新店。
+      read: async () => {
+        const current = await baseReceiptSettings.get();
+        return {
+          profileVersion: current.profileVersion,
+          profileAckedVersion: current.profileAckedVersion,
+        };
+      },
+      apply: async (profile) => {
+        try {
+          await settingsRepository.applyReceiptProfile(profile);
+        } catch (error) {
+          if (error instanceof ReceiptProfileRejectedError) return "rejected";
+          throw error;
+        }
+        // 日结回单读取组合根缓存的设置；落盘后立刻刷新，下一张小票/回单即用新资料。
+        // 刷新失败不影响已落盘的资料，缓存在下一次保存或重启时恢复一致。
+        try {
+          dailyCloseReceiptSettings = await baseReceiptSettings.get();
+        } catch {
+          // 保留旧缓存。
+        }
+        return "applied";
+      },
+      markAcked: async (version) => {
+        await settingsRepository.markReceiptProfileAcked(version);
+      },
+    },
+    boundStoreCode: () => {
+      // 未注册设备的组合根以 "unregistered" 占位，没有可信门店，不发同步请求。
+      const storeCode = input.auditMetadata.storeCode.trim();
+      return storeCode === "" || storeCode === "unregistered" ? null : storeCode;
+    },
+    now: () => input.clock.now().getTime(),
+    ...(input.reportReceiptProfileSync
+      ? { log: input.reportReceiptProfileSync }
+      : {}),
+  });
   const createCashCheckout = (cashierLease: TrustedCashierLease) =>
     createSessionCashCheckout(
       input,
@@ -1575,6 +1648,18 @@ export function createProductionPosRuntimeServices(
         receiptProfile: {
           load: (signal) =>
             new HbposStoreApi(input.transport).getCurrentReceiptProfile(signal),
+          // 「立即同步」：等在途后台同步结束后再跑一轮，随后读回最新落盘资料供设置页刷新只读展示。
+          sync: async () => {
+            const result = await receiptProfileSync.syncNow();
+            if (result.status === "updated" || result.status === "up-to-date") {
+              return {
+                status: result.status,
+                version: result.version,
+                printer: await baseReceiptSettings.get(),
+              };
+            }
+            return settingsReceiptProfileSyncOutcome(result);
+          },
         },
         paymentConfigurationTransition: {
           run: (operation) => {
@@ -1936,6 +2021,8 @@ export function createProductionPosRuntimeServices(
       return () => {
         // runtime 重载会重新构造组合根；先解除 scope 订阅，避免旧 cashier/cart 闭包被永久保留。
         disposeDeviceScopeListener();
+        // 中止在途的下发资料同步请求，之后的触发一律跳过。
+        receiptProfileSync.dispose();
         shutdown ??= Promise.all([
           catalogRefreshCoordinator.shutdown(),
           sharedHeldOrderPublicationLoop?.shutdown() ?? Promise.resolve(),
@@ -1998,6 +2085,9 @@ export function createProductionPosRuntimeServices(
     catalog,
     catalogRefresh: catalogRefreshCoordinator,
     receiptSettings,
+    receiptProfileSync: {
+      requestSync: (trigger) => receiptProfileSync.requestSync(trigger),
+    },
     fulfilment: {
       drainAutomaticQueue: () => fulfilment.drainAutomaticQueue(),
       retryFailedPrint: (jobId) => fulfilment.retryFailedPrint(jobId),
@@ -3348,6 +3438,34 @@ async function runUpdateTransitionWithActiveCart<T>(
   // 不持有普通 operation lease，固定锁序因此不会形成 activeCart 反向等待。
   await activeCart.waitForExclusiveLeaseRelease();
   return activeCart.runUpdateTransitionExclusive(() => operation());
+}
+
+/** 把控制器的失败原因收敛成设置页能展示的几类文案。 */
+function settingsReceiptProfileSyncOutcome(
+  result: ReceiptProfileSyncResult,
+): SettingsReceiptProfileSyncResult {
+  switch (result.status) {
+    case "not-published":
+      return { status: "not-published" };
+    case "failed":
+      switch (result.reason) {
+        case "offline":
+          return { status: "failed", reason: "offline" };
+        case "unauthorized":
+          return { status: "failed", reason: "unauthorized" };
+        case "unsupported":
+          return { status: "failed", reason: "unsupported" };
+        case "invalid-response":
+        case "invalid-profile":
+        case "store-mismatch":
+          return { status: "failed", reason: "invalid" };
+        default:
+          return { status: "failed", reason: "failed" };
+      }
+    default:
+      // skipped（设备未就绪/已关闭）与不会出现在此分支的成功态。
+      return { status: "failed", reason: "failed" };
+  }
 }
 
 function receiptSettingsService(

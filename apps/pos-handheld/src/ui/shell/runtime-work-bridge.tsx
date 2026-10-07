@@ -2,9 +2,32 @@ import { useEffect, useMemo, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
 import { usePosShellStore } from "./pos-shell-store";
-import { RuntimeWorkController } from "./runtime-work-controller";
+import {
+  RuntimeWorkController,
+  type RuntimeBackgroundWorkPort,
+} from "./runtime-work-controller";
 
+import type { ExpoPosRuntimeServices } from "@/core/runtime/expo-pos-runtime";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
+
+/** 总部下发小票资料的定时检查周期。 */
+const RECEIPT_PROFILE_SYNC_INTERVAL_MS = 60_000;
+
+function isDeviceAuthorized(
+  services: Pick<ExpoPosRuntimeServices, "device"> | null,
+): boolean {
+  return (
+    services?.device === "authorized-online" ||
+    services?.device === "authorized-local"
+  );
+}
+
+/** 设备未认证（待注册/待审批/已锁定）时不暴露下发资料同步，避免无凭据请求。 */
+function toWorkPort(services: ExpoPosRuntimeServices): RuntimeBackgroundWorkPort {
+  return isDeviceAuthorized(services)
+    ? services
+    : { ...services, receiptProfileSync: undefined };
+}
 
 export function RuntimeWorkBridge() {
   const runtime = usePosRuntime();
@@ -14,10 +37,13 @@ export function RuntimeWorkBridge() {
   const controller = useMemo(
     () =>
       runtime.services
-        ? new RuntimeWorkController(runtime.services)
+        ? new RuntimeWorkController(toWorkPort(runtime.services))
         : null,
     [runtime.services],
   );
+  // 控制器只在设备认证就绪后才带上下发资料同步入口；设备状态变化会换新 services，
+  // 随之重建控制器并立即补一次同步，即「设备认证就绪后立即一次」。
+  const receiptProfileEnabled = controller !== null && isDeviceAuthorized(runtime.services);
 
   useEffect(() => {
     if (!controller) return undefined;
@@ -47,6 +73,18 @@ export function RuntimeWorkBridge() {
     }, 30 * 60 * 1_000);
     return () => clearInterval(timer);
   }, [connectivity, runtime.services]);
+
+  useEffect(() => {
+    // 前台常驻且在线时每 60 秒检查一次总部下发的小票资料；后台不轮询，回前台另有立即触发。
+    if (!controller || !receiptProfileEnabled || connectivity !== "online") {
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      if (AppState.currentState !== "active") return;
+      controller.onReceiptProfileTimer();
+    }, RECEIPT_PROFILE_SYNC_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [connectivity, controller, receiptProfileEnabled]);
 
   useEffect(() => {
     if (!controller || connectivity === "checking") return undefined;

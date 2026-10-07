@@ -203,5 +203,7 @@ function receiptSettings() {
     abn: "12 345 678 901",
     returnPolicy: "",
     profileStoreCode: "S001",
+    profileVersion: 0,
+    profileAckedVersion: 0,
   };
 }

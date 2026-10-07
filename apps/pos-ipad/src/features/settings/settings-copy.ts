@@ -247,6 +247,10 @@ export const settingsEnglishCopy = {
   "field.receiptAbn": "ABN",
   "field.receiptReturnPolicy": "Return policy",
   "peripherals.loadStoreProfile": "Load from store",
+  "peripherals.syncStoreProfile": "Sync now",
+  "peripherals.storeProfileManaged":
+    "Managed by head office. Edit it in Web store management.",
+  "peripherals.storeProfileVersion": "Applied version {{version}}",
   "action.connect": "Connect & Save",
   "printer.pickerTitle": "Choose a nearby Bluetooth device",
   "printer.pickerHint":
@@ -473,6 +477,19 @@ export const settingsEnglishCopy = {
   "status.printer-test-passed": "Test receipt sent",
   "status.receipt-profile-loaded": "Loaded. Save to apply.",
   "status.receipt-profile-load-failed": "Could not load store profile.",
+  "status.receipt-profile-not-published":
+    "Head office has not published a receipt profile yet.",
+  "status.receipt-profile-sync-failed": "Sync failed. Please try again later.",
+  "status.receipt-profile-sync-forbidden":
+    "Sync failed: this account is not allowed to sync the receipt profile.",
+  "status.receipt-profile-sync-invalid":
+    "Sync failed: the profile published by head office is invalid.",
+  "status.receipt-profile-sync-offline":
+    "Sync failed: no network connection.",
+  "status.receipt-profile-sync-unsupported":
+    "Sync failed: the server does not support receipt profile publishing yet.",
+  "status.receipt-profile-synced": "Updated to version {{version}}",
+  "status.receipt-profile-up-to-date": "Already up to date",
   "status.restart-failed": "Restart or endpoint change failed",
   "status.safety-check-failed": "Safety state unavailable; action blocked",
   "status.scanner-test-failed": "Scanner test failed",
@@ -724,6 +741,9 @@ export const settingsChineseCopy = {
   "field.receiptAbn": "ABN",
   "field.receiptReturnPolicy": "退货政策",
   "peripherals.loadStoreProfile": "从门店载入",
+  "peripherals.syncStoreProfile": "立即同步",
+  "peripherals.storeProfileManaged": "由总部下发，请在 Web 分店管理修改",
+  "peripherals.storeProfileVersion": "已应用版本 {{version}}",
   "action.connect": "连接并保存",
   "printer.pickerTitle": "选择附近的蓝牙设备",
   "printer.pickerHint":
@@ -934,6 +954,14 @@ export const settingsChineseCopy = {
   "status.printer-test-passed": "测试小票已发送",
   "status.receipt-profile-loaded": "已载入，保存后生效",
   "status.receipt-profile-load-failed": "门店资料载入失败",
+  "status.receipt-profile-not-published": "总部还没有下发过小票资料",
+  "status.receipt-profile-sync-failed": "同步失败，请稍后重试",
+  "status.receipt-profile-sync-forbidden": "同步失败：当前账号没有同步小票资料的权限",
+  "status.receipt-profile-sync-invalid": "同步失败：总部下发的资料无效",
+  "status.receipt-profile-sync-offline": "同步失败：网络不可用",
+  "status.receipt-profile-sync-unsupported": "同步失败：服务器暂不支持小票资料下发",
+  "status.receipt-profile-synced": "已更新到版本 {{version}}",
+  "status.receipt-profile-up-to-date": "已是最新",
   "status.restart-failed": "重启或地址切换失败",
   "status.safety-check-failed": "无法确认本地安全状态，操作已阻断",
   "status.scanner-test-failed": "扫码测试失败",

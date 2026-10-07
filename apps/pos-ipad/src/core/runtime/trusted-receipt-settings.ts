@@ -20,6 +20,7 @@ const MAX_STORE_NAME_CHARACTERS = 120;
  * 当前分店本机保存资料优先，设备展示名仅在本机为空时兜底。
  * scope 不匹配时只清资料、保留 peripheral/开关，并把当前店号持久化绑定，
  * 避免旧店资料在下一次读取时被再次当作 legacy 采用。
+ * 换店清空资料时同时清空总部下发版本与已回执版本，下一轮同步会按新店重新拉取。
  */
 export async function resolveTrustedReceiptPrinterSettings(
   current: ReceiptPrinterSettings,
@@ -48,6 +49,8 @@ export async function resolveTrustedReceiptPrinterSettings(
       phone: "",
       abn: "",
       returnPolicy: "",
+      profileVersion: 0,
+      profileAckedVersion: 0,
     });
     await persist(save, persisted);
     return Object.freeze({
@@ -74,6 +77,8 @@ export async function resolveTrustedReceiptPrinterSettings(
         phone: "",
         abn: "",
         returnPolicy: "",
+        profileVersion: 0,
+        profileAckedVersion: 0,
       });
       return Object.freeze({
         ...cleared,

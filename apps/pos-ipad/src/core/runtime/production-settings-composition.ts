@@ -29,6 +29,7 @@ import {
   type SettingsPaymentSettingsInput,
   type SettingsPendingDataSnapshot,
   type SettingsReceiptProfileDraft,
+  type SettingsReceiptProfileSyncResult,
   type SettingsLinklyPairingPort,
   type SettingsLinklySetupControlPort,
   type SettingsScannerTestResult,
@@ -120,6 +121,10 @@ export type ProductionSettingsCompositionInput = Readonly<{
   }>;
   receiptProfile: Readonly<{
     load(signal: AbortSignal): Promise<SettingsReceiptProfileDraft | null>;
+    /** 「立即同步」；缺省表示不支持，设置页按同步失败处理。 */
+    sync?:
+      | ((signal: AbortSignal) => Promise<SettingsReceiptProfileSyncResult>)
+      | undefined;
   }>;
   paymentConfiguration: Readonly<{
     current: SettingsPaymentSettingsInput | null;

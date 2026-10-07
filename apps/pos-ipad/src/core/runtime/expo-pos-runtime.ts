@@ -898,6 +898,15 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         instanceId: installationId,
       },
       supportAppId: POS_APP_ID,
+      // 总部下发小票资料同步只上报版本号、触发源与失败原因，绝不带地址/电话/ABN 等资料内容。
+      reportReceiptProfileSync(event) {
+        applicationLog?.record({
+          level: event.level,
+          message: event.message,
+          category: "settings.receipt-profile",
+          properties: event.properties,
+        });
+      },
       reportPaymentRecoveryFallback(fallback) {
         // 设备仍可启动，但说明耐久草稿已无法被当前代码重算；须人工在支付页完成恢复或安全取消。
         applicationLog?.record({
