@@ -1460,4 +1460,25 @@
   <data name="dailyClose.linklySettlement.notToday" xml:space="preserve">
     <value>Linkly settlement is only available when the business date is today. Change the business date to {0:yyyy-MM-dd} and try again.</value>
   </data>
+  <data name="datePicker.previousDay" xml:space="preserve">
+    <value>Previous day</value>
+  </data>
+  <data name="datePicker.nextDay" xml:space="preserve">
+    <value>Next day</value>
+  </data>
+  <data name="datePicker.previousMonth" xml:space="preserve">
+    <value>Previous month</value>
+  </data>
+  <data name="datePicker.nextMonth" xml:space="preserve">
+    <value>Next month</value>
+  </data>
+  <data name="datePicker.today" xml:space="preserve">
+    <value>Today</value>
+  </data>
+  <data name="datePicker.yesterday" xml:space="preserve">
+    <value>Yesterday</value>
+  </data>
+  <data name="history.quickRange.last7Days" xml:space="preserve">
+    <value>Last 7 days</value>
+  </data>
 </root>

@@ -1,6 +1,7 @@
 <UserControl x:Class="Hbpos.Client.Wpf.Views.Screens.DailyCloseView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Hbpos.Client.Wpf.Views.Controls"
              xmlns:converters="clr-namespace:Hbpos.Client.Wpf.Converters"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
@@ -387,39 +388,26 @@
                                         </StackPanel>
                                     </Button>
 
-                                    <Border x:Name="DailyCloseBusinessDateBlock"
-                                            Grid.Column="1"
-                                            Margin="0,0,14,0"
-                                            Padding="10,3"
-                                            VerticalAlignment="Center"
-                                            Background="{DynamicResource PosSurfaceAltBrush}"
-                                            BorderBrush="{DynamicResource PosBorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="8">
-                                        <StackPanel Orientation="Horizontal">
-                                            <materialDesign:PackIcon Kind="CalendarMonthOutline"
-                                                                     Width="20"
-                                                                     Height="20"
-                                                                     Margin="0,0,8,0"
-                                                                     VerticalAlignment="Center"
-                                                                     Foreground="{DynamicResource PosTextSecondaryBrush}" />
-                                            <StackPanel VerticalAlignment="Center">
-                                                <TextBlock Text="{loc:Loc dailyClose.businessDate}" Style="{StaticResource SettlementLabelStyle}" FontSize="11" />
-                                                <DatePicker SelectedDate="{Binding SelectedDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                            IsEnabled="{Binding CanChangeBusinessDate}"
-                                                            Height="30"
-                                                            MinWidth="150"
-                                                            FontSize="16"
-                                                            FontWeight="Bold" />
-                                            </StackPanel>
-                                            <Border Margin="10,0,0,0" Style="{StaticResource TodayChipStyle}">
-                                                <TextBlock Text="{loc:Loc dailyClose.today}"
-                                                           FontSize="12"
-                                                           FontWeight="Bold"
-                                                           Foreground="{DynamicResource PosSuccessTextBrush}" />
-                                            </Border>
-                                        </StackPanel>
-                                    </Border>
+                                    <!-- 营业日期：前一天 / 日期 / 后一天三个触屏按钮，点日期弹出大格子月历；不能选未来日期。 -->
+                                    <StackPanel x:Name="DailyCloseBusinessDateBlock"
+                                                Grid.Column="1"
+                                                Margin="0,0,14,0"
+                                                VerticalAlignment="Center"
+                                                Orientation="Horizontal">
+                                        <controls:PosDatePicker SelectedDate="{Binding SelectedDate, Mode=TwoWay}"
+                                                                IsEnabled="{Binding CanChangeBusinessDate}"
+                                                                Label="{loc:Loc dailyClose.businessDate}"
+                                                                ShowDayStepButtons="True"
+                                                                ButtonHeight="48"
+                                                                DateButtonMinWidth="200"
+                                                                AutomationProperties.AutomationId="DailyCloseBusinessDatePicker" />
+                                        <Border Margin="10,0,0,0" Style="{StaticResource TodayChipStyle}">
+                                            <TextBlock Text="{loc:Loc dailyClose.today}"
+                                                       FontSize="12"
+                                                       FontWeight="Bold"
+                                                       Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                        </Border>
+                                    </StackPanel>
 
                                     <Border x:Name="DailyCloseNavigationTabsBorder"
                                             Grid.Column="2"
