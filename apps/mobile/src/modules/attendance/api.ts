@@ -19,6 +19,7 @@ import type {
   AttendanceLeaveRequestPayload,
   AttendanceLocationSamplePayload,
   AttendanceManagedPunchAdjustmentPayload,
+  AttendanceMealState,
   AttendancePublishWeekPayload,
   AttendancePunch,
   AttendancePunchMutationResult,
@@ -46,6 +47,10 @@ import {
   resolveAustralianHolidayJurisdiction,
 } from "@/modules/attendance/public-holiday-sync";
 import { normalizeAttendanceToday } from "@/modules/attendance/attendance-today-normalization";
+import {
+  normalizeAttendanceMealClaim,
+  normalizeAttendanceMealState,
+} from "@/modules/attendance/attendance-meal-break";
 import {
   normalizeAttendancePunchAdjustment,
   normalizeAttendancePunchAdjustmentPreview,
@@ -185,6 +190,7 @@ function normalizeSchedule(raw: ApiRecord): AttendanceSchedule {
     status: asString(pick(raw, "status", "Status"), "Scheduled"),
     remark: asOptionalString(pick(raw, "remark", "Remark", "note", "Note")),
     mealBreakCount: asOptionalNumber(pick(raw, "mealBreakCount", "MealBreakCount")) ?? null,
+    effectiveMealBreakCount: asOptionalNumber(pick(raw, "effectiveMealBreakCount", "EffectiveMealBreakCount")),
     minorCompliance: normalizeMinorCompliance(pick(raw, "minorCompliance", "MinorCompliance")),
     isMine: asBoolean(pick(raw, "isMine", "IsMine", "mine", "Mine")),
     holidayName: asOptionalString(pick(raw, "holidayName", "HolidayName")),
@@ -216,6 +222,8 @@ function normalizePunch(raw: ApiRecord): AttendancePunch {
     posDeviceCode: asOptionalString(pick(raw, "posDeviceCode", "PosDeviceCode")),
     serverTimeUtc: asOptionalString(pick(raw, "serverTimeUtc", "ServerTimeUtc")),
     minorCompliance: normalizeMinorCompliance(pick(raw, "minorCompliance", "MinorCompliance")),
+    // 最后一次下班带了用餐声明时，打卡响应里才有 mealClaim。
+    mealClaim: normalizeAttendanceMealClaim(pick(raw, "mealClaim", "MealClaim")),
   };
 }
 
@@ -402,6 +410,7 @@ function normalizeApproval(raw: ApiRecord): AttendanceApproval {
     adjustment: isRecord(pick(raw, "adjustment", "Adjustment"))
       ? normalizeAttendancePunchAdjustment(pick(raw, "adjustment", "Adjustment"))
       : undefined,
+    mealClaim: normalizeAttendanceMealClaim(pick(raw, "mealClaim", "MealClaim")),
   };
 }
 
@@ -623,6 +632,18 @@ export async function punchAttendance(
     response.data,
     normalizePunch(isRecord(response.data) ? response.data : {}),
   );
+}
+
+/** 当班一键开始休息：不扫码、不要求定位；只在进行中的班段里有效。 */
+export async function startMyMealBreak(storeCode: string): Promise<AttendanceMealState | undefined> {
+  const response = await apiClient.post(`${ATTENDANCE_BASE}/my/meal-breaks/start`, { storeCode });
+  return normalizeAttendanceMealState(response.data);
+}
+
+/** 结束进行中的休息。 */
+export async function endMyMealBreak(storeCode: string): Promise<AttendanceMealState | undefined> {
+  const response = await apiClient.post(`${ATTENDANCE_BASE}/my/meal-breaks/end`, { storeCode });
+  return normalizeAttendanceMealState(response.data);
 }
 
 export async function resolveAttendanceQr(

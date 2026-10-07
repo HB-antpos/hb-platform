@@ -17,6 +17,13 @@ function normalizeUtcInstant(value: string) {
     : `${milliseconds}Z`;
 }
 
+/** API 的 UTC instant 转为毫秒时间戳；后端从数据库读出的 UTC 列不带 Z，同样按 UTC 解析。无效时返回 undefined。 */
+export function toAttendanceUtcMillis(value?: string | null) {
+  if (!value?.trim()) return undefined;
+  const millis = new Date(normalizeUtcInstant(value)).getTime();
+  return Number.isFinite(millis) ? millis : undefined;
+}
+
 /** API 的 UTC instant 转为手机所在时区的无 offset wall time。 */
 export function toAttendanceDeviceLocalTime(value?: string | null) {
   if (!value?.trim()) return "";

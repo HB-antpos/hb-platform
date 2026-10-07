@@ -49,4 +49,11 @@ assert.match(source, /resolveAttendancePunchDisplayTime\(segment\.clockOut\)/,
 assert.match(source, /formatTime\(session\.startTime\)[\s\S]{0,80}formatTime\(session\.endTime\)/,
   "排班开始结束时间属于门店本地 wall time，禁止经过手机时区转换");
 
+assert.match(source, /allowPunch \? findActiveMealSession\(today\?\.scheduleSessions\) : undefined/,
+  "用餐区只在当天显示，历史日期不能出现开始/结束休息");
+assert.match(source, /resolveAttendanceMealPanelState\(mealSession\.meal, currentTime\.getTime\(\)\)/,
+  "用餐区状态必须随每秒刷新的时钟计算，到点自动出现提醒、休息计时实时走");
+assert.match(source, /today\.meal\.paid/,
+  "有用餐扣除或加回时必须展示计薪工时");
+
 console.log("today-punch-card-contract.test.ts: ok");

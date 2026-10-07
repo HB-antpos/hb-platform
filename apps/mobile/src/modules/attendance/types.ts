@@ -76,6 +76,18 @@ export interface AttendanceSchedule {
   remark?: string;
   /** 店长指定的用餐次数（每次 30 分钟，0 = 不扣用餐）；为空表示按班次时长默认。 */
   mealBreakCount?: number | null;
+  /** 后端算好的有效用餐次数（指定值优先，否则按时长默认）；旧后端不返回。 */
+  effectiveMealBreakCount?: number;
+  /** 计薪时扣除的用餐分钟（是否休息过都按排班扣）。 */
+  mealDeductionMinutes?: number;
+  /** 声明没休息且店长已批准、加回工时的分钟。 */
+  approvedMealAddBackMinutes?: number;
+  /** 声明没休息、等待店长审核的分钟（只展示，未计入计薪工时）。 */
+  pendingMealAddBackMinutes?: number;
+  /** 计薪工时 = 已闭合班段工时 − 用餐扣除 + 已批准加回。 */
+  paidMinutes?: number;
+  /** 当班用餐状态：仅「我的今日」且排班有用餐时返回。 */
+  meal?: AttendanceMealState;
   minorCompliance?: MinorEmploymentComplianceEvaluation;
   isMine: boolean;
   holidayName?: string;
@@ -129,6 +141,8 @@ export interface AttendancePunch {
   earlyLeaveMinutes?: number;
   lateDepartureMinutes?: number;
   minorCompliance?: MinorEmploymentComplianceEvaluation;
+  /** 打卡响应里的用餐声明：最后一次下班带了声明才有；声明没休息时 status 为 Pending。 */
+  mealClaim?: AttendanceMealClaim;
 }
 
 export interface AttendancePunchMutationResult extends AttendancePunch {
@@ -137,6 +151,54 @@ export interface AttendancePunchMutationResult extends AttendancePunch {
   punchType: "ClockIn" | "ClockOut";
   serverTimeUtc: string;
   storeTimeZone: string;
+}
+
+export interface AttendanceMealBreakRecord {
+  breakGuid: string;
+  startUtc: string;
+  endUtc?: string;
+}
+
+/** 某个排班此刻的用餐状态，由后端按排班与实际工时计算。 */
+export interface AttendanceMealState {
+  scheduleGuid: string;
+  storeCode: string;
+  effectiveMealBreakCount: number;
+  /** 已有的休息：满 10 分钟的休息记录 + 班段间满 30 分钟的空档 + 此前已声明的次数。 */
+  handledCount: number;
+  requiredCount: number;
+  /** 此刻下班是否为最后一次下班；只有最后一次下班才检查用餐。 */
+  clockOutWouldBeFinal: boolean;
+  /** 此刻下班缺几次休息；大于 0 时扫码前先问员工。 */
+  missingCountIfClockOutNow: number;
+  hasOpenBreak: boolean;
+  openBreakStartedAtUtc?: string;
+  /** 连续工作满 4 小时的提醒时间；为空表示无需提醒。 */
+  nextReminderAtUtc?: string;
+  serverTimeUtc?: string;
+  breaks: AttendanceMealBreakRecord[];
+}
+
+/** 下班时对「缺休息」的声明：notTakenCount 为没休息的次数，0 表示都休息了。 */
+export interface AttendanceMealDeclaration {
+  notTakenCount: number;
+  reason?: string;
+}
+
+export type AttendanceMealClaimStatus = "None" | "Pending" | "Approved" | "Rejected" | "Cancelled" | string;
+
+export interface AttendanceMealClaim {
+  claimGuid: string;
+  scheduleGuid?: string;
+  workDate?: string;
+  expectedCount: number;
+  recordedCount: number;
+  missingCount: number;
+  notTakenCount: number;
+  claimedMinutes: number;
+  approvedMinutes?: number;
+  status: AttendanceMealClaimStatus;
+  reason?: string;
 }
 
 export interface AttendancePunchSegment {
@@ -231,6 +293,8 @@ export interface AttendancePunchPayload {
   locationLongitude?: number;
   locationAccuracy?: number;
   locationCapturedAtUtc?: string;
+  /** 扫码前员工对缺休息的回答；旧后端忽略此字段。 */
+  mealDeclaration?: AttendanceMealDeclaration;
 }
 
 export interface AttendanceQrResolveResult {
@@ -446,7 +510,7 @@ export interface AttendanceLeaveAttachmentUploadResult {
 export interface AttendanceApproval {
   approvalGuid: string;
   sourceGuid: string;
-  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | string;
+  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | "MealBreak" | string;
   employeeName?: string;
   storeCode?: string;
   storeName?: string;
@@ -458,6 +522,8 @@ export interface AttendanceApproval {
   candidateOvertimeMinutes?: number;
   approvedOvertimeMinutes?: number;
   adjustment?: AttendancePunchAdjustment;
+  /** sourceType 为 MealBreak 时的用餐声明。 */
+  mealClaim?: AttendanceMealClaim;
 }
 
 export interface AttendanceApprovalPayload {
