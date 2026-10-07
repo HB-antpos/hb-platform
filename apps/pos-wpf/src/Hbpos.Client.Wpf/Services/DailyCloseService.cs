@@ -137,7 +137,8 @@ internal static class DailyClosePeriodFactory
 
 public sealed class DailyCloseService(
     ILocalDailyCloseRepository repository,
-    ILocalSqliteCheckpointService? checkpointService = null) : IDailyCloseService
+    ILocalSqliteCheckpointService? checkpointService = null,
+    IDailyCloseUploadScheduler? uploadScheduler = null) : IDailyCloseService
 {
     public static IReadOnlyList<CashDenomination> AustralianDenominations { get; } =
     [
@@ -184,6 +185,8 @@ public sealed class DailyCloseService(
             var archive = await repository.SaveAsync(report, cashCountsSnapshot, cancellationToken);
             // SaveAsync 已提交后不能再把调用方取消报告成“日结未保存”。
             await TryCheckpointWalAfterDailyCloseAsync(CancellationToken.None);
+            // 本地提交成功后才唤醒上传 Worker；唤醒只是尽力而为，失败不能把"日结已保存"变成失败。
+            TryRequestDailyCloseUpload();
             return archive;
         }, cancellationToken);
     }
@@ -198,6 +201,27 @@ public sealed class DailyCloseService(
         return Task.Run(
             () => repository.GetArchivesAsync(sessionSnapshot, businessDateSnapshot, cancellationToken),
             cancellationToken);
+    }
+
+    private void TryRequestDailyCloseUpload()
+    {
+        if (uploadScheduler is null)
+        {
+            return;
+        }
+
+        try
+        {
+            uploadScheduler.RequestUpload();
+        }
+        catch (Exception ex)
+        {
+            // 日结已经落库：唤醒失败时 Worker 的 30 秒轮询仍会把这条 Pending 记录补传出去。
+            ConsoleLog.WriteError(
+                "DailyCloseUpload",
+                $"daily close upload wake-up failed error={ex.GetType().Name} message={ex.Message}",
+                exception: ex);
+        }
     }
 
     private async Task TryCheckpointWalAfterDailyCloseAsync(CancellationToken cancellationToken)
@@ -233,7 +257,8 @@ public sealed class DailyCloseService(
     }
 }
 
-public sealed class LocalDailyCloseRepository(LocalSqliteStore store, TimeZoneInfo? businessTimeZone = null) : ILocalDailyCloseRepository
+// partial：上传相关的仓储方法在 LocalDailyCloseRepository.Upload.cs，复用本文件里的私有读取/规整方法。
+public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, TimeZoneInfo? businessTimeZone = null) : ILocalDailyCloseRepository
 {
     public async Task<DailyCloseReport> LoadReportAsync(
         PosSessionState session,
@@ -363,27 +388,7 @@ public sealed class LocalDailyCloseRepository(LocalSqliteStore store, TimeZoneIn
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                var dailyCloseGuid = ReadGuid(reader, "DailyCloseGuid");
-                var report = new DailyCloseReport(
-                    DateTime.ParseExact(ReadString(reader, "BusinessDate"), "yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    ReadDateTimeOffset(reader, "PeriodFrom"),
-                    ReadDateTimeOffset(reader, "PeriodTo"),
-                    ReadString(reader, "StoreCode"),
-                    ReadString(reader, "DeviceCode"),
-                    ReadString(reader, "CashierId"),
-                    ReadString(reader, "CashierName"),
-                    reader.GetInt32(reader.GetOrdinal("OrderCount")),
-                    ReadPaymentSummaries(reader),
-                    ReadDecimal(reader, "RefundAmount"),
-                    ReadDecimal(reader, "ReturnQuantity"));
-                rows.Add(new DailyCloseArchiveRow(
-                    dailyCloseGuid,
-                    report,
-                    ReadDateTimeOffset(reader, "SavedAt"),
-                    ReadDecimal(reader, "NoteSubtotal"),
-                    ReadDecimal(reader, "CoinSubtotal"),
-                    ReadDecimal(reader, "CountedCashAmount"),
-                    ReadDecimal(reader, "CashDifference")));
+                rows.Add(ReadArchiveRow(reader));
             }
         }
 
@@ -403,6 +408,31 @@ public sealed class LocalDailyCloseRepository(LocalSqliteStore store, TimeZoneIn
         }
 
         return archives;
+    }
+
+    /// <summary>读取一行 LocalDailyCloses 的存档头（不含面额明细）；查询存档与上传取数共用同一份映射。</summary>
+    private static DailyCloseArchiveRow ReadArchiveRow(SqliteDataReader reader)
+    {
+        var report = new DailyCloseReport(
+            DateTime.ParseExact(ReadString(reader, "BusinessDate"), "yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ReadDateTimeOffset(reader, "PeriodFrom"),
+            ReadDateTimeOffset(reader, "PeriodTo"),
+            ReadString(reader, "StoreCode"),
+            ReadString(reader, "DeviceCode"),
+            ReadString(reader, "CashierId"),
+            ReadString(reader, "CashierName"),
+            reader.GetInt32(reader.GetOrdinal("OrderCount")),
+            ReadPaymentSummaries(reader),
+            ReadDecimal(reader, "RefundAmount"),
+            ReadDecimal(reader, "ReturnQuantity"));
+        return new DailyCloseArchiveRow(
+            ReadGuid(reader, "DailyCloseGuid"),
+            report,
+            ReadDateTimeOffset(reader, "SavedAt"),
+            ReadDecimal(reader, "NoteSubtotal"),
+            ReadDecimal(reader, "CoinSubtotal"),
+            ReadDecimal(reader, "CountedCashAmount"),
+            ReadDecimal(reader, "CashDifference"));
     }
 
     private static async Task<IReadOnlyList<Guid>> ReadOrderGuidsAsync(

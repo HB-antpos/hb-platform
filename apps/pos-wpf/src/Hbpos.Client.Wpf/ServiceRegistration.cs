@@ -228,7 +228,10 @@ public static class ServiceRegistration
         services.AddSingleton<ILocalOrderUploadRepository, LocalOrderUploadRepository>();
         services.AddSingleton<ISuspendedOrderRepository, SuspendedOrderRepository>();
         services.AddSingleton<ISyncQueueRepository, SyncQueueRepository>();
-        services.AddSingleton<ILocalDailyCloseRepository, LocalDailyCloseRepository>();
+        // 中文注释：日结仓储同时承担上传状态读写，三个注册必须解析到同一个单例（共用同一个 LocalSqliteStore）。
+        services.AddSingleton<LocalDailyCloseRepository>();
+        services.AddSingleton<ILocalDailyCloseRepository>(sp => sp.GetRequiredService<LocalDailyCloseRepository>());
+        services.AddSingleton<ILocalDailyCloseUploadRepository>(sp => sp.GetRequiredService<LocalDailyCloseRepository>());
         services.AddSingleton<ILocalLinklySettlementRepository, LocalLinklySettlementRepository>();
         services.AddSingleton<ILinklyUnresolvedSettlementReader>(sp =>
             sp.GetRequiredService<ILocalLinklySettlementRepository>());
@@ -508,6 +511,25 @@ public static class ServiceRegistration
         services.AddSingleton<ILinklySettlementUploadScheduler>(sp =>
             sp.GetRequiredService<LinklySettlementUploadWorker>());
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<LinklySettlementUploadWorker>());
+        // 日结记录上传：与 Linkly 结算上传同一套模式（设备授权 HttpClient、Singleton 服务、IHostedService Worker）。
+        services.AddHttpClient<IDailyCloseSyncApiClient, DailyCloseSyncApiClient>(client =>
+        {
+            client.BaseAddress = initialApiAddress;
+            client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .AddRuntimeApiEndpoint()
+        .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        services.AddSingleton(sp => new DailyCloseUploadService(
+            sp.GetRequiredService<ILocalDailyCloseUploadRepository>(),
+            sp.GetRequiredService<IDailyCloseSyncApiClient>(),
+            sp.GetRequiredService<DeviceAuthorizationState>(),
+            appVersion: sp.GetRequiredService<ClientLogIdentity>().AppVersion));
+        services.AddSingleton<IDailyCloseUploadExecutionService>(sp =>
+            sp.GetRequiredService<DailyCloseUploadService>());
+        services.AddSingleton<DailyCloseUploadWorker>();
+        services.AddSingleton<IDailyCloseUploadScheduler>(sp =>
+            sp.GetRequiredService<DailyCloseUploadWorker>());
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<DailyCloseUploadWorker>());
         services.AddSingleton<ILinklySettlementService, LinklySettlementService>();
         services.AddHttpClient<ISquareTerminalSetupClient, SquareTerminalSetupClient>(client =>
         {
