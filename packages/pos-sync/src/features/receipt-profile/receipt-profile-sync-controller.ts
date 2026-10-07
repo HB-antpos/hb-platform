@@ -14,9 +14,10 @@
  *
  * 日志里只出现版本号、触发源、失败原因与 HTTP 状态码，绝不写入地址、电话、ABN 等资料内容。
  *
- * 认证说明：sync / ack 沿用服务端 ReceiptPrinter 授权策略，即请求须带收银员票据且该收银员具备
- * 「设置小票打印机」权限。尚无收银员登录或权限不足时服务端回 401/403，这里归为 unauthorized，
- * 只在状态变化时记一次日志，不弹窗、不影响本机资料；等具备权限的收银员登录后，下一轮自然恢复。
+ * 认证说明：sync / ack 只要求设备认证（设备头由通用 transport 附加），不要求收银员票据，
+ * 也不要求「设置小票打印机」权限——没人登录、或当前收银员没有该权限时，后台轮询同样应成功。
+ * 因此 401/403 表示设备认证本身有问题（例如设备被撤销或尚未授权），而不是账号权限问题：
+ * 这里归为 unauthorized，只在状态变化时记一次日志，不弹窗、不影响本机资料，下一轮继续重试。
  */
 
 export const RECEIPT_PROFILE_SYNC_INTERVAL_MS = 60_000;
@@ -320,7 +321,8 @@ export class ReceiptProfileSyncController {
     trigger: ReceiptProfileSyncTrigger,
     extra: Readonly<Record<string, string | number | boolean>> = {},
   ): ReceiptProfileSyncResult {
-    // 离线、未授权、服务端未升级是常态，记 Information；其余异常记 Warning。
+    // 离线与服务器未升级是常态，记 Information；unauthorized（设备认证问题）沿用同一级别，
+    // 其余异常记 Warning。无论哪种都只在状态变化时记一次，不弹窗。
     const expected =
       reason === "offline" || reason === "unauthorized" || reason === "unsupported";
     const key = `${reason}:${String(extra.status ?? "")}:${String(extra.version ?? "")}`;

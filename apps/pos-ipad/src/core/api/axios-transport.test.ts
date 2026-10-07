@@ -3,12 +3,14 @@ import test from "node:test";
 
 import { AxiosError, create, type AxiosRequestConfig } from "axios";
 
+import { SecurityApiCredentialProvider } from "../security/api-credential-provider";
+
 import {
   createAxiosHbposTransport,
   createFreshCashierAxiosHbposTransport,
   type HbposRequestCredentials,
 } from "./axios-transport";
-import { HbposApiError, HbposCashierApi } from "./hbpos-api";
+import { HbposApiError, HbposCashierApi, HbposStoreApi } from "./hbpos-api";
 
 function createDeferred<T>(): {
   promise: Promise<T>;
@@ -783,4 +785,56 @@ test("非 axios 异常（TRANSPORT_UNEXPECTED）携带独立错误码与中性�
       && error.code === "TRANSPORT_UNEXPECTED"
       && error.message.includes("请求未能完成"),
   );
+});
+
+test("总部下发小票资料 sync/ack 经通用 transport 发出：没有收银员票据时只带设备认证头，不因缺少票据而拒绝发请求", async () => {
+  const requests: AxiosRequestConfig[] = [];
+  const instance = create({
+    adapter: async (config) => {
+      requests.push(config);
+      return {
+        config,
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        data: {
+          success: true,
+          data: config.method === "get" ? { changed: false, version: 0 } : { appliedVersion: 3 },
+        },
+      };
+    },
+  });
+  // 真实的 SecurityApiCredentialProvider：有设备凭据、钥匙串里没有收银员票据（没人登录）。
+  const credentialProvider = new SecurityApiCredentialProvider(
+    {
+      async getTransportCredentials() {
+        return {
+          authorizationCode: "device-secret",
+          deviceCode: "POS-001",
+          storeCode: "1003",
+          hardwareId: "INSTALL-001",
+        };
+      },
+    } as never,
+    { async get() { return null; } } as never,
+  );
+  const api = new HbposStoreApi(
+    createAxiosHbposTransport("https://hbpos.example", credentialProvider, instance),
+  );
+
+  await api.syncReceiptProfile(2);
+  await api.ackReceiptProfile(3);
+
+  assert.equal(requests.length, 2, "没有收银员票据时 transport 照常发出请求");
+  assert.equal(requests[0]?.url, "/api/v1/stores/current/receipt-profile/sync");
+  assert.deepEqual(requests[0]?.params, { knownVersion: 2 });
+  assert.equal(requests[1]?.url, "/api/v1/stores/current/receipt-profile/ack");
+  assert.deepEqual(JSON.parse(String(requests[1]?.data)), { version: 3 });
+  for (const request of requests) {
+    assert.equal(request.headers?.Authorization, "Bearer device-secret");
+    assert.equal(request.headers?.["X-HBPOS-Device-Code"], "POS-001");
+    assert.equal(request.headers?.["X-HBPOS-Store-Code"], "1003");
+    assert.equal(request.headers?.["X-HBPOS-Hardware-Id"], "INSTALL-001");
+    assert.equal(request.headers?.["X-HBPOS-Cashier-Authorization"], undefined);
+  }
 });

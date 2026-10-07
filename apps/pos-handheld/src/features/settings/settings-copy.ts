@@ -409,7 +409,7 @@ export const settingsEnglishCopy = {
     "Head office has not published a receipt profile yet.",
   "status.receipt-profile-sync-failed": "Sync failed. Please try again later.",
   "status.receipt-profile-sync-forbidden":
-    "Sync failed: this account is not allowed to sync the receipt profile.",
+    "Sync failed: device authentication failed. Check that this device is still authorized.",
   "status.receipt-profile-sync-invalid":
     "Sync failed: the profile published by head office is invalid.",
   "status.receipt-profile-sync-offline":
@@ -810,7 +810,8 @@ export const settingsChineseCopy = {
   "status.receipt-profile-load-failed": "门店资料载入失败",
   "status.receipt-profile-not-published": "总部还没有下发过小票资料",
   "status.receipt-profile-sync-failed": "同步失败，请稍后重试",
-  "status.receipt-profile-sync-forbidden": "同步失败：当前账号没有同步小票资料的权限",
+  "status.receipt-profile-sync-forbidden":
+    "同步失败：设备认证未通过，请检查本设备是否仍已授权",
   "status.receipt-profile-sync-invalid": "同步失败：总部下发的资料无效",
   "status.receipt-profile-sync-offline": "同步失败：网络不可用",
   "status.receipt-profile-sync-unsupported": "同步失败：服务器暂不支持小票资料下发",

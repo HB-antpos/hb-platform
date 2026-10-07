@@ -2704,7 +2704,7 @@ test("立即同步：已是最新、总部还没下发过，各自给出对应�
   assert.deepEqual(presenter.getState().printer, before);
 });
 
-test("立即同步失败：按原因给出离线/无权限/服务器未支持/资料无效/通用失败，草稿保持不变", async () => {
+test("立即同步失败：按原因给出离线/设备认证未通过/服务器未支持/资料无效/通用失败，草稿保持不变", async () => {
   const { port, presenter } = await managedPresenter();
   const before = presenter.getState().printer;
   const expectations = [
@@ -2738,7 +2738,7 @@ test("立即同步失败：按原因给出离线/无权限/服务器未支持/�
   assert.deepEqual(presenter.getState().printer, before);
 });
 
-test("运行时没有提供同步能力或缺少权限时：按失败/需要权限处理，不会误报已是最新", async () => {
+test("运行时没有提供同步能力时按失败处理，设置页本身缺少「设置小票打印机」权限时不发同步，均不会误报已是最新", async () => {
   const { port, presenter } = await managedPresenter();
   port.omitSync = true;
   const withoutSync = createPresenter(port);

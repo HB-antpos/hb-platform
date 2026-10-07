@@ -2963,7 +2963,7 @@ function receiptProfileTransport(script: Readonly<{
   return { transport, requests };
 }
 
-test("下发资料后台同步：拉取→原子写入→回执→记录已回执版本；下一轮以新版本号轮询且不重复回执", async () => {
+test("下发资料后台同步（无需收银员登录）：拉取→原子写入→回执→记录已回执版本；下一轮以新版本号轮询且不重复回执", async () => {
   const repository = receiptProfileRepository();
   const { transport, requests } = receiptProfileTransport({
     sync: (known) =>
@@ -3210,10 +3210,11 @@ test("设置页立即同步：已应用下发资料后走 sync 接口、刷新�
   presenter.destroy();
 });
 
-test("设置页立即同步的失败原因按网络/权限/服务器未支持归类；总部从未下发时提示未下发且不覆盖本机手工设置", async () => {
+test("设置页立即同步的失败原因按网络/设备认证/服务器未支持归类；总部从未下发时提示未下发且不覆盖本机手工设置", async () => {
   const failures: Array<[unknown, string]> = [
     [Object.assign(new Error("offline"), { name: "HbposApiError", kind: "transport", code: "NO_HTTP_RESPONSE" }), "receipt-profile-sync-offline"],
-    [Object.assign(new Error("denied"), { name: "HbposApiError", kind: "http", status: 403 }), "receipt-profile-sync-forbidden"],
+    // 现在 sync/ack 只要求设备认证：401/403 表示设备认证本身有问题（如设备被撤销或尚未授权）
+    [Object.assign(new Error("device auth rejected"), { name: "HbposApiError", kind: "http", status: 403 }), "receipt-profile-sync-forbidden"],
     [Object.assign(new Error("gone"), { name: "HbposApiError", kind: "http", status: 404 }), "receipt-profile-sync-unsupported"],
     [Object.assign(new Error("boom"), { name: "HbposApiError", kind: "http", status: 500 }), "receipt-profile-sync-failed"],
   ];

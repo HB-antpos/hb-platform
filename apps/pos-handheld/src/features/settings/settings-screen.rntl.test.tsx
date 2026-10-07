@@ -2396,7 +2396,7 @@ describe("SettingsScreen", () => {
 
       const failures = [
         ["offline", "同步失败：网络不可用"],
-        ["unauthorized", "同步失败：当前账号没有同步小票资料的权限"],
+        ["unauthorized", "同步失败：设备认证未通过，请检查本设备是否仍已授权"],
         ["unsupported", "同步失败：服务器暂不支持小票资料下发"],
         ["invalid", "同步失败：总部下发的资料无效"],
         ["failed", "同步失败，请稍后重试"],
