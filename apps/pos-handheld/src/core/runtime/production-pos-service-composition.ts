@@ -1147,6 +1147,10 @@ export function createProductionPosRuntimeServices(
         printQueue: fulfilmentStore,
         trustedStoreCode: input.auditMetadata.storeCode,
         now: input.clock.now,
+        // 券面「Valid until」按业务时区取日历日，不用设备时区；缺省由券面渲染器沿用布里斯班。
+        ...(input.businessTimeZone !== undefined
+          ? { businessTimeZone: input.businessTimeZone }
+          : {}),
         requestPrintDrain: (): Promise<unknown> => fulfilment.drainAutomaticQueue(),
       })
     : null;
@@ -2866,6 +2870,8 @@ function createAvailableReturnRuntime(input: Readonly<{
       ),
       returnReceiptSettings(input.receiptSettings),
       input.input.clock.now,
+      // 券面「Valid until」按业务时区取日历日，不用设备时区；缺省由渲染器沿用布里斯班。
+      input.input.businessTimeZone,
     );
   const fulfilment = new ReturnFulfilmentRuntime({
     plans: input.input.database.returnFulfilmentPlans(

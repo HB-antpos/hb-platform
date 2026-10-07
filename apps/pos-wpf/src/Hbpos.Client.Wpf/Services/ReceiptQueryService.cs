@@ -128,7 +128,33 @@ internal static class ReceiptRefundVoucherMapper
     }
 }
 
-public sealed record RefundVoucherReceipt(string VoucherCode, decimal Amount);
+/// <summary>
+/// 退款代金券券面数据。ExpiresAt 是服务端那张券自己的真实到期时刻（旧券 12 个月、新券 90 天规则不同，
+/// 客户端不能按规则反推），由打印服务在出票前按券号补查；查不到时为 null，券面不印日期但照常出票。
+/// </summary>
+public sealed record RefundVoucherReceipt(string VoucherCode, decimal Amount, DateTimeOffset? ExpiresAt = null);
+
+/// <summary>
+/// 小票底部的条款块（标题 + 若干条款行）；只有显式带上的小票才会打印，其余小票输出保持不变。
+/// </summary>
+public sealed record ReceiptTerms(string Title, IReadOnlyList<string> Lines);
+
+/// <summary>
+/// 券面使用说明（英文，业主审定稿）。只对退款代金券：这类券由服务端绑定发券门店（别的门店会被拒绝）、
+/// 支持分次使用（余额保留）；「不可兑现」与业主「代金券买的商品不能退现金」的规则一致。
+/// 余额凭证对应的券类型不限于退款券，不一定限本店，所以不套用这段文字。
+/// </summary>
+internal static class VoucherReceiptTerms
+{
+    public static readonly ReceiptTerms RefundVoucher = new(
+        "VOUCHER TERMS",
+        [
+            "Use at the issuing store only.",
+            "Pay with it at checkout by scanning the barcode or QR code.",
+            "Can be used across several purchases until the balance is $0.00.",
+            "Not redeemable for cash."
+        ]);
+}
 
 internal static class ReceiptRefundVoucherDocuments
 {
@@ -154,7 +180,8 @@ internal static class ReceiptRefundVoucherDocuments
             .ToList();
 }
 
-public sealed record VoucherBalanceReceipt(string VoucherCode, decimal RemainingBalance);
+/// <summary>余额凭证券面数据；ExpiresAt 含义同退款券（出票前补查，查不到为 null）。</summary>
+public sealed record VoucherBalanceReceipt(string VoucherCode, decimal RemainingBalance, DateTimeOffset? ExpiresAt = null);
 
 public sealed record ReceiptDetails(
     Guid OrderGuid,
@@ -174,7 +201,8 @@ public sealed record ReceiptDetails(
     string? OrderDisplay = null,
     IReadOnlyList<string>? ExtraInfoLines = null,
     RefundVoucherReceipt? RefundVoucher = null,
-    VoucherBalanceReceipt? VoucherBalance = null)
+    VoucherBalanceReceipt? VoucherBalance = null,
+    ReceiptTerms? Terms = null)
 {
     public string TransactionIdDisplay => $"#{OrderGuid.ToString("N")[..10].ToUpperInvariant()}";
 

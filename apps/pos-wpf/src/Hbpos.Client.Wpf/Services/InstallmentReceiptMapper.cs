@@ -61,7 +61,29 @@ internal static class InstallmentReceiptMapper
             payments,
             StatusText: GetStatusText(order),
             OrderDisplay: order.InstallmentNumber,
-            ExtraInfoLines: extraInfoLines);
+            ExtraInfoLines: extraInfoLines,
+            Terms: GetTerms(order));
+    }
+
+    /// <summary>
+    /// 分期条款（英文，业主审定稿）。金额门槛与服务端 InstallmentService 的
+    /// MinimumInstallmentTotalAmount(50) / MinimumDownPaymentAmount(20) 保持一致；
+    /// 「每次 $5」只是说明文字，系统不做强制校验（业主 2026-10-07 决定），最后一笔余额不足 $5 时按余额收。
+    /// </summary>
+    internal static readonly ReceiptTerms InstallmentTerms = new(
+        "INSTALLMENT TERMS",
+        [
+            "Order total: $50.00 minimum.",
+            "First payment: $20.00 minimum.",
+            "Each later payment: $5.00 minimum, or the remaining balance if it is lower."
+        ]);
+
+    private static ReceiptTerms? GetTerms(LocalInstallmentOrder order)
+    {
+        // 中文注释：条款只对仍在还款的分期单有意义；已付清、已提货、已取消的小票不再打印，避免取消单被误导。
+        return order.Status == InstallmentStatus.Active && order.PickupInfo is null
+            ? InstallmentTerms
+            : null;
     }
 
     /// <summary>

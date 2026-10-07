@@ -609,6 +609,112 @@ test("refund 零、正数和 MIN_SAFE 金额均在 Voucher 请求及受保护状
   }
 });
 
+// 服务端（ASP.NET Core + System.Text.Json 默认序列化 DateTimeOffset）真实会返回 "+00:00" 形态，
+// 而存储层只接受 toISOString() 规范形态，所以适配器必须在落库前规范化。
+const EXPIRY_WIRE_FORMS: readonly (readonly [label: string, wire: string, canonical: string])[] = [
+  ["服务端真实形态（无毫秒 +00:00）", "2027-01-05T12:59:59+00:00", "2027-01-05T12:59:59.000Z"],
+  ["带毫秒 +00:00", "2027-01-05T12:59:59.123+00:00", "2027-01-05T12:59:59.123Z"],
+  ["Z 无毫秒", "2027-01-05T12:59:59Z", "2027-01-05T12:59:59.000Z"],
+  ["门店偏移 +11:00", "2027-01-05T23:59:59+11:00", "2027-01-05T12:59:59.000Z"],
+  ["已是规范形态（输出不变）", "2027-01-05T12:59:59.000Z", "2027-01-05T12:59:59.000Z"],
+];
+
+test("refund 响应的 expiredAt 无论哪种线上形态，落库状态里的 expiresAtIso 都是规范形态", async () => {
+  for (const [label, wire, canonical] of EXPIRY_WIRE_FORMS) {
+    const transport = new ScriptedTransport([
+      ok({
+        voucherCode: "RF100",
+        amount: 12.5,
+        remainingAmount: 12.5,
+        status: "1",
+        expiredAt: wire,
+      }),
+    ]);
+    const secrets = new MemoryProtectedTokenPort();
+    const adapter = createAdapter(transport, secrets);
+
+    const result = await adapter.refund(
+      attempt({
+        operation: "refund",
+        amount: { currency: "AUD", cents: -1_250 },
+        state: "Submitted",
+      }),
+    );
+
+    assert.equal(result.state, "Approved", label);
+    const saved = secrets.states.get("attempt-1");
+    assert.equal(saved?.phase, "approved", label);
+    assert.equal(saved?.voucherCode, "RF100", label);
+    assert.equal(saved?.expiresAtIso, canonical, label);
+  }
+});
+
+test("purchase 锁券响应的 expiresAt 同样规范化后落库（与 refund 共用同一校验）", async () => {
+  for (const [label, wire, canonical] of EXPIRY_WIRE_FORMS) {
+    const transport = new ScriptedTransport([
+      ok(queryResponse()),
+      ok({
+        voucherCode: "VC100",
+        lockedAmount: 12.5,
+        reservationToken: "reservation-secret-1",
+        expiresAt: wire,
+        remainingAmountAfterLock: 7.5,
+      }),
+    ]);
+    const secrets = new MemoryProtectedTokenPort();
+    const adapter = createAdapter(transport, secrets);
+
+    const result = await adapter.submit(attempt());
+
+    assert.equal(result.state, "Approved", label);
+    assert.equal(secrets.states.get("attempt-1")?.expiresAtIso, canonical, label);
+  }
+});
+
+test("expiredAt/expiresAt 不是日期时保持原有错误码，不落 approved 状态", async () => {
+  for (const bad of ["not-a-date", "", "2027-13-45T99:00:00Z"]) {
+    const refundSecrets = new MemoryProtectedTokenPort();
+    const refund = await createAdapter(
+      new ScriptedTransport([
+        ok({
+          voucherCode: "RF100",
+          amount: 12.5,
+          remainingAmount: 12.5,
+          status: "1",
+          expiredAt: bad,
+        }),
+      ]),
+      refundSecrets,
+    ).refund(
+      attempt({
+        operation: "refund",
+        amount: { currency: "AUD", cents: -1_250 },
+        state: "Submitted",
+      }),
+    );
+    assert.equal(refund.state, "Unknown", JSON.stringify(bad));
+    assert.equal(refund.responseCode, "VOUCHER_REFUND_EXPIRY_INVALID");
+    assert.equal(refundSecrets.states.get("attempt-1")?.phase, "refund-submitted");
+
+    const lockSecrets = new MemoryProtectedTokenPort();
+    const lock = await createAdapter(
+      new ScriptedTransport([
+        ok(queryResponse()),
+        ok({
+          voucherCode: "VC100",
+          lockedAmount: 12.5,
+          reservationToken: "reservation-secret-1",
+          expiresAt: bad,
+          remainingAmountAfterLock: 7.5,
+        }),
+      ]),
+      lockSecrets,
+    ).submit(attempt());
+    assert.equal(lock.state, "Unknown", JSON.stringify(bad));
+    assert.equal(lock.responseCode, "VOUCHER_LOCK_EXPIRY_INVALID");
+  }
+});
+
 class ScriptedTransport implements HbposTransport {
   public readonly calls: HbposTransportRequest[] = [];
 
@@ -632,6 +738,14 @@ class MemoryProtectedTokenPort implements VoucherProtectedTokenPort {
   private readonly references = new Map<string, VoucherProtectedAttemptState>();
 
   public async save(state: VoucherProtectedAttemptStateDraft): Promise<string> {
+    // 与真实 SqliteVoucherProtectedTokenStore.validateDraft 一致：落库的到期时刻必须是
+    // toISOString() 规范形态；否则存储层会抛 TypeError，已出券的退款卡在 refund-submitted。
+    if (
+      state.expiresAtIso !== null &&
+      new Date(Date.parse(state.expiresAtIso)).toISOString() !== state.expiresAtIso
+    ) {
+      throw new TypeError("voucher expiry must be canonical ISO UTC.");
+    }
     const existing = this.states.get(state.attemptId);
     const protectedReference =
       existing?.protectedReference ??

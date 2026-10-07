@@ -946,12 +946,21 @@ function optionalText(value: unknown): string | null {
     : null;
 }
 
+/**
+ * 校验服务端返回的时间并规范化为 `toISOString()` 形态（UTC、毫秒、Z）。
+ *
+ * 服务端（ASP.NET Core + System.Text.Json 默认序列化 DateTimeOffset）返回的是
+ * "2027-01-05T12:59:59+00:00" 这类带偏移的形态，而 SqliteVoucherProtectedTokenStore 只接受
+ * 规范形态：不规范化会在服务端已出券之后落库抛 TypeError，退款/锁券卡死且同一幂等键重放仍失败。
+ * 锁券（expiresAt）与退款（expiredAt）共用此函数；已是规范形态时输出不变。
+ */
 function requiredIsoDate(value: unknown, code: string): string {
   const text = requiredText(value, code);
-  if (!Number.isFinite(Date.parse(text))) {
+  const epochMilliseconds = Date.parse(text);
+  if (!Number.isFinite(epochMilliseconds)) {
     throw new VoucherAdapterError(code);
   }
-  return text;
+  return new Date(epochMilliseconds).toISOString();
 }
 
 function requiredProtectedReference(value: unknown): string {

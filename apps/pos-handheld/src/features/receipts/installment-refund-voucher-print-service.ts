@@ -24,6 +24,11 @@ export type InstallmentRefundVoucherPrintServiceOptions = Readonly<{
   printQueue: InstallmentRefundVoucherPrintQueuePort;
   trustedStoreCode: string;
   now(): Date;
+  /**
+   * 券面「Valid until」按此业务时区取日历日（IANA 名）；缺省沿用 Australia/Brisbane，
+   * 非法时区名只会省略到期行，不影响出票。
+   */
+  businessTimeZone?: string;
   requestPrintDrain(): Promise<unknown>;
 }>;
 
@@ -54,6 +59,9 @@ export class InstallmentRefundVoucherPrintService {
       orderLabel,
       vouchers,
       printedAt: this.options.now(),
+      ...(this.options.businessTimeZone !== undefined
+        ? { businessTimeZone: this.options.businessTimeZone }
+        : {}),
     });
   }
 

@@ -545,6 +545,7 @@ public static class ServiceRegistration
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
         services.AddSingleton<IVoucherTenderClient>(sp => sp.GetRequiredService<IVoucherApiClient>());
+        services.AddSingleton<IVoucherExpiryLookup, VoucherExpiryLookup>();
         services.AddSingleton<IDeviceRegistrationWorkflowService, DeviceRegistrationWorkflowService>();
         services.AddSingleton<ISpecialProductsWorkflowService, SpecialProductsWorkflowService>();
         services.AddSingleton<IReceiptReturnsWorkflowService, ReceiptReturnsWorkflowService>();

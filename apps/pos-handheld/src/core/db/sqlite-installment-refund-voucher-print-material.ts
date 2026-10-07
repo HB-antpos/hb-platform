@@ -6,6 +6,12 @@ export type InstallmentRefundVoucherPrintMaterial = Readonly<{
   voucherCode: string;
   /** 正数整数分币。 */
   amountCents: number;
+  /**
+   * 发这张券时服务端返回并写入受保护状态的真实到期时刻（规范 ISO，UTC 绝对时刻）。可选：
+   * 缺失、null 或格式异常时不带该字段，券面只省略「Valid until」行，绝不影响出券。
+   * 历史券（12 个月）与新券（90 天且取整到门店当天结束）规则不同，客户端不得反推。
+   */
+  expiresAtIso?: string | null;
 }>;
 
 export interface InstallmentRefundVoucherPrintMaterialPort {
@@ -69,6 +75,9 @@ implements InstallmentRefundVoucherPrintMaterialPort {
       vouchers.push(Object.freeze({
         voucherCode: state.voucherCode,
         amountCents: Math.abs(state.amountCents),
+        ...(isCanonicalIso(state.expiresAtIso)
+          ? { expiresAtIso: state.expiresAtIso }
+          : {}),
       }));
     }
     return Object.freeze(vouchers);
@@ -81,4 +90,10 @@ function exactText(value: string): string {
     throw new Error("Installment refund voucher identity is invalid.");
   }
   return normalized;
+}
+
+function isCanonicalIso(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
