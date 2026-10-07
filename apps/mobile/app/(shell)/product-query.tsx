@@ -1873,7 +1873,8 @@ function ProductQueryContent() {
           action: printTarget.kind === "product"
             ? "product"
             : `${printTarget.kind}:${printTarget.codeId}` as PrintAction,
-          printType: printTarget.kind === "product" ? null : smallLabel ? "small" : null,
+          // 主条码（product）与套码、多码一样遵循「小标签」开关，否则扫主条码总是打普通标签。
+          printType: smallLabel ? "small" : null,
         });
       }
 
@@ -1923,7 +1924,8 @@ function ProductQueryContent() {
         }
       }
 
-      return sendProductLabel(targetDetail);
+      // 离线或无 printTarget 时按主条码兜底打印，同样要带上小标签开关。
+      return sendProductLabel(targetDetail, { printType: smallLabel ? "small" : null });
     },
     [
       getErrorMessage,

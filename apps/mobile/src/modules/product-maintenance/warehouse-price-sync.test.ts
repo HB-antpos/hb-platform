@@ -527,6 +527,8 @@ function createPageFlow(options: {
   autoPrintEnabled?: boolean;
   offline?: boolean;
   scopeCurrent?: boolean;
+  smallLabel?: boolean;
+  printTarget?: Record<string, unknown> | null;
   print?: () => Promise<boolean>;
 } = {}) {
   const detail = options.detail ?? structuredClone(currentDetail);
@@ -534,7 +536,7 @@ function createPageFlow(options: {
   const messages: string[] = [];
   const feedback: string[] = [];
   let autoPricingCalls = 0;
-  const smartAutoPrint = compileCallback<(keyword: string, value: Detail) => Promise<boolean>>(
+  const smartAutoPrint = compileCallback<(keyword: string, value: Detail, target?: Record<string, unknown> | null) => Promise<boolean>>(
     smartAutoPrintStatement, "smartAutoPrint", {
       useCallback: (callback: unknown) => callback,
       sendProductLabel: async (value: Detail, printOptions?: PrintOptions) => {
@@ -542,7 +544,7 @@ function createPageFlow(options: {
         return options.print ? options.print() : true;
       },
       getMultiCodeItemId: (code: Detail["multiCodes"][number]) => code.multiCodeId,
-      smallLabel: false,
+      smallLabel: options.smallLabel === true,
       printQuantity: 1,
       quantitySingleUse: false,
       setSnackbarMessage: (message: string) => messages.push(message),
@@ -572,6 +574,7 @@ function createPageFlow(options: {
       scanSource: "camera",
       scanKeyword: options.scanKeyword ?? "MAIN-1",
       autoPrintEnabled: options.autoPrintEnabled !== false,
+      printTarget: options.printTarget ?? null,
     }),
     prints, messages, feedback,
     get autoPricingCalls() { return autoPricingCalls; },
@@ -580,8 +583,8 @@ function createPageFlow(options: {
 
 async function runPageRegression() {
   for (const [scanKeyword, expectedOptions] of [
-    ["MAIN-1", undefined],
-    ["PRODUCT-1", undefined],
+    ["MAIN-1", { printType: null }],
+    ["PRODUCT-1", { printType: null }],
     ["SET-1", { barcode: "SET-1", retailPrice: 10, action: "set:set-id", printType: null }],
     ["MULTI-1", { barcode: "MULTI-1", retailPrice: 4, action: "multi:multi-id", printType: null }],
   ] as const) {
@@ -592,6 +595,30 @@ async function runPageRegression() {
     assert.equal(flow.prints[0].detail.storePrice.retailPrice, 5, "标签使用当前门店售价");
     assert.equal(flow.autoPricingCalls, 0, "供应商 200 不评估自动价");
     assert.deepEqual(flow.feedback, ["found"]);
+  }
+
+  // 「自动打印」与「小标签」同时开启：主条码（含在线快路径的 product 目标）、套码、多码都必须打小标签。
+  const productTarget = { kind: "product", barcode: "MAIN-1", retailPrice: 5, discountRate: 0.2, codeId: null };
+  const setTarget = { kind: "set", barcode: "SET-1", retailPrice: 10, discountRate: null, codeId: "set-id" };
+  const multiTarget = { kind: "multi", barcode: "MULTI-1", retailPrice: 4, discountRate: null, codeId: "multi-id" };
+  for (const [scanKeyword, printTarget] of [
+    ["MAIN-1", null],
+    ["MAIN-1", productTarget],
+    ["SET-1", null],
+    ["SET-1", setTarget],
+    ["MULTI-1", null],
+    ["MULTI-1", multiTarget],
+  ] as const) {
+    for (const smallLabel of [true, false]) {
+      const flow = createPageFlow({ scanKeyword, printTarget, smallLabel });
+      assert.equal((await flow.run()).labelPrinted, true, `${scanKeyword} 扫码自动打印`);
+      assert.equal(flow.prints.length, 1);
+      assert.equal(
+        flow.prints[0].options?.printType,
+        smallLabel ? "small" : null,
+        `${scanKeyword}${printTarget ? `（${printTarget.kind} 目标）` : ""} 小标签开关=${smallLabel}`,
+      );
+    }
   }
 
   const missingCode = createPageFlow({ scanKeyword: "MULTI-ON-PAGE-2" });
