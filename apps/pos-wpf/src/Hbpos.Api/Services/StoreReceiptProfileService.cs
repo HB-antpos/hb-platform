@@ -85,16 +85,27 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             """,
             new SugarParameter("@StoreCode", storeCode));
 
-        return row is null
-            ? null
-            : new StoreReceiptProfileDto(
-                row.StoreCode,
-                row.StoreName,
-                row.BrandName,
-                row.Address,
-                row.Phone,
-                row.Abn,
-                row.ReturnPolicy);
+        if (row is null)
+        {
+            return null;
+        }
+
+        // 门店存在且启用后，若总部下发过快照就以最新快照为准（收银端打印认的是下发版本，
+        // 「载入/立即同步」也必须拿到同一份内容）；从未下发（或快照表还没建）时沿用门店当前值，Version=0。
+        var release = await StoreReceiptProfileReleaseQueries.GetLatestAsync(context.MainDb, storeCode);
+        if (release is not null)
+        {
+            return release with { StoreCode = row.StoreCode };
+        }
+
+        return new StoreReceiptProfileDto(
+            row.StoreCode,
+            row.StoreName,
+            row.BrandName,
+            row.Address,
+            row.Phone,
+            row.Abn,
+            row.ReturnPolicy);
     }
 }
 

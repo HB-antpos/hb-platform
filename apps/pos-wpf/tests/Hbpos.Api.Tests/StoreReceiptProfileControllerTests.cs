@@ -64,7 +64,7 @@ public sealed class StoreReceiptProfileControllerTests
             "12 345 678 901",
             "30 天无理由退换");
         var service = new FakeStoreReceiptProfileService(new StoreReceiptProfileLookupResult(profile));
-        var controller = new StoresController(service);
+        var controller = new StoresController(service, new NoopReleaseService());
         SetStoreClaim(controller, "S001");
 
         var result = await controller.GetCurrentReceiptProfile(CancellationToken.None);
@@ -83,7 +83,7 @@ public sealed class StoreReceiptProfileControllerTests
             null,
             StoreReceiptProfileService.StoreNotFoundCode,
             "门店不存在或已停用"));
-        var controller = new StoresController(service);
+        var controller = new StoresController(service, new NoopReleaseService());
         SetStoreClaim(controller, "S-MISSING");
 
         var result = await controller.GetCurrentReceiptProfile(CancellationToken.None);
@@ -101,7 +101,7 @@ public sealed class StoreReceiptProfileControllerTests
             null,
             StoreReceiptProfileService.InvalidCharactersCode,
             "门店资料包含不可打印控制字符"));
-        var controller = new StoresController(service);
+        var controller = new StoresController(service, new NoopReleaseService());
         SetStoreClaim(controller, "S001");
 
         var result = await controller.GetCurrentReceiptProfile(CancellationToken.None);
@@ -116,7 +116,8 @@ public sealed class StoreReceiptProfileControllerTests
     public async Task GetCurrentReceiptProfile_returns_401_when_store_claim_missing()
     {
         var controller = new StoresController(
-            new FakeStoreReceiptProfileService(new StoreReceiptProfileLookupResult(null)));
+            new FakeStoreReceiptProfileService(new StoreReceiptProfileLookupResult(null)),
+            new NoopReleaseService());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -184,5 +185,23 @@ public sealed class StoreReceiptProfileControllerTests
             LastStoreCode = storeCode;
             return Task.FromResult(result);
         }
+    }
+
+    // 既有的门店资料用例只关心 GET receipt-profile；下发快照的同步/回执另有专门的测试文件覆盖。
+    private sealed class NoopReleaseService : IStoreReceiptProfileReleaseService
+    {
+        public Task<StoreReceiptProfileSyncLookupResult> GetSyncAsync(
+            string storeCode,
+            int knownVersion,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<StoreReceiptProfileAckLookupResult> AckAsync(
+            string storeCode,
+            string deviceCode,
+            string? deviceSystem,
+            int version,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }
