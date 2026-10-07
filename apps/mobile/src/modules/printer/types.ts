@@ -25,6 +25,15 @@ export interface PrinterStatus {
   address?: string | null;
 }
 
+/**
+ * 安卓原生层缓冲的蓝牙链路事件（ACL / 配对 / 蓝牙开关广播、每次连接尝试的现场与耗时、BLE GATT 状态码）。
+ * ev 是事件类型，atMs 是发生时刻（epoch 毫秒）；其余字段都是标量，缺失值为 null。
+ */
+export type NativeLinkEvent = {
+  ev: string;
+  atMs: number;
+} & Record<string, string | number | boolean | null>;
+
 export interface PreparedBarcode {
   value: string;
   kind: PrinterBarcodeKind;

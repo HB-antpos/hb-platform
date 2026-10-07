@@ -195,6 +195,42 @@ test("环形缓冲有上限：长时间失败的快照保留开头与最近事�
   assert.equal(new Set(events.map((event) => JSON.stringify(event))).size, events.length);
 });
 
+test("原生事件带原始时间戳进入快照：按真实发生时间排序，不开启故障也不计入失败", () => {
+  const { emitted, recorder, advance } = setup();
+  recorder.record("link.lost", { source: "native" });
+  advance(6_000);
+  fail(recorder);
+  fail(recorder);
+  // 原生事件在失败之后才被取走（JS 取缓冲），但发生得更早：ACL 断开在 link.lost 之前 300 毫秒。
+  recorder.record("native.diag", { ev: "acl.disconnected", address: "AA:BB", tracked: true, socketConnected: true }, 4_999_700);
+  recorder.record("native.diag", { ev: "connect.error", elapsedMs: 5_450, error: "IOException: read failed" }, 5_005_900);
+  fail(recorder);
+
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].properties.failures, 3, "原生事件不计入失败次数");
+  const events = eventsOf(emitted[0]);
+  const times = events.map((event) => event.t);
+  assert.deepEqual(times, [...times].sort((a, b) => a - b), "必须按真实发生时间升序");
+  assert.equal(events[0].kind, "native.diag");
+  assert.equal(events[0].ev, "acl.disconnected");
+  assert.equal(events[0].t, -300, "相对故障开始（link.lost）的毫秒，早于它所以为负");
+  assert.equal(events[0].socketConnected, true);
+  assert.equal("atMs" in events[0], false, "时间戳不作为字段重复输出");
+  const connectError = events.find((event) => event.ev === "connect.error");
+  assert.equal(connectError?.elapsedMs, 5_450);
+});
+
+test("原生事件时间戳非法时退回当前时间，仍能记录", () => {
+  const { emitted, recorder } = setup();
+  recorder.record("link.lost", { source: "native" });
+  recorder.record("native.diag", { ev: "adapter.state", state: "off" }, Number.NaN);
+  for (let i = 0; i < 3; i += 1) fail(recorder);
+  const adapter = eventsOf(emitted[0]).find((event) => event.ev === "adapter.state");
+  assert.ok(adapter, "非法时间戳不能让事件丢失");
+  assert.equal(adapter.t, 0, "退回当前（时钟未走）时间");
+  assert.equal(adapter.state, "off");
+});
+
 test("字段清洗：丢弃 undefined 与保留键，截断超长文本；emit 抛错不外溢", () => {
   const emitted: PrinterLinkLogItem[] = [];
   const recorder = createPrinterLinkRecorder({

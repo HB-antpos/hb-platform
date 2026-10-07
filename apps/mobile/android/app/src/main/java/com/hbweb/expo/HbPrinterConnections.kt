@@ -52,6 +52,8 @@ internal class RfcommPrinterConnection(private val socket: BluetoothSocket) : Pr
 @SuppressLint("MissingPermission")
 internal class BlePrinterConnection private constructor(
   private val onConnectionLost: (BlePrinterConnection) -> Unit,
+  // 链路诊断：只上报 GATT 回调的状态码，调用方的实现不会抛异常，也不影响连接流程。
+  private val onDiag: (String, Map<String, Any?>) -> Unit,
 ) : PrinterConnection {
   private val handler = Handler(Looper.getMainLooper())
   private val ready = CountDownLatch(1)
@@ -77,6 +79,8 @@ internal class BlePrinterConnection private constructor(
       if (closed.get()) {
         return
       }
+      // status 才是 BLE 失败的真实原因码（如 133 = GATT_ERROR）；连接超时则根本没有这条回调。
+      onDiag("ble.gatt.state", mapOf("status" to status, "newState" to newState))
       if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
         if (ready.count == 0L) {
           return
@@ -104,6 +108,7 @@ internal class BlePrinterConnection private constructor(
     }
 
     override fun onMtuChanged(target: BluetoothGatt, value: Int, status: Int) {
+      onDiag("ble.mtu", mapOf("status" to status, "mtu" to value))
       if (status == BluetoothGatt.GATT_SUCCESS && value > DEFAULT_ATT_MTU) {
         mtu = value
       }
@@ -114,6 +119,7 @@ internal class BlePrinterConnection private constructor(
       if (closed.get() || ready.count == 0L) {
         return
       }
+      onDiag("ble.services", mapOf("status" to status, "count" to target.services?.size))
       if (status != BluetoothGatt.GATT_SUCCESS) {
         failSetup("Bluetooth printer BLE service discovery failed (status=$status).")
         return
@@ -301,8 +307,9 @@ internal class BlePrinterConnection private constructor(
       device: BluetoothDevice,
       timeoutMs: Long,
       onConnectionLost: (BlePrinterConnection) -> Unit,
+      onDiag: (String, Map<String, Any?>) -> Unit = { _, _ -> },
     ): BlePrinterConnection {
-      val connection = BlePrinterConnection(onConnectionLost)
+      val connection = BlePrinterConnection(onConnectionLost, onDiag)
       try {
         connection.start(context, device)
         if (!connection.ready.await(timeoutMs, TimeUnit.MILLISECONDS)) {

@@ -8,6 +8,7 @@ import {
   buildWarehouseProductLabelCommand,
 } from "@/modules/printer/cpcl-labels";
 import type {
+  NativeLinkEvent,
   PrinterDevice,
   PrinterStatus,
   PrinterTransport,
@@ -24,6 +25,8 @@ type NativePrinterModule = {
   connect(address: string): Promise<boolean>;
   /** 新安卓原生包才有：按传输类型选择 RFCOMM 或 BLE GATT，同时作为“支持 BLE 打印”的能力标记。 */
   connectWithTransport?(address: string, transport: PrinterTransport | null): Promise<boolean>;
+  /** 新安卓原生包才有：取走原生层缓冲的蓝牙链路事件；旧包没有这个方法。 */
+  drainLinkDiagnostics?(): Promise<unknown>;
   disconnect(): Promise<boolean>;
   print(command: string, encoding?: string): Promise<boolean>;
   printProductLabel(payload: ProductLabelPrintPayload, printType?: string | null): Promise<boolean>;
@@ -141,6 +144,38 @@ export async function connectPrinter(address: string, transport?: PrinterTranspo
     return module.connectWithTransport(address, transport ?? null);
   }
   return module.connect(address);
+}
+
+const NATIVE_DIAGNOSTICS_TIMEOUT_MS = 1500;
+
+function isNativeLinkEvent(value: unknown): value is NativeLinkEvent {
+  if (!value || typeof value !== "object") return false;
+  const { ev, atMs } = value as { ev?: unknown; atMs?: unknown };
+  return typeof ev === "string" && typeof atMs === "number" && Number.isFinite(atMs);
+}
+
+/**
+ * 取走安卓原生层的蓝牙链路事件，供链路诊断并入。只有新安卓原生包才有；旧包、iOS、取不到、超时一律返回空数组，
+ * 诊断只是旁路，绝不能让连接或打印等它或因它失败。
+ */
+export async function drainNativeLinkDiagnostics(
+  timeoutMs = NATIVE_DIAGNOSTICS_TIMEOUT_MS,
+): Promise<NativeLinkEvent[]> {
+  if (Platform.OS !== "android" || typeof nativeModule?.drainLinkDiagnostics !== "function") {
+    return [];
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<unknown>((resolve) => {
+      timer = setTimeout(() => resolve([]), timeoutMs);
+    });
+    const events = await Promise.race([nativeModule.drainLinkDiagnostics(), timeout]);
+    return Array.isArray(events) ? events.filter(isNativeLinkEvent) : [];
+  } catch {
+    return [];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** 经典蓝牙必须先在系统中配对；打不开蓝牙设置页时退回本应用设置页。 */
