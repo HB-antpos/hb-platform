@@ -361,10 +361,13 @@ public sealed partial class StoreCashService
                 Items = rows
                     .Select(row =>
                     {
-                        var depositSlips = slipsByDeposit[row.DepositGuid].ToList();
+                        var depositSlips = slipsByDeposit[row.DepositGuid].OrderBy(slip => slip.SortOrder).ToList();
                         var item = MapDepositListItem<CashDepositListItemDto>(row, access);
                         item.SlipCount = depositSlips.Count;
                         item.ImageCount = depositSlips.Sum(slip => imageCounts.GetValueOrDefault(slip.SlipGuid));
+                        item.SlipSummaries = depositSlips
+                            .Select(slip => SummarizeSlip(slip, imageCounts.GetValueOrDefault(slip.SlipGuid)))
+                            .ToList();
                         return item;
                     })
                     .ToList(),
@@ -438,6 +441,9 @@ public sealed partial class StoreCashService
         var detail = MapDepositListItem<CashDepositDetailDto>(deposit, access);
         detail.SlipCount = slips.Count;
         detail.ImageCount = slips.Sum(slip => attachments.GetValueOrDefault(slip.SlipGuid)?.Count ?? 0);
+        detail.SlipSummaries = slips
+            .Select(slip => SummarizeSlip(slip, attachments.GetValueOrDefault(slip.SlipGuid)?.Count ?? 0))
+            .ToList();
         detail.OverrideReason = deposit.OverrideReason;
         detail.VoidReason = deposit.VoidReason;
         detail.VoidedByName = deposit.VoidedByName;
@@ -453,6 +459,15 @@ public sealed partial class StoreCashService
             .ToList();
         return detail;
     }
+
+    private static CashDepositSlipSummaryDto SummarizeSlip(StoreCashDepositSlip slip, int imageCount) =>
+        new()
+        {
+            SlipGuid = slip.SlipGuid,
+            Amount = slip.Amount,
+            SlipNo = slip.SlipNo,
+            ImageCount = imageCount,
+        };
 
     // ───────────────────────── 作废 ─────────────────────────
 

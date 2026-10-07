@@ -85,6 +85,8 @@ export interface AccessControl {
   canEditStoreProducts: boolean
   canCreateStoreProducts: boolean
   canManageStoreOps: boolean
+  /** 分店现金管理页（/pos-admin/store-cash）：只认 Cash.Overview.View。 */
+  canViewStoreCash: boolean
   canManageLocalPurchase: boolean
   canEditLocalPurchase: boolean
   canPushLocalPurchaseToHq: boolean

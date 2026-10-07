@@ -139,7 +139,7 @@
     },
     "Cash.Overview.View": {
       "name": "View cash management",
-      "description": "Mobile Cash - view a store's cash pool balance, daily breakdown, deposits and cash expense records. Store managers are limited to the stores linked to them."
+      "description": "Mobile Cash and the web page /pos-admin/store-cash - view and export a store's cash pool balance, daily breakdown, deposits and cash expense records. Store managers are limited to the stores linked to them."
     },
     "Cash.Void": {
       "name": "Void cash records",

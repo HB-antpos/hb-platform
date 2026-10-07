@@ -44,6 +44,16 @@ public sealed class StoreCashController : ControllerBase
     public Task<IActionResult> GetSummary([FromQuery] string? storeCode, CancellationToken cancellationToken) =>
         RunAsync(access => _service.GetSummaryAsync(access, storeCode, cancellationToken), cancellationToken);
 
+    /// <summary>Web 多店总览；storeCodes 只表示可见范围的子集，越权分店直接忽略。</summary>
+    [HttpGet("overview")]
+    [Authorize(Policy = Permissions.Cash.OverviewView)]
+    public Task<IActionResult> GetOverview(
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        [FromQuery] List<string>? storeCodes,
+        CancellationToken cancellationToken
+    ) => RunAsync(access => _service.GetOverviewAsync(access, from, to, storeCodes, cancellationToken), cancellationToken);
+
     [HttpGet("daily")]
     [Authorize(Policy = Permissions.Cash.OverviewView)]
     public Task<IActionResult> GetDaily(
@@ -133,6 +143,7 @@ public sealed class StoreCashController : ControllerBase
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
         [FromQuery] string? category,
+        [FromQuery] string? reviewStatus,
         [FromQuery] bool includeVoided = false,
         [FromQuery] int limit = 50,
         [FromQuery] int offset = 0,
@@ -144,6 +155,7 @@ public sealed class StoreCashController : ControllerBase
             from,
             to,
             category,
+            reviewStatus,
             includeVoided,
             limit,
             offset,
@@ -163,6 +175,18 @@ public sealed class StoreCashController : ControllerBase
         [FromBody] CreateCashExpenseRequest request,
         CancellationToken cancellationToken
     ) => RunAsync(access => _service.CreateExpenseAsync(access, request, cancellationToken), cancellationToken);
+
+    /// <summary>财务事后核对标记（已核 / 存疑 / 清除），与作废同属 Cash.Void。</summary>
+    [HttpPost("expenses/{expenseGuid}/review")]
+    [Authorize(Policy = Permissions.Cash.Void)]
+    public Task<IActionResult> ReviewExpense(
+        string expenseGuid,
+        [FromBody] CashExpenseReviewRequest request,
+        CancellationToken cancellationToken
+    ) => RunAsync(
+        access => _service.ReviewExpenseAsync(access, expenseGuid, request ?? new CashExpenseReviewRequest(), cancellationToken),
+        cancellationToken
+    );
 
     [HttpPost("expenses/{expenseGuid}/void")]
     public Task<IActionResult> VoidExpense(

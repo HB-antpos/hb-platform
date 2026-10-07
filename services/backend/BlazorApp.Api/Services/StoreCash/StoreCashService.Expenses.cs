@@ -195,6 +195,7 @@ public sealed partial class StoreCashService
         DateOnly? from,
         DateOnly? to,
         string? category,
+        string? reviewStatus,
         bool includeVoided,
         int limit,
         int offset,
@@ -204,6 +205,12 @@ public sealed partial class StoreCashService
         if (!access.CanViewOverview)
         {
             return Fail<CashPagedDto<CashExpenseListItemDto>>("无权查看现金管理", StoreCashConstants.ErrorCodes.StoreForbidden);
+        }
+
+        var reviewFilter = reviewStatus?.Trim();
+        if (!string.IsNullOrEmpty(reviewFilter) && !StoreCashConstants.ReviewStatus.IsValid(reviewFilter))
+        {
+            return Fail<CashPagedDto<CashExpenseListItemDto>>("核对状态无效", StoreCashConstants.ErrorCodes.InvalidRequest);
         }
 
         var lookup = await LookupStoreAsync(access, storeCode, cancellationToken);
@@ -225,6 +232,7 @@ public sealed partial class StoreCashService
         var toColumn = to.HasValue ? StoreCashClock.ToColumn(to.Value) : DateTime.MaxValue;
         var t2FromColumn = StoreCashClock.ToColumn(CashVisibilityRules.T2VisibleFrom(today));
         var hasCategory = !string.IsNullOrEmpty(categoryFilter);
+        var hasReview = !string.IsNullOrEmpty(reviewFilter);
         var restrictT2 = !access.AllStores;
         var (take, skip) = NormalizePaging(limit, offset);
 
@@ -233,6 +241,7 @@ public sealed partial class StoreCashService
             .Where(item => item.StoreCode == code && item.ExpenseDate >= fromColumn && item.ExpenseDate <= toColumn)
             .WhereIF(!includeVoided, item => item.Status == StoreCashConstants.RecordStatus.Active)
             .WhereIF(hasCategory, item => item.Category == categoryFilter)
+            .WhereIF(hasReview, item => item.ReviewStatus == reviewFilter)
             .WhereIF(
                 restrictT2,
                 item => item.Category != StoreCashConstants.ExpenseCategory.T2 || item.ExpenseDate >= t2FromColumn
@@ -248,6 +257,7 @@ public sealed partial class StoreCashService
             rows.Select(item => item.ExpenseGuid).ToList(),
             cancellationToken
         );
+        var reviewerNames = await LoadUserNamesAsync(rows.Select(item => item.ReviewedByUserGuid), cancellationToken);
 
         return ApiResponse<CashPagedDto<CashExpenseListItemDto>>.OK(
             new CashPagedDto<CashExpenseListItemDto>
@@ -256,7 +266,7 @@ public sealed partial class StoreCashService
                 Items = rows
                     .Select(row =>
                     {
-                        var item = MapExpenseListItem<CashExpenseListItemDto>(row, access);
+                        var item = MapExpenseListItem<CashExpenseListItemDto>(row, access, reviewerNames);
                         item.ImageCount = imageCounts.GetValueOrDefault(row.ExpenseGuid);
                         return item;
                     })
@@ -318,7 +328,11 @@ public sealed partial class StoreCashService
             : null;
     }
 
-    private T MapExpenseListItem<T>(StoreCashExpense row, CashAccess access)
+    private T MapExpenseListItem<T>(
+        StoreCashExpense row,
+        CashAccess access,
+        IReadOnlyDictionary<string, string> reviewerNames
+    )
         where T : CashExpenseListItemDto, new() =>
         new()
         {
@@ -330,6 +344,10 @@ public sealed partial class StoreCashService
             PayeeName = row.PayeeName,
             Note = row.Note,
             ReviewStatus = row.ReviewStatus,
+            ReviewNote = row.ReviewNote,
+            ReviewedAtUtc = StoreCashClock.AsUtc(row.ReviewedAtUtc),
+            ReviewedByName = row.ReviewedByUserGuid is null ? null : reviewerNames.GetValueOrDefault(row.ReviewedByUserGuid),
+            CanReview = access.CanVoid && row.Status == StoreCashConstants.RecordStatus.Active,
             Status = row.Status,
             CreatedByName = row.CreatedByName,
             CreatedAtUtc = StoreCashClock.AsUtc(row.CreatedAtUtc),
@@ -345,7 +363,8 @@ public sealed partial class StoreCashService
     {
         var attachments = await _attachments.GetLinkedAsync(new[] { expense.ExpenseGuid }, cancellationToken);
         var list = attachments.GetValueOrDefault(expense.ExpenseGuid) ?? new List<CashAttachmentDto>();
-        var detail = MapExpenseListItem<CashExpenseDetailDto>(expense, access);
+        var reviewerNames = await LoadUserNamesAsync(new[] { expense.ReviewedByUserGuid }, cancellationToken);
+        var detail = MapExpenseListItem<CashExpenseDetailDto>(expense, access, reviewerNames);
         detail.ImageCount = list.Count;
         detail.PayeeUserGuid = expense.PayeeUserGuid;
         detail.VoidReason = expense.VoidReason;
@@ -353,6 +372,95 @@ public sealed partial class StoreCashService
         detail.VoidedAtUtc = StoreCashClock.AsUtc(expense.VoidedAtUtc);
         detail.Attachments = list;
         return detail;
+    }
+
+    /// <summary>核对人姓名：取员工姓名，没有就用登录名；一次查完本页涉及的人。</summary>
+    private async Task<IReadOnlyDictionary<string, string>> LoadUserNamesAsync(
+        IEnumerable<string?> userGuids,
+        CancellationToken cancellationToken
+    )
+    {
+        var guids = userGuids
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (guids.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var users = await _db.Queryable<User>()
+            .Where(item => guids.Contains(item.UserGUID))
+            .Select(item => new { item.UserGUID, item.FullName, item.Username })
+            .ToListAsync(cancellationToken);
+        return users.ToDictionary(
+            item => item.UserGUID,
+            item => string.IsNullOrWhiteSpace(item.FullName) ? item.Username : item.FullName!,
+            StringComparer.Ordinal
+        );
+    }
+
+    // ───────────────────────── 核对标记 ─────────────────────────
+
+    /// <summary>
+    /// 财务事后核对：已核 / 存疑 / 清除。需要 Cash.Void（与作废同属财务级权限），只对有效记录；
+    /// 存疑必须写说明。标记不影响支出生效与现金池，只用于筛选与提示。
+    /// </summary>
+    public async Task<ApiResponse<CashExpenseDetailDto>> ReviewExpenseAsync(
+        CashAccess access,
+        string expenseGuid,
+        CashExpenseReviewRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!access.CanVoid)
+        {
+            return Fail<CashExpenseDetailDto>("无权核对现金支出", StoreCashConstants.ErrorCodes.StoreForbidden);
+        }
+
+        var expense = await LoadVisibleExpenseAsync(access, expenseGuid, cancellationToken);
+        if (expense is null)
+        {
+            return Fail<CashExpenseDetailDto>("支出记录不存在", StoreCashConstants.ErrorCodes.RecordNotFound);
+        }
+
+        if (expense.Status != StoreCashConstants.RecordStatus.Active)
+        {
+            return Fail<CashExpenseDetailDto>("已作废的支出不能核对", StoreCashConstants.ErrorCodes.InvalidRequest);
+        }
+
+        var status = request.ReviewStatus?.Trim();
+        if (!StoreCashConstants.ReviewStatus.IsValid(status))
+        {
+            return Fail<CashExpenseDetailDto>("核对状态无效", StoreCashConstants.ErrorCodes.InvalidRequest);
+        }
+
+        var note = NormalizeText(request.Note, MaxReasonLength);
+        if (status == StoreCashConstants.ReviewStatus.Flagged && (note is null || note.Length < MinReasonLength))
+        {
+            return Fail<CashExpenseDetailDto>("标记存疑必须写明原因", StoreCashConstants.ErrorCodes.InvalidRequest);
+        }
+
+        var cleared = status == StoreCashConstants.ReviewStatus.None;
+        var now = Now.UtcDateTime;
+        var guid = expense.ExpenseGuid;
+        string? reviewer = cleared ? null : access.UserGuid;
+        DateTime? reviewedAt = cleared ? null : now;
+        string? reviewNote = cleared ? null : note;
+        await _db.Updateable<StoreCashExpense>()
+            .SetColumns(item => new StoreCashExpense
+            {
+                ReviewStatus = status!,
+                ReviewNote = reviewNote,
+                ReviewedByUserGuid = reviewer,
+                ReviewedAtUtc = reviewedAt,
+            })
+            .Where(item => item.ExpenseGuid == guid && item.Status == StoreCashConstants.RecordStatus.Active)
+            .ExecuteCommandAsync(cancellationToken);
+
+        var reloaded = await LoadVisibleExpenseAsync(access, expenseGuid, cancellationToken) ?? expense;
+        return ApiResponse<CashExpenseDetailDto>.OK(await BuildExpenseDetailAsync(reloaded, access, cancellationToken));
     }
 
     // ───────────────────────── 作废 ─────────────────────────

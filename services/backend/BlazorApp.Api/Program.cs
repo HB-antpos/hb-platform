@@ -1175,10 +1175,11 @@ builder.Services.AddScoped<IAttendancePosDeviceStatusProvider, AttendancePosDevi
 builder.Services.AddScoped<ITaxInvoiceService, TaxInvoiceService>();
 builder.Services.AddScoped<ISalesDashboardReactService, SalesDashboardReactService>();
 builder.Services.AddScoped<IMonthlyStoreDailySalesReactService, MonthlyStoreDailySalesReactService>();
-// 分店现金管理（存银行 / 现金支出 / 现金池）。日结取数口在后端日结接入前用「未接入」占位实现，
-// 接入时只需把 ICashDailyCloseSource 换成真实实现，其余服务与接口不用改。
+// 分店现金管理（存银行 / 现金支出 / 现金池）。现金池流入只认日结实点现金：取数口读 POSM_DailyClose
+// （收银端日结上传，表由 Hbpos.Api 建立、后台只读）；若需临时停用，换回 NotConnectedCashDailyCloseSource 即可。
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashAccessResolver, BlazorApp.Api.Services.StoreCash.CashAccessResolver>();
-builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashDailyCloseSource, BlazorApp.Api.Services.StoreCash.NotConnectedCashDailyCloseSource>();
+builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashDailyCloseSource>(sp =>
+    new BlazorApp.Api.Services.StoreCash.PosmCashDailyCloseSource(sp.GetRequiredService<POSMSqlSugarContext>().Db));
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashAttachmentService, BlazorApp.Api.Services.StoreCash.StoreCashAttachmentService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashService, BlazorApp.Api.Services.StoreCash.StoreCashService>();
 builder.Services.AddScoped<ISalesDashboardCacheWarmer, SalesDashboardCacheWarmer>();

@@ -72,6 +72,8 @@
     <Compile Include="StoreReceiptProfilePipelineTests.cs" />
     <Compile Include="StoreCashServiceTests.cs" />
     <Compile Include="StoreCashRulesTests.cs" />
+    <Compile Include="PosmCashDailyCloseSourceTests.cs" />
+    <Compile Include="PosmCashDailyCloseSourceSqlServerTests.cs" />
     <Compile Include="SchemaMigrationSqlServerIntegrationTests.cs" />
     <Compile Include="SchemaCommandProcessTests.cs" />
     <Compile Include="DomesticProductCreationControllerTests.cs" />

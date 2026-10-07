@@ -131,6 +131,13 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.canViewOperationAudits || access.hasPermission(P.LegacyEmployeeLogs.View),
   },
   {
+    // 分店现金管理：只有 Cash.Overview.View 的店长 / 财务登录后直接落到现金管理页。
+    // 放在既有入口之后，已有其他后台权限的组合用户继续沿用原默认入口。
+    defaultPath: '/pos-admin/store-cash',
+    targetPrefixes: ['/pos-admin/store-cash'],
+    canAccess: (access) => access.hasPermission(P.Cash.OverviewView),
+  },
+  {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
     targetPrefixes: ['/system/performance-baseline'],

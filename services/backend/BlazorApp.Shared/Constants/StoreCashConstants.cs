@@ -25,6 +25,15 @@ public static class StoreCashConstants
             category is not null && All.Contains(category, StringComparer.Ordinal);
     }
 
+    public static class ReviewStatus
+    {
+        public const string None = "None";
+        public const string Reviewed = "Reviewed";
+        public const string Flagged = "Flagged";
+
+        public static bool IsValid(string? value) => value is None or Reviewed or Flagged;
+    }
+
     public static class AttachmentStatus
     {
         /// <summary>已签发上传，对象在 cash/pending/ 下，尚未被业务单据确认。</summary>

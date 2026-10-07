@@ -1,4 +1,5 @@
 import {
+  AccountBookOutlined,
   AppstoreOutlined,
   BankOutlined,
   BarChartOutlined,
@@ -77,6 +78,8 @@ const PosAdminAdvertisementsPage = lazy(() => import('../pages/PosAdmin/Advertis
 const PosAdminEmployeeLogsPage = lazy(() => import('../pages/PosAdmin/EmployeeLogs'))
 const LinklySettlementsPage = lazy(() => import('../pages/PosAdmin/LinklySettlements'))
 const LinklySettlementDetailPage = lazy(() => import('../pages/PosAdmin/LinklySettlementDetail'))
+// 分店现金管理：多店现金池总览、按日日结、存款与现金支出（页面文案随页面懒加载）。
+const PosAdminStoreCashPage = lazy(() => import('../pages/PosAdmin/StoreCash'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
 const LocalSupplierInvoiceSalesAnalysisPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoiceSalesAnalysis'))
 const InvoiceEditPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit'))
@@ -140,6 +143,7 @@ interface LeafEntry {
 
 const iconMap = {
   DashboardOutlined: <DashboardOutlined />,
+  AccountBookOutlined: <AccountBookOutlined />,
   AppstoreOutlined: <AppstoreOutlined />,
   BankOutlined: <BankOutlined />,
   BarChartOutlined: <BarChartOutlined />,
@@ -869,6 +873,16 @@ export const appRoutes: AppRouteItem[] = [
           dynamicTitle: () => i18n.t('menu.linklySettlementDetail'),
         },
         element: <LinklySettlementDetailPage />,
+      },
+      {
+        path: '/pos-admin/store-cash',
+        meta: {
+          title: 'menu.storeCash',
+          icon: 'AccountBookOutlined',
+          keepAlive: true,
+          accessKey: 'canViewStoreCash',
+        },
+        element: <PosAdminStoreCashPage />,
       },
       {
         path: '/pos-admin/sales-orders',

@@ -155,6 +155,8 @@ namespace BlazorApp.Api.Services
                     // 员工操作日志合并页：老收银 / 新收银在页内切换，任一查看权限即可见。
                     new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
                     new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
+                    // 分店现金管理：多店现金池总览、按日日结、存款与现金支出；店长只见关联分店，T2 受 14 天窗口限制。
+                    new() { Path = "/pos-admin/store-cash",           TitleKey = "menu.storeCash",              Icon = "AccountBookOutlined",        Permission = Permissions.Cash.OverviewView },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
@@ -739,6 +741,8 @@ namespace BlazorApp.Api.Services
                 Permissions.System.ManageAppDownloads,
                 Permissions.PosTerminal.Audit.View,
                 Permissions.LegacyEmployeeLogs.View,
+                // 现金管理页：只有该权限的店长 / 财务也要能拿到后台菜单，否则前端只能退回本地菜单。
+                Permissions.Cash.OverviewView,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage
             );

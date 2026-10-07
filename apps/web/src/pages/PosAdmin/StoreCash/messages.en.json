@@ -1,0 +1,360 @@
+{
+  "storeCash": {
+    "title": "Cash management",
+    "subtitle": "Cash pool = opening + counted cash from daily closes − deposits − expenses. The float is taken out before counting, so the balance should be close to 0 after banking.",
+    "noStores": "This account has no stores with cash data to view",
+    "t2Note": "T2 covers the last {{days}} days only",
+    "tabs": {
+      "overview": "Overview",
+      "daily": "Daily",
+      "deposits": "Deposits",
+      "expenses": "Expenses"
+    },
+    "dailyCloseMissing": {
+      "title": "Daily close data is not connected yet",
+      "description": "Cash pool balance, daily close cash and close variance can't be calculated yet and show as \"—\". Deposit and expense records are not affected."
+    },
+    "filters": {
+      "range": "Date range",
+      "rangeHint": "Up to {{days}} days, no later than the store's today",
+      "store": "Store",
+      "stores": "Stores",
+      "allStores": "All stores",
+      "category": "Category",
+      "allCategories": "All categories",
+      "review": "Review status",
+      "allReview": "All",
+      "includeVoided": "Include voided"
+    },
+    "actions": {
+      "refresh": "Refresh",
+      "retry": "Retry",
+      "cancel": "Cancel"
+    },
+    "export": {
+      "button": "Export CSV",
+      "preparing": "Preparing…",
+      "progress": "Exporting {{done}} / {{total}} rows",
+      "success": "Exported {{fileName}} ({{rows}} rows)",
+      "tooMany": "{{total}} rows match the current filters, over the export limit of {{max}}. Narrow the date range or filters and try again.",
+      "empty": "Nothing to export for the current filters",
+      "failed": "Export failed: {{reason}}",
+      "prefix": {
+        "overview": "CashOverview",
+        "daily": "CashDaily",
+        "deposits": "CashDeposits",
+        "expenses": "CashExpenses"
+      }
+    },
+    "kpi": {
+      "region": "Cash metrics",
+      "pool": "Cash pool balance",
+      "poolSub": "As of each store's today",
+      "openingMissing": "Opening cash missing at {{count}} store(s); total unavailable",
+      "dailyCloseMissing": "Daily close data not connected",
+      "inflow": "Daily close cash in range",
+      "variance": "Close variance",
+      "deposits": "Deposits in range",
+      "depositCount": "Deposits: {{count}}",
+      "expenses": "Expenses in range",
+      "expenseSub": "Cash wages, cash purchases, T2 and other",
+      "overdue": "Stores overdue to bank",
+      "overdueSub": "Not banked for over {{days}} days; {{count}} business day(s) not banked",
+      "flagged": "Flagged expenses",
+      "flaggedSub": "Flagged by finance for follow-up; expenses still count"
+    },
+    "overview": {
+      "openDaily": "Open this store's daily breakdown",
+      "openingMissing": "No opening",
+      "openingMissingHint": "No opening cash recorded for this store yet, so the cash pool balance can't be calculated",
+      "allDeposited": "All banked",
+      "uncoveredDays": "Not banked: {{count}} day(s)",
+      "overdue": "Overdue",
+      "oldestUncovered": "Oldest {{date}}",
+      "varianceHint": "Counted − expected: positive is over, negative is short",
+      "closeDays": "Days with close: {{count}}",
+      "missingCloseHint": "Business days in range (excluding today) without any daily close; may be closed days, for reference only",
+      "missingCloseDays": "No close: {{count}} day(s)",
+      "depositCount": "Deposits: {{count}}",
+      "tableLabel": "Store cash overview table",
+      "tableTitle": "By store",
+      "rangeNote": "Range {{from}} ~ {{to}}; cash pool balance and days not banked are as of each store's today",
+      "rowHint": "Click a store to open its daily breakdown",
+      "empty": "No data for the selected stores in this range",
+      "totalRow": "Total ({{count}} stores)",
+      "columns": {
+        "store": "Store",
+        "poolBalance": "Cash pool",
+        "uncovered": "Not banked",
+        "inflowCash": "Close cash",
+        "closeVariance": "Close variance",
+        "closeDays": "Close days",
+        "deposits": "Deposits",
+        "expenseGroup": "Expenses in range",
+        "expenseTotal": "Total",
+        "flagged": "Flagged",
+        "lastDepositDate": "Last deposit"
+      }
+    },
+    "weekday": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "daily": {
+      "columns": {
+        "businessDate": "Business day",
+        "inflowCash": "Close cash",
+        "close": "Daily close",
+        "covered": "Banked",
+        "expenseTotal": "Expenses",
+        "devices": "Device closes"
+      },
+      "hasClose": "Closed",
+      "noClose": "No close",
+      "covered": "Banked",
+      "uncovered": "Not banked",
+      "deviceCount": "Devices: {{count}}",
+      "manualCount": "Manual {{count}}",
+      "staleCount": "To confirm {{count}}",
+      "overlapCount": "Overlap {{count}}",
+      "summary": {
+        "inflow": "Close cash",
+        "closeDays": "Days with close",
+        "uncoveredDays": "Days not banked",
+        "expense": "Expenses"
+      },
+      "readOnlyHint": "Store managers choose which closes count in the staff app's Cash screen; read-only here",
+      "tableLabel": "Daily breakdown table",
+      "empty": "No daily closes or expenses for this store in the selected range",
+      "device": {
+        "included": "Counted in pool",
+        "selectedBy": "Chosen manually by {{name}} at {{time}}",
+        "stale": "A newer daily close was saved after the manual choice; the store manager needs to confirm it again in the app",
+        "overlap": "The manually chosen closes have overlapping periods and may be double counted",
+        "reason": "Reason for manual choice: {{reason}}"
+      },
+      "archive": {
+        "savedAt": "Saved at",
+        "period": "Period",
+        "periodHint": "The till period this close covers (store local time)",
+        "counted": "Counted",
+        "expected": "Expected",
+        "variance": "Variance",
+        "included": "Counted",
+        "yes": "Counted",
+        "no": "Not counted",
+        "empty": "No daily close archives"
+      }
+    },
+    "selection": {
+      "Default": "Default (latest)",
+      "Manual": "Manual"
+    },
+    "category": {
+      "Salary": "Cash wages",
+      "Purchase": "Cash purchases",
+      "T2": "T2",
+      "Other": "Other"
+    },
+    "review": {
+      "None": "Not reviewed",
+      "Reviewed": "Reviewed",
+      "Flagged": "Flagged"
+    },
+    "status": {
+      "Active": "Active",
+      "Voided": "Voided"
+    },
+    "deposits": {
+      "columns": {
+        "depositDate": "Deposit date",
+        "covered": "Business days covered",
+        "total": "Total",
+        "slips": "Slips",
+        "images": "Photos",
+        "createdBy": "Entered by",
+        "createdAt": "Entered at",
+        "status": "Status",
+        "note": "Note"
+      },
+      "coveredRange": "{{from}} ~ {{to}}",
+      "slipCount": "{{count}}",
+      "tableLabel": "Deposit records table",
+      "tableTitle": "Deposit records",
+      "rowHint": "Click a row to see slips and photos",
+      "empty": "No deposits for this store in the selected range",
+      "drawerTitle": "Deposit {{date}}",
+      "drawerTitleLoading": "Deposit details",
+      "fields": {
+        "status": "Status",
+        "depositDate": "Deposit date",
+        "covered": "Business days covered",
+        "total": "Total",
+        "slips": "Slips",
+        "createdBy": "Entered",
+        "note": "Note",
+        "overrideReason": "Difference reason"
+      },
+      "slipSummary": "Slips: {{slips}}, photos: {{images}}",
+      "slipsTitle": "Deposit slips",
+      "noSlips": "No slips",
+      "slipLabel": "Slip {{index}}",
+      "slipNo": "Slip no. {{slipNo}}",
+      "slipNoMissing": "No slip number",
+      "slipImageAlt": "Slip {{index}} photo {{image}}"
+    },
+    "expenses": {
+      "columns": {
+        "expenseDate": "Date",
+        "category": "Category",
+        "amount": "Amount",
+        "payee": "Payee",
+        "note": "Note",
+        "review": "Review",
+        "createdBy": "Entered",
+        "status": "Status",
+        "images": "Photos"
+      },
+      "tooMany": "{{total}} expenses match the current filters, over the limit of {{max}}, so they can't be listed or totalled. Narrow the date range or filters.",
+      "summary": {
+        "region": "Expense totals by category",
+        "total": "Total",
+        "count": "({{count}})",
+        "voidedExcluded": "Excludes {{count}} voided",
+        "flagged": "Flagged: {{count}}"
+      },
+      "tableLabel": "Cash expense table",
+      "tableTitle": "Expense records",
+      "rowHint": "Click a row to see receipts and review",
+      "empty": "No expenses for this store with the selected filters",
+      "drawerTitle": "Expense {{date}}",
+      "drawerTitleLoading": "Expense details",
+      "flaggedBanner": "Flagged by finance",
+      "fields": {
+        "status": "Status",
+        "expenseDate": "Date",
+        "category": "Category",
+        "amount": "Amount",
+        "payee": "Payee",
+        "note": "Note",
+        "createdBy": "Entered",
+        "review": "Review flag"
+      },
+      "receiptsTitle": "Receipt photos ({{count}})",
+      "receiptAlt": "Receipt photo {{index}}"
+    },
+    "drawer": {
+      "reload": "Reload",
+      "byAt": "{{name}} · {{time}}",
+      "noImages": "No photos",
+      "imageExpiry": "Photo links are valid for a few minutes; click Reload if they don't open"
+    },
+    "void": {
+      "success": "Voided",
+      "voidedTitle": "Voided; not counted in the cash pool or totals",
+      "voidedDetail": "Reason: {{reason}} ({{name}} · {{time}})",
+      "depositButton": "Void deposit",
+      "depositTitle": "Void this deposit?",
+      "depositDescription": "Once voided, the {{amount}} deposit on {{date}} no longer counts toward the cash pool, and the business days it covered show as not banked again. This can't be undone.",
+      "expenseButton": "Void expense",
+      "expenseTitle": "Void this expense?",
+      "expenseDescription": "Once voided, the {{amount}} expense on {{date}} no longer counts toward the cash pool or totals. This can't be undone.",
+      "reasonLabel": "Reason for voiding",
+      "reasonPlaceholder": "e.g. entered twice, wrong amount",
+      "confirm": "Void"
+    },
+    "reviewAction": {
+      "success": "Review flag updated",
+      "markReviewed": "Mark reviewed",
+      "markFlagged": "Flag",
+      "clear": "Clear flag",
+      "reviewedTitle": "Mark as reviewed?",
+      "reviewedDescription": "Confirm the {{amount}} expense on {{date}} has been checked. Review flags don't change whether the expense counts.",
+      "reviewedConfirm": "Mark reviewed",
+      "flaggedTitle": "Flag this expense?",
+      "flaggedDescription": "The {{amount}} expense on {{date}} will be flagged and highlighted in the list. Flags don't change whether the expense counts or the cash pool.",
+      "flaggedConfirm": "Flag",
+      "clearTitle": "Clear the review flag?",
+      "clearDescription": "The {{amount}} expense on {{date}} will go back to not reviewed.",
+      "clearConfirm": "Clear flag",
+      "noteLabel": "Note",
+      "notePlaceholderRequired": "Explain why it's flagged (required)",
+      "notePlaceholderOptional": "Optional"
+    },
+    "reason": {
+      "tooShort": "Enter at least {{min}} characters"
+    },
+    "pagination": {
+      "total": "{{count}} records"
+    },
+    "errors": {
+      "invalidRequest": "Invalid request. Check the filters.",
+      "dateOutOfRange": "The date is outside the allowed range",
+      "storeNotFound": "Store not found",
+      "storeForbidden": "You don't have permission to view cash data for this store",
+      "recordNotFound": "The record doesn't exist or has been removed",
+      "voidNotAllowed": "You can't void this record, or the time limit for voiding has passed",
+      "closeSourceUnavailable": "Daily close data can't be read right now. Try again later.",
+      "conflict": "Someone else changed this record. Refresh and try again.",
+      "server": "Server error. Try again later.",
+      "network": "Network error. Check your connection and try again.",
+      "unknown": "Something went wrong. Try again later."
+    },
+    "csv": {
+      "storeCode": "Store code",
+      "storeName": "Store name",
+      "poolBalance": "Cash pool balance",
+      "openingMissing": "Opening missing",
+      "uncoveredDays": "Days not banked",
+      "oldestUncoveredDate": "Oldest day not banked",
+      "depositOverdue": "Deposit overdue",
+      "inflowCash": "Daily close cash",
+      "closeVariance": "Close variance",
+      "closeDays": "Days with close",
+      "missingCloseDays": "Days without close",
+      "depositCount": "Deposit count",
+      "depositTotal": "Deposit amount",
+      "expenseTotal": "Expense total",
+      "t2Restricted": "T2 (last {{days}} days only)",
+      "flaggedCount": "Flagged count",
+      "lastDepositDate": "Last deposit date",
+      "totalRow": "Total",
+      "yes": "Yes",
+      "no": "No",
+      "businessDate": "Business day",
+      "hasClose": "Has close",
+      "covered": "Covered by deposit",
+      "dayExpense": "Expenses",
+      "deviceCount": "Devices with close",
+      "manualDevices": "Manual devices",
+      "staleDevices": "Devices to confirm",
+      "depositDate": "Deposit date",
+      "coveredFrom": "Covered from",
+      "coveredTo": "Covered to",
+      "depositAmount": "Deposit total",
+      "slipCount": "Slips",
+      "slipIndex": "Slip #",
+      "slipAmount": "Slip amount",
+      "slipNo": "Slip no.",
+      "slipImageCount": "Slip photos",
+      "imageCount": "Photos",
+      "createdBy": "Entered by",
+      "createdAt": "Entered at",
+      "status": "Status",
+      "note": "Note",
+      "expenseDate": "Expense date",
+      "category": "Category",
+      "amount": "Amount",
+      "payee": "Payee",
+      "reviewStatus": "Review status",
+      "reviewNote": "Review note",
+      "reviewedBy": "Reviewed by",
+      "reviewedAt": "Reviewed at"
+    }
+  }
+}

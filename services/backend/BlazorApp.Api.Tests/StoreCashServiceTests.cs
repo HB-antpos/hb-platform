@@ -247,6 +247,10 @@ public sealed class StoreCashServiceTests : IDisposable
         Assert.Equal(2, detail.SlipCount);
         Assert.Equal(3, detail.ImageCount);
         Assert.Equal(new[] { 300m, 120.55m }, detail.Slips.Select(slip => slip.Amount));
+        // 列表也带逐张存单摘要（银行对账按存单粒度）。
+        var listed = (await service.ListDepositsAsync(Manager(), "S001", null, null, false, 50, 0, default)).Data!.Items.Single();
+        Assert.Equal(new[] { 300m, 120.55m }, listed.SlipSummaries.Select(slip => slip.Amount));
+        Assert.Equal(new[] { 2, 1 }, listed.SlipSummaries.Select(slip => slip.ImageCount));
         Assert.Equal(new[] { first, second }, detail.Slips[0].Attachments.Select(item => item.AttachmentGuid));
         Assert.All(detail.Slips.SelectMany(slip => slip.Attachments), item => Assert.Contains("cash/S001/", item.Url));
         Assert.True(detail.CanVoid);
@@ -363,10 +367,10 @@ public sealed class StoreCashServiceTests : IDisposable
         var old = await CreateExpenseAsync(service, Finance(), "t2-old", StoreCashConstants.ExpenseCategory.T2, 700m, Today.AddDays(-14));
         await CreateExpenseAsync(service, Manager(), "salary", StoreCashConstants.ExpenseCategory.Salary, 300m, Today.AddDays(-2));
 
-        var managerList = (await service.ListExpensesAsync(Manager(), "S001", null, null, null, false, 50, 0, default)).Data!;
+        var managerList = (await service.ListExpensesAsync(Manager(), "S001", null, null, null, null, false, 50, 0, default)).Data!;
         Assert.Equal(2, managerList.Total);
         Assert.DoesNotContain(managerList.Items, item => item.ExpenseGuid == old.ExpenseGuid);
-        var managerT2 = (await service.ListExpensesAsync(Manager(), "S001", null, null, "T2", false, 50, 0, default)).Data!;
+        var managerT2 = (await service.ListExpensesAsync(Manager(), "S001", null, null, "T2", null, false, 50, 0, default)).Data!;
         Assert.Equal(new[] { recent.ExpenseGuid }, managerT2.Items.Select(item => item.ExpenseGuid));
 
         Assert.Equal(StoreCashConstants.ErrorCodes.RecordNotFound, (await service.GetExpenseAsync(Manager(), old.ExpenseGuid, default)).ErrorCode);
@@ -385,7 +389,7 @@ public sealed class StoreCashServiceTests : IDisposable
         var managerDaily = (await service.GetDailyAsync(Manager(), "S001", oldDay, oldDay, default)).Data!.Rows.Single();
         Assert.Equal(0m, managerDaily.ExpenseTotal);
 
-        var financeList = (await service.ListExpensesAsync(Finance(), "S001", null, null, null, false, 50, 0, default)).Data!;
+        var financeList = (await service.ListExpensesAsync(Finance(), "S001", null, null, null, null, false, 50, 0, default)).Data!;
         Assert.Equal(3, financeList.Total);
         Assert.True((await service.GetExpenseAsync(Finance(), old.ExpenseGuid, default)).Success);
         var financeSummary = (await service.GetSummaryAsync(Finance(), "S001", default)).Data!;
@@ -471,7 +475,7 @@ public sealed class StoreCashServiceTests : IDisposable
         Assert.Equal("录错了", again.Data!.VoidReason);
 
         // 作废后不再计入现金池，列表默认也不显示。
-        var list = (await service.ListExpensesAsync(Manager(), "S001", null, null, null, false, 50, 0, default)).Data!;
+        var list = (await service.ListExpensesAsync(Manager(), "S001", null, null, null, null, false, 50, 0, default)).Data!;
         Assert.DoesNotContain(list.Items, item => item.ExpenseGuid == mine.ExpenseGuid);
 
         // 超过 24 小时，本人也不能再作废；有作废权限的可以。
@@ -525,6 +529,144 @@ public sealed class StoreCashServiceTests : IDisposable
         Assert.Equal(470m, (await service.GetSummaryAsync(Manager(), "S001", default)).Data!.PoolBalance);
     }
 
+    // ───────────────────────── 多店总览 ─────────────────────────
+
+    [Fact]
+    public async Task Overview_财务看全部分店_区间统计与当前余额分开算_不可算的店让合计也不可算()
+    {
+        var service = CreateService();
+        await SetOpeningAsync(service, Finance(), new DateOnly(2026, 10, 2), 50m);
+        _closes.Archives.AddRange(new[]
+        {
+            Close("a1", new DateOnly(2026, 10, 2), 300m, expected: 305m),
+            Close("a2", new DateOnly(2026, 10, 3), 150m, expected: 150m),
+            Close("a3", new DateOnly(2026, 10, 3), 100m, device: "POS_2", expected: 98m),
+            Close("b1", new DateOnly(2026, 10, 5), 200m, store: "S002"),
+            // 区间外（9 月）的日结不进区间统计。
+            Close("old", new DateOnly(2026, 9, 28), 999m),
+        });
+        var deposit = await service.CreateDepositAsync(Finance(), DepositRequest(
+            "dep-1",
+            new DateOnly(2026, 10, 5),
+            (new DateOnly(2026, 10, 2), new DateOnly(2026, 10, 3)),
+            "期初现金留店备用",
+            (550m, new[] { await UploadAsync(service, Finance()) })), default);
+        Assert.True(deposit.Success, deposit.Message);
+        await CreateExpenseAsync(service, Finance(), "e1", StoreCashConstants.ExpenseCategory.Salary, 80m, new DateOnly(2026, 10, 6));
+
+        var overview = (await service.GetOverviewAsync(Finance(), null, null, null, default)).Data!;
+
+        // 默认区间：本月 1 日到今天。
+        Assert.Equal(new DateOnly(2026, 10, 1), overview.From);
+        Assert.Equal(Today, overview.To);
+        Assert.False(overview.T2Restricted);
+        Assert.Equal(new[] { "S001", "S002" }, overview.Rows.Select(row => row.StoreCode));
+
+        var s001 = overview.Rows[0];
+        // 50 + 300 + 250 − 550 − 80 = −30（10-04 之后没有日结，现金被工资花掉了）。
+        Assert.Equal(-30m, s001.PoolBalance);
+        Assert.Equal(550m, s001.InflowCash);
+        Assert.Equal(-3m, s001.CloseVariance);
+        Assert.Equal(2, s001.CloseDayCount);
+        // 期初 10-02 起、今天之前，10-04 到 10-07 四天没有日结。
+        Assert.Equal(4, s001.MissingCloseDayCount);
+        Assert.Equal(550m, s001.DepositTotal);
+        Assert.Equal(1, s001.DepositCount);
+        Assert.Equal(80m, s001.ExpenseTotal);
+        Assert.Equal(0, s001.UncoveredDayCount);
+        Assert.Equal(new DateOnly(2026, 10, 5), s001.LastDepositDate);
+
+        var s002 = overview.Rows[1];
+        Assert.True(s002.OpeningMissing);
+        Assert.Null(s002.PoolBalance);
+        Assert.Equal(200m, s002.InflowCash);
+        Assert.Equal(1, s002.UncoveredDayCount);
+        Assert.Equal(new DateOnly(2026, 10, 5), s002.OldestUncoveredDate);
+
+        // S002 余额不可算：合计余额也不可算；可加的金额照常合计。
+        Assert.Null(overview.Totals.PoolBalance);
+        Assert.Equal(750m, overview.Totals.InflowCash);
+        Assert.Equal(550m, overview.Totals.DepositTotal);
+        Assert.Equal(80m, overview.Totals.ExpenseByCategory.Single(item => item.Category == "Salary").Amount);
+        Assert.Equal(1, overview.Totals.UncoveredDayCount);
+    }
+
+    [Fact]
+    public async Task Overview_店长只看关联分店_越权分店被忽略_T2只计窗口内_区间校验()
+    {
+        var service = CreateService();
+        await CreateExpenseAsync(service, Finance(), "t2-old", StoreCashConstants.ExpenseCategory.T2, 700m, Today.AddDays(-20));
+        await CreateExpenseAsync(service, Finance(), "t2-new", StoreCashConstants.ExpenseCategory.T2, 100m, Today.AddDays(-1));
+
+        var manager = (await service.GetOverviewAsync(Manager(), Today.AddDays(-30), Today, new[] { "S001", "S002" }, default)).Data!;
+        Assert.True(manager.T2Restricted);
+        var row = Assert.Single(manager.Rows);
+        Assert.Equal("S001", row.StoreCode);
+        Assert.Equal(800m, row.ExpenseTotal);
+        Assert.Equal(100m, row.ExpenseByCategory.Single(item => item.Category == "T2").Amount);
+
+        var onlyForbidden = (await service.GetOverviewAsync(Manager(), null, null, new[] { "S002" }, default)).Data!;
+        Assert.Empty(onlyForbidden.Rows);
+
+        Assert.Equal(
+            StoreCashConstants.ErrorCodes.InvalidRequest,
+            (await service.GetOverviewAsync(Finance(), Today.AddDays(-93), Today, null, default)).ErrorCode
+        );
+        Assert.Equal(
+            StoreCashConstants.ErrorCodes.InvalidRequest,
+            (await service.GetOverviewAsync(Finance(), Today, null, null, default)).ErrorCode
+        );
+    }
+
+    // ───────────────────────── 核对标记 ─────────────────────────
+
+    [Fact]
+    public async Task Review_需要作废权限_存疑必须写原因_可按状态筛选_清除后回到未核_作废后不能再核()
+    {
+        _db.Insertable(new User { UserGUID = "u-fin", Username = "finance", FullName = "财务小王", Email = "f@example.com" }).ExecuteCommand();
+        var service = CreateService();
+        var expense = await CreateExpenseAsync(service, Manager(), "e1", StoreCashConstants.ExpenseCategory.Other, 30m, Today);
+        Assert.False(expense.CanReview);
+
+        Assert.Equal(
+            StoreCashConstants.ErrorCodes.StoreForbidden,
+            (await service.ReviewExpenseAsync(Manager(), expense.ExpenseGuid, new CashExpenseReviewRequest { ReviewStatus = "Reviewed" }, default)).ErrorCode
+        );
+        Assert.Equal(
+            StoreCashConstants.ErrorCodes.InvalidRequest,
+            (await service.ReviewExpenseAsync(Finance(), expense.ExpenseGuid, new CashExpenseReviewRequest { ReviewStatus = "Flagged" }, default)).ErrorCode
+        );
+
+        var flagged = await service.ReviewExpenseAsync(
+            Finance(),
+            expense.ExpenseGuid,
+            new CashExpenseReviewRequest { ReviewStatus = "Flagged", Note = "没有收据" },
+            default
+        );
+        Assert.True(flagged.Success, flagged.Message);
+        Assert.Equal("Flagged", flagged.Data!.ReviewStatus);
+        Assert.Equal("没有收据", flagged.Data.ReviewNote);
+        Assert.Equal("财务小王", flagged.Data.ReviewedByName);
+        Assert.NotNull(flagged.Data.ReviewedAtUtc);
+        Assert.True(flagged.Data.CanReview);
+
+        var onlyFlagged = (await service.ListExpensesAsync(Finance(), "S001", null, null, null, "Flagged", false, 50, 0, default)).Data!;
+        Assert.Equal(new[] { expense.ExpenseGuid }, onlyFlagged.Items.Select(item => item.ExpenseGuid));
+        Assert.Empty((await service.ListExpensesAsync(Finance(), "S001", null, null, null, "Reviewed", false, 50, 0, default)).Data!.Items);
+        Assert.Equal(1, (await service.GetOverviewAsync(Finance(), null, null, null, default)).Data!.Totals.FlaggedExpenseCount);
+
+        var cleared = await service.ReviewExpenseAsync(Finance(), expense.ExpenseGuid, new CashExpenseReviewRequest { ReviewStatus = "None" }, default);
+        Assert.Equal("None", cleared.Data!.ReviewStatus);
+        Assert.Null(cleared.Data.ReviewedByName);
+        Assert.Null(cleared.Data.ReviewNote);
+
+        Assert.True((await service.VoidExpenseAsync(Finance(), expense.ExpenseGuid, new CashVoidRequest { Reason = "重复录入" }, default)).Success);
+        Assert.Equal(
+            StoreCashConstants.ErrorCodes.InvalidRequest,
+            (await service.ReviewExpenseAsync(Finance(), expense.ExpenseGuid, new CashExpenseReviewRequest { ReviewStatus = "Reviewed" }, default)).ErrorCode
+        );
+    }
+
     // ───────────────────────── 工具 ─────────────────────────
 
     private StoreCashService CreateService()
@@ -558,12 +700,14 @@ public sealed class StoreCashServiceTests : IDisposable
         string device = "POS_1",
         int savedHour = 22,
         int fromHour = 0,
-        int toHour = 24
+        int toHour = 24,
+        string store = "S001",
+        decimal? expected = null
     )
     {
         var midnight = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         return new CashCloseArchive(
-            "S001",
+            store,
             date,
             device,
             closeId,
@@ -571,7 +715,7 @@ public sealed class StoreCashServiceTests : IDisposable
             midnight.AddHours(toHour),
             midnight.AddHours(savedHour),
             counted,
-            counted
+            expected ?? counted
         );
     }
 

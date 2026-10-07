@@ -89,6 +89,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageAdvertisements: [P.Advertisements.View],
   canViewAttendanceSchedule: [P.Attendance.AdminView, P.Attendance.ScheduleViewStore],
   canManageStoreOps: [P.Store.ManageOperations],
+  canViewStoreCash: [P.Cash.OverviewView],
   canViewOperationAudits: [P.PosTerminal.AuditView],
   canViewLegacyEmployeeLogs: [P.LegacyEmployeeLogs.View],
   // 合并页任一权限可见；从菜单授予时只补第一个（老收银查看），移除时两个来源权限一并撤销。
@@ -173,11 +174,15 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/pos-admin/cash-register-users', title: 'menu.cashRegisterUsers', accessKey: 'canManageStoreOps' },
       { path: '/pos-admin/operation-logs', title: 'menu.operationLogs', accessKey: 'canViewEmployeeOperationLogs' },
       { path: '/pos-admin/linkly-settlements', title: 'menu.linklySettlements', accessKey: 'isAdmin' },
+      { path: '/pos-admin/store-cash', title: 'menu.storeCash', accessKey: 'canViewStoreCash' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },
       { path: '/pos-admin/local-supplier-invoices', title: 'menu.localSupplierInvoices', accessKey: 'canManageLocalPurchase' },
     ],
   },
 ]
+
+/** 自带后台入口规则（见 webPortalAccess 的 ADMIN_ENTRY_RULES）的独立页面：从菜单授予时不连带授予工作台。 */
+const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash'])
 
 const warehouseStaffVisibleMenuPaths = new Set([
   '/warehouse',
@@ -213,8 +218,10 @@ function buildAddPermissionCodes(
   // 中文注释：菜单添加只补最小可见权限，避免只读入口把角色提升成管理权限。
   const primaryPermissionCode = permissionCodes[0]
   const nextCodes = [primaryPermissionCode]
-  // 销售看板的单页权限已包含后台入口能力，不连带授予工作台。
+  // 销售看板的单页权限、现金管理页权限已包含后台入口能力，不连带授予工作台
+  // （给店长开现金管理不应顺带开放全公司数据看板）。
   if (route.path !== '/dashboard' && !route.path.startsWith('/executive-sales-intelligence/') &&
+    !SELF_ENTRY_MENU_PATHS.has(route.path) &&
     !explicitPermissionCodeSet.has(P.Dashboard.View)) {
     nextCodes.push(P.Dashboard.View)
   }

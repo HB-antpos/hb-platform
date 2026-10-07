@@ -150,6 +150,7 @@ public sealed class StoreCashRulesTests
     [Theory]
     [InlineData(nameof(StoreCashController.GetContext), Permissions.Cash.OverviewView)]
     [InlineData(nameof(StoreCashController.GetSummary), Permissions.Cash.OverviewView)]
+    [InlineData(nameof(StoreCashController.GetOverview), Permissions.Cash.OverviewView)]
     [InlineData(nameof(StoreCashController.GetDaily), Permissions.Cash.OverviewView)]
     [InlineData(nameof(StoreCashController.ListDeposits), Permissions.Cash.OverviewView)]
     [InlineData(nameof(StoreCashController.GetDeposit), Permissions.Cash.OverviewView)]
@@ -161,6 +162,7 @@ public sealed class StoreCashRulesTests
     [InlineData(nameof(StoreCashController.SetOpening), Permissions.Cash.DepositCreate)]
     [InlineData(nameof(StoreCashController.CreateCount), Permissions.Cash.DepositCreate)]
     [InlineData(nameof(StoreCashController.CreateExpense), Permissions.Cash.ExpenseCreate)]
+    [InlineData(nameof(StoreCashController.ReviewExpense), Permissions.Cash.Void)]
     public void 控制器动作带对应的权限码(string actionName, string expectedPolicy)
     {
         var method = typeof(StoreCashController).GetMethod(actionName)!;
@@ -175,7 +177,7 @@ public sealed class StoreCashRulesTests
         Assert.NotEmpty(typeof(StoreCashController).GetCustomAttributes<AuthorizeAttribute>(inherit: false));
         var actions = typeof(StoreCashController)
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
-        Assert.Equal(17, actions.Length);
+        Assert.Equal(19, actions.Length);
         Assert.All(actions, action => Assert.NotEmpty(action.GetCustomAttributes<HttpMethodAttribute>(inherit: false)));
     }
 

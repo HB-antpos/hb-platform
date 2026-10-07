@@ -385,8 +385,8 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     routeName: 'store-cash',
     titleKey: 'tabs.storeCash',
     icon: 'bank-transfer',
-    // 与后端 FullAppMenu 一致：现金入口只认 Cash.Overview.View；Web 权限常量表暂无 Cash 分组，这里直接写权限码。
-    permissionCodes: ['Cash.Overview.View'],
+    // 与后端 FullAppMenu 一致：现金入口只认 Cash.Overview.View。
+    permissionCodes: [P.Cash.OverviewView],
     order: 53,
     ...ROUTE_LABELS['store-cash'],
   },

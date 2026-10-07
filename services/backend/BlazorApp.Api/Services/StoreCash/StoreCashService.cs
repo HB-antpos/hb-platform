@@ -169,33 +169,7 @@ public sealed partial class StoreCashService : IStoreCashService
         );
     }
 
-    // ───────────────────────── 现金池快照 ─────────────────────────
-
-    private sealed class ExpenseLite
-    {
-        public string ExpenseGuid { get; set; } = string.Empty;
-        public string Category { get; set; } = string.Empty;
-        public DateTime ExpenseDate { get; set; }
-        public decimal Amount { get; set; }
-    }
-
-    private sealed class PoolSnapshot
-    {
-        public required Store Store { get; init; }
-        public required DateOnly AsOf { get; init; }
-        public required bool Connected { get; init; }
-        public StoreCashBalanceEntry? Opening { get; init; }
-        public required DateOnly ScanFrom { get; init; }
-        public required List<CashCloseArchive> Archives { get; init; }
-        public required Dictionary<(DateOnly Date, string Device), ResolvedCloseSelection> Resolved { get; init; }
-        public required Dictionary<DateOnly, decimal> InflowByDate { get; init; }
-        public required List<StoreCashDeposit> Deposits { get; init; }
-        public required List<ExpenseLite> Expenses { get; init; }
-        public decimal? InflowTotal { get; init; }
-        public decimal DepositTotal { get; init; }
-        public decimal ExpenseTotal { get; init; }
-        public decimal? PoolBalance { get; init; }
-    }
+    // ───────────────────────── 现金池快照（计算见 StoreCashService.Pool.cs） ─────────────────────────
 
     private async Task<StoreCashBalanceEntry?> GetActiveOpeningAsync(
         string storeCode,
@@ -206,98 +180,6 @@ public sealed partial class StoreCashService : IStoreCashService
                 && item.EntryType == StoreCashConstants.BalanceEntryType.Opening
                 && item.Status == StoreCashConstants.RecordStatus.Active)
             .FirstAsync(cancellationToken);
-
-    private async Task<PoolSnapshot> BuildPoolAsync(
-        Store store,
-        DateOnly asOf,
-        CancellationToken cancellationToken
-    )
-    {
-        var code = store.StoreCode;
-        var opening = await GetActiveOpeningAsync(code, cancellationToken);
-        var openingDate = opening is null ? (DateOnly?)null : StoreCashClock.FromColumn(opening.EntryDate);
-        // 没有期初时余额不可算，但仍扫描最近一段日结，让「未存天数」等提示可用；存款、支出合计则按全部有效记录统计。
-        var scanFrom = openingDate ?? asOf.AddDays(-NoOpeningScanDays);
-        var totalsFrom = openingDate ?? DateOnly.MinValue;
-        var totalsFromColumn = StoreCashClock.ToColumn(totalsFrom);
-        var asOfColumn = StoreCashClock.ToColumn(asOf);
-
-        var connected = _closeSource.IsConnected;
-        var archives = new List<CashCloseArchive>();
-        var resolved = new Dictionary<(DateOnly Date, string Device), ResolvedCloseSelection>();
-        var inflowByDate = new Dictionary<DateOnly, decimal>();
-        if (connected && scanFrom <= asOf)
-        {
-            archives = (await _closeSource.GetArchivesAsync(new[] { code }, scanFrom, asOf, cancellationToken))
-                .Where(archive => string.Equals(archive.StoreCode, code, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            var scanFromColumn = StoreCashClock.ToColumn(scanFrom);
-            var selections = await _db.Queryable<StoreCashCloseSelection>()
-                .Where(item => item.StoreCode == code
-                    && item.IsCurrent
-                    && item.BusinessDate >= scanFromColumn
-                    && item.BusinessDate <= asOfColumn)
-                .ToListAsync(cancellationToken);
-            var selectionByKey = selections.ToDictionary(
-                item => (StoreCashClock.FromColumn(item.BusinessDate), item.DeviceCode)
-            );
-
-            foreach (var group in archives.GroupBy(archive => (archive.BusinessDate, archive.DeviceCode)))
-            {
-                selectionByKey.TryGetValue(group.Key, out var current);
-                var selection = CashCloseSelectionResolver.Resolve(group.ToList(), current);
-                resolved[group.Key] = selection;
-                inflowByDate[group.Key.BusinessDate] =
-                    inflowByDate.GetValueOrDefault(group.Key.BusinessDate) + selection.IncludedCash;
-            }
-        }
-
-        var deposits = await _db.Queryable<StoreCashDeposit>()
-            .Where(item => item.StoreCode == code
-                && item.Status == StoreCashConstants.RecordStatus.Active
-                && item.DepositDate >= totalsFromColumn
-                && item.DepositDate <= asOfColumn)
-            .ToListAsync(cancellationToken);
-        var expenses = await _db.Queryable<StoreCashExpense>()
-            .Where(item => item.StoreCode == code
-                && item.Status == StoreCashConstants.RecordStatus.Active
-                && item.ExpenseDate >= totalsFromColumn
-                && item.ExpenseDate <= asOfColumn)
-            .Select(item => new ExpenseLite
-            {
-                ExpenseGuid = item.ExpenseGuid,
-                Category = item.Category,
-                ExpenseDate = item.ExpenseDate,
-                Amount = item.Amount,
-            })
-            .ToListAsync(cancellationToken);
-
-        var depositTotal = deposits.Sum(item => item.TotalAmount);
-        var expenseTotal = expenses.Sum(item => item.Amount);
-        decimal? inflowTotal = connected && opening is not null ? inflowByDate.Values.Sum() : null;
-        decimal? pool = connected && opening is not null
-            ? decimal.Round(opening.Amount + inflowTotal!.Value - depositTotal - expenseTotal, 2)
-            : null;
-
-        return new PoolSnapshot
-        {
-            Store = store,
-            AsOf = asOf,
-            Connected = connected,
-            Opening = opening,
-            ScanFrom = scanFrom,
-            Archives = archives,
-            Resolved = resolved,
-            InflowByDate = inflowByDate,
-            Deposits = deposits,
-            Expenses = expenses,
-            InflowTotal = inflowTotal.HasValue ? decimal.Round(inflowTotal.Value, 2) : null,
-            DepositTotal = decimal.Round(depositTotal, 2),
-            ExpenseTotal = decimal.Round(expenseTotal, 2),
-            PoolBalance = pool,
-        };
-    }
 
     /// <summary>被某张有效存款的覆盖范围包含；有多张时取最后录入的一张作为「由哪张存款覆盖」。</summary>
     private static StoreCashDeposit? FindCoveringDeposit(IEnumerable<StoreCashDeposit> deposits, DateOnly date) =>
@@ -333,29 +215,8 @@ public sealed partial class StoreCashService : IStoreCashService
         var pool = await BuildPoolAsync(store, today, cancellationToken);
 
         // 分类合计：无全部分店权限者的 T2 只含窗口内，所以分类之和可能小于 ExpenseTotal（展示层限制，余额仍是真实值）。
-        var categories = StoreCashConstants.ExpenseCategory.All
-            .Select(category => new CashExpenseCategoryTotalDto
-            {
-                Category = category,
-                Amount = decimal.Round(
-                    pool.Expenses
-                        .Where(item => item.Category == category)
-                        .Where(item => CashVisibilityRules.CanSeeExpense(
-                            access,
-                            item.Category,
-                            StoreCashClock.FromColumn(item.ExpenseDate),
-                            today))
-                        .Sum(item => item.Amount),
-                    2
-                ),
-            })
-            .ToList();
-
-        // 未覆盖营业日：有日结现金，却不在任何有效存款的覆盖范围内。
-        var uncovered = pool.InflowByDate
-            .Where(item => item.Value > 0 && FindCoveringDeposit(pool.Deposits, item.Key) is null)
-            .OrderBy(item => item.Key)
-            .ToList();
+        var categories = CategoryTotals(pool.Expenses, access, today);
+        var uncovered = UncoveredDays(pool);
         DateOnly? oldestUncovered = uncovered.Count > 0 ? uncovered[0].Key : null;
 
         var missingCloseDates = new List<DateOnly>();
@@ -409,8 +270,7 @@ public sealed partial class StoreCashService : IStoreCashService
                 UncoveredDayCount = uncovered.Count,
                 OldestUncoveredDate = oldestUncovered,
                 UncoveredCash = pool.Connected ? decimal.Round(uncovered.Sum(item => item.Value), 2) : null,
-                DepositOverdue = oldestUncovered.HasValue
-                    && today.DayNumber - oldestUncovered.Value.DayNumber > StoreCashConstants.DepositOverdueDays,
+                DepositOverdue = IsDepositOverdue(today, oldestUncovered),
                 SuggestedDepositAmount = pool.PoolBalance is > 0 ? pool.PoolBalance : null,
                 LastDepositDate = lastDeposit is null ? null : StoreCashClock.FromColumn(lastDeposit.DepositDate),
                 LastCount = lastCount is null ? null : MapEntry(lastCount, access),
