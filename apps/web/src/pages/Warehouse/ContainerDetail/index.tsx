@@ -2,17 +2,24 @@ import {
   ArrowLeftOutlined,
   AppstoreOutlined,
   CheckCircleOutlined,
+  CheckOutlined,
   CloudUploadOutlined,
   CopyOutlined,
   DeleteOutlined,
+  DownOutlined,
   DownloadOutlined,
   EditOutlined,
+  ExclamationCircleOutlined,
   HistoryOutlined,
+  LoadingOutlined,
+  MoreOutlined,
   ReloadOutlined,
   SaveOutlined,
   SearchOutlined,
   SettingOutlined,
   SnippetsOutlined,
+  TableOutlined,
+  TranslationOutlined,
 } from '@ant-design/icons'
 import {
   DndContext,
@@ -34,13 +41,13 @@ import {
   Card,
   Checkbox,
   DatePicker,
-  Descriptions,
   Dropdown,
   Drawer,
   Image,
   Input,
   InputNumber,
   Modal,
+  Popover,
   Progress,
   Radio,
   Select,
@@ -59,14 +66,18 @@ import type { TFunction } from 'i18next'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { useKeepAliveContext } from 'keepalive-for-react'
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type HTMLAttributes, type Key, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type HTMLAttributes, type Key, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import containerDetailMessagesEn from './containerDetailMessages.en.json'
 import containerDetailMessagesZh from './containerDetailMessages.zh.json'
+import containerDetailPageMessagesEn from './containerDetailPageMessages.en.json'
+import containerDetailPageMessagesZh from './containerDetailPageMessages.zh.json'
 import { useNavigate } from 'react-router-dom'
 import BarcodePreview from '../../../components/BarcodePreview'
-import PageContainer from '../../../components/PageContainer'
+import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
+import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
+import StatusPill, { type StatusPillTone } from '../../../components/listToolbar/StatusPill'
 import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
 import {
   alignDomesticProductCode,
@@ -252,6 +263,33 @@ import {
   type ContainerCategoryChange,
 } from './containerCategoryManageLogic'
 import ContainerTagFilters from './ContainerTagFilters'
+import {
+  getContainerDetailViewDefaultColumnWidth,
+  CONTAINER_DETAIL_CHECK_TAGS,
+  CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY,
+  CONTAINER_DETAIL_COLUMN_VIEWS,
+  CONTAINER_DETAIL_NEW_STATE_TAGS,
+  CONTAINER_DETAIL_PRODUCT_TYPE_TAGS,
+  CONTAINER_DETAIL_SEARCH_FIELDS,
+  applyContainerDetailSearchText,
+  buildContainerDetailOverviewFacts,
+  describeContainerDetailColumnFilters,
+  getContainerDetailRowIssues,
+  hasContainerDetailColumnFilterValues,
+  isContainerDetailMatchPendingFilterActive,
+  normalizeContainerDetailColumnView,
+  removeContainerDetailColumnFilter,
+  resolveContainerDetailOverviewStats,
+  resolveContainerDetailViewColumnKeys,
+  summarizeContainerDetailManualDraft,
+  switchContainerDetailSearchField,
+  toggleContainerDetailMatchPendingFilter,
+  type ContainerDetailColumnFilterDescriptor,
+  type ContainerDetailColumnView,
+  type ContainerDetailEtaHint,
+  type ContainerDetailRowIssue,
+  type ContainerDetailSearchField,
+} from './containerDetailViewLogic'
 import {
   buildContainerDetailDraftStorageKey,
   captureContainerDetailDraftFieldBaselineTokens,
@@ -458,12 +496,13 @@ function getContainerDetailDraftStorage(): ContainerDetailDraftStorage | null {
   }
 }
 
-const containerStatusOptions = [
-  { value: 0, color: 'blue', labelKey: 'loaded' },
-  { value: 1, color: 'orange', labelKey: 'inTransit' },
-  { value: 2, color: 'success', labelKey: 'completed' },
-  { value: 7, color: 'error', labelKey: 'cancelled' },
-] as const
+// 状态只用颜色表达含义，与货柜列表一致：已装柜蓝、运输中橙、已完成绿、已取消灰。
+const containerStatusOptions: readonly { value: number; tone: StatusPillTone; labelKey: string }[] = [
+  { value: 0, tone: 'blue', labelKey: 'loaded' },
+  { value: 1, tone: 'orange', labelKey: 'inTransit' },
+  { value: 2, tone: 'green', labelKey: 'completed' },
+  { value: 7, tone: 'gray', labelKey: 'cancelled' },
+]
 
 const containerExistingProductUpdateFields: readonly UpdateFieldOption<ContainerExistingProductUpdateField>[] = [
   { value: 'domesticPrice', labelKey: 'containers.updateFields.domesticPrice', fallbackLabel: '国内价格（仓库主表）' },
@@ -530,10 +569,9 @@ function UpdateFieldSelector<T extends string>({
   )
 }
 
-function getStatusTag(status: number | undefined, t: TFunction) {
-  if (status == null) return <Tag>{t('containers.status.unknown')}</Tag>
-  const item = containerStatusOptions.find((option) => option.value === status)
-  return item ? <Tag color={item.color}>{t(`containers.status.${item.labelKey}`)}</Tag> : <Tag>{t('containers.status.unknownWithCode', { status })}</Tag>
+function getStatusPill(status: number | undefined, t: TFunction) {
+  const item = status == null ? undefined : containerStatusOptions.find((option) => option.value === status)
+  return <StatusPill tone={item?.tone ?? 'gray'}>{getContainerStatusText(status, t)}</StatusPill>
 }
 
 function getContainerStatusText(status: number | undefined, t: TFunction) {
@@ -584,10 +622,20 @@ function getMatchTypeLabel(value: ContainerDetailMatchTypeFilter, t: TFunction) 
   return t(map[value])
 }
 
-function getMatchTypeTagColor(value: ContainerDetailMatchTypeFilter) {
+// 匹配方式也是状态：编码匹配绿、候选需确认橙、未匹配灰。
+function getMatchTypeTone(value: ContainerDetailMatchTypeFilter): StatusPillTone {
   if (value === 'productCode') return 'green'
-  if (value === 'supplierItem') return 'gold'
-  return 'red'
+  if (value === 'supplierItem') return 'orange'
+  return 'gray'
+}
+
+// 体积显示去掉多余的尾零，最多保留 4 位，与运费换算预览的精度一致。
+function formatVolume(value?: number) {
+  return value == null ? '--' : value.toLocaleString('zh-CN', { maximumFractionDigits: 4 })
+}
+
+function formatTagCount(value: number | null | undefined) {
+  return value == null ? '--' : value.toLocaleString('en-US')
 }
 
 function CopyableText({ value }: { value?: string }) {
@@ -636,8 +684,44 @@ function TwoLineText({ value }: { value?: string }) {
 
 // 本页新增文案随页面代码块懒注册，不进入首屏 i18n 包（首屏 gzip 预算余量很小）。
 registerPageMessages({ zh: containerDetailMessagesZh, en: containerDetailMessagesEn })
+// 重设计新增文案统一挂在 warehouseUi.containerDetail 下，同样随页面懒注册。
+registerPageMessages({ zh: containerDetailPageMessagesZh, en: containerDetailPageMessagesEn })
+
+interface SelectionMenuAction {
+  key: string
+  label: ReactNode
+  disabled?: boolean
+  danger?: boolean
+  onClick: () => void
+}
+
+/** 勾选条里的分组下拉：一组同类批量操作收进一个小按钮，组内没有可用项时整组不渲染。 */
+function SelectionMenuButton({ label, icon, actions }: { label: ReactNode; icon?: ReactNode; actions: SelectionMenuAction[] }) {
+  if (!actions.length) return null
+  return (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: actions.map((action) => ({
+          key: action.key,
+          label: action.label,
+          disabled: action.disabled,
+          danger: action.danger,
+        })),
+        onClick: ({ key }) => actions.find((action) => action.key === key)?.onClick(),
+      }}
+    >
+      <Button size="small" icon={icon}>
+        {label}
+        <DownOutlined />
+      </Button>
+    </Dropdown>
+  )
+}
 
 const CONTAINER_DETAIL_TABLE_SCROLL_X = 2440
+// 「成本核算 / 上架定价」列少，横向滚动宽度按列宽总和走，只给一个不至于挤压的下限。
+const CONTAINER_DETAIL_VIEW_TABLE_MIN_SCROLL_X = 1100
 const CONTAINER_DETAIL_TABLE_SCROLL_Y = 620
 const CONTAINER_DETAIL_SELECTION_COLUMN_WIDTH = 56
 const CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.containerDetail.columnOrder.v3'
@@ -648,6 +732,15 @@ const CONTAINER_DETAIL_MAX_COLUMN_WIDTH = 420
 const CONTAINER_DETAIL_SUCCESS_NOTIFICATION_SECONDS = 10
 const DEFAULT_CONTAINER_DETAIL_SORT: ContainerDetailSortState = { field: 'itemNumber', order: 'ascend' }
 const CONTAINER_DETAIL_EDITABLE_COLUMN_KEYS = ['englishName', 'packingQuantity', 'unitVolume', 'middlePackQuantity', 'floatRate', 'importPrice', 'oemPrice', 'remark'] as const
+// 失焦即自动保存的列与需点「保存明细」的草稿列，只用于表头图例样式，不影响任何保存逻辑。
+const CONTAINER_DETAIL_AUTO_SAVE_COLUMN_KEYS = new Set(['packingQuantity', 'unitVolume', 'floatRate', 'middlePackQuantity', 'productName', 'remark'])
+const CONTAINER_DETAIL_DRAFT_COLUMN_KEYS = new Set(['importPrice', 'oemPrice', 'englishName'])
+
+function getContainerDetailColumnSaveModeClassName(columnKey: string) {
+  if (CONTAINER_DETAIL_AUTO_SAVE_COLUMN_KEYS.has(columnKey)) return 'container-detail-col-autosave'
+  if (CONTAINER_DETAIL_DRAFT_COLUMN_KEYS.has(columnKey)) return 'container-detail-col-draft'
+  return ''
+}
 const WHOLE_CONTAINER_DETAIL_EXPORT_LABEL_KEYS: Partial<Record<ContainerDetailExportColumnKey, string>> = {
   index: 'containers.columns.index',
   productName: 'containers.fields.productName',
@@ -863,7 +956,14 @@ export default function ContainerDetailPage() {
   const [isContainerDetailFieldFocused, setIsContainerDetailFieldFocused] = useState(false)
   const hasPendingConcurrencyConflicts = pendingDetailConflicts.length > 0
   const pendingDetailFieldCount = countPendingContainerDetailFields(pendingDetailPatches)
-  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([])
+  const [selectedRowKeys, setSelectedRowKeysState] = useState<Key[]>([])
+  // 「改为选择全部 M 条筛选结果」= 原「未勾选时批量作用于当前筛选全部」的显式化：该模式下勾选键保持为空，
+  // 批量操作照旧走「全部筛选结果」分支；任何改写勾选（含筛选变化、翻页、操作成功后清空）都会退出该模式。
+  const [allFilteredSelected, setAllFilteredSelected] = useState(false)
+  const setSelectedRowKeys = useCallback((keys: Key[]) => {
+    setAllFilteredSelected(false)
+    setSelectedRowKeysState(keys)
+  }, [])
   const [selectedTagFilters, setSelectedTagFilters] = useState<ContainerDetailTagFilter[]>([])
   const [categories, setCategories] = useState<WarehouseCategoryNode[]>([])
   const [categoryLoading, setCategoryLoading] = useState(false)
@@ -874,6 +974,16 @@ export default function ContainerDetailPage() {
   const [columnOrder, setColumnOrder] = useState<ContainerDetailTableColumnKey[]>([])
   const [columnWidths, setColumnWidths] = useState<ContainerDetailColumnWidthMap>({})
   const [showReadonlyOemPrice, setShowReadonlyOemPrice] = useState(false)
+  // 列视图只控制哪些列可见，记在本机；列顺序与列宽仍各自沿用原有的 localStorage 设置。
+  const [columnView, setColumnViewState] = useState<ContainerDetailColumnView>(() => {
+    try {
+      return normalizeContainerDetailColumnView(typeof window === 'undefined' ? null : localStorage.getItem(CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY))
+    } catch {
+      return normalizeContainerDetailColumnView(null)
+    }
+  })
+  const [searchField, setSearchField] = useState<ContainerDetailSearchField>('itemNumber')
+  const [searchDraft, setSearchDraft] = useState('')
   const [batchFloatRate, setBatchFloatRate] = useState<number | null>(null)
   const [batchImportPrice, setBatchImportPrice] = useState<number | null>(null)
   const [batchOemPrice, setBatchOemPrice] = useState<number | null>(null)
@@ -2228,22 +2338,22 @@ export default function ContainerDetailPage() {
 
   const tagStats = detailLoadMode === 'full' ? localBaseTagStats : remoteTagStats
 
-  const tagStatOptions = useMemo<{ value: ContainerDetailTagFilter; label: string; color?: string }[]>(() => [
-    { value: 'all', label: t('containers.filters.allTags'), color: 'blue' },
-    { value: 'new', label: t('containers.tags.newProduct'), color: 'cyan' },
-    { value: 'existing', label: t('containers.tags.existingProduct'), color: 'purple' },
-    { value: 'normal', label: t('containers.productTypes.normal'), color: 'default' },
-    { value: 'set', label: t('containers.productTypes.set'), color: 'blue' },
-    { value: 'multi', label: t('containers.productTypes.multiCode'), color: 'purple' },
-    { value: 'setChild', label: t('containers.productTypes.setChild'), color: 'orange' },
-    { value: 'noOemPrice', label: t('containers.filters.missingOemPrice'), color: 'orange' },
-    { value: 'abnormalImport', label: t('containers.filters.abnormalImportPrice'), color: 'red' },
-    { value: 'active', label: t('common.activeUpper'), color: 'success' },
-    { value: 'inactive', label: t('common.inactiveUpper'), color: 'volcano' },
+  // 已选标签在「已生效」条里的显示名。标签不再按值上色（颜色只表示状态），「进口价异常」改名「进口价缺失」，口径不变。
+  const tagStatOptions = useMemo<{ value: Exclude<ContainerDetailTagFilter, 'all'>; label: string }[]>(() => [
+    { value: 'new', label: t('containers.tags.newProduct') },
+    { value: 'existing', label: t('containers.tags.existingProduct') },
+    { value: 'normal', label: t('containers.productTypes.normal') },
+    { value: 'set', label: t('containers.productTypes.set') },
+    { value: 'multi', label: t('containers.productTypes.multiCode') },
+    { value: 'setChild', label: t('containers.productTypes.setChild') },
+    { value: 'noOemPrice', label: t('containers.filters.missingOemPrice') },
+    { value: 'abnormalImport', label: t('warehouseUi.containerDetail.checkMissingImport') },
+    { value: 'active', label: t('common.activeUpper') },
+    { value: 'inactive', label: t('common.inactiveUpper') },
   ], [t])
 
   const selectedTagOptions = useMemo(
-    () => tagStatOptions.filter((option) => option.value !== 'all' && selectedTagFilters.includes(option.value)),
+    () => tagStatOptions.filter((option) => selectedTagFilters.includes(option.value)),
     [selectedTagFilters, tagStatOptions],
   )
 
@@ -2469,7 +2579,10 @@ export default function ContainerDetailPage() {
       </Typography.Text>
       {!selectedRowKeys.length ? (
         <Typography.Text type="warning">
-          {t('containers.modals.batchActionAllHint', '当前未选择商品，确认后将按当前筛选范围执行全部匹配明细。')}
+          {/* 勾选条里选了「全部筛选结果」时同样作用于当前筛选全部，只是提示语不再说「未选择」。 */}
+          {allFilteredSelected
+            ? t('warehouseUi.containerDetail.batchAllFilteredHint')
+            : t('containers.modals.batchActionAllHint', '当前未选择商品，确认后将按当前筛选范围执行全部匹配明细。')}
         </Typography.Text>
       ) : null}
       {extra}
@@ -5517,12 +5630,8 @@ export default function ContainerDetailPage() {
   }
 
   const hasNumberRangeFilter = (value?: ContainerDetailNumberRangeFilter) => value?.min != null || value?.max != null
+  // 非默认排序与列头筛选一起显示在「已生效」条里，移除即恢复货号升序（原「清空列过滤」的语义）。
   const hasCustomSortState = sortState.field !== DEFAULT_CONTAINER_DETAIL_SORT.field || sortState.order !== DEFAULT_CONTAINER_DETAIL_SORT.order
-  const hasActiveColumnState = Object.values(columnFilters).some((value) => {
-    if (Array.isArray(value)) return value.length > 0
-    if (value && typeof value === 'object') return hasNumberRangeFilter(value as ContainerDetailNumberRangeFilter)
-    return typeof value === 'string' ? Boolean(value.trim()) : value != null
-  }) || hasCustomSortState
 
   const filterIcon = (active?: boolean) => <SearchOutlined style={{ color: active ? '#1677ff' : undefined }} />
 
@@ -5732,6 +5841,167 @@ export default function ContainerDetailPage() {
     )
   }
 
+  // ---- 单元格渲染：「全部列」的原列与视图里的「商品」合成列共用同一套渲染与编辑链路 ----
+
+  const renderProductImage = (row: ContainerDetail, size = 40) => {
+    const imageUrl = getContainerDetailImageUrl(row)
+
+    return imageUrl ? (
+      <Image
+        className="container-detail-product-image"
+        width={size}
+        height={size}
+        src={imageUrl}
+        alt={row.商品信息?.货号 || row.商品信息?.商品名称 || ''}
+        preview={{ mask: t('containers.actions.previewImage', '查看大图') }}
+      />
+    ) : (
+      <span className="container-detail-no-image">{t('containers.empty.noImage')}</span>
+    )
+  }
+
+  const renderItemNumberCell = (row: ContainerDetail) => {
+    const productCode = getContainerDetailProductCode(row)
+    const itemNumber = getContainerDetailItemNumber(row)
+    const productName = getContainerDetailProductName(row)
+    const canViewHistory = access.canManageWarehouseProducts && Boolean(productCode) && !row.是否新商品
+
+    return (
+      <span className="container-detail-copyable">
+        <span style={{ minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
+          <CopyableText value={itemNumber} />
+        </span>
+        {canViewHistory ? (
+          <Tooltip title={t('containers.actions.viewProductHistory', '查看商品修改记录')}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={t('containers.actions.viewProductHistory', '查看商品修改记录')}
+              icon={<HistoryOutlined />}
+              onClick={(event) => {
+                event.stopPropagation()
+                setChangeHistoryProduct({ productCode: productCode!, itemNumber, productName })
+              }}
+            />
+          </Tooltip>
+        ) : null}
+      </span>
+    )
+  }
+
+  const renderNewProductTag = (row: ContainerDetail) => {
+    if (!isContainerDetailContainerNewProduct(row)) return <Tag>{t('containers.tags.existing')}</Tag>
+    const newTag = <Tag color="blue">{t('containers.tags.new')}</Tag>
+    // 列宽有限：本柜已建档的新品沿用同一个「新」标签，悬停说明已建档，避免与未建档混淆。
+    return isContainerDetailCreatedContainerNewProduct(row)
+      ? <Tooltip title={t('containers.tags.newCreatedHint')}>{newTag}</Tooltip>
+      : newTag
+  }
+
+  const renderProductNameCell = (row: ContainerDetail) => {
+    const key = rowKey(row)
+    const saveFailure = getAutoSaveFailure(row, '商品名称')
+    const concurrencyConflict = resolveConcurrencyConflict(row, '商品名称')
+    if (access.canEditContainer && editingProductNameRowKey === key) {
+      return renderConcurrentEditableField(row, '商品名称', (
+        <Input.TextArea
+          autoFocus
+          className="container-detail-product-name-input"
+          value={editingProductNameValue}
+          autoSize={{ minRows: 1, maxRows: 2 }}
+          style={{ resize: 'none' }}
+          status={saveFailure || concurrencyConflict ? 'error' : undefined}
+          aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+          title={concurrencyConflict?.message ?? saveFailure?.message}
+          onChange={(event) => setEditingProductNameValue(event.target.value)}
+          onBlur={() => handleProductNameEditBlur(row)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              cancelEditingProductName()
+              return
+            }
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault()
+              void commitProductNameEdit(row).catch(handleDetailSaveError)
+            }
+          }}
+        />
+      ))
+    }
+
+    return renderConcurrentEditableField(row, '商品名称', (
+      <div
+        className={[
+          access.canEditContainer ? 'container-detail-product-name-editable' : '',
+          saveFailure ? 'container-detail-auto-save-failed' : '',
+          concurrencyConflict ? 'container-detail-concurrent-field-input' : '',
+        ].filter(Boolean).join(' ') || undefined}
+        aria-invalid={Boolean(saveFailure || concurrencyConflict)}
+        title={concurrencyConflict?.message ?? saveFailure?.message}
+        onDoubleClick={() => startEditingProductName(row)}
+      >
+        <TwoLineText value={getContainerDetailProductName(row)} />
+      </div>
+    ))
+  }
+
+  const rowIssueLabels: Record<ContainerDetailRowIssue, string> = {
+    missingRetailPrice: t('containers.filters.missingOemPrice'),
+    missingImportPrice: t('warehouseUi.containerDetail.checkMissingImport'),
+    matchPending: t('warehouseUi.containerDetail.checkMatchPending'),
+  }
+
+  const renderRowIssues = (row: ContainerDetail) => {
+    const issues = getContainerDetailRowIssues(row)
+    if (!issues.length) return null
+    return (
+      <span className="wh-cdetail-issues">
+        {issues.map((issue) => (
+          <span key={issue} className={`wh-cdetail-issue wh-cdetail-issue-${issue}`}>{rowIssueLabels[issue]}</span>
+        ))}
+      </span>
+    )
+  }
+
+  // 手动草稿字段（进口价、零售价、英文名称）改过还没点「保存明细」时，单元格用琥珀底提示。
+  const getDraftInputRootClassName = (row: ContainerDetail, field: '进口价格' | '贴牌价格' | '英文名称') => {
+    const patch = row.hguid ? pendingDetailPatches[row.hguid] : undefined
+    const dirty = field === '英文名称'
+      ? patch?.英文名称 !== undefined || patch?.ClearEnglishName === true
+      : patch?.[field] !== undefined
+    return dirty ? 'container-detail-draft-input container-detail-draft-input-dirty' : 'container-detail-draft-input'
+  }
+
+  const productColumn: ColumnsType<ContainerDetail>[number] = {
+    // 视图专用合成列：图 + 货号（可复制/看修改记录）+ 新/已有与特殊类型标签 + 名称（双击编辑，失焦自动保存）。
+    key: 'product',
+    title: renderCompactHeader(t('warehouseUi.containerDetail.columnProduct')),
+    width: 300,
+    fixed: 'left',
+    render: (_, row) => (
+      <div className="wh-cdetail-product-cell">
+        <span className="wh-cdetail-product-thumb">{renderProductImage(row, 36)}</span>
+        <div className="wh-cdetail-product-main">
+          <div className="wh-cdetail-product-line">
+            <span className="wh-cdetail-product-code">{renderItemNumberCell(row)}</span>
+            {/* 合成商品列只标「新」：已有商品是常态，再挂「已有」会把货号挤成省略号；「全部列」的新商品列仍显示新/已有 */}
+            {isContainerDetailContainerNewProduct(row) ? renderNewProductTag(row) : null}
+            {getContainerDetailProductType(row) !== '普通商品' ? renderProductTypeTag(row) : null}
+          </div>
+          {renderProductNameCell(row)}
+        </div>
+      </div>
+    ),
+  }
+
+  const issuesColumn: ColumnsType<ContainerDetail>[number] = {
+    key: 'issues',
+    title: renderCompactHeader(t('warehouseUi.containerDetail.columnIssues')),
+    width: 160,
+    render: (_, row) => renderRowIssues(row),
+  }
+
   const readonlyOemPriceColumn: ColumnsType<ContainerDetail>[number] = {
     // 只读快览列只展示后端按新/已有商品分流后的来源价。
     key: 'readonlyOemPrice',
@@ -5742,28 +6012,14 @@ export default function ContainerDetailPage() {
   }
 
   const baseColumns: ColumnsType<ContainerDetail> = [
+    productColumn,
     { key: 'index', title: renderCompactHeader(t('containers.columns.index')), width: 56, fixed: 'left', render: (_v, _r, index) => renderNumericCell(detailRowNumberOffset + index + 1) },
     {
       key: 'image',
       title: renderCompactHeader(t('containers.columns.image')),
       width: 64,
       fixed: 'left',
-      render: (_, row) => {
-        const imageUrl = getContainerDetailImageUrl(row)
-
-        return imageUrl ? (
-          <Image
-            className="container-detail-product-image"
-            width={40}
-            height={40}
-            src={imageUrl}
-            alt={row.商品信息?.货号 || row.商品信息?.商品名称 || ''}
-            preview={{ mask: t('containers.actions.previewImage', '查看大图') }}
-          />
-        ) : (
-          <span style={{ color: '#999' }}>{t('containers.empty.noImage')}</span>
-        )
-      },
+      render: (_, row) => renderProductImage(row),
     },
     {
       title: renderColumnTitle('itemNumber', t('containers.fields.itemNumber')),
@@ -5771,34 +6027,7 @@ export default function ContainerDetailPage() {
       fixed: 'left',
       ...makeSortProps('itemNumber'),
       ...textFilterProps('itemNumber', t('containers.placeholders.filterItemNumber')),
-      render: (_, row) => {
-        const productCode = getContainerDetailProductCode(row)
-        const itemNumber = getContainerDetailItemNumber(row)
-        const productName = getContainerDetailProductName(row)
-        const canViewHistory = access.canManageWarehouseProducts && Boolean(productCode) && !row.是否新商品
-
-        return (
-          <span className="container-detail-copyable">
-            <span style={{ minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
-              <CopyableText value={itemNumber} />
-            </span>
-            {canViewHistory ? (
-              <Tooltip title={t('containers.actions.viewProductHistory', '查看商品修改记录')}>
-                <Button
-                  type="text"
-                  size="small"
-                  aria-label={t('containers.actions.viewProductHistory', '查看商品修改记录')}
-                  icon={<HistoryOutlined />}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setChangeHistoryProduct({ productCode: productCode!, itemNumber, productName })
-                  }}
-                />
-              </Tooltip>
-            ) : null}
-          </span>
-        )
-      },
+      render: (_, row) => renderItemNumberCell(row),
     },
     {
       title: renderColumnTitle('englishName', t('containers.fields.englishName')),
@@ -5824,6 +6053,7 @@ export default function ContainerDetailPage() {
           <Input.TextArea
             ref={(cell) => setEditableCellRef(rowKey(row), 'englishName', cell)}
             className="container-detail-english-name-input"
+            rootClassName={getDraftInputRootClassName(row, '英文名称')}
             value={getContainerDetailEnglishName(row) ?? ''}
             autoSize={{ minRows: 1, maxRows: 2 }}
             style={{ resize: 'none' }}
@@ -5884,6 +6114,7 @@ export default function ContainerDetailPage() {
         return access.canEditContainer ? renderConcurrentEditableField(row, '单件装箱数', (
           <InputNumber
             ref={(cell) => setEditableCellRef(rowKey(row), 'packingQuantity', cell)}
+            rootClassName="container-detail-autosave-input"
             value={row.单件装箱数}
             keyboard={false}
             min={0}
@@ -5932,6 +6163,7 @@ export default function ContainerDetailPage() {
         return access.canEditContainer ? renderConcurrentEditableField(row, '单件体积', (
           <InputNumber
             ref={(cell) => setEditableCellRef(rowKey(row), 'unitVolume', cell)}
+            rootClassName="container-detail-autosave-input"
             value={row.单件体积}
             keyboard={false}
             min={0}
@@ -5996,6 +6228,7 @@ export default function ContainerDetailPage() {
         return access.canEditContainer ? renderConcurrentEditableField(row, '调整浮率', (
           <InputNumber
             ref={(cell) => setEditableCellRef(rowKey(row), 'floatRate', cell)}
+            rootClassName="container-detail-autosave-input"
             value={row.调整浮率}
             keyboard={false}
             precision={2}
@@ -6034,6 +6267,7 @@ export default function ContainerDetailPage() {
         return access.canEditContainer ? renderConcurrentEditableField(row, '中包数', (
           <InputNumber
             ref={(cell) => setEditableCellRef(rowKey(row), 'middlePackQuantity', cell)}
+            rootClassName="container-detail-autosave-input"
             value={row.中包数}
             keyboard={false}
             min={0}
@@ -6086,6 +6320,7 @@ export default function ContainerDetailPage() {
           ? renderConcurrentEditableField(row, '进口价格', renderImportPriceCell(row, (
             <InputNumber
               ref={(cell) => setEditableCellRef(rowKey(row), 'importPrice', cell)}
+              rootClassName={getDraftInputRootClassName(row, '进口价格')}
               value={row.进口价格}
               keyboard={false}
               min={0}
@@ -6125,6 +6360,7 @@ export default function ContainerDetailPage() {
         return access.canEditContainer ? renderConcurrentEditableField(row, '贴牌价格', (
           <InputNumber
             ref={(cell) => setEditableCellRef(rowKey(row), 'oemPrice', cell)}
+            rootClassName={getDraftInputRootClassName(row, '贴牌价格')}
             value={getContainerDetailVisibleOemPrice(row)}
             keyboard={false}
             min={0}
@@ -6161,14 +6397,7 @@ export default function ContainerDetailPage() {
         value,
         label: value === 'new' ? t('containers.tags.newProduct') : t('containers.tags.existingProduct'),
       }))),
-      render: (_, row) => {
-        if (!isContainerDetailContainerNewProduct(row)) return <Tag>{t('containers.tags.existing')}</Tag>
-        const newTag = <Tag color="blue">{t('containers.tags.new')}</Tag>
-        // 列宽有限：本柜已建档的新品沿用同一个「新」标签，悬停说明已建档，避免与未建档混淆。
-        return isContainerDetailCreatedContainerNewProduct(row)
-          ? <Tooltip title={t('containers.tags.newCreatedHint')}>{newTag}</Tooltip>
-          : newTag
-      },
+      render: (_, row) => renderNewProductTag(row),
     },
     {
       title: renderColumnTitle('productType', t('containers.fields.productType')),
@@ -6196,7 +6425,7 @@ export default function ContainerDetailPage() {
 
         return (
           <Space direction="vertical" size={2}>
-            <Tag color={getMatchTypeTagColor(matchType)}>{getMatchTypeLabel(matchType, t)}</Tag>
+            <StatusPill tone={getMatchTypeTone(matchType)}>{getMatchTypeLabel(matchType, t)}</StatusPill>
             {canAlignCandidate ? (
               <Button
                 type="link"
@@ -6245,53 +6474,7 @@ export default function ContainerDetailPage() {
       width: 180,
       ...makeSortProps('productName'),
       ...textFilterProps('productName', t('containers.placeholders.filterProductName', '商品名称过滤')),
-      render: (_, row) => {
-        const key = rowKey(row)
-        const saveFailure = getAutoSaveFailure(row, '商品名称')
-        const concurrencyConflict = resolveConcurrencyConflict(row, '商品名称')
-        if (access.canEditContainer && editingProductNameRowKey === key) {
-          return renderConcurrentEditableField(row, '商品名称', (
-            <Input.TextArea
-              autoFocus
-              className="container-detail-product-name-input"
-              value={editingProductNameValue}
-              autoSize={{ minRows: 1, maxRows: 2 }}
-              style={{ resize: 'none' }}
-              status={saveFailure || concurrencyConflict ? 'error' : undefined}
-              aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-              title={concurrencyConflict?.message ?? saveFailure?.message}
-              onChange={(event) => setEditingProductNameValue(event.target.value)}
-              onBlur={() => handleProductNameEditBlur(row)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault()
-                  cancelEditingProductName()
-                  return
-                }
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault()
-                  void commitProductNameEdit(row).catch(handleDetailSaveError)
-                }
-              }}
-            />
-          ))
-        }
-
-        return renderConcurrentEditableField(row, '商品名称', (
-          <div
-            className={[
-              access.canEditContainer ? 'container-detail-product-name-editable' : '',
-              saveFailure ? 'container-detail-auto-save-failed' : '',
-              concurrencyConflict ? 'container-detail-concurrent-field-input' : '',
-            ].filter(Boolean).join(' ') || undefined}
-            aria-invalid={Boolean(saveFailure || concurrencyConflict)}
-            title={concurrencyConflict?.message ?? saveFailure?.message}
-            onDoubleClick={() => startEditingProductName(row)}
-          >
-            <TwoLineText value={getContainerDetailProductName(row)} />
-          </div>
-        ))
-      },
+      render: (_, row) => renderProductNameCell(row),
     },
     {
       title: renderColumnTitle('warehouseStatus', t('containers.fields.warehouseStatus')),
@@ -6341,6 +6524,7 @@ export default function ContainerDetailPage() {
         return access.canEditContainer ? renderConcurrentEditableField(row, '备注', (
           <Input
             ref={(cell) => setEditableCellRef(rowKey(row), 'remark', cell)}
+            rootClassName="container-detail-autosave-input"
             value={row.备注 ?? ''}
             status={saveFailure || concurrencyConflict ? 'error' : undefined}
             aria-invalid={Boolean(saveFailure || concurrencyConflict)}
@@ -6357,6 +6541,7 @@ export default function ContainerDetailPage() {
         )) : renderConcurrentEditableField(row, '备注', row.备注 || '--')
       },
     },
+    issuesColumn,
   ]
 
   const draggableColumnKeys = baseColumns.map((column) => String(column.key) as ContainerDetailTableColumnKey)
@@ -6473,10 +6658,14 @@ export default function ContainerDetailPage() {
   const orderedBaseColumns = useMemo(() => {
     const activeOrder = columnOrder.length ? columnOrder : draggableColumnKeys
     const columnMap = new Map(baseColumns.map((column) => [String(column.key), column]))
-    return activeOrder
+    // 列视图只决定哪些列可见：按当前（可拖拽调整的）列顺序挑出该视图的列，左固定列挪到最前。
+    const fixedLeftKeys = new Set(baseColumns
+      .filter((column) => column.fixed === 'left')
+      .map((column) => String(column.key) as ContainerDetailTableColumnKey))
+    return resolveContainerDetailViewColumnKeys(columnView, activeOrder, fixedLeftKeys)
       .map((key) => columnMap.get(key))
       .filter((column): column is ColumnsType<ContainerDetail>[number] => Boolean(column))
-  }, [baseColumns, columnOrder, draggableColumnKeys])
+  }, [baseColumns, columnOrder, columnView, draggableColumnKeys])
 
   const orderedEditableColumnKeys = useMemo(
     () => getContainerDetailEditableColumnKeysInOrder(
@@ -6493,10 +6682,18 @@ export default function ContainerDetailPage() {
     : orderedBaseColumns
   ).map((column) => ({
     ...column,
-    width: columnWidths[String(column.key) as ContainerDetailTableColumnKey] ?? column.width,
+    // 列宽优先级：用户拖过的列宽 > 当前视图的默认列宽 > 列定义自带的宽度（即「全部列」的宽度）。
+    width: columnWidths[String(column.key) as ContainerDetailTableColumnKey]
+      ?? getContainerDetailViewDefaultColumnWidth(columnView, String(column.key) as ContainerDetailTableColumnKey)
+      ?? column.width,
+    // 表头标出两种保存方式：实线下划线 = 失焦自动保存，虚线 = 需点「保存明细」；只读用户不显示。
+    className: [
+      column.className,
+      access.canEditContainer ? getContainerDetailColumnSaveModeClassName(String(column.key)) : '',
+    ].filter(Boolean).join(' ') || undefined,
     onHeaderCell: () => {
       const columnKey = String(column.key) as ContainerDetailTableColumnKey
-      const width = columnWidths[columnKey] ?? column.width
+      const width = columnWidths[columnKey] ?? getContainerDetailViewDefaultColumnWidth(columnView, columnKey) ?? column.width
       return {
         'data-column-key': columnKey,
         'data-column-width': typeof width === 'number' ? width : CONTAINER_DETAIL_MIN_COLUMN_WIDTH,
@@ -6505,7 +6702,7 @@ export default function ContainerDetailPage() {
     },
   })) as ColumnsType<ContainerDetail>
   const tableScrollX = Math.max(
-    CONTAINER_DETAIL_TABLE_SCROLL_X,
+    columnView === 'all' ? CONTAINER_DETAIL_TABLE_SCROLL_X : CONTAINER_DETAIL_VIEW_TABLE_MIN_SCROLL_X,
     CONTAINER_DETAIL_SELECTION_COLUMN_WIDTH + columns.reduce((total, column) => {
       const width = typeof column.width === 'number' ? column.width : Number(column.width)
       return total + (Number.isFinite(width) ? width : 0)
@@ -6527,8 +6724,404 @@ export default function ContainerDetailPage() {
     viewport.isSmallLandscape ? 'container-detail-page-small-landscape' : '',
   ].filter(Boolean).join(' ')
 
+  const setColumnView = (view: ContainerDetailColumnView) => {
+    setColumnViewState(view)
+    try {
+      localStorage.setItem(CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY, view)
+    } catch {
+      // localStorage 不可用时只影响本次页面内的视图选择。
+    }
+  }
+
+  // ---- 工具栏搜索：输入约 300ms 防抖后写入对应列头文字筛选；列头筛选、清空全部或定位草稿改了同一字段时，搜索框跟随显示 ----
+  const searchCommittedValue = columnFilters[searchField] ?? ''
+  useEffect(() => {
+    setSearchDraft((draft) => (draft.trim() === searchCommittedValue.trim() ? draft : searchCommittedValue))
+  }, [searchCommittedValue])
+
+  useEffect(() => {
+    if (searchDraft.trim() === searchCommittedValue.trim()) return
+    const timer = window.setTimeout(() => {
+      setColumnFilters((current) => applyContainerDetailSearchText(current, searchField, searchDraft))
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [searchCommittedValue, searchDraft, searchField])
+
+  const handleSearchFieldChange = (nextField: ContainerDetailSearchField) => {
+    // 先把仍在防抖中的输入落到当前字段，再按规则把关键字挪到新字段（新字段已有条件时保持不动）。
+    const committedFilters = applyContainerDetailSearchText(columnFilters, searchField, searchDraft)
+    const switched = switchContainerDetailSearchField(committedFilters, searchField, nextField)
+    if (switched.filters !== columnFilters) setColumnFilters(switched.filters)
+    setSearchField(nextField)
+    setSearchDraft(switched.text)
+  }
+
+  // ---- 已生效筛选条：标签筛选、列头筛选与非默认排序都可逐个移除 ----
+  const columnFilterLabelKeys: Record<keyof ContainerDetailColumnFilters, string> = {
+    itemNumber: 'containers.fields.itemNumber',
+    barcode: 'containers.fields.barcode',
+    productName: 'containers.fields.productName',
+    englishName: 'containers.fields.englishName',
+    remark: 'containers.fields.remark',
+    productTypes: 'containers.fields.productType',
+    newProductStates: 'containers.fields.newProduct',
+    matchTypes: 'containers.fields.matchType',
+    warehouseStatus: 'containers.fields.warehouseStatus',
+    containerPieces: 'containers.fields.containerPieces',
+    middlePackQuantity: 'containers.fields.middlePackQuantity',
+    containerQuantity: 'containers.fields.containerQuantity',
+    packingQuantity: 'containers.fields.packingQuantity',
+    unitVolume: 'containers.fields.unitVolume',
+    domesticPrice: 'containers.fields.domesticPrice',
+    floatRate: 'containers.fields.floatRate',
+    transportCost: 'containers.fields.transportCost',
+    unitTransportCost: 'containers.fields.unitTransportCost',
+    warehouseImportPrice: 'containers.fields.warehouseImportPrice',
+    lastOEMPrice: 'containers.fields.lastOEMPrice',
+    importPrice: 'containers.fields.importPrice',
+    oemPrice: 'containers.fields.oemPrice',
+  }
+  const sortFieldLabelKeys: Record<ContainerDetailSortField, string> = {
+    itemNumber: 'containers.fields.itemNumber',
+    barcode: 'containers.fields.barcode',
+    productName: 'containers.fields.productName',
+    englishName: 'containers.fields.englishName',
+    productType: 'containers.fields.productType',
+    newProduct: 'containers.fields.newProduct',
+    matchType: 'containers.fields.matchType',
+    containerPieces: 'containers.fields.containerPieces',
+    middlePackQuantity: 'containers.fields.middlePackQuantity',
+    containerQuantity: 'containers.fields.containerQuantity',
+    packingQuantity: 'containers.fields.packingQuantity',
+    unitVolume: 'containers.fields.unitVolume',
+    domesticPrice: 'containers.fields.domesticPrice',
+    floatRate: 'containers.fields.floatRate',
+    transportCost: 'containers.fields.transportCost',
+    unitTransportCost: 'containers.fields.unitTransportCost',
+    warehouseImportPrice: 'containers.fields.warehouseImportPrice',
+    lastOEMPrice: 'containers.fields.lastOEMPrice',
+    importPrice: 'containers.fields.importPrice',
+    oemPrice: 'containers.fields.oemPrice',
+    warehouseStatus: 'containers.fields.warehouseStatus',
+    remark: 'containers.fields.remark',
+  }
+  const listSeparator = t('warehouseUi.containerDetail.listSeparator')
+
+  const formatRangeFilterValue = (min?: number, max?: number) => {
+    if (min != null && max != null) return t('warehouseUi.containerDetail.rangeBetween', { min, max })
+    if (min != null) return t('warehouseUi.containerDetail.rangeAtLeast', { value: min })
+    return t('warehouseUi.containerDetail.rangeAtMost', { value: max })
+  }
+
+  const formatEnumFilterValue = (key: keyof ContainerDetailColumnFilters, value: string) => {
+    if (key === 'productTypes') return getProductTypeFilterLabel(value as ContainerDetailProductTypeFilter, t)
+    if (key === 'matchTypes') return getMatchTypeLabel(value as ContainerDetailMatchTypeFilter, t)
+    if (key === 'newProductStates') return value === 'new' ? t('containers.tags.newProduct') : t('containers.tags.existingProduct')
+    if (key === 'warehouseStatus') return value === 'active' ? t('common.activeUpper') : t('common.inactiveUpper')
+    return value
+  }
+
+  const describeColumnFilterValue = (descriptor: ContainerDetailColumnFilterDescriptor) => {
+    if (descriptor.kind === 'text') return descriptor.value
+    if (descriptor.kind === 'range') return formatRangeFilterValue(descriptor.min, descriptor.max)
+    return descriptor.values.map((value) => formatEnumFilterValue(descriptor.key, value)).join(listSeparator)
+  }
+
+  const getTagGroupLabel = (tag: ContainerDetailTagFilter) => {
+    if ((CONTAINER_DETAIL_NEW_STATE_TAGS as readonly ContainerDetailTagFilter[]).includes(tag)) return t('warehouseUi.containerDetail.chipGroupProduct')
+    if ((CONTAINER_DETAIL_PRODUCT_TYPE_TAGS as readonly ContainerDetailTagFilter[]).includes(tag)) return t('containers.fields.productType')
+    if ((CONTAINER_DETAIL_CHECK_TAGS as readonly ContainerDetailTagFilter[]).includes(tag)) return t('warehouseUi.containerDetail.checksTitle')
+    return t('warehouseUi.containerDetail.chipGroupShelf')
+  }
+
+  const activeFilterItems: ActiveFilterItem[] = [
+    ...selectedTagOptions.map((option): ActiveFilterItem => ({
+      key: `tag:${option.value}`,
+      label: getTagGroupLabel(option.value),
+      value: option.label,
+      source: 'toolbar',
+      onRemove: () => toggleTagFilter(option.value),
+    })),
+    ...describeContainerDetailColumnFilters(columnFilters).map((descriptor): ActiveFilterItem => ({
+      key: `column:${descriptor.key}`,
+      label: t(columnFilterLabelKeys[descriptor.key]),
+      value: describeColumnFilterValue(descriptor),
+      source: 'column',
+      onRemove: () => setColumnFilters((current) => removeContainerDetailColumnFilter(current, descriptor.key)),
+    })),
+    ...(hasCustomSortState ? [{
+      key: 'sort',
+      label: t('warehouseUi.containerDetail.chipSort'),
+      value: t(
+        sortState.order === 'ascend' ? 'warehouseUi.containerDetail.sortAscend' : 'warehouseUi.containerDetail.sortDescend',
+        { field: t(sortFieldLabelKeys[sortState.field]) },
+      ),
+      source: 'column' as const,
+      // 移除排序 = 恢复默认的货号升序，与原「清空列过滤」一致。
+      onRemove: () => setSortState(DEFAULT_CONTAINER_DETAIL_SORT),
+    }] : []),
+  ]
+
+  const clearAllDetailFilters = () => {
+    setSelectedTagFilters([])
+    setColumnFilters({})
+    setSortState(DEFAULT_CONTAINER_DETAIL_SORT)
+  }
+
+  // ---- 提交前检查：缺零售价、进口价缺失走标签筛选；匹配待确认走「匹配方式」列头筛选，计数都来自同一份标签统计 ----
+  const matchPendingFilterActive = isContainerDetailMatchPendingFilterActive(columnFilters)
+  const submitChecks: { key: string; label: string; count: number | null; active: boolean; tone: 'orange' | 'red' | 'amber'; onToggle: () => void }[] = [
+    {
+      key: 'noOemPrice',
+      label: t('containers.filters.missingOemPrice'),
+      count: tagStats ? tagStats.noOemPrice : null,
+      active: selectedTagFilters.includes('noOemPrice'),
+      tone: 'orange',
+      onToggle: () => toggleTagFilter('noOemPrice'),
+    },
+    {
+      key: 'abnormalImport',
+      label: t('warehouseUi.containerDetail.checkMissingImport'),
+      count: tagStats ? tagStats.abnormalImport : null,
+      active: selectedTagFilters.includes('abnormalImport'),
+      tone: 'red',
+      onToggle: () => toggleTagFilter('abnormalImport'),
+    },
+    {
+      key: 'matchPending',
+      label: t('warehouseUi.containerDetail.checkMatchPending'),
+      count: tagStats ? tagStats.supplierItemMatched : null,
+      active: matchPendingFilterActive,
+      tone: 'amber',
+      onToggle: () => setColumnFilters((current) => toggleContainerDetailMatchPendingFilter(current)),
+    },
+  ]
+
+  // ---- 概况卡 ----
+  // 整柜构成统计缓存：分页模式下有列头筛选时服务端统计不再是整柜口径，沿用上一次的整柜值。
+  const overviewStatsCacheRef = useRef<{ containerGuid: string; stats: ContainerDetailTagStats } | null>(null)
+  const allLoadedRowsTagStats = useMemo(() => buildContainerDetailTagStats(baseFilteredRows), [baseFilteredRows])
+  const overviewStatsResolution = resolveContainerDetailOverviewStats({
+    loadMode: detailLoadMode,
+    allRowsStats: allLoadedRowsTagStats,
+    remoteStats: remoteTagStats,
+    remoteStatsIsCurrent: lastLoadedDetailStatsKeyRef.current === pagedDetailStatsKey,
+    hasColumnFilters: hasContainerDetailColumnFilterValues(columnFilters),
+    cachedStats: overviewStatsCacheRef.current?.containerGuid === containerGuid ? overviewStatsCacheRef.current.stats : null,
+  })
+  if (overviewStatsResolution.cacheable && overviewStatsResolution.stats) {
+    overviewStatsCacheRef.current = { containerGuid, stats: overviewStatsResolution.stats }
+  }
+  const overviewStats = overviewStatsResolution.stats
+  const overviewFacts = buildContainerDetailOverviewFacts(container, dayjs())
+
+  const describeEtaFact = (hint: ContainerDetailEtaHint): { text?: string; tone?: 'warning' | 'danger' } => {
+    if (hint.kind === 'overdue') return { text: t('warehouseUi.containerDetail.etaOverdue', { days: hint.days }), tone: 'danger' }
+    if (hint.kind === 'today') return { text: t('warehouseUi.containerDetail.etaToday'), tone: 'warning' }
+    if (hint.kind === 'soon') return { text: t('warehouseUi.containerDetail.etaSoon', { days: hint.days }), tone: 'warning' }
+    if (hint.kind === 'upcoming') return { text: t('warehouseUi.containerDetail.etaUpcoming', { week: hint.week, days: hint.days }) }
+    if (hint.kind === 'week') return { text: t('warehouseUi.containerDetail.weekLabel', { week: hint.week }) }
+    return {}
+  }
+  const etaDescription = describeEtaFact(overviewFacts.etaHint)
+
+  const overviewFactItems: { key: string; label: string; value: ReactNode; sub?: ReactNode; tone?: 'warning' | 'danger' | 'muted' }[] = [
+    {
+      key: 'loadingDate',
+      label: t('containers.fields.loadingDate'),
+      value: overviewFacts.loadingDate ?? '--',
+      sub: overviewFacts.loadingWeek != null ? t('warehouseUi.containerDetail.weekLabel', { week: overviewFacts.loadingWeek }) : undefined,
+    },
+    {
+      key: 'estimatedArrival',
+      label: t('containers.fields.estimatedArrival'),
+      value: overviewFacts.etaDate ?? '--',
+      sub: etaDescription.text,
+      tone: etaDescription.tone,
+    },
+    {
+      key: 'actualArrival',
+      label: t('containers.fields.actualArrival'),
+      value: overviewFacts.actualArrivalDate ?? t('warehouseUi.containerDetail.notArrived'),
+      tone: overviewFacts.actualArrivalDate ? undefined : 'muted',
+    },
+    {
+      key: 'exchangeRate',
+      label: t('containers.fields.exchangeRate'),
+      value: formatNumber(container?.汇率, 4),
+      sub: t('warehouseUi.containerDetail.rateUnit'),
+    },
+    {
+      key: 'freight',
+      label: t('containers.fields.freight'),
+      value: formatCurrency(container?.运费, '$'),
+      sub: overviewFacts.standard68Freight != null
+        ? t('warehouseUi.containerDetail.freightStandard68', { amount: formatCurrency(overviewFacts.standard68Freight, '$') })
+        : undefined,
+    },
+    {
+      key: 'totalVolume',
+      label: t('containers.fields.totalVolume'),
+      value: container?.总体积 == null ? '--' : t('warehouseUi.containerDetail.volumeValue', { volume: formatVolume(container.总体积) }),
+      sub: overviewFacts.loadRatePercent != null
+        ? (
+          <span title={t('warehouseUi.containerDetail.loadRateTitle')}>
+            {t('warehouseUi.containerDetail.loadRate', { rate: overviewFacts.loadRatePercent })}
+          </span>
+        )
+        : undefined,
+    },
+    {
+      // 合计金额来自货柜主表汇总，只读展示。
+      key: 'domesticPriceTotal',
+      label: t('containers.fields.domesticPriceTotal'),
+      value: formatCurrency(container?.合计金额, '¥'),
+      sub: overviewStats ? t('warehouseUi.containerDetail.detailCount', { count: overviewStats.all }) : undefined,
+    },
+    {
+      key: 'composition',
+      label: t('warehouseUi.containerDetail.compositionLabel'),
+      value: overviewStats
+        ? t('warehouseUi.containerDetail.compositionValue', { newCount: overviewStats.new, existing: overviewStats.existing })
+        : '--',
+      sub: overviewStats
+        ? overviewStats.setChild > 0
+          ? t('warehouseUi.containerDetail.compositionSubWithChild', { set: overviewStats.set, multi: overviewStats.multi, setChild: overviewStats.setChild })
+          : t('warehouseUi.containerDetail.compositionSub', { set: overviewStats.set, multi: overviewStats.multi })
+        : undefined,
+    },
+  ]
+
+  const presenceEditors = editingPresence.editors
+  const presenceViewers = editingPresence.viewers
+  const showEditingPresence = editingPresenceAvailable && (presenceViewers.length > 0 || presenceEditors.length > 0)
+  const presenceInitial = (presenceEditors[0] ?? presenceViewers[0])?.userName?.trim().slice(0, 1).toUpperCase() ?? ''
+
+  // ---- 编辑货柜信息抽屉：取消即丢弃抽屉里未保存的头部修改 ----
+  const openHeaderEditor = () => {
+    if (!access.canEditContainer) return
+    setHeaderEditing(true)
+  }
+
+  const closeHeaderEditor = () => {
+    if (savingHeaderRef.current) return
+    // 按当前已加载的货柜主表重置表单与运费换算器，保存流程与校验完全不变。
+    if (container) {
+      setHeaderForm({
+        货柜编号: container.货柜编号,
+        装柜日期: container.装柜日期 ? dayjs(container.装柜日期) : null,
+        预计到岸日期: container.预计到岸日期 ? dayjs(container.预计到岸日期) : null,
+        实际到货日期: container.实际到货日期 ? dayjs(container.实际到货日期) : null,
+        汇率: container.汇率,
+        备注: container.备注,
+        状态: container.状态,
+      })
+      setFreightInputMode('standard68')
+      setFreightInputValue(normalizeContainerFreightInput(
+        deriveContainerFreightInput(container.运费, container.总体积, 'standard68'),
+        'standard68',
+      ))
+    }
+    setFreightInputDirty(false)
+    setHeaderEditing(false)
+  }
+
+  // ---- 保存状态条：自动保存字段与需点「保存明细」的本机草稿分开展示 ----
+  const currentAutoSaveContextKey = autoSaveContextKeyRef.current
+  const autoSaveUnsettledPatches = isContainerDetailAutoSaveContextCurrent(
+    currentAutoSaveContextKey,
+    containerGuid,
+    pendingDetailDraftIdentityRef.current,
+  )
+    ? autoSaveQueueRef.current?.getUnsettledPatches(currentAutoSaveContextKey) ?? {}
+    : {}
+  const manualDraftSummary = summarizeContainerDetailManualDraft(pendingDetailPatches, autoSaveUnsettledPatches)
+  const manualDraftBreakdown = [
+    manualDraftSummary.importPrice > 0 ? t('warehouseUi.containerDetail.draftBreakdownImport', { count: manualDraftSummary.importPrice }) : '',
+    manualDraftSummary.retailPrice > 0 ? t('warehouseUi.containerDetail.draftBreakdownRetail', { count: manualDraftSummary.retailPrice }) : '',
+    manualDraftSummary.englishName > 0 ? t('warehouseUi.containerDetail.draftBreakdownEnglish', { count: manualDraftSummary.englishName }) : '',
+    manualDraftSummary.other > 0 ? t('warehouseUi.containerDetail.draftBreakdownOther', { count: manualDraftSummary.other }) : '',
+  ].filter(Boolean).join(' · ')
+  const hasManualDraftFailures = Object.keys(pendingDetailFailures).length > 0
+
+  // ---- 勾选条 ----
+  const filteredResultTotal = detailLoadMode === 'paged' ? detailItemsTotal : displayRows.length
+  const selectionCount = allFilteredSelected ? filteredResultTotal : selectedRowKeys.length
+  const displayRowKeys = useMemo(() => displayRows.map(rowKey), [displayRows])
+
+  const selectAllFilteredRows = () => {
+    // 勾选键置空 + 进入「全部筛选结果」模式：批量操作走原来未勾选时的全部筛选分支，确认弹窗与预览不变。
+    setSelectedRowKeysState([])
+    setAllFilteredSelected(true)
+  }
+
+  const priceSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
+    { key: 'batchPrices', label: t('containers.actions.batchUpdatePrices', '批量修改价格'), disabled: batchPricesSaving, onClick: () => void openBatchPricesModal() },
+    { key: 'batchFloatRate', label: t('containers.actions.batchUpdateFloatRate', '批量修改浮率'), disabled: batchFloatRateSaving, onClick: () => void openBatchFloatRateModal() },
+  ] : []
+  const englishNameSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
+    { key: 'translate', label: t('containers.actions.batchTranslate'), onClick: () => void translateNames() },
+    { key: 'editEnglishName', label: t('containers.actions.batchEditEnglishName'), onClick: () => void openBatchEditEnglishName() },
+    { key: 'clearEnglishName', label: t('containers.actions.clearEnglishNames'), onClick: () => void clearEnglishNames() },
+  ] : []
+  const categorySelectionAction: SelectionMenuAction | null = access.canEditContainer && canBatchSetCategory
+    ? { key: 'batchCategory', label: t('warehouseUi.containerDetail.actionCategory'), onClick: () => void openBatchCategory() }
+    : null
+  const productLibrarySelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
+    { key: 'matchDomesticData', label: t('containers.actions.matchDomesticData'), disabled: matchDomesticDataLoading, onClick: () => void handleMatchDomesticData() },
+    ...(canCreateContainerProducts
+      ? [{ key: 'createNew', label: t('containers.actions.createNewProducts'), disabled: createProductsLoading || pendingDetailSaveCount > 0, onClick: () => void createNewProducts() }]
+      : []),
+    { key: 'updatePurchase', label: t('containers.actions.updateExistingPurchase'), onClick: () => void updateExistingPurchase() },
+  ] : []
+  const shelfSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
+    { key: 'active', label: t('containers.actions.batchActivate'), onClick: () => void applyActive(true) },
+    // 下架仍先弹供货说明（applyActive 内部），取消即放弃本次下架。
+    { key: 'inactive', label: t('containers.actions.batchDeactivate'), onClick: () => void applyActive(false) },
+  ] : []
+  const hasSelectionActions = priceSelectionActions.length > 0
+    || englishNameSelectionActions.length > 0
+    || Boolean(categorySelectionAction)
+    || productLibrarySelectionActions.length > 0
+    || shelfSelectionActions.length > 0
+    || access.canManagePosProducts
+    || access.canDeleteContainer
+  const requiresRowSelectionHint = allFilteredSelected
+    ? t('warehouseUi.containerDetail.requiresRowSelection')
+    : ''
+
+  // ---- 页头 ⋯ 与导出菜单 ----
+  const headerMoreMenuItems = [
+    ...(access.canEditContainer ? [
+      { key: 'editInfo', icon: <EditOutlined />, label: t('warehouseUi.containerDetail.editInfo'), disabled: !container },
+      { key: 'translateHq', icon: <TranslationOutlined />, label: t('containers.actions.translateHqData'), disabled: hqTranslating },
+    ] : []),
+    ...(access.canManageWarehouseCategories
+      ? [{ key: 'manageCategories', icon: <SettingOutlined />, label: t('containers.actions.manageCategories', '管理分类') }]
+      : []),
+    { key: 'refresh', icon: <ReloadOutlined />, label: t('common.refresh') },
+    ...(isColumnSettingsCustomized
+      ? [{ key: 'resetColumns', icon: <ReloadOutlined />, label: t('containers.actions.resetColumns', '重置列') }]
+      : []),
+  ]
+
+  const handleHeaderMoreMenuClick = (key: string) => {
+    if (key === 'editInfo') openHeaderEditor()
+    if (key === 'translateHq') void translateHqData()
+    if (key === 'manageCategories') openCategoryManageModal('batch')
+    if (key === 'refresh') void refreshContainerDetail()
+    if (key === 'resetColumns') resetColumnOrder()
+  }
+
+  const columnViewLabels: Record<ContainerDetailColumnView, string> = {
+    cost: t('warehouseUi.containerDetail.viewCost'),
+    pricing: t('warehouseUi.containerDetail.viewPricing'),
+    all: t('warehouseUi.containerDetail.viewAll'),
+  }
+
   return (
-    <PageContainer title={container?.货柜编号 ? t('containers.detailTitleWithNumber', { number: container.货柜编号 }) : t('menu.containerDetail')}>
+    // 概况卡就是页头（返回、货柜编号、状态与操作），不再额外渲染 PageContainer 标题栏，避免重复。
+    <div className="page-container">
       <Modal
         title={t('containers.modals.batchUpdateFloatRateTitle', '批量修改浮率')}
         open={batchFloatRateModalOpen}
@@ -6714,312 +7307,231 @@ export default function ContainerDetailPage() {
       ) : null}
       <div className={pageClassName}>
       <Spin spinning={loading}>
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <div className="wh-cdetail-stack">
           {!containerGuid ? <Alert type="warning" showIcon message={t('containers.messages.missingContainerGuid')} /> : null}
-          <Card>
-            <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
-              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/warehouse/containers')}>{t('containers.actions.backToList')}</Button>
-              <Space wrap>
-                <Button icon={<ReloadOutlined />} onClick={() => void refreshContainerDetail()}>{t('common.refresh')}</Button>
-                {access.canEditContainer ? (
-                  headerEditing ? (
-                    <Button type="primary" icon={<SaveOutlined />} loading={savingHeader} onClick={() => void saveHeader()}>{t('containers.actions.saveContainer')}</Button>
-                  ) : (
-                    <Button icon={<EditOutlined />} onClick={() => setHeaderEditing(true)}>{t('containers.actions.editContainer')}</Button>
-                  )
+          <section className="wh-cdetail-overview" aria-label={t('warehouseUi.containerDetail.overviewAria')}>
+            <div className="wh-cdetail-overview-head">
+              <Tooltip title={t('containers.actions.backToList')}>
+                <Button
+                  className="wh-cdetail-back"
+                  icon={<ArrowLeftOutlined />}
+                  aria-label={t('containers.actions.backToList')}
+                  onClick={() => navigate('/warehouse/containers')}
+                />
+              </Tooltip>
+              <h1 className="wh-cdetail-title">{container?.货柜编号 || t('menu.containerDetail')}</h1>
+              {container ? getStatusPill(container.状态, t) : null}
+              {container?.备注 ? (
+                <span className="wh-cdetail-remark" title={container.备注}>{container.备注}</span>
+              ) : null}
+              {showEditingPresence ? (
+                <span className="container-detail-editing-presence" aria-live="polite" aria-label={t('warehouseUi.containerDetail.presenceAria')}>
+                  <span
+                    className={`wh-cdetail-presence-avatar${presenceEditors.length ? ' wh-cdetail-presence-avatar-editing' : ''}`}
+                    aria-hidden="true"
+                  >
+                    {presenceInitial}
+                  </span>
+                  {presenceEditors.length > 0 ? (
+                    <span className="wh-cdetail-presence-editing" title={getContainerDetailPresenceTitle(presenceEditors)}>
+                      {t('warehouseUi.containerDetail.presenceEditing', { names: presenceEditors.map((user) => formatContainerDetailPresenceUser(user)).join(listSeparator) })}
+                    </span>
+                  ) : null}
+                  {presenceEditors.length > 0 && presenceViewers.length > 0 ? (
+                    <span className="wh-cdetail-presence-separator" aria-hidden="true">|</span>
+                  ) : null}
+                  {presenceViewers.length > 0 ? (
+                    <span title={getContainerDetailPresenceTitle(presenceViewers)}>
+                      {t('warehouseUi.containerDetail.presenceViewing', { names: presenceViewers.map((user) => formatContainerDetailPresenceUser(user)).join(listSeparator) })}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              <span className="wh-cdetail-spacer" />
+              <div className="wh-cdetail-head-actions">
+                <Dropdown
+                  disabled={exporting}
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      { key: 'excel', label: t('containers.actions.exportExcel', '导出 Excel') },
+                      { key: 'pdf', label: t('containers.actions.exportPdf', '导出 PDF') },
+                      { type: 'divider' },
+                      { key: 'allExcelWithImages', label: t('containers.actions.exportAllExcelWithImages', '全部导出（含图片）') },
+                      { type: 'divider' },
+                      { key: 'columns', label: t('warehouseUi.containerDetail.selectExportColumnsEllipsis') },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === 'excel') {
+                        void exportDetails(DEFAULT_CONTAINER_DETAIL_EXPORT_COLUMN_KEYS, 'excel')
+                      }
+                      if (key === 'pdf') {
+                        void exportDetails(DEFAULT_CONTAINER_DETAIL_PDF_EXPORT_COLUMN_KEYS, 'pdf')
+                      }
+                      if (key === 'allExcelWithImages') {
+                        void exportDetails(ALL_CONTAINER_DETAIL_EXPORT_COLUMN_KEYS, 'excel', 'wholeContainer')
+                      }
+                      if (key === 'columns') {
+                        // 原「导出选项 › 选择导出列」并入导出菜单，弹窗与导出逻辑不变。
+                        setExportFormatWithDefaults('excel')
+                        setExportColumnModalOpen(true)
+                      }
+                    },
+                  }}
+                >
+                  <Button icon={<DownloadOutlined />} loading={exporting}>
+                    {t('common.export')}
+                    <DownOutlined />
+                  </Button>
+                </Dropdown>
+                {canSubmitContainer ? (
+                  <Tooltip title={pendingDetailSaveCount > 0 || pendingDetailPatchCount > 0 ? t('containers.messages.savePendingDetailsFirst', '请先点击“保存明细”保存待提交的明细修改') : ''}>
+                    <Button
+                      type="primary"
+                      icon={<CheckCircleOutlined />}
+                      loading={submitContainerLoading}
+                      disabled={submitContainerLoading || pendingDetailSaveCount > 0 || pendingDetailPatchCount > 0}
+                      onClick={() => void submitContainer()}
+                    >
+                      {t('containers.actions.submitContainer', '提交货柜')}
+                    </Button>
+                  </Tooltip>
                 ) : null}
-              </Space>
-            </Space>
-            <Descriptions bordered size="small" column={4} style={{ marginTop: 16 }}>
-              <Descriptions.Item label={t('containers.fields.containerNumber')}>
-                {headerEditing ? (
-                  <Input
-                    value={headerForm.货柜编号}
-                    onChange={(event) => setHeaderForm((prev) => ({ ...prev, 货柜编号: event.target.value }))}
+                <Dropdown
+                  trigger={['click']}
+                  placement="bottomRight"
+                  menu={{ items: headerMoreMenuItems, onClick: ({ key }) => handleHeaderMoreMenuClick(key) }}
+                >
+                  <Button
+                    icon={hqTranslating ? <LoadingOutlined /> : <MoreOutlined />}
+                    aria-busy={hqTranslating || undefined}
+                    aria-label={t('warehouseUi.containerDetail.moreActionsAria')}
                   />
-                ) : container?.货柜编号 || '--'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.loadingDate')}>
-                {headerEditing ? (
-                  <DatePicker allowClear={false} value={headerForm.装柜日期} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 装柜日期: value }))} />
-                ) : formatDate(container?.装柜日期)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.estimatedArrival')}>
-                {headerEditing ? (
-                  <DatePicker allowClear={false} value={headerForm.预计到岸日期} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 预计到岸日期: value }))} />
-                ) : formatDate(container?.预计到岸日期)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.status')}>
-                {headerEditing ? (
-                  <Select
-                    value={headerForm.状态}
-                    style={{ minWidth: 120 }}
-                    options={containerStatusOptions.map((option) => ({
-                      value: option.value,
-                      label: t(`containers.status.${option.labelKey}`),
-                    }))}
-                    onChange={(value) => setHeaderForm((prev) => ({ ...prev, 状态: value }))}
-                  />
-                ) : getStatusTag(container?.状态, t)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.actualArrival')}>
-                {headerEditing ? <DatePicker value={headerForm.实际到货日期} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 实际到货日期: value }))} /> : formatDate(container?.实际到货日期)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.exchangeRate')}>
-                {headerEditing ? <InputNumber value={headerForm.汇率} precision={4} controls={false} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 汇率: value ?? undefined }))} /> : formatNumber(container?.汇率, 4)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.freight')}>
-                {headerEditing ? (
-                  <div className="container-detail-freight-calculator">
-                    <Radio.Group
-                      className="container-detail-freight-mode"
-                      aria-label={t('containers.fields.freight')}
-                      size="small"
-                      optionType="button"
-                      buttonStyle="solid"
-                      value={freightInputMode}
-                      options={[
-                        {
-                          value: 'standard68',
-                          label: t('containers.freightCalculator.modes.standard68'),
-                        },
-                        {
-                          value: 'perCbm',
-                          label: t('containers.freightCalculator.modes.perCbm'),
-                        },
-                      ]}
-                      onChange={(event) => handleFreightInputModeChange(event.target.value as ContainerFreightInputMode)}
-                    />
-                    <InputNumber
-                      className="container-detail-freight-input"
-                      aria-label={t(`containers.freightCalculator.modes.${freightInputMode}`)}
-                      value={freightInputValue}
-                      min={0}
-                      precision={freightInputMode === 'perCbm' ? 4 : 2}
-                      step={freightInputMode === 'perCbm' ? 0.0001 : 0.01}
-                      controls={false}
-                      disabled={!freightVolumeValid}
-                      placeholder={t(`containers.freightCalculator.placeholders.${freightInputMode}`)}
-                      onChange={handleFreightInputChange}
-                    />
-                    {!freightVolumeValid ? (
-                      <Typography.Text role="alert" type="danger" className="container-detail-freight-feedback">
-                        {t('containers.freightCalculator.invalidVolume')}
-                      </Typography.Text>
-                    ) : freightInputDirty && freightPreviewValue === undefined ? (
-                      <Typography.Text role="alert" type="danger" className="container-detail-freight-feedback">
-                        {t('containers.freightCalculator.invalidInput')}
-                      </Typography.Text>
-                    ) : (
-                      <Typography.Text role="status" aria-live="polite" type="secondary" className="container-detail-freight-feedback">
-                        {t('containers.freightCalculator.preview', {
-                          volume: formatNumber(container?.总体积, 4),
-                          freight: formatNumber(freightPreviewValue),
-                        })}
-                      </Typography.Text>
-                    )}
-                  </div>
-                ) : formatNumber(container?.运费)}
-              </Descriptions.Item>
-              {/* 合计金额来自货柜主表汇总，编辑态也保持只读。 */}
-              <Descriptions.Item label={t('containers.fields.domesticPriceTotal')}>{formatCurrency(container?.合计金额, '¥')}</Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.totalVolume')}>{formatNumber(container?.总体积, 4)}</Descriptions.Item>
-              <Descriptions.Item label={t('containers.fields.remark')} span={3}>
-                {headerEditing ? <Input.TextArea value={headerForm.备注} rows={2} onChange={(event) => setHeaderForm((prev) => ({ ...prev, 备注: event.target.value }))} /> : container?.备注 || '--'}
-              </Descriptions.Item>
-            </Descriptions>
-          </Card>
+                </Dropdown>
+              </div>
+            </div>
+            <dl className="wh-cdetail-facts">
+              {overviewFactItems.map((fact) => (
+                <div key={fact.key} className="wh-cdetail-fact">
+                  <dt className="wh-cdetail-fact-label">{fact.label}</dt>
+                  <dd className={`wh-cdetail-fact-value${fact.tone ? ` wh-cdetail-fact-value-${fact.tone}` : ''}`}>{fact.value}</dd>
+                  <dd className={`wh-cdetail-fact-sub${fact.tone && fact.tone !== 'muted' ? ` wh-cdetail-fact-sub-${fact.tone}` : ''}`}>
+                    {fact.sub ?? ' '}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          <section className="wh-cdetail-checks" aria-label={t('warehouseUi.containerDetail.checksTitle')}>
+            <div className="wh-cdetail-checks-head">
+              <h2 className="wh-cdetail-checks-title">{t('warehouseUi.containerDetail.checksTitle')}</h2>
+              <span className="wh-cdetail-checks-hint">{t('warehouseUi.containerDetail.checksHint')}</span>
+            </div>
+            <div className="wh-cdetail-checks-list">
+              {submitChecks.map((check) => {
+                const isZero = check.count === 0
+                return (
+                  <button
+                    key={check.key}
+                    type="button"
+                    aria-pressed={check.active}
+                    disabled={isZero && !check.active}
+                    className={[
+                      'wh-cdetail-check',
+                      `wh-cdetail-check-${check.tone}`,
+                      check.active ? 'wh-cdetail-check-active' : '',
+                      isZero ? 'wh-cdetail-check-zero' : '',
+                    ].filter(Boolean).join(' ')}
+                    onClick={check.onToggle}
+                  >
+                    <span className="wh-cdetail-check-dot" aria-hidden="true" />
+                    {check.label}
+                    <strong className="wh-cdetail-check-count">{formatTagCount(check.count)}</strong>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
 
           <Card className="container-detail-grid-card">
             <div ref={setGridContentElement} className="container-detail-grid-content">
               <div ref={setToolbarElement} className="container-detail-sticky-controls">
                 <div className="container-detail-toolbar">
-                  <div className="container-detail-action-row">
-                    <Space wrap size={[6, 6]} className="container-detail-action-group">
-                      <Dropdown
-                        disabled={exporting}
-                        menu={{
-                          items: [
-                            { key: 'excel', label: t('containers.actions.exportExcel', '导出 Excel') },
-                            { key: 'pdf', label: t('containers.actions.exportPdf', '导出 PDF') },
-                            { type: 'divider' },
-                            { key: 'allExcelWithImages', label: t('containers.actions.exportAllExcelWithImages', '全部导出（含图片）') },
-                          ],
-                          onClick: ({ key }) => {
-                            if (key === 'excel') {
-                              void exportDetails(DEFAULT_CONTAINER_DETAIL_EXPORT_COLUMN_KEYS, 'excel')
-                            }
-                            if (key === 'pdf') {
-                              void exportDetails(DEFAULT_CONTAINER_DETAIL_PDF_EXPORT_COLUMN_KEYS, 'pdf')
-                            }
-                            if (key === 'allExcelWithImages') {
-                              void exportDetails(ALL_CONTAINER_DETAIL_EXPORT_COLUMN_KEYS, 'excel', 'wholeContainer')
-                            }
-                          },
-                        }}
-                      >
-                        <Button size="small" icon={<DownloadOutlined />} loading={exporting}>
-                          {t('common.export')}
-                        </Button>
-                      </Dropdown>
-                      <Dropdown
-                        menu={{
-                          items: [
-                            { key: 'columns', label: t('containers.actions.selectExportColumns', '选择导出列') },
-                          ],
-                          onClick: ({ key }) => {
-                            if (key === 'columns') {
-                              setExportFormatWithDefaults('excel')
-                              setExportColumnModalOpen(true)
-                            }
-                          },
-                        }}
-                      >
-                        <Button size="small">{t('containers.actions.exportOptions', '导出选项')}</Button>
-                      </Dropdown>
-                      {isColumnSettingsCustomized ? (
-                        <Button size="small" icon={<ReloadOutlined />} onClick={resetColumnOrder}>
-                          {t('containers.actions.resetColumns', '重置列')}
-                        </Button>
-                      ) : null}
-                      {access.canEditContainer ? (
-                        <Button size="small" loading={hqTranslating} onClick={() => void translateHqData()}>
-                          {t('containers.actions.translateHqData')}
-                        </Button>
-                      ) : null}
-                      {canSubmitContainer ? (
-                        <Tooltip title={pendingDetailSaveCount > 0 || pendingDetailPatchCount > 0 ? t('containers.messages.savePendingDetailsFirst', '请先点击“保存明细”保存待提交的明细修改') : ''}>
-                          <Button
-                            size="small"
-                            type="primary"
-                            icon={<CheckCircleOutlined />}
-                            loading={submitContainerLoading}
-                            disabled={submitContainerLoading || pendingDetailSaveCount > 0 || pendingDetailPatchCount > 0}
-                            onClick={() => void submitContainer()}
-                          >
-                            {t('containers.actions.submitContainer', '提交货柜')}
-                          </Button>
-                        </Tooltip>
-                      ) : null}
-                      {access.canManagePosProducts ? (
-                        <Tooltip title={!selectedRowKeys.length ? t('containers.messages.selectProducts') : ''}>
-                          <Button
-                            size="small"
-                            icon={<CloudUploadOutlined />}
-                            loading={pushToHqLoading}
-                            disabled={!selectedRowKeys.length || pushToHqLoading}
-                            onClick={() => void handlePushSelectedProductsToHq()}
-                          >
-                            {t('containers.actions.pushToHq', '发送到 HQ')}
-                          </Button>
-                        </Tooltip>
-                      ) : null}
-                      {access.canEditContainer ? (
-                        <Dropdown
-                          menu={{
-                            items: [
-                              { key: 'batchFloatRate', label: t('containers.actions.batchUpdateFloatRate', '批量修改浮率'), disabled: batchFloatRateSaving },
-                              { key: 'batchPrices', label: t('containers.actions.batchUpdatePrices', '批量修改价格'), disabled: batchPricesSaving },
-                              { key: 'matchDomesticData', label: t('containers.actions.matchDomesticData'), disabled: matchDomesticDataLoading },
-                              { type: 'divider' },
-                              { key: 'translate', label: t('containers.actions.batchTranslate') },
-                              { key: 'editEnglishName', label: t('containers.actions.batchEditEnglishName') },
-                              { key: 'clearEnglishName', label: t('containers.actions.clearEnglishNames') },
-                              ...(canBatchSetCategory
-                                ? [{ key: 'batchCategory', icon: <AppstoreOutlined />, label: t('containers.actions.batchSetCategory', '批量分类') }]
-                                : []),
-                              ...(canCreateContainerProducts
-                                ? [{ key: 'createNew', label: t('containers.actions.createNewProducts'), disabled: createProductsLoading || pendingDetailSaveCount > 0 }]
-                                : []),
-                              { key: 'updatePurchase', label: t('containers.actions.updateExistingPurchase') },
-                              { key: 'active', label: t('containers.actions.batchActivate') },
-                              { key: 'inactive', label: t('containers.actions.batchDeactivate') },
-                            ],
-                            onClick: ({ key }) => {
-                              if (key === 'batchFloatRate') void openBatchFloatRateModal()
-                              if (key === 'batchPrices') void openBatchPricesModal()
-                              if (key === 'matchDomesticData') void handleMatchDomesticData()
-                              if (key === 'translate') void translateNames()
-                              if (key === 'editEnglishName') void openBatchEditEnglishName()
-                              if (key === 'clearEnglishName') void clearEnglishNames()
-                              if (key === 'batchCategory') void openBatchCategory()
-                              if (key === 'createNew') void createNewProducts()
-                              if (key === 'updatePurchase') void updateExistingPurchase()
-                              if (key === 'active') void applyActive(true)
-                              if (key === 'inactive') void applyActive(false)
-                            },
-                          }}
-                        >
-                          <Button size="small">{t('containers.actions.batchActions')}</Button>
-                        </Dropdown>
-                      ) : null}
-                      {access.canManageWarehouseCategories ? (
-                        <Button
-                          size="small"
-                          icon={<SettingOutlined />}
-                          onClick={() => openCategoryManageModal('batch')}
-                        >
-                          {t('containers.actions.manageCategories', '管理分类')}
-                        </Button>
-                      ) : null}
-                      {access.canDeleteContainer ? <Button size="small" danger icon={<DeleteOutlined />} onClick={deleteSelected}>{t('containers.actions.deleteDetails')}</Button> : null}
-                    </Space>
-                    <Space wrap size={[8, 4]} className="container-detail-action-meta">
-                      <Typography.Text type="secondary" className="container-detail-loaded-count">
-                        {detailLoadMode === 'full'
-                          ? t('containers.text.fullRows', '已完整加载 {{count}} 条', { count: rows.length })
-                          : t('containers.text.pageRows', '当前页 {{loaded}} / 共 {{total}} 条', {
-                              loaded: rows.length,
-                              total: detailItemsTotal,
-                            })}
-                        {filteredRows.length !== rows.length ? ` ${t('containers.text.visibleRows', '当前可见 {{count}} 条', { count: filteredRows.length })}` : ''}
-                        {detailLoading ? ` ${t('common.loading', '加载中')}` : ''}
-                      </Typography.Text>
-                      {hasActiveColumnState ? (
-                        <Button size="small" className="container-detail-compact-button" onClick={() => {
-                          setColumnFilters({})
-                          setSortState(DEFAULT_CONTAINER_DETAIL_SORT)
-                        }}>
-                          {t('containers.actions.clearColumnFilters', '清空列过滤')}
-                        </Button>
-                      ) : null}
-                      <Space size={6} className="container-detail-readonly-toggle">
-                        <Typography.Text type="secondary">{t('containers.actions.showReadonlyOemPrice', '只读零售价')}</Typography.Text>
-                        <Switch
-                          size="small"
-                          checked={showReadonlyOemPrice}
-                          onChange={setShowReadonlyOemPrice}
-                        />
-                      </Space>
-                    </Space>
-                  </div>
-
-                  {editingPresenceAvailable && (editingPresence.viewers.length > 0 || editingPresence.editors.length > 0) ? (
-                    <Space size={6} wrap className="container-detail-editing-presence" aria-live="polite">
-                      {editingPresence.viewers.length > 0 ? (
-                        <Typography.Text type="secondary" title={getContainerDetailPresenceTitle(editingPresence.viewers)}>
-                          {t('containers.text.otherViewers', '正在查看：{{names}}', { names: editingPresence.viewers.map((user) => formatContainerDetailPresenceUser(user)).join('、') })}
-                        </Typography.Text>
-                      ) : null}
-                      {editingPresence.editors.length > 0 ? (
-                        <Typography.Text type="warning" title={getContainerDetailPresenceTitle(editingPresence.editors)}>
-                          {t('containers.text.otherEditors', '正在编辑：{{names}}', { names: editingPresence.editors.map((user) => formatContainerDetailPresenceUser(user)).join('、') })}
-                        </Typography.Text>
-                      ) : null}
-                    </Space>
-                  ) : null}
-
                   {access.canEditContainer ? (
-                    <Space wrap size={[6, 6]} className="container-detail-bulk-row">
-                      <Button
-                        size="small"
-                        icon={<SaveOutlined />}
-                        loading={detailSaveSubmitting}
-                        disabled={!pendingDetailPatchCount || detailSaveSubmitting}
-                        onClick={() => void savePendingDetails()}
+                    <div className="container-detail-bulk-row" aria-label={t('warehouseUi.containerDetail.saveBarAria')}>
+                      <span
+                        className={`container-detail-auto-save-meta wh-cdetail-save-auto${autoSaveSnapshot.failureCount > 0 ? ' wh-cdetail-save-auto-failed' : autoSaveSnapshot.unsavedFieldCount > 0 ? ' wh-cdetail-save-auto-saving' : ''}`}
+                        aria-live="polite"
                       >
-                        {t('containers.actions.saveDetails', '保存明细')}{pendingDetailPatchCount ? ` (${pendingDetailPatchCount})` : ''}
-                      </Button>
+                        {autoSaveSnapshot.failureCount > 0 ? (
+                          <>
+                            <ExclamationCircleOutlined />
+                            {t('containers.text.autoSaveFailedFields', '{{count}} 项未保存', { count: autoSaveSnapshot.failureCount })}
+                            <Button size="small" type="link" danger onClick={retryFailedAutoSaves}>
+                              {t('containers.actions.retryAutoSave', '重试')}
+                            </Button>
+                          </>
+                        ) : autoSaveSnapshot.unsavedFieldCount > 0 ? (
+                          <>
+                            <LoadingOutlined />
+                            {t('containers.text.autoSavingFields', '正在保存 {{count}} 项', { count: autoSaveSnapshot.unsavedFieldCount })}
+                          </>
+                        ) : (
+                          <>
+                            <CheckOutlined />
+                            {t('warehouseUi.containerDetail.autoSavedAll')}
+                            <span className="wh-cdetail-save-hint">{t('warehouseUi.containerDetail.autoSaveFieldsHint')}</span>
+                          </>
+                        )}
+                      </span>
+                      {manualDraftSummary.total > 0 || isDetailDraftMemoryOnly ? (
+                        <>
+                          <span className="wh-cdetail-save-divider" aria-hidden="true" />
+                          <span className={`container-detail-draft-meta wh-cdetail-save-draft${hasManualDraftFailures ? ' wh-cdetail-save-draft-failed' : ''}`}>
+                            <span className="wh-cdetail-save-dot" aria-hidden="true" />
+                            <strong>{t('warehouseUi.containerDetail.draftPending', { count: manualDraftSummary.total })}</strong>
+                            <span className="wh-cdetail-save-breakdown">
+                              {manualDraftBreakdown ? `${manualDraftBreakdown} · ` : ''}
+                              {t('warehouseUi.containerDetail.draftLocalHint')}
+                            </span>
+                          </span>
+                          {isDetailDraftMemoryOnly ? (
+                            <span className="wh-cdetail-save-memory" role="alert">{t('warehouseUi.containerDetail.draftMemoryOnly')}</span>
+                          ) : null}
+                          {manualDraftSummary.total > 0 ? (
+                            <>
+                              <Button
+                                size="small"
+                                type="link"
+                                title={t('warehouseUi.containerDetail.locateDraftTitle')}
+                                onClick={() => locateFirstPendingDetailField()}
+                              >
+                                {t('warehouseUi.containerDetail.locateDraft')}
+                              </Button>
+                              <Button
+                                size="small"
+                                type="link"
+                                className="wh-cdetail-save-discard"
+                                disabled={detailSaveSubmitting}
+                                onClick={clearPendingDetailDraft}
+                              >
+                                {t('warehouseUi.containerDetail.discardDraft')}
+                              </Button>
+                            </>
+                          ) : null}
+                        </>
+                      ) : null}
+                      {hasPendingConcurrencyConflicts ? (
+                        <span className="wh-cdetail-save-conflict">
+                          <ExclamationCircleOutlined />
+                          {t('warehouseUi.containerDetail.conflictsPending', { count: pendingDetailConflicts.length })}
+                          <Button size="small" type="link" danger onClick={() => setConflictDrawerOpen(true)}>
+                            {t('warehouseUi.containerDetail.resolveConflicts')}
+                          </Button>
+                        </span>
+                      ) : null}
+                      <span className="wh-cdetail-spacer" />
                       <Tooltip title={t('containers.text.columnPasteTooltip', '把 Excel 一列数据按当前显示顺序填入目标列；也可在单元格内直接 Ctrl+V 粘贴多行')}>
                         <Button
                           size="small"
@@ -7030,76 +7542,152 @@ export default function ContainerDetailPage() {
                           {t('containers.actions.pasteColumn', '粘贴列')}
                         </Button>
                       </Tooltip>
-                      {autoSaveSnapshot.unsavedFieldCount > 0 ? (
-                        <Space
-                          size={4}
-                          className="container-detail-auto-save-meta"
-                          aria-live="polite"
-                        >
-                          <Typography.Text type={autoSaveSnapshot.failureCount > 0 ? 'danger' : 'secondary'}>
-                            {autoSaveSnapshot.failureCount > 0
-                              ? t(
-                                  'containers.text.autoSaveFailedFields',
-                                  '{{count}} 项未保存',
-                                  { count: autoSaveSnapshot.failureCount },
-                                )
-                              : t(
-                                  'containers.text.autoSavingFields',
-                                  '正在保存 {{count}} 项',
-                                  { count: autoSaveSnapshot.unsavedFieldCount },
-                                )}
-                          </Typography.Text>
-                          {autoSaveSnapshot.failureCount > 0 ? (
-                            <Button size="small" type="link" danger onClick={retryFailedAutoSaves}>
-                              {t('containers.actions.retryAutoSave', '重试')}
-                            </Button>
-                          ) : null}
-                        </Space>
-                      ) : null}
-                      {pendingDetailFieldCount > 0 ? (
-                        <Space size={4} className="container-detail-draft-meta">
-                          <Typography.Text type={Object.keys(pendingDetailFailures).length > 0 ? 'danger' : 'warning'}>
-                            {t(
-                              'containers.text.unsavedDetailFields',
-                              '{{count}} 项未保存',
-                              { count: pendingDetailFieldCount },
-                            )}
-                          </Typography.Text>
-                          {isDetailDraftMemoryOnly ? (
-                            <Typography.Text type="danger">
-                              {t('containers.text.localDraftMemoryOnly', '仅当前页面内存保存，刷新或关闭页面会丢失')}
-                            </Typography.Text>
-                          ) : null}
-                          <Button size="small" type="link" onClick={() => locateFirstPendingDetailField()}>
-                            {t('containers.actions.locateUnsavedDetail', '定位未保存项')}
-                          </Button>
-                          <Button
-                            size="small"
-                            type="link"
-                            danger
-                            disabled={detailSaveSubmitting}
-                            onClick={clearPendingDetailDraft}
-                          >
-                            {t('containers.actions.clearDraft', '清空草稿')}
-                          </Button>
-                        </Space>
-                      ) : null}
-                      {hasPendingConcurrencyConflicts ? (
-                        <Button size="small" danger onClick={() => setConflictDrawerOpen(true)}>
-                          {t('containers.actions.reviewConcurrencyConflicts', '并发冲突 {{count}} 项', { count: pendingDetailConflicts.length })}
-                        </Button>
-                      ) : null}
-                    </Space>
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<SaveOutlined />}
+                        loading={detailSaveSubmitting}
+                        disabled={!pendingDetailPatchCount || detailSaveSubmitting}
+                        onClick={() => void savePendingDetails()}
+                      >
+                        {t('containers.actions.saveDetails', '保存明细')}{pendingDetailPatchCount ? ` (${pendingDetailPatchCount})` : ''}
+                      </Button>
+                    </div>
                   ) : null}
 
-                  <ContainerTagFilters
-                    tagStatOptions={tagStatOptions}
-                    tagStats={tagStats}
-                    selectedTagFilters={selectedTagFilters}
-                    selectedTagOptions={selectedTagOptions}
-                    onToggleTagFilter={toggleTagFilter}
-                    onSetTagFilters={setTagFiltersFromSelect}
-                  />
+                  <div className="container-detail-action-row">
+                    <div className="wh-cdetail-seg" role="group" aria-label={t('warehouseUi.containerDetail.viewsAria')}>
+                      {CONTAINER_DETAIL_COLUMN_VIEWS.map((view) => (
+                        <button
+                          key={view}
+                          type="button"
+                          aria-pressed={columnView === view}
+                          className={`wh-cdetail-seg-item${columnView === view ? ' wh-cdetail-seg-item-active' : ''}`}
+                          onClick={() => setColumnView(view)}
+                        >
+                          {columnViewLabels[view]}
+                        </button>
+                      ))}
+                    </div>
+                    <Space.Compact className="wh-cdetail-search">
+                      <Select<ContainerDetailSearchField>
+                        className="wh-cdetail-search-field"
+                        aria-label={t('warehouseUi.containerDetail.searchFieldAria')}
+                        value={searchField}
+                        popupMatchSelectWidth={false}
+                        options={CONTAINER_DETAIL_SEARCH_FIELDS.map((field) => ({ value: field, label: t(`containers.fields.${field}`) }))}
+                        onChange={handleSearchFieldChange}
+                      />
+                      <Input
+                        allowClear
+                        className="wh-cdetail-search-input"
+                        prefix={<SearchOutlined />}
+                        value={searchDraft}
+                        placeholder={t('warehouseUi.containerDetail.searchPlaceholder')}
+                        aria-label={t('warehouseUi.containerDetail.searchAria')}
+                        onChange={(event) => setSearchDraft(event.target.value)}
+                      />
+                    </Space.Compact>
+                    <ContainerTagFilters
+                      tagStats={tagStats}
+                      selectedTagFilters={selectedTagFilters}
+                      onSetTagFilters={setTagFiltersFromSelect}
+                    />
+                    <span className="wh-cdetail-spacer" />
+                    <div className="container-detail-action-meta">
+                      {access.canEditContainer ? (
+                        <span className="wh-cdetail-legend">
+                          <span className="wh-cdetail-legend-item">
+                            <span className="wh-cdetail-legend-swatch wh-cdetail-legend-autosave" aria-hidden="true" />
+                            {t('warehouseUi.containerDetail.legendAutoSave')}
+                          </span>
+                          <span className="wh-cdetail-legend-item">
+                            <span className="wh-cdetail-legend-swatch wh-cdetail-legend-draft" aria-hidden="true" />
+                            {t('warehouseUi.containerDetail.legendDraft')}
+                          </span>
+                        </span>
+                      ) : null}
+                      <Popover
+                        trigger="click"
+                        placement="bottomRight"
+                        content={(
+                          <div className="wh-cdetail-colset">
+                            <div className="wh-cdetail-colset-title">{t('common.listToolbar.columnSettings')}</div>
+                            <div className="wh-cdetail-colset-hint">{t('warehouseUi.containerDetail.columnSettingsHint')}</div>
+                            <div className="container-detail-readonly-toggle">
+                              <span>{t('containers.actions.showReadonlyOemPrice', '只读零售价')}</span>
+                              <Switch
+                                size="small"
+                                checked={showReadonlyOemPrice}
+                                disabled={columnView !== 'all'}
+                                onChange={setShowReadonlyOemPrice}
+                              />
+                            </div>
+                            {columnView !== 'all' ? (
+                              <div className="wh-cdetail-colset-hint">{t('warehouseUi.containerDetail.readonlyRetailAllOnly')}</div>
+                            ) : null}
+                            {isColumnSettingsCustomized ? (
+                              <Button size="small" icon={<ReloadOutlined />} onClick={resetColumnOrder}>
+                                {t('containers.actions.resetColumns', '重置列')}
+                              </Button>
+                            ) : null}
+                          </div>
+                        )}
+                      >
+                        <Button icon={<TableOutlined />} aria-label={t('common.listToolbar.columnSettings')} />
+                      </Popover>
+                    </div>
+                  </div>
+
+                  {activeFilterItems.length ? (
+                    <ActiveFilterBar items={activeFilterItems} onClearAll={clearAllDetailFilters} />
+                  ) : null}
+
+                  <SelectionActionBar selectedCount={selectionCount} onClearSelection={() => setSelectedRowKeys([])}>
+                    {allFilteredSelected ? (
+                      <span className="wh-cdetail-selection-scope">{t('warehouseUi.containerDetail.allFilteredSelected')}</span>
+                    ) : filteredResultTotal > selectedRowKeys.length ? (
+                      <Button type="link" size="small" className="wh-cdetail-selection-all" onClick={selectAllFilteredRows}>
+                        {t('warehouseUi.containerDetail.selectAllFiltered', { count: filteredResultTotal })}
+                      </Button>
+                    ) : null}
+                    {hasSelectionActions ? <span className="wh-cdetail-selection-divider" aria-hidden="true" /> : null}
+                    <SelectionMenuButton label={t('warehouseUi.containerDetail.actionPriceFloat')} actions={priceSelectionActions} />
+                    <SelectionMenuButton label={t('warehouseUi.containerDetail.actionEnglishName')} actions={englishNameSelectionActions} />
+                    {categorySelectionAction ? (
+                      <Button size="small" icon={<AppstoreOutlined />} onClick={categorySelectionAction.onClick}>
+                        {categorySelectionAction.label}
+                      </Button>
+                    ) : null}
+                    <SelectionMenuButton label={t('warehouseUi.containerDetail.actionProductLibrary')} actions={productLibrarySelectionActions} />
+                    <SelectionMenuButton label={t('warehouseUi.containerDetail.actionShelf')} actions={shelfSelectionActions} />
+                    {access.canManagePosProducts ? (
+                      <Tooltip title={!selectedRowKeys.length ? requiresRowSelectionHint || t('containers.messages.selectProducts') : ''}>
+                        <Button
+                          size="small"
+                          icon={<CloudUploadOutlined />}
+                          loading={pushToHqLoading}
+                          disabled={!selectedRowKeys.length || pushToHqLoading}
+                          onClick={() => void handlePushSelectedProductsToHq()}
+                        >
+                          {t('containers.actions.pushToHq', '发送到 HQ')}
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    {access.canDeleteContainer ? (
+                      <Tooltip title={!selectedRowKeys.length ? requiresRowSelectionHint : ''}>
+                        <Button
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          disabled={!selectedRowKeys.length}
+                          onClick={deleteSelected}
+                        >
+                          {t('containers.actions.deleteDetails')}
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                  </SelectionActionBar>
 
                   {exporting ? (
                     <div className="container-detail-export-progress">
@@ -7134,7 +7722,8 @@ export default function ContainerDetailPage() {
                       dataSource={displayRows}
                       loading={detailLoading}
                       rowSelection={{
-                        selectedRowKeys,
+                        // 「全部筛选结果」模式下当前显示的行都显示为已勾选；勾选键本身仍为空，批量操作走全部筛选分支。
+                        selectedRowKeys: allFilteredSelected ? displayRowKeys : selectedRowKeys,
                         onChange: setSelectedRowKeys,
                         fixed: !viewport.isSmallPortrait,
                         // 紧凑表格中默认选择列过窄，显式留出复选框点击空间。
@@ -7155,10 +7744,23 @@ export default function ContainerDetailPage() {
                       onChange={handleTableChange}
                       onScroll={handleDetailTableScroll}
                       footer={() => (
-                        <Space direction="vertical" size={2}>
-                          <Typography.Text type="secondary">{t('containers.formulas.transportCost', '运输成本 = 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积')}</Typography.Text>
-                          <Typography.Text type="secondary">{t('containers.formulas.importPrice', '进口价格 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11')}</Typography.Text>
-                        </Space>
+                        <div className="wh-cdetail-table-footer">
+                          <Space direction="vertical" size={2}>
+                            <Typography.Text type="secondary">{t('containers.formulas.transportCost', '运输成本 = 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积')}</Typography.Text>
+                            <Typography.Text type="secondary">{t('containers.formulas.importPrice', '进口价格 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11')}</Typography.Text>
+                          </Space>
+                          <Typography.Text type="secondary" className="container-detail-loaded-count">
+                            {detailLoadMode === 'full'
+                              ? filteredRows.length !== rows.length
+                                ? t('warehouseUi.containerDetail.footerFilteredFull', { filtered: filteredRows.length, loaded: rows.length })
+                                : t('containers.text.fullRows', '已完整加载 {{count}} 条', { count: rows.length })
+                              : t('containers.text.pageRows', '当前页 {{loaded}} / 共 {{total}} 条', {
+                                  loaded: rows.length,
+                                  total: detailItemsTotal,
+                                })}
+                            {detailLoading ? ` ${t('common.loading', '加载中')}` : ''}
+                          </Typography.Text>
+                        </div>
                       )}
                     />
                   </SortableContext>
@@ -7166,8 +7768,128 @@ export default function ContainerDetailPage() {
               </div>
             </div>
           </Card>
-        </Space>
+        </div>
       </Spin>
+      <Drawer
+        title={t('warehouseUi.containerDetail.editInfo')}
+        open={headerEditing && access.canEditContainer}
+        width={viewport.isSmallPortrait ? '100%' : 560}
+        maskClosable={false}
+        closable={!savingHeader}
+        onClose={closeHeaderEditor}
+        footer={(
+          <div className="wh-cdetail-edit-footer">
+            <Button disabled={savingHeader} onClick={closeHeaderEditor}>{t('common.cancel')}</Button>
+            <Button type="primary" icon={<SaveOutlined />} loading={savingHeader} onClick={() => void saveHeader()}>{t('containers.actions.saveContainer')}</Button>
+          </div>
+        )}
+      >
+        <div className="wh-cdetail-edit-form">
+          <div className="wh-cdetail-edit-field">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.containerNumber')}</span>
+            <Input
+              aria-label={t('containers.fields.containerNumber')}
+              value={headerForm.货柜编号}
+              onChange={(event) => setHeaderForm((prev) => ({ ...prev, 货柜编号: event.target.value }))}
+            />
+          </div>
+          <div className="wh-cdetail-edit-field">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.status')}</span>
+            {/* 状态仍可任意改，不新增流转限制（与原页头编辑一致）。 */}
+            <Select
+              aria-label={t('containers.fields.status')}
+              value={headerForm.状态}
+              options={containerStatusOptions.map((option) => ({
+                value: option.value,
+                label: t(`containers.status.${option.labelKey}`),
+              }))}
+              onChange={(value) => setHeaderForm((prev) => ({ ...prev, 状态: value }))}
+            />
+          </div>
+          <div className="wh-cdetail-edit-field">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.loadingDate')}</span>
+            <DatePicker allowClear={false} value={headerForm.装柜日期} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 装柜日期: value }))} />
+          </div>
+          <div className="wh-cdetail-edit-field">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.estimatedArrival')}</span>
+            <DatePicker allowClear={false} value={headerForm.预计到岸日期} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 预计到岸日期: value }))} />
+          </div>
+          <div className="wh-cdetail-edit-field">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.actualArrival')}</span>
+            <DatePicker value={headerForm.实际到货日期} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 实际到货日期: value }))} />
+          </div>
+          <div className="wh-cdetail-edit-field">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.exchangeRate')}</span>
+            <InputNumber value={headerForm.汇率} precision={4} controls={false} aria-label={t('containers.fields.exchangeRate')} onChange={(value) => setHeaderForm((prev) => ({ ...prev, 汇率: value ?? undefined }))} />
+          </div>
+          <div className="wh-cdetail-edit-field wh-cdetail-edit-field-wide">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.freight')}</span>
+            <div className="container-detail-freight-calculator">
+              <Radio.Group
+                className="container-detail-freight-mode"
+                aria-label={t('containers.fields.freight')}
+                size="small"
+                optionType="button"
+                buttonStyle="solid"
+                value={freightInputMode}
+                options={[
+                  {
+                    value: 'standard68',
+                    label: t('containers.freightCalculator.modes.standard68'),
+                  },
+                  {
+                    value: 'perCbm',
+                    label: t('containers.freightCalculator.modes.perCbm'),
+                  },
+                ]}
+                onChange={(event) => handleFreightInputModeChange(event.target.value as ContainerFreightInputMode)}
+              />
+              <InputNumber
+                className="container-detail-freight-input"
+                aria-label={t(`containers.freightCalculator.modes.${freightInputMode}`)}
+                value={freightInputValue}
+                min={0}
+                precision={freightInputMode === 'perCbm' ? 4 : 2}
+                step={freightInputMode === 'perCbm' ? 0.0001 : 0.01}
+                controls={false}
+                disabled={!freightVolumeValid}
+                placeholder={t(`containers.freightCalculator.placeholders.${freightInputMode}`)}
+                onChange={handleFreightInputChange}
+              />
+              {!freightVolumeValid ? (
+                <Typography.Text role="alert" type="danger" className="container-detail-freight-feedback">
+                  {t('containers.freightCalculator.invalidVolume')}
+                </Typography.Text>
+              ) : freightInputDirty && freightPreviewValue === undefined ? (
+                <Typography.Text role="alert" type="danger" className="container-detail-freight-feedback">
+                  {t('containers.freightCalculator.invalidInput')}
+                </Typography.Text>
+              ) : (
+                <Typography.Text role="status" aria-live="polite" type="secondary" className="container-detail-freight-feedback">
+                  {t('containers.freightCalculator.preview', {
+                    volume: formatNumber(container?.总体积, 4),
+                    freight: formatNumber(freightPreviewValue),
+                  })}
+                </Typography.Text>
+              )}
+            </div>
+          </div>
+          <div className="wh-cdetail-edit-field wh-cdetail-edit-field-wide">
+            <span className="wh-cdetail-edit-label">{t('containers.fields.remark')}</span>
+            <Input.TextArea
+              aria-label={t('containers.fields.remark')}
+              value={headerForm.备注}
+              rows={2}
+              onChange={(event) => setHeaderForm((prev) => ({ ...prev, 备注: event.target.value }))}
+            />
+          </div>
+          {/* 国内价格合计与总体积来自货柜主表汇总，编辑抽屉里也只读。 */}
+          <div className="wh-cdetail-edit-readonly">
+            <span>{t('containers.fields.domesticPriceTotal')}：{formatCurrency(container?.合计金额, '¥')}</span>
+            <span>{t('containers.fields.totalVolume')}：{formatNumber(container?.总体积, 4)}</span>
+          </div>
+        </div>
+      </Drawer>
       <Modal
         title={t('containers.modals.columnPasteTitle', '粘贴 Excel 列数据')}
         open={columnPasteModalOpen}
@@ -7348,6 +8070,6 @@ export default function ContainerDetailPage() {
         </Space>
       </Modal>
       </div>
-    </PageContainer>
+    </div>
   )
 }

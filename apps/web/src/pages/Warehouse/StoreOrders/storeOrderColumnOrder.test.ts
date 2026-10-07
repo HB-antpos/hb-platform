@@ -82,37 +82,37 @@ assertEqual(
   '分店订货列表列顺序初始化为空时不应误判为已自定义',
 )
 
+// 订货明细重设计后：商品列（图片 + 货号 + 名称）固定在左侧，操作列固定在右侧，其余为可拖拽的普通列。
 const defaultDetailColumnOrder: StoreOrderDetailTableColumnKey[] = [
-  'index',
-  'productImage',
-  'itemNumber',
-  'productName',
-  'barcode',
+  'product',
+  'locationCode',
+  'quantity',
+  'allocQuantity',
   'allocatedImportAmount',
   'actions',
 ]
 
 assertDeepEqual(
-  mergeStoreOrderDetailColumnOrder(['barcode', 'unknown', 'itemNumber', 'barcode'], defaultDetailColumnOrder),
-  ['itemNumber', 'index', 'productImage', 'barcode', 'productName', 'allocatedImportAmount', 'actions'],
-  '订货明细列顺序应过滤未知列、去重、补齐新增列，并把固定列留在两端',
+  mergeStoreOrderDetailColumnOrder(['quantity', 'unknown', 'product', 'quantity', 'itemNumber'], defaultDetailColumnOrder),
+  ['product', 'quantity', 'locationCode', 'allocQuantity', 'allocatedImportAmount', 'actions'],
+  '订货明细列顺序应过滤未知列（含改版前的旧列键）、去重、补齐新增列，并把固定列留在两端',
 )
 
 assertDeepEqual(
-  moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'productName', 'itemNumber'),
+  moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'locationCode', 'product'),
   defaultDetailColumnOrder,
   '订货明细列拖拽不应允许普通列跨入固定左列分区',
 )
 
 assertDeepEqual(
-  moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'actions', 'barcode'),
+  moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'actions', 'quantity'),
   defaultDetailColumnOrder,
   '订货明细列拖拽不应允许固定右列跨入普通列分区',
 )
 
 assertDeepEqual(
-  moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'barcode', 'productName'),
-  ['index', 'productImage', 'itemNumber', 'barcode', 'productName', 'allocatedImportAmount', 'actions'],
+  moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'quantity', 'locationCode'),
+  ['product', 'quantity', 'locationCode', 'allocQuantity', 'allocatedImportAmount', 'actions'],
   '订货明细普通列仍应能在中间分区内调整顺序',
 )
 
@@ -124,7 +124,7 @@ assertEqual(
 
 assertEqual(
   isStoreOrderDetailColumnOrderCustomized(
-    moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'barcode', 'productName'),
+    moveStoreOrderDetailColumnOrder(defaultDetailColumnOrder, 'quantity', 'locationCode'),
     defaultDetailColumnOrder,
   ),
   true,

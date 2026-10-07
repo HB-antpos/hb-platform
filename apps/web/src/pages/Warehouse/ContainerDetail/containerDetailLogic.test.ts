@@ -3350,20 +3350,16 @@ assertEqual(
   true,
   '全量模式标签应在本地处理；分页模式标签必须进入远程 scope 并触发受控重载',
 )
+// 重设计：标签筛选改为紧凑分组控件（类型多选下拉、新/已有与上下架分段），每组第一项「全部」即清空本组；
+// 颜色只表示状态，标签不再按值上色。保留的意图：有总览入口、新商品与多码类型入口都在。
 assertEqual(
-  pageSource.includes("{ value: 'all', label: t('containers.filters.allTags'), color: 'blue' }"),
+  tagFiltersSource.includes("{ value: 'all', label: t('common.all') }") &&
+    tagFiltersSource.includes("{ value: 'new', label: t('containers.tags.newProduct') }") &&
+    tagFiltersSource.includes("multi: t('containers.productTypes.multiCode')") &&
+    pageSource.includes("{ value: 'new', label: t('containers.tags.newProduct') }") &&
+    pageSource.includes("{ value: 'multi', label: t('containers.productTypes.multiCode') }"),
   true,
-  '全部标签统计项应保持蓝色，作为总览入口',
-)
-assertEqual(
-  pageSource.includes("{ value: 'new', label: t('containers.tags.newProduct'), color: 'cyan' }"),
-  true,
-  '新商品统计项应使用不同于全部标签的颜色',
-)
-assertEqual(
-  pageSource.includes("{ value: 'multi', label: t('containers.productTypes.multiCode'), color: 'purple' }"),
-  true,
-  '统计 tag 应包含多码商品类型入口',
+  '紧凑标签筛选应提供「全部」总览、新商品和多码商品类型入口，已生效条也能显示它们的名称',
 )
 assertEqual(
   pageSource.includes('productTypeFilter'),
@@ -3371,9 +3367,12 @@ assertEqual(
   '顶部独立商品类型下拉已取消，商品类型过滤应通过统计 tag 和列头筛选完成',
 )
 assertEqual(
-  tagFiltersSource.includes('color={option.color}'),
+  !tagFiltersSource.includes('color={option.color}') &&
+    !pageSource.includes("color: 'cyan'") &&
+    tagFiltersSource.includes('CONTAINER_DETAIL_PRODUCT_TYPE_TAGS') &&
+    tagFiltersSource.includes('replaceContainerDetailTagGroup('),
   true,
-  '统计标签应始终按各自语义色显示，不只在选中时显示蓝色',
+  '标签筛选不再按值上色（颜色只表示状态），各组控件只替换本组已选标签以保持组内并集、组间交集',
 )
 assertEqual(
   pageSource.includes('const targetRows = selectedRowKeys.length ? selectedRows : displayRows'),
@@ -3390,13 +3389,17 @@ assertEqual(
   true,
   '隐藏选中行触发批量操作时应使用 i18n 提示用户重新选择',
 )
-assertEqual(tagFiltersSource.includes('role="button"'), true, '统计 tag 应提供按钮语义')
-assertEqual(tagFiltersSource.includes('tabIndex={0}'), true, '统计 tag 应可通过键盘聚焦')
+// 分段筛选改用原生 <button>：天然具备按钮语义、可 Tab 聚焦并响应 Enter/空格，不再需要 role/tabIndex/键盘补丁。
+assertEqual(
+  tagFiltersSource.includes('<button') && tagFiltersSource.includes('type="button"'),
+  true,
+  '分段标签筛选应使用原生按钮，保证按钮语义、键盘聚焦与 Enter/空格触发',
+)
 assertEqual(tagFiltersSource.includes('aria-pressed={active}'), true, '统计 tag 应暴露当前选中状态')
 assertEqual(
-  tagFiltersSource.includes("event.key === 'Enter' || event.key === ' '"),
+  tagFiltersSource.includes('role="group"') && tagFiltersSource.includes('aria-label={ariaLabel}'),
   true,
-  '统计 tag 应支持 Enter 和空格键触发过滤',
+  '每组分段筛选应有带名称的 group 语义，读屏能区分新/已有与上下架两组',
 )
 
 const hqSelectionRows: ContainerDetail[] = [
@@ -4258,7 +4261,7 @@ assertDeepEqual(
     'value={batchImportPrice}\n            placeholder={t(\'containers.fields.importPrice\')}\n            min={0}\n            prefix="$"\n            precision={2}\n            controls={false}',
     'value={batchOemPrice}\n            placeholder={t(\'containers.fields.oemPrice\')}\n            min={0}\n            prefix="$"\n            precision={2}\n            controls={false}',
     '<InputNumber value={headerForm.汇率} precision={4} controls={false}',
-    "step={freightInputMode === 'perCbm' ? 0.0001 : 0.01}\n                      controls={false}",
+    "step={freightInputMode === 'perCbm' ? 0.0001 : 0.01}\n                controls={false}",
   ].filter((snippet) => !pageSource.includes(snippet)),
   [],
   '货柜明细页所有可编辑数字输入都应关闭加减按钮',
@@ -4538,9 +4541,9 @@ assertEqual(
 )
 assertEqual(
   pageSource.includes('filteredRows.length !== rows.length') &&
-    pageSource.includes("t('containers.text.visibleRows'"),
+    pageSource.includes("t('warehouseUi.containerDetail.footerFilteredFull', { filtered: filteredRows.length, loaded: rows.length })"),
   true,
-  '分类过滤后应显示当前可见行数量，避免误解为后端总数变化',
+  '筛选后应在表格底部显示筛选出的行数与已完整加载行数，避免误解为后端总数变化',
 )
 assertEqual(
   (() => {
@@ -5333,22 +5336,28 @@ assertEqual(
   true,
   '分类管理弹窗应按分类管理权限挂载，并协调刷新后的目标分类',
 )
-const batchActionsButtonIndex = pageSource.indexOf("<Button size=\"small\">{t('containers.actions.batchActions')}</Button>")
-const manageCategoriesButtonIndex = pageSource.indexOf("onClick={() => openCategoryManageModal('batch')}")
-const deleteDetailsButtonIndex = pageSource.indexOf("onClick={deleteSelected}>{t('containers.actions.deleteDetails')")
+// 重设计：「管理分类」收进页头 ⋯ 菜单（仍按分类管理权限显示），批量操作改到勾选后出现的勾选条，
+// 删除明细仍是勾选条里最后一个危险操作。保留的意图：入口存在、两个分类弹窗内不重复放入口、批量目标分类沿用。
+const manageCategoriesMenuIndex = pageSource.indexOf("? [{ key: 'manageCategories', icon: <SettingOutlined />, label: t('containers.actions.manageCategories', '管理分类') }]")
+const selectionBarStart = pageSource.indexOf('<SelectionActionBar selectedCount={selectionCount}')
+const batchCategorySelectionIndex = pageSource.indexOf('categorySelectionAction ? (', selectionBarStart)
+const deleteDetailsButtonIndex = pageSource.indexOf('onClick={deleteSelected}', selectionBarStart)
 const batchCategoryModalSource = pageSource.slice(
   pageSource.indexOf("title={t('containers.modals.batchCategoryTitle'"),
   pageSource.indexOf("title={t('containers.modals.rowCategoryTitle'"),
 )
 assertEqual(
-  batchActionsButtonIndex >= 0 &&
-    manageCategoriesButtonIndex > batchActionsButtonIndex &&
-    deleteDetailsButtonIndex > manageCategoriesButtonIndex &&
+  manageCategoriesMenuIndex >= 0 &&
+    pageSource.includes('...(access.canManageWarehouseCategories') &&
+    pageSource.includes("if (key === 'manageCategories') openCategoryManageModal('batch')") &&
+    selectionBarStart >= 0 &&
+    batchCategorySelectionIndex > selectionBarStart &&
+    deleteDetailsButtonIndex > batchCategorySelectionIndex &&
     !batchCategoryModalSource.includes('manageCategories') &&
     !rowCategoryModalSource.includes('manageCategories') &&
     pageSource.includes('setTargetCategoryGuid((current) => findWarehouseCategory(categories, current)?.categoryGUID)'),
   true,
-  '管理分类入口应位于主工具栏批量操作按钮之后，并保留有效的批量目标分类',
+  '管理分类入口应在页头 ⋯ 菜单按权限显示，批量分类与删除明细在勾选条里，并保留有效的批量目标分类',
 )
 assertEqual(
   categoryManageSource.includes('createWarehouseCategory') &&
@@ -5709,9 +5718,10 @@ assertEqual(
   '货柜明细表格应压缩单元格 padding 提升密度',
 )
 assertEqual(
-  pageStyleSource.includes('.container-detail-stat-tag-muted'),
+  pageStyleSource.includes('.wh-cdetail-seg-item-active') &&
+    tagFiltersSource.includes("wh-cdetail-seg-item${active ? ' wh-cdetail-seg-item-active' : ''}"),
   true,
-  '未选中的统计标签应有弱化样式，保留颜色同时避免和选中态混淆',
+  '分段筛选的选中项应有独立样式，未选中项保持弱化，避免和选中态混淆',
 )
 assertEqual(
   pageSource.includes('const headerLoadRequestIdRef = useRef(0)') &&
