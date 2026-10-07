@@ -5,6 +5,7 @@ import { ReturnFeatureError } from "@hb/pos-domain/features/returns/return-domai
 
 import {
   ReturnLookupAdapter,
+  buildVoucherFundedBasis,
   decimalAmountToCents,
   type LocalReceiptReturnSnapshot,
   type LocalReturnCatalogItem,
@@ -102,6 +103,117 @@ test("关键字严格走 history → 同门店 orderGuid → return-context，�
   assert.equal(publicJson.includes("SQ:payment-secret"), false);
   assert.equal(publicJson.includes("AUTH-SECRET"), false);
   assert.equal(publicJson.includes("411111"), false);
+});
+
+test("代金券占比按原单各支付原始付款额计算，已退完的券容量仍计入占比", async () => {
+  const remote = new FakeHistoryApi();
+  const base = remoteContext();
+  remote.contextResult = {
+    ...base,
+    paymentCapacities: [
+      ...(base.paymentCapacities ?? []),
+      {
+        // 券付款已全部退回（剩余 0）：不产出可退容量，但原单代金券占比仍按原始付款额计入。
+        method: 3,
+        originalAmount: 4,
+        refundedAmount: 4,
+        remainingAmount: 0,
+        originalOrderGuid: orderGuid,
+      },
+      {
+        method: 3,
+        originalAmount: 1,
+        refundedAmount: 0,
+        remainingAmount: 1,
+        originalOrderGuid: orderGuid,
+      },
+    ],
+  };
+  const vault = new RecordingVault();
+  const adapter = createAdapter({ historyApi: remote, capacityVault: vault });
+
+  const context = await adapter.lookupReceipt(orderGuid);
+
+  assert.deepEqual(context?.voucherFundedBasis, {
+    voucherOriginalCents: 500,
+    paidOriginalCents: 1_501,
+  });
+  assert.deepEqual(
+    context?.tenderCapacities.map((capacity) => capacity.method),
+    ["cash", "card", "voucher"],
+  );
+  assert.equal(vault.inputs[0]?.capacities.length, 3);
+});
+
+test("代金券占比：无券付款为 0 占比；原始付款额缺失、非法或合计 ≤0 时不约束", async () => {
+  const remote = new FakeHistoryApi();
+  const adapter = createAdapter({ historyApi: remote });
+
+  remote.contextResult = remoteContext();
+  assert.deepEqual((await adapter.lookupReceipt(orderGuid))?.voucherFundedBasis, {
+    voucherOriginalCents: 0,
+    paidOriginalCents: 1_001,
+  });
+
+  const base = remoteContext();
+  remote.contextResult = {
+    ...base,
+    paymentCapacities: (base.paymentCapacities ?? []).map((capacity, index) => {
+      if (index !== 0) return capacity;
+      const { originalAmount: _missing, ...withoutOriginalAmount } = capacity;
+      return withoutOriginalAmount;
+    }),
+  };
+  assert.equal((await adapter.lookupReceipt(orderGuid))?.voucherFundedBasis, null);
+
+  remote.contextResult = {
+    ...base,
+    paymentCapacities: (base.paymentCapacities ?? []).map((capacity, index) =>
+      index === 0 ? { ...capacity, originalAmount: 1.005 } : capacity),
+  };
+  assert.equal((await adapter.lookupReceipt(orderGuid))?.voucherFundedBasis, null);
+
+  assert.equal(
+    buildVoucherFundedBasis([
+      { isVoucher: true, originalCents: 0 },
+      { isVoucher: false, originalCents: -100 },
+    ]),
+    null,
+  );
+  assert.deepEqual(
+    buildVoucherFundedBasis([
+      { isVoucher: true, originalCents: 300 },
+      { isVoucher: false, originalCents: 700 },
+      { isVoucher: false, originalCents: 0 },
+    ]),
+    { voucherOriginalCents: 300, paidOriginalCents: 1_000 },
+  );
+  assert.equal(
+    buildVoucherFundedBasis([{ isVoucher: true, originalCents: 0.5 }]),
+    null,
+  );
+});
+
+test("本地回退原样透传快照的代金券占比，缺省为 null", async () => {
+  const remote = new FakeHistoryApi();
+  remote.searchError = new HbposApiError("offline", { kind: "transport" });
+  const local = new FakeLocalOrders();
+  const adapter = createAdapter({ historyApi: remote, localOrders: local });
+
+  local.result = {
+    ...localSnapshot(),
+    voucherFundedBasis: { voucherOriginalCents: 200, paidOriginalCents: 700 },
+  };
+  assert.deepEqual(
+    (await adapter.lookupReceipt("receipt-local"))?.voucherFundedBasis,
+    { voucherOriginalCents: 200, paidOriginalCents: 700 },
+  );
+
+  local.result = localSnapshot();
+  assert.equal(
+    (await adapter.lookupReceipt("receipt-local"))?.voucherFundedBasis,
+    null,
+  );
 });
 
 test("远端稳定拒绝或跨门店结果绝不回退本地订单", async () => {

@@ -2188,10 +2188,11 @@ test("真实 SQLite：退货多 allocation 在 provider 前耐久绑定，Unknow
               },
             ],
           },
+          // 多张退款券已允许（逐张出票），但必须打印券面，不能按旧口径只开钱箱。
           fulfilment: {
-            printJobId: "unsafe-multi-voucher-print",
+            printJobId: null,
             drawerEventId: null,
-            receiptKind: "refund-voucher",
+            receiptKind: "none",
             drawerRequired: false,
           },
         }),
@@ -5884,14 +5885,14 @@ function durableReturnCompletion(
     String(allocation.method));
   const hasCash = methods.includes("cash");
   const hasCard = methods.includes("card");
-  const voucherOnly =
-    methods.length === 1 && methods[0] === "voucher";
+  // 与 deriveReturnFulfilmentPolicy 同口径：含刷卡出退货小票，否则有退款券就出券面。
+  const hasVoucher = methods.includes("voucher");
   const receiptKind:
     | "none"
     | "refund-voucher"
     | "refund-receipt" = hasCard
     ? "refund-receipt"
-    : voucherOnly
+    : hasVoucher
       ? "refund-voucher"
       : "none";
   return {

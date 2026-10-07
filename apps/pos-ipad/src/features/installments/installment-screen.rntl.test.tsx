@@ -402,6 +402,85 @@ test("PaidOff 取货要求二次确认；无权限和恢复状态显示原因并
   await recoveryScreen.unmount();
 });
 
+test("PaidOff 可在更多操作里退款取消（不提供作废），并选择原路退或全部退代金券", async () => {
+  const { presenter, spies } = createPresenter(
+    {
+      details: details("PaidOff"),
+      orders: [summary()],
+      selectedGuid: GUID,
+    },
+    false,
+    true,
+    false,
+    { selectedDetailsVoidable: false },
+  );
+  const screen = await render(<InstallmentScreen presenter={presenter} />);
+
+  expect(screen.getByTestId("installment-confirm-pickup")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("installment-more-actions"));
+  expect(screen.getByTestId("installment-more-cancel")).toBeTruthy();
+  expect(screen.queryByTestId("installment-more-void")).toBeNull();
+  await fireEvent.press(screen.getByTestId("installment-more-cancel"));
+  expect(screen.getByTestId("installment-cancel-refund-mode")).toBeTruthy();
+  expect(
+    screen.getByTestId("installment-cancel-refund-mode-original-route").props
+      .accessibilityState.selected,
+  ).toBe(true);
+  await fireEvent.press(
+    screen.getByTestId("installment-cancel-refund-mode-voucher"),
+  );
+  expect(spies.setCancelRefundMode).toHaveBeenCalledWith("voucher");
+  await fireEvent.press(screen.getByTestId("installment-cancel-refund"));
+  expect(screen.getByTestId("installment-confirm-cancel")).toBeTruthy();
+  expect(
+    screen.getByText(/including a fully paid balance, will be refunded through the original route/u),
+  ).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("installment-confirm-operation-submit"));
+  expect(spies.cancelWithRefund).toHaveBeenCalledTimes(1);
+  await screen.unmount();
+}, 15_000);
+
+test("含刷卡原付款时原路退不可选，提示原因并以退代金券确认", async () => {
+  const { presenter, spies } = createPresenter(
+    {
+      details: details("Active"),
+      orders: [summary()],
+      selectedGuid: GUID,
+    },
+    false,
+    true,
+    true,
+    {
+      selectedDetailsCancelRefundMode: "voucher",
+      selectedDetailsOriginalRouteRefundable: false,
+    },
+  );
+  const screen = await render(
+    <InstallmentScreen onStartRepayment={() => true} presenter={presenter} />,
+  );
+
+  await fireEvent.press(screen.getByTestId("installment-more-actions"));
+  await fireEvent.press(screen.getByTestId("installment-more-cancel"));
+  const originalRoute = screen.getByTestId(
+    "installment-cancel-refund-mode-original-route",
+  );
+  expect(originalRoute.props.accessibilityState.disabled).toBe(true);
+  expect(
+    screen.getByTestId("installment-cancel-refund-mode-voucher").props
+      .accessibilityState.selected,
+  ).toBe(true);
+  expect(
+    screen.getByText(/card payments, which cannot be refunded through the original route/u),
+  ).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("installment-cancel-refund"));
+  expect(
+    screen.getByText(/refunded in full as new refund vouchers/u),
+  ).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("installment-confirm-operation-submit"));
+  expect(spies.cancelWithRefund).toHaveBeenCalledTimes(1);
+  await screen.unmount();
+}, 15_000);
+
 test("busy 与 online-required 明确说明阻塞原因并禁用主操作", async () => {
   const busy = createPresenter({
     busy: true,
@@ -826,6 +905,7 @@ function createPresenter(
     },
     busy: false,
     cancelReason: "",
+    cancelRefundMode: "original-route",
     createDownPayment: "20.00",
     createDraft: null,
     createNote: "",
@@ -866,6 +946,9 @@ function createPresenter(
     retryDetails: jest.fn(async () => undefined),
     select: jest.fn(async (_installmentGuid: string) => undefined),
     setCancelReason: jest.fn((_value: string) => undefined),
+    setCancelRefundMode: jest.fn(
+      (_value: InstallmentPresenterState["cancelRefundMode"]) => undefined,
+    ),
     setDateFilter: jest.fn(async (_value: InstallmentPresenterState["dateFilter"]) => undefined),
     setDeviceScope: jest.fn(async (_value: InstallmentPresenterState["deviceScope"]) => undefined),
     setPickupNote: jest.fn((_value: string) => undefined),
@@ -882,6 +965,11 @@ function createPresenter(
       selectedDetailsCancelRefundable:
         actionCapabilities.selectedDetailsCancelRefundable ??
         selectedDetailsWritable,
+      selectedDetailsCancelRefundMode:
+        actionCapabilities.selectedDetailsCancelRefundMode ??
+        "original-route",
+      selectedDetailsOriginalRouteRefundable:
+        actionCapabilities.selectedDetailsOriginalRouteRefundable ?? true,
       selectedDetailsPickupConfirmable:
         actionCapabilities.selectedDetailsPickupConfirmable ??
         selectedDetailsWritable,

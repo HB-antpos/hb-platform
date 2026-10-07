@@ -1,4 +1,5 @@
 
+import { canCancelInstallmentWithRefund } from "@hb/pos-domain/core/contracts/installments";
 import {
   hasInstallmentReprintPermission,
   resolveInstallmentsAccess,
@@ -6,6 +7,7 @@ import {
 } from "@hb/pos-domain/features/installments/installment-authorization";
 import { isValidInstallmentDateFilter } from "./installment-date-filter";
 import type {
+  InstallmentCancelRefundMode,
   InstallmentCardProvider,
   InstallmentDateFilter,
   InstallmentDetails,
@@ -126,6 +128,8 @@ export interface InstallmentWorkflowPort {
   cancelWithRefund(input: Readonly<{
     installmentGuid: string;
     reason: string | null;
+    /** 旧实现可省略，按原路退处理。 */
+    refundMode?: InstallmentCancelRefundMode;
   }>): Promise<InstallmentDetails>;
   void(input: Readonly<{
     installmentGuid: string;
@@ -144,6 +148,10 @@ export type InstallmentWorkflowErrorCode =
   | "conflict"
   | "online-required"
   | "payment-recovery-required"
+  /** 原路退不支持所选原付款（刷卡），需改选"全部退代金券"；未发生任何退款。 */
+  | "refund-method-unsupported"
+  /** 服务端未按所选退款方式建立取消 claim（旧服务端不支持退代金券）；未发生任何退款。 */
+  | "refund-mode-unsupported"
   | "service-unavailable";
 
 export class InstallmentWorkflowError extends Error {
@@ -160,6 +168,8 @@ export type InstallmentStatusCode =
   | "action-failed"
   | "authorization-declined"
   | "cancel-complete"
+  | "cancel-refund-method-unsupported"
+  | "cancel-refund-mode-unsupported"
   | "claim-review-required"
   | "conflict"
   | "create-complete"
@@ -209,6 +219,8 @@ export type InstallmentPresenterState = Readonly<{
   statusCode: InstallmentStatusCode | null;
   statusFilter: InstallmentStatus | null;
   cancelReason: string;
+  /** 用户选择的取消退款方式；有刷卡原付款时实际以 capabilities 的强制退代金券为准。 */
+  cancelRefundMode: InstallmentCancelRefundMode;
   voidReason: string;
 }>;
 
@@ -222,6 +234,10 @@ export type InstallmentReprintState =
 export type InstallmentPresenterCapabilities = Readonly<{
   reprint: boolean;
   selectedDetailsCancelRefundable: boolean;
+  /** 实际将提交的退款方式：原路退不可用时强制为退代金券。 */
+  selectedDetailsCancelRefundMode: InstallmentCancelRefundMode;
+  /** 原路退是否可用；有已记录的刷卡原付款时服务端拒绝原路退。 */
+  selectedDetailsOriginalRouteRefundable: boolean;
   selectedDetailsPickupConfirmable: boolean;
   selectedDetailsRepayable: boolean;
   selectedDetailsVoidable: boolean;
@@ -290,6 +306,7 @@ export class InstallmentPresenter {
       statusCode: null,
       statusFilter: null,
       cancelReason: "",
+      cancelRefundMode: "original-route",
       voidReason: "",
     };
     this.unsubscribeDrafts = options.createDrafts.subscribe(() => {
@@ -315,6 +332,9 @@ export class InstallmentPresenter {
       reprint: this.reprintableDetails() !== null,
       selectedDetailsCancelRefundable:
         this.selectedDetailsCancelRefundable(),
+      selectedDetailsCancelRefundMode: this.effectiveCancelRefundMode(),
+      selectedDetailsOriginalRouteRefundable:
+        this.selectedDetailsOriginalRouteRefundable(),
       selectedDetailsPickupConfirmable:
         this.selectedDetailsPickupConfirmable(),
       selectedDetailsRepayable: this.selectedDetailsRepayable(),
@@ -481,6 +501,23 @@ export class InstallmentPresenter {
 
   public setCancelReason(value: string): void {
     this.patchText("cancelReason", value, 1_000);
+  }
+
+  public setCancelRefundMode(mode: InstallmentCancelRefundMode): void {
+    if (this.destroyed) return;
+    if (mode !== "original-route" && mode !== "voucher") return;
+    if (
+      mode === "original-route" &&
+      !this.selectedDetailsOriginalRouteRefundable()
+    ) {
+      // 中文注释：刷卡原付款无法原路退回，保持退代金券并提示原因。
+      this.patch({
+        cancelRefundMode: "voucher",
+        statusCode: "cancel-refund-method-unsupported",
+      });
+      return;
+    }
+    this.patch({ cancelRefundMode: mode, statusCode: null });
   }
 
   public setVoidReason(value: string): void {
@@ -793,17 +830,18 @@ export class InstallmentPresenter {
     const details = this.state.details;
     if (
       !details ||
-      details.status !== "Active" ||
-      details.balanceCents <= 0
+      !canCancelInstallmentWithRefund(details.status, details.balanceCents)
     ) {
       this.patch({ statusCode: "action-failed" });
       return Promise.resolve();
     }
+    const refundMode = this.effectiveCancelRefundMode();
     return this.runAction(
       () =>
         this.workflow.cancelWithRefund({
           installmentGuid: details.installmentGuid,
           reason: optionalTrimmed(this.state.cancelReason),
+          refundMode,
         }),
       "cancel-complete",
     );
@@ -1035,13 +1073,29 @@ export class InstallmentPresenter {
     const details = this.state.details;
     return Boolean(
       details &&
-        details.status === "Active" &&
-        details.balanceCents > 0 &&
+        canCancelInstallmentWithRefund(details.status, details.balanceCents) &&
         this.selectedDetailsActionScopeAllowed(
           details,
           this.crossDeviceCancelRefundEnabled,
         ),
     );
+  }
+
+  private selectedDetailsOriginalRouteRefundable(): boolean {
+    const details = this.state.details;
+    // 中文注释：服务端原路退对刷卡原付款一律拒绝（无服务端可核验的卡退款回执）。
+    return !details?.payments.some(
+      (payment) =>
+        payment.status === "Recorded" &&
+        payment.amountCents > 0 &&
+        payment.method === "card",
+    );
+  }
+
+  private effectiveCancelRefundMode(): InstallmentCancelRefundMode {
+    return this.selectedDetailsOriginalRouteRefundable()
+      ? this.state.cancelRefundMode
+      : "voucher";
   }
 
   private selectedDetailsVoidable(): boolean {
@@ -1268,6 +1322,12 @@ function workflowFailureCode(error: unknown): InstallmentStatusCode {
     if (error.code === "online-required") return "online-required";
     if (error.code === "payment-recovery-required") {
       return "payment-recovery-required";
+    }
+    if (error.code === "refund-method-unsupported") {
+      return "cancel-refund-method-unsupported";
+    }
+    if (error.code === "refund-mode-unsupported") {
+      return "cancel-refund-mode-unsupported";
     }
     return "service-unavailable";
   }

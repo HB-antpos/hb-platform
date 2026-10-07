@@ -2476,12 +2476,14 @@ function normalizeCompletion(
   const hasCard = plan.allocations.some(
     (allocation) => allocation.method === "card",
   );
-  const voucherOnly =
-    plan.allocations.length === 1 &&
-    plan.allocations[0]?.method === "voucher";
+  // 必须与 deriveReturnFulfilmentPolicy 完全一致：含刷卡 → 退货小票（其后追加各张退款券），
+  // 不含刷卡但有退款券（含现金 + 券混合）→ 逐张退款券面，其余只开钱箱。
+  const hasVoucher = plan.allocations.some(
+    (allocation) => allocation.method === "voucher",
+  );
   const expectedReceiptKind = hasCard
     ? "refund-receipt"
-    : voucherOnly
+    : hasVoucher
       ? "refund-voucher"
       : "none";
   if (

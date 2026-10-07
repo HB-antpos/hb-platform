@@ -44,6 +44,31 @@ export type ReturnFulfilmentRuntimeOptions = Readonly<{
 }>;
 
 /**
+ * refund-receipt 计划的打印字节：普通退货小票在前；若退货单含新签发的退款券
+ * （刷卡 + 退款券混合退款），把每张券面追加到同一冻结 print job（每张各自切纸）。
+ * 不新增打印任务、不改迁移，物化重放仍由同一 plan 保证幂等；券面材料缺失时整体抛错，
+ * plan 保持 pending 重试，绝不只打小票而漏打退款券。
+ */
+export async function renderRefundReceiptWithVouchers(input: Readonly<{
+  renderReceipt(): Promise<RenderedReturnReceipt>;
+  hasRefundVoucherTender(): Promise<boolean>;
+  renderRefundVouchers(): Promise<RenderedReturnReceipt>;
+}>): Promise<RenderedReturnReceipt> {
+  const receipt = await input.renderReceipt();
+  if (!(await input.hasRefundVoucherTender())) return receipt;
+  const vouchers = await input.renderRefundVouchers();
+  if (vouchers.printerId !== receipt.printerId) {
+    throw new Error("Return receipt printer identity has diverged.");
+  }
+  const receiptBytes = new Uint8Array(
+    receipt.receiptBytes.byteLength + vouchers.receiptBytes.byteLength,
+  );
+  receiptBytes.set(receipt.receiptBytes, 0);
+  receiptBytes.set(vouchers.receiptBytes, receipt.receiptBytes.byteLength);
+  return Object.freeze({ printerId: receipt.printerId, receiptBytes });
+}
+
+/**
  * 退货账本完成后的唯一履约物化边界。
  *
  * 本服务没有 return ledger 或 outbox 写接口：渲染及物化失败只会让冻结 plan

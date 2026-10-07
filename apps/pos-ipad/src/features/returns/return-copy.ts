@@ -43,6 +43,9 @@ export const returnEnglishCopy = {
   "summary.method": "Preferred tender",
   "summary.rule": "The final plan may split across original tenders. Card, voucher and installment refunds require online recovery.",
   "summary.ruleReceiptDefault": "Refunds default to the original tender. Cash or voucher may be selected instead.",
+  "voucherFunded.notice": "Items bought with vouchers cannot be refunded as cash or card: at least {{amount}} must be refunded as a voucher.",
+  "voucherFunded.onlineRequired": "Items bought with vouchers must be refunded as a voucher, and refund vouchers can only be issued online. Reconnect and try again.",
+  "voucherFunded.capacityExceeded": "The remaining original tender capacity cannot cover the voucher portion of this refund. Ask a supervisor to review the refund history.",
   "status.waitingTitle": "Refund in progress",
   "status.waitingHint": "Keep this screen open. Do not retry or change tender.",
   "status.unknownTitle": "Refund outcome unknown",
@@ -73,7 +76,7 @@ export const returnEnglishCopy = {
   "error.RETURN_EXECUTION_FAILED": "The refund could not be completed and was not automatically retried.",
   "error.RETURN_RECOVERY_FAILED": "Recovery did not complete. Keep this refund in recovery.",
   "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "This card payment was confirmed on a standalone terminal and cannot be refunded to the card. Choose cash or voucher.",
-  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "A voucher can replace only a single original payment (not instalments). Choose cash for this order.",
+  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "Instalment payments cannot be replaced by a voucher refund. Choose cash for this order.",
 } as const;
 
 export type ReturnCopyKey = keyof typeof returnEnglishCopy;
@@ -123,6 +126,9 @@ const returnChineseCopy = {
   "summary.method": "优先退款方式",
   "summary.rule": "最终计划可按原支付容量拆分；银行卡、礼券和分期退款必须在线恢复。",
   "summary.ruleReceiptDefault": "默认按原支付方式退回；也可选择现金或代金券代替。",
+  "voucherFunded.notice": "代金券买的商品不能退现金或退卡：至少 {{amount}} 须退代金券。",
+  "voucherFunded.onlineRequired": "代金券买的商品须退代金券，退款券只能联网签发，请联网后再退。",
+  "voucherFunded.capacityExceeded": "原单剩余可退额度不足以签发须退的代金券，请联系主管核对原单退款记录。",
   "status.waitingTitle": "正在退款",
   "status.waitingHint": "请保持此页面，不要重试或更换退款方式。",
   "status.unknownTitle": "退款结果未知",
@@ -153,7 +159,7 @@ const returnChineseCopy = {
   "error.RETURN_EXECUTION_FAILED": "退款未完成，系统没有自动重试。",
   "error.RETURN_RECOVERY_FAILED": "恢复尚未完成，请保持此退款为恢复状态。",
   "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "该笔刷卡为独立刷卡机人工确认，无法原卡退回，请选择现金或礼券退款。",
-  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "礼券只能代替单一原支付（分期除外）退款，该订单请选择现金。",
+  "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "分期付款部分不能以礼券代替退款，该订单请选择现金。",
 } as const satisfies Record<ReturnCopyKey, string>;
 
 const returnCopy = {

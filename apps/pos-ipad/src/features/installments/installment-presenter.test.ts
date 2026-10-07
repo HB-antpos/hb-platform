@@ -854,7 +854,7 @@ test("补款仅允许 Active 且金额不超过余额；重复点击只产生一
   assert.equal(subject.getState().statusCode, "invalid-repayment");
 });
 
-test("取消退款与作废只允许 Active，取货只允许 PaidOff，并复用 WPF 权限边界", async () => {
+test("取消退款允许 Active 与已付清未提货，作废只允许 Active，取货只允许 PaidOff，并复用 WPF 权限边界", async () => {
   const workflow = new FakeWorkflow();
   const subject = presenter(workflow);
   await subject.select(GUID_ACTIVE);
@@ -866,6 +866,7 @@ test("取消退款与作废只允许 Active，取货只允许 PaidOff，并复�
     input: {
       installmentGuid: GUID_ACTIVE,
       reason: "Customer request",
+      refundMode: "original-route",
     },
   });
 
@@ -904,6 +905,110 @@ test("取消退款与作废只允许 Active，取货只允许 PaidOff，并复�
   await noCancel.select(GUID_ACTIVE);
   await noCancel.cancelWithRefund();
   assert.equal(noCancel.getState().statusCode, "permission-required");
+});
+
+test("已付清未提货可取消退款但不可作废；已提货、已取消都不可取消", async () => {
+  const workflow = new FakeWorkflow();
+  const subject = presenter(workflow);
+  await subject.select(GUID_PAID);
+
+  assert.equal(subject.capabilities.selectedDetailsCancelRefundable, true);
+  assert.equal(subject.capabilities.selectedDetailsVoidable, false);
+  assert.equal(subject.capabilities.selectedDetailsPickupConfirmable, true);
+  await subject.cancelWithRefund();
+  assert.deepEqual(workflow.writeCalls.at(-1), {
+    kind: "cancel",
+    input: {
+      installmentGuid: GUID_PAID,
+      reason: null,
+      refundMode: "original-route",
+    },
+  });
+
+  const writes = workflow.writeCalls.length;
+  await subject.select(GUID_PAID);
+  await subject.voidSelected();
+  assert.equal(workflow.writeCalls.length, writes);
+
+  for (const status of ["PickedUp", "Cancelled"] as const) {
+    workflow.detailResults.set(GUID_PAID, Promise.resolve({
+      ...details("PaidOff"),
+      status,
+    }));
+    await subject.select(GUID_PAID);
+    assert.equal(subject.capabilities.selectedDetailsCancelRefundable, false);
+    await subject.cancelWithRefund();
+    assert.equal(workflow.writeCalls.length, writes);
+  }
+});
+
+test("退款方式：可选全部退代金券；含刷卡原付款时原路退不可用并强制退代金券", async () => {
+  const workflow = new FakeWorkflow();
+  const subject = presenter(workflow);
+  await subject.select(GUID_ACTIVE);
+  assert.equal(subject.capabilities.selectedDetailsOriginalRouteRefundable, true);
+  assert.equal(subject.capabilities.selectedDetailsCancelRefundMode, "original-route");
+
+  subject.setCancelRefundMode("voucher");
+  assert.equal(subject.getState().cancelRefundMode, "voucher");
+  assert.equal(subject.capabilities.selectedDetailsCancelRefundMode, "voucher");
+  await subject.cancelWithRefund();
+  assert.deepEqual(workflow.writeCalls.at(-1), {
+    kind: "cancel",
+    input: {
+      installmentGuid: GUID_ACTIVE,
+      reason: null,
+      refundMode: "voucher",
+    },
+  });
+
+  workflow.detailResults.set(GUID_ACTIVE, Promise.resolve({
+    ...details("Active"),
+    payments: [{
+      paymentGuid: "20000000-0000-4000-8000-000000000001",
+      method: "card",
+      amountCents: 2_000,
+      status: "Recorded",
+      recordedAtIso: "2026-07-27T01:02:03.000Z",
+      cashierId: "C1",
+      deviceCode: "IPAD-1",
+      cardType: "VISA",
+      maskedCardNumber: "****4242",
+    }],
+  }));
+  await subject.select(GUID_ACTIVE);
+  assert.equal(subject.capabilities.selectedDetailsOriginalRouteRefundable, false);
+  assert.equal(subject.capabilities.selectedDetailsCancelRefundMode, "voucher");
+  subject.setCancelRefundMode("original-route");
+  assert.equal(subject.getState().cancelRefundMode, "voucher");
+  assert.equal(
+    subject.getState().statusCode,
+    "cancel-refund-method-unsupported",
+  );
+  await subject.cancelWithRefund();
+  assert.deepEqual(workflow.writeCalls.at(-1), {
+    kind: "cancel",
+    input: {
+      installmentGuid: GUID_ACTIVE,
+      reason: null,
+      refundMode: "voucher",
+    },
+  });
+});
+
+test("退款方式相关 workflow 错误映射为可读状态码", async () => {
+  for (const [code, statusCode] of [
+    ["refund-method-unsupported", "cancel-refund-method-unsupported"],
+    ["refund-mode-unsupported", "cancel-refund-mode-unsupported"],
+  ] as const) {
+    const workflow = new FakeWorkflow();
+    workflow.cancelError = new InstallmentWorkflowError(code, "safe failure");
+    const subject = presenter(workflow);
+    await subject.select(GUID_ACTIVE);
+    await subject.cancelWithRefund();
+    assert.equal(subject.getState().statusCode, statusCode);
+    assert.equal(subject.getState().recoveryRequired, false);
+  }
 });
 
 test("Unknown 后允许重试同一 durable action，恢复成功后解除提示", async () => {
@@ -1048,8 +1153,11 @@ class FakeWorkflow implements InstallmentWorkflowPort {
     return this.nextRepayment ?? details("PaidOff");
   }
 
+  public cancelError: Error | null = null;
+
   public async cancelWithRefund(input: unknown): Promise<InstallmentDetails> {
     this.writeCalls.push({ kind: "cancel", input });
+    if (this.cancelError) throw this.cancelError;
     return details("Cancelled");
   }
 

@@ -22,6 +22,7 @@ import type {
   InstallmentCancelClaimCreateCommand,
   InstallmentCancelClaimIdentity,
   InstallmentCancelClaimResolveCommand,
+  InstallmentCancelRefundMode,
   InstallmentRefundCommand,
   InstallmentsRemotePort,
   InstallmentVoidCommand,
@@ -93,6 +94,11 @@ const METHOD_TO_API = Object.freeze({
   card: 2,
   voucher: 3,
 } satisfies Readonly<Record<InstallmentPaymentMethod, 1 | 2 | 3>>);
+
+const REFUND_MODE_TO_API = Object.freeze({
+  "original-route": 1,
+  voucher: 2,
+} satisfies Readonly<Record<InstallmentCancelRefundMode, 1 | 2>>);
 
 const RESOLVE_OUTCOME_TO_API = Object.freeze({
   Released: 1,
@@ -360,6 +366,8 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
           "refundPlanFingerprint",
           128,
         ),
+        // 中文注释：显式下发退款方式；旧服务端会丢弃该字段，回包 refundMode 由 runtime 严格比对。
+        refundMode: requestRefundMode(command.refundMode),
       },
     });
     return this.mapCancelClaim(
@@ -564,6 +572,9 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
         "idempotencyKey",
         256,
       ),
+      ...(command.refundMode === undefined
+        ? {}
+        : { refundMode: requestRefundMode(command.refundMode) }),
     };
     const response = await this.transport.request<
       HbposEnvelope<GeneratedCancelResponse>
@@ -871,6 +882,7 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
       operationGuid,
       idempotencyKey: responseText(input.idempotencyKey, "cancelClaim.idempotencyKey", 100),
       refundPlanFingerprint: responseText(input.refundPlanFingerprint, "cancelClaim.refundPlanFingerprint", 128),
+      refundMode: responseCancelRefundMode(input.refundMode, "cancelClaim.refundMode"),
       status: responseCancelClaimStatus(input.status, "cancelClaim.status"),
       createdAtIso: responseIso(input.createdAtUtc, "cancelClaim.createdAtUtc"),
       updatedAtIso: responseIso(input.updatedAtUtc, "cancelClaim.updatedAtUtc"),
@@ -1179,6 +1191,26 @@ function responseClaimStatus(
   if (value === 4 || value === "Released") return "Released";
   if (value === 5 || value === "Declined") return "Declined";
   if (value === 6 || value === "Unknown") return "Unknown";
+  throw invalidResponse(field);
+}
+
+function requestRefundMode(
+  value: InstallmentCancelRefundMode,
+): 1 | 2 {
+  if (value !== "original-route" && value !== "voucher") {
+    throw invalidRequest("refundMode");
+  }
+  return REFUND_MODE_TO_API[value];
+}
+
+/** 旧服务端不回传 refundMode：只能是原路退语义；未知取值一律拒绝。 */
+function responseCancelRefundMode(
+  value: unknown,
+  field: string,
+): InstallmentCancelRefundMode {
+  if (value === undefined || value === null) return "original-route";
+  if (value === 1 || value === "OriginalRoute") return "original-route";
+  if (value === 2 || value === "Voucher") return "voucher";
   throw invalidResponse(field);
 }
 

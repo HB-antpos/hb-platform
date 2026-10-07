@@ -155,6 +155,50 @@ test("金额不闭合、卡 provider 不明确或跨 scope 时返回 incomplete 
   }
 });
 
+test("退代金券模式不要求原卡交易证据，但卡 provider 仍须可识别；原路退保持严格", async () => {
+  // 刷卡原付款只有 Square 前缀引用、没有卡交易明细。
+  const withoutCardTransactions = details({
+    paidAmount: 30,
+    payments: [
+      payment("01", 1, 10, null, null, null),
+      payment("02", 2, 20, "SQ:SQUARE-PAYMENT-ID", null, null),
+    ],
+  });
+
+  const strictVault = new RecordingVault(null);
+  const strict = await new HbposInstallmentRefundProvenance(
+    new RecordingTransport([ok(withoutCardTransactions)]),
+    strictVault,
+  ).resolveOrImport(scope());
+  assert.equal(strict.complete, false);
+  assert.equal(strictVault.imports.length, 0);
+
+  const voucherVault = new RecordingVault(null);
+  const voucherMode = await new HbposInstallmentRefundProvenance(
+    new RecordingTransport([ok(withoutCardTransactions)]),
+    voucherVault,
+  ).resolveOrImport({ ...scope(), refundMode: "voucher" });
+  assert.equal(voucherMode.complete, true);
+  assert.deepEqual(
+    voucherMode.tenders.map(({ method, provider }) => [method, provider]),
+    [["cash", null], ["card", "square"]],
+  );
+
+  // 卡 provider 无法识别时（本地证据表约束 card 必带 Square/Linkly），即使退代金券也失败关闭。
+  const unknownVault = new RecordingVault(null);
+  const unknownProvider = await new HbposInstallmentRefundProvenance(
+    new RecordingTransport([
+      ok(details({
+        paidAmount: 20,
+        payments: [payment("01", 2, 20, "CARD:UNKNOWN", null, null)],
+      })),
+    ]),
+    unknownVault,
+  ).resolveOrImport({ ...scope(), refundMode: "voucher" });
+  assert.equal(unknownProvider.complete, false);
+  assert.equal(unknownVault.imports.length, 0);
+});
+
 test("seedRefundAttempt 只委托受保护 vault，adapter 仍会复核 attempt 身份", async () => {
   const vault = new RecordingVault(snapshot([]));
   const provenance = new HbposInstallmentRefundProvenance(

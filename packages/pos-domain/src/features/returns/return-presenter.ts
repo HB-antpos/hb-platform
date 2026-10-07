@@ -1,4 +1,5 @@
 import {
+  computeRequiredVoucherRefundCents,
   selectedLineAmountCents,
   type ReturnErrorCode,
   type ReturnSourceKind,
@@ -51,6 +52,8 @@ export type ReturnPresenterState = Readonly<{
   /** 为 null 表示未显式选择（有单退货默认按原支付方式退回）。 */
   preferredMethod: ReturnTenderMethod | null;
   selectedTotalCents: number;
+  /** 代金券买的部分必须退代金券的最低金额（只读提示，计划阶段同口径强制）。 */
+  requiredVoucherRefundCents: number;
   canConfirm: boolean;
   errorCode: ReturnErrorCode | null;
   result: Readonly<{
@@ -70,6 +73,7 @@ const INITIAL_STATE: ReturnPresenterState = {
   capacities: [],
   preferredMethod: null,
   selectedTotalCents: 0,
+  requiredVoucherRefundCents: 0,
   canConfirm: false,
   errorCode: null,
   result: null,
@@ -377,6 +381,13 @@ export class ReturnPresenter {
         snapshot.preferredMethod ??
         (snapshot.caseKind === "no-receipt" ? "cash" : null),
       selectedTotalCents: snapshot.selectedTotalCents,
+      requiredVoucherRefundCents:
+        snapshot.caseKind === "receipt"
+          ? computeRequiredVoucherRefundCents(
+              snapshot.selectedTotalCents,
+              snapshot.voucherFundedBasis,
+            )
+          : 0,
       canConfirm:
         snapshot.selectedTotalCents > 0 &&
         snapshot.status === "draft",

@@ -77,6 +77,7 @@ export type InstallmentScreenPresenter = Pick<
   | "retryDetails"
   | "select"
   | "setCancelReason"
+  | "setCancelRefundMode"
   | "setDateFilter"
   | "setDeviceScope"
   | "setPickupNote"
@@ -1280,41 +1281,87 @@ function DetailsActions({
   }
 
   if (details.status === "PaidOff") {
-    if (!selectedDetailsPickupConfirmable) return null;
-    const blocked = actionBlockReason(
-      state,
-      state.access.canConfirmPickup,
-      true,
-    );
+    // 中文注释：已付清未提货可提货，也可取消并全额退款；作废（不退款）不对付清单开放。
+    if (!selectedDetailsPickupConfirmable && !selectedDetailsCancelRefundable) {
+      return null;
+    }
+    const blocked = selectedDetailsPickupConfirmable
+      ? actionBlockReason(state, state.access.canConfirmPickup, true)
+      : null;
+    const cancelBlocked = selectedDetailsCancelRefundable
+      ? actionBlockReason(state, state.access.canCancel, true)
+      : null;
     return (
       <PosKeyboardAwareScrollView
         contentContainerStyle={styles.actionDockContent}
         style={styles.actionDock}
         testID="installment-action-dock"
       >
-        <Text style={styles.actionDockTitle}>
-          {installmentText(locale, "pickup.title")}
-        </Text>
-        <PosKeyboardAwareTextInput
-          accessibilityLabel={installmentText(
-            locale,
-            "pickup.noteAccessibility",
-          )}
-          editable={!blocked}
-          onChangeText={(value) => presenter.setPickupNote(value)}
-          placeholder={installmentText(locale, "pickup.notePlaceholder")}
-          style={styles.textInput}
-          testID="installment-pickup-note"
-          value={state.pickupNote}
-        />
-        <ActionButton
-          disabled={Boolean(blocked)}
-          label={installmentText(locale, "action.confirmPickup")}
-          onPress={() => setConfirmation("pickup")}
-          testID="installment-confirm-pickup"
-          wide
-        />
-        {blocked ? <ActionBlockNotice locale={locale} reason={blocked} /> : null}
+        {selectedDetailsPickupConfirmable ? (
+          <>
+            <Text style={styles.actionDockTitle}>
+              {installmentText(locale, "pickup.title")}
+            </Text>
+            <PosKeyboardAwareTextInput
+              accessibilityLabel={installmentText(
+                locale,
+                "pickup.noteAccessibility",
+              )}
+              editable={!blocked}
+              onChangeText={(value) => presenter.setPickupNote(value)}
+              placeholder={installmentText(locale, "pickup.notePlaceholder")}
+              style={styles.textInput}
+              testID="installment-pickup-note"
+              value={state.pickupNote}
+            />
+          </>
+        ) : null}
+        <View style={styles.actionDockButtons}>
+          {selectedDetailsPickupConfirmable ? (
+            <View style={styles.primaryActionGrow}>
+              <ActionButton
+                disabled={Boolean(blocked)}
+                label={installmentText(locale, "action.confirmPickup")}
+                onPress={() => {
+                  setMoreOpen(false);
+                  setDangerMode(null);
+                  setConfirmation("pickup");
+                }}
+                testID="installment-confirm-pickup"
+                wide
+              />
+            </View>
+          ) : null}
+          {selectedDetailsCancelRefundable ? (
+            <ActionButton
+              disabled={Boolean(cancelBlocked)}
+              label={installmentText(
+                locale,
+                moreOpen ? "action.closeMore" : "action.more",
+              )}
+              onPress={() => {
+                setMoreOpen(!moreOpen);
+                setDangerMode(null);
+                setConfirmation(null);
+              }}
+              testID="installment-more-actions"
+              tone="secondary"
+            />
+          ) : null}
+        </View>
+        {!selectedDetailsWritable && selectedDetailsCancelRefundable ? (
+          <Text
+            style={styles.crossDeviceNotice}
+            testID="installment-cross-device-notice"
+          >
+            {installmentText(locale, "details.crossDeviceActionNotice")}
+          </Text>
+        ) : null}
+        {blocked ? (
+          <ActionBlockNotice locale={locale} reason={blocked} />
+        ) : cancelBlocked ? (
+          <ActionBlockNotice locale={locale} reason={cancelBlocked} />
+        ) : null}
         {confirmation === "pickup" && !blocked ? (
           <ConfirmationStrip
             kind="pickup"
@@ -1324,6 +1371,19 @@ function DetailsActions({
               setConfirmation(null);
               void presenter.confirmPickup();
             }}
+          />
+        ) : null}
+        {moreOpen && !cancelBlocked && selectedDetailsCancelRefundable ? (
+          <CancellationPanel
+            canCancel
+            canVoid={false}
+            confirmation={confirmation}
+            dangerMode={dangerMode}
+            locale={locale}
+            presenter={presenter}
+            setConfirmation={setConfirmation}
+            setDangerMode={setDangerMode}
+            state={state}
           />
         ) : null}
       </PosKeyboardAwareScrollView>
@@ -1507,6 +1567,9 @@ function CancellationPanel({
         testID={cancelMode ? "installment-cancel-reason" : "installment-void-reason"}
         value={cancelMode ? state.cancelReason : state.voidReason}
       />
+      {cancelMode ? (
+        <RefundModeSelector locale={locale} presenter={presenter} />
+      ) : null}
       <ActionButton
         label={installmentText(
           locale,
@@ -1521,6 +1584,12 @@ function CancellationPanel({
         <ConfirmationStrip
           kind={dangerMode}
           locale={locale}
+          messageKey={
+            cancelMode &&
+            presenter.capabilities.selectedDetailsCancelRefundMode === "voucher"
+              ? "confirmation.cancelVoucher"
+              : undefined
+          }
           onCancel={() => setConfirmation(null)}
           onConfirm={() => {
             const action = cancelMode
@@ -1535,14 +1604,65 @@ function CancellationPanel({
   );
 }
 
+/**
+ * 取消面板内的退款方式选择：原路退回 / 全部退代金券。
+ * 含刷卡原付款时原路退不可选，presenter 会强制退代金券，这里只展示原因。
+ */
+function RefundModeSelector({
+  locale,
+  presenter,
+}: Readonly<{
+  locale: InstallmentLocale;
+  presenter: InstallmentScreenPresenter;
+}>) {
+  const originalRouteAvailable =
+    presenter.capabilities.selectedDetailsOriginalRouteRefundable;
+  const refundMode = presenter.capabilities.selectedDetailsCancelRefundMode;
+  const options = ["original-route", "voucher"] as const;
+  return (
+    <View style={styles.refundModeGroup} testID="installment-cancel-refund-mode">
+      <Text style={styles.filterLabel}>
+        {installmentText(locale, "cancel.refundModeLabel")}
+      </Text>
+      <View style={styles.refundModeOptions}>
+        {options.map((option) => (
+          <ActionButton
+            compact
+            disabled={option === "original-route" && !originalRouteAvailable}
+            key={option}
+            label={installmentText(locale, `cancel.refundMode.${option}`)}
+            onPress={() => presenter.setCancelRefundMode(option)}
+            selected={refundMode === option}
+            testID={`installment-cancel-refund-mode-${option}`}
+            tone="secondary"
+          />
+        ))}
+      </View>
+      <Text
+        style={styles.refundModeHint}
+        testID="installment-cancel-refund-mode-hint"
+      >
+        {installmentText(
+          locale,
+          originalRouteAvailable
+            ? `cancel.refundModeHint.${refundMode}`
+            : "cancel.cardRequiresVoucher",
+        )}
+      </Text>
+    </View>
+  );
+}
+
 function ConfirmationStrip({
   kind,
   locale,
+  messageKey,
   onCancel,
   onConfirm,
 }: Readonly<{
   kind: ConfirmationKind;
   locale: InstallmentLocale;
+  messageKey?: "confirmation.cancelVoucher" | undefined;
   onCancel(): void;
   onConfirm(): void;
 }>) {
@@ -1553,7 +1673,7 @@ function ConfirmationStrip({
       testID={`installment-confirm-${kind}`}
     >
       <Text style={styles.confirmationText}>
-        {installmentText(locale, `confirmation.${kind}`)}
+        {installmentText(locale, messageKey ?? `confirmation.${kind}`)}
       </Text>
       <View style={styles.confirmationActions}>
         <ActionButton
@@ -1666,6 +1786,8 @@ function StatusBanner({
   const danger = [
     "action-failed",
     "authorization-declined",
+    "cancel-refund-method-unsupported",
+    "cancel-refund-mode-unsupported",
     "claim-review-required",
     "conflict",
     "details-failed",
@@ -2365,6 +2487,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 10,
     gap: 8,
+  },
+  refundModeGroup: {
+    gap: 6,
+  },
+  refundModeOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  refundModeHint: {
+    color: posColors.mutedInk,
+    fontSize: 12,
+    lineHeight: 18,
   },
   dangerPanelHeader: {
     flexDirection: "row",

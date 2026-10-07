@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   ReturnFeatureError,
   buildReturnRefundPlan,
+  computeRequiredVoucherRefundCents,
   createNoReceiptDraftLine,
   createReceiptDraftLines,
   updateReturnLineQuantity,
@@ -199,7 +200,7 @@ test("刷卡订单可选现金代替退款：整单统一现金且仍绑定原�
   ]);
 });
 
-test("礼券可代替单一刷卡/现金额度并绑定原额度；分期额度与多笔原支付被拒", () => {
+test("礼券可代替刷卡/现金额度并绑定原额度；分期额度被拒，多笔原支付逐笔签券", () => {
   const context = receiptContext({
     lines: [
       {
@@ -247,18 +248,79 @@ test("礼券可代替单一刷卡/现金额度并绑定原额度；分期额度�
       }),
     hasCode("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE"),
   );
-  // 多笔原支付会拆成多张券，退款券打印与同步只支持单张。
+  // 多笔原支付逐笔签发退款券（同步与券面打印均支持多张），各自绑定原额度。
+  const multiple = buildReturnRefundPlan({
+    sourceKind: "receipt",
+    originalOrderGuid: "order-a",
+    lines: selected,
+    capacities: [capacity("cash", 2_000, false), capacity("card", 3_000, false)],
+    online: true,
+    preferredMethod: "voucher",
+  });
+  assert.deepEqual(
+    multiple.allocations.map((allocation) => [
+      allocation.method,
+      allocation.signedAmountCents,
+      allocation.originalCapacityId,
+    ]),
+    [
+      ["voucher", -2_000, "capacity-cash"],
+      ["voucher", -3_000, "capacity-card"],
+    ],
+  );
+});
+
+test("代金券买的部分只能退代金券：按原付款占比向上取整，其余才按所选方式", () => {
+  assert.equal(computeRequiredVoucherRefundCents(1_000, { voucherOriginalCents: 1_000, paidOriginalCents: 3_000 }), 334);
+  assert.equal(computeRequiredVoucherRefundCents(1_000, null), 0);
+  assert.equal(computeRequiredVoucherRefundCents(1_000, { voucherOriginalCents: 0, paidOriginalCents: 3_000 }), 0);
+  assert.equal(computeRequiredVoucherRefundCents(500, { voucherOriginalCents: 5_000, paidOriginalCents: 5_000 }), 500);
+
+  const lines = updateReturnLineQuantity(createReceiptDraftLines(receiptContext()), "line-a", 1);
+  const basis = { voucherOriginalCents: 1_000, paidOriginalCents: 3_000 };
+  const plan = (
+    capacities: readonly OriginalReturnTenderCapacity[],
+    preferredMethod: "cash" | "voucher" | null,
+    voucherFundedBasis: typeof basis | null = basis,
+    online = true,
+  ) =>
+    buildReturnRefundPlan({
+      sourceKind: "receipt",
+      originalOrderGuid: "order-a",
+      lines,
+      capacities,
+      online,
+      preferredMethod,
+      voucherFundedBasis,
+    }).allocations.map((allocation) => [
+      allocation.method,
+      allocation.signedAmountCents,
+      allocation.originalCapacityId,
+    ]);
+
+  // 选现金：代金券部分 3.34 仍退代金券，其余 6.66 现金。
+  assert.deepEqual(plan([capacity("cash", 2_000, false), capacity("voucher", 1_000, false)], "cash"), [
+    ["voucher", -334, "capacity-voucher"],
+    ["cash", -666, "capacity-cash"],
+  ]);
+  // 原路退：卡额度排在前也不能挤掉代金券部分；原代金券额度只能退代金券。
+  assert.deepEqual(plan([capacity("card", 2_000, false), capacity("voucher", 1_000, false)], null), [
+    ["voucher", -334, "capacity-voucher"],
+    ["card", -666, "capacity-card"],
+  ]);
+  // 原代金券额度已退完：差额以其他额度改发代金券，同一额度的同方式分配合并。
+  assert.deepEqual(plan([capacity("card", 3_000, false)], "cash"), [
+    ["voucher", -334, "capacity-card"],
+    ["cash", -666, "capacity-card"],
+  ]);
+  // 无占比依据（旧快照）保持原行为。
+  assert.deepEqual(plan([capacity("cash", 2_000, false), capacity("voucher", 1_000, false)], "cash", null), [
+    ["cash", -1_000, "capacity-cash"],
+  ]);
+  // 须退代金券时离线不能退（退款代金券须在线签发）。
   assert.throws(
-    () =>
-      buildReturnRefundPlan({
-        sourceKind: "receipt",
-        originalOrderGuid: "order-a",
-        lines: selected,
-        capacities: [capacity("cash", 2_000, false), capacity("card", 3_000, false)],
-        online: true,
-        preferredMethod: "voucher",
-      }),
-    hasCode("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE"),
+    () => plan([capacity("cash", 3_000, true)], null, basis, false),
+    hasCode("RETURN_ONLINE_REQUIRED"),
   );
 });
 

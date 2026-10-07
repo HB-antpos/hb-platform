@@ -108,11 +108,19 @@ export type InstallmentCancelClaimStatus =
   | "Declined"
   | "Unknown";
 
+/**
+ * 取消退款方式，对应服务端 InstallmentCancelRefundMode：
+ * original-route=1 原路退回；voucher=2 每笔已记录原付款都改发一张退款代金券。
+ */
+export type InstallmentCancelRefundMode = "original-route" | "voucher";
+
 export type InstallmentCancelClaim = Readonly<{
   installmentGuid: string;
   operationGuid: string;
   idempotencyKey: string;
   refundPlanFingerprint: string;
+  /** 旧服务端不回传该字段时按原路退处理；调用方必须与本地选择严格比对。 */
+  refundMode: InstallmentCancelRefundMode;
   status: InstallmentCancelClaimStatus;
   createdAtIso: string;
   updatedAtIso: string;
@@ -132,6 +140,7 @@ export type InstallmentCancelClaimCreateCommand =
       idempotencyKey: string;
       reason: string | null;
       refundPlanFingerprint: string;
+      refundMode: InstallmentCancelRefundMode;
     }>;
 
 export type InstallmentCancelClaimResolveCommand =
@@ -274,6 +283,8 @@ export type InstallmentCancelCommand = InstallmentIdentity &
     refunds: readonly InstallmentRefundCommand[];
     reason: string | null;
     idempotencyKey: string;
+    /** 旧 action 没有该字段，一律视为原路退。 */
+    refundMode?: InstallmentCancelRefundMode;
   }>;
 
 export type InstallmentVoidCommand = InstallmentIdentity &

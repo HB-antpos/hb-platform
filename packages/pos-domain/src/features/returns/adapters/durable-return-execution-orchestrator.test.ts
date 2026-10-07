@@ -71,9 +71,10 @@ test("完成事务按 WPF 规则冻结现金、券、卡及混合退款履约策
       drawerRequired: false,
     },
     {
-      name: "多券不自动选择券码",
+      // 每张退款券逐张出券面，不再因多券放弃打印。
+      name: "多券逐张打印",
       plan: planForMethods(["voucher", "voucher"]),
-      receiptKind: "none",
+      receiptKind: "refund-voucher",
       drawerRequired: false,
     },
     {
@@ -95,9 +96,10 @@ test("完成事务按 WPF 规则冻结现金、券、卡及混合退款履约策
       drawerRequired: true,
     },
     {
+      // 与 WPF 对齐：现金+退款券的混合退款同样打印退款券并开钱箱。
       name: "现金加券",
       plan: planForMethods(["cash", "voucher"]),
-      receiptKind: "none",
+      receiptKind: "refund-voucher",
       drawerRequired: true,
     },
   ] as const;

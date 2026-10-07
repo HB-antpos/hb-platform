@@ -10,6 +10,7 @@ import {
   type HbposTransport,
 } from "@/core/api";
 import type { PaymentAttempt, PaymentProvider } from "@/core/contracts";
+import type { InstallmentCancelRefundMode } from "@/features/installments/installment-models";
 import type { components } from "@hb/pos-api-client/openapi";
 
 type GeneratedDetails = components["schemas"]["InstallmentDetailsDto"];
@@ -67,9 +68,14 @@ export class HbposInstallmentRefundProvenance
   ) {}
 
   public async resolveOrImport(
-    input: ProvenanceScope,
+    input: ProvenanceScope &
+      Readonly<{ refundMode?: InstallmentCancelRefundMode }>,
   ): Promise<InstallmentRefundProvenanceSnapshot> {
     const scope = normalizeScope(input);
+    const refundMode = input.refundMode ?? "original-route";
+    if (refundMode !== "original-route" && refundMode !== "voucher") {
+      throw new Error("Installment refund mode is invalid.");
+    }
     const local = await this.vault.resolve(scope);
     if (local && validSafeSnapshot(local, scope, null)) {
       return freezeSnapshot(local);
@@ -82,7 +88,7 @@ export class HbposInstallmentRefundProvenance
       url: `/api/v1/installments/${scope.installmentGuid}`,
     });
     const details = unwrapHbposEnvelope(response.data);
-    const prepared = prepareProtectedImport(details, scope);
+    const prepared = prepareProtectedImport(details, scope, refundMode);
     if (!prepared) return incomplete(scope);
 
     const imported = await this.vault.importProtected(prepared);
@@ -102,6 +108,7 @@ export class HbposInstallmentRefundProvenance
 function prepareProtectedImport(
   detailsInput: GeneratedDetails | null,
   scope: ProvenanceScope,
+  refundMode: InstallmentCancelRefundMode,
 ): InstallmentProtectedProvenanceImport | null {
   if (!isRecord(detailsInput)) return null;
   const installmentGuid = uuid(detailsInput.installmentGuid);
@@ -158,7 +165,10 @@ function prepareProtectedImport(
         (reference !== null || cardTransactions.length > 0)) ||
       (method === "voucher" &&
         (!reference || cardTransactions.length > 0)) ||
+      // 中文注释：退代金券模式不会向卡 provider 发起退款，不再要求原卡引用与卡交易证据；
+      // 但 provider 仍须能识别为 Square/Linkly（本地证据表约束 card 必带其一）。
       (method === "card" &&
+        refundMode === "original-route" &&
         (!reference ||
           cardTransactions.length === 0 ||
           !cardAmountMatches(cardTransactions, amountCents)))

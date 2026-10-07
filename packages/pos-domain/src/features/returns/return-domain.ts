@@ -80,6 +80,15 @@ export type ReceiptReturnLine = Readonly<{
   syncProvenance: LineSyncProvenance;
 }>;
 
+/**
+ * 代金券买的商品不能退现金/退卡（与 WPF VoucherFundedRefundPolicy 口径一致）：
+ * 依据原单各支付的原始付款额（不是剩余额）计算代金券付款占比。
+ */
+export type VoucherFundedRefundBasis = Readonly<{
+  voucherOriginalCents: number;
+  paidOriginalCents: number;
+}>;
+
 export type ReceiptReturnContext = Readonly<{
   originalOrderGuid: string;
   receiptLabel: string;
@@ -87,6 +96,8 @@ export type ReceiptReturnContext = Readonly<{
   returnRecordsMayBeStale: boolean;
   lines: readonly ReceiptReturnLine[];
   tenderCapacities: readonly OriginalReturnTenderCapacity[];
+  /** 缺省（旧快照/无法取得原始付款额）时不额外约束，保持原有退款行为。 */
+  voucherFundedBasis?: VoucherFundedRefundBasis | null;
 }>;
 
 export type NoReceiptReturnItem = Readonly<{
@@ -231,6 +242,35 @@ export function validateReceiptReturnContext(
   }
 }
 
+/**
+ * 本次退款中必须以退款代金券退回的最低金额：退款额 × 代金券付款占比，向上取整到分。
+ */
+export function computeRequiredVoucherRefundCents(
+  totalRefundCents: number,
+  basis: VoucherFundedRefundBasis | null | undefined,
+): number {
+  if (
+    !basis ||
+    !Number.isSafeInteger(totalRefundCents) ||
+    totalRefundCents <= 0 ||
+    !Number.isSafeInteger(basis.voucherOriginalCents) ||
+    !Number.isSafeInteger(basis.paidOriginalCents) ||
+    basis.voucherOriginalCents <= 0 ||
+    basis.paidOriginalCents <= 0
+  ) {
+    return 0;
+  }
+  const voucherCents = Math.min(basis.voucherOriginalCents, basis.paidOriginalCents);
+  const numerator = totalRefundCents * voucherCents;
+  if (!Number.isSafeInteger(numerator)) {
+    throw new ReturnFeatureError("RETURN_AMOUNT_EXCEEDED");
+  }
+  return Math.min(
+    totalRefundCents,
+    Math.floor((numerator + basis.paidOriginalCents - 1) / basis.paidOriginalCents),
+  );
+}
+
 export function createReceiptDraftLines(
   context: ReceiptReturnContext,
 ): readonly ReturnDraftLine[] {
@@ -321,6 +361,7 @@ export function buildReturnRefundPlan(input: Readonly<{
   capacities: readonly OriginalReturnTenderCapacity[];
   online: boolean;
   preferredMethod: ReturnTenderMethod | null;
+  voucherFundedBasis?: VoucherFundedRefundBasis | null;
 }>): ReturnRefundPlan {
   const selected = input.lines.filter((line) => line.selectedQuantity > 0);
   if (!selected.length) {
@@ -397,6 +438,14 @@ export function buildReturnRefundPlan(input: Readonly<{
   if (!input.online && input.preferredMethod === "voucher") {
     throw new ReturnFeatureError("RETURN_ONLINE_REQUIRED");
   }
+  // 代金券买的部分只能退代金券；退款代金券须在线签发，离线时整单不能退。
+  const requiredVoucherCents = computeRequiredVoucherRefundCents(
+    totalRefundCents,
+    input.voucherFundedBasis,
+  );
+  if (requiredVoucherCents > 0 && !input.online) {
+    throw new ReturnFeatureError("RETURN_ONLINE_REQUIRED");
+  }
   const eligible = input.capacities
     .filter(
       (capacity) =>
@@ -420,15 +469,52 @@ export function buildReturnRefundPlan(input: Readonly<{
       return left.index - right.index;
     });
 
-  let remaining = totalRefundCents;
   const allocations: ReturnRefundAllocation[] = [];
+  const usedByCapacity = new Map<string, number>();
+  const capacityAvailable = (capacity: OriginalReturnTenderCapacity) =>
+    capacity.remainingCents - (usedByCapacity.get(capacity.capacityId) ?? 0);
+  const enforceVoucherFunding = requiredVoucherCents > 0;
+  if (enforceVoucherFunding) {
+    // 先预留代金券应退部分：优先扣原代金券额度，不足时以其他额度改发代金券（分期额度除外）。
+    let voucherRemaining = requiredVoucherCents;
+    const voucherFirst = [
+      ...eligible.filter(({ capacity }) => capacity.method === "voucher"),
+      ...eligible.filter(
+        ({ capacity }) => capacity.method !== "voucher" && capacity.method !== "installment",
+      ),
+    ];
+    for (const { capacity } of voucherFirst) {
+      if (voucherRemaining === 0) break;
+      const amount = Math.min(voucherRemaining, capacityAvailable(capacity));
+      if (amount <= 0) continue;
+      pushOrMergeAllocation(allocations, {
+        method: "voucher",
+        signedAmountCents: -amount,
+        originalCapacityId: capacity.capacityId,
+        originalOrderGuid: capacity.originalOrderGuid,
+        offlineCashProof: null,
+      });
+      usedByCapacity.set(
+        capacity.capacityId,
+        (usedByCapacity.get(capacity.capacityId) ?? 0) + amount,
+      );
+      voucherRemaining -= amount;
+    }
+    if (voucherRemaining !== 0) {
+      throw new ReturnFeatureError("RETURN_CAPACITY_EXCEEDED");
+    }
+  }
+
+  let remaining = totalRefundCents - requiredVoucherCents;
   for (const { capacity } of eligible) {
     if (remaining === 0) break;
     if (!input.online) validateOfflineCashCapacity(capacity);
-    const amount = Math.min(remaining, capacity.remainingCents);
+    const amount = Math.min(remaining, capacityAvailable(capacity));
     if (amount <= 0) continue;
     const substituted =
       input.preferredMethod === "cash" || input.preferredMethod === "voucher";
+    // 启用代金券占比约束时，原代金券额度无论选什么方式都只能退代金券。
+    const voucherLocked = enforceVoucherFunding && capacity.method === "voucher";
     if (capacity.substituteOnly === true && !substituted) {
       // 不能原路退回的额度必须由收银员明确选择现金或代金券，绝不静默改走刷卡机。
       throw new ReturnFeatureError("RETURN_ORIGINAL_REFUND_UNAVAILABLE");
@@ -437,12 +523,13 @@ export function buildReturnRefundPlan(input: Readonly<{
       // 分期额度的退款需走分期流程，不能签发礼券代替。
       throw new ReturnFeatureError("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE");
     }
-    allocations.push({
+    pushOrMergeAllocation(allocations, {
       // 用户选定代替方式（现金/代金券）时，整单统一使用该方式退款；
       // 未选定或偏好为其他方式（card/installment）时，保持原支付方式原路退回。
       // 代替退款仍绑定原 capacity 扣减额度，防止超额退款。
-      method:
-        input.preferredMethod === "cash" || input.preferredMethod === "voucher"
+      method: voucherLocked
+        ? "voucher"
+        : input.preferredMethod === "cash" || input.preferredMethod === "voucher"
           ? input.preferredMethod
           : capacity.method,
       signedAmountCents: -amount,
@@ -450,6 +537,10 @@ export function buildReturnRefundPlan(input: Readonly<{
       originalOrderGuid: capacity.originalOrderGuid,
       offlineCashProof: input.online ? null : capacity.offlineCashProof,
     });
+    usedByCapacity.set(
+      capacity.capacityId,
+      (usedByCapacity.get(capacity.capacityId) ?? 0) + amount,
+    );
     remaining -= amount;
   }
   if (remaining !== 0) {
@@ -457,11 +548,7 @@ export function buildReturnRefundPlan(input: Readonly<{
       input.online ? "RETURN_CAPACITY_EXCEEDED" : "RETURN_ONLINE_REQUIRED",
     );
   }
-  if (input.preferredMethod === "voucher" && allocations.length > 1) {
-    // 每条礼券分配签发一张新券，退款券打印与同步只支持单张；
-    // 多笔原支付的订单改用现金代替，避免拆成多张券或打印失败。
-    throw new ReturnFeatureError("RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE");
-  }
+  // 每条礼券分配签发一张新券；同步与退款券打印均支持多张（逐张出票），不再限制单张。
 
   return {
     sourceKind: input.sourceKind,
@@ -470,6 +557,27 @@ export function buildReturnRefundPlan(input: Readonly<{
     allocations,
     online: input.online,
   };
+}
+
+// 同一额度、同一方式的分配合并为一笔，避免预留阶段与常规阶段对同一原支付各签一张券。
+function pushOrMergeAllocation(
+  allocations: ReturnRefundAllocation[],
+  allocation: ReturnRefundAllocation,
+): void {
+  const index = allocations.findIndex(
+    (existing) =>
+      existing.originalCapacityId === allocation.originalCapacityId &&
+      existing.method === allocation.method,
+  );
+  if (index < 0) {
+    allocations.push(allocation);
+    return;
+  }
+  const merged = allocations[index]!.signedAmountCents + allocation.signedAmountCents;
+  if (!Number.isSafeInteger(merged)) {
+    throw new ReturnFeatureError("RETURN_AMOUNT_EXCEEDED");
+  }
+  allocations[index] = { ...allocations[index]!, signedAmountCents: merged };
 }
 
 export function selectedLineAmountCents(

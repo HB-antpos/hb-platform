@@ -6360,6 +6360,34 @@ BEGIN
 END;
 `;
 
+
+/**
+ * 取消分期签发的退款代金券在取消成功后自动出券面（与 WPF 对齐）。分期单不在 local_orders，
+ * 以 external_order_guid 记 installmentGuid；除既有的外部重打外，只放行 job_id 以
+ * 'installment-refund-voucher:' 为前缀的非重打自动任务，其余外部订单身份仍然拒绝。
+ */
+const M48 = `
+DROP TRIGGER IF EXISTS trg_print_jobs_external_order_insert_valid;
+
+CREATE TRIGGER trg_print_jobs_external_order_insert_valid
+BEFORE INSERT ON print_jobs
+FOR EACH ROW
+WHEN NEW.external_order_guid IS NOT NULL
+  AND (
+    NEW.order_guid IS NOT NULL
+    OR (
+      NEW.is_reprint <> 1
+      AND SUBSTR(NEW.job_id, 1, 27) <> 'installment-refund-voucher:'
+    )
+    OR TYPEOF(NEW.external_order_guid) <> 'text'
+    OR LENGTH(TRIM(NEW.external_order_guid)) = 0
+    OR LENGTH(NEW.external_order_guid) > 128
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'PRINT_JOB_EXTERNAL_ORDER_INVALID');
+END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -6408,6 +6436,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 45, name: "M45_catalog_code_conflicts", sql: M45 },
   { version: 46, name: "M46_manual_card_terminal_blocking", sql: M46 },
   { version: 47, name: "M47_voucher_reversal_blocked_disposition", sql: M47 },
+  { version: 48, name: "M48_installment_refund_voucher_print_jobs", sql: M48 },
 ];
 
 export async function applyMigrations(

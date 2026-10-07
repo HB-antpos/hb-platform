@@ -23,9 +23,9 @@ test("单一券退款只在打印瞬间解析受保护券码，并生成独立 C
       },
     },
     {
-      async resolveApprovedRefundVoucher(actionId, returnOrderGuid) {
+      async resolveApprovedRefundVouchers(actionId, returnOrderGuid) {
         materialReads.push({ actionId, returnOrderGuid });
-        return protectedMaterial();
+        return [protectedMaterial()];
       },
     },
     {
@@ -87,7 +87,7 @@ test("退款券抬头依次回退 Brand、Store、Store Code", async () => {
   const render = async (store: FrozenReturnReceiptSettings["store"]) => {
     const renderer = new ProtectedRefundVoucherReceiptRenderer(
       { async getByGuid() { return pureVoucherReturn(); } },
-      { async resolveApprovedRefundVoucher() { return protectedMaterial(); } },
+      { async resolveApprovedRefundVouchers() { return [protectedMaterial()]; } },
       {
         async getFrozenReturnReceiptSettings() {
           return { ...settings(), store };
@@ -121,8 +121,8 @@ test("zh-CN 退款券启用中文模式并使用 GB18030 文本字节", async ()
       },
     },
     {
-      async resolveApprovedRefundVoucher() {
-        return protectedMaterial();
+      async resolveApprovedRefundVouchers() {
+        return [protectedMaterial()];
       },
     },
     {
@@ -169,8 +169,8 @@ test("CODE128 转义券码中的左花括号并按转义后长度编码，QR 与
       },
     },
     {
-      async resolveApprovedRefundVoucher() {
-        return { ...protectedMaterial(), voucherCode };
+      async resolveApprovedRefundVouchers() {
+        return [{ ...protectedMaterial(), voucherCode }];
       },
     },
     {
@@ -256,7 +256,8 @@ test("订单、金额、券码或设置不满足冻结身份时失败关闭", as
       settings: settings(),
     },
     {
-      name: "multiple tenders",
+      // 多出一笔券而合计不等于订单实退金额：订单本身不自洽，必须拒绝。
+      name: "tender total mismatch",
       order: {
         ...baseOrder,
         tenders: [
@@ -286,8 +287,8 @@ test("订单、金额、券码或设置不满足冻结身份时失败关闭", as
       const renderer = new ProtectedRefundVoucherReceiptRenderer(
         { async getByGuid() { return current.order; } },
         {
-          async resolveApprovedRefundVoucher() {
-            return current.material;
+          async resolveApprovedRefundVouchers() {
+            return current.material === null ? null : [current.material];
           },
         },
         {
@@ -304,6 +305,84 @@ test("订单、金额、券码或设置不满足冻结身份时失败关闭", as
     });
   }
 });
+
+test("混合退款逐张打印退款券：现金+券只出券面，卡+两张券出两张券面且各自切纸", async () => {
+  const base = pureVoucherReturn();
+  const mixed: LocalOrder = {
+    ...base,
+    total: { currency: "AUD", cents: -2000 },
+    actualAmount: { currency: "AUD", cents: -2000 },
+    tenders: [
+      {
+        tenderGuid: "card-tender-1",
+        method: "card",
+        amount: { currency: "AUD", cents: -1000 },
+        reference: null,
+        reservationToken: null,
+      },
+      {
+        tenderGuid: "voucher-tender-1",
+        method: "voucher",
+        amount: { currency: "AUD", cents: -600 },
+        reference: null,
+        reservationToken: null,
+      },
+      {
+        tenderGuid: "voucher-tender-2",
+        method: "voucher",
+        amount: { currency: "AUD", cents: -400 },
+        reference: null,
+        reservationToken: null,
+      },
+    ],
+  };
+  const renderer = new ProtectedRefundVoucherReceiptRenderer(
+    { async getByGuid() { return mixed; } },
+    {
+      async resolveApprovedRefundVouchers() {
+        return [
+          { ...protectedMaterial(), voucherCode: "RF-B", refundAmountCents: 400 },
+          { ...protectedMaterial(), voucherCode: "RF-A", refundAmountCents: 600 },
+        ];
+      },
+    },
+    { async getFrozenReturnReceiptSettings() { return settings(); } },
+    () => new Date(2026, 6, 10, 9, 30, 0),
+  );
+
+  const rendered = await renderer.render("return-action-1", "return-order-1");
+  const text = encoder.decode(rendered.receiptBytes);
+
+  assert.match(text, /Voucher: RF-A/);
+  assert.match(text, /Amount: \$6\.00/);
+  assert.match(text, /Voucher: RF-B/);
+  assert.match(text, /Amount: \$4\.00/);
+  assert.equal(countSequence([...rendered.receiptBytes], [0x1d, 0x56, 0x00]), 2);
+
+  // 券材料张数与 voucher tender 不一致时失败关闭。
+  const missingOne = new ProtectedRefundVoucherReceiptRenderer(
+    { async getByGuid() { return mixed; } },
+    {
+      async resolveApprovedRefundVouchers() {
+        return [{ ...protectedMaterial(), voucherCode: "RF-A", refundAmountCents: 600 }];
+      },
+    },
+    { async getFrozenReturnReceiptSettings() { return settings(); } },
+    () => new Date(2026, 6, 10, 9, 30, 0),
+  );
+  await assert.rejects(
+    () => missingOne.render("return-action-1", "return-order-1"),
+    /REFUND_VOUCHER_MATERIAL_INVALID/,
+  );
+});
+
+function countSequence(bytes: readonly number[], sequence: readonly number[]): number {
+  let count = 0;
+  for (let index = 0; index + sequence.length <= bytes.length; index += 1) {
+    if (sequence.every((value, offset) => bytes[index + offset] === value)) count += 1;
+  }
+  return count;
+}
 
 function pureVoucherReturn(): LocalOrder {
   return {

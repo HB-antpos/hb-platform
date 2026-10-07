@@ -2315,9 +2315,60 @@ test("cancel/refund 只把 durable action 交给支付 port，不从脱敏详情
   );
 });
 
+test("取消退款完成后才打印退款券；打印异常不影响取消结果", async () => {
+  for (const failPrint of [false, true]) {
+    const prints: string[] = [];
+    let harnessEvents: string[] = [];
+    const harness = createHarness({
+      refundVoucherPrinter: {
+        async printAfterCancel(installmentGuid, orderLabel) {
+          // 打印发生在本地 action 完成之后，取消事实已落定。
+          assert.ok(harnessEvents.includes("action-complete"));
+          prints.push(`${installmentGuid}|${orderLabel}`);
+          if (failPrint) throw new Error("printer offline");
+        },
+      },
+    });
+    harnessEvents = harness.events;
+    const presenter = harness.runtime.createPresenter();
+    await presenter.select("installment-1");
+    await presenter.cancelWithRefund();
+
+    assert.equal(prints.length, 1, `failPrint=${failPrint}`);
+    assert.match(prints[0]!, /^installment-1\|/u);
+    assert.equal(harness.api.cancelCalls.length, 1);
+    assert.ok(harness.events.includes("action-complete"));
+    assert.equal(presenter.getState().statusCode, "cancel-complete", `failPrint=${failPrint}`);
+  }
+});
+
 test("取消 claim 指纹与后端/WPF 共享固定 golden vector，并忽略输入付款顺序", async () => {
   const installmentGuid = "11111111-1111-4111-8111-111111111111";
-  const harness = createHarness();
+  const sourceGuids = [
+    "40000000-0000-4000-8000-000000000001",
+    "20000000-0000-4000-8000-000000000001",
+    "30000000-0000-4000-8000-000000000001",
+  ];
+  const sourceAmounts = [725, 2_000, 1_050];
+  const harness = createHarness({
+    paymentsFactory: (actionStore, events) =>
+      new FixedRefundPayments(actionStore, events, (actionId) =>
+        sourceGuids.map((sourceGuid, index) => ({
+          refund: {
+            paymentGuid: `10000000-0000-4000-8000-00000000000${index + 1}`,
+            method: "voucher" as const,
+            amountCents: sourceAmounts[index]!,
+            reference: `VOUCHER_REFUND:RV-${index + 1}`,
+            cardTransactions: [],
+            idempotencyKey: `${actionId}:refund:${sourceGuid}`,
+          },
+          originalTenderEvidenceId: `evidence-${index + 1}`,
+          refundAttemptId: `refund-attempt-${index + 1}`,
+          sourceAttemptId: `source-attempt-${index + 1}`,
+          sourcePaymentGuid: sourceGuid,
+        })),
+      ),
+  });
   harness.api.detailsResponse = details({
     installmentGuid,
     payments: [
@@ -2357,21 +2408,196 @@ test("取消 claim 指纹与后端/WPF 共享固定 golden vector，并忽略输
     ],
   });
 
+  // 含刷卡原付款只能退代金券；指纹仍按原付款方式计算，黄金向量保持不变。
   await workflowOf(harness.runtime.createPresenter()).cancelWithRefund({
     installmentGuid,
     reason: null,
+    refundMode: "voucher",
   });
 
   const command = harness.actionStore.createdCandidates[0]?.command;
   assert.ok(command && command.kind === "cancel-refund");
+  assert.equal(command.refundMode, "voucher");
   assert.equal(
     command.refundPlanFingerprint,
     "sha256:e71e70a0dde391c395f87e43cbeb12056488ad6fbbd76622ba77761cf2b816e4",
+  );
+  assert.equal(harness.api.cancelClaimCreateCalls[0]?.refundMode, "voucher");
+  assert.equal(
+    harness.api.cancelClaimCreateCalls[0]?.refundPlanFingerprint,
+    command.refundPlanFingerprint,
   );
   assert.equal(
     harness.hashMaterials[0],
     '{"installmentGuid":"11111111-1111-4111-8111-111111111111","payments":[["20000000-0000-4000-8000-000000000001","cash",2000],["30000000-0000-4000-8000-000000000001","card",1050],["40000000-0000-4000-8000-000000000001","voucher",725]]}',
   );
+});
+
+test("原路退遇到刷卡原付款时在建 action/claim 前失败关闭并提示改选退代金券", async () => {
+  const harness = createHarness();
+  harness.api.detailsResponse = details({
+    payments: [
+      recordedPayment({
+        paymentGuid: "30000000-0000-4000-8000-000000000001",
+        method: "card",
+        amountCents: 2_000,
+        reference: null,
+        reservationToken: null,
+        cardTransactions: [],
+        idempotencyKey: "card-payment",
+      }),
+    ],
+  });
+
+  await assert.rejects(
+    workflowOf(harness.runtime.createPresenter()).cancelWithRefund({
+      installmentGuid: "installment-1",
+      reason: null,
+      refundMode: "original-route",
+    }),
+    (error: unknown) =>
+      error instanceof InstallmentWorkflowError &&
+      error.code === "refund-method-unsupported",
+  );
+  assert.equal(harness.actionStore.createdCandidates.length, 0);
+  assert.equal(harness.api.cancelClaimCreateCalls.length, 0);
+  assert.equal(harness.payments.beginCalls, 0);
+});
+
+test("服务端 INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED 映射为可读错误并释放本地 Created", async () => {
+  const harness = createHarness({
+    cancelClaimCreateErrorCode: "INSTALLMENT_CANCEL_REFUND_METHOD_UNSUPPORTED",
+  });
+  const presenter = harness.runtime.createPresenter();
+  await presenter.select("installment-1");
+  await presenter.cancelWithRefund();
+
+  assert.equal(
+    presenter.getState().statusCode,
+    "cancel-refund-method-unsupported",
+  );
+  assert.equal(harness.payments.beginCalls, 0);
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+});
+
+test("旧服务端丢弃 refundMode 时不 begin-refund、不签发退款券，释放 claim 并失败关闭", async () => {
+  const harness = createHarness();
+  harness.api.cancelClaimRefundModeOverride = "original-route";
+
+  await assert.rejects(
+    workflowOf(harness.runtime.createPresenter()).cancelWithRefund({
+      installmentGuid: "installment-1",
+      reason: null,
+      refundMode: "voucher",
+    }),
+    (error: unknown) =>
+      error instanceof InstallmentWorkflowError &&
+      error.code === "refund-mode-unsupported",
+  );
+  assert.equal(harness.api.cancelClaimCreateCalls[0]?.refundMode, "voucher");
+  assert.equal(harness.events.includes("cancel-claim-begin"), false);
+  assert.equal(harness.events.includes("payments-begin"), false);
+  assert.ok(harness.events.includes("cancel-claim-resolve:Released"));
+  assert.equal(harness.payments.beginCalls, 0);
+  assert.equal(harness.api.cancelCalls.length, 0);
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+});
+
+test("退代金券模式：现金、刷卡、代金券原付款全部以退款券退回，commit 带 VOUCHER_REFUND 前缀", async () => {
+  const sources = [
+    { guid: "20000000-0000-4000-8000-000000000001", method: "cash" as const, amountCents: 2_000 },
+    { guid: "30000000-0000-4000-8000-000000000001", method: "card" as const, amountCents: 1_050 },
+    { guid: "40000000-0000-4000-8000-000000000001", method: "voucher" as const, amountCents: 725 },
+  ];
+  const harness = createHarness({
+    paymentsFactory: (actionStore, events) =>
+      new FixedRefundPayments(actionStore, events, (actionId) =>
+        sources.map((source, index) => ({
+          refund: {
+            paymentGuid: `10000000-0000-4000-8000-00000000000${index + 1}`,
+            method: "voucher" as const,
+            amountCents: source.amountCents,
+            reference: `VOUCHER_REFUND:RV-${index + 1}`,
+            cardTransactions: [],
+            idempotencyKey: `${actionId}:refund:${source.guid}`,
+          },
+          originalTenderEvidenceId: `evidence-${index + 1}`,
+          refundAttemptId: `refund-attempt-${index + 1}`,
+          sourceAttemptId: `source-attempt-${index + 1}`,
+          sourcePaymentGuid: source.guid,
+        })),
+      ),
+  });
+  harness.api.detailsResponse = details({
+    payments: sources.map((source) =>
+      recordedPayment({
+        paymentGuid: source.guid,
+        method: source.method,
+        amountCents: source.amountCents,
+        reference: null,
+        reservationToken: null,
+        cardTransactions: [],
+        idempotencyKey: `${source.method}-payment`,
+      }),
+    ),
+  });
+
+  const result = await workflowOf(harness.runtime.createPresenter()).cancelWithRefund({
+    installmentGuid: "installment-1",
+    reason: null,
+    refundMode: "voucher",
+  });
+
+  assert.equal(result.status, "Cancelled");
+  const committed = harness.api.cancelCalls[0]?.refunds ?? [];
+  assert.equal(committed.length, 3);
+  assert.deepEqual(
+    committed.map((refund) => [refund.method, refund.amountCents, refund.originalPaymentGuid, refund.reference]),
+    [
+      ["voucher", 2_000, sources[0]!.guid, "VOUCHER_REFUND:RV-1"],
+      ["voucher", 1_050, sources[1]!.guid, "VOUCHER_REFUND:RV-2"],
+      ["voucher", 725, sources[2]!.guid, "VOUCHER_REFUND:RV-3"],
+    ],
+  );
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+});
+
+test("退代金券模式下支付端返回非券退款或券退款缺前缀时不提交 commit", async () => {
+  for (const invalid of [
+    { method: "cash" as const, reference: null },
+    { method: "voucher" as const, reference: "RV-1" },
+  ]) {
+    const harness = createHarness({
+      paymentsFactory: (actionStore, events) =>
+        new FixedRefundPayments(actionStore, events, (actionId) => [{
+          refund: {
+            paymentGuid: "10000000-0000-4000-8000-000000000001",
+            method: invalid.method,
+            amountCents: 2_000,
+            reference: invalid.reference,
+            cardTransactions: [],
+            idempotencyKey: `${actionId}:refund:20000000-0000-4000-8000-000000000001`,
+          },
+          originalTenderEvidenceId: "evidence-1",
+          refundAttemptId: "refund-attempt-1",
+          sourceAttemptId: "source-attempt-1",
+          sourcePaymentGuid: "20000000-0000-4000-8000-000000000001",
+        }]),
+    });
+
+    await assert.rejects(
+      workflowOf(harness.runtime.createPresenter()).cancelWithRefund({
+        installmentGuid: "installment-1",
+        reason: null,
+        refundMode: "voucher",
+      }),
+      (error: unknown) =>
+        error instanceof InstallmentWorkflowError &&
+        error.code === "payment-recovery-required",
+    );
+    assert.equal(harness.events.includes("cancel-claim-commit"), false);
+    assert.equal(harness.api.cancelCalls.length, 0);
+  }
 });
 
 test("cancel claim busy 在任何退款 provider 前原子释放本地 Created", async () => {
@@ -2803,6 +3029,50 @@ class ScriptedPayments implements InstallmentMutationPaymentPort {
   }
 }
 
+/** 取消退款专用的固定支付端：按 action 生成既定退款结果，用于退代金券模式断言。 */
+class FixedRefundPayments implements InstallmentMutationPaymentPort {
+  public beginCalls = 0;
+
+  public constructor(
+    private readonly actionStore: MemoryInstallmentActionStore,
+    private readonly events: string[],
+    private readonly refundsFor: (actionId: string) => InstallmentApprovedRefund[],
+  ) {}
+
+  public async prepareRepaymentClaim(): Promise<never> {
+    throw new Error("repayment is not supported by this fake");
+  }
+
+  public async inspectCashSettlement(): Promise<never> {
+    throw new Error("cash settlement is not supported by this fake");
+  }
+
+  public async confirmCashRepayment(): Promise<never> {
+    throw new Error("cash repayment is not supported by this fake");
+  }
+
+  public beginOrRecover(persistedActionId: string) {
+    return this.resolve(persistedActionId);
+  }
+
+  public recoverBlocking(persistedActionId: string) {
+    return this.resolve(persistedActionId);
+  }
+
+  private async resolve(persistedActionId: string) {
+    this.beginCalls += 1;
+    this.events.push("payments-begin");
+    const persisted = this.actionStore.get(persistedActionId);
+    if (persisted?.action.kind !== "cancel-refund") {
+      throw new Error("cancel action is required");
+    }
+    return {
+      kind: "approved" as const,
+      refunds: this.refundsFor(persisted.action.actionId),
+    };
+  }
+}
+
 class MemorySnapshotCache {
   public readonly listCalls: { storeCode: string; limit: number; offset: number }[] = [];
   public readonly upsertCalls: { storeCode: string; snapshots: readonly InstallmentSnapshot[] }[] = [];
@@ -3198,6 +3468,9 @@ class ScriptedApi {
   public claim: InstallmentRepaymentClaim | null = null;
   public cancelClaim: InstallmentCancelClaim | null = null;
   public cancelClaimCommitDetailsOverride: InstallmentDetails | null = null;
+  /** 模拟旧服务端丢弃 refundMode：回包退款方式固定为该值。 */
+  public cancelClaimRefundModeOverride: InstallmentCancelClaim["refundMode"] | null = null;
+  public readonly cancelClaimCreateCalls: InstallmentCancelClaimCreateCommand[] = [];
   public voidTransportFailsOnce = false;
   public pickupTransportFailsOnce = false;
   public lifecycleCashierNameOverride: string | undefined;
@@ -3463,11 +3736,17 @@ class ScriptedApi {
 
   public async createCancelClaim(command: InstallmentCancelClaimCreateCommand) {
     this.events.push("cancel-claim-create");
+    this.cancelClaimCreateCalls.push(command);
     if (this.cancelClaimCreateErrorCode) {
       throw new HbposApiError("cancel claim busy", { kind: "http", status: 409, code: this.cancelClaimCreateErrorCode });
     }
     if (this.cancelClaim) return Object.freeze({ ...this.cancelClaim, alreadyExists: true });
-    this.cancelClaim = cancelClaimFrom(command, "Prepared");
+    this.cancelClaim = cancelClaimFrom(
+      this.cancelClaimRefundModeOverride
+        ? { ...command, refundMode: this.cancelClaimRefundModeOverride }
+        : command,
+      "Prepared",
+    );
     return this.cancelClaim;
   }
 
@@ -3700,6 +3979,9 @@ function createHarness(options: Readonly<{
   cancelAllRefundsDeclined?: boolean;
   permissions?: readonly string[];
   receiptReprint?: InstallmentReceiptReprintRuntimePort;
+  refundVoucherPrinter?: Readonly<{
+    printAfterCancel(installmentGuid: string, orderLabel: string): Promise<unknown>;
+  }>;
   cacheUpsertFailsOnce?: boolean;
   lifecycleCompleteFailsOnce?: boolean;
   useAtomicFinalizer?: boolean;
@@ -3780,6 +4062,9 @@ function createHarness(options: Readonly<{
     payments,
     ...(options.receiptReprint
       ? { receiptReprint: options.receiptReprint }
+      : {}),
+    ...(options.refundVoucherPrinter
+      ? { refundVoucherPrinter: options.refundVoucherPrinter }
       : {}),
     voucherIntents,
     sha256Hex: async (material: string) => {

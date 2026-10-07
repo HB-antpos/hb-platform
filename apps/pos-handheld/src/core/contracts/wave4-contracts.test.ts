@@ -10,7 +10,10 @@ import {
   normalizeDailyCloseCounts,
 } from "@hb/pos-domain/core/contracts/daily-close";
 import { evaluateDeviceReregistrationPreflight } from "./device-reregistration";
-import { canTransitionInstallment } from "@hb/pos-domain/core/contracts/installments";
+import {
+  canCancelInstallmentWithRefund,
+  canTransitionInstallment,
+} from "@hb/pos-domain/core/contracts/installments";
 import { normalizeRemoteHistoryQuery } from "@hb/pos-domain/core/contracts/remote-history";
 import { normalizeSpecialProductOrder } from "@hb/pos-domain/core/contracts/special-products";
 
@@ -97,8 +100,19 @@ test("分期只允许 WPF 的单向业务状态迁移", () => {
   assert.equal(canTransitionInstallment("Active", "PaidOff"), true);
   assert.equal(canTransitionInstallment("Active", "Cancelled"), true);
   assert.equal(canTransitionInstallment("PaidOff", "PickedUp"), true);
-  assert.equal(canTransitionInstallment("PaidOff", "Cancelled"), false);
+  // 已付清未提货可取消并全额退款（与服务端 InstallmentLifecycleRules 同口径）。
+  assert.equal(canTransitionInstallment("PaidOff", "Cancelled"), true);
+  assert.equal(canTransitionInstallment("PickedUp", "Cancelled"), false);
   assert.equal(canTransitionInstallment("Cancelled", "Active"), false);
+});
+
+test("分期取消退款只限进行中有余额或已付清未提货", () => {
+  assert.equal(canCancelInstallmentWithRefund("Active", 100), true);
+  assert.equal(canCancelInstallmentWithRefund("Active", 0), false);
+  assert.equal(canCancelInstallmentWithRefund("PaidOff", 0), true);
+  assert.equal(canCancelInstallmentWithRefund("PaidOff", 100), false);
+  assert.equal(canCancelInstallmentWithRefund("PickedUp", 0), false);
+  assert.equal(canCancelInstallmentWithRefund("Cancelled", 0), false);
 });
 
 test("手持端更新策略在本地同时门禁离线现金，但始终开放恢复与补传", () => {

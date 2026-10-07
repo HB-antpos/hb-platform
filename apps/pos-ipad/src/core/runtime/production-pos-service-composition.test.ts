@@ -547,6 +547,11 @@ test("支付成功重打在本地普通订单缺失时回退可信分期详情",
         return null;
       },
     }),
+    installmentRefundVoucherPrintMaterial: () => ({
+      async listApprovedRefundVouchers() {
+        return [];
+      },
+    }),
     installmentPaymentPersistence: () => ({
       providerAttempts: {},
       voucherIntents: {},
@@ -1203,6 +1208,11 @@ test("分期生产服务使用独立支付账本和第二套 provider 上下文�
         return null;
       },
     }),
+    installmentRefundVoucherPrintMaterial: () => ({
+      async listApprovedRefundVouchers() {
+        return [];
+      },
+    }),
     installmentPaymentPersistence: () => ({
       providerAttempts: {},
       voucherIntents: {},
@@ -1350,6 +1360,11 @@ test("分期生产组合以服务端 scoped Linkly DTO 冻结旧 pending 与 fin
         async loadLifecycleBlocking() { return null; },
         async loadProviderAcknowledgementPending() {
           return kind === "final" && frozen ? { actionId: "final-ack" } : null;
+        },
+      }),
+      installmentRefundVoucherPrintMaterial: () => ({
+        async listApprovedRefundVouchers() {
+          return [];
         },
       }),
       installmentPaymentPersistence: () => ({
@@ -1514,6 +1529,11 @@ test("分期生产组合注入现金原子 finalizer 并在渲染前上报四阶
   Object.assign(database, {
     installmentSnapshots: () => snapshotRepository,
     installmentActions: () => actionStore,
+    installmentRefundVoucherPrintMaterial: () => ({
+      async listApprovedRefundVouchers() {
+        return [];
+      },
+    }),
     installmentPaymentPersistence: () => ({
       providerAttempts,
       voucherIntents: { async stage() {} },
@@ -5828,7 +5848,7 @@ function databaseFor(
     refundVoucherPrintMaterial: () => {
       options.onRefundVoucherPrintMaterialCreated?.();
       return {
-        async resolveApprovedRefundVoucher() {
+        async resolveApprovedRefundVouchers() {
           return null;
         },
       };

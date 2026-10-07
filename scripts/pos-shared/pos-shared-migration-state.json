@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "05b1742ac616512c5d27edaaed3b5c582dac8705b7bcf3405599c1fac657874b",
+  "reviewedModuleTopologySha256": "dd61a4aef385c339b5d0e89a4124a98cf376f1b079f8e80acbb62cb15ca7b400",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -183,6 +183,12 @@
       "package": "pos-domain",
       "reason": "覆盖手工刷卡额度只能现金/礼券代替、礼券可代替单一刷卡/现金额度，分期与多笔原支付的礼券代替在计划阶段被拒",
       "requiredAssertion": "hasCode(\"RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE\")"
+    },
+    {
+      "path": "features/receipts/refund-voucher-receipt-renderer.test.ts",
+      "package": "pos-receipt-core",
+      "reason": "券面材料端口改为返回数组，新增混合退款（卡+两张券）逐张出券面与券材料张数不一致失败关闭的行为测试",
+      "requiredAssertion": "assert.equal(countSequence([...rendered.receiptBytes], [0x1d, 0x56, 0x00]), 2);"
     }
   ],
   "runtimeAdaptations": [
@@ -297,10 +303,10 @@
     {
       "path": "features/returns/adapters/durable-return-execution-orchestrator.ts",
       "package": "pos-domain",
-      "reason": "Linkly 多笔退款在单笔结果与证据耐久后逐笔确认；确认失败暂停后续退款，冷恢复只确认原退款后继续原计划",
+      "reason": "Linkly 多笔退款在单笔结果与证据耐久后逐笔确认；确认失败暂停后续退款，冷恢复只确认原退款后继续原计划；履约策略与 WPF 对齐：含刷卡打退货小票（追加各张退款券），不含刷卡但有退款券时逐张打印退款券（含现金+券、多券）",
       "baselineCanonicalRuntimeSha256": "305c8af43381ef0d83ee69c80f602b7b777a7efc8715282ce8a4f27a44a9b84e",
-      "canonicalRuntimeSha256": "720b13dfa9101dcf326b28680f88504d1ba8d606458227bf9ae4952c7be3562b",
-      "canonicalTypeSha256": "8423a8c9302484380247d38e78777c254e02b523418cdc74588adddc6d66c74d",
+      "canonicalRuntimeSha256": "0625c06e61f053926c7250c0d93e86bf7f21b2448270dbfd7f74ef1bfb3b3867",
+      "canonicalTypeSha256": "4cb46ae16a746e797a7cfb7d75176d8362380c8b670dab39db6509875f283ed6",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -391,10 +397,10 @@
     {
       "path": "features/returns/return-domain.ts",
       "package": "pos-domain",
-      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；礼券代替仅限单一刷卡/现金/礼券额度，分期与多笔原支付在计划阶段拒绝",
+      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；分期额度不能礼券代替；与 WPF 对齐\"代金券买的商品不能退现金/退卡\"：按原单代金券原始付款占比向上取整预留须退代金券部分（优先原券额度，不足以其他额度改发代金券），原券额度只能退券，离线须退券时拒绝，多笔原支付逐笔签券",
       "baselineCanonicalRuntimeSha256": "3797772fd2f5077d3dee899186d28a0e52201d024b6c77be1b6b31f48dd71257",
-      "canonicalRuntimeSha256": "b6a1e45dd936f8f3c1f4f2cbd3617ba08d20bc2ff965c1fe6f8d2db24626b0c6",
-      "canonicalTypeSha256": "6157f28a92669c4c140c5e29864c441c056ec529ea6033d5a47c05deab0b5263",
+      "canonicalRuntimeSha256": "7cfef7124e26edf8fc115f9e6cfb9da44418ef5b37359a0647f454c85b0fd7d7",
+      "canonicalTypeSha256": "a0405781983dff1ce16fb69ed8fccaac9e3aeb1222167932559abce63e93288d",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -419,10 +425,10 @@
     {
       "path": "features/returns/return-presenter.ts",
       "package": "pos-domain",
-      "reason": "容量汇总暴露 originalRefundAvailable，界面据此隐藏无法原路退回的退款方式按钮",
+      "reason": "容量汇总暴露 originalRefundAvailable，界面据此隐藏无法原路退回的退款方式按钮；state 暴露 requiredVoucherRefundCents，提示代金券买的部分至少须退代金券的金额",
       "baselineCanonicalRuntimeSha256": "c31c130fc7b0d8ecf8d6ad9be3b1a32e7edbd9ecca17d831f22a1f1cdfa9ba8c",
-      "canonicalRuntimeSha256": "476919c6b229cf45ac4b98c31271c70d24f6137f48e12165a9d15393fc86a43a",
-      "canonicalTypeSha256": "f59c149f051ff2e25bf5710804defde0c3bbf2544fd25af50ac8ca59af6767b6",
+      "canonicalRuntimeSha256": "683882270f9720079c44beb1ae61257fef4a84a1fee877610c0dec58310e7e85",
+      "canonicalTypeSha256": "1d6b9177157c7ce3ea97f4ce224d28864dfe6b6a2cff5010642aa7f5a24c66cd",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -447,10 +453,10 @@
     {
       "path": "features/returns/return-workflow.ts",
       "package": "pos-domain",
-      "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款",
+      "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款；快照携带代金券占比依据 voucherFundedBasis 并传给退款计划",
       "baselineCanonicalRuntimeSha256": "55a8b7b7f0db17efa15f1d7591e4fb8624b4b4b35b1efe4443927704ef262afc",
-      "canonicalRuntimeSha256": "dc485d7a2350982dc9be359af284c169a9adc2eb9261c20a0ed2ef8cdd8acca5",
-      "canonicalTypeSha256": "ce098e333505aa1857a61b43603a1a9afae2c9e6e47994334649657ef5e46fbb",
+      "canonicalRuntimeSha256": "e61c2d4ef5fbb85ead1b90864f41016db610f0da3331b999351d7219cfb51565",
+      "canonicalTypeSha256": "ba2777d086b13e4762dac88dd1f369c3ea866d1aa550be5fe7d3bbc2ba294af1",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -490,6 +496,56 @@
           "workspace": "apps/pos-handheld",
           "script": "test:receipts",
           "path": "src/features/receipts/receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "core/contracts/installments.ts",
+      "package": "pos-domain",
+      "reason": "与服务端/WPF 对齐：已付清(PaidOff、余额 0)未提货的分期单允许取消退款（PaidOff→Cancelled），新增 canCancelInstallmentWithRefund；作废仍只限进行中单",
+      "baselineCanonicalRuntimeSha256": "325a5e218ec5d2c5374bd864018e7fb92893ee61ab653a4f009620c11e17aa40",
+      "canonicalRuntimeSha256": "baf77e70d414b18357f0bb68c42a0d4e4dce15e9ad1515cc162ec89fd22ed167",
+      "canonicalTypeSha256": "72c27a66121b2e00786a2edcb3aae59b01ff06d682ce96ee38da9e5d1e959977",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:contracts",
+          "path": "src/core/contracts/wave4-contracts.test.ts",
+          "pattern": "src/core/contracts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:contracts",
+          "path": "src/core/contracts/wave4-contracts.test.ts",
+          "pattern": "src/core/contracts/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/receipts/refund-voucher-receipt-renderer.ts",
+      "package": "pos-receipt-core",
+      "reason": "退款券面支持混合退款与多张退款券：材料端口返回每笔 voucher tender 一份，逐张编码拼入同一冻结 print job；抽出 encodeRefundVoucherDocuments 供取消分期退款券复用，新增 hasRefundVoucherTender",
+      "baselineCanonicalRuntimeSha256": "1f9d0f50597f2785dbe7bbf8cbc6d71739debf380b5c6a6817306363843d11fe",
+      "canonicalRuntimeSha256": "a41baf6b101aeb86bc04e7e6e7f030b50e6bf84f0cfc615f69db5978b5ff2ac9",
+      "canonicalTypeSha256": "722d48f6f9bb6d5349b2e56b955e3763443e40647d4d48b4e432b42d23de0d93",
+      "behaviorTests": [
+        {
+          "workspace": "packages/pos-receipt-core",
+          "script": "test",
+          "path": "src/features/receipts/refund-voucher-receipt-renderer.test.ts",
+          "pattern": "src/**/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/installment-refund-voucher-print-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/installment-refund-voucher-print-service.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
         }
       ]

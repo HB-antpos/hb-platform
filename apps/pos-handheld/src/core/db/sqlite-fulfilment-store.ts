@@ -206,6 +206,66 @@ export class SqliteFulfilmentStore {
     });
   }
 
+  /**
+   * 取消分期签发的退款券自动出票：分期单不在 local_orders，以 external_order_guid 记分期单，
+   * 任务号必须带固定前缀（迁移触发器只放行该前缀的非重打外部任务）。分期取消是终态，
+   * 同一任务号已存在即视为已入队，不比对打印时间不同的新字节，避免重放重复出票。
+   */
+  public async enqueueInstallmentRefundVoucherPrintJob(input: Readonly<{
+    jobId: string;
+    installmentGuid: string;
+    printerId: string;
+    receiptBytes: Uint8Array;
+  }>): Promise<"created" | "existing"> {
+    assertFulfilmentId(input.jobId, "Print job id");
+    assertFulfilmentId(input.installmentGuid, "Print installment id");
+    assertPrinterId(input.printerId);
+    if (input.jobId !== `installment-refund-voucher:${input.installmentGuid}`) {
+      throw new Error("Installment refund voucher print job id is invalid.");
+    }
+    if (
+      !(input.receiptBytes instanceof Uint8Array) ||
+      input.receiptBytes.length === 0
+    ) {
+      throw new Error("Idempotent print receipt bytes are invalid.");
+    }
+    const encryptedReceipt = await this.options.encryptor.encrypt(
+      encodeReceipt(input.receiptBytes),
+    );
+    return this.db.withExclusiveTransaction(async (tx) => {
+      const existing = await tx.getFirst<PrintRow>(
+        "SELECT * FROM print_jobs WHERE job_id = ?",
+        [input.jobId],
+      );
+      if (existing) {
+        const persisted = mapPrintJobMetadata(existing);
+        if (
+          persisted.orderGuid !== input.installmentGuid ||
+          persisted.isReprint
+        ) {
+          throw new Error(
+            "Idempotent print job does not match frozen material.",
+          );
+        }
+        return "existing";
+      }
+      await insertPrintJob(
+        tx,
+        {
+          jobId: input.jobId,
+          orderGuid: input.installmentGuid,
+          printerId: input.printerId,
+          receiptBytes: input.receiptBytes,
+          isReprint: false,
+        },
+        encryptedReceipt,
+        this.options.nowIso(),
+        input.installmentGuid,
+      );
+      return "created";
+    });
+  }
+
   public enqueueDrawerEvent(input: PersistedDrawerEventInput): Promise<void> {
     return this.db.withExclusiveTransaction((tx) => insertDrawerEvent(tx, input, this.options.nowIso()));
   }

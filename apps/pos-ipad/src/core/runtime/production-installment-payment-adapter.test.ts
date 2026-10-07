@@ -522,8 +522,85 @@ test("取消按 paymentGuid 精确绑定现金/Square/券原付款，先完成 p
     "ORIGINAL-SQUARE-PAYMENT",
   );
   assert.equal(voucher.calls[0]?.attempt.operation, "refund");
+  // 中文注释：服务端按 VOUCHER_REFUND:{券码} 核验新签发退款券；裸券码会被拒绝。
+  assert.equal(
+    result.refunds[2]?.refund.reference,
+    "VOUCHER_REFUND:REFUND-VOUCHER-SECRET",
+  );
+  assert.equal(provenance.resolveInputs[0]?.refundMode, "original-route");
   assert.equal(store.cashApprovalCalls, 1);
   assert.equal(store.events.at(-1), "approve-cash");
+});
+
+test("退代金券模式：现金、刷卡、代金券原付款各签发一张同额退款券，不调卡 provider、不注入卡引用、不批准现金", async () => {
+  const store = new MemoryAttemptStore(cancelAction("voucher"));
+  const provenance = new FakeProvenance(
+    provenanceSnapshot([
+      originalTender("cash", 500, "01"),
+      originalTender("card", 1_200, "02", "square"),
+      originalTender("voucher", 800, "03", "voucher"),
+    ]),
+  );
+  const square = new ScriptedProvider("square");
+  const voucher = new ScriptedProvider("voucher");
+  for (let index = 0; index < 3; index += 1) {
+    voucher.refundResults.push(
+      providerResult("Approved", {
+        voucherReservationToken: `vpr_refund_handle_${index}`,
+      }),
+    );
+  }
+  const voucherMaterials = new FakeVoucherMaterials();
+  voucherMaterials.approved = {
+    reference: "RV-0001",
+    reservationToken: null,
+  };
+  const adapter = createAdapter({
+    store,
+    provenance,
+    providers: new ProviderRegistry(square, voucher),
+    voucherMaterials,
+  });
+
+  const result = await adapter.beginOrRecover(ACTION_ID);
+
+  assert.equal(result.kind, "approved");
+  if (result.kind !== "approved" || !("refunds" in result)) {
+    assert.fail("Expected approved refunds.");
+  }
+  assert.deepEqual(
+    result.refunds.map((entry) => ({
+      method: entry.refund.method,
+      amountCents: entry.refund.amountCents,
+      reference: entry.refund.reference,
+      cardTransactions: entry.refund.cardTransactions.length,
+      sourcePaymentGuid: entry.sourcePaymentGuid,
+      idempotencyKey: entry.refund.idempotencyKey,
+    })),
+    ["01", "02", "03"].map((suffix, index) => ({
+      method: "voucher",
+      amountCents: [500, 1_200, 800][index],
+      reference: "VOUCHER_REFUND:RV-0001",
+      cardTransactions: 0,
+      sourcePaymentGuid: sourcePaymentGuid(suffix),
+      idempotencyKey: `${ACTION_ID}:refund:${sourcePaymentGuid(suffix)}`,
+    })),
+  );
+  assert.equal(provenance.resolveInputs[0]?.refundMode, "voucher");
+  assert.equal(provenance.seedCalls.length, 0);
+  assert.equal(square.calls.length, 0);
+  assert.deepEqual(
+    voucher.calls.map((call) => [call.kind, call.attempt.amount.cents]),
+    [
+      ["refund", -500],
+      ["refund", -1_200],
+      ["refund", -800],
+    ],
+  );
+  assert.equal(store.cashApprovalCalls, 0);
+  const plan = store.plans.get(ACTION_ID);
+  assert.equal(plan?.cashSettlements.length, 0);
+  assert.ok(plan?.attempts.every((record) => record.attempt.provider === "voucher"));
 });
 
 test("两笔 Linkly 退款在首笔耐久 Approved 后先 ACK，释放终端 guard 再执行第二笔", async () => {
@@ -1010,9 +1087,16 @@ class FakeProvenance implements InstallmentRefundProvenanceRemotePort {
     attemptId: string;
   }>[] = [];
 
+  public readonly resolveInputs: Parameters<
+    InstallmentRefundProvenanceRemotePort["resolveOrImport"]
+  >[0][] = [];
+
   public constructor(public snapshot: InstallmentRefundProvenanceSnapshot) {}
 
-  public async resolveOrImport(): Promise<InstallmentRefundProvenanceSnapshot> {
+  public async resolveOrImport(
+    input: Parameters<InstallmentRefundProvenanceRemotePort["resolveOrImport"]>[0],
+  ): Promise<InstallmentRefundProvenanceSnapshot> {
+    this.resolveInputs.push(input);
     return this.snapshot;
   }
 
@@ -1112,7 +1196,9 @@ function paymentAction(
   });
 }
 
-function cancelAction(): PersistedInstallmentAction {
+function cancelAction(
+  refundMode?: "original-route" | "voucher",
+): PersistedInstallmentAction {
   return Object.freeze({
     action: Object.freeze({
       actionId: ACTION_ID,
@@ -1132,6 +1218,7 @@ function cancelAction(): PersistedInstallmentAction {
       cancelledAtIso: NOW,
       reason: "Customer cancellation",
       idempotencyKey: ACTION_ID,
+      ...(refundMode ? { refundMode } : {}),
     }),
     deviceCode: DEVICE_CODE,
     intentFingerprint: '{"kind":"cancel-refund"}',
