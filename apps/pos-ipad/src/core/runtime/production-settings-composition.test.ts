@@ -751,6 +751,8 @@ test("设置页测试打印只要求已保存 peripheralId，不受自动打印�
           abn: "",
           returnPolicy: "",
           profileStoreCode: "S1",
+          profileVersion: 0,
+          profileAckedVersion: 0,
         }),
         save: async () => undefined,
       },
@@ -797,6 +799,8 @@ test("测试打印用正式销售票据构造 TEST/NOT A SALE 样例且包含政
           abn: "12 345 678 901",
           returnPolicy: "Refunds within 14 days.",
           profileStoreCode: "S1",
+          profileVersion: 0,
+          profileAckedVersion: 0,
         }),
         save: async () => undefined,
       },
@@ -879,6 +883,8 @@ test("设置页钱箱测试先保存 draft，再只调用受控动作且不直�
     abn: "",
     returnPolicy: "",
     profileStoreCode: "S1",
+    profileVersion: 0,
+    profileAckedVersion: 0,
   };
   const runtime = createProductionSettingsComposition(
     dependencies({
@@ -984,6 +990,8 @@ test("清除打印机只持久化 null，不绕过 fulfilment hardware tail 主�
     abn: "",
     returnPolicy: "",
     profileStoreCode: "S1",
+    profileVersion: 0,
+    profileAckedVersion: 0,
   };
   const runtime = createProductionSettingsComposition(
     dependencies({
@@ -1036,6 +1044,8 @@ test("清除打印机持久化失败时不应断开或清空 UI draft", async ()
           abn: "",
           returnPolicy: "",
           profileStoreCode: "S1",
+          profileVersion: 0,
+          profileAckedVersion: 0,
         }),
         save: async () => {
           throw new Error("save failed");
@@ -1099,6 +1109,8 @@ test("清除打印机在读取后保存前复核 lease，失效时不保存也�
             abn: "",
             returnPolicy: "",
             profileStoreCode: "S1",
+            profileVersion: 0,
+            profileAckedVersion: 0,
           };
         },
         save: async () => {
@@ -1163,6 +1175,8 @@ test("清除打印机保存生效后 session 变化仍返回完成且不主动�
           abn: "",
           returnPolicy: "",
           profileStoreCode: "S1",
+          profileVersion: 0,
+          profileAckedVersion: 0,
         }),
         save: async (settings) => {
           savedPeripheralId = settings.peripheralId;
@@ -1330,6 +1344,8 @@ function dependencies(
         abn: "",
         returnPolicy: "",
         profileStoreCode: "S1",
+        profileVersion: 0,
+        profileAckedVersion: 0,
       }),
       save: async () => undefined,
     },

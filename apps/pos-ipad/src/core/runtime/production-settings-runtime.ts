@@ -342,6 +342,12 @@ function securedSettingsPort(
     } : {}),
     loadReceiptProfile: (signal) =>
       run(() => input.control.loadReceiptProfile(signal)),
+    ...(input.control.syncReceiptProfile
+      ? {
+          syncReceiptProfile: (signal: AbortSignal) =>
+            run(() => input.control.syncReceiptProfile!(signal)),
+        }
+      : {}),
     scanPrinters: (signal) =>
       run(() => input.control.scanPrinters(signal)),
     connectPrinter: (peripheralId, signal) =>

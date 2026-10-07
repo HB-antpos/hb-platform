@@ -18,6 +18,8 @@ const settings: ReceiptPrinterSettings = {
   abn: "12 345 678 901",
   returnPolicy: "Refunds within 14 days.",
   profileStoreCode: "1042",
+  profileVersion: 0,
+  profileAckedVersion: 0,
 };
 
 test("当前店本机保存店名优先，设备展示名仅在本机为空时兜底", async () => {
@@ -158,6 +160,64 @@ test("profileStoreCode 与当前店不匹配时清空资料但保留硬件设置
   assert.equal(persisted.value?.phone, "");
   assert.equal(persisted.value?.abn, "");
   assert.equal(persisted.value?.returnPolicy, "");
+});
+
+test("换店清空资料时同时清空下发版本与已回执版本，新店下一轮同步重新拉取", async () => {
+  const managed: ReceiptPrinterSettings = {
+    ...settings,
+    profileStoreCode: "9999",
+    profileVersion: 7,
+    profileAckedVersion: 7,
+  };
+  const persisted: { value: ReceiptPrinterSettings | null } = { value: null };
+
+  const resolved = await resolveTrustedReceiptPrinterSettings(
+    managed,
+    "1042",
+    undefined,
+    async (next) => { persisted.value = next; },
+  );
+
+  assert.equal(resolved.profileVersion, 0);
+  assert.equal(resolved.profileAckedVersion, 0);
+  assert.equal(persisted.value?.profileVersion, 0);
+  assert.equal(persisted.value?.profileAckedVersion, 0);
+  // 硬件设置照旧保留
+  assert.equal(persisted.value?.peripheralId, settings.peripheralId);
+});
+
+test("本机无 scope 的旧资料绑定落盘失败走 fallback 时同样不带下发版本", async () => {
+  const resolved = await resolveTrustedReceiptPrinterSettings(
+    { ...settings, profileStoreCode: "", profileVersion: 3, profileAckedVersion: 3 },
+    "1042",
+    undefined,
+    async () => { throw new Error("db busy"); },
+  );
+
+  assert.equal(resolved.brandName, "");
+  assert.equal(resolved.profileVersion, 0);
+  assert.equal(resolved.profileAckedVersion, 0);
+});
+
+test("当前店已应用的下发资料与版本原样保留，不触发清理落盘", async () => {
+  let persistCalls = 0;
+  const managed: ReceiptPrinterSettings = {
+    ...settings,
+    profileVersion: 7,
+    profileAckedVersion: 6,
+  };
+
+  const resolved = await resolveTrustedReceiptPrinterSettings(
+    managed,
+    "1042",
+    undefined,
+    async () => { persistCalls += 1; },
+  );
+
+  assert.equal(resolved.profileVersion, 7);
+  assert.equal(resolved.profileAckedVersion, 6);
+  assert.equal(resolved.brandName, "Hot Bargain");
+  assert.equal(persistCalls, 0);
 });
 
 test("全新空 profile 不误绑定 legacy，设备店名仅在本机为空时兜底", async () => {

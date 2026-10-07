@@ -30,6 +30,7 @@ import {
   type SettingsPaymentSettingsInput,
   type SettingsPendingDataSnapshot,
   type SettingsReceiptProfileDraft,
+  type SettingsReceiptProfileSyncResult,
   type SettingsSnapshot,
 } from "./settings-presenter";
 
@@ -2582,6 +2583,244 @@ function safePending(
   };
 }
 
+const MANAGED_PRINTER: ReceiptPrinterSettings = {
+  ...DEFAULT_RECEIPT_PRINTER_SETTINGS,
+  printEnabled: true,
+  drawerEnabled: true,
+  peripheralId: "XP-N160I",
+  paper: "80mm",
+  locale: "en",
+  brandName: "Hot Bargain",
+  storeName: "Bankstown",
+  address: "1 Main St",
+  phone: "02 1234 5678",
+  abn: "12 345 678 901",
+  returnPolicy: "14 days.",
+  profileStoreCode: "BNE-01",
+  profileVersion: 3,
+  profileAckedVersion: 3,
+};
+
+async function managedPresenter(port = new FakeSettingsPort()) {
+  port.snapshotValue = { ...snapshot(), printer: MANAGED_PRINTER };
+  const presenter = createPresenter(port);
+  await presenter.load();
+  return { port, presenter };
+}
+
+test("已应用总部下发资料（profileVersion>0）：六项资料只读，硬件设置照常可改", async () => {
+  const { presenter } = await managedPresenter();
+  const before = presenter.getState().printer;
+
+  presenter.setReceiptBrandName("Edited brand");
+  presenter.setReceiptStoreName("Edited store");
+  presenter.setReceiptAddress("Edited address");
+  presenter.setReceiptPhone("0000");
+  presenter.setReceiptAbn("00 000 000 000");
+  presenter.setReceiptReturnPolicy("Edited policy");
+  assert.deepEqual(presenter.getState().printer, before, "六项资料不能被改动");
+
+  presenter.setPrinterPaper("58mm");
+  presenter.setPrinterLocale("zh-CN");
+  presenter.setDrawerEnabled(false);
+  assert.equal(presenter.getState().printer.paper, "58mm");
+  assert.equal(presenter.getState().printer.locale, "zh-CN");
+  assert.equal(presenter.getState().printer.drawerEnabled, false);
+  assert.equal(presenter.getState().printer.profileVersion, 3);
+});
+
+test("未下发（profileVersion=0）时六项资料仍可手工编辑，行为与旧版一致", async () => {
+  const port = new FakeSettingsPort();
+  const presenter = createPresenter(port);
+  await presenter.load();
+  assert.equal(presenter.getState().printer.profileVersion, 0);
+
+  presenter.setReceiptBrandName("Manual brand");
+  presenter.setReceiptStoreName("Manual store");
+  presenter.setReceiptAddress("Manual address");
+  presenter.setReceiptPhone("0400");
+  presenter.setReceiptAbn("11 111 111 111");
+  presenter.setReceiptReturnPolicy("Manual policy");
+  const printer = presenter.getState().printer;
+  assert.equal(printer.brandName, "Manual brand");
+  assert.equal(printer.storeName, "Manual store");
+  assert.equal(printer.address, "Manual address");
+  assert.equal(printer.phone, "0400");
+  assert.equal(printer.abn, "11 111 111 111");
+  assert.equal(printer.returnPolicy, "Manual policy");
+});
+
+test("立即同步成功：只替换六项资料与下发版本，保留尚未保存的硬件草稿，状态为已更新", async () => {
+  const { port, presenter } = await managedPresenter();
+  presenter.setPrinterPaper("58mm");
+  port.syncResult = {
+    status: "updated",
+    version: 4,
+    printer: {
+      ...MANAGED_PRINTER,
+      paper: "80mm",
+      brandName: "New brand",
+      storeName: "New store",
+      address: "2 New St\nSydney",
+      phone: "02 9999 0000",
+      abn: "99 999 999 999",
+      returnPolicy: "7 days.",
+      profileVersion: 4,
+      profileAckedVersion: 4,
+    },
+  };
+
+  await presenter.syncReceiptProfile();
+
+  const printer = presenter.getState().printer;
+  assert.equal(port.syncCalls, 1);
+  assert.equal(presenter.getState().statusCode, "receipt-profile-synced");
+  assert.equal(printer.brandName, "New brand");
+  assert.equal(printer.storeName, "New store");
+  assert.equal(printer.address, "2 New St\nSydney");
+  assert.equal(printer.phone, "02 9999 0000");
+  assert.equal(printer.abn, "99 999 999 999");
+  assert.equal(printer.returnPolicy, "7 days.");
+  assert.equal(printer.profileVersion, 4);
+  assert.equal(printer.profileAckedVersion, 4);
+  // 用户尚未保存的硬件草稿不能被同步结果覆盖
+  assert.equal(printer.paper, "58mm");
+  // 同步本身不写本机设置（写入由同步控制器原子完成）
+  assert.equal(port.savedPrinters.length, 0);
+});
+
+test("立即同步：已是最新、总部还没下发过，各自给出对应状态，且不改草稿", async () => {
+  const { port, presenter } = await managedPresenter();
+  const before = presenter.getState().printer;
+
+  port.syncResult = { status: "up-to-date", version: 3, printer: MANAGED_PRINTER };
+  await presenter.syncReceiptProfile();
+  assert.equal(presenter.getState().statusCode, "receipt-profile-up-to-date");
+  assert.deepEqual(presenter.getState().printer, before);
+
+  port.syncResult = { status: "not-published" };
+  await presenter.syncReceiptProfile();
+  assert.equal(presenter.getState().statusCode, "receipt-profile-not-published");
+  assert.deepEqual(presenter.getState().printer, before);
+});
+
+test("立即同步失败：按原因给出离线/设备认证未通过/服务器未支持/资料无效/通用失败，草稿保持不变", async () => {
+  const { port, presenter } = await managedPresenter();
+  const before = presenter.getState().printer;
+  const expectations = [
+    ["offline", "receipt-profile-sync-offline"],
+    ["unauthorized", "receipt-profile-sync-forbidden"],
+    ["unsupported", "receipt-profile-sync-unsupported"],
+    ["invalid", "receipt-profile-sync-invalid"],
+    ["failed", "receipt-profile-sync-failed"],
+  ] as const;
+  for (const [reason, statusCode] of expectations) {
+    port.syncResult = { status: "failed", reason };
+    await presenter.syncReceiptProfile();
+    assert.equal(presenter.getState().statusCode, statusCode, reason);
+    assert.deepEqual(presenter.getState().printer, before);
+  }
+
+  port.failSync = true;
+  await presenter.syncReceiptProfile();
+  assert.equal(presenter.getState().statusCode, "receipt-profile-sync-failed");
+  assert.deepEqual(presenter.getState().printer, before);
+
+  // 同步结果里的资料不合规（控制字符）：整体丢弃，草稿保持不变
+  port.failSync = false;
+  port.syncResult = {
+    status: "updated",
+    version: 5,
+    printer: { ...MANAGED_PRINTER, returnPolicy: "Unsafe\u001b@", profileVersion: 5 },
+  };
+  await presenter.syncReceiptProfile();
+  assert.equal(presenter.getState().statusCode, "receipt-profile-sync-invalid");
+  assert.deepEqual(presenter.getState().printer, before);
+});
+
+test("运行时没有提供同步能力时按失败处理，设置页本身缺少「设置小票打印机」权限时不发同步，均不会误报已是最新", async () => {
+  const { port, presenter } = await managedPresenter();
+  port.omitSync = true;
+  const withoutSync = createPresenter(port);
+  await withoutSync.load();
+  await withoutSync.syncReceiptProfile();
+  assert.equal(withoutSync.getState().statusCode, "receipt-profile-sync-failed");
+
+  const noPermission = new SettingsPresenter({
+    permissions: [SETTINGS_VIEW_PERMISSION],
+    port,
+  });
+  await noPermission.load();
+  await noPermission.syncReceiptProfile();
+  assert.equal(noPermission.getState().statusCode, "permission-required");
+  assert.equal(port.syncCalls, 0);
+  void presenter;
+});
+
+test("已下发后旧的「载入门店资料」不再覆盖只读资料，一律改走同步；未下发时仍走旧载入", async () => {
+  const { port, presenter } = await managedPresenter();
+  port.syncResult = { status: "up-to-date", version: 3, printer: MANAGED_PRINTER };
+  port.receiptProfileValue = {
+    storeCode: "BNE-01",
+    brandName: "Legacy brand",
+    storeName: "Legacy store",
+    address: "",
+    phone: "",
+    abn: "",
+    returnPolicy: "",
+  };
+
+  await presenter.loadReceiptProfile();
+
+  assert.equal(port.receiptProfileCalls, 0, "不得再走旧载入接口");
+  assert.equal(port.syncCalls, 1);
+  assert.equal(presenter.getState().printer.brandName, "Hot Bargain");
+
+  const legacyPort = new FakeSettingsPort();
+  legacyPort.receiptProfileValue = port.receiptProfileValue;
+  const legacy = createPresenter(legacyPort);
+  await legacy.load();
+  await legacy.loadReceiptProfile();
+  assert.equal(legacyPort.receiptProfileCalls, 1);
+  assert.equal(legacyPort.syncCalls, 0);
+  assert.equal(legacy.getState().statusCode, "receipt-profile-loaded");
+});
+
+test("已下发时保存硬件设置：六项资料与版本原样随草稿提交（只读字段不被当作用户改动）", async () => {
+  const { port, presenter } = await managedPresenter();
+  presenter.setPrinterPaper("58mm");
+
+  await presenter.savePrinterSettings();
+
+  assert.equal(port.savedPrinters.length, 1);
+  const saved = port.savedPrinters[0];
+  assert.equal(saved?.paper, "58mm");
+  assert.equal(saved?.brandName, "Hot Bargain");
+  assert.equal(saved?.storeName, "Bankstown");
+  assert.equal(saved?.address, "1 Main St");
+  assert.equal(saved?.profileVersion, 3);
+  assert.equal(saved?.profileAckedVersion, 3);
+  assert.equal(presenter.getState().statusCode, "printer-settings-saved");
+});
+
+test("快照里的脏下发版本号（负数/小数/非数字）按 0 规整，缺失也按 0", async () => {
+  for (const dirty of [-1, 1.5, Number.NaN, undefined, "3"]) {
+    const port = new FakeSettingsPort();
+    port.snapshotValue = {
+      ...snapshot(),
+      printer: {
+        ...MANAGED_PRINTER,
+        profileVersion: dirty as unknown as number,
+        profileAckedVersion: dirty as unknown as number,
+      },
+    };
+    const presenter = createPresenter(port);
+    await presenter.load();
+    assert.equal(presenter.getState().printer.profileVersion, 0);
+    assert.equal(presenter.getState().printer.profileAckedVersion, 0);
+  }
+});
+
 class FakeSettingsPort implements SettingsControlPort {
   public squareSetup: FakeSquareSetupControlPort | undefined;
   public linklySetup: FakeLinklySetupControlPort | undefined;
@@ -2619,6 +2858,12 @@ class FakeSettingsPort implements SettingsControlPort {
   public failReceiptProfile = false;
   public receiptProfileValue: SettingsReceiptProfileDraft | null = null;
   public receiptProfileCalls = 0;
+  public failSync = false;
+  public omitSync = false;
+  public syncCalls = 0;
+  public syncResult: SettingsReceiptProfileSyncResult = {
+    status: "not-published",
+  };
   public printerScanError: unknown = null;
   public cashDrawerTestResult: SettingsCashDrawerTestResult = {
     status: "completed",
@@ -2886,6 +3131,16 @@ class FakeSettingsPort implements SettingsControlPort {
     this.receiptProfileCalls += 1;
     if (this.failReceiptProfile) throw new Error("receipt profile load failed");
     return this.receiptProfileValue;
+  }
+
+  // omitSync 模拟运行时没有提供「立即同步」能力（可选端口缺省）。
+  public get syncReceiptProfile(): SettingsControlPort["syncReceiptProfile"] {
+    if (this.omitSync) return undefined;
+    return async () => {
+      this.syncCalls += 1;
+      if (this.failSync) throw new Error("receipt profile sync failed");
+      return this.syncResult;
+    };
   }
 
   public testCashDrawer: SettingsControlPort["testCashDrawer"] = async () => {

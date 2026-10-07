@@ -12,6 +12,17 @@ export type RuntimeBackgroundWorkPort = Readonly<{
     refreshOnForeground(): Promise<unknown>;
     refreshOnNetworkAvailable(): Promise<unknown>;
   }>;
+  /**
+   * 总部下发小票资料的后台同步。缺省（设备未就绪、旧组合）时整条链路静默跳过；
+   * 实现保证永不 reject，且自身负责单飞、404 退避与失败日志。
+   */
+  receiptProfileSync?:
+    | Readonly<{
+        requestSync(
+          trigger: "startup" | "foreground" | "network" | "timer",
+        ): Promise<unknown>;
+      }>
+    | undefined;
 }>;
 
 /**
@@ -27,6 +38,7 @@ export class RuntimeWorkController {
   public constructor(private readonly services: RuntimeBackgroundWorkPort) {}
 
   public onApplicationStarted(): Promise<void> {
+    this.requestReceiptProfileSync("startup");
     return this.runWithHardware(
       () => this.services.sync.onApplicationStarted(),
       () => this.services.appUpdates?.refreshOnStartup(),
@@ -34,6 +46,7 @@ export class RuntimeWorkController {
   }
 
   public onForeground(): Promise<void> {
+    this.requestReceiptProfileSync("foreground");
     return this.runWithHardware(
       () => this.services.sync.onForeground(),
       () => this.services.appUpdates?.refreshOnForeground(),
@@ -41,9 +54,34 @@ export class RuntimeWorkController {
   }
 
   public async onNetworkChanged(isOnline: boolean): Promise<void> {
+    // 联网（含离线恢复）才去检查总部下发资料；断网不发请求，继续用本机资料。
+    if (isOnline) this.requestReceiptProfileSync("network");
     await this.services.sync.onNetworkChanged(isOnline);
     if (isOnline) {
       await this.services.appUpdates?.refreshOnNetworkAvailable();
+    }
+  }
+
+  /** 前台常驻时每 60 秒由壳层定时器调用一次，让总部下发在一分钟内生效。 */
+  public onReceiptProfileTimer(): void {
+    this.requestReceiptProfileSync("timer");
+  }
+
+  /**
+   * 下发资料同步与订单同步、外设队列互不依赖：不等待它，也不让它的异常影响其他触发器。
+   * 单飞、退避与日志都在 receiptProfileSync 内部处理。
+   */
+  private requestReceiptProfileSync(
+    trigger: "startup" | "foreground" | "network" | "timer",
+  ): void {
+    const port = this.services.receiptProfileSync;
+    if (!port) return;
+    try {
+      void Promise.resolve(port.requestSync(trigger)).catch(() => {
+        // 同步失败只记日志（控制器内部处理），这里不再重复上抛。
+      });
+    } catch {
+      // 同步入口抛出同步异常时同样不能影响启动、前台与联网流程。
     }
   }
 

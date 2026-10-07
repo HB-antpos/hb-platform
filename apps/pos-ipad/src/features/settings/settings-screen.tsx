@@ -75,6 +75,7 @@ export type SettingsScreenPresenter = Pick<
   | "loadSquareDevices"
   | "loadSquareLocations"
   | "loadReceiptProfile"
+  | "syncReceiptProfile"
   | "requestApiAddressChange"
   | "requestAppRestart"
   | "requestCatalogReset"
@@ -222,7 +223,11 @@ export function SettingsScreen({
         </View>
 
         {state.statusCode ? (
-          <StatusBanner locale={locale} statusCode={state.statusCode} />
+          <StatusBanner
+            locale={locale}
+            statusCode={state.statusCode}
+            receiptProfileVersion={state.printer.profileVersion}
+          />
         ) : null}
 
         <View style={styles.workspace} testID="settings-workspace">
@@ -2232,17 +2237,32 @@ function ReceiptStoreProfileCard({
     key: SettingsCopyKey,
     values?: Readonly<Record<string, string | number>>,
   ) => settingsText(locale, key, values);
+  // 已应用总部下发资料（profileVersion > 0）：六项资料只读，按钮改为「立即同步」。
+  const managed = state.printer.profileVersion > 0;
+  const fieldsDisabled = disabled || managed;
   return (
     <SectionCard
       eyebrow={t("eyebrow.storeProfile")}
       title={t("peripherals.storeProfile")}
     >
+      {managed ? (
+        <View testID="settings-receipt-profile-managed">
+          <Text style={styles.sectionCopy}>
+            {t("peripherals.storeProfileManaged")}
+          </Text>
+          <Text style={styles.sectionCopy}>
+            {t("peripherals.storeProfileVersion", {
+              version: state.printer.profileVersion,
+            })}
+          </Text>
+        </View>
+      ) : null}
       <FieldLabel label={t("field.receiptBrandName")} />
       <PosKeyboardAwareTextInput
         accessibilityLabel={t("field.receiptBrandName")}
         autoCapitalize="words"
         autoCorrect={false}
-        editable={!disabled}
+        editable={!fieldsDisabled}
         maxLength={120}
         onChangeText={(value) => presenter.setReceiptBrandName(value)}
         style={styles.textInput}
@@ -2254,7 +2274,7 @@ function ReceiptStoreProfileCard({
         accessibilityLabel={t("field.receiptStoreName")}
         autoCapitalize="words"
         autoCorrect={false}
-        editable={!disabled}
+        editable={!fieldsDisabled}
         maxLength={120}
         onChangeText={(value) => presenter.setReceiptStoreName(value)}
         style={styles.textInput}
@@ -2264,7 +2284,7 @@ function ReceiptStoreProfileCard({
       <FieldLabel label={t("field.receiptAddress")} />
       <PosKeyboardAwareTextInput
         accessibilityLabel={t("field.receiptAddress")}
-        editable={!disabled}
+        editable={!fieldsDisabled}
         maxLength={240}
         multiline
         onChangeText={(value) => presenter.setReceiptAddress(value)}
@@ -2278,7 +2298,7 @@ function ReceiptStoreProfileCard({
         accessibilityLabel={t("field.receiptPhone")}
         autoCapitalize="none"
         autoCorrect={false}
-        editable={!disabled}
+        editable={!fieldsDisabled}
         maxLength={60}
         onChangeText={(value) => presenter.setReceiptPhone(value)}
         style={styles.textInput}
@@ -2290,7 +2310,7 @@ function ReceiptStoreProfileCard({
         accessibilityLabel={t("field.receiptAbn")}
         autoCapitalize="characters"
         autoCorrect={false}
-        editable={!disabled}
+        editable={!fieldsDisabled}
         maxLength={32}
         onChangeText={(value) => presenter.setReceiptAbn(value)}
         style={styles.textInput}
@@ -2300,7 +2320,7 @@ function ReceiptStoreProfileCard({
       <FieldLabel label={t("field.receiptReturnPolicy")} />
       <PosKeyboardAwareTextInput
         accessibilityLabel={t("field.receiptReturnPolicy")}
-        editable={!disabled}
+        editable={!fieldsDisabled}
         maxLength={500}
         multiline
         onChangeText={(value) => presenter.setReceiptReturnPolicy(value)}
@@ -2312,8 +2332,16 @@ function ReceiptStoreProfileCard({
       <View style={styles.actionRow}>
         <ActionButton
           disabled={disabled}
-          label={t("peripherals.loadStoreProfile")}
-          onPress={() => void presenter.loadReceiptProfile()}
+          label={t(
+            managed
+              ? "peripherals.syncStoreProfile"
+              : "peripherals.loadStoreProfile",
+          )}
+          onPress={() =>
+            void (managed
+              ? presenter.syncReceiptProfile()
+              : presenter.loadReceiptProfile())
+          }
           testID="settings-receipt-profile-load"
           tone="secondary"
         />
@@ -3422,7 +3450,13 @@ function EmptyPanel({
 function StatusBanner({
   locale,
   statusCode,
-}: Readonly<{ locale: SettingsLocale; statusCode: SettingsStatusCode }>) {
+  receiptProfileVersion,
+}: Readonly<{
+  locale: SettingsLocale;
+  statusCode: SettingsStatusCode;
+  /** 「已更新到版本 N」文案用：同步成功后本机已应用的下发版本。 */
+  receiptProfileVersion: number;
+}>) {
   const success = isSuccessStatus(statusCode);
   return (
     <View
@@ -3433,7 +3467,9 @@ function StatusBanner({
       ]}
       testID="settings-status"
     >
-      <Text style={styles.statusText}>{statusCopy(locale, statusCode)}</Text>
+      <Text style={styles.statusText}>
+        {statusCopy(locale, statusCode, { version: receiptProfileVersion })}
+      </Text>
     </View>
   );
 }
@@ -3586,8 +3622,9 @@ function confirmationTitle(
 function statusCopy(
   locale: SettingsLocale,
   statusCode: SettingsStatusCode,
+  values?: Readonly<Record<string, string | number>>,
 ): string {
-  return settingsText(locale, `status.${statusCode}` as SettingsCopyKey);
+  return settingsText(locale, `status.${statusCode}` as SettingsCopyKey, values);
 }
 
 function isSuccessStatus(statusCode: SettingsStatusCode): boolean {
@@ -3612,6 +3649,8 @@ function isSuccessStatus(statusCode: SettingsStatusCode): boolean {
     "printer-settings-saved",
     "printer-test-passed",
     "receipt-profile-loaded",
+    "receipt-profile-synced",
+    "receipt-profile-up-to-date",
     "scanner-test-passed",
   ].includes(statusCode);
 }
