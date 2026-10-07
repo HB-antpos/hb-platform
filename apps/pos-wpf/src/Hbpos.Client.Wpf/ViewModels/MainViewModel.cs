@@ -1374,6 +1374,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         if (Session.CashierSession is not null)
         {
+            if (CurrentScreen is PaymentViewModel payment)
+            {
+                // 付款页扫码多半是代金券：弹窗打开就填进券号框；弹窗没开则提示先点「代金券」。
+                if (payment.TryAcceptScannedVoucherCode(barcode))
+                {
+                    ConsoleLog.Write(
+                        "RawScanner",
+                        $"keyboard fallback scan routed to voucher entry barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(barcode)}");
+                    return true;
+                }
+
+                if (payment.CanScanVoucherAfterOpeningEntry)
+                {
+                    StatusMessage = _localization.T("shell.scanner.status.openVoucherEntryFirst");
+                    ConsoleLog.Write(
+                        "RawScanner",
+                        $"keyboard fallback scan on payment screen without voucher entry barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(barcode)}");
+                    return true;
+                }
+            }
+
             // 已登录时，设置、日结、付款等不接收扫码的页面不能把条码当员工码登录：
             // 否则商品条码会提示「收银员条码无效」，同事的员工码还会直接顶替当前收银员。
             StatusMessage = _localization.T("shell.scanner.status.unsupportedScreen");

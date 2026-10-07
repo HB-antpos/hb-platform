@@ -6858,6 +6858,38 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public async Task Payment_page_voucher_dialog_accepts_scan_routed_from_keyboard_fallback_without_auto_confirm()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-144S", "Voucher Scan Tea", "930144S", PriceSourceKind.StoreRetailPrice, 5m));
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            TenderToAdd = new PaymentTender(PaymentMethodKind.Cash, 0m)
+        };
+        var viewModel = new PaymentViewModel(cart, workflow, Session, paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(VoucherEnabled: true)));
+
+        // 弹窗没开时付款页不接这次扫码，由主窗口提示先点「代金券」。
+        Assert.False(viewModel.TryAcceptScannedVoucherCode("hb-voucher-77"));
+        Assert.True(viewModel.CanScanVoucherAfterOpeningEntry);
+
+        viewModel.TenderAmountText = "5";
+        viewModel.OpenVoucherEntryCommand.Execute(null);
+        viewModel.VoucherEntryKeyCommand.Execute("9");
+
+        Assert.True(viewModel.TryAcceptScannedVoucherCode("  hb-voucher-77 "));
+
+        // 与扫码直接进输入框一致：整体替换、转大写，不自动确认。
+        Assert.Equal("HB-VOUCHER-77", viewModel.VoucherEntryText);
+        Assert.True(viewModel.IsVoucherEntryDialogOpen);
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal(0, workflow.AddTenderCallCount);
+
+        await viewModel.ConfirmVoucherEntryCommand.ExecuteAsync(null);
+
+        Assert.Equal("HB-VOUCHER-77", Assert.Single(viewModel.PaymentTenders).Reference);
+    }
+
+    [Fact]
     public async Task Payment_page_voucher_dialog_requires_code_before_confirming()
     {
         var cart = new PosCartService();
