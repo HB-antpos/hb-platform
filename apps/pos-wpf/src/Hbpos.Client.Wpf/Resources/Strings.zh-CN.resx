@@ -2321,6 +2321,8 @@
   <data name="dailyClose.linklySettlement.refresh" xml:space="preserve"><value>刷新</value></data>
   <data name="dailyClose.linklySettlement.settleAndPrint" xml:space="preserve"><value>结算并打印</value></data>
   <data name="dailyClose.linklySettlement.pinpadOffline" xml:space="preserve"><value>刷卡机离线，Linkly 结算未发送。请检查刷卡机连接后，在「Linkly 结算」页签点「结算并打印」重试。</value></data>
+  <data name="dailyClose.linklySettlement.checkingTerminal" xml:space="preserve"><value>正在检查刷卡机状态...</value></data>
+  <data name="dailyClose.linklySettlement.terminalNotReady" xml:space="preserve"><value>刷卡机未就绪，Linkly 结算未发送（{0}）。请确认 Linkly 程序已打开、刷卡机已连接后，在「Linkly 结算」页签点「结算并打印」重试。</value></data>
   <data name="dailyClose.linklySettlement.confirm.title" xml:space="preserve"><value>确认刷卡机日结</value></data>
   <data name="dailyClose.linklySettlement.confirm.message" xml:space="preserve"><value>确定要向刷卡机提交 {0:d} 的 Linkly 日结并打印银行小票吗？</value></data>
   <data name="dailyClose.linklySettlement.time" xml:space="preserve"><value>时间</value></data>

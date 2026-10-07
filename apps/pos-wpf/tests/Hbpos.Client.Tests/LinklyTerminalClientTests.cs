@@ -1428,6 +1428,8 @@ public sealed class LinklyTerminalClientTests
         var result = await client.TestConnectionAsync("127.0.0.1", 2011, TimeSpan.FromSeconds(1));
 
         Assert.False(result.Succeeded);
+        // 结算预检靠这个标记区分“刷卡机离线”与“连不上/超时”，不能靠匹配文案。
+        Assert.True(result.PinPadOffline);
         Assert.Contains("offline (PF)", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, eftClient.DisconnectCallCount);
         Assert.True(eftClient.Disposed);
@@ -1485,6 +1487,8 @@ public sealed class LinklyTerminalClientTests
         var result = await client.TestConnectionAsync("127.0.0.1", 2011, TimeSpan.FromSeconds(1));
 
         Assert.False(result.Succeeded);
+        // 非 PF 的失败不是“离线”，不能置离线标记。
+        Assert.False(result.PinPadOffline);
         Assert.Contains("NOT READY (XX)", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 

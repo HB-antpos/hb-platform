@@ -15,8 +15,32 @@ public sealed record LinklySettlementManualResolutionResult(
     LocalLinklySettlementRecord Settlement,
     string Message);
 
+// 结算前的刷卡机预检结果。Ready=false 时结算请求不会发出，也不会产生任何本地或服务器记录。
+public sealed record LinklySettlementTerminalCheck(
+    bool Ready,
+    bool Offline = false,
+    string? Message = null)
+{
+    public static LinklySettlementTerminalCheck Passed { get; } = new(true);
+}
+
+// 刷卡机未就绪、结算被拦下：此时尚未创建结算记录，没有需要上传或处理的数据，收银员排除故障后可直接重试。
+public sealed class LinklySettlementTerminalUnavailableException(LinklySettlementTerminalCheck check)
+    : InvalidOperationException(check.Message ?? "The card terminal is not ready, so the Linkly settlement was not sent.")
+{
+    public LinklySettlementTerminalCheck Check { get; } = check;
+}
+
 public interface ILinklySettlementService
 {
+    // 发送结算前先确认刷卡机在线：离线时直接说明、不发送，避免留下没有金额的失败结算记录。
+    // 默认视为通过，不支持预检的实现保持原有行为。
+    Task<LinklySettlementTerminalCheck> CheckTerminalReadyAsync(
+        PosSessionState session,
+        DateTime businessDate,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(LinklySettlementTerminalCheck.Passed);
+
     Task<LinklySettlementExecutionResult> SettleAndPrintAsync(
         PosSessionState session,
         DateTime businessDate,
@@ -59,6 +83,54 @@ public sealed class LinklySettlementService(
     ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
     IPaymentMethodSettingsService? paymentMethodSettingsService = null) : ILinklySettlementService
 {
+    // 预检只是问一次刷卡机状态，用短超时：刷卡机真离线时不能让收银员干等业务级超时。
+    private static readonly TimeSpan TerminalCheckTimeout = TimeSpan.FromSeconds(10);
+
+    public async Task<LinklySettlementTerminalCheck> CheckTerminalReadyAsync(
+        PosSessionState session,
+        DateTime businessDate,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
+
+        // 已有未决（Pending/Unknown）记录时，结算本来就会被阻塞并给出专门提示，不能在这里误报成“刷卡机离线”。
+        var existingSettlements = await settlementRepository.GetByBusinessDateAsync(
+            session.StoreCode,
+            session.DeviceCode,
+            businessDate,
+            cancellationToken);
+        if (existingSettlements.Any(settlement =>
+                settlement.Status is LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown))
+        {
+            return LinklySettlementTerminalCheck.Passed;
+        }
+
+        return await CheckTerminalAsync(settings, cancellationToken);
+    }
+
+    private async Task<LinklySettlementTerminalCheck> CheckTerminalAsync(
+        CardTerminalSettings settings,
+        CancellationToken cancellationToken)
+    {
+        // 只有本地 IP 模式能直接向 EFT-Client 查刷卡机状态；云端模式没有等价的轻量查询，保持原有行为。
+        if (settings.Processor != CardProcessorKind.Linkly ||
+            CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode) != LinklyConnectionMode.LocalIp)
+        {
+            return LinklySettlementTerminalCheck.Passed;
+        }
+
+        var result = await terminalClient.TestConnectionAsync(
+            settings.LinklyHost,
+            settings.LinklyPort,
+            TerminalCheckTimeout,
+            cancellationToken);
+
+        // 在线但尚未登录银行网络（Succeeded 且 PinPadLoggedOn=false）仍放行：终端会自己回银行响应，不属于离线。
+        return result.Succeeded
+            ? LinklySettlementTerminalCheck.Passed
+            : new LinklySettlementTerminalCheck(false, result.PinPadOffline, result.Message);
+    }
+
     public async Task<bool> ShouldAutoSettleAfterDailyCloseAsync(
         PosSessionState session,
         DateTime businessDate,
@@ -129,6 +201,25 @@ public sealed class LinklySettlementService(
         if (unresolvedSettlement is not null)
         {
             return await RecoverResumableSettlementAsync(settings, unresolvedSettlement, cancellationToken);
+        }
+
+        // 刷卡机离线或连不上时在这里拦下：此时还没创建任何记录，本地和服务器都不会留下没有金额的失败结算。
+        // 必须放在未决记录分支之后，已有未决记录时的阻塞提示不受影响；VM 在确认框之前也会预检一次，这里兜住确认期间掉线。
+        var terminalCheck = await CheckTerminalAsync(settings, cancellationToken);
+        if (!terminalCheck.Ready)
+        {
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"settlement blocked before send: terminal not ready offline={terminalCheck.Offline} message={terminalCheck.Message}",
+                new ApplicationLogContext(
+                    Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = session.StoreCode,
+                        ["deviceCode"] = session.DeviceCode,
+                        ["mode"] = settings.LinklyConnectionMode.ToString(),
+                        ["result"] = terminalCheck.Offline ? "pinpad-offline" : "terminal-not-ready"
+                    }));
+            throw new LinklySettlementTerminalUnavailableException(terminalCheck);
         }
 
         var requestedAt = DateTimeOffset.UtcNow;
