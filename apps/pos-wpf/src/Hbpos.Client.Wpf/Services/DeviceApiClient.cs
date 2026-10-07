@@ -203,7 +203,10 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
         return result.Data;
     }
 
-    private static bool IsApiResultEnvelope(JsonElement root)
+    /// <summary>
+    /// 判断 JSON 是否为本 API 的 ApiResult 信封（带布尔 success 字段的对象）；收银员登录/会话刷新客户端共用此口径。
+    /// </summary>
+    internal static bool IsApiResultEnvelope(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object)
         {
