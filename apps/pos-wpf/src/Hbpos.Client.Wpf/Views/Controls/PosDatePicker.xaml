@@ -1,0 +1,231 @@
+<UserControl x:Class="Hbpos.Client.Wpf.Views.Controls.PosDatePicker"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
+             xmlns:controls="clr-namespace:Hbpos.Client.Wpf.Views.Controls"
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+             x:Name="Root">
+    <UserControl.Resources>
+        <!-- 前后一天、翻月按钮：触屏按钮，前后一天的宽高由 StepButtonWidth / ButtonHeight 决定（不小于 44）。 -->
+        <Style x:Key="PosDatePickerIconButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+
+        <!-- 月历日期格子：52px 高，选中日主色填充、今天主色描边，未来日期不可点（基础样式禁用时半透明）。 -->
+        <Style x:Key="PosDatePickerDayButtonStyle" TargetType="Button" BasedOn="{StaticResource PosButtonBaseStyle}">
+            <Setter Property="Height" Value="52" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsInDisplayMonth}" Value="False">
+                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsToday}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                    <Setter Property="Foreground" Value="White" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <Button x:Name="PreviousDayButton"
+                Grid.Column="0"
+                Width="{Binding StepButtonWidth, ElementName=Root}"
+                Height="{Binding ButtonHeight, ElementName=Root}"
+                Margin="0,0,6,0"
+                Click="PreviousDayButtonClick"
+                ToolTip="{loc:Loc datePicker.previousDay}"
+                AutomationProperties.Name="{loc:Loc datePicker.previousDay}"
+                Style="{StaticResource PosDatePickerIconButtonStyle}">
+            <materialDesign:PackIcon Kind="ChevronLeft" Width="26" Height="26" />
+        </Button>
+
+        <Button x:Name="DateButton"
+                Grid.Column="1"
+                Height="{Binding ButtonHeight, ElementName=Root}"
+                MinWidth="{Binding DateButtonMinWidth, ElementName=Root}"
+                MinHeight="0"
+                Padding="12,0"
+                Click="DateButtonClick"
+                AutomationProperties.Name="{Binding Label, ElementName=Root}"
+                Style="{StaticResource PosSecondaryButtonStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <materialDesign:PackIcon x:Name="CalendarIcon"
+                                         Grid.Column="0"
+                                         Kind="CalendarMonthOutline"
+                                         Width="20"
+                                         Height="20"
+                                         Margin="0,0,10,0"
+                                         VerticalAlignment="Center"
+                                         Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock x:Name="LabelText"
+                               Text="{Binding Label, ElementName=Root}"
+                               FontSize="11"
+                               FontWeight="Normal"
+                               Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                    <TextBlock x:Name="DateText"
+                               FontSize="{Binding DateFontSize, ElementName=Root}"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosTextBrush}" />
+                </StackPanel>
+                <materialDesign:PackIcon x:Name="DropDownGlyph"
+                                         Grid.Column="2"
+                                         Kind="ChevronDown"
+                                         Width="20"
+                                         Height="20"
+                                         Margin="10,0,0,0"
+                                         VerticalAlignment="Center"
+                                         Foreground="{DynamicResource PosTextSecondaryBrush}" />
+            </Grid>
+        </Button>
+
+        <Button x:Name="NextDayButton"
+                Grid.Column="2"
+                Width="{Binding StepButtonWidth, ElementName=Root}"
+                Height="{Binding ButtonHeight, ElementName=Root}"
+                Margin="6,0,0,0"
+                Click="NextDayButtonClick"
+                ToolTip="{loc:Loc datePicker.nextDay}"
+                AutomationProperties.Name="{loc:Loc datePicker.nextDay}"
+                Style="{StaticResource PosDatePickerIconButtonStyle}">
+            <materialDesign:PackIcon Kind="ChevronRight" Width="26" Height="26" />
+        </Button>
+
+        <!-- 点外面自动关闭；月历每格 52px、翻月和快捷按钮 48px，手指能直接点准。 -->
+        <Popup x:Name="CalendarPopup"
+               PlacementTarget="{Binding ElementName=DateButton}"
+               Placement="Bottom"
+               VerticalOffset="6"
+               StaysOpen="False"
+               AllowsTransparency="True">
+            <Border Width="416"
+                    Margin="0,0,10,10"
+                    Padding="12"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.18" />
+                </Border.Effect>
+                <StackPanel>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="PreviousMonthButton"
+                                Grid.Column="0"
+                                Width="48"
+                                Height="48"
+                                Click="PreviousMonthButtonClick"
+                                AutomationProperties.Name="{loc:Loc datePicker.previousMonth}"
+                                Style="{StaticResource PosDatePickerIconButtonStyle}">
+                            <materialDesign:PackIcon Kind="ChevronLeft" Width="26" Height="26" />
+                        </Button>
+                        <TextBlock x:Name="MonthTitleText"
+                                   Grid.Column="1"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontSize="18"
+                                   FontWeight="SemiBold" />
+                        <Button x:Name="NextMonthButton"
+                                Grid.Column="2"
+                                Width="48"
+                                Height="48"
+                                Click="NextMonthButtonClick"
+                                AutomationProperties.Name="{loc:Loc datePicker.nextMonth}"
+                                Style="{StaticResource PosDatePickerIconButtonStyle}">
+                            <materialDesign:PackIcon Kind="ChevronRight" Width="26" Height="26" />
+                        </Button>
+                    </Grid>
+
+                    <ItemsControl x:Name="DayNameItems" Margin="0,0,0,4" Focusable="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="7" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"
+                                           HorizontalAlignment="Center"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <ItemsControl x:Name="DayItems" Focusable="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="7" Rows="6" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type controls:PosDatePickerDayCell}">
+                                <Button Content="{Binding DayText}"
+                                        Tag="{Binding Date}"
+                                        IsEnabled="{Binding IsSelectable}"
+                                        AutomationProperties.Name="{Binding AccessibleName}"
+                                        Click="DayButtonClick"
+                                        Style="{StaticResource PosDatePickerDayButtonStyle}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border Margin="0,10,0,0"
+                            Padding="0,10,0,0"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
+                            BorderThickness="0,1,0,0">
+                        <UniformGrid Columns="2">
+                            <Button x:Name="YesterdayButton"
+                                    Height="48"
+                                    Margin="0,0,4,0"
+                                    Content="{loc:Loc datePicker.yesterday}"
+                                    Click="YesterdayButtonClick"
+                                    Style="{StaticResource PosSecondaryButtonStyle}" />
+                            <Button x:Name="TodayButton"
+                                    Height="48"
+                                    Margin="4,0,0,0"
+                                    Content="{loc:Loc datePicker.today}"
+                                    Click="TodayButtonClick"
+                                    BorderBrush="{DynamicResource PosPrimaryBrush}"
+                                    Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                    Style="{StaticResource PosSecondaryButtonStyle}" />
+                        </UniformGrid>
+                    </Border>
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

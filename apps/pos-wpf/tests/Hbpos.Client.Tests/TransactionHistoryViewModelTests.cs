@@ -1348,6 +1348,59 @@ public sealed class TransactionHistoryViewModelTests
         Assert.Equal(today.Date, viewModel.DateTo);
     }
 
+    [Theory]
+    [InlineData(TransactionHistoryViewModel.QuickDateRangeToday, 0, 0)]
+    [InlineData(TransactionHistoryViewModel.QuickDateRangeYesterday, -1, -1)]
+    [InlineData(TransactionHistoryViewModel.QuickDateRangeLast7Days, -6, 0)]
+    public async Task Quick_date_range_sets_dates_and_queries_immediately(
+        string range,
+        int fromOffsetDays,
+        int toOffsetDays)
+    {
+        var now = new DateTimeOffset(2026, 10, 8, 10, 0, 0, TimeSpan.Zero);
+        var receiptQuery = new CapturingReceiptQueryService();
+        var viewModel = new TransactionHistoryViewModel(
+            receiptQuery,
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            timeProvider: new FixedUtcTimeProvider(now))
+        {
+            DateFrom = new DateTime(2026, 9, 1),
+            DateTo = new DateTime(2026, 9, 2)
+        };
+
+        await viewModel.ApplyQuickDateRangeCommand.ExecuteAsync(range);
+
+        var today = now.Date;
+        Assert.Equal(today.AddDays(fromOffsetDays), viewModel.DateFrom);
+        Assert.Equal(today.AddDays(toOffsetDays), viewModel.DateTo);
+        Assert.Equal(1, receiptQuery.QueryCallCount);
+        Assert.Equal(today.AddDays(fromOffsetDays), receiptQuery.LastQuery?.SoldFrom?.Date);
+        Assert.Equal(today.AddDays(toOffsetDays), receiptQuery.LastQuery?.SoldTo?.Date);
+    }
+
+    [Fact]
+    public async Task Unknown_quick_date_range_keeps_dates_and_does_not_query()
+    {
+        var receiptQuery = new CapturingReceiptQueryService();
+        var viewModel = new TransactionHistoryViewModel(
+            receiptQuery,
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession())
+        {
+            DateFrom = new DateTime(2026, 9, 1),
+            DateTo = new DateTime(2026, 9, 2)
+        };
+
+        await viewModel.ApplyQuickDateRangeCommand.ExecuteAsync("next-week");
+
+        Assert.Equal(new DateTime(2026, 9, 1), viewModel.DateFrom);
+        Assert.Equal(new DateTime(2026, 9, 2), viewModel.DateTo);
+        Assert.Equal(0, receiptQuery.QueryCallCount);
+    }
+
     [Fact]
     public async Task Remote_history_shows_reprint_and_hides_recall()
     {

@@ -3290,4 +3290,25 @@
   <data name="dailyClose.linklySettlement.notToday" xml:space="preserve">
     <value>Linkly 结算只能在营业日期为今天时进行。请把营业日期改为 {0:yyyy-MM-dd} 后再试。</value>
   </data>
+  <data name="datePicker.previousDay" xml:space="preserve">
+    <value>前一天</value>
+  </data>
+  <data name="datePicker.nextDay" xml:space="preserve">
+    <value>后一天</value>
+  </data>
+  <data name="datePicker.previousMonth" xml:space="preserve">
+    <value>上个月</value>
+  </data>
+  <data name="datePicker.nextMonth" xml:space="preserve">
+    <value>下个月</value>
+  </data>
+  <data name="datePicker.today" xml:space="preserve">
+    <value>今天</value>
+  </data>
+  <data name="datePicker.yesterday" xml:space="preserve">
+    <value>昨天</value>
+  </data>
+  <data name="history.quickRange.last7Days" xml:space="preserve">
+    <value>近 7 天</value>
+  </data>
 </root>

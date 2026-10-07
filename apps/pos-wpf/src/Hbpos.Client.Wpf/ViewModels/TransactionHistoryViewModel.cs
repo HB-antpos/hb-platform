@@ -412,6 +412,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         SelectAllReuploadableCommand = new RelayCommand(SelectAllReuploadable, CanStartReupload);
         ReuploadSelectedCommand = new AsyncRelayCommand(ReuploadSelectedAsync, CanStartReupload);
         ReuploadDateRangeCommand = new AsyncRelayCommand(ReuploadDateRangeAsync, CanReuploadDateRange);
+        ApplyQuickDateRangeCommand = new AsyncRelayCommand<string>(ApplyQuickDateRangeAsync);
         DeleteHeldOrderCommand = new AsyncRelayCommand<HistoryOrderListItem>(DeleteHeldOrderAsync, CanDeleteHeldOrder);
         ShareHeldOrderCommand = new AsyncRelayCommand<HistoryOrderListItem>(ShareHeldOrderAsync, CanShareHeldOrder);
         ForceReleaseHeldOrderCommand = new RelayCommand<HistoryOrderListItem>(RequestForceRelease, CanForceReleaseOrder);
@@ -551,6 +552,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     internal IReadOnlyList<HistoryOrderDetailLine> OrderDetailLinesForTests => _orderDetailLines;
 
     public IAsyncRelayCommand LoadCommand { get; }
+
+    /// <summary>筛选栏快捷日期范围（参数见 QuickDateRange* 常量），设好起止日期后立即按当前筛选查询。</summary>
+    public IAsyncRelayCommand<string> ApplyQuickDateRangeCommand { get; }
 
     public IRelayCommand ReturnToPosCommand { get; }
 
@@ -931,6 +935,32 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         var today = _timeProvider.GetLocalNow().Date;
         DateFrom = today;
         DateTo = today;
+    }
+
+    public const string QuickDateRangeToday = "today";
+    public const string QuickDateRangeYesterday = "yesterday";
+    public const string QuickDateRangeLast7Days = "last7days";
+
+    private Task ApplyQuickDateRangeAsync(string? range)
+    {
+        var today = _timeProvider.GetLocalNow().Date;
+        (DateTime From, DateTime To)? dates = range switch
+        {
+            QuickDateRangeToday => (today, today),
+            QuickDateRangeYesterday => (today.AddDays(-1), today.AddDays(-1)),
+            // 近 7 天含今天：今天往前推 6 天。
+            QuickDateRangeLast7Days => (today.AddDays(-6), today),
+            _ => null
+        };
+        if (dates is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        DateFrom = dates.Value.From;
+        DateTo = dates.Value.To;
+        // 不走 LoadCommand：它的扫码去重以查询框文字为键，快捷按钮不是扫码，不能被同一文字的去重吞掉。
+        return LoadAsync();
     }
 
     partial void OnSelectedSourceOptionChanged(HistorySourceOption? value)

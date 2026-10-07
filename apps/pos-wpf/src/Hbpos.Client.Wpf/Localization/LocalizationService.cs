@@ -69,11 +69,13 @@ public sealed class LocalizationService : ILocalizationService
         if (Equals(_currentCulture, supportedCulture))
         {
             ApplyThreadCulture(supportedCulture);
+            ReapplyThreadCultureAfterCurrentCallback();
             return;
         }
 
         _currentCulture = supportedCulture;
         ApplyThreadCulture(_currentCulture);
+        ReapplyThreadCultureAfterCurrentCallback();
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentCulture)));
         CultureChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -150,6 +152,24 @@ public sealed class LocalizationService : ILocalizationService
         }
 
         return $"[[{key}]]";
+    }
+
+    /// <summary>
+    /// 关键逻辑：CultureInfo.CurrentCulture 存在 AsyncLocal 里。运行中切换语言走 ShellCultureService.ApplyAsync 等 async 方法，
+    /// 在其同步段里设置的线程区域性会在 async 方法返回时被还原，界面线程停在启动时的语言
+    /// （中文启动后切到英文，日期、星期仍按中文显示）。这里再投递一次到当前同步上下文：投递的回调不在任何 async 方法里，
+    /// WPF 调度器会把回调结束时的区域性保留到界面线程上。只设线程区域性，DefaultThread* 已在上面同步设好。
+    /// </summary>
+    private void ReapplyThreadCultureAfterCurrentCallback()
+    {
+        SynchronizationContext.Current?.Post(
+            static state =>
+            {
+                var culture = ((LocalizationService)state!)._currentCulture;
+                CultureInfo.CurrentCulture = culture;
+                CultureInfo.CurrentUICulture = culture;
+            },
+            this);
     }
 
     private static void ApplyThreadCulture(CultureInfo culture)

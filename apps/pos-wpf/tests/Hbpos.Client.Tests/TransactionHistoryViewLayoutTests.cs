@@ -485,10 +485,27 @@ public sealed class TransactionHistoryViewLayoutTests
                 (string?)element.Attribute(x + "Name") == filterName));
         }
 
-        var datePickers = filterPanel.Descendants(presentation + "DatePicker").ToArray();
+        // 日期范围改用触屏日期选择器（不允许未来日期），并带今天 / 昨天 / 近 7 天快捷范围。
+        Assert.Empty(filterPanel.Descendants(presentation + "DatePicker"));
+        XNamespace controls = "clr-namespace:Hbpos.Client.Wpf.Views.Controls";
+        var datePickers = filterPanel.Descendants(controls + "PosDatePicker").ToArray();
         Assert.Equal(2, datePickers.Length);
         Assert.All(datePickers, picker =>
-            Assert.Equal("Short", (string?)picker.Attribute("SelectedDateFormat")));
+        {
+            Assert.Equal("44", (string?)picker.Attribute("ButtonHeight"));
+            Assert.Null(picker.Attribute("AllowFutureDates"));
+        });
+        var quickRangeParameters = filterPanel.Descendants(presentation + "Button")
+            .Where(button => (string?)button.Attribute("Command") == "{Binding ApplyQuickDateRangeCommand}")
+            .Select(button => (string?)button.Attribute("CommandParameter") ?? string.Empty)
+            .ToArray();
+        Assert.Equal(
+            [
+                TransactionHistoryViewModel.QuickDateRangeToday,
+                TransactionHistoryViewModel.QuickDateRangeYesterday,
+                TransactionHistoryViewModel.QuickDateRangeLast7Days,
+            ],
+            quickRangeParameters);
         Assert.Contains(datePickers, picker =>
             (string?)picker.Attribute("AutomationProperties.AutomationId") == "TransactionHistoryDateFrom");
         Assert.Contains(datePickers, picker =>

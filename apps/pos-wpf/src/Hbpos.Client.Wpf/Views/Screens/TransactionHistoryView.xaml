@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:converters="clr-namespace:Hbpos.Client.Wpf.Converters"
+             xmlns:controls="clr-namespace:Hbpos.Client.Wpf.Views.Controls"
              xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
              xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -443,49 +444,62 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel x:Name="HistoryDateRangeFilter" Grid.Column="0" Width="286">
+                        <!-- 日期范围：开始 / 结束两个触屏日期按钮（不能选未来日期），右侧今天、昨天、近 7 天快捷范围点了立即查询。 -->
+                        <StackPanel x:Name="HistoryDateRangeFilter" Grid.Column="0">
                             <TextBlock Text="{loc:Loc history.dateRangeLabel}"
                                        Style="{StaticResource HistoryFilterLabelStyle}" />
-                            <Border Height="44"
-                                    Padding="2,0"
-                                    Background="{DynamicResource PosSurfaceBrush}"
-                                    BorderBrush="{DynamicResource PosBorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="7">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="18" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <DatePicker SelectedDate="{Binding DateFrom, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                SelectedDateFormat="Short"
-                                                Height="42"
-                                                FontSize="12"
-                                                BorderThickness="0"
-                                                Background="Transparent"
-                                                VerticalContentAlignment="Center"
-                                                AutomationProperties.AutomationId="TransactionHistoryDateFrom"
-                                                AutomationProperties.Name="{loc:Loc history.dateRangeLabel}"
-                                                ToolTip="{loc:Loc history.dateRangeLabel}" />
-                                    <TextBlock Grid.Column="1"
-                                               Text="-"
-                                               Foreground="{DynamicResource PosSubtleForegroundBrush}"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center" />
-                                    <DatePicker Grid.Column="2"
-                                                SelectedDate="{Binding DateTo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                SelectedDateFormat="Short"
-                                                Height="42"
-                                                FontSize="12"
-                                                BorderThickness="0"
-                                                Background="Transparent"
-                                                VerticalContentAlignment="Center"
-                                                AutomationProperties.AutomationId="TransactionHistoryDateTo"
-                                                AutomationProperties.Name="{loc:Loc history.dateRangeLabel}"
-                                                ToolTip="{loc:Loc history.dateRangeLabel}" />
-                                </Grid>
-                            </Border>
+                            <StackPanel Orientation="Horizontal">
+                                <controls:PosDatePicker SelectedDate="{Binding DateFrom, Mode=TwoWay}"
+                                                        IncludeDayOfWeek="False"
+                                                        ShowDropDownGlyph="False"
+                                                        ButtonHeight="44"
+                                                        DateButtonMinWidth="0"
+                                                        DateFontSize="14"
+                                                        AutomationProperties.AutomationId="TransactionHistoryDateFrom"
+                                                        AutomationProperties.Name="{loc:Loc history.dateRangeLabel}" />
+                                <TextBlock Text="-"
+                                           Margin="6,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource PosSubtleForegroundBrush}" />
+                                <controls:PosDatePicker SelectedDate="{Binding DateTo, Mode=TwoWay}"
+                                                        IncludeDayOfWeek="False"
+                                                        ShowDropDownGlyph="False"
+                                                        ButtonHeight="44"
+                                                        DateButtonMinWidth="0"
+                                                        DateFontSize="14"
+                                                        AutomationProperties.AutomationId="TransactionHistoryDateTo"
+                                                        AutomationProperties.Name="{loc:Loc history.dateRangeLabel}" />
+                                <StackPanel x:Name="HistoryQuickDateRanges"
+                                            Orientation="Horizontal"
+                                            Margin="10,0,0,0">
+                                    <Button Content="{loc:Loc datePicker.today}"
+                                            Command="{Binding ApplyQuickDateRangeCommand}"
+                                            CommandParameter="today"
+                                            Height="44"
+                                            Padding="10,0"
+                                            FontSize="14"
+                                            AutomationProperties.AutomationId="TransactionHistoryQuickRangeToday"
+                                            Style="{StaticResource PosSecondaryButtonStyle}" />
+                                    <Button Content="{loc:Loc datePicker.yesterday}"
+                                            Command="{Binding ApplyQuickDateRangeCommand}"
+                                            CommandParameter="yesterday"
+                                            Height="44"
+                                            Padding="10,0"
+                                            Margin="6,0,0,0"
+                                            FontSize="14"
+                                            AutomationProperties.AutomationId="TransactionHistoryQuickRangeYesterday"
+                                            Style="{StaticResource PosSecondaryButtonStyle}" />
+                                    <Button Content="{loc:Loc history.quickRange.last7Days}"
+                                            Command="{Binding ApplyQuickDateRangeCommand}"
+                                            CommandParameter="last7days"
+                                            Height="44"
+                                            Padding="10,0"
+                                            Margin="6,0,0,0"
+                                            FontSize="14"
+                                            AutomationProperties.AutomationId="TransactionHistoryQuickRangeLast7Days"
+                                            Style="{StaticResource PosSecondaryButtonStyle}" />
+                                </StackPanel>
+                            </StackPanel>
                         </StackPanel>
 
                         <StackPanel x:Name="HistoryTerminalFilter"

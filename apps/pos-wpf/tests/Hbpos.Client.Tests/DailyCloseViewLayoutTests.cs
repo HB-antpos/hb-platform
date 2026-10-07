@@ -7,6 +7,7 @@ public sealed class DailyCloseViewLayoutTests
 {
     private static readonly XNamespace Presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+    private static readonly XNamespace Controls = "clr-namespace:Hbpos.Client.Wpf.Views.Controls";
 
     [Fact]
     public void History_and_linkly_are_the_only_tabs_and_history_toolbar_creates_or_resumes_drafts()
@@ -21,8 +22,13 @@ public sealed class DailyCloseViewLayoutTests
         Assert.Empty(tabControl.Descendants().Where(element =>
             (string?)element.Attribute(Xaml + "Name") == "CashCountPanel"));
 
-        var datePicker = Assert.Single(view.Descendants(Presentation + "DatePicker"));
+        // 营业日期改用触屏日期选择器：带前后一天按钮，草稿期间整体禁用；不再用系统 DatePicker。
+        Assert.Empty(view.Descendants(Presentation + "DatePicker"));
+        var datePicker = Assert.Single(view.Descendants(Controls + "PosDatePicker"));
         Assert.Equal("{Binding CanChangeBusinessDate}", (string?)datePicker.Attribute("IsEnabled"));
+        Assert.Equal("{Binding SelectedDate, Mode=TwoWay}", (string?)datePicker.Attribute("SelectedDate"));
+        Assert.Equal("True", (string?)datePicker.Attribute("ShowDayStepButtons"));
+        Assert.Null(datePicker.Attribute("AllowFutureDates"));
 
         var toolbarTemplate = Assert.Single(view.Descendants(Presentation + "ControlTemplate").Where(template =>
             template.Descendants(Presentation + "ContentPresenter").Any(presenter =>
