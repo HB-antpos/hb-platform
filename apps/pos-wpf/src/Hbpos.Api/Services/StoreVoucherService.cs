@@ -37,9 +37,33 @@ public sealed class StoreVoucherService(
     IStoreVoucherRepository repository,
     IStoreVoucherReservationService reservationService,
     TimeProvider? timeProvider = null,
-    ILogger<StoreVoucherService>? logger = null) : IStoreVoucherService
+    ILogger<StoreVoucherService>? logger = null,
+    IStoreTimeZoneResolver? timeZoneResolver = null) : IStoreVoucherService
 {
+    // 中文注释：新发代金券（含退款券）的默认有效期，统一为 90 天；只影响此后新发的券，已发出的券到期日不变。
+    private const int VoucherValidityDays = 90;
+
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+    /// <summary>
+    /// 默认到期时刻 = 发券日（门店当地日历日）+ 90 天，取整到该日门店当地 23:59:59。
+    /// 券面印的「Valid until yyyy-MM-dd」是日历日，顾客会认为当天结束前都能用，
+    /// 所以不能按「发券时刻 + 90 天」精确到秒（否则上午发的券，到期日下午就失效）。
+    /// 结果是绝对时刻（含门店当天的 UTC 偏移，夏令时跨越按到期日当天的偏移算）；库里照旧存 UTC。
+    /// 未注入时区解析器（仅单元测试）时按 UTC 日历日处理；生产由 DI 注入，门店没配时区时回退悉尼。
+    /// </summary>
+    private async Task<DateTimeOffset> ResolveDefaultExpiryAsync(
+        string storeCode,
+        DateTimeOffset issuedAt,
+        CancellationToken cancellationToken)
+    {
+        var storeTimeZone = timeZoneResolver is null
+            ? TimeZoneInfo.Utc
+            : await timeZoneResolver.ResolveAsync(storeCode, cancellationToken);
+        var issuedLocalDate = TimeZoneInfo.ConvertTime(issuedAt, storeTimeZone).Date;
+        var lastValidLocalSecond = issuedLocalDate.AddDays(VoucherValidityDays + 1).AddSeconds(-1);
+        return StoreWallClock.ToDateTimeOffset(lastValidLocalSecond, storeTimeZone);
+    }
 
     public async Task<StoreVoucherQueryResponse> QueryAsync(
         string storeCode,
@@ -161,13 +185,14 @@ public sealed class StoreVoucherService(
             !string.IsNullOrWhiteSpace(normalizedIdempotencyKey),
             request.OrderReference);
         var now = _timeProvider.GetUtcNow();
+        var defaultExpiry = await ResolveDefaultExpiryAsync(normalizedStoreCode, now, cancellationToken);
         var voucher = await repository.CreateRefundVoucherAsync(
             new RefundVoucherCreateModel(
                 normalizedStoreCode,
                 decimal.Round(request.Amount, 2, MidpointRounding.AwayFromZero),
                 normalizedCashierId,
                 now,
-                now.AddMonths(12),
+                defaultExpiry,
                 normalizedIdempotencyKey,
             request.OrderReference?.Trim(),
             request.Reason?.Trim()),
@@ -186,7 +211,7 @@ public sealed class StoreVoucherService(
             voucher.RemainingAmount ?? decimal.Round(request.Amount, 2, MidpointRounding.AwayFromZero),
             voucher.Status ?? "1",
             voucher.ExpiredDate is null
-                ? now.AddMonths(12)
+                ? defaultExpiry
                 : DateTime.SpecifyKind(voucher.ExpiredDate.Value, DateTimeKind.Utc));
     }
 
@@ -203,7 +228,7 @@ public sealed class StoreVoucherService(
         }
 
         var now = _timeProvider.GetUtcNow();
-        var expiredAt = request.ExpiredAt ?? now.AddMonths(12);
+        var expiredAt = request.ExpiredAt ?? await ResolveDefaultExpiryAsync(normalizedStoreCode, now, cancellationToken);
         if (expiredAt <= now)
         {
             throw new InvalidOperationException("ExpiredAt must be in the future.");
