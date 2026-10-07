@@ -36,6 +36,9 @@ const fields = (overrides: Partial<StoreReceiptProfileFields> = {}): StoreReceip
   phone: '0200000000',
   abn: '11111111111',
   returnPolicy: '14 days',
+  // 代金券使用说明 / 分期条款默认未定制（null＝收银端按内置默认文案打印）。
+  voucherTerms: null,
+  installmentTerms: null,
   ...overrides,
 })
 
@@ -71,10 +74,14 @@ const device = (overrides: Partial<StoreReceiptProfileDevice> = {}): StoreReceip
 assert.equal(normalizeReceiptField(null), '')
 assert.equal(normalizeReceiptField(undefined), '')
 assert.equal(normalizeReceiptField('  x  '), 'x')
-assert.deepEqual([...RECEIPT_PROFILE_FIELD_KEYS], ['brandName', 'storeName', 'address', 'phone', 'abn', 'returnPolicy'], '6 个字段及顺序')
+assert.deepEqual(
+  [...RECEIPT_PROFILE_FIELD_KEYS],
+  ['brandName', 'storeName', 'address', 'phone', 'abn', 'returnPolicy', 'voucherTerms', 'installmentTerms'],
+  '8 个字段及顺序（与后端 StoreReceiptProfileFieldsDto 一致）',
+)
 
 const same = diffReceiptProfile(fields({ brandName: null, phone: '  ' }), fields({ brandName: '', phone: null }))
-assert.equal(same.length, 6)
+assert.equal(same.length, 8)
 assert.ok(same.every((diff) => !diff.changed), 'null / 空串 / 纯空白视为相同')
 
 const changed = diffReceiptProfile(fields({ address: '2 Example St', abn: 'abc' }), fields({ abn: 'ABC' }))
@@ -84,7 +91,48 @@ assert.equal(changed.find((diff) => diff.key === 'address')?.newValue, '2 Exampl
 
 const firstDiff = diffReceiptProfile(fields({ returnPolicy: ' ' }), null)
 assert.ok(firstDiff.every((diff) => diff.oldValue === null), '首次下发没有旧值')
-assert.deepEqual(firstDiff.filter((diff) => !diff.changed).map((diff) => diff.key), ['returnPolicy'], '首次下发只有空内容的字段不算「将下发」')
+assert.deepEqual(
+  firstDiff.filter((diff) => !diff.changed).map((diff) => diff.key),
+  ['returnPolicy', 'voucherTerms', 'installmentTerms'],
+  '首次下发只有空内容的字段不算「将下发」（两个说明字段未定制也是空内容）',
+)
+
+// ── 代金券使用说明 / 分期条款：新字段进入新旧对比，口径与退货政策相同 ──
+{
+  // 只有新字段变化：被标记为有差异，其余 6 个字段不受影响。
+  const termsOnly = diffReceiptProfile(
+    fields({ voucherTerms: 'Use at the issuing store only.\nNot redeemable for cash.' }),
+    fields(),
+  )
+  assert.deepEqual(termsOnly.filter((diff) => diff.changed).map((diff) => diff.key), ['voucherTerms'])
+  assert.equal(termsOnly.find((diff) => diff.key === 'voucherTerms')?.oldValue, null)
+
+  // 清空定制（有内容 → null）也是实质修改。
+  const cleared = diffReceiptProfile(fields({ installmentTerms: null }), fields({ installmentTerms: 'Order total: $50.00 minimum.' }))
+  assert.deepEqual(cleared.filter((diff) => diff.changed).map((diff) => diff.key), ['installmentTerms'])
+
+  // null / 空串 / 纯空白 / 首尾空白视为相同；换行风格与大小写是实质差异。
+  const noise = diffReceiptProfile(
+    fields({ voucherTerms: '  Line A\nLine B \n', installmentTerms: '   ' }),
+    fields({ voucherTerms: 'Line A\nLine B', installmentTerms: null }),
+  )
+  assert.ok(noise.every((diff) => !diff.changed), '新字段同样忽略首尾空白，空白等同未定制')
+  const style = diffReceiptProfile(fields({ voucherTerms: 'Line A\r\nLine B' }), fields({ voucherTerms: 'Line A\nLine B' }))
+  assert.deepEqual(style.filter((diff) => diff.changed).map((diff) => diff.key), ['voucherTerms'])
+
+  // 旧服务端 / 旧快照响应里没有这两个字段（undefined）：按未定制处理，不抛错、不误报差异。
+  const legacy = { ...fields(), voucherTerms: undefined, installmentTerms: undefined } as unknown as StoreReceiptProfileFields
+  assert.ok(diffReceiptProfile(legacy, fields()).every((diff) => !diff.changed))
+  assert.ok(diffReceiptProfile(fields(), legacy).every((diff) => !diff.changed))
+
+  // 预览里仅新字段变化的分店：分类 changed，高亮键只含新字段（分类以服务端 status 为准）。
+  const termsPreview = buildPublishPreview([
+    statusItem({ storeGuid: 'g-terms', status: 'pending', current: fields({ installmentTerms: 'Order total: $50.00 minimum.' }) }),
+  ])
+  assert.equal(termsPreview.rows[0].kind, 'changed')
+  assert.deepEqual(termsPreview.rows[0].changedKeys, ['installmentTerms'])
+  assert.equal(termsPreview.publishCount, 1)
+}
 
 // ── 下发预览分类：是否有变化以服务端 status 为准 ──
 assert.equal(classifyPublishItem(statusItem({ status: 'never', latestVersion: 0, latest: null })), 'first')

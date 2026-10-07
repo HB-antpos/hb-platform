@@ -44,6 +44,20 @@ namespace BlazorApp.Shared.Models
         public string? ReturnPolicy { get; set; }
 
         /// <summary>
+        /// 代金券使用说明（印在退款代金券券面「VOUCHER TERMS」下方，一行一条）；可空，最长 600 字符。
+        /// 为空表示收银端按内置默认文案打印。与 ReturnPolicy 一样由 Web 分店维护表单录入、点「下发」后才到收银端。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 600)]
+        public string? VoucherTerms { get; set; }
+
+        /// <summary>
+        /// 分期条款（印在进行中分期小票「INSTALLMENT TERMS」下方，一行一条）；可空，最长 600 字符。
+        /// 为空表示收银端按内置默认文案打印。下发口径同 <see cref="VoucherTerms"/>。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 600)]
+        public string? InstallmentTerms { get; set; }
+
+        /// <summary>
         /// 联系邮箱
         /// </summary>
         [SugarColumn(IsNullable = true, Length = 100)]

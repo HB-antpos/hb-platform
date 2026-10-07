@@ -37,7 +37,21 @@ assert.ok(
 for (const language of ['zh', 'en']) {
   const globalSource = readFileSync(resolve(`src/i18n/locales/${language}.json`), 'utf8')
   assert.ok(!globalSource.includes('receiptProfile'), `${language}.json 不应包含小票下发文案，应放在页面级消息文件`)
+  // 代金券使用说明 / 分期条款的文案同样只在页面级消息文件里。
+  for (const key of ['voucherTerms', 'installmentTerms', 'termsUsingDefault', 'formReceiptTerms']) {
+    assert.ok(!globalSource.includes(`"${key}"`), `${language}.json 不应包含 ${key} 文案，应放在页面级消息文件`)
+  }
 }
+
+// 4.1) 下发确认框里 8 个字段都有标签，且未定制的说明字段显示「收银端默认文案」而不是和别的空字段一样的 --。
+const publishModalSource = readFileSync(resolve('src/pages/System/Stores/ReceiptProfilePublishModal.tsx'), 'utf8')
+for (const key of ['voucherTerms', 'installmentTerms']) {
+  assert.ok(publishModalSource.includes(`case '${key}':`), `下发确认框应为 ${key} 提供字段标签`)
+}
+assert.ok(
+  publishModalSource.includes("t('system.stores.termsUsingDefault')") && publishModalSource.includes('isTermsField(diff.key)'),
+  '说明字段为空时应提示「收银端默认文案」',
+)
 
 // 5) 下发服务只被分店管理页的懒加载代码块引用，不进首屏包。
 function walk(directory: string): string[] {

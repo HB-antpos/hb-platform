@@ -1029,6 +1029,8 @@ test("手动载入门店资料成功时只替换六字段并保留硬件，失�
     phone: "07 1234 5678",
     abn: "12 345 678 901",
     returnPolicy: "Refunds within 14 days.",
+    voucherTerms: "",
+    installmentTerms: "",
   };
   await presenter.loadReceiptProfile();
 
@@ -1055,6 +1057,8 @@ test("手动载入门店资料成功时只替换六字段并保留硬件，失�
     phone: "",
     abn: "",
     returnPolicy: "",
+    voucherTerms: "",
+    installmentTerms: "",
   };
   await presenter.loadReceiptProfile();
   const empty = presenter.getState().printer;
@@ -1084,6 +1088,8 @@ test("手动载入门店资料成功时只替换六字段并保留硬件，失�
     phone: "07 1234 5678",
     abn: "12 345 678 901",
     returnPolicy: "Unsafe@",
+    voucherTerms: "",
+    installmentTerms: "",
   };
   await presenter.loadReceiptProfile();
   assert.equal(presenter.getState().statusCode, "receipt-profile-load-failed");
@@ -1097,6 +1103,8 @@ test("手动载入门店资料成功时只替换六字段并保留硬件，失�
     phone: "07 1234 5678",
     abn: "12 345 678 901",
     returnPolicy: "Refunds within 14 days.",
+    voucherTerms: "",
+    installmentTerms: "",
   };
   await presenter.loadReceiptProfile();
   assert.equal(presenter.getState().statusCode, "receipt-profile-load-failed");
@@ -1116,6 +1124,8 @@ test("载入门店资料只在 Save 后落本机", async () => {
     phone: "07 1234 5678",
     abn: "12 345 678 901",
     returnPolicy: "Refunds within 14 days.",
+    voucherTerms: "",
+    installmentTerms: "",
   };
   await presenter.loadReceiptProfile();
   assert.equal(port.savedPrinters.length, 0);
@@ -3020,6 +3030,8 @@ const MANAGED_PRINTER: ReceiptPrinterSettings = {
   phone: "02 1234 5678",
   abn: "12 345 678 901",
   returnPolicy: "14 days.",
+  voucherTerms: "",
+  installmentTerms: "",
   profileStoreCode: "BNE-01",
   profileVersion: 3,
   profileAckedVersion: 3,
@@ -3192,6 +3204,8 @@ test("已下发后旧的「载入门店资料」不再覆盖只读资料，一�
     phone: "",
     abn: "",
     returnPolicy: "",
+    voucherTerms: "",
+    installmentTerms: "",
   };
 
   await presenter.loadReceiptProfile();
@@ -4129,3 +4143,155 @@ function deferred<T>(): Readonly<{
     reject: rejectPromise,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 券使用说明（voucherTerms）与分期条款（installmentTerms）
+// ---------------------------------------------------------------------------
+
+test("未下发（profileVersion=0）：券使用说明与分期条款可手工编辑，保存时随设置一起落本机", async () => {
+  const port = new FakeSettingsPort();
+  const presenter = createPresenter(port);
+  await presenter.load();
+  assert.equal(presenter.getState().printer.voucherTerms, "");
+  assert.equal(presenter.getState().printer.installmentTerms, "");
+
+  presenter.setReceiptVoucherTerms("Valid at all stores.\r\nNo cash refunds.");
+  presenter.setReceiptInstallmentTerms("Deposit $30 minimum.\tSee store.");
+  assert.equal(presenter.getState().printer.voucherTerms, "Valid at all stores.\r\nNo cash refunds.");
+  assert.equal(presenter.getState().printer.installmentTerms, "Deposit $30 minimum.\tSee store.");
+
+  await presenter.savePrinterSettings();
+  assert.equal(presenter.getState().statusCode, "printer-settings-saved");
+  assert.equal(port.savedPrinters.at(-1)?.voucherTerms, "Valid at all stores.\r\nNo cash refunds.");
+  assert.equal(port.savedPrinters.at(-1)?.installmentTerms, "Deposit $30 minimum.\tSee store.");
+});
+
+test("已应用总部下发资料：券使用说明与分期条款与六项门店资料一样只读", async () => {
+  const { presenter } = await managedPresenter();
+  const before = presenter.getState().printer;
+
+  presenter.setReceiptVoucherTerms("Edited voucher rule.");
+  presenter.setReceiptInstallmentTerms("Edited installment rule.");
+
+  assert.deepEqual(presenter.getState().printer, before);
+});
+
+test("券使用说明与分期条款：上限 600（恰好保存、超出不落本机），含控制字符不落本机", async () => {
+  const port = new FakeSettingsPort();
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  presenter.setReceiptVoucherTerms("v".repeat(600));
+  presenter.setReceiptInstallmentTerms("i".repeat(600));
+  await presenter.savePrinterSettings();
+  assert.equal(presenter.getState().statusCode, "printer-settings-saved");
+  assert.equal(port.savedPrinters.at(-1)?.voucherTerms.length, 600);
+  assert.equal(port.savedPrinters.at(-1)?.installmentTerms.length, 600);
+
+  const savedCount = port.savedPrinters.length;
+  for (const draft of ["x".repeat(601), "Unsafe\u001b@", "Bell\u0007", "C1\u009b"]) {
+    presenter.setReceiptVoucherTerms(draft);
+    assert.throws(() => presenter.savePrinterSettings(), /invalid public text/u, JSON.stringify(draft).slice(0, 20));
+    presenter.setReceiptVoucherTerms("ok");
+    presenter.setReceiptInstallmentTerms(draft);
+    assert.throws(() => presenter.savePrinterSettings(), /invalid public text/u, JSON.stringify(draft).slice(0, 20));
+    presenter.setReceiptInstallmentTerms("ok");
+  }
+  assert.equal(port.savedPrinters.length, savedCount, "不合规草稿不得落本机");
+});
+
+test("手动载入门店资料：把总部侧的券使用说明与分期条款一并载入草稿（null 已由适配层归一为空串）", async () => {
+  const port = new FakeSettingsPort();
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  port.receiptProfileValue = {
+    storeCode: "BNE-01",
+    brandName: "Hot Bargain",
+    storeName: "Brisbane",
+    address: "1 Queen St",
+    phone: "07 1234 5678",
+    abn: "12 345 678 901",
+    returnPolicy: "Refunds within 14 days.",
+    voucherTerms: "Valid at all stores.",
+    installmentTerms: "",
+  };
+  await presenter.loadReceiptProfile();
+
+  assert.equal(presenter.getState().statusCode, "receipt-profile-loaded");
+  assert.equal(presenter.getState().printer.voucherTerms, "Valid at all stores.");
+  assert.equal(presenter.getState().printer.installmentTerms, "");
+  assert.equal(port.savedPrinters.length, 0, "载入只更新草稿");
+
+  // 条款不合规：整份载入失败，草稿保持原样。
+  const before = presenter.getState().printer;
+  for (const bad of [{ voucherTerms: "x".repeat(601) }, { installmentTerms: "Unsafe\u001b@" }]) {
+    port.receiptProfileValue = {
+      storeCode: "BNE-01",
+      brandName: "Hot Bargain",
+      storeName: "Brisbane",
+      address: "1 Queen St",
+      phone: "07 1234 5678",
+      abn: "12 345 678 901",
+      returnPolicy: "Refunds within 14 days.",
+      voucherTerms: "",
+      installmentTerms: "",
+      ...bad,
+    };
+    await presenter.loadReceiptProfile();
+    assert.equal(presenter.getState().statusCode, "receipt-profile-load-failed");
+    assert.deepEqual(presenter.getState().printer, before);
+  }
+});
+
+test("立即同步成功：把总部新下发的券使用说明与分期条款替换进草稿（含被清空为未定制）", async () => {
+  const { port, presenter } = await managedPresenter();
+  port.syncResult = {
+    status: "updated",
+    version: 4,
+    printer: {
+      ...MANAGED_PRINTER,
+      voucherTerms: "HQ voucher rule.\nSecond line.",
+      installmentTerms: "HQ installment rule.",
+      profileVersion: 4,
+      profileAckedVersion: 4,
+    },
+  };
+
+  await presenter.syncReceiptProfile();
+
+  assert.equal(presenter.getState().statusCode, "receipt-profile-synced");
+  assert.equal(presenter.getState().printer.voucherTerms, "HQ voucher rule.\nSecond line.");
+  assert.equal(presenter.getState().printer.installmentTerms, "HQ installment rule.");
+
+  port.syncResult = {
+    status: "updated",
+    version: 5,
+    printer: {
+      ...MANAGED_PRINTER,
+      voucherTerms: "",
+      installmentTerms: "",
+      profileVersion: 5,
+      profileAckedVersion: 5,
+    },
+  };
+  await presenter.syncReceiptProfile();
+  assert.equal(presenter.getState().printer.voucherTerms, "", "总部清空后回到未定制");
+  assert.equal(presenter.getState().printer.installmentTerms, "");
+  assert.equal(presenter.getState().printer.profileVersion, 5);
+});
+
+test("立即同步结果里的条款不合规：状态为 invalid，草稿原样保留", async () => {
+  const { port, presenter } = await managedPresenter();
+  const before = presenter.getState().printer;
+  for (const bad of [{ voucherTerms: "x".repeat(601) }, { installmentTerms: "Unsafe\u001b@" }]) {
+    port.syncResult = {
+      status: "updated",
+      version: 6,
+      printer: { ...MANAGED_PRINTER, profileVersion: 6, ...bad },
+    };
+    await presenter.syncReceiptProfile();
+    assert.equal(presenter.getState().statusCode, "receipt-profile-sync-invalid");
+    assert.deepEqual(presenter.getState().printer, before);
+  }
+});

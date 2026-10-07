@@ -22,12 +22,50 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
     public const string StoreCodeRequiredCode = "STORE_CODE_REQUIRED";
     public const string InvalidCharactersCode = "STORE_PROFILE_INVALID_CHARACTERS";
 
+    // 含新列 VoucherTerms / InstallmentTerms 的读取；HBweb 迁移或启动补列还没跑时会抛 207，由 LoadProfileAsync 回退到旧 SQL。
+    internal const string SelectStoreSql = """
+        SELECT
+            StoreCode,
+            StoreName,
+            BrandName,
+            Address,
+            Phone,
+            ABN AS Abn,
+            ReturnPolicy,
+            VoucherTerms,
+            InstallmentTerms
+        FROM [dbo].[Store]
+        WHERE StoreCode = @StoreCode
+          AND IsActive = 1
+          AND (IsDeleted = 0 OR IsDeleted IS NULL)
+        """;
+
+    // 降级兜底：不含新列的旧 SQL（新字段读出为 null，收银端按默认文案打印）。
+    internal const string SelectStoreLegacySql = """
+        SELECT
+            StoreCode,
+            StoreName,
+            BrandName,
+            Address,
+            Phone,
+            ABN AS Abn,
+            ReturnPolicy
+        FROM [dbo].[Store]
+        WHERE StoreCode = @StoreCode
+          AND IsActive = 1
+          AND (IsDeleted = 0 OR IsDeleted IS NULL)
+        """;
+
     private readonly HbposSqlSugarContext? dbContext;
+    private readonly ILogger<StoreReceiptProfileService>? logger;
     private readonly Func<string, CancellationToken, Task<StoreReceiptProfileDto?>> loadProfileAsync;
 
-    public StoreReceiptProfileService(HbposSqlSugarContext dbContext)
+    public StoreReceiptProfileService(
+        HbposSqlSugarContext dbContext,
+        ILogger<StoreReceiptProfileService>? logger = null)
     {
         this.dbContext = dbContext;
+        this.logger = logger;
         loadProfileAsync = LoadProfileAsync;
     }
 
@@ -68,22 +106,16 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             "Db context is required for store receipt profile lookup.");
         cancellationToken.ThrowIfCancellationRequested();
 
-        var row = await context.MainDb.Ado.SqlQuerySingleAsync<StoreReceiptProfileRow>(
-            """
-            SELECT
-                StoreCode,
-                StoreName,
-                BrandName,
-                Address,
-                Phone,
-                ABN AS Abn,
-                ReturnPolicy
-            FROM [dbo].[Store]
-            WHERE StoreCode = @StoreCode
-              AND IsActive = 1
-              AND (IsDeleted = 0 OR IsDeleted IS NULL)
-            """,
-            new SugarParameter("@StoreCode", storeCode));
+        // 先读含新列的 SQL；部署顺序出错（新列还不存在）时回退旧 SQL，不能让载入接口因此 500。
+        var row = await StoreReceiptProfileColumnFallback.QueryAsync(
+            () => context.MainDb.Ado.SqlQuerySingleAsync<StoreReceiptProfileRow>(
+                SelectStoreSql,
+                new SugarParameter("@StoreCode", storeCode)),
+            () => context.MainDb.Ado.SqlQuerySingleAsync<StoreReceiptProfileRow>(
+                SelectStoreLegacySql,
+                new SugarParameter("@StoreCode", storeCode)),
+            "Store",
+            logger);
 
         if (row is null)
         {
@@ -92,7 +124,7 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
 
         // 门店存在且启用后，若总部下发过快照就以最新快照为准（收银端打印认的是下发版本，
         // 「载入/立即同步」也必须拿到同一份内容）；从未下发（或快照表还没建）时沿用门店当前值，Version=0。
-        var release = await StoreReceiptProfileReleaseQueries.GetLatestAsync(context.MainDb, storeCode);
+        var release = await StoreReceiptProfileReleaseQueries.GetLatestAsync(context.MainDb, storeCode, logger);
         if (release is not null)
         {
             return release with { StoreCode = row.StoreCode };
@@ -105,14 +137,16 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             row.Address,
             row.Phone,
             row.Abn,
-            row.ReturnPolicy);
+            row.ReturnPolicy,
+            VoucherTerms: row.VoucherTerms,
+            InstallmentTerms: row.InstallmentTerms);
     }
 }
 
 public static class StoreReceiptProfileGuard
 {
-    // 仅 Address 与 ReturnPolicy 需要 CR/LF/TAB 排版；其余字段（含 StoreCode/StoreName/
-    // BrandName/Phone/Abn）任何控制字符均会污染小票草稿，必须整接口失败且不返回数据。
+    // 仅 Address、ReturnPolicy 与 VoucherTerms / InstallmentTerms（多行条款正文）需要 CR/LF/TAB 排版；
+    // 其余字段（含 StoreCode/StoreName/BrandName/Phone/Abn）任何控制字符均会污染小票草稿，必须整接口失败且不返回数据。
     public static bool IsValid(StoreReceiptProfileDto profile)
     {
         return NoControlCharacters(profile.StoreCode)
@@ -121,7 +155,9 @@ public static class StoreReceiptProfileGuard
             && NoControlCharacters(profile.Phone)
             && NoControlCharacters(profile.Abn)
             && AllowedMultiline(profile.Address)
-            && AllowedMultiline(profile.ReturnPolicy);
+            && AllowedMultiline(profile.ReturnPolicy)
+            && AllowedMultiline(profile.VoucherTerms)
+            && AllowedMultiline(profile.InstallmentTerms);
     }
 
     private static bool NoControlCharacters(string? value)
@@ -176,4 +212,8 @@ public sealed class StoreReceiptProfileRow
     public string? Abn { get; set; }
 
     public string? ReturnPolicy { get; set; }
+
+    public string? VoucherTerms { get; set; }
+
+    public string? InstallmentTerms { get; set; }
 }

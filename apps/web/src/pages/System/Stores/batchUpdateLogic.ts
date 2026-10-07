@@ -14,6 +14,10 @@ export interface BatchUpdateStoreFormValues {
   isActive?: boolean
   applyReturnPolicy?: boolean
   returnPolicy?: string
+  applyVoucherTerms?: boolean
+  voucherTerms?: string
+  applyInstallmentTerms?: boolean
+  installmentTerms?: string
 }
 
 export type StoreSelectionScopeAction =
@@ -83,6 +87,17 @@ export function buildBatchUpdateStoresRequest(
   if (values.applyReturnPolicy) {
     fields.push('returnPolicy')
     request.returnPolicy = trimToNullable(values.returnPolicy)
+  }
+
+  // 代金券使用说明 / 分期条款：与退换货政策同口径（trim，空白变 null）。null＝清除定制，下发后收银端回到内置默认文案。
+  if (values.applyVoucherTerms) {
+    fields.push('voucherTerms')
+    request.voucherTerms = trimToNullable(values.voucherTerms)
+  }
+
+  if (values.applyInstallmentTerms) {
+    fields.push('installmentTerms')
+    request.installmentTerms = trimToNullable(values.installmentTerms)
   }
 
   if (fields.length === 0) {

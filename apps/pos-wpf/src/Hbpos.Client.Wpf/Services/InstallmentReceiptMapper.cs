@@ -69,6 +69,7 @@ internal static class InstallmentReceiptMapper
     /// 分期条款（英文，业主审定稿）。金额门槛与服务端 InstallmentService 的
     /// MinimumInstallmentTotalAmount(50) / MinimumDownPaymentAmount(20) 保持一致；
     /// 「每次 $5」只是说明文字，系统不做强制校验（业主 2026-10-07 决定），最后一笔余额不足 $5 时按余额收。
+    /// 这里只是未定制时的默认正文；总部按门店定制后由 <see cref="ReceiptTextFormatter"/> 渲染时套用（见 <see cref="ReceiptTermsText"/>）。
     /// </summary>
     internal static readonly ReceiptTerms InstallmentTerms = new(
         "INSTALLMENT TERMS",
@@ -76,7 +77,8 @@ internal static class InstallmentReceiptMapper
             "Order total: $50.00 minimum.",
             "First payment: $20.00 minimum.",
             "Each later payment: $5.00 minimum, or the remaining balance if it is lower."
-        ]);
+        ],
+        ReceiptTermsKind.Installment);
 
     private static ReceiptTerms? GetTerms(LocalInstallmentOrder order)
     {

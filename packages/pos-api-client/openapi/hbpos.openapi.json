@@ -14622,6 +14622,14 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "voucherTerms": {
+            "type": "string",
+            "nullable": true
+          },
+          "installmentTerms": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

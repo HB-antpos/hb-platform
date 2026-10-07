@@ -18,8 +18,8 @@ import {
 } from './receiptProfileLogic'
 
 /**
- * 6 个字段的标签：字面量映射（页面消息契约测试靠字面量扫键）。
- * 品牌/店名/地址/电话/ABN/退货政策与分店表单共用既有文案，不重复定义。
+ * 8 个字段的标签：字面量映射（页面消息契约测试靠字面量扫键）。
+ * 品牌/店名/地址/电话/ABN/退货政策与分店表单共用既有文案，不重复定义；代金券使用说明 / 分期条款用页面级文案。
  */
 function fieldLabel(key: ReceiptProfileFieldKey, t: TFunction) {
   switch (key) {
@@ -33,6 +33,10 @@ function fieldLabel(key: ReceiptProfileFieldKey, t: TFunction) {
       return t('system.stores.contactPhone')
     case 'abn':
       return t('system.stores.abn')
+    case 'voucherTerms':
+      return t('system.stores.voucherTerms')
+    case 'installmentTerms':
+      return t('system.stores.installmentTerms')
     default:
       return t('system.stores.returnPolicy')
   }
@@ -46,15 +50,21 @@ interface ReceiptProfilePublishModalProps {
   onPublished: (result: StoreReceiptProfilePublishResult, guids: string[]) => void
 }
 
-function ValueText({ value }: { value: string | null | undefined }) {
-  return value?.trim() ? <span className="sys-store-rp-value">{value}</span> : <span className="sys-store-faint">--</span>
+/** 代金券使用说明 / 分期条款为空表示「未定制」：收银端会按内置默认文案打印，所以不能显示成和别的空字段一样的「--」。 */
+function isTermsField(key: ReceiptProfileFieldKey) {
+  return key === 'voucherTerms' || key === 'installmentTerms'
 }
 
-/** 单店新旧对比：6 个字段逐行列出，只有「有差异」的行高亮；首次下发没有旧值，只列将下发的内容。 */
+function ValueText({ value, emptyText }: { value: string | null | undefined; emptyText?: string }) {
+  return value?.trim() ? <span className="sys-store-rp-value">{value}</span> : <span className="sys-store-faint">{emptyText ?? '--'}</span>
+}
+
+/** 单店新旧对比：8 个字段逐行列出，只有「有差异」的行高亮；首次下发没有旧值，只列将下发的内容。 */
 function DiffTable({ row }: { row: PublishPreviewRow }) {
   const { t } = useTranslation()
   const first = row.kind === 'first'
   const diffs: ReceiptFieldDiff[] = row.diffs
+  const termsDefaultText = t('system.stores.termsUsingDefault')
   return (
     <div className={first ? 'sys-store-rp-diff sys-store-rp-diff-first' : 'sys-store-rp-diff'} role="table">
       <div className="sys-store-rp-diff-head" role="row">
@@ -74,9 +84,13 @@ function DiffTable({ row }: { row: PublishPreviewRow }) {
         >
           <span role="rowheader" className="sys-store-rp-diff-label">{fieldLabel(diff.key, t)}</span>
           {first ? null : (
-            <span role="cell" className="sys-store-rp-diff-old"><ValueText value={diff.oldValue} /></span>
+            <span role="cell" className="sys-store-rp-diff-old">
+              <ValueText value={diff.oldValue} emptyText={isTermsField(diff.key) ? termsDefaultText : undefined} />
+            </span>
           )}
-          <span role="cell" className="sys-store-rp-diff-new"><ValueText value={diff.newValue} /></span>
+          <span role="cell" className="sys-store-rp-diff-new">
+            <ValueText value={diff.newValue} emptyText={isTermsField(diff.key) ? termsDefaultText : undefined} />
+          </span>
         </div>
       ))}
     </div>

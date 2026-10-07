@@ -85,6 +85,18 @@ namespace BlazorApp.Shared.DTOs
         public string? ReturnPolicy { get; set; }
 
         /// <summary>
+        /// 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "代金券使用说明长度不能超过600个字符")]
+        public string? VoucherTerms { get; set; }
+
+        /// <summary>
+        /// 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "分期条款长度不能超过600个字符")]
+        public string? InstallmentTerms { get; set; }
+
+        /// <summary>
         /// 分店地址
         /// </summary>
         [StringLength(200, ErrorMessage = "地址长度不能超过200个字符")]
@@ -159,6 +171,18 @@ namespace BlazorApp.Shared.DTOs
         public string? ReturnPolicy { get; set; }
 
         /// <summary>
+        /// 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "代金券使用说明长度不能超过600个字符")]
+        public string? VoucherTerms { get; set; }
+
+        /// <summary>
+        /// 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "分期条款长度不能超过600个字符")]
+        public string? InstallmentTerms { get; set; }
+
+        /// <summary>
         /// 分店地址
         /// </summary>
         [StringLength(200, ErrorMessage = "地址长度不能超过200个字符")]
@@ -211,6 +235,8 @@ namespace BlazorApp.Shared.DTOs
         public const string BrandName = "brandName";
         public const string IsActive = "isActive";
         public const string ReturnPolicy = "returnPolicy";
+        public const string VoucherTerms = "voucherTerms";
+        public const string InstallmentTerms = "installmentTerms";
     }
 
     /// <summary>
@@ -225,7 +251,7 @@ namespace BlazorApp.Shared.DTOs
 
         [Required(ErrorMessage = "至少选择一个修改字段")]
         [MinLength(1, ErrorMessage = "至少选择一个修改字段")]
-        [MaxLength(5, ErrorMessage = "每批最多修改5个字段")]
+        [MaxLength(7, ErrorMessage = "每批最多修改7个字段")]
         public List<string> Fields { get; set; } = new();
 
         public string? TimeZoneId { get; set; }
@@ -237,6 +263,10 @@ namespace BlazorApp.Shared.DTOs
         public bool? IsActive { get; set; }
 
         public string? ReturnPolicy { get; set; }
+
+        public string? VoucherTerms { get; set; }
+
+        public string? InstallmentTerms { get; set; }
     }
 
     /// <summary>
@@ -281,6 +311,18 @@ namespace BlazorApp.Shared.DTOs
         /// </summary>
         [StringLength(500, ErrorMessage = "退换货政策长度不能超过500个字符")]
         public string? ReturnPolicy { get; set; }
+
+        /// <summary>
+        /// 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "代金券使用说明长度不能超过600个字符")]
+        public string? VoucherTerms { get; set; }
+
+        /// <summary>
+        /// 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "分期条款长度不能超过600个字符")]
+        public string? InstallmentTerms { get; set; }
 
         /// <summary>
         /// 分店地址
@@ -391,6 +433,18 @@ namespace BlazorApp.Shared.DTOs
         /// </summary>
         [StringLength(500, ErrorMessage = "退换货政策长度不能超过500个字符")]
         public string? ReturnPolicy { get; set; }
+
+        /// <summary>
+        /// 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "代金券使用说明长度不能超过600个字符")]
+        public string? VoucherTerms { get; set; }
+
+        /// <summary>
+        /// 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；为空表示收银端按内置默认文案打印
+        /// </summary>
+        [StringLength(600, ErrorMessage = "分期条款长度不能超过600个字符")]
+        public string? InstallmentTerms { get; set; }
 
         /// <summary>
         /// 分店地址

@@ -61,6 +61,8 @@ function settings(overrides: Partial<ReceiptPrinterSettings> = {}): ReceiptPrint
     phone: "07 1234 5678",
     abn: "12 345 678 901",
     returnPolicy: "Change of mind returns within 14 days.",
+    voucherTerms: "",
+    installmentTerms: "",
     profileStoreCode: "BNE-01",
     profileVersion: 0,
     profileAckedVersion: 0,
@@ -93,6 +95,8 @@ test("旧 receipt_printer_v1 自动补新资料字段且不清空打印/钱箱/�
     assert.equal(current.peripheralId, "XP-N160I");
     assert.equal(current.paper, "58mm");
     assert.equal(current.returnPolicy, "");
+    assert.equal(current.voucherTerms, "");
+    assert.equal(current.installmentTerms, "");
     assert.equal(current.profileStoreCode, "");
   });
 });
@@ -161,6 +165,28 @@ test("损坏或敏感 JSON fail-closed 为禁用默认值，非法写入不覆�
   });
 });
 
+test("敏感键拦截仍有效：voucherTerms 是公开文案已豁免，但 voucherCode 等含 voucher 的键照旧拒绝", async () => {
+  await withDatabase(async (connection) => {
+    const repository = new PosSettingsRepository(connection, () => "2026-10-08T00:00:00.000Z");
+    const saved = await repository.saveReceiptPrinterSettings(settings({ voucherTerms: "Public wording." }));
+    assert.equal(saved.voucherTerms, "Public wording.");
+
+    for (const forbidden of ["voucherCode", "voucher", "voucherTermsExtra", "cardNumber", "authToken"]) {
+      await assert.rejects(
+        () => repository.saveReceiptPrinterSettings({ ...settings(), [forbidden]: "x" } as unknown as ReceiptPrinterSettings),
+        /unsupported or sensitive/,
+        forbidden,
+      );
+    }
+    // 落盘里混入含 voucher 的未知键：整份判损坏，回落默认值（与既有 fail-closed 一致）。
+    await connection.run(
+      "UPDATE app_settings SET setting_value = ? WHERE setting_key = 'receipt_printer_v1'",
+      [JSON.stringify({ ...settings(), voucherCode: "RF123" })],
+    );
+    assert.deepEqual(await repository.getReceiptPrinterSettings(), DEFAULT_RECEIPT_PRINTER_SETTINGS);
+  });
+});
+
 test("并发保存以最后一次完整对象原子替换，禁止字段拼接", async () => {
   await withDatabase(async (connection) => {
     let now = 0;
@@ -188,14 +214,24 @@ function profile(overrides: Partial<ReceiptProfileApplyInput> = {}): ReceiptProf
     phone: " 02 1234 5678 ",
     abn: " 12 345 678 901 ",
     returnPolicy: "Returns within 14 days.\tSee store.",
+    voucherTerms: "",
+    installmentTerms: "",
     ...overrides,
   };
 }
 
-/** 落盘形状：下发版本为 0 时两个版本字段不落盘（与旧版格式一致）。 */
+/**
+ * 落盘形状：下发版本为 0 时两个版本字段不落盘；券使用说明 / 分期条款为空串（未定制）时对应键也不落盘
+ * （与旧版格式一致）。
+ */
 function onDisk(value: ReceiptPrinterSettings): Record<string, unknown> {
-  const { profileVersion, profileAckedVersion, ...rest } = value;
-  return profileVersion > 0 ? { ...rest, profileVersion, profileAckedVersion } : { ...rest };
+  const { profileVersion, profileAckedVersion, voucherTerms, installmentTerms, ...rest } = value;
+  return {
+    ...rest,
+    ...(voucherTerms !== "" ? { voucherTerms } : {}),
+    ...(installmentTerms !== "" ? { installmentTerms } : {}),
+    ...(profileVersion > 0 ? { profileVersion, profileAckedVersion } : {}),
+  };
 }
 
 test("未下发时落盘 JSON 不含版本字段（与旧版格式一致，OTA 回滚后旧代码仍能读）；应用下发后才写入两个版本字段", async () => {
@@ -275,7 +311,7 @@ test("applyReceiptProfile 一次性原子写入六项资料 + 版本 + 绑定门
     const applied = await repository.applyReceiptProfile(profile());
 
     const stored = await persistedJson(connection);
-    assert.deepEqual(stored, {
+    assert.deepEqual(stored, onDisk({
       ...settings(),
       brandName: "Hot Bargain",
       storeName: "Hot Bargain Bankstown",
@@ -286,8 +322,8 @@ test("applyReceiptProfile 一次性原子写入六项资料 + 版本 + 绑定门
       profileStoreCode: "BNE-01",
       profileVersion: 3,
       profileAckedVersion: 0,
-    });
-    assert.deepEqual(applied, stored);
+    }));
+    assert.deepEqual(onDisk(applied), stored);
     // 硬件设置原样保留
     assert.equal(stored.printEnabled, true);
     assert.equal(stored.drawerEnabled, true);
@@ -323,6 +359,11 @@ test("applyReceiptProfile 任何一项不合规都抛 ReceiptProfileRejectedErro
       ["退货政策超过 500", profile({ returnPolicy: "x".repeat(501) })],
       ["地址含 C1 控制字符", profile({ address: "ok\u0085bad" })],
       ["退货政策含 ESC", profile({ returnPolicy: "a\u001bb" })],
+      ["券使用说明超过 600", profile({ voucherTerms: "x".repeat(601) })],
+      ["分期条款超过 600", profile({ installmentTerms: "x".repeat(601) })],
+      ["券使用说明含 ESC", profile({ voucherTerms: "a\u001b@b" })],
+      ["分期条款含 DEL", profile({ installmentTerms: "a\u007fb" })],
+      ["分期条款含 C1 控制字符", profile({ installmentTerms: "a\u009bb" })],
       ["门店代码含控制字符", profile({ storeCode: "BNE\u001b01" })],
       ["版本为 0", profile({ version: 0 })],
       ["版本为小数", profile({ version: 1.5 })],
@@ -334,8 +375,158 @@ test("applyReceiptProfile 任何一项不合规都抛 ReceiptProfileRejectedErro
         (error: unknown) => error instanceof ReceiptProfileRejectedError,
         name,
       );
-      assert.deepEqual(await persistedJson(connection), before, `${name}：落盘内容必须原样不变`);
+      assert.deepEqual(await persistedJson(connection), onDisk(before), `${name}：落盘内容必须原样不变`);
     }
+  });
+});
+
+test("券使用说明 / 分期条款：未定制时不落盘新键（旧版格式不变），填写后才落盘并可原样读回", async () => {
+  await withDatabase(async (connection) => {
+    const repository = new PosSettingsRepository(connection, () => "2026-10-08T00:00:00.000Z");
+    const legacyKeys = Object.keys(onDisk(settings())).sort();
+
+    await repository.saveReceiptPrinterSettings(settings());
+    assert.deepEqual(Object.keys(await persistedJson(connection)).sort(), legacyKeys);
+
+    const custom = settings({
+      voucherTerms: "Valid at all stores.\r\nNo cash refunds.\tSee store.",
+      installmentTerms: "Deposit $30 minimum.\nLater payments from $10.",
+    });
+    const saved = await repository.saveReceiptPrinterSettings(custom);
+    assert.deepEqual(saved, custom);
+    assert.deepEqual(await repository.getReceiptPrinterSettings(), custom);
+    assert.deepEqual(await persistedJson(connection), onDisk(custom));
+    assert.ok("voucherTerms" in (await persistedJson(connection)));
+
+    // 只填一项：只落盘这一项。
+    await repository.saveReceiptPrinterSettings(settings({ installmentTerms: "Only installment." }));
+    const onlyInstallment = await persistedJson(connection);
+    assert.equal("voucherTerms" in onlyInstallment, false);
+    assert.equal(onlyInstallment.installmentTerms, "Only installment.");
+
+    // 清空（换店清空路径）后回到旧格式。
+    await repository.saveReceiptPrinterSettings(settings());
+    assert.deepEqual(Object.keys(await persistedJson(connection)).sort(), legacyKeys);
+  });
+});
+
+test("旧库升级：receipt_printer_v1 缺少两个条款字段或值为 null 时读出空串，不报错、不重置打印/钱箱设置", async () => {
+  await withDatabase(async (connection) => {
+    const repository = new PosSettingsRepository(connection, () => "2026-10-08T00:00:00.000Z");
+    const { voucherTerms: _v, installmentTerms: _i, ...legacy } = settings();
+    void _v;
+    void _i;
+    for (const stored of [legacy, { ...legacy, voucherTerms: null, installmentTerms: null }]) {
+      await connection.run(
+        "INSERT INTO app_settings (setting_key, setting_value, updated_at_iso) VALUES (?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+        ["receipt_printer_v1", JSON.stringify(stored), "2026-10-08T00:00:00.000Z"],
+      );
+      const current = await repository.getReceiptPrinterSettings();
+      assert.equal(current.voucherTerms, "");
+      assert.equal(current.installmentTerms, "");
+      assert.equal(current.printEnabled, true);
+      assert.equal(current.drawerEnabled, true);
+      assert.equal(current.peripheralId, "XP-N160I");
+    }
+  });
+});
+
+test("券使用说明 / 分期条款校验：上限 600（恰好通过、601 拒绝），只放行 CR/LF/TAB，其余控制字符整份拒绝", async () => {
+  await withDatabase(async (connection) => {
+    const repository = new PosSettingsRepository(connection, () => "2026-10-08T00:00:00.000Z");
+    for (const field of ["voucherTerms", "installmentTerms"] as const) {
+      const atLimit = await repository.saveReceiptPrinterSettings(settings({ [field]: "x".repeat(600) }));
+      assert.equal(atLimit[field].length, 600);
+      await assert.rejects(
+        () => repository.saveReceiptPrinterSettings(settings({ [field]: "x".repeat(601) })),
+        new RegExp(`${field} is invalid`),
+      );
+      for (const bad of ["Bad\u0007text", "Bad\u001b@text", "Bad\u007ftext", "Bad\u009btext", "Bad\u000btext"]) {
+        await assert.rejects(
+          () => repository.saveReceiptPrinterSettings(settings({ [field]: bad })),
+          new RegExp(`${field} is invalid`),
+          JSON.stringify(bad),
+        );
+      }
+      const multiline = await repository.saveReceiptPrinterSettings(
+        settings({ [field]: "Line 1\r\nLine 2\tTabbed\rLine 3" }),
+      );
+      assert.equal(multiline[field], "Line 1\r\nLine 2\tTabbed\rLine 3");
+      // 非法写入不覆盖已落盘的有效配置。
+      assert.deepEqual(await repository.getReceiptPrinterSettings(), multiline);
+    }
+  });
+});
+
+test("applyReceiptProfile：条款字段随资料原子写入；空串 = 未定制且不落盘新键；服务端回退到未定制也能清掉旧条款", async () => {
+  await withDatabase(async (connection) => {
+    const repository = new PosSettingsRepository(connection, () => "2026-10-08T01:00:00.000Z");
+
+    const applied = await repository.applyReceiptProfile(profile({
+      version: 2,
+      voucherTerms: "Valid at all stores.\nNo cash refunds.",
+      installmentTerms: "Deposit $30 minimum.",
+    }));
+    assert.equal(applied.voucherTerms, "Valid at all stores.\nNo cash refunds.");
+    assert.equal(applied.installmentTerms, "Deposit $30 minimum.");
+    assert.deepEqual(await persistedJson(connection), onDisk(applied));
+    assert.deepEqual(await repository.getReceiptPrinterSettings(), applied);
+
+    // 下一版本总部清空了条款（空串）：本机条款一并清空，回到默认文案。
+    const cleared = await repository.applyReceiptProfile(profile({ version: 3 }));
+    assert.equal(cleared.voucherTerms, "");
+    assert.equal(cleared.installmentTerms, "");
+    const stored = await persistedJson(connection);
+    assert.equal("voucherTerms" in stored, false);
+    assert.equal("installmentTerms" in stored, false);
+  });
+});
+
+test("applyReceiptProfile 兼容旧服务端：条款字段为 undefined / null 时按未定制处理，不抛错", async () => {
+  await withDatabase(async (connection) => {
+    const repository = new PosSettingsRepository(connection, () => "2026-10-08T01:00:00.000Z");
+    const legacyInput = {
+      ...profile({ version: 2 }),
+      voucherTerms: undefined,
+      installmentTerms: null,
+    } as unknown as ReceiptProfileApplyInput;
+
+    const applied = await repository.applyReceiptProfile(legacyInput);
+
+    assert.equal(applied.voucherTerms, "");
+    assert.equal(applied.installmentTerms, "");
+    assert.equal(applied.profileVersion, 2);
+  });
+});
+
+test("用户保存（保留下发资料）：已下发时条款以已落盘值为准，未下发时取用户输入", async () => {
+  await withDatabase(async (connection) => {
+    const repository = new PosSettingsRepository(connection, () => "2026-10-08T01:00:00.000Z");
+
+    // 未下发：本机可编辑，草稿里的条款照常保存。
+    const manual = await repository.saveReceiptPrinterSettingsPreservingProfile(
+      settings({ voucherTerms: "Manual voucher rule.", installmentTerms: "Manual installment rule." }),
+    );
+    assert.equal(manual.voucherTerms, "Manual voucher rule.");
+    assert.equal(manual.installmentTerms, "Manual installment rule.");
+
+    // 总部下发后，过期草稿（带着旧的手工条款）再保存：条款以下发值为准。
+    await repository.applyReceiptProfile(profile({
+      version: 4,
+      voucherTerms: "HQ voucher rule.",
+      installmentTerms: "",
+    }));
+    const saved = await repository.saveReceiptPrinterSettingsPreservingProfile(
+      settings({
+        voucherTerms: "Stale manual voucher rule.",
+        installmentTerms: "Stale manual installment rule.",
+        paper: "58mm",
+      }),
+    );
+    assert.equal(saved.voucherTerms, "HQ voucher rule.");
+    assert.equal(saved.installmentTerms, "", "下发值为空串时不能被过期草稿盖回");
+    assert.equal(saved.paper, "58mm");
+    assert.deepEqual(await persistedJson(connection), onDisk(saved));
   });
 });
 
@@ -390,7 +581,7 @@ test("用户保存（保留下发资料）：下发版本永远以已落盘值�
     assert.equal(saved.profileVersion, 7);
     assert.equal(saved.paper, "58mm");
     assert.equal(saved.peripheralId, "NEW-PRINTER");
-    assert.deepEqual(await persistedJson(connection), saved);
+    assert.deepEqual(await persistedJson(connection), onDisk(saved));
   });
 });
 
@@ -399,7 +590,18 @@ test("saveReceiptPrinterSettings 仍是整体覆盖：换店清空路径可以�
     const repository = new PosSettingsRepository(connection, () => "2026-10-07T01:00:00.000Z");
     await repository.applyReceiptProfile(profile({ version: 7 }));
     const cleared = await repository.saveReceiptPrinterSettings(
-      settings({ brandName: "", storeName: "", address: "", phone: "", abn: "", returnPolicy: "", profileVersion: 0, profileAckedVersion: 0 }),
+      settings({
+        brandName: "",
+        storeName: "",
+        address: "",
+        phone: "",
+        abn: "",
+        returnPolicy: "",
+        voucherTerms: "",
+        installmentTerms: "",
+        profileVersion: 0,
+        profileAckedVersion: 0,
+      }),
     );
     assert.equal(cleared.profileVersion, 0);
     assert.equal((await repository.getReceiptPrinterSettings()).profileVersion, 0);
@@ -422,7 +624,7 @@ test("apply 与用户保存并发：各自在独占事务内读-改-写，最终
     assert.equal(final.profileVersion, 3);
     assert.equal(final.storeName, "Version three");
     assert.equal(final.paper, "58mm", "并发的硬件保存不能丢失");
-    assert.deepEqual(await persistedJson(connection), final);
+    assert.deepEqual(await persistedJson(connection), onDisk(final));
   });
 });
 

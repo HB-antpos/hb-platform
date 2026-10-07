@@ -9,10 +9,17 @@ namespace Hbpos.Client.Tests;
 public sealed class ReceiptProfileLocalStoreTests
 {
     private static readonly ReceiptProfileFields SampleFields = new(
-        "HQ Brand", "Sunnybank", "Shop 1\r\nBrisbane", "07 3000 0000", "12 345 678 901", "Return within 7 days");
+        "HQ Brand",
+        "Sunnybank",
+        "Shop 1\r\nBrisbane",
+        "07 3000 0000",
+        "12 345 678 901",
+        "Return within 7 days",
+        "Voucher line 1\r\nVoucher line 2",
+        "Installment line 1\nInstallment line 2");
 
     [Fact]
-    public async Task Apply_writes_six_fields_version_and_binding_in_one_batch()
+    public async Task Apply_writes_all_fields_version_and_binding_in_one_batch()
     {
         var repository = new ProfileTestSettingsRepository();
         var store = new ReceiptPrinterSettingsStore(repository, ProfileTestData.Auth("S001"));
@@ -20,7 +27,7 @@ public sealed class ReceiptProfileLocalStoreTests
         var applied = await store.ApplyHeadquartersProfileAsync("S001", SampleFields, 3);
 
         Assert.True(applied);
-        // 六个字段 + 版本 + 回执版本清零 + 绑定门店必须是同一次批量写（本地库里是一个事务）。
+        // 八个字段（含代金券使用说明 / 分期条款）+ 版本 + 回执版本清零 + 绑定门店必须是同一次批量写（本地库里是一个事务）。
         Assert.Equal(1, repository.BatchWriteCount);
         Assert.Equal("S001", repository.Peek("ReceiptPrinter:ProfileStoreCode"));
         Assert.Equal("3", repository.Peek("ReceiptPrinter:ProfileVersion"));
@@ -31,12 +38,149 @@ public sealed class ReceiptProfileLocalStoreTests
         Assert.Equal("07 3000 0000", repository.Peek("ReceiptPrinter:S001:StorePhone"));
         Assert.Equal("12 345 678 901", repository.Peek("ReceiptPrinter:S001:Abn"));
         Assert.Equal("Return within 7 days", repository.Peek("ReceiptPrinter:S001:ReturnPolicy"));
+        Assert.Equal("Voucher line 1\r\nVoucher line 2", repository.Peek("ReceiptPrinter:S001:VoucherTerms"));
+        Assert.Equal("Installment line 1\nInstallment line 2", repository.Peek("ReceiptPrinter:S001:InstallmentTerms"));
 
         var loaded = await store.LoadAsync();
         Assert.Equal(3, loaded.ProfileVersion);
         Assert.Equal("HQ Brand", loaded.BrandName);
         Assert.Equal("Shop 1\r\nBrisbane", loaded.StoreAddress);
         Assert.Equal("Return within 7 days", loaded.ReturnPolicy);
+        Assert.Equal("Voucher line 1\r\nVoucher line 2", loaded.VoucherTerms);
+        Assert.Equal("Installment line 1\nInstallment line 2", loaded.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Apply_snapshot_without_terms_clears_previously_customized_terms()
+    {
+        var repository = new ProfileTestSettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository, ProfileTestData.Auth("S001"));
+        await store.ApplyHeadquartersProfileAsync("S001", SampleFields, 3);
+
+        // 总部之后把两段正文清空（或下发的是不带这两个字段的快照）：本机必须回到默认文案，而不是沿用旧定制。
+        await store.ApplyHeadquartersProfileAsync(
+            "S001",
+            SampleFields with { VoucherTerms = null, InstallmentTerms = "   \r\n " },
+            4);
+
+        var loaded = await store.LoadAsync();
+        Assert.Equal(string.Empty, loaded.VoucherTerms);
+        Assert.Equal(string.Empty, loaded.InstallmentTerms);
+        Assert.Equal("Return within 7 days", loaded.ReturnPolicy);
+    }
+
+    [Fact]
+    public async Task Apply_trims_the_terms_text()
+    {
+        var repository = new ProfileTestSettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository, ProfileTestData.Auth("S001"));
+
+        await store.ApplyHeadquartersProfileAsync(
+            "S001",
+            SampleFields with { VoucherTerms = "  \r\nOnly line\r\n  ", InstallmentTerms = "\tA\nB " },
+            3);
+
+        var loaded = await store.LoadAsync();
+        Assert.Equal("Only line", loaded.VoucherTerms);
+        Assert.Equal("A\nB", loaded.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Old_database_without_terms_keys_loads_as_not_customized()
+    {
+        // 升级前写入的本机库：绑定了门店、有退货政策，但从没有过 VoucherTerms / InstallmentTerms 两个键。
+        var repository = new ProfileTestSettingsRepository();
+        await repository.SetValuesAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["ReceiptPrinter:ProfileStoreCode"] = "S001",
+            ["ReceiptPrinter:ProfileVersion"] = "2",
+            ["ReceiptPrinter:ProfileAckedVersion"] = "2",
+            ["ReceiptPrinter:S001:BrandName"] = "HQ Brand",
+            ["ReceiptPrinter:S001:StoreName"] = "Sunnybank",
+            ["ReceiptPrinter:S001:ReturnPolicy"] = "Return within 7 days",
+        });
+        var store = new ReceiptPrinterSettingsStore(repository, ProfileTestData.Auth("S001"));
+
+        var loaded = await store.LoadAsync();
+
+        // 读不到键不能报错，也不能把版本 / 其他字段弄丢；两段正文为空串＝未定制＝默认文案。
+        Assert.Equal(2, loaded.ProfileVersion);
+        Assert.Equal("Return within 7 days", loaded.ReturnPolicy);
+        Assert.Equal(string.Empty, loaded.VoucherTerms);
+        Assert.Equal(string.Empty, loaded.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Terms_do_not_follow_the_device_to_another_store()
+    {
+        var repository = new ProfileTestSettingsRepository();
+        var auth = ProfileTestData.Auth("S001");
+        var store = new ReceiptPrinterSettingsStore(repository, auth);
+        await store.ApplyHeadquartersProfileAsync("S001", SampleFields, 3);
+
+        auth.Set(new DeviceAuthorizationContext("DEV1", "S002", "HW", "AUTH"));
+
+        // 换店：旧店定制的使用说明 / 分期条款不能用在新店小票上。
+        var loaded = await store.LoadAsync();
+        Assert.Equal(string.Empty, loaded.VoucherTerms);
+        Assert.Equal(string.Empty, loaded.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Save_without_headquarters_profile_persists_and_trims_the_terms_text()
+    {
+        var repository = new ProfileTestSettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository, ProfileTestData.Auth("S001"));
+
+        await store.SaveAsync(ReceiptPrinterSettings.Default with
+        {
+            VoucherTerms = "  Local voucher text  ",
+            InstallmentTerms = "   "
+        });
+
+        // 从未下发：本机可手工编辑，保存后立即生效；纯空白归一为空串（未定制）。
+        var loaded = await store.LoadAsync();
+        Assert.Equal("Local voucher text", loaded.VoucherTerms);
+        Assert.Equal(string.Empty, loaded.InstallmentTerms);
+        Assert.Equal("Local voucher text", repository.Peek("ReceiptPrinter:S001:VoucherTerms"));
+        Assert.Equal(string.Empty, repository.Peek("ReceiptPrinter:S001:InstallmentTerms"));
+    }
+
+    [Fact]
+    public async Task Legacy_unscoped_store_round_trips_the_terms_text()
+    {
+        var repository = new ProfileTestSettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository);
+
+        await store.SaveAsync(ReceiptPrinterSettings.Default with
+        {
+            VoucherTerms = "Voucher A\nVoucher B",
+            InstallmentTerms = "Installment A"
+        });
+
+        var loaded = await store.LoadAsync();
+        Assert.Equal("Voucher A\nVoucher B", loaded.VoucherTerms);
+        Assert.Equal("Installment A", loaded.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Legacy_unscoped_terms_are_migrated_when_binding_the_current_store()
+    {
+        var repository = new ProfileTestSettingsRepository();
+        await repository.SetValuesAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["ReceiptPrinter:StoreName"] = "Old Store",
+            ["ReceiptPrinter:VoucherTerms"] = "Old voucher terms",
+            ["ReceiptPrinter:InstallmentTerms"] = "Old installment terms",
+        });
+        var store = new ReceiptPrinterSettingsStore(repository, ProfileTestData.Auth("S001"));
+
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal("Old voucher terms", loaded.VoucherTerms);
+        Assert.Equal("Old installment terms", loaded.InstallmentTerms);
+        Assert.Equal("Old voucher terms", repository.Peek("ReceiptPrinter:S001:VoucherTerms"));
+        Assert.Equal("Old installment terms", repository.Peek("ReceiptPrinter:S001:InstallmentTerms"));
     }
 
     [Fact]
@@ -164,6 +308,8 @@ public sealed class ReceiptProfileLocalStoreTests
             StorePhone = "STALE DRAFT",
             Abn = "STALE DRAFT",
             ReturnPolicy = "STALE DRAFT",
+            VoucherTerms = "STALE DRAFT",
+            InstallmentTerms = "STALE DRAFT",
             ProfileVersion = 99
         });
 
@@ -178,6 +324,8 @@ public sealed class ReceiptProfileLocalStoreTests
         Assert.Equal("07 3000 0000", loaded.StorePhone);
         Assert.Equal("12 345 678 901", loaded.Abn);
         Assert.Equal("Return within 7 days", loaded.ReturnPolicy);
+        Assert.Equal("Voucher line 1\r\nVoucher line 2", loaded.VoucherTerms);
+        Assert.Equal("Installment line 1\nInstallment line 2", loaded.InstallmentTerms);
         Assert.Equal(3, loaded.ProfileVersion);
     }
 
@@ -299,6 +447,8 @@ public sealed class ReceiptProfileLocalStoreTests
             Assert.Equal(3, loaded.ProfileVersion);
             Assert.Equal("HQ Brand", loaded.BrandName);
             Assert.Equal("Shop 1\r\nBrisbane", loaded.StoreAddress);
+            Assert.Equal("Voucher line 1\r\nVoucher line 2", loaded.VoucherTerms);
+            Assert.Equal("Installment line 1\nInstallment line 2", loaded.InstallmentTerms);
             Assert.Equal(new ReceiptProfileLocalState(3, 3), await restarted.LoadProfileStateAsync("S001"));
         }
         finally

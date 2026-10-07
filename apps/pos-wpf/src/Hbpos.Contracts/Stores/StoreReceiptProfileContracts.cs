@@ -9,6 +9,12 @@ namespace Hbpos.Contracts.Stores;
 /// Version&gt;=1 表示内容是该版本的下发快照。两个成员放在末尾并带默认值，旧调用点与旧服务端
 /// （JSON 里没有 version）都按「从未下发」处理。
 /// </para>
+/// <para>
+/// VoucherTerms / InstallmentTerms 是退款代金券与进行中分期小票底部「使用说明 / 分期条款」的正文（一行一条，
+/// 标题 VOUCHER TERMS / INSTALLMENT TERMS 由收银端固定印）；null 或空白＝收银端按内置默认文案打印。
+/// 与 ReturnPolicy 一样允许 CR/LF/TAB、拒绝其他控制字符，长度上限各 600；放在末尾并带默认值，
+/// 旧服务端（JSON 里没有这两个字段）与旧客户端（忽略未知字段）互相兼容。
+/// </para>
 /// </summary>
 public sealed record StoreReceiptProfileDto(
     string StoreCode,
@@ -19,7 +25,9 @@ public sealed record StoreReceiptProfileDto(
     string? Abn,
     string? ReturnPolicy,
     int Version = 0,
-    DateTimeOffset? PublishedAt = null);
+    DateTimeOffset? PublishedAt = null,
+    string? VoucherTerms = null,
+    string? InstallmentTerms = null);
 
 /// <summary>
 /// 收银端按版本号轮询的同步结果：Changed=false 时 Profile 为 null（本机已是最新或从未下发），

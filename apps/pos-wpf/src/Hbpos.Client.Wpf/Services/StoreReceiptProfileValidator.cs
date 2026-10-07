@@ -10,6 +10,9 @@ public static class StoreReceiptProfileValidator
 {
     public const int ReturnPolicyMaxLength = 500;
 
+    /// <summary>代金券使用说明 / 分期条款的长度上限（UTF-16 码元），取值规则见 <see cref="ReceiptTermsText"/>。</summary>
+    public const int TermsMaxLength = ReceiptTermsText.MaxLength;
+
     /// <summary>
     /// 返回 null 表示通过，否则返回不含资料内容的错误说明（可以直接写日志或展示）。
     /// <paramref name="requireStoreName"/> 只给下发同步使用：下发快照的门店名必须非空
@@ -17,14 +20,16 @@ public static class StoreReceiptProfileValidator
     /// </summary>
     public static string? Validate(StoreReceiptProfileDto profile, bool requireStoreName = false)
     {
-        // 仅地址/退货政策允许 CR、LF、TAB；其余资料字段拒绝任何控制字符（含 DEL）。
+        // 仅地址/退货政策/代金券使用说明/分期条款允许 CR、LF、TAB（多行排版）；其余资料字段拒绝任何控制字符（含 DEL）。
         if (ContainsRejectedControlCharacter(profile.StoreCode, allowLineBreaksAndTabs: false) ||
             ContainsRejectedControlCharacter(profile.StoreName, allowLineBreaksAndTabs: false) ||
             ContainsRejectedControlCharacter(profile.BrandName, allowLineBreaksAndTabs: false) ||
             ContainsRejectedControlCharacter(profile.Phone, allowLineBreaksAndTabs: false) ||
             ContainsRejectedControlCharacter(profile.Abn, allowLineBreaksAndTabs: false) ||
             ContainsRejectedControlCharacter(profile.Address, allowLineBreaksAndTabs: true) ||
-            ContainsRejectedControlCharacter(profile.ReturnPolicy, allowLineBreaksAndTabs: true))
+            ContainsRejectedControlCharacter(profile.ReturnPolicy, allowLineBreaksAndTabs: true) ||
+            ContainsRejectedControlCharacter(profile.VoucherTerms, allowLineBreaksAndTabs: true) ||
+            ContainsRejectedControlCharacter(profile.InstallmentTerms, allowLineBreaksAndTabs: true))
         {
             return "Store receipt profile contains invalid control characters.";
         }
@@ -32,6 +37,17 @@ public static class StoreReceiptProfileValidator
         if (profile.ReturnPolicy is { Length: > ReturnPolicyMaxLength })
         {
             return "Return policy exceeds the maximum length of 500 characters.";
+        }
+
+        // 错误信息只说明哪个字段超限，不带任何资料内容（会被写进日志 / 展示在设置页）。
+        if (profile.VoucherTerms is { Length: > TermsMaxLength })
+        {
+            return "Voucher terms exceed the maximum length of 600 characters.";
+        }
+
+        if (profile.InstallmentTerms is { Length: > TermsMaxLength })
+        {
+            return "Installment terms exceed the maximum length of 600 characters.";
         }
 
         if (requireStoreName && string.IsNullOrWhiteSpace(profile.StoreName))

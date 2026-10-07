@@ -4,11 +4,10 @@ import test from "node:test";
 import {
   InstallmentReceiptReprintPreparationService,
   isInstallmentReceiptReprintEligible,
+  type FrozenInstallmentReceiptSettings,
+  type InstallmentReceiptSettingsSource,
 } from "./installment-receipt-reprint-service";
-import type {
-  FrozenReceiptReprintSettings,
-  ReceiptReprintSettingsSource,
-} from "@hb/pos-receipt-core/features/receipts/receipt-reprint-service";
+import type { FrozenReceiptReprintSettings } from "@hb/pos-receipt-core/features/receipts/receipt-reprint-service";
 
 import type { InstallmentDetails, InstallmentsRemotePort } from "@/features/installments/installment-models";
 
@@ -97,7 +96,7 @@ function details(overrides: Partial<InstallmentDetails> = {}): InstallmentDetail
 function createService(input: Readonly<{
   response?: InstallmentDetails | null;
   getDetails?: InstallmentsRemotePort["getDetails"];
-  settingValue?: FrozenReceiptReprintSettings | null;
+  settingValue?: FrozenInstallmentReceiptSettings | null;
   trustedStoreCode?: string;
   trustedDeviceCode?: string;
   refundVouchers?: Readonly<{
@@ -114,7 +113,7 @@ function createService(input: Readonly<{
         : (input.response ?? null);
     },
   };
-  const settingSource: ReceiptReprintSettingsSource = {
+  const settingSource: InstallmentReceiptSettingsSource = {
     async getFrozenReceiptSettings() {
       settingsCalls += 1;
       return input.settingValue === undefined ? settings : input.settingValue;
@@ -528,6 +527,117 @@ test("状态为进行中但带提货信息的不一致数据不打印分期条�
   }).service.prepare(installmentGuid))?.receiptBytes);
 
   assert.doesNotMatch(receipt, /INSTALLMENT TERMS/u);
+});
+
+test("总部下发了分期条款正文：进行中补打标题仍是 INSTALLMENT TERMS，正文换成自定义行（空行丢弃、逐行 trim），默认条款不再出现", async () => {
+  const harness = createService({
+    response: activeInstallment(),
+    settingValue: {
+      ...settings,
+      store: { ...settings.store, returnPolicy: "Refunds within 14 days with proof of purchase." },
+      installmentTerms: "  Deposit $30 minimum.  \r\n\r\n   \nLater payments from $10.\rBalance due within 90 days.",
+    },
+  });
+
+  const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
+
+  const policy = receipt.indexOf("Refunds and returns");
+  const title = receipt.indexOf("INSTALLMENT TERMS");
+  const machineCode = receipt.indexOf(installmentGuid, title);
+  assert.ok(policy >= 0 && title > policy, "条款仍在退货政策之后");
+  assert.ok(machineCode > title, "条款仍在条码/QR 之前");
+  assert.equal(receipt.split("INSTALLMENT TERMS").length - 1, 1);
+  // 三行正文依次紧跟标题，空行被丢弃、行首尾空白被去掉。
+  assert.ok(receipt.indexOf("Deposit $30 minimum.", title) > title);
+  assert.ok(receipt.indexOf("Later payments from $10.", title) > receipt.indexOf("Deposit $30 minimum.", title));
+  assert.ok(receipt.indexOf("Balance due within 90 days.", title) > receipt.indexOf("Later payments from $10.", title));
+  assert.doesNotMatch(receipt, /Order total: \$50\.00 minimum\./u);
+  assert.doesNotMatch(receipt, /First payment: \$20\.00 minimum\./u);
+  assert.doesNotMatch(receipt, /Each later payment/u);
+});
+
+test("分期条款未定制（缺省 / null / 空串 / 纯空白）时与不带该字段的补打小票逐字节一致，仍是默认条款", async () => {
+  const baseline = (await createService({ response: activeInstallment() }).service.prepare(installmentGuid))?.receiptBytes;
+  assert.ok(baseline);
+  assert.match(decoder.decode(baseline), /Order total: \$50\.00 minimum\./u);
+
+  for (const blank of [undefined, null, "", "   ", "\r\n \t\n"]) {
+    const prepared = await createService({
+      response: activeInstallment(),
+      settingValue: { ...settings, installmentTerms: blank },
+    }).service.prepare(installmentGuid);
+    assert.deepEqual(prepared?.receiptBytes, baseline, JSON.stringify(blank));
+  }
+});
+
+test("分期条款自定义正文不合规（含 ESC 等控制字符、超过 600）时整份丢弃回退默认条款，补打不失败", async () => {
+  const baseline = (await createService({ response: activeInstallment() }).service.prepare(installmentGuid))?.receiptBytes;
+  assert.ok(baseline);
+
+  for (const installmentTerms of [
+    "Deposit $30 minimum.\u001b@\u001b!\u0001",
+    "Bell\u0007",
+    "C1\u009b",
+    "x".repeat(601),
+  ]) {
+    const prepared = await createService({
+      response: activeInstallment(),
+      settingValue: { ...settings, installmentTerms },
+    }).service.prepare(installmentGuid);
+    assert.deepEqual(prepared?.receiptBytes, baseline, JSON.stringify(installmentTerms).slice(0, 30));
+  }
+
+  // 恰好 600 个字符仍生效。
+  const atLimit = await createService({
+    response: activeInstallment(),
+    settingValue: { ...settings, installmentTerms: "y".repeat(600) },
+  }).service.prepare(installmentGuid);
+  assert.notDeepEqual(atLimit?.receiptBytes, baseline);
+  assert.match(decoder.decode(atLimit?.receiptBytes), /yyyyyyyyyyyyyyyyyyyy/u);
+});
+
+test("自定义分期条款同样只印在进行中的分期上：已付清、已取消的补打小票不带条款也不带自定义正文", async () => {
+  const customSettings = { ...settings, installmentTerms: "Custom installment rule." };
+  for (const response of [
+    details({ status: "PaidOff" }),
+    details({
+      status: "Cancelled",
+      paidCents: 0,
+      balanceCents: 0,
+      payments: [payment("12345678-1234-1234-1234-000000000002", 10_000, "2026-08-01T02:00:00.000Z")],
+      cancellationInfo: {
+        kind: "RefundCancel",
+        cancelledAtIso: "2026-08-03T01:02:03.000Z",
+        cancelledBy: "Alice",
+        reason: "Customer request",
+      },
+    }),
+  ]) {
+    const receipt = decoder.decode(
+      (await createService({ response, settingValue: customSettings }).service.prepare(installmentGuid))?.receiptBytes,
+    );
+    assert.doesNotMatch(receipt, /INSTALLMENT TERMS/u);
+    assert.doesNotMatch(receipt, /Custom installment rule\./u);
+  }
+});
+
+test("58mm 下自定义分期条款长句按 32 字符在单词边界换行，zh-CN 小票标题仍为英文", async () => {
+  const harness = createService({
+    response: activeInstallment(),
+    settingValue: {
+      ...settings,
+      paper: "58mm",
+      locale: "zh-CN",
+      installmentTerms: "Installment deposits are non-refundable once goods are set aside.",
+    },
+  });
+
+  const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
+
+  assert.match(receipt, /INSTALLMENT TERMS/u);
+  // 32 字符纸宽下在单词边界换行：不会把 non-refundable 拆开。
+  assert.match(receipt, /Installment deposits are[\s\S]{1,12}non-refundable once goods are[\s\S]{1,12}set aside\./u);
+  assert.doesNotMatch(receipt, /Order total/u);
 });
 
 test("prepare 对 GUID、门店或当前设备不一致 fail closed 且不读取设置", async () => {

@@ -8,8 +8,17 @@ import type {
 } from '../../../types/storeReceiptProfile'
 import { RequestError } from '../../../utils/request'
 
-/** 参与下发的 6 个字段，顺序即确认框里的展示顺序（与契约 StoreReceiptProfileFieldsDto 一致）。 */
-export const RECEIPT_PROFILE_FIELD_KEYS = ['brandName', 'storeName', 'address', 'phone', 'abn', 'returnPolicy'] as const
+/** 参与下发的 8 个字段，顺序即确认框里的展示顺序（与契约 StoreReceiptProfileFieldsDto 一致）。 */
+export const RECEIPT_PROFILE_FIELD_KEYS = [
+  'brandName',
+  'storeName',
+  'address',
+  'phone',
+  'abn',
+  'returnPolicy',
+  'voucherTerms',
+  'installmentTerms',
+] as const
 export type ReceiptProfileFieldKey = (typeof RECEIPT_PROFILE_FIELD_KEYS)[number]
 
 /** 契约：单批下发 1–100 家。 */

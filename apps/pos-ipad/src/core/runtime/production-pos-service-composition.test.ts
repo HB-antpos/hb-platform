@@ -138,6 +138,8 @@ import {
   createPostCommitWorkDrain,
   createPostCommitFulfilmentCashCheckout,
   createProductionPosRuntimeServices,
+  receiptReprintSettings,
+  returnReceiptSettings,
   type ProductionSettingsRuntimeConfiguration,
 } from "./production-pos-service-composition";
 
@@ -3448,6 +3450,8 @@ const BASE_RECEIPT_SETTINGS: ReceiptPrinterSettings = {
   phone: "0712345678",
   abn: "12 345 678 901",
   returnPolicy: "Manual policy",
+  voucherTerms: "",
+  installmentTerms: "",
   profileStoreCode: "S001",
   profileVersion: 0,
   profileAckedVersion: 0,
@@ -3565,6 +3569,159 @@ test("下发资料后台同步（无需收银员登录）：拉取→原子写�
     requests.map(({ url, params }) => ({ url, params })),
     [{ url: "/api/v1/stores/current/receipt-profile/sync", params: { knownVersion: 3 } }],
   );
+});
+
+test("下发资料后台同步：券使用说明与分期条款随资料落盘，冻结设置（退款券/分期补打）据此带出；总部清空后回到未定制", async () => {
+  const repository = receiptProfileRepository();
+  const { transport } = receiptProfileTransport({
+    sync: (known) =>
+      known === 0
+        ? {
+            changed: true,
+            version: 1,
+            profile: hqProfile(1, {
+              voucherTerms: "HQ voucher rule.\nSecond line.",
+              installmentTerms: "HQ installment rule.",
+            }),
+          }
+        : known === 1
+          ? {
+              changed: true,
+              version: 2,
+              // 总部清空两个文本：服务端返回 null，等价于未定制。
+              profile: hqProfile(2, { voucherTerms: null, installmentTerms: null }),
+            }
+          : { changed: false, version: known },
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport },
+  );
+  await services.initialize();
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("startup"), {
+    status: "updated",
+    version: 1,
+  });
+  const settings = await services.receiptSettings.get();
+  assert.equal(settings.voucherTerms, "HQ voucher rule.\nSecond line.");
+  assert.equal(settings.installmentTerms, "HQ installment rule.");
+  assert.equal(settings.profileVersion, 1);
+  assert.equal(settings.profileAckedVersion, 1);
+
+  // 冻结设置：退款券面（退货首次打印 + 取消分期后打印共用）带券使用说明，分期补打带分期条款。
+  const returnFrozen = await returnReceiptSettings(services.receiptSettings).getFrozenReturnReceiptSettings();
+  assert.equal(returnFrozen?.voucherTerms, "HQ voucher rule.\nSecond line.");
+  assert.equal(returnFrozen?.store.returnPolicy, "HQ policy v1", "退货政策行为不变");
+  const reprintFrozen = await receiptReprintSettings(services.receiptSettings).getFrozenReceiptSettings();
+  assert.equal(reprintFrozen?.installmentTerms, "HQ installment rule.");
+  assert.equal(reprintFrozen?.store.returnPolicy, "HQ policy v1");
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("timer"), {
+    status: "updated",
+    version: 2,
+  });
+  const cleared = await services.receiptSettings.get();
+  assert.equal(cleared.voucherTerms, "");
+  assert.equal(cleared.installmentTerms, "");
+  assert.equal(
+    (await returnReceiptSettings(services.receiptSettings).getFrozenReturnReceiptSettings())?.voucherTerms,
+    "",
+  );
+  assert.equal(
+    (await receiptReprintSettings(services.receiptSettings).getFrozenReceiptSettings())?.installmentTerms,
+    "",
+  );
+});
+
+test("下发资料后台同步：条款字段不合规（超过 600）整份丢弃，不写入、不回执，本机条款保持原样", async () => {
+  const repository = receiptProfileRepository({
+    ...BASE_RECEIPT_SETTINGS,
+    voucherTerms: "Manual voucher rule.",
+  });
+  const { transport, requests } = receiptProfileTransport({
+    sync: () => ({
+      changed: true,
+      version: 4,
+      profile: hqProfile(4, { voucherTerms: "x".repeat(601) }),
+    }),
+  });
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    { transport },
+  );
+  await services.initialize();
+
+  assert.deepEqual(await services.receiptProfileSync.requestSync("startup"), {
+    status: "failed",
+    reason: "invalid-profile",
+  });
+
+  assert.equal(requests.some(({ url }) => url.endsWith("/ack")), false);
+  const settings = await services.receiptSettings.get();
+  assert.equal(settings.voucherTerms, "Manual voucher rule.");
+  assert.equal(settings.profileVersion, 0);
+});
+
+test("设置页本机填写券使用说明与分期条款（未下发）→ 保存后冻结设置带出；未填写时冻结设置为空串（走默认文案）", async () => {
+  const repository = receiptProfileRepository();
+  const services = createTestComposition(
+    databaseFor([], { receiptSettingsRepository: repository }),
+    {
+      cashierPermissions: [SETTINGS_VIEW_PERMISSION, SETTINGS_RECEIPT_PRINTER_PERMISSION],
+      settings: settingsRuntimeConfiguration(),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  assert.equal(
+    (await returnReceiptSettings(services.receiptSettings).getFrozenReturnReceiptSettings())?.voucherTerms,
+    "",
+  );
+  if (!("createPresenter" in services.settings)) throw new Error("settings unavailable");
+  const presenter = services.settings.createPresenter();
+  await presenter.load();
+
+  presenter.setReceiptVoucherTerms("Local voucher rule.");
+  presenter.setReceiptInstallmentTerms("Local installment rule.");
+  await presenter.savePrinterSettings();
+
+  assert.equal(presenter.getState().statusCode, "printer-settings-saved");
+  const saved = await services.receiptSettings.get();
+  assert.equal(saved.voucherTerms, "Local voucher rule.");
+  assert.equal(saved.installmentTerms, "Local installment rule.");
+  assert.equal(
+    (await returnReceiptSettings(services.receiptSettings).getFrozenReturnReceiptSettings())?.voucherTerms,
+    "Local voucher rule.",
+  );
+  assert.equal(
+    (await receiptReprintSettings(services.receiptSettings).getFrozenReceiptSettings())?.installmentTerms,
+    "Local installment rule.",
+  );
+  presenter.destroy();
+});
+
+test("冻结设置映射：打印未启用时退款券设置为 null（保持 plan pending），外设损坏时分期补打设置为 null", async () => {
+  const frozenFor = (overrides: Partial<ReceiptPrinterSettings>) => ({
+    get: async (): Promise<ReceiptPrinterSettings> => ({
+      ...BASE_RECEIPT_SETTINGS,
+      voucherTerms: "Voucher rule.",
+      installmentTerms: "Installment rule.",
+      ...overrides,
+    }),
+  });
+
+  assert.equal(
+    await returnReceiptSettings(frozenFor({ printEnabled: false })).getFrozenReturnReceiptSettings(),
+    null,
+  );
+  assert.equal(
+    await receiptReprintSettings(frozenFor({ peripheralId: null })).getFrozenReceiptSettings(),
+    null,
+  );
+  const ok = await returnReceiptSettings(frozenFor({})).getFrozenReturnReceiptSettings();
+  assert.equal(ok?.voucherTerms, "Voucher rule.");
+  assert.equal(ok?.printerId, "printer-1");
 });
 
 test("下发资料后台同步：新版本落盘后，已创建的日结回单立即使用新资料（组合根缓存同步刷新）", async () => {
@@ -6154,6 +6311,8 @@ function databaseFor(
     phone: "0712345678",
     abn: "12 345 678 901",
     returnPolicy: "",
+    voucherTerms: "",
+    installmentTerms: "",
     profileStoreCode: "S001",
     profileVersion: 0,
     profileAckedVersion: 0,

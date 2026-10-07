@@ -39,6 +39,8 @@ test("当前门店小票资料载入透传 signal，已中止请求不会触达 
             phone: "07 3000 0000",
             abn: "12 345 678 901",
             returnPolicy: "Refunds within 14 days.",
+            voucherTerms: "",
+            installmentTerms: "",
           };
         },
       },

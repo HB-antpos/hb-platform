@@ -181,8 +181,21 @@ internal static class ProfileTestData
         string? address = Address,
         string? phone = Phone,
         string? abn = Abn,
-        string? returnPolicy = "Return within 7 days") =>
-        new(storeCode!, storeName!, brandName, address, phone, abn, returnPolicy, version, DateTimeOffset.UnixEpoch);
+        string? returnPolicy = "Return within 7 days",
+        string? voucherTerms = null,
+        string? installmentTerms = null) =>
+        new(
+            storeCode!,
+            storeName!,
+            brandName,
+            address,
+            phone,
+            abn,
+            returnPolicy,
+            version,
+            DateTimeOffset.UnixEpoch,
+            voucherTerms,
+            installmentTerms);
 
     public static StoreReceiptProfileSyncDto Changed(StoreReceiptProfileDto profile) =>
         new(true, profile.Version, profile);

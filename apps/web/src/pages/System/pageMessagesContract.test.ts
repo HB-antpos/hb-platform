@@ -37,6 +37,8 @@ const pages = [
     sources: [
       'src/pages/System/Stores/index.tsx',
       'src/pages/System/Stores/StoreFormFields.tsx',
+      // 独立详情页（未挂路由）也展示代金券使用说明 / 分期条款，自己注册页面级消息文件
+      'src/pages/System/Stores/Detail.tsx',
       // 小票资料下发：状态单元格 / 设备应用抽屉 / 下发确认弹窗用的也是 system.stores.* 文案
       'src/pages/System/Stores/ReceiptProfileCells.tsx',
       'src/pages/System/Stores/ReceiptProfileDevicesDrawer.tsx',

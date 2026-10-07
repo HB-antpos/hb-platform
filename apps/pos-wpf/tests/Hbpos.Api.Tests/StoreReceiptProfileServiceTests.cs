@@ -118,6 +118,98 @@ public sealed class StoreReceiptProfileServiceTests
         Assert.Equal(StoreReceiptProfileService.InvalidCharactersCode, result.ErrorCode);
     }
 
+    [Fact]
+    public async Task GetCurrentAsync_passes_voucher_and_installment_terms_through_unchanged()
+    {
+        // 多行、首尾空白、空行都原样透传：归一与取行是收银端的职责，接口不改写内容。
+        var profile = BuildProfile() with
+        {
+            VoucherTerms = "Use at the issuing store only.\r\n\r\n  Not redeemable for cash.  ",
+            InstallmentTerms = "Order total: $50.00 minimum.\tFirst payment: $20.00 minimum."
+        };
+        var service = new StoreReceiptProfileService(
+            (_, _) => Task.FromResult<StoreReceiptProfileDto?>(profile));
+
+        var result = await service.GetCurrentAsync("S001", CancellationToken.None);
+
+        Assert.Null(result.ErrorCode);
+        Assert.Equal(profile.VoucherTerms, result.Profile!.VoucherTerms);
+        Assert.Equal(profile.InstallmentTerms, result.Profile.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task GetCurrentAsync_old_rows_without_terms_stay_valid_with_null_terms()
+    {
+        var service = new StoreReceiptProfileService(
+            (_, _) => Task.FromResult<StoreReceiptProfileDto?>(BuildProfile()));
+
+        var result = await service.GetCurrentAsync("S001", CancellationToken.None);
+
+        Assert.Null(result.ErrorCode);
+        Assert.Null(result.Profile!.VoucherTerms);
+        Assert.Null(result.Profile.InstallmentTerms);
+    }
+
+    [Theory]
+    [InlineData("VoucherTerms", '\r')]
+    [InlineData("VoucherTerms", '\n')]
+    [InlineData("VoucherTerms", '\t')]
+    [InlineData("InstallmentTerms", '\r')]
+    [InlineData("InstallmentTerms", '\n')]
+    [InlineData("InstallmentTerms", '\t')]
+    public async Task GetCurrentAsync_allows_cr_lf_tab_in_voucher_and_installment_terms(string field, char whitespace)
+    {
+        var value = $"Line1{whitespace}Line2";
+        var profile = field == "VoucherTerms"
+            ? BuildProfile() with { VoucherTerms = value }
+            : BuildProfile() with { InstallmentTerms = value };
+        var service = new StoreReceiptProfileService(
+            (_, _) => Task.FromResult<StoreReceiptProfileDto?>(profile));
+
+        var result = await service.GetCurrentAsync("S001", CancellationToken.None);
+
+        Assert.NotNull(result.Profile);
+        Assert.Null(result.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("VoucherTerms", '\u0001')]
+    [InlineData("VoucherTerms", '\u0008')]
+    [InlineData("VoucherTerms", '\u007F')]
+    [InlineData("VoucherTerms", '\u009F')]
+    [InlineData("InstallmentTerms", '\u0001')]
+    [InlineData("InstallmentTerms", '\u0008')]
+    [InlineData("InstallmentTerms", '\u007F')]
+    [InlineData("InstallmentTerms", '\u009F')]
+    public async Task GetCurrentAsync_rejects_disallowed_control_characters_in_voucher_and_installment_terms(
+        string field,
+        char controlChar)
+    {
+        var value = $"Line1{controlChar}Line2";
+        var profile = field == "VoucherTerms"
+            ? BuildProfile() with { VoucherTerms = value }
+            : BuildProfile() with { InstallmentTerms = value };
+        var service = new StoreReceiptProfileService(
+            (_, _) => Task.FromResult<StoreReceiptProfileDto?>(profile));
+
+        var result = await service.GetCurrentAsync("S001", CancellationToken.None);
+
+        // 整份拒绝且不返回任何数据（与退货政策同口径）。
+        Assert.Null(result.Profile);
+        Assert.Equal(StoreReceiptProfileService.InvalidCharactersCode, result.ErrorCode);
+    }
+
+    [Fact]
+    public void StoreReceiptProfileRow_carries_the_new_term_columns_for_the_sql_mapping()
+    {
+        var row = new StoreReceiptProfileRow { VoucherTerms = "v", InstallmentTerms = "i" };
+
+        Assert.Equal("v", row.VoucherTerms);
+        Assert.Equal("i", row.InstallmentTerms);
+        Assert.Null(new StoreReceiptProfileRow().VoucherTerms);
+        Assert.Null(new StoreReceiptProfileReleaseRow().InstallmentTerms);
+    }
+
     [Theory]
     [InlineData("StoreCode", '\r')]
     [InlineData("StoreCode", '\n')]

@@ -135,9 +135,25 @@ internal static class ReceiptRefundVoucherMapper
 public sealed record RefundVoucherReceipt(string VoucherCode, decimal Amount, DateTimeOffset? ExpiresAt = null);
 
 /// <summary>
-/// 小票底部的条款块（标题 + 若干条款行）；只有显式带上的小票才会打印，其余小票输出保持不变。
+/// 条款块的种类：决定打印时套用本机设置里的哪一段定制正文（总部下发，见 <see cref="ReceiptTermsText"/>）。
 /// </summary>
-public sealed record ReceiptTerms(string Title, IReadOnlyList<string> Lines);
+public enum ReceiptTermsKind
+{
+    /// <summary>固定条款，正文不可定制。</summary>
+    Fixed,
+
+    /// <summary>分期条款（INSTALLMENT TERMS），正文可由总部按门店定制。</summary>
+    Installment,
+
+    /// <summary>退款代金券使用说明（VOUCHER TERMS），正文可由总部按门店定制。</summary>
+    RefundVoucher
+}
+
+/// <summary>
+/// 小票底部的条款块（标题 + 若干条款行）；只有显式带上的小票才会打印，其余小票输出保持不变。
+/// <see cref="Lines"/> 是内置默认正文，<see cref="Kind"/> 标明该块是否允许被本机设置里的定制正文替换。
+/// </summary>
+public sealed record ReceiptTerms(string Title, IReadOnlyList<string> Lines, ReceiptTermsKind Kind = ReceiptTermsKind.Fixed);
 
 /// <summary>
 /// 券面使用说明（英文，业主审定稿）。只对退款代金券：这类券由服务端绑定发券门店（别的门店会被拒绝）、
@@ -153,7 +169,8 @@ internal static class VoucherReceiptTerms
             "Pay with it at checkout by scanning the barcode or QR code.",
             "Can be used across several purchases until the balance is $0.00.",
             "Not redeemable for cash."
-        ]);
+        ],
+        ReceiptTermsKind.RefundVoucher);
 }
 
 internal static class ReceiptRefundVoucherDocuments

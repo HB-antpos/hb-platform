@@ -319,6 +319,71 @@ assertIncludes(
   '英文文案应明确说明退换货政策最大长度',
 )
 
+// 代金券使用说明 / 分期条款（总部按门店维护，点「下发」后到三端收银）。
+// 文案放页面级消息文件，不进全局语言包（首屏 gzip 预算很紧）。
+const zhPageMessages = readFileSync(resolve('src/pages/System/Stores/storesMessages.zh.json'), 'utf8')
+const enPageMessages = readFileSync(resolve('src/pages/System/Stores/storesMessages.en.json'), 'utf8')
+const termsDefaultsSource = readFileSync(resolve('src/pages/System/Stores/receiptTermsDefaults.ts'), 'utf8')
+for (const [field, label] of [['voucherTerms', '代金券使用说明'], ['installmentTerms', '分期条款']] as const) {
+  assertIncludes(
+    formFieldsSource,
+    `name="${field}"`,
+    `创建和编辑分店表单都应提供 ${label} 文本域`,
+  )
+  assertIncludes(
+    formFieldsSource,
+    `<CountedLabel name="${field}"`,
+    `${label} 应带字数计数，超限即时变红`,
+  )
+  assertIncludes(
+    formFieldsSource,
+    `t('system.stores.${field}MaxLength')`,
+    `${label} 长度校验应使用页面级友好提示文案`,
+  )
+  assertIncludes(
+    pageSource,
+    `${field}: detail.${field}`,
+    `编辑分店时应回填服务端返回的 ${label}`,
+  )
+  assertIncludes(
+    pageSource,
+    `detailStore.${field}`,
+    `列表页内详情抽屉应展示 ${label}`,
+  )
+  assertIncludes(
+    pageSource,
+    `apply${field[0].toUpperCase()}${field.slice(1)}`,
+    `批量弹窗应为 ${label} 提供独立修改开关`,
+  )
+  assertIncludes(
+    detailPageSource,
+    `store.${field}`,
+    `独立分店详情页应展示 ${label}`,
+  )
+  assertOccurrenceExactly(
+    storeTypesSource,
+    `${field}?: string`,
+    4,
+    `StoreDto、CreateStoreDto、UpdateStoreDto 和批量请求都应声明可选的 ${field}`,
+  )
+  // 全局语言包里不得出现（页面级消息文件才是它们的家）；页面级中英文都要有，且上限写明 600。
+  assertNotIncludes(zhSource, `"${field}"`, `${field} 文案不应进全局中文语言包`)
+  assertNotIncludes(enSource, `"${field}"`, `${field} 文案不应进全局英文语言包`)
+  assertIncludes(zhPageMessages, `"${field}":`, `${field} 应有页面级中文文案`)
+  assertIncludes(enPageMessages, `"${field}":`, `${field} 应有页面级英文文案`)
+}
+assertIncludes(zhPageMessages, '"voucherTermsMaxLength": "代金券使用说明不能超过 600 个字符"', '中文文案应明确说明代金券使用说明最大长度')
+assertIncludes(zhPageMessages, '"installmentTermsMaxLength": "分期条款不能超过 600 个字符"', '中文文案应明确说明分期条款最大长度')
+assertIncludes(enPageMessages, '"voucherTermsMaxLength": "Voucher terms cannot exceed 600 characters"', '英文文案应明确说明代金券使用说明最大长度')
+assertIncludes(enPageMessages, '"installmentTermsMaxLength": "Installment terms cannot exceed 600 characters"', '英文文案应明确说明分期条款最大长度')
+// 表单里的 placeholder 展示收银端内置默认文案，批量弹窗同理；长度上限与后端 / 收银端同值，只在常量文件里定义一次。
+assertIncludes(formFieldsSource, 'placeholder={DEFAULT_VOUCHER_TERMS_TEXT}', '代金券使用说明输入框应以默认文案作为占位提示')
+assertIncludes(formFieldsSource, 'placeholder={DEFAULT_INSTALLMENT_TERMS_TEXT}', '分期条款输入框应以默认文案作为占位提示')
+assertIncludes(pageSource, 'placeholder={DEFAULT_VOUCHER_TERMS_TEXT}', '批量修改的代金券使用说明应以默认文案作为占位提示')
+assertIncludes(pageSource, 'placeholder={DEFAULT_INSTALLMENT_TERMS_TEXT}', '批量修改的分期条款应以默认文案作为占位提示')
+assertIncludes(termsDefaultsSource, 'RECEIPT_TERMS_MAX_LENGTH = 600', '两个字段的长度上限应为 600')
+assertNotIncludes(formFieldsSource, 'max: 600', '长度上限必须引用 RECEIPT_TERMS_MAX_LENGTH，不要在表单里再写一份字面量')
+
 assertIncludes(
   pageSource,
   'usePermission(P.Stores.Edit)',

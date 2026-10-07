@@ -2,6 +2,11 @@ import { ReloadOutlined } from '@ant-design/icons'
 import { Button, Form, Input, Select, Switch } from 'antd'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import {
+  DEFAULT_INSTALLMENT_TERMS_TEXT,
+  DEFAULT_VOUCHER_TERMS_TEXT,
+  RECEIPT_TERMS_MAX_LENGTH,
+} from './receiptTermsDefaults'
 import { storeTimeZoneOptions } from './timeZoneOptions'
 import './stores.css'
 
@@ -162,6 +167,30 @@ export default function StoreFormFields({ onRegenerateStoreCode, storeCodeLoadin
             rules={[{ max: 500, message: t('system.stores.returnPolicyMaxLength') }]}
           >
             <Input.TextArea rows={4} autoComplete="off" />
+          </Form.Item>
+        </div>
+      </section>
+
+      {/* 代金券 / 分期小票底部的使用说明：标题由收银端固定印，这里只填标题下面的正文。
+          留空＝收银端使用内置默认文案，所以 placeholder 直接展示默认英文稿（只是提示，不会被保存）。 */}
+      <section className="sys-store-section">
+        <h4 className="sys-store-section-title">{t('system.stores.formReceiptTerms')}</h4>
+        <div className="sys-store-grid">
+          <Form.Item
+            label={<CountedLabel name="voucherTerms" label={t('system.stores.voucherTerms')} max={RECEIPT_TERMS_MAX_LENGTH} />}
+            name="voucherTerms"
+            extra={t('system.stores.voucherTermsHint')}
+            rules={[{ max: RECEIPT_TERMS_MAX_LENGTH, message: t('system.stores.voucherTermsMaxLength') }]}
+          >
+            <Input.TextArea rows={5} autoComplete="off" placeholder={DEFAULT_VOUCHER_TERMS_TEXT} />
+          </Form.Item>
+          <Form.Item
+            label={<CountedLabel name="installmentTerms" label={t('system.stores.installmentTerms')} max={RECEIPT_TERMS_MAX_LENGTH} />}
+            name="installmentTerms"
+            extra={t('system.stores.installmentTermsHint')}
+            rules={[{ max: RECEIPT_TERMS_MAX_LENGTH, message: t('system.stores.installmentTermsMaxLength') }]}
+          >
+            <Input.TextArea rows={5} autoComplete="off" placeholder={DEFAULT_INSTALLMENT_TERMS_TEXT} />
           </Form.Item>
         </div>
       </section>

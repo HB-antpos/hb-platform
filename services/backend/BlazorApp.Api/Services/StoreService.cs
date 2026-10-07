@@ -29,6 +29,8 @@ namespace BlazorApp.Api.Services
                 StoreBatchUpdateFieldNames.BrandName,
                 StoreBatchUpdateFieldNames.IsActive,
                 StoreBatchUpdateFieldNames.ReturnPolicy,
+                StoreBatchUpdateFieldNames.VoucherTerms,
+                StoreBatchUpdateFieldNames.InstallmentTerms,
             },
             StringComparer.Ordinal
         );
@@ -88,6 +90,8 @@ namespace BlazorApp.Api.Services
                         Address = s.Address,
                         TimeZoneId = s.TimeZoneId,
                         ReturnPolicy = s.ReturnPolicy,
+                        VoucherTerms = s.VoucherTerms,
+                        InstallmentTerms = s.InstallmentTerms,
                         ContactPhone = s.Phone,
                         ContactEmail = s.ContactEmail,
                         IsActive = s.IsActive,
@@ -131,6 +135,8 @@ namespace BlazorApp.Api.Services
                         Address = s.Address,
                         TimeZoneId = s.TimeZoneId,
                         ReturnPolicy = s.ReturnPolicy,
+                        VoucherTerms = s.VoucherTerms,
+                        InstallmentTerms = s.InstallmentTerms,
                         ContactPhone = s.Phone,
                         ContactEmail = s.ContactEmail,
                         IsActive = s.IsActive,
@@ -299,6 +305,8 @@ namespace BlazorApp.Api.Services
                         Address = s.Address,
                         TimeZoneId = s.TimeZoneId,
                         ReturnPolicy = s.ReturnPolicy,
+                        VoucherTerms = s.VoucherTerms,
+                        InstallmentTerms = s.InstallmentTerms,
                         ContactPhone = s.Phone,
                         ContactEmail = s.ContactEmail,
                         IsActive = s.IsActive,
@@ -457,6 +465,8 @@ namespace BlazorApp.Api.Services
                     Address = store.Address,
                     TimeZoneId = store.TimeZoneId,
                     ReturnPolicy = store.ReturnPolicy,
+                    VoucherTerms = store.VoucherTerms,
+                    InstallmentTerms = store.InstallmentTerms,
                     ContactPhone = store.Phone,
                     ContactEmail = store.ContactEmail,
                     IsActive = store.IsActive,
@@ -565,6 +575,8 @@ namespace BlazorApp.Api.Services
                 store.BrandName = dto.BrandName;
                 store.Address = dto.Address;
                 store.ReturnPolicy = dto.ReturnPolicy;
+                store.VoucherTerms = dto.VoucherTerms;
+                store.InstallmentTerms = dto.InstallmentTerms;
                 if (!string.IsNullOrWhiteSpace(dto.TimeZoneId))
                 {
                     store.TimeZoneId = normalizedTimeZoneId;
@@ -587,6 +599,8 @@ namespace BlazorApp.Api.Services
                     Address = store.Address,
                     TimeZoneId = store.TimeZoneId,
                     ReturnPolicy = store.ReturnPolicy,
+                    VoucherTerms = store.VoucherTerms,
+                    InstallmentTerms = store.InstallmentTerms,
                     ContactPhone = store.Phone,
                     ContactEmail = store.ContactEmail,
                     IsActive = store.IsActive,
@@ -640,7 +654,7 @@ namespace BlazorApp.Api.Services
 
                 var fields = dto.Fields ?? new List<string>();
                 if (
-                    fields.Count is < 1 or > 5
+                    fields.Count is < 1 or > 7
                     || fields.Any(string.IsNullOrWhiteSpace)
                     || fields.Distinct(StringComparer.Ordinal).Count() != fields.Count
                     || fields.Any(field => !AllowedBatchUpdateFields.Contains(field))
@@ -666,6 +680,12 @@ namespace BlazorApp.Api.Services
                 );
                 var updateReturnPolicy = selectedFields.Contains(
                     StoreBatchUpdateFieldNames.ReturnPolicy
+                );
+                var updateVoucherTerms = selectedFields.Contains(
+                    StoreBatchUpdateFieldNames.VoucherTerms
+                );
+                var updateInstallmentTerms = selectedFields.Contains(
+                    StoreBatchUpdateFieldNames.InstallmentTerms
                 );
 
                 string? normalizedTimeZoneId = null;
@@ -713,6 +733,27 @@ namespace BlazorApp.Api.Services
                     return CreateBatchUpdateError(
                         requestedCount,
                         "退换货政策长度不能超过500个字符",
+                        "INVALID_STORE_BATCH_VALUE"
+                    );
+                }
+
+                // 代金券使用说明 / 分期条款：与退换货政策同口径（trim、空白变 null），上限各 600。
+                var normalizedVoucherTerms = NormalizeNullableBatchText(dto.VoucherTerms);
+                if (updateVoucherTerms && normalizedVoucherTerms?.Length > 600)
+                {
+                    return CreateBatchUpdateError(
+                        requestedCount,
+                        "代金券使用说明长度不能超过600个字符",
+                        "INVALID_STORE_BATCH_VALUE"
+                    );
+                }
+
+                var normalizedInstallmentTerms = NormalizeNullableBatchText(dto.InstallmentTerms);
+                if (updateInstallmentTerms && normalizedInstallmentTerms?.Length > 600)
+                {
+                    return CreateBatchUpdateError(
+                        requestedCount,
+                        "分期条款长度不能超过600个字符",
                         "INVALID_STORE_BATCH_VALUE"
                     );
                 }
@@ -772,6 +813,14 @@ namespace BlazorApp.Api.Services
                         .SetColumnsIF(
                             updateReturnPolicy,
                             store => store.ReturnPolicy == normalizedReturnPolicy
+                        )
+                        .SetColumnsIF(
+                            updateVoucherTerms,
+                            store => store.VoucherTerms == normalizedVoucherTerms
+                        )
+                        .SetColumnsIF(
+                            updateInstallmentTerms,
+                            store => store.InstallmentTerms == normalizedInstallmentTerms
                         )
                         .SetColumns(store => store.UpdatedAt == updatedAt)
                         .Where(store =>
@@ -1615,6 +1664,8 @@ WHEN NOT MATCHED THEN
                     Address = store.Address,
                     TimeZoneId = store.TimeZoneId,
                     ReturnPolicy = store.ReturnPolicy,
+                    VoucherTerms = store.VoucherTerms,
+                    InstallmentTerms = store.InstallmentTerms,
                     ContactEmail = store.ContactEmail,
                     IsActive = store.IsActive,
                     CreatedAt = store.CreatedAt,
@@ -1650,6 +1701,8 @@ WHEN NOT MATCHED THEN
                     Address = store.Address,
                     TimeZoneId = store.TimeZoneId,
                     ReturnPolicy = store.ReturnPolicy,
+                    VoucherTerms = store.VoucherTerms,
+                    InstallmentTerms = store.InstallmentTerms,
                     ContactPhone = store.Phone,
                     ContactEmail = store.ContactEmail,
                     // 分店详情必须保留数据库状态，避免 DTO 默认值覆盖停用分店。
@@ -1717,6 +1770,8 @@ WHEN NOT MATCHED THEN
                     Address = dto.Address,
                     TimeZoneId = normalizedTimeZoneId,
                     ReturnPolicy = dto.ReturnPolicy,
+                    VoucherTerms = dto.VoucherTerms,
+                    InstallmentTerms = dto.InstallmentTerms,
                     ABN = dto.ABN,
                     BrandName = dto.BrandName,
                     StoreGUID = Guid.NewGuid().ToString(),
@@ -1742,6 +1797,8 @@ WHEN NOT MATCHED THEN
                     Address = store.Address,
                     TimeZoneId = store.TimeZoneId,
                     ReturnPolicy = store.ReturnPolicy,
+                    VoucherTerms = store.VoucherTerms,
+                    InstallmentTerms = store.InstallmentTerms,
                     ContactEmail = store.ContactEmail,
                     IsActive = store.IsActive,
                     CreatedAt = store.CreatedAt,
@@ -1803,6 +1860,8 @@ WHEN NOT MATCHED THEN
                 store.BrandName = dto.BrandName;
                 store.Address = dto.Address;
                 store.ReturnPolicy = dto.ReturnPolicy;
+                store.VoucherTerms = dto.VoucherTerms;
+                store.InstallmentTerms = dto.InstallmentTerms;
                 if (!string.IsNullOrWhiteSpace(dto.TimeZoneId))
                 {
                     store.TimeZoneId = normalizedTimeZoneId;
@@ -1825,6 +1884,8 @@ WHEN NOT MATCHED THEN
                     Address = store.Address,
                     TimeZoneId = store.TimeZoneId,
                     ReturnPolicy = store.ReturnPolicy,
+                    VoucherTerms = store.VoucherTerms,
+                    InstallmentTerms = store.InstallmentTerms,
                     ContactPhone = store.Phone,
                     ContactEmail = store.ContactEmail,
                     IsActive = store.IsActive,

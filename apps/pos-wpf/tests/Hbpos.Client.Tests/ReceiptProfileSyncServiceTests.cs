@@ -66,9 +66,70 @@ public sealed class ReceiptProfileSyncServiceTests
         Assert.Equal(ProfileTestData.Phone, loaded.StorePhone);
         Assert.Equal(ProfileTestData.Abn, loaded.Abn);
         Assert.Equal("Return within 7 days", loaded.ReturnPolicy);
+        // 旧快照（没有这两个字段）：本机为空串＝未定制，打印走默认文案。
+        Assert.Equal(string.Empty, loaded.VoucherTerms);
+        Assert.Equal(string.Empty, loaded.InstallmentTerms);
         var args = Assert.Single(applied);
         Assert.Equal("S001", args.StoreCode);
         Assert.Equal(3, args.Version);
+    }
+
+    [Fact]
+    public async Task Changed_profile_with_terms_is_applied_to_local_settings_and_acked()
+    {
+        using var harness = new Harness();
+        harness.Api.OnSync = (_, _) => Task.FromResult(ProfileTestData.Changed(ProfileTestData.Profile(
+            3,
+            voucherTerms: "Voucher line 1\r\n\r\nVoucher line 2",
+            installmentTerms: "Installment line 1")));
+
+        var result = await harness.Service.SyncNowAsync();
+
+        Assert.Equal(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.Applied, 3), result);
+        Assert.Equal([3], harness.Api.AckVersions);
+        var loaded = await harness.Store.LoadAsync();
+        Assert.Equal("Voucher line 1\r\n\r\nVoucher line 2", loaded.VoucherTerms);
+        Assert.Equal("Installment line 1", loaded.InstallmentTerms);
+        // 打印取正文时空行才会被丢弃；落盘保留总部下发的原样（仅首尾 trim）。
+        Assert.Equal(["Voucher line 1", "Voucher line 2"], ReceiptTermsText.SplitLines(loaded.VoucherTerms));
+    }
+
+    [Fact]
+    public async Task Terms_at_exactly_the_length_limit_with_line_breaks_and_tabs_are_accepted()
+    {
+        using var harness = new Harness();
+        var voucherTerms = "a\t\r\n" + new string('v', ReceiptTermsText.MaxLength - 4);
+        var installmentTerms = new string('i', ReceiptTermsText.MaxLength);
+        Assert.Equal(ReceiptTermsText.MaxLength, voucherTerms.Length);
+        harness.Api.OnSync = (_, _) => Task.FromResult(ProfileTestData.Changed(ProfileTestData.Profile(
+            3, voucherTerms: voucherTerms, installmentTerms: installmentTerms)));
+
+        var result = await harness.Service.SyncNowAsync();
+
+        Assert.Equal(ReceiptProfileSyncOutcome.Applied, result.Outcome);
+    }
+
+    [Fact]
+    public async Task Logs_never_contain_the_terms_text_even_when_the_profile_is_discarded()
+    {
+        using var harness = new Harness();
+        using var capture = new ConsoleLogCapture();
+        harness.Api.OnSync = (_, _) => Task.FromResult(ProfileTestData.Changed(ProfileTestData.Profile(
+            3, voucherTerms: "TOP-SECRET-VOUCHER-LINE", installmentTerms: "TOP-SECRET-INSTALLMENT-LINE")));
+        await harness.Service.SyncNowAsync();
+        harness.Api.OnSync = (_, _) => Task.FromResult(ProfileTestData.Changed(ProfileTestData.Profile(
+            4,
+            voucherTerms: "TOP-SECRET-VOUCHER-LINE\u0001",
+            installmentTerms: "TOP-SECRET-INSTALLMENT-LINE")));
+        await harness.Service.SyncNowAsync();
+        harness.Api.OnSync = (_, _) => Task.FromResult(ProfileTestData.Changed(ProfileTestData.Profile(
+            5, installmentTerms: "TOP-SECRET-INSTALLMENT-LINE" + new string('x', ReceiptTermsText.MaxLength))));
+        await harness.Service.SyncNowAsync();
+
+        var text = string.Join('\n', capture.Lines);
+        Assert.Contains("applied version=3", text, StringComparison.Ordinal);
+        Assert.Contains("Discarded", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("TOP-SECRET", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -304,6 +365,11 @@ public sealed class ReceiptProfileSyncServiceTests
     [InlineData("newline-in-store-name")]
     [InlineData("control-char-in-store-code")]
     [InlineData("return-policy-too-long")]
+    [InlineData("voucher-terms-too-long")]
+    [InlineData("installment-terms-too-long")]
+    [InlineData("control-char-in-voucher-terms")]
+    [InlineData("control-char-in-installment-terms")]
+    [InlineData("del-in-voucher-terms")]
     [InlineData("blank-store-name")]
     [InlineData("null-store-name")]
     public async Task Invalid_profile_is_discarded_with_no_partial_write_and_no_ack(string scenario)
@@ -317,6 +383,11 @@ public sealed class ReceiptProfileSyncServiceTests
             "newline-in-store-name" => ProfileTestData.Profile(3, storeName: "Sunny\nbank"),
             "control-char-in-store-code" => ProfileTestData.Profile(3, storeCode: "S001\u0002"),
             "return-policy-too-long" => ProfileTestData.Profile(3, returnPolicy: new string('x', 501)),
+            "voucher-terms-too-long" => ProfileTestData.Profile(3, voucherTerms: new string('x', 601)),
+            "installment-terms-too-long" => ProfileTestData.Profile(3, installmentTerms: new string('x', 601)),
+            "control-char-in-voucher-terms" => ProfileTestData.Profile(3, voucherTerms: "Line1\nBad\u0001Line"),
+            "control-char-in-installment-terms" => ProfileTestData.Profile(3, installmentTerms: "Bad\u0008Line"),
+            "del-in-voucher-terms" => ProfileTestData.Profile(3, voucherTerms: "Bad\u007FLine"),
             "blank-store-name" => ProfileTestData.Profile(3, storeName: "   "),
             "null-store-name" => ProfileTestData.Profile(3, storeName: null),
             _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null)

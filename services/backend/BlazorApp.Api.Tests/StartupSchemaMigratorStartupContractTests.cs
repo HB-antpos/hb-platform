@@ -200,6 +200,56 @@ public sealed class StartupSchemaMigratorStartupContractTests
     }
 
     [Fact]
+    public async Task StoreDtos_代金券使用说明与分期条款随退换货政策同位置声明且上限600()
+    {
+        var dtoSource = await File.ReadAllTextAsync(Path.Combine(
+            FindRepoRoot(),
+            "services/backend/BlazorApp.Shared/DTOs/StoreDtos.cs"));
+
+        // 与 ReturnPolicy 一样出现在 Create/Update/Store/StoreDetail 四个整表 DTO 与批量补丁共 5 处。
+        foreach (var property in new[] { "VoucherTerms", "InstallmentTerms" })
+        {
+            Assert.Equal(5, System.Text.RegularExpressions.Regex.Matches(
+                dtoSource,
+                @"public string\? " + property + @" \{ get; set; \}").Count);
+        }
+
+        // 四个整表 DTO 用 DataAnnotation 限 600；批量补丁只在 fields 选中时由服务校验。
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(
+            dtoSource,
+            @"\[StringLength\(600, ErrorMessage = ""代金券使用说明长度不能超过600个字符""\)\]").Count);
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(
+            dtoSource,
+            @"\[StringLength\(600, ErrorMessage = ""分期条款长度不能超过600个字符""\)\]").Count);
+    }
+
+    [Fact]
+    public async Task 代金券使用说明与分期条款只走版本迁移_启动补列与Hq同步都不触碰()
+    {
+        var root = FindRepoRoot();
+        var migrator = await File.ReadAllTextAsync(Path.Combine(
+            root,
+            "services/backend/BlazorApp.Api/Data/StartupSchemaMigrator.cs"));
+        // 生产启动不迁移，新字段只能走 20261008.002-store-receipt-terms 版本迁移，不得再混入启动期补列。
+        Assert.DoesNotContain("VoucherTerms", migrator, StringComparison.Ordinal);
+        Assert.DoesNotContain("InstallmentTerms", migrator, StringComparison.Ordinal);
+
+        var serviceSource = await File.ReadAllTextAsync(Path.Combine(
+            root,
+            "services/backend/BlazorApp.Api/Services/StoreService.cs"));
+        var hqStart = serviceSource.IndexOf(
+            "private async Task UpsertHqBranchAsync",
+            StringComparison.Ordinal);
+        var hqEnd = serviceSource.IndexOf(
+            "private static SugarParameter ToParameter",
+            StringComparison.Ordinal);
+        Assert.True(hqStart >= 0 && hqEnd > hqStart, "无法定位 StoreService 的 HQ 同步代码区间");
+        var hqRegion = serviceSource[hqStart..hqEnd];
+        Assert.DoesNotContain("VoucherTerms", hqRegion, StringComparison.Ordinal);
+        Assert.DoesNotContain("InstallmentTerms", hqRegion, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StoreService_Hq同步不写入或覆盖退换货政策()
     {
         var serviceSource = await File.ReadAllTextAsync(Path.Combine(

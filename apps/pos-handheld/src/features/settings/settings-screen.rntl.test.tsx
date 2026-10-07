@@ -1744,6 +1744,8 @@ describe("SettingsScreen", () => {
       phone: "07 3000 0000",
       abn: "12 345 678 901",
       returnPolicy: "Refunds within 14 days.",
+      voucherTerms: "Valid at all stores.\nNo cash refunds.",
+      installmentTerms: "Deposit $30 minimum.",
     };
     const presenter = createPresenter(port);
     await presenter.load();
@@ -1770,6 +1772,9 @@ describe("SettingsScreen", () => {
       "settings-receipt-phone": 60,
       "settings-receipt-abn": 32,
       "settings-receipt-return-policy": 500,
+      // 券使用说明 / 分期条款上限与打印层、本机存储、服务端一致（600）。
+      "settings-receipt-voucher-terms": 600,
+      "settings-receipt-installment-terms": 600,
     } as const;
     for (const [testID, maxLength] of Object.entries(fieldMaxLengths)) {
       const field = screen.getByTestId(testID);
@@ -1812,6 +1817,12 @@ describe("SettingsScreen", () => {
     );
     expect(screen.getByTestId("settings-receipt-return-policy").props.value).toBe(
       "Refunds within 14 days.",
+    );
+    expect(screen.getByTestId("settings-receipt-voucher-terms").props.value).toBe(
+      "Valid at all stores.\nNo cash refunds.",
+    );
+    expect(screen.getByTestId("settings-receipt-installment-terms").props.value).toBe(
+      "Deposit $30 minimum.",
     );
     expect(screen.getByText("Loaded. Save to apply.")).toBeTruthy();
     expect(port.savedPrinterSettings).toHaveLength(0);
@@ -2282,6 +2293,8 @@ describe("SettingsScreen", () => {
       phone: "02 1234 5678",
       abn: "12 345 678 901",
       returnPolicy: "14 days.",
+      voucherTerms: "Valid at all stores.\nNo cash refunds.",
+      installmentTerms: "Deposit $30 minimum.",
       profileStoreCode: "BNE-01",
       profileVersion: 3,
       profileAckedVersion: 3,
@@ -2293,6 +2306,8 @@ describe("SettingsScreen", () => {
       "settings-receipt-phone",
       "settings-receipt-abn",
       "settings-receipt-return-policy",
+      "settings-receipt-voucher-terms",
+      "settings-receipt-installment-terms",
     ] as const;
 
     async function openManagedCard(
@@ -2351,6 +2366,8 @@ describe("SettingsScreen", () => {
         phone: "",
         abn: "",
         returnPolicy: "",
+        voucherTerms: "",
+        installmentTerms: "",
       };
       port.syncResult = {
         status: "updated",
@@ -2408,6 +2425,75 @@ describe("SettingsScreen", () => {
       }
     });
 
+    it("已应用下发资料：券使用说明与分期条款显示总部下发的正文且只读，留空提示可见（中英文）", async () => {
+      const zh = await openManagedCard("zh");
+
+      expect(zh.screen.getByText("代金券使用说明")).toBeTruthy();
+      expect(zh.screen.getByText("分期条款")).toBeTruthy();
+      expect(zh.screen.getByTestId("settings-receipt-voucher-terms").props.value).toBe(
+        "Valid at all stores.\nNo cash refunds.",
+      );
+      expect(zh.screen.getByTestId("settings-receipt-installment-terms").props.value).toBe(
+        "Deposit $30 minimum.",
+      );
+      expect(zh.screen.getByTestId("settings-receipt-voucher-terms").props.editable).toBe(false);
+      expect(zh.screen.getByTestId("settings-receipt-installment-terms").props.editable).toBe(false);
+      expect(zh.screen.getByTestId("settings-receipt-terms-hint")).toBeTruthy();
+      expect(zh.screen.getByText(/留空＝使用默认文案/u)).toBeTruthy();
+
+      const en = await openManagedCard("en");
+      expect(en.screen.getAllByText("Voucher terms").length).toBeGreaterThan(0);
+      expect(en.screen.getAllByText("Installment terms").length).toBeGreaterThan(0);
+      expect(en.screen.getAllByText(/Leave blank to use the default wording\./u).length).toBeGreaterThan(0);
+    });
+
+    it("已应用下发资料且总部未定制条款：两个输入框为空并显示「默认文案」占位", async () => {
+      const port = new ScreenSettingsPort();
+      port.snapshotValue = {
+        ...snapshot(),
+        printer: { ...managedPrinter, voucherTerms: "", installmentTerms: "" },
+      };
+      const presenter = createPresenter(port);
+      await presenter.load();
+      const screen = await render(<SettingsScreen locale="zh" presenter={presenter} />);
+      await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+      await screen.findByTestId("settings-pane-content-peripherals");
+
+      for (const testID of ["settings-receipt-voucher-terms", "settings-receipt-installment-terms"]) {
+        const field = screen.getByTestId(testID);
+        expect(field.props.value).toBe("");
+        expect(field.props.placeholder).toBe("默认文案");
+        expect(field.props.editable).toBe(false);
+      }
+    });
+
+    it("点击「立即同步」后，设置页刷新为总部新下发的券使用说明与分期条款", async () => {
+      const port = new ScreenSettingsPort();
+      port.syncResult = {
+        status: "updated",
+        version: 4,
+        printer: {
+          ...managedPrinter,
+          voucherTerms: "New voucher rule.",
+          installmentTerms: "",
+          profileVersion: 4,
+          profileAckedVersion: 4,
+        },
+      };
+      const { screen } = await openManagedCard("zh", port);
+
+      await fireEvent.press(screen.getByTestId("settings-receipt-profile-load"));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("settings-receipt-voucher-terms").props.value).toBe(
+          "New voucher rule.",
+        ),
+      );
+      // 总部把分期条款清空：回到未定制（空串 + 默认文案占位）。
+      expect(screen.getByTestId("settings-receipt-installment-terms").props.value).toBe("");
+      expect(screen.getByText("已更新到版本 4")).toBeTruthy();
+    });
+
     it("未下发（profileVersion=0）：六字段可编辑，按钮仍是「载入门店资料」，行为与旧版一致", async () => {
       const port = new ScreenSettingsPort();
       const presenter = createPresenter(port);
@@ -2425,6 +2511,40 @@ describe("SettingsScreen", () => {
       expect(screen.queryByText("立即同步")).toBeNull();
       expect(screen.queryByText("由总部下发，请在 Web 分店管理修改")).toBeNull();
       expect(screen.queryByTestId("settings-receipt-profile-managed")).toBeNull();
+    });
+
+    it("未下发：券使用说明与分期条款可本机编辑，留空提示可见，保存后写入本机设置", async () => {
+      const port = new ScreenSettingsPort();
+      const presenter = createPresenter(port);
+      await presenter.load();
+      const screen = await render(
+        <SettingsScreen locale="zh" presenter={presenter} />,
+      );
+      await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+      await screen.findByTestId("settings-pane-content-peripherals");
+
+      expect(screen.getByTestId("settings-receipt-voucher-terms").props.value).toBe("");
+      expect(screen.getByTestId("settings-receipt-voucher-terms").props.placeholder).toBe("默认文案");
+      expect(screen.getByText(/留空＝使用默认文案/u)).toBeTruthy();
+
+      await fireEvent.changeText(
+        screen.getByTestId("settings-receipt-voucher-terms"),
+        "Local voucher rule.\nSecond line.",
+      );
+      await fireEvent.changeText(
+        screen.getByTestId("settings-receipt-installment-terms"),
+        "Local installment rule.",
+      );
+      expect(screen.getByTestId("settings-receipt-voucher-terms").props.value).toBe(
+        "Local voucher rule.\nSecond line.",
+      );
+      expect(port.savedPrinterSettings).toHaveLength(0);
+
+      await presenter.savePrinterSettings();
+
+      expect(port.savedPrinterSettings).toHaveLength(1);
+      expect(port.savedPrinterSettings[0]?.voucherTerms).toBe("Local voucher rule.\nSecond line.");
+      expect(port.savedPrinterSettings[0]?.installmentTerms).toBe("Local installment rule.");
     });
   });
 

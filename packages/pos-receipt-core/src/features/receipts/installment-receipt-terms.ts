@@ -7,6 +7,8 @@ import type { ReceiptTermsBlock } from "./receipt-document";
  * - 只有「进行中」的分期补打才会传入（见两端 installment-receipt-reprint-service）；
  *   手持与 iPad 必须引用这同一份常量，不要各自抄写。
  * - 第三条较长，不在此手工拆行：由 buildSaleReceiptDocument 按纸宽（58mm=32 / 80mm=42 字符）自动换行。
+ * - 这是「未定制」时的内置默认文案，必须保持逐字不变。总部在 Web 分店管理下发了自定义正文时，
+ *   由分期补打服务经 resolveReceiptTermsBlock（receipt-terms-text.ts）换成「本块标题 + 自定义正文」。
  */
 export const INSTALLMENT_RECEIPT_TERMS: ReceiptTermsBlock = Object.freeze({
   title: "INSTALLMENT TERMS",

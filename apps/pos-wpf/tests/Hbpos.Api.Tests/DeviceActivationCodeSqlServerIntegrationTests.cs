@@ -248,6 +248,8 @@ public sealed class DeviceActivationSqlServerFixture : IAsyncLifetime
                 [Address] nvarchar(500) NULL,
                 [TimeZoneId] nvarchar(80) NULL,
                 [ReturnPolicy] nvarchar(500) NULL,
+                [VoucherTerms] nvarchar(600) NULL,
+                [InstallmentTerms] nvarchar(600) NULL,
                 [ContactEmail] nvarchar(100) NULL,
                 [ABN] nvarchar(20) NULL,
                 [BrandName] nvarchar(100) NULL,

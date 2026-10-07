@@ -171,6 +171,8 @@ test("退款券材料带上这张券自己的到期时刻；null、缺失或格�
 function printService(input: Readonly<{
   vouchers: readonly { voucherCode: string; amountCents: number; expiresAtIso?: string | null }[];
   businessTimeZone?: string;
+  /** 冻结设置里总部下发的券使用说明正文；缺省 = 不带该字段（旧设置）。 */
+  voucherTerms?: string | null;
   enqueued: { jobId: string; receiptBytes: Uint8Array }[];
 }>): InstallmentRefundVoucherPrintService {
   return new InstallmentRefundVoucherPrintService({
@@ -186,6 +188,7 @@ function printService(input: Readonly<{
           paper: "58mm",
           locale: "en",
           store: { brandName: "Hot Bargain", storeName: "Main", address: "", phone: "", abn: "", returnPolicy: "" },
+          ...(input.voucherTerms !== undefined ? { voucherTerms: input.voucherTerms } : {}),
         };
       },
     },
@@ -257,4 +260,33 @@ test("分期取消后打印：到期日缺失或 businessTimeZone 缺省/非法�
   const invalidZone = await bytesFor(NEW_RULE_EXPIRY, "Not/A_Zone");
   assert.doesNotMatch(invalidZone, /Valid until/u);
   assert.match(invalidZone, /VOUCHER TERMS/u);
+});
+
+test("分期取消后打印：总部下发了券使用说明正文时每张券面都印它（标题固定），未定制或不合规时回落默认文案", async () => {
+  const textFor = async (voucherTerms: string | null | undefined): Promise<string> => {
+    const enqueued: { jobId: string; receiptBytes: Uint8Array }[] = [];
+    const service = printService({
+      vouchers: [
+        { voucherCode: "RF-A", amountCents: 1_000 },
+        { voucherCode: "RF-B", amountCents: 500 },
+      ],
+      ...(voucherTerms !== undefined ? { voucherTerms } : {}),
+      enqueued,
+    });
+    assert.equal(await service.printAfterCancel(INSTALLMENT_GUID, "IP-S001-1"), "queued");
+    return decoder.decode(enqueued[0]!.receiptBytes);
+  };
+
+  const custom = await textFor("  Valid at all stores.  \r\n\r\nNo cash refunds on vouchers.");
+  assert.equal(custom.match(/VOUCHER TERMS/gu)?.length, 2);
+  assert.equal(custom.match(/Valid at all stores\./gu)?.length, 2, "每张券面都带自定义正文");
+  assert.equal(custom.match(/No cash refunds on vouchers\./gu)?.length, 2);
+  assert.doesNotMatch(custom, /Not redeemable for cash\./u);
+  assert.doesNotMatch(custom, /Use at the issuing store only\./u);
+
+  const baseline = await textFor(undefined);
+  assert.match(baseline, /Not redeemable for cash\./u);
+  for (const fallback of [null, "", "  \n\t", "Unsafe\u001b@ text", "x".repeat(601)]) {
+    assert.equal(await textFor(fallback), baseline, JSON.stringify(fallback).slice(0, 30));
+  }
 });

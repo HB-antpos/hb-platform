@@ -154,6 +154,9 @@ public sealed class StoreReceiptProfileControllerTests
         Assert.Contains("\"phone\":null", json, StringComparison.Ordinal);
         Assert.Contains("\"abn\":null", json, StringComparison.Ordinal);
         Assert.Contains("\"returnPolicy\":null", json, StringComparison.Ordinal);
+        // 新增的两段条款正文：未定制时显式为 null，客户端据此走默认文案。
+        Assert.Contains("\"voucherTerms\":null", json, StringComparison.Ordinal);
+        Assert.Contains("\"installmentTerms\":null", json, StringComparison.Ordinal);
     }
 
     private static void SetStoreClaim(ControllerBase controller, string storeCode)

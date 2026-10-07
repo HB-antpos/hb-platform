@@ -272,6 +272,55 @@ test("设备注册重置只发送 operationId 并使用本次在线员工票据"
   ]);
 });
 
+test("当前门店小票资料使用认证 transport 的固定 GET 路径并完整保留空值", async () => {
+  const calls: HbposTransportRequest[] = [];
+  const transport: HbposTransport = {
+    async request<T>(config: HbposTransportRequest) {
+      calls.push(config);
+      return {
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            storeCode: "BNE-01",
+            storeName: "Brisbane",
+            brandName: "Hot Bargain",
+            address: "",
+            phone: "07 3000 0000",
+            abn: "",
+            returnPolicy: "Refunds within 14 days.",
+            // 券使用说明有值、分期条款为 null：null 归一为空串（未定制）。
+            voucherTerms: "Valid at all stores.\nNo cash refunds.",
+            installmentTerms: null,
+          },
+        } as T,
+      };
+    },
+  };
+  const controller = new AbortController();
+
+  const profile = await new HbposStoreApi(transport).getCurrentReceiptProfile(
+    controller.signal,
+  );
+
+  assert.deepEqual(calls, [{
+    method: "GET",
+    url: "/api/v1/stores/current/receipt-profile",
+    signal: controller.signal,
+  }]);
+  assert.deepEqual(profile, {
+    storeCode: "BNE-01",
+    storeName: "Brisbane",
+    brandName: "Hot Bargain",
+    address: "",
+    phone: "07 3000 0000",
+    abn: "",
+    returnPolicy: "Refunds within 14 days.",
+    voucherTerms: "Valid at all stores.\nNo cash refunds.",
+    installmentTerms: "",
+  });
+});
+
 test("下发资料轮询：固定 GET sync 路径只带 knownVersion，不拼门店/设备参数，并透传取消信号", async () => {
   const calls: HbposTransportRequest[] = [];
   const transport: HbposTransport = {
@@ -292,6 +341,8 @@ test("下发资料轮询：固定 GET sync 路径只带 knownVersion，不拼门
               phone: null,
               abn: "12 345 678 901",
               returnPolicy: null,
+              voucherTerms: null,
+              installmentTerms: "Deposit $30 minimum.\r\nLater payments from $10.",
               version: 4,
               publishedAt: "2026-10-07T00:00:00Z",
             },
@@ -322,6 +373,8 @@ test("下发资料轮询：固定 GET sync 路径只带 knownVersion，不拼门
       phone: "",
       abn: "12 345 678 901",
       returnPolicy: "",
+      voucherTerms: "",
+      installmentTerms: "Deposit $30 minimum.\r\nLater payments from $10.",
     },
   });
 });
@@ -348,6 +401,9 @@ test("下发资料轮询对生成类型里全部可选的字段容错：changed 
   ).syncReceiptProfile(0);
   assert.equal(missingVersion.changed, true);
   assert.equal(missingVersion.profile?.version, 0);
+  // 旧服务端不返回两个条款字段：归一为空串（未定制），照常使用默认文案
+  assert.equal(missingVersion.profile?.voucherTerms, "");
+  assert.equal(missingVersion.profile?.installmentTerms, "");
   // 非布尔 changed 不当作 true
   assert.equal(
     (await new HbposStoreApi(respond({ changed: "true", version: 1 })).syncReceiptProfile(0)).changed,
