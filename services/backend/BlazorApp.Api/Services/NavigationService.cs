@@ -344,6 +344,14 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "store-cash",
+                TitleKey = "tabs.storeCash",
+                Icon = "bank-transfer",
+                Permission = Permissions.Cash.OverviewView,
+                Order = 53,
+            },
+            new()
+            {
                 RouteName = "attendance-personal",
                 TitleKey = "tabs.attendancePersonal",
                 Icon = "calendar-clock",

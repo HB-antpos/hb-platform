@@ -39,6 +39,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "sales-orders", labelKey: "routes.salesOrders", icon: "receipt-text-outline" },
       { routeName: "installment-orders", labelKey: "routes.installmentOrders", icon: "cash-clock" },
       { routeName: "store-vouchers", labelKey: "routes.storeVouchers", icon: "ticket-confirmation-outline" },
+      { routeName: "store-cash", labelKey: "routes.storeCash", icon: "bank-transfer" },
       { routeName: "seasonal-cards", labelKey: "routes.seasonalCards", icon: "cards-outline" },
     ],
   },

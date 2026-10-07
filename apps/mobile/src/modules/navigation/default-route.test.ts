@@ -412,6 +412,31 @@ assertEqual(
 );
 
 assertEqual(
+  TAB_PATHS["store-cash"],
+  "/(shell)/store-cash",
+  "store cash route is registered as a valid tab path"
+);
+
+// 现金入口按账号权限与可操作分店授权：设备会话必须隐藏，账号会话照后端菜单显示。
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["product-query", "store-cash"],
+    isDeviceMode: true,
+  }).join(","),
+  "workbench,product-query,settings",
+  "设备模式收到显式现金菜单时也必须隐藏现金入口"
+);
+
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["store-vouchers", "store-cash"],
+    isDeviceMode: false,
+  }).join(","),
+  "workbench,store-vouchers,store-cash,settings",
+  "账号会话必须保留后端下发的现金入口"
+);
+
+assertEqual(
   TAB_PATHS["seasonal-cards"],
   "/(shell)/seasonal-cards",
   "seasonal cards route is registered as a valid tab path"

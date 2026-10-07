@@ -1,0 +1,373 @@
+{
+  "title": "现金",
+  "tabs": {
+    "overview": "总览",
+    "daily": "按日",
+    "records": "记录"
+  },
+  "store": {
+    "current": "当前分店",
+    "switch": "切换",
+    "switchLabel": "切换分店，当前 {{store}}"
+  },
+  "states": {
+    "loading": "加载中…",
+    "loadFailed": "加载失败，请稍后重试。",
+    "notAllowed": "当前账号没有查看现金的权限。",
+    "noStores": "没有可操作的分店，请联系管理员为你的账号关联分店。",
+    "noDepositPermission": "当前账号没有登记存款、选择日结、录入期初与盘点的权限。",
+    "noExpensePermission": "当前账号没有录入现金支出的权限。"
+  },
+  "categories": {
+    "Salary": "现金工资",
+    "Purchase": "现金购物",
+    "T2": "T2",
+    "Other": "其他"
+  },
+  "weekdays": {
+    "0": "周日",
+    "1": "周一",
+    "2": "周二",
+    "3": "周三",
+    "4": "周四",
+    "5": "周五",
+    "6": "周六"
+  },
+  "overview": {
+    "balance": "现金池余额",
+    "balanceUnavailable": "暂不可算",
+    "formula": "现金池 = 期初 + 日结实点现金 − 存款 − 支出。备用金不计入（点钱前已取出），存完后余额应趋近 $0.00。",
+    "asOf": "截至 {{date}}",
+    "closeDisconnected": "日结数据暂未接入，现金池余额暂不可算。存款、支出、记录、期初与盘点仍可正常使用。",
+    "openingMissing": "还没有期初现金。请先录入期初现金，现金池余额才能计算。",
+    "recordOpening": "录入期初现金",
+    "breakdownTitle": "余额构成",
+    "opening": "期初现金（{{date}}）",
+    "openingNone": "期初现金（未录入）",
+    "inflow": "日结实点现金",
+    "depositTotal": "已存款",
+    "expenseTotal": "现金支出",
+    "depositTitle": "存银行",
+    "suggested": "建议存款额（= 现金池余额）",
+    "noSuggestion": "现金池余额不为正，暂无建议存款额。",
+    "suggestionUnavailable": "现金池余额暂不可算，请按实际点钱结果录入存款。",
+    "overdueChip": "已逾期",
+    "overdue": "最久未存的营业日已超过 {{days}} 天，请尽快把现金存入银行。",
+    "uncovered": "还有 {{count}} 个营业日的日结现金没有被存款覆盖（最早 {{date}}，合计 {{amount}}）。",
+    "lastDeposit": "上次存款：{{date}}",
+    "noDepositYet": "还没有存款记录。",
+    "depositAction": "存银行",
+    "missingClose": "最近 14 天有 {{count}} 个营业日没有日结存档（可能是休息日）：{{dates}}",
+    "expenseTitle": "现金支出",
+    "noExpense": "还没有现金支出。",
+    "expenseAction": "记现金支出",
+    "countTitle": "最近盘点",
+    "countDate": "盘点日期",
+    "countAmount": "实盘现金",
+    "countExpected": "应有余额",
+    "countDifference": "差异",
+    "noCount": "还没有盘点记录。",
+    "countAction": "盘点"
+  },
+  "daily": {
+    "disconnected": "日结数据暂未接入，按日明细暂不可用。",
+    "rangeDays": "近 {{count}} 天",
+    "rangeCaption": "{{from}} 至 {{to}}",
+    "empty": "这段时间没有日结数据。",
+    "noClose": "无日结",
+    "covered": "已存银行",
+    "uncovered": "未存银行",
+    "needsConfirm": "待确认",
+    "expense": "当天支出",
+    "noDevices": "这一天没有设备日结存档。",
+    "device": "设备 {{code}}",
+    "included": "纳入现金池 {{amount}}",
+    "modeDefault": "默认（最新一份）",
+    "modeManual": "手选",
+    "stale": "选择之后又有新存档，请确认。",
+    "overlap": "所选存档统计区间重叠，可能重复计入。",
+    "manualBy": "{{name}} 于 {{time}} 手选：{{reason}}",
+    "noArchives": "没有存档。",
+    "archiveIncluded": "已纳入",
+    "savedAt": "保存时间 {{time}}",
+    "period": "统计区间 {{from}} ~ {{to}}",
+    "counted": "实点",
+    "expected": "应有",
+    "variance": "差异",
+    "manualSelect": "手动选择",
+    "restoreDefault": "恢复默认",
+    "selectedSum": "已选 {{count}} 份，实点合计",
+    "overlapLocal": "所选存档的统计区间重叠，可能重复计入，请在原因里说明。",
+    "reasonLabel": "选择原因（必填）",
+    "reasonPlaceholder": "例如：早晚两班各交班一次，两份都要计入",
+    "confirmSelection": "确认选择",
+    "errors": {
+      "noneSelected": "请至少勾选一份存档。",
+      "reasonRequired": "请填写选择原因（至少 2 个字）。",
+      "reasonTooLong": "原因过长（最多 500 字）。",
+      "unchanged": "选择没有变化，无需重复提交。"
+    }
+  },
+  "records": {
+    "kinds": {
+      "deposits": "存款",
+      "expenses": "支出",
+      "entries": "期初与盘点"
+    },
+    "ranges": {
+      "last30": "近 30 天",
+      "last90": "近 90 天",
+      "all": "全部"
+    },
+    "allCategories": "全部类别",
+    "includeVoided": "显示已作废",
+    "loadMore": "加载更多",
+    "end": "没有更多了",
+    "emptyDeposits": "没有符合条件的存款记录。",
+    "emptyExpenses": "没有符合条件的支出记录。",
+    "emptyEntries": "没有期初或盘点记录。",
+    "voided": "已作废",
+    "depositMeta": "{{slips}} 张存单 · {{images}} 张图",
+    "images": "{{count}} 张图",
+    "covered": "覆盖营业日 {{from}} ~ {{to}}",
+    "payee": "收款人：{{name}}",
+    "createdBy": "{{name}} · {{time}}",
+    "entryTypes": {
+      "Opening": "期初",
+      "Count": "盘点"
+    },
+    "countDifference": "应有 {{expected}}，差异 {{difference}}"
+  },
+  "void": {
+    "action": "作废",
+    "confirm": "确认作废",
+    "reasonLabel": "作废原因（必填）",
+    "reasonPlaceholder": "至少两个字，例如：金额录错了",
+    "reasonTooShort": "作废原因至少两个字。",
+    "reasonTooLong": "作废原因过长（最多 500 字）。",
+    "depositTitle": "作废这笔存款？",
+    "expenseTitle": "作废这笔支出？",
+    "entryTitle": "作废这条记录？",
+    "description": "{{date}} · {{amount}}。作废后现金池余额会相应调整，此操作不能撤销。",
+    "entryDescription": "{{type}} · {{date}} · {{amount}}。作废后现金池余额会相应调整，此操作不能撤销。"
+  },
+  "deposit": {
+    "title": "存银行",
+    "store": "分店：{{store}}",
+    "baseline": "当前现金池余额 {{amount}}，也是建议存款额（备用金已在点钱前取出）。",
+    "baselineNoSuggestion": "当前现金池余额 {{amount}}，暂无建议存款额。存款合计与它相差超过 {{threshold}} 时需要填写差异原因。",
+    "baselineUnavailable": "暂时读不到现金池余额，无法给出建议存款额；提交时服务端会校验差异。",
+    "fields": {
+      "date": "存款日期",
+      "dateHintLimited": "可补录最近 {{days}} 天（含今天）。",
+      "dateHintUnlimited": "有全部分店权限，补录不限回溯天数。"
+    },
+    "covered": {
+      "title": "覆盖营业日（选填）",
+      "hint": "这次存款覆盖了哪些营业日的日结现金。默认从最早没存的营业日到最近有日结的一天，可以修改，也可以清空。",
+      "from": "起",
+      "to": "止",
+      "empty": "不选",
+      "clear": "清除覆盖范围"
+    },
+    "slip": {
+      "title": "存单 {{index}}",
+      "amount": "存单金额",
+      "slipNo": "存单号（选填）",
+      "photos": "存单照片",
+      "photosHint": "每张存单至少 1 张、最多 {{max}} 张照片，请拍清金额与日期。",
+      "remove": "删除",
+      "add": "添加存单",
+      "limit": "最多 {{max}} 张存单"
+    },
+    "summaryTitle": "存款汇总",
+    "total": "存款合计",
+    "baselineRow": "现金池余额",
+    "difference": "与现金池余额相差",
+    "override": {
+      "title": "差异原因",
+      "hint": "存款合计与现金池余额相差超过 {{threshold}}，请说明原因。",
+      "label": "差异原因（必填）",
+      "placeholder": "例如：多存了备用金 / 少存了一部分"
+    },
+    "note": {
+      "label": "备注（选填）"
+    },
+    "submit": "提交存款",
+    "uploading": "正在上传照片 {{done}}/{{total}}…",
+    "sending": "正在提交…"
+  },
+  "expense": {
+    "title": "记现金支出",
+    "effectiveNotice": "录入即生效，不需要审核。录错了请到「记录」里作废后重录。",
+    "fields": {
+      "date": "支出日期",
+      "category": "类别",
+      "amount": "金额",
+      "payee": "收款人（选填）",
+      "note": "备注（选填）"
+    },
+    "photos": {
+      "receipt": "收据照片",
+      "receiptHint": "购物必须至少 1 张收据，最多 {{max}} 张。",
+      "optional": "图片（选填）",
+      "optionalHint": "可上传最多 {{max}} 张图片。"
+    },
+    "amountLabel": "支出金额",
+    "submit": "提交支出"
+  },
+  "balance": {
+    "openingTitle": "录入期初现金",
+    "countTitle": "盘点",
+    "openingHint": "期初现金是现金池的起点：自期初日起，日结实点现金计入，存款与支出扣减。每家分店只能有一条有效的期初。",
+    "countHint": "盘点就是数一遍店里实际的现金（不含备用金），并与系统算出的应有余额对比差异。",
+    "openingDate": "期初日期",
+    "countDate": "盘点日期",
+    "entryDate": "日期",
+    "openingAmount": "期初现金金额",
+    "countAmount": "实盘现金金额",
+    "note": "备注（选填）",
+    "submitOpening": "保存期初现金",
+    "submitCount": "提交盘点",
+    "openingSaved": "期初现金已保存。",
+    "countSaved": "盘点已记录。",
+    "expected": "应有余额",
+    "difference": "差异（实盘 − 应有）",
+    "differenceUnknown": "当时日结数据未接入，或还没有期初，暂时算不出应有余额，所以没有差异可以比较。",
+    "outcome": {
+      "balanced": "实盘与应有余额一致。",
+      "over": "实盘比应有余额多，请核对是否漏记了支出，或多收了现金。",
+      "short": "实盘比应有余额少，请核对是否漏记了支出或存款。"
+    },
+    "openingExists": "这家分店已经有有效的期初现金，不能重复录入。",
+    "done": "完成"
+  },
+  "detail": {
+    "depositTitle": "存款详情",
+    "expenseTitle": "支出详情",
+    "notFound": "记录不存在，或你没有权限查看。",
+    "created": "已记录。以下是系统保存的内容。",
+    "voidedBanner": "这条记录已作废，不再计入现金池。",
+    "depositDate": "存款日期",
+    "expenseDate": "支出日期",
+    "covered": "覆盖营业日",
+    "overrideReason": "差异原因",
+    "payee": "收款人",
+    "note": "备注",
+    "createdBy": "录入人",
+    "createdAt": "录入时间",
+    "voidInfo": "作废信息",
+    "voidReason": "作废原因",
+    "voidedBy": "作废人",
+    "voidedAt": "作废时间",
+    "slipAmount": "存单金额",
+    "slipNo": "存单号",
+    "images": "图片",
+    "noImages": "没有图片。"
+  },
+  "photo": {
+    "count": "{{count}}/{{max}} 张",
+    "add": {
+      "camera": "拍照",
+      "library": "相册"
+    },
+    "status": {
+      "uploading": "上传中",
+      "failed": "上传失败，点击重试",
+      "retry": "重试"
+    },
+    "remove": "删除照片",
+    "preview": "查看照片",
+    "limitReached": "最多 {{max}} 张，多选的部分已忽略。",
+    "errors": {
+      "decode_failed": "这张图片无法处理，请换一张或重新拍摄。",
+      "blob_read_failed": "读取图片失败，请重试。",
+      "file_too_large": "图片压缩后仍超过 5 MB，请换一张或重新拍摄。",
+      "libraryPermission": "没有相册权限，请在系统设置里允许 HB 访问照片。"
+    }
+  },
+  "camera": {
+    "taken": "已拍 {{count}}/{{max}} 张",
+    "capture": "拍照",
+    "done": "完成",
+    "full": "已达上限 {{max}} 张，点「完成」返回。",
+    "captureFailed": "这张没拍成，请重试。",
+    "permissionTitle": "需要相机权限",
+    "permissionDescription": "拍摄存单与收据需要使用相机。",
+    "grantPermission": "允许使用相机",
+    "openSettings": "去系统设置"
+  },
+  "viewer": {
+    "page": "{{current}} / {{total}}",
+    "close": "关闭",
+    "previous": "上一张",
+    "next": "下一张",
+    "loadFailed": "图片加载失败"
+  },
+  "leave": {
+    "discardTitle": "放弃未提交的内容？",
+    "discardMessage": "已填写的内容和拍好的照片将会丢失。",
+    "keepEditing": "继续编辑",
+    "discard": "放弃",
+    "busyTitle": "正在提交",
+    "busyMessage": "请等提交完成后再离开，避免重复记账。"
+  },
+  "errors": {
+    "generic": "操作失败，请稍后重试。",
+    "fixFirst": "请先修正标红的内容。",
+    "uploadFailed": "有 {{count}} 张照片上传失败。请点缩略图上的「重试」，或检查网络后再次提交；已上传成功的照片不会重复上传。",
+    "retryKeepsData": "已保留所填内容与已上传的照片，可直接重新提交，不会重复记账。",
+    "money": {
+      "empty": "请输入金额。",
+      "invalid": "金额格式不正确。",
+      "tooManyDecimals": "金额最多两位小数。",
+      "negative": "金额不能为负数。",
+      "notPositive": "金额必须大于 0。",
+      "tooLarge": "金额超出上限。"
+    },
+    "deposit": {
+      "dateInvalid": "请选择有效的存款日期。",
+      "dateOutOfRange": "存款日期不能晚于门店今天，也不能早于可补录范围。",
+      "coveredIncomplete": "覆盖营业日需要同时填写起止，或都不填。",
+      "coveredInvalid": "覆盖营业日的日期无效。",
+      "coveredReversed": "覆盖营业日的起日不能晚于止日。",
+      "coveredFuture": "覆盖营业日不能晚于存款日期。",
+      "noteTooLong": "备注过长（最多 500 字）。",
+      "slipsEmpty": "请至少添加一张存单。",
+      "slipsTooMany": "存单数量超出上限。",
+      "slipPhotosMissing": "每张存单至少需要 1 张照片。",
+      "slipPhotosTooMany": "每张存单最多 {{max}} 张照片。",
+      "slipNoTooLong": "存单号过长。",
+      "overrideReasonRequired": "请填写差异原因（至少 2 个字）。"
+    },
+    "expense": {
+      "dateInvalid": "请选择有效的支出日期。",
+      "dateOutOfRange": "支出日期不能晚于门店今天，也不能早于可补录范围。",
+      "categoryMissing": "请选择支出类别。",
+      "receiptRequired": "现金购物必须至少上传 1 张收据。",
+      "photosTooMany": "最多 {{max}} 张图片。",
+      "payeeTooLong": "收款人姓名过长。",
+      "noteTooLong": "备注过长（最多 500 字）。"
+    },
+    "balance": {
+      "dateInvalid": "请选择有效的日期。",
+      "dateOutOfRange": "日期不能晚于门店今天，也不能早于可补录范围。",
+      "noteTooLong": "备注过长（最多 500 字）。"
+    },
+    "codes": {
+      "CASH_INVALID_REQUEST": "提交的内容有误，请检查后重试。",
+      "CASH_STORE_NOT_FOUND": "找不到这家分店。",
+      "CASH_STORE_FORBIDDEN": "你没有权限操作这家分店。",
+      "CASH_RECORD_NOT_FOUND": "记录不存在，或你没有权限查看。",
+      "CASH_DATE_OUT_OF_RANGE": "日期超出可补录范围。",
+      "CASH_ATTACHMENT_INVALID": "图片无效或已过期，请重新提交，系统会重新上传图片。",
+      "CASH_ATTACHMENT_REQUIRED": "缺少必须的图片。",
+      "CASH_OVERRIDE_REASON_REQUIRED": "存款合计与现金池余额相差较大，请填写差异原因。",
+      "CASH_OPENING_EXISTS": "这家分店已经有有效的期初现金。",
+      "CASH_VOID_NOT_ALLOWED": "你没有权限作废这条记录（没有作废权限时，只能在时限内作废自己录入的记录）。",
+      "CASH_CLOSE_SOURCE_UNAVAILABLE": "日结数据暂未接入，暂时无法操作。",
+      "CASH_CLOSE_NOT_FOUND": "所选日结存档不存在，请刷新后重试。",
+      "CASH_CONFLICT": "数据刚刚被修改，请刷新后重试。"
+    }
+  }
+}

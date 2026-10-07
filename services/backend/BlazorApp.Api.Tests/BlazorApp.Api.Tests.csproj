@@ -70,6 +70,8 @@
     <Compile Include="StoreReceiptProfileServiceTests.cs" />
     <Compile Include="StoreReceiptProfileControllerTests.cs" />
     <Compile Include="StoreReceiptProfilePipelineTests.cs" />
+    <Compile Include="StoreCashServiceTests.cs" />
+    <Compile Include="StoreCashRulesTests.cs" />
     <Compile Include="SchemaMigrationSqlServerIntegrationTests.cs" />
     <Compile Include="SchemaCommandProcessTests.cs" />
     <Compile Include="DomesticProductCreationControllerTests.cs" />

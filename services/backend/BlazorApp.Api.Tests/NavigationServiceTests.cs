@@ -900,8 +900,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(36, menu.Count);
+        Assert.Equal(37, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "app-install");
+        Assert.Contains(menu, item => item.RouteName == "store-cash");
         Assert.Contains(menu, item => item.RouteName == "containers");
         Assert.Contains(menu, item => item.RouteName == "warehouse-picking");
         Assert.Contains(menu, item => item.RouteName == "cash-register-users");

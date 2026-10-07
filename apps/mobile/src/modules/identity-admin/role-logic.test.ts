@@ -90,7 +90,7 @@ assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
 assert.equal(fullMenus.filter((item) => item.platform === "web").length, 46);
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 33);
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 34);
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "app-install")?.permissionCodes,
   ["System.ViewMobileAppInstallLinks"]
@@ -113,6 +113,11 @@ assert.deepEqual(
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "cash-register-users")?.permissionCodes,
   ["CashRegisterUsers.MobileManage", "CashRegisterUsers.MobilePrint"]
+);
+// 现金入口只认独立的 Cash.Overview.View，与后端 FullAppMenu 的 store-cash 同口径。
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "store-cash")?.permissionCodes,
+  ["Cash.Overview.View"]
 );
 assert.equal(new Set(fullMenus.map((item) => `${item.platform}:${item.key}`)).size, fullMenus.length);
 assert.deepEqual(fullMenus.find((item) => item.key === "/system/roles")?.permissionCodes, ["Roles.View"]);

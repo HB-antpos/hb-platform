@@ -24,6 +24,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "app-install",
   // 收银用户条码是真实员工登录凭据，审核模式不展示。
   "cash-register-users",
+  // 现金管理是真实资金流水与票据照片，审核模式没有离线演示数据。
+  "store-cash",
   "workbench",
 ] as const;
 

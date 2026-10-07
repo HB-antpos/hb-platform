@@ -125,6 +125,26 @@
       "name": "View Australian suppliers",
       "description": "View the Australian supplier list on the web admin."
     },
+    "Cash.AllStores.View": {
+      "name": "View all-store cash and T2",
+      "description": "Cash management - view cash data for every store and the full T2 history, and back-fill without the look-back day limit. Without it, a store manager only sees T2 from the last 14 days for the stores linked to them."
+    },
+    "Cash.Deposit.Create": {
+      "name": "Record bank deposits",
+      "description": "Mobile Cash - record cash banked with the deposit slip photo, pick the daily closes included in the cash pool, and enter opening cash and stock-take balances."
+    },
+    "Cash.Expense.Create": {
+      "name": "Record cash expenses",
+      "description": "Mobile Cash - record cash wages, cash purchases, T2 and other cash expenses; each entry takes effect as soon as it is saved."
+    },
+    "Cash.Overview.View": {
+      "name": "View cash management",
+      "description": "Mobile Cash - view a store's cash pool balance, daily breakdown, deposits and cash expense records. Store managers are limited to the stores linked to them."
+    },
+    "Cash.Void": {
+      "name": "Void cash records",
+      "description": "Cash management - void any deposit, cash expense or opening/stock-take record within scope. Without it, a store manager can only void their own entries within 24 hours."
+    },
     "Container.Create": {
       "name": "Create containers",
       "description": "Create container records."

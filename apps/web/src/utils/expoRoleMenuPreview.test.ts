@@ -71,6 +71,7 @@ const completePreview = buildPreview([
   P.SeasonalProductInsights.View,
   P.InstallmentOrders.View,
   P.StoreVouchers.View,
+  'Cash.Overview.View',
   P.Attendance.ScheduleViewSelf,
   P.Attendance.ScheduleViewStore,
   'SeasonalCards.Remaining.ViewManagedStore',
@@ -105,6 +106,7 @@ assertArrayEqual(
     'seasonal-product-insights',
     'installment-orders',
     'store-vouchers',
+    'store-cash',
     'attendance-personal',
     'attendance-management',
     'seasonal-cards',
@@ -172,9 +174,22 @@ assertArrayEqual(
     'seasonal-product-insights',
     'installment-orders',
     'store-vouchers',
+    'store-cash',
     'seasonal-cards',
   ],
   'Web 权限预览的门店业务分组应包含商品进销和节日贺卡',
+)
+
+// 现金入口只认独立的 Cash.Overview.View：没有该权限码不可见，有则可见且紧跟门店代金券。
+assertEqual(
+  buildPreview([P.StoreVouchers.View]).allRoutes.find((route) => route.routeName === 'store-cash')?.visible,
+  false,
+  '只有门店代金券权限时不应显示现金入口',
+)
+assertEqual(
+  buildPreview(['Cash.Overview.View']).allRoutes.find((route) => route.routeName === 'store-cash')?.visible,
+  true,
+  '拥有 Cash.Overview.View 时应显示现金入口',
 )
 
 // 季节商品查询使用独立权限：只有「查看分店商品」不应看到入口。

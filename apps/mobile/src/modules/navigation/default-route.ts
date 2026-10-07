@@ -13,6 +13,7 @@ export type AppTabPath =
   | "/(shell)/promotions"
   | "/(shell)/reports"
   | "/(shell)/store-vouchers"
+  | "/(shell)/store-cash"
   | "/(shell)/seasonal-cards"
   | "/(shell)/attendance-personal"
   | "/(shell)/attendance-management"
@@ -53,6 +54,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   promotions: "/(shell)/promotions",
   reports: "/(shell)/reports",
   "store-vouchers": "/(shell)/store-vouchers",
+  "store-cash": "/(shell)/store-cash",
   "seasonal-cards": "/(shell)/seasonal-cards",
   "attendance-personal": "/(shell)/attendance-personal",
   "attendance-management": "/(shell)/attendance-management",
@@ -93,6 +95,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "legacy-employee-logs",
   // 收银用户条码按操作人账号的可管理分店授权，设备会话不展示入口。
   "cash-register-users",
+  // 设备会话没有用户账号，现金接口按账号权限与可操作分店授权，设备模式不展示入口。
+  "store-cash",
   // 季节商品查询按账号独立权限授权，设备会话没有该权限，接口会直接拒绝。
   "seasonal-product-insights",
   "device-management",

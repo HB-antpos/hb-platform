@@ -92,6 +92,7 @@ const STORE_ROUTE_NAMES = new Set([
   'local-supplier-invoices',
   'installment-orders',
   'store-vouchers',
+  'store-cash',
   'seasonal-cards',
 ])
 
@@ -150,6 +151,7 @@ const TAB_PATHS: Record<string, string> = {
   promotions: '/(shell)/promotions',
   reports: '/(shell)/reports',
   'store-vouchers': '/(shell)/store-vouchers',
+  'store-cash': '/(shell)/store-cash',
   'seasonal-cards': '/(shell)/seasonal-cards',
   'attendance-personal': '/(shell)/attendance-personal',
   'attendance-management': '/(shell)/attendance-management',
@@ -189,6 +191,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   reports: { zhTitle: '报表', enTitle: 'Reports' },
   'installment-orders': { zhTitle: '分期订单', enTitle: 'Installments' },
   'store-vouchers': { zhTitle: '门店代金券', enTitle: 'Vouchers' },
+  'store-cash': { zhTitle: '现金', enTitle: 'Cash' },
   'seasonal-cards': { zhTitle: '节日贺卡', enTitle: 'Seasonal Cards' },
   'attendance-personal': { zhTitle: '考勤', enTitle: 'Attendance' },
   'attendance-management': { zhTitle: '考勤管理', enTitle: 'Attendance Management' },
@@ -377,6 +380,15 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: [P.StoreVouchers.View],
     order: 52,
     ...ROUTE_LABELS['store-vouchers'],
+  },
+  {
+    routeName: 'store-cash',
+    titleKey: 'tabs.storeCash',
+    icon: 'bank-transfer',
+    // 与后端 FullAppMenu 一致：现金入口只认 Cash.Overview.View；Web 权限常量表暂无 Cash 分组，这里直接写权限码。
+    permissionCodes: ['Cash.Overview.View'],
+    order: 53,
+    ...ROUTE_LABELS['store-cash'],
   },
   {
     routeName: 'attendance-personal',

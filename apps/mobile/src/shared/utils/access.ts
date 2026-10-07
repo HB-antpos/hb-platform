@@ -61,6 +61,14 @@ export const PERMISSIONS = {
   StoreVouchers: {
     View: "StoreVouchers.View",
   },
+  // 现金管理五个码由管理员显式授予，界面按接口返回的 capabilities 控制按钮。
+  Cash: {
+    OverviewView: "Cash.Overview.View",
+    DepositCreate: "Cash.Deposit.Create",
+    ExpenseCreate: "Cash.Expense.Create",
+    Void: "Cash.Void",
+    AllStoresView: "Cash.AllStores.View",
+  },
   StoreProducts: {
     View: "StoreProducts.View",
     Create: "StoreProducts.Create",
