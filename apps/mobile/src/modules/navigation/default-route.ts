@@ -32,6 +32,7 @@ export type AppTabPath =
   | "/(shell)/employee-profile"
   | "/(shell)/employee-profile-review"
   | "/(shell)/legacy-employee-logs"
+  | "/(shell)/daily-closes"
   | "/(shell)/device-management"
   | "/(shell)/app-install"
   | "/(shell)/app-downloads"
@@ -73,6 +74,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   "employee-profile": "/(shell)/employee-profile",
   "employee-profile-review": "/(shell)/employee-profile-review",
   "legacy-employee-logs": "/(shell)/legacy-employee-logs",
+  "daily-closes": "/(shell)/daily-closes",
   "device-management": "/(shell)/device-management",
   "app-install": "/(shell)/app-install",
   "app-downloads": "/(shell)/app-downloads",
@@ -93,6 +95,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "employee-profile-review",
   // 设备会话没有用户账号，老收银操作日志按账号可管理分店授权，设备模式不展示入口。
   "legacy-employee-logs",
+  // 日结记录同样按账号权限与可查看分店授权，设备会话没有用户账号，设备模式不展示入口。
+  "daily-closes",
   // 收银用户条码按操作人账号的可管理分店授权，设备会话不展示入口。
   "cash-register-users",
   // 设备会话没有用户账号，现金接口按账号权限与可操作分店授权，设备模式不展示入口。

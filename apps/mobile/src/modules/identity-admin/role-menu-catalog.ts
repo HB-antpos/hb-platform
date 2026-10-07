@@ -50,6 +50,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/cash-register-users", "Cash register users", "收银用户", ["Store.ManageOperations"]],
   ["/pos-admin/operation-logs", "Operation logs", "操作日志", ["Permissions.PosTerminal.Audit.View"]],
   ["/pos-admin/linkly-settlements", "Linkly settlements", "Linkly 结算", [], { requireAdmin: true }],
+  // 与后端 FullMenu 一致：日结记录只认独立权限码 DailyCloseRecords.View（紧跟 Linkly 结算）。
+  ["/pos-admin/daily-closes", "Daily closes", "日结记录", ["DailyCloseRecords.View"]],
   // 分店现金管理（多店现金池、按日日结、存款、现金支出）：与移动端「现金」入口同一个 Cash.Overview.View。
   ["/pos-admin/store-cash", "Cash management", "现金管理", ["Cash.Overview.View"]],
   ["/pos-admin/schedule-attendance", "Schedule and attendance", "排班考勤", ["Attendance.Schedule.ViewStore"]],
@@ -95,6 +97,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["reports", "Reports", "报表", ["Reports.ProductMovement.View"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：老收银或新收银任一查看权限即可见。
   ["legacy-employee-logs", "Employee operation logs", "员工操作日志", ["LegacyEmployeeLogs.View", "Permissions.PosTerminal.Audit.View"]],
+  // 与后端 FullAppMenu 的 daily-closes 一致：只认独立权限码 DailyCloseRecords.View（收银机日结权限与员工操作日志权限都不能打开）。
+  ["daily-closes", "Daily closes", "日结记录", ["DailyCloseRecords.View"]],
   ["app-install", "Install app", "App 安装", ["System.ViewMobileAppInstallLinks"]],
   ["app-downloads", "App downloads", "应用下载", ["System.ViewAppDownloads"], { requireAdmin: true }],
   ["wpf-versions", "WPF versions", "WPF 版本", ["System.ViewAppDownloads"], { requireAdmin: true }],

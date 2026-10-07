@@ -89,8 +89,8 @@ assert.equal(implicitPreview[0].visible && implicitPreview[0].readOnly, true);
 assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
-assert.equal(fullMenus.filter((item) => item.platform === "web").length, 47);
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 34);
+assert.equal(fullMenus.filter((item) => item.platform === "web").length, 48);
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 35);
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "app-install")?.permissionCodes,
   ["System.ViewMobileAppInstallLinks"]
@@ -123,6 +123,16 @@ assert.deepEqual(
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "web" && item.key === "/pos-admin/store-cash")?.permissionCodes,
   ["Cash.Overview.View"]
+);
+// Web 与移动端日结记录入口同一个独立权限码（后端 FullMenu 的 /pos-admin/daily-closes 与 FullAppMenu 的 daily-closes）。
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "web" && item.key === "/pos-admin/daily-closes")?.permissionCodes,
+  ["DailyCloseRecords.View"]
+);
+// 日结记录只认独立的 DailyCloseRecords.View，与后端 FullAppMenu 的 daily-closes 同口径（收银机日结权限、员工操作日志权限都不能打开）。
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "daily-closes")?.permissionCodes,
+  ["DailyCloseRecords.View"]
 );
 assert.equal(new Set(fullMenus.map((item) => `${item.platform}:${item.key}`)).size, fullMenus.length);
 assert.deepEqual(fullMenus.find((item) => item.key === "/system/roles")?.permissionCodes, ["Roles.View"]);

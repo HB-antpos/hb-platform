@@ -119,6 +119,7 @@ function createEmptyAccess(): AccessControl {
     canViewLegacyEmployeeLogs: false,
     canViewEmployeeOperationLogs: false,
     canReviewLegacyEmployeeLogs: false,
+    canViewDailyCloseRecords: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
     canViewAppDownloads: false,
@@ -363,6 +364,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewOperationAudits = isAdmin || hasPermission(P.PosTerminal.AuditView)
   const canViewLegacyEmployeeLogs = isAdmin || hasPermission(P.LegacyEmployeeLogs.View)
   const canReviewLegacyEmployeeLogs = isAdmin || hasPermission(P.LegacyEmployeeLogs.Review)
+  // 日结记录只认独立的 DailyCloseRecords.View；收银机上的日结权限与员工操作日志权限都不能打开它。
+  const canViewDailyCloseRecords = isAdmin || hasPermission(P.DailyCloseRecords.View)
   // 合并页只要能看其中一个来源即可进入，页内只显示有权限的来源。
   const canViewEmployeeOperationLogs = canViewOperationAudits || canViewLegacyEmployeeLogs
   const canManageScheduledTasks = isAdmin || hasPermission(P.System.ManageScheduledTasks)
@@ -497,6 +500,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewLegacyEmployeeLogs,
     canViewEmployeeOperationLogs,
     canReviewLegacyEmployeeLogs,
+    canViewDailyCloseRecords,
     canManageScheduledTasks,
     canManageSystemSettings,
     canViewAppDownloads,

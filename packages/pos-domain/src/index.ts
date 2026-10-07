@@ -2,6 +2,7 @@ export * from "./core/contracts/audit-actor";
 export * from "./core/contracts/audit-scope";
 export * from "./core/contracts/cart";
 export * from "./core/contracts/daily-close";
+export * from "./core/contracts/daily-close-upload";
 export * from "./core/contracts/drawer";
 export * from "./core/contracts/installments";
 export * from "./core/contracts/line-sync-provenance";

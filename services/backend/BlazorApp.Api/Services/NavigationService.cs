@@ -155,6 +155,8 @@ namespace BlazorApp.Api.Services
                     // 员工操作日志合并页：老收银 / 新收银在页内切换，任一查看权限即可见。
                     new() { Path = "/pos-admin/operation-logs",       TitleKey = "menu.operationLogs",          Icon = "FileTextOutlined",           AnyPermissions = new List<string> { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View } },
                     new() { Path = "/pos-admin/linkly-settlements",   TitleKey = "menu.linklySettlements",      Icon = "ReconciliationOutlined",     RequireAdmin = true },
+                    // 日结记录：WPF / 手持 / iPad 上传的日结与现金盘点明细；独立权限码，分店范围由查询接口收口。
+                    new() { Path = "/pos-admin/daily-closes",          TitleKey = "menu.dailyCloses",            Icon = "MoneyCollectOutlined",       Permission = Permissions.DailyCloseRecords.View },
                     // 分店现金管理：多店现金池总览、按日日结、存款与现金支出；店长只见关联分店，T2 受 14 天窗口限制。
                     new() { Path = "/pos-admin/store-cash",           TitleKey = "menu.storeCash",              Icon = "AccountBookOutlined",        Permission = Permissions.Cash.OverviewView },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
@@ -399,6 +401,18 @@ namespace BlazorApp.Api.Services
                 // 路由名沿用 legacy-employee-logs，旧版本 App 收到新菜单仍能打开。
                 // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
                 AnyPermissions = new[] { Permissions.LegacyEmployeeLogs.View, Permissions.PosTerminal.Audit.View },
+                Order = 57,
+            },
+            new()
+            {
+                RouteName = "daily-closes",
+                TitleKey = "tabs.dailyCloses",
+                Icon = "cash-register",
+                // 移动端「日结记录」：与 Web /pos-admin/daily-closes 同一个独立权限码；店长只看自己关联的分店，由查询接口收口。
+                // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
+                Permission = Permissions.DailyCloseRecords.View,
+                // 与声明位置（legacy-employee-logs 之后、user-admin 之前）同属 57：同值按声明顺序稳定排序，
+                // Web 的 App 菜单预览（expoRoleMenuPreview）按源码声明顺序比对，必须一致。
                 Order = 57,
             },
             new()
@@ -741,6 +755,7 @@ namespace BlazorApp.Api.Services
                 Permissions.System.ManageAppDownloads,
                 Permissions.PosTerminal.Audit.View,
                 Permissions.LegacyEmployeeLogs.View,
+                Permissions.DailyCloseRecords.View,
                 // 现金管理页：只有该权限的店长 / 财务也要能拿到后台菜单，否则前端只能退回本地菜单。
                 Permissions.Cash.OverviewView,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,

@@ -51,6 +51,7 @@ import {
   type AttendanceSecurityTerminalScope,
 } from "./sqlite-attendance-security-repository";
 import { SqliteDailyCloseRepository } from "@hb/pos-db/core/db/sqlite-daily-close-repository";
+import { SqliteDailyCloseUploadRepository } from "@hb/pos-db/core/db/sqlite-daily-close-upload-repository";
 import { SqliteOrderSyncStatusRepository } from "@hb/pos-db";
 import {
   SqliteFulfilmentStore,
@@ -287,6 +288,11 @@ export class PosDatabase implements DatabasePort {
   /** 日结汇总与冻结归档只经专用 facade 访问，feature 不取得审计表或裸连接。 */
   public dailyCloses(): SqliteDailyCloseRepository {
     return new SqliteDailyCloseRepository(this.connection);
+  }
+
+  /** 日结记录上传 outbox（升级后补传历史日结）只经此窄 facade 访问上传状态列。 */
+  public dailyCloseUploads(): SqliteDailyCloseUploadRepository {
+    return new SqliteDailyCloseUploadRepository(this.connection);
   }
 
   /** 特殊商品全量替换、标记和设备本地顺序统一由同一事务仓储维护。 */
