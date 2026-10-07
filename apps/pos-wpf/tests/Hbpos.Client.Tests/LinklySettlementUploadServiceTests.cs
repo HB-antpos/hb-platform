@@ -492,11 +492,12 @@ public sealed class LinklySettlementUploadServiceTests
             CallCount++;
             if (CallCount == 1)
             {
-                FirstFailure.SetResult();
+                FirstFailure.TrySetResult();
                 throw new InvalidOperationException("transient execution failure");
             }
 
-            SecondExecution.SetResult();
+            // 工作器在停止前可能被残留信号再唤醒一轮；重复完成必须幂等，否则替身自身抛异常会被记成第二条 Warning。
+            SecondExecution.TrySetResult();
             return Task.FromResult(new LinklySettlementUploadExecutionResult(0, 0, 0, 0, false));
         }
     }
