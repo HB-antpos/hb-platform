@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { Card, Icon, Text } from "react-native-paper";
+import { Button, Card, Icon, Text } from "react-native-paper";
 import type {
   AttendancePunch,
   AttendancePunchVerificationState,
@@ -12,7 +12,16 @@ import {
   resolveAttendancePunchExceptionMinutes,
 } from "@/modules/attendance/attendance-today-normalization";
 import { resolveAttendanceTodayStatus } from "@/modules/attendance/attendance-today-status";
-import { resolveAttendancePunchDisplayTime } from "@/modules/attendance/attendance-device-time";
+import {
+  resolveAttendancePunchDisplayTime,
+  toAttendanceDeviceLocalTime,
+} from "@/modules/attendance/attendance-device-time";
+import {
+  findActiveMealSession,
+  formatMealElapsed,
+  resolveAttendanceMealPanelState,
+} from "@/modules/attendance/attendance-meal-break";
+import { MEAL_BREAK_MINUTES } from "@/modules/attendance/attendance-my-week";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { type AttendanceStatusTone, StatusPill } from "./AdjustmentFormControls";
@@ -69,6 +78,9 @@ export function TodayPunchCard({
   lastQrPunch,
   trackingWarning,
   onScan,
+  isMealBreakBusy,
+  onStartMealBreak,
+  onEndMealBreak,
 }: {
   today?: AttendanceToday;
   title?: string;
@@ -85,6 +97,9 @@ export function TodayPunchCard({
   lastQrPunch?: AttendancePunch;
   trackingWarning?: string;
   onScan: () => void;
+  isMealBreakBusy?: boolean;
+  onStartMealBreak?: (storeCode: string) => void;
+  onEndMealBreak?: (storeCode: string) => void;
 }) {
   const { t } = useAppTranslation(["attendance", "common"]);
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -129,6 +144,13 @@ export function TodayPunchCard({
     : verification.network.reason === "networkUnreachable"
       ? t("today.info.networkUnavailable")
       : t("today.info.networkUnknown");
+  // 用餐区只在当天、正在上班（或休息中）且排班有用餐要求时出现；旧后端没有 meal 字段时整块不显示。
+  const mealSession = allowPunch ? findActiveMealSession(today?.scheduleSessions) : undefined;
+  const mealPanel = mealSession
+    ? resolveAttendanceMealPanelState(mealSession.meal, currentTime.getTime())
+    : undefined;
+  const mealTotal = mealSession?.meal.effectiveMealBreakCount ?? 0;
+  const mealHandled = Math.min(mealSession?.meal.handledCount ?? 0, mealTotal);
   const alertMessage = !allowPunch
     ? t("today.dailyRecords.alertSelectedDate")
     : today?.holidayName
@@ -181,6 +203,88 @@ export function TodayPunchCard({
               {scanLabel}
             </Text>
           </Pressable>
+
+          {/* 用餐区：休息中显示计时；满 4 小时显示提醒横幅；未到时只给一行提示。不扫码，一键开始/结束。 */}
+          {mealSession && mealPanel ? (
+            <View
+              accessibilityRole={mealPanel.kind === "due" ? "alert" : undefined}
+              style={[
+                styles.mealPanel,
+                mealPanel.kind === "due" ? styles.mealPanelDue : null,
+                mealPanel.kind === "onBreak" ? styles.mealPanelOnBreak : null,
+              ]}
+            >
+              <Icon
+                source={mealPanel.kind === "onBreak"
+                  ? "coffee-outline"
+                  : mealPanel.kind === "done" ? "check-circle-outline" : "food-outline"}
+                size={18}
+                color={mealPanel.kind === "due"
+                  ? HB_COLORS.warning
+                  : mealPanel.kind === "done" ? HB_COLORS.success : HB_COLORS.textSecondary}
+              />
+              <View style={styles.flexText}>
+                {mealPanel.kind === "onBreak" ? (
+                  <>
+                    <Text variant="labelLarge" style={styles.tabularText}>
+                      {t("today.meal.onBreak", { elapsed: formatMealElapsed(mealPanel.elapsedSeconds) })}
+                    </Text>
+                    {mealSession.meal.openBreakStartedAtUtc ? (
+                      <Text variant="bodySmall" style={styles.muted}>
+                        {t("today.meal.onBreakSince", {
+                          time: formatTime(toAttendanceDeviceLocalTime(mealSession.meal.openBreakStartedAtUtc)),
+                        })}
+                      </Text>
+                    ) : null}
+                  </>
+                ) : mealPanel.kind === "due" ? (
+                  <>
+                    <Text variant="labelLarge" style={styles.bannerText}>{t("today.meal.dueTitle")}</Text>
+                    <Text variant="bodySmall" style={styles.bannerText}>
+                      {t("today.meal.dueBody", { minutes: MEAL_BREAK_MINUTES })}
+                    </Text>
+                  </>
+                ) : mealPanel.kind === "upcoming" ? (
+                  <Text variant="bodySmall" style={styles.muted}>
+                    {mealPanel.dueAtMs !== undefined
+                      ? t("today.meal.upcomingAt", {
+                          handled: mealHandled,
+                          total: mealTotal,
+                          time: formatTime(toAttendanceDeviceLocalTime(mealSession.meal.nextReminderAtUtc)),
+                        })
+                      : t("today.meal.upcoming", { handled: mealHandled, total: mealTotal })}
+                  </Text>
+                ) : (
+                  <Text variant="bodySmall" style={styles.muted}>
+                    {t("today.meal.done", { handled: mealHandled, total: mealTotal })}
+                  </Text>
+                )}
+              </View>
+              {mealPanel.kind === "onBreak" && onEndMealBreak ? (
+                <Button
+                  compact
+                  mode="outlined"
+                  disabled={isMealBreakBusy}
+                  loading={isMealBreakBusy}
+                  onPress={() => onEndMealBreak(mealSession.storeCode)}
+                >
+                  {t("today.meal.end")}
+                </Button>
+              ) : mealPanel.kind !== "done" && mealPanel.kind !== "onBreak"
+                && mealSession.hasOpenSegment && onStartMealBreak ? (
+                <Button
+                  compact
+                  mode={mealPanel.kind === "due" ? "contained" : "text"}
+                  icon="coffee-outline"
+                  disabled={isMealBreakBusy || isPunching}
+                  loading={isMealBreakBusy}
+                  onPress={() => onStartMealBreak(mealSession.storeCode)}
+                >
+                  {t("today.meal.start")}
+                </Button>
+              ) : null}
+            </View>
+          ) : null}
 
           <View style={styles.pillRow}>
             <StatusPill label={networkLabel} tone={networkTone} />
@@ -373,6 +477,25 @@ export function TodayPunchCard({
                     <Text variant="labelSmall" style={styles.muted}>{t("today.summary.overtime")}</Text>
                   </View>
                 </View>
+                {/* 计薪工时说明：排班有用餐扣除或有加回申请时才显示，员工能看到扣了多少、待审多少。 */}
+                {(session.mealDeductionMinutes ?? 0) > 0
+                  || (session.pendingMealAddBackMinutes ?? 0) > 0
+                  || (session.approvedMealAddBackMinutes ?? 0) > 0 ? (
+                  <Text variant="bodySmall" style={[styles.muted, styles.tabularText]}>
+                    {[
+                      t("today.meal.deduction", { duration: formatDuration(session.mealDeductionMinutes) }),
+                      (session.pendingMealAddBackMinutes ?? 0) > 0
+                        ? t("today.meal.pendingAddBack", { duration: formatDuration(session.pendingMealAddBackMinutes) })
+                        : undefined,
+                      (session.approvedMealAddBackMinutes ?? 0) > 0
+                        ? t("today.meal.approvedAddBack", { duration: formatDuration(session.approvedMealAddBackMinutes) })
+                        : undefined,
+                      session.paidMinutes !== undefined
+                        ? t("today.meal.paid", { duration: formatDuration(session.paidMinutes) })
+                        : undefined,
+                    ].filter(Boolean).join(" · ")}
+                  </Text>
+                ) : null}
                 {(session.overtime.rawMinutes > 0 ||
                   session.overtime.candidateMinutes > 0 ||
                   session.overtime.approvedMinutes > 0) ? (
@@ -427,6 +550,19 @@ const styles = StyleSheet.create({
     gap: 2,
     padding: HB_SPACING.xs,
   },
+  // 用餐区默认是一行轻量提示（无底色），到期换成警示横幅色，休息中换成中性底色，保持主按钮是视觉焦点。
+  mealPanel: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    borderRadius: HB_RADIUS.control,
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
+    minHeight: 44,
+    paddingHorizontal: HB_SPACING.xs,
+    paddingVertical: 4,
+  },
+  mealPanelDue: { backgroundColor: "#FFFAEB" },
+  mealPanelOnBreak: { backgroundColor: HB_COLORS.surfaceMuted },
   muted: { color: HB_COLORS.textSecondary },
   mutedTime: { color: HB_COLORS.outline },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },

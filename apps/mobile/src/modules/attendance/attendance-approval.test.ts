@@ -3,8 +3,15 @@ import {
   buildAttendanceApprovalReviewRequest,
   getSupplementalAttendanceApprovalDetail,
   isKnownAttendanceApprovalSourceType,
+  validateAttendanceMealBreakApproval,
   validateAttendanceOvertimeApproval,
 } from "./attendance-approval";
+
+// 用餐未休息加工时：批准不需要备注，拒绝必须填备注（与后端 REVIEW_REMARK_REQUIRED 一致）。
+assert.equal(isKnownAttendanceApprovalSourceType("MealBreak"), true);
+assert.equal(validateAttendanceMealBreakApproval({ action: "approve" }), null);
+assert.equal(validateAttendanceMealBreakApproval({ action: "reject", remark: "  " }), "remarkRequired");
+assert.equal(validateAttendanceMealBreakApproval({ action: "reject", remark: "当天有轮休" }), null);
 
 assert.equal(isKnownAttendanceApprovalSourceType("Punch"), true);
 assert.equal(isKnownAttendanceApprovalSourceType("Leave"), true);

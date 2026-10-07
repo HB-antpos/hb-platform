@@ -7,7 +7,8 @@ export type KnownAttendanceApprovalSourceType =
   | "Leave"
   | "PunchAdjustment"
   | "Overtime"
-  | "MissingClockOut";
+  | "MissingClockOut"
+  | "MealBreak";
 
 export type OvertimeApprovalValidationError =
   | "outOfRange"
@@ -20,6 +21,7 @@ const knownSourceTypes = new Set<KnownAttendanceApprovalSourceType>([
   "PunchAdjustment",
   "Overtime",
   "MissingClockOut",
+  "MealBreak",
 ]);
 
 export function isKnownAttendanceApprovalSourceType(
@@ -48,6 +50,14 @@ export function buildAttendanceApprovalReviewRequest(
       ? { approvedOvertimeMinutes: payload.approvedOvertimeMinutes }
       : {}),
   };
+}
+
+/** 用餐未休息加工时：批准按申请分钟全额加回，拒绝必须填写审核备注（与后端 REVIEW_REMARK_REQUIRED 一致）。 */
+export function validateAttendanceMealBreakApproval(input: {
+  action: OvertimeApprovalAction;
+  remark?: string;
+}): "remarkRequired" | null {
+  return input.action === "reject" && !input.remark?.trim() ? "remarkRequired" : null;
 }
 
 export function validateAttendanceOvertimeApproval(input: {

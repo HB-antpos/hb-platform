@@ -1,4 +1,5 @@
 import type {
+  AttendanceMealDeclaration,
   AttendancePunch,
   AttendancePunchMutationResult,
   AttendancePunchPayload,
@@ -182,6 +183,7 @@ export function buildAttendanceQrPunchPayload(
   qrToken: string,
   punchAuthorizationToken: string | undefined,
   verification: AttendancePunchVerificationPayload,
+  mealDeclaration?: AttendanceMealDeclaration,
 ): AttendancePunchPayload {
   return {
     qrToken,
@@ -190,6 +192,8 @@ export function buildAttendanceQrPunchPayload(
     locationLongitude: verification.locationLongitude,
     locationAccuracy: verification.locationAccuracy,
     locationCapturedAtUtc: verification.locationCapturedAtUtc,
+    // 扫码前问过「吃饭休息了吗」才带；没问过（上班、或不缺休息）时保持原 payload。
+    ...(mealDeclaration ? { mealDeclaration } : {}),
   };
 }
 
@@ -308,6 +312,10 @@ const ATTENDANCE_ERROR_KEYS: Record<string, string> = {
   ECONNABORTED: "messages.qrNetworkRequired",
   DAY_COMPLETE: "messages.qrDayComplete",
   QR_REQUIRED: "messages.qrRequired",
+  // 当班开始/结束休息的错误码。
+  NO_OPEN_SEGMENT: "messages.mealNoOpenSegment",
+  NO_OPEN_MEAL_BREAK: "messages.mealNoOpenBreak",
+  MEAL_BREAK_ALREADY_OPEN: "messages.mealBreakAlreadyOpen",
 };
 
 export function getAttendancePunchErrorKey(errorCode?: string) {

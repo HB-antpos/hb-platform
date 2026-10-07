@@ -9,6 +9,7 @@ import type {
   AttendanceStorePunchState,
   AttendanceToday,
 } from "./types";
+import { normalizeAttendanceMealState } from "./attendance-meal-break";
 
 type ApiRecord = Record<string, unknown>;
 
@@ -245,6 +246,18 @@ function normalizeScheduleBase(raw: ApiRecord): AttendanceSchedule {
     ),
     leaveType: asOptionalString(pick(raw, "leaveType", "LeaveType")),
     leaveGuid: asOptionalString(pick(raw, "leaveGuid", "LeaveGuid")),
+    // 用餐与计薪工时：旧后端不返回时全部为 undefined，界面不出现用餐相关内容。
+    mealBreakCount: asOptionalNumber(pick(raw, "mealBreakCount", "MealBreakCount")) ?? null,
+    effectiveMealBreakCount: asOptionalNumber(pick(raw, "effectiveMealBreakCount", "EffectiveMealBreakCount")),
+    mealDeductionMinutes: asOptionalNumber(pick(raw, "mealDeductionMinutes", "MealDeductionMinutes")),
+    approvedMealAddBackMinutes: asOptionalNumber(
+      pick(raw, "approvedMealAddBackMinutes", "ApprovedMealAddBackMinutes"),
+    ),
+    pendingMealAddBackMinutes: asOptionalNumber(
+      pick(raw, "pendingMealAddBackMinutes", "PendingMealAddBackMinutes"),
+    ),
+    paidMinutes: asOptionalNumber(pick(raw, "paidMinutes", "PaidMinutes")),
+    meal: normalizeAttendanceMealState(pick(raw, "meal", "Meal")),
   };
 }
 
