@@ -1,0 +1,204 @@
+{
+  "title": "Daily closes",
+  "actions": {
+    "back": "Back",
+    "openFilters": "Filters",
+    "retry": "Retry",
+    "resetFilters": "Reset filters",
+    "close": "Close"
+  },
+  "messages": {
+    "reviewUnavailable": "Daily closes are not available in review mode.",
+    "notAllowed": "You do not have permission to view daily closes."
+  },
+  "scope": {
+    "allStores": "All stores",
+    "oneStore": "{{store}}",
+    "manyStores": "{{store}} · {{count}} stores",
+    "customRange": "{{from}} → {{to}}"
+  },
+  "presets": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "last7": "Last 7 days",
+    "thisMonth": "This month",
+    "custom": "Custom"
+  },
+  "status": {
+    "all": "All",
+    "short": "Short",
+    "over": "Over",
+    "even": "Even",
+    "none": "No amount"
+  },
+  "statusLine": {
+    "short": "Cash short",
+    "over": "Cash over",
+    "even": "Cash balanced",
+    "none": "No amount"
+  },
+  "summary": {
+    "title": "Net difference (counted − expected)",
+    "expected": "Expected",
+    "counted": "Counted",
+    "noAmounts": "No records with amounts under the current filters",
+    "noAmountNote": "{{count}} more with no amount, not included in the totals"
+  },
+  "section": {
+    "dayHeading": "{{weekday}} {{day}} {{month}}",
+    "count": "Closes {{count}}",
+    "countPartial": "{{count}} loaded",
+    "difference": "Difference"
+  },
+  "weekdays": {
+    "0": "Sun",
+    "1": "Mon",
+    "2": "Tue",
+    "3": "Wed",
+    "4": "Thu",
+    "5": "Fri",
+    "6": "Sat"
+  },
+  "months": {
+    "1": "Jan",
+    "2": "Feb",
+    "3": "Mar",
+    "4": "Apr",
+    "5": "May",
+    "6": "Jun",
+    "7": "Jul",
+    "8": "Aug",
+    "9": "Sep",
+    "10": "Oct",
+    "11": "Nov",
+    "12": "Dec"
+  },
+  "source": {
+    "wpf": "WPF",
+    "handheld": "Handheld",
+    "ipad": "iPad"
+  },
+  "dataSource": {
+    "clientUpload": "Uploaded by POS",
+    "auditBackfill": "Backfilled from operation logs"
+  },
+  "mark": {
+    "nth": "No. {{n}}",
+    "backfill": "Backfilled",
+    "inferred": "Inferred"
+  },
+  "card": {
+    "saved": "Saved {{time}}",
+    "compare": "Expected {{expected}} → counted {{counted}}",
+    "noAmountHint": "Only a save record, no cash amounts"
+  },
+  "states": {
+    "loading": "Loading daily closes",
+    "loadFailed": "Could not load daily closes",
+    "emptyTitle": "No daily closes match these filters",
+    "emptyDescription": "Closes saved before the rollout only get full details after their POS is upgraded.",
+    "rangeInvalid": "The business date range is not valid, please pick it again",
+    "loadMoreFailed": "Could not load more, tap to retry",
+    "refreshFailed": "Refresh failed, showing the previous results. Tap to retry",
+    "loadedOf": "Loaded {{shown}} of {{total}}",
+    "end": "{{total}} in total, all loaded"
+  },
+  "errors": {
+    "invalidQuery": "Invalid filters: the business date range is at most 93 days and the start cannot be after the end.",
+    "forbidden": "You do not have permission to view daily closes, or your session has expired.",
+    "notFound": "This daily close does not exist, or it is outside the stores you can view.",
+    "loadFailed": "Could not load daily closes. Please try again later.",
+    "detailFailed": "Could not load the daily close. Please try again later."
+  },
+  "filters": {
+    "title": "Filters",
+    "stores": "Stores",
+    "storesHint": "Multiple allowed, only stores you can view",
+    "storesAll": "All stores",
+    "searchStore": "Search stores",
+    "range": "Business date",
+    "rangeFrom": "From",
+    "rangeTo": "To",
+    "rangeHint": "Up to 93 days",
+    "rangeIssue": {
+      "invalid": "Pick a start and an end date",
+      "reversed": "The start date cannot be after the end date",
+      "tooLong": "The range is at most 93 days"
+    },
+    "source": "Source",
+    "sourceAll": "All",
+    "device": "Terminal",
+    "deviceHint": "Pick one store first",
+    "deviceNeedStore": "Select a single store to choose a terminal",
+    "deviceAll": "All terminals",
+    "deviceLoading": "Loading terminals",
+    "deviceNone": "No daily closes at this store in the last 93 days",
+    "cashier": "Cashier",
+    "cashierPlaceholder": "Name or ID",
+    "reset": "Reset",
+    "backToFilters": "Back to filters",
+    "viewResults": "View results",
+    "viewCount": "View {{count}}"
+  },
+  "detail": {
+    "title": "Daily close",
+    "notFound": "This daily close could not be found",
+    "dateLine": "Business date {{date}}{{inferred}} · saved {{time}} · {{source}}",
+    "inferredSuffix": " (inferred)",
+    "reconExpected": "Expected cash",
+    "reconCounted": "Counted cash",
+    "reconDifference": "Cash difference",
+    "reconFormula": "Difference = counted cash − expected cash",
+    "reconNoAmount": "This close has no cash amounts, only a save record, so it cannot be reconciled.",
+    "notice": {
+      "title": "Backfilled record",
+      "cashOnly": "Saved before the POS upgrade; only the three cash figures (expected, counted, difference) could be recovered.",
+      "traceOnly": "Saved before the POS upgrade; only a save record exists, with no amounts.",
+      "generic": "Backfilled from old operation logs; the details are incomplete.",
+      "inferred": "The business date is inferred from the save time.",
+      "upgrade": "Full details fill in automatically once that terminal is upgraded."
+    },
+    "tenders": {
+      "title": "Payment summary",
+      "method": "Method",
+      "sales": "Sales",
+      "refund": "Refunds",
+      "net": "Net",
+      "total": "Total",
+      "cash": "Cash",
+      "card": "Card",
+      "voucher": "Voucher"
+    },
+    "cashCount": {
+      "title": "Cash count",
+      "note": "Notes {{amount}}",
+      "coin": "Coins {{amount}}",
+      "noteSubtotal": "Notes subtotal",
+      "coinSubtotal": "Coins subtotal",
+      "row": "× {{quantity}}",
+      "empty": "No count data for this kind of denomination"
+    },
+    "placeholder": "No data yet · waiting for the terminal to upload",
+    "info": {
+      "title": "Details",
+      "summaryOrders": "{{value}} orders",
+      "summaryReturns": "{{value}} returned",
+      "store": "Store",
+      "device": "Terminal",
+      "cashier": "Cashier",
+      "businessDate": "Business date",
+      "orders": "Orders",
+      "returns": "Returned items",
+      "cardNet": "Card net",
+      "source": "Source",
+      "dataSource": "Data source",
+      "period": "Period",
+      "guid": "Close ID",
+      "appVersion": "POS version",
+      "receivedAt": "Uploaded",
+      "expand": "Expand details",
+      "collapse": "Collapse details"
+    },
+    "saveLog": "View save log (employee operation logs)"
+  }
+}

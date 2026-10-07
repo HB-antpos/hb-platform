@@ -600,6 +600,57 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildMenu_日结记录仅凭独立查看权限可见且位于收银管理分组()
+    {
+        var user = CreateUser(new Claim("permission", Permissions.DailyCloseRecords.View));
+
+        var menu = _service.BuildMenu(user);
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        var dailyCloses = Assert.Single(posAdmin.Children!);
+        Assert.Equal("/pos-admin/daily-closes", dailyCloses.Path);
+        Assert.Equal("menu.dailyCloses", dailyCloses.TitleKey);
+        Assert.Equal("MoneyCollectOutlined", dailyCloses.Icon);
+        Assert.Equal(Permissions.DailyCloseRecords.View, dailyCloses.Permission);
+        Assert.False(dailyCloses.RequireAdmin);
+    }
+
+    [Theory]
+    [InlineData("Admin")]
+    [InlineData("管理员")]
+    [InlineData("SuperAdmin")]
+    [InlineData("超级管理员")]
+    public void BuildMenu_系统管理员别名均显示日结记录(string roleName)
+    {
+        var user = CreateUser(new Claim(ClaimTypes.Role, roleName));
+
+        var menu = _service.BuildMenu(user);
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        Assert.Single(posAdmin.Children!, child => child.Path == "/pos-admin/daily-closes");
+    }
+
+    [Theory]
+    [InlineData(Permissions.Dashboard.View)]
+    [InlineData(Permissions.PosTerminal.Audit.View)]
+    [InlineData(Permissions.LegacyEmployeeLogs.View)]
+    // 收银机上操作日结的权限（PosTerminal.DailyClose.*）与后台查看日结记录是两回事，不能互相授予。
+    [InlineData(Permissions.PosTerminal.DailyClose.View)]
+    [InlineData(Permissions.PosTerminal.DailyClose.Save)]
+    [InlineData(Permissions.PosTerminal.DailyClose.Reprint)]
+    public void BuildMenu_没有日结记录查看权限的用户不显示日结记录(string permission)
+    {
+        var user = CreateUser(new Claim("permission", permission));
+
+        var menu = _service.BuildMenu(user);
+
+        Assert.DoesNotContain(
+            menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
+            child => child.Path == "/pos-admin/daily-closes"
+        );
+    }
+
+    [Fact]
     public void BuildMenu_不再单列老系统操作日志入口()
     {
         var user = CreateUser(
@@ -900,7 +951,8 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(37, menu.Count);
+        Assert.Equal(38, menu.Count);
+        Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "app-install");
         Assert.Contains(menu, item => item.RouteName == "store-cash");
         Assert.Contains(menu, item => item.RouteName == "containers");
@@ -1508,6 +1560,41 @@ public class NavigationServiceTests
             _service.BuildDeviceAppMenu("Mobile"),
             item => item.RouteName == "cash-register-users"
         );
+    }
+
+    [Fact]
+    public void BuildAppMenu_日结记录仅凭独立查看权限可见()
+    {
+        var viewer = CreateUser(new Claim("permission", Permissions.DailyCloseRecords.View));
+        var item = Assert.Single(_service.BuildAppMenu(viewer), menu => menu.RouteName == "daily-closes");
+        Assert.Equal("tabs.dailyCloses", item.TitleKey);
+        Assert.Equal("cash-register", item.Icon);
+
+        // 收银机上的日结权限、员工操作日志权限、无关权限都不能打开它。
+        foreach (var permission in new[]
+                 {
+                     Permissions.PosTerminal.DailyClose.View,
+                     Permissions.PosTerminal.DailyClose.Save,
+                     Permissions.PosTerminal.DailyClose.Reprint,
+                     Permissions.PosTerminal.Audit.View,
+                     Permissions.LegacyEmployeeLogs.View,
+                     Permissions.Users.View,
+                 })
+        {
+            Assert.DoesNotContain(
+                _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+                menu => menu.RouteName == "daily-closes"
+            );
+        }
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_HidesDailyClosesForDeviceMode()
+    {
+        // 设备会话没有用户账号，日结记录按账号关联分店授权，所以设备模式菜单不应暴露该入口。
+        var menu = _service.BuildDeviceAppMenu("Mobile");
+
+        Assert.DoesNotContain(menu, item => item.RouteName == "daily-closes");
     }
 
     [Fact]

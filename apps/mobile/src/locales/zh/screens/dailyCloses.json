@@ -1,0 +1,204 @@
+{
+  "title": "日结记录",
+  "actions": {
+    "back": "返回",
+    "openFilters": "筛选",
+    "retry": "重试",
+    "resetFilters": "重置筛选",
+    "close": "关闭"
+  },
+  "messages": {
+    "reviewUnavailable": "审核模式下不提供日结记录。",
+    "notAllowed": "你没有查看日结记录的权限。"
+  },
+  "scope": {
+    "allStores": "全部分店",
+    "oneStore": "{{store}}",
+    "manyStores": "{{store}} 等 {{count}} 家",
+    "customRange": "{{from}} → {{to}}"
+  },
+  "presets": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "last7": "近 7 天",
+    "thisMonth": "本月",
+    "custom": "自定义"
+  },
+  "status": {
+    "all": "全部",
+    "short": "短款",
+    "over": "长款",
+    "even": "已平",
+    "none": "无金额"
+  },
+  "statusLine": {
+    "short": "现金短款",
+    "over": "现金长款",
+    "even": "现金已平",
+    "none": "无金额"
+  },
+  "summary": {
+    "title": "净差额（实点 − 应有）",
+    "expected": "应有",
+    "counted": "实点",
+    "noAmounts": "当前筛选下没有带金额的记录",
+    "noAmountNote": "另有 {{count}} 份无金额记录，不计入合计"
+  },
+  "section": {
+    "dayHeading": "{{month}}{{day}}日 {{weekday}}",
+    "count": "{{count}} 份",
+    "countPartial": "已加载 {{count}} 份",
+    "difference": "差额"
+  },
+  "weekdays": {
+    "0": "周日",
+    "1": "周一",
+    "2": "周二",
+    "3": "周三",
+    "4": "周四",
+    "5": "周五",
+    "6": "周六"
+  },
+  "months": {
+    "1": "1月",
+    "2": "2月",
+    "3": "3月",
+    "4": "4月",
+    "5": "5月",
+    "6": "6月",
+    "7": "7月",
+    "8": "8月",
+    "9": "9月",
+    "10": "10月",
+    "11": "11月",
+    "12": "12月"
+  },
+  "source": {
+    "wpf": "WPF",
+    "handheld": "手持",
+    "ipad": "iPad"
+  },
+  "dataSource": {
+    "clientUpload": "收银端上传",
+    "auditBackfill": "操作日志补录"
+  },
+  "mark": {
+    "nth": "第 {{n}} 次",
+    "backfill": "补录",
+    "inferred": "推算"
+  },
+  "card": {
+    "saved": "保存 {{time}}",
+    "compare": "应有 {{expected}} → 实点 {{counted}}",
+    "noAmountHint": "只有保存记录，没有现金金额"
+  },
+  "states": {
+    "loading": "正在加载日结记录",
+    "loadFailed": "日结记录加载失败",
+    "emptyTitle": "该筛选条件下没有日结记录",
+    "emptyDescription": "上线前保存的日结，要等对应收银端升级后才会出现完整明细。",
+    "rangeInvalid": "营业日区间不合法，请重新选择",
+    "loadMoreFailed": "加载更多失败，点按重试",
+    "refreshFailed": "刷新失败，显示的是上次的结果，点按重试",
+    "loadedOf": "已加载 {{shown}} / 共 {{total}} 条",
+    "end": "共 {{total}} 条，已全部加载"
+  },
+  "errors": {
+    "invalidQuery": "查询条件不合法：营业日期区间最长 93 天，且起始日不能晚于结束日。",
+    "forbidden": "没有查看日结记录的权限，或登录已失效。",
+    "notFound": "这条日结记录不存在，或不在你可查看的分店范围内。",
+    "loadFailed": "日结记录加载失败，请稍后重试。",
+    "detailFailed": "日结详情加载失败，请稍后重试。"
+  },
+  "filters": {
+    "title": "筛选",
+    "stores": "分店",
+    "storesHint": "可多选，仅显示你可查看的分店",
+    "storesAll": "全部分店",
+    "searchStore": "搜索分店",
+    "range": "营业日",
+    "rangeFrom": "开始日期",
+    "rangeTo": "结束日期",
+    "rangeHint": "最长 93 天",
+    "rangeIssue": {
+      "invalid": "请选择开始和结束日期",
+      "reversed": "开始日期不能晚于结束日期",
+      "tooLong": "营业日区间最长 93 天"
+    },
+    "source": "来源",
+    "sourceAll": "全部",
+    "device": "终端",
+    "deviceHint": "选择单个分店后可选",
+    "deviceNeedStore": "先选择单个分店，再选终端",
+    "deviceAll": "全部终端",
+    "deviceLoading": "正在读取终端",
+    "deviceNone": "该分店近 93 天没有日结记录",
+    "cashier": "收银员",
+    "cashierPlaceholder": "姓名或编号",
+    "reset": "重置",
+    "backToFilters": "返回筛选",
+    "viewResults": "查看结果",
+    "viewCount": "查看 {{count}} 条"
+  },
+  "detail": {
+    "title": "日结详情",
+    "notFound": "找不到这条日结记录",
+    "dateLine": "营业日 {{date}}{{inferred}} · 保存于 {{time}} · {{source}}",
+    "inferredSuffix": "（推算）",
+    "reconExpected": "系统应有现金",
+    "reconCounted": "实点现金",
+    "reconDifference": "现金差额",
+    "reconFormula": "差额 = 实点现金 − 系统应有现金",
+    "reconNoAmount": "这份日结没有现金金额，只留下了保存记录，无法对账。",
+    "notice": {
+      "title": "历史补录记录",
+      "cashOnly": "保存于收银端升级之前，只补出了现金三项（应有、实点、差额）。",
+      "traceOnly": "保存于收银端升级之前，只有保存记录，没有金额。",
+      "generic": "这是从旧操作日志补录的记录，明细不完整。",
+      "inferred": "营业日按保存时间推算。",
+      "upgrade": "该终端升级后，完整明细会自动补全。"
+    },
+    "tenders": {
+      "title": "支付方式汇总",
+      "method": "方式",
+      "sales": "销售",
+      "refund": "退款",
+      "net": "净额",
+      "total": "合计",
+      "cash": "现金",
+      "card": "刷卡",
+      "voucher": "代金券"
+    },
+    "cashCount": {
+      "title": "现金盘点明细",
+      "note": "纸币 {{amount}}",
+      "coin": "硬币 {{amount}}",
+      "noteSubtotal": "纸币小计",
+      "coinSubtotal": "硬币小计",
+      "row": "× {{quantity}}",
+      "empty": "没有这类面额的盘点数据"
+    },
+    "placeholder": "暂无数据 · 待该终端补传",
+    "info": {
+      "title": "基本信息",
+      "summaryOrders": "订单 {{value}}",
+      "summaryReturns": "退货 {{value}} 件",
+      "store": "分店",
+      "device": "终端",
+      "cashier": "收银员",
+      "businessDate": "营业日",
+      "orders": "订单数",
+      "returns": "退货件数",
+      "cardNet": "刷卡净额",
+      "source": "来源",
+      "dataSource": "数据来源",
+      "period": "统计时段",
+      "guid": "日结编号",
+      "appVersion": "收银端版本",
+      "receivedAt": "上传时间",
+      "expand": "展开基本信息",
+      "collapse": "收起基本信息"
+    },
+    "saveLog": "查看保存记录（员工操作日志）"
+  }
+}

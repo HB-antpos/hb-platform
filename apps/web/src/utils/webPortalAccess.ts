@@ -131,6 +131,12 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.canViewOperationAudits || access.hasPermission(P.LegacyEmployeeLogs.View),
   },
   {
+    // 日结记录：独立权限码，只有它的账号也要能进入后台；放在既有入口之后，组合权限用户继续沿用原默认入口。
+    defaultPath: '/pos-admin/daily-closes',
+    targetPrefixes: ['/pos-admin/daily-closes'],
+    canAccess: (access) => access.hasPermission(P.DailyCloseRecords.View),
+  },
+  {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
     targetPrefixes: ['/system/performance-baseline'],

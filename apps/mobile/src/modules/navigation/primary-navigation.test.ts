@@ -195,6 +195,11 @@ assert.equal(
   "员工操作日志从工作台进入，不能新增一级导航"
 );
 assert.equal(
+  compactPrimaryItems("daily-closes", [...fullMenu, "daily-closes"])[0]?.active,
+  true,
+  "日结记录从工作台进入，不能新增一级导航"
+);
+assert.equal(
   compactPrimaryItems("attendance-management", fullMenu)[2]?.active,
   true,
   "考勤管理页也必须高亮打卡，而不是改变打卡的个人考勤目标"
@@ -510,6 +515,21 @@ assert.deepEqual(
   ],
   "员工操作日志必须归入运营与报表并紧跟报表中心，只依赖后端显式菜单"
 );
+assert.deepEqual(
+  buildWorkbenchSections(["reports", "legacy-employee-logs", "daily-closes"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "operations-reports",
+      itemRouteNames: ["reports", "legacy-employee-logs", "daily-closes"],
+    },
+  ],
+  "日结记录必须归入运营与报表并紧跟员工操作日志，只依赖后端显式菜单"
+);
+assert.equal(zhWorkbench.routes.dailyCloses, "日结记录", "中文工作台必须显示日结记录");
+assert.equal(enWorkbench.routes.dailyCloses, "Daily closes", "英文工作台必须显示 Daily closes");
 assert.deepEqual(
   buildWorkbenchSections(["local-supplier-invoices"]).map((section) => ({
     key: section.key,

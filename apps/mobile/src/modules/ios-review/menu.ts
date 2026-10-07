@@ -26,6 +26,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "cash-register-users",
   // 现金管理是真实资金流水与票据照片，审核模式没有离线演示数据。
   "store-cash",
+  // 日结记录是真实门店现金对账数据，审核模式没有离线演示数据。
+  "daily-closes",
   "workbench",
 ] as const;
 

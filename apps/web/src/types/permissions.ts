@@ -175,6 +175,11 @@ export const P = {
     View: 'LegacyEmployeeLogs.View',
     Review: 'LegacyEmployeeLogs.Review',
   },
+  // 日结记录（WPF / 手持 / iPad 上传的日结与现金盘点明细）只读页：独立顶层权限码，
+  // 刻意不用 Permissions.PosTerminal.* 前缀（该前缀会被当作收银机权限下发）。
+  DailyCloseRecords: {
+    View: 'DailyCloseRecords.View',
+  },
   Dashboard: {
     View: 'Dashboard',
   },
