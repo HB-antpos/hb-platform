@@ -409,7 +409,9 @@ namespace BlazorApp.Api.Services
                 // 移动端「日结记录」：与 Web /pos-admin/daily-closes 同一个独立权限码；店长只看自己关联的分店，由查询接口收口。
                 // 设备模式菜单（BuildDeviceAppMenu）按 DeviceBaseRouteNames 白名单挑选，不会包含此项。
                 Permission = Permissions.DailyCloseRecords.View,
-                Order = 58,
+                // 与声明位置（legacy-employee-logs 之后、user-admin 之前）同属 57：同值按声明顺序稳定排序，
+                // Web 的 App 菜单预览（expoRoleMenuPreview）按源码声明顺序比对，必须一致。
+                Order = 57,
             },
             new()
             {
