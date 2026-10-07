@@ -608,7 +608,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (printerSettingsVisible) {
-      // 筛选不持久化；每次打开详情均优先展示当前 Android 打印通道支持的经典蓝牙。
+      // 筛选不持久化；每次打开详情都回到默认视图：经典蓝牙与 BLE 都列出。
       setTransportFilters({ ...DEFAULT_PRINTER_TRANSPORT_FILTERS });
     }
   }, [printerSettingsVisible]);
@@ -1624,7 +1624,7 @@ export default function Settings() {
                 </View>
 
                 <View style={styles.filterRow}>
-                  <Text variant="bodyMedium">{t("printer.filterXPOnly")}</Text>
+                  <Text variant="bodyMedium" style={styles.filterLabel}>{t("printer.filterXPOnly")}</Text>
                   <Switch
                     value={filterXPOnly}
                     onValueChange={setFilterXPOnly}
@@ -2292,6 +2292,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: HB_SPACING.sm,
     borderRadius: HB_RADIUS.control,
     backgroundColor: HB_COLORS.surfaceMuted,
+  },
+  filterLabel: {
+    flex: 1,
   },
   primaryPrinterActions: {
     flexDirection: "row",

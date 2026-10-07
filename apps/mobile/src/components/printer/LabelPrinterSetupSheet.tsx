@@ -44,6 +44,7 @@ function resolveStatusKey(status: PrinterConnectionState, paused: boolean) {
  * 蓝牙标签打印机的就地设置弹层：扫描、连接、测试、清除。
  * 与「设置 → 打印机」共用 printer/api 与已保存的打印机，业务页面无需跳转离开当前上下文。
  * 文案复用 settings 命名空间，两处保持一致。
+ * 文字不限行数、按钮行可换行：英文文案较长，窄屏 PDA 上不能截断。
  */
 export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetupSheetProps) {
   const { t, language } = useAppTranslation(["settings", "common"]);
@@ -63,7 +64,7 @@ export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetup
 
   useEffect(() => {
     if (visible) {
-      // 筛选只服务本次选择；重新打开时回到最安全的经典蓝牙默认视图。
+      // 筛选只服务本次选择；重新打开时回到默认视图：经典蓝牙与 BLE 都列出。
       setTransportFilters({ ...DEFAULT_PRINTER_TRANSPORT_FILTERS });
     }
   }, [visible]);
@@ -161,7 +162,7 @@ export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetup
     >
       <View style={styles.content}>
         <View style={styles.headerRow}>
-          <Text variant="bodyMedium" style={styles.flex} numberOfLines={1}>
+          <Text variant="bodyMedium" style={styles.headerText}>
             {savedPrinter
               ? t("printer.selected", { printer: savedPrinter.name || savedPrinter.address })
               : t("printer.notSelected")}
@@ -180,13 +181,13 @@ export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetup
             onPress={handleScan}
             loading={busy && !isConnecting}
             disabled={busy || !hasSelectedTransport}
-            style={styles.flex}
+            style={styles.actionButton}
           >
             {busy && !isConnecting ? t("printer.scanning") : t("printer.scan")}
           </Button>
           {savedPrinter ? (
             isConnected ? (
-              <Button mode="outlined" icon="link-off" onPress={handleDisconnect} disabled={busy} style={styles.flex}>
+              <Button mode="outlined" icon="link-off" onPress={handleDisconnect} disabled={busy} style={styles.actionButton}>
                 {t("printer.disconnect")}
               </Button>
             ) : (
@@ -196,7 +197,7 @@ export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetup
                 onPress={handleConnectSaved}
                 loading={busy && isConnecting}
                 disabled={busy}
-                style={styles.flex}
+                style={styles.actionButton}
               >
                 {busy && isConnecting ? t("printer.connecting") : t("printer.connect")}
               </Button>
@@ -205,7 +206,7 @@ export function LabelPrinterSetupSheet({ visible, onDismiss }: LabelPrinterSetup
         </View>
 
         <View style={styles.filterRow}>
-          <Text variant="bodyMedium">{t("printer.filterXPOnly")}</Text>
+          <Text variant="bodyMedium" style={styles.filterLabel}>{t("printer.filterXPOnly")}</Text>
           <Switch value={filterXPOnly} onValueChange={setFilterXPOnly} disabled={busy} />
         </View>
 
@@ -282,13 +283,16 @@ const styles = StyleSheet.create({
   content: {
     gap: HB_SPACING.sm,
   },
-  flex: {
-    flex: 1,
-  },
   headerRow: {
+    // 打印机名与状态胶囊同行放不下时，胶囊整体换到下一行，而不是把名字截成 “Current printer: XP-…”。
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
-    gap: HB_SPACING.xs,
+    columnGap: HB_SPACING.xs,
+    rowGap: HB_SPACING.xxs,
+  },
+  headerText: {
+    flexShrink: 1,
   },
   statusPill: {
     paddingHorizontal: HB_SPACING.xs,
@@ -307,16 +311,25 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: HB_SPACING.xs,
+  },
+  actionButton: {
+    // 按文字宽度起步再均分剩余空间：Paper 按钮文字只有一行，英文放不下时整行换行而不是截断（与设置页一致）。
+    flexGrow: 1,
   },
   filterRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: HB_SPACING.sm,
     paddingHorizontal: HB_SPACING.sm,
     paddingVertical: HB_SPACING.xs,
     borderRadius: HB_RADIUS.control,
     backgroundColor: "#F2F4F7",
+  },
+  filterLabel: {
+    flex: 1,
   },
   listLabel: {
     color: HB_COLORS.textSecondary,
@@ -332,6 +345,7 @@ const styles = StyleSheet.create({
   },
   footerActions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: HB_SPACING.xs,
   },
